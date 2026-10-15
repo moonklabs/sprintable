@@ -6,7 +6,28 @@ import { useTranslations } from 'next-intl';
 import { beginPendingProjectTarget, endPendingProjectTarget } from '@/lib/pending-project-switch';
 import { TAB_PROJECT_STORAGE_KEY } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
+import { canGrantProjectAccess } from '@/lib/project-access-role';
+import { desktopApp } from '@/lib/desktop-app';
+import { homeAsTilde } from '@/lib/home-tilde';
 import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
+import { useRenderNonce } from '@/hooks/use-render-nonce';
+
+/**
+ * [SID:4681] (Yuna §K): the plan-limit answer of a refused project create — `{ error: { code: 'PLAN_LIMIT_EXCEEDED', limit, tier, resource } }`
+ * (the legacy `detail` envelope too, as the organization dialog reads it) — or null for any other answer. `free` = the tier is free or
+ * not said (the banner's reason differs for a paid plan). A 402 for another resource is not this banner's.
+ */
+async function planLimitOf(res: { json: () => Promise<unknown> }): Promise<{ limit: number; free: boolean } | null> {
+  try {
+    const j = await res.json() as { error?: Record<string, unknown>; detail?: unknown } | null;
+    const e = j?.error ?? (j?.detail && typeof j.detail === 'object' ? j.detail as Record<string, unknown> : null);
+    if (!e || e.code !== 'PLAN_LIMIT_EXCEEDED') return null;
+    if (e.resource !== undefined && e.resource !== 'project') return null;
+    return { limit: typeof e.limit === 'number' ? e.limit : 1, free: e.tier === undefined || e.tier === 'free' };
+  } catch {
+    return null;
+  }
+}
 
 export interface OrgSwitcherItem {
   orgId: string;
@@ -148,6 +169,18 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
   const setNewProjectName = (v: string) => setNewProjectForm((f) => ({ ...f, name: v }));
   const setNewProjectDesc = (v: string) => setNewProjectForm((f) => ({ ...f, description: v }));
   const [creating, setCreating] = useState(false);
+  // [SID:4681] (D3 · piece ②) — the agents the person checked for the new project (ids · all off to start · not a draft: a check list
+  // is re-read from the server each time the dialog opens, so a stale saved pick could name an agent that is gone)
+  const [newProjectAgentIds, setNewProjectAgentIds] = useState<string[]>([]);
+  // [SID:4681] — after a make: the project exists but some grants failed (the count) · null = nothing to say. Shown beside the
+  // trigger (the dialog closed and the switch happened — the project is real; the missing grants are given again in the project's settings).
+  const [createProjectNotice, setCreateProjectNotice] = useState<string | null>(null);
+  // [SID:4681] (D3 · piece ③) — the folder picked in the app's chooser for the new project (app only · the field is not drawn in a
+  // browser · not a draft: a path the app handed to THIS page is the only one it accepts — `not_picked` otherwise); kept on this Mac
+  // right after the make (`setProjectFolder`) and sent as the project's `workdir_hint` (① · shown as text, never opened by the server)
+  const [newProjectFolder, setNewProjectFolder] = useState<string | null>(null);
+  // [SID:4681] ③ — the project exists but the folder could not be kept on this Mac (Yuna §H: its own line, apart from the grants' one)
+  const [createProjectFolderNotice, setCreateProjectFolderNotice] = useState<string | null>(null);
 
   // story #3147(doc mobile-switcher-redesign-spec-4758744a §③) — 검색 state 신규. 데스크톱
   // UnifiedSwitcher(lg:)는 이 필드를 안 쓰므로(호출부가 안 읽으면 그냥 죽은 값) 회귀 0.
@@ -159,6 +192,9 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
   // 403이었다. 실패를 담아 다이얼로그에 명시로 보여준다(어떤 실패든 침묵하지 않는 게 근본 — a
   // 만으론 다음 다른 실패가 또 조용히 묻힌다).
   const [createProjectError, setCreateProjectError] = useState<string | null>(null);
+  // [SID:4681] (Yuna §K · PO 10-14 · walk 7): the plan's project limit (402 PLAN_LIMIT_EXCEEDED) is not a «try again later» — it has its own banner
+  const [createProjectLimit, setCreateProjectLimit] = useState<{ limit: number; free: boolean } | null>(null);
+  const [createProjectLimitNonce, bumpCreateProjectLimitNonce] = useRenderNonce();
   // story #2544 — switchOrg/switchOrgAndProject는 `localOrgId`를 optimistic으로 먼저 찍고
   // (아래 참고) try에 catch 없이 finally만 있었다. `fetch` 자체가 던지면(네트워크 실패 등)
   // else 분기(revert)를 절대 못 타 — 실제 전환은 실패했는데 드롭다운은 "전환됨"으로 영구
@@ -174,6 +210,9 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
 
   const currentOrg = orgs.find((o) => o.orgId === localOrgId);
   const otherOrgs = orgs.filter((o) => o.orgId !== localOrgId);
+  // [SID:4681] (Kadir codex · PO (나)): only an org owner/admin may grant (the server's rule) — a member sees no check list and no grant
+  // is sent (every one would be a 403, and the «접근 권한» screen the notice names is owner/admin only too)
+  const canGrantAccess = canGrantProjectAccess(currentOrg?.role);
 
   const displayOrg = currentOrg?.orgName ?? 'Organization';
 
@@ -344,10 +383,54 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
     }
   }
 
-  async function createProject(name: string, description: string): Promise<boolean> {
+  /**
+   * [SID:4681] (D3 · piece ②) — right after the project is made, each checked agent gets a grant (the existing endpoint, one call
+   * each · POST /api/projects/{id}/access {member_id}); 409 (already granted) counts as done. A failed grant does not undo the
+   * project: the count goes to `createProjectNotice`, the dialog closes and the switch happens as before.
+   */
+  async function grantAgents(projectId: string, agentIds: string[]): Promise<{ granted: number; failed: number }> {
+    let granted = 0;
+    let failed = 0;
+    for (const memberId of agentIds) {
+      try {
+        const r = await fetchWithAuth(`/api/projects/${projectId}/access`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ member_id: memberId, org_member_id: null, permission: 'granted' }),
+        });
+        if (r.ok || r.status === 409) granted += 1;
+        else failed += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    return { granted, failed };
+  }
+
+  /**
+   * [SID:4681] (D3 · piece ③) — the folder, kept on this Mac by the app (D1 `setProjectFolder`: the app checks the path again — one its
+   * own chooser handed to this page, inside home, not its own folder). `{problem}` or no app or a throw = not kept: the project stays,
+   * the notice says so (the agent picks a folder when it starts — 4565). True when kept.
+   */
+  async function keepProjectFolder(projectId: string, folder: string): Promise<boolean> {
+    const app = desktopApp();
+    if (!app) return false;
+    try {
+      const r = await app.setProjectFolder({ projectId, path: folder });
+      return 'ok' in r && r.ok === true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function createProject(name: string, description: string, opts: { agentIds?: string[]; folder?: string | null } = {}): Promise<boolean> {
     if (!name.trim() || creating) return false;
     setCreating(true);
     setCreateProjectError(null);
+    setCreateProjectLimit(null);
+    setCreateProjectNotice(null);
+    setCreateProjectFolderNotice(null);
+    const folder = opts.folder === undefined ? newProjectFolder : opts.folder;
     try {
       const res = await fetch('/api/projects', {
         method: 'POST',
@@ -356,6 +439,10 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
           name: name.trim(),
           description: description.trim() || null,
           ...(currentOrgId ? { org_id: currentOrgId } : {}),
+          // [SID:4681] ③: the picked folder as the project's text hint (① · 5061) — only when one was picked, and with home as `~`
+          // (PO 5067 review): the hint is a server value every project member reads, so the Mac user's name never rides in it (the
+          // setup's defaultWorkdirHint is `~/…` too); the app's own setProjectFolder below gets the absolute path
+          ...(folder ? { workdir_hint: homeAsTilde(folder) } : {}),
         }),
       });
       if (!res.ok) {
@@ -364,13 +451,32 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
         // 다이얼로그만 그대로 남았다 — "버튼 무반응"으로 보인 정체. 원인이 뭐든(403/기타) 침묵
         // 하지 않는다: (a)가 이번 원인(stale project_id 헤더)은 없앴지만, 다음 다른 실패가 또
         // 조용히 묻히지 않도록 실패 표시 자체를 근본으로 남긴다.
+        // [SID:4681] (Yuna §K): only the plan's project limit (402 PLAN_LIMIT_EXCEEDED) gets the upgrade banner — the dialog keeps what was
+        // typed and picked; every other failure (5xx · network · 403) keeps the one line above
+        const limit = res.status === 402 ? await planLimitOf(res) : null;
+        if (limit) {
+          setCreateProjectLimit(limit);
+          bumpCreateProjectLimitNonce();
+          return false;
+        }
         setCreateProjectError(tSwitcher('switcherCreateProjectError'));
         return false;
       }
       const data = await res.json() as { id?: string; data?: { id: string } };
       const newId = data.id ?? data.data?.id;
+      // [SID:4681] ③: the folder first — kept on this Mac under the new project's id (before the grants: the folder is the app's
+      // one-call hand, the grants are n server calls)
+      if (newId && folder && !(await keepProjectFolder(newId, folder))) setCreateProjectFolderNotice(tSwitcher('switcherFolderNotSaved'));
+      // [SID:4681]: the grants before the dialog closes (the person sees «만드는 중» until the agents are in)
+      const agentIds = opts.agentIds ?? newProjectAgentIds;
+      if (newId && canGrantAccess && agentIds.length > 0) {
+        const r = await grantAgents(newId, agentIds);
+        if (r.failed > 0) setCreateProjectNotice(tSwitcher('switcherAccessPartial', { failed: r.failed }));
+      }
       setCreateProjectOpen(false);
       clearNewProjectDraft();
+      setNewProjectAgentIds([]);
+      setNewProjectFolder(null);
       setCreateProjectError(null);
       if (newId) await switchProject(newId);
       else router.refresh();
@@ -399,6 +505,8 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
   // 성공 뒤 다시 열었을 때(취소→재오픈) 낡은 에러가 새 시도처럼 보일 수 있다.
   function setCreateProjectOpenAndClearError(nextOpen: boolean) {
     setCreateProjectError(null);
+    setCreateProjectLimit(null);
+    if (nextOpen) { setNewProjectAgentIds([]); setCreateProjectNotice(null); setNewProjectFolder(null); setCreateProjectFolderNotice(null); } // [SID:4681]: every box off · no folder each time the dialog opens · the last make's notices go (Yuna §F · §H)
     setCreateProjectOpen(nextOpen);
   }
 
@@ -408,9 +516,16 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
     createOrgOpen, setCreateOrgOpen,
     createProjectOpen, setCreateProjectOpen: setCreateProjectOpenAndClearError,
     createProjectError,
+    createProjectLimit,
+    createProjectLimitNonce,
+    createProjectNotice, // [SID:4681]
+    createProjectFolderNotice, // [SID:4681] ③
     switchOrgError,
     newProjectName, setNewProjectName,
     newProjectDesc, setNewProjectDesc,
+    newProjectAgentIds, setNewProjectAgentIds, // [SID:4681]
+    canGrantAccess, // [SID:4681] (PO (나)): the check list is drawn only for an owner/admin
+    newProjectFolder, setNewProjectFolder, // [SID:4681] ③ (app only)
     clearNewProjectDraft,
     creating,
     searchQuery, setSearchQuery,

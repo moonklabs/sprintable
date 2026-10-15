@@ -42,9 +42,16 @@ _TTL_SEC = _HEARTBEAT_SEC * 3
 _KEY_TTL_SEC = _TTL_SEC * 4  # ZSET 키 자체 leak backstop
 
 # KEYS[1]=zset · ARGV[1]=now(만료 evict 기준) · ARGV[2]=now+TTL(신규 score) · ARGV[3]=limit ·
-# ARGV[4]=conn_id · ARGV[5]=key TTL. 만료(score<=now) evict → ZCARD → count<limit 이면 ZADD 후 1, 아니면 0.
+# ARGV[4]=conn_id · ARGV[5]=key TTL. 만료(score<=now) evict → 이미 그 몫을 쥔 member면 갱신 후 1(story #4509 AC1b: 같은
+# 받는 곳의 다시 붙음은 자기 몫을 다시 쥔다 — 연결마다 새 uuid인 member는 미리 있을 수 없어 기존 동작 무변) → ZCARD →
+# count<limit 이면 ZADD 후 1, 아니면 0.
 _ACQUIRE_LUA = """
 redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
+if redis.call('ZSCORE', KEYS[1], ARGV[4]) then
+  redis.call('ZADD', KEYS[1], ARGV[2], ARGV[4])
+  redis.call('EXPIRE', KEYS[1], ARGV[5])
+  return 1
+end
 local count = redis.call('ZCARD', KEYS[1])
 if count < tonumber(ARGV[3]) then
   redis.call('ZADD', KEYS[1], ARGV[2], ARGV[4])
@@ -123,6 +130,79 @@ async def count(scope: str) -> "int | None":
     except Exception:
         logger.warning("sse_lease.count failed", exc_info=True)
         return None
+
+
+def _text(m: object) -> str:
+    return m.decode() if isinstance(m, (bytes, bytearray)) else str(m)
+
+
+async def members(scope: str) -> "list[str] | None":
+    """story #4676 (UX-1 F4): the live members of a scope (expired ones evicted first) — `rcv:<receiver>` for a desktop install,
+    a connection id for anything without the header. A setup key's stream reads who else receives this agent, across instances.
+    None = Redis unavailable (the caller reads its in-process view instead)."""
+    if not _enabled():
+        return None
+    client = redis_shared.get_client()
+    if client is None:
+        return None
+    try:
+        await client.zremrangebyscore(_key(scope), "-inf", time.time())
+        return [_text(m) for m in await client.zrange(_key(scope), 0, -1)]
+    except Exception:
+        logger.warning("sse_lease.members failed", exc_info=True)
+        return None
+
+
+def _taken_key(scope: str) -> str:
+    return redis_shared.key(_DOMAIN, "sse_lease_taken", scope)
+
+
+async def mark_taken(scope: str, member: str) -> None:
+    """story #4676: a person's [여기서 받기] took the scope over for `member` — the other receivers' streams on OTHER instances read
+    this on their heartbeat and end `superseded` (this instance's are told directly). TTL = the lease TTL: a taker that dies leaves
+    the mark for no longer than its lease would have lived."""
+    if not _enabled():
+        return
+
+    async def _op(client) -> None:
+        await client.set(_taken_key(scope), member, ex=_TTL_SEC)
+
+    await redis_shared.with_fallback(_op, lambda: None)
+
+
+async def taken_by(scope: str) -> "str | None":
+    """story #4676: the member a person's take-over gave the scope to, or None (no take-over · Redis unavailable)."""
+    if not _enabled():
+        return None
+    client = redis_shared.get_client()
+    if client is None:
+        return None
+    try:
+        v = await client.get(_taken_key(scope))
+        return None if v is None else _text(v)
+    except Exception:
+        return None
+
+
+# KEYS[1]=mark key · ARGV[1]=member — delete the mark only while it is this member's (compare and delete in one step: a later
+# taker's mark, set between a read and a delete, must not go — 까디르 4676 ①)
+_CLEAR_TAKEN_LUA = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
+
+
+async def clear_taken(scope: str, member: str) -> None:
+    """story #4676: the taker's stream ended — its mark goes with it (only its own: a later taker's stays — one atomic step)."""
+    if not _enabled():
+        return
+
+    async def _op(client) -> None:
+        await client.eval(_CLEAR_TAKEN_LUA, 1, _taken_key(scope), member)
+
+    await redis_shared.with_fallback(_op, lambda: None)
 
 
 async def earliest_expiry(scope: str) -> "float | None":

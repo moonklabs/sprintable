@@ -1,0 +1,9 @@
+{
+  "_note": "story #4441 — each fixed tool's output for these bodies, recorded on develop c1eae9842 before the change (the change must keep it byte for byte).",
+  "outputs": {
+    "get_content_rules": "{\n  \"rules\": {\n    \"tone\": \"차분하게\",\n    \"banned_terms\": [\n      \"x\"\n    ]\n  },\n  \"version\": 3,\n  \"updated_at\": \"2026-09-30T00:00:00Z\",\n  \"generation_budget_status\": {\n    \"monthly_limit\": 100,\n    \"used\": 7,\n    \"exhausted\": false\n  }\n}",
+    "get_publication_insights": "{\n  \"publication_id\": \"pub-1\",\n  \"snapshots\": [\n    {\n      \"offset_label\": \"1d\",\n      \"status\": \"captured\",\n      \"metrics\": {\n        \"views\": 10,\n        \"likes\": 1,\n        \"shares\": null\n      }\n    },\n    {\n      \"offset_label\": \"7d\",\n      \"status\": \"captured\",\n      \"metrics\": {\n        \"views\": 40,\n        \"likes\": 3,\n        \"shares\": null\n      }\n    },\n    {\n      \"offset_label\": null,\n      \"status\": \"captured\",\n      \"metrics\": {\n        \"views\": 5\n      }\n    }\n  ],\n  \"delta_1d_to_7d\": {},\n  \"delta_unavailable_reason\": null,\n  \"superseded_snapshots\": 1\n}",
+    "set_default_project": "{\n  \"resolved_default_project_id\": \"00000000-0000-0000-0000-000000000009\",\n  \"default_project_id\": \"00000000-0000-0000-0000-000000000009\"\n}"
+  },
+  "cache_project_after_set_default": "00000000-0000-0000-0000-000000000009"
+}

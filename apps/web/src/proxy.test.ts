@@ -13,6 +13,8 @@ vi.mock('jose', async (importOriginal) => {
 
 import { proxy as middleware, RENAMED_RESOURCES, RETIRED_RESOURCES } from './proxy';
 import { stubFetch } from '@/test-utils/as-fetch-response';
+import { safeNextPath } from '@/lib/auth/session-redirect';
+import { parseSetupFragment } from '@/lib/desktop-setup';
 
 const JWT_SECRET = 'test-secret-for-proxy-tests';
 
@@ -132,6 +134,12 @@ describe('proxy', () => {
     expect(response.status).toBe(200);
   });
 
+  it('lets the session-less push unregister call through (story #4397 — the app calls it after logout · with an expired session)', async () => {
+    const response = await middleware(makeRequest('/api/push/devices/unregister'));
+    expect(response.status).toBe(200); // passed to the route handler — no /login redirect
+    expect(response.headers.get('location')).toBeNull();
+  });
+
   it('passes all /api/* paths without JWT check', async () => {
     const apiPaths = [
       '/api/v1/bridge/slack/interactions',
@@ -168,6 +176,23 @@ describe('proxy', () => {
     expect(loc).toContain('https://app.example.com/login?');
     expect(loc).toContain(`next=${encodeURIComponent('/dashboard')}`);
     expect(loc).not.toContain('reason=session_expired');
+  });
+
+  it('[SID:4427] the desktop setup request carries no code to the server; the login round trip returns to the setup page (PO 09:45Z)', async () => {
+    // 앱은 설정 값을 `#` 뒤로 넘긴다 — 브라우저는 fragment를 서버로 보내지 않으므로 서버가 받는 요청은 경로뿐이다.
+    const code = `${'A'.repeat(20)}_-${'b'.repeat(21)}`;
+    const opened = new URL(`https://app.example.com/desktop/setup#code=${code}&runtimes=claude,codex`);
+    const serverSees = opened.pathname + opened.search; // what reaches proxy.ts and the request log
+    expect(serverSees).toBe('/desktop/setup');
+    const response = await middleware(makeRequest(serverSees));
+    expect(response.status).toBe(307);
+    const loc = new URL(response.headers.get('location') ?? '');
+    expect(loc.pathname).toBe('/login');
+    expect(loc.searchParams.get('next')).toBe('/desktop/setup');
+    expect(response.headers.get('location')).not.toContain(code);
+    expect(safeNextPath(loc.searchParams.get('next'))).toBe('/desktop/setup');
+    // the values themselves: after the login the desktop app reopens the page with its # (the shell holds the code)
+    expect(parseSetupFragment(opened.hash)).toEqual({ code, runtimes: ['claude', 'codex'], setupId: null, blocked: [] });
   });
 
   it('clears sp_at/sp_rt cookies on definitive refresh failure — UI path (story e5225c0a P0)', async () => {
@@ -1497,5 +1522,25 @@ describe('proxy — 가입 출처 first-touch 캡처(story #3204)', () => {
     // 응답에 이 쿠키를 새로 set하지 않았어야 한다(요청에 이미 있던 값이 그대로 유지 —
     // set-cookie 자체가 없으므로 get()이 undefined).
     expect(response.cookies.get('sp_attr_medium')?.value).toBeUndefined();
+  });
+});
+
+describe('[SID:4397] a page GET with an org hint never switches the session', () => {
+  beforeEach(() => {
+    process.env['JWT_SECRET'] = JWT_SECRET;
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://localhost:8000';
+    mockFetch.mockReset();
+    mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ data: {} }) });
+  });
+
+  afterEach(() => {
+    delete process.env['JWT_SECRET'];
+  });
+
+  it('switching revokes the person\'s refresh tokens on every device (#3649), so the proxy leaves `org_id` to the page card', async () => {
+    const token = await makeAccessToken();
+    await middleware(makeRequest('/gates/g-1?org_id=11111111-2222-4333-8444-555555555555', { sp_at: token }));
+    const switchCalls = mockFetch.mock.calls.filter((c: unknown[]) => String(c[0]).includes('/switch-org'));
+    expect(switchCalls).toHaveLength(0);
   });
 });

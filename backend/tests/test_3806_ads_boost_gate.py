@@ -228,6 +228,33 @@ async def test_invalid_schedule_returns_422():
 
 
 @pytest.mark.anyio
+async def test_unknown_currency_returns_422_and_nothing_is_sealed():
+    """story #4417 — the sealed amount is in minor units of its currency; one outside the table (currency_minor) is refused
+    at the request, before a gate is opened."""
+    from app.main import app
+    from app.models.gate import Gate
+    from sqlalchemy import func, select
+
+    engine, Session, org_id, project_id, owner_id, pub, _, ad_conn_id = await _setup(await _session_factory())
+    try:
+        _setup_org_scoped_app(app, Session, org_id, user_id=owner_id)
+        async with _client_for(app) as client:
+            r = await client.post(
+                f"/api/v2/organizations/{org_id}/publications/{pub.id}/boosts",
+                json=_boost_body(ad_connection_id=ad_conn_id, currency="JPY"),
+            )
+        assert r.status_code == 422, r.text
+        assert r.json()["error"]["code"] == "ADS_BOOST_UNKNOWN_CURRENCY"
+        async with Session() as s:
+            assert (await s.execute(
+                select(func.count()).select_from(Gate).where(Gate.org_id == org_id, Gate.gate_type == "ads_boost")
+            )).scalar_one() == 0
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_approver_role_missing_returns_409():
     from app.main import app
 

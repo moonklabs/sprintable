@@ -7,7 +7,6 @@ import { CSS } from '@dnd-kit/utilities';
 import { useLocale, useTranslations } from 'next-intl';
 import { pickEulReulJosa } from '@/lib/korean-particle';
 import type { KanbanStory, KanbanMember, LineStatusSummary } from './types';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import { parseStoryCardTitle } from '@/lib/story-card-title';
 import { Badge } from '@/components/ui/badge';
 import { AlertTriangle, ChevronRight, EyeOff, History, Pause, Rocket, Zap, ZapOff, type LucideIcon } from 'lucide-react';
@@ -20,9 +19,10 @@ import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/h
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { TrustSeal } from '@/components/verify/trust-seal';
 import { deriveTrustStage } from '@/services/verify';
-import { formatRelativeTime } from '@/lib/storage/format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { memberDisplayLabel } from '@/lib/member-display';
 import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 // #1942 재작업(까심 REQUEST_CHANGES): 카드-상대 flip(left-0/right-0)은 보드가 가로스크롤이라
 // 카드 자체가 뷰포트 밖으로 밀려나면(신고 재현: 컬럼 280px, 카드 x=215~471, 뷰포트 390px) 어느
@@ -137,7 +137,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
   const t = useTranslations('board');
   const tc = useTranslations('common');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   // E-BOARD S6: 복수 assignee. assignees 우선, 없으면 단일 assignee 폴백. agent 한 명이라도 있으면 agent 취급(glow).
   const assigneeList = (assignees && assignees.length > 0) ? assignees : (assignee ? [assignee] : []);
   const hasAgent = assigneeList.some((m) => m.type === 'agent');
@@ -585,7 +585,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                     variant="verified"
                     humanName={verifiedBy.name}
                     humanLabel={verifiedBy.name ? undefined : memberDisplayLabel(null, tc)}
-                    when={story.human_verified_at ? formatRelativeTime(story.human_verified_at, locale, displayTimezone) : ''}
+                    when={story.human_verified_at ? formatViewerRelativeTime(story.human_verified_at, locale, displayTimezone) : ''}
                   />
                 ) : story.status === 'done' && trustStage === 'claimed' ? (
                   <TrustSeal variant="claimed" agentInitial={trustAgent?.name ? getInitials(trustAgent.name) : undefined} />
@@ -600,7 +600,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                     <span
                       title={[
                         lastExecution.rule_name ?? t('workflowExecuted'),
-                        lastExecution.completed_at ? formatRelativeTime(lastExecution.completed_at, locale, displayTimezone) : '',
+                        lastExecution.completed_at ? formatViewerRelativeTime(lastExecution.completed_at, locale, displayTimezone) : '',
                         lastExecution.status === 'matched' ? `✅ ${t('ruleMatched')}` : `⊘ ${t('ruleNone')}`,
                       ].filter(Boolean).join(' · ')}
                       className="flex h-5 w-5 items-center justify-center"

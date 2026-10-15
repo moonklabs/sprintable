@@ -3,9 +3,11 @@
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { AlertTriangle, Loader2 } from 'lucide-react';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Alert, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { ourDownloadUrl } from '@/lib/desktop-downloads';
+import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 
 /**
  * story #3807 AC3(페드루 PO 確定 2026-09-11) — dev-app 다운로드 자리(최소 1곳).
@@ -31,35 +33,58 @@ import { Card } from '@/components/ui/card';
  * 사실이 빠졌다: ① 대상 플랫폼(현재 매니페스트가 darwin-aarch64뿐 — 다른
  * 아키텍처를 받을 수 있다고 지어내지 않는다) ② 공증 前 Gatekeeper가 처음
  * 실행을 막는다는 사실과 그 우회(우클릭→열기) — 민이 spctl로 실측 확認.
+ *
+ * [SID:4619](2026-10-08 · 선생님 «실행할 수 없음») — 이 카드가 옛 Tauri 업데이터 매니페스트
+ * (`/desktop/updates/macos.json` → 0.1.2 · ad-hoc)의 url을 받는 단추로 쓰고 있었다. 이제 지금 앱
+ * «Sprintable Dev Setup»(Electron DMG · Developer ID · 공증 전)의 매니페스트
+ * `/desktop/downloads/macos.json`(mobile `publish-dev-setup.mjs`가 올린 것 · version · build ·
+ * url · sha256)을 읽는다. 옛 매니페스트는 이미 깔린 옛 앱의 업데이트용이라 그대로 둔다.
+ * 첫 열기 안내는 유나 정본(`~/.sprintable-shared/yuna/4619-download-card-copy.md`): 웹은 macOS 판을
+ * 모르니 13 이상 모두에서 되는 «설정 → 그래도 열기» 길 하나 + macOS 12 덧줄 · 끌어 놓기 한 줄.
  */
 
-interface MacosUpdateManifest {
+/** publish-dev-setup.mjs가 쓰는 매니페스트 중 이 카드가 읽는 칸 */
+interface DesktopDownloadManifest {
+  product: string;
   version: string;
-  pub_date: string;
-  platforms: {
-    'darwin-aarch64': { url: string; signature: string };
-  };
+  build: string;
+  url: string;
+  /** story 4655 (PO 14405): the first-open guide follows this flag — only an un-notarized build is blocked by macOS. Absent = treated as not notarized. */
+  notarized?: boolean;
 }
 
-function parseBuildSha(version: string): string | null {
-  const idx = version.indexOf('+');
-  if (idx < 0 || idx === version.length - 1) return null;
-  return version.slice(idx + 1);
+/**
+ * story #4547 (Yuna `4547-phone-download-card.md` · spec b0713c54 «4524 곁» · AC1): the macOS download is for a Mac — the device
+ * decides, never the window's width (a narrow Mac window keeps [다운로드]). Not a Mac: inside the phone app's shell, or a browser
+ * whose user agent is not a Mac's (iPhone · Android · a tablet · another OS). iPadOS reports itself as «Macintosh» and stays on the
+ * Mac side (nothing is blocked there).
+ */
+export function notAMac(userAgent: string, inPhoneApp: boolean): boolean {
+  return inPhoneApp || !/Macintosh/.test(userAgent);
 }
 
-export function DesktopDownloadCard() {
+/** story 4668: `hideTitle` — the onboarding's «데스크톱 앱 받기» screen has the title as its h1, so the card's own «데스크톱 앱» line
+ * is not drawn there (Yuna A-2); every other place keeps it. */
+/** story 4680 (Yuna 5065): `ctaVariant` — under another hero (the recruiter's [이 컴퓨터에서 시작]) the card's [다운로드] is outline,
+ * so one screen has one primary; every other place keeps the default. */
+export function DesktopDownloadCard({ hideTitle = false, ctaVariant = 'default' }: { hideTitle?: boolean; ctaVariant?: 'default' | 'outline' } = {}) {
   const t = useTranslations('desktop');
-  const [manifest, setManifest] = useState<MacosUpdateManifest | null>(null);
+  const [manifest, setManifest] = useState<DesktopDownloadManifest | null>(null);
   const [loading, setLoading] = useState(true);
+  // story #4547/#4661: the device is read after mount, and a claim that comes later reaches this card (subscribed)
+  const { inPhoneApp } = usePhoneBridge();
+  const elsewhere = typeof navigator !== 'undefined' && notAMac(navigator.userAgent, inPhoneApp);
 
   useEffect(() => {
     let alive = true;
-    fetch('/desktop/updates/macos.json')
+    fetch('/desktop/downloads/macos.json')
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null)
-      .then((json: MacosUpdateManifest | null) => {
+      .then((json: DesktopDownloadManifest | null) => {
         if (!alive) return;
-        setManifest(json?.version && json.platforms?.['darwin-aarch64']?.url ? json : null);
+        // [SID:4619 · Kadir 5004 후속 ①] a link only into our bucket — any other url is «지금은 받을 수 없어요», as no manifest
+        const url = ourDownloadUrl(json?.url);
+        setManifest(json?.version && url ? { ...json, url } : null);
         setLoading(false);
       });
     return () => { alive = false; };
@@ -80,7 +105,7 @@ export function DesktopDownloadCard() {
   if (!manifest) {
     return (
       <Card className="space-y-2 p-4" data-testid="desktop-download-card">
-        <p className="text-sm font-medium text-foreground">{t('title')}</p>
+        {hideTitle ? null : <p className="text-sm font-medium text-foreground">{t('title')}</p>}
         <p className="text-xs text-muted-foreground" data-testid="desktop-download-unavailable">
           {t('unavailable')}
         </p>
@@ -88,16 +113,19 @@ export function DesktopDownloadCard() {
     );
   }
 
-  const buildSha = parseBuildSha(manifest.version);
-  const downloadUrl = manifest.platforms['darwin-aarch64'].url;
+  const buildSha = manifest.build || null;
+  const downloadUrl = manifest.url;
 
   return (
     <Card className="space-y-2 p-4" data-testid="desktop-download-card">
-      <p className="text-sm font-medium text-foreground">{t('title')}</p>
+      {hideTitle ? null : <p className="text-sm font-medium text-foreground">{t('title')}</p>}
       <p className="text-xs text-muted-foreground" data-testid="desktop-download-target">
         {t('targetLabel')}
       </p>
       <p className="text-xs text-muted-foreground">
+        {/* [SID:4619] Yuna 04:0xZ: the app's own name first — macOS names it so when it blocks (its «… was blocked to protect
+            your Mac» names «Sprintable Dev Setup»), and the card and System Settings must use the same word. From the manifest; none → the line as before */}
+        {manifest.product ? <span data-testid="desktop-download-product">{manifest.product}{' · '}</span> : null}
         <span data-testid="desktop-download-version">{t('versionLabel', { version: manifest.version })}</span>
         {buildSha ? (
           <span data-testid="desktop-download-build-sha">{' · '}{t('buildLabel', { sha: buildSha })}</span>
@@ -107,16 +135,39 @@ export function DesktopDownloadCard() {
           AlertTitle로 먼저 보이고, 「왜」(공증 전 내부용)는 AlertDescription으로 덧붙인다.
           이전엔 둘 다 위 메타 정보(버전·대상 플랫폼)와 같은 text-xs text-muted-foreground라
           경고라는 게 눈에 안 띄었다(유나 지적). */}
+      {/* story #4547: not a Mac — nothing to do here: no warning, no button, one line where they were (no link either: no way to
+          open the Mac's screen from here). The unavailable state above keeps its own line (a Mac could not get it either) */}
+      {elsewhere ? (
+        <p className="break-keep text-xs text-muted-foreground" data-testid="desktop-download-open-on-mac">{t('openOnMac')}</p>
+      ) : (
+      <>
+      {/* [SID:4619] 유나 정본 — 제목 = 지금 할 일 · 손순서 두 줄(번호가 뜻) · macOS 12 덧줄 · 까닭(공증 전) */}
+      {/* story 4655 (PO 14405): the guide is for an un-notarized build only; a notarized one opens without it (the button stays) */}
+      {manifest.notarized === true ? null : (
       <Alert variant="warning">
         <AlertTriangle className="h-4 w-4" />
-        <AlertTitle data-testid="desktop-download-gatekeeper-notice">{t('gatekeeperNotice')}</AlertTitle>
-        <AlertDescription data-testid="desktop-download-notarization-notice">
-          {t('notarizationNotice')}
-        </AlertDescription>
+        <AlertTitle className="break-keep" data-testid="desktop-download-gatekeeper-title">{t('gatekeeperTitle')}</AlertTitle>
+        {/* AlertDescription is a <p> — an <ol> and <p>s inside it are invalid nesting (Yuna 5004): a div with its classes */}
+        <div className="col-start-2 space-y-1 text-xs leading-relaxed break-keep [overflow-wrap:anywhere]">
+          <ol className="list-decimal space-y-1 pl-4" data-testid="desktop-download-install-steps">
+            <li>{t('installStepDrag')}</li>
+            {/* the settings panel's name in one piece (it split over two lines at 390; one piece is easier to find in Settings) */}
+            {/* <nw> = «no wrap»: two letters, so the ko value holds no English word (verify:no-ascii-token-in-ko-value) */}
+            <li>{t.rich('installStepOpen', { nw: (chunks) => <span className="whitespace-nowrap" data-testid="desktop-download-settings-panel">{chunks}</span> })}</li>
+          </ol>
+          {/* text-xs only — muted on the warning tint is below AA (verify:no-muted-on-tint · story #3839) */}
+          <p className="text-xs" data-testid="desktop-download-old-mac">{t('installOldMac')}</p>
+          <p className="text-xs" data-testid="desktop-download-notarization-notice">
+            {t('notarizationNotice')}
+          </p>
+        </div>
       </Alert>
-      <Button asChild size="sm" data-testid="desktop-download-button">
+      )}
+      <Button asChild size="sm" variant={ctaVariant} data-testid="desktop-download-button">
         <a href={downloadUrl} download>{t('downloadCta')}</a>
       </Button>
+      </>
+      )}
     </Card>
   );
 }

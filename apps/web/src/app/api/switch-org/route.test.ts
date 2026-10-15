@@ -10,6 +10,10 @@ vi.mock('@/lib/db/server', () => ({
   SP_AT_COOKIE: 'sp_at',
   SP_RT_COOKIE: 'sp_rt',
 }));
+const cookieJar = vi.hoisted(() => ({ rt: 'rt-this-session' as string | undefined }));
+vi.mock('next/headers', () => ({
+  cookies: async () => ({ get: (name: string) => (name === 'sp_rt' && cookieJar.rt ? { value: cookieJar.rt } : undefined) }),
+}));
 
 import { POST } from './route';
 
@@ -53,5 +57,25 @@ describe('/api/switch-org — 상류 비-JSON 본문(story #3644 AC8)', () => {
     expect(res.status).toBe(403);
     const body = await res.json() as { error: { code: string } };
     expect(body.error.code).toBe('ORG_ACCESS_DENIED');
+  });
+});
+
+describe('[SID:4400] /api/switch-org sends this session\'s refresh token', () => {
+  it('the backend gets sp_rt, so it revokes only this session (other devices keep theirs)', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: { code: 'X' } }), { status: 403 }));
+    vi.stubGlobal('fetch', fetchMock);
+    cookieJar.rt = 'rt-this-session';
+    await POST(switchRequest('org-2'));
+    const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1];
+    expect(JSON.parse(String(init.body))).toEqual({ org_id: 'org-2', refresh_token: 'rt-this-session' });
+  });
+
+  it('without the cookie the field is left out (the backend then keeps its previous behaviour)', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: { code: 'X' } }), { status: 403 }));
+    vi.stubGlobal('fetch', fetchMock);
+    cookieJar.rt = undefined;
+    await POST(switchRequest('org-2'));
+    const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1];
+    expect(JSON.parse(String(init.body))).toEqual({ org_id: 'org-2' });
   });
 });

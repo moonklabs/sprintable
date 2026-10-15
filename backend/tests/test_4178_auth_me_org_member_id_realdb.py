@@ -181,6 +181,52 @@ async def test_human_session_without_org_member_row_returns_200_org_member_id_no
 
 
 @pytest.mark.anyio
+async def test_4668_deleted_organization_leaves_an_orphan_member_row_but_org_member_id_is_none():
+    """story 4668 — org_members.org_id has no FK and deleting an organization removes only the organization row, so the member row
+    stays behind. The JWT of a person whose organization was deleted still carries that org_id until the next refresh: `/auth/me`
+    must NOT read the orphan row as «a member of an organization» (the onboarding screens send such a person on as if the
+    organization still existed). A live organization's membership is still returned."""
+    from sqlalchemy import delete, select
+
+    from app.main import app
+    from app.models.organization import Organization
+    from app.models.project import OrgMember
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        # alive: the member row is returned
+        _override(app, Session, _human_auth(seeded["user_id"], seeded["org_id"]))
+        try:
+            alive = await _client_for(app).get("/api/v2/auth/me")
+        finally:
+            app.dependency_overrides.clear()
+        assert alive.status_code == 200, alive.text
+        assert alive.json().get("data", alive.json())["org_member_id"] == str(seeded["org_member_id"])
+
+        # the organization is deleted the way delete_by_user does it — only its own row; the member row stays (the orphan)
+        async with Session() as s:
+            await s.execute(delete(Organization).where(Organization.id == seeded["org_id"]))
+            await s.commit()
+        async with Session() as s:
+            orphan = (await s.execute(select(OrgMember.id).where(OrgMember.org_id == seeded["org_id"]))).scalar_one_or_none()
+        assert orphan == seeded["org_member_id"], "the premise: the member row survives the organization's deletion"
+
+        _override(app, Session, _human_auth(seeded["user_id"], seeded["org_id"]))
+        try:
+            gone = await _client_for(app).get("/api/v2/auth/me")
+        finally:
+            app.dependency_overrides.clear()
+        assert gone.status_code == 200, gone.text
+        payload = gone.json().get("data", gone.json())
+        assert payload["org_member_id"] is None  # reverted (no organization join) → the orphan's id comes back and this fails
+        assert payload["member_id"] == str(seeded["user_id"])
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_agent_api_key_session_unchanged_org_member_id_none():
     from app.dependencies.auth import AuthContext
     from app.main import app

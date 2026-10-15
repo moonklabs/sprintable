@@ -21,6 +21,7 @@ from app.services.ads_boost import (
     AdsBudgetExceedsSealError,
     request_ads_boost,
 )
+from app.services.ads_boost_cancel import AdsBoostCancelInProgressError
 from app.services.i18n_catalog import t
 from app.services.member_resolver import resolve_member
 
@@ -110,6 +111,18 @@ async def _create_ads_boost_endpoint(
                 "message": t("ads_boost.invalid_schedule", resolved_locale),
             },
         )
+    # story #4417 — the sealed amount is in minor units of this currency: one outside the table (currency_minor) has no unit to
+    # compare the spend with, so it is refused here instead of being sealed.
+    from app.services.currency_minor import CURRENCY_EXPONENTS
+
+    if body.currency not in CURRENCY_EXPONENTS:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "ADS_BOOST_UNKNOWN_CURRENCY",
+                "message": t("ads_boost.unknown_currency", resolved_locale, supported=", ".join(sorted(CURRENCY_EXPONENTS))),
+            },
+        )
 
     try:
         gate = await request_ads_boost(
@@ -140,6 +153,12 @@ async def _create_ads_boost_endpoint(
                 "code": "ADS_BOOST_APPROVER_ROLE_MISSING",
                 "message": t("ads_boost.approver_role_missing", resolved_locale),
             },
+        ) from exc
+    except AdsBoostCancelInProgressError as exc:
+        # story #4460 — the post's last boost is being cancelled (its campaign not known to be off yet): no new cycle until it is
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "ADS_BOOST_CANCEL_IN_PROGRESS", "message": t("ads_boost.cancel_in_progress", resolved_locale)},
         ) from exc
     except AdsBudgetExceedsSealError as exc:
         raise HTTPException(

@@ -8,7 +8,7 @@ from __future__ import annotations
 import base64
 import binascii
 
-from ..api_client import client
+from ..api_client import SprintableApiError, client
 
 # 백엔드 `app/services/mcp_attachment_upload.py`의 동일 상수와 정합(client-side fail-fast 가드 —
 # MCP 페이로드 낭비 전 조기 거부).
@@ -16,6 +16,23 @@ MAX_ATTACHMENTS = 5
 MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024  # 2MiB decoded/file
 MAX_TOTAL_ATTACHMENT_BYTES = 6 * 1024 * 1024  # 6MiB decoded/total
 _MAX_ATTACHMENT_BASE64_CHARS = ((MAX_ATTACHMENT_BYTES + 2) // 3) * 4
+# story #4474 — the same reason code the backend rechecks answer with (app/services/mcp_attachment_upload.py).
+ATTACHMENT_LIMIT_EXCEEDED = "ATTACHMENT_LIMIT_EXCEEDED"
+
+
+class AttachmentLimitError(SprintableApiError, ValueError):
+    """Over the declared limit (count or total size). A `SprintableApiError` so `err()` answers with the code and the values
+    instead of UNKNOWN (story #4474 — an agent sending six files got «too many attachments» with code UNKNOWN); still a
+    `ValueError` for callers and tests that catch that."""
+
+    def __init__(self, message: str, *, files: int, total_bytes: int | None) -> None:
+        detail = {
+            "max_files": MAX_ATTACHMENTS,
+            "max_total_bytes": MAX_TOTAL_ATTACHMENT_BYTES,
+            "files": files,
+            "total_bytes": total_bytes,
+        }
+        super().__init__(400, message, body=detail, code=ATTACHMENT_LIMIT_EXCEEDED)
 
 
 def validate_attachment(att: dict, index: int) -> tuple[dict, int]:
@@ -57,13 +74,15 @@ async def upload_attachments(upload_path: str, attachments: list[dict] | None) -
     if not attachments:
         return []
     if len(attachments) > MAX_ATTACHMENTS:
-        raise ValueError(f"too many attachments (max {MAX_ATTACHMENTS})")
+        # total_bytes unknown here on purpose — nothing is decoded before the count check
+        raise AttachmentLimitError(f"too many attachments (max {MAX_ATTACHMENTS})", files=len(attachments), total_bytes=None)
 
     validated: list[tuple[dict, int]] = [validate_attachment(att, i) for i, att in enumerate(attachments)]
     total_size = sum(size for _payload, size in validated)
     if total_size > MAX_TOTAL_ATTACHMENT_BYTES:
-        raise ValueError(
-            f"attachments total too large (max {MAX_TOTAL_ATTACHMENT_BYTES} decoded bytes)"
+        raise AttachmentLimitError(
+            f"attachments total too large (max {MAX_TOTAL_ATTACHMENT_BYTES} decoded bytes)",
+            files=len(attachments), total_bytes=total_size,
         )
 
     uploaded: list[dict] = []

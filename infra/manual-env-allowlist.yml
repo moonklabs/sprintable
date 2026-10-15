@@ -494,6 +494,11 @@ settings_exempt:
 # ⛔여기 등재는 "영원히 안 본다"가 아니라 "지금 근거를 남긴다"다 — 그 조건부 스위치가
 # 실제로 켜지는 환경이 생기면 이 사유도 같이 재검토해야 한다.
 code_read_exempt:
+  - key: K_REVISION
+    reason: >-
+      story #4513 — apps/web/src/app/api/health/route.ts (and backend app/core/build_info.py) report the running revision;
+      Cloud Run injects K_REVISION into every revision's container itself (platform-provided, never set by our IaC). Absent
+      or off its shape → «unknown».
   - key: KMS_PROVIDER
     reason: >-
       apps/web/src/lib/kms/provider.ts — 'local'|'gcp'|'vault' 스위치, 기본값 'local'로

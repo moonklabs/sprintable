@@ -14,6 +14,26 @@ import pytest
 import app.routers.conversations as conv
 
 
+
+# story #4500 — the delivery reads participants through member_resolver's org-scoped helpers (one query each, then the org-member
+# filter — another query). This mocked session answers queries in order, and its participants stand for members of the org:
+# the helpers answer as the participant query did before — one query, every participant.
+async def _participants_as_one_query(session, conversation_id, *_a, **_k):
+    r = await session.execute(None)
+    try:
+        vals = r.scalars().all()
+        if isinstance(vals, list):
+            return set(vals)
+    except Exception:  # noqa: BLE001 — a mock answering rows only
+        pass
+    return {row[0] for row in r.all()}
+
+
+@pytest.fixture(autouse=True)
+def _participants_are_org_members(monkeypatch):
+    monkeypatch.setattr("app.services.member_resolver.conversation_member_ids_in_org", _participants_as_one_query)
+    monkeypatch.setattr("app.services.member_resolver.conversation_member_ids_of_its_org", _participants_as_one_query)
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"

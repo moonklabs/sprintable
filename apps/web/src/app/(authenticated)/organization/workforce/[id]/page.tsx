@@ -5,13 +5,17 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { formatAgentRuntimeLine } from '@/components/agents/agent-management-tab';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { sessionStateLabel } from '@/components/chat/agent-session-strip';
+import type { SessionLimit } from '@/lib/agent-session-limit';
+import type { SessionRun } from '@/lib/agent-session-run';
 import { AlertTriangle, ArrowLeft, Check, Copy, MinusCircle, Pencil, X, XCircle } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { AgentConnectionSettingsSection } from '@/components/agents/agent-connection-settings-section';
 import { MessagingPolicySection } from '@/components/agents/messaging-policy-section';
+import { AgentRunProfileSection } from '@/components/agents/agent-run-profile-section';
+import { isDesktopRuntime } from '@/lib/agent-run-profile';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { OperatorInput } from '@/components/ui/operator-control';
@@ -22,6 +26,7 @@ import { Avatar } from '@/components/shared/avatar';
 import { AvatarEditCard } from '@/components/shared/avatar-edit-card';
 import { MemberNotificationPreferencesSummary } from '@/components/agents/member-notification-preferences-summary';
 import { useToast } from '@/components/ui/toast';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import {
   RUNTIME_REGISTRY,
   getRuntimeDef,
@@ -35,6 +40,7 @@ import { fetchMe } from '@/lib/me-client';
 import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
 import { copyTextSafely } from '@/lib/clipboard';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /** 런타임 상태(6종 중 ①~⑤) → 배지·헬퍼 표현. ⑥(드롭다운 dot)은 AC 범위 외(§11). */
 const RUNTIME_STATUS_UI: Record<
@@ -78,6 +84,19 @@ interface AgentMember {
   needs_restart?: boolean | null;
 }
 
+/** story 4675 — what GET /api/agents/{id}/desktop-session says about where the agent is (the DM strip's shape · the bound pair is new) */
+interface DeskView {
+  setup_id: string | null;
+  device_name: string | null;
+  state: string | null;
+  activity?: string | null;
+  limit?: SessionLimit | null;
+  // story 4686 (AC2): what the live session really runs on (the strip's line · «지금 도는 것» in the run group)
+  run?: SessionRun | null;
+  bound_setup_id?: string | null;
+  bound_device_name?: string | null;
+}
+
 interface WebhookConfig {
   id: string;
   member_id: string | null;
@@ -114,10 +133,15 @@ export default function AgentDetailPage() {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('settings');
   const ta = useTranslations('agents');
+  const tSession = useTranslations('chats.agentSession'); // story 4675 — the session's word, the DM strip's table
+  // story 4675 (Yuna 5068): /desktop redirects to Today while DESKTOP_DOWNLOAD_ENABLED is off (prod now) — the link follows the
+  // same flag the sidebar and /more read (navV3Flags); off, or not known → no link, the line stays
+  const { navV3Flags } = useDashboardContext();
+  const desktopPageOn = navV3Flags?.desktopDownloadEnabled === true;
   const tc = useTranslations('common');
   const to = useTranslations('organization');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
   const { addToast } = useToast();
@@ -126,6 +150,17 @@ export default function AgentDetailPage() {
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [orgRole, setOrgRole] = useState<string>('member');
+  // story 4675 (F2): the computer this agent runs on (its reported session · the DM strip's own read) or is bound to (its live
+  // key's setup) — one read; nothing said when neither (the page as it was)
+  const [desk, setDesk] = useState<DeskView | null>(null);
+  useEffect(() => {
+    let off = false;
+    fetchWithAuth(`/api/agents/${id}/desktop-session`)
+      .then(async (r) => (r.ok ? ((await r.json()) as DeskView) : null))
+      .catch(() => null)
+      .then((v) => { if (!off) setDesk(v); });
+    return () => { off = true; };
+  }, [id]);
 
   const [editingName, setEditingName] = useState(false);
   const [editName, setEditName] = useState('');
@@ -468,6 +503,27 @@ export default function AgentDetailPage() {
                       <p className="mt-1 truncate text-xs text-muted-foreground">{runtimeLine}</p>
                     ) : null;
                   })()}
+                  {/* story 4675 (F2 · Yuna §I ②③): «지금 도는 컴퓨터: {name} · {state}» (the DM strip's word) · bound but never run →
+                      «{name}에 연결됨 · 아직 안 돌았어요» · neither → no line. The device row link for an org owner/admin only (the
+                      list is theirs · 4424). */}
+                  {(() => {
+                    const line = desk?.state && desk.device_name
+                      ? ta('runningOn', { name: desk.device_name, state: sessionStateLabel(desk, tSession) })
+                      : desk?.bound_device_name ? ta('boundNotRunYet', { name: desk.bound_device_name }) : null;
+                    if (!line) return null;
+                    const setupId = desk?.setup_id ?? desk?.bound_setup_id ?? null;
+                    const manage = (orgRole === 'admin' || orgRole === 'owner') && desktopPageOn;
+                    return (
+                      <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 break-keep text-xs text-muted-foreground" data-testid="agent-running-on">
+                        <span>{line}</span>
+                        {manage && setupId ? (
+                          <Link href={flatHref(`/desktop#device=${setupId}`)} className="whitespace-nowrap font-medium text-primary hover:underline" data-testid="agent-see-devices">
+                            {ta('seeConnectedDevices')}
+                          </Link>
+                        ) : null}
+                      </p>
+                    );
+                  })()}
                 </div>
                 {canEdit && (
                 <button
@@ -578,6 +634,9 @@ export default function AgentDetailPage() {
         );
       })()}
 
+      {/* story #4540 (C-5) — «실행»: the model · effort the desktop app starts this agent with (desktop runtimes only) */}
+      {isDesktopRuntime(agent.runtime_type) ? <AgentRunProfileSection agentId={agent.id} runtimeType={agent.runtime_type ?? null} runNow={desk?.run ?? null} /> : null}
+
       {/* API Keys */}
       {/* story #3994(«거짓 경고» 클래스, PO CHANGES-1 2026-09-17) — 「시스템 발행」은
           키를 발급받을 연결 대상이 아니다(연결된 키로 고객 에이전트가 "시스템 발행"
@@ -655,7 +714,7 @@ export default function AgentDetailPage() {
                   value={webhookUrl}
                   onChange={(e) => setWebhookUrl(e.target.value)}
                   placeholder="https://your-agent.example.com/webhook"
-                  className="flex-1 font-mono text-xs"
+                  className="flex-1 font-mono"
                   disabled={!webhookActive || !canEditWebhook}
                 />
                 <Button

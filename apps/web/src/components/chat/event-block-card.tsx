@@ -18,6 +18,7 @@ import { gateTypeLabel } from '@/lib/gate-type-label';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { entityTypeLabel } from '@/components/chat/chat-input-entity-tokens';
 import { formatLocaleDateTime } from '@/lib/i18n';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { isLocalizedPlatformPreset, localizeLegacyUnnamedHeader, localizePresetBlockTemplate, localizeSeedStageTextBlocks, presetName } from '@/lib/platform-preset-copy';
 
 // story #3893 CHANGES①(PO PR#4298 리뷰 2026-09-15) — outcome-intent-fields.tsx의
@@ -208,6 +209,7 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
   const tHypotheses = useTranslations('hypotheses');
   const tPreset = useTranslations('recipePreset');
   const locale = useLocale();
+  const viewerTz = useViewerTimeZone(); // story #4443 PR2
   const { currentMemberType, role, orgId, currentTeamMemberId } = useDashboardContext();
   const flatHref = useFlatHref();
   // story #3287(도메인탈고정) — org 커스텀 status 라벨 오버라이드. statusLabel()이 undefined면
@@ -331,8 +333,9 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
   // (기존 Intl 포매터, 신규 로직 0)로 렌더 시점 로케일 포맷. 파싱 실패(빈 문자열 반환,
   // formatLocaleDate의 기존 계약)는 labels 키를 안 채워 optional 생략.
   const measuredAtRaw = payload['measured_at'];
-  if (typeof measuredAtRaw === 'string') {
-    const formatted = formatLocaleDateTime(measuredAtRaw, locale);
+  // story #4443 PR2 — in the viewer's zone; not known yet → the optional label is left out (never a UTC time)
+  if (typeof measuredAtRaw === 'string' && viewerTz) {
+    const formatted = formatLocaleDateTime(measuredAtRaw, locale, viewerTz);
     if (formatted) labels['measured_at'] = formatted;
   }
 

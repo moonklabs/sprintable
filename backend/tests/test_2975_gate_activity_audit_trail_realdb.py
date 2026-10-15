@@ -281,3 +281,56 @@ async def test_realdb_void_gate_now_recorded_in_activity_log():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_realdb_story_4485_activity_carries_who_kind_a_server_row_and_a_person_row():
+    """story #4485 — the history says who did it by kind: a row the server itself wrote (`approval_card_delivery_failed` —
+    actor_type platform, no actor_id) answers actor_type «platform» (the web names it «시스템», not «알 수 없음»); a person's
+    approval answers «human». Mutation: drop actor_type from the response → this fails."""
+    from app.main import app
+    from app.models.activity_log import ActivityLog
+    from app.models.gate import Gate
+    from app.models.pm import Story
+    from app.services.merge_verdict_gate import MERGE_GATE_TYPE
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_common(s, email_prefix="po4485", display_name="PO")
+            story = Story(id=uuid.uuid4(), org_id=seeded["org_id"], project_id=seeded["project_id"], title="#4485 actor_type")
+            s.add(story)
+            await s.commit()
+            gate = Gate(
+                id=uuid.uuid4(), org_id=seeded["org_id"], work_item_id=story.id, work_item_type="story",
+                gate_type=MERGE_GATE_TYPE, status="pending",
+                approved_head_sha=None, github_check_run_id=1, github_check_run_sha="sha-4485",
+            )
+            s.add(gate)
+            s.add(ActivityLog(
+                org_id=seeded["org_id"], action="approval_card_delivery_failed", actor_id=None, actor_type="platform",
+                entity_type="gate", entity_id=gate.id, context={},
+            ))
+            await s.commit()
+            gate_id = gate.id
+
+        await _setup_app(app, Session, seeded["org_id"], seeded["user_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.post(
+                f"/api/v2/gates/{gate_id}/transition",
+                json={"status": "approved", "note": "실 승인", "evidence_viewed": True, "reviewed_head_sha": "sha-4485"},
+            )
+            assert resp.status_code == 200, resp.text
+            resp = await client.get(f"/api/v2/gates/{gate_id}/activity")
+            assert resp.status_code == 200, resp.text
+            by_action = {i["action"]: i for i in resp.json()}
+            assert by_action["approval_card_delivery_failed"]["actor_type"] == "platform"
+            assert by_action["approval_card_delivery_failed"]["actor_id"] is None
+            assert by_action["gate_approved"]["actor_type"] == "human"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()

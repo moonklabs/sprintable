@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { ChevronLeft, PanelRight } from 'lucide-react';
@@ -17,7 +17,7 @@ import { useTodaySnapshot } from '@/components/org-briefing/use-today-snapshot';
 import { NavV3Sidebar } from '@/components/nav/nav-v3-item-list';
 import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
 import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations, type NavV3Flags } from '@/lib/nav-v3-destinations';
-import { useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
+import { isOwnMessage, useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
 import { useFlatHref } from '@/hooks/use-flat-href';
 
 /**
@@ -32,6 +32,34 @@ import { useFlatHref } from '@/hooks/use-flat-href';
  * 옛 `/chats`·`ChatListView`·`ChatView`·`approval-request-card.tsx` 전부 무접촉
  * (재사용은 import/조각뿐, 그 파일들 자체는 1줄도 안 건드림).
  */
+/**
+ * The thread rail after a new message: the thread moves to the top with its latest line, and gains one unread unless it is
+ * open or the message is mine (story #4440 — my own message now arrives from my other tabs and devices, and is never unread).
+ * `unknown` = the thread is not in the rail yet (the caller reloads it).
+ */
+export function threadsAfterMessage(
+  prev: ChatV3Thread[] | null,
+  payload: Record<string, unknown>,
+  { selectedId, meId }: { selectedId: string | null | undefined; meId: string | undefined },
+): { next: ChatV3Thread[] | null; unknown: boolean } {
+  const conversationId = (payload.conversation_id ?? payload.id) as string | undefined;
+  if (!prev || !conversationId) return { next: prev, unknown: false };
+  const idx = prev.findIndex((th) => th.id === conversationId);
+  if (idx === -1) return { next: prev, unknown: true };
+  const content = payload.content as string | undefined;
+  const createdAt = payload.created_at as string | undefined;
+  const updated = [...prev];
+  const item = { ...updated[idx]! };
+  const hasAttachments = Array.isArray(payload.attachments) && payload.attachments.length > 0;
+  // story #4442 — an attachment-only message (no text) updates the thread too: «첨부 파일» and its time
+  if (createdAt && (content || hasAttachments)) {
+    item.latest_message = { content: content ?? '', created_at: createdAt, ...(hasAttachments ? { has_attachments: true } : {}) };
+    if (conversationId !== selectedId && !isOwnMessage(payload, meId)) item.unread_count = (item.unread_count ?? 0) + 1;
+  }
+  updated.splice(idx, 1);
+  return { next: [item, ...updated], unknown: false };
+}
+
 export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Flags }) {
   // story #4004 — 「오늘」 목적지는 더 이상 이 화면이 재조립하지 않는다(nav-v3-item-list.tsx가
   // resolveNavV3Destinations 그대로 씀). 이벤트 카드 서명·관련 링크는 "결정할 것" 맥락이라
@@ -70,6 +98,10 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
   const { data: todaySnapshot } = useTodaySnapshot();
   const needsMe = todaySnapshot?.needsMe ?? [];
   const [threads, setThreads] = useState<ChatV3Thread[] | null>(null);
+  // story #4442 (PO 00:04Z) — the rail as last rendered, so «not in the rail → read it again» is decided outside a state
+  // updater (updaters stay pure; strict mode calls them twice)
+  const threadsRef = useRef<ChatV3Thread[] | null>(null);
+  useLayoutEffect(() => { threadsRef.current = threads; }, [threads]);
   const [loadError, setLoadError] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // story #4006 AC3/AC4(§4, doc 5bc82986) — lg 미만은 레일↔대화 단일 페인. selectedId는
@@ -230,28 +262,26 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
   // 통째 재조회로 폴백. 「지금 열린 스레드는 안읽음 점 안 켬」(AC3 명시 문구) — legacy처럼
   // mark-read SSE 왕복으로 되돌리는 대신 이 화면 규모에 맞게 즉시 스킵(신규 mark-read
   // 배선은 이 스토리 범위 밖).
+  // the rail's row update, one contract for received messages and this tab's own sends (story #4442 · PO 23:25Z):
+  // `unknown` = not in the rail yet (a new group a DM branched into · a conversation opened by link, outside the first page)
+  // → read the rail again
+  const applyThreadMessage = useCallback((payload: Record<string, unknown>) => {
+    const opts = { selectedId, meId: me?.id };
+    if (threadsAfterMessage(threadsRef.current, payload, opts).unknown) {
+      if (me) loadConversations(me); // once, outside any updater
+      return;
+    }
+    setThreads((prev) => threadsAfterMessage(prev, payload, opts).next);
+  }, [selectedId, loadConversations, me]);
+
   const handleThreadMessage = useCallback((payload: Record<string, unknown>) => {
     const conversationId = (payload.conversation_id ?? payload.id) as string | undefined;
-    const content = payload.content as string | undefined;
-    const createdAt = payload.created_at as string | undefined;
     if (!conversationId) return;
     // story #4008 CHANGES 2 — 이 화면(선택된 스레드)에 온 메시지는 대화 열로도
     // 밀어준다(그 컴포넌트는 더 이상 자기 useChatSse가 없다 — 위 import 주석).
     if (conversationId === selectedId) messagesRef.current?.receiveMessage(payload);
-    setThreads((prev) => {
-      if (!prev) return prev;
-      const idx = prev.findIndex((th) => th.id === conversationId);
-      if (idx === -1) { if (me) loadConversations(me); return prev; }
-      const updated = [...prev];
-      const item = { ...updated[idx]! };
-      if (content && createdAt) {
-        item.latest_message = { content, created_at: createdAt };
-        if (conversationId !== selectedId) item.unread_count = (item.unread_count ?? 0) + 1;
-      }
-      updated.splice(idx, 1);
-      return [item, ...updated];
-    });
-  }, [selectedId, loadConversations, me]);
+    applyThreadMessage(payload);
+  }, [selectedId, applyThreadMessage]);
 
   const handleThreadRead = useCallback((payload: SseConversationReadPayload) => {
     setThreads((prev) =>
@@ -269,6 +299,9 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
   useChatSse({
     currentTeamMemberId: me?.id,
     onConversationMessage: handleThreadMessage,
+    // story #4442 — this tab's own sends update the rail row (the echo is dropped; the chat column already has the message);
+    // my message never leaves an unread dot; a conversation the rail doesn't hold yet reads the rail again
+    onSentHere: applyThreadMessage,
     onConversationRead: handleThreadRead,
     onReconnect: handleThreadReconnect,
   });

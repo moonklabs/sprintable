@@ -134,7 +134,8 @@ async def test_realdb_assignee_changed_pushes_sse_to_accessible_members():
         async with Session() as s:
             seeded = await _seed_org_project_story_owner(s)
         org_id, story_id, a_id = seeded["org_id"], seeded["story_id"], seeded["user_a_id"]
-        new_assignee_id = uuid.uuid4()
+        # story #4497: an assignee must be a member of the org now (a random id is refused 422) — the org's own member
+        new_assignee_id = seeded["org_member_a_id"]
 
         pushed: list[tuple[str, dict]] = []
 

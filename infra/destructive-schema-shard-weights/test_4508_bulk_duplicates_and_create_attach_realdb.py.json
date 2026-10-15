@@ -1,0 +1,1 @@
+{"file": "tests/test_4508_bulk_duplicates_and_create_attach_realdb.py", "sec": 6.0, "source": "story-4508 — bulk with the same story twice is refused; a story saved with an assignee answers 201 when an enrichment fails after it — new file measured locally (uv run pytest)"}

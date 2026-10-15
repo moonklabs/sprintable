@@ -34,6 +34,10 @@ def anyio_backend():
     return "asyncio"
 
 
+# story #4395 — 전역 엔진 배경 작업 drain → dispose는 conftest(`drain_global_background_work`)가 destructive async 테스트 전부에
+# 주입한다 — 이 파일에만 두던 fixture는 걷었다(파일마다 기억에 기대지 않게).
+
+
 async def _session():
     """SLA 하네스(create_all + 워크플로 테이블 TRUNCATE) + 실 훅 경로(시스템 발행자·이벤트 발행)가 쓰는 raw-SQL 부분 유니크
     인덱스 둘(0258 · entity_references) — create_all이 못 세우는 것을 test_4090 하네스와 같이 보정(제품 결함 아님)."""
@@ -335,4 +339,59 @@ async def test_caller_session_returns_its_connection_before_items_so_a_two_conne
             assert await _events(Session, sr_id, "auto_approved") == 1
     finally:
         await small.dispose()
+        await engine.dispose()
+
+
+async def _idle_in_tx_on_global_engine(Session) -> int:
+    """전역 엔진이 이 DB에 남긴 idle in transaction 커넥션 수 — destructive 테스트에선 conftest가 app 이름을
+    `GLOBAL_ENGINE_TEST_TAG_PREFIX`(ge|…)로 바꿔 달고, 태깅 전이면 `db_application_name()` 그대로다."""
+    from sqlalchemy import text
+
+    from app.core.database import db_application_name
+    from tests.conftest import GLOBAL_ENGINE_TEST_TAG_PREFIX
+
+    async with Session() as s:
+        return (await s.execute(text(
+            "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
+            "AND state = 'idle in transaction' AND (starts_with(application_name, :tag) OR application_name = :app)"
+        ), {"tag": GLOBAL_ENGINE_TEST_TAG_PREFIX, "app": db_application_name()})).scalar_one()
+
+
+async def test_story_4395_publish_path_background_work_is_drained_before_the_loop_closes(monkeypatch):
+    """story #4395 — 항목 B의 발행이 커밋 뒤 띄운 `mark_agent_replied`가 SELECT 뒤 트랜잭션을 연 채 머무는 순간(느린 배달)을
+    고정해 재현한다: `process_sla`가 돌아온 직후엔 전역 엔진에 idle in transaction이 **있고**(양성대조 — 이 재현이 실제로
+    누수 모양을 만든다), conftest 정리(`drain_global_background_work`)를 거치면 **0**이다.
+    뮤테이션: 정리에서 drain을 빼면(dispose만) 머무는 태스크의 커넥션은 풀에 없어 dispose가 못 닫는다 → 1 남음 — RED."""
+    from sqlalchemy import select
+
+    import app.services.conversation_webhook as conversation_webhook
+    from app.core.database import async_session_factory
+    from app.models.conversation_webhook_delivery import ConversationWebhookDelivery
+    from app.services.workflow_sla_processor import process_sla
+
+    engine, Session = await _session()
+    try:
+        w = await _seed_mixed_batch(Session)
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def _slow_mark_agent_replied(conversation_id):
+            async with async_session_factory() as db:  # 실 배달과 같은 전역 엔진 · 같은 SELECT
+                await db.execute(select(ConversationWebhookDelivery.id).limit(1))
+                started.set()
+                await release.wait()  # SELECT 뒤 트랜잭션을 연 채 머묾(CI 덤프의 pid 480 모양)
+
+        monkeypatch.setattr(conversation_webhook, "mark_agent_replied", _slow_mark_agent_replied)
+        with patch(_NOTIFY, new=AsyncMock()):
+            async with Session() as s:
+                counts = await process_sla(s, now=_NOW)
+        assert counts["auto_approved"] == 1, counts
+        await asyncio.wait_for(started.wait(), timeout=10)
+        assert await _idle_in_tx_on_global_engine(Session) == 1  # 양성대조: 루프가 여기서 닫히면 이 커넥션이 버려진다
+
+        asyncio.get_running_loop().call_later(0.2, release.set)  # 느린 배달이 결국 끝난다 — 정리는 그걸 기다려야 한다
+        from tests.conftest import drain_global_background_work
+
+        await drain_global_background_work()
+        assert await _idle_in_tx_on_global_engine(Session) == 0
+    finally:
         await engine.dispose()

@@ -19,10 +19,13 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { CreateOrganizationDialog } from '@/components/nav/create-organization-dialog';
+import { ProjectAccessPicker } from '@/components/nav/project-access-picker';
+import { ProjectFolderField } from '@/components/nav/project-folder-field';
 import { useUnifiedSwitcher, type OrgSwitcherItem, type ProjectSwitcherItem } from '@/hooks/use-unified-switcher';
 import { useAccountSwitcher } from '@/hooks/use-account-switcher';
 import { orgRoleLabel } from '@/lib/org-member-role';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { ProjectLimitBanner } from '@/components/nav/project-limit-banner';
 
 interface ContextSwitcherChipProps {
   orgs: OrgSwitcherItem[];
@@ -144,7 +147,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                   value={s.searchQuery}
                   onChange={(e) => s.setSearchQuery(e.target.value)}
                   placeholder={t('switcherProjectSearchPlaceholder')}
-                  className="h-10 w-full rounded-[10px] border border-border bg-muted pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  className="h-10 w-full rounded-[10px] border border-border bg-muted pl-9 pr-3 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                 />
               </div>
             </div>
@@ -171,6 +174,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                     variant="ghost"
                     disabled={s.pending}
                     onClick={() => void s.switchProject(project.projectId)}
+                    aria-current={isCurrent ? 'true' : undefined}
                     className={`min-h-11 w-full justify-start gap-2.5 rounded-lg px-3.5 py-2.5 text-left font-normal hover:bg-accent disabled:opacity-60 ${isCurrent ? 'bg-brand/10' : ''}`}
                   >
                     <OrgInitial
@@ -284,6 +288,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                       variant="ghost"
                       disabled={acc.busy !== null || isActive}
                       onClick={() => void acc.handleSwitch(account)}
+                      aria-current={isActive ? 'true' : undefined}
                       className={`min-h-11 w-full justify-start gap-2.5 rounded-lg px-3.5 py-2.5 text-left font-normal hover:bg-accent disabled:opacity-60 ${isActive ? 'bg-brand/10' : ''}`}
                     >
                       <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
@@ -355,13 +360,15 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
             <DialogTitle>{t('switcherNewProjectDialogTitle')}</DialogTitle>
           </DialogHeader>
           <form onSubmit={(e) => { e.preventDefault(); void s.createProject(s.newProjectName, s.newProjectDesc); }} className="space-y-3">
+            {/* [SID:4681] (Yuna §K): the plan's project limit — a warning banner at the form's top (in place of the general failure line below) */}
+            {s.createProjectLimit && <ProjectLimitBanner key={s.createProjectLimitNonce} limit={s.createProjectLimit.limit} free={s.createProjectLimit.free} />}
             <div className="space-y-1">
               <label className="text-sm font-medium" htmlFor="chip-proj-name">
                 {t('switcherProjectNameLabel')} <span className="text-destructive">*</span>
               </label>
               <input
                 id="chip-proj-name"
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 placeholder={t('switcherProjectNamePlaceholder')}
                 value={s.newProjectName}
                 onChange={(e) => s.setNewProjectName(e.target.value)}
@@ -375,13 +382,18 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
               </label>
               <textarea
                 id="chip-proj-desc"
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 placeholder={t('switcherProjectDescPlaceholder')}
                 rows={3}
                 value={s.newProjectDesc}
                 onChange={(e) => s.setNewProjectDesc(e.target.value)}
               />
             </div>
+            {/* [SID:4681] (D3 · piece ③): the same folder field as the sidebar dialog — inside the desktop app only */}
+            <ProjectFolderField value={s.newProjectFolder} onChange={s.setNewProjectFolder} disabled={s.creating} idPrefix="chip" />
+            {/* [SID:4681] (D3 · piece ②): the same check list as the sidebar dialog — the web too (AC3) */}
+            {/* Kadir codex · PO (나): an org member may not grant (the server's rule) — no list, no call */}
+            {s.canGrantAccess && <ProjectAccessPicker selected={s.newProjectAgentIds} onChange={s.setNewProjectAgentIds} disabled={s.creating} idPrefix="chip" />}
             {/* story #2468(b) — 실패를 침묵하지 않는다("버튼 무반응"의 정체가 이 자리였다). */}
             {s.createProjectError && (
               <p role="alert" className="text-sm text-destructive">{s.createProjectError}</p>
@@ -396,6 +408,14 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
           </form>
         </DialogContent>
       </Dialog>
+      {/* [SID:4681]: the project was made but some grants failed — said under the chip (the sheet closed and the switch happened) */}
+      {s.createProjectNotice && (
+        <p role="alert" className="px-1 text-xs text-destructive lg:hidden" data-testid="context-switcher-chip-create-project-notice">{s.createProjectNotice}</p>
+      )}
+      {/* [SID:4681] ③: the folder could not be kept on this Mac — its own line (Yuna §H) */}
+      {s.createProjectFolderNotice && (
+        <p role="alert" className="px-1 text-xs text-destructive lg:hidden" data-testid="context-switcher-chip-create-project-folder-notice">{s.createProjectFolderNotice}</p>
+      )}
     </>
   );
 }

@@ -11,6 +11,8 @@
 // 조직 타임존이 브라우저와 달라지는 순간(BE 조직 tz 필드 착지 뒤) 이 변환 자체를
 // 제대로 된 tz 변환 라이브러리로 바꿔야 한다 — 지금은 그 필드가 없어(그라운딩 확認,
 // story #3422 ②-a 커밋 참고) 범위 밖으로 명시해 둔다.
+import { zonedWallClockToIso } from './schedule-format';
+
 export type ScheduledAtValidation =
   | { valid: true; iso: string }
   | { valid: false; reason: 'past' | 'invalid' };
@@ -31,9 +33,15 @@ export function parseScheduledAtServerError(body: unknown): 'past_or_invalid' | 
   return hit ? 'past_or_invalid' : null;
 }
 
-export function validateScheduledAt(localValue: string, now: Date = new Date()): ScheduledAtValidation {
-  if (!localValue) return { valid: false, reason: 'invalid' };
-  const date = new Date(localValue);
+// story #4443 PR3b (PO 00:07Z ④) — the typed wall clock («2026-09-05T14:30») is read in the zone the caller names: the team's
+// (the org's · useTeamTimeZone). Was `new Date(localValue)` — the browser's zone, whatever the org's is. Not known yet → invalid.
+const LOCAL_VALUE = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/;
+
+export function validateScheduledAt(localValue: string, timeZone: string | null, now: Date = new Date()): ScheduledAtValidation {
+  if (!localValue || !timeZone) return { valid: false, reason: 'invalid' };
+  const m = LOCAL_VALUE.exec(localValue);
+  if (!m) return { valid: false, reason: 'invalid' };
+  const date = new Date(zonedWallClockToIso(m[1]!, Number(m[2]), Number(m[3]), Number(m[4] ?? 0), 0, timeZone));
   if (Number.isNaN(date.getTime())) return { valid: false, reason: 'invalid' };
   if (date.getTime() <= now.getTime()) return { valid: false, reason: 'past' };
   return { valid: true, iso: date.toISOString() };

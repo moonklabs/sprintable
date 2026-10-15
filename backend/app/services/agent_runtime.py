@@ -23,6 +23,18 @@ from enum import Enum
 
 SKILL_MODEL_MEDIATED = "model-mediated"
 
+# story 4680 (UX-1 · D2): the desktop app's runtime ids → members.runtime_type — the ONE place (desktop_setup.py binds with it,
+# runtime_capabilities carries its inverse as `desktop_runtime`, so the web never keeps a table of its own).
+DESKTOP_RUNTIME_TYPES: dict[str, str] = {"claude": "claude-code", "codex": "codex"}
+
+
+def desktop_runtime_of(runtime_type: str) -> str | None:
+    """`claude-code` → `claude` · `codex` → `codex` · anything else → None (no desktop app runs it)."""
+    for desktop, member in DESKTOP_RUNTIME_TYPES.items():
+        if member == runtime_type:
+            return desktop
+    return None
+
 
 class RuntimeType(str, Enum):
     """member.runtime_type 의 허용 9종(앱 레이어 강제)."""

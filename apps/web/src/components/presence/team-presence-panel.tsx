@@ -64,7 +64,8 @@ function PresenceRow({ item, authFailure }: { item: TeamPresenceItem; authFailur
   const dotStatus: PresenceStatus = item.presence_status ?? 'offline';
   // story #3092(2단계, 표면1) — runtime_type 원값이 아니라 runtimeLabel()로 고유명사화
   // (raw key「claude-code」 노출 금지, 전역 폴백 규칙).
-  const fallback = [item.agent_role, runtimeLabel(item.runtime_type)].filter(Boolean).join(' · ');
+  // story 4675 (F2 · Yuna §I ⑤): the computer's name ends the line as text (no chip — one line stays one line); none → no tail
+  const fallback = [item.agent_role, runtimeLabel(item.runtime_type), item.device_name].filter(Boolean).join(' · ');
 
   return (
     <li className={cn('flex items-center gap-2.5 rounded-lg px-2 py-1.5', offline && 'opacity-60')}>

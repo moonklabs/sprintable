@@ -519,6 +519,7 @@ function ConversationLayer({ conversation }: { conversation: WorkcellConversatio
                   <button
                     key={v}
                     type="button"
+                    aria-pressed={v === view}
                     onClick={() => setView(v)}
                     className={cn(
                       'px-2.5 py-1 text-[10px] transition-colors duration-[140ms]',

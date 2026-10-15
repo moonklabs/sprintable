@@ -153,7 +153,7 @@ export function KanbanColumn({
               <button
                 type="button"
                 aria-label={t('expandDoneColumn')}
-                onClick={onToggleCollapse}
+                onClick={onToggleCollapse} aria-expanded={!collapsed}
                 className={`flex h-5 w-5 items-center justify-center rounded transition ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}
               >
                 <ChevronDown className="h-3.5 w-3.5" />
@@ -214,7 +214,7 @@ export function KanbanColumn({
                   <button
                     type="button"
                     aria-label={t('collapseDoneColumn')}
-                    onClick={onToggleCollapse}
+                    onClick={onToggleCollapse} aria-expanded={!collapsed}
                     className={`flex h-5 w-5 items-center justify-center rounded transition ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}
                   >
                     <ChevronUp className="h-3.5 w-3.5" />
@@ -250,7 +250,7 @@ export function KanbanColumn({
                 if (e.key === 'Escape') onWipLimitRemove?.();
               }}
               placeholder={t('wipLimitLabel')}
-              className="h-7 w-20 text-xs"
+              className="h-7 w-24"
               autoFocus
             />
             <Button size="sm" variant="default" className="h-7 px-2 text-xs" onClick={onWipLimitSave}>
@@ -278,7 +278,7 @@ export function KanbanColumn({
               }
             }}
             placeholder={t('addStoryPlaceholder')}
-            className="h-8 text-sm"
+            className="h-8 text-base lg:text-sm"
           />
           <div className="mt-2 flex items-center gap-2">
             <Button

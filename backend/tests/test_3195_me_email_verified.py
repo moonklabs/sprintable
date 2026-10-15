@@ -24,10 +24,11 @@ def anyio_backend():
     return "asyncio"
 
 
-def _mock_db(email_verified: bool | None) -> AsyncMock:
+def _mock_db(email_verified: bool | None, display_name: str | None = None) -> AsyncMock:
+    # story 4427 — get_auth_me reads email_verified and display_name in one query (a row of both, or None).
     session = AsyncMock()
     result = MagicMock()
-    result.scalar_one_or_none.return_value = email_verified
+    result.one_or_none.return_value = (email_verified, display_name)
     session.execute = AsyncMock(return_value=result)
     return session
 
@@ -83,3 +84,52 @@ async def test_email_verified_lookup_failure_degrades_to_none_not_crash():
     session.execute = AsyncMock(side_effect=RuntimeError("db down"))
     resp = await get_auth_me(auth=auth, db=session)
     assert resp.email_verified is None
+
+
+@pytest.mark.anyio
+async def test_4427_human_session_returns_display_name_for_the_desktop_default_org_name():
+    """story 4427 — the desktop sign-up screen defaults the organization name to «{display_name}의 조직»."""
+    auth = AuthContext(user_id=str(uuid.uuid4()), email="jiwoo@example.com", claims={"app_metadata": {}})
+    resp = await get_auth_me(auth=auth, db=_mock_db(True, "김지우"))
+    assert resp.display_name == "김지우"
+    assert resp.email_verified is True
+
+
+@pytest.mark.anyio
+async def test_4427_display_name_none_when_unset_and_no_user_row():
+    auth = AuthContext(user_id=str(uuid.uuid4()), email="x@example.com", claims={"app_metadata": {}})
+    assert (await get_auth_me(auth=auth, db=_mock_db(False, None))).display_name is None
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=MagicMock(one_or_none=MagicMock(return_value=None)))
+    resp = await get_auth_me(auth=auth, db=session)
+    assert resp.display_name is None and resp.email_verified is None
+
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("required", [True, False])
+async def test_4453_human_session_says_whether_this_server_requires_verification(monkeypatch, required):
+    """story 4453 — the web's org-creating screens open with a «verify your e-mail» gate only when the server asks for it
+    (`require_verified_email_for_org_create`); a self-hosted server with the setting off must show no gate."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "require_verified_email_for_org_create", required)
+    auth = AuthContext(user_id=str(uuid.uuid4()), email="new@example.com", claims={"app_metadata": {}})
+    resp = await get_auth_me(auth=auth, db=_mock_db(False))
+    assert resp.email_verification_required is required
+    assert resp.email_verified is False
+    assert resp.email == "new@example.com"  # the address the gate shows
+
+
+@pytest.mark.anyio
+async def test_4453_api_key_context_has_no_verification_requirement_field():
+    auth = AuthContext(
+        user_id=str(uuid.uuid4()),
+        email=None,
+        claims={"app_metadata": {"api_key_id": "key-1", "org_id": str(uuid.uuid4())}},
+    )
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=RuntimeError("agent context must not reach the human lookups"))
+    resp = await get_auth_me(auth=auth, db=session)
+    assert resp.email_verification_required is None
+    assert resp.email is None

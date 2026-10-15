@@ -9,6 +9,13 @@ from app.models.agent_session import AgentSession
 from app.models.auth_identity import AuthIdentity, AuthMigration, AuthMigrationEvent
 from app.models.auth_native_bootstrap import AuthNativeBootstrapCode
 from app.models.oauth_handoff_code import OAuthHandoffCode
+from app.models.desktop_relay import DesktopCommand, DesktopDeviceToken, DesktopDeviceTokenCode, DesktopSession
+from app.models.agent_watch import AgentWatch, DeployServing, GithubPullRequest
+from app.models.desktop_setup import DesktopSetup
+from app.models.remote_control_audit_log import OrgRemoteControlAuditLog
+from app.models.agent_permission import AgentPermissionRequest, RemoteDevice, RemoteDevicePairing, RemoteDevicePairingOffer
+from app.models.agent_allowed_host import AgentAllowedHost
+from app.models.agent_run_profile import AgentRunProfile
 from app.models.bridge import BridgeChannelMapping, BridgeUserMapping
 from app.models.chat_command_audit_log import ChatCommandAuditLog
 from app.models.deletion_audit import DeletionAuditLog
@@ -157,7 +164,7 @@ from app.models.org_content_rule import OrgContentRule
 from app.models.publication_attempt import PublicationAttempt
 from app.models.insight_snapshot import InsightSnapshot
 from app.models.channel_publication_reconciliation import ChannelPublicationReconciliation
-from app.models.ads_boost_run import AdsBoostRun
+from app.models.ads_boost_run import AdsBoostRun, AdsBoostRunCycle
 from app.models.material_lineage import MaterialLineage
 from app.models.external_publish_pause_audit_log import ExternalPublishPauseAuditLog
 
@@ -169,6 +176,21 @@ __all__ = [
     "AuthMigrationEvent",
     "AuthNativeBootstrapCode",
     "OAuthHandoffCode",
+    "DesktopSetup",
+    "DesktopDeviceToken",
+    "DesktopDeviceTokenCode",
+    "OrgRemoteControlAuditLog",
+    "AgentPermissionRequest",
+    "RemoteDevice",
+    "RemoteDevicePairing",
+    "RemoteDevicePairingOffer",
+    "AgentAllowedHost",
+    "AgentRunProfile",
+    "DesktopSession",
+    "DesktopCommand",
+    "AgentWatch",
+    "GithubPullRequest",
+    "DeployServing",
     "DeviceInstallation",
     "DeviceProofChallenge",
     "ArtifactNode",

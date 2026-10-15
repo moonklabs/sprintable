@@ -130,7 +130,7 @@ export function GoalOutcomeDialog({
                 value={actual}
                 onChange={(e) => setActual(e.target.value)}
                 autoFocus
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm tabular-nums text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm tabular-nums text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               />
             </div>
             <div className="shrink-0 space-y-1">
@@ -142,7 +142,7 @@ export function GoalOutcomeDialog({
                 type="text"
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               />
               <p className="text-[11px] text-muted-foreground">{t('outcomeReasonHint')}</p>
             </div>
@@ -169,7 +169,7 @@ export function GoalOutcomeDialog({
                 onChange={(e) => setReason(e.target.value)}
                 autoFocus
                 placeholder={t('outcomeUnmeasurableReasonHint')}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               />
             </div>
             <DialogFooter className="mt-auto shrink-0">

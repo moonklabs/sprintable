@@ -54,6 +54,7 @@ function GroupMemberList({ members, moreLabel, selectedSlug, onSelect }: {
           <button
             type="button"
             onClick={() => onSelect(doc.slug)}
+            aria-current={selectedSlug === doc.slug ? 'page' : undefined}
             className={cn(
               'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] font-semibold transition-colors',
               selectedSlug === doc.slug

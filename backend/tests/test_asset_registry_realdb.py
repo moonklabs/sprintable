@@ -991,6 +991,102 @@ async def test_grace_cron_hard_deletes_expired_softdeleted(monkeypatch):
         await engine.dispose()
 
 
+async def _seed_expired_asset(Session) -> uuid.UUID:
+    aid = uuid.uuid4()
+    async with Session() as s:
+        await _reset_and_seed(s)
+        await s.execute(text(
+            "INSERT INTO assets (id,org_id,project_id,container,object_path,name,size_bytes,deleted_at)"
+            " VALUES (:id,:o,:p,:c,'grace/slow','slow',10, now() - interval '8 days')"
+        ), {"id": aid, "o": ORG, "p": PROJ_A, "c": BUCKET})
+        await s.commit()
+    return aid
+
+
+def _blocking_delete_provider():
+    """delete_object가 풀어 줄 때까지 멈춰 선다 — 테스트가 «GCS 삭제 도중»에 끼어든다."""
+    import asyncio
+    from unittest.mock import MagicMock
+
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def _delete(container, object_path):
+        started.set()
+        await asyncio.wait_for(release.wait(), 20)
+        return True
+
+    prov = MagicMock()
+    prov.delete_object = _delete
+    return prov, started, release
+
+
+@pytest.mark.anyio
+async def test_grace_cron_holds_no_open_transaction_during_blob_delete(monkeypatch):
+    """story #4405 — GCS 삭제 도중 cron 연결이 idle in transaction이 아니다(예전: 대상 SELECT로 연 트랜잭션을 500건 GCS 왕복 내내 들고 있음 → RED)."""
+    import asyncio
+    from unittest.mock import MagicMock
+
+    from app.routers import cron
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        aid = await _seed_expired_asset(Session)
+        prov, started, release = _blocking_delete_provider()
+        monkeypatch.setattr(cron, "get_storage_provider", lambda: prov)
+        async with Session() as worker:
+            task = asyncio.create_task(cron.assets_grace_hard_delete(MagicMock(), session=worker))
+            try:
+                await asyncio.wait_for(started.wait(), 20)
+                async with Session() as probe:
+                    idle_in_tx = (await probe.execute(text(
+                        "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()"
+                        " AND pid <> pg_backend_pid() AND state LIKE 'idle in transaction%'"
+                    ))).scalar_one()
+                    await probe.rollback()
+            finally:
+                release.set()
+                await task
+        assert idle_in_tx == 0
+        async with Session() as s:
+            assert (await s.execute(text(f"SELECT count(*) FROM assets WHERE id='{aid}'"))).scalar_one() == 0
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_grace_cron_keeps_row_restored_during_blob_delete(monkeypatch):
+    """story #4405 — GCS 삭제 도중 복원(deleted_at 비움)되면 row는 남긴다(삭제 조건 `deleted_at IS NOT NULL`)."""
+    import asyncio
+    import json
+    from unittest.mock import MagicMock
+
+    from app.routers import cron
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        aid = await _seed_expired_asset(Session)
+        prov, started, release = _blocking_delete_provider()
+        monkeypatch.setattr(cron, "get_storage_provider", lambda: prov)
+        async with Session() as worker:
+            task = asyncio.create_task(cron.assets_grace_hard_delete(MagicMock(), session=worker))
+            try:
+                await asyncio.wait_for(started.wait(), 20)
+                async with Session() as user:
+                    await user.execute(text("SET LOCAL lock_timeout = '2s'"))
+                    await user.execute(text("UPDATE assets SET deleted_at = NULL WHERE id = :id"), {"id": aid})
+                    await user.commit()
+            finally:
+                release.set()
+                resp = await task
+        assert json.loads(resp.body)["data"]["hard_deleted"] == 0
+        async with Session() as s:
+            assert (await s.execute(text(f"SELECT count(*) FROM assets WHERE id='{aid}'"))).scalar_one() == 1
+    finally:
+        await engine.dispose()
+
+
 @pytest.mark.anyio
 async def test_storage_warn_cron_email_dedup_rearm(monkeypatch):
     """S8 Phase 2: 80% 경고 cron — over-80%→owner 메일+마커, cooldown→재발송 X, under-80%→마커 re-arm."""

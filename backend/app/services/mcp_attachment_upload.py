@@ -26,6 +26,23 @@ MAX_ATTACHMENT_NAME_LEN = 255
 MCP_MAX_ATTACHMENTS = 5
 MCP_MAX_TOTAL_ATTACHMENT_BYTES = 6 * 1024 * 1024  # 6MiB decoded (total)
 
+# story #4474 — a rejection over the declared limit says why, as a code the caller can branch on (it used to reach the agent
+# as code UNKNOWN). Same code from the MCP client-side check (sprintable_mcp/tools/attachments.py) and from the server rechecks.
+ATTACHMENT_LIMIT_EXCEEDED = "ATTACHMENT_LIMIT_EXCEEDED"
+
+
+def mcp_limit_exceeded_detail(message: str, *, files: int, total_bytes: int) -> dict:
+    """HTTPException detail for the MCP declared limit: the code, the message as before, and the values (the limits and what
+    was sent). `http_exception_handler` passes a dict detail through as the error object."""
+    return {
+        "code": ATTACHMENT_LIMIT_EXCEEDED,
+        "message": message,
+        "max_files": MCP_MAX_ATTACHMENTS,
+        "max_total_bytes": MCP_MAX_TOTAL_ATTACHMENT_BYTES,
+        "files": files,
+        "total_bytes": total_bytes,
+    }
+
 _SAFE_ATTACHMENT_NAME_RE = re.compile(r"[^\w.\-]+")
 
 

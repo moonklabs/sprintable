@@ -14,8 +14,9 @@ import {
   formatMinorCurrency, majorToMinor, minorToMajor,
   type GenerationBudgetState, type GenerationBudgetCurrency,
 } from '@/components/content/generation-budget-indicator';
-import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
  * story #3747(UI 재설계 ⑥, 유나 시안 e07f98c6 v3 — 구획 넷) — 「긴 폼 하나+저장 하나」를
@@ -183,7 +184,7 @@ function TagListEditor({
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addTag(); } }}
         placeholder={placeholder}
-        className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+        className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-sm"
         data-testid={`${testIdPrefix}-input`}
       />
     </div>
@@ -447,6 +448,7 @@ export default function ContentRulesPage() {
     return t(KEYS[field]);
   }, [t]);
 
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known) · before the early return (hooks)
   if (!orgId) return null;
 
   // story #3747(첫 절 §갈래 셋, 페드루 PO 確定 2026-09-09) — updated_at은 row가 있으면
@@ -454,15 +456,14 @@ export default function ContentRulesPage() {
   // 한 번도 안 정함을 사람말로 설명한다(빈 줄 0). updated_by는 그 안에서만 갈린다.
   //
   // story #3747 CHANGES(페드루 PO 지적, 2026-09-09, CI 가드 story #3493) — 날짜는
-  // `toLocaleDateString` 직접 호출 대신 doc §11-2 정본 `formatScheduledAt()`(「MM-DD
+  // `toLocaleDateString` 직접 호출 대신 doc §11-2 정본 `formatViewerScheduledAt()`(「MM-DD
   // HH:mm {TZ}」+`resolveDisplayTimezone()`)로. 시안의 "9월 7일" 형은 이 정본 함수가
   // 이미 확定해 둔 형과 달라 코드 쪽이 정본(유나 통지는 PO 몫).
-  const displayTimezone = resolveDisplayTimezone().tz;
   const lastChangedText = loadState !== 'ready' ? null : updatedAt === null
     ? t('pageNeverSetSuffix')
     : updatedBy?.name
-      ? t('pageLastChangedWithName', { date: formatScheduledAt(updatedAt, displayTimezone).display, name: updatedBy.name })
-      : t('pageLastChangedDateOnly', { date: formatScheduledAt(updatedAt, displayTimezone).display });
+      ? t('pageLastChangedWithName', { date: formatViewerScheduledAt(updatedAt, displayTimezone).display, name: updatedBy.name })
+      : t('pageLastChangedDateOnly', { date: formatViewerScheduledAt(updatedAt, displayTimezone).display });
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 p-6">
@@ -635,7 +636,7 @@ export default function ContentRulesPage() {
                     <input
                       id="content-rules-tone"
                       type="text" value={draft ?? ''} onChange={(e) => setDraft(e.target.value || null)}
-                      placeholder={t('tonePlaceholder')} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                      placeholder={t('tonePlaceholder')} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-sm"
                       data-testid="content-rules-tone"
                     />
                   )}
@@ -844,7 +845,7 @@ function UtmRulesEditForm({ value, onSave, onCancel, saving, t }: {
             <input
               id="content-rules-utm-default-source" type="text" value={draft.default_source ?? ''}
               onChange={(e) => setDraft((d) => ({ ...d, default_source: e.target.value || null }))}
-              placeholder={t('utmRulesDefaultSourcePlaceholder')} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+              placeholder={t('utmRulesDefaultSourcePlaceholder')} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-sm"
               data-testid="content-rules-utm-default-source"
             />
           </div>
@@ -853,7 +854,7 @@ function UtmRulesEditForm({ value, onSave, onCancel, saving, t }: {
             <input
               id="content-rules-utm-default-medium" type="text" value={draft.default_medium ?? ''}
               onChange={(e) => setDraft((d) => ({ ...d, default_medium: e.target.value || null }))}
-              placeholder={t('utmRulesDefaultMediumPlaceholder')} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+              placeholder={t('utmRulesDefaultMediumPlaceholder')} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-sm"
               data-testid="content-rules-utm-default-medium"
             />
           </div>
@@ -863,7 +864,7 @@ function UtmRulesEditForm({ value, onSave, onCancel, saving, t }: {
             <select
               id="content-rules-utm-content-from" value={draft.content_from}
               onChange={(e) => setDraft((d) => ({ ...d, content_from: e.target.value as UtmRules['content_from'] }))}
-              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm" data-testid="content-rules-utm-content-from"
+              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-sm" data-testid="content-rules-utm-content-from"
             >
               <option value="draft_id">{t('utmRulesContentFromDraftId')}</option>
               <option value="none">{t('utmRulesContentFromNone')}</option>
@@ -904,7 +905,7 @@ function GenerationBudgetEditForm({ value, onSave, onCancel, saving, t }: {
             const currency = draft?.currency ?? 'KRW';
             setDraft({ limit_minor: majorToMinor(majorValue, currency), currency, period: 'month' });
           }}
-          placeholder={t('generationBudgetLimitPlaceholder')} className="w-32 rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+          placeholder={t('generationBudgetLimitPlaceholder')} className="w-32 rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-sm"
           data-testid="content-rules-generation-budget-limit"
         />
         {draft ? (
@@ -915,7 +916,7 @@ function GenerationBudgetEditForm({ value, onSave, onCancel, saving, t }: {
               const majorValue = minorToMajor(draft.limit_minor, draft.currency);
               setDraft({ limit_minor: majorToMinor(majorValue, nextCurrency), currency: nextCurrency, period: 'month' });
             }}
-            className="rounded-md border border-border bg-background px-2 py-1.5 text-sm" data-testid="content-rules-generation-budget-currency"
+            className="rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-sm" data-testid="content-rules-generation-budget-currency"
           >
             <option value="KRW">KRW</option>
             <option value="USD">USD</option>
@@ -949,7 +950,7 @@ function BrandKitEditForm({ value, onSave, onCancel, saving, t }: {
         <input
           id="content-rules-brand-logo" type="text" value={draft.logo_url ?? ''}
           onChange={(e) => setDraft((d) => ({ ...d, logo_url: e.target.value || undefined }))}
-          placeholder={t('brandKitLogoPlaceholder')} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+          placeholder={t('brandKitLogoPlaceholder')} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-sm"
         />
         <BrandLogoPreview key={draft.logo_url ?? ''} url={draft.logo_url} t={t} />
       </div>

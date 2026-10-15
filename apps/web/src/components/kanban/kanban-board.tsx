@@ -1333,6 +1333,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               key={id || 'all'}
               type="button"
               variant="ghost"
+              aria-pressed={assigneeTypeFilter === id}
               onClick={() => setAssigneeTypeFilter(id)}
               className={`h-auto min-h-0 min-w-0 rounded-md px-3 py-1.5 text-xs font-medium ${
                 assigneeTypeFilter === id
@@ -1372,7 +1373,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                   value={sprintSearch}
                   onChange={(e) => setSprintSearch(e.target.value)}
                   placeholder={t('searchSprints')}
-                  className="h-7 text-xs"
+                  className="h-7"
                 />
               </div>
               <DropdownMenuSeparator />
@@ -1431,7 +1432,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                   value={epicSearch}
                   onChange={(e) => setEpicSearch(e.target.value)}
                   placeholder={t('searchEpics')}
-                  className="h-7 text-xs"
+                  className="h-7"
                 />
               </div>
               <DropdownMenuSeparator />
@@ -1494,7 +1495,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                   value={assigneeSearch}
                   onChange={(e) => setAssigneeSearch(e.target.value)}
                   placeholder={t('searchAssignees')}
-                  className="h-7 text-xs"
+                  className="h-7"
                 />
               </div>
               <DropdownMenuSeparator />
@@ -1576,7 +1577,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                     value={labelSearch}
                     onChange={(e) => setLabelSearch(e.target.value)}
                     placeholder={t('searchLabels')}
-                    className="h-7 text-xs"
+                    className="h-7"
                   />
                 </div>
                 <DropdownMenuSeparator />
@@ -1632,7 +1633,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               onChange={(e) => setSearchQuery(e.target.value)}
               onBlur={() => { if (!searchQuery) setShowSearch(false); }}
               placeholder={t('searchPlaceholder')}
-              className="h-7 w-36 text-xs"
+              className="h-7 w-36"
             />
           ) : (
             <Button
@@ -1653,6 +1654,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
             <Button
               type="button"
               variant="ghost"
+              aria-pressed={viewMode === 'board'}
               onClick={() => setViewMode('board')}
               aria-label={t('boardViewLabel')}
               title={t('boardViewLabel')}
@@ -1665,6 +1667,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
             <Button
               type="button"
               variant="ghost"
+              aria-pressed={viewMode === 'list'}
               onClick={() => setViewMode('list')}
               aria-label={t('listViewLabel')}
               title={t('listViewLabel')}

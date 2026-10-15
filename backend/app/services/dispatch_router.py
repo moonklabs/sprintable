@@ -74,6 +74,10 @@ async def route_dispatch_event(
     SSE(agent): _push_to_agent 호출.
     Discord: webhook_configs discord endpoint 조회 후 HTTP POST.
     mute: 전달 skip. agent+assigned는 mute 무시.
+
+    story #4402 — every read happens first and is copied into plain values; the transaction then ends (the connection goes
+    back to the pool) **before** any webhook POST. A POST can wait up to ~33 s (3 tries × 10 s + backoff), and nothing is
+    written after it — before, the session sat idle in transaction for that whole time, holding a pooled connection.
     """
     from app.models.webhook_config import WebhookConfig
     from app.routers.events import _event_to_payload, _push_to_agent
@@ -83,10 +87,14 @@ async def route_dispatch_event(
     )).scalar_one_or_none()
     if event is None:
         logger.warning("route_dispatch_event: event %s not found", event_id)
+        await db.rollback()
         return
 
     recipient_id = event.recipient_id
     recipient_type = event.recipient_type
+    event_type = event.event_type
+    event_org_id = event.org_id
+    event_project_id = getattr(event, "project_id", None)
 
     # preference 조회 — global scope 우선, 없으면 기본값
     pref = (await db.execute(
@@ -103,45 +111,28 @@ async def route_dispatch_event(
     # AC3: agent + assigned event → mute 무시, 강제 delivery (exact match)
     is_mandatory = (
         recipient_type == "agent"
-        and event.event_type in _AGENT_MANDATORY_TYPES
+        and event_type in _AGENT_MANDATORY_TYPES
     )
     if level == "mute" and not is_mandatory:
         logger.debug("route_dispatch_event: mute skip event_id=%s recipient=%s", event_id, recipient_id)
+        await db.rollback()
         return
 
     payload = _event_to_payload(event)
 
-    # webhook_configs 조회 — 활성 웹훅이 있으면 channel 설정에 관계없이 외부로 전달
-    active_wh = (await db.execute(
-        select(WebhookConfig).where(
-            WebhookConfig.member_id == recipient_id,
-            WebhookConfig.is_active.is_(True),
-        )
-    )).scalars().first()
-
-    if active_wh and channel == "sse":
-        # AC2: webhook URL로 POST — HMAC 서명 + exponential backoff retry
-        is_discord_url = (
-            "discord.com/api/webhooks" in active_wh.url
-            or "discordapp.com/api/webhooks" in active_wh.url
-        )
-        ext_payload = (
-            {"content": f"[{event.event_type}] {payload.get('payload', {}).get('title', event.event_type)}"}
-            if is_discord_url
-            else payload
-        )
-        # Discord URL은 secret 미적용 (Discord 자체 인증 방식 사용)
-        secret = None if is_discord_url else active_wh.secret
-        success = await _post_with_retry(active_wh.url, ext_payload, secret, str(recipient_id))
-        if not success:
-            # AC4: 재시도 전량 실패 → SSE inbox fallback (이벤트 유실 방지)
-            _push_to_agent(str(recipient_id), payload)
-    elif channel == "sse":
-        # AC1: webhook 없는 에이전트 → SSE stream 기본 수신
-        _push_to_agent(str(recipient_id), payload)
-
+    # The webhook to POST to, as plain values: (url, secret) or None.
+    # sse: 활성 웹훅이 있으면 channel 설정에 관계없이 외부로 전달 · discord: discord endpoint.
+    target: tuple[str, str | None] | None = None
+    if channel == "sse":
+        active_wh = (await db.execute(
+            select(WebhookConfig).where(
+                WebhookConfig.member_id == recipient_id,
+                WebhookConfig.is_active.is_(True),
+            )
+        )).scalars().first()
+        if active_wh is not None:
+            target = (active_wh.url, active_wh.secret)
     elif channel == "discord":
-        import httpx
         wh = (await db.execute(
             select(WebhookConfig).where(
                 WebhookConfig.member_id == recipient_id,
@@ -149,28 +140,33 @@ async def route_dispatch_event(
                 WebhookConfig.is_active.is_(True),
             )
         )).scalars().first()
-
         if wh is None:
             # AC11 fallback: discord endpoint 미설정 → sse fallback
             logger.info(
                 "route_dispatch_event: discord endpoint missing for %s — sse fallback", recipient_id
             )
-            _push_to_agent(str(recipient_id), payload)
         else:
-            is_discord_url = (
-                "discord.com/api/webhooks" in wh.url
-                or "discordapp.com/api/webhooks" in wh.url
-            )
-            discord_payload = (
-                {"content": f"[{event.event_type}] {payload.get('payload', {}).get('title', event.event_type)}"}
-                if is_discord_url
-                else payload
-            )
-            success = await _post_with_retry(wh.url, discord_payload, None if is_discord_url else wh.secret, str(recipient_id))
-            if not success:
-                _push_to_agent(str(recipient_id), payload)
+            target = (wh.url, wh.secret)
+
+    # Reads done: end the transaction before any HTTP (story #4402). Everything below uses the plain values above.
+    await db.rollback()
+
+    if target is not None:
+        # AC2: webhook URL로 POST — HMAC 서명 + exponential backoff retry
+        url, secret = target
+        is_discord_url = "discord.com/api/webhooks" in url or "discordapp.com/api/webhooks" in url
+        ext_payload = (
+            {"content": f"[{event_type}] {payload.get('payload', {}).get('title', event_type)}"}
+            if is_discord_url
+            else payload
+        )
+        # Discord URL은 secret 미적용 (Discord 자체 인증 방식 사용)
+        success = await _post_with_retry(url, ext_payload, None if is_discord_url else secret, str(recipient_id))
+        if not success:
+            # AC4: 재시도 전량 실패 → SSE inbox fallback (이벤트 유실 방지)
+            _push_to_agent(str(recipient_id), payload)
     else:
-        # in_app, telegram 등 — 현재 in_app은 SSE로 처리
+        # sse without a webhook (AC1: SSE stream 기본 수신) · discord without an endpoint (AC11) · in_app, telegram 등
         _push_to_agent(str(recipient_id), payload)
 
     # S-C2: dispatch_triggered — agent recipient인 경우 기록 (AC2, AC6)
@@ -182,14 +178,14 @@ async def route_dispatch_event(
             from app.services.activity_log import record_activity_bg
             from app.services.pg_pubsub import fire_and_forget
             fire_and_forget(record_activity_bg(
-                org_id=event.org_id,
+                org_id=event_org_id,
                 action="dispatch_triggered",
                 actor_id=recipient_id,
                 actor_type="agent",
-                project_id=getattr(event, "project_id", None),
+                project_id=event_project_id,
                 entity_type="event",
                 entity_id=event_id,
-                context={"event_type": event.event_type, "channel": channel},
+                context={"event_type": event_type, "channel": channel},
             ))
         except Exception:
             logger.warning("dispatch record_activity_bg setup failed event_id=%s", event_id, exc_info=True)

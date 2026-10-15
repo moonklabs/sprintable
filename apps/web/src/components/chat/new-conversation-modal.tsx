@@ -15,6 +15,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { RowName } from '@/components/shared/row-name';
+import { DeviceChip } from '@/components/desktop/device-chip';
 
 interface Member {
   id: string;
@@ -26,6 +27,12 @@ interface Member {
   // story #3997(3994 후속) — /api/v2/members가 additive로 실어 보내기 시작한 필드
   // (MemberResponse.runtime_type). 「시스템 발행」을 이 select에서 걸러내는 데 쓴다.
   runtime_type?: string | null;
+}
+
+/** story 4675 (F2) — what the second read (`/api/team-members?type=agent`) says about each agent: its connection and its computer */
+interface AgentFacts {
+  verified: boolean | null;
+  device_name: string | null;
 }
 
 // story #2613 — 정책 거부(AGENT_MESSAGE_POLICY_DENIED)는 대상 에이전트로의 워크포스 설정
@@ -48,7 +55,8 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
   const [members, setMembers] = useState<Member[]>([]);
   const rowLabels = memberRowLabels(members, tc, () => '');
   // story #3194 — 별도 state로 둔다(members setter와 순서 경쟁 없이 항상 render에서만 merge).
-  const [verifiedById, setVerifiedById] = useState<Record<string, boolean | null>>({});
+  // story 4675: the same read also says which computer each agent is bound to (the chip) — one map, two facts
+  const [factsById, setFactsById] = useState<Record<string, AgentFacts>>({});
   const [selected, setSelected] = useState<string[]>([]);
   const [groupTitle, setGroupTitle] = useState('');
   const [loading, setLoading] = useState(true);
@@ -72,11 +80,11 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
     fetchWithAuth('/api/team-members?type=agent')
       .then((r) => r.json())
       .then((json) => {
-        const vMap: Record<string, boolean | null> = {};
-        for (const m of (json.data ?? []) as Array<{ id: string; verified?: boolean | null }>) {
-          vMap[m.id] = m.verified ?? null;
+        const map: Record<string, AgentFacts> = {};
+        for (const m of (json.data ?? []) as Array<{ id: string; verified?: boolean | null; device_name?: string | null }>) {
+          map[m.id] = { verified: m.verified ?? null, device_name: m.device_name ?? null };
         }
-        setVerifiedById(vMap);
+        setFactsById(map);
       })
       .catch(() => {});
   }, [projectId]);
@@ -160,12 +168,15 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
                     </div>
                     {/* [SID:4286 · 유나 12:06Z] 라벨은 «이름 없는 구성원»(타입은 원 아이콘 · 표식) — 이름 없는 행이 둘 이상이면 겹친 행에만 «· ID 앞 8자»(memberRowLabels · 꼬리 규칙 한 곳). */}
                     <RowName className="flex-1" label={rowLabels.get(m.id) ?? memberDisplayLabel(m.name, tc)} id={m.id} />
+                    {/* story 4675 (F2 · Yuna §I): the computer chip right after the name, before the mark and the «연결 안 됨» badge —
+                        when two agents share a name it is the one thing that tells them apart */}
+                    {m.type === 'agent' ? <DeviceChip name={factsById[m.id]?.device_name} /> : null}
                     {/* story #3049(2984-S1) — AgentIdentity 프리미티브(헤어라인+proof-blue
                         신호 dot) 채택, soft-fill 폐지. */}
                     {m.type === 'agent' && <AgentIdentity />}
                     {/* story #3194(AC3) — 새 대화 상대 선택기에도 연결 상태 노출(발명 0, #2751
                         get_verified_map 그대로 — agent-management-tab.tsx와 동일 배지). */}
-                    {m.type === 'agent' && verifiedById[m.id] === false ? (
+                    {m.type === 'agent' && factsById[m.id]?.verified === false ? (
                       <Badge variant="warning" className="shrink-0">{ta('agentNotConnected')}</Badge>
                     ) : null}
                     {selected.includes(m.id) && <Check className="h-3.5 w-3.5 flex-shrink-0 text-primary" />}
@@ -184,7 +195,7 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
                 value={groupTitle}
                 onChange={(e) => setGroupTitle(e.target.value)}
                 placeholder={t('groupTitlePlaceholder')}
-                className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-base lg:text-sm focus:outline-none focus:ring-1 focus:ring-primary"
               />
             </div>
           )}

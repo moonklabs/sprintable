@@ -1,0 +1,1 @@
+{"file": "tests/test_4395_destructive_reset_lock_timeout_realdb.py", "sec": 10.0, "provisional": true, "source": "story #4395(미르코, 2026-09-28) — 로컬 raw pytest 실측(1.5s)을 CI 배율(~6x, story #3383 관례)로 보수 반영한 잠정값 · CI 첫 run 샤드 실측으로 교체 예정 — provisional:true(story #4152/#4159 관례)"}

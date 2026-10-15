@@ -8,8 +8,7 @@ import {
 import { useLocale, useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { pickIGaJosa } from '@/lib/korean-particle';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { deriveTrustStage, asVerificationSheet, type EvidenceItem, type EvidenceType, type VerificationSheetItem } from '@/services/verify';
 import {
   adaptArtifactDetail, getArtifactVersionDetail,
@@ -19,6 +18,7 @@ import { ArtifactExpandDialog } from '@/components/canvas/artifact-expand-dialog
 import { type GalleryTimelineVersion } from '@/components/canvas/artifact-gallery-timeline';
 import { fetchWithAuth } from '@/lib/db/client';
 import { memberDisplayLabel, memberLookup } from '@/lib/member-display';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 const VISIBLE_LIMIT = 4;
 
@@ -105,7 +105,7 @@ function VerificationSheetRow({
     <li className="rounded-md px-1.5 py-1 hover:bg-muted/40">
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}
         className="flex w-full items-center gap-2 text-left"
         data-testid="evidence-verification-sheet-summary"
       >
@@ -179,7 +179,7 @@ export function EvidenceSection({
   const tInsights = useTranslations('insightsBoard');
   const naLabel = tInsights('insightsBoardCommentsNotApplicable');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [expanded, setExpanded] = useState(false);
   const [items, setItems] = useState<EvidenceItem[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -296,7 +296,7 @@ export function EvidenceSection({
   const verifiedByName = humanVerifiedBy
     ? memberLookup(memberMap, humanVerifiedBy, tCommon, { loaded: memberNamesLoaded })?.label ?? null
     : null;
-  const verifiedWhen = humanVerifiedAt ? formatRelativeTime(humanVerifiedAt, locale, displayTimezone) : null;
+  const verifiedWhen = humanVerifiedAt ? formatViewerRelativeTime(humanVerifiedAt, locale, displayTimezone) : null;
   const sealLabel = trustStage === 'verified'
     ? (verifiedByName ? `${t('trustSealVerifiedBy', { name: verifiedByName })}${verifiedWhen ? ` · ${verifiedWhen}` : ''}` : t('provenCompletion'))
     : t('trustSealClaimedBy');
@@ -304,7 +304,7 @@ export function EvidenceSection({
   return (
     <div className={className}>
       <div className="rounded-lg border border-border p-2.5">
-        <button type="button" onClick={handleToggle} className="flex w-full items-center gap-2 text-left">
+        <button type="button" onClick={handleToggle} aria-expanded={expanded} className="flex w-full items-center gap-2 text-left">
           <Check
             className={cn('h-3 w-3 shrink-0', trustStage === 'verified' ? 'text-success/85' : 'text-warning-strong')}
             strokeWidth={2.6}
@@ -408,6 +408,7 @@ export function EvidenceSection({
                     <button
                       key={ty}
                       type="button"
+                      aria-pressed={addType === ty}
                       onClick={() => setAddType(ty)}
                       className={cn(
                         'rounded px-2 py-0.5 text-[10px] font-medium transition',
@@ -423,14 +424,14 @@ export function EvidenceSection({
                   value={addRef}
                   onChange={(e) => setAddRef(e.target.value)}
                   placeholder={t('evidenceRefPlaceholder')}
-                  className="w-full rounded border border-border bg-background px-2 py-1 text-xs"
+                  className="w-full rounded border border-border bg-background px-2 py-1 text-base lg:text-xs"
                 />
                 <input
                   type="text"
                   value={addNote}
                   onChange={(e) => setAddNote(e.target.value)}
                   placeholder={t('evidenceNotePlaceholder')}
-                  className="w-full rounded border border-border bg-background px-2 py-1 text-xs"
+                  className="w-full rounded border border-border bg-background px-2 py-1 text-base lg:text-xs"
                 />
                 {addError ? <p className="text-[11px] text-destructive">{t('evidenceAddFailed')}</p> : null}
                 <div className="flex justify-end gap-1.5">

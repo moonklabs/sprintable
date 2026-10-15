@@ -19,8 +19,9 @@ import { fetchMe } from '@/lib/me-client';
 import { canEditOrgMemberRole, orgRoleLabel } from '@/lib/org-member-role';
 import { memberDisplayLabel } from '@/lib/member-display';
 import { copyTextSafely } from '@/lib/clipboard';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface OrgMember {
   id: string;
@@ -56,7 +57,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
   const tc = useTranslations('common');
   const tShare = useTranslations('share');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
 
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'admin' | 'member'>('member');
@@ -310,7 +311,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                 <>
                   <button
                     type="button"
-                    onClick={() => setShowProjectPicker((v) => !v)}
+                    onClick={() => setShowProjectPicker((v) => !v)} aria-expanded={showProjectPicker}
                     className="flex w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-left text-sm text-foreground transition hover:bg-muted/50 md:max-w-sm"
                   >
                     <span className={inviteProjectIds.length === 0 ? 'text-muted-foreground' : ''}>
@@ -376,7 +377,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
           readOnly
           value={copyFailedInviteUrl}
           onFocus={(e) => e.currentTarget.select()}
-          className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground"
+          className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-base lg:text-xs text-foreground"
           data-testid="org-members-copy-failed-raw-invite-url"
         />
       )}
@@ -409,7 +410,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                 name={memberDisplayLabel(member.name, tc)}
                 email={member.email}
                 className="border-0 rounded-none bg-transparent"
-                meta={member.joined_at ? t('orgMemberJoinedMeta', { time: formatRelativeTime(member.joined_at, locale, displayTimezone) }) : undefined}
+                meta={member.joined_at ? t('orgMemberJoinedMeta', { time: formatViewerRelativeTime(member.joined_at, locale, displayTimezone) }) : undefined}
                 actions={
                   // story #3771(PO 별건 ㉓·유나 r65) — 역할 열/액션 열을 항상 둘 다 렌더한다
                   // (행마다 열의 뜻이 같게). 역할 변경 불가 행(소유자·자기 자신)은 select 대신
@@ -421,7 +422,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                   <>
                     {canEdit ? (
                       <select
-                        className="rounded-md border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                        className="rounded-md border border-input bg-background px-2 py-1 text-base lg:text-xs focus:outline-none focus:ring-1 focus:ring-ring"
                         value={member.role}
                         disabled={changingRoleId === member.id}
                         onChange={(e) => void handleChangeRole(member.id, e.target.value as 'admin' | 'member')}
@@ -503,7 +504,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
                 key={invite.id}
                 name={invite.email}
                 className="border-0 rounded-none bg-transparent"
-                meta={t('orgInviteMeta', { role: invite.role, date: formatScheduledAt(invite.expires_at, displayTimezone).display })}
+                meta={t('orgInviteMeta', { role: invite.role, date: formatViewerScheduledAt(invite.expires_at, displayTimezone).display })}
                 emphasis="subtle"
                 actions={
                   canManage ? (

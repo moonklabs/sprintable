@@ -201,7 +201,7 @@ export function TwoFactorSection({ onLoadError }: TwoFactorSectionProps = {}) {
               inputMode="numeric"
               maxLength={6}
               placeholder="000000"
-              className="w-full rounded-lg border border-border bg-background px-4 py-2 text-center font-mono tracking-widest text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              className="w-full rounded-lg border border-border bg-background px-4 py-2 text-center font-mono text-base tracking-widest text-foreground lg:text-sm focus:outline-none focus:ring-2 focus:ring-primary"
               value={otpCode}
               onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
             />
@@ -224,7 +224,7 @@ export function TwoFactorSection({ onLoadError }: TwoFactorSectionProps = {}) {
               <input
                 type="password"
                 placeholder={t('twoFactorPasswordPlaceholder')}
-                className="w-full rounded-lg border border-border bg-background px-4 py-2 text-foreground focus:outline-none focus:ring-2 focus:ring-destructive"
+                className="w-full rounded-lg border border-border bg-background px-4 py-2 text-base text-foreground lg:text-sm focus:outline-none focus:ring-2 focus:ring-destructive"
                 value={disablePassword}
                 onChange={(e) => setDisablePassword(e.target.value)}
               />
@@ -234,7 +234,7 @@ export function TwoFactorSection({ onLoadError }: TwoFactorSectionProps = {}) {
                 inputMode="numeric"
                 maxLength={6}
                 placeholder="000000"
-                className="w-full rounded-lg border border-border bg-background px-4 py-2 text-center font-mono tracking-widest text-foreground focus:outline-none focus:ring-2 focus:ring-destructive"
+                className="w-full rounded-lg border border-border bg-background px-4 py-2 text-center font-mono text-base tracking-widest text-foreground lg:text-sm focus:outline-none focus:ring-2 focus:ring-destructive"
                 value={otpCode}
                 onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
               />

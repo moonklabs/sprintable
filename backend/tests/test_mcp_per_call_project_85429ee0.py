@@ -83,6 +83,7 @@ async def test_request_sets_x_project_id_on_override():
         status_code = 200
         is_success = True
         text = "{}"
+        content = b"{}"  # story #4430 — as httpx.Response has it (the client treats an empty body as None)
 
         def json(self):
             return {"ok": 1}

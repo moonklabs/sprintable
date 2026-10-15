@@ -26,14 +26,14 @@ import { RecipeDetailView } from '@/components/organization/recipe-detail-view';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { cyclicStages, isCyclicDefinition, type EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { publishHistorySenderLabel } from '@/lib/member-display';
 import { useMarketingRecipes } from '@/hooks/use-marketing-recipes';
 import { recipeKeyDomain } from '@/lib/recipe-role-slots';
 import { presetAction, presetName } from '@/lib/platform-preset-copy';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 // story #2664 — 목록(GET) 응답 모델(events.py EventDefinitionResponse)엔 아직 id가 없다
 // (BE #2663, PR#3069 재QA 중). id가 없는 항목은 수정/비활성 버튼을 아예 안 그린다 — #2663가
@@ -397,7 +397,10 @@ export default function OrganizationEventsPage() {
               titleAs="dialog-title"
               onApply={() => setMarketingApplyTarget(marketingDetailTarget)}
             />
-          ) : null}
+          ) : (
+            // story #4386 — 닫히는 동안(대상이 비는 순간)에도 창 이름이 남게. 보이는 글 없음.
+            <DialogTitle className="sr-only">{t('recipeGalleryTabMarketing')}</DialogTitle>
+          )}
         </DialogContent>
       </Dialog>
     </div>
@@ -447,7 +450,7 @@ function EventDefRow({
                 낱말 안에서 끊고, lg:truncate도 실제로 말줄임한다. */}
             <button
               type="button"
-              onClick={onToggleExpand}
+              onClick={onToggleExpand} aria-expanded={expanded}
               className="min-w-0 break-words text-left text-sm text-foreground hover:underline lg:truncate"
               data-testid={`event-def-toggle-${def.key}`}
             >
@@ -576,7 +579,7 @@ function PublishHistorySection({ definitionKey, t }: { definitionKey: string; t:
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const locale = useLocale();
   const tc = useTranslations('common');
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [state, setState] = useState<PublishHistoryState>({ kind: 'loading' });
 
   useEffect(() => {
@@ -610,7 +613,7 @@ function PublishHistorySection({ definitionKey, t }: { definitionKey: string; t:
             <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
               <span className="text-foreground">{publishHistorySenderLabel(item, t, tc)}</span>
               <span className="flex items-center gap-2 text-muted-foreground">
-                {formatRelativeTime(item.created_at, locale, displayTimezone)}
+                {formatViewerRelativeTime(item.created_at, locale, displayTimezone)}
                 {/* 대상-프로젝트: 발행 이력 항목엔 대화의 프로젝트가 없다(대화 화면이 착지 뒤 자기 프로젝트로 연다). */}
                 <Link href={flatHref(`/chats/${item.conversation_id}`)} className="text-primary hover:underline">
                   {t('eventPublishHistoryOpenChat')}
@@ -830,27 +833,22 @@ function EventFormDialog({
       onOpenChange(next);
     }}>
       <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-3xl">
+        {/* [SID:4388] shared tabs: arrow keys · Home/End move and select (activateOnFocus), aria-selected comes with it. The root
+            wraps the header and the body so the two bodies are real tab panels (role=tabpanel · named by their tab · a focus stop);
+            `contents` keeps the dialog's layout as before. */}
+        <Tabs value={tab} onValueChange={(v) => setTab(v as 'basic' | 'advanced')} className="contents">
         <DialogHeader>
           <div className="flex items-center justify-between gap-3">
             <DialogTitle>{mode === 'create' ? t('eventCreateDialogTitle') : t('eventEditDialogTitle')}</DialogTitle>
-            <div className="inline-flex shrink-0 rounded-lg bg-muted p-0.5">
-              <button
-                type="button"
-                disabled={advancedOnly}
-                onClick={() => setTab('basic')}
-                className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${tab === 'basic' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}
-              >
-                {t('definerTabBasic')}
-              </button>
-              <button
-                type="button"
-                onClick={() => setTab('advanced')}
-                className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${tab === 'advanced' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}
-              >
-                {t('definerTabAdvanced')}
-                {advancedOnly ? <Badge variant="warning" className="ml-1 text-[9px]">{t('definerAdvancedOnlyBadge')}</Badge> : null}
-              </button>
-            </div>
+              <TabsList activateOnFocus className="shrink-0">
+                <TabsTrigger value="basic" disabled={advancedOnly}>
+                  {t('definerTabBasic')}
+                </TabsTrigger>
+                <TabsTrigger value="advanced">
+                  {t('definerTabAdvanced')}
+                  {advancedOnly ? <Badge variant="warning" className="ml-1 text-[9px]">{t('definerAdvancedOnlyBadge')}</Badge> : null}
+                </TabsTrigger>
+              </TabsList>
           </div>
           {/* story #2666(발견) — 원래 문구가 "org.{조직 slug}."처럼 한글 자리표시자를 ICU
               변수 자리에 그대로 박아 놔 next-intl이 MALFORMED_ARGUMENT로 파싱 실패하던
@@ -874,11 +872,11 @@ function EventFormDialog({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={t('eventNamePlaceholder')}
-              className="text-sm"
+              className="text-base lg:text-sm"
             />
             {!name.trim() ? <p className="mt-1 text-[11px] text-muted-foreground">{t('eventNameHint')}</p> : null}
           </div>
-          {tab === 'basic' ? (
+          <TabsContent value="basic" className="rounded-sm text-[length:inherit] leading-[inherit] focus-visible:ring-2 focus-visible:ring-ring">
             <EventDefinerForm
               state={definerState}
               onChange={setDefinerState}
@@ -888,7 +886,8 @@ function EventFormDialog({
               testPublishing={testPublishing}
               testPublishResult={savedKey ? testPublishResult : { ok: false, message: t('definerTestPublishSaveFirst') }}
             />
-          ) : (
+          </TabsContent>
+          <TabsContent value="advanced" className="rounded-sm text-[length:inherit] leading-[inherit] focus-visible:ring-2 focus-visible:ring-ring">
             <div className="space-y-3">
               <div>
                 <label className="mb-1 block text-[11px] font-semibold text-muted-foreground" htmlFor="event-key">
@@ -898,7 +897,7 @@ function EventFormDialog({
                   <>
                     <div className="flex items-center gap-1">
                       <span className="shrink-0 font-mono text-xs text-muted-foreground">{prefix}</span>
-                      <Input id="event-key" value={keySuffix} onChange={(e) => setKeySuffix(e.target.value)} className="font-mono text-sm" />
+                      <Input id="event-key" value={keySuffix} onChange={(e) => setKeySuffix(e.target.value)} className="font-mono text-base lg:text-sm" />
                     </div>
                     {advancedKeyError ? (
                       <p className="mt-1 text-[11px] text-destructive">
@@ -909,7 +908,7 @@ function EventFormDialog({
                     )}
                   </>
                 ) : (
-                  <Input id="event-key" value={target?.key ?? ''} readOnly disabled className="font-mono text-sm" />
+                  <Input id="event-key" value={target?.key ?? ''} readOnly disabled className="font-mono text-base lg:text-sm" />
                 )}
               </div>
               <JsonField id="event-payload-schema" label={t('eventPayloadSchemaLabel')} value={payloadSchema} onChange={setPayloadSchema} />
@@ -924,17 +923,18 @@ function EventFormDialog({
                   value={rolesCsv}
                   onChange={(e) => setRolesCsv(e.target.value)}
                   placeholder={t('eventActionAuthRolePlaceholder')}
-                  className="text-sm"
+                  className="text-base lg:text-sm"
                 />
               </div>
             </div>
-          )}
+          </TabsContent>
           {error ? (
             <p role="alert" aria-live="assertive" className="mt-3 rounded-md border border-destructive/30 bg-destructive-tint px-3 py-2 text-xs text-foreground">
               {error}
             </p>
           ) : null}
         </div>
+        </Tabs>
         <DialogFooter className="shrink-0">
           <Button variant="outline" onClick={() => { clearFormDraft(); onOpenChange(false); }} disabled={saving}>
             {mode === 'create' && savedKey ? tc('close') /* 저장 후엔 닫기만 남는다(재저장=중복 POST·409 방지) */ : tc('cancel')}
@@ -965,7 +965,7 @@ function JsonField({ id, label, value, onChange }: { id: string; label: string; 
         value={value}
         onChange={(e) => onChange(e.target.value)}
         spellCheck={false}
-        className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+        className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 font-mono text-base lg:text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
       />
     </div>
   );

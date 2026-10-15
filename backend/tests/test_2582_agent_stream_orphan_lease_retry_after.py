@@ -17,6 +17,8 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from tests.agent_stream_auth import agent_stream_claims
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -48,7 +50,8 @@ def _patch_route(monkeypatch, agent_id, org_plan="free"):
     res_agent = MagicMock(); res_agent.scalar_one_or_none.return_value = tm
     res_plan = MagicMock(); res_plan.scalar_one_or_none.return_value = org_plan
     res_cursor = MagicMock(); res_cursor.scalar_one_or_none.return_value = None
-    db.execute = AsyncMock(side_effect=[res_agent, res_plan, res_cursor])
+    res_key = MagicMock(); res_key.scalar_one_or_none.return_value = None  # story #4676: the key's desktop_setup_id — a hand-made key here
+    db.execute = AsyncMock(side_effect=[res_agent, res_plan, res_key, res_cursor])
 
     class _Ctx:
         async def __aenter__(self):
@@ -60,7 +63,7 @@ def _patch_route(monkeypatch, agent_id, org_plan="free"):
     monkeypatch.setattr(ag, "_agent_sse_connection_count", 0)  # global cap 여유
     req = MagicMock(); req.headers = {}
     auth = AuthContext(user_id=str(agent_id), email=None,
-                       claims={"app_metadata": {"api_key_id": "k"}}, org_id=None)
+                       claims=agent_stream_claims(uuid.uuid4()), org_id=None)
     return req, auth, str(agent_id)
 
 

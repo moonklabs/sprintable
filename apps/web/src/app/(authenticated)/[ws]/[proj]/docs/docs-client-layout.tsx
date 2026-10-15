@@ -305,8 +305,14 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         addToast({ title: t('renameFailed'), type: 'error' });
         await fetchTree();
       } else {
-        const { data } = await res.json() as { data: { updated_at: string } };
-        setPendingDocUpdate({ id: docId, title: newName, updated_at: data.updated_at });
+        // story #4445 — PATCH /api/docs/{id} passes the backend's DocResponse through as is (a bare object, not `{ data }`).
+        // Reading `{ data }` threw on a saved rename («renameFailed» + a tree re-read). Only the contract's shape is read; an
+        // answer without `updated_at` cannot set the remote-change baseline, so the tree is read again instead (no failure
+        // toast — the rename was saved).
+        const saved: unknown = await res.json();
+        const updatedAt = saved && typeof saved === 'object' ? (saved as { updated_at?: unknown }).updated_at : undefined;
+        if (typeof updatedAt === 'string') setPendingDocUpdate({ id: docId, title: newName, updated_at: updatedAt });
+        else await fetchTree();
       }
     } catch { addToast({ title: t('renameFailed'), type: 'error' }); await fetchTree(); }
   }, [fetchTree, addToast, t]);
@@ -483,7 +489,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             }}
             placeholder={t('newFolderPlaceholder')}
             disabled={folderSubmitting}
-            className="w-full min-w-0 rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
+            className="w-full min-w-0 rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
           />
           {folderCreateError ? (
             <p className="text-[11px] text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{folderCreateError}</p>
@@ -507,6 +513,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             <button
               key={mode}
               type="button"
+              aria-pressed={viewMode === mode}
               onClick={() => setViewMode(mode)}
               className={cn(
                 // story #2963 §2 — 언더라인 탭(I3 정본, docs-index.tsx 카테고리 탭과 동일 클래스
@@ -557,7 +564,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         if (allTags.length === 0) return null;
         return (
           <div className="border-b border-border">
-            <button type="button" onClick={() => setTagsCollapsed((v) => !v)} className="flex w-full items-center justify-between px-4 py-1 text-[11px] text-muted-foreground hover:text-foreground">
+            <button type="button" onClick={() => setTagsCollapsed((v) => !v)} aria-expanded={!tagsCollapsed} className="flex w-full items-center justify-between px-4 py-1 text-[11px] text-muted-foreground hover:text-foreground">
               <span className="flex items-center gap-1.5">
                 {tagsCollapsed ? <ChevronRight className="size-3" /> : <ChevronDown className="size-3" />}
                 {t('tagFilter')}
@@ -704,7 +711,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           <aside className="focus-inset relative hidden w-[236px] flex-shrink-0 flex-col overflow-x-hidden overflow-y-auto border-r border-border/80 bg-background lg:flex">
             <button
               type="button"
-              onClick={handleToggleSidebar}
+              onClick={handleToggleSidebar} aria-expanded={!sidebarCollapsed}
               title={t('hideSidebar')}
               className="absolute right-2 top-2 z-10 rounded-md border border-border p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
@@ -738,7 +745,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           {sidebarCollapsed && (
             <button
               type="button"
-              onClick={handleToggleSidebar}
+              onClick={handleToggleSidebar} aria-expanded={!sidebarCollapsed}
               title={t('openSidebar')}
               className="absolute left-2 top-2 z-10 hidden rounded-md border border-border p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:block"
             >

@@ -9,8 +9,8 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { useDocsLayout, type Doc } from './docs-context';
 import { docUrl } from '@/components/docs/lib/doc-project-url';
 import { DOC_STATUS_TONE, toDocStatusFilter, docStatusLabelKey, type DocStatusFilter } from '@/components/docs/lib/doc-status-tone';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
  * story #2955 §2/§6(doc docs-index-reader-redesign-handoff) — 셸 A "지식 인덱스". 미선택
@@ -57,7 +57,7 @@ export function DocsIndex() {
   const t = useTranslations('docs');
   const tc = useTranslations('common');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const router = useRouter();
   const { tree, handleNewDoc, wsSlug, projSlug, loading, loadError, fetchTree } = useDocsLayout();
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null); // null = 전체
@@ -156,7 +156,7 @@ export function DocsIndex() {
 
   // story #3493 — doc.updated_at은 "기록"(마지막으로 편집된 시점) — 3436 묶음 8
   // 정본(formatRelativeTime)으로 통일.
-  const formatDate = (s: string | undefined) => (s ? formatRelativeTime(s, locale, displayTimezone) : '—');
+  const formatDate = (s: string | undefined) => (s ? formatViewerRelativeTime(s, locale, displayTimezone) : '—');
   const [lead, ...rest] = filtered;
 
   return (
@@ -187,6 +187,7 @@ export function DocsIndex() {
         <button
           type="button"
           onClick={() => setCategoryFilter(null)}
+          aria-pressed={categoryFilter === null}
           className={`px-2.5 py-1 text-[13px] font-semibold transition ${categoryFilter === null ? 'border-b-2 border-proof-citron text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
         >
           {t('indexCategoryAll')} <span className="font-mono text-[11px] text-muted-foreground">{items.length}</span>
@@ -196,6 +197,7 @@ export function DocsIndex() {
             key={f.id}
             type="button"
             onClick={() => setCategoryFilter(f.id)}
+            aria-pressed={categoryFilter === f.id}
             className={`px-2.5 py-1 text-[13px] font-medium transition ${categoryFilter === f.id ? 'border-b-2 border-proof-citron text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
           >
             {f.title} <span className="font-mono text-[11px] text-muted-foreground">{categoryCounts[f.id] ?? 0}</span>
@@ -205,6 +207,7 @@ export function DocsIndex() {
           <button
             type="button"
             onClick={() => setCategoryFilter(UNCATEGORIZED)}
+            aria-pressed={categoryFilter === UNCATEGORIZED}
             className={`px-2.5 py-1 text-[13px] font-medium transition ${categoryFilter === UNCATEGORIZED ? 'border-b-2 border-proof-citron text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
           >
             {t('indexCategoryUncategorized')} <span className="font-mono text-[11px] text-muted-foreground">{categoryCounts[UNCATEGORIZED]}</span>

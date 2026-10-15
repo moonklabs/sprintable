@@ -43,7 +43,7 @@ export function AgentRunToolCallsSection({
   runId: string;
   runStatus: AgentRunStatus;
   locale: string;
-  displayTimezone: string;
+  displayTimezone: string | null;
 }) {
   const t = useTranslations('agentRuns');
   const [rows, setRows] = useState<ToolCallRow[]>([]);
@@ -164,7 +164,7 @@ function ToolCallRowItem({
 }: {
   row: ToolCallRow;
   locale: string;
-  displayTimezone: string;
+  displayTimezone: string | null;
   expanded: boolean;
   onToggleExpand: () => void;
   t: ReturnType<typeof useTranslations>;
@@ -189,7 +189,7 @@ function ToolCallRowItem({
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={onToggleExpand}
+                onClick={onToggleExpand} aria-expanded={expanded}
                 className="gap-1 truncate p-0 px-1 font-mono text-sm font-normal text-foreground"
                 data-testid={`tool-call-toggle-${row.id}`}
               >

@@ -216,9 +216,9 @@ describe('HypothesisNarrativePanel — story #2533, lifecycle 단일 응답 소�
     const displayTimezone = resolveDisplayTimezone().tz;
     // 셋 다 "now"(2026-09-05 기준 테스트 실행 시각) 대비 7일을 훌쩍 넘긴 과거라
     // formatRelativeTime도 formatScheduledAt과 동일한 절대 표기로 폴백한다.
-    expect(document.body.textContent).toContain(formatScheduledAt('2026-07-01T00:00:00Z', displayTimezone).display);
-    expect(document.body.textContent).toContain(formatScheduledAt('2026-08-01T00:00:00Z', displayTimezone).display);
-    expect(document.body.textContent).toContain(formatScheduledAt('2026-07-15T00:00:00Z', displayTimezone).display);
+    expect(document.body.textContent).toContain(formatScheduledAt('2026-07-01T00:00:00Z', displayTimezone, Intl.DateTimeFormat().resolvedOptions().timeZone).display);
+    expect(document.body.textContent).toContain(formatScheduledAt('2026-08-01T00:00:00Z', displayTimezone, Intl.DateTimeFormat().resolvedOptions().timeZone).display);
+    expect(document.body.textContent).toContain(formatScheduledAt('2026-07-15T00:00:00Z', displayTimezone, Intl.DateTimeFormat().resolvedOptions().timeZone).display);
   });
 
   it('fetch 실패 시 에러 문구를 보이고 크래시하지 않는다', async () => {

@@ -122,7 +122,22 @@ const ALLOWLIST: ReadonlySet<string> = new Set([
 export interface ScanRepoResult {
   refs: LegacyTotalConsumerRef[];
   fileCount: number;
+  /** AST로 실제 파싱한 파일 수 — `mayReadLegacyTotal`이 거른 뒤. */
+  parsedCount: number;
   allowlistHit: Set<string>;
+}
+
+// story #4408 — 전 파일(2천여 개)을 AST로 파싱하던 것이 CI 부하에서 6000ms를 넘겨 거짓 RED(26 run 최댓값
+// 6042ms · 실패 run 6651ms). 위반(`meta.total` · `meta?.total` · `meta['total']`)은 소스에 글자 `total`이
+// 있어야만 생기므로, 그 글자가 없는 파일은 파싱할 필요가 없다.
+// 단 AST는 이스케이프를 풀어 값으로 본다 — 식별자의 유니코드 이스케이프 · 문자열의 16진 이스케이프(`x74` 꼴) · 줄 이음(백슬래시 +
+// 줄바꿈) · 뜻 없는 이스케이프(백슬래시 + 보통 글자 = 그 글자)가 전부 `total`을 만들 수 있다(까디르 4806 렌즈 ① — 16진 · 줄 이음).
+// 이스케이프 모양을 하나씩 세면 또 빠지므로 **백슬래시가 하나라도 든 파일은 파싱**한다(develop 기준 2474개 중 515개 — 거름 전의 약 1/5).
+// 거른 파일도 읽고 세므로 완전성 검사(scannedCount === files.length)는 그대로다. 문법 오류 검출은 이
+// 가드의 계약이 아니다(type-check가 잡는다) — 파싱하는 파일에서는 예전처럼 파싱 실패를 던진다.
+// 원래도 못 잡던 것(그대로): 8진 이스케이프 · `'tot' + 'al'` 같은 쪼갬(AST가 값을 합치지 않는다).
+export function mayReadLegacyTotal(content: string): boolean {
+  return content.includes('total') || content.includes('\\');
 }
 
 const MIN_EXPECTED_FILES = 500;
@@ -136,11 +151,14 @@ export function scanRepo(srcRoot: string): ScanRepoResult {
 
   const allRefs: LegacyTotalConsumerRef[] = [];
   let scannedCount = 0;
+  let parsedCount = 0;
   for (const abs of files) {
     const rel = path.relative(srcRoot, abs).split(path.sep).join('/');
     const content = readFileSync(abs, 'utf8');
-    allRefs.push(...scanFileContent(content, rel));
     scannedCount += 1;
+    if (!mayReadLegacyTotal(content)) continue;
+    allRefs.push(...scanFileContent(content, rel));
+    parsedCount += 1;
   }
 
   // 완전성(fail-closed) — [[feedback_a_guard_iterating_over_extracted_not_expected_fails_silent]]
@@ -157,7 +175,7 @@ export function scanRepo(srcRoot: string): ScanRepoResult {
     return true;
   });
 
-  return { refs, fileCount: files.length, allowlistHit };
+  return { refs, fileCount: files.length, parsedCount, allowlistHit };
 }
 
 const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');

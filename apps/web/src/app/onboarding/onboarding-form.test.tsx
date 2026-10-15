@@ -149,6 +149,13 @@ describe('OnboardingForm — error.code 분기 (story #2484)', () => {
     await act(async () => { createOrgBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
 
+    // story 4668 — the fork comes after the organization: the web way keeps the project · agent steps this test walks
+    const webRadio = container.querySelector('[data-testid=onboarding-where-web] input') as HTMLInputElement;
+    await act(async () => { webRadio.click(); });
+    const continueBtn = container.querySelector('[data-testid=onboarding-where-continue]');
+    await act(async () => { continueBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
     const projectNameInput = container.querySelector('input') as HTMLInputElement;
     await act(async () => { setNativeValue(projectNameInput, 'My Project'); });
     const createProjectBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.onboarding.createProjectAction);

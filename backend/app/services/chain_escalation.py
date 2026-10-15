@@ -41,9 +41,9 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
-from sqlalchemy import func, select, update
+from sqlalchemy import exists, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -109,19 +109,70 @@ async def _open_circuit_breaker(
     return breaker_id
 
 
-async def _auto_close_circuit_breaker(db: AsyncSession, conversation_id: uuid.UUID) -> None:
+async def _auto_close_circuit_breaker(
+    db: AsyncSession, conversation_id: uuid.UUID, *, reason: str = "auto: episode resolved+cooldown",
+    breaker_id: uuid.UUID | None = None,
+) -> bool:
     """story #2630: release_mode='auto' org 전용 — 에피소드 자연 해소 시 열린 breaker를 닫는다.
-    released_by는 NULL로 남긴다(사람이 안 눌렀다는 사실 자체가 감사 대상)."""
+    released_by는 NULL로 남긴다(사람이 안 눌렀다는 사실 자체가 감사 대상). story #4631: 닫았으면 True · `breaker_id`면 그 행만
+    (Kadir 5015: the block that was checked — never one opened in between)."""
     from app.models.chain_circuit_breaker import ChainCircuitBreaker
 
-    await db.execute(
-        update(ChainCircuitBreaker)
-        .where(
+    where = [ChainCircuitBreaker.conversation_id == conversation_id, ChainCircuitBreaker.released_at.is_(None)]
+    if breaker_id is not None:
+        where.append(ChainCircuitBreaker.id == breaker_id)
+    result = await db.execute(
+        update(ChainCircuitBreaker).where(*where).values(released_at=func.clock_timestamp(), release_reason=reason)
+    )
+    return result.rowcount > 0
+
+
+async def _episode_marker_alive(conversation_id: uuid.UUID) -> bool:
+    """story #4631: 이 대화의 에피소드 마커가 아직 살아 있는지. Redis 불가 → True(살아 있다고 봄 — 차단을 푸는 쪽의
+    판단이라 모르면 풀지 않는다, fail-closed)."""
+    from app.services import redis_shared
+
+    key = redis_shared.key("chain_escalation", "episode", str(conversation_id))
+
+    async def _op(client) -> bool:
+        return bool(await client.exists(key))
+
+    return await redis_shared.with_fallback(_op, lambda: True)
+
+
+async def release_if_quiet(db: AsyncSession, *, org_id: uuid.UUID, conversation_id: uuid.UUID) -> bool:
+    """story #4631 (PO 고름 A): release_mode='auto'의 자동 해제가 실제로 돌게 — agent 발신의 423 자리에서 부른다.
+
+    원래 자동 닫기는 메시지 저장 뒤의 평가(evaluate_unsupervised_chain_episode의 «resolved»)에서만 불렸는데, 차단이 열리면
+    agent 발신은 저장 전에 423이라 평가가 다시 돌 기회가 없었고(마커도 TTL로 사라지면 «resolved»가 오지 않음) — auto org도
+    한 번 막히면 사람이 풀 때까지 영원히 막혔다. 여기서: auto org이고, 차단이 열린 지 창×2(마커 TTL과 같은 길이)가 지났고,
+    에피소드 마커가 없고, 최근 창의 속도가 임계 이하면 → 닫고 True(그 발신은 통과). manual · 조건 미달 · Redis 불가 → False
+    (차단 유지 · 무변)."""
+    from app.models.chain_circuit_breaker import ChainCircuitBreaker
+
+    _enabled, window_seconds, threshold, _cb_mode, release_mode = await _get_org_config(db, org_id)
+    if release_mode != "auto":
+        return False
+    # Kadir (5015): one clock — the database's, the same that stamped opened_at (no value from the agent, no app-server clock)
+    checked = (await db.execute(
+        select(ChainCircuitBreaker.id, ChainCircuitBreaker.opened_at <= func.clock_timestamp() - timedelta(seconds=window_seconds * 2)).where(
             ChainCircuitBreaker.conversation_id == conversation_id,
             ChainCircuitBreaker.released_at.is_(None),
         )
-        .values(released_at=func.now(), release_reason="auto: episode resolved+cooldown")
-    )
+    )).one_or_none()
+    if checked is None or not checked[1]:  # none open · under two windows
+        return False
+    if await _episode_marker_alive(conversation_id):
+        return False
+    if await _recent_message_velocity(db, conversation_id, window_seconds) > threshold:
+        return False
+    # Kadir (5015): close the block that was checked, by its id — a block opened in between (the old one closed by another send,
+    # a new burst) was never checked and stays open
+    if await _auto_close_circuit_breaker(db, conversation_id, reason="auto: quiet since block", breaker_id=checked[0]):
+        return True
+    # Kadir (5015): two sends racing here — the other one closed it a moment ago (closed once, released_at is never moved); this
+    # send goes through too rather than meeting a 423 for a block that is gone
+    return await get_open_circuit_breaker_id(db, conversation_id) is None
 
 
 async def _recent_message_velocity(
@@ -129,13 +180,23 @@ async def _recent_message_velocity(
 ) -> int:
     """최근 window_seconds 안 이 대화의 메시지 수 — 속도축 실축. caller가 이미 human-less
     대화임을 확인했으므로(호출부 관례) 발신자 전부 agent라 별도 type 필터 없이 전량 카운트."""
+    from app.models.chain_circuit_breaker import ChainCircuitBreaker
     from app.models.conversation import ConversationMessage
 
-    since = datetime.now(timezone.utc) - timedelta(seconds=window_seconds)
+    # story #4631 (Kadir 5016): only messages after the conversation's last release count — released within the window, the burst
+    # that opened the block was still counted and the first message after the release paused the conversation again at once (the
+    # admin's release undone). Now a new block needs a new burst.
+    last_release = (
+        select(func.max(ChainCircuitBreaker.released_at))
+        .where(ChainCircuitBreaker.conversation_id == conversation_id)
+        .scalar_subquery()
+    )
+    # story #4631 (Kadir 5015): the database's clock — the one that stamps a message and opens a block — not the app server's
     return (await db.execute(
         select(func.count()).select_from(ConversationMessage).where(
             ConversationMessage.conversation_id == conversation_id,
-            ConversationMessage.created_at >= since,
+            ConversationMessage.created_at >= func.clock_timestamp() - timedelta(seconds=window_seconds),
+            or_(last_release.is_(None), ConversationMessage.created_at > last_release),
         )
     )).scalar_one()
 
@@ -222,13 +283,8 @@ async def evaluate_unsupervised_chain_episode(
         from app.models.project import OrgMember
         from app.services.notification_dispatch import dispatch_notification
 
-        approver_ids = (await db.execute(
-            select(OrgMember.id).where(
-                OrgMember.org_id == org_id,
-                OrgMember.role.in_(("owner", "admin")),
-                OrgMember.deleted_at.is_(None),
-            )
-        )).scalars().all()
+        # story #4657: the notice goes to exactly the people who may release (one rule with may_release_circuit_breaker)
+        approver_ids = [om_id for om_id, _user_id in await release_admin_rows(db, org_id)]
         if not approver_ids:
             return
 
@@ -237,16 +293,25 @@ async def evaluate_unsupervised_chain_episode(
         # 아니면 "감싸는 함수의 파라미터"만 해석). 그래서 분기별로 event_type이 리터럴로 보이는
         # 별도 호출 2개를 둔다(공유 로직 추출 대신 — 스캐너가 요구하는 형태, PR #3022 CI 적발).
         if breaker_id is not None:
+            # story #4631 (PO 고름 B): reference_id = 그 대화 id — 딥링크(chat_thread)와 해제 API(/conversations/{id}/
+            # circuit-breaker/release)가 둘 다 대화 id로 받는다. 전엔 차단 행 id라 알림을 누르면 없는 대화로 갔다.
+            # story #4631 (Yuna «4631» §5-1): what happened and where it is released (the conversation's banner · [멈춤 풀기]) — the
+            # old body promised a release button on the notice that never existed. The org's language, from the shared catalog.
+            from app.models.conversation import Conversation
+            from app.services.i18n_catalog import t
+            from app.services.org_locale import resolve_org_locale
+
+            locale = await resolve_org_locale(db, org_id)
+            conv_title = (await db.execute(
+                select(Conversation.title).where(Conversation.id == conversation_id)
+            )).scalar_one_or_none()
             await dispatch_notification(
                 db, org_id=org_id, event_type="conversation.circuit_breaker_opened",
                 target_member_ids=list(approver_ids),
-                title="무인간 대화 자동 차단(서킷브레이커)",
-                body=(
-                    f"human 참가자가 없는 대화에서 최근 {window_seconds}초간 메시지 {velocity}건"
-                    f"(임계 {threshold})이 발생해 agent 발신이 일시 차단됐어요. "
-                    "이 알림의 «차단 해제»로 즉시 풀 수 있어요."
-                ),
-                reference_type="conversation", reference_id=breaker_id,
+                title=(t("conversation.agents_paused_notice_title", locale, conversation=conv_title) if conv_title
+                       else t("conversation.agents_paused_notice_title_bare", locale)),
+                body=t("conversation.agents_paused_notice_body", locale),
+                reference_type="conversation", reference_id=conversation_id,
                 source_project_id=project_id,
                 via_outbox=True,
             )
@@ -285,6 +350,71 @@ async def get_open_circuit_breaker_id(db: AsyncSession, conversation_id: uuid.UU
     )).scalar_one_or_none()
 
 
+async def release_admin_rows(db: AsyncSession, org_id: uuid.UUID) -> list[tuple[uuid.UUID, uuid.UUID]]:
+    """story #4657: the one rule for who may release an org's flood block — an org owner/admin (org_members role) whose person
+    also has an active, undeleted human members row. The notice's recipients and the release check both read this; a second
+    rule would send a notice to someone who cannot press the button (or leave a person with the button and no notice).
+    Returns (org_members.id, user_id) pairs."""
+    from app.models.member import Member
+    from app.models.project import OrgMember
+
+    active_human = exists().where(
+        Member.org_id == org_id, Member.user_id == OrgMember.user_id, Member.type == "human",
+        Member.is_active.is_(True), Member.deleted_at.is_(None),
+    )
+    rows = (await db.execute(
+        select(OrgMember.id, OrgMember.user_id).where(
+            OrgMember.org_id == org_id,
+            OrgMember.role.in_(("owner", "admin")),
+            OrgMember.deleted_at.is_(None),
+            active_human,
+        )
+    )).all()
+    return [(om_id, user_id) for om_id, user_id in rows]
+
+
+async def may_release_circuit_breaker(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID) -> bool:
+    """story #4631 (Kadir 5016): who may release a conversation's flood block — an org owner/admin (human: org_members holds no
+    agent and `is_org_owner_or_admin` excludes one besides) whose members row is active and not deleted — the same rule as removing
+    another person's phone (#4624 · `is_active_org_admin`): a deactivated admin releases nothing. No members row → no (fail closed).
+    The release API and the conversation read's can_release both ask this, so the button and the API never disagree."""
+    from app.models.member import Member
+    return any(uid == user_id for _om_id, uid in await release_admin_rows(db, org_id))
+
+
+async def open_circuit_breaker_state(
+    db: AsyncSession, *, conversation_id: uuid.UUID, org_id: uuid.UUID, caller_user_id: uuid.UUID | None,
+) -> dict | None:
+    """story #4631 C: the conversation's open flood block as the web shows it — None when none is open. `can_release` is the
+    release API's own question (may_release_circuit_breaker · `caller_user_id` None = not a human session → never)."""
+    from app.models.chain_circuit_breaker import ChainCircuitBreaker
+
+    opened_at = (await db.execute(
+        select(ChainCircuitBreaker.opened_at).where(
+            ChainCircuitBreaker.conversation_id == conversation_id,
+            ChainCircuitBreaker.released_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if opened_at is None:
+        return None
+    _enabled, window_seconds, _threshold, _mode, release_mode = await _get_org_config(db, org_id)
+    can_release = caller_user_id is not None and await may_release_circuit_breaker(db, user_id=caller_user_id, org_id=org_id)
+    # Yuna «4631» §2: the way it is really released (release_if_quiet makes «auto» true) and, for auto, after how many quiet
+    # minutes — the server's value (window × 2), never one the web assumes
+    # story #4657: no one in the org may release it → say so (the band names the reason; the block is never silent)
+    no_release_admin = not await release_admin_rows(db, org_id)
+    return {
+        "opened_at": opened_at, "release_mode": release_mode, "can_release": can_release,
+        "auto_release_after_minutes": auto_release_after_minutes(window_seconds) if release_mode == "auto" else None,
+        "no_release_admin": no_release_admin,
+    }
+
+
+def auto_release_after_minutes(window_seconds: int) -> int:
+    """story #4631: release_if_quiet's wait (window × 2) in whole minutes, rounded up — what a person and an agent are told."""
+    return -(-(window_seconds * 2) // 60)
+
+
 async def release_circuit_breaker(
     db: AsyncSession, *, conversation_id: uuid.UUID, released_by: uuid.UUID, reason: str | None,
 ) -> bool:
@@ -299,6 +429,23 @@ async def release_circuit_breaker(
             ChainCircuitBreaker.conversation_id == conversation_id,
             ChainCircuitBreaker.released_at.is_(None),
         )
-        .values(released_at=func.now(), released_by=released_by, release_reason=reason)
+        .values(released_at=func.clock_timestamp(), released_by=released_by, release_reason=reason)
     )
-    return result.rowcount > 0
+    released = result.rowcount > 0
+    if released:
+        # story #4631 (Yuna «4631» §3 · BE 확인): the episode marker can outlive the block (its TTL is window × 2 after the last
+        # message) — released while it lived, the same burst's next messages read «continuing» and no new block opened until it
+        # died down. Cleared here: a burst after a release is a new episode, and it pauses the conversation again.
+        await _clear_episode_marker(conversation_id)
+    return released
+
+
+async def _clear_episode_marker(conversation_id: uuid.UUID) -> None:
+    from app.services import redis_shared
+
+    key = redis_shared.key("chain_escalation", "episode", str(conversation_id))
+
+    async def _op(client) -> None:
+        await client.delete(key)
+
+    await redis_shared.with_fallback(_op, lambda: None)

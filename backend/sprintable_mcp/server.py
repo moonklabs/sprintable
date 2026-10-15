@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # import 경로만 이동.
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.tools.base import Tool as _FastMCPTool
-from mcp.types import TextContent
+from mcp.types import ImageContent, TextContent
 from mcp.types import Tool as MCPTool
 from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic.fields import PydanticUndefined
@@ -46,10 +46,19 @@ from .tools.a2a import (
     LinkGateToTaskInput, ListAgentCardsInput, link_gate_to_task, list_agent_cards,
 )
 from .tools.channel_posts import (
-    GetPublicationInsightsInput, WithdrawChannelPostDraftInput,
-    get_publication_insights, withdraw_channel_post_draft,
+    AttachChannelPostImageInput, ConfirmChannelPostVideoInput, CreateChannelPostDraftInput,
+    GetChannelPostPublicationInput, GetChannelPostVideoUploadUrlInput, GetMyChannelConnectionStatusInput,
+    GetPublicationInsightsInput, ListChannelConnectionsInput, SubmitChannelPostDraftInput, WithdrawChannelPostDraftInput,
+    attach_channel_post_image, confirm_channel_post_video, create_channel_post_draft, get_channel_post_publication,
+    get_channel_post_video_upload_url, get_my_channel_connection_status, get_publication_insights,
+    list_channel_connections, submit_channel_post_draft, withdraw_channel_post_draft,
+)
+from .tools.site_posts import (
+    CreateSitePostDraftInput, GetSitePostPublicationInput, SubmitSitePostDraftInput,
+    create_site_post_draft, get_site_post_publication, submit_site_post_draft,
 )
 from .tools.content_rules import GetContentRulesInput, get_content_rules
+from .tools.watches import ListWatchesInput, UnwatchInput, WatchInput, list_watches, unwatch, watch
 from .tools.decisions import RequestDecisionInput, request_decision
 from .tools.evidence import AddEvidenceInput, add_evidence
 from .tools.judgments import AddJudgmentInput, ListJudgmentsInput, add_judgment, list_judgments
@@ -110,6 +119,7 @@ from .tools.meetings import (
     create_meeting, delete_meeting, get_meeting, list_meetings,
     trigger_ai_summary, update_meeting,
 )
+from .tools.chat_attachment import GetChatAttachmentInput, get_chat_attachment  # story 4646
 from .tools.chat import (
     CreateConversationInput, GetChatMessageInput, ListChatMessagesInput, ListConversationsInput,
     SendChatInput, create_conversation, get_chat_message, list_chat_messages,
@@ -142,10 +152,10 @@ from .tools.standup import (
     save_standup, standup_history, standup_missing, update_retro_action_status,
 )
 from .tools.stories import (
-    AddStoryInput, AssignStoryToSprintInput,
+    AddStoryInput, AssignStoryToSprintInput, GetStoryInput,
     ListBacklogInput, ListStoriesInput, UnassignStoryFromSprintInput, UpdateStoryInput,
     UpdateStoryStatusInput,
-    add_story, assign_story_to_sprint,
+    add_story, assign_story_to_sprint, get_story,
     list_backlog, list_stories, unassign_story_from_sprint,
     update_story, update_story_status,
 )
@@ -155,6 +165,7 @@ from .tools.tasks import (
     add_task, get_task, list_my_tasks, list_tasks,
     update_task, update_task_status,
 )
+from .tools.user_blocks import ListUserBlocksInput, RemoveUserBlockInput, list_user_blocks, remove_user_block
 from .tools.webhooks import (
     DeleteWebhookConfigInput, ListWebhookConfigsInput, UpsertWebhookConfigInput,
     delete_webhook_config, list_webhook_configs, upsert_webhook_config,
@@ -262,6 +273,16 @@ def _denied(name: str) -> list[TextContent]:
     ))]
 
 
+def _output_annotation(fn) -> object:
+    """도구 출력 스키마 주석. 도구가 ImageContent(사진)를 돌려주면 그 주석을 따르고(story 4646 AC4 —
+    list[TextContent]로 고정하면 사진 항목이 출력 검증에서 거부된다), 그 밖의 도구는 전부 종전대로 둔다."""
+    try:
+        hint = get_type_hints(fn).get("return")
+    except Exception:
+        hint = None
+    return hint if hint is not None and "ImageContent" in repr(hint) else list[TextContent]
+
+
 def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
     """BaseModel → flat inspect.Signature so FastMCP emits top-level params."""
     try:
@@ -339,7 +360,7 @@ def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
     wrapper.__qualname__ = name
     wrapper.__doc__ = doc
     wrapper.__signature__ = inspect.Signature(
-        params, return_annotation=list[TextContent]
+        params, return_annotation=_output_annotation(fn)
     )
     return wrapper
 
@@ -512,12 +533,18 @@ async def ping(ctx: Context | None = None) -> list[TextContent]:
 # ── 87개 도구 flat schema 등록 ─────────────────────────────────────────────────
 
 _TOOL_DEFS: list[tuple] = [
-    # Stories (8)
+    # Stories (9)
     ("sprintable_list_stories",
      "[일감] 프로젝트 스토리 목록 조회. project_id/org_id context 자동 주입."
      " 각 항목의 reference_token 필드가 그 스토리를 가리키는 참조 토큰"
      "([제목](entity:story:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282).",
      ListStoriesInput, list_stories),
+    # story 4615: a story by its id, in full — a hand-over's `source="story:<id>"` carries only the title and the start of the
+    # description (never the acceptance criteria); this reads the rest without searching by title.
+    ("sprintable_get_story",
+     "[일감] 스토리 단건 조회 — 설명 · 수용 기준(AC) · 상태 · 담당 · 에픽을 한 번에. 건넴의 source=\"story:<id>\"나"
+     " 배정 알림의 story id를 그대로 넣으면 전문을 읽는다(제목 검색 불필요). 다른 조직 · 없는 id는 404.",
+     GetStoryInput, get_story),
     ("sprintable_list_backlog",
      "[일감] 백로그 스토리 목록 (스프린트 미배정 · done/in-review 제외, story #3148). limit"
      "(선택)로 상한 조정 — 서버 기본은 limit 미지정 시 유지(무회귀). cursor 페이지네이션은"
@@ -951,6 +978,10 @@ _TOOL_DEFS: list[tuple] = [
      "[조직] conversation thread 메시지 목록 조회. conversation_id로 대화를 지정(thread_id는"
      " 폐기 예정 별칭 — 응답의 thread_id는 대화 ID가 아니라 각 메시지의 회신 스레드 ID, story #2427).",
      ListChatMessagesInput, list_chat_messages),
+    ("sprintable_get_chat_attachment",
+     "[조직] 채팅 메시지 첨부 하나의 내용 읽기(story 4646). message_id + index(0부터)로 지정 — 이미지는 사진으로 보이고,"
+     " 텍스트는 본문으로 나온다. 크기가 크거나 읽을 수 없는 첨부는 메타(이름·형식·크기·이유)만. 첨부를 읽을 때는 이 도구를 쓴다.",
+     GetChatAttachmentInput, get_chat_attachment),
     ("sprintable_get_chat_message",
      "[조직] conversation thread 내 메시지 단건 원문 조회(message_id로 즉시 픽업). ⭐웹훅 payload가"
      " 잘렸거나 원문이 의심될 때 재발신 요청 대신 이걸로 먼저 확인 — conversation_id=대화 id"
@@ -958,6 +989,14 @@ _TOOL_DEFS: list[tuple] = [
      " thread_id는 대화 ID가 아니라 그 메시지의 회신 스레드 ID다(story #2427) — 응답을 보고 그대로"
      " 다시 부를 때는 응답의 conversation_id를 쓸 것.",
      GetChatMessageInput, get_chat_message),
+    ("sprintable_list_user_blocks",
+     "[조직] 내 차단 목록 — 내가 차단한 멤버(member id)와 차단한 때(story #4430). 차단한 멤버의 메시지는 내 알림 ·"
+     " 이벤트에서 빠진다 — 누군가의 메시지가 계속 안 온다면 여기서 먼저 확인. 풀기는 `sprintable_remove_user_block`.",
+     ListUserBlocksInput, list_user_blocks),
+    ("sprintable_remove_user_block",
+     "[조직] 내 차단 하나 풀기(member_id = 차단을 풀 멤버 id) — 그 멤버의 메시지가 다시 온다(story #4430). 없는 차단을"
+     " 풀어도 오류 없음(변화 없음). 차단 목록은 `sprintable_list_user_blocks`.",
+     RemoveUserBlockInput, remove_user_block),
     # Meetings (6)
     ("sprintable_list_meetings",
      "[일감] 프로젝트 미팅 목록 조회."
@@ -1040,6 +1079,23 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_get_leaderboard_v2",
      "[조직] 보상 리더보드 조회 — 이 프로젝트 순위. period(all · daily · weekly · monthly, 기본 all) · limit(1~100, 기본 50).",
      GetLeaderboardInput, get_leaderboard_v2),
+    # Watches (3) — story #4536: they live on the server, past the session
+    ("sprintable_watch",
+     "[일감] 서버에 감시 하나를 건다 — 세션이 끝나거나 다시 켜져도 살아 있고, 일어나면 이 에이전트 스트림에 "
+     "`watch.fired` 이벤트로 한 번 온다(꺼져 있었으면 다시 붙을 때 첫 일감). condition: "
+     "`github.pr_merged`(target {repo:\"owner/name\", pr}) · `github.pr_checks_completed`(같은 target · 열린 PR) · "
+     "`deploy.serving`(target {service:\"backend\", repo, pr} = 내 PR이 서빙되면 · 또는 {service:\"backend\", commit}). "
+     "서버가 본 적 없는 PR은 422 PR_NOT_SEEN(푸시나 CI가 한 번 돈 뒤 다시) · 병합 없이 닫힌 PR은 422 "
+     "PR_CLOSED_UNMERGED · 이미 일어난 일이면 걸자마자 온다. expires_in_hours 1~720(기본 168). GitHub를 "
+     "폴링하지 말고 이 도구로 기다릴 것.",
+     WatchInput, watch),
+    ("sprintable_unwatch",
+     "[일감] 이 에이전트가 건 감시 하나를 푼다(남의 감시는 404).",
+     UnwatchInput, unwatch),
+    ("sprintable_list_watches",
+     "[일감] 이 에이전트가 건 감시 목록 — 기본은 살아 있는 것만, include_done=true면 불 붙은 것 · 푼 것 · "
+     "만료된 것까지(fired_fact에 일어난 사실).",
+     ListWatchesInput, list_watches),
     # Notifications (3)
     ("sprintable_check_notifications",
      "알림 목록 조회.",
@@ -1105,6 +1161,48 @@ _TOOL_DEFS: list[tuple] = [
      "게이트는 사유 「작성자가 폐기」로 rejected 종결, 이미 발행된 초안은 409(발행 취소는 "
      "별도 unpublish 경로). 이미 폐기된 초안 재호출은 멱등.",
      WithdrawChannelPostDraftInput, withdraw_channel_post_draft),
+    # 채널 · 사이트 글 도구 — story #4581(2026-10-06): 런처의 sprintable-channel 플러그인에만 있던 것을
+    # 호스티드로(앱 세션은 sprintable-desktop 대리로 같은 도구를 얻는다). 발행 자체는 없다 — 초안 · 게이트
+    # 상신 · 결과 읽기까지(실 발행은 사람 승인 뒤 서버 몫).
+    ("sprintable_create_channel_post_draft",
+     "[일감] 작업(work_item_id)에 붙는 채널 글 초안을 만들거나(첫 호출) 새 버전으로 고친다(같은 작업 · "
+     "연결로 다시 부름). connection_id는 sprintable_list_channel_connections에서. 연결이 비활성이면 409 "
+     "CHANNEL_CONNECTION_NOT_ACTIVE · 글이 채널 한도를 넘으면 422 CHANNEL_TEXT_TOO_LONG(그대로 돌려줌).",
+     CreateChannelPostDraftInput, create_channel_post_draft),
+    ("sprintable_submit_channel_post_draft",
+     "[일감] 채널 글 초안 버전(version_id 생략=최신)을 external_publish 게이트에 올려 사람 승인을 받는다 — "
+     "승인 뒤 발행은 서버가 한다. 승인 역할 없음 · 다른 초안이 게이트를 쥠 · 콘텐츠 규칙 위반은 BE 거절 그대로.",
+     SubmitChannelPostDraftInput, submit_channel_post_draft),
+    ("sprintable_get_channel_post_publication",
+     "[일감] 채널 글 초안 하나 — 상태 · 버전 · 발행 결과(퍼머링크 등)를 서버가 준 그대로 읽는다.",
+     GetChannelPostPublicationInput, get_channel_post_publication),
+    ("sprintable_list_channel_connections",
+     "[일감] 이 조직의 채널 연결 중 에이전트가 쓸 수 있는 것(id · 채널 · 계정 이름 · 상태). 자격 값은 없다.",
+     ListChannelConnectionsInput, list_channel_connections),
+    ("sprintable_get_my_channel_connection_status",
+     "[일감] 작업(work_item_type · work_item_id)이 지금 선 레시피 단계에 묶인 채널 연결의 상태(needs_reauth "
+     "등) — 발행 단계에서 한 번. needs_reauth면 발행하지 말고 사람에게 재연결을 부탁할 것.",
+     GetMyChannelConnectionStatusInput, get_my_channel_connection_status),
+    ("sprintable_attach_channel_post_image",
+     "[일감] 채널 글 초안에 이미지 하나(image_base64 · content_type)를 붙인다 — 새 초안 버전이 생긴다.",
+     AttachChannelPostImageInput, attach_channel_post_image),
+    ("sprintable_get_channel_post_video_upload_url",
+     "[일감] 채널 글 초안 영상 1/2단계 — 서명된 올림 주소(upload_url · object_path · 필요한 PUT 헤더)를 받는다. "
+     "그 주소로 영상 바이트를 PUT한 뒤 sprintable_confirm_channel_post_video.",
+     GetChannelPostVideoUploadUrlInput, get_channel_post_video_upload_url),
+    ("sprintable_confirm_channel_post_video",
+     "[일감] 채널 글 초안 영상 2/2단계 — 올린 객체(object_path)를 초안에 붙인다(새 초안 버전).",
+     ConfirmChannelPostVideoInput, confirm_channel_post_video),
+    ("sprintable_create_site_post_draft",
+     "[일감] 작업에 붙는 사이트 글(블로그) 초안을 만들거나 새 버전으로 고친다(title · slug · lang · summary · "
+     "body_md 필수 · tags · media_manifest 선택). campaign_id · connection_id는 준 것만 싣는다(안 주면 이전 값 유지).",
+     CreateSitePostDraftInput, create_site_post_draft),
+    ("sprintable_submit_site_post_draft",
+     "[일감] 사이트 글 초안 버전(version_id 생략=최신)을 external_publish 게이트에 올린다 — 승인 뒤 발행은 서버 몫.",
+     SubmitSitePostDraftInput, submit_site_post_draft),
+    ("sprintable_get_site_post_publication",
+     "[일감] 사이트 글 초안의 발행 결과(호스티드 사이트 발행 정보)를 서버가 준 그대로 읽는다.",
+     GetSitePostPublicationInput, get_site_post_publication),
     # 발행물 1일·7일 인사이트 — story #3651(2026-09-07). 블루프린트 §7 Phase 2 AC
     # 「1일·7일 성과를 비교해 후속 스토리를 만든다」의 에이전트 몫(스토리 생성 자체는
     # 기존 sprintable_add_story).

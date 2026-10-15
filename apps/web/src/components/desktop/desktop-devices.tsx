@@ -1,0 +1,239 @@
+'use client';
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useFormatter, useTranslations } from 'next-intl';
+import { InvisibleSample, useViewerTimeZone } from '@/components/viewer-time-zone';
+import { Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { fetchWithAuth } from '@/lib/db/client';
+import { pickIGaJosa } from '@/lib/korean-particle';
+import {
+  canDisconnect, canManageDevices, deviceAgentCount, deviceAgents, deviceDateOptions, linkedSetupId, markDisconnected, orderDevices,
+  readDevices, readRevoked, type DesktopDevice,
+} from '@/lib/desktop-devices';
+import Link from 'next/link';
+import { ChevronDown } from 'lucide-react';
+import { useFlatHref } from '@/hooks/use-flat-href';
+import { stageRoleLabel } from '@/lib/stage-role';
+
+/**
+ * story #4424 — «연결된 기기» on /desktop (Yuna 0ebe65ef · PO adopted 15:42Z; its copy table is the source for every string).
+ * An org owner/admin sees the org's devices and «연결 끊기», which revokes every key that setup handed out and only those
+ * (4424 AC5 from the screen). A member sees the heading and one line — the list is asked for only after the role says owner/admin
+ * (no 403, no error screen). No org column: the list is this org's only.
+ */
+export function DesktopDevices() {
+  const t = useTranslations('desktop.devices');
+  const tDesktop = useTranslations('desktop');
+  const { orgId, orgMemberships } = useDashboardContext();
+  const manage = canManageDevices(orgMemberships.find((o) => o.orgId === orgId)?.role);
+  const [devices, setDevices] = useState<DesktopDevice[] | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [asking, setAsking] = useState<DesktopDevice | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [done, setDone] = useState<{ device: string; already: boolean } | null>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  // every list read gets a number; only the latest may write — a read started before an org switch (the retry button, the
+  // re-read after an unreadable disconnect answer) that answers after it is the previous org's and is dropped (Qadir 4839 T1 ②)
+  const readSeq = useRef(0);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  // the list is this org's: read again whenever the org changes (Qadir 4830 ① — a client-side org switch kept /desktop mounted
+  // and showed the previous org's devices), starting from a clean slate so nothing of the other org shows meanwhile
+  const load = useCallback(() => {
+    setLoadFailed(false);
+    setDevices(null);
+    setDone(null);
+    setAsking(null);
+    setFailed(false);
+    const mine = ++readSeq.current;
+    fetchWithAuth('/api/desktop/setups')
+      .then(readDevices)
+      .catch(() => null)
+      .then((list) => {
+        if (readSeq.current !== mine) return;
+        if (list) setDevices(list);
+        else setLoadFailed(true);
+      });
+    return () => { if (readSeq.current === mine) readSeq.current += 1; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the request is scoped by the session's org (the token switch-org reissues); orgId says when it changed
+  }, [orgId]);
+
+  useEffect(() => (manage ? load() : undefined), [manage, load]);
+
+  // story 4675 (F2): the workforce detail links here as `/desktop#device=<setup_id>` — that row opens and comes into view once the
+  // list is here (read after the list, so a link that arrives before the rows still finds its row)
+  const [linked, setLinked] = useState<string | null>(null);
+  useEffect(() => { if (devices) setLinked(linkedSetupId(window.location.hash)); }, [devices]);
+
+  const disconnect = async (device: DesktopDevice) => {
+    setBusy(true);
+    setFailed(false);
+    try {
+      const res = await fetchWithAuth(`/api/desktop/setups/${device.setup_id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(String(res.status));
+      // the server says who disconnected it and when — «you» only when this call did it (Qadir 4830 ④)
+      const revoked = await readRevoked(res);
+      if (revoked) {
+        setDevices((list) => (list ? markDisconnected(list, device.setup_id, revoked) : list));
+        setDone({ device: device.device_name, already: revoked.already });
+      } else {
+        // an answer we cannot read: the result is unknown — the re-read list says what happened, the line claims nothing
+        // (Qadir 4839 T1 ①)
+        load();
+      }
+      setAsking(null);
+      headingRef.current?.focus(); // the pressed button is gone — focus goes to the list heading
+    } catch {
+      setFailed(true); // said inside the dialog, which stays open
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // the dialog says the row's own «에이전트 N개» (one key); its particle follows that word (ko — en ignores {josa})
+  const agentsText = t('agents', { count: asking ? deviceAgentCount(asking) : 0 });
+  const confirmBody = t('confirmBody', { agents: agentsText, josa: pickIGaJosa(agentsText) });
+
+  return (
+    <section className="space-y-2" data-testid="desktop-devices" aria-labelledby="desktop-devices-heading">
+      <h2 id="desktop-devices-heading" ref={headingRef} tabIndex={-1} className="text-sm font-semibold text-foreground outline-none">
+        {t('title')}
+      </h2>
+      {!manage ? (
+        <p className="text-xs text-muted-foreground" data-testid="desktop-devices-member">{t('member')}</p>
+      ) : (
+        <>
+          <p className="text-xs text-muted-foreground">{t('description')}</p>
+          <p aria-live="polite" className="break-keep text-xs text-foreground" data-testid="desktop-devices-done">
+            {done ? t(done.already ? 'alreadyDone' : 'done', { device: done.device }) : null}
+          </p>
+          {loadFailed ? (
+            <p className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="desktop-devices-load-failed">
+              {t('loadFailed')}
+              <Button variant="outline" size="sm" onClick={load}>{t('retry')}</Button>
+            </p>
+          ) : devices === null ? (
+            <p className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="size-3.5 animate-spin" />
+              {tDesktop('loading')}
+            </p>
+          ) : devices.length === 0 ? (
+            <Card className="border-dashed px-4 py-5" data-testid="desktop-devices-empty">
+              <p className="text-sm font-medium text-foreground">{t('emptyTitle')}</p>
+              <p className="text-xs text-muted-foreground">{t('emptyBody')}</p>
+            </Card>
+          ) : (
+            <Card className="overflow-hidden p-0">
+              <ul className="divide-y divide-border">
+                {orderDevices(devices).map((d) => <DeviceRow key={d.setup_id} device={d} linked={d.setup_id === linked} onDisconnect={() => { setFailed(false); setAsking(d); }} />)}
+              </ul>
+            </Card>
+          )}
+        </>
+      )}
+      <Dialog open={asking !== null} onOpenChange={(open) => { if (!open && !busy) setAsking(null); }}>
+        <DialogContent showCloseButton={false} initialFocus={cancelRef}>
+          <DialogHeader>
+            <DialogTitle className="truncate" title={asking?.device_name}>{t('confirmTitle', { device: asking?.device_name ?? '' })}</DialogTitle>
+            {/* the v3 body is long (story #4434) — keep Korean words whole at 360, as the list rows do (Yuna) */}
+            <DialogDescription className="break-keep">{confirmBody}</DialogDescription>
+          </DialogHeader>
+          {failed ? <p role="alert" className="text-sm text-destructive" data-testid="desktop-devices-failed">{t('failed')}</p> : null}
+          <DialogFooter>
+            <Button ref={cancelRef} variant="outline" disabled={busy} onClick={() => setAsking(null)}>{t('cancel')}</Button>
+            <Button variant="destructive" disabled={busy} onClick={() => { if (asking) void disconnect(asking); }} data-testid="desktop-devices-confirm">
+              {busy ? t('disconnecting') : t('disconnect')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </section>
+  );
+}
+
+function DeviceRow({ device, linked = false, onDisconnect }: { device: DesktopDevice; linked?: boolean; onDisconnect: () => void }) {
+  const t = useTranslations('desktop.devices');
+  const tOrg = useTranslations('organization');
+  const flatHref = useFlatHref();
+  const format = useFormatter();
+  const off = device.state === 'disconnected';
+  const count = deviceAgentCount(device);
+  // story 4675 (F2 · Yuna §I ④): the row opens to its agents (name → the workforce page · role); a device with no agent is the
+  // row alone. A link from the workforce detail (`#device=`) opens it and brings it into view.
+  const agents = deviceAgents(device);
+  const rowRef = useRef<HTMLLIElement>(null);
+  useEffect(() => { if (linked) rowRef.current?.scrollIntoView?.({ block: 'center' }); }, [linked]);
+  const at = off ? device.revoked_at : device.confirmed_at;
+  const who = off ? device.revoked_by_name : device.confirmed_by_name;
+  // story #4443 — in the viewer's zone (was next-intl's, which nothing set: the server's UTC); unknown yet → held, not drawn
+  const tz = useViewerTimeZone();
+  const date = at ? format.dateTime(new Date(at), { ...deviceDateOptions(at, new Date(), tz ?? 'UTC'), timeZone: tz ?? 'UTC' }) : null;
+  const dateText = date ? t(off ? 'disconnectedOn' : 'connectedOn', { date }) : null;
+  const stateLabel = device.state === 'handed_over' ? t('state.handed_over')
+    : device.state === 'waiting_for_app' ? t('state.waiting_for_app')
+    : device.state === 'not_handed_over' ? t('state.not_handed_over')
+    : t('state.disconnected');
+  const head = (
+    <>
+      <div className="min-w-0">
+        <p className={`flex flex-wrap items-center gap-2 text-sm ${off ? 'font-medium text-muted-foreground' : 'font-semibold text-foreground'}`}>
+          {agents.length > 0 ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden /> : null}
+          <span className="truncate" data-testid="desktop-device-name">{device.device_name}</span>
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground" data-testid="desktop-device-state">
+            <StateDot state={device.state} />
+            <span className={device.state === 'handed_over' ? 'text-success' : undefined}>{stateLabel}</span>
+          </span>
+        </p>
+        {device.state === 'not_handed_over' ? <p className="mt-0.5 break-keep text-xs text-muted-foreground">{t('notHandedOverWhy')}</p> : null}
+        <p className="mt-0.5 break-keep text-xs text-muted-foreground" data-testid="desktop-device-meta">
+          {t('agents', { count })}
+          {dateText ? <>{' · '}{tz ? dateText : <InvisibleSample>{dateText}</InvisibleSample>}</> : null}
+          {who ? <>{' · '}{t(off ? 'disconnectedBy' : 'connectedBy', { name: who })}</> : null}
+        </p>
+      </div>
+      {canDisconnect(device) ? (
+        // inside a <summary> a button's click would also open/close the row — the button keeps its one meaning
+        <Button variant="outline" size="sm" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDisconnect(); }} aria-label={t('disconnectAria', { device: device.device_name })} data-testid="desktop-device-disconnect">
+          {t('disconnect')}
+        </Button>
+      ) : null}
+    </>
+  );
+  return (
+    <li ref={rowRef} data-testid="desktop-device-row" data-state={device.state}>
+      {agents.length === 0 ? (
+        <div className="flex items-start justify-between gap-3 px-4 py-3">{head}</div>
+      ) : (
+        <details className="group" open={linked || undefined} data-testid="desktop-device-details">
+          <summary
+            className="flex cursor-pointer list-none items-start justify-between gap-3 px-4 py-3 [&::-webkit-details-marker]:hidden"
+            aria-label={t('expandAgentsAria', { device: device.device_name })}
+          >
+            {head}
+          </summary>
+          <ul className="space-y-1 px-4 pb-3 pl-9 text-xs text-muted-foreground" data-testid="desktop-device-agents">
+            {agents.map((a) => (
+              <li key={a.member_id} className="break-keep" data-testid="desktop-device-agent">
+                <Link href={flatHref(`/organization/workforce/${a.member_id}`)} className="font-medium text-foreground hover:underline">{a.name ?? a.member_id}</Link>
+                {a.role ? ` · ${stageRoleLabel(a.role, tOrg)}` : null}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </li>
+  );
+}
+
+function StateDot({ state }: { state: DesktopDevice['state'] }) {
+  if (state === 'disconnected') return null;
+  if (state === 'waiting_for_app') return <span aria-hidden className="inline-block size-1.5 rounded-full border border-muted-foreground" />;
+  return <span aria-hidden className={`inline-block size-1.5 rounded-full ${state === 'handed_over' ? 'bg-success' : 'bg-muted-foreground'}`} />;
+}

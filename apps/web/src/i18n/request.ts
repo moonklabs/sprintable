@@ -2,6 +2,7 @@ import { getRequestConfig } from 'next-intl/server';
 import { cookies, headers } from 'next/headers';
 
 import { resolveLocale } from './locale-negotiation';
+import { VIEWER_TZ_COOKIE, validTimeZone } from '@/lib/viewer-time-zone';
 
 // story #3778 CHANGES(유나 design:changes 2026-09-10 — 카디르 큐 전 발견) — export해
 // BFF(retro-sessions/[id]/export/route.ts)가 이 함수 하나로 로케일을 푼다. 전엔 그
@@ -19,11 +20,25 @@ export async function getLocale(): Promise<string> {
   return resolveLocale({ cookie: cookieStore.get('locale')?.value, acceptLanguage: headerStore.get('accept-language') });
 }
 
+/** story #4443 — the viewer's zone from the `tz` cookie the browser sets (components/viewer-time-zone.tsx), or null when it has
+ *  not been set yet (a first visit) or is not a zone. */
+export async function getViewerTimeZone(): Promise<string | null> {
+  const raw = (await cookies()).get(VIEWER_TZ_COOKIE)?.value;
+  if (!raw) return null;
+  let value = raw;
+  try { value = decodeURIComponent(raw); } catch { return null; }
+  return validTimeZone(value);
+}
+
 export default getRequestConfig(async () => {
   const locale = await getLocale();
 
   return {
     locale,
     messages: (await import(`../../messages/${locale}.json`)).default,
+    // story #4443 — was unset: next-intl then used the server's own zone (Cloud Run = UTC) on the server and in the browser.
+    // Unknown viewer → UTC said out loud (not the server's by accident); a date drawn for a person reads useViewerTimeZone,
+    // which draws nothing until the zone is known.
+    timeZone: (await getViewerTimeZone()) ?? 'UTC',
   };
 });

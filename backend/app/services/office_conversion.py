@@ -14,6 +14,7 @@ story #2771 §7 구현 그라운딩(doc 84ef0cb7) 결정 반영:
 """
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 import httpx
@@ -105,12 +106,14 @@ async def _call_gotenberg(filename: str, data: bytes) -> bytes:
     total = 0
     magic_checked = False
     try:
+        # story #4403 AC1b — 동기 google-auth 네트워크 호출(기본 timeout 120s)이 이벤트 루프를 막지 않게
+        auth_headers = await asyncio.to_thread(_id_token_header)
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             async with client.stream(
                 "POST",
                 f"{_GOTENBERG_URL}/forms/libreoffice/convert",
                 files={"files": (filename, data, "application/octet-stream")},
-                headers=_id_token_header(),
+                headers=auth_headers,
             ) as resp:
                 if resp.status_code != 200:
                     raise ConversionFailed(f"gotenberg returned {resp.status_code}")

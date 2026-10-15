@@ -24,6 +24,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.pagination import decode_metric_cursor, encode_metric_cursor
 from app.models.channel_post_comment import ChannelPostComment, ChannelPostCommentReply, CommentCollectionSchedule
 
+from app.services.external_call_tx import in_worker_scope
+
 logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 50
@@ -315,6 +317,10 @@ async def _fetch_replies_raw(
     # 조건부로 조립한다(새 판정 로직 0, 위 effective_external_id 분기와 동형 축).
     extra_kwargs = {"published_at": pub.published_at} if channel == "facebook_sandbox" else {}
     import httpx
+
+    from app.services.external_call_tx import end_transaction_before_external_call_in_worker
+
+    await end_transaction_before_external_call_in_worker(db)  # story #4404 — worker only (request callers keep their transaction)
     try:
         async with httpx.AsyncClient() as client:
             return await _publish_client.fetch_replies(
@@ -657,6 +663,7 @@ async def _sweep_orphaned_active_publications_for_self_recovery(db: AsyncSession
     return seeded
 
 
+@in_worker_scope  # story #4404 — the worker's fetches end the session's transaction before the provider call
 async def process_due_comment_collections(db: AsyncSession, *, now: datetime | None = None) -> dict[str, int]:
     """`insight_snapshots.py::process_due_insight_snapshots`와 동형 SKIP LOCKED 2단계
     커밋(클레임 commit → 개별 처리 commit/rollback 격리)."""

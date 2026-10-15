@@ -31,7 +31,8 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     # 돼, role-scope 키(예 scope=["docs"])로 recruit된 에이전트가 이 도구를 호출 못 하는(403)
     # 채로 조용히 회귀한다 — 이 스토리가 고치려던 "발견 못 함"과 결이 같은 새 차단이라 미리 막는다.
     ("docs", ("doc", "search_docs", "submit_for_approval")),
-    ("chat", ("chat", "message", "conversation")),
+    # story #4430: "user_block" — an agent's own block list (list · remove) belongs with chat: blocks only act on messages.
+    ("chat", ("chat", "message", "conversation", "user_block")),
     ("sprints", ("sprint",)),
     ("hypotheses", ("hypothes",)),
     # 계층 리네이밍 B1(story 1925): "goal" 추가 — sprintable_add_goal 등 신 이름도 이 그룹으로
@@ -154,6 +155,10 @@ _ALWAYS_ALLOWED: frozenset[str] = frozenset({
     # 스코프 키가 이 도구를 403으로 못 본다. vendored 사본과 동기화 필수
     # (sprintable_mcp/toolset.py).
     "sprintable_list_agent_cards",
+    # story #4536 — an agent's own watches (set · clear · list its own, never another's): a self-scope coordination
+    # utility like lock_files, needed by any role (waiting on a merge · a check · a deploy instead of polling GitHub).
+    # vendored 사본과 동기화 필수(sprintable_mcp/toolset.py).
+    "sprintable_watch", "sprintable_unwatch", "sprintable_list_watches",
 })
 
 # scope 토큰: 그룹명 외에 read/write(레거시·전체 비파괴 의미), admin/destructive(파괴적 허용)
@@ -280,6 +285,8 @@ _PATH_GROUP_PREFIXES: tuple[tuple[str, str], ...] = (
     ("/api/v2/audit-logs", "audit"),
     ("/api/v2/webhooks", "webhooks"),
     ("/api/v2/conversations", "chat"),
+    # story #4430 (Qadir 4853) — the block list the chat-group tools wrap: the REST path is gated like the tools
+    ("/api/v2/user-blocks", "chat"),
     ("/api/v2/meetings", "meetings"),
     ("/api/v2/retros", "retro"),
     ("/api/v2/stories", "stories"),
@@ -474,6 +481,7 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_add_retro_item", "sprintable_add_story", "sprintable_add_task",
     "sprintable_assign_story_to_sprint", "sprintable_change_retro_phase",
     "sprintable_check_notifications", "sprintable_checkin_sprint", "sprintable_claim_story",
+    "sprintable_watch", "sprintable_unwatch", "sprintable_list_watches",  # story #4536
     "sprintable_close_sprint", "sprintable_create_conversation", "sprintable_create_doc",
     "sprintable_create_meeting", "sprintable_create_retro_session", "sprintable_create_sprint",
     "sprintable_delete_meeting",
@@ -488,10 +496,14 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_get_project_overview", "sprintable_get_recent_activity",
     "sprintable_get_retro_session_by_sprint", "sprintable_get_sprint_velocity_history",
     "sprintable_get_standup", "sprintable_get_task", "sprintable_get_unassigned_stories",
+    "sprintable_get_story",  # story 4615 — a story by its id, in full
     "sprintable_get_velocity", "sprintable_get_wallet", "sprintable_get_workflow_guide",
     "sprintable_give_reward", "sprintable_list_audit_logs", "sprintable_list_backlog",
     "sprintable_get_chat_message",
+    "sprintable_get_chat_attachment",  # story 4646 — 채팅 첨부 읽기
     "sprintable_list_chat_messages", "sprintable_list_conversations", "sprintable_list_docs", "sprintable_list_epics",
+    # story #4430 — an agent's own block list
+    "sprintable_list_user_blocks", "sprintable_remove_user_block",
     "sprintable_list_goals",
     "sprintable_list_meetings", "sprintable_list_my_tasks", "sprintable_list_retro_sessions",
     "sprintable_list_sprints", "sprintable_list_standup_entries", "sprintable_list_stories",
@@ -564,6 +576,19 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_get_publication_insights",
     # 콘텐츠 규칙 읽기(story #3769) — "content_rule" 키워드로 "content" 그룹.
     "sprintable_get_content_rules",
+    # 채널 · 사이트 글(story #4581) — 이름의 "channel_post" · "site_post" · "channel_connection"이 _GROUP_KEYWORDS
+    # "content"에 걸린다(새 키워드 0).
+    "sprintable_create_channel_post_draft",
+    "sprintable_submit_channel_post_draft",
+    "sprintable_get_channel_post_publication",
+    "sprintable_list_channel_connections",
+    "sprintable_get_my_channel_connection_status",
+    "sprintable_attach_channel_post_image",
+    "sprintable_get_channel_post_video_upload_url",
+    "sprintable_confirm_channel_post_video",
+    "sprintable_create_site_post_draft",
+    "sprintable_submit_site_post_draft",
+    "sprintable_get_site_post_publication",
 )
 
 # picker 표시 순서(비파괴 먼저). order 필드 힌트 + 배열 순서 둘 다 이 순서.

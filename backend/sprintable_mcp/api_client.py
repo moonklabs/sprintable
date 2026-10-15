@@ -211,6 +211,13 @@ def _extract_error_message(status: int, body: Any) -> str:
         return f"Sprintable API {status}"
 
 
+class UnsafeRequestPath(ValueError):
+    """story #4430 — a request path refused before any HTTP (see SprintableClient._reject_unsafe_path)."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__(f"unsafe_request_path: refused a path with an empty, «.» or «..» segment: {path!r}")
+
+
 class SprintableClient:
     """Sprintable PM API 싱글톤 클라이언트.
 
@@ -338,6 +345,24 @@ class SprintableClient:
             body={"accessible_project_ids": accessible},
         )
 
+    @staticmethod
+    def _reject_unsafe_path(path: str) -> None:
+        """story #4430 (Qadir 4853 ②) — a path that would mean something else once normalized never leaves this client.
+
+        Tools build paths from agent-supplied strings (`f"/api/v2/user-blocks/{member_id}"`); `../visual-artifacts/<id>` there
+        is normalized by the HTTP stack into another endpoint, called with the agent's key — and past gates that judged the
+        *tool* (e.g. «not destructive»). The class is closed here, before any request: a segment that is empty, `.` or `..`, or
+        that decodes to one of those or to a separator, is refused. The query string is not a path and is not checked."""
+        from urllib.parse import unquote
+
+        route = path.split("?", 1)[0]
+        if not route.startswith("/"):
+            raise UnsafeRequestPath(path)
+        for segment in route.split("/")[1:]:
+            decoded = unquote(segment)
+            if segment == "" or decoded in (".", "..") or "/" in decoded or "\\" in decoded:
+                raise UnsafeRequestPath(path)
+
     async def request(
         self,
         method: str,
@@ -348,6 +373,7 @@ class SprintableClient:
         unwrap: bool = True,
         return_headers: bool = False,
     ) -> Any:
+        self._reject_unsafe_path(path)
         url = f"{self._base_url}{path}"
         # E-MCP-HTTP S1: effective 키 = per-request override(http 멀티테넌트) ∨ env 단일키(stdio·무회귀).
         _key = _api_key_override.get() or self._api_key
@@ -405,6 +431,12 @@ class SprintableClient:
             message = _extract_error_message(resp.status_code, body)
             raise SprintableApiError(resp.status_code, message, body, code=_extract_error_code(body))
 
+        # story #4430 (Qadir 4853 ①) — a success with no body (204, or an empty 200) is None, not a JSON error: DELETE routes
+        # answer 204, and parsing that raised after the change had already been made — the tool reported «error» for a done
+        # removal. Every tool that calls a 204 route shared this hole.
+        if resp.status_code == 204 or not resp.content:
+            data = None
+            return (data, resp.headers) if return_headers else data
         data = resp.json()
         # ⛔story #2294 ③ 후속(오르테가 라이브 실측, 2026-07-29): {data: T, ...sibling} 래핑을
         # 무조건 data만 남기고 sibling(예: references·command_gate)을 통째로 버렸다 — 그 결과
@@ -458,3 +490,18 @@ class SprintableClient:
 
 
 client = SprintableClient()
+
+
+# story #4441 (Qadir 4853 2nd line) — a success with no body is `None` (story #4430). A tool that reads a field or spreads
+# the result right away turned that into «Error: UNKNOWN: 'NoneType' …» — a success reported as a failure. These two are
+# the one place that says what «no body» means for a result read as a mapping or as a list; any other result comes back
+# as the very same object, so a response with a body is unchanged byte for byte.
+# (tests/test_4441_mcp_tools_empty_body_guard.py runs every tool on an empty body.)
+def as_mapping(result: Any) -> Any:
+    """`{}` for a success with no body; otherwise `result` itself."""
+    return {} if result is None else result
+
+
+def as_list(result: Any) -> Any:
+    """`[]` for a success with no body; otherwise `result` itself."""
+    return [] if result is None else result

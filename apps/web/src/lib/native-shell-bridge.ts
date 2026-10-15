@@ -39,6 +39,14 @@ export function notifySessionChanged() {
   window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'session-changed' }));
 }
 
+// story #4397 — the active account changed without passing /login (account switch · «log out only this account» with another
+// account left). The shell re-registers its push device so the device follows the new person (the register upsert
+// overwrites user · org · member). Not `session-changed`: that one is the cookie flush on every token refresh. Same
+// convention as the others — outside the native shell it does nothing.
+export function notifyAccountChanged() {
+  window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'account-changed' }));
+}
+
 // story #2766(레인 A) §A5 — 다운로드 버튼 환경 분기의 판별 신호. 서버사이드(SSR)에서
 // 호출하면 항상 false(window 없음).
 export function isNativeShell(): boolean {

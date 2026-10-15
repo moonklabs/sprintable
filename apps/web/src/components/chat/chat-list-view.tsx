@@ -7,12 +7,11 @@ import { MessageSquare, Users } from 'lucide-react';
 import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import { useLocale, useTranslations } from 'next-intl';
 import { EmptyState } from '@/components/ui/empty-state';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { NewConversationModal } from './new-conversation-modal';
 import { ConnectionLostBanner } from './connection-lost-banner';
-import { useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
+import { isOwnMessage, useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { queuePendingToast } from './cross-project-toast-provider';
 import { Avatar } from '@/components/shared/avatar';
@@ -28,6 +27,8 @@ import { composeEventPreviewLine } from './event-block-card';
 import { toPlainPreview } from './entity-ref';
 import { useOrgDomainLabels, type OrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { DeviceChip } from '@/components/desktop/device-chip';
 
 interface Participant {
   member_id: string;
@@ -42,6 +43,9 @@ interface Participant {
   // [conversation_id]/page.tsx의 Participant와 동일 계약). optional — BE 기본값(True)과
   // 짝 맞춰 필드 자체가 없으면 "실존"으로 읽는다(participantDisplayLabel).
   resolved?: boolean;
+  /** story 4675 (F2) — the computer an agent participant is bound to (the server's `_fetch_conversation_participants` · this
+   *  org's setups only); null/absent for humans, agents with no live desktop key, and an older server */
+  device_name?: string | null;
 }
 
 interface ConversationItem {
@@ -61,6 +65,8 @@ interface ConversationItem {
   latest_message: {
     content: string;
     created_at: string;
+    // story #4442 — the list row reads «첨부 파일» when the latest message has no text but files (the server already sends it)
+    has_attachments?: boolean;
     event?: {
       event_key: string;
       payload: Record<string, unknown>;
@@ -95,8 +101,8 @@ interface OutsideProjectConversation {
 
 // story #3493 — 손으로 짠 상대시각(하드코딩 'ko-KR', locale 무시)이 3436 묶음 8
 // 정본(formatRelativeTime)과 별개로 존재하던 자리. 대화 최근시각은 "기록"이라 정본에 위임.
-function formatTime(iso: string, locale: string, displayTimezone: string): string {
-  return formatRelativeTime(iso, locale, displayTimezone);
+function formatTime(iso: string, locale: string, displayTimezone: string | null): string {
+  return formatViewerRelativeTime(iso, locale, displayTimezone);
 }
 
 function formatParticipantNames(
@@ -153,7 +159,7 @@ function ConversationRow({
   // useLocale()은 순수 Context 읽기(HTTP 요청 0)라 행마다 불러도 되는 것 — CHANGES①이
   // 지적한 것은 useOrgDomainLabels(HTTP fetch를 매 마운트 발사)뿐이다.
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
 
   const displayName = conv.title ??
     (conv.participants && conv.participants.length > 0
@@ -174,6 +180,7 @@ function ConversationRow({
   // 마크다운 링크/entity 참조 토큰이 그대로 샐 수 있어 평문화(toPlainPreview)한다.
   const preview = eventPreview
     ?? (conv.latest_message?.content ? toPlainPreview(conv.latest_message.content) : null)
+    ?? (conv.latest_message?.has_attachments ? t('latestAttachmentOnly') : null) // story #4442 (Yuna)
     ?? t('noMessages');
   const time = conv.latest_message?.created_at ?? conv.updated_at;
   const unread = conv.unread_count ?? 0;
@@ -209,6 +216,8 @@ function ConversationRow({
             {t('agent')}
           </span>
         )}
+        {/* story 4675 (F2): a DM with an agent names its computer after the «에이전트» chip; a group row says nothing (several · Q-b) */}
+        {isAgentInConv ? <DeviceChip name={others[0]?.device_name} className="text-[10px]" /> : null}
       </div>
     ) : (
       <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -341,12 +350,14 @@ function OutsideProjectRow({
   );
 }
 
-function applyConversationMessageUpdate(
+export function applyConversationMessageUpdate(
   prev: ConversationItem[],
-  payload: { conversation_id?: string; content?: string; created_at?: string },
+  payload: { conversation_id?: string; content?: string; created_at?: string } & Record<string, unknown>,
   onRefetch: () => void,
+  meId?: string,
 ): ConversationItem[] {
   const { conversation_id, content, created_at } = payload;
+  const hasAttachments = Array.isArray(payload.attachments) && payload.attachments.length > 0;
   if (!conversation_id) return prev;
   const idx = prev.findIndex((c) => c.id === conversation_id);
   if (idx === -1) {
@@ -355,10 +366,12 @@ function applyConversationMessageUpdate(
   }
   const updated = [...prev];
   const item = { ...updated[idx]! };
-  if (content && created_at) {
-    item.latest_message = { content, created_at };
+  // story #4442 — an attachment-only message (no text) updates the row too: «첨부 파일» and its time
+  if (created_at && (content || hasAttachments)) {
+    item.latest_message = { content: content ?? '', created_at, ...(hasAttachments ? { has_attachments: true } : {}) };
     item.updated_at = created_at;
-    item.unread_count = (item.unread_count ?? 0) + 1;
+    // story #4440 — my own message (sent from another tab or device) moves the row up but is never unread
+    if (!isOwnMessage(payload, meId)) item.unread_count = (item.unread_count ?? 0) + 1;
   }
   updated.splice(idx, 1);
   return [item, ...updated];
@@ -590,14 +603,14 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     if (wasLoaded) { setAgentLoading(true); loadAgentConversationsOnce(); }
   }, [projectId, loadAgentConversationsOnce]);
 
-  const handleConversationMessage = useCallback((payload: { conversation_id?: string; content?: string; created_at?: string }) => {
-    setConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchConversations(0, false)));
+  const handleConversationMessage = useCallback((payload: { conversation_id?: string; content?: string; created_at?: string } & Record<string, unknown>) => {
+    setConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchConversations(0, false), currentTeamMemberId));
     // agent 탭을 아직 안 연 상태에선 allConversations 를 reactive 로드하지 않는다(lazy 유지) —
     // 탭 첫 활성화 시 loadAgentConversationsOnce 가 최신본을 받으므로 누락 없음.
     if (agentLoadedRef.current) {
-      setAllConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchAllConversations(0, false)));
+      setAllConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchAllConversations(0, false), currentTeamMemberId));
     }
-  }, [fetchConversations, fetchAllConversations]);
+  }, [fetchConversations, fetchAllConversations, currentTeamMemberId]);
 
   // story #1977(트랙B): 다른 탭/기기에서 mark-read → conversation.read SSE(#1976, 본인 타
   // 커넥션 전파)로 이 목록이 열려있는 동안에도 unread 배지가 즉시 서버 truth로 자가정정.
@@ -639,6 +652,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const { connected, polling } = useChatSse({
     currentTeamMemberId,
     onConversationMessage: handleConversationMessage,
+    onSentHere: handleConversationMessage, // story #4442 — this tab's own sends (my message: up, never unread)
     onConversationRead: handleConversationRead,
     onReconnect: handleReconnect,
     onPoll: handlePoll,

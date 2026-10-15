@@ -13,9 +13,14 @@
  * ## 이 가드가 «못 잡는» 것(초록 = «다 봤다»로 읽지 않게)
  *   ㉠ 버튼 자식에 식(`{label}` · `{inner}`)이나 모르는 컴포넌트가 있으면 글을 그릴 수 있다고 보고 넘긴다 — 식이 아이콘만 담아도 못 잡는다.
  *   ㉡ `{...props}` 전달 버튼은 넘긴다(이름이 호출부에서 올 수 있음).
- *   ㉢ 이름 속성 값이 비었는지(`aria-label=""` · 빈 변수)는 안 본다 — 있다/없다만.
+ *   ㉢ 이름 속성 값이 **식**이면(`aria-label={label}` · `aria-labelledby={titleId}`) 비었는지 · 가리키는 id가 있는지는 모른다 — 있다고 본다.
+ *      리터럴은 본다(story #4386): 빈 값 · 공백만(`aria-label=""`)은 이름 아님 · 리터럴 `aria-labelledby="x y"`는 가리키는 id가 이 파일에
+ *      **전부** 리터럴 `id="…"`로 있어야 이름(다른 파일 · 식 id가 가리키는 것은 못 따라감).
  *   ㉣ `<a>` · `role="button"` div 등 버튼 태그가 아닌 클릭 요소는 대상 밖.
  *   ㉤ 창: 안쪽 컴포넌트가 제목을 그리는지는 모른다 — 제목 요소 · 이름 속성 · 'dialog-title' 글자가 이 파일 안 그 창 가지에 없으면 건다(없는 쪽으로 기움).
+ *      제목은 **늘 그려질 때만** 센다(story #4386): `&&` · `||` · `??` 뒤에만 있거나 삼항 한쪽에만 있으면 없는 것으로 본다. 식 안의 다른 모양
+ *      (배열 map · 함수 호출이 돌려주는 제목)은 모른다 — 그 제목은 세지 않는다(없는 쪽으로 기움). 스스로 닫는 창(`<DialogContent />`)도 건다.
+ *   ㉥ `aria-hidden`은 리터럴 참(`"true"` · `'true'` · `{true}` · 값 없음)만 숨김으로 본다 — 식(`aria-hidden={hide}`)은 숨기지 않는다고 본다.
  *
  * GRANDFATHER 없음 — 첫 전수(버튼 14 · 창 3)를 이 PR에서 전부 고쳤다. 작업 목록 390 시트는 [SID:4374]가 고친다. 새로 생기면 즉시 FAIL.
  */
@@ -49,7 +54,43 @@ function attrMap(open: Opening, sf: ts.SourceFile): { attrs: Map<string, ts.JsxA
 }
 
 function isTrue(a: ts.JsxAttribute | undefined, sf: ts.SourceFile): boolean {
-  return !!a && /^aria-hidden(=("true"|\{true\}))?$/.test(a.getText(sf).replace(/\s+/g, ''));
+  // story #4386 — 작은따옴표 `'true'` · `{"true"}`도 참(예전엔 큰따옴표 · {true}만 → 숨긴 버튼을 걸고 숨긴 글자를 이름으로 셈).
+  return !!a && /^aria-hidden(=("true"|'true'|\{true\}|\{"true"\}|\{'true'\}))?$/.test(a.getText(sf).replace(/\s+/g, ''));
+}
+
+/** 속성 값이 문자열 리터럴이면 그 글, 식이면 null(모름). 값 없는 속성은 ''. */
+function literalValue(a: ts.JsxAttribute): string | null {
+  const init = a.initializer;
+  if (!init) return '';
+  if (ts.isStringLiteral(init)) return init.text;
+  if (ts.isJsxExpression(init) && init.expression && (ts.isStringLiteral(init.expression) || ts.isNoSubstitutionTemplateLiteral(init.expression))) {
+    return init.expression.text;
+  }
+  return null;
+}
+
+/** 이 파일의 리터럴 `id="…"` 값들(aria-labelledby 대상 확인용). */
+function literalIds(sf: ts.SourceFile): Set<string> {
+  const ids = new Set<string>();
+  const walk = (n: ts.Node): void => {
+    if (ts.isJsxAttribute(n) && n.name.getText(sf) === 'id') {
+      const v = literalValue(n);
+      if (v) ids.add(v);
+    }
+    n.forEachChild(walk);
+  };
+  walk(sf);
+  return ids;
+}
+
+/** story #4386 — 이름 속성이 «실제로» 이름을 주나. 리터럴 빈 값 · 공백만 = 아님(A) · 리터럴 labelledby는 가리키는 id가 이 파일에 다 있어야(B). 식은 모름 → 준다고 봄(㉢). */
+function givesName(key: string, a: ts.JsxAttribute | undefined, ids: Set<string>): boolean {
+  if (!a) return false;
+  const v = literalValue(a);
+  if (v === null) return true;
+  if (v.trim() === '') return false;
+  if (key === 'aria-labelledby') return v.trim().split(/\s+/).every((id) => ids.has(id));
+  return true;
 }
 
 /** 이 파일에서 아이콘으로 볼 이름 — lucide-react · 아이콘 모듈의 가져온 이름 + `…Icon` · svg. */
@@ -93,9 +134,45 @@ function childrenMayName(nodes: readonly ts.Node[], sf: ts.SourceFile, icons: Se
   return nodes.some(may);
 }
 
+/** story #4386 — 이 가지가 **늘** 제목을 그리나(E). `&&` · `||` · `??` 뒤 · 삼항 한쪽에만 있으면 아님. 'dialog-title' 글자 관례는 어디 있든 셈. */
+function alwaysTitled(x: ts.Node, sf: ts.SourceFile): boolean {
+  if ((ts.isStringLiteral(x) || ts.isNoSubstitutionTemplateLiteral(x)) && x.text === 'dialog-title') return true;
+  if (ts.isJsxElement(x) || ts.isJsxSelfClosingElement(x)) {
+    const open = ts.isJsxElement(x) ? x.openingElement : x;
+    if (TITLE_TAG.test(open.tagName.getText(sf))) return true;
+    if (open.attributes.properties.some((a) => alwaysTitled(a, sf))) return true;
+    return ts.isJsxElement(x) && x.children.some((c) => alwaysTitled(c, sf));
+  }
+  if (ts.isJsxFragment(x)) return x.children.some((c) => alwaysTitled(c, sf));
+  if (ts.isJsxExpression(x)) return !!x.expression && alwaysTitled(x.expression, sf);
+  if (ts.isParenthesizedExpression(x)) return alwaysTitled(x.expression, sf);
+  if (ts.isConditionalExpression(x)) return alwaysTitled(x.whenTrue, sf) && alwaysTitled(x.whenFalse, sf);
+  if (ts.isBinaryExpression(x)) {
+    const op = x.operatorToken.kind;
+    if (op === ts.SyntaxKind.AmpersandAmpersandToken || op === ts.SyntaxKind.BarBarToken || op === ts.SyntaxKind.QuestionQuestionToken) {
+      return containsDialogTitleMarker(x); // 'dialog-title' 관례 글자만은 어디 있든 셈 — 제목 요소는 조건부면 안 셈
+    }
+  }
+  if (ts.isJsxAttribute(x)) return !!x.initializer && alwaysTitled(x.initializer, sf);
+  // 그 밖의 식(map · 함수 호출 등): 'dialog-title' 글자 관례만 셈(㉤)
+  return containsDialogTitleMarker(x);
+}
+
+function containsDialogTitleMarker(x: ts.Node): boolean {
+  let hit = false;
+  const walk = (n: ts.Node): void => {
+    if (hit) return;
+    if ((ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) && n.text === 'dialog-title') hit = true;
+    else n.forEachChild(walk);
+  };
+  walk(x);
+  return hit;
+}
+
 export function scanContent(content: string, file: string): NamelessRef[] {
   const sf = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const icons = iconNames(sf);
+  const ids = literalIds(sf);
   const refs: NamelessRef[] = [];
   const lineOf = (n: ts.Node) => sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
 
@@ -113,7 +190,7 @@ export function scanContent(content: string, file: string): NamelessRef[] {
 
       if (!inRender && (isButtonTag(tag) || renderIsButton)) {
         const r = renderOpen ? attrMap(renderOpen, sf) : { attrs: new Map<string, ts.JsxAttribute>(), spread: false };
-        const named = NAME_ATTRS.some((k) => attrs.has(k) || (renderIsButton && r.attrs.has(k)));
+        const named = NAME_ATTRS.some((k) => givesName(k, attrs.get(k), ids) || (renderIsButton && givesName(k, r.attrs.get(k), ids)));
         const hidden = isTrue(attrs.get('aria-hidden'), sf);
         const children = [...(ts.isJsxElement(n) ? n.children : []), ...(renderIsButton && renderEl && ts.isJsxElement(renderEl) ? renderEl.children : [])];
         if (!named && !hidden && !spread && !(renderIsButton && r.spread) && !childrenMayName(children, sf, icons)) {
@@ -121,15 +198,10 @@ export function scanContent(content: string, file: string): NamelessRef[] {
         }
       }
 
-      if (ts.isJsxElement(n) && DIALOG_TAG.test(tag) && !spread && !attrs.has('aria-label') && !attrs.has('aria-labelledby')) {
-        let titled = false;
-        const find = (x: ts.Node): void => {
-          if (titled) return;
-          if ((ts.isJsxElement(x) || ts.isJsxSelfClosingElement(x)) && TITLE_TAG.test((ts.isJsxElement(x) ? x.openingElement : x).tagName.getText(sf))) titled = true;
-          else if ((ts.isStringLiteral(x) || ts.isNoSubstitutionTemplateLiteral(x)) && x.text === 'dialog-title') titled = true;
-          else x.forEachChild(find);
-        };
-        n.children.forEach(find);
+      // story #4386 — 스스로 닫는 창(자식 없음)도 본다(D) · 이름 속성은 리터럴 빈 값 · 없는 id면 없는 것(A · B).
+      if (DIALOG_TAG.test(tag) && !spread && !givesName('aria-label', attrs.get('aria-label'), ids)
+        && !givesName('aria-labelledby', attrs.get('aria-labelledby'), ids)) {
+        const titled = ts.isJsxElement(n) && n.children.some((c) => alwaysTitled(c, sf));
         if (!titled) refs.push({ kind: 'dialog', file, line: lineOf(n), tag });
       }
     }
@@ -169,7 +241,7 @@ function main(): number {
   }
   const buttons = refs.filter((r) => r.kind === 'button');
   const dialogs = refs.filter((r) => r.kind === 'dialog');
-  console.log(`[4375] 접근 이름 없는 버튼 ${buttons.length}건 · 이름 없는 창 ${dialogs.length}건(머리 주석 ㉠~㉤ = 못 잡는 것)`);
+  console.log(`[4375] 접근 이름 없는 버튼 ${buttons.length}건 · 이름 없는 창 ${dialogs.length}건(머리 주석 ㉠~㉥ = 못 잡는 것)`);
   for (const r of buttons) console.error(`  - ${r.file}:${r.line} <${r.tag}> — 아이콘만 있는 버튼: aria-label={t(…)}(닫기 = common.close · 행마다면 항목을 품게)`);
   for (const r of dialogs) console.error(`  - ${r.file}:${r.line} <${r.tag}> — 창 이름 없음: …Title(보이는 제목) 또는 sr-only …Title · aria-labelledby`);
   return refs.length ? 1 : 0;

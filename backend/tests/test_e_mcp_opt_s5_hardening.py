@@ -157,6 +157,7 @@ def test_mcp_client_sends_x_mcp_transport_header(monkeypatch):
             status_code = 200
             is_success = True
             headers = {"content-type": "application/json"}
+            content = b"{}"  # story #4430 — as httpx.Response has it
             def json(self): return {}
             @property
             def text(self): return "{}"

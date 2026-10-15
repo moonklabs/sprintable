@@ -125,9 +125,8 @@ async def _make_agent_owned_by(session, org_id, project_id, owner_member_id, nam
 
 def _client_for(app):
     from httpx import ASGITransport, AsyncClient
-    # raise_app_exceptions=False — persona seed 성공 경로가 별도·기존 버그(missing DB
-    # function, 위 test_persona_seed_attacker_403_admin_200 주석 참고)로 500을 내는데,
-    # 기본값(True)이면 httpx가 그걸 파이썬 예외로 재던져 resp.status_code로 관찰이 안 된다.
+    # raise_app_exceptions=False — 예전엔 persona seed 성공 경로가 missing DB function으로 500을 내서 필요했다(그 끝점은
+    # story #4407 AC5로 걷힘). 앱 예외를 status로 관찰하는 성질은 그대로 둔다.
     return AsyncClient(
         transport=ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test",
     )
@@ -192,7 +191,7 @@ def _clear_overrides():
 
 
 # ============================================================================
-# agent_personas.py — create/seed/update/delete
+# agent_personas.py — create/update/delete (seed는 story #4407 AC5로 걷힘)
 # ============================================================================
 
 
@@ -216,35 +215,6 @@ async def test_persona_create_attacker_403_owner_201():
                 "agent_id": str(scenario["agent_id"]), "name": "Legit", "system_prompt": "ok",
             })
             assert resp.status_code == 201, resp.text
-        finally:
-            await client.aclose()
-            _clear_overrides()
-    finally:
-        await scenario["engine"].dispose()
-
-
-@pytest.mark.anyio
-async def test_persona_seed_attacker_403_admin_200():
-    scenario = await _build_scenario()
-    try:
-        client = await _client_as(scenario, scenario["attacker_user_id"])
-        try:
-            resp = await client.post(f"/api/v2/agent-personas/seed?agent_id={scenario['agent_id']}")
-            assert resp.status_code == 403, resp.text
-        finally:
-            await client.aclose()
-            _clear_overrides()
-
-        client = await _client_as(scenario, scenario["admin_user_id"])
-        try:
-            resp = await client.post(f"/api/v2/agent-personas/seed?agent_id={scenario['agent_id']}")
-            # story #4000 그라운딩 중 발견(별도·기존 버그, 이 스토리 범위 밖) — repo.seed_builtin()이
-            # 호출하는 Postgres 함수 seed_builtin_personas(uuid,uuid,uuid)가 어느 migration에도
-            # 존재하지 않아 admin이 실제로 호출해도 500(UndefinedFunctionError)이 난다(실측
-            # 확인). 이 카드가 책임지는 건 "소유권 게이트를 통과하는가"뿐 — 통과 후 500은
-            # 별도 버그이므로 admin에게 403이 아님(=게이트 통과)만 단언하고, 함수 결손은
-            # PO에게 별도 스토리로 플래그한다.
-            assert resp.status_code != 403, resp.text
         finally:
             await client.aclose()
             _clear_overrides()

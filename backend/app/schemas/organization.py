@@ -8,12 +8,25 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class CreateOrganization(BaseModel):
     name: str
-    slug: str
+    # story 4427 (PO 2026-09-30 01:04Z): optional — when it is left out the server derives it from the name
+    # (a Korean-only name falls back to `workspace-<8 hex>`), so a desktop sign-up never has to type a slug.
+    # A slug that is sent is still validated and refused as before (format · reserved · taken).
+    slug: str | None = None
     owner_member_id: uuid.UUID | None = None
 
-    @field_validator("name", "slug")
+    @field_validator("name")
     @classmethod
     def not_empty(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("must not be empty")
+        return stripped
+
+    @field_validator("slug")
+    @classmethod
+    def slug_not_blank(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
         stripped = v.strip()
         if not stripped:
             raise ValueError("must not be empty")

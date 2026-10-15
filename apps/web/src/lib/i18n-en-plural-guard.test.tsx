@@ -24,6 +24,11 @@ const ALLOWED_BARE_COUNT: Record<string, string> = {
   'standup.entryCount': '소비처 0(i18n-dead-key-baseline)',
   'cage.trustScoreWindowHint': '소비처 0(i18n-dead-key-baseline)',
   'agents.toolPermissions.expandTools': '{group}은 도구 묶음 이름(수가 아님) — «Git tools»',
+  'desktop.setup.stillPreparing': '{roles}는 역할 이름 묶음(수가 아님) — «agent/agents»는 앞의 {count, plural}이 이미 가름(story 4433)',
+  'desktop.setup.stopped': '{roles}는 역할 이름 묶음(수가 아님) — «agent/agents»는 앞의 {count, plural}이 이미 가름(story 4433)',
+  'desktop.setup.notConnected.blockTitle': '{roles}는 역할 이름 묶음(수가 아님) — «agent/agents»는 앞의 {count, plural}이 이미 가름(story 4452)',
+  'desktop.setup.move.stillConnecting': '{names}는 에이전트 이름 묶음(수가 아님) — «is»는 동사(복수 낱말 아님) · 단·복수는 감싼 {count, plural}이 가름(story 4576 · 유나 문구)',
+  'desktop.setup.move.folderWait': '{names}는 에이전트 이름 묶음(수가 아님) — «starts»는 3인칭 단수 동사(복수 낱말 아님) · 단·복수는 감싼 {count, plural}이 가름(story 4576 · 유나 문구)',
   'content.channelPostsImageAnimatedUnsupported': '{frameCount}는 애니메이션 프레임 수(늘 2 이상) · 모르면 빈 문자열이라 plural 불가',
 };
 
@@ -128,8 +133,8 @@ describe('en 개수 문구 복수형(story #4223)', () => {
     expect(t('flow.nextMakerBacklogLine', { n: 3, owned: 0 })).toBe('3 items not ready yet — none of them are owned yet');
     expect(t('flow.nextMakerBacklogLine', { n: 3, owned: 1 })).toBe('3 items not ready yet — 1 of them is owned');
     expect(t('flow.nextMakerBacklogLine', { n: 3, owned: 2 })).toBe('3 items not ready yet — 2 of them are owned');
-    expect(t('settings.agentScopeAllProjectsHint', { count: 1 })).toBe('Granted to the only project.');
-    expect(t('settings.agentScopeAllProjectsHint', { count: 4 })).toBe('Granted to all 4 projects.');
+    expect(t('settings.agentScopeAllProjectsHint', { count: 1 })).toBe('Joins the only project team.');
+    expect(t('settings.agentScopeAllProjectsHint', { count: 4 })).toBe('Joins all 4 project teams.');
   });
 
   it('⭐배포 20 라이브 미달 — 레시피 상세 요약 «1 gate» · 오늘 머리 요약 · 인원 한도 · 경과 일수(1·N)', () => {

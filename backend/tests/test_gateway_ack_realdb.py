@@ -91,7 +91,8 @@ async def _get_acked_seq(conn, agent_id: uuid.UUID) -> int:
 
 
 async def _fetch_events_after(conn, agent_id: uuid.UUID, after_seq: int) -> list[int]:
-    """start_seq 이후 visible 이벤트 recipient_seq 목록 — agent_gateway._fetch_events와 동일 쿼리."""
+    """start_seq 이후 visible 이벤트 recipient_seq 목록 — agent_gateway._fetch_events의 커서 조건과 동일(story #4497의 org 조건은
+    뺐다 — 이 파일의 이벤트는 다 한 org라 결과가 같고, 여기서 보는 건 ack · 커서 의미)."""
     rows = await conn.fetch(
         """
         SELECT e.recipient_seq

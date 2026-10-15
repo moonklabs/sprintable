@@ -1459,7 +1459,91 @@ describe('GateActivityHistory — 결재 이력 실 응답 shape 마운트(story
     await act(async () => { root.render(wrap(<GateActivityHistory gateId="gate-1" />)); });
 
     expect(container.textContent).toContain(koMessages.cage.gateActivityActionAdsBoostAutoPausedCapReached);
-    expect(container.textContent).not.toContain(koMessages.cage.gateActivityActionAdsBoostPaused);
+    // story #4484 (Yuna 02:20Z) — the scheduler's label now starts with the person's «홍보 중지» on purpose («홍보 중지(까닭)»);
+    // the actor («시스템») tells them apart, so the old «does not contain the person's label» check no longer applies
+  });
+
+  // story #4466 (PO 17:07Z · Yuna 17:09Z) — a scheduler pause says why it fired: the approval withdrawn · the spend could not be
+  // checked · the cap; a scheduler pause without a reason says «자동 중지» only — never «광고비 상한 도달» it did not reach.
+  it.each([
+    ['approval_gone', 'gateActivityActionAdsBoostAutoPausedApprovalGone'],
+    ['spend_unreadable', 'gateActivityActionAdsBoostAutoPausedSpendUnreadable'],
+    ['cancelled', 'gateActivityActionAdsBoostAutoPausedCancelled'], // story #4460 — a cancel the scheduler finished
+    [undefined, 'gateActivityActionAdsBoostAutoPaused'],
+  ] as const)('a scheduler pause with reason %s reads %s, not the cap', async (reason, key) => {
+    vi.mocked(fetchWithAuth).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([
+        {
+          id: 'log-1', action: 'ads_boost_paused', actor_id: 'm-1', actor_name: '미르코',
+          context: reason ? { initiated_by: 'scheduler', reason } : { initiated_by: 'scheduler' }, created_at: '2026-10-01T17:06:09Z',
+        },
+      ]),
+    } as Response);
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateActivityHistory gateId="gate-1" />)); });
+
+    const labels = koMessages.cage as Record<string, string>;
+    expect(container.textContent).toContain(labels[key]);
+    expect(container.textContent).not.toContain(koMessages.cage.gateActivityActionAdsBoostAutoPausedCapReached);
+    // story #4484 (Yuna 02:20Z) — the scheduler's label now starts with the person's «홍보 중지» on purpose («홍보 중지(까닭)»);
+    // the actor («시스템») tells them apart, so the old «does not contain the person's label» check no longer applies
+  });
+
+  // story #4460 (Yuna 02:19Z · 02:20Z) — a cancel's row reads «홍보 취소», and an action the web does not know reads «기타 활동»: the
+  // row stays (an audit record) but its raw key is shown nowhere — not in the text, not in a title — only a console warning.
+  it('a cancel reads «홍보 취소»; an unknown action reads «기타 활동» with no raw key anywhere', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.mocked(fetchWithAuth).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([
+        { id: 'log-1', action: 'ads_boost_cancelled', actor_id: 'm-1', actor_name: '미르코', context: { reason: '다른 예산으로' }, created_at: '2026-10-02T02:10:00Z' },
+        { id: 'log-2', action: 'some_future_action_4460', actor_id: 'm-1', actor_name: '미르코', context: {}, created_at: '2026-10-02T02:11:00Z' },
+      ]),
+    } as Response);
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateActivityHistory gateId="gate-1" />)); });
+
+    const rows = [...container.querySelectorAll('li')].map((li) => li.textContent ?? '');
+    expect(rows[0]).toContain(koMessages.cage.gateActivityActionAdsBoostCancelled);
+    expect(rows[1]).toContain(koMessages.cage.gateActivityActionOther);
+    expect(container.innerHTML).not.toContain('ads_boost_cancelled');
+    expect(container.innerHTML).not.toContain('some_future_action_4460');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('[gate-activity]'), ['some_future_action_4460']);
+    warn.mockRestore();
+  });
+
+  // story #4484 (Yuna 02:20Z) — what the scheduler did reads as the system's: «시스템 · 홍보 시작(시작일 도달)» for the start on the
+  // sealed start date and «시스템 · 홍보 중지(까닭)» for its pauses (the server records them actor_type platform, no actor)
+  it('a scheduled start and a scheduler pause read «시스템» with their reason', async () => {
+    vi.mocked(fetchWithAuth).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([
+        { id: 'log-1', action: 'ads_boost_started', actor_id: null, actor_name: null, actor_type: 'platform', context: { initiated_by: 'scheduler' }, created_at: '2026-10-02T03:00:00Z' },
+        { id: 'log-2', action: 'ads_boost_paused', actor_id: null, actor_name: null, actor_type: 'platform', context: { initiated_by: 'scheduler', reason: 'cap_reached' }, created_at: '2026-10-02T04:00:00Z' },
+        { id: 'log-3', action: 'ads_boost_started', actor_id: 'm-1', actor_name: '미르코', actor_type: 'human', context: { initiated_by: 'human' }, created_at: '2026-10-02T05:00:00Z' },
+      ]),
+    } as Response);
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateActivityHistory gateId="gate-1" />)); });
+
+    const rows = [...container.querySelectorAll('li')].map((li) => li.textContent ?? '');
+    expect(rows[0]).toContain(koMessages.cage.gateActivityActorSystem);
+    expect(rows[0]).toContain(koMessages.cage.gateActivityActionAdsBoostAutoStarted);
+    expect(rows[1]).toContain(koMessages.cage.gateActivityActorSystem);
+    expect(rows[1]).toContain(koMessages.cage.gateActivityActionAdsBoostAutoPausedCapReached);
+    expect(rows[2]).toContain('미르코');
+    expect(rows[2]).toContain(koMessages.cage.gateActivityActionAdsBoostStarted);
+    expect(rows[2]).not.toContain(koMessages.cage.gateActivityActionAdsBoostAutoStarted);
   });
 
   // story #3806(Phase3·3-2 PR 12) — 「눌렀는데 아무 일도 없었다」 결함 처방 — 형제
@@ -1750,5 +1834,57 @@ describe('generation_budget 한도·사용·남음 한 줄(story #4085 AC4-B)', 
     expect(container.textContent).not.toContain('한도');
     expect(container.textContent).not.toContain('남음');
     expect(container.textContent).toContain(koMessages.cage.generationBudgetSealedCostCurrencyUnknown);
+  });
+});
+
+// story #4485 — a row the server itself wrote (actor_type platform, no actor_id · approval_card_delivery_failed) is named
+// «시스템» in the actor's place, not «알 수 없음»; the actions AC0 found unnamed show their words, not the raw key.
+describe('[SID:4485] GateActivityHistory — the server as actor · the actions that showed raw', () => {
+  afterEach(() => {
+    vi.mocked(fetchWithAuth).mockReset();
+  });
+
+  it('platform row → «시스템» · delegated/tossed/discussion/delivery-failed/held/resumed → their words', async () => {
+    const row = (id: string, action: string, actor: Partial<{ actor_id: string | null; actor_name: string | null; actor_type: string }>) => ({
+      id, action, actor_id: null, actor_name: null, context: {}, created_at: '2026-10-02T02:30:00Z', ...actor,
+    });
+    vi.mocked(fetchWithAuth).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([
+        row('l1', 'approval_card_delivery_failed', { actor_type: 'platform' }),
+        row('l2', 'gate_delegated', { actor_id: 'm-1', actor_name: 'PO', actor_type: 'human' }),
+        row('l3', 'gate_tossed', { actor_id: 'm-1', actor_name: 'PO', actor_type: 'human' }),
+        row('l4', 'gate_discussion_requested', { actor_id: 'm-1', actor_name: 'PO', actor_type: 'human' }),
+        row('l5', 'gate_held', { actor_id: 'm-1', actor_name: 'PO', actor_type: 'human' }),
+        row('l6', 'gate_pending', { actor_id: 'm-1', actor_name: 'PO', actor_type: 'human' }),
+      ]),
+    } as Response);
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateActivityHistory gateId="gate-1" />)); });
+
+    const text = container.textContent ?? '';
+    expect(text).toContain(`${koMessages.cage.gateActivityActorSystem} · ${koMessages.cage.gateActivityActionApprovalCardDeliveryFailed}`);
+    expect(text).not.toContain(koMessages.cage.gateActivityActorFallback);
+    for (const key of ['gateActivityActionDelegated', 'gateActivityActionTossed', 'gateActivityActionDiscussionRequested', 'gateActivityActionHeld', 'gateActivityActionResumed'] as const) {
+      expect(text).toContain(koMessages.cage[key]);
+    }
+    for (const raw of ['approval_card_delivery_failed', 'gate_delegated', 'gate_tossed', 'gate_discussion_requested', 'gate_held', 'gate_pending']) {
+      expect(text).not.toContain(raw);
+    }
+  });
+
+  it('an older server without actor_type: no name → still «알 수 없음» (nothing invented)', async () => {
+    vi.mocked(fetchWithAuth).mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([{ id: 'l1', action: 'gate_approved', actor_id: null, actor_name: null, context: {}, created_at: '2026-10-02T02:30:00Z' }]),
+    } as Response);
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root.render(wrap(<GateActivityHistory gateId="gate-1" />)); });
+    expect(container.textContent).toContain(koMessages.cage.gateActivityActorFallback);
   });
 });

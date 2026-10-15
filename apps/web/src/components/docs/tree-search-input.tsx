@@ -40,7 +40,7 @@ export function TreeSearchInput({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+          className="min-w-0 flex-1 bg-transparent text-base lg:text-sm text-foreground outline-none placeholder:text-muted-foreground"
         />
         {isSearching && (
           <button

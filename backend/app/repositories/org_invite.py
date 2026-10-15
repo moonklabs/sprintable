@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from dataclasses import dataclass, field
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +14,25 @@ from app.core.config import settings
 from app.models.org_invite import OrgInvite
 from app.models.organization import Organization
 from app.models.project import OrgMember, Project
+
+
+# story #4427 (Qadir 4833 · PO 05:12Z · 05:15Z) — the one way an invite's email is compared with an address (an invite's
+# or a person's), used by every place that does it: making an invite (already a member · a pending one already), «my
+# invites», accept, the login fallback accept (auth.py) and the invitee's locale (org_invites.py). Before, they differed —
+# the list compared `lower().strip()` of the person's address with the stored value as it is, accept compared `lower()` of
+# both — so an older invite or account whose address kept spaces or capitals was shown in one and refused by another.
+# Same characters on both sides: ASCII whitespace trimmed, then lower-cased. New invites are stored in this form too.
+_EMAIL_TRIM = " \t\r\n"
+
+
+def invite_email_key(email: str) -> str:
+    """The comparison form of an email address (Python side)."""
+    return email.strip(_EMAIL_TRIM).lower()
+
+
+def invite_email_key_sql(column):
+    """The same comparison form in SQL, for a stored column (btrim of the same characters, then lower)."""
+    return func.lower(func.btrim(column, _EMAIL_TRIM))
 
 
 @dataclass
@@ -41,7 +60,7 @@ class OrgInviteRepository:
             .join(User, User.id == OrgMember.user_id)
             .where(
                 OrgMember.org_id == org_id,
-                User.email == email.lower().strip(),
+                invite_email_key_sql(User.email) == invite_email_key(email),
                 OrgMember.deleted_at.is_(None),
             )
             .limit(1)
@@ -53,7 +72,7 @@ class OrgInviteRepository:
         result = await self.session.execute(
             select(OrgInvite.id).where(
                 OrgInvite.organization_id == org_id,
-                OrgInvite.email == email.lower().strip(),
+                invite_email_key_sql(OrgInvite.email) == invite_email_key(email),
                 OrgInvite.status == "pending",
             ).limit(1)
         )
@@ -76,7 +95,7 @@ class OrgInviteRepository:
         now = datetime.now(timezone.utc)
         invite = OrgInvite(
             organization_id=org_id,
-            email=email.lower().strip(),
+            email=invite_email_key(email),
             role=role,
             expires_at=now + timedelta(days=_INVITE_EXPIRE_DAYS),
             created_by=created_by,
@@ -187,8 +206,37 @@ class OrgInviteRepository:
             projects=projects,
         )
 
+    async def pending_for_email(self, email: str, user_id: uuid.UUID) -> list[dict]:
+        """story #4427 (PO 01:21Z) — the pending, unexpired invites to this email, newest first, leaving out the orgs the
+        person already belongs to. The caller passes only a verified email (never someone else's)."""
+        now = datetime.now(timezone.utc)
+        already = select(OrgMember.org_id).where(OrgMember.user_id == user_id, OrgMember.deleted_at.is_(None))
+        rows = (await self.session.execute(
+            select(OrgInvite, Organization.name)
+            .join(Organization, Organization.id == OrgInvite.organization_id)
+            .where(
+                invite_email_key_sql(OrgInvite.email) == invite_email_key(email),
+                OrgInvite.status == "pending",
+                OrgInvite.expires_at > now,
+                OrgInvite.organization_id.not_in(already),
+            )
+            .order_by(OrgInvite.created_at.desc())
+        )).all()
+        return [
+            {"invite_id": str(inv.id), "org_id": str(inv.organization_id), "org_name": name, "role": inv.role,
+             "invited_at": inv.created_at, "expires_at": inv.expires_at}
+            for inv, name in rows
+        ]
+
     async def accept(self, token: str, user_id: uuid.UUID, user_email: str) -> dict:
         """초대 수락. 성공 시 org_id/role 반환. 실패 시 reason 포함."""
+        # story 4427 (나) · Qadir 4837 1st line — every way an invite is accepted comes through here: the accept route, the
+        # auto-accept at sign-in and sign-up with an invite token. The per-person first-organization lock is taken here, once,
+        # so confirm-new-org's «no organization · no pending invite» check cannot interleave with any of them (it would leave
+        # the person with the invited organization AND a new one). Transaction-scoped: held until the caller commits.
+        from app.services.org_project_create import lock_first_org_path
+
+        await lock_first_org_path(self.session, user_id)
         result = await self.session.execute(
             select(OrgInvite).where(OrgInvite.token == token)
         )
@@ -199,7 +247,7 @@ class OrgInviteRepository:
             # Idempotent: the same invitee re-accepting (double-click / re-visit / back button)
             # is already a member → treat as success rather than a 409 error. Only a *different*
             # user hitting an already-consumed invite gets already_accepted.
-            if invite.email.lower() == user_email.lower():
+            if invite_email_key(invite.email) == invite_email_key(user_email):
                 # ensure membership exists (prior accept may predate a backfill) — idempotent
                 await self.session.execute(
                     pg_insert(OrgMember)
@@ -230,7 +278,7 @@ class OrgInviteRepository:
             return {"ok": False, "reason": "invalid_status"}
         if invite.expires_at < datetime.now(timezone.utc):
             return {"ok": False, "reason": "expired"}
-        if invite.email.lower() != user_email.lower():
+        if invite_email_key(invite.email) != invite_email_key(user_email):
             return {"ok": False, "reason": "email_mismatch"}
 
         # story #2477 AC②③ — Free cap 재검증(accept 시점) + 동시 수락 레이스 방어.

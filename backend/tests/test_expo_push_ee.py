@@ -53,7 +53,8 @@ def _mock_db(devices: list) -> AsyncMock:
 
 
 def _dev(token: str, member_id: uuid.UUID | None = None):
-    return SimpleNamespace(expo_push_token=token, member_id=member_id or uuid.uuid4())
+    # a PushDevice row: id · platform are read too (story #4396 — ok tickets are remembered by device for receipts)
+    return SimpleNamespace(id=uuid.uuid4(), platform="android", expo_push_token=token, member_id=member_id or uuid.uuid4())
 
 
 # ─── _expo_send_chunk (ticket 파싱·재시도) ────────────────────────────────────

@@ -140,7 +140,7 @@ async def test_get_verification_state_http_uses_heartbeat_not_sse(monkeypatch):
 
     db = AsyncMock()
     db.execute = AsyncMock(return_value=_first(("profile-row",)))  # fresh heartbeat 존재
-    out = await get_verification_state(db, uuid.uuid4(), transport="http")
+    out = await get_verification_state(db, uuid.uuid4(), org_id=uuid.uuid4(), transport="http")
     assert db.execute.await_count == 1  # SSE 관련 verify_seq/acked_seq 조회 0회
     assert out["verified"] is True
     assert [r["state"] for r in out["rail"]] == list(HTTP_RAIL_STATES)
@@ -151,7 +151,7 @@ async def test_get_verification_state_http_uses_heartbeat_not_sse(monkeypatch):
 async def test_get_verification_state_http_no_heartbeat_not_verified():
     db = AsyncMock()
     db.execute = AsyncMock(return_value=_first(None))
-    out = await get_verification_state(db, uuid.uuid4(), transport="http")
+    out = await get_verification_state(db, uuid.uuid4(), org_id=uuid.uuid4(), transport="http")
     assert out["verified"] is False
 
 
@@ -160,7 +160,7 @@ async def test_get_verification_state_stdio_default_unchanged():
     """transport 미지정 = 기존 stdio 6단계 경로 그대로(회귀0)."""
     db = AsyncMock()
     db.execute = AsyncMock(side_effect=[_scalar(5), _scalar(7), _first(("sess",))])
-    out = await get_verification_state(db, uuid.uuid4())
+    out = await get_verification_state(db, uuid.uuid4(), org_id=uuid.uuid4())
     assert [r["state"] for r in out["rail"]] == list(RAIL_STATES)
     assert out["verified"] is True
 
@@ -250,6 +250,7 @@ async def test_verify_connection_http_skips_synthetic_event_and_wake(monkeypatch
 
 @pytest.mark.anyio
 async def test_verification_status_passes_transport_through():
+    org = uuid.uuid4()
     member = SimpleNamespace(id=uuid.uuid4(), project_id=uuid.uuid4())
     db = AsyncMock()
     db.execute = AsyncMock(return_value=_scalar(member))
@@ -257,9 +258,9 @@ async def test_verification_status_passes_transport_through():
         return_value={"verified": True, "rail": [], "verify_seq": None},
     )) as get_state:
         await ag.agent_verification_status(
-            member.id, transport="http", session=db, auth=MagicMock(), org_id=uuid.uuid4(),
+            member.id, transport="http", session=db, auth=MagicMock(), org_id=org,
         )
-    get_state.assert_awaited_once_with(db, member.id, transport="http")
+    get_state.assert_awaited_once_with(db, member.id, org_id=org, transport="http")  # story #4500: the caller's org
 
 
 # ── emit_onboarding_event dynamic transport (하드코딩 제거 회귀 가드) ──────────

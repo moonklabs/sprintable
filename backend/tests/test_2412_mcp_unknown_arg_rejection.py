@@ -20,6 +20,17 @@ import pytest
 sys.path.insert(0, ".")
 
 
+@pytest.fixture(autouse=True)
+def _no_real_wrapper_calls():
+    """PO 22:51Z (Minh's catch_test_host): a registered tool runs through `_flat()`, which loads the key's scope (GET …/mcp/manifest)
+    and fires a heartbeat (PATCH …/heartbeat) — real requests to whatever base URL an earlier test left on the MCP client singleton
+    (`http://x` · `http://test`), a sandbox network question every run. Neither is what these tests check."""
+    from unittest.mock import AsyncMock, patch
+    with patch("sprintable_mcp.server._load_scope_for", new=AsyncMock(return_value=[])), \
+         patch("sprintable_mcp.server._heartbeat_fire_forget", new=AsyncMock()):
+        yield
+
+
 @pytest.mark.anyio
 async def test_baseline_unpatched_arg_model_silently_drops_unknown_kwarg():
     """positive control — 패치 전 FastMCP 기본 동작 자체가 조용히 삼킨다는 것을 직접 재현.
@@ -71,8 +82,15 @@ async def test_registered_standup_history_tool_still_accepts_known_args():
     from sprintable_mcp import server as srv
 
     tool = srv.mcp._tool_manager.get_tool("sprintable_standup_history")
-    result = await tool.run({"limit": 5, "days": 7}, Context())
+    # PO 22:51Z (Minh's catch_test_host): the tool's own API call went out for real (GET <whatever base an earlier test left on the
+    # client singleton>/api/v2/standups/history) — the arguments reaching it is the point, not the network
+    from unittest.mock import AsyncMock, patch
+    with patch("sprintable_mcp.tools.standup.client") as mock_client:
+        mock_client.get = AsyncMock(return_value=[])
+        result = await tool.run({"limit": 5, "days": 7}, Context())
     assert isinstance(result, list)
+    mock_client.get.assert_awaited_once()
+    assert mock_client.get.await_args.kwargs["params"]["days"] == "7"  # the declared argument reaches the API call (as the query string)
 
 
 def test_all_registered_tools_share_the_same_lockdown():
@@ -84,12 +102,13 @@ def test_all_registered_tools_share_the_same_lockdown():
     123→124. story #3331: sprintable_list_conversations 추가로 124→125. story #3614:
     sprintable_withdraw_channel_post_draft 추가로 125→126. story #3651:
     sprintable_get_publication_insights 추가로 126→127. story #3769:
-    sprintable_get_content_rules 추가로 127→128) 전부 arg_model이
+    sprintable_get_content_rules 추가로 127→128. story #4430: sprintable_list_user_blocks ·
+    sprintable_remove_user_block 추가로 128→130) 전부 arg_model이
     extra=forbid로 잠겨 있어야 한다(상속 갈래 SprintableInput/BaseModel 안 가리고 전부)."""
     from sprintable_mcp import server as srv
 
     tools = srv.mcp._tool_manager.list_tools()
-    assert len(tools) == 128
+    assert len(tools) == 146  # story 4646: sprintable_get_chat_attachment 145→146 · story 4615: sprintable_get_story 144→145 · story #4581: 채널 · 사이트 글 11종 133→144 · story #4536: watch · unwatch · list_watches 3종 신설 130→133
     unlocked = [
         t.name for t in tools
         if t.fn_metadata.arg_model.model_config.get("extra") != "forbid"

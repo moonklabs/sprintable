@@ -1,7 +1,6 @@
 import type { DbClient } from '@/services/db-client';
-import { parseBody, createTaskSchema } from '@sprintable/shared';
 
-import { TaskService, type CreateTaskInput } from '@/services/task';
+import { TaskService } from '@/services/task';
 import { createTaskRepository } from '@/lib/storage/factory';
 import { handleApiError } from '@/lib/api-error';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
@@ -126,18 +125,5 @@ export async function GET(request: Request) {
       totalCount: counts.totalCount ?? page.length,
       doneCount: counts.doneCount ?? (page as Array<{ status: string }>).filter((t) => t.status === 'done').length,
     });
-  } catch (err: unknown) { return handleApiError(err); }
-}
-
-export async function POST(request: Request) {
-  try {
-    const me = await getOrgProjectAuthContext(request);
-    if (!me) return ApiErrors.unauthorized();
-    if (me.rateLimitExceeded) return ApiErrors.tooManyRequests(me.rateLimitRemaining, me.rateLimitResetAt);
-    const parsed = await parseBody(request, createTaskSchema); if (!parsed.success) return parsed.response; const body = parsed.data;
-    const repo = await createTaskRepository();
-    const service = new TaskService(repo);
-    const task = await service.create(body as CreateTaskInput);
-    return apiSuccess(task, undefined, 201);
   } catch (err: unknown) { return handleApiError(err); }
 }

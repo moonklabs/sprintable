@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { DOCX_RENDER_OPTIONS, neutralizeDocxLinks } from '@/lib/docx-safe';
 import { Download, Expand, File, FileCode, FileText, Film, Image as ImageIcon, Loader2, Music, X, type LucideIcon } from 'lucide-react';
 import { fetchWithAuth } from '@/lib/db/client';
 import { downloadAsset, openExternal } from '@/lib/native-shell-bridge';
@@ -383,16 +384,13 @@ function DocxBody({ url, label }: { url: string; label: string }) {
         if (settled) return;
         if (!containerRef.current) throw new Error('docx render target unmounted');
         containerRef.current.innerHTML = '';
-        await renderAsync(buf, containerRef.current, undefined, {
-          inWrapper: true,
-          // 인시던트(2026-08-19) — A4 고정폭 페이지가 좁은 패널에서 가로 스크롤로만
-          // 도달 가능해 실사용 판정이 "잘림"이었다(선생님 실클릭 스크린샷). ignoreWidth:true로
-          // docx-preview가 페이지/표 폭을 강제하지 않게 해 컨테이너 폭에 자연히 맞춘다
-          // (fit-width) — WYSIWYG 정확도보다 미리보기 가독성 우선.
-          ignoreWidth: true,
-          ignoreHeight: true,
-          breakPages: true,
-        });
+        // 인시던트(2026-08-19) — A4 고정폭 페이지가 좁은 패널에서 가로 스크롤로만
+        // 도달 가능해 실사용 판정이 "잘림"이었다(선생님 실클릭 스크린샷). ignoreWidth:true로
+        // docx-preview가 페이지/표 폭을 강제하지 않게 해 컨테이너 폭에 자연히 맞춘다
+        // (fit-width) — WYSIWYG 정확도보다 미리보기 가독성 우선. #4532: renderAltChunks off ·
+        // 렌더 뒤 링크 주소 정리(docx-safe.ts — 문서 안 HTML 조각 · javascript: 링크가 우리 출처에서 돌던 길).
+        await renderAsync(buf, containerRef.current, undefined, { ...DOCX_RENDER_OPTIONS });
+        neutralizeDocxLinks(containerRef.current);
         clearTimeout(timeoutId);
         markReady();
       } catch (err) {
@@ -441,6 +439,16 @@ function DocxBody({ url, label }: { url: string; label: string }) {
  * 개방은 피싱 표면이라 금지 — toss-checkout 선례) fetch로 직접 받아 Blob→객체 URL로 바꿔
  * 그것만 iframe에 건다. DocxBody와 동형 패턴(단일 try/catch+독립 타이머).
  */
+/**
+ * story #4532 AC5 (Kadir · PO 21:46Z): the PDF preview's blob is ALWAYS a PDF. `res.blob()` kept the type the server gave — an
+ * upload's content_type is whatever the uploader sent — so an «x.pdf» that is really HTML became a text/html blob, and the
+ * unsandboxed iframe below ran its scripts in our origin (the HTML preview is sandboxed; this path went around it). Typed as
+ * application/pdf the browser hands it to its PDF viewer, which runs nothing (measured in Chromium 2026-10-03: as-is → the script
+ * ran · typed → none). The iframe cannot take a sandbox: Chromium's PDF viewer does not draw in a sandboxed frame (any sandbox
+ * value → the broken-page icon, measured the same day) — the type is the fix.
+ */
+export const pdfBlob = async (res: Response): Promise<Blob> => new Blob([await res.arrayBuffer()], { type: 'application/pdf' });
+
 function PdfBody({ url, label }: { url: string; label: string }) {
   const t = useTranslations('chats');
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>('loading');
@@ -473,7 +481,7 @@ function PdfBody({ url, label }: { url: string; label: string }) {
       try {
         const res = await fetch(url, { signal: controller.signal });
         if (!res.ok) throw new Error(String(res.status));
-        const blob = await res.blob();
+        const blob = await pdfBlob(res); // #4532: never the server's type
         objectUrl = URL.createObjectURL(blob);
         clearTimeout(timeoutId);
         markReady(objectUrl);
@@ -692,7 +700,7 @@ function PptxBody({ assetId, label }: { assetId: string; label: string }) {
         // blob:만 열려 있으므로(PdfBody와 동형) fetch로 직접 받아 Blob→객체 URL로 바꾼다.
         const pdfRes = await fetch(signedUrl, { signal: controller.signal });
         if (!pdfRes.ok) throw new Error(String(pdfRes.status));
-        const blob = await pdfRes.blob();
+        const blob = await pdfBlob(pdfRes); // #4532: the converted file goes into the same unsandboxed iframe
         objectUrl = URL.createObjectURL(blob);
         clearTimeout(timeoutId);
         markReady(objectUrl);

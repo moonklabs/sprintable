@@ -10,6 +10,10 @@ test.describe('Onboarding — new user setup', () => {
     const password = 'TestPassword123!';
 
     await page.goto('/register');
+    // story 4669: with Google on, the e-mail form is folded under [Sign up with e-mail] — open it first (a build with no OAuth
+    // shows the form as before and has no such button)
+    const emailOpen = page.getByTestId('register-email-open');
+    if (await emailOpen.isVisible({ timeout: 3000 }).catch(() => false)) await emailOpen.click();
     // CHANGES(페드루 PO, 2026-09-18) — networkidle 정리 — 바로 다음 줄의 이메일 입력창
     // visible 대기가 이미 decisive 신호라 networkidle은 여기서도 그냥 중복.
     const emailInput = page.locator('input[placeholder="Email"]');
@@ -63,8 +67,12 @@ test.describe('Onboarding — new user setup', () => {
       { timeout: 10000 }
     );
 
-    // Should advance to project step
+    // story 4668: after the organization comes the fork «where will your agents run?» — the web way keeps the project step
     await page.waitForLoadState('load');
+    const webRadio = page.locator('[data-testid=onboarding-where-web] input');
+    await webRadio.waitFor({ state: 'visible', timeout: 8000 });
+    await webRadio.check();
+    await page.getByTestId('onboarding-where-continue').click();
     // Look for project-related text or next form
     const projectInput = page.locator('input[placeholder*="project" i], input[type="text"]').first();
     await expect(projectInput, 'project step input should appear').toBeVisible({ timeout: 8000 });
@@ -88,6 +96,12 @@ test.describe('Onboarding — new user setup', () => {
     await expect(createOrgBtn).toBeEnabled({ timeout: 5000 });
     await createOrgBtn.click();
 
+    // story 4668: the fork — the web way (the app way ends on the download screen with no project step)
+    const webRadio = page.locator('[data-testid=onboarding-where-web] input');
+    await webRadio.waitFor({ state: 'visible', timeout: 20000 });
+    await webRadio.check();
+    await page.getByTestId('onboarding-where-continue').click();
+
     // Step 2: Project — wait for "Create Project" button to appear (confirms step transition)
     const createProjectBtn = page.getByRole('button', { name: /create project/i });
     await createProjectBtn.waitFor({ state: 'visible', timeout: 20000 });
@@ -97,12 +111,17 @@ test.describe('Onboarding — new user setup', () => {
     await createProjectBtn.click();
 
     // Step 3: Agent — wait for "Skip" button to appear, then skip
-    // Clicking Skip calls router.push('/dashboard') directly
+    // story 4668: Skip goes to the connect step (the desktop card is there — no dead end), not home
     const skipBtn = page.getByRole('button', { name: 'Skip' });
     await skipBtn.waitFor({ state: 'visible', timeout: 20000 });
     await skipBtn.click();
 
-    await page.waitForURL(/\/(dashboard|inbox|board)/, { timeout: 15000 });
+    // Step 4: Connect without an agent — the desktop section's own button is the way out (4668: no footer here)
+    const connectNoAgent = page.getByTestId('connect-step-no-agent');
+    await connectNoAgent.waitFor({ state: 'visible', timeout: 20000 });
+    await page.getByTestId('connect-step-desktop-finish').click();
+
+    await page.waitForURL(/\/(dashboard|inbox|board|today|chats)/, { timeout: 15000 });
     const finalUrl = page.url();
     expect(
       finalUrl.includes('/dashboard') || finalUrl.includes('/inbox') || finalUrl.includes('/board'),

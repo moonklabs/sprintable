@@ -22,11 +22,33 @@ from app.core.database import async_session_factory
 from app.models.conversation import ConversationMessage
 from app.models.team import TeamMember
 from app.routers.ws_chat import _authenticate, _broadcast, _get_or_create_conversation
+from app.services.member_resolver import resolve_member_display_name
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v2/channel", tags=["channel", "Organization"])
 
 _FILES_DIR = Path(os.getenv("CHANNEL_FILES_DIR", "/tmp/sprintable_files"))
+
+# story #4532 AC5 (Kadir · PO 21:59Z): an uploaded file keeps its extension, and its type was guessed from it — an «.html» (or
+# «.svg», which carries scripts too) came back as text/html from our origin and ran in whoever opened the link. Only these types
+# are shown in place; everything else is a download (octet-stream + attachment), and nothing is sniffed.
+CHANNEL_INLINE_TYPES = frozenset({
+    "image/png", "image/jpeg", "image/gif", "image/webp",
+    "audio/mpeg", "audio/mp4", "audio/ogg", "audio/wav", "audio/webm",
+    "video/mp4", "video/webm",
+    "application/pdf",
+})
+
+
+def channel_file_headers(name: str) -> tuple[str, dict[str, str]]:
+    """The served type and headers for a stored channel file: an allowed type inline, anything else a download."""
+    guessed, _ = mimetypes.guess_type(name)
+    if guessed in CHANNEL_INLINE_TYPES:
+        return guessed, {"X-Content-Type-Options": "nosniff"}
+    return "application/octet-stream", {
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": "attachment",
+    }
 
 
 async def _require_caller(api_key: str | None, token: str | None) -> TeamMember:
@@ -86,18 +108,27 @@ async def _persist_and_broadcast(
         await db.commit()
         await db.refresh(msg)
 
+    # story #4418 (Qadir 01a0eb42) — `_authenticate` answers an owner-floor person with `_CallerIdentity` (no `.name`): the
+    # name comes from `resolve_member_display_name` like the WS hub, not from the caller object (before: saved, then a 500 and
+    # nothing broadcast).
+    async with async_session_factory() as db:
+        sender_name = await resolve_member_display_name(caller.id, caller.org_id, db)
     payload_dict: dict = {
         "id": str(msg.id),
         "conversation_id": str(conv_id),
         "sender_id": str(caller.id),
-        "sender_name": caller.name,
+        "sender_name": sender_name,
         "content": msg_content,
         "ts": msg.created_at.isoformat(),
     }
     if file_url:
         payload_dict["file_url"] = file_url
 
-    await _broadcast(str(agent_id), json.dumps(payload_dict))
+    # story #4418 — the message is saved: a broadcast failure is logged, not turned into an error for the sender
+    try:
+        await _broadcast(str(agent_id), json.dumps(payload_dict))
+    except Exception:  # noqa: BLE001
+        logger.error("channel: broadcast failed after save agent_id=%s message_id=%s", agent_id, msg.id, exc_info=True)
 
 
 class DeliverBody(BaseModel):
@@ -150,5 +181,5 @@ async def channel_files(name: str) -> FileResponse:
     path = _FILES_DIR / name
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="Not found")
-    media_type, _ = mimetypes.guess_type(name)
-    return FileResponse(path, media_type=media_type or "application/octet-stream")
+    media_type, headers = channel_file_headers(name)
+    return FileResponse(path, media_type=media_type, headers=headers)

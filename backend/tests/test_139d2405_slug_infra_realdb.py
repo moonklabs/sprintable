@@ -560,3 +560,75 @@ async def test_resolve_project_by_slug_no_access_404():
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+
+
+# ─── story 4427: slug left out → the server derives it (desktop sign-up never types a slug) ─────────────────────
+async def _new_user(Session):
+    from app.models.user import User
+    user_id = uuid.uuid4()
+    async with Session() as s:
+        s.add(User(id=user_id, email=f"u-{user_id.hex[:8]}@test.com", hashed_password="x", email_verified=True))
+        await s.commit()
+    return user_id
+
+
+async def _create_org(Session, body: dict):
+    from app.main import app
+    user_id = await _new_user(Session)
+    await _setup_app(app, Session, user_id)
+    client = _client_for(app)
+    try:
+        return await client.post("/api/v2/organizations", json=body)
+    finally:
+        await client.aclose()
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_4427_create_organization_without_slug_korean_name_gets_workspace_fallback():
+    import re
+    engine, Session = await _session_factory()
+    try:
+        resp = await _create_org(Session, {"name": "문클랩스 팀"})
+        assert resp.status_code == 201, resp.text
+        assert re.fullmatch(r"workspace-[0-9a-f]{8}", resp.json()["slug"]), resp.json()["slug"]
+        assert resp.json()["name"] == "문클랩스 팀"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_4427_create_organization_without_slug_ascii_name_is_slugified_and_unique():
+    engine, Session = await _session_factory()
+    base = f"desk{uuid.uuid4().hex[:6]}"
+    try:
+        first = await _create_org(Session, {"name": f"{base.upper()} Team"})
+        assert first.status_code == 201, first.text
+        assert first.json()["slug"] == f"{base}-team"
+        second = await _create_org(Session, {"name": f"{base.upper()} Team"})  # another user, same name
+        assert second.status_code == 201, second.text
+        assert second.json()["slug"] == f"{base}-team-2", "a taken slug gets -2, not a 409"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_4427_create_organization_without_slug_reserved_name_gets_suffix():
+    engine, Session = await _session_factory()
+    try:
+        resp = await _create_org(Session, {"name": "Admin"})
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["slug"].startswith("admin-") and resp.json()["slug"] != "admin"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_4427_create_organization_slug_sent_is_still_checked():
+    engine, Session = await _session_factory()
+    try:
+        assert (await _create_org(Session, {"name": "Blank", "slug": "   "})).status_code == 422, "a blank slug is refused, not derived"
+        assert (await _create_org(Session, {"name": "Bad", "slug": "Not_Valid!"})).status_code == 400
+        assert (await _create_org(Session, {"name": "Admin Org", "slug": "admin"})).status_code == 400
+    finally:
+        await engine.dispose()

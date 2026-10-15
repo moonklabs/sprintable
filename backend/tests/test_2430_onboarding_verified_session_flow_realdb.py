@@ -78,15 +78,16 @@ async def _seed_agent(session, org_id, project_id):
     return member_id
 
 
-def _agent_auth(agent_id):
+def _agent_auth(agent_id, org_id):
     from app.dependencies.auth import AuthContext
+    # story #4500: an API key carries its organization (as get_current_user builds it) — the ack acts on that org's events
     return AuthContext(
         user_id=str(agent_id), email=None,
-        claims={"app_metadata": {"api_key_id": str(uuid.uuid4())}},
+        claims={"app_metadata": {"api_key_id": str(uuid.uuid4()), "org_id": str(org_id)}}, org_id=str(org_id),
     )
 
 
-async def _setup_app(app, Session, agent_id):
+async def _setup_app(app, Session, agent_id, org_id):
     from app.dependencies.auth import get_current_user
     from tests.conftest import override_db_and_read
 
@@ -100,7 +101,7 @@ async def _setup_app(app, Session, agent_id):
                 raise
 
     async def _auth():
-        return _agent_auth(agent_id)
+        return _agent_auth(agent_id, org_id)
 
     override_db_and_read(app, _db)
     app.dependency_overrides[get_current_user] = _auth
@@ -137,7 +138,7 @@ async def test_verified_and_ack_received_inherit_session_id_and_flow_from_verify
             seq = await start_verification(s, agent_id=agent_id, org_id=org_id, project_id=project_id)
             await s.commit()
 
-        await _setup_app(app, Session, agent_id)
+        await _setup_app(app, Session, agent_id, org_id)
         client = _client_for(app)
         try:
             resp = await client.post("/api/v2/agent/events/ack", json={"seq": seq})
@@ -205,7 +206,7 @@ async def test_verified_inherits_latest_verify_started_row_on_retry_not_the_firs
             seq = await start_verification(s, agent_id=agent_id, org_id=org_id, project_id=project_id)
             await s.commit()
 
-        await _setup_app(app, Session, agent_id)
+        await _setup_app(app, Session, agent_id, org_id)
         client = _client_for(app)
         try:
             resp = await client.post("/api/v2/agent/events/ack", json={"seq": seq})
@@ -252,7 +253,7 @@ async def test_verified_gracefully_degrades_when_no_verify_started_row_exists():
             seq = await start_verification(s, agent_id=agent_id, org_id=org_id, project_id=project_id)
             await s.commit()
 
-        await _setup_app(app, Session, agent_id)
+        await _setup_app(app, Session, agent_id, org_id)
         client = _client_for(app)
         try:
             resp = await client.post("/api/v2/agent/events/ack", json={"seq": seq})

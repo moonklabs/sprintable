@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { ViewerDate } from '@/components/viewer-time-zone';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -48,11 +49,9 @@ function getReviewTypeVariant(type: StandupReviewType): 'info' | 'success' | 'de
   return 'info';
 }
 
-function formatTimestamp(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? value
-    : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+// story #4443 PR2 — through ViewerDate (the viewer's zone and locale); an unparseable value is shown as it came
+function FeedbackTime({ value }: { value: string }) {
+  return Number.isNaN(new Date(value).getTime()) ? <>{value}</> : <ViewerDate value={value} options={{ dateStyle: 'medium', timeStyle: 'short' }} />;
 }
 
 /** story #4370 — 피드백 폼 초안(글 · 종류). */
@@ -340,7 +339,7 @@ export function StandupFeedbackDialog({
                           <Badge variant={getReviewTypeVariant(item.review_type)}>{t(`reviewType_${item.review_type}`)}</Badge>
                           <span className="text-sm font-medium text-foreground">{authorName}</span>
                         </div>
-                        <span className="text-xs text-muted-foreground">{formatTimestamp(item.created_at)}</span>
+                        <span className="text-xs text-muted-foreground"><FeedbackTime value={item.created_at} /></span>
                       </div>
                       {isEditing ? (
                         <div className="mt-3 space-y-3">

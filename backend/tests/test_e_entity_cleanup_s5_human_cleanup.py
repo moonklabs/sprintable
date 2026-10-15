@@ -15,8 +15,7 @@ import inspect
 
 def test_projects_no_human_team_member_creation():
     """create_project 소스에 type='human' team_member INSERT 없음."""
-    from app.routers import projects
-    source = inspect.getsource(projects.create_project)
+    source = _create_project_source()
     # human team_member INSERT가 없어야 함
     assert "'human'" not in source or "team_members" not in source or (
         # team_members 참조가 있더라도 'human' insert가 아닌 agent 필터에만 사용
@@ -42,12 +41,21 @@ def test_auth_no_human_team_member_on_invite():
             assert "TeamMember(" not in context, f"Human TeamMember creation found at line {i}: {context}"
 
 
+def _create_project_source() -> str:
+    """story 4427 (나) piece 1 — create_project's writes moved to services/org_project_create.create_project_with_member;
+    the route must still call it, and the guards below read the route and that function together."""
+    from app.routers import projects
+    from app.services import org_project_create
+    route = inspect.getsource(projects.create_project)
+    assert "create_project_with_member(" in route
+    return route + inspect.getsource(org_project_create.create_project_with_member)
+
+
 # ─── AC2: org_member 참조 전환 ───────────────────────────────────────────────
 
 def test_projects_ensures_org_member():
     """create_project 소스에 org_members upsert 존재 (opt-out 접근 보장)."""
-    from app.routers import projects
-    source = inspect.getsource(projects.create_project)
+    source = _create_project_source()
     assert "org_members" in source
     assert "ON CONFLICT" in source
 
@@ -76,8 +84,7 @@ def test_task_assignee_has_no_team_members_fk():
 
 def test_projects_auto_attach_agent_only():
     """create_project auto-attach 소스에 type='agent' 필터 존재."""
-    from app.routers import projects
-    source = inspect.getsource(projects.create_project)
+    source = _create_project_source()
     assert "agent" in source
     assert "project_memberships" in source
 
@@ -94,14 +101,12 @@ def test_team_members_create_agent_still_works():
 
 def test_project_creation_uses_org_members_for_access():
     """create_project 소스에 org_members INSERT/upsert 존재 — human은 org_member로 접근."""
-    from app.routers import projects
-    source = inspect.getsource(projects.create_project)
+    source = _create_project_source()
     assert "org_members" in source
 
 
 def test_project_auto_attach_excludes_human():
     """create_project auto-attach에서 human team_member 생성 없음."""
-    from app.routers import projects
-    source = inspect.getsource(projects.create_project)
+    source = _create_project_source()
     # INSERT INTO team_members ... 'human' 패턴이 없어야 함
     assert "INSERT INTO team_members" not in source

@@ -193,7 +193,7 @@ export function SetPasswordSection({ onLoadError }: SetPasswordSectionProps = {}
                 type="password"
                 placeholder={t('setPasswordPlaceholderNew')}
                 autoComplete="new-password"
-                className={`w-full rounded-lg border px-4 py-2 text-sm text-foreground bg-background focus:outline-none focus:ring-2 focus:ring-primary ${
+                className={`w-full rounded-lg border px-4 py-2 text-base lg:text-sm text-foreground bg-background focus:outline-none focus:ring-2 focus:ring-primary ${
                   showRules && !isPasswordValid ? 'border-destructive' : 'border-border'
                 }`}
                 value={password}
@@ -204,7 +204,7 @@ export function SetPasswordSection({ onLoadError }: SetPasswordSectionProps = {}
                 type="password"
                 placeholder={t('setPasswordPlaceholderConfirm')}
                 autoComplete="new-password"
-                className={`w-full rounded-lg border px-4 py-2 text-sm text-foreground bg-background focus:outline-none focus:ring-2 focus:ring-primary ${
+                className={`w-full rounded-lg border px-4 py-2 text-base lg:text-sm text-foreground bg-background focus:outline-none focus:ring-2 focus:ring-primary ${
                   touched && confirm && !isConfirmValid ? 'border-destructive' : 'border-border'
                 }`}
                 value={confirm}

@@ -20,6 +20,20 @@ export function resolveDisplayTimezone(orgTimezone?: string | null): { tz: strin
   }
 }
 
+/** story #4443 PR3b (Yuna 03:27Z) — the caption beside a promised-time input: the team's offset («GMT+9») when it is not the
+ *  viewer's at that moment (Seoul ↔ Tokyo: none) · null when they agree or either zone is unknown. */
+export function teamOffsetCaption(at: Date, teamTz: string | null, viewerTz: string | null): string | null {
+  if (!teamTz || !viewerTz) return null;
+  return tzOffsetMs(at, teamTz) === tzOffsetMs(at, viewerTz) ? null : offsetLabel(at, teamTz);
+}
+
+/** story #4443 PR2b — a time in the viewer's own zone: never labelled with an offset (Yuna 22:45Z), and it does not ask the
+ *  runtime which zone the viewer is in (in a server render that is the server's UTC, which would add «GMT+9» there and not in
+ *  the browser). Not known yet (null) → nothing. */
+export function formatViewerScheduledAt(iso: string, viewerTz: string | null): { display: string; utcNote: string } {
+  return formatScheduledAt(iso, viewerTz, viewerTz);
+}
+
 /** 캘린더 격자의 날짜 열 키(YYYY-MM-DD, 주어진 tz 기준) — formatScheduledAt과 같은
  * tz를 받아야 그룹핑과 표기가 어긋나지 않는다(위 docstring 그대로). */
 export function toDateKey(iso: string, tz: string): string {
@@ -28,14 +42,6 @@ export function toDateKey(iso: string, tz: string): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
 }
 
-/** 이 런타임(= 보는 사람의 브라우저)의 시간대. 서버에서 부르면 서버 시간대라 «보는 사람»이 아니다 — 서버 컴포넌트는 null을 넘긴다. */
-function runtimeTimezone(): string | null {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone;
-  } catch {
-    return null;
-  }
-}
 
 /** «GMT+9» · «GMT-7» · «GMT+5:30» · UTC는 «GMT» — `shortOffset`은 로케일과 무관하게 같은 모양이 되도록 en-US로 고정(유나 판정 · ko/en 같게). */
 function offsetLabel(date: Date, tz: string): string {
@@ -53,9 +59,13 @@ function offsetLabel(date: Date, tz: string): string {
  * 보는 사람을 모르는 서버 렌더는 null → 항상 붙인다. */
 export function formatScheduledAt(
   iso: string,
-  tz: string,
-  viewerTz: string | null = runtimeTimezone(),
+  tz: string | null,
+  // story #4443 PR3a (Kadir 4867 second line) — required: the viewer's zone is named by the caller, never asked of the runtime
+  // (in a server render the runtime is UTC: a Seoul viewer's own time got «GMT+9» there and not in the browser)
+  viewerTz: string | null,
 ): { display: string; utcNote: string } {
+  // story #4443 PR2b — the viewer's zone not known yet (a first visit's server render and hydration): nothing to draw, never UTC
+  if (!tz) return { display: '', utcNote: '' };
   const date = new Date(iso);
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: tz, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
@@ -102,7 +112,7 @@ function tzOffsetMs(utcInstant: Date, tz: string): number {
  * 따라 경계가 최대 한 시간 어긋날 수 있다. 지금 테스트가 고정하는 네 시간대(KST·UTC·
  * Honolulu·LA)는 전환 시각이 자정이 아니라 이 오차의 영향을 안 받는다 — 조직 시간대
  * 기능이 열려 자정 전환 tz가 실제로 들어올 때 재검토 대상으로 남겨 둔다. */
-function zonedWallClockToIso(dateKey: string, hh: number, mm: number, ss: number, ms: number, tz: string): string {
+export function zonedWallClockToIso(dateKey: string, hh: number, mm: number, ss: number, ms: number, tz: string): string {
   const [y, mo, d] = dateKey.split('-').map(Number);
   const utcGuess = Date.UTC(y, (mo ?? 1) - 1, d, hh, mm, ss, ms);
   const offset = tzOffsetMs(new Date(utcGuess), tz);

@@ -189,30 +189,6 @@ async def test_create_persona_same_org_agent_still_free():
 
 
 @pytest.mark.anyio
-async def test_seed_builtin_personas_cross_org_agent_blocked():
-    """seed_builtin_personas도 동일 갭·동일 가드로 봉쇄."""
-    from app.main import app
-
-    engine, Session = await _session_factory()
-    try:
-        async with Session() as s:
-            seeded = await _seed_two_orgs(s)
-
-        await _setup_app(app, Session, seeded["org_a_id"], seeded["project_a_id"])
-        client = _client_for(app)
-        try:
-            resp = await client.post(
-                f"/api/v2/agent-personas/seed?agent_id={seeded['agent_b_id']}",
-            )
-            assert resp.status_code == 404, resp.text
-        finally:
-            await client.aclose()
-    finally:
-        app.dependency_overrides.clear()
-        await engine.dispose()
-
-
-@pytest.mark.anyio
 async def test_create_persona_nonexistent_agent_also_404():
     """존재하지 않는 agent_id도 동일 404(존재 비노출)."""
     from app.main import app

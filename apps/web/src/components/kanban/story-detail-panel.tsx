@@ -2,10 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { formatRelativeTime } from '@/lib/storage/format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
@@ -69,6 +68,7 @@ import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 export interface Task {
   id: string;
@@ -382,7 +382,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   // story #3776(1층B) — "닫기"/"취소", common ns의 기존 close/cancel 키 재사용.
   const tc = useTranslations('common');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   // story #1959(P2-S3): 딥링크 매니페스트(story_detail→parentTab=all) — 콜드 진입 시 "전체"
   // 탭 루트를 BACK 대상으로 선주입. 카드 클릭으로 연 경우(history.length>1)는 no-op.
   useSyntheticParentTabHistory('/more');
@@ -1958,7 +1958,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     onPaste={handlePasteAttach}
                     projectId={projectId}
                     placeholder={t('markdownPlaceholder')}
-                    className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-base lg:text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     autoFocus
                     getEntityTypeLabel={getEntityTypeLabel}
                     entityCandidatesLabel={t('entityCandidatesLabel')}
@@ -2018,7 +2018,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     onChange={setAcDraft}
                     projectId={projectId}
                     placeholder={t('markdownPlaceholder')}
-                    className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex field-sizing-content min-h-[160px] w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-base lg:text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     autoFocus
                     getEntityTypeLabel={getEntityTypeLabel}
                     entityCandidatesLabel={t('entityCandidatesLabel')}
@@ -2208,6 +2208,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                               key={hex}
                               type="button"
                               variant="ghost"
+                              aria-pressed={newLabelColor === hex}
                               onClick={() => setNewLabelColor(hex)}
                               className={`h-4 min-h-0 w-4 min-w-0 rounded-full border-2 p-0 ${newLabelColor === hex ? 'border-foreground' : 'border-transparent'}`}
                               style={{ backgroundColor: hex }}
@@ -2221,7 +2222,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           onChange={(e) => setNewLabelName(e.target.value)}
                           onKeyDown={(e) => { if (e.key === 'Enter') void handleCreateLabel(); }}
                           placeholder={t('newLabelNamePlaceholder')}
-                          className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                          className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-base lg:text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                         />
                         <Button
                           type="button"
@@ -2249,7 +2250,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 <Button
                   type="button"
                   variant="ghost"
-                  onClick={() => setShowAddDep((v) => !v)}
+                  onClick={() => setShowAddDep((v) => !v)} aria-expanded={showAddDep}
                   className="h-auto min-h-0 min-w-0 flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground hover:bg-muted"
                 >
                   <Plus className="size-3" />{t('dep.add')}
@@ -2385,6 +2386,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         key={type}
                         type="button"
                         variant="ghost"
+                        aria-pressed={depType === type}
                         onClick={() => setDepType(type)}
                         className={`h-auto min-h-0 min-w-0 rounded px-2 py-0.5 text-[10px] font-medium ${depType === type ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
                       >
@@ -2397,7 +2399,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     value={depQuery}
                     onChange={(e) => setDepQuery(e.target.value)}
                     placeholder={t('dep.searchPlaceholder')}
-                    className="w-full rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                    className="w-full rounded border border-border bg-background px-2 py-1 text-base lg:text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                   {/* story #2328(C-11 ㉡층): 2글자 미만이면 후보(depCandidates), 2글자
                       이상이면 검색 결과(depQueryResults) — 절대 안 섞는다(갈아치움). */}
@@ -2546,7 +2548,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     placeholder={t('commentInputPlaceholder')}
                     value={commentInput}
                     onChange={(e) => setCommentInput(e.target.value)}
-                    className="flex field-sizing-content min-h-[80px] w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex field-sizing-content min-h-[80px] w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-2 text-base lg:text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                         void handleSubmitComment();
@@ -2578,7 +2580,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           <div className="mt-2 flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
                             <span>{commentAuthorLabels.get(comment.created_by) ?? authorLabel(comment.created_by)}</span>
                             <span>·</span>
-                            <span>{formatRelativeTime(comment.created_at, locale, displayTimezone)}</span>
+                            <span>{formatViewerRelativeTime(comment.created_at, locale, displayTimezone)}</span>
                           </div>
                         </li>
                       ))}
@@ -2612,7 +2614,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                             <div className="mt-1 flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
                               <span>{actorName}</span>
                               <span>·</span>
-                              <span>{formatRelativeTime(activity.created_at, locale, displayTimezone)}</span>
+                              <span>{formatViewerRelativeTime(activity.created_at, locale, displayTimezone)}</span>
                               {isLong ? (
                                 <Button
                                   type="button"

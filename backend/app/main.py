@@ -14,6 +14,7 @@ from slowapi.errors import RateLimitExceeded
 from app.core.config import settings
 from app.core.logging_config import configure_logging
 from app.core.rate_limit import limiter
+from app.models.conversation import MessageContentTooLong
 
 # story #2179(2026-07-24, 오르테가군 판정) 근본수정 — 예전엔 `APP_ENV` 문자열 비교로 JSON
 # 로그 여부를 갈랐다("development"가 아니면 JSON). 그런데 JSON 로그가 필요한 진짜 조건은
@@ -231,7 +232,7 @@ async def lifespan(app: FastAPI):
             await worker_engine.dispose()
 
 
-from app.routers import a2a, account, activation, activity_logs, admin_billing, background_jobs, admin_unhandled_errors, activity_stream, ads_boost, ads_boost_execution, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_personas, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, api_keys, channel_post_comments, channel_post_comment_replies, engagement_items, insight_snapshots, insights_board, assets, billing_keys, toss_webhooks, org_subscription_checkout, billing_packs, campaigns, content_rules, context_pack, publishing_metrics, connectors, channel_connections, channel_posts, deeplink_manifest, domain_labels, gate_config, gate_metrics, attachments, audit_logs, auth, auth_firebase_internal, auth_native_bootstrap, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, device_installations, dispatch, docs, entities, goals, event_notifications, events, evidence, exclusion, file_locks, gates, github_integration, glance, health, hitl, hitl_config, hypotheses, integrations, invite_accept, judgments, labels, legal, loop_measure_due, loops, material_lineage, mcp, me, meetings, members, measurement_connections, merge_gate, newsletter_send, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_generation_connectors, org_members, organizations, oss, pageview_metering, participation, plan_features, platform_settings, policy_documents, project_access, project_settings, projects, public_docs, public_pageview, public_site_posts, recipe_repeat_schedules, reference_candidates, references, release_notes, resolve, retros, rewards, role_templates, runtime_capabilities, session_context, site_posts, sprints, standups, stories, subscription, support_gateway_token, tasks, team_members, team_presence, today, trust_scores, usage, user_blocks, verdict_capture, verdicts, visual_artifacts, webhooks, workflow_executions, workflow_line_config, workflow_report, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
+from app.routers import a2a, chat_attachment_content, account, activation, activity_logs, admin_billing, background_jobs, admin_unhandled_errors, activity_stream, ads_boost, ads_boost_execution, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_permissions, desktop_commands, agent_personas, agent_run_profiles, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, desktop_relay, desktop_setup, remote_control, watches, api_keys, channel_post_comments, channel_post_comment_replies, engagement_items, insight_snapshots, insights_board, assets, billing_keys, toss_webhooks, org_subscription_checkout, billing_packs, campaigns, content_rules, context_pack, publishing_metrics, connectors, channel_connections, channel_posts, deeplink_manifest, domain_labels, gate_config, gate_metrics, attachments, audit_logs, auth, auth_firebase_internal, auth_native_bootstrap, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, device_installations, dispatch, docs, entities, goals, event_notifications, events, evidence, exclusion, file_locks, gates, github_integration, glance, health, hitl, hitl_config, hypotheses, integrations, invite_accept, judgments, labels, legal, loop_measure_due, loops, material_lineage, mcp, me, meetings, members, measurement_connections, merge_gate, newsletter_send, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_generation_connectors, org_members, organizations, oss, pageview_metering, participation, plan_features, platform_settings, policy_documents, project_access, project_settings, projects, public_docs, public_pageview, public_site_posts, recipe_repeat_schedules, reference_candidates, references, release_notes, resolve, retros, rewards, role_templates, runtime_capabilities, session_context, site_posts, sprints, standups, stories, subscription, support_gateway_token, tasks, team_members, team_presence, today, trust_scores, usage, user_blocks, verdict_capture, verdicts, visual_artifacts, webhooks, workflow_executions, workflow_line_config, workflow_report, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
 
 # 도메인 축 B(org-1st-class-surface-ia-design-b §3): OpenAPI 태그 조직-우선 위계.
 # 개별 라우터는 기존 세부 tag(예 "stories")를 그대로 유지하고 이 4축 태그를 추가로 보유(다중
@@ -309,6 +310,18 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
                 request, HTTPException(status_code=422, detail=offset_required_detail(".".join(loc), request)),
             )
     return await request_validation_exception_handler(request, exc)
+
+
+@app.exception_handler(MessageContentTooLong)
+async def message_too_long_handler(request: Request, exc: MessageContentTooLong) -> JSONResponse:
+    """story #4605: a chat message past the content bound (any route that writes one) — 422 `message_too_long` with the limit and
+    what came, in UTF-8 bytes; the a2a JSON-RPC route gets its own error envelope through the same handler."""
+    message = f"The message is too long ({exc.got} bytes) — the limit is {exc.limit} bytes"
+    if a2a.is_a2a_rpc_path(request.url.path):
+        return await a2a.build_rpc_error_response(request, 422, f"message_too_long: {message}")
+    return await http_exception_handler(request, HTTPException(status_code=422, detail={
+        "code": "message_too_long", "message": message, "limit": exc.limit, "got": exc.got,
+    }))
 
 
 @app.exception_handler(RateLimitExceeded)
@@ -447,6 +460,26 @@ from app.services.tool_call_recording import ToolCallRecordingMiddleware  # noqa
 
 app.add_middleware(ToolCallRecordingMiddleware)
 
+
+class _ServingReportMiddleware:
+    """story #4536 — this revision reports the commit it serves on its first outside request (services.agent_watches)."""
+
+    def __init__(self, inner):
+        self.inner = inner
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http":
+            from app.services.agent_watches import note_request
+
+            try:
+                note_request(scope.get("path") or "")
+            except Exception:  # noqa: BLE001 — never in a request's way
+                _logger.warning("deploy serving note failed", exc_info=True)
+        await self.inner(scope, receive, send)
+
+
+app.add_middleware(_ServingReportMiddleware)
+
 # story #4332 — 요청마다 풀 체크아웃 대기 · SQL 수 · SQL 합계 ms(로그 한 줄만 · 응답 헤더 0). 맨 바깥에 둬 모든 미들웨어의 SQL까지 센다.
 # 까디르 4697 ① — DB_TIMING_LOG_ENABLED가 켜진 경우에만 단다(꺼져 있으면 요청마다 드는 비용 0 · 엔진 쪽도 같은 판단 · database.py).
 from app.core.request_db_timing import RequestDbTimingMiddleware, timing_enabled  # noqa: E402
@@ -525,6 +558,7 @@ app.include_router(team_members.router)
 app.include_router(user_blocks.router)
 app.include_router(agents.router)
 app.include_router(a2a.router)
+app.include_router(chat_attachment_content.router)  # story 4646 — 채팅 첨부 읽기(에이전트 · MCP 도구)
 app.include_router(team_presence.router)
 app.include_router(org_members.router)
 app.include_router(standups.router)
@@ -604,6 +638,13 @@ app.include_router(bridge.router)
 app.include_router(cron.router)
 app.include_router(auth_firebase_internal.router)
 app.include_router(auth_native_bootstrap.router)
+app.include_router(desktop_setup.router)  # story #4424 — setup-codes/exchange take no login
+app.include_router(desktop_relay.router)  # story #4529 — the device relay (device token only)
+app.include_router(remote_control.router)  # story #4535 — the org's «원격 제어» switch
+app.include_router(agent_permissions.router)  # story #4533 — an agent's permission request · the phones that answer
+app.include_router(desktop_commands.router)  # story #4534 — the DM header's session · a phone's stop / instruction
+app.include_router(agent_run_profiles.router)  # story #4540 — the model · effort a desktop agent starts with
+app.include_router(watches.router)  # story #4536 — an agent's watches (agent key · its own)
 app.include_router(device_installations.router)
 app.include_router(hitl.router)
 app.include_router(integrations.router)

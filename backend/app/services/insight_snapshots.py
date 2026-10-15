@@ -25,6 +25,8 @@ from app.models.insight_snapshot import InsightSnapshot
 from app.services.facebook_publish import _GRAPH_BASE as _FACEBOOK_GRAPH_BASE
 from app.services.instagram_publish import _GRAPH_BASE as _INSTAGRAM_GRAPH_BASE
 
+from app.services.external_call_tx import end_transaction_before_external_call_in_worker, in_worker_scope
+
 logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 50
@@ -214,6 +216,28 @@ async def resolve_publication_org_id(db: AsyncSession, *, publication_id: uuid.U
         return org_id
     return (await db.execute(
         select(SitePost.org_id).where(SitePost.id == publication_id)
+    )).scalar_one_or_none()
+
+
+async def resolve_publication_project_id(db: AsyncSession, *, publication_id: uuid.UUID) -> uuid.UUID | None:
+    """story #4688 (AC2): the project of the story a publication came from — a site post carries `source_story_id`, a channel publication reaches
+    its story through its gate (`gate.work_item_id`). None when it resolves to no story (the publication is org-level: nothing to hide)."""
+    from app.models.channel_publication import ChannelPublication
+    from app.models.gate import Gate
+    from app.models.pm import Story
+    from app.models.site_post import SitePost
+
+    site_story = (await db.execute(
+        select(SitePost.source_story_id).where(SitePost.id == publication_id)
+    )).scalar_one_or_none()
+    if site_story is not None:
+        return (await db.execute(select(Story.project_id).where(Story.id == site_story))).scalar_one_or_none()
+    return (await db.execute(
+        select(Story.project_id)
+        .select_from(ChannelPublication)
+        .join(Gate, Gate.id == ChannelPublication.gate_id)
+        .join(Story, Story.id == Gate.work_item_id)
+        .where(ChannelPublication.id == publication_id)
     )).scalar_one_or_none()
 
 
@@ -568,6 +592,7 @@ async def _fetch_instagram_via_connection(db: AsyncSession, snapshot: InsightSna
 
     import httpx
 
+    await end_transaction_before_external_call_in_worker(db)  # story #4404
     async with httpx.AsyncClient() as client:
         return await _fetch_instagram(client, access_token=access_token, media_id=pub.external_id)
 
@@ -664,6 +689,7 @@ async def _fetch_facebook_via_connection(db: AsyncSession, snapshot: InsightSnap
 
     import httpx
 
+    await end_transaction_before_external_call_in_worker(db)  # story #4404
     async with httpx.AsyncClient() as client:
         return await _fetch_facebook(client, access_token=access_token, media_id=pub.external_id)
 
@@ -777,6 +803,7 @@ async def _fetch_youtube_via_connection(db: AsyncSession, snapshot: InsightSnaps
 
     import httpx
 
+    await end_transaction_before_external_call_in_worker(db)  # story #4404
     async with httpx.AsyncClient() as client:
         return await _fetch_youtube(client, access_token=access_token, video_id=pub.external_id)
 
@@ -804,6 +831,7 @@ async def _fetch_x_via_connection(db: AsyncSession, snapshot: InsightSnapshot) -
 
     import httpx
 
+    await end_transaction_before_external_call_in_worker(db)  # story #4404
     async with httpx.AsyncClient() as client:
         return await _fetch_x(client, access_token=access_token, tweet_id=pub.external_id)
 
@@ -886,6 +914,7 @@ async def _fetch_threads_via_connection(db: AsyncSession, snapshot: InsightSnaps
 
     import httpx
 
+    await end_transaction_before_external_call_in_worker(db)  # story #4404
     async with httpx.AsyncClient() as client:
         return await _fetch_threads(client, access_token=access_token, media_id=pub.external_id)
 
@@ -921,6 +950,7 @@ async def _fetch_stibee_via_connection(db: AsyncSession, snapshot: InsightSnapsh
 
     import httpx
 
+    await end_transaction_before_external_call_in_worker(db)  # story #4404
     async with httpx.AsyncClient(timeout=30) as client:
         try:
             result = await fetch_send_result(client, api_key=access_token, email_id=int(pub.external_id))
@@ -989,6 +1019,9 @@ async def _finalize_snapshot_write(db: AsyncSession, snapshot: InsightSnapshot, 
     return True
 
 
+# story #4404 — the worker's fetches (channel · Stibee · GA4) end the session's transaction before the provider call; the channel
+# numbers are committed before GA4 enrichment (a GA4 failure already returns quietly and keeps them).
+@in_worker_scope
 async def process_due_insight_snapshots(db: AsyncSession, *, now: datetime | None = None) -> dict[str, int]:
     """story #3497 그라운딩④ — `process_due_publication_commands`와 동형 SKIP LOCKED
     2단계 커밋(클레임 commit → 개별 처리 commit/rollback 격리). due_at이 도래한
@@ -1359,6 +1392,7 @@ async def _maybe_enrich_with_ga4_inflow(db: AsyncSession, snapshot: InsightSnaps
     # 크다 — PO 確定으로 이번엔 알려진 제약으로 남긴다. DST가 없는 tz(Asia/Seoul 등)
     # 는 전혀 안 걸린다.
 
+    await end_transaction_before_external_call_in_worker(db)  # story #4404
     async with httpx.AsyncClient(timeout=15) as client:
         try:
             access_token, _expires_in = await refresh_access_token(

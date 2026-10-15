@@ -146,7 +146,7 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
       <button
         type="button"
         aria-label={t('expandRail')}
-        onClick={toggleManualExpand}
+        onClick={toggleManualExpand} aria-expanded={railMode !== 'collapsed'}
         className={`fixed left-0 top-1/2 z-30 hidden -translate-y-1/2 rounded-r-md border border-l-0 border-border bg-card p-1.5 text-muted-foreground shadow-sm transition hover:text-foreground lg:block xl:hidden ${railMode !== 'collapsed' ? '!hidden' : ''}`}
       >
         <PanelLeftOpen className="h-4 w-4" />

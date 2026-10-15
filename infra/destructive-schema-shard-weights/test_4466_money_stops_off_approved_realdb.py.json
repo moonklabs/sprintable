@@ -1,0 +1,1 @@
+{"file": "tests/test_4466_money_stops_off_approved_realdb.py", "sec": 6.0, "source": "story-4466 — a running boost keeps a way to stop spending when its gate leaves approved (pause through any gate status · a reopen keeps a queued pause · leaving approved pauses a live campaign) — new file measured locally (uv run pytest, 7 cases, wall time about 6s — same method as test_4461)"}

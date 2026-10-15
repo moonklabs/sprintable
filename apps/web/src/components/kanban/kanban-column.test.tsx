@@ -208,3 +208,17 @@ describe('KanbanColumn — 긴 org 라벨이 WIP 카운트를 안 밀어낸다(�
     expect(rightGroup?.className).toContain('shrink-0');
   });
 });
+
+// [SID:4380] 칸 접기/펼치기 단추가 펼침 상태를 알린다(aria-expanded).
+describe('KanbanColumn — 접기/펼치기 펼침 상태([SID:4380])', () => {
+  it.each([[true, 'false'], [false, 'true']])('collapsed=%s → 단추 aria-expanded=%s', async (collapsed, expanded) => {
+    await act(async () => {
+      root.render(wrap(
+        <KanbanColumn id="done" label="완료" stories={[]} epicMap={{}} memberMap={{}} onStoryClick={vi.fn()} collapsed={collapsed} onToggleCollapse={vi.fn()} />,
+      ));
+    });
+    const name = collapsed ? koMessages.board.expandDoneColumn : koMessages.board.collapseDoneColumn;
+    const btn = Array.from(container.querySelectorAll('button')).find((b) => b.getAttribute('aria-label') === name);
+    expect(btn?.getAttribute('aria-expanded')).toBe(expanded);
+  });
+});

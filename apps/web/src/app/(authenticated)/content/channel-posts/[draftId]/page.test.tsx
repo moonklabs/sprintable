@@ -2248,7 +2248,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
 
     // story 3436(묶음 5 확장, PO 지적) — §11-2 정본 형식(formatScheduledAt)으로 pin 이동
     // (toLocaleString()은 브라우저 로케일 의존이라 이 화면의 다른 시각 표기와도 어긋났다).
-    expect(container.textContent).toContain(formatScheduledAt(resetAt, resolveDisplayTimezone().tz).display);
+    expect(container.textContent).toContain(formatScheduledAt(resetAt, resolveDisplayTimezone().tz, Intl.DateTimeFormat().resolvedOptions().timeZone).display);
   });
 
   // story #3598(유나 §AC9 문구 確定 2026-09-06 15:44Z) — errorChannelPublishProviderError
@@ -2333,7 +2333,7 @@ describe('ChannelPostEditPage (story #3402 AC5/AC6)', () => {
     expect(container.querySelector('[data-testid="channel-post-published-info"]')).toBeNull();
     const result = container.querySelector('[data-testid="channel-post-publish-result"]');
     // story 3436(묶음 5 확장) — §11-2 정본 형식으로 pin 이동(회귀 아님).
-    expect(result?.textContent).toContain(formatScheduledAt('2026-09-05T00:00:00Z', resolveDisplayTimezone().tz).display);
+    expect(result?.textContent).toContain(formatScheduledAt('2026-09-05T00:00:00Z', resolveDisplayTimezone().tz, Intl.DateTimeFormat().resolvedOptions().timeZone).display);
   });
 
   // 디디군 리뷰 nit(2026-09-04 06:05Z, PR#3769 진행 중 발견) — 재발행 요청이 이번엔

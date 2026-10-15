@@ -96,7 +96,7 @@ export function HitlApprovalCard({ request, createdAt, answer, onRespond }: Hitl
             onChange={(e) => setReason(e.target.value)}
             placeholder={t('hitlDenyReasonPlaceholder')}
             disabled={locked}
-            className="h-8 flex-1 text-xs"
+            className="h-8 flex-1"
             autoFocus
           />
           <div className="flex gap-1.5">

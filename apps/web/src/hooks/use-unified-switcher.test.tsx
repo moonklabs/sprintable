@@ -27,12 +27,18 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/moonklabs/sprintable/board',
   useSearchParams: () => new URLSearchParams(searchParamsValueRef.current),
 }));
+// [SID:4681] ③ — the desktop app's bridge (D1 lib/desktop-app): null = a browser (the default for every older test)
+const { desktopAppRef } = vi.hoisted(() => ({
+  desktopAppRef: { current: null as null | { setProjectFolder: (a: { projectId: string; path: string }) => Promise<{ ok: true } | { problem: string }> } },
+}));
+vi.mock('@/lib/desktop-app', () => ({ desktopApp: () => desktopAppRef.current ?? undefined }));
 
 let container: HTMLDivElement;
 let root: Root;
 
 const ORGS: OrgSwitcherItem[] = [
-  { orgId: 'org-moonklabs', orgName: '뭉클랩', orgSlug: 'moonklabs' },
+  // [SID:4681] (PO (나)): an org admin — the grants of the 4681 tests below are allowed; a member's case sets its own orgs
+  { orgId: 'org-moonklabs', orgName: '뭉클랩', orgSlug: 'moonklabs', role: 'admin' },
   { orgId: 'org-dogfood', orgName: 'HITL Dogfood Test', orgSlug: 'hitl-dogfood-test' },
 ];
 // 서버 /me/memberships — 계정 상태(JWT "현재 org"=Dogfood)로 스코프된 값. currentOrgId(URL,
@@ -65,6 +71,7 @@ beforeEach(() => {
   result = null;
   routerPushMock.mockClear();
   searchParamsValueRef.current = '';
+  desktopAppRef.current = null; // [SID:4681] ③ — a browser unless a test says otherwise
   window.sessionStorage.clear(); // story #2468 — 테스트 간 stale project_id 오염 방지
 });
 
@@ -414,6 +421,201 @@ describe('useUnifiedSwitcher — story #3147 검색 state(신규)', () => {
     await act(async () => { result?.setSearchQuery('landing'); });
     await act(async () => { result?.setOpen(true); });
     expect(result?.searchQuery).toBe('landing');
+  });
+});
+
+// [SID:4681] (D3 · piece ②) — the checked agents get a grant each right after the project is made (POST /api/projects/{id}/access
+// {member_id} · 409 = already there = done); a failed grant leaves the project and says the count; no check = no call; the list is
+// cleared when the dialog opens and after a make.
+describe('useUnifiedSwitcher — 새 프로젝트의 에이전트 접근 grant (story #4681)', () => {
+  function stubCreateAndAccess(accessStatus: (memberId: string) => number) {
+    const calls: { url: string; body: unknown }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/projects' && init?.method === 'POST') return { ok: true, json: async () => ({ data: { id: 'proj-new' } }) };
+      const m = /^\/api\/projects\/(.+)\/access$/.exec(url);
+      if (m && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { member_id: string };
+        calls.push({ url, body });
+        const status = accessStatus(body.member_id);
+        return { ok: status >= 200 && status < 300, status, json: async () => ({ data: { id: `rec-${body.member_id}` } }) };
+      }
+      return { ok: true, json: async () => ({ data: { ok: true } }) }; // switch-project · slug
+    }));
+    return calls;
+  }
+
+  it('checked ids → one grant each on the new project, in order; the dialog closes and the switch happens; no notice', async () => {
+    const calls = stubCreateAndAccess(() => 201);
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { result!.setCreateProjectOpen(true); });
+    await act(async () => { result!.setNewProjectAgentIds(['a-1', 'a-2']); });
+    await act(async () => { await result!.createProject('결제 개편', '', { agentIds: result!.newProjectAgentIds }); });
+    expect(calls.map((c) => c.url)).toEqual(['/api/projects/proj-new/access', '/api/projects/proj-new/access']);
+    expect(calls.map((c) => (c.body as { member_id: string }).member_id)).toEqual(['a-1', 'a-2']);
+    expect((calls[0]!.body as Record<string, unknown>)).toEqual({ member_id: 'a-1', org_member_id: null, permission: 'granted' });
+    expect(result!.createProjectOpen).toBe(false);
+    expect(result!.createProjectNotice).toBeNull();
+    expect(result!.newProjectAgentIds).toEqual([]);
+  });
+
+  it('nothing checked → no access call at all (as before this story)', async () => {
+    const calls = stubCreateAndAccess(() => 201);
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { await result!.createProject('결제 개편', ''); });
+    expect(calls).toEqual([]);
+    expect(result!.createProjectNotice).toBeNull();
+  });
+
+  it('409 (already granted) counts as done; a 400 and a thrown fetch count as failed — the project stays, the notice names the count', async () => {
+    const calls = stubCreateAndAccess((id) => (id === 'a-dup' ? 409 : id === 'a-bad' ? 400 : 201));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { await result!.createProject('결제 개편', '', { agentIds: ['a-ok', 'a-dup', 'a-bad'] }); });
+    expect(calls.length).toBe(3);
+    expect(result!.createProjectOpen).toBe(false); // the project is real — closed and switched as on success
+    expect(result!.createProjectNotice).toBe('프로젝트는 만들었지만 에이전트 1개를 팀에 넣지 못했어요 — 프로젝트 설정 › 접근 권한에서 다시 해 주세요.'); // Yuna §G-3 (4680/4677): «팀에 넣기» · «개» · the tab's own name
+    expect(result!.createProjectError).toBeNull();
+    // Yuna §F (non-blocking): the notice goes the next time the dialog opens
+    await act(async () => { result!.setCreateProjectOpen(true); });
+    expect(result!.createProjectNotice).toBeNull();
+  });
+
+  it('opening the dialog clears the checked ids (every box off each time)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) })));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { result!.setNewProjectAgentIds(['a-1']); });
+    await act(async () => { result!.setCreateProjectOpen(true); });
+    expect(result!.newProjectAgentIds).toEqual([]);
+  });
+
+  it('[Kadir codex · PO (나)] an org member (not owner/admin): canGrantAccess is false and no grant is sent even with ids — the server would refuse each one (403) and the notice would name a screen the member cannot open', async () => {
+    const calls = stubCreateAndAccess(() => 201);
+    const MEMBER_ORGS: OrgSwitcherItem[] = [{ orgId: 'org-moonklabs', orgName: '뭉클랩', orgSlug: 'moonklabs', role: 'member' }];
+    function MemberComp() {
+      const hook = useUnifiedSwitcher({ orgs: MEMBER_ORGS, currentOrgId: 'org-moonklabs', projects: STALE_PROJECTS, currentProjectId: undefined });
+      useEffect(() => { result = hook; });
+      return null;
+    }
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><MemberComp /></NextIntlClientProvider>); });
+    expect(result!.canGrantAccess).toBe(false);
+    await act(async () => { await result!.createProject('결제 개편', '', { agentIds: ['a-1', 'a-2'] }); });
+    expect(calls).toEqual([]);
+    expect(result!.createProjectOpen).toBe(false); // the project itself is made and switched to, as before
+    expect(result!.createProjectNotice).toBeNull();
+  });
+
+  it('an org admin: canGrantAccess is true (the list is drawn · the grants go)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) })));
+    await act(async () => { root.render(<TestComp />); });
+    expect(result!.canGrantAccess).toBe(true);
+  });
+
+  it('a failed make (403) grants nothing', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') calls.push(url);
+      return { ok: false, status: 403, json: async () => ({}) };
+    }));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { await result!.createProject('결제 개편', '', { agentIds: ['a-1'] }); });
+    expect(calls).toEqual(['/api/projects']);
+    expect(result!.createProjectError).toBeTruthy();
+  });
+});
+
+// [SID:4681] (D3 · piece ③) — the folder picked in the app: sent as the project's `workdir_hint` (text · ①) and kept on this Mac by the
+// app (`setProjectFolder`, right after the make, before the grants); not kept (`{problem}` · no app · a throw) = the project stays and
+// its own notice says so (Yuna §H — apart from the grants' line); no folder = neither; the folder is dropped when the dialog opens.
+describe('useUnifiedSwitcher — 새 프로젝트의 이 컴퓨터 폴더 (story #4681 ③)', () => {
+  const FOLDER = '/Users/t/work/결제';
+  function stub(accessStatus = 201) {
+    const order: string[] = [];
+    const bodies: Record<string, unknown>[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/projects' && init?.method === 'POST') {
+        order.push('make');
+        bodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        return { ok: true, json: async () => ({ data: { id: 'proj-new' } }) };
+      }
+      if (/^\/api\/projects\/.+\/access$/.test(url) && init?.method === 'POST') {
+        order.push('grant');
+        return { ok: accessStatus < 300, status: accessStatus, json: async () => ({}) };
+      }
+      return { ok: true, json: async () => ({ data: { ok: true } }) };
+    }));
+    const setProjectFolder = vi.fn<(a: { projectId: string; path: string }) => Promise<{ ok: true } | { problem: string }>>(async (a) => { order.push(`keep:${a.projectId}:${a.path}`); return { ok: true as const }; });
+    desktopAppRef.current = { setProjectFolder };
+    return { order, bodies, setProjectFolder };
+  }
+
+  it('a picked folder → workdir_hint in the make · setProjectFolder once with the new id, after the make and before the grants · no notice · the folder is dropped', async () => {
+    const s = stub();
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { result!.setNewProjectFolder(FOLDER); });
+    expect(result!.newProjectFolder).toBe(FOLDER);
+    await act(async () => { await result!.createProject('결제 개편', '', { agentIds: ['a-1'] }); });
+    // PO 5067: the server gets home as `~` (the Mac user's name never leaves this computer) — the app's own hand gets the absolute path
+    expect(s.bodies[0]!.workdir_hint).toBe('~/work/결제');
+    expect(String(s.bodies[0]!.workdir_hint).startsWith('~/')).toBe(true);
+    expect(JSON.stringify(s.bodies[0])).not.toContain('/Users/');
+    expect(s.order).toEqual(['make', `keep:proj-new:${FOLDER}`, 'grant']);
+    expect(s.setProjectFolder).toHaveBeenCalledWith({ projectId: 'proj-new', path: FOLDER });
+    expect(result!.createProjectFolderNotice).toBeNull();
+    expect(result!.createProjectNotice).toBeNull();
+    expect(result!.newProjectFolder).toBeNull();
+    expect(result!.createProjectOpen).toBe(false);
+  });
+
+  it('opts.folder wins over the state (the dialog passes what it shows)', async () => {
+    const s = stub();
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { await result!.createProject('결제 개편', '', { folder: '/Users/t/other' }); });
+    expect(s.bodies[0]!.workdir_hint).toBe('~/other');
+    expect(s.setProjectFolder).toHaveBeenCalledWith({ projectId: 'proj-new', path: '/Users/t/other' });
+  });
+
+  it('not kept ({problem} · a throw · no app): the project stays, closed and switched; the folder notice says so (Yuna §H) — and the grants\' line stays its own', async () => {
+    const s = stub(400);
+    s.setProjectFolder.mockImplementationOnce(async () => ({ problem: 'not_picked' }));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { await result!.createProject('결제 개편', '', { agentIds: ['a-1'], folder: FOLDER }); });
+    expect(result!.createProjectOpen).toBe(false);
+    expect(result!.createProjectError).toBeNull();
+    expect(result!.createProjectFolderNotice).toBe('프로젝트는 만들었지만 폴더는 이 컴퓨터에 남기지 못했어요 — 에이전트를 시작할 때 앱에서 폴더를 고를 수 있어요.');
+    expect(result!.createProjectNotice).toBe('프로젝트는 만들었지만 에이전트 1개를 팀에 넣지 못했어요 — 프로젝트 설정 › 접근 권한에서 다시 해 주세요.');
+    // a throw
+    const t = stub();
+    t.setProjectFolder.mockImplementationOnce(async () => { throw new Error('bridge gone'); });
+    await act(async () => { await result!.createProject('결제 개편 2', '', { folder: FOLDER }); });
+    expect(result!.createProjectFolderNotice).toBe('프로젝트는 만들었지만 폴더는 이 컴퓨터에 남기지 못했어요 — 에이전트를 시작할 때 앱에서 폴더를 고를 수 있어요.');
+    // no app (a folder with no bridge cannot happen from the field — the hook still does not pretend it was kept)
+    stub();
+    desktopAppRef.current = null;
+    await act(async () => { await result!.createProject('결제 개편 3', '', { folder: FOLDER }); });
+    expect(result!.createProjectFolderNotice).toBe('프로젝트는 만들었지만 폴더는 이 컴퓨터에 남기지 못했어요 — 에이전트를 시작할 때 앱에서 폴더를 고를 수 있어요.');
+    // the next open clears it
+    await act(async () => { result!.setCreateProjectOpen(true); });
+    expect(result!.createProjectFolderNotice).toBeNull();
+  });
+
+  it('no folder: no workdir_hint in the make · setProjectFolder never called (in the app too)', async () => {
+    const s = stub();
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { await result!.createProject('결제 개편', ''); });
+    expect('workdir_hint' in s.bodies[0]!).toBe(false);
+    expect(s.setProjectFolder).not.toHaveBeenCalled();
+    expect(result!.createProjectFolderNotice).toBeNull();
+  });
+
+  it('a failed make keeps nothing · opening the dialog drops a picked folder', async () => {
+    const s = stub();
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 403, json: async () => ({}) })));
+    await act(async () => { root.render(<TestComp />); });
+    await act(async () => { await result!.createProject('결제 개편', '', { folder: FOLDER }); });
+    expect(s.setProjectFolder).not.toHaveBeenCalled();
+    expect(result!.createProjectFolderNotice).toBeNull();
+    await act(async () => { result!.setNewProjectFolder(FOLDER); });
+    await act(async () => { result!.setCreateProjectOpen(true); });
+    expect(result!.newProjectFolder).toBeNull();
   });
 });
 

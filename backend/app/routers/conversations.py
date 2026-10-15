@@ -383,6 +383,8 @@ def _total_unread_count_stmt(member_id: uuid.UUID):
 async def _fetch_conversation_participants(
     conv_ids: list[uuid.UUID],
     db: AsyncSession,
+    *,
+    device_org_id: uuid.UUID | None = None,
 ) -> dict[uuid.UUID, list[dict]]:
     """story #2009: conversation(들)의 participants 배치 조회 — list_conversations의 기존
     N+1 방지 배치 로직을 단건(`get_conversation`)에서도 재사용하도록 추출(로직 복제 금지, AC).
@@ -390,6 +392,10 @@ async def _fetch_conversation_participants(
     반환 dict shape는 두 엔드포인트가 항상 동일 JSON을 내려주도록 고정:
     `{"member_id", "name", "avatar_url", "type", "runtime_type"}` (list_conversations의
     participants 항목과 byte-identical — FE 파싱 일관성).
+
+    story 4675 (F2) — `device_name`: the computer an agent participant is bound to now, read only when the caller passes its
+    org (`device_org_id`) and only for that org's setups — a participant from another organization gets null, as does a
+    human or an agent with no live desktop key.
     """
     if not conv_ids:
         return {}
@@ -409,6 +415,12 @@ async def _fetch_conversation_participants(
             select(TeamMember.id, TeamMember.runtime_type).where(TeamMember.id.in_(all_member_ids))
         )).all()
         runtime_type_map = {r.id: r.runtime_type for r in rt_rows}
+
+    devices: dict[uuid.UUID, dict] = {}
+    if all_member_ids and device_org_id is not None:
+        from app.services.desktop_commands import bound_devices
+
+        devices = await bound_devices(db, org_id=device_org_id, member_ids=all_member_ids)
 
     conv_participants: dict[uuid.UUID, list[dict]] = defaultdict(list)
     for r in p_rows:
@@ -431,6 +443,7 @@ async def _fetch_conversation_participants(
             "type": resolved.type if resolved else "human",
             "runtime_type": runtime_type_map.get(r.member_id),
             "resolved": resolved.resolved if resolved else False,
+            "device_name": (devices.get(r.member_id) or {}).get("device_name"),
         })
     return conv_participants
 
@@ -562,17 +575,32 @@ def _build_message_summary(content: str | None, sender_name: str | None, has_att
     return f"{name}: {preview}" if preview else name
 
 
+def sender_org_id_of(sender: "ResolvedMember | TeamMember | None") -> str | None:
+    """story 4649 — 보낸 이가 속한 조직(사람·에이전트 모두). 없거나 주인 없는 sentinel(uuid 0)이면 None.
+    발신 때 서버가 이 행에서 만든 값만 쓴다 — 이벤트 payload에 실린 같은 이름의 값은 읽지 않는다."""
+    org = getattr(sender, "org_id", None)
+    if not isinstance(org, uuid.UUID) or org == uuid.UUID(int=0):
+        return None
+    return str(org)
+
+
 def _msg_payload(
     msg: ConversationMessage, sender: "ResolvedMember | TeamMember | None",
     *, references: list[dict[str, str]] | None = None,
     blocked_sender_ids: set[uuid.UUID] | None = None,
     sender_runtime_type: str | None = None,
+    viewer_member_id: uuid.UUID | None = None,
 ) -> dict:
     # story #2319 미완(미르코 dev 라이브 실측 2026-08-02) — tombstone인데 attachments가 응답에
     # 그대로 남아 첨부(영상 등)가 계속 재생됐다. AC③(오발송 스크럽) 근거가 이걸로 무너진다 —
     # 여기서 빈 배열로 덮는다(실제 근본은 attachments.py authorize의 belongs 쿼리에 deleted_at
     # 필터를 추가한 것 — 이 payload 필터는 FE가 애초에 못 보게 하는 2차 방어).
     attachments = (msg.attachments if isinstance(msg.attachments, list) else []) if msg.deleted_at is None else []
+    # story 4646 — 읽는 길을 응답에 안내(저장 데이터는 안 바꿈): 각 첨부 항목에 index와 읽는 도구 이름
+    attachments = [
+        {**a, "index": i, "read_with": "sprintable_get_chat_attachment"} if isinstance(a, dict) else a
+        for i, a in enumerate(attachments)
+    ]
     payload = {
         "id": str(msg.id),
         "conversation_id": str(msg.conversation_id),
@@ -586,6 +614,8 @@ def _msg_payload(
         "mentioned_ids": [str(m) for m in (msg.mentioned_ids or [])],
         # E-FILE S1: 첨부 직렬화 (SSE + GET messages 공통). list 아니면 [](레거시/None/mock 안전).
         "attachments": attachments,
+        # story 4649 — 데몬이 자기 조직과 대조하는 칸. 프레임 최상위로 올라온다(라이브 푸시 · 백필 둘 다).
+        "sender_org_id": sender_org_id_of(sender),
         "sender": {
             "id": str(sender.id),
             "name": sender.name,
@@ -622,6 +652,14 @@ def _msg_payload(
     # 모르는 SSE/write-response 경로는 넘기지 않아 키 자체가 없다(기존 references 규율 재사용).
     if blocked_sender_ids is not None:
         payload["is_blocked_sender"] = bool(sender and sender.id in blocked_sender_ids)
+    # story #4430 — how many participants a block kept this message from, shown to its sender only (never to the blocker
+    # or anyone else — a count, never who: PO 16:20Z). Read paths pass the viewer; the send answer carries its own
+    # `delivery` block instead.
+    # read like _activation_payload: loaded values only (__dict__), never a lazy load inside this sync builder
+    _meta = (getattr(msg, "__dict__", None) or {}).get("msg_metadata")
+    withheld = _meta.get(DELIVERY_WITHHELD_KEY) if isinstance(_meta, dict) else None
+    if withheld and viewer_member_id is not None and msg.sender_id == viewer_member_id:
+        payload["delivery_withheld"] = withheld
     # E-ACTIVATION S1: typed activation 필드 top-level 노출(없으면 None). connector 헤더 주입용.
     payload.update(_activation_payload(msg))
     # story #2604 P2: approval-request 카드 스키마 top-level 노출(없으면 None·additive).
@@ -635,6 +673,10 @@ def _msg_payload(
 
 
 _ACTIVATION_KINDS = frozenset({"request", "handoff", "result", "ack"})
+
+# story #4430 — a message a block kept from some participants: the metadata key on the sent line, and the closed reason.
+DELIVERY_WITHHELD_KEY = "delivery_withheld"
+DELIVERY_WITHHELD_REASON_BLOCKED = "recipient_blocked_sender"
 
 
 def _activation_meta(req: "SendMessageRequest") -> dict | None:
@@ -756,19 +798,23 @@ def _server_command_payload(msg: "ConversationMessage") -> dict:
     return {"server_command": server_command if isinstance(server_command, dict) else None}
 
 
-async def _viewer_blocked_sender_ids(auth: AuthContext, org_id: uuid.UUID, db: AsyncSession) -> set[uuid.UUID]:
-    """story #2349 — 읽기 경로 전용. viewer(현재 caller)가 차단한 member_id 집합.
+async def _viewer_blocked_sender_ids(
+    auth: AuthContext, org_id: uuid.UUID, db: AsyncSession,
+) -> tuple[set[uuid.UUID], uuid.UUID | None]:
+    """story #2349 — 읽기 경로 전용. viewer(현재 caller)가 차단한 member_id 집합 + viewer 자신의 member id(story #4430 —
+    보낸 사람에게만 보이는 `delivery_withheld`용 · 못 풀면 None).
 
-    grant-only 휴먼(team_member 행 없음)은 차단 기능을 아직 못 쓴다(user_blocks.py의 동일
-    경계) — 여기서는 read 경로가 안 깨지게 빈 집합으로 조용히 폴백한다(차단 0건과 동치).
+    story #4444 — a grant-only person (no team-member row) can block now too, so their blocks mask as well: the key is
+    their member id either way.
     """
     resolved = await _resolve_member(auth, org_id, db)
-    if not isinstance(resolved, TeamMember):
-        return set()
+    viewer_id = getattr(resolved, "id", None)
+    if viewer_id is None:
+        return set(), None
     rows = (await db.execute(
-        select(UserBlock.blocked_member_id).where(UserBlock.blocker_member_id == resolved.id)
+        select(UserBlock.blocked_member_id).where(UserBlock.blocker_member_id == viewer_id)
     )).scalars().all()
-    return set(rows)
+    return set(rows), viewer_id
 
 
 async def _dispatch_conversation_event(
@@ -826,12 +872,12 @@ async def _dispatch_conversation_event(
                 "attachment_context SSE 주입 실패 message_id=%s", msg.id, exc_info=True,
             )
 
-    # 참여자 조회
-    rows = (await db.execute(
-        select(ConversationParticipant.member_id)
-        .where(ConversationParticipant.conversation_id == conversation.id)
-    )).all()
-    participant_ids = {r[0] for r in rows} - {sender.id} - (exclude_ids or set())
+    # 참여자 조회 — story #4500: this org's conversation · this org's members only
+    from app.services.member_resolver import conversation_member_ids_in_org
+
+    participant_ids = (
+        await conversation_member_ids_in_org(db, conversation.id, org_id)
+    ) - {sender.id} - (exclude_ids or set())
 
     if not participant_ids:
         return []
@@ -992,12 +1038,10 @@ async def _dispatch_human_intervention_event(
     # 단독으론 org_member-only 휴먼(SSOT 전환 이후 org 다수)이 조용히 human_targets에서
     # 빠졌다(chain-expired 개입 알림이 그 휴먼에게 영원히 안 감). is_human_member_condition
     # (member_resolver.py, #3627과 같은 판정자)으로 통일.
-    human_targets = set((await db.execute(
-        select(ConversationParticipant.member_id).where(
-            ConversationParticipant.conversation_id == conversation.id,
-            is_human_member_condition(ConversationParticipant.member_id),
-        )
-    )).scalars().all())
+    # story #4500: this org's conversation · this org's members only
+    from app.services.member_resolver import conversation_member_ids_in_org
+
+    human_targets = await conversation_member_ids_in_org(db, conversation.id, org_id, humans_only=True)
     if not human_targets:
         return []
 
@@ -1251,11 +1295,27 @@ class ConversationResponse(BaseModel):
     # story #4179 — free_response(#2603 멘션 전용 라우팅의 방 단위 예외)가 PATCH 응답에만 있어
     # 웹 토글이 새로 열 때마다 off로 읽혔다(그 상태로 다시 저장하면 꺼짐 — 데이터 훼손). additive.
     free_response: bool = False
+    # story #4631 C — the flood block of this conversation, while one is open (else absent): when it opened, how it is released
+    # (the org's release_mode) and whether the caller may release it (a human org owner/admin — the release API's own rule).
+    circuit_breaker: "CircuitBreakerState | None" = None
+
+
+class CircuitBreakerState(BaseModel):
+    opened_at: datetime
+    release_mode: str
+    can_release: bool
+    # auto only: after how many quiet minutes agents may send again (window × 2 · the server's value)
+    auto_release_after_minutes: int | None = None
+    # story #4657: nobody in the org may release it (no active owner/admin) — the band says so instead of «ask an admin»
+    no_release_admin: bool = False
+
+
+ConversationResponse.model_rebuild()
 
 
 # E-FILE S1: 채팅 첨부. GCS 기록은 FE-proxy(uploadToGcs)가 처리하고 BE는 URL+메타만 저장.
 _MAX_ATTACHMENTS = 10
-_MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024  # 100MB (메타 sanity 상한)
+from app.services.attachment_limits import HUMAN_ATTACHMENT_MAX_BYTES as _MAX_ATTACHMENT_SIZE  # 100MB · 한 곳 정의(story 4646)
 
 # E-MCP-OPT S2(bbfd24ba)/S6: MCP(비-브라우저) 클라이언트용 JSON/base64 업로드 공용 프리미티브
 # (S6 부터 story/doc 도 공유 — `app/services/mcp_attachment_upload.py` 참조).
@@ -1319,6 +1379,9 @@ class MessageAttachment(BaseModel):
 class SendMessageRequest(BaseModel):
     content: str
     mentioned_ids: list[uuid.UUID] = []
+    # story #4440 (PO 19:37Z) — a token the sending tab makes before sending; returned only on the sender's own echo, so that
+    # tab knows its own message even when the echo arrives before the send answer. Never stored.
+    client_nonce: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,64}$")
     thread_id: uuid.UUID | None = None
     attachments: list[MessageAttachment] = []
     # E-ACTIVATION S1 (typed activation · additive): 발신자가 «응답 의무»를 구조로 선언.
@@ -1534,7 +1597,7 @@ async def list_conversations(
 
     # participants 배치 조회 (N+1 방지) — story #2009: get_conversation과 공유하는 헬퍼로 추출.
     conv_id_list = [c.id for c in convs]
-    conv_participants = await _fetch_conversation_participants(conv_id_list, db)
+    conv_participants = await _fetch_conversation_participants(conv_id_list, db, device_org_id=org_id)
 
     # story #1976: unread_count 배치 — 단일 JOIN+GROUP BY(N+1 방지, §4-2). INNER JOIN이라
     # unread=0 대화는 결과행 없음 → dict.get(id, 0)으로 자연 0 처리.
@@ -1767,7 +1830,7 @@ async def list_recent_conversations_outside_project(
     # 관례 그대로)인데 이 엔드포인트가 participants를 안 내려줘 FE가 조립할 재료 자체가 없었다
     # ("님과의 대화"라는 접미 조각만 그대로 노출되던 원인). limit≤5라 배치조회 비용 무시 가능
     # — list_conversations/get_conversation과 동일 헬퍼(_fetch_conversation_participants) 재사용.
-    conv_participants = await _fetch_conversation_participants([conv.id for conv, *_ in rows], db)
+    conv_participants = await _fetch_conversation_participants([conv.id for conv, *_ in rows], db, device_org_id=org_id)
 
     return {
         "data": [
@@ -1853,8 +1916,16 @@ async def get_conversation(
         )).scalar_one()
     # story #2009: 단건 조회도 list_conversations와 동일 participants shape을 자체 포함 —
     # FE가 30건 캡 있는 list 엔드포인트에 기대던 workaround(.find() miss 버그) 제거.
-    participants_map = await _fetch_conversation_participants([conversation_id], db)
+    participants_map = await _fetch_conversation_participants([conversation_id], db, device_org_id=org_id)
     resp.participants = participants_map.get(conversation_id, [])
+    # story #4631 C: the open flood block, for the conversation's banner and its [차단 해제]
+    from app.services.chain_escalation import open_circuit_breaker_state
+
+    breaker = await open_circuit_breaker_state(
+        db, conversation_id=conversation_id, org_id=org_id,
+        caller_user_id=uuid.UUID(auth.user_id) if sender.type == "human" else None,
+    )
+    resp.circuit_breaker = CircuitBreakerState(**breaker) if breaker else None
     return resp
 
 
@@ -2060,13 +2131,14 @@ async def list_messages(
     refs_by_msg = await fetch_stored_references(
         db, org_id=org_id, source_type="chat_message", source_ids=[m.id for m in msgs],
     )
-    blocked_sender_ids = await _viewer_blocked_sender_ids(auth, org_id, db)
+    blocked_sender_ids, viewer_member_id = await _viewer_blocked_sender_ids(auth, org_id, db)
 
     data = [
         _msg_payload(
             m, member_map.get(m.sender_id), references=refs_by_msg.get(m.id, []),
             blocked_sender_ids=blocked_sender_ids,
             sender_runtime_type=runtime_type_map.get(m.sender_id) if m.sender_id else None,
+            viewer_member_id=viewer_member_id,
         )
         for m in msgs
     ]
@@ -2111,11 +2183,12 @@ async def get_message(
     refs_by_msg = await fetch_stored_references(
         db, org_id=org_id, source_type="chat_message", source_ids=[msg.id],
     )
-    blocked_sender_ids = await _viewer_blocked_sender_ids(auth, org_id, db)
+    blocked_sender_ids, viewer_member_id = await _viewer_blocked_sender_ids(auth, org_id, db)
     return _msg_payload(
         msg, sender_map.get(msg.sender_id), references=refs_by_msg.get(msg.id, []),
         blocked_sender_ids=blocked_sender_ids,
         sender_runtime_type=runtime_type_map.get(msg.sender_id) if msg.sender_id else None,
+        viewer_member_id=viewer_member_id,
     )
 
 
@@ -2222,13 +2295,14 @@ async def list_message_replies(
     refs_by_msg = await fetch_stored_references(
         db, org_id=org_id, source_type="chat_message", source_ids=[m.id for m in msgs],
     )
-    blocked_sender_ids = await _viewer_blocked_sender_ids(auth, org_id, db)
+    blocked_sender_ids, viewer_member_id = await _viewer_blocked_sender_ids(auth, org_id, db)
 
     data = [
         _msg_payload(
             m, member_map.get(m.sender_id), references=refs_by_msg.get(m.id, []),
             blocked_sender_ids=blocked_sender_ids,
             sender_runtime_type=runtime_type_map.get(m.sender_id) if m.sender_id else None,
+            viewer_member_id=viewer_member_id,
         )
         for m in msgs
     ]
@@ -2407,7 +2481,11 @@ async def release_circuit_breaker_endpoint(
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    if not await is_org_owner_or_admin(db, uuid.UUID(auth.user_id), org_id):
+    # story #4631 (Kadir 5016): an active owner/admin only — a deactivated one releases nothing (the #4624 rule); the conversation
+    # read's can_release asks the same question, so the band's button and this route never disagree
+    from app.services.chain_escalation import may_release_circuit_breaker
+
+    if not await may_release_circuit_breaker(db, user_id=uuid.UUID(auth.user_id), org_id=org_id):
         raise HTTPException(
             status_code=403,
             detail="서킷브레이커 해제는 org owner/admin만 가능합니다.",
@@ -2580,9 +2658,13 @@ async def send_message_core(
     # 대화 안에서 가능). breaker 행은 human-less 대화에서만 열리므로(open 호출부 조건) 이
     # 조회 결과가 있다는 것 자체가 "이 대화는 human-less"를 함의 — 별도 human 유무 쿼리 불요.
     if sender.type == "agent":
-        from app.services.chain_escalation import get_open_circuit_breaker_id
+        from app.services.chain_escalation import get_open_circuit_breaker_id, release_if_quiet
 
         open_breaker_id = await get_open_circuit_breaker_id(db, conversation_id)
+        # story #4631 (PO 고름 A): release_mode='auto'의 자동 해제는 여기서 — 차단 중엔 저장 뒤 평가가 돌지 않아 전엔 영영
+        # 안 풀렸다. 조용해진 auto org의 차단이면 닫고 이 발신은 통과(manual · 조건 미달은 그대로 423).
+        if open_breaker_id is not None and await release_if_quiet(db, org_id=org_id, conversation_id=conversation_id):
+            open_breaker_id = None
         if open_breaker_id is not None:
             # story #3933 AC3 — 이 자리는 사람이 아니라 «차단된 에이전트 자신»이 읽는다
             # (MCP send_chat_message 호출자). `error` 키를 `code`로 바꿔 api_client.py::
@@ -2595,23 +2677,27 @@ async def send_message_core(
             # "circuit_breaker_open"이면 api_client.py::_split_code_message의 코드
             # 인식 정규식(`^[A-Z][A-Z0-9_]*: `)이 못 잡아 code가 안 뽑힌다 — 값 자체를
             # 새로 발명하는 게 아니라 이 레포 전체가 이미 쓰는 대소문자 관례로 맞추는 것.
-            # 원문 리터럴은 개명 前 그대로 한 덩어리 유지(인접 문자열 리터럴 결합 —
-            # `scripts/verify_no_new_korean_user_strings.py`가 AST `ast.Constant` 단위로
-            # 세므로 이렇게 두 줄로 이어 써도 파서가 하나의 상수로 합친다) — message/hint
-            # 분리는 런타임 `.split(" — ", 1)`로만 한다. 리터럴 자체를 둘로 쪼개면 그
-            # 가드의 "baseline can only shrink" 순증 체크가 파일당 항목 수 증가로 잡는다
-            # (CI 실측, PR#4357 — 5→6건 FAIL). 새 낱말은 여전히 0.
-            _circuit_breaker_notice = (
-                "폭주 감지로 이 대화의 agent 발신이 일시 차단되었습니다 — "
-                "org owner/admin의 해제 또는 자동 해소를 기다려주세요."
+            # story #4631 (Yuna «4631» §5): the words from the shared catalog in the org's language, and true to how this org's
+            # block is released — the old hint promised a «자동 해소» a manual org never gives, and said nothing of sending again
+            # (each retry is another refused turn). manual → wait for an organization admin · auto → about {n} quiet minutes.
+            from app.services.chain_escalation import _get_org_config, auto_release_after_minutes
+            from app.services.i18n_catalog import t
+            from app.services.org_locale import resolve_org_locale
+
+            _locale = await resolve_org_locale(db, org_id)
+            _enabled, _window, _threshold, _mode, _release_mode = await _get_org_config(db, org_id)
+            _quiet_minutes = auto_release_after_minutes(_window)
+            _cb_hint = (
+                t("conversation.agents_paused_hint_auto_one" if _quiet_minutes == 1 else "conversation.agents_paused_hint_auto",
+                  _locale, n=_quiet_minutes)
+                if _release_mode == "auto" else t("conversation.agents_paused_hint_manual", _locale)
             )
-            _cb_message, _cb_hint = _circuit_breaker_notice.split(" — ", 1)
             raise HTTPException(
                 status_code=423,
                 detail={
                     "code": "CIRCUIT_BREAKER_OPEN",
-                    "message": _cb_message,
-                    "hint": _cb_hint.rstrip("."),
+                    "message": t("conversation.agents_paused_message", _locale),
+                    "hint": _cb_hint,
                     "conversation_id": str(conversation_id),
                     "circuit_breaker_id": str(open_breaker_id),
                 },
@@ -2640,15 +2726,11 @@ async def send_message_core(
     # E-MEMBER-SSOT Phase 0: 저장·DM포크·group 멘션 발송 모든 경로에 org 필터를 한 번 적용.
     #   grant-only 휴먼(org_member) 멘션은 포함하고, cross-org UUID는 저장/발송 전에 제거.
     #   group conversation은 fork 분기가 없어 별도 필터가 누락돼 있던 것을 여기서 함께 막는.
-    valid_mentioned_ids: list[uuid.UUID] = []
-    if body.mentioned_ids:
-        _org_member_ids = await filter_org_member_ids(set(body.mentioned_ids), org_id, db)
-        # 원본 순서 보존 + 중복 제거
-        _seen: set[uuid.UUID] = set()
-        for mid in body.mentioned_ids:
-            if mid in _org_member_ids and mid not in _seen:
-                _seen.add(mid)
-                valid_mentioned_ids.append(mid)
+    # story #4505: an old alias id resolves to the living member first (4500's recipient rule), then the org check — the
+    # mention is stored and sent under the canonical id (원본 순서 보존 + 중복 제거)
+    from app.services.member_resolver import org_mention_ids
+
+    valid_mentioned_ids: list[uuid.UUID] = await org_mention_ids(body.mentioned_ids or [], org_id, db)
 
     # story #2646(2026-08-14, 은퇴): 본문 `@handle` 텍스트 파싱(story #2603 P0,
     # handle_mention_parser.py)을 여기서 mentioned_ids와 합집합하던 블록을 제거했다 —
@@ -2751,14 +2833,14 @@ async def send_message_core(
     # 첨부는 기존 100MB/10개 한도만 적용받는다·회귀0).
     if body.attachments:
         mcp_origin = [a for a in body.attachments if _is_mcp_upload_object_path(a.url)]
-        if len(mcp_origin) > _MCP_MAX_ATTACHMENTS or (
-            sum(a.size for a in mcp_origin) > _MCP_MAX_TOTAL_ATTACHMENT_BYTES
-        ):
+        mcp_total_bytes = sum(a.size for a in mcp_origin)
+        if len(mcp_origin) > _MCP_MAX_ATTACHMENTS or mcp_total_bytes > _MCP_MAX_TOTAL_ATTACHMENT_BYTES:
             raise HTTPException(
                 status_code=400,
-                detail=(
+                detail=mcp_attachment_upload.mcp_limit_exceeded_detail(
                     f"mcp attachments exceed declared limit "
-                    f"(max {_MCP_MAX_ATTACHMENTS} files / {_MCP_MAX_TOTAL_ATTACHMENT_BYTES} bytes total)"
+                    f"(max {_MCP_MAX_ATTACHMENTS} files / {_MCP_MAX_TOTAL_ATTACHMENT_BYTES} bytes total)",
+                    files=len(mcp_origin), total_bytes=mcp_total_bytes,
                 ),
             )
 
@@ -2971,6 +3053,29 @@ async def send_message_core(
     except Exception:
         logger.warning("user_blocker_ids lookup failed message_id=%s — fail-open(no exclusion)", msg.id, exc_info=True)
 
+    # story #4430 — the participants this message will not reach because they blocked the sender: never a quiet success.
+    # A count and a closed reason code, never who (PO 16:20Z — blocking is a people's feature too; «who blocked me» would
+    # break the blocker's quiet). Kept on the sent line (metadata) for the sender's later reads, and in the send answer.
+    withheld_delivery: dict | None = None
+    if user_blocker_ids:
+        _others = set((await db.execute(
+            select(ConversationParticipant.member_id).where(
+                ConversationParticipant.conversation_id == conv.id,
+                ConversationParticipant.member_id != sender.id,
+            )
+        )).scalars().all())
+        _withheld_n = len(_others & user_blocker_ids)
+        if _withheld_n:
+            # the room's kind lets the sender's tools word it right (a 1:1 «the recipient» vs a group count) — the sender
+            # already knows it, so it tells nothing about who blocked (PO 16:49Z). Counted from the participants, not the
+            # room's `type` column: a room typed "dm" can hold three or more people, and «the recipient» would be untrue
+            # there (PO 17:18Z).
+            withheld_delivery = {
+                "withheld_count": _withheld_n, "reason": DELIVERY_WITHHELD_REASON_BLOCKED,
+                "conversation_type": "dm" if len(_others) == 1 else "group",
+            }
+            msg.msg_metadata = {**(msg.msg_metadata or {}), DELIVERY_WITHHELD_KEY: withheld_delivery}
+
     # E-EVENT-1CONFIG + story #2620(P3, DeliveryDecision 단일화): webhook 전달 대상을 요청
     # 트랜잭션서 1회 산출(SSOT) — SSE-skip 결정과 실제 webhook delivery 가 **같은 snapshot**을
     # 쓰게 해 TOCTOU silent loss 를 차단한다(산티아고 Finding 1). 산출된 target 을 그대로
@@ -3081,14 +3186,20 @@ async def send_message_core(
     # 일어나는 건 group conversation에서 기존 비참가자를 멘션하는 경우뿐이다.
     if msg.mentioned_ids:
         mention_targets = set(msg.mentioned_ids) - {sender.id} - discord_exclude_ids - blocked_agent_ids - user_blocker_ids
+        # story #4519 — who got their conversation:mention Event (it is their bell item): the notification below then writes
+        # none for them, or one mention showed twice on the bell (and the copy ignored a muted conversation). Set only after
+        # the savepoint held — a rolled-back Event is no bell item.
+        mention_evented: frozenset[uuid.UUID] = frozenset()
         if mention_targets:
             try:
                 async with db.begin_nested():
-                    pending_sse_pushes += await _dispatch_mention_events(
+                    mention_pushes = await _dispatch_mention_events(
                         db, conv, msg, org_id, sender, mention_targets,
                         webhook_covered_ids=webhook_covered_ids,
                         references=msg_references,
                     )
+                pending_sse_pushes += mention_pushes
+                mention_evented = frozenset(uuid.UUID(pid) for pid, _ in mention_pushes)
             except Exception:
                 logger.warning("mention event dispatch failed conversation_id=%s", conversation_id, exc_info=True)
 
@@ -3136,6 +3247,7 @@ async def send_message_core(
                             },
                             # story #2460(§6 봉합②): 개인 webhook·Expo push 실배달을 요청 트랜잭션 밖으로.
                             via_outbox=True,
+                            human_event_recorded_for=mention_evented,  # story #4519 — their bell item is the conversation:mention above
                         )
             except Exception:
                 logger.warning(
@@ -3217,6 +3329,20 @@ async def send_message_core(
             ))
         except Exception:
             logger.warning("process_event failed for message.created message_id=%s", msg.id, exc_info=True)
+
+    # story #4440 — the person who sent it gets it on their other tabs and devices too: one transient push to all their
+    # connections (no Event row — nothing unread, no notification), with what only the sender sees (`delivery_withheld`) and
+    # the sending tab's nonce. An agent sender is still left out (its own message must not wake it). The sending tab drops
+    # its own echo by the nonce or the id.
+    if sender.type != "agent":
+        _echo = {
+            "event_type": "conversation.message_created",
+            **_msg_payload(msg, sender, references=msg_references, viewer_member_id=sender.id),
+            "recipient_id": str(sender.id),
+        }
+        if body.client_nonce:
+            _echo["client_nonce"] = body.client_nonce
+        pending_sse_pushes.append((str(sender.id), _echo))
 
     # commit 완료 후 SSE push — Event가 DB에 커밋된 상태에서 push해야 race condition 없음
     def _push_pending_sse() -> None:
@@ -3359,6 +3485,9 @@ async def send_message_core(
     if fork_info:
         response["forked"] = True
         response["forked_conversation_id"] = fork_info["forked_conversation_id"]
+    # story #4430 — the participants a block kept this message from (a count · a closed reason); absent when none.
+    if withheld_delivery:
+        response["delivery"] = withheld_delivery
     # E-CHAT-CMD S4: 미지원 런타임으로 차단된 커맨드의 hint 를 발신자에게 반환(AC3 hint response).
     if command_hints:
         response["command_gate"] = {"blocked": command_hints}

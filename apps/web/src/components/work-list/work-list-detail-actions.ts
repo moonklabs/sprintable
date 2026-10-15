@@ -61,8 +61,9 @@ export function riskSentenceKey(gate: Pick<GateItem, 'risk_grade'>): 'riskSenten
  * 위험/경고 축은 amber 하나뿐, red는 파괴적 액션 전용 — risk badge가 그 축을 잘못
  * 빌려 썼던 것). high·low 둘 다 warning(amber) 하나로 — 「저위험/고위험」 구분은 pill의
  * 낱말 자체(chipLowRisk/riskBadgeHigh)가 이미 하므로 색까지 나눌 필요가 없다. */
-export function riskBadgeVariant(gate: Pick<GateItem, 'risk_grade'>): 'warning' | null {
-  return gate.risk_grade === 'high' || gate.risk_grade === 'low' ? 'warning' : null;
+// story #4448 (Yuna 04:13Z) — low risk is the row's neutral chip (work-list-row.tsx), not the high-risk warning yellow
+export function riskBadgeVariant(gate: Pick<GateItem, 'risk_grade'>): 'warning' | 'chip' | null {
+  return gate.risk_grade === 'high' ? 'warning' : gate.risk_grade === 'low' ? 'chip' : null;
 }
 
 /** story #3845·3860 AC2 — 「답하기」는 conversation_id가 있을 때만(없으면 비노출).

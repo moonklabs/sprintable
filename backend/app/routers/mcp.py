@@ -33,7 +33,14 @@ async def get_mcp_manifest(auth: AuthContext = Depends(get_current_user)) -> dic
     if not meta.get("api_key_id"):
         raise HTTPException(status_code=403, detail="API key required for MCP manifest")
     scope = meta.get("scope") or []
-    return resolve_policy(scope)
+    policy = resolve_policy(scope)
+    # story #4424 (PO 08:39Z) — only the Sprintable MCP server calls this (at tools/list), never the daemon's agent stream:
+    # a call with a key a desktop setup handed out = that setup's agent connected its tools. Marked once per setup · member,
+    # right before the successful answer; never in the way of it.
+    from app.services.desktop_setup import mark_tools_connected
+
+    await mark_tools_connected(meta.get("api_key_id"))
+    return policy
 
 
 @router.get("/manifest/check")

@@ -172,6 +172,15 @@ async def receive_escalation_event(
     )).scalar_one_or_none()
     if project is None:
         raise HTTPException(status_code=503, detail="support escalation target project not found")
+    # story #4502 (4500's leftover): the configured requester and approver must be members of the target org — the same
+    # recipient rule as 4500 (an old alias id resolves to the living member first, which is then used). A config naming
+    # someone outside it is refused like any other broken setting (fail-closed 503), never written into the card's conversation.
+    from app.services.member_resolver import canonicalize_member_ids, filter_org_member_ids
+
+    _canon = await canonicalize_member_ids({requester_id, approver_id}, session)
+    requester_id, approver_id = _canon[requester_id], _canon[approver_id]
+    if {requester_id, approver_id} - await filter_org_member_ids({requester_id, approver_id}, org.id, session):
+        raise HTTPException(status_code=503, detail="support escalation requester/approver is not a member of the target org")
 
     # 고객 org 이름만(개인정보 0) — 다른 org를 "읽는" 것뿐(대상 org에 쓰기/멤버 편입 없음),
     # 내부 운영 티켓에 어느 고객인지 식별하는 정상적 지원 업무 범위.

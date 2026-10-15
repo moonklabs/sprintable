@@ -118,7 +118,7 @@ export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, ca
                   readOnly
                   value={result.download_url}
                   onFocus={(e) => e.currentTarget.select()}
-                  className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-[11px] text-foreground"
+                  className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-base lg:text-[11px] text-foreground"
                   data-testid="export-dialog-copy-failed-raw-link"
                 />
               </div>
@@ -143,7 +143,7 @@ export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, ca
               <div className="flex gap-1.5">
                 {(['png', 'html'] as const).map((f) => (
                   <button
-                    key={f} type="button" disabled={f === 'png' && !pngAllowed} onClick={() => setFormat(f)}
+                    key={f} type="button" disabled={f === 'png' && !pngAllowed} aria-pressed={format === f} onClick={() => setFormat(f)}
                     title={f === 'png' && !pngAllowed ? t('exportPngUnavailableForHtml') : undefined}
                     className={`rounded-md border px-2.5 py-1 text-[11px] font-semibold uppercase disabled:cursor-not-allowed disabled:opacity-40 ${format === f ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`}
                   >
@@ -158,7 +158,7 @@ export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, ca
                 <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{t('exportThemeLabel')}</p>
                 <div className="flex gap-1.5">
                   {(['light', 'dark'] as const).map((th) => (
-                    <button key={th} type="button" onClick={() => setTheme(th)}
+                    <button key={th} type="button" aria-pressed={theme === th} onClick={() => setTheme(th)}
                       className={`rounded-md border px-2.5 py-1 text-[11px] ${theme === th ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`}>
                       {th === 'light' ? t('themeLight') : t('themeDark')}
                     </button>

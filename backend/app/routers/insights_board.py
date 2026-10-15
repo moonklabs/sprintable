@@ -280,15 +280,19 @@ async def get_insights_board_endpoint(
     viewer_is_human = (await resolve_member(_auth, org_id, db)).type == "human"
 
     try:
-        from app.services.project_auth import restricted_accessible_project_ids
+        from app.services.project_auth import project_scope
 
+        _scope_ids, _restricted = await project_scope(db, uuid.UUID(str(_auth.user_id)), org_id)
         result = await list_insights_board(
             db, org_id=org_id, window=window, channel=channel, status=status,
             sort=sort, sort_dir=sort_dir, cursor=cursor, limit=limit,
             work_item_id=work_item_id, include_deleted=include_deleted, viewer_is_human=viewer_is_human,
             # story #4351 PR B(⑤ 읽기) — 접근이 제한된 caller는 접근 가능 프로젝트의 발행 행 · 수만(owner/admin = None).
-            project_ids=await restricted_accessible_project_ids(db, uuid.UUID(str(_auth.user_id)), org_id),
+            # story #4688: None («reaches every project») filters to the projects that still exist
+            project_ids=_scope_ids,
         )
+        # the scope label is about WHO is looking (a limited caller vs one who reaches every project), not about the list the query used
+        result["scope"] = "accessible_projects" if _restricted else "org"
     except InsightsBoardInvalidWindowError as exc:
         raise HTTPException(
             status_code=422,

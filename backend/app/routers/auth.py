@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import secrets
@@ -366,6 +367,45 @@ def _explicit_revoke_values(now: datetime) -> dict:
     return {"revoked_at": now, "expires_at": now}
 
 
+async def _revoke_other_sessions(
+    session: AsyncSession, user_id: uuid.UUID, keep_token_hash: str | None,
+) -> tuple[int, uuid.UUID | None]:
+    """story #4630 — end every session of this person except this one (password change · reset · «sign out everywhere else»).
+
+    Returns (sessions ended, this session's live token id or None). «This session» is the live refresh token of THIS person
+    whose hash is `keep_token_hash` — a token of someone else, a dead one or none at all keeps nothing (every session ends):
+    the token can only narrow what stays, never reach another person's rows.
+
+    Two passes, both through `_explicit_revoke_values`:
+    ① live tokens → revoked (each one a signed-in device);
+    ② tokens already revoked by a rotation but still inside the refresh grace window (§2449 — `expires_at` untouched by the
+       rotation) → their window is closed too. Without it a device's previous token, rotated a moment ago, could fork a new
+       session from that window after its live token was revoked. The kept token's own predecessor (`replaced_by` = it) keeps
+       its window: that is this browser's own rotation race."""
+    now = datetime.now(timezone.utc)
+    keep_id: uuid.UUID | None = None
+    if keep_token_hash:
+        keep_id = (await session.execute(
+            select(RefreshToken.id).where(
+                RefreshToken.user_id == user_id,
+                RefreshToken.token_hash == keep_token_hash,
+                RefreshToken.revoked_at.is_(None),
+                RefreshToken.expires_at > now,
+            )
+        )).scalar_one_or_none()
+    # a live sign-in = not revoked and not expired (an expired row never revoked is a sign-in already over — counting it
+    # made «다른 로그인 {n}개» larger than what the person knows · Didi · Yuna 09:2xZ)
+    live = [RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None), RefreshToken.expires_at > now]
+    if keep_id is not None:
+        live.append(RefreshToken.id != keep_id)
+    ended = await session.execute(update(RefreshToken).where(*live).values(**_explicit_revoke_values(now)))
+    window = [RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_not(None), RefreshToken.expires_at > now]
+    if keep_id is not None:
+        window.append(or_(RefreshToken.replaced_by.is_(None), RefreshToken.replaced_by != keep_id))
+    await session.execute(update(RefreshToken).where(*window).values(expires_at=now))
+    return ended.rowcount or 0, keep_id
+
+
 _ROLE_RANK: dict[str, int] = {"owner": 4, "admin": 3, "manager": 2, "member": 1}
 
 
@@ -558,10 +598,12 @@ async def _build_app_metadata(
         # OrgInvite (org_invites 테이블 — canonical /api/v2/invites 경로).
         # 구 Invitation(invitations) 경로는 d3619e80 cutover로 제거 — org_invites가 단일 SSOT.
         # invite link 가입 후 explicit accept 없이 로그인 시 자동 수락 fallback.
+        from app.repositories.org_invite import invite_email_key, invite_email_key_sql
+
         now = datetime.now(timezone.utc)
         org_inv_result = await session.execute(
             select(OrgInvite).where(
-                OrgInvite.email == user.email.lower(),
+                invite_email_key_sql(OrgInvite.email) == invite_email_key(user.email),
                 OrgInvite.status == "pending",
                 OrgInvite.expires_at > now,
             ).order_by(OrgInvite.created_at.asc(), OrgInvite.id).limit(1)
@@ -656,22 +698,87 @@ async def _build_app_metadata(
     }
 
 
+def _context_uuid(md: dict, key: str) -> uuid.UUID | None:
+    value = md.get(key) or None
+    return uuid.UUID(str(value)) if value else None
+
+
 async def _store_refresh_token(
     session: AsyncSession,
     user: User,
     raw_token: str,
     expires_at: datetime,
+    *,
+    app_metadata: dict,
 ) -> uuid.UUID:
+    """story #4400 — the refresh token carries its session's org and project (the app_metadata the tokens were issued
+    with). A refresh re-issues that session's context (`_refresh_session_context`), so each session keeps its own org:
+    switching org on one device no longer moves the others (they used to follow the person-wide last_org_id)."""
     row = RefreshToken(
         user_id=user.id,
         token_hash=hash_token(raw_token),
-        org_id=None,
-        project_id=None,
+        org_id=_context_uuid(app_metadata, "org_id"),
+        project_id=_context_uuid(app_metadata, "project_id"),
         expires_at=expires_at,
     )
     session.add(row)
     await session.commit()
     return row.id
+
+
+async def _live_org_ids(session: AsyncSession, user_id: uuid.UUID) -> list[uuid.UUID]:
+    """story #4400 — the person's live orgs, oldest membership first: org_members.deleted_at IS NULL and the organization
+    still exists (a membership orphaned by a hard-deleted org does not count)."""
+    from app.models.organization import Organization
+
+    return list((await session.execute(
+        select(OrgMember.org_id)
+        .join(Organization, Organization.id == OrgMember.org_id)
+        .where(OrgMember.user_id == user_id, OrgMember.deleted_at.is_(None))
+        .order_by(OrgMember.created_at.asc(), OrgMember.id)
+    )).scalars().all())
+
+
+async def _refresh_session_context(
+    user: User, session: AsyncSession, rt_org_id: uuid.UUID | None, rt_project_id: uuid.UUID | None,
+) -> dict:
+    """story #4400 — app_metadata for a refresh (and switch-account, the same rotation): the session's own org, the one on
+    its refresh token, while the person is still a live member of it.
+
+    Otherwise (they left that org, or a token issued before #4400 carries no org) the person-wide default as before:
+    user.last_org_id — unless they have left that org too, then their first live org (a departed org is never
+    re-issued). Transition: a pre-#4400 token follows last_org_id on its first refresh only; the token issued then
+    carries the org.
+
+    No live org at all (every membership left, or the account deleted): a claim without an org, the state of a new sign-up —
+    not 401, and never a departed org (Qadir 01a0e9fc: the request auth trusts the JWT org when no X-Org-Id is sent). The
+    stale last_org_id is cleared so the resolution below cannot land on it.
+
+    «Live» = org_members.deleted_at IS NULL **and** the organization still exists (an orphan membership after an org was
+    hard-deleted does not count).
+
+    The session's project is re-applied the way switch-project sets it (last_project_id, and the explicit target under
+    the de-fallback flag); _build_app_metadata only lands on it when it is still accessible in that org."""
+    live_orgs = await _live_org_ids(session, user.id)
+    if not live_orgs:
+        if getattr(user, "last_org_id", None) is not None:
+            user.last_org_id = None
+        md = await _build_app_metadata(user, session)
+        # No org claim without a live membership, whatever the resolution found (a still-active legacy member row). A
+        # pending invite it accepted just now is a live membership, so it stays.
+        if md.get("org_id") and uuid.UUID(str(md["org_id"])) not in await _live_org_ids(session, user.id):
+            return {}
+        return md
+    if rt_org_id is not None and rt_org_id in live_orgs:
+        if rt_project_id is not None:
+            user.last_project_id = rt_project_id
+        return await _build_app_metadata(user, session, org_id=rt_org_id, project_id=rt_project_id)
+    # Always an explicit live org from here: the default resolution without one falls back to the oldest membership row,
+    # which may be orphaned (users.last_org_id is SET NULL when an org is deleted, the membership row is not).
+    last_org_id = getattr(user, "last_org_id", None)
+    return await _build_app_metadata(
+        user, session, org_id=last_org_id if last_org_id in live_orgs else live_orgs[0],
+    )
 
 
 # ─── POST /api/v2/auth/register ───────────────────────────────────────────────
@@ -729,7 +836,7 @@ async def register(
         _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md, session_started_at=int(datetime.now(timezone.utc).timestamp()))
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
-    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
+    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=_md)
 
     # 이메일 인증 발송 — 실패해도 가입은 완료하되 **반드시 가시화**(silent swallow 금지).
     # send_email은 bool 반환(True=Resend/SMTP 실발송, False=콘솔 폴백=미발송). delivered를 응답
@@ -746,7 +853,8 @@ async def register(
         # story #3205 — locale=ko 유저 → ko 메일·locale=en 유저 → en 메일(AC1).
         locale = resolve_locale(user.locale)
         copy = TRANSACTIONAL_COPY["verify_email"][locale]
-        delivered = send_email(
+        delivered = await asyncio.to_thread(  # story #4403 — 동기 send_email(SMTP 10s · Resend 30s)이 이벤트 루프를 막지 않게
+            send_email,
             to=user.email,
             subject=copy["subject"],
             html_body=render_action_email(
@@ -872,7 +980,7 @@ async def login(
         _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md, session_started_at=int(datetime.now(timezone.utc).timestamp()))
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
-    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
+    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=_md)
 
     _ip = request.client.host if request.client else None
     _ua = request.headers.get("user-agent")
@@ -924,7 +1032,7 @@ async def refresh_token(
     # (replaced_by)의 성패가 anti-replay 불변식의 성패에 영향을 줘선 안 된다 — 그래서 이 revoke
     # UPDATE는 replaced_by 없이 «독립적으로» 커밋되고, replaced_by는 새 row가 실제로 INSERT+
     # commit된 «후에» 별개 문장으로 기록한다(아래 _store_refresh_token 호출부 이후).
-    revoked_user_id = (await session.execute(
+    rotated = (await session.execute(
         update(RefreshToken)
         .where(
             RefreshToken.token_hash == token_hash,
@@ -932,8 +1040,10 @@ async def refresh_token(
             RefreshToken.expires_at > datetime.now(timezone.utc),
         )
         .values(revoked_at=datetime.now(timezone.utc))
-        .returning(RefreshToken.user_id)
-    )).scalar_one_or_none()
+        .returning(RefreshToken.user_id, RefreshToken.org_id, RefreshToken.project_id)
+    )).first()
+    revoked_user_id = rotated.user_id if rotated else None
+    rt_org_id, rt_project_id = (rotated.org_id, rotated.project_id) if rotated else (None, None)
     won_atomic_rotation = revoked_user_id is not None
     if revoked_user_id is None:
         # ⛔P0 신 클래스(#1887 쿠키-Domain no-op과 별개) — proxy.ts 의 FE 인스턴스-로컬
@@ -970,14 +1080,17 @@ async def refresh_token(
         resolve_cutoff = datetime.now(timezone.utc) - timedelta(
             seconds=settings.auth_refresh_chain_resolve_window_seconds
         )
-        revoked_user_id = (await session.execute(
-            select(RefreshToken.user_id).where(
+        straggler = (await session.execute(
+            select(RefreshToken.user_id, RefreshToken.org_id, RefreshToken.project_id).where(
                 RefreshToken.token_hash == token_hash,
                 RefreshToken.revoked_at.is_not(None),
                 RefreshToken.revoked_at > resolve_cutoff,
                 RefreshToken.expires_at > datetime.now(timezone.utc),
             )
-        )).scalar_one_or_none()
+        )).first()
+        revoked_user_id = straggler.user_id if straggler else None
+        if straggler:
+            rt_org_id, rt_project_id = straggler.org_id, straggler.project_id
         if revoked_user_id is None:
             # #2124(관측성 보강 — 오르테가군 요청 2026-07-27): 하드 401은 지금까지 계정 상관이
             # 0이라 "누가 이 루프에 빠졌는지" 못 쫓았다(prod 실측: 같은 key가 ~20초 간격으로
@@ -1043,7 +1156,7 @@ async def refresh_token(
         )
         return _err("USER_NOT_FOUND", "User not found", 401)
 
-    _md = await _build_app_metadata(user, session)
+    _md = await _refresh_session_context(user, session, rt_org_id, rt_project_id)  # story #4400 — this session's org
     if settings.build_app_metadata_defallback:
         _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
     # story #3247 — session_started_at은 원 refresh 토큰(위에서 이미 decode한 payload)의
@@ -1068,7 +1181,7 @@ async def refresh_token(
         str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         session_started_at=_session_started_at,
     )
-    new_token_id = await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
+    new_token_id = await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=_md)
     if won_atomic_rotation:
         # story #2449(회귀 수정): 이 시점엔 새 row가 이미 INSERT+commit 완료라(_store_refresh_
         # token 내부), old row의 이 UPDATE가 실패하거나 프로세스가 죽어도 원자 revoke(위)는
@@ -1118,7 +1231,7 @@ async def switch_account(
     # ⚠️ 원자 single-use rotation(까심 TOCTOU): SELECT-then-UPDATE 비원자면 동시 2요청이 둘 다
     # 통과해 double-spend. 검증+revoke 를 단일 UPDATE...WHERE revoked_at IS NULL...RETURNING 으로
     # 원자화 — 동시 요청 중 정확히 1건만 row 매치(나머지 0행→401).
-    revoked_user_id = (await session.execute(
+    rotated = (await session.execute(
         update(RefreshToken)
         .where(
             RefreshToken.token_hash == token_hash,
@@ -1126,8 +1239,10 @@ async def switch_account(
             RefreshToken.expires_at > datetime.now(timezone.utc),
         )
         .values(revoked_at=datetime.now(timezone.utc))
-        .returning(RefreshToken.user_id)
-    )).scalar_one_or_none()
+        .returning(RefreshToken.user_id, RefreshToken.org_id, RefreshToken.project_id)
+    )).first()
+    revoked_user_id = rotated.user_id if rotated else None
+    rt_org_id, rt_project_id = (rotated.org_id, rotated.project_id) if rotated else (None, None)
     if revoked_user_id is None:
         return _err("TOKEN_REVOKED", "Refresh token revoked or expired", 401)
 
@@ -1135,7 +1250,7 @@ async def switch_account(
     if not user:
         return _err("USER_NOT_FOUND", "User not found", 401)
 
-    _md = await _build_app_metadata(user, session)
+    _md = await _refresh_session_context(user, session, rt_org_id, rt_project_id)  # story #4400 — this session's org
     if settings.build_app_metadata_defallback:
         _persist_resolved_context(user, _md)  # last_project_id/last_org_id 영속
     # story #3247 — refresh_token()과 동형(위 §3247 주석 참고) — 타겟 계정의 원 세션 시작
@@ -1151,7 +1266,7 @@ async def switch_account(
         str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         session_started_at=_session_started_at,
     )
-    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
+    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=_md)
 
     return _ok({
         **tokens,
@@ -1605,7 +1720,7 @@ async def oauth_callback(
     tokens = create_tokens(str(user.id), user.email, _md, session_started_at=int(datetime.now(timezone.utc).timestamp()))
     raw_refresh = tokens["refresh_token"]
     expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
-    await _store_refresh_token(session, user, raw_refresh, expires_at)
+    await _store_refresh_token(session, user, raw_refresh, expires_at, app_metadata=_md)
 
     return _ok({
         "access_token": tokens["access_token"],
@@ -1775,7 +1890,8 @@ async def forgot_password(
         from app.services.email_copy import TRANSACTIONAL_COPY
         locale = resolve_locale(user.locale)
         copy = TRANSACTIONAL_COPY["reset_password"][locale]
-        send_email(
+        await asyncio.to_thread(  # story #4403 — 동기 send_email(SMTP 10s · Resend 30s)이 이벤트 루프를 막지 않게
+            send_email,
             to=user.email,
             subject=copy["subject"],
             html_body=render_action_email(
@@ -1819,7 +1935,10 @@ async def reset_password(
             password_set_at=datetime.now(timezone.utc),
         )
     )
-    return _ok({"message": "Password reset successfully"})
+    # story #4630 — the reset comes from a mailed link, signed out: every session of the person ends (password_set_at
+    # alone only stopped them at their next refresh; their tokens and the refresh grace window stayed open)
+    ended, _ = await _revoke_other_sessions(session, user.id, None)
+    return _ok({"message": "Password reset successfully", "sessions_ended": ended})
 
 
 @router.patch("/change-password")
@@ -1832,16 +1951,53 @@ async def change_password(
     if user is None:
         return _err("USER_NOT_FOUND", "User not found", 404)
 
+    # story #4630 (Kadir qa:changes · codex 01a11afd) — #3649 as at logout-others: a session already ended by an earlier password
+    # change does not get to change it again
+    if _is_session_stale_after_password_change(user, auth.claims.get("session_started_at")):
+        return _err("SESSION_INVALIDATED", "Password was changed — please log in again", 401)
     if not verify_password(body.current_password, user.hashed_password):
         return _err("WRONG_PASSWORD", "Current password is incorrect", 400)
 
+    now = datetime.now(timezone.utc)
     await session.execute(
-        update(User).where(User.id == user.id).values(
-            hashed_password=hash_password(body.new_password),
-            password_set_at=datetime.now(timezone.utc),
-        )
+        update(User).where(User.id == user.id).values(hashed_password=hash_password(body.new_password), password_set_at=now)
     )
-    return _ok({"message": "Password changed successfully"})
+    # story #4630 (PO 10:18Z · option (b) after Kadir qa:changes · codex 01a11afd) — every session ends now, this one too (as
+    # a reset). A new pair for this session would need a session start of now, and #3649 (refresh) and #3247 (disabling TOTP
+    # with the password) read that same start: a stolen session holding the current password could then change it and turn
+    # 2FA off. Before, password_set_at alone stopped the sessions at their next refresh and no token row was revoked.
+    ended, _ = await _revoke_other_sessions(session, user.id, None)
+    await session.commit()
+    return _ok({"message": "Password changed successfully", "sessions_ended": ended})
+
+
+class LogoutOthersRequest(BaseModel):
+    # story #4630 — this session's refresh token (the web BFF sends its sp_rt)
+    refresh_token: str | None = None
+
+
+@router.post("/logout-others")
+async def logout_others(
+    body: LogoutOthersRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> JSONResponse:
+    """story #4630 — «sign out everywhere else»: every refresh token of this person ends except this session's.
+
+    Only refresh tokens (people's signed-in browsers and the phone app's web sign-in) — API keys, a desktop setup's device
+    token and paired phone keys are other tables and stay. A token sent that is not this person's live one keeps nothing:
+    every session ends, this one too (`kept_this: false`)."""
+    user = await _get_user_by_id(session, uuid.UUID(auth.user_id))
+    if user is None:
+        return _err("USER_NOT_FOUND", "User not found", 404)
+    # #3649 — an old access token of a session ended by a password change does not get to act as «this session»
+    if _is_session_stale_after_password_change(user, auth.claims.get("session_started_at")):
+        return _err("SESSION_INVALIDATED", "Password was changed — please log in again", 401)
+    ended, keep_id = await _revoke_other_sessions(
+        session, user.id, hash_token(body.refresh_token) if body.refresh_token else None,
+    )
+    await session.commit()
+    return _ok({"sessions_ended": ended, "kept_this": keep_id is not None})
 
 
 # ─── POST /api/v2/auth/set-password/request, GET /api/v2/auth/set-password/confirm ──
@@ -1893,7 +2049,8 @@ async def request_set_password(
     from app.services.email_copy import TRANSACTIONAL_COPY
     locale = resolve_locale(user.locale)
     copy = TRANSACTIONAL_COPY["set_password_confirm"][locale]
-    delivered = send_email(
+    delivered = await asyncio.to_thread(  # story #4403 — 동기 send_email(SMTP 10s · Resend 30s)이 이벤트 루프를 막지 않게
+        send_email,
         to=user.email,
         subject=copy["subject"],
         html_body=render_action_email(
@@ -2012,7 +2169,8 @@ async def resend_verification(
     from app.services.email_copy import TRANSACTIONAL_COPY
     locale = resolve_locale(user.locale)
     copy = TRANSACTIONAL_COPY["verify_email"][locale]
-    delivered = send_email(
+    delivered = await asyncio.to_thread(  # story #4403 — 동기 send_email(SMTP 10s · Resend 30s)이 이벤트 루프를 막지 않게
+        send_email,
         to=user.email,
         subject=copy["subject"],
         html_body=render_action_email(
@@ -2040,6 +2198,35 @@ async def resend_verification(
 
 class SwitchProjectRequest(BaseModel):
     project_id: uuid.UUID
+    # story #4400 — this session's refresh token (the web BFF sends its sp_rt): only that token is revoked.
+    refresh_token: str | None = None
+
+
+async def _revoke_switching_session(
+    session: AsyncSession, user: User, refresh_token: str | None, *, route: str,
+) -> None:
+    """story #4400 — switch-org / switch-project revoke **this session's** refresh token only, not every device's.
+
+    The all-device revoke came with switch-project (#655) and was copied into switch-org (#847), with no threat stated.
+    The refresh token now carries its session's org (`_store_refresh_token`), so other sessions keep their own org and
+    have nothing to be revoked for. #3649's protections are untouched: the stale-session check runs before this, and
+    the revoke goes through the same seam (`_explicit_revoke_values`, which also closes the refresh grace window).
+    logout · password change · admin revoke still revoke every device.
+
+    Without a token (a caller that does not send it yet — web pods older than the backend during a deploy) the
+    previous behaviour stays: every token of the person. Each such use logs one structured line
+    (event=switch_revoke_fallback · route · how many tokens; no user id) so the fallback can be removed once it reads 0."""
+    conditions = [RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None)]
+    if refresh_token:
+        conditions.append(RefreshToken.token_hash == hash_token(refresh_token))
+    result = await session.execute(
+        update(RefreshToken).where(*conditions).values(**_explicit_revoke_values(datetime.now(timezone.utc)))
+    )
+    if not refresh_token:
+        logger.info(
+            "auth switch revoked every token (no refresh_token sent)",
+            extra={"structured": {"event": "switch_revoke_fallback", "route": route, "revoked": result.rowcount or 0}},
+        )
 
 
 @router.post("/switch-project")
@@ -2076,15 +2263,10 @@ async def switch_project(
     target_project_id = body.project_id
     user.last_project_id = target_project_id
 
-    # 기존 refresh token 무효화 — story #3649(보안 결함): expires_at도 함께 내려
-    # refresh()의 유예창(§3649 주석)이 이 RT들을 재사용 대상에서 뺀다(명시 폐기,
-    # 회전 경합 straggler 아님).
-    _now = datetime.now(timezone.utc)
-    await session.execute(
-        update(RefreshToken)
-        .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
-        .values(**_explicit_revoke_values(_now))
-    )
+    # 이 세션 refresh token 무효화 — story #3649(보안 결함): expires_at도 함께 내려
+    # refresh()의 유예창(§3649 주석)이 이 RT를 재사용 대상에서 뺀다(명시 폐기,
+    # 회전 경합 straggler 아님). story #4400: 전 기기 → 이 세션만.
+    await _revoke_switching_session(session, user, body.refresh_token, route="switch-project")
 
     # 908075db 단계1: target을 명시 의도로 전달 — flag on이면 _build_app_metadata가 추측 없이 그대로 존중.
     app_metadata = await _build_app_metadata(user, session, project_id=target_project_id)
@@ -2106,7 +2288,7 @@ async def switch_project(
         str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         session_started_at=_session_started_at,
     )
-    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
+    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=app_metadata)
 
     await session.commit()
     return _ok(tokens)
@@ -2116,6 +2298,7 @@ async def switch_project(
 
 class SwitchOrganizationRequest(BaseModel):
     org_id: uuid.UUID
+    refresh_token: str | None = None  # story #4400 — see SwitchProjectRequest
 
 
 @router.post("/switch-org")
@@ -2152,14 +2335,9 @@ async def switch_organization(
     # cross-org 옛 프로젝트 재주입 0 (last_project_id=None이어도 org는 유지).
     user.last_org_id = body.org_id
 
-    # 기존 refresh token 무효화 — story #3649(보안 결함): switch_project()와 동형
-    # (§3649 주석 참고).
-    _now = datetime.now(timezone.utc)
-    await session.execute(
-        update(RefreshToken)
-        .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
-        .values(**_explicit_revoke_values(_now))
-    )
+    # 이 세션 refresh token 무효화 — story #3649(보안 결함): switch_project()와 동형
+    # (§3649 주석 참고). story #4400: 전 기기 → 이 세션만.
+    await _revoke_switching_session(session, user, body.refresh_token, route="switch-org")
 
     # _build_app_metadata 호출 전에 target project_id 고정
     # (내부에서 user.last_project_id를 이전 org TM으로 덮어쓰므로 먼저 캡처)
@@ -2192,7 +2370,7 @@ async def switch_organization(
         str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         session_started_at=_session_started_at,
     )
-    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp)
+    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=app_metadata)
 
     await session.commit()
 
@@ -2219,6 +2397,17 @@ class AuthMeResponse(BaseModel):
     # 이 신호가 필요했다. api_key 컨텍스트(에이전트)는 User 행이 없어 None(무의미 — 온보딩 게이트
     # 자체가 인간 전용이라 agent 소비처는 이 필드를 참조하지 않는다).
     email_verified: bool | None = None
+    # story 4453 — whether this server makes a person verify their e-mail before creating an organization
+    # (`require_verified_email_for_org_create`): the web's two org-creating screens open with a «verify your e-mail» gate
+    # only when this is true and email_verified is false (a self-hosted server with the setting off shows no gate).
+    # Human sessions only; None for an API-key context.
+    email_verification_required: bool | None = None
+    # story 4453 — the address the verification mail went to, shown on that gate (the session's own e-mail). Human sessions
+    # only; None for an API-key context.
+    email: str | None = None
+    # story 4427 — the desktop sign-up screen defaults the organization name to «{display_name}의 조직» (never the
+    # e-mail's local part). Human sessions only; None when unset or for an API-key context.
+    display_name: str | None = None
     # story #4178(산티아고 prod 에스컬레이션 1d522e6d) — 사람(JWT) 세션의 `member_id`는
     # `auth.user_id`(=users.id) 그대로라 `/api/v2/events/stream`의 `resolve_member_identity`
     # (TeamMember.id/OrgMember.id만 허용)로 검증하면 404가 난다. `member_id` 자체의 의미는
@@ -2279,6 +2468,9 @@ async def get_auth_me(
     ambiguous = False
     accessible_ids: list[str] = []
     email_verified: bool | None = None
+    email_verification_required: bool | None = None
+    email: str | None = None
+    display_name: str | None = None
     org_member_id: str | None = None
     org_id_raw = auth.org_id or meta.get("org_id")
     if meta.get("api_key_id"):
@@ -2294,19 +2486,27 @@ async def get_auth_me(
         # 응답 org_id도 이 org로 — 한 응답 안에서 org가 섞이지 않게. 에이전트 분기는 무변(AC3).
         resolved_org = await resolve_request_org_id(auth, x_org_id, request)
         org_id_raw = str(resolved_org) if resolved_org is not None else None
+        email_verification_required = bool(settings.require_verified_email_for_org_create)
+        email = auth.email or None
         # story #3195 — human JWT 세션(auth.user_id == User.id)에 한해서만 조회. api_key
         # 컨텍스트는 위 분기라 여기 안 온다(불필요 쿼리 회피).
         try:
-            email_verified = (
-                await db.execute(select(User.email_verified).where(User.id == uuid.UUID(auth.user_id)))
-            ).scalar_one_or_none()
+            user_row = (
+                await db.execute(select(User.email_verified, User.display_name).where(User.id == uuid.UUID(auth.user_id)))
+            ).one_or_none()
+            if user_row is not None:
+                email_verified, display_name = user_row
         except Exception:
             logger.warning("get_auth_me: email_verified 조회 실패 — None으로 반환", exc_info=True)
         # story #4178 — org 미해소(org 없음·OrgMember 행 없음)는 예외가 아니라 None.
+        # story 4668 — «살아 있는 조직»의 멤버십일 때만: org_members.org_id에는 FK가 없고 조직 삭제는 조직 행만 지운다
+        # (organization.py delete_by_user) → 지운 조직의 OrgMember는 고아로 남는다. 조직 존재를 조인하지 않으면 JWT에 옛 org_id가
+        # 남은 사람이 지운 조직의 «가입자»로 읽혀, 온보딩이 «이미 조직이 있다»며 지운 조직으로 보낸다.
         if resolved_org is not None:
+            from app.models.organization import Organization
             try:
                 row = (await db.execute(
-                    select(OrgMember.id).where(
+                    select(OrgMember.id).join(Organization, Organization.id == OrgMember.org_id).where(
                         OrgMember.org_id == resolved_org,
                         OrgMember.user_id == uuid.UUID(auth.user_id),
                         OrgMember.deleted_at.is_(None),
@@ -2323,6 +2523,9 @@ async def get_auth_me(
         is_project_ambiguous=ambiguous,
         accessible_project_ids=accessible_ids,
         email_verified=email_verified,
+        email_verification_required=email_verification_required,
+        email=email,
+        display_name=display_name,
         org_member_id=org_member_id,
     )
 

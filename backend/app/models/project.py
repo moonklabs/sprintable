@@ -27,13 +27,23 @@ class Project(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     # non-null이고, 유니크 제약(org_id, slug)은 NULL 여러 개를 서로 다른 값으로 취급해 무해하다.
     slug: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # [SID:4681] (UX-1 · D3 · AC4): the folder a person picked on their computer for this project's agents — a hint for people and
+    # other devices («this project lives in ~/work/foo»), stored and shown as TEXT only. The server never opens, resolves or checks
+    # it as a path (migration 0451 · additive · nullable). The folder an agent actually starts in is decided on the Mac
+    # (desktop-electron project-workdirs · the 4565 home-only check) — never from this value (a server-named path could point anywhere).
+    workdir_hint: Mapped[str | None] = mapped_column(Text, nullable=True)
     # S3-2: warn(default) | block
     violation_level: Mapped[str] = mapped_column(String(10), nullable=False, default="warn")
 
     # relationships (string refs to avoid circular imports)
-    team_members: Mapped[list["TeamMember"]] = relationship("TeamMember", back_populates="project", lazy="select")
-    sprints: Mapped[list["Sprint"]] = relationship("Sprint", back_populates="project", lazy="select")
-    epics: Mapped[list["Goal"]] = relationship("Goal", back_populates="project", lazy="select")
+    # `passive_deletes="all"` (10-14, dev: DELETE /api/projects/{id} answered 500 twice): deleting the project must not make the ORM touch these rows.
+    # Without it the unit of work first SETS each child's project_id to NULL before the DELETE — `team_members` is a VIEW (0088: «cannot update
+    # view»), `sprints` · `goals` have project_id NOT NULL — so a project with a granted member, a sprint or an epic could never be deleted.
+    # What happens to a dependent row is the database's own rule (ON DELETE CASCADE where a foreign key says so — project_access, desktop_setups …);
+    # rows with no foreign key (sprints · goals · stories …) stay as they are: the copy promises «비활성화», not erasure.
+    team_members: Mapped[list["TeamMember"]] = relationship("TeamMember", back_populates="project", lazy="select", passive_deletes="all")
+    sprints: Mapped[list["Sprint"]] = relationship("Sprint", back_populates="project", lazy="select", passive_deletes="all")
+    epics: Mapped[list["Goal"]] = relationship("Goal", back_populates="project", lazy="select", passive_deletes="all")
 
 
 class OrgMember(Base):

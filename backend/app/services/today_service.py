@@ -617,10 +617,11 @@ async def _resolve_today_results(
 async def build_today_snapshot(
     session: AsyncSession, *, org_id: uuid.UUID, auth: AuthContext, tz: str,
 ) -> dict[str, Any]:
-    from app.services.project_auth import restricted_accessible_project_ids
+    from app.services.project_auth import project_scope
 
     # story #4351 PR B — 접근이 제한된 caller면 접근 가능 프로젝트 목록(owner/admin = None = 옛 동작). 이 화면의 모든 칸이 같은 값을 쓴다.
-    restricted = await restricted_accessible_project_ids(session, uuid.UUID(str(auth.user_id)), org_id)
+    # story #4688: the projects that exist and that the caller reaches (an owner/admin is not «unfiltered»); `restricted_label` only feeds `scope`
+    restricted, restricted_label = await project_scope(session, uuid.UUID(str(auth.user_id)), org_id)
     needs_me, needs_me_count = await _resolve_needs_me(session, org_id, auth, restricted_project_ids=restricted)
     agent_progress = await _resolve_agent_progress(session, org_id, auth, restricted_project_ids=restricted)
     completed_today = await _resolve_completed_today(session, org_id, auth, tz, restricted_project_ids=restricted)
@@ -635,5 +636,5 @@ async def build_today_snapshot(
         "published_today": published_today,
         "usage": usage,
         **today_results,
-        "scope": "org" if restricted is None else "accessible_projects",
+        "scope": "accessible_projects" if restricted_label else "org",
     }

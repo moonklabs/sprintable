@@ -394,3 +394,18 @@ describe('GoalsClient — 페이지 h1 1개 원칙(story #3945)', () => {
     expect(h1s[0]!.textContent).toBe('목표');
   });
 });
+
+describe('[SID:4388] GoalsClient — the chosen status filter is announced as pressed', () => {
+  it('the first filter («all») starts pressed; clicking the second moves aria-pressed to it', async () => {
+    stubFetch([{ id: 'e1', title: 'E-CANVAS', status: 'active', story_count: 3, is_ai_generated: false }]);
+    await mount();
+    const row = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '전체')!.parentElement!;
+    const pressed = () => Array.from(row.querySelectorAll(':scope > button')).map((b) => b.getAttribute('aria-pressed'));
+    const count = pressed().length;
+    expect(count).toBeGreaterThan(2);
+    expect(pressed()).toEqual(['true', ...Array(count - 1).fill('false')]);
+
+    await act(async () => { (row.querySelectorAll(':scope > button')[1] as HTMLButtonElement).click(); });
+    expect(pressed()).toEqual(['false', 'true', ...Array(count - 2).fill('false')]);
+  });
+});

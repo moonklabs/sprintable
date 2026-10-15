@@ -85,7 +85,7 @@ async def test_get_state_acked_verified():
     db = AsyncMock()
     # execute 순서: verify_seq, acked_seq, session-fresh
     db.execute = AsyncMock(side_effect=[_scalar(5), _scalar(7), _first(("sess",))])
-    out = await get_verification_state(db, uuid.uuid4())
+    out = await get_verification_state(db, uuid.uuid4(), org_id=uuid.uuid4())
     assert out["verified"] is True
     assert _states(out["rail"])["verified"] == "done"
 
@@ -94,7 +94,7 @@ async def test_get_state_acked_verified():
 async def test_get_state_no_verify_all_pending():
     db = AsyncMock()
     db.execute = AsyncMock(side_effect=[_scalar(None), _scalar(None)])  # verify_seq None → session 미조회
-    out = await get_verification_state(db, uuid.uuid4())
+    out = await get_verification_state(db, uuid.uuid4(), org_id=uuid.uuid4())
     assert out["verified"] is False
     assert all(r["status"] == "pending" for r in out["rail"])
 

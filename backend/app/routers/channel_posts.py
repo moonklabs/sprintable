@@ -28,7 +28,7 @@ from app.services.external_publish_pause import ExternalPublishPausedError
 from app.services.publish_error_body import preflight_error_body, preflight_error_facts
 from app.services.background_jobs import background_job_view, enqueue_background_job
 from app.services.image_integrity import ImageIntegrityError, validate_image_bytes
-from app.services.project_auth import require_project_access, restricted_accessible_project_ids
+from app.services.project_auth import require_project_access, scoped_project_ids
 from app.services.publication_command import derive_processing_kind, viewer_can_retry
 from app.services.provider_call_mark import provider_call_marked, reset_provider_call_mark
 from app.services.channel_posts import (
@@ -1661,7 +1661,7 @@ async def list_channel_post_drafts_endpoint(
 
     rows = await list_channel_post_drafts(
         db, org_id=org_id, limit=limit, offset=offset,
-        project_ids=await restricted_accessible_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351
+        project_ids=await scoped_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351 · #4688
         scheduled_from=scheduled_from, scheduled_to=scheduled_to, unscheduled=unscheduled,
         include_withdrawn=include_withdrawn, include_deleted=include_deleted,
         work_item_id=work_item_id,
@@ -1669,7 +1669,7 @@ async def list_channel_post_drafts_endpoint(
     total = await count_channel_post_drafts(
         db, org_id=org_id, include_withdrawn=include_withdrawn, include_deleted=include_deleted,
         work_item_id=work_item_id,
-        project_ids=await restricted_accessible_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351
+        project_ids=await scoped_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351 · #4688
     )
     response.headers["X-Total-Count"] = str(total)
     source_titles = await get_source_titles_and_latest_versions(
@@ -1716,7 +1716,7 @@ async def get_channel_post_draft_detail_endpoint(
     # 필터가 특정 URL로 들어온 초안을 조용히 404 취급하면 안 된다).
     rows = await list_channel_post_drafts(
         db, org_id=org_id, draft_id=draft_id, limit=1, include_withdrawn=True, include_deleted=True,
-        project_ids=await restricted_accessible_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351
+        project_ids=await scoped_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351 · #4688
     )
     if not rows:
         raise HTTPException(status_code=404, detail=f"draft를 찾을 수 없습니다: {draft_id}")
@@ -1791,7 +1791,7 @@ async def list_content_item_variants_endpoint(
 
     rows = await list_channel_post_drafts(
         db, org_id=org_id, source_content_item_id=content_item_id, limit=200,
-        project_ids=await restricted_accessible_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351
+        project_ids=await scoped_project_ids(db, uuid.UUID(auth.user_id), org_id),  # story #4351 · #4688
     )
     # story #3437(후속 묶음) — 이 엔드포인트는 filter 자체가 content_item_id 단건이라
     # source_content_item_id가 전부 이 값 하나 — 배치라 해도 실질 단건 조회.
@@ -2534,8 +2534,15 @@ class RetryPublicationCommandResponse(BaseModel):
     status: str
 
 
+class RetryPublicationCommandRequest(BaseModel):
+    """story #4409 — optional body. `confirmed_no_campaign`: the person checked the ad account and the campaign of an ads boost
+    stopped as «outcome unknown» does not exist there (required for that case only; ignored otherwise)."""
+    confirmed_no_campaign: bool = False
+
+
 async def _retry_publication_command(
     db: AsyncSession, *, org_id: uuid.UUID, command_id: uuid.UUID, auth: AuthContext,
+    confirmed_no_campaign: bool = False,
 ) -> RetryPublicationCommandResponse:
     """story #3414 AC5·#3476(페드루 보정②, 미르코 FE 그라운딩 2026-09-05) — 휴먼
     전용, `dead_letter`/`blocked` 상태인 command만 `pending`으로 되돌린다(그 외는
@@ -2544,8 +2551,22 @@ async def _retry_publication_command(
     호출돼도 그대로 맞는다, 이 함수 자체엔 분기 코드가 없다(불필요)."""
     await _require_human(db, auth, org_id)
 
-    from app.services.publication_command import retry_dead_letter_command
+    from app.models.publication_command import PublicationCommand
+    from app.services.ads_boost_execution import AdsBoostCampaignCheckRequiredError, prepare_ads_boost_retry
+    from app.services.publication_command import human_retryable, retry_dead_letter_command
 
+    # story #4409 — an ads boost «outcome unknown» needs the person's confirmation first (see prepare_ads_boost_retry).
+    target = (await db.execute(
+        select(PublicationCommand).where(PublicationCommand.id == command_id, PublicationCommand.org_id == org_id)
+    )).scalar_one_or_none()
+    if target is not None and human_retryable(target):
+        try:
+            await prepare_ads_boost_retry(db, target, confirmed_no_campaign=confirmed_no_campaign)
+        except AdsBoostCampaignCheckRequiredError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": exc.code, "message": "Confirm that the campaign does not exist in the ad account first."},
+            ) from exc
     command = await retry_dead_letter_command(db, org_id=org_id, command_id=command_id)
     if command is None:
         raise HTTPException(status_code=404, detail="command를 찾을 수 없거나 재시도 대상이 아닙니다")
@@ -2563,6 +2584,7 @@ async def retry_publication_command_shared_endpoint(
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
+    body: RetryPublicationCommandRequest | None = None,
 ) -> RetryPublicationCommandResponse:
     """story #3476(페드루 보정②) — content_kind 무관 공용 경로. 기존
     `/channel-posts/publication-commands/{id}/retry`는 경로 자체에 channel-posts가
@@ -2570,7 +2592,10 @@ async def retry_publication_command_shared_endpoint(
     새 호출은 전부 이 경로로 옮긴다 — 구 경로는 하위호환으로 이 함수에 위임만."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
-    return await _retry_publication_command(db, org_id=org_id, command_id=command_id, auth=auth)
+    return await _retry_publication_command(
+        db, org_id=org_id, command_id=command_id, auth=auth,
+        confirmed_no_campaign=bool(body and body.confirmed_no_campaign),
+    )
 
 
 @router.post(
@@ -2583,6 +2608,7 @@ async def retry_publication_command_endpoint(
     db: AsyncSession = Depends(get_db),
     verified_org_id: uuid.UUID = Depends(get_verified_org_id),
     auth: AuthContext = Depends(get_current_user),
+    body: RetryPublicationCommandRequest | None = None,
 ) -> RetryPublicationCommandResponse:
     """story #3414 AC5 — 휴먼 전용(발행 자체가 human-only인 것과 동형). `dead_letter`
     **또는 `blocked`**(연결 복구 대기 — 페드루 리뷰 블로커B: 원래 dead_letter만
@@ -2597,7 +2623,10 @@ async def retry_publication_command_endpoint(
     위임만(동작 무변, 구 경로 호환 유지 — FE 마이그레이션 전까지 죽이지 않는다)."""
     if org_id != verified_org_id:
         raise HTTPException(status_code=403, detail="org_id mismatch")
-    return await _retry_publication_command(db, org_id=org_id, command_id=command_id, auth=auth)
+    return await _retry_publication_command(
+        db, org_id=org_id, command_id=command_id, auth=auth,
+        confirmed_no_campaign=bool(body and body.confirmed_no_campaign),
+    )
 
 
 class CancelScheduledCommandResponse(BaseModel):

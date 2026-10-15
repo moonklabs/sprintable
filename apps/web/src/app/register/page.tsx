@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
+import { Button } from '@/components/ui/button';
 import { LegalFooter } from '@/components/legal/legal-footer';
 import { safeNextPath } from '@/lib/auth/session-redirect';
 
@@ -34,6 +35,17 @@ export default function RegisterPage() {
   const [tosAccepted, setTosAccepted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // story 4669 (U6 · Yuna A-5): with Google on, the e-mail form is folded under [이메일로 가입] — Google is the way with no mail
+  // round trip (email-verify-gate treats a social sign-in as verified). A build with no OAuth keeps the form open as before.
+  const googleEnabled = process.env.NEXT_PUBLIC_OAUTH_ENABLED === 'true';
+  const [emailOpen, setEmailOpen] = useState(false);
+  const emailFormOpen = !googleEnabled || emailOpen;
+  // Yuna (5064 design · 4723's class): the fold button goes away when pressed, so the keyboard focus must not fall to the body —
+  // it moves to the form's first field. One-way: the form never folds again (no aria-expanded — there is no «collapsed» state after).
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (emailOpen) nameInputRef.current?.focus();
+  }, [emailOpen]);
 
   const rules = checkPasswordRules(password);
   const categoriesMet = countCategories(rules);
@@ -105,12 +117,82 @@ export default function RegisterPage() {
           <p className="text-sm text-muted-foreground">{t('subtitle')}</p>
         </div>
 
-        <div className="space-y-3">
+        {/* story 4669: the terms line first (both ways need it), then Google as the main button, then the folded e-mail form */}
+        <label className="flex items-start gap-2 cursor-pointer select-none">
           <input
+            type="checkbox"
+            checked={tosAccepted}
+            onChange={(e) => setTosAccepted(e.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 rounded border-border accent-brand"
+            disabled={loading}
+          />
+          <span className="text-xs text-muted-foreground">
+            {t('tosPrefix')}{' '}
+            <Link href="/terms" target="_blank" className="font-medium text-brand-text hover:text-brand-text/85">
+              {t('termsOfService')}
+            </Link>{' '}
+            {t('and')}{' '}
+            <Link href="/privacy" target="_blank" className="font-medium text-brand-text hover:text-brand-text/85">
+              {t('privacyPolicy')}
+            </Link>
+          </span>
+        </label>
+
+        {/* story #2105 1차 — #2096과 같은 결함클래스(계정 없는 사람이 처음 만나는 화면인데
+            실패 사유가 스크린리더에 안 읽힘). setError(null)이 재시도마다 먼저 실행돼(위
+            handleRegister) 이 단락이 매번 언마운트→리마운트되므로 동일 사유가 반복돼도
+            안정적으로 낭독된다. */}
+        {error && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">{error}</p>}
+
+        {googleEnabled && (
+          <div className="space-y-3">
+            {/* story #3220 — login/page.tsx의 OAuth 버튼들과 동일 패턴으로 next 전파
+                (/auth/login/route.ts가 이미 next를 읽어 콜백까지 이어준다 — 이 버튼만
+                빠져 있었음, fix-on-sight). story 4669: the main button, first (brand surface = the one hero on this screen) */}
+            <a
+              href={tosAccepted ? `/auth/login?provider=google&tos_accepted=true${nextParam ? `&next=${encodeURIComponent(nextParam)}` : ''}` : undefined}
+              onClick={!tosAccepted ? (e) => { e.preventDefault(); setError(t('tosRequiredError')); } : undefined}
+              data-testid="register-google"
+              className={`flex w-full min-h-[44px] items-center justify-center gap-3 rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90 ${!tosAccepted ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              <svg className="h-5 w-5 rounded-full bg-background p-0.5" viewBox="0 0 24 24">
+                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
+                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+              </svg>
+              {t('continueWithGoogle')}
+            </a>
+
+            <div className="relative flex items-center">
+              <div className="flex-grow border-t border-border/50" />
+              <span className="mx-3 flex-shrink text-xs text-muted-foreground">{t('or')}</span>
+              <div className="flex-grow border-t border-border/50" />
+            </div>
+
+            {!emailOpen && (
+              <Button
+                type="button"
+                variant="outline"
+                size="lg"
+                onClick={() => setEmailOpen(true)}
+                data-testid="register-email-open"
+                className="w-full min-h-[44px] rounded-lg text-sm font-medium"
+              >
+                {t('emailSignUp')}
+              </Button>
+            )}
+          </div>
+        )}
+
+        {emailFormOpen && (
+        <div className="space-y-3" data-testid="register-email-form">
+          <input
+            ref={nameInputRef}
             type="text"
             placeholder={t('namePlaceholder')}
             autoComplete="name"
-            className="w-full rounded-lg border border-border px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full rounded-lg border border-border px-4 py-3 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleRegister()}
@@ -120,7 +202,7 @@ export default function RegisterPage() {
             type="email"
             placeholder={t('emailPlaceholder')}
             autoComplete="email"
-            className="w-full rounded-lg border border-border px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full rounded-lg border border-border px-4 py-3 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleRegister()}
@@ -130,7 +212,7 @@ export default function RegisterPage() {
             type="password"
             placeholder={t('passwordPlaceholder')}
             autoComplete="new-password"
-            className={`w-full rounded-lg border px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand ${
+            className={`w-full rounded-lg border px-4 py-3 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand ${
               showRules && !isPasswordValid ? 'border-destructive' : 'border-border'
             }`}
             value={password}
@@ -147,66 +229,16 @@ export default function RegisterPage() {
               </li>
             </ul>
           )}
-
-          <label className="flex items-start gap-2 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={tosAccepted}
-              onChange={(e) => setTosAccepted(e.target.checked)}
-              className="mt-0.5 h-4 w-4 shrink-0 rounded border-border accent-brand"
-              disabled={loading}
-            />
-            <span className="text-xs text-muted-foreground">
-              {t('tosPrefix')}{' '}
-              <Link href="/terms" target="_blank" className="font-medium text-brand-text hover:text-brand-text/85">
-                {t('termsOfService')}
-              </Link>{' '}
-              {t('and')}{' '}
-              <Link href="/privacy" target="_blank" className="font-medium text-brand-text hover:text-brand-text/85">
-                {t('privacyPolicy')}
-              </Link>
-            </span>
-          </label>
-
-          {/* story #2105 1차 — #2096과 같은 결함클래스(계정 없는 사람이 처음 만나는 화면인데
-              실패 사유가 스크린리더에 안 읽힘). setError(null)이 재시도마다 먼저 실행돼(위
-              handleRegister) 이 단락이 매번 언마운트→리마운트되므로 동일 사유가 반복돼도
-              안정적으로 낭독된다. */}
-          {error && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">{error}</p>}
+          {/* story 4669: with Google on this is the second way — not a second brand-colored button (the hero is Google's) */}
           <button
             onClick={handleRegister}
             disabled={loading || !displayName.trim() || !email.trim() || !password.trim() || !tosAccepted}
-            className="flex w-full min-h-[44px] items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90 disabled:opacity-50"
+            data-testid="register-submit"
+            className={`flex w-full min-h-[44px] items-center justify-center rounded-lg px-4 py-3 text-sm font-medium transition disabled:opacity-50 ${googleEnabled ? 'bg-muted text-foreground hover:bg-muted/80' : 'bg-brand text-brand-foreground hover:bg-brand/90'}`}
           >
             {loading ? t('creatingAccount') : t('submit')}
           </button>
         </div>
-
-        {process.env.NEXT_PUBLIC_OAUTH_ENABLED === 'true' && (
-          <div className="space-y-3">
-            <div className="relative flex items-center">
-              <div className="flex-grow border-t border-border/50" />
-              <span className="mx-3 flex-shrink text-xs text-muted-foreground">{t('orContinueWith')}</span>
-              <div className="flex-grow border-t border-border/50" />
-            </div>
-
-            {/* story #3220 — login/page.tsx의 OAuth 버튼들과 동일 패턴으로 next 전파
-                (/auth/login/route.ts가 이미 next를 읽어 콜백까지 이어준다 — 이 버튼만
-                빠져 있었음, fix-on-sight). */}
-            <a
-              href={tosAccepted ? `/auth/login?provider=google&tos_accepted=true${nextParam ? `&next=${encodeURIComponent(nextParam)}` : ''}` : undefined}
-              onClick={!tosAccepted ? (e) => { e.preventDefault(); setError(t('tosRequiredError')); } : undefined}
-              className={`flex w-full min-h-[44px] items-center justify-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-sm font-medium text-foreground/80 transition hover:bg-muted/50 ${!tosAccepted ? 'opacity-50 cursor-not-allowed' : ''}`}
-            >
-              <svg className="h-5 w-5" viewBox="0 0 24 24">
-                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
-                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
-                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
-                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
-              </svg>
-              {t('continueWithGoogle')}
-            </a>
-          </div>
         )}
 
         <p className="text-center text-sm text-muted-foreground">

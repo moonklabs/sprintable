@@ -122,3 +122,17 @@ describe('LoopsClient — 페이지 h1 1개(story #3946)', () => {
     expect(container.querySelectorAll('h1')).toHaveLength(1);
   });
 });
+
+describe('[SID:4388] LoopsClient — the chosen status filter is announced as pressed', () => {
+  it('the first filter («all») starts pressed; clicking the second moves aria-pressed to it', async () => {
+    await mount();
+    const row = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '전체')!.parentElement!;
+    const pressed = () => Array.from(row.querySelectorAll(':scope > button')).map((b) => b.getAttribute('aria-pressed'));
+    const count = pressed().length;
+    expect(count).toBeGreaterThan(2);
+    expect(pressed()).toEqual(['true', ...Array(count - 1).fill('false')]);
+
+    await act(async () => { (row.querySelectorAll(':scope > button')[1] as HTMLButtonElement).click(); });
+    expect(pressed()).toEqual(['false', 'true', ...Array(count - 2).fill('false')]);
+  });
+});

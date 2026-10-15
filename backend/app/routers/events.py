@@ -39,13 +39,21 @@ from app.dependencies.auth import (
     get_verified_org_id_streaming,
 )
 from app.core import shutdown as _shutdown_module
+from app.core.sse_event_name import sse_event_name, validate_event_type
 from app.dependencies.database import get_db
 from app.dependencies.ownership import _is_org_admin
 from app.models.event import Event
 from app.services.agent_onboarding_config import resolve_locale_from_request
+from app.services.stream_access import RECHECK_BEFORE_SEND_SEC, AccessRecheck
 from app.services.org_locale import resolve_org_locale
 from app.services.i18n_catalog import t
-from app.services.member_resolver import assert_caller_is_member, resolve_member_identity
+from app.services.member_resolver import assert_caller_is_member, lookup_members_by_ids, resolve_member_identity
+
+
+def _access_revoked_frame(reason: str) -> str:
+    """story #4565 — the same frame /agent/stream ends with when its key is no longer allowed."""
+    return f"event: access_revoked\ndata: {json.dumps({'reason': reason})}\n\n"
+
 
 router = APIRouter(prefix="/api/v2/events", tags=["events", "Organization"])
 
@@ -320,6 +328,9 @@ def _should_skip_live_event(eid: str | None, sent_event_ids: set[str]) -> bool:
 
 def _event_to_payload(event: "Event") -> dict:
     return {
+        # story 4649 — 백필은 배치 조회 결과(_backfill_frame_data가 넣는다)로 채운다. 여기서는 모른다고 둔다.
+        # 행의 org_id는 만든 곳이라 쓰지 않고, 저장된 payload의 값은 신뢰하지 않는다.
+        "sender_org_id": None,
         "event_id": str(event.id),
         "event_type": event.event_type,
         "source": {"type": event.source_entity_type, "id": str(event.source_entity_id) if event.source_entity_id else None},
@@ -332,6 +343,55 @@ def _event_to_payload(event: "Event") -> dict:
         # story #4245 — 만든 트랜잭션 id(xid8 · 문자열 — 64비트라 JS number 정밀도 밖일 수 있음). 옛 행 None.
         "created_xid": str(event.created_xid) if getattr(event, "created_xid", None) is not None else None,
     }
+
+
+def _uuid_text_or_none(value: object) -> str | None:
+    """story 4649 — a UUID as text, or None when the value is not one (never passed through as is)."""
+    if value is None:
+        return None
+    try:
+        parsed = uuid.UUID(str(value))
+    except (ValueError, TypeError, AttributeError):
+        return None
+    return None if parsed == uuid.UUID(int=0) else str(parsed)
+
+
+def _with_stream_org(frame: dict, stream_org_id: "uuid.UUID | str | None") -> dict:
+    """story 4649 — two fields lead every agent-stream frame: `stream_org_id` (the org that authenticated this stream — the
+    daemon has no org of its own to compare with) and `sender_org_id` (the sender's org — the server's value from the chat
+    message, null when none or not a UUID). The stream's org is always the authenticated one; a frame's own value of either
+    name is replaced for the stream and validated for the sender."""
+    rest = {k: v for k, v in frame.items() if k not in ("stream_org_id", "sender_org_id")}
+    return {
+        "stream_org_id": str(stream_org_id) if stream_org_id is not None else None,
+        "sender_org_id": _uuid_text_or_none(frame.get("sender_org_id")),
+        **rest,
+    }
+
+
+async def _sender_orgs_for(db: "AsyncSession", events: list) -> dict[str, str | None]:
+    """story 4649 — the senders' orgs for one backfill batch: ONE lookup for the whole batch (not per event, not per frame).
+    Keys are sender ids as text; the value is the sender's own org as a UUID text, or None (orphan · sentinel · not a UUID)."""
+    ids = {e.sender_id for e in events if e.sender_id is not None}
+    if not ids:
+        return {}
+    members = await lookup_members_by_ids(ids, db)
+    return {str(mid): _uuid_text_or_none(getattr(m, "org_id", None)) for mid, m in members.items()}
+
+
+def _backfill_frame_data(event: "Event", stream_org_id: "uuid.UUID | None" = None,
+                         sender_orgs: "dict[str, str | None] | None" = None) -> dict:
+    """story #4505 (Mirko live 00:51Z · PO 01:06Z) — a backfill frame in the shape of the live one. A live frame is the pushed
+    dict, whose payload keys are top-level (`gate_id`, `status`, `conversation_id` …); a backfill frame was `_event_to_payload`,
+    where they sit only under `payload` — so a handler reading the live shape (the approvals inbox `payload.gate_id`, the chat
+    approval card) dropped every event that came by backfill: a gate created before the stream opened or in a reconnect gap
+    never appeared until reload. The payload's keys are also put at the top level here, never over a key the frame already
+    has (event_id · event_type · source · sender_id · payload · content · created_at · created_xid). Backfill only — the live
+    dispatch (`dispatch_router`) and the agent gateway build their own frames and are unchanged."""
+    data = _event_to_payload(event)
+    data["sender_org_id"] = (sender_orgs or {}).get(str(event.sender_id)) if event.sender_id is not None else None
+    flat = {k: v for k, v in (event.payload or {}).items() if k not in data}
+    return _with_stream_org({**flat, **data}, stream_org_id)
 
 
 # ─── SSE endpoint ─────────────────────────────────────────────────────────────
@@ -349,6 +409,12 @@ class CreateEventRequest(BaseModel):
     recipient_id: uuid.UUID
     recipient_type: str
     payload: dict = {}
+
+    @field_validator("event_type")
+    @classmethod
+    def _event_type_is_a_closed_shape(cls, v: str) -> str:
+        # story #4692 [SEC]: the name is written into SSE `event:` lines — a newline in it would plant frames on an agent's stream
+        return validate_event_type(v)
 
 
 class EventResponse(BaseModel):
@@ -470,6 +536,12 @@ async def agent_event_stream(
     # story #2128: 연결 시작 시점에 이미 종료 예정 시각을 갖고 태어난다(#2161과 동일 원리 —
     # "시작할 때 이미 끝날 시각을 갖고 태어나게"). monotonic — 벽시계 조정에 영향 안 받음.
     _lifespan_deadline = time.monotonic() + _SSE_LIFESPAN_SEC + random.uniform(0, _SSE_LIFESPAN_JITTER_SEC)
+
+    # story #4565 (Qadir ①): an agent key revoked after this stream opened (a setup moved the agent to another computer · a
+    # device disconnected) ends it — rechecked on each heartbeat and before more content goes out. Only an agent key's stream
+    # (a person's JWT session has no key to revoke here).
+    _key_id = auth.claims.get("app_metadata", {}).get("api_key_id")
+    _access = AccessRecheck(_key_id, resolved_member_id, agent_only=False) if _key_id else None
 
     async def generate():
         # story #3026(실사고, PO 확定 2026-08-24) — 이 연결이 실제로 클라에 내보낸(yield
@@ -596,13 +668,17 @@ async def agent_event_stream(
                 )
 
                 for i in range(0, len(pending_events), _SSE_BATCH_SIZE):
+                    if _access is not None and (_why := await _access.due(RECHECK_BEFORE_SEND_SEC)):
+                        yield _access_revoked_frame(_why)
+                        return
                     batch = pending_events[i : i + _SSE_BATCH_SIZE]
-                    batch_data = [_event_to_payload(evt) for evt in batch]
+                    sender_orgs = await _sender_orgs_for(db, batch)  # story 4649: one lookup for the batch's senders
+                    batch_data = [_backfill_frame_data(evt, org_id, sender_orgs) for evt in batch]  # story #4505: the live frame's shape
                     # 1c22da3e fix: yield 먼저 → 성공 후 delivered 마킹.
                     # 선마킹 시 yield(클라 disconnect 등) 실패하면 이벤트가 delivered로
                     # 남아 영구 누락. 후마킹 + 클라 seen_ids dedup 으로 손실 0(재전송 허용).
                     for data, evt in zip(batch_data, batch):
-                        yield f"event: {evt.event_type}\nid: {evt.id}\ndata: {json.dumps({**data, 'is_backfill': True})}\n\n"
+                        yield f"event: {sse_event_name(evt.event_type)}\nid: {evt.id}\ndata: {json.dumps({**data, 'is_backfill': True})}\n\n"
                         # story #3026 — 이 연결이 백필로 이미 내보낸 id. 아래 라이브 루프의
                         # 큐에 같은 event_id가 겹쳐 들어와도(레이스 윈도우) 이 연결에서 또
                         # 안 보낸다(연결-로컬 dedup, DB 공유상태 아님).
@@ -627,7 +703,7 @@ async def agent_event_stream(
                 # id와 달라져 클라 SeenIdsCache dedup이 같은 이벤트를 다른 걸로 오판한다.
                 _r_id = _r_payload.pop("_sse_transient_id", None) or str(uuid.uuid4())
                 yield (
-                    f"event: {_r_event_type}\nid: {_r_id}\n"
+                    f"event: {sse_event_name(_r_event_type)}\nid: {_r_id}\n"
                     f"data: {json.dumps({**_r_payload, 'event_id': _r_id, 'is_backfill': True})}\n\n"
                 )
 
@@ -668,8 +744,14 @@ async def agent_event_stream(
                             yield "event: heartbeat\ndata: {}\n\n"
                             if await request.is_disconnected():
                                 break
+                            if _access is not None and (_why := await _access.due(_SSE_HEARTBEAT_TIMEOUT)):
+                                yield _access_revoked_frame(_why)
+                                return
                             continue
                         event_data = get_task.result()
+                        if _access is not None and (_why := await _access.due(RECHECK_BEFORE_SEND_SEC)):
+                            yield _access_revoked_frame(_why)
+                            return
                         event_type = event_data.get("event_type", "message")
                         # story #3026 — dedup 판단은 이 연결이 이미 보냈는지(연결-로컬
                         # `_sent_event_ids`)만 본다. ⚠️예전엔 여기서 `Event.status`(DB, org
@@ -691,11 +773,11 @@ async def agent_event_stream(
                         # 대체돼 나가므로 원본 dict에서 제거(클라에 내부 키 노출 방지).
                         _transient_id = event_data.pop("_sse_transient_id", None)
                         _live_id = eid or _transient_id or str(uuid.uuid4())
-                        _sse_data = json.dumps({**event_data, 'event_id': _live_id, 'is_backfill': False})
+                        _sse_data = json.dumps({**_with_stream_org(event_data, org_id), 'event_id': _live_id, 'is_backfill': False})
                         # S-COMM-12: canonical 이벤트 시 legacy alias도 병행 yield (HTTP SSE 하위호환)
                         if event_type == "conversation.message_created":
                             yield f"event: conversation:message\nid: {_live_id}\ndata: {_sse_data}\n\n"
-                        yield f"event: {event_type}\nid: {_live_id}\ndata: {_sse_data}\n\n"
+                        yield f"event: {sse_event_name(event_type)}\nid: {_live_id}\ndata: {_sse_data}\n\n"
                         # story #3026 — 이 연결이 방금 보낸 id를 기록(연결-로컬, 위 pre-yield
                         # 체크가 읽는 그 집합). yield가 여기까지 왔다는 건 이미 성공했다는
                         # 뜻이라 실패 시 기록 안 남는 걱정은 없다(아래 DB 마킹과 동일 순서
@@ -3113,6 +3195,12 @@ async def _publish_registry_event_core(
     msg_response = await send_message_core(
         conv.id, send_body, background_tasks, db=db, auth=auth, org_id=org_id, after_commit=after_commit,
     )
+    if sender.type == "agent" and payload.get("work_item_type") == "story" and payload.get("work_item_id"):
+        # story #4424 — a desktop setup agent's first write on its first work item = its first result (no-op for others;
+        # the server's own publishes come from the system publisher, never a setup's agent)
+        from app.services.desktop_setup import mark_first_result
+
+        await mark_first_result(payload.get("work_item_id"), sender.id, db=db)
 
     # story #2636(P1b) 갭 1호 처방 — 전환 실측(가동 1시간, 페드루군)에서 실제로 걸린
     # 정황: work_item이 보드에 미배정이면 work_item_stakeholders 해석이 빈 집합이라 발행은
@@ -3902,9 +3990,9 @@ async def apply_recipe_role_bindings(
     from app.models.channel_connection import ChannelConnection
     from app.models.event_definition import EventDefinition
     from app.models.org_generation_connector import OrgGenerationConnector
-    from app.models.recipe_role_binding import RecipeRoleBinding
     from app.models.team import TeamMember
     from app.services.project_auth import require_project_access
+    from app.services.recipe_role_bindings import stage_target, upsert_role_binding
 
     if body.project_id is not None:
         # story #2697 SSOT — require_project_access로 수렴(raw inline has_project_access+raise
@@ -3951,10 +4039,9 @@ async def apply_recipe_role_bindings(
     # "agent" = 오늘 계약 그대로).
     # story #4101(alembic 0391) — 두 값 판별을 세 값으로 확장. "agent"가 기본(무선언 stage
     # 회귀 0)은 그대로.
+    # story #4424 — the rule and the upsert below live in services/recipe_role_bindings.py (shared with the desktop setup).
     def _stage_target(stage: str) -> str:
-        capability = (definition.stage_metadata.get(stage) or {}).get("capability")
-        target = (capability or {}).get("target")
-        return target if target in ("channel_connection", "generation_connector") else "agent"
+        return stage_target(definition, stage)
 
     channel_stage_values = {s: v for s, v in body.role_mapping.items() if _stage_target(s) == "channel_connection"}
     generation_stage_values = {
@@ -4118,44 +4205,12 @@ async def apply_recipe_role_bindings(
     except Exception:
         pass
 
-    # SQL NULL은 `= NULL`로 안 잡힌다(IS NULL 필요) — project_id 스코프 절을 조건부로 구성.
-    project_scope_clause = (
-        RecipeRoleBinding.project_id.is_(None) if body.project_id is None
-        else RecipeRoleBinding.project_id == body.project_id
-    )
-
     upserted = 0
     for stage, value_str in body.role_mapping.items():
-        value_id = uuid.UUID(value_str)
-        target = _stage_target(stage)
-        col_agent = value_id if target == "agent" else None
-        col_channel = value_id if target == "channel_connection" else None
-        col_generation = value_id if target == "generation_connector" else None
-        existing = (await db.execute(
-            select(RecipeRoleBinding).where(
-                RecipeRoleBinding.org_id == org_id,
-                project_scope_clause,
-                RecipeRoleBinding.event_definition_key == definition.key,
-                RecipeRoleBinding.stage == stage,
-            )
-        )).scalar_one_or_none()
-        if existing is not None:
-            # story #4090/#4101 — 재-apply가 같은 stage를 다른 target kind로 바꿀 수도 있다
-            # (예: 정의 개정으로 capability가 붙거나 빠짐) — 세 컬럼 다 명시로 재설정해야
-            # CHECK(ck_recipe_role_bindings_exactly_one_target)가 안 걸린다(한쪽만
-            # setattr하면 구 값이 다른 컬럼에 남아 XOR 위반).
-            existing.agent_member_id = col_agent
-            existing.channel_connection_id = col_channel
-            existing.generation_connector_id = col_generation
-        else:
-            db.add(RecipeRoleBinding(
-                org_id=org_id, project_id=body.project_id, event_definition_key=definition.key,
-                stage=stage,
-                agent_member_id=col_agent,
-                channel_connection_id=col_channel,
-                generation_connector_id=col_generation,
-                created_by=actor_id,
-            ))
+        await upsert_role_binding(
+            db, org_id=org_id, project_id=body.project_id, definition_key=definition.key, stage=stage,
+            target=_stage_target(stage), value_id=uuid.UUID(value_str), actor_id=actor_id,
+        )
         upserted += 1
 
     await db.commit()

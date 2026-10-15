@@ -2508,3 +2508,17 @@ describe('ChatBubble — 글자 0·첨부 0이면 빈 본문 문구(story #4200 
     expect(container.textContent).toContain('a.pdf');
   });
 });
+
+
+describe('ChatBubble — story #4430 «not delivered» line', () => {
+  it('under my own bubble when a block withheld it; nothing on someone else\'s', async () => {
+    const withheld = { ...baseMessage, content: '내일 오전에 초안 공유할게요.', delivery_withheld: { withheld_count: 1, conversation_type: 'dm' as const } };
+    await act(async () => { root.render(wrap(<ChatBubble message={withheld} isMine />)); });
+    expect(container.querySelector('[data-testid="withheld-delivery-line"]')?.textContent)
+      .toBe('전달되지 않았어요 — 받는 사람이 내 메시지를 받지 않도록 해 두었어요');
+    await act(async () => { root.render(wrap(<ChatBubble message={withheld} isMine={false} />)); });
+    expect(container.querySelector('[data-testid="withheld-delivery-line"]')).toBeNull();
+    await act(async () => { root.render(wrap(<ChatBubble message={{ ...baseMessage, content: '평범한 말' }} isMine />)); });
+    expect(container.querySelector('[data-testid="withheld-delivery-line"]')).toBeNull();
+  });
+});

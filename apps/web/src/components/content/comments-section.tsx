@@ -1,7 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { formatScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/components/content/schedule-format';
 import { CommentBodyText } from '@/components/content/comment-body-text';
 import { CommentsRefreshButton, type CommentsRefreshOutcome } from '@/components/content/comments-refresh-button';
 import { Button } from '@/components/ui/button';
@@ -201,7 +201,7 @@ export function deriveCommentsFace(data: RawCommentsResponse): CommentsFace {
 // 여전히 'none', 지어내지 않는다).
 export interface CommentsSectionProps {
   face: CommentsFace;
-  displayTimezone: string;
+  displayTimezone: string | null;
   /** 수동 재수집(BE #3865 조각①). uncollected 포함 모든 얼굴에서 뜬다 — "아직
    * 수집 전"이어도 사람이 지금 바로 트리거할 수 있어야 한다(자동 수집을 기다리지
    * 않는다). onRefresh는 POST만 하고, 성공 뒤 목록을 다시 부르는 건 호출부(페이지)
@@ -251,7 +251,7 @@ function CommentsList({
   comments, displayTimezone, t, onConvertToTask, onReply, onRetryReply, onResubmitReply,
 }: {
   comments: CommentItem[];
-  displayTimezone: string;
+  displayTimezone: string | null;
   t: ReturnType<typeof useTranslations>;
   onConvertToTask: (comment: CommentItem) => void;
   onReply: (comment: CommentItem) => void;
@@ -288,11 +288,11 @@ function CommentsList({
                   시각일 뿐 채널에 올라온 시각이 아니다). */}
               {comment.externalCreatedAt ? (
                 <span className="text-xs text-muted-foreground" data-testid="comments-item-authored-at">
-                  {formatScheduledAt(comment.externalCreatedAt, displayTimezone).display}
+                  {formatViewerScheduledAt(comment.externalCreatedAt, displayTimezone).display}
                 </span>
               ) : (
                 <span className="text-xs text-muted-foreground" data-testid="comments-item-captured-at">
-                  {t('commentsItemCapturedAtLabel', { time: formatScheduledAt(comment.capturedAt, displayTimezone).display })}
+                  {t('commentsItemCapturedAtLabel', { time: formatViewerScheduledAt(comment.capturedAt, displayTimezone).display })}
                 </span>
               )}
             </div>
@@ -440,7 +440,7 @@ export function CommentsSection({ face, displayTimezone, onRefresh, onConvertToT
     );
   }
 
-  const capturedAtDisplay = formatScheduledAt(face.capturedAt, displayTimezone).display;
+  const capturedAtDisplay = formatViewerScheduledAt(face.capturedAt, displayTimezone).display;
 
   if (face.kind === 'empty') {
     return (

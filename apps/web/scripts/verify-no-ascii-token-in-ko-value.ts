@@ -125,6 +125,9 @@ export const TOKEN_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   // prod 승격(결제 되돌림)으로 AU/UI 유일 소비처(automation-usage 경고 배너 문구)가
   // ko.json에서 사라져 죽은 토큰 — 여기 남겨두면 이 가드 자체가 "죽은 항목 방치"를
   // 자기모순으로 만든다(위 stale 자가검출과 동일 규율).
+  // story #4427(유나 ⑥ 문구 채택 2026-09-29 07:16Z) — «회사 IT 관리자»(데스크톱 첫 실행 설정 실패 ⑥ · 유나 확정 문구). 한국어에서 굳은
+  // 말이고 «전산 관리자»가 오히려 낯설다 — 낱말을 바꾸지 않고 토큰을 허용.
+  'IT',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -158,6 +161,9 @@ export function wholeValueRefKey(r: Pick<WholeValueAsciiRef, 'key'>): string {
 // 여러 키에 반복돼도 키마다 등재 필요). story #3922(§⑤ 낱말 드리프트 전량 정리)가
 // baseline 69건을 분류해 이관 — 각 그룹 사유는 PO 判定(2026-09-15) 그대로.
 export const WHOLE_VALUE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
+  // story #4413 — 언어 선택지는 지금 UI 언어와 무관하게 늘 자기 언어 이름(한국어 · English)이다 — 못 읽는 언어로 바뀌어 있어도
+  // 찾게 하려는 것이라 번역 대상이 아님(브랜드명과 같은 부류).
+  'settings.languageOptionEn',
   // 채널 브랜드명(제3자 서비스 고유명사, 번역 대상 아님) — channelConnect·content·
   // organization 3개 네임스페이스에 동일 브랜드 라벨이 반복(각 표면이 독립 소비처).
   'channelConnect.channelLabelFacebook', 'channelConnect.channelLabelGhost',
@@ -301,10 +307,35 @@ export function lowercaseWordRefKey(r: Pick<LowercaseWordRef, 'key' | 'word'>): 
 //    stderr에 실제로 찍히는 로그 문자열 리터럴.
 //  - 브랜드명 예시(moonklabs)·시스템 기능명 리터럴(ping).
 export const LOWERCASE_WORD_ALLOWLIST: ReadonlySet<string> = new Set<string>([
+  // story #4427 (유나 v24 · PO 11:19Z) — Claude Code 터미널이 영어로 띄우는 믿기 선택지를 그대로 인용(«Yes, I trust this folder»):
+  // 사용자가 화살표로 **그 글자를 찾아 고르는** 자리라 옮기면 화면과 어긋난다(CLI 출력 리터럴 · 위 «stderr 로그 문자열» 부류).
+  // Claude Code 2.1.x 폴더 믿기 물음 선택지 원문 · CLI 문구가 바뀌면 같이 고침. PO 승인 2026-09-30 11:24Z.
+  // story 4653 (PO 17040 · 승인 2026-10-12): the CLI command names a person types as they are — not translated (the placeholder of the
+  // setup row's tools field: «예: aws · gcloud · kubectl»). Exact words only, one per entry.
+  'desktop.setup.tools.placeholder::aws',
+  'desktop.setup.tools.placeholder::gcloud',
+  'desktop.setup.tools.placeholder::kubectl',
+  'desktop.setup.trustHint::trust',
+  'desktop.setup.trustHint::this',
+  'desktop.setup.trustHint::folder',
+  'desktop.setup.trustHint::exit', // v27 · PO 12:11Z — «No, exit», the other choice quoted as the CLI shows it
+  'desktop.setup.notConnected.bodyClaude::trust',
+  'desktop.setup.notConnected.bodyClaude::this',
+  'desktop.setup.notConnected.bodyClaude::folder',
+  // story #4433 — Claude Code CLI가 화면에 띄우는 선택지 글자 그대로(«Yes, I trust this folder») — 사람이 터미널에서 그 글자를
+  // 찾아 골라야 해서 번역하면 못 찾음(유나 v24 · v26 표기 규칙 «CLI 선택지는 영어 원문 그대로» · 셸 상태판과 같은 글자).
+  // PO 승인 2026-09-30 12:08Z · CLI 문구가 바뀌면 이 셋과 ko 값을 같이 고침.
+  'desktop.setup.stoppedTrust::folder',
+  'desktop.setup.stoppedTrust::this',
+  'desktop.setup.stoppedTrust::trust',
   // story #4359 — 버튼이 복사하는 셸 `export KEY=…` 줄의 명령어 그대로(유나 문구 판정 · PO 2026-09-27 22:42Z 전달).
   'agents.fakechatEnvCopyExport::export',
   'agents.toolPermissions.coreAlways::ping',
   'board.backlinksEmptyScoped::source',
+  'cage.boostStartFailedConnection::link', // story #4447 — the <link> markup tag (the same «연결 확인» link shape as content.commentsReplyFailureConnectionBlocked)
+  'cage.boostStartFailedConnectionRetry::link', // story #4447 (Yuna) — the same «연결 확인» link, with the retry tail
+  'cage.boostStartBlockedOriginConnection::link', // story #4447 (Yuna 06:12Z) — the «채널 연결» link
+  'cage.boostPauseConnectionLostReconnect::link', // story #4461 — the «광고 연결 다시 잇기» link (channel connections)
   'cage.githubCheckRependingReason::pending',
   'cage.githubCheckRependingReasonWithPrior::pending',
   'chats.commandArgHintPriority::critical',

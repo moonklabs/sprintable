@@ -53,6 +53,103 @@ TIMEZONE_DISPLAY_NAMES: dict[str, dict[str, str]] = {
 ## en 문장 = 유나 定(2026-09-10, 카드 코멘트 착지) — 이 레포 404/409/422 detail 관례
 ## (`<Noun> not found`·`<Noun> already exists`·거절 문장형) 실측 대조 근거로 확定됨.
 _CATALOG: dict[str, dict[str, str]] = {
+    # story #4533 — an agent's permission request notice (명세 모음 B-2 «폰 알림»: the agent and the tool only — no command,
+    # no path; a lock screen and a notice history keep them)
+    "agent_permission.notice_title": {"ko": "권한 대기 · {agent}", "en": "Waiting for permission · {agent}"},
+    "agent_permission.notice_title_bare": {"ko": "권한 대기", "en": "Waiting for permission"},
+    # story #4631 (Yuna «4631» §5 · §5-1) — a conversation whose agent messages are paused (the flood block): what the refused agent
+    # reads (423 · true to how this org's block is released), and the notice to org owners/admins (where to resume it)
+    "conversation.agents_paused_message": {
+        "ko": "이 대화의 에이전트 메시지가 멈춰 있어요(에이전트끼리 짧은 사이에 메시지가 너무 많이 오감)",
+        "en": "Agent messages in this conversation are paused (agents sent each other too many messages in a short time)",
+    },
+    "conversation.agents_paused_hint_manual": {
+        "ko": "조직 관리자가 풀 때까지 이 대화에 보내지 마세요 — 다시 보내도 막혀요",
+        "en": "Don't send to this conversation until an organization admin resumes it — sending again is blocked too",
+    },
+    "conversation.agents_paused_hint_auto": {
+        "ko": "대화가 {n}분쯤 조용하면 다시 보낼 수 있어요 — 그 전에 보내면 또 막혀요",
+        "en": "You can send again once the conversation has been quiet for about {n} minutes — sending before then is blocked too",
+    },
+    # n = 1 (an org whose window is 30 s or less): the catalog has no plural forms, so the singular is its own key (Yuna «4631» 63행)
+    "conversation.agents_paused_hint_auto_one": {
+        "ko": "대화가 {n}분쯤 조용하면 다시 보낼 수 있어요 — 그 전에 보내면 또 막혀요",
+        "en": "You can send again once the conversation has been quiet for about {n} minute — sending before then is blocked too",
+    },
+    "conversation.agents_paused_notice_title": {"ko": "에이전트 메시지를 멈췄어요 · {conversation}", "en": "Agent messages paused · {conversation}"},
+    "conversation.agents_paused_notice_title_bare": {"ko": "에이전트 메시지를 멈췄어요", "en": "Agent messages paused"},
+    "conversation.agents_paused_notice_body": {
+        "ko": "에이전트끼리 짧은 사이에 메시지를 너무 많이 주고받았어요. 대화를 열어 [멈춤 풀기]로 풀 수 있어요.",
+        "en": "Agents sent each other too many messages in a short time. Open the conversation to resume them with [Resume agent messages].",
+    },
+    # story #4534 — a phone's [지금 지시] line in the conversation and its turn-end notice (명세 B-3: no instruction text,
+    # command or path in the notice; «마쳤어요» is not used — the turn ended, not the work)
+    "desktop_command.prompt_line": {"ko": "지시 · 지금 턴에 보냄", "en": "Instruction · sent into the current turn"},
+    # story #4534 (Yuna 03:49Z): pasted while a tool was open — it goes in after that step, so «sent into the current turn» would be false
+    "desktop_command.prompt_line_after_step": {"ko": "지시 · 하던 단계 뒤에 넣음", "en": "Instruction · queued after the step in progress"},
+    "desktop_command.turn_end_title": {"ko": "{agent} · 다음 일 기다림", "en": "{agent} · Waiting for work"},
+    "desktop_command.turn_end_title_bare": {"ko": "다음 일 기다림", "en": "Waiting for work"},
+    "desktop_command.turn_end_body": {
+        "ko": "하던 일을 멈추고 다음 일을 기다려요 — 눌러서 대화를 확인해 주세요",
+        "en": "It stopped and is waiting for the next task — tap to check the conversation",
+    },
+    # story #4534 (Yuna 04:05Z): the turn ended in the board's own word — the title is that state's chip word (one table), the body
+    # what is true there (an error · a usage limit are not «waiting for work»); no instruction text, command or path (B-3)
+    "desktop_command.turn_end_title.waiting_input": {"ko": "{agent} · 입력 대기", "en": "{agent} · Waiting for input"},
+    "desktop_command.turn_end_title.usage_limit": {"ko": "{agent} · 사용 한도", "en": "{agent} · Usage limit"},
+    "desktop_command.turn_end_title.paused_limit": {"ko": "{agent} · 한도로 쉬는 중", "en": "{agent} · Paused at usage limit"},
+    # story #4685 (Yuna `limit-notice-1014.md` — the words as written): an agent on the person's computer stood at the usage limit, and
+    # the one notice that it is working again. One agent: the title is the existing paused_limit one above (same words for the same
+    # state). Several told together: «{agent} and {others} more». No account · model · number of tries in the words.
+    "desktop_limit_notice.stood.title_many": {"ko": "{agent} 외 {others}개 · 한도로 쉬는 중", "en": "{agent} and {others} more · Paused at usage limit"},
+    "desktop_limit_notice.stood.body_known": {
+        "ko": "사용 한도에 걸려 멈췄어요 — {time}에 풀려요. 다시 일하기 시작하면 또 알려요.",
+        "en": "Hit the usage limit and stopped — it resets at {time}. You'll get another notice when work starts again.",
+    },
+    "desktop_limit_notice.stood.body_unknown": {
+        "ko": "사용 한도에 걸려 멈췄어요 — 풀리는 시각은 아직 몰라요. 다시 일하기 시작하면 또 알려요.",
+        "en": "Hit the usage limit and stopped — the reset time isn't known yet. You'll get another notice when work starts again.",
+    },
+    # story #4686 (Yuna `run-info-1014.md` (5)): where the limit hit — the account first (a usage limit hits the ACCOUNT), then the model.
+    # Appended to the «stood» body only (never to «lifted»); no line at all when nothing is known.
+    "desktop_limit_notice.where": {"ko": "한도가 걸린 곳: {where}.", "en": "Limit reached on: {where}."},
+    "desktop_limit_notice.where_account_model": {"ko": "{account} · {model}", "en": "{account} · {model}"},
+    "desktop_limit_notice.where_more_accounts": {"ko": "{account} 외 계정 {k}개", "en": "{account} and {k} more accounts"},
+    # the {time} of the body: the person's clock — «오후 3:20» / «3:20 PM»; another day adds the date — «10월 15일 오전 9:00» / «Oct 15, 9:00 AM»
+    "desktop_limit_notice.time.am": {"ko": "오전", "en": "AM"},
+    "desktop_limit_notice.time.pm": {"ko": "오후", "en": "PM"},
+    "desktop_limit_notice.time.clock": {"ko": "{ampm} {hour}:{minute}", "en": "{hour}:{minute} {ampm}"},
+    "desktop_limit_notice.time.dated": {"ko": "{month}월 {day}일 {clock}", "en": "{month} {day}, {clock}"},
+    "desktop_limit_notice.lifted.title_one": {"ko": "{agent} · 작업 중", "en": "{agent} · Working"},
+    "desktop_limit_notice.lifted.title_many": {"ko": "{agent} 외 {others}개 · 작업 중", "en": "{agent} and {others} more · Working"},
+    "desktop_limit_notice.lifted.body_one": {"ko": "사용 한도가 풀려 다시 일하기 시작했어요.", "en": "The usage limit reset and it's working again."},
+    "desktop_limit_notice.lifted.body_many": {"ko": "사용 한도가 풀려 다시 일하기 시작했어요.", "en": "The usage limit reset and they're working again."},
+    "desktop_command.turn_end_title.error": {"ko": "{agent} · 오류", "en": "{agent} · Error"},
+    "desktop_command.turn_end_title_bare.waiting_input": {"ko": "입력 대기", "en": "Waiting for input"},
+    "desktop_command.turn_end_title_bare.usage_limit": {"ko": "사용 한도", "en": "Usage limit"},
+    "desktop_command.turn_end_title_bare.paused_limit": {"ko": "한도로 쉬는 중", "en": "Paused at usage limit"},
+    "desktop_command.turn_end_title_bare.error": {"ko": "오류", "en": "Error"},
+    "desktop_command.turn_end_body.waiting_input": {
+        "ko": "그 컴퓨터의 터미널에서 답을 기다리고 있어요 — 눌러서 대화를 확인해 주세요",
+        "en": "It's waiting for an answer in that computer's terminal — tap to check the conversation",
+    },
+    "desktop_command.turn_end_body.usage_limit": {
+        "ko": "사용 한도에 걸렸어요 — 눌러서 어떻게 이어 갈지 확인해 주세요", "en": "Hit its usage limit — tap to see how it can go on",
+    },
+    "desktop_command.turn_end_body.paused_limit": {
+        "ko": "사용 한도에 걸려 멈췄어요 — 한도가 풀리면 스스로 이어서 해요", "en": "Hit its usage limit — it continues by itself when the limit resets",
+    },
+    "desktop_command.turn_end_body.error_limit": {
+        "ko": "사용 한도에 걸려 멈췄어요 — 눌러서 확인해 주세요", "en": "Hit its usage limit and stopped — tap to check",
+    },
+    "desktop_command.turn_end_body.error": {
+        "ko": "에이전트가 오류로 멈췄어요 — 까닭은 그 컴퓨터의 데스크톱 앱에서 볼 수 있어요",
+        "en": "The agent stopped with an error — the reason is in the desktop app on that computer",
+    },
+    "agent_permission.notice_body": {
+        "ko": "{tool} 허용을 기다리고 있어요 — 눌러서 확인해 주세요",
+        "en": "Waiting for you to allow {tool} — tap to check",
+    },
     # story #3786 슬라이스 1 — dependencies.py(8건, 고유 키 5개: "의존성을 찾을 수 없음"이
     # 4개 호출부에서 재사용됨).
     "dependencies.item_not_found": {
@@ -811,6 +908,11 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "시작 시각은 종료 시각보다 빨라야 해요.",
         "en": "The start time must be earlier than the end time.",
     },
+    # story #4417 — a boost currency outside the minor-unit table (app/services/currency_minor.py)
+    "ads_boost.unknown_currency": {
+        "ko": "이 통화로는 홍보를 요청할 수 없어요 — {supported} 중 하나로 요청해 주세요.",
+        "en": "Boosts can't be requested in this currency — use one of {supported}.",
+    },
     "ads_boost.publication_not_found": {
         "ko": "이 조직에 없는 발행물이에요.",
         "en": "Publication not found in this organization.",
@@ -842,6 +944,19 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "이 조직에 없는 광고 홍보(boost) 건이에요.",
         "en": "Ads boost not found in this organization.",
     },
+    # story #4460 — a boost's cancel (drafts · Yuna's copy)
+    "ads_boost.cancel_forbidden": {
+        "ko": "이 홍보는 요청한 사람이나 관리자만 취소할 수 있어요.",
+        "en": "Only the person who requested this promotion or an admin can cancel it.",
+    },
+    "ads_boost.already_cancelled": {
+        "ko": "이미 취소된 홍보예요.",
+        "en": "This promotion is already cancelled.",
+    },
+    "ads_boost.cancel_in_progress": {
+        "ko": "이 글의 홍보를 취소하는 중이에요 — 광고가 멈춘 게 확인되면 다시 요청할 수 있어요.",
+        "en": "This post's promotion is being cancelled — you can request again once the ad is confirmed paused.",
+    },
     "ads_boost.gate_not_approved": {
         "ko": "아직 승인되지 않은 광고 홍보(boost) 건이에요.",
         "en": "This ads boost hasn't been approved yet.",
@@ -853,6 +968,46 @@ _CATALOG: dict[str, dict[str, str]] = {
     "ads_boost.already_paused": {
         "ko": "이미 중지된 광고 홍보(boost) 건이에요.",
         "en": "This ads boost is already paused.",
+    },
+    # story #4417 — the spend can't be checked against the budget (another currency · repeated read failures)
+    "ads_boost.spend_unreadable_no_resume": {
+        "ko": "광고비를 예산과 맞춰 볼 수 없어 멈춘 홍보라 다시 켤 수 없어요.",
+        "en": "This boost was paused because its ad spend can't be checked against the budget, so it can't be resumed.",
+    },
+    # story #4486 (Yuna 04:02Z) — a resume · a start refused because the spend reached the approved total budget this cycle
+    "ads_boost.cap_reached_no_resume": {
+        "ko": "쓴 광고비가 총예산에 닿아 멈춘 홍보라 다시 켤 수 없어요 — 더 쓰려면 «홍보 취소» 뒤 같은 글로 새로 요청해 주세요.",
+        "en": "This promotion stopped when its ad spend reached the total budget, so it can't be switched on again. To spend more, cancel it («Cancel promotion») and request the same post again.",
+    },
+    "ads_boost.cap_reached_no_start": {
+        "ko": "다시 승인돼도 총예산에 닿아 멈춘 홍보는 다시 시작하지 않아요 — 더 쓰려면 «홍보 취소» 뒤 같은 글로 새로 요청해 주세요.",
+        "en": "Even with a new approval, a promotion that stopped at its total budget won't start again. To spend more, cancel it («Cancel promotion») and request the same post again.",
+    },
+    "ads_boost.spend_unreadable_title": {
+        "ko": "광고 홍보를 멈췄어요",
+        "en": "We paused an ad boost",
+    },
+    # story #4417 (Qadir 01a0eb71 A) — the ad connection is gone: we can't read the spend and can't pause it at Meta ourselves
+    "ads_boost.spend_context_lost_title": {
+        "ko": "광고 관리자에서 홍보를 직접 멈춰 주세요",
+        "en": "Pause your ad boost in Ads Manager",
+    },
+    "ads_boost.spend_context_lost_body": {
+        "ko": "광고 계정 연결이 끊겨 홍보를 멈출 수 없어요 — 멈추기 전까지 광고비가 계속 나갈 수 있어요. 광고 관리자에서 직접 멈춰 주세요.",
+        "en": "The ad account connection is gone, so we can't pause the boost — ad spend may continue until it's paused. Please pause it in Ads Manager.",
+    },
+    # story #4417 (Yuna 5884175792) — sent while the pause is requested but not in effect yet: never «paused» before it is
+    "ads_boost.spend_unreadable_pausing_title": {
+        "ko": "광고 홍보를 멈추고 있어요",
+        "en": "We're pausing an ad boost",
+    },
+    "ads_boost.spend_unreadable_pausing_body": {
+        "ko": "광고비를 승인한 예산과 맞춰 볼 수 없어 홍보를 멈추고 있어요. 멈추면 더는 광고비가 나가지 않아요.",
+        "en": "We couldn't check the ad spend against the approved budget, so we're pausing the boost. Once it's paused, no more ad spend.",
+    },
+    "ads_boost.spend_unreadable_body": {
+        "ko": "광고비를 승인한 예산과 맞춰 볼 수 없어 홍보를 멈췄어요. 더는 광고비가 나가지 않아요.",
+        "en": "We couldn't check the ad spend against the approved budget, so we paused the boost. No more ad spend.",
     },
     "ads_boost.not_paused": {
         "ko": "중지 상태가 아닌 광고 홍보(boost) 건이에요.",

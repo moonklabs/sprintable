@@ -16,6 +16,8 @@ def _mock_story(status: str = "backlog") -> MagicMock:
     s.id = STORY_ID
     s.org_id = ORG_ID
     s.project_id = PROJECT_ID
+    # story 4615: a live story — a MagicMock's automatic deleted_at is not None (GET /stories/{id} answers 404 for a deleted one)
+    s.deleted_at = None
     # story 9ac9b80f: MagicMock 자동 속성은 Pydantic int|None 검증 실패 — 명시 세팅.
     s.story_number = 1
     s.epic_id = None

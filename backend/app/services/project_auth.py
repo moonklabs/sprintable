@@ -722,11 +722,16 @@ async def accessible_project_ids_in_org(
     return [uuid.UUID(str(r[0])) for r in rows.all()]
 
 
-async def restricted_accessible_project_ids(
+async def project_scope(
     session: AsyncSession, user_id: uuid.UUID, org_id: uuid.UUID,
-) -> list[uuid.UUID] | None:
-    """story #4351 — caller가 org의 **모든** 프로젝트에 접근하면 None(거를 것 없음 — owner/admin 등은 옛 동작 그대로), 아니면 접근 가능
-    프로젝트 목록. «제한된 caller에게만 범위를 건다»는 목록 · 집계 라우트가 같이 쓴다."""
+) -> tuple[list[uuid.UUID], bool]:
+    """story #4688 (AC2): `(ids, restricted)` — the projects a project-bound query filters by, and whether the caller is limited.
+
+    `ids` = the projects that EXIST (not deleted) and that the caller reaches — for a caller who reaches every project that is simply every project
+    still there. `accessible_project_ids_in_org` already reads from `projects`, so no query is added: the second read below (the org's live projects)
+    is the one `restricted_accessible_project_ids` always made, only to tell «limited» from «reaches all».
+    A deleted project's rows have no foreign key that removes them; «reaches all» must never mean «filter nothing» (they would join the owner's
+    lists and counts). `restricted` is only for the labels that say «org» vs «accessible_projects» (who is looking, not what the query used)."""
     from sqlalchemy import select
 
     from app.models.project import Project
@@ -735,7 +740,49 @@ async def restricted_accessible_project_ids(
     all_projects = set((await session.execute(
         select(Project.id).where(Project.org_id == org_id, Project.deleted_at.is_(None))
     )).scalars())
-    return None if all_projects <= set(accessible) else accessible
+    return accessible, not (all_projects <= set(accessible))
+
+
+async def restricted_accessible_project_ids(
+    session: AsyncSession, user_id: uuid.UUID, org_id: uuid.UUID,
+) -> list[uuid.UUID] | None:
+    """story #4351 — caller가 org의 **모든** 프로젝트에 접근하면 None(거를 것 없음 — owner/admin 등은 옛 동작 그대로), 아니면 접근 가능
+    프로젝트 목록. «제한된 caller에게만 범위를 건다»는 목록 · 집계 라우트가 같이 쓴다.
+
+    story #4688: filtering routes no longer read this `None` as «filter nothing» — they use `scoped_project_ids` / `project_scope`. It stays for
+    what only asks «is this caller limited?»."""
+    ids, restricted = await project_scope(session, user_id, org_id)
+    return ids if restricted else None
+
+
+async def scoped_project_ids(session: AsyncSession, user_id: uuid.UUID, org_id: uuid.UUID) -> list[uuid.UUID]:
+    """story #4688 (AC2): the list a project-bound query filters by (see `project_scope`) — for routes that need no «scope» label."""
+    return (await project_scope(session, user_id, org_id))[0]
+
+
+async def live_project_ids_in_org(session: AsyncSession, org_id: uuid.UUID) -> list[uuid.UUID]:
+    """story #4688 (AC2): the org's projects that exist and are not deleted. `restricted_accessible_project_ids` answers None («nothing to filter»)
+    for a caller who reaches every project — that None lets a deleted project's leftovers (rows with no foreign key to `projects`) into org-wide
+    aggregates; the aggregate routes use THIS list in its place, so «all projects» means all that are still there."""
+    from sqlalchemy import select
+
+    from app.models.project import Project
+
+    return list((await session.execute(
+        select(Project.id).where(Project.org_id == org_id, Project.deleted_at.is_(None))
+    )).scalars())
+
+
+async def project_is_live(session: AsyncSession, org_id: uuid.UUID, project_id: uuid.UUID) -> bool:
+    """story #4688 (AC2): the project exists in this org and is not deleted. Deleting a project is non-destructive (what it held stays,
+    unreachable): a list asked for a dead project's own id has nothing to say."""
+    from sqlalchemy import select
+
+    from app.models.project import Project
+
+    return (await session.execute(
+        select(Project.id).where(Project.id == project_id, Project.org_id == org_id, Project.deleted_at.is_(None))
+    )).scalar_one_or_none() is not None
 
 
 async def project_accessible_member_ids(
@@ -770,6 +817,16 @@ async def project_accessible_member_ids(
             FROM org_members om
             WHERE om.org_id = :org_id
               AND om.role IN ('owner', 'admin')
+              AND om.deleted_at IS NULL
+            UNION
+            -- story #4507: a person granted this project through an org-member grant row (project_access.member_id NULL —
+            -- not in the team_members view), as has_project_access's human grant branch admits them
+            SELECT om.id
+            FROM project_access pa
+            JOIN org_members om ON om.id = pa.org_member_id
+            WHERE pa.project_id = :project_id
+              AND pa.permission = 'granted'
+              AND om.org_id = :org_id
               AND om.deleted_at IS NULL
             """
         ),

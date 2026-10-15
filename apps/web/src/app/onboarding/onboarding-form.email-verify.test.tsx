@@ -76,7 +76,7 @@ describe('OnboardingForm — EMAIL_VERIFICATION_REQUIRED (story #2441)', () => {
     // raw 영문 에러 문자열이 화면에 그대로 노출되면 안 된다(#2437에서 실제로 겪은 결함).
     expect(container.textContent).not.toContain('Email verification required to create organization');
     expect(container.textContent).toContain('이메일 인증');
-    const resendBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '인증 메일 재전송');
+    const resendBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '인증 메일 다시 보내기');
     expect(resendBtn).toBeTruthy();
   });
 
@@ -125,7 +125,7 @@ describe('OnboardingForm — EMAIL_VERIFICATION_REQUIRED (story #2441)', () => {
     await act(async () => { submitButton().click(); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
-    const resendBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '인증 메일 재전송') as HTMLButtonElement;
+    const resendBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '인증 메일 다시 보내기') as HTMLButtonElement;
     await act(async () => { resendBtn.click(); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
@@ -155,7 +155,7 @@ describe('OnboardingForm — EMAIL_VERIFICATION_REQUIRED (story #2441)', () => {
     await act(async () => { submitButton().click(); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
-    const resendBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '인증 메일 재전송') as HTMLButtonElement;
+    const resendBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '인증 메일 다시 보내기') as HTMLButtonElement;
     await act(async () => { resendBtn.click(); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
@@ -186,7 +186,7 @@ describe('OnboardingForm — EMAIL_VERIFICATION_REQUIRED (story #2441)', () => {
     expect(container.textContent).not.toContain('Slug already exists');
     // story #3901 — 리터럴 재-pin 대신 ko.json 값을 읽어 대조.
     expect(container.textContent).toContain(koMessages.onboarding.createOrgFailed);
-    const resendBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '인증 메일 재전송');
+    const resendBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '인증 메일 다시 보내기');
     expect(resendBtn).toBeUndefined();
   });
 });

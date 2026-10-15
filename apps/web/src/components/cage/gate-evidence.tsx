@@ -5,8 +5,8 @@ import { CheckCircle, XCircle, GitPullRequest, Check, Pause, Ban, Loader2, type 
 import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone, formatScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
+import { formatScheduledAt } from '@/components/content/schedule-format';
 import type { GateItem } from '@/components/kanban/types';
 import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity-ref';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
@@ -21,6 +21,8 @@ import { isProductionWorkbenchKind, type ProductionWorkbenchKind } from '@/servi
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { keepHref } from '@/lib/with-project-param';
 import { actorRowLabels } from '@/lib/member-display';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { useTeamTimeZone } from '@/components/team-time-zone';
 
 /**
  * H1-S8 머지 verdict 게이트 evidence(read-only 표시). 3 surface(GateInbox row·story detail·
@@ -542,13 +544,17 @@ interface GateActivityLogItem {
   action: string;
   actor_id: string | null;
   actor_name: string | null;
+  /** story #4485 — human · agent · platform (BE ActivityLog.actor_type). An older server may not send it. */
+  actor_type?: string;
   context: Record<string, unknown>;
   created_at: string;
 }
 
 // action(BE ActivityLog.action 원문, gate_service.py) → i18n 키. 매핑에 없는 action은 원문 그대로
 // 폴백 렌더(신규 action 추가 시 이 화면이 죽는 대신 정직하게 raw string을 보여줌 — no-fiction).
-const GATE_ACTIVITY_LABEL_KEY: Record<string, string> = {
+// story #4485 — every action the backend writes on a gate is listed in contracts/gate-activity-actions.json; the backend test keeps
+// that list equal to the code and gate-evidence.4485.test.ts keeps every one of them here with its ko/en label.
+export const GATE_ACTIVITY_LABEL_KEY: Record<string, string> = {
   gate_approved: 'gateActivityActionApproved',
   gate_rejected: 'gateActivityActionRejected',
   gate_resolution_undone: 'gateActivityActionUndone',
@@ -560,14 +566,23 @@ const GATE_ACTIVITY_LABEL_KEY: Record<string, string> = {
   ads_spend_refresh_requested: 'gateActivityActionAdsSpendRefreshRequested',
   // story #3806(Phase3·3-2 PR 14, 페드루 PO 確定 2026-09-11 19:52Z) —
   // process_one_ads_boost_command 실행 성공 지점 신설 액션(ads_boost_execution.py
-  // ::_ACTIVITY_ACTION_BY_OP). ads_boost_paused는 scheduler+cap_reached 조합일
-  // 때만 아래 adsBoostActivityLabel()이 별도 문구로 덮어쓴다(이 맵은 그 기본값).
+  // ::_ACTIVITY_ACTION_BY_OP). ads_boost_paused는 scheduler가 멈춘 것이면 아래
+  // adsBoostActivityLabel()이 그 사유대로 덮어쓴다(이 맵은 사람이 누른 기본값).
   ads_boost_started: 'gateActivityActionAdsBoostStarted',
   ads_boost_paused: 'gateActivityActionAdsBoostPaused',
   ads_boost_resumed: 'gateActivityActionAdsBoostResumed',
+  // story #4460 (Yuna 02:19Z) — cancel_ads_boost records it (ads_boost_cancel.py)
+  ads_boost_cancelled: 'gateActivityActionAdsBoostCancelled',
   // story #4262(유나 표) — newsletter_send_execution.py `_ACTIVITY_ACTION_SEND_*`가 남기는 액션. 원시 문자열이 그대로 보였다.
   newsletter_send_succeeded: 'gateActivityActionNewsletterSendSucceeded',
   newsletter_send_failed: 'gateActivityActionNewsletterSendFailed',
+  // story #4485 (Yuna 02:25Z) — written but never named here, so the history showed the raw key
+  gate_delegated: 'gateActivityActionDelegated',
+  gate_tossed: 'gateActivityActionTossed',
+  gate_discussion_requested: 'gateActivityActionDiscussionRequested',
+  approval_card_delivery_failed: 'gateActivityActionApprovalCardDeliveryFailed',
+  gate_held: 'gateActivityActionHeld',
+  gate_pending: 'gateActivityActionResumed',
 };
 
 // story #3806(Phase3·3-2 PR 14) — ads_boost_paused 한 action이 두 얼굴이다: 사람이
@@ -575,12 +590,24 @@ const GATE_ACTIVITY_LABEL_KEY: Record<string, string> = {
 // — 사용자가 "왜 멈췄는지" 화면에서 바로 읽어야 한다는 게 이 PR의 존재 이유 그
 // 자체). context는 BE가 이미 실어 보낸다(ads_boost_execution.py::activity_context
 // — {initiated_by, reason?}), 여기서 새로 지어내지 않는다.
+// story #4466 (PO 17:07Z, the live run) — the scheduler pauses for three reasons now (the cap · the spend could not be checked ·
+// the approval withdrawn), and the history said «광고비 상한 도달» for all of them. The line follows the reason the server recorded
+// (ads_boost_execution._scheduler_pause_reason); a scheduler pause without one says «자동 중지» only (Yuna 17:09Z — automatic is
+// true, the cause unknown), never the cap.
+const SCHEDULER_PAUSE_LABEL: Record<string, string> = {
+  cap_reached: 'gateActivityActionAdsBoostAutoPausedCapReached',
+  approval_gone: 'gateActivityActionAdsBoostAutoPausedApprovalGone',
+  spend_unreadable: 'gateActivityActionAdsBoostAutoPausedSpendUnreadable',
+  cancelled: 'gateActivityActionAdsBoostAutoPausedCancelled', // story #4460 — the scheduler finished a cancel's pause
+  none: 'gateActivityActionAdsBoostAutoPaused', // no reason recorded: «자동 중지» only
+};
+
 function adsBoostActivityLabel(item: GateActivityLogItem, t: ReturnType<typeof useTranslations>): string | null {
-  if (item.action !== 'ads_boost_paused') return null;
-  if (item.context['initiated_by'] === 'scheduler' && item.context['reason'] === 'cap_reached') {
-    return t('gateActivityActionAdsBoostAutoPausedCapReached');
-  }
-  return null;
+  // story #4484 (Yuna 02:20Z) — a start the scheduler made on the sealed start date (the actor reads «시스템»)
+  if (item.action === 'ads_boost_started' && item.context['initiated_by'] === 'scheduler') return t('gateActivityActionAdsBoostAutoStarted');
+  if (item.action !== 'ads_boost_paused' || item.context['initiated_by'] !== 'scheduler') return null;
+  const reason = item.context['reason'];
+  return t((typeof reason === 'string' && SCHEDULER_PAUSE_LABEL[reason]) || SCHEDULER_PAUSE_LABEL.none);
 }
 
 /**
@@ -593,7 +620,7 @@ function adsBoostActivityLabel(item: GateActivityLogItem, t: ReturnType<typeof u
 export function GateActivityHistory({ gateId, refreshKey }: { gateId: string; refreshKey?: number }) {
   const t = useTranslations('cage');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [items, setItems] = useState<GateActivityLogItem[] | null>(null);
 
   // story #3806(Phase3·3-2 PR 12, 페드루 PO 실측 캡처 2026-09-11 18:16Z) — 「눌렀는데
@@ -619,9 +646,15 @@ export function GateActivityHistory({ gateId, refreshKey }: { gateId: string; re
   }, [gateId, refreshKey]);
 
   if (items === null) return null;
+  const unknownActions = [...new Set(items.filter((item) => !GATE_ACTIVITY_LABEL_KEY[item.action]).map((item) => item.action))];
+  if (unknownActions.length && process.env.NODE_ENV !== 'production') {
+    console.warn('[gate-activity] no label for action(s) — shown as «기타 활동»; add them to GATE_ACTIVITY_LABEL_KEY', unknownActions);
+  }
   // [SID:4311 PR 3] 활동 줄의 행위자 — 같은 이름 서로 다른 구성원 둘이면 «· ID 앞 8자»(행위자 id마다 한 번 · 불러온 줄 안에서만).
   // 이름 빔은 기존 폴백 그대로(story #2975) — 이 응답은 떠난 사람과 이름 없는 사람을 둘 다 null로 싣어(gates.py actor_name_map) 가를 수 없다.
-  const actorLabel = (item: GateActivityLogItem) => item.actor_name || t('gateActivityActorFallback');
+  // story #4485 — a row the server itself wrote (actor_type platform, no actor_id) is «시스템», in the same place as a person's name
+  const actorLabel = (item: GateActivityLogItem) =>
+    item.actor_name || (item.actor_type === 'platform' ? t('gateActivityActorSystem') : t('gateActivityActorFallback'));
   const actorLabels = actorRowLabels(items.map((item) => ({ id: item.actor_id, label: item.actor_id ? actorLabel(item) : null })));
 
   return (
@@ -639,10 +672,12 @@ export function GateActivityHistory({ gateId, refreshKey }: { gateId: string; re
               <li key={item.id} className="text-[11px] text-muted-foreground">
                 <span className="font-medium text-foreground">{(item.actor_id ? actorLabels.get(item.actor_id) : undefined) ?? actorLabel(item)}</span>
                 {' · '}
-                {adsBoostLabel ?? (labelKey ? t(labelKey) : item.action)}
+                {/* story #4460 (Yuna 02:19Z · 02:20Z · PO) — an action this map does not know is never drawn as its raw key (the second
+                    time, after 3806's ads_spend_refresh_requested): «기타 활동», the row kept (an audit record) */}
+                {adsBoostLabel ?? (labelKey ? t(labelKey) : t('gateActivityActionOther'))}
                 {sha ? <span className="ml-1 font-mono">{t('githubCheckShaLabel', { sha: sha.slice(0, 7) })}</span> : null}
                 {/* story #3493 — 게이트 활동 로그 항목은 "기록"(정본 formatRelativeTime). */}
-                <span className="ml-1">· {formatRelativeTime(item.created_at, locale, displayTimezone)}</span>
+                <span className="ml-1">· {formatViewerRelativeTime(item.created_at, locale, displayTimezone)}</span>
               </li>
             );
           })}
@@ -777,8 +812,10 @@ function publishOutcomeLabel(code: string, t: ReturnType<typeof useTranslations>
  * 정정용으로 남긴다.
  */
 function LinkedChannelDraftCard({ gate, isRecipeGate }: { gate: GateItem; isRecipeGate: boolean }) {
+  const teamTz = useTeamTimeZone(); // story #4443 PR3b — a promised time is the team's (the org's zone)
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('cage');
+  const viewerTz = useViewerTimeZone(); // story #4443 PR2b
   const draft = gate.linked_channel_draft;
 
   if (!draft) {
@@ -829,7 +866,7 @@ function LinkedChannelDraftCard({ gate, isRecipeGate }: { gate: GateItem; isReci
       {draft.sealed_scheduled_at ? (
         <p className="text-muted-foreground">
           {t('linkedChannelDraftScheduledLabel')} ·{' '}
-          <span className="text-foreground">{formatScheduledAt(draft.sealed_scheduled_at, resolveDisplayTimezone().tz).display}</span>
+          <span className="text-foreground">{formatScheduledAt(draft.sealed_scheduled_at, teamTz, viewerTz).display}</span>
         </p>
       ) : null}
       <LinkedDraftVersionLine version={draft.version} />
@@ -882,8 +919,10 @@ function LinkedDraftVersionLine({ version }: { version: number }) {
  * 초안이 없을 때의 빈 상태는 채널 카드가 그린다(레시피 게이트엔 두 카드 중 하나만 그려진다).
  */
 function LinkedSiteDraftCard({ gate }: { gate: GateItem }) {
+  const teamTz = useTeamTimeZone(); // story #4443 PR3b — a promised time is the team's (the org's zone)
   const t = useTranslations('cage');
   const flatHref = useFlatHref(); // story #4226 — flat 링크 `?p=`
+  const viewerTz = useViewerTimeZone(); // story #4443 PR2b
   const draft = gate.linked_site_draft;
   if (!draft) return null;
   const destinationLabel = draft.channel
@@ -899,7 +938,7 @@ function LinkedSiteDraftCard({ gate }: { gate: GateItem }) {
       {draft.sealed_scheduled_at ? (
         <p className="text-muted-foreground">
           {t('linkedChannelDraftScheduledLabel')} ·{' '}
-          <span className="text-foreground">{formatScheduledAt(draft.sealed_scheduled_at, resolveDisplayTimezone().tz).display}</span>
+          <span className="text-foreground">{formatScheduledAt(draft.sealed_scheduled_at, teamTz, viewerTz).display}</span>
         </p>
       ) : null}
       <LinkedDraftVersionLine version={draft.version} />
@@ -918,6 +957,7 @@ function LinkedSiteDraftCard({ gate }: { gate: GateItem }) {
 }
 
 function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
+  const teamTz = useTeamTimeZone(); // story #4443 PR3b — a promised time is the team's (the org's zone)
   const t = useTranslations('cage');
   const tContent = useTranslations('content');
   // story #4082(유나 design CHANGES 2026-09-21) — approvals-queue.tsx·gates/[id]/page.tsx와
@@ -928,7 +968,7 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
   // 복제해 두고 cage가 tContent를 넘겨 그 복제분을 썼다(#3367 주석 정정).
   const channelLabel = useChannelLabel();
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [expanded, setExpanded] = useState(false);
   return (
     <div className="mt-1.5 space-y-1 rounded-lg bg-muted/40 px-2.5 py-1.5 text-[11.5px]">
@@ -949,9 +989,9 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
             <p>
               <span className="text-muted-foreground">{t('adsBoostScheduleLabel')} · </span>
               <span className="text-foreground">
-                {formatScheduledAt(facts.adsStartsAt, displayTimezone).display}
+                {formatScheduledAt(facts.adsStartsAt, teamTz, displayTimezone).display}
                 {' ~ '}
-                {formatScheduledAt(facts.adsEndsAt, displayTimezone).display}
+                {formatScheduledAt(facts.adsEndsAt, teamTz, displayTimezone).display}
                 {' '}
                 ({t('adsBoostScheduleDays', {
                   days: Math.round(
@@ -1033,7 +1073,7 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
           {facts.newsletterSendScheduledAt ? (
             <p>
               <span className="text-muted-foreground">{t('newsletterSendScheduleLabel')} · </span>
-              <span className="text-foreground">{formatScheduledAt(facts.newsletterSendScheduledAt, displayTimezone).display}</span>
+              <span className="text-foreground">{formatScheduledAt(facts.newsletterSendScheduledAt, teamTz, displayTimezone).display}</span>
             </p>
           ) : null}
           <p>
@@ -1118,7 +1158,7 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
         <div>
           <button
             type="button"
-            onClick={() => setExpanded((v) => !v)}
+            onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}
             className="text-muted-foreground underline underline-offset-2"
           >
             {expanded ? t('recipeApprovalSummaryCollapse') : t('recipeApprovalSummaryExpand')}
@@ -1157,7 +1197,7 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
       {facts.scheduledAt ? (
         <p>
           <span className="text-muted-foreground">{t('recipeApprovalScheduledAtLabel')} · </span>
-          <span className="text-foreground">{formatScheduledAt(facts.scheduledAt, displayTimezone).display}</span>
+          <span className="text-foreground">{formatScheduledAt(facts.scheduledAt, teamTz, displayTimezone).display}</span>
         </p>
       ) : null}
       {/* story #3367(3자기점검, 페드루 지적 2026-09-10·유나 CHANGES 정정) — AC7

@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { useChatSse, normalizeToMessage } from './use-chat-sse';
+import { useChatSse, normalizeToMessage, parseDeliveryWithheld, sentMessageFromAnswer } from './use-chat-sse';
 
 describe('normalizeToMessage — story #2604 P2 approval_target 노출', () => {
   it('raw payload에 approval_target이 있으면 그대로 실린다', () => {
@@ -555,5 +555,31 @@ describe('useChatSse — 폴링 fallback(story #3621)', () => {
     // onPoll이 없으니 폴링 effect 자체가 조기 return — 타이머 advance가 아무 것도 못 건드려도
     // (에러 없이) 통과해야 한다. 이 테스트의 존재 의의는 "onPoll 없을 때도 회귀 없음" 확인.
     await expect(act(async () => { await vi.advanceTimersByTimeAsync(60_000); })).resolves.not.toThrow();
+  });
+});
+
+
+describe('story #4430 — delivery_withheld is kept on the way in (a dropped field would be a quiet success again)', () => {
+  it('normalizeToMessage keeps a read\'s delivery_withheld; absent stays absent', () => {
+    const m = normalizeToMessage({ id: 'm1', content: 'x', delivery_withheld: { withheld_count: 2, reason: 'recipient_blocked_sender', conversation_type: 'group' } });
+    expect(m.delivery_withheld).toEqual({ withheld_count: 2, conversation_type: 'group' });
+    expect(normalizeToMessage({ id: 'm2', content: 'y' }).delivery_withheld).toBeUndefined();
+  });
+
+  it('the send answer\'s sibling `delivery` lands on the sender\'s own line', () => {
+    const m = sentMessageFromAnswer({
+      data: { id: 'm3', content: 'z', sender: { id: 'me' } },
+      delivery: { withheld_count: 1, reason: 'recipient_blocked_sender', conversation_type: 'dm' },
+    });
+    expect(m.id).toBe('m3');
+    expect(m.delivery_withheld).toEqual({ withheld_count: 1, conversation_type: 'dm' });
+    expect(sentMessageFromAnswer({ data: { id: 'm4', content: 'w' } }).delivery_withheld).toBeUndefined();
+  });
+
+  it('only a positive integer count counts; an unknown kind is dropped (the line then uses the count wording)', () => {
+    for (const bad of [null, undefined, 'x', {}, { withheld_count: 0 }, { withheld_count: -1 }, { withheld_count: 1.5 }, { withheld_count: '2' }]) {
+      expect(parseDeliveryWithheld(bad)).toBeUndefined();
+    }
+    expect(parseDeliveryWithheld({ withheld_count: 1, conversation_type: 'channel' })).toEqual({ withheld_count: 1 });
   });
 });

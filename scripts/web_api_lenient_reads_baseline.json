@@ -1,0 +1,95 @@
+{
+ "app/(authenticated)/organization/events/page.tsx": {
+  "isArray-or-data": 1
+ },
+ "app/invite/accept/page.tsx": {
+  "data-or-self": 1
+ },
+ "app/onboarding/connect-step.tsx": {
+  "data-or-self": 1
+ },
+ "components/agents/agent-connection-settings-section.tsx": {
+  "data-or-self": 1
+ },
+ "components/cage/gate-undo-button.tsx": {
+  "data-in": 1
+ },
+ "components/chat/chat-view.tsx": {
+  "isArray-or-data": 1
+ },
+ "components/chat/thread-panel.tsx": {
+  "isArray-or-data": 1
+ },
+ "components/connect-rules-v3/connect-rules-v3-events.tsx": {
+  "isArray-or-data": 1
+ },
+ "components/desktop/desktop-setup-progress.tsx": {
+  "key-in-self-or-data": 1
+ },
+ "components/desktop/desktop-setup.tsx": {
+  "field-or-data-field": 3
+ },
+ "components/dispatch/entity-dispatch-panel.tsx": {
+  "data-or-self": 1
+ },
+ "components/docs/doc-gate-section.tsx": {
+  "data-or-self": 1
+ },
+ "components/docs/doc-status-rail.tsx": {
+  "data-or-self": 1
+ },
+ "components/docs/use-doc-sync.ts": {
+  "data-or-self": 1
+ },
+ "components/epics/epic-swimlane-board.tsx": {
+  "data-or-self": 1
+ },
+ "components/integrations/pr-link-section.tsx": {
+  "data-or-self": 2
+ },
+ "components/kanban/kanban-board.tsx": {
+  "data-or-self": 3
+ },
+ "components/organization/apply-recipe-dialog.tsx": {
+  "isArray-or-data": 2
+ },
+ "components/organization/marketing-recipe-apply-dialog.tsx": {
+  "isArray-or-data": 1
+ },
+ "components/presence/use-team-presence.ts": {
+  "isArray-or-data": 1
+ },
+ "components/settings/my-notification-channel-section.tsx": {
+  "data-or-self": 1
+ },
+ "components/settings/workflow-template-gallery-section.tsx": {
+  "isArray-or-data": 2
+ },
+ "hooks/use-chat-sse.ts": {
+  "data-or-self": 1
+ },
+ "hooks/use-entity-picker.ts": {
+  "isArray-or-data": 3
+ },
+ "hooks/use-marketing-recipes.ts": {
+  "isArray-or-data": 1
+ },
+ "hooks/use-recipe-member-options.ts": {
+  "isArray-or-data": 1
+ },
+ "hooks/use-recipe-start-candidates.ts": {
+  "field-or-data-field": 1
+ },
+ "hooks/use-unified-switcher.ts": {
+  "field-or-data-field": 1
+ },
+ "hooks/use-work-item-production-evidence.ts": {
+  "isArray-or-data": 1
+ },
+ "lib/fetch-gate.ts": {
+  "data-or-self": 1
+ },
+ "lib/toolset-catalog.ts": {
+  "data-in": 1
+ }
+}

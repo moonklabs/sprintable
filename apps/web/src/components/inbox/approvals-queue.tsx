@@ -7,7 +7,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { CheckCircle, ChevronDown, ChevronUp, Pencil, XCircle } from 'lucide-react';
+import { CheckCircle, ChevronDown, ChevronUp, XCircle } from 'lucide-react';
 import { deriveRiskLevel, usesSignatureFlow, deriveDiffFacts, isDecisionGate, deriveDecisionFacts, isRecipePublishGate, reviewedDraftOf } from '@/components/cage/gate-risk';
 import { gateNeedsAction } from '@/components/cage/gate-evidence';
 import { GateUndoButton, UNDO_WINDOW_MS } from '@/components/cage/gate-undo-button';
@@ -17,7 +17,7 @@ import { gateTypeLabel } from '@/lib/gate-type-label';
 import { gateApproveLabelKey, sigApproveAndSignLabelKey } from '@/lib/newsletter-gate-approve-label';
 import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
-import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatScheduledAt } from '@/components/content/schedule-format';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -29,6 +29,8 @@ import { INBOX_GATES_HELD_URL, INBOX_GATES_PENDING_URL, takePrefetchedOrFetch, t
 import { fetchGateById } from '@/lib/fetch-gate';
 import { buildGateTransitionBody, buildHitlDecisionBody, classifyGateTransitionErrorCode } from '@/lib/gate-decision-payload';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { useTeamTimeZone } from '@/components/team-time-zone';
 
 // story #1960(P2-S4) — 결재함 통합 큐. Gate 3종(게이트·문서결재·머지게이트, gate_type/
 // work_item_type discriminator로 단일 Gate 테이블에 자연 수렴 — #1954에서 확定된 스코프
@@ -143,6 +145,7 @@ function formatUndoRemaining(resolvedAtMs: number, t: ReturnType<typeof useTrans
 }
 
 export function ApprovalsQueue() {
+  const teamTz = useTeamTimeZone(); // story #4443 PR3b — a promised time is the team's (the org's zone)
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   // story #4241 — 결재함은 조직 전체 목록이다. 행 링크는 «현재 프로젝트»가 아니라 결재 자신의 프로젝트를 싣는다(다른 프로젝트 결재를 열면
   // 셸도 그 프로젝트로 — 셸·본문 두 세계 방지). 프로젝트 무관 대상(null)은 지금처럼 현재 프로젝트. flatHref는 이미 실은 p를 보존한다.
@@ -161,7 +164,7 @@ export function ApprovalsQueue() {
   // SSOT(organization 네임스페이스)로 stage/role 낱말을 통일.
   const tOrg = useTranslations('organization');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const router = useRouter();
   // story #2103 — BE `PATCH /api/v1/hitl-requests/{id}`가 human-only 불변식이다(gates.py
   // transition_gate_endpoint와 동형, resolved.type != "human" → 403). #2091(게이트 상세)과
@@ -560,9 +563,9 @@ export function ApprovalsQueue() {
                 {gate.sealed_ads_starts_at && gate.sealed_ads_ends_at ? (
                   <>
                     {' · '}
-                    {formatScheduledAt(gate.sealed_ads_starts_at, displayTimezone).display}
+                    {formatScheduledAt(gate.sealed_ads_starts_at, teamTz, displayTimezone).display}
                     {' ~ '}
-                    {formatScheduledAt(gate.sealed_ads_ends_at, displayTimezone).display}
+                    {formatScheduledAt(gate.sealed_ads_ends_at, teamTz, displayTimezone).display}
                   </>
                 ) : null}
                 {gate.sealed_ads_objective ? ` · ${adsBoostObjectiveLabel(gate.sealed_ads_objective, tContent)}` : ''}
@@ -611,7 +614,7 @@ export function ApprovalsQueue() {
           <div className="w-full">
             <button
               type="button"
-              onClick={() => toggleDecisionExpanded(gate.id)}
+              onClick={() => toggleDecisionExpanded(gate.id)} aria-expanded={decisionExpanded}
               className="mt-1 flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
             >
               {decisionExpanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
@@ -814,10 +817,11 @@ export function ApprovalsQueue() {
                   className="order-1 h-8 flex-1 gap-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60 sm:order-1 sm:flex-none"
                   disabled={disabled}
                   onClick={rejectOnClick}
-                  aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: t('sigRequestChanges') })}
+                  aria-label={t('gateRowActionAriaLabel', { n: index + 1, label: t('sigReject') })}
                 >
-                  <Pencil className="size-3.5" />
-                  {t('sigRequestChanges')}
+                  {/* story #4558 — 줄 단추도 같은 낱말 «반려»(키 sigReject · 옛 «변경 요청») · 연필(«고쳐 달라»)이 아니라 XCircle. */}
+                  <XCircle className="size-3.5" />
+                  {t('sigReject')}
                 </Button>
                 {/* story #2631(PO 결정③) — 「보류(논의 필요)」는 결재함 전 게이트 타입 단일 표면. */}
                 <Button

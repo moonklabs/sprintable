@@ -1,0 +1,1 @@
+{"file": "tests/test_4505_backfill_frame_shape_realdb.py", "sec": 6.0, "source": "story-4505 — a backfill frame carries the live frame keys at the top level (gate created / resolved / delegated) — new file measured locally (uv run pytest)"}

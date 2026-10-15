@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import datetime, timezone
 
@@ -7,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
-from app.repositories.org_invite import OrgInviteRepository
+from app.repositories.org_invite import OrgInviteRepository, invite_email_key, invite_email_key_sql
 from app.repositories.organization import OrganizationRepository
 from app.schemas.org_invite import CreateOrgInvite, OrgInviteResponse
 from app.services.org_invite_email import send_invite_email
@@ -25,8 +26,15 @@ async def _resolve_invitee_locale(session: AsyncSession, email: str) -> str:
     from app.models.user import User
     from app.services.agent_onboarding_config import resolve_locale
 
+    # the invite-email comparison (invite_email_key · 4427): two older accounts that differ only by spaces or capitals
+    # both match it now — one row, the exact address first, then the oldest account
     locale_value = (
-        await session.execute(select(User.locale).where(User.email == email))
+        await session.execute(
+            select(User.locale)
+            .where(invite_email_key_sql(User.email) == invite_email_key(email))
+            .order_by((User.email == email).desc(), User.created_at.asc())
+            .limit(1)
+        )
     ).scalar_one_or_none()
     return resolve_locale(locale_value)
 
@@ -111,7 +119,9 @@ async def create_org_invite(
     )
     org_name = org.name if org else str(id)
     invitee_locale = await _resolve_invitee_locale(session, invite.email)
-    error = send_invite_email(
+    # story #4403 — send_invite_email은 동기(send_email · SMTP 10s · Resend 30s) — 이벤트 루프를 막지 않게.
+    error = await asyncio.to_thread(
+        send_invite_email,
         to=invite.email, org_name=org_name, token=invite.token, role=invite.role, org_id=str(id), locale=invitee_locale,
     )
     sent_at = None if error else datetime.now(timezone.utc)
@@ -145,7 +155,9 @@ async def resend_org_invite(
     )
     org_name = org.name if org else str(id)
     invitee_locale = await _resolve_invitee_locale(session, invite.email)
-    error = send_invite_email(
+    # story #4403 — send_invite_email은 동기(send_email · SMTP 10s · Resend 30s) — 이벤트 루프를 막지 않게.
+    error = await asyncio.to_thread(
+        send_invite_email,
         to=invite.email, org_name=org_name, token=invite.token, role=invite.role, org_id=str(id), locale=invitee_locale,
     )
     sent_at = None if error else datetime.now(timezone.utc)

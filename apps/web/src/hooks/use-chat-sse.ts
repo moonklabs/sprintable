@@ -60,6 +60,8 @@ export interface ChatMessage {
    * "판단 재료 없음"(이 필드를 안 주는 경로)이라 마스킹을 보류한다 — false로 기본값을 주면
    * "차단 여부 모름"이 "차단 안 함"으로 뭉개진다. */
   is_blocked_sender?: boolean;
+  // story #4430 — participants a block kept this message from (a count, never who) · sent by the server to the sender only
+  delivery_withheld?: DeliveryWithheld;
   /** story #2604 P2 — BE(#3007)가 msg_metadata['approval_target']를 payload top-level에
    * additive로 노출(`_approval_payload`, `_activation_payload`와 동형). 있으면 결재 카드를
    * 렌더한다 — 없으면(구 메시지·approval_target 없는 일반 메시지) 항상 `null`(옛 서버는 키
@@ -122,6 +124,79 @@ export interface ChatMessage {
   } | null;
 }
 
+/**
+ * story #4440 — the server now also sends a person's own new message to all their connections (their other tabs and devices
+ * see it live). The tab that sent it already shows it (from the send answer), so it drops its own echo: by the nonce it made
+ * before sending (PO 19:37Z — the echo can arrive before the send answer, when the tab does not know the id yet) or by the id
+ * once the answer came. Per tab (module state); small and bounded.
+ */
+const SENT_HERE_MAX = 200;
+// story #4442 — this tab's lists, told about each send made from this tab
+const sentHereListeners = new Set<(payload: Record<string, unknown>) => void>();
+const sentHereNonces: string[] = [];
+const sentHereIds: string[] = [];
+
+function remember(list: string[], value: string) {
+  list.push(value);
+  if (list.length > SENT_HERE_MAX) list.splice(0, list.length - SENT_HERE_MAX);
+}
+
+/** A nonce for one send from this tab (goes in the request as `client_nonce`); remembered here. */
+export function newClientNonce(): string {
+  const nonce = `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  remember(sentHereNonces, nonce);
+  return nonce;
+}
+
+/** The id of a message this tab sent (from the send answer). */
+export function rememberSentHere(messageId: string | undefined | null) {
+  if (messageId) remember(sentHereIds, messageId);
+}
+
+/** Is this payload this tab's own echo (sent from here)? */
+export function isEchoOfSentHere(payload: Record<string, unknown>): boolean {
+  const nonce = payload.client_nonce;
+  if (typeof nonce === 'string' && sentHereNonces.includes(nonce)) return true;
+  const id = payload.id;
+  return typeof id === 'string' && sentHereIds.includes(id);
+}
+
+/** story #4440 — «my message»: its sender is me. One rule for every place that counts unread (a message of mine never is). */
+export function isOwnMessage(payload: Record<string, unknown>, meId: string | undefined | null): boolean {
+  if (!meId) return false;
+  const sender = payload.sender as { id?: unknown } | undefined;
+  return (typeof sender?.id === 'string' && sender.id === meId) || payload.created_by === meId;
+}
+
+/** story #4430 — how many participants a block kept a message from, and the room's kind (from who is in it). */
+export interface DeliveryWithheld {
+  withheld_count: number;
+  conversation_type?: 'dm' | 'group';
+}
+
+/** A positive integer count or nothing — anything else from the wire is treated as «nothing withheld». */
+export function parseDeliveryWithheld(v: unknown): DeliveryWithheld | undefined {
+  if (!v || typeof v !== 'object') return undefined;
+  const o = v as { withheld_count?: unknown; conversation_type?: unknown };
+  const n = o.withheld_count;
+  if (typeof n !== 'number' || !Number.isInteger(n) || n <= 0) return undefined;
+  const kind = o.conversation_type === 'dm' || o.conversation_type === 'group' ? o.conversation_type : undefined;
+  return kind ? { withheld_count: n, conversation_type: kind } : { withheld_count: n };
+}
+
+/**
+ * story #4430 — the message from a send answer: `{data, delivery?}` (`delivery` is a sibling of `data`, like `command_gate`).
+ * The sender's own line gets the same `delivery_withheld` a later read would give it — without this the mark would only
+ * appear after a reload (a quiet success right when it matters).
+ */
+export function sentMessageFromAnswer(raw: Record<string, unknown>): ChatMessage {
+  const payload = (raw.data ?? raw) as Record<string, unknown>;
+  rememberSentHere(typeof payload.id === 'string' ? payload.id : null); // story #4440 — its echo is dropped here
+  for (const listener of [...sentHereListeners]) listener(payload); // story #4442 — this tab's lists update their row
+  const delivery = parseDeliveryWithheld(raw.delivery);
+  return normalizeToMessage(delivery ? { ...payload, delivery_withheld: delivery } : payload);
+}
+
 // Normalize backend _to_chat_message format → ChatMessage
 export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
   const sender = raw.sender as { id?: string; name?: string; type?: string; avatar_url?: string | null; runtime_type?: string | null } | undefined;
@@ -148,6 +223,8 @@ export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
     references: Array.isArray(raw.references) ? raw.references as ChatMessage['references'] : undefined,
     // story #2349 — references와 동일 규율: 키 부재(undefined)와 false를 구분한다.
     is_blocked_sender: typeof raw.is_blocked_sender === 'boolean' ? raw.is_blocked_sender : undefined,
+    // story #4430 — kept, not dropped with the other unknown fields (a dropped field would be a quiet success again)
+    delivery_withheld: parseDeliveryWithheld(raw.delivery_withheld),
     // story #2604 P2 — BE가 top-level에 항상 키를 싣진 않는 경로(구 메시지 등)도 있어 `?? null`.
     approval_target: (raw.approval_target ?? null) as ChatMessage['approval_target'],
     // story #2637 AC0-a — approval_target과 동일 규율.
@@ -188,12 +265,18 @@ interface UseChatSseOptions {
    *  규칙과 충돌 0), 재연결 성공(connected=true) 즉시 멈춘다 — 그 뒤는 기존
    *  onReconnect(backfill)가 이어받는다(중복 fetch 0). */
   onPoll?: () => Promise<boolean | undefined> | boolean | undefined;
+  /**
+   * story #4442 — a message this tab just sent (from its send answer). The tab drops its own echo (#4440), so the lists in
+   * this tab (legacy list · v3 rail) take their row update from here instead. The chat view itself does not subscribe (it
+   * already added the message).
+   */
+  onSentHere?: (payload: Record<string, unknown>) => void;
 }
 
 // story #2095 — 재연결 backoff는 sse-reconnect-backoff.ts(공용, sse-multiplexer.ts와
 // 동일 모듈 재사용)로 뽑았다.
 
-export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorking, onConversationRead, onReconnect, onPoll }: UseChatSseOptions) {
+export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorking, onConversationRead, onReconnect, onPoll, onSentHere }: UseChatSseOptions) {
   const [connected, setConnected] = useState(false);
   const sourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -216,6 +299,16 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
   // useLayoutEffect: DOM commit 후 동기 실행 — useEffect(비동기)보다 먼저 실행되어
   // SSE 이벤트 도달 전에 ref가 항상 최신 콜백을 가리킴 (stale closure 방지)
   useLayoutEffect(() => { onConversationMessageRef.current = onConversationMessage; }, [onConversationMessage]);
+  // story #4442 — subscribe to this tab's own sends (only when asked: the lists)
+  const onSentHereRef = useRef(onSentHere);
+  useLayoutEffect(() => { onSentHereRef.current = onSentHere; }, [onSentHere]);
+  const wantsSentHere = typeof onSentHere === 'function';
+  useEffect(() => {
+    if (!wantsSentHere) return;
+    const listener = (p: Record<string, unknown>) => onSentHereRef.current?.(p);
+    sentHereListeners.add(listener);
+    return () => { sentHereListeners.delete(listener); };
+  }, [wantsSentHere]);
   useLayoutEffect(() => { onWorkingRef.current = onWorking; }, [onWorking]);
   useLayoutEffect(() => { onConversationReadRef.current = onConversationRead; }, [onConversationRead]);
   useLayoutEffect(() => { onReconnectRef.current = onReconnect; }, [onReconnect]);
@@ -225,7 +318,11 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
   const handleConversationMessage = (raw: string) => {
     if (shouldSuppressDuplicateSseEvent(raw, seenIdsRef.current)) return;
     try {
-      onConversationMessageRef.current?.(JSON.parse(raw) as Record<string, unknown>);
+      const payload = JSON.parse(raw) as Record<string, unknown>;
+      // story #4440 — this tab sent it and already shows it: its echo changes nothing here (no second reply count, no
+      // second line). Other tabs and devices of the same person take it like any message.
+      if (isEchoOfSentHere(payload)) return;
+      onConversationMessageRef.current?.(payload);
     } catch { /* ignore parse errors */ }
   };
   const handleWorking = (raw: string) => {

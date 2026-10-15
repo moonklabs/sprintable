@@ -16,13 +16,13 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/db/client';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { deriveContentPostStatus, type ContentPostStatus, type ContentPostStatusInput } from '@/components/content/post-status';
 import { StatusChip } from '@/components/content/status-chip';
 import { AuthorKindBadge } from '@/components/content/author-kind-badge';
 import { ResponsiveDataTable, type ResponsiveDataTableColumn } from '@/components/shared/responsive-data-table';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**
  * story #3368(Phase0·마케팅운영 S4, doc phase0-post-manager-screen-design §8-1 순서 2번) —
@@ -113,7 +113,7 @@ export default function ContentPostListPage() {
   const tBoard = useTranslations('board');
   const locale = useLocale();
   const router = useRouter();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
 
   const [drafts, setDrafts] = useState<SitePostDraftListItem[]>([]);
   const [totalCount, setTotalCount] = useState<number | null>(null);
@@ -269,7 +269,7 @@ export default function ContentPostListPage() {
       renderCell: ({ draft }) => (
         <>
           <span data-testid="content-current-version">
-            {formatRelativeTime(draft.updated_at, locale, displayTimezone)}
+            {formatViewerRelativeTime(draft.updated_at, locale, displayTimezone)}
             <span className="ml-1 font-mono">· v{draft.current_version}</span>
           </span>
           <span className="inline-flex items-center gap-1" data-testid="content-latest-author">

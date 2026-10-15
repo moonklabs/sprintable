@@ -153,9 +153,14 @@ def test_mcp_declared_limit_exceeded_is_422_with_measured_counts():
     with pytest.raises(HTTPException) as exc_info:
         _enforce_mcp_attachment_declared_limit(over_limit)
     assert exc_info.value.status_code == 422, "mcp 선언한도 초과는 이제 422(개수/크기 상한과 동일 코드)"
-    assert str(mcp_attachment_upload.MCP_MAX_ATTACHMENTS + 1) in exc_info.value.detail, (
+    detail = exc_info.value.detail
+    assert str(mcp_attachment_upload.MCP_MAX_ATTACHMENTS + 1) in detail["message"], (
         "메시지에 실제 개수가 실려야 한다(AC4: 무엇이 몇 개를 넘었는지)"
     )
+    # story #4474: the reason as a code, with the limits and what was sent
+    assert detail["code"] == mcp_attachment_upload.ATTACHMENT_LIMIT_EXCEEDED
+    assert (detail["files"], detail["max_files"]) == (mcp_attachment_upload.MCP_MAX_ATTACHMENTS + 1, mcp_attachment_upload.MCP_MAX_ATTACHMENTS)
+    assert detail["max_total_bytes"] == mcp_attachment_upload.MCP_MAX_TOTAL_ATTACHMENT_BYTES
 
 
 def test_story_attachment_count_limit_exceeded_is_422_with_measured_count():

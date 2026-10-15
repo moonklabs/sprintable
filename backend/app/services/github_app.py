@@ -11,6 +11,7 @@ exp≤10m·POST access_tokens·token 1h. impl 변동 시 현행 docs 재확인.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -91,7 +92,8 @@ async def get_installation_token(installation_id: int) -> str | None:
     if cached and cached[1] - _TOKEN_REFRESH_SKEW > time.time():
         return cached[0]
 
-    app_jwt = build_app_jwt()
+    # story #4403 AC1b — 동기 google-auth 네트워크 호출(기본 timeout 120s)이 이벤트 루프를 막지 않게(Secret Manager — 첫 호출만, 뒤로는 캐시)
+    app_jwt = await asyncio.to_thread(build_app_jwt)
     if not app_jwt:
         return None
     try:
@@ -293,7 +295,8 @@ async def remove_pr_label(installation_id: int, repo_full_name: str, pr_number: 
 
 async def fetch_installation_metadata(installation_id: int) -> dict | None:
     """`GET /app/installations/{id}`(App JWT) — account login/type·repo selection. best-effort(None=graceful)."""
-    app_jwt = build_app_jwt()
+    # story #4403 AC1b — 동기 google-auth 네트워크 호출(기본 timeout 120s)이 이벤트 루프를 막지 않게(Secret Manager — 첫 호출만, 뒤로는 캐시)
+    app_jwt = await asyncio.to_thread(build_app_jwt)
     if not app_jwt:
         return None
     try:

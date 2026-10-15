@@ -12,6 +12,7 @@ version + 최소 `MEETS_DEVICE_INTEGRITY`. `MEETS_STRONG_INTEGRITY`는 이 스�
 아닌 고위험 작업 강화정책용(호출부가 반환된 verdict 목록을 보고 자체 판단)."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 
@@ -69,7 +70,8 @@ async def verify_play_integrity_token(
     바인딩한 canonical request hash — 서버가 기대하는 값과 정확히 일치해야 한다(다른
     요청 맥락의 토큰 재사용 방지, 이 세션의 canonical-transcript-binding 원칙과 동일)."""
     try:
-        access_token = _get_access_token()
+        # story #4403 AC1b — 동기 google-auth 네트워크 호출(기본 timeout 120s)이 이벤트 루프를 막지 않게
+        access_token = await asyncio.to_thread(_get_access_token)
     except Exception as exc:
         logger.warning("play_integrity.verify failed reason=adc_token_unavailable")
         raise PlayIntegrityVerificationError("adc_token_unavailable") from exc

@@ -5,6 +5,9 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ACCOUNT_CAP } from '@/lib/auth/account-limits';
 import { fetchWithAuth } from '@/lib/db/client';
+import { notifyAccountChanged } from '@/lib/native-shell-bridge';
+import { clearAccountScopedStorage } from '@/lib/browser-storage-keys';
+import { handOwnerTo, markIntendedSwitch } from '@/lib/tab-owner';
 
 export interface Account {
   account_id: string;
@@ -77,6 +80,9 @@ export function useAccountSwitcher(name: string, avatarUrl?: string | null) {
         setBusy(null);
         return;
       }
+      notifyAccountChanged(); // story #4397 — the app re-registers its push device for the new account
+      clearAccountScopedStorage('switch'); // story #4487 — the previous account's browser values do not reach the next one (drafts stay)
+      handOwnerTo(acc.account_id); // story #4490 — the vault account id is the next user's id (RT sub): an intended owner change
       window.location.assign('/inbox'); // active 전환 → 풀 리로드로 전 컨텍스트 리셋
     } catch {
       setError(t('switchFailed'));
@@ -100,6 +106,8 @@ export function useAccountSwitcher(name: string, avatarUrl?: string | null) {
         return;
       }
       const j = (await r.json().catch(() => null)) as { data?: { redirect?: string } } | null;
+      clearAccountScopedStorage('switch'); // story #4487 — the account being added signs in next in this tab (drafts stay)
+      markIntendedSwitch(); // story #4490 — who signs in next is not known yet: the next owner change is intended (10 min)
       window.location.assign(j?.data?.redirect ?? '/login');
     } catch {
       // story #3638(유나 §8 별건) — 계정 추가 실패 시 busy 스피너만 멈추고 조용했다.
@@ -118,8 +126,14 @@ export function useAccountSwitcher(name: string, avatarUrl?: string | null) {
         body: JSON.stringify({ scope }),
       });
       const j = (await r.json().catch(() => null)) as { data?: { next?: string | null } } | null;
-      window.location.assign(scope === 'this' && j?.data?.next ? '/inbox' : '/login');
+      const remaining = scope === 'this' && !!j?.data?.next;
+      // story #4397 — another account stays active without passing /login: the app re-registers its push device for it.
+      // (Going to /login instead, the app switches its device off itself.)
+      if (remaining) notifyAccountChanged();
+      clearAccountScopedStorage('signout'); // story #4487 — whoever signs in next here does not inherit this account's values
+      window.location.assign(remaining ? '/inbox' : '/login');
     } catch {
+      clearAccountScopedStorage('signout');
       router.push('/login');
     }
   };

@@ -43,7 +43,6 @@ app/routers/a2a.py::/rpc 호출은 그 에이전트의 org에 소속된 Sprintab
 app/routers/a2a.py::Sprintable 프로젝트/AC/정책 컨텍스트를 A2A task에 첨부(opt-in, A2A-Extensions 헤더로 활성화)
 app/routers/a2a.py::— role_template 미배정(recruit 이전)
 app/routers/a2a.py::완료 시 sprintable_send_chat_message(thread_id=conversation_id, reply_thread_id=reply_thread_id, content=<결과>)로 회신하세요.
-app/routers/agent_gateway.py::SELECT\n                e.id::text            AS event_id,\n                e.event_type,\n                e.recipient_seq,\n                e.source_entity_type,\n                e.source_entity_id::text AS source_entity_id,\n                e.sender_id::text     AS sender_id,\n                e.recipient_id::text  AS recipient_id,\n                e.payload,\n                e.created_at,\n                e.project_id::text    AS project_id,\n                e.org_id::text        AS org_id,\n                c.title               AS conversation_title,\n                tm.name               AS sender_name\n            FROM events e\n            -- d0bca260: conversation_title 도출. payload.conversation_id가 uuid 형태일 때만 join\n            -- (비-대화 이벤트는 NULL → 안전). 36자 uuid 패턴 가드로 ::uuid 캐스트 에러 0.\n            LEFT JOIN conversations c\n                ON e.payload->>'conversation_id' ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'\n               AND c.id = (e.payload->>'conversation_id')::uuid\n            -- d0bca260 AC3: sender_name. events.sender_id는 team_members FK라 직접 join(canonical 무관).\n            LEFT JOIN team_members tm ON tm.id = e.sender_id\n            WHERE e.recipient_id = CAST(:agent_id AS uuid)\n              AND e.recipient_seq > :after_seq\n            ORDER BY e.recipient_seq ASC\n            LIMIT :limit
 app/routers/agent_message_policy.py::SELECT om.id, om.org_id, om.user_id, om.role,\n                   om.created_at, om.deleted_at,\n                   u.email,\n                   COALESCE(NULLIF(m.name, ''), NULLIF(u.display_name, '')) AS name  -- story #3758: email 폴백 0(name 슬롯만·email 컬럼은 그대로)\n            FROM org_members om\n            LEFT JOIN users u ON u.id = om.user_id\n            LEFT JOIN members m\n                   ON m.org_id = om.org_id AND m.user_id = om.user_id\n                  AND m.type = 'human' AND m.deleted_at IS NULL\n            WHERE om.org_id = :org_id AND om.deleted_at IS NULL\n            ORDER BY om.created_at
 app/routers/analytics.py::epic_id 또는 epic_ids 중 정확히 하나를 지정하십시오
 app/routers/analytics.py::epic_ids가 비어 있습니다
@@ -157,7 +156,6 @@ app/routers/context_pack.py::해당 프로젝트 접근 권한이 없습니다
 app/routers/conversations.py::님의 새 메시지
 app/routers/conversations.py::님이 나를 멘션했어요
 app/routers/conversations.py::서킷브레이커 해제는 org owner/admin만 가능합니다.
-app/routers/conversations.py::폭주 감지로 이 대화의 agent 발신이 일시 차단되었습니다 — org owner/admin의 해제 또는 자동 해소를 기다려주세요.
 app/routers/conversations.py::현재 보고 있는 프로젝트(제외 대상)
 app/routers/cron.py::관찰된 참조 0건(수집범위: mention/embed, source=chat_message·doc만 — PR/커밋/증거자유텍스트는 미수집이라 이 수에 없음)
 app/routers/cron.py::인데 CRON_SECRET 미설정 — 내부 cron 엔드포인트가 인증 없이 공개된다(fail-closed·story #2072).
@@ -532,12 +530,10 @@ app/services/billing_scheduler.py::WITH absolute_latest_grants AS (\n           
 app/services/billing_scheduler.py::[Sprintable] 결제가 처리되지 않았습니다 — 확인해 주세요
 app/services/blog_destinations.py::블로그 목적지는 아직 배선되지 않았습니다(wordpress=조각③b·webhook=조각④에서 배선 예정).
 app/services/campaigns.py::campaign을 찾을 수 없습니다:
-app/services/chain_escalation.py::)이 발생해 agent 발신이 일시 차단됐어요. 이 알림의 «차단 해제»로 즉시 풀 수 있어요.
 app/services/chain_escalation.py::)이 발생했어요.
 app/services/chain_escalation.py::human 참가자가 없는 대화에서 최근
 app/services/chain_escalation.py::건(임계
 app/services/chain_escalation.py::무인간 대화 무감독 연쇄 감지
-app/services/chain_escalation.py::무인간 대화 자동 차단(서킷브레이커)
 app/services/chain_escalation.py::초간 메시지
 app/services/channel_adapters.py::Sprintable 호스팅 블로그
 app/services/channel_adapters.py::fail-closed: prod 배포에 테스트용 채널 어댑터가 등재돼 있습니다(SANDBOX_CHANNEL_ENABLED가 prod에 잘못 설정됐을 가능성 — story #4009 AC3):

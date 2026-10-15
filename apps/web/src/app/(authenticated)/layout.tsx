@@ -3,12 +3,15 @@ import { cookies, headers } from 'next/headers';
 import { ACTIVATION_COLLAPSED_COOKIE, ACTIVATION_HINT_COOKIE, isActivationCollapsed, parseActivationHint } from '@/lib/activation-hint';
 import { getServerSession } from '@/lib/db/server';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
+import { onboardingRedirect, staysForNewOrgSetup } from '@/lib/auth/onboarding-next';
 import { resolveProjectMemberships } from '@/lib/resolve-project-memberships';
 import { DashboardShell } from '../dashboard/dashboard-shell';
 import { StorageCapacityToastProvider } from '@/components/storage/storage-capacity-toast-provider';
 import { CrossProjectToastProvider } from '@/components/chat/cross-project-toast-provider';
+import { DesktopSetupDocWatch } from '@/components/desktop/desktop-setup-doc-watch';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { logServerTiming, withServerTiming } from '@/lib/server-timing';
+import { TabOwnerGate } from '@/components/auth/tab-owner-gate';
 
 interface MemberContext {
   id: string;
@@ -35,11 +38,14 @@ interface OrgMembership {
   timezone?: string | null;
 }
 
+/** story #4490 (Kadir 4903) — the body never renders by itself: it hands back the screen and whose session it is, and the
+ * exported layout always puts TabOwnerGate around it. Every branch (the org-less setup page included) goes through the gate
+ * by construction — a branch returning bare JSX is a type error. */
 async function AuthenticatedLayoutBody({
   children,
 }: {
   children: React.ReactNode;
-}) {
+}): Promise<{ userId: string; node: React.ReactNode }> {
   // AC3: proxy 가 주입한 x-pathname 으로 next 보존(server component 는 현재 경로 직접 못 읽음).
   const hdrs = await headers();
   const currentPath = hdrs.get('x-pathname') ?? '';
@@ -76,7 +82,12 @@ async function AuthenticatedLayoutBody({
   // 🔴 org 없는 유저(신규 OAuth 가입자 등 — team_member 미생성 시 /me 404) → 온보딩으로.
   // auth/callback이 is_new_user 무관 /inbox 리다이렉트하는 결함을 layout에서 OAuth+email/pw 공통 커버
   // (org-less가 깨진 페이지 도달 자체 차단). /onboarding은 (authenticated) 밖이라 루프 없음.
-  if (meRes.status === 404) redirect('/onboarding');
+  // story 4427 (나): an organization-less person on the desktop setup page stays there, without the shell (it needs an
+  // organization) — the page shows the «새 조직» mode, or sends them to the one screen when an invite exists or the check fails
+  if (meRes.status === 404) {
+    if (staysForNewOrgSetup(currentPath)) return { userId: session.user_id, node: children };
+    redirect(onboardingRedirect(currentPath));
+  }
 
   // 0746aab9: /me가 403(org 전환 후 project 접근/인가 실패) 등 비-2xx면, 조용히 null 컨텍스트로
   // 렌더하지 않고 에러 경계(error.tsx)로 넘긴다. 기존 `me = meRes.ok ? ... : null`이 403/500을
@@ -86,7 +97,10 @@ async function AuthenticatedLayoutBody({
   }
 
   const me = (await meRes.json()) as MemberContext | null;
-  if (!me?.org_id) redirect('/onboarding');
+  if (!me?.org_id) {
+    if (staysForNewOrgSetup(currentPath)) return { userId: session.user_id, node: children };
+    redirect(onboardingRedirect(currentPath));
+  }
   const memberships: { projectId: string; projectName: string; projectSlug?: string | null; orgId?: string | null }[] =
     membershipsRes?.ok ? ((await membershipsRes.json()) as { projectId: string; projectName: string; projectSlug?: string | null; orgId?: string | null }[]) : [];
   // story #2885 — sentinel(0-프로젝트 org) 오염 가드, 근거는 resolve-project-memberships.ts 참고.
@@ -182,46 +196,53 @@ async function AuthenticatedLayoutBody({
     ? (me?.project_name ?? undefined)
     : undefined;
 
-  return (
-    <DashboardShell
-      currentTeamMemberId={me?.id}
-      orgId={me?.org_id}
-      orgTimezone={currentOrgTimezone}
-      // story #2545(카디르 라이브 재QA, 2026-08-10) — `me?.org_id`는 JWT `app_metadata.org_id`
-      // 클레임(#2544가 "top-level org_id"라 부른 바로 그 필드 — backend/app/dependencies/
-      // auth.py의 `jwt_org_id = auth.claims.get("app_metadata", {}).get("org_id")`와 동일
-      // 필드. "top-level"은 app_metadata *안에서* org_id가 최상위라는 뜻이지, JWT payload
-      // 자체의 최상위 필드라는 뜻이 아니다 — 오해 소지가 있어 명시한다)가 아니라, `/api/v2/me`가
-      // (주로) `app_metadata.project_id` 클레임으로 찾은 TeamMember 행의 org다
-      // (backend/app/routers/me.py). 두 클레임이 갈리면(예: org_id는 reset됐는데 project_id는
-      // 옛 org를 여전히 가리키는 부분-stale JWT) me.org_id가 «이미 pathOrgId와 같다»고
-      // 잘못 보고해 아래 자동 switch-org effect가 조기 return — 그 순간 실제 서명된
-      // app_metadata.org_id 클레임은 여전히 다르다(카디르 실측).
-      // getServerSession()이 이미 jwtVerify로 이 클레임을 직접 읽어둔 값을 그대로 흘려보낸다
-      // (신규 fetch/디코드 0) — DashboardShell의 불일치 판정은 이 값을 우선한다.
-      jwtOrgId={session.org_id ?? undefined}
-      projectId={me?.project_id}
-      projectName={projectNameForDisplay}
-      currentProjectSlug={currentProjectSlug}
-      userName={me?.name}
-      role={me?.role}
-      currentMemberType={me?.type}
-      projectMemberships={projectMemberships}
-      orgMemberships={orgMemberships}
-      pathOrgId={pathOrgId}
-      pathProjectId={pathProjectId}
-      serverResolvedPath={pathProjectId ? currentPath : undefined}
-      navV3Flags={navV3Flags}
-      initialActivationComplete={activationChecklist}
-      activationSeedFromHint={activationHint === 'complete'}
-      activationOrgId={activationOrgId}
-      initialActivationCollapsed={activationCollapsed}
-    >
-      <StorageCapacityToastProvider>
-        <CrossProjectToastProvider>{children}</CrossProjectToastProvider>
-      </StorageCapacityToastProvider>
-    </DashboardShell>
-  );
+  return {
+    userId: session.user_id,
+    node: (
+      <DashboardShell
+        currentTeamMemberId={me?.id}
+        orgId={me?.org_id}
+        orgTimezone={currentOrgTimezone}
+        // story #2545(카디르 라이브 재QA, 2026-08-10) — `me?.org_id`는 JWT `app_metadata.org_id`
+        // 클레임(#2544가 "top-level org_id"라 부른 바로 그 필드 — backend/app/dependencies/
+        // auth.py의 `jwt_org_id = auth.claims.get("app_metadata", {}).get("org_id")`와 동일
+        // 필드. "top-level"은 app_metadata *안에서* org_id가 최상위라는 뜻이지, JWT payload
+        // 자체의 최상위 필드라는 뜻이 아니다 — 오해 소지가 있어 명시한다)가 아니라, `/api/v2/me`가
+        // (주로) `app_metadata.project_id` 클레임으로 찾은 TeamMember 행의 org다
+        // (backend/app/routers/me.py). 두 클레임이 갈리면(예: org_id는 reset됐는데 project_id는
+        // 옛 org를 여전히 가리키는 부분-stale JWT) me.org_id가 «이미 pathOrgId와 같다»고
+        // 잘못 보고해 아래 자동 switch-org effect가 조기 return — 그 순간 실제 서명된
+        // app_metadata.org_id 클레임은 여전히 다르다(카디르 실측).
+        // getServerSession()이 이미 jwtVerify로 이 클레임을 직접 읽어둔 값을 그대로 흘려보낸다
+        // (신규 fetch/디코드 0) — DashboardShell의 불일치 판정은 이 값을 우선한다.
+        jwtOrgId={session.org_id ?? undefined}
+        projectId={me?.project_id}
+        projectName={projectNameForDisplay}
+        currentProjectSlug={currentProjectSlug}
+        userName={me?.name}
+        role={me?.role}
+        currentMemberType={me?.type}
+        projectMemberships={projectMemberships}
+        orgMemberships={orgMemberships}
+        pathOrgId={pathOrgId}
+        pathProjectId={pathProjectId}
+        serverResolvedPath={pathProjectId ? currentPath : undefined}
+        navV3Flags={navV3Flags}
+        initialActivationComplete={activationChecklist}
+        activationSeedFromHint={activationHint === 'complete'}
+        activationOrgId={activationOrgId}
+        initialActivationCollapsed={activationCollapsed}
+      >
+        <StorageCapacityToastProvider>
+          <CrossProjectToastProvider>
+            {children}
+            {/* story #4427 — 데스크톱 설정 진행 중 탭의 문서 · 가이드 열기 셈(설정 없는 탭은 아무것도 안 함) */}
+            <DesktopSetupDocWatch />
+          </CrossProjectToastProvider>
+        </StorageCapacityToastProvider>
+      </DashboardShell>
+    ),
+  };
 }
 
 /**
@@ -231,7 +252,8 @@ async function AuthenticatedLayoutBody({
 export default async function AuthenticatedLayout(props: Parameters<typeof AuthenticatedLayoutBody>[0]) {
   const { value, spans, totalMs } = await withServerTiming(() => AuthenticatedLayoutBody(props));
   if (spans.length > 0) logServerTiming('layout', 'ssr', totalMs, spans);
-  return value;
+  // story #4490 — the previous person's browser values go before anything below (every branch) reads them
+  return <TabOwnerGate userId={value.userId}>{value.node}</TabOwnerGate>;
 }
 
 /** proxy가 인코딩해 실은 헤더·쿠키 값 풀기(잘못된 인코딩이면 없는 것으로). */

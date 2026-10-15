@@ -308,10 +308,13 @@ async def test_cron_epic_internal_ops_hit():
         nonlocal call_count
         call_count += 1
         result = MagicMock()
+        # story #4405 — ① sprint · story · goal 값 읽기(.all() 튜플) → ④ 기록 단계 행 재조회(pending일 때만) → ⑤ 하위 스토리 상태.
         if call_count <= 2:
-            result.scalars.return_value.all.return_value = []
+            result.all.return_value = []
         elif call_count == 3:
-            result.scalars.return_value.all.return_value = [epic]
+            result.all.return_value = [(epic.id, epic.org_id, epic.metric_definition, epic.outcome_result)]
+        elif call_count == 4:
+            result.scalar_one_or_none.return_value = epic
         else:
             result.scalars.return_value.all.return_value = ["done", "done", "done", "backlog"]
         return result
@@ -369,10 +372,13 @@ async def test_cron_epic_does_not_change_epic_status():
         nonlocal call_count
         call_count += 1
         result = MagicMock()
+        # story #4405 — ① sprint · story · goal 값 읽기(.all() 튜플) → ④ 기록 단계 행 재조회(pending일 때만) → ⑤ 하위 스토리 상태.
         if call_count <= 2:
-            result.scalars.return_value.all.return_value = []
+            result.all.return_value = []
         elif call_count == 3:
-            result.scalars.return_value.all.return_value = [epic]
+            result.all.return_value = [(epic.id, epic.org_id, epic.metric_definition, epic.outcome_result)]
+        elif call_count == 4:
+            result.scalar_one_or_none.return_value = epic
         else:
             result.scalars.return_value.all.return_value = ["done", "done"]
         return result

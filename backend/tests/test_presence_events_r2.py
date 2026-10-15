@@ -14,6 +14,26 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
+
+# story #4500 — the delivery reads participants through member_resolver's org-scoped helpers (one query each, then the org-member
+# filter — another query). This mocked session answers queries in order, and its participants stand for members of the org:
+# the helpers answer as the participant query did before — one query, every participant.
+async def _participants_as_one_query(session, conversation_id, *_a, **_k):
+    r = await session.execute(None)
+    try:
+        vals = r.scalars().all()
+        if isinstance(vals, list):
+            return set(vals)
+    except Exception:  # noqa: BLE001 — a mock answering rows only
+        pass
+    return {row[0] for row in r.all()}
+
+
+@pytest.fixture(autouse=True)
+def _participants_are_org_members(monkeypatch):
+    monkeypatch.setattr("app.services.member_resolver.conversation_member_ids_in_org", _participants_as_one_query)
+    monkeypatch.setattr("app.services.member_resolver.conversation_member_ids_of_its_org", _participants_as_one_query)
+
 def _patch_session_factory(participant_ids: list[str]):
     """async_session_factory()를 mock async context manager로 대체 — ConversationParticipant
     조회 결과로 participant_ids를 반환하게 한다(test_agent_gateway.py의 헬퍼와 동형)."""

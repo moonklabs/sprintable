@@ -123,7 +123,7 @@ function NowStripSeverityGroup({ severity, items }: { severity: NowStripSeverity
         <Button
           type="button"
           variant="link"
-          onClick={() => setGroupExpanded((v) => !v)}
+          onClick={() => setGroupExpanded((v) => !v)} aria-expanded={groupExpanded}
           className="h-auto p-0 px-1 text-[11px] font-medium"
         >
           {groupExpanded ? t('nowStripCollapse') : t('nowStripGroupMore', { count: hiddenCount })}

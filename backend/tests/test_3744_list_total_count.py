@@ -32,12 +32,18 @@ def _configure_secrets(monkeypatch):
     import importlib
     from cryptography.fernet import Fernet
 
-    monkeypatch.setenv("CRON_SECRET", "test-cron-secret")
-    monkeypatch.setenv("APP_ENV", "local")
-    monkeypatch.setenv("CHANNEL_CREDENTIAL_ENCRYPTION_KEY", Fernet.generate_key().decode())
-    import app.core.config as config_module
-    importlib.reload(config_module)
+    from app.core.config import settings
+
+    monkeypatch.setenv("CRON_SECRET", "test-cron-secret")  # read from the environment (cron.py)
+    # story 4459: patch the ONE settings object every module already holds (undone after the test), as the sibling files do —
+    # reloading app.core.config made a new object each test and never put the old one back, so a module imported before
+    # (youtube_privacy via test_4272's import) kept reading the old one: later files in the same run saw «audit incomplete»
+    # whatever they set (test_3815_youtube_publish failed only in a big batch)
+    monkeypatch.setattr(settings, "app_env", "local")
+    monkeypatch.setattr(settings, "channel_credential_encryption_key", Fernet.generate_key().decode())
     import app.services.channel_credential_crypto as crypto_module
+    importlib.reload(crypto_module)
+    yield
     importlib.reload(crypto_module)
 
 
@@ -244,6 +250,8 @@ async def test_site_posts_list_public_url_set_when_published_and_base_url_config
     # importlib.reload(app.core.config)를 하는 자리라, 이미 import된 app.services.
     # site_posts 모듈은 reload 전 settings 객체를 계속 들고 있다(모듈 레벨
     # \은 이름을 바인딩할 뿐 재로드를 안 따라간다).
+    # (story 4459: the fixture no longer reloads the config — there is one settings object now, so the patch below is the same
+    #  object the app reads; kept as written, it still holds)
     # test_3386_site_post_publication.py는 이 파일과 달리 reload를 안 해 우연히 안전했다.
     # 실 코드가 읽는 객체(app.services.site_posts.settings)를 직접 패치해야 값이 먹는다.
     import app.services.site_posts as site_posts_module

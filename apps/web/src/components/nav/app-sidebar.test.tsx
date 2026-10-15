@@ -8,6 +8,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
+import type { NavV3Flags } from '@/lib/nav-v3-destinations';
 
 const { pathnameRef } = vi.hoisted(() => ({ pathnameRef: { current: '/dashboard' } }));
 
@@ -89,7 +90,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function mount(userName?: string, navV3Flags?: { todayV3Enabled: boolean; chatV3Enabled: boolean; connectRulesV3Enabled: boolean }) {
+async function mount(userName?: string, navV3Flags?: NavV3Flags) {
   await act(async () => {
     root.render(withProviders(
       <AppSidebar projectMemberships={[]} chatUnreadTotal={0} userName={userName} navV3Flags={navV3Flags} />,
@@ -181,6 +182,15 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
     expect(channelsLink?.getAttribute('href')).toBe('/organization/channels');
     const rulesLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('콘텐츠 규칙'));
     expect(rulesLink?.getAttribute('href')).toBe('/organization/content-rules');
+  });
+
+  it('story #4524 — «데스크톱 앱» links to /desktop only when the server says DESKTOP_DOWNLOAD_ENABLED (no role input: everyone sees it)', async () => {
+    const desktopLink = () => [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('데스크톱 앱'));
+    expandAllGroups();
+    await mount(undefined, { todayV3Enabled: false, chatV3Enabled: false, connectRulesV3Enabled: false, desktopDownloadEnabled: true });
+    expect(desktopLink()?.getAttribute('href')).toBe('/desktop');
+    await mount(undefined, { todayV3Enabled: false, chatV3Enabled: false, connectRulesV3Enabled: false, desktopDownloadEnabled: false });
+    expect(desktopLink()).toBeUndefined();
   });
 
   it('리소스 항목(일감, org/project slug 없음)이 bare href로 폴백한다(기존 resourceLink 동작)', async () => {

@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import uuid
@@ -93,7 +94,7 @@ async def is_org_agent_connected(db: AsyncSession, org_id: uuid.UUID) -> bool:
     ]
     if agent_ids:
         from app.services.agent_verify import get_verified_map
-        verified_map = await get_verified_map(db, agent_ids)
+        verified_map = await get_verified_map(db, agent_ids, org_id=org_id)
         if any(verified_map.values()):
             return True
     return await is_org_first_roundtrip_done(db, org_id)
@@ -320,7 +321,8 @@ async def send_activation_reminder(db: AsyncSession, user: User) -> bool:
     unsub_link = f"{app_url}/unsubscribe?token={unsub_token}"
     # story #3205 — locale=ko 유저 → ko 메일·locale=en 유저 → en 메일(AC1).
     locale = resolve_locale(user.locale)
-    delivered = send_email(
+    delivered = await asyncio.to_thread(  # story #4403 — 동기 send_email(SMTP 10s · Resend 30s)이 이벤트 루프를 막지 않게
+        send_email,
         to=user.email,
         # 유나 design:pass 권장(2026-08-27) — 해요체("완료예요") → 합니다체 정합.
         subject=REMINDER_COPY[locale]["subject"],

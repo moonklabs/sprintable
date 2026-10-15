@@ -18,18 +18,150 @@ from app.models.onboarding_event import OnboardingEvent
 
 logger = logging.getLogger(__name__)
 
-# §1 canonical 11종 = FE 4(사용자행동) + BE 7(서버관측) + verify_started(FE).
-EVENT_CATALOG = frozenset({
-    "onboarding_started", "agent_created", "config_generated", "config_copied",
-    "first_auth_seen", "stream_connected", "verify_started", "event_sent",
-    "ack_received", "verified", "abandoned",
+# FE-emit — the names the web sends through `POST /onboarding/events` (apps/web/src/app/onboarding/onboarding-telemetry.ts
+# `OnboardingEvent`). story #4426 — three of them were never in the catalog and every send was a silent 422
+# (`abandoned_explicit` since OB-4 — named in this comment but left out of the set · `desktop_handoff_selected` ·
+# `desktop_key_copied` from #3983). The two lists are pinned equal by test_4426_onboarding_event_contract.py.
+FE_EMIT_EVENTS = frozenset({
+    "onboarding_started", "config_copied", "verify_started", "abandoned_explicit",
+    "desktop_handoff_selected", "desktop_key_copied",
+    # story #4427 — AC2 «문서 0»: 설정이 진행 중인 탭에서 문서 · 가이드 링크를 열 때(웹 · session_id = setup_id).
+    "desktop_doc_opened",
 })
-# BE-emit 8종(seam map). FE 4종(onboarding_started/config_copied/verify_started/abandoned_explicit)은
-# OB-3 프록시로 들어온다.
+# BE-emit 8종(seam map).
 BE_EMIT_EVENTS = frozenset({
     "agent_created", "config_generated", "first_auth_seen", "stream_connected",
     "event_sent", "ack_received", "verified", "abandoned",
+    # story #4424 — the desktop setup's own steps, written by its endpoints (services/desktop_setup.py)
+    "desktop_setup_code_issued", "desktop_setup_confirmed", "desktop_setup_exchanged",
+    # the MCP manifest route marks an agent's first tools connection (services/desktop_setup.mark_tools_connected)
+    "desktop_tools_connected", "desktop_first_result_seen",
 })
+# story #4424 (PO 08:42Z) — the names the desktop app (sprintable-mobile) sends through `POST /onboarding/events`, keyed by
+# the setup id. That repository cannot carry a line of this list, so the PR that *reads* them (the setup status) carries it;
+# the app keeps a copy of these names with a «sent names ⊆ copy» test pointing here. Merge this before the app sends them.
+DESKTOP_SHELL_EMIT_EVENTS = frozenset({
+    "desktop_workdir_fallback", "desktop_setup_blocked", "desktop_first_screen_human_input", "desktop_first_task_handed",
+    # PO 09:58Z — the shell reopens the setup page after a sign-in (the code never sits in the web), so it is the one that
+    # knows a sign-in happened: a human hand, sent by the shell
+    "desktop_setup_signed_in",
+    # story #4433 (Min 11:55Z) — an agent's session ended early (meta member_id · runtime · exit_code) and the person restarted
+    # it (meta member_id); the setup status reads them as signals.agents_ended
+    "desktop_agent_ended_early", "desktop_agent_restarted",
+    # story #4452 (선생님 check A · PO 04:35Z) — an agent of the setup could not be started (meta member_id · reason · code ·
+    # runtime · limit · first_member_id); the setup status reads it as signals.agents_start_failed
+    "desktop_agent_start_failed",
+    # story #4658 (PO 17072 (a) · 17077) — an agent asks for a sign-in (meta member_id · runtime?) and the question is over (meta member_id); the setup
+    # status reads them as signals.agents_sign_in
+    "desktop_agent_needs_sign_in", "desktop_agent_sign_in_cleared",
+})
+# story #4438 (PO 18:42Z) — the meta of each name the desktop app sends, one closed shape per name, checked at the entrance
+# (POST /onboarding/events): a known field of the wrong kind or with an unknown value → 422 `invalid_meta`, nothing stored; a
+# field not in the shape is dropped and the rest stored (PO 19:07Z — refusing the whole event would lose a hand, and an app
+# build that adds a field before the server knows it would lose every such event). Twice today a non-string field became a 500 on the read side (4828 reason · 4846 runtime); this closes the class
+# instead of one isinstance per read. The readers keep their own guards for rows stored before this check. The app's copy of
+# the names is desktop-electron/src/shell-events.ts (sprintable-mobile); a name here needs a shape here (test pins it).
+BLOCKED_REASONS = frozenset({"managed_mcp"})
+BLOCKED_RUNTIMES = frozenset({"claude", "codex"})
+BLOCKED_WHEN = frozenset({"found", "after_start"})  # seen while finding the runtime · the session ended right after start
+AGENT_RUNTIMES = frozenset({"claude", "codex"})
+EXIT_CODE_RANGE = range(-(2**31), 2**31)
+# story #4452 — why the shell could not start an agent: its reason, and for a refusal the daemon's closed code (desktop-protocol:
+# adapter_prepare_failed · spawn_failed split out of profile_invalid so the reason is the real one) or the first agent's wait
+# (ended · timeout). The web words each one (Yuna 04:41Z); free text is never sent.
+START_FAILED_REASONS = frozenset({"runtime_missing", "credentials_refused", "start_refused", "key_unreadable", "first_not_ready", "workdir_needed"})  # 4565: an attached agent waits for its folder
+START_FAILED_CODES = frozenset({
+    "session_limit", "credentials_missing", "profile_invalid", "unknown_profile", "adapter_prepare_failed", "spawn_failed",
+    "not_connected", "bad_reply", "ended", "timeout",
+})
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def _fits(spec: dict, v: object) -> bool:
+    """One field's value against its spec (the contract file's words): `const` · `enum` (strings) · `type` bool | uuid | int32.
+    An unknown spec never fits (closed: a typo in the table refuses, it never lets anything through)."""
+    if "const" in spec:
+        return v is spec["const"]
+    if "enum" in spec:
+        return isinstance(v, str) and v in spec["enum"]
+    kind = spec.get("type")
+    if kind == "bool":
+        return isinstance(v, bool)
+    if kind == "uuid":
+        return isinstance(v, str) and bool(_UUID_RE.match(v))
+    if kind == "int32":
+        return isinstance(v, int) and not isinstance(v, bool) and v in EXIT_CODE_RANGE
+    return False
+
+
+def _field(required: bool, **spec: object) -> dict:
+    return {"required": required, **spec}
+
+
+# name → field → {required, value spec}. Plain data, so the test holds it equal to the contract file, values included (Kadir
+# 228 · PO 19:45Z). Optional fields are the ones an app build may leave out (older builds · unknown values).
+DESKTOP_SHELL_META_SHAPES: dict[str, dict[str, dict]] = {
+    "desktop_workdir_fallback": {"hinted": _field(True, type="bool")},
+    "desktop_setup_blocked": {
+        "reason": _field(True, enum=sorted(BLOCKED_REASONS)),
+        "runtime": _field(False, enum=sorted(BLOCKED_RUNTIMES)),
+        "when": _field(False, enum=sorted(BLOCKED_WHEN)),
+    },
+    "desktop_first_screen_human_input": {"human_hand": _field(True, const=True)},
+    "desktop_first_task_handed": {"via": _field(True, enum=["start", "turn"])},
+    "desktop_setup_signed_in": {},
+    "desktop_agent_ended_early": {
+        "member_id": _field(True, type="uuid"),
+        "runtime": _field(False, enum=sorted(AGENT_RUNTIMES)),
+        "exit_code": _field(False, type="int32"),
+    },
+    "desktop_agent_restarted": {"member_id": _field(True, type="uuid")},
+    "desktop_agent_start_failed": {
+        "member_id": _field(True, type="uuid"),
+        "reason": _field(True, enum=sorted(START_FAILED_REASONS)),
+        "code": _field(False, enum=sorted(START_FAILED_CODES)),
+        "runtime": _field(False, enum=sorted(AGENT_RUNTIMES)),
+        "limit": _field(False, type="int32"),  # session_limit's cap (the status read keeps a positive one only)
+        "first_member_id": _field(False, type="uuid"),  # first_not_ready: the agent it waited on (the web names its role)
+    },
+    "desktop_agent_needs_sign_in": {
+        "member_id": _field(True, type="uuid"),
+        "runtime": _field(False, enum=sorted(AGENT_RUNTIMES)),
+    },
+    "desktop_agent_sign_in_cleared": {"member_id": _field(True, type="uuid")},
+}
+
+
+def desktop_meta_error(event: str, meta: object) -> str | None:
+    """The first known field of `meta` that breaks `event`'s shape (or «meta» itself), None when it fits · None for other
+    names. Fields not in the shape are not judged here — desktop_meta_known drops them."""
+    shape = DESKTOP_SHELL_META_SHAPES.get(event)
+    if shape is None:
+        return None
+    if not isinstance(meta, dict):
+        return "meta"
+    for key, spec in shape.items():
+        if key not in meta:
+            if spec["required"]:
+                return key
+            continue
+        if not _fits(spec, meta[key]):
+            return key
+    return None
+
+
+def desktop_meta_known(event: str, meta: dict) -> dict:
+    """`meta` with only the fields `event`'s shape knows (the same dict for names without a shape)."""
+    shape = DESKTOP_SHELL_META_SHAPES.get(event)
+    return meta if shape is None else {k: v for k, v in meta.items() if k in shape}
+
+
+# Pedro 13:51Z (4426) — names that are a person's act by definition: the hand count reads them by name (once per setup),
+# whatever the meta says — the shell sends desktop_setup_signed_in with no meta, and apps already in people's hands keep doing
+# so; counting here makes every app build and every row already stored count right.
+HUMAN_HAND_EVENTS = frozenset({"desktop_setup_signed_in"})
+# §1 canonical = FE-emit ∪ BE-emit (one source each; the router accepts exactly this).
+EVENT_CATALOG = FE_EMIT_EVENTS | BE_EMIT_EVENTS | DESKTOP_SHELL_EMIT_EVENTS
 # §4 실패사유 taxonomy(8).
 FAILURE_REASONS = frozenset({
     "config_error", "no_copy", "no_auth", "stream_unreachable",
@@ -154,6 +286,12 @@ def _derive_abandon_reason(events: set[str]) -> str:
     return "no_copy"                # config 생성됐으나 복사 안 함
 
 
+# The events after which an agent's onboarding is over — the sweep never adds `abandoned` after one of them. story #4426
+# (Qadir): `abandoned_explicit` (the web's leave signal) was in the docstring but not in the check; it was never stored before
+# (a silent 422), and once stored it would have been counted twice (explicit + the sweep's `abandoned`).
+SWEEP_TERMINAL_EVENTS = ("verified", "abandoned", "abandoned_explicit")
+
+
 async def sweep_abandoned_onboarding(
     db: AsyncSession, *, older_than_minutes: int = ABANDON_THRESHOLD_MINUTES
 ) -> int:
@@ -182,7 +320,7 @@ async def sweep_abandoned_onboarding(
         terminal = (await db.execute(
             select(OnboardingEvent.id).where(
                 OnboardingEvent.agent_id == agent_id,
-                OnboardingEvent.event.in_(("verified", "abandoned")),
+                OnboardingEvent.event.in_(SWEEP_TERMINAL_EVENTS),
             ).limit(1)
         )).first()
         if terminal:

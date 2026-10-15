@@ -7,7 +7,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Text, func
+from sqlalchemy import Boolean, DateTime, Text, false, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -31,6 +31,9 @@ class OnboardingEvent(Base):
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     client_ts: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     meta: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    # alembic 0424 — set by the server only: a desktop app event that carried its setup's token, or a web event from a
+    # signed-in member of that setup's org. The setup reads count these and server-written rows (story #4424).
+    desktop_setup_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
     server_ts: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

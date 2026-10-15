@@ -170,7 +170,7 @@ export function FollowUpDialog({ orgId, publicationId, originalTitle, onClose }:
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder={t('followUpTitlePlaceholder')}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               />
             </div>
 
@@ -184,7 +184,7 @@ export function FollowUpDialog({ orgId, publicationId, originalTitle, onClose }:
                 onChange={(e) => setNote(e.target.value)}
                 placeholder={t('followUpNotePlaceholder')}
                 rows={3}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               />
             </div>
 

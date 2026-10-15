@@ -5,7 +5,9 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { BarChart2, Bell, CreditCard, FolderKanban, GitBranch, LifeBuoy, Menu, Palette, Plus, ShieldCheck, Trash2, User, Users, Webhook, X } from 'lucide-react';
+import { BarChart2, Bell, CreditCard, FolderKanban, GitBranch, LifeBuoy, Menu, Monitor, Palette, Plus, ShieldCheck, Trash2, User, Users, Webhook, X } from 'lucide-react';
+import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
+import { PhoneAppCard } from '@/components/desktop/phone-app-card';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
 import { OrgMembersSection } from '@/components/settings/org-members-section';
 import { AddMemberModal } from '@/components/settings/add-member-modal';
@@ -20,11 +22,13 @@ import { WorkflowExecutionHistorySection } from '@/components/settings/workflow-
 import { WorkflowTemplateGallerySection } from '@/components/settings/workflow-template-gallery-section';
 import { WorkflowLineEditorSection } from '@/components/settings/workflow-line-editor-section';
 import { ThemeSettings } from '@/components/settings/theme-settings';
+import { LanguageSettings } from '@/components/settings/language-settings';
 import { RefreshSettings } from '@/components/settings/refresh-settings';
 import { StandupDeadlineSection } from '@/components/settings/standup-deadline-section';
 import { GateLevelMatrix } from '@/components/settings/gate-level-matrix';
 import { OrgGatePolicySection } from '@/components/settings/org-gate-policy-section';
 import { TwoFactorSection } from '@/components/settings/two-factor-section';
+import { OtherSessionsSection } from '@/components/settings/other-sessions-section';
 import { SetPasswordSection } from '@/components/settings/set-password-section';
 import { LinkedAccountsSection } from '@/components/settings/linked-accounts-section';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -740,11 +744,19 @@ export default function SettingsPage() {
             </TabsTrigger>
             <TabsTrigger value="appearance">
               <Palette className="h-4 w-4" />
-              {t('tabAppearance')}
+              {/* story #4413 — 이 탭은 테마와 언어를 담는다(폰에서 언어를 바꾸는 유일한 자리) → 탭 이름은 «화면» · 사이드바 테마 토글 묶음은 tabAppearance(«테마») 그대로. */}
+              {t('tabDisplay')}
             </TabsTrigger>
             <TabsTrigger value="notifications">
               <Bell className="h-4 w-4" />
               {t('tabNotifications')}
+            </TabsTrigger>
+            {/* story 4668 (PO Q-b · Yuna A-4): where the onboarding's «데스크톱 앱 받기» screen is reopened — the card and the phone
+                card only, with no DESKTOP_DOWNLOAD_ENABLED gate (the onboarding card has none either; the gated «데스크톱 앱» menu
+                and /desktop page would be a lie to point at where the flag is off) */}
+            <TabsTrigger value="desktop">
+              <Monitor className="h-4 w-4" />
+              {t('desktopTab')}
             </TabsTrigger>
             {isSupportWidgetEnabled() && (
               <TabsTrigger value="support">
@@ -860,7 +872,7 @@ export default function SettingsPage() {
           <div className="lg:hidden flex items-center gap-2 border-b px-4 py-2">
             <button
               type="button"
-              onClick={() => setLnbOpen((v) => !v)}
+              onClick={() => setLnbOpen((v) => !v)} aria-expanded={lnbOpen}
               className="md:hidden rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
               aria-label={tNav('toggleSidebar')}
             >
@@ -890,6 +902,7 @@ export default function SettingsPage() {
                   <SetPasswordSection onLoadError={handleProfileSectionLoadError} />
                   <LinkedAccountsSection onLoadError={handleProfileSectionLoadError} />
                   <TwoFactorSection onLoadError={handleProfileSectionLoadError} />
+                  <OtherSessionsSection />
                 </div>
                 {currentProjectId && (
                   <MyNotificationChannelSection
@@ -902,7 +915,19 @@ export default function SettingsPage() {
             </TabsContent>
 
             <TabsContent value="appearance">
-              <ThemeSettings />
+              {/* story #4413(유나) — 언어는 테마 바로 아래 · 같은 행 모양(폰에서 언어를 바꿀 유일한 자리). */}
+              <div className="space-y-6">
+                <ThemeSettings />
+                <LanguageSettings />
+              </div>
+            </TabsContent>
+
+            <TabsContent value="desktop">
+              {/* story 4668: the download card (+ the phone app's store links on a device that is not a Mac · 4654) — nothing else */}
+              <div className="space-y-6" data-testid="settings-desktop-tab">
+                <DesktopDownloadCard />
+                <PhoneAppCard />
+              </div>
             </TabsContent>
 
             {isSupportWidgetEnabled() && (
@@ -1096,7 +1121,7 @@ export default function SettingsPage() {
                           {(currentOrgRole === 'owner' || currentOrgRole === 'admin') ? (
                             <div className="flex items-center gap-2">
                               <input
-                                className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                                className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                                 value={editOrgName}
                                 onChange={(e) => setEditOrgName(e.target.value)}
                                 onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveOrgName(); }}
@@ -1370,7 +1395,7 @@ export default function SettingsPage() {
                                   value={draft}
                                   onChange={(e) => setWebhookEditing((prev) => ({ ...prev, [member.id]: e.target.value }))}
                                   placeholder={t('webhookUrlPlaceholder')}
-                                  className="min-w-0 flex-1 font-mono text-xs"
+                                  className="min-w-0 flex-1 font-mono"
                                 />
                                 <Button
                                   variant="hero"
@@ -1537,7 +1562,7 @@ export default function SettingsPage() {
                 {t('orgDeleteConfirmPrompt', { name: orgInfo.name })}
               </label>
               <input
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-destructive"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-destructive"
                 placeholder={orgInfo.name}
                 value={deleteOrgConfirmName}
                 onChange={(e) => setDeleteOrgConfirmName(e.target.value)}

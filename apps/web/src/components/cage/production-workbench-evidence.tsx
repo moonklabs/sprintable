@@ -4,8 +4,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { CircleDollarSign, Play } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
-import { formatRelativeTime } from '@/lib/storage/format';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { isLinkableRef } from '@/components/verify/evidence-section';
 import { useWorkItemProductionEvidence } from '@/hooks/use-work-item-production-evidence';
 import {
@@ -16,6 +15,7 @@ import {
   asMaterialCollectionSheet, asConceptBrief, asStoryboard, asAnimatic, asVerificationSheet,
   type ProductionWorkbenchKind, type EvidenceItem,
 } from '@/services/verify';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 // story #4057(E-RECIPE-1 ③, 유나 작업대 시안 v1·artifact 9b5d6512 위) — gates/[id]에서 사람이
 // ⓐ컨셉·ⓑ구조 승인 前 크리에이터 에이전트 stage 산출물(#4041 계약)을 읽는 리치 렌더.
@@ -46,7 +46,7 @@ const KIND_TITLE_KEY: Record<ProductionWorkbenchKind, string> = {
 function OutputCardHeader({ kindTitle, evidence, isCurrent }: { kindTitle: string; evidence: EvidenceItem; isCurrent?: boolean }) {
   const t = useTranslations('cage');
   const locale = useLocale();
-  const displayTimezone = resolveDisplayTimezone().tz;
+  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
       <span className="text-[12.5px] font-bold text-foreground">{kindTitle}</span>
@@ -60,9 +60,9 @@ function OutputCardHeader({ kindTitle, evidence, isCurrent }: { kindTitle: strin
         </span>
       ) : null}
       {/* story #3493 정본 — 게이트 evidence 카드는 "기록" 표기라 toLocaleString류가 아니라
-          formatRelativeTime(gate-evidence.tsx GateActivityHistory와 동형 관례). */}
+          formatViewerRelativeTime(gate-evidence.tsx GateActivityHistory와 동형 관례). */}
       <span className="ml-auto text-[10.5px] text-muted-foreground">
-        {formatRelativeTime(evidence.created_at, locale, displayTimezone)}
+        {formatViewerRelativeTime(evidence.created_at, locale, displayTimezone)}
       </span>
     </div>
   );

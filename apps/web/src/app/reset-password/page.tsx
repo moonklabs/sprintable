@@ -114,7 +114,7 @@ export default function ResetPasswordPage() {
               type="password"
               placeholder={t('placeholder')}
               autoComplete="new-password"
-              className={`w-full rounded-lg border px-4 py-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand ${
+              className={`w-full rounded-lg border px-4 py-3 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand ${
                 touched && !isValid ? 'border-destructive' : 'border-border'
               }`}
               value={password}
