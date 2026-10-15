@@ -507,11 +507,11 @@ def test_timeline_lists_in_time_order_with_ms_status_and_a_closed_browser_class(
     lines, stats, cut = probe.agg_timeline(es, TEMPLATES, WEB, BACK)
     assert cut is False
     assert lines == [
-        "  2026-10-15T06:55:01Z  web  GET /inbox  200  80ms  1234B  proto=h2  browser=android-webview",
-        "  2026-10-15T06:55:05Z  backend  POST /api/v2/me  401  12ms  1234B  proto=h2  browser=android-webview",
-        "  2026-10-15T06:55:06Z  web  GET /api/chat/conversations  200  ?ms  1234B  proto=h2  browser=android-webview",
-        "  2026-10-15T06:55:07Z  web  ? /inbox  ?  ?ms  ?B  proto=?  browser=other",
-        "  2026-10-15T06:55:09Z  web  GET /api/chat/conversations  200  11532ms  1234B  proto=h2  browser=android-webview",
+        "  2026-10-15T06:55:01Z  web  GET /inbox  200  80ms  1234B  proto=h2  browser=android-webview  rsc=0  p=0  from=/{}",
+        "  2026-10-15T06:55:05Z  backend  POST /api/v2/me  401  12ms  1234B  proto=h2  browser=android-webview  rsc=0  p=0  from=/{}",
+        "  2026-10-15T06:55:06Z  web  GET /api/chat/conversations  200  ?ms  1234B  proto=h2  browser=android-webview  rsc=0  p=0  from=/{}",
+        "  2026-10-15T06:55:07Z  web  ? /inbox  ?  ?ms  ?B  proto=?  browser=other  rsc=0  p=0  from=-",
+        "  2026-10-15T06:55:09Z  web  GET /api/chat/conversations  200  11532ms  1234B  proto=h2  browser=android-webview  rsc=0  p=0  from=/{}",
     ]
     assert "  web  GET /api/chat/conversations  2건 · p50 11532ms · 최대 11532ms · 크기 합계 2468B" in stats   # ? 는 통계에서 빠진다
     assert "  web  GET /inbox  1건 · p50 80ms · 최대 80ms · 크기 합계 1234B" in stats
@@ -561,6 +561,7 @@ def test_timeline_mode_runs_only_the_timeline_with_the_window_in_the_filter(monk
         return "[]"
 
     monkeypatch.setattr(probe, "_run", fake_run)
+    monkeypatch.setattr(probe, "_curl_version", lambda url: "h2")      # 가짜 — 이 시험은 밖으로 나가지 않는다
     monkeypatch.setattr(probe, "build_route_templates", lambda: (TEMPLATES, []))
     monkeypatch.setenv("TIMELINE_START", "2026-10-15T06:50:00Z")
     monkeypatch.setenv("TIMELINE_END", "2026-10-15T07:50:00Z")
@@ -570,10 +571,14 @@ def test_timeline_mode_runs_only_the_timeline_with_the_window_in_the_filter(monk
     assert "env=prod" in out and "sprintable-frontend-prod" in out and "sprintable-backend-prod" in out
     assert "sprintable-frontend-dev" not in out and "realtime" not in out          # dev · 실시간 서비스는 안 읽는다
     assert "state_check" not in out and "① " not in out                            # 기존 칸은 안 돈다
-    assert len(calls) == 2                                                          # 요청 한 번 · 시스템 로그 한 번
+    assert len(calls) == 3                                                          # 요청 한 번 · 시스템 로그 한 번 · 정적 청크 한 번(4698)
+    assert "prod=h2 · dev=h2" in out                                                # 가장자리 HTTP 판 줄
     flt = [c[3] for c in calls]
     assert all('timestamp>="2026-10-15T06:50:00Z" AND timestamp<="2026-10-15T07:50:00Z"' in f for f in flt)
     assert any("/_next/static/" in f and "NOT" in f for f in flt) and any("varlog%2Fsystem" in f for f in flt)
+    # 정적 청크 요청은 «NOT» 없이 따로(웹 서비스만) — 기존 요청 줄에는 계속 안 섞인다
+    static_f = [f for f in flt if "/_next/static/" in f and "NOT" not in f]
+    assert len(static_f) == 1 and "sprintable-frontend-prod" in static_f[0] and "sprintable-backend-prod" not in static_f[0]
     assert all("--order=asc" in c for c in calls)
     monkeypatch.setenv("TIMELINE_ENV", "dev")
     calls.clear()
@@ -612,6 +617,75 @@ def test_size_and_protocol_are_numbers_and_closed_words_only():
         _req("2026-10-15T06:55:06Z", "/inbox", size=True, protocol=7),
     ]
     lines, stats, _cut = probe.agg_timeline(es, TEMPLATES, WEB, BACK)
-    assert [ln.split("  ")[-3:-1] for ln in lines] == [["48213B", "proto=h1.1"], ["0B", "proto=h3"], ["?B", "proto=?"], ["?B", "proto=?"], ["?B", "proto=?"], ["?B", "proto=?"]]
+    assert [ln.split("  ")[-6:-4] for ln in lines] == [["48213B", "proto=h1.1"], ["0B", "proto=h3"], ["?B", "proto=?"], ["?B", "proto=?"], ["?B", "proto=?"], ["?B", "proto=?"]]
     assert stats == ["  web  GET /inbox  6건 · p50 250ms · 최대 250ms · 크기 합계 48213B"]
     _no_secret("\n".join(lines + stats))
+
+
+# ── story 4698: probe ⑤ 확장 — 쿼리 표지(`_rsc` · `p`) · 어디서(referer 라벨) · 정적 청크 · 가장자리 HTTP 판 ─────────────────────────────────────
+def _url_req(ts: str, url: str, referer=None, **kw) -> dict:
+    e = _req(ts, "/x", **kw)
+    e["httpRequest"]["requestUrl"] = url
+    if referer is None:
+        e["httpRequest"].pop("referer", None)
+    else:
+        e["httpRequest"]["referer"] = referer
+    return e
+
+
+def test_query_flags_and_the_from_label_say_which_and_from_where_without_any_value():
+    es = [
+        _url_req("2026-10-15T06:55:41Z", f"https://app.example/chats?_rsc={SECRETS[7]}&p={SECRETS[1]}", referer=f"https://app.example/inbox?p={SECRETS[1]}&code={SECRETS[5]}"),
+        _url_req("2026-10-15T06:55:46Z", "https://app.example/chats?p=", referer="https://app.example/inbox"),
+        _url_req("2026-10-15T06:55:50Z", "https://app.example/chats?other=1"),
+        _url_req("2026-10-15T06:55:51Z", "https://app.example/chats", referer=""),
+        _url_req("2026-10-15T06:55:52Z", "https://app.example/chats?p=%zz&_rsc", referer=7),
+    ]
+    lines, _stats, _cut = probe.agg_timeline(es, TEMPLATES, WEB, BACK)
+    tails = [ln.split("  ")[-3:] for ln in lines]
+    assert tails == [["rsc=1", "p=1", "from=/inbox"], ["rsc=0", "p=1", "from=/inbox"], ["rsc=0", "p=0", "from=-"], ["rsc=0", "p=0", "from=-"], ["rsc=1", "p=1", "from=-"]]
+    _no_secret("\n".join(lines))
+
+
+def test_static_requests_fold_to_three_closed_kinds_and_never_carry_a_chunk_name():
+    chunk = "a1b2c3d4e5f60718"          # 빌드 해시 같은 모양
+    es = [
+        _url_req("2026-10-15T06:55:41Z", f"https://app.example/_next/static/chunks/app/chats/page-{chunk}.js", latency="0.400s", size="91000"),
+        _url_req("2026-10-15T06:55:42Z", f"https://app.example/_next/static/chunks/webpack-{chunk}.js?v={SECRETS[5]}", latency="0.200s", size="4000"),
+        _url_req("2026-10-15T06:55:43Z", f"https://app.example/_next/static/css/{chunk}.css", latency="0.100s", size="30000"),
+        _url_req("2026-10-15T06:55:44Z", f"https://app.example/_next/static/media/{chunk}.woff2", latency="0.050s", size="20000"),
+        _url_req("2026-10-15T06:55:45Z", f"https://app.example/_next/static/{chunk}/_buildManifest.js", latency="0.010s", size="500"),   # 빌드 아이디 폴더 → (other)
+        _url_req("2026-10-15T06:55:46Z", "https://app.example/inbox"),                                                              # 정적이 아니면 (other)
+    ]
+    lines, stats, cut = probe.agg_static(es, WEB, BACK)
+    assert cut is False
+    labels = [ln.split("  ")[3] for ln in lines]
+    assert labels == ["GET /_next/static/chunks/*", "GET /_next/static/chunks/*", "GET /_next/static/css/*", "GET /_next/static/media/*", "GET /_next/static/(other)/*", "GET (other)"]
+    assert "  web  GET /_next/static/chunks/*  2건 · p50 200ms · 최대 400ms · 크기 합계 95000B" in stats
+    text = "\n".join(lines + stats)
+    assert chunk not in text and "page-" not in text and "webpack-" not in text and "_buildManifest" not in text
+    _no_secret(text)
+    assert probe.static_label(None) == "(other)" and probe.static_label("not a url") == "(other)"
+
+
+def test_edge_versions_are_closed_words_and_a_failure_is_a_question_mark(monkeypatch):
+    seen = []
+    assert probe.edge_versions(lambda url: seen.append(url) or "h2") == "prod=h2 · dev=h2"
+    assert seen == ["https://app.sprintable.ai/login", "https://dev-app.sprintable.ai/login"]   # 닫힌 둘 — 밖의 주소는 안 부른다
+    import subprocess as sp
+
+    def fake(stdout="", returncode=0, raises=None):
+        def run(cmd, **kw):
+            assert cmd[0] == "curl" and cmd[-1].startswith("https://") and "-w" in cmd
+            if raises:
+                raise raises
+            return sp.CompletedProcess(cmd, returncode, stdout=stdout, stderr="")
+        return run
+    for out, want in [("2", "h2"), ("3", "h3"), ("1.1", "h1.1"), ("1.0", "h1.0"), (f"2 {SECRETS[3]}", "?"), ("", "?"), ("9", "?")]:
+        monkeypatch.setattr(probe.subprocess, "run", fake(out))
+        assert probe._curl_version("https://app.sprintable.ai/login") == want, out
+    monkeypatch.setattr(probe.subprocess, "run", fake("2", returncode=7))
+    assert probe._curl_version("https://app.sprintable.ai/login") == "?"
+    for exc in (OSError("no curl"), sp.TimeoutExpired("curl", 30)):
+        monkeypatch.setattr(probe.subprocess, "run", fake(raises=exc))
+        assert probe._curl_version("https://app.sprintable.ai/login") == "?"
