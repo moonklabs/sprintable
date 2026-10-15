@@ -186,3 +186,25 @@ async def test_07_a_key_that_holds_a_live_pairing_stays_where_it_is(world):
         assert (again.status_code, again.json()["error"]["code"]) == (409, "remote_device_taken")
         row = (await _sql(fetch=f"SELECT member_id FROM remote_devices WHERE id = '{first.json()['id']}'"))[0]
         assert str(row[0]) == str(OWNER_TM)
+
+
+async def test_09_a_failing_reason_lookup_logs_the_kind_of_failure_only_and_never_changes_the_answer(world, caplog):
+    """Kadir/PO (5091): the warning carried `exc_info` — a failed query's traceback holds its parameters (setup · org ids), which the record
+    must not. Only the exception's class name is kept."""
+    from app.services import agent_permissions as svc
+
+    setup_id, org_id, member_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+
+    class _Db:
+        async def execute(self, *_a, **_k):
+            raise RuntimeError(f"could not read {setup_id} of org {org_id} for {member_id}")
+
+    caplog.set_level(logging.INFO, logger="app.services.agent_permissions")
+    await svc._log_setup_not_found(_Db(), member_id=member_id, org_id=org_id, setup_id=setup_id)  # type: ignore[arg-type]
+    records = [r for r in caplog.records if "setup_not_found" in r.getMessage()]
+    assert len(records) == 1 and records[0].levelno == logging.WARNING
+    assert records[0].exc_info is None
+    text = records[0].getMessage()
+    assert "RuntimeError" in text
+    for v in (setup_id, org_id, member_id):
+        assert str(v) not in text

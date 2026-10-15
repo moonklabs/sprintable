@@ -410,8 +410,9 @@ async def _log_setup_not_found(db: AsyncSession, *, member_id: uuid.UUID, org_id
         else:
             reason, caller_in_setup_org = "computer_not_exchanged", None
         logger.info("pairing offer refused as setup_not_found: reason=%s caller_in_computers_org=%s", reason, caller_in_setup_org)
-    except Exception:  # noqa: BLE001 — a record that cannot be written is not a reason to change what the phone is told
-        logger.warning("pairing offer refused as setup_not_found: reason could not be read", exc_info=True)
+    except Exception as exc:  # noqa: BLE001 — a record that cannot be written is not a reason to change what the phone is told
+        # the kind of failure only: a traceback or a message of a failed query carries its parameters (the setup · org ids)
+        logger.warning("pairing offer refused as setup_not_found: reason could not be read (%s)", type(exc).__name__)
 
 
 async def offer_pairing(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, body: PairingOffer) -> RemoteDevicePairingOffer:
