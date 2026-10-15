@@ -3,6 +3,10 @@
 Real database. The app sends `device_id` (its salted hash of the machine id) with the exchange; the server keeps an org-scoped
 HMAC of it and, for the same org and key, closes the older lines with the reason replaced_by_new_setup and revokes their device
 tokens (the old token is then refused by the relay). The agents and their keys stay.
+
+PO 10-15: a line is replaced only when the new setup is the SAME AGENTS set up again — every agent the old line carried is
+among the new setup's (or the old line has no agent left). One computer holds one setup per lane, so another lane's setup on
+the same computer stays open. These tests set agents up as a move (existing agents), the way a reinstall does.
 """
 from __future__ import annotations
 
@@ -14,6 +18,7 @@ import pytest
 from app.core.config import settings
 from app.services.desktop_setup import machine_key_for
 from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (autouse ones apply here too)
+    EXISTING,
     ORG,
     ORG2,
     OUTSIDER,
@@ -29,6 +34,8 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
     anyio_backend,
     world,
 )
+from tests.test_4565_attach_existing_agent_realdb import attachable  # noqa: F401 — fixture (movable builds on it)
+from tests.test_4576_move_setup_realdb import EXISTING_B, _move, _move_code, movable  # noqa: F401
 
 pytestmark = pytest.mark.anyio
 
@@ -51,17 +58,24 @@ async def _remote_control_on(world):
     yield
 
 
+@pytest.fixture(autouse=True)
+async def _agents(movable):
+    """Two existing agents (EXISTING · EXISTING_B) in the project, ready to be moved to a computer."""
+    yield
+
+
 @pytest.fixture
 def secret(monkeypatch):
     monkeypatch.setattr(settings, "channel_oauth_state_secret", SECRET)
     return SECRET
 
 
-async def _device(c, name: str, device_id: str | None) -> dict:
-    """A device set up on this org: code, confirm, exchange — with the device_id when given."""
+async def _device(c, name: str, device_id: str | None, *agents: uuid.UUID) -> dict:
+    """A device set up on this org as a move of existing agents (EXISTING by default): code, confirm, exchange — with the
+    device_id when given. The agents' own keys rotate at the exchange (one agent, one place)."""
 
-    code, verifier = await _code(c, name)
-    assert (await _confirm(c, code)).status_code == 200
+    code, verifier, _setup_id = await _move_code(c, name)
+    assert (await _confirm(c, code, body=_move(*(agents or (EXISTING,))))).status_code == 200
     body = {"code": code, "verifier": verifier, **({"device_id": device_id} if device_id else {})}
     r = await c.post("/api/v2/desktop/setup-codes/exchange", json=body)
     assert r.status_code == 200, r.text
@@ -77,13 +91,13 @@ async def _line(setup_id: str) -> tuple:
     return tuple(rows[0])
 
 
-async def test_the_same_machine_twice_closes_the_old_line_and_its_old_token_is_refused(world, secret):
+async def test_the_same_agent_set_up_again_on_the_same_machine_closes_the_old_line_and_its_old_token_is_refused(world, secret):
     async with _client() as c:
         first = await _device(c, "d4660 mac first", SAME_MACHINE)
         # the old line is heard from once, so it has a «last heard» time to show
         assert (await c.put("/api/v2/desktop/relay/sessions", json={"report_seq": 1, "sessions": []}, headers=_tok(first["device_token"]))).status_code == 200
 
-        second = await _device(c, "d4660 mac second", SAME_MACHINE)
+        second = await _device(c, "d4660 mac second", SAME_MACHINE)  # the same agent again (a reinstall)
 
         closed, reason, first_key = await _line(first["setup_id"])
         assert closed is True and reason == "replaced_by_new_setup"
@@ -97,9 +111,58 @@ async def test_the_same_machine_twice_closes_the_old_line_and_its_old_token_is_r
         new = await c.put("/api/v2/desktop/relay/sessions", json={"report_seq": 1, "sessions": []}, headers=_tok(second["device_token"]))
         assert new.status_code == 200, new.text
 
-        # the old line's agents and their keys are not stopped by the replacement (only its device token is revoked)
-        live_keys = (await _sql(fetch=f"SELECT count(*) FROM agent_api_keys k WHERE k.desktop_setup_id = '{first['setup_id']}' AND k.revoked_at IS NULL"))[0][0]
-        assert live_keys == len(first["agents"])
+        # one agent, one place: the agent's only live key is the new setup's (the move rotated it, not the replacement)
+        keys = await _sql(fetch=f"SELECT desktop_setup_id::text FROM agent_api_keys WHERE team_member_id = '{EXISTING}' AND revoked_at IS NULL")
+        assert [k[0] for k in keys] == [second["setup_id"]]
+
+
+async def test_another_lanes_setup_on_the_same_machine_stays_open(world, secret):
+    # PO 10-15: one computer holds one setup per lane — a setup of OTHER agents closes nothing (and a mutant that closes every
+    # same-machine line goes red here)
+    async with _client() as c:
+        lane_a = await _device(c, "d4660 lane A", SAME_MACHINE, EXISTING)
+        assert (await c.put(RELAY, json={"report_seq": 1, "sessions": []}, headers=_tok(lane_a["device_token"]))).status_code == 200
+        lane_b = await _device(c, "d4660 lane B", SAME_MACHINE, EXISTING_B)
+
+        a_closed, a_reason, a_key = await _line(lane_a["setup_id"])
+        assert a_closed is False and a_reason is None
+        b_closed, b_reason, b_key = await _line(lane_b["setup_id"])
+        assert b_closed is False and b_reason is None
+        assert a_key == b_key == machine_key_for(ORG, SAME_MACHINE)  # the same computer, two live lines
+        for tok in (lane_a["device_token"], lane_b["device_token"]):  # both device tokens still pass the relay
+            assert (await c.put(RELAY, json={"report_seq": 2, "sessions": []}, headers=_tok(tok))).status_code == 200
+
+
+async def test_a_new_setup_closes_an_old_line_only_when_it_has_all_that_lines_agents(world, secret):
+    # a line of two agents: a setup of one of them takes that one out of it but does not replace it; a setup that has
+    # what is left of it does — judged on what the line carried before each exchange
+    async with _client() as c:
+        both = await _device(c, "d4660 lane both", SAME_MACHINE, EXISTING, EXISTING_B)
+        only_a = await _device(c, "d4660 lane A again", SAME_MACHINE, EXISTING)
+        assert (await _line(both["setup_id"]))[:2] == (False, None), "it still carries EXISTING_B — not replaced by a setup of EXISTING"
+        assert (await _line(only_a["setup_id"]))[:2] == (False, None)
+
+        only_b = await _device(c, "d4660 lane B again", SAME_MACHINE, EXISTING_B)
+        assert (await _line(both["setup_id"]))[:2] == (True, "replaced_by_new_setup"), "EXISTING_B was all that was left of it"
+        assert (await _line(only_a["setup_id"]))[:2] == (False, None), "carries EXISTING, which the setup of EXISTING_B lacks"
+        assert (await _line(only_b["setup_id"]))[:2] == (False, None)
+
+
+async def test_a_line_whose_agents_all_moved_away_is_closed_by_the_next_setup_on_its_machine(world, secret):
+    # PO 10-15 ③: the line the agents left (members 0 — the one 9fb4dd3a of the legion's list) is closed by the next setup on
+    # its machine, whatever agents that setup carries; the other machine's line is not touched
+    async with _client() as c:
+        emptied = await _device(c, "d4660 emptied", SAME_MACHINE, EXISTING)
+        elsewhere = await _device(c, "d4660 elsewhere", OTHER_MACHINE, EXISTING)  # takes EXISTING away from the first line
+        assert (await _line(emptied["setup_id"]))[:2] == (False, None), "another machine: nothing closed yet"
+        left = (await _sql(fetch=f"SELECT members::text FROM desktop_setups WHERE id = '{emptied['setup_id']}'"))[0][0]
+        assert "member_id" not in left, "its agent moved out of it"
+
+        later = await _device(c, "d4660 later", SAME_MACHINE, EXISTING_B)  # another agent, the same machine as the emptied line
+        assert (await _line(emptied["setup_id"]))[:2] == (True, "replaced_by_new_setup")
+        assert (await _line(elsewhere["setup_id"]))[:2] == (False, None)
+        assert (await _line(later["setup_id"]))[:2] == (False, None)
+        assert (await c.put(RELAY, json={"report_seq": 1, "sessions": []}, headers=_tok(emptied["device_token"]))).status_code == 401
 
 
 async def test_a_different_machine_in_the_same_org_leaves_the_line_open(world, secret):
