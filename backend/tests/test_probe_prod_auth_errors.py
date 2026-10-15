@@ -407,3 +407,211 @@ def test_app_link_paths_never_echo_the_ua_the_query_or_a_path_suffix():
 def test_app_link_malformed_entries_do_not_crash():
     junk = [{}, {"httpRequest": "x"}, {"httpRequest": {"requestUrl": 5}}, {"httpRequest": {"requestUrl": "https://a/native/oauth-return", "userAgent": 5}}]
     assert probe.agg_app_link_paths(junk) == ["  ?  /native/oauth-return  ?  ?  browser=other  1건"]
+
+
+# ── ⑤ 시간 창 요청 타임라인 (선생님 «prod 모바일앱에서만 첫 로그인 뒤 홈 → 대화 탭이 10초 넘게» · PO 10-15) ─────────────────────────────────
+
+WEB = frozenset({"sprintable-frontend-prod"})
+BACK = frozenset({"sprintable-backend-prod"})
+TEMPLATES = frozenset({
+    (), ("inbox",), ("api", "health"), ("api", "chat", "conversations"), ("api", "chat", "conversations", "{}", "messages"),
+    ("api", "v2", "me"), ("api", "v2", "stories", "{}"), ("api", "v2", "stories", "{}", "comments"), ("{}", "{}", "flow"), ("{}",),
+})
+
+
+def _req(ts: str, path: str, status=200, method="GET", latency="0.250s", service="sprintable-frontend-prod", ua="Mozilla/5.0 (Linux; Android 14; wv) Chrome/120.0 SecretUA", size="1234", protocol="HTTP/2.0") -> dict:
+    url = f"https://app.example{path}"
+    hr = {"requestUrl": url, "requestMethod": method, "status": status, "latency": latency, "userAgent": ua, "remoteIp": SECRETS[2], "referer": SECRETS[4],
+          "responseSize": size, "protocol": protocol}
+    return {"timestamp": ts, "resource": {"labels": {"service_name": service}}, "httpRequest": hr}
+
+
+def test_timeline_window_is_bounded_and_shaped():
+    ok = probe.parse_timeline_window("2026-10-15T06:50:00Z", "2026-10-15T08:50:00Z", "prod")
+    assert ok == ("2026-10-15T06:50:00Z", "2026-10-15T08:50:00Z", "prod")
+    assert probe.parse_timeline_window("2026-10-15T06:50:00Z", "2026-10-15T07:00:00Z", None)[2] == "prod"  # env 기본 prod
+    assert probe.parse_timeline_window(" 2026-10-15T06:50:00Z\n", "2026-10-15T07:00:00Z ", " dev ") == ("2026-10-15T06:50:00Z", "2026-10-15T07:00:00Z", "dev")  # 가장자리 공백은 걷는다
+    assert probe.parse_timeline_window("2026-10-15T06:50:00Z", "2026-10-15T07:00:00Z", "dev")[2] == "dev"
+    for start, end, env in [
+        ("2026-10-15T06:50:00Z", "2026-10-15T08:50:01Z", "prod"),   # 2시간 + 1초
+        ("2026-10-15T07:00:00Z", "2026-10-15T06:50:00Z", "prod"),   # 끝이 앞
+        ("2026-10-15T07:00:00Z", "2026-10-15T07:00:00Z", "prod"),   # 길이 0
+        ("2026-10-15 06:50:00", "2026-10-15T07:00:00Z", "prod"),    # 모양
+        ("2026-10-15T06:50:00+09:00", "2026-10-15T07:00:00Z", "prod"),
+        ("", "2026-10-15T07:00:00Z", "prod"),
+        ("2026-10-15T06:50:00Z", "2026-10-15T07:00:00Z", "staging"),
+        ("2026-10-15T06:50:00Z", "2026-10-15T07:0\n0:00Z", "prod"),   # 가운데 낀 개행
+        ("2026-10-15T06:50:00Z", "2026-10-15T07:00:00Z", "prod; rm"),
+    ]:
+        with pytest.raises(SystemExit):
+            probe.parse_timeline_window(start, end, env)
+
+
+def test_web_route_files_become_closed_templates():
+    t = probe.web_route_template
+    assert t("apps/web/src/app/(authenticated)/inbox/page.tsx") == ("inbox",)
+    assert t("apps/web/src/app/(authenticated)/[ws]/[proj]/flow/page.tsx") == ("{}", "{}", "flow")
+    assert t("apps/web/src/app/api/chat/conversations/[id]/messages/route.ts") == ("api", "chat", "conversations", "{}", "messages")
+    assert t("apps/web/src/app/page.tsx") == ()
+    for hidden in ("apps/web/src/app/api/x/route.test.ts", "apps/web/src/app/(a)/inbox/page.test.tsx", "apps/web/src/app/@modal/x/page.tsx",
+                   "apps/web/src/app/_private/x/page.tsx", "apps/web/src/app/docs/[...slug]/page.tsx", "apps/web/src/app/docs/[[...slug]]/page.tsx",
+                   "apps/web/src/lib/x/page.tsx", "apps/web/src/app/inbox/layout.tsx"):
+        assert t(hidden) is None, hidden
+    assert probe.shape_route_template("/api/v2/stories/{}/comments") == ("api", "v2", "stories", "{}", "comments")
+    assert probe.shape_route_template("no-slash") is None and probe.shape_route_template(5) is None
+
+
+def test_build_route_templates_unions_head_and_main_and_notes_a_missing_one():
+    files = {"HEAD": ["apps/web/src/app/(x)/inbox/page.tsx"], "origin/main": ["apps/web/src/app/api/health/route.ts"]}
+    shapes = {"HEAD": '[{"path": "/api/v2/me"}]', "origin/main": "not json"}
+    templates, notes = probe.build_route_templates(lambda rev: files[rev], lambda rev: shapes[rev])
+    assert templates == frozenset({("inbox",), ("api", "health"), ("api", "v2", "me")})
+    assert any("origin/main" in n and "route-shape" in n for n in notes)
+    def boom(rev): raise RuntimeError("x")
+    t2, n2 = probe.build_route_templates(boom, boom)
+    assert t2 == frozenset() and len(n2) == 4
+
+
+def test_route_label_is_a_closed_template_never_the_requests_own_text():
+    lab = lambda path: probe.route_label(f"https://app.example{path}?code={SECRETS[5]}&user={SECRETS[1]}", TEMPLATES)
+    assert lab("/inbox") == "/inbox"
+    assert lab("/") == "/"
+    assert lab(f"/api/v2/stories/{SECRETS[1]}") == "/api/v2/stories/{}"
+    assert lab(f"/api/v2/stories/{SECRETS[1]}/comments") == "/api/v2/stories/{}/comments"
+    assert lab("/api/chat/conversations/abc/messages") == "/api/chat/conversations/{}/messages"
+    assert lab("/acme/proj/flow") == "/{}/{}/flow"
+    assert lab("/api/health") == "/api/health"                       # 고정 라벨
+    assert lab("/_next/static/chunks/a.js") == "/_next/static/*"
+    # 가장 구체적인 템플릿이 이긴다: `/inbox` 는 `/{}` 가 아니라 `/inbox`
+    assert lab("/someone") == "/{}"
+    # 목록 밖은 (other) — 요청 글자는 어디에도 안 실린다
+    for bad in ("/totally/unknown/path", f"/api/v2/{SECRETS[3]}", "//", "/api/chat/conversations/a/b/c/d"):
+        out = lab(bad)
+        assert out == "(other)" or "{}" in out or out.startswith("/"), bad
+        for secret in SECRETS:
+            assert secret not in out
+    assert probe.route_label(None, TEMPLATES) == "(other)" and probe.route_label(7, TEMPLATES) == "(other)"
+    assert probe.route_label("https://x/zzz/yyy", frozenset({("a",)})) == "(other)"
+
+
+def test_timeline_lists_in_time_order_with_ms_status_and_a_closed_browser_class():
+    es = [
+        _req("2026-10-15T06:55:09.9Z", "/api/chat/conversations", latency="11.532s"),
+        _req("2026-10-15T06:55:01.1Z", "/inbox", latency="0.080s"),
+        _req("2026-10-15T06:55:05.0Z", "/api/v2/me", service="sprintable-backend-prod", status=401, method="POST", latency="0.012345678s"),
+        _req("2026-10-15T06:55:06.0Z", "/api/chat/conversations", latency="garbage"),
+        {"timestamp": "2026-10-15T06:55:07Z", "resource": {"labels": {"service_name": "sprintable-frontend-prod"}}, "httpRequest": {"requestUrl": f"https://a.example/inbox?token={SECRETS[7]}", "requestMethod": "WEIRD\r\nX: 1", "status": 999}},
+        {"timestamp": "2026-10-15T06:55:08Z"},       # httpRequest 없음 — 건너뛴다
+        {"httpRequest": "x"},
+    ]
+    lines, stats, cut = probe.agg_timeline(es, TEMPLATES, WEB, BACK)
+    assert cut is False
+    assert lines == [
+        "  2026-10-15T06:55:01Z  web  GET /inbox  200  80ms  1234B  proto=h2  browser=android-webview",
+        "  2026-10-15T06:55:05Z  backend  POST /api/v2/me  401  12ms  1234B  proto=h2  browser=android-webview",
+        "  2026-10-15T06:55:06Z  web  GET /api/chat/conversations  200  ?ms  1234B  proto=h2  browser=android-webview",
+        "  2026-10-15T06:55:07Z  web  ? /inbox  ?  ?ms  ?B  proto=?  browser=other",
+        "  2026-10-15T06:55:09Z  web  GET /api/chat/conversations  200  11532ms  1234B  proto=h2  browser=android-webview",
+    ]
+    assert "  web  GET /api/chat/conversations  2건 · p50 11532ms · 최대 11532ms · 크기 합계 2468B" in stats   # ? 는 통계에서 빠진다
+    assert "  web  GET /inbox  1건 · p50 80ms · 최대 80ms · 크기 합계 1234B" in stats
+    _no_secret("\n".join(lines + stats))
+
+
+def test_timeline_stats_p50_and_max_by_label():
+    es = [_req(f"2026-10-15T06:55:{i:02d}Z", "/api/v2/me", latency=f"{ms / 1000:.3f}s", service="sprintable-backend-prod") for i, ms in enumerate([100, 900, 300, 200])]
+    _lines, stats, _cut = probe.agg_timeline(es, TEMPLATES, WEB, BACK)
+    assert stats == ["  backend  GET /api/v2/me  4건 · p50 200ms · 최대 900ms · 크기 합계 4936B"]   # 짝수 개 → 아래쪽 중앙값(실제로 있던 값)
+
+
+def test_timeline_line_cap_is_reported_not_silent(monkeypatch):
+    monkeypatch.setattr(probe, "_TL_MAX_LINES", 3)
+    es = [_req(f"2026-10-15T06:55:{i:02d}Z", "/inbox") for i in range(5)]
+    lines, stats, cut = probe.agg_timeline(es, TEMPLATES, WEB, BACK)
+    assert cut is True and len(lines) == 3 and stats == ["  web  GET /inbox  5건 · p50 250ms · 최대 250ms · 크기 합계 6170B"]
+
+
+def test_cold_starts_print_time_kind_and_a_closed_reason_only():
+    def sys_entry(ts, text, service="sprintable-frontend-prod"):
+        return {"timestamp": ts, "textPayload": text, "resource": {"labels": {"service_name": service}}}
+    es = [
+        sys_entry("2026-10-15T06:56:00Z", "Starting new instance. Reason: AUTOSCALING - Instance started due to user traffic."),
+        sys_entry("2026-10-15T06:55:00Z", "Starting new instance. Reason: MIN_INSTANCES - x", "sprintable-backend-prod"),
+        sys_entry("2026-10-15T06:57:00Z", f"Starting new instance. Reason: {SECRETS[8].upper().replace('.', '_')} {SECRETS[0]}"),
+        sys_entry("2026-10-15T06:58:00Z", "Starting new instance."),
+        sys_entry("2026-10-15T06:59:00Z", f"container log {SECRETS[0]} nothing to do with starts"),
+    ]
+    out = probe.agg_cold_starts(es, WEB, BACK)
+    assert out == [
+        "  2026-10-15T06:55:00Z  backend  reason=MIN_INSTANCES",
+        "  2026-10-15T06:56:00Z  web  reason=AUTOSCALING",
+        "  2026-10-15T06:57:00Z  web  reason=(other)",
+        "  2026-10-15T06:58:00Z  web  reason=?",
+    ]
+    _no_secret("\n".join(out))
+
+
+def test_timeline_mode_runs_only_the_timeline_with_the_window_in_the_filter(monkeypatch, capsys):
+    calls = []
+
+    def fake_run(cmd):
+        if cmd[:4] == ["gcloud", "run", "services", "list"]:
+            return "sprintable-frontend-prod\nsprintable-backend-prod\nsprintable-frontend-dev\nsprintable-realtime-prod\n"
+        calls.append(cmd)
+        return "[]"
+
+    monkeypatch.setattr(probe, "_run", fake_run)
+    monkeypatch.setattr(probe, "build_route_templates", lambda: (TEMPLATES, []))
+    monkeypatch.setenv("TIMELINE_START", "2026-10-15T06:50:00Z")
+    monkeypatch.setenv("TIMELINE_END", "2026-10-15T07:50:00Z")
+    monkeypatch.setenv("TIMELINE_ENV", "prod")
+    assert probe.main() == 0
+    out = capsys.readouterr().out
+    assert "env=prod" in out and "sprintable-frontend-prod" in out and "sprintable-backend-prod" in out
+    assert "sprintable-frontend-dev" not in out and "realtime" not in out          # dev · 실시간 서비스는 안 읽는다
+    assert "state_check" not in out and "① " not in out                            # 기존 칸은 안 돈다
+    assert len(calls) == 2                                                          # 요청 한 번 · 시스템 로그 한 번
+    flt = [c[3] for c in calls]
+    assert all('timestamp>="2026-10-15T06:50:00Z" AND timestamp<="2026-10-15T07:50:00Z"' in f for f in flt)
+    assert any("/_next/static/" in f and "NOT" in f for f in flt) and any("varlog%2Fsystem" in f for f in flt)
+    assert all("--order=asc" in c for c in calls)
+    monkeypatch.setenv("TIMELINE_ENV", "dev")
+    calls.clear()
+    assert probe.main() == 0
+    assert "sprintable-frontend-dev" in capsys.readouterr().out and "sprintable-frontend-prod" not in "".join(c[3] for c in calls)
+
+
+def test_a_bad_window_stops_before_any_gcloud_call(monkeypatch):
+    monkeypatch.setattr(probe, "_run", lambda cmd: pytest.fail("gcloud must not be called"))
+    monkeypatch.setenv("TIMELINE_START", "2026-10-15T06:50:00Z")
+    monkeypatch.setenv("TIMELINE_END", "2026-10-15T10:50:00Z")  # 4시간
+    with pytest.raises(SystemExit):
+        probe.main()
+
+
+def test_the_real_sources_in_this_checkout_yield_the_routes_the_story_is_about():
+    """소스가 바뀌어 템플릿이 조용히 비면 여기서 빨강 — 홈 · 대화 · 로그인 길."""
+    root = _INFRA_DIR.parent
+    import subprocess
+    files = subprocess.run(["git", "ls-files", "apps/web/src/app"], capture_output=True, text=True, cwd=root).stdout.splitlines()
+    shapes = (root / "scripts" / "web_api_route_shapes.json").read_text(encoding="utf-8")
+    templates, notes = probe.build_route_templates(lambda rev: files if rev == "HEAD" else [], lambda rev: shapes if rev == "HEAD" else "[]")
+    assert len(templates) > 300
+    assert ("login",) in templates and ("api", "v2", "me") in templates
+    assert ("chat",) in templates and ("chats",) in templates and ("today",) in templates   # 홈 · 대화 탭의 페이지
+    assert ("api", "conversations", "{}", "messages") in templates                          # 대화 메시지 API(웹 BFF)
+
+
+def test_size_and_protocol_are_numbers_and_closed_words_only():
+    es = [
+        _req("2026-10-15T06:55:01Z", "/inbox", size="48213", protocol="HTTP/1.1"),
+        _req("2026-10-15T06:55:02Z", "/inbox", size="0", protocol="HTTP/3.0"),
+        _req("2026-10-15T06:55:03Z", "/inbox", size=f"12{SECRETS[1]}", protocol=f"HTTP/9 {SECRETS[3]}"),   # 숫자 아님 · 닫힌 낱말 밖
+        _req("2026-10-15T06:55:04Z", "/inbox", size="-5", protocol=None),
+        _req("2026-10-15T06:55:05Z", "/inbox", size="9" * 13, protocol="http/2"),                         # 너무 큼 · 대소문자
+        _req("2026-10-15T06:55:06Z", "/inbox", size=True, protocol=7),
+    ]
+    lines, stats, _cut = probe.agg_timeline(es, TEMPLATES, WEB, BACK)
+    assert [ln.split("  ")[-3:-1] for ln in lines] == [["48213B", "proto=h1.1"], ["0B", "proto=h3"], ["?B", "proto=?"], ["?B", "proto=?"], ["?B", "proto=?"], ["?B", "proto=?"]]
+    assert stats == ["  web  GET /inbox  6건 · p50 250ms · 최대 250ms · 크기 합계 48213B"]
+    _no_secret("\n".join(lines + stats))
