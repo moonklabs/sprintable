@@ -731,12 +731,19 @@ steps:
           # #4398 — 사용자 IP 머리글 서명 비밀(백엔드와 같은 값 · dev만 · prod는 승격 때).
           FE_SECRETS="--update-secrets=EDGE_CLIENT_IP_SECRET=EDGE_CLIENT_IP_SECRET_DEV:latest"
           ENV_VARS="$${ENV_VARS},DESKTOP_DOWNLOAD_ENABLED=true"
+          # story 4696 — the download card's bucket is the SERVER's setting (apps/web lib/desktop-downloads.ts has no default: an
+          # unset one closes the card, so a prod that does not name its own can never link dev's app). dev: the dev bucket.
+          ENV_VARS="$${ENV_VARS},DESKTOP_DOWNLOAD_BUCKET=sprintable-desktop-releases-dev"
           # story #4219 C1(PO 판정) — 첫 문서 서버 구간 마커(Server-Timing 헤더·로그 한 줄 · 이름·시간만). dev 분기에서만
           # 싣고 prod엔 안 실어 미설정 = 꺼짐(값이 정확히 "true"일 때만 켜진다 — lib/server-timing.isServerTimingEnabled).
           ENV_VARS="$${ENV_VARS},SERVER_TIMING_MARKERS=true"
         elif [ "${_DEPLOY_ENV}" == "prod" ]; then
           # #4398 — prod는 명시 제거(손으로 붙여도 다음 배포가 뗀다 · 없는 키 제거는 gcloud가 건너뜀).
           FE_SECRETS="--remove-secrets=EDGE_CLIENT_IP_SECRET"
+          # story 4696 (PO 10-15 · the teacher opened «받기» on the web today) — the /desktop download is ON in prod, from prod's OWN bucket
+          # (sprintable-desktop-releases · filled by the publish path, not dev's). Until that bucket has a manifest the card closes
+          # («지금은 받을 수 없어요»: a 404 is no manifest), so this is safe to carry ahead of the upload.
+          ENV_VARS="$${ENV_VARS},DESKTOP_DOWNLOAD_ENABLED=true,DESKTOP_DOWNLOAD_BUCKET=sprintable-desktop-releases"
         fi
         gcloud run deploy sprintable-frontend-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/frontend:${COMMIT_SHA} \

@@ -44,7 +44,7 @@ function stubFetch() {
     if (url.endsWith('/api/projects')) return { ok: true, json: async () => ({ data: { id: 'proj-1' } }) };
     if (url.endsWith('/api/current-project')) return { ok: true, json: async () => ({}) };
     if (url.endsWith('/api/team-members')) return { ok: true, json: async () => ({ data: { id: 'agent-1', api_key: 'sk_live_abcd1234' } }) };
-    if (url.endsWith('/desktop/downloads/macos.json')) return { ok: true, json: async () => MANIFEST };
+    if (url.endsWith('/desktop/downloads/macos.json')) return { ok: true, json: async () => MANIFEST, headers: new Headers({ 'x-desktop-download-bucket': 'sprintable-desktop-releases-dev' }) };
     // remote control · connection artifact · verification — none of them matters here; a 404 is handled by each component
     return { ok: false, status: 404, json: async () => ({}) };
   }));

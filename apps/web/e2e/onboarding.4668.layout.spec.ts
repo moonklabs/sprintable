@@ -69,7 +69,7 @@ async function build() {
   return built;
 }
 
-type Answer = unknown | { __status: number; body: unknown };
+type Answer = unknown | { __status: number; body: unknown; headers?: Record<string, string> };
 const MANIFEST = {
   product: 'Sprintable Dev Setup', version: '0.4.0', build: 'abc1234', notarized: false,
   url: 'https://storage.googleapis.com/sprintable-desktop-releases-dev/Sprintable-Dev-Setup.dmg',
@@ -81,7 +81,8 @@ const API: Record<string, Answer> = {
   'POST /api/projects': { data: { id: 'proj-1' } },
   'POST /api/current-project': {},
   'POST /api/onboarding/events': {},
-  'GET /desktop/downloads/macos.json': MANIFEST,
+  // story 4697: the manifest route tells the card its bucket in a header — without it the card closes («지금은 받을 수 없어요»)
+  'GET /desktop/downloads/macos.json': { __status: 200, body: MANIFEST, headers: { 'x-desktop-download-bucket': 'sprintable-desktop-releases-dev' } },
   // the organization's owner, remote control off → the 4656 block is drawn under «더 보기» when opened
   'GET /api/organizations/org-1/remote-control': { data: { enabled: false, enabled_at: null, can_change: true, owner_names: ['송윤재'], connected_setups: 0 } },
 };
@@ -97,8 +98,8 @@ async function open(page: Page, o: { width: number; theme: 'L' | 'D'; locale?: '
     }
     const a = API[`${route.request().method()} ${url.pathname}`] ?? API[url.pathname];
     if (a === undefined) return route.fulfill({ status: 404, body: '{}' });
-    const { __status, body } = (a && typeof a === 'object' && '__status' in a ? a : { __status: 200, body: a }) as { __status: number; body: unknown };
-    return route.fulfill({ status: __status, contentType: 'application/json', body: JSON.stringify(body) });
+    const { __status, body, headers } = (a && typeof a === 'object' && '__status' in a ? a : { __status: 200, body: a }) as { __status: number; body: unknown; headers?: Record<string, string> };
+    return route.fulfill({ status: __status, contentType: 'application/json', body: JSON.stringify(body), ...(headers ? { headers } : {}) });
   });
   await page.goto('about:blank');
   await page.goto('http://preview.test/');
