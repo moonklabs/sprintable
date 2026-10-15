@@ -7057,6 +7057,13 @@
       "noAgentRow": "에이전트가 맡는 역할이 하나는 있어야 시작할 수 있어요 — 역할 하나를 에이전트로 바꿔 주세요.",
       "attachableReading": "이미 있는 에이전트 목록을 불러오고 있어요",
       "attachableFailed": "이미 있는 에이전트 목록을 불러오지 못했어요",
+      "preselect": {
+        "notListed": "고른 에이전트는 이 컴퓨터에서 시작할 수 없어요",
+        "notInProject": "{name} · 이 프로젝트 팀에 아직 없어요 — 팀에 넣으면 이 컴퓨터에서 시작할 수 있어요",
+        "runtimeMissing": "{name} · 이 컴퓨터에서 {runtime}{eulReul} 찾지 못했어요 — 설치하고 로그인한 뒤 다시 찾아 주세요",
+        "runtimeBlocked": "{name} · {runtime}{eunNeun} 회사 설정 때문에 이 컴퓨터에서 Sprintable에 연결할 수 없어요",
+        "useNew": "새로 만들기로 바꾸기"
+      },
       "newOrg": {
         "line": "새 조직 «{name}»도 함께 만들어요",
         "later": "이름은 나중에 설정에서 바꿀 수 있어요."

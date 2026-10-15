@@ -7057,6 +7057,13 @@
       "noAgentRow": "At least one role needs an agent before you can start — switch a role back to an agent.",
       "attachableReading": "Loading your existing agents",
       "attachableFailed": "Couldn't load your existing agents",
+      "preselect": {
+        "notListed": "The agent you picked can't start on this computer",
+        "notInProject": "{name} · not on this project's team yet — put it on the team to start it on this computer",
+        "runtimeMissing": "{name} · Couldn't find {runtime} on this computer — install it and sign in, then look again",
+        "runtimeBlocked": "{name} · {runtime} can't connect to Sprintable on this computer because of your company's settings",
+        "useNew": "Use new agents instead"
+      },
       "newOrg": {
         "line": "This also creates a new organization, \"{name}\"",
         "later": "You can rename them later in settings."

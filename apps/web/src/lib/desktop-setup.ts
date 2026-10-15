@@ -88,6 +88,30 @@ export type RowOwner = { kind: 'me' } | { kind: 'agent'; runtime: DesktopRuntime
 /** `in_project` false (PO 04:37Z): the person has to add it to the project first — shown turned off with why, never chosen. */
 export interface AttachableAgent { id: string; name: string; runtime: DesktopRuntime; live_keys: number; last_used_at: string | null; in_project: boolean }
 
+/** story 4703 — why the recruiter's agent (`agent=` · the preselect) cannot take a row of this list, from the server's own list and the
+ * runtimes the app found (never a guessed reason). null = nothing to say: no preselect, or it lands (in the project, its runtime usable here).
+ * - `unlisted`: the id is not in the list — not an active agent of this organization with a desktop runtime. Another organization's agent,
+ *   an id that does not exist and an agent with no desktop runtime are ONE answer here (the list is this organization's only, and carries
+ *   no name or id of the missing one — nothing about whether it exists elsewhere can show).
+ * - `runtime_missing` / `runtime_blocked`: its runtime is not on this computer / is found but cannot take tools (company-managed); a missing
+ *   runtime comes first when several reasons meet (adding it to the project would not make it run).
+ * - `outside_project`: in the organization, its runtime usable here, but not in this project (the page's [프로젝트 팀에 넣기] road). */
+export type PreselectHold =
+  | { reason: 'unlisted' }
+  | { reason: 'runtime_missing' | 'runtime_blocked' | 'outside_project'; agent: AttachableAgent };
+
+export function preselectHoldOf(
+  list: readonly AttachableAgent[], preselect: string | null | undefined, usable: readonly DesktopRuntime[], blocked: readonly DesktopRuntime[] = [],
+): PreselectHold | null {
+  if (!preselect) return null;
+  const agent = list.find((a) => a.id === preselect);
+  if (!agent) return { reason: 'unlisted' };
+  if (blocked.includes(agent.runtime)) return { reason: 'runtime_blocked', agent };
+  if (!usable.includes(agent.runtime)) return { reason: 'runtime_missing', agent };
+  if (!agent.in_project) return { reason: 'outside_project', agent };
+  return null;
+}
+
 /** The «이미 있는 에이전트» choices of a row (agent · either rows only): every attachable agent whose runtime is on this computer.
  * The page draws the others (runtime not here · picked for another row) as disabled options with why. */
 export function existingChoices(attachable: readonly AttachableAgent[], runtimes: readonly DesktopRuntime[]): RowOwner[] {
