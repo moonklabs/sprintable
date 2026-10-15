@@ -1679,15 +1679,15 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
     expect(container.textContent).not.toContain('새 조직 «'); // the progress view
   });
 
-  it('[SID:4670] the new organization: the tick «폰에서도 다루기 (원격 제어)» is on by default with its help line; unticked → no switch call at all', async () => {
+  it('[SID:4670] the new organization: the tick «폰으로도 에이전트 다루기» is on by default with its help line; unticked → no switch call at all', async () => {
     stubNoOrg();
     await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} setupId="s-1" />);
     const row = container.querySelector('[data-testid=setup-phone-control]')!;
     expect(row).not.toBeNull();
     const box = row.querySelector('input[type=checkbox]') as HTMLInputElement;
     expect(box.checked).toBe(true);
-    expect(row.textContent).toContain('폰에서도 다루기 (원격 제어)');
-    expect(row.textContent).toContain('켜면 페어링된 폰에서 에이전트를 멈추고, 지시하고, 권한 요청에 답할 수 있어요 — 끄면 권한 요청이 폰으로 오지 않아요. 나중에 바꿀 수 있어요.');
+    expect(row.textContent).toContain('폰으로도 에이전트 다루기');
+    expect(row.textContent).toContain('원격 제어를 켜면 페어링된 폰에서 에이전트를 멈추고, 지시하고, 권한 요청에 답할 수 있어요. 이 조직 전체에 적용되고, 나중에 끌 수 있어요.');
     // the row sits in the start row, above «시작»
     expect(container.querySelector('[data-testid=setup-start-row]')!.contains(row)).toBe(true);
     await act(async () => { box.click(); });
@@ -2565,7 +2565,7 @@ describe('[SID:4494] old= — the page says a runtime is too old, not missing', 
   });
 });
 
-describe('[SID:4670] «폰에서도 다루기 (원격 제어)» — the tick above «시작» for the person who can switch the org\'s remote control', () => {
+describe('[SID:4670] «폰으로도 에이전트 다루기» — the tick above «시작» for the person who can switch the org\'s remote control', () => {
   const confirmOk = () => new Response(JSON.stringify({ setup_id: SETUP_ID, members: [], work_item_id: 'w-1' }), { status: 200 });
   const puts = () => calls.filter((c) => c.method === 'PUT' && /\/remote-control$/.test(c.url));
   const row = () => container.querySelector('[data-testid=setup-phone-control]');
@@ -2608,11 +2608,10 @@ describe('[SID:4670] «폰에서도 다루기 (원격 제어)» — the tick abo
     expect(puts()).toHaveLength(0);
   });
 
-  it('no row — and no PUT — when the switch is already on · the person cannot change it (an admin) · the value is not read', async () => {
+  it('no row — and no PUT — when the switch is already on · the person cannot change it (an admin)', async () => {
     for (const get of [
       remoteGetOf({ enabled: true, can_change: true, enabled_at: 'x' }),
       remoteGetOf({ enabled: false, can_change: false, enabled_at: null }),
-      () => new Response('{}', { status: 404 }),
     ]) {
       remoteGet = get;
       stub(confirmOk);
@@ -2624,6 +2623,40 @@ describe('[SID:4670] «폰에서도 다루기 (원격 제어)» — the tick abo
       expect(puts()).toHaveLength(0);
       act(() => root.unmount()); root = createRoot(container);
     }
+  });
+
+  // Yuna §M: a read that FAILED is no longer «no row» — the box is drawn, unticked (never flip a value that could not be read to «on»)
+  it('the value could not be read (a final answer) → the box is drawn UNTICKED · «시작» sends no switch call · ticking it by hand sends the one PUT', async () => {
+    remoteGet = () => new Response('{}', { status: 404 });
+    stub(confirmOk);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} setupId={SETUP_ID} />);
+    expect((row()!.querySelector('input[type=checkbox]') as HTMLInputElement).checked).toBe(false);
+    calls = [];
+    await act(async () => { startButton().click(); });
+    await flushAll();
+    expect(puts()).toHaveLength(0);
+    act(() => root.unmount()); root = createRoot(container);
+    stub(confirmOk);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} setupId={SETUP_ID} />);
+    await act(async () => { (row()!.querySelector('input[type=checkbox]') as HTMLInputElement).click(); });
+    calls = [];
+    await act(async () => { startButton().click(); });
+    await flushAll();
+    expect(puts()).toHaveLength(1);
+  });
+
+  it('Yuna §M shape: a bordered box with the phone icon, a semibold label, a size-5 tick — inside the sticky footer, just above «시작»', async () => {
+    remoteGet = remoteGetOf(REMOTE_OFF_OWNER);
+    stub(confirmOk);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} setupId={SETUP_ID} />);
+    const footer = container.querySelector('[data-testid=setup-start-row]')!;
+    const box = footer.querySelector('[data-testid=setup-phone-control]') as HTMLElement;
+    expect(box.className).toContain('rounded-md border p-3');
+    expect(box.querySelector('svg[aria-hidden=true]')).not.toBeNull();
+    expect(box.querySelector('label span')!.className).toContain('font-semibold');
+    expect(box.querySelector('input')!.className).toContain('size-5');
+    const kids = [...footer.children];
+    expect(kids.indexOf(box)).toBe(kids.indexOf(kids.find((k) => k.tagName === 'BUTTON')!) - 1); // right above [시작]
   });
 
   it('the switch call is refused: the setup still goes on to its progress (no error card)', async () => {

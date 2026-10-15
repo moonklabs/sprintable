@@ -30,6 +30,10 @@ let root: Root;
 let calls: { url: string; method?: string; body?: unknown }[];
 let agentsNow: () => Response;
 let statusNow: () => unknown = () => ({});
+// story 4670 AC1 — GET/PUT /api/organizations/{id}/remote-control (default 404: not known → no «폰에서도 다루기» row)
+const REMOTE_OFF_OWNER = { enabled: false, can_change: true, enabled_at: null };
+let remoteGet: () => Response = () => new Response('{}', { status: 404 });
+let remotePut: () => Response = () => new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'now' } }), { status: 200 });
 
 function stub(confirm: () => Response | Promise<Response>) {
   calls = [];
@@ -40,6 +44,7 @@ function stub(confirm: () => Response | Promise<Response>) {
     if (url.includes('/api/desktop/setup/agents')) return agentsNow();
     if (url.includes('/api/desktop/setup-codes/')) return confirm();
     if (url.includes('/api/desktop/setups/')) return new Response(JSON.stringify(statusNow()), { status: 200 });
+    if (/\/api\/organizations\/[^/]+\/remote-control$/.test(url)) return init?.method === 'PUT' ? remotePut() : remoteGet();
     return new Response('{}', { status: 404 });
   }));
 }
@@ -61,6 +66,8 @@ const tick = async (name: string) => {
 const startRowLine = () => (container.querySelector('[data-testid=setup-start-row] p') as HTMLElement).textContent;
 
 beforeEach(() => {
+  remoteGet = () => new Response('{}', { status: 404 });
+  remotePut = () => new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'now' } }), { status: 200 });
   agentsNow = () => new Response(JSON.stringify({ agents: [DAMRONG, DAN, KADIR] }), { status: 200 });
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
 });
@@ -369,6 +376,40 @@ describe('[SID:4576] the move\'s progress — two steps, by name', () => {
     expect(text()).toContain('이제 이 컴퓨터에서 일해요 — 다음 일감은 평소처럼 받아요');
   });
 
+  // story 4670 AC1: the move is the new customer's usual road — its end screen carries the phone's way in too (the QR block · [폰 페어링 열기]
+  // · the remote-control [켜기]), and the progress head's «아래 카드에서 다시 켤 수 있어요» line points at that card
+  it('story 4670 AC1: settled → the phone card is below (owner: [폰 페어링 열기]) · not settled yet → no card', async () => {
+    statusNow = () => base({ tools_connected: [{ member_id: 'm-dan', at: '2026-10-06T04:41:00Z' }, { member_id: 'm-kad', at: '2026-10-06T04:41:02Z' }] });
+    stub(() => new Response('{}'));
+    await mount(<SetupProgressView setupId="s-1" recipeName="" />);
+    await read();
+    expect(container.querySelector('[data-testid=setup-phone-card] [data-testid=setup-phone-pair]')).not.toBeNull();
+    act(() => root.unmount()); root = createRoot(container);
+    statusNow = () => base({ tools_connected: [{ member_id: 'm-dan', at: '2026-10-06T04:41:00Z' }] });
+    await mount(<SetupProgressView setupId="s-1" recipeName="" />);
+    await read();
+    expect(container.querySelector('[data-testid=setup-phone-card]')).toBeNull();
+  });
+
+  it('story 4670 AC1: the tick was on but the switch did not turn on → the head says it on the move\'s progress, and before the first reading too', async () => {
+    const line = () => container.querySelector('[data-testid=setup-phone-control-failed]')?.textContent;
+    statusNow = () => ({});
+    stub(() => new Response('{}'));
+    await mount(<SetupProgressView setupId="s-1" recipeName="" phoneControlFailed />);
+    await read();
+    expect(line()).toBe('폰 다루기는 켜지 못했어요 — 끝나면 아래 카드에서 다시 켤 수 있어요.'); // no status yet
+    act(() => root.unmount()); root = createRoot(container);
+    statusNow = () => base({});
+    await mount(<SetupProgressView setupId="s-1" recipeName="" phoneControlFailed />);
+    await read();
+    expect(container.querySelector('[data-testid=setup-move-progress]')).not.toBeNull();
+    expect(line()).toBe('폰 다루기는 켜지 못했어요 — 끝나면 아래 카드에서 다시 켤 수 있어요.');
+    act(() => root.unmount()); root = createRoot(container);
+    await mount(<SetupProgressView setupId="s-1" recipeName="" />);
+    await read();
+    expect(line()).toBeUndefined();
+  });
+
   it('one connected, one still on its way → ① done with the pairs · ② running with «{이름}은 아직 연결하고 있어요» · the leaving line', async () => {
     statusNow = () => base({ tools_connected: [{ member_id: 'm-dan', at: '2026-10-06T04:41:00Z' }] });
     stub(() => new Response('{}'));
@@ -450,5 +491,92 @@ describe('[SID:4576] the address and the confirm body', () => {
   it('moveConfirmBody: each agent once, no recipe or folder · moveListOrder: movable first, server order kept inside each group', () => {
     expect(moveConfirmBody(CODE, 'p-1', ['a', 'b', 'a'])).toEqual({ code: CODE, project_id: 'p-1', roles: [{ role: 'move', agent_id: 'a' }, { role: 'move', agent_id: 'b' }] });
     expect(moveListOrder([DAMRONG, DAN, KADIR], ['claude']).map((a) => a.id)).toEqual(['a-dan', 'a-dam', 'a-kadir']);
+  });
+});
+
+// ── story 4670 AC1 (PO dev walk 10-15): the hire → «이 컴퓨터에서 시작» road lands on «옮기기» (the agent just made is an «existing
+// agent»). The tick above «시작» was drawn for the recipe start only — on this road it was not there, and no PUT was ever sent. ──
+describe('[SID:4670] «폰으로도 에이전트 다루기» on the move road (the new customer\'s usual road)', () => {
+  const row = () => container.querySelector('[data-testid=setup-phone-control]');
+  const puts = () => calls.filter((c) => c.method === 'PUT' && /\/remote-control$/.test(c.url));
+  const confirmOk = () => new Response(JSON.stringify({ setup_id: 'a'.repeat(8) + '-0000-4000-8000-000000000001', members: [], work_item_id: 'w-1' }), { status: 200 });
+  const pressMoveStart = async () => { await chooseMove(); await tick('댄 어윈'); calls = []; await act(async () => { button('옮기기')!.click(); }); await settle(); };
+
+  it('the hire road: recruiter preselect → «옮기기» → the row is there and ticked → [옮기기] = the confirmation first, then ONE PUT {enabled:true} for this session\'s org', async () => {
+    remoteGet = () => new Response(JSON.stringify({ data: REMOTE_OFF_OWNER }), { status: 200 });
+    stub(confirmOk);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove preselect="a-dan" />);
+    await chooseMove();
+    expect((row()!.querySelector('input[type=checkbox]') as HTMLInputElement).checked).toBe(true);
+    await pressMoveStart();
+    expect(calls.map((c) => `${c.method ?? 'GET'} ${c.url}`).filter((u) => !u.includes('/api/desktop/setups/'))).toEqual([
+      'POST /api/desktop/setup-codes/confirm', 'PUT /api/organizations/o-1/remote-control',
+    ]);
+    expect(puts()[0]!.body).toEqual({ enabled: true });
+  });
+
+  it('the row follows the way: there on «레시피로 시작» and on «옮기기» (one row, not two)', async () => {
+    remoteGet = () => new Response(JSON.stringify({ data: REMOTE_OFF_OWNER }), { status: 200 });
+    stub(confirmOk);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />);
+    expect(container.querySelectorAll('[data-testid=setup-phone-control]')).toHaveLength(1);
+    await chooseMove();
+    expect(container.querySelectorAll('[data-testid=setup-phone-control]')).toHaveLength(1);
+  });
+
+  it('unticked → the move is sent and NO switch call', async () => {
+    remoteGet = () => new Response(JSON.stringify({ data: REMOTE_OFF_OWNER }), { status: 200 });
+    stub(confirmOk);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />);
+    await chooseMove();
+    await act(async () => { (row()!.querySelector('input[type=checkbox]') as HTMLInputElement).click(); });
+    await pressMoveStart();
+    expect(calls.some((c) => c.url === '/api/desktop/setup-codes/confirm')).toBe(true);
+    expect(puts()).toHaveLength(0);
+  });
+
+  it('the move is refused → no switch call (the PUT never rides ahead of the confirmation)', async () => {
+    remoteGet = () => new Response(JSON.stringify({ data: REMOTE_OFF_OWNER }), { status: 200 });
+    stub(() => new Response(JSON.stringify({ error: { code: 'agents_changed' } }), { status: 409 }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />);
+    await pressMoveStart();
+    expect(calls.some((c) => c.url === '/api/desktop/setup-codes/confirm')).toBe(true);
+    expect(puts()).toHaveLength(0);
+  });
+
+  it('no row — and no PUT — when the switch is already on · the person cannot change it', async () => {
+    for (const get of [
+      () => new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'x' } }), { status: 200 }),
+      () => new Response(JSON.stringify({ data: { enabled: false, can_change: false, enabled_at: null } }), { status: 200 }),
+    ]) {
+      remoteGet = get;
+      stub(confirmOk);
+      await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />);
+      await chooseMove();
+      expect(row()).toBeNull();
+      await pressMoveStart();
+      expect(puts()).toHaveLength(0);
+      act(() => root.unmount()); root = createRoot(container);
+    }
+  });
+
+  it('the value could not be read (a final answer) → the box is drawn UNTICKED on the move road too · no PUT unless ticked by hand', async () => {
+    remoteGet = () => new Response('{}', { status: 404 });
+    stub(confirmOk);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />);
+    await chooseMove();
+    expect((row()!.querySelector('input[type=checkbox]') as HTMLInputElement).checked).toBe(false);
+    await pressMoveStart();
+    expect(puts()).toHaveLength(0);
+  });
+
+  it('the switch call is refused: the move still goes on, and the progress head says it (the line the recipe road already has)', async () => {
+    remoteGet = () => new Response(JSON.stringify({ data: REMOTE_OFF_OWNER }), { status: 200 });
+    remotePut = () => new Response('{}', { status: 403 });
+    stub(confirmOk);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />);
+    await pressMoveStart();
+    expect(puts()).toHaveLength(1);
+    expect(container.querySelector('[data-testid=setup-phone-control-failed]')?.textContent).toBe('폰 다루기는 켜지 못했어요 — 끝나면 아래 카드에서 다시 켤 수 있어요.'); // (no status read yet: the card before it carries the line too)
   });
 });

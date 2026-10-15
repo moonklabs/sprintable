@@ -29,17 +29,20 @@ export function connectedSetupsOf(s: OrgRemoteControl): number {
   return s.connected_setups ?? s.connected_computers ?? 0;
 }
 
-interface Entry { value: OrgRemoteControl | null; listeners: Set<() => void>; asked: boolean; reading: boolean; gen: number }
+/** what a page sees: the value (null until read · or when it could not be) and whether the read FAILED (after its retries) — told apart from «still reading» */
+interface View { value: OrgRemoteControl | null; failed: boolean }
+const LOADING: View = { value: null, failed: false };
+interface Entry { view: View; listeners: Set<() => void>; asked: boolean; reading: boolean; gen: number }
 const entries = new Map<string, Entry>();
 
 function entry(orgId: string): Entry {
   let e = entries.get(orgId);
-  if (!e) { e = { value: null, listeners: new Set(), asked: false, reading: false, gen: 0 }; entries.set(orgId, e); }
+  if (!e) { e = { view: LOADING, listeners: new Set(), asked: false, reading: false, gen: 0 }; entries.set(orgId, e); }
   return e;
 }
 
-function publish(e: Entry, value: OrgRemoteControl | null): void {
-  e.value = value;
+function publish(e: Entry, value: OrgRemoteControl | null, failed = false): void {
+  e.view = { value, failed };
   for (const l of e.listeners) l();
 }
 
@@ -54,24 +57,51 @@ function release(orgId: string, e: Entry): void {
   queueMicrotask(() => { if (unused()) entries.delete(orgId); });
 }
 
+/**
+ * story 4670 AC1 (PO dev walk 10-15 · «읽기 실패 = 행 0»): a read that did not come back for a reason that may pass — the connection
+ * dropped, a 5xx, a 401 that the refresh did not mend — is asked again (a few times, a little later) while someone still shows the
+ * value; before, one miss left the switch row and the end card's [켜기] gone for the whole visit, with nothing said. An answer that
+ * says «no» (403 not a person of the org · 404) is final and not asked again.
+ */
+export const REMOTE_READ_RETRY_MS = [1500, 4000] as const;
+
+async function readOnce(orgId: string): Promise<{ value: OrgRemoteControl | null; retry: boolean; failed: boolean }> {
+  try {
+    const res = await fetchWithAuth(`/api/organizations/${orgId}/remote-control`);
+    if (!res.ok) return { value: null, retry: res.status >= 500 || res.status === 401, failed: true };
+    const value = ((await res.json()) as { data?: OrgRemoteControl }).data ?? null;
+    return { value, retry: false, failed: value === null };
+  } catch {
+    return { value: null, retry: true, failed: true };
+  }
+}
+
 function read(orgId: string): void {
   const e = entry(orgId);
   if (e.asked) return;
   e.asked = true;
   e.reading = true;
   const began = e.gen;
-  void fetchWithAuth(`/api/organizations/${orgId}/remote-control`)
-    .then(async (res) => (res.ok ? ((await res.json()) as { data?: OrgRemoteControl }).data ?? null : null))
-    .catch(() => null)
-    .then((v) => {
-      e.reading = false;
-      if (e.gen === began) publish(e, v); // a change made since the read began wins over the read
-      release(orgId, e);
-    });
+  void (async () => {
+    let answer = await readOnce(orgId);
+    for (const wait of REMOTE_READ_RETRY_MS) {
+      if (!answer.retry || e.gen !== began) break;
+      await new Promise((r) => setTimeout(r, wait));
+      if (e.listeners.size === 0) break; // everyone left meanwhile: no one is waiting for it
+      answer = await readOnce(orgId);
+    }
+    e.reading = false;
+    if (e.gen === began) publish(e, answer.value, answer.failed); // a change made since the read began wins over the read
+    release(orgId, e);
+  })();
 }
 
-/** The org's «원격 제어» as this page knows it (null: not known · not an org person) and the way to replace it after a change. */
-export function useOrgRemoteControl(orgId: string | null | undefined): [OrgRemoteControl | null, (next: OrgRemoteControl) => void] {
+/**
+ * The org's «원격 제어» as this page knows it (null: not known yet · or not read), the way to replace it after a change, and — story 4670 AC1 —
+ * `failed`: the read did not come back even after its retries (null + failed = «could not be read», told apart from null + not failed
+ * = «still reading»; a page that must not lose a row to a failed read draws it then).
+ */
+export function useOrgRemoteControl(orgId: string | null | undefined): [OrgRemoteControl | null, (next: OrgRemoteControl) => void, boolean] {
   const subscribe = useCallback((onChange: () => void) => {
     if (!orgId) return () => {};
     const e = entry(orgId);
@@ -81,7 +111,7 @@ export function useOrgRemoteControl(orgId: string | null | undefined): [OrgRemot
       release(orgId, e);
     };
   }, [orgId]);
-  const value = useSyncExternalStore(subscribe, () => (orgId ? entries.get(orgId)?.value ?? null : null), () => null);
+  const view = useSyncExternalStore(subscribe, () => (orgId ? entries.get(orgId)?.view ?? LOADING : LOADING), () => LOADING);
   useEffect(() => { if (orgId) read(orgId); }, [orgId]);
   const set = useCallback((next: OrgRemoteControl) => {
     if (!orgId) return;
@@ -89,7 +119,7 @@ export function useOrgRemoteControl(orgId: string | null | undefined): [OrgRemot
     e.gen += 1;
     publish(e, next);
   }, [orgId]);
-  return [value, set];
+  return [view.value, set, view.failed];
 }
 
 /**
