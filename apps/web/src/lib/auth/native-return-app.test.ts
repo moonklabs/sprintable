@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { appReturnUrl, appScheme, appSetupLink, nativeReturnApp } from './native-return-app';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { appReturnUrl, appScheme, appSetupLink, defaultScheme, nativeReturnApp } from './native-return-app';
 
 // story #4626 (PO 08:04Z): which desktop app a hand-back opens — a closed table. A value outside it is the default, and no
 // string from the URL ever reaches a link.
@@ -59,5 +59,66 @@ describe('native-return-app — story #4626', () => {
     expect(appSetupLink(null, undefined, { agent: 'a1111111-0000-4000-8000-000000000001' })).toBe('ai.sprintable:/desktop/setup?agent=a1111111-0000-4000-8000-000000000001');
     expect(appSetupLink(null, undefined, { agent: '../x' })).toBe('ai.sprintable:/desktop/setup');
     expect(appSetupLink(null, undefined, { agent: null })).toBe('ai.sprintable:/desktop/setup');
+  });
+});
+
+// story 4696 (PO 10-15): the Mac's «Sprintable Dev Setup» registers `ai.sprintable.dev` only and our crew's Macs have it alone, so on the DEV web a
+// link handed out without an `app` (a plain browser tab) must default to `ai.sprintable.dev` — or nobody opens it. The default is by the build's own
+// public address (NEXT_PUBLIC_APP_URL — the same source as phone-app-store.ts). The production web is byte for byte as before.
+describe('native-return-app — story 4696: the default scheme by host', () => {
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  it('⭐exactly the dev web\'s host → ai.sprintable.dev · the production host and everything else → ai.sprintable', () => {
+    for (const u of ['https://dev-app.sprintable.ai', 'https://dev-app.sprintable.ai/', 'https://dev-app.sprintable.ai:443/x?y=1', 'HTTPS://DEV-APP.SPRINTABLE.AI']) {
+      expect(defaultScheme(u), u).toBe('ai.sprintable.dev');
+    }
+    for (const u of ['https://app.sprintable.ai', 'https://app.sprintable.ai/', 'http://localhost:3000', 'http://127.0.0.1:3000', 'https://staging-app.sprintable.ai',
+      'https://dev-app.sprintable.ai.evil.example', 'https://evil.example/dev-app.sprintable.ai', 'https://xdev-app.sprintable.ai', 'https://dev-app.sprintable.aix',
+      'https://user@evil.example/?h=dev-app.sprintable.ai', 'dev-app.sprintable.ai', 'not a url', '', undefined]) {
+      expect(defaultScheme(u), String(u)).toBe('ai.sprintable');
+    }
+  });
+
+  it('the build\'s own address is read at call time (vi.stubEnv) — unset → the prod default, so every older test stays as it was', () => {
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', '');
+    expect(appScheme(null)).toBe('ai.sprintable');
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://dev-app.sprintable.ai');
+    expect(appScheme(null)).toBe('ai.sprintable.dev');
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://app.sprintable.ai');
+    expect(appScheme(null)).toBe('ai.sprintable');
+  });
+
+  it('⭐dev web: no `app` → every link of the page goes to ai.sprintable.dev (return · setup · reopen · pair · agent)', () => {
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://dev-app.sprintable.ai');
+    expect(appReturnUrl(new URLSearchParams('code=abc123'))).toBe('ai.sprintable.dev:/oauth-return?code=abc123');
+    expect(appReturnUrl(new URLSearchParams('code=abc123&state=xyz'))).toBe('ai.sprintable.dev:/oauth-return?code=abc123&state=xyz');
+    expect(appReturnUrl(new URLSearchParams(''))).toBe('ai.sprintable.dev:/oauth-return');
+    expect(appSetupLink(null)).toBe('ai.sprintable.dev:/desktop/setup');
+    expect(appSetupLink(null, 'reopen')).toBe('ai.sprintable.dev:/desktop/setup?intent=reopen');
+    expect(appSetupLink(null, 'pair')).toBe('ai.sprintable.dev:/desktop/setup?intent=pair');
+    expect(appSetupLink(null, undefined, { agent: 'a1111111-0000-4000-8000-000000000001' })).toBe('ai.sprintable.dev:/desktop/setup?agent=a1111111-0000-4000-8000-000000000001');
+  });
+
+  it('⭐dev web: a value outside the table is «no value» → the host\'s default, never the value · the table\'s own values stay as they are', () => {
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://dev-app.sprintable.ai');
+    for (const v of ['evil', 'javascript:alert(1)//', 'ai.sprintable.check', 'ai.sprintable', 'DEV', 'CHECK', ' dev', '']) {
+      expect(appReturnUrl(new URLSearchParams({ code: 'abc', app: v })), v).toBe('ai.sprintable.dev:/oauth-return?code=abc');
+    }
+    expect(appReturnUrl(new URLSearchParams('code=abc&app=check'))).toBe('ai.sprintable.check:/oauth-return?code=abc');   // the check app keeps its own
+    expect(appReturnUrl(new URLSearchParams('code=abc&app=dev'))).toBe('ai.sprintable.dev:/oauth-return?code=abc');
+    expect(appSetupLink('check')).toBe('ai.sprintable.check:/desktop/setup');
+    expect(appSetupLink('dev')).toBe('ai.sprintable.dev:/desktop/setup');
+  });
+
+  it('⭐production web: byte for byte as before — every default link is ai.sprintable:', () => {
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://app.sprintable.ai');
+    expect(appReturnUrl(new URLSearchParams('code=abc123'))).toBe('ai.sprintable:/oauth-return?code=abc123');
+    expect(appReturnUrl(new URLSearchParams('code=abc&app=evil'))).toBe('ai.sprintable:/oauth-return?code=abc');
+    expect(appSetupLink(null)).toBe('ai.sprintable:/desktop/setup');
+    expect(appSetupLink(null, 'reopen')).toBe('ai.sprintable:/desktop/setup?intent=reopen');
+    expect(appSetupLink(null, 'pair')).toBe('ai.sprintable:/desktop/setup?intent=pair');
+    expect(appSetupLink(null, undefined, { agent: 'a1111111-0000-4000-8000-000000000001' })).toBe('ai.sprintable:/desktop/setup?agent=a1111111-0000-4000-8000-000000000001');
+    expect(appReturnUrl(new URLSearchParams('code=abc&app=check'))).toBe('ai.sprintable.check:/oauth-return?code=abc');
+    expect(appSetupLink('dev')).toBe('ai.sprintable.dev:/desktop/setup');   // an explicit `dev` (the dev phone app · Dev Setup) is the same on any host
   });
 });

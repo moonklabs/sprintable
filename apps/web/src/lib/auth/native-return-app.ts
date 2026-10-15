@@ -9,6 +9,12 @@
 // phone app now registers its own scheme (`ai.sprintable.dev`) and says so (`app=dev`, sent at the sign-in start); the prod app sends nothing.
 // The default stays `ai.sprintable` byte for byte: the customer app, the setup app, the phone shell, and any path the web cannot
 // tie to an app (an address typed by a person, outside an app's window) — PO 08:04Z.
+// story 4696 (PO 10-15): …on the PRODUCTION web. The Mac's «Sprintable Dev Setup» now registers `ai.sprintable.dev` only (no longer
+// `ai.sprintable`, which the prod app owns), and our crew's Macs have the dev setup app alone — so on the DEV web a link the page hands out
+// without an `app` (a plain browser tab: the recruiter's «이 컴퓨터에서 시작», a setup / pairing link) must default to `ai.sprintable.dev`
+// or nobody opens it. The default is chosen by this build's own public address (NEXT_PUBLIC_APP_URL, inlined at build time — same
+// source as phone-app-store.ts): the dev web → `ai.sprintable.dev`; the production web, localhost, a test build, or an unset address →
+// `ai.sprintable` (nothing changes there). A value outside the table is «no value», so it gets the host's default, never the value itself.
 
 export type NativeReturnApp = 'check' | 'dev';
 
@@ -16,6 +22,9 @@ export type NativeReturnApp = 'check' | 'dev';
 export const RETURN_APP_PARAM = 'app';
 
 const DEFAULT_SCHEME = 'ai.sprintable';
+const DEV_DEFAULT_SCHEME = 'ai.sprintable.dev';
+/** the dev web's host — the only host whose default differs (the production web, `app.sprintable.ai`, keeps `ai.sprintable`) */
+const DEV_WEB_HOST = 'dev-app.sprintable.ai';
 const SCHEMES: Readonly<Record<NativeReturnApp, string>> = Object.freeze({ check: 'ai.sprintable.check', dev: 'ai.sprintable.dev' });
 
 /** the table's own entry for `value`, or null (the default) — exact match only */
@@ -23,9 +32,17 @@ export function nativeReturnApp(value: string | null | undefined): NativeReturnA
   return value === 'check' ? 'check' : value === 'dev' ? 'dev' : null;
 }
 
-/** the scheme (no colon) a link to that app starts with */
+/** story 4696: the scheme a link with no (or an off-table) `app` starts with — by this build's public address. Exactly the dev web's host
+ *  → `ai.sprintable.dev`; everything else (the production host, localhost, a test build, an unset or unparsable address) → `ai.sprintable`. */
+export function defaultScheme(appUrl: string | undefined = process.env.NEXT_PUBLIC_APP_URL): string {
+  let host = '';
+  try { host = appUrl ? new URL(appUrl).hostname : ''; } catch { host = ''; }
+  return host === DEV_WEB_HOST ? DEV_DEFAULT_SCHEME : DEFAULT_SCHEME;
+}
+
+/** the scheme (no colon) a link to that app starts with — with no app, the host's default (see `defaultScheme`) */
 export function appScheme(app: NativeReturnApp | null): string {
-  return app ? SCHEMES[app] : DEFAULT_SCHEME;
+  return app ? SCHEMES[app] : defaultScheme();
 }
 
 /** `/native/oauth-return`'s button: the app named by `app`. `app` itself is not handed on; every other value is, as before.

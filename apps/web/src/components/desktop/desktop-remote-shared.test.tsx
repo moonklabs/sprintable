@@ -43,7 +43,8 @@ const OFF_LINE = '지금 조직(문클랩스)은 원격 제어가 꺼져 있어�
 function server(put: (enabled: boolean) => Response) {
   let enabled = false;
   fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
-    if (url === '/api/remote-devices') return json({ devices: [] });
+    // story 4697 AC5: the «꺼져 있어요» line is about phones that ARE paired — a paired phone is in this world (with none, the line is not drawn at all)
+    if (url === '/api/remote-devices') return json({ devices: [{ id: 'p1', label: 'iPhone', confirm_number: '482 917', last_used_at: null, pairs: [{ setup_id: 's1', device_name: 'SYJ-MacBook-Pro', paired_at: '2026-10-02T03:00:00Z' }] }] });
     if (init?.method === 'PUT') {
       const want = (JSON.parse(String(init.body)) as { enabled: boolean }).enabled;
       const res = put(want);

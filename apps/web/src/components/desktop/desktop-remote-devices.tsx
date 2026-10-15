@@ -119,7 +119,9 @@ export function DesktopRemoteDevices() {
   return (
     <section className="break-keep flex flex-col gap-2" data-testid="desktop-remote-devices" aria-labelledby="desktop-remote-devices-title">
       <h2 id="desktop-remote-devices-title" className="text-base font-semibold">{t('title')}</h2>
-      {remoteControlOn === false && orgName ? (
+      {/* story 4697 AC5 (Yuna's prod pass): «the org's remote control is off — a paired computer's status shows but control does not work» is about phones that ARE paired.
+          With none, it sat above «아직 페어링된 폰이 없어요» for every new customer (new orgs start with remote control off — the card just above already says so) */}
+      {remoteControlOn === false && orgName && phones.length > 0 ? (
         <p className="text-xs text-muted-foreground">{t('orgOff', { org: orgName })}</p>
       ) : null}
       {phones.length === 0 ? (

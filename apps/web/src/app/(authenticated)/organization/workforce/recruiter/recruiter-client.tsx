@@ -33,6 +33,8 @@ import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card'
 import { copyTextSafely } from '@/lib/clipboard';
 import { buildCodexConfigToml } from '@/lib/codex-mcp-config';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { AgentLimitBanner } from '@/components/agents/agent-limit-banner';
+import { agentLimitOf, type AgentLimit } from '@/lib/agent-limit';
 
 // ─── 상수/헬퍼 ──────────────────────────────────────────────────────────────
 
@@ -424,6 +426,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   const [equipRole, setEquipRole] = useState<'member' | 'admin'>('member');
   const [equipCreating, setEquipCreating] = useState(false);
   const [equipError, setEquipError] = useState<string | null>(null);
+  const [equipLimit, setEquipLimit] = useState<AgentLimit | null>(null); // story 4680: POST /api/agents said «the plan's agent limit» (402) — its own banner, not «다시 시도»
   const [equipResult, setEquipResult] = useState<{
     name: string;
     mcp_config: McpConfigBundle | null;
@@ -443,6 +446,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     if (scopeMode === 'projects' && scopeProjectIds.length === 0) return;
     setEquipCreating(true);
     setEquipError(null);
+    setEquipLimit(null);
     setEquipRuntimeSaveWarning(false);
     try {
       const res = await fetch('/api/agents', {
@@ -483,7 +487,11 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
       } else {
         // story #2485 — backend create_org_agent()는 generic HTTP상태 코드만 낸다
         // (진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
-        setEquipError(t('recruitFailed'));
+        // story 4680 (Yuna §N): the plan's agent limit (402 · resource agent) → its banner (what was typed stays); every other failure keeps the fixed line
+        const failBody: unknown = await res.json().catch(() => null);
+        const limitHit = agentLimitOf(res.status, failBody);
+        if (limitHit) setEquipLimit(limitHit);
+        else setEquipError(t('recruitFailed'));
       }
     } catch {
       setEquipError(t('recruitFailed'));
@@ -725,6 +733,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   const [existingKeyRotateWarning, setExistingKeyRotateWarning] = useState<{ agentId: string; agentName: string } | null>(null);
   const [recruiting, setRecruiting] = useState(false);
   const [recruitError, setRecruitError] = useState<string | null>(null);
+  const [recruitLimit, setRecruitLimit] = useState<AgentLimit | null>(null); // story 4680: the same in the full recruit road
   const [activeAgentName, setActiveAgentName] = useState('');
 
   useEffect(() => {
@@ -790,6 +799,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     if (!selectedRoleSlug) return;
     setRecruiting(true);
     setRecruitError(null);
+    setRecruitLimit(null);
     try {
       let agentId: string;
       let agentName: string;
@@ -814,6 +824,9 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
           }),
         });
         const createJson = (await createRes.json().catch(() => null)) as { data?: { id: string } } | null;
+        // story 4680 (Yuna §N): the plan's agent limit (402 · resource agent) → its banner (the finally below frees the button); anything else as before
+        const limitHit = createRes.ok ? null : agentLimitOf(createRes.status, createJson);
+        if (limitHit) { setRecruitLimit(limitHit); return; }
         if (!createRes.ok || !createJson?.data?.id) throw new Error(t('recruitFailed'));
         agentId = createJson.data.id;
         agentName = name;
@@ -1234,7 +1247,8 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                       길이 없었다(equip-skip은 STEP2 이후 바로 생성). 키만 받는 사람도 런타임은
                       골라야 하므로 여기서도 노출한다(Full 경로 STEP3과 동일 렌더러 공유). */}
                   {renderRuntimePicker()}
-                  {equipError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-xs text-destructive">{equipError}</p>}
+                  {equipLimit ? <AgentLimitBanner limit={equipLimit.limit} free={equipLimit.free} />
+                    : equipError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-xs text-destructive">{equipError}</p>}
                 </div>
               ) : null}
 
@@ -1316,7 +1330,8 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 </div>
               </div>
 
-              {recruitError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">{recruitError}</p>}
+              {recruitLimit ? <AgentLimitBanner limit={recruitLimit.limit} free={recruitLimit.free} />
+                : recruitError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">{recruitError}</p>}
 
               {/* story #2667 ⓒ — 기존 에이전트가 이미 가진 활성 키(equip-skip 등으로 발급됐을
                   수 있는)를 recruit이 rotate하기 前에 명시 고지. handleRecruit()이 실측 후 이
