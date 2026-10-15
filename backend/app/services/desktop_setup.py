@@ -929,12 +929,27 @@ def machine_key_for(org_id: uuid.UUID, device_id: str | None) -> str | None:
     return hmac.new(key, f"{org_id}|{device_id}".encode(), hashlib.sha256).hexdigest()
 
 
-async def _retire_same_machine(db: AsyncSession, *, machine_key: str, others: list[DesktopSetup], now: datetime) -> int:
-    """story 4660 — a new setup on the same machine (same org, same machine key) replaces the older lines: each is closed with
-    the reason and its device tokens are revoked. The agents and their keys stay — the new setup exchanges its own keys."""
+def _agents_of(setup: DesktopSetup) -> frozenset[uuid.UUID]:
+    """Every agent a setup carries — what «the same agents set up again» is measured by (story 4660 · PO 10-15)."""
+    return frozenset(uuid.UUID(str(m["member_id"])) for m in (setup.members or []) if m.get("kind") == "agent")
+
+
+async def _retire_same_machine(
+    db: AsyncSession, *, machine_key: str, others: list[DesktopSetup], now: datetime,
+    new_agents: frozenset[uuid.UUID] | set[uuid.UUID], before: dict[uuid.UUID, frozenset[uuid.UUID]],
+) -> int:
+    """story 4660 — a new setup on the same machine (same org, same machine key) replaces an older line only when it is the
+    SAME agents set up again: the older line's agents (`before` — as they were before this exchange moved agents out of it) are
+    all among the new setup's agents (`new_agents`). A line with no agent left is covered by anything. Another lane's setup on
+    the same computer carries other agents and stays open — one computer holds one setup per lane (PO 10-15). Each replaced
+    line is closed with the reason and its device tokens are revoked; the agents and their keys stay — the new setup
+    exchanges its own keys."""
     from app.models.desktop_relay import DesktopDeviceToken
 
-    old = [o for o in others if o.machine_key == machine_key and o.revoked_at is None]
+    old = [
+        o for o in others
+        if o.machine_key == machine_key and o.revoked_at is None and before[o.id] <= new_agents
+    ]
     for o in old:
         o.revoked_at = now
         o.revoked_reason = "replaced_by_new_setup"
@@ -987,6 +1002,9 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str, device_i
         # any key exists (PO 08:31Z ③ · 09:45Z)
         raise DesktopSetupError("service_unavailable", "the MCP or API address is not configured")
 
+    # story 4660 — what each other line carried BEFORE this exchange moves agents out of it (`_rotate_existing_agent` below
+    # empties a line of the agents this setup takes): «the same agents set up again» is judged on these
+    agents_before = {o.id: _agents_of(o) for o in others}
     # one key per agent (a role's agent appears once per stage in `members`)
     kind = setup_kind(setup)
     per_agent = group_exchange_agents(setup.members or [], kind)
@@ -1004,7 +1022,10 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str, device_i
         agents.append({**entry, "api_key": plaintext})
     mkey = machine_key_for(setup.org_id, device_id)
     if mkey:
-        await _retire_same_machine(db, machine_key=mkey, others=others, now=_now())
+        await _retire_same_machine(
+            db, machine_key=mkey, others=others, now=_now(),
+            new_agents=frozenset(uuid.UUID(str(a)) for a in per_agent), before=agents_before,
+        )
         setup.machine_key = mkey
     setup.exchanged_at = _now()
     setup.keys_issued = len(agents)
