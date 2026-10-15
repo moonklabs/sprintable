@@ -116,6 +116,29 @@ async def post_pairing_offer(
     return JSONResponse(status_code=202, content={"state": "sent"})
 
 
+@router.get("/remote-devices/pairing-target")
+async def get_pairing_target(
+    setup_id: uuid.UUID = Query(...),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+):
+    """story 4695 — the organization of the computer a QR names, for a member of that organization (their own session only). The phone
+    sends its key and its offer with that org (`X-Org-Id`), not with whatever org its login happens to rest on. Anyone else: the
+    offer's own answer (404 setup_not_found) — nothing tells whether such a computer exists."""
+    from app.routers.auth import _requires_interactive_session
+
+    if _requires_interactive_session(auth):
+        raise HTTPException(status_code=403, detail={"code": "person_session_required", "message": "a person's session is required"})
+    try:
+        user_id = uuid.UUID(str(auth.user_id))
+    except ValueError:
+        return _error(DesktopRelayError(404, "setup_not_found", "no such computer"))
+    org_id = await agent_permissions.pairing_target_org(db, user_id=user_id, setup_id=setup_id)
+    if org_id is None:
+        return _error(DesktopRelayError(404, "setup_not_found", "no such computer"))
+    return {"org_id": str(org_id)}
+
+
 @router.get("/remote-devices/pairing-offers/{offer_id}")
 async def get_pairing_offer(
     offer_id: uuid.UUID,

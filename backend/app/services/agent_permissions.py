@@ -104,6 +104,21 @@ def _device_view(d: RemoteDevice, pairs: list[dict] | None = None) -> dict:
     }
 
 
+async def _same_person_without_pairs(db: AsyncSession, key: RemoteDevice, user_id: uuid.UUID | None) -> bool:
+    """story 4695 — is the caller (by their login) the person the key's member is, and does the key hold no live pairing?"""
+    from app.models.member import Member
+
+    if user_id is None:
+        return False
+    owner = (await db.execute(select(Member.user_id).where(Member.id == key.member_id))).scalar_one_or_none()
+    if owner is None or owner != user_id:
+        return False
+    live = (await db.execute(
+        select(func.count()).select_from(RemoteDevicePairing).where(RemoteDevicePairing.remote_device_id == key.id, RemoteDevicePairing.removed_at.is_(None))
+    )).scalar_one()
+    return live == 0
+
+
 async def register_phone(
     db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, body: RemoteDeviceRegistration, user_id: uuid.UUID | None = None,
 ) -> tuple[dict, bool]:
@@ -121,7 +136,13 @@ async def register_phone(
         raise DesktopRelayError(401, "session_ended", "this login has ended — sign in again to register the phone")
     existing =(await db.execute(select(RemoteDevice).where(RemoteDevice.fingerprint == fp).with_for_update())).scalar_one_or_none()
     if existing is not None and existing.member_id != member_id:
-        raise DesktopRelayError(409, "remote_device_taken", "this phone key is registered by someone else")
+        # story 4695: the SAME person's key, registered under their member of another organization (the phone's login rested on
+        # another org of the account when it first registered) — it moves to the member of the org the QR is in, as long as it holds
+        # no live pairing there (a pair belongs to its organization's computer: that key stays where it is). Another person's → taken.
+        if not await _same_person_without_pairs(db, existing, user_id):
+            raise DesktopRelayError(409, "remote_device_taken", "this phone key is registered by someone else")
+        existing.member_id, existing.org_id = member_id, org_id
+        await db.flush()
     if existing is not None and existing.revoked_at is None:
         if session_id is not None:
             existing.session_token_id = session_id
@@ -350,6 +371,50 @@ class PairingReveal(BaseModel):
     reveal: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$")  # 32 bytes · base64url, no padding
 
 
+async def pairing_target_org(db: AsyncSession, *, user_id: uuid.UUID, setup_id: uuid.UUID) -> uuid.UUID | None:
+    """story 4695 — which organization is the computer of this QR in, for a person who is a member of THAT organization? The phone's
+    session may be on another org of the same account (the page sits outside the shell, so no org header is carried and the login's
+    default org rules): the offer must go to the QR's org. Only a member of the computer's org gets the answer (the same «one answer»
+    as the offer itself for anyone else — a live, exchanged computer; nothing is said about computers of organizations they are not in)."""
+    from app.models.project import OrgMember
+
+    return (await db.execute(
+        select(DesktopSetup.org_id)
+        .join(OrgMember, (OrgMember.org_id == DesktopSetup.org_id) & (OrgMember.user_id == user_id) & OrgMember.deleted_at.is_(None))
+        .where(DesktopSetup.id == setup_id, DesktopSetup.revoked_at.is_(None), DesktopSetup.exchanged_at.is_not(None))
+    )).scalars().first()
+
+
+async def _log_setup_not_found(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, setup_id: uuid.UUID) -> None:
+    """story 4695 — the phone is told ONE thing for four causes (as the device-token code: nothing says which computers exist), so the
+    server's own record is where they are told apart: no such computer · it is another organization's than the session's (and whether the
+    caller is a member of THAT organization — the multi-org account whose session org is not the QR's) · disconnected · never exchanged.
+    Words only — no id, no name, no value. A failing log never changes the answer."""
+    try:
+        from app.models.member import Member
+        from app.models.project import OrgMember
+
+        row = (await db.execute(
+            select(DesktopSetup.org_id, DesktopSetup.revoked_at, DesktopSetup.exchanged_at).where(DesktopSetup.id == setup_id)
+        )).first()
+        if row is None:
+            reason, caller_in_setup_org = "no_such_computer", None
+        elif row.org_id != org_id:
+            user_id = (await db.execute(select(Member.user_id).where(Member.id == member_id))).scalar_one_or_none()
+            member_there = None if user_id is None else (await db.execute(
+                select(OrgMember.id).where(OrgMember.org_id == row.org_id, OrgMember.user_id == user_id, OrgMember.deleted_at.is_(None))
+            )).first() is not None
+            reason, caller_in_setup_org = "computer_of_another_org", member_there
+        elif row.revoked_at is not None:
+            reason, caller_in_setup_org = "computer_disconnected", None
+        else:
+            reason, caller_in_setup_org = "computer_not_exchanged", None
+        logger.info("pairing offer refused as setup_not_found: reason=%s caller_in_computers_org=%s", reason, caller_in_setup_org)
+    except Exception as exc:  # noqa: BLE001 — a record that cannot be written is not a reason to change what the phone is told
+        # the kind of failure only: a traceback or a message of a failed query carries its parameters (the setup · org ids)
+        logger.warning("pairing offer refused as setup_not_found: reason could not be read (%s)", type(exc).__name__)
+
+
 async def offer_pairing(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, body: PairingOffer) -> RemoteDevicePairingOffer:
     """The phone scanned a desktop's QR: carry its registered key down to that desktop with the MAC the phone made from the QR's
     secret. The server never sees that secret, so it can neither make nor check the MAC — a key it swapped would not match it on
@@ -368,6 +433,7 @@ async def offer_pairing(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.
                                    DesktopSetup.revoked_at.is_(None), DesktopSetup.exchanged_at.is_not(None))
     )).scalar_one_or_none()
     if setup is None:
+        await _log_setup_not_found(db, member_id=member_id, org_id=org_id, setup_id=body.setup_id)
         raise DesktopRelayError(404, "setup_not_found", "no such computer")
     if not await remote_control.is_enabled(db, org_id):
         raise DesktopRelayError(409, remote_control.OFF_CODE, "remote control is off for this organization")
