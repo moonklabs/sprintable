@@ -196,6 +196,52 @@ def test_malformed_entries_do_not_crash_or_leak():
     assert probe.agg_diag_summary([]) == [] and probe.agg_diag_lines([]) == []
 
 
+# ── ③ 칸 이름만 ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+def test_field_names_carry_no_values_and_odd_names_fold():
+    entry = {
+        "timestamp": "2026-10-09T02:00:00Z", "severity": "INFO", "labels": {SECRETS[0]: SECRETS[1]},
+        "jsonPayload": {
+            "message": f"expo push: sent org={ORG_FULL} token={SECRETS[1]}", "logger": "x", "member_id": MEMBER_FULL,
+            SECRETS[0]: 1, MEMBER_FULL: 2, "a" * 41: 3,  # 이메일 · id · 너무 긴 이름이 «키»로 온 경우
+        },
+        MEMBER_FULL: "x",
+    }
+    names = probe.field_names(entry)
+    assert names == sorted(names)
+    assert {"timestamp", "severity", "labels", "jsonPayload", "jsonPayload.message", "jsonPayload.logger", "jsonPayload.member_id", "jsonPayload.(other)", "(other)"} == set(names)
+    _no_secret("\n".join(names))
+
+
+def test_field_names_cap_and_junk():
+    names = probe.field_names({"jsonPayload": {f"k{i}": i for i in range(80)}})
+    assert len(names) == probe._FIELD_NAMES_MAX + 1 and names[-1].startswith("… 외 ")
+    assert probe.field_names(None) == [] and probe.field_names("x") == [] and probe.field_names({}) == []
+    assert probe.field_names({"jsonPayload": "text"}) == ["jsonPayload"]
+
+
+def test_main_prints_the_latest_entrys_field_names_unfiltered_and_without_values(monkeypatch, capsys):
+    seen: dict[str, list[str]] = {}
+
+    def fake_run(cmd):
+        if cmd[:4] == ["gcloud", "run", "services", "list"]:
+            return "sprintable-backend-dev\n"
+        flt = cmd[3]
+        if "expo push: sent" in flt or "push_diagnostics" in flt:
+            return "[]"
+        seen["cmd"] = cmd
+        import json
+        return json.dumps([{"timestamp": "2026-10-15T00:00:00Z", "severity": "INFO", "jsonPayload": {"message": SECRETS[1], "logger": "x"}}])
+
+    monkeypatch.setattr(probe, "_run", fake_run)
+    _env(monkeypatch)
+    assert probe.main() == 0
+    out = capsys.readouterr().out
+    assert "jsonPayload · jsonPayload.logger · jsonPayload.message · severity · timestamp" in out
+    _no_secret(out)
+    assert "--limit=1" in seen["cmd"]  # 한 줄만
+    assert ORG not in seen["cmd"][3] and MEMBER not in seen["cmd"][3] and "expo" not in seen["cmd"][3]  # 필터 없이(서비스 + 시각만)
+
+
 # ── 입력 · gcloud ───────────────────────────────────────────────────────────────────────────────────────────────────────
 def test_inputs_are_bounded_and_shaped():
     assert probe.parse_days(None) == 14 and probe.parse_days("30") == 30

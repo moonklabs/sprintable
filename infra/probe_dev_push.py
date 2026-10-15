@@ -20,6 +20,7 @@
 꺼내 **닫힌 목록**에 있는 값만 그대로 세고, 목록 밖은 «(other)» 로 센다. «글자 모양이 맞으면 통과»는 쓰지 않는다(까디르 렌즈, 4689). 특히 Expo 의 에러 사유는
 `details.error` 가 없으면 티켓의 **자유 글 메시지**(토큰 원문이 든 문장)가 사유 자리에 실리므로(`expo_push.py` `err = … or ticket.get("message")`) 닫힌 코드 목록 밖은 모두 (other).
 필터에 쓰는 앞 8자리(org · member)는 출력 어디에도 안 나온다. 원문 한 줄도 출력하지 않는다.
+  ③ 필터 없이 이 서비스의 최근 1줄의 «칸 이름만»(값 0) — ① ② 가 0건일 때 «필터가 틀렸나 · 정말 0인가»를 가르는 용도(PO 요청). 이름이 짧은 식별자 모양이 아니면 (other).
 예외: gcloud 가 실패하면 그 오류 문구(권한 부족 등)를 그대로 찍는다(이 자체가 결과 — PO 지시. 로그 항목이 아니라 gcloud 의 stderr 다).
 
 앱 런타임을 import 하지 않는다(gcloud + 표준 라이브러리만) — probe_prod_auth_errors.py 와 같은 규율. gcloud 는 `run services list` 와 `logging read` 만 부른다.
@@ -244,6 +245,26 @@ def agg_diag_lines(diags: list[Diag]) -> list[str]:
     return lines
 
 
+# ── ③ 필터 없이 그 서비스 최근 1줄의 «칸 이름만» ──────────────────────────────────────────────────────────────────────────────
+_FIELD_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,39}$")
+_FIELD_NAMES_MAX = 40
+
+
+def field_names(entry: object) -> list[str]:
+    """로그 항목 하나의 «칸 이름»만 — 최상위 칸과 `jsonPayload.<칸>`. **값은 한 글자도 안 낸다.** 이름이 짧은 식별자 모양이 아니면 «(other)» 로 접는다
+    (이름이 값이 되는 항목 — 예: 사용자 id 를 키로 쓴 맵 — 을 막는다). 필터가 틀렸는지 정말 0건인지를 가르려는 것."""
+    if not isinstance(entry, dict):
+        return []
+    names: set[str] = set()
+    for k, v in entry.items():
+        names.add(k if isinstance(k, str) and _FIELD_NAME.match(k) else _OTHER)
+        if k == "jsonPayload" and isinstance(v, dict):
+            for jk in v:
+                names.add(f"jsonPayload.{jk}" if isinstance(jk, str) and _FIELD_NAME.match(jk) else f"jsonPayload.{_OTHER}")
+    ordered = sorted(names)
+    return ordered[:_FIELD_NAMES_MAX] + ([f"… 외 {len(ordered) - _FIELD_NAMES_MAX}개"] if len(ordered) > _FIELD_NAMES_MAX else [])
+
+
 # ── gcloud ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 class _GcloudError(Exception):
     pass
@@ -271,9 +292,9 @@ def _dev_backends() -> list[str]:
     return [n for n in names if n == "sprintable-backend-dev"]
 
 
-def _read(flt: str) -> list[dict]:
+def _read(flt: str, limit: int = _MAX_ENTRIES) -> list[dict]:
     out = _run([
-        "gcloud", "logging", "read", flt, f"--limit={_MAX_ENTRIES}", "--order=desc", "--format=json", *_project_args(),
+        "gcloud", "logging", "read", flt, f"--limit={limit}", "--order=desc", "--format=json", *_project_args(),
     ])
     data = json.loads(out) if out.strip() else []
     return data if isinstance(data, list) else []
@@ -364,6 +385,12 @@ def main() -> int:
         return warn +agg_diag_summary(diags) + ["", "  [한 건마다 — 최신 먼저]"] + agg_diag_lines(diags), len(es)
 
     out += _section("② push_diagnostics — 선생님 폰이 등록에서 멈춘 곳 (stage · permission · error_code)", two)
+
+    def three():
+        es = _read(f"{svc} AND {t}", limit=1)
+        return ([f"  {' · '.join(field_names(es[0]))}"] if es else []), len(es)
+
+    out += _section("③ 필터 없이 이 서비스 최근 1줄의 칸 이름만 (값 0) — ① ② 가 0건일 때 «필터가 틀렸나 · 정말 0인가»를 가르는 용도", three)
 
     print("\n".join(out))
     return 0
