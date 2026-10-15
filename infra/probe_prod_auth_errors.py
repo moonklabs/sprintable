@@ -15,6 +15,12 @@
      «경로 라벨 · 메서드 · 상태 코드 · 브라우저 갈래(닫힌 목록 chrome / android-webview / other) · 개수». 경로는 정확히 일치하는
      셋만 세고(쿼리 · 경로 뒤 값 0), User-Agent 는 원문을 어디에도 찍지 않고 닫힌 목록 셋 중 하나로만 접는다.
 
+⑤ (2026-10-15 · 선생님 «prod 모바일앱에서만 첫 로그인 뒤 홈 → 대화 탭이 10초 넘게») **시간 창 요청 타임라인** — `TIMELINE_START` · `TIMELINE_END`(UTC `YYYY-MM-DDTHH:MM:SSZ` ·
+  최대 2시간) · `TIMELINE_ENV`(`prod` | `dev`) 가 주어지면 **이 칸만** 돈다(위 ①~④ 는 안 돈다): 그 창 안의 웹 · 백엔드 서비스 요청을 «시각(초) · 서비스 갈래 · 메서드 · 경로 라벨 ·
+  상태 · 걸린 시간(ms) · 브라우저 갈래» 로 시간순 나열하고, 경로 라벨별 건수 · p50 · 최대, 그리고 Cloud Run «새 인스턴스 시작(콜드 스타트)» 줄(닫힌 이유 낱말)을 더한다. 경로 라벨은
+  **닫힌 목록**(소스의 웹 라우트 파일 · 백엔드 route-shape 표에서 실행 때 만든 템플릿 + 고정 몇 개 — 밖은 «(other)»)이고 템플릿의 `{}` 자리는 요청 값이 아니라 «{}» 로만 찍힌다.
+  사용자 · 쿠키 · 쿼리 · IP · UA 값 0(브라우저는 닫힌 셋 갈래만).
+
 ⛔**출력은 허용 목록만이다.** 로그 항목(이메일 · 사용자 id · IP · 쿠키 · 토큰 · UA · referer · 쿼리의 code/state/error 외 값)은
 어디에도 찍지 않는다 — 집계 함수는 항목에서 «정해진 칸»만 꺼내 **닫힌 목록**에 있는 값만 그대로 세고, 목록 밖은 «(other)» 로 센다.
 «글자 모양이 맞으면 통과»는 호출자(URL 친 쪽)가 고른 글자를 찍는 구멍이라(까디르 렌즈) 쓰지 않는다. 원문 한 줄도 출력하지 않는다.
@@ -353,18 +359,22 @@ def _project_args() -> list[str]:
     return [f"--project={project}"] if project else []
 
 
-def _prod_services() -> tuple[list[str], list[str]]:
+def _env_services(env: str) -> tuple[list[str], list[str]]:
     out = _run(["gcloud", "run", "services", "list", f"--region={_REGION}", "--format=value(metadata.name)", *_project_args()])
     names = [n.strip() for n in out.splitlines() if n.strip()]
-    prod = [n for n in names if "prod" in n]
-    web = [n for n in prod if "frontend" in n or n.endswith("-web-prod") or "-web-" in n]
-    backend = [n for n in prod if "backend" in n]
+    chosen = [n for n in names if env in n]
+    web = [n for n in chosen if "frontend" in n or n.endswith(f"-web-{env}") or "-web-" in n]
+    backend = [n for n in chosen if "backend" in n]
     return web, backend
 
 
-def _read(flt: str) -> list[dict]:
+def _prod_services() -> tuple[list[str], list[str]]:
+    return _env_services("prod")
+
+
+def _read(flt: str, order: str = "desc") -> list[dict]:
     out = _run([
-        "gcloud", "logging", "read", flt, f"--limit={_MAX_ENTRIES}", "--order=desc", "--format=json", *_project_args(),
+        "gcloud", "logging", "read", flt, f"--limit={_MAX_ENTRIES}", f"--order={order}", "--format=json", *_project_args(),
     ])
     data = json.loads(out) if out.strip() else []
     return data if isinstance(data, list) else []
@@ -386,6 +396,216 @@ def _section(title: str, fn) -> list[str]:
     return lines
 
 
+# ── ⑤ 시간 창 요청 타임라인 ────────────────────────────────────────────────────────────────────────────────────────────────
+_TL_ISO = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+_TL_MAX_SECONDS = 2 * 3600
+_TL_ENVS = ("prod", "dev")
+_TL_MAX_LINES = 600
+_TL_FIXED_PATHS = frozenset({"/_next/image", "/api/health", "/api/v2/health", "/favicon.ico"})
+_TL_STATIC_PREFIX = "/_next/static/"
+_TL_STATIC_LABEL = "/_next/static/*"
+_COLD_START_REASONS = frozenset({"AUTOSCALING", "MIN_INSTANCES", "MIN_INSTANCE", "MANUAL_SCALING", "DEPLOYMENT", "SCALE_TO_ZERO"})
+_COLD_START_RE = re.compile(r"Starting new instance\.?(?:\s*Reason:\s*([A-Z_]+))?")
+_LATENCY_RE = re.compile(r"^(\d+(?:\.\d+)?)s$")
+_WEB_ROOT = "apps/web/src/app/"
+_SHAPES_PATH = "scripts/web_api_route_shapes.json"
+_WEB_ROUTE_FILES = frozenset({"page.tsx", "page.ts", "route.ts", "route.tsx"})
+
+
+def parse_timeline_window(start: str | None, end: str | None, env: str | None) -> tuple[str, str, str]:
+    """입력 셋을 검사한다 — 모양이 틀리면 SystemExit(밖의 값은 어디에도 안 쓰인다). 창은 최대 2시간, 끝이 시작보다 뒤."""
+    s, e, v = (start or "").strip(), (end or "").strip(), (env or "prod").strip()
+    if not (_TL_ISO.match(s) and _TL_ISO.match(e)):
+        raise SystemExit("TIMELINE_START · TIMELINE_END 는 UTC `YYYY-MM-DDTHH:MM:SSZ` 이어야 한다")
+    if v not in _TL_ENVS:
+        raise SystemExit(f"TIMELINE_ENV 는 {' | '.join(_TL_ENVS)} 중 하나여야 한다")
+    t0 = datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ")
+    t1 = datetime.strptime(e, "%Y-%m-%dT%H:%M:%SZ")
+    if t1 <= t0:
+        raise SystemExit("TIMELINE_END 는 TIMELINE_START 보다 뒤여야 한다")
+    if (t1 - t0).total_seconds() > _TL_MAX_SECONDS:
+        raise SystemExit("시간 창은 최대 2시간이다")
+    return s, e, v
+
+
+def web_route_template(file_path: str) -> tuple[str, ...] | None:
+    """웹 라우트 파일(`apps/web/src/app/…/page.tsx` · `route.ts`) → 경로 템플릿(그룹 `(x)` 는 뺀다 · `[x]` 는 «{}» · 가려진 라우트는 None)."""
+    if not file_path.startswith(_WEB_ROOT):
+        return None
+    parts = file_path[len(_WEB_ROOT):].split("/")
+    if parts[-1] not in _WEB_ROUTE_FILES:
+        return None
+    segs: list[str] = []
+    for seg in parts[:-1]:
+        if seg.startswith("(") and seg.endswith(")"):
+            continue
+        if seg.startswith(("@", "_", "[...", "[[")):
+            return None
+        segs.append("{}" if seg.startswith("[") and seg.endswith("]") else seg)
+    return tuple(segs)
+
+
+def shape_route_template(path: object) -> tuple[str, ...] | None:
+    """백엔드 route-shape 표의 `path`(이미 «{}» 로 접힌 템플릿) → 템플릿."""
+    if not isinstance(path, str) or not path.startswith("/"):
+        return None
+    return tuple(seg for seg in path.split("/") if seg)
+
+
+def _git_files(rev: str) -> list[str]:
+    proc = subprocess.run(["git", "ls-tree", "-r", "--name-only", rev, "--", _WEB_ROOT], capture_output=True, text=True, cwd=_repo_root(), timeout=60)
+    if proc.returncode != 0:
+        raise RuntimeError("git ls-tree failed")
+    return [ln for ln in proc.stdout.splitlines() if ln]
+
+
+def _git_shapes(rev: str) -> str:
+    proc = subprocess.run(["git", "show", f"{rev}:{_SHAPES_PATH}"], capture_output=True, text=True, cwd=_repo_root(), timeout=60)
+    if proc.returncode != 0:
+        raise RuntimeError("git show failed")
+    return proc.stdout
+
+
+def build_route_templates(read_files=_git_files, read_shapes=_git_shapes) -> tuple[frozenset[tuple[str, ...]], list[str]]:
+    """닫힌 경로 템플릿 — 웹 라우트 파일 목록 + 백엔드 route-shape 표. develop(체크아웃 HEAD) ∪ origin/main(prod 는 main 코드). 못 읽은 판은 메모로 남는다."""
+    notes: list[str] = []
+    templates: set[tuple[str, ...]] = set()
+    for rev in ("HEAD", "origin/main"):
+        try:
+            for f in read_files(rev):
+                t = web_route_template(f)
+                if t is not None:
+                    templates.add(t)
+        except Exception as exc:  # noqa: BLE001 — 한 판을 못 읽어도 다른 판은 쓴다
+            notes.append(f"{rev}: 웹 라우트 파일 목록을 못 읽었다 ({type(exc).__name__})")
+        try:
+            for row in json.loads(read_shapes(rev) or "[]"):
+                t = shape_route_template(row.get("path") if isinstance(row, dict) else None)
+                if t is not None:
+                    templates.add(t)
+        except Exception as exc:  # noqa: BLE001
+            notes.append(f"{rev}: route-shape 표를 못 읽었다 ({type(exc).__name__})")
+    return frozenset(templates), notes
+
+
+def route_label(request_url: object, templates: frozenset[tuple[str, ...]]) -> str:
+    """요청 URL 의 «경로»만 본다(쿼리 · 호스트는 버린다) → 닫힌 템플릿 하나(가장 구체적인 것) · 고정 라벨 · «(other)». 요청의 글자는 라벨에 안 실린다."""
+    if not isinstance(request_url, str):
+        return _OTHER
+    path = urlsplit(request_url).path
+    if path.startswith(_TL_STATIC_PREFIX):
+        return _TL_STATIC_LABEL
+    if path in _TL_FIXED_PATHS:
+        return path
+    segs = tuple(seg for seg in path.split("/") if seg)
+    best: tuple[int, tuple[str, ...]] | None = None
+    for t in templates:
+        if len(t) != len(segs) or not all(a == "{}" or a == b for a, b in zip(t, segs)):
+            continue
+        score = sum(1 for a in t if a != "{}")
+        if best is None or score > best[0] or (score == best[0] and t < best[1]):
+            best = (score, t)
+    return "/" + "/".join(best[1]) if best else _OTHER
+
+
+def _latency_ms(value: object) -> int | None:
+    m = _LATENCY_RE.match(value) if isinstance(value, str) else None
+    return round(float(m.group(1)) * 1000) if m else None
+
+
+def _kind(entry: dict, web: frozenset[str], backend: frozenset[str]) -> str:
+    resource = entry.get("resource")
+    labels = resource.get("labels") if isinstance(resource, dict) else None
+    name = labels.get("service_name") if isinstance(labels, dict) else None
+    return "web" if name in web else "backend" if name in backend else "other"
+
+
+def agg_timeline(entries: list[dict], templates: frozenset[tuple[str, ...]], web: frozenset[str], backend: frozenset[str]) -> tuple[list[str], list[str], bool]:
+    """(시간순 줄 · 경로 라벨별 통계 줄 · 줄 한도에 닿았나). 줄 = 시각(초) · 갈래 · 메서드 · 라벨 · 상태 · ms · 브라우저 갈래. 이 밖의 칸은 안 읽는다."""
+    rows: list[tuple[str, str, str, str, str, int | None, str]] = []
+    for e in entries:
+        hr = e.get("httpRequest")
+        if not isinstance(hr, dict):
+            continue
+        method = hr.get("requestMethod")
+        method = method if method in _METHODS else "?"
+        status = hr.get("status")
+        status_text = str(status) if isinstance(status, int) and 100 <= status <= 599 else "?"
+        rows.append((_stamp(e.get("timestamp")), _kind(e, web, backend), method, route_label(hr.get("requestUrl"), templates), status_text,
+                     _latency_ms(hr.get("latency")), classify_browser(hr.get("userAgent"))))
+    rows.sort(key=lambda r: r[0])
+    lines = [
+        f"  {t}  {kind}  {method} {label}  {status}  {'?' if ms is None else ms}ms  browser={browser}"
+        for t, kind, method, label, status, ms, browser in rows[:_TL_MAX_LINES]
+    ]
+    groups: dict[tuple[str, str, str], list[int]] = defaultdict(list)
+    counts: Counter[tuple[str, str, str]] = Counter()
+    for _t, kind, method, label, _st, ms, _b in rows:
+        counts[(kind, method, label)] += 1
+        if ms is not None:
+            groups[(kind, method, label)].append(ms)
+    stats: list[str] = []
+    for key, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
+        ms_list = sorted(groups.get(key, []))
+        p50 = f"{ms_list[(len(ms_list) - 1) // 2]}ms" if ms_list else "?"
+        mx = f"{ms_list[-1]}ms" if ms_list else "?"
+        stats.append(f"  {key[0]}  {key[1]} {key[2]}  {n}건 · p50 {p50} · 최대 {mx}")
+    return lines, stats, len(rows) > _TL_MAX_LINES
+
+
+def agg_cold_starts(entries: list[dict], web: frozenset[str], backend: frozenset[str]) -> list[str]:
+    """Cloud Run 시스템 로그의 «Starting new instance» 줄 — 시각(초) · 서비스 갈래 · 닫힌 이유 낱말만(원문 줄은 안 찍는다)."""
+    out: list[tuple[str, str, str]] = []
+    for e in entries:
+        m = _COLD_START_RE.search(_text_of(e))
+        if not m:
+            continue
+        reason = m.group(1)
+        out.append((_stamp(e.get("timestamp")), _kind(e, web, backend), reason if reason in _COLD_START_REASONS else (_OTHER if reason else "?")))
+    out.sort()
+    return [f"  {t}  {kind}  reason={reason}" for t, kind, reason in out]
+
+
+def run_timeline(start: str, end: str, env: str) -> int:
+    try:
+        web, backend = _env_services(env)
+    except _GcloudError as exc:
+        print(f"✗ Cloud Run 서비스 목록을 못 읽었다 — gcloud 오류 문구 그대로:\n{exc}")
+        return 1
+    print(f"# 요청 타임라인 — env={env} · 창 {start} ~ {end} (UTC) · 허용 목록 출력만 · 정적 파일(/_next/static/)은 읽지 않는다")
+    print(f"웹 서비스: {', '.join(web) or '(없음)'} · 백엔드 서비스: {', '.join(backend) or '(없음)'}")
+    if not web and not backend:
+        print(f"✗ 이름에 {env} 가 든 웹/백엔드 서비스를 못 찾았다")
+        return 1
+    templates, notes = build_route_templates()
+    print(f"닫힌 경로 템플릿(소스에서 실행 때 만듦): {len(templates)}개")
+    for note in notes:
+        print(f"  ⚠ {note}")
+    if not templates:
+        print("  ⚠ 템플릿이 비었다 — 모든 경로가 (other) 로 나온다(소스 경로가 바뀌었는지 확인)")
+    webs, backs = frozenset(web), frozenset(backend)
+    window = f'timestamp>="{start}" AND timestamp<="{end}"'
+    out: list[str] = []
+
+    def requests():
+        flt = f'{_service_filter(web + backend)} AND logName:"run.googleapis.com%2Frequests" AND NOT httpRequest.requestUrl:"{_TL_STATIC_PREFIX}" AND {window}'
+        es = _read(flt, order="asc")
+        lines, stats, cut = agg_timeline(es, templates, webs, backs)
+        body = lines + ([f"  … 줄 한도({_TL_MAX_LINES})에 닿아 뒤는 생략 — 아래 통계는 읽은 전부"] if cut else [])
+        shown = (body + ["  ── 경로 라벨별 (건수 · p50 · 최대) ──"] + stats) if lines else []
+        return shown, len(es)
+    out += _section("⑤a 요청 시간순 (시각 · 서비스 · 메서드 라벨 · 상태 · 걸린 시간 · 브라우저 갈래)", requests)
+
+    def cold():
+        flt = f'{_service_filter(web + backend)} AND logName:"run.googleapis.com%2Fvarlog%2Fsystem" AND "Starting new instance" AND {window}'
+        es = _read(flt, order="asc")
+        return agg_cold_starts(es, webs, backs), len(es)
+    out += _section("⑤b Cloud Run 새 인스턴스 시작(콜드 스타트)", cold)
+    print("\n".join(out))
+    return 0
+
+
+
 def parse_hours(raw: str | None) -> int:
     try:
         hours = int((raw or "12").strip())
@@ -397,6 +617,9 @@ def parse_hours(raw: str | None) -> int:
 
 
 def main() -> int:
+    tl_start, tl_end = os.environ.get("TIMELINE_START", "").strip(), os.environ.get("TIMELINE_END", "").strip()
+    if tl_start or tl_end:  # ⑤ — 시간 창이 주어지면 이 칸만 돈다
+        return run_timeline(*parse_timeline_window(tl_start, tl_end, os.environ.get("TIMELINE_ENV")))
     hours = parse_hours(os.environ.get("HOURS"))
     since = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
     print(f"# prod 로그인 실패 진단 — 지난 {hours}시간 (since {since}) · 허용 목록 출력만")
