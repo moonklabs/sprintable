@@ -753,7 +753,8 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   // names, never at a file's content) and which of this project's agents already work in it. Asked once the project's agents are known (the
   // answer is the intersection with them). A browser · an older app · no folder kept → null, and the page is exactly as it was.
   const folderSays = useFolderTraces(bridge?.folderTraces, { projectId }, existingAgents ? existingAgents.map((a) => a.id) : null);
-  const folderTrace = folderSays ? pickFolderTrace(folderSays.traces, bridge?.runtimes ?? []) : undefined;
+  // the file is picked among the runtimes the app found AND this organization supports (foundHere, bridge order) — a first match this org cannot hire falls through to the next file
+  const folderTrace = folderSays ? pickFolderTrace(folderSays.traces, foundHere.map((f) => f.found)) : undefined;
   const folderTraceCap = folderTrace ? foundHere.find((f) => f.found.runtime === folderTrace.runtime)?.cap : undefined;
   const folderAgents = folderSays ? folderSays.agents.flatMap((id) => { const a = existingAgents?.find((x) => x.id === id); return a ? [a] : []; }) : [];
   // [이 폴더의 에이전트로 채용]: the «역할 없이(키만)» way, at its second step, with that file's runtime already chosen — no role to pick

@@ -111,6 +111,21 @@ describe('[SID:4693] RecruiterClient — the folder trace card inside the deskto
     expect(q(container, 'folder-trace-card')!.textContent).toContain('"file":"AGENTS.md"');
   });
 
+  it('both files, the app found claude first but this organization hires codex only → the card falls through to AGENTS.md (not a card-less page)', async () => {
+    const codexOnly = CAPS.filter((c) => c.slug !== 'claude-code');
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.startsWith('/api/role-templates')) return jsonResponse({ data: [] });
+      if (url === '/api/projects') return jsonResponse({ data: [{ id: 'proj-1', name: 'Proj 1' }] });
+      if (url === '/api/runtime-capabilities') return jsonResponse({ data: codexOnly });
+      if (url.startsWith('/api/team-members?')) return jsonResponse({ data: [] });
+      throw new Error(`unmocked fetch: ${url}`);
+    }));
+    useApp(bridgeWith([CL, CX], async () => ({ traces: [{ file: 'CLAUDE.md', runtime: 'claude' }, { file: 'AGENTS.md', runtime: 'codex' }], agents: [] })));
+    await mount();
+    expect(q(container, 'folder-trace-card')!.textContent).toContain('"file":"AGENTS.md"');
+  });
+
   it('nothing to offer → the page exactly as before: no trace · a trace of a runtime that is not on this computer · an empty answer · an older app (no hand) · a browser', async () => {
     const nothing = async () => ({ traces: [], agents: [] });
     useApp(bridgeWith([CL], nothing)); await mount(); expect(q(container, 'folder-trace-card')).toBeNull(); expect(q(container, 'folder-agent-card')).toBeNull(); expect(container.textContent).toContain('recruiter.roleQuestion');
