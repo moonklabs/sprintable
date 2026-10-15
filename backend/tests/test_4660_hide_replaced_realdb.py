@@ -9,10 +9,10 @@ import pytest
 
 from app.core.config import settings
 from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (autouse ones apply here too)
+    EXISTING,
     ORG,
     OWNER,
     _client,
-    _code,
     _confirm,
     _dispose_global_engine_after_test,
     _person,
@@ -20,6 +20,8 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
     anyio_backend,
     world,
 )
+from tests.test_4565_attach_existing_agent_realdb import attachable  # noqa: F401 — fixture (movable builds on it)
+from tests.test_4576_move_setup_realdb import _move, _move_code, movable  # noqa: F401
 
 pytestmark = pytest.mark.anyio
 
@@ -37,6 +39,12 @@ def _addresses(monkeypatch):
     monkeypatch.setenv("FASTAPI_URL", "https://api.d4660h.test")
 
 
+@pytest.fixture(autouse=True)
+async def _agents(movable):
+    """An existing agent in the project, ready to be moved to a computer."""
+    yield
+
+
 @pytest.fixture
 def secret(monkeypatch):
     monkeypatch.setattr(settings, "channel_oauth_state_secret", SECRET)
@@ -44,8 +52,9 @@ def secret(monkeypatch):
 
 
 async def _device(c, name: str, device_id: str) -> dict:
-    code, verifier = await _code(c, name)
-    assert (await _confirm(c, code)).status_code == 200
+    """A device set up as a move of EXISTING (the same agent again is what replaces an older line — PO 10-15)."""
+    code, verifier, _setup_id = await _move_code(c, name)
+    assert (await _confirm(c, code, body=_move(EXISTING))).status_code == 200
     r = await c.post(EXCHANGE, json={"code": code, "verifier": verifier, "device_id": device_id})
     assert r.status_code == 200, r.text
     return r.json()
