@@ -12,12 +12,12 @@ describe('native-return-app — story #4626', () => {
 
   it('⭐a value outside the table → the default · no free string: another name · a scheme · empty · another case · padded · a list', () => {
     // Kadir 08:18Z: look-alikes too — full-width letters · a Cyrillic «с» · a zero-width space · a trailing newline
-    for (const v of ['evil', 'ai.sprintable.check', 'ai.sprintable.check:', 'CHECK', 'Check', ' check', 'check ', 'check,setup', '', 'setup', 'javascript',
+    for (const v of ['evil', 'ai.sprintable.check', 'ai.sprintable.check:', 'ai.sprintable.dev', 'DEV', 'Dev', ' dev', 'dev ', 'dev\n', 'dev,check', 'ｄｅｖ', 'dеv', 'CHECK', 'Check', ' check', 'check ', 'check,setup', '', 'setup', 'javascript',
       'ｃｈｅｃｋ', 'сheck', 'check​', 'check\n', null, undefined]) {
       expect(nativeReturnApp(v), String(v)).toBeNull();
     }
     // and whatever came in `app`, the link is exactly the default one — nothing of the value is in it
-    for (const v of ['evil', 'javascript:alert(1)//', 'https://example.com', 'ai.sprintable.check']) {
+    for (const v of ['evil', 'javascript:alert(1)//', 'https://example.com', 'ai.sprintable.check', 'ai.sprintable.dev', 'DEV']) {
       expect(appReturnUrl(new URLSearchParams({ code: 'abc', app: v })), v).toBe('ai.sprintable:/oauth-return?code=abc');
     }
   });
@@ -32,6 +32,19 @@ describe('native-return-app — story #4626', () => {
     expect(appReturnUrl(new URLSearchParams('code=abc123&app=check'))).toBe('ai.sprintable.check:/oauth-return?code=abc123');
     expect(appReturnUrl(new URLSearchParams('app=check&code=abc123&state=xyz'))).toBe('ai.sprintable.check:/oauth-return?code=abc123&state=xyz');
     expect(appReturnUrl(new URLSearchParams('app=evil&code=abc123'))).toBe('ai.sprintable:/oauth-return?code=abc123');
+  });
+
+  // story 4689 (PO 10-15): the dev phone app — its own scheme so the return button never opens the prod app (or a chooser) on a phone that has both
+  it('[4689] `dev` is in the table: ai.sprintable.dev · the prod/default link is unchanged · `app` itself is not handed on', () => {
+    expect(nativeReturnApp('dev')).toBe('dev');
+    expect(appScheme('dev')).toBe('ai.sprintable.dev');
+    expect(appScheme('dev')).not.toBe(appScheme(null));
+    expect(appScheme('dev')).not.toBe(appScheme('check'));
+    expect(appScheme(null)).toBe('ai.sprintable');
+    expect(appReturnUrl(new URLSearchParams('code=abc123&app=dev'))).toBe('ai.sprintable.dev:/oauth-return?code=abc123');
+    expect(appReturnUrl(new URLSearchParams('app=dev&code=abc123&state=xyz'))).toBe('ai.sprintable.dev:/oauth-return?code=abc123&state=xyz');
+    // the prod phone app sends no `app` → exactly the link from before
+    expect(appReturnUrl(new URLSearchParams('code=abc123'))).toBe('ai.sprintable:/oauth-return?code=abc123');
   });
 
   it('the setup links: none → the two from before · check → the same paths on the check app\'s scheme', () => {

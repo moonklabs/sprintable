@@ -104,19 +104,33 @@ def _device_view(d: RemoteDevice, pairs: list[dict] | None = None) -> dict:
     }
 
 
-async def _same_person_without_pairs(db: AsyncSession, key: RemoteDevice, user_id: uuid.UUID | None) -> bool:
-    """story 4695 — is the caller (by their login) the person the key's member is, and does the key hold no live pairing?"""
+async def _key_of_same_person(db: AsyncSession, key: RemoteDevice, user_id: uuid.UUID | None) -> str | None:
+    """story 4695 — the caller (by their login) is the person the key's member is? → `movable` (the key holds no live pairing) ·
+    `has_pairings` (it holds one: it stays in its organization) · None (another person's key)."""
     from app.models.member import Member
 
     if user_id is None:
-        return False
+        return None
     owner = (await db.execute(select(Member.user_id).where(Member.id == key.member_id))).scalar_one_or_none()
     if owner is None or owner != user_id:
-        return False
+        return None
     live = (await db.execute(
         select(func.count()).select_from(RemoteDevicePairing).where(RemoteDevicePairing.remote_device_id == key.id, RemoteDevicePairing.removed_at.is_(None))
     )).scalar_one()
-    return live == 0
+    return "movable" if live == 0 else "has_pairings"
+
+
+async def _org_name_if_member(db: AsyncSession, *, key_org_id: uuid.UUID, user_id: uuid.UUID | None) -> str | None:
+    """story 4695 — the name of an organization, only to a person who is (still) a member of it."""
+    from app.models.organization import Organization
+    from app.models.project import OrgMember
+
+    if user_id is None:
+        return None
+    return (await db.execute(
+        select(Organization.name).join(OrgMember, OrgMember.org_id == Organization.id)
+        .where(Organization.id == key_org_id, OrgMember.user_id == user_id, OrgMember.deleted_at.is_(None))
+    )).scalars().first()
 
 
 async def register_phone(
@@ -139,8 +153,16 @@ async def register_phone(
         # story 4695: the SAME person's key, registered under their member of another organization (the phone's login rested on
         # another org of the account when it first registered) — it moves to the member of the org the QR is in, as long as it holds
         # no live pairing there (a pair belongs to its organization's computer: that key stays where it is). Another person's → taken.
-        if not await _same_person_without_pairs(db, existing, user_id):
+        kind = await _key_of_same_person(db, existing, user_id)
+        if kind is None:
             raise DesktopRelayError(409, "remote_device_taken", "this phone key is registered by someone else")
+        if kind == "has_pairings":
+            # the same person's own key — not «someone else's»: it pairs with computers of another organization of theirs
+            # which organization — the person is told where to remove the phone (they are a member there, so its name is theirs to see);
+            # a person who has since left that organization is told without a name
+            org_name = await _org_name_if_member(db, key_org_id=existing.org_id, user_id=user_id)
+            raise DesktopRelayError(409, "remote_device_other_org", "this phone key is paired with a computer of another organization of yours",
+                                    detail={"org_name": org_name} if org_name else None)
         existing.member_id, existing.org_id = member_id, org_id
         await db.flush()
     if existing is not None and existing.revoked_at is None:

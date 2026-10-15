@@ -36,7 +36,7 @@ type View =
   | { kind: 'remoteOff' }
   | { kind: 'noScreenLock' | 'biometricRequired' }
   // story #4624 (Yuna): the limit and «another account» lines have [다시 찍기] under them (right after a phone is removed on the web)
-  | { kind: 'retry'; line: 'expired' | 'notOurs' | 'notPaired' | 'unreachable' | 'setupNotFound' | 'offerUsed' | 'registerAgain' | 'limit' | 'taken' | 'failed' };
+  | { kind: 'retry'; line: 'expired' | 'notOurs' | 'notPaired' | 'unreachable' | 'setupNotFound' | 'offerUsed' | 'registerAgain' | 'limit' | 'taken' | 'takenOtherOrg' | 'failed'; /** story 4695: the organization the phone is paired in (named by the server) */ org?: string };
 
 
 /**
@@ -119,6 +119,7 @@ function Pairing() {
       case 'sent': setView({ kind: 'checking', head, phoneKeyId: r.phoneKeyId }); return;
       case 'alreadyPaired': case 'remoteOff': case 'noScreenLock': case 'biometricRequired': setView({ kind: r.kind }); return;
       case 'limit': void enterLimit(); return;
+      case 'takenOtherOrg': setView({ kind: 'retry', line: 'takenOtherOrg', ...(r.org ? { org: r.org } : {}) }); return;
       default: setView({ kind: 'retry', line: r.kind });
     }
   };
@@ -170,7 +171,7 @@ function Pairing() {
 
   const cancel = () => { known.current = null; setView({ kind: 'start' }); };
   // each refusal's line — one literal key per case (the i18n guards read literal keys)
-  const retryLine = (line: RetryLine): string => {
+  const retryLine = (line: RetryLine, org?: string): string => {
     switch (line) {
       case 'expired': return t('expired');
       case 'notOurs': return t('notOurs');
@@ -181,6 +182,7 @@ function Pairing() {
       case 'registerAgain': return t('registerAgain');
       case 'limit': return t('limit.title');
       case 'taken': return t('taken');
+      case 'takenOtherOrg': return org ? t('takenOtherOrgNamed', { org }) : t('takenOtherOrg');
       case 'failed': return t('failed');
     }
   };
@@ -272,7 +274,7 @@ function Pairing() {
       );
     }
     case 'retry':
-      return <Shell><Line focus={pressed}>{retryLine(view.line)}</Line><Actions>{rescan}</Actions></Shell>;
+      return <Shell><Line focus={pressed}>{retryLine(view.line, view.org)}</Line><Actions>{rescan}</Actions></Shell>;
   }
 }
 

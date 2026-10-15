@@ -184,6 +184,20 @@ describe('GET /api/auth/callback/[provider] — native OAuth-handoff branch', ()
     expect((await run(null)).location).toBe('https://dev-app.sprintable.ai/native/oauth-return?code=handoff-code-xyz');
   });
 
+  // story 4689 — the dev phone app: the return page is told `app=dev`; the BE binding does not change (the app only picks which button opens)
+  it('[4689] return_app cookie «dev» → the return page gets app=dev · BE return uri still ai.sprintable:/oauth-return', async () => {
+    process.env['MOBILE_APP_LINK_ORIGIN'] = 'https://dev-app.sprintable.ai';
+    stubCookies({ oauth_native_challenge_google: 'a'.repeat(43), oauth_native_callback_mode_google: 'custom_scheme', oauth_native_return_app_google: 'dev' });
+    mockFetch.mockReset();
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: { access_token: fakeJwt({ sub: 'user-123' }), refresh_token: 'legacy-rt' } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ code: 'handoff-code-xyz' }) });
+    const res = await GET(makeRequest({ code: 'c', state: 'matching-state' }), routeParams());
+    expect(res.headers.get('location')).toBe('https://dev-app.sprintable.ai/native/oauth-return?code=handoff-code-xyz&app=dev');
+    const [, issueOpts] = mockFetch.mock.calls[1] as [string, RequestInit];
+    expect(JSON.parse(String(issueOpts.body)).return_uri).toBe('ai.sprintable:/oauth-return');
+  });
+
   it('with a native challenge cookie: sends the internal secret header on the issue call', async () => {
     stubCookies({ oauth_native_challenge_google: 'a'.repeat(43) });
     process.env['FIREBASE_BFF_INTERNAL_SECRET'] = 'shared-secret';

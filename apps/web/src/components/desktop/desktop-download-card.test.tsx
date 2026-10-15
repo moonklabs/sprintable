@@ -54,8 +54,10 @@ async function flush() {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 
-function jsonResponse(body: unknown, ok = true) {
-  return { ok, json: async () => body } as Response;
+// story 4696: the manifest route tells the card its bucket in a header (the server's own setting)
+const DEV_BUCKET = 'sprintable-desktop-releases-dev';
+function jsonResponse(body: unknown, ok = true, bucket: string | null = DEV_BUCKET) {
+  return { ok, json: async () => body, headers: new Headers(bucket ? { 'x-desktop-download-bucket': bucket } : {}) } as Response;
 }
 
 // story #3807 AC3(페드루 PO 確定 2026-09-11 · 착수 시점 민 AC2 PR 0건) — 민의
@@ -88,6 +90,26 @@ describe('DesktopDownloadCard — story #3807 AC3', () => {
     url: 'https://storage.googleapis.com/sprintable-desktop-releases-dev/macos-electron/0.2.0/Sprintable-Dev-Setup-abc123def-arm64.dmg',
     sha256: 'f'.repeat(64), size: 1, signed_team: 'JN798BC4KC', notarized: false, pub_date: '2026-10-08T03:00:00.000Z',
   };
+
+  it('[SID:4696] the manifest cannot be read (an empty prod bucket: 404 / 502 from the route) → the card closes as «지금은 받을 수 없어요» — no version, no link', async () => {
+    for (const status of [404, 502, 503]) {
+      vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status, json: async () => ({ error: 'manifest_unavailable' }), headers: new Headers() }) as Response));
+      await act(async () => { root.render(wrap(<DesktopDownloadCard />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="desktop-download-unavailable"]')?.textContent, String(status)).toBe(koMessages.desktop.unavailable);
+      expect(container.querySelector('[data-testid="desktop-download-button"]')).toBeNull();
+    }
+  });
+
+  it('[SID:4696] no bucket told by the server (prod with none set) → «지금은 받을 수 없어요», no link — even for a well-formed dev-bucket url; a prod bucket told with a dev url → no link either', async () => {
+    for (const bucket of [null, 'sprintable-desktop-releases']) {
+      vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(MANIFEST, true, bucket)));
+      await act(async () => { root.render(wrap(<DesktopDownloadCard />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="desktop-download-unavailable"]')?.textContent, String(bucket)).toBe(koMessages.desktop.unavailable);
+      expect(container.querySelector('[data-testid="desktop-download-button"]')).toBeNull();
+    }
+  });
 
   it('⭐[SID:4619] 매니페스트 수신 — 대상 · 버전 · 빌드 · 첫 열기 안내(유나 정본: 제목 · 순서 두 줄 · macOS 12 덧줄 · 공증 전) · DMG 링크', async () => {
     const fetchMock = vi.fn(async () => jsonResponse(MANIFEST));

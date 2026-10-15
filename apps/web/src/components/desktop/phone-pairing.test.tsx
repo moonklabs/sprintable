@@ -356,6 +356,26 @@ describe('[4532] phone pairing screen', () => {
     expect(buttons()).toEqual(['다시 찍기']);
   });
 
+  it('the same person\'s phone paired in another organization → its own line (the way out: remove it THERE) + [다시 찍기] (story 4695 · Yuna takenOtherOrg)', async () => {
+    registerPost = () => res(409, { error: { code: 'remote_device_other_org' } });
+    installShell();
+    await render();
+    await press('QR 찍기');
+    await press('페어링');
+    expect(line()).toBe('이 폰은 다른 조직의 컴퓨터와 이미 페어링돼 있어 여기서는 페어링할 수 없어요 — 그 조직의 웹 «데스크톱 앱 › 원격 기기»에서 이 폰을 뺀 뒤 다시 찍어 주세요');
+    expect(buttons()).toEqual(['다시 찍기']);
+  });
+
+  it('…and it names the organization when the server does (Yuna {org} line) — where to remove the phone', async () => {
+    registerPost = () => res(409, { error: { code: 'remote_device_other_org', detail: { org_name: 'Moonklabs' } } });
+    installShell();
+    await render();
+    await press('QR 찍기');
+    await press('페어링');
+    expect(line()).toBe('이 폰은 Moonklabs 조직의 컴퓨터와 이미 페어링돼 있어 여기서는 페어링할 수 없어요 — 그 조직의 웹 «데스크톱 앱 › 원격 기기»에서 이 폰을 뺀 뒤 다시 찍어 주세요');
+    expect(buttons()).toEqual(['다시 찍기']);
+  });
+
   it('a phone with no screen lock → the line + [설정 열기] (the shell opens the settings) + [다시 찍기]', async () => {
     shell['device.key.info'] = { ok: false, code: 'no_screen_lock' };
     installShell();

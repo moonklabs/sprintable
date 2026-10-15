@@ -30,6 +30,8 @@ _KNOWN = {
     # project — its stream, session reports and command results are that device's only; the session view is the org's
     # owners and admins (as the setup's own revoke), not a project read
     "app/routers/desktop_relay.py::device_stream",
+    # story 4695 — device-token route · the token's own setup's organization id and name only (no project-owned entity is read)
+    "app/routers/desktop_relay.py::device_setup_facts",
     "app/routers/desktop_relay.py::get_device_sessions",
     "app/routers/desktop_relay.py::post_command_result",
     "app/routers/desktop_relay.py::post_session_state",

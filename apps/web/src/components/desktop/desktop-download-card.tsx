@@ -6,7 +6,7 @@ import { AlertTriangle, Loader2 } from 'lucide-react';
 import { Alert, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { ourDownloadUrl } from '@/lib/desktop-downloads';
+import { DESKTOP_DOWNLOAD_BUCKET_HEADER, ourDownloadUrl } from '@/lib/desktop-downloads';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 
 /**
@@ -78,12 +78,14 @@ export function DesktopDownloadCard({ hideTitle = false, ctaVariant = 'default' 
   useEffect(() => {
     let alive = true;
     fetch('/desktop/downloads/macos.json')
-      .then((r) => (r.ok ? r.json() : null))
+      .then(async (r) => (r.ok ? { json: (await r.json()) as DesktopDownloadManifest, bucket: r.headers.get(DESKTOP_DOWNLOAD_BUCKET_HEADER) } : null))
       .catch(() => null)
-      .then((json: DesktopDownloadManifest | null) => {
+      .then((got: { json: DesktopDownloadManifest; bucket: string | null } | null) => {
         if (!alive) return;
-        // [SID:4619 · Kadir 5004 후속 ①] a link only into our bucket — any other url is «지금은 받을 수 없어요», as no manifest
-        const url = ourDownloadUrl(json?.url);
+        const json = got?.json ?? null;
+        // [SID:4619 · Kadir 5004 후속 ①] a link only into our bucket — any other url is «지금은 받을 수 없어요», as no manifest.
+        // story 4696: «our bucket» is the one the server says (its own setting) — none said, nothing is ours
+        const url = ourDownloadUrl(json?.url, got?.bucket);
         setManifest(json?.version && url ? { ...json, url } : null);
         setLoading(false);
       });

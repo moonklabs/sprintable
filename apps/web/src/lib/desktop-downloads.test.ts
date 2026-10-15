@@ -1,13 +1,26 @@
 // [SID:4619] AC2 — the download manifest is read from macos-electron/latest (the Electron app), and the old Tauri updater's
 // manifest (desktop-updates.ts · macos/latest/macos.json) is a different place that this card no longer reads.
 import { describe, expect, it, vi } from 'vitest';
-import { DesktopDownloadUnavailableError, fetchDesktopDownloadManifest, ourDownloadUrl } from './desktop-downloads';
+import { DesktopDownloadUnavailableError, desktopDownloadBucket, fetchDesktopDownloadManifest, ourDownloadUrl } from './desktop-downloads';
+
+const DEV = 'sprintable-desktop-releases-dev';
+const PROD = 'sprintable-desktop-releases';
 
 // [SID:4619 · Kadir 5004 후속 ①] the manifest is relayed as it is — the card links its url only when it is in our bucket
 describe('ourDownloadUrl', () => {
   const OURS = 'https://storage.googleapis.com/sprintable-desktop-releases-dev/macos-electron/0.2.0/Sprintable-Dev-Setup-abc123def-arm64.dmg';
   it('our bucket over https: linked (as the parsed href)', () => {
-    expect(ourDownloadUrl(OURS)).toBe(OURS);
+    expect(ourDownloadUrl(OURS, DEV)).toBe(OURS);
+  });
+  // story 4696: «ours» is the configured bucket — a prod deployment's bucket is not dev's, and the other way round
+  it('the configured bucket is the only one: a dev bucket link under a prod setting is not linked (and the prod one is)', () => {
+    expect(ourDownloadUrl(OURS, PROD)).toBeNull();
+    const prodUrl = OURS.replace(DEV, PROD);
+    expect(ourDownloadUrl(prodUrl, PROD)).toBe(prodUrl);
+    expect(ourDownloadUrl(prodUrl, DEV)).toBeNull();
+  });
+  it('no bucket named (null · undefined · empty · not a bucket name) → nothing is ours — never a dev fallback', () => {
+    for (const bucket of [null, undefined, '', 'a/b', '../x', 'UPPER', 'a'] as const) expect(ourDownloadUrl(OURS, bucket), String(bucket)).toBeNull();
   });
   it.each([
     ['another host', 'https://evil.example/sprintable-desktop-releases-dev/x.dmg'],
@@ -25,7 +38,24 @@ describe('ourDownloadUrl', () => {
     ['not a string', 42],
     ['nothing', undefined],
   ])('%s: not linked', (_name, url) => {
-    expect(ourDownloadUrl(url)).toBeNull();
+    expect(ourDownloadUrl(url, DEV)).toBeNull();
+  });
+});
+
+describe('desktopDownloadBucket (story 4696)', () => {
+  it('a plain bucket name from the server env; unset · empty · a path or a dotted/odd value → null (the card closes)', () => {
+    expect(desktopDownloadBucket(DEV)).toBe(DEV);
+    expect(desktopDownloadBucket(`  ${PROD}\n`)).toBe(PROD);
+    for (const v of [undefined, '', '   ', 'a/b', 'evil.example/x', '../x', 'x'.repeat(64), 'UPPER_CASE']) expect(desktopDownloadBucket(v), String(v)).toBeNull();
+  });
+  it('reads the process env by default; unset → null', () => {
+    const was = process.env.DESKTOP_DOWNLOAD_BUCKET;
+    try {
+      delete process.env.DESKTOP_DOWNLOAD_BUCKET;
+      expect(desktopDownloadBucket()).toBeNull();
+      process.env.DESKTOP_DOWNLOAD_BUCKET = PROD;
+      expect(desktopDownloadBucket()).toBe(PROD);
+    } finally { if (was === undefined) delete process.env.DESKTOP_DOWNLOAD_BUCKET; else process.env.DESKTOP_DOWNLOAD_BUCKET = was; }
   });
 });
 
@@ -33,8 +63,8 @@ describe('fetchDesktopDownloadManifest', () => {
   it('reads macos-electron/latest/manifest.json past the cache (no-store · a new query each call) and returns the body as it is', async () => {
     const body = '{\n  "version": "0.2.0"\n}\n';
     const mockFetch = vi.fn().mockResolvedValue({ ok: true, text: async () => body });
-    expect(await fetchDesktopDownloadManifest(mockFetch as unknown as typeof fetch)).toBe(body);
-    await fetchDesktopDownloadManifest(mockFetch as unknown as typeof fetch);
+    expect(await fetchDesktopDownloadManifest(mockFetch as unknown as typeof fetch, DEV)).toBe(body);
+    await fetchDesktopDownloadManifest(mockFetch as unknown as typeof fetch, DEV);
     const [[url1, opts], [url2]] = mockFetch.mock.calls as [string, RequestInit][];
     expect(opts).toEqual({ cache: 'no-store' });
     expect(url1).toMatch(/^https:\/\/storage\.googleapis\.com\/sprintable-desktop-releases-dev\/macos-electron\/latest\/manifest\.json\?_t=\d+-[a-z0-9]+$/);
@@ -43,6 +73,20 @@ describe('fetchDesktopDownloadManifest', () => {
 
   it('throws DesktopDownloadUnavailableError on a non-2xx (a missing object is not a broken 200)', async () => {
     const mockFetch = vi.fn().mockResolvedValue({ ok: false, status: 404, statusText: 'Not Found' });
-    await expect(fetchDesktopDownloadManifest(mockFetch as unknown as typeof fetch)).rejects.toThrow(DesktopDownloadUnavailableError);
+    await expect(fetchDesktopDownloadManifest(mockFetch as unknown as typeof fetch, DEV)).rejects.toThrow(DesktopDownloadUnavailableError);
+  });
+
+  it('the manifest is read from the CONFIGURED bucket — a prod setting never touches the dev bucket', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true, text: async () => '{}' });
+    await fetchDesktopDownloadManifest(mockFetch as unknown as typeof fetch, PROD);
+    const url = String(mockFetch.mock.calls[0]![0]);
+    expect(url.startsWith(`https://storage.googleapis.com/${PROD}/macos-electron/latest/manifest.json?`)).toBe(true);
+    expect(url).not.toContain('-dev');
+  });
+
+  it('no bucket configured → unavailable without any request (never a dev fallback)', async () => {
+    const mockFetch = vi.fn();
+    await expect(fetchDesktopDownloadManifest(mockFetch as unknown as typeof fetch, null)).rejects.toThrow(DesktopDownloadUnavailableError);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });

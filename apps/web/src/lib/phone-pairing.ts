@@ -22,6 +22,7 @@ export type OfferOutcome =
   | { kind: 'alreadyPaired' }
   | { kind: 'limit' } // 409 remote_device_limit — three phones already
   | { kind: 'taken' } // 409 remote_device_taken — this phone's key is registered to another account (story #4624)
+  | { kind: 'takenOtherOrg'; org?: string } // 409 remote_device_other_org — the SAME person's key, paired with a computer of another organization of theirs (story 4695)
   | { kind: 'noScreenLock' }
   | { kind: 'biometricRequired' }
   | { kind: 'offerUsed' } // 409 — another phone (or an earlier send) took this QR
@@ -66,6 +67,13 @@ const orgHeader = (setupId: string): Record<string, string> => {
   const org = targetOrgOf.get(setupId);
   return org ? { 'X-Org-Id': org } : {};
 };
+
+/** the organization the server names for «paired in another organization» (error.detail.org_name) — a short clean string, or nothing */
+function orgOf(body: Record<string, unknown>): { org?: string } {
+  const detail = (body.error as { detail?: { org_name?: unknown } } | undefined)?.detail;
+  const name = typeof detail?.org_name === 'string' ? detail.org_name.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100) : '';
+  return name ? { org: name } : {};
+}
 
 async function read(res: Response): Promise<{ code: string; body: Record<string, unknown> }> {
   try {
@@ -134,6 +142,7 @@ export async function sendPairOffer(head: OfferHead, label: string, deps: PairDe
     if (!res.ok) {
       if (code === 'remote_device_limit') return { kind: 'limit' };
       if (code === 'remote_device_taken') return { kind: 'taken' }; // story #4624: its own line, not the general «보내지 못했어요»
+      if (code === 'remote_device_other_org') return { kind: 'takenOtherOrg', ...orgOf(body) }; // story 4695: not «another account» — the same person's phone, another organization
       return { kind: 'failed' };
     }
     if (typeof body.id !== 'string') return { kind: 'failed' };
