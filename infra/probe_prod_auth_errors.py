@@ -647,6 +647,60 @@ def edge_versions(curl=None) -> str:
     return " · ".join(f"{name}={fetch(url)}" for name, url in _EDGE_PROBES)
 
 
+_CF_STATUSES = frozenset({"HIT", "MISS", "EXPIRED", "BYPASS", "DYNAMIC", "STALE", "REVALIDATED", "UPDATING"})
+_CC_PLAIN = frozenset({"public", "private", "no-store", "no-cache", "immutable", "must-revalidate"})
+_CC_NUMBERED = re.compile(r"^(max-age|s-maxage)=(\d{1,10})$")
+_CHUNK_URL = re.compile(r'(?:src|href)="(/_next/static/[^"\s<>]{1,300}\.(?:js|css))"')
+
+
+def _curl_text(args: list[str]) -> str:
+    """이 러너의 `curl` 로 읽은 글(실패 · 시간 초과 → 빈 글). 밖으로 나가는 곳은 호출부의 닫힌 주소 둘뿐이다."""
+    try:
+        proc = subprocess.run(["curl", "-s", "--max-time", "20", *args], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return proc.stdout if proc.returncode == 0 else ""
+
+
+def first_chunk_path(html: str) -> str | None:
+    """문서에서 `/_next/static/…(.js|.css)` 주소 하나(경로) — 출력에는 안 싣는다(어느 청크인지가 아니라 «캐시 머리글»만 본다)."""
+    m = _CHUNK_URL.search(html or "")
+    return m.group(1) if m else None
+
+
+def cache_headers_summary(header_text: str) -> str:
+    """응답 머리글 글 → `cf=<닫힌 낱말|?> age=<숫자|?> cc=<알려진 지시어만|?>`. 다른 머리글 · 값은 안 읽는다."""
+    cf, age, cc = "?", "?", "?"
+    for line in (header_text or "").splitlines():
+        name, _, value = line.partition(":")
+        name, value = name.strip().lower(), value.strip()
+        if name == "cf-cache-status" and value.upper() in _CF_STATUSES:
+            cf = value.upper()
+        elif name == "age" and value.isdigit() and len(value) <= 10:
+            age = value
+        elif name == "cache-control":
+            kept = [d for d in (t.strip().lower() for t in value.split(",")) if d in _CC_PLAIN or _CC_NUMBERED.match(d)]
+            cc = ",".join(kept) if kept else "?"
+    return f"cf={cf} age={age} cc={cc}"
+
+
+def edge_static_cache(curl_text=None) -> list[str]:
+    """prod · dev 의 `/login` 문서에서 정적 청크 주소 하나를 골라 두 번 받아(본문은 버린다) Cloudflare 캐시 머리글만 비교한다 — 두 도메인의 정적 캐시가 같은지."""
+    fetch = curl_text or _curl_text
+    out: list[str] = []
+    for name, login in _EDGE_PROBES:
+        origin = login.rsplit("/", 1)[0]
+        path = first_chunk_path(fetch([login]))
+        if path is None:
+            out.append(f"  {name}: 문서에서 정적 청크 주소를 못 찾았다")
+            continue
+        url = origin + path
+        first = cache_headers_summary(fetch(["-D", "-", "-o", "/dev/null", url]))
+        second = cache_headers_summary(fetch(["-D", "-", "-o", "/dev/null", url]))
+        out.append(f"  {name}: 1회째 {first} · 2회째 {second}")
+    return out
+
+
 def run_timeline(start: str, end: str, env: str) -> int:
     try:
         web, backend = _env_services(env)
@@ -659,6 +713,9 @@ def run_timeline(start: str, end: str, env: str) -> int:
         print(f"✗ 이름에 {env} 가 든 웹/백엔드 서비스를 못 찾았다")
         return 1
     print(f"가장자리 HTTP 판(이 러너 → Cloudflare · `curl` · 폰이 협상한 판 아님): {edge_versions()}")
+    print("정적 청크 캐시(Cloudflare · 같은 청크를 두 번 받아 머리글만 · 청크 이름은 안 찍는다):")
+    for line in edge_static_cache():
+        print(line)
     templates, notes = build_route_templates()
     print(f"닫힌 경로 템플릿(소스에서 실행 때 만듦): {len(templates)}개")
     for note in notes:

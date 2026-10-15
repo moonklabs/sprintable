@@ -562,6 +562,7 @@ def test_timeline_mode_runs_only_the_timeline_with_the_window_in_the_filter(monk
 
     monkeypatch.setattr(probe, "_run", fake_run)
     monkeypatch.setattr(probe, "_curl_version", lambda url: "h2")      # 가짜 — 이 시험은 밖으로 나가지 않는다
+    monkeypatch.setattr(probe, "_curl_text", lambda args: "")           # (정적 청크 캐시 읽기도 — 문서가 비면 «못 찾았다»)
     monkeypatch.setattr(probe, "build_route_templates", lambda: (TEMPLATES, []))
     monkeypatch.setenv("TIMELINE_START", "2026-10-15T06:50:00Z")
     monkeypatch.setenv("TIMELINE_END", "2026-10-15T07:50:00Z")
@@ -573,6 +574,7 @@ def test_timeline_mode_runs_only_the_timeline_with_the_window_in_the_filter(monk
     assert "state_check" not in out and "① " not in out                            # 기존 칸은 안 돈다
     assert len(calls) == 3                                                          # 요청 한 번 · 시스템 로그 한 번 · 정적 청크 한 번(4698)
     assert "prod=h2 · dev=h2" in out                                                # 가장자리 HTTP 판 줄
+    assert "정적 청크 캐시(Cloudflare" in out and "prod: 문서에서 정적 청크 주소를 못 찾았다" in out and "dev: 문서에서 정적 청크 주소를 못 찾았다" in out   # 정적 캐시 비교 줄(문서가 비면 «못 찾았다»)
     flt = [c[3] for c in calls]
     assert all('timestamp>="2026-10-15T06:50:00Z" AND timestamp<="2026-10-15T07:50:00Z"' in f for f in flt)
     assert any("/_next/static/" in f and "NOT" in f for f in flt) and any("varlog%2Fsystem" in f for f in flt)
@@ -689,3 +691,45 @@ def test_edge_versions_are_closed_words_and_a_failure_is_a_question_mark(monkeyp
     for exc in (OSError("no curl"), sp.TimeoutExpired("curl", 30)):
         monkeypatch.setattr(probe.subprocess, "run", fake(raises=exc))
         assert probe._curl_version("https://app.sprintable.ai/login") == "?"
+
+
+def test_cache_headers_summary_keeps_closed_words_and_known_directives_only():
+    hdr = "\r\n".join([
+        "HTTP/2 200", "content-type: text/javascript", f"x-secret: {SECRETS[3]}", "CF-Cache-Status: hit", "Age: 42",
+        f"cache-control: public, max-age=31536000, immutable, foo={SECRETS[5]}, s-maxage=60",
+    ])
+    assert probe.cache_headers_summary(hdr) == "cf=HIT age=42 cc=public,max-age=31536000,immutable,s-maxage=60"
+    assert probe.cache_headers_summary("cf-cache-status: SOMETHING\nage: -1\ncache-control: weird") == "cf=? age=? cc=?"
+    assert probe.cache_headers_summary(f"cf-cache-status: HIT {SECRETS[3]}\nage: {'9' * 12}") == "cf=? age=? cc=?"
+    assert probe.cache_headers_summary("") == "cf=? age=? cc=?" and probe.cache_headers_summary(None) == "cf=? age=? cc=?"
+    _no_secret(probe.cache_headers_summary(hdr))
+
+
+def test_first_chunk_path_picks_one_static_address_and_nothing_else():
+    html = '<html><script src="/api/x.js"></script><link href="/_next/static/css/abc123.css"><script src="/_next/static/chunks/main-9f.js"></script>'
+    assert probe.first_chunk_path(html) == "/_next/static/css/abc123.css"
+    assert probe.first_chunk_path("<html>nothing</html>") is None and probe.first_chunk_path(None) is None
+
+
+def test_edge_static_cache_asks_the_closed_pair_twice_and_never_prints_the_chunk():
+    calls = []
+
+    def fake(args):
+        calls.append(args)
+        if args[-1].endswith("/login"):
+            return '<script src="/_next/static/chunks/app-SECRETCHUNK1234.js"></script>'
+        hit = len([c for c in calls if "-D" in c]) % 2 == 0
+        return f"HTTP/2 200\r\ncf-cache-status: {'HIT' if hit else 'MISS'}\r\nage: {7 if hit else 0}\r\ncache-control: public, max-age=31536000, immutable"
+    out = probe.edge_static_cache(fake)
+    assert out == [
+        "  prod: 1회째 cf=MISS age=0 cc=public,max-age=31536000,immutable · 2회째 cf=HIT age=7 cc=public,max-age=31536000,immutable",
+        "  dev: 1회째 cf=MISS age=0 cc=public,max-age=31536000,immutable · 2회째 cf=HIT age=7 cc=public,max-age=31536000,immutable",
+    ]
+    assert "SECRETCHUNK" not in "\n".join(out)
+    hosts = {c[-1].split("/")[2] for c in calls}
+    assert hosts == {"app.sprintable.ai", "dev-app.sprintable.ai"}                    # 닫힌 둘 — 밖의 주소는 안 부른다
+    assert edge_none(lambda args: "") == ["  prod: 문서에서 정적 청크 주소를 못 찾았다", "  dev: 문서에서 정적 청크 주소를 못 찾았다"]
+
+
+def edge_none(fetch):
+    return probe.edge_static_cache(fetch)
