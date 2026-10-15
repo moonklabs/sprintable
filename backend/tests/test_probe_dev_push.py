@@ -265,6 +265,69 @@ def _env(monkeypatch):
     monkeypatch.setenv("SPLIT_DATE", "2026-10-08")
 
 
+def test_gcloud_error_text_hides_emails_and_keeps_the_rest(monkeypatch, capsys):
+    """까디르 렌즈 1선: gcloud 오류 stderr 에 운영자 계정 이메일이 실릴 수 있다 — 이메일 모양만 (email) 로 가리고 다른 문구는 그대로."""
+    import subprocess
+
+    msg = (
+        "ERROR: (gcloud.logging.read) PERMISSION_DENIED: Permission 'logging.logEntries.list' denied on resource "
+        "(or it may not exist). account ops.person+dev@moonklabs.com and svc-1@proj.iam.gserviceaccount.com cannot read"
+    )
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 1, stdout="", stderr=msg))
+    with pytest.raises(probe._GcloudError) as ei:
+        probe._run(["gcloud", "logging", "read", "x"])
+    text = str(ei.value)
+    assert "ops.person" not in text and "moonklabs.com" not in text and "iam.gserviceaccount" not in text and "@" not in text
+    assert text == (
+        "ERROR: (gcloud.logging.read) PERMISSION_DENIED: Permission 'logging.logEntries.list' denied on resource "
+        "(or it may not exist). account (email) and (email) cannot read"
+    )
+
+
+def test_an_email_across_the_800_char_cut_is_hidden_before_the_cut(monkeypatch):
+    import subprocess
+
+    msg = "x" * 780 + " ops.person@moonklabs.com tail"  # 이메일이 800자 경계를 가로지른다 — 자른 뒤 가리면 «ops.person@moonklabs» 조각이 남는다
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 1, stdout="", stderr=msg))
+    with pytest.raises(probe._GcloudError) as ei:
+        probe._run(["gcloud", "logging", "read", "x"])
+    text = str(ei.value)
+    assert "ops" not in text.replace("x", "") and "@" not in text and text.endswith("(email) tail")
+    assert len(text) <= 800
+
+
+def test_the_whole_stdout_never_carries_planted_secrets_or_raw_ids(monkeypatch, capsys):
+    """까디르 렌즈 1선: 집계 함수의 반환값만 보면 파싱 도중의 print(원문)이 안 잡힌다 — main 이 stdout 에 쓴 것 전부를 본다."""
+    import json
+
+    es_push = [
+        _push("2026-10-09T02:00:00Z", devices=1, ok=0, error=1, reasons=f"{{'\"{SECRETS[1]}\" bad for {SECRETS[0]}': 1}}"),
+        _push("2026-10-09T02:01:00Z", "conversation.message", org=OTHER_ORG_FULL),
+    ]
+    es_diag = [_diag("2026-10-09T01:00:00Z", "device_token", "granted", SECRETS[1]), _diag("2026-10-09T01:01:00Z", member=OTHER_MEMBER_FULL)]
+    es_any = [{"timestamp": "2026-10-15T00:00:00Z", "jsonPayload": {"message": f"x {SECRETS[1]}", SECRETS[0]: MEMBER_FULL, "member_id": MEMBER_FULL}}]
+
+    def fake_run(cmd):
+        if cmd[:4] == ["gcloud", "run", "services", "list"]:
+            return "sprintable-backend-dev\n"
+        flt = cmd[3]
+        if "expo push: sent" in flt:
+            return json.dumps(es_push)
+        if "push_diagnostics" in flt:
+            return json.dumps(es_diag)
+        return json.dumps(es_any)
+
+    monkeypatch.setattr(probe, "_run", fake_run)
+    _env(monkeypatch)
+    assert probe.main() == 0
+    captured = capsys.readouterr()
+    everything = captured.out + captured.err
+    _no_secret(everything)
+    for raw in (ORG_FULL, MEMBER_FULL, OTHER_MEMBER_FULL, OTHER_ORG_FULL, "e75ca548-"):
+        assert raw not in everything, raw
+    assert "stage=device_token" in everything and "devices=1  ok=0  error=1" in everything  # 그래도 읽은 결과는 나온다
+
+
 def test_a_failing_gcloud_prints_its_error_as_the_result(monkeypatch, capsys):
     def boom(cmd):
         raise probe._GcloudError("ERROR: (gcloud.logging.read) PERMISSION_DENIED: The caller does not have permission")

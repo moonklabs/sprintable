@@ -21,7 +21,8 @@
 `details.error` 가 없으면 티켓의 **자유 글 메시지**(토큰 원문이 든 문장)가 사유 자리에 실리므로(`expo_push.py` `err = … or ticket.get("message")`) 닫힌 코드 목록 밖은 모두 (other).
 필터에 쓰는 앞 8자리(org · member)는 출력 어디에도 안 나온다. 원문 한 줄도 출력하지 않는다.
   ③ 필터 없이 이 서비스의 최근 1줄의 «칸 이름만»(값 0) — ① ② 가 0건일 때 «필터가 틀렸나 · 정말 0인가»를 가르는 용도(PO 요청). 이름이 짧은 식별자 모양이 아니면 (other).
-예외: gcloud 가 실패하면 그 오류 문구(권한 부족 등)를 그대로 찍는다(이 자체가 결과 — PO 지시. 로그 항목이 아니라 gcloud 의 stderr 다).
+예외: gcloud 가 실패하면 그 오류 문구(권한 부족 등)를 찍는다(이 자체가 결과 — PO 지시. 로그 항목이 아니라 gcloud 의 stderr 다). 단 운영자 계정 이메일이 문구에
+실릴 수 있어(`account x@y does not have permission`) 이메일 모양 글자는 «(email)» 로 가린 뒤 800자로 자른다(까디르 렌즈 1선).
 
 앱 런타임을 import 하지 않는다(gcloud + 표준 라이브러리만) — probe_prod_auth_errors.py 와 같은 규율. gcloud 는 `run services list` 와 `logging read` 만 부른다.
 """
@@ -270,6 +271,15 @@ class _GcloudError(Exception):
     pass
 
 
+_EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}")
+
+
+def redact_gcloud_text(text: str) -> str:
+    """gcloud 의 오류 문구는 그대로 찍되(PO 지시) 이메일 모양 글자(운영자 계정이 «account x@y does not have permission» 꼴로 실린다)는 «(email)» 로 가린다.
+    가린 **뒤에** 길이를 자른다(자르다 이메일 조각이 남지 않게)."""
+    return _EMAIL.sub("(email)", text)
+
+
 def _run(cmd: list[str]) -> str:
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_GCLOUD_TIMEOUT_SECONDS)
@@ -277,7 +287,7 @@ def _run(cmd: list[str]) -> str:
         raise _GcloudError(f"gcloud 가 {_GCLOUD_TIMEOUT_SECONDS}초 안에 끝나지 않았다 ({exc.cmd[2] if len(exc.cmd) > 2 else 'logging'})") from None
     if proc.returncode != 0:
         # PO: 권한이 없으면 그 오류 문구 그대로가 결과다 — gcloud 의 stderr(로그 항목이 아님). 너무 길면 자른다.
-        raise _GcloudError((proc.stderr or proc.stdout or "gcloud 실패(출력 없음)").strip()[:800])
+        raise _GcloudError(redact_gcloud_text((proc.stderr or proc.stdout or "gcloud 실패(출력 없음)").strip())[:800])
     return proc.stdout
 
 
