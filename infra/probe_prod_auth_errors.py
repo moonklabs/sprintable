@@ -508,6 +508,35 @@ def route_label(request_url: object, templates: frozenset[tuple[str, ...]]) -> s
     return "/" + "/".join(best[1]) if best else _OTHER
 
 
+_STATIC_KINDS = frozenset({"chunks", "css", "media"})
+
+
+def static_label(request_url: object) -> str:
+    """`/_next/static/…` 요청 → 닫힌 낱말 라벨(`chunks` · `css` · `media` · `(other)`). 빌드 해시 · 파일 이름은 라벨에 안 실린다(청크 «개수 · ms · 크기»만 본다)."""
+    if not isinstance(request_url, str):
+        return _OTHER
+    path = urlsplit(request_url).path
+    if not path.startswith(_TL_STATIC_PREFIX):
+        return _OTHER
+    kind = path[len(_TL_STATIC_PREFIX):].split("/", 1)[0]
+    return f"{_TL_STATIC_PREFIX}{kind}/*" if kind in _STATIC_KINDS else f"{_TL_STATIC_PREFIX}(other)/*"
+
+
+def _query_flag(request_url: object, key: str) -> str:
+    """쿼리에 `key` 가 있나 — «1»/«0»/«?» 셋뿐(값은 안 읽는다). 라우터의 RSC 요청(`_rsc`)인지 · `?p=`(프로젝트 표지)가 실렸는지를 가른다."""
+    if not isinstance(request_url, str):
+        return "?"
+    try:
+        return "1" if key in parse_qs(urlsplit(request_url).query, keep_blank_values=True) else "0"
+    except ValueError:
+        return "?"
+
+
+def _from_label(referer: object, templates: frozenset[tuple[str, ...]]) -> str:
+    """referer → 닫힌 경로 라벨(없으면 «-»). 어디서 온 요청인지(홈 → 대화 탭 같은 이동)만 본다."""
+    return "-" if not isinstance(referer, str) or not referer else route_label(referer, templates)
+
+
 _PROTOCOLS = {"HTTP/1.0": "h1.0", "HTTP/1.1": "h1.1", "HTTP/2": "h2", "HTTP/2.0": "h2", "HTTP/3": "h3", "HTTP/3.0": "h3"}
 
 
@@ -534,9 +563,8 @@ def _kind(entry: dict, web: frozenset[str], backend: frozenset[str]) -> str:
     return "web" if name in web else "backend" if name in backend else "other"
 
 
-def agg_timeline(entries: list[dict], templates: frozenset[tuple[str, ...]], web: frozenset[str], backend: frozenset[str]) -> tuple[list[str], list[str], bool]:
-    """(시간순 줄 · 경로 라벨별 통계 줄 · 줄 한도에 닿았나). 줄 = 시각(초) · 갈래 · 메서드 · 라벨 · 상태 · ms · 응답 크기(B) · 프로토콜(닫힌 낱말) · 브라우저 갈래. 이 밖의 칸은 안 읽는다."""
-    rows: list[tuple[str, str, str, str, str, int | None, str, int | None, str]] = []
+def _timeline_rows(entries: list[dict], labeler, templates: frozenset[tuple[str, ...]], web: frozenset[str], backend: frozenset[str]) -> list[tuple]:
+    rows: list[tuple] = []
     for e in entries:
         hr = e.get("httpRequest")
         if not isinstance(hr, dict):
@@ -545,17 +573,23 @@ def agg_timeline(entries: list[dict], templates: frozenset[tuple[str, ...]], web
         method = method if method in _METHODS else "?"
         status = hr.get("status")
         status_text = str(status) if isinstance(status, int) and 100 <= status <= 599 else "?"
-        rows.append((_stamp(e.get("timestamp")), _kind(e, web, backend), method, route_label(hr.get("requestUrl"), templates), status_text,
-                     _latency_ms(hr.get("latency")), classify_browser(hr.get("userAgent")), _size_bytes(hr.get("responseSize")), _proto(hr.get("protocol"))))
+        url = hr.get("requestUrl")
+        rows.append((_stamp(e.get("timestamp")), _kind(e, web, backend), method, labeler(url), status_text,
+                     _latency_ms(hr.get("latency")), classify_browser(hr.get("userAgent")), _size_bytes(hr.get("responseSize")), _proto(hr.get("protocol")),
+                     _query_flag(url, "_rsc"), _query_flag(url, "p"), _from_label(hr.get("referer"), templates)))
     rows.sort(key=lambda r: r[0])
+    return rows
+
+
+def _timeline_output(rows: list[tuple]) -> tuple[list[str], list[str], bool]:
     lines = [
-        f"  {t}  {kind}  {method} {label}  {status}  {'?' if ms is None else ms}ms  {'?' if size is None else size}B  proto={proto}  browser={browser}"
-        for t, kind, method, label, status, ms, browser, size, proto in rows[:_TL_MAX_LINES]
+        f"  {t}  {kind}  {method} {label}  {status}  {'?' if ms is None else ms}ms  {'?' if size is None else size}B  proto={proto}  browser={browser}  rsc={rsc}  p={pq}  from={frm}"
+        for t, kind, method, label, status, ms, browser, size, proto, rsc, pq, frm in rows[:_TL_MAX_LINES]
     ]
     groups: dict[tuple[str, str, str], list[int]] = defaultdict(list)
     counts: Counter[tuple[str, str, str]] = Counter()
     sizes: Counter[tuple[str, str, str]] = Counter()
-    for _t, kind, method, label, _st, ms, _b, size, _p in rows:
+    for _t, kind, method, label, _st, ms, _b, size, _p, _r, _q, _f in rows:
         counts[(kind, method, label)] += 1
         if size is not None:
             sizes[(kind, method, label)] += size
@@ -568,6 +602,18 @@ def agg_timeline(entries: list[dict], templates: frozenset[tuple[str, ...]], web
         mx = f"{ms_list[-1]}ms" if ms_list else "?"
         stats.append(f"  {key[0]}  {key[1]} {key[2]}  {n}건 · p50 {p50} · 최대 {mx} · 크기 합계 {sizes.get(key, 0)}B")
     return lines, stats, len(rows) > _TL_MAX_LINES
+
+
+def agg_timeline(entries: list[dict], templates: frozenset[tuple[str, ...]], web: frozenset[str], backend: frozenset[str]) -> tuple[list[str], list[str], bool]:
+    """(시간순 줄 · 경로 라벨별 통계 줄 · 줄 한도에 닿았나). 줄 = 시각(초) · 갈래 · 메서드 · 라벨 · 상태 · ms · 응답 크기(B) · 프로토콜 · 브라우저 갈래 · 쿼리에 `_rsc`·`p` 가 있나(1/0) · 어디서 온 요청인가(referer → 닫힌 라벨).
+    이 밖의 칸은 안 읽는다 — 쿼리의 값 · referer 의 글자는 어디에도 안 실린다."""
+    return _timeline_output(_timeline_rows(entries, lambda url: route_label(url, templates), templates, web, backend))
+
+
+def agg_static(entries: list[dict], web: frozenset[str], backend: frozenset[str]) -> tuple[list[str], list[str], bool]:
+    """`/_next/static/` 요청(JS · CSS · 글꼴 청크) — 닫힌 낱말 라벨(`chunks` · `css` · `media`)로 접어 시간순 · 건수 · p50 · 최대 · 크기 합계. 청크 이름 · 해시는 안 실린다.
+    Cloudflare 가 캐시로 답한 요청은 오리진에 안 와 여기 없다 — 보이는 것은 오리진까지 온(MISS) 것뿐이다."""
+    return _timeline_output(_timeline_rows(entries, static_label, frozenset(), web, backend))
 
 
 def agg_cold_starts(entries: list[dict], web: frozenset[str], backend: frozenset[str]) -> list[str]:
@@ -583,17 +629,93 @@ def agg_cold_starts(entries: list[dict], web: frozenset[str], backend: frozenset
     return [f"  {t}  {kind}  reason={reason}" for t, kind, reason in out]
 
 
+_EDGE_PROBES = (("prod", "https://app.sprintable.ai/login"), ("dev", "https://dev-app.sprintable.ai/login"))
+_EDGE_VERSIONS = {"1.0": "h1.0", "1.1": "h1.1", "2": "h2", "3": "h3"}
+
+
+def _curl_version(url: str) -> str:
+    """이 러너에서 가장자리(Cloudflare)까지 `curl` 이 협상한 HTTP 판 — 닫힌 낱말만(밖 · 실패는 «?»). 폰이 협상한 판은 아니다(같은 가장자리의 같은 영역일 때만 같은 말)."""
+    try:
+        proc = subprocess.run(["curl", "-s", "-o", "/dev/null", "--max-time", "20", "-w", "%{http_version}", url], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return "?"
+    return _EDGE_VERSIONS.get(proc.stdout.strip(), "?") if proc.returncode == 0 else "?"
+
+
+def edge_versions(curl=None) -> str:
+    fetch = curl or _curl_version     # 부를 때 풀어 쓴다 — 시험이 `_curl_version` 을 갈아끼울 수 있게(밖으로 나가는 시험 0)
+    return " · ".join(f"{name}={fetch(url)}" for name, url in _EDGE_PROBES)
+
+
+_CF_STATUSES = frozenset({"HIT", "MISS", "EXPIRED", "BYPASS", "DYNAMIC", "STALE", "REVALIDATED", "UPDATING"})
+_CC_PLAIN = frozenset({"public", "private", "no-store", "no-cache", "immutable", "must-revalidate"})
+_CC_NUMBERED = re.compile(r"^(max-age|s-maxage)=(\d{1,10})$")
+_CHUNK_URL = re.compile(r'(?:src|href)="(/_next/static/[^"\s<>]{1,300}\.(?:js|css))"')
+
+
+def _curl_text(args: list[str]) -> str:
+    """이 러너의 `curl` 로 읽은 글(실패 · 시간 초과 → 빈 글). 밖으로 나가는 곳은 호출부의 닫힌 주소 둘뿐이다."""
+    try:
+        proc = subprocess.run(["curl", "-s", "--max-time", "20", *args], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return proc.stdout if proc.returncode == 0 else ""
+
+
+def first_chunk_path(html: str) -> str | None:
+    """문서에서 `/_next/static/…(.js|.css)` 주소 하나(경로) — 출력에는 안 싣는다(어느 청크인지가 아니라 «캐시 머리글»만 본다)."""
+    m = _CHUNK_URL.search(html or "")
+    return m.group(1) if m else None
+
+
+def cache_headers_summary(header_text: str) -> str:
+    """응답 머리글 글 → `cf=<닫힌 낱말|?> age=<숫자|?> cc=<알려진 지시어만|?>`. 다른 머리글 · 값은 안 읽는다."""
+    cf, age, cc = "?", "?", "?"
+    for line in (header_text or "").splitlines():
+        name, _, value = line.partition(":")
+        name, value = name.strip().lower(), value.strip()
+        if name == "cf-cache-status" and value.upper() in _CF_STATUSES:
+            cf = value.upper()
+        elif name == "age" and value.isdigit() and len(value) <= 10:
+            age = value
+        elif name == "cache-control":
+            kept = [d for d in (t.strip().lower() for t in value.split(",")) if d in _CC_PLAIN or _CC_NUMBERED.match(d)]
+            cc = ",".join(kept) if kept else "?"
+    return f"cf={cf} age={age} cc={cc}"
+
+
+def edge_static_cache(curl_text=None) -> list[str]:
+    """prod · dev 의 `/login` 문서에서 정적 청크 주소 하나를 골라 두 번 받아(본문은 버린다) Cloudflare 캐시 머리글만 비교한다 — 두 도메인의 정적 캐시가 같은지."""
+    fetch = curl_text or _curl_text
+    out: list[str] = []
+    for name, login in _EDGE_PROBES:
+        origin = login.rsplit("/", 1)[0]
+        path = first_chunk_path(fetch([login]))
+        if path is None:
+            out.append(f"  {name}: 문서에서 정적 청크 주소를 못 찾았다")
+            continue
+        url = origin + path
+        first = cache_headers_summary(fetch(["-D", "-", "-o", "/dev/null", url]))
+        second = cache_headers_summary(fetch(["-D", "-", "-o", "/dev/null", url]))
+        out.append(f"  {name}: 1회째 {first} · 2회째 {second}")
+    return out
+
+
 def run_timeline(start: str, end: str, env: str) -> int:
     try:
         web, backend = _env_services(env)
     except _GcloudError as exc:
         print(f"✗ Cloud Run 서비스 목록을 못 읽었다 — gcloud 오류 문구 그대로:\n{exc}")
         return 1
-    print(f"# 요청 타임라인 — env={env} · 창 {start} ~ {end} (UTC) · 허용 목록 출력만 · 정적 파일(/_next/static/)은 읽지 않는다")
+    print(f"# 요청 타임라인 — env={env} · 창 {start} ~ {end} (UTC) · 허용 목록 출력만(정적 청크는 ⑤c 에 이름 없이 건수 · ms · 크기만)")
     print(f"웹 서비스: {', '.join(web) or '(없음)'} · 백엔드 서비스: {', '.join(backend) or '(없음)'}")
     if not web and not backend:
         print(f"✗ 이름에 {env} 가 든 웹/백엔드 서비스를 못 찾았다")
         return 1
+    print(f"가장자리 HTTP 판(이 러너 → Cloudflare · `curl` · 폰이 협상한 판 아님): {edge_versions()}")
+    print("정적 청크 캐시(Cloudflare · 같은 청크를 두 번 받아 머리글만 · 청크 이름은 안 찍는다):")
+    for line in edge_static_cache():
+        print(line)
     templates, notes = build_route_templates()
     print(f"닫힌 경로 템플릿(소스에서 실행 때 만듦): {len(templates)}개")
     for note in notes:
@@ -618,6 +740,14 @@ def run_timeline(start: str, end: str, env: str) -> int:
         es = _read(flt, order="asc")
         return agg_cold_starts(es, webs, backs), len(es)
     out += _section("⑤b Cloud Run 새 인스턴스 시작(콜드 스타트)", cold)
+
+    def static():
+        flt = f'{_service_filter(web)} AND logName:"run.googleapis.com%2Frequests" AND httpRequest.requestUrl:"{_TL_STATIC_PREFIX}" AND {window}'
+        es = _read(flt, order="asc")
+        lines, stats, cut = agg_static(es, webs, backs)
+        body = lines + ([f"  … 줄 한도({_TL_MAX_LINES})에 닿아 뒤는 생략 — 아래 통계는 읽은 전부"] if cut else [])
+        return ((body + ["  ── 라벨별 (건수 · p50 · 최대 · 크기 합계) ──"] + stats) if lines else []), len(es)
+    out += _section("⑤c 정적 청크(/_next/static · 오리진까지 온 것만 — Cloudflare 캐시 적중분은 여기 없다)", static)
     print("\n".join(out))
     return 0
 
