@@ -2,14 +2,16 @@
 // signed-in page; not in proxy.ts PUBLIC_PREFIX — no app reads it without a session). Body = desktop-downloads.ts (the GCS
 // manifest publish-dev-setup.mjs wrote, relayed as it is). The old Tauri updater's /desktop/updates/macos.json is separate.
 import { NextResponse } from 'next/server';
-import { DesktopDownloadUnavailableError, fetchDesktopDownloadManifest } from '@/lib/desktop-downloads';
+import { DESKTOP_DOWNLOAD_BUCKET_HEADER, DesktopDownloadUnavailableError, desktopDownloadBucket, fetchDesktopDownloadManifest } from '@/lib/desktop-downloads';
 
 export async function GET() {
   try {
-    const body = await fetchDesktopDownloadManifest();
+    const bucket = desktopDownloadBucket();
+    const body = await fetchDesktopDownloadManifest(fetch, bucket);
     return new NextResponse(body, {
       status: 200,
-      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      // story 4696: the card (a client component) links the manifest's url only inside THIS bucket — told here, by the server's own setting
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', [DESKTOP_DOWNLOAD_BUCKET_HEADER]: bucket ?? '' },
     });
   } catch (err) {
     if (err instanceof DesktopDownloadUnavailableError) {

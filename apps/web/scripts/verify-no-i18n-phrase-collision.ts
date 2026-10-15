@@ -221,6 +221,9 @@ const NON_NUMBER_PLACEHOLDER_NAMES = new Set([
   // the app, Yuna 10-15 yuna/4693-copy.md). ko/en lines: recruiter.folderTraceTitle / folderTraceBody · nav.switcherFolderTrace — always a file's name before
   // «파일이» / «파일을», the `filename` axis, never a count.
   'file',
+  // story 4695 — {org}: an organization's name (Yuna 4695-pairing-copy.md takenOtherOrgNamed — «이 폰은 {org} 조직의 컴퓨터와 이미 페어링돼 있어…»; the
+  // server names the organization the phone is paired in, to a member of it) — a name, never a count (the `name` · `project` axis).
+  'org',
 ]);
 const PLACEHOLDER_NAME_RE = /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
 

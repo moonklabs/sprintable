@@ -4,20 +4,23 @@
 //
 // A CLOSED table — the only place a scheme is chosen. A value outside it (a typo, another app's name, a scheme, an empty value,
 // another case) is the same as no value: the default. No caller ever puts a string from the URL into a link.
+// story 4689 (PO 10-15): the phone apps too. 선생님's phone carries the dev app and the prod app side by side; both claimed `ai.sprintable:`, so
+// the «앱으로 돌아가기» button opened the wrong app (or a chooser) and a prod sign-in that the server finished never finished in the app. The dev
+// phone app now registers its own scheme (`ai.sprintable.dev`) and says so (`app=dev`, sent at the sign-in start); the prod app sends nothing.
 // The default stays `ai.sprintable` byte for byte: the customer app, the setup app, the phone shell, and any path the web cannot
 // tie to an app (an address typed by a person, outside an app's window) — PO 08:04Z.
 
-export type NativeReturnApp = 'check';
+export type NativeReturnApp = 'check' | 'dev';
 
 /** the query / cookie value an app sends — only these names mean anything */
 export const RETURN_APP_PARAM = 'app';
 
 const DEFAULT_SCHEME = 'ai.sprintable';
-const SCHEMES: Readonly<Record<NativeReturnApp, string>> = Object.freeze({ check: 'ai.sprintable.check' });
+const SCHEMES: Readonly<Record<NativeReturnApp, string>> = Object.freeze({ check: 'ai.sprintable.check', dev: 'ai.sprintable.dev' });
 
 /** the table's own entry for `value`, or null (the default) — exact match only */
 export function nativeReturnApp(value: string | null | undefined): NativeReturnApp | null {
-  return value === 'check' ? 'check' : null;
+  return value === 'check' ? 'check' : value === 'dev' ? 'dev' : null;
 }
 
 /** the scheme (no colon) a link to that app starts with */

@@ -7258,6 +7258,8 @@
       "webLink": "Remove on the web instead"
     },
     "taken": "This phone is registered to another Sprintable account, so it can't be paired — sign in with that account and pair, or remove this phone in that account's web «Desktop app › Remote devices», then scan again",
+    "takenOtherOrg": "This phone is already paired with a computer in another organization, so it can't pair here — remove this phone in that organization's web «Desktop app › Remote devices», then scan again",
+    "takenOtherOrgNamed": "This phone is already paired with a computer in {org}, so it can't pair here — remove this phone in that organization's web «Desktop app › Remote devices», then scan again",
     "failed": "Couldn't send the pairing — please scan again",
     "notInApp": "Open this screen in the Sprintable app on your phone",
     "getApp": "Get the phone app",

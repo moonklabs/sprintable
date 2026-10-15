@@ -187,6 +187,17 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
     return StreamingResponse(generate(), media_type="text/event-stream", headers=headers)
 
 
+@router.get("/relay/setup")
+async def device_setup_facts(setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)) -> dict:
+    """story 4695 — the organization this device's setup belongs to, named for the person at that computer. The Mac app's pairing list
+    shows it per setup (the phone must be signed in to the same organization); a setup made before the app kept the name asks for it
+    here, with its own device token. Not a secret: `X-Desktop-Org-Id` on the stream already names the org to this token's holder."""
+    from app.models.organization import Organization
+
+    name = (await db.execute(select(Organization.name).where(Organization.id == setup.org_id))).scalar_one_or_none()
+    return {"org_id": str(setup.org_id), "org_name": name}
+
+
 @router.put("/relay/sessions")
 async def put_sessions(body: relay.SessionSnapshot, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
     from app.services import desktop_commands
