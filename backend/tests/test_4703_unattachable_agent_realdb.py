@@ -99,6 +99,47 @@ async def test_another_orgs_agent_and_an_id_nobody_has_get_the_same_answer_whole
             assert (r.status_code, r.json()) == (answers["foreign"][0], answers["foreign"][1]), agent_id
 
 
+async def _statements_of_one_refusal(c, agent_id: uuid.UUID, kind: str) -> list[str]:
+    """The SQL statements the server ran for ONE refused confirmation (the confirmation only — the code is made before listening)."""
+    from sqlalchemy import event
+
+    from app.core.database import engine
+
+    if kind == "recipe":
+        code, _ = await _code(c, f"d4703 sql recipe {agent_id}")
+        body = _attach(agent_id)
+    else:
+        code, _v, _s = await _move_code(c, f"d4703 sql move {agent_id}")
+        body = _move(agent_id)
+    seen: list[str] = []
+
+    def listener(conn, cursor, statement, parameters, context, executemany):  # noqa: ANN001
+        seen.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", listener)
+    try:
+        r = await _confirm(c, code, body=body)
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", listener)
+    assert r.status_code == 404 and r.json()["error"]["code"] == "agent_not_found", r.text
+    return seen
+
+
+@pytest.mark.parametrize("kind", ["recipe", "move"])
+async def test_the_refusal_costs_the_server_the_same_work_for_another_orgs_agent_and_an_id_nobody_has(movable, kind):
+    # PO 10-15 ③ (Kadir: «시간차 포함»): not only the same answer — the same WORK. A wall-clock comparison is flaky, so this pins the
+    # deterministic part: the same SQL statements in the same order for another organization's agent, an id nobody has, an agent with no
+    # desktop runtime and an inactive one. A server that went and looked «elsewhere» for the foreign id would run an extra statement.
+    async with _client() as c:
+        await _statements_of_one_refusal(c, OTHER_ORG_AGENT, kind)  # warm-up: first-use work (caches · lazy imports) is not the thing measured
+        foreign = await _statements_of_one_refusal(c, OTHER_ORG_AGENT, kind)
+        nobody = await _statements_of_one_refusal(c, UNATTACHABLE["an id nobody has"][0], kind)
+        no_runtime = await _statements_of_one_refusal(c, NO_RUNTIME, kind)
+        inactive = await _statements_of_one_refusal(c, INACTIVE, kind)
+    assert foreign, "the listener saw nothing — the measurement is broken"
+    assert foreign == nobody == no_runtime == inactive
+
+
 async def test_the_candidates_list_never_carries_another_orgs_agent_and_asks_for_no_id(attachable):
     # the list is this organization's agents only, and has no «look this id up» parameter — the web cannot learn «exists elsewhere» from it
     async with _client() as c:
