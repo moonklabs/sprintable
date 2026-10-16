@@ -378,7 +378,11 @@ async def create_start(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
         raise DesktopRelayError(404, "project_not_found", "no such project of this agent")
     # two presses of the same key at once must not both miss the first row and meet the UNIQUE key at the insert (a 500): the computer's row
     # is locked here, so the second waits for the first commit and then finds its command (enqueue_command takes the same row's lock later)
-    await db.execute(select(DesktopSetup.id).where(DesktopSetup.id == setup.id).with_for_update())
+    # (the row is read again under the lock — `populate_existing` — so the folder list and the computer's state the rest of this function reads are the
+    # ones committed at this moment, not the ones read before waiting: a replaced list or a disconnect that committed meanwhile is seen, not the old copy)
+    await db.execute(select(DesktopSetup).where(DesktopSetup.id == setup.id).with_for_update().execution_options(populate_existing=True))
+    if setup.revoked_at is not None:
+        raise DesktopRelayError(404, "computer_not_found", "no such computer for this agent")
     # the same press again (the same key) gets back the command it made — asked after who may press and whose computer it is
     existing = (await db.execute(
         select(DesktopCommand).where(DesktopCommand.setup_id == setup.id,

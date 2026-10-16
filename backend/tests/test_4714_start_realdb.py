@@ -242,6 +242,14 @@ async def test_06_a_person_sees_and_starts_only_projects_they_can_open(world):
         assert (r.status_code, r.json()["error"]["code"]) == (404, "project_not_found")
         assert (await _post(c, agent, _start(plain_phone, sid, project=PROJ), who=PLAIN)).status_code == 201
         assert len(await _commands(sid)) == 1
+        # the project is soft-deleted after the computer reported it: neither read names it any more (the agent's view of the person goes with it — can_view — and the
+        # project query filters `deleted_at` too; a mutant that drops only the latter is not observable through this route, the two guard the same thing)
+        await _sql(f"UPDATE projects SET deleted_at = now() WHERE id = '{PROJ}'")
+        try:
+            assert str(PROJ) not in (await _list(c, agent, plain_phone, who=PLAIN)).text
+            assert str(PROJ) not in (await _all(c, plain_phone, who=PLAIN)).text
+        finally:
+            await _sql(f"UPDATE projects SET deleted_at = NULL WHERE id = '{PROJ}'")
 
 
 async def test_07_a_key_is_one_persons_own_and_a_deactivated_agent_starts_nothing_and_is_offered_nothing(world):
@@ -336,3 +344,46 @@ async def test_09_the_first_screen_in_one_read_every_paired_computer_with_its_ag
             assert (r.status_code) == 403
         finally:
             await _sql(f"DELETE FROM human_api_keys WHERE member_id = '{OWNER_TM}'")
+
+
+async def test_10_a_gone_pairing_a_disconnected_computer_and_a_deleted_project_leave_both_reads_and_a_list_that_changes_while_a_press_waits_is_the_new_one(world, monkeypatch):
+    """codex 5132 round 4 ⑥: each filter of the two reads is pinned by what it removes — an unpaired phone (removed_at), a disconnected computer (revoked_at),
+    a soft-deleted project; and ⑤ (nearest part): the press reads the computer's row again under its lock, so a folder list the computer replaced
+    after the press began is the one the press is judged by (no_folder), not the copy read before waiting."""
+    from app.services import desktop_commands
+
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4714j")
+        sid = device["setup_id"]
+        await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ), (agent, PROJ2)), headers=_tok(device["device_token"]))
+        await _sql(f"INSERT INTO project_access (id,project_id,member_id,permission) VALUES (gen_random_uuid(),'{PROJ2}','{OWNER_TM}','granted') ON CONFLICT DO NOTHING")
+
+        async def shown():
+            one = (await _list(c, agent, phone)).json()["computers"]
+            every = (await _all(c, phone)).json()["computers"]
+            return ([[p["project_id"] for p in x["projects"]] for x in one], [[[p["project_id"] for p in a["projects"]] for a in x["agents"] if a["agent_member_id"] == agent] for x in every])
+
+        base_one, base_all = await shown()
+        assert base_one and base_one[0] and base_all and base_all[0][0]  # the owner sees the computer and the agent's projects
+        # the phone is unpaired (a removed pairing) → no computer in either read
+        await _sql(f"UPDATE remote_device_pairings SET removed_at = now() WHERE setup_id = '{sid}'")
+        assert (await shown()) == ([], [])
+        await _sql(f"UPDATE remote_device_pairings SET removed_at = NULL WHERE setup_id = '{sid}'")
+        assert (await shown()) == (base_one, base_all)
+        # the computer is disconnected → no computer in either read, and a press is refused as an unknown computer
+        await _sql(f"UPDATE desktop_setups SET revoked_at = now() WHERE id = '{sid}'")
+        assert (await shown()) == ([], [])
+        assert (await _post(c, agent, _start(phone, sid))).status_code == 404
+        await _sql(f"UPDATE desktop_setups SET revoked_at = NULL WHERE id = '{sid}'")
+        # the computer replaces its folder list (empties it) right after the press read the computer and before it got the lock → the press sees the new list
+        real = desktop_commands._agent_projects
+
+        async def then_the_computer_replaces_its_list(db, agent_id):
+            got = await real(db, agent_id)
+            await _sql(f"UPDATE desktop_setups SET startable = '[]'::jsonb WHERE id = '{sid}'")
+            return got
+
+        monkeypatch.setattr(desktop_commands, "_agent_projects", then_the_computer_replaces_its_list)
+        r = await _post(c, agent, _start(phone, sid))
+        assert (r.status_code, r.json()["error"]["code"]) == (409, "no_folder")
+        assert await _commands(sid) == []
