@@ -107,6 +107,13 @@ async function open(page: Page, o: { kind: Kind; width: number; theme: 'L' | 'D'
 }
 
 const frames = (page: Page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(1)))));
+// story 4600: a pixel comparison on an element with a transition must wait for that transition to end. The Switch's `transition-all`
+// (150 ms) also eases its focus ring, and two frames land mid-way — the L-390 arrival cell went red or green by timing with no screen
+// change (4980 1ba85a88a red · rerun green). Wait for every running animation in the element (a cancelled one counts as ended), then
+// two frames for the paint. No fixed sleep. Call it after `frames` so the change has started its transition.
+const settled = (target: Locator) => target.evaluate((el) =>
+  Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished.catch(() => undefined)))
+    .then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(1))))));
 const outDir = () => { const d = process.env['CAPTURE_OUT'] || test.info().outputDir; mkdirSync(d, { recursive: true }); return d; };
 async function shot(page: Page, target: Locator, name: string) {
   await target.scrollIntoViewIfNeeded();
@@ -336,6 +343,7 @@ for (const width of [1440, 390]) for (const theme of ['L', 'D'] as const) {
     await expect(sw).toHaveAttribute('aria-checked', 'false');
     await page.mouse.move(0, 0);
     await frames(page);
+    await settled(sw); // 4600: the ring at its end state, not a blend
     const box = (await card.boundingBox())!;
     expect(box.y >= 0 && box.y + box.height <= (page.viewportSize()!.height + 1), 'the card is in view').toBe(true);
     const s = (await sw.boundingBox())!;
@@ -347,6 +355,7 @@ for (const width of [1440, 390]) for (const theme of ['L', 'D'] as const) {
     // reset (AC6), so it must stay. The ring then goes once the person has moved on.
     await page.keyboard.press('Tab');
     await frames(page);
+    await settled(sw); // 4600: the ring's transition out has finished before the ring-less shot
     const after = await page.evaluate(() => (document.activeElement as HTMLElement | null)?.getAttribute('data-slot') ?? null);
     expect(after, 'the person moved the focus off the switch').not.toBe('switch');
     const blurred = await page.screenshot({ clip });
