@@ -25,6 +25,32 @@ const PHONE_SCROLL_RULES = 'max-sm:[&_td]:[word-break:keep-all] max-sm:[&_th]:[w
 /** 폰에서 이 열 수 이상인 표는 행마다 카드로 그린다(Yuna AC0 ②) — 그보다 좁은 표는 표 그대로 가로 스크롤. */
 export const PHONE_CARD_MIN_COLUMNS = 4;
 
+/** 열 하나가 읽히려면 최소 이만큼(px) — PO 5118 판정: «칸 폭 < 열 수 × 160px이면 카드». 이보다 좁게 눌린 표는 선생님이 매일 보는 크기대에서 막을 거리 */
+export const COLUMN_MIN_PX = 160;
+/** 열이 많아도 카드로 가는 칸 폭의 상한(px) — 7열 이상은 모두 이 값(유나 판정: 4열 640 · 5열 800 · 6열 960 · 7열 이상 1120) */
+export const CARD_BELOW_MAX_PX = 1120;
+
+export type CardBelow = 640 | 800 | 960 | 1120;
+
+/** 이 열 수의 표가 카드로 바뀌는 칸 폭(px): 열 수 × COLUMN_MIN_PX, 상한 CARD_BELOW_MAX_PX — 4열 640 · 5열 800 · 6열 960 · 7열 이상 1120 */
+export function cardBelowPx(columns: number): CardBelow {
+  const px = Math.min(CARD_BELOW_MAX_PX, columns * COLUMN_MIN_PX);
+  return px <= 640 ? 640 : px <= 800 ? 800 : px <= 960 ? 960 : 1120;
+}
+
+/** 칸 폭(px)이 주어졌을 때 카드로 그리는가 — CSS 컨테이너 쿼리(아래 표)와 같은 규칙의 순수 함수(시험이 폭을 직접 대어 보는 자리) */
+export function cardsAtBoxWidth(columns: number, boxPx: number): boolean {
+  return columns >= PHONE_CARD_MIN_COLUMNS && boxPx < cardBelowPx(columns);
+}
+
+/** Tailwind는 클래스를 «문자열 그대로» 읽으므로 폭마다 리터럴을 따로 둔다(조립하면 빌드에서 안 만들어진다). 카드 목록 · 표 상자 한 쌍. */
+const CARD_SWITCH: Record<CardBelow, { cards: string; table: string }> = {
+  640: { cards: '@min-[640px]:hidden', table: 'hidden @min-[640px]:block' },
+  800: { cards: '@min-[800px]:hidden', table: 'hidden @min-[800px]:block' },
+  960: { cards: '@min-[960px]:hidden', table: 'hidden @min-[960px]:block' },
+  1120: { cards: '@min-[1120px]:hidden', table: 'hidden @min-[1120px]:block' },
+};
+
 type TableCell = ReactNode;
 
 function elementsOf(node: ReactNode, tags: readonly string[]): ReactElement<{ children?: ReactNode }>[] {
@@ -60,8 +86,13 @@ export function wrapTablesInScrollShell(html: string): string {
 }
 
 /**
- * 마크다운 `table` 처리기. `phoneCards`(챗 미리보기만 켠다): 머리 열이 PHONE_CARD_MIN_COLUMNS 이상이면 폰에서는 행마다 카드
- * («머리: 값» 줄 — 빈 칸은 줄이 없다)를 그리고, 640px부터는 표를 그린다. 카드는 같은 칸 내용(링크 · 코드 · 강조)을 그대로 다시 쓴다.
+ * 마크다운 `table` 처리기. `phoneCards`(챗 미리보기만 켠다): 머리 열이 PHONE_CARD_MIN_COLUMNS 이상이면 «표를 감싼 칸의 실제 폭»이
+ * 열 수 × COLUMN_MIN_PX(160px · 상한 1120) 미만일 때 행마다 카드(«머리: 값» 줄 — 빈 칸은 줄이 없다)를 그리고, 그 이상이면 표를 그린다. 카드는 같은 칸 내용(링크 ·
+ * 코드 · 강조)을 그대로 다시 쓴다.
+ *
+ * 기준이 화면(뷰포트) 폭이 아니라 그 칸의 폭인 까닭(story 4707 다시 열림 · 선생님 지적 10-16): 넓은 화면의 옆 문서 칸(약 480~720px)은 화면
+ * 폭으로는 «폰이 아닌데» 표가 한 열 두세 글자로 짓눌린다. CSS 컨테이너 쿼리(`@container` + `@min-[…]`)로 칸 폭을 보므로 폰(칸 < 640) ·
+ * 좁은 옆 칸 모두 카드, 넓은 칸만 표. 컨테이너 쿼리를 모르는 낡은 웹뷰는 `@min` 규칙을 못 읽어 카드(안전한 쪽)로 남는다.
  */
 export function DocTable({ children, phoneCards = false }: { children?: ReactNode; phoneCards?: boolean }) {
   const scroll = (
@@ -71,10 +102,11 @@ export function DocTable({ children, phoneCards = false }: { children?: ReactNod
   );
   const data = phoneCards ? readDocTable(children) : null;
   if (!data || data.headers.length < PHONE_CARD_MIN_COLUMNS) return scroll;
+  const below = cardBelowPx(data.headers.length);
   return (
-    <>
-      <div className="hidden sm:block">{scroll}</div>
-      <ul className="not-prose m-0 mb-2 flex list-none flex-col gap-3 p-0 sm:hidden" data-doc-table-cards="">
+    <div className="@container" data-doc-table-box="" data-card-below={below}>
+      <div className={CARD_SWITCH[below].table}>{scroll}</div>
+      <ul className={`not-prose m-0 mb-2 flex list-none flex-col gap-3 p-0 ${CARD_SWITCH[below].cards}`} data-doc-table-cards="">
         {data.rows.map((cells, i) => (
           <li key={i} className={cn(cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex flex-col gap-1 p-3')} data-doc-table-card="">
             {cells.map((cell, j) => (hasContent(cell) ? (
@@ -86,6 +118,6 @@ export function DocTable({ children, phoneCards = false }: { children?: ReactNod
           </li>
         ))}
       </ul>
-    </>
+    </div>
   );
 }
