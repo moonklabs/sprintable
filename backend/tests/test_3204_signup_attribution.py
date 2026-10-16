@@ -185,7 +185,7 @@ async def test_oauth_callback_new_user_returns_is_new_user_true_and_persists_att
     monkeypatch.setattr(settings, "jwt_secret", "test-jwt-secret", raising=False)
     monkeypatch.setattr(
         auth_router, "_exchange_oauth_code_for_userinfo",
-        AsyncMock(return_value=("google-oauth-id-1", "brand-new@example.com")),
+        AsyncMock(return_value=("google-oauth-id-1", "brand-new@example.com", True)),
     )
     state = create_oauth_state_token("google")
     session = _mock_session_returning_none()
@@ -223,7 +223,7 @@ async def test_oauth_callback_existing_user_login_returns_is_new_user_false(monk
     monkeypatch.setattr(settings, "jwt_secret", "test-jwt-secret", raising=False)
     monkeypatch.setattr(
         auth_router, "_exchange_oauth_code_for_userinfo",
-        AsyncMock(return_value=("google-oauth-id-1", "existing@example.com")),
+        AsyncMock(return_value=("google-oauth-id-1", "existing@example.com", True)),
     )
     monkeypatch.setattr(auth_router, "_build_app_metadata", AsyncMock(return_value={}))
     state = create_oauth_state_token("google")

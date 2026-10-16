@@ -501,6 +501,18 @@ def _persist_resolved_context(user: User, md: dict) -> None:
         user.last_org_id = uuid.UUID(oid)
 
 
+def pending_invite_auto_accept_allowed(user: User) -> bool:
+    """story 4722 — the ONE place that decides whether signing in / up may turn a pending invite for this e-mail into a membership.
+
+    The fallback in `_build_app_metadata` finds an invite by the user's e-mail ADDRESS. An address typed into the sign-up form proves nothing about
+    who reads that mailbox, so the fallback runs only for an account whose mailbox was proved: `email_verified` (the verify-mail link, or an OAuth
+    provider that said the address is verified — `oauth_callback`). The other proof is the invite LINK itself: a token the invitee holds goes through
+    `_auto_accept_invitation` / `POST /api/v2/invites/accept`, never through this fallback. An unproved account leaves the invite pending and gets no
+    context of that organization in its token. All four roads (sign-up, sign-in, OAuth callback, refresh of a person with no organization) call
+    `_build_app_metadata`, so this is the single gate for them."""
+    return bool(getattr(user, "email_verified", False))
+
+
 async def _build_app_metadata(
     user: User, session: AsyncSession, org_id: uuid.UUID | None = None,
     project_id: uuid.UUID | None = None,
@@ -593,7 +605,8 @@ async def _build_app_metadata(
         # member.user_id is None은 사실상 미발현(뷰 휴먼 브랜치 user_id 채워짐); 레거시 미링크분만 보정.
         await session.execute(update(Member).where(Member.id == member.id).values(user_id=user.id))
 
-    if not member:
+    if not member and pending_invite_auto_accept_allowed(user):
+        # story 4722: only an account whose mailbox is proved (see pending_invite_auto_accept_allowed) — the invite stays pending otherwise
         # 2. 이메일로 pending 초대 조회 → 자동 수락 + org_member 생성
         # OrgInvite (org_invites 테이블 — canonical /api/v2/invites 경로).
         # 구 Invitation(invitations) 경로는 d3619e80 cutover로 제거 — org_invites가 단일 SSOT.
@@ -615,12 +628,15 @@ async def _build_app_metadata(
             # 동일). 인라인 복제 제거 → 3경로(명시·signup·login-fallback) divergence 방지. (이전엔 org_member
             # +status만 하고 grant 스킵 → invitee grant 0행 → /api/projects=[].)
             from app.repositories.org_invite import OrgInviteRepository
-            await OrgInviteRepository(session).accept(org_inv.token, user.id, user.email)
-            return {
-                "org_id": str(org_inv.organization_id),
-                "project_id": "",
-                "role": org_inv.role,
-            }
+            accepted = await OrgInviteRepository(session).accept(org_inv.token, user.id, user.email)
+            # story 4722 (codex 01a146b6): the org context is returned only when the accept really made the membership — an invite revoked /
+            # expired between the lookup above and the accept used to leave a token that names an organization the person is not a member of
+            if accepted.get("ok"):
+                return {
+                    "org_id": str(org_inv.organization_id),
+                    "project_id": "",
+                    "role": org_inv.role,
+                }
 
     if not member:
         # Path 4: org_members fallback — team_member 없지만 org에는 등록된 사용자.
@@ -1522,8 +1538,9 @@ class OAuthExchangeError(Exception):
 
 async def _exchange_oauth_code_for_userinfo(
     client: httpx.AsyncClient, provider: str, cfg: dict, code: str,
-) -> tuple[str, str]:
-    """code→access_token 교환 후 (oauth_id, email) 반환. email은 provider가 안 주면 ""(빈
+) -> tuple[str, str, bool]:
+    """code→access_token 교환 후 (oauth_id, email, email_verified) 반환. story 4722: `email_verified` = the PROVIDER said the address is verified
+    (Google userinfo / Apple id_token `email_verified`: `true` or `"true"`) — a missing or false claim is NOT verified. email은 provider가 안 주면 ""(빈
     문자열) — Apple은 최초 인가 이후 재인가에서 email을 아예 안 돌려주는 게 공식 동작이라
     "필수 여부" 판단은 호출부 책임으로 남긴다(oauth_callback은 신규가입에 이메일이 필수라
     직접 검사하고, oauth_link_callback은 oauth_id만 있으면 충분 — 이메일로 아무것도 안 함)."""
@@ -1564,7 +1581,13 @@ async def _exchange_oauth_code_for_userinfo(
 
     oauth_id = str(userinfo.get(cfg["id_field"], ""))
     email = (userinfo.get(cfg["email_field"]) or "").lower().strip()
-    return oauth_id, email
+    return oauth_id, email, _provider_says_verified(userinfo)
+
+
+def _provider_says_verified(userinfo: dict) -> bool:
+    """story 4722 AC2: only an explicit true counts (Google sends a boolean, Apple a boolean or the string "true"); absent / false / anything else → not verified."""
+    v = userinfo.get("email_verified")
+    return v is True or (isinstance(v, str) and v.strip().lower() == "true")
 
 
 class OAuthCallbackRequest(BaseModel):
@@ -1636,7 +1659,7 @@ async def oauth_callback(
 
     async with httpx.AsyncClient(timeout=15) as client:
         try:
-            oauth_id, email = await _exchange_oauth_code_for_userinfo(client, provider, cfg, body.code)
+            oauth_id, email, provider_email_verified = await _exchange_oauth_code_for_userinfo(client, provider, cfg, body.code)
         except OAuthExchangeError as exc:
             return _err(exc.code, exc.message, 400)
 
@@ -1674,7 +1697,8 @@ async def oauth_callback(
             await session.commit()
             await session.refresh(user)
         else:
-            # 신규 유저 생성 (비밀번호 없음 — OAuth 전용, 이메일 인증 완료)
+            # 신규 유저 생성 (비밀번호 없음 — OAuth 전용). story 4722 AC2: 이메일 인증 완료 = **공급자가 그렇게 말했을 때만**(Google/Apple
+            # `email_verified` 참) — 예전엔 무조건 True여서 공급자가 «미확인»이라 한 주소도 초대 자동 수락 문을 열었다.
             if not body.tos_accepted:
                 return _err("TOS_NOT_ACCEPTED", "You must accept the Terms of Service to register", 400)
             from app.services.agent_onboarding_config import resolve_locale_from_request
@@ -1682,7 +1706,7 @@ async def oauth_callback(
                 email=email,
                 hashed_password="",
                 is_active=True,
-                email_verified=True,
+                email_verified=provider_email_verified,
                 tos_accepted_at=datetime.now(timezone.utc),
                 # story #3205 — register()와 동일 포착(발명 0).
                 locale=resolve_locale_from_request(None, request.headers.get("accept-language")),
@@ -1800,7 +1824,7 @@ async def oauth_link_callback(
 
     async with httpx.AsyncClient(timeout=15) as client:
         try:
-            oauth_id, _email = await _exchange_oauth_code_for_userinfo(client, provider, cfg, body.code)
+            oauth_id, _email, _verified = await _exchange_oauth_code_for_userinfo(client, provider, cfg, body.code)
         except OAuthExchangeError as exc:
             return _err(exc.code, exc.message, 400)
 

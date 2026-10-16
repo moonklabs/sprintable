@@ -199,7 +199,7 @@ async def test_oauth_callback_invite_accept_success_overrides_cookie_derived_utm
     monkeypatch.setattr(settings, "jwt_secret", "test-jwt-secret", raising=False)
     monkeypatch.setattr(
         auth_router, "_exchange_oauth_code_for_userinfo",
-        AsyncMock(return_value=("google-oauth-id-1", "brand-new@example.com")),
+        AsyncMock(return_value=("google-oauth-id-1", "brand-new@example.com", True)),
     )
     org_id = str(uuid.uuid4())
     state = create_oauth_state_token("google")
@@ -238,7 +238,7 @@ async def test_oauth_callback_invite_accept_failure_is_hands_off(monkeypatch):
     monkeypatch.setattr(settings, "jwt_secret", "test-jwt-secret", raising=False)
     monkeypatch.setattr(
         auth_router, "_exchange_oauth_code_for_userinfo",
-        AsyncMock(return_value=("google-oauth-id-2", "brand-new-2@example.com")),
+        AsyncMock(return_value=("google-oauth-id-2", "brand-new-2@example.com", True)),
     )
     state = create_oauth_state_token("google")
     session = _mock_session_returning_none()
