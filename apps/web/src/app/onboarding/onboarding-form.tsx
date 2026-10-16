@@ -110,6 +110,8 @@ export function OnboardingForm({
   const [resendError, setResendError] = useState('');
   // one arrival at a time — a second run (a remount in development · a double press) must never make a second organization
   const arriving = useRef(false);
+  // the person's choice «초대와 따로 내 조직 만들기» — kept across the arrival's retries (a retry never asks the invites again)
+  const ownOrgChosen = useRef(false);
 
   const progress = onboardingProgress(step);
 
@@ -164,9 +166,13 @@ export function OnboardingForm({
   };
 
   // story 4715: arrival. `ownOrg` — the person chose «초대와 따로 내 조직 만들기» on the invited screen: the invites are known, make it.
-  const arrive = async (ownOrg = false) => {
+  const arrive = async (ownOrg = ownOrgChosen.current) => {
     if (arriving.current) return;
     arriving.current = true;
+    ownOrgChosen.current = ownOrg;
+    // from the invited card the arrival's own screen takes over, so a failed read there is seen (with its retry), not hidden behind the card
+    if (ownOrg) setStep('arrive');
+    // from the invited card the arrival's own screen takes over, so a failed read there is seen (with its retry), not hidden behind the card
     setArrival('working');
     setError('');
     setEmailVerifyBlocked(false);
@@ -176,13 +182,14 @@ export function OnboardingForm({
       // `/api/auth/me` answers from the JWT claims — 200 with or without an organization (story #3195 · 카디르 QA PR#3617)
       // rule 4832 for this read too (Kadir QA 5124): an answer that cannot be read is NOT «no organization» — folding it would make a second
       // organization for a person who already has one. Stop with [다시 확인]; nothing is made.
-      let me: { data?: { org_id?: string | null; org_member_id?: string | null; email_verified?: boolean | null; display_name?: string | null } } | null;
+      let me: { data?: { member_id?: string | null; org_id?: string | null; org_member_id?: string | null; email_verified?: boolean | null; display_name?: string | null } } | null;
       try {
         const res = await fetchWithAuth('/api/auth/me');
         if (!res.ok) throw new Error(String(res.status));
         me = await res.json();
-        // a 200 that carries no account (`{}` · `{data:null}`) is not an answer either — only an account object is «read»
-        if (!me?.data || typeof me.data !== 'object') throw new Error('no account');
+        // a 200 that carries no account (`{}` · `{data:null}` · `{data:{}}`) is not an answer either — the contract's account always has
+        // `member_id` (backend AuthMeResponse), so only that counts as «read»
+        if (typeof me?.data?.member_id !== 'string' || !me.data.member_id) throw new Error('no account');
       } catch {
         setArrival('account-check-failed');
         return;

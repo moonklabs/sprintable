@@ -63,6 +63,8 @@ export function FirstScreen({ orgName, onConnectElsewhere, onFinish }: FirstScre
           {/* the 3983 funnel's «went the desktop way» signal — sent where the fork's app choice used to send it, now on the download press */}
           <DesktopDownloadCard hideTitle ctaLabel={t('macCta')} onCta={() => emitOnboardingEvent('desktop_handoff_selected', { agent_id: null, flow: 'onboarding' })} />
           <p className="break-keep text-xs text-muted-foreground" data-testid="onboarding-first-after-note">{to('download.afterNote')}</p>
+          {/* story 4671 (U3): a Mac draws the phone app's QR too — the person at the Mac is who needs it; nothing to get → nothing drawn */}
+          <PhoneAppCard />
           {orgLine}
           <div className="space-y-1">
             <Button variant="link" size="sm" className="h-auto whitespace-normal px-0 py-0 text-left text-xs" onClick={onConnectElsewhere} data-testid="onboarding-first-connect">

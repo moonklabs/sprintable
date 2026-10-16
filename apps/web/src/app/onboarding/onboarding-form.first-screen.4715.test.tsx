@@ -12,6 +12,12 @@ import { NextIntlClientProvider } from 'next-intl';
 import { OnboardingForm, onboardingProgress } from './onboarding-form';
 import koMessages from '../../../messages/ko.json';
 
+// the phone app has a store link to show (as the card's own test) — so «is the card on this screen» can be told apart from «nothing to get»
+vi.mock('@/lib/phone-app-store', async (orig) => ({
+  ...(await orig<typeof import('@/lib/phone-app-store')>()),
+  PHONE_APP_PUBLISHED: { android: true, ios: false },
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const MAC_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36';
@@ -24,7 +30,7 @@ const MANIFEST = {
 const INVITE = { invite_id: 'inv-1', org_id: 'org-x', org_name: '문클랩스', role: 'member', expires_at: '2026-10-30T00:00:00Z' };
 
 type Me = { member_id: string; email_verified: boolean; org_id?: string | null; org_member_id?: string | null; display_name?: string | null };
-interface Opts { me?: Me; invites?: unknown[] | 'fail' }
+interface Opts { me?: Me; invites?: unknown[] | 'fail'; meFails?: boolean }
 interface Call { url: string; body?: Record<string, unknown> }
 
 let calls: Call[];
@@ -45,6 +51,7 @@ function stubFetch(o: Opts = {}) {
     calls.push({ url, body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined });
     const ok = (json: unknown) => ({ ok: true, status: 200, headers: new Headers(), json: async () => json });
     if (url.endsWith('/api/onboarding/events')) return ok({});
+    if (url.endsWith('/api/auth/me') && opts.meFails) return { ok: false, status: 503, headers: new Headers(), json: async () => ({}) };
     if (url.endsWith('/api/auth/me')) return ok({ data: opts.me ?? { member_id: 'u-1', email_verified: true, org_id: null, org_member_id: null, display_name: '김지우' } });
     if (url.endsWith('/api/invites/mine')) {
       if (opts.invites === 'fail') return { ok: false, status: 500, headers: new Headers(), json: async () => ({}) };
@@ -157,6 +164,7 @@ describe('[SID:4715] 카디르 QA — an unreadable /api/auth/me is not «no org
     ['a network error', () => { throw new Error('network'); }],
     ['a 200 without an account ({})', () => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({}) })],
     ['a 200 with data: null', () => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({ data: null }) })],
+    ['a 200 with an empty account ({data:{}})', () => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({ data: {} }) })],
   ];
   it.each(meFails)('T7 me answers %s → no POST, no invite read · «계정을 확인하지 못했어요 …» + [다시 확인] · a good answer then makes it', async (_label, bad) => {
     stubFetch();
@@ -176,6 +184,42 @@ describe('[SID:4715] 카디르 QA — an unreadable /api/auth/me is not «no org
     await click(byTestId('onboarding-account-check-again'));
     expect(orgPosts()).toHaveLength(1);
     expect(h1()).toBe(first.macTitle);
+  });
+});
+
+describe('[SID:4715] self-QA — the choice «초대와 따로 내 조직 만들기» fails in view, and keeps its choice on retry', () => {
+  it('T8 invited → own organization → the account check fails: the failure and [다시 확인] are on screen (not behind the invited card) · retry makes it once, the invites are not asked again', async () => {
+    stubFetch({ invites: [INVITE] });
+    await mount();
+    expect(byTestId('onboarding-invited')).not.toBeNull();
+    opts.meFails = true;
+    await click(byTestId('onboarding-invited-own-org'));
+    // reverted (the step stays «invited») → the card is still all there is, no line and no button
+    expect(byTestId('onboarding-account-check-failed')?.textContent).toBe(koMessages.onboarding.accountCheckFailed);
+    expect(byTestId('onboarding-invited')).toBeNull();
+    expect(orgPosts()).toHaveLength(0);
+    const inviteReadsBefore = calls.filter((c) => c.url.endsWith('/api/invites/mine')).length;
+    opts.meFails = false;
+    await click(byTestId('onboarding-account-check-again'));
+    expect(orgPosts()).toHaveLength(1);
+    expect(calls.filter((c) => c.url.endsWith('/api/invites/mine')).length).toBe(inviteReadsBefore);
+    expect(h1()).toBe(first.macTitle);
+  });
+});
+
+describe('[SID:4715] self-QA — the phone app card stays on the first screen (story 4671: a Mac draws it too)', () => {
+  it('T9 a Mac and a device that is not a Mac both draw the phone app card; the Mac screen keeps the one primary', async () => {
+    await mount();
+    // reverted (the card dropped from the Mac branch) → null here
+    expect(byTestId('onboarding-first-mac')).not.toBeNull();
+    expect(byTestId('phone-app-card')).not.toBeNull();
+    await act(async () => { root.render(wrap(<div />)); });
+
+    setUserAgent(PHONE_UA);
+    stubFetch();
+    await mount();
+    expect(byTestId('onboarding-first-not-mac')).not.toBeNull();
+    expect(byTestId('phone-app-card')).not.toBeNull();
   });
 });
 
