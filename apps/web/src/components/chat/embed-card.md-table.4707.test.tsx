@@ -8,7 +8,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { NextIntlClientProvider } from 'next-intl';
 
 import { MdBody } from './embed-card';
-import { CARD_BELOW_PX, DOC_TABLE_RULES, DocTable, PHONE_CARD_MIN_COLUMNS, readDocTable } from '@/components/docs/doc-table';
+import { CARD_BELOW_MAX_PX, COLUMN_MIN_PX, DOC_TABLE_RULES, DocTable, PHONE_CARD_MIN_COLUMNS, cardBelowPx, cardsAtBoxWidth, readDocTable } from '@/components/docs/doc-table';
 import koMessages from '../../../messages/ko.json';
 
 // 걷기 표 문서(doc 2e593422)의 실제 표 셋 — 5열(§1 걷기 표 · 긴 한글 칸 · 코드 · 링크 칸) · 3열(§0) · 6열(§6)
@@ -19,6 +19,9 @@ const WALK_5 = `| # | ① 선생님 손 | ② 닫는 AC 칸 | ③ 우리가 볼 
 const WALK_3 = `| # | 할 일 | 누가 |
 |---|---|---|
 | 0-1 | **판 = 8f653af1e** (PO 11:52Z) | PO · 유나 |`;
+const WALK_7 = `| a | b | c | d | e | f | g |
+|---|---|---|---|---|---|---|
+| 1 | 2 | 3 | 4 | 5 | 6 | 7 |`;
 const WALK_6 = `| 스토리 | AC1 | AC2 | AC3 | AC4 | AC5 |
 |---|---|---|---|---|---|
 | 4668 | ✅ 시험 | ✅ 시험 | ✅ 시험 + 유나 | 🚶5 | 🚶4~5 |`;
@@ -34,7 +37,7 @@ function render(content: string): HTMLElement {
 const cards = (host: HTMLElement) => [...host.querySelectorAll('[data-doc-table-card]')] as HTMLElement[];
 
 describe('챗 문서 미리보기의 표 — story 4707', () => {
-  it('5열 표: 표는 가로 스크롤 상자 안에 · 카드는 표를 감싼 «칸의 폭» 기준(컨테이너 쿼리) — 칸 < 640이면 카드 · 그 이상이면 표 (되돌리면 상자도 카드도 없다)', () => {
+  it('5열 표: 표는 가로 스크롤 상자 안에 · 카드는 표를 감싼 «칸의 폭» 기준(컨테이너 쿼리) — 칸 < 열 수 × 160px(5열 = 800)이면 카드 · 그 이상이면 표 (되돌리면 상자도 카드도 없다)', () => {
     const host = render(WALK_5);
     const table = host.querySelector('table')!;
     expect(table).not.toBeNull();
@@ -44,15 +47,55 @@ describe('챗 문서 미리보기의 표 — story 4707', () => {
     // story 4707 다시 열림(선생님 지적): 화면 폭(sm:)이 아니라 표를 감싼 칸의 폭 — 넓은 화면의 좁은 옆 문서 칸(480~720px)도 카드
     const box = host.querySelector('[data-doc-table-box]') as HTMLElement;
     expect(box.className).toContain('@container');
-    expect(shell.parentElement!.className).toContain(`hidden @min-[${CARD_BELOW_PX}px]:block`); // 칸이 좁으면 표를 숨기고 카드를 보인다
+    expect(box.getAttribute('data-card-below')).toBe('800'); // 5열 = 5 × 160
+    expect(shell.parentElement!.className).toContain('hidden @min-[800px]:block'); // 칸이 좁으면 표를 숨기고 카드를 보인다
     const list = host.querySelector('[data-doc-table-cards]')!;
-    expect(list.className).toContain(`@min-[${CARD_BELOW_PX}px]:hidden`);
+    expect(list.className).toContain('@min-[800px]:hidden');
     expect(`${box.innerHTML}`).not.toMatch(/\bsm:(hidden|block)\b/); // 화면 폭 기준은 남지 않았다
     expect(cards(host)).toHaveLength(2); // 본문 행 둘 = 카드 둘
   });
 
-  it('카드 전환 폭 640은 클래스 문자열과 상수가 같다(Tailwind는 문자열 그대로 읽으므로 상수와 어긋나면 빨강)', () => {
-    expect(CARD_BELOW_PX).toBe(640);
+  // PO 5118 판정: 열 하나 최소 160px — 칸 폭 < 열 수 × 160이면 카드(4열 640 · 5열 800 · 6열 960 · 7열 이상 1120 상한 — 유나 판정)
+  it('열 수에 비례한 전환 폭: 4열 640 · 5열 800 · 6열 960 · 7열 이상 1120(상한) — 클래스 리터럴과 순수 함수가 같다', () => {
+    expect(COLUMN_MIN_PX).toBe(160);
+    expect(CARD_BELOW_MAX_PX).toBe(1120);
+    expect([4, 5, 6, 7, 12].map(cardBelowPx)).toEqual([640, 800, 960, 1120, 1120]);
+    for (const [md, below] of [[WALK_5, 800], [WALK_6, 960], [WALK_7, 1120], ['| a | b | c | d |\n|---|---|---|---|\n| 1 | 2 | 3 | 4 |', 640]] as const) {
+      const host = render(md);
+      expect(host.querySelector('[data-doc-table-box]')!.getAttribute('data-card-below')).toBe(String(below));
+      expect(host.querySelector('[data-doc-table-cards]')!.className).toContain(`@min-[${below}px]:hidden`); // 클래스 문자열이 상수와 같다
+      expect(host.querySelector('[data-doc-table-box] > div')!.className).toContain(`hidden @min-[${below}px]:block`);
+    }
+  });
+
+  // codex 질문(까디르): 가장 가까운 컨테이너가 이 상자인가 · 쿼리를 모르는 웹뷰에서 둘 다 보이거나 둘 다 안 보이지 않는가
+  it('카드 목록과 표 상자는 모두 표 상자(@container)의 직계 자식 — 위쪽 다른 컨테이너가 아니라 이 상자의 폭을 본다', () => {
+    const host = render(WALK_5);
+    const box = host.querySelector('[data-doc-table-box]') as HTMLElement;
+    expect(box.className).toBe('@container');
+    expect(host.querySelector('[data-doc-table-cards]')!.parentElement).toBe(box);
+    expect(host.querySelector('table')!.parentElement!.parentElement!.parentElement).toBe(box); // table > 스크롤 상자 > 전환 div > 표 상자
+  });
+
+  it('컨테이너 쿼리를 모르는 웹뷰: 표는 기본이 hidden · 카드는 기본이 보임 — @min 규칙을 못 읽으면 카드만 남는다(둘 다 보이거나 둘 다 안 보이는 일 없음)', () => {
+    const host = render(WALK_5);
+    const tableBox = host.querySelector('table')!.parentElement!.parentElement as HTMLElement;
+    const base = (c: string) => c.split(/\s+/).filter((t) => !t.includes(':'));
+    expect(base(tableBox.className)).toContain('hidden'); // @min 없이는 표를 숨김
+    expect(base(host.querySelector('[data-doc-table-cards]')!.className)).not.toContain('hidden'); // @min 없이는 카드를 보임
+  });
+
+  // 선생님이 매일 보는 크기: 넓은 창 옆 문서 칸 720 → 안쪽 672. 5열 표가 열당 134px로 눌리면 안 된다
+  it('[PO 5118] 720 칸(안쪽 672): 5열 표 = 카드 · 4열 표 = 표 — 576 · 650 · 390 칸은 모두 카드 · 넓은 칸은 표', () => {
+    expect(cardsAtBoxWidth(5, 672)).toBe(true); // 5열 · 720 칸 = 카드
+    expect(cardsAtBoxWidth(4, 672)).toBe(false); // 4열 · 720 칸 = 표 (672 ≥ 640)
+    expect(cardsAtBoxWidth(6, 672)).toBe(true);
+    for (const box of [358, 528, 602]) for (const cols of [4, 5, 6]) expect(cardsAtBoxWidth(cols, box)).toBe(true); // 폰 390 · 칸 576 · 칸 650
+    expect(cardsAtBoxWidth(5, 800)).toBe(false); // 정확히 열 수 × 160이면 표
+    expect(cardsAtBoxWidth(6, 960)).toBe(false);
+    expect(cardsAtBoxWidth(9, 1100)).toBe(true); // 상한 1120 — 7열 이상은 1120 미만이면 카드
+    expect(cardsAtBoxWidth(9, 1120)).toBe(false); // 전체 폭 1440 창의 안쪽 1,390은 표
+    expect(cardsAtBoxWidth(3, 300)).toBe(false); // 3열은 카드 대상이 아니다
   });
 
   it('카드 한 장 = «머리: 값» 줄들 — 칸 내용(코드 · 강조)이 그대로 · 빈 칸은 줄이 없다', () => {
@@ -88,6 +131,7 @@ describe('챗 문서 미리보기의 표 — story 4707', () => {
   it('경계: 정확히 4열 = 카드 · 3열 = 표(위) — 4열 이상부터', () => {
     const host = render('| a | b | c | d |\n|---|---|---|---|\n| 1 | 2 | 3 | 4 |');
     expect(cards(host)).toHaveLength(1);
+    expect(host.querySelector('[data-doc-table-box]')!.getAttribute('data-card-below')).toBe('640');
   });
 
   it('6열 표도 카드 — 열 수 기준은 머리 열 수', () => {
