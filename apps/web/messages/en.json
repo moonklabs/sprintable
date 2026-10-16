@@ -7059,7 +7059,8 @@
         "label": "Handle agents from your phone too",
         "help": "Turning on remote control lets a paired phone stop and instruct agents and answer their permission requests. It applies to this whole organization, and you can turn it off later.",
         "failed": "Phone control couldn't be turned on — you can turn it on from the card at the end.",
-        "again": "Turn on again"
+        "again": "Turn on again",
+        "failedStopped": "Phone control couldn't be turned on — try again, or open the conversation without it for now."
       },
       "phoneCard": {
         "remoteOff": "Remote control is off —",

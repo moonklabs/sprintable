@@ -325,7 +325,8 @@ describe('[SID:4670 AC1] «폰으로도 에이전트 다루기» on the three-st
         expect(puts()).toHaveLength(1);
         expect(assign).not.toHaveBeenCalled(); // held: no automatic move
         const card = container.querySelector('[data-testid=solo-phone-failed]')!;
-        expect(card.textContent).toContain('폰 다루기는 켜지 못했어요');
+        expect(card.textContent).toContain('폰으로 다루기를 켜지 못했어요 — 다시 켜 보거나, 폰 없이 대화부터 열어도 돼요.'); // Yuna 5121: this card has no «아래 카드», so not the recipe end card's line
+        expect(card.textContent).not.toContain('아래 카드');
         expect(buttonOf('다시 켜기')).toBeTruthy(); expect(buttonOf('대화 열기')).toBeTruthy();
         if (how === 'again') {
           remotePut = () => new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'now' } }), { status: 200 });

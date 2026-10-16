@@ -122,7 +122,7 @@ export function SetupProgressView({ setupId, recipeName, phoneControlFailed = fa
   if (soloRoom && holdRoom) {
     return (
       <Card className="break-keep flex flex-col gap-3 p-6" data-testid="solo-phone-failed">
-        <p className="text-sm" role="status">{t('phoneControl.failed')}</p>
+        <p className="text-sm" role="status">{t('phoneControl.failedStopped')}</p>
         <div className="flex flex-wrap gap-2">
           <Button disabled={phoneRetrying} onClick={() => { setPhoneRetrying(true); void onPhoneRetry!().finally(() => setPhoneRetrying(false)); }}>{t('phoneControl.again')}</Button>
           <Button variant="outline" onClick={() => { opened.current = true; window.location.assign(flatHref(`/chats/${soloRoom}`)); }}>{tOnboarding('firstInstructionOpenConversation')}</Button>
