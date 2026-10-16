@@ -181,6 +181,8 @@ export function OnboardingForm({
         const res = await fetchWithAuth('/api/auth/me');
         if (!res.ok) throw new Error(String(res.status));
         me = await res.json();
+        // a 200 that carries no account (`{}` · `{data:null}`) is not an answer either — only an account object is «read»
+        if (!me?.data || typeof me.data !== 'object') throw new Error('no account');
       } catch {
         setArrival('account-check-failed');
         return;

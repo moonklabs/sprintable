@@ -155,6 +155,8 @@ describe('[SID:4715] 카디르 QA — an unreadable /api/auth/me is not «no org
   const meFails: Array<[string, (url: string) => unknown]> = [
     ['5xx', () => ({ ok: false, status: 503, headers: new Headers(), json: async () => ({}) })],
     ['a network error', () => { throw new Error('network'); }],
+    ['a 200 without an account ({})', () => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({}) })],
+    ['a 200 with data: null', () => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({ data: null }) })],
   ];
   it.each(meFails)('T7 me answers %s → no POST, no invite read · «계정을 확인하지 못했어요 …» + [다시 확인] · a good answer then makes it', async (_label, bad) => {
     stubFetch();
