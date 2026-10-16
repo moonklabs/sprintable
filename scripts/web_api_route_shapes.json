@@ -951,6 +951,16 @@
 },
 {
 "method": "POST",
+"path": "/api/v2/desktop/setup-codes/confirm-solo",
+"kind": "object"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/setup-codes/confirm-solo-new-org",
+"kind": "object"
+},
+{
+"method": "POST",
 "path": "/api/v2/desktop/setup-codes/exchange",
 "kind": "envelope"
 },

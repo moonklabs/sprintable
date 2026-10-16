@@ -30,6 +30,8 @@ from app.services.desktop_setup import (
     confirm_setup,
     confirm_setup_first_project,
     confirm_setup_new_org,
+    confirm_solo_setup,
+    confirm_solo_setup_new_org,
     create_setup_code,
     exchange_setup,
     exchange_urls,
@@ -74,6 +76,8 @@ _STATUS = {
     "move_needs_existing_agents": 422,
     # story #4576 (PO 04:24Z): the app that made the code did not say it can take a move (an app from before) — update the app
     "app_cannot_move": 409,
+    # story 4711: the app that made the code did not say it can take a solo setup (an app from before) — update the app
+    "app_cannot_solo": 409,
 }
 
 
@@ -255,6 +259,76 @@ async def post_confirm(
     )
 
 
+class ConfirmSoloRequest(BaseModel):
+    """story 4711 — «시작» of the first setup in three steps: the runtime the person picked and the folder's project. Exactly one of
+    `project_id` (the app found a project that already uses the chosen folder) and `project_name` (the folder's name — a new
+    project). No path: the server never sees the folder."""
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = SETUP_CODE_FIELD
+    runtime: str = Field(min_length=1, max_length=32)
+    project_id: uuid.UUID | None = None
+    project_name: str | None = Field(default=None, min_length=1, max_length=100)
+    workdir_hint: str | None = Field(default=None, max_length=200)
+    tools: list[str] | None = Field(default=None, max_length=AGENT_TOOLS_CAP)
+
+    @field_validator("project_name")
+    @classmethod
+    def _project_name_trimmed(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            raise ValueError("must not be blank")
+        if any(ord(ch) < 32 or ord(ch) == 127 for ch in v):
+            raise ValueError("must not contain control characters")
+        return v
+
+    @field_validator("workdir_hint")
+    @classmethod
+    def _hint_no_control_characters(cls, v: str | None) -> str | None:
+        if v is not None and any(ord(ch) < 32 or ord(ch) == 127 for ch in v):
+            raise ValueError("workdir_hint must not contain control characters")
+        return v
+
+    @field_validator("tools")
+    @classmethod
+    def _tools_on_the_rule(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            bad = bad_agent_tool_names(v)
+            if bad:
+                raise ValueError(f"tool names outside the rule (lowercase letters, digits, - or _, 1-24 characters): {bad}")
+        return v
+
+
+class ConfirmSoloResponse(ConfirmResponse):
+    project_id: uuid.UUID
+    conversation_id: uuid.UUID  # the person ↔ agent room the first screen opens
+
+
+@router.post("/setup-codes/confirm-solo", response_model=ConfirmSoloResponse, response_model_exclude_unset=True)
+async def post_confirm_solo(
+    body: ConfirmSoloRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    user_id = _human_only(auth)
+    try:
+        setup_id, members, project_id, conversation_id = await confirm_solo_setup(
+            db, code=body.code, user_id=user_id, org_id=org_id, runtime=body.runtime, project_id=body.project_id,
+            project_name=body.project_name, auth=auth, workdir_hint=body.workdir_hint, tools=body.tools,
+        )
+    except DesktopSetupError as e:
+        # get_db rolls the whole session back: no project, agent or room is left by a failed start (the plan's 402 too)
+        raise _error(e) from None
+    await db.commit()
+    return ConfirmSoloResponse(
+        setup_id=setup_id, project_id=project_id, conversation_id=conversation_id,
+        members=[ConfirmedMember(**{k: m[k] for k in ("stage", "role", "member_id", "kind", "name") if k in m}) for m in members],
+    )
+
+
 # story 4427 (나) · design doc 9a4cb445 §1 · §8 · §10 — a person with no organization: «시작» makes the organization, its first
 # project and the setup in one transaction. No organization or project field at all (extra=forbid): this path can only make a
 # new organization, never point at an existing one.
@@ -329,6 +403,62 @@ async def post_confirm_new_org(
     )
 
 
+class ConfirmSoloNewOrgRequest(BaseModel):
+    """story 4711 AC4 — a person with no organization: the folder's project and the organization (named by the web) are made with
+    the start. No ids at all (extra=forbid): this path can only make a new organization."""
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = SETUP_CODE_FIELD
+    runtime: str = Field(min_length=1, max_length=32)
+    org_name: str = Field(min_length=1, max_length=100)
+    project_name: str = Field(min_length=1, max_length=100)
+    workdir_hint: str | None = Field(default=None, max_length=200)
+    tools: list[str] | None = Field(default=None, max_length=AGENT_TOOLS_CAP)
+
+    @field_validator("org_name", "project_name")
+    @classmethod
+    def _name_trimmed_no_control_characters(cls, v: str) -> str:
+        return ConfirmNewOrgRequest._name_trimmed_no_control_characters(v)
+
+    @field_validator("workdir_hint")
+    @classmethod
+    def _hint_no_control_characters(cls, v: str | None) -> str | None:
+        return ConfirmNewOrgRequest._hint_no_control_characters(v)
+
+    @field_validator("tools")
+    @classmethod
+    def _tools_on_the_rule(cls, v: list[str] | None) -> list[str] | None:
+        return ConfirmSoloRequest._tools_on_the_rule(v)
+
+
+class ConfirmSoloNewOrgResponse(ConfirmSoloResponse):
+    org_id: uuid.UUID
+
+
+@router.post("/setup-codes/confirm-solo-new-org", response_model=ConfirmSoloNewOrgResponse, response_model_exclude_unset=True)
+async def post_confirm_solo_new_org(
+    body: ConfirmSoloNewOrgRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+):
+    user_id = _human_only(auth)
+    retry = hit_person_limits("desktop-confirm-new-org", str(user_id), *CONFIRM_NEW_ORG_LIMITS)  # the same limit as the way an organization is made
+    if retry is not None:
+        raise _rate_limited(retry)
+    try:
+        setup_id, members, org_id, project_id, conversation_id = await confirm_solo_setup_new_org(
+            db, code=body.code, user_id=user_id, org_name=body.org_name, project_name=body.project_name, runtime=body.runtime,
+            auth=auth, workdir_hint=body.workdir_hint, tools=body.tools,
+        )
+    except DesktopSetupError as e:
+        raise _error(e) from None  # get_db rolls the whole session back: no organization, project, agent or room is left
+    await db.commit()
+    return ConfirmSoloNewOrgResponse(
+        setup_id=setup_id, org_id=org_id, project_id=project_id, conversation_id=conversation_id,
+        members=[ConfirmedMember(**{k: m[k] for k in ("stage", "role", "member_id", "kind", "name") if k in m}) for m in members],
+    )
+
+
 class ExchangeRequest(BaseModel):
     code: str = SETUP_CODE_FIELD
     verifier: str = Field(min_length=43, max_length=128)
@@ -361,7 +491,7 @@ async def post_exchange(request: Request, body: ExchangeRequest, db: AsyncSessio
             "setup_id": str(done.setup_id), "agents": done.agents, "api_url": api_url, "mcp_url": mcp_url,
             "workdir_hint": done.workdir_hint, "org_name": done.org_name,
             # story #4576 (PO 04:24Z): a move has no recipe — no recipe_name at all; «setup_kind» says which (an older app ignores it)
-            **({} if done.setup_kind == "move" else {"recipe_name": done.recipe_name}),
+            **({} if done.setup_kind in ("move", "solo") else {"recipe_name": done.recipe_name}),
             "setup_kind": done.setup_kind,
             # story 4470: the org's id (an added field — an older app ignores it)
             "org_id": str(done.org_id) if done.org_id else None,
@@ -403,7 +533,7 @@ class SetupItem(BaseModel):
     keys_issued: int
     active_keys: int
     members: list[SetupMember]
-    setup_kind: Literal["move", "recipe"] | None = None  # story #4576 — None before a confirmation
+    setup_kind: Literal["move", "recipe", "solo"] | None = None  # story #4576 — None before a confirmation
 
 
 class SetupListResponse(BaseModel):
@@ -577,7 +707,8 @@ class SetupStatusResponse(BaseModel):
     work_item_id: str | None
     members: list[SetupMember]
     # story #4576: «move» = no recipe, device and keys only (the web shows two steps · no first task or result) · «recipe»
-    setup_kind: Literal["move", "recipe"] | None = None
+    setup_kind: Literal["move", "recipe", "solo"] | None = None
+    conversation_id: uuid.UUID | None = None  # story 4711: a solo setup's person ↔ agent room (the progress screen opens it)
     signals: SetupSignals
 
 
