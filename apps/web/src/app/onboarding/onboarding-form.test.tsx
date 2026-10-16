@@ -46,24 +46,29 @@ function setNativeValue(el: HTMLInputElement, value: string) {
 }
 
 async function flush() {
-  await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  // story 4715: arrival is a chain (me → invites → organization → refresh) — enough turns for it to settle
+  await act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); });
+}
+
+// story 4715: arrival reads who the person is and their pending invites (none here), then makes the organization itself — no name field
+function arrivalAnswer(url: string): { ok: boolean; status?: number; json: () => Promise<unknown> } | null {
+  if (url === '/api/onboarding/events') return { ok: true, json: async () => ({}) };
+  if (url === '/api/auth/me') return { ok: true, json: async () => ({ data: { member_id: 'u-1', email_verified: true, org_id: null, org_member_id: null } }) };
+  if (url === '/api/invites/mine') return { ok: true, json: async () => ({ invites: [] }) }; // the backend's one shape (no envelope)
+  return null;
 }
 
 describe('OnboardingForm — error.code 분기 (story #2484)', () => {
   it('create-org 알려지지 않은 code — 안전 폴백, raw message 미노출(유나 design:changes 델타)', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url === '/api/onboarding/events') return { ok: true, json: async () => ({}) };
+      const a = arrivalAnswer(url);
+      if (a) return a;
       if (url === '/api/organizations') {
         return { ok: false, json: async () => ({ error: { code: 'SOME_NEW_CODE', message: 'brand new raw string' } }) };
       }
       throw new Error('unexpected fetch: ' + url);
     }));
     await act(async () => { root.render(wrap(<OnboardingForm todayHref="/today" chatsHref="/chats" />)); });
-
-    const nameInput = container.querySelector('input') as HTMLInputElement;
-    await act(async () => { setNativeValue(nameInput, 'My Org'); });
-    const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.onboarding.createOrg);
-    await act(async () => { createBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
 
     expect(container.textContent).not.toContain('brand new raw string');
@@ -72,7 +77,8 @@ describe('OnboardingForm — error.code 분기 (story #2484)', () => {
 
   it('resend-verification 비-429 실패(USER_NOT_FOUND) — raw 영문 대신 번역 문구', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url === '/api/onboarding/events') return { ok: true, json: async () => ({}) };
+      const a = arrivalAnswer(url);
+      if (a) return a;
       if (url === '/api/organizations') {
         return { ok: false, json: async () => ({ error: { code: 'EMAIL_VERIFICATION_REQUIRED', message: 'x' } }) };
       }
@@ -82,11 +88,6 @@ describe('OnboardingForm — error.code 분기 (story #2484)', () => {
       throw new Error('unexpected fetch: ' + url);
     }));
     await act(async () => { root.render(wrap(<OnboardingForm todayHref="/today" chatsHref="/chats" />)); });
-
-    const nameInput = container.querySelector('input') as HTMLInputElement;
-    await act(async () => { setNativeValue(nameInput, 'My Org'); });
-    const createBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.onboarding.createOrg);
-    await act(async () => { createBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
 
     const resendBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.onboarding.resendVerificationCta);
@@ -131,7 +132,8 @@ describe('OnboardingForm — error.code 분기 (story #2484)', () => {
     // 생성 성공 時 agent 단계로 안 가고 바로 홈으로 finishToHome()한다(story #3179 S3c) —
     // agent 단계에 실제 projectId를 갖고 도달하려면 org→project 전 과정을 그대로 밟아야 한다.
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url === '/api/onboarding/events') return { ok: true, json: async () => ({}) };
+      const a = arrivalAnswer(url);
+      if (a) return a;
       if (url === '/api/organizations') return { ok: true, json: async () => ({ data: { id: 'org-1' } }) };
       if (url === '/api/auth/refresh') return { ok: true, json: async () => ({}) };
       if (url === '/api/projects') return { ok: true, json: async () => ({ data: { id: 'proj-1' } }) };
@@ -139,21 +141,15 @@ describe('OnboardingForm — error.code 분기 (story #2484)', () => {
       if (url === '/api/team-members') {
         return { ok: false, json: async () => ({ error: { code: 'SOME_CODE', message: 'raw server text' } }) };
       }
-      throw new Error('unexpected fetch: ' + url);
+      // the one screen's download card · its phone card — not this test's matter
+      return { ok: false, status: 404, json: async () => ({}) };
     }));
     await act(async () => { root.render(wrap(<OnboardingForm todayHref="/today" chatsHref="/chats" />)); });
-
-    const orgNameInput = container.querySelector('input') as HTMLInputElement;
-    await act(async () => { setNativeValue(orgNameInput, 'My Org'); });
-    const createOrgBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.onboarding.createOrg);
-    await act(async () => { createOrgBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
 
-    // story 4668 — the fork comes after the organization: the web way keeps the project · agent steps this test walks
-    const webRadio = container.querySelector('[data-testid=onboarding-where-web] input') as HTMLInputElement;
-    await act(async () => { webRadio.click(); });
-    const continueBtn = container.querySelector('[data-testid=onboarding-where-continue]');
-    await act(async () => { continueBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // story 4715 — the organization is made on arrival; the web way («이미 돌고 있는 에이전트 연결하기») keeps the project · agent steps
+    const connect = container.querySelector('[data-testid=onboarding-first-connect]');
+    await act(async () => { connect?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
 
     const projectNameInput = container.querySelector('input') as HTMLInputElement;

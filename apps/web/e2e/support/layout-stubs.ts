@@ -26,7 +26,8 @@ export const STUBS: Record<string, string> = {
   '@/lib/phone-answer': 'export async function answerOnPhone(id, decision) { return { kind: "answered", decision }; }',
   // story #4583: the inbox reads the org's remote control — the dashboard context comes with it. No remote-control answer → no «off» line.
   '@/app/dashboard/dashboard-shell': "export function useDashboardContext() { return { orgId: 'org-1' }; }",
-  '@/components/viewer-time-zone': "export function useViewerTimeZone() { return 'Asia/Seoul'; }",
+  // story 4715: the onboarding draws the setup's invited card (InvisibleSample holds a row's place before the zone is known — here it is known)
+  '@/components/viewer-time-zone': "export function useViewerTimeZone() { return 'Asia/Seoul'; } export function InvisibleSample({ children }) { return children; }",
   // a client navigation like Next's: the link's own onClick first, then (unless prevented) no page load — the harness swaps the view
   'next/link': "import React from 'react'; export default function Link({ href, children, onClick, ...rest }) { return React.createElement('a', { href, ...rest, onClick: (e) => { onClick && onClick(e); if (!e.defaultPrevented && window.__clientNav) { e.preventDefault(); window.__clientNav(href); } } }, children); }",
 };

@@ -15,15 +15,10 @@ import { SectionCard } from '@/components/ui/section-card';
 import { fetchWithAuth } from '@/lib/db/client';
 import { withProjectParam } from '@/hooks/use-flat-href';
 import { existingOrgIdFromMe } from './existing-org';
+import { defaultOrgName } from '@/lib/default-org-name';
 
-/** A display name longer than this is not used in the default (Yuna f6cfda19: «40자 넘으면 «내 조직»»). */
-export const DEFAULT_NAME_MAX = 40;
-
-/** The default organization name: «{name}의 조직» from the profile display name, or «내 조직» — never the e-mail's local part. */
-export function defaultOrgName(displayName: string | null | undefined, withName: (name: string) => string, fallback: string): string {
-  const name = (displayName ?? '').trim();
-  return name && name.length <= DEFAULT_NAME_MAX ? withName(name) : fallback;
-}
+// story 4715: the made name moved to `lib/default-org-name` (shared with the web first screen); re-exported for the importers of this file
+export { DEFAULT_NAME_MAX, defaultOrgName } from '@/lib/default-org-name';
 
 interface DesktopCreateOrgProps {
   /** Where to go once both exist — only ever `/desktop/setup` (page.tsx checks it). */
