@@ -219,7 +219,7 @@ async def test_oauth_link_callback_success_new_link(monkeypatch):
     monkeypatch.setattr(settings, "jwt_secret", "test-jwt-secret", raising=False)
     monkeypatch.setattr(
         auth_router, "_exchange_oauth_code_for_userinfo",
-        AsyncMock(return_value=("google-oauth-id-1", "user@example.com")),
+        AsyncMock(return_value=("google-oauth-id-1", "user@example.com", True)),
     )
 
     uid = str(uuid.uuid4())
@@ -260,7 +260,7 @@ async def test_oauth_link_callback_rejects_conflict_different_user(monkeypatch):
     monkeypatch.setattr(settings, "jwt_secret", "test-jwt-secret", raising=False)
     monkeypatch.setattr(
         auth_router, "_exchange_oauth_code_for_userinfo",
-        AsyncMock(return_value=("google-oauth-id-1", "other@example.com")),
+        AsyncMock(return_value=("google-oauth-id-1", "other@example.com", True)),
     )
 
     uid = str(uuid.uuid4())
@@ -300,7 +300,7 @@ async def test_oauth_link_callback_idempotent_when_already_self_linked(monkeypat
     monkeypatch.setattr(settings, "jwt_secret", "test-jwt-secret", raising=False)
     monkeypatch.setattr(
         auth_router, "_exchange_oauth_code_for_userinfo",
-        AsyncMock(return_value=("google-oauth-id-1", "user@example.com")),
+        AsyncMock(return_value=("google-oauth-id-1", "user@example.com", True)),
     )
 
     uid = str(uuid.uuid4())
