@@ -270,6 +270,16 @@ describe('[SID:4711] the first setup in three steps', () => {
     expect(window.location.hash).toBe('#progress=11111111-1111-4111-8111-aaaaaaaaaaaa');
   });
 
+  it('codex self-QA: while the start is going out the team-path link is off (it would unmount the card and leave the finished start on a page that shows the recipe)', async () => {
+    confirmNow = () => new Promise<Response>(() => { /* never answers */ }) as unknown as Response;
+    await mount(frag('&fshown=~/code/my-app&fname=my-app'), { projectId: PROJ, projects: [] });
+    expect(buttonOf('여러 에이전트로 팀 꾸리기 →')!.disabled).toBe(false);
+    await act(async () => { buttonOf('시작')!.click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(buttonOf('여러 에이전트로 팀 꾸리기 →')!.disabled).toBe(true);
+    expect(teamPressed).toBe(false);
+  });
+
   it('billing closed (prod today): the free-plan question has no upgrade link', async () => {
     ee.on = false;
     confirmNow = () => new Response(JSON.stringify({ error: { code: 'PLAN_LIMIT_EXCEEDED', resource: 'project', limit: 1, existing_project: { id: PROJ, name: 'Mine' } } }), { status: 402 });

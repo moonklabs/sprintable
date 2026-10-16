@@ -317,7 +317,7 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
           <p className="text-xs text-muted-foreground">{t('toolNote')}</p>
         </section>
       </Card>
-      <p className="text-sm"><Button type="button" variant="link" className="h-auto p-0 underline underline-offset-2" onClick={onTeam}>{t('quick.team')}</Button></p>
+      <p className="text-sm"><Button type="button" variant="link" className="h-auto p-0 underline underline-offset-2" disabled={starting} onClick={onTeam}>{t('quick.team')}</Button></p>
     </div>
   );
 }
