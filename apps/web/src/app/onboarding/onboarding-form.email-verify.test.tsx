@@ -43,7 +43,7 @@ afterEach(async () => {
 // story 4715: no name field — arrival reads who the person is and their invites (none), then sends the organization itself
 function arrivalAnswer(url: string): Response | null {
   if (url === '/api/auth/me') return { ok: true, json: async () => ({ data: { member_id: 'u-1', email_verified: true, org_id: null, org_member_id: null } }) } as Response;
-  if (url === '/api/invites/mine') return { ok: true, json: async () => ({ data: { invites: [] } }) } as Response;
+  if (url === '/api/invites/mine') return { ok: true, json: async () => ({ invites: [] }) } as Response; // the backend's one shape (no envelope)
   return null;
 }
 

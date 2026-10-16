@@ -41,7 +41,8 @@ function stubFetch(me: Me, opts: { meGate?: Promise<void>; meFails?: 'reject' | 
     if (url === '/api/onboarding/events') return ok({});
     if (url === '/api/organizations/org-1/remote-control') return ok({ enabled: false, enabled_at: null, can_change: true, owner_names: [] });
     // story 4715: the usual onboarding's arrival — no invites · the organization it makes · the token refresh after it
-    if (url === '/api/invites/mine') return ok({ invites: [] });
+    // the backend's one shape for this endpoint is `{ invites }` with no envelope (MyInvitesResponse) — not ok()'s `{ data }`
+    if (url === '/api/invites/mine') return { ok: true, status: 200, headers: new Headers(), json: async () => ({ invites: [] }) } as Response;
     if (url === '/api/organizations') return ok({ id: 'org-new' });
     if (url === '/api/auth/refresh') return ok({});
     if (url === '/api/projects') return ok({ id: 'proj-1' });

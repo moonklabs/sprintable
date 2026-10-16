@@ -48,7 +48,7 @@ function stubFetch(o: Opts = {}) {
     if (url.endsWith('/api/auth/me')) return ok({ data: opts.me ?? { member_id: 'u-1', email_verified: true, org_id: null, org_member_id: null, display_name: '김지우' } });
     if (url.endsWith('/api/invites/mine')) {
       if (opts.invites === 'fail') return { ok: false, status: 500, headers: new Headers(), json: async () => ({}) };
-      return ok({ data: { invites: opts.invites ?? [] } });
+      return ok({ invites: opts.invites ?? [] }); // the backend's one shape (MyInvitesResponse · no envelope)
     }
     if (url.endsWith('/api/organizations')) return ok({ data: { id: 'org-1' } });
     if (url.endsWith('/api/auth/refresh')) return ok({});

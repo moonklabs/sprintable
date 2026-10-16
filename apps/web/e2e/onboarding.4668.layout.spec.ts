@@ -79,7 +79,7 @@ const INVITE = { invite_id: 'inv-1', org_id: 'org-x', org_name: '문클랩스', 
 const API: Record<string, Answer> = {
   'GET /api/auth/me': { data: { member_id: 'u-1', email_verified: true, email_verification_required: true, org_id: null, org_member_id: null, display_name: '송윤재' } },
   // story 4715: arrival reads the pending invites before it makes the organization (none here; the invited scene overrides it)
-  'GET /api/invites/mine': { data: { invites: [] } },
+  'GET /api/invites/mine': { invites: [] }, // the backend's one shape (MyInvitesResponse · no envelope)
   'POST /api/organizations': { data: { id: 'org-1' } },
   'POST /api/auth/refresh': {},
   'POST /api/projects': { data: { id: 'proj-1' } },
@@ -189,7 +189,7 @@ for (const width of [1440, 390]) {
     test(`pending invite · the invited card, no organization made · ${tag}`, async ({ page }) => {
       const made: string[] = [];
       page.on('request', (r) => { if (r.method() === 'POST' && r.url().endsWith('/api/organizations')) made.push(r.url()); });
-      await open(page, { width, theme, api: { 'GET /api/invites/mine': { data: { invites: [INVITE] } } } });
+      await open(page, { width, theme, api: { 'GET /api/invites/mine': { invites: [INVITE] } } });
       await expect(page.getByTestId('setup-invited')).toContainText('초대받은 조직이 있어요');
       await expect(page.getByTestId('onboarding-invited-own-org')).toHaveText('초대와 따로 내 조직 만들기');
       expect(made).toHaveLength(0);

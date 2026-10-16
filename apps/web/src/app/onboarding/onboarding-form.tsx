@@ -8,7 +8,7 @@ import { OperatorInput, OperatorTextarea, OperatorSelect } from '@/components/ui
 import { useTranslations } from 'next-intl';
 import { fetchWithAuth } from '@/lib/db/client';
 import { defaultOrgName } from '@/lib/default-org-name';
-import { readMyInvites, type MyInvite } from '@/lib/my-invites';
+import { fetchMyInvites, type MyInvite } from '@/lib/my-invites';
 import { InvitedCard } from '@/components/desktop/desktop-setup';
 import { ConnectStep } from './connect-step';
 import { FirstScreen } from './first-screen';
@@ -185,7 +185,7 @@ export function OnboardingForm({
       if (!ownOrg) {
         let pending: MyInvite[];
         try {
-          pending = await readMyInvites();
+          pending = await fetchMyInvites();
         } catch {
           // rule 4832: never make an organization while the invites are unknown
           setArrival('invite-check-failed');
