@@ -1846,7 +1846,9 @@ describe('[SID:4427] ③ limit and the recipe line (Yuna table)', () => {
     await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
     await act(async () => { startButton().click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
-    expect(text()).toContain('이 레시피는 에이전트 2개가 필요한데, 지금 1개만 더 만들 수 있어요. 쓰지 않는 에이전트를 정리하거나');
+    // story 4717 AC2: «새 에이전트» · no limit in this answer → no plan line (the number-less «모두 만들었어요» would contradict «1개만 더»)
+    expect(text()).toContain('이 레시피는 새 에이전트 2개가 필요한데, 지금 1개만 더 만들 수 있어요. 쓰지 않는 에이전트를 정리하거나');
+    expect(text()).not.toContain('모두 만들었어요');
     expect(([...container.querySelectorAll('a')].find((a) => a.textContent === '에이전트 정리하기') as HTMLAnchorElement).getAttribute('href')).toContain('/organization/workforce');
     await act(async () => { root.unmount(); }); root = createRoot(container);
 
@@ -1854,8 +1856,11 @@ describe('[SID:4427] ③ limit and the recipe line (Yuna table)', () => {
     await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
     await act(async () => { startButton().click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
-    expect(text()).toContain('이 조직에서 만들 수 있는 에이전트 수를 넘어요');
+    // story 4717 AC2: the recruiter's words — billing closed here: «한도에 도달했어요» + the free plan's limit, no upgrade way
+    expect(text()).toContain('한도에 도달했어요');
+    expect(text()).toContain('무료 플랜은 에이전트를 5개까지 만들 수 있어요.');
     expect(text()).not.toContain('필요한데');
+    expect(text()).not.toContain('요금제 업그레이드');
     await act(async () => { ([...container.querySelectorAll('button')].find((b) => b.textContent === '레시피 다시 고르기') as HTMLButtonElement).click(); });
     expect(startButton()).toBeTruthy(); // back to the choices
   });
@@ -3013,5 +3018,69 @@ describe('[SID:4670] «폰으로도 에이전트 다루기» — the tick above 
     await flushAll();
     expect(puts()).toHaveLength(1);
     expect(text()).toContain('에이전트를 시작하고 있어요');
+  });
+});
+
+describe('[SID:4717] the plan\'s agent room before «시작» (AC1) and one way of saying the limit (AC2)', () => {
+  const withRoom = (room: object) => () => new Response(JSON.stringify({ recipes: RECIPES, agent_room: room }), { status: 200 });
+  const confirms = () => calls.filter((c) => c.url.includes('/api/desktop/setup-codes/confirm'));
+
+  it('room enough → «시작» on and the count line says how many more can be made', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    recipesNow = withRoom({ limit: 3, current: 0, available: 3, tier: 'free' });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(container.querySelector('[data-testid=setup-agent-room]')?.textContent).toBe(' · 지금 3개 더 만들 수 있어요');
+    expect(startButton().disabled).toBe(false);
+    expect(container.querySelector('[data-testid=setup-room-short]')).toBeNull();
+  });
+
+  it('room short → «시작» off before the press: how many, the free plan\'s limit, the ways — and no confirmation is sent', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    recipesNow = withRoom({ limit: 3, current: 2, available: 1, tier: 'free' });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    const short = container.querySelector('[data-testid=setup-room-short]') as HTMLElement;
+    expect(short.textContent).toContain('이 레시피는 새 에이전트 2개가 필요한데, 지금 1개만 더 만들 수 있어요. 무료 플랜은 에이전트를 3개까지 만들 수 있어요.');
+    expect(startButton().disabled).toBe(true);
+    await act(async () => { startButton().click(); });
+    expect(confirms()).toHaveLength(0);
+    expect(([...short.querySelectorAll('a')].find((a) => a.textContent === '에이전트 정리하기') as HTMLAnchorElement).getAttribute('href')).toContain('/organization/workforce');
+    expect(short.textContent).not.toContain('요금제 업그레이드'); // billing closed in this build
+    expect(container.querySelector('[data-testid=setup-room-use-existing]')).toBeNull(); // no agent of the org can take a row
+  });
+
+  it('no room at all → its own sentence, never «0개만 더»', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    recipesNow = withRoom({ limit: 3, current: 3, available: 0, tier: 'free' });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(text()).toContain('이 레시피는 새 에이전트 2개가 필요한데, 지금은 더 만들 수 없어요.');
+    expect(text()).not.toContain('0개만');
+    expect(startButton().disabled).toBe(true);
+  });
+
+  it('an agent the organization has takes a row → one new agent fits and «시작» comes back on', async () => {
+    const DAN = 'a1111111-0000-4000-8000-000000000001';
+    stub(() => new Response('{}', { status: 200 }));
+    recipesNow = withRoom({ limit: 3, current: 2, available: 1, tier: 'free' });
+    agentsNow = () => new Response(JSON.stringify({ agents: [{ id: DAN, name: '댄 어윈', runtime: 'claude', live_keys: 0, last_used_at: null, in_project: true }] }), { status: 200 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(container.querySelector('[data-testid=setup-room-use-existing]')?.textContent).toBe('역할 칸에서 «이미 있는 에이전트»를 고르면 새로 만들지 않아요.');
+    expect(startButton().disabled).toBe(true);
+    const sel = container.querySelector('select[aria-label^="조사"]') as HTMLSelectElement;
+    await act(async () => { sel.value = `agent:${DAN}`; sel.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(container.querySelector('[data-testid=setup-room-short]')).toBeNull();
+    expect(startButton().disabled).toBe(false);
+    expect(container.querySelector('[data-testid=setup-agent-room]')?.textContent).toBe(' · 지금 1개 더 만들 수 있어요');
+  });
+
+  it('no limit holds (null) or a shape the page does not read → nothing said, nothing held', async () => {
+    for (const room of [null, { limit: 3, current: 2, available: 5, tier: 'free' }, { limit: -1, current: 0, available: 0 }]) {
+      stub(() => new Response('{}', { status: 200 }));
+      recipesNow = withRoom(room as object);
+      await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+      expect(container.querySelector('[data-testid=setup-agent-room]'), JSON.stringify(room)).toBeNull();
+      expect(container.querySelector('[data-testid=setup-room-short]')).toBeNull();
+      expect(startButton().disabled).toBe(false);
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+    }
   });
 });

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useSearchParams } from 'next/navigation';
 import { Loader2, Smartphone } from 'lucide-react';
@@ -22,13 +22,16 @@ import { formatLocaleDate } from '@/lib/i18n';
 import { InvisibleSample, useViewerTimeZone } from '@/components/viewer-time-zone';
 import { EmailVerifyGateCard, useEmailVerifyGate } from '@/components/auth/email-verify-gate';
 import {
-  agentRowCount, confirmBody, firstProjectConfirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type OldRuntime, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk, withPreselectedAgent,
-  type AttachableAgent, type DesktopRuntime, type PreselectHold, type SetupRecipe, type SetupRoleRow, movedRowCount, ownerKey, preselectHoldOf, withAttachable, withDefaultRecipeFirst,
+  agentRoomOf, agentRowCount, confirmBody, firstProjectConfirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type OldRuntime, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk, withPreselectedAgent,
+  type AgentRoom, type AttachableAgent, type DesktopRuntime, roomShort, type PreselectHold, type SetupRecipe, type SetupRoleRow, movedRowCount, ownerKey, preselectHoldOf, withAttachable, withDefaultRecipeFirst,
   addAgentTool, hasSignInCheck, JUDGED_AGENT_TOOLS,
   moveConfirmBody, movableState, moveListOrder } from '@/lib/desktop-setup';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { appSetupLink, nativeReturnApp, RETURN_APP_PARAM } from '@/lib/auth/native-return-app';
 import { putOrgRemoteControl, useOrgRemoteControl } from '@/lib/org-remote-control';
+import { agentLimitOf, type AgentLimit } from '@/lib/agent-limit';
+import { isEEEnabled } from '@/lib/ee';
+import { limitCopy } from '@/lib/plan-limit-copy';
 
 /**
  * story #4427(E-DESKTOP P2) — 웹 설정 페이지. 데스크톱 앱이 이 페이지를 설정 코드 + 찾은 에이전트 목록과 함께 연다.
@@ -61,7 +64,7 @@ export type SetupFailure = 'no-agent' | 'not-admin' | 'agent-limit' | 'expired' 
 const FAILURE_KEY: Record<string, string> = {
   'no-agent.title': 'failure.no-agent.title', 'no-agent.body': 'failure.no-agent.body', 'no-agent.action': 'failure.no-agent.action',
   'not-admin.title': 'failure.not-admin.title', 'not-admin.body': 'failure.not-admin.body', 'not-admin.action': 'failure.not-admin.action',
-  'agent-limit.title': 'failure.agent-limit.title', 'agent-limit.body': 'failure.agent-limit.body', 'agent-limit.action': 'failure.agent-limit.action',
+  'agent-limit.body': 'failure.agent-limit.body', 'agent-limit.action': 'failure.agent-limit.action',
   'expired.title': 'failure.expired.title', 'expired.body': 'failure.expired.body', 'expired.action': 'failure.expired.action',
   'offline.title': 'failure.offline.title', 'offline.body': 'failure.offline.body', 'offline.action': 'failure.offline.action',
   'managed.title': 'failure.managed.title', 'managed.body': 'failure.managed.body', 'managed.action': 'failure.managed.action',
@@ -208,7 +211,7 @@ type View =
   /** saved on the server, but the new token could not be had: the progress cannot be read here (4429 ①) */
   | { kind: 'done-reload' }
   /** `retry`: what «다시 시도 / 다시 확인» does — read the list again, or send the confirm again. */
-  | { kind: 'failed'; failure: SetupFailure; counts?: LimitCounts | null; retry?: 'load' | 'confirm' }
+  | { kind: 'failed'; failure: SetupFailure; counts?: LimitCounts | null; plan?: AgentLimit | null; retry?: 'load' | 'confirm' }
   /** `message`: a line the new-organization start can say instead of the generic one (e-mail not verified · org/project limit). */
   | { kind: 'error'; message?: string };
 
@@ -268,6 +271,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const phoneControl = phoneControlPicked ?? !remoteReadFailed;
   const [phoneControlFailed, setPhoneControlFailed] = useState(false);
   const [recipes, setRecipes] = useState<SetupRecipe[]>([]);
+  // story 4717 AC1: how many more agents the plan has room for (null = no limit holds · not read) — read with the recipe list
+  const [agentRoom, setAgentRoom] = useState<AgentRoom | null>(null);
   const [recipeId, setRecipeId] = useState<string>('');
   const [rows, setRows] = useState<SetupRoleRow[]>([]);
   // story #4565: this org's existing agents the setup may move to this computer (owner/admin · this project) — none: no group
@@ -400,6 +405,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         // the default recipe first and chosen when it is there (PO 10:40Z ② · Yuna v23) — not whatever the server sorted first
         const usable = withDefaultRecipeFirst(list.filter((d) => listableRecipe(d, presetName(d, tPreset))));
         if (off) return;
+        setAgentRoom(agentRoomOf(body?.agent_room)); // the contract's one shape (no data-wrapped fallback — scripts/verify_web_api_response_shapes.py)
         setRecipes(usable);
         if (usable[0]) pick(usable[0]);
         setView(usable.length ? { kind: 'choose' } : { kind: 'failed', failure: 'no-recipe', retry: 'load' });
@@ -566,6 +572,9 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const humanList = humanRoles.join(' · ');
   const agents = agentRowCount(rows);
   const moved = movedRowCount(rows);
+  // story 4717 AC1: more new agents than the plan has room for — «시작» stays off and the ways show (never a 402 after the press)
+  const short = !moveMode && roomShort(agentRoom, agents);
+  const canUseExisting = rows.some((r) => r.owner.kind === 'agent' && r.choices.some((c) => c.kind === 'existing'));
 
   /**
    * story 4670 (AC1): the tick's one PUT — after the confirmation went through, for the org this setup belongs to (the one the server
@@ -639,7 +648,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         : null;
       if (message) { setView({ kind: 'error', message }); return; }
       const failure = failureForCode(error?.code, error?.resource);
-      setView(failure ? { kind: 'failed', failure, counts: failure === 'agent-limit' ? limitCounts(body?.error) : null, retry: failure === 'recipes-changed' ? 'load' : undefined } : { kind: 'error' });
+      setView(failure ? { kind: 'failed', failure, counts: failure === 'agent-limit' ? limitCounts(body?.error) : null, plan: failure === 'agent-limit' ? agentLimitOf(402, body) : null, retry: failure === 'recipes-changed' ? 'load' : undefined } : { kind: 'error' });
     } catch {
       setView({ kind: 'failed', failure: 'offline', retry: 'confirm' });
     }
@@ -699,7 +708,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         window.location.reload();
       }
       : undefined;
-    return <Failure failure={view.failure} counts={view.counts ?? null} onRetry={onRetry} onReloadPage={onReloadPage}
+    return <Failure failure={view.failure} counts={view.counts ?? null} plan={view.plan ?? null} onRetry={onRetry} onReloadPage={onReloadPage}
       onChooseRecipe={view.failure === 'agent-limit' || view.failure === 'recipe-too-big' ? () => setView({ kind: 'choose' }) : undefined} />;
   }
   // 쓸 수 있는 런타임이 하나도 없을 때: 막힌 것만 있으면 ⑥ 전체 화면, 아무것도 못 찾았으면 ①
@@ -719,7 +728,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   // would be false); the server refuses the same with no_agent_role
   const noAgentRow = needsAnAgent(rows);
   const namesOk = firstProject ? !!projectName.trim() : !newOrg || (!!orgName.trim() && !!projectName.trim());
-  const canStart = !!recipe && (newOrg || firstProject || !!chosenProject) && namesOk && !noAgentRow && workdirInputOk(workdir) && view.kind === 'choose' && attachableHold === null && preselectHold === null;
+  const canStart = !!recipe && (newOrg || firstProject || !!chosenProject) && namesOk && !noAgentRow && workdirInputOk(workdir) && view.kind === 'choose' && attachableHold === null && preselectHold === null && !short;
   const canMoveStart = !!chosenProject && moveChosen.length > 0 && view.kind === 'choose';
   const toggleMove = (id: string, on: boolean) => setMoving((ms) => (on ? [...new Set([...ms, id])] : ms.filter((m) => m !== id)));
 
@@ -1106,6 +1115,9 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
               >{t('preselect.useNew')}</Button>
             </div>
           </div>
+        ) : short && agentRoom ? (
+          // story 4717 AC1: the recipe needs more new agents than the plan has room for — said before the press, in the count line's place
+          <RoomShort room={agentRoom} need={agents} canUseExisting={canUseExisting} />
         ) : (
           <p className="text-xs text-muted-foreground">
             {moveMode ? (needsProjectPick ? t('projectPick.reason') : !anyMovable ? t('move.noneMovable') : moveChosen.length === 0 ? t('move.noneChosen') : t('move.startNote', { m: moveChosen.length }))
@@ -1113,6 +1125,9 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
               // story 4496 (Yuna 10:05Z ②): several projects and none picked — why «시작» is off, in the count line's place
               : needsProjectPick ? t('projectPick.reason')
               : startNote(t, agents, moved, humanList, humanRoles.length > 0)}
+            {/* story 4717 AC1: the room, when a limit holds and this recipe makes new agents */}
+            {!moveMode && !noAgentRow && !needsProjectPick && agentRoom && agents > 0
+              ? <span data-testid="setup-agent-room"> · {t('room.left', { left: agentRoom.available })}</span> : null}
           </p>
         )}
         {/* directly below the line · stays after a press (aria-disabled while it reads — not `disabled`: keyboard focus stays on it, as 4678's
@@ -1175,6 +1190,50 @@ export function MovedAgentNote({ agent }: { agent: AttachableAgent | undefined }
 }
 
 /** «시작» 아래 줄(4565 · Yuna 02:32Z ①): «만들고»는 새로 만드는 것만 세고, 옮겨 오는 것은 «옮겨»로 · 사람 역할이 있으면 꼬리. */
+/** story 4717 AC2: «N개 필요 · M개 더» — M = 0 is its own sentence («0개만 더» read as nonsense). */
+function roomCountsLine(t: ReturnType<typeof useTranslations<'desktop.setup'>>, need: number, left: number): string {
+  return left === 0 ? t('room.shortNone', { need }) : t('room.short', { need, left });
+}
+
+/**
+ * story 4717 AC1: before [시작], when the recipe as chosen makes more new agents than the plan has room for. «시작» is off (canStart);
+ * this says how many, in the plan's words (the recruiter's rule — lib/plan-limit-copy), and the ways: an agent the organization
+ * already has can take a row (no new agent · the rows' «이미 있는 에이전트» group, story #4565) · tidy up · upgrade where billing is open.
+ */
+function RoomShort({ room, need, canUseExisting }: { room: AgentRoom; need: number; canUseExisting: boolean }) {
+  const t = useTranslations('desktop.setup');
+  return (
+    <RoomShortBox room={room} line={roomCountsLine(t, need, room.available)}
+      hint={canUseExisting ? <p className="text-xs text-muted-foreground" data-testid="setup-room-use-existing">{t('room.useExisting')}</p> : null} />
+  );
+}
+
+/**
+ * story 4717 (follow-up · PO 05:04Z): the plan's agent room said before «시작» — one box for the recipe setup and the solo card
+ * (desktop-setup-quick): the line it is given (how many · in that screen's words), the plan's limit in the recruiter's words
+ * (lib/plan-limit-copy), an optional hint (the way that keeps the person's agents), then [에이전트 정리하기] · upgrade where billing is open.
+ */
+export function RoomShortBox({ room, line, hint = null }: { room: AgentRoom; line: string; hint?: ReactNode }) {
+  const t = useTranslations('desktop.setup');
+  const tNav = useTranslations('nav');
+  const tRecruiter = useTranslations('recruiter');
+  const flatHref = useFlatHref();
+  const copy = limitCopy({ resource: 'agent', limit: room.limit, free: room.free, billingOpen: isEEEnabled() });
+  return (
+    <div className="flex flex-col gap-2" data-testid="setup-room-short">
+      <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]" role="status">
+        {line}
+        {copy.reason ? <> {tRecruiter(copy.reason.key, copy.reason.withLimit ? { limit: room.limit } : undefined)}</> : null}
+      </p>
+      {hint}
+      <div className="flex flex-wrap gap-2">
+        <Button asChild variant="outline" size="sm"><a href={flatHref('/organization/workforce')}>{t('failure.agent-limit.manage')}</a></Button>
+        {copy.link ? <Button asChild variant="outline" size="sm"><a href={flatHref('/settings?tab=billing')}>{tNav('orgLimitUpgradeLink')}</a></Button> : null}
+      </div>
+    </div>
+  );
+}
+
 function startNote(t: ReturnType<typeof useTranslations<'desktop.setup'>>, made: number, moved: number, humanList: string, withMe: boolean): string {
   const me = withMe ? { roles: humanList, josa: pickEunNeunJosa(humanList) } : null;
   if (moved === 0) return me ? t('startNoteWithMe', { n: made, ...me }) : t('startNote', { n: made });
@@ -1200,18 +1259,29 @@ export function TooOldCard({ old }: { old: OldRuntime[] }) {
   );
 }
 
-export function Failure({ failure, onRetry, counts = null, onChooseRecipe, onReloadPage, todayHref }: { failure: SetupFailure; onRetry?: () => void; counts?: LimitCounts | null; onChooseRecipe?: () => void; onReloadPage?: () => void; todayHref?: string }) {
+export function Failure({ failure, onRetry, counts = null, plan = null, solo = false, onChooseRecipe, onReloadPage, todayHref }: { failure: SetupFailure; onRetry?: () => void; counts?: LimitCounts | null; plan?: AgentLimit | null; /** story 4717: the solo card (one agent, no recipe) — its own words, no «레시피» */ solo?: boolean; onChooseRecipe?: () => void; onReloadPage?: () => void; todayHref?: string }) {
   const t = useTranslations('desktop.setup');
+  const tNav = useTranslations('nav');
+  const tRecruiter = useTranslations('recruiter');
+  // story 4717 AC2: the agent limit is worded by the one rule the recruiter's banner uses (lib/plan-limit-copy) — title, plan line, upgrade way
+  const limit = failure === 'agent-limit' ? limitCopy({ resource: 'agent', limit: plan?.limit ?? null, free: plan?.free ?? true, billingOpen: isEEEnabled() }) : null;
   const flatHref = useFlatHref();
   const key = (part: 'title' | 'body' | 'action') => FAILURE_KEY[`${failure}.${part}`]!;
   const links = useAppSetupLinks();
   const appButton = (label: string) => <Button asChild><a href={links.open}>{label}</a></Button>;
   return (
     <Card className="break-keep flex flex-col gap-3 p-6">
-      <h1 className="text-lg font-semibold">{t(key('title'))}</h1>
-      <p className="text-sm text-muted-foreground">
-        {failure === 'agent-limit' && counts ? <>{t('failure.agent-limit.bodyWithCounts', { need: counts.need, left: counts.left })} </> : null}{t(key('body'))}
-      </p>
+      <h1 className="text-lg font-semibold">{limit ? tNav(limit.title) : t(key('title'))}</h1>
+      {limit ? (
+        <p className="text-sm text-muted-foreground" data-testid="setup-agent-limit-body">
+          {solo ? <>{t('room.soloNone')} </> : counts ? <>{roomCountsLine(t, counts.need, counts.left)} </> : null}
+          {/* the plan line needs the server's limit when numbers are shown — the number-less «모두 만들었어요» would contradict «1개만 더» */}
+          {limit.reason && (plan?.limit != null || !counts) ? <>{tRecruiter(limit.reason.key, limit.reason.withLimit && plan?.limit != null ? { limit: plan.limit } : undefined)} </> : null}
+          {solo ? t('room.soloTidy') : t(key('body'))}
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">{t(key('body'))}</p>
+      )}
       {failure === 'no-agent' ? (
         <ul className="flex flex-col gap-2">
           {(Object.keys(INSTALL) as DesktopRuntime[]).map((r) => (
@@ -1236,6 +1306,7 @@ export function Failure({ failure, onRetry, counts = null, onChooseRecipe, onRel
           : failure === 'agent-limit' ? <>
             {onChooseRecipe ? <Button onClick={onChooseRecipe}>{t(key('action'))}</Button> : null}
             <Button variant="outline" asChild><a href={flatHref('/organization/workforce')}>{t('failure.agent-limit.manage')}</a></Button>
+            {limit?.link ? <Button variant="outline" asChild><a href={flatHref('/settings?tab=billing')}>{tNav('orgLimitUpgradeLink')}</a></Button> : null}
           </>
           : null}
       </div>

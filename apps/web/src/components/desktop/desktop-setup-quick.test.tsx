@@ -33,6 +33,8 @@ let calls: { url: string; method?: string; body?: unknown }[];
 let confirmNow: () => Response;
 /** what GET /api/invites/mine answers now (default: none) — story 4711 AC4 reads its failure */
 let invitesNow: () => Response | Promise<Response> = () => new Response(JSON.stringify({ invites: [] }), { status: 200 });
+/** story 4717: what GET /api/desktop/recipes answers (default 404 — no room read: the card as before) */
+let recipesNow: () => Response = () => new Response('{}', { status: 404 });
 /** what GET /api/desktop/setups/{id} answers (the progress view's reading) */
 let statusNow: () => unknown = () => ({});
 /** story 4670: what GET /api/organizations/{id}/remote-control answers now, and the PUT (default: not known → the page reads it as a failed read) */
@@ -46,6 +48,7 @@ function stub() {
     const url = String(input);
     calls.push({ url, ...(init?.method ? { method: init.method } : {}), body: init?.body ? JSON.parse(String(init.body)) : undefined });
     if (url.includes('/api/desktop/setup-codes/confirm-solo')) return confirmNow();
+    if (url.endsWith('/api/desktop/recipes')) return recipesNow(); // story 4717: the plan's agent room rides on the recipe list
     if (/\/api\/organizations\/[^/]+\/remote-control$/.test(url)) return init?.method === 'PUT' ? remotePut() : remoteGet();
     if (url.endsWith('/api/invites/mine')) return invitesNow();
     if (url.endsWith('/api/auth/me')) return new Response(JSON.stringify({ data: { display_name: '김지우', email: 'a@b.c', email_verified: true, email_verification_required: true } }), { status: 200 });
@@ -74,7 +77,7 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   confirmNow = () => new Response(JSON.stringify({ project_id: PROJ, conversation_id: 'c-1', members: [] }), { status: 200 });
   invitesNow = () => new Response(JSON.stringify({ invites: [] }), { status: 200 });
-  statusNow = () => ({}); __resetOrgRemoteControlForTest(); teamPressed = false; ee.on = false; sp.value = null; remoteGet = remoteOf({ enabled: true, can_change: true, enabled_at: 'now' }); remotePut = () => new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'now' } }), { status: 200 }); stub();
+  recipesNow = () => new Response('{}', { status: 404 }); statusNow = () => ({}); __resetOrgRemoteControlForTest(); teamPressed = false; ee.on = false; sp.value = null; remoteGet = remoteOf({ enabled: true, can_change: true, enabled_at: 'now' }); remotePut = () => new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'now' } }), { status: 200 }); stub();
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); sessionStorage.clear(); });
 
@@ -531,5 +534,79 @@ describe('[SID:4711 AC2] after a solo start the first screen is the conversation
     expect((await progress(STATUS('waiting_for_app', 'solo', 'c-1'))).mock.calls.length).toBe(0);
     await act(async () => { root.render(<div />); });
     expect((await progress(STATUS('handed_over', 'move', 'c-1'))).mock.calls.length).toBe(0);
+  });
+});
+
+describe('[SID:4717] the solo card says the plan\'s agent room before «시작» (follow-up · PO 05:04Z)', () => {
+  const room = (r: object | null) => () => new Response(JSON.stringify({ recipes: [], agent_room: r }), { status: 200 });
+  const ORG_FOLDER = '&fshown=~/code/my-app&fname=my-app';
+  const opts = { projectId: PROJ, projects: [{ projectId: PROJ, projectName: 'Existing', orgId: 'o-1' }] };
+
+  it('an organization with no room left → «시작» off before the press, the plan\'s limit, the team path, no confirm sent', async () => {
+    recipesNow = room({ limit: 3, current: 3, available: 0, tier: 'free' });
+    await mount(frag(ORG_FOLDER), opts);
+    const box = container.querySelector('[data-testid=setup-room-short]')!;
+    expect(box.textContent).toContain('지금은 에이전트를 더 만들 수 없어요. 무료 플랜은 에이전트를 3개까지 만들 수 있어요.');
+    expect(container.querySelector('[data-testid=quick-room-use-team]')!.textContent).toBe('이미 있는 에이전트로 시작하려면 아래 «여러 에이전트로 팀 꾸리기»에서 골라요.');
+    expect(linkOf('에이전트 정리하기')!.getAttribute('href')).toContain('/organization/workforce');
+    expect(box.textContent).not.toContain('레시피');
+    expect(buttonOf('시작')!.disabled).toBe(true);
+    await act(async () => { buttonOf('시작')!.click(); });
+    expect(calls.some((c) => c.url.includes('/confirm-solo'))).toBe(false);
+  });
+
+  it('codex self-QA: the room read lands AFTER the project question (402) → «넣고 시작» is held and the reason is said, never a silent press', async () => {
+    ee.on = true;
+    let open!: () => void;
+    const gate = new Promise<void>((r) => { open = r; });
+    recipesNow = (() => gate.then(room({ limit: 3, current: 3, available: 0, tier: 'free' }))) as unknown as () => Response;
+    confirmNow = () => new Response(JSON.stringify({ error: { code: 'PLAN_LIMIT_EXCEEDED', resource: 'project', limit: 1, existing_project: { id: PROJ, name: 'Mine' } } }), { status: 402 });
+    await mount(frag(ORG_FOLDER), opts);
+    await act(async () => { buttonOf('시작')!.click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid=quick-limit]')).not.toBeNull();
+    expect(buttonOf('넣고 시작')!.disabled).toBe(false);
+    await act(async () => { open(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(buttonOf('넣고 시작')!.disabled).toBe(true);
+    expect(container.querySelector('[data-testid=quick-limit] [data-testid=setup-room-short]')).not.toBeNull();
+    await act(async () => { buttonOf('넣고 시작')!.click(); });
+    expect(calls.filter((c) => c.url.endsWith('/confirm-solo')).length).toBe(1); // only the first press went out
+  });
+
+  it('room for one → the card as before (nothing said about the limit) and «시작» on', async () => {
+    recipesNow = room({ limit: 3, current: 2, available: 1, tier: 'free' });
+    await mount(frag(ORG_FOLDER), opts);
+    expect(container.querySelector('[data-testid=setup-room-short]')).toBeNull();
+    expect(buttonOf('시작')!.disabled).toBe(false);
+  });
+
+  it('no limit (null) · a shape not read · the list failing → nothing said, nothing held', async () => {
+    for (const answer of [room(null), room({ limit: 3, current: 3, available: 2 }), () => new Response('{}', { status: 500 })]) {
+      recipesNow = answer;
+      await mount(frag(ORG_FOLDER), opts);
+      expect(container.querySelector('[data-testid=setup-room-short]')).toBeNull();
+      expect(buttonOf('시작')!.disabled).toBe(false);
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+    }
+  });
+
+  it('a new organization and a member who is not an admin do not read it', async () => {
+    await mount(frag(ORG_FOLDER), { orgId: null });
+    await mount(frag(''), { role: 'member' });
+    expect(calls.some((c) => c.url.endsWith('/api/desktop/recipes'))).toBe(false);
+  });
+
+  it('the 402 after the press (the room changed meanwhile) → the solo card\'s words: no «레시피», the plan\'s limit from the answer', async () => {
+    ee.on = true;
+    confirmNow = () => new Response(JSON.stringify({ error: { code: 'PLAN_LIMIT_EXCEEDED', resource: 'agent', limit: 3, tier: 'free', current: 3, needed: 1, available: 0 } }), { status: 402 });
+    await mount(frag(ORG_FOLDER), opts);
+    await act(async () => { buttonOf('시작')!.click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    const body = container.querySelector('[data-testid=setup-agent-limit-body]')!;
+    expect(body.textContent).toBe('지금은 에이전트를 더 만들 수 없어요. 무료 플랜은 에이전트를 3개까지 만들 수 있어요. 계속하려면 요금제를 업그레이드해 주세요. 쓰지 않는 에이전트를 정리해 주세요.');
+    expect(text()).toContain('업그레이드가 필요해요');
+    expect(linkOf('요금제 업그레이드 →')).toBeTruthy();
+    expect(text()).not.toContain('레시피');
   });
 });

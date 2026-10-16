@@ -32,6 +32,17 @@ def assert_not_system_publisher(runtime_type: str | None) -> None:
         raise HTTPException(status_code=409, detail={"code": "SYSTEM_PUBLISHER_RESERVED"})
 
 
+def assert_runtime_type_not_reserved(new_runtime_type: str | None) -> None:
+    """story 4717 (Kadir 10-16 · PO ①) — the other half of the reservation: no write may **set** a member's runtime_type to the
+    publisher's value. Only the server makes «시스템 발행» (`routers/events.py::_get_or_create_system_publisher`, its own
+    insert — it never comes through here). Since 4717 the plan's agent count (app/services/agent_count.py) leaves that value
+    out, so an agent a customer could relabel would drop out of the count and the free plan's limit would have no end;
+    before 4717 it would also have made the org's publisher a customer's agent (the next automatic publish picks the first
+    such row). Same 409 code as the mutation guard above (`SYSTEM_PUBLISHER_RESERVED` — no person's sentence, §3779)."""
+    if new_runtime_type == SYSTEM_PUBLISHER_RUNTIME_TYPE:
+        raise HTTPException(status_code=409, detail={"code": "SYSTEM_PUBLISHER_RESERVED"})
+
+
 async def assert_member_id_not_system_publisher(session: AsyncSession, member_id: uuid.UUID) -> None:
     """`assert_agent_owner`를 안 쓰는 자리(project_access.py·webhooks.py — 이미 다른 축의
     ownership 게이트를 통과한 뒤 대상 member_id만 남는 경로)에서, 그 member_id 하나로
