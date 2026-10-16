@@ -172,6 +172,17 @@ function reloadToProgress(setupId: string): void {
   window.location.reload();
 }
 
+/** The person's pending invites (`GET /api/invites/mine`); throws when the list cannot be read — not knowing is not «no invites».
+ *  One reading for the recipe setup and the first-setup card (story 4711). */
+export async function fetchMyInvites(): Promise<MyInvite[]> {
+  const res = await fetchWithAuth('/api/invites/mine');
+  if (!res.ok) throw new Error(String(res.status));
+  const body = await res.json();
+  const list: unknown = body?.invites ?? body?.data?.invites;
+  if (!Array.isArray(list)) throw new Error('no list');
+  return list as MyInvite[];
+}
+
 /**
  * The setup is saved but its progress cannot be read with the old token (4429 ① · Yuna 09:42Z): in the progress's place, not over
  * it — «앱이 받아 가기를 기다리는 중» would say what the page does not know. No red: only «seeing» is blocked.
@@ -330,12 +341,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   // (나) no organization: their invites decide the mode (0 → a new organization · some → where to go · unreadable → (가))
   async function readInvites() {
     try {
-      const res = await fetchWithAuth('/api/invites/mine');
-      if (!res.ok) throw new Error(String(res.status));
-      const body = await res.json();
-      const list: unknown = body?.invites ?? body?.data?.invites;
-      if (!Array.isArray(list)) throw new Error('no list');
-      setOrgMode(list.length ? { kind: 'invited', invites: list as MyInvite[] } : { kind: 'new' });
+      const list = await fetchMyInvites();
+      setOrgMode(list.length ? { kind: 'invited', invites: list } : { kind: 'new' });
     } catch {
       window.location.assign(onboardingRedirect(window.location.pathname)); // this page → /onboarding?next=… (4832)
     }

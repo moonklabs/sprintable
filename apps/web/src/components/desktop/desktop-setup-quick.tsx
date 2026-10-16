@@ -16,7 +16,7 @@ import { appSetupLink, nativeReturnApp, RETURN_APP_PARAM } from '@/lib/auth/nati
 import { useSearchParams } from 'next/navigation';
 import { setupFragment, isFolderRefused, type DesktopRuntime, type SetupQuery } from '@/lib/desktop-setup';
 import { defaultSoloRuntime, shownProjectName, soloConfirmBody, soloNewOrgConfirmBody, soloOutcome, soloStartBlock, usableRuntimes } from '@/lib/desktop-setup-quick';
-import { Failure, INSTALL, InvitedCard, RUNTIME_LABEL, SetupDoneReload, TooOldCard, joinNewOrg, limitCounts, useAppSetupLinks, type MyInvite } from './desktop-setup';
+import { Failure, INSTALL, InvitedCard, RUNTIME_LABEL, SetupDoneReload, TooOldCard, fetchMyInvites, joinNewOrg, limitCounts, useAppSetupLinks, type MyInvite } from './desktop-setup';
 import { SetupProgressView } from './desktop-setup-progress';
 
 /**
@@ -57,12 +57,8 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
 
   async function readInvites() {
     try {
-      const res = await fetchWithAuth('/api/invites/mine');
-      if (!res.ok) throw new Error(String(res.status));
-      const body = await res.json();
-      const list: unknown = body?.invites ?? body?.data?.invites;
-      if (!Array.isArray(list)) throw new Error('no list');
-      setOrgMode(list.length ? { kind: 'invited', invites: list as MyInvite[] } : { kind: 'new' });
+      const list = await fetchMyInvites();
+      setOrgMode(list.length ? { kind: 'invited', invites: list } : { kind: 'new' });
     } catch {
       window.location.assign(onboardingRedirect(window.location.pathname));
     }
@@ -101,11 +97,11 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
     setRateLine(null);
     setErrorLine(null);
     setView({ kind: 'starting' });
-    const post = (path: string, body: unknown) => fetchWithAuth(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const json = { method: 'POST', headers: { 'Content-Type': 'application/json' } } as const;
     try {
       const res = newOrg
-        ? await post('/api/desktop/setup-codes/confirm-solo-new-org', soloNewOrgConfirmBody(query.code, runtime, folder, orgName))
-        : await post('/api/desktop/setup-codes/confirm-solo', soloConfirmBody(query.code, runtime, matched ? folder : { ...folder, projectId: undefined }, useProject));
+        ? await fetchWithAuth('/api/desktop/setup-codes/confirm-solo-new-org', { ...json, body: JSON.stringify(soloNewOrgConfirmBody(query.code, runtime, folder, orgName)) })
+        : await fetchWithAuth('/api/desktop/setup-codes/confirm-solo', { ...json, body: JSON.stringify(soloConfirmBody(query.code, runtime, matched ? folder : { ...folder, projectId: undefined }, useProject)) });
       if (res.ok) {
         const okBody = await res.json().catch(() => null) as { project_id?: string; org_id?: string } | null;
         // the tab has no project (or no organization) yet: the one made (or used) becomes the tab's, the way the recipe setup does

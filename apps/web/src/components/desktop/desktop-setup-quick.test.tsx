@@ -245,7 +245,8 @@ describe('[SID:4711 AC2] after a solo start the first screen is the conversation
     Object.defineProperty(window, 'location', { configurable: true, value: { ...real, pathname: real.pathname, search: real.search, hash: real.hash, assign } });
     try {
       await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><SetupProgressView setupId="s-1" recipeName="" /></NextIntlClientProvider>); });
-      for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); });
+      // the first reading runs on the next task (setTimeout 0), then the fetch and the state change: let real tasks pass, no fixed wait
+      for (let i = 0; i < 12; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     } finally { Object.defineProperty(window, 'location', { configurable: true, value: real }); }
     return assign;
   }
