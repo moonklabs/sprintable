@@ -151,6 +151,20 @@ describe('닫는 일 · 머리 · 빈 본문 (codex 검수 반영)', () => {
     expect(seen).toHaveLength(0);
   });
 
+  it('닫는 중(destroy를 부른 바로 그 순간)에 직접 dispatch한 본문 DELETE도 h2로 새지 않는다 — 본문 없이 가지 않고 «닫힘» 오류로 끝난다', async () => {
+    const d = use();
+    const pending = d.destroy(); // 기다리지 않는다 — 같은 틱에서 바로 dispatch
+    const errors: Error[] = [];
+    d.dispatch(
+      { origin: url, path: '/api/v2/organizations/o4', method: 'DELETE', headers: { 'content-type': 'application/json', 'content-length': String(BODY.length) }, body: BODY },
+      { onConnect: () => {}, onHeaders: () => true, onData: () => true, onComplete: () => {}, onError: (e: Error) => { errors.push(e); } } as unknown as Dispatcher.DispatchHandler,
+    );
+    await pending;
+    await new Promise((r) => setTimeout(r, 300));
+    expect(errors).toHaveLength(1);
+    expect(seen).toHaveLength(0);
+  });
+
   it('close도 콜백 판 · promise 판 둘 다 끝난다(자기 자신을 끝없이 부르지 않는다)', async () => {
     const d1 = use() as Agent;
     await fetch(`${url}/x`, { method: 'DELETE', headers: JSON_HDR, body: BODY });

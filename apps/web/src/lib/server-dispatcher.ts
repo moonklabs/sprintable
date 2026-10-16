@@ -67,23 +67,20 @@ export function createBffDispatcher(
   let h1Agent: Agent | null = null;
   const h1 = () => (h1Agent ??= new Agent({ keepAliveTimeout: BFF_KEEPALIVE_MS, keepAliveMaxTimeout: BFF_KEEPALIVE_MAX_MS, ...agentExtra }));
   const agentDispatch = agent.dispatch.bind(agent);
-  // 이미 닫히기 시작했으면(닫는 중 · 닫힘 · 부숨) h1을 새로 만들지 않고 원 Agent로 보낸다 — 거기서 «닫힘» 오류가 제대로 난다.
-  let shuttingDown = false;
+  // 이미 닫혔거나 부서졌으면 h1을 새로 만들지 않고 원 Agent로 보낸다 — 거기서 «닫힘» 오류가 제대로 난다.
   const dispatch = (opts: Dispatcher.DispatchOptions, handler: Dispatcher.DispatchHandler) =>
-    !shuttingDown && !agent.closed && !agent.destroyed && isBodyDeleteToBackend(opts, backend)
+    !agent.closed && !agent.destroyed && isBodyDeleteToBackend(opts, backend)
       ? h1().dispatch(opts, handler)
       : agentDispatch(opts, handler);
-  // 닫을 때 h1 쪽도 같이 닫는다. undici의 close/destroy는 콜백이 없으면 안에서 `this.destroy(err, cb)`를 다시 부르므로(promise 판),
-  // 이 덧씌움은 항상 «콜백 판»으로 원본을 부른다 — 안 그러면 자기 자신을 끝없이 부른다.
+  // 닫을 때 h1 쪽도 같이 닫는다. 원 Agent의 close/destroy를 «바로» 부른다(닫힘 표시가 그 자리에서 서므로, 닫는 중에 온 본문 DELETE가 h2로
+  // 새어 본문을 잃지 않고 «닫힘» 오류가 난다) — h1은 그와 나란히 닫는다. undici의 close/destroy는 콜백이 없으면 안에서 `this.destroy(err, cb)`를
+  // 다시 부르므로(promise 판), 이 덧씌움은 원본을 항상 «콜백 판»으로 부른다 — 안 그러면 자기 자신을 끝없이 부른다.
   type Lifecycle = (...args: unknown[]) => unknown;
   const alsoH1 = (base: Lifecycle, side: (args: unknown[]) => Promise<unknown> | undefined): Lifecycle => (...args) => {
-    shuttingDown = true;
-    const hasCb = args.some((a) => typeof a === 'function');
-    const closeSide = () => Promise.resolve(side(args)).catch(() => undefined);
-    if (hasCb) { void closeSide().then(() => base(...args)); return undefined; }
-    return new Promise<void>((resolve, reject) => {
-      void closeSide().then(() => base(...args, (err: Error | null) => (err ? reject(err) : resolve())));
-    });
+    const sideDone = Promise.resolve(side(args)).catch(() => undefined);
+    if (args.some((a) => typeof a === 'function')) { base(...args); return undefined; }
+    const baseDone = new Promise<void>((resolve, reject) => { base(...args, (err: Error | null) => (err ? reject(err) : resolve())); });
+    return Promise.all([sideDone, baseDone]).then(() => undefined);
   };
   agent.close = alsoH1(agent.close.bind(agent) as Lifecycle, () => h1Agent?.close()) as typeof agent.close;
   agent.destroy = alsoH1(agent.destroy.bind(agent) as Lifecycle, (args) => h1Agent?.destroy(typeof args[0] === 'function' ? null : ((args[0] as Error | null | undefined) ?? null))) as typeof agent.destroy;
