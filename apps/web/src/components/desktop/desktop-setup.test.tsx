@@ -2118,15 +2118,22 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
     expect(inviteUntilDate('not-a-date', 'ko', 'Asia/Seoul', now)).toBe('');
   });
 
-  it('the invite read fails → sent to the one-screen «조직 만들기» ((가) · /onboarding?next=%2Fdesktop%2Fsetup) — not knowing is not «no invites»', async () => {
+  it('the invite read fails → the card says so in place (story 4711 AC4: no «조직 만들기» screen to be sent to) and [다시 확인] reads again — not knowing is not «no invites»', async () => {
     const assign = vi.fn();
     vi.stubGlobal('location', { ...window.location, assign } as unknown as Location);
     invitesNow = () => new Response('{}', { status: 503 });
     stubNoOrg();
     await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} />);
-    expect(assign).toHaveBeenCalledWith('/onboarding?next=%2Fdesktop%2Fsetup');
+    expect(assign).not.toHaveBeenCalled(); // nowhere to be sent
+    const card = container.querySelector('[data-testid=setup-invite-check-failed]')!;
+    expect(card.textContent).toContain('초대를 확인하지 못했어요 — 확인한 뒤에 조직을 만들어요');
     expect(urls().some((u) => u.includes('/api/desktop/recipes'))).toBe(false);
     expect(container.querySelector('[data-testid=setup-new-org]')).toBeNull();
+    // [다시 확인] reads the invites again; with none the page goes on as a new organization
+    invitesNow = () => new Response(JSON.stringify({ invites: [] }), { status: 200 });
+    await act(async () => { ([...container.querySelectorAll('button')].find((b) => b.textContent === '다시 확인') as HTMLButtonElement).click(); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid=setup-invite-check-failed]')).toBeNull();
   });
 
   it('refusals: an invite arrived meanwhile (409 pending_invites) → the invite card · an organization appeared (409 has_organization) → «이미 조직이 있어요» [다시 불러오기] · e-mail not verified · organization limit → the one-screen words', async () => {

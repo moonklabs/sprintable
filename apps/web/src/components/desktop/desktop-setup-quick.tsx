@@ -9,8 +9,8 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { isEEEnabled } from '@/lib/ee';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { defaultOrgName } from '@/app/onboarding/desktop-create-org';
-import { onboardingRedirect } from '@/lib/auth/onboarding-next';
+import { defaultOrgName } from '@/lib/default-org-name';
+import { InviteCheckFailedCard } from './invite-check-failed';
 import { EmailVerifyGateCard, useEmailVerifyGate } from '@/components/auth/email-verify-gate';
 import { appSetupLink, nativeReturnApp, RETURN_APP_PARAM } from '@/lib/auth/native-return-app';
 import { putOrgRemoteControl, useOrgRemoteControl } from '@/lib/org-remote-control';
@@ -27,7 +27,7 @@ import { SetupProgressView } from './desktop-setup-progress';
  * app found for the folder) — never a path. No recipe, no first task: the first screen after the start is the conversation (the progress
  * view opens it).
  */
-type OrgMode = { kind: 'has-org' } | { kind: 'checking' } | { kind: 'new' } | { kind: 'invited'; invites: MyInvite[] };
+type OrgMode = { kind: 'has-org' } | { kind: 'checking' } | { kind: 'new' } | { kind: 'invited'; invites: MyInvite[] } | { kind: 'invite-failed' };
 type View = { kind: 'choose' } | { kind: 'starting' } | { kind: 'started' } | { kind: 'done-reload' }
   | { kind: 'failed'; failure: 'offline' | 'not-admin' | 'expired' | 'has-org' | 'agent-limit'; counts?: { need: number; left: number } | null };
 
@@ -94,7 +94,7 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
       const list = await fetchMyInvites();
       setOrgMode(list.length ? { kind: 'invited', invites: list } : { kind: 'new' });
     } catch {
-      window.location.assign(onboardingRedirect(window.location.pathname));
+      setOrgMode({ kind: 'invite-failed' }); // story 4711 AC4: not knowing is not "no invites" — the card says so and reads again
     }
   }
   useEffect(() => { if (!orgId) void readInvites(); }, [orgId]);
@@ -225,6 +225,7 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
   }
 
   if (orgMode.kind === 'invited') return <InvitedCard invites={orgMode.invites} />;
+  if (orgMode.kind === 'invite-failed') return <InviteCheckFailedCard onRetry={() => { setOrgMode({ kind: 'checking' }); void readInvites(); }} />;
   if (newOrg && verifyGate.kind === 'closed') return <EmailVerifyGateCard gate={verifyGate} />;
   if (orgMode.kind === 'checking' || (newOrg && verifyGate.kind === 'reading')) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   if (orgMode.kind === 'has-org' && !isAdmin) return <Failure failure="not-admin" />;
