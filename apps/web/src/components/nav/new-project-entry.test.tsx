@@ -68,6 +68,18 @@ describe('[SID:4713] NewProjectEntry', () => {
     expect(NEW_PROJECT_LINK).toBe('ai.sprintable:/desktop/setup');
   });
 
+  it('the address is the constant — not the page address, the query, storage or the clipboard (codex QA)', async () => {
+    inApp();
+    // an address that carries other values must never leak into what the shell is handed
+    Object.defineProperty(window, 'location', { configurable: true, value: { ...window.location, href: 'https://evil.example/?next=ai.sprintable:/desktop/setup%3Fagent%3Dx', search: '?agent=other&code=abc', assign } });
+    window.localStorage.setItem('pending-setup', 'agent=other');
+    await act(async () => { root.render(withProviders(<NewProjectEntry />)); });
+    await act(async () => { entry()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(assign).toHaveBeenCalledTimes(1);
+    expect(assign.mock.calls[0]![0]).toBe('ai.sprintable:/desktop/setup'); // exactly the constant, no query, no fragment
+    expect(String(assign.mock.calls[0]![0])).not.toMatch(/[?#]|agent|code|evil/);
+  });
+
   it('in a browser (no bridge): nothing is drawn', async () => {
     await act(async () => { root.render(withProviders(<NewProjectEntry />)); });
     expect(entry()).toBeNull();
