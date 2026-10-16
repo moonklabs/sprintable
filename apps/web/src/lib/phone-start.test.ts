@@ -107,6 +107,20 @@ describe('[4714] the server\'s refusals and the command\'s ends', () => {
   });
 });
 
+describe('[4714] codex round 1 — a valid JSON body that is not an object', () => {
+  it('a post answered 201 with `null` (or a number) is unknown — never a throw; a poll answered `null` is asked again', async () => {
+    for (const body of ['null', '7', '"x"']) {
+      server(new Response(body, { status: 201 }));
+      expect((await startOnPhone(input, deps(signed))).kind).toBe('unknown');
+    }
+    let t = 0;
+    server(json(201, { command_id: CMD }), [new Response('null', { status: 200 }), json(200, { state: 'done' })]);
+    await expect(startOnPhone(input, deps(signed, { now: () => t, wait: async (ms: number) => { t += ms; } }))).resolves.toEqual({ kind: 'started' });
+    server(json(201, { command_id: CMD }), [new Response('null', { status: 200 })]);
+    expect((await startOnPhone(input, deps(signed, { now: () => t, wait: async (ms: number) => { t += ms; } }))).kind).toBe('unknown');
+  });
+});
+
 describe('[4714] [결과 확인] never signs again and never starts twice', () => {
   it('unknown with an id → the same command is followed (no post, no shell call); unknown without one → the same post with the same key and the same signed body', async () => {
     const lost = server(() => { throw new Error('network'); });

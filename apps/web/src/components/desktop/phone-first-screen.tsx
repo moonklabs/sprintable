@@ -58,15 +58,17 @@ export function PhoneFirstScreen({ orgId, chatsHref }: { orgId: string | null; c
 
   // the computers this phone is paired with; one screen per computer in v1 is the first one that can take a start (reachable first)
   const computers = read.view.computers;
-  const computer = computers.find((c) => c.reachable && c.agents.length > 0) ?? computers.find((c) => c.agents.length > 0) ?? computers[0];
-  if (computer.agents.length === 0) {
+  // only an agent the person may command can be started from here (`can_command`) — the others are not offered
+  const commandable = (c: StartableComputer) => c.agents.filter((a) => a.can_command);
+  const computer = computers.find((c) => c.reachable && commandable(c).length > 0) ?? computers.find((c) => commandable(c).length > 0) ?? computers[0];
+  if (commandable(computer).length === 0) {
     return (
       <Card className="break-keep p-6" data-testid="onboarding-phone-no-agent">
         <p className="text-sm text-foreground">{t('noAgent.line', { device: computer.device_name })}</p>
       </Card>
     );
   }
-  return <StartCard computer={computer} chatHref={chatsHref} onRemoteOff={reload} />;
+  return <StartCard computer={computer} agents={commandable(computer)} chatHref={chatsHref} onRemoteOff={reload} />;
 }
 
 function NoMac({ pairHref }: { pairHref: string }) {
@@ -114,10 +116,9 @@ function RemoteOff({ orgId, onTurnedOn }: { orgId: string | null; onTurnedOn: ()
   );
 }
 
-function StartCard({ computer, chatHref, onRemoteOff }: { computer: StartableComputer; chatHref?: string; onRemoteOff: () => void }) {
+function StartCard({ computer, agents, chatHref, onRemoteOff }: { computer: StartableComputer; agents: StartableAgent[]; chatHref?: string; onRemoteOff: () => void }) {
   const t = useTranslations('onboarding.phone');
   const { phoneCall } = usePhoneBridge();
-  const agents = computer.agents;
   const [agentId, setAgentId] = useState<string | null>(agents.length === 1 ? agents[0].agent_member_id : null); // one agent → picked already
   const agent: StartableAgent | undefined = agents.find((a) => a.agent_member_id === agentId);
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -126,6 +127,8 @@ function StartCard({ computer, chatHref, onRemoteOff }: { computer: StartableCom
   const [sheet, setSheet] = useState<'agent' | 'project' | null>(null);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<StartOutcome | null>(null);
+  // a start whose end is not known: the only way on is [결과 확인] (the same command) — a new press would sign again and could start it twice
+  const locked = outcome?.kind === 'unknown';
   const pending = useRef<Pending | null>(null);
   const deps = { phoneCall, newKey };
 
@@ -172,18 +175,18 @@ function StartCard({ computer, chatHref, onRemoteOff }: { computer: StartableCom
       <h1 id="onboarding-step-title" className="break-keep text-center text-2xl font-bold text-foreground">{t('start.title', { device: computer.device_name })}</h1>
       <Card className="break-keep flex flex-col gap-3 p-4">
         {agents.length > 1 ? (
-          <PickRow label={t('start.agentLabel')} value={agent?.name ?? null} onOpen={() => setSheet('agent')} testId="onboarding-phone-agent" />
+          <PickRow label={t('start.agentLabel')} value={agent?.name ?? null} onOpen={() => setSheet('agent')} disabled={locked} testId="onboarding-phone-agent" />
         ) : (
           <div className="flex min-h-11 flex-col justify-center" data-testid="onboarding-phone-agent-fixed">
             <span className="text-xs text-muted-foreground">{t('start.agentLabel')}</span>
             <span className="text-sm font-medium text-foreground">{agents[0].name}</span>
           </div>
         )}
-        <PickRow label={t('start.projectLabel')} value={project?.name ?? null} onOpen={() => setSheet('project')} disabled={!agent} testId="onboarding-phone-project" />
+        <PickRow label={t('start.projectLabel')} value={project?.name ?? null} onOpen={() => setSheet('project')} disabled={!agent || locked} testId="onboarding-phone-project" />
         <p className="text-xs text-muted-foreground" data-testid="onboarding-phone-new-folder">{t('start.newFolder')}</p>
       </Card>
       <div className="space-y-1">
-        <Button size="lg" className="w-full whitespace-nowrap" disabled={busy || reason !== null} onClick={() => void start()} data-testid="onboarding-phone-start-go">
+        <Button size="lg" className="w-full whitespace-nowrap" disabled={busy || locked || reason !== null} onClick={() => void start()} data-testid="onboarding-phone-start-go">
           {busy ? t('start.starting') : t('start.action')}
         </Button>
         {reason ? <p className="text-xs text-muted-foreground" data-testid="onboarding-phone-reason">{reason}</p> : null}

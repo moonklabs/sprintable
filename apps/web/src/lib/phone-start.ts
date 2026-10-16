@@ -172,7 +172,8 @@ async function post(pending: Pending, deps: StartDeps): Promise<StartOutcome> {
   }
   let made: { command_id?: string };
   try { made = (await res.json()) as typeof made; } catch { return { kind: 'unknown', pending }; }
-  if (typeof made.command_id !== 'string') return { kind: 'unknown', pending };
+  // a valid JSON body that is not an object (null · a number) is no command id — kept as unknown, never dereferenced
+  if (!made || typeof made !== 'object' || typeof made.command_id !== 'string') return { kind: 'unknown', pending };
   return follow({ ...pending, commandId: made.command_id }, deps);
 }
 
@@ -192,6 +193,7 @@ async function follow(pending: Pending, deps: StartDeps): Promise<StartOutcome> 
     } catch {
       continue;
     }
+    if (!r || typeof r !== 'object') continue; // a body that is not an object is not an end — ask again
     if (r.state === 'done') return { kind: 'started' };
     if (r.state === 'rejected') {
       if (r.result_code === 'already_running') return { kind: 'already_running' };

@@ -287,6 +287,40 @@ describe('[4714] branch 5 — the result lines', () => {
   });
 });
 
+describe('[4714] codex round 1 — a start of unknown end is locked; only agents the person may command are offered', () => {
+  it('after an unknown end [시작] and both pickers are off — a new press would sign again and could start it twice; [결과 확인] lifts the lock', async () => {
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    world.post = json({ error: { code: 'INTERNAL_ERROR' } }, 500);
+    await press(byId('onboarding-phone-start-go'));
+    expect(byId('onboarding-phone-check')).not.toBeNull();
+    expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(true);
+    expect((byId('onboarding-phone-project') as HTMLButtonElement).disabled).toBe(true);
+    const signs = phoneCall.mock.calls.filter((c) => c[0] === 'command.sign').length;
+    await press(byId('onboarding-phone-start-go')); // a press on a disabled button does nothing
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'command.sign').length).toBe(signs);
+    world.post = json({ command_id: CMD, state: 'queued' }, 201);
+    await press(byId('onboarding-phone-check'));
+    expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(false); // it started — the screen is ready again
+  });
+
+  it('an agent with can_command false is not offered (no row, no picker choice); with only such agents the screen says there is none to start', async () => {
+    world.startable = { remote_control: true, computers: [computer({ agents: [
+      { agent_member_id: AGENT, name: '내가 못 시키는', can_command: false, projects: [{ project_id: PROJECT, name: '결제 개편' }] },
+      { agent_member_id: AGENT2, name: '문서 담당', can_command: true, projects: [{ project_id: PROJECT2, name: '정산' }] },
+    ] })] };
+    await screen();
+    expect(byId('onboarding-phone-agent-fixed')?.textContent).toContain('문서 담당'); // the only commandable one is picked already
+    expect(text()).not.toContain('내가 못 시키는');
+    world.startable = { remote_control: true, computers: [computer({ agents: [{ agent_member_id: AGENT, name: '내가 못 시키는', can_command: false, projects: [{ project_id: PROJECT, name: '결제 개편' }] }] })] };
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await screen();
+    expect(byId('onboarding-phone-no-agent')).not.toBeNull();
+    expect(byId('onboarding-phone-start')).toBeNull();
+  });
+});
+
 describe('[4714] a read that failed, and the screen outside the phone app', () => {
   it('a failed read says so with one button that reads again', async () => {
     fetchWithAuth.mockImplementation(async () => json({}, 500));
