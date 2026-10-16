@@ -70,6 +70,17 @@ async function fillAndSubmit() {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 
+describe('CreateOrganizationDialog — the switcher\'s request (story 4721 keeps its defaults)', () => {
+  it('slug required as before: the name and the address derived from it are both sent', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ data: { id: 'o-1', name: 'Test Org', slug: 'test-org' } }) }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { onCreated } = await mount();
+    await fillAndSubmit();
+    expect(JSON.parse((fetchMock.mock.calls[0] as unknown as [string, { body: string }])[1].body)).toEqual({ name: 'Test Org', slug: 'test-org' });
+    expect(onCreated).toHaveBeenCalledWith('o-1');
+  });
+});
+
 describe('CreateOrganizationDialog — PLAN_LIMIT_EXCEEDED envelope (story #2470)', () => {
   it('실제 응답 envelope({error:{code}})으로 한도 배너가 실제로 뜬다 — raw 영문 message 노출 없음', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({

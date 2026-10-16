@@ -6960,7 +6960,11 @@
         },
         "not-admin": {
           "title": "You need to be an org admin to create agents",
-          "body": "This account isn't an admin of this organization. Ask an admin to start from this screen, or get admin rights and open it again.",
+          "body": "You're a member of {org}. In this organization an admin starts agents. Ask an admin, or create your own organization and start there.",
+          "bodyAsk": "You're a member of {org}. In this organization an admin starts agents. Ask an admin.",
+          "bodyNoName": "You're a member of this organization. In this organization an admin starts agents. Ask an admin, or create your own organization and start there.",
+          "bodyNoNameAsk": "You're a member of this organization. In this organization an admin starts agents. Ask an admin.",
+          "create": "Create my own organization",
           "action": "Check again"
         },
         "agent-limit": {

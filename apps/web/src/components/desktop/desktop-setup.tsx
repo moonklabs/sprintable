@@ -32,6 +32,9 @@ import { putOrgRemoteControl, useOrgRemoteControl } from '@/lib/org-remote-contr
 import { agentLimitOf, type AgentLimit } from '@/lib/agent-limit';
 import { isEEEnabled } from '@/lib/ee';
 import { limitCopy } from '@/lib/plan-limit-copy';
+import { CreateOrganizationDialog } from '@/components/nav/create-organization-dialog';
+import { memberCardFacts } from '@/lib/desktop-setup-member';
+import { TAB_PROJECT_STORAGE_KEY } from '@/lib/project-context-client';
 
 /**
  * story #4427(E-DESKTOP P2) — 웹 설정 페이지. 데스크톱 앱이 이 페이지를 설정 코드 + 찾은 에이전트 목록과 함께 연다.
@@ -692,7 +695,14 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   if (newOrg && verifyGate.kind === 'closed') return <EmailVerifyGateCard gate={verifyGate} />;
   if (newOrg && verifyGate.kind === 'reading') return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   // a person making a new organization is its owner-to-be: the server checks «no organization» itself (org_members 0 rows)
-  if (orgMode.kind === 'has-org' && !isAdmin && view.kind !== 'loading') return <Failure failure="not-admin" />;
+  // the setup values are only in memory (the page took them off the address): a reload that should land on THIS page puts them back first
+  // — «이미 조직이 있어요» [다시 불러오기] (4429 ②) and, story 4721, the member card's [다시 확인] and its switch into the new organization
+  const reloadKeepingSetup = () => {
+    // replaceState, not `location.hash =`: no hashchange (the page's own handler would take the values off again before the reload)
+    window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment({ code, runtimes: found, setupId, blocked, old, ...(canMove ? { canMove: true as const } : {}), ...(preselect ? { agent: preselect } : {}) }));
+    window.location.reload();
+  };
+  if (orgMode.kind === 'has-org' && !isAdmin && view.kind !== 'loading') return <Failure failure="not-admin" onReloadPage={reloadKeepingSetup} />;
   if (view.kind === 'loading') return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   if (view.kind === 'failed') {
     // «목록 다시 불러오기» (move-changed): the agents are read again — the ticks that are no longer movable fall off by themselves
@@ -701,13 +711,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       : view.failure === 'offline' ? () => void start() : view.failure === 'move-offline' ? () => void moveStart() : undefined;
     // «이미 조직이 있어요» [다시 불러오기]: reload with the setup values put back into the fragment — they are only in memory now
     // (the page took them off the address), and a bare reload showed «데스크톱 앱에서 열어 주세요» (4429 ②)
-    const onReloadPage = view.failure === 'has-org'
-      // replaceState, not `location.hash =`: no hashchange (the page's own handler would take the values off again before the reload)
-      ? () => {
-        window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment({ code, runtimes: found, setupId, blocked, old, ...(canMove ? { canMove: true as const } : {}) }));
-        window.location.reload();
-      }
-      : undefined;
+    const onReloadPage = view.failure === 'has-org' || view.failure === 'not-admin' ? reloadKeepingSetup : undefined;
     return <Failure failure={view.failure} counts={view.counts ?? null} plan={view.plan ?? null} onRetry={onRetry} onReloadPage={onReloadPage}
       onChooseRecipe={view.failure === 'agent-limit' || view.failure === 'recipe-too-big' ? () => setView({ kind: 'choose' }) : undefined} />;
   }
@@ -1270,6 +1274,36 @@ export function Failure({ failure, onRetry, counts = null, plan = null, solo = f
   const key = (part: 'title' | 'body' | 'action') => FAILURE_KEY[`${failure}.${part}`]!;
   const links = useAppSetupLinks();
   const appButton = (label: string) => <Button asChild><a href={links.open}>{label}</a></Button>;
+  // story 4721 (Yuna invited-member-card-1017 §3): a MEMBER on the not-admin card has two ways out beside «다시 확인» — ask an admin (the
+  // body says it) and start in an organization of their own (the primary, only while the plan lets them make one)
+  const { orgId, orgMemberships, userName } = useDashboardContext();
+  const tNewOrg = useTranslations('desktopOnboarding');
+  const [createOpen, setCreateOpen] = useState(false);
+  const [madeOrgId, setMadeOrgId] = useState<string | null>(null); // made, but the switch to it did not go through: the primary tries the switch again
+  const [enterFailed, setEnterFailed] = useState(false);
+  const [entering, setEntering] = useState(false); // the switch is on its way: a second press waits for it
+  const member = failure === 'not-admin' ? memberCardFacts(orgId, orgMemberships, isEEEnabled()) : null;
+  const canCreate = !!member && (member.canCreateOwn || madeOrgId !== null);
+  const org = member?.orgName ?? '';
+  const memberBody = !member ? null
+    : member.orgName ? (member.canCreateOwn ? t('failure.not-admin.body', { org }) : t('failure.not-admin.bodyAsk', { org }))
+    : (member.canCreateOwn ? t('failure.not-admin.bodyNoName') : t('failure.not-admin.bodyNoNameAsk'));
+  const reloadPage = onReloadPage ?? (() => window.location.reload());
+  async function enterOwnOrg(newOrgId: string) {
+    setEntering(true);
+    setEnterFailed(false);
+    try {
+      const res = await fetchWithAuth('/api/switch-org', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ org_id: newOrgId }) });
+      const json = await res.json().catch(() => null) as { data?: { ok?: boolean } } | null;
+      if (!(res.ok && json?.data?.ok)) { setEnterFailed(true); setEntering(false); return; }
+      // the switcher's own order: the tab's project belongs to the organization left, so it goes before the page is read again
+      window.sessionStorage.removeItem(TAB_PROJECT_STORAGE_KEY);
+      reloadPage();
+    } catch {
+      setEnterFailed(true);
+      setEntering(false);
+    }
+  }
   return (
     <Card className="break-keep flex flex-col gap-3 p-6">
       <h1 className="text-lg font-semibold">{limit ? tNav(limit.title) : t(key('title'))}</h1>
@@ -1281,7 +1315,7 @@ export function Failure({ failure, onRetry, counts = null, plan = null, solo = f
           {solo ? t('room.soloTidy') : t(key('body'))}
         </p>
       ) : (
-        <p className="text-sm text-muted-foreground">{t(key('body'))}</p>
+        <p className="text-sm text-muted-foreground">{memberBody ?? t(key('body'))}</p>
       )}
       {failure === 'no-agent' ? (
         <ul className="flex flex-col gap-2">
@@ -1302,7 +1336,13 @@ export function Failure({ failure, onRetry, counts = null, plan = null, solo = f
             {todayHref ? <Button asChild variant="outline"><a href={todayHref}>{t('goToday')}</a></Button> : null}
           </>
           : (failure === 'offline' || failure === 'no-recipe' || failure === 'recipes-offline' || failure === 'recipes-changed' || failure === 'move-changed' || failure === 'move-offline') && onRetry ? <Button onClick={onRetry}>{t(key('action'))}</Button>
-          : failure === 'not-admin' || failure === 'move-not-admin' || failure === 'managed' || failure === 'has-org' ? <Button onClick={onReloadPage ?? (() => window.location.reload())}>{t(key('action'))}</Button>
+          : failure === 'not-admin' && canCreate ? <>
+            <Button disabled={entering} onClick={() => { if (madeOrgId) void enterOwnOrg(madeOrgId); else setCreateOpen(true); }}>{t('failure.not-admin.create')}</Button>
+            {/* once the organization is made, «다시 확인» is the same way back as the primary: a plain reload would drop the made organization and
+                its switch (the new owner row would then close the primary) */}
+            <Button variant="outline" disabled={entering} onClick={() => { if (madeOrgId) void enterOwnOrg(madeOrgId); else reloadPage(); }}>{t(key('action'))}</Button>
+          </>
+          : failure === 'not-admin' || failure === 'move-not-admin' || failure === 'managed' || failure === 'has-org' ? <Button onClick={reloadPage}>{t(key('action'))}</Button>
           : failure === 'recipe-too-big' && onChooseRecipe ? <Button onClick={onChooseRecipe}>{t(key('action'))}</Button>
           : failure === 'agent-limit' ? <>
             {onChooseRecipe ? <Button onClick={onChooseRecipe}>{t(key('action'))}</Button> : null}
@@ -1311,6 +1351,16 @@ export function Failure({ failure, onRetry, counts = null, plan = null, solo = f
           </>
           : null}
       </div>
+      {enterFailed ? <p role="alert" className="text-sm text-destructive">{tNav('switcherSwitchOrgError')}</p> : null}
+      {member?.canCreateOwn ? (
+        <CreateOrganizationDialog
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          initialName={defaultOrgName(userName, (n) => tNewOrg('defaultOrgNameWithName', { name: n }), tNewOrg('defaultOrgName'))}
+          slugOptional
+          onCreated={(id) => { setMadeOrgId(id); void enterOwnOrg(id); }}
+        />
+      ) : null}
     </Card>
   );
 }
