@@ -6901,7 +6901,10 @@
         "left": "you can add {left} more",
         "short": "This recipe needs {need, plural, one {# new agent} other {# new agents}}, but you can add only {left} more.",
         "shortNone": "This recipe needs {need, plural, one {# new agent} other {# new agents}}, but you can't add any more right now.",
-        "useExisting": "Choose «Existing agents» for a role and no new agent is made."
+        "useExisting": "Choose «Existing agents» for a role and no new agent is made.",
+        "soloNone": "You can't add any more agents right now.",
+        "soloTidy": "Remove agents you don't use.",
+        "soloUseTeam": "To start with an agent you already have, choose it under «Set up a team of agents» below."
       },
       "startNoteWithMe": "Creates {n, plural, one {# agent} other {# agents}} on this computer and hands over the first task · you take {roles}",
       "startNoteMoved": "Moves {m, plural, one {# agent} other {# agents}} to this computer and hands over the first task",

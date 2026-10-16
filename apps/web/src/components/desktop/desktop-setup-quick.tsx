@@ -15,9 +15,10 @@ import { EmailVerifyGateCard, useEmailVerifyGate } from '@/components/auth/email
 import { appSetupLink, nativeReturnApp, RETURN_APP_PARAM } from '@/lib/auth/native-return-app';
 import { putOrgRemoteControl, useOrgRemoteControl } from '@/lib/org-remote-control';
 import { useSearchParams } from 'next/navigation';
-import { setupFragment, isFolderRefused, moveConfirmBody, movableState, type AttachableAgent, type DesktopRuntime, type SetupQuery } from '@/lib/desktop-setup';
+import { agentRoomOf, roomShort, setupFragment, isFolderRefused, moveConfirmBody, movableState, type AgentRoom, type AttachableAgent, type DesktopRuntime, type SetupQuery } from '@/lib/desktop-setup';
+import { agentLimitOf, type AgentLimit } from '@/lib/agent-limit';
 import { defaultSoloRuntime, shownProjectName, soloConfirmBody, soloNewOrgConfirmBody, soloOutcome, soloStartBlock, usableRuntimes } from '@/lib/desktop-setup-quick';
-import { ATTACHABLE_READ_LIMIT_MS, DesktopSetup, Failure, INSTALL, InvitedCard, MovedAgentNote, PROGRESS_FRAGMENT, RUNTIME_LABEL, SetupDoneReload, TooOldCard, fetchMyInvites, joinNewOrg, limitCounts, moveFailureForCode, useAppSetupLinks, type MyInvite } from './desktop-setup';
+import { ATTACHABLE_READ_LIMIT_MS, DesktopSetup, Failure, INSTALL, InvitedCard, MovedAgentNote, PROGRESS_FRAGMENT, RoomShortBox, RUNTIME_LABEL, SetupDoneReload, TooOldCard, fetchMyInvites, joinNewOrg, limitCounts, moveFailureForCode, useAppSetupLinks, type MyInvite } from './desktop-setup';
 import { SetupProgressView } from './desktop-setup-progress';
 
 /**
@@ -29,7 +30,7 @@ import { SetupProgressView } from './desktop-setup-progress';
  */
 type OrgMode = { kind: 'has-org' } | { kind: 'checking' } | { kind: 'new' } | { kind: 'invited'; invites: MyInvite[] } | { kind: 'invite-failed' };
 type View = { kind: 'choose' } | { kind: 'starting' } | { kind: 'started' } | { kind: 'done-reload' }
-  | { kind: 'failed'; failure: 'offline' | 'not-admin' | 'expired' | 'has-org' | 'agent-limit'; counts?: { need: number; left: number } | null };
+  | { kind: 'failed'; failure: 'offline' | 'not-admin' | 'expired' | 'has-org' | 'agent-limit'; counts?: { need: number; left: number } | null; plan?: AgentLimit | null };
 
 /** The setup the progress belongs to: the SERVER's id from its answer, else the address's own — each only if it is a uuid (the progress route takes nothing else, and a
  *  code-like string must never be written into the address). None valid → null: the plain «started» card, no polling. */
@@ -87,6 +88,19 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
   // codex self-QA: the setup this start made is the SERVER's (`setup_id` in its answer); the address's `setup=` is only the fallback (an older answer without it)
   const [madeSetupId, setMadeSetupId] = useState<string | null>(null);
   const [limitAskRaw, setLimitAsk] = useState<{ id: string; name: string; folderKey: string } | null>(null);
+  // story 4717 (follow-up · PO 05:04Z): the plan's agent room for an organization's setup (the admin's — anyone else stops at «not admin»).
+  // The recipe list carries it (the server's one count — «시스템 발행» left out). A new organization always has room for this one agent,
+  // so it is not read there. Not read · no limit · a shape this page does not read → nothing said and nothing held.
+  const [agentRoom, setAgentRoom] = useState<AgentRoom | null>(null);
+  useEffect(() => {
+    if (orgMode.kind !== 'has-org' || !isAdmin || agent) return; // the `agent=` move makes no new agent — nothing to count
+    let off = false;
+    fetchWithAuth('/api/desktop/recipes')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body: { agent_room?: unknown } | null) => { if (!off) setAgentRoom(agentRoomOf(body?.agent_room)); })
+      .catch(() => { /* nothing said */ });
+    return () => { off = true; };
+  }, [orgMode.kind, isAdmin, orgId, agent]);
   const [copied, setCopied] = useState<DesktopRuntime | null>(null);
 
   const inviteReads = useRef(0); // codex self-QA: only the LATEST read decides (a late failure must not overwrite a read that already succeeded)
@@ -131,6 +145,8 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
     : matched ? { kind: 'existing' as const, name: matched.projectName }
     : { kind: 'new' as const, name: newOrg ? folder.name : shownProjectName(folder.name, orgProjects.map((p) => p.projectName)) };
   const block = soloStartBlock(runtime, folder, wideOk);
+  // story 4717 (follow-up · PO 05:04Z): the one new agent this card makes does not fit the plan — «시작» off, said before the press
+  const roomFull = !agent && roomShort(agentRoom, 1); // the `agent=` move confirmation makes no new agent — the room never holds it
   const folderLink = appSetupLink(app, 'folder', { pick: runtime });
 
   // codex self-QA: two presses before the state commits must not send two confirmations (and two phone-control PUTs)
@@ -181,7 +197,7 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
     try { await startOnce(useProject); } finally { startInFlight.current = false; }
   }
   async function startOnce(useProject?: string) {
-    if (!runtime || !folder || soloStartBlock(runtime, folder, wideOk)) return;
+    if (!runtime || !folder || soloStartBlock(runtime, folder, wideOk) || roomFull) return;
     setRateLine(null);
     setErrorLine(null);
     setView({ kind: 'starting' });
@@ -215,7 +231,7 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
         }
         case 'use-existing-project': setLimitAsk({ ...out.project, folderKey: folder.shown }); setView({ kind: 'choose' }); return;
         case 'project-limit': setErrorLine(t('firstProject.limit', { limit: typeof error?.limit === 'number' ? error.limit : 1 })); setView({ kind: 'choose' }); return;
-        case 'agent-limit': setView({ kind: 'failed', failure: 'agent-limit', counts: limitCounts(body?.error) }); return;
+        case 'agent-limit': setView({ kind: 'failed', failure: 'agent-limit', counts: limitCounts(body?.error), plan: agentLimitOf(402, body) }); return;
         case 'not-admin': setView({ kind: 'failed', failure: 'not-admin' }); return;
         case 'expired': setView({ kind: 'failed', failure: 'expired' }); return;
         case 'has-org': setView({ kind: 'failed', failure: 'has-org' }); return;
@@ -239,7 +255,7 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
     const onReloadPage = view.failure === 'has-org'
       ? () => { window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment(query)); window.location.reload(); }
       : undefined;
-    return <Failure failure={view.failure} counts={view.counts ?? null} onRetry={view.failure === 'offline' ? () => void (agent ? startAgent() : start(limitAsk?.id)) : undefined} onReloadPage={onReloadPage} />;
+    return <Failure failure={view.failure} counts={view.counts ?? null} plan={view.plan ?? null} solo onRetry={view.failure === 'offline' ? () => void (agent ? startAgent() : start(limitAsk?.id)) : undefined} onReloadPage={onReloadPage} />;
   }
   // nothing usable on this computer: blocked by the company's policy · installed but too old · not found (the install lines)
   if (!agent && usable.length === 0) {
@@ -368,7 +384,11 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
                   </label>
                 </div>
               ) : null}
-              <div><Button disabled={starting || (agent ? !agentProject : block !== null)} aria-describedby="quick-start-line" onClick={() => void (agent ? startAgent() : start())}>{starting ? t('quick.starting') : t('quick.start')}</Button></div>
+              {roomFull && agentRoom ? (
+                <RoomShortBox room={agentRoom} line={t('room.soloNone')}
+                  hint={<p className="text-xs text-muted-foreground" data-testid="quick-room-use-team">{t('room.soloUseTeam')}</p>} />
+              ) : null}
+              <div><Button disabled={starting || (agent ? !agentProject : block !== null || roomFull)} aria-describedby="quick-start-line" onClick={() => void (agent ? startAgent() : start())}>{starting ? t('quick.starting') : t('quick.start')}</Button></div>
               <p id="quick-start-line" className="text-sm text-muted-foreground" data-testid="quick-start-line">
                 {agent ? (agentProject ? t('quick.projectChosen', { name: orgProjects.find((p) => p.projectId === agentProject)?.projectName ?? '' }) : '')
                   : blockLine ?? (runtime && projectLine
