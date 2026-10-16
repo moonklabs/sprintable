@@ -134,9 +134,13 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(moveConfirmBody(query.code, agentProject, [agent.id])),
       });
       if (res.ok) {
+        // the setup this move belongs to is the SERVER's (`setup_id` in its answer, shape-checked); the address's `setup=` is only the fallback (codex self-QA)
+        const okBody = await res.json().catch(() => null) as { setup_id?: string } | null;
+        const made = typeof okBody?.setup_id === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(okBody.setup_id) ? okBody.setup_id : query.setupId;
+        setMadeSetupId(made);
         if (!projectId && !(await joinNewOrg({ project_id: agentProject }))) { setView({ kind: 'done-reload' }); return; }
         await turnPhoneControlOn(orgId);
-        if (query.setupId) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(query.setupId)); // a reload goes back to the progress (as the solo start does)
+        if (made) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(made)); // a reload goes back to the progress (as the solo start does)
         setView({ kind: 'started' });
         return;
       }

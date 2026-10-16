@@ -85,6 +85,31 @@ describe('[SID:4711] the `agent=` branch of the setup page', () => {
     expect(body.roles.every((r) => r.runtime === undefined && r.owner === undefined)).toBe(true); // no new agent, no «me»
   });
 
+  it('codex self-QA: after a move the progress and the reload address use the setup the SERVER answered (shape-checked); a nonsense id falls back to the address\'s own', async () => {
+    const SERVER_ID = '33333333-3333-4333-8333-cccccccccccc';
+    confirmNow = () => new Response(JSON.stringify({ setup_id: SERVER_ID, members: [], work_item_id: null }), { status: 200 });
+    await open(frag('move,solo', '&setup=11111111-1111-4111-8111-aaaaaaaaaaaa'));
+    await act(async () => { start()!.click(); });
+    for (let i = 0; i < 8; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(window.location.hash).toBe(`#progress=${SERVER_ID}`);
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+    expect(calls.some((c) => c.url.includes(`/api/desktop/setups/${SERVER_ID}`))).toBe(true);
+    await act(async () => { root.render(<div />); });
+    confirmNow = () => new Response(JSON.stringify({ setup_id: 'a/../b', members: [], work_item_id: null }), { status: 200 });
+    await open(frag('move,solo', '&setup=11111111-1111-4111-8111-aaaaaaaaaaaa'));
+    await act(async () => { start()!.click(); });
+    for (let i = 0; i < 8; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(window.location.hash).toBe('#progress=11111111-1111-4111-8111-aaaaaaaaaaaa');
+  });
+
+  it('codex self-QA: two presses of [시작] before the card redraws send ONE move confirmation', async () => {
+    await open(frag('move,solo'));
+    const go = start()!;
+    await act(async () => { go.click(); go.click(); });
+    for (let i = 0; i < 8; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(calls.filter((c) => c.method === 'POST' && c.url === '/api/desktop/setup-codes/confirm').length).toBe(1);
+  });
+
   it('an app that can take only a move (no solo) gets the same branch', async () => {
     await open(frag('move'));
     expect(container.querySelector('[data-testid=quick-agent-fixed]')).not.toBeNull();
