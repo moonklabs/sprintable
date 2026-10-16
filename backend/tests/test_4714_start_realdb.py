@@ -224,12 +224,15 @@ async def test_06_a_person_sees_and_starts_only_projects_they_can_open(world):
     plain_tm = await _plain_member()
     await _sql(f"INSERT INTO project_access (id,project_id,member_id,permission) VALUES (gen_random_uuid(),'{PROJ}','{plain_tm}','granted')")
     async with _client() as c:
-        device, agent, _owner_phone, owner_der = await _setup(c, "d4424 mac 4714f")
+        device, agent, owner_phone, owner_der = await _setup(c, "d4424 mac 4714f")
         sid = device["setup_id"]
         await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ), (agent, PROJ2)), headers=_tok(device["device_token"]))
         plain_phone, plain_der = await _register(c, PLAIN)
         await _pair(c, device["device_token"], owner_der, plain_der)
         await _sql(f"UPDATE members SET owner_member_id = '{plain_tm}' WHERE id = '{agent}'")  # may command, as the agent's owner
+        # a borrowed key lists nothing even when that key IS paired with this computer (the key must be the asker's own) — both ways
+        assert (await _list(c, agent, plain_phone, who=OWNER)).json()["computers"] == []
+        assert (await _list(c, agent, owner_phone, who=PLAIN)).json()["computers"] == []
         comp = (await _list(c, agent, plain_phone, who=PLAIN)).json()["computers"][0]
         assert comp["can_command"] is True and [p["project_id"] for p in comp["projects"]] == [str(PROJ)]
         r = await _post(c, agent, _start(plain_phone, sid, project=PROJ2), who=PLAIN)
