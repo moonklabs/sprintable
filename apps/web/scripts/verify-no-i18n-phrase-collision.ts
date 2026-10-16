@@ -409,6 +409,13 @@ export function findMemberSynonymCollisions(
 // 낀 세 쌍(3402 2·3575 1) 전부 그래서 삭제(양성대조: 제외 로직을 끄면 다시 RED가 되어야
 // 한다).
 export const EXEMPT_PAIRS = new Set<string>([
+  // story 4717 (agent room before «시작») — the room lines («이 레시피는 새 에이전트 {need}개가 필요한데, 지금 {left}개만 더 만들 수 있어요.» ·
+  // «…지금은 더 만들 수 없어요.») contain «레시피», the recipe card's own label (`desktop.setup.recipe`). Not the shape this guard is for
+  // (#2352/#2365: two counted phrases read as one another): the label counts nothing — it names the card the person chose — and the
+  // sentence says what THAT recipe needs, so the same word is the point (the old failure card said the same: «이 레시피는 에이전트 {need}개가
+  // 필요한데»). Look again if the recipe label ever carries a count («레시피 · {n}»).
+  'desktop.setup.recipe <-> desktop.setup.room.shortNone',
+  'desktop.setup.recipe <-> desktop.setup.room.short',
   // story #4624 (Yuna «미르코 범위» 08:0xZ) — [이 폰 빼기]'s confirmation («… 짝지은 컴퓨터 {n}대와 모두 끊겨요. 원격 기기 자리 하나가
   // 비고 …» · {n} = the computers that phone is paired with) contains «원격 기기», the section's own title. Not the shape this guard
   // is for (#2352/#2365: two counted phrases read as one another): the title counts nothing, and the sentence names the remote
