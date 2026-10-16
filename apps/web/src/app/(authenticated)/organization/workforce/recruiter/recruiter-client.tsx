@@ -1030,7 +1030,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
     void handleRecruit(undefined, heroStart);
   };
   const scopeLine = (() => {
-    if (scopeMode === 'org') return tSettings('agentScopeAllProjects');
+    if (scopeMode === 'org') return t('scopeLineOrg');
     const names = scopeProjectIds.map((id) => orgProjects?.find((p) => p.id === id)?.name).filter((n): n is string => Boolean(n));
     if (names.length === 0) return ''; // the project list is still being read — the line appears with it
     if (names.length >= 2) return t('scopeLineMany', { n: names.length, projects: names.join(', ') });
@@ -1289,7 +1289,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                       {recruiting ? t('hiringShort') : t('startHere')}
                     </Button>
                     <p className="break-keep text-xs text-muted-foreground" data-testid="recruiter-hero-line">
-                      {selectedRole ? t('startHereLine', { role: selectedRole.name }) : t('startHereNeedRole')}
+                      {scopeEmpty ? t('startHereNeedProject') : selectedRole ? t('startHereLine', { role: selectedRole.name }) : t('startHereNeedRole')}
                     </p>
                     {startHere.kind === 'failed' ? (
                       <p role="alert" aria-live="assertive" className="text-xs text-foreground" data-testid="recruiter-start-here-failed">{t('startHereFailed')}</p>
@@ -1476,7 +1476,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                     <Button variant="hero" onClick={pressHero} disabled={recruiting || startHere.kind === 'busy' || scopeEmpty} data-testid="recruiter-start-here-link-button">
                       {recruiting ? t('hiringShort') : t('startHere')}
                     </Button>
-                    <p className="break-keep text-xs text-muted-foreground">{selectedRole ? t('startHereLine', { role: selectedRole.name }) : ''}</p>
+                    <p className="break-keep text-xs text-muted-foreground">{scopeEmpty ? t('startHereNeedProject') : selectedRole ? t('startHereLine', { role: selectedRole.name }) : ''}</p>
                     {startHere.kind === 'ok' ? (
                       <p role="status" aria-live="polite" className="text-xs text-foreground" data-testid="recruiter-start-here-opened">{t('startHereOpened')}</p>
                     ) : null}

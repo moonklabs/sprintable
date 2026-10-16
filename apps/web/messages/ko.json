@@ -6374,6 +6374,8 @@
     "scopeLine": "이 프로젝트에서 일해요 · {project}",
     "scopeLineMany": "{n}개 프로젝트에서 일해요 · {projects}",
     "scopeChange": "바꾸기",
+    "scopeLineOrg": "모든 프로젝트에서 일해요",
+    "startHereNeedProject": "프로젝트를 하나 이상 고르면 시작할 수 있어요",
     "startHereLine": "{role} 에이전트를 채용하고, 이 컴퓨터에서 에이전트와 폴더를 골라 시작해요",
     "startHereNeedRole": "직무를 고르면 시작할 수 있어요",
     "hiringShort": "채용하는 중…",

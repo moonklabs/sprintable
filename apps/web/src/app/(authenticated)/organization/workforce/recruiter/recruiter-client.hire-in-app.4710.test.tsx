@@ -147,6 +147,20 @@ describe('[SID:4710] RecruiterClient — hiring starts the agent here', () => {
       expect(calls.find((c) => c.method === 'POST' && c.url === '/api/agents')!.body).toMatchObject({ project_ids: ['proj-1', 'proj-2'] });
     });
 
+    it('zero projects chosen: the hero is off and the line says why (not the hire line); the whole-organization choice reads as the other lines do', async () => {
+      inApp(bridgeWith(async () => ({ ok: true })));
+      await mount();
+      await pickRole();
+      expect(testid(container, 'recruiter-hero-line')!.textContent).toBe('recruiter.startHereLine({"role":"디자이너"})');
+      await click(testid(container, 'recruiter-scope-change')!);
+      await click(buttonsWithText(container, (t) => t.includes('Proj 1'))[0]!); // Proj 1 off → nothing chosen
+      expect((testid(container, 'recruiter-start-here-button') as HTMLButtonElement).disabled).toBe(true);
+      expect(testid(container, 'recruiter-hero-line')!.textContent).toBe('recruiter.startHereNeedProject'); // reverted → the hire line stays and fails here
+      await click(buttonsWithText(container, (t) => t.startsWith('settings.agentScopeAllProjects'))[0]!);
+      expect(testid(container, 'recruiter-scope-line')!.textContent).toBe('recruiter.scopeLineOrg'); // «…에서 일해요», not the bare label
+      expect((testid(container, 'recruiter-start-here-button') as HTMLButtonElement).disabled).toBe(false);
+    });
+
     it('a hire that fails: the one line (role=alert), the hero stays, nothing is handed to the app', async () => {
       recruitStatus = 500;
       const b = bridgeWith(async () => ({ ok: true }));
