@@ -197,7 +197,7 @@ describe('DesktopRemoteDevices (story #4533)', () => {
     answers([phone({ label: 'Galaxy S24', pairs: [...phone().pairs, { setup_id: 's2', device_name: 'Studio', paired_at: '2026-09-30T03:00:00Z' }] })]);
     await render();
     await act(async () => { button('이 폰 빼기')[0].click(); });
-    expect(text()).toContain('이 폰을 뺄까요? · Galaxy S24 — 빼면 그 폰으로는 승인 · 멈춤 · 지시를 할 수 없고, 짝지은 컴퓨터 2대와 모두 끊겨요. 원격 기기 자리 하나가 비고, 그 폰을 다시 쓰려면 폰에서 짝짓기를 새로 해요.');
+    expect(text()).toContain('이 폰을 뺄까요? · Galaxy S24 — 빼면 그 폰으로는 승인 · 멈춤 · 지시를 할 수 없고, 페어링된 컴퓨터 2대와 모두 끊겨요. 원격 기기 자리 하나가 비고, 그 폰을 다시 쓰려면 폰에서 페어링을 새로 해요.');
     expect(document.activeElement?.textContent).toBe('취소');
     expect(button('빼기').every((b) => b.disabled || b.closest('[role="group"]'))).toBe(true); // the pair buttons wait while it asks
     fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => (
@@ -267,7 +267,7 @@ describe('DesktopRemoteDevices (story #4533)', () => {
     expect(container.querySelectorAll('[data-testid="desktop-remote-phone"]')[0].textContent).toContain('페어링 없음');
     await act(async () => { button('이 폰 빼기')[0].click(); });
     // Yuna 08:14Z: no pair → its own line, without a cost it does not have
-    expect(text()).toContain('이 폰을 뺄까요? · Galaxy (지운 앱) — 짝지은 컴퓨터는 없어요. 빼면 원격 기기 자리 하나가 비고, 그 폰을 다시 쓰려면 폰에서 짝짓기를 새로 해요.');
+    expect(text()).toContain('이 폰을 뺄까요? · Galaxy (지운 앱) — 페어링된 컴퓨터는 없어요. 빼면 원격 기기 자리 하나가 비고, 그 폰을 다시 쓰려면 폰에서 페어링을 새로 해요.');
     expect(text()).not.toContain('0대');
     await act(async () => { button('취소')[0].click(); });
     expect(document.activeElement).toBe(button('이 폰 빼기')[0]);
