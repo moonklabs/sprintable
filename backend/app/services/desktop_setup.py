@@ -171,13 +171,33 @@ async def verify_setup_event(
 
 
 async def _active_agent_count(db: AsyncSession, org_id: uuid.UUID) -> int:
-    """The org's active agents — the same count the plan limit uses (ee/plan_limits.check_agent_add_limit, read only)."""
-    from sqlalchemy import text
+    """The org's agents as the plan limit counts them — story 4717 AC4: the one count (app/services/agent_count.py) that
+    ee/plan_limits.check_agent_add_limit and GET /desktop/recipes also call, so «available» here is the number the page showed."""
+    from app.services.agent_count import plan_agent_count
 
-    return int((await db.execute(
-        text("SELECT COUNT(*) FROM members WHERE org_id = :oid AND type = 'agent' AND is_active = true AND deleted_at IS NULL"),
-        {"oid": str(org_id)},
-    )).scalar() or 0)
+    return await plan_agent_count(db, org_id)
+
+
+async def setup_agent_room(db: AsyncSession, org_id: uuid.UUID | None) -> dict | None:
+    """story 4717 AC1 — how many more agents this organization can make, read before [시작] so the setup page can say
+    «이 레시피는 에이전트 N개가 필요해요 · 지금 M개 더 만들 수 있어요» instead of meeting a 402 after it.
+    `{limit, current, available, tier}`: the limit and the count are the ones `check_agent_add_limit` holds a confirmation to
+    (ee/plan_limits.agent_room · the one count), `available` = limit − current, never below 0 — the same number a 402's
+    `available` carries (`_with_setup_numbers`). `org_id=None` = a person with no organization yet: a new organization starts
+    with none. None = no limit is enforced (OSS · an unlimited plan): the page says nothing about a limit."""
+    if not settings.is_ee_enabled:
+        return None
+    from ee.plan_limits import agent_room, new_org_agent_limit  # type: ignore[import]
+
+    if org_id is None:
+        limit = await new_org_agent_limit(db)
+        room = None if limit is None else (limit, 0, "free")
+    else:
+        room = await agent_room(db, org_id)
+    if room is None:
+        return None
+    limit, current, tier = room
+    return {"limit": limit, "current": current, "available": max(0, limit - current), "tier": tier}
 
 
 def _with_setup_numbers(exc: HTTPException, *, needed: int, agents_before: int) -> HTTPException:

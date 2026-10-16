@@ -260,6 +260,28 @@ export function needsAnAgent(rows: readonly SetupRoleRow[]): boolean {
   return !rows.some((r) => r.owner.kind === 'agent' || r.owner.kind === 'existing');
 }
 
+/**
+ * story 4717 AC1 — the plan's agent room as the recipe list carries it (`agent_room` · services/desktop_setup.setup_agent_room):
+ * the limit and the count are the ones the confirmation will be held to (one count on the server — the publisher «시스템 발행» is not
+ * in it), so «지금 M개 더» before [시작] is the 402's `available`. `free`: tier free or not named, as the recruiter reads a 402's
+ * tier (lib/agent-limit). null = no limit holds (OSS · an unlimited plan) or a shape this page does not read: nothing is said and
+ * nothing is held — a number is never made up.
+ */
+export interface AgentRoom { limit: number; available: number; free: boolean }
+const shownWhole = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 9999;
+export function agentRoomOf(value: unknown): AgentRoom | null {
+  if (!value || typeof value !== 'object') return null;
+  const { limit, current, available, tier } = value as { limit?: unknown; current?: unknown; available?: unknown; tier?: unknown };
+  if (!shownWhole(limit) || !shownWhole(current) || !shownWhole(available) || available !== Math.max(0, limit - current)) return null;
+  return { limit, available, free: typeof tier !== 'string' || tier === '' || tier === 'free' };
+}
+
+/** story 4717 AC1 — the recipe as chosen makes more new agents than the plan has room for: «시작» stays off and the page shows the
+ * ways (an agent the organization already has for a row · upgrade · tidy up) instead of meeting a 402 after the press. */
+export function roomShort(room: AgentRoom | null, made: number): boolean {
+  return !!room && made > room.available;
+}
+
 /** «에이전트 N개» — 새로 만들 에이전트 수(새 런타임을 고른 줄). 옮겨 오는 이미 있는 에이전트는 셈하지 않는다(4565). */
 export function agentRowCount(rows: readonly SetupRoleRow[]): number {
   return rows.filter((r) => r.owner.kind === 'agent').length;

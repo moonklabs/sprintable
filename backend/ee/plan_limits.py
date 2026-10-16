@@ -345,15 +345,42 @@ async def check_agent_add_limit(session: AsyncSession, org_id) -> None:
     _seats, max_agents = offering
     if max_agents is None:
         return  # 무제한 tier
-    count = (await session.execute(
-        text(
-            "SELECT COUNT(*) FROM members "
-            "WHERE org_id = :oid AND type = 'agent' AND is_active = true AND deleted_at IS NULL"
-        ),
-        {"oid": str(org_id)},
-    )).scalar() or 0
+    # story 4717 AC4: the one count (app/services/agent_count.py) — «시스템 발행» is not one of the customer's agents
+    from app.services.agent_count import plan_agent_count
+
+    count = await plan_agent_count(session, org_id)
     if count >= max_agents:
         raise _plan_limit_error("agent", max_agents, current=count, tier=tier)
+
+
+async def _agent_limit_of_tier(session: AsyncSession, tier: str) -> int | None:
+    """A tier's agent limit as `check_agent_add_limit` enforces it — None when nothing is enforced (an unlimited tier, an
+    unknown tier or no offering row: the same fail-open as the check, so a read never shows a limit the check would not hold)."""
+    if tier not in KNOWN_TIERS:
+        return None
+    offering = await _get_offering_limits(session, tier)
+    if offering is None:
+        return None
+    return offering[1]
+
+
+async def agent_room(session: AsyncSession, org_id) -> tuple[int, int, str] | None:
+    """story 4717 AC1 — (limit, current, tier) for the setup page's «지금 M개 더 만들 수 있어요» before [시작], read with the same
+    tier rule and the same count as `check_agent_add_limit` (the tier: the web words the limit as the 402's `tier` does).
+    None = no limit is enforced for this org (nothing to show)."""
+    from app.services.agent_count import plan_agent_count
+
+    tier = await _get_org_tier(session, org_id)
+    limit = await _agent_limit_of_tier(session, tier)
+    if limit is None:
+        return None
+    return limit, await plan_agent_count(session, org_id), tier
+
+
+async def new_org_agent_limit(session: AsyncSession) -> int | None:
+    """story 4717 AC1 — the agent limit a person with no organization yet will have: a new organization has no
+    subscription row, which `_get_org_tier` reads as free. None = not enforced."""
+    return await _agent_limit_of_tier(session, "free")
 
 
 # story #3176 — 크론 주기(5분, cron.py::au_usage_warn) 대비 3배 여유. 이 창 안에서 크론이
