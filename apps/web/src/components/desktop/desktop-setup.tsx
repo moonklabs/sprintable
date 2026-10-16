@@ -1054,7 +1054,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       )}
 
       {/* what the agents ask and what they do not (PO 00:41Z · Yuna v17): Sprintable's own tools are pre-allowed; files ·
-          commands · other tools still ask each time — at the end of the flow, just above the start row (4446) */}
+          commands · other tools follow the person's own Claude Code · Codex settings on that computer (story 4708 — the app no longer
+          promises «ask each time») — at the end of the flow, just above the start row (4446) */}
       <p className="text-xs text-muted-foreground">{t('toolNote')}</p>
 
       {/* «시작» and its one line stay in sight (4446 · Yuna b2d15f85 ② · PO 00:31Z): stuck to the bottom of whatever scrolls —
