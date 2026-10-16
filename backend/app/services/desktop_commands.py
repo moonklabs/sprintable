@@ -367,6 +367,8 @@ async def create_start(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
     from app.services.project_auth import has_project_access
 
     agent = await _agent(db, org_id, agent_id)
+    if not agent.is_active:  # a deactivated agent starts nothing (a stop / end stays possible — they end a session that may still run)
+        raise DesktopRelayError(409, "agent_inactive", "this agent is not active")
     setup = next((s for s in await _agent_setups(db, org_id, agent_id) if s.id == body.setup_id), None)
     if setup is None:  # no such computer of this agent in this org — another org's, another agent's or none: the same answer
         raise DesktopRelayError(404, "computer_not_found", "no such computer for this agent")
@@ -374,6 +376,9 @@ async def create_start(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
         raise DesktopRelayError(403, "not_allowed_to_command", "you cannot command this agent")
     if body.project_id not in await _agent_projects(db, agent_id) or not await has_project_access(db, user_id, body.project_id, org_id):
         raise DesktopRelayError(404, "project_not_found", "no such project of this agent")
+    # two presses of the same key at once must not both miss the first row and meet the UNIQUE key at the insert (a 500): the computer's row
+    # is locked here, so the second waits for the first commit and then finds its command (enqueue_command takes the same row's lock later)
+    await db.execute(select(DesktopSetup.id).where(DesktopSetup.id == setup.id).with_for_update())
     # the same press again (the same key) gets back the command it made — asked after who may press and whose computer it is
     existing = (await db.execute(
         select(DesktopCommand).where(DesktopCommand.setup_id == setup.id,
@@ -410,7 +415,7 @@ async def startable_view(db: AsyncSession, *, member_id: uuid.UUID, member_role:
     if not await can_view(db, user_id=user_id, org_id=org_id, agent_id=agent_id):
         raise DesktopRelayError(404, "agent_not_found", "no such agent")
     agent = await _agent(db, org_id, agent_id)
-    setups = await _agent_setups(db, org_id, agent_id)
+    setups = await _agent_setups(db, org_id, agent_id) if agent.is_active else []  # a deactivated agent has nothing to start
     reachable = await _reachable(db, {s.id for s in setups}, _now())
     computers: list[dict] = []
     for setup in setups:

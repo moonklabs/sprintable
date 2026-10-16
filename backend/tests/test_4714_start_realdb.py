@@ -236,3 +236,43 @@ async def test_06_a_person_sees_and_starts_only_projects_they_can_open(world):
         assert (r.status_code, r.json()["error"]["code"]) == (404, "project_not_found")
         assert (await _post(c, agent, _start(plain_phone, sid, project=PROJ), who=PLAIN)).status_code == 201
         assert len(await _commands(sid)) == 1
+
+
+async def test_07_a_key_is_one_persons_own_and_a_deactivated_agent_starts_nothing_and_is_offered_nothing(world):
+    """Two people who may both press with the SAME idempotency key get their own commands (the key is namespaced by the person); a
+    deactivated agent with a live computer, pairing and folder pair is neither offered nor started."""
+    plain_tm = await _plain_member()
+    await _sql(f"INSERT INTO project_access (id,project_id,member_id,permission) VALUES (gen_random_uuid(),'{PROJ}','{plain_tm}','granted')",
+               f"UPDATE org_members SET role = 'admin' WHERE org_id = '{ORG}' AND user_id = '{PLAIN}'")
+    async with _client() as c:
+        device, agent, owner_phone, owner_der = await _setup(c, "d4424 mac 4714g")
+        sid = device["setup_id"]
+        await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ)), headers=_tok(device["device_token"]))
+        plain_phone, plain_der = await _register(c, PLAIN)
+        await _pair(c, device["device_token"], owner_der, plain_der)
+        key = str(uuid.uuid4())
+        mine = await _post(c, agent, _start(owner_phone, sid, key=key))
+        theirs = await _post(c, agent, _start(plain_phone, sid, key=key), who=PLAIN)  # an org admin: may press, with their own phone
+        assert (mine.status_code, theirs.status_code) == (201, 201), (mine.text, theirs.text)
+        assert mine.json()["command_id"] != theirs.json()["command_id"]
+        assert len(await _commands(sid)) == 2
+        # deactivated agent: not offered, not started
+        await _sql(f"UPDATE members SET is_active = false WHERE id = '{agent}'")
+        assert (await _list(c, agent, owner_phone)).json()["computers"] == []
+        r = await _post(c, agent, _start(owner_phone, sid))
+        assert (r.status_code, r.json()["error"]["code"]) == (409, "agent_inactive")
+        assert len(await _commands(sid)) == 2
+
+
+async def test_08_two_presses_of_one_key_at_once_make_one_command_not_a_500(world):
+    import asyncio
+
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4714h")
+        sid = device["setup_id"]
+        await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ)), headers=_tok(device["device_token"]))
+        key = str(uuid.uuid4())
+        answers = await asyncio.gather(*[_post(c, agent, _start(phone, sid, key=key)) for _ in range(4)])
+        assert [a.status_code for a in answers] == [201, 201, 201, 201], [a.text for a in answers]
+        assert len({a.json()["command_id"] for a in answers}) == 1
+        assert len(await _commands(sid)) == 1
