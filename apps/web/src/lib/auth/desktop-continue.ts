@@ -37,6 +37,24 @@ export function parseContinueStart(q: Getter): ContinueStart | null {
   return { challenge, returnApp };
 }
 
+const START_KEYS = ['code_challenge', 'cc_method', 'callback_mode', RETURN_APP_QUERY] as const;
+
+/**
+ * the four start parameters out of a request body or a page's search params — null when any of them is present but not ONE string (a number,
+ * `null`, a list, a repeated query key). An optional `return_app` that is malformed must not read as «absent» and fall to the default app.
+ * Other keys are not read at all.
+ */
+export function startParamsFrom(raw: Record<string, unknown>): URLSearchParams | null {
+  const q = new URLSearchParams();
+  for (const k of START_KEYS) {
+    const v = raw[k];
+    if (v === undefined) continue;
+    if (typeof v !== 'string') return null;
+    q.set(k, v);
+  }
+  return q;
+}
+
 /** the start parameters in the shape the page keeps them in its own address (for the sign-in round trip and the button's body) */
 export function continueQuery(start: ContinueStart): string {
   const p = new URLSearchParams({ code_challenge: start.challenge, cc_method: 'S256', callback_mode: 'custom_scheme' });

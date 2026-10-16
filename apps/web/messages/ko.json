@@ -1561,13 +1561,13 @@
   "desktopContinue": {
     "title": "이 컴퓨터의 앱을 열까요?",
     "account": "{account} 계정으로 로그인해요.",
-    "body": "열면 이 컴퓨터의 Sprintable 앱이 이 계정으로 로그인돼요. 직접 연 것이 아니라면 열지 마세요.",
+    "body": "열면 이 컴퓨터의 Sprintable 앱이 이 계정으로 로그인돼요. 앱에서 직접 시작한 게 아니라면 열지 마세요.",
     "open": "열기",
     "opening": "여는 중…",
-    "otherAccount": "다른 계정으로",
+    "otherAccount": "로그아웃하고 다른 계정으로",
     "error": "열지 못했어요. 잠시 뒤 다시 눌러 주세요.",
     "invalidTitle": "앱에서 열어 주세요",
-    "invalidBody": "이 화면은 Sprintable 앱이 처음 열릴 때 브라우저에 띄워요. 앱에서 다시 시작해 주세요."
+    "invalidBody": "이 화면은 앱이 브라우저로 보낼 때만 열려요. 앱에서 로그인을 다시 시작해 주세요."
   },
   "nativeOauthReturn": {
     "title": "로그인이 완료됐어요",

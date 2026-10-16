@@ -188,3 +188,34 @@ describe('next.config.ts 모듈 레벨 가드 — NEXT_PUBLIC_APP_URL 배포 빌
     await expect(import('./next.config')).resolves.toBeDefined();
   });
 });
+
+describe('the two pages that carry a one-time code in their address (story 4712 · Kadir v2 lens cond. 5)', () => {
+  async function headerGroups() {
+    vi.resetModules();
+    const mod = await import('./next.config');
+    const config = mod.default as { headers?: () => Promise<Array<{ source: string; headers: Array<{ key: string; value: string }> }>> };
+    return config.headers!();
+  }
+
+  it('/native/continue and /native/oauth-return get Referrer-Policy: no-referrer and Cache-Control: no-store', async () => {
+    const groups = await headerGroups();
+    const g = groups.find((x) => x.source.startsWith('/native/'));
+    expect(g).toBeDefined();
+    expect(g!.source).toBe('/native/:page(continue|oauth-return)');
+    expect(g!.headers).toEqual(expect.arrayContaining([
+      { key: 'Referrer-Policy', value: 'no-referrer' },
+      { key: 'Cache-Control', value: 'no-store' },
+    ]));
+  });
+
+  it('the group repeats the whole catch-all set (frame ban · CSP …) with only Referrer-Policy different, and no header key twice', async () => {
+    const groups = await headerGroups();
+    const all = groups.find((x) => x.source === '/(.*)')!;
+    const native = groups.find((x) => x.source.startsWith('/native/'))!;
+    const keys = native.headers.map((h) => h.key);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(native.headers.find((h) => h.key === 'X-Frame-Options')?.value).toBe('DENY');
+    for (const h of all.headers.filter((x) => x.key !== 'Referrer-Policy')) expect(native.headers).toContainEqual(h);
+    expect(all.headers.find((h) => h.key === 'Referrer-Policy')!.value).toBe('strict-origin-when-cross-origin'); // everywhere else unchanged
+  });
+});

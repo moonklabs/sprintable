@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { getServerSession } from '@/lib/db/server';
 import { expectedReturnUri } from '@/lib/auth/oauth-callback-mode';
-import { continueReturnPath, parseContinueStart } from '@/lib/auth/desktop-continue';
+import { continueReturnPath, parseContinueStart, startParamsFrom } from '@/lib/auth/desktop-continue';
 import { overContinueLimit } from '@/lib/auth/desktop-continue-limit';
 import { BFF_BACKEND_EXTERNAL_CHAIN_TIMEOUT_MS } from '@/lib/backend-signal';
 import { backendFetch } from '@/lib/backend-fetch';
@@ -30,10 +30,10 @@ export async function POST(request: Request): Promise<Response> {
   let raw: unknown;
   try { raw = await request.json(); } catch { return fail(400, 'BAD_REQUEST'); }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fail(400, 'BAD_REQUEST');
-  const q = new URLSearchParams();
-  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) if (typeof v === 'string') q.set(k, v);
-  // Kadir v2 ①: where the code may go is a closed table; off the table → refused, the issue is never called
-  const start = parseContinueStart(q);
+  // Kadir v2 ①: where the code may go is a closed table; off the table → refused, the issue is never called (a start parameter that is not one
+  // string — `null`, a list — is off the table too, not «absent»)
+  const q = startParamsFrom(raw as Record<string, unknown>);
+  const start = q && parseContinueStart(q);
   if (!start) return fail(400, 'BAD_START');
 
   if (overContinueLimit(session.user_id, Date.now())) return fail(429, 'RATE_LIMITED');

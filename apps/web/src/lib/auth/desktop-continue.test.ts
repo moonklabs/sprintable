@@ -1,7 +1,7 @@
 // story 4712 — «브라우저 이어받기»: the app's start parameters are checked as a CLOSED set (Kadir v2 ①): off by one character, one method, one mode or
 // one app name and the whole start is refused — nothing is partly accepted, and the route never calls the issue for a refused start.
 import { describe, expect, it } from 'vitest';
-import { CONTINUE_CHALLENGE_RE, continueQuery, continueReturnPath, parseContinueStart } from './desktop-continue';
+import { CONTINUE_CHALLENGE_RE, continueQuery, continueReturnPath, parseContinueStart, startParamsFrom } from './desktop-continue';
 
 const CH = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM'; // 43 chars, the RFC 7636 appendix B challenge
 const q = (o: Record<string, string>) => new URLSearchParams(o);
@@ -57,6 +57,15 @@ describe('continueQuery · continueReturnPath', () => {
     for (const returnApp of [null, 'dev', 'check'] as const) {
       const start = { challenge: CH, returnApp };
       expect(parseContinueStart(new URLSearchParams(continueQuery(start)))).toEqual(start);
+    }
+  });
+
+  it('startParamsFrom: only the four start keys are read, each as ONE string — a present non-string (null · number · list) refuses the whole start', () => {
+    expect(startParamsFrom({ ...good, return_app: 'dev', utm_source: ['x', 'y'], other: 1 })?.toString()).toBe(new URLSearchParams({ ...good, return_app: 'dev' }).toString());
+    expect(startParamsFrom({})?.toString()).toBe('');
+    for (const bad of [null, 1, true, ['dev'], ['dev', 'dev'], {}]) {
+      expect(startParamsFrom({ ...good, return_app: bad })).toBeNull();
+      expect(startParamsFrom({ ...good, code_challenge: bad })).toBeNull();
     }
   });
 

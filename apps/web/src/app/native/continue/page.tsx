@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { getServerSession } from '@/lib/db/server';
-import { CONTINUE_PATH, continueQuery, parseContinueStart } from '@/lib/auth/desktop-continue';
+import { CONTINUE_PATH, continueQuery, parseContinueStart, startParamsFrom } from '@/lib/auth/desktop-continue';
 import { DesktopContinueCard } from '@/components/desktop/desktop-continue-card';
 
 /**
@@ -12,9 +12,8 @@ import { DesktopContinueCard } from '@/components/desktop/desktop-continue-card'
  */
 export default async function DesktopContinuePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const raw = await searchParams;
-  const q = new URLSearchParams();
-  for (const [k, v] of Object.entries(raw)) if (typeof v === 'string') q.set(k, v);
-  const start = parseContinueStart(q);
+  const q = startParamsFrom(raw); // a start parameter given twice (a list) is off, not «absent»
+  const start = q && parseContinueStart(q);
   const t = await getTranslations('desktopContinue');
 
   if (!start) {

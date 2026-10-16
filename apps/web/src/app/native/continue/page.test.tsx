@@ -55,6 +55,7 @@ describe('/native/continue', () => {
     ['https mode', { ...GOOD, callback_mode: 'https' }],
     ['an app off the table', { ...GOOD, return_app: 'prod' }],
     ['a challenge given twice', { ...GOOD, code_challenge: [CH, CH] }],
+    ['an optional app given twice (not «absent»)', { ...GOOD, return_app: ['dev', 'dev'] }],
   ])('%s → "open this from the app", no card, and no sign-in is asked for', async (_n, sp) => {
     const html = await render(sp);
     expect(html).toContain('invalidTitle');

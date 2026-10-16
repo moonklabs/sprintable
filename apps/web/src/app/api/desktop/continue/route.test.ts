@@ -108,6 +108,13 @@ describe('POST /api/desktop/continue', () => {
     expect(h.backendFetch).not.toHaveBeenCalled();
   });
 
+  it('an optional return_app that is malformed (null · a number · a list) is refused, not read as «absent» and defaulted (codex round: LOW)', async () => {
+    for (const bad of [null, 1, ['dev'], ['dev', 'dev'], {}]) {
+      expect((await route.POST(post({ ...GOOD, return_app: bad }))).status).toBe(400);
+    }
+    expect(h.backendFetch).not.toHaveBeenCalled();
+  });
+
   it('the server cannot issue (error · no code · network) → 502 and no code anywhere in the answer', async () => {
     h.backendFetch.mockResolvedValueOnce(new Response('{}', { status: 500 }));
     expect((await route.POST(post(GOOD))).status).toBe(502);

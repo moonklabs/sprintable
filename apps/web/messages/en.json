@@ -1561,13 +1561,13 @@
   "desktopContinue": {
     "title": "Open the app on this computer?",
     "account": "You will sign in as {account}.",
-    "body": "If you open it, the Sprintable app on this computer signs in with this account. If you did not start this yourself, do not open it.",
+    "body": "If you open it, the Sprintable app on this computer signs in with this account. If you didn't start this from the app, don't open it.",
     "open": "Open",
     "opening": "Opening…",
-    "otherAccount": "Use another account",
+    "otherAccount": "Sign out and use another account",
     "error": "Could not open it. Please press it again in a moment.",
     "invalidTitle": "Open this from the app",
-    "invalidBody": "The Sprintable app shows this page in your browser the first time it opens. Please start again from the app."
+    "invalidBody": "This page only opens when the app sends you to the browser. Please start sign-in again from the app."
   },
   "nativeOauthReturn": {
     "title": "You're signed in",

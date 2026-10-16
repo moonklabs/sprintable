@@ -51,11 +51,13 @@ describe('DesktopContinueCard', () => {
     mount('ko');
     expect(container.querySelector('[data-testid=continue-account]')?.textContent).toBe('jay@example.com 계정으로 로그인해요.');
     expect(container.textContent).toContain('이 컴퓨터의 Sprintable 앱이 이 계정으로 로그인돼요');
+    expect(container.textContent).toContain('앱에서 직접 시작한 게 아니라면 열지 마세요'); // Yuna: what «직접 연» meant was ambiguous
     expect(button('열기')).toBeTruthy();
-    expect(button('다른 계정으로')).toBeTruthy();
+    expect(button('로그아웃하고 다른 계정으로')).toBeTruthy();
     act(() => root.unmount()); root = createRoot(container);
     mount('en');
     expect(container.querySelector('[data-testid=continue-account]')?.textContent).toBe('You will sign in as jay@example.com.');
+    expect(button('Sign out and use another account')).toBeTruthy(); // the link says it signs this browser out
     expect(f).not.toHaveBeenCalled();
     expect(assign).not.toHaveBeenCalled();
   });
@@ -100,11 +102,11 @@ describe('DesktopContinueCard', () => {
     expect(assign).not.toHaveBeenCalled();
   });
 
-  it('[다른 계정으로] signs this browser out and returns to this same page (the start kept)', async () => {
+  it('[로그아웃하고 다른 계정으로] signs this browser out and returns to this same page (the start kept)', async () => {
     const f = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
     vi.stubGlobal('fetch', f);
     mount('ko');
-    act(() => button('다른 계정으로').click());
+    act(() => button('로그아웃하고 다른 계정으로').click());
     await flush();
     expect(f).toHaveBeenCalledWith('/api/auth/logout', expect.objectContaining({ method: 'POST' }));
     expect(assign).toHaveBeenCalledWith(`/login?next=${encodeURIComponent(HERE)}`);
