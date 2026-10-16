@@ -172,8 +172,11 @@ describe('닫는 일 · 머리 · 빈 본문 (codex 검수 반영)', () => {
     expect(d1.closed).toBe(true);
     const d2 = createBffDispatcher(url, { connect: { ca: cert } });
     made.push(d2);
+    setGlobalDispatcher(d2);
+    await fetch(`${url}/y`, { method: 'DELETE', headers: JSON_HDR, body: BODY }); // h1 쪽을 실제로 만든 뒤 콜백 판으로 닫는다
     await new Promise<void>((resolve) => { d2.close(() => resolve()); });
     expect(d2.closed).toBe(true);
+    await expect(fetch(`${url}/z`, { method: 'DELETE', headers: JSON_HDR, body: BODY })).rejects.toBeTruthy();
   });
 
   it('한 번 읽으면 끝나는 머리(제너레이터)는 분류가 읽지 않는다 — 읽으면 undici가 받을 머리가 사라진다', () => {

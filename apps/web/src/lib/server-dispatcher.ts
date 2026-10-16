@@ -78,7 +78,15 @@ export function createBffDispatcher(
   type Lifecycle = (...args: unknown[]) => unknown;
   const alsoH1 = (base: Lifecycle, side: (args: unknown[]) => Promise<unknown> | undefined): Lifecycle => (...args) => {
     const sideDone = Promise.resolve(side(args)).catch(() => undefined);
-    if (args.some((a) => typeof a === 'function')) { base(...args); return undefined; }
+    const cbAt = args.findIndex((a) => typeof a === 'function');
+    if (cbAt !== -1) {
+      // 콜백 판: 부르는 쪽 콜백은 원 Agent와 h1이 둘 다 끝난 뒤에 불린다.
+      const next = [...args];
+      const cb = args[cbAt] as (...r: unknown[]) => void;
+      next[cbAt] = (...r: unknown[]) => { void sideDone.then(() => cb(...r)); };
+      base(...next);
+      return undefined;
+    }
     const baseDone = new Promise<void>((resolve, reject) => { base(...args, (err: Error | null) => (err ? reject(err) : resolve())); });
     return Promise.all([sideDone, baseDone]).then(() => undefined);
   };
