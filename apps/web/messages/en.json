@@ -1573,7 +1573,7 @@
       "failed": "Couldn't turn on remote control — please try again"
     },
     "download": {
-      "afterNote": "After the download, just open the app. You can close this window.",
+      "afterNote": "After the download, open the app and continue with the same account. You can close this window.",
       "laterNote": "You don't have to download now — you can reopen this screen from Settings › «Get the desktop app»."
     },
     "verifyStatusDone": "Done",
@@ -1635,7 +1635,7 @@
     "keyOneTimeNote": "The API key is shown only once — copy it now.",
     "desktopHandoffSubtitle": "Download and open it to finish setup in the desktop app.",
     "webConnectSecondaryLabel": "Or continue on the web",
-    "desktopOpenAppNote": "Open the app and the browser continues with this account",
+    "desktopOpenAppNote": "Open the app and continue with this account",
     "desktopFinishToToday": "Go to Today",
     "restartAfterConfig": "Once you've saved the config, restart Claude Code — the new connection only takes effect after a restart.",
     "verifyWaiting": "Checking the connection… retrying automatically.",
@@ -1690,7 +1690,7 @@
     "projectSubtitleNoOrg": "Create your first project.",
     "first": {
       "macTitle": "Your agents run on your Mac",
-      "macLead": "Download the Mac app and open it — choose a folder and your agent starts right away. Needs Claude Code or Codex on this Mac.",
+      "macLead": "Download the Mac app, open it and continue with the same account — then choose a folder and your agent starts right away. Needs Claude Code or Codex on this Mac.",
       "macCta": "Get the Mac app",
       "notMacTitle": "There's only a Mac app for now",
       "notMacLead": "Sign in with this account on a Mac and get the app to start an agent. An agent already running somewhere else can be connected right now.",
