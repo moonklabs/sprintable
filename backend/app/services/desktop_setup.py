@@ -37,7 +37,9 @@ from app.models.api_key import ApiKey
 from app.models.desktop_setup import DesktopSetup
 from app.services.oauth_handoff import pkce_challenge_from_verifier
 
-SETUP_CODE_TTL = timedelta(minutes=10)
+# story 4669 (U6): 30 minutes — a person who signs up on the web, installs the app and comes back to the setup page found the
+# code gone at 10 (failure.expired). The app polls until this `expires_at` (setup-flow.ts), so the number lives here only.
+SETUP_CODE_TTL = timedelta(minutes=30)
 # story #4426 ② — the setup's own steps, written by the backend (grouped by `session_id` = the setup id). A person's action
 # carries `meta.human_hand = true`; the one-line read counts those.
 EVENT_CODE_ISSUED = "desktop_setup_code_issued"
@@ -60,10 +62,13 @@ EVENT_DOC_OPENED = "desktop_doc_opened"
 EVENT_AGENT_ENDED_EARLY = "desktop_agent_ended_early"
 EVENT_AGENT_RESTARTED = "desktop_agent_restarted"
 EVENT_AGENT_START_FAILED = "desktop_agent_start_failed"  # story #4452
+EVENT_AGENT_NEEDS_SIGN_IN = "desktop_agent_needs_sign_in"  # story #4658
+EVENT_AGENT_SIGN_IN_CLEARED = "desktop_agent_sign_in_cleared"  # story #4658 (the question is over)
 from app.services.onboarding_funnel import START_FAILED_CODES, START_FAILED_REASONS  # noqa: E402
 from app.services.onboarding_funnel import EXIT_CODE_RANGE as _EXIT_CODE_RANGE  # noqa: E402
-# the desktop app's runtime ids → members.runtime_type (the values the rest of the product uses)
-RUNTIME_TYPES = {"claude": "claude-code", "codex": "codex"}
+# the desktop app's runtime ids → members.runtime_type (the values the rest of the product uses) — story 4680: the table lives in
+# agent_runtime.py (runtime_capabilities carries its inverse); this name stays for the readers here
+from app.services.agent_runtime import DESKTOP_RUNTIME_TYPES as RUNTIME_TYPES  # noqa: E402
 _CHALLENGE_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")  # base64url(sha256) without padding
 _VERIFIER_RE = re.compile(r"^[A-Za-z0-9._~-]{43,128}$")  # RFC 7636 §4.1
 
@@ -204,6 +209,7 @@ class RoleChoice:
     runtime: str | None = None
     owner: str | None = None
     agent_id: str | None = None
+    tools: list[str] | None = None  # story 4653 (PO 14015): the CLI names this agent uses — cleaned by clean_agent_tools
 
 
 @dataclass
@@ -215,6 +221,7 @@ class RoleBinding:
     person_roles: set[str]
     agent_runtimes: dict[str, str]
     existing_agents: dict[str, uuid.UUID] = field(default_factory=dict)
+    agent_tools: dict[str, list[str]] = field(default_factory=dict)  # story 4653: role → cleaned tool names
 
 
 # the product's limits for one setup (PO 06:04Z: judged here with recipe_too_large, not by the request schema)
@@ -238,12 +245,15 @@ def bind_setup_roles(rows: list[dict], roles: list[RoleChoice]) -> RoleBinding:
     person = {r["role"] for r in rows if r["kind"] == "human"}
     runtimes: dict[str, str] = {}
     existing: dict[str, uuid.UUID] = {}
+    agent_tools: dict[str, list[str]] = {}
     seen: set[str] = set()
     for r in roles:
         k = kind.get(r.role)
         if r.role in seen or k is None or k == "human":
             raise DesktopSetupError("roles_invalid", f"role {r.role!r}")
         seen.add(r.role)
+        if r.tools is not None:
+            agent_tools[r.role] = clean_agent_tools(r.tools)
         if sum(x is not None for x in (r.runtime, r.owner, r.agent_id)) > 1:
             raise DesktopSetupError("roles_invalid", f"role {r.role!r}: one of a runtime, owner or agent")
         if r.agent_id is not None:
@@ -266,7 +276,27 @@ def bind_setup_roles(rows: list[dict], roles: list[RoleChoice]) -> RoleBinding:
         raise DesktopSetupError("roles_invalid", f"a runtime is needed for: {missing}")
     if not runtimes and not existing:
         raise DesktopSetupError("no_agent_role", "every row is the person's — the setup starts at least one agent")
-    return RoleBinding(order=order, person_roles=person, agent_runtimes=runtimes, existing_agents=existing)
+    return RoleBinding(order=order, person_roles=person, agent_runtimes=runtimes, existing_agents=existing, agent_tools=agent_tools)
+
+
+def group_exchange_agents(members: list[dict], kind: str) -> dict[str, dict]:
+    """The agents an exchange hands over, one entry per agent (pure — story 4653 ④). A recipe's agent appears once per stage, so
+    its tools are the union of its rows' tools (cleaned, the runtime left out); a move's agent is its id, runtime and tools."""
+    per_agent: dict[str, dict] = {}
+    for m in members:
+        if m["kind"] != "agent":
+            continue
+        if kind == "move":
+            # story #4576 (PO 04:24Z): a move's agent — its id and runtime (its name is added with its new key below); no recipe
+            # role or stages, there is no recipe
+            per_agent.setdefault(m["member_id"], {"member_id": m["member_id"], "runtime": m["runtime"], "existing": True, "tools": clean_agent_tools(m.get("tools"), m.get("runtime"))})
+            continue
+        entry = per_agent.setdefault(m["member_id"], {"member_id": m["member_id"], "role": m.get("role") or m["stage"], "stages": [], "runtime": m["runtime"], "tools": []})
+        entry["tools"] = clean_agent_tools([*entry["tools"], *(clean_agent_tools(m.get("tools"), m.get("runtime")))], m.get("runtime"))
+        if m.get("existing"):
+            entry["existing"] = True
+        entry["stages"].append(m["stage"])
+    return per_agent
 
 
 def stage_role(definition, stage: str) -> str:
@@ -503,6 +533,36 @@ async def _check_confirmable(
     await require_project_access(db, user_id, project_id, org_id, not_found_detail="Project not found")
 
 
+# story 4653 (PO 14015 (가)-a): the CLIs an agent of this setup uses — names only, kept on its member. The app checks these
+# (and claude · codex always); a name that is not a short plain word is dropped, and the list is capped.
+# ONE rule for the names (PO 17027 ②): a short lowercase word of 1–24 characters. The web's setup screen keeps the same rule
+# (apps/web lib/desktop-setup.ts AGENT_TOOL_NAME_RE + AGENT_TOOL_NAME_MAX), and the request refuses a name outside it with a 422.
+AGENT_TOOL_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,23}$")
+AGENT_TOOL_NAME_MAX = 24
+AGENT_TOOLS_CAP = 8  # the list in all, the runtime included
+
+
+def bad_agent_tool_names(raw: list) -> list[str]:
+    """The names in a request list that are not on the rule (PO 17027 ②: the request refuses them with a 422 that names them)."""
+    return [str(x) for x in raw if not (isinstance(x, str) and AGENT_TOOL_NAME.fullmatch(x))]
+
+
+def clean_agent_tools(raw: object, runtime: str | None = None) -> list[str]:
+    """The tool names one member keeps, for what is stored and handed to the app: names on the rule, no repeat, the runtime
+    NOT among them (the runtime's own sign-in is always checked — PO 17027 ④ «런타임 칩 중복 제거»), at most AGENT_TOOLS_CAP.
+    Anything else (not a list, a non-string, a name off the rule) is dropped here, never raised on — the request is refused
+    before it gets this far (RoleIn)."""
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for item in raw:
+        if isinstance(item, str) and AGENT_TOOL_NAME.fullmatch(item) and item != runtime and item not in out:
+            out.append(item)
+        if len(out) >= AGENT_TOOLS_CAP:
+            break
+    return out
+
+
 def setup_kind(setup: DesktopSetup) -> str | None:
     """story #4576 — which kind of setup this is (the web's progress: a move has two steps, ready → Sprintable connected, and no
     first task or result · the app attaches a move's agents with no recipe role or stages): «move» = confirmed with no recipe ·
@@ -546,6 +606,7 @@ async def confirm_move_setup(
     if len(roles) > SETUP_MAX_ROLES:
         raise DesktopSetupError("recipe_too_large", f"{len(roles)} agents (at most {SETUP_MAX_ROLES})")
     agent_ids: list[uuid.UUID] = []
+    tools_by_agent: dict[uuid.UUID, list[str] | None] = {}
     for r in roles:
         if r.runtime is not None or r.owner is not None or not r.agent_id:
             raise DesktopSetupError("move_needs_existing_agents", "every row of a move is an agent the organization already has")
@@ -556,13 +617,15 @@ async def confirm_move_setup(
         if agent_id in agent_ids:
             raise DesktopSetupError("roles_invalid", "the same agent twice")
         agent_ids.append(agent_id)
+        tools_by_agent[agent_id] = r.tools
 
     members: list[dict] = []
     for agent_id in agent_ids:
         runtime = await _attachable_runtime(db, org_id=org_id, project_id=project_id, agent_id=agent_id)
         name = (await db.execute(select(Member.name).where(Member.id == agent_id))).scalar_one_or_none() or ""
         # PO 04:24Z — a move's agent is its id, its runtime and its own name: no recipe role, no stages
-        members.append({"member_id": str(agent_id), "kind": "agent", "runtime": runtime, "existing": True, "name": " ".join(name.split())[:120]})
+        members.append({"member_id": str(agent_id), "kind": "agent", "runtime": runtime, "existing": True, "name": " ".join(name.split())[:120],
+                        "tools": clean_agent_tools(tools_by_agent.get(agent_id), runtime)})  # story 4653
 
     setup.org_id = org_id
     setup.project_id = project_id
@@ -669,6 +732,8 @@ async def confirm_setup(
             "runtime": None if human else choices[role],
             # story #4565: attached, not made by this setup — its old keys are revoked at the exchange; «disconnect» never stops it
             **({"existing": True} if role in existing else {}),
+            # story 4653: the CLI names this agent uses (the exchange hands them to the app; none for a person's row)
+            **({} if human else {"tools": clean_agent_tools(binding.agent_tools.get(role), choices[role])}),
         })
         await upsert_role_binding(
             db, org_id=org_id, project_id=project_id, definition_key=definition.key, stage=stage, target="agent",
@@ -745,6 +810,10 @@ class Exchanged:
     device_token: str | None = None
     # story #4576 — «move» · «recipe»
     setup_kind: str | None = None
+    # [SID:4681] (D3 · piece ③) — which project this setup was for: the app keeps it on each agent's profile, so a start on that
+    # Mac can use the project's folder (chosen in the new-project dialog) when the agent has not picked one of its own. An added
+    # field — an older app ignores it; None for a setup with no project (a move).
+    project_id: uuid.UUID | None = None
 
 
 async def _lock_in_order(db: AsyncSession, *, member_ids: set[uuid.UUID], setup_ids: set[uuid.UUID]) -> dict[uuid.UUID, DesktopSetup]:
@@ -835,7 +904,65 @@ async def list_attachable_agents(db: AsyncSession, *, user_id: uuid.UUID, org_id
     ]
 
 
-async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Exchanged | None:
+_DEVICE_ID_RE = re.compile(r"^[0-9a-f]{64}$")  # sha256 hex of the app's machine id
+
+
+MACHINE_KEY_INFO = b"sprintable/desktop-machine-key/v1"
+
+
+def _hkdf_sha256(ikm: bytes, *, info: bytes, length: int = 32) -> bytes:
+    """RFC 5869 HKDF with SHA-256 and no salt: extract, then expand (32 bytes = one block). Stdlib only."""
+    prk = hmac.new(b"\x00" * hashlib.sha256().digest_size, ikm, hashlib.sha256).digest()
+    return hmac.new(prk, info + b"\x01", hashlib.sha256).digest()[:length]
+
+
+def machine_key_for(org_id: uuid.UUID, device_id: str | None) -> str | None:
+    """story 4660 — the org-scoped key of a machine: HMAC(server secret, org_id|device_id). None (fail-safe) when the app sent
+    no valid device_id or the server has no secret — then nothing is stored and no old line is closed. Never HMAC with an
+    empty key."""
+    # the secret is the one the channel OAuth state already signs with (bound in dev and prod). Rotating it only changes
+    # the machine keys — the old lines then stay open as new ones; no login or stored credential depends on it.
+    secret = settings.channel_oauth_state_secret
+    if not secret or not device_id or not _DEVICE_ID_RE.match(device_id):
+        return None
+    key = _hkdf_sha256(secret.encode(), info=MACHINE_KEY_INFO)
+    return hmac.new(key, f"{org_id}|{device_id}".encode(), hashlib.sha256).hexdigest()
+
+
+def _agents_of(setup: DesktopSetup) -> frozenset[uuid.UUID]:
+    """Every agent a setup carries — what «the same agents set up again» is measured by (story 4660 · PO 10-15)."""
+    return frozenset(uuid.UUID(str(m["member_id"])) for m in (setup.members or []) if m.get("kind") == "agent")
+
+
+async def _retire_same_machine(
+    db: AsyncSession, *, machine_key: str, others: list[DesktopSetup], now: datetime,
+    new_agents: frozenset[uuid.UUID] | set[uuid.UUID], before: dict[uuid.UUID, frozenset[uuid.UUID]],
+) -> int:
+    """story 4660 — a new setup on the same machine (same org, same machine key) replaces an older line only when it is the
+    SAME agents set up again: the older line's agents (`before` — as they were before this exchange moved agents out of it) are
+    all among the new setup's agents (`new_agents`). A line with no agent left is covered by anything. Another lane's setup on
+    the same computer carries other agents and stays open — one computer holds one setup per lane (PO 10-15). Each replaced
+    line is closed with the reason and its device tokens are revoked; the agents and their keys stay — the new setup
+    exchanges its own keys."""
+    from app.models.desktop_relay import DesktopDeviceToken
+
+    old = [
+        o for o in others
+        if o.machine_key == machine_key and o.revoked_at is None and before[o.id] <= new_agents
+    ]
+    for o in old:
+        o.revoked_at = now
+        o.revoked_reason = "replaced_by_new_setup"
+    if old:
+        await db.execute(
+            update(DesktopDeviceToken)
+            .where(DesktopDeviceToken.setup_id.in_([o.id for o in old]), DesktopDeviceToken.revoked_at.is_(None))
+            .values(revoked_at=now)
+        )
+    return len(old)
+
+
+async def exchange_setup(db: AsyncSession, *, code: str, verifier: str, device_id: str | None = None) -> Exchanged | None:
     """None = not confirmed yet (pending). Checks the verifier before anything else about the code, so a code seen in an
     address bar tells nothing without it. A wrong verifier does not burn the code (256-bit verifier: nothing to guess, and
     burning would let anyone who saw the address cancel the person's setup)."""
@@ -850,12 +977,13 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Excha
     # story #4565 (PO 02:51Z): the locks in the one order — the attached agents' member rows, then this setup and the other
     # live, handed-over setups of the org, by id — and everything below is read again under them
     attached = _attached_agents(setup)
+    # story 4660: always read — the machine key of this exchange may close a line with no attached agent
     other_ids = set((await db.execute(
         select(DesktopSetup.id).where(
             DesktopSetup.org_id == setup.org_id, DesktopSetup.id != setup.id, DesktopSetup.revoked_at.is_(None),
             DesktopSetup.exchanged_at.is_not(None),
         )
-    )).scalars().all()) if attached else set()
+    )).scalars().all())
     locked = await _lock_in_order(db, member_ids=attached, setup_ids={setup.id, *other_ids})
     setup = locked[setup.id]
     others = [locked[i] for i in sorted(other_ids) if i in locked]
@@ -874,21 +1002,12 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Excha
         # any key exists (PO 08:31Z ③ · 09:45Z)
         raise DesktopSetupError("service_unavailable", "the MCP or API address is not configured")
 
+    # story 4660 — what each other line carried BEFORE this exchange moves agents out of it (`_rotate_existing_agent` below
+    # empties a line of the agents this setup takes): «the same agents set up again» is judged on these
+    agents_before = {o.id: _agents_of(o) for o in others}
     # one key per agent (a role's agent appears once per stage in `members`)
-    per_agent: dict[str, dict] = {}
     kind = setup_kind(setup)
-    for m in setup.members or []:
-        if m["kind"] != "agent":
-            continue
-        if kind == "move":
-            # story #4576 (PO 04:24Z): a move's agent — its id and runtime (its name is added with its new key below); no recipe
-            # role or stages, there is no recipe
-            per_agent.setdefault(m["member_id"], {"member_id": m["member_id"], "runtime": m["runtime"], "existing": True})
-            continue
-        entry = per_agent.setdefault(m["member_id"], {"member_id": m["member_id"], "role": m.get("role") or m["stage"], "stages": [], "runtime": m["runtime"]})
-        if m.get("existing"):
-            entry["existing"] = True
-        entry["stages"].append(m["stage"])
+    per_agent = group_exchange_agents(setup.members or [], kind)
     agents: list[dict] = []
     for entry in per_agent.values():
         member_id = uuid.UUID(entry["member_id"])
@@ -901,6 +1020,13 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Excha
             team_member_id=member_id, scope=list(ALL_GROUPS), expires_at=None, desktop_setup_id=setup.id,
         )
         agents.append({**entry, "api_key": plaintext})
+    mkey = machine_key_for(setup.org_id, device_id)
+    if mkey:
+        await _retire_same_machine(
+            db, machine_key=mkey, others=others, now=_now(),
+            new_agents=frozenset(uuid.UUID(str(a)) for a in per_agent), before=agents_before,
+        )
+        setup.machine_key = mkey
     setup.exchanged_at = _now()
     setup.keys_issued = len(agents)
     await db.flush()
@@ -920,7 +1046,7 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str) -> Excha
     device_token = await issue_device_token(db, setup.id)  # story #4529 — same transaction as the keys: all or nothing
     return Exchanged(
         setup_id=setup.id, agents=agents, workdir_hint=setup.workdir_hint, recipe_name=await _recipe_name(db, setup), org_name=org_name,
-        org_id=setup.org_id, device_token=device_token, setup_kind=kind,
+        org_id=setup.org_id, device_token=device_token, setup_kind=kind, project_id=setup.project_id,
     )
 
 
@@ -1001,9 +1127,13 @@ async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
         update(ApiKey).where(ApiKey.desktop_setup_id == setup.id, ApiKey.revoked_at.is_(None))
         .values(revoked_at=now).returning(ApiKey.id)
     )).scalars().all()
-    from app.services.desktop_relay import revoke_device_tokens
+    from app.services import desktop_relay
 
-    await revoke_device_tokens(db, setup.id, now=now)  # story #4529 — the device's relay token goes with its keys
+    await desktop_relay.revoke_device_tokens(db, setup.id, now=now)  # story #4529 — the device's relay token goes with its keys
+    # story #4554 ④ (PO 11:45Z): nothing waits for a disconnected device — its open commands end as rejected `device_disconnected`,
+    # and its open stream is told after the commit so it ends with `access_revoked` now, not at its next 30-second check
+    await desktop_relay.reject_open_commands(db, setup_ids=[setup.id], result_code=desktop_relay.DISCONNECTED_CODE)
+    desktop_relay.schedule_disconnected_after_commit(db, setup.id)
     # story #4565: only the agents this setup made — an existing agent attached here keeps running elsewhere once moved on
     # (its keys from this setup are revoked above; the agent itself is not stopped)
     agent_ids = {
@@ -1041,10 +1171,22 @@ async def list_setups(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID
 
     if not await is_org_owner_or_admin(db, user_id, org_id):
         raise DesktopSetupError("not_org_admin")
+    # story 4660 — a line the same machine's new setup replaced is the same computer, not another one: it is left out here.
+    # A line a person disconnected (reason null) stays, as before.
     rows = (await db.execute(
-        select(DesktopSetup).where(DesktopSetup.org_id == org_id, DesktopSetup.confirmed_at.isnot(None))
-        .order_by(DesktopSetup.confirmed_at.desc()).limit(200)
+        select(DesktopSetup).where(
+            DesktopSetup.org_id == org_id, DesktopSetup.confirmed_at.isnot(None),
+            DesktopSetup.revoked_reason.is_distinct_from("replaced_by_new_setup"),
+        ).order_by(DesktopSetup.confirmed_at.desc()).limit(200)
     )).scalars().all()
+    # story 4660 — newest heard-from time per setup (over its tokens; a setup never heard from has none)
+    from app.models.desktop_relay import DesktopDeviceToken
+
+    heard = dict((await db.execute(
+        select(DesktopDeviceToken.setup_id, func.max(DesktopDeviceToken.last_used_at)).where(
+            DesktopDeviceToken.setup_id.in_([r.id for r in rows]),
+        ).group_by(DesktopDeviceToken.setup_id)
+    )).all()) if rows else {}
     active = dict((await db.execute(
         select(ApiKey.desktop_setup_id, func.count()).where(
             ApiKey.desktop_setup_id.in_([r.id for r in rows]), ApiKey.revoked_at.is_(None),
@@ -1058,6 +1200,7 @@ async def list_setups(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID
         "recipe_key": r.event_definition_key, "confirmed_by": r.confirmed_by, "confirmed_at": r.confirmed_at,
         "confirmed_by_name": names.get(r.confirmed_by), "revoked_by_name": names.get(r.revoked_by),
         "exchanged_at": r.exchanged_at, "revoked_at": r.revoked_at, "keys_issued": r.keys_issued,
+        "last_used_at": heard.get(r.id), "revoked_reason": r.revoked_reason,
         "active_keys": active.get(r.id, 0),
         "members": [{k: m.get(k) for k in ("stage", "role", "member_id", "kind", "runtime", "name")} for m in (r.members or [])],
         "setup_kind": setup_kind(r),  # story #4576
@@ -1144,6 +1287,50 @@ def _agents_ended(setup: DesktopSetup, rows) -> list[dict]:
     return out
 
 
+async def is_setup_agent(db: AsyncSession, setup_id: uuid.UUID, member_id: object) -> bool:
+    """story #4658 — the member is one of this setup's own agents: listed in its members AND belonging to the setup's organization.
+    Another organization's agent, or an agent of this organization that is not in the setup, is not — refused at the entrance."""
+    from app.models.member import Member
+
+    setup = (await db.execute(select(DesktopSetup).where(DesktopSetup.id == setup_id))).scalar_one_or_none()
+    if setup is None:
+        return False
+    listed = any(m.get("kind") == "agent" and str(m.get("member_id") or "") == str(member_id) for m in (setup.members or []))
+    if not listed:
+        return False
+    # the member itself must belong to the setup's own organization (a foreign id listed by mistake is still refused)
+    own = (await db.execute(select(Member.id).where(
+        Member.id == uuid.UUID(str(member_id)), Member.org_id == setup.org_id, Member.type == "agent",
+    ))).scalar_one_or_none()
+    return own is not None
+
+
+def _agents_sign_in(setup: DesktopSetup, rows) -> list[dict]:
+    """story #4658 (PO 17072 (a)) — per agent of this setup that asks for a sign-in now: its last ask (the runtime when it is claude
+    or codex, else None). A later «signed in» for that agent clears it. Only this setup's agents; the order is the setup's."""
+    order: list[str] = []
+    for m in setup.members or []:
+        mid = str(m.get("member_id") or "")
+        if m.get("kind") == "agent" and mid and mid not in order:
+            order.append(mid)
+    asking: dict[str, tuple[dict, datetime]] = {}
+    for e, meta, at in rows:  # oldest first — the last write wins
+        mid = str((meta or {}).get("member_id") or "")
+        if mid not in order:
+            continue
+        if e == EVENT_AGENT_NEEDS_SIGN_IN:
+            asking[mid] = (meta or {}, at)
+        elif e == EVENT_AGENT_SIGN_IN_CLEARED:
+            asking.pop(mid, None)
+    out = []
+    for mid in order:
+        if mid not in asking:
+            continue
+        meta, at = asking[mid]
+        out.append({"member_id": mid, "at": at, "runtime": meta.get("runtime") if meta.get("runtime") in BLOCKED_RUNTIMES else None})
+    return out
+
+
 def _agents_start_failed(setup: DesktopSetup, rows) -> list[dict]:
     """story #4452 (선생님 check A · PO 04:35Z) — per agent of this setup that the shell could not start: its last such report
     (reason · the daemon's code · runtime · a session cap · the agent it waited on), unless the agent connected its tools or was
@@ -1221,6 +1408,7 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
     recipe = await _recipe_ref(db, setup)
     agents_ended = _agents_ended(setup, rows)
     agents_start_failed = _agents_start_failed(setup, rows)
+    agents_sign_in = _agents_sign_in(setup, rows)
     return {
         "setup_id": setup.id, "device_name": setup.device_name, "state": setup_state(setup),  # only a confirmed setup belongs to an org (an unconfirmed one is «not found»)
         "recipe_name": recipe["name"] if recipe else None,
@@ -1240,6 +1428,7 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
             "first_screen_human_input_at": screen_input[1] if screen_input else None,
             "agents_ended": agents_ended,
             "agents_start_failed": agents_start_failed,
+            "agents_sign_in": agents_sign_in,
             "blocked": {
                 "at": blocked[1],
                 "reason": reason if reason in BLOCKED_REASONS else None,

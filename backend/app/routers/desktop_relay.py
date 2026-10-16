@@ -11,10 +11,11 @@ import asyncio
 import json
 import logging
 import random
+import re
 import time
 import uuid
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +38,20 @@ _HEARTBEAT_SEC = 30
 _RECHECK_SEC = 30
 _BACKSTOP_SEC = 30  # a read even without a wake (a wake lost on the way) — new commands come by the wake (PO 05:43Z)
 _STREAMS_PER_DEVICE = 2  # a reconnect may overlap the old connection for a moment
+
+
+_LAST_EVENT_ID_RE = re.compile(r"^\d{1,20}$")
+
+
+def _start_seq(header: str | None, *, latest: int) -> int:
+    """story #4554 ②: the cursor the stream resumes from — 0 when none is given, 400 `invalid_last_event_id` when it is not a
+    non-negative integer, and never past the device's latest command number."""
+    if header is None or header.strip() == "":
+        return 0
+    value = header.strip()
+    if not _LAST_EVENT_ID_RE.match(value):
+        raise HTTPException(status_code=400, detail={"code": "invalid_last_event_id", "message": "Last-Event-ID must be a non-negative integer"})
+    return min(int(value), latest)
 
 
 def _error(exc: relay.DesktopRelayError) -> JSONResponse:
@@ -64,10 +79,12 @@ async def _device(
 @router.get("/relay/stream")
 async def device_stream(request: Request, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)) -> StreamingResponse:
     setup_id, org_id = setup.id, setup.org_id
-    try:
-        start_seq = int(request.headers.get("last-event-id") or 0)
-    except ValueError:
-        start_seq = 0
+    confirmed_by = setup.confirmed_by  # story #4618 (Kadir 420 ③ · PO 05:36Z): read with the org, from the same token row
+    # story #4554 ② (PO 11:45Z) — `Last-Event-ID` is a device_seq this device was given: not a number (letters · a sign · empty
+    # after trimming) → 400 before the stream opens (the daemon drops its cursor and reconnects); a number past the device's
+    # latest (or past int32) → «from after the latest»: nothing is sent again (before: a bad cursor meant «from the start» — every
+    # unacked command, an approval among them, went down again — or a DB error ended the stream with an empty 200).
+    start_seq = _start_seq(request.headers.get("last-event-id"), latest=int(setup.relay_command_seq or 0))
     await relay.touch_device(db, setup_id)
     await db.commit()
 
@@ -96,6 +113,10 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
         removals_sent: set[str] = set()  # each connection sends a removal once; the next connection again until it is dropped
         offers_sent: set[str] = set()  # story #4531 — each live pairing offer once per connection, again on the next
         try:
+            # story #4607 (run13b ⑪ · PO 21:02Z): a first byte now — the front end holds the response head until the body's first byte,
+            # and the first heartbeat is 30 s away: the daemon counted every reconnect (each ~5 min 20 s) as 30 s closed and held its
+            # approvals for them. An SSE comment: the daemon's parser drops it (inbox/sse.ts · a line starting with ':').
+            yield ": open\n\n"
             while True:
                 if await request.is_disconnected():
                     return
@@ -137,16 +158,44 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
                     yield "event: heartbeat\ndata: {}\n\n"
                 wait = max(0.05, min(_BACKSTOP_SEC, _HEARTBEAT_SEC - (time.monotonic() - last_beat), deadline - time.monotonic()))
                 try:
-                    await asyncio.wait_for(wakes.get(), timeout=wait)
+                    woke = [await asyncio.wait_for(wakes.get(), timeout=wait)]
                     while not wakes.empty():  # several wakes → one read
-                        wakes.get_nowait()
+                        woke.append(wakes.get_nowait())
+                    # story #4554 ④: the disconnect's own signal — recheck now, not at the next 30-second check
+                    if any(isinstance(w, dict) and w.get(relay.DISCONNECTED_CODE) for w in woke):
+                        last_check = float("-inf")
                 except asyncio.TimeoutError:
                     pass
         finally:
+            # story #4554 ⑤ (agent_gateway.py's own shape): the last stream of this device takes its key with it — an empty set
+            # per device that ever connected is not left in the map for the instance's lifetime
             _agent_connections[relay.wake_key(setup_id)].discard(wakes)
+            if not _agent_connections[relay.wake_key(setup_id)]:
+                _agent_connections.pop(relay.wake_key(setup_id), None)
             await sse_lease.release(scope, conn_id)
 
-    return StreamingResponse(generate(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    # story #4618 (PO 02:24Z): the setup's organization, so the daemon can give a phone paired on one setup to its sibling setups of
+    # the same organization only (it pins only after a person matched the number on that Mac; the server still keeps each setup's
+    # pairs from that setup's own report). Not a secret: the device token already names it. A header, not a frame: an older daemon
+    # never sees an unknown event.
+    # Kadir 420 ③ · PO 05:36Z: one Mac's daemon can hold setups of different people of the same organization (two people share the
+    # Mac) — the phone goes only to setups the SAME person confirmed. `X-Desktop-Confirmed-By` = the setup's confirmed_by (the user who
+    # confirmed it), from the token row like the org; absent when the row has none (the daemon then gives that setup nothing).
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "X-Desktop-Org-Id": str(org_id)}
+    if confirmed_by is not None:
+        headers["X-Desktop-Confirmed-By"] = str(confirmed_by)
+    return StreamingResponse(generate(), media_type="text/event-stream", headers=headers)
+
+
+@router.get("/relay/setup")
+async def device_setup_facts(setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)) -> dict:
+    """story 4695 — the organization this device's setup belongs to, named for the person at that computer. The Mac app's pairing list
+    shows it per setup (the phone must be signed in to the same organization); a setup made before the app kept the name asks for it
+    here, with its own device token. Not a secret: `X-Desktop-Org-Id` on the stream already names the org to this token's holder."""
+    from app.models.organization import Organization
+
+    name = (await db.execute(select(Organization.name).where(Organization.id == setup.org_id))).scalar_one_or_none()
+    return {"org_id": str(setup.org_id), "org_name": name}
 
 
 @router.put("/relay/sessions")
@@ -200,11 +249,13 @@ async def post_command_result(
 @router.get("/setups/{setup_id}/sessions")
 async def get_device_sessions(
     setup_id: uuid.UUID,
+    limit: int = Query(default=relay.SESSIONS_PAGE_DEFAULT, ge=1, le=relay.SESSIONS_PAGE_MAX),
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
-    """A person's view of a device's sessions (owner/admin, as the «연결된 기기» section) — `unknown` when the device is silent."""
+    """A person's view of a device's sessions (owner/admin, as the «연결된 기기» section) — `unknown` when the device is silent.
+    story #4554 ①: live first, newest first, `limit` of them (default 50 · at most 200)."""
     from app.services.project_auth import is_org_owner_or_admin
 
     if not await is_org_owner_or_admin(db, uuid.UUID(auth.user_id), org_id):
@@ -214,7 +265,7 @@ async def get_device_sessions(
     )).scalar_one_or_none()
     if exists is None:
         raise HTTPException(status_code=404, detail={"code": "SETUP_NOT_FOUND", "message": "no such device in this org"})
-    return {"sessions": await relay.device_sessions_view(db, setup_id)}
+    return {"sessions": await relay.device_sessions_view(db, setup_id, limit=limit)}
 
 
 # ── story #4533 (B-2) — permission requests up · the device's phone pairs (contract §9 ① · §10 ②) ───────────────────────────
@@ -234,7 +285,32 @@ async def post_permission_request(
     await relay.touch_device(db, setup.id)
     await db.commit()
     content = {"id": str(row.id), "state": row.state, "recipient_reason": row.recipient_reason}
+    if created and row.recipient_member_id is not None:
+        await _push_permission_notice_live(db, row.id, row.recipient_member_id)
     return JSONResponse(status_code=201 if created else 200, content=content)
+
+
+async def _push_permission_notice_live(db: AsyncSession, request_row_id: uuid.UUID, recipient: uuid.UUID) -> None:
+    """story #4607 (PO 22:42Z · measured: phone card 0.76 s / 9.1 s — the 15 s poll's phase): the recipient's notice was only an Event
+    row (dispatch_notification INSERTs a person's Event and never puts it on a live stream), so a phone whose event stream was open
+    got it at its next reconnect's backfill at best — the approvals page's «a new request → read now» never ran. After the commit
+    (never before — a push for a row a rollback undoes), the Event(s) dispatch_notification made for this request go to the
+    recipient's open streams, in the backfill frame's shape (one event_id → the client's dedup holds across both). Best effort: a
+    failed push leaves the 201 as it is (the poll and the next backfill still bring it)."""
+    from app.models.event import Event
+    from app.routers.events import _backfill_frame_data, _push_to_agent
+
+    try:
+        events = (await db.execute(
+            select(Event).where(
+                Event.recipient_id == recipient, Event.event_type == "dispatched",
+                Event.source_entity_type == "agent_permission_request", Event.source_entity_id == request_row_id,
+            )
+        )).scalars().all()
+        for evt in events:
+            _push_to_agent(str(recipient), _backfill_frame_data(evt))
+    except Exception:  # noqa: BLE001 — best effort: the notice row is committed already
+        logger.warning("permission notice live push failed request=%s recipient=%s", request_row_id, recipient, exc_info=True)
 
 
 @router.post("/relay/permission-requests/{request_id}/withdraw")

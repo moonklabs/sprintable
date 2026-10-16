@@ -21,8 +21,10 @@ from app.dependencies.auth import AuthContext, bearer_scheme, get_current_user, 
 from app.dependencies.database import get_db
 from app.services import desktop_device_token_codes as device_codes
 from app.services.desktop_setup import (
+    AGENT_TOOLS_CAP,
     DesktopSetupError,
     RoleChoice,
+    bad_agent_tool_names,
     list_attachable_agents,
     confirm_move_setup,
     confirm_setup,
@@ -138,10 +140,22 @@ class RoleIn(BaseModel):
     owner: str | None = Field(default=None, max_length=32)
     # story #4565: `{role, agent_id}` — an agent the organization already has, attached to this computer for the role
     agent_id: str | None = Field(default=None, max_length=64)
+    # story 4653 (PO 14015 · 17027 ②): the CLI names this agent uses — the runtime's own included or not; a name off the rule, or a
+    # list longer than the cap, is refused with a 422 that names it (never dropped silently)
+    tools: list[str] | None = Field(default=None, max_length=AGENT_TOOLS_CAP)
+
+    @field_validator("tools")
+    @classmethod
+    def _tools_on_the_rule(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            bad = bad_agent_tool_names(v)
+            if bad:
+                raise ValueError(f"tool names outside the rule (lowercase letters, digits, - or _, 1-24 characters): {bad}")
+        return v
 
 
 # Qadir 4825 (PO 09:45Z) — the setup code travels in bodies only, never in a URL: a path is written to the access log and the
-# error handler's log (the exchange polls for ten minutes, a line each time), and a code plus any org's admin session could
+# error handler's log (the exchange polls for the code's whole life — SETUP_CODE_TTL — a line each time), and a code plus any org's admin session could
 # bind someone else's desktop to that org. So neither route has the code in its path.
 SETUP_CODE_FIELD = Field(min_length=20, max_length=128)
 
@@ -205,7 +219,7 @@ async def post_confirm(
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
     user_id = _human_only(auth)
-    roles = [RoleChoice(role=r.role, runtime=r.runtime, owner=r.owner, agent_id=r.agent_id) for r in body.roles]
+    roles = [RoleChoice(role=r.role, runtime=r.runtime, owner=r.owner, agent_id=r.agent_id, tools=r.tools) for r in body.roles]
     made_project: uuid.UUID | None = None
     try:
         if body.project_id is None and not body.project_name:
@@ -302,7 +316,7 @@ async def post_confirm_new_org(
     try:
         setup_id, members, work_item_id, org_id, project_id = await confirm_setup_new_org(
             db, code=body.code, user_id=user_id, org_name=body.org_name, project_name=body.project_name, recipe_id=body.recipe_id,
-            roles=[RoleChoice(role=r.role, runtime=r.runtime, owner=r.owner, agent_id=r.agent_id) for r in body.roles], auth=auth, workdir_hint=body.workdir_hint,
+            roles=[RoleChoice(role=r.role, runtime=r.runtime, owner=r.owner, agent_id=r.agent_id, tools=r.tools) for r in body.roles], auth=auth, workdir_hint=body.workdir_hint,
             background_tasks=background_tasks,
         )
     except DesktopSetupError as e:
@@ -318,6 +332,8 @@ async def post_confirm_new_org(
 class ExchangeRequest(BaseModel):
     code: str = SETUP_CODE_FIELD
     verifier: str = Field(min_length=43, max_length=128)
+    # story 4660 — the app's stable machine id (sha256 of the hardware UUID with the app's fixed salt); optional
+    device_id: str | None = None
 
 
 @router.post("/setup-codes/exchange")
@@ -327,7 +343,7 @@ class ExchangeRequest(BaseModel):
 async def post_exchange(request: Request, body: ExchangeRequest, db: AsyncSession = Depends(get_db)):
     headers = {"Cache-Control": "no-store"}
     try:
-        done = await exchange_setup(db, code=body.code, verifier=body.verifier)
+        done = await exchange_setup(db, code=body.code, verifier=body.verifier, device_id=body.device_id)
     except DesktopSetupError as e:
         await db.rollback()  # returned, not raised: nothing may be committed on the way out
         err = _error(e)
@@ -351,6 +367,9 @@ async def post_exchange(request: Request, body: ExchangeRequest, db: AsyncSessio
             "org_id": str(done.org_id) if done.org_id else None,
             # story #4529 — the device token for /api/v2/desktop/relay/* (shown once · an older app ignores it)
             "device_token": done.device_token,
+            # [SID:4681] (D3 · piece ③): the setup's project — the app keeps it per agent profile for the project folder's cwd (an
+            # added field — an older app ignores it · null for a setup with no project)
+            "project_id": str(done.project_id) if done.project_id else None,
         },
         headers=headers,
     )
@@ -370,6 +389,10 @@ class SetupItem(BaseModel):
     device_name: str
     state: Literal["waiting_for_app", "handed_over", "not_handed_over", "disconnected"]
     project_id: uuid.UUID | None
+    # story 4660 — the newest heard-from time of this device's tokens (the «오래됨» rule reads it); null if never heard
+    last_used_at: datetime | None = None
+    # story 4660 — the closed reason the server closed this line, if it did
+    revoked_reason: str | None = None
     recipe_key: str | None
     confirmed_by: uuid.UUID | None
     confirmed_at: datetime | None
@@ -504,6 +527,13 @@ class AgentEnded(BaseModel):
     restarted_at: datetime | None = None
 
 
+class AgentSignIn(BaseModel):
+    """story #4658 — an agent that asks for a sign-in now (cleared by its «signed in»): when it asked, and the runtime's name when known."""
+    member_id: str
+    at: datetime
+    runtime: Literal["claude", "codex"] | None = None
+
+
 class AgentStartFailed(BaseModel):
     """story #4452 — an agent the shell could not start: its last report (cleared once it connects or is restarted after it).
     `reason`/`code` are closed sets (onboarding_funnel START_FAILED_*) — the web words them; None = not one it knows."""
@@ -529,6 +559,7 @@ class SetupSignals(BaseModel):
     blocked: SetupBlocked | None
     agents_ended: list[AgentEnded] = []  # story #4433 — one row per agent whose session ended early
     agents_start_failed: list[AgentStartFailed] = []  # story #4452 — one row per agent the shell could not start
+    agents_sign_in: list[AgentSignIn] = []  # story #4658 — one row per agent asking for a sign-in now
 
 
 class SetupStatusRecipe(BaseModel):

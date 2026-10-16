@@ -6,8 +6,10 @@ import { Button } from '@/components/ui/button';
 import { OperatorInput, OperatorTextarea, OperatorSelect } from '@/components/ui/operator-control';
 import { useTranslations } from 'next-intl';
 import { fetchWithAuth } from '@/lib/db/client';
-import { getPublicAppHost } from '@/lib/public-app-host';
 import { ConnectStep } from './connect-step';
+import { WhereStep, type WhereChoice } from './where-step';
+import { DesktopGetStep } from './desktop-get-step';
+import { existingOrgIdFromMe } from './existing-org';
 import { emitOnboardingEvent } from './onboarding-telemetry';
 import { withProjectParam } from '@/hooks/use-flat-href';
 
@@ -35,24 +37,26 @@ export function resolveOnboardingLandingHref(todayV3Enabled: boolean, todayHref:
   return todayV3Enabled ? todayHref : chatsHref;
 }
 
-function loadOrgDraft(uid: string): { orgName: string; orgSlug: string } | null {
+// story 4669 (U6): the draft is the name only — the slug field is gone (the server derives the slug, as the app way's one screen
+// has had since 4427). A draft written before, `{orgName, orgSlug}`, still restores its name.
+function loadOrgDraft(uid: string): { orgName: string } | null {
   if (typeof window === 'undefined') return null;
   try {
     const raw = sessionStorage.getItem(ORG_DRAFT_STORAGE_PREFIX + uid);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { orgName?: unknown; orgSlug?: unknown };
-    if (typeof parsed.orgName !== 'string' || typeof parsed.orgSlug !== 'string') return null;
-    return { orgName: parsed.orgName, orgSlug: parsed.orgSlug };
+    const parsed = JSON.parse(raw) as { orgName?: unknown };
+    if (typeof parsed.orgName !== 'string') return null;
+    return { orgName: parsed.orgName };
   } catch {
     return null;
   }
 }
 
-function saveOrgDraft(uid: string, orgName: string, orgSlug: string): void {
+function saveOrgDraft(uid: string, orgName: string): void {
   try {
     const key = ORG_DRAFT_STORAGE_PREFIX + uid;
-    if (!orgName && !orgSlug) { sessionStorage.removeItem(key); return; }
-    sessionStorage.setItem(key, JSON.stringify({ orgName, orgSlug }));
+    if (!orgName) { sessionStorage.removeItem(key); return; }
+    sessionStorage.setItem(key, JSON.stringify({ orgName }));
   } catch {
     // 시크릿 모드 등 sessionStorage 차단 — 이 스토리 前과 동일(비영속) 동작으로 조용히 저하.
   }
@@ -74,8 +78,26 @@ const AGENT_ROLE_LABEL_KEYS: Record<string, string> = {
   devops: 'roleDevops',
 };
 
-type Step = 'org' | 'project' | 'agent' | 'connect';
-const STEPS: Step[] = ['org', 'project', 'agent', 'connect'];
+// story 4668 (UX-1 · U1 · design mirko/4668-design.md): after the organization, one fork («where») — the app way goes to one
+// screen «데스크톱 앱 받기» («desktop») and ends there (the desktop setup makes the project and agents · 4496); the web way keeps
+// project → agent → connect. The agent step's [건너뛰기] now goes to connect (not home — that was a dead end: the app card was
+// never seen).
+type Step = 'org' | 'where' | 'desktop' | 'project' | 'agent' | 'connect';
+
+/** The progress strip (PO · Yuna 07:16Z): before the fork is chosen the total is unknown, so the organization and fork screens show
+ * the bar only — its width follows the radio currently chosen (app = 3 screens, web = 5). From the screen after the fork on, the
+ * fraction is shown: app «3 / 3» · web «3 / 5» «4 / 5» «5 / 5». */
+export function onboardingProgress(step: Step, choice: WhereChoice): { fraction: number; label: { current: number; total: number } | null } {
+  const total = choice === 'app' ? 3 : 5;
+  switch (step) {
+    case 'org': return { fraction: 1 / total, label: null };
+    case 'where': return { fraction: 2 / total, label: null };
+    case 'desktop': return { fraction: 1, label: { current: 3, total: 3 } };
+    case 'project': return { fraction: 3 / 5, label: { current: 3, total: 5 } };
+    case 'agent': return { fraction: 4 / 5, label: { current: 4, total: 5 } };
+    case 'connect': return { fraction: 1, label: { current: 5, total: 5 } };
+  }
+}
 
 interface OnboardingFormProps {
   initialStep?: Step;
@@ -102,8 +124,9 @@ export function OnboardingForm({
   const tc = useTranslations('common');
 
   const [step, setStep] = useState<Step>(initialStep ?? 'org');
+  // story 4668: the fork's choice — the app way is the default («권장»); the bar on the org/fork screens follows it
+  const [whereChoice, setWhereChoice] = useState<WhereChoice>('app');
   const [orgName, setOrgName] = useState('');
-  const [orgSlug, setOrgSlug] = useState('');
   // story #3195 — draft 저장/복원 키는 uid가 확정돼야(=/api/auth/me 응답 後) 정해진다.
   const [draftUid, setDraftUid] = useState<string | null>(null);
   // 유나 design:changes(PR#3617) — draft 복원이 post-mount effect라 응답 前엔 입력창이
@@ -134,7 +157,7 @@ export function OnboardingForm({
   const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [resendError, setResendError] = useState('');
 
-  const stepIndex = STEPS.indexOf(step);
+  const progress = onboardingProgress(step, whereChoice);
 
   // OB-4: wizard 진입 1회 emit. session_id는 telemetry가 sessionStorage로 1회차당 고정.
   useEffect(() => {
@@ -152,8 +175,13 @@ export function OnboardingForm({
     let cancelled = false;
     fetchWithAuth('/api/auth/me')
       .then((res) => (res.ok ? res.json() : null))
-      .then((json: { data?: { member_id?: string; email_verified?: boolean | null } } | null) => {
+      .then((json: { data?: { member_id?: string; email_verified?: boolean | null; org_id?: string | null; org_member_id?: string | null } } | null) => {
         if (cancelled) return;
+        // story 4668: this account already has an organization (a reload at the fork or at the app download, a re-opened
+        // `/onboarding?signup=1`) — no second «조직 만들기» (the free plan allows one: it ended in the upgrade modal). On to the
+        // fork, with that organization; the fork is where the first run left off after the organization was made.
+        const existingOrgId = existingOrgIdFromMe(json);
+        if (existingOrgId) { setOrgId(existingOrgId); setStep('where'); return; }
         // AC2 — email_verified가 명시 false일 때만 배너를 띄운다(true·null 둘 다 무표시 —
         // null은 조회 실패/판정 불가란 뜻이라, 이전처럼 "제출해봐야 아는" 폴백으로 자연스럽게
         // 저하할 뿐 새로운 오탐을 만들지 않는다).
@@ -167,7 +195,6 @@ export function OnboardingForm({
         const draft = loadOrgDraft(uid);
         if (draft) {
           setOrgName((prev) => prev || draft.orgName);
-          setOrgSlug((prev) => prev || draft.orgSlug);
         }
         setIdentityResolved(true);
       })
@@ -184,29 +211,11 @@ export function OnboardingForm({
   // codex MED가 지적한 계정간 누수가 재발한다.
   useEffect(() => {
     if (step !== 'org' || !draftUid) return;
-    saveOrgDraft(draftUid, orgName, orgSlug);
-  }, [step, draftUid, orgName, orgSlug]);
-
-  const handleOrgNameChange = (name: string) => {
-    setOrgName(name);
-    setOrgSlug(
-      name
-        .toLowerCase()
-        .replace(/[^a-z0-9\s-]/g, '')
-        .replace(/\s+/g, '-')
-        .replace(/-+/g, '-')
-        .slice(0, 50),
-    );
-  };
-
-  const handleOrgSlugChange = (value: string) => {
-    setOrgSlug(value.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 50));
-  };
-
-  const slugValid = /^[a-z0-9][a-z0-9-]{0,48}[a-z0-9]$|^[a-z0-9]$/.test(orgSlug);
+    saveOrgDraft(draftUid, orgName);
+  }, [step, draftUid, orgName]);
 
   const handleCreateOrg = async () => {
-    if (!orgName.trim() || !orgSlug.trim()) return;
+    if (!orgName.trim()) return;
     setLoading(true);
     setError('');
     setEmailVerifyBlocked(false);
@@ -220,7 +229,9 @@ export function OnboardingForm({
       const res = await fetch('/api/organizations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: orgName.trim(), slug: orgSlug.trim() }),
+        // story 4669: no slug — the server derives it from the name (ASCII part, or `workspace-<8 hex>` for a Korean-only name)
+        // and makes it unique, the same way the app way's one screen does (org_project_create.py · 4427)
+        body: JSON.stringify({ name: orgName.trim() }),
       });
       const json = await res.json();
 
@@ -259,7 +270,8 @@ export function OnboardingForm({
       // 새 JWT에 org_id(BE auth Path4 org_member fallback) 반영. 이래야 다음 단계 project 생성의
       // getAuthContext(/api/v2/me)가 통과한다(미refresh 시 fresh JWT엔 team_member 없어 me null → 401).
       await fetch('/api/auth/refresh', { method: 'POST' }).catch(() => null);
-      setStep('project');
+      // story 4668: the fork comes next, not the project step
+      setStep('where');
     } catch {
       setError(t('networkError'));
     } finally {
@@ -418,31 +430,49 @@ export function OnboardingForm({
     void finishToHome();
   };
 
+  // story 4668: [계속] at the fork. The app way is counted with the same signal the connect step's desktop button sends
+  // (3983 funnel · one axis for «went the desktop way»); no project or agent is made here.
+  const handleWhereContinue = () => {
+    if (whereChoice === 'app') {
+      emitOnboardingEvent('desktop_handoff_selected', { agent_id: null, flow: 'onboarding' });
+      setStep('desktop');
+      return;
+    }
+    setStep('project');
+  };
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className={`w-full ${step === 'connect' ? 'max-w-lg' : 'max-w-md'} space-y-6 rounded-2xl border border-border bg-card p-6 shadow-lg sm:p-8`}>
-        {/* 진행 표시줄 */}
-        <div className="space-y-1.5">
-          <div className="flex justify-between text-xs text-muted-foreground">
-            <span>{t('stepOf', { current: stepIndex + 1, total: STEPS.length })}</span>
-          </div>
+      <div className={`w-full ${step === 'connect' ? 'max-w-lg' : 'max-w-md'} space-y-6 rounded-2xl border border-border bg-card p-6 shadow-lg sm:p-8`} data-testid="onboarding-card">
+        {/* 진행 표시줄 — story 4668: bar only until the fork is chosen, the fraction from the screen after it (onboardingProgress) */}
+        <div className="space-y-1.5" data-testid="onboarding-progress">
+          {progress.label ? (
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span data-testid="onboarding-step-of">{t('stepOf', progress.label)}</span>
+            </div>
+          ) : null}
           <div className="h-1.5 w-full rounded-full bg-muted">
             <div
               className="h-1.5 rounded-full bg-primary transition-all duration-300"
-              style={{ width: `${((stepIndex + 1) / STEPS.length) * 100}%` }}
+              style={{ width: `${progress.fraction * 100}%` }}
+              data-testid="onboarding-progress-bar"
             />
           </div>
         </div>
 
         <div className="text-center">
-          <h1 className="text-2xl font-bold text-foreground">
+          <h1 id="onboarding-step-title" className="break-keep text-2xl font-bold text-foreground">
             {step === 'org' && t('createOrg')}
+            {step === 'where' && t('where.title')}
+            {step === 'desktop' && t('download.title')}
             {step === 'project' && t('createProject')}
             {step === 'agent' && t('createAgent')}
             {step === 'connect' && t('connectAgent')}
           </h1>
-          <p className="mt-2 text-sm text-muted-foreground">
+          <p className="mt-2 break-keep text-sm text-muted-foreground">
             {step === 'org' && t('welcome')}
+            {step === 'where' && t('where.subtitle')}
+            {step === 'desktop' && t('download.lead')}
             {step === 'project' && t('projectSubtitle', { orgName })}
             {step === 'agent' && t('agentSubtitle')}
             {step === 'connect' && t('connectSubtitle')}
@@ -486,47 +516,26 @@ export function OnboardingForm({
           <div className="space-y-4">
             {/* 유나 design:changes(PR#3617) — draft 복원(uid 확定 後 별도 effect)이 응답
                 前엔 항상 empty로 뜬 뒤 채워지는 깜빡임을 만들었다("입력이 그대로 있다"는
-                인상이 AC 자체). identityResolved 前까지 두 입력을 disabled로 게이팅해 그
+                인상이 AC 자체). identityResolved 前까지 입력을 disabled로 게이팅해 그
                 순간 자체를 없앤다. */}
+            {/* story 4669 (U6): the name only — the URL slug field, its auto-derivation and its two hints (2750: a Korean-only
+                name derived nothing and blocked the button) are gone; the server derives and uniquifies the slug */}
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-foreground">{t('orgName')}</label>
               <OperatorInput
                 type="text"
                 value={orgName}
-                onChange={(e) => handleOrgNameChange(e.target.value)}
+                onChange={(e) => setOrgName(e.target.value)}
                 placeholder={t('orgNamePlaceholder')}
                 disabled={!identityResolved}
               />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-foreground">{t('slug')}</label>
-              <OperatorInput
-                type="text"
-                value={orgSlug}
-                onChange={(e) => handleOrgSlugChange(e.target.value)}
-                placeholder={t('slugPlaceholder')}
-                disabled={!identityResolved}
-              />
-              {orgSlug && !slugValid ? (
-                // ⚠️Phase2 i18n·#2485 — 클라 측 정규식 검증 문구가 하드코딩 한국어다(t() 아님,
-                // 서버 응답과 무관 — raw 서버 누수는 아님). #2484 스코프 밖, 유나 design 확認.
-                <p className="text-xs text-destructive">{t('slugCharsHint')}</p>
-              ) : !orgSlug && orgName.trim() ? (
-                // story #2750 — 조직명이 한글 등 비-ASCII로만 이뤄지면 handleOrgNameChange의
-                // 자동 파생(로마자/숫자만 남기는 정규식)이 전부 걸러내 orgSlug가 빈 문자열로
-                // 남는다. 그 상태에서 아래 버튼이 무설명 disabled로 남던 것이 이 스토리의 근본
-                // 결함 — 이미 존재하는 수동 slug 입력 칸(바로 위)으로 안내해 막힘을 뚫는다.
-                <p className="text-xs text-destructive">{t('slugManualRequired')}</p>
-              ) : (
-                <p className="text-xs text-muted-foreground">{getPublicAppHost()}/{orgSlug || '...'}</p>
-              )}
             </div>
             <Button
               variant="hero"
               size="lg"
               className="w-full"
               onClick={() => void handleCreateOrg()}
-              disabled={!orgName.trim() || !orgSlug.trim() || !slugValid || loading}
+              disabled={!orgName.trim() || loading}
             >
               {loading ? tc('creating') : t('createOrg')}
             </Button>
@@ -596,19 +605,36 @@ export function OnboardingForm({
             >
               {loading ? tc('creating') : t('createAgentAction')}
             </Button>
+            {/* story 4668 (AC2): skipping goes to the connect step (the app card is there) — before, it went home: a dead end */}
             <Button
               variant="glass"
               size="lg"
               className="w-full"
-              onClick={handleFinish}
+              onClick={() => setStep('connect')}
             >
               {t('skip')}
             </Button>
           </div>
         )}
 
+        {step === 'where' && (
+          <WhereStep choice={whereChoice} onChoose={setWhereChoice} onContinue={handleWhereContinue} titleId="onboarding-step-title" />
+        )}
+
+        {step === 'desktop' && (
+          <DesktopGetStep orgId={orgId} onBackToChoice={() => setStep('where')} onFinish={handleFinish} />
+        )}
+
         {step === 'connect' && (
-          <ConnectStep agentId={agentId} apiKey={newApiKey} projectId={projectId} onFinish={handleFinish} todayV3Enabled={todayV3Enabled} />
+          <ConnectStep
+            agentId={agentId}
+            apiKey={newApiKey}
+            projectId={projectId}
+            orgId={orgId}
+            onFinish={handleFinish}
+            todayV3Enabled={todayV3Enabled}
+            onMakeAgent={() => setStep('agent')}
+          />
         )}
       </div>
       {showUpgrade && <UpgradeModal message={upgradeReason} onClose={() => setShowUpgrade(false)} />}

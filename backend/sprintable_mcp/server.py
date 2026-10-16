@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # import 경로만 이동.
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.tools.base import Tool as _FastMCPTool
-from mcp.types import TextContent
+from mcp.types import ImageContent, TextContent
 from mcp.types import Tool as MCPTool
 from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic.fields import PydanticUndefined
@@ -119,6 +119,7 @@ from .tools.meetings import (
     create_meeting, delete_meeting, get_meeting, list_meetings,
     trigger_ai_summary, update_meeting,
 )
+from .tools.chat_attachment import GetChatAttachmentInput, get_chat_attachment  # story 4646
 from .tools.chat import (
     CreateConversationInput, GetChatMessageInput, ListChatMessagesInput, ListConversationsInput,
     SendChatInput, create_conversation, get_chat_message, list_chat_messages,
@@ -151,10 +152,10 @@ from .tools.standup import (
     save_standup, standup_history, standup_missing, update_retro_action_status,
 )
 from .tools.stories import (
-    AddStoryInput, AssignStoryToSprintInput,
+    AddStoryInput, AssignStoryToSprintInput, GetStoryInput,
     ListBacklogInput, ListStoriesInput, UnassignStoryFromSprintInput, UpdateStoryInput,
     UpdateStoryStatusInput,
-    add_story, assign_story_to_sprint,
+    add_story, assign_story_to_sprint, get_story,
     list_backlog, list_stories, unassign_story_from_sprint,
     update_story, update_story_status,
 )
@@ -272,6 +273,16 @@ def _denied(name: str) -> list[TextContent]:
     ))]
 
 
+def _output_annotation(fn) -> object:
+    """도구 출력 스키마 주석. 도구가 ImageContent(사진)를 돌려주면 그 주석을 따르고(story 4646 AC4 —
+    list[TextContent]로 고정하면 사진 항목이 출력 검증에서 거부된다), 그 밖의 도구는 전부 종전대로 둔다."""
+    try:
+        hint = get_type_hints(fn).get("return")
+    except Exception:
+        hint = None
+    return hint if hint is not None and "ImageContent" in repr(hint) else list[TextContent]
+
+
 def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
     """BaseModel → flat inspect.Signature so FastMCP emits top-level params."""
     try:
@@ -349,7 +360,7 @@ def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
     wrapper.__qualname__ = name
     wrapper.__doc__ = doc
     wrapper.__signature__ = inspect.Signature(
-        params, return_annotation=list[TextContent]
+        params, return_annotation=_output_annotation(fn)
     )
     return wrapper
 
@@ -522,12 +533,18 @@ async def ping(ctx: Context | None = None) -> list[TextContent]:
 # ── 87개 도구 flat schema 등록 ─────────────────────────────────────────────────
 
 _TOOL_DEFS: list[tuple] = [
-    # Stories (8)
+    # Stories (9)
     ("sprintable_list_stories",
      "[일감] 프로젝트 스토리 목록 조회. project_id/org_id context 자동 주입."
      " 각 항목의 reference_token 필드가 그 스토리를 가리키는 참조 토큰"
      "([제목](entity:story:id))을 준다 — 채팅 등에 그대로 쓰면 참조가 생긴다(story #2282).",
      ListStoriesInput, list_stories),
+    # story 4615: a story by its id, in full — a hand-over's `source="story:<id>"` carries only the title and the start of the
+    # description (never the acceptance criteria); this reads the rest without searching by title.
+    ("sprintable_get_story",
+     "[일감] 스토리 단건 조회 — 설명 · 수용 기준(AC) · 상태 · 담당 · 에픽을 한 번에. 건넴의 source=\"story:<id>\"나"
+     " 배정 알림의 story id를 그대로 넣으면 전문을 읽는다(제목 검색 불필요). 다른 조직 · 없는 id는 404.",
+     GetStoryInput, get_story),
     ("sprintable_list_backlog",
      "[일감] 백로그 스토리 목록 (스프린트 미배정 · done/in-review 제외, story #3148). limit"
      "(선택)로 상한 조정 — 서버 기본은 limit 미지정 시 유지(무회귀). cursor 페이지네이션은"
@@ -961,6 +978,10 @@ _TOOL_DEFS: list[tuple] = [
      "[조직] conversation thread 메시지 목록 조회. conversation_id로 대화를 지정(thread_id는"
      " 폐기 예정 별칭 — 응답의 thread_id는 대화 ID가 아니라 각 메시지의 회신 스레드 ID, story #2427).",
      ListChatMessagesInput, list_chat_messages),
+    ("sprintable_get_chat_attachment",
+     "[조직] 채팅 메시지 첨부 하나의 내용 읽기(story 4646). message_id + index(0부터)로 지정 — 이미지는 사진으로 보이고,"
+     " 텍스트는 본문으로 나온다. 크기가 크거나 읽을 수 없는 첨부는 메타(이름·형식·크기·이유)만. 첨부를 읽을 때는 이 도구를 쓴다.",
+     GetChatAttachmentInput, get_chat_attachment),
     ("sprintable_get_chat_message",
      "[조직] conversation thread 내 메시지 단건 원문 조회(message_id로 즉시 픽업). ⭐웹훅 payload가"
      " 잘렸거나 원문이 의심될 때 재발신 요청 대신 이걸로 먼저 확인 — conversation_id=대화 id"

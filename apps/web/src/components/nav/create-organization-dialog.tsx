@@ -14,6 +14,8 @@ import { Button } from '@/components/ui/button';
 import { useRenderNonce } from '@/hooks/use-render-nonce';
 import { getPublicAppHost } from '@/lib/public-app-host';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { isEEEnabled } from '@/lib/ee';
+import { limitCopy } from '@/lib/plan-limit-copy';
 
 const SLUG_REGEX = /^[a-z0-9][a-z0-9-]{0,48}[a-z0-9]$|^[a-z0-9]$/;
 
@@ -132,6 +134,8 @@ export function CreateOrganizationDialog({
     }
   }
 
+  // story 4680 (Yuna §N-2): the same switch as the project and agent banners — billing closed (prod today) → the fact, no way
+  const orgLimit = limitCopy({ resource: 'org', limit: 1, free: true, billingOpen: isEEEnabled() });
   const canSubmit = name.trim().length > 0 && slug.trim().length > 0 && !slugError && !creating;
 
   return (
@@ -143,14 +147,16 @@ export function CreateOrganizationDialog({
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
           {planLimitHit && (
             <div key={planLimitNonce} role="alert" aria-live="assertive" aria-atomic="true" className="rounded-md border border-warning-border bg-warning-tint px-3 py-3 text-sm space-y-1">
-              <p className="font-medium text-warning-strong">{t('orgLimitBannerTitle')}</p>
-              <p className="text-warning-strong">{tOnboarding('orgLimitExceededError', { limit: 1 })}</p>
-              <a
-                href={flatHref('/settings?tab=billing')}
-                className="inline-block mt-1 text-xs font-medium text-warning-strong underline underline-offset-2 transition hover:opacity-80"
-              >
-                {t('orgLimitUpgradeLink')}
-              </a>
+              <p className="font-medium text-warning-strong break-keep">{t(orgLimit.title)}</p>
+              {orgLimit.reason ? <p className="text-warning-strong break-keep">{tOnboarding(orgLimit.reason.key, orgLimit.reason.withLimit ? { limit: 1 } : undefined)}</p> : null}
+              {orgLimit.link ? (
+                <a
+                  href={flatHref('/settings?tab=billing')}
+                  className="inline-block mt-1 text-xs font-medium text-warning-strong underline underline-offset-2 transition hover:opacity-80"
+                >
+                  {t('orgLimitUpgradeLink')}
+                </a>
+              ) : null}
             </div>
           )}
           {error && (

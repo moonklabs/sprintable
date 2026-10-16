@@ -38,8 +38,9 @@ class ChainCircuitBreaker(Base):
     org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     conversation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # story #4632: the moment of the write (clock_timestamp), not the start of the transaction (now()) — see 0448.
     opened_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=text("now()"), nullable=False
+        DateTime(timezone=True), server_default=text("clock_timestamp()"), nullable=False
     )
     released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # human-only(is_org_owner_or_admin) 릴리즈만 채운다 — auto-release(에피소드 자연 해소)는

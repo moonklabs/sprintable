@@ -156,9 +156,12 @@ async def create_project_with_member(
     description: str | None,
     slug: str | None,
     user_id: str | None,
+    workdir_hint: str | None = None,
 ) -> Project:
     """The project (a sent slug is checked, else derived and made unique in the organization) and the calling person as an
-    organization member (`member` when not one already) with their human member anchor. Never commits."""
+    organization member (`member` when not one already) with their human member anchor. Never commits.
+    [SID:4681] `workdir_hint`: the folder's name as the person gave it — text, stored as is (validated at the schema); the desktop
+    setup's own caller leaves it out."""
     # story 139d2405(S-slug-infra): 명시 지정 시 형식 검증 + org 내 유일성(충돌 시 409 — organizations
     # create와 동형: 사용자가 명시한 값은 조용히 안 바꾼다). 미지정 시 name→kebab 파생 후 자동 유일화
     # (충돌 -n suffix — 시스템 파생값이라 조용히 바꿔도 됨).
@@ -172,7 +175,7 @@ async def create_project_with_member(
         # slug에 실어 URL 라우팅이 깨졌다(app/services/entity_slug.py 상단 주석 근거 기록 참고).
         # ASCII 산출 실패(순수 비ASCII 이름) 시 id-fallback — name 자체는 그대로 저장/표시.
         slug = await resolve_unique_project_slug(session, org_id, slugify_ascii_or_fallback(name))
-    project = await ProjectRepository(session, org_id).create(name=name, description=description, slug=slug)
+    project = await ProjectRepository(session, org_id).create(name=name, description=description, slug=slug, workdir_hint=workdir_hint)
     # project_memberships 테이블 미존재 — agent 자동 첨부는 agent 생성 시 project_id로 직접 연결.
     # Ensure the creating user is in org_members (S5: human type team_member 신규 생성 제거).
     if user_id:

@@ -94,6 +94,23 @@ def build_verification_rail(
     return rail
 
 
+async def lock_connection_test_decision(db: AsyncSession, agent_id: uuid.UUID) -> None:
+    """story #4594 (Qadir · QA on 4975) — one connect at a time decides whether this agent gets a connection test.
+
+    The stream's connect reads «is a test waiting?» (``get_verification_state``) and then writes one (``start_verification``)
+    — two statements, and nothing between them held a second connect of the same agent back (no FOR UPDATE · no unique · no
+    upsert): two connects at nearly the same moment (one launcher started twice · a daemon restart overlapping the old
+    stream) both read «none» and both wrote one. Bounded by the size of that first-connect burst (the next reconnect is held
+    back by either row), but two rows where #4582 says one. A transaction-scoped advisory lock keyed by the agent, taken
+    before the read, makes the second connect wait for the first's commit (or rollback) and then read what it wrote.
+
+    Not a unique index: the person's [확인] button (``POST verify-connection``) starts a fresh test on purpose while one
+    waits, so «one unacked test per agent» is a rule of the connect path, not an invariant of the table. The lock is released
+    with the caller's commit/rollback — call it inside the transaction that reads and writes. Same key shape as
+    ``onboarding_funnel``/``desktop_setup`` (``hashtext`` of a string); pinned by test_4594_connection_test_guard_atomic_realdb."""
+    await db.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"{VERIFY_EVENT_TYPE}:{agent_id}"))))
+
+
 async def start_verification(
     db: AsyncSession, *, agent_id: uuid.UUID, org_id: uuid.UUID, project_id: uuid.UUID
 ) -> int:

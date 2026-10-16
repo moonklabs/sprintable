@@ -1,9 +1,10 @@
 """story #4535 (E-DESKTOP-2 B-4 · AC1) — an organization's «원격 제어» switch. Contract 02d2cf71 §2 (v1.5).
 
 Off by default; only an owner turns it on or off. While off the device line is off as a whole (PO 08:55Z ⓐ): every relay call
-is refused (403 remote_control_off — the device token stays valid), an open relay stream ends with
-`access_revoked {reason: remote_control_off}`, no command is made (409), and turning it off rejects the devices' open
-commands in the same transaction. The daemon then waits without knocking; turning it on sends each of the org's live devices
+is refused with **409** `remote_control_off` (routers/desktop_relay.py — the device token stays valid), an open relay stream ends
+with its own `event: remote_control_off` frame — never `access_revoked` and never a 401/403, which the daemon takes as revoked
+for good (story #4589 · PO 00:42Z: this text once said 403 · access_revoked, contract v1.5; the code is v1.8) — no command is
+made (409), and turning it off rejects the devices' open commands in the same transaction. The daemon then waits without knocking; turning it on sends each of the org's live devices
 one `desktop.remote_control` Event down its agents' own streams (the daemon acks it and opens the relay again), and the app's
 `GET /desktop/remote-control` read is the floor when that Event is missed (PO 08:55Z).
 """
@@ -12,10 +13,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.desktop_relay import DesktopCommand
 from app.models.desktop_setup import DesktopSetup
 from app.models.organization import Organization
 
@@ -42,14 +42,15 @@ async def is_enabled(db: AsyncSession, org_id: uuid.UUID | None) -> bool:
     )).scalar_one_or_none() is not None
 
 
-def state_view(org: Organization, *, can_change: bool, owner_names: list[str], connected_computers: int) -> dict:
+def state_view(org: Organization, *, can_change: bool, owner_names: list[str], connected_setups: int) -> dict:
     """story #4583: + who can turn it on (owner_names — display names only · no email · no id) and how many of the org's
-    computers are connected (a count only · no device name) — the off state names the owner to everyone else, and the
+    setups are connected (a count only · no device name) — the off state names the owner to everyone else, and the
     approvals line shows only when a computer is connected (Yuna `4583/copy.md` · PO 04:09Z)."""
     at = org.remote_control_enabled_at
     return {
         "enabled": at is not None, "enabled_at": at.isoformat() if at else None, "can_change": can_change,
-        "owner_names": owner_names, "connected_computers": connected_computers,
+        "owner_names": owner_names, "connected_setups": connected_setups,
+        "connected_computers": connected_setups,  # story 4584: the old name, same value, for one deploy — removed next deploy
     }
 
 
@@ -83,15 +84,15 @@ async def owner_names(db: AsyncSession, org_id: uuid.UUID) -> list[str]:
 
 def _live_devices(org_id: uuid.UUID) -> tuple:
     """The org's live devices: keys picked up · not disconnected · in a project. Turning it on wakes exactly these, and
-    story #4583's `connected_computers` counts exactly these (Didi R4) — «≥ 1» means «turning it on reaches a computer»."""
+    story #4583's `connected_setups` counts exactly these (Didi R4) — «≥ 1» means «turning it on reaches a computer»."""
     return (
         DesktopSetup.org_id == org_id, DesktopSetup.exchanged_at.is_not(None), DesktopSetup.revoked_at.is_(None),
         DesktopSetup.project_id.is_not(None),
     )
 
 
-async def connected_computers(db: AsyncSession, org_id: uuid.UUID) -> int:
-    """story #4583: how many of the org's computers turning it on would wake (`_live_devices`). A count only."""
+async def connected_setups(db: AsyncSession, org_id: uuid.UUID) -> int:
+    """story #4583: how many of the org's live setups turning it on would wake (`_live_devices`). A count only."""
     from sqlalchemy import func
 
     return int((await db.execute(select(func.count()).select_from(DesktopSetup).where(*_live_devices(org_id)))).scalar_one())
@@ -107,16 +108,15 @@ async def set_enabled(db: AsyncSession, *, org: Organization, actor_id: uuid.UUI
     now = _now()
     org.remote_control_enabled_at, org.remote_control_enabled_by = (now, actor_id) if enabled else (None, None)
     db.add(OrgRemoteControlAuditLog(org_id=org.id, actor_id=actor_id, enabled=enabled))
-    setups = select(DesktopSetup.id).where(DesktopSetup.org_id == org.id)
     if not enabled:
-        rejected = (await db.execute(
-            update(DesktopCommand)
-            .where(DesktopCommand.setup_id.in_(setups), DesktopCommand.state.in_(("queued", "delivered")))
-            .values(state="rejected", result_code=OFF_CODE, finished_at=now)
-            .returning(DesktopCommand.id)
-        )).scalars().all()
+        # story #4554 ④ · Kadir 4981 ②: one path with the disconnect's — an answer_approval among the open commands moves its
+        # permission request to rejected too (the approver's phone must not read «answered» for an answer that never went down)
+        from app.services.desktop_relay import reject_open_commands
+
+        setup_ids = list((await db.execute(select(DesktopSetup.id).where(DesktopSetup.org_id == org.id))).scalars().all())
+        rejected = await reject_open_commands(db, setup_ids=setup_ids, result_code=OFF_CODE)
         await db.flush()
-        return len(rejected)
+        return rejected
     return await _wake_devices(db, org.id)
 
 

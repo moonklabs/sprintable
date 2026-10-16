@@ -5,7 +5,9 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { BarChart2, Bell, CreditCard, FolderKanban, GitBranch, LifeBuoy, Menu, Palette, Plus, ShieldCheck, Trash2, User, Users, Webhook, X } from 'lucide-react';
+import { BarChart2, Bell, CreditCard, FolderKanban, GitBranch, LifeBuoy, Menu, Monitor, Palette, Plus, ShieldCheck, Trash2, User, Users, Webhook, X } from 'lucide-react';
+import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
+import { PhoneAppCard } from '@/components/desktop/phone-app-card';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
 import { OrgMembersSection } from '@/components/settings/org-members-section';
 import { AddMemberModal } from '@/components/settings/add-member-modal';
@@ -26,6 +28,7 @@ import { StandupDeadlineSection } from '@/components/settings/standup-deadline-s
 import { GateLevelMatrix } from '@/components/settings/gate-level-matrix';
 import { OrgGatePolicySection } from '@/components/settings/org-gate-policy-section';
 import { TwoFactorSection } from '@/components/settings/two-factor-section';
+import { OtherSessionsSection } from '@/components/settings/other-sessions-section';
 import { SetPasswordSection } from '@/components/settings/set-password-section';
 import { LinkedAccountsSection } from '@/components/settings/linked-accounts-section';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -41,6 +44,7 @@ import { useToast } from '@/components/ui/toast';
 import { NOTIFICATION_TYPES } from '@/lib/notification-types';
 import { isEEEnabled } from '@/lib/ee';
 import { isSupportWidgetEnabled } from '@/lib/support-widget-flag';
+import { HIDDEN_SETTINGS_TABS, resolveSettingsTab as resolveTab } from './settings-tab';
 import { SupportSettingsTabPanel } from '@/components/settings/support-tab-panel';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import dynamic from 'next/dynamic';
@@ -130,18 +134,8 @@ function isWebhookUrlAllowed(url: string): boolean {
 //   (BE 라우트 0건 — Sprintable이 고객사 모델키/MCP연결을 호스팅하는 모델을 접었다는
 //   판단, 재노출은 새 구현이 필요·set에서 제거만으론 복원 안 됨). 이 문자열은 과거 딥링크
 //   (?tab=ai) 방어 폴백 용도로만 남긴다.
-const HIDDEN_SETTINGS_TABS = new Set<string>(['ai', 'workflow', 'org-members']);
-const DEFAULT_SETTINGS_TAB = 'profile';
-
-// ?tab= 딥링크가 숨김 탭을 가리키면 기본 탭으로 폴백 (빈 화면 방지).
-// story #3274 — support 탭은 isSupportWidgetEnabled() 뒤(prod는 아직 false)라 flag off일
-// 때 ?tab=support로 직접 들어오면 트리거/콘텐츠가 아예 안 그려져 빈 화면이 된다 — 그
-// 경우도 기본 탭으로 폴백.
-function resolveSettingsTab(tab: string | null): string {
-  if (!tab || HIDDEN_SETTINGS_TABS.has(tab)) return DEFAULT_SETTINGS_TAB;
-  if (tab === 'support' && !isSupportWidgetEnabled()) return DEFAULT_SETTINGS_TAB;
-  return tab;
-}
+// the tab from ?tab= (pure · tested in settings-tab.test.ts) with this deployment's gates
+const resolveSettingsTab = (tab: string | null): string => resolveTab(tab, { supportWidget: isSupportWidgetEnabled(), billing: isEEEnabled() });
 
 export default function SettingsPage() {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
@@ -748,6 +742,13 @@ export default function SettingsPage() {
               <Bell className="h-4 w-4" />
               {t('tabNotifications')}
             </TabsTrigger>
+            {/* story 4668 (PO Q-b · Yuna A-4): where the onboarding's «데스크톱 앱 받기» screen is reopened — the card and the phone
+                card only, with no DESKTOP_DOWNLOAD_ENABLED gate (the onboarding card has none either; the gated «데스크톱 앱» menu
+                and /desktop page would be a lie to point at where the flag is off) */}
+            <TabsTrigger value="desktop">
+              <Monitor className="h-4 w-4" />
+              {t('desktopTab')}
+            </TabsTrigger>
             {isSupportWidgetEnabled() && (
               <TabsTrigger value="support">
                 <LifeBuoy className="h-4 w-4" />
@@ -892,6 +893,7 @@ export default function SettingsPage() {
                   <SetPasswordSection onLoadError={handleProfileSectionLoadError} />
                   <LinkedAccountsSection onLoadError={handleProfileSectionLoadError} />
                   <TwoFactorSection onLoadError={handleProfileSectionLoadError} />
+                  <OtherSessionsSection />
                 </div>
                 {currentProjectId && (
                   <MyNotificationChannelSection
@@ -908,6 +910,14 @@ export default function SettingsPage() {
               <div className="space-y-6">
                 <ThemeSettings />
                 <LanguageSettings />
+              </div>
+            </TabsContent>
+
+            <TabsContent value="desktop">
+              {/* story 4668: the download card (+ the phone app's store links on a device that is not a Mac · 4654) — nothing else */}
+              <div className="space-y-6" data-testid="settings-desktop-tab">
+                <DesktopDownloadCard />
+                <PhoneAppCard />
               </div>
             </TabsContent>
 

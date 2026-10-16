@@ -21,6 +21,8 @@ export type OfferOutcome =
   | { kind: 'sent'; phoneKeyId: string }
   | { kind: 'alreadyPaired' }
   | { kind: 'limit' } // 409 remote_device_limit — three phones already
+  | { kind: 'taken' } // 409 remote_device_taken — this phone's key is registered to another account (story #4624)
+  | { kind: 'takenOtherOrg'; org?: string } // 409 remote_device_other_org — the SAME person's key, paired with a computer of another organization of theirs (story 4695)
   | { kind: 'noScreenLock' }
   | { kind: 'biometricRequired' }
   | { kind: 'offerUsed' } // 409 — another phone (or an earlier send) took this QR
@@ -42,6 +44,36 @@ type Call = (type: string, args?: Record<string, unknown>) => Promise<PhoneAnswe
 export interface PairDeps { phoneCall: Call }
 
 const json = { 'Content-Type': 'application/json' };
+
+// story 4695 — the phone's pairing page sits outside the dashboard shell, so no X-Org-Id is carried and the server judged the offer by the
+// login's DEFAULT org: an account in several orgs got `setup_not_found` for a computer that is theirs. The QR names a computer; the server
+// says which org it is in (for a member of that org), and the key, the list, the offer and the wait all go with that org.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const targetOrgOf = new Map<string, string>();
+
+async function findTargetOrg(setupId: string): Promise<string | null> {
+  try {
+    const res = await fetchWithAuth(`/api/remote-devices/pairing-target?setup_id=${encodeURIComponent(setupId)}`);
+    if (!res.ok) return null;
+    const body = (await res.json()) as { org_id?: unknown };
+    return typeof body.org_id === 'string' && UUID.test(body.org_id) ? body.org_id : null;
+  } catch {
+    return null;
+  }
+}
+
+/** the org header of this QR's computer — none when the server did not name one (then the call goes as it always did) */
+const orgHeader = (setupId: string): Record<string, string> => {
+  const org = targetOrgOf.get(setupId);
+  return org ? { 'X-Org-Id': org } : {};
+};
+
+/** the organization the server names for «paired in another organization» (error.detail.org_name) — a short clean string, or nothing */
+function orgOf(body: Record<string, unknown>): { org?: string } {
+  const detail = (body.error as { detail?: { org_name?: unknown } } | undefined)?.detail;
+  const name = typeof detail?.org_name === 'string' ? detail.org_name.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100) : '';
+  return name ? { org: name } : {};
+}
 
 async function read(res: Response): Promise<{ code: string; body: Record<string, unknown> }> {
   try {
@@ -82,9 +114,9 @@ export async function scanPairQr(deps: PairDeps): Promise<ScanOutcome> {
 
 interface Paired { id: string; pairs: Array<{ setup_id: string }> }
 
-async function myPhones(): Promise<Paired[] | null> {
+async function myPhones(setupId: string): Promise<Paired[] | null> {
   try {
-    const res = await fetchWithAuth('/api/remote-devices');
+    const res = await fetchWithAuth('/api/remote-devices', { headers: orgHeader(setupId) });
     if (!res.ok) return null;
     const body = (await res.json()) as { devices?: Paired[] };
     return Array.isArray(body.devices) ? body.devices : null;
@@ -101,24 +133,31 @@ export async function sendPairOffer(head: OfferHead, label: string, deps: PairDe
     if (key.code === 'biometric_required') return { kind: 'biometricRequired' };
     return { kind: 'failed' };
   }
+  const org = await findTargetOrg(head.setup_id);
+  if (org) targetOrgOf.set(head.setup_id, org); else targetOrgOf.delete(head.setup_id);
   let phoneKeyId: string;
   try {
-    const res = await fetchWithAuth('/api/remote-devices', { method: 'POST', headers: json, body: JSON.stringify({ label, public_key: key.public_key }) });
+    const res = await fetchWithAuth('/api/remote-devices', { method: 'POST', headers: { ...json, ...orgHeader(head.setup_id) }, body: JSON.stringify({ label, public_key: key.public_key }) });
     const { code, body } = await read(res);
-    if (!res.ok) return code === 'remote_device_limit' ? { kind: 'limit' } : { kind: 'failed' };
+    if (!res.ok) {
+      if (code === 'remote_device_limit') return { kind: 'limit' };
+      if (code === 'remote_device_taken') return { kind: 'taken' }; // story #4624: its own line, not the general «보내지 못했어요»
+      if (code === 'remote_device_other_org') return { kind: 'takenOtherOrg', ...orgOf(body) }; // story 4695: not «another account» — the same person's phone, another organization
+      return { kind: 'failed' };
+    }
     if (typeof body.id !== 'string') return { kind: 'failed' };
     phoneKeyId = body.id;
   } catch {
     return { kind: 'failed' };
   }
-  const phones = await myPhones();
+  const phones = await myPhones(head.setup_id);
   if (phones?.some((p) => p.id === phoneKeyId && p.pairs.some((x) => x.setup_id === head.setup_id))) return { kind: 'alreadyPaired' };
 
   const mac = await deps.phoneCall('pair.mac', { offer_id: head.offer_id, phone_key_id: phoneKeyId, label });
   if (!mac.ok || typeof mac.mac !== 'string') return mac.code === 'no_offer' ? { kind: 'expired' } : { kind: 'failed' };
   try {
     const res = await fetchWithAuth('/api/remote-devices/pairing-offers', {
-      method: 'POST', headers: json,
+      method: 'POST', headers: { ...json, ...orgHeader(head.setup_id) },
       body: JSON.stringify({ setup_id: head.setup_id, offer_id: head.offer_id, phone_key_id: phoneKeyId, label, expires_at: head.expires_at, mac: mac.mac }),
     });
     if (res.ok) return { kind: 'sent', phoneKeyId };
@@ -142,7 +181,7 @@ export async function checkPairOffer(head: OfferHead, phoneKeyId: string, known:
   let state = '';
   let reveal: unknown = null;
   try {
-    const res = await fetchWithAuth(`/api/remote-devices/pairing-offers/${head.offer_id}?setup_id=${encodeURIComponent(head.setup_id)}`);
+    const res = await fetchWithAuth(`/api/remote-devices/pairing-offers/${head.offer_id}?setup_id=${encodeURIComponent(head.setup_id)}`, { headers: orgHeader(head.setup_id) });
     if (!res.ok) return { kind: 'failed' };
     const body = (await res.json()) as { state?: string; reveal?: unknown };
     state = body.state ?? '';
@@ -153,7 +192,7 @@ export async function checkPairOffer(head: OfferHead, phoneKeyId: string, known:
   if (state === 'sent') return { kind: 'waiting' };
   if (state !== 'revealed' && state !== 'expired') return { kind: 'failed' };
   // after the computer took it (or the time ran out) the pair may have stood: the server's list says so
-  const phones = await myPhones();
+  const phones = await myPhones(head.setup_id);
   if (phones?.some((p) => p.id === phoneKeyId && p.pairs.some((x) => x.setup_id === head.setup_id))) return { kind: 'paired' };
   if (state === 'expired') return { kind: 'notPaired' };
   if (known) return { kind: 'number', number: known };

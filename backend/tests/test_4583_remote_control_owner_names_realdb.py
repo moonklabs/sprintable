@@ -2,11 +2,11 @@
 
 The two new fields, pinned (PO 04:09Z · Kadir's lens «what the new fields show, and to whom»):
 - `owner_names`: display names only — no email · no member id · no user id.
-- `connected_computers`: a count only — no device name.
+- `connected_setups`: a count only — no device name.
 - The person-session read answers only a person of that org — anyone else gets resolve_member's own 400 (unchanged · PO 05:08Z:
   the shared resolver's status is outside this story) with **no name in the body**; the device read (an agent key) answers only
   its own org's names.
-- «Owner» is read where the PUT gate reads it, on both resolver branches (Didi R2); `connected_computers` counts the devices turning
+- «Owner» is read where the PUT gate reads it, on both resolver branches (Didi R2); `connected_setups` counts the devices turning
   it on would wake (Didi R4 · `_live_devices`).
 - Unchanged: the switch starts off, and only an owner's person session changes it (4535's tests).
 """
@@ -52,18 +52,20 @@ async def test_the_answer_carries_exactly_five_keys_and_names_the_owner_to_every
     async with _client() as c:
         for who, can in ((OWNER, True), (PLAIN, False)):
             body = (await c.get(URL, headers=_person(who))).json()
-            assert set(body) == {"enabled", "enabled_at", "can_change", "owner_names", "connected_computers"}, body
+            # story 4584: the old name rides along for one deploy, with the same value (the web reads connected_setups only)
+            assert set(body) == {"enabled", "enabled_at", "can_change", "owner_names", "connected_setups", "connected_computers"}, body
+            assert body["connected_computers"] == body["connected_setups"]
             assert body["can_change"] is can
             assert body["owner_names"] == ["Owner"], "a person who is not an owner reads the owner's name"
             _no_identity(body["owner_names"])
-            assert isinstance(body["connected_computers"], int)
+            assert isinstance(body["connected_setups"], int)
 
 
 async def _count(c) -> int:
-    return (await c.get(URL, headers=_person(PLAIN))).json()["connected_computers"]
+    return (await c.get(URL, headers=_person(PLAIN))).json()["connected_setups"]
 
 
-async def test_connected_computers_counts_only_what_turning_it_on_would_wake(world):
+async def test_connected_setups_counts_only_what_turning_it_on_would_wake(world):
     async with _client() as c:
         assert await _count(c) == 0
         await _device(c, name="d4424 mac 4583a")
@@ -79,7 +81,7 @@ async def test_connected_computers_counts_only_what_turning_it_on_would_wake(wor
         # another org's live device → not counted here
         await _sql(f"UPDATE desktop_setups SET org_id = '{ORG2}' WHERE org_id = '{ORG}' AND device_name = 'd4424 mac 4583b'")
         body = (await c.get(URL, headers=_person(PLAIN))).json()
-        assert body["connected_computers"] == 0
+        assert body["connected_setups"] == 0
         assert "d4424 mac" not in str(body), "a count only — no device name"
 
 
@@ -87,7 +89,7 @@ async def test_another_orgs_person_gets_the_resolvers_400_with_no_name_in_it(wor
     async with _client() as c:
         r = await c.get(URL, headers=_person(OUTSIDER))
         assert r.status_code == 400, r.text  # resolve_member's own (PO 05:08Z: unchanged — not this story's)
-        assert "Owner" not in r.text and "owner_names" not in r.text and "connected_computers" not in r.text
+        assert "Owner" not in r.text and "owner_names" not in r.text and "connected_setups" not in r.text
 
 
 async def test_owner_names_are_who_the_put_gate_lets_turn_it_on_on_both_resolver_branches(world, monkeypatch):
@@ -121,12 +123,14 @@ async def test_an_owner_without_a_name_row_or_inactive_is_left_out_never_shown_a
         _no_identity(names)
         await _sql(f"UPDATE members SET is_active = false WHERE id = '{OWNER_TM}'")
         assert (await c.get(URL, headers=_person(PLAIN))).json()["owner_names"] == [], "an inactive owner is not named"
-        # the edge pinned as the meant behaviour (Kadir 4973 · PO 06:06Z): the gate still lets both turn it on — the list names
-        # only those it can show, it does not decide who may change it (an inactive member at the gate is 4535's, not this card's)
-        assert (await c.put(URL, json={"enabled": True}, headers=_person(OWNER))).status_code == 200, "inactive owner: the gate as today"
-        assert (await c.put(URL, json={"enabled": False}, headers=_person(nameless))).status_code == 200, "nameless owner: the gate as today"
+        # story #4585 (PO 01:35Z): the gate is 4598's one rule now (`is_active_owner` · fail closed) — the two it never names cannot
+        # change it either (was pinned 200 here as «the gate as today», Kadir 4973 · PO 06:06Z, until 4585 decided it)
+        for who, what in ((OWNER, "inactive owner"), (nameless, "owner with no members row")):
+            r = await c.put(URL, json={"enabled": True}, headers=_person(who))
+            assert r.status_code == 403 and r.json()["error"]["code"] == "owner_required", (what, r.text)
+            assert (await c.get(URL, headers=_person(who))).json()["can_change"] is False, what
         body = (await c.get(URL, headers=_person(PLAIN))).json()
-        assert body["owner_names"] == [] and body["can_change"] is False
+        assert body["owner_names"] == [] and body["can_change"] is False and body["enabled"] is False  # nothing changed
 
 
 async def test_the_device_reads_only_its_own_orgs_owner_names(world):

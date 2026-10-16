@@ -125,6 +125,7 @@ async def test_list_projects_returns_only_accessible(monkeypatch):
     proj.id = P1; proj.org_id = ORG_ID; proj.name = "P1"; proj.slug = "p1"
     proj.description = None; proj.created_at = _now; proj.updated_at = _now; proj.deleted_at = None
     proj.violation_level = "warn"
+    proj.workdir_hint = None  # [SID:4681]: ProjectResponse reads this field now — a MagicMock attribute is not `str | None`
     scalars = MagicMock(); scalars.all.return_value = [proj]
     res = MagicMock(); res.scalars.return_value = scalars
     session = AsyncMock(); session.execute = AsyncMock(return_value=res)

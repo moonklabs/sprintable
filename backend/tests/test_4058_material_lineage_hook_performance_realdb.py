@@ -39,6 +39,10 @@ def _full_access_caller_4351(monkeypatch):
     import app.services.project_auth as project_auth
 
     monkeypatch.setattr(project_auth, "restricted_accessible_project_ids", _AsyncMock(return_value=None))
+    # story #4688: routes filter by `project_scope` (the projects that EXIST and the caller reaches) — «full access» here = the org's live projects, from the DB
+    from tests.scope_pin_4688 import _live_from_db
+
+    monkeypatch.setattr(project_auth, "project_scope", _live_from_db)
     monkeypatch.setattr(project_auth, "has_project_access", _AsyncMock(return_value=True))
 
 

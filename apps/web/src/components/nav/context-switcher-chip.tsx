@@ -19,10 +19,13 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { CreateOrganizationDialog } from '@/components/nav/create-organization-dialog';
+import { ProjectAccessPicker } from '@/components/nav/project-access-picker';
+import { ProjectFolderField } from '@/components/nav/project-folder-field';
 import { useUnifiedSwitcher, type OrgSwitcherItem, type ProjectSwitcherItem } from '@/hooks/use-unified-switcher';
 import { useAccountSwitcher } from '@/hooks/use-account-switcher';
 import { orgRoleLabel } from '@/lib/org-member-role';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { ProjectLimitBanner } from '@/components/nav/project-limit-banner';
 
 interface ContextSwitcherChipProps {
   orgs: OrgSwitcherItem[];
@@ -357,6 +360,8 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
             <DialogTitle>{t('switcherNewProjectDialogTitle')}</DialogTitle>
           </DialogHeader>
           <form onSubmit={(e) => { e.preventDefault(); void s.createProject(s.newProjectName, s.newProjectDesc); }} className="space-y-3">
+            {/* [SID:4681] (Yuna §K): the plan's project limit — a warning banner at the form's top (in place of the general failure line below) */}
+            {s.createProjectLimit && <ProjectLimitBanner key={s.createProjectLimitNonce} limit={s.createProjectLimit.limit} free={s.createProjectLimit.free} />}
             <div className="space-y-1">
               <label className="text-sm font-medium" htmlFor="chip-proj-name">
                 {t('switcherProjectNameLabel')} <span className="text-destructive">*</span>
@@ -384,6 +389,11 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                 onChange={(e) => s.setNewProjectDesc(e.target.value)}
               />
             </div>
+            {/* [SID:4681] (D3 · piece ③): the same folder field as the sidebar dialog — inside the desktop app only */}
+            <ProjectFolderField value={s.newProjectFolder} onChange={s.setNewProjectFolder} disabled={s.creating} idPrefix="chip" />
+            {/* [SID:4681] (D3 · piece ②): the same check list as the sidebar dialog — the web too (AC3) */}
+            {/* Kadir codex · PO (나): an org member may not grant (the server's rule) — no list, no call */}
+            {s.canGrantAccess && <ProjectAccessPicker selected={s.newProjectAgentIds} onChange={s.setNewProjectAgentIds} disabled={s.creating} idPrefix="chip" />}
             {/* story #2468(b) — 실패를 침묵하지 않는다("버튼 무반응"의 정체가 이 자리였다). */}
             {s.createProjectError && (
               <p role="alert" className="text-sm text-destructive">{s.createProjectError}</p>
@@ -398,6 +408,14 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
           </form>
         </DialogContent>
       </Dialog>
+      {/* [SID:4681]: the project was made but some grants failed — said under the chip (the sheet closed and the switch happened) */}
+      {s.createProjectNotice && (
+        <p role="alert" className="px-1 text-xs text-destructive lg:hidden" data-testid="context-switcher-chip-create-project-notice">{s.createProjectNotice}</p>
+      )}
+      {/* [SID:4681] ③: the folder could not be kept on this Mac — its own line (Yuna §H) */}
+      {s.createProjectFolderNotice && (
+        <p role="alert" className="px-1 text-xs text-destructive lg:hidden" data-testid="context-switcher-chip-create-project-folder-notice">{s.createProjectFolderNotice}</p>
+      )}
     </>
   );
 }

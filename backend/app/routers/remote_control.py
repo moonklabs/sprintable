@@ -17,7 +17,7 @@ from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.models.organization import Organization
 from app.services import remote_control
-from app.services.member_resolver import resolve_member
+from app.services.member_resolver import is_active_owner, resolve_member
 
 router = APIRouter(tags=["remote-control"])
 
@@ -28,6 +28,8 @@ class RemoteControlState(BaseModel):
     can_change: bool
     # story #4583: display names only (no email · no id) · a count only (no device name)
     owner_names: list[str]
+    connected_setups: int
+    # story 4584: the old name, the same value, for one deploy (the backend ships before the web that reads connected_setups) — remove next deploy
     connected_computers: int
 
 
@@ -59,16 +61,23 @@ async def _org(db: AsyncSession, org_id: uuid.UUID, *, lock: bool = False) -> Or
     return org
 
 
+async def _may_change(db: AsyncSession, member) -> bool:
+    """story #4585 (PO 01:35Z): an owner whose member row is active, fail closed — an inactive owner held the whole org's switch
+    while `owner_names` (active people only) never named them. story #4598: the rule lives in `member_resolver.is_active_owner`,
+    the one the run profile's «묻지 않고 일하기» gates call too."""
+    return await is_active_owner(db, member)
+
+
 @router.get("/api/v2/organizations/{org_id}/remote-control", response_model=RemoteControlState)
 async def get_remote_control(org_id: uuid.UUID, db: AsyncSession = Depends(get_db), auth: AuthContext = Depends(get_current_user)):
     member = await _person_of(db, auth, org_id)
-    return await _view(db, await _org(db, org_id), can_change=member.role == "owner")
+    return await _view(db, await _org(db, org_id), can_change=await _may_change(db, member))
 
 
 async def _view(db: AsyncSession, org: Organization, *, can_change: bool) -> dict:
     return remote_control.state_view(
         org, can_change=can_change, owner_names=await remote_control.owner_names(db, org.id),
-        connected_computers=await remote_control.connected_computers(db, org.id),
+        connected_setups=await remote_control.connected_setups(db, org.id),
     )
 
 
@@ -83,7 +92,7 @@ async def put_remote_control(
     if _requires_interactive_session(auth):
         raise HTTPException(status_code=403, detail={"code": "person_session_required", "message": "a person's session is required"})
     member = await _person_of(db, auth, org_id)
-    if member.role != "owner":
+    if not await _may_change(db, member):  # story #4585: an inactive owner too — the same 403 code as 4598's
         raise HTTPException(status_code=403, detail={"code": "owner_required", "message": "only an owner of this organization can change it"})
     org = await _org(db, org_id, lock=True)
     await remote_control.set_enabled(db, org=org, actor_id=member.id, enabled=body.enabled)

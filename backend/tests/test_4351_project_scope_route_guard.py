@@ -22,7 +22,7 @@ from pathlib import Path
 _BACKEND = Path(__file__).resolve().parent.parent
 _ROUTERS = _BACKEND / "app" / "routers"
 _ROUTE_METHODS = frozenset({"get", "post", "put", "patch", "delete"})
-_ACCESS = re.compile(r"(project_access|accessible|can_access|_scope_filter)")
+_ACCESS = re.compile(r"(project_access|accessible|can_access|_scope_filter|scoped_project_ids|project_scope|project_is_live)")  # story #4688: the live-scope helpers resolve the same set
 
 _KNOWN = {
     "app/routers/account.py::resolve_accounts",
@@ -30,6 +30,8 @@ _KNOWN = {
     # project — its stream, session reports and command results are that device's only; the session view is the org's
     # owners and admins (as the setup's own revoke), not a project read
     "app/routers/desktop_relay.py::device_stream",
+    # story 4695 — device-token route · the token's own setup's organization id and name only (no project-owned entity is read)
+    "app/routers/desktop_relay.py::device_setup_facts",
     "app/routers/desktop_relay.py::get_device_sessions",
     "app/routers/desktop_relay.py::post_command_result",
     "app/routers/desktop_relay.py::post_session_state",

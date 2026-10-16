@@ -49,3 +49,8 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: backend/sprintable_mcp/dist
+
+  # 2026-10-12 (story 4659): 발행 직후 설치 스모크. 매일 cron 대신 발행 때만 돈다.
+  smoke:
+    needs: publish
+    uses: ./.github/workflows/mcp-pypi-smoke.yml

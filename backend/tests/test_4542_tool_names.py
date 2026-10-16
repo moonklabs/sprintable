@@ -16,7 +16,7 @@ def _strip(s: str) -> str:
 
 
 def test_the_shared_file_is_the_one_pinned_in_both_repos():
-    assert hashlib.sha256(RAW).hexdigest() == "abc9a6fdfb644dedf2cb49d5089df5910e4ed03857418e45e6c9a8084d6427eb"
+    assert hashlib.sha256(RAW).hexdigest() == "21d9b626462d132f2b44e99c4bce57abaa21658ac375f76ff4e61119e2d614a5"
 
 
 def test_every_vector_names_and_wraps_as_the_board_and_the_phone_do():
@@ -44,8 +44,8 @@ def test_the_computer_once_only_on_its_exact_tail():
 
 def test_4580_the_daemons_sandbox_network_value_is_named_and_the_push_carries_no_host():
     """[SID:4580] Claude's sandbox network question (no tool of its own) — the daemon sends `SandboxNetwork`: named «네트워크 연결» /
-    "Network connection" for runtime claude only (by exact key); every other claude name stays as Claude shows it; the push body is
-    built from the name alone (Yuna 08:51Z: no host on a lock screen)."""
+    "Network connection" (by exact key); every other claude name stays as Claude shows it; the push body is built from the name alone
+    (Yuna 08:51Z: no host on a lock screen). [SID:4591] the name is the value's, whatever the runtime (none too)."""
     from app.services.i18n_catalog import t
     from app.services.tool_names import shown_tool
 
@@ -53,8 +53,12 @@ def test_4580_the_daemons_sandbox_network_value_is_named_and_the_push_carries_no
     assert tool_name("claude", "SandboxNetwork", "en") == "Network connection"
     for other in ("Bash", "sandboxnetwork", "SandboxNetwork ", "__proto__", "names", "constructor"):
         assert tool_name("claude", other, "ko") == other
-    assert tool_name("codex", "SandboxNetwork", "ko") == "작업⁠(SandboxNetwork)"  # a claude-only value
-    assert tool_name(None, "SandboxNetwork", "ko") == "SandboxNetwork"  # a runtime not known: as it is
+    for runtime in ("codex", "hermes", None):  # story 4591: one gate — the daemon's own value, before any runtime
+        assert tool_name(runtime, "SandboxNetwork", "ko") == "네트워크 연결", runtime
+        assert tool_name(runtime, "SandboxNetwork", "en") == "Network connection", runtime
+    for other in ("sandboxnetwork", "SandboxNetwork ", "__proto__", "constructor"):  # exact own key only
+        assert tool_name(None, other, "ko") == other
+    assert tool_name("codex", "exec_command", "ko") == "작업\u2060(exec_command)"  # codex's other values as before
     body = t("agent_permission.notice_body", "ko", tool=shown_tool("claude", "SandboxNetwork", "ko"))
     assert _strip(body) == "네트워크 연결 허용을 기다리고 있어요 — 눌러서 확인해 주세요"
     assert _strip(t("agent_permission.notice_body", "en", tool=shown_tool("claude", "SandboxNetwork", "en"))) == "Waiting for you to allow Network connection — tap to check"

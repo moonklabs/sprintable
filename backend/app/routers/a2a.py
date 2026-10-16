@@ -683,7 +683,8 @@ async def _handle_send_message(
         sender_id=None,
         content=delivered_content,
         thread_id=None,
-        created_at=now,
+        # story #4632: the write's own moment (clock_timestamp), not the request's app-clock `now` taken before the transaction
+        created_at=func.clock_timestamp(),
     ))
     await session.flush()
 

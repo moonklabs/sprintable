@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Collection
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -19,7 +20,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.desktop_relay import DesktopCommand, DesktopSession
 from app.models.desktop_setup import DesktopSetup
-from app.services.desktop_relay import INSTRUCT_NOW_MAX, PROMPT_MAX, SESSION_KEY_PATTERN, DesktopRelayError, legacy_state, limit_view
+from app.services.desktop_relay import (
+    INSTRUCT_NOW_MAX,
+    PROMPT_MAX,
+    SESSION_KEY_PATTERN,
+    DesktopRelayError,
+    inbox_view,
+    legacy_state,
+    limit_view,
+    run_view,
+    system_view,
+    widened_fields,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +96,37 @@ async def _agent_setups(db: AsyncSession, org_id: uuid.UUID, agent_id: uuid.UUID
     return [s for s in rows if any(m.get("member_id") == str(agent_id) and m.get("kind") == "agent" for m in (s.members or []))]
 
 
+async def bound_devices(db: AsyncSession, *, org_id: uuid.UUID, member_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, dict]:
+    """story 4675 (F2) — the computer each agent is bound to now, for a list: `{member_id: {setup_id, device_name}}`.
+
+    «Bound» = the agent holds a live key (not revoked · not expired) that a confirmed, exchanged, not-revoked setup of this org
+    handed out — a move (4565 · 4576) revokes the old computer's key, so the key is the one true link (`desktop_setups.members`
+    keeps the agent on the old setup too and cannot say). Two live keys for the moment after a move → the newest exchanged
+    setup wins. No live key → the agent is absent from the dict (the API shows null). Only this org's setups are read: a
+    conversation shared across organizations never carries another org's computer names (PO 09:54Z).
+    """
+    from app.models.api_key import ApiKey
+
+    ids = [i for i in set(member_ids) if i]
+    if not ids:
+        return {}
+    now = _now()
+    rows = (await db.execute(
+        select(ApiKey.team_member_id, DesktopSetup.id, DesktopSetup.device_name)
+        .join(DesktopSetup, DesktopSetup.id == ApiKey.desktop_setup_id)
+        .where(
+            ApiKey.team_member_id.in_(ids), ApiKey.revoked_at.is_(None),
+            (ApiKey.expires_at.is_(None)) | (ApiKey.expires_at > now),
+            DesktopSetup.org_id == org_id, DesktopSetup.revoked_at.is_(None), DesktopSetup.exchanged_at.is_not(None),
+        )
+        .order_by(DesktopSetup.exchanged_at.desc())
+    )).all()
+    out: dict[uuid.UUID, dict] = {}
+    for member_id, setup_id, device_name in rows:
+        out.setdefault(member_id, {"setup_id": setup_id, "device_name": device_name})
+    return out
+
+
 # ── ① the DM header ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 
@@ -115,11 +158,15 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
     # story #4534 (phone contract 48616ee0 v0.3): the names the phone's sheet and system prompt show — never signed
     view = {"agent_name": agent.name,
             "conversation": await _conversation_named(db, conversation_id, member_id=member_id, agent=agent) if conversation_id else None,
-            "setup_id": None, "device_name": None, "session_key": None, "runtime": None, "state": None, "activity": None, "state_at": None, "limit": None, "instruct_now": None,
+            "setup_id": None, "device_name": None, "session_key": None, "runtime": None, "state": None, "activity": None, "state_at": None, "limit": None, "run": None, "instruct_now": None,
             "remote_control": await remote_control.is_enabled(db, org_id),
             "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent,
                                        setup=setups[0] if setups else None),
             "pending_permission_request_id": None}
+    # story 4675 (F2) — the computer the agent is bound to (its live key's setup), said even before any session was reported:
+    # the workforce detail's «{name}에 연결됨 · 아직 안 돌았어요» line and its link to the device row
+    bound = (await bound_devices(db, org_id=org_id, member_ids=[agent_id])).get(agent_id)
+    view.update({"bound_setup_id": str(bound["setup_id"]) if bound else None, "bound_device_name": bound["device_name"] if bound else None})
     if not setups:
         return view
     sessions = (await db.execute(
@@ -140,6 +187,13 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
         "state": legacy_state(state), "activity": state, "state_at": pick.state_at.isoformat(),
         # story #4534 (contract v1.12): a usage limit's why — only while the row is a limit word and the device is heard
         "limit": limit_view(pick) if state == pick.state else None,
+        # story #4686: what it runs on — only while the device is heard and the session lives (the same gate)
+        "run": run_view(pick) if state == pick.state and pick.state != "stopped" else None,
+        "inbox": inbox_view(pick) if state == pick.state and pick.state != "stopped" else None,  # story #4684
+        # story #4599: a held turn's why (the window's folder) — only while the device is heard
+        "system": system_view(pick) if state == pick.state else None,
+        # story #4641: a widening a person made at the terminal — the three keys, only while the device is heard (the same gate as above)
+        **widened_fields(pick, silent=state != pick.state),
         # story #4534 (PO 06:30Z · Kadir 06:31Z): whether [지금 지시] can go into its turn — only while the device is heard
         "instruct_now": pick.instruct_now if state == pick.state else None,
         "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup),
@@ -154,6 +208,16 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
         )).scalar_one_or_none()
         if view["pending_permission_request_id"] is not None:
             view["pending_permission_request_id"] = str(view["pending_permission_request_id"])
+        # story #4590 (Yuna §2): the question it waits on can only be answered in that computer's terminal — the DM strip says so in
+        # place of the inbox line (whoever it was sent to: a fact of the question, not of the reader). Read from the request rows —
+        # no field on the session row (Mirko's contract §5)
+        view["ask_terminal_only"] = (await db.execute(
+            select(AgentPermissionRequest.id).where(
+                AgentPermissionRequest.setup_id == setup.id, AgentPermissionRequest.session_key == pick.session_key,
+                AgentPermissionRequest.state == "pending", AgentPermissionRequest.expires_at > now,
+                AgentPermissionRequest.terminal_only.is_(True),
+            ).limit(1)
+        )).scalar_one_or_none() is not None
     return view
 
 
@@ -163,7 +227,9 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
 class CommandRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["stop_session", "send_prompt"]
+    # story #4599 (contract v1.13.2 · PO 14:08Z): `end_session` — the whole session ended, from the phone's [세션 끝내기] (the one handle
+    # on a turn a macOS window holds); the shell signs that kind, so what was signed is what happens
+    kind: Literal["stop_session", "send_prompt", "end_session"]
     session_key: str = Field(pattern=SESSION_KEY_PATTERN)
     text: str | None = Field(default=None, min_length=1, max_length=PROMPT_MAX)
     conversation_id: uuid.UUID | None = None
@@ -184,7 +250,9 @@ async def _participant(db: AsyncSession, conversation_id: uuid.UUID, member_id: 
 
 async def create_command(db: AsyncSession, *, member_id: uuid.UUID, member_role: str | None, user_id: uuid.UUID,
                          org_id: uuid.UUID, agent_id: uuid.UUID, body: CommandRequest) -> tuple[DesktopCommand | None, str]:
-    """→ (the command, "queued"), or (None, "already_stopped") for a stop on a session that is not working."""
+    """→ (the command, "queued"), or (None, "already_stopped") for a stop on a session that is not working (an end on one that has
+    stopped). A stop on a turn a macOS window holds is refused with its own closed reason (409 `system_wait_end_only`) — never an
+    «already stopped», never an end of the session behind the person's back (story #4599 · PO 12:40Z ④ · 14:18Z)."""
     from app.services import remote_control
     from app.services.agent_permissions import _reachable, paired_phone
     from app.services.desktop_relay import enqueue_command
@@ -193,8 +261,8 @@ async def create_command(db: AsyncSession, *, member_id: uuid.UUID, member_role:
         raise DesktopRelayError(422, "invalid_payload", "an instruction needs its text and conversation")
     if body.kind == "send_prompt" and len(body.text) > INSTRUCT_NOW_MAX:  # code points (Kadir 06:21Z ④) — the sheet stops it first
         raise DesktopRelayError(422, "instruct_too_long", f"an instruction into the turn is {INSTRUCT_NOW_MAX} characters at most")
-    if body.kind == "stop_session" and (body.text is not None or body.conversation_id is not None):
-        raise DesktopRelayError(422, "invalid_payload", "a stop carries no text or conversation")
+    if body.kind in ("stop_session", "end_session") and (body.text is not None or body.conversation_id is not None):
+        raise DesktopRelayError(422, "invalid_payload", "a stop or an end carries no text or conversation")
     agent = await _agent(db, org_id, agent_id)
     setups = {s.id: s for s in await _agent_setups(db, org_id, agent_id)}
     session = (await db.execute(
@@ -225,9 +293,18 @@ async def create_command(db: AsyncSession, *, member_id: uuid.UUID, member_role:
         raise DesktopRelayError(409, "device_unreachable", "that computer has not been heard from")
     if await paired_phone(db, member_id=member_id, phone_id=body.phone_key_id, setup_id=setup.id) is None:
         raise DesktopRelayError(409, "phone_not_paired", "this phone is not paired with that computer")
-    # a stop while it works or while it waits on a person's permission (Kadir 325 · PO 04:34Z — the daemon stops it then too);
-    # an instruction only into a running turn
+    # story #4599 (PO 12:40Z ④ · 14:18Z): a stop while a macOS window holds the turn is refused with its own closed reason — the
+    # session is not stopped, it is frozen in that window (an Esc cannot reach it), and a stop is never turned into an end of the
+    # session behind the person's back. Asked BEFORE the «not working» line below: that line would answer «already_stopped», a false
+    # answer to the phone · the web · an MCP caller. The phone shows no [멈춤] there (only [세션 끝내기] → end_session); this is the race
+    # of a press just before the window came up. The daemon refuses with the same word (Mirko 385).
+    if body.kind == "stop_session" and session.state == "waiting_system":
+        raise DesktopRelayError(409, SYSTEM_WAIT_END_ONLY, "a macOS window holds this turn — only an end of the session goes through")
+    # a stop while it works or while it waits on a person's permission (Kadir 325 · PO 04:34Z — the daemon stops it then too); an
+    # instruction only into a running turn; an end of the session whenever it has not stopped (PO 14:08Z: always ends)
     if body.kind == "stop_session" and session.state not in ("working", "waiting_permission"):
+        return None, "already_stopped"
+    if body.kind == "end_session" and session.state == "stopped":
         return None, "already_stopped"
     if body.kind == "send_prompt" and session.state != "working":
         raise DesktopRelayError(409, "session_not_working", "the turn has ended — send it as a message")
@@ -275,7 +352,7 @@ async def get_command(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UU
     row = (await db.execute(
         select(DesktopCommand, DesktopSetup).join(DesktopSetup, DesktopSetup.id == DesktopCommand.setup_id).where(
             DesktopCommand.id == command_id, DesktopCommand.requested_by == member_id, DesktopSetup.org_id == org_id,
-            DesktopCommand.kind.in_(("stop_session", "send_prompt")),
+            DesktopCommand.kind.in_(("stop_session", "send_prompt", "end_session")),
         )
     )).first()
     if row is None:
@@ -294,6 +371,8 @@ async def get_command(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UU
 
 # story #4534: the words a turn ends in (a [지금 지시]'s sender is told once)
 TURN_ENDED_STATES = ("idle", "waiting_input", "error", "paused_limit")
+# story #4599 (PO 14:18Z): the closed reason a stop gets on a turn a macOS window holds — the server's and the daemon's one word
+SYSTEM_WAIT_END_ONLY = "system_wait_end_only"
 
 
 async def on_session_reported(db: AsyncSession, setup: DesktopSetup, session_key: str, state: str, at: datetime) -> None:
@@ -334,7 +413,7 @@ async def on_command_done(db: AsyncSession, cmd: DesktopCommand) -> None:
     An instruction done: its one line in the conversation — «sent into the current turn», or after_step «queued after the step in
     progress» (Yuna 03:49Z: it has not gone in yet). Refused or failed: no line — the phone sends the words as a message instead
     (sent_as_message), and that message is the record."""
-    if cmd.kind == "stop_session" and cmd.state == "done" and cmd.session_key:
+    if cmd.kind in ("stop_session", "end_session") and cmd.state == "done" and cmd.session_key:
         await _close_prompts(db, cmd.setup_id, cmd.session_key)
     if cmd.kind == "send_prompt" and cmd.state == "done" and not await _line_written(db, cmd.id):
         payload = cmd.payload or {}
@@ -354,6 +433,11 @@ def _turn_end_kind(row: DesktopSession | None) -> tuple[str | None, str | None]:
     if row is None or row.state == "idle":
         return None, None
     if row.state == "waiting_input":
+        # story #4685 (Yuna limit-notice-1014.md §③): one word for one state — a limit the app looks at again by itself (`looks`) is
+        # «paused at the usage limit», like the strip says; a held one (a person must look at that computer) and a limit from a
+        # daemon that does not look keep «usage limit» (fail-closed: never promise a look that never comes)
+        if row.limit_self_resume and row.limit_looks and not row.limit_held:
+            return "paused_limit", "paused_limit"
         return ("usage_limit", "usage_limit") if row.limit_self_resume else ("waiting_input", "waiting_input")
     if row.state == "paused_limit":
         return "paused_limit", "paused_limit"

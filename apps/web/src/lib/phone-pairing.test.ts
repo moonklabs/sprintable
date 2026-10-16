@@ -94,10 +94,22 @@ describe('[4532] sendPairOffer', () => {
     }
   });
 
-  it('the registration refused: three phones already → limit; anything else → failed', async () => {
+  it('the registration refused: three phones already → limit · another account\'s phone → taken (story #4624) · anything else → failed', async () => {
     await expect(sendPairOffer(HEAD, 'x', serverFor(okShell(), server(okRoutes({ 'POST /api/remote-devices': () => res(409, { error: { code: 'remote_device_limit' } }) })))))
       .resolves.toEqual({ kind: 'limit' });
     await expect(sendPairOffer(HEAD, 'x', serverFor(okShell(), server(okRoutes({ 'POST /api/remote-devices': () => res(409, { error: { code: 'remote_device_taken' } }) })))))
+      .resolves.toEqual({ kind: 'taken' });
+    // story 4695: the SAME person's key, paired with a computer of another organization of theirs — not «another account»
+    await expect(sendPairOffer(HEAD, 'x', serverFor(okShell(), server(okRoutes({ 'POST /api/remote-devices': () => res(409, { error: { code: 'remote_device_other_org' } }) })))))
+      .resolves.toEqual({ kind: 'takenOtherOrg' });
+    // …naming the organization when the server does (a short clean string — never raw)
+    await expect(sendPairOffer(HEAD, 'x', serverFor(okShell(), server(okRoutes({ 'POST /api/remote-devices': () => res(409, { error: { code: 'remote_device_other_org', detail: { org_name: ' 문클랩스\n ' } } }) })))))
+      .resolves.toEqual({ kind: 'takenOtherOrg', org: '문클랩스' });
+    for (const detail of [{ org_name: 5 }, { org_name: '  ' }, {}, null]) {
+      await expect(sendPairOffer(HEAD, 'x', serverFor(okShell(), server(okRoutes({ 'POST /api/remote-devices': () => res(409, { error: { code: 'remote_device_other_org', detail } }) })))))
+        .resolves.toEqual({ kind: 'takenOtherOrg' });
+    }
+    await expect(sendPairOffer(HEAD, 'x', serverFor(okShell(), server(okRoutes({ 'POST /api/remote-devices': () => res(409, { error: { code: 'something_new' } }) })))))
       .resolves.toEqual({ kind: 'failed' });
   });
 

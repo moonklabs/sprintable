@@ -383,6 +383,8 @@ def _total_unread_count_stmt(member_id: uuid.UUID):
 async def _fetch_conversation_participants(
     conv_ids: list[uuid.UUID],
     db: AsyncSession,
+    *,
+    device_org_id: uuid.UUID | None = None,
 ) -> dict[uuid.UUID, list[dict]]:
     """story #2009: conversation(들)의 participants 배치 조회 — list_conversations의 기존
     N+1 방지 배치 로직을 단건(`get_conversation`)에서도 재사용하도록 추출(로직 복제 금지, AC).
@@ -390,6 +392,10 @@ async def _fetch_conversation_participants(
     반환 dict shape는 두 엔드포인트가 항상 동일 JSON을 내려주도록 고정:
     `{"member_id", "name", "avatar_url", "type", "runtime_type"}` (list_conversations의
     participants 항목과 byte-identical — FE 파싱 일관성).
+
+    story 4675 (F2) — `device_name`: the computer an agent participant is bound to now, read only when the caller passes its
+    org (`device_org_id`) and only for that org's setups — a participant from another organization gets null, as does a
+    human or an agent with no live desktop key.
     """
     if not conv_ids:
         return {}
@@ -409,6 +415,12 @@ async def _fetch_conversation_participants(
             select(TeamMember.id, TeamMember.runtime_type).where(TeamMember.id.in_(all_member_ids))
         )).all()
         runtime_type_map = {r.id: r.runtime_type for r in rt_rows}
+
+    devices: dict[uuid.UUID, dict] = {}
+    if all_member_ids and device_org_id is not None:
+        from app.services.desktop_commands import bound_devices
+
+        devices = await bound_devices(db, org_id=device_org_id, member_ids=all_member_ids)
 
     conv_participants: dict[uuid.UUID, list[dict]] = defaultdict(list)
     for r in p_rows:
@@ -431,6 +443,7 @@ async def _fetch_conversation_participants(
             "type": resolved.type if resolved else "human",
             "runtime_type": runtime_type_map.get(r.member_id),
             "resolved": resolved.resolved if resolved else False,
+            "device_name": (devices.get(r.member_id) or {}).get("device_name"),
         })
     return conv_participants
 
@@ -562,6 +575,15 @@ def _build_message_summary(content: str | None, sender_name: str | None, has_att
     return f"{name}: {preview}" if preview else name
 
 
+def sender_org_id_of(sender: "ResolvedMember | TeamMember | None") -> str | None:
+    """story 4649 — 보낸 이가 속한 조직(사람·에이전트 모두). 없거나 주인 없는 sentinel(uuid 0)이면 None.
+    발신 때 서버가 이 행에서 만든 값만 쓴다 — 이벤트 payload에 실린 같은 이름의 값은 읽지 않는다."""
+    org = getattr(sender, "org_id", None)
+    if not isinstance(org, uuid.UUID) or org == uuid.UUID(int=0):
+        return None
+    return str(org)
+
+
 def _msg_payload(
     msg: ConversationMessage, sender: "ResolvedMember | TeamMember | None",
     *, references: list[dict[str, str]] | None = None,
@@ -574,6 +596,11 @@ def _msg_payload(
     # 여기서 빈 배열로 덮는다(실제 근본은 attachments.py authorize의 belongs 쿼리에 deleted_at
     # 필터를 추가한 것 — 이 payload 필터는 FE가 애초에 못 보게 하는 2차 방어).
     attachments = (msg.attachments if isinstance(msg.attachments, list) else []) if msg.deleted_at is None else []
+    # story 4646 — 읽는 길을 응답에 안내(저장 데이터는 안 바꿈): 각 첨부 항목에 index와 읽는 도구 이름
+    attachments = [
+        {**a, "index": i, "read_with": "sprintable_get_chat_attachment"} if isinstance(a, dict) else a
+        for i, a in enumerate(attachments)
+    ]
     payload = {
         "id": str(msg.id),
         "conversation_id": str(msg.conversation_id),
@@ -587,6 +614,8 @@ def _msg_payload(
         "mentioned_ids": [str(m) for m in (msg.mentioned_ids or [])],
         # E-FILE S1: 첨부 직렬화 (SSE + GET messages 공통). list 아니면 [](레거시/None/mock 안전).
         "attachments": attachments,
+        # story 4649 — 데몬이 자기 조직과 대조하는 칸. 프레임 최상위로 올라온다(라이브 푸시 · 백필 둘 다).
+        "sender_org_id": sender_org_id_of(sender),
         "sender": {
             "id": str(sender.id),
             "name": sender.name,
@@ -1266,11 +1295,27 @@ class ConversationResponse(BaseModel):
     # story #4179 — free_response(#2603 멘션 전용 라우팅의 방 단위 예외)가 PATCH 응답에만 있어
     # 웹 토글이 새로 열 때마다 off로 읽혔다(그 상태로 다시 저장하면 꺼짐 — 데이터 훼손). additive.
     free_response: bool = False
+    # story #4631 C — the flood block of this conversation, while one is open (else absent): when it opened, how it is released
+    # (the org's release_mode) and whether the caller may release it (a human org owner/admin — the release API's own rule).
+    circuit_breaker: "CircuitBreakerState | None" = None
+
+
+class CircuitBreakerState(BaseModel):
+    opened_at: datetime
+    release_mode: str
+    can_release: bool
+    # auto only: after how many quiet minutes agents may send again (window × 2 · the server's value)
+    auto_release_after_minutes: int | None = None
+    # story #4657: nobody in the org may release it (no active owner/admin) — the band says so instead of «ask an admin»
+    no_release_admin: bool = False
+
+
+ConversationResponse.model_rebuild()
 
 
 # E-FILE S1: 채팅 첨부. GCS 기록은 FE-proxy(uploadToGcs)가 처리하고 BE는 URL+메타만 저장.
 _MAX_ATTACHMENTS = 10
-_MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024  # 100MB (메타 sanity 상한)
+from app.services.attachment_limits import HUMAN_ATTACHMENT_MAX_BYTES as _MAX_ATTACHMENT_SIZE  # 100MB · 한 곳 정의(story 4646)
 
 # E-MCP-OPT S2(bbfd24ba)/S6: MCP(비-브라우저) 클라이언트용 JSON/base64 업로드 공용 프리미티브
 # (S6 부터 story/doc 도 공유 — `app/services/mcp_attachment_upload.py` 참조).
@@ -1552,7 +1597,7 @@ async def list_conversations(
 
     # participants 배치 조회 (N+1 방지) — story #2009: get_conversation과 공유하는 헬퍼로 추출.
     conv_id_list = [c.id for c in convs]
-    conv_participants = await _fetch_conversation_participants(conv_id_list, db)
+    conv_participants = await _fetch_conversation_participants(conv_id_list, db, device_org_id=org_id)
 
     # story #1976: unread_count 배치 — 단일 JOIN+GROUP BY(N+1 방지, §4-2). INNER JOIN이라
     # unread=0 대화는 결과행 없음 → dict.get(id, 0)으로 자연 0 처리.
@@ -1785,7 +1830,7 @@ async def list_recent_conversations_outside_project(
     # 관례 그대로)인데 이 엔드포인트가 participants를 안 내려줘 FE가 조립할 재료 자체가 없었다
     # ("님과의 대화"라는 접미 조각만 그대로 노출되던 원인). limit≤5라 배치조회 비용 무시 가능
     # — list_conversations/get_conversation과 동일 헬퍼(_fetch_conversation_participants) 재사용.
-    conv_participants = await _fetch_conversation_participants([conv.id for conv, *_ in rows], db)
+    conv_participants = await _fetch_conversation_participants([conv.id for conv, *_ in rows], db, device_org_id=org_id)
 
     return {
         "data": [
@@ -1871,8 +1916,16 @@ async def get_conversation(
         )).scalar_one()
     # story #2009: 단건 조회도 list_conversations와 동일 participants shape을 자체 포함 —
     # FE가 30건 캡 있는 list 엔드포인트에 기대던 workaround(.find() miss 버그) 제거.
-    participants_map = await _fetch_conversation_participants([conversation_id], db)
+    participants_map = await _fetch_conversation_participants([conversation_id], db, device_org_id=org_id)
     resp.participants = participants_map.get(conversation_id, [])
+    # story #4631 C: the open flood block, for the conversation's banner and its [차단 해제]
+    from app.services.chain_escalation import open_circuit_breaker_state
+
+    breaker = await open_circuit_breaker_state(
+        db, conversation_id=conversation_id, org_id=org_id,
+        caller_user_id=uuid.UUID(auth.user_id) if sender.type == "human" else None,
+    )
+    resp.circuit_breaker = CircuitBreakerState(**breaker) if breaker else None
     return resp
 
 
@@ -2428,7 +2481,11 @@ async def release_circuit_breaker_endpoint(
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    if not await is_org_owner_or_admin(db, uuid.UUID(auth.user_id), org_id):
+    # story #4631 (Kadir 5016): an active owner/admin only — a deactivated one releases nothing (the #4624 rule); the conversation
+    # read's can_release asks the same question, so the band's button and this route never disagree
+    from app.services.chain_escalation import may_release_circuit_breaker
+
+    if not await may_release_circuit_breaker(db, user_id=uuid.UUID(auth.user_id), org_id=org_id):
         raise HTTPException(
             status_code=403,
             detail="서킷브레이커 해제는 org owner/admin만 가능합니다.",
@@ -2601,9 +2658,13 @@ async def send_message_core(
     # 대화 안에서 가능). breaker 행은 human-less 대화에서만 열리므로(open 호출부 조건) 이
     # 조회 결과가 있다는 것 자체가 "이 대화는 human-less"를 함의 — 별도 human 유무 쿼리 불요.
     if sender.type == "agent":
-        from app.services.chain_escalation import get_open_circuit_breaker_id
+        from app.services.chain_escalation import get_open_circuit_breaker_id, release_if_quiet
 
         open_breaker_id = await get_open_circuit_breaker_id(db, conversation_id)
+        # story #4631 (PO 고름 A): release_mode='auto'의 자동 해제는 여기서 — 차단 중엔 저장 뒤 평가가 돌지 않아 전엔 영영
+        # 안 풀렸다. 조용해진 auto org의 차단이면 닫고 이 발신은 통과(manual · 조건 미달은 그대로 423).
+        if open_breaker_id is not None and await release_if_quiet(db, org_id=org_id, conversation_id=conversation_id):
+            open_breaker_id = None
         if open_breaker_id is not None:
             # story #3933 AC3 — 이 자리는 사람이 아니라 «차단된 에이전트 자신»이 읽는다
             # (MCP send_chat_message 호출자). `error` 키를 `code`로 바꿔 api_client.py::
@@ -2616,23 +2677,27 @@ async def send_message_core(
             # "circuit_breaker_open"이면 api_client.py::_split_code_message의 코드
             # 인식 정규식(`^[A-Z][A-Z0-9_]*: `)이 못 잡아 code가 안 뽑힌다 — 값 자체를
             # 새로 발명하는 게 아니라 이 레포 전체가 이미 쓰는 대소문자 관례로 맞추는 것.
-            # 원문 리터럴은 개명 前 그대로 한 덩어리 유지(인접 문자열 리터럴 결합 —
-            # `scripts/verify_no_new_korean_user_strings.py`가 AST `ast.Constant` 단위로
-            # 세므로 이렇게 두 줄로 이어 써도 파서가 하나의 상수로 합친다) — message/hint
-            # 분리는 런타임 `.split(" — ", 1)`로만 한다. 리터럴 자체를 둘로 쪼개면 그
-            # 가드의 "baseline can only shrink" 순증 체크가 파일당 항목 수 증가로 잡는다
-            # (CI 실측, PR#4357 — 5→6건 FAIL). 새 낱말은 여전히 0.
-            _circuit_breaker_notice = (
-                "폭주 감지로 이 대화의 agent 발신이 일시 차단되었습니다 — "
-                "org owner/admin의 해제 또는 자동 해소를 기다려주세요."
+            # story #4631 (Yuna «4631» §5): the words from the shared catalog in the org's language, and true to how this org's
+            # block is released — the old hint promised a «자동 해소» a manual org never gives, and said nothing of sending again
+            # (each retry is another refused turn). manual → wait for an organization admin · auto → about {n} quiet minutes.
+            from app.services.chain_escalation import _get_org_config, auto_release_after_minutes
+            from app.services.i18n_catalog import t
+            from app.services.org_locale import resolve_org_locale
+
+            _locale = await resolve_org_locale(db, org_id)
+            _enabled, _window, _threshold, _mode, _release_mode = await _get_org_config(db, org_id)
+            _quiet_minutes = auto_release_after_minutes(_window)
+            _cb_hint = (
+                t("conversation.agents_paused_hint_auto_one" if _quiet_minutes == 1 else "conversation.agents_paused_hint_auto",
+                  _locale, n=_quiet_minutes)
+                if _release_mode == "auto" else t("conversation.agents_paused_hint_manual", _locale)
             )
-            _cb_message, _cb_hint = _circuit_breaker_notice.split(" — ", 1)
             raise HTTPException(
                 status_code=423,
                 detail={
                     "code": "CIRCUIT_BREAKER_OPEN",
-                    "message": _cb_message,
-                    "hint": _cb_hint.rstrip("."),
+                    "message": t("conversation.agents_paused_message", _locale),
+                    "hint": _cb_hint,
                     "conversation_id": str(conversation_id),
                     "circuit_breaker_id": str(open_breaker_id),
                 },

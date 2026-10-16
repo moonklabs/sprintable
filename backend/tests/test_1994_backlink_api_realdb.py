@@ -2354,7 +2354,10 @@ async def test_get_message_hides_attachments_after_delete():
         client = _client_for(app)
         try:
             before = await client.get(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
-            assert before.json()["attachments"] == [{"url": path, "content_type": "video/mp4"}]
+            # story 4646: each item also says its index (its place in the stored list) and the tool that reads it
+            assert before.json()["attachments"] == [
+                {"url": path, "content_type": "video/mp4", "index": 0, "read_with": "sprintable_get_chat_attachment"}
+            ]
 
             del_resp = await client.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}")
             assert del_resp.status_code == 200, del_resp.text

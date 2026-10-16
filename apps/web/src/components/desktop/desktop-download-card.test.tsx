@@ -4,18 +4,40 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
-import { DesktopDownloadCard } from './desktop-download-card';
+import enMessages from '../../../messages/en.json';
+import { PhoneBridgeClaim } from '@/components/providers/phone-bridge-claim';
+
+// story #4547: the card tells a Mac from anything else — jsdom's own user agent («(darwin|linux) … jsdom») is no Mac's, so each case
+// says which device it is (a Mac by default: the suite below is the Mac card)
+const MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
+const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+const ANDROID = 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36';
+const WINDOWS = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36';
+let ua = MAC;
+let inPhoneApp = false;
+// story #4661: the phone state is subscribable — a test plays the claim by flipping it and telling the listeners
+const phoneListeners = vi.hoisted(() => new Set<() => void>());
+vi.mock('@/lib/phone-bridge', () => ({
+  isPhoneApp: () => inPhoneApp,
+  claimPhoneBridge: () => {},
+  phoneCall: async () => ({ id: '', ok: false, code: 'not_phone_app' }),
+  subscribePhoneApp: (listen: () => void) => { phoneListeners.add(listen); return () => { phoneListeners.delete(listen); }; },
+}));
+const { DesktopDownloadCard, notAMac } = await import('./desktop-download-card');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
 let root: Root;
 
-function wrap(node: React.ReactNode) {
-  return <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC">{node}</NextIntlClientProvider>;
+function wrap(node: React.ReactNode, locale: 'ko' | 'en' = 'ko') {
+  return <PhoneBridgeClaim><NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="UTC">{node}</NextIntlClientProvider></PhoneBridgeClaim>;
 }
 
 beforeEach(() => {
+  ua = MAC;
+  inPhoneApp = false;
+  vi.spyOn(navigator, 'userAgent', 'get').mockImplementation(() => ua);
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -25,14 +47,17 @@ afterEach(async () => {
   await act(async () => { root.unmount(); });
   container.remove();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 async function flush() {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 
-function jsonResponse(body: unknown, ok = true) {
-  return { ok, json: async () => body } as Response;
+// story 4696: the manifest route tells the card its bucket in a header (the server's own setting)
+const DEV_BUCKET = 'sprintable-desktop-releases-dev';
+function jsonResponse(body: unknown, ok = true, bucket: string | null = DEV_BUCKET) {
+  return { ok, json: async () => body, headers: new Headers(bucket ? { 'x-desktop-download-bucket': bucket } : {}) } as Response;
 }
 
 // story #3807 AC3(페드루 PO 確定 2026-09-11 · 착수 시점 민 AC2 PR 0건) — 민의
@@ -59,39 +84,221 @@ describe('DesktopDownloadCard — story #3807 AC3', () => {
       .toBe(koMessages.desktop.unavailable);
   });
 
-  it('⭐매니페스트 수신 — 대상·버전·공증 문구·Gatekeeper 안내·다운로드 링크(GCS url)가 정확히 뜬다(빌드 sha 없는 순수 semver)', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
-      version: '0.3.1', pub_date: '2026-09-11T00:00:00Z',
-      platforms: { 'darwin-aarch64': { url: 'https://storage.googleapis.com/sprintable-desktop-releases-dev/macos/0.3.1/app.tar.gz', signature: 'sig' } },
-    })));
+  // [SID:4619] — the card reads the Electron app's manifest (/desktop/downloads/macos.json), never the old Tauri updater's
+  const MANIFEST = {
+    product: 'Sprintable Dev Setup', bundle_id: 'ai.sprintable.desktop.dev.setup', version: '0.2.0', build: 'abc123def',
+    url: 'https://storage.googleapis.com/sprintable-desktop-releases-dev/macos-electron/0.2.0/Sprintable-Dev-Setup-abc123def-arm64.dmg',
+    sha256: 'f'.repeat(64), size: 1, signed_team: 'JN798BC4KC', notarized: false, pub_date: '2026-10-08T03:00:00.000Z',
+  };
+
+  it('[SID:4696] the manifest cannot be read (an empty prod bucket: 404 / 502 from the route) → the card closes as «지금은 받을 수 없어요» — no version, no link', async () => {
+    for (const status of [404, 502, 503]) {
+      vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status, json: async () => ({ error: 'manifest_unavailable' }), headers: new Headers() }) as Response));
+      await act(async () => { root.render(wrap(<DesktopDownloadCard />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="desktop-download-unavailable"]')?.textContent, String(status)).toBe(koMessages.desktop.unavailable);
+      expect(container.querySelector('[data-testid="desktop-download-button"]')).toBeNull();
+    }
+  });
+
+  it('[SID:4696] no bucket told by the server (prod with none set) → «지금은 받을 수 없어요», no link — even for a well-formed dev-bucket url; a prod bucket told with a dev url → no link either', async () => {
+    for (const bucket of [null, 'sprintable-desktop-releases']) {
+      vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(MANIFEST, true, bucket)));
+      await act(async () => { root.render(wrap(<DesktopDownloadCard />)); });
+      await flush();
+      expect(container.querySelector('[data-testid="desktop-download-unavailable"]')?.textContent, String(bucket)).toBe(koMessages.desktop.unavailable);
+      expect(container.querySelector('[data-testid="desktop-download-button"]')).toBeNull();
+    }
+  });
+
+  it('⭐[SID:4619] 매니페스트 수신 — 대상 · 버전 · 빌드 · 첫 열기 안내(유나 정본: 제목 · 순서 두 줄 · macOS 12 덧줄 · 공증 전) · DMG 링크', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(MANIFEST));
+    vi.stubGlobal('fetch', fetchMock);
     await act(async () => { root.render(wrap(<DesktopDownloadCard />)); });
     await flush();
 
-    const card = container.querySelector('[data-testid="desktop-download-card"]');
-    expect(card).not.toBeNull();
-    // 페드루 PO 정정 2(2026-09-11 16:13Z) — 대상 플랫폼·Gatekeeper 우회 안내.
-    expect(container.querySelector('[data-testid="desktop-download-target"]')?.textContent)
-      .toBe(koMessages.desktop.targetLabel);
-    expect(container.querySelector('[data-testid="desktop-download-gatekeeper-notice"]')?.textContent)
-      .toBe(koMessages.desktop.gatekeeperNotice);
-    expect(container.querySelector('[data-testid="desktop-download-version"]')?.textContent).toBe('버전 0.3.1');
-    expect(container.querySelector('[data-testid="desktop-download-build-sha"]')).toBeNull();
-    expect(container.querySelector('[data-testid="desktop-download-notarization-notice"]')?.textContent)
-      .toBe(koMessages.desktop.notarizationNotice);
+    // the Electron app's manifest, not the old Tauri updater's (installed old apps keep updating from that one)
+    expect(fetchMock.mock.calls.map((c) => String((c as unknown[])[0]))).toEqual(['/desktop/downloads/macos.json']);
+    expect(container.querySelector('[data-testid="desktop-download-target"]')?.textContent).toBe(koMessages.desktop.targetLabel);
+    expect(container.querySelector('[data-testid="desktop-download-version"]')?.textContent).toBe('버전 0.2.0');
+    // Yuna 04:0xZ: the app's name (as macOS says it when it blocks) leads the line — «Sprintable Dev Setup · 버전 0.2.0 · 빌드 …»
+    expect(container.querySelector('[data-testid="desktop-download-version"]')?.parentElement?.textContent).toBe('Sprintable Dev Setup · 버전 0.2.0 · 빌드 abc123def');
+    // the settings panel's name in one piece (nowrap) — the step reads whole
+    const panel = container.querySelector('[data-testid="desktop-download-settings-panel"]');
+    expect(panel?.textContent).toBe('개인정보 보호 및 보안');
+    expect(panel?.className.split(' ')).toContain('whitespace-nowrap');
+    expect(container.querySelector('[data-testid="desktop-download-build-sha"]')?.textContent).toBe(' · 빌드 abc123def');
+    expect(container.querySelector('[data-testid="desktop-download-gatekeeper-title"]')?.textContent)
+      .toBe('처음 열면 macOS가 막아요 — 한 번만 이렇게 열어 주세요');
+    expect([...container.querySelectorAll('[data-testid="desktop-download-install-steps"] > li')].map((e) => e.textContent)).toEqual([
+      '받은 파일을 열어 앱을 「응용 프로그램」 폴더로 끌어 놓아요',
+      '앱을 한 번 열어 본 뒤 시스템 설정 → 개인정보 보호 및 보안 → 「그래도 열기」',
+    ]);
+    expect(container.querySelector('[data-testid="desktop-download-old-mac"]')?.textContent).toBe('macOS 12에서는 앱을 우클릭 → 「열기」');
+    // no block inside a <p> (Yuna 5004: AlertDescription is a <p>) — the list and its lines sit in a div
+    expect(container.querySelector('p ol, p p')).toBeNull();
+    expect(container.querySelector('[data-testid="desktop-download-notarization-notice"]')?.textContent).toBe('Apple 공증 전 내부용이에요.');
     const link = container.querySelector('[data-testid="desktop-download-button"]') as HTMLAnchorElement;
-    expect(link.getAttribute('href')).toBe('https://storage.googleapis.com/sprintable-desktop-releases-dev/macos/0.3.1/app.tar.gz');
+    expect(link.getAttribute('href')).toBe(MANIFEST.url);
     expect(link.hasAttribute('download')).toBe(true);
   });
 
-  it('version이 semver+build 형식(예: "0.3.1+a1b2c3d")이면 「+」 뒤를 빌드 sha로 따로 보인다', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
-      version: '0.3.1+a1b2c3d', pub_date: '2026-09-11T00:00:00Z',
-      platforms: { 'darwin-aarch64': { url: 'https://storage.googleapis.com/x/app.tar.gz', signature: 'sig' } },
-    })));
+  it('[SID:4619] a manifest without a product name: the line as before («버전 … · 빌드 …», no name)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ...MANIFEST, product: '' })));
     await act(async () => { root.render(wrap(<DesktopDownloadCard />)); });
     await flush();
+    expect(container.querySelector('[data-testid="desktop-download-product"]')).toBeNull();
+    expect(container.querySelector('[data-testid="desktop-download-version"]')?.parentElement?.textContent).toBe('버전 0.2.0 · 빌드 abc123def');
+  });
 
-    expect(container.querySelector('[data-testid="desktop-download-version"]')?.textContent).toBe('버전 0.3.1+a1b2c3d');
-    expect(container.querySelector('[data-testid="desktop-download-build-sha"]')?.textContent).toBe(' · 빌드 a1b2c3d');
+  it('[SID:4619] the old right-click line is gone — its key in neither locale, nothing reads it', async () => {
+    const en = (await import('../../../messages/en.json')).default as { desktop: Record<string, unknown> };
+    expect('gatekeeperNotice' in koMessages.desktop).toBe(false);
+    expect('gatekeeperNotice' in en.desktop).toBe(false);
+    expect(en.desktop.installStepOpen).toBe('Try opening the app once, then go to System Settings → <nw>Privacy & Security</nw> → "Open Anyway"');
+    expect(koMessages.desktop.installStepOpen).toBe('앱을 한 번 열어 본 뒤 시스템 설정 → <nw>개인정보 보호 및 보안</nw> → 「그래도 열기」');
+  });
+
+  it('[SID:4619 · Kadir 5004 후속 ①] a manifest whose url is not our bucket is «지금은 받을 수 없어요» — no link to it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ...MANIFEST, url: 'https://storage.googleapis.com/sprintable-desktop-releases-dev-evil/x.dmg' })));
+    await act(async () => { root.render(wrap(<DesktopDownloadCard />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="desktop-download-unavailable"]')?.textContent).toBe(koMessages.desktop.unavailable);
+    expect(container.querySelector('[data-testid="desktop-download-button"]')).toBeNull();
+    expect(container.innerHTML.includes('dev-evil')).toBe(false);
+  });
+
+  it('[SID:4619] a manifest without a url (or the old Tauri shape) is «지금은 받을 수 없어요», not a broken button', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ version: '0.1.2', platforms: { 'darwin-aarch64': { url: 'https://x/Sprintable.app.tar.gz', signature: 's' } } })));
+    await act(async () => { root.render(wrap(<DesktopDownloadCard />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="desktop-download-unavailable"]')?.textContent).toBe(koMessages.desktop.unavailable);
+    expect(container.querySelector('[data-testid="desktop-download-button"]')).toBeNull();
+  });
+});
+
+describe('[4547] not a Mac — one line where the warning and [다운로드] were (Yuna 4547-phone-download-card.md · spec «4524 곁»)', () => {
+  // [SID:4619] the Electron app's manifest shape (/desktop/downloads/macos.json) — the url inside our bucket (5005's link guard)
+  const manifest = () => vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+    product: 'Sprintable Dev Setup', version: '0.3.1', build: 'abc123def',
+    url: 'https://storage.googleapis.com/sprintable-desktop-releases-dev/macos-electron/0.3.1/Sprintable-Dev-Setup-abc123def-arm64.dmg',
+  })));
+  /** 4619's first-open guide box (its title · its two steps) and the button — the Mac-only part of the card */
+  const macPart = () => ({ title: !!q('desktop-download-gatekeeper-title'), steps: !!q('desktop-download-install-steps'),
+    oldMac: !!q('desktop-download-old-mac'), button: !!q('desktop-download-button') });
+  const q = (id: string) => container.querySelector(`[data-testid="${id}"]`);
+  async function show(locale: 'ko' | 'en' = 'ko') {
+    await act(async () => { root.render(wrap(<DesktopDownloadCard />, locale)); });
+    await flush();
+  }
+
+  it('the device decides: iPhone · Android · Windows · the phone app → not a Mac; a Mac (a narrow window too) · iPadOS (reports «Macintosh») → a Mac', () => {
+    expect([IPHONE, ANDROID, WINDOWS].map((u) => notAMac(u, false))).toEqual([true, true, true]);
+    expect(notAMac(MAC, true)).toBe(true); // inside the phone app's shell, whatever it reports
+    expect(notAMac(MAC, false)).toBe(false);
+  });
+
+  it('a phone: title · target · version stay · no first-open guide box (4619) · no button · the one muted line · no link', async () => {
+    ua = IPHONE;
+    manifest();
+    await show();
+    expect(q('desktop-download-target')?.textContent).toBe(koMessages.desktop.targetLabel);
+    expect(q('desktop-download-version')?.textContent).toBe('버전 0.3.1');
+    expect(macPart()).toEqual({ title: false, steps: false, oldMac: false, button: false });
+    const line = q('desktop-download-open-on-mac');
+    expect(line?.textContent).toBe('Mac에서 이 화면을 열어 받아 주세요');
+    expect(line?.className).toContain('text-muted-foreground');
+    expect(q('desktop-download-card')?.querySelector('a, button')).toBeNull();
+  });
+
+  it('a phone never paints the Mac card, not for one frame — every DOM change on the way in is checked (Yuna: the device is known when «loading» ends)', async () => {
+    ua = IPHONE;
+    manifest();
+    let macSeen = false;
+    const seen = new MutationObserver(() => {
+      if (q('desktop-download-button') || q('desktop-download-gatekeeper-notice')) macSeen = true;
+    });
+    seen.observe(container, { childList: true, subtree: true });
+    await show();
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); }); // a later task too: a device read after «loading» ends shows here
+    seen.disconnect();
+    expect(q('desktop-download-open-on-mac')).not.toBeNull();
+    expect(macSeen).toBe(false);
+  });
+
+  it('inside the phone app (its shell) the same, even with a Mac-looking user agent', async () => {
+    inPhoneApp = true;
+    manifest();
+    await show();
+    expect(q('desktop-download-button')).toBeNull();
+    expect(q('desktop-download-open-on-mac')).not.toBeNull();
+  });
+
+  it('a claim that comes after the manifest was read still turns the card into the phone line (story #4661)', async () => {
+    manifest();
+    await show();
+    expect(q('desktop-download-button')).not.toBeNull();
+    await act(async () => { inPhoneApp = true; phoneListeners.forEach((listen) => listen()); });
+    await flush();
+    expect(q('desktop-download-button')).toBeNull();
+    expect(q('desktop-download-open-on-mac')).not.toBeNull();
+  });
+
+  it('a Mac in a 390 px window keeps [다운로드] and the whole first-open guide box (4619) — the width never decides (negative control)', async () => {
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(390);
+    manifest();
+    await show();
+    expect(macPart()).toEqual({ title: true, steps: true, oldMac: true, button: true });
+    expect(q('desktop-download-open-on-mac')).toBeNull();
+  });
+
+  it('the manifest not read × a phone: the «not available» line, not «open on your Mac» (a Mac could not get it either)', async () => {
+    ua = ANDROID;
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(null, false)));
+    await show();
+    expect(q('desktop-download-unavailable')?.textContent).toBe(koMessages.desktop.unavailable);
+    expect(q('desktop-download-open-on-mac')).toBeNull();
+  });
+
+  it('reads in English', async () => {
+    ua = IPHONE;
+    manifest();
+    await show('en');
+    expect(q('desktop-download-open-on-mac')?.textContent).toBe('Open this page on your Mac to download');
+  });
+});
+
+// [SID:4655 · PO 14405 (A)] the first-open guide follows the manifest's `notarized` flag: a notarized build opens without it,
+// an un-notarized one (and a manifest with no flag) keeps the guide. The button is there either way.
+describe('[4655] the guide follows notarized', () => {
+  const BASE = {
+    product: 'Sprintable Dev Setup', version: '0.2.0', build: 'b1363923d',
+    url: 'https://storage.googleapis.com/sprintable-desktop-releases-dev/macos-electron/0.2.0/Sprintable-Dev-Setup-b1363923d-arm64.dmg',
+  };
+  const q = (id: string) => container.querySelector(`[data-testid="${id}"]`);
+  async function show(manifest: Record<string, unknown>) {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(manifest)));
+    await act(async () => { root.render(wrap(<DesktopDownloadCard />)); });
+    await flush();
+  }
+
+  it('notarized: true → no first-open guide and no «공증 전» line; the button stays', async () => {
+    await show({ ...BASE, notarized: true });
+    expect(q('desktop-download-gatekeeper-title')).toBeNull();
+    expect(q('desktop-download-install-steps')).toBeNull();
+    expect(q('desktop-download-notarization-notice')).toBeNull();
+    expect(q('desktop-download-button')?.getAttribute('href')).toBe(BASE.url);
+  });
+
+  it('notarized: false → the guide and the «공증 전» line are there', async () => {
+    await show({ ...BASE, notarized: false });
+    expect(q('desktop-download-gatekeeper-title')?.textContent).toBe(koMessages.desktop.gatekeeperTitle);
+    expect(q('desktop-download-notarization-notice')?.textContent).toBe(koMessages.desktop.notarizationNotice);
+    expect(q('desktop-download-button')).not.toBeNull();
+  });
+
+  it('no flag at all → treated as not notarized: the guide stays (never hide a block that may be there)', async () => {
+    await show({ ...BASE });
+    expect(q('desktop-download-gatekeeper-title')).not.toBeNull();
   });
 });

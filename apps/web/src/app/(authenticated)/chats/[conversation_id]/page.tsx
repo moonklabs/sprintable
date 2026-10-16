@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Bell, BellOff, ChevronLeft, UserPlus, Pencil, Settings } from 'lucide-react';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { AgentSessionStrip } from '@/components/chat/agent-session-strip';
+import { AgentsPausedBand, type AgentsPausedState } from '@/components/chat/agents-paused-band';
 import { ChatView } from '@/components/chat/chat-view';
 import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { AddParticipantModal } from '@/components/chat/add-participant-modal';
@@ -49,6 +50,8 @@ interface ConversationMeta {
   // story #2621 v1 — 전달 계약 편집 모달의 free_response 초기값(conversation.free_response,
   // EF-S2/#2603 P0). 부재 시 false로 graceful(하위호환 — 옛 응답엔 이 필드가 없을 수 있음).
   freeResponse: boolean;
+  // story #4631 C — the open flood block (agent messages paused), absent when none is open
+  agentsPaused: AgentsPausedState | null;
 }
 
 // story #2168 PR-②(오르테가 지적) — `?from=`은 사용자가 URL을 통해 조작 가능한 값이다.
@@ -122,7 +125,7 @@ export default function ConversationPage() {
       if (!res.ok) return;
       const conv = await res.json() as {
         title: string | null; type: 'dm' | 'group'; participants?: Participant[]; muted?: boolean; last_read_at?: string | null;
-        free_response?: boolean;
+        free_response?: boolean; circuit_breaker?: AgentsPausedState | null;
       };
       setMeta({
         title: conv.title,
@@ -131,6 +134,7 @@ export default function ConversationPage() {
         muted: conv.muted ?? false,
         lastReadAt: conv.last_read_at ?? null,
         freeResponse: conv.free_response ?? false,
+        agentsPaused: conv.circuit_breaker ?? null,
       });
     } catch { /* non-critical */ }
   }, [conversation_id, projectId]);
@@ -375,6 +379,8 @@ export default function ConversationPage() {
           <>
           {/* story #4534 — a DM with an agent: its session on the computer (the web looks · inside the phone app: [멈춤] [지금 지시]) */}
           {headerAvatarParticipant?.type === 'agent' ? <AgentSessionStrip agentId={headerAvatarParticipant.member_id} conversationId={conversation_id} /> : null}
+          {/* story #4631 C · D — agent messages paused: the band (and an owner/admin's [멈춤 풀기]) — one per conversation */}
+          <AgentsPausedBand key={conversation_id} conversationId={conversation_id} state={meta?.agentsPaused ?? null} onResumed={() => void fetchMeta()} />
           <ChatView
             key={conversation_id}
             threadId={conversation_id}

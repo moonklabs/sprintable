@@ -3,7 +3,7 @@
 // story #4532 — the phone bridge claim (design doc 0dceadda v3.1 ②): claimed once at boot · the sender and the receiver kept out
 // of `window` (PO 06:07Z ①) · answers matched by id, once · no call waits forever (PO 06:07Z ②) · nothing outside the phone app.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { __resetPhoneBridgeForTest, claimPhoneBridge, isPhoneApp, PHONE_CALL_MAX_MS, phoneCall, type PhoneAnswer } from './phone-bridge';
+import { __resetPhoneBridgeForTest, claimPhoneBridge, isPhoneApp, PHONE_CALL_MAX_MS, phoneCall, subscribePhoneApp, type PhoneAnswer } from './phone-bridge';
 
 /** what the shell puts into the top frame (sprintable-mobile lib/phoneBridge): one claim, then the handle is gone */
 let shellReply: ((a: PhoneAnswer) => void) | null = null;
@@ -97,5 +97,23 @@ describe('[4532] phone bridge', () => {
     window.dispatchEvent(new Event('pagehide'));
     await expect(a).resolves.toMatchObject({ ok: false, code: 'page_hidden' });
     await expect(b).resolves.toMatchObject({ ok: false, code: 'page_hidden' });
+  });
+});
+
+// story #4661 — a claim that comes after a reader has already looked must reach that reader (useSyncExternalStore)
+describe('subscribePhoneApp (story #4661)', () => {
+  it('the claim notifies the subscriber once, and an unsubscribed listener hears nothing', () => {
+    const heard = vi.fn();
+    const off = subscribePhoneApp(heard);
+    expect(isPhoneApp()).toBe(false);
+    installShellHandle();
+    claimPhoneBridge();
+    expect(isPhoneApp()).toBe(true);
+    expect(heard).toHaveBeenCalledTimes(1);
+    off();
+    __resetPhoneBridgeForTest();
+    installShellHandle();
+    claimPhoneBridge();
+    expect(heard).toHaveBeenCalledTimes(1);
   });
 });

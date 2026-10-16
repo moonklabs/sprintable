@@ -14,7 +14,9 @@ import functools
 import hashlib
 import hmac
 import logging
+import re
 import secrets
+import unicodedata
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -31,6 +33,7 @@ from app.models.desktop_relay import (
     DesktopDeviceToken,
     DesktopSession,
     SESSION_LIMIT_STATES,
+    SESSION_WIDENED_MODES,
 )
 from app.core.datetime_query import OffsetDatetime
 from app.models.desktop_setup import DesktopSetup
@@ -40,6 +43,13 @@ logger = logging.getLogger(__name__)
 TOKEN_PREFIX = "sdt_"
 UNKNOWN_AFTER = timedelta(seconds=90)  # PO 05:19Z — three missed 30-second heartbeats
 SESSION_KEY_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
+# story #4554 (PO 11:45Z) — the relay's edges, each a named number:
+INT32_MAX = 2_147_483_647  # `desktop_sessions.last_report_seq` · `desktop_commands.device_seq` are int4 — a report past it → 422, never 500
+SESSION_ROWS_PER_DEVICE = 200  # the most recent rows a device keeps (live and ended) — a new key past it drops the oldest ended row first
+ENDED_SESSION_RETENTION = timedelta(days=7)  # an ended session is kept this long, then goes with the next report
+SESSIONS_PAGE_DEFAULT = 50  # a person's read of a device's sessions: live first, newest first — `limit` (default · max)
+SESSIONS_PAGE_MAX = 200
+DISCONNECTED_CODE = "device_disconnected"  # the open commands of a disconnected device · the stream's access_revoked reason
 PROMPT_MAX = 8000
 # story #4534 (Kadir 06:21Z ④ · Yuna 06:29Z ②): an instruction into the running turn — code points, the same count on the phone's
 # sheet, the web's sheet, the daemon and here (one line pasted at once stays under the CLI's fold — 800 measured, not folded)
@@ -73,6 +83,9 @@ async def issue_device_token(db: AsyncSession, setup_id: uuid.UUID) -> str:
     )
     token = TOKEN_PREFIX + secrets.token_urlsafe(32)
     db.add(DesktopDeviceToken(id=uuid.uuid4(), setup_id=setup_id, token_hash=_hash(token), issued_at=now))
+    # story #4554 ③ (PO 11:45Z): a new token = a daemon that may start counting from 1 again (a reinstall · §1.1) — the device's
+    # report baseline goes back to 0 with it, so its first report is not refused as stale for ever
+    await db.execute(update(DesktopSession).where(DesktopSession.setup_id == setup_id).values(last_report_seq=0))
     await db.flush()
     return token
 
@@ -139,6 +152,89 @@ class SessionLimit(BaseModel):
     at: OffsetDatetime | None = None
     again: bool | None = None
     self_resume: Literal["maybe", "no", "unknown"] | None = None
+    # story #4560 (contract v2.1 §5 · PO 14:41Z): the daemon held off at the limit's end — the closed words only (another → 422)
+    held: Literal["screen", "esc_not_taken"] | None = None
+    # story #4685 (PO 10-14 00:39Z · additive): this daemon looks at the limit again by itself (reset time unknown) — `true` or absent;
+    # a `false` is not a word of the contract (422), so «not looking» is only ever the absence
+    looks: Literal[True] | None = None
+
+
+RUN_EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
+# story #4686: a Claude model id as the run profile takes it — the one rule (services.agent_run_profile.CLAUDE_MODEL_NAME), which also
+# admits the other runtime's names (a subset); the optional «[1m]» tail is kept as it is
+_RUN_MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}(\[1m\])?$")
+# story #4686 (Kadir 5073 · PO 10-14 02:0xZ — «an allow-list first, not a refusal list»): the account label is only what the daemon builds —
+# after NFKC (a fullwidth «＠» is an «@»): ① a MASKED address — one or two address characters, «***», the host (`yo***@host.tld`) — or ② an
+# organisation name (letters · digits · spaces · a few marks, ≤ 50, no «@» · «*» · «(»), then optionally « (Plan)» from a CLOSED set of words.
+# Anything else (an address of any length, a token, a free sentence) is refused — so a new way of writing a secret does not need a new rule.
+ACCOUNT_PLANS = ("Free", "Pro", "Max", "Team", "Enterprise")
+_ACCOUNT_MASKED = r"[A-Za-z0-9.+_%-]{1,2}\*\*\*@[A-Za-z0-9](?:[A-Za-z0-9.-]{0,60}[A-Za-z0-9])?\.[A-Za-z]{2,}"
+_ACCOUNT_ORG = r"[^\W_][\w .,&'\u2019\u00b7+/:-]{0,49}"
+_ACCOUNT_LABEL = re.compile(rf"^(?:{_ACCOUNT_MASKED}|{_ACCOUNT_ORG})(?: \((?:{'|'.join(ACCOUNT_PLANS)})\))?$")
+# the second layer: token shapes an organisation name could still spell (the allow-list admits letters and digits)
+_ACCOUNT_SECRET_SHAPES = (
+    re.compile(r"\bsk-[A-Za-z0-9-]{10,}"),
+    re.compile(r"\bBearer\s", re.IGNORECASE),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{8,}"),
+    re.compile(r"[A-Za-z0-9+/=_-]{32,}"),
+    # a link (Kadir 5073 probe, PO 10-14): the name's marks «:» and «/» are for «R&D/Ops» — «://» makes it an address a reader could follow
+    re.compile(r"://"),
+)
+
+
+class SessionRun(BaseModel):
+    """story #4686 (PO 10-14 01:06Z · Yuna run-info-1014.md): what a session really runs on — shown on the board, the phone and the web.
+    `model` the model that ran (the transcript's last real assistant line; else the profile's) · `model_set` whether the profile
+    NAMED a model (false = the runtime's default ran — 10-13) · `effort` the thinking depth the profile gave (a closed word; absent =
+    the default) · `account` the account's display label, Claude only, already masked by the daemon (never an e-mail written out)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str | None = Field(default=None, max_length=70)
+    model_set: StrictBool | None = None
+    effort: Literal["low", "medium", "high", "xhigh", "max", "ultra"] | None = None
+    account: str | None = Field(default=None, min_length=1, max_length=80)
+
+    @model_validator(mode="after")
+    def _closed_shapes(self) -> "SessionRun":
+        if self.model is not None and not _RUN_MODEL.fullmatch(self.model):  # (fullmatch: a `$` also takes a trailing newline)
+            raise ValueError("model is not a model id")
+        if self.account is not None:
+            if any(unicodedata.category(ch) in ("Cc", "Cf", "Zl", "Zp", "Co", "Cs") for ch in self.account) or self.account != self.account.strip():
+                raise ValueError("account carries a control, invisible or edge-space character")
+            # NFKC first: the shapes below are read on what the label MEANS (a fullwidth «＠» is an «@»), and that is what is kept
+            account = unicodedata.normalize("NFKC", self.account)
+            if len(account) > 80 or not _ACCOUNT_LABEL.fullmatch(account):
+                raise ValueError("account is not a label the daemon makes (a masked address or an organisation name, then a plan word)")
+            if any(shape.search(account) for shape in _ACCOUNT_SECRET_SHAPES):
+                raise ValueError("account carries a token shape")
+            self.account = account
+        return self
+
+
+class SystemHold(BaseModel):
+    """story #4599 (contract v1.13 · Kadir lens ③): why a `waiting_system` turn waits — the folder the macOS window asks about, when
+    the daemon read it (tccd's service name → a closed list); absent when the window was seen by its owner alone. Never a path."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    folder: Literal["documents", "desktop", "downloads", "network_volume", "icloud"] | None = None
+
+
+class SessionInbox(BaseModel):
+    """story #4684 (0454 · Yuna ux1-copy §L ②③): why THIS computer's subscription for the agent is stopped — the app board's own closed words.
+    A stopped session keeps none (accepted like `run`, never stored or shown — it receives nothing to explain); absent = receiving, or not said."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stream: Literal["stopped_other_receiver", "stopped_taken_over", "stopped_auth", "stopped_inbox_full"]
+
+
+# story #4641 (design 4641 · 0449): a mode a person widened at the terminal — the same closed list as the model (a test holds them together)
+WidenedMode = Literal["plan", "default", "acceptEdits", "auto", "dontAsk", "bypassPermissions"]
+# a widening stamped further ahead of the server's clock than this is not believed: the three keys are dropped, never kept (a
+# far-future `at` would pin the newer-wins rule for good)
+WIDENED_MAX_AHEAD = timedelta(minutes=5)
 
 
 class SessionReport(BaseModel):
@@ -150,9 +246,20 @@ class SessionReport(BaseModel):
     runtime: Literal["claude", "codex"]
     # story #4534 (0437 · contract v1.12): the board's own words — never folded into «idle» (asked in the terminal · an error ·
     # paused at a usage limit)
-    state: Literal["starting", "working", "idle", "waiting_permission", "waiting_input", "error", "paused_limit", "stopped"]
+    # story #4599 (0442 · contract v1.13): `waiting_system` — held by a macOS window on that computer (no limit rides on it)
+    state: Literal["starting", "working", "idle", "waiting_permission", "waiting_input", "error", "paused_limit", "waiting_system", "stopped"]
     at: OffsetDatetime  # a time without its offset is refused (4330)
     limit: SessionLimit | None = None
+    # story #4686: what it runs on — each report sets it (a report without it clears it, like `instruct_now`)
+    run: SessionRun | None = None
+    # story #4599: the window's folder — with `waiting_system` only (the validator below)
+    system: SystemHold | None = None
+    # story #4684: why this computer's subscription for the agent is stopped — each report sets it (a report without it clears it: it receives again)
+    inbox: SessionInbox | None = None
+    # story #4641: a widening a person made at the terminal — the three together or none; the daemon decides the order (from ≠ to only)
+    permission_widened_at: OffsetDatetime | None = None
+    permission_widened_from: WidenedMode | None = None
+    permission_widened_to: WidenedMode | None = None
     # story #4534 (0438 · PO 06:30Z): whether this session can take an instruction into the running turn — read by the daemon once
     # when the session starts. It only hides [지금 지시] on the web; the daemon decides again when an instruction comes (Kadir 06:31Z)
     instruct_now: StrictBool | None = None  # a boolean only — never «yes» · 1 read as true
@@ -161,6 +268,13 @@ class SessionReport(BaseModel):
     def _limit_on_a_limit_word_only(self) -> "SessionReport":
         if self.limit is not None and self.state not in SESSION_LIMIT_STATES:
             raise ValueError("limit is carried with waiting_input · error · paused_limit only")
+        if self.system is not None and self.state != "waiting_system":
+            raise ValueError("system is carried with waiting_system only")
+        widened = (self.permission_widened_at, self.permission_widened_from, self.permission_widened_to)
+        if any(v is not None for v in widened) and not all(v is not None for v in widened):
+            raise ValueError("permission widening: the at, from and to come together or not at all")
+        if self.permission_widened_from is not None and self.permission_widened_from == self.permission_widened_to:
+            raise ValueError("permission widening: from and to are the same mode")
         return self
 
 
@@ -202,12 +316,94 @@ def _set_limit(row: DesktopSession, limit: SessionLimit | None) -> None:
     row.limit_at = limit.at if limit else None
     row.limit_again = limit.again if limit else None
     row.limit_self_resume = limit.self_resume if limit else None
+    row.limit_held = limit.held if limit else None
+    row.limit_looks = True if limit and limit.looks else None  # story #4685
+
+
+def _set_run(row: DesktopSession, run: SessionRun | None) -> None:
+    """story #4686: the row's run info is the report's — a report without it clears it (the reader then says nothing, never a stale value)."""
+    row.run_model = run.model if run else None
+    row.run_model_set = run.model_set if run else None
+    row.run_effort = run.effort if run else None
+    row.run_account = run.account if run else None
+
+
+def _set_inbox(row: DesktopSession, inbox: SessionInbox | None) -> None:
+    """story #4684: the row's receive stop is the report's — a report without it clears it (this computer receives again)."""
+    row.inbox_stream = inbox.stream if inbox else None
+
+
+def inbox_view(row: DesktopSession) -> dict | None:
+    """story #4684: a row's receive stop as a reader sees it — None when the row says none."""
+    return {"stream": row.inbox_stream} if row.inbox_stream is not None else None
+
+
+def run_view(row: DesktopSession) -> dict | None:
+    """story #4686: a row's run info as a reader sees it (only what is set) — None when the row says none."""
+    out: dict = {}
+    if row.run_model is not None:
+        out["model"] = row.run_model
+    if row.run_model_set is not None:
+        out["model_set"] = row.run_model_set
+    if row.run_effort is not None:
+        out["effort"] = row.run_effort
+    if row.run_account is not None:
+        out["account"] = row.run_account
+    return out or None
+
+
+def _set_system(row: DesktopSession, report: SessionReport) -> None:
+    """story #4599: the window's folder is the report's — any other word (the hold is over) clears it."""
+    row.system_folder = report.system.folder if report.state == "waiting_system" and report.system else None
+
+
+def _set_widened(row: DesktopSession, report: SessionReport, now: datetime, *, was_stopped: bool = False) -> None:
+    """story #4641: the latest widening is the report's, by its `at` — a report without one keeps what is stored (its clock is the
+    daemon's and only a newer `at` replaces); a fresh start holds none: a `starting` report, or a live report on a row that had
+    ended (`was_stopped` — a new session under the same key, Kadir's lens ③); an `at` past the bound is dropped with a log line."""
+    if report.state == "starting" or (was_stopped and report.state != "stopped"):
+        row.permission_widened_at = row.permission_widened_from = row.permission_widened_to = None
+        return
+    if report.permission_widened_at is None:
+        return
+    if report.permission_widened_at > now + WIDENED_MAX_AHEAD:
+        logger.info("relay.widened_ahead_dropped session=%s", row.session_key)
+        return
+    if row.permission_widened_at is not None and report.permission_widened_at <= row.permission_widened_at:
+        return
+    row.permission_widened_at = report.permission_widened_at
+    row.permission_widened_from = report.permission_widened_from
+    row.permission_widened_to = report.permission_widened_to
+
+
+def widened_view(row: DesktopSession) -> dict:
+    """story #4641: the widening as a reader sees it — the three keys, only while one is stored."""
+    if row.permission_widened_at is None:
+        return {}
+    return {
+        "permission_widened_at": row.permission_widened_at.isoformat(),
+        "permission_widened_from": row.permission_widened_from,
+        "permission_widened_to": row.permission_widened_to,
+    }
+
+
+def widened_fields(row: DesktopSession, silent: bool) -> dict:
+    """story #4641: the reader's keys — only while the device is heard (a silent device's keys are not said, as the other facts)."""
+    return {} if silent else widened_view(row)
+
+
+def system_view(row: DesktopSession) -> dict | None:
+    """story #4599: a `waiting_system` row's why as a reader sees it — `{folder}` (null when not read); None on any other word."""
+    if row.state != "waiting_system":
+        return None
+    return {"folder": row.system_folder}
 
 
 # story #4534 (Kadir 4960 · PO 05:36Z): a reader built for the five words (a web bundle from before · a tab left open · the phone's web
 # view) must never meet a word it does not know — `state` stays one of the five (the new words fold to idle, as the daemon used to
 # send them) and the board's own word goes in `activity` beside it, read by the new web only.
-LEGACY_STATE = {"waiting_input": "idle", "error": "idle", "paused_limit": "idle"}
+# story #4599: a turn held by a macOS window is still a turn — a reader from before sees it working (what the daemon sent before)
+LEGACY_STATE = {"waiting_input": "idle", "error": "idle", "paused_limit": "idle", "waiting_system": "working"}
 
 
 def legacy_state(state: str) -> str:
@@ -225,63 +421,142 @@ def limit_view(row: DesktopSession) -> dict | None:
         out["again"] = row.limit_again
     if row.limit_self_resume is not None:
         out["self_resume"] = row.limit_self_resume
+    if row.limit_held is not None:  # story #4560: the device list and the DM header read it from here
+        out["held"] = row.limit_held
+    if row.limit_looks:  # story #4685: the phone and the web say «the app checks again» only when this is here
+        out["looks"] = True
     return out
+
+
+def _check_seq_range(seq: int) -> None:
+    """story #4554 ③: the columns are int4 — a number past them is refused as a number (422), not met as a DB error (500)."""
+    if seq > INT32_MAX:
+        raise DesktopRelayError(422, "report_seq_out_of_range", f"report_seq must be at most {INT32_MAX}")
+
+
+async def _prune_expired(db: AsyncSession, setup_id: uuid.UUID, *, now: datetime) -> None:
+    """story #4554 ① (PO 11:45Z): an ended session is kept ENDED_SESSION_RETENTION, then goes with the device's next report (no
+    sweep job — the write path cleans its own device, under the device row's lock)."""
+    from sqlalchemy import delete
+
+    await db.execute(delete(DesktopSession).where(
+        DesktopSession.setup_id == setup_id, DesktopSession.state == "stopped", DesktopSession.ended_at.is_not(None),
+        DesktopSession.ended_at < now - ENDED_SESSION_RETENTION,
+    ))
+
+
+async def _make_room(db: AsyncSession, setup_id: uuid.UUID, *, new_rows: int) -> None:
+    """story #4554 ①: if `new_rows` more rows would take the device past SESSION_ROWS_PER_DEVICE, the oldest ended rows go first;
+    live rows are never dropped — when they alone fill the device, a new key is refused (422 `too_many_sessions`, nothing written)."""
+    from sqlalchemy import delete
+
+    total = (await db.execute(select(func.count()).select_from(DesktopSession).where(DesktopSession.setup_id == setup_id))).scalar_one()
+    over = total + new_rows - SESSION_ROWS_PER_DEVICE
+    if over <= 0:
+        return
+    oldest_ended = (await db.execute(
+        select(DesktopSession.id).where(DesktopSession.setup_id == setup_id, DesktopSession.state == "stopped")
+        .order_by(DesktopSession.ended_at.asc().nulls_first(), DesktopSession.created_at.asc()).limit(over)
+    )).scalars().all()
+    if oldest_ended:
+        await db.execute(delete(DesktopSession).where(DesktopSession.id.in_(oldest_ended)))
+    if len(oldest_ended) < over:
+        raise DesktopRelayError(422, "too_many_sessions", f"a device keeps at most {SESSION_ROWS_PER_DEVICE} sessions")
 
 
 async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_key: str, report: SessionStateReport) -> DesktopSession:
     """A report older than (or equal to) the device's latest is refused — 409 (a reordered delivery never undoes a newer one)."""
     _check_agent(setup, report.agent_member_id)
+    _check_seq_range(report.report_seq)
     latest = await _lock_device_seq(db, setup.id)
     if report.report_seq <= latest:
-        raise DesktopRelayError(409, "stale_report", f"report_seq {report.report_seq} is not after {latest}")
+        raise _stale(report.report_seq, latest)
+    await _prune_expired(db, setup.id, now=_now())  # story #4554 ①
     row = (await db.execute(
         select(DesktopSession).where(DesktopSession.setup_id == setup.id, DesktopSession.session_key == session_key)
     )).scalar_one_or_none()
     if row is None:
+        await _make_room(db, setup.id, new_rows=1)  # story #4554 ①
         row = DesktopSession(id=uuid.uuid4(), setup_id=setup.id, session_key=session_key)
         db.add(row)
+    was_stopped = row.state == "stopped"  # captured before the row takes the new word (the new session under the same key)
     row.agent_member_id, row.runtime, row.state = report.agent_member_id, report.runtime, report.state
     row.last_report_seq, row.state_at = report.report_seq, report.at
     row.ended_at = report.at if report.state == "stopped" else None
+    was_limited = bool(row.limited)  # story #4685: read before this report overwrites it — the notice follows the move into / out of a limit
     _set_limit(row, report.limit)
+    _set_run(row, report.run)  # story #4686
+    _set_inbox(row, report.inbox if report.state != "stopped" else None)  # story #4684
+    _set_system(row, report)  # story #4599
+    _set_widened(row, report, _now(), was_stopped=was_stopped)  # story #4641
     row.instruct_now = report.instruct_now  # story #4534: each report sets it — a report without it clears it (Kadir 06:31Z (c))
     await touch_device(db, setup.id)
     await db.flush()
     from app.services.desktop_commands import on_session_reported  # story #4534 — a [지금 지시]'s turn end
+    from app.services.desktop_limit_notice import after_report  # story #4685 — the person who connected the computer is told
 
     await on_session_reported(db, setup, session_key, report.state, report.at)
+    await after_report(db, setup, row, was_limited=was_limited)
     return row
 
 
+def _stale(seq: int, latest: int) -> DesktopRelayError:
+    """story #4554 ③ (Kadir 4981 ①): the refusal names the device's latest number, so a daemon whose own count fell behind (a state
+    file gone back to 0 · a reinstall that kept its token) takes `latest + 1` and sends its snapshot again — one round trip, and the
+    order of reports is never undone."""
+    return DesktopRelayError(409, "stale_report", f"report_seq {seq} is not after {latest}", detail={"latest": latest})
+
+
 async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: SessionSnapshot) -> int:
-    """The whole list (after a reconnect): the given sessions as reported; a session the device no longer lists is stopped."""
+    """The whole list (after a reconnect): the given sessions as reported; a session the device no longer lists is stopped.
+
+    story #4554 ③ · Kadir 4981 ①: a snapshot obeys the same «after the latest» rule as a single report — a late snapshot (an HTTP
+    retry of an older PUT landing after a newer report · two daemon processes over a restart) never undoes newer state (seq 10
+    working → seq 11 idle → late seq 9 working was stored as working). The baseline goes to 0 with a new device token only
+    (issue_device_token — a reinstall loses the token with the state file, §12); a daemon behind the latest reads it from the 409."""
     for s in snapshot.sessions:
         _check_agent(setup, s.agent_member_id)
+    _check_seq_range(snapshot.report_seq)
     keys = [s.session_key for s in snapshot.sessions]
     if len(set(keys)) != len(keys):
         raise DesktopRelayError(422, "duplicate_session_key", "a session key appears twice")
-    latest = await _lock_device_seq(db, setup.id)
+    latest = await _lock_device_seq(db, setup.id)  # the device row's lock — two reports at once are ordered
     if snapshot.report_seq <= latest:
-        raise DesktopRelayError(409, "stale_report", f"report_seq {snapshot.report_seq} is not after {latest}")
+        raise _stale(snapshot.report_seq, latest)
     now = _now()
+    await _prune_expired(db, setup.id, now=now)  # story #4554 ①
     existing = {r.session_key: r for r in (await db.execute(
         select(DesktopSession).where(DesktopSession.setup_id == setup.id)
     )).scalars().all()}
+    await _make_room(db, setup.id, new_rows=sum(1 for s in snapshot.sessions if s.session_key not in existing))  # story #4554 ①
+    kept = set((await db.execute(select(DesktopSession.id).where(DesktopSession.setup_id == setup.id))).scalars().all())
+    existing = {k: r for k, r in existing.items() if r.id in kept}  # an ended row _make_room dropped is not written again
+    limit_moves: list[tuple[DesktopSession, bool]] = []  # story #4685: (row, was it limited before this snapshot) — the notice reads the move
     for s in snapshot.sessions:
         row = existing.pop(s.session_key, None)
         if row is None:
             row = DesktopSession(id=uuid.uuid4(), setup_id=setup.id, session_key=s.session_key)
             db.add(row)
+        limit_moves.append((row, bool(row.limited)))
+        was_stopped = row.state == "stopped"  # captured before the row takes the new word (a new session under the same key)
         row.agent_member_id, row.runtime, row.state, row.state_at = s.agent_member_id, s.runtime, s.state, s.at
         row.last_report_seq = snapshot.report_seq
         row.ended_at = s.at if s.state == "stopped" else None
         _set_limit(row, s.limit)
+        _set_run(row, s.run)  # story #4686
+        _set_inbox(row, s.inbox if s.state != "stopped" else None)  # story #4684
+        _set_system(row, s)  # story #4599
+        _set_widened(row, s, now, was_stopped=was_stopped)  # story #4641
         row.instruct_now = s.instruct_now
     for row in existing.values():
         row.last_report_seq = snapshot.report_seq
         if row.state != "stopped":
+            limit_moves.append((row, bool(row.limited)))  # story #4685: a dropped session leaves its limit too
             row.state, row.state_at, row.ended_at = "stopped", now, now
             _set_limit(row, None)
+            _set_run(row, None)  # story #4686: a dropped session says nothing of what it ran on
+            _set_inbox(row, None)  # story #4684: a dropped session explains no receive stop
+            row.system_folder = None  # story #4599: a dropped session holds no window
             row.instruct_now = None
     await touch_device(db, setup.id)
     await db.flush()
@@ -291,19 +566,31 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
         await on_session_reported(db, setup, s.session_key, s.state, s.at)
     for row in existing.values():
         await on_session_reported(db, setup, row.session_key, "stopped", now)
+    from app.services.desktop_limit_notice import after_report  # story #4685 — a snapshot's lines move sessions into / out of a limit too
+
+    for row, was_limited in limit_moves:
+        await after_report(db, setup, row, was_limited=was_limited)
     return len(snapshot.sessions)
 
 
-async def device_sessions_view(db: AsyncSession, setup_id: uuid.UUID, *, now: datetime | None = None) -> list[dict]:
+async def device_sessions_view(
+    db: AsyncSession, setup_id: uuid.UUID, *, now: datetime | None = None, limit: int = SESSIONS_PAGE_DEFAULT,
+) -> list[dict]:
     """The sessions as a person sees them: each one's reported state, or `unknown` for all when the device has been silent
-    longer than UNKNOWN_AFTER (never «dead» — the device may come back and send its list)."""
+    longer than UNKNOWN_AFTER (never «dead» — the device may come back and send its list).
+
+    story #4554 ④: «heard from» counts the device's live token only — a disconnected device (its token revoked) is silent at once,
+    not for the 90 seconds its last heartbeat would have covered. ①: live rows first, newest first, `limit` of them."""
     now = now or _now()
     last_heard = (await db.execute(
-        select(func.max(DesktopDeviceToken.last_used_at)).where(DesktopDeviceToken.setup_id == setup_id)
+        select(func.max(DesktopDeviceToken.last_used_at))
+        .where(DesktopDeviceToken.setup_id == setup_id, DesktopDeviceToken.revoked_at.is_(None))
     )).scalar_one_or_none()
     silent = last_heard is None or now - last_heard > UNKNOWN_AFTER
     rows = (await db.execute(
-        select(DesktopSession).where(DesktopSession.setup_id == setup_id).order_by(DesktopSession.created_at)
+        select(DesktopSession).where(DesktopSession.setup_id == setup_id)
+        .order_by((DesktopSession.state == "stopped").asc(), DesktopSession.state_at.desc(), DesktopSession.created_at.desc())
+        .limit(max(1, min(limit, SESSIONS_PAGE_MAX)))
     )).scalars().all()
     return [{
         "session_key": r.session_key, "agent_member_id": str(r.agent_member_id), "runtime": r.runtime,
@@ -311,8 +598,22 @@ async def device_sessions_view(db: AsyncSession, setup_id: uuid.UUID, *, now: da
         # story #4534: the board's own word (eight) and a usage limit's why — for the new web only
         "activity": "unknown" if silent and r.state != "stopped" else r.state,
         **({"limit": lv} if not silent and (lv := limit_view(r)) is not None else {}),
+        # story #4686: what it runs on (model · whether chosen · thinking depth · account) — only while the device is heard
+        **({"run": rn} if not silent and r.state != "stopped" and (rn := run_view(r)) is not None else {}),
+        # story #4684: why this computer receives no new work for the agent — only while the device is heard and the session lives
+        **({"inbox": ib} if not silent and r.state != "stopped" and (ib := inbox_view(r)) is not None else {}),
+        # story #4599: a held turn's why (the window's folder) — for the new web only, and only while the device is heard
+        **({"system": sv} if not silent and (sv := system_view(r)) is not None else {}),
+        # story #4641: a widening a person made at the terminal — the three keys, only while the device is heard
+        **widened_fields(r, silent),
         # story #4534 (PO 06:30Z): whether [지금 지시] can go into its turn — not said for a device not heard (Kadir 06:31Z (c))
         "instruct_now": None if silent else r.instruct_now,
+        # story #4543 (PO 21:12Z): when the session began and ended — the crew's daily ledger reads app coverage from these. Facts, not
+        # the live state, so shown for a silent device too. created_at = the server's first row for the key; ended_at = the device's
+        # `at` of its stopped report, or the server's time when a snapshot dropped the key; null while live (a stopped key reported
+        # live again clears it)
+        "created_at": r.created_at.isoformat(),
+        "ended_at": r.ended_at.isoformat() if r.ended_at else None,
     } for r in rows]
 
 
@@ -353,11 +654,20 @@ class StopSessionPayload(_Payload):
     signed: str = Field(min_length=1, max_length=16384)  # story #4534 — every command a person makes is signed (contract v1.9.1)
 
 
+class EndSessionPayload(_Payload):
+    """story #4599 (contract v1.13.2 · PO 14:08Z): the whole session ended — the stop's shape, its own kind (the phone signs
+    `kind: end_session`, so what was signed is what happens; the daemon never turns a stop into this)."""
+
+    session_key: str = Field(pattern=SESSION_KEY_PATTERN)
+    signed: str = Field(min_length=1, max_length=16384)
+
+
 PAYLOAD_SCHEMAS: dict[str, type[_Payload]] = {
     "start_session": StartSessionPayload,
     "send_prompt": SendPromptPayload,
     "answer_approval": AnswerApprovalPayload,
     "stop_session": StopSessionPayload,
+    "end_session": EndSessionPayload,
 }
 assert tuple(PAYLOAD_SCHEMAS) == COMMAND_KINDS, "every command kind has one payload schema"
 
@@ -461,8 +771,9 @@ async def record_command_result(db: AsyncSession, setup: DesktopSetup, command_i
         # story #4580 (Kadir 02:08Z): the stage the command answered — a late result of the first answer never moves the second
         stage = "confirm" if (cmd.payload or {}).get("stage") == "confirm" else "ask"
         await on_answer_result(db, setup.id, (cmd.payload or {}).get("request_id"), result.state, result.result_code, stage=stage)
-    # story #4534 — a stop done closes that session's waiting instructions (no turn-end notice); an instruction done writes its line
-    if cmd.kind in ("stop_session", "send_prompt"):
+    # story #4534 — a stop done closes that session's waiting instructions (no turn-end notice); an instruction done writes its line;
+    # story #4599 — an end of the session done closes them the same way
+    if cmd.kind in ("stop_session", "send_prompt", "end_session"):
         from app.services.desktop_commands import on_command_done
 
         await on_command_done(db, cmd)
@@ -479,6 +790,53 @@ async def record_command_result(db: AsyncSession, setup: DesktopSetup, command_i
 
 def wake_key(setup_id: uuid.UUID) -> str:
     return f"desktop:{setup_id}"
+
+
+async def reject_open_commands(db: AsyncSession, *, setup_ids: list[uuid.UUID], result_code: str) -> int:
+    """story #4554 ④ (PO 11:45Z) · §2.1 off (remote_control.set_enabled): the devices' open commands (`queued` · `delivered`) end
+    as `rejected` with the reason — nothing waits for a device that will not come back (or may not be reached).
+
+    Kadir 4981 ②: an `answer_approval` among them carried a person's answer that never reached the device — its permission request
+    must not stay `answered` (the approver's phone would say it went through: a false success). The same handler the daemon's own
+    result takes (agent_permissions.on_answer_result) moves it to `rejected` with the same code, in this transaction."""
+    from app.services.agent_permissions import on_answer_result
+
+    if not setup_ids:
+        return 0
+    now = _now()
+    rejected = (await db.execute(
+        update(DesktopCommand)
+        .where(DesktopCommand.setup_id.in_(setup_ids), DesktopCommand.state.in_(("queued", "delivered")))
+        .values(state="rejected", result_code=result_code, finished_at=now)
+        .returning(DesktopCommand.setup_id, DesktopCommand.kind, DesktopCommand.payload)
+    )).all()
+    for setup_id, kind, payload in rejected:
+        if kind == "answer_approval" and (payload or {}).get("request_id"):
+            # story #4580 (Kadir 02:08Z): the stage the command answered — a late result of the first answer never moves the second
+            stage = "confirm" if payload.get("stage") == "confirm" else "ask"
+            await on_answer_result(db, setup_id, payload["request_id"], "rejected", result_code, stage=stage)
+    return len(rejected)
+
+
+def _fire_disconnected(setup_id: uuid.UUID) -> None:
+    """story #4554 ④: the device's open stream is told now — it rechecks and ends with `access_revoked` at once, not at its next
+    30-second check. Carried like a wake (this instance at once · other instances through the same backplane); the stream reads the
+    mark, never the payload's words."""
+    from app.routers.events import _push_to_agent
+
+    try:
+        _push_to_agent(wake_key(setup_id), {"__wake__": True, "seq": 0, DISCONNECTED_CODE: True})
+    except Exception:  # noqa: BLE001 — the stream's 30-second recheck still ends it
+        logger.warning("desktop relay disconnect signal failed setup=%s", setup_id, exc_info=True)
+
+
+def schedule_disconnected_after_commit(db: AsyncSession, setup_id: uuid.UUID) -> None:
+    """After the disconnect's commit only (before it, the stream's recheck would still find the device valid)."""
+    if not isinstance(db.sync_session, Session):
+        return
+    from app.services.after_commit import schedule_after_commit
+
+    schedule_after_commit(db, [functools.partial(_fire_disconnected, setup_id)])
 
 
 def _fire_wake(setup_id: uuid.UUID, seq: int) -> None:

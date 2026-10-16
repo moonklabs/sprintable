@@ -14,23 +14,13 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { compile, optimize } from '@tailwindcss/node';
+import { layoutStubPlugin } from './support/layout-stubs';
 
 const req = createRequire(__filename);
 const WEB = path.join(__dirname, '..');
 const APP = path.join(WEB, 'src', 'app');
 const LONG = 'very-long-subdomain-name-for-testing.build-cache.example-corp.internal';
 
-const STUBS: Record<string, string> = {
-  '@/lib/db/client': 'export const fetchWithAuth = (u, i) => fetch(u, i);',
-  '@/hooks/use-sse-notifications': 'export function useSseNotifications() {}',
-  '@/hooks/use-flat-href': 'export function useFlatHref() { return (h) => h; }',
-  '@/lib/phone-bridge': "export const isPhoneApp = () => !!window.__phone; export const phoneCall = async (k) => (k === 'device.auth' ? { id: 'x', ok: true, auth: 'biometric' } : { id: 'x', ok: false });",
-  '@/lib/phone-answer': "export async function answerOnPhone(id, decision) { return { kind: 'answered', decision }; }",
-  // story #4583: the inbox now reads the org's remote control (components/desktop/remote-off.tsx) — the dashboard context and
-  // next/link come with it. No remote-control answer here → 404 → no «off» line, so these scenes are as before.
-  '@/app/dashboard/dashboard-shell': "export function useDashboardContext() { return { orgId: 'org-1' }; }",
-  'next/link': "import React from 'react'; export default function Link({ href, children, ...rest }) { return React.createElement('a', { href, ...rest }, children); }",
-};
 
 let built: { js: string; css: string } | null = null;
 async function build() {
@@ -43,18 +33,19 @@ async function build() {
         import ko from './messages/ko.json'; import en from './messages/en.json';
         import { AgentRunProfileSection } from './src/components/agents/agent-run-profile-section';
         import { AgentPermissionRequests } from './src/components/inbox/agent-permission-requests';
+        import { PhoneBridgeContext } from './src/components/providers/phone-bridge-context';
+        import { phoneCall } from '@/lib/phone-bridge';
         window.__mount = (kind, locale) => createRoot(document.getElementById('root')).render(
           React.createElement(NextIntlClientProvider, { locale, messages: locale === 'en' ? en : ko, timeZone: 'Asia/Seoul' },
-            kind === 'profile' ? React.createElement(AgentRunProfileSection, { agentId: 'a1', runtimeType: 'claude-code' })
-              : React.createElement(AgentPermissionRequests)));`,
+            // story #4661: the screens read the phone state from the bridge context (the claim's provider) — the harness plays the claim
+            React.createElement(PhoneBridgeContext.Provider, { value: { inPhoneApp: !!window.__phone, phoneCall } },
+              kind === 'profile' ? React.createElement(AgentRunProfileSection, { agentId: 'a1', runtimeType: 'claude-code' })
+                : React.createElement(AgentPermissionRequests))));`,
       resolveDir: WEB, loader: 'tsx',
     },
     bundle: true, format: 'iife', platform: 'browser', write: false, logLevel: 'silent', jsx: 'automatic',
     tsconfig: path.join(WEB, 'tsconfig.json'), define: { 'process.env.NODE_ENV': '"production"' },
-    plugins: [{ name: 'stubs', setup(b) {
-      b.onResolve({ filter: /^(@\/(lib\/db\/client|hooks\/use-sse-notifications|hooks\/use-flat-href|lib\/phone-bridge|lib\/phone-answer|app\/dashboard\/dashboard-shell)|next\/link)$/ }, (a) => ({ path: a.path, namespace: 'stub' }));
-      b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: STUBS[a.path]!, loader: 'js', resolveDir: WEB }));
-    } }],
+    plugins: [layoutStubPlugin()],
   });
   const js = out.outputFiles[0]!.text;
   // every class the bundle can render — the strings in it, split (unknown tokens are ignored by the compiler)

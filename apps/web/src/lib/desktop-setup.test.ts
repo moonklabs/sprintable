@@ -143,6 +143,15 @@ describe('[SID:4427] 진행 표시 — 상태 조회 한 번을 세 단계로(PO
   });
   const T0 = Date.parse('2026-09-30T00:00:00Z');
 
+  // story 4658 (PO 17072 (a) · 17076): an agent that asks for a sign-in shows its own block (roles · the runtimes' commands); none → null
+  it('[SID:4658] a sign-in ask: the role and the runtime are read from the status; no ask → null', () => {
+    expect(setupProgress(base(), T0, null).signIn).toBeNull();
+    const s = { ...base(), signals: { ...base().signals, agents_sign_in: [{ member_id: 'm1', at: '2026-09-30T00:00:01Z', runtime: 'claude' as const }] } };
+    expect(setupProgress(s, T0, null).signIn).toEqual({ runtimes: ['claude'] });
+    const cleared = { ...base(), signals: { ...base().signals, agents_sign_in: [] } };
+    expect(setupProgress(cleared, T0, null).signIn).toBeNull();
+  });
+
   it('앱이 받기 전: 모두 도는 중 · 안내 없음 · ⑦ 없음', () => {
     const p = setupProgress(base(), T0, null);
     expect([p.ready, p.handed, p.result]).toEqual(['running', 'running', 'running']);

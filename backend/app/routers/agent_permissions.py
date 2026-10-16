@@ -25,7 +25,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db
 from app.services import agent_permissions
 from app.services.desktop_relay import DesktopRelayError
-from app.services.member_resolver import resolve_member
+from app.services.member_resolver import is_active_org_admin, resolve_member
 
 router = APIRouter(prefix="/api/v2", tags=["agent-permissions"])
 
@@ -86,7 +86,10 @@ async def post_remote_device(
 ):
     member = await _person(db, auth, org_id, interactive=True)
     try:
-        view, created = await agent_permissions.register_phone(db, member_id=uuid.UUID(str(member.id)), org_id=org_id, body=body)
+        # story #4629: the session it registers from is the caller's own (auth.user_id) — another person's token binds nothing
+        view, created = await agent_permissions.register_phone(
+            db, member_id=uuid.UUID(str(member.id)), org_id=org_id, body=body, user_id=uuid.UUID(auth.user_id),
+        )
     except DesktopRelayError as exc:
         await db.rollback()
         return _error(exc)
@@ -111,6 +114,29 @@ async def post_pairing_offer(
         return _error(exc)
     await db.commit()
     return JSONResponse(status_code=202, content={"state": "sent"})
+
+
+@router.get("/remote-devices/pairing-target")
+async def get_pairing_target(
+    setup_id: uuid.UUID = Query(...),
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+):
+    """story 4695 — the organization of the computer a QR names, for a member of that organization (their own session only). The phone
+    sends its key and its offer with that org (`X-Org-Id`), not with whatever org its login happens to rest on. Anyone else: the
+    offer's own answer (404 setup_not_found) — nothing tells whether such a computer exists."""
+    from app.routers.auth import _requires_interactive_session
+
+    if _requires_interactive_session(auth):
+        raise HTTPException(status_code=403, detail={"code": "person_session_required", "message": "a person's session is required"})
+    try:
+        user_id = uuid.UUID(str(auth.user_id))
+    except ValueError:
+        return _error(DesktopRelayError(404, "setup_not_found", "no such computer"))
+    org_id = await agent_permissions.pairing_target_org(db, user_id=user_id, setup_id=setup_id)
+    if org_id is None:
+        return _error(DesktopRelayError(404, "setup_not_found", "no such computer"))
+    return {"org_id": str(org_id)}
 
 
 @router.get("/remote-devices/pairing-offers/{offer_id}")
@@ -138,10 +164,31 @@ async def get_remote_devices(
 ):
     member = await _person(db, auth, org_id, interactive=False)
     if scope == "org":
-        if member.role not in ("owner", "admin"):
+        if not await is_active_org_admin(db, member):  # story #4624 (PO 08:5xZ): an inactive owner/admin sees no one else's phones
             raise HTTPException(status_code=403, detail={"code": "not_org_admin", "message": "owners and admins only"})
         return {"devices": await agent_permissions.list_phones(db, member_id=None, org_id=org_id)}
     return {"devices": await agent_permissions.list_phones(db, member_id=uuid.UUID(str(member.id)), org_id=org_id)}
+
+
+@router.delete("/remote-devices/{phone_id}")
+async def delete_remote_device(
+    phone_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story #4624: the phone key itself (its pairs with it) — its owner, or an active owner/admin of the org."""
+    member = await _person(db, auth, org_id, interactive=False)
+    try:
+        removed, session = await agent_permissions.remove_phone(
+            db, phone_id=phone_id, actor_member_id=uuid.UUID(str(member.id)), actor_is_admin=await is_active_org_admin(db, member), org_id=org_id,
+        )
+    except DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await db.commit()
+    # story #4629: whether that phone's own login session was ended too («ended») or none was found («not_found» — key and pairs only)
+    return {"removed": removed, **({"session": session} if removed else {})}
 
 
 @router.delete("/remote-devices/{phone_id}/pairs/{setup_id}")
@@ -156,7 +203,7 @@ async def delete_remote_device_pair(
     try:
         removed = await agent_permissions.remove_pair(
             db, phone_id=phone_id, setup_id=setup_id, actor_member_id=uuid.UUID(str(member.id)),
-            actor_is_admin=member.role in ("owner", "admin"), org_id=org_id,
+            actor_is_admin=await is_active_org_admin(db, member), org_id=org_id,  # story #4624: an inactive admin is not one
         )
     except DesktopRelayError as exc:
         await db.rollback()

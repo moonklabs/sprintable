@@ -76,20 +76,27 @@ describe('MobileTabBar — 결재 대기 수 SSE 라이브 · 생존 시 포커�
 
   it('⭐게이트 SSE 이벤트(승인 · 위임 · 토스)를 구독하고, 이벤트가 오면 다시 물어 배지가 바뀐다', async () => {
     await mount();
-    // story #4533 — and an agent's permission request sent to me (its bell notice): the server counts it into the same number
-    expect(Object.keys(muxState.handlers).sort()).toEqual(['conversation.gate_delegated', 'conversation.gate_resolved', 'conversation.gate_tossed', 'event_notification']);
+    // story #4533 — and an agent's permission request sent to me (its bell notice): the server counts it into the same number.
+    // story #4612: by the names the server really writes — the named `dispatched` frame (was `event_notification`, a name no server
+    // code sends: this test was green while the real count never moved) and a request's later change
+    expect(Object.keys(muxState.handlers).sort()).toEqual(['agent.permission_request.changed', 'conversation.gate_delegated', 'conversation.gate_resolved', 'conversation.gate_tossed', 'dispatched']);
     expect(container.querySelector('span[aria-hidden]')?.textContent).toBe('2');
     serverCount = 1;
     await act(async () => { muxState.handlers['conversation.gate_resolved']!(JSON.stringify({ gate_id: 'g-1' })); });
     await flush();
     expect(container.querySelector('span[aria-hidden]')?.textContent).toBe('1');
     serverCount = 5;
-    await act(async () => { muxState.handlers['event_notification']!(JSON.stringify({ event_type: 'dispatched', payload: { event_type: 'conversation.message' } })); });
+    await act(async () => { muxState.handlers['dispatched']!(JSON.stringify({ event_type: 'dispatched', payload: { event_type: 'conversation.message' } })); });
     await flush();
     expect(container.querySelector('span[aria-hidden]')?.textContent).toBe('1'); // any other notice: no recount
     serverCount = 2;
-    await act(async () => { muxState.handlers['event_notification']!(JSON.stringify({ event_type: 'dispatched', payload: { event_type: 'agent.permission_request' } })); });
+    await act(async () => { muxState.handlers['dispatched']!(JSON.stringify({ event_type: 'dispatched', payload: { event_type: 'agent.permission_request' } })); });
     await flush();
     expect(container.querySelector('span[aria-hidden]')?.textContent).toBe('2');
+    // story #4612: the request answered on another screen (or withdrawn by the daemon) → the count follows at once
+    serverCount = 1;
+    await act(async () => { muxState.handlers['agent.permission_request.changed']!(JSON.stringify({ event_type: 'agent.permission_request.changed', request_id: 'q1', state: 'answered', event_id: 't-1' })); });
+    await flush();
+    expect(container.querySelector('span[aria-hidden]')?.textContent).toBe('1');
   });
 });

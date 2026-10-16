@@ -20,6 +20,15 @@ ORG_ID = uuid.uuid4()
 MEMBER_ID = uuid.uuid4()
 
 
+@pytest.fixture(autouse=True)
+def _no_real_scope_fetch():
+    """PO 22:51Z (Minh's catch_test_host): `_flat()` loads the key's scope first — a real GET http://x/api/v2/mcp/manifest (a sandbox
+    network question every run, and a per-key cache that made which test fetched it depend on the order). No test here is about the
+    scope: an allow-all scope for every one."""
+    with patch("sprintable_mcp.server._load_scope_for", new=AsyncMock(return_value=[])):
+        yield
+
+
 # ─── AC1/2: heartbeat 엔드포인트 ─────────────────────────────────────────────
 
 def _mock_member_for_heartbeat():

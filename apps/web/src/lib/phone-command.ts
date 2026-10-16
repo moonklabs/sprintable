@@ -11,6 +11,7 @@
 // no new signature), so nothing goes in twice.
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { hiddenCharsChange } from './instruction-text';
 import type { PhoneAnswer } from './phone-bridge';
 
 export type CommandOutcome =
@@ -21,6 +22,8 @@ export type CommandOutcome =
   | { kind: 'sent_as_message' } // the turn had ended — sent as a message instead (it goes in when its turn comes)
   | { kind: 'sent_as_message_not_now' } // this session could not take it into the turn (the daemon said so) — sent as a message instead
   | { kind: 'too_long' } // over 400 code points — the sheet stops it first; the server refuses it again
+  // story 4633 (contract v0.4 §3 · web): the daemon refused it because the text holds invisible characters — refused, never sent as a message
+  | { kind: 'hidden_text' }
   | { kind: 'unreachable' } // the server refused before making it (409 device_unreachable) — certainly not sent
   | { kind: 'unknown'; pending: Pending } // it may have gone (the post's answer was lost · no end in two minutes) — follow it, never redo it
   | { kind: 'remote_off' } // the organization turned remote control off
@@ -32,14 +35,23 @@ export type CommandOutcome =
   | { kind: 'key_invalidated' }
   | { kind: 'not_registered' }
   | { kind: 'signed_out' }
+  // story #4599 (contract v1.13.2 · PO 14:08Z · 14:18Z): the whole session ended (end_session done) — no line of its own, the strip shows
+  // the ended state · a stop refused because a macOS window holds the turn (the server's or the daemon's closed reason) — only an end goes
+  | { kind: 'ended' }
+  | { kind: 'system_wait_end_only' }
+  // story #4599 (Yuna · PO 19:47Z): [세션 끝내기] signed nothing — the window was answered on that Mac first, the session works again
+  // (the shell's `not_held`). Never «failed»: «다시 눌러 주세요» would press [멈춤], the button there now, and stop a working turn
+  | { kind: 'not_held' }
   | { kind: 'failed' };
 
 export type CommandInput =
   | { agentId: string; kind: 'stop_session' }
+  | { agentId: string; kind: 'end_session' } // story #4599: [세션 끝내기] — the shell signs this kind, so what was signed is what happens
   | { agentId: string; kind: 'send_prompt'; text: string; conversationId: string };
 
+export type Verb = 'stop' | 'send' | 'end';
 /** a command the web posted (or tried to): what [결과 확인] follows again — the same key and body, its id once known */
-export interface Pending { verb: 'stop' | 'send'; key: string; body: Record<string, unknown>; commandId?: string }
+export interface Pending { verb: Verb; key: string; body: Record<string, unknown>; commandId?: string }
 
 type Call = (type: string, args: Record<string, unknown>) => Promise<PhoneAnswer>;
 export interface CommandDeps {
@@ -69,6 +81,7 @@ const KEY_REFUSALS: Record<string, PlainOutcome['kind']> = {
   signed_out: 'signed_out',
   remote_control_off: 'remote_off',
   conversation_not_found: 'conversation_not_found',
+  not_held: 'not_held', // story #4599: an end refused by the shell — no longer held by a macOS window (phoneCalls.js)
 };
 
 async function codeOf(res: Response): Promise<string> {
@@ -85,12 +98,13 @@ export async function commandOnPhone(input: CommandInput, deps: CommandDeps): Pr
   // the turn had ended: an instruction goes in as a message (the person's words are never dropped) · a stop had nothing to stop
   const notWorking = async (text: string): Promise<CommandOutcome> => {
     if (!prompt) return { kind: 'already_stopped' };
+    if (hiddenCharsChange(text)) return { kind: 'hidden_text' }; // story 4633: a text the daemon would change never goes into the chat as a message
     return (await deps.sendMessage(text).catch(() => false)) ? { kind: 'sent_as_message' } : { kind: 'failed' };
   };
 
   const signed = await deps.phoneCall('command.sign', prompt
     ? { agent_member_id: input.agentId, kind: 'send_prompt', text: input.text, conversation_id: input.conversationId }
-    : { agent_member_id: input.agentId, kind: 'stop_session' });
+    : { agent_member_id: input.agentId, kind: input.kind });
   if (!signed.ok) {
     const code = signed.code ?? '';
     if (code === 'not_working' || code === 'no_session') return notWorking(prompt ? input.text : '');
@@ -102,10 +116,12 @@ export async function commandOnPhone(input: CommandInput, deps: CommandDeps): Pr
   if (prompt && text === undefined) return { kind: 'failed' };
 
   const pending: Pending = {
-    verb: prompt ? 'send' : 'stop',
+    verb: prompt ? 'send' : input.kind === 'end_session' ? 'end' : 'stop',
     key: deps.newKey(),
     body: {
-      kind: input.kind,
+      // story #4599 (PO 14:25Z · Min 387): the kind the shell signed is the kind posted — an end is never posted as a stop, nor the
+      // other way (the daemon checks the signed kind against the command's); a shell from before says none → what was asked
+      kind: typeof signed.kind === 'string' ? signed.kind : input.kind,
       session_key: signed.session_key,
       signed: signed.signed,
       phone_key_id: signed.phone_key_id,
@@ -126,6 +142,7 @@ async function post(agentId: string, pending: Pending, deps: CommandDeps): Promi
   const text = typeof pending.body.text === 'string' ? pending.body.text : '';
   const notWorking = async (): Promise<CommandOutcome> => {
     if (!prompt) return { kind: 'already_stopped' };
+    if (hiddenCharsChange(text)) return { kind: 'hidden_text' }; // story 4633: a text the daemon would change never goes into the chat as a message
     return (await deps.sendMessage(text).catch(() => false)) ? { kind: 'sent_as_message' } : { kind: 'failed' };
   };
   let res: Response;
@@ -146,7 +163,10 @@ async function post(agentId: string, pending: Pending, deps: CommandDeps): Promi
     // a refusal the server named (4xx): nothing was made (the same key would have given back the first command — server rule)
     if (code === 'session_not_working' || code === 'session_not_found') return notWorking();
     if (code === 'device_unreachable') return { kind: 'unreachable' };
+    // story #4599 (PO 14:18Z): a macOS window holds the turn — the stop was refused before anything was made; only an end goes
+    if (code === 'system_wait_end_only') return { kind: 'system_wait_end_only' };
     if (code === 'instruct_too_long') return { kind: 'too_long' };
+    if (code === 'instruct_hidden_text') return { kind: 'hidden_text' }; // story 4633: refused before anything was made — never a message
     if (code === 'remote_control_off') return { kind: 'remote_off' };
     if (code === 'conversation_not_found') return { kind: 'conversation_not_found' };
     if (code === 'phone_not_paired') return { kind: 'not_paired' };
@@ -176,17 +196,24 @@ async function follow(agentId: string, pending: Pending, deps: CommandDeps): Pro
     } catch {
       continue;
     }
-    if (r.state === 'done') return prompt ? { kind: r.result_code === 'after_step' ? 'sent_after_step' : 'sent_now' } : { kind: 'stopped' };
+    if (r.state === 'done') return prompt ? { kind: r.result_code === 'after_step' ? 'sent_after_step' : 'sent_now' } : pending.verb === 'end' ? { kind: 'ended' } : { kind: 'stopped' };
+    // story #4599 (Mirko 385): the daemon found a macOS window holding the turn when the stop reached it — the same closed reason
+    if (r.state === 'rejected' && r.result_code === 'system_wait_end_only') return { kind: 'system_wait_end_only' };
     // the daemon found the turn ended: it never put it in — the instruction becomes a message (nothing went in twice)
     if (r.state === 'rejected' && r.result_code === 'session_not_working') {
       if (!prompt) return { kind: 'already_stopped' };
       const text = typeof pending.body.text === 'string' ? pending.body.text : '';
+      if (hiddenCharsChange(text)) return { kind: 'hidden_text' }; // story 4633: a text the daemon would change never goes into the chat as a message
       return (await deps.sendMessage(text).catch(() => false)) ? { kind: 'sent_as_message' } : { kind: 'failed' };
     }
     // story #4534 (PO 06:20Z · Kadir 06:31Z (a)): the daemon could not put it into this session's turn (refused before anything was
     // pasted) — it goes in as a message, never dropped; its own line says why
+    // story 4633 (contract v0.4 §3): the daemon refused the signed text for its hidden characters — its own line; no «send as a message»
+    // route (the same words would reach the chat unchecked)
+    if (prompt && r.state === 'rejected' && r.result_code === 'instruct_hidden_text') return { kind: 'hidden_text' };
     if (prompt && r.state === 'rejected' && r.result_code === 'instruct_not_now') {
       const text = typeof pending.body.text === 'string' ? pending.body.text : '';
+      if (hiddenCharsChange(text)) return { kind: 'hidden_text' }; // story 4633: a text the daemon would change never goes into the chat as a message
       return (await deps.sendMessage(text).catch(() => false)) ? { kind: 'sent_as_message_not_now' } : { kind: 'failed' };
     }
     if (r.state === 'rejected' || r.state === 'failed') return { kind: 'failed' };

@@ -13,9 +13,13 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { fetchWithAuth } from '@/lib/db/client';
 import { pickIGaJosa } from '@/lib/korean-particle';
 import {
-  canDisconnect, canManageDevices, deviceAgentCount, deviceDateOptions, markDisconnected, orderDevices, readDevices, readRevoked,
-  type DesktopDevice,
+  canDisconnect, canManageDevices, deviceAgentCount, deviceAgents, deviceDateOptions, linkedSetupId, markDisconnected, orderDevices,
+  readDevices, readRevoked, type DesktopDevice,
 } from '@/lib/desktop-devices';
+import Link from 'next/link';
+import { ChevronDown } from 'lucide-react';
+import { useFlatHref } from '@/hooks/use-flat-href';
+import { stageRoleLabel } from '@/lib/stage-role';
 
 /**
  * story #4424 — «연결된 기기» on /desktop (Yuna 0ebe65ef · PO adopted 15:42Z; its copy table is the source for every string).
@@ -62,6 +66,11 @@ export function DesktopDevices() {
   }, [orgId]);
 
   useEffect(() => (manage ? load() : undefined), [manage, load]);
+
+  // story 4675 (F2): the workforce detail links here as `/desktop#device=<setup_id>` — that row opens and comes into view once the
+  // list is here (read after the list, so a link that arrives before the rows still finds its row)
+  const [linked, setLinked] = useState<string | null>(null);
+  useEffect(() => { if (devices) setLinked(linkedSetupId(window.location.hash)); }, [devices]);
 
   const disconnect = async (device: DesktopDevice) => {
     setBusy(true);
@@ -123,7 +132,7 @@ export function DesktopDevices() {
           ) : (
             <Card className="overflow-hidden p-0">
               <ul className="divide-y divide-border">
-                {orderDevices(devices).map((d) => <DeviceRow key={d.setup_id} device={d} onDisconnect={() => { setFailed(false); setAsking(d); }} />)}
+                {orderDevices(devices).map((d) => <DeviceRow key={d.setup_id} device={d} linked={d.setup_id === linked} onDisconnect={() => { setFailed(false); setAsking(d); }} />)}
               </ul>
             </Card>
           )}
@@ -149,11 +158,18 @@ export function DesktopDevices() {
   );
 }
 
-function DeviceRow({ device, onDisconnect }: { device: DesktopDevice; onDisconnect: () => void }) {
+function DeviceRow({ device, linked = false, onDisconnect }: { device: DesktopDevice; linked?: boolean; onDisconnect: () => void }) {
   const t = useTranslations('desktop.devices');
+  const tOrg = useTranslations('organization');
+  const flatHref = useFlatHref();
   const format = useFormatter();
   const off = device.state === 'disconnected';
   const count = deviceAgentCount(device);
+  // story 4675 (F2 · Yuna §I ④): the row opens to its agents (name → the workforce page · role); a device with no agent is the
+  // row alone. A link from the workforce detail (`#device=`) opens it and brings it into view.
+  const agents = deviceAgents(device);
+  const rowRef = useRef<HTMLLIElement>(null);
+  useEffect(() => { if (linked) rowRef.current?.scrollIntoView?.({ block: 'center' }); }, [linked]);
   const at = off ? device.revoked_at : device.confirmed_at;
   const who = off ? device.revoked_by_name : device.confirmed_by_name;
   // story #4443 — in the viewer's zone (was next-intl's, which nothing set: the server's UTC); unknown yet → held, not drawn
@@ -164,10 +180,11 @@ function DeviceRow({ device, onDisconnect }: { device: DesktopDevice; onDisconne
     : device.state === 'waiting_for_app' ? t('state.waiting_for_app')
     : device.state === 'not_handed_over' ? t('state.not_handed_over')
     : t('state.disconnected');
-  return (
-    <li className="flex items-start justify-between gap-3 px-4 py-3" data-testid="desktop-device-row" data-state={device.state}>
+  const head = (
+    <>
       <div className="min-w-0">
         <p className={`flex flex-wrap items-center gap-2 text-sm ${off ? 'font-medium text-muted-foreground' : 'font-semibold text-foreground'}`}>
+          {agents.length > 0 ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden /> : null}
           <span className="truncate" data-testid="desktop-device-name">{device.device_name}</span>
           <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground" data-testid="desktop-device-state">
             <StateDot state={device.state} />
@@ -182,10 +199,35 @@ function DeviceRow({ device, onDisconnect }: { device: DesktopDevice; onDisconne
         </p>
       </div>
       {canDisconnect(device) ? (
-        <Button variant="outline" size="sm" onClick={onDisconnect} aria-label={t('disconnectAria', { device: device.device_name })} data-testid="desktop-device-disconnect">
+        // inside a <summary> a button's click would also open/close the row — the button keeps its one meaning
+        <Button variant="outline" size="sm" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDisconnect(); }} aria-label={t('disconnectAria', { device: device.device_name })} data-testid="desktop-device-disconnect">
           {t('disconnect')}
         </Button>
       ) : null}
+    </>
+  );
+  return (
+    <li ref={rowRef} data-testid="desktop-device-row" data-state={device.state}>
+      {agents.length === 0 ? (
+        <div className="flex items-start justify-between gap-3 px-4 py-3">{head}</div>
+      ) : (
+        <details className="group" open={linked || undefined} data-testid="desktop-device-details">
+          <summary
+            className="flex cursor-pointer list-none items-start justify-between gap-3 px-4 py-3 [&::-webkit-details-marker]:hidden"
+            aria-label={t('expandAgentsAria', { device: device.device_name })}
+          >
+            {head}
+          </summary>
+          <ul className="space-y-1 px-4 pb-3 pl-9 text-xs text-muted-foreground" data-testid="desktop-device-agents">
+            {agents.map((a) => (
+              <li key={a.member_id} className="break-keep" data-testid="desktop-device-agent">
+                <Link href={flatHref(`/organization/workforce/${a.member_id}`)} className="font-medium text-foreground hover:underline">{a.name ?? a.member_id}</Link>
+                {a.role ? ` · ${stageRoleLabel(a.role, tOrg)}` : null}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </li>
   );
 }

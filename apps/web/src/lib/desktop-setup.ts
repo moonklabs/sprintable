@@ -21,7 +21,10 @@ const CODE_RE = /^[A-Za-z0-9_-]{43}$/;
 export interface SetupQuery { code: string; runtimes: DesktopRuntime[]; setupId: string | null; /** 찾았지만 이 컴퓨터에서 도구를 못 붙이는 것(⑥ · 회사 관리 MCP) — runtimes의 부분집합. */ blocked: DesktopRuntime[]; /** story 4494: 이 컴퓨터에 깔렸지만 바닥보다 낮은 판뿐인 런타임(쓸 수 없음) — runtimes에 없는 것만. */ old?: OldRuntime[];
   /** story #4576 (PO 04:24Z): the app said `caps=move` — it can take a move's exchange (agents with no recipe role). Absent = an app
    *  from before: the page offers «옮기기» turned off with why. Only present when true (the parsed shape stays as before otherwise). */
-  canMove?: true }
+  canMove?: true;
+  /** story 4680 (D2): `agent=<member id>` — the agent the recruiter just made (the app's startHere({agentId}) put it in the fragment);
+   *  the page chooses it for the first agent row once the «이미 있는 에이전트» list has it. Only a uuid-shaped value; absent otherwise. */
+  agent?: string }
 
 /** story 4494 (PO 10:00Z (a)): the app's `old=codex:0.153.4:0.156.1` — a runtime installed only below its floor (its version · the
  * lowest that works). The page says «버전이 낮아» for it instead of «찾지 못했어요». */
@@ -55,7 +58,26 @@ export function parseSetupQuery(params: { get(name: string): string | null }): S
   const runtimes = DESKTOP_RUNTIMES.filter((r) => asked.has(r));
   const blockedAsked = new Set((params.get('blocked') ?? '').split(',').map((s) => s.trim()));
   const caps = new Set((params.get('caps') ?? '').split(',').map((s) => s.trim()));
-  return { code, runtimes, setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null, blocked: runtimes.filter((r) => blockedAsked.has(r)), ...withOld(parseOldRuntimes(params.get('old'), runtimes)), ...(caps.has('move') ? { canMove: true as const } : {}) };
+  const agent = params.get('agent') ?? '';
+  return { code, runtimes, setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null, blocked: runtimes.filter((r) => blockedAsked.has(r)), ...withOld(parseOldRuntimes(params.get('old'), runtimes)), ...(caps.has('move') ? { canMove: true as const } : {}), ...(AGENT_ID_RE.test(agent) ? { agent } : {}) };
+}
+
+/** story 4680: a member id as the app puts it in `agent=` — a uuid; anything else is ignored (never put in a request) */
+const AGENT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** story 4680 (D2): the rows with `agentId` chosen for the first agent/either row whose choices include it (the recruiter's
+ * [이 컴퓨터에서 시작] put it in the address) — no such row or choice (another project · its runtime not here · the list has not
+ * come yet) → the rows as they are. Applied when rows are (re)built; a person's later choice stands until the next rebuild. */
+export function withPreselectedAgent(rows: readonly SetupRoleRow[], agentId: string | null | undefined): SetupRoleRow[] {
+  if (!agentId) return [...rows];
+  let done = false;
+  return rows.map((r) => {
+    if (done || r.actor === 'human') return r;
+    const choice = r.choices.find((c) => c.kind === 'existing' && c.agentId === agentId);
+    if (!choice) return r;
+    done = true;
+    return { ...r, owner: choice };
+  });
 }
 
 /** `existing` (story #4565): an agent the organization already has, moved to this computer for the row (no new member). */
@@ -65,6 +87,32 @@ export type RowOwner = { kind: 'me' } | { kind: 'agent'; runtime: DesktopRuntime
  * runtime), its live key count (any → moving it cuts its current connection) and when one was last used. No key value. */
 /** `in_project` false (PO 04:37Z): the person has to add it to the project first — shown turned off with why, never chosen. */
 export interface AttachableAgent { id: string; name: string; runtime: DesktopRuntime; live_keys: number; last_used_at: string | null; in_project: boolean }
+
+/** story 4703 — why the recruiter's agent (`agent=` · the preselect) cannot take a row of this list, from the server's own list and the
+ * runtimes the app found (never a guessed reason). null = nothing to say: no preselect, or it lands (in the project, its runtime usable here).
+ * - `unlisted`: the id is not in the list — not an active agent of this organization with a desktop runtime. Another organization's agent,
+ *   an id that does not exist and an agent with no desktop runtime are ONE answer here (the list is this organization's only, and carries
+ *   no name or id of the missing one — nothing about whether it exists elsewhere can show).
+ * - `runtime_blocked` / `runtime_missing`: its runtime is found but cannot take tools (company-managed) / is not on this computer. The two exclude
+ *   each other (a blocked runtime is a found one). A runtime reason comes before `outside_project` when several meet (adding the agent to the
+ *   project would not make it run, and an install hint is the wrong thing to say about a blocked runtime). The order checked, as in Yuna's
+ *   4703 copy: unlisted → runtime_blocked → runtime_missing → outside_project.
+ * - `outside_project`: in the organization, its runtime usable here, but not in this project (the page's [프로젝트 팀에 넣기] road). */
+export type PreselectHold =
+  | { reason: 'unlisted' }
+  | { reason: 'runtime_missing' | 'runtime_blocked' | 'outside_project'; agent: AttachableAgent };
+
+export function preselectHoldOf(
+  list: readonly AttachableAgent[], preselect: string | null | undefined, usable: readonly DesktopRuntime[], blocked: readonly DesktopRuntime[] = [],
+): PreselectHold | null {
+  if (!preselect) return null;
+  const agent = list.find((a) => a.id === preselect);
+  if (!agent) return { reason: 'unlisted' };
+  if (blocked.includes(agent.runtime)) return { reason: 'runtime_blocked', agent };
+  if (!usable.includes(agent.runtime)) return { reason: 'runtime_missing', agent };
+  if (!agent.in_project) return { reason: 'outside_project', agent };
+  return null;
+}
 
 /** The «이미 있는 에이전트» choices of a row (agent · either rows only): every attachable agent whose runtime is on this computer.
  * The page draws the others (runtime not here · picked for another row) as disabled options with why. */
@@ -97,6 +145,8 @@ export interface SetupRoleRow {
   /** 고를 수 있는 쪽: human → 나만 · agent → 에이전트만 · either → 에이전트 + 나. */
   choices: RowOwner[];
   owner: RowOwner;
+  /** story 4653: the extra CLI names this agent uses (the runtime's own is not here). Only read for an agent row. */
+  tools?: string[];
 }
 
 /** One row the server worked out for the setup (4831 `setup_role_rows` — the same function the confirmation checks with). */
@@ -193,8 +243,44 @@ export interface ConfirmBody {
   /** 에이전트 단위 = 역할(PO 08:31Z · 4825 CHANGES): 한 역할이 여러 stage를 맡아도 에이전트 하나. */
   /** `{role, runtime}` = a new agent · `{role, owner: 'me'}` = the person confirming holds an either row (PO 05:21Z ⒜) ·
    * `{role, agent_id}` = an existing agent moved to this computer (4565). Human rows are not sent (the server binds them). */
-  roles: ({ role: string; runtime: DesktopRuntime } | { role: string; owner: 'me' } | { role: string; agent_id: string })[];
+  roles: ({ role: string; runtime: DesktopRuntime; tools?: string[] } | { role: string; owner: 'me' } | { role: string; agent_id: string; tools?: string[] })[];
   workdir_hint: string;
+}
+
+/** story 4653 (Yuna ⑤ design:pass · PO 15017): the CLIs an agent uses beyond its runtime. The runtime chip is always there
+ *  (claude · codex sign-in always checked); these are the names the judging table knows (gcloud · gh · aws). A name it does not
+ *  know is kept, but its sign-in gets no line (the server checks the same list). */
+export const JUDGED_AGENT_TOOLS = ['gcloud', 'gh', 'aws'] as const;
+export const AGENT_TOOLS_MAX = 8;
+export const AGENT_TOOL_NAME_MAX = 24;
+// the same rule as the server's (backend desktop_setup.py AGENT_TOOL_NAME: 1–24 characters, lowercase, the first a letter)
+export const AGENT_TOOL_NAME_RE = /^[a-z][a-z0-9_-]*$/;
+
+export type AddToolResult = { ok: true; tools: string[] } | { ok: false; reason: 'invalid' | 'duplicate' | 'max' };
+
+/** The extra names of one agent row, with one more name added: short lowercase, no repeat, the runtime's own name not again,
+ *  at most AGENT_TOOLS_MAX in all (the runtime counts as one). */
+export function addAgentTool(tools: readonly string[], runtime: DesktopRuntime, raw: string): AddToolResult {
+  const name = raw.trim().toLowerCase();
+  if (!AGENT_TOOL_NAME_RE.test(name) || name.length > AGENT_TOOL_NAME_MAX) return { ok: false, reason: 'invalid' };
+  if (name === runtime || tools.includes(name)) return { ok: false, reason: 'duplicate' };
+  if (tools.length + 1 >= AGENT_TOOLS_MAX) return { ok: false, reason: 'max' };
+  return { ok: true, tools: [...tools, name] };
+}
+
+/** Whether the server will check this name's sign-in (the runtime's own, or one of the judged names). */
+export function hasSignInCheck(name: string, runtime: DesktopRuntime): boolean {
+  return name === runtime || (JUDGED_AGENT_TOOLS as readonly string[]).includes(name);
+}
+
+/** story 4653: `tools` is sent only when the person added names — the runtime's own sign-in is checked either way. */
+function extraTools(r: SetupRoleRow): { tools?: string[] } {
+  return r.tools && r.tools.length > 0 ? { tools: agentToolNames(r.owner.kind === 'agent' || r.owner.kind === 'existing' ? r.owner.runtime : 'claude', r.tools) } : {};
+}
+
+/** The tool names sent for an agent row: its runtime first, then the names the person added (never repeated). */
+export function agentToolNames(runtime: DesktopRuntime, extra: readonly string[] = []): string[] {
+  return [runtime, ...extra.filter((x) => x !== runtime)];
 }
 
 /** 확인 요청(4424 confirm) — 에이전트가 맡는 역할마다 {role, runtime}(역할 하나 = 에이전트 하나), «나»를 고른 either 줄은
@@ -211,9 +297,9 @@ export function confirmBody(code: string, rows: readonly SetupRoleRow[], project
     code,
     project_id: projectId,
     recipe_id: recipeId,
-    roles: rows.flatMap<ConfirmBody['roles'][number]>((r) => (r.owner.kind === 'agent' ? [{ role: r.role, runtime: r.owner.runtime }]
+    roles: rows.flatMap<ConfirmBody['roles'][number]>((r) => (r.owner.kind === 'agent' ? [{ role: r.role, runtime: r.owner.runtime, ...extraTools(r) }]
       // story #4565: an existing agent moved to this computer — its id; the server checks it is this org's and takes its runtime
-      : r.owner.kind === 'existing' ? [{ role: r.role, agent_id: r.owner.agentId }]
+      : r.owner.kind === 'existing' ? [{ role: r.role, agent_id: r.owner.agentId, ...extraTools(r) }]
         : r.actor === 'either' ? [{ role: r.role, owner: 'me' as const }] : [])),
     workdir_hint: workdirHint.trim(),
   };
@@ -259,6 +345,7 @@ export function setupFragment(q: SetupQuery): string {
   if (q.blocked.length) p.set('blocked', q.blocked.join(','));
   if (q.old?.length) p.set('old', q.old.map((o) => `${o.runtime}:${o.version}:${o.min}`).join(','));
   if (q.canMove) p.set('caps', 'move');
+  if (q.agent) p.set('agent', q.agent);
   return `#${p.toString().replace(/%2C/g, ',')}`;
 }
 
@@ -340,6 +427,8 @@ export interface SetupStatus {
     /** story 4452 — 셸이 시작하지 못한 에이전트마다 마지막 보고(이유 · 데몬 code · 상한 · 기다린 첫 에이전트). 그 뒤 연결되거나
      *  다시 시작되면 BE가 뺀다. 없으면 아무것도 안 바뀐다. */
     agents_start_failed?: AgentStartFailure[];
+    /** story 4658 — the agents whose sign-in question is open now (cleared when the question is over: the agent moved on, or its session ended); runtime is claude · codex or null. Absent = none. */
+    agents_sign_in?: { member_id: string; at: string; runtime: DesktopRuntime | null }[];
   };
 }
 
@@ -417,6 +506,8 @@ export interface SetupProgress {
    * 그 뒤 첫 결과가 없는 에이전트만 · 없으면 null. `claude` = Claude Code가 섞임(다시 켜면 믿기를 다시 물을 수 있다는 둘째 문장).
    */
   stopped: { roles: string[]; claude: boolean } | null;
+  /** story 4658 — the runtimes (claude · codex) of the agents asking for a sign-in now. null = none. */
+  signIn: { runtimes: DesktopRuntime[] } | null;
   /**
    * story 4433 (Yuna v29 · PO 15:59Z): a step spins only while something moves. ① gets the still ring when every agent not
    * connected yet is stopped; ② when the agent to receive the first task is stopped (③ as before: any stopped agent). A step
@@ -504,6 +595,7 @@ export function setupProgress(s: SetupStatus, now: number, handedOverSeenAt: num
     expired: s.state === 'not_handed_over',
     disconnected: s.state === 'disconnected',
     stopped,
+    signIn: signInOf(s),
     readyPaused: !(ready === 'done' || handed === 'done') && agentIds.some((id) => !connected.has(id))
       && agentIds.filter((id) => !connected.has(id)).every((id) => stoppedMembers.has(id) || failedIds.has(id)),
     handedPaused: handed === 'running' && !!agents[0] && (stoppedMembers.has(agents[0].member_id) || failedIds.has(agents[0].member_id)),
@@ -584,6 +676,14 @@ export function moveProgress(s: SetupStatus, now: number, handedOverSeenAt: numb
     expired: s.state === 'not_handed_over',
     disconnected: s.state === 'disconnected',
   };
+}
+
+/** story 4658: who asks for a sign-in now, by runtime (claude · codex) — the band names the command of each runtime. null = none. */
+function signInOf(s: SetupStatus): SetupProgress['signIn'] {
+  const asking = s.signals.agents_sign_in ?? [];
+  if (asking.length === 0) return null;
+  const runtimes = [...new Set(asking.map((a) => a.runtime).filter((r): r is DesktopRuntime => r === 'claude' || r === 'codex'))];
+  return { runtimes };
 }
 
 /** story 4452 — the failures in the flow's order (one per agent), with the role names the copy needs (the agent it waited on). */

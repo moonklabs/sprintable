@@ -55,6 +55,7 @@ async def create_project(
     await check_project_create_allowed(session, org_id)
     project = await create_project_with_member(
         session, org_id=org_id, name=body.name, description=body.description, slug=body.slug, user_id=auth.user_id,
+        workdir_hint=body.workdir_hint,  # [SID:4681]: text only — stored and shown, never opened as a path here
     )
 
     await session.commit()

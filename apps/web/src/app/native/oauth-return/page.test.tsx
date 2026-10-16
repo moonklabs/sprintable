@@ -81,4 +81,40 @@ describe('NativeOauthReturnPage — custom scheme 버튼 (P1 후속)', () => {
     const anchor = container.querySelector('a');
     expect(anchor?.getAttribute('href')).toBe('ai.sprintable:/oauth-return?code=abc123&state=xyz');
   });
+
+  // story 4696 — the dev web's return button for a sign-in that named no app goes to the dev setup app's scheme; the production web is as before
+  it('[4696] dev web: no app → ai.sprintable.dev:/oauth-return?code=… · an off-table app → the same · the production web → ai.sprintable', async () => {
+    try {
+      vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://dev-app.sprintable.ai');
+      h.searchParams = new URLSearchParams('code=abc123');
+      await mountAndWait();
+      expect(container.querySelector('a')?.getAttribute('href')).toBe('ai.sprintable.dev:/oauth-return?code=abc123');
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+      vi.resetModules();
+      h.searchParams = new URLSearchParams('code=abc123&app=javascript:alert(1)');
+      await mountAndWait();
+      expect(container.querySelector('a')?.getAttribute('href')).toBe('ai.sprintable.dev:/oauth-return?code=abc123');
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+      vi.resetModules();
+      vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://app.sprintable.ai');
+      h.searchParams = new URLSearchParams('code=abc123');
+      await mountAndWait();
+      expect(container.querySelector('a')?.getAttribute('href')).toBe('ai.sprintable:/oauth-return?code=abc123');
+    } finally { vi.unstubAllEnvs(); }
+  });
+
+  // story #4626 — the sign-in came from the check app: its own scheme · still a tap, never automatic
+  it('[4626] app=check → ai.sprintable.check:/oauth-return?code=… (app not handed on) · an off-table app → the default link', async () => {
+    h.searchParams = new URLSearchParams('code=abc123&app=check');
+    await mountAndWait();
+    expect(container.querySelector('a')?.getAttribute('href')).toBe('ai.sprintable.check:/oauth-return?code=abc123');
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    vi.resetModules();
+    h.searchParams = new URLSearchParams('code=abc123&app=javascript:alert(1)');
+    await mountAndWait();
+    expect(container.querySelector('a')?.getAttribute('href')).toBe('ai.sprintable:/oauth-return?code=abc123');
+  });
 });

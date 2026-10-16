@@ -1,7 +1,7 @@
 'use client';
 
 import { VerifyPromptCopyFailedPanel } from '@/app/onboarding/verify-prompt-copy-failed-panel';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { memberOptionLabels } from '@/lib/member-display';
@@ -25,11 +25,35 @@ import { RUNTIME_CAPABILITIES_FALLBACK, RUNTIME_GUIDE_FILENAME_FALLBACK, KIT_FIL
 import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
+import { desktopApp, subscribeDesktopApp, pickFolderTrace, type SprintableDesktop, type DesktopRuntimeFound } from '@/lib/desktop-app';
+import { FolderTraceCard } from '@/components/desktop/folder-trace-card';
+import { useFolderTraces } from '@/components/desktop/use-folder-traces';
+import { appSetupLink } from '@/lib/auth/native-return-app';
+import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
 import { copyTextSafely } from '@/lib/clipboard';
 import { buildCodexConfigToml } from '@/lib/codex-mcp-config';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { AgentLimitBanner } from '@/components/agents/agent-limit-banner';
+import { agentLimitOf, type AgentLimit } from '@/lib/agent-limit';
 
 // ─── 상수/헬퍼 ──────────────────────────────────────────────────────────────
+
+/** story 4680 (PO 5065 ①): how the recruit's end screen offers «start on this computer» — only for a runtime the desktop app runs
+ * (`desktop_runtime` set: claude-code · codex): inside the app the bridge's hand (`app`), in a browser the app link (`link`); any
+ * other runtime (cursor · gemini · connector …) → null = the screen exactly as before (the app could not even choose that agent). */
+export function startHereMode(inApp: boolean, chosen: Pick<RuntimeCapabilityItem, 'desktop_runtime'> | undefined): 'app' | 'link' | null {
+  if (!chosen?.desktop_runtime) return null;
+  return inApp ? 'app' : 'link';
+}
+
+/** story 4680 (D2): the app's «found on this computer» list matched to the server's capabilities by `desktop_runtime` (the one table,
+ * agent_runtime.DESKTOP_RUNTIME_TYPES) — in the app's order; a found runtime the server has no capability for is left out. */
+export function foundRuntimes(found: readonly DesktopRuntimeFound[], caps: readonly RuntimeCapabilityItem[]): { found: DesktopRuntimeFound; cap: RuntimeCapabilityItem }[] {
+  return found.flatMap((f) => {
+    const cap = caps.find((c) => c.desktop_runtime === f.runtime);
+    return cap ? [{ found: f, cap }] : [];
+  });
+}
 
 // story d82c1092(생성경로 단일화): 5-step(직무›스코프›실행환경›번들›검증). equip-skip(역할 없이)
 // 경로는 3(직무·스코프·완료)만 쓰고 STEP3을 "결과" 화면으로 재사용한다(runtime 스텝 스킵).
@@ -402,6 +426,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   const [equipRole, setEquipRole] = useState<'member' | 'admin'>('member');
   const [equipCreating, setEquipCreating] = useState(false);
   const [equipError, setEquipError] = useState<string | null>(null);
+  const [equipLimit, setEquipLimit] = useState<AgentLimit | null>(null); // story 4680: POST /api/agents said «the plan's agent limit» (402) — its own banner, not «다시 시도»
   const [equipResult, setEquipResult] = useState<{
     name: string;
     mcp_config: McpConfigBundle | null;
@@ -421,6 +446,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     if (scopeMode === 'projects' && scopeProjectIds.length === 0) return;
     setEquipCreating(true);
     setEquipError(null);
+    setEquipLimit(null);
     setEquipRuntimeSaveWarning(false);
     try {
       const res = await fetch('/api/agents', {
@@ -461,7 +487,11 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
       } else {
         // story #2485 — backend create_org_agent()는 generic HTTP상태 코드만 낸다
         // (진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
-        setEquipError(t('recruitFailed'));
+        // story 4680 (Yuna §N): the plan's agent limit (402 · resource agent) → its banner (what was typed stays); every other failure keeps the fixed line
+        const failBody: unknown = await res.json().catch(() => null);
+        const limitHit = agentLimitOf(res.status, failBody);
+        if (limitHit) setEquipLimit(limitHit);
+        else setEquipError(t('recruitFailed'));
       }
     } catch {
       setEquipError(t('recruitFailed'));
@@ -525,12 +555,31 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     [supportedRuntimes],
   );
 
+  // story 4680 (UX-1 · D2): inside the desktop app the page reads its bridge (D1 · lib/desktop-app.ts) — the runtimes the app
+  // found on this computer; in a browser there is none and the picker is as it was. story 4691: the app's list can arrive AFTER the
+  // page loaded (detection takes seconds) — `subscribeDesktopApp` re-reads it when the app says it changed (an older app: no-op).
+  const bridge = useSyncExternalStore<SprintableDesktop | undefined>(subscribeDesktopApp, desktopApp, () => undefined);
+  const foundHere = useMemo(
+    () => foundRuntimes(bridge?.runtimes ?? [], supportedRuntimes),
+    [bridge, supportedRuntimes],
+  );
+  const foundSlugs = useMemo(() => new Set(foundHere.map((f) => f.cap.slug)), [foundHere]);
+  // the default is the first the app found (bridge order · PO Q-d) — once, when the list is known; a person's pick after that stands
+  const foundDefaultApplied = useRef(false);
+  // story 4691: a runtime a PERSON clicked stands — a list that arrives later never replaces it with the found default
+  const runtimePickedByPerson = useRef(false);
+  const chooseRuntime = useCallback((slug: string) => { runtimePickedByPerson.current = true; setRuntime(slug); }, []);
+
   // 로드된 목록에 현재 선택값이 없으면(예: 기본값 'claude-code'가 이 org enviro서 미지원) 첫 지원
   // 런타임으로 보정 — recruit() 400 방지.
   useEffect(() => {
+    if (!foundDefaultApplied.current && foundHere.length) {
+      foundDefaultApplied.current = true;
+      if (!runtimePickedByPerson.current && foundHere[0]!.cap.slug !== runtime) { setRuntime(foundHere[0]!.cap.slug); return; }
+    }
     const next = pickDefaultRuntime(supportedRuntimes, runtime);
     if (next !== runtime) setRuntime(next);
-  }, [supportedRuntimes, runtime]);
+  }, [supportedRuntimes, runtime, foundHere]);
 
   // story 0dfa1d79: generic connector 슬롯은 named 9런타임 승격 後 "커스텀/미지원 런타임용 BYO
   // escape hatch"로 재정의 — BE display_name("Connector")을 그대로 안 쓰고 명확한 라벨로 오버라이드.
@@ -539,10 +588,8 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
 
   // story 5ea9bafe: STEP4 오리엔팅 헤더·전달 카피·STEP5 intro에서 공용으로 쓰는 현재 선택 런타임의
   // 표시명(못 찾으면 slug 그대로 — 로딩 중 등 방어).
-  const currentRuntimeDisplayName = (() => {
-    const rc = runtimeCapabilities?.find((r) => r.slug === runtime);
-    return rc ? runtimeDisplayName(rc) : runtime;
-  })();
+  const currentCapability = runtimeCapabilities?.find((r) => r.slug === runtime);
+  const currentRuntimeDisplayName = currentCapability ? runtimeDisplayName(currentCapability) : runtime;
 
   // story #2433(B) — equip-skip("역할 없이(키만)")도 STEP3(실행환경) 자체가 스킵돼 런타임을
   // 고를 길이 없었다(equip-skip은 STEP2 이후 바로 생성). Full 경로 STEP3의 런타임 그리드를
@@ -565,16 +612,59 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
         </div>
       ) : (
         <>
+          {/* story 4680 (D2 · Yuna G-1): inside the app, what it found on this computer comes first and is the default; nothing found →
+              the list as before with one line and the way to install (the app's setup ① card) */}
+          {bridge && foundHere.length > 0 ? (
+            <div className="space-y-1" data-testid="recruiter-found-here">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {t('foundHereTitle')}<span className="ml-1 normal-case tracking-normal" data-testid="recruiter-found-here-device">· {bridge.device.name}</span>
+              </p>
+              <div className="grid grid-cols-3 gap-2">
+                {foundHere.map(({ found, cap }, i) => {
+                  const sel = runtime === cap.slug;
+                  return (
+                    <Button
+                      key={cap.slug}
+                      type="button"
+                      variant="outline"
+                      onClick={() => chooseRuntime(cap.slug)}
+                      aria-label={t('foundHereCardAria', { n: i + 1, label: runtimeDisplayName(cap) })}
+                      aria-pressed={sel}
+                      data-testid={`recruiter-found-${found.runtime}`}
+                      className={cn(
+                        'relative h-auto min-w-0 flex-col items-start gap-1 whitespace-normal rounded-xl p-2.5 text-left',
+                        sel ? 'border-primary/60 ring-1 ring-primary/40' : 'hover:border-primary/30',
+                      )}
+                    >
+                      {sel && <Check className="absolute right-2 top-2 h-3.5 w-3.5 text-primary" aria-hidden />}
+                      <span className="text-xs font-bold text-foreground">{runtimeDisplayName(cap)}</span>
+                      <span className="text-[10px] text-muted-foreground">{t('foundHereVersion', { version: found.version })}</span>
+                      <span className="w-full truncate font-mono text-[10px] text-muted-foreground" title={found.executable}>{found.executable}</span>
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+          {bridge && foundHere.length === 0 ? (
+            <p className="flex items-start gap-1.5 text-xs text-muted-foreground" data-testid="recruiter-found-none">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span>
+                {t('foundHereNone')}{' '}
+                <a href={appSetupLink(null)} className="font-medium text-primary hover:underline" data-testid="recruiter-found-install">{t('foundHereInstall')}</a>
+              </span>
+            </p>
+          ) : null}
           <div className="space-y-1">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeSupportedLabel')}</p>
             <div className="grid grid-cols-3 gap-2">
-              {displayedSupportedRuntimes.map((rc) => {
+              {displayedSupportedRuntimes.filter((rc) => !foundSlugs.has(rc.slug)).map((rc) => {
                 const sel = runtime === rc.slug;
                 return (
                   <button
                     key={rc.slug}
                     type="button"
-                    onClick={() => setRuntime(rc.slug)}
+                    onClick={() => chooseRuntime(rc.slug)}
                     className={cn(
                       'relative flex flex-col items-start gap-1 rounded-xl border p-2.5 text-left transition-colors',
                       sel ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border hover:border-primary/30',
@@ -643,6 +733,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   const [existingKeyRotateWarning, setExistingKeyRotateWarning] = useState<{ agentId: string; agentName: string } | null>(null);
   const [recruiting, setRecruiting] = useState(false);
   const [recruitError, setRecruitError] = useState<string | null>(null);
+  const [recruitLimit, setRecruitLimit] = useState<AgentLimit | null>(null); // story 4680: the same in the full recruit road
   const [activeAgentName, setActiveAgentName] = useState('');
 
   useEffect(() => {
@@ -666,6 +757,23 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
       }
     })();
   }, [existingAgents, projectId]);
+
+  // story 4693 (UX-1 · D4): inside the app, what the project's folder on this computer says — a CLAUDE.md / AGENTS.md in it (the app looks at two
+  // names, never at a file's content) and which of this project's agents already work in it. Asked once the project's agents are known (the
+  // answer is the intersection with them). A browser · an older app · no folder kept → null, and the page is exactly as it was.
+  const folderSays = useFolderTraces(bridge?.folderTraces, { projectId }, existingAgents ? existingAgents.map((a) => a.id) : null);
+  // the file is picked among the runtimes the app found AND this organization supports (foundHere, bridge order) — a first match this org cannot hire falls through to the next file
+  const folderTrace = folderSays ? pickFolderTrace(folderSays.traces, foundHere.map((f) => f.found)) : undefined;
+  const folderTraceCap = folderTrace ? foundHere.find((f) => f.found.runtime === folderTrace.runtime)?.cap : undefined;
+  const folderAgents = folderSays ? folderSays.agents.flatMap((id) => { const a = existingAgents?.find((x) => x.id === id); return a ? [a] : []; }) : [];
+  // [이 폴더의 에이전트로 채용]: the «역할 없이(키만)» way, at its second step, with that file's runtime already chosen — no role to pick
+  const recruitFromFolder = () => {
+    if (!folderTraceCap) return;
+    chooseRuntime(folderTraceCap.slug);
+    setEquipSkip(true);
+    setSelectedRoleSlug(null);
+    setStep(2);
+  };
 
   // STEP 3 — bundle result
   const [recruitResult, setRecruitResult] = useState<RecruitResponse | null>(null);
@@ -691,6 +799,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     if (!selectedRoleSlug) return;
     setRecruiting(true);
     setRecruitError(null);
+    setRecruitLimit(null);
     try {
       let agentId: string;
       let agentName: string;
@@ -715,6 +824,9 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
           }),
         });
         const createJson = (await createRes.json().catch(() => null)) as { data?: { id: string } } | null;
+        // story 4680 (Yuna §N): the plan's agent limit (402 · resource agent) → its banner (the finally below frees the button); anything else as before
+        const limitHit = createRes.ok ? null : agentLimitOf(createRes.status, createJson);
+        if (limitHit) { setRecruitLimit(limitHit); return; }
         if (!createRes.ok || !createJson?.data?.id) throw new Error(t('recruitFailed'));
         agentId = createJson.data.id;
         agentName = name;
@@ -855,6 +967,22 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     }
   };
 
+  // story 4680 (D2): [이 컴퓨터에서 시작] inside the app — the bridge opens the app's setup page with this agent chosen (its `agent=`
+  // fragment · the setup's 4565 way). `ok` → what to press next; any closed code ('ignored' · 'no_setup' · 'bad_request' — D1) →
+  // one line, the app's own way back. Counted with the desktop signal the onboarding uses (3983 funnel · flow recruit).
+  const [startHere, setStartHere] = useState<{ kind: 'idle' | 'busy' | 'ok' | 'failed'; code?: string }>({ kind: 'idle' });
+  const handleStartHere = async () => {
+    if (!bridge || !recruiterAgentId || startHere.kind === 'busy') return;
+    setStartHere({ kind: 'busy' });
+    emitOnboardingEvent('desktop_handoff_selected', { agent_id: recruiterAgentId, flow: 'recruit' });
+    try {
+      const r = await bridge.startHere({ agentId: recruiterAgentId });
+      if (r.ok) { leftRef.current = true; setStartHere({ kind: 'ok' }); } else setStartHere({ kind: 'failed', code: r.code });
+    } catch {
+      setStartHere({ kind: 'failed' });
+    }
+  };
+
   // story #4180 — Codex는 TOML(`.codex/config.toml`), 그 외 런타임은 기존 JSON(`.mcp.json`)
   // 그대로. BE mcp_config 값 자체는 무변경 — 이 화면의 재직렬화(포맷)만 runtime으로 가른다.
   const mcpConfigFilename = resolveMcpConfigFilename(runtime);
@@ -903,6 +1031,15 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
           {/* ── STEP 1 : 직무 선택 ── */}
           {step === 1 && (
             <div className="space-y-3">
+              {bridge && (folderAgents.length > 0 || folderTraceCap) ? (
+                <FolderTraceCard
+                  trace={folderTraceCap ? folderTrace : undefined}
+                  runtimeName={folderTraceCap ? runtimeDisplayName(folderTraceCap) : ''}
+                  agents={folderAgents}
+                  onRecruit={recruitFromFolder}
+                  onStart={(agentId) => bridge.startHere({ agentId })}
+                />
+              ) : null}
               <p className="text-sm font-semibold text-foreground">{t('roleQuestion')}</p>
 
               {roleError ? (
@@ -1110,7 +1247,8 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                       길이 없었다(equip-skip은 STEP2 이후 바로 생성). 키만 받는 사람도 런타임은
                       골라야 하므로 여기서도 노출한다(Full 경로 STEP3과 동일 렌더러 공유). */}
                   {renderRuntimePicker()}
-                  {equipError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-xs text-destructive">{equipError}</p>}
+                  {equipLimit ? <AgentLimitBanner limit={equipLimit.limit} free={equipLimit.free} />
+                    : equipError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-xs text-destructive">{equipError}</p>}
                 </div>
               ) : null}
 
@@ -1192,7 +1330,8 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 </div>
               </div>
 
-              {recruitError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">{recruitError}</p>}
+              {recruitLimit ? <AgentLimitBanner limit={recruitLimit.limit} free={recruitLimit.free} />
+                : recruitError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">{recruitError}</p>}
 
               {/* story #2667 ⓒ — 기존 에이전트가 이미 가진 활성 키(equip-skip 등으로 발급됐을
                   수 있는)를 recruit이 rotate하기 前에 명시 고지. handleRecruit()이 실측 후 이
@@ -1639,10 +1778,39 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 {t('executionBoundaryNote')}
               </p>
 
+              {/* story 4680 (D2 · 4677 · Yuna G-2): the agent starts on this computer — inside the app one hand (the bridge opens the
+                  setup page with this agent chosen · 4565 way), from a browser the app link with `?agent=` (+ the download card for a
+                  computer with no app). Only for a runtime the app runs (PO 5065 ①: startHereMode) — then the one hero on this
+                  screen and [완료] is glass; otherwise the screen is as it was. */}
+              {startHereMode(Boolean(bridge), currentCapability) ? (
+              <div className="space-y-2 border-t border-border pt-3" data-testid="recruiter-start-here">
+                {bridge ? (
+                  <Button variant="hero" onClick={() => void handleStartHere()} disabled={startHere.kind === 'busy'} data-testid="recruiter-start-here-button">
+                    {t('startHere')}
+                  </Button>
+                ) : (
+                  <Button variant="hero" asChild data-testid="recruiter-start-here-link">
+                    <a href={appSetupLink(null, undefined, { agent: recruitResult.agent_id })}>{t('startHere')}</a>
+                  </Button>
+                )}
+                {startHere.kind === 'ok' ? (
+                  <p role="status" aria-live="polite" className="text-xs text-foreground" data-testid="recruiter-start-here-opened">{t('startHereOpened')}</p>
+                ) : null}
+                {startHere.kind === 'failed' ? (
+                  <p role="alert" aria-live="assertive" className="text-xs text-foreground" data-testid="recruiter-start-here-failed">{t('startHereFailed')}</p>
+                ) : null}
+                {/* 4435: the switch is the app's own (its menu) — the page only says where (PO Q-a: a page never turns it on) */}
+                <p className="break-keep text-xs text-muted-foreground" data-testid="recruiter-own-mcp-note">{t('ownMcpNote')}</p>
+                {/* Yuna 5065: the shared card's [다운로드] under this hero is outline — one primary on the screen */}
+                {!bridge ? <DesktopDownloadCard ctaVariant="outline" /> : null}
+              </div>
+              ) : null}
+
               <div className="flex justify-between gap-2 pt-2">
                 <Button variant="ghost" onClick={() => setStep(4)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
-                {/* story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. story #4017 — 목적지 모듈. */}
-                <Link href={chatsHref} onClick={handleFinish}><Button variant={verified ? 'hero' : 'glass'}>{t('finish')}</Button></Link>
+                {/* story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. story #4017 — 목적지 모듈. story 4680: glass while [이 컴퓨터에서
+                    시작] is the hero; the old rule (hero once verified) otherwise */}
+                <Link href={chatsHref} onClick={handleFinish}><Button variant={startHereMode(Boolean(bridge), currentCapability) ? 'glass' : verified ? 'hero' : 'glass'}>{t('finish')}</Button></Link>
               </div>
             </div>
           )}

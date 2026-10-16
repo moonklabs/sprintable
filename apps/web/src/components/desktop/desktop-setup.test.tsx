@@ -13,8 +13,13 @@ const { ctx, sp } = vi.hoisted(() => ({ ctx: vi.fn(), sp: { value: null as URLSe
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ctx() }));
 // the query the router reports (the dashboard shell adds ?p= with a router replace)
 vi.mock('next/navigation', async (orig) => ({ ...(await orig<typeof import('next/navigation')>()), useSearchParams: () => sp.value }));
+// story 4670: the end card draws the phone app's QR block (PhoneAppGet) when the app can be got — a published Android store by default;
+// one test turns it off (no store · no opt-in page in this environment) for the §E ③f shape
+const { phonePub } = vi.hoisted(() => ({ phonePub: { android: true, ios: false } }));
+vi.mock('@/lib/phone-app-store', async (orig) => ({ ...(await orig<typeof import('@/lib/phone-app-store')>()), PHONE_APP_PUBLISHED: phonePub }));
 
-import { DesktopSetup, DesktopSetupEntry, OpenInDesktopApp, SETUP_APP_LINK, SETUP_REOPEN_LINK, ToolsNotConnected, failureForCode, inviteUntilDate } from './desktop-setup';
+import { ATTACHABLE_READ_LIMIT_MS, DesktopSetup, DesktopSetupEntry, Failure, OpenInDesktopApp, SETUP_APP_LINK, SETUP_REOPEN_LINK, ToolsNotConnected, failureForCode, inviteUntilDate } from './desktop-setup';
+import { pickEulReulJosa, pickEunNeunJosa } from '@/lib/korean-particle';
 import { DesktopSetupDocWatch } from './desktop-setup-doc-watch';
 import { SetupProgressView } from './desktop-setup-progress';
 import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
@@ -33,23 +38,29 @@ const RECIPES: { id: string; key: string; name: string; description?: string; ro
 
 let container: HTMLDivElement;
 let root: Root;
-let calls: { url: string; body?: unknown }[];
+let calls: { url: string; method?: string; body?: unknown }[];
 /** What GET /api/desktop/recipes answers now (tests change it: empty · failing · a list). */
 let recipesNow: () => Response = () => new Response(JSON.stringify({ recipes: RECIPES }), { status: 200 });
 /** story #4565 — what GET /api/desktop/setup/agents answers now (none by default: the page as before). */
 let agentsNow: () => Response = () => new Response('{}', { status: 404 });
 /** What GET /api/desktop/setups/{id} answers now (the progress tests change it between polls). */
 let statusNow: () => unknown = () => ({});
+/** story 4670 — GET /api/organizations/{id}/remote-control (default 404: not known → no «폰에서도 다루기» row) and the PUT that switches it on. */
+const REMOTE_OFF_OWNER = { enabled: false, can_change: true, enabled_at: null };
+let remoteGet: () => Response = () => new Response('{}', { status: 404 });
+let remotePut: () => Response = () => new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'now' } }), { status: 200 });
+const remoteGetOf = (v: object) => () => new Response(JSON.stringify({ data: v }), { status: 200 });
 
 function stub(confirm: () => Response | Promise<Response>) {
   calls = [];
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    calls.push({ url, ...(init?.method ? { method: init.method } : {}), body: init?.body ? JSON.parse(String(init.body)) : undefined });
     if (url.endsWith('/api/desktop/recipes')) return recipesNow();
     if (url.includes('/api/desktop/setup/agents')) return agentsNow();
     if (url.includes('/api/desktop/setup-codes/')) return confirm();
     if (url.includes('/api/desktop/setups/')) return new Response(JSON.stringify(statusNow()), { status: 200 });
+    if (/\/api\/organizations\/[^/]+\/remote-control$/.test(url)) return init?.method === 'PUT' ? remotePut() : remoteGet();
     return new Response('{}', { status: 404 });
   }));
 }
@@ -76,7 +87,7 @@ const openRecipes = async () => {
   if (b) await act(async () => { b.click(); });
 };
 
-beforeEach(() => { agentsNow = () => new Response('{}', { status: 404 }); recipesNow = () => new Response(JSON.stringify({ recipes: RECIPES }), { status: 200 }); container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
+beforeEach(() => { remoteGet = () => new Response('{}', { status: 404 }); remotePut = () => new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'now' } }), { status: 200 }); agentsNow = () => new Response('{}', { status: 404 }); recipesNow = () => new Response(JSON.stringify({ recipes: RECIPES }), { status: 200 }); container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); sessionStorage.clear(); });
 const events = () => calls.filter((c) => c.url.endsWith('/api/onboarding/events')).map((c) => c.body as { event: string; session_id: string });
 
@@ -139,7 +150,9 @@ describe('[SID:4427] desktop setup page', () => {
     await act(async () => { startButton().click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     expect(text()).toContain('설정 시간이 지났어요');
-    expect((container.querySelector(`a[href="${SETUP_APP_LINK}"]`) as HTMLAnchorElement).textContent).toBe('앱에서 다시 시작');
+    // story 4669 (Yuna A-5): the expired card's button names what it does — a new code (the disconnected card keeps «앱에서 다시 시작»)
+    expect(text()).toContain('새 코드로 다시 열면 처음부터 골라요');
+    expect((container.querySelector(`a[href="${SETUP_APP_LINK}"]`) as HTMLAnchorElement).textContent).toBe('새 코드로 다시');
     await act(async () => { root.unmount(); }); root = createRoot(container);
 
     stub(() => { throw new TypeError('fetch failed'); });
@@ -383,6 +396,51 @@ describe('[SID:4427] desktop setup page', () => {
     expect(SETUP_REOPEN_LINK).toBe('ai.sprintable:/desktop/setup?intent=reopen');
     expect(container.querySelector(`a[href="${SETUP_APP_LINK}"]`)).toBeNull();
   });
+
+  // story 4696 — on the DEV web a page reached without `app` (a plain browser tab) opens the dev setup app's own scheme; the prod web keeps ai.sprintable
+  it('[4696] dev web: no `app` → the buttons open ai.sprintable.dev: · `app=check` keeps its own · the production web keeps the default', async () => {
+    stub(() => new Response('{}'));
+    const hrefs = () => [...container.querySelectorAll('a')].map((a) => a.getAttribute('href'));
+    try {
+      vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://dev-app.sprintable.ai');
+      sp.value = null;
+      await mount(<OpenInDesktopApp />);
+      expect(hrefs()).toEqual(['ai.sprintable.dev:/desktop/setup?intent=reopen']);
+      await mount(<Failure failure="expired" />);
+      expect(hrefs()).toContain('ai.sprintable.dev:/desktop/setup');
+      expect(hrefs()).not.toContain('ai.sprintable:/desktop/setup');
+      sp.value = new URLSearchParams({ app: 'evil' });
+      await mount(<OpenInDesktopApp />);
+      expect(hrefs()).toEqual(['ai.sprintable.dev:/desktop/setup?intent=reopen']);
+      sp.value = new URLSearchParams('app=check');
+      await mount(<OpenInDesktopApp />);
+      expect(hrefs()).toEqual(['ai.sprintable.check:/desktop/setup?intent=reopen']);
+      vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://app.sprintable.ai');
+      sp.value = null;
+      await mount(<OpenInDesktopApp />);
+      expect(hrefs()).toEqual(['ai.sprintable:/desktop/setup?intent=reopen']);
+    } finally { sp.value = null; vi.unstubAllEnvs(); }
+  });
+
+  // story #4626 — the page the check app opened (`?app=check`) sends its buttons back to the check app; a typed address
+  // (no `app`) or a value off the closed table keeps the default links byte for byte
+  it('[4626] ?app=check → the buttons open ai.sprintable.check: · off the table → the default links', async () => {
+    stub(() => new Response('{}'));
+    const hrefs = () => [...container.querySelectorAll('a')].map((a) => a.getAttribute('href'));
+    try {
+      sp.value = new URLSearchParams('app=check');
+      await mount(<OpenInDesktopApp />);
+      expect(hrefs()).toEqual(['ai.sprintable.check:/desktop/setup?intent=reopen']);
+      await mount(<Failure failure="expired" />);
+      expect(hrefs()).toContain('ai.sprintable.check:/desktop/setup');
+      expect(hrefs()).not.toContain(SETUP_APP_LINK);
+      for (const off of ['evil', 'CHECK', 'ai.sprintable.check', '']) {
+        sp.value = new URLSearchParams({ app: off });
+        await mount(<OpenInDesktopApp />);
+        expect(hrefs(), off).toEqual([SETUP_REOPEN_LINK]);
+      }
+    } finally { sp.value = null; }
+  });
 });
 
 describe('[SID:4565] existing agents moved to this computer', () => {
@@ -420,12 +478,166 @@ describe('[SID:4565] existing agents moved to this computer', () => {
     expect([...selectOf('작성').querySelectorAll('optgroup')].map((g) => g.label)).toEqual(['새로 만들기', '이미 있는 에이전트', '사람']); // either row
     const mini = optionText(research, `agent:${MINI}`)!;
     expect([mini.disabled, mini.textContent]).toEqual([true, '미니 · Codex가 이 컴퓨터에 없어요']);
-    // PO 04:37Z: not in the project yet — turned off, and what to do first
-    const out = optionText(research, `agent:${OUT}`)!;
-    expect([out.disabled, out.textContent]).toEqual([true, '바깥 · 이 프로젝트에 아직 없어요 — 먼저 프로젝트에 추가해 주세요']);
+    // story 4678 (PO 04:37Z → P1′-a): not on the team yet is not an option here (a disabled line cannot hold [프로젝트 팀에 넣기]) — it is
+    // in the list under the rows with its button (desktop-setup.4678.test)
+    expect(optionText(research, `agent:${OUT}`)).toBeUndefined();
     await choose('조사', `agent:${DAN}`);
     const elsewhere = optionText(selectOf('작성'), `agent:${DAN}`)!;
     expect([elsewhere.disabled, elsewhere.textContent]).toEqual([true, '댄 어윈 · 다른 역할에 골랐어요']);
+  });
+
+  // ── story 4678 (P1′-a · Yuna §J): [프로젝트 팀에 넣기] on an agent the organization has that this project's team does not ──
+  const OUT2 = 'a1111111-0000-4000-8000-000000000005';
+  const ZED = 'a1111111-0000-4000-8000-000000000006'; // Codex, off the team — and Codex is not on this computer
+  const outsider = (id: string, name: string, runtime = 'claude') => ({ id, name, runtime, live_keys: 0, last_used_at: null, in_project: false });
+  let onTeam = new Set<string>();
+  /** the agents list as the server tells it: whoever was put on the team reads `in_project: true` from then on */
+  const agentsWith = (extra: object[] = []) => () => new Response(JSON.stringify({
+    agents: [...AGENTS, ...extra].map((a) => ('id' in a && onTeam.has(String(a.id)) ? { ...a, in_project: true } : a)),
+  }), { status: 200 });
+  /** `post(n, memberId)` answers the n-th POST /api/projects/{id}/access (a throw = a dropped connection) */
+  function stubGrant(post: (n: number, memberId: string) => Response | Promise<Response>) {
+    onTeam = new Set();
+    stub(() => new Response('{}', { status: 200 }));
+    const base = globalThis.fetch as unknown as (i: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+    let n = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/projects/') && url.endsWith('/access')) {
+        const body = JSON.parse(String(init?.body));
+        calls.push({ url, method: init?.method, body });
+        const res = await post(++n, body.member_id);
+        if (res.ok || res.status === 409) onTeam.add(body.member_id);
+        return res;
+      }
+      return base(input, init);
+    }));
+  }
+  const putButtons = () => [...container.querySelectorAll('[data-testid=setup-put-on-team]')] as HTMLButtonElement[];
+  const press = async (b: HTMLButtonElement) => { await act(async () => { b.click(); }); for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); }); };
+  const posts = () => calls.filter((c) => c.url.includes('/api/projects/') && c.url.endsWith('/access'));
+  const doneLine = () => container.querySelector('[data-testid=setup-put-on-team-done]') as HTMLElement;
+  const failedLine = () => container.querySelector('[data-testid=setup-put-on-team-failed]') as HTMLElement | null;
+
+  it('[SID:4678] not on the team → no option in the select; a line in a folded list with [프로젝트 팀에 넣기] · a runtime this computer lacks gets no button', async () => {
+    stubGrant(() => new Response('{}', { status: 201 }));
+    agentsNow = agentsWith([outsider(ZED, '제드', 'codex')]);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(optionText(selectOf('조사'), `agent:${OUT}`)).toBeUndefined(); // reverted (a disabled option again) → defined
+    const group = container.querySelector('[data-testid=setup-not-on-team]') as HTMLDetailsElement;
+    expect(group.open).toBe(false);
+    expect(group.querySelector('summary')!.textContent).toBe('프로젝트 팀에 없는 에이전트 1개');
+    expect(group.textContent).not.toContain('제드');
+    const [b] = putButtons();
+    expect(putButtons()).toHaveLength(1);
+    expect([b.textContent, b.getAttribute('aria-label')]).toEqual(['프로젝트 팀에 넣기', '프로젝트 팀에 넣기 · 바깥']);
+    expect(group.querySelector('[data-testid=setup-not-on-team-row]')!.textContent).toContain('바깥 · 이 프로젝트 팀에 아직 없어요');
+    expect(doneLine().textContent).toBe('');
+  });
+
+  it('[SID:4678] [프로젝트 팀에 넣기] → one POST {member_id}, the list read again, the agent is an option (not picked), one line says so, focus goes to the role select, the code is not touched', async () => {
+    stubGrant(() => new Response('{}', { status: 201 }));
+    agentsNow = agentsWith();
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    const count = (m: (u: string) => boolean) => calls.filter((c) => m(c.url)).length;
+    const recipesBefore = count((u) => u.endsWith('/api/desktop/recipes'));
+    const agentsBefore = count((u) => u.includes('/api/desktop/setup/agents'));
+    await press(putButtons()[0]);
+    expect(posts()).toHaveLength(1);
+    expect(posts()[0]).toMatchObject({ method: 'POST', body: { member_id: OUT, org_member_id: null, permission: 'granted' } });
+    expect(posts()[0].url).toContain('/api/projects/p-1/access');
+    expect(count((u) => u.includes('/api/desktop/setup/agents'))).toBe(agentsBefore + 1); // the server is the truth
+    expect(count((u) => u.endsWith('/api/desktop/recipes'))).toBe(recipesBefore); // the recipe is not read again
+    expect(count((u) => u.includes('/api/desktop/setup-codes/'))).toBe(0); // the code is not touched
+    const opt = optionText(selectOf('조사'), `agent:${OUT}`)!;
+    expect([opt.disabled, opt.textContent]).toEqual([false, '바깥']);
+    expect(selectOf('조사').value).toBe('claude'); // not picked for them
+    expect(container.querySelector('[data-testid=setup-not-on-team]')).toBeNull(); // the list is empty → gone
+    expect(doneLine().textContent).toBe('바깥 · 팀에 넣었어요 — 위 역할 칸에서 고를 수 있어요');
+    expect(doneLine().getAttribute('role')).toBe('status');
+    expect(document.activeElement).toBe(selectOf('조사')); // not the page (the pressed button is gone)
+  });
+
+  it('[SID:4678] another line left → focus goes to that line\'s button, never the page', async () => {
+    stubGrant(() => new Response('{}', { status: 201 }));
+    agentsNow = agentsWith([outsider(OUT2, '바깥 둘')]);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(container.querySelector('summary')!.textContent).toBe('프로젝트 팀에 없는 에이전트 2개');
+    await press(putButtons()[0]);
+    expect(putButtons()).toHaveLength(1);
+    expect((document.activeElement as HTMLElement).dataset.putOnTeam).toBe(OUT2); // reverted (focus not moved) → body
+    expect(container.querySelector('summary')!.textContent).toBe('프로젝트 팀에 없는 에이전트 1개');
+  });
+
+  it('[SID:4678] 409 (already on the team — another tab did it) is done, not a failure', async () => {
+    stubGrant(() => new Response('{}', { status: 409 }));
+    agentsNow = agentsWith();
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    await press(putButtons()[0]);
+    expect(failedLine()).toBeNull();
+    expect(doneLine().textContent).toBe('바깥 · 팀에 넣었어요 — 위 역할 칸에서 고를 수 있어요'); // reverted (409 = failure) → the alert
+    expect(optionText(selectOf('조사'), `agent:${OUT}`)!.disabled).toBe(false);
+  });
+
+  it('[SID:4678] a 500 or a dropped connection: the line stays with «팀에 넣지 못했어요 — 다시 눌러 주세요» under it, the button works again, the third press goes through', async () => {
+    stubGrant((n) => {
+      if (n === 1) return new Response('{}', { status: 500 });
+      if (n === 2) throw new Error('offline');
+      return new Response('{}', { status: 201 });
+    });
+    agentsNow = agentsWith();
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    for (const _ of [1, 2]) {
+      await press(putButtons()[0]);
+      expect(failedLine()!.textContent).toBe('팀에 넣지 못했어요 — 다시 눌러 주세요');
+      expect(failedLine()!.getAttribute('role')).toBe('alert');
+      expect(putButtons()).toHaveLength(1); // the line stays
+      expect(putButtons()[0].getAttribute('aria-disabled')).toBeNull();
+      expect(document.activeElement).toBe(putButtons()[0]);
+      expect(optionText(selectOf('조사'), `agent:${OUT}`)).toBeUndefined();
+    }
+    await press(putButtons()[0]);
+    expect(posts()).toHaveLength(3);
+    expect(failedLine()).toBeNull();
+    expect(optionText(selectOf('조사'), `agent:${OUT}`)!.disabled).toBe(false);
+  });
+
+  it('[SID:4678] while it works the button reads «넣는 중…», ignores a second press and keeps focus', async () => {
+    let release!: (r: Response) => void;
+    const pending = new Promise<Response>((r) => { release = r; });
+    stubGrant((n) => (n === 1 ? pending : new Response('{}', { status: 201 })));
+    agentsNow = agentsWith();
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    const [b] = putButtons();
+    b.focus();
+    await act(async () => { b.click(); });
+    expect([b.textContent, b.getAttribute('aria-disabled'), b.getAttribute('aria-label')]).toEqual(['넣는 중…', 'true', null]);
+    await act(async () => { b.click(); });
+    expect(posts()).toHaveLength(1); // reverted (no guard) → 2
+    expect(document.activeElement).toBe(b);
+    await act(async () => { release(new Response('{}', { status: 201 })); });
+    for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); });
+    expect(doneLine().textContent).toContain('팀에 넣었어요');
+  });
+
+  // PO 4678: the recruiter's agent (4680 preselect) that was not on the team lands on the first agent row once it is put on the team —
+  // if nobody touched a row yet; «자동 선택 안 함» is for every other agent
+  it('[SID:4678 × 4680] the recruiter\'s agent was not on the team: put on the team → it lands on the first agent row · a person who already picked keeps their pick', async () => {
+    stubGrant(() => new Response('{}', { status: 201 }));
+    agentsNow = agentsWith();
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={OUT} />);
+    expect(selectOf('조사').value).toBe('claude'); // not on the team: nothing to land on yet
+    await press(putButtons()[0]);
+    expect(selectOf('조사').value).toBe(`agent:${OUT}`);
+    expect(selectOf('작성').value).not.toBe(`agent:${OUT}`);
+
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    stubGrant(() => new Response('{}', { status: 201 }));
+    agentsNow = agentsWith();
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={OUT} />);
+    await choose('조사', 'codex'); // a person's pick first
+    await press(putButtons()[0]);
+    expect(selectOf('조사').value).toBe('codex'); // reverted (the preselect lands anyway) → the recruiter's agent
   });
 
   it('a moved agent with a live key: what the move does, when it was last seen · the start line counts new and moved apart · the body sends its id', async () => {
@@ -442,11 +654,392 @@ describe('[SID:4565] existing agents moved to this computer', () => {
     expect([...row.querySelectorAll('p')][0].textContent).toBe('에이전트 1개를 새로 만들고 1개를 이 컴퓨터로 옮겨 첫 일감을 맡겨요 · 연출은 내가 맡아요');
     await choose('작성', `agent:${MINI}`);
     expect([...row.querySelectorAll('p')][0].textContent).toBe('에이전트 2개를 이 컴퓨터로 옮겨 첫 일감을 맡겨요 · 연출은 내가 맡아요');
-    expect(container.querySelectorAll('[data-testid=setup-moved-note]')).toHaveLength(2); // MINI: a live key, no last-used line
+    // story 4680 (Yuna G-4): MINI's keys were never used — no live connection to cut, so no line under it (DAN's stays)
+    expect(container.querySelectorAll('[data-testid=setup-moved-note]')).toHaveLength(1);
     await act(async () => { startButton().click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     const post = calls.find((c) => c.url.includes('/api/desktop/setup-codes/confirm'))!;
     expect((post.body as { roles: unknown[] }).roles).toEqual([{ role: '조사', agent_id: DAN }, { role: '작성', agent_id: MINI }]);
+  });
+
+  // story 4680 (D2): the recruiter's [이 컴퓨터에서 시작] puts `agent=` in the address — that agent takes the first agent row
+  it('[SID:4680] preselect: the first agent row starts with that agent · not in the project → nothing chosen · the body sends its id', async () => {
+    stub(() => new Response(JSON.stringify({ data: { work_item_id: 'w-1' } }), { status: 200 }));
+    agentsNow = () => new Response(JSON.stringify({ agents: AGENTS }), { status: 200 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+    expect(selectOf('조사').value).toBe(`agent:${DAN}`); // reverted (no preselect) → 'claude'
+    expect(selectOf('작성').value).not.toBe(`agent:${DAN}`); // the first agent row only
+    await act(async () => { startButton().click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    const post = calls.find((c) => c.url.includes('/api/desktop/setup-codes/confirm'))!;
+    expect((post.body as { roles: { role: string; agent_id?: string }[] }).roles[0]).toEqual({ role: '조사', agent_id: DAN });
+    await act(async () => { root.unmount(); }); root = createRoot(container); calls.length = 0;
+
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={OUT} />);
+    expect(selectOf('조사').value).toBe('claude'); // not on the team: never chosen (4565 · PO 04:37Z)
+  });
+
+  // PO 5065 ②: the preselect is spent the first time it lands — a person's later choice stands when the rows are built again
+  // (another recipe · the list read again). Reverted (applied on every rebuild) → the recruiter's agent comes back and this fails.
+  it('[SID:4680] preselect once: chosen another agent, then another recipe → the row is not pulled back to the recruiter\'s agent', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = () => new Response(JSON.stringify({ agents: AGENTS }), { status: 200 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+    expect(selectOf('조사').value).toBe(`agent:${DAN}`);
+    await choose('조사', 'claude');
+    expect(selectOf('조사').value).toBe('claude');
+    await openRecipes();
+    const other = [...container.querySelectorAll('input[name=recipe]')].find((i) => (i as HTMLInputElement).value === 'rec-2') as HTMLInputElement;
+    await act(async () => { other.click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect((container.querySelector('input[name=recipe]:checked') as HTMLInputElement).value).toBe('rec-2');
+    expect(selectOf('조사').value).toBe('claude'); // the spent preselect does not come back
+  });
+
+  // PO 6e245cf40 (나): the list may arrive AFTER the person already set a row (a slow read) — their choice stands; the preselect
+  // is spent by the person's hand, not only by landing. Reverted (spent only when it lands) → the late list writes DAN over 'codex'.
+  it('[SID:4680] preselect pending (list not here yet) · a person sets the row · the list arrives → the row keeps the person\'s choice', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    let release!: (r: Response) => void;
+    const late = new Promise<Response>((r) => { release = r; });
+    agentsNow = (() => late) as unknown as () => Response;
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+    expect(selectOf('조사').value).toBe('claude'); // the recipe's default — the preselect has nothing to land on yet
+    await choose('조사', 'codex');
+    await act(async () => { release(new Response(JSON.stringify({ agents: AGENTS }), { status: 200 })); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(optionText(selectOf('조사'), `agent:${DAN}`)).toBeTruthy(); // the late list did arrive
+    expect(selectOf('조사').value).toBe('codex');
+  });
+
+  // Kadir 5065 (codex round 2): the agent list may arrive BEFORE the recipes — then there is no row yet; the preselect must not
+  // be spent on nothing, and the recipe's first rows (built by pick() from the mount render's closure) must see the list that
+  // has arrived. Reverted (spent on «would land» · pick reads the closure's []) → the row stays 'claude' and the group is missing.
+  it('[SID:4680] agents first, recipes later → the recruiter\'s agent still takes the first agent row (and the existing group is there)', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = () => new Response(JSON.stringify({ agents: AGENTS }), { status: 200 });
+    let release!: (r: Response) => void;
+    const late = new Promise<Response>((r) => { release = r; });
+    recipesNow = (() => late) as unknown as () => Response;
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+    expect(container.querySelector('select')).toBeNull(); // no recipe yet, no rows
+    await act(async () => { release(new Response(JSON.stringify({ recipes: RECIPES }), { status: 200 })); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(optionText(selectOf('조사'), `agent:${DAN}`)).toBeTruthy(); // the existing group, from the list that arrived first
+    expect(selectOf('조사').value).toBe(`agent:${DAN}`);
+    expect(selectOf('작성').value).not.toBe(`agent:${DAN}`);
+  });
+
+  // story 4701 (walk: «profile no» 2 of 7): with the recruiter's agent in the address, «시작» pressed BEFORE the agents list arrived sent
+  // «새로 만들기» rows — a new Creator · Publisher — and the recruited agent was on no setup. Now «시작» waits for the list.
+  // Reverted (`attachableHold` out of `canStart`) → the button is on while the list is late and the press posts a confirm with no agent_id.
+  it('[SID:4701] preselect + list late: «시작» is off with the reading line (a press posts nothing) · the list arrives → on, and the body sends the recruiter\'s agent', async () => {
+    stub(() => new Response(JSON.stringify({ data: { work_item_id: 'w-1' } }), { status: 200 }));
+    let release!: (r: Response) => void;
+    const late = new Promise<Response>((r) => { release = r; });
+    agentsNow = (() => late) as unknown as () => Response;
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+    expect(container.querySelector('select')).not.toBeNull(); // the recipe's rows are here — only the list is not
+    expect(startButton().disabled).toBe(true);
+    expect(container.querySelector('[data-testid=setup-attachable-reading]')?.textContent).toBe('이미 있는 에이전트 목록을 불러오고 있어요');
+    expect(container.querySelector('[data-testid=setup-attachable-reading]')?.getAttribute('role')).toBe('status'); // Yuna 4701-copy §1
+    expect(container.querySelector('[data-testid=setup-attachable-retry]')).toBeNull();
+    await act(async () => { startButton().click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(calls.some((c) => c.url.includes('/api/desktop/setup-codes/confirm'))).toBe(false);
+
+    await act(async () => { release(new Response(JSON.stringify({ agents: AGENTS }), { status: 200 })); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid=setup-attachable-reading]')).toBeNull();
+    expect(startButton().disabled).toBe(false);
+    expect(selectOf('조사').value).toBe(`agent:${DAN}`);
+    await act(async () => { startButton().click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    const post = calls.find((c) => c.url.includes('/api/desktop/setup-codes/confirm'))!;
+    expect((post.body as { roles: { role: string; agent_id?: string }[] }).roles[0]).toEqual({ role: '조사', agent_id: DAN });
+  });
+
+  // The read failing (a refusal · the network) never falls quietly to «새로 만들기»: «시작» stays off, the line says so, [다시 불러오기]
+  // reads again — and what it reads lands the recruiter's agent. Reverted (a failed read counts as «done») → «시작» is on after the failure.
+  it('[SID:4701] preselect + the list read fails → «시작» stays off · [다시 불러오기] reads again (the page is not reloaded) · then the agent lands', async () => {
+    stub(() => new Response(JSON.stringify({ data: { work_item_id: 'w-1' } }), { status: 200 }));
+    for (const failing of [() => new Response('{}', { status: 500 }), () => { throw new Error('offline'); }]) {
+      agentsNow = failing as unknown as () => Response;
+      await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+      expect(startButton().disabled).toBe(true);
+      expect(container.querySelector('[data-testid=setup-attachable-failed]')?.textContent).toBe('이미 있는 에이전트 목록을 불러오지 못했어요');
+      expect(container.querySelector('[data-testid=setup-attachable-failed]')?.getAttribute('role')).toBe('alert'); // Yuna 4701-copy §2
+      const retry = container.querySelector('[data-testid=setup-attachable-retry]') as HTMLButtonElement;
+      expect(retry.textContent).toBe('목록 다시 불러오기');
+      expect(retry.previousElementSibling).toBe(container.querySelector('[data-testid=setup-attachable-failed]')); // directly below the line
+      const reads = () => calls.filter((c) => c.url.includes('/api/desktop/setup/agents')).length;
+      const before = reads();
+      agentsNow = () => new Response(JSON.stringify({ agents: AGENTS }), { status: 200 });
+      await act(async () => { retry.click(); });
+      for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+      expect(reads()).toBe(before + 1);
+      expect(container.querySelector('[data-testid=setup-attachable-retry]')).toBeNull();
+      expect(startButton().disabled).toBe(false);
+      expect(selectOf('조사').value).toBe(`agent:${DAN}`);
+      await act(async () => { root.unmount(); }); root = createRoot(container); calls.length = 0;
+    }
+  });
+
+  // Yuna 4701-copy §2 (the press): the line goes back to «reading», the button STAYS with aria-disabled and ignores presses (keyboard focus
+  // stays on it — not `disabled`); the list arriving takes it away and focus goes to «시작»; failing again leaves focus on the button.
+  // Reverted (`disabled` instead of aria-disabled · no focus move) → the focus checks fail.
+  it('[SID:4701] [목록 다시 불러오기]: reading again keeps the button (aria-disabled · presses ignored · focus kept) · arrives → focus on «시작» · fails again → focus stays', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = () => new Response('{}', { status: 500 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+    const reads = () => calls.filter((c) => c.url.includes('/api/desktop/setup/agents')).length;
+    let retry = container.querySelector('[data-testid=setup-attachable-retry]') as HTMLButtonElement;
+    expect(retry.getAttribute('aria-disabled')).toBeNull();
+    retry.focus();
+    let release!: (r: Response) => void;
+    agentsNow = (() => new Promise<Response>((r) => { release = r; })) as unknown as () => Response;
+    const before = reads();
+    await act(async () => { retry.click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(reads()).toBe(before + 1);
+    retry = container.querySelector('[data-testid=setup-attachable-retry]') as HTMLButtonElement; // still here
+    expect(retry.getAttribute('aria-disabled')).toBe('true');
+    expect(retry.disabled).toBe(false);
+    expect(document.activeElement).toBe(retry);
+    expect(container.querySelector('[data-testid=setup-attachable-reading]')).not.toBeNull();
+    await act(async () => { retry.click(); });                                   // a press while it reads is ignored
+    expect(reads()).toBe(before + 1);
+
+    await act(async () => { release(new Response('{}', { status: 500 })); });    // fails again → the failure line · the button · focus kept
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid=setup-attachable-failed]')).not.toBeNull();
+    expect(document.activeElement).toBe(container.querySelector('[data-testid=setup-attachable-retry]'));
+
+    agentsNow = (() => new Promise<Response>((r) => { release = r; })) as unknown as () => Response;
+    await act(async () => { (container.querySelector('[data-testid=setup-attachable-retry]') as HTMLButtonElement).click(); });
+    await act(async () => { release(new Response(JSON.stringify({ agents: AGENTS }), { status: 200 })); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid=setup-attachable-retry]')).toBeNull();
+    expect(startButton().disabled).toBe(false);
+    expect(document.activeElement).toBe(startButton());
+  });
+
+  // Yuna 4701-copy §3: a read that never answers is a silent failure — after the limit the page says «failed» (button reads again); an answer
+  // that comes later still lands. Reverted (no limit) → the reading line goes on for ever.
+  it('[SID:4701] a read that never answers → after the limit the failure line and the button (the limit is not a wall-clock wait here: faked timers)', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      let release!: (r: Response) => void;
+      agentsNow = (() => new Promise<Response>((r) => { release = r; })) as unknown as () => Response;
+      await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+      expect(container.querySelector('[data-testid=setup-attachable-reading]')).not.toBeNull();
+      await act(async () => { vi.advanceTimersByTime(ATTACHABLE_READ_LIMIT_MS - 1); });
+      expect(container.querySelector('[data-testid=setup-attachable-reading]')).not.toBeNull(); // not yet
+      await act(async () => { vi.advanceTimersByTime(1); });
+      expect(container.querySelector('[data-testid=setup-attachable-reading]')).toBeNull();
+      expect(container.querySelector('[data-testid=setup-attachable-failed]')).not.toBeNull();
+      expect(container.querySelector('[data-testid=setup-attachable-retry]')).not.toBeNull();
+      expect(startButton().disabled).toBe(true);
+      await act(async () => { release(new Response(JSON.stringify({ agents: AGENTS }), { status: 200 })); }); // a late answer still lands
+      for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+      expect(container.querySelector('[data-testid=setup-attachable-failed]')).toBeNull();
+      expect(startButton().disabled).toBe(false);
+      expect(selectOf('조사').value).toBe(`agent:${DAN}`);
+    } finally { vi.useRealTimers(); }
+  });
+
+  // The road with no `agent=` (the first setup · a recipe) and the roads with no read to wait for are as they were: a late or failing list
+  // never holds «시작» (the group is left out; «새로 만들기» works) — AC2. Reverted (the hold applied without a preselect) → «시작» is off here.
+  it('[SID:4701] no preselect: a late or failing list does not hold «시작» · a preselect for a non-admin (no read) does not either', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = (() => new Promise<Response>(() => undefined)) as unknown as () => Response; // never arrives
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
+    expect(startButton().disabled).toBe(false);
+    expect(container.querySelector('[data-testid=setup-attachable-reading]')).toBeNull();
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+
+    agentsNow = () => new Response('{}', { status: 500 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
+    expect(startButton().disabled).toBe(false);
+    expect(container.querySelector('[data-testid=setup-attachable-retry]')).toBeNull();
+    await act(async () => { root.unmount(); }); root = createRoot(container); calls.length = 0;
+
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />, 'member');
+    expect(calls.some((c) => c.url.includes('/api/desktop/setup/agents'))).toBe(false); // not an admin: the list is not asked for
+    expect(container.querySelector('[data-testid=setup-attachable-reading]')).toBeNull(); // …so nothing waits for it
+    expect(container.querySelector('[data-testid=setup-attachable-retry]')).toBeNull();
+  });
+
+  // ── story 4703 (Yuna 4703-copy-1015): the recruiter's agent (`agent=`) cannot take a row although the list is here ────────────────────
+  // Before: it landed on no row and «시작» went on to the recipe's NEW agents without a word. Now «시작» is off, one line says why — from the
+  // list and the found runtimes — and the person chooses (the way that keeps the agent first; «새로 만들기로 바꾸기» last).
+  const FOREIGN = 'b2222222-0000-4000-8000-000000000001'; // another organization's agent: never in this organization's list
+  const NOBODY = 'b2222222-0000-4000-8000-000000000002'; // an id that exists nowhere
+  const holdBox = () => container.querySelector('[data-testid=setup-preselect-hold]') as HTMLElement | null;
+  const reasonLine = () => container.querySelector('[data-testid=setup-preselect-reason]') as HTMLElement | null;
+  const holdLabels = () => [...(holdBox()?.querySelectorAll('button, a') ?? [])].map((b) => (b.textContent ?? '').trim());
+  const settle = async () => { for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); }); };
+  const pressEl = async (el: Element) => { await act(async () => { (el as HTMLElement).click(); }); await settle(); };
+  const confirmCalls = () => calls.filter((c) => c.url.includes('/api/desktop/setup-codes/confirm'));
+  const listOf = (agents: object[]) => () => new Response(JSON.stringify({ agents }), { status: 200 });
+
+  it('[SID:4703] ① the id is not in the list → «시작» off · the one line (no name · no id) · one button · pressing «시작» posts nothing · «새로 만들기로 바꾸기» → the count line, «시작» on and focused, and the body has NO agent_id', async () => {
+    stub(() => new Response(JSON.stringify({ data: { work_item_id: 'w-1' } }), { status: 200 }));
+    agentsNow = listOf(AGENTS);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={FOREIGN} />);
+    expect(startButton().disabled).toBe(true); // reverted (no `preselectHold` in canStart) → on, and a press creates new agents
+    expect(reasonLine()?.textContent).toBe('고른 에이전트는 이 컴퓨터에서 시작할 수 없어요');
+    expect(reasonLine()?.getAttribute('role')).toBe('status');
+    expect(reasonLine()?.getAttribute('data-reason')).toBe('unlisted');
+    expect(holdLabels()).toEqual(['새로 만들기로 바꾸기']);
+    for (const a of AGENTS) expect(holdBox()!.textContent).not.toContain(a.name); // no name of anyone
+    expect(holdBox()!.innerHTML).not.toContain(FOREIGN); // and not the id that was asked
+    await act(async () => { startButton().click(); }); await settle();
+    expect(confirmCalls()).toHaveLength(0);
+
+    await pressEl(container.querySelector('[data-testid=setup-preselect-use-new]')!);
+    expect(holdBox()).toBeNull();
+    expect(text()).toContain('에이전트'); // the count line came back
+    expect(startButton().disabled).toBe(false);
+    expect(document.activeElement).toBe(startButton()); // Yuna: focus moves to «시작»
+    await pressEl(startButton());
+    const roles = (confirmCalls()[0]!.body as { roles: { agent_id?: string }[] }).roles;
+    expect(roles.every((r) => r.agent_id === undefined)).toBe(true); // a person chose «새로 만들기» — only now
+  });
+
+  it('[SID:4703] ③ another organization\'s agent and an id nobody has → the SAME page (same DOM · same text · no call that carries the id)', async () => {
+    const seen: Record<string, { html: string; start: boolean; calls: string[] }> = {};
+    for (const [name, id] of [['foreign', FOREIGN], ['nobody', NOBODY]] as const) {
+      stub(() => new Response('{}', { status: 200 }));
+      agentsNow = listOf(AGENTS);
+      await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={id} />);
+      seen[name] = { html: holdBox()!.outerHTML, start: startButton().disabled, calls: calls.map((c) => `${c.method ?? 'GET'} ${c.url.replace(id, '<id>')}`) };
+      expect(calls.some((c) => c.url.includes(id) || JSON.stringify(c.body ?? '').includes(id))).toBe(false); // the id is never sent anywhere
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+    }
+    expect(seen.foreign).toEqual(seen.nobody);
+  });
+
+  it('[SID:4703] an agent with no desktop runtime or one that is inactive is not in the list either → the same ① (nothing tells «exists» from «does not»)', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = listOf(AGENTS); // the server leaves them out of the list — the page cannot tell them from an id nobody has
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={'b2222222-0000-4000-8000-0000000000ff'} />);
+    expect(reasonLine()?.getAttribute('data-reason')).toBe('unlisted');
+    expect(reasonLine()?.textContent).toBe('고른 에이전트는 이 컴퓨터에서 시작할 수 없어요');
+  });
+
+  it('[SID:4703] ② outside the project → the line names it · [프로젝트 팀에 넣기] then [새로 만들기로 바꾸기] · putting it on the team lands it on the first agent row · focus «시작»', async () => {
+    let inProject = false;
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = () => new Response(JSON.stringify({ agents: AGENTS.map((a) => (a.id === OUT ? { ...a, in_project: inProject } : a)) }), { status: 200 });
+    const base = globalThis.fetch as unknown as (i: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/projects/') && url.endsWith('/access')) { calls.push({ url, method: init?.method, body: JSON.parse(String(init?.body)) }); inProject = true; return new Response('{}', { status: 201 }); }
+      return base(input, init);
+    }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={OUT} />);
+    expect(startButton().disabled).toBe(true);
+    expect(reasonLine()?.textContent).toBe('바깥 · 이 프로젝트 팀에 아직 없어요 — 팀에 넣으면 이 컴퓨터에서 시작할 수 있어요');
+    expect(holdLabels()).toEqual(['프로젝트 팀에 넣기', '새로 만들기로 바꾸기']); // the way that keeps the agent first
+    await pressEl(container.querySelector('[data-testid=setup-preselect-put]')!);
+    expect(calls.some((c) => c.url.includes('/access') && (c.body as { member_id: string }).member_id === OUT)).toBe(true);
+    expect(holdBox()).toBeNull();
+    expect(selectOf('조사').value).toBe(`agent:${OUT}`); // the recruiter's agent, on the first agent row (the preselect was not spent)
+    expect(startButton().disabled).toBe(false);
+    expect(document.activeElement).toBe(startButton());
+  });
+
+  it('[SID:4703] ② [프로젝트 팀에 넣기] fails → the failure line under it, focus stays on THAT button (not the list\'s), «시작» stays off', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = listOf(AGENTS);
+    const base = globalThis.fetch as unknown as (i: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/projects/') && url.endsWith('/access')) { calls.push({ url, method: init?.method }); return new Response('{}', { status: 500 }); }
+      return base(input, init);
+    }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={OUT} />);
+    await pressEl(container.querySelector('[data-testid=setup-preselect-put]')!);
+    expect(container.querySelector('[data-testid=setup-put-on-team-failed]')).not.toBeNull();
+    expect(document.activeElement).toBe(container.querySelector('[data-testid=setup-preselect-put]'));
+    expect(holdBox()).not.toBeNull();
+    expect(startButton().disabled).toBe(true);
+  });
+
+  it('[SID:4703] ③ its runtime is not on this computer → the line · the install row of THAT runtime · [다시 찾기] · [새로 만들기로 바꾸기] (no «프로젝트 팀에 넣기»)', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = listOf(AGENTS);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} preselect={MINI} />); // MINI = codex, in the project
+    expect(startButton().disabled).toBe(true);
+    expect(reasonLine()?.getAttribute('data-reason')).toBe('runtime_missing');
+    expect(reasonLine()?.textContent).toBe(`미니 · 이 컴퓨터에서 Codex${pickEulReulJosa('Codex')} 찾지 못했어요 — 설치하고 로그인한 뒤 다시 찾아 주세요`);
+    expect(container.querySelector('[data-testid=setup-preselect-install] code')?.textContent).toContain('codex'); // the codex install command
+    expect(container.querySelector('[data-testid=setup-preselect-install] code')?.textContent).not.toContain('claude.ai');
+    expect(holdLabels()).toEqual(['복사', '다시 찾기', '새로 만들기로 바꾸기']);
+    expect(container.querySelector('[data-testid=setup-preselect-look-again]')?.getAttribute('href')).toBe(SETUP_APP_LINK);
+  });
+
+  it('[SID:4703] ④ its runtime is blocked by the company → the blocked line (not blockedClaudeNote whole) · one button', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = listOf(AGENTS);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} blocked={['claude']} preselect={DAN} />);
+    expect(startButton().disabled).toBe(true);
+    expect(reasonLine()?.getAttribute('data-reason')).toBe('runtime_blocked');
+    expect(reasonLine()?.textContent).toBe(`댄 어윈 · Claude Code${pickEunNeunJosa('Claude Code')} 회사 설정 때문에 이 컴퓨터에서 Sprintable에 연결할 수 없어요`);
+    expect(reasonLine()?.textContent).not.toContain('Codex가 맡아요'); // the second half of blockedClaudeNote would be false here
+    expect(holdLabels()).toEqual(['새로 만들기로 바꾸기']);
+  });
+
+  it('[SID:4703] reasons together: one line — unlisted over blocked over missing over outside the project', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    // outside the project AND its runtime (codex) missing → the runtime line only
+    agentsNow = listOf([{ id: MINI, name: '미니', runtime: 'codex', live_keys: 0, last_used_at: null, in_project: false }]);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} preselect={MINI} />);
+    expect(container.querySelectorAll('[data-testid=setup-preselect-reason]')).toHaveLength(1);
+    expect(reasonLine()?.getAttribute('data-reason')).toBe('runtime_missing');
+    expect(container.querySelector('[data-testid=setup-preselect-put]')).toBeNull();
+  });
+
+  it('[SID:4703] the roads that do not change: it lands (no line) · no preselect · a row set by hand lets the line go', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = listOf(AGENTS);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+    expect(holdBox()).toBeNull();
+    expect(startButton().disabled).toBe(false);
+    expect(selectOf('조사').value).toBe(`agent:${DAN}`);
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = listOf(AGENTS);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
+    expect(holdBox()).toBeNull();
+    expect(startButton().disabled).toBe(false);
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = listOf(AGENTS);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={FOREIGN} />);
+    expect(holdBox()).not.toBeNull();
+    await choose('조사', 'codex'); // the person sets a row → the recruiter's agent is let go; the line no longer holds «시작»
+    expect(holdBox()).toBeNull();
+    expect(startButton().disabled).toBe(false);
+  });
+
+  // ── folded in from PR 5110's non-blocking list (PO 10-15 · Yuna 4703-copy §«Carried over») ─────────────────────────────────────────
+  it('[SID:4701→4703] the retry button looks busy while it re-reads (aria-disabled dims it, like [프로젝트 팀에 넣기]) · after the list arrives focus goes to «시작», or to the first agent row\'s select when «시작» is still off', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = () => new Response('{}', { status: 500 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={FOREIGN} />);
+    const retry = container.querySelector('[data-testid=setup-attachable-retry]') as HTMLButtonElement;
+    expect(retry.className).toContain('aria-disabled:pointer-events-none');
+    expect(retry.className).toContain('aria-disabled:opacity-50');
+    agentsNow = listOf(AGENTS); // the list now arrives — but the recruiter's agent is not in it, so «시작» is off for ①
+    await pressEl(retry);
+    expect(container.querySelector('[data-testid=setup-attachable-retry]')).toBeNull();
+    expect(startButton().disabled).toBe(true);
+    expect(document.activeElement).toBe(container.querySelector('section select')); // not the page: the first agent row's select
   });
 
   it('no live key → no line under it (nothing would be cut)', async () => {
@@ -1011,6 +1604,114 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     expect(polls()).toBe(n); // stops once the result is in
   });
 
+  // story 4670 (UX-1 · U2 · Yuna §E ③): once the setup is done, the end screen carries «폰에서도 다루려면» — the phone app's QR block and,
+  // for an owner/admin, [폰 페어링 열기] (the app's deep link `intent=pair`); a member reads where pairing is done; nothing before the end
+  it('[SID:4670] the end card «폰에서도 다루려면»: QR block · owner → [폰 페어링 열기] = ai.sprintable:/desktop/setup?intent=pair · member → the band line · not drawn before the setup is done', async () => {
+    statusNow = () => status('waiting_for_app');
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(container.querySelector('[data-testid=setup-phone-card]')).toBeNull();
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], first_result_at: 'y' });
+    await tick(2_000);
+    const card = container.querySelector('[data-testid=setup-phone-card]');
+    expect(card?.querySelector('h2')?.textContent).toBe('폰에서도 다루려면');
+    expect(card?.textContent).toContain('폰 카메라로 QR을 찍어 폰 앱을 받고, 그 다음 [폰 페어링 열기]로 이 컴퓨터와 페어링해요.');
+    expect(card?.querySelector('[data-testid=phone-app-get]')).not.toBeNull();
+    const pair = card?.querySelector('[data-testid=setup-phone-pair]');
+    expect(pair?.textContent).toBe('폰 페어링 열기');
+    expect(pair?.getAttribute('href')).toBe('ai.sprintable:/desktop/setup?intent=pair');
+    expect(card?.querySelector('[data-testid=setup-phone-member]')).toBeNull();
+    // the way out stays as it was, the card after it
+    expect([...(container.querySelector('[data-testid=setup-way-out]')?.querySelectorAll('a, button') ?? [])].map((b) => b.textContent)).toEqual(['결과 보기', '오늘로 가기']);
+    // a member: the QR block and the band line — no button
+    act(() => root.unmount()); root = createRoot(container);
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />, 'member');
+    await tick(0);
+    const member = container.querySelector('[data-testid=setup-phone-card]');
+    expect(member?.querySelector('[data-testid=setup-phone-pair]')).toBeNull();
+    expect(member?.querySelector('[data-testid=setup-phone-member]')?.textContent).toBe('페어링은 이 컴퓨터의 Sprintable 앱 띠 [폰 페어링]에서 해요.');
+    expect(member?.querySelector('[data-testid=phone-app-get]')).not.toBeNull();
+  });
+
+  // story 4670 (Yuna §E ②): the «폰에서도 다루기» tick was on but the switch did not turn on — one line at the progress head; the setup went on
+  it('[SID:4670] §E ② the head line «폰 다루기는 켜지 못했어요 — 끝나면 아래 카드에서 다시 켤 수 있어요.» only when the page says the switch failed', async () => {
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], first_result_at: 'y' });
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" phoneControlFailed />);
+    await tick(0);
+    expect(container.querySelector('[data-testid=setup-phone-control-failed]')?.textContent).toBe('폰 다루기는 켜지 못했어요 — 끝나면 아래 카드에서 다시 켤 수 있어요.');
+    act(() => root.unmount()); root = createRoot(container);
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(container.querySelector('[data-testid=setup-phone-control-failed]')).toBeNull();
+  });
+
+  // §E ③e: the card's own line for the org's off switch — an owner turns it on in place (the session's org · one PUT)
+  it('[SID:4670] §E ③e the card: org remote control off + can change → «원격 제어가 꺼져 있어요 — [켜기]»; [켜기] = one PUT (session org) and the line goes · a refusal says so, the line stays · on / not an owner → no line', async () => {
+    statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], first_result_at: 'y' });
+    remoteGet = remoteGetOf(REMOTE_OFF_OWNER);
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    const line = () => container.querySelector('[data-testid=setup-phone-remote-off]');
+    expect(line()?.textContent).toContain('원격 제어가 꺼져 있어요 —');
+    // a refusal: says so, the line stays
+    remotePut = () => new Response('{}', { status: 500 });
+    await act(async () => { (container.querySelector('[data-testid=setup-phone-remote-on]') as HTMLButtonElement).click(); });
+    await tick(0);
+    expect(container.querySelector('[data-testid=setup-phone-remote-failed]')?.textContent).toBe('켜지 못했어요 — 잠시 뒤 다시 눌러 주세요');
+    expect(line()).not.toBeNull();
+    // the press that works
+    remotePut = () => new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'now' } }), { status: 200 });
+    calls = [];
+    await act(async () => { (container.querySelector('[data-testid=setup-phone-remote-on]') as HTMLButtonElement).click(); });
+    await tick(0);
+    const puts = calls.filter((c) => c.method === 'PUT');
+    expect(puts.map((c) => c.url)).toEqual(['/api/organizations/o-1/remote-control']); // the session's org
+    expect(puts[0]!.body).toEqual({ enabled: true });
+    expect(line()).toBeNull();
+    expect(container.querySelector('[data-testid=setup-phone-pair]')).not.toBeNull(); // the pairing button was never hidden
+    // already on · cannot change · not read → no line at all
+    for (const v of [{ enabled: true, can_change: true, enabled_at: 'x' }, { enabled: false, can_change: false, enabled_at: null }] as const) {
+      act(() => root.unmount()); root = createRoot(container);
+      remoteGet = remoteGetOf(v);
+      stub(() => new Response('{}', { status: 200 }));
+      await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+      await tick(0);
+      expect(line()).toBeNull();
+    }
+    act(() => root.unmount()); root = createRoot(container);
+    remoteGet = () => new Response('{}', { status: 404 });
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+    await tick(0);
+    expect(line()).toBeNull();
+  });
+
+  // PO 5066 ① · Yuna §E ③f: no way to get the phone app here (nothing published · no opt-in page) → PhoneAppGet draws nothing, so the
+  // card must not speak of a QR: the owner's body becomes «폰 앱을 받아 두었다면 …» with the button, and a member gets no card at all
+  it('[SID:4670] no way to get the phone app → owner: «폰 앱을 받아 두었다면 [폰 페어링 열기]로 …», no QR block, the button · member: no card', async () => {
+    phonePub.android = false;
+    try {
+      statusNow = () => status('handed_over', { tools_connected: [{ member_id: 'm1', at: 'x' }, { member_id: 'm2', at: 'x' }], first_result_at: 'y' });
+      stub(() => new Response('{}', { status: 200 }));
+      await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />);
+      await tick(0);
+      const card = container.querySelector('[data-testid=setup-phone-card]');
+      expect(card?.getAttribute('data-app')).toBe('no');
+      expect(card?.textContent).toContain('폰 앱을 받아 두었다면 [폰 페어링 열기]로 이 컴퓨터와 페어링해요.');
+      expect(card?.textContent).not.toContain('QR');
+      expect(card?.querySelector('[data-testid=phone-app-get]')).toBeNull();
+      expect(card?.querySelector('[data-testid=setup-phone-pair]')?.getAttribute('href')).toBe('ai.sprintable:/desktop/setup?intent=pair');
+      act(() => root.unmount()); root = createRoot(container);
+      await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />, 'member');
+      await tick(0);
+      expect(container.querySelector('[data-testid=setup-phone-card]')).toBeNull();
+      expect(container.querySelector('[data-testid=setup-way-out]')).not.toBeNull(); // the way out is still there
+    } finally { phonePub.android = true; }
+  });
+
   it('[SID:4492] ②\'s line: «준비가 끝나면 … 건네요» while it waits · «… 건네는 중이에요» once it runs (ko · bare · en)', async () => {
     const handedLine = () => (container.querySelectorAll('ol > li[data-state]')[1]!.querySelector('span > span + span')?.textContent ?? '');
     statusNow = () => status('handed_over', { tools_connected: [] }); // ② waits
@@ -1192,7 +1893,8 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
     calls = [];
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      calls.push({ url, ...(init?.method ? { method: init.method } : {}), body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (/\/api\/organizations\/[^/]+\/remote-control$/.test(url)) return remotePut();
       if (url.endsWith('/api/invites/mine')) return invitesNow();
       if (url.endsWith('/api/auth/me')) return new Response(JSON.stringify({ data: { display_name: meName, ...meVerify } }), { status: 200 });
       if (url.endsWith('/api/desktop/recipes/for-new-org')) return recipesNow();
@@ -1305,11 +2007,47 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
       code: CODE, recipe_id: 'rec-1', roles: [{ role: '조사', runtime: 'claude' }, { role: '작성', runtime: 'claude' }],
       workdir_hint: '~/Sprintable/마케팅 루프', org_name: '김지우의 조직', project_name: '첫 프로젝트',
     });
+    // story 4670 (AC1): the «폰에서도 다루기» tick is on by default for the owner-to-be → after the confirmation and the new token, the one PUT
+    // for the org the server just made (`org_id` of the answer), then the progress
     expect(calls.filter((c) => !c.url.includes('/api/desktop/setups/')).map((c) => c.url)).toEqual([
-      '/api/desktop/setup-codes/confirm-new-org', '/api/auth/refresh', '/api/current-project', '/api/auth/refresh',
+      '/api/desktop/setup-codes/confirm-new-org', '/api/auth/refresh', '/api/current-project', '/api/auth/refresh', '/api/organizations/o-new/remote-control',
     ]);
+    expect(calls.find((c) => c.url === '/api/organizations/o-new/remote-control')).toMatchObject({ method: 'PUT', body: { enabled: true } });
     expect(calls.find((c) => c.url === '/api/current-project')!.body).toEqual({ project_id: 'p-new' });
     expect(container.textContent).not.toContain('새 조직 «'); // the progress view
+  });
+
+  it('[SID:4670] the new organization: the tick «폰으로도 에이전트 다루기» is on by default with its help line; unticked → no switch call at all', async () => {
+    stubNoOrg();
+    await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} setupId="s-1" />);
+    const row = container.querySelector('[data-testid=setup-phone-control]')!;
+    expect(row).not.toBeNull();
+    const box = row.querySelector('input[type=checkbox]') as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    expect(row.textContent).toContain('폰으로도 에이전트 다루기');
+    expect(row.textContent).toContain('원격 제어를 켜면 페어링된 폰에서 에이전트를 멈추고, 지시하고, 권한 요청에 답할 수 있어요. 이 조직 전체에 적용되고, 나중에 끌 수 있어요.');
+    // the row sits in the start row, above «시작»
+    expect(container.querySelector('[data-testid=setup-start-row]')!.contains(row)).toBe(true);
+    await act(async () => { box.click(); });
+    expect(box.checked).toBe(false);
+    calls = [];
+    await act(async () => { startButton().click(); });
+    await flush();
+    expect(urls()).toContain('/api/desktop/setup-codes/confirm-new-org');
+    expect(calls.some((c) => c.url.includes('/remote-control'))).toBe(false); // reverted (PUT whatever the tick says) → fails
+  });
+
+  it('[SID:4670] the new organization, the tick on, the switch refused: the setup still goes on to its progress (one PUT only · no retry loop)', async () => {
+    remotePut = () => new Response('{}', { status: 500 });
+    statusNow = () => status('waiting_for_app'); // a status that is still going — the progress card holds still (an empty status would read as expired)
+    stubNoOrg();
+    await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} setupId="s-1" />);
+    calls = [];
+    await act(async () => { startButton().click(); });
+    await flush();
+    expect(calls.filter((c) => c.url.includes('/remote-control'))).toHaveLength(1);
+    expect(text()).toContain('에이전트를 시작하고 있어요'); // the progress, not an error card
+    expect(container.querySelector('[data-testid=setup-phone-control]')).toBeNull(); // the form is gone
   });
 
   it('[바꾸기] opens both names (organization · first project) with «이름은 나중에 설정에서 바꿀 수 있어요.»; an empty name blocks «시작» with its reason; typed names are sent', async () => {
@@ -2162,5 +2900,111 @@ describe('[SID:4494] old= — the page says a runtime is too old, not missing', 
     window.history.replaceState(null, '', `/desktop/setup#code=${CODE}&setup=s-9&runtimes=&old=codex:0.153.4:0.156.1`);
     await mount(<DesktopSetupEntry />);
     expect(text()).toContain('이 컴퓨터의 Codex 버전(0.153.4)이 낮아 쓸 수 없어요');
+  });
+});
+
+describe('[SID:4670] «폰으로도 에이전트 다루기» — the tick above «시작» for the person who can switch the org\'s remote control', () => {
+  const confirmOk = () => new Response(JSON.stringify({ setup_id: SETUP_ID, members: [], work_item_id: 'w-1' }), { status: 200 });
+  const puts = () => calls.filter((c) => c.method === 'PUT' && /\/remote-control$/.test(c.url));
+  const row = () => container.querySelector('[data-testid=setup-phone-control]');
+  const flushAll = async () => { for (let i = 0; i < 10; i++) await act(async () => { await Promise.resolve(); }); };
+
+  it('owner · switch off → the row is there and ticked; «시작» = the confirmation first, then ONE PUT for this session\'s org with {enabled:true}', async () => {
+    remoteGet = remoteGetOf(REMOTE_OFF_OWNER);
+    stub(confirmOk);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} setupId={SETUP_ID} />);
+    expect((row()!.querySelector('input[type=checkbox]') as HTMLInputElement).checked).toBe(true);
+    calls = [];
+    await act(async () => { startButton().click(); });
+    await flushAll();
+    const order = calls.filter((c) => !c.url.includes('/api/desktop/setups/')).map((c) => `${c.method ?? 'GET'} ${c.url}`);
+    expect(order).toEqual(['POST /api/desktop/setup-codes/confirm', 'PUT /api/organizations/o-1/remote-control']);
+    expect(puts()[0]!.body).toEqual({ enabled: true });
+    expect(text()).toContain('에이전트를 시작하고 있어요');
+  });
+
+  it('unticked → «시작» sends the confirmation and NO switch call, by any road', async () => {
+    remoteGet = remoteGetOf(REMOTE_OFF_OWNER);
+    stub(confirmOk);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} setupId={SETUP_ID} />);
+    await act(async () => { (row()!.querySelector('input[type=checkbox]') as HTMLInputElement).click(); });
+    calls = [];
+    await act(async () => { startButton().click(); });
+    await flushAll();
+    expect(calls.some((c) => c.url === '/api/desktop/setup-codes/confirm')).toBe(true);
+    expect(puts()).toHaveLength(0);
+  });
+
+  it('the confirmation fails → no switch call (the PUT never rides ahead of it)', async () => {
+    remoteGet = remoteGetOf(REMOTE_OFF_OWNER);
+    stub(() => new Response(JSON.stringify({ error: { code: 'recipes_changed' } }), { status: 409 }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} setupId={SETUP_ID} />);
+    calls = [];
+    await act(async () => { startButton().click(); });
+    await flushAll();
+    expect(calls.some((c) => c.url === '/api/desktop/setup-codes/confirm')).toBe(true);
+    expect(puts()).toHaveLength(0);
+  });
+
+  it('no row — and no PUT — when the switch is already on · the person cannot change it (an admin)', async () => {
+    for (const get of [
+      remoteGetOf({ enabled: true, can_change: true, enabled_at: 'x' }),
+      remoteGetOf({ enabled: false, can_change: false, enabled_at: null }),
+    ]) {
+      remoteGet = get;
+      stub(confirmOk);
+      await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} setupId={SETUP_ID} />);
+      expect(row()).toBeNull();
+      calls = [];
+      await act(async () => { startButton().click(); });
+      await flushAll();
+      expect(puts()).toHaveLength(0);
+      act(() => root.unmount()); root = createRoot(container);
+    }
+  });
+
+  // Yuna §M: a read that FAILED is no longer «no row» — the box is drawn, unticked (never flip a value that could not be read to «on»)
+  it('the value could not be read (a final answer) → the box is drawn UNTICKED · «시작» sends no switch call · ticking it by hand sends the one PUT', async () => {
+    remoteGet = () => new Response('{}', { status: 404 });
+    stub(confirmOk);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} setupId={SETUP_ID} />);
+    expect((row()!.querySelector('input[type=checkbox]') as HTMLInputElement).checked).toBe(false);
+    calls = [];
+    await act(async () => { startButton().click(); });
+    await flushAll();
+    expect(puts()).toHaveLength(0);
+    act(() => root.unmount()); root = createRoot(container);
+    stub(confirmOk);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} setupId={SETUP_ID} />);
+    await act(async () => { (row()!.querySelector('input[type=checkbox]') as HTMLInputElement).click(); });
+    calls = [];
+    await act(async () => { startButton().click(); });
+    await flushAll();
+    expect(puts()).toHaveLength(1);
+  });
+
+  it('Yuna §M shape: a bordered box with the phone icon, a semibold label, a size-5 tick — inside the sticky footer, just above «시작»', async () => {
+    remoteGet = remoteGetOf(REMOTE_OFF_OWNER);
+    stub(confirmOk);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} setupId={SETUP_ID} />);
+    const footer = container.querySelector('[data-testid=setup-start-row]')!;
+    const box = footer.querySelector('[data-testid=setup-phone-control]') as HTMLElement;
+    expect(box.className).toContain('rounded-md border p-3');
+    expect(box.querySelector('svg[aria-hidden=true]')).not.toBeNull();
+    expect(box.querySelector('label span')!.className).toContain('font-semibold');
+    expect(box.querySelector('input')!.className).toContain('size-5');
+    const kids = [...footer.children];
+    expect(kids.indexOf(box)).toBe(kids.indexOf(kids.find((k) => k.tagName === 'BUTTON')!) - 1); // right above [시작]
+  });
+
+  it('the switch call is refused: the setup still goes on to its progress (no error card)', async () => {
+    remoteGet = remoteGetOf(REMOTE_OFF_OWNER);
+    remotePut = () => new Response('{}', { status: 403 });
+    stub(confirmOk);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} setupId={SETUP_ID} />);
+    await act(async () => { startButton().click(); });
+    await flushAll();
+    expect(puts()).toHaveLength(1);
+    expect(text()).toContain('에이전트를 시작하고 있어요');
   });
 });

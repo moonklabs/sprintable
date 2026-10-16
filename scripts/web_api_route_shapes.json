@@ -456,6 +456,11 @@
 },
 {
 "method": "GET",
+"path": "/api/v2/api-keys/{}/usage-summary",
+"kind": "object"
+},
+{
+"method": "GET",
 "path": "/api/v2/assets",
 "kind": "object"
 },
@@ -527,6 +532,11 @@
 {
 "method": "POST",
 "path": "/api/v2/auth/logout",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/auth/logout-others",
 "kind": "unknown"
 },
 {
@@ -756,6 +766,11 @@
 },
 {
 "method": "GET",
+"path": "/api/v2/conversations/{}/messages/{}/attachments/{}/content",
+"kind": "unknown"
+},
+{
+"method": "GET",
 "path": "/api/v2/conversations/{}/messages/{}/replies",
 "kind": "envelope"
 },
@@ -902,6 +917,11 @@
 {
 "method": "POST",
 "path": "/api/v2/desktop/relay/sessions/{}/state",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/relay/setup",
 "kind": "unknown"
 },
 {
@@ -3012,6 +3032,16 @@
 {
 "method": "GET",
 "path": "/api/v2/remote-devices/pairing-offers/{}",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/remote-devices/pairing-target",
+"kind": "unknown"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/remote-devices/{}",
 "kind": "unknown"
 },
 {

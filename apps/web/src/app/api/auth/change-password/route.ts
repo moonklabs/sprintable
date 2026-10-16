@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
+import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
+import { cookieBase } from '@/lib/auth/cookies';
 import { safeJsonParse } from '@/lib/api-response';
 import { backendFetch } from '@/lib/backend-fetch';
 
@@ -24,5 +26,11 @@ export async function PATCH(request: Request) {
   if (!fastapiRes.ok) {
     return NextResponse.json({ error: json['error'] ?? { code: 'FAILED', message: 'Failed' } }, { status: fastapiRes.status });
   }
-  return NextResponse.json({ data: json['data'] ?? { message: 'ok' } });
+  // story #4630 (PO 10:18Z · option (b)) — the backend ended every session, this one too: this browser signs out now, as at
+  // logout, rather than on its next refresh
+  const res = NextResponse.json({ data: json['data'] ?? { message: 'ok' } });
+  const gone = { ...cookieBase(), maxAge: 0 };
+  res.cookies.set(SP_AT_COOKIE, '', gone);
+  res.cookies.set(SP_RT_COOKIE, '', gone);
+  return res;
 }

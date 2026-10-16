@@ -10,8 +10,7 @@
  * on its own background is ≥ 4.5, measured on the shot's pixels · arriving at `/desktop#remote-control`, the owner's switch holds the
  * focus with a ring that shows in pixels, and the switch stays off.
  *
- * Rules (the list's): the target is on screen · two animation frames after the change (and, for a pixel comparison, the element's
- * transitions finished — story #4600) · `mouse.move(0, 0)` before each shot · no cap
+ * Rules (the list's): the target is on screen · two animation frames after the change · `mouse.move(0, 0)` before each shot · no cap
  * on the class candidates · names `4583-web-{#}-{scene}-{owner|member}-{L|D}-{width}.png`. Files go to CAPTURE_OUT when set, else
  * this test's output folder (with `contrast.json`).
  */
@@ -20,30 +19,12 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { compile, optimize } from '@tailwindcss/node';
+import { layoutStubPlugin } from './support/layout-stubs';
 
 const req = createRequire(__filename);
 const WEB = path.join(__dirname, '..');
 const APP = path.join(WEB, 'src', 'app');
 
-const STUBS: Record<string, string> = {
-  '@/lib/db/client': 'export const fetchWithAuth = (u, i) => fetch(u, i);',
-  '@/hooks/use-sse-notifications': 'export function useSseNotifications() {}',
-  '@/hooks/use-flat-href': 'export function useFlatHref() { return (h) => h; }',
-  '@/lib/phone-bridge': `export const isPhoneApp = () => !!window.__phone;
-    export const phoneCall = async (k) => {
-      if (k === 'pair.scan') return { ok: true, offer_id: '0f3c2a1e-1111-4222-8333-944455556666', setup_id: '12345678-9abc-4def-8123-456789abcdef', device_name: 'SYJ-MacBook-Pro', expires_at: new Date(Date.now() + 300000).toISOString() };
-      if (k === 'device.key.info') return { ok: true, public_key: 'pk' };
-      if (k === 'pair.mac') return { ok: true, mac: 'mac' };
-      if (k === 'device.auth') return { id: 'x', ok: true, auth: 'biometric' };
-      return { id: 'x', ok: false };
-    };`,
-  '@/lib/phone-answer': 'export async function answerOnPhone(id, decision) { return { kind: "answered", decision }; }',
-  '@/app/dashboard/dashboard-shell': "export function useDashboardContext() { return { orgId: 'org-1' }; }",
-  '@/components/viewer-time-zone': "export function useViewerTimeZone() { return 'Asia/Seoul'; }",
-  // a client navigation like Next's: the link's own onClick first, then (unless prevented) no page load — the harness swaps the view
-  'next/link': "import React from 'react'; export default function Link({ href, children, onClick, ...rest }) { return React.createElement('a', { href, ...rest, onClick: (e) => { onClick && onClick(e); if (!e.defaultPrevented && window.__clientNav) { e.preventDefault(); window.__clientNav(href); } } }, children); }",
-};
-const STUB_FILTER = /^(@\/lib\/db\/client|@\/hooks\/use-sse-notifications|@\/hooks\/use-flat-href|@\/lib\/phone-bridge|@\/lib\/phone-answer|@\/app\/dashboard\/dashboard-shell|@\/components\/viewer-time-zone|next\/link)$/;
 
 let built: { js: string; css: string } | null = null;
 async function build() {
@@ -59,13 +40,17 @@ async function build() {
         import { AgentSessionStrip } from './src/components/chat/agent-session-strip';
         import { AgentPermissionRequests } from './src/components/inbox/agent-permission-requests';
         import { DesktopRemoteControlCard } from './src/components/desktop/desktop-remote-control-card';
+        import { PhoneBridgeContext } from './src/components/providers/phone-bridge-context';
+        import { phoneCall } from '@/lib/phone-bridge';
         const h = React.createElement;
         const pick = (kind) => kind === 'pair' ? h(PhonePairing) : kind === 'remote' ? h(DesktopRemoteConfirm)
           : kind === 'strip' ? h(AgentSessionStrip, { agentId: 'a1', conversationId: 'c1' }) : kind === 'inbox' ? h(AgentPermissionRequests)
           : kind === 'card-far' ? h(React.Fragment, null, h('div', { style: { height: 1600 } }), h(DesktopRemoteControlCard)) : h(DesktopRemoteControlCard);
         window.__mount = (kind, locale) => {
           const root = createRoot(document.getElementById('root'));
-          const wrap = (k) => h(NextIntlClientProvider, { locale, messages: locale === 'en' ? en : ko, timeZone: 'Asia/Seoul' }, pick(k));
+          // story #4661: the screens read the phone state from the bridge context — the harness plays the claim's provider
+          const wrap = (k) => h(NextIntlClientProvider, { locale, messages: locale === 'en' ? en : ko, timeZone: 'Asia/Seoul' },
+            h(PhoneBridgeContext.Provider, { value: { inPhoneApp: !!window.__phone, phoneCall } }, pick(k)));
           // story #4583 (Yuna 4974): the link → card path as an in-app navigation (no reload) — pushState, then the card
           window.__clientNav = (href) => { history.pushState(null, '', href); root.render(wrap('card-far')); };
           root.render(wrap(kind));
@@ -73,11 +58,10 @@ async function build() {
       resolveDir: WEB, loader: 'tsx',
     },
     bundle: true, format: 'iife', platform: 'browser', write: false, logLevel: 'silent', jsx: 'automatic',
-    tsconfig: path.join(WEB, 'tsconfig.json'), define: { 'process.env.NODE_ENV': '"production"' },
-    plugins: [{ name: 'stubs', setup(b) {
-      b.onResolve({ filter: STUB_FILTER }, (a) => ({ path: a.path, namespace: 'stub' }));
-      b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: STUBS[a.path]!, loader: 'js', resolveDir: WEB }));
-    } }],
+    tsconfig: path.join(WEB, 'tsconfig.json'),
+    // story #4654: the store target reads the public app address at load — the build inlines it as Next does (production = app.sprintable.ai)
+    define: { 'process.env.NODE_ENV': '"production"', 'process.env.NEXT_PUBLIC_APP_URL': '"https://app.sprintable.ai"' },
+    plugins: [layoutStubPlugin()],
   });
   const js = out.outputFiles[0]!.text;
   // every class the bundle can render — no length cap (PR 4972: a cut Button base string drew the wrong border and ring)
@@ -123,14 +107,13 @@ async function open(page: Page, o: { kind: Kind; width: number; theme: 'L' | 'D'
 }
 
 const frames = (page: Page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(1)))));
-// story #4600 (Yuna): a pixel equality test must wait for the element's transitions to finish, not just two frames — the shadcn
-// Switch has `transition-all` (150 ms) on its ring, so two frames after focus/blur read a mid-transition blend and the L-390 cell
-// went red or green by timing (4980 1ba85a88a red · the same job rerun green). Every running animation on the element and its
-// subtree, then two frames so the final state is painted.
-const settled = async (page: Page, el: Locator) => {
-  await el.evaluate((node) => Promise.all(node.getAnimations({ subtree: true }).map((a) => a.finished.catch(() => undefined))));
-  await frames(page);
-};
+// story 4600: a pixel comparison on an element with a transition must wait for that transition to end. The Switch's `transition-all`
+// (150 ms) also eases its focus ring, and two frames land mid-way — the L-390 arrival cell went red or green by timing with no screen
+// change (4980 1ba85a88a red · rerun green). Wait for every running animation in the element (a cancelled one counts as ended), then
+// two frames for the paint. No fixed sleep. Call it after `frames` so the change has started its transition.
+const settled = (target: Locator) => target.evaluate((el) =>
+  Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished.catch(() => undefined)))
+    .then(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(1))))));
 const outDir = () => { const d = process.env['CAPTURE_OUT'] || test.info().outputDir; mkdirSync(d, { recursive: true }); return d; };
 async function shot(page: Page, target: Locator, name: string) {
   await target.scrollIntoViewIfNeeded();
@@ -185,10 +168,10 @@ async function linkOnItsOwnRow(line: Locator, link: Locator) {
 // ── fixtures (Yuna's list) ──────────────────────────────────────────────────────────────────────────────────────────────────
 const NAMES3 = ['송윤재', '윤도선', '김하나'];
 const NAMES3_EN = ['Song Yunjae', 'Yun Doseon', 'Kim Hana'];
-const org = (o: { owner: boolean; names?: string[]; computers?: number; on?: boolean }) => ({
+const org = (o: { owner: boolean; names?: string[]; setups?: number; on?: boolean }) => ({
   'GET /api/organizations/org-1/remote-control': { data: {
     enabled: !!o.on, enabled_at: o.on ? '2026-10-07T01:00:00Z' : null, can_change: o.owner,
-    owner_names: o.names ?? NAMES3, connected_computers: o.computers ?? 1,
+    owner_names: o.names ?? NAMES3, connected_setups: o.setups ?? 1,
   } },
 });
 const REQUEST = {
@@ -220,21 +203,21 @@ const inboxApi = (o: Parameters<typeof org>[0]) => ({ ...org(o), 'GET /api/agent
 
 // ── the copy (Yuna `4583/copy.md`) ───────────────────────────────────────────────────────────────────────────────────────────
 const KO = {
-  pairOwner: '원격 제어가 꺼져 있어 짝지을 수 없어요 — 켜면 이 폰에서 에이전트에 답하고, 멈추거나 지시할 수 있어요',
-  pairMember: (o: string) => `원격 제어가 꺼져 있어 짝지을 수 없어요 — 조직 소유자${o}가 켜면 다시 할 수 있어요`,
+  pairOwner: '원격 제어가 꺼져 있어 페어링할 수 없어요 — 켜면 이 폰에서 에이전트에 답하고, 멈추거나 지시할 수 있어요',
+  pairMember: (o: string) => `원격 제어가 꺼져 있어 페어링할 수 없어요 — 조직 소유자${o}가 켜면 다시 할 수 있어요`,
   remoteOwner: '이 조직은 원격 제어가 꺼져 있어 이 컴퓨터를 켤 수 없어요 — 조직의 원격 제어를 먼저 켜 주세요',
   remoteMember: (o: string) => `이 조직은 원격 제어가 꺼져 있어 이 컴퓨터를 켤 수 없어요 — 조직 소유자${o}가 켜면 다시 할 수 있어요`,
   stripOwner: '원격 제어가 꺼져 있어 폰에서 멈추거나 지시할 수 없어요',
   stripMember: (o: string) => `원격 제어가 꺼져 있어 폰에서 멈추거나 지시할 수 없어요 — 조직 소유자${o}가 켤 수 있어요`,
-  inboxOwner: '원격 제어가 꺼져 있어 데스크톱 에이전트의 권한 요청이 여기로 오지 않아요',
-  inboxMember: (o: string) => `원격 제어가 꺼져 있어 데스크톱 에이전트의 권한 요청이 여기로 오지 않아요 — 조직 소유자${o}가 켤 수 있어요`,
+  inboxOwner: '원격 제어가 꺼져 있어 데스크톱 에이전트의 새 권한 요청이 여기로 오지 않아요',
+  inboxMember: (o: string) => `원격 제어가 꺼져 있어 데스크톱 에이전트의 새 권한 요청이 여기로 오지 않아요 — 조직 소유자${o}가 켤 수 있어요`,
   offEffect: '꺼져 있으면 권한 요청이 폰으로 오지 않고, 폰에서 멈추거나 지시할 수도 없어요',
   ownerOnlyOff: (o: string) => `원격 제어 · 꺼짐 — 조직 소유자${o}만 켜고 끌 수 있어요`,
   ownerOnlyOn: (o: string) => `원격 제어 · 켜짐 — 조직 소유자${o}만 켜고 끌 수 있어요`,
   link: '원격 제어 켜러 가기',
 };
 const THREE = '(송윤재 외 2명)';
-const NEW_LINES = [KO.pairOwner, KO.remoteOwner, KO.stripOwner, KO.inboxOwner, KO.offEffect, KO.link, '오지 않아요', '켤 수 없어요', '짝지을 수 없어요'];
+const NEW_LINES = [KO.pairOwner, KO.remoteOwner, KO.stripOwner, KO.inboxOwner, KO.offEffect, KO.link, '오지 않아요', '켤 수 없어요', '페어링할 수 없어요'];
 
 for (const width of [1440, 390]) for (const theme of ['L', 'D'] as const) {
   const tag = `${theme}-${width}`;
@@ -243,7 +226,7 @@ for (const width of [1440, 390]) for (const theme of ['L', 'D'] as const) {
     if (width === 390) { // ① is the phone's page: 390 only
       await open(page, { kind: 'pair', width, theme, phone: true, api: pairApi({ owner: true }, OFFER_OFF) });
       await page.getByRole('button', { name: 'QR 찍기' }).click();
-      await page.getByRole('button', { name: '짝짓기' }).click();
+      await page.getByRole('button', { name: '페어링' }).click();
       const card = page.getByTestId('phone-pairing');
       const line = page.getByTestId('phone-pairing-line');
       await expect(line).toHaveText(KO.pairOwner);
@@ -254,14 +237,14 @@ for (const width of [1440, 390]) for (const theme of ['L', 'D'] as const) {
 
       await open(page, { kind: 'pair', width, theme, phone: true, api: pairApi({ owner: false }, OFFER_OFF) });
       await page.getByRole('button', { name: 'QR 찍기' }).click();
-      await page.getByRole('button', { name: '짝짓기' }).click();
+      await page.getByRole('button', { name: '페어링' }).click();
       await expect(page.getByTestId('phone-pairing-line')).toHaveText(KO.pairMember(THREE));
       await expect(page.getByTestId('phone-pairing').locator('a, button')).toHaveText(['닫기']);
       await shot(page, page.getByTestId('phone-pairing'), `4583-web-1b-pair-refused-member-${tag}`);
 
       await open(page, { kind: 'pair', width, theme, phone: true, api: pairApi({ owner: false, names: [] }, OFFER_OFF) });
       await page.getByRole('button', { name: 'QR 찍기' }).click();
-      await page.getByRole('button', { name: '짝짓기' }).click();
+      await page.getByRole('button', { name: '페어링' }).click();
       await expect(page.getByTestId('phone-pairing-line')).toHaveText(KO.pairMember(''));
       await shot(page, page.getByTestId('phone-pairing'), `4583-web-6-pair-no-names-member-${tag}`);
     }
@@ -323,7 +306,7 @@ for (const width of [1440, 390]) for (const theme of ['L', 'D'] as const) {
       await expect(page.getByTestId('agent-permission-remote-off')).toHaveText(KO.inboxMember(THREE));
       await shot(page, page.locator('#root'), `4583-web-4b-inbox-${where}-member-${tag}`);
     }
-    await open(page, { kind: 'inbox', width, theme, api: inboxApi({ owner: true, computers: 0 }) });
+    await open(page, { kind: 'inbox', width, theme, api: inboxApi({ owner: true, setups: 0 }) });
     await expect(page.getByTestId('agent-permission-requests')).toBeVisible();
     await expect(page.getByTestId('agent-permission-remote-off')).toHaveCount(0);
     await shot(page, page.locator('#root'), `4583-web-4c-inbox-no-computer-owner-${tag}`);
@@ -360,26 +343,22 @@ for (const width of [1440, 390]) for (const theme of ['L', 'D'] as const) {
     await expect(sw).toHaveAttribute('aria-checked', 'false');
     await page.mouse.move(0, 0);
     await frames(page);
+    await settled(sw); // 4600: the ring at its end state, not a blend
     const box = (await card.boundingBox())!;
     expect(box.y >= 0 && box.y + box.height <= (page.viewportSize()!.height + 1), 'the card is in view').toBe(true);
     const s = (await sw.boundingBox())!;
     const clip = { x: Math.max(0, s.x - 6), y: Math.max(0, s.y - 6), width: s.width + 12, height: s.height + 12 };
-    await settled(page, sw); // story #4600: the ring's 150 ms transition has ended — the focused shot is the final ring, not a blend
     const focused = await page.screenshot({ clip });
     await page.screenshot({ path: path.join(outDir(), `4583-web-5c-arrive-owner-${tag}.png`) });
-    // story #4600: a bare `blur()` is undone by the card's arrival hold — `holdArrivalFocus` puts the focus back on the switch for
-    // 1.5 s whenever it falls to the page — so the ring came straight back and the «blurred» shot was another mid-transition blend
-    // (equal to the focused blend now and then: the L-390 red). Move the focus to another element instead: by the hold's own rule
-    // the mark comes off and the hold ends, and the ring's transition out can finish before the shot.
-    await page.evaluate(() => {
-      const away = document.createElement('button');
-      away.id = '__away'; away.textContent = 'away'; away.style.position = 'fixed'; away.style.left = '-9999px'; away.style.top = '0';
-      document.body.appendChild(away); away.focus();
-    });
-    await expect(sw).not.toBeFocused();
-    await settled(page, sw);
+    // 4595 (PO, 5021 L-390): the person leaves with Tab (a keypress ends the arrival hold, remote-off.tsx). A script blur() is not a
+    // person: it drops the focus to the body, and the hold takes it back — the same path that keeps the focus through Next's scroll
+    // reset (AC6), so it must stay. The ring then goes once the person has moved on.
+    await page.keyboard.press('Tab');
+    await frames(page);
+    await settled(sw); // 4600: the ring's transition out has finished before the ring-less shot
+    const after = await page.evaluate(() => (document.activeElement as HTMLElement | null)?.getAttribute('data-slot') ?? null);
+    expect(after, 'the person moved the focus off the switch').not.toBe('switch');
     const blurred = await page.screenshot({ clip });
-    await page.evaluate(() => document.getElementById('__away')?.remove());
     expect(focused.equals(blurred), 'the focus ring shows in pixels').toBe(false);
 
     await open(page, { kind: 'card-far', width, theme, hash: '#remote-control', api: org({ owner: false }) });
@@ -455,7 +434,7 @@ test('[4583] ⑧ en — 1a · 4a · 5b · 1440 L', async ({ page }) => {
   await shot(page, page.getByTestId('phone-pairing'), '4583-web-8-pair-refused-owner-en-L-1440');
 
   await open(page, { kind: 'inbox', width: w, theme, locale, api: inboxApi({ owner: true, names: NAMES3_EN }) });
-  await expect(page.getByTestId('agent-permission-remote-off').locator('p')).toHaveText("Remote control is off, so desktop agents' permission requests don't come here");
+  await expect(page.getByTestId('agent-permission-remote-off').locator('p')).toHaveText("Remote control is off, so desktop agents' new permission requests don't come here");
   await shot(page, page.locator('#root'), '4583-web-8-inbox-owner-en-L-1440');
 
   await open(page, { kind: 'card', width: w, theme, locale, api: org({ owner: false, names: NAMES3_EN }) });

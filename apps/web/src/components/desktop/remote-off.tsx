@@ -10,7 +10,7 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useFlatHref } from '@/hooks/use-flat-href';
-import { useOrgRemoteControl } from '@/lib/org-remote-control';
+import { connectedSetupsOf, useOrgRemoteControl } from '@/lib/org-remote-control';
 
 export const REMOTE_CONTROL_ANCHOR = 'remote-control';
 
@@ -42,6 +42,8 @@ export function takeArrival(): boolean {
 }
 
 export const ARRIVED_ATTR = 'data-arrived';
+/** how long the arrival holds the focus while the person has not pressed a key or a pointer (story 4595: the card reads it too) */
+export const ARRIVAL_HOLD_MS = 1500;
 
 /**
  * Focus `target`, mark it `data-arrived` (its ring is drawn from that mark — `:focus-visible` is the browser's guess and is false
@@ -51,7 +53,7 @@ export const ARRIVED_ATTR = 'data-arrived';
  * leaves after the hold — never only because the hold's time ran out (the ring vanishing while the focus stays would be a change
  * on screen). Returns the cleanup.
  */
-export function holdArrivalFocus(target: HTMLElement, card: HTMLElement | null, holdMs = 1500): () => void {
+export function holdArrivalFocus(target: HTMLElement, card: HTMLElement | null, holdMs = ARRIVAL_HOLD_MS): () => void {
   target.setAttribute(ARRIVED_ATTR, '');
   target.focus();
   let holding = true;
@@ -87,7 +89,7 @@ export interface RemoteOff {
   owner: boolean;
   /** the values for the `{owners}` / `{hasOwners}` placeholders of every «not owner» line */
   names: { owners: string; hasOwners: 'yes' | 'no' };
-  connectedComputers: number;
+  connectedSetups: number;
 }
 
 /** Yuna's name form: 1 «A» · 2 «A · B» · 3+ «A 외 n명» — always inside «조직 소유자(…)», so no josa depends on the name. */
@@ -107,7 +109,7 @@ export function useRemoteOff(): RemoteOff | null {
   return {
     owner: state.can_change,
     names: { owners, hasOwners: owners ? 'yes' : 'no' },
-    connectedComputers: state.connected_computers ?? 0,
+    connectedSetups: connectedSetupsOf(state),
   };
 }
 

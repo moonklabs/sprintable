@@ -56,6 +56,22 @@ from unittest.mock import AsyncMock, MagicMock
 # 환경을 따로 넘기므로 이 기본값의 영향을 안 받는다.
 os.environ.setdefault("SANDBOX_CHANNEL_ENABLED", "true")
 
+# PO 2026-10-07 22:51Z (Minh's catch_test_host · «사람 손 없이»): no test looks for cloud credentials on a metadata server — google-auth
+# (google.auth.default() — embedding · firebase · admin auth) and boto (the S3 storage provider) each asked 169.254.169.254, a sandbox
+# network question every run. Set before anything imports them: google-auth reads NO_GCE_CHECK once, when its metadata module loads.
+os.environ.setdefault("NO_GCE_CHECK", "true")
+os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
+# …and a request to a made-up host or a metadata address is refused before a socket opens (tests/_no_real_network.py); the test that
+# made it fails, naming it (the autouse fixture `_no_real_network_requests` below)
+try:
+    from tests import _no_real_network  # noqa: E402
+except ImportError:
+    # a copy of this conftest run outside the tests package — the pytester-based guards (test_3186 · test_2643 · test_4152 ·
+    # test_a05da51b) copy it into a temp dir and run an inner session there: no guard module beside it, so no guard (not a real run)
+    _no_real_network = None
+else:
+    _no_real_network.install()
+
 
 # story #4319(AC5) — CI 정지 감지기(scripts/run-with-stall-detection.sh)가 죽이기 전에 보내는 신호로 스택을 남긴다.
 # STALL_EVIDENCE_DIR이 있을 때만(CI destructive 샤드). 모듈 최상위에서 등록해 수집(collection) 중 멈춤도 잡힌다.
@@ -295,6 +311,22 @@ def _resolve_global_engine_test_tag(app_name: str) -> str | None:
         return None
     node_hash = app_name[len(GLOBAL_ENGINE_TEST_TAG_PREFIX):].split("|", 1)[0]
     return _DESTRUCTIVE_TAG["nodeids"].get(node_hash)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_network_requests():
+    """PO 2026-10-07 22:51Z: a test that sent a request to a made-up host or a metadata address (refused by tests/_no_real_network.py)
+    fails here, naming it — mock the call (MockTransport · respx · patch the client), never let it go out. A request a background task
+    of an earlier test makes shows under the test running then: still a leak to fix."""
+    if _no_real_network is None:  # a copied conftest outside the tests package (see its import)
+        yield
+        return
+    _no_real_network.CAUGHT.clear()
+    yield
+    if _no_real_network.CAUGHT:
+        caught = "; ".join(f"{what} (at {where})" for where, what in _no_real_network.CAUGHT)
+        _no_real_network.CAUGHT.clear()
+        pytest.fail(f"a real request left the test — mock it (tests/_no_real_network.py): {caught}", pytrace=False)
 
 
 @pytest.fixture(autouse=True)
@@ -1088,7 +1120,13 @@ def _guard_global_shutdown_event_leak(request):
             "남긴 오염으로 판단해 reset 후 진행(이 테스트는 피해자로 취급, 실패 처리 안 함)",
             request.node.nodeid,
         )
-        shutdown_module.reset_shutdown_event()
+    # story 4687(까디르 2선 실측) — «set 오염»만이 아니라 «루프 묶임» 오염도 막는다: asyncio.Event는 `.wait()`가 처음 Future를
+    # 만든 순간 그 시점의 실행 루프에 영구히 묶인다(shutdown.py 주석). 전역 단일 인스턴스를 SSE 스트림 시험이 자기 anyio 루프에서
+    # `.wait()`하고(events.py/agent_gateway.py의 shutdown_wait_task) 끝나면, 그 닫힌 루프에 묶인 채 남아 — 다음 시험(다른 루프)의
+    # 스트림이 같은 Event를 기다리다 `RuntimeError: ... is bound to a different event loop`(«Task exception was never retrieved»)로
+    # 죽는다. 순서 의존(2143 → 4565[revoked] · 단독은 초록 · CI 셔플에서 언제든). set 여부와 무관하게 «매 시험을 새 · 묶이지 않은
+    # Event로 시작»시킨다 — 피해자 보호(설정 시점 방어, 위 처방과 같은 결). 앱 코드·시험 단언은 그대로.
+    shutdown_module.reset_shutdown_event()
     yield
 
 

@@ -86,11 +86,12 @@ describe('OnboardingForm — 1/4 입력값 sessionStorage draft 영속(story #31
 
     const raw = sessionStorage.getItem(DRAFT_PREFIX + UID_A);
     expect(raw).toBeTruthy();
-    const parsed = JSON.parse(raw!) as { orgName: string; orgSlug: string };
+    const parsed = JSON.parse(raw!) as { orgName: string; orgSlug?: string };
     expect(parsed.orgName).toBe('새싹상회');
+    expect(parsed.orgSlug).toBeUndefined(); // story 4669: the slug field is gone — the draft is the name only
   });
 
-  it('재마운트(=인증 왕복 시뮬레이션) 시 같은 uid의 draft가 복원돼 재입력을 요구하지 않는다', async () => {
+  it('재마운트(=인증 왕복 시뮬레이션) 시 같은 uid의 draft가 복원돼 재입력을 요구하지 않는다 — 옛 {orgName, orgSlug} draft도 이름은 살린다(4669)', async () => {
     sessionStorage.setItem(DRAFT_PREFIX + UID_A, JSON.stringify({ orgName: '새싹상회', orgSlug: 'saessak-shop' }));
     vi.stubGlobal('fetch', mockFetchDefault(UID_A));
     await act(async () => { root.render(wrap()); });
@@ -98,8 +99,7 @@ describe('OnboardingForm — 1/4 입력값 sessionStorage draft 영속(story #31
 
     const nameInput = container.querySelector('input') as HTMLInputElement;
     expect(nameInput.value).toBe('새싹상회');
-    const inputs = container.querySelectorAll('input');
-    expect((inputs[1] as HTMLInputElement).value).toBe('saessak-shop');
+    expect(container.querySelectorAll('input')).toHaveLength(1);
   });
 
   it('조직 생성 성공 시 draft를 지운다(더는 필요 없어짐)', async () => {
@@ -146,7 +146,7 @@ describe('OnboardingForm — 1/4 입력값 sessionStorage draft 영속(story #31
 });
 
 describe('OnboardingForm — identityResolved 前 입력 게이팅(유나 design:changes, PR#3617)', () => {
-  it('/api/auth/me 미해소 동안 조직명·슬러그 입력이 disabled — 빈 값이 순간이라도 안 채워지는 깜빡임 방지', async () => {
+  it('/api/auth/me 미해소 동안 조직명 입력이 disabled — 빈 값이 순간이라도 안 채워지는 깜빡임 방지', async () => {
     let resolveMe!: (v: { ok: true; json: () => Promise<unknown> }) => void;
     const mePromise = new Promise<{ ok: true; json: () => Promise<unknown> }>((r) => { resolveMe = r; });
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
@@ -158,7 +158,6 @@ describe('OnboardingForm — identityResolved 前 입력 게이팅(유나 design
 
     const inputs = container.querySelectorAll('input');
     expect((inputs[0] as HTMLInputElement).disabled).toBe(true);
-    expect((inputs[1] as HTMLInputElement).disabled).toBe(true);
 
     await act(async () => {
       resolveMe({ ok: true, json: async () => ({ data: { member_id: UID_A, org_id: null, email_verified: true } }) });

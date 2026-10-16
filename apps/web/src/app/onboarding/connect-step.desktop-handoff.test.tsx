@@ -127,48 +127,6 @@ describe('ConnectStep — 주 경로(story #3983 AC1·AC2)', () => {
   });
 });
 
-describe('ConnectStep — 데스크톱 절 키 복사 칸(story #3983 CHANGES①)', () => {
-  it('⭐키가 마스킹돼 보이고, 복사 버튼을 누르면 「복사됨」으로 바뀐다', async () => {
-    await mount();
-    const keyBox = container.querySelector('[data-testid="connect-step-desktop-key-handoff"]')!.parentElement!;
-    expect(keyBox.textContent).toContain('sk_live_••••1234');
-    const copyBtn = container.querySelector('[data-testid="connect-step-desktop-key-copy"]') as HTMLButtonElement;
-    await act(async () => { copyBtn.click(); });
-    expect(copyBtn.textContent).toContain(ko.onboarding.copied);
-  });
-
-  // 페드루 PO CHANGES r2(2026-09-17 02:23Z, 1차 ④와 같은 목적) — config_copied는
-  // 웹 경로 이벤트(verify rail 첫 상태)라 데스크톱 복사가 그걸 재사용하면
-  // 데스크톱/웹 활성화 퍼널이 다시 섞인다 — 별도 이름으로 가른다.
-  it('⭐데스크톱 키 복사는 desktop_key_copied만 emit하고 config_copied는 안 낸다', async () => {
-    const { fetchMock } = await mount();
-    const copyBtn = container.querySelector('[data-testid="connect-step-desktop-key-copy"]') as HTMLButtonElement;
-    await act(async () => { copyBtn.click(); });
-    const bodies = fetchMock.mock.calls
-      .filter((c) => c[0] === '/api/onboarding/events')
-      .map((c) => String(c[1]?.body ?? ''));
-    expect(bodies.some((b) => b.includes('desktop_key_copied'))).toBe(true);
-    expect(bodies.some((b) => b.includes('"event":"config_copied"'))).toBe(false);
-  });
-
-  // story #3986(클래스 «거짓 성공 표시») — 클립보드 실패를 삼키고도 「복사됨」을
-  // 띄우던 결함의 처방 pin. 실패하면 「복사됨」이 안 뜨고, 마스킹판 대신 실 키가
-  // 선택 가능한 입력으로 바뀐다(유나 지시 — 별도 "선택 가능" 안내 줄은 안 만든다,
-  // 실패 문구 자체가 지시).
-  it('⭐클립보드 복사가 실패하면(권한 거부 등) 「복사됨」이 안 뜨고, 실패 문구+선택 가능한 실 키가 뜬다', async () => {
-    vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn().mockRejectedValue(new DOMException('denied', 'NotAllowedError')) } });
-    await mount();
-    const copyBtn = container.querySelector('[data-testid="connect-step-desktop-key-copy"]') as HTMLButtonElement;
-    await act(async () => { copyBtn.click(); });
-    expect(copyBtn.textContent).not.toContain(ko.onboarding.copied);
-    expect(container.querySelector('[role="alert"]')?.textContent).toBe(ko.common.copyFailedSelectManually);
-    const rawKeyInput = container.querySelector('[data-testid="connect-step-desktop-key-raw"]') as HTMLInputElement;
-    expect(rawKeyInput).not.toBeNull();
-    expect(rawKeyInput.value).toBe('sk_live_1234');
-    expect(rawKeyInput.readOnly).toBe(true);
-  });
-});
-
 describe('ConnectStep — 보조 경로 삭제 0(story #3983 AC1)', () => {
   it('⭐기존 웹 connect 흐름(transport 토글·아티팩트 카드·검증 레일·첫 지시 CTA)이 그대로 다 있다', async () => {
     await mount();
@@ -180,11 +138,12 @@ describe('ConnectStep — 보조 경로 삭제 0(story #3983 AC1)', () => {
   });
 });
 
-describe('ConnectStep — 키 핸드오프 문구 한 쌍(story #3983 AC4)', () => {
-  it('⭐키 화면에 「이 키를 데스크톱 앱에 붙여 넣어요」+정본 캐논 문구가 같이 뜬다', async () => {
+describe('ConnectStep — 데스크톱 절 키 칸 없음(카드 4542 · 키 붙여 넣기 입구 없음)', () => {
+  it('⭐「앱을 열면 브라우저가 이 계정으로 이어서 열려요」 한 줄이 뜨고, 키 복사 칸은 없다', async () => {
     await mount();
-    const note = container.querySelector('[data-testid="connect-step-desktop-key-handoff"]');
-    expect(note?.textContent).toContain('이 키를 데스크톱 앱에 붙여 넣어요');
-    expect(note?.textContent).toContain('새 키는 웹에서 발급해요. 저장한 키는 다시 볼 수 없어요.');
+    const note = container.querySelector('[data-testid="connect-step-desktop-open-note"]');
+    expect(note?.textContent).toContain(ko.onboarding.desktopOpenAppNote);
+    expect(container.querySelector('[data-testid="connect-step-desktop-key-copy"]')).toBeNull();
+    expect(container.querySelector('[data-testid="connect-step-desktop-key-raw"]')).toBeNull();
   });
 });

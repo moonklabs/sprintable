@@ -255,6 +255,9 @@ async def list_stories(
             response.headers["X-Result-Count"] = str(len(stories))
         return [StoryResponse.model_validate(s) for s in stories]
 
+    # story #4688 (AC2): a DELETED / unknown project's own id lists nothing — the three project branches below carry the rule in their query
+    # (`StoryRepository._project_live_clause`, an EXISTS: no extra roundtrip), so the page, the count and the headers all say «none».
+
     # story #2188 ④-b(2026-07-25, 오르테가군 판정 — 의도된 제약, 코드 고칠 이유 없음):
     # `no_sprint=True`를 `project_id` 없이 보내면 이 분기 자체가 안 걸려 제네릭 분기(:148
     # 이하)로 떨어지고, 거기엔 sprint_id IS NULL을 적용하는 로직이 없어 no_sprint가 통째로
@@ -1099,11 +1102,12 @@ async def get_workflow_line_metrics(
     repo: StoryRepository = Depends(_get_repo),
     auth: AuthContext = Depends(get_current_user),
 ) -> dict:
-    from app.services.project_auth import restricted_accessible_project_ids
+    from app.services.project_auth import scoped_project_ids
     from app.services.workflow_line_metrics import compute_line_metrics
 
-    restricted = await restricted_accessible_project_ids(repo.session, uuid.UUID(auth.user_id), repo.org_id)
-    return await compute_line_metrics(repo.session, repo.org_id, window_days=window_days, project_ids=restricted)
+    # story #4688 (AC2): None = «reaches every project» must not mean «no filter» — a deleted project's stories would join the numbers
+    scope = await scoped_project_ids(repo.session, uuid.UUID(auth.user_id), repo.org_id)
+    return await compute_line_metrics(repo.session, repo.org_id, window_days=window_days, project_ids=scope)
 
 
 @router.get("/{id}", response_model=StoryResponse)
@@ -1113,7 +1117,9 @@ async def get_story(
     auth: AuthContext = Depends(get_current_user),
 ) -> StoryResponse:
     story = await repo.get(id)
-    if story is None:
+    # story 4615 (Kadir qa:changes · PO): a deleted story reads as one that does not exist — the same 404, nothing of it (repo.get
+    # does not filter deleted_at, and the MCP get_story reads through here)
+    if story is None or story.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Story not found")
     await _assert_story_project_access(repo.session, auth, repo.org_id, story.project_id)
     await _attach_list_fields(repo.session, repo.org_id, [story])

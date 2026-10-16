@@ -9,6 +9,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
+import { PhoneBridgeClaim } from '@/components/providers/phone-bridge-claim';
 
 const AGENT = '22222222-3333-4444-8555-666666666666';
 const CONV = '33333333-4444-4555-8666-777777777777';
@@ -21,7 +22,12 @@ vi.mock('next/link', () => ({ default: ({ href, children, ...rest }: { href: str
 vi.mock('@/hooks/use-sse-notifications', () => ({ useSseNotifications: () => {} }));
 let phone = true;
 const phoneCall = vi.fn();
-vi.mock('@/lib/phone-bridge', () => ({ isPhoneApp: () => phone, phoneCall: (...a: unknown[]) => phoneCall(...a) }));
+vi.mock('@/lib/phone-bridge', () => ({
+  isPhoneApp: () => phone,
+  phoneCall: (...a: unknown[]) => phoneCall(...a),
+  claimPhoneBridge: () => {},
+  subscribePhoneApp: () => () => {},
+}));
 const { AgentSessionStrip } = await import('./agent-session-strip');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -59,9 +65,9 @@ async function settle(n = 6) { for (let i = 0; i < n; i++) await act(async () =>
 async function render(locale: 'ko' | 'en' = 'ko') {
   await act(async () => {
     root.render(
-      <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
+      <PhoneBridgeClaim><NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
         <AgentSessionStrip agentId={AGENT} conversationId={CONV} />
-      </NextIntlClientProvider>,
+      </NextIntlClientProvider></PhoneBridgeClaim>,
     );
   });
   await settle();
@@ -113,6 +119,116 @@ describe('[4534] the strip inside the phone app', () => {
     // Kadir 325 · PO 04:34Z: an agent that asks can still be stopped from the phone — [멈춤] shows, [지금 지시] does not (it goes
     // into a running turn only)
     expect(buttons()).toEqual([ko.button.stop]);
+  });
+
+  it('story #4590 (Yuna §2): the question only that computer\'s terminal answers — the card\'s line, no inbox link, [멈춤] only · a browser alike', async () => {
+    const words = koMessages.agentPermissions.line.terminalOnly;
+    for (const isPhone of [true, false]) {
+      phone = isPhone;
+      sessionView = { ...sessionView, state: 'waiting_permission', pending_permission_request_id: 'p-1', ask_terminal_only: true };
+      server(res(201, {}));
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+      await render();
+      const line = container.querySelector('[data-testid="agent-session-line"]');
+      expect(line?.textContent).toBe(words);
+      expect(line?.tagName).toBe('P'); // not the inbox link
+      expect(container.querySelector('a')).toBeNull();
+      expect(buttons()).toEqual(isPhone ? [ko.button.stop] : []);
+    }
+  });
+
+  it('story #4599 (Yuna ① · PO 14:25Z): held by a macOS window — the phone line («여기서 [세션 끝내기]») and one button, [세션 끝내기] ([멈춤] would not work there)', async () => {
+    sessionView = { ...sessionView, state: 'working', activity: 'waiting_system', system: { folder: 'documents' } };
+    server(res(201, {}));
+    await render();
+    expect(container.querySelector('[data-testid="agent-session-line"]')?.textContent).toBe(ko.line.waitingSystemFolderPhone.replace('{folder}', ko.folder.documents));
+    expect(buttons()).toEqual([ko.button.endSession]);
+  });
+
+  it('story #4599: a browser, or a phone that may not command, gets no button and the line that says where the handles are (the phone · the desktop app)', async () => {
+    server(res(201, {}));
+    for (const [over, isPhone] of [[{}, false], [{ can_command: false }, true], [{ remote_control: false }, true]] as const) {
+      phone = isPhone;
+      sessionView = { ...sessionView, ...over, state: 'working', activity: 'waiting_system', system: { folder: null } };
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+      await render();
+      expect(buttons()).toEqual([]);
+      expect(container.querySelector('[data-testid="agent-session-line"]')?.textContent).toBe(ko.line.waitingSystem);
+    }
+  });
+
+  it('story #4599: [세션 끝내기] → the confirm dialog (title · body · [취소] focused first) → [취소] signs nothing', async () => {
+    sessionView = { ...sessionView, state: 'working', activity: 'waiting_system' };
+    server(res(201, {}));
+    await render();
+    await press(ko.button.endSession);
+    expect(document.body.textContent).toContain(ko.endDialog.title);
+    expect(document.body.textContent).toContain(ko.endDialog.body);
+    const cancel = [...document.querySelectorAll('button')].find((b) => b.textContent === ko.endDialog.cancel)!;
+    expect(document.activeElement).toBe(cancel);
+    await press(ko.endDialog.cancel);
+    expect(document.body.textContent).not.toContain(ko.endDialog.title);
+    expect(phoneCall).not.toHaveBeenCalled();
+    expect(buttons()).toEqual([ko.button.endSession]);
+  });
+
+  it('story #4599: confirmed → the shell signs `end_session` → posted with the kind the shell returned → done → no line of its own, the state is read again', async () => {
+    vi.useFakeTimers();
+    sessionView = { ...sessionView, state: 'working', activity: 'waiting_system', system: { folder: 'desktop' } };
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'done' })]);
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S-END', phone_key_id: 'k-1', session_key: 's-9', kind: 'end_session' });
+    await render();
+    await press(ko.button.endSession);
+    const confirm = document.querySelector('[data-testid="agent-end-confirm"]') as HTMLButtonElement;
+    await act(async () => { confirm.click(); });
+    await settle();
+    expect(phoneCall).toHaveBeenCalledWith('command.sign', { agent_member_id: AGENT, kind: 'end_session' });
+    expect(commandLine()?.textContent).toBe(ko.command.stopping); // the stop's «on its way» line — no words of its own (Yuna ①)
+    const reads = () => calls.filter((c) => c.url.endsWith('/desktop-session')).length;
+    const before = reads();
+    sessionView = { ...sessionView, state: 'stopped', activity: 'stopped', system: null };
+    await poll(1);
+    expect(commandLine()).toBeNull();
+    expect(reads()).toBeGreaterThan(before);
+    expect(container.querySelector('[data-testid="agent-session-chip"]')?.textContent).toBe(ko.state.stopped);
+    expect(buttons()).toEqual([]);
+    const post = calls.find((c) => c.init?.method === 'POST')!;
+    expect(JSON.parse(post.init!.body as string)).toMatchObject({ kind: 'end_session', session_key: 's-9', signed: 'S-END', phone_key_id: 'k-1' });
+    expect(JSON.parse(post.init!.body as string)).not.toHaveProperty('text');
+  });
+
+  it('story #4599 (Yuna · PO 19:47Z): [세션 끝내기] confirmed after the window was answered on that Mac → the shell says not_held → «세션은 끝내지 않았어요» — never «다시 눌러 주세요» (that would press [멈춤] on a working turn) · nothing posted', async () => {
+    sessionView = { ...sessionView, state: 'working', activity: 'waiting_system', system: { folder: 'documents' } };
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }));
+    phoneCall.mockResolvedValue({ id: 'w', ok: false, code: 'not_held' });
+    await render();
+    await press(ko.button.endSession);
+    const confirm = document.querySelector('[data-testid="agent-end-confirm"]') as HTMLButtonElement;
+    await act(async () => { confirm.click(); });
+    await settle();
+    expect(commandLine()?.textContent).toBe(ko.command.endNotHeld);
+    expect(commandLine()?.textContent).not.toBe(ko.command.stop.failed);
+    expect(calls.some((c) => c.init?.method === 'POST')).toBe(false);
+    // en
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await render('en');
+    await press(enMessages.chats.agentSession.button.endSession);
+    await act(async () => { (document.querySelector('[data-testid="agent-end-confirm"]') as HTMLButtonElement).click(); });
+    await settle();
+    expect(commandLine()?.textContent).toBe(enMessages.chats.agentSession.command.endNotHeld);
+  });
+
+  it('story #4599 (PO 14:18Z): [멈춤] pressed just before the window came up — the server\'s closed reason → its own line, nothing as a message', async () => {
+    const calls = server(res(409, { error: { code: 'system_wait_end_only' } }));
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9' });
+    await render();
+    await press(ko.button.stop);
+    await settle();
+    expect(commandLine()?.textContent).toBe(ko.command.stopSystemWait);
+    expect(calls.some((c) => c.url.endsWith('/messages'))).toBe(false);
   });
 
   it('waiting for permission, [멈춤] signs a stop the same way (agent only) and posts it', async () => {
@@ -247,7 +363,7 @@ describe('[4534] the strip inside the phone app', () => {
     expect((document.querySelector('[data-testid="agent-instruct-text"]') as HTMLTextAreaElement).value).toBe('x');
   });
 
-  it('refusals keep the button\'s verb and their way out: signed out → [다시 로그인] · key lost → [다시 짝짓기] · no screen lock → [설정 열기]', async () => {
+  it('refusals keep the button\'s verb and their way out: signed out → [다시 로그인] · key lost → [다시 페어링] · no screen lock → [설정 열기]', async () => {
     server(res(201, {}));
     for (const [code, stopLine, sendLine, action] of [
       ['signed_out', ko.command.stop.signedOut, ko.command.send.signedOut, ko.command.signInAgain],
@@ -362,5 +478,85 @@ describe('[4534] [지금 지시] only when the daemon can put it into the turn',
     await press(ko.sheet.send);
     expect(commandLine()?.textContent).toBe(ko.sheet.tooLong);
     expect(calls.some((c) => c.url.endsWith('/messages'))).toBe(false);
+  });
+
+  // story 4633 (contract v0.4 §3 · Yuna's web line): a text the daemon refused for its hidden characters gets its own line, and it never
+  // goes into the chat as a message (the same words would arrive unchecked there)
+  it('[4633] the daemon refused it for hidden characters (instruct_hidden_text) → its own line, nothing as a message', async () => {
+    vi.useFakeTimers();
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'rejected', result_code: 'instruct_hidden_text' })]);
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: 'run the tests' });
+    await render();
+    await press(ko.button.instruct);
+    await type('run the tests');
+    await press(ko.sheet.send);
+    await poll(1);
+    expect(commandLine()?.textContent).toBe(ko.command.hiddenText);
+    expect(calls.some((c) => c.url.endsWith('/messages'))).toBe(false);
+  });
+
+  it('[4633] the server refuses it for hidden characters (instruct_hidden_text) → its own line, nothing as a message', async () => {
+    const calls = server(res(422, { error: { code: 'instruct_hidden_text' } }));
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: 'run the tests' });
+    await render();
+    await press(ko.button.instruct);
+    await type('run the tests');
+    await press(ko.sheet.send);
+    expect(commandLine()?.textContent).toBe(ko.command.hiddenText);
+    expect(calls.some((c) => c.url.endsWith('/messages'))).toBe(false);
+  });
+
+  // story 4633 (PO correction): the «send as a message» route is closed by the same check — a text with a hidden character never goes
+  // into the chat, even when the daemon only said «not now» (the fallback would deliver it unchecked)
+  it('[4633] the daemon said «not now», but the text holds a hidden character → no message; its own line', async () => {
+    vi.useFakeTimers();
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'rejected', result_code: 'instruct_not_now' })]);
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: `run${String.fromCodePoint(0x200b)} the tests` });
+    await render();
+    await press(ko.button.instruct);
+    await type(`run${String.fromCodePoint(0x200b)} the tests`);
+    await press(ko.sheet.send);
+    await poll(1);
+    expect(commandLine()?.textContent).toBe(ko.command.hiddenText);
+    expect(calls.some((c) => c.url.endsWith('/messages'))).toBe(false);
+  });
+
+  // story 4633 (Kadir 943fac90f · survivors): the two other message routes are held by the same check — the daemon found the turn ended
+  // (session_not_working) on the poll, and the server found it ended on the post — a hidden character means no message on either
+  it('[4633] the daemon found the turn ended (session_not_working) and the text holds a hidden character → no message; its own line', async () => {
+    vi.useFakeTimers();
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'rejected', result_code: 'session_not_working' })]);
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: `run${String.fromCodePoint(0x200b)} the tests` });
+    await render();
+    await press(ko.button.instruct);
+    await type(`run${String.fromCodePoint(0x200b)} the tests`);
+    await press(ko.sheet.send);
+    await poll(1);
+    expect(commandLine()?.textContent).toBe(ko.command.hiddenText);
+    expect(calls.some((c) => c.url.endsWith('/messages'))).toBe(false);
+  });
+
+  it('[4633] the server found the turn ended (409 session_not_working) and the text holds a hidden character → no message; its own line', async () => {
+    const calls = server(res(409, { error: { code: 'session_not_working' } }));
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: `run${String.fromCodePoint(0x200b)} the tests` });
+    await render();
+    await press(ko.button.instruct);
+    await type(`run${String.fromCodePoint(0x200b)} the tests`);
+    await press(ko.sheet.send);
+    expect(commandLine()?.textContent).toBe(ko.command.hiddenText);
+    expect(calls.some((c) => c.url.endsWith('/messages'))).toBe(false);
+  });
+
+  it('[4633 · probe] a tab and a CR in the text are not hidden characters — the not-now fallback still sends it as a message', async () => {
+    vi.useFakeTimers();
+    const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'rejected', result_code: 'instruct_not_now' })]);
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: 'run\tthe\rtests' });
+    await render();
+    await press(ko.button.instruct);
+    await type('run\tthe\rtests');
+    await press(ko.sheet.send);
+    await poll(1);
+    expect(commandLine()?.textContent).toBe(ko.command.sentAsMessageNotNow);
+    expect(calls.some((c) => c.url.endsWith('/messages'))).toBe(true);
   });
 });

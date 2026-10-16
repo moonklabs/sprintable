@@ -91,7 +91,7 @@ export function ProjectAccessSection({ projectId }: ProjectAccessSectionProps) {
         // 차단 — DELETE grant
         const res = await fetchWithAuth(`/api/projects/${projectId}/access/${existing.id}`, { method: 'DELETE' });
         if (res.ok) {
-          setMessage({ type: 'success', text: `${member.name} 접근 권한 해제됨` });
+          setMessage({ type: 'success', text: t('projectMemberTakeOff', { name: member.name }) });
           await refreshData();
         } else {
           setMessage({ type: 'error', text: t('projectAccessRevokeFailed') });
@@ -104,7 +104,7 @@ export function ProjectAccessSection({ projectId }: ProjectAccessSectionProps) {
           body: JSON.stringify({ org_member_id: member.id, role: member.role }),
         });
         if (res.ok) {
-          setMessage({ type: 'success', text: `${member.name} 접근 권한 부여됨` });
+          setMessage({ type: 'success', text: t('projectMemberPutOn', { name: member.name }) });
           await refreshData();
         } else {
           setMessage({ type: 'error', text: t('projectAccessGrantFailed') });

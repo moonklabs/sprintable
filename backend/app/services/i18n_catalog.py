@@ -57,6 +57,31 @@ _CATALOG: dict[str, dict[str, str]] = {
     # no path; a lock screen and a notice history keep them)
     "agent_permission.notice_title": {"ko": "권한 대기 · {agent}", "en": "Waiting for permission · {agent}"},
     "agent_permission.notice_title_bare": {"ko": "권한 대기", "en": "Waiting for permission"},
+    # story #4631 (Yuna «4631» §5 · §5-1) — a conversation whose agent messages are paused (the flood block): what the refused agent
+    # reads (423 · true to how this org's block is released), and the notice to org owners/admins (where to resume it)
+    "conversation.agents_paused_message": {
+        "ko": "이 대화의 에이전트 메시지가 멈춰 있어요(에이전트끼리 짧은 사이에 메시지가 너무 많이 오감)",
+        "en": "Agent messages in this conversation are paused (agents sent each other too many messages in a short time)",
+    },
+    "conversation.agents_paused_hint_manual": {
+        "ko": "조직 관리자가 풀 때까지 이 대화에 보내지 마세요 — 다시 보내도 막혀요",
+        "en": "Don't send to this conversation until an organization admin resumes it — sending again is blocked too",
+    },
+    "conversation.agents_paused_hint_auto": {
+        "ko": "대화가 {n}분쯤 조용하면 다시 보낼 수 있어요 — 그 전에 보내면 또 막혀요",
+        "en": "You can send again once the conversation has been quiet for about {n} minutes — sending before then is blocked too",
+    },
+    # n = 1 (an org whose window is 30 s or less): the catalog has no plural forms, so the singular is its own key (Yuna «4631» 63행)
+    "conversation.agents_paused_hint_auto_one": {
+        "ko": "대화가 {n}분쯤 조용하면 다시 보낼 수 있어요 — 그 전에 보내면 또 막혀요",
+        "en": "You can send again once the conversation has been quiet for about {n} minute — sending before then is blocked too",
+    },
+    "conversation.agents_paused_notice_title": {"ko": "에이전트 메시지를 멈췄어요 · {conversation}", "en": "Agent messages paused · {conversation}"},
+    "conversation.agents_paused_notice_title_bare": {"ko": "에이전트 메시지를 멈췄어요", "en": "Agent messages paused"},
+    "conversation.agents_paused_notice_body": {
+        "ko": "에이전트끼리 짧은 사이에 메시지를 너무 많이 주고받았어요. 대화를 열어 [멈춤 풀기]로 풀 수 있어요.",
+        "en": "Agents sent each other too many messages in a short time. Open the conversation to resume them with [Resume agent messages].",
+    },
     # story #4534 — a phone's [지금 지시] line in the conversation and its turn-end notice (명세 B-3: no instruction text,
     # command or path in the notice; «마쳤어요» is not used — the turn ended, not the work)
     "desktop_command.prompt_line": {"ko": "지시 · 지금 턴에 보냄", "en": "Instruction · sent into the current turn"},
@@ -73,6 +98,32 @@ _CATALOG: dict[str, dict[str, str]] = {
     "desktop_command.turn_end_title.waiting_input": {"ko": "{agent} · 입력 대기", "en": "{agent} · Waiting for input"},
     "desktop_command.turn_end_title.usage_limit": {"ko": "{agent} · 사용 한도", "en": "{agent} · Usage limit"},
     "desktop_command.turn_end_title.paused_limit": {"ko": "{agent} · 한도로 쉬는 중", "en": "{agent} · Paused at usage limit"},
+    # story #4685 (Yuna `limit-notice-1014.md` — the words as written): an agent on the person's computer stood at the usage limit, and
+    # the one notice that it is working again. One agent: the title is the existing paused_limit one above (same words for the same
+    # state). Several told together: «{agent} and {others} more». No account · model · number of tries in the words.
+    "desktop_limit_notice.stood.title_many": {"ko": "{agent} 외 {others}개 · 한도로 쉬는 중", "en": "{agent} and {others} more · Paused at usage limit"},
+    "desktop_limit_notice.stood.body_known": {
+        "ko": "사용 한도에 걸려 멈췄어요 — {time}에 풀려요. 다시 일하기 시작하면 또 알려요.",
+        "en": "Hit the usage limit and stopped — it resets at {time}. You'll get another notice when work starts again.",
+    },
+    "desktop_limit_notice.stood.body_unknown": {
+        "ko": "사용 한도에 걸려 멈췄어요 — 풀리는 시각은 아직 몰라요. 다시 일하기 시작하면 또 알려요.",
+        "en": "Hit the usage limit and stopped — the reset time isn't known yet. You'll get another notice when work starts again.",
+    },
+    # story #4686 (Yuna `run-info-1014.md` (5)): where the limit hit — the account first (a usage limit hits the ACCOUNT), then the model.
+    # Appended to the «stood» body only (never to «lifted»); no line at all when nothing is known.
+    "desktop_limit_notice.where": {"ko": "한도가 걸린 곳: {where}.", "en": "Limit reached on: {where}."},
+    "desktop_limit_notice.where_account_model": {"ko": "{account} · {model}", "en": "{account} · {model}"},
+    "desktop_limit_notice.where_more_accounts": {"ko": "{account} 외 계정 {k}개", "en": "{account} and {k} more accounts"},
+    # the {time} of the body: the person's clock — «오후 3:20» / «3:20 PM»; another day adds the date — «10월 15일 오전 9:00» / «Oct 15, 9:00 AM»
+    "desktop_limit_notice.time.am": {"ko": "오전", "en": "AM"},
+    "desktop_limit_notice.time.pm": {"ko": "오후", "en": "PM"},
+    "desktop_limit_notice.time.clock": {"ko": "{ampm} {hour}:{minute}", "en": "{hour}:{minute} {ampm}"},
+    "desktop_limit_notice.time.dated": {"ko": "{month}월 {day}일 {clock}", "en": "{month} {day}, {clock}"},
+    "desktop_limit_notice.lifted.title_one": {"ko": "{agent} · 작업 중", "en": "{agent} · Working"},
+    "desktop_limit_notice.lifted.title_many": {"ko": "{agent} 외 {others}개 · 작업 중", "en": "{agent} and {others} more · Working"},
+    "desktop_limit_notice.lifted.body_one": {"ko": "사용 한도가 풀려 다시 일하기 시작했어요.", "en": "The usage limit reset and it's working again."},
+    "desktop_limit_notice.lifted.body_many": {"ko": "사용 한도가 풀려 다시 일하기 시작했어요.", "en": "The usage limit reset and they're working again."},
     "desktop_command.turn_end_title.error": {"ko": "{agent} · 오류", "en": "{agent} · Error"},
     "desktop_command.turn_end_title_bare.waiting_input": {"ko": "입력 대기", "en": "Waiting for input"},
     "desktop_command.turn_end_title_bare.usage_limit": {"ko": "사용 한도", "en": "Usage limit"},

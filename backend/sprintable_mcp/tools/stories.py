@@ -1,7 +1,9 @@
-"""스토리 관련 MCP 도구 (7개). E-SECURITY SEC-S1: delete_story는 의도적으로 제거됨 — 에이전트
+"""스토리 관련 MCP 도구 (8개 · story 4615: get_story). E-SECURITY SEC-S1: delete_story는 의도적으로 제거됨 — 에이전트
 hard-delete는 사람 승인 없는 물리삭제라 차단(DELETE 엔드포인트 자체는 유지, 휴먼 전용으로 승격).
 삭제가 필요한 워크플로우는 상태변경/archive로 대체."""
 from __future__ import annotations
+
+import uuid
 
 from mcp.types import CallToolResult, TextContent
 
@@ -36,6 +38,11 @@ class ListStoriesInput(SprintableInput):
     assignee_id: str | None = None
     limit: int | None = None
     cursor: str | None = None  # 이전 호출의 X-Next-Cursor 헤더 값을 그대로 넘기면 다음 페이지.
+
+
+class GetStoryInput(SprintableInput):
+    # story 4615: the id a hand-over gives (`source="story:<uuid>"`) — a UUID, never a free string in the path (Qadir 4853 ②)
+    story_id: uuid.UUID
 
 
 class ListBacklogInput(SprintableInput):
@@ -167,6 +174,15 @@ async def list_stories(args: ListStoriesInput) -> list[TextContent]:
         items, headers = await client.get_with_headers("/api/v2/stories", params=params)
         has_more, next_cursor = _has_more_from_headers(headers, items)
         return ok_paginated(items, has_more=has_more, next_cursor=next_cursor, tool_name="sprintable_list_stories")
+    except Exception as exc:
+        return err(exc)
+
+
+async def get_story(args: GetStoryInput) -> list[TextContent]:
+    """story 4615: one story in full — description · acceptance criteria · status · assignees · epic. The server's own read
+    (`GET /api/v2/stories/{id}`), so its org/project scope check is the same: another org's story or a missing one is 404."""
+    try:
+        return ok(await client.get(f"/api/v2/stories/{args.story_id}"))
     except Exception as exc:
         return err(exc)
 

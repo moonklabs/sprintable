@@ -147,7 +147,8 @@ async def test_a_move_is_the_device_and_its_keys_only(movable):
         ex = r.json()
         assert ex["setup_kind"] == "move" and "recipe_name" not in ex  # PO 04:24Z: a move has no recipe name at all
         mine = ex["agents"][0]
-        assert set(mine) == {"member_id", "runtime", "existing", "name", "api_key"}  # no role, no stages
+        assert set(mine) == {"member_id", "runtime", "existing", "name", "api_key", "tools"}  # no role, no stages · story 4653: its tools (none here)
+        assert mine["tools"] == []
         assert (mine["member_id"], mine["existing"], mine["runtime"], mine["name"]) == (str(EXISTING), True, "claude", "Existing")
         assert await _live_keys(EXISTING) == 1
         assert (await c.get("/api/v2/auth/me", headers={"Authorization": f"Bearer {old_a}"})).status_code == 401

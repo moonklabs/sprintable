@@ -204,6 +204,26 @@ const NON_NUMBER_PLACEHOLDER_NAMES = new Set([
   // 아님) — verify.evidenceSignedBy="{name}{josa} 남김"·recruiter.verifyGuideMcp="…{runtime}{josa} 열어…"
   // 등 6키가 이 이름을 쓴다. 개별 EXEMPT_PAIRS 대신 규칙(이 이름은 수-인접이 아님)으로 안다.
   'josa',
+  // story #4599 — {folder}: a folder's words. ko.json's three uses read directly (2026-10-07): docs.docTreeMovedIntoFolder
+  // «{title}, {folder} 폴더로 이동했어요.» (a folder's name) · chats.agentSession.line.waitingSystemFolder / …FolderPhone
+  // «macOS가 그 컴퓨터 화면에서 {folder} 쓸지 묻고 있어요 …» filled from a closed list of folder words with their particle
+  // («문서 폴더를» · «데스크탑 폴더를» · «다운로드 폴더를» · «네트워크 볼륨을» · «iCloud Drive를») — the `name` · `channel` axis,
+  // never a count. The pairs it raised (state.stopped «끝» · button.endSession / endDialog.confirm «세션 끝내기» inside that line)
+  // are the line naming the button that stands beside it — the designed copy (Yuna §①), not two counts in one word.
+  'folder',
+  // story #4624 — {phone} · {device}: a phone's label and a computer's name. ko.json's uses read directly (2026-10-08): {phone} only in
+  // desktop.remoteDevices (confirmRemove · confirmRemovePhone · phoneRemoved · removed · alreadyRemoved — «뺐어요 · {phone}» etc., the
+  // phone's own label, Yuna 14:15Z «the name in the label place») · {device} in desktop.disconnect* («{device} 연결 끊기» …), the
+  // device head «{device} · {org}», remoteDevices.pairedWith «짝: {device}» / confirmRemove, phonePairing.confirm / paired — always a
+  // computer's name. The `name` · `channel` axis, never a count.
+  'phone', 'device',
+  // story 4693 — {file}: one of the two instruction-file names the desktop app looks for in a project's folder — «CLAUDE.md» · «AGENTS.md» (a closed table in
+  // the app, Yuna 10-15 yuna/4693-copy.md). ko/en lines: recruiter.folderTraceTitle / folderTraceBody · nav.switcherFolderTrace — always a file's name before
+  // «파일이» / «파일을», the `filename` axis, never a count.
+  'file',
+  // story 4695 — {org}: an organization's name (Yuna 4695-pairing-copy.md takenOtherOrgNamed — «이 폰은 {org} 조직의 컴퓨터와 이미 페어링돼 있어…»; the
+  // server names the organization the phone is paired in, to a member of it) — a name, never a count (the `name` · `project` axis).
+  'org',
 ]);
 const PLACEHOLDER_NAME_RE = /\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
 
@@ -389,6 +409,17 @@ export function findMemberSynonymCollisions(
 // 낀 세 쌍(3402 2·3575 1) 전부 그래서 삭제(양성대조: 제외 로직을 끄면 다시 RED가 되어야
 // 한다).
 export const EXEMPT_PAIRS = new Set<string>([
+  // story #4624 (Yuna «미르코 범위» 08:0xZ) — [이 폰 빼기]'s confirmation («… 짝지은 컴퓨터 {n}대와 모두 끊겨요. 원격 기기 자리 하나가
+  // 비고 …» · {n} = the computers that phone is paired with) contains «원격 기기», the section's own title. Not the shape this guard
+  // is for (#2352/#2365: two counted phrases read as one another): the title counts nothing, and the sentence names the remote
+  // device place — the very thing the section lists — on purpose (the two removals, a pair vs the phone itself, are told apart by
+  // that word). Look again if the title ever carries a count («원격 기기 · {n}»).
+  'desktop.remoteDevices.confirmRemovePhone <-> desktop.remoteDevices.title',
+  // story #4630 (Yuna «4630» ①) — the result line «다른 로그인 {n}개를 끝냈어요 — 길어야 1시간 안에 로그아웃되고, …» contains
+  // «로그아웃», the confirmation dialog's button. Not the shape this guard is for (#2352/#2365: two counted phrases read as one
+  // another): the button is a verb inside the dialog, the line a sentence under the card's own button; «로그아웃» is the same act on
+  // purpose (Yuna split «끝냈어요» now · «로그아웃» within an hour). Look again if the line ever becomes a label or a count title.
+  'settings.otherSessionsConfirmButton <-> settings.otherSessionsDone',
   // story #4458 (PO 10:56Z · Yuna 11:00Z) — the held campaign's needs_check sentence («…으로 만들어져 시작하지 않았어요 — …» · {amount}
   // = a money amount) contains «시작», the start dialog's confirm button label. Not the shape
   // this guard is for (#2352/#2365: two counted phrases read as one another): the sentence and the button are never on the card

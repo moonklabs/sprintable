@@ -156,7 +156,6 @@ app/routers/context_pack.py::해당 프로젝트 접근 권한이 없습니다
 app/routers/conversations.py::님의 새 메시지
 app/routers/conversations.py::님이 나를 멘션했어요
 app/routers/conversations.py::서킷브레이커 해제는 org owner/admin만 가능합니다.
-app/routers/conversations.py::폭주 감지로 이 대화의 agent 발신이 일시 차단되었습니다 — org owner/admin의 해제 또는 자동 해소를 기다려주세요.
 app/routers/conversations.py::현재 보고 있는 프로젝트(제외 대상)
 app/routers/cron.py::관찰된 참조 0건(수집범위: mention/embed, source=chat_message·doc만 — PR/커밋/증거자유텍스트는 미수집이라 이 수에 없음)
 app/routers/cron.py::인데 CRON_SECRET 미설정 — 내부 cron 엔드포인트가 인증 없이 공개된다(fail-closed·story #2072).
@@ -527,12 +526,10 @@ app/services/billing_scheduler.py::Sprintable 정기결제(갱신)
 app/services/billing_scheduler.py::WITH absolute_latest_grants AS (\n                    -- companion 유무와 무관하게, org별 «절대 최신» grant 정확히 1건을\n                    -- 먼저 확定(위 불변식 ⓐ 이전 단계 — superseded 판정의 유일한 축).\n                    SELECT DISTINCT ON (org_id) id, org_id, amount_minor, currency,\n                           metadata AS entry_metadata\n                    FROM billing_ledger_entries\n                    WHERE entry_type = 'credit_grant' AND metadata->>'kind' = 'tier_grant'\n                    ORDER BY org_id, ts DESC\n                )\n                SELECT lg.id, lg.org_id, lg.amount_minor, lg.currency, lg.entry_metadata\n                FROM absolute_latest_grants lg\n                WHERE NOT EXISTS (\n                    -- «그 특정 절대-최신 행 하나»에만 companion 유무를 검사(불변식 ⓐ).\n                    -- companion이 있으면 이 org는 이번 스윕에서 후보가 아예 없음(구\n                    -- grant로 되돌아가지 않는다 — superseded는 영구 제외).\n                    SELECT 1 FROM billing_ledger_entries r\n                    WHERE r.entry_type = 'adjustment'\n                      AND r.metadata->>'kind' = 'tier_grant_revert'\n                      AND r.metadata->>'reverted_entry_id' = lg.id::text\n                )
 app/services/blog_destinations.py::블로그 목적지는 아직 배선되지 않았습니다(wordpress=조각③b·webhook=조각④에서 배선 예정).
 app/services/campaigns.py::campaign을 찾을 수 없습니다:
-app/services/chain_escalation.py::)이 발생해 agent 발신이 일시 차단됐어요. 이 알림의 «차단 해제»로 즉시 풀 수 있어요.
 app/services/chain_escalation.py::)이 발생했어요.
 app/services/chain_escalation.py::human 참가자가 없는 대화에서 최근
 app/services/chain_escalation.py::건(임계
 app/services/chain_escalation.py::무인간 대화 무감독 연쇄 감지
-app/services/chain_escalation.py::무인간 대화 자동 차단(서킷브레이커)
 app/services/chain_escalation.py::초간 메시지
 app/services/channel_adapters.py::Sprintable 호스팅 블로그
 app/services/channel_adapters.py::fail-closed: prod 배포에 테스트용 채널 어댑터가 등재돼 있습니다(SANDBOX_CHANNEL_ENABLED가 prod에 잘못 설정됐을 가능성 — story #4009 AC3):

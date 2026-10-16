@@ -38,6 +38,10 @@ class AgentApiKeyUsageLog(Base):
     endpoint: Mapped[str] = mapped_column(Text, nullable=False)
     method: Mapped[str] = mapped_column(Text, nullable=False)
     remote_ip: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #4546 (0447) — through our MCP client or not (its own X-MCP-Transport · NULL = a direct call) and, inside a tool call, the
+    # tool (X-Sprintable-Tool). The client's own words: for looking, never for deciding.
+    mcp_transport: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tool_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

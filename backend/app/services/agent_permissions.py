@@ -19,7 +19,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -74,6 +74,24 @@ class RemoteDeviceRegistration(BaseModel):
 
     label: str = Field(min_length=1, max_length=64)
     public_key: str = Field(min_length=1, max_length=2048)
+    # story #4629: the phone's own refresh token, added by the web route from its session cookie (never by the phone) — only
+    # its hash is looked up, to record which session registered the key; never stored, never echoed back
+    refresh_token: str | None = Field(default=None, max_length=4096, repr=False)
+
+
+async def _session_row_id(db: AsyncSession, *, user_id: uuid.UUID, raw: str | None) -> uuid.UUID | None:
+    """story #4629: the live refresh-token row this raw token is — the person's own only (another person's token binds nothing)."""
+    if not raw:
+        return None
+    from app.core.security import hash_token
+    from app.models.user import RefreshToken
+
+    return (await db.execute(
+        select(RefreshToken.id).where(
+            RefreshToken.token_hash == hash_token(raw), RefreshToken.user_id == user_id,
+            RefreshToken.revoked_at.is_(None), RefreshToken.expires_at > func.now(),
+        )
+    )).scalar_one_or_none()
 
 
 def _device_view(d: RemoteDevice, pairs: list[dict] | None = None) -> dict:
@@ -86,15 +104,71 @@ def _device_view(d: RemoteDevice, pairs: list[dict] | None = None) -> dict:
     }
 
 
-async def register_phone(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, body: RemoteDeviceRegistration) -> tuple[dict, bool]:
+async def _key_of_same_person(db: AsyncSession, key: RemoteDevice, user_id: uuid.UUID | None) -> str | None:
+    """story 4695 — the caller (by their login) is the person the key's member is? → `movable` (the key holds no live pairing) ·
+    `has_pairings` (it holds one: it stays in its organization) · None (another person's key)."""
+    from app.models.member import Member
+
+    if user_id is None:
+        return None
+    owner = (await db.execute(select(Member.user_id).where(Member.id == key.member_id))).scalar_one_or_none()
+    if owner is None or owner != user_id:
+        return None
+    live = (await db.execute(
+        select(func.count()).select_from(RemoteDevicePairing).where(RemoteDevicePairing.remote_device_id == key.id, RemoteDevicePairing.removed_at.is_(None))
+    )).scalar_one()
+    return "movable" if live == 0 else "has_pairings"
+
+
+async def _org_name_if_member(db: AsyncSession, *, key_org_id: uuid.UUID, user_id: uuid.UUID | None) -> str | None:
+    """story 4695 — the name of an organization, only to a person who is (still) a member of it."""
+    from app.models.organization import Organization
+    from app.models.project import OrgMember
+
+    if user_id is None:
+        return None
+    return (await db.execute(
+        select(Organization.name).join(OrgMember, OrgMember.org_id == Organization.id)
+        .where(Organization.id == key_org_id, OrgMember.user_id == user_id, OrgMember.deleted_at.is_(None))
+    )).scalars().first()
+
+
+async def register_phone(
+    db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, body: RemoteDeviceRegistration, user_id: uuid.UUID | None = None,
+) -> tuple[dict, bool]:
     """The phone app registers its key under the person's own login. The same key again → the same row (created False); a
-    fourth live key → 409 remote_device_limit with the three, to choose one to remove (PO B-4)."""
+    fourth live key → 409 remote_device_limit with the three, to choose one to remove (PO B-4). story #4629: the session it
+    registered from is recorded on the key (each registration — the latest login wins; none sent keeps what was there); a token
+    sent that is not a live login of the person → 401 session_ended."""
     der = _decode_public_key(body.public_key)
     fp = fingerprint_of(der)
-    existing = (await db.execute(select(RemoteDevice).where(RemoteDevice.fingerprint == fp).with_for_update())).scalar_one_or_none()
+    session_id = await _session_row_id(db, user_id=user_id, raw=body.refresh_token) if user_id is not None else None
+    # Kadir (5012): a phone whose login was ended with its key still holds an access token for up to an hour, and the web sends its
+    # now-dead refresh token along — that registration would bring the removed key back. A refresh token that is not a live login
+    # of this person (ended · expired · someone else's) → refused: sign in again. None sent (no cookie) records nothing, as before.
+    if body.refresh_token and user_id is not None and session_id is None:
+        raise DesktopRelayError(401, "session_ended", "this login has ended — sign in again to register the phone")
+    existing =(await db.execute(select(RemoteDevice).where(RemoteDevice.fingerprint == fp).with_for_update())).scalar_one_or_none()
     if existing is not None and existing.member_id != member_id:
-        raise DesktopRelayError(409, "remote_device_taken", "this phone key is registered by someone else")
+        # story 4695: the SAME person's key, registered under their member of another organization (the phone's login rested on
+        # another org of the account when it first registered) — it moves to the member of the org the QR is in, as long as it holds
+        # no live pairing there (a pair belongs to its organization's computer: that key stays where it is). Another person's → taken.
+        kind = await _key_of_same_person(db, existing, user_id)
+        if kind is None:
+            raise DesktopRelayError(409, "remote_device_taken", "this phone key is registered by someone else")
+        if kind == "has_pairings":
+            # the same person's own key — not «someone else's»: it pairs with computers of another organization of theirs
+            # which organization — the person is told where to remove the phone (they are a member there, so its name is theirs to see);
+            # a person who has since left that organization is told without a name
+            org_name = await _org_name_if_member(db, key_org_id=existing.org_id, user_id=user_id)
+            raise DesktopRelayError(409, "remote_device_other_org", "this phone key is paired with a computer of another organization of yours",
+                                    detail={"org_name": org_name} if org_name else None)
+        existing.member_id, existing.org_id = member_id, org_id
+        await db.flush()
     if existing is not None and existing.revoked_at is None:
+        if session_id is not None:
+            existing.session_token_id = session_id
+            await db.flush()
         return _device_view(existing), False
     # count under the person's rows' lock: two registrations at once cannot both be the third
     live = (await db.execute(
@@ -105,9 +179,14 @@ async def register_phone(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid
         raise DesktopRelayError(409, "remote_device_limit", "at most three phones", detail={"devices": [_device_view(d) for d in live]})
     if existing is not None:  # the person's own key, removed before — back as it was
         existing.revoked_at, existing.label, existing.org_id = None, body.label, org_id
+        if session_id is not None:
+            existing.session_token_id = session_id
         await db.flush()
         return _device_view(existing), True
-    row = RemoteDevice(id=uuid.uuid4(), member_id=member_id, org_id=org_id, label=body.label, public_key=body.public_key.rstrip("="), fingerprint=fp)
+    row = RemoteDevice(
+        id=uuid.uuid4(), member_id=member_id, org_id=org_id, label=body.label, public_key=body.public_key.rstrip("="), fingerprint=fp,
+        session_token_id=session_id,
+    )
     db.add(row)
     await db.flush()
     return _device_view(row), True
@@ -158,6 +237,71 @@ async def remove_pair(
     await db.flush()
     _wake_device_after_commit(db, setup_id)
     return True
+
+
+async def _end_phone_session(db: AsyncSession, phone: RemoteDevice, now: datetime) -> Literal["ended", "not_found"]:
+    """story #4629 (PO 09:02Z: A2): the login session the phone registered its key from — that one only. Its refresh token rotates
+    on every refresh (`replaced_by` · #2449), so the chain is followed to its live end and every live row of it is revoked through
+    the one revoke seam (`_explicit_revoke_values` · #3649 — it also closes the refresh grace window). No recorded session (a key
+    registered before 0446 · no token sent) or a chain with nothing live (already logged out · expired) → nothing is revoked:
+    «not_found» (PO: no other session is ever touched to make up for it)."""
+    from app.models.user import RefreshToken
+    from app.routers.auth import _explicit_revoke_values
+
+    chain: list[uuid.UUID] = []
+    at = phone.session_token_id
+    while at is not None and at not in chain and len(chain) < 10_000:
+        chain.append(at)
+        at = (await db.execute(select(RefreshToken.replaced_by).where(RefreshToken.id == at))).scalar_one_or_none()
+    if not chain:
+        logger.info("phone removed: no session recorded — key and pairs only", extra={"structured": {"event": "phone_removed_session_not_found", "why": "none_recorded"}})
+        return "not_found"
+    live = (await db.execute(
+        update(RefreshToken)
+        .where(RefreshToken.id.in_(chain), RefreshToken.revoked_at.is_(None), RefreshToken.expires_at > now)
+        .values(**_explicit_revoke_values(now))
+    )).rowcount
+    # a row rotated out keeps its expiry (#2449: only revoked_at is set), so within the refresh grace window the phone could
+    # present its previous token and fork a new session — every row of the chain is closed too (Min 09:27Z · its revoked_at kept)
+    await db.execute(
+        update(RefreshToken).where(RefreshToken.id.in_(chain), RefreshToken.expires_at > now).values(expires_at=now)
+    )
+    if not live:
+        logger.info("phone removed: its session is no longer live — key and pairs only", extra={"structured": {"event": "phone_removed_session_not_found", "why": "not_live"}})
+        return "not_found"
+    return "ended"
+
+
+async def remove_phone(
+    db: AsyncSession, *, phone_id: uuid.UUID, actor_member_id: uuid.UUID | None, actor_is_admin: bool, org_id: uuid.UUID,
+) -> tuple[bool, Literal["ended", "not_found"] | None]:
+    """story #4624 (1선 · PO 07:58Z): [이 폰 빼기] — the key itself. Before, nothing ever set `revoked_at`: a phone reinstalled three
+    times held three live keys for good (`remote_device_limit`), and the product's own advice («원격 기기에서 하나를 빼 주세요») could
+    only remove pairs. Now: the key's owner or an owner/admin of its org — anyone else gets the same 404 as a key that does not exist.
+    `revoked_at` set (the limit counts live keys only) · every live pair of it removed the [빼기] way (`pairing_removed` goes down to
+    each setup until its snapshot drops it) · each of those setups woken. Already removed → False (idempotent). The same key
+    registered again by its owner comes back (register_phone · unchanged). story #4629: also that phone's own login session
+    (`_end_phone_session` → «ended» · «not_found»; None when nothing was removed)."""
+    phone = (await db.execute(
+        select(RemoteDevice).where(RemoteDevice.id == phone_id, RemoteDevice.org_id == org_id).with_for_update()
+    )).scalar_one_or_none()
+    if phone is None or not (actor_is_admin or phone.member_id == actor_member_id):
+        raise DesktopRelayError(404, "phone_not_found", "no such phone")
+    if phone.revoked_at is not None:
+        return False, None
+    now = _now()
+    phone.revoked_at = now
+    pairs = (await db.execute(
+        select(RemoteDevicePairing).where(RemoteDevicePairing.remote_device_id == phone_id, RemoteDevicePairing.removed_at.is_(None))
+        .with_for_update()
+    )).scalars().all()
+    for pair in pairs:
+        pair.removed_at, pair.removed_by, pair.removal_acked_at = now, actor_member_id, None
+    await db.flush()
+    session = await _end_phone_session(db, phone, now)
+    for setup_id in {p.setup_id for p in pairs}:
+        _wake_device_after_commit(db, setup_id)
+    return True, session
 
 
 class PairingReport(BaseModel):
@@ -249,6 +393,50 @@ class PairingReveal(BaseModel):
     reveal: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$")  # 32 bytes · base64url, no padding
 
 
+async def pairing_target_org(db: AsyncSession, *, user_id: uuid.UUID, setup_id: uuid.UUID) -> uuid.UUID | None:
+    """story 4695 — which organization is the computer of this QR in, for a person who is a member of THAT organization? The phone's
+    session may be on another org of the same account (the page sits outside the shell, so no org header is carried and the login's
+    default org rules): the offer must go to the QR's org. Only a member of the computer's org gets the answer (the same «one answer»
+    as the offer itself for anyone else — a live, exchanged computer; nothing is said about computers of organizations they are not in)."""
+    from app.models.project import OrgMember
+
+    return (await db.execute(
+        select(DesktopSetup.org_id)
+        .join(OrgMember, (OrgMember.org_id == DesktopSetup.org_id) & (OrgMember.user_id == user_id) & OrgMember.deleted_at.is_(None))
+        .where(DesktopSetup.id == setup_id, DesktopSetup.revoked_at.is_(None), DesktopSetup.exchanged_at.is_not(None))
+    )).scalars().first()
+
+
+async def _log_setup_not_found(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, setup_id: uuid.UUID) -> None:
+    """story 4695 — the phone is told ONE thing for four causes (as the device-token code: nothing says which computers exist), so the
+    server's own record is where they are told apart: no such computer · it is another organization's than the session's (and whether the
+    caller is a member of THAT organization — the multi-org account whose session org is not the QR's) · disconnected · never exchanged.
+    Words only — no id, no name, no value. A failing log never changes the answer."""
+    try:
+        from app.models.member import Member
+        from app.models.project import OrgMember
+
+        row = (await db.execute(
+            select(DesktopSetup.org_id, DesktopSetup.revoked_at, DesktopSetup.exchanged_at).where(DesktopSetup.id == setup_id)
+        )).first()
+        if row is None:
+            reason, caller_in_setup_org = "no_such_computer", None
+        elif row.org_id != org_id:
+            user_id = (await db.execute(select(Member.user_id).where(Member.id == member_id))).scalar_one_or_none()
+            member_there = None if user_id is None else (await db.execute(
+                select(OrgMember.id).where(OrgMember.org_id == row.org_id, OrgMember.user_id == user_id, OrgMember.deleted_at.is_(None))
+            )).first() is not None
+            reason, caller_in_setup_org = "computer_of_another_org", member_there
+        elif row.revoked_at is not None:
+            reason, caller_in_setup_org = "computer_disconnected", None
+        else:
+            reason, caller_in_setup_org = "computer_not_exchanged", None
+        logger.info("pairing offer refused as setup_not_found: reason=%s caller_in_computers_org=%s", reason, caller_in_setup_org)
+    except Exception as exc:  # noqa: BLE001 — a record that cannot be written is not a reason to change what the phone is told
+        # the kind of failure only: a traceback or a message of a failed query carries its parameters (the setup · org ids)
+        logger.warning("pairing offer refused as setup_not_found: reason could not be read (%s)", type(exc).__name__)
+
+
 async def offer_pairing(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, body: PairingOffer) -> RemoteDevicePairingOffer:
     """The phone scanned a desktop's QR: carry its registered key down to that desktop with the MAC the phone made from the QR's
     secret. The server never sees that secret, so it can neither make nor check the MAC — a key it swapped would not match it on
@@ -267,6 +455,7 @@ async def offer_pairing(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.
                                    DesktopSetup.revoked_at.is_(None), DesktopSetup.exchanged_at.is_not(None))
     )).scalar_one_or_none()
     if setup is None:
+        await _log_setup_not_found(db, member_id=member_id, org_id=org_id, setup_id=body.setup_id)
         raise DesktopRelayError(404, "setup_not_found", "no such computer")
     if not await remote_control.is_enabled(db, org_id):
         raise DesktopRelayError(409, remote_control.OFF_CODE, "remote control is off for this organization")
@@ -419,13 +608,25 @@ class PermissionRequestReport(BaseModel):
     session_key: str = Field(pattern=SESSION_KEY_PATTERN)
     agent_member_id: uuid.UUID
     runtime: Literal["claude", "codex"]
-    tool: str = Field(pattern=_TOOL_PATTERN)
-    summary: str = Field(min_length=1, max_length=200)
+    tool: str | None = Field(default=None, pattern=_TOOL_PATTERN)
+    summary: str | None = Field(default=None, min_length=1, max_length=200)
     masked: bool = False
     truncated: bool = False
     workdir: str | None = Field(default=None, max_length=200)
-    input_hash: str = Field(pattern=_HASH_PATTERN)
+    input_hash: str | None = Field(default=None, pattern=_HASH_PATTERN)
     expires_at: AwareDatetime
+    # story #4590 (Mirko's contract v1.14 ①): a question only that computer's terminal can answer — nothing to sign, so no hash;
+    # its tool and summary only when the daemon read them. Every other report keeps all three, as before.
+    terminal_only: bool = False
+
+    @model_validator(mode="after")
+    def _fields_for_its_kind(self) -> "PermissionRequestReport":
+        if self.terminal_only:
+            if self.input_hash is not None:
+                raise ValueError("a terminal-only request carries no input_hash (nothing is signed)")
+        elif self.tool is None or self.summary is None or self.input_hash is None:
+            raise ValueError("tool, summary and input_hash are required unless the request is terminal_only")
+        return self
 
 
 async def report_request(db: AsyncSession, setup: DesktopSetup, body: PermissionRequestReport) -> tuple[AgentPermissionRequest, bool]:
@@ -453,14 +654,16 @@ async def report_request(db: AsyncSession, setup: DesktopSetup, body: Permission
         id=uuid.uuid4(), setup_id=setup.id, request_id=body.request_id, session_key=body.session_key,
         agent_member_id=body.agent_member_id, runtime=body.runtime, tool=body.tool, summary=body.summary, masked=body.masked,
         truncated=body.truncated, workdir=body.workdir, input_hash=body.input_hash, expires_at=body.expires_at, state="pending",
-        recipient_member_id=recipient, recipient_reason=reason,
+        recipient_member_id=recipient, recipient_reason=reason, terminal_only=body.terminal_only,
     )
     try:
         async with db.begin_nested():  # the same request twice at once: one row, the other reads it
             db.add(row)
     except IntegrityError:
         return (await db.execute(q)).scalar_one(), False
-    if recipient is not None:
+    # story #4590 (Yuna §3): a terminal-only question sends no notice — the notice is the phone's push, and a push calls a person to
+    # something they cannot do there; the card is on the approvals list (its count), the one at that computer sees the board
+    if recipient is not None and not row.terminal_only:
         await _send_permission_notice(db, setup, row, recipient)
     return row, True
 
@@ -496,7 +699,34 @@ async def _send_permission_notice(db: AsyncSession, setup: DesktopSetup, row: Ag
 class Withdrawal(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    reason: Literal["answered_locally", "session_ended", "expired", "host_unread"]
+    # story #4590 (Mirko ②): `terminal_only` — the question the phone could answer became one only the terminal can; the daemon withdraws
+    # the answerable row so and reports a new terminal-only one (a row never turns from answerable to not: the signing path is untouched)
+    reason: Literal["answered_locally", "session_ended", "expired", "host_unread", "terminal_only"]
+
+
+# story #4612 (PO 23:36Z · after 4607): a request's later change — answered · withdrawn · rejected by the daemon · back to pending
+# for its second answer — told to the one person whose list shows it (`list_for_member`: recipient_member_id only), so a card left
+# open on another screen leaves at once instead of at its next 15 s read. A transient SSE frame (no Event row — nothing for the
+# bell), carrying only which request and its state (the 4533 rule: no summary · tool · folder), sent after the outer commit
+# (`schedule_after_commit` — a rolled-back change sends nothing).
+PERMISSION_CHANGED_EVENT = "agent.permission_request.changed"
+
+
+def _schedule_changed(db: AsyncSession, request_id: uuid.UUID, recipient: uuid.UUID | None, state: str) -> None:
+    if recipient is None:
+        return
+    import functools
+
+    from app.services.after_commit import schedule_after_commit
+
+    payload = {"event_type": PERMISSION_CHANGED_EVENT, "request_id": str(request_id), "state": state}
+    schedule_after_commit(db, [functools.partial(_fire_changed, str(recipient), payload)])
+
+
+def _fire_changed(member_id: str, payload: dict) -> None:
+    from app.routers.events import _push_to_agent
+
+    _push_to_agent(member_id, dict(payload))  # no event_id → the transient path (its own id · the reconnect replay buffer)
 
 
 async def withdraw_request(db: AsyncSession, setup: DesktopSetup, request_id: uuid.UUID, body: Withdrawal) -> AgentPermissionRequest:
@@ -513,10 +743,12 @@ async def withdraw_request(db: AsyncSession, setup: DesktopSetup, request_id: uu
             raise DesktopRelayError(409, "not_allowed_yet", "only a network question answered «allow…» can end with its host unread")
         row.state, row.result_code = "withdrawn", "host_unread"
         await db.flush()
+        _schedule_changed(db, row.request_id, row.recipient_member_id, row.state)  # story #4612
         return row
     if row.state == "pending":
         row.state, row.result_code = "withdrawn", body.reason
         await db.flush()
+        _schedule_changed(db, row.request_id, row.recipient_member_id, row.state)  # story #4612
     return row
 
 
@@ -572,6 +804,7 @@ async def confirm_host(db: AsyncSession, setup: DesktopSetup, request_id: uuid.U
     row.stage, row.host, row.state, row.expires_at = "confirm", host, "pending", body.expires_at
     row.decision = row.answered_by = row.answered_phone_key_id = row.answered_at = row.result_code = None
     await db.flush()
+    _schedule_changed(db, row.request_id, row.recipient_member_id, row.state)  # story #4612: the card's second state
     return row
 
 
@@ -631,8 +864,14 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
     rows = [(r, s) for r, s in rows if state is None or shown_state(r, now) == state]
     if not rows:
         return []
+    from app.services import remote_control
+
     setup_ids = {s.id for _r, s in rows}
     reachable = await _reachable(db, setup_ids, now)
+    # story #4589 (PO 00:37Z): with the org's «원격 제어» off no answer can go down (the command is refused 409) — read here, never
+    # withdrawn: turned on again, the same rows are answerable again (a withdrawn row could never be: the daemon's same request_id
+    # finds it). The card says why in place of its buttons; «unknown» would call it a lost connection
+    off = not await remote_control.is_enabled(db, org_id)
     paired_setups = set((await db.execute(
         select(RemoteDevicePairing.setup_id).join(RemoteDevice, RemoteDevice.id == RemoteDevicePairing.remote_device_id)
         .where(RemoteDevice.member_id == member_id, RemoteDevice.revoked_at.is_(None), RemoteDevicePairing.removed_at.is_(None),
@@ -646,7 +885,9 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
     out = []
     for r, s in rows:
         shown = shown_state(r, now)
-        answerable = shown == "pending" and s.id in reachable and s.id in paired_setups
+        # story #4590: a terminal-only question is never answerable here (no button · no signing values · the answer route refuses it)
+        # story #4589: nor anything while the org's «원격 제어» is off
+        answerable = shown == "pending" and s.id in reachable and s.id in paired_setups and not r.terminal_only and not off
         role = next((m.get("role") for m in (s.members or []) if m.get("member_id") == str(r.agent_member_id)), None)
         out.append({
             "id": str(r.id), "request_id": str(r.request_id), "setup_id": str(s.id), "device_name": s.device_name,
@@ -654,12 +895,14 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
             # story 4542: the name a person reads (web card) by the one rule, from the row's own runtime + tool — the phone's signing
             # sheet never shows it (it names the tool from the value it signs)
             "runtime": r.runtime, "tool": r.tool,
-            "tool_name": {lang: shown_tool(r.runtime, r.tool, lang) for lang in ("ko", "en")},
+            # story #4590: no tool read (a terminal-only question) → no name; the card says «무엇을 묻는지는 … 볼 수 있어요» instead
+            "tool_name": {lang: shown_tool(r.runtime, r.tool, lang) for lang in ("ko", "en")} if r.tool is not None else None,
+            "terminal_only": r.terminal_only,
             "summary": r.summary, "masked": r.masked, "truncated": r.truncated, "workdir": r.workdir,
             "created_at": r.created_at.isoformat(), "expires_at": r.expires_at.isoformat(), "state": shown,
             "answered_by_name": names.get(r.answered_by) if r.answered_by else None, "decision": r.decision,
             "device_reachable": s.id in reachable, "recipient_reason": r.recipient_reason,
-            "answerable": answerable,
+            "answerable": answerable, "remote_control_off": off,
             # story 4532 (PO 21:39Z · 까디르 1선): the values the phone signs, read by the phone's own shell from here — never handed
             # over by the web page (a page that passes them could have the phone sign another request of the same tool). Only on a
             # row the person can answer now (까디르 ② · PO 01:40Z): `input_hash` is an unsalted sha256 of the raw input, so a short
@@ -675,12 +918,20 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
 
 def open_requests_count(*, member_id, org_id: uuid.UUID):
     """A scalar subquery: the requests sent to this person still open — pending and inside the window (an expired one is still
-    shown for a while, but waits for no answer). For the approvals badge's one statement (routers.gates)."""
+    shown for a while, but waits for no answer). For the approvals badge's one statement (routers.gates). story #4589: none while
+    the org's «원격 제어» is off — nothing can be answered here then (the list still shows them, with why)."""
+    from app.models.organization import Organization
+
     return (
         select(func.count()).select_from(AgentPermissionRequest)
         .join(DesktopSetup, DesktopSetup.id == AgentPermissionRequest.setup_id)
+        .join(Organization, Organization.id == DesktopSetup.org_id)
         .where(AgentPermissionRequest.recipient_member_id == member_id, AgentPermissionRequest.state == "pending",
-               AgentPermissionRequest.expires_at > func.now(), DesktopSetup.org_id == org_id)
+               AgentPermissionRequest.expires_at > func.now(), DesktopSetup.org_id == org_id,
+               # story #4590 (Yuna §3): a terminal-only question is on the list but never on the badge — nothing to do here
+               AgentPermissionRequest.terminal_only.is_(False),
+               # story #4589: nor anything while the org's «원격 제어» is off
+               Organization.remote_control_enabled_at.is_not(None))
         .scalar_subquery()
     )
 
@@ -715,6 +966,9 @@ async def answer_request(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid
         raise DesktopRelayError(409, "already_answered", "this request was answered", detail={"answered_by_name": who, "decision": row.decision})
     if row.state == "withdrawn":
         raise DesktopRelayError(410, "withdrawn", "the agent no longer waits for this answer")
+    # story #4590 (Mirko ③): only that computer's terminal answers it — no command goes down (its list row was never answerable)
+    if row.terminal_only:
+        raise DesktopRelayError(409, "terminal_only", "this question can only be answered in that computer's terminal")
     if shown_state(row, now) == "expired":
         raise DesktopRelayError(410, "expired", "the permission window has passed")
     # the phone must be this person's and paired to this device now — or the daemon would refuse it (unknown_key) and, the
@@ -737,6 +991,7 @@ async def answer_request(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid
     row.decision, row.answered_at = body.decision, now
     phone.last_used_at = now
     await db.flush()
+    _schedule_changed(db, row.request_id, row.recipient_member_id, row.state)  # story #4612: other open screens
     return row
 
 
@@ -761,9 +1016,12 @@ async def on_answer_result(db: AsyncSession, setup_id: uuid.UUID, request_id: st
     rid = _uuid(request_id)
     if rid is None:
         return
-    await db.execute(
+    changed = (await db.execute(
         update(AgentPermissionRequest)
         .where(AgentPermissionRequest.setup_id == setup_id, AgentPermissionRequest.request_id == rid,
                AgentPermissionRequest.state == "answered", AgentPermissionRequest.stage == stage)
         .values(state="rejected", result_code=result_code or state)
-    )
+        .returning(AgentPermissionRequest.request_id, AgentPermissionRequest.recipient_member_id)
+    )).all()
+    for req_id, recipient in changed:  # story #4612: only a row that really moved
+        _schedule_changed(db, req_id, recipient, "rejected")

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -8,8 +8,8 @@ import { Card } from '@/components/ui/card';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { useFlatHref } from '@/hooks/use-flat-href';
-import { agentOnDevice, permissionLine, shownToolName, stillShown, waitedMinutes, type PermissionRequest } from '@/lib/agent-permissions';
-import { isPhoneApp, phoneCall } from '@/lib/phone-bridge';
+import { agentOnDevice, permissionLine, requestAge, shownToolName, stillShown, type PermissionRequest } from '@/lib/agent-permissions';
+import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { answerOnPhone, type AnswerOutcome } from '@/lib/phone-answer';
 import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off';
@@ -36,13 +36,12 @@ const EMPTY_REFRESH_MS = 30_000;
 type PhoneAuth = 'biometric' | 'screen_lock' | 'biometric_required' | 'no_screen_lock';
 type Answer = { kind: 'sending'; decision: 'allow' | 'deny' } | AnswerOutcome;
 
-const noSubscribe = () => () => {};
-const notOnServer = () => false;
 
 const canConfirm = (auth: PhoneAuth) => auth === 'biometric' || auth === 'screen_lock';
 
 /** Re-read how the phone confirms — on mount and when the person comes back (from the phone's settings). `onRead` hears each read. */
 function usePhoneAuth(phone: boolean, onRead: (auth: PhoneAuth) => void): PhoneAuth | null {
+  const { phoneCall } = usePhoneBridge();
   const [auth, setAuth] = useState<PhoneAuth | null>(null);
   const heard = useRef(onRead);
   useEffect(() => { heard.current = onRead; });
@@ -58,9 +57,12 @@ function usePhoneAuth(phone: boolean, onRead: (auth: PhoneAuth) => void): PhoneA
     const onVisible = () => { if (document.visibilityState === 'visible') read(); };
     document.addEventListener('visibilitychange', onVisible);
     return () => { off = true; document.removeEventListener('visibilitychange', onVisible); };
-  }, [phone]);
+  }, [phone, phoneCall]);
   return phone ? auth : null;
 }
+
+/** story #4612: the server's SSE name for a request's later change (backend services/agent_permissions.py PERMISSION_CHANGED_EVENT) */
+const PERMISSION_CHANGED_EVENT = 'agent.permission_request.changed';
 
 async function readRequests(): Promise<PermissionRequest[] | null> {
   try {
@@ -78,7 +80,7 @@ export function AgentPermissionRequests() {
   const remoteOff = useRemoteOff(); // story #4583: why none come — only while off and with a connected computer
   const [requests, setRequests] = useState<PermissionRequest[] | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const phone = useSyncExternalStore(noSubscribe, isPhoneApp, notOnServer);
+  const { inPhoneApp: phone, phoneCall } = usePhoneBridge();
   // answers given on this page: the card stays with its line until the next read (story #4596 — the list is what waits; `at` = when its
   // answer was given)
   const [answers, setAnswers] = useState<ReadonlyMap<string, Kept>>(new Map());
@@ -95,10 +97,30 @@ export function AgentPermissionRequests() {
   const waiting = shown.length > 0;
   const [notices, setNotices] = useState(0);
   const readFor = useRef(-1);
+  // story #4612: the requests answered on THIS page — their change frame is not read on (the card keeps its result line until the
+  // next read, story #4596 D-1; a read at once would take it away the moment it was answered)
+  const answeredHere = useRef<ReadonlySet<string>>(new Set());
+  useEffect(() => { answeredHere.current = new Set([...answers.values()].map((k) => k.row.request_id)); }, [answers]);
 
   useSseNotifications({
     onNotification: (n) => {
       if (n.event_type === 'dispatched' && n.payload?.event_type === 'agent.permission_request') setNotices((k) => k + 1);
+    },
+    // story #4607: the server sends a person's notice as a NAMED frame (`event: dispatched` — backend routers/events.py, backfill and
+    // live), which the hook's default names and the unnamed `message` never receive — so a new request's notice never read the list
+    // here (the card came by the 15 s poll: 0.76 s / 9.1 s measured). Subscribed by name now.
+    // story #4612: a request's later change (answered · withdrawn · rejected · its second answer) comes as the named transient frame
+    // `agent.permission_request.changed` {request_id, state} — read at once, so a card left open here leaves when another screen,
+    // the terminal or the daemon changed it (it waited for the next 15 s read)
+    extraEventNames: ['dispatched', PERMISSION_CHANGED_EVENT],
+    onExtraEvent: (name, data) => {
+      if (name === PERMISSION_CHANGED_EVENT) {
+        const id = (data as { request_id?: unknown } | null)?.request_id;
+        if (typeof id === 'string' && !answeredHere.current.has(id)) setNotices((k) => k + 1);
+        return;
+      }
+      const d = data as { payload?: { event_type?: unknown } | null } | null;
+      if (d?.payload?.event_type === 'agent.permission_request') setNotices((k) => k + 1);
     },
   });
 
@@ -137,8 +159,9 @@ export function AgentPermissionRequests() {
 
   // story #4583 (Yuna copy.md row 4): while remote control is off no request reaches the server, so the list is empty without a word —
   // one muted line says why, above the list (web and the phone's approvals list are this component). Only with a connected computer:
-  // an org that never connected one gets no line (it would be noise).
-  const offLine = remoteOff && remoteOff.connectedComputers > 0 ? (
+  // an org that never connected one gets no line (it would be noise). story #4589: «새» requests — the ones waiting when it was turned
+  // off stay below, each with its own line (the words stay true with the list empty or not)
+  const offLine = remoteOff && remoteOff.connectedSetups > 0 ? (
     <div className="mb-4 flex flex-col gap-1" data-testid="agent-permission-remote-off">
       <p className="break-keep text-sm text-muted-foreground">
         {remoteOff.owner ? t('remoteOffOwner') : t('remoteOffOthers', remoteOff.names)}
@@ -211,6 +234,10 @@ function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
   const answersHere = phone && (answer !== null || (line === 'answerOnPhone' && r.state === 'pending' && r.answerable));
   // story #4580 AC2 (Yuna «4580 AC2» ① ② · 배치 ① ②): the network question — first with no host, then its second state with the host
   const net = r.tool === SANDBOX_NET_TOOL && r.runtime === 'claude' ? (r.stage === 'confirm' && r.host ? 'confirm' : 'ask') : null;
+  // story #4604 (Yuna · 4596 AC4 run 13b): the question's own words — «press [Allow…]» · «{host}에 연결하려고 해요» — only while it
+  // still asks (the waiting chip's rule): an answered · expired · withdrawn card keeps the tool name and its result line, never an
+  // instruction with no button under it. A press that came back (cancelled · failed) brings the buttons back, and the words with them
+  const asking = stillWaiting(r, answer);
   return (
     <Card className="flex flex-col gap-1.5 px-4 py-3" data-testid="agent-permission-card">
       <div className="flex w-full flex-wrap items-center gap-1.5">
@@ -219,22 +246,28 @@ function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
         ) : (
           <Badge variant="chip">{t('chip')}</Badge>
         )}
-        {line === 'unknown' || !stillWaiting(r, answer) ? null : (
-          <span className="text-[11px] text-muted-foreground" data-testid="agent-permission-waited">{t('waited', { n: waitedMinutes(r, now) })}</span>
+        {line !== 'unknown' && asking ? (
+          <span className="text-[11px] text-muted-foreground" data-testid="agent-permission-waited">{t('waited', requestAge(r, now))}</span>
+        ) : (
+          // story #4610 (run13b 20:45Z): every other card says when it was asked, in the chip's place — answered · expired · withdrawn
+          // cards stay a while (#4596) and several of one agent looked alike: which question a result belongs to is this time
+          <span className="text-[11px] text-muted-foreground" data-testid="agent-permission-asked">{t('asked', requestAge(r, now))}</span>
         )}
       </div>
       <p className="text-sm text-foreground">{agentOnDevice(r.agent_name, r.device_name)}</p>
       {r.role ? <p className="text-xs text-muted-foreground">{t('role', { role: r.role })}</p> : null}
-      <p className="text-xs text-foreground" data-testid="agent-permission-tool">{tool}</p>
-      {net === 'confirm' ? (
+      {/* story #4590 (Yuna §1): a terminal-only question whose tool was not read — where to see it, never a made-up name */}
+      {tool !== null ? <p className="text-xs text-foreground" data-testid="agent-permission-tool">{tool}</p>
+        : <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-tool-unread">{t('toolUnread')}</p>}
+      {net === 'confirm' ? (!asking ? null :
         <div className="space-y-1" data-testid="agent-permission-net-confirm">
           <p className="break-keep text-sm font-medium text-foreground [overflow-wrap:anywhere]">{t('net.confirmTitle', { host: r.host ?? '' })}</p>
           <p className="break-keep text-pretty text-sm text-foreground">{t('net.confirmBody')}</p>
           <p className="break-keep text-pretty text-xs text-muted-foreground">{t('net.confirmScope')}</p>
         </div>
-      ) : net === 'ask' ? (
+      ) : net === 'ask' ? (!(asking && line === 'answerOnPhone') ? null : // Yuna 4987: no «press [허용…]» where no button can come (no word from the computer · no paired phone)
         <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-net">{t('net.askLine')}</p>
-      ) : (
+      ) : r.summary === null ? null : ( // story #4590: no detail read → no summary box
         <div className="rounded-md bg-muted/50 px-2 py-1.5">
           <p className="break-all font-mono text-xs text-foreground">{r.summary}</p>
           {notes.length > 0 ? <p className="mt-0.5 text-[11px] text-muted-foreground">{notes.join(' · ')}</p> : null}
@@ -244,13 +277,15 @@ function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
       {net === 'ask' && r.host_unread && answer === null ? (
         <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-line">{t('net.hostUnread')}</p>
       ) : answersHere ? (
-        <PhoneAnswerPlace tool={tool} auth={auth} answer={answer} onAnswer={onAnswer} net={net} host={r.host ?? ''} hostUnread={r.host_unread === true} />
+        <PhoneAnswerPlace tool={tool ?? ''} auth={auth} answer={answer} onAnswer={onAnswer} net={net} host={r.host ?? ''} hostUnread={r.host_unread === true} />
       ) : (
         <p className="text-xs text-muted-foreground" data-testid="agent-permission-line">
           {line === 'expired' ? t('line.expired')
-            : line === 'unknown' ? t('line.unknown')
-              : line === 'noPairedPhone' ? t('line.noPairedPhone')
-                : t('line.answerOnPhone')}
+            : line === 'remoteControlOff' ? t('line.remoteControlOff') // story #4589: no link here — the off line above the list has it
+              : line === 'unknown' ? t('line.unknown')
+                : line === 'terminalOnly' ? t('line.terminalOnly')
+                : line === 'noPairedPhone' ? t('line.noPairedPhone')
+                  : t('line.answerOnPhone')}
         </p>
       )}
     </Card>
@@ -265,6 +300,7 @@ function PhoneAnswerPlace({ tool, auth, answer, onAnswer, net = null, host = '',
   /** story #4580 AC2 F2 (Yuna 2-7): the host could not be read — the request ended with nothing allowed */
   hostUnread?: boolean;
 }) {
+  const { phoneCall } = usePhoneBridge();
   const t = useTranslations('agentPermissions');
   const flat = useFlatHref();
   const a = answer;

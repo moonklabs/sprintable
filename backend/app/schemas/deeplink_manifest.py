@@ -777,6 +777,31 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
             ),
             channel=DeepLinkChannelFields(channel_grade=ChannelGrade.a2),
         ),
+        # story #4685 — an agent on the person's computer stood at the usage limit / the limit lifted and it works again
+        # (reference_id = the agent). No screen of its own to open yet (the computer's session list is not a route) → the
+        # «지금» tab, the same safe landing as agent.permission_request; promotion waits for that screen (Yuna 10-14 [판단]).
+        DeepLinkManifestEntry(
+            app=DeepLinkAppFields(
+                type="agent.limit_paused", target="now", parent_tab=ParentTab.all,
+                target_promotion_pending=True,
+                return_policy=ReturnPolicy.fallback_now,
+            ),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=False,
+                required_payload=["reference_id"],
+            ),
+        ),
+        DeepLinkManifestEntry(
+            app=DeepLinkAppFields(
+                type="agent.limit_lifted", target="now", parent_tab=ParentTab.all,
+                target_promotion_pending=True,
+                return_policy=ReturnPolicy.fallback_now,
+            ),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=False,
+                required_payload=["reference_id"],
+            ),
+        ),
         # story #4534 (E-DESKTOP-2 B-3) — the turn a phone's [지금 지시] went into has ended: opens the conversation the agent
         # answers in (reference_id = that conversation). project_id: the device's setup may have none, so not promised.
         DeepLinkManifestEntry(
@@ -815,10 +840,10 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
         # story #2630: 서킷브레이커 open — 위 unsupervised_chain_expired와 달리 «관측»이
         # 아니라 agent 발신이 실제로 막힌 상태다. org owner/admin이 해제(release) 액션을
         # 취할 수 있어야 풀리므로(manual release_mode가 기본) A2(조치 필요·비긴급) —
-        # SLA성 즉시대응은 아니라 A1은 과함. reference_id는 conversation_id가 아니라
-        # chain_circuit_breaker.id(release 엔드포인트가 그 id로 타겟팅, chain_escalation.py
-        # evaluate_unsupervised_chain_episode 참조) — target은 그래도 chat_thread(탭하면
-        # 그 대화로 이동, 해제 액션 자체는 알림 카드에서).
+        # SLA성 즉시대응은 아니라 A1은 과함. story #4631: reference_id = conversation_id —
+        # target(chat_thread)과 해제 엔드포인트(/conversations/{id}/circuit-breaker/release)가 둘 다
+        # 대화 id로 받는다(전엔 chain_circuit_breaker.id라 탭하면 없는 대화로 갔다). 해제 단추는
+        # 그 대화 머리의 차단 띠(웹 · 4631 C).
         DeepLinkManifestEntry(
             app=DeepLinkAppFields(
                 type="conversation.circuit_breaker_opened", target="chat_thread",

@@ -115,6 +115,7 @@ def _repo(*, list_ret=None, get_ret=None, session=None):
     return SimpleNamespace(
         list=AsyncMock(return_value=list_ret),
         get=AsyncMock(return_value=get_ret),
+        is_leftover_of_deleted_project=AsyncMock(return_value=False),  # story #4688: an entry of a live project
         session=session, org_id=ORG,
     )
 
