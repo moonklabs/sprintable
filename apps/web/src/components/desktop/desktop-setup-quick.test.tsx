@@ -280,6 +280,16 @@ describe('[SID:4711] the first setup in three steps', () => {
     expect(teamPressed).toBe(false);
   });
 
+  it('codex self-QA: an address whose setup= is not a uuid and an answer without a valid id → the plain «started» card, NO progress route is ever read with the bad id', async () => {
+    confirmNow = () => new Response(JSON.stringify({ project_id: PROJ, conversation_id: 'c-1', members: [] }), { status: 200 });
+    await mount(frag('&fshown=~/code/my-app&fname=my-app').replace('setup=11111111-1111-4111-8111-aaaaaaaaaaaa', 'setup=s-1'), { projectId: PROJ, projects: [] });
+    await act(async () => { buttonOf('시작')!.click(); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 40)); });
+    expect(calls.some((c) => c.url.includes('/api/desktop/setups/s-1'))).toBe(false);
+    expect(window.location.hash).not.toContain('s-1');
+  });
+
   it('billing closed (prod today): the free-plan question has no upgrade link', async () => {
     ee.on = false;
     confirmNow = () => new Response(JSON.stringify({ error: { code: 'PLAN_LIMIT_EXCEEDED', resource: 'project', limit: 1, existing_project: { id: PROJ, name: 'Mine' } } }), { status: 402 });

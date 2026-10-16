@@ -105,6 +105,16 @@ describe('[SID:4711] the `agent=` branch of the setup page', () => {
     }
   });
 
+  it('codex self-QA: an address whose setup= is not a uuid and an answer without a valid id → the plain «started» card, NO progress route is ever read with the bad id', async () => {
+    confirmNow = () => new Response(JSON.stringify({ members: [], work_item_id: null }), { status: 200 });
+    await open(frag('move,solo', '&setup=s-1'));
+    await act(async () => { start()!.click(); });
+    for (let i = 0; i < 8; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 40)); });
+    expect(calls.some((c) => c.url.includes('/api/desktop/setups/s-1'))).toBe(false);
+    expect(window.location.hash).not.toContain('s-1');
+  });
+
   it('codex self-QA: two presses of [시작] before the card redraws send ONE move confirmation', async () => {
     await open(frag('move,solo'));
     const go = start()!;

@@ -228,8 +228,8 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
   if (newOrg && verifyGate.kind === 'closed') return <EmailVerifyGateCard gate={verifyGate} />;
   if (orgMode.kind === 'checking' || (newOrg && verifyGate.kind === 'reading')) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   if (orgMode.kind === 'has-org' && !isAdmin) return <Failure failure="not-admin" />;
-  if (view.kind === 'done-reload') return <SetupDoneReload setupId={madeSetupId ?? query.setupId} />;
-  if (view.kind === 'started') return <SetupProgressView setupId={madeSetupId ?? query.setupId} recipeName="" phoneControlFailed={phoneControlFailed} onPhoneRetry={retryPhoneControl} />;
+  if (view.kind === 'done-reload') return <SetupDoneReload setupId={madeSetupId} />;
+  if (view.kind === 'started') return <SetupProgressView setupId={madeSetupId} recipeName="" phoneControlFailed={phoneControlFailed} onPhoneRetry={retryPhoneControl} />;
   if (view.kind === 'failed') {
     const onReloadPage = view.failure === 'has-org'
       ? () => { window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment(query)); window.location.reload(); }
