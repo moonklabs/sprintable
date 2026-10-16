@@ -650,6 +650,27 @@ async def confirm_move_setup(
     return setup.id, members, None
 
 
+async def _with_existing_project(db: AsyncSession, exc: HTTPException, *, org_id: uuid.UUID, user_id: uuid.UUID) -> HTTPException:
+    """story 4711 (PO 03:55Z): the plan's project limit (402) on a NEW folder project — when the organization has exactly one project
+    and the person can open it, the 402 also names it (`existing_project`), so the card can ask «이 폴더의 에이전트를 ‹{project}›에
+    넣어 시작할까요?» and the person's [넣고 시작] sends that `project_id`. Nothing is put there on the server's own: the plan is not
+    changed and no one is moved quietly. Any other error passes as it is."""
+    from app.models.project import Project
+    from app.services.project_auth import has_project_access
+
+    detail = exc.detail if isinstance(exc.detail, dict) else None
+    if exc.status_code != 402 or not detail or detail.get("code") != "PLAN_LIMIT_EXCEEDED" or detail.get("resource") != "project":
+        return exc
+    rows = (await db.execute(
+        select(Project.id, Project.name).where(Project.org_id == org_id, Project.deleted_at.is_(None)).limit(2)
+    )).all()
+    if len(rows) != 1 or not await has_project_access(db, user_id, rows[0].id, org_id):
+        return exc
+    return HTTPException(
+        status_code=402, detail={**detail, "existing_project": {"id": str(rows[0].id), "name": rows[0].name}}, headers=exc.headers,
+    )
+
+
 SOLO_AGENT_NAMES = {"claude": "Claude Code", "codex": "Codex"}  # story 4711 (Yuna): the agent is called what the person picked
 
 
@@ -719,7 +740,10 @@ async def confirm_solo_setup(
         from app.services.org_project_create import check_project_create_allowed, create_project_with_member
 
         await db.execute(select(Organization.id).where(Organization.id == org_id).with_for_update())  # two codes at once see one name list
-        await check_project_create_allowed(db, org_id)
+        try:
+            await check_project_create_allowed(db, org_id)
+        except HTTPException as exc:
+            raise await _with_existing_project(db, exc, org_id=org_id, user_id=user_id) from None
         name = await _unique_name(db, Project, Project.org_id == org_id, Project.deleted_at.is_(None), base=project_name)
         project_id = (await create_project_with_member(
             db, org_id=org_id, name=name, description=None, slug=None, user_id=str(user_id),

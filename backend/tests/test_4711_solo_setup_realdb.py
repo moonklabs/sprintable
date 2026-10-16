@@ -12,12 +12,18 @@ import uuid
 
 import pytest
 
+from tests.test_4565_attach_existing_agent_realdb import (  # noqa: F401 — fixtures used by name
+    _live_keys,
+    _plain_key,
+    attachable,
+)
 from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures used by name
     EVENT_TOKENS,
     ORG,
     OWNER,
     PLAIN,
     PROJ,
+    EXISTING,
     _addresses,
     _client,
     _dispose_global_engine_after_test,
@@ -41,7 +47,7 @@ _EXTRA_CLEAN = [
 
 
 @pytest.fixture
-async def solo(world):
+async def solo(attachable):  # 4565's world plus an agent of the organization that already runs somewhere
     yield
     await _sql(*_EXTRA_CLEAN)  # the projects a test made hang off project_access / profiles that the shared cleanup does not know
 
@@ -74,6 +80,8 @@ async def _state() -> dict:
 
 @pytest.mark.anyio
 async def test_a_solo_start_makes_one_agent_a_project_for_the_folder_and_the_room_to_open(solo):
+    other_key = await _plain_key(EXISTING)  # an agent of the organization that runs somewhere else
+    other_live = await _live_keys(EXISTING)
     async with _client() as c:
         before = await _state()
         code, verifier, setup_id = await _solo_code(c, "d4424 solo A")
@@ -120,6 +128,9 @@ async def test_a_solo_start_makes_one_agent_a_project_for_the_folder_and_the_roo
         assert set(mine) == {"member_id", "runtime", "name", "api_key", "tools"}
         assert (mine["member_id"], mine["runtime"], mine["name"], mine["tools"]) == (member["member_id"], "claude", "Claude Code", [])
         assert (await c.get("/api/v2/auth/me", headers={"Authorization": f"Bearer {mine['api_key']}"})).status_code == 200
+        # Kadir (5120): the exchange makes the solo agent's ONE key and rotates nobody else's — another agent's keys live on
+        assert await _live_keys(EXISTING) == other_live
+        assert (await c.get("/api/v2/auth/me", headers={"Authorization": f"Bearer {other_key}"})).status_code == 200
     assert (await _state())["stories"] == before["stories"]
 
 
@@ -215,7 +226,11 @@ async def test_the_plan_project_limit_on_a_new_folder_is_the_plans_402_and_leave
     project is a made one) — and a folder whose project the app found (`project_id`) still starts."""
     from app.core.config import settings
 
+    async def agent_allowed(_db, _org):
+        return None
+
     monkeypatch.setattr(type(settings), "is_ee_enabled", property(lambda _self: True))
+    monkeypatch.setattr("ee.plan_limits.check_agent_add_limit", agent_allowed)  # this test is about the PROJECT limit
     async with _client() as c:
         before = await _state()
         code, _, _ = await _solo_code(c, "d4424 solo project limit")
@@ -223,6 +238,16 @@ async def test_the_plan_project_limit_on_a_new_folder_is_the_plans_402_and_leave
         assert r.status_code == 402, r.text
         error = r.json()["error"]
         assert (error["code"], error["resource"]) == ("PLAN_LIMIT_EXCEEDED", "project"), r.text
+        # PO 03:55Z: the 402 names the organization's only project, so the card can ask «넣어 시작할까요?» — nothing is put there yet
+        assert error["existing_project"] == {"id": str(PROJ), "name": "P"}, r.text
         assert await _state() == before
-        ok = await _confirm_solo(c, code, {"runtime": "claude", "project_id": str(PROJ)})
+        # the person's [넣고 시작]: the same code, that project — the agent starts in it (the plan is not changed)
+        ok = await _confirm_solo(c, code, {"runtime": "claude", "project_id": error["existing_project"]["id"]})
         assert ok.status_code == 200, ok.text
+        assert ok.json()["project_id"] == str(PROJ)
+        assert (await _state())["projects"] == before["projects"]
+        # a second project in the organization: no single project to name, the plain 402 stays
+        await _sql(f"INSERT INTO projects (id,org_id,name,slug,violation_level) VALUES (gen_random_uuid(),'{ORG}','P2','d4711-p2','warn')")
+        again, _, _ = await _solo_code(c, "d4424 solo project limit 2")
+        r2 = await _confirm_solo(c, again, {"runtime": "claude", "project_name": "third-folder"})
+        assert r2.status_code == 402 and "existing_project" not in r2.json()["error"], r2.text
