@@ -23,7 +23,7 @@ async function rotateSessionInto(res: NextResponse): Promise<void> {
   const refreshToken = (await cookies()).get(SP_RT_COOKIE)?.value;
   if (!refreshToken) return;
   const refreshed = await backendFetch(`${FASTAPI_URL()}/api/v2/auth/refresh`, {
-    timeLimitOnly: true, // the refresh token is single-use: it must finish even if the browser goes away (story #4320)
+    timeLimitOnly: true, // story #4320 — 리프레시 토큰은 한 번 쓰는 값: 브라우저가 끊어도 끝까지 가야 한다(끊으면 새 토큰을 잃는다) — 시간 제한만.
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ refresh_token: refreshToken }),
