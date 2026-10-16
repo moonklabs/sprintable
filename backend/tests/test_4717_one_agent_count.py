@@ -91,3 +91,45 @@ def test_the_new_org_recipe_list_carries_the_free_room(client):
     assert r.status_code == 200, r.text
     assert r.json() == {"recipes": [], "agent_room": room}
     assert read.await_args.args[1] is None  # no organization yet
+
+
+# ── Kadir 10-16 · PO ①: no write sets the publisher's runtime_type (the count leaves it out) ──
+
+def test_setting_the_publisher_runtime_type_is_refused_and_any_other_value_passes():
+    from fastapi import HTTPException
+
+    from app.services.system_publisher_guard import assert_runtime_type_not_reserved
+
+    with pytest.raises(HTTPException) as exc:
+        assert_runtime_type_not_reserved("system-publisher")
+    assert (exc.value.status_code, exc.value.detail) == (409, {"code": "SYSTEM_PUBLISHER_RESERVED"})
+    for ok in ("claude-code", "codex", None, "System-Publisher "):
+        assert_runtime_type_not_reserved(ok)
+
+
+@pytest.mark.anyio
+async def test_the_one_write_path_refuses_it_before_writing():
+    """apply_anchor_update is where PATCH · recruit · the desktop setup write runtime_type — it refuses before any SQL runs."""
+    from fastapi import HTTPException
+
+    from app.repositories.team_member import TeamMemberRepository
+
+    session = MagicMock()
+    session.execute = AsyncMock()
+    repo = TeamMemberRepository(session, uuid.uuid4())
+    with pytest.raises(HTTPException) as exc:
+        await repo.apply_anchor_update(MagicMock(id=uuid.uuid4()), {"runtime_type": "system-publisher", "name": "x"})
+    assert exc.value.status_code == 409
+    session.execute.assert_not_awaited()
+
+
+def test_the_patch_route_checks_before_the_run_profile_reset():
+    from app.routers import team_members
+
+    src = inspect.getsource(team_members.update_team_member)
+    assert src.index("assert_runtime_type_not_reserved(") < src.index("on_runtime_changed(")
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
