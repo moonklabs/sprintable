@@ -297,6 +297,24 @@ class SessionSnapshot(BaseModel):
     sessions: list[SnapshotSession] = Field(max_length=64)
 
 
+STARTABLE_MAX = 128
+
+
+class StartableItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agent_member_id: uuid.UUID
+    project_id: uuid.UUID
+
+
+class StartableSnapshot(BaseModel):
+    """story #4714: the computer's own list of the (agent, project) pairs it has a usable folder for — ids only (a path has no place in
+    it: every body forbids extra fields). Replaces the whole list; the computer decides at the start, this is what the phone is shown."""
+    model_config = ConfigDict(extra="forbid")
+
+    startable: list[StartableItem] = Field(max_length=STARTABLE_MAX)
+
+
 def _setup_agents(setup: DesktopSetup) -> set[uuid.UUID]:
     return {uuid.UUID(str(m["member_id"])) for m in (setup.members or []) if m.get("kind") == "agent" and m.get("member_id")}
 
@@ -585,6 +603,21 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
     return len(snapshot.sessions)
 
 
+async def replace_startable(db: AsyncSession, setup: DesktopSetup, snapshot: StartableSnapshot) -> int:
+    """story #4714: the computer's startable pairs, as it says them (a pair for an agent this device was not set up with is refused —
+    the same rule as a session report). Stored as given, sorted and without repeats."""
+    for item in snapshot.startable:
+        _check_agent(setup, item.agent_member_id)
+    pairs = sorted({(str(i.agent_member_id), str(i.project_id)) for i in snapshot.startable})
+    await db.execute(
+        update(DesktopSetup).where(DesktopSetup.id == setup.id)
+        .values(startable=[{"agent_member_id": a, "project_id": p} for a, p in pairs])
+    )
+    await touch_device(db, setup.id)
+    await db.flush()
+    return len(pairs)
+
+
 async def device_sessions_view(
     db: AsyncSession, setup_id: uuid.UUID, *, now: datetime | None = None, limit: int = SESSIONS_PAGE_DEFAULT,
 ) -> list[dict]:
@@ -637,8 +670,13 @@ class _Payload(BaseModel):
 
 
 class StartSessionPayload(_Payload):
+    """story #4714 (contract 02d2cf71 new version): a phone's signed start — the agent, the project (never a path, a mode, an argument or a
+    runtime: the computer reads its own folder for the project and the agent's own profile), and the phone's signed blob carried as is.
+    The old shape {agent_member_id, runtime} has no maker any more (the daemon refused it as `unsigned` since v1.9.1)."""
+
     agent_member_id: uuid.UUID
-    runtime: Literal["claude", "codex"]
+    project_id: uuid.UUID
+    signed: str = Field(min_length=1, max_length=16384)
 
 
 class SendPromptPayload(_Payload):

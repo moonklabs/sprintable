@@ -321,6 +321,119 @@ async def create_command(db: AsyncSession, *, member_id: uuid.UUID, member_role:
     return cmd, cmd.state
 
 
+# ── ②b a phone's signed start (story #4714 · design 4714-design.md) ─────────────────────────────────────────────────────────────
+
+
+class StartRequest(BaseModel):
+    """The phone's start of an agent on one of its paired computers for one project. No folder, path, mode, argument or runtime — the
+    computer reads its own folder for the project and uses the agent's own profile; the server does not open `signed`."""
+    model_config = ConfigDict(extra="forbid")
+
+    setup_id: uuid.UUID
+    project_id: uuid.UUID
+    idempotency_key: str = Field(min_length=1, max_length=100)
+    signed: str = Field(min_length=1, max_length=16384)
+    phone_key_id: uuid.UUID
+
+
+async def _agent_projects(db: AsyncSession, agent_id: uuid.UUID) -> set[uuid.UUID]:
+    from app.models.member import AgentProjectProfile
+
+    return set((await db.execute(select(AgentProjectProfile.project_id).where(AgentProjectProfile.member_id == agent_id))).scalars().all())
+
+
+def _startable_pairs(setup: DesktopSetup, agent_id: uuid.UUID) -> set[uuid.UUID]:
+    """The projects the computer said it has a usable folder for, for this agent (ids only)."""
+    out: set[uuid.UUID] = set()
+    for item in setup.startable or []:
+        if item.get("agent_member_id") == str(agent_id):
+            try:
+                out.add(uuid.UUID(str(item.get("project_id"))))
+            except ValueError:
+                continue
+    return out
+
+
+async def create_start(db: AsyncSession, *, member_id: uuid.UUID, member_role: str | None, user_id: uuid.UUID, org_id: uuid.UUID,
+                       agent_id: uuid.UUID, body: StartRequest) -> tuple[DesktopCommand, str]:
+    """A phone's signed `start_session` → (the command, its state). The same checks as a stop (`create_command`) — who may press, the
+    computer is the agent's and of this org, remote control on, the computer heard from, the phone the person's own and paired with
+    it — then the start's own: the project is one the agent belongs to and the person can open, and the computer has said it has a
+    folder for that pair. That last line is for showing: the computer reads its own files again and refuses a start it cannot do
+    (`no_folder`), whatever the server believes."""
+    from app.services import remote_control
+    from app.services.agent_permissions import _reachable, paired_phone
+    from app.services.desktop_relay import enqueue_command
+    from app.services.project_auth import has_project_access
+
+    agent = await _agent(db, org_id, agent_id)
+    setup = next((s for s in await _agent_setups(db, org_id, agent_id) if s.id == body.setup_id), None)
+    if setup is None:  # no such computer of this agent in this org — another org's, another agent's or none: the same answer
+        raise DesktopRelayError(404, "computer_not_found", "no such computer for this agent")
+    if not can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup):
+        raise DesktopRelayError(403, "not_allowed_to_command", "you cannot command this agent")
+    if body.project_id not in await _agent_projects(db, agent_id) or not await has_project_access(db, user_id, body.project_id, org_id):
+        raise DesktopRelayError(404, "project_not_found", "no such project of this agent")
+    # the same press again (the same key) gets back the command it made — asked after who may press and whose computer it is
+    existing = (await db.execute(
+        select(DesktopCommand).where(DesktopCommand.setup_id == setup.id,
+                                     DesktopCommand.idempotency_key == f"b4:{member_id}:{body.idempotency_key}")
+    )).scalar_one_or_none()
+    if existing is not None:
+        return existing, existing.state
+    if not await remote_control.is_enabled(db, org_id):
+        raise DesktopRelayError(409, remote_control.OFF_CODE, "remote control is off for this organization")
+    if setup.id not in await _reachable(db, {setup.id}, _now()):
+        raise DesktopRelayError(409, "device_unreachable", "that computer has not been heard from")
+    if await paired_phone(db, member_id=member_id, phone_id=body.phone_key_id, setup_id=setup.id) is None:
+        raise DesktopRelayError(409, "phone_not_paired", "this phone is not paired with that computer")
+    if body.project_id not in _startable_pairs(setup, agent_id):
+        raise DesktopRelayError(409, "no_folder", "that computer has no folder for this project — pick one at the computer")
+    cmd = await enqueue_command(
+        db, setup=setup, kind="start_session",
+        payload={"agent_member_id": str(agent_id), "project_id": str(body.project_id), "signed": body.signed},
+        idempotency_key=f"b4:{member_id}:{body.idempotency_key}", requested_by=member_id,
+    )
+    return cmd, cmd.state
+
+
+async def startable_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: str | None, user_id: uuid.UUID, org_id: uuid.UUID,
+                         agent_id: uuid.UUID, phone_key_id: uuid.UUID) -> dict:
+    """What the phone may offer for starting this agent: each computer of the agent that THIS person's phone is paired with, whether it is
+    heard from, whether the person may command, and the projects the computer says it has a folder for that the person can open — ids
+    and names, never a path. A computer that has said nothing lists none (the phone then says «start it at the Mac»)."""
+    from app.models.project import Project
+    from app.services import remote_control
+    from app.services.agent_permissions import _reachable, paired_phone
+    from app.services.project_auth import has_project_access
+
+    if not await can_view(db, user_id=user_id, org_id=org_id, agent_id=agent_id):
+        raise DesktopRelayError(404, "agent_not_found", "no such agent")
+    agent = await _agent(db, org_id, agent_id)
+    setups = await _agent_setups(db, org_id, agent_id)
+    reachable = await _reachable(db, {s.id for s in setups}, _now())
+    computers: list[dict] = []
+    for setup in setups:
+        if await paired_phone(db, member_id=member_id, phone_id=phone_key_id, setup_id=setup.id) is None:
+            continue
+        wanted = _startable_pairs(setup, agent_id) & await _agent_projects(db, agent_id)
+        projects: list[dict] = []
+        if wanted:
+            rows = (await db.execute(
+                select(Project.id, Project.name).where(Project.id.in_(wanted), Project.org_id == org_id, Project.deleted_at.is_(None))
+                .order_by(Project.name.asc(), Project.id)
+            )).all()
+            for pid, name in rows:
+                if await has_project_access(db, user_id, pid, org_id):
+                    projects.append({"project_id": str(pid), "name": name})
+        computers.append({
+            "setup_id": str(setup.id), "device_name": setup.device_name, "reachable": setup.id in reachable,
+            "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup),
+            "projects": projects,
+        })
+    return {"remote_control": await remote_control.is_enabled(db, org_id), "computers": computers}
+
+
 async def _line_written(db: AsyncSession, command_id: uuid.UUID) -> bool:
     from app.models.conversation import ConversationMessage
 
