@@ -119,8 +119,7 @@ async def post_desktop_start(
     user_id = uuid.UUID(str(auth.user_id))
     try:
         cmd, state = await desktop_commands.create_start(
-            db, member_id=uuid.UUID(str(member.id)), member_role=await desktop_commands.org_role(db, org_id, user_id), user_id=user_id,
-            org_id=org_id, agent_id=agent_member_id, body=body,
+            db, member_id=uuid.UUID(str(member.id)), user_id=user_id, org_id=org_id, agent_id=agent_member_id, body=body,
         )
     except DesktopRelayError as exc:
         await db.rollback()

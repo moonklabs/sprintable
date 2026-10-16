@@ -354,7 +354,7 @@ def _startable_pairs(setup: DesktopSetup, agent_id: uuid.UUID) -> set[uuid.UUID]
     return out
 
 
-async def create_start(db: AsyncSession, *, member_id: uuid.UUID, member_role: str | None, user_id: uuid.UUID, org_id: uuid.UUID,
+async def create_start(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID,
                        agent_id: uuid.UUID, body: StartRequest) -> tuple[DesktopCommand, str]:
     """A phone's signed `start_session` → (the command, its state). The same checks as a stop (`create_command`) — who may press, the
     computer is the agent's and of this org, remote control on, the computer heard from, the phone the person's own and paired with
@@ -377,7 +377,8 @@ async def create_start(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
         setup = next((s for s in await _agent_setups(db, org_id, agent_id) if s.id == body.setup_id), None)
         if setup is None or setup.revoked_at is not None:  # no such computer of this agent in this org — another org's, another agent's or none: the same answer
             raise DesktopRelayError(404, "computer_not_found", "no such computer for this agent")
-        if not can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup):
+        # the person's role is read here, in every judgement — not handed in from before the lock (a demotion that committed while this press waited counts)
+        if not can_command(member_id=member_id, member_role=await org_role(db, org_id, user_id), user_id=user_id, agent=agent, setup=setup):
             raise DesktopRelayError(403, "not_allowed_to_command", "you cannot command this agent")
         if body.project_id not in await _agent_projects(db, agent_id) or not await has_project_access(db, user_id, body.project_id, org_id):
             raise DesktopRelayError(404, "project_not_found", "no such project of this agent")
