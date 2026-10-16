@@ -73,7 +73,7 @@ interface OnboardingFormProps {
 }
 
 /** What arrival is doing: working on it · stopped because the invites could not be read (nothing made) · stopped on another failure */
-type Arrival = 'working' | 'invite-check-failed' | 'failed';
+type Arrival = 'working' | 'account-check-failed' | 'invite-check-failed' | 'failed';
 
 export function OnboardingForm({
   initialStep, initialOrgId, todayV3Enabled = false, todayHref, chatsHref,
@@ -174,9 +174,17 @@ export function OnboardingForm({
     setResendError('');
     try {
       // `/api/auth/me` answers from the JWT claims — 200 with or without an organization (story #3195 · 카디르 QA PR#3617)
-      const me = await fetchWithAuth('/api/auth/me')
-        .then((res) => (res.ok ? res.json() : null))
-        .catch(() => null) as { data?: { org_id?: string | null; org_member_id?: string | null; email_verified?: boolean | null; display_name?: string | null } } | null;
+      // rule 4832 for this read too (Kadir QA 5124): an answer that cannot be read is NOT «no organization» — folding it would make a second
+      // organization for a person who already has one. Stop with [다시 확인]; nothing is made.
+      let me: { data?: { org_id?: string | null; org_member_id?: string | null; email_verified?: boolean | null; display_name?: string | null } } | null;
+      try {
+        const res = await fetchWithAuth('/api/auth/me');
+        if (!res.ok) throw new Error(String(res.status));
+        me = await res.json();
+      } catch {
+        setArrival('account-check-failed');
+        return;
+      }
       // story 4668: already a member (a reload · a re-opened `/onboarding?signup=1`) — no second organization
       const existing = existingOrgIdFromMe(me);
       if (existing) { setOrgId(existing); setStep('first'); return; }
@@ -439,6 +447,11 @@ export function OnboardingForm({
                 <Loader2 className="size-4 animate-spin" aria-hidden />
                 <span id="onboarding-step-title">{t('arriving')}</span>
               </p>
+            ) : arrival === 'account-check-failed' ? (
+              <div className="space-y-3">
+                <p role="alert" className="break-keep text-sm text-foreground" data-testid="onboarding-account-check-failed">{t('accountCheckFailed')}</p>
+                <Button variant="outline" onClick={() => void arrive()} data-testid="onboarding-account-check-again">{t('inviteCheckAgain')}</Button>
+              </div>
             ) : arrival === 'invite-check-failed' ? (
               <div className="space-y-3">
                 <p role="alert" className="break-keep text-sm text-foreground" data-testid="onboarding-invite-check-failed">{t('inviteCheckFailed')}</p>

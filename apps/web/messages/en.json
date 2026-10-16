@@ -1684,6 +1684,7 @@
     "verifyExamplePrompt": "Show me my story list",
     "arriving": "Getting ready…",
     "inviteCheckFailed": "We couldn't check your invitations — your organization is made once they're checked",
+    "accountCheckFailed": "We couldn't check your account — your organization is made once it's checked",
     "inviteCheckAgain": "Check again",
     "invitedOwnOrg": "Make my own organization instead",
     "projectSubtitleNoOrg": "Create your first project.",

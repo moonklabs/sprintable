@@ -1684,6 +1684,7 @@
     "verifyExamplePrompt": "내 스토리 목록 보여줘",
     "arriving": "준비하는 중…",
     "inviteCheckFailed": "초대를 확인하지 못했어요 — 확인한 뒤에 조직을 만들어요",
+    "accountCheckFailed": "계정을 확인하지 못했어요 — 확인한 뒤에 조직을 만들어요",
     "inviteCheckAgain": "다시 확인",
     "invitedOwnOrg": "초대와 따로 내 조직 만들기",
     "projectSubtitleNoOrg": "첫 프로젝트를 만들어 보세요.",

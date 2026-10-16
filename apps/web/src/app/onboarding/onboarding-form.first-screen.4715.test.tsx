@@ -151,6 +151,32 @@ describe('[SID:4715] AC6 — pending invites first: no organization is made whil
   });
 });
 
+describe('[SID:4715] 카디르 QA — an unreadable /api/auth/me is not «no organization» (rule 4832 on that read too)', () => {
+  const meFails: Array<[string, (url: string) => unknown]> = [
+    ['5xx', () => ({ ok: false, status: 503, headers: new Headers(), json: async () => ({}) })],
+    ['a network error', () => { throw new Error('network'); }],
+  ];
+  it.each(meFails)('T7 me answers %s → no POST, no invite read · «계정을 확인하지 못했어요 …» + [다시 확인] · a good answer then makes it', async (_label, bad) => {
+    stubFetch();
+    const good = (globalThis.fetch as unknown as (u: RequestInfo | URL, i?: RequestInit) => Promise<unknown>);
+    let failMe = true;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (failMe && url.endsWith('/api/auth/me')) { calls.push({ url }); return bad(url); }
+      return good(input, init);
+    }));
+    await mount();
+    // reverted (a failed me folded into «no organization») → the invites read succeeds as «none» and a POST goes out here
+    expect(orgPosts()).toHaveLength(0);
+    expect(calls.some((c) => c.url.endsWith('/api/invites/mine'))).toBe(false);
+    expect(byTestId('onboarding-account-check-failed')?.textContent).toBe(koMessages.onboarding.accountCheckFailed);
+    failMe = false;
+    await click(byTestId('onboarding-account-check-again'));
+    expect(orgPosts()).toHaveLength(1);
+    expect(h1()).toBe(first.macTitle);
+  });
+});
+
 describe('[SID:4715] AC2 · AC3 — one screen in place of the fork and the download screen', () => {
   it('T3 a Mac: title · lead · [Mac 앱 받기] is the one primary · the web way is a small link · no fork radios', async () => {
     await mount();
