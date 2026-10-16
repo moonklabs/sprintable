@@ -41,8 +41,9 @@ export function SignInBand({ runtimes }: { runtimes: DesktopRuntime[] }) {
   );
 }
 
-export function SetupProgressView({ setupId, recipeName, phoneControlFailed = false }: { setupId: string | null; recipeName: string; phoneControlFailed?: boolean }) {
+export function SetupProgressView({ setupId, recipeName, phoneControlFailed = false, onPhoneRetry }: { setupId: string | null; recipeName: string; phoneControlFailed?: boolean; /** story 4711 (PO 10-16): a solo start whose «폰으로도 다루기» switch did not turn on — turns it on again; true = it did */ onPhoneRetry?: () => Promise<boolean> }) {
   const t = useTranslations('desktop.setup');
+  const tOnboarding = useTranslations('onboarding'); // story 4711: [대화 열기] is the words the first-instruction card already uses (Yuna)
   const locale = useLocale();
   const tOrg = useTranslations('organization');
   const tPreset = useTranslations('recipePreset');
@@ -90,11 +91,16 @@ export function SetupProgressView({ setupId, recipeName, phoneControlFailed = fa
   // over (the folder-trust question, if Claude Code asks it, shows there). Once: a person who comes back to the page is not sent again.
   const soloRoom = snap?.status.setup_kind === 'solo' && snap.status.state === 'handed_over' ? snap.status.conversation_id ?? null : null;
   const opened = useRef(false);
+  // story 4711 (PO 10-16): when the tick was on but the switch did not turn on, the person is NOT sent to the conversation on their own: the card
+  // says so and they choose — [다시 켜기] (on success the conversation opens as usual) or [대화 열기]. A start that went well, or a tick left off, is
+  // sent at once as before.
+  const [phoneRetrying, setPhoneRetrying] = useState(false);
+  const holdRoom = phoneControlFailed && !!onPhoneRetry; // [다시 켜기] succeeding clears `phoneControlFailed` in the card's state — the hold ends and the conversation opens
   useEffect(() => {
-    if (!soloRoom || opened.current) return;
+    if (!soloRoom || opened.current || holdRoom) return;
     opened.current = true;
     window.location.assign(flatHref(`/chats/${soloRoom}`)); // a full load: the page's address holds nothing to keep, and a new token may be needed
-  }, [soloRoom, flatHref]);
+  }, [soloRoom, flatHref, holdRoom]);
   // story 4464 — keep reading until every agent is in (PO 12:04Z: also while a block waits for the person — once they act and the
   // agent connects, the block goes); after 2 minutes of such waiting, every 10 s instead of 2
   const done = move ? move.settled : !!progress && progress.settled;
@@ -113,6 +119,17 @@ export function SetupProgressView({ setupId, recipeName, phoneControlFailed = fa
     return () => { window.clearInterval(timer); };
   }, [setupId, poll, delay]);
 
+  if (soloRoom && holdRoom) {
+    return (
+      <Card className="break-keep flex flex-col gap-3 p-6" data-testid="solo-phone-failed">
+        <p className="text-sm" role="status">{t('phoneControl.failed')}</p>
+        <div className="flex flex-wrap gap-2">
+          <Button disabled={phoneRetrying} onClick={() => { setPhoneRetrying(true); void onPhoneRetry!().finally(() => setPhoneRetrying(false)); }}>{t('phoneControl.again')}</Button>
+          <Button variant="outline" onClick={() => { opened.current = true; window.location.assign(flatHref(`/chats/${soloRoom}`)); }}>{tOnboarding('firstInstructionOpenConversation')}</Button>
+        </div>
+      </Card>
+    );
+  }
   if (!progress || !status) {
     return (
       <Card className="break-keep p-6">

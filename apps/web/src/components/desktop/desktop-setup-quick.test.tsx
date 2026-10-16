@@ -30,6 +30,8 @@ let container: HTMLDivElement;
 let root: Root;
 let calls: { url: string; method?: string; body?: unknown }[];
 let confirmNow: () => Response;
+/** what GET /api/desktop/setups/{id} answers (the progress view's reading) */
+let statusNow: () => unknown = () => ({});
 /** story 4670: what GET /api/organizations/{id}/remote-control answers now, and the PUT (default: not known → the page reads it as a failed read) */
 let remoteGet: () => Response = () => new Response('{}', { status: 404 });
 let remotePut: () => Response = () => new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'now' } }), { status: 200 });
@@ -46,7 +48,7 @@ function stub() {
     if (url.endsWith('/api/auth/me')) return new Response(JSON.stringify({ data: { display_name: '김지우', email: 'a@b.c', email_verified: true, email_verification_required: true } }), { status: 200 });
     if (url.endsWith('/api/auth/refresh')) return new Response('{}', { status: 200 });
     if (url.endsWith('/api/current-project')) return new Response('{}', { status: 200 });
-    if (url.includes('/api/desktop/setups/')) return new Response(JSON.stringify({}), { status: 200 });
+    if (url.includes('/api/desktop/setups/')) return new Response(JSON.stringify(statusNow()), { status: 200 });
     return new Response('{}', { status: 404 });
   }));
 }
@@ -68,7 +70,7 @@ const linkOf = (label: string) => [...container.querySelectorAll('a')].find((a) 
 beforeEach(() => {
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   confirmNow = () => new Response(JSON.stringify({ project_id: PROJ, conversation_id: 'c-1', members: [] }), { status: 200 });
-  __resetOrgRemoteControlForTest(); teamPressed = false; ee.on = false; sp.value = null; remoteGet = remoteOf({ enabled: true, can_change: true, enabled_at: 'now' }); remotePut = () => new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'now' } }), { status: 200 }); stub();
+  statusNow = () => ({}); __resetOrgRemoteControlForTest(); teamPressed = false; ee.on = false; sp.value = null; remoteGet = remoteOf({ enabled: true, can_change: true, enabled_at: 'now' }); remotePut = () => new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'now' } }), { status: 200 }); stub();
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); sessionStorage.clear(); });
 
@@ -301,6 +303,72 @@ describe('[SID:4670 AC1] «폰으로도 에이전트 다루기» on the three-st
     expect(tick()!.checked).toBe(false);
     await press();
     expect(puts()).toHaveLength(0);
+  });
+
+  it('PO 10-16: the switch did NOT turn on → the conversation is not opened on its own: the line + [다시 켜기] · [대화 열기]; [다시 켜기] sends the PUT once more and then the conversation opens; [대화 열기] opens it at once', async () => {
+    const SOLO = {
+      setup_id: 's-1', device_name: 'Mac', state: 'handed_over', recipe_name: null, recipe: null, work_item_id: null, setup_kind: 'solo', conversation_id: 'c-1',
+      members: [{ stage: null, role: null, member_id: 'm-1', kind: 'agent', runtime: 'claude', name: 'Claude Code' }],
+      signals: { tools_connected: [], first_task_handed_at: null, first_result_at: null, workdir_fallback_at: null, blocked: null },
+    };
+    for (const how of ['again', 'open'] as const) {
+      statusNow = () => SOLO;
+      remoteGet = remoteOf(OFF_OWNER);
+      remotePut = () => new Response('{}', { status: 500 }); // the switch did not turn on
+      const assign = vi.fn();
+      const real = window.location;
+      Object.defineProperty(window, 'location', { configurable: true, value: { ...real, pathname: real.pathname, search: real.search, hash: real.hash, assign } });
+      try {
+        await mount(frag(FOLDER + '&setup=11111111-1111-4111-8111-aaaaaaaaaaaa'), { projectId: PROJ });
+        await press();
+        for (let i = 0; i < 10; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+        expect(puts()).toHaveLength(1);
+        expect(assign).not.toHaveBeenCalled(); // held: no automatic move
+        const card = container.querySelector('[data-testid=solo-phone-failed]')!;
+        expect(card.textContent).toContain('폰 다루기는 켜지 못했어요');
+        expect(buttonOf('다시 켜기')).toBeTruthy(); expect(buttonOf('대화 열기')).toBeTruthy();
+        if (how === 'again') {
+          remotePut = () => new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'now' } }), { status: 200 });
+          await act(async () => { buttonOf('다시 켜기')!.click(); });
+          for (let i = 0; i < 10; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+          expect(puts()).toHaveLength(2); // one more PUT
+          expect(assign).toHaveBeenCalledTimes(1); // and then the conversation opens, as for a start that went well
+          expect(String(assign.mock.calls[0][0])).toContain('/chats/c-1');
+        } else {
+          await act(async () => { buttonOf('대화 열기')!.click(); });
+          expect(puts()).toHaveLength(1); // no PUT
+          expect(assign).toHaveBeenCalledTimes(1);
+          expect(String(assign.mock.calls[0][0])).toContain('/chats/c-1');
+        }
+      } finally { Object.defineProperty(window, 'location', { configurable: true, value: real }); }
+      await act(async () => { root.render(<div />); });
+      calls.length = 0; __resetOrgRemoteControlForTest();
+    }
+  });
+
+  it('the switch turned on (or the tick left off) → the conversation opens at once, as before — no holding card', async () => {
+    const SOLO = {
+      setup_id: 's-1', device_name: 'Mac', state: 'handed_over', recipe_name: null, recipe: null, work_item_id: null, setup_kind: 'solo', conversation_id: 'c-1',
+      members: [{ stage: null, role: null, member_id: 'm-1', kind: 'agent', runtime: 'claude', name: 'Claude Code' }],
+      signals: { tools_connected: [], first_task_handed_at: null, first_result_at: null, workdir_fallback_at: null, blocked: null },
+    };
+    for (const untick of [false, true]) {
+      statusNow = () => SOLO;
+      remoteGet = remoteOf(OFF_OWNER);
+      const assign = vi.fn();
+      const real = window.location;
+      Object.defineProperty(window, 'location', { configurable: true, value: { ...real, pathname: real.pathname, search: real.search, hash: real.hash, assign } });
+      try {
+        await mount(frag(FOLDER + '&setup=11111111-1111-4111-8111-aaaaaaaaaaaa'), { projectId: PROJ });
+        if (untick) await act(async () => { tick()!.click(); });
+        await press();
+        for (let i = 0; i < 10; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+        expect(container.querySelector('[data-testid=solo-phone-failed]')).toBeNull();
+        expect(assign).toHaveBeenCalledTimes(1);
+      } finally { Object.defineProperty(window, 'location', { configurable: true, value: real }); }
+      await act(async () => { root.render(<div />); });
+      __resetOrgRemoteControlForTest();
+    }
   });
 
   it('a new organization (no organization yet): the row is there, ticked, and the PUT goes to the organization the start made', async () => {

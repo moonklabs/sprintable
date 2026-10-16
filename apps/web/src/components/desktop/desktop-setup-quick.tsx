@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -54,10 +54,19 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
   const phoneControl = phoneControlPicked ?? !remoteReadFailed;
   const [phoneControlFailed, setPhoneControlFailed] = useState(false);
   const showPhoneControl = newOrg || (orgMode.kind === 'has-org' && (remoteReadFailed || (!!remoteState && remoteState.can_change && !remoteState.enabled)));
+  const phoneOrgRef = useRef<string | null>(null);
   async function turnPhoneControlOn(phoneOrg: string | null | undefined) {
     if (!showPhoneControl || !phoneControl || !phoneOrg) return;
+    phoneOrgRef.current = phoneOrg;
     const turned = await putOrgRemoteControl(phoneOrg);
     setPhoneControlFailed(!turned.ok);
+  }
+  /** story 4711 (PO 10-16): [다시 켜기] on the progress card after the switch did not turn on — the same one PUT, again */
+  async function retryPhoneControl(): Promise<boolean> {
+    if (!phoneOrgRef.current) return false;
+    const turned = await putOrgRemoteControl(phoneOrgRef.current);
+    setPhoneControlFailed(!turned.ok);
+    return turned.ok;
   }
   const verifyGate = useEmailVerifyGate(newOrg, () => { setOrgMode({ kind: 'checking' }); void readInvites(); });
   const [orgName, setOrgName] = useState('');
@@ -156,7 +165,7 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
   if (orgMode.kind === 'checking' || (newOrg && verifyGate.kind === 'reading')) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   if (orgMode.kind === 'has-org' && !isAdmin) return <Failure failure="not-admin" />;
   if (view.kind === 'done-reload') return <SetupDoneReload setupId={query.setupId} />;
-  if (view.kind === 'started') return <SetupProgressView setupId={query.setupId} recipeName="" phoneControlFailed={phoneControlFailed} />;
+  if (view.kind === 'started') return <SetupProgressView setupId={query.setupId} recipeName="" phoneControlFailed={phoneControlFailed} onPhoneRetry={retryPhoneControl} />;
   if (view.kind === 'failed') {
     const onReloadPage = view.failure === 'has-org'
       ? () => { window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment(query)); window.location.reload(); }
