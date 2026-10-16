@@ -37,6 +37,7 @@ from app.services.desktop_setup import (
     list_setups,
     person_names,
     revoke_setup,
+    setup_agent_room,
     setup_hands,
     setup_status,
 )
@@ -425,8 +426,18 @@ class SetupRecipe(BaseModel):
     roles: list[SetupRecipeRole]
 
 
+class SetupAgentRoom(BaseModel):
+    """story 4717 AC1 — the plan's agent limit as the confirmation will hold it (see services.desktop_setup.setup_agent_room)."""
+    limit: int
+    current: int
+    available: int
+    tier: str  # as a 402's `tier` — the web words the limit with it (free names the plan)
+
+
 class SetupRecipesResponse(BaseModel):
     recipes: list[SetupRecipe]
+    # story 4717 AC1: how many more agents can be made — null = no limit is enforced (nothing to say before [시작])
+    agent_room: SetupAgentRoom | None = None
 
 
 @router.get("/recipes", response_model=SetupRecipesResponse)
@@ -438,7 +449,10 @@ async def get_setup_recipes(
     """PO 16:03Z — the recipes the desktop setup page can start, each with its setup rows worked out by the same function the
     confirmation checks with (the web draws them as they come)."""
     _human_only(auth)
-    return SetupRecipesResponse(recipes=[SetupRecipe(**r) for r in await list_setup_recipes(db, org_id=org_id)])
+    return SetupRecipesResponse(
+        recipes=[SetupRecipe(**r) for r in await list_setup_recipes(db, org_id=org_id)],
+        agent_room=await setup_agent_room(db, org_id),
+    )
 
 
 @router.get("/recipes/for-new-org", response_model=SetupRecipesResponse)
@@ -457,7 +471,10 @@ async def get_setup_recipes_for_new_org(
         raise _rate_limited(retry)
     if await has_active_org(db, user_id):
         raise _error(DesktopSetupError("has_organization"))
-    return SetupRecipesResponse(recipes=[SetupRecipe(**r) for r in await list_setup_recipes(db, org_id=None)])
+    return SetupRecipesResponse(
+        recipes=[SetupRecipe(**r) for r in await list_setup_recipes(db, org_id=None)],
+        agent_room=await setup_agent_room(db, None),
+    )
 
 
 class AttachableAgent(BaseModel):
