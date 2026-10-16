@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -13,6 +13,7 @@ import { defaultOrgName } from '@/app/onboarding/desktop-create-org';
 import { onboardingRedirect } from '@/lib/auth/onboarding-next';
 import { EmailVerifyGateCard, useEmailVerifyGate } from '@/components/auth/email-verify-gate';
 import { appSetupLink, nativeReturnApp, RETURN_APP_PARAM } from '@/lib/auth/native-return-app';
+import { putOrgRemoteControl, useOrgRemoteControl } from '@/lib/org-remote-control';
 import { useSearchParams } from 'next/navigation';
 import { setupFragment, isFolderRefused, type DesktopRuntime, type SetupQuery } from '@/lib/desktop-setup';
 import { defaultSoloRuntime, shownProjectName, soloConfirmBody, soloNewOrgConfirmBody, soloOutcome, soloStartBlock, usableRuntimes } from '@/lib/desktop-setup-quick';
@@ -44,6 +45,20 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
   const orgRole = orgMemberships?.find((o) => o.orgId === orgId)?.role ?? 'member';
   const isAdmin = orgRole === 'owner' || orgRole === 'admin';
   const orgProjects = useMemo(() => (projectMemberships ?? []).filter((m) => !m.orgId || m.orgId === orgId), [projectMemberships, orgId]);
+  // story 4670 AC1 (PO 10-16 correction — it was dropped from this card by mistake): «폰으로도 에이전트 다루기», ONE tick above «시작» (Yuna §M), on by
+  // default, only for the person who can switch the org's remote control and only while it is off (a new organization: its maker is the
+  // owner-to-be, so always); a read that FAILED draws it too, unticked; already on → no row. The PUT is sent once, only after the start
+  // went through and only if the tick is still on — never otherwise (a start unticked: no PUT).
+  const [remoteState, , remoteReadFailed] = useOrgRemoteControl(orgId);
+  const [phoneControlPicked, setPhoneControl] = useState<boolean | null>(null);
+  const phoneControl = phoneControlPicked ?? !remoteReadFailed;
+  const [phoneControlFailed, setPhoneControlFailed] = useState(false);
+  const showPhoneControl = newOrg || (orgMode.kind === 'has-org' && (remoteReadFailed || (!!remoteState && remoteState.can_change && !remoteState.enabled)));
+  async function turnPhoneControlOn(phoneOrg: string | null | undefined) {
+    if (!showPhoneControl || !phoneControl || !phoneOrg) return;
+    const turned = await putOrgRemoteControl(phoneOrg);
+    setPhoneControlFailed(!turned.ok);
+  }
   const verifyGate = useEmailVerifyGate(newOrg, () => { setOrgMode({ kind: 'checking' }); void readInvites(); });
   const [orgName, setOrgName] = useState('');
   const [view, setView] = useState<View>({ kind: 'choose' });
@@ -106,6 +121,7 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
         const okBody = await res.json().catch(() => null) as { project_id?: string; org_id?: string } | null;
         // the tab has no project (or no organization) yet: the one made (or used) becomes the tab's, the way the recipe setup does
         if ((newOrg || !projectId) && !(await joinNewOrg(newOrg ? okBody : { project_id: okBody?.project_id ?? useProject ?? matched?.projectId }))) { setView({ kind: 'done-reload' }); return; }
+        await turnPhoneControlOn(newOrg ? okBody?.org_id ?? null : orgId); // story 4670 AC1: after the start went through — the one PUT, or none
         setView({ kind: 'started' });
         return;
       }
@@ -140,7 +156,7 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
   if (orgMode.kind === 'checking' || (newOrg && verifyGate.kind === 'reading')) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   if (orgMode.kind === 'has-org' && !isAdmin) return <Failure failure="not-admin" />;
   if (view.kind === 'done-reload') return <SetupDoneReload setupId={query.setupId} />;
-  if (view.kind === 'started') return <SetupProgressView setupId={query.setupId} recipeName="" />;
+  if (view.kind === 'started') return <SetupProgressView setupId={query.setupId} recipeName="" phoneControlFailed={phoneControlFailed} />;
   if (view.kind === 'failed') {
     const onReloadPage = view.failure === 'has-org'
       ? () => { window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment(query)); window.location.reload(); }
@@ -256,6 +272,16 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
           {/* the free-plan question has its own primary [넣고 시작] — the start row is not drawn beside it (Yuna 5121 ①) */}
           {limitAsk ? null : (
             <div className="flex flex-col gap-2">
+              {showPhoneControl ? (
+                // story 4670 AC1 (Yuna §M): a bordered box, the phone icon, a semibold label, a bigger tick — one line inside the third step, just above «시작»
+                <div className="flex gap-3 rounded-md border p-3" data-testid="setup-phone-control">
+                  <input type="checkbox" id="quick-phone-control" checked={phoneControl} onChange={(e) => setPhoneControl(e.target.checked)} disabled={starting} className="mt-0.5 size-5 shrink-0 self-start accent-primary" />
+                  <label htmlFor="quick-phone-control" className="block min-w-0 flex-1 cursor-pointer break-keep">
+                    <span className="flex items-center gap-1.5 text-sm font-semibold"><Smartphone className="size-4 shrink-0 text-primary" aria-hidden />{t('phoneControl.label')}</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">{t('phoneControl.help')}</span>
+                  </label>
+                </div>
+              ) : null}
               <div><Button disabled={starting || block !== null} aria-describedby="quick-start-line" onClick={() => void start()}>{starting ? t('quick.starting') : t('quick.start')}</Button></div>
               <p id="quick-start-line" className="text-sm text-muted-foreground" data-testid="quick-start-line">
                 {blockLine ?? (runtime && projectLine

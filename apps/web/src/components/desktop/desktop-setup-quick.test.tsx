@@ -20,6 +20,7 @@ import { DesktopSetupQuick } from './desktop-setup-quick';
 import { SetupProgressView } from './desktop-setup-progress';
 import { parseSetupFragment } from '@/lib/desktop-setup';
 import { appSetupLink } from '@/lib/auth/native-return-app';
+import { __resetOrgRemoteControlForTest } from '@/lib/org-remote-control';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -29,6 +30,10 @@ let container: HTMLDivElement;
 let root: Root;
 let calls: { url: string; method?: string; body?: unknown }[];
 let confirmNow: () => Response;
+/** story 4670: what GET /api/organizations/{id}/remote-control answers now, and the PUT (default: not known → the page reads it as a failed read) */
+let remoteGet: () => Response = () => new Response('{}', { status: 404 });
+let remotePut: () => Response = () => new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'now' } }), { status: 200 });
+const remoteOf = (v: object) => () => new Response(JSON.stringify({ data: v }), { status: 200 });
 
 function stub() {
   calls = [];
@@ -36,6 +41,9 @@ function stub() {
     const url = String(input);
     calls.push({ url, ...(init?.method ? { method: init.method } : {}), body: init?.body ? JSON.parse(String(init.body)) : undefined });
     if (url.includes('/api/desktop/setup-codes/confirm-solo')) return confirmNow();
+    if (/\/api\/organizations\/[^/]+\/remote-control$/.test(url)) return init?.method === 'PUT' ? remotePut() : remoteGet();
+    if (url.endsWith('/api/invites/mine')) return new Response(JSON.stringify({ invites: [] }), { status: 200 });
+    if (url.endsWith('/api/auth/me')) return new Response(JSON.stringify({ data: { display_name: '김지우', email: 'a@b.c', email_verified: true, email_verification_required: true } }), { status: 200 });
     if (url.endsWith('/api/auth/refresh')) return new Response('{}', { status: 200 });
     if (url.endsWith('/api/current-project')) return new Response('{}', { status: 200 });
     if (url.includes('/api/desktop/setups/')) return new Response(JSON.stringify({}), { status: 200 });
@@ -60,7 +68,7 @@ const linkOf = (label: string) => [...container.querySelectorAll('a')].find((a) 
 beforeEach(() => {
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   confirmNow = () => new Response(JSON.stringify({ project_id: PROJ, conversation_id: 'c-1', members: [] }), { status: 200 });
-  teamPressed = false; ee.on = false; sp.value = null; stub();
+  __resetOrgRemoteControlForTest(); teamPressed = false; ee.on = false; sp.value = null; remoteGet = remoteOf({ enabled: true, can_change: true, enabled_at: 'now' }); remotePut = () => new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'now' } }), { status: 200 }); stub();
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); sessionStorage.clear(); });
 
@@ -228,6 +236,81 @@ describe('[SID:4711] the page picks the card by what the app said', () => {
     expect(appSetupLink(null, 'folder', { pick: 'codex' })).toBe('ai.sprintable:/desktop/setup?intent=folder&pick=codex');
     expect(appSetupLink(null, 'folder')).toBe('ai.sprintable:/desktop/setup?intent=folder');
     expect(appSetupLink(null, 'reopen', { pick: 'codex' })).toBe('ai.sprintable:/desktop/setup?intent=reopen'); // pick rides only on a folder ask
+  });
+});
+
+describe('[SID:4670 AC1] «폰으로도 에이전트 다루기» on the three-step card (PO 10-16 correction)', () => {
+  const OFF_OWNER = { enabled: false, can_change: true, enabled_at: null };
+  const tick = () => container.querySelector('#quick-phone-control') as HTMLInputElement | null;
+  const puts = () => calls.filter((c) => c.method === 'PUT' && c.url.includes('/remote-control'));
+  const FOLDER = '&fshown=~/code/my-app&fname=my-app';
+  const press = async () => { await act(async () => { buttonOf('시작')!.click(); }); for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); }); };
+
+  it('an owner of an organization whose remote control is OFF: one tick above [시작], ticked, with the words — and it sits in the start row (no new step)', async () => {
+    remoteGet = remoteOf(OFF_OWNER);
+    await mount(frag(FOLDER), { projectId: PROJ, projects: [{ projectId: PROJ, projectName: 'P', orgId: 'o-1' }] });
+    expect(tick()?.checked).toBe(true);
+    expect(container.querySelector('[data-testid=setup-phone-control]')!.textContent).toContain('폰으로도 에이전트 다루기');
+    expect(container.querySelectorAll('input[type=checkbox]')).toHaveLength(1);
+    const row = container.querySelector('[data-testid=setup-phone-control]')!;
+    expect(row.nextElementSibling?.querySelector('button')?.textContent).toBe('시작'); // just above «시작»
+  });
+
+  it('already on · the person cannot change it → no row', async () => {
+    for (const v of [{ enabled: true, can_change: true, enabled_at: 'x' }, { enabled: false, can_change: false, enabled_at: null }]) {
+      remoteGet = remoteOf(v);
+      await mount(frag(FOLDER), { projectId: PROJ });
+      expect(tick()).toBeNull();
+      await act(async () => { root.render(<div />); });
+    }
+  });
+
+  it('[시작] → the confirmation goes through → ONE PUT {enabled:true} for this session\'s org, after it', async () => {
+    remoteGet = remoteOf(OFF_OWNER);
+    await mount(frag(FOLDER), { projectId: PROJ });
+    await press();
+    const order = calls.map((c) => (c.url.endsWith('/confirm-solo') ? 'confirm' : c.method === 'PUT' && c.url.includes('/remote-control') ? 'put' : null)).filter(Boolean);
+    expect(order).toEqual(['confirm', 'put']);
+    expect(puts()).toHaveLength(1);
+    expect(puts()[0]!.url).toContain('/api/organizations/o-1/remote-control');
+    expect(puts()[0]!.body).toEqual({ enabled: true });
+  });
+
+  it('unticked → the start goes and NO switch call', async () => {
+    remoteGet = remoteOf(OFF_OWNER);
+    await mount(frag(FOLDER), { projectId: PROJ });
+    await act(async () => { tick()!.click(); });
+    await press();
+    expect(calls.some((c) => c.url.endsWith('/confirm-solo'))).toBe(true);
+    expect(puts()).toHaveLength(0);
+  });
+
+  it('a start that did not go through sends no PUT (the tick never rides on a failed confirmation)', async () => {
+    remoteGet = remoteOf(OFF_OWNER);
+    confirmNow = () => new Response(JSON.stringify({ error: { code: 'something_else' } }), { status: 500 });
+    await mount(frag(FOLDER), { projectId: PROJ });
+    await press();
+    expect(puts()).toHaveLength(0);
+  });
+
+  it('a read that FAILED draws the row too — unticked (an unreadable value is never flipped on by default)', async () => {
+    remoteGet = () => new Response('{}', { status: 404 }); // a final «no» (a 5xx is asked again a little later) — failed, not «still reading»
+    await mount(frag(FOLDER), { projectId: PROJ });
+    for (let i = 0; i < 6; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(tick()).not.toBeNull();
+    expect(tick()!.checked).toBe(false);
+    await press();
+    expect(puts()).toHaveLength(0);
+  });
+
+  it('a new organization (no organization yet): the row is there, ticked, and the PUT goes to the organization the start made', async () => {
+    confirmNow = () => new Response(JSON.stringify({ project_id: PROJ, org_id: 'o-new', conversation_id: 'c-1', members: [] }), { status: 200 });
+    await mount(frag(FOLDER), { orgId: null });
+    for (let i = 0; i < 8; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(tick()?.checked).toBe(true);
+    await press();
+    expect(calls.some((c) => c.url.endsWith('/confirm-solo-new-org'))).toBe(true);
+    expect(puts().map((p) => p.url)).toEqual([expect.stringContaining('/api/organizations/o-new/remote-control')]);
   });
 });
 
