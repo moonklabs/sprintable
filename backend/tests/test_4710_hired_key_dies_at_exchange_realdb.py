@@ -19,7 +19,6 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures us
     RECIPE,
     _addresses,
     _client,
-    _code,
     _confirm,
     _dispose_global_engine_after_test,
     _exchange,
@@ -28,7 +27,9 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures us
     anyio_backend,
     world,
 )
-from tests.test_4565_attach_existing_agent_realdb import _attach, _live_keys, attachable  # noqa: F401
+from tests.test_4565_attach_existing_agent_realdb import _live_keys, attachable  # noqa: F401
+# the confirmation the recruiter's hero opens in the app is the MOVE shape (an app that can take a move · roles = existing agents), not 4565's recipe attach
+from tests.test_4576_move_setup_realdb import _move, _move_code
 
 
 async def _recruit_key(member) -> str:
@@ -53,8 +54,8 @@ async def test_the_key_the_recruit_answered_with_is_dead_once_the_app_has_the_ag
         assert (await c.get("/api/v2/auth/me", headers={"Authorization": f"Bearer {recruit_key}"})).status_code != 401
         assert await _live_keys(EXISTING) == 1
 
-        code, verifier = await _code(c, "d4710 hire")
-        r = await _confirm(c, code, body=_attach())  # the setup the recruiter's hero opens: the hired agent, attached
+        code, verifier, _setup = await _move_code(c, "d4710 hire")  # a code as the app asks for it: capabilities ["move"]
+        r = await _confirm(c, code, body=_move(EXISTING))  # the setup the recruiter's hero opens: the hired agent, moved to the app
         assert r.status_code == 200, r.text
         assert await _live_keys(EXISTING) == 1  # nothing revoked at the confirmation — the app has not taken it yet
         # the setup is the «이미 있는 에이전트» shape: the hired agent carries the `existing` mark — without it the exchange would not go
