@@ -116,7 +116,14 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
   const block = soloStartBlock(runtime, folder, wideOk);
   const folderLink = appSetupLink(app, 'folder', { pick: runtime });
 
+  // codex self-QA: two presses before the state commits must not send two confirmations (and two phone-control PUTs)
+  const startInFlight = useRef(false);
   async function start(useProject?: string) {
+    if (startInFlight.current) return;
+    startInFlight.current = true;
+    try { await startOnce(useProject); } finally { startInFlight.current = false; }
+  }
+  async function startOnce(useProject?: string) {
     if (!runtime || !folder || soloStartBlock(runtime, folder, wideOk)) return;
     setRateLine(null);
     setErrorLine(null);

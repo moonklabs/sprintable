@@ -105,6 +105,24 @@ describe('[SID:4711] the first setup in three steps', () => {
     expect(JSON.stringify(calls)).not.toContain('~/code');
   });
 
+  it('codex self-QA: two presses of [시작] before the screen redraws send ONE confirmation', async () => {
+    await mount(frag('&fshown=~/code/my-app&fname=my-app'), { projectId: PROJ, projects: [{ projectId: PROJ, projectName: 'Existing', orgId: 'o-1' }] });
+    const go = buttonOf('시작')!;
+    await act(async () => { go.click(); go.click(); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(calls.filter((c) => c.url.endsWith('/confirm-solo')).length).toBe(1);
+  });
+
+  it('codex self-QA: a folder name that is a path (a made-up link) is no answer — nothing is sent, the button asks for the folder', async () => {
+    for (const name of ['/Users/me/repo', 'a/b', 'a\\b']) {
+      await mount(frag(`&fshown=~/code/my-app&fname=${encodeURIComponent(name)}`), { projectId: PROJ, projects: [] });
+      expect(container.querySelector('[data-testid=quick-folder]')).toBeNull();
+      expect(buttonOf('시작')!.disabled).toBe(true);
+      expect(calls.filter((c) => c.url.includes('confirm-solo'))).toEqual([]);
+      await act(async () => { root.render(<div />); });
+    }
+  });
+
   it('a project the app found for this folder is used (by id), and the line says so', async () => {
     await mount(frag(`&fshown=~/code/my-app&fname=my-app&fproject=${PROJ}`), { projectId: PROJ, projects: [{ projectId: PROJ, projectName: 'Existing', orgId: 'o-1' }] });
     expect(container.querySelector('[data-testid=quick-project]')!.textContent).toBe('이 폴더의 프로젝트 · Existing');

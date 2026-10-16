@@ -99,6 +99,8 @@ export function parseRuntimeVersions(value: string | null, found: readonly Deskt
 }
 
 const NO_CONTROL = /^[^\u0000-\u001f\u007f\u2028\u2029]+$/;
+/** A folder NAME (what the web sends for a new project) is one path segment: never a path (codex self-QA — a made-up link must not carry one to the server). */
+const NO_PATH_SEPARATOR = /^[^/\\]+$/;
 /** The folder the app's Mac window answered, from `fshown` · `fname` (· `fproject` · `fwide=1`) — or `frefused=<code>`. Anything that
  *  is not exactly one of the two shapes is no answer (the card then shows the button, as before the window). */
 export function parseSoloFolder(params: { get(name: string): string | null }): SoloFolder | SoloFolderRefused | undefined {
@@ -106,7 +108,7 @@ export function parseSoloFolder(params: { get(name: string): string | null }): S
   if (refused) return { refused };
   const shown = params.get('fshown') ?? '';
   const name = params.get('fname') ?? '';
-  if (!shown || shown.length > 300 || !NO_CONTROL.test(shown) || !name || name.length > 100 || !NO_CONTROL.test(name)) return undefined;
+  if (!shown || shown.length > 300 || !NO_CONTROL.test(shown) || !name || name.length > 100 || !NO_CONTROL.test(name) || !NO_PATH_SEPARATOR.test(name)) return undefined;
   const project = params.get('fproject') ?? '';
   return { shown, name, ...(AGENT_ID_RE.test(project) ? { projectId: project } : {}), ...(params.get('fwide') === '1' ? { wide: true as const } : {}) };
 }
