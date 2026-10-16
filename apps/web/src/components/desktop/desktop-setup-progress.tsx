@@ -74,7 +74,7 @@ export function SetupProgressView({ setupId, recipeName, phoneControlFailed = fa
       // «설정 진행 중» 표시(문서 열림 셈 · AC2): 흐름이 끝나면 지우고, 아니면 읽을 때마다 새로 적는다(PO 13:00Z)
       // story #4576: a move has no first result — its flow ends when every agent is settled
       if (s.signals.first_result_at || s.signals.blocked || s.state === 'not_handed_over' || s.state === 'disconnected'
-        || (s.setup_kind === 'move' && moveProgress(s, Date.now(), null).settled)) forgetActiveSetup();
+        || ((s.setup_kind === 'move' || s.setup_kind === 'solo') && moveProgress(s, Date.now(), null).settled)) forgetActiveSetup();
       else rememberActiveSetup(setupId);
       const at = Date.now();
       setSnap((prev) => ({ status: s, at, handedOverSeenAt: prev?.handedOverSeenAt ?? (s.state === 'handed_over' ? at : null) }));
@@ -84,7 +84,17 @@ export function SetupProgressView({ setupId, recipeName, phoneControlFailed = fa
   const status = snap?.status ?? null;
   const progress = snap ? setupProgress(snap.status, snap.at, snap.handedOverSeenAt) : null;
   // story #4576: a move («이미 있는 에이전트 옮기기») has its own two steps — the server says which (setup_kind)
-  const move = snap && snap.status.setup_kind === 'move' ? moveProgress(snap.status, snap.at, snap.handedOverSeenAt) : null;
+  // story 4711: a solo start (the first setup in three steps) has the same two steps — one agent, no recipe, no first task or result
+  const move = snap && (snap.status.setup_kind === 'move' || snap.status.setup_kind === 'solo') ? moveProgress(snap.status, snap.at, snap.handedOverSeenAt) : null;
+  // story 4711 AC2: the first screen after a solo start is the conversation with that agent — opened once the app has taken the agent
+  // over (the folder-trust question, if Claude Code asks it, shows there). Once: a person who comes back to the page is not sent again.
+  const soloRoom = snap?.status.setup_kind === 'solo' && snap.status.state === 'handed_over' ? snap.status.conversation_id ?? null : null;
+  const opened = useRef(false);
+  useEffect(() => {
+    if (!soloRoom || opened.current) return;
+    opened.current = true;
+    window.location.assign(flatHref(`/chats/${soloRoom}`)); // a full load: the page's address holds nothing to keep, and a new token may be needed
+  }, [soloRoom, flatHref]);
   // story 4464 — keep reading until every agent is in (PO 12:04Z: also while a block waits for the person — once they act and the
   // agent connects, the block goes); after 2 minutes of such waiting, every 10 s instead of 2
   const done = move ? move.settled : !!progress && progress.settled;

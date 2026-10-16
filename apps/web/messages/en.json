@@ -6995,6 +6995,43 @@
           "action": "Start again in the app"
         }
       },
+      "quick": {
+        "title": "Start an agent on this computer",
+        "stepAgent": "Agent",
+        "stepFolder": "Folder",
+        "tooOld": "{name} {version} — too old to use with this app · update it to choose it",
+        "noAgentTitle": "We couldn't find Claude Code or Codex on this computer",
+        "noAgentBody": "Install and sign in to Claude Code or Codex, then look again. You can install them from the terminal.",
+        "copy": "Copy",
+        "copied": "Copied",
+        "copyAria": "Copy · {name} install command",
+        "refind": "Look again",
+        "folderPick": "Choose a folder",
+        "folderChange": "Change",
+        "projectNew": "Project name · {name}",
+        "projectExisting": "This folder's project · {name}",
+        "projectChosen": "Project · {name}",
+        "wideAsk": "The agent works across this whole folder — is that right?",
+        "wideYes": "Yes",
+        "folderOther": "Choose another folder",
+        "start": "Start",
+        "starting": "Starting…",
+        "startLine": "Creates one {runtime} agent, adds it to the {project} project, and opens a conversation in this folder",
+        "blockNoAgent": "You can start once an agent is found",
+        "blockNoFolder": "You can start once you choose a folder",
+        "blockWide": "You can start once you confirm the folder",
+        "team": "Set up a team of agents →",
+        "refused": {
+          "denied": "We can't open this folder — allow Sprintable in System Settings › Privacy & Security › Files and Folders, or choose another folder",
+          "missing": "We can't find the folder you chose — choose it again"
+        },
+        "failed": "Couldn't start — try again",
+        "limit": {
+          "title": "The free plan has one project",
+          "body": "You can add this folder's agent to the {project} project and start — the agent works in this folder.",
+          "addStart": "Add and start"
+        }
+      },
       "direct": {
         "title": "Open this in the desktop app",
         "body": "This setup can only be done in the Sprintable app on the computer where your agents run.",
