@@ -555,6 +555,25 @@ describe('[SID:4717] the solo card says the plan\'s agent room before «시작»
     expect(calls.some((c) => c.url.includes('/confirm-solo'))).toBe(false);
   });
 
+  it('codex self-QA: the room read lands AFTER the project question (402) → «넣고 시작» is held and the reason is said, never a silent press', async () => {
+    ee.on = true;
+    let open!: () => void;
+    const gate = new Promise<void>((r) => { open = r; });
+    recipesNow = (() => gate.then(room({ limit: 3, current: 3, available: 0, tier: 'free' }))) as unknown as () => Response;
+    confirmNow = () => new Response(JSON.stringify({ error: { code: 'PLAN_LIMIT_EXCEEDED', resource: 'project', limit: 1, existing_project: { id: PROJ, name: 'Mine' } } }), { status: 402 });
+    await mount(frag(ORG_FOLDER), opts);
+    await act(async () => { buttonOf('시작')!.click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid=quick-limit]')).not.toBeNull();
+    expect(buttonOf('넣고 시작')!.disabled).toBe(false);
+    await act(async () => { open(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(buttonOf('넣고 시작')!.disabled).toBe(true);
+    expect(container.querySelector('[data-testid=quick-limit] [data-testid=setup-room-short]')).not.toBeNull();
+    await act(async () => { buttonOf('넣고 시작')!.click(); });
+    expect(calls.filter((c) => c.url.endsWith('/confirm-solo')).length).toBe(1); // only the first press went out
+  });
+
   it('room for one → the card as before (nothing said about the limit) and «시작» on', async () => {
     recipesNow = room({ limit: 3, current: 2, available: 1, tier: 'free' });
     await mount(frag(ORG_FOLDER), opts);

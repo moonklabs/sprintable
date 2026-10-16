@@ -361,8 +361,13 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
           <div role="status" className="flex flex-col gap-2 rounded-md border p-3 text-sm" data-testid="quick-limit">
             <p className="font-medium">{t('quick.limit.title')}</p>
             <p>{t('quick.limit.body', { project: limitAsk.name })}</p>
+            {/* codex self-QA (4717): the room can fill after the press that raised this question — the button is held and the reason said, never a silent no-op */}
+            {roomFull && agentRoom ? (
+              <RoomShortBox room={agentRoom} line={t('room.soloNone')}
+                hint={<p className="text-xs text-muted-foreground" data-testid="quick-room-use-team">{t('room.soloUseTeam')}</p>} />
+            ) : null}
             <div className="flex flex-wrap items-center gap-3">
-              <Button disabled={starting} onClick={() => void start(limitAsk.id)}>{starting ? t('quick.starting') : t('quick.limit.addStart')}</Button>
+              <Button disabled={starting || roomFull} onClick={() => void start(limitAsk.id)}>{starting ? t('quick.starting') : t('quick.limit.addStart')}</Button>
               {isEEEnabled() ? <a className="text-xs underline underline-offset-2" href={flatHref('/settings?tab=billing')}>{tNav('orgLimitUpgradeLink')}</a> : null}
             </div>
           </div>
