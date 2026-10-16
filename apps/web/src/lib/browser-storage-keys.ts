@@ -35,7 +35,7 @@ export type StorageKeyEntry =
 export const BROWSER_STORAGE_KEYS: readonly StorageKeyEntry[] = [
   // ── account: flows into the next account's screen or requests, or holds a person's words · state ──
   { key: 'sprintable_tab_project_id', area: 'session', scope: 'account', on: ['signout', 'switch'],
-    where: ['app/dashboard/dashboard-shell.tsx', 'lib/project-context-client.ts', 'components/nav/org-hint-banner.tsx', 'hooks/use-unified-switcher.ts'] },
+    where: ['app/dashboard/dashboard-shell.tsx', 'lib/project-context-client.ts', 'components/nav/org-hint-banner.tsx', 'hooks/use-unified-switcher.ts', 'components/desktop/desktop-setup.tsx'] },
   // drafts are `…:u:<owner>:…` since story #4490 (owner-keyed: a switch keeps them, nobody else sees them); the head stays the
   // prefix so a sign-out also clears drafts written before then (no owner segment) — lib/tab-owner.ts adopts those
   { key: 'sprintable:field-draft:v1:', prefix: true, area: 'session', scope: 'account', on: ['signout'], where: ['hooks/use-field-draft.ts', 'lib/tab-owner.ts'] },
