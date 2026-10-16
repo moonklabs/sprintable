@@ -133,3 +133,30 @@ def test_the_patch_route_checks_before_the_run_profile_reset():
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+def test_the_guard_and_the_count_compare_the_same_exact_value():
+    """Kadir ② — one constant, no normalisation on either side: what the guard refuses is exactly what the count leaves out."""
+    from app.services import agent_count, system_publisher_guard
+
+    assert "SYSTEM_PUBLISHER_RUNTIME_TYPE" in inspect.getsource(system_publisher_guard.assert_runtime_type_not_reserved)
+    assert "SYSTEM_PUBLISHER_RUNTIME_TYPE" in inspect.getsource(agent_count.plan_agent_count)
+    for src in (inspect.getsource(system_publisher_guard.assert_runtime_type_not_reserved), inspect.getsource(agent_count)):
+        assert ".lower(" not in src and ".strip(" not in src and "ILIKE" not in src.upper().replace("LIKE ", "")
+
+
+def test_runtime_type_is_written_only_where_it_is_checked():
+    """Kadir ① — every place app/ writes members.runtime_type: the server's publisher insert, the one anchor write path
+    (PATCH · recruit · setup — guarded), and the run profile (desktop runtimes only). A new write path makes this red."""
+    writers = set()
+    for path in (BACKEND / "app").rglob("*.py"):
+        src = path.read_text(encoding="utf-8")
+        # code statements only (a line that starts with the assignment / the insert keyword / the dict) — not prose in docstrings
+        if re.search(r"(?m)^\s+\w+\.runtime_type\s*=(?!=)|^\s+runtime_type\s*=\s*\"system-publisher\"|\{\s*\"runtime_type\"\s*:", src):
+            writers.add(str(path.relative_to(BACKEND)))
+    assert writers == {
+        "app/routers/events.py",  # the server's own «시스템 발행» insert
+        "app/services/agent_run_profile.py",  # member.runtime_type = new_runtime — after check(): claude-code · codex only
+        "app/services/recruit_service.py",  # → apply_anchor_update (guarded)
+        "app/services/desktop_setup.py",  # → apply_anchor_update (guarded) · RUNTIME_TYPES only
+    }, writers
