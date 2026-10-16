@@ -5,7 +5,9 @@ const h = vi.hoisted(() => ({
   cookieGet: vi.fn(),
   proxy: vi.fn(),
   backend: vi.fn(),
+  csrf: vi.fn(),
 }));
+vi.mock('@/lib/auth/csrf', () => ({ verifyCsrfOrigin: h.csrf }));
 vi.mock('next/headers', () => ({ cookies: vi.fn(async () => ({ get: h.cookieGet })) }));
 vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi: h.proxy }));
 vi.mock('@/lib/backend-fetch', () => ({ backendFetch: h.backend }));
@@ -17,6 +19,7 @@ const call = () => POST(new Request('http://localhost/api/invites/tok/accept', {
 
 describe('POST /api/invites/[token]/accept', () => {
   beforeEach(() => {
+    h.csrf.mockReset().mockReturnValue(null);
     h.cookieGet.mockReset().mockImplementation((n: string) => (n === 'sp_rt' ? { value: 'old-rt' } : undefined));
     h.proxy.mockReset().mockImplementation(async () => ok({ ok: true, org_id: 'o1', role: 'member' }));
     h.backend.mockReset().mockImplementation(async () => ok({ data: { access_token: 'new-at', refresh_token: 'new-rt' } }));
@@ -50,6 +53,23 @@ describe('POST /api/invites/[token]/accept', () => {
     const res2 = await call();
     expect(res2.status).toBe(200);
     expect(res2.headers.get('set-cookie') ?? '').not.toContain('sp_at=');
+  });
+
+  it('a request from another origin is refused before the accept or any rotation (same check as /api/auth/refresh)', async () => {
+    h.csrf.mockReturnValue(new Response(JSON.stringify({ error: { code: 'CSRF_FORBIDDEN' } }), { status: 403 }));
+    const res = await call();
+    expect(res.status).toBe(403);
+    expect(h.proxy).not.toHaveBeenCalled();
+    expect(h.backend).not.toHaveBeenCalled();
+  });
+
+  it('a dead refresh token (401) leaves the cookies alone — the ordinary refresh path clears it, the accept stays a success', async () => {
+    h.backend.mockImplementation(async () => new Response(JSON.stringify({ error: { code: 'TOKEN_REVOKED' } }), { status: 401 }));
+    const res = await call();
+    expect(res.status).toBe(200);
+    const setCookie = res.headers.get('set-cookie') ?? '';
+    expect(setCookie).not.toContain('sp_at');
+    expect(setCookie).not.toContain('sp_rt');
   });
 
   it('no refresh cookie → nothing to rotate, the accept still succeeds', async () => {
