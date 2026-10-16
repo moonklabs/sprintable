@@ -94,12 +94,15 @@ describe('[SID:4711] the `agent=` branch of the setup page', () => {
     expect(window.location.hash).toBe(`#progress=${SERVER_ID}`);
     await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
     expect(calls.some((c) => c.url.includes(`/api/desktop/setups/${SERVER_ID}`))).toBe(true);
-    await act(async () => { root.render(<div />); });
-    confirmNow = () => new Response(JSON.stringify({ setup_id: 'a/../b', members: [], work_item_id: null }), { status: 200 });
-    await open(frag('move,solo', '&setup=11111111-1111-4111-8111-aaaaaaaaaaaa'));
-    await act(async () => { start()!.click(); });
-    for (let i = 0; i < 8; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
-    expect(window.location.hash).toBe('#progress=11111111-1111-4111-8111-aaaaaaaaaaaa');
+    // anything that is not a uuid is not a setup id (the progress route takes nothing else; a code-like string must not reach the address): the address's own stands
+    for (const bad of ['a/../b', 's-1', 'x'.repeat(43)]) {
+      await act(async () => { root.render(<div />); });
+      confirmNow = () => new Response(JSON.stringify({ setup_id: bad, members: [], work_item_id: null }), { status: 200 });
+      await open(frag('move,solo', '&setup=11111111-1111-4111-8111-aaaaaaaaaaaa'));
+      await act(async () => { start()!.click(); });
+      for (let i = 0; i < 8; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      expect(window.location.hash).toBe('#progress=11111111-1111-4111-8111-aaaaaaaaaaaa');
+    }
   });
 
   it('codex self-QA: two presses of [시작] before the card redraws send ONE move confirmation', async () => {

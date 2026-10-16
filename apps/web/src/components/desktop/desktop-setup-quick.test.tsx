@@ -263,7 +263,7 @@ describe('[SID:4711] the first setup in three steps', () => {
     // a nonsense id in the answer is not trusted: the address's own setup id stands
     await act(async () => { root.render(<div />); });
     calls.length = 0;
-    confirmNow = () => new Response(JSON.stringify({ setup_id: 'a/../b', project_id: PROJ, conversation_id: 'c-1', members: [] }), { status: 200 });
+    confirmNow = () => new Response(JSON.stringify({ setup_id: 's-1', project_id: PROJ, conversation_id: 'c-1', members: [] }), { status: 200 }); // not a uuid (also 'a/../b' · a code-like string in the move test)
     await mount(frag('&fshown=~/code/my-app&fname=my-app'), { projectId: PROJ, projects: [] });
     await act(async () => { buttonOf('시작')!.click(); });
     for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });

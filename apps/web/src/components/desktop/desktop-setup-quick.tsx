@@ -31,6 +31,14 @@ type OrgMode = { kind: 'has-org' } | { kind: 'checking' } | { kind: 'new' } | { 
 type View = { kind: 'choose' } | { kind: 'starting' } | { kind: 'started' } | { kind: 'done-reload' }
   | { kind: 'failed'; failure: 'offline' | 'not-admin' | 'expired' | 'has-org' | 'agent-limit'; counts?: { need: number; left: number } | null };
 
+/** The setup the progress belongs to: the SERVER's id from its answer, else the address's own — each only if it is a uuid (the progress route takes nothing else, and a
+ *  code-like string must never be written into the address). None valid → null: the plain «started» card, no polling. */
+const SETUP_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function progressIdOf(fromAnswer: unknown, fromAddress: string | null): string | null {
+  if (typeof fromAnswer === 'string' && SETUP_UUID.test(fromAnswer)) return fromAnswer;
+  return fromAddress && SETUP_UUID.test(fromAddress) ? fromAddress : null;
+}
+
 export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { query: SetupQuery; onTeam: () => void; /** story 4711 (`agent=` branch): the recruiter's agent, already checked movable — the card's ① is that one agent (read-only) and «시작» is the MOVE confirmation, never a new agent */ agent?: AttachableAgent; /** the move could not be confirmed because the agent is no longer movable (left the project …): the wrapper falls to the recipe page with its reasons */ onNotMovable?: () => void }) {
   const t = useTranslations('desktop.setup');
   const tNewOrg = useTranslations('desktopOnboarding');
@@ -136,7 +144,7 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
       if (res.ok) {
         // the setup this move belongs to is the SERVER's (`setup_id` in its answer, shape-checked); the address's `setup=` is only the fallback (codex self-QA)
         const okBody = await res.json().catch(() => null) as { setup_id?: string } | null;
-        const made = typeof okBody?.setup_id === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(okBody.setup_id) ? okBody.setup_id : query.setupId;
+        const made = progressIdOf(okBody?.setup_id, query.setupId);
         setMadeSetupId(made);
         if (!projectId && !(await joinNewOrg({ project_id: agentProject }))) { setView({ kind: 'done-reload' }); return; }
         await turnPhoneControlOn(orgId);
@@ -180,7 +188,7 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
         : await fetchWithAuth('/api/desktop/setup-codes/confirm-solo', { ...json, body: JSON.stringify(soloConfirmBody(query.code, runtime, matched ? folder : { ...folder, projectId: undefined }, useProject)) });
       if (res.ok) {
         const okBody = await res.json().catch(() => null) as { project_id?: string; org_id?: string; setup_id?: string } | null;
-        const made = typeof okBody?.setup_id === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(okBody.setup_id) ? okBody.setup_id : query.setupId;
+        const made = progressIdOf(okBody?.setup_id, query.setupId);
         setMadeSetupId(made);
         // the tab has no project (or no organization) yet: the one made (or used) becomes the tab's, the way the recipe setup does
         if ((newOrg || !projectId) && !(await joinNewOrg(newOrg ? okBody : { project_id: okBody?.project_id ?? useProject ?? matched?.projectId }))) { setView({ kind: 'done-reload' }); return; }
