@@ -14,6 +14,8 @@ import { useFlatHref } from '@/hooks/use-flat-href';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { SetupProgressView } from './desktop-setup-progress';
+import { DesktopSetupQuick } from './desktop-setup-quick';
+import { showsQuickCard } from '@/lib/desktop-setup-quick';
 import { defaultOrgName } from '@/app/onboarding/desktop-create-org';
 import { onboardingRedirect } from '@/lib/auth/onboarding-next';
 import { formatLocaleDate } from '@/lib/i18n';
@@ -42,14 +44,14 @@ export const SETUP_REOPEN_LINK = appSetupLink(null, 'reopen');
 
 /** story #4626: the links for the app that opened this page — `?app=` through the closed table (none · anything else = the
  *  default above, byte for byte; a typed address has none) */
-function useAppSetupLinks(): { open: string; reopen: string } {
+export function useAppSetupLinks(): { open: string; reopen: string } {
   const app = nativeReturnApp(useSearchParams()?.get(RETURN_APP_PARAM));
   return { open: appSetupLink(app), reopen: appSetupLink(app, 'reopen') };
 }
-const RUNTIME_LABEL: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex' };
+export const RUNTIME_LABEL: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex' };
 // each provider's recommended install (no Node.js needed; fixed provider addresses with no version in them — PO 13:10Z from
 // code.claude.com/docs/en/setup and github.com/openai/codex)
-const INSTALL: Record<DesktopRuntime, string> = { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh' };
+export const INSTALL: Record<DesktopRuntime, string> = { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh' };
 
 export type SetupFailure = 'no-agent' | 'not-admin' | 'agent-limit' | 'expired' | 'offline' | 'managed' | 'no-recipe' | 'recipes-offline' | 'recipe-too-big' | 'recipes-changed' | 'has-org' | 'disconnected'
   // story #4576 — the move's own refusals (Yuna «② 확인이 거절될 때»)
@@ -139,7 +141,7 @@ export function limitCounts(error: { needed?: unknown; available?: unknown } | u
  * project as the current one, a fresh token again — the order the one-screen «조직 만들기» uses (Mirko 02:26Z). The setup is
  * already committed, so a failed step here does not stop the progress view (it reads by the setup id).
  */
-async function joinNewOrg(body: { project_id?: string; data?: { project_id?: string } } | null): Promise<boolean> {
+export async function joinNewOrg(body: { project_id?: string; data?: { project_id?: string } } | null): Promise<boolean> {
   const projectId = body?.project_id ?? body?.data?.project_id;
   if (!(await renewToken())) return false;
   if (projectId) {
@@ -168,6 +170,17 @@ function reloadToProgress(setupId: string): void {
   // replaceState, not `location.hash =`: no hashchange for the page's own handler (same as 4429 ②)
   window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(setupId));
   window.location.reload();
+}
+
+/** The person's pending invites (`GET /api/invites/mine`); throws when the list cannot be read — not knowing is not «no invites».
+ *  One reading for the recipe setup and the first-setup card (story 4711). */
+export async function fetchMyInvites(): Promise<MyInvite[]> {
+  const res = await fetchWithAuth('/api/invites/mine');
+  if (!res.ok) throw new Error(String(res.status));
+  const body = await res.json();
+  const list: unknown = body?.invites ?? body?.data?.invites;
+  if (!Array.isArray(list)) throw new Error('no list');
+  return list as MyInvite[];
 }
 
 /**
@@ -328,12 +341,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   // (나) no organization: their invites decide the mode (0 → a new organization · some → where to go · unreadable → (가))
   async function readInvites() {
     try {
-      const res = await fetchWithAuth('/api/invites/mine');
-      if (!res.ok) throw new Error(String(res.status));
-      const body = await res.json();
-      const list: unknown = body?.invites ?? body?.data?.invites;
-      if (!Array.isArray(list)) throw new Error('no list');
-      setOrgMode(list.length ? { kind: 'invited', invites: list as MyInvite[] } : { kind: 'new' });
+      const list = await fetchMyInvites();
+      setOrgMode(list.length ? { kind: 'invited', invites: list } : { kind: 'new' });
     } catch {
       window.location.assign(onboardingRedirect(window.location.pathname)); // this page → /onboarding?next=… (4832)
     }
@@ -1365,6 +1374,7 @@ function SetupOrProgress({ query }: { query: SetupQuery }) {
   const t = useTranslations('desktop.setup');
   const id = query.setupId && SETUP_ID_SHAPE.test(query.setupId) ? query.setupId : null;
   const [started, setStarted] = useState<boolean | null>(id ? null : false);
+  const [teamPath, setTeamPath] = useState(false);
   useEffect(() => {
     if (!id) return;
     let off = false;
@@ -1381,6 +1391,9 @@ function SetupOrProgress({ query }: { query: SetupQuery }) {
   }, [id]);
   if (started === null) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   if (started && id) return <SetupProgressView setupId={id} recipeName="" />;
+  // story 4711: an app that can take the first setup in three steps gets that card; the recipe setup is one link away («팀 꾸리기»).
+  // A recruiter's agent (`agent=`) keeps the recipe page for now — its own branch of the card comes with the recruiter's PR.
+  if (showsQuickCard(query, teamPath) && !query.agent) return <DesktopSetupQuick query={query} onTeam={() => setTeamPath(true)} />;
   return <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} old={query.old ?? []} canMove={query.canMove === true} preselect={query.agent ?? null} />;
 }
 

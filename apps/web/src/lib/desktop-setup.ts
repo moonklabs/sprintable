@@ -24,7 +24,25 @@ export interface SetupQuery { code: string; runtimes: DesktopRuntime[]; setupId:
   canMove?: true;
   /** story 4680 (D2): `agent=<member id>` — the agent the recruiter just made (the app's startHere({agentId}) put it in the fragment);
    *  the page chooses it for the first agent row once the «이미 있는 에이전트» list has it. Only a uuid-shaped value; absent otherwise. */
-  agent?: string }
+  agent?: string;
+  /** story 4711: the app said `caps=solo` — it can take the first setup in three steps (one new agent for a picked folder).
+   *  Absent = an app from before: the page is today's recipe setup. Only present when true. */
+  canSolo?: true;
+  /** story 4711: the runtime the person had picked before the Mac folder window (`pick=` — the app puts it back, the address is new). */
+  pick?: DesktopRuntime;
+  /** story 4711: the versions the app read (`rv=claude:2.1.289,codex:0.159.3`) — shown after the program's name; only well-shaped ones. */
+  versions?: Partial<Record<DesktopRuntime, string>>;
+  /** story 4711: what the Mac folder window answered — a folder (shown home-shortened · its name · the project already using it) or why not. */
+  folder?: SoloFolder | SoloFolderRefused }
+
+/** story 4711: the folder the person picked in the Mac window. `shown` is for the eyes only (home shortened to `~`); the server gets
+ *  `name` (the project's name) — never a path. `projectId`: the app found a project that already uses this folder (project-workdirs).
+ *  `wide`: the home folder itself or the top of the disk — the agent would work across all of it, so the card asks once. */
+export interface SoloFolder { shown: string; name: string; projectId?: string; wide?: true }
+export const FOLDER_REFUSALS = ['missing', 'not_folder', 'app_folder', 'denied'] as const;
+export type FolderRefusal = (typeof FOLDER_REFUSALS)[number];
+export interface SoloFolderRefused { refused: FolderRefusal }
+export const isFolderRefused = (f: SoloFolder | SoloFolderRefused | undefined): f is SoloFolderRefused => !!f && 'refused' in f;
 
 /** story 4494 (PO 10:00Z (a)): the app's `old=codex:0.153.4:0.156.1` — a runtime installed only below its floor (its version · the
  * lowest that works). The page says «버전이 낮아» for it instead of «찾지 못했어요». */
@@ -59,7 +77,40 @@ export function parseSetupQuery(params: { get(name: string): string | null }): S
   const blockedAsked = new Set((params.get('blocked') ?? '').split(',').map((s) => s.trim()));
   const caps = new Set((params.get('caps') ?? '').split(',').map((s) => s.trim()));
   const agent = params.get('agent') ?? '';
-  return { code, runtimes, setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null, blocked: runtimes.filter((r) => blockedAsked.has(r)), ...withOld(parseOldRuntimes(params.get('old'), runtimes)), ...(caps.has('move') ? { canMove: true as const } : {}), ...(AGENT_ID_RE.test(agent) ? { agent } : {}) };
+  const solo = caps.has('solo') ? { canSolo: true as const } : {};
+  const pickAsked = params.get('pick') ?? '';
+  const pick = DESKTOP_RUNTIMES.find((r) => r === pickAsked && runtimes.includes(r));
+  const versions = parseRuntimeVersions(params.get('rv'), runtimes);
+  const folder = parseSoloFolder(params);
+  return { code, runtimes, setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null, blocked: runtimes.filter((r) => blockedAsked.has(r)), ...withOld(parseOldRuntimes(params.get('old'), runtimes)), ...(caps.has('move') ? { canMove: true as const } : {}), ...solo, ...(pick ? { pick } : {}), ...(Object.keys(versions).length ? { versions } : {}), ...(folder ? { folder } : {}), ...(AGENT_ID_RE.test(agent) ? { agent } : {}) };
+}
+
+
+/** `rv=claude:2.1.289,codex:0.159.3` → the versions of the found runtimes, each at most once; a broken entry is dropped. */
+export function parseRuntimeVersions(value: string | null, found: readonly DesktopRuntime[]): Partial<Record<DesktopRuntime, string>> {
+  const out: Partial<Record<DesktopRuntime, string>> = {};
+  for (const part of (value ?? '').split(',')) {
+    const [r, v, ...rest] = part.trim().split(':');
+    const runtime = DESKTOP_RUNTIMES.find((x) => x === r);
+    if (!runtime || rest.length || !found.includes(runtime) || out[runtime] !== undefined || !v || !VERSION_RE.test(v)) continue;
+    out[runtime] = v;
+  }
+  return out;
+}
+
+const NO_CONTROL = /^[^\u0000-\u001f\u007f\u2028\u2029]+$/;
+/** A folder NAME (what the web sends for a new project) is one path segment: never a path (codex self-QA — a made-up link must not carry one to the server). */
+const NO_PATH_SEPARATOR = /^[^/\\]+$/;
+/** The folder the app's Mac window answered, from `fshown` · `fname` (· `fproject` · `fwide=1`) — or `frefused=<code>`. Anything that
+ *  is not exactly one of the two shapes is no answer (the card then shows the button, as before the window). */
+export function parseSoloFolder(params: { get(name: string): string | null }): SoloFolder | SoloFolderRefused | undefined {
+  const refused = FOLDER_REFUSALS.find((r) => r === params.get('frefused'));
+  if (refused) return { refused };
+  const shown = params.get('fshown') ?? '';
+  const name = params.get('fname') ?? '';
+  if (!shown || shown.length > 300 || !NO_CONTROL.test(shown) || !name.trim() || name.length > 100 || !NO_CONTROL.test(name) || !NO_PATH_SEPARATOR.test(name)) return undefined; // a blank name is no name (the server would refuse it with a 422)
+  const project = params.get('fproject') ?? '';
+  return { shown, name, ...(AGENT_ID_RE.test(project) ? { projectId: project } : {}), ...(params.get('fwide') === '1' ? { wide: true as const } : {}) };
 }
 
 /** story 4680: a member id as the app puts it in `agent=` — a uuid; anything else is ignored (never put in a request) */
@@ -344,8 +395,18 @@ export function setupFragment(q: SetupQuery): string {
   if (q.setupId) p.set('setup', q.setupId);
   if (q.blocked.length) p.set('blocked', q.blocked.join(','));
   if (q.old?.length) p.set('old', q.old.map((o) => `${o.runtime}:${o.version}:${o.min}`).join(','));
-  if (q.canMove) p.set('caps', 'move');
+  const caps = [...(q.canMove ? ['move'] : []), ...(q.canSolo ? ['solo'] : [])];
+  if (caps.length) p.set('caps', caps.join(','));
   if (q.agent) p.set('agent', q.agent);
+  if (q.pick) p.set('pick', q.pick);
+  const rv = Object.entries(q.versions ?? {});
+  if (rv.length) p.set('rv', rv.map(([r, v]) => `${r}:${v}`).join(','));
+  if (isFolderRefused(q.folder)) p.set('frefused', q.folder.refused);
+  else if (q.folder) {
+    p.set('fshown', q.folder.shown); p.set('fname', q.folder.name);
+    if (q.folder.projectId) p.set('fproject', q.folder.projectId);
+    if (q.folder.wide) p.set('fwide', '1');
+  }
   return `#${p.toString().replace(/%2C/g, ',')}`;
 }
 
@@ -410,7 +471,9 @@ export interface SetupStatus {
   members: { stage: string | null; role: string | null; member_id: string; kind: 'agent' | 'human'; runtime: DesktopRuntime | null; name?: string | null }[];
   /** story #4576: «move» = no recipe (device and keys only — two steps on the page, no first task or result) · «recipe» · null before
    *  the confirmation (an older server sends none: the recipe page as before) */
-  setup_kind?: 'move' | 'recipe' | null;
+  setup_kind?: 'move' | 'recipe' | 'solo' | null;
+  /** story 4711: a solo setup's person ↔ agent room — the page opens it once the app has taken the agent over (none otherwise) */
+  conversation_id?: string | null;
   signals: {
     tools_connected: { member_id: string; at: string }[];
     first_task_handed_at: string | null;

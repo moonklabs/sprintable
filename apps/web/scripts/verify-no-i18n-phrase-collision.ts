@@ -865,6 +865,9 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 주세요» sits right under that «시작» on purpose (the same word, so the person knows which one). Not two phrases that could
   // be mistaken for each other.
   'desktop.setup.rateLimited <-> desktop.setup.start',
+  // story 4711: the same line, drawn by the first-setup card too — «…다시 «시작»을 눌러 주세요» under that card's own «시작» button
+  // (`quick.start`), the same word on purpose as above (4429 ③). Not two phrases that could be mistaken for each other.
+  'desktop.setup.quick.start <-> desktop.setup.rateLimited',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이
