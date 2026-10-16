@@ -76,6 +76,8 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
   const [pickedRuntime, setPickedRuntime] = useState<DesktopRuntime | null>(null);
   const [wideOk, setWideOk] = useState(false);
   /** the one project of a free organization that the 402 named; chosen by [넣고 시작] only */
+  // codex self-QA: the setup this start made is the SERVER's (`setup_id` in its answer); the address's `setup=` is only the fallback (an older answer without it)
+  const [madeSetupId, setMadeSetupId] = useState<string | null>(null);
   const [limitAskRaw, setLimitAsk] = useState<{ id: string; name: string; folderKey: string } | null>(null);
   const [copied, setCopied] = useState<DesktopRuntime | null>(null);
 
@@ -136,12 +138,14 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
         ? await fetchWithAuth('/api/desktop/setup-codes/confirm-solo-new-org', { ...json, body: JSON.stringify(soloNewOrgConfirmBody(query.code, runtime, folder, orgName)) })
         : await fetchWithAuth('/api/desktop/setup-codes/confirm-solo', { ...json, body: JSON.stringify(soloConfirmBody(query.code, runtime, matched ? folder : { ...folder, projectId: undefined }, useProject)) });
       if (res.ok) {
-        const okBody = await res.json().catch(() => null) as { project_id?: string; org_id?: string } | null;
+        const okBody = await res.json().catch(() => null) as { project_id?: string; org_id?: string; setup_id?: string } | null;
+        const made = typeof okBody?.setup_id === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(okBody.setup_id) ? okBody.setup_id : query.setupId;
+        setMadeSetupId(made);
         // the tab has no project (or no organization) yet: the one made (or used) becomes the tab's, the way the recipe setup does
         if ((newOrg || !projectId) && !(await joinNewOrg(newOrg ? okBody : { project_id: okBody?.project_id ?? useProject ?? matched?.projectId }))) { setView({ kind: 'done-reload' }); return; }
         await turnPhoneControlOn(newOrg ? okBody?.org_id ?? null : orgId); // story 4670 AC1: after the start went through — the one PUT, or none
         // a reload from here goes back to this setup's progress (the id is in the address the app opened), not to «앱에서 열어 주세요» — as the recipe page's reload does (4429 ①)
-        if (query.setupId) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(query.setupId));
+        if (made) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(made));
         setView({ kind: 'started' });
         return;
       }
@@ -175,8 +179,8 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
   if (newOrg && verifyGate.kind === 'closed') return <EmailVerifyGateCard gate={verifyGate} />;
   if (orgMode.kind === 'checking' || (newOrg && verifyGate.kind === 'reading')) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   if (orgMode.kind === 'has-org' && !isAdmin) return <Failure failure="not-admin" />;
-  if (view.kind === 'done-reload') return <SetupDoneReload setupId={query.setupId} />;
-  if (view.kind === 'started') return <SetupProgressView setupId={query.setupId} recipeName="" phoneControlFailed={phoneControlFailed} onPhoneRetry={retryPhoneControl} />;
+  if (view.kind === 'done-reload') return <SetupDoneReload setupId={madeSetupId ?? query.setupId} />;
+  if (view.kind === 'started') return <SetupProgressView setupId={madeSetupId ?? query.setupId} recipeName="" phoneControlFailed={phoneControlFailed} onPhoneRetry={retryPhoneControl} />;
   if (view.kind === 'failed') {
     const onReloadPage = view.failure === 'has-org'
       ? () => { window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment(query)); window.location.reload(); }

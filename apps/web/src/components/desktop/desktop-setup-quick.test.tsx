@@ -251,6 +251,25 @@ describe('[SID:4711] the first setup in three steps', () => {
     expect(window.location.href).not.toContain(CODE);
   });
 
+  it('codex self-QA: the progress and the reload address use the setup the SERVER made (its answer), not only the address\'s setup=; an invalid id from the answer falls back to the address', async () => {
+    const SERVER_ID = '33333333-3333-4333-8333-cccccccccccc';
+    confirmNow = () => new Response(JSON.stringify({ setup_id: SERVER_ID, project_id: PROJ, conversation_id: 'c-1', members: [] }), { status: 200 });
+    await mount(frag('&fshown=~/code/my-app&fname=my-app'), { projectId: PROJ, projects: [] });
+    await act(async () => { buttonOf('시작')!.click(); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(window.location.hash).toBe(`#progress=${SERVER_ID}`);
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)); }); // the progress view's first reading is on the next task (setTimeout 0)
+    expect(calls.some((c) => c.url.includes(`/api/desktop/setups/${SERVER_ID}`))).toBe(true); // the progress reads THAT setup
+    // a nonsense id in the answer is not trusted: the address's own setup id stands
+    await act(async () => { root.render(<div />); });
+    calls.length = 0;
+    confirmNow = () => new Response(JSON.stringify({ setup_id: 'a/../b', project_id: PROJ, conversation_id: 'c-1', members: [] }), { status: 200 });
+    await mount(frag('&fshown=~/code/my-app&fname=my-app'), { projectId: PROJ, projects: [] });
+    await act(async () => { buttonOf('시작')!.click(); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(window.location.hash).toBe('#progress=11111111-1111-4111-8111-aaaaaaaaaaaa');
+  });
+
   it('billing closed (prod today): the free-plan question has no upgrade link', async () => {
     ee.on = false;
     confirmNow = () => new Response(JSON.stringify({ error: { code: 'PLAN_LIMIT_EXCEEDED', resource: 'project', limit: 1, existing_project: { id: PROJ, name: 'Mine' } } }), { status: 402 });
