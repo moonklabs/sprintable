@@ -877,7 +877,10 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
       const recruitRes = await fetch(`/api/agents/${agentId}/recruit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role_template_slug: selectedRoleSlug, runtime, locale }),
+        // story 4710 (Kadir 5123 · key lens): the hero path hires WITHOUT a key — the app takes the agent over and the setup exchange makes the
+        // one key it needs (`_rotate_existing_agent` + the exchange's new key), so the browser never receives a key nobody uses. The screens
+        // as before (`startAfter` unset) keep the default and show the key once.
+        body: JSON.stringify({ role_template_slug: selectedRoleSlug, runtime, locale, ...(startAfter ? { issue_key: false } : {}) }),
       });
       const recruitJson = (await recruitRes.json().catch(() => null)) as { data?: RecruitResponse } | null;
       if (!recruitRes.ok || !recruitJson?.data) throw new Error(t('recruitFailed'));

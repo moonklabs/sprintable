@@ -124,7 +124,8 @@ describe('[SID:4710] RecruiterClient — hiring starts the agent here', () => {
       await click(testid(container, 'recruiter-start-here-button')!);
       const post = calls.find((c) => c.method === 'POST' && c.url === '/api/agents')!;
       expect(post.body).toMatchObject({ scope_mode: 'projects', project_ids: ['proj-1'], defer_key_issuance: true });
-      expect(calls.some((c) => c.url === '/api/agents/00000000-0000-4000-8000-000000000009/recruit')).toBe(true);
+      const recruit = calls.find((c) => c.method === 'POST' && c.url === '/api/agents/00000000-0000-4000-8000-000000000009/recruit')!;
+      expect(recruit.body).toMatchObject({ role_template_slug: 'designer', issue_key: false }); // hired without a key (Kadir · reverted → fails)
       expect(b.startHere).toHaveBeenCalledTimes(1);
       expect(b.startHere).toHaveBeenCalledWith({ agentId: '00000000-0000-4000-8000-000000000009' });
       // the key the recruit answer carries is never drawn (AC3) — nor is the kit or the verify step
@@ -232,7 +233,8 @@ describe('[SID:4710] RecruiterClient — hiring starts the agent here', () => {
       await toRuntimeStep();
       await click(testid(container, 'recruiter-connect-elsewhere')!);
       expect(assign).not.toHaveBeenCalled();
-      expect(calls.some((c) => c.url === '/api/agents/00000000-0000-4000-8000-000000000009/recruit')).toBe(true);
+      const recruit = calls.find((c) => c.method === 'POST' && c.url === '/api/agents/00000000-0000-4000-8000-000000000009/recruit')!;
+      expect(recruit.body).not.toHaveProperty('issue_key'); // the key path keeps the server's default (a key, shown once)
       expect(container.textContent).toContain('recruiter.keyOnceTitle'); // step 4, the kit: the key is drawn here, as before
     });
 
