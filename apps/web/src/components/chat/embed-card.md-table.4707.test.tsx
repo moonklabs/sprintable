@@ -8,7 +8,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { NextIntlClientProvider } from 'next-intl';
 
 import { MdBody } from './embed-card';
-import { DOC_TABLE_RULES, DocTable, PHONE_CARD_MIN_COLUMNS, readDocTable } from '@/components/docs/doc-table';
+import { CARD_BELOW_PX, DOC_TABLE_RULES, DocTable, PHONE_CARD_MIN_COLUMNS, readDocTable } from '@/components/docs/doc-table';
 import koMessages from '../../../messages/ko.json';
 
 // 걷기 표 문서(doc 2e593422)의 실제 표 셋 — 5열(§1 걷기 표 · 긴 한글 칸 · 코드 · 링크 칸) · 3열(§0) · 6열(§6)
@@ -34,17 +34,25 @@ function render(content: string): HTMLElement {
 const cards = (host: HTMLElement) => [...host.querySelectorAll('[data-doc-table-card]')] as HTMLElement[];
 
 describe('챗 문서 미리보기의 표 — story 4707', () => {
-  it('5열 표: 표는 가로 스크롤 상자 안에(640px부터) · 폰에서는 행마다 카드 — 되돌리면(table 처리기 0) 상자도 카드도 없다', () => {
+  it('5열 표: 표는 가로 스크롤 상자 안에 · 카드는 표를 감싼 «칸의 폭» 기준(컨테이너 쿼리) — 칸 < 640이면 카드 · 그 이상이면 표 (되돌리면 상자도 카드도 없다)', () => {
     const host = render(WALK_5);
     const table = host.querySelector('table')!;
     expect(table).not.toBeNull();
     const shell = table.parentElement!;
     expect(shell.className).toContain('overflow-x-auto'); // 표만 스크롤 — 문서 전체가 아니라
     expect(shell.className).toContain('rounded-xl');
-    expect(shell.parentElement!.className).toContain('hidden sm:block'); // 폰에선 표를 숨기고 카드를 보인다
+    // story 4707 다시 열림(선생님 지적): 화면 폭(sm:)이 아니라 표를 감싼 칸의 폭 — 넓은 화면의 좁은 옆 문서 칸(480~720px)도 카드
+    const box = host.querySelector('[data-doc-table-box]') as HTMLElement;
+    expect(box.className).toContain('@container');
+    expect(shell.parentElement!.className).toContain(`hidden @min-[${CARD_BELOW_PX}px]:block`); // 칸이 좁으면 표를 숨기고 카드를 보인다
     const list = host.querySelector('[data-doc-table-cards]')!;
-    expect(list.className).toContain('sm:hidden');
+    expect(list.className).toContain(`@min-[${CARD_BELOW_PX}px]:hidden`);
+    expect(`${box.innerHTML}`).not.toMatch(/\bsm:(hidden|block)\b/); // 화면 폭 기준은 남지 않았다
     expect(cards(host)).toHaveLength(2); // 본문 행 둘 = 카드 둘
+  });
+
+  it('카드 전환 폭 640은 클래스 문자열과 상수가 같다(Tailwind는 문자열 그대로 읽으므로 상수와 어긋나면 빨강)', () => {
+    expect(CARD_BELOW_PX).toBe(640);
   });
 
   it('카드 한 장 = «머리: 값» 줄들 — 칸 내용(코드 · 강조)이 그대로 · 빈 칸은 줄이 없다', () => {

@@ -25,6 +25,9 @@ const PHONE_SCROLL_RULES = 'max-sm:[&_td]:[word-break:keep-all] max-sm:[&_th]:[w
 /** 폰에서 이 열 수 이상인 표는 행마다 카드로 그린다(Yuna AC0 ②) — 그보다 좁은 표는 표 그대로 가로 스크롤. */
 export const PHONE_CARD_MIN_COLUMNS = 4;
 
+/** 표를 감싼 칸의 폭이 이 값(px) 미만이면 4열 이상 표는 카드 — 화면 폭이 아니라 칸 폭 기준(컨테이너 쿼리) */
+export const CARD_BELOW_PX = 640;
+
 type TableCell = ReactNode;
 
 function elementsOf(node: ReactNode, tags: readonly string[]): ReactElement<{ children?: ReactNode }>[] {
@@ -60,8 +63,13 @@ export function wrapTablesInScrollShell(html: string): string {
 }
 
 /**
- * 마크다운 `table` 처리기. `phoneCards`(챗 미리보기만 켠다): 머리 열이 PHONE_CARD_MIN_COLUMNS 이상이면 폰에서는 행마다 카드
- * («머리: 값» 줄 — 빈 칸은 줄이 없다)를 그리고, 640px부터는 표를 그린다. 카드는 같은 칸 내용(링크 · 코드 · 강조)을 그대로 다시 쓴다.
+ * 마크다운 `table` 처리기. `phoneCards`(챗 미리보기만 켠다): 머리 열이 PHONE_CARD_MIN_COLUMNS 이상이면 «표를 감싼 칸의 실제 폭»이
+ * CARD_BELOW_PX 미만일 때 행마다 카드(«머리: 값» 줄 — 빈 칸은 줄이 없다)를 그리고, 그 이상이면 표를 그린다. 카드는 같은 칸 내용(링크 ·
+ * 코드 · 강조)을 그대로 다시 쓴다.
+ *
+ * 기준이 화면(뷰포트) 폭이 아니라 그 칸의 폭인 까닭(story 4707 다시 열림 · 선생님 지적 10-16): 넓은 화면의 옆 문서 칸(약 480~720px)은 화면
+ * 폭으로는 «폰이 아닌데» 표가 한 열 두세 글자로 짓눌린다. CSS 컨테이너 쿼리(`@container` + `@min-[…]`)로 칸 폭을 보므로 폰(칸 < 640) ·
+ * 좁은 옆 칸 모두 카드, 넓은 칸만 표. 컨테이너 쿼리를 모르는 낡은 웹뷰는 `@min` 규칙을 못 읽어 카드(안전한 쪽)로 남는다.
  */
 export function DocTable({ children, phoneCards = false }: { children?: ReactNode; phoneCards?: boolean }) {
   const scroll = (
@@ -72,9 +80,9 @@ export function DocTable({ children, phoneCards = false }: { children?: ReactNod
   const data = phoneCards ? readDocTable(children) : null;
   if (!data || data.headers.length < PHONE_CARD_MIN_COLUMNS) return scroll;
   return (
-    <>
-      <div className="hidden sm:block">{scroll}</div>
-      <ul className="not-prose m-0 mb-2 flex list-none flex-col gap-3 p-0 sm:hidden" data-doc-table-cards="">
+    <div className="@container" data-doc-table-box="">
+      <div className="hidden @min-[640px]:block">{scroll}</div>
+      <ul className="not-prose m-0 mb-2 flex list-none flex-col gap-3 p-0 @min-[640px]:hidden" data-doc-table-cards="">
         {data.rows.map((cells, i) => (
           <li key={i} className={cn(cardVariants({ surface: 'subtle', radius: 'compact' }), 'flex flex-col gap-1 p-3')} data-doc-table-card="">
             {cells.map((cell, j) => (hasContent(cell) ? (
@@ -86,6 +94,6 @@ export function DocTable({ children, phoneCards = false }: { children?: ReactNod
           </li>
         ))}
       </ul>
-    </>
+    </div>
   );
 }
