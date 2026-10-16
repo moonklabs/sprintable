@@ -6924,7 +6924,7 @@
       "putOnTeamFailed": "Couldn't put it on the team — press it again",
       "movedWarning": "Once the app on this computer takes it over, this agent's current connection is cut — if it was working somewhere else, it stops there",
       "lastConnected": "Last connected · {time}",
-      "toolNote": "Agents work in Sprintable without asking, and ask each time before changing files, running commands, or using other tools on this computer.",
+      "toolNote": "Agents work in Sprintable without asking. Files, commands and other tools on this computer follow this computer's Claude Code or Codex settings — they ask or go ahead as those settings say.",
       "startedTitle": "Starting your agents",
       "startedDoneTitle": "Your agents have started",
       "startedBody": "Your agents keep working even if you close this window.",

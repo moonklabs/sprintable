@@ -105,7 +105,9 @@ describe('[SID:4427] desktop setup page', () => {
     // PO 00:41Z · Yuna v17, placed by 4446 (Yuna b2d15f85 ②): the tool note ends the flow just above the start row; the row
     // itself carries «시작» and its one line
     const row = container.querySelector('[data-testid=setup-start-row]') as HTMLElement;
-    expect(row.previousElementSibling?.textContent).toBe('에이전트는 Sprintable 안의 일은 묻지 않고 하고, 이 컴퓨터의 파일을 바꾸거나 명령을 실행하거나 다른 도구를 쓸 땐 그때마다 물어봐요.');
+    // story 4708 (Yuna `4708-copy-1016.md` row 4): after the app stopped deciding what is asked, the note no longer promises «그때마다 물어봐요»
+    expect(row.previousElementSibling?.textContent).toBe('에이전트는 Sprintable 안의 일은 묻지 않고 해요. 이 컴퓨터의 파일 · 명령 · 다른 도구는 이 컴퓨터의 Claude Code · Codex 설정대로 묻거나 바로 해요.');
+    expect(row.previousElementSibling?.textContent).not.toContain('그때마다');
     expect([...row.querySelectorAll('p')][0].textContent).toBe('에이전트 2개를 이 컴퓨터에 만들고 첫 일감을 맡겨요 · 연출은 내가 맡아요');
     expect(text()).not.toContain('발행'); // channel stage → later
     expect(startButton().disabled).toBe(false);
