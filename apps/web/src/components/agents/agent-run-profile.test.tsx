@@ -9,6 +9,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
 import { effortsFor, keepEffortIfTaken, modelNameOk, saveErrorKey, sharedRuntime, type RunProfileOptions } from '@/lib/agent-run-profile';
 import { AgentRunProfileFields, CUSTOM, DEFAULT, KEEP, draftBody, draftReady, initialDraft, withModel, withRuntime } from './agent-run-profile-fields';
 import { AgentRunProfileSection } from './agent-run-profile-section';
@@ -295,6 +296,21 @@ describe('AgentRunProfileSection — «묻지 않고 일하기» (story #4598)',
     expect(JSON.parse(puts[0])).toEqual({ runtime: 'claude-code', model: 'opus', effort: 'high', unattended: true });
     expect(unattendedSwitch()!.getAttribute('aria-checked')).toBe('true');
     expect(saveButton()!.disabled).toBe(true);
+  });
+
+  // story #4708 (Yuna `yuna/4708-copy-1016.md` row 2 · after the app stopped fencing an unattended session — mobile PR 564): the why-line says
+  // what is true now — tools run right away, the person's own Claude Code settings decide the rest, and ONE Sprintable tool (the webhook
+  // setting, the session's only `ask` line) still asks. The old promises («건너뛰어요» · «울타리는 그대로») are gone in both languages.
+  it("[4708] the why-line: Yuna's words in ko and en, and the old promises (skipped · fences stay) are gone", () => {
+    const en = enMessages.agents as unknown as Record<string, string>;
+    expect(ag.runProfileUnattendedHelp).toBe(
+      '켜면 이 에이전트는 도구를 쓸 때 사람에게 묻지 않고 바로 해요. 폰·웹 승인 카드도 오지 않아요 — 웹훅 설정 바꾸기만 물어요. 무엇을 하고 못 하게 할지는 그 컴퓨터의 Claude Code 설정을 따라요',
+    );
+    expect(en.runProfileUnattendedHelp).toBe(
+      'When on, this agent uses tools right away without asking a person. No approval cards reach your phone or web — only changing a webhook setting still asks. What it may and may not do follows the Claude Code settings on that computer',
+    );
+    for (const old of ['건너뛰어요', '허용되지 않은', '울타리']) expect(ag.runProfileUnattendedHelp).not.toContain(old);
+    for (const old of ['skipped', 'not already allowed', 'fences', 'stay as they are']) expect(en.runProfileUnattendedHelp).not.toContain(old);
   });
 
   it('an admin (may change model · effort, not the switch): no switch — the visible «소유자(윤재 · 도선)만» line with the value · a save carries no unattended', async () => {
