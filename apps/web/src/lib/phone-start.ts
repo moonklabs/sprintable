@@ -195,12 +195,13 @@ async function follow(pending: Pending, deps: StartDeps): Promise<StartOutcome> 
     }
     if (!r || typeof r !== 'object') continue; // a body that is not an object is not an end — ask again
     if (r.state === 'done') return { kind: 'started' };
-    if (r.state === 'rejected') {
-      if (r.result_code === 'already_running') return { kind: 'already_running' };
-      if (r.result_code === 'no_folder') return { kind: 'no_folder' };
+    if (r.state === 'rejected' || r.state === 'failed') {
+      if (r.result_code === 'remote_control_off') return { kind: 'remote_off' }; // switched off while the command was on its way — the screen goes back to branch 1
+      if (r.state === 'rejected' && r.result_code === 'already_running') return { kind: 'already_running' };
+      if (r.state === 'rejected' && r.result_code === 'no_folder') return { kind: 'no_folder' };
+      if (r.state === 'failed' && r.result_code === 'workdir_refused') return { kind: 'no_folder' }; // the mapping changed before the spawn
       return { kind: 'failed' };
     }
-    if (r.state === 'failed') return r.result_code === 'workdir_refused' ? { kind: 'no_folder' } : { kind: 'failed' }; // the mapping changed before the spawn
   }
   return { kind: 'unknown', pending };
 }

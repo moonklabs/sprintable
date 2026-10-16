@@ -33,7 +33,7 @@ const computer = (over: Record<string, unknown> = {}) => ({
   agents: [{ agent_member_id: AGENT, name: '결제 담당', can_command: true, projects: [{ project_id: PROJECT, name: '결제 개편' }, { project_id: PROJECT2, name: '정산' }] }], ...over,
 });
 
-interface World { devices?: unknown[]; startable?: unknown; remote?: unknown; post?: Response; poll?: Response; remotePut?: Response }
+interface World { devices?: unknown[]; startable?: unknown; remote?: unknown; post?: Response; poll?: Response; remotePut?: Response; hold?: Promise<void> }
 let world: World;
 let calls: Array<{ url: string; method: string; body?: Record<string, unknown> }>;
 function server() {
@@ -44,7 +44,7 @@ function server() {
     if (url === '/api/remote-devices') return json({ devices: world.devices ?? [{ id: 'p-1', confirm_number: '482 917' }] });
     if (url.startsWith('/api/desktop/startable')) return json(world.startable ?? { remote_control: true, computers: [computer()] });
     if (url.endsWith('/remote-control')) return method === 'PUT' ? (world.remotePut ?? json({ data: { enabled: true, enabled_at: null, can_change: true } })) : json(world.remote ?? { data: { enabled: false, enabled_at: null, can_change: true } });
-    if (url.endsWith('/desktop-start')) return world.post ?? json({ command_id: CMD, state: 'queued' }, 201);
+    if (url.endsWith('/desktop-start')) { if (world.hold) await world.hold; return world.post ?? json({ command_id: CMD, state: 'queued' }, 201); }
     if (url.includes('/desktop-commands/')) return world.poll ?? json({ state: 'done', result_code: null });
     throw new Error(`unexpected ${method} ${url}`);
   });
@@ -302,6 +302,26 @@ describe('[4714] codex round 1 — a start of unknown end is locked; only agents
     world.post = json({ command_id: CMD, state: 'queued' }, 201);
     await press(byId('onboarding-phone-check'));
     expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(false); // it started — the screen is ready again
+  });
+
+  it('while a start is in flight the pickers and [시작] are off; a choice made on a sheet that was already open is ignored once the end is unknown', async () => {
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await press(byId('onboarding-phone-project')); // a sheet is open …
+    let release: () => void = () => {};
+    world.hold = new Promise<void>((r) => { release = r; });
+    world.post = json({ error: { code: 'INTERNAL_ERROR' } }, 500);
+    await act(async () => { (byId('onboarding-phone-start-go') as HTMLElement).click(); }); // … and the start goes out meanwhile
+    await flush();
+    expect((byId('onboarding-phone-project') as HTMLButtonElement).disabled).toBe(true); // busy: the picker is off
+    expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { release(); });
+    await settle();
+    expect(byId('onboarding-phone-check')).not.toBeNull(); // unknown
+    const row = Array.from(container.querySelectorAll('[data-testid="onboarding-phone-sheet-row"]')).find((r) => r.textContent?.includes('정산'));
+    await press(row ?? null); // a choice on the open sheet: ignored
+    expect(byId('onboarding-phone-check')).not.toBeNull(); // the lock and the pending are still there
+    expect(byId('onboarding-phone-project')?.textContent).toContain('결제 개편'); // the pick did not move
   });
 
   it('an agent with can_command false is not offered (no row, no picker choice); with only such agents the screen says there is none to start', async () => {

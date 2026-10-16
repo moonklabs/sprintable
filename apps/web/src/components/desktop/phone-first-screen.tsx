@@ -23,6 +23,16 @@ type Read = { kind: 'reading' } | { kind: 'failed' } | { kind: 'no_phone' } | { 
 
 const newKey = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`);
 
+/** true while the component is mounted — an answer that comes after it left sets nothing */
+function useAlive() {
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
+  return alive;
+}
+
 export function PhoneFirstScreen({ orgId, chatsHref }: { orgId: string | null; chatsHref?: string }) {
   const t = useTranslations('onboarding.phone');
   const { phoneCall } = usePhoneBridge();
@@ -33,12 +43,18 @@ export function PhoneFirstScreen({ orgId, chatsHref }: { orgId: string | null; c
   const land = useCallback((r: StartableRead) => {
     setRead(r.kind === 'view' ? { kind: 'view', view: r.view } : r.kind === 'no_phone' || r.kind === 'no_screen_lock' ? { kind: 'no_phone' } : { kind: 'failed' });
   }, []);
-  useEffect(() => {
-    let live = true;
-    void readStartable(phoneCall).then((r) => { if (live) land(r); });
-    return () => { live = false; };
+  // one read at a time counts: an answer lands only if the screen is still there AND no newer read began (a late answer never covers a newer one)
+  const readGen = useRef(0);
+  const readNow = useCallback(() => {
+    const mine = ++readGen.current;
+    void readStartable(phoneCall).then((r) => { if (mine === readGen.current) land(r); });
   }, [phoneCall, land]);
-  const reload = () => { setRead({ kind: 'reading' }); void readStartable(phoneCall).then(land); }; // a press (retry · turned on · remote off found): the empty area, then read again
+  const dropReads = useCallback(() => { readGen.current++; }, []); // leaving the page: whatever is still out is dropped
+  useEffect(() => {
+    readNow();
+    return dropReads;
+  }, [readNow, dropReads]);
+  const reload = () => { setRead({ kind: 'reading' }); readNow(); }; // a press (retry · turned on · remote off found): the empty area, then read again
 
   // reading: an empty area (the device is read after mount — no flash)
   if (read.kind === 'reading') return <div data-testid="onboarding-phone-reading" aria-busy="true" />;
@@ -89,6 +105,7 @@ function NoMac({ pairHref }: { pairHref: string }) {
 
 function RemoteOff({ orgId, onTurnedOn }: { orgId: string | null; onTurnedOn: () => void }) {
   const t = useTranslations('onboarding.phone');
+  const alive = useAlive();
   const [rc, setRc] = useOrgRemoteControl(orgId);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -97,6 +114,7 @@ function RemoteOff({ orgId, onTurnedOn }: { orgId: string | null; onTurnedOn: ()
     if (!orgId || busy) return;
     setBusy(true); setFailed(false);
     const r = await putOrgRemoteControl(orgId);
+    if (!alive.current) return; // the screen is gone — nothing is set, nothing moves on
     setBusy(false);
     if (!r.ok) { setFailed(true); return; }
     if (r.data) setRc(r.data);
@@ -129,7 +147,9 @@ function StartCard({ computer, agents, chatHref, onRemoteOff }: { computer: Star
   const [outcome, setOutcome] = useState<StartOutcome | null>(null);
   // a start whose end is not known: the only way on is [결과 확인] (the same command) — a new press would sign again and could start it twice
   const locked = outcome?.kind === 'unknown';
+  const frozen = busy || locked; // a start is in flight, or its end is not known: nothing the person picks may change the pick (or clear what [결과 확인] follows)
   const pending = useRef<Pending | null>(null);
+  const alive = useAlive();
   const deps = { phoneCall, newKey };
 
   const apply = (o: StartOutcome) => {
@@ -140,13 +160,17 @@ function StartCard({ computer, agents, chatHref, onRemoteOff }: { computer: Star
   const start = async () => {
     if (busy || !agent || !project) return;
     setBusy(true); setOutcome(null);
-    apply(await startOnPhone({ setupId: computer.setup_id, agentId: agent.agent_member_id, projectId: project.project_id }, deps));
+    const o = await startOnPhone({ setupId: computer.setup_id, agentId: agent.agent_member_id, projectId: project.project_id }, deps);
+    if (!alive.current) return;
+    apply(o);
     setBusy(false);
   };
   const check = async () => {
     if (busy || !pending.current) return;
     setBusy(true);
-    apply(await checkStart(pending.current, deps));
+    const o = await checkStart(pending.current, deps);
+    if (!alive.current) return;
+    apply(o);
     setBusy(false);
   };
 
@@ -175,14 +199,14 @@ function StartCard({ computer, agents, chatHref, onRemoteOff }: { computer: Star
       <h1 id="onboarding-step-title" className="break-keep text-center text-2xl font-bold text-foreground">{t('start.title', { device: computer.device_name })}</h1>
       <Card className="break-keep flex flex-col gap-3 p-4">
         {agents.length > 1 ? (
-          <PickRow label={t('start.agentLabel')} value={agent?.name ?? null} onOpen={() => setSheet('agent')} disabled={locked} testId="onboarding-phone-agent" />
+          <PickRow label={t('start.agentLabel')} value={agent?.name ?? null} onOpen={() => setSheet('agent')} disabled={frozen} testId="onboarding-phone-agent" />
         ) : (
           <div className="flex min-h-11 flex-col justify-center" data-testid="onboarding-phone-agent-fixed">
             <span className="text-xs text-muted-foreground">{t('start.agentLabel')}</span>
             <span className="text-sm font-medium text-foreground">{agents[0].name}</span>
           </div>
         )}
-        <PickRow label={t('start.projectLabel')} value={project?.name ?? null} onOpen={() => setSheet('project')} disabled={!agent || locked} testId="onboarding-phone-project" />
+        <PickRow label={t('start.projectLabel')} value={project?.name ?? null} onOpen={() => setSheet('project')} disabled={!agent || frozen} testId="onboarding-phone-project" />
         <p className="text-xs text-muted-foreground" data-testid="onboarding-phone-new-folder">{t('start.newFolder')}</p>
       </Card>
       <div className="space-y-1">
@@ -207,6 +231,7 @@ function StartCard({ computer, agents, chatHref, onRemoteOff }: { computer: Star
           rows={sheet === 'agent' ? agents.map((a) => ({ id: a.agent_member_id, name: a.name })) : projects.map((p) => ({ id: p.project_id, name: p.name }))}
           selected={sheet === 'agent' ? agentId : projectId}
           onPick={(id) => {
+            if (frozen) { setSheet(null); return; }
             if (sheet === 'agent') setAgentId(id); else setProjectId(id); // a project the other agent does not have reads as «not picked»: it is looked up in THAT agent's list
             setOutcome(null); pending.current = null; setSheet(null);
           }}

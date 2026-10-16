@@ -93,6 +93,7 @@ describe('[4714] the server\'s refusals and the command\'s ends', () => {
     [{ state: 'done' }, 'started'], [{ state: 'rejected', result_code: 'already_running' }, 'already_running'], [{ state: 'rejected', result_code: 'no_folder' }, 'no_folder'],
     [{ state: 'rejected', result_code: 'unknown_agent' }, 'failed'], [{ state: 'rejected', result_code: 'schema_rejected' }, 'failed'], [{ state: 'rejected', result_code: 'expired' }, 'failed'],
     [{ state: 'failed', result_code: 'workdir_refused' }, 'no_folder'], [{ state: 'failed', result_code: 'unknown_agent' }, 'failed'], [{ state: 'failed' }, 'failed'],
+    [{ state: 'rejected', result_code: 'remote_control_off' }, 'remote_off'], [{ state: 'failed', result_code: 'remote_control_off' }, 'remote_off'],
   ])('the command ends as %j → %s', async (poll, kind) => {
     server(json(201, { command_id: CMD }), [json(200, poll)]);
     await expect(startOnPhone(input, deps(signed))).resolves.toEqual({ kind });
