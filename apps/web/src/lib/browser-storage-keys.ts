@@ -39,6 +39,8 @@ export const BROWSER_STORAGE_KEYS: readonly StorageKeyEntry[] = [
   // drafts are `…:u:<owner>:…` since story #4490 (owner-keyed: a switch keeps them, nobody else sees them); the head stays the
   // prefix so a sign-out also clears drafts written before then (no owner segment) — lib/tab-owner.ts adopts those
   { key: 'sprintable:field-draft:v1:', prefix: true, area: 'session', scope: 'account', on: ['signout'], where: ['hooks/use-field-draft.ts', 'lib/tab-owner.ts'] },
+  // story 4715: the onboarding no longer has an organization-name field, so nothing writes this any more — kept so a draft written
+  // before still goes on sign-out or switch (a session area: it is gone with the tab anyway; drop the entry once no such tab can be open)
   { key: 'sp_onboarding_org_draft:', prefix: true, area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['app/onboarding/onboarding-form.tsx'] },
   { key: 'sprintable_onboarding_session_id', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['app/onboarding/onboarding-telemetry.ts'] },
   { key: 'sprintable_pending_toast', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['components/chat/cross-project-toast-provider.tsx'] },

@@ -56,7 +56,8 @@ describe('[SID:4668] SettingsPage — «데스크톱 앱 받기» tab', () => {
     const tabNames = Array.from(container.querySelectorAll('[role="tab"]')).map((el) => el.textContent?.trim());
     // reverted (no trigger) → this fails
     expect(tabNames).toContain(koMessages.settings.desktopTab);
-    expect(koMessages.settings.desktopTab).toBe(koMessages.onboarding.download.title); // the same words as the onboarding h1 (Yuna A-4)
+    // the onboarding's way out names this tab (story 4715: its old «데스크톱 앱 받기» h1 is gone — the line that points here is the link)
+    expect(koMessages.onboarding.download.laterNote).toContain(`«${koMessages.settings.desktopTab}»`);
     expect(container.querySelector('[data-testid=settings-desktop-tab]')).not.toBeNull();
     expect(container.querySelector('[data-testid=desktop-download-card]')).not.toBeNull();
   });
