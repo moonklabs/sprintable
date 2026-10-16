@@ -134,6 +134,12 @@ describe('proxy', () => {
     expect(response.status).toBe(200);
   });
 
+  it('story 4712: /native/continue reaches its page with no cookie (the page sends a signed-out person to the plain sign-in, not to the «session expired» one)', async () => {
+    const response = await middleware(makeRequest('/native/continue?code_challenge=x'));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('location')).toBeNull();
+  });
+
   it('lets the session-less push unregister call through (story #4397 — the app calls it after logout · with an expired session)', async () => {
     const response = await middleware(makeRequest('/api/push/devices/unregister'));
     expect(response.status).toBe(200); // passed to the route handler — no /login redirect

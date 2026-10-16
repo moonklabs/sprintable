@@ -94,6 +94,9 @@ const PUBLIC_PREFIX = [
   // 발견: 이 목록 누락 시 /login?next=%2Fnative%2Foauth-return 307로 튕겨 폴백 페이지가
   // 렌더되지 않았다.
   '/native/oauth-return',
+  // story 4712 — «브라우저 이어받기»: the Mac app opens this in the browser at its first run, often with no web session yet. The page checks
+  // the session itself (no session → the plain sign-in with `next` back here, no «session expired» banner) and makes no code — only its POST does.
+  '/native/continue',
   '/invite',
   '/internal-dogfood',
   '/terms',
