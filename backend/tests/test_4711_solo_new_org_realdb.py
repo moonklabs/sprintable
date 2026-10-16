@@ -11,10 +11,12 @@ from tests.test_4427_confirm_new_org_realdb import (  # noqa: F401 — fixtures 
     DEVICE,
     _addresses,
     _client,
+    _confirm_new,
     _dispose_global_engine_after_test,
     _fresh_person_limits,
     _person,
     _pkce,
+    _preset_body,
     _sql,
     anyio_backend,
     world,
@@ -114,3 +116,41 @@ async def test_refusals_make_nothing(world, monkeypatch):
         r = await _confirm(c, code, who)
         assert r.status_code == 402, r.text
         assert await _made(who) == NOTHING
+
+
+@pytest.mark.anyio
+async def test_only_the_person_who_confirmed_gets_the_same_answer_again(world):
+    """Kadir (5120 mutant `confirmed_by == user_id` removed lived): another signed-in person who knows an already-confirmed code must NOT
+    get the organization, project and room ids it made — they get «already_confirmed» and nothing changes."""
+    owner = await world.person()
+    stranger = await world.person()
+    async with _client() as c:
+        code, _ = await _solo_code(c)
+        first = await _confirm(c, code, owner)
+        assert first.status_code == 200, first.text
+        r = await _confirm(c, code, stranger)
+        assert (r.status_code, r.json()["error"]["code"]) == (409, "already_confirmed"), r.text
+        for leaked in ("org_id", "project_id", "conversation_id", "members", "setup_id"):
+            assert leaked not in r.text, f"{leaked} leaked to another person"
+        assert await _made(stranger) == {**ONE_OF_EACH, "memberships": 0}  # the stranger belongs to nothing; the world holds what the owner's round made
+        assert await _made(owner) == ONE_OF_EACH
+        again = await _confirm(c, code, owner)  # the owner still gets the same answer
+        assert (again.status_code, again.json()["org_id"]) == (200, first.json()["org_id"])
+
+
+@pytest.mark.anyio
+async def test_the_new_org_path_has_the_per_person_limit_shared_with_the_recipe_way(world):
+    """Kadir (5120 mutant `limit off` lived): 3/hour per person on the way an organization is made — the solo path and the recipe path
+    count in ONE bucket («desktop-confirm-new-org»); another person has their own count."""
+    who = await world.person()
+    someone_else = await world.person()
+    async with _client() as c:
+        body = await _preset_body(c, who)
+        for _ in range(2):
+            r = await _confirm(c, "x" * 40, who)  # a made-up code: 404, but counted
+            assert r.status_code == 404, r.text
+        await _confirm_new(c, "x" * 40, who, body)  # the recipe path counts in the same bucket
+        r = await _confirm(c, "x" * 40, who)
+        assert (r.status_code, r.json()["error"]["code"]) == (429, "RATE_LIMITED"), r.text
+        assert int(r.headers["retry-after"]) > 0
+        assert (await _confirm(c, "x" * 40, someone_else)).status_code == 404, "another person has their own count"
