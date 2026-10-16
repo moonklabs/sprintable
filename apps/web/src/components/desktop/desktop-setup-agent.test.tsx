@@ -43,7 +43,7 @@ beforeEach(() => {
     if (url.includes('/api/desktop/setup/agents')) return agents();
     if (url.endsWith('/api/desktop/setup-codes/confirm')) return confirmNow();
     if (url.includes('/remote-control')) return new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'x' } }), { status: 200 });
-    if (url.endsWith('/api/desktop/recipes')) return new Response(JSON.stringify({ recipes: [] }), { status: 200 });
+    if (url.endsWith('/api/desktop/recipes')) return new Response(JSON.stringify({ recipes: [], agent_room: { limit: 3, current: 3, available: 0, tier: 'free' } }), { status: 200 }); // story 4717: a FULL room — the move must not care
     return new Response('{}', { status: 404 });
   }));
   ctx.mockReturnValue({ projectId: PROJ, currentProjectSlug: 'proj', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'owner' }], projectMemberships: [{ projectId: PROJ, projectName: '내 프로젝트', orgId: 'o-1' }] });
@@ -119,6 +119,16 @@ describe('[SID:4711] the `agent=` branch of the setup page', () => {
     await open(frag('move,solo'));
     const go = start()!;
     await act(async () => { go.click(); go.click(); });
+    for (let i = 0; i < 8; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(calls.filter((c) => c.method === 'POST' && c.url === '/api/desktop/setup-codes/confirm').length).toBe(1);
+  });
+
+  it('[SID:4717] a full agent room does not hold the MOVE: the agent already exists, so «시작» stays on, no room box, and the card does not even read the room', async () => {
+    await open(frag('move,solo'));
+    expect(start()!.disabled).toBe(false);
+    expect(container.querySelector('[data-testid=setup-room-short]')).toBeNull();
+    expect(calls.some((c) => c.url.endsWith('/api/desktop/recipes'))).toBe(false);
+    await act(async () => { start()!.click(); });
     for (let i = 0; i < 8; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     expect(calls.filter((c) => c.method === 'POST' && c.url === '/api/desktop/setup-codes/confirm').length).toBe(1);
   });
