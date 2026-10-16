@@ -59,9 +59,30 @@ export function createBffDispatcher(
         ? new Pool(origin, { ...(opts as Pool.Options), allowH2: true, connections: backendConnections, factory: protocolPipeliningClient })
         : new Pool(origin, opts as Pool.Options),
   });
+  // story #4723 — 본문이 있는 DELETE는 h1로 보낸다. undici h2는 DELETE(PUT · POST · PATCH만 «본문을 기대»하는 메서드로 본다 ·
+  // client-h2.js expectsPayload)에는 content-length를 안 달고, 길이 없는 h2 DATA는 Cloud Run 앞단(GFE)을 지나며 백엔드에 «본문 없음»으로
+  // 닿는다(dev 실측: 설정 → 조직 삭제 DELETE /api/organizations/{id} 가 422 body missing). undici h1은 길이를 단다.
+  // 백엔드 origin에 한해 · 본문이 있는 DELETE만 · 나머지 메서드와 스트림 · SSE는 그대로 h2.
+  let h1Agent: Agent | null = null;
+  const h1 = () => (h1Agent ??= new Agent({ keepAliveTimeout: BFF_KEEPALIVE_MS, keepAliveMaxTimeout: BFF_KEEPALIVE_MAX_MS, ...agentExtra }));
+  const agentDispatch = agent.dispatch.bind(agent);
+  const dispatch = (opts: Dispatcher.DispatchOptions, handler: Dispatcher.DispatchHandler) =>
+    isBodyDeleteToBackend(opts, backend) ? h1().dispatch(opts, handler) : agentDispatch(opts, handler);
+  // 닫을 때 h1 쪽도 같이 닫는다. undici의 close/destroy는 콜백이 없으면 안에서 `this.destroy(err, cb)`를 다시 부르므로(promise 판),
+  // 이 덧씌움은 항상 «콜백 판»으로 원본을 부른다 — 안 그러면 자기 자신을 끝없이 부른다.
+  type Lifecycle = (...args: unknown[]) => unknown;
+  const alsoH1 = (base: Lifecycle, side: (args: unknown[]) => Promise<unknown> | undefined): Lifecycle => (...args) => {
+    const hasCb = args.some((a) => typeof a === 'function');
+    const closeSide = () => Promise.resolve(side(args)).catch(() => undefined);
+    if (hasCb) { void closeSide().then(() => base(...args)); return undefined; }
+    return new Promise<void>((resolve, reject) => {
+      void closeSide().then(() => base(...args, (err: Error | null) => (err ? reject(err) : resolve())));
+    });
+  };
+  agent.close = alsoH1(agent.close.bind(agent) as Lifecycle, () => h1Agent?.close()) as typeof agent.close;
+  agent.destroy = alsoH1(agent.destroy.bind(agent) as Lifecycle, (args) => h1Agent?.destroy(typeof args[0] === 'function' ? null : ((args[0] as Error | null | undefined) ?? null))) as typeof agent.destroy;
   // 계측(dev 전용): 디스패치 순간의 계측 범위를 적어 둔다 — 연결 상한으로 풀 줄에 선 요청이 나중에 남의 문맥에서 만들어져도
   // 제 요청에 적히게(server-timing noteDispatch). 계측이 꺼져 있으면 noteDispatch는 바로 돌아간다.
-  const dispatch = agent.dispatch.bind(agent);
   agent.dispatch = ((opts: Dispatcher.DispatchOptions, handler: Dispatcher.DispatchHandler) => {
     const cancel = noteDispatch(opts);
     if (!cancel) return dispatch(opts, handler); // 계측 꺼짐 — handler를 건드리지 않는다
@@ -73,6 +94,30 @@ export function createBffDispatcher(
     }
   }) as typeof agent.dispatch;
   return agent;
+}
+
+/** 요청 머리에서 한 값(대소문자 무시). undici는 object · [k, v, k, v …] · Iterable 셋 다 받는다. */
+function headerOf(headers: Dispatcher.DispatchOptions['headers'], name: string): string | null {
+  if (!headers) return null;
+  const lower = name.toLowerCase();
+  if (Array.isArray(headers)) {
+    for (let i = 0; i + 1 < headers.length; i += 2) if (String(headers[i]).toLowerCase() === lower) return String(headers[i + 1]);
+    return null;
+  }
+  const entries = Symbol.iterator in headers ? (headers as Iterable<[string, string | string[]]>) : Object.entries(headers as Record<string, string | string[]>);
+  for (const [k, v] of entries) if (String(k).toLowerCase() === lower) return String(Array.isArray(v) ? v[0] : v);
+  return null;
+}
+
+/**
+ * 백엔드 origin으로 가는, 본문이 실제로 있는 DELETE. 전역 fetch는 본문 `''`도 «빈 스트림 + content-length: 0»으로 바꿔 넘기므로(프록시는
+ * DELETE에도 `request.text()`를 싣는다 — 본문 없는 DELETE 47곳이 거의 전부 이 모양) 길이 0은 본문 없음으로 본다. 길이를 모르는 스트림은 본문 있음.
+ */
+export function isBodyDeleteToBackend(opts: Dispatcher.DispatchOptions, backend: string | null): boolean {
+  if (backend === null || String(opts.method).toUpperCase() !== 'DELETE') return false;
+  if (opts.body == null || opts.body === '') return false;
+  if (headerOf(opts.headers, 'content-length') === '0') return false;
+  return originOf(opts.origin as string | URL) === backend;
 }
 
 /**
