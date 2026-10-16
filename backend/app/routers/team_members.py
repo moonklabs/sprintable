@@ -621,6 +621,11 @@ async def update_team_member(
         await assert_agent_owner_mutable(id, session, org_id, uuid.UUID(auth.user_id))
     else:
         await _assert_can_manage_human(member, session, org_id, auth, data=data)
+    if "runtime_type" in data:
+        # story 4717 (Kadir · PO ①): refused before anything moves (the run-profile reset below) — apply_anchor_update checks it too
+        from app.services.system_publisher_guard import assert_runtime_type_not_reserved
+
+        assert_runtime_type_not_reserved(data["runtime_type"])
     if member.type == "agent" and "runtime_type" in data and data["runtime_type"] != member.runtime_type:
         # story #4540 — the run profile's model · effort are the old runtime's names: back to defaults, version moves on
         from app.services.agent_run_profile import on_runtime_changed
