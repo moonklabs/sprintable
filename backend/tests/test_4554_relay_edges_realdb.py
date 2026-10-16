@@ -221,23 +221,25 @@ async def test_01b_a_future_at_is_held_to_now_so_a_stopped_row_still_ages_out(wo
         sid, token, agent = d["setup_id"], d["device_token"], d["agents"][0]["member_id"]
         far = "2099-01-01T00:00:00+00:00"
         inside = datetime.fromtimestamp(time.time() + 240, timezone.utc).isoformat()  # 4 min ahead: inside the skew
-        r = await c.post("/api/v2/desktop/relay/sessions/f1/state", json=_state(agent, 1, "stopped", at=far), headers=_tok(token))
-        assert r.status_code == 200, r.text
-        assert (await c.post("/api/v2/desktop/relay/sessions/f2/state", json=_state(agent, 2, "stopped", at=inside), headers=_tok(token))).status_code == 200
-        snap = _snap(agent, 3, ["f3"], "stopped")
+        # the snapshot FIRST and alone (a snapshot is the whole list — a session it does not name is stopped «now», which would hide a
+        # single report's own time: Kadir 5117 «only the single report path left unheld → still green»), then the single reports
+        snap = _snap(agent, 1, ["f3"], "stopped")
         snap["sessions"][0]["at"] = far
-        snap["sessions"].append({**snap["sessions"][0], "session_key": "f1"})  # f1 again, still in the snapshot
         assert (await c.put(SNAP, json=snap, headers=_tok(token))).status_code == 200
+        r = await c.post("/api/v2/desktop/relay/sessions/f1/state", json=_state(agent, 2, "stopped", at=far), headers=_tok(token))
+        assert r.status_code == 200, r.text
+        assert (await c.post("/api/v2/desktop/relay/sessions/f2/state", json=_state(agent, 3, "stopped", at=inside), headers=_tok(token))).status_code == 200
         # seconds ahead of now: (state_at, ended_at) per key
         rows = {k: (state_ahead, end_ahead) for k, state_ahead, end_ahead in await _sql(fetch=(
             f"SELECT session_key, extract(epoch FROM state_at - now()), extract(epoch FROM ended_at - now()) FROM desktop_sessions WHERE setup_id = '{sid}'"))}
-        for k in ("f1", "f3"):
-            assert rows[k][0] <= 5 and rows[k][1] <= 5, (k, rows[k])  # held to now — not 2099
+        assert rows["f1"][0] <= 5 and rows["f1"][1] <= 5, ("a single report", rows["f1"])  # held to now — not 2099
+        assert rows["f3"][0] <= 5 and rows["f3"][1] <= 5, ("a snapshot line", rows["f3"])
         assert 200 <= rows["f2"][1] <= 245, rows["f2"]  # 4 min ahead: kept as the device said
-        # and so it ages: 8 days back from what was stored → gone with the next report
-        await _sql(f"UPDATE desktop_sessions SET ended_at = ended_at - interval '8 days' WHERE setup_id = '{sid}' AND session_key = 'f3'")
+        # and so each ages on its own: 8 days back from what was stored → gone with the next report
+        await _sql(f"UPDATE desktop_sessions SET ended_at = ended_at - interval '8 days' WHERE setup_id = '{sid}' AND session_key IN ('f1', 'f3')")
         assert (await c.post("/api/v2/desktop/relay/sessions/f2/state", json=_state(agent, 4, "stopped"), headers=_tok(token))).status_code == 200
-        assert "f3" not in {r[0] for r in await _rows(sid)}
+        left = {r[0] for r in await _rows(sid)}
+        assert "f1" not in left and "f3" not in left, left
 
 
 async def test_04_a_disconnected_device_is_unknown_at_once_its_commands_rejected_its_stream_ended(world, monkeypatch):
