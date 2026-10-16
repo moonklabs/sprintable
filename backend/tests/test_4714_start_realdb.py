@@ -160,6 +160,9 @@ async def test_04_who_may_press_the_computer_the_pairing_and_the_project_are_eac
         # a plain member (not owner/admin · not the agent's owner · not who confirmed the device) may not
         r = await _post(c, agent, _start(plain_phone, sid), who=PLAIN)
         assert (r.status_code, r.json()["error"]["code"]) == (403, "not_allowed_to_command")
+        # the list says the same: this person may see the computer (their phone is paired · they can open the project) but may not command it
+        seen = (await _list(c, agent, plain_phone, who=PLAIN)).json()["computers"]
+        assert [x["can_command"] for x in seen] == [False]
         # someone else's phone key · a phone not paired with this computer
         borrowed = await _post(c, agent, _start(plain_phone, sid))
         assert (borrowed.status_code, borrowed.json()["error"]["code"]) == (409, "phone_not_paired")
@@ -279,3 +282,57 @@ async def test_08_two_presses_of_one_key_at_once_make_one_command_not_a_500(worl
         assert [a.status_code for a in answers] == [201, 201, 201, 201], [a.text for a in answers]
         assert len({a.json()["command_id"] for a in answers}) == 1
         assert len(await _commands(sid)) == 1
+
+
+def _all(c, phone, who=OWNER, headers=None):
+    return c.get("/api/v2/desktop/startable", params={"phone_key_id": phone}, headers=headers or _person(who))
+
+
+async def test_09_the_first_screen_in_one_read_every_paired_computer_with_its_agents_and_startable_projects(world):
+    """contract v1.18: the phone's paired computers → each one's agents (active · the person can open) → the projects each can be started for.
+    A paired computer with no agent lists `agents: []`; only this asker's own paired key lists anything; ids and names, never a path."""
+    from app.core.database import async_session_factory
+    from app.repositories.human_api_key import HumanApiKeyRepository
+
+    plain_tm = await _plain_member()
+    await _sql(f"INSERT INTO project_access (id,project_id,member_id,permission) VALUES (gen_random_uuid(),'{PROJ}','{plain_tm}','granted')")
+    async with _client() as c:
+        device, agent, phone, owner_der = await _setup(c, "d4424 mac 4714i")
+        other_agent = device["agents"][1]["member_id"]
+        sid = device["setup_id"]
+        await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ), (agent, PROJ2)), headers=_tok(device["device_token"]))
+        view = (await _all(c, phone)).json()
+        assert set(view) == {"remote_control", "computers"} and view["remote_control"] is True
+        comp = view["computers"][0]
+        assert set(comp) == {"setup_id", "device_name", "reachable", "agents"} and comp["setup_id"] == sid and comp["reachable"] is True
+        by_id = {a["agent_member_id"]: a for a in comp["agents"]}
+        assert set(by_id) == {agent, other_agent}  # every agent this computer was set up with (the owner opens them all)
+        assert all(set(a) == {"agent_member_id", "name", "can_command", "projects"} for a in comp["agents"])
+        assert sorted(p["project_id"] for p in by_id[agent]["projects"]) == sorted([str(PROJ), str(PROJ2)]) and by_id[other_agent]["projects"] == []
+        assert all(set(p) == {"project_id", "name"} for a in comp["agents"] for p in a["projects"])
+        # a key that is not the asker's (even one paired with this computer) · a key paired with nothing lists no computer
+        plain_phone, plain_der = await _register(c, PLAIN)
+        await _pair(c, device["device_token"], owner_der, plain_der)
+        assert (await _all(c, plain_phone, who=OWNER)).json()["computers"] == []
+        assert (await _all(c, phone, who=PLAIN)).json()["computers"] == []
+        lone, _ = await _register(c, label="old phone")
+        assert (await _all(c, lone)).json()["computers"] == []
+        # the plain member (project access to PROJ only, no right to command): sees the computer and only agents/projects they can open
+        mine = (await _all(c, plain_phone, who=PLAIN)).json()["computers"][0]
+        assert {a["agent_member_id"] for a in mine["agents"]} <= {agent, other_agent} and all(a["can_command"] is False for a in mine["agents"])
+        assert all(p["project_id"] == str(PROJ) for a in mine["agents"] for p in a["projects"])
+        # a person who may open none of these agents (their project access is gone) sees the paired computer and no agent on it
+        await _sql(f"DELETE FROM project_access WHERE member_id = '{plain_tm}'")
+        assert [x["agents"] for x in (await _all(c, plain_phone, who=PLAIN)).json()["computers"]] == [[]]
+        # an agent set up here but deactivated is not listed; a computer left with no agent says `agents: []`
+        await _sql(f"UPDATE members SET is_active = false WHERE id IN ('{agent}','{other_agent}')")
+        assert (await _all(c, phone)).json()["computers"][0]["agents"] == []
+        # a person's own session only
+        async with async_session_factory() as s:
+            _k, plaintext = await HumanApiKeyRepository(s).create(member_id=OWNER_TM, name="d4714 all", expires_at=None)
+            await s.commit()
+        try:
+            r = await _all(c, phone, headers={"Authorization": f"Bearer {plaintext}", "X-Org-Id": str(ORG)})
+            assert (r.status_code) == 403
+        finally:
+            await _sql(f"DELETE FROM human_api_keys WHERE member_id = '{OWNER_TM}'")

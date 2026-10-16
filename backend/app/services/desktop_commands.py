@@ -402,15 +402,33 @@ async def create_start(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
     return cmd, cmd.state
 
 
+async def _openable_startable_projects(db: AsyncSession, setup: DesktopSetup, agent_id: uuid.UUID, *, user_id: uuid.UUID,
+                                       org_id: uuid.UUID) -> list[dict]:
+    """The projects the computer says it has a folder for, for this agent, that the agent is in and the person can open — ids and names
+    only (never a path), ordered by name. The one place both startable reads take their project list from."""
+    from app.models.project import Project
+    from app.services.project_auth import has_project_access
+
+    wanted = _startable_pairs(setup, agent_id) & await _agent_projects(db, agent_id)
+    projects: list[dict] = []
+    if wanted:
+        rows = (await db.execute(
+            select(Project.id, Project.name).where(Project.id.in_(wanted), Project.org_id == org_id, Project.deleted_at.is_(None))
+            .order_by(Project.name.asc(), Project.id)
+        )).all()
+        for pid, name in rows:
+            if await has_project_access(db, user_id, pid, org_id):
+                projects.append({"project_id": str(pid), "name": name})
+    return projects
+
+
 async def startable_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: str | None, user_id: uuid.UUID, org_id: uuid.UUID,
                          agent_id: uuid.UUID, phone_key_id: uuid.UUID) -> dict:
     """What the phone may offer for starting this agent: each computer of the agent that THIS person's phone is paired with, whether it is
     heard from, whether the person may command, and the projects the computer says it has a folder for that the person can open — ids
     and names, never a path. A computer that has said nothing lists none (the phone then says «start it at the Mac»)."""
-    from app.models.project import Project
     from app.services import remote_control
     from app.services.agent_permissions import _reachable, paired_phone
-    from app.services.project_auth import has_project_access
 
     if not await can_view(db, user_id=user_id, org_id=org_id, agent_id=agent_id):
         raise DesktopRelayError(404, "agent_not_found", "no such agent")
@@ -421,21 +439,62 @@ async def startable_view(db: AsyncSession, *, member_id: uuid.UUID, member_role:
     for setup in setups:
         if await paired_phone(db, member_id=member_id, phone_id=phone_key_id, setup_id=setup.id) is None:
             continue
-        wanted = _startable_pairs(setup, agent_id) & await _agent_projects(db, agent_id)
-        projects: list[dict] = []
-        if wanted:
-            rows = (await db.execute(
-                select(Project.id, Project.name).where(Project.id.in_(wanted), Project.org_id == org_id, Project.deleted_at.is_(None))
-                .order_by(Project.name.asc(), Project.id)
-            )).all()
-            for pid, name in rows:
-                if await has_project_access(db, user_id, pid, org_id):
-                    projects.append({"project_id": str(pid), "name": name})
         computers.append({
             "setup_id": str(setup.id), "device_name": setup.device_name, "reachable": setup.id in reachable,
             "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup),
-            "projects": projects,
+            "projects": await _openable_startable_projects(db, setup, agent_id, user_id=user_id, org_id=org_id),
         })
+    return {"remote_control": await remote_control.is_enabled(db, org_id), "computers": computers}
+
+
+async def startable_computers_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: str | None, user_id: uuid.UUID,
+                                   org_id: uuid.UUID, phone_key_id: uuid.UUID) -> dict:
+    """The phone's whole first screen in one read (contract v1.18): every computer of this organization THIS person's phone is paired
+    with, whether it is heard from, and for each the agents it was set up with that the person can open (active ones) — each with
+    whether the person may command it and the projects it can be started for. A paired computer with no agent lists `agents: []`
+    (the phone then says «start the first setup at the Mac» — a per-agent read cannot say that, there is no agent to ask about).
+    Ids and names only, never a path; a key that is not the asker's own (or is revoked) lists nothing."""
+    from app.models.agent_permission import RemoteDevice, RemoteDevicePairing
+    from app.models.member import Member
+    from app.services import remote_control
+    from app.services.agent_permissions import _reachable
+
+    setups = (await db.execute(
+        select(DesktopSetup)
+        .join(RemoteDevicePairing, RemoteDevicePairing.setup_id == DesktopSetup.id)
+        .join(RemoteDevice, RemoteDevice.id == RemoteDevicePairing.remote_device_id)
+        .where(RemoteDevice.id == phone_key_id, RemoteDevice.member_id == member_id, RemoteDevice.revoked_at.is_(None),
+               RemoteDevicePairing.removed_at.is_(None),
+               DesktopSetup.org_id == org_id, DesktopSetup.revoked_at.is_(None), DesktopSetup.exchanged_at.is_not(None))
+        .order_by(DesktopSetup.exchanged_at.desc(), DesktopSetup.id)
+    )).scalars().all()
+    reachable = await _reachable(db, {s.id for s in setups}, _now())
+    computers: list[dict] = []
+    for setup in setups:
+        agent_ids: list[uuid.UUID] = []
+        for m in setup.members or []:
+            if m.get("kind") == "agent" and m.get("member_id"):
+                try:
+                    aid = uuid.UUID(str(m["member_id"]))
+                except ValueError:
+                    continue
+                if aid not in agent_ids:
+                    agent_ids.append(aid)
+        agents: list[dict] = []
+        for aid in agent_ids:
+            agent = (await db.execute(
+                select(Member).where(Member.id == aid, Member.org_id == org_id, Member.type == "agent", Member.deleted_at.is_(None),
+                                     Member.is_active.is_(True))
+            )).scalar_one_or_none()
+            if agent is None or not await can_view(db, user_id=user_id, org_id=org_id, agent_id=aid):
+                continue
+            agents.append({
+                "agent_member_id": str(aid), "name": agent.name,
+                "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup),
+                "projects": await _openable_startable_projects(db, setup, aid, user_id=user_id, org_id=org_id),
+            })
+        agents.sort(key=lambda a: (a["name"] or "", a["agent_member_id"]))
+        computers.append({"setup_id": str(setup.id), "device_name": setup.device_name, "reachable": setup.id in reachable, "agents": agents})
     return {"remote_control": await remote_control.is_enabled(db, org_id), "computers": computers}
 
 

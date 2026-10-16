@@ -246,6 +246,31 @@ async def post_command_result(
     return {"command_id": str(cmd.id), "state": cmd.state}
 
 
+@router.get("/startable")
+async def get_startable_computers(
+    phone_key_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story #4714 (contract v1.18): the phone's first screen in one read — this person's phone's paired computers, each with its agents
+    and the projects an agent can be started for. A person's own session (an API key or an agent key is 403); ids and names, never a path."""
+    from app.routers.auth import _requires_interactive_session
+    from app.services import desktop_commands
+    from app.services.member_resolver import resolve_member
+
+    if _requires_interactive_session(auth):
+        raise HTTPException(status_code=403, detail={"code": "person_session_required", "message": "a person's session is required"})
+    member = await resolve_member(auth, org_id, db)
+    if member.type != "human":
+        raise HTTPException(status_code=403, detail={"code": "person_session_required", "message": "a person's session is required"})
+    user_id = uuid.UUID(str(auth.user_id))
+    return await desktop_commands.startable_computers_view(
+        db, member_id=uuid.UUID(str(member.id)), member_role=await desktop_commands.org_role(db, org_id, user_id), user_id=user_id,
+        org_id=org_id, phone_key_id=phone_key_id,
+    )
+
+
 @router.get("/setups/{setup_id}/sessions")
 async def get_device_sessions(
     setup_id: uuid.UUID,
