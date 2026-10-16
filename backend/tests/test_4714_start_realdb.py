@@ -378,12 +378,58 @@ async def test_10_a_gone_pairing_a_disconnected_computer_and_a_deleted_project_l
         # the computer replaces its folder list (empties it) right after the press read the computer and before it got the lock → the press sees the new list
         real = desktop_commands._agent_projects
 
+        seen = {"n": 0}
+
         async def then_the_computer_replaces_its_list(db, agent_id):
             got = await real(db, agent_id)
-            await _sql(f"UPDATE desktop_setups SET startable = '[]'::jsonb WHERE id = '{sid}'")
+            seen["n"] += 1
+            if seen["n"] == 1:  # only after the FIRST judgement (the second runs under the row lock the update would wait for)
+                await _sql(f"UPDATE desktop_setups SET startable = '[]'::jsonb WHERE id = '{sid}'")
             return got
 
         monkeypatch.setattr(desktop_commands, "_agent_projects", then_the_computer_replaces_its_list)
         r = await _post(c, agent, _start(phone, sid))
         assert (r.status_code, r.json()["error"]["code"]) == (409, "no_folder")
         assert await _commands(sid) == []
+
+
+async def test_11_what_is_taken_back_while_a_press_waits_for_the_computers_lock_is_seen_by_the_press(world, monkeypatch):
+    """codex 5132 round 5: the press judges who may press (the agent active · the computer · the right to command · the project and its access) twice —
+    once for the answer and again under the computer's row lock. Each case changes the truth right after the first judgement (as a commit that lands
+    while the press waits would): a project grant taken back · the agent deactivated · the phone unpaired."""
+    from app.services import desktop_commands
+
+    plain_tm = await _plain_member()
+    real = desktop_commands._agent_projects
+
+    async def run_case(change_sql, expect, case):
+        async with _client() as c:
+            device, agent, owner_phone, owner_der = await _setup(c, f"d4424 mac 4714k{case}")
+            sid = device["setup_id"]
+            await _sql(f"INSERT INTO project_access (id,project_id,member_id,permission) VALUES (gen_random_uuid(),'{PROJ}','{plain_tm}','granted') ON CONFLICT DO NOTHING")
+            await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ)), headers=_tok(device["device_token"]))
+            plain_phone, plain_der = await _register(c, PLAIN)
+            await _pair(c, device["device_token"], owner_der, plain_der)
+            await _sql(f"UPDATE members SET owner_member_id = '{plain_tm}' WHERE id = '{agent}'")  # may command, as the agent's owner
+            ok = await _post(c, agent, _start(plain_phone, sid), who=PLAIN)
+            assert ok.status_code == 201, ok.text  # the same press with nothing changed is accepted
+            n = len(await _commands(sid))
+            calls = {"n": 0}
+
+            async def then_the_truth_changes(db, agent_id):
+                got = await real(db, agent_id)
+                calls["n"] += 1
+                if calls["n"] == 1:  # right after the first judgement, before the lock
+                    await _sql(change_sql(agent, sid, plain_tm))
+                return got
+
+            monkeypatch.setattr(desktop_commands, "_agent_projects", then_the_truth_changes)
+            r = await _post(c, agent, _start(plain_phone, sid), who=PLAIN)
+            monkeypatch.setattr(desktop_commands, "_agent_projects", real)
+            assert (r.status_code, r.json()["error"]["code"]) == expect, (case, r.text)
+            assert len(await _commands(sid)) == n  # nothing queued after the truth changed
+            await _sql(f"UPDATE members SET is_active = true WHERE id = '{agent}'")
+
+    await run_case(lambda agent, sid, tm: f"DELETE FROM project_access WHERE member_id = '{tm}' AND project_id = '{PROJ}'", (404, "project_not_found"), "a")
+    await run_case(lambda agent, sid, tm: f"UPDATE members SET is_active = false WHERE id = '{agent}'", (409, "agent_inactive"), "b")
+    await run_case(lambda agent, sid, tm: f"UPDATE remote_device_pairings SET removed_at = now() WHERE setup_id = '{sid}'", (409, "phone_not_paired"), "c")

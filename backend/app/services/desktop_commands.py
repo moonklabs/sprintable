@@ -366,23 +366,30 @@ async def create_start(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
     from app.services.desktop_relay import enqueue_command
     from app.services.project_auth import has_project_access
 
-    agent = await _agent(db, org_id, agent_id)
-    if not agent.is_active:  # a deactivated agent starts nothing (a stop / end stays possible — they end a session that may still run)
-        raise DesktopRelayError(409, "agent_inactive", "this agent is not active")
-    setup = next((s for s in await _agent_setups(db, org_id, agent_id) if s.id == body.setup_id), None)
-    if setup is None:  # no such computer of this agent in this org — another org's, another agent's or none: the same answer
-        raise DesktopRelayError(404, "computer_not_found", "no such computer for this agent")
-    if not can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup):
-        raise DesktopRelayError(403, "not_allowed_to_command", "you cannot command this agent")
-    if body.project_id not in await _agent_projects(db, agent_id) or not await has_project_access(db, user_id, body.project_id, org_id):
-        raise DesktopRelayError(404, "project_not_found", "no such project of this agent")
+    async def authorize() -> tuple[Member, DesktopSetup]:
+        """Who may press, for whom, on which computer, for which project — read from the rows as they are NOW (the agent is read again, not
+        taken from the session's copy). Asked twice: first for the answer, then again under the computer's row lock, because a grant
+        taken back, an agent deactivated or a computer disconnected while this press waited for the lock is not seen by the first."""
+        agent = await _agent(db, org_id, agent_id)
+        await db.refresh(agent)
+        if not agent.is_active:  # a deactivated agent starts nothing (a stop / end stays possible — they end a session that may still run)
+            raise DesktopRelayError(409, "agent_inactive", "this agent is not active")
+        setup = next((s for s in await _agent_setups(db, org_id, agent_id) if s.id == body.setup_id), None)
+        if setup is None or setup.revoked_at is not None:  # no such computer of this agent in this org — another org's, another agent's or none: the same answer
+            raise DesktopRelayError(404, "computer_not_found", "no such computer for this agent")
+        if not can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup):
+            raise DesktopRelayError(403, "not_allowed_to_command", "you cannot command this agent")
+        if body.project_id not in await _agent_projects(db, agent_id) or not await has_project_access(db, user_id, body.project_id, org_id):
+            raise DesktopRelayError(404, "project_not_found", "no such project of this agent")
+        return agent, setup
+
+    agent, setup = await authorize()
     # two presses of the same key at once must not both miss the first row and meet the UNIQUE key at the insert (a 500): the computer's row
     # is locked here, so the second waits for the first commit and then finds its command (enqueue_command takes the same row's lock later)
     # (the row is read again under the lock — `populate_existing` — so the folder list and the computer's state the rest of this function reads are the
     # ones committed at this moment, not the ones read before waiting: a replaced list or a disconnect that committed meanwhile is seen, not the old copy)
     await db.execute(select(DesktopSetup).where(DesktopSetup.id == setup.id).with_for_update().execution_options(populate_existing=True))
-    if setup.revoked_at is not None:
-        raise DesktopRelayError(404, "computer_not_found", "no such computer for this agent")
+    agent, setup = await authorize()  # again, under the lock: what committed while this press waited is seen
     # the same press again (the same key) gets back the command it made — asked after who may press and whose computer it is
     existing = (await db.execute(
         select(DesktopCommand).where(DesktopCommand.setup_id == setup.id,
