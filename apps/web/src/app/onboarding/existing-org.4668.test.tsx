@@ -9,7 +9,6 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { OnboardingForm } from './onboarding-form';
-import { DesktopCreateOrg } from './desktop-create-org';
 import { existingOrgIdFromMe } from './existing-org';
 import koMessages from '../../../messages/ko.json';
 
@@ -57,7 +56,6 @@ function provider(node: React.ReactNode) {
   return <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">{node}</NextIntlClientProvider>;
 }
 const settle = () => act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); });
-const text = () => container.textContent ?? '';
 
 beforeEach(() => {
   container = document.createElement('div');
@@ -133,62 +131,5 @@ describe('[SID:4668] the usual onboarding (OnboardingForm)', () => {
     await settle();
     expect(urls).not.toContain('/api/auth/me');
     expect(urls).not.toContain('/api/organizations');
-  });
-});
-
-describe('[SID:4668] the desktop sign-up\'s one screen (DesktopCreateOrg)', () => {
-  it('an account with an organization goes on to the setup page — the screen makes no second organization', async () => {
-    stubFetch(WITH_ORG);
-    await act(async () => { root.render(provider(<DesktopCreateOrg next="/desktop/setup" />)); });
-    await settle();
-    expect(hrefSet).toEqual(['/desktop/setup']); // reverted → fails
-    expect(urls).not.toContain('/api/organizations');
-    expect(urls).not.toContain('/api/projects');
-  });
-
-  it('no organization · a stale claim → the screen stays (nothing sent anywhere)', async () => {
-    for (const me of [NO_ORG, STALE_CLAIM]) {
-      hrefSet = [];
-      stubFetch(me);
-      await act(async () => { root.render(provider(<DesktopCreateOrg next="/desktop/setup" />)); });
-      await settle();
-      expect(hrefSet).toEqual([]);
-      expect(text()).toContain('조직 만들기');
-      await act(async () => { root.render(provider(<div />)); });
-    }
-  });
-
-  describe('«만들기» waits for /api/auth/me (PO 10-15 · Kadir codex): pressed before the answer it would make a second organization', () => {
-    const createBtn = () => Array.from(container.querySelectorAll('button')).find((b) => /만들기|만드는 중/.test(b.textContent ?? '')) as HTMLButtonElement;
-
-    it('held while the answer is pending → enabled once it says «no organization»; nothing was sent meanwhile', async () => {
-      let open!: () => void;
-      stubFetch(NO_ORG, { meGate: new Promise<void>((r) => { open = r; }) });
-      await act(async () => { root.render(provider(<DesktopCreateOrg next="/desktop/setup" />)); });
-      await settle();
-      expect(createBtn().disabled).toBe(true); // reverted (the default name enables it at once) → fails
-      expect(urls).not.toContain('/api/organizations');
-      await act(async () => { open(); });
-      await settle();
-      expect(createBtn().disabled).toBe(false);
-    });
-
-    it('an answer that fails (rejects · not ok) still releases the button — no dead end', async () => {
-      for (const meFails of ['reject', 'status'] as const) {
-        stubFetch(NO_ORG, { meFails });
-        await act(async () => { root.render(provider(<DesktopCreateOrg next="/desktop/setup" />)); });
-        await settle();
-        expect(createBtn().disabled).toBe(false);
-        await act(async () => { root.render(provider(<div />)); });
-      }
-    });
-
-    it('an account found to have an organization stays held while it is sent on (no second organization from a last-moment press)', async () => {
-      stubFetch(WITH_ORG);
-      await act(async () => { root.render(provider(<DesktopCreateOrg next="/desktop/setup" />)); });
-      await settle();
-      expect(hrefSet).toEqual(['/desktop/setup']);
-      expect(createBtn().disabled).toBe(true);
-    });
   });
 });

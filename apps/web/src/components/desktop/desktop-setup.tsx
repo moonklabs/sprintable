@@ -16,8 +16,8 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { SetupProgressView } from './desktop-setup-progress';
 import { DesktopSetupAgent, DesktopSetupQuick } from './desktop-setup-quick';
 import { showsQuickCard } from '@/lib/desktop-setup-quick';
-import { defaultOrgName } from '@/app/onboarding/desktop-create-org';
-import { onboardingRedirect } from '@/lib/auth/onboarding-next';
+import { defaultOrgName } from '@/lib/default-org-name';
+import { InviteCheckFailedCard } from './invite-check-failed';
 import { formatLocaleDate } from '@/lib/i18n';
 import { InvisibleSample, useViewerTimeZone } from '@/components/viewer-time-zone';
 import { EmailVerifyGateCard, useEmailVerifyGate } from '@/components/auth/email-verify-gate';
@@ -221,7 +221,7 @@ export interface MyInvite { invite_id: string; org_id: string; org_name: string;
  * invited somewhere, so the page makes nothing and says where to go. An invite read that fails sends them to 4832's one-screen
  * «조직 만들기» instead — not knowing is not taken as «no invites».
  */
-type OrgMode = { kind: 'has-org' } | { kind: 'checking' } | { kind: 'new' } | { kind: 'invited'; invites: MyInvite[] };
+type OrgMode = { kind: 'has-org' } | { kind: 'checking' } | { kind: 'new' } | { kind: 'invited'; invites: MyInvite[] } | { kind: 'invite-failed' };
 
 export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null, old = [], canMove = false, preselect = null }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[]; setupId?: string | null; old?: OldRuntime[]; canMove?: boolean; /** story 4680: the agent the recruiter just made — chosen for the first agent row once the list has it */ preselect?: string | null }) {
   // ⑥ 갈래 가: 찾았지만 회사 설정으로 도구를 못 붙이는 런타임은 고를 수 없고, 꺼진 선택지로만 보인다. PO 08:37Z · 유나 08:38Z.
@@ -339,12 +339,16 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   }, [setupId]);
 
   // (나) no organization: their invites decide the mode (0 → a new organization · some → where to go · unreadable → (가))
+  const inviteReads = useRef(0); // codex self-QA: only the LATEST read decides (a late failure must not overwrite a read that already succeeded)
   async function readInvites() {
+    const mine = ++inviteReads.current;
     try {
       const list = await fetchMyInvites();
+      if (mine !== inviteReads.current) return;
       setOrgMode(list.length ? { kind: 'invited', invites: list } : { kind: 'new' });
     } catch {
-      window.location.assign(onboardingRedirect(window.location.pathname)); // this page → /onboarding?next=… (4832)
+      if (mine !== inviteReads.current) return;
+      setOrgMode({ kind: 'invite-failed' }); // story 4711 AC4: not knowing is not "no invites" — the page says so and reads again (no organization is made meanwhile)
     }
   }
   useEffect(() => {
@@ -675,6 +679,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   }
 
   if (orgMode.kind === 'invited') return <InvitedCard invites={orgMode.invites} />;
+  if (orgMode.kind === 'invite-failed') return <InviteCheckFailedCard onRetry={() => { setOrgMode({ kind: 'checking' }); void readInvites(); }} />;
   if (newOrg && verifyGate.kind === 'closed') return <EmailVerifyGateCard gate={verifyGate} />;
   if (newOrg && verifyGate.kind === 'reading') return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   // a person making a new organization is its owner-to-be: the server checks «no organization» itself (org_members 0 rows)

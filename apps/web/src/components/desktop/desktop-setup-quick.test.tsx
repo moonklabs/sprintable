@@ -3,6 +3,7 @@
 // story 4711 — 처음 셋업 세 걸음(에이전트 → 폴더 → 시작): one card · the folder comes back from the app's Mac window in the `#` ·
 // [시작] = one confirm-solo with the runtime and the folder's NAME (never a path) · the free plan's one project asks instead of 402.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { StrictMode } from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
@@ -30,6 +31,8 @@ let container: HTMLDivElement;
 let root: Root;
 let calls: { url: string; method?: string; body?: unknown }[];
 let confirmNow: () => Response;
+/** what GET /api/invites/mine answers now (default: none) — story 4711 AC4 reads its failure */
+let invitesNow: () => Response | Promise<Response> = () => new Response(JSON.stringify({ invites: [] }), { status: 200 });
 /** what GET /api/desktop/setups/{id} answers (the progress view's reading) */
 let statusNow: () => unknown = () => ({});
 /** story 4670: what GET /api/organizations/{id}/remote-control answers now, and the PUT (default: not known → the page reads it as a failed read) */
@@ -44,7 +47,7 @@ function stub() {
     calls.push({ url, ...(init?.method ? { method: init.method } : {}), body: init?.body ? JSON.parse(String(init.body)) : undefined });
     if (url.includes('/api/desktop/setup-codes/confirm-solo')) return confirmNow();
     if (/\/api\/organizations\/[^/]+\/remote-control$/.test(url)) return init?.method === 'PUT' ? remotePut() : remoteGet();
-    if (url.endsWith('/api/invites/mine')) return new Response(JSON.stringify({ invites: [] }), { status: 200 });
+    if (url.endsWith('/api/invites/mine')) return invitesNow();
     if (url.endsWith('/api/auth/me')) return new Response(JSON.stringify({ data: { display_name: '김지우', email: 'a@b.c', email_verified: true, email_verification_required: true } }), { status: 200 });
     if (url.endsWith('/api/auth/refresh')) return new Response('{}', { status: 200 });
     if (url.endsWith('/api/current-project')) return new Response('{}', { status: 200 });
@@ -70,6 +73,7 @@ const linkOf = (label: string) => [...container.querySelectorAll('a')].find((a) 
 beforeEach(() => {
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   confirmNow = () => new Response(JSON.stringify({ project_id: PROJ, conversation_id: 'c-1', members: [] }), { status: 200 });
+  invitesNow = () => new Response(JSON.stringify({ invites: [] }), { status: 200 });
   statusNow = () => ({}); __resetOrgRemoteControlForTest(); teamPressed = false; ee.on = false; sp.value = null; remoteGet = remoteOf({ enabled: true, can_change: true, enabled_at: 'now' }); remotePut = () => new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'now' } }), { status: 200 }); stub();
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); sessionStorage.clear(); });
@@ -288,6 +292,38 @@ describe('[SID:4711] the first setup in three steps', () => {
     await act(async () => { await new Promise((r) => setTimeout(r, 40)); });
     expect(calls.some((c) => c.url.includes('/api/desktop/setups/s-1'))).toBe(false);
     expect(window.location.hash).not.toContain('s-1');
+  });
+
+  it('story 4711 AC4: the invites cannot be read → the card says so in place (no redirect to a «조직 만들기» screen), nothing is made; [다시 확인] reads again', async () => {
+    const assign = vi.fn();
+    vi.stubGlobal('location', { ...window.location, assign } as unknown as Location);
+    invitesNow = () => new Response('{}', { status: 503 });
+    await mount(frag('&fshown=~/code/my-app&fname=my-app'), { orgId: null, role: 'owner', projects: [] });
+    expect(assign).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-testid=setup-invite-check-failed]')!.textContent).toContain('초대를 확인하지 못했어요 — 확인한 뒤에 조직을 만들어요');
+    expect(calls.filter((c) => c.method === 'POST')).toEqual([]);
+    invitesNow = () => new Response(JSON.stringify({ invites: [] }), { status: 200 });
+    await act(async () => { buttonOf('다시 확인')!.click(); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid=setup-invite-check-failed]')).toBeNull();
+  });
+
+  it('codex self-QA: two overlapping invite reads (StrictMode runs the effect twice) — a LATE failure does not overwrite the read that already succeeded', async () => {
+    let n = 0;
+    let failLate: (r: Response) => void = () => {};
+    invitesNow = () => {
+      n += 1;
+      if (n === 1) return new Promise<Response>((resolve) => { failLate = resolve; }); // the first read answers last, with a failure
+      return new Response(JSON.stringify({ invites: [] }), { status: 200 });          // the second answers at once: none → a new organization
+    };
+    ctx.mockReturnValue({ projectId: undefined, currentProjectSlug: 'proj', userName: '김지우', orgId: null, orgMemberships: [], projectMemberships: [] });
+    const query = parseSetupFragment(frag('&fshown=~/code/my-app&fname=my-app'))!;
+    await act(async () => { root.render(<StrictMode><NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DesktopSetupQuick query={query} onTeam={() => {}} /></NextIntlClientProvider></StrictMode>); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(n).toBe(2);
+    await act(async () => { failLate(new Response('{}', { status: 503 })); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid=setup-invite-check-failed]')).toBeNull(); // not the retry card
   });
 
   it('billing closed (prod today): the free-plan question has no upgrade link', async () => {
