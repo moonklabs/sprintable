@@ -15,9 +15,9 @@ import { EmailVerifyGateCard, useEmailVerifyGate } from '@/components/auth/email
 import { appSetupLink, nativeReturnApp, RETURN_APP_PARAM } from '@/lib/auth/native-return-app';
 import { putOrgRemoteControl, useOrgRemoteControl } from '@/lib/org-remote-control';
 import { useSearchParams } from 'next/navigation';
-import { setupFragment, isFolderRefused, type DesktopRuntime, type SetupQuery } from '@/lib/desktop-setup';
+import { setupFragment, isFolderRefused, moveConfirmBody, movableState, type AttachableAgent, type DesktopRuntime, type SetupQuery } from '@/lib/desktop-setup';
 import { defaultSoloRuntime, shownProjectName, soloConfirmBody, soloNewOrgConfirmBody, soloOutcome, soloStartBlock, usableRuntimes } from '@/lib/desktop-setup-quick';
-import { Failure, INSTALL, InvitedCard, PROGRESS_FRAGMENT, RUNTIME_LABEL, SetupDoneReload, TooOldCard, fetchMyInvites, joinNewOrg, limitCounts, useAppSetupLinks, type MyInvite } from './desktop-setup';
+import { ATTACHABLE_READ_LIMIT_MS, DesktopSetup, Failure, INSTALL, InvitedCard, MovedAgentNote, PROGRESS_FRAGMENT, RUNTIME_LABEL, SetupDoneReload, TooOldCard, fetchMyInvites, joinNewOrg, limitCounts, moveFailureForCode, useAppSetupLinks, type MyInvite } from './desktop-setup';
 import { SetupProgressView } from './desktop-setup-progress';
 
 /**
@@ -31,7 +31,7 @@ type OrgMode = { kind: 'has-org' } | { kind: 'checking' } | { kind: 'new' } | { 
 type View = { kind: 'choose' } | { kind: 'starting' } | { kind: 'started' } | { kind: 'done-reload' }
   | { kind: 'failed'; failure: 'offline' | 'not-admin' | 'expired' | 'has-org' | 'agent-limit'; counts?: { need: number; left: number } | null };
 
-export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam: () => void }) {
+export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { query: SetupQuery; onTeam: () => void; /** story 4711 (`agent=` branch): the recruiter's agent, already checked movable — the card's ① is that one agent (read-only) and «시작» is the MOVE confirmation, never a new agent */ agent?: AttachableAgent; /** the move could not be confirmed because the agent is no longer movable (left the project …): the wrapper falls to the recipe page with its reasons */ onNotMovable?: () => void }) {
   const t = useTranslations('desktop.setup');
   const tNewOrg = useTranslations('desktopOnboarding');
   const tOnboarding = useTranslations('onboarding');
@@ -106,7 +106,8 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
   }, [newOrg]);
 
   const usable = usableRuntimes(query);
-  const runtime = pickedRuntime && usable.includes(pickedRuntime) ? pickedRuntime : defaultSoloRuntime(usable, query.pick);
+  const runtime = agent ? agent.runtime : pickedRuntime && usable.includes(pickedRuntime) ? pickedRuntime : defaultSoloRuntime(usable, query.pick);
+  const agentProject = agent ? (projectId ?? (orgProjects.length === 1 ? orgProjects[0]!.projectId : undefined)) : undefined;
   const folder = query.folder && !isFolderRefused(query.folder) ? query.folder : undefined;
   // codex self-QA: the free plan's «넣고 시작» question belongs to the folder it was asked for — another folder picked afterwards (same page, new address) must not start into A's project
   const limitAsk = limitAskRaw && limitAskRaw.folderKey === (folder?.shown ?? '') ? limitAskRaw : null;
@@ -122,6 +123,42 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
 
   // codex self-QA: two presses before the state commits must not send two confirmations (and two phone-control PUTs)
   const startInFlight = useRef(false);
+  /** story 4711 (`agent=` branch): the recruiter's agent is an agent the organization ALREADY has → the confirmation is the move («existing» row, no recipe,
+   *  no new agent): the exchange then revokes every key the agent had (`_rotate_existing_agent`) — the key the hire handed to the browser dies there. */
+  async function startAgent() {
+    if (!agent || !agentProject || startInFlight.current) return; // the same one-press guard as start()
+    startInFlight.current = true;
+    setRateLine(null); setErrorLine(null); setView({ kind: 'starting' });
+    try {
+      const res = await fetchWithAuth('/api/desktop/setup-codes/confirm', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(moveConfirmBody(query.code, agentProject, [agent.id])),
+      });
+      if (res.ok) {
+        if (!projectId && !(await joinNewOrg({ project_id: agentProject }))) { setView({ kind: 'done-reload' }); return; }
+        await turnPhoneControlOn(orgId);
+        if (query.setupId) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(query.setupId)); // a reload goes back to the progress (as the solo start does)
+        setView({ kind: 'started' });
+        return;
+      }
+      const body = await res.json().catch(() => null);
+      const error = body?.error as { code?: string } | undefined;
+      if (res.status === 429 || error?.code === 'RATE_LIMITED') {
+        const secs = Number(res.headers.get('Retry-After'));
+        const time = !Number.isFinite(secs) || secs <= 0 ? t('rateLimitedMoment') : secs < 60 ? t('rateLimitedSeconds', { n: Math.ceil(secs) }) : t('rateLimitedMinutes', { n: Math.ceil(secs / 60) });
+        setRateLine(t('rateLimited', { time })); setView({ kind: 'choose' }); return;
+      }
+      const failure = moveFailureForCode(error?.code);
+      if (failure === 'move-not-admin') setView({ kind: 'failed', failure: 'not-admin' });
+      else if (failure === 'expired') setView({ kind: 'failed', failure: 'expired' });
+      else if (failure === 'move-changed' && onNotMovable) onNotMovable(); // the agent left the project / is gone: the recipe page with its reasons (self-QA), never the same card again
+      else { setErrorLine(t('quick.failed')); setView({ kind: 'choose' }); }
+    } catch {
+      setView({ kind: 'failed', failure: 'offline' });
+    } finally {
+      startInFlight.current = false;
+    }
+  }
+
   async function start(useProject?: string) {
     if (startInFlight.current) return;
     startInFlight.current = true;
@@ -185,10 +222,10 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
     const onReloadPage = view.failure === 'has-org'
       ? () => { window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment(query)); window.location.reload(); }
       : undefined;
-    return <Failure failure={view.failure} counts={view.counts ?? null} onRetry={view.failure === 'offline' ? () => void start(limitAsk?.id) : undefined} onReloadPage={onReloadPage} />;
+    return <Failure failure={view.failure} counts={view.counts ?? null} onRetry={view.failure === 'offline' ? () => void (agent ? startAgent() : start(limitAsk?.id)) : undefined} onReloadPage={onReloadPage} />;
   }
   // nothing usable on this computer: blocked by the company's policy · installed but too old · not found (the install lines)
-  if (usable.length === 0) {
+  if (!agent && usable.length === 0) {
     if (query.blocked.length > 0) return <Failure failure="managed" />;
     if ((query.old?.length ?? 0) > 0) return <TooOldCard old={query.old ?? []} />;
     return (
@@ -223,7 +260,13 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
 
         <section aria-labelledby="quick-step-agent" className="flex flex-col gap-2">
           <h2 id="quick-step-agent" className="text-sm font-medium">① {t('quick.stepAgent')}</h2>
-          {usable.length > 1 ? (
+          {agent ? (
+            // story 4711 (`agent=` branch): the recruiter's agent — one read-only line (no radio, nothing to choose), the move's warning when it works elsewhere
+            <div data-testid="quick-agent-fixed">
+              <p className="flex items-center gap-2 text-sm"><span>{agent.name}</span><span className="text-xs text-muted-foreground">{RUNTIME_LABEL[agent.runtime]}{query.versions?.[agent.runtime] ? ` ${query.versions[agent.runtime]}` : ''}</span></p>
+              <MovedAgentNote agent={agent} />
+            </div>
+          ) : usable.length > 1 ? (
             <div role="radiogroup" aria-labelledby="quick-step-agent" className="flex flex-col gap-1">
               {usable.map((r) => (
                 <label key={r} className="flex items-center gap-2 text-sm">
@@ -241,6 +284,7 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
           ))}
         </section>
 
+        {agent ? null : (
         <section aria-labelledby="quick-step-folder" className="flex flex-col gap-2">
           <h2 id="quick-step-folder" className="text-sm font-medium">② {t('quick.stepFolder')}</h2>
           {refused ? (
@@ -278,6 +322,7 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
             runtime ? <div><Button asChild variant="outline"><a href={folderLink}>{t('quick.folderPick')}</a></Button></div> : null
           )}
         </section>
+        )}
 
         {limitAsk ? (
           <div role="status" className="flex flex-col gap-2 rounded-md border p-3 text-sm" data-testid="quick-limit">
@@ -306,18 +351,57 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
                   </label>
                 </div>
               ) : null}
-              <div><Button disabled={starting || block !== null} aria-describedby="quick-start-line" onClick={() => void start()}>{starting ? t('quick.starting') : t('quick.start')}</Button></div>
+              <div><Button disabled={starting || (agent ? !agentProject : block !== null)} aria-describedby="quick-start-line" onClick={() => void (agent ? startAgent() : start())}>{starting ? t('quick.starting') : t('quick.start')}</Button></div>
               <p id="quick-start-line" className="text-sm text-muted-foreground" data-testid="quick-start-line">
-                {blockLine ?? (runtime && projectLine
-                  ? t('quick.startLine', { runtime: `${name}`, project: projectLine.name })
-                  : '')}
+                {agent ? (agentProject ? t('quick.projectChosen', { name: orgProjects.find((p) => p.projectId === agentProject)?.projectName ?? '' }) : '')
+                  : blockLine ?? (runtime && projectLine
+                    ? t('quick.startLine', { runtime: `${name}`, project: projectLine.name })
+                    : '')}
               </p>
             </div>
           )}
           <p className="text-xs text-muted-foreground">{t('toolNote')}</p>
         </section>
       </Card>
-      <p className="text-sm"><Button type="button" variant="link" className="h-auto p-0 underline underline-offset-2" disabled={starting} onClick={onTeam}>{t('quick.team')}</Button></p>
+      {agent ? null : <p className="text-sm"><Button type="button" variant="link" className="h-auto p-0 underline underline-offset-2" disabled={starting} onClick={onTeam}>{t('quick.team')}</Button></p>}
     </div>
   );
+}
+
+/**
+ * story 4711 — the page opened WITH a recruiter's agent (`agent=<member id>` in the address, from the in-app hire's [이 컴퓨터에서 시작]): the card is
+ * the same three-step card with ① FIXED to that agent, and «시작» is the MOVE confirmation — the agent is one the organization already has, never a new
+ * one, so the exchange revokes every key it had (`_rotate_existing_agent`): the key the hire handed to the browser dies there (Kadir's lens on 5123).
+ * Only when the agent can really be moved now (in this project · its program on this computer · the person can move it); otherwise the recipe page
+ * with its reasons (4703 `PreselectHold`) — never a quiet fall to a new agent. While the list is read: the loading card.
+ */
+export function DesktopSetupAgent({ query, onTeam }: { query: SetupQuery; onTeam: () => void }) {
+  const t = useTranslations('desktop.setup');
+  const { projectId, orgId, orgMemberships, projectMemberships } = useDashboardContext();
+  const isAdmin = ['owner', 'admin'].includes(orgMemberships?.find((o) => o.orgId === orgId)?.role ?? 'member');
+  const orgProjects = useMemo(() => (projectMemberships ?? []).filter((m) => !m.orgId || m.orgId === orgId), [projectMemberships, orgId]);
+  const project = projectId ?? (orgProjects.length === 1 ? orgProjects[0]!.projectId : undefined);
+  const wanted = !!orgId && isAdmin && !!project;
+  const [read, setRead] = useState<{ project: string; agents: AttachableAgent[] | null } | null>(null);
+  const [gone, setGone] = useState(false); // the move said «not movable now»: the recipe page from here on
+  useEffect(() => {
+    if (!wanted || !project) return;
+    let off = false;
+    // a read that never ends (headers or body) is a «could not read» after the same limit the recipe page uses — the recipe page then, never a spinner for good
+    const limit = setTimeout(() => { if (!off) setRead({ project, agents: null }); }, ATTACHABLE_READ_LIMIT_MS);
+    fetchWithAuth(`/api/desktop/setup/agents?project_id=${encodeURIComponent(project)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body: { agents?: AttachableAgent[] } | null) => { if (!off) setRead({ project, agents: Array.isArray(body?.agents) ? body.agents : null }); })
+      .catch(() => { if (!off) setRead({ project, agents: null }); })
+      .finally(() => clearTimeout(limit));
+    // leaving a project (or the page): nothing of its answer is kept for the next one — A → B → A never shows A's old list while A is read again (self-QA)
+    return () => { off = true; clearTimeout(limit); setRead(null); };
+  }, [wanted, project]);
+  const fallback = <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} old={query.old ?? []} canMove={query.canMove === true} preselect={query.agent ?? null} />;
+  if (!wanted) return fallback;
+  if (!read || read.project !== project) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
+  const found = gone ? undefined : read.agents?.find((a) => a.id === query.agent);
+  const runtimes = usableRuntimes(query);
+  if (!found || movableState(found, runtimes) !== 'ok') return fallback;
+  return <DesktopSetupQuick query={query} onTeam={onTeam} agent={found} onNotMovable={() => setGone(true)} />;
 }
