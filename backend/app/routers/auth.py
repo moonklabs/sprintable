@@ -1691,6 +1691,18 @@ async def oauth_callback(
             await session.execute(select(User).where(User.email == email, User.is_active.is_(True)))
         ).scalar_one_or_none()
         if user:
+            # story 4724 (found by the 4722 codex read): linking this provider identity to an EXISTING account because the e-mail text matches
+            # equates two identities on an address the provider itself did not vouch for. An attacker who controls a provider account that carries
+            # someone else's address unverified would get that person's account (and its token). Only a provider-VERIFIED address may be matched
+            # to an existing account. Decision for the other branch (below, a NEW account): it stays allowed with the provider's claim stored in
+            # `email_verified` — creating a fresh identity equates nothing, and the account is held back from everything a proved mailbox unlocks
+            # (4722: no invite auto-accept; creating an organization needs a verified mailbox).
+            if not provider_email_verified:
+                return _err(
+                    "OAUTH_EMAIL_NOT_VERIFIED",
+                    "The provider did not verify this e-mail address, so it cannot be linked to the existing account",
+                    403,
+                )
             await session.execute(
                 update(User).where(User.id == user.id).values(**{f"{provider}_id": oauth_id})
             )
