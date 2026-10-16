@@ -139,7 +139,7 @@ describe('ConnectStep — 보조 경로 삭제 0(story #3983 AC1)', () => {
 });
 
 describe('ConnectStep — 데스크톱 절 키 칸 없음(카드 4542 · 키 붙여 넣기 입구 없음)', () => {
-  it('⭐「앱을 열면 브라우저가 이 계정으로 이어서 열려요」 한 줄이 뜨고, 키 복사 칸은 없다', async () => {
+  it('⭐「앱을 열고 이 계정으로 들어가면 돼요」 한 줄이 뜨고, 키 복사 칸은 없다', async () => {
     await mount();
     const note = container.querySelector('[data-testid="connect-step-desktop-open-note"]');
     expect(note?.textContent).toContain(ko.onboarding.desktopOpenAppNote);

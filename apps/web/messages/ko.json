@@ -1573,7 +1573,7 @@
       "failed": "원격 제어를 켜지 못했어요 — 다시 시도해 주세요"
     },
     "download": {
-      "afterNote": "받은 뒤엔 앱을 열기만 하면 돼요. 이 창은 닫아도 돼요.",
+      "afterNote": "받은 뒤엔 앱을 열고 같은 계정으로 들어가면 돼요. 이 창은 닫아도 돼요.",
       "laterNote": "지금 받지 않아도 돼요 — 이 화면은 설정에서 «데스크톱 앱 받기»로 다시 열 수 있어요."
     },
     "verifyStatusDone": "완료",
@@ -1635,7 +1635,7 @@
     "keyOneTimeNote": "API 키는 지금 한 번만 표시돼요 — 지금 복사해두세요.",
     "desktopHandoffSubtitle": "내려받아 열면 데스크톱 앱에서 마저 설정해요.",
     "webConnectSecondaryLabel": "또는 웹에서 계속",
-    "desktopOpenAppNote": "앱을 열면 브라우저가 이 계정으로 이어서 열려요",
+    "desktopOpenAppNote": "앱을 열고 이 계정으로 들어가면 돼요",
     "desktopFinishToToday": "오늘로 가기",
     "restartAfterConfig": "설정을 저장했다면 Claude Code를 재시작하세요 — 재시작해야 새 연결이 적용돼요.",
     "verifyWaiting": "연결을 확인하는 중이에요 — 자동으로 다시 시도해요.",
@@ -1690,7 +1690,7 @@
     "projectSubtitleNoOrg": "첫 프로젝트를 만들어 보세요.",
     "first": {
       "macTitle": "에이전트는 내 Mac에서 돌아가요",
-      "macLead": "Mac 앱을 받아 열면 폴더를 고르고 에이전트를 바로 시작해요. 이 Mac에 Claude Code나 Codex가 있어야 해요.",
+      "macLead": "Mac 앱을 받아 열고 같은 계정으로 들어가면 폴더를 고르고 에이전트를 바로 시작해요. 이 Mac에 Claude Code나 Codex가 있어야 해요.",
       "macCta": "Mac 앱 받기",
       "notMacTitle": "지금은 Mac 앱만 있어요",
       "notMacLead": "Mac에서 이 계정으로 로그인해 앱을 받으면 에이전트를 시작할 수 있어요. 다른 곳에서 이미 돌고 있는 에이전트는 지금 바로 연결할 수 있어요.",
