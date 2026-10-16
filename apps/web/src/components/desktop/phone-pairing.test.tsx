@@ -342,7 +342,7 @@ describe('[4532] phone pairing screen', () => {
     expect(fetchWithAuth.mock.calls.some(([url, init]) => url === '/api/remote-devices/p-1' && init?.method === 'DELETE')).toBe(true);
     expect(document.body.textContent).toContain('뺐어요 · 내 폰 A');
     expect(container.querySelectorAll('[data-testid="pairing-limit-phone"]').length).toBe(1);
-    expect(document.body.textContent).toContain('자리가 하나 비었어요. [다시 찍기]를 누르면 새 QR로 이어서 짝지어요');
+    expect(document.body.textContent).toContain('자리가 하나 비었어요. [다시 찍기]를 누르면 새 QR로 이어서 페어링해요');
     expect(buttons()).toContain('다시 찍기');
   });
 
