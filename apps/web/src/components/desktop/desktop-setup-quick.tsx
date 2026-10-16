@@ -162,7 +162,8 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
         <ul className="flex flex-col gap-2">
           {(Object.keys(INSTALL) as DesktopRuntime[]).map((r) => (
             <li key={r} className="flex items-center justify-between gap-3 rounded-md border p-2">
-              <code className="min-w-0 truncate text-xs">{INSTALL[r]}</code>
+              <span className="shrink-0 text-sm font-medium">{RUNTIME_LABEL[r]}</span>
+              <code className="min-w-0 flex-1 truncate text-xs">{INSTALL[r]}</code>
               <Button variant="ghost" size="sm" aria-label={t('quick.copyAria', { name: RUNTIME_LABEL[r] })}
                 onClick={() => { void navigator.clipboard?.writeText(INSTALL[r]).catch(() => {}); setCopied(r); }}>
                 {copied === r ? t('quick.copied') : t('quick.copy')}
@@ -208,7 +209,10 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
           <h2 id="quick-step-folder" className="text-sm font-medium">② {t('quick.stepFolder')}</h2>
           {refused ? (
             <p role="alert" className="text-sm text-destructive" data-testid="quick-refused">
-              {refused === 'denied' ? t('quick.refused.denied') : t('quick.refused.missing')}
+              {refused === 'denied' ? t('quick.refused.denied')
+                : refused === 'app_folder' ? t('quick.refused.app_folder')
+                  : refused === 'not_folder' ? t('quick.refused.not_folder')
+                    : t('quick.refused.missing')}
             </p>
           ) : null}
           {folder ? (
@@ -224,11 +228,11 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
                       : t('quick.projectChosen', { name: projectLine.name })}
                 </p>
               ) : null}
-              {folder.wide ? (
+              {folder.wide && !wideOk ? (
                 <div role="status" className="flex flex-col gap-2 rounded-md border p-3 text-sm" data-testid="quick-wide">
                   <p>{t('quick.wideAsk')}</p>
                   <div className="flex gap-2">
-                    {wideOk ? null : <Button size="sm" onClick={() => setWideOk(true)}>{t('quick.wideYes')}</Button>}
+                    <Button size="sm" onClick={() => setWideOk(true)}>{t('quick.wideYes')}</Button>
                     <Button asChild size="sm" variant="outline"><a href={folderLink}>{t('quick.folderOther')}</a></Button>
                   </div>
                 </div>
@@ -253,14 +257,17 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
         <section className="flex flex-col gap-2">
           {errorLine ? <p role="alert" className="text-sm text-destructive" data-testid="quick-error">{errorLine}</p> : null}
           {rateLine ? <p role="alert" className="text-sm text-destructive">{rateLine}</p> : null}
-          <div className="flex flex-col gap-2">
-            <div><Button disabled={starting || block !== null || limitAsk !== null} aria-describedby="quick-start-line" onClick={() => void start()}>{starting ? t('quick.starting') : t('quick.start')}</Button></div>
-            <p id="quick-start-line" className="text-sm text-muted-foreground" data-testid="quick-start-line">
-              {blockLine ?? (runtime && projectLine
-                ? t('quick.startLine', { runtime: `${name}`, project: projectLine.name })
-                : '')}
-            </p>
-          </div>
+          {/* the free-plan question has its own primary [넣고 시작] — the start row is not drawn beside it (Yuna 5121 ①) */}
+          {limitAsk ? null : (
+            <div className="flex flex-col gap-2">
+              <div><Button disabled={starting || block !== null} aria-describedby="quick-start-line" onClick={() => void start()}>{starting ? t('quick.starting') : t('quick.start')}</Button></div>
+              <p id="quick-start-line" className="text-sm text-muted-foreground" data-testid="quick-start-line">
+                {blockLine ?? (runtime && projectLine
+                  ? t('quick.startLine', { runtime: `${name}`, project: projectLine.name })
+                  : '')}
+              </p>
+            </div>
+          )}
           <p className="text-xs text-muted-foreground">{t('toolNote')}</p>
         </section>
       </Card>

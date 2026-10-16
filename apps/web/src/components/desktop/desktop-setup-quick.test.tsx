@@ -122,13 +122,29 @@ describe('[SID:4711] the first setup in three steps', () => {
     expect(container.querySelector('[data-testid=quick-start-line]')!.textContent).toBe('폴더를 확인하면 시작할 수 있어요');
     await act(async () => { buttonOf('맞아요')!.click(); });
     expect(buttonOf('시작')!.disabled).toBe(false);
-    expect(linkOf('다른 폴더 고르기')).toBeTruthy();
+    expect(container.querySelector('[data-testid=quick-wide]')).toBeNull(); // Yuna 5121 ②: once confirmed the question is gone
+    expect(text()).not.toContain('이 폴더 전체에서 일해요');
+    expect(linkOf('폴더 바꾸기') ?? linkOf('바꾸기')).toBeTruthy(); // the folder can still be changed
   });
 
   it('a refused window answer says why and keeps the button; a cancel shows nothing', async () => {
     await mount(frag('&frefused=denied'));
     expect(container.querySelector('[data-testid=quick-refused]')!.textContent).toContain('시스템 설정 › 개인정보 보호 및 보안 › 파일 및 폴더');
     expect(linkOf('폴더 고르기')).toBeTruthy();
+  });
+
+  it('the app\'s own folder and a non-folder have their own lines (Yuna 5121 ④)', async () => {
+    await mount(frag('&frefused=app_folder'));
+    expect(container.querySelector('[data-testid=quick-refused]')!.textContent).toBe('Sprintable 앱이 쓰는 폴더라 고를 수 없어요 — 다른 폴더를 골라 주세요');
+    await act(async () => { root.render(<div />); });
+    await mount(frag('&frefused=not_folder'));
+    expect(container.querySelector('[data-testid=quick-refused]')!.textContent).toBe('고른 항목이 폴더가 아니에요 — 폴더를 골라 주세요');
+    await act(async () => { root.render(<div />); });
+    await mount(frag('&frefused=missing'));
+    expect(container.querySelector('[data-testid=quick-refused]')!.textContent).toBe('고른 폴더를 찾을 수 없어요 — 다시 골라 주세요');
+    await act(async () => { root.render(<div />); });
+    await mount(frag('&frefused=app_folder'), {}, 'en');
+    expect(container.querySelector('[data-testid=quick-refused]')!.textContent).toBe('This folder is used by the Sprintable app itself — choose another folder');
   });
 
   it('English words', async () => {
@@ -149,6 +165,8 @@ describe('[SID:4711] the first setup in three steps', () => {
     await mount(`#code=${CODE}&runtimes=&caps=solo`);
     expect(container.querySelector('[data-testid=quick-no-agent]')!.textContent).toContain('이 컴퓨터에서 Claude Code나 Codex를 찾지 못했어요');
     expect(container.querySelectorAll('code').length).toBe(2);
+    const rows = [...container.querySelectorAll('[data-testid=quick-no-agent] li')].map((li) => li.firstElementChild!.textContent);
+    expect(rows).toEqual(['Claude Code', 'Codex']); // Yuna 5121 ③: each row starts with the program's name
     expect(linkOf('다시 찾기')!.getAttribute('href')).toBe('ai.sprintable:/desktop/setup');
     expect(buttonOf('시작')).toBeUndefined();
   });
@@ -169,7 +187,8 @@ describe('[SID:4711] the first setup in three steps', () => {
     expect(ask.textContent).toContain('이 폴더의 에이전트를 Mine 프로젝트에 넣어 시작할 수 있어요 — 에이전트는 이 폴더에서 일해요.');
     expect(ask.textContent).toContain('요금제 업그레이드 →'); // billing open
     expect(container.querySelector('[data-testid=quick-project]')!.textContent).toBe('프로젝트 · Mine');
-    expect(buttonOf('시작')!.disabled).toBe(true); // the one primary on the card is «넣고 시작»
+    expect(buttonOf('시작')).toBeUndefined(); // Yuna 5121 ①: the one primary on the card is «넣고 시작» — no [시작] beside it
+    expect(container.querySelector('[data-testid=quick-start-line]')).toBeNull();
     confirmNow = () => new Response(JSON.stringify({ project_id: PROJ, conversation_id: 'c-1', members: [] }), { status: 200 });
     await act(async () => { buttonOf('넣고 시작')!.click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });

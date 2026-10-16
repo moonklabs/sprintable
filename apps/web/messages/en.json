@@ -7023,7 +7023,9 @@
         "team": "Set up a team of agents →",
         "refused": {
           "denied": "We can't open this folder — allow Sprintable in System Settings › Privacy & Security › Files and Folders, or choose another folder",
-          "missing": "We can't find the folder you chose — choose it again"
+          "missing": "We can't find the folder you chose — choose it again",
+          "app_folder": "This folder is used by the Sprintable app itself — choose another folder",
+          "not_folder": "What you chose isn't a folder — choose a folder"
         },
         "failed": "Couldn't start — try again",
         "limit": {
