@@ -62,16 +62,22 @@ export function createBffDispatcher(
   // story #4723 — 본문이 있는 DELETE는 h1로 보낸다. undici h2는 DELETE(PUT · POST · PATCH만 «본문을 기대»하는 메서드로 본다 ·
   // client-h2.js expectsPayload)에는 content-length를 안 달고, 길이 없는 h2 DATA는 Cloud Run 앞단(GFE)을 지나며 백엔드에 «본문 없음»으로
   // 닿는다(dev 실측: 설정 → 조직 삭제 DELETE /api/organizations/{id} 가 422 body missing). undici h1은 길이를 단다.
-  // 백엔드 origin에 한해 · 본문이 있는 DELETE만 · 나머지 메서드와 스트림 · SSE는 그대로 h2.
+  // 백엔드 origin에 한해 · 본문이 있는 DELETE만 · 나머지 메서드와 스트림 · SSE는 그대로 h2. 전제: 백엔드가 h1도 받는다(Cloud Run · 평문 CI ·
+  // 로컬 모두 그렇다) — h2 전용 백엔드를 두게 되면 본문 있는 DELETE는 이 경로에서 막힌다(그때 이 전제를 다시 본다).
   let h1Agent: Agent | null = null;
   const h1 = () => (h1Agent ??= new Agent({ keepAliveTimeout: BFF_KEEPALIVE_MS, keepAliveMaxTimeout: BFF_KEEPALIVE_MAX_MS, ...agentExtra }));
   const agentDispatch = agent.dispatch.bind(agent);
+  // 이미 닫히기 시작했으면(닫는 중 · 닫힘 · 부숨) h1을 새로 만들지 않고 원 Agent로 보낸다 — 거기서 «닫힘» 오류가 제대로 난다.
+  let shuttingDown = false;
   const dispatch = (opts: Dispatcher.DispatchOptions, handler: Dispatcher.DispatchHandler) =>
-    isBodyDeleteToBackend(opts, backend) ? h1().dispatch(opts, handler) : agentDispatch(opts, handler);
+    !shuttingDown && !agent.closed && !agent.destroyed && isBodyDeleteToBackend(opts, backend)
+      ? h1().dispatch(opts, handler)
+      : agentDispatch(opts, handler);
   // 닫을 때 h1 쪽도 같이 닫는다. undici의 close/destroy는 콜백이 없으면 안에서 `this.destroy(err, cb)`를 다시 부르므로(promise 판),
   // 이 덧씌움은 항상 «콜백 판»으로 원본을 부른다 — 안 그러면 자기 자신을 끝없이 부른다.
   type Lifecycle = (...args: unknown[]) => unknown;
   const alsoH1 = (base: Lifecycle, side: (args: unknown[]) => Promise<unknown> | undefined): Lifecycle => (...args) => {
+    shuttingDown = true;
     const hasCb = args.some((a) => typeof a === 'function');
     const closeSide = () => Promise.resolve(side(args)).catch(() => undefined);
     if (hasCb) { void closeSide().then(() => base(...args)); return undefined; }
@@ -104,8 +110,9 @@ function headerOf(headers: Dispatcher.DispatchOptions['headers'], name: string):
     for (let i = 0; i + 1 < headers.length; i += 2) if (String(headers[i]).toLowerCase() === lower) return String(headers[i + 1]);
     return null;
   }
-  const entries = Symbol.iterator in headers ? (headers as Iterable<[string, string | string[]]>) : Object.entries(headers as Record<string, string | string[]>);
-  for (const [k, v] of entries) if (String(k).toLowerCase() === lower) return String(Array.isArray(v) ? v[0] : v);
+  // 한 번 읽으면 끝나는 Iterable(제너레이터 등)은 여기서 읽지 않는다 — undici가 같은 머리를 뒤에 다시 읽는다. 길이를 모르는 것으로 본다.
+  if (Symbol.iterator in headers) return null;
+  for (const [k, v] of Object.entries(headers as Record<string, string | string[]>)) if (k.toLowerCase() === lower) return String(Array.isArray(v) ? v[0] : v);
   return null;
 }
 
@@ -116,6 +123,7 @@ function headerOf(headers: Dispatcher.DispatchOptions['headers'], name: string):
 export function isBodyDeleteToBackend(opts: Dispatcher.DispatchOptions, backend: string | null): boolean {
   if (backend === null || String(opts.method).toUpperCase() !== 'DELETE') return false;
   if (opts.body == null || opts.body === '') return false;
+  if ((opts.body as { byteLength?: number }).byteLength === 0) return false; // 빈 Buffer · 빈 typed array
   if (headerOf(opts.headers, 'content-length') === '0') return false;
   return originOf(opts.origin as string | URL) === backend;
 }

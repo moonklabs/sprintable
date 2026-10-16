@@ -11,7 +11,7 @@ import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { getGlobalDispatcher, setGlobalDispatcher } from 'undici';
-import type { Dispatcher } from 'undici';
+import type { Agent, Dispatcher } from 'undici';
 
 const { getServerSessionMock, getLocaleMock } = vi.hoisted(() => ({
   getServerSessionMock: vi.fn(),
@@ -130,6 +130,54 @@ describe('그 밖은 그대로 — 다른 메서드 · 본문 없는 DELETE는 h
     expect(isBodyDeleteToBackend(o('POST', '{"a":1}'), b)).toBe(false);
     expect(isBodyDeleteToBackend(o('DELETE', '{"a":1}', 'https://other.test'), b)).toBe(false);
     expect(isBodyDeleteToBackend(o('DELETE', '{"a":1}'), null)).toBe(false);
+  });
+});
+
+describe('닫는 일 · 머리 · 빈 본문 (codex 검수 반영)', () => {
+  it('h1 쪽까지 닫힌다: 본문 있는 DELETE 뒤 destroy하면 그 h1 연결도 끊기고, 부순 뒤의 본문 DELETE는 새 h1을 만들지 않고 오류로 끝난다', async () => {
+    const d = use();
+    await fetch(`${url}/api/v2/organizations/o1`, { method: 'DELETE', headers: JSON_HDR, body: BODY });
+    expect(seen).toHaveLength(1);
+    await d.destroy();
+    const before = seen.length;
+    await expect(fetch(`${url}/api/v2/organizations/o2`, { method: 'DELETE', headers: JSON_HDR, body: BODY })).rejects.toBeTruthy();
+    expect(seen.length).toBe(before);
+  });
+
+  it('부순 뒤 첫 본문 DELETE는 h1을 새로 만들어 보내지 않고 오류로 끝난다(닫힌 뒤 새는 연결 없음)', async () => {
+    const d = use();
+    await d.destroy();
+    await expect(fetch(`${url}/api/v2/organizations/o3`, { method: 'DELETE', headers: JSON_HDR, body: BODY })).rejects.toBeTruthy();
+    expect(seen).toHaveLength(0);
+  });
+
+  it('close도 콜백 판 · promise 판 둘 다 끝난다(자기 자신을 끝없이 부르지 않는다)', async () => {
+    const d1 = use() as Agent;
+    await fetch(`${url}/x`, { method: 'DELETE', headers: JSON_HDR, body: BODY });
+    await d1.close();
+    expect(d1.closed).toBe(true);
+    const d2 = createBffDispatcher(url, { connect: { ca: cert } });
+    made.push(d2);
+    await new Promise<void>((resolve) => { d2.close(() => resolve()); });
+    expect(d2.closed).toBe(true);
+  });
+
+  it('한 번 읽으면 끝나는 머리(제너레이터)는 분류가 읽지 않는다 — 읽으면 undici가 받을 머리가 사라진다', () => {
+    const b = 'https://be.test';
+    let reads = 0;
+    const gen = (function* () { reads += 1; yield ['content-type', 'application/json']; })();
+    const opts = { method: 'DELETE', body: '{"a":1}', origin: b, path: '/x', headers: gen } as unknown as Dispatcher.DispatchOptions;
+    expect(isBodyDeleteToBackend(opts, b)).toBe(true);
+    expect([...gen]).toEqual([['content-type', 'application/json']]); // 분류 뒤에도 그대로 남아 있다
+    expect(reads).toBe(1);
+  });
+
+  it('빈 Buffer · 빈 Uint8Array 본문 DELETE는 본문 없음(h2 그대로)', () => {
+    const b = 'https://be.test';
+    const o = (body: unknown) => ({ method: 'DELETE', body, origin: b, path: '/x' }) as unknown as Dispatcher.DispatchOptions;
+    expect(isBodyDeleteToBackend(o(Buffer.alloc(0)), b)).toBe(false);
+    expect(isBodyDeleteToBackend(o(new Uint8Array(0)), b)).toBe(false);
+    expect(isBodyDeleteToBackend(o(Buffer.from('x')), b)).toBe(true);
   });
 });
 
