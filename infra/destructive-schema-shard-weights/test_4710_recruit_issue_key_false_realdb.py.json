@@ -1,0 +1,1 @@
+{"file": "tests/test_4710_recruit_issue_key_false_realdb.py", "sec": 20.0, "provisional": true, "source": "story-4710 recruit issue_key=false (카디르, 2026-10-16) — 로컬 raw pytest 4건 약 3s 실측치를 CI 배율(~6x, story #3383 관례)로 보수 반영한 잠정값, 실 CI 샤드 로그로 재확認 필요 — provisional:true(story #4152 관례)"}
