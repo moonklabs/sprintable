@@ -51,6 +51,7 @@ describe('[SID:4710] RecruiterClient — hiring starts the agent here', () => {
   let calls: Calls[];
   let recruitStatus: number;
   let connectedSetups: number;
+  let teamMembers: Array<{ id: string; name: string; type: string }>;
   let assign: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -59,6 +60,7 @@ describe('[SID:4710] RecruiterClient — hiring starts the agent here', () => {
     calls = [];
     recruitStatus = 200;
     connectedSetups = 0;
+    teamMembers = [];
     assign = vi.fn();
     Object.defineProperty(window, 'location', { configurable: true, value: { ...window.location, assign } });
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -68,7 +70,7 @@ describe('[SID:4710] RecruiterClient — hiring starts the agent here', () => {
       if (url.startsWith('/api/role-templates')) return jsonResponse({ data: [ROLE] });
       if (url === '/api/projects') return jsonResponse({ data: [{ id: 'proj-1', name: 'Proj 1' }, { id: 'proj-2', name: 'Proj 2' }] });
       if (url === '/api/runtime-capabilities') return jsonResponse({ data: RUNTIME_CAPABILITIES_FALLBACK });
-      if (url.startsWith('/api/team-members?')) return jsonResponse({ data: [] });
+      if (url.startsWith('/api/team-members?')) return jsonResponse({ data: teamMembers });
       if (url === '/api/organizations/org-1/remote-control') return jsonResponse({ data: { enabled: false, enabled_at: null, can_change: false, owner_names: [], connected_setups: connectedSetups } });
       if (url === '/api/agents' && method === 'POST') return jsonResponse({ data: { id: '00000000-0000-4000-8000-000000000009' } });
       if (url === '/api/agents/00000000-0000-4000-8000-000000000009/recruit' && method === 'POST') {
@@ -188,6 +190,21 @@ describe('[SID:4710] RecruiterClient — hiring starts the agent here', () => {
       expect(calls.filter((c) => c.method === 'POST' && c.url === '/api/agents/00000000-0000-4000-8000-000000000009/recruit')).toHaveLength(2); // recruited twice
       expect(b.startHere).toHaveBeenCalledTimes(1);
       expect(testid(container, 'recruiter-hire-failed')).toBeNull();
+    });
+
+    it('the retry knows its agent by the id this tab was handed — an older agent of the SAME NAME is never recruited (Kadir · key lens)', async () => {
+      const OTHER = '00000000-0000-4000-8000-0000000000aa';
+      teamMembers = [{ id: OTHER, name: 'recruiter.agentNameAutoFill({"role":"디자이너"})', type: 'agent' }];
+      recruitStatus = 500;
+      inApp(bridgeWith(async () => ({ ok: true })));
+      await mount();
+      await pickRole();
+      await click(testid(container, 'recruiter-start-here-button')!);
+      recruitStatus = 200;
+      await click(testid(container, 'recruiter-start-here-button')!);
+      const posted = calls.filter((c) => c.method === 'POST' && c.url.startsWith('/api/agents/')).map((c) => c.url);
+      expect(posted).toEqual(Array(2).fill('/api/agents/00000000-0000-4000-8000-000000000009/recruit')); // only the agent this tab made
+      expect(calls.some((c) => c.url.includes(OTHER))).toBe(false); // the same-named one is not even touched or read
     });
 
     it('the app could not open the setup: the line + the hero again STARTS — it never hires a second agent', async () => {
