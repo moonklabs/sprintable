@@ -1,7 +1,38 @@
-import { apiSuccess } from '@/lib/api-response';
+import { cookies } from 'next/headers';
+import type { NextResponse } from 'next/server';
+import { apiSuccess, safeJsonParse } from '@/lib/api-response';
+import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
+import { backendFetch } from '@/lib/backend-fetch';
+import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 type RouteParams = { params: Promise<{ token: string }> };
+
+const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+
+/**
+ * story 4722 — a token-proven accept makes the membership, but the session the person already holds was issued before it (a sign-up whose address is
+ * not proved yet gets no auto-accept, so its access token names no organization and `/me` finds none). Rotate the session here, in the same response,
+ * so the next page already sees the organization — the same rotation the client does after the onboarding form (`/api/auth/refresh`). A refresh that
+ * fails changes nothing: the accept has already happened, and the next ordinary refresh brings the organization in.
+ */
+async function rotateSessionInto(res: NextResponse): Promise<void> {
+  const refreshToken = (await cookies()).get(SP_RT_COOKIE)?.value;
+  if (!refreshToken) return;
+  const refreshed = await backendFetch(`${FASTAPI_URL()}/api/v2/auth/refresh`, {
+    timeLimitOnly: true, // the refresh token is single-use: it must finish even if the browser goes away (story #4320)
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  }).catch(() => null);
+  if (!refreshed?.ok) return;
+  const json = await safeJsonParse(refreshed) as { data?: { access_token?: string; refresh_token?: string } };
+  const at = json?.data?.access_token;
+  const rt = json?.data?.refresh_token;
+  if (!at || !rt) return;
+  res.cookies.set(SP_AT_COOKIE, at, { ...cookieBase(), maxAge: SP_AT_MAX_AGE_SECONDS });
+  res.cookies.set(SP_RT_COOKIE, rt, { ...cookieBase(), maxAge: 30 * 24 * 60 * 60 });
+}
 
 export async function POST(request: Request, { params }: RouteParams) {
   const { token } = await params;
@@ -18,6 +49,12 @@ export async function POST(request: Request, { params }: RouteParams) {
     timeLimitOnly: true,
   });
   if (!_r.ok) return _r;
-  if (_r.status === 204) return apiSuccess({ ok: true });
-  return apiSuccess(await _r.json());
+  if (_r.status === 204) {
+    const res = apiSuccess({ ok: true });
+    await rotateSessionInto(res);
+    return res;
+  }
+  const res = apiSuccess(await _r.json());
+  await rotateSessionInto(res);
+  return res;
 }

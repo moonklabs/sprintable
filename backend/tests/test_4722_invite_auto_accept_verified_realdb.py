@@ -252,6 +252,32 @@ async def test_refresh_of_a_person_with_no_org_follows_the_flag_at_that_moment(w
     assert _joined_the_org(_claims(r2))
 
 
+# ── the real web journey (codex 01a146c7): sign up WITHOUT the token → the invite page accepts WITH the token → the same session works ────
+@pytest.mark.anyio
+async def test_signup_then_accept_on_the_invite_page_then_the_rotated_session_has_the_organization(world):
+    """the web register form does not carry `invite_token`; the invitee lands on the invite page next and POSTs the token with the session the sign-up made.
+    That session's token has no organization (the address is not proved yet) and `/me` finds none until the session is rotated — the web BFF accept route
+    rotates it in the same response (apps/web api/invites/[token]/accept/route.ts). The server half of that contract: after a token accept, a refresh of
+    that session yields a token that names the organization, and `/me` answers with it."""
+    email = "signup@d4722.test"
+    async with _client() as c:
+        reg = await c.post("/api/v2/auth/register", json={"email": email, "password": PASSWORD, "display_name": "Invitee", "tos_accepted": True})
+        assert reg.status_code == 201, reg.text
+        data = reg.json().get("data", reg.json())
+        assert not _joined_the_org(_claims(reg))
+        bearer = {"Authorization": f"Bearer {data['access_token']}"}
+        assert (await c.get("/api/v2/me", headers=bearer)).status_code == 404              # the org-less session, as the web layout sees it
+        acc = await c.post("/api/v2/invites/accept", json={"token": TOK["main"]}, headers=bearer)
+        assert acc.status_code == 200, acc.text
+        assert await _members(email) == 1
+        rotated = await c.post("/api/v2/auth/refresh", json={"refresh_token": data["refresh_token"]})
+        assert rotated.status_code == 200, rotated.text
+        assert _joined_the_org(_claims(rotated))
+        me = await c.get("/api/v2/me", headers={"Authorization": f"Bearer {(rotated.json().get('data', rotated.json()))['access_token']}"})
+    assert me.status_code == 200, me.text
+    assert str(me.json().get("org_id") or (me.json().get("data") or {}).get("org_id")) == str(ORG)
+
+
 # ── the accept must really have happened ────────────────────────────────────────────────────────────
 @pytest.mark.anyio
 async def test_a_refused_accept_leaves_no_org_context_in_the_token(world, monkeypatch):
