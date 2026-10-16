@@ -114,7 +114,7 @@ describe('[SID:4711] the first setup in three steps', () => {
   });
 
   it('codex self-QA: a folder name that is a path (a made-up link) is no answer — nothing is sent, the button asks for the folder', async () => {
-    for (const name of ['/Users/me/repo', 'a/b', 'a\\b']) {
+    for (const name of ['/Users/me/repo', 'a/b', 'a\\b', '  ']) {
       await mount(frag(`&fshown=~/code/my-app&fname=${encodeURIComponent(name)}`), { projectId: PROJ, projects: [] });
       expect(container.querySelector('[data-testid=quick-folder]')).toBeNull();
       expect(buttonOf('시작')!.disabled).toBe(true);
@@ -222,6 +222,33 @@ describe('[SID:4711] the first setup in three steps', () => {
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     const posts = calls.filter((c) => c.url.endsWith('/confirm-solo'));
     expect(posts.map((p) => p.body)).toEqual([{ code: CODE, runtime: 'claude', project_name: 'folder' }, { code: CODE, runtime: 'claude', project_id: PROJ }]);
+  });
+
+  it('codex self-QA: the «넣고 시작» question belongs to the folder it was asked for — another folder picked afterwards asks again, never starts into the first one\'s project', async () => {
+    ee.on = true;
+    confirmNow = () => new Response(JSON.stringify({ error: { code: 'PLAN_LIMIT_EXCEEDED', resource: 'project', limit: 1, existing_project: { id: PROJ, name: 'Mine' } } }), { status: 402 });
+    await mount(frag('&fshown=~/a/folder-a&fname=folder-a'), { projectId: PROJ, projects: [{ projectId: PROJ, projectName: 'Mine', orgId: 'o-1' }] });
+    await act(async () => { buttonOf('시작')!.click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid=quick-limit]')).not.toBeNull();
+    // the window answers again with folder B (the same page, a new address)
+    await mount(frag('&fshown=~/b/folder-b&fname=folder-b'), { projectId: PROJ, projects: [{ projectId: PROJ, projectName: 'Mine', orgId: 'o-1' }] });
+    expect(container.querySelector('[data-testid=quick-limit]')).toBeNull();
+    expect(buttonOf('넣고 시작')).toBeUndefined();
+    expect(buttonOf('시작')!.disabled).toBe(false);
+    confirmNow = () => new Response(JSON.stringify({ project_id: PROJ, conversation_id: 'c-1', members: [] }), { status: 200 });
+    await act(async () => { buttonOf('시작')!.click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    const posts = calls.filter((c) => c.url.endsWith('/confirm-solo')).map((p) => p.body);
+    expect(posts.at(-1)).toEqual({ code: CODE, runtime: 'claude', project_name: 'folder-b' }); // B by its own name — not A's project id
+  });
+
+  it('codex self-QA: a started setup puts #progress=<setup id> on the address, so a reload goes back to the progress (the code is not in it)', async () => {
+    await mount(frag('&fshown=~/code/my-app&fname=my-app'), { projectId: PROJ, projects: [] });
+    await act(async () => { buttonOf('시작')!.click(); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(window.location.hash).toBe('#progress=11111111-1111-4111-8111-aaaaaaaaaaaa');
+    expect(window.location.href).not.toContain(CODE);
   });
 
   it('billing closed (prod today): the free-plan question has no upgrade link', async () => {

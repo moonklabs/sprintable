@@ -17,7 +17,7 @@ import { putOrgRemoteControl, useOrgRemoteControl } from '@/lib/org-remote-contr
 import { useSearchParams } from 'next/navigation';
 import { setupFragment, isFolderRefused, type DesktopRuntime, type SetupQuery } from '@/lib/desktop-setup';
 import { defaultSoloRuntime, shownProjectName, soloConfirmBody, soloNewOrgConfirmBody, soloOutcome, soloStartBlock, usableRuntimes } from '@/lib/desktop-setup-quick';
-import { Failure, INSTALL, InvitedCard, RUNTIME_LABEL, SetupDoneReload, TooOldCard, fetchMyInvites, joinNewOrg, limitCounts, useAppSetupLinks, type MyInvite } from './desktop-setup';
+import { Failure, INSTALL, InvitedCard, PROGRESS_FRAGMENT, RUNTIME_LABEL, SetupDoneReload, TooOldCard, fetchMyInvites, joinNewOrg, limitCounts, useAppSetupLinks, type MyInvite } from './desktop-setup';
 import { SetupProgressView } from './desktop-setup-progress';
 
 /**
@@ -76,7 +76,7 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
   const [pickedRuntime, setPickedRuntime] = useState<DesktopRuntime | null>(null);
   const [wideOk, setWideOk] = useState(false);
   /** the one project of a free organization that the 402 named; chosen by [넣고 시작] only */
-  const [limitAsk, setLimitAsk] = useState<{ id: string; name: string } | null>(null);
+  const [limitAskRaw, setLimitAsk] = useState<{ id: string; name: string; folderKey: string } | null>(null);
   const [copied, setCopied] = useState<DesktopRuntime | null>(null);
 
   async function readInvites() {
@@ -106,6 +106,8 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
   const usable = usableRuntimes(query);
   const runtime = pickedRuntime && usable.includes(pickedRuntime) ? pickedRuntime : defaultSoloRuntime(usable, query.pick);
   const folder = query.folder && !isFolderRefused(query.folder) ? query.folder : undefined;
+  // codex self-QA: the free plan's «넣고 시작» question belongs to the folder it was asked for — another folder picked afterwards (same page, new address) must not start into A's project
+  const limitAsk = limitAskRaw && limitAskRaw.folderKey === (folder?.shown ?? '') ? limitAskRaw : null;
   const refused = isFolderRefused(query.folder) ? query.folder.refused : null;
   // the project the app found for this folder counts only if this organization really has it — else it is a new project by the folder's name
   const matched = folder?.projectId && !newOrg ? orgProjects.find((p) => p.projectId === folder.projectId) : undefined;
@@ -138,6 +140,8 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
         // the tab has no project (or no organization) yet: the one made (or used) becomes the tab's, the way the recipe setup does
         if ((newOrg || !projectId) && !(await joinNewOrg(newOrg ? okBody : { project_id: okBody?.project_id ?? useProject ?? matched?.projectId }))) { setView({ kind: 'done-reload' }); return; }
         await turnPhoneControlOn(newOrg ? okBody?.org_id ?? null : orgId); // story 4670 AC1: after the start went through — the one PUT, or none
+        // a reload from here goes back to this setup's progress (the id is in the address the app opened), not to «앱에서 열어 주세요» — as the recipe page's reload does (4429 ①)
+        if (query.setupId) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(query.setupId));
         setView({ kind: 'started' });
         return;
       }
@@ -152,7 +156,7 @@ export function DesktopSetupQuick({ query, onTeam }: { query: SetupQuery; onTeam
           setView({ kind: 'choose' });
           return;
         }
-        case 'use-existing-project': setLimitAsk(out.project); setView({ kind: 'choose' }); return;
+        case 'use-existing-project': setLimitAsk({ ...out.project, folderKey: folder.shown }); setView({ kind: 'choose' }); return;
         case 'project-limit': setErrorLine(t('firstProject.limit', { limit: typeof error?.limit === 'number' ? error.limit : 1 })); setView({ kind: 'choose' }); return;
         case 'agent-limit': setView({ kind: 'failed', failure: 'agent-limit', counts: limitCounts(body?.error) }); return;
         case 'not-admin': setView({ kind: 'failed', failure: 'not-admin' }); return;

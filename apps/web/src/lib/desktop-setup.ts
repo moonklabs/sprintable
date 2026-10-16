@@ -108,7 +108,7 @@ export function parseSoloFolder(params: { get(name: string): string | null }): S
   if (refused) return { refused };
   const shown = params.get('fshown') ?? '';
   const name = params.get('fname') ?? '';
-  if (!shown || shown.length > 300 || !NO_CONTROL.test(shown) || !name || name.length > 100 || !NO_CONTROL.test(name) || !NO_PATH_SEPARATOR.test(name)) return undefined;
+  if (!shown || shown.length > 300 || !NO_CONTROL.test(shown) || !name.trim() || name.length > 100 || !NO_CONTROL.test(name) || !NO_PATH_SEPARATOR.test(name)) return undefined; // a blank name is no name (the server would refuse it with a 422)
   const project = params.get('fproject') ?? '';
   return { shown, name, ...(AGENT_ID_RE.test(project) ? { projectId: project } : {}), ...(params.get('fwide') === '1' ? { wide: true as const } : {}) };
 }
