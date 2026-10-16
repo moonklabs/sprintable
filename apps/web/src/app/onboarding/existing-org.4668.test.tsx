@@ -40,6 +40,15 @@ function stubFetch(me: Me, opts: { meGate?: Promise<void>; meFails?: 'reject' | 
     }
     if (url === '/api/onboarding/events') return ok({});
     if (url === '/api/organizations/org-1/remote-control') return ok({ enabled: false, enabled_at: null, can_change: true, owner_names: [] });
+    // story 4715: the usual onboarding's arrival — no invites · the organization it makes · the token refresh after it
+    // the backend's one shape for this endpoint is `{ invites }` with no envelope (MyInvitesResponse) — not ok()'s `{ data }`
+    if (url === '/api/invites/mine') return { ok: true, status: 200, headers: new Headers(), json: async () => ({ invites: [] }) } as Response;
+    if (url === '/api/organizations') return ok({ id: 'org-new' });
+    if (url === '/api/auth/refresh') return ok({});
+    if (url === '/api/projects') return ok({ id: 'proj-1' });
+    if (url === '/api/current-project') return ok({});
+    // the one screen's download manifest — not this test's matter
+    if (url.startsWith('/desktop/')) return { ok: false, status: 404, headers: new Headers(), json: async () => ({}) } as Response;
     throw new Error('unexpected fetch: ' + url);
   }));
 }
@@ -78,39 +87,42 @@ describe('[SID:4668] existingOrgIdFromMe — a live membership, not just the JWT
 });
 
 describe('[SID:4668] the usual onboarding (OnboardingForm)', () => {
-  it('an account with an organization lands on the fork, not on «조직 만들기» — no organization is ever asked for', async () => {
+  it('an account with an organization lands on the one screen — no organization made, no invites read (story 4715)', async () => {
     stubFetch(WITH_ORG);
     await act(async () => { root.render(provider(<OnboardingForm todayHref="/today" chatsHref="/chats" />)); });
     await settle();
-    expect(text()).toContain('에이전트를 어디서 돌릴까요?');
-    expect(container.querySelector('[data-testid="onboarding-where-continue"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="onboarding-first-connect"]')).not.toBeNull();
     expect(container.querySelector('input[type="text"]')).toBeNull(); // no organization name field
-    expect(text()).not.toContain('조직 이름');
     expect(urls).not.toContain('/api/organizations'); // reverted (the form ignores the membership) → fails
+    expect(urls).not.toContain('/api/invites/mine');
   });
 
-  it('the fork carries that organization on: [계속] with the app way opens the download step', async () => {
+  it('the one screen carries that organization on: the web way\'s project is made in THIS organization', async () => {
     stubFetch(WITH_ORG);
     await act(async () => { root.render(provider(<OnboardingForm todayHref="/today" chatsHref="/chats" />)); });
     await settle();
-    await act(async () => { (container.querySelector('[data-testid="onboarding-where-continue"]') as HTMLButtonElement).click(); });
+    await act(async () => { (container.querySelector('[data-testid="onboarding-first-connect"]') as HTMLButtonElement).click(); });
     await settle();
-    expect(text()).toContain('데스크톱 앱 받기');
-    // «더 보기» holds the organization's remote-control line: it reads THIS organization's switch (the id came from the membership,
-    // not from a form the person filled)
-    await act(async () => { (container.querySelector('[data-testid="onboarding-download-more"]') as HTMLButtonElement).click(); });
+    const input = container.querySelector('input[type="text"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(input, 'My Project'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    const create = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === koMessages.onboarding.createProjectAction) as HTMLButtonElement;
+    const calls = vi.mocked(fetch).mock.calls;
+    await act(async () => { create.click(); });
     await settle();
-    expect(urls).toContain('/api/organizations/org-1/remote-control');
+    const projectCall = calls.find((c) => c[0] === '/api/projects');
+    // the id came from the membership, not from a form the person filled
+    expect(JSON.parse(String((projectCall![1] as RequestInit).body)).org_id).toBe('org-1');
   });
 
-  it('a stale claim (the organization was deleted from the settings page) or no organization → «조직 만들기» as before', async () => {
+  it('a stale claim (the organization was deleted from the settings page) or no organization → the invites are read, then one is made', async () => {
     for (const me of [STALE_CLAIM, NO_ORG]) {
       stubFetch(me);
       await act(async () => { root.render(provider(<OnboardingForm todayHref="/today" chatsHref="/chats" />)); });
       await settle();
-      expect(text()).toContain('조직 만들기');
-      expect(text()).not.toContain('에이전트를 어디서 돌릴까요?');
-      expect(container.querySelector('input[type="text"]')).not.toBeNull();
+      expect(urls).toContain('/api/invites/mine');
+      expect(urls.filter((u) => u === '/api/organizations')).toHaveLength(1);
+      expect(container.querySelector('input[type="text"]')).toBeNull();
       await act(async () => { root.render(provider(<div />)); });
     }
   });
@@ -120,7 +132,7 @@ describe('[SID:4668] the usual onboarding (OnboardingForm)', () => {
     await act(async () => { root.render(provider(<OnboardingForm initialStep="project" initialOrgId="org-1" todayHref="/today" chatsHref="/chats" />)); });
     await settle();
     expect(urls).not.toContain('/api/auth/me');
-    expect(text()).not.toContain('에이전트를 어디서 돌릴까요?');
+    expect(urls).not.toContain('/api/organizations');
   });
 });
 

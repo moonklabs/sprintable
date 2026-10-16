@@ -44,7 +44,12 @@ test.describe('Onboarding — new user setup', () => {
     ).toBe(true);
   });
 
-  test('onboarding org step: fills org name and advances', async ({ page }) => {
+  test('onboarding arrival: the organization is made without a name field, then the web way reaches the project step', async ({ page }) => {
+    // story 4715: no organization-name step — arrival reads the pending invites (none for a fresh account) and makes the organization
+    const orgMade = page.waitForResponse(
+      (resp) => resp.url().includes('/api/organizations') && resp.request().method() === 'POST',
+      { timeout: 20000 }
+    );
     await registerAndGetToOnboarding(page);
 
     if (!page.url().includes('/onboarding')) {
@@ -52,28 +57,13 @@ test.describe('Onboarding — new user setup', () => {
       return;
     }
 
-    const orgName = `Test Org ${Date.now()}`;
+    await orgMade;
+    await expect(page.locator('input[type="text"]'), 'no organization-name field').toHaveCount(0);
 
-    // Step 1: org name
-    const orgInput = page.locator('input[placeholder*="org" i], input[placeholder*="company" i], input[placeholder*="workspace" i], input[type="text"]').first();
-    await orgInput.waitFor({ state: 'visible', timeout: 8000 });
-    await orgInput.fill(orgName);
-
-    const nextBtn = page.getByRole('button', { name: /next|continue|create/i }).first();
-    await nextBtn.click();
-
-    await page.waitForResponse(
-      (resp) => resp.url().includes('/api/organizations') && resp.request().method() === 'POST',
-      { timeout: 10000 }
-    );
-
-    // story 4668: after the organization comes the fork «where will your agents run?» — the web way keeps the project step
-    await page.waitForLoadState('load');
-    const webRadio = page.locator('[data-testid=onboarding-where-web] input');
-    await webRadio.waitFor({ state: 'visible', timeout: 8000 });
-    await webRadio.check();
-    await page.getByTestId('onboarding-where-continue').click();
-    // Look for project-related text or next form
+    // the one first screen → «이미 돌고 있는 에이전트 연결하기» — the web way keeps the project step
+    const connect = page.getByTestId('onboarding-first-connect');
+    await connect.waitFor({ state: 'visible', timeout: 20000 });
+    await connect.click();
     const projectInput = page.locator('input[placeholder*="project" i], input[type="text"]').first();
     await expect(projectInput, 'project step input should appear').toBeVisible({ timeout: 8000 });
   });
@@ -88,19 +78,10 @@ test.describe('Onboarding — new user setup', () => {
 
     const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
-    // Step 1: Org — wait for "Create Organization" button specifically
-    const createOrgBtn = page.getByRole('button', { name: /create org/i });
-    await createOrgBtn.waitFor({ state: 'visible', timeout: 8000 });
-    const orgInput = page.locator('input[type="text"]').first();
-    await orgInput.pressSequentially(`Org ${suffix}`, { delay: 30 });
-    await expect(createOrgBtn).toBeEnabled({ timeout: 5000 });
-    await createOrgBtn.click();
-
-    // story 4668: the fork — the web way (the app way ends on the download screen with no project step)
-    const webRadio = page.locator('[data-testid=onboarding-where-web] input');
-    await webRadio.waitFor({ state: 'visible', timeout: 20000 });
-    await webRadio.check();
-    await page.getByTestId('onboarding-where-continue').click();
+    // Step 1 (story 4715): the organization is made on arrival — the first screen's web way leads to the project step
+    const connect = page.getByTestId('onboarding-first-connect');
+    await connect.waitFor({ state: 'visible', timeout: 20000 });
+    await connect.click();
 
     // Step 2: Project — wait for "Create Project" button to appear (confirms step transition)
     const createProjectBtn = page.getByRole('button', { name: /create project/i });
