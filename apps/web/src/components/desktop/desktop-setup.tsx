@@ -339,11 +339,15 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   }, [setupId]);
 
   // (나) no organization: their invites decide the mode (0 → a new organization · some → where to go · unreadable → (가))
+  const inviteReads = useRef(0); // codex self-QA: only the LATEST read decides (a late failure must not overwrite a read that already succeeded)
   async function readInvites() {
+    const mine = ++inviteReads.current;
     try {
       const list = await fetchMyInvites();
+      if (mine !== inviteReads.current) return;
       setOrgMode(list.length ? { kind: 'invited', invites: list } : { kind: 'new' });
     } catch {
+      if (mine !== inviteReads.current) return;
       setOrgMode({ kind: 'invite-failed' }); // story 4711 AC4: not knowing is not "no invites" — the page says so and reads again (no organization is made meanwhile)
     }
   }

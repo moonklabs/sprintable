@@ -89,11 +89,15 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
   const [limitAskRaw, setLimitAsk] = useState<{ id: string; name: string; folderKey: string } | null>(null);
   const [copied, setCopied] = useState<DesktopRuntime | null>(null);
 
+  const inviteReads = useRef(0); // codex self-QA: only the LATEST read decides (a late failure must not overwrite a read that already succeeded)
   async function readInvites() {
+    const mine = ++inviteReads.current;
     try {
       const list = await fetchMyInvites();
+      if (mine !== inviteReads.current) return;
       setOrgMode(list.length ? { kind: 'invited', invites: list } : { kind: 'new' });
     } catch {
+      if (mine !== inviteReads.current) return;
       setOrgMode({ kind: 'invite-failed' }); // story 4711 AC4: not knowing is not "no invites" — the card says so and reads again
     }
   }
