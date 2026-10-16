@@ -4567,7 +4567,7 @@
     "runProfileAllowedHostRemove": "Remove",
     "runProfileAllowedHostRemoved": "Removed · {host}",
     "runProfileUnattended": "Work without asking",
-    "runProfileUnattendedHelp": "When on, this agent uses tools right away without asking a person. No approval cards reach your phone or web — only changing a webhook setting still asks. What it may and may not do follows the Claude Code settings on that computer",
+    "runProfileUnattendedHelp": "When on, this agent uses tools right away without asking a person. No approval cards reach your phone or web. What it may and may not do follows the Claude Code settings on that computer",
     "runProfileUnattendedOwnerOnlyOn": "Work without asking · on — only an organization owner{hasOwners, select, yes { ({owners})} other {}} can turn it on or off",
     "runProfileUnattendedOwnerOnlyOff": "Work without asking · off — only an organization owner{hasOwners, select, yes { ({owners})} other {}} can turn it on or off",
     "runProfileUnattendedCodex": "Work without asking · Claude Code agents only — this agent keeps asking for each tool, as it does now",

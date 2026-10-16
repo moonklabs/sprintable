@@ -35,8 +35,7 @@ export interface RunProfile {
   allowed_hosts?: { host: string; added_at: string | null }[];
   /** story #4598 → #4708: «묻지 않고 일하기» — on → the next session starts in the CLI's bypassPermissions mode (tools run right away; what
    *  the agent may and may not do follows the person's own Claude Code settings on that computer; the app adds no sandbox · no Bash
-   *  guard · no deny lines · no allow list — and the one Sprintable tool on the session's ask list, the webhook setting, still asks)
-   *  (absent from an older server = off) */
+   *  guard · no deny lines · no allow list) (absent from an older server = off) */
   unattended?: boolean;
   /** story #4598: an org owner only may flip it (the server's rule; the switch is read-only for everyone else) */
   can_change_unattended?: boolean;
