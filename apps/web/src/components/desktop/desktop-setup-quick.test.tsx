@@ -263,7 +263,7 @@ describe('[SID:4711] the first setup in three steps', () => {
     // a nonsense id in the answer is not trusted: the address's own setup id stands
     await act(async () => { root.render(<div />); });
     calls.length = 0;
-    confirmNow = () => new Response(JSON.stringify({ setup_id: 'a/../b', project_id: PROJ, conversation_id: 'c-1', members: [] }), { status: 200 });
+    confirmNow = () => new Response(JSON.stringify({ setup_id: 's-1', project_id: PROJ, conversation_id: 'c-1', members: [] }), { status: 200 }); // not a uuid (also 'a/../b' · a code-like string in the move test)
     await mount(frag('&fshown=~/code/my-app&fname=my-app'), { projectId: PROJ, projects: [] });
     await act(async () => { buttonOf('시작')!.click(); });
     for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
@@ -278,6 +278,16 @@ describe('[SID:4711] the first setup in three steps', () => {
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     expect(buttonOf('여러 에이전트로 팀 꾸리기 →')!.disabled).toBe(true);
     expect(teamPressed).toBe(false);
+  });
+
+  it('codex self-QA: an address whose setup= is not a uuid and an answer without a valid id → the plain «started» card, NO progress route is ever read with the bad id', async () => {
+    confirmNow = () => new Response(JSON.stringify({ project_id: PROJ, conversation_id: 'c-1', members: [] }), { status: 200 });
+    await mount(frag('&fshown=~/code/my-app&fname=my-app').replace('setup=11111111-1111-4111-8111-aaaaaaaaaaaa', 'setup=s-1'), { projectId: PROJ, projects: [] });
+    await act(async () => { buttonOf('시작')!.click(); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 40)); });
+    expect(calls.some((c) => c.url.includes('/api/desktop/setups/s-1'))).toBe(false);
+    expect(window.location.hash).not.toContain('s-1');
   });
 
   it('billing closed (prod today): the free-plan question has no upgrade link', async () => {

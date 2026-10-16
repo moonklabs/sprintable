@@ -14,7 +14,7 @@ import { useFlatHref } from '@/hooks/use-flat-href';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { SetupProgressView } from './desktop-setup-progress';
-import { DesktopSetupQuick } from './desktop-setup-quick';
+import { DesktopSetupAgent, DesktopSetupQuick } from './desktop-setup-quick';
 import { showsQuickCard } from '@/lib/desktop-setup-quick';
 import { defaultOrgName } from '@/app/onboarding/desktop-create-org';
 import { onboardingRedirect } from '@/lib/auth/onboarding-next';
@@ -1155,7 +1155,7 @@ function PutOnTeamButton({ agent, state, onPress, fromHold = false }: { agent: A
   );
 }
 
-function MovedAgentNote({ agent }: { agent: AttachableAgent | undefined }) {
+export function MovedAgentNote({ agent }: { agent: AttachableAgent | undefined }) {
   const t = useTranslations('desktop.setup');
   const locale = useLocale();
   const viewerTz = useViewerTimeZone();
@@ -1393,6 +1393,8 @@ function SetupOrProgress({ query }: { query: SetupQuery }) {
   if (started && id) return <SetupProgressView setupId={id} recipeName="" />;
   // story 4711: an app that can take the first setup in three steps gets that card; the recipe setup is one link away («팀 꾸리기»).
   // A recruiter's agent (`agent=`) keeps the recipe page for now — its own branch of the card comes with the recruiter's PR.
+  // story 4711 (`agent=` branch): a recruiter's agent, an app that can move → the card with ① fixed to that agent (a move, never a new agent)
+  if (query.agent && query.canMove === true && !teamPath) return <DesktopSetupAgent query={query} onTeam={() => setTeamPath(true)} />;
   if (showsQuickCard(query, teamPath) && !query.agent) return <DesktopSetupQuick query={query} onTeam={() => setTeamPath(true)} />;
   return <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} old={query.old ?? []} canMove={query.canMove === true} preselect={query.agent ?? null} />;
 }
