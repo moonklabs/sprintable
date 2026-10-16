@@ -13,6 +13,7 @@ const RENDERS_GATE = /<TabOwnerGate\b/;
 const NO_GATE_NEEDED: Record<string, string> = {
   'page.tsx': 'the root page only redirects (to /today or /login) — it renders nothing',
   'invite/accept/page.tsx': 'renders the invite card only (no account-scope storage user · table 05:02Z); accepting navigates into the gated app',
+  'native/continue/page.tsx': 'story 4712 — shows the signed-in account\'s email and one button; stores nothing in the browser (no account-scope storage user); [열기] hands a one-time code to the Mac app and navigates to the return page',
 };
 /** Places that must render the gate even though they do not read the session themselves. */
 const MUST_GATE = ['onboarding/layout.tsx'];

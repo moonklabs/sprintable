@@ -217,7 +217,8 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
     // story #4548 — `desktop/remote/page.tsx`(원격 제어 켜기 웹 확인) 하나로 129→130(default export만).
     // story #4532 — `desktop/pair/page.tsx`(폰 앱 안 짝짓기 화면) 하나로 130→131(default export만).
     // story 4670 — `desktop/remote-on/page.tsx`(원격 제어를 켜는 확인 한 장) 하나로 131→132(default export만).
-    expect(fileCount).toBe(132);
+    // story 4712 — `native/continue/page.tsx`(«브라우저 이어받기» 확인 한 장) 하나로 132→133(default export만).
+    expect(fileCount).toBe(133);
     expect(violations).toEqual([]);
   });
 });

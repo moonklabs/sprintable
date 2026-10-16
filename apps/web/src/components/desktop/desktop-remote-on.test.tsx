@@ -248,8 +248,10 @@ describe('[SID:4670] ⓑ the page cannot step out of the frame-denying header (X
     const config = (await import('../../../next.config')).default as { headers?: () => Promise<{ source: string; headers: { key: string; value: string }[] }[]> };
     const rules = (await config.headers?.()) ?? [];
     expect(rules.length).toBeGreaterThan(0);
+    expect(rules.some((r) => r.source === '/(.*)')).toBe(true);
     for (const r of rules) {
-      expect(r.source).toBe('/(.*)'); // no per-path rule: nothing is left out of it
+      // a per-path rule may exist (story 4712: the two code-carrying /native pages add no-referrer · no-store) but it must carry the ban too —
+      // no path is left out of it
       expect(r.headers.find((h) => h.key === 'X-Frame-Options')?.value).toBe('DENY');
     }
   });

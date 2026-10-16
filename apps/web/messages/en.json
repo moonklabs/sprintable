@@ -1558,6 +1558,17 @@
     "processError": "Something went wrong while processing your request.",
     "backToLogin": "Back to login"
   },
+  "desktopContinue": {
+    "title": "Open the app on this computer?",
+    "account": "You will sign in as {account}.",
+    "body": "If you open it, the Sprintable app on this computer signs in with this account. If you didn't start this from the app, don't open it.",
+    "open": "Open",
+    "opening": "Opening…",
+    "otherAccount": "Sign out and use another account",
+    "error": "Could not open it. Please press it again in a moment.",
+    "invalidTitle": "Open this from the app",
+    "invalidBody": "This page only opens when the app sends you to the browser. Please start sign-in again from the app."
+  },
   "nativeOauthReturn": {
     "title": "You're signed in",
     "body": "Tap the button below to return to the Sprintable app.",
