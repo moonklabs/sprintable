@@ -738,6 +738,8 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
   const [elsewhere, setElsewhere] = useState(false);
   const [scopeOpen, setScopeOpen] = useState(false);
   const [hired, setHired] = useState<{ agentId: string; name: string } | null>(null);
+  // the hero's agent is made before the recruit call; when the recruit fails the next press hires THAT agent (same name · same scope), never a second one
+  const heroCreated = useRef<{ sig: string; id: string } | null>(null);
   const [recruiting, setRecruiting] = useState(false);
   const [recruitError, setRecruitError] = useState<string | null>(null);
   const [recruitLimit, setRecruitLimit] = useState<AgentLimit | null>(null); // story 4680: the same in the full recruit road
@@ -820,23 +822,30 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
         // create가 키를 먼저 발급하면 recruit의 rotate가 그 키를 무고지로 죽인다(create 응답의
         // 키는 여기서 애초에 읽지도 않는다 — 화면에 노출된 적 없는 키가 조용히 사라지는 게 실사고
         // 원인). recruit이 유일한 발급처가 되게 한다.
-        const createRes = await fetch('/api/agents', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name,
-            scope_mode: scopeMode,
-            project_ids: scopeMode === 'projects' ? scopeProjectIds : [],
-            defer_key_issuance: true,
-          }),
-        });
-        const createJson = (await createRes.json().catch(() => null)) as { data?: { id: string } } | null;
-        // story 4680 (Yuna §N): the plan's agent limit (402 · resource agent) → its banner (the finally below frees the button); anything else as before
-        const limitHit = createRes.ok ? null : agentLimitOf(createRes.status, createJson);
-        if (limitHit) { setRecruitLimit(limitHit); return; }
-        if (!createRes.ok || !createJson?.data?.id) throw new Error(t('recruitFailed'));
-        agentId = createJson.data.id;
-        agentName = name;
+        const sig = JSON.stringify([name, scopeMode, scopeMode === 'projects' ? scopeProjectIds : []]);
+        if (startAfter && heroCreated.current?.sig === sig) {
+          agentId = heroCreated.current.id; // story 4710: the hero's earlier recruit failed after the agent was made — hire that one
+          agentName = name;
+        } else {
+          const createRes = await fetch('/api/agents', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name,
+              scope_mode: scopeMode,
+              project_ids: scopeMode === 'projects' ? scopeProjectIds : [],
+              defer_key_issuance: true,
+            }),
+          });
+          const createJson = (await createRes.json().catch(() => null)) as { data?: { id: string } } | null;
+          // story 4680 (Yuna §N): the plan's agent limit (402 · resource agent) → its banner (the finally below frees the button); anything else as before
+          const limitHit = createRes.ok ? null : agentLimitOf(createRes.status, createJson);
+          if (limitHit) { setRecruitLimit(limitHit); return; }
+          if (!createRes.ok || !createJson?.data?.id) throw new Error(t('recruitFailed'));
+          agentId = createJson.data.id;
+          agentName = name;
+          if (startAfter) heroCreated.current = { sig, id: agentId };
+        }
       } else {
         if (!selectedExistingAgentId) { setRecruitError(t('agentSelectRequired')); setRecruiting(false); return; }
         agentId = selectedExistingAgentId;
@@ -888,6 +897,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
       // story 4710: the hero path hires and starts — the key the recruit answer carries is never put in state, never drawn (the app takes the
       // agent over and issues its own; the key shown here would be erased anyway · backend desktop_setup.py)
       if (startAfter) {
+        heroCreated.current = null;
         await launchStart(recruitJson.data.agent_id, startAfter, agentName);
         return;
       }

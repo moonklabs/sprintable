@@ -174,6 +174,22 @@ describe('[SID:4710] RecruiterClient — hiring starts the agent here', () => {
       expect(b.startHere).not.toHaveBeenCalled();
     });
 
+    it('a hire that fails AFTER the agent was made: pressing the hero again hires THAT agent — no second agent (codex 5123 · reverted → two creates)', async () => {
+      recruitStatus = 500;
+      const b = bridgeWith(async () => ({ ok: true }));
+      inApp(b);
+      await mount();
+      await pickRole();
+      await click(testid(container, 'recruiter-start-here-button')!);
+      expect(testid(container, 'recruiter-hire-failed')).not.toBeNull();
+      recruitStatus = 200;
+      await click(testid(container, 'recruiter-start-here-button')!);
+      expect(calls.filter((c) => c.method === 'POST' && c.url === '/api/agents')).toHaveLength(1); // one agent made
+      expect(calls.filter((c) => c.method === 'POST' && c.url === '/api/agents/00000000-0000-4000-8000-000000000009/recruit')).toHaveLength(2); // recruited twice
+      expect(b.startHere).toHaveBeenCalledTimes(1);
+      expect(testid(container, 'recruiter-hire-failed')).toBeNull();
+    });
+
     it('the app could not open the setup: the line + the hero again STARTS — it never hires a second agent', async () => {
       let first = true;
       const b = bridgeWith(async () => { if (first) { first = false; return { ok: false, code: 'ignored' }; } return { ok: true }; });
