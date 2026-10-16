@@ -96,7 +96,8 @@ def _now() -> datetime:
 
 # story #4576 — what an app may say it can take when it asks for a code; anything else it names is left out (a newer app's word
 # this server does not know yet is no error)
-KNOWN_CAPABILITIES = ("move",)
+# story 4711: «solo» = the first setup in three steps (one new agent for the folder the person chose · no recipe)
+KNOWN_CAPABILITIES = ("move", "solo")
 
 
 async def create_setup_code(
@@ -285,6 +286,10 @@ def group_exchange_agents(members: list[dict], kind: str) -> dict[str, dict]:
     per_agent: dict[str, dict] = {}
     for m in members:
         if m["kind"] != "agent":
+            continue
+        if kind == "solo":
+            # story 4711: a solo setup's agent — made by the confirmation, so not «existing» (its key is made, not rotated); no recipe role
+            per_agent.setdefault(m["member_id"], {"member_id": m["member_id"], "runtime": m["runtime"], "name": m.get("name") or "", "tools": clean_agent_tools(m.get("tools"), m.get("runtime"))})
             continue
         if kind == "move":
             # story #4576 (PO 04:24Z): a move's agent — its id and runtime (its name is added with its new key below); no recipe
@@ -566,10 +571,13 @@ def clean_agent_tools(raw: object, runtime: str | None = None) -> list[str]:
 def setup_kind(setup: DesktopSetup) -> str | None:
     """story #4576 — which kind of setup this is (the web's progress: a move has two steps, ready → Sprintable connected, and no
     first task or result · the app attaches a move's agents with no recipe role or stages): «move» = confirmed with no recipe ·
-    «recipe» = confirmed with one · None before a confirmation."""
+    «recipe» = confirmed with one · «solo» (story 4711) = confirmed with no recipe, for one agent the confirmation made ·
+    None before a confirmation."""
     if setup.confirmed_at is None:
         return None
-    return "recipe" if setup.event_definition_key else "move"
+    if setup.event_definition_key:
+        return "recipe"
+    return "solo" if any(m.get("solo") for m in (setup.members or [])) else "move"
 
 
 async def confirm_move_setup(
@@ -640,6 +648,186 @@ async def confirm_move_setup(
         meta={"flow": "desktop_move", "human_hand": True, "agents": len(members)},
     )
     return setup.id, members, None
+
+
+SOLO_AGENT_NAMES = {"claude": "Claude Code", "codex": "Codex"}  # story 4711 (Yuna): the agent is called what the person picked
+
+
+async def _unique_name(db: AsyncSession, model, *conds, base: str) -> str:
+    """`base`, or `base 2`, `base 3` … — the first not taken among the rows `conds` select (case-insensitive, trimmed)."""
+    taken = {" ".join((n or "").split()).casefold() for (n,) in (await db.execute(select(model.name).where(*conds))).all()}
+    name, n = base, 1
+    while " ".join(name.split()).casefold() in taken:
+        n += 1
+        name = f"{base} {n}"
+    return name
+
+
+async def confirm_solo_setup(
+    db: AsyncSession,
+    *,
+    code: str,
+    user_id: uuid.UUID,
+    org_id: uuid.UUID,
+    runtime: str,
+    project_id: uuid.UUID | None,
+    project_name: str | None,
+    auth,
+    workdir_hint: str | None = None,
+    tools: list[str] | None = None,
+) -> tuple[uuid.UUID, list[dict], uuid.UUID, uuid.UUID]:
+    """story 4711 (PO 03:36Z) — the first setup in three steps: one agent on the runtime the person picked, for the folder they
+    chose. No recipe, no story, nothing published. Returns (setup_id, members, project_id, conversation_id); never commits.
+
+    The project is the app's answer to «which project already uses this folder» (`project_id` — the app keeps folder → project,
+    the server never sees a path), else a new project named after the folder (`project_name`; a name already taken in the
+    organization becomes «{name} 2»). The agent is called by its program's name (a name taken becomes «Claude Code 2»). The
+    plan's agent limit (402) and project limit roll everything back. The person ↔ agent DM is made with it: it is the first
+    screen after the start. A replay by the same person returns what the code made."""
+    from app.models.member import Member
+    from app.models.organization import Organization
+    from app.models.project import Project
+    from app.repositories.team_member import TeamMemberRepository
+    from app.services.member_resolver import resolve_member
+    from app.services.org_agent import create_org_level_agent
+    from app.services.project_auth import is_org_owner_or_admin, require_project_access
+
+    setup = await _setup_by_code(db, code)
+    if _confirmed_again(setup, user_id, org_id):
+        members = list(setup.members or [])
+        if not (members and members[0].get("solo") and members[0].get("conversation_id")):
+            raise DesktopSetupError("already_confirmed")  # confirmed as a recipe or a move: not this request's answer
+        return setup.id, members, setup.project_id, uuid.UUID(str(members[0]["conversation_id"]))
+    if setup.revoked_at is not None or setup.exchanged_at is not None:
+        raise DesktopSetupError("code_used")
+    if _now() >= setup.expires_at:
+        raise DesktopSetupError("code_expired")
+    if setup.confirmed_at is not None:
+        raise DesktopSetupError("already_confirmed")
+    if "solo" not in (setup.capabilities or []):
+        raise DesktopSetupError("app_cannot_solo")
+    if runtime not in RUNTIME_TYPES:
+        raise DesktopSetupError("roles_invalid", "unknown runtime")
+    if not await is_org_owner_or_admin(db, user_id, org_id):
+        raise DesktopSetupError("not_org_admin")
+    if (project_id is None) == (not project_name):
+        raise DesktopSetupError("request_invalid", "exactly one of project_id and project_name")
+
+    if project_id is not None:
+        await require_project_access(db, user_id, project_id, org_id, not_found_detail="Project not found")
+    else:
+        from app.services.org_project_create import check_project_create_allowed, create_project_with_member
+
+        await db.execute(select(Organization.id).where(Organization.id == org_id).with_for_update())  # two codes at once see one name list
+        await check_project_create_allowed(db, org_id)
+        name = await _unique_name(db, Project, Project.org_id == org_id, Project.deleted_at.is_(None), base=project_name)
+        project_id = (await create_project_with_member(
+            db, org_id=org_id, name=name, description=None, slug=None, user_id=str(user_id),
+        )).id
+
+    try:
+        person_member_id = uuid.UUID(str((await resolve_member(auth, org_id, db, project_id)).id))
+    except Exception as exc:  # noqa: BLE001 — no member row for the person in this project: say so, don't guess
+        raise DesktopSetupError("human_stage_needs_member") from exc
+
+    agents_before = await _active_agent_count(db, org_id) if settings.is_ee_enabled else 0
+    if settings.is_ee_enabled:
+        from ee.plan_limits import check_agent_add_limit  # type: ignore[import]
+
+        try:
+            await check_agent_add_limit(db, org_id)  # an HTTPException(402) here rolls the whole setup back
+        except HTTPException as exc:
+            raise _with_setup_numbers(exc, needed=1, agents_before=agents_before) from None
+    agent_name = await _unique_name(
+        db, Member, Member.org_id == org_id, Member.type == "agent", Member.is_active.is_(True), Member.deleted_at.is_(None),
+        base=SOLO_AGENT_NAMES[runtime],
+    )
+    agent, _no_key = await create_org_level_agent(
+        db, org_id=org_id, created_by=user_id, name=agent_name, role="member", project_ids=[project_id], defer_key_issuance=True,
+    )
+    await TeamMemberRepository(db, org_id).apply_anchor_update(agent, {"runtime_type": RUNTIME_TYPES[runtime]})
+
+    from app.services.approval_delivery import _get_or_create_approval_dm  # the person ↔ agent DM: one get-or-create room
+
+    conv = await _get_or_create_approval_dm(db, org_id=org_id, project_id=project_id, requester_id=person_member_id, approver_id=agent.id)
+    members = [{
+        "member_id": str(agent.id), "kind": "agent", "runtime": runtime, "solo": True, "name": agent_name,
+        "tools": clean_agent_tools(tools, runtime), "conversation_id": str(conv.id),
+    }]
+    setup.org_id = org_id
+    setup.project_id = project_id
+    setup.event_definition_key = None
+    setup.confirmed_by = user_id
+    setup.confirmed_at = _now()
+    setup.members = members
+    setup.workdir_hint = workdir_hint
+    await db.flush()
+    from app.services.onboarding_funnel import emit_onboarding_event
+
+    await emit_onboarding_event(
+        db, EVENT_CONFIRMED, session_id=setup.id, org_id=org_id, project_id=project_id,
+        meta={"flow": "desktop_solo", "human_hand": True, "agents": 1},
+    )
+    return setup.id, members, project_id, conv.id
+
+
+async def confirm_solo_setup_new_org(
+    db: AsyncSession,
+    *,
+    code: str,
+    user_id: uuid.UUID,
+    org_name: str,
+    project_name: str,
+    runtime: str,
+    auth,
+    workdir_hint: str | None = None,
+    tools: list[str] | None = None,
+) -> tuple[uuid.UUID, list[dict], uuid.UUID, uuid.UUID, uuid.UUID]:
+    """story 4711 AC4 (PO 03:42Z) — «시작» of the three steps for a person with no organization: the organization (its name is the
+    web's — the screen no longer asks for it), the folder's project and the solo setup in **one transaction**. The folder is the
+    only thing that makes a project: no empty «first project» beside it. Returns (setup_id, members, org_id, project_id,
+    conversation_id); never commits. Same order as `confirm_setup_new_org` (e-mail gate → per-user lock → the code → a replay →
+    the code's state → no organization yet → no pending invite → owned-org limit → create → the solo confirmation itself)."""
+    from app.models.user import User
+    from app.repositories.org_invite import OrgInviteRepository
+    from app.services.org_project_create import (
+        check_owned_org_limit,
+        create_org_with_owner,
+        has_active_org,
+        lock_first_org_path,
+        require_verified_email_for_org,
+    )
+
+    await require_verified_email_for_org(db, str(user_id))
+    await lock_first_org_path(db, user_id)
+    setup = await _setup_by_code(db, code)
+    if setup.confirmed_at is not None and setup.confirmed_by == user_id and setup.revoked_at is None:
+        members = list(setup.members or [])
+        if not (members and members[0].get("solo") and members[0].get("conversation_id")):
+            raise DesktopSetupError("already_confirmed")
+        return setup.id, members, setup.org_id, setup.project_id, uuid.UUID(str(members[0]["conversation_id"]))
+    if setup.revoked_at is not None or setup.exchanged_at is not None:
+        raise DesktopSetupError("code_used")
+    if _now() >= setup.expires_at:
+        raise DesktopSetupError("code_expired")
+    if setup.confirmed_at is not None:
+        raise DesktopSetupError("already_confirmed")
+    if "solo" not in (setup.capabilities or []):
+        raise DesktopSetupError("app_cannot_solo")
+    if await has_active_org(db, user_id):
+        raise DesktopSetupError("has_organization")
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if user is not None and user.email_verified and user.email:
+        if await OrgInviteRepository(db).pending_for_email(user.email, user.id):
+            raise DesktopSetupError("pending_invites")
+    await check_owned_org_limit(db, str(user_id))
+
+    org = await create_org_with_owner(db, name=org_name, slug=None, user_id=str(user_id), owner_member_id=None)
+    setup_id, members, project_id, conversation_id = await confirm_solo_setup(
+        db, code=code, user_id=user_id, org_id=org.id, runtime=runtime, project_id=None, project_name=project_name, auth=auth,
+        workdir_hint=workdir_hint, tools=tools,
+    )
+    return setup_id, members, org.id, project_id, conversation_id
 
 
 async def confirm_setup(
@@ -1417,6 +1605,8 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
         "members": [{k: m.get(k) for k in ("stage", "role", "member_id", "kind", "runtime", "name")} for m in (setup.members or [])],
         # story #4576: «move» (no recipe · device and keys only) or «recipe»
         "setup_kind": setup_kind(setup),
+        # story 4711: a solo setup's person ↔ agent room — the progress screen's way into the first conversation (none otherwise)
+        "conversation_id": next((m["conversation_id"] for m in (setup.members or []) if m.get("solo") and m.get("conversation_id")), None),
         "signals": {
             "tools_connected": [{"member_id": k, "at": v} for k, v in tools.items()],
             "first_task_handed_at": handed[1] if handed else None,
