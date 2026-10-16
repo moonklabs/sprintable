@@ -4570,7 +4570,7 @@
     "runProfileUnattendedHelp": "When on, this agent uses tools right away without asking a person. No approval cards reach your phone or web. What it may and may not do follows the Claude Code settings on that computer",
     "runProfileUnattendedOwnerOnlyOn": "Work without asking · on — only an organization owner{hasOwners, select, yes { ({owners})} other {}} can turn it on or off",
     "runProfileUnattendedOwnerOnlyOff": "Work without asking · off — only an organization owner{hasOwners, select, yes { ({owners})} other {}} can turn it on or off",
-    "runProfileUnattendedCodex": "Work without asking · Claude Code agents only — this agent keeps asking for each tool, as it does now",
+    "runProfileUnattendedCodex": "Work without asking · Claude Code agents only — this agent does Sprintable work without asking; other tools ask or go ahead as the Codex settings on its computer say",
     "runProfileErrorOwnerRequired": "Only an organization owner can change Work without asking — the other values weren't saved either",
     "runProfileRuntime": "Runtime",
     "runProfileModel": "Model",

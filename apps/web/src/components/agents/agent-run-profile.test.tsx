@@ -343,6 +343,13 @@ describe('AgentRunProfileSection — «묻지 않고 일하기» (story #4598)',
     const puts = await render({ ...base, runtime: 'codex', model: 'gpt-6-sol', effort: 'ultra', unattended: false, can_change_unattended: true });
     expect(unattendedSwitch()).toBeNull();
     expect(unattendedLine()).toBe(ag.runProfileUnattendedCodex);
+    // story 4708 (Yuna `4708-copy-1016.md` row 5): after the app stopped deciding what a Codex agent is asked, the line promises only what is true —
+    // Sprintable's own work goes without asking, the rest follows the Codex settings on that computer — and the old «지금처럼 물어요» is gone
+    expect(ag.runProfileUnattendedCodex).toBe('묻지 않고 일하기 · Claude Code 에이전트만 돼요 — 이 에이전트는 Sprintable 안의 일은 묻지 않고, 다른 도구는 그 컴퓨터의 Codex 설정대로 묻거나 바로 해요');
+    const enAg = enMessages.agents as unknown as Record<string, string>;
+    expect(enAg.runProfileUnattendedCodex).toBe('Work without asking · Claude Code agents only — this agent does Sprintable work without asking; other tools ask or go ahead as the Codex settings on its computer say');
+    for (const old of ['지금처럼', '도구를 쓸 때마다']) expect(ag.runProfileUnattendedCodex).not.toContain(old);
+    for (const old of ['keeps asking', 'as it does now', 'for each tool']) expect(enAg.runProfileUnattendedCodex).not.toContain(old);
     expect(unattendedLine()).not.toContain('소유자');
     const trigger = [...container.querySelectorAll('button[aria-labelledby]')].find((b) => nameOf(b).startsWith('모델')) as HTMLElement;
     await act(async () => {
