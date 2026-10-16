@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useSearchParams } from 'next/navigation';
 import { Loader2, Smartphone } from 'lucide-react';
@@ -1197,6 +1197,19 @@ function roomCountsLine(t: ReturnType<typeof useTranslations<'desktop.setup'>>, 
  */
 function RoomShort({ room, need, canUseExisting }: { room: AgentRoom; need: number; canUseExisting: boolean }) {
   const t = useTranslations('desktop.setup');
+  return (
+    <RoomShortBox room={room} line={roomCountsLine(t, need, room.available)}
+      hint={canUseExisting ? <p className="text-xs text-muted-foreground" data-testid="setup-room-use-existing">{t('room.useExisting')}</p> : null} />
+  );
+}
+
+/**
+ * story 4717 (follow-up · PO 05:04Z): the plan's agent room said before «시작» — one box for the recipe setup and the solo card
+ * (desktop-setup-quick): the line it is given (how many · in that screen's words), the plan's limit in the recruiter's words
+ * (lib/plan-limit-copy), an optional hint (the way that keeps the person's agents), then [에이전트 정리하기] · upgrade where billing is open.
+ */
+export function RoomShortBox({ room, line, hint = null }: { room: AgentRoom; line: string; hint?: ReactNode }) {
+  const t = useTranslations('desktop.setup');
   const tNav = useTranslations('nav');
   const tRecruiter = useTranslations('recruiter');
   const flatHref = useFlatHref();
@@ -1204,10 +1217,10 @@ function RoomShort({ room, need, canUseExisting }: { room: AgentRoom; need: numb
   return (
     <div className="flex flex-col gap-2" data-testid="setup-room-short">
       <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]" role="status">
-        {roomCountsLine(t, need, room.available)}
+        {line}
         {copy.reason ? <> {tRecruiter(copy.reason.key, copy.reason.withLimit ? { limit: room.limit } : undefined)}</> : null}
       </p>
-      {canUseExisting ? <p className="text-xs text-muted-foreground" data-testid="setup-room-use-existing">{t('room.useExisting')}</p> : null}
+      {hint}
       <div className="flex flex-wrap gap-2">
         <Button asChild variant="outline" size="sm"><a href={flatHref('/organization/workforce')}>{t('failure.agent-limit.manage')}</a></Button>
         {copy.link ? <Button asChild variant="outline" size="sm"><a href={flatHref('/settings?tab=billing')}>{tNav('orgLimitUpgradeLink')}</a></Button> : null}
@@ -1241,7 +1254,7 @@ export function TooOldCard({ old }: { old: OldRuntime[] }) {
   );
 }
 
-export function Failure({ failure, onRetry, counts = null, plan = null, onChooseRecipe, onReloadPage, todayHref }: { failure: SetupFailure; onRetry?: () => void; counts?: LimitCounts | null; plan?: AgentLimit | null; onChooseRecipe?: () => void; onReloadPage?: () => void; todayHref?: string }) {
+export function Failure({ failure, onRetry, counts = null, plan = null, solo = false, onChooseRecipe, onReloadPage, todayHref }: { failure: SetupFailure; onRetry?: () => void; counts?: LimitCounts | null; plan?: AgentLimit | null; /** story 4717: the solo card (one agent, no recipe) — its own words, no «레시피» */ solo?: boolean; onChooseRecipe?: () => void; onReloadPage?: () => void; todayHref?: string }) {
   const t = useTranslations('desktop.setup');
   const tNav = useTranslations('nav');
   const tRecruiter = useTranslations('recruiter');
@@ -1256,10 +1269,10 @@ export function Failure({ failure, onRetry, counts = null, plan = null, onChoose
       <h1 className="text-lg font-semibold">{limit ? tNav(limit.title) : t(key('title'))}</h1>
       {limit ? (
         <p className="text-sm text-muted-foreground" data-testid="setup-agent-limit-body">
-          {counts ? <>{roomCountsLine(t, counts.need, counts.left)} </> : null}
+          {solo ? <>{t('room.soloNone')} </> : counts ? <>{roomCountsLine(t, counts.need, counts.left)} </> : null}
           {/* the plan line needs the server's limit when numbers are shown — the number-less «모두 만들었어요» would contradict «1개만 더» */}
           {limit.reason && (plan?.limit != null || !counts) ? <>{tRecruiter(limit.reason.key, limit.reason.withLimit && plan?.limit != null ? { limit: plan.limit } : undefined)} </> : null}
-          {t(key('body'))}
+          {solo ? t('room.soloTidy') : t(key('body'))}
         </p>
       ) : (
         <p className="text-sm text-muted-foreground">{t(key('body'))}</p>
