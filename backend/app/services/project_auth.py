@@ -76,8 +76,10 @@ async def get_project_role(
                     WHERE p.id = :pid AND om.user_id = :uid AND om.deleted_at IS NULL
                     LIMIT 1) AS org_role,
                   (SELECT pa.role FROM project_access pa
-                     LEFT JOIN org_members om2 ON pa.org_member_id = om2.id
+                     LEFT JOIN org_members om2 ON pa.org_member_id = om2.id AND om2.deleted_at IS NULL
                     WHERE pa.project_id = :pid AND pa.permission = 'granted'
+                      -- story 4727: an ENDED org-member row (removed · account deleted · organization deleted) grants nothing — the ON above drops it, so only the
+                      -- agent branch (pa.member_id) can still match; the org-role subselect above filters the same column
                       AND (om2.user_id = :uid OR pa.member_id = :uid)
                     LIMIT 1) AS proj_role
                 """
