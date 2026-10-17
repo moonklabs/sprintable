@@ -17,7 +17,8 @@ import { putOrgRemoteControl, useOrgRemoteControl } from '@/lib/org-remote-contr
 import { useSearchParams } from 'next/navigation';
 import { agentRoomOf, roomShort, setupFragment, isFolderRefused, moveConfirmBody, movableState, type AgentRoom, type AttachableAgent, type DesktopRuntime, type SetupQuery } from '@/lib/desktop-setup';
 import { agentLimitOf, type AgentLimit } from '@/lib/agent-limit';
-import { defaultSoloRuntime, shownProjectName, soloConfirmBody, soloNewOrgConfirmBody, soloOutcome, soloStartBlock, usableRuntimes } from '@/lib/desktop-setup-quick';
+import { pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle'; // 4713: «{file}가 · {runtime}로» — the particle follows the word (the scoped honorific guard forbids a fixed one after a placeholder)
+import { defaultSoloRuntime, folderTracePick, shownProjectName, soloConfirmBody, soloNewOrgConfirmBody, soloOutcome, soloStartBlock, usableRuntimes } from '@/lib/desktop-setup-quick';
 import { ATTACHABLE_READ_LIMIT_MS, DesktopSetup, Failure, INSTALL, InvitedCard, MovedAgentNote, PROGRESS_FRAGMENT, RoomShortBox, RUNTIME_LABEL, SetupDoneReload, TooOldCard, fetchMyInvites, joinNewOrg, limitCounts, moveFailureForCode, useAppSetupLinks, type MyInvite } from './desktop-setup';
 import { SetupProgressView } from './desktop-setup-progress';
 
@@ -82,7 +83,8 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
   const [view, setView] = useState<View>({ kind: 'choose' });
   const [rateLine, setRateLine] = useState<string | null>(null);
   const [errorLine, setErrorLine] = useState<string | null>(null);
-  const [pickedRuntime, setPickedRuntime] = useState<DesktopRuntime | null>(null);
+  // story 4713 AC2: the person's own radio choice belongs to the folder it was made for — a folder picked afterwards starts from what ITS marks say again
+  const [pickedFor, setPickedFor] = useState<{ folderKey: string; runtime: DesktopRuntime } | null>(null);
   const [wideOk, setWideOk] = useState(false);
   /** the one project of a free organization that the 402 named; chosen by [넣고 시작] only */
   // codex self-QA: the setup this start made is the SERVER's (`setup_id` in its answer); the address's `setup=` is only the fallback (an older answer without it)
@@ -132,9 +134,13 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
   }, [newOrg]);
 
   const usable = usableRuntimes(query);
-  const runtime = agent ? agent.runtime : pickedRuntime && usable.includes(pickedRuntime) ? pickedRuntime : defaultSoloRuntime(usable, query.pick);
   const agentProject = agent ? (projectId ?? (orgProjects.length === 1 ? orgProjects[0]!.projectId : undefined)) : undefined;
   const folder = query.folder && !isFolderRefused(query.folder) ? query.folder : undefined;
+  const folderKey = `${folder?.shown ?? ''}|${(folder?.traces ?? []).join(',')}`;
+  const pickedRuntime = pickedFor && pickedFor.folderKey === folderKey ? pickedFor.runtime : null;
+  // story 4713 AC2: a folder with a CLAUDE.md / AGENTS.md picks the program that mark means (when this computer has it); the person's own radio beats it
+  const traceHit = agent ? null : folderTracePick(folder, usable);
+  const runtime = agent ? agent.runtime : pickedRuntime && usable.includes(pickedRuntime) ? pickedRuntime : traceHit?.runtime ?? defaultSoloRuntime(usable, query.pick);
   // codex self-QA: the free plan's «넣고 시작» question belongs to the folder it was asked for — another folder picked afterwards (same page, new address) must not start into A's project
   const limitAsk = limitAskRaw && limitAskRaw.folderKey === (folder?.shown ?? '') ? limitAskRaw : null;
   const refused = isFolderRefused(query.folder) ? query.folder.refused : null;
@@ -304,7 +310,7 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
             <div role="radiogroup" aria-labelledby="quick-step-agent" className="flex flex-col gap-1">
               {usable.map((r) => (
                 <label key={r} className="flex items-center gap-2 text-sm">
-                  <input type="radio" name="quick-runtime" checked={runtime === r} onChange={() => setPickedRuntime(r)} />
+                  <input type="radio" name="quick-runtime" checked={runtime === r} onChange={() => setPickedFor({ folderKey, runtime: r })} />
                   <span>{RUNTIME_LABEL[r]}</span>
                   {withVersion(r) ? <span className="text-xs text-muted-foreground">{withVersion(r)}</span> : null}
                 </label>
@@ -313,6 +319,9 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
           ) : (
             <p className="flex items-center gap-2 text-sm"><span>{runtime ? RUNTIME_LABEL[runtime] : ''}</span>{runtime && withVersion(runtime) ? <span className="text-xs text-muted-foreground">{withVersion(runtime)}</span> : null}</p>
           )}
+          {traceHit && runtime === traceHit.runtime ? (
+            <p className="text-xs text-muted-foreground" data-testid="quick-trace">{t('quick.traceDefault', { file: traceHit.file, iga: pickIGaJosa(traceHit.file), runtime: RUNTIME_LABEL[traceHit.runtime], euro: pickEuroJosa(RUNTIME_LABEL[traceHit.runtime]) })}</p>
+          ) : null}
           {(query.old ?? []).map((o) => (
             <p key={o.runtime} className="text-xs text-muted-foreground">{t('quick.tooOld', { name: RUNTIME_LABEL[o.runtime], version: o.version })}</p>
           ))}

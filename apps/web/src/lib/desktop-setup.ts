@@ -38,7 +38,10 @@ export interface SetupQuery { code: string; runtimes: DesktopRuntime[]; setupId:
 /** story 4711: the folder the person picked in the Mac window. `shown` is for the eyes only (home shortened to `~`); the server gets
  *  `name` (the project's name) — never a path. `projectId`: the app found a project that already uses this folder (project-workdirs).
  *  `wide`: the home folder itself or the top of the disk — the agent would work across all of it, so the card asks once. */
-export interface SoloFolder { shown: string; name: string; projectId?: string; wide?: true }
+/** story 4713 AC2: the two marks the app looks for in a picked folder (its `folder-traces.ts` table) and the program each one means — the closed set the address may carry. */
+export const SOLO_TRACE_RUNTIME = { 'CLAUDE.md': 'claude', 'AGENTS.md': 'codex' } as const satisfies Record<string, DesktopRuntime>;
+export type SoloTraceFile = keyof typeof SOLO_TRACE_RUNTIME;
+export interface SoloFolder { shown: string; name: string; projectId?: string; wide?: true; traces?: readonly SoloTraceFile[] }
 export const FOLDER_REFUSALS = ['missing', 'not_folder', 'app_folder', 'denied'] as const;
 export type FolderRefusal = (typeof FOLDER_REFUSALS)[number];
 export interface SoloFolderRefused { refused: FolderRefusal }
@@ -110,7 +113,10 @@ export function parseSoloFolder(params: { get(name: string): string | null }): S
   const name = params.get('fname') ?? '';
   if (!shown || shown.length > 300 || !NO_CONTROL.test(shown) || !name.trim() || name.length > 100 || !NO_CONTROL.test(name) || !NO_PATH_SEPARATOR.test(name)) return undefined; // a blank name is no name (the server would refuse it with a 422)
   const project = params.get('fproject') ?? '';
-  return { shown, name, ...(AGENT_ID_RE.test(project) ? { projectId: project } : {}), ...(params.get('fwide') === '1' ? { wide: true as const } : {}) };
+  // story 4713 AC2: `ftrace=CLAUDE.md,AGENTS.md` — only the table's two names count, once each, in the table's order (anything else is no mark)
+  const marks = (params.get('ftrace') ?? '').split(',');
+  const traces = (Object.keys(SOLO_TRACE_RUNTIME) as SoloTraceFile[]).filter((m) => marks.includes(m));
+  return { shown, name, ...(AGENT_ID_RE.test(project) ? { projectId: project } : {}), ...(params.get('fwide') === '1' ? { wide: true as const } : {}), ...(traces.length > 0 ? { traces } : {}) };
 }
 
 /** story 4680: a member id as the app puts it in `agent=` — a uuid; anything else is ignored (never put in a request) */
@@ -428,6 +434,7 @@ export function setupFragment(q: SetupQuery): string {
     p.set('fshown', q.folder.shown); p.set('fname', q.folder.name);
     if (q.folder.projectId) p.set('fproject', q.folder.projectId);
     if (q.folder.wide) p.set('fwide', '1');
+    if (q.folder.traces?.length) p.set('ftrace', q.folder.traces.join(','));
   }
   return `#${p.toString().replace(/%2C/g, ',')}`;
 }
