@@ -76,9 +76,14 @@ class World:
     """one organization with a project, a doc under a public share link, an agent with its key, a published site post under the
     organization's public key"""
 
+    org: str | None = None
+    sfx: str | None = None
+    key_ids: list  # agent_api_keys has no org_id column: its rows are cleaned by id
+
     async def build(self, c) -> World:
         sfx = uuid.uuid4().hex[:8]
         self.sfx = sfx
+        self.key_ids = []
         email = f"owner-{sfx}@{TAG}.test"
         reg = await _call(c, "POST", "/api/v2/auth/register", json_body={"email": email, "password": "Passw0rd!x-" + sfx, "display_name": "Owner 4728", "tos_accepted": True})
         assert reg.status_code in (200, 201), reg.text
@@ -129,18 +134,23 @@ class World:
         return self
 
     async def cleanup(self) -> None:
-        """leave nothing behind in the shared database: every row of this organization (whatever tables carry its org_id), then the person"""
-        tables = [r[0] for r in await _sql(
-            "SELECT c.table_name FROM information_schema.columns c JOIN information_schema.tables t "
-            "ON t.table_name=c.table_name AND t.table_schema=c.table_schema AND t.table_type='BASE TABLE' "
-            "WHERE c.table_schema='public' AND c.column_name='org_id'")]
-        for _pass in range(2):  # a table that still points at a row another table holds fails the first time; the second pass gets it
-            for t in tables:
-                with contextlib.suppress(DBAPIError):
-                    await _sql(f'DELETE FROM "{t}" WHERE org_id = :o', o=self.org)
-        await _sql("DELETE FROM organizations WHERE id = :o", o=self.org)
-        await _sql("DELETE FROM refresh_tokens WHERE user_id IN (SELECT id FROM users WHERE email LIKE :e)", e=f"%-{self.sfx}@{TAG}.test")
-        await _sql("DELETE FROM users WHERE email LIKE :e", e=f"%-{self.sfx}@{TAG}.test")
+        """leave nothing behind in the shared database: the agent's key rows (no org_id column), every row of this organization (whatever
+        tables carry its org_id), then the person. Safe after a build that stopped half way."""
+        for kid in self.key_ids:
+            await _sql("DELETE FROM agent_api_keys WHERE id = :k", k=kid)
+        if self.org:
+            tables = [r[0] for r in await _sql(
+                "SELECT c.table_name FROM information_schema.columns c JOIN information_schema.tables t "
+                "ON t.table_name=c.table_name AND t.table_schema=c.table_schema AND t.table_type='BASE TABLE' "
+                "WHERE c.table_schema='public' AND c.column_name='org_id'")]
+            for _pass in range(2):  # a table that still points at a row another table holds fails the first time; the second pass gets it
+                for t in tables:
+                    with contextlib.suppress(DBAPIError):
+                        await _sql(f'DELETE FROM "{t}" WHERE org_id = :o', o=self.org)
+            await _sql("DELETE FROM organizations WHERE id = :o", o=self.org)
+        if self.sfx:
+            await _sql("DELETE FROM refresh_tokens WHERE user_id IN (SELECT id FROM users WHERE email LIKE :e)", e=f"%-{self.sfx}@{TAG}.test")
+            await _sql("DELETE FROM users WHERE email LIKE :e", e=f"%-{self.sfx}@{TAG}.test")
 
     async def public_reads(self, c) -> dict:
         return {
@@ -157,8 +167,9 @@ class World:
 @pytest.mark.anyio
 async def test_a_a_live_organization_keeps_its_public_links():
     async with _client() as c:
-        w = await World().build(c)
+        w = World()
         try:
+            await w.build(c)
             assert await w.public_reads(c) == {"doc": 200, "posts_list": 200, "post": 200}
             assert (await _sql("SELECT status FROM channel_connections WHERE org_id = :o", o=w.org)) == [("active",)]  # a live organization is untouched
             assert (await _sql("SELECT status FROM publication_commands WHERE id = :i", i=w.command)) == [("pending",)]
@@ -169,8 +180,9 @@ async def test_a_a_live_organization_keeps_its_public_links():
 @pytest.mark.anyio
 async def test_b_deleting_the_organization_ends_its_links_keys_and_posts():
     async with _client() as c:
-        w = await World().build(c)
+        w = World()
         try:
+            await w.build(c)
             await w.delete_through_the_route(c)
 
             assert await w.public_reads(c) == {"doc": 410, "posts_list": 404, "post": 404}
@@ -195,8 +207,9 @@ async def test_b_deleting_the_organization_ends_its_links_keys_and_posts():
 async def test_c_an_organization_deleted_before_this_change_cannot_be_read_through_its_old_links():
     """what the delete did before: only the organizations row went (here: the same SQL), every link / key / post stayed in its table"""
     async with _client() as c:
-        w = await World().build(c)
+        w = World()
         try:
+            await w.build(c)
             await _sql("DELETE FROM organizations WHERE id = :o", o=w.org)
             assert (await _sql("SELECT status FROM doc_share_tokens WHERE org_id = :o", o=w.org)) == [("active",)]  # nothing ended it
             assert await w.public_reads(c) == {"doc": 410, "posts_list": 404, "post": 404}
