@@ -156,6 +156,41 @@ async def test_c_a_rejected_delete_ends_nothing():
 
 
 @pytest.mark.anyio
+async def test_e_a_live_owner_row_of_a_missing_organization_does_not_count():
+    """What the delete path cannot rule out: a membership write that lands while the organization is being deleted (no foreign key to
+    serialize on) leaves a live owner row for an organization that no longer exists. The limit counts existing organizations only, so that
+    person can still make a new one — while an owner row of an organization that exists still counts (control)."""
+    from ee import plan_limits
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    straggler, real_owner = uuid.uuid4(), uuid.uuid4()
+    gone_org, live_org = uuid.uuid4(), uuid.uuid4()
+    try:
+        async with Session() as session:  # one transaction, rolled back: nothing stays in the shared database
+            await session.execute(
+                text("INSERT INTO org_members (id, org_id, user_id, role) VALUES (:id, :o, :u, 'owner')"),
+                {"id": uuid.uuid4(), "o": gone_org, "u": straggler},
+            )
+            await plan_limits.check_org_create_limit(session, straggler)  # no raise: the orphan does not count
+
+            await session.execute(
+                text("INSERT INTO organizations (id, name, slug, plan) VALUES (:id, :n, :s, 'free')"),
+                {"id": live_org, "n": f"t4726-{live_org}", "s": f"s4726-{live_org}"},
+            )
+            await session.execute(
+                text("INSERT INTO org_members (id, org_id, user_id, role) VALUES (:id, :o, :u, 'owner')"),
+                {"id": uuid.uuid4(), "o": live_org, "u": real_owner},
+            )
+            with pytest.raises(HTTPException) as full:  # control: an existing organization's owner row still takes the slot
+                await plan_limits.check_org_create_limit(session, real_owner)
+            assert full.value.status_code == 402
+            await session.rollback()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_d_backfill_ends_rows_left_by_organizations_deleted_before_the_fix():
     """Runs the migration's own statement, but inside one transaction that is rolled back: the statement is global (it ends every orphaned
     row in the table), and this suite shares its database with other real-DB tests whose own rows must not be touched for good."""
