@@ -475,3 +475,16 @@ async def test_13_one_key_on_two_computers_is_two_commands(world):
         assert (r1.status_code, r2.status_code) == (201, 201), (r1.text, r2.text)
         assert r1.json()["command_id"] != r2.json()["command_id"]
         assert len(await _commands(dev1["setup_id"])) == 1 and len(await _commands(dev2["setup_id"])) == 1
+
+
+async def test_14_the_whole_phone_read_lists_only_the_computer_this_phone_is_paired_with(world):
+    """codex 5132 round 9 ⑥: two computers in the organization, each paired with its own phone — a phone sees ITS computer and not the other one."""
+    async with _client() as c:
+        dev1, agent1, phone1, _d1 = await _setup(c, "d4424 mac 4714p1")
+        dev2, agent2, phone2, _d2 = await _setup(c, "d4424 mac 4714p2")
+        for dev, agent in ((dev1, agent1), (dev2, agent2)):
+            assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ)), headers=_tok(dev["device_token"]))).status_code == 200
+        assert dev1["setup_id"] != dev2["setup_id"]
+        seen1 = [x["setup_id"] for x in (await _all(c, phone1)).json()["computers"]]
+        seen2 = [x["setup_id"] for x in (await _all(c, phone2)).json()["computers"]]
+        assert seen1 == [dev1["setup_id"]] and seen2 == [dev2["setup_id"]]
