@@ -515,3 +515,32 @@ async def test_15_a_phone_starts_only_on_the_computer_it_is_paired_with_and_only
         await _sql(f"UPDATE remote_devices SET revoked_at = now() WHERE id = '{phone2}'")
         r = await _post(c, agent2, _start(phone2, sid2))
         assert (r.status_code, r.json()["error"]["code"]) == (409, "phone_not_paired")
+
+
+async def test_16_the_whole_phone_read_drops_a_revoked_key_and_an_agent_the_person_cannot_open(world):
+    """codex 5132 round 11 ⑥ (the full list of unpinned predicates): (a) a revoked phone key lists nothing in the whole-phone read; (b) `can_view` looks at the
+    TARGET agent's own projects only — a person who may open agent B's project but none of agent A's does not see agent A's computer through B."""
+    plain_tm = await _plain_member()
+    async with _client() as c:
+        device, agent, phone, owner_der = await _setup(c, "d4424 mac 4714r")
+        other = device["agents"][1]["member_id"]
+        sid = device["setup_id"]
+        await _sql(
+            f"DELETE FROM agent_project_profiles WHERE member_id = '{other}'",
+            f"INSERT INTO agent_project_profiles (id,member_id,project_id) VALUES (gen_random_uuid(),'{other}','{PROJ2}')",  # the other agent: a project the plain person cannot open
+            f"INSERT INTO agent_project_profiles (id,member_id,project_id) SELECT gen_random_uuid(),'{agent}','{PROJ}' WHERE NOT EXISTS "
+            f"(SELECT 1 FROM agent_project_profiles WHERE member_id = '{agent}' AND project_id = '{PROJ}')",
+            f"INSERT INTO project_access (id,project_id,member_id,permission) VALUES (gen_random_uuid(),'{PROJ}','{plain_tm}','granted') ON CONFLICT DO NOTHING",
+        )
+        await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ), (other, PROJ2)), headers=_tok(device["device_token"]))
+        plain_phone, plain_der = await _register(c, PLAIN)
+        await _pair(c, device["device_token"], owner_der, plain_der)
+        # (b) the plain person opens agent `agent` (PROJ) and not agent `other` (PROJ2 only): the whole-phone read names the one, the other's own read is a 404
+        comp = (await _all(c, plain_phone, who=PLAIN)).json()["computers"][0]
+        assert [a["agent_member_id"] for a in comp["agents"]] == [agent]
+        gone = await _list(c, other, plain_phone, who=PLAIN)
+        assert (gone.status_code, gone.json()["error"]["code"]) == (404, "agent_not_found")
+        # (a) the key is revoked → the whole-phone read lists nothing
+        assert [x["setup_id"] for x in (await _all(c, phone)).json()["computers"]] == [sid]
+        await _sql(f"UPDATE remote_devices SET revoked_at = now() WHERE id = '{phone}'")
+        assert (await _all(c, phone)).json()["computers"] == []
