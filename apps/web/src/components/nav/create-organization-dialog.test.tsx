@@ -81,6 +81,15 @@ describe('CreateOrganizationDialog — the switcher\'s request (story 4721 keeps
   });
 });
 
+describe('CreateOrganizationDialog — a 403 EMAIL_VERIFICATION_REQUIRED (story 4721)', () => {
+  it('without a handler it is the generic error line, as before', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 403, json: async () => ({ error: { code: 'EMAIL_VERIFICATION_REQUIRED', message: 'x' } }) })));
+    await mount();
+    await fillAndSubmit();
+    expect(document.body.querySelector('[role=alert]')?.textContent).toBe('조직을 만들지 못했어요. 잠시 후 다시 시도해 주세요.');
+  });
+});
+
 describe('CreateOrganizationDialog — PLAN_LIMIT_EXCEEDED envelope (story #2470)', () => {
   it('실제 응답 envelope({error:{code}})으로 한도 배너가 실제로 뜬다 — raw 영문 message 노출 없음', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({

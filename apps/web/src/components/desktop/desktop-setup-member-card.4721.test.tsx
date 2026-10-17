@@ -25,6 +25,7 @@ let root: Root;
 let calls: { url: string; body?: unknown }[];
 let makeOrg: () => Response;
 let switchOrg: () => Response;
+let meNow: () => Response;
 
 const MEMBER_OF_ACME = [{ orgId: 'o-acme', orgName: 'Acme', orgSlug: 'acme', role: 'member' }];
 
@@ -36,12 +37,14 @@ beforeEach(() => {
   calls = [];
   makeOrg = () => new Response(JSON.stringify({ data: { id: 'o-mine', name: '김지우의 조직', slug: 'workspace-1a2b3c4d' } }), { status: 200 });
   switchOrg = () => new Response(JSON.stringify({ data: { ok: true } }), { status: 200 });
+  meNow = () => new Response(JSON.stringify({ data: { email: 'invited@x.test', email_verified: false, email_verification_required: true } }), { status: 200 });
   window.sessionStorage.setItem(TAB_PROJECT_STORAGE_KEY, 'p-old');
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
     if (url === '/api/organizations') return makeOrg();
     if (url === '/api/switch-org') return switchOrg();
+    if (url === '/api/auth/me') return meNow();
     return new Response('{}', { status: 404 });
   }));
 });
@@ -182,5 +185,51 @@ describe('story 4721 — the member card', () => {
     });
     expect(text()).toContain('에이전트를 옮기려면 조직 관리자여야 해요');
     expect(buttonOf('내 조직 만들어 시작하기')).toBeUndefined();
+  });
+
+  const EMAIL_REQUIRED = () => new Response(JSON.stringify({ error: { code: 'EMAIL_VERIFICATION_REQUIRED', message: 'x' } }), { status: 403 });
+  const gate = () => container.querySelector('[data-testid=email-verify-gate]');
+
+  it('the server wants the e-mail verified (403): the e-mail gate stands in the card\'s place — no generic error, nothing switched', async () => {
+    makeOrg = EMAIL_REQUIRED;
+    await mount(MEMBER_OF_ACME, { onReloadPage: vi.fn() });
+    await act(async () => { buttonOf('내 조직 만들어 시작하기')!.click(); });
+    await submitDialog();
+    expect(gate()).not.toBeNull();
+    expect(text()).toContain('invited@x.test');
+    expect(text()).not.toContain('에이전트를 만들려면 조직 관리자여야 해요'); // the gate is the page now
+    expect(document.body.querySelector('#org-name')).toBeNull(); // the dialog closed
+    expect(calls.map((c) => c.url)).toEqual(['/api/organizations', '/api/auth/me']);
+  });
+
+  it('after the mailbox is proved the card is back, and the primary makes the organization this time', async () => {
+    makeOrg = EMAIL_REQUIRED;
+    const reload = vi.fn();
+    await mount(MEMBER_OF_ACME, { onReloadPage: reload });
+    await act(async () => { buttonOf('내 조직 만들어 시작하기')!.click(); });
+    await submitDialog();
+    expect(gate()).not.toBeNull();
+    makeOrg = () => new Response(JSON.stringify({ data: { id: 'o-mine' } }), { status: 200 });
+    meNow = () => new Response(JSON.stringify({ data: { email: 'invited@x.test', email_verified: true, email_verification_required: true } }), { status: 200 });
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await flush();
+    expect(gate()).toBeNull();
+    expect(text()).toContain('에이전트를 만들려면 조직 관리자여야 해요');
+    expect(text()).not.toContain('조직을 만들지 못했어요'); // verified in the meantime: the card is just back, no error line
+    await act(async () => { buttonOf('내 조직 만들어 시작하기')!.click(); });
+    await submitDialog();
+    expect(calls.map((c) => c.url).filter((u) => u === '/api/organizations' || u === '/api/switch-org')).toEqual(['/api/organizations', '/api/organizations', '/api/switch-org']);
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('the server says «verify first» but /me says the mailbox is proved: no gate to show — the card with the generic line', async () => {
+    makeOrg = EMAIL_REQUIRED;
+    meNow = () => new Response(JSON.stringify({ data: { email: 'invited@x.test', email_verified: true, email_verification_required: true } }), { status: 200 });
+    await mount(MEMBER_OF_ACME, { onReloadPage: vi.fn() });
+    await act(async () => { buttonOf('내 조직 만들어 시작하기')!.click(); });
+    await submitDialog();
+    expect(gate()).toBeNull();
+    expect(text()).toContain('조직을 만들지 못했어요');
+    expect(buttonOf('내 조직 만들어 시작하기')).toBeDefined();
   });
 });
