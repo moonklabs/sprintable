@@ -488,3 +488,30 @@ async def test_14_the_whole_phone_read_lists_only_the_computer_this_phone_is_pai
         seen1 = [x["setup_id"] for x in (await _all(c, phone1)).json()["computers"]]
         seen2 = [x["setup_id"] for x in (await _all(c, phone2)).json()["computers"]]
         assert seen1 == [dev1["setup_id"]] and seen2 == [dev2["setup_id"]]
+
+
+async def test_15_a_phone_starts_only_on_the_computer_it_is_paired_with_and_only_while_the_pairing_and_the_key_live(world):
+    """codex 5132 round 10 ⑥: `paired_phone` is the single «this phone is paired with THIS computer now» check — each of its parts pinned here."""
+    async with _client() as c:
+        dev1, agent1, phone1, _d1 = await _setup(c, "d4424 mac 4714q1")
+        dev2, agent2, phone2, _d2 = await _setup(c, "d4424 mac 4714q2")
+        for dev, agent in ((dev1, agent1), (dev2, agent2)):
+            assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ)), headers=_tok(dev["device_token"]))).status_code == 200
+        sid2 = dev2["setup_id"]
+        # phone1 is paired with computer 1 only: on computer 2 it is not a paired phone (refused · and the agent's list shows it nothing)
+        r = await _post(c, agent2, _start(phone1, sid2))
+        assert (r.status_code, r.json()["error"]["code"]) == (409, "phone_not_paired")
+        assert (await _list(c, agent2, phone1)).json()["computers"] == []
+        assert await _commands(sid2) == []
+        # its own computer: accepted
+        assert (await _post(c, agent2, _start(phone2, sid2))).status_code == 201
+        # the pairing is taken away → refused (a removed pairing is not a pairing)
+        await _sql(f"UPDATE remote_device_pairings SET removed_at = now() WHERE setup_id = '{sid2}'")
+        r = await _post(c, agent2, _start(phone2, sid2))
+        assert (r.status_code, r.json()["error"]["code"]) == (409, "phone_not_paired")
+        await _sql(f"UPDATE remote_device_pairings SET removed_at = NULL WHERE setup_id = '{sid2}'")
+        assert (await _post(c, agent2, _start(phone2, sid2))).status_code == 201
+        # the key is revoked → refused (a revoked key is not a phone)
+        await _sql(f"UPDATE remote_devices SET revoked_at = now() WHERE id = '{phone2}'")
+        r = await _post(c, agent2, _start(phone2, sid2))
+        assert (r.status_code, r.json()["error"]["code"]) == (409, "phone_not_paired")
