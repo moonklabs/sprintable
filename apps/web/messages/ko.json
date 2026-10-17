@@ -7542,5 +7542,22 @@
   "remoteControlOff": {
     "goTo": "원격 제어 켜러 가기",
     "ownersMore": "{first} 외 {n}명"
+  },
+  "reclaimNotice": {
+    "title": "이 주소를 인증하기 전에 있던 연결을 끊었어요",
+    "body": "그때 이 계정에 있던 {items}{eulReul} 끊었어요. 조직과 멤버십은 그대로예요 — 필요한 건 새로 만들면 돼요.",
+    "passwordLine": "비밀번호도 비웠어요. 쓰려면 로그인 화면의 «{forgot}»로 새로 정해 주세요.",
+    "items": {
+      "sessions": "로그인 상태",
+      "providers": "다른 로그인 방식",
+      "twoStep": "2단계 인증",
+      "keys": "키",
+      "phones": "등록한 폰",
+      "computers": "컴퓨터",
+      "phonesAndComputers": "등록한 폰과 컴퓨터",
+      "join": " · ",
+      "lastJoin": " · ",
+      "pairJoin": " · "
+    }
   }
 }

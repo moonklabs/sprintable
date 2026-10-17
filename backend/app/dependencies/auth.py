@@ -467,7 +467,7 @@ async def _resolve_firebase_session(token: str, db: AsyncSession) -> AuthContext
     return AuthContext(
         user_id=str(user.id),
         email=user.email,
-        claims={"auth_issuer": verified.issuer, "app_metadata": app_metadata},
+        claims={"auth_issuer": verified.issuer, "auth_time": verified.auth_time, "app_metadata": app_metadata},
         org_id=org_id,
     )
 

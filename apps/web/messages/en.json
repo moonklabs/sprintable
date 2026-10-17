@@ -7542,5 +7542,22 @@
   "remoteControlOff": {
     "goTo": "Go to remote control",
     "ownersMore": "{n, plural, one {{first} and # other} other {{first} and # others}}"
+  },
+  "reclaimNotice": {
+    "title": "We disconnected what existed before you verified this address",
+    "body": "What this account had at that time — {items} — was disconnected. Your organizations and memberships are unchanged; create what you need again.",
+    "passwordLine": "The password was cleared too. To use one, choose a new one with “{forgot}” on the sign-in screen.",
+    "items": {
+      "sessions": "sign-ins",
+      "providers": "other sign-in methods",
+      "twoStep": "two-step verification",
+      "keys": "keys",
+      "phones": "registered phones",
+      "computers": "computers",
+      "phonesAndComputers": "registered phones and computers",
+      "join": ", ",
+      "lastJoin": ", and ",
+      "pairJoin": " and "
+    }
   }
 }
