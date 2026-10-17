@@ -9,6 +9,7 @@ from typing import Any
 import pyotp
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+from passlib.exc import UnknownHashError
 
 from app.core.config import settings
 
@@ -39,7 +40,14 @@ def hash_password(plain: str) -> str:
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return _pwd_context.verify(plain, hashed)
+    """False — never an exception — when there is no usable hash to check against: an account made through a provider (or one whose password was cleared,
+    story 4725) stores "" and passlib raises `UnknownHashError` on it, which a password sign-in turned into a 500 instead of the ordinary refusal."""
+    if not hashed:
+        return False
+    try:
+        return _pwd_context.verify(plain, hashed)
+    except (UnknownHashError, ValueError):
+        return False
 
 
 # ─── JWT ──────────────────────────────────────────────────────────────────────

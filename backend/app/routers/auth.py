@@ -26,7 +26,7 @@ def _normalize_email(v: str) -> str:
         raise ValueError("Invalid email format")
     return v
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -404,6 +404,99 @@ async def _revoke_other_sessions(
         window.append(or_(RefreshToken.replaced_by.is_(None), RefreshToken.replaced_by != keep_id))
     await session.execute(update(RefreshToken).where(*window).values(expires_at=now))
     return ended.rowcount or 0, keep_id
+
+
+_PROVIDER_ID_COLUMNS = ("google_id", "github_id", "apple_id")
+
+
+async def _reclaim_unproved_account(
+    session: AsyncSession, user: User, *, keep_provider: tuple[str, str] | None = None, new_password_hash: str | None = None,
+    ip_address: str | None = None, why: str,
+) -> datetime | None:
+    """story 4725 — the moment a mailbox is PROVED for an account that had not been proved before, everything that account held or made from before the proof
+    is dropped, because nothing says who made it (PO 2026-10-17, decisions 1 + 2). One transaction with the caller's commit:
+    - the account: verified; the password cleared (a mailed reset sets the new one in the same statement); every provider identity untied except `keep_provider`
+      (the one that has just proved the address); the two-factor secret and the failed-login counters cleared;
+    - every sign-in: live refresh tokens AND their grace windows, and EVERY ACCESS TOKEN already issued — through the per-user cut-off epoch
+      (`auth_migrations.auth_valid_after`, checked on every request by `_reject_if_before_cutover`), so one guard covers every route (two-factor setup, key
+      issuing, setup codes, phone registration…) instead of a check on each. The epoch is the last instant of the CURRENT second: a token carries whole seconds
+      (`iat`), so a token minted in the same second as the reclaim is refused too; a session made after the next second begins passes (the caller waits for
+      that second — `_wait_for_second_after`);
+    - what the account made before the proof: its personal API keys, the agents it created and their keys, the project keys it created, the phones it registered,
+      the desktop setups it confirmed (with their device tokens), its pending sign-in hand-over codes.
+    The account itself and what it owns stay (organizations, memberships). Returns the epoch, or None when the account was already proved (another proof got there
+    first — the UPDATE is conditional, so two overlapping proofs do not erase each other).
+    Named residuals: (1) a request of the old session that is IN FLIGHT while this transaction is still open can pass the cut-off check (the row is not visible yet) and
+    commit a lasting credential between this transaction's statements and its commit — a window of milliseconds; (2) an event stream a person's session already
+    opened ends by its own 90-second lifespan (a person's stream has no per-request recheck), after which it cannot reconnect; (3) a delegated support-gateway
+    token minted from the old session lives out its own 300-second TTL (the route that mints one is behind the cut-off, so none can be minted after the reclaim);
+    (4) an account in the Firebase-migration state `reset_required` stays rejected on every token by that state, as before — the reclaim does not change migration state."""
+    from datetime import timedelta
+
+    from app.models.api_key import ApiKey
+    from app.models.auth_identity import AuthIdentity, AuthMigration
+    from app.models.desktop_relay import DesktopDeviceToken
+    from app.models.desktop_setup import DesktopSetup
+    from app.models.human_api_key import HumanApiKey
+    from app.models.oauth_handoff_code import OAuthHandoffCode
+    from app.models.project_api_key import ProjectApiKey
+    from app.models.agent_permission import RemoteDevice
+    from sqlalchemy.dialects.postgresql import insert as _pg_insert
+
+    now = datetime.now(timezone.utc)
+    values: dict = {
+        "email_verified": True,
+        "hashed_password": new_password_hash or "",
+        "password_set_at": now,
+        "totp_enabled": False, "totp_secret": None, "totp_last_timestep": None, "totp_fail_count": 0, "totp_locked_until": None,
+        "login_fail_count": 0, "login_locked_until": None,
+    }
+    for col in _PROVIDER_ID_COLUMNS:
+        values[col] = None
+    if keep_provider is not None:
+        values[f"{keep_provider[0]}_id"] = keep_provider[1]
+    claimed = await session.execute(
+        update(User).where(User.id == user.id, User.email_verified.is_(False)).values(**values).returning(User.id)
+    )
+    if claimed.scalar_one_or_none() is None:
+        return None
+    ended, _ = await _revoke_other_sessions(session, user.id, None)
+
+    human_members = select(Member.id).where(Member.user_id == user.id)
+    agents = select(Member.id).where(Member.owner_member_id.in_(human_members))
+    await session.execute(update(HumanApiKey).where(HumanApiKey.member_id.in_(human_members), HumanApiKey.revoked_at.is_(None)).values(revoked_at=now))
+    await session.execute(update(ApiKey).where(or_(ApiKey.member_id.in_(agents), ApiKey.team_member_id.in_(agents)), ApiKey.revoked_at.is_(None)).values(revoked_at=now))
+    await session.execute(update(ProjectApiKey).where(ProjectApiKey.created_by == user.id, ProjectApiKey.revoked_at.is_(None)).values(revoked_at=now))
+    await session.execute(update(RemoteDevice).where(RemoteDevice.member_id.in_(human_members), RemoteDevice.revoked_at.is_(None)).values(revoked_at=now))
+    setups = select(DesktopSetup.id).where(DesktopSetup.confirmed_by == user.id, DesktopSetup.revoked_at.is_(None))
+    await session.execute(update(DesktopDeviceToken).where(DesktopDeviceToken.setup_id.in_(setups), DesktopDeviceToken.revoked_at.is_(None)).values(revoked_at=now))
+    await session.execute(update(DesktopSetup).where(DesktopSetup.confirmed_by == user.id, DesktopSetup.revoked_at.is_(None)).values(revoked_at=now, revoked_reason="account_reclaimed"))
+    await session.execute(update(OAuthHandoffCode).where(OAuthHandoffCode.user_id == user.id, OAuthHandoffCode.consumed_at.is_(None)).values(consumed_at=now))
+    # the cut-off: the last microsecond before the NEXT whole second (tokens carry whole seconds)
+    # written LAST (after every revocation above): a slow reclaim that crosses a second must not leave the cut-off earlier than the end of its own work
+    epoch = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(seconds=1) - timedelta(microseconds=1)
+    upsert = _pg_insert(AuthMigration).values(user_id=user.id, state="legacy", auth_valid_after=epoch)
+    stored_epoch = (await session.execute(upsert.on_conflict_do_update(
+        index_elements=[AuthMigration.user_id],
+        set_={"auth_valid_after": func.greatest(AuthMigration.auth_valid_after, upsert.excluded.auth_valid_after)},
+    ).returning(AuthMigration.auth_valid_after))).scalar_one()
+    # Firebase identities linked to the account are provider identities too (codex 01a1478d): untied with the others
+    await session.execute(delete(AuthIdentity).where(AuthIdentity.user_id == user.id))
+    await _write_audit(session, "unverified_account_reclaimed", user_id=user.id, ip_address=ip_address, detail=f"{why}; sessions_ended={ended}")
+    return stored_epoch
+
+
+async def _wait_for_second_after(epoch: datetime) -> None:
+    """A session made right after a reclaim must carry an `iat` later than the cut-off. `iat` is whole seconds and the check rejects `iat <= cut-off`, so the
+    first safe instant is the first whole second STRICTLY after the cut-off (whatever its fraction — an older, larger epoch may carry arbitrary microseconds): wait
+    until the clock is past it, at most 2 s (a cut-off far in the future is an operational state this wait cannot fix and must not turn into a long sleep)."""
+    import asyncio
+    from datetime import timedelta
+
+    target = epoch.replace(microsecond=0) + timedelta(seconds=1)
+    wait = (target - datetime.now(timezone.utc)).total_seconds() + 0.02
+    if wait > 0:
+        await asyncio.sleep(min(wait, 2.0))
 
 
 _ROLE_RANK: dict[str, int] = {"owner": 4, "admin": 3, "manager": 2, "member": 1}
@@ -1585,9 +1678,10 @@ async def _exchange_oauth_code_for_userinfo(
 
 
 def _provider_says_verified(userinfo: dict) -> bool:
-    """story 4722 AC2: only an explicit true counts (Google sends a boolean, Apple a boolean or the string "true"); absent / false / anything else → not verified."""
+    """story 4722 AC2: only an explicit true counts (Google sends a boolean, Apple a boolean or the exact string "true"); absent / false / anything else → not verified.
+    Story 4725 (Didi's codex 01a1472e): no trimming and no case folding — `" TRUE "` is not what either provider sends."""
     v = userinfo.get("email_verified")
-    return v is True or (isinstance(v, str) and v.strip().lower() == "true")
+    return v is True or v == "true"
 
 
 class OAuthCallbackRequest(BaseModel):
@@ -1703,11 +1797,23 @@ async def oauth_callback(
                     "The provider did not verify this e-mail address, so it cannot be linked to the existing account",
                     403,
                 )
-            await session.execute(
-                update(User).where(User.id == user.id).values(**{f"{provider}_id": oauth_id})
-            )
+            reclaimed_epoch = None
+            if not user.email_verified:
+                # story 4725: the provider has just proved the mailbox of an account NOBODY had proved — what it held before (a password, sessions,
+                # other provider ids, a two-factor secret, keys it made…) may be an earlier squatter's: dropped here, in this transaction
+                # (see `_reclaim_unproved_account`). None = another proof got there first → the plain tie below.
+                reclaimed_epoch = await _reclaim_unproved_account(
+                    session, user, keep_provider=(provider, oauth_id), why=f"provider={provider}",
+                    ip_address=request.client.host if request.client else None,
+                )
+            if reclaimed_epoch is None:
+                await session.execute(
+                    update(User).where(User.id == user.id).values(**{f"{provider}_id": oauth_id})
+                )
             await session.commit()
             await session.refresh(user)
+            if reclaimed_epoch is not None:
+                await _wait_for_second_after(reclaimed_epoch)  # the session made below must be later than the cut-off
         else:
             # 신규 유저 생성 (비밀번호 없음 — OAuth 전용). story 4722 AC2: 이메일 인증 완료 = **공급자가 그렇게 말했을 때만**(Google/Apple
             # `email_verified` 참) — 예전엔 무조건 True여서 공급자가 «미확인»이라 한 주소도 초대 자동 수락 문을 열었다.
@@ -1965,6 +2071,12 @@ async def reset_password(
     if _hashlib.sha256(user.hashed_password.encode()).hexdigest()[:16] != pw_sig:
         return _err("INVALID_TOKEN", "Reset token has already been used", 400)
 
+    if not user.email_verified:
+        # story 4725 (Didi): the mailed reset link proves the mailbox of an account nobody had proved — the owner takes it over: verified, the new password,
+        # and what an earlier squatter may have left (provider identities, a two-factor secret, every sign-in) dropped. A VERIFIED account keeps its
+        # provider links and its two-factor secret through a reset (only sessions end, below).
+        if await _reclaim_unproved_account(session, user, new_password_hash=hash_password(body.new_password), why="password-reset") is not None:
+            return _ok({"message": "Password reset successfully", "sessions_ended": None})
     await session.execute(
         update(User).where(User.id == user.id).values(
             hashed_password=hash_password(body.new_password),
@@ -2171,9 +2283,17 @@ async def verify_email(
     if user.email_verified:
         return _ok({"message": "Email already verified"})
 
-    await session.execute(
-        update(User).where(User.id == user.id).values(email_verified=True)
-    )
+    if not user.hashed_password:
+        # story 4725 (b): an account made by a provider that did NOT vouch for the address has no password — its holder is whoever signed in with that
+        # provider identity, which may be a squatter. The mailbox owner clicking this link proves the address now: the same reclaim as at the provider
+        # link (sessions and provider ids dropped; the owner comes back through a provider that vouches, or a mailed reset). An account WITH a password
+        # keeps it: the person who registered it clicks this link in the normal flow (a registration-time squatter is a separate design question).
+        if await _reclaim_unproved_account(session, user, why="mail-verification") is None:
+            await session.execute(update(User).where(User.id == user.id).values(email_verified=True))
+    else:
+        await session.execute(
+            update(User).where(User.id == user.id).values(email_verified=True)
+        )
     return _ok({"message": "Email verified successfully"})
 
 

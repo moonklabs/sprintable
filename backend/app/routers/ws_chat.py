@@ -11,7 +11,7 @@ import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy import and_, select
 
 from sqlalchemy.exc import IntegrityError
@@ -19,7 +19,8 @@ from sqlalchemy.exc import IntegrityError
 from dataclasses import dataclass
 
 from app.core.database import async_session_factory
-from app.core.security import JWTError, decode_jwt, hash_token
+from app.core.security import hash_token
+from app.dependencies.auth import verify_access_token
 from app.models.api_key import ApiKey
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant, MessageContentTooLong
 from app.models.project import OrgMember
@@ -69,17 +70,12 @@ async def _authenticate(api_key: str | None, token: str | None) -> TeamMember | 
             )).scalar_one_or_none()
 
         if token:
+            # story 4725 (Mirko 6228236239): signature · type · subject · the per-user cut-off in ONE place
             try:
-                payload = decode_jwt(token)
-            except JWTError:
+                payload = await verify_access_token(token, db)
+            except HTTPException:
                 return None
-            # E-SECURITY SEC-S5(story 278fe427·P0 핫픽스): get_current_user와 동일 타입혼동 갭 —
-            # WS 인증도 refresh 토큰을 그대로 받아들이던 봉인.
-            if payload.get("type") != "access":
-                return None
-            user_id = payload.get("sub")
-            if not user_id:
-                return None
+            user_id = payload["sub"]
             try:
                 uid = uuid.UUID(user_id)
             except ValueError:
