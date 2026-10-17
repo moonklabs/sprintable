@@ -56,6 +56,13 @@ async def _live_rows(session, org_id):
     )).all()
 
 
+async def _ended_rows(session, org_id):
+    """Rows that stay in the table with deleted_at set (soft-ended, not physically deleted)."""
+    return (await session.execute(
+        text("SELECT user_id, role FROM org_members WHERE org_id = :o AND deleted_at IS NOT NULL ORDER BY role"), {"o": org_id}
+    )).all()
+
+
 async def _cleanup(session, *org_ids):
     for o in org_ids:
         await session.execute(text("DELETE FROM org_members WHERE org_id = :o"), {"o": o})
@@ -86,6 +93,7 @@ async def test_a_only_organization_deleted_then_a_new_one_is_allowed():
             assert result == {"ok": True}
 
             assert await _live_rows(session, org_id) == []  # the owner's row ended with the organization
+            assert [(r[0], r[1]) for r in await _ended_rows(session, org_id)] == [(owner, "owner")]  # soft-ended: the row is still there
             await plan_limits.check_org_create_limit(session, owner)  # no raise: the slot is back
     finally:
         async with Session() as session:
@@ -113,6 +121,7 @@ async def test_b_other_organization_still_counts_and_other_members_end_with_thei
             assert result == {"ok": True}
 
             assert await _live_rows(session, a) == []  # owner and plain member of the deleted organization both ended
+            assert {r[0] for r in await _ended_rows(session, a)} == {owner, member}  # ... and both rows are still there (not physically deleted)
             assert {r[0] for r in await _live_rows(session, b)} == {other_owner, member}  # the other organization is untouched
             with pytest.raises(HTTPException) as still_full:  # a person who still owns another organization stays at the limit
                 await plan_limits.check_org_create_limit(session, other_owner)
