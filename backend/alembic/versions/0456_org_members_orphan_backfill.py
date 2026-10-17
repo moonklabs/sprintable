@@ -10,13 +10,12 @@ Same soft, reversible way as 0091 (dead-org tombstone of 2026-06-04: «하드 DE
 because then every row would look orphaned.
 The downgrade does nothing (the ended rows belong to organizations that do not exist, so there is nothing to restore them to).
 
-Numbering: 0455 is taken by the open PR 5132 (desktop_setup_startable, down_revision 0454). This one branches from the current develop head (0454);
-whichever of the two merges second changes its down_revision to the other's revision (one line) so there is a single head.
+Numbering: 0455 is taken by PR 5132 (desktop_setup_startable, down_revision 0454), which merges first; this one chains after it (down_revision 0455).
 """
 from alembic import op
 
 revision = "0456"
-down_revision = "0454"
+down_revision = "0455"
 branch_labels = None
 depends_on = None
 
