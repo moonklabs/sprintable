@@ -603,6 +603,28 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
     return len(snapshot.sessions)
 
 
+async def accessible_startable(db: AsyncSession, setup: DesktopSetup, snapshot: StartableSnapshot) -> StartableSnapshot:
+    """story #4714: narrow the computer's list to the pairs its own agents can really have: the agent is one this device was set up with
+    (else 422 `agent_not_on_device`, as a session report) AND the agent belongs to the project (its project profile) AND the project is a live
+    project of this device's organization. A pair outside that is dropped, not refused: the computer works from its own files and a refusal would
+    only make it send the same list again. The phone's reads cut the list by who may open what; this keeps the stored list itself to what is possible."""
+    from app.models.member import AgentProjectProfile
+    from app.models.project import Project
+
+    for item in snapshot.startable:
+        _check_agent(setup, item.agent_member_id)
+    agents = {i.agent_member_id for i in snapshot.startable}
+    if not agents:
+        return snapshot
+    rows = (await db.execute(
+        select(AgentProjectProfile.member_id, AgentProjectProfile.project_id)
+        .join(Project, Project.id == AgentProjectProfile.project_id)
+        .where(AgentProjectProfile.member_id.in_(agents), Project.org_id == setup.org_id, Project.deleted_at.is_(None))
+    )).all()
+    possible = {(m, p) for m, p in rows}
+    return StartableSnapshot(startable=[i for i in snapshot.startable if (i.agent_member_id, i.project_id) in possible])
+
+
 async def replace_startable(db: AsyncSession, setup: DesktopSetup, snapshot: StartableSnapshot) -> int:
     """story #4714: the computer's startable pairs, as it says them (a pair for an agent this device was not set up with is refused —
     the same rule as a session report). Stored as given, sorted and without repeats."""

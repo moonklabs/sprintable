@@ -401,9 +401,10 @@ async def post_pairing_reveal(offer_id: uuid.UUID, body: PairingReveal, setup: D
 
 @router.put("/relay/startable")
 async def put_startable(body: relay.StartableSnapshot, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
-    """story #4714: the computer's own list of the (agent, project) pairs it has a usable folder for — ids only; replaces the whole list."""
+    """story #4714: the computer's own list of the (agent, project) pairs it has a usable folder for — ids only; replaces the whole list. The list is
+    narrowed first to the pairs its agents can really have (`accessible_startable`: the agent's project profile · a live project of this organization)."""
     try:
-        n = await relay.replace_startable(db, setup, body)
+        n = await relay.replace_startable(db, setup, await relay.accessible_startable(db, setup, body))
     except relay.DesktopRelayError as exc:
         await db.rollback()
         return _error(exc)

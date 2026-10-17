@@ -79,10 +79,17 @@ async def test_01_the_computer_reports_ids_only_the_list_is_replaced_whole_and_a
         sid, tok = device["setup_id"], _tok(device["device_token"])
         # no device token → 401 (a person is no device)
         assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ)), headers=_person(OWNER))).status_code == 401
-        ok = await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ), (agent, PROJ2), (agent, PROJ)), headers=tok)
-        assert (ok.status_code, ok.json()) == (200, {"startable": 2})  # sorted · no repeat
+        ok = await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ), (agent, PROJ2), (agent, PROJ), (agent, PROJ3)), headers=tok)
+        assert (ok.status_code, ok.json()) == (200, {"startable": 2})  # sorted · no repeat · (agent, PROJ3) dropped: the agent is not in that project
         stored = (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{sid}'"))[0][0]
         assert sorted(stored, key=lambda i: i["project_id"]) == [{"agent_member_id": agent, "project_id": str(PROJ)}, {"agent_member_id": agent, "project_id": str(PROJ2)}]
+        # narrowed to what the agents can really have: a project that is gone (soft-deleted) is dropped too, and nothing else is stored
+        await _sql(f"UPDATE projects SET deleted_at = now() WHERE id = '{PROJ2}'")
+        try:
+            assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ), (agent, PROJ2)), headers=tok)).json() == {"startable": 1}
+            assert (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{sid}'"))[0][0] == [{"agent_member_id": agent, "project_id": str(PROJ)}]
+        finally:
+            await _sql(f"UPDATE projects SET deleted_at = NULL WHERE id = '{PROJ2}'")
         # replaced whole, not merged
         assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ2)), headers=tok)).json() == {"startable": 1}
         stored = (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{sid}'"))[0][0]

@@ -315,6 +315,16 @@
 "kind": "unknown"
 },
 {
+"method": "POST",
+"path": "/api/v2/agents/{}/desktop-start",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/agents/{}/desktop-startable",
+"kind": "unknown"
+},
+{
 "method": "GET",
 "path": "/api/v2/agents/{}/message-policy",
 "kind": "object"
@@ -925,6 +935,11 @@
 "kind": "unknown"
 },
 {
+"method": "PUT",
+"path": "/api/v2/desktop/relay/startable",
+"kind": "unknown"
+},
+{
 "method": "GET",
 "path": "/api/v2/desktop/relay/stream",
 "kind": "unknown"
@@ -992,6 +1007,11 @@
 {
 "method": "GET",
 "path": "/api/v2/desktop/setups/{}/sessions",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/startable",
 "kind": "unknown"
 },
 {
