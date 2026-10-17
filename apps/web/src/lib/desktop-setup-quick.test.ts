@@ -1,7 +1,7 @@
 // story 4711 — the pure rules of the first setup in three steps (and the address the app opens the page with)
 import { describe, expect, it } from 'vitest';
 import { parseSetupFragment, setupFragment, parseRuntimeVersions, isFolderRefused } from './desktop-setup';
-import { defaultSoloRuntime, shownProjectName, soloConfirmBody, soloNewOrgConfirmBody, soloOutcome, soloStartBlock, showsQuickCard, usableRuntimes } from './desktop-setup-quick';
+import { defaultSoloRuntime, folderTracePick, shownProjectName, soloConfirmBody, soloNewOrgConfirmBody, soloOutcome, soloStartBlock, showsQuickCard, usableRuntimes } from './desktop-setup-quick';
 
 const CODE = `${'A'.repeat(20)}_-${'b'.repeat(21)}`;
 const PROJ = '11111111-1111-4111-8111-111111111111';
@@ -87,5 +87,28 @@ describe('[SID:4711] what the server\'s answers mean for the card', () => {
     expect(soloOutcome(409, { code: 'pending_invites' }, null)).toEqual({ kind: 'pending-invites' });
     expect(soloOutcome(429, undefined, '90')).toEqual({ kind: 'rate-limited', retryAfter: 90 });
     expect(soloOutcome(500, { code: 'something' }, null)).toEqual({ kind: 'generic' });
+  });
+});
+
+describe('[SID:4713 AC2] the folder marks in the address, and the program they pick', () => {
+  const F = '&fshown=~/a&fname=a';
+  it('reads ftrace: only the table\'s two names, once each, in the table\'s order — anything else is no mark', () => {
+    expect((q(`${F}&ftrace=AGENTS.md,CLAUDE.md`).folder as { traces?: string[] }).traces).toEqual(['CLAUDE.md', 'AGENTS.md']);
+    expect((q(`${F}&ftrace=CLAUDE.md,CLAUDE.md,agents.md,../CLAUDE.md,X`).folder as { traces?: string[] }).traces).toEqual(['CLAUDE.md']);
+    expect(q(`${F}&ftrace=nope`).folder).toEqual({ shown: '~/a', name: 'a' });
+    expect(q(`${F}`).folder).toEqual({ shown: '~/a', name: 'a' });
+  });
+  it('the address the page builds again carries the marks (round trip)', () => {
+    const r = q(`${F}&ftrace=CLAUDE.md,AGENTS.md`);
+    expect(setupFragment(r)).toContain('ftrace=CLAUDE.md,AGENTS.md');
+    expect(parseSetupFragment(setupFragment(r))!.folder).toEqual(r.folder);
+  });
+  it('folderTracePick: the first OFFERED program with a mark; none offered has one → null', () => {
+    const both = { shown: '~/a', name: 'a', traces: ['CLAUDE.md', 'AGENTS.md'] as const };
+    expect(folderTracePick(both, ['codex', 'claude'])).toEqual({ file: 'AGENTS.md', runtime: 'codex' }); // the found order decides
+    expect(folderTracePick(both, ['claude'])).toEqual({ file: 'CLAUDE.md', runtime: 'claude' });
+    expect(folderTracePick({ shown: '~/a', name: 'a', traces: ['AGENTS.md'] }, ['claude'])).toBeNull();
+    expect(folderTracePick({ shown: '~/a', name: 'a' }, ['claude', 'codex'])).toBeNull();
+    expect(folderTracePick(undefined, ['claude'])).toBeNull();
   });
 });

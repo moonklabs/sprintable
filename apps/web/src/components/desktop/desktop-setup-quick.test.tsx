@@ -718,3 +718,66 @@ describe('[SID:4721] the member card on the first-setup page keeps the setup val
     expect(calls.find((c) => c.url === '/api/organizations')!.body).toEqual({ name: "Jiwoo's organization" });
   });
 });
+
+describe('[SID:4713 AC2] the card picks the program a folder\'s CLAUDE.md / AGENTS.md means, and says so once', () => {
+  const checked = () => container.querySelector('input[name=quick-runtime]:checked')!.parentElement!.textContent ?? '';
+  const line = () => container.querySelector('[data-testid=quick-trace]')?.textContent ?? null;
+  const F = '&fshown=~/code/my-app&fname=my-app';
+
+  it('a folder with CLAUDE.md → Claude Code picked and the line names the file; with AGENTS.md → Codex picked, the line names AGENTS.md, and [시작] sends codex', async () => {
+    await mount(frag(`${F}&pick=codex&ftrace=CLAUDE.md`)); // the earlier pick is only an echo: the folder's mark wins over it
+    expect(checked()).toContain('Claude Code');
+    expect(line()).toBe('이 폴더에 CLAUDE.md가 있어요 · 에이전트는 Claude Code로 골라 뒀어요');
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    await mount(frag(`${F}&ftrace=AGENTS.md`));
+    expect(checked()).toContain('Codex');
+    expect(line()).toBe('이 폴더에 AGENTS.md가 있어요 · 에이전트는 Codex로 골라 뒀어요');
+    await act(async () => { buttonOf('시작')!.click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(calls.find((c) => c.url.endsWith('/confirm-solo'))!.body).toEqual({ code: CODE, runtime: 'codex', project_name: 'my-app' });
+  });
+
+  it('both marks → the first program this computer has in the found order; no mark → no line and the usual default', async () => {
+    await mount(frag(`${F}&ftrace=CLAUDE.md,AGENTS.md`));
+    expect(checked()).toContain('Claude Code');
+    expect(line()).toContain('CLAUDE.md');
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    await mount(frag(`${F}&pick=codex`));
+    expect(checked()).toContain('Codex'); // the echoed pick stands when the folder says nothing
+    expect(line()).toBeNull();
+  });
+
+  it('a mark whose program this computer does not have → the usual default and NO line (never a word about something that was not done)', async () => {
+    await mount(`#code=${CODE}&setup=11111111-1111-4111-8111-aaaaaaaaaaaa&runtimes=claude&caps=move,solo&rv=claude:2.1.289${F}&ftrace=AGENTS.md`);
+    expect(line()).toBeNull();
+    expect(text()).toContain('Claude Code');
+    expect(container.querySelector('[data-testid=quick-start-line]')!.textContent).toContain('Claude Code 에이전트 하나를');
+  });
+
+  it('the person picks the other radio → the line is gone (it would be false); picking the marked one again brings it back', async () => {
+    await mount(frag(`${F}&ftrace=AGENTS.md`));
+    const radios = () => [...container.querySelectorAll<HTMLInputElement>('input[name=quick-runtime]')];
+    await act(async () => { radios().find((r) => r.parentElement!.textContent!.includes('Claude Code'))!.click(); });
+    expect(checked()).toContain('Claude Code');
+    expect(line()).toBeNull();
+    await act(async () => { radios().find((r) => r.parentElement!.textContent!.includes('Codex'))!.click(); });
+    expect(line()).toContain('AGENTS.md');
+  });
+
+  it('the person\'s radio choice belongs to the folder it was made for: a folder picked afterwards starts from its own mark again', async () => {
+    const query = (extra: string) => parseSetupFragment(frag(extra))!;
+    ctx.mockReturnValue({ projectId: undefined, currentProjectSlug: 'proj', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'owner' }], projectMemberships: [] });
+    const render = async (extra: string) => { await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DesktopSetupQuick query={query(extra)} onTeam={() => undefined} /></NextIntlClientProvider>); }); for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); }); };
+    await render(`${F}&ftrace=AGENTS.md`);
+    await act(async () => { [...container.querySelectorAll<HTMLInputElement>('input[name=quick-runtime]')].find((r) => r.parentElement!.textContent!.includes('Claude Code'))!.click(); });
+    expect(checked()).toContain('Claude Code');
+    await render('&fshown=~/code/other&fname=other&ftrace=AGENTS.md'); // another folder, same page
+    expect(checked()).toContain('Codex');
+    expect(line()).toContain('AGENTS.md');
+  });
+
+  it('English words', async () => {
+    await mount(frag(`${F}&ftrace=AGENTS.md`), {}, 'en');
+    expect(line()).toBe('This folder has AGENTS.md · Codex is picked for it');
+  });
+});

@@ -7038,6 +7038,7 @@
         "copied": "Copied",
         "copyAria": "Copy · {name} install command",
         "refind": "Look again",
+        "traceDefault": "This folder has {file} · {runtime} is picked for it",
         "folderPick": "Choose a folder",
         "folderChange": "Change",
         "projectNew": "Project name · {name}",

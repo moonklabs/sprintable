@@ -1,12 +1,22 @@
 // story 4711 — 처음 셋업 세 걸음(에이전트 → 폴더 → 시작)의 순수 규칙. 화면 · 글은 유나 `yuna/4711-copy-1016.md`, 서버는 confirm-solo(PR 5120).
 // 폴더 고르기는 앱의 맥 폴더 창이 한다(웹은 못 고른다) — 앱이 고른 결과를 주소의 `#` 조각으로 되돌려 열고, 웹은 «이름»만 서버에 보낸다(경로 0).
-import { DESKTOP_RUNTIMES, isFolderRefused, type DesktopRuntime, type FolderRefusal, type SetupQuery, type SoloFolder } from './desktop-setup';
+import { DESKTOP_RUNTIMES, SOLO_TRACE_RUNTIME, isFolderRefused, type DesktopRuntime, type FolderRefusal, type SetupQuery, type SoloFolder, type SoloTraceFile } from './desktop-setup';
 
 /** The agent the card picks without being asked: the person's earlier pick (echoed by the app after the folder window) if it is still
  *  usable, else the first usable one in the fixed order (Claude Code → Codex). None usable → null (the card shows the no-agent block). */
 export function defaultSoloRuntime(usable: readonly DesktopRuntime[], pick?: DesktopRuntime): DesktopRuntime | null {
   if (pick && usable.includes(pick)) return pick;
   return DESKTOP_RUNTIMES.find((r) => usable.includes(r)) ?? null;
+}
+
+/** story 4713 AC2: the mark the folder carries whose program this card can offer — the first of the OFFERED programs (their order is the app's found order,
+ *  the rule the recruiter's card uses) that has a mark in the folder. None offered has a mark → null (no pick, and no line: never a word about something not done). */
+export function folderTracePick(folder: SoloFolder | undefined, usable: readonly DesktopRuntime[]): { file: SoloTraceFile; runtime: DesktopRuntime } | null {
+  for (const runtime of usable) {
+    const file = folder?.traces?.find((f) => SOLO_TRACE_RUNTIME[f] === runtime);
+    if (file) return { file, runtime };
+  }
+  return null;
 }
 
 /** The runtimes the card may offer: found, and not one the company's managed MCP policy blocks (⑥). */
