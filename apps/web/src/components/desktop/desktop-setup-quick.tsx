@@ -248,13 +248,13 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
   if (orgMode.kind === 'invite-failed') return <InviteCheckFailedCard onRetry={() => { setOrgMode({ kind: 'checking' }); void readInvites(); }} />;
   if (newOrg && verifyGate.kind === 'closed') return <EmailVerifyGateCard gate={verifyGate} />;
   if (orgMode.kind === 'checking' || (newOrg && verifyGate.kind === 'reading')) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
-  if (orgMode.kind === 'has-org' && !isAdmin) return <Failure failure="not-admin" />;
+  // the setup values are only in memory (the page took them off the address): a reload that lands on THIS page puts them back first
+  const reloadKeepingSetup = () => { window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment(query)); window.location.reload(); };
+  if (orgMode.kind === 'has-org' && !isAdmin) return <Failure failure="not-admin" onReloadPage={reloadKeepingSetup} />;
   if (view.kind === 'done-reload') return <SetupDoneReload setupId={madeSetupId} />;
   if (view.kind === 'started') return <SetupProgressView setupId={madeSetupId} recipeName="" phoneControlFailed={phoneControlFailed} onPhoneRetry={retryPhoneControl} />;
   if (view.kind === 'failed') {
-    const onReloadPage = view.failure === 'has-org'
-      ? () => { window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment(query)); window.location.reload(); }
-      : undefined;
+    const onReloadPage = view.failure === 'has-org' || view.failure === 'not-admin' ? reloadKeepingSetup : undefined;
     return <Failure failure={view.failure} counts={view.counts ?? null} plan={view.plan ?? null} solo onRetry={view.failure === 'offline' ? () => void (agent ? startAgent() : start(limitAsk?.id)) : undefined} onReloadPage={onReloadPage} />;
   }
   // nothing usable on this computer: blocked by the company's policy · installed but too old · not found (the install lines)

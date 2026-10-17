@@ -168,6 +168,35 @@ describe('[SID:4427] desktop setup page', () => {
     expect(text()).toContain('연결이 끊겼어요');
   });
 
+
+  it('story 4721: a member who came for a recruited agent (agent=…) keeps it through [다시 확인] — the fragment carries the agent too', async () => {
+    vi.stubGlobal('location', { ...window.location, pathname: '/desktop/setup', search: '', hash: '', reload: vi.fn() } as unknown as Location);
+    let replaced = '';
+    const replaceState = vi.spyOn(window.history, 'replaceState').mockImplementation((_s, _t, url) => { replaced = String(url); });
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} setupId="s-1" preselect="agent-1" />, 'member');
+    await act(async () => { ([...container.querySelectorAll('button')].find((b) => b.textContent === '다시 확인') as HTMLButtonElement).click(); });
+    expect(new URLSearchParams(replaced.split('#')[1]).get('agent')).toBe('agent-1');
+    replaceState.mockRestore();
+  });
+
+  it('story 4721: the server refuses «시작» as not-admin (the page took them for an admin) → the member card, and [다시 확인] reloads WITH the setup values', async () => {
+    const order: string[] = [];
+    vi.stubGlobal('location', { ...window.location, pathname: '/desktop/setup', search: '', hash: '', reload: vi.fn(() => { order.push('reload'); }) } as unknown as Location);
+    let replaced = '';
+    const replaceState = vi.spyOn(window.history, 'replaceState').mockImplementation((_s, _t, url) => { replaced = String(url); order.push('replace'); });
+    stub(() => new Response(JSON.stringify({ error: { code: 'not_org_admin', message: 'x' } }), { status: 403 }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} setupId="s-1" />);
+    await act(async () => { startButton().click(); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(text()).toContain('에이전트를 만들려면 조직 관리자여야 해요');
+    await act(async () => { ([...container.querySelectorAll('button')].find((b) => b.textContent === '다시 확인') as HTMLButtonElement).click(); });
+    expect(order).toEqual(['replace', 'reload']);
+    expect(replaced.startsWith('/desktop/setup#')).toBe(true);
+    const q = new URLSearchParams(replaced.split('#')[1]);
+    expect([q.get('code'), q.get('setup'), q.get('runtimes')]).toEqual([CODE, 's-1', 'claude']); // not only the code: everything the page held
+    replaceState.mockRestore();
+  });
   it('confirm codes → screens (closed list); an unknown code is not guessed', () => {
     expect(failureForCode('not_org_admin')).toBe('not-admin');
     expect(failureForCode('person_session_required')).toBe('not-admin');

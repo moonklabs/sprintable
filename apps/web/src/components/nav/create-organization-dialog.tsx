@@ -32,12 +32,18 @@ interface CreateOrganizationDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: (orgId: string) => void;
+  /** story 4721: the name the box opens with (the Mac app's setup card fills it the way the app path names an organization). */
+  initialName?: string;
+  /** story 4721: the address name may stay empty — the server derives it from the name (story 4669), as the first-screen path does. */
+  slugOptional?: boolean;
 }
 
 export function CreateOrganizationDialog({
   open,
   onOpenChange,
   onCreated,
+  initialName = '',
+  slugOptional = false,
 }: CreateOrganizationDialogProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('nav');
@@ -48,8 +54,12 @@ export function CreateOrganizationDialog({
   // 재사용한다 — 문구가 실제로 하나의 출처를 갖는다.
   const tOnboarding = useTranslations('onboarding');
   const tc = useTranslations('common');
-  const [name, setName] = useState('');
-  const [slug, setSlug] = useState('');
+  // story 4721: where the address is optional it is only what the person typed — never derived from the name here (a Korean name gives «-»,
+  // «Jiwoo의 조직» gives «jiwoo-»; and a derived address that collides would answer 409 where the server would have numbered it): the
+  // server derives it (story 4669), as the first-screen path does
+  const derive = (n: string) => (slugOptional ? '' : toSlug(n));
+  const [name, setName] = useState(initialName);
+  const [slug, setSlug] = useState(derive(initialName));
   const [slugTouched, setSlugTouched] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
@@ -66,7 +76,7 @@ export function CreateOrganizationDialog({
   function handleNameChange(value: string) {
     setName(value);
     if (!slugTouched) {
-      setSlug(toSlug(value));
+      setSlug(derive(value));
     }
   }
 
@@ -77,8 +87,8 @@ export function CreateOrganizationDialog({
 
   function handleClose(nextOpen: boolean) {
     if (!nextOpen) {
-      setName('');
-      setSlug('');
+      setName(initialName);
+      setSlug(derive(initialName));
       setSlugTouched(false);
       setError('');
       setPlanLimitHit(false);
@@ -88,14 +98,14 @@ export function CreateOrganizationDialog({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim() || !slug.trim() || slugError || creating) return;
+    if (!name.trim() || (!slugOptional && !slug.trim()) || slugError || creating) return;
     setCreating(true);
     setError('');
     try {
       const res = await fetch('/api/organizations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), slug: slug.trim() }),
+        body: JSON.stringify(slug.trim() ? { name: name.trim(), slug: slug.trim() } : { name: name.trim() }),
       });
       const json = await res.json() as { data?: { id: string; name: string; slug: string }; error?: { code?: string; message?: string }; detail?: { code?: string; message?: string } | string };
       if (!res.ok) {
@@ -136,7 +146,7 @@ export function CreateOrganizationDialog({
 
   // story 4680 (Yuna §N-2): the same switch as the project and agent banners — billing closed (prod today) → the fact, no way
   const orgLimit = limitCopy({ resource: 'org', limit: 1, free: true, billingOpen: isEEEnabled() });
-  const canSubmit = name.trim().length > 0 && slug.trim().length > 0 && !slugError && !creating;
+  const canSubmit = name.trim().length > 0 && (slugOptional || slug.trim().length > 0) && !slugError && !creating;
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -182,7 +192,7 @@ export function CreateOrganizationDialog({
           </div>
           <div className="space-y-1">
             <label className="text-sm font-medium" htmlFor="org-slug">
-              {t('createOrgSlugLabel')} <span className="text-destructive">*</span>
+              {t('createOrgSlugLabel')}{slugOptional ? null : <> <span className="text-destructive">*</span></>}
             </label>
             <input
               id="org-slug"
@@ -190,7 +200,7 @@ export function CreateOrganizationDialog({
               placeholder={t('createOrgSlugPlaceholder')}
               value={slug}
               onChange={(e) => handleSlugChange(e.target.value)}
-              required
+              required={!slugOptional}
             />
             {slugError ? (
               <p className="text-xs text-destructive">{slugError}</p>

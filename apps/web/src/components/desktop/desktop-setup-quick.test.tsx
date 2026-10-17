@@ -51,6 +51,8 @@ function stub() {
     if (url.endsWith('/api/desktop/recipes')) return recipesNow(); // story 4717: the plan's agent room rides on the recipe list
     if (/\/api\/organizations\/[^/]+\/remote-control$/.test(url)) return init?.method === 'PUT' ? remotePut() : remoteGet();
     if (url.endsWith('/api/invites/mine')) return invitesNow();
+    if (url === '/api/organizations' && init?.method === 'POST') return new Response(JSON.stringify({ data: { id: 'o-mine' } }), { status: 200 }); // story 4721
+    if (url === '/api/switch-org') return new Response(JSON.stringify({ data: { ok: true } }), { status: 200 });
     if (url.endsWith('/api/auth/me')) return new Response(JSON.stringify({ data: { display_name: '김지우', email: 'a@b.c', email_verified: true, email_verification_required: true } }), { status: 200 });
     if (url.endsWith('/api/auth/refresh')) return new Response('{}', { status: 200 });
     if (url.endsWith('/api/current-project')) return new Response('{}', { status: 200 });
@@ -608,5 +610,111 @@ describe('[SID:4717] the solo card says the plan\'s agent room before «시작»
     expect(text()).toContain('업그레이드가 필요해요');
     expect(linkOf('요금제 업그레이드 →')).toBeTruthy();
     expect(text()).not.toContain('레시피');
+  });
+});
+
+describe('[SID:4721] the member card on the first-setup page keeps the setup values through its reloads', () => {
+  const memberReload = () => {
+    const order: string[] = [];
+    vi.stubGlobal('location', { ...window.location, pathname: '/desktop/setup', search: '', hash: '', reload: vi.fn(() => { order.push('reload'); }) } as unknown as Location);
+    let replaced = '';
+    vi.spyOn(window.history, 'replaceState').mockImplementation((_s, _t, url) => { replaced = String(url); order.push('replace'); });
+    return { order, replaced: () => replaced };
+  };
+  // the values go back into the fragment — a bare reload showed «데스크톱 앱에서 열어 주세요» — ALL of them (code · setup · runtimes · caps · versions · folder)
+  const checkFragment = (replaced: string, sent: string = frag('')) => {
+    expect(replaced.startsWith('/desktop/setup#')).toBe(true);
+    expect(parseSetupFragment('#' + replaced.split('#')[1])).toEqual(parseSetupFragment(sent));
+  };
+
+  it('[다시 확인] reloads WITH the setup values', async () => {
+    const r = memberReload();
+    await mount(frag(''), { role: 'member' });
+    await act(async () => { buttonOf('다시 확인')!.click(); });
+    expect(r.order).toEqual(['replace', 'reload']);
+    checkFragment(r.replaced());
+  });
+
+  it('the server refuses [시작] as not-admin (the page thought they were an admin): the same card, and [다시 확인] reloads WITH the setup values', async () => {
+    const r = memberReload();
+    confirmNow = () => new Response(JSON.stringify({ error: { code: 'not_org_admin' } }), { status: 403 });
+    await mount(frag('&fshown=~/new/folder&fname=folder'), { role: 'owner' });
+    await act(async () => { buttonOf('시작')!.click(); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(text()).toContain('에이전트를 만들려면 조직 관리자여야 해요');
+    await act(async () => { buttonOf('다시 확인')!.click(); });
+    expect(r.order).toEqual(['replace', 'reload']);
+    checkFragment(r.replaced(), frag('&fshown=~/new/folder&fname=folder'));
+  });
+
+  it('create → switch → the reload carries the setup values too (the same page as the new owner, not «앱에서 열기»)', async () => {
+    const r = memberReload();
+    await mount(frag(''), { role: 'member' });
+    await act(async () => { buttonOf('내 조직 만들어 시작하기')!.click(); });
+    const form = document.body.querySelector('form') as HTMLFormElement;
+    await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+    for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); });
+    expect(calls.filter((c) => c.url === '/api/organizations' || c.url === '/api/switch-org').map((c) => [c.url, c.body])).toEqual([
+      ['/api/organizations', { name: '김지우의 조직' }],
+      ['/api/switch-org', { org_id: 'o-mine' }],
+    ]);
+    expect(r.order).toEqual(['replace', 'reload']);
+    checkFragment(r.replaced());
+  });
+
+  it('the organization was made but the switch failed: [다시 확인] tries the SWITCH again too (a bare reload would drop the made organization and close the primary)', async () => {
+    const r = memberReload();
+    await mount(frag(''), { role: 'member' });
+    const base = globalThis.fetch;
+    let switches = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => String(input) === '/api/switch-org'
+      ? (calls.push({ url: '/api/switch-org' }), ++switches === 1 ? new Response('{}', { status: 500 }) : new Response(JSON.stringify({ data: { ok: true } }), { status: 200 }))
+      : base(input, init)));
+    await act(async () => { buttonOf('내 조직 만들어 시작하기')!.click(); });
+    const form = document.body.querySelector('form') as HTMLFormElement;
+    await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+    for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); });
+    expect(text()).toContain('조직을 전환하지 못했어요');
+    expect(r.order).toEqual([]);
+    await act(async () => { buttonOf('다시 확인')!.click(); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(calls.filter((c) => c.url === '/api/organizations')).toHaveLength(1); // never a second organization
+    expect(calls.filter((c) => c.url === '/api/switch-org')).toHaveLength(2);
+    expect(r.order).toEqual(['replace', 'reload']);
+  });
+
+  it('a second press while the switch is on its way does not send a second switch', async () => {
+    const r = memberReload();
+    await mount(frag(''), { role: 'member' });
+    let release: (v: Response) => void = () => {};
+    const base = globalThis.fetch;
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => String(input) === '/api/switch-org'
+      ? (calls.push({ url: '/api/switch-org' }), new Promise<Response>((res) => { release = res; }))
+      : base(input, init)));
+    await act(async () => { buttonOf('내 조직 만들어 시작하기')!.click(); });
+    const form = document.body.querySelector('form') as HTMLFormElement;
+    await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+    for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); });
+    expect(buttonOf('내 조직 만들어 시작하기')!.disabled).toBe(true);
+    await act(async () => { buttonOf('내 조직 만들어 시작하기')!.click(); });
+    expect(calls.filter((c) => c.url === '/api/switch-org')).toHaveLength(1);
+    await act(async () => { release(new Response(JSON.stringify({ data: { ok: true } }), { status: 200 })); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(r.order).toEqual(['replace', 'reload']);
+  });
+
+  it('en: the dialog opens with «Jiwoo\'s organization» and the address box stays empty (no derived address such as «jiwoo-s-organization» is sent)', async () => {
+    memberReload();
+    ctx.mockReturnValue({ projectId: undefined, currentProjectSlug: 'proj', userName: 'Jiwoo', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'member' }], projectMemberships: [] });
+    const query = parseSetupFragment(frag(''))!;
+    await act(async () => { root.render(<NextIntlClientProvider locale="en" messages={enMessages} timeZone="Asia/Seoul"><DesktopSetupQuick query={query} onTeam={() => {}} /></NextIntlClientProvider>); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    await act(async () => { buttonOf('Create my own organization')!.click(); });
+    expect((document.body.querySelector('#org-name') as HTMLInputElement).value).toBe("Jiwoo's organization");
+    expect((document.body.querySelector('#org-slug') as HTMLInputElement).value).toBe('');
+    const form = document.body.querySelector('form') as HTMLFormElement;
+    await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+    for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); });
+    expect(calls.find((c) => c.url === '/api/organizations')!.body).toEqual({ name: "Jiwoo's organization" });
   });
 });
