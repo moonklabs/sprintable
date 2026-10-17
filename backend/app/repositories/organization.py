@@ -5,7 +5,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -307,6 +307,18 @@ class OrganizationRepository:
             entity_type="organization", entity_id=org_id, entity_title=org.name,
             note=impact_note,
         ))
+        # story 4726 — `org_members.org_id` has no foreign key (baseline schema.sql: only a primary key and a unique on
+        # (org_id, user_id)), so deleting the organizations row below does not remove the people's rows: the owner row stayed
+        # with deleted_at NULL and kept counting in the free plan's owned-organization limit (ee/plan_limits.py
+        # check_org_create_limit) — the one person who deleted their only organization could not make a new one (402 on dev,
+        # 10-17). The rows of a deleted organization are ended with it, in the same transaction, the way an account or member
+        # removal ends them (deleted_at): every reader of org_members already filters `deleted_at IS NULL`, so the fix lives
+        # here once instead of in each of the readers (35 raw queries and 73 ORM selects).
+        await self.session.execute(
+            update(OrgMember)
+            .where(OrgMember.org_id == org_id, OrgMember.deleted_at.is_(None))
+            .values(deleted_at=func.now())
+        )
         await self.session.delete(org)
         return {"ok": True}
 
