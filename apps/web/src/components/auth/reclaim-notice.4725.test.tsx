@@ -55,6 +55,13 @@ describe('story 4725 — the reclaim notice', () => {
     expect(closeButton()!.className).not.toMatch(/bg-primary/); // not a filled button
   });
 
+  it('the notice carries the info icon (decorative) so its text starts in the text column like the sibling notices', async () => {
+    await mount();
+    const icon = notice()!.querySelector(':scope > svg');
+    expect(icon).not.toBeNull();
+    expect(icon!.getAttribute('aria-hidden')).toBe('true');
+  });
+
   it('it is a neutral status, not an alert: role=status, no alert role, never closes by itself', async () => {
     await mount();
     expect(notice()!.getAttribute('role')).toBe('status');
@@ -124,7 +131,7 @@ describe('story 4725 — the reclaim notice', () => {
   });
 
   it('it is mounted in the signed-in shell (a built notice nobody mounts tells no one)', () => {
-    const shell = readFileSync(path.join(process.cwd(), 'apps/web/src/app/dashboard/dashboard-shell.tsx'), 'utf8');
+    const shell = readFileSync(path.resolve(__dirname, '..', '..', 'app', 'dashboard', 'dashboard-shell.tsx'), 'utf8');
     expect(shell).toContain("import { ReclaimNoticeAlert } from '@/components/auth/reclaim-notice';");
     expect(shell).toMatch(/<ReclaimNoticeAlert \/>/);
   });

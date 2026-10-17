@@ -596,6 +596,11 @@
 },
 {
 "method": "POST",
+"path": "/api/v2/auth/reclaim-notice/dismiss",
+"kind": "unknown"
+},
+{
+"method": "POST",
 "path": "/api/v2/auth/refresh",
 "kind": "unknown"
 },

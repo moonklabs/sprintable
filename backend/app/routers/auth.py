@@ -494,7 +494,7 @@ async def _reclaim_unproved_account(
     cut: list[str] = []
     if ended:
         cut.append("sessions")
-    if identities_cut or any(v and not (keep_provider is not None and col == f"{keep_provider[0]}_id" and v == keep_provider[1]) for col, v in pre_providers.items()):
+    if identities_cut or any(pre_providers.values()):
         cut.append("providers")
     if pre.totp_enabled or pre.totp_secret:
         cut.append("two_step")
@@ -2682,6 +2682,8 @@ async def get_auth_me(
             ).one_or_none()
             if user_row is not None:
                 email_verified, display_name, reclaim_notice = user_row
+                if _requires_interactive_session(auth):
+                    reclaim_notice = None   # only a person at a screen is told (a personal API key is not)
         except Exception:
             logger.warning("get_auth_me: email_verified 조회 실패 — None으로 반환", exc_info=True)
         # story #4178 — org 미해소(org 없음·OrgMember 행 없음)는 예외가 아니라 None.
@@ -2729,9 +2731,8 @@ async def dismiss_reclaim_notice(
     # a request that was admitted just before a reclaim waits here for the row the reclaim holds: after it commits, the session is checked against the cut-off AGAIN
     # (under the lock), so an old session cannot erase the notice the reclaim just wrote
     await session.execute(select(User.id).where(User.id == uuid.UUID(auth.user_id)).with_for_update())
-    # (a Firebase session carries no `iat`: its `auth_time` was already checked against the cut-off for this request by its own resolver)
-    if auth.claims.get("iat") is not None:
-        await _reject_if_before_cutover(auth.user_id, auth.claims.get("iat"), session)
+    # (a legacy session carries `iat`, a Firebase one `auth_time` — the same per-user cut-off applies to either)
+    await _reject_if_before_cutover(auth.user_id, auth.claims.get("iat") or auth.claims.get("auth_time"), session)
     await session.execute(update(User).where(User.id == uuid.UUID(auth.user_id)).values(reclaim_notice=None))
     await session.commit()
     return _ok({"dismissed": True})

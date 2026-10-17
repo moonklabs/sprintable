@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 import uuid
 from unittest.mock import AsyncMock
 
@@ -263,11 +264,33 @@ async def test_a_session_without_iat_such_as_firebase_can_clear_its_own_notice(w
         await _register(c, email)
         owner = _data(await _callback(c, monkeypatch, provider="google", sub="owner-sub", email=email, verified=True))
         uid = (await _rows(f"SELECT id FROM users WHERE email = '{email}'"))[0][0]
-        auth = AuthContext(user_id=str(uid), email=email, claims={"auth_issuer": "https://securetoken.example/p", "app_metadata": {}})
+        auth = AuthContext(user_id=str(uid), email=email, claims={"auth_issuer": "https://securetoken.example/p", "auth_time": int(time.time()) + 5, "app_metadata": {}})
         async with async_session_factory() as session:
             r = await dismiss_reclaim_notice(session=session, auth=auth)
             assert r.status_code == 200
         assert await _notice(c, owner) is None
+
+
+@pytest.mark.anyio
+async def test_a_firebase_session_older_than_the_cut_off_cannot_clear_it(world, monkeypatch):
+    """the same re-check by `auth_time` for a session that has no `iat` (Kadir's recommendation 1)"""
+    from fastapi import HTTPException
+
+    from app.core.database import async_session_factory
+    from app.dependencies.auth import AuthContext
+    from app.routers.auth import dismiss_reclaim_notice
+
+    email = "victim@d4725n.test"
+    async with _client() as c:
+        await _register(c, email)
+        owner = _data(await _callback(c, monkeypatch, provider="google", sub="owner-sub", email=email, verified=True))
+        uid = (await _rows(f"SELECT id FROM users WHERE email = '{email}'"))[0][0]
+        auth = AuthContext(user_id=str(uid), email=email, claims={"auth_issuer": "https://securetoken.example/p", "auth_time": int(time.time()) - 3600, "app_metadata": {}})
+        async with async_session_factory() as session:
+            with pytest.raises(HTTPException) as exc:
+                await dismiss_reclaim_notice(session=session, auth=auth)
+            assert exc.value.status_code == 401
+        assert await _notice(c, owner) is not None
 
 
 @pytest.mark.anyio
@@ -332,6 +355,38 @@ async def test_the_mailed_reset_and_the_mail_verification_roads_leave_the_same_n
         r = await c.get("/api/v2/auth/verify-email", params={"token": create_email_verification_token(str(uid2))})
         assert r.status_code == 200, r.text
         assert await _stored(verify_email) == {"cut": ["sessions", "providers"], "password_cleared": False}
+
+
+@pytest.mark.anyio
+async def test_a_mailed_reset_that_sets_a_new_password_does_not_say_the_password_was_cleared(world, monkeypatch):
+    """Kadir's surviving mutant: an unverified account WITH a password, reclaimed by the mailed reset that sets the new one — the password is replaced, not cleared"""
+    from app.core.security import create_password_reset_token
+
+    email = "plain@d4725n.test"
+    async with _client() as c:
+        await _register(c, email)
+        uid, stored = (await _rows(f"SELECT id, hashed_password FROM users WHERE email = '{email}'"))[0]
+        reset = await c.post("/api/v2/auth/reset-password", json={"token": create_password_reset_token(str(uid), stored), "new_password": NEW_PASSWORD})
+        assert reset.status_code == 200, reset.text
+        assert await _stored(email) == {"cut": ["sessions"], "password_cleared": False}
+
+
+@pytest.mark.anyio
+async def test_a_personal_api_key_session_is_not_told(world, monkeypatch):
+    """Kadir's recommendation 2: /auth/me gives the notice to a person at a screen only (the model comment says «none for an API-key context»)"""
+    from app.core.security import create_tokens
+
+    email = "victim@d4725n.test"
+    async with _client() as c:
+        await _register(c, email)
+        owner = _data(await _callback(c, monkeypatch, provider="google", sub="owner-sub", email=email, verified=True))
+        uid = (await _rows(f"SELECT id FROM users WHERE email = '{email}'"))[0][0]
+        await asyncio.sleep(1.1)
+        keyed = create_tokens(str(uid), email=email, app_metadata={"human_api_key_id": str(uuid.uuid4())}, session_started_at=int(time.time()))
+        me = await c.get("/api/v2/auth/me", headers=_auth(keyed))
+        assert me.status_code == 200, me.text
+        assert _data(me)["reclaim_notice"] is None
+        assert await _notice(c, owner) is not None
 
 
 @pytest.mark.anyio

@@ -6,6 +6,7 @@
 // Neutral (info) notice · role=status · never closes by itself · one outline button on the right. It is drawn only while the server has the mark, and the
 // list names only what the server says it cut (a «cut» for what never existed would be false).
 import { useEffect, useState } from 'react';
+import { Info } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -75,6 +76,7 @@ export function ReclaimNoticeAlert() {
 
   return (
     <Alert variant="info" role="status" data-testid="reclaim-notice">
+      <Info className="h-4 w-4 text-info" aria-hidden />
       <AlertTitle>{t('title')}</AlertTitle>
       <AlertDescription>
         {names.length > 0 ? <span className="block break-keep">{t('body', { items, eulReul: pickEulReulJosa(items) })}</span> : null}
