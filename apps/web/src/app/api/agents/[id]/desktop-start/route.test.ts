@@ -31,13 +31,24 @@ describe('POST /api/agents/[id]/desktop-start', () => {
     expect(Object.keys(await req.json()).sort()).toEqual(['idempotency_key', 'phone_key_id', 'project_id', 'setup_id', 'signed']);
   });
 
+  it('no query string goes on (the contract has none) and the caller\'s abort signal still reaches the proxy', async () => {
+    const ac = new AbortController();
+    const req = new Request(`http://localhost:3000/api/agents/${AGENT}/desktop-start?phone_key_id=other&path=/x`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(GOOD), signal: ac.signal });
+    await POST(req, params(AGENT));
+    const [fwd] = proxy.mock.calls[0] as [Request];
+    expect(new URL(fwd.url).search).toBe('');
+    expect(fwd.signal.aborted).toBe(false);
+    ac.abort();
+    expect(fwd.signal.aborted).toBe(true);
+  });
+
   it('a key that was not sent is not invented (the server refuses the missing one)', async () => {
     await POST(post({ setup_id: 's', signed: 'SIG' }), params(AGENT));
     const [req] = proxy.mock.calls[0] as [Request];
     expect(await req.json()).toEqual({ setup_id: 's', signed: 'SIG' });
   });
 
-  it.each(['not-a-uuid', '../x', `${AGENT}/extra`, AGENT.slice(1), ''])('an agent id of %j is a 404 and nothing is proxied', async (id) => {
+  it.each(['not-a-uuid', '../x', `${AGENT}/extra`, AGENT.slice(1), '', `${AGENT}\n`, `${AGENT}\r\n`, ` ${AGENT}`])('an agent id of %j is a 404 and nothing is proxied', async (id) => {
     const res = await POST(post(GOOD), params(id));
     expect(res.status).toBe(404);
     expect(proxy).not.toHaveBeenCalled();

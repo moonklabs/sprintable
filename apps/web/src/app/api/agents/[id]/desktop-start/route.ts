@@ -21,5 +21,8 @@ export async function POST(request: Request, { params }: RouteParams): Promise<R
   for (const k of DESKTOP_START_KEYS) if (k in body) closed[k] = body[k];
   const headers = new Headers(request.headers);
   headers.delete('content-length');
-  return proxyToFastapi(new Request(request.url, { method: 'POST', headers, body: JSON.stringify(closed) }), `/api/v2/agents/${id}/desktop-start`);
+  // no query goes on (the contract has none), and the caller's abort signal still reaches the upstream call (codex 3 on the delta)
+  const url = new URL(request.url);
+  url.search = '';
+  return proxyToFastapi(new Request(url.toString(), { method: 'POST', headers, body: JSON.stringify(closed), signal: request.signal }), `/api/v2/agents/${id}/desktop-start`);
 }

@@ -27,7 +27,16 @@ describe('GET /api/desktop/startable', () => {
     expect(new URL(req.url).search).toBe(`?phone_key_id=${KEY}`);
   });
 
-  it.each(['', '?phone_key_id=', '?phone_key_id=x', `?phone_key_id=${KEY}x`, `?phone_key_id=../${KEY}`, '?other=1'])('a request of %j is a 422 and nothing is proxied', async (qs) => {
+  it('the caller\'s abort signal still reaches the proxy', async () => {
+    const ac = new AbortController();
+    await GET(new Request(`http://localhost:3000/api/desktop/startable?phone_key_id=${KEY}`, { method: 'GET', signal: ac.signal }));
+    const [fwd] = proxy.mock.calls[0] as [Request];
+    expect(fwd.signal.aborted).toBe(false);
+    ac.abort();
+    expect(fwd.signal.aborted).toBe(true);
+  });
+
+  it.each(['', '?phone_key_id=', '?phone_key_id=x', `?phone_key_id=${KEY}x`, `?phone_key_id=../${KEY}`, '?other=1', `?phone_key_id=${KEY}%0A`, `?phone_key_id=${KEY}%0D%0A`, `?phone_key_id=%20${KEY}`])('a request of %j is a 422 and nothing is proxied', async (qs) => {
     const res = await GET(get(qs));
     expect(res.status).toBe(422);
     expect(proxy).not.toHaveBeenCalled();

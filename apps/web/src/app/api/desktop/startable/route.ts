@@ -12,5 +12,5 @@ export async function GET(request: Request): Promise<Response> {
   url.search = '';
   url.searchParams.set('phone_key_id', key);
   const headers = new Headers(request.headers);
-  return proxyToFastapi(new Request(url.toString(), { method: 'GET', headers }), '/api/v2/desktop/startable');
+  return proxyToFastapi(new Request(url.toString(), { method: 'GET', headers, signal: request.signal }), '/api/v2/desktop/startable'); // the caller's abort signal still reaches the upstream call
 }
