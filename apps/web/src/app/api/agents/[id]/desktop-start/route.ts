@@ -2,13 +2,24 @@ import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
 // story #4714 — the phone app's signed start of an agent that already exists on a paired computer: POST /api/v2/agents/{id}/desktop-start
 // {setup_id, project_id, idempotency_key, signed, phone_key_id} (contract 02d2cf71 §14 ②). The web never makes `signed` — the phone app's
-// shell does, from the list it read itself; the server carries it unopened. No path · mode · arguments reach the server from here.
+// shell does, from the list it read itself; the server carries it unopened.
+//
+// Kadir (5140 lens · 3): the closed body is kept HERE as well as in the page's code — only these five keys are forwarded, whatever the caller
+// sent. «No path · folder · mode · arguments · runtime goes from the web» is a structure of this route, not only a habit of one component
+// (the server's schema — extra fields are a 422 — and the daemon's comparison of the signed payload remain the real guards).
 const AGENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const DESKTOP_START_KEYS = ['setup_id', 'project_id', 'signed', 'phone_key_id', 'idempotency_key'] as const;
 
 type RouteParams = { params: Promise<{ id: string }> };
 
 export async function POST(request: Request, { params }: RouteParams): Promise<Response> {
   const { id } = await params;
   if (!AGENT_ID.test(id)) return Response.json({ error: { code: 'not_found' } }, { status: 404 });
-  return proxyToFastapi(request, `/api/v2/agents/${id}/desktop-start`);
+  const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return Response.json({ error: { code: 'bad_request' } }, { status: 422 });
+  const closed: Record<string, unknown> = {};
+  for (const k of DESKTOP_START_KEYS) if (k in body) closed[k] = body[k];
+  const headers = new Headers(request.headers);
+  headers.delete('content-length');
+  return proxyToFastapi(new Request(request.url, { method: 'POST', headers, body: JSON.stringify(closed) }), `/api/v2/agents/${id}/desktop-start`);
 }

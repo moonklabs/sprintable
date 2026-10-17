@@ -122,6 +122,15 @@ describe('[4714] codex round 1 — a valid JSON body that is not an object', () 
   });
 });
 
+describe('[4714] Kadir 5140 lens — only `done` is a start (the mirror of the unknown rule)', () => {
+  it.each(['queued', 'accepted', 'working', 'sent', 'running', 'pending'])('a command still in state %j for the whole two minutes is unknown — never started', async (state) => {
+    let t = 0;
+    server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state })]);
+    const out = await startOnPhone(input, deps(signed, { now: () => t, wait: async (ms: number) => { t += ms; } }));
+    expect(out.kind).toBe('unknown');
+  });
+});
+
 describe('[4714] codex round 3 — a bridge call that is rejected', () => {
   it('a rejected device.key.info is a failed read; a rejected command.sign is a failed start with nothing posted', async () => {
     const calls = server(json(201, { command_id: CMD }));
