@@ -68,11 +68,22 @@ async def test_resolve_public_doc_deleted_410():
 
 @pytest.mark.anyio
 async def test_resolve_public_active_returns_doc():
-    doc = SimpleNamespace(title="T", content="C", content_format="markdown")
+    doc = SimpleNamespace(title="T", content="C", content_format="markdown", org_id=uuid.uuid4())
     tok = SimpleNamespace(status="active", doc_id=uuid.uuid4())
-    db = _db_with([_exec_returning(tok), _exec_returning(doc)])
+    db = _db_with([_exec_returning(tok), _exec_returning(doc), _exec_returning(doc.org_id)])  # 토큰 · doc · 조직 존재
     out = await doc_share.resolve_public(db, "t")
     assert out.title == "T"
+
+
+@pytest.mark.anyio
+async def test_resolve_public_organization_gone_410():
+    """story 4728 — 토큰 active · doc 살아 있어도 조직 행이 없으면(조직 삭제 · docs에 조직 FK 없음) 410."""
+    doc = SimpleNamespace(title="T", content="C", content_format="markdown", org_id=uuid.uuid4())
+    tok = SimpleNamespace(status="active", doc_id=uuid.uuid4())
+    db = _db_with([_exec_returning(tok), _exec_returning(doc), _exec_returning(None)])
+    with pytest.raises(doc_share.ShareTokenError) as ei:
+        await doc_share.resolve_public(db, "t")
+    assert ei.value.status_code == 410
 
 
 # ── 메타 누출 0: 공개 응답 필드 집합 고정 ──────────────────────────────────────
