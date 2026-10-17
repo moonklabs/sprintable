@@ -7015,6 +7015,7 @@
       },
       "quick": {
         "title": "이 컴퓨터에서 에이전트 시작하기",
+        "titleAgent": "{name} 에이전트 시작하기",
         "stepAgent": "에이전트",
         "stepFolder": "폴더",
         "tooOld": "{name} {version} — 이 앱과 쓰기엔 오래된 판이에요 · 업데이트하면 고를 수 있어요",
