@@ -440,3 +440,18 @@ async def test_11_what_is_taken_back_while_a_press_waits_for_the_computers_lock_
     await run_case(lambda agent, sid, tm: f"UPDATE members SET is_active = false WHERE id = '{agent}'", (409, "agent_inactive"), "b")
     await run_case(lambda agent, sid, tm: f"UPDATE remote_device_pairings SET removed_at = now() WHERE setup_id = '{sid}'", (409, "phone_not_paired"), "c")
     await run_case(lambda agent, sid, tm: f"UPDATE org_members SET role = 'member' WHERE org_id = '{ORG}' AND user_id = '{PLAIN}'", (403, "not_allowed_to_command"), "d", as_admin=True)
+    await run_case(lambda agent, sid, tm: f"DELETE FROM agent_project_profiles WHERE member_id = '{agent}' AND project_id = '{PROJ}'", (404, "project_not_found"), "e")  # the agent leaves the project; the person still has access
+
+
+async def test_12_one_computers_list_replaces_only_its_own(world):
+    """codex 5132 round 7 ⑥: a computer's PUT writes ITS row only — a second computer's list stays as that computer said it."""
+    async with _client() as c:
+        dev1, agent1, _p1, _d1 = await _setup(c, "d4424 mac 4714m1")
+        dev2, agent2, _p2, _d2 = await _setup(c, "d4424 mac 4714m2")
+        assert dev1["setup_id"] != dev2["setup_id"]
+        assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent2, PROJ2)), headers=_tok(dev2["device_token"]))).status_code == 200
+        assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent1, PROJ)), headers=_tok(dev1["device_token"]))).status_code == 200
+        one = (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{dev1['setup_id']}'"))[0][0]
+        two = (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{dev2['setup_id']}'"))[0][0]
+        assert one == [{"agent_member_id": agent1, "project_id": str(PROJ)}]
+        assert two == [{"agent_member_id": agent2, "project_id": str(PROJ2)}]
