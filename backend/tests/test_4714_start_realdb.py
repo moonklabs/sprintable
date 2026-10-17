@@ -11,6 +11,7 @@ import pytest
 
 from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (autouse ones apply here too)
     ORG,
+    ORG2,
     OWNER,
     OWNER_TM,
     PLAIN,
@@ -90,6 +91,17 @@ async def test_01_the_computer_reports_ids_only_the_list_is_replaced_whole_and_a
             assert (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{sid}'"))[0][0] == [{"agent_member_id": agent, "project_id": str(PROJ)}]
         finally:
             await _sql(f"UPDATE projects SET deleted_at = NULL WHERE id = '{PROJ2}'")
+        # a live project of ANOTHER organization is not stored either, even when a profile row links this agent to it
+        other_org_project = uuid.UUID("d4424000-0000-0000-0000-0000000000a9")
+        await _sql(
+            f"INSERT INTO projects (id,org_id,name,slug,violation_level) VALUES ('{other_org_project}','{ORG2}','Other org project','d4714-p9','warn') ON CONFLICT DO NOTHING",
+            f"INSERT INTO agent_project_profiles (id,member_id,project_id) VALUES (gen_random_uuid(),'{agent}','{other_org_project}')",
+        )
+        try:
+            assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ), (agent, other_org_project)), headers=tok)).json() == {"startable": 1}
+            assert (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{sid}'"))[0][0] == [{"agent_member_id": agent, "project_id": str(PROJ)}]
+        finally:
+            await _sql(f"DELETE FROM agent_project_profiles WHERE project_id = '{other_org_project}'", f"DELETE FROM projects WHERE id = '{other_org_project}'")
         # replaced whole, not merged
         assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ2)), headers=tok)).json() == {"startable": 1}
         stored = (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{sid}'"))[0][0]
