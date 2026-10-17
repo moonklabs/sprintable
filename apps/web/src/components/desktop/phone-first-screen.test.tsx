@@ -336,7 +336,7 @@ describe('[4714] codex round 1 — a start of unknown end is locked; only agents
     await act(async () => { root.unmount(); });
     root = createRoot(container);
     await screen();
-    expect(byId('onboarding-phone-no-agent')).not.toBeNull();
+    expect(byId('onboarding-phone-no-agent')?.textContent).toBe('윤재의 맥북에는 내가 시작할 수 있는 에이전트가 없어요.'); // Yuna 4714 §5: not «아직 에이전트가 없어요» — it has some
     expect(byId('onboarding-phone-start')).toBeNull();
   });
 });
@@ -372,6 +372,7 @@ describe('[4714] codex round 3 — a rejected bridge call and an unreadable org 
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000); }); // the retries of the read (1.5 s · 4 s) run out
     await flush();
     expect(byId('onboarding-phone-off-read-failed')?.textContent).toContain('불러오지 못했어요 — 다시 눌러 주세요');
+    expect(byId('onboarding-phone-off-read-failed')?.querySelector('p')?.getAttribute('role')).toBe('alert');
     expect(text()).not.toContain('소유자 · 관리자가 켜면');
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '다시 불러오기')).toBe(true);
   });
@@ -382,6 +383,7 @@ describe('[4714] a read that failed, and the screen outside the phone app', () =
     fetchWithAuth.mockImplementation(async () => json({}, 500));
     await screen();
     expect(byId('onboarding-phone-read-failed')?.textContent).toContain('불러오지 못했어요 — 다시 눌러 주세요');
+    expect(byId('onboarding-phone-read-failed')?.querySelector('p')?.getAttribute('role')).toBe('alert'); // a failure, not a status (Yuna 4714 §5)
     server();
     await press(Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '다시 불러오기') ?? null);
     expect(byId('onboarding-phone-start')).not.toBeNull();

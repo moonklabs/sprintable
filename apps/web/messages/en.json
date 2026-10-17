@@ -1723,7 +1723,8 @@
         "pair": "I already have the app on my Mac — pair"
       },
       "noAgent": {
-        "line": "{device} has no agents yet — pick a folder at your Mac and start the first agent."
+        "line": "{device} has no agents yet — pick a folder at your Mac and start the first agent.",
+        "lineNoAccess": "There's no agent on {device} that you can start."
       },
       "start": {
         "title": "Start an agent on {device}?",

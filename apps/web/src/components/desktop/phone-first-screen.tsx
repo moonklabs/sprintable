@@ -62,7 +62,7 @@ export function PhoneFirstScreen({ orgId, chatsHref }: { orgId: string | null; c
   if (read.kind === 'failed') {
     return (
       <Card className="break-keep flex flex-col gap-3 p-6" data-testid="onboarding-phone-read-failed">
-        <p role="status" className="text-sm text-muted-foreground">{t('result.readFailed')}</p>
+        <p role="alert" className="text-sm text-muted-foreground">{t('result.readFailed')}</p>
         <div><Button variant="outline" onClick={reload}>{t('result.retry')}</Button></div>
       </Card>
     );
@@ -80,7 +80,8 @@ export function PhoneFirstScreen({ orgId, chatsHref }: { orgId: string | null; c
   if (commandable(computer).length === 0) {
     return (
       <Card className="break-keep p-6" data-testid="onboarding-phone-no-agent">
-        <p className="text-sm text-foreground">{t('noAgent.line', { device: computer.device_name })}</p>
+        {/* Yuna 4714 §5: the first-agent line is true only when the computer has no agent at all; agents it has but the person may not start get their own line */}
+        <p className="text-sm text-foreground">{computer.agents.length === 0 ? t('noAgent.line', { device: computer.device_name }) : t('noAgent.lineNoAccess', { device: computer.device_name })}</p>
       </Card>
     );
   }
@@ -127,7 +128,7 @@ function RemoteOff({ orgId, onTurnedOn }: { orgId: string | null; onTurnedOn: ()
         // who may turn it on is not known yet (still reading → nothing drawn) or could not be read (a line and one retry — never a dead end)
         readFailed ? (
           <div className="space-y-2" data-testid="onboarding-phone-off-read-failed">
-            <p role="status" className="text-sm text-muted-foreground">{t('result.readFailed')}</p>
+            <p role="alert" className="text-sm text-muted-foreground">{t('result.readFailed')}</p>
             <div><Button variant="outline" onClick={onTurnedOn}>{t('result.retry')}</Button></div>
           </div>
         ) : null
