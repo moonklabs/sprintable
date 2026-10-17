@@ -221,12 +221,12 @@ async def test_oauth_callback_follows_the_providers_own_verified_claim(world, mo
 
 
 def test_the_providers_claim_is_read_strictly():
-    """only an explicit true counts: a boolean (Google) or the string "true" (Apple); absent · false · other strings → not verified"""
+    """only an explicit true counts: a boolean (Google) or exactly the string "true" (Apple); absent · false · other strings → not verified"""
     from app.routers.auth import _provider_says_verified as v
 
-    assert v({"email_verified": True}) and v({"email_verified": "true"}) and v({"email_verified": " TRUE "})
+    assert v({"email_verified": True}) and v({"email_verified": "true"})
     for bad in ({}, {"email_verified": False}, {"email_verified": "false"}, {"email_verified": "1"}, {"email_verified": 1}, {"email_verified": None},
-                {"email_verified": "yes"}):
+                {"email_verified": "yes"}, {"email_verified": " TRUE "}, {"email_verified": "True"}, {"email_verified": "TRUE"}):
         assert not v(bad), bad
 
 
