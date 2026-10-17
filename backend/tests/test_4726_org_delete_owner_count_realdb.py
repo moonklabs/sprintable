@@ -157,6 +157,8 @@ async def test_c_a_rejected_delete_ends_nothing():
 
 @pytest.mark.anyio
 async def test_d_backfill_ends_rows_left_by_organizations_deleted_before_the_fix():
+    """Runs the migration's own statement, but inside one transaction that is rolled back: the statement is global (it ends every orphaned
+    row in the table), and this suite shares its database with other real-DB tests whose own rows must not be touched for good."""
     path = Path(__file__).resolve().parent.parent / "alembic" / "versions" / "0456_org_members_orphan_backfill.py"
     spec = importlib.util.spec_from_file_location("rev_0456", path)
     mod = importlib.util.module_from_spec(spec)
@@ -165,26 +167,32 @@ async def test_d_backfill_ends_rows_left_by_organizations_deleted_before_the_fix
     engine = create_async_engine(_ASYNC)
     Session = async_sessionmaker(engine, expire_on_commit=False)
     stranded_owner, live_owner = uuid.uuid4(), uuid.uuid4()
-    gone_org = uuid.uuid4()  # an organization that no longer exists (deleted before the fix): only its org_members row is left
-    live_org = None
+    gone_org, live_org = uuid.uuid4(), uuid.uuid4()  # gone_org: deleted before the fix — only its org_members row is left
     try:
         async with Session() as session:
             await session.execute(
                 text("INSERT INTO org_members (id, org_id, user_id, role) VALUES (:id, :o, :u, 'owner')"),
                 {"id": uuid.uuid4(), "o": gone_org, "u": stranded_owner},
             )
-            live_org, _ = await _org(session, live_owner)
-            await session.commit()
+            await session.execute(
+                text("INSERT INTO organizations (id, name, slug, plan) VALUES (:id, :n, :s, 'free')"),
+                {"id": live_org, "n": f"t4726-{live_org}", "s": f"s4726-{live_org}"},
+            )
+            await session.execute(
+                text("INSERT INTO org_members (id, org_id, user_id, role) VALUES (:id, :o, :u, 'owner')"),
+                {"id": uuid.uuid4(), "o": live_org, "u": live_owner},
+            )
 
             await session.execute(text(mod.BACKFILL_SQL))
-            await session.commit()
             assert await _live_rows(session, gone_org) == []  # stranded row ended
+            assert [(r[0], r[1]) for r in await _ended_rows(session, gone_org)] == [(stranded_owner, "owner")]  # ... and kept
             assert len(await _live_rows(session, live_org)) == 1  # a live organization's row is left alone
 
             await session.execute(text(mod.BACKFILL_SQL))  # running it again changes nothing
-            await session.commit()
             assert len(await _live_rows(session, live_org)) == 1
+            assert len(await _ended_rows(session, gone_org)) == 1
+
+            await session.rollback()  # nothing of this test (nor the global effect of the statement) stays in the shared database
+            assert await _ended_rows(session, gone_org) == []
     finally:
-        async with Session() as session:
-            await _cleanup(session, *( [live_org] if live_org else [] ), gone_org)
         await engine.dispose()
