@@ -1282,6 +1282,12 @@ export function Failure({ failure, onRetry, counts = null, plan = null, solo = f
   const [madeOrgId, setMadeOrgId] = useState<string | null>(null); // made, but the switch to it did not go through: the primary tries the switch again
   const [enterFailed, setEnterFailed] = useState(false);
   const [entering, setEntering] = useState(false); // the switch is on its way: a second press waits for it
+  // the server wants the e-mail verified before an organization is made (an invited person's account has its own «verified» mark): the gate that
+  // new-org mode already uses stands in the card's place until the mailbox is proved, then the card is back and the primary can be pressed again
+  const [verifyWanted, setVerifyWanted] = useState(false);
+  const verifyGate = useEmailVerifyGate(verifyWanted, () => setVerifyWanted(false));
+  // asked for the gate but the server's own answer says the mailbox is proved (or cannot be read): no gate to show — the generic line
+  const createRefused = verifyWanted && verifyGate.kind === 'open';
   const member = failure === 'not-admin' ? memberCardFacts(orgId, orgMemberships, isEEEnabled()) : null;
   const canCreate = !!member && (member.canCreateOwn || madeOrgId !== null);
   const org = member?.orgName ?? '';
@@ -1304,6 +1310,7 @@ export function Failure({ failure, onRetry, counts = null, plan = null, solo = f
       setEntering(false);
     }
   }
+  if (verifyWanted && verifyGate.kind === 'closed') return <EmailVerifyGateCard gate={verifyGate} />;
   return (
     <Card className="break-keep flex flex-col gap-3 p-6">
       <h1 className="text-lg font-semibold">{limit ? tNav(limit.title) : t(key('title'))}</h1>
@@ -1352,12 +1359,14 @@ export function Failure({ failure, onRetry, counts = null, plan = null, solo = f
           : null}
       </div>
       {enterFailed ? <p role="alert" className="text-sm text-destructive">{tNav('switcherSwitchOrgError')}</p> : null}
+      {createRefused ? <p role="alert" className="text-sm text-destructive">{tNav('createOrgGenericError')}</p> : null}
       {member?.canCreateOwn ? (
         <CreateOrganizationDialog
           open={createOpen}
           onOpenChange={setCreateOpen}
           initialName={defaultOrgName(userName, (n) => tNewOrg('defaultOrgNameWithName', { name: n }), tNewOrg('defaultOrgName'))}
           slugOptional
+          onEmailVerificationRequired={() => setVerifyWanted(true)}
           onCreated={(id) => { setMadeOrgId(id); void enterOwnOrg(id); }}
         />
       ) : null}
