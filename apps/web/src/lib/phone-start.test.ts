@@ -122,6 +122,15 @@ describe('[4714] codex round 1 — a valid JSON body that is not an object', () 
   });
 });
 
+describe('[4714] codex round 3 — a bridge call that is rejected', () => {
+  it('a rejected device.key.info is a failed read; a rejected command.sign is a failed start with nothing posted', async () => {
+    const calls = server(json(201, { command_id: CMD }));
+    await expect(readStartable(async () => { throw new Error('bridge'); })).resolves.toEqual({ kind: 'failed' });
+    await expect(startOnPhone(input, deps(signed, { phoneCall: vi.fn(async () => { throw new Error('bridge'); }) } as never))).resolves.toEqual({ kind: 'failed' });
+    expect(calls).toEqual([]);
+  });
+});
+
 describe('[4714] [결과 확인] never signs again and never starts twice', () => {
   it('unknown with an id → the same command is followed (no post, no shell call); unknown without one → the same post with the same key and the same signed body', async () => {
     const lost = server(() => { throw new Error('network'); });

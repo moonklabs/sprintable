@@ -341,6 +341,42 @@ describe('[4714] codex round 1 — a start of unknown end is locked; only agents
   });
 });
 
+describe('[4714] codex round 3 — a rejected bridge call and an unreadable org switch are never a dead end', () => {
+  it('a rejected command.sign leaves [시작] usable again with the failure line (not busy forever)', async () => {
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    phoneCall.mockImplementation(async (type: string) => { if (type === 'command.sign') throw new Error('bridge'); return keyAnswer; });
+    await press(byId('onboarding-phone-start-go'));
+    expect(byId('onboarding-phone-result')?.querySelector('p')?.textContent).toBe('시작하지 못했어요 — 다시 눌러 주세요');
+    expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('a rejected device.key.info ends the reading with the read-failed screen and its retry (not «reading» forever)', async () => {
+    phoneCall.mockImplementation(async () => { throw new Error('bridge'); });
+    await screen();
+    expect(byId('onboarding-phone-read-failed')).not.toBeNull();
+  });
+
+  it('remote control off and the org switch cannot be read: a line and one retry — not the non-owner copy with nothing to press', async () => {
+    world.startable = { remote_control: false, computers: [computer()] };
+    world.remote = undefined;
+    fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? 'GET' });
+      if (url === '/api/remote-devices') return json({ devices: [{ id: 'p-1', confirm_number: '482 917' }] });
+      if (url.startsWith('/api/desktop/startable')) return json({ remote_control: false, computers: [computer()] });
+      return json({}, 500); // the org switch's read
+    });
+    await screen();
+    expect(byId('onboarding-phone-off')).not.toBeNull();
+    expect(text()).not.toContain('소유자 · 관리자가 켜면'); // no guess at who may turn it on while it is unknown
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); }); // the retries of the read (1.5 s · 4 s) run out
+    await flush();
+    expect(byId('onboarding-phone-off-read-failed')?.textContent).toContain('불러오지 못했어요 — 다시 눌러 주세요');
+    expect(text()).not.toContain('소유자 · 관리자가 켜면');
+    expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent === '다시 불러오기')).toBe(true);
+  });
+});
+
 describe('[4714] a read that failed, and the screen outside the phone app', () => {
   it('a failed read says so with one button that reads again', async () => {
     fetchWithAuth.mockImplementation(async () => json({}, 500));

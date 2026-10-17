@@ -47,7 +47,7 @@ export function PhoneFirstScreen({ orgId, chatsHref }: { orgId: string | null; c
   const readGen = useRef(0);
   const readNow = useCallback(() => {
     const mine = ++readGen.current;
-    void readStartable(phoneCall).then((r) => { if (mine === readGen.current) land(r); });
+    void readStartable(phoneCall).catch((): StartableRead => ({ kind: 'failed' })).then((r) => { if (mine === readGen.current) land(r); });
   }, [phoneCall, land]);
   const dropReads = useCallback(() => { readGen.current++; }, []); // leaving the page: whatever is still out is dropped
   useEffect(() => {
@@ -106,7 +106,7 @@ function NoMac({ pairHref }: { pairHref: string }) {
 function RemoteOff({ orgId, onTurnedOn }: { orgId: string | null; onTurnedOn: () => void }) {
   const t = useTranslations('onboarding.phone');
   const alive = useAlive();
-  const [rc, setRc] = useOrgRemoteControl(orgId);
+  const [rc, setRc, readFailed] = useOrgRemoteControl(orgId);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const canChange = rc?.can_change === true; // only the person who can switch it gets the button (the same test as the web's switch)
@@ -123,7 +123,17 @@ function RemoteOff({ orgId, onTurnedOn }: { orgId: string | null; onTurnedOn: ()
   return (
     <Card className="break-keep flex flex-col gap-3 p-6" data-testid="onboarding-phone-off">
       <h1 id="onboarding-step-title" className="text-lg font-semibold text-foreground">{t('off.title')}</h1>
-      <p className="text-sm text-muted-foreground">{canChange ? t('off.bodyOwner') : t('off.bodyOther')}</p>
+      {rc === null ? (
+        // who may turn it on is not known yet (still reading → nothing drawn) or could not be read (a line and one retry — never a dead end)
+        readFailed ? (
+          <div className="space-y-2" data-testid="onboarding-phone-off-read-failed">
+            <p role="status" className="text-sm text-muted-foreground">{t('result.readFailed')}</p>
+            <div><Button variant="outline" onClick={onTurnedOn}>{t('result.retry')}</Button></div>
+          </div>
+        ) : null
+      ) : (
+        <p className="text-sm text-muted-foreground">{canChange ? t('off.bodyOwner') : t('off.bodyOther')}</p>
+      )}
       {canChange ? (
         <div className="space-y-1">
           <Button size="lg" className="w-full whitespace-nowrap" disabled={busy} onClick={() => void turnOn()} data-testid="onboarding-phone-turn-on">{t('off.action')}</Button>
@@ -160,7 +170,7 @@ function StartCard({ computer, agents, chatHref, onRemoteOff }: { computer: Star
   const start = async () => {
     if (busy || !agent || !project) return;
     setBusy(true); setOutcome(null);
-    const o = await startOnPhone({ setupId: computer.setup_id, agentId: agent.agent_member_id, projectId: project.project_id }, deps);
+    const o = await startOnPhone({ setupId: computer.setup_id, agentId: agent.agent_member_id, projectId: project.project_id }, deps).catch((): StartOutcome => ({ kind: 'failed' }));
     if (!alive.current) return;
     apply(o);
     setBusy(false);
@@ -168,7 +178,7 @@ function StartCard({ computer, agents, chatHref, onRemoteOff }: { computer: Star
   const check = async () => {
     if (busy || !pending.current) return;
     setBusy(true);
-    const o = await checkStart(pending.current, deps);
+    const o = await checkStart(pending.current, deps).catch((): StartOutcome => ({ kind: 'failed' }));
     if (!alive.current) return;
     apply(o);
     setBusy(false);

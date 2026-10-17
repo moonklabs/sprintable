@@ -50,7 +50,8 @@ export type StartableRead =
  * nothing is registered from here.
  */
 export async function readStartable(phoneCall: Call): Promise<StartableRead> {
-  const key = await phoneCall('device.key.info', {});
+  let key: PhoneAnswer;
+  try { key = await phoneCall('device.key.info', {}); } catch { return { kind: 'failed' }; } // a bridge call that is rejected is a failed read, not a screen stuck on «reading»
   if (!key.ok) return key.code === 'no_screen_lock' ? { kind: 'no_screen_lock' } : { kind: 'failed' };
   if (typeof key.key_number !== 'string') return { kind: 'failed' };
   let id: string | null = null;
@@ -133,7 +134,12 @@ async function codeOf(res: Response): Promise<string> {
 }
 
 export async function startOnPhone(input: StartInput, deps: StartDeps): Promise<StartOutcome> {
-  const signed = await deps.phoneCall('command.sign', { kind: 'start_session', setup_id: input.setupId, agent_member_id: input.agentId, project_id: input.projectId });
+  let signed: PhoneAnswer;
+  try {
+    signed = await deps.phoneCall('command.sign', { kind: 'start_session', setup_id: input.setupId, agent_member_id: input.agentId, project_id: input.projectId });
+  } catch {
+    return { kind: 'failed' }; // the bridge rejected the call: nothing was signed, nothing was posted — never a start left «busy»
+  }
   if (!signed.ok) return { kind: SHELL_REFUSALS[signed.code ?? ''] ?? 'failed' } as StartOutcome;
   if (typeof signed.signed !== 'string' || typeof signed.phone_key_id !== 'string') return { kind: 'failed' };
   const pending: Pending = {
