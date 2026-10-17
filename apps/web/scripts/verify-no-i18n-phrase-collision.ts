@@ -204,6 +204,10 @@ const NON_NUMBER_PLACEHOLDER_NAMES = new Set([
   // 아님) — verify.evidenceSignedBy="{name}{josa} 남김"·recruiter.verifyGuideMcp="…{runtime}{josa} 열어…"
   // 등 6키가 이 이름을 쓴다. 개별 EXEMPT_PAIRS 대신 규칙(이 이름은 수-인접이 아님)으로 안다.
   'josa',
+  // story 4713 AC2 — {iga} · {euro}: the same kind of name as {josa} (a Korean grammar particle from the korean-particle helpers — pickIGaJosa · pickEuroJosa —
+  // never a number): desktop.setup.quick.traceDefault «이 폴더에 {file}{iga} 있어요 · 에이전트는 {runtime}{euro} 골라 뒀어요». Two particles stand in one line, so
+  // one {josa} cannot serve both; the scoped honorific guard forbids a fixed particle after a placeholder, which is why they are placeholders at all.
+  'iga', 'euro',
   // story #4599 — {folder}: a folder's words. ko.json's three uses read directly (2026-10-07): docs.docTreeMovedIntoFolder
   // «{title}, {folder} 폴더로 이동했어요.» (a folder's name) · chats.agentSession.line.waitingSystemFolder / …FolderPhone
   // «macOS가 그 컴퓨터 화면에서 {folder} 쓸지 묻고 있어요 …» filled from a closed list of folder words with their particle

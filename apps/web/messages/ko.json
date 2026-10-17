@@ -7038,7 +7038,7 @@
         "copied": "복사했어요",
         "copyAria": "복사 · {name} 설치 명령",
         "refind": "다시 찾기",
-        "traceDefault": "이 폴더에 {file}가 있어요 · 에이전트는 {runtime}로 골라 뒀어요",
+        "traceDefault": "이 폴더에 {file}{iga} 있어요 · 에이전트는 {runtime}{euro} 골라 뒀어요",
         "folderPick": "폴더 고르기",
         "folderChange": "바꾸기",
         "projectNew": "프로젝트 이름 · {name}",

@@ -17,6 +17,7 @@ import { putOrgRemoteControl, useOrgRemoteControl } from '@/lib/org-remote-contr
 import { useSearchParams } from 'next/navigation';
 import { agentRoomOf, roomShort, setupFragment, isFolderRefused, moveConfirmBody, movableState, type AgentRoom, type AttachableAgent, type DesktopRuntime, type SetupQuery } from '@/lib/desktop-setup';
 import { agentLimitOf, type AgentLimit } from '@/lib/agent-limit';
+import { pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle'; // 4713: «{file}가 · {runtime}로» — the particle follows the word (the scoped honorific guard forbids a fixed one after a placeholder)
 import { defaultSoloRuntime, folderTracePick, shownProjectName, soloConfirmBody, soloNewOrgConfirmBody, soloOutcome, soloStartBlock, usableRuntimes } from '@/lib/desktop-setup-quick';
 import { ATTACHABLE_READ_LIMIT_MS, DesktopSetup, Failure, INSTALL, InvitedCard, MovedAgentNote, PROGRESS_FRAGMENT, RoomShortBox, RUNTIME_LABEL, SetupDoneReload, TooOldCard, fetchMyInvites, joinNewOrg, limitCounts, moveFailureForCode, useAppSetupLinks, type MyInvite } from './desktop-setup';
 import { SetupProgressView } from './desktop-setup-progress';
@@ -319,7 +320,7 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
             <p className="flex items-center gap-2 text-sm"><span>{runtime ? RUNTIME_LABEL[runtime] : ''}</span>{runtime && withVersion(runtime) ? <span className="text-xs text-muted-foreground">{withVersion(runtime)}</span> : null}</p>
           )}
           {traceHit && runtime === traceHit.runtime ? (
-            <p className="text-xs text-muted-foreground" data-testid="quick-trace">{t('quick.traceDefault', { file: traceHit.file, runtime: RUNTIME_LABEL[traceHit.runtime] })}</p>
+            <p className="text-xs text-muted-foreground" data-testid="quick-trace">{t('quick.traceDefault', { file: traceHit.file, iga: pickIGaJosa(traceHit.file), runtime: RUNTIME_LABEL[traceHit.runtime], euro: pickEuroJosa(RUNTIME_LABEL[traceHit.runtime]) })}</p>
           ) : null}
           {(query.old ?? []).map((o) => (
             <p key={o.runtime} className="text-xs text-muted-foreground">{t('quick.tooOld', { name: RUNTIME_LABEL[o.runtime], version: o.version })}</p>
