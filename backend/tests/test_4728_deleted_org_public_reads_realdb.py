@@ -11,11 +11,13 @@ Two layers, each pinned here:
 DB env (ALEMBIC_DATABASE_URL or PARITY_TEST_DATABASE_URL, plus DATABASE_URL for the app's own engine) is required, otherwise skip."""
 from __future__ import annotations
 
+import contextlib
 import os
 import uuid
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -111,7 +113,34 @@ class World:
             "VALUES (:i,:o,'ko',:s,'t','s','body of the post',now(),:st,:g)",
             i=uuid.uuid4(), o=self.org, s=self.post_slug, st=uuid.uuid4(), g=uuid.uuid4(),
         )
+        # what background jobs keep using: a channel token (its refresh cron), a GA4 connection (its scoring cron), a post waiting to go out
+        await _sql(
+            "INSERT INTO channel_connections (id,org_id,channel,account_id,status,encrypted_access_token,encrypted_refresh_token) "
+            "VALUES (:i,:o,'threads',:a,'active','enc-access','enc-refresh')",
+            i=uuid.uuid4(), o=self.org, a=f"acct-{sfx}",
+        )
+        await _sql("INSERT INTO ga4_connections (id,org_id,encrypted_access_token,encrypted_refresh_token) VALUES (:i,:o,'enc-a','enc-r')", i=uuid.uuid4(), o=self.org)
+        self.command = uuid.uuid4()
+        await _sql(
+            "INSERT INTO publication_commands (id,org_id,gate_id,destination,approved_version,requested_by_member_id,status) "
+            "VALUES (:i,:o,:g,:d,:v,:m,'pending')",
+            i=self.command, o=self.org, g=uuid.uuid4(), d=uuid.uuid4(), v=uuid.uuid4(), m=uuid.uuid4(),
+        )
         return self
+
+    async def cleanup(self) -> None:
+        """leave nothing behind in the shared database: every row of this organization (whatever tables carry its org_id), then the person"""
+        tables = [r[0] for r in await _sql(
+            "SELECT c.table_name FROM information_schema.columns c JOIN information_schema.tables t "
+            "ON t.table_name=c.table_name AND t.table_schema=c.table_schema AND t.table_type='BASE TABLE' "
+            "WHERE c.table_schema='public' AND c.column_name='org_id'")]
+        for _pass in range(2):  # a table that still points at a row another table holds fails the first time; the second pass gets it
+            for t in tables:
+                with contextlib.suppress(DBAPIError):
+                    await _sql(f'DELETE FROM "{t}" WHERE org_id = :o', o=self.org)
+        await _sql("DELETE FROM organizations WHERE id = :o", o=self.org)
+        await _sql("DELETE FROM refresh_tokens WHERE user_id IN (SELECT id FROM users WHERE email LIKE :e)", e=f"%-{self.sfx}@{TAG}.test")
+        await _sql("DELETE FROM users WHERE email LIKE :e", e=f"%-{self.sfx}@{TAG}.test")
 
     async def public_reads(self, c) -> dict:
         return {
@@ -129,24 +158,37 @@ class World:
 async def test_a_a_live_organization_keeps_its_public_links():
     async with _client() as c:
         w = await World().build(c)
-        assert await w.public_reads(c) == {"doc": 200, "posts_list": 200, "post": 200}
+        try:
+            assert await w.public_reads(c) == {"doc": 200, "posts_list": 200, "post": 200}
+            assert (await _sql("SELECT status FROM channel_connections WHERE org_id = :o", o=w.org)) == [("active",)]  # a live organization is untouched
+            assert (await _sql("SELECT status FROM publication_commands WHERE id = :i", i=w.command)) == [("pending",)]
+        finally:
+            await w.cleanup()
 
 
 @pytest.mark.anyio
 async def test_b_deleting_the_organization_ends_its_links_keys_and_posts():
     async with _client() as c:
         w = await World().build(c)
-        await w.delete_through_the_route(c)
+        try:
+            await w.delete_through_the_route(c)
 
-        assert await w.public_reads(c) == {"doc": 410, "posts_list": 404, "post": 404}
-        assert (await _sql("SELECT status, revoked_at IS NOT NULL FROM doc_share_tokens WHERE org_id = :o", o=w.org)) == [("revoked", True)]
-        assert (await _sql("SELECT revoked_at IS NOT NULL FROM org_metering_keys WHERE org_id = :o", o=w.org)) == [(True,)]
-        assert (await _sql("SELECT unpublished_at IS NOT NULL FROM site_posts WHERE org_id = :o", o=w.org)) == [(True,)]
-        # the agent's key row is revoked too (the `members` cascade turns its member_id to NULL, so it could not be matched afterwards)
-        for kid in w.key_ids:
-            assert (await _sql("SELECT revoked_at IS NOT NULL FROM agent_api_keys WHERE id = :k", k=kid)) == [(True,)]
-        r = await _call(c, "GET", f"/api/v2/stories?project_id={w.proj}", bearer=w.agent_key)
-        assert r.status_code == 401
+            assert await w.public_reads(c) == {"doc": 410, "posts_list": 404, "post": 404}
+            assert (await _sql("SELECT status, revoked_at IS NOT NULL FROM doc_share_tokens WHERE org_id = :o", o=w.org)) == [("revoked", True)]
+            assert (await _sql("SELECT revoked_at IS NOT NULL FROM org_metering_keys WHERE org_id = :o", o=w.org)) == [(True,)]
+            assert (await _sql("SELECT unpublished_at IS NOT NULL FROM site_posts WHERE org_id = :o", o=w.org)) == [(True,)]
+            # what background jobs would have kept using: the channel token is revoked and its secrets dropped, the GA4 connection is gone,
+            # the post waiting to go out is cancelled
+            assert (await _sql("SELECT status, encrypted_access_token IS NULL, encrypted_refresh_token IS NULL FROM channel_connections WHERE org_id = :o", o=w.org)) == [("revoked", True, True)]
+            assert (await _sql("SELECT count(*) FROM ga4_connections WHERE org_id = :o", o=w.org)) == [(0,)]
+            assert (await _sql("SELECT status FROM publication_commands WHERE id = :i", i=w.command)) == [("cancelled",)]
+            # the agent's key row is revoked too (the `members` cascade turns its member_id to NULL, so it could not be matched afterwards)
+            for kid in w.key_ids:
+                assert (await _sql("SELECT revoked_at IS NOT NULL FROM agent_api_keys WHERE id = :k", k=kid)) == [(True,)]
+            r = await _call(c, "GET", f"/api/v2/stories?project_id={w.proj}", bearer=w.agent_key)
+            assert r.status_code == 401
+        finally:
+            await w.cleanup()
 
 
 @pytest.mark.anyio
@@ -154,6 +196,9 @@ async def test_c_an_organization_deleted_before_this_change_cannot_be_read_throu
     """what the delete did before: only the organizations row went (here: the same SQL), every link / key / post stayed in its table"""
     async with _client() as c:
         w = await World().build(c)
-        await _sql("DELETE FROM organizations WHERE id = :o", o=w.org)
-        assert (await _sql("SELECT status FROM doc_share_tokens WHERE org_id = :o", o=w.org)) == [("active",)]  # nothing ended it
-        assert await w.public_reads(c) == {"doc": 410, "posts_list": 404, "post": 404}
+        try:
+            await _sql("DELETE FROM organizations WHERE id = :o", o=w.org)
+            assert (await _sql("SELECT status FROM doc_share_tokens WHERE org_id = :o", o=w.org)) == [("active",)]  # nothing ended it
+            assert await w.public_reads(c) == {"doc": 410, "posts_list": 404, "post": 404}
+        finally:
+            await w.cleanup()
