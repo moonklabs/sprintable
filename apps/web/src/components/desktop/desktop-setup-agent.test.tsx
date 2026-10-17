@@ -72,6 +72,12 @@ describe('[SID:4711] the `agent=` branch of the setup page', () => {
     expect(start()!.disabled).toBe(false);
   });
 
+  it('the card from a hire is titled after THAT agent — «{name} 에이전트 시작하기» — not the generic title (story 4710 correction)', async () => {
+    await open(frag('move,solo'));
+    expect(container.querySelector('[data-testid=quick-card] h1')!.textContent).toBe('Dan 에이전트 시작하기');
+    expect(text()).not.toContain('이 컴퓨터에서 에이전트 시작하기');
+  });
+
   it('«시작» = the MOVE confirmation: {code, project_id, roles:[{role, agent_id}]} — no recipe, no runtime row, never confirm-solo', async () => {
     await open(frag('move,solo'));
     await act(async () => { start()!.click(); });

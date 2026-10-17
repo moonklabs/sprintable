@@ -289,7 +289,8 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
   return (
     <div className="flex flex-col gap-3">
       <Card className="break-keep flex flex-col gap-5 p-6" data-testid="quick-card">
-        <h1 className="text-lg font-semibold">{t('quick.title')}</h1>
+        {/* story 4710 (Yuna 4710-copy-1016 · the correction's «{name} 에이전트 시작하기»): from a hire the card is about THAT agent */}
+        <h1 className="text-lg font-semibold">{agent ? t('quick.titleAgent', { name: agent.name }) : t('quick.title')}</h1>
 
         <section aria-labelledby="quick-step-agent" className="flex flex-col gap-2">
           <h2 id="quick-step-agent" className="text-sm font-medium">① {t('quick.stepAgent')}</h2>

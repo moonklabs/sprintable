@@ -7015,6 +7015,7 @@
       },
       "quick": {
         "title": "Start an agent on this computer",
+        "titleAgent": "Start {name}",
         "stepAgent": "Agent",
         "stepFolder": "Folder",
         "tooOld": "{name} {version} — too old to use with this app · update it to choose it",
