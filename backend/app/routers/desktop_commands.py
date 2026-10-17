@@ -96,7 +96,7 @@ async def get_desktop_startable(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
-    member = await _person(db, auth, org_id, interactive=False)
+    member = await _person(db, auth, org_id, interactive=True)  # a person's own session, like the whole-phone read and the press itself (an API key or an agent key is 403)
     user_id = uuid.UUID(str(auth.user_id))
     try:
         return await desktop_commands.startable_view(

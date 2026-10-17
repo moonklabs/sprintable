@@ -205,6 +205,10 @@ async def test_05_only_a_persons_own_session_presses_a_start_and_a_made_up_shape
                             {"Authorization": f"Bearer {device['agents'][0]['api_key']}", "X-Org-Id": str(ORG)}):
                 r = await _post(c, agent, _start(phone, sid), headers=headers)
                 assert (r.status_code, r.json()["error"]["code"]) == (403, "person_session_required")
+                # the two reads are the person's own too — the agent's list and the whole phone's list
+                for url in (f"/api/v2/agents/{agent}/desktop-startable", "/api/v2/desktop/startable"):
+                    g = await c.get(url, params={"phone_key_id": phone}, headers=headers)
+                    assert (g.status_code, g.json()["error"]["code"]) == (403, "person_session_required"), url
         finally:
             await _sql(f"DELETE FROM human_api_keys WHERE member_id = '{OWNER_TM}'")
         # the queue itself takes no old shape: {agent, runtime} (no maker any more) and an unsigned one are refused
@@ -455,3 +459,19 @@ async def test_12_one_computers_list_replaces_only_its_own(world):
         two = (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{dev2['setup_id']}'"))[0][0]
         assert one == [{"agent_member_id": agent1, "project_id": str(PROJ)}]
         assert two == [{"agent_member_id": agent2, "project_id": str(PROJ2)}]
+
+
+async def test_13_one_key_on_two_computers_is_two_commands(world):
+    """codex 5132 round 8 ⑥: a same-key press is the same press only on the same computer — the same person with the same key on another computer
+    queues its own command (the same-key lookup is scoped to the computer)."""
+    async with _client() as c:
+        dev1, agent1, phone1, _d1 = await _setup(c, "d4424 mac 4714n1")
+        dev2, agent2, phone2, _d2 = await _setup(c, "d4424 mac 4714n2")
+        for dev, agent in ((dev1, agent1), (dev2, agent2)):
+            assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ)), headers=_tok(dev["device_token"]))).status_code == 200
+        key = str(uuid.uuid4())
+        r1 = await _post(c, agent1, _start(phone1, dev1["setup_id"], key=key))
+        r2 = await _post(c, agent2, _start(phone2, dev2["setup_id"], key=key))
+        assert (r1.status_code, r2.status_code) == (201, 201), (r1.text, r2.text)
+        assert r1.json()["command_id"] != r2.json()["command_id"]
+        assert len(await _commands(dev1["setup_id"])) == 1 and len(await _commands(dev2["setup_id"])) == 1
