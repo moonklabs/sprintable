@@ -55,7 +55,7 @@ from app.core.security import (
     create_refresh_token,
 )
 from app.core.rate_limit import limiter, resend_verification_limiter
-from app.dependencies.auth import AuthContext, get_current_user, resolve_request_org_id
+from app.dependencies.auth import AuthContext, _reject_if_before_cutover, get_current_user, resolve_request_org_id
 from app.services.project_auth import (
     accessible_project_ids_in_org, first_accessible_project_id, has_project_access,
 )
@@ -443,6 +443,13 @@ async def _reclaim_unproved_account(
     from app.models.agent_permission import RemoteDevice
     from sqlalchemy.dialects.postgresql import insert as _pg_insert
 
+    # what the account held BEFORE this runs (the ORM-enabled UPDATE below would also refresh the loaded object): the notice says only what was really cut
+    # (locked FOR UPDATE: the row is read and then overwritten in this one transaction, so a concurrent two-factor / provider / password change cannot slip in between
+    # and leave the notice naming a state that was not the one cut)
+    pre = (await session.execute(
+        select(User.hashed_password, User.google_id, User.github_id, User.apple_id, User.totp_enabled, User.totp_secret).where(User.id == user.id).with_for_update()
+    )).one()
+    pre_providers = dict(zip(_PROVIDER_ID_COLUMNS, (pre.google_id, pre.github_id, pre.apple_id)))
     now = datetime.now(timezone.utc)
     values: dict = {
         "email_verified": True,
@@ -464,13 +471,13 @@ async def _reclaim_unproved_account(
 
     human_members = select(Member.id).where(Member.user_id == user.id)
     agents = select(Member.id).where(Member.owner_member_id.in_(human_members))
-    await session.execute(update(HumanApiKey).where(HumanApiKey.member_id.in_(human_members), HumanApiKey.revoked_at.is_(None)).values(revoked_at=now))
-    await session.execute(update(ApiKey).where(or_(ApiKey.member_id.in_(agents), ApiKey.team_member_id.in_(agents)), ApiKey.revoked_at.is_(None)).values(revoked_at=now))
-    await session.execute(update(ProjectApiKey).where(ProjectApiKey.created_by == user.id, ProjectApiKey.revoked_at.is_(None)).values(revoked_at=now))
-    await session.execute(update(RemoteDevice).where(RemoteDevice.member_id.in_(human_members), RemoteDevice.revoked_at.is_(None)).values(revoked_at=now))
+    keys_cut = (await session.execute(update(HumanApiKey).where(HumanApiKey.member_id.in_(human_members), HumanApiKey.revoked_at.is_(None)).values(revoked_at=now))).rowcount or 0
+    keys_cut += (await session.execute(update(ApiKey).where(or_(ApiKey.member_id.in_(agents), ApiKey.team_member_id.in_(agents)), ApiKey.revoked_at.is_(None)).values(revoked_at=now))).rowcount or 0
+    keys_cut += (await session.execute(update(ProjectApiKey).where(ProjectApiKey.created_by == user.id, ProjectApiKey.revoked_at.is_(None)).values(revoked_at=now))).rowcount or 0
+    phones_cut = (await session.execute(update(RemoteDevice).where(RemoteDevice.member_id.in_(human_members), RemoteDevice.revoked_at.is_(None)).values(revoked_at=now))).rowcount or 0
     setups = select(DesktopSetup.id).where(DesktopSetup.confirmed_by == user.id, DesktopSetup.revoked_at.is_(None))
     await session.execute(update(DesktopDeviceToken).where(DesktopDeviceToken.setup_id.in_(setups), DesktopDeviceToken.revoked_at.is_(None)).values(revoked_at=now))
-    await session.execute(update(DesktopSetup).where(DesktopSetup.confirmed_by == user.id, DesktopSetup.revoked_at.is_(None)).values(revoked_at=now, revoked_reason="account_reclaimed"))
+    computers_cut = (await session.execute(update(DesktopSetup).where(DesktopSetup.confirmed_by == user.id, DesktopSetup.revoked_at.is_(None)).values(revoked_at=now, revoked_reason="account_reclaimed"))).rowcount or 0
     await session.execute(update(OAuthHandoffCode).where(OAuthHandoffCode.user_id == user.id, OAuthHandoffCode.consumed_at.is_(None)).values(consumed_at=now))
     # the cut-off: the last microsecond before the NEXT whole second (tokens carry whole seconds)
     # written LAST (after every revocation above): a slow reclaim that crosses a second must not leave the cut-off earlier than the end of its own work
@@ -481,7 +488,25 @@ async def _reclaim_unproved_account(
         set_={"auth_valid_after": func.greatest(AuthMigration.auth_valid_after, upsert.excluded.auth_valid_after)},
     ).returning(AuthMigration.auth_valid_after))).scalar_one()
     # Firebase identities linked to the account are provider identities too (codex 01a1478d): untied with the others
-    await session.execute(delete(AuthIdentity).where(AuthIdentity.user_id == user.id))
+    # only ACTIVE links count as «cut» (an already-unlinked historical row is deleted too but was not a way in)
+    identities_cut = sum(1 for (unlinked_at,) in (await session.execute(delete(AuthIdentity).where(AuthIdentity.user_id == user.id).returning(AuthIdentity.unlinked_at))).all() if unlinked_at is None)
+    # story 4725 decision 2: the «show it once» mark — what was REALLY cut (a notice that says «cut» for what never existed would be false); nothing when nothing was
+    cut: list[str] = []
+    if ended:
+        cut.append("sessions")
+    if identities_cut or any(v and not (keep_provider is not None and col == f"{keep_provider[0]}_id" and v == keep_provider[1]) for col, v in pre_providers.items()):
+        cut.append("providers")
+    if pre.totp_enabled or pre.totp_secret:
+        cut.append("two_step")
+    if keys_cut:
+        cut.append("keys")
+    if phones_cut:
+        cut.append("phones")
+    if computers_cut:
+        cut.append("computers")
+    password_cleared = bool(pre.hashed_password) and new_password_hash is None
+    if cut or password_cleared:
+        await session.execute(update(User).where(User.id == user.id).values(reclaim_notice={"cut": cut, "password_cleared": password_cleared}))
     await _write_audit(session, "unverified_account_reclaimed", user_id=user.id, ip_address=ip_address, detail=f"{why}; sessions_ended={ended}")
     return stored_epoch
 
@@ -2564,6 +2589,10 @@ class AuthMeResponse(BaseModel):
     # story 4427 — the desktop sign-up screen defaults the organization name to «{display_name}의 조직» (never the
     # e-mail's local part). Human sessions only; None when unset or for an API-key context.
     display_name: str | None = None
+    # story 4725 decision 2 — while the server has a «what was cut when your mailbox was proved» notice to show this person once: {"cut": ["sessions" | "providers" |
+    # "two_step" | "keys" | "phones" | "computers"], "password_cleared": bool} (set by the reclaim of an unproved account with what it really cut, cleared by
+    # POST /auth/reclaim-notice/dismiss). Nothing else is in it. Human sessions only; None when there is nothing to show or for an API-key context.
+    reclaim_notice: dict | None = None
     # story #4178(산티아고 prod 에스컬레이션 1d522e6d) — 사람(JWT) 세션의 `member_id`는
     # `auth.user_id`(=users.id) 그대로라 `/api/v2/events/stream`의 `resolve_member_identity`
     # (TeamMember.id/OrgMember.id만 허용)로 검증하면 404가 난다. `member_id` 자체의 의미는
@@ -2627,6 +2656,7 @@ async def get_auth_me(
     email_verification_required: bool | None = None
     email: str | None = None
     display_name: str | None = None
+    reclaim_notice: dict | None = None
     org_member_id: str | None = None
     org_id_raw = auth.org_id or meta.get("org_id")
     if meta.get("api_key_id"):
@@ -2648,10 +2678,10 @@ async def get_auth_me(
         # 컨텍스트는 위 분기라 여기 안 온다(불필요 쿼리 회피).
         try:
             user_row = (
-                await db.execute(select(User.email_verified, User.display_name).where(User.id == uuid.UUID(auth.user_id)))
+                await db.execute(select(User.email_verified, User.display_name, User.reclaim_notice).where(User.id == uuid.UUID(auth.user_id)))
             ).one_or_none()
             if user_row is not None:
-                email_verified, display_name = user_row
+                email_verified, display_name, reclaim_notice = user_row
         except Exception:
             logger.warning("get_auth_me: email_verified 조회 실패 — None으로 반환", exc_info=True)
         # story #4178 — org 미해소(org 없음·OrgMember 행 없음)는 예외가 아니라 None.
@@ -2682,8 +2712,29 @@ async def get_auth_me(
         email_verification_required=email_verification_required,
         email=email,
         display_name=display_name,
+        reclaim_notice=reclaim_notice,
         org_member_id=org_member_id,
     )
+
+
+@router.post("/reclaim-notice/dismiss")
+async def dismiss_reclaim_notice(
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> JSONResponse:
+    """story 4725 decision 2 — the person closes the «what was cut when your mailbox was proved» notice: the server's mark is cleared and it does not come
+    back. A person's own session only (an API key or an agent key is 403), and only the caller's own row — there is no id in the request."""
+    if _requires_interactive_session(auth):
+        return _err("REQUIRES_INTERACTIVE_SESSION", "이 작업은 브라우저 세션에서만 가능합니다", 403)
+    # a request that was admitted just before a reclaim waits here for the row the reclaim holds: after it commits, the session is checked against the cut-off AGAIN
+    # (under the lock), so an old session cannot erase the notice the reclaim just wrote
+    await session.execute(select(User.id).where(User.id == uuid.UUID(auth.user_id)).with_for_update())
+    # (a Firebase session carries no `iat`: its `auth_time` was already checked against the cut-off for this request by its own resolver)
+    if auth.claims.get("iat") is not None:
+        await _reject_if_before_cutover(auth.user_id, auth.claims.get("iat"), session)
+    await session.execute(update(User).where(User.id == uuid.UUID(auth.user_id)).values(reclaim_notice=None))
+    await session.commit()
+    return _ok({"dismissed": True})
 
 
 class SetDefaultProjectRequest(BaseModel):
