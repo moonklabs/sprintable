@@ -99,11 +99,13 @@ async def _get_offering_limits(session: AsyncSession, tier: str) -> tuple[int, i
 
 
 async def check_org_create_limit(session: AsyncSession, user_id) -> None:
-    """Free: 사용자당 owner org 1개 제한."""
+    """Free: 사용자당 owner org 1개 제한. story 4726 — 있는 조직만 센다: org_members.org_id에는 FK가 없어 조직 행이 지워져도(삭제 길은 이제 멤버
+    행도 끝내지만, 삭제와 겹친 멤버 쓰기 · 예전에 남은 행) 산 owner 행이 남을 수 있고, 그 행은 한도를 먹으면 안 된다."""
     result = await session.execute(
         text(
-            "SELECT COUNT(*) FROM org_members"
-            " WHERE user_id = :uid AND role = 'owner' AND deleted_at IS NULL"
+            "SELECT COUNT(*) FROM org_members om"
+            " JOIN organizations o ON o.id = om.org_id"
+            " WHERE om.user_id = :uid AND om.role = 'owner' AND om.deleted_at IS NULL"
         ),
         {"uid": str(user_id)},
     )
