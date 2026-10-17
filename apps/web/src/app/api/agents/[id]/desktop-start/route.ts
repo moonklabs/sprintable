@@ -1,4 +1,5 @@
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
+import { DESKTOP_START_KEYS } from '@/lib/desktop-start-keys';
 
 // story #4714 — the phone app's signed start of an agent that already exists on a paired computer: POST /api/v2/agents/{id}/desktop-start
 // {setup_id, project_id, idempotency_key, signed, phone_key_id} (contract 02d2cf71 §14 ②). The web never makes `signed` — the phone app's
@@ -8,7 +9,6 @@ import { proxyToFastapi } from '@/lib/fastapi-proxy';
 // sent. «No path · folder · mode · arguments · runtime goes from the web» is a structure of this route, not only a habit of one component
 // (the server's schema — extra fields are a 422 — and the daemon's comparison of the signed payload remain the real guards).
 const AGENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export const DESKTOP_START_KEYS = ['setup_id', 'project_id', 'signed', 'phone_key_id', 'idempotency_key'] as const;
 
 type RouteParams = { params: Promise<{ id: string }> };
 

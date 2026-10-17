@@ -4,12 +4,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const proxy = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi: proxy }));
+import * as route from './route';
 import { GET } from './route';
 
 const KEY = '99999999-9999-4999-8999-999999999999';
 const get = (qs: string) => new Request(`http://localhost:3000/api/desktop/startable${qs}`, { method: 'GET' });
 
 beforeEach(() => { proxy.mockReset().mockImplementation(async () => new Response('{"remote_control":true,"computers":[]}', { status: 200 })); });
+
+it('exports only its HTTP handler (a Next.js app route may export nothing else — the build refuses a helper here)', () => {
+  expect(Object.keys(route)).toEqual(['GET']);
+});
 
 describe('GET /api/desktop/startable', () => {
   it('proxies to exactly /api/v2/desktop/startable with the key id', async () => {

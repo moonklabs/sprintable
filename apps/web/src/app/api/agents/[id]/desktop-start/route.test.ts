@@ -4,7 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const proxy = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi: proxy }));
-import { DESKTOP_START_KEYS, POST } from './route';
+import { DESKTOP_START_KEYS } from '@/lib/desktop-start-keys';
+import * as route from './route';
+import { POST } from './route';
 
 const AGENT = '22222222-3333-4444-8555-666666666666';
 const post = (body: unknown) => new Request(`http://localhost:3000/api/agents/${AGENT}/desktop-start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: typeof body === 'string' ? body : JSON.stringify(body) });
@@ -14,6 +16,10 @@ const GOOD = { setup_id: 's', project_id: 'p', signed: 'SIG', phone_key_id: 'k',
 beforeEach(() => { proxy.mockReset().mockImplementation(async () => new Response('{}', { status: 201 })); });
 
 describe('POST /api/agents/[id]/desktop-start', () => {
+  it('exports only its HTTP handler (a Next.js app route may export nothing else — the build refuses a helper here)', () => {
+    expect(Object.keys(route)).toEqual(['POST']);
+  });
+
   it('proxies to exactly /api/v2/agents/{id}/desktop-start with the five contract keys', async () => {
     const res = await POST(post(GOOD), params(AGENT));
     expect(res.status).toBe(201);
