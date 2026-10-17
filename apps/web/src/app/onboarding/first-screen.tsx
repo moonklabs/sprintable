@@ -11,12 +11,17 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { DesktopDownloadCard, notAMac } from '@/components/desktop/desktop-download-card';
 import { PhoneAppCard } from '@/components/desktop/phone-app-card';
+import { PhoneFirstScreen } from '@/components/desktop/phone-first-screen';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { emitOnboardingEvent } from './onboarding-telemetry';
 
 const noSubscribe = () => () => undefined;
 
 interface FirstScreenProps {
+  /** story 4714: the organization's id — the phone app's screen needs it to turn remote control on (null: not known here) */
+  orgId?: string | null;
+  /** story 4714: where «대화» is (the server resolved it from the nav flags — never a literal here) */
+  chatsHref?: string;
   /** the organization's name when this page made it (or read it) — null: not known here, the line is not drawn (never made up) */
   orgName: string | null;
   /** the web way: project → agent → connect */
@@ -25,13 +30,29 @@ interface FirstScreenProps {
   onFinish: () => void;
 }
 
-export function FirstScreen({ orgName, onConnectElsewhere, onFinish }: FirstScreenProps) {
+export function FirstScreen({ orgId = null, chatsHref, orgName, onConnectElsewhere, onFinish }: FirstScreenProps) {
   const t = useTranslations('onboarding.first');
   const to = useTranslations('onboarding');
   // the device is read after mount (null on the server and before the first read — no hydration mismatch), as the card does
   const { inPhoneApp } = usePhoneBridge();
   const elsewhere = useSyncExternalStore(noSubscribe, () => notAMac(navigator.userAgent, inPhoneApp), () => null);
   if (elsewhere === null) return null;
+
+  // story 4714 (AC1 · Yuna 4714-copy-1017): inside the phone app the Mac-or-not fork is not drawn — the phone's own screen takes its place
+  // (a phone pairs with a Mac and starts its agents from it; «지금은 Mac 앱만 있어요» would say the opposite). Other non-Mac browsers keep theirs.
+  if (inPhoneApp) {
+    return (
+      <div className="space-y-4" data-testid="onboarding-first-phone-app">
+        <PhoneFirstScreen orgId={orgId} chatsHref={chatsHref} />
+        <p className="break-keep border-t border-border pt-4 text-xs text-muted-foreground" data-testid="onboarding-first-later">
+          {to('download.laterNote')}{' '}
+          <Button variant="link" size="sm" className="h-auto px-0 py-0 text-xs" onClick={onFinish} data-testid="onboarding-first-finish">
+            {to('desktopFinishToToday')}
+          </Button>
+        </p>
+      </div>
+    );
+  }
 
   const connectNote = <p className="break-keep text-xs text-muted-foreground">{t('connectNote')}</p>;
   const orgLine = orgName
