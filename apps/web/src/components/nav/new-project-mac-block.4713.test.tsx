@@ -118,6 +118,14 @@ describe('story 4713 AC3 — the Mac block in the browser\'s «새 프로젝트�
     expect(container.querySelector('[data-testid=new-project-mac-open]')).toBeNull();
     expect(container.querySelector('[data-testid=new-project-mac-elsewhere]')!.textContent).toBe('Mac에서 이 계정으로 열면 폴더로 바로 시작할 수 있어요');
     expect(text()).not.toContain('앱이 안 열리면');
+    // several setups, still not a Mac: the count alone — «이 컴퓨터의 앱에서 열려요» would promise an opening that cannot happen (Yuna's note)
+    rc.value = { connected_setups: 3 };
+    await render();
+    expect(text()).toContain('연결된 Mac이 3대예요.');
+    expect(text()).not.toContain('이 컴퓨터의 앱');
+    await render({ locale: 'en' });
+    expect(text()).toContain('3 Macs are connected.');
+    expect(text()).not.toContain('app on this computer');
     rc.value = { connected_setups: 0 };
     await render();
     expect(container.querySelector('[data-testid=download-card]')).toBeNull(); // not a Mac: nothing to install here

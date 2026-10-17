@@ -199,6 +199,7 @@
     "switcherMacTitle": "You can also start from a folder in the Mac app",
     "switcherMacBody": "Pick a folder and the project and an agent are made together.",
     "switcherMacBodyMany": "{n, plural, one {# Mac is} other {# Macs are}} connected — the app on this computer opens. Pick a folder and the project and an agent are made together.",
+    "switcherMacCountOnly": "{n, plural, one {# Mac is} other {# Macs are}} connected.",
     "switcherMacAction": "Continue in the Mac app",
     "switcherMacNoOpen": "If the app doesn't open, open the Sprintable app on your Mac and tap «New project».",
     "switcherMacTitleNone": "With the Mac app you can start from a folder",

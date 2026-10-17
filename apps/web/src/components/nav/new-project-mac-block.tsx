@@ -18,7 +18,8 @@ const noSubscribe = () => () => undefined;
  * 받으면 …» and the download. The link opens the app on THIS computer (the OS opens a custom scheme where the browser runs), so there is
  * no list to choose from — «어느 맥에서» is not offered. Not drawn inside the desktop app (it has its own always-visible «새 프로젝트») or
  * the phone app, and not while the count is unknown or failed (never a promise from an unknown count). A browser that is not a Mac's gets
- * the line «Mac에서 이 계정으로 열면 …» in place of the button — the link would open nothing there.
+ * the line «Mac에서 이 계정으로 열면 …» in place of the button — the link would open nothing there — and, with several setups, the count alone
+ * (Yuna's note on the review: «이 컴퓨터의 앱에서 열려요» would promise an opening that cannot happen there).
  * The button is outline (the dialog keeps its one primary, [만들기]) and presses nothing on the server; the dialog stays open.
  */
 export function NewProjectMacBlock({ orgId }: { orgId: string | null | undefined }) {
@@ -38,7 +39,7 @@ export function NewProjectMacBlock({ orgId }: { orgId: string | null | undefined
     <section className="flex flex-col gap-2 rounded-md border bg-muted/30 p-3" data-testid="new-project-mac-block">
       <h3 className="break-keep text-sm font-medium">{none ? t('switcherMacTitleNone') : t('switcherMacTitle')}</h3>
       <p className="break-keep text-xs text-muted-foreground">
-        {none ? tFirst('macLead') : n >= 2 ? t('switcherMacBodyMany', { n }) : t('switcherMacBody')}
+        {none ? tFirst('macLead') : n >= 2 ? (elsewhere ? t('switcherMacCountOnly', { n }) : t('switcherMacBodyMany', { n })) : t('switcherMacBody')}
       </p>
       {elsewhere ? (
         <p className="break-keep text-xs text-muted-foreground" data-testid="new-project-mac-elsewhere">{t('switcherMacElsewhere')}</p>
