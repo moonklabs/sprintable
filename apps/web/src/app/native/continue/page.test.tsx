@@ -10,8 +10,8 @@ vi.mock('@/lib/backend-fetch', () => ({ backendFetch: h.backendFetch }));
 vi.mock('next/navigation', () => ({ redirect: (to: string) => { h.redirect(to); throw new Error(`REDIRECT:${to}`); } }));
 vi.mock('next-intl/server', () => ({ getTranslations: async () => (k: string) => k }));
 vi.mock('@/components/desktop/desktop-continue-card', () => ({
-  DesktopContinueCard: (p: { account: string; here: string; start: { challenge: string; returnApp: string | null } }) => (
-    <div data-card data-account={p.account} data-here={p.here} data-app={p.start.returnApp ?? ''} />
+  DesktopContinueCard: (p: { account: string; here: string; failed?: boolean; start: { challenge: string; returnApp: string | null } }) => (
+    <div data-card data-account={p.account} data-here={p.here} data-app={p.start.returnApp ?? ''} data-failed={p.failed ? '1' : ''} />
   ),
 }));
 
@@ -36,6 +36,13 @@ describe('/native/continue', () => {
     expect(html).toContain('data-app="dev"');
     expect(h.redirect).not.toHaveBeenCalled();
     expect(h.backendFetch).not.toHaveBeenCalled(); // opening the page makes no code
+  });
+
+  it('the form route sent the person back with failed=1 → the card gets failed (and `here` stays without it, so a sign-in round trip does not keep the flag)', async () => {
+    const html = await render({ ...GOOD, failed: '1' });
+    expect(html).toContain('data-failed="1"');
+    expect(html).toContain(`data-here="/native/continue?code_challenge=${CH}&amp;cc_method=S256&amp;callback_mode=custom_scheme"`);
+    expect(await render(GOOD)).toContain('data-failed=""');
   });
 
   it('not signed in → the sign-in page with next = this page and the whole start (no "session expired" reason)', async () => {

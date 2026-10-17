@@ -33,7 +33,7 @@ export default async function DesktopContinuePage({ searchParams }: { searchPara
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-muted px-4">
-      <DesktopContinueCard account={session.email} start={{ challenge: start.challenge, returnApp: start.returnApp }} here={here} />
+      <DesktopContinueCard account={session.email} start={{ challenge: start.challenge, returnApp: start.returnApp }} here={here} failed={raw['failed'] === '1'} />
     </main>
   );
 }
