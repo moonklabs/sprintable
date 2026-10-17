@@ -20,7 +20,7 @@ export async function POST(request: Request): Promise<Response> {
   const csrfError = verifyCsrfOrigin(request);
   if (csrfError) return csrfError;
 
-  let raw: Record<string, unknown> = {};
+  const raw: Record<string, unknown> = {};
   try {
     const form = await request.formData();
     // a field given twice, or a file, is off (not «absent») — `startParamsFrom` refuses what is not ONE string
