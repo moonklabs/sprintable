@@ -36,6 +36,9 @@ class DesktopSetup(Base):
     members: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     # alembic 0439 (story #4576) — what the app that made the code can take (["move"]); None = an app from before named none
     capabilities: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # alembic 0455 (story #4714) — the (agent, project) pairs the computer says it has a usable folder for: [{agent_member_id, project_id}], ids only
+    # (never a path), replaced whole by the computer's own PUT /relay/startable; NULL = it has said nothing. Shown to the phone; the computer decides.
+    startable: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     # the folder chosen on the web — handed back as is in the exchange; the desktop app is the judge of the path
     workdir_hint: Mapped[str | None] = mapped_column(Text, nullable=True)
     # alembic 0423 — the story the confirmation created (its first work item); the status read and the first-result mark

@@ -78,7 +78,7 @@ async def test_02_last_event_id_not_a_number_is_400_and_past_the_latest_sends_no
     async with _client() as c:
         d = await _device(c, name="d4554 lei")
         sid, token, agent = d["setup_id"], d["device_token"], d["agents"][0]["member_id"]
-        await _enqueue(sid, "start_session", {"agent_member_id": agent, "runtime": "claude"}, "k1")
+        await _enqueue(sid, "start_session", {"agent_member_id": agent, "project_id": str(uuid.uuid4()), "signed": "sig"}, "k1")
         await _enqueue(sid, "stop_session", {"session_key": "s-1", "signed": "sig"}, "k2")
         first = await c.get(STREAM, headers=_tok(token))  # no cursor: both, as before
         assert first.status_code == 200 and first.text.count("event: command") == 2

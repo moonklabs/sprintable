@@ -297,6 +297,24 @@ class SessionSnapshot(BaseModel):
     sessions: list[SnapshotSession] = Field(max_length=64)
 
 
+STARTABLE_MAX = 128
+
+
+class StartableItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agent_member_id: uuid.UUID
+    project_id: uuid.UUID
+
+
+class StartableSnapshot(BaseModel):
+    """story #4714: the computer's own list of the (agent, project) pairs it has a usable folder for — ids only (a path has no place in
+    it: every body forbids extra fields). Replaces the whole list; the computer decides at the start, this is what the phone is shown."""
+    model_config = ConfigDict(extra="forbid")
+
+    startable: list[StartableItem] = Field(max_length=STARTABLE_MAX)
+
+
 def _setup_agents(setup: DesktopSetup) -> set[uuid.UUID]:
     return {uuid.UUID(str(m["member_id"])) for m in (setup.members or []) if m.get("kind") == "agent" and m.get("member_id")}
 
@@ -585,6 +603,43 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
     return len(snapshot.sessions)
 
 
+async def accessible_startable(db: AsyncSession, setup: DesktopSetup, snapshot: StartableSnapshot) -> StartableSnapshot:
+    """story #4714: narrow the computer's list to the pairs its own agents can really have: the agent is one this device was set up with
+    (else 422 `agent_not_on_device`, as a session report) AND the agent belongs to the project (its project profile) AND the project is a live
+    project of this device's organization. A pair outside that is dropped, not refused: the computer works from its own files and a refusal would
+    only make it send the same list again. The phone's reads cut the list by who may open what; this keeps the stored list itself to what is possible."""
+    from app.models.member import AgentProjectProfile
+    from app.models.project import Project
+
+    for item in snapshot.startable:
+        _check_agent(setup, item.agent_member_id)
+    agents = {i.agent_member_id for i in snapshot.startable}
+    if not agents:
+        return snapshot
+    rows = (await db.execute(
+        select(AgentProjectProfile.member_id, AgentProjectProfile.project_id)
+        .join(Project, Project.id == AgentProjectProfile.project_id)
+        .where(AgentProjectProfile.member_id.in_(agents), Project.org_id == setup.org_id, Project.deleted_at.is_(None))
+    )).all()
+    possible = {(m, p) for m, p in rows}
+    return StartableSnapshot(startable=[i for i in snapshot.startable if (i.agent_member_id, i.project_id) in possible])
+
+
+async def replace_startable(db: AsyncSession, setup: DesktopSetup, snapshot: StartableSnapshot) -> int:
+    """story #4714: the computer's startable pairs, as it says them (a pair for an agent this device was not set up with is refused —
+    the same rule as a session report). Stored as given, sorted and without repeats."""
+    for item in snapshot.startable:
+        _check_agent(setup, item.agent_member_id)
+    pairs = sorted({(str(i.agent_member_id), str(i.project_id)) for i in snapshot.startable})
+    await db.execute(
+        update(DesktopSetup).where(DesktopSetup.id == setup.id)
+        .values(startable=[{"agent_member_id": a, "project_id": p} for a, p in pairs])
+    )
+    await touch_device(db, setup.id)
+    await db.flush()
+    return len(pairs)
+
+
 async def device_sessions_view(
     db: AsyncSession, setup_id: uuid.UUID, *, now: datetime | None = None, limit: int = SESSIONS_PAGE_DEFAULT,
 ) -> list[dict]:
@@ -637,8 +692,13 @@ class _Payload(BaseModel):
 
 
 class StartSessionPayload(_Payload):
+    """story #4714 (contract 02d2cf71 new version): a phone's signed start — the agent, the project (never a path, a mode, an argument or a
+    runtime: the computer reads its own folder for the project and the agent's own profile), and the phone's signed blob carried as is.
+    The old shape {agent_member_id, runtime} has no maker any more (the daemon refused it as `unsigned` since v1.9.1)."""
+
     agent_member_id: uuid.UUID
-    runtime: Literal["claude", "codex"]
+    project_id: uuid.UUID
+    signed: str = Field(min_length=1, max_length=16384)
 
 
 class SendPromptPayload(_Payload):

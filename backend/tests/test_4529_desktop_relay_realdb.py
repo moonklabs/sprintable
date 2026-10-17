@@ -114,7 +114,7 @@ async def test_an_open_stream_sends_its_commands_then_ends_on_access_revoked(wor
         d = await _device(c)
         sid, token = d["setup_id"], d["device_token"]
         agent = d["agents"][0]["member_id"]
-        await _enqueue(sid, "start_session", {"agent_member_id": agent, "runtime": "claude"}, "k1")
+        await _enqueue(sid, "start_session", {"agent_member_id": agent, "project_id": str(uuid.uuid4()), "signed": "sig"}, "k1")
         await _enqueue(sid, "stop_session", {"session_key": "s-1", "signed": "sig"}, "k2")
         r = await c.get("/api/v2/desktop/relay/stream", headers=_tok(token))
         assert r.status_code == 200
@@ -183,6 +183,9 @@ async def test_commands_four_kinds_a_schema_each_one_row_per_key_numbered_per_de
         whole = {"conversation_id": str(uuid.uuid4()), "signed": "sig"}  # the rest of a prompt (v1.9) — each case fails for its own reason
         for kind, payload in (("run_shell", {"cmd": "ls"}), ("send_prompt", {"session_key": "s", "text": "hi", "keys": "x", **whole}),
                               ("start_session", {"agent_member_id": str(uuid.uuid4()), "runtime": "claude"}),
+                              ("start_session", {"agent_member_id": agent, "runtime": "claude"}),  # story #4714: the old shape has no maker any more
+                              ("start_session", {"agent_member_id": agent, "project_id": str(uuid.uuid4()), "signed": "sig", "path": "/tmp"}),  # no room for a path
+                              ("start_session", {"agent_member_id": agent, "project_id": str(uuid.uuid4())}),  # unsigned
                               ("send_prompt", {"session_key": "s", "text": "x" * 8001, **whole}),
                               ("send_prompt", {"session_key": "s", "text": "hi", "conversation_id": whole["conversation_id"]}),
                               ("stop_session", {"session_key": "s"})):  # story #4534 — unsigned: refused
@@ -194,7 +197,7 @@ async def test_commands_four_kinds_a_schema_each_one_row_per_key_numbered_per_de
         again = await _enqueue(sid, "send_prompt", {"session_key": "s", "text": "other", "conversation_id": conv, "signed": "sig"}, "same")
         # the same key: the first row as it was (the second body is not taken — v1.9 fields carried as sent)
         assert again.id == first.id and again.payload == {"session_key": "s", "text": "hi", "conversation_id": conv, "signed": "sig"}
-        second = await _enqueue(sid, "start_session", {"agent_member_id": agent, "runtime": "codex"}, "k2")
+        second = await _enqueue(sid, "start_session", {"agent_member_id": agent, "project_id": str(uuid.uuid4()), "signed": "sig"}, "k2")
         assert (first.device_seq, second.device_seq) == (1, 2)
 
 
