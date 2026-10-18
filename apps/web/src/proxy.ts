@@ -162,7 +162,7 @@ async function lookupVerifiedOrg(fastapiUrl: string, accessToken: string): Promi
     }
     if (!res.ok) return { kind: 'unknown' };
     const me = await res.json() as { org_id?: string };
-    return typeof me.org_id === 'string' ? { kind: 'org', orgId: me.org_id } : { kind: 'unknown' };
+    return typeof me.org_id === 'string' && me.org_id !== '' ? { kind: 'org', orgId: me.org_id } : { kind: 'unknown' }; // an empty id is not an organization: pass through, as `!orgId` always did
   } catch {
     return { kind: 'unknown' };
   }

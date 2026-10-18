@@ -992,6 +992,7 @@ describe('proxy — a person with no organization yet is sent to the onboarding,
       ['404 not a member answer', () => new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Organization not found' } }), { status: 404 })],
       ['404 not JSON', () => new Response('<html>gateway</html>', { status: 404 })],
       ['200 without org_id', () => new Response('{}', { status: 200 })],
+      ['200 with an empty org_id', () => new Response(JSON.stringify({ org_id: '' }), { status: 200 })],
       ['network error', () => { throw new Error('network'); }],
     ];
     for (const [label, answer] of unknowns) {
