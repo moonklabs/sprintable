@@ -13,6 +13,7 @@ from app.models.deletion_audit import DeletionAuditLog
 from app.models.organization import Organization
 from app.models.participation import ParticipationRole
 from app.models.project import OrgMember, Project
+from app.services.org_billing_end import end_org_billing
 from app.services.org_subscription_checkout import STALE_CLAIM_WINDOW
 
 logger = logging.getLogger(__name__)
@@ -343,6 +344,7 @@ class OrganizationRepository:
             ),
         ):
             await self.session.execute(text(stmt), {"o": org_id})
+        await end_org_billing(self.session, org_id)  # failed 주문 · 빌링키 · 구독 — 같은 트랜잭션
         await self.session.delete(org)
         return {"ok": True}
 

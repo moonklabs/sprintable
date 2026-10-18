@@ -32,11 +32,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.billing_order import BillingOrder
 from app.models.org_billing_key import OrgBillingKey
+from app.models.organization import Organization
 from app.services.billing_key_crypto import decrypt_billing_key, ensure_configured
 
 logger = logging.getLogger(__name__)
 from app.services.billing_ledger import record_ledger_entry
+from app.services.org_billing_end import end_org_billing
 from app.services.payment.toss_adapter import DUPLICATED_ORDER_ID, TossAdapter, TossApiError
+
+
+class OrganizationGone(RuntimeError):
+    """story #4728 — 조직이 이미 없다(삭제됨). Toss 를 부르지 않았고 주문 행도 새로 만들지 않았다."""
 
 
 class ChargeSendDeadlinePassed(RuntimeError):
@@ -193,6 +199,14 @@ async def charge_org(
     뒤에 Toss를 부르는 경합을 좁힌다(대사 쪽은 이 시한 + Toss 한도보다 오래 지난 뒤에만 «청구 0»을 적는다)."""
     if amount_minor <= 0:
         raise ValueError(f"amount_minor must be positive: {amount_minor!r}")
+
+    # story #4728 — 조직이 없으면 청구도 주문 claim 도 하지 않는다. org_billing_keys / billing_orders 는 org_id 에 외래키가 없어
+    # 조직이 지워져도 남은 failed 주문 + 활성 빌링키가 dunning 스윕을 타고 계속 청구될 수 있다(이 가드 이전에 지워진 조직 포함).
+    # 남은 결제 상태는 여기서 끝내 다음 스윕이 다시 고르지 않게 한다.
+    if await session.scalar(select(Organization.id).where(Organization.id == org_id)) is None:
+        await end_org_billing(session, org_id)
+        await session.commit()
+        raise OrganizationGone(f"organization {org_id} no longer exists — not charged")
 
     # ⭐블로커1 근본fix — 원자적 claim. ON CONFLICT DO NOTHING이 성공(rowcount==1)한
     # 호출만 이 order_id의 charge 시도를 "소유"한다.
