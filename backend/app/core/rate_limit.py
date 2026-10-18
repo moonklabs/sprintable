@@ -129,10 +129,14 @@ def hit_person_limits_strict(scope: str, user_id: str, *specs: str) -> int | Non
     so the caller refuses instead of sending."""
     import time
 
+    hit_items = []
     for spec in specs:
         item = _parse_limit(spec)
+        hit_items.append(item)
         if not _strict_person_limiter.hit(item, scope, user_id):
-            reset_at, _remaining = _strict_person_limiter.get_window_stats(item, scope, user_id)
+            # the answer is the LAST of the resets of every window this request touched: the tighter windows it already counted in stay
+            # recorded, so a retry earlier than the longest of them would only be refused again (codex 01a1506a)
+            reset_at = max(_strict_person_limiter.get_window_stats(i, scope, user_id)[0] for i in hit_items)
             return max(1, int(reset_at - time.time()) + 1)
     return None
 

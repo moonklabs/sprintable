@@ -255,3 +255,14 @@ def test_a_request_the_minute_rule_refuses_does_not_use_up_the_hour(monkeypatch)
     assert rate_limit.hit_person_limits_strict("order", "p", "3/hour") is None
     assert rate_limit.hit_person_limits_strict("order", "p", "3/hour") is not None
     rate_limit.reset_strict_person_limits()
+
+
+def test_retry_after_is_the_longest_reset_of_the_windows_the_request_touched(monkeypatch):
+    """a request the looser window refuses has already been counted by the tighter one: a retry sooner than THAT window's reset is refused again"""
+    from app.core import rate_limit
+
+    rate_limit.reset_strict_person_limits()
+    assert rate_limit.hit_person_limits_strict("longest", "p", "1/second") is None  # the short window is now full for ~1 s
+    wait = rate_limit.hit_person_limits_strict("longest", "p", "1/minute", "1/second")  # the minute window lets this one in, the second one refuses
+    assert wait is not None and wait >= 55, wait  # not the ~1 s of the refusing window alone: the minute it just counted in
+    rate_limit.reset_strict_person_limits()

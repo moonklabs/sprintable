@@ -7,7 +7,9 @@ vi.mock('@/lib/fastapi-proxy', () => ({ proxyToFastapi: proxy }));
 import * as route from './route';
 import { POST } from './route';
 
-const post = (init: RequestInit = {}, qs = '') => new Request(`http://localhost:3000/api/desktop/mac-link-mail${qs}`, { method: 'POST', ...init });
+const ORIGIN = 'http://localhost:3000';
+const post = (init: RequestInit = {}, qs = '') => new Request(`${ORIGIN}/api/desktop/mac-link-mail${qs}`, { method: 'POST', ...init, headers: { Origin: ORIGIN, ...(init.headers as Record<string, string> | undefined) } });
+const postWithoutOrigin = () => new Request(`${ORIGIN}/api/desktop/mac-link-mail`, { method: 'POST' });
 
 beforeEach(() => {
   proxy.mockReset().mockImplementation(async () => new Response('{"delivered":true,"email":"own@example.test"}', { status: 200 }));
@@ -18,6 +20,22 @@ afterEach(() => { vi.unstubAllEnvs(); });
 describe('POST /api/desktop/mac-link-mail', () => {
   it('exports only its HTTP handler (a Next.js app route may export nothing else — the build refuses a helper here)', () => {
     expect(Object.keys(route)).toEqual(['POST']);
+  });
+
+  it('Origin is required (none at all is refused) and another site\'s is refused: 403, and the server is never asked (the mail is the one side effect)', async () => {
+    const none = await POST(postWithoutOrigin());
+    expect(none.status).toBe(403);
+    for (const origin of ['https://evil.example', 'http://localhost:3999', 'null']) {
+      const res = await POST(post({ headers: { Origin: origin } }));
+      expect([origin, res.status]).toEqual([origin, 403]);
+    }
+    expect(proxy).not.toHaveBeenCalled();
+  });
+
+  it('the refusal comes before the download gate (a foreign page learns nothing about whether the app is offered)', async () => {
+    vi.stubEnv('DESKTOP_DOWNLOAD_ENABLED', 'false');
+    const res = await POST(post({ headers: { Origin: 'https://evil.example' } }));
+    expect(res.status).toBe(403);
   });
 
   it('proxies a POST to exactly /api/v2/desktop/mac-link-mail', async () => {
