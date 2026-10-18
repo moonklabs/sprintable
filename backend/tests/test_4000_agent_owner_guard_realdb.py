@@ -84,7 +84,7 @@ async def _make_project(session, org_id, name="P4000"):
     return project
 
 
-async def _make_human(session, org_id, project_id, role="member"):
+async def _make_human(session, org_id, project_id, role="member", project_role=None):
     """휴먼 멤버 하나(User+OrgMember+Member+ProjectAccess) — test_2266의 _make_human_member와
     동형(role 파라미터만 추가, org-admin 회귀 케이스에 재사용)."""
     from app.models.member import Member
@@ -101,7 +101,7 @@ async def _make_human(session, org_id, project_id, role="member"):
     m = Member(id=om.id, org_id=org_id, type="human", user_id=user.id, name=f"Human-{role}")
     session.add(m)
     await session.flush()
-    session.add(ProjectAccess(project_id=project_id, org_member_id=om.id, member_id=m.id, role=role))
+    session.add(ProjectAccess(project_id=project_id, org_member_id=om.id, member_id=m.id, role=project_role or role))
     await session.commit()
     return m.id, user.id
 
@@ -167,7 +167,8 @@ async def _build_scenario():
     async with Session() as s:
         org = await _make_org(s)
         project = await _make_project(s, org.id)
-        owner_member_id, owner_user_id = await _make_human(s, org.id, project.id, role="member")
+        # story #4730 — «the creator» passes only while she still holds a seat that may create the agent: here, admin of the agent's project
+        owner_member_id, owner_user_id = await _make_human(s, org.id, project.id, role="member", project_role="admin")
         attacker_member_id, attacker_user_id = await _make_human(s, org.id, project.id, role="member")
         admin_member_id, admin_user_id = await _make_human(s, org.id, project.id, role="admin")
         agent_id = await _make_agent_owned_by(s, org.id, project.id, owner_member_id)

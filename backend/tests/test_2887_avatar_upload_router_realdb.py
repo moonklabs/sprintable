@@ -92,6 +92,9 @@ async def _seed(s) -> None:
         f"(gen_random_uuid(),'{PROJ}','{MEMBER_A}','granted','member'),"
         f"(gen_random_uuid(),'{PROJ}','{MEMBER_B}','granted','member'),"
         f"(gen_random_uuid(),'{PROJ}','{MEMBER_ADMIN}','granted','admin')",
+        # story #4730 — «the creator» (A) passes only while she still holds a seat that may create the agent: admin of the project
+        f"INSERT INTO project_access (id,project_id,org_member_id,permission,role) VALUES "
+        f"(gen_random_uuid(),'{PROJ}','{MEMBER_A}','granted','admin')",
         # 에이전트 — owner_member_id=MEMBER_A → team_members뷰 created_by=USER_A(0110 뷰 정의).
         f"INSERT INTO members (id,org_id,type,owner_member_id,name) VALUES "
         f"('{AGENT_MEMBER}','{ORG}','agent','{MEMBER_A}','Agent')",
