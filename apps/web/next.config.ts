@@ -86,6 +86,11 @@ const _SECURITY_HEADERS = [
 
 // the catch-all's headers with ONE changed (Referrer-Policy) and one added — repeated whole, so the frame ban and the rest never depend on how two
 // matching entries are merged, and no header key appears twice
+const _NATIVE_CONFIRM_PAGE_HEADERS = [
+  ..._SECURITY_HEADERS.filter((h) => h.key !== 'Referrer-Policy'),
+  { key: 'Referrer-Policy', value: 'same-origin' },
+  { key: 'Cache-Control', value: 'no-store' },
+];
 const _NATIVE_CODE_PAGE_HEADERS = [
   ..._SECURITY_HEADERS.filter((h) => h.key !== 'Referrer-Policy'),
   { key: 'Referrer-Policy', value: 'no-referrer' },
@@ -151,8 +156,15 @@ const nextConfig: NextConfig = {
       // (`/native/oauth-return?code=…`) or the app's PKCE challenge (`/native/continue?…`): no Referer to anyone, never cached. The group repeats the
       // catch-all's headers (only Referrer-Policy differs), so nothing here depends on how two matching entries merge.
       {
-        source: '/native/:page(continue|oauth-return)',
+        source: '/native/oauth-return',
         headers: _NATIVE_CODE_PAGE_HEADERS,
+      },
+      // …except the confirm page: its [열기] is a plain form POST, and a page served with `no-referrer` makes the browser send that POST with `Origin: null`
+      // (Fetch's «serializing a request origin» — a navigation-mode request under the no-referrer policy) which the CSRF check rightly refuses. The page carries only the
+      // app's PKCE *challenge* (a public hash), so `same-origin` — the Referer and a real Origin to this site, nothing to anyone else — gives up nothing.
+      {
+        source: '/native/continue',
+        headers: _NATIVE_CONFIRM_PAGE_HEADERS,
       },
     ];
   },

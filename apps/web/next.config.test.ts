@@ -197,25 +197,38 @@ describe('the two pages that carry a one-time code in their address (story 4712 
     return config.headers!();
   }
 
-  it('/native/continue and /native/oauth-return get Referrer-Policy: no-referrer and Cache-Control: no-store', async () => {
+  it('/native/oauth-return (the code in its address) gets Referrer-Policy: no-referrer and Cache-Control: no-store', async () => {
     const groups = await headerGroups();
-    const g = groups.find((x) => x.source.startsWith('/native/'));
+    const g = groups.find((x) => x.source === '/native/oauth-return');
     expect(g).toBeDefined();
-    expect(g!.source).toBe('/native/:page(continue|oauth-return)');
     expect(g!.headers).toEqual(expect.arrayContaining([
       { key: 'Referrer-Policy', value: 'no-referrer' },
       { key: 'Cache-Control', value: 'no-store' },
     ]));
   });
 
+  // the walk of the installed app on dev (14512cc42 · 5146): [열기] is a plain form POST and a page served with no-referrer makes the browser send it with `Origin: null` —
+  // verifyCsrfOrigin refused it and the window showed raw JSON. The confirm page must send a real Origin: same-origin (a referrer only to this site), not no-referrer.
+  it('/native/continue (the confirm page with the [열기] form) gets Referrer-Policy: same-origin — NOT no-referrer (Origin: null) — and Cache-Control: no-store', async () => {
+    const groups = await headerGroups();
+    const g = groups.find((x) => x.source === '/native/continue');
+    expect(g).toBeDefined();
+    expect(g!.headers).toEqual(expect.arrayContaining([
+      { key: 'Referrer-Policy', value: 'same-origin' },
+      { key: 'Cache-Control', value: 'no-store' },
+    ]));
+    expect(g!.headers.find((h) => h.key === 'Referrer-Policy')!.value).not.toBe('no-referrer');
+  });
+
   it('the group repeats the whole catch-all set (frame ban · CSP …) with only Referrer-Policy different, and no header key twice', async () => {
     const groups = await headerGroups();
     const all = groups.find((x) => x.source === '/(.*)')!;
-    const native = groups.find((x) => x.source.startsWith('/native/'))!;
-    const keys = native.headers.map((h) => h.key);
-    expect(new Set(keys).size).toBe(keys.length);
-    expect(native.headers.find((h) => h.key === 'X-Frame-Options')?.value).toBe('DENY');
-    for (const h of all.headers.filter((x) => x.key !== 'Referrer-Policy')) expect(native.headers).toContainEqual(h);
+    for (const native of groups.filter((x) => x.source.startsWith('/native/'))) {
+      const keys = native.headers.map((h) => h.key);
+      expect(new Set(keys).size).toBe(keys.length);
+      expect(native.headers.find((h) => h.key === 'X-Frame-Options')?.value).toBe('DENY');
+      for (const h of all.headers.filter((x) => x.key !== 'Referrer-Policy')) expect(native.headers).toContainEqual(h);
+    }
     expect(all.headers.find((h) => h.key === 'Referrer-Policy')!.value).toBe('strict-origin-when-cross-origin'); // everywhere else unchanged
   });
 });
