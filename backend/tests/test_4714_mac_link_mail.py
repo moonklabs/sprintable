@@ -266,3 +266,19 @@ def test_retry_after_is_the_longest_reset_of_the_windows_the_request_touched(mon
     wait = rate_limit.hit_person_limits_strict("longest", "p", "1/minute", "1/second")  # the minute window lets this one in, the second one refuses
     assert wait is not None and wait >= 55, wait  # not the ~1 s of the refusing window alone: the minute it just counted in
     rate_limit.reset_strict_person_limits()
+
+
+def test_retry_after_in_the_real_order_when_the_hour_refuses_and_the_minute_lets_by():
+    """the order the route really uses (`1/minute`, `3/hour`): the HOUR window refuses, the minute window had let the request in. The longest reset is the
+    SECOND window's (~an hour) — a reply built from the first window's reset alone (about a minute) would tell the person to come back an hour too early
+    (Kadir 5152 pin: the (minute, second) test above has its longest window first and can not tell the two apart)."""
+    from app.core import rate_limit
+    from app.routers.desktop_mac_link import MAC_LINK_MAIL_LIMITS
+
+    assert MAC_LINK_MAIL_LIMITS == ("1/minute", "3/hour")
+    rate_limit.reset_strict_person_limits()
+    for _ in range(3):  # fill the hour window alone (three an hour), without touching the minute window
+        assert rate_limit.hit_person_limits_strict("order-real", "p", "3/hour") is None
+    wait = rate_limit.hit_person_limits_strict("order-real", "p", *MAC_LINK_MAIL_LIMITS)  # minute: passes · hour: refuses
+    assert wait is not None and 3000 < wait <= 3601, wait  # ~ the hour, not the ~60 s of the window that let it in
+    rate_limit.reset_strict_person_limits()
