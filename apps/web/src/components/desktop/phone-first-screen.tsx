@@ -4,7 +4,8 @@
 // came from the PHONE APP. The first screen's «지금은 Mac 앱만 있어요» (a browser that is not a Mac) says the opposite of what is true here — a
 // phone pairs with a Mac and starts its agents from it — so inside the phone app this screen takes its place (AC1).
 //   · remote control off → the owner turns it on right here (one button), anyone else is told who can;
-//   · no computer paired (AC2) → «에이전트는 Mac에서 돌아가요» + the pairing link (no mail button: its server does not exist yet);
+//   · no computer paired (AC2) → «에이전트는 Mac에서 돌아가요» + [Mac에서 열 링크를 메일로 받기] (the server mails the signed-in person's OWN address a plain link;
+//     drawn only where the Mac app is offered) + the pairing link;
 //   · a computer paired, no agent on it → one line, no button;
 //   · a computer paired with agents (AC3) → pick the agent and the project (names only · «새 폴더는 Mac 앞에서») → [시작] → the shell signs →
 //     the computer starts the session from its own folder; every end is one line.
@@ -17,6 +18,7 @@ import { Card } from '@/components/ui/card';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { useOrgRemoteControl, putOrgRemoteControl } from '@/lib/org-remote-control';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { sendMacLinkMail, type MacLinkMailOutcome } from '@/lib/phone-mac-link-mail';
 import { checkStart, readStartable, startOnPhone, type Pending, type StartOutcome, type StartableAgent, type StartableComputer, type StartableRead, type StartableView } from '@/lib/phone-start';
 
 type Read = { kind: 'reading' } | { kind: 'failed' } | { kind: 'no_phone' } | { kind: 'view'; view: StartableView };
@@ -33,7 +35,8 @@ function useAlive() {
   return alive;
 }
 
-export function PhoneFirstScreen({ orgId, chatsHref }: { orgId: string | null; chatsHref?: string }) {
+/** `macDownloadEnabled`: the server's own judgement that the Mac app is offered here (`isDesktopDownloadEnabled`, resolved by the page) — false/absent: no mail button, no line */
+export function PhoneFirstScreen({ orgId, chatsHref, macDownloadEnabled = false }: { orgId: string | null; chatsHref?: string; macDownloadEnabled?: boolean }) {
   const t = useTranslations('onboarding.phone');
   const { phoneCall } = usePhoneBridge();
   const flat = useFlatHref();
@@ -70,7 +73,7 @@ export function PhoneFirstScreen({ orgId, chatsHref }: { orgId: string | null; c
 
   // remote control off comes first: pairing itself is refused while it is off, so «pair» would be a dead end (branch 1 before branch 2)
   if (read.kind === 'view' && !read.view.remote_control) return <RemoteOff orgId={orgId} onTurnedOn={reload} />;
-  if (read.kind === 'no_phone' || read.view.computers.length === 0) return <NoMac pairHref={flat('/desktop/pair')} />;
+  if (read.kind === 'no_phone' || read.view.computers.length === 0) return <NoMac pairHref={flat('/desktop/pair')} mailEnabled={macDownloadEnabled} />;
 
   // the computers this phone is paired with; one screen per computer in v1 is the first one that can take a start (reachable first)
   const computers = read.view.computers;
@@ -88,15 +91,54 @@ export function PhoneFirstScreen({ orgId, chatsHref }: { orgId: string | null; c
   return <StartCard computer={computer} agents={commandable(computer)} chatHref={chatsHref} onRemoteOff={reload} />;
 }
 
-function NoMac({ pairHref }: { pairHref: string }) {
+type MailState = { kind: 'idle' } | { kind: 'sending' } | { kind: 'sent'; email: string } | { kind: 'limited' } | { kind: 'need_verify' } | { kind: 'failed' } | { kind: 'hidden' };
+
+function NoMac({ pairHref, mailEnabled }: { pairHref: string; mailEnabled: boolean }) {
   const t = useTranslations('onboarding.phone');
+  const alive = useAlive();
+  const [mail, setMail] = useState<MailState>({ kind: 'idle' });
+  const sending = mail.kind === 'sending';
+  const out = useRef(false); // a call is out: two taps in one tick both read the same render's state, so the guard is a ref (one mail per press)
+  const requestMail = async () => {
+    if (out.current) return;
+    out.current = true;
+    setMail({ kind: 'sending' });
+    let o: MacLinkMailOutcome;
+    try { o = await sendMacLinkMail(); } catch { o = { kind: 'failed' }; }
+    out.current = false;
+    if (!alive.current) return; // the screen is gone — nothing is set
+    // the server's word is the only one: «sent» only for a delivered mail; the Mac app not offered here (409) draws nothing at all
+    setMail(o.kind === 'not_enabled' ? { kind: 'hidden' } : o);
+  };
+  const showMail = mailEnabled && mail.kind !== 'hidden';
   return (
     <div className="space-y-4" data-testid="onboarding-phone-no-mac">
       <div className="text-center">
         <h1 id="onboarding-step-title" className="break-keep text-2xl font-bold text-foreground">{t('noMac.title')}</h1>
         <p className="mt-2 break-keep text-sm text-muted-foreground">{t('noMac.body')}</p>
       </div>
-      {/* the pairing page is the existing one (the shell has the camera and the key); a text link — the mail button waits for its server */}
+      {showMail ? (
+        <div className="space-y-2 text-center" data-testid="onboarding-phone-mail">
+          {/* one state at a time under the button's place: button → sending → sent (+ again) | limited | need-verify | failed (the button is back) */}
+          {mail.kind === 'sent' ? (
+            <p role="status" className="break-keep text-sm text-muted-foreground [overflow-wrap:anywhere]" data-testid="onboarding-phone-mail-sent">
+              {t('noMac.mailSent', { email: mail.email })}{' '}
+              <Button variant="link" size="sm" onClick={requestMail} className="h-auto whitespace-normal px-0 py-0 text-sm" data-testid="onboarding-phone-mail-again">{t('noMac.mailAgain')}</Button>
+            </p>
+          ) : mail.kind === 'need_verify' ? (
+            <p role="status" className="break-keep text-sm text-muted-foreground" data-testid="onboarding-phone-mail-need-verify">{t('noMac.mailNeedVerify')}</p>
+          ) : (
+            <>
+              <Button variant="link" size="sm" onClick={requestMail} disabled={sending} className="h-auto whitespace-normal px-0 py-0 text-sm" data-testid="onboarding-phone-mail-button">
+                {sending ? t('noMac.mailSending') : t('noMac.mail')}
+              </Button>
+              {mail.kind === 'limited' ? <p role="status" className="break-keep text-sm text-muted-foreground" data-testid="onboarding-phone-mail-limited">{t('noMac.mailLimited')}</p> : null}
+              {mail.kind === 'failed' ? <p role="alert" className="break-keep text-sm text-destructive" data-testid="onboarding-phone-mail-failed">{t('noMac.mailFailed')}</p> : null}
+            </>
+          )}
+        </div>
+      ) : null}
+      {/* the pairing page is the existing one (the shell has the camera and the key); a text link, drawn in every state */}
       <p className="text-center">
         <Button variant="link" size="sm" asChild className="h-auto whitespace-normal px-0 py-0 text-sm"><a href={pairHref} data-testid="onboarding-phone-pair">{t('noMac.pair')}</a></Button>
       </p>

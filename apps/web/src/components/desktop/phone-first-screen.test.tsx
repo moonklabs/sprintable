@@ -33,7 +33,7 @@ const computer = (over: Record<string, unknown> = {}) => ({
   agents: [{ agent_member_id: AGENT, name: '결제 담당', can_command: true, projects: [{ project_id: PROJECT, name: '결제 개편' }, { project_id: PROJECT2, name: '정산' }] }], ...over,
 });
 
-interface World { devices?: unknown[]; startable?: unknown; remote?: unknown; post?: Response; poll?: Response; remotePut?: Response; hold?: Promise<void> }
+interface World { mail?: Response; devices?: unknown[]; startable?: unknown; remote?: unknown; post?: Response; poll?: Response; remotePut?: Response; hold?: Promise<void> }
 let world: World;
 let calls: Array<{ url: string; method: string; body?: Record<string, unknown> }>;
 function server() {
@@ -41,6 +41,7 @@ function server() {
   fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
     calls.push({ url, method, body: init?.body ? JSON.parse(init.body as string) : undefined });
+    if (url === '/api/desktop/mac-link-mail') return world.mail ?? json({ delivered: true, email: 'me@example.test' });
     if (url === '/api/remote-devices') return json({ devices: world.devices ?? [{ id: 'p-1', confirm_number: '482 917' }] });
     if (url.startsWith('/api/desktop/startable')) return json(world.startable ?? { remote_control: true, computers: [computer()] });
     if (url.endsWith('/remote-control')) return method === 'PUT' ? (world.remotePut ?? json({ data: { enabled: true, enabled_at: null, can_change: true } })) : json(world.remote ?? { data: { enabled: false, enabled_at: null, can_change: true } });
@@ -99,7 +100,7 @@ const pickFromSheet = async (rowId: string, name: string) => {
 };
 
 describe('[4714] branch 2 — no paired computer (AC2)', () => {
-  it('this phone\'s key is not on the server\'s list → «에이전트는 Mac에서 돌아가요» + the pairing link; no mail button (its server does not exist)', async () => {
+  it('this phone\'s key is not on the server\'s list → «에이전트는 Mac에서 돌아가요» + the pairing link; no mail button where the Mac app is not offered (the server says so)', async () => {
     world.devices = [{ id: 'x', confirm_number: '000 000' }];
     await screen();
     expect(byId('onboarding-phone-no-mac')).not.toBeNull();
@@ -119,6 +120,123 @@ describe('[4714] branch 2 — no paired computer (AC2)', () => {
     keyAnswer = { id: 'k', ok: false, code: 'no_screen_lock' };
     await screen();
     expect(byId('onboarding-phone-no-mac')).not.toBeNull();
+  });
+});
+
+const mailScreen = (opts?: Parameters<typeof renderIn>[1]) => renderIn(<PhoneFirstScreen orgId="org-1" chatsHref="/chats" macDownloadEnabled />, opts);
+const mailCalls = () => calls.filter((c) => c.url === '/api/desktop/mac-link-mail');
+
+describe('[4714 AC2] «Mac에서 열 링크를 메일로 받기» (Yuna 4714-ac2-mac-link-mail-copy-1018)', () => {
+  beforeEach(() => { world.devices = [{ id: 'x', confirm_number: '000 000' }]; }); // the no-Mac screen
+
+  it('drawn only where the Mac app is offered: macDownloadEnabled false/absent → no button and no mail line', async () => {
+    await screen();
+    expect(byId('onboarding-phone-mail')).toBeNull();
+    expect(text()).not.toMatch(/메일|Email/);
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await mailScreen();
+    expect(byId('onboarding-phone-mail-button')?.textContent).toBe('Mac에서 열 링크를 메일로 받기');
+    expect(byId('onboarding-phone-pair')?.getAttribute('href')).toContain('/desktop/pair');
+  });
+
+  it('the first screen hands the flag down: FirstScreen in the phone app draws the mail button only with macDownloadEnabled', async () => {
+    const withFlag = <FirstScreen orgId="org-1" chatsHref="/chats" macDownloadEnabled orgName={null} onConnectElsewhere={() => {}} onFinish={() => {}} />;
+    const withoutFlag = <FirstScreen orgId="org-1" chatsHref="/chats" orgName={null} onConnectElsewhere={() => {}} onFinish={() => {}} />;
+    await renderIn(withoutFlag, { phone: true });
+    expect(byId('onboarding-phone-no-mac')).not.toBeNull();
+    expect(byId('onboarding-phone-mail')).toBeNull();
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await renderIn(withFlag, { phone: true });
+    expect(byId('onboarding-phone-mail-button')).not.toBeNull();
+  });
+
+  it('pressing it POSTs with no body and no address; a delivered mail says where it went (status, not an alert) with [다시 받기] and no button', async () => {
+    await mailScreen();
+    await press(byId('onboarding-phone-mail-button'));
+    expect(mailCalls()).toEqual([{ url: '/api/desktop/mac-link-mail', method: 'POST', body: undefined }]);
+    const sent = byId('onboarding-phone-mail-sent');
+    expect(sent?.textContent).toContain('메일을 보냈어요 · me@example.test — Mac에서 이 메일을 열어 링크를 눌러 주세요.');
+    expect(sent?.getAttribute('role')).toBe('status');
+    expect(byId('onboarding-phone-mail-button')).toBeNull();
+    expect(byId('onboarding-phone-mail-again')?.textContent).toBe('다시 받기');
+    expect(byId('onboarding-phone-pair')).not.toBeNull();
+    expect(byId('onboarding-phone-pair')?.closest('[hidden]')).toBeNull(); // drawn AND shown, not just present
+  });
+
+  it('[다시 받기] makes the same call again', async () => {
+    await mailScreen();
+    await press(byId('onboarding-phone-mail-button'));
+    await press(byId('onboarding-phone-mail-again'));
+    expect(mailCalls()).toHaveLength(2);
+  });
+
+  it('a mail that was not delivered (delivered:false) is the failure alert, never the sent line; the button is back', async () => {
+    world.mail = json({ delivered: false, email: 'me@example.test' });
+    await mailScreen();
+    await press(byId('onboarding-phone-mail-button'));
+    expect(byId('onboarding-phone-mail-sent')).toBeNull();
+    const failed = byId('onboarding-phone-mail-failed');
+    expect(failed?.textContent).toBe('메일을 보내지 못했어요 — 다시 눌러 주세요');
+    expect(failed?.getAttribute('role')).toBe('alert');
+    expect(byId('onboarding-phone-mail-button')).not.toBeNull();
+  });
+
+  it('429 → the limit line (status) and the button stays; 409 email_not_verified → the verify line and no button', async () => {
+    world.mail = json({ error: { code: 'rate_limited' } }, 429);
+    await mailScreen();
+    await press(byId('onboarding-phone-mail-button'));
+    expect(byId('onboarding-phone-mail-limited')?.textContent).toContain('잠깐 사이에 너무 자주 받았어요');
+    expect(byId('onboarding-phone-mail-limited')?.getAttribute('role')).toBe('status');
+    expect(byId('onboarding-phone-mail-button')).not.toBeNull();
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    world.mail = json({ error: { code: 'email_not_verified' } }, 409);
+    await mailScreen();
+    await press(byId('onboarding-phone-mail-button'));
+    expect(byId('onboarding-phone-mail-need-verify')?.textContent).toBe('이메일 인증이 필요해요 — 링크를 받으려면 먼저 이메일 인증을 완료해 주세요.');
+    expect(byId('onboarding-phone-mail-button')).toBeNull();
+    expect(byId('onboarding-phone-pair')).not.toBeNull();
+    expect(byId('onboarding-phone-pair')?.closest('[hidden]')).toBeNull();
+  });
+
+  it('409 download_not_enabled → nothing is drawn: no button, no line (the screen never promises a mail the server will not send)', async () => {
+    world.mail = json({ error: { code: 'download_not_enabled' } }, 409);
+    await mailScreen();
+    await press(byId('onboarding-phone-mail-button'));
+    expect(byId('onboarding-phone-mail')).toBeNull();
+    expect(text()).not.toMatch(/메일|Email/);
+    expect(byId('onboarding-phone-pair')).not.toBeNull();
+  });
+
+  it('one mail per press: two taps in the same tick send one; while the call is out the button is off and says so; a lost answer is the failure line', async () => {
+    let release: (r: Response) => void = () => undefined;
+    world.mail = undefined;
+    const held = new Promise<Response>((r) => { release = r; });
+    const base = fetchWithAuth.getMockImplementation()!;
+    fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => (url === '/api/desktop/mac-link-mail' ? (calls.push({ url, method: init?.method ?? 'GET', body: undefined }), held) : base(url, init)));
+    await mailScreen();
+    const first = byId('onboarding-phone-mail-button') as HTMLButtonElement;
+    await act(async () => { first.click(); first.click(); }); // both read the same render: only a ref guard sees the first
+    await flush();
+    expect(mailCalls()).toHaveLength(1);
+    const button = byId('onboarding-phone-mail-button') as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.textContent).toBe('보내는 중이에요…');
+    await act(async () => { release(new Response('x', { status: 500 })); });
+    await flush();
+    expect(byId('onboarding-phone-mail-failed')).not.toBeNull();
+    await press(byId('onboarding-phone-mail-button')); // the lock is lifted after the end: pressing again sends again
+    expect(mailCalls()).toHaveLength(2);
+  });
+
+  it('en: the same states in English', async () => {
+    await mailScreen({ locale: 'en' });
+    expect(byId('onboarding-phone-mail-button')?.textContent).toBe('Email me a link to open on my Mac');
+    await press(byId('onboarding-phone-mail-button'));
+    expect(byId('onboarding-phone-mail-sent')?.textContent).toContain('Sent to me@example.test — open the email on your Mac and click the link.');
+    expect(byId('onboarding-phone-mail-again')?.textContent).toBe('Send again');
   });
 });
 
@@ -431,10 +549,21 @@ describe('[4714] the words (Yuna\'s sheet)', () => {
     for (const k of Object.keys(ko)) expect(ph(en[k])).toBe(ph(ko[k]));
   });
   it('the agent and the project are rows, never a placeholder inside a sentence; no «셋업» on this screen; «Mac» is named only where there is no Mac yet', () => {
-    for (const [k, v] of Object.entries(ko)) { expect(v).not.toMatch(/\{(agent|project)\}/); expect(v).not.toContain('셋업'); expect(k).not.toMatch(/mail/i); }
+    for (const [k, v] of Object.entries(ko)) { expect(v).not.toMatch(/\{(agent|project)\}/); expect(v).not.toContain('셋업'); void k; }
     expect(ko['start.title']).toContain('{device}');
     expect(ko['noAgent.line']).toContain('{device}');
     expect(ko['start.title']).not.toMatch(/맥/);
+  });
+  it('[AC2] the mail lines: exactly the sheet\'s seven keys, the same in ko and en, with {email} as the only placeholder (no particle after an address)', () => {
+    const keys = ['noMac.mail', 'noMac.mailAgain', 'noMac.mailFailed', 'noMac.mailLimited', 'noMac.mailNeedVerify', 'noMac.mailSending', 'noMac.mailSent'];
+    expect(Object.keys(ko).filter((k) => /mail/i.test(k)).sort()).toEqual(keys);
+    expect(Object.keys(en).filter((k) => /mail/i.test(k)).sort()).toEqual(keys);
+    for (const k of keys) {
+      const placeholders = (v: string) => (v.match(/\{[a-zA-Z]+\}/g) ?? []).sort();
+      expect(placeholders(ko[k])).toEqual(placeholders(en[k]));
+      expect(placeholders(ko[k])).toEqual(k === 'noMac.mailSent' ? ['{email}'] : []);
+    }
+    expect(ko['noMac.mailSent']).not.toMatch(/\{email\}[은는이가을를의에도]/); // a particle straight after an address is not safe
   });
   it('the refusals reuse the phone lines\' shape: each ends in an instruction, a started or cancelled start has no key', () => {
     expect(Object.keys(ko).filter((k) => k.startsWith('result.')).sort()).toEqual([

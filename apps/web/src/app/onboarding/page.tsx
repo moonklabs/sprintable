@@ -4,6 +4,7 @@ import { desktopOnboardingNext } from '@/lib/auth/onboarding-next';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { resolveChatsHref, resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { EmailVerifyGate } from '@/components/auth/email-verify-gate';
+import { isDesktopDownloadEnabled } from '@/lib/desktop-download-gate';
 
 interface OnboardingPageProps {
   searchParams: Promise<{ step?: string; orgId?: string; next?: string }>;
@@ -35,6 +36,7 @@ export default async function OnboardingPage({ searchParams }: OnboardingPagePro
       todayV3Enabled={flags.todayV3Enabled}
       todayHref={todayHref}
       chatsHref={chatsHref}
+      macDownloadEnabled={isDesktopDownloadEnabled(process.env.DESKTOP_DOWNLOAD_ENABLED)}
     />
   );
   return initialStep === 'project' ? form : <EmailVerifyGate>{form}</EmailVerifyGate>;
