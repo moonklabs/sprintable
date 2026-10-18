@@ -66,10 +66,15 @@ def world(monkeypatch):
     async def _db():
         yield _Db(state["user"])
 
-    app.dependency_overrides[get_db] = _db
+    from tests.conftest import override_db_and_read  # story #2451: the one way a get_db override is hung (get_read_db is covered with it)
+
+    override_db_and_read(app, _db)
     yield SimpleNamespace(sent=sent, state=state)
     app.dependency_overrides.pop(get_current_user, None)
+    from app.dependencies.database import get_read_db
+
     app.dependency_overrides.pop(get_db, None)
+    app.dependency_overrides.pop(get_read_db, None)
     reset_strict_person_limits()
 
 
