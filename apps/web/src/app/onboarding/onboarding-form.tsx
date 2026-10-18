@@ -473,7 +473,7 @@ export function OnboardingForm({
         )}
 
         {step === 'first' && (
-          <FirstScreen orgName={orgName} onConnectElsewhere={() => setStep('project')} onFinish={handleFinish} />
+          <FirstScreen orgId={orgId} chatsHref={chatsHref} orgName={orgName} onConnectElsewhere={() => setStep('project')} onFinish={handleFinish} />
         )}
 
         {step === 'project' && (
