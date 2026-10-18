@@ -34,8 +34,12 @@ describe('POST /api/invites/mine/[inviteId]/accept', () => {
     expect(h.proxy).not.toHaveBeenCalled();
   });
 
-  it('the id is passed as one path segment (a crafted id cannot add a path)', async () => {
-    await route.POST(post({ Origin: 'http://localhost:3000' }), params('../../auth/me'));
-    expect(h.proxy.mock.calls[0]![1]).toBe('/api/v2/invites/mine/..%2F..%2Fauth%2Fme/accept');
+  it('an id that is not a UUID (a literal `..`, a path, junk) is a 404 with the BE\'s own body and the BE is never called', async () => {
+    for (const id of ['..', '../../auth/me', 'not-a-uuid', '', ID + '/x']) {
+      const res = await route.POST(post({ Origin: 'http://localhost:3000' }), params(id));
+      expect(res.status, id).toBe(404);
+      expect(await res.json()).toEqual({ detail: 'Invite not found' });
+    }
+    expect(h.proxy).not.toHaveBeenCalled();
   });
 });

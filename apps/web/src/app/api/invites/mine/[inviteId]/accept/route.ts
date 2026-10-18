@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
 
+const INVITE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 type RouteParams = { params: Promise<{ inviteId: string }> };
 
 /**
@@ -19,5 +21,7 @@ export async function POST(request: Request, { params }: RouteParams): Promise<R
   const csrfError = verifyCsrfOrigin(request);
   if (csrfError) return csrfError;
   const { inviteId } = await params;
+  // an invite id is a UUID: anything else (a literal `..` would fold the path onto the token route) is the same 404 the BE gives a missing id
+  if (!INVITE_ID.test(inviteId)) return NextResponse.json({ detail: 'Invite not found' }, { status: 404 });
   return proxyToFastapi(request, `/api/v2/invites/mine/${encodeURIComponent(inviteId)}/accept`);
 }

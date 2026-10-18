@@ -96,6 +96,8 @@ describe('story 4711 AC4 — the invited card', () => {
     await act(async () => { joins()[0]!.click(); });
     expect(joins().map((b) => b.disabled)).toEqual([true, true]);
     expect(joins()[0]!.textContent).toBe('들어가는 중이에요…');
+    expect(joins()[0]!.getAttribute('aria-busy')).toBe('true');
+    expect(joins()[1]!.getAttribute('aria-busy')).toBe('false');
     expect(joins()[1]!.textContent).toBe('들어가기');
     expect(ownOrg().disabled).toBe(true);
     await act(async () => { joins()[1]!.click(); joins()[0]!.click(); });

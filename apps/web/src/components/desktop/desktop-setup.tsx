@@ -1419,8 +1419,9 @@ export function InvitedCard({ invites, onReload, onCreateOwn, ownBusy = false }:
       if (!orgId) {
         const res = await fetchWithAuth(`/api/invites/mine/${encodeURIComponent(invite.invite_id)}/accept`, { method: 'POST' });
         if (!res.ok) { fail(res.status === 409 ? 'already' : res.status === 410 ? 'expired' : res.status === 403 || res.status === 404 ? 'notMine' : 'unknown'); return; }
-        const body = (await res.json().catch(() => null)) as { data?: { org_id?: unknown }; org_id?: unknown } | null;
-        orgId = body?.data?.org_id ?? body?.org_id;
+        // the backend's one shape (schemas/invite_accept.py AcceptInviteResponse: `{ ok, org_id, role }`, no envelope — the BFF route passes it through as it is)
+        const body = (await res.json().catch(() => null)) as { org_id?: unknown } | null;
+        orgId = body?.org_id;
         if (typeof orgId !== 'string' || !orgId) { fail('unknown'); return; }
         acceptedOrg.current[invite.invite_id] = orgId;
       }
@@ -1457,7 +1458,7 @@ export function InvitedCard({ invites, onReload, onCreateOwn, ownBusy = false }:
               <div className="mt-2">
                 <Button
                   variant={filled ? 'default' : 'outline'} size="sm" className="whitespace-nowrap" disabled={busy !== null}
-                  aria-label={t('invited.joinAria', { org: i.org_name })} onClick={() => void join(i)} data-testid="setup-invited-join"
+                  aria-label={t('invited.joinAria', { org: i.org_name })} aria-busy={busy === i.invite_id} onClick={() => void join(i)} data-testid="setup-invited-join"
                 >
                   {busy === i.invite_id ? t('invited.joining') : t('invited.join')}
                 </Button>
