@@ -1605,7 +1605,7 @@ jobs:
     needs: [detect-changed-scope]
     if: needs.detect-changed-scope.outputs.backend_relevant != 'false' && (github.event.action != 'edited' || github.event.changes.base != null)
     # story #4731 — the suite ran in ONE runner at 22–23 minutes under a 25-minute ceiling (25m15s on develop a3e7f8ac9 → «exceeded the maximum
-    # execution time» → the required `Backend pytest` red → the dev deploy stopped). It is now split in 4 shards over the SAME collected tests
+    # execution time» → the required `Backend pytest` red → the dev deploy stopped). It is now split in 6 shards over the SAME collected tests
     # (`backend/scripts/shard_nondestructive_tests.py`: whole files, greedy LPT by collected-test count, one pure function of the collection, so
     # every shard computes the same split; shard 0 also checks that the split is disjoint and complete). `backend-test` (the required check) reads this
     # job's aggregated result — any leg failed / cancelled / skipped makes it red, as before. The ceiling is for one shard (measured: see story 4731).
@@ -1613,7 +1613,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2, 3, 4, 5]
 
     services:
       postgres:
