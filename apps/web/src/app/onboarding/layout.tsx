@@ -14,9 +14,13 @@ export default async function OnboardingLayout({ children }: { children: ReactNo
     <TabOwnerGate userId={session?.user_id}>
       {/* story 4725 decision 2: a person whose unproved account was reclaimed usually has no organization yet, so the sign-in lands HERE, outside the dashboard shell
           that draws the notice — it stands above the form until they close it (the server holds the mark; empty = nothing drawn) */}
-      <div className="mx-auto w-full max-w-md px-4 pt-4 empty:hidden">
-        <ReclaimNoticeAlert />
-      </div>
+      {/* only with a session: the notice reads /api/auth/me through fetchWithAuth, and a 401 there (an anonymous visit to a page that decides about login itself) would
+          start a refresh and tell the whole app the session ended (codex 01a15051) */}
+      {session ? (
+        <div className="mx-auto w-full max-w-md px-4 pt-4 empty:hidden">
+          <ReclaimNoticeAlert />
+        </div>
+      ) : null}
       {children}
     </TabOwnerGate>
   );
