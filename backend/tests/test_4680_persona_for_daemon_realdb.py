@@ -28,6 +28,7 @@ from tests.test_4529_desktop_relay_realdb import _device
 pytestmark = pytest.mark.anyio
 
 OWN = "/api/v2/agent-run-profile"
+P = {"project_id": str(PROJ)}  # the project the start is for — the daemon always sends it (story 4680: no project → no role)
 PROJ_B = uuid.UUID("d4680000-0000-0000-0000-0000000000b2")
 TEMPLATE = uuid.UUID("d4680000-0000-0000-0000-0000000000c1")
 
@@ -80,7 +81,7 @@ def _recruit_text(locale: str = "ko") -> str:
 async def test_01_an_agent_that_was_never_hired_as_a_role_gets_no_persona_field(world):
     async with _client() as c:
         device = await _device(c, name="d4680 mac a")
-        own = await c.get(OWN, headers=_key(device))
+        own = await c.get(OWN, params=P, headers=_key(device))
         assert own.status_code == 200, own.text
         assert "persona" not in own.json()
 
@@ -95,7 +96,7 @@ async def test_02_a_recruited_persona_hands_over_the_session_edition_only(world)
         full = _recruit_text("ko")
         assert _INTEGRATION_PROMPT_TEXT["ko"].split("\n", 1)[0] in full           # the recruit's text DOES carry the one-time instruction …
         await _persona(agent, system_prompt=full, config={"role_template_id": str(TEMPLATE), "tool_allowlist": ["stories"]})
-        own = await c.get(OWN, headers=_key(device))
+        own = await c.get(OWN, params=P, headers=_key(device))
         persona = own.json()["persona"]
         assert persona["role"] == "Bug Triage Lead"                                 # the job template's name (members.agent_role stays empty for a recruited agent)
         text = persona["instructions"]
@@ -115,7 +116,7 @@ async def test_03_the_english_kit_gives_the_english_session_edition(world):
         device = await _device(c, name="d4680 mac c")
         agent = device["agents"][0]["member_id"]
         await _persona(agent, system_prompt=_recruit_text("en"), config={"role_template_id": str(TEMPLATE)})
-        text = (await c.get(OWN, headers=_key(device))).json()["persona"]["instructions"]
+        text = (await c.get(OWN, params=P, headers=_key(device))).json()["persona"]["instructions"]
         assert "EN: Triage every new bug" in text and "Sprintable Role Context" in text
         assert _INTEGRATION_PROMPT_TEXT["en"].split("\n", 1)[0] not in text
 
@@ -127,11 +128,11 @@ async def test_04_a_hand_written_persona_goes_as_it_is_and_a_gone_template_falls
         device = await _device(c, name="d4680 mac d")
         agent, other = device["agents"][0]["member_id"], device["agents"][1]["member_id"]
         await _persona(agent, name="Release Captain", system_prompt="You decide when we ship.\nAlways ask QA first.", style="Short sentences.")
-        mine = (await c.get(OWN, headers=_key(device))).json()["persona"]
+        mine = (await c.get(OWN, params=P, headers=_key(device))).json()["persona"]
         assert (mine["role"], mine["instructions"], mine["style"]) == ("Release Captain", "You decide when we ship.\nAlways ask QA first.", "Short sentences.")
         # a recruited persona whose template is gone: its own text, without the integration prompt
         await _persona(other, system_prompt=_recruit_text("ko"), config={"role_template_id": str(uuid.uuid4())})
-        gone = (await c.get(OWN, headers=_key(device, 1))).json()["persona"]
+        gone = (await c.get(OWN, params=P, headers=_key(device, 1))).json()["persona"]
         assert _INTEGRATION_PROMPT_TEXT["ko"].split("\n", 1)[0] not in gone["instructions"] and "Bug Triage Lead" in gone["instructions"]
 
 
@@ -145,36 +146,75 @@ async def test_05_only_the_agents_own_default_persona_in_its_org(world):
         await _persona(agent, name="A built-in", system_prompt="x", builtin=True, project=p("d1"))      # a built-in
         await _persona(agent, name="Deleted", system_prompt="x", deleted=True, project=p("d2"))         # deleted
         await _persona(agent, name="Other org", system_prompt="x", project=p("d3"), org=uuid.UUID("d4680000-0000-0000-0000-0000000000f0"))   # another organization's row
-        assert "persona" not in (await c.get(OWN, headers=_key(device))).json()
-        theirs = (await c.get(OWN, headers=_key(device, 1))).json()["persona"]
+        assert "persona" not in (await c.get(OWN, params=P, headers=_key(device))).json()
+        theirs = (await c.get(OWN, params=P, headers=_key(device, 1))).json()["persona"]
         assert theirs["role"] == "The Other One"
         assert (await c.get(OWN, headers=_person(OWNER))).status_code == 403                            # a person is not a daemon
 
 
-async def test_06_the_project_of_the_start_picks_its_persona_else_the_earliest(world):
+async def _second_project(agent) -> None:
+    """the agent is ALSO in project B (an agent_project_profiles row — what makes an agent a member of a project)"""
+    await _sql(
+        f"INSERT INTO projects (id,org_id,name,slug,violation_level) VALUES ('{PROJ_B}','{ORG}','D4680 B','d4680-b','warn') ON CONFLICT DO NOTHING",
+        f"INSERT INTO agent_project_profiles (id,member_id,project_id) VALUES (gen_random_uuid(),'{agent}','{PROJ_B}')",
+    )
+
+
+async def test_06_the_start_project_alone_decides_never_another_projects_role(world):
+    """PO 2026-10-18 (Kadir's lens ①): the daemon names the project of the start; the server checks the key's agent is in it and gives THAT project's persona only. No project, a
+    project the agent is not in, an empty or malformed id, a project with no persona → no role at all — never the other project's (no silent substitution)."""
     async with _client() as c:
         device = await _device(c, name="d4680 mac f")
         agent = device["agents"][0]["member_id"]
+        await _second_project(agent)
         await _persona(agent, name="In project A", system_prompt="a", project=PROJ)
         await _persona(agent, name="In project B", system_prompt="b", project=PROJ_B)
-        assert (await c.get(OWN, headers=_key(device))).json()["persona"]["role"] == "In project A"                        # the earliest
-        assert (await c.get(OWN, params={"project_id": str(PROJ_B)}, headers=_key(device))).json()["persona"]["role"] == "In project B"
-        assert (await c.get(OWN, params={"project_id": str(uuid.uuid4())}, headers=_key(device))).json()["persona"]["role"] == "In project A"   # none there → the earliest
+        role = lambda r: (r.json().get("persona") or {}).get("role")  # noqa: E731
+        assert role(await c.get(OWN, params={"project_id": str(PROJ)}, headers=_key(device))) == "In project A"
+        assert role(await c.get(OWN, params={"project_id": str(PROJ_B)}, headers=_key(device))) == "In project B"        # an agent in two projects: each start its own
+        assert role(await c.get(OWN, headers=_key(device))) is None                                                           # no project → no role
+        for bad in ("", "not-a-uuid", str(uuid.uuid4()), str(PROJ) + "x"):
+            r = await c.get(OWN, params={"project_id": bad}, headers=_key(device))
+            assert r.status_code == 200 and "persona" not in r.json(), (bad, r.status_code)                                   # the profile (model · effort · version …) is still read
+        # a project the agent is not in, even when a persona row of the agent sits there
+        other = uuid.UUID("d4680000-0000-0000-0000-0000000000e1")
+        await _persona(agent, name="Not mine", system_prompt="x", project=other)
+        r = await c.get(OWN, params={"project_id": str(other)}, headers=_key(device))
+        assert "persona" not in r.json() and r.json()["runtime"] == "claude"
+        # a project the agent is in but that has no persona
+        await _sql(f"DELETE FROM agent_personas WHERE project_id = '{PROJ_B}'")
+        assert "persona" not in (await c.get(OWN, params={"project_id": str(PROJ_B)}, headers=_key(device))).json()
+
+
+async def test_06b_a_base_persona_is_joined_only_for_the_same_agent_and_project_or_a_builtin(world):
+    async with _client() as c:
+        device = await _device(c, name="d4680 mac j")
+        agent, other = device["agents"][0]["member_id"], device["agents"][1]["member_id"]
+        await _second_project(agent)
+        foreign = await _persona(other, name="Other agent's base", system_prompt="FOREIGN AGENT TEXT", default=False)                  # another agent, same project
+        elsewhere = await _persona(agent, name="Other project's base", system_prompt="FOREIGN PROJECT TEXT", default=False, project=PROJ_B)  # same agent, another project
+        builtin = await _persona(agent, name="House", system_prompt="BUILTIN TEXT", default=False, builtin=True, project=uuid.UUID("d4680000-0000-0000-0000-0000000000e2"))
+        mine = await _persona(agent, name="My own base", system_prompt="MY BASE TEXT", default=False, project=PROJ, builtin=False)
+        for base, expected in ((foreign, "own"), (elsewhere, "own"), (builtin, "BUILTIN TEXT\n\nown"), (mine, "MY BASE TEXT\n\nown")):
+            await _sql(f"DELETE FROM agent_personas WHERE agent_id = '{agent}' AND is_default AND project_id = '{PROJ}'")
+            await _persona(agent, name="Captain", system_prompt="own", config={"base_persona_id": str(base)})
+            got = (await c.get(OWN, params=P, headers=_key(device))).json()["persona"]["instructions"]
+            assert got == expected, (expected, got)
 
 
 async def test_07_the_text_is_capped_by_characters_and_bytes_and_control_and_format_characters_are_gone(world):
     async with _client() as c:
         device = await _device(c, name="d4680 mac g")
         agent = device["agents"][0]["member_id"]
-        hidden = "\u202e\u2066\u200b\u200f\ufeff\u2028\u2029\u2060"
+        hidden = "\u202e\u2066\u200b\u200f\ufeff\u2028\u2029\u2060\u061c\u206a\u206b\u206c\u206d\u206e\u206f\u00ad\U000e0041"
         await _persona(agent, name="Cap\x07tain\nof\u202e  the ship", system_prompt="line one\r\nline\x01 two\ttab\x1b[31m" + hidden + "end" + "x" * 20_000)
-        p = (await c.get(OWN, headers=_key(device))).json()["persona"]
+        p = (await c.get(OWN, params=P, headers=_key(device))).json()["persona"]
         assert p["role"] == "Captain of the ship"                                   # one line · same filter
         assert p["instructions"].startswith("line one\nline two\ttab[31mend") and len(p["instructions"]) == 16_000
         assert not any(ch in p["instructions"] for ch in ("\x01", "\x07", "\x1b", "\r") + tuple(hidden))
         # bytes: 16,000 Korean characters would be 48 KB — the byte cap cuts first
         await _sql(f"UPDATE agent_personas SET system_prompt = '{'가' * 16_000}' WHERE agent_id = '{agent}'")
-        k = (await c.get(OWN, headers=_key(device))).json()["persona"]["instructions"]
+        k = (await c.get(OWN, params=P, headers=_key(device))).json()["persona"]["instructions"]
         assert len(k.encode("utf-8")) <= 32_000 and len(k) == 10_666
 
 
@@ -184,11 +224,11 @@ async def test_07b_the_base_persona_goes_through_the_same_filter_and_the_one_cap
         agent = device["agents"][0]["member_id"]
         base = await _persona(agent, name="House style", system_prompt="BASE\u202e text\x01 here", style="base\u200bstyle", default=False)
         await _persona(agent, name="Captain", system_prompt="own text", style="own style", config={"base_persona_id": str(base)})
-        p = (await c.get(OWN, headers=_key(device))).json()["persona"]
+        p = (await c.get(OWN, params=P, headers=_key(device))).json()["persona"]
         assert p["instructions"] == "BASE text here\n\nown text"                      # base first, cleaned, same text as the persona's own
         assert p["style"] == "basestyle\n\nown style"
         await _sql(f"UPDATE agent_personas SET system_prompt = '{'b' * 20_000}' WHERE id = '{base}'")
-        long = (await c.get(OWN, headers=_key(device))).json()["persona"]["instructions"]
+        long = (await c.get(OWN, params=P, headers=_key(device))).json()["persona"]["instructions"]
         assert len(long) == 16_000 and long.startswith("b" * 100)                    # base + own never beyond one cap
 
 
@@ -197,8 +237,8 @@ async def test_08_the_version_is_a_digest_of_what_is_handed_and_moves_when_it_ch
         device = await _device(c, name="d4680 mac h")
         agent = device["agents"][0]["member_id"]
         pid = await _persona(agent, name="Captain", system_prompt="first text")
-        v1 = (await c.get(OWN, headers=_key(device))).json()["persona"]["version"]
-        assert v1 == (await c.get(OWN, headers=_key(device))).json()["persona"]["version"]
+        v1 = (await c.get(OWN, params=P, headers=_key(device))).json()["persona"]["version"]
+        assert v1 == (await c.get(OWN, params=P, headers=_key(device))).json()["persona"]["version"]
         await _sql(f"UPDATE agent_personas SET system_prompt = 'second text' WHERE id = '{pid}'")
-        v2 = (await c.get(OWN, headers=_key(device))).json()["persona"]["version"]
+        v2 = (await c.get(OWN, params=P, headers=_key(device))).json()["persona"]["version"]
         assert v2 != v1 and "text" not in v2

@@ -72,7 +72,7 @@ async def get_options(
 
 @router.get("/agent-run-profile")
 async def get_own_profile(
-    project_id: uuid.UUID | None = None,
+    project_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
@@ -85,7 +85,12 @@ async def get_own_profile(
         raise HTTPException(status_code=404, detail="Agent not found")
     view = await profiles.read_for_daemon(db, member=member)
     # story 4680 AC2: the role this agent was hired for (its own default persona; the field is left out when it has none)
-    persona = await profiles.persona_for_daemon(db, member=member, project_id=project_id)
+    # the project the start is for: an empty or malformed id is simply «no project» (the profile — model · effort · version — is still read; the role is not given)
+    try:
+        project = uuid.UUID(project_id) if project_id else None
+    except ValueError:
+        project = None
+    persona = await profiles.persona_for_daemon(db, member=member, project_id=project)
     if persona is not None:
         view["persona"] = persona
     return view
