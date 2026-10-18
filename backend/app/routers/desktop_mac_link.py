@@ -28,8 +28,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v2/desktop", tags=["desktop"])
 
-# per signed-in person (not per address): the same shape as «인증 메일 다시 보내기» (3 an hour) plus a minute between two
-MAC_LINK_MAIL_LIMITS = ("3/hour", "1/minute")
+# per signed-in person (not per address): the same shape as «인증 메일 다시 보내기» (3 an hour) plus a minute between two — TIGHTEST FIRST (the
+# counter stops at the first full window, so a request the minute rule refuses does not use up the hour)
+MAC_LINK_MAIL_LIMITS = ("1/minute", "3/hour")
 _SCOPE = "mac-link-mail"
 
 

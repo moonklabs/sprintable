@@ -119,17 +119,21 @@ _strict_person_limiter = _MovingWindow(_strict_person_limit_storage)
 
 
 def hit_person_limits_strict(scope: str, user_id: str, *specs: str) -> int | None:
-    """Like `hit_person_limits` (None = allowed; else the seconds until a retry can pass; every window is checked before any is
-    counted), but a storage failure is NOT swallowed: it raises `StorageError`, so the caller refuses instead of sending."""
+    """Counts one request of `user_id` in `scope` against every limit in `specs`, TIGHTEST FIRST ("1/minute", "3/hour"). None =
+    allowed; otherwise the seconds until a retry can pass (for `Retry-After`).
+
+    Each window is `hit()` — one atomic step that counts and answers (Redis: one script; memory: one lock) — never a `test()` then
+    a `hit()`: two requests that arrive together would both pass the test before either was counted (codex 01a15033). A refusal
+    stops at the first window that is full, so the looser windows after it are not used up by a request that never got through;
+    the looser window counts only requests the tighter ones let by. A storage problem is NOT swallowed: it raises `StorageError`,
+    so the caller refuses instead of sending."""
     import time
 
-    items = [_parse_limit(s) for s in specs]
-    for item in items:
-        if not _strict_person_limiter.test(item, scope, user_id):
+    for spec in specs:
+        item = _parse_limit(spec)
+        if not _strict_person_limiter.hit(item, scope, user_id):
             reset_at, _remaining = _strict_person_limiter.get_window_stats(item, scope, user_id)
             return max(1, int(reset_at - time.time()) + 1)
-    for item in items:
-        _strict_person_limiter.hit(item, scope, user_id)
     return None
 
 

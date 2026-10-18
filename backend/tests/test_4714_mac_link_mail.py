@@ -213,6 +213,35 @@ def test_the_strict_limiter_itself_does_not_swallow_a_storage_error(monkeypatch)
     def _down(*_a, **_k):
         raise StorageError(Exception("down"))
 
-    monkeypatch.setattr(rate_limit._strict_person_limiter, "test", _down)
+    monkeypatch.setattr(rate_limit._strict_person_limiter, "hit", _down)
     with pytest.raises(StorageError):
         rate_limit.hit_person_limits_strict("scope", "person", "3/hour")
+
+
+def test_the_strict_limiter_counts_and_answers_in_one_step_never_test_then_hit(monkeypatch):
+    """two requests that arrive together must not both pass a separate `test()` before either is counted: the only step is `hit()`"""
+    from app.core import rate_limit
+
+    def _no_separate_check(*_a, **_k):
+        raise AssertionError("a separate test() step lets concurrent requests all pass before any is counted")
+
+    monkeypatch.setattr(rate_limit._strict_person_limiter, "test", _no_separate_check)
+    rate_limit.reset_strict_person_limits()
+    assert rate_limit.hit_person_limits_strict("atomic", "person", "1/minute", "3/hour") is None
+    wait = rate_limit.hit_person_limits_strict("atomic", "person", "1/minute", "3/hour")
+    assert wait is not None and wait >= 1  # the second is refused by the minute rule
+    rate_limit.reset_strict_person_limits()
+
+
+def test_a_request_the_minute_rule_refuses_does_not_use_up_the_hour(monkeypatch):
+    from app.core import rate_limit
+
+    rate_limit.reset_strict_person_limits()
+    assert rate_limit.hit_person_limits_strict("order", "p", "1/minute", "3/hour") is None  # counts: minute 1, hour 1
+    for _ in range(5):  # refused by the minute rule: the hour must stay at 1
+        assert rate_limit.hit_person_limits_strict("order", "p", "1/minute", "3/hour") is not None
+    # only the hour rule is left to judge: it still has 2 free (a refused-by-minute request counted nothing there)
+    assert rate_limit.hit_person_limits_strict("order", "p", "3/hour") is None
+    assert rate_limit.hit_person_limits_strict("order", "p", "3/hour") is None
+    assert rate_limit.hit_person_limits_strict("order", "p", "3/hour") is not None
+    rate_limit.reset_strict_person_limits()
