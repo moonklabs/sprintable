@@ -13,6 +13,7 @@ from app.models.deletion_audit import DeletionAuditLog
 from app.models.organization import Organization
 from app.models.participation import ParticipationRole
 from app.models.project import OrgMember, Project
+from app.services.org_billing_end import end_org_billing
 from app.services.org_subscription_checkout import STALE_CLAIM_WINDOW
 
 logger = logging.getLogger(__name__)
@@ -319,6 +320,31 @@ class OrganizationRepository:
             .where(OrgMember.org_id == org_id, OrgMember.deleted_at.is_(None))
             .values(deleted_at=func.now())
         )
+        # story 4728 (AC0 measured on a real PG): the organization row going away leaves the public links, public keys and agent keys
+        # of that organization alive in tables with no foreign key to it (doc_share_tokens · org_metering_keys · site_posts · agent_api_keys
+        # all keep org_id as a plain column) — a doc share link kept answering 200 with the deleted organization's text. They are ended
+        # here, in the delete's own transaction, before `members` is cascaded away (that cascade turns agent_api_keys.member_id to NULL and
+        # the key could no longer be matched to its organization). The public readers also check that the organization exists
+        # (services/doc_share.resolve_public · services/pageview_counter.resolve_org_by_public_key), which covers organizations that were
+        # deleted before this change.
+        for stmt in (
+            "UPDATE doc_share_tokens SET status = 'revoked', revoked_at = now() WHERE org_id = :o AND status = 'active'",
+            "UPDATE org_metering_keys SET revoked_at = now() WHERE org_id = :o AND revoked_at IS NULL",
+            "UPDATE site_posts SET unpublished_at = now() WHERE org_id = :o AND unpublished_at IS NULL",
+            # the same for what background jobs would keep using for a dead organization: the channel tokens its refresh cron renews, the
+            # GA4 tokens its scoring cron reads, and the posts that are still waiting to go out to an outside channel
+            "UPDATE channel_connections SET status = 'revoked', encrypted_access_token = NULL, encrypted_refresh_token = NULL"
+            " WHERE org_id = :o AND status <> 'revoked'",
+            "DELETE FROM ga4_connections WHERE org_id = :o",
+            "UPDATE publication_commands SET status = 'cancelled' WHERE org_id = :o AND status IN ('pending', 'blocked', 'blocked_unapproved')",
+            (
+                "UPDATE agent_api_keys SET revoked_at = now() WHERE revoked_at IS NULL"
+                " AND (member_id IN (SELECT id FROM members WHERE org_id = :o)"
+                " OR team_member_id IN (SELECT id FROM members WHERE org_id = :o))"
+            ),
+        ):
+            await self.session.execute(text(stmt), {"o": org_id})
+        await end_org_billing(self.session, org_id)  # failed 주문 · 빌링키 · 구독 — 같은 트랜잭션
         await self.session.delete(org)
         return {"ok": True}
 

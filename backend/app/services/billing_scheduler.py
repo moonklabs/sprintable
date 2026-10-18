@@ -34,6 +34,7 @@ from app.models.org_subscription import OrgSubscription
 from app.models.project import OrgMember
 from app.models.user import User
 from app.services.billing_charge import (
+    OrganizationGone,
     _confirm_with_ledger,
     _mark_failed_if_not_confirmed,
     charge_org,
@@ -323,13 +324,16 @@ async def _sync_renewal_retry_outcome(
     active로 복귀·period 롤오버(AC2 "성공 시 원 주기 유지"), 아직 failed면 past_due
     유지+이번 실패도 통보(AC3 "매 실패마다")."""
     order = (
-        await session.execute(select(BillingOrder).where(BillingOrder.order_id == order_id))
+        # populate_existing — 스윕이 이미 읽어 둔 객체가 아니라 DB의 지금 상태(charge_org 가드가 raw SQL로 끝낸 주문 포함)를 본다.
+        await session.execute(select(BillingOrder).where(BillingOrder.order_id == order_id).execution_options(populate_existing=True))
     ).scalar_one()
     sub = (
         await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))
     ).scalar_one_or_none()
     if sub is None:
         return
+    if order.status == "downgraded":
+        return  # story #4728 — 조직이 없어져 주문이 끝났다(charge_org 가드) — past_due 로 되돌리지도, 메일을 보내지도 않는다.
 
     if order.status == "confirmed":
         # AC2 — 재결제 성공 시 원 주기 유지: sub.current_period_end는 실패 후에도 «원래
@@ -608,6 +612,10 @@ async def trigger_due_charges(session: AsyncSession, *, now: datetime | None = N
                 session, org_id=sub.org_id, order_id=order_id, amount_minor=amount_minor,
                 currency=currency, order_name="Sprintable 정기결제(갱신)",
             )
+        except OrganizationGone:
+            # story #4728 — 조직이 없다(charge_org 가드가 구독 · 주문 · 빌링키를 이미 끝냈다): past_due 로 되돌리지도 메일을 보내지도 않는다.
+            logger.warning("trigger_due_charges: org_id=%s no longer exists — skipped", sub.org_id)
+            continue
         except Exception:
             logger.exception("trigger_due_charges: charge_org failed for org_id=%s order_id=%s", sub.org_id, order_id)
             order = (

@@ -741,6 +741,24 @@ async def test_send_deadline_passed_means_toss_is_never_called(Session, toss, mo
 
 
 @pytest.mark.anyio
+async def test_organization_deleted_mid_attempt_ends_the_attempt_failed_with_zero_charge(Session, toss):
+    """story #4728 — charge_org refuses a missing organization (OrganizationGone, provider never called); the attempt ends failed instead of
+    staying 'processing' as an unknown charge outcome for the reconciler to chase."""
+    from app.services import billing_payment_attempt as svc
+
+    async with Session() as s:
+        org_id = await _new_org(s)
+        attempt_id = uuid.uuid4()
+        _, token = await svc.start_checkout_attempt(s, attempt_id=attempt_id, org_id=org_id, requested_by=None, tier="team", billing_cycle="monthly")
+        await s.execute(text("DELETE FROM organizations WHERE id = :o"), {"o": org_id})
+        await s.commit()
+        await svc.drive_attempt(s, attempt_id, token, auth_key="auth-1")
+        done = await svc.get_attempt(s, attempt_id)
+        assert (done.status, done.reason) == ("failed", "organization gone — not charged")
+    assert toss.charge_calls == []
+
+
+@pytest.mark.anyio
 async def test_card_auth_declined_fails_before_charge_and_asks_for_reauth(Session, toss):
     from app.services import billing_payment_attempt as svc
 

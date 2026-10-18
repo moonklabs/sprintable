@@ -147,6 +147,12 @@ async def test_awaiting_auth_placeholder_is_never_treated_as_active_billing_key_
     try:
         async with Session() as session:
             org_id = uuid.uuid4()
+            # story #4728 — charge_org 는 조직이 없으면 청구 前에 끊는다(OrganizationGone): 이 시험의 조직은 실제로 있어야 한다.
+            await session.execute(
+                text("INSERT INTO organizations (id, name, slug, plan) VALUES (:id, :name, :slug, 'free')"),
+                {"id": org_id, "name": f"test-org-{org_id}", "slug": f"slug-{org_id}"},
+            )
+            await session.commit()
             # placeholder만 있고(실 빌링키 없음) — 위젯 인증 前 상태 그대로.
             await ensure_customer_key(session, org_id=org_id)
 
