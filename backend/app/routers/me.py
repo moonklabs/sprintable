@@ -21,6 +21,8 @@ from app.schemas.human_api_key import (
 )
 from app.schemas.me import MeResponse, UpdateMe
 
+NO_MEMBERSHIP_REASON = "no_membership"  # story 4714 AC6: `GET /api/v2/me` 404 «this account has no membership (no organization yet)» — read by the web proxy
+
 router = APIRouter(prefix="/api/v2/me", tags=["me", "Organization"])
 
 
@@ -242,7 +244,10 @@ async def get_me(
                 )
 
     if member is None:
-        raise HTTPException(status_code=404, detail="Member not found")
+        # story 4714 AC6 — a person who has no organization yet (a brand-new account). The web's proxy sends exactly this person to the onboarding
+        # and must not read it off the message's words: `reason` is the machine-readable field (code stays NOT_FOUND — every other reader of the
+        # envelope is unchanged). Rewording the message never changes what a reader of `reason` sees.
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Member not found", "reason": NO_MEMBERSHIP_REASON})
 
     data = MeResponse.model_validate(member)
     data.project_name = member.project.name if member.project else None

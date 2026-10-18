@@ -145,7 +145,7 @@ const CURRENT_PROJECT_COOKIE = 'sprintable_current_project_id';
 /**
  * What `/api/v2/me` says about this session's organization — three answers, not two (story 4714 AC6):
  *  · `org`     the server answered and the person works in `orgId`;
- *  · `none`    the server answered «Member not found» (404 NOT_FOUND): the account exists but has no organization yet — a brand-new person;
+ *  · `none`    the server answered 404 NOT_FOUND with `reason: 'no_membership'` (`me.py`): the account exists but has no organization yet — a brand-new person;
  *  · `unknown` anything else (a 5xx, a network error, a 200 without an org, a 404 that is not that answer): the call did not tell us.
  * Only `none` may send a person to the onboarding: an `unknown` is a moment of trouble, and an organization member must never be bounced to
  * «create an organization» because of it (it passes through, as it always did).
@@ -155,10 +155,11 @@ async function lookupVerifiedOrg(fastapiUrl: string, accessToken: string): Promi
   try {
     const res = await fetch(`${fastapiUrl}/api/v2/me`, { headers: { Authorization: `Bearer ${accessToken}` } });
     if (res.status === 404) {
-      const body = await res.json().catch(() => null) as { error?: { code?: unknown; message?: unknown } } | null;
-      const code = body?.error?.code;
-      const message = body?.error?.message;
-      return code === 'NOT_FOUND' && typeof message === 'string' && /member/i.test(message) ? { kind: 'none' } : { kind: 'unknown' };
+      // the machine-readable field the backend writes for exactly this answer (`me.py` NO_MEMBERSHIP_REASON) — never the message's words, so a
+      // rewording of the message can not quietly bring the 404 trap back. Without it (an older backend during a rollout, a gateway's 404, a 404
+      // of another route) the answer is `unknown`: pass through, never a redirect.
+      const body = await res.json().catch(() => null) as { error?: { code?: unknown; reason?: unknown } } | null;
+      return body?.error?.code === 'NOT_FOUND' && body?.error?.reason === 'no_membership' ? { kind: 'none' } : { kind: 'unknown' };
     }
     if (!res.ok) return { kind: 'unknown' };
     const me = await res.json() as { org_id?: string };
