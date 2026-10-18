@@ -61,33 +61,6 @@ TRANSACTIONAL_COPY: dict[str, dict[str, dict]] = {
             "fallback_label": "If the button doesn't work, paste this address into your browser:",
         },
     },
-    # story 4714 AC2 — «Mac에서 열 링크를 메일로 받기»: 폰에서 요청한 사람 본인 메일로 가는 `{app_url}/desktop` 링크 메일.
-    # 글은 유나 홀름 시트 4714-ac2-mac-link-mail-copy-1018.md 그대로(글자 단위). 링크에 토큰·코드가 없다는 사실에 두 줄
-    # (expiry_note · security_note)이 기대고 있다 — 토큰을 싣게 되면 이 두 줄이 같이 바뀐다.
-    "mac_link": {
-        "ko": {
-            "subject": "Mac에서 Sprintable을 시작할 링크예요",
-            "intro_lines": [
-                "폰에서 요청하신 Mac용 Sprintable 링크예요.",
-                "Mac에서 이 메일을 열고 아래 버튼을 눌러 주세요. 로그인한 뒤 앱을 받고 첫 에이전트를 시작할 수 있어요.",
-            ],
-            "cta_label": "Mac 앱 받기",
-            "expiry_note": "이 링크는 계속 쓸 수 있어요. 열어도 로그인해야 계정에 들어가요.",
-            "security_note": "본인이 요청하지 않으셨다면 이 메일을 무시하셔도 돼요 — 링크에는 계정 정보가 들어 있지 않아요.",
-            "fallback_label": "버튼이 열리지 않으면 아래 주소를 브라우저에 붙여넣어 주세요:",
-        },
-        "en": {
-            "subject": "Your link to start Sprintable on your Mac",
-            "intro_lines": [
-                "Here is the link to Sprintable for Mac that you asked for on your phone.",
-                "Open this email on your Mac and click the button below. After you sign in, you can get the app and start your first agent.",
-            ],
-            "cta_label": "Get the Mac app",
-            "expiry_note": "This link doesn't expire. You still have to sign in to get into your account.",
-            "security_note": "If you didn't ask for this, you can safely ignore this email — the link holds no account information.",
-            "fallback_label": "If the button doesn't work, paste this address into your browser:",
-        },
-    },
     # story #ab2a503f([버그·보안·HIGH] set-password 재인증 게이트, 2026-09-01) — OAuth 전용
     # 계정 최초 비밀번호 설정 확인 메일. reset_password와 골격 동일(재사용, 신규 렌더러 0)이나
     # expiry_note만 15분(SET_PASSWORD_CONFIRM_EXPIRE_MINUTES, security.py)로 더 짧게 — "지금

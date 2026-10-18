@@ -62,22 +62,21 @@ async def post_mac_link_mail(
 
     from app.services.agent_onboarding_config import resolve_locale
     from app.services.email import render_action_email, send_email
-    from app.services.email_copy import TRANSACTIONAL_COPY
+    from app.services.i18n_catalog import t
 
     locale = resolve_locale(user.locale)
-    copy = TRANSACTIONAL_COPY["mac_link"][locale]
     link = f"{os.getenv('NEXT_PUBLIC_APP_URL', 'https://app.sprintable.ai')}/desktop"  # nothing but the page: no token · no code · no query
     delivered = await asyncio.to_thread(  # the sync sender (SMTP 10 s · Resend 30 s) must not hold the event loop
         send_email,
         to=user.email,
-        subject=copy["subject"],
+        subject=t("mac_link_mail.subject", locale),
         html_body=render_action_email(
-            intro_lines=copy["intro_lines"],
-            cta_label=copy["cta_label"],
+            intro_lines=[t("mac_link_mail.intro_1", locale), t("mac_link_mail.intro_2", locale)],
+            cta_label=t("mac_link_mail.cta_label", locale),
             cta_url=link,
-            expiry_note=copy["expiry_note"],
-            security_note=copy["security_note"],
-            fallback_label=copy["fallback_label"],
+            expiry_note=t("mac_link_mail.expiry_note", locale),
+            security_note=t("mac_link_mail.security_note", locale),
+            fallback_label=t("mac_link_mail.fallback_label", locale),
             locale=locale,
         ),
     )

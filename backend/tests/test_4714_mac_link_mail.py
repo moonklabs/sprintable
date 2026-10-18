@@ -193,13 +193,18 @@ async def test_the_mail_is_the_sheets_words_and_the_link_is_the_plain_desktop_pa
     assert "token" not in mail["html"].lower().replace("account information", "")  # nothing token-like rides in the mail
 
 
-def test_the_mail_words_exist_in_both_languages_with_the_same_fields():
-    from app.services.email_copy import TRANSACTIONAL_COPY
+def test_the_mail_words_are_in_the_catalog_in_both_languages_with_the_sheets_keys():
+    from app.services.i18n_catalog import MessageCatalog, t
 
-    ko, en = TRANSACTIONAL_COPY["mac_link"]["ko"], TRANSACTIONAL_COPY["mac_link"]["en"]
-    assert set(ko) == set(en) == {"subject", "intro_lines", "cta_label", "expiry_note", "security_note", "fallback_label"}
-    assert len(ko["intro_lines"]) == len(en["intro_lines"]) == 2
-    assert all(ko[k] and en[k] for k in ko)
+    keys = {f"mac_link_mail.{k}" for k in ("subject", "intro_1", "intro_2", "cta_label", "expiry_note", "security_note", "fallback_label")}
+    assert {k for k in MessageCatalog.keys() if k.startswith("mac_link_mail.")} == keys
+    for k in keys:
+        assert MessageCatalog.locales_for(k) == frozenset({"ko", "en"})
+        assert t(k, "ko") and t(k, "en") and t(k, "ko") != t(k, "en")
+    # the two lines that promise «no account information» / «no expiry» are true only while the link holds no token (they are the lines to
+    # change if one is ever added)
+    assert "계정 정보가 들어 있지 않아요" in t("mac_link_mail.security_note", "ko")
+    assert "holds no account information" in t("mac_link_mail.security_note", "en")
 
 
 def test_the_route_is_one_post_and_takes_no_body():
