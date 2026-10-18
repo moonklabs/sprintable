@@ -81,13 +81,13 @@ async def test_01_the_computer_reports_ids_only_the_list_is_replaced_whole_and_a
         # no device token → 401 (a person is no device)
         assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ)), headers=_person(OWNER))).status_code == 401
         ok = await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ), (agent, PROJ2), (agent, PROJ), (agent, PROJ3)), headers=tok)
-        assert (ok.status_code, ok.json()) == (200, {"startable": 2, "dropped_agents": [], "applied": True})  # sorted · no repeat · (agent, PROJ3) dropped: the agent is not in that project
+        assert (ok.status_code, ok.json()) == (200, {"startable": 2, "dropped_agents": [], "applied": True, "startable_seq": None})  # sorted · no repeat · (agent, PROJ3) dropped: the agent is not in that project
         stored = (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{sid}'"))[0][0]
         assert sorted(stored, key=lambda i: i["project_id"]) == [{"agent_member_id": agent, "project_id": str(PROJ)}, {"agent_member_id": agent, "project_id": str(PROJ2)}]
         # narrowed to what the agents can really have: a project that is gone (soft-deleted) is dropped too, and nothing else is stored
         await _sql(f"UPDATE projects SET deleted_at = now() WHERE id = '{PROJ2}'")
         try:
-            assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ), (agent, PROJ2)), headers=tok)).json() == {"startable": 1, "dropped_agents": [], "applied": True}
+            assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ), (agent, PROJ2)), headers=tok)).json() == {"startable": 1, "dropped_agents": [], "applied": True, "startable_seq": None}
             assert (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{sid}'"))[0][0] == [{"agent_member_id": agent, "project_id": str(PROJ)}]
         finally:
             await _sql(f"UPDATE projects SET deleted_at = NULL WHERE id = '{PROJ2}'")
@@ -98,23 +98,23 @@ async def test_01_the_computer_reports_ids_only_the_list_is_replaced_whole_and_a
             f"INSERT INTO agent_project_profiles (id,member_id,project_id) VALUES (gen_random_uuid(),'{agent}','{other_org_project}')",
         )
         try:
-            assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ), (agent, other_org_project)), headers=tok)).json() == {"startable": 1, "dropped_agents": [], "applied": True}
+            assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ), (agent, other_org_project)), headers=tok)).json() == {"startable": 1, "dropped_agents": [], "applied": True, "startable_seq": None}
             assert (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{sid}'"))[0][0] == [{"agent_member_id": agent, "project_id": str(PROJ)}]
         finally:
             await _sql(f"DELETE FROM agent_project_profiles WHERE project_id = '{other_org_project}'", f"DELETE FROM projects WHERE id = '{other_org_project}'")
         # replaced whole, not merged
-        assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ2)), headers=tok)).json() == {"startable": 1, "dropped_agents": [], "applied": True}
+        assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ2)), headers=tok)).json() == {"startable": 1, "dropped_agents": [], "applied": True, "startable_seq": None}
         stored = (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{sid}'"))[0][0]
         assert stored == [{"agent_member_id": agent, "project_id": str(PROJ2)}]
         # an agent this device was not set up with · a path (or any extra field) · a pair without a project · too many
         # an agent this device was not set up with is LEFT OUT and named (not refused: one stale agent must not hide the others) — what was stored stays the agent's own
         stranger = str(uuid.uuid4())
         mixed = await c.put("/api/v2/desktop/relay/startable", json=_startable((stranger, PROJ), (agent, PROJ2)), headers=tok)
-        assert (mixed.status_code, mixed.json()) == (200, {"startable": 1, "dropped_agents": [stranger], "applied": True})
+        assert (mixed.status_code, mixed.json()) == (200, {"startable": 1, "dropped_agents": [stranger], "applied": True, "startable_seq": None})
         assert (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{sid}'"))[0][0] == [{"agent_member_id": agent, "project_id": str(PROJ2)}]
         # only strangers: an empty list is stored (the computer says «nothing to start»), the strangers are named
         only = await c.put("/api/v2/desktop/relay/startable", json=_startable((stranger, PROJ)), headers=tok)
-        assert (only.status_code, only.json()) == (200, {"startable": 0, "dropped_agents": [stranger], "applied": True})
+        assert (only.status_code, only.json()) == (200, {"startable": 0, "dropped_agents": [stranger], "applied": True, "startable_seq": None})
         assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ2)), headers=tok)).json()["startable"] == 1
         item = {"agent_member_id": agent, "project_id": str(PROJ)}
         assert (await c.put("/api/v2/desktop/relay/startable", json={"startable": [{**item, "path": "/Users/x/work"}]}, headers=tok)).status_code == 422
@@ -582,15 +582,15 @@ async def test_17_a_report_numbered_at_or_below_the_highest_applied_is_ignored_s
         stored = lambda: _sql(fetch=f"SELECT startable, startable_seq FROM desktop_setups WHERE id = '{sid}'")  # noqa: E731
         put = lambda body: c.put("/api/v2/desktop/relay/startable", json=body, headers=tok)  # noqa: E731
         r = await put({**_startable((agent, PROJ)), "seq": 10})
-        assert (r.status_code, r.json()) == (200, {"startable": 1, "dropped_agents": [], "applied": True})
+        assert (r.status_code, r.json()) == (200, {"startable": 1, "dropped_agents": [], "applied": True, "startable_seq": 10})
         assert (await stored())[0][1] == 10
         # the late, lower one: ignored — the stored list is the newer one, the answer says so and counts what is stored
         late = await put({**_startable((agent, PROJ), (agent, PROJ2)), "seq": 5})
-        assert (late.status_code, late.json()) == (200, {"startable": 1, "dropped_agents": [], "applied": False})
+        assert (late.status_code, late.json()) == (200, {"startable": 1, "dropped_agents": [], "applied": False, "startable_seq": 10})  # the answer names the number the server holds: the computer goes on from it
         assert (await stored())[0] == ([{"agent_member_id": agent, "project_id": str(PROJ)}], 10)
         # the same number again: ignored too (a number is applied once)
         same = await put({**_startable((agent, PROJ), (agent, PROJ2)), "seq": 10})
-        assert same.json()["applied"] is False
+        assert (same.json()["applied"], same.json()["startable_seq"]) == (False, 10)
         assert (await stored())[0] == ([{"agent_member_id": agent, "project_id": str(PROJ)}], 10)  # nothing was overwritten by the ignored report
         # an ignored report still counts as the computer being heard (liveness): its last_used_at moves
         await _sql(f"UPDATE desktop_device_tokens SET last_used_at = now() - interval '5 minutes' WHERE setup_id = '{sid}' AND revoked_at IS NULL")
@@ -598,11 +598,11 @@ async def test_17_a_report_numbered_at_or_below_the_highest_applied_is_ignored_s
         assert (await _sql(fetch=f"SELECT last_used_at > now() - interval '1 minute' FROM desktop_device_tokens WHERE setup_id = '{sid}' AND revoked_at IS NULL"))[0][0] is True
         # a higher one is applied and moves the number
         up = await put({**_startable((agent, PROJ), (agent, PROJ2)), "seq": 11})
-        assert (up.json()["startable"], up.json()["applied"]) == (2, True)
+        assert (up.json()["startable"], up.json()["applied"], up.json()["startable_seq"]) == (2, True, 11)
         assert (await stored())[0][1] == 11
         # unnumbered (an older app): applied, the number stays
         old = await put(_startable((agent, PROJ)))
-        assert (old.json()["startable"], old.json()["applied"]) == (1, True)
+        assert (old.json()["startable"], old.json()["applied"], old.json()["startable_seq"]) == (1, True, 11)  # unnumbered: the number is told, not moved
         assert (await stored())[0][1] == 11
         # not a positive whole number → refused, nothing changes
         for bad in (0, -3, "7", 1.5):

@@ -638,26 +638,28 @@ async def accessible_startable(db: AsyncSession, setup: DesktopSetup, snapshot: 
     return snapshot.model_copy(update={"startable": [i for i in snapshot.startable if (i.agent_member_id, i.project_id) in possible]}), dropped
 
 
-async def replace_startable(db: AsyncSession, setup: DesktopSetup, snapshot: StartableSnapshot) -> tuple[int, bool]:
+async def replace_startable(db: AsyncSession, setup: DesktopSetup, snapshot: StartableSnapshot) -> tuple[int, bool, int | None]:
     """story #4714: the computer's startable pairs, as it says them (already narrowed by `accessible_startable`). Stored as given, sorted and without
     repeats. A numbered report is applied by ONE statement that holds the guard itself (`startable_seq IS NULL OR startable_seq < seq`): a report at or
     below the highest applied is IGNORED (returns the stored count, applied False) — a late request cannot cover a newer list, lock or no lock.
-    An unnumbered report (an older app) is applied and leaves the number alone. `seq` is bounded to 2**62 on purpose (well inside BIGINT)."""
+    An unnumbered report (an older app) is applied and leaves the number alone. `seq` is bounded to 2**62 on purpose (well inside BIGINT).
+    The third value is the number the server holds AFTER this report (NULL = no numbered report yet): the computer reads it when its report was ignored and goes on
+    from there, instead of guessing how far behind it is (its clock may have gone back since a restart)."""
     pairs = sorted({(str(i.agent_member_id), str(i.project_id)) for i in snapshot.startable})
     values: dict = {"startable": [{"agent_member_id": a, "project_id": p} for a, p in pairs]}
     stmt = update(DesktopSetup).where(DesktopSetup.id == setup.id)
     if snapshot.seq is not None:
         values["startable_seq"] = snapshot.seq
         stmt = stmt.where(or_(DesktopSetup.startable_seq.is_(None), DesktopSetup.startable_seq < snapshot.seq))
-    applied = (await db.execute(stmt.values(**values).returning(DesktopSetup.id))).first() is not None
-    if not applied:
-        kept = (await db.execute(select(DesktopSetup.startable).where(DesktopSetup.id == setup.id))).scalar_one_or_none()
+    row = (await db.execute(stmt.values(**values).returning(DesktopSetup.startable_seq))).first()
+    if row is None:
+        kept, held = (await db.execute(select(DesktopSetup.startable, DesktopSetup.startable_seq).where(DesktopSetup.id == setup.id))).one()
         await touch_device(db, setup.id)  # an ignored report is still the computer speaking: it was heard
         await db.flush()
-        return len(kept or []), False
+        return len(kept or []), False, held
     await touch_device(db, setup.id)
     await db.flush()
-    return len(pairs), True
+    return len(pairs), True, row[0]
 
 
 async def device_sessions_view(
