@@ -336,3 +336,42 @@ async def test_d_an_agent_with_no_project_is_out_of_reach_for_a_creator_who_lost
             assert as_creator >= 400 and as_admin >= 400 and as_creator == as_admin, (as_creator, as_admin)
         finally:
             await w.cleanup()
+
+
+@pytest.mark.anyio
+async def test_e_a_creator_who_is_admin_only_of_a_later_project_of_the_agent_still_passes():
+    """an agent that belongs to three projects; its creator is a plain member of the first, holds nothing in the second and is admin of the LAST one only.
+    The guard must look at every project of the agent (not just the first row of the `team_members` projection): a lookup cut to one project fails this
+    for the creator, while a plain member who is admin of none of the three still gets 403."""
+    async with _client() as c:
+        w = World()
+        try:
+            await w.build(c)
+            extra = []
+            for n in (2, 3):
+                p = await _call(c, "POST", "/api/v2/projects", bearer=w.owner.token, json_body={"org_id": w.org, "name": f"p4730-{n}-{w.sfx}"})
+                assert p.status_code in (200, 201), p.text
+                extra.append(_data(p)["id"])
+            creator = await w.add_person(c, "latecreator", org_role="member", project_role="member")  # a plain member of the first project
+            plain = await w.add_person(c, "plainmember", org_role="member", project_role="member")  # a plain member everywhere
+            for person in (creator, plain):
+                await _sql("INSERT INTO project_access (id, project_id, org_member_id, role, permission) VALUES (:i, :p, :m, 'member', 'granted')", i=uuid.uuid4(), p=extra[0], m=person.org_member_id)
+            await _sql("INSERT INTO project_access (id, project_id, org_member_id, role, permission) VALUES (:i, :p, :m, 'admin', 'granted')", i=uuid.uuid4(), p=extra[1], m=creator.org_member_id)
+            agent_id = await w.new_agent(c, creator)
+            for pid in extra:  # the agent belongs to all three projects
+                await _sql("INSERT INTO agent_project_profiles (id, member_id, project_id) VALUES (:i, :a, :p)", i=uuid.uuid4(), a=agent_id, p=pid)
+            assert (await _sql("SELECT count(DISTINCT project_id) FROM team_members WHERE id = :a", a=agent_id)) == [(3,)]
+
+            for who, expect_pass in ((creator, True), (plain, False)):
+                for name, method, url, body in (
+                    ("message_policy_get", "GET", f"/api/v2/agents/{agent_id}/message-policy", None),
+                    ("keys_list", "GET", f"/api/v2/agents/{agent_id}/api-keys", None),
+                    ("message_policy_put", "PUT", f"/api/v2/agents/{agent_id}/message-policy", {"mode": "org_wide"}),
+                ):
+                    r = await _call(c, method, url, bearer=who.token, json_body=body)
+                    if expect_pass:
+                        assert r.status_code < 300, f"{who.label} (admin of the agent's last project) was refused on {name}: {r.status_code} {r.text}"
+                    else:
+                        assert r.status_code == 403, f"{who.label} (admin of none) got {r.status_code} on {name}"
+        finally:
+            await w.cleanup()
