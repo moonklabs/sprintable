@@ -91,6 +91,7 @@ class World:
         self.proj = None
         self.owner = None
         self.agent_ids: list = []
+        self.api_keys: dict = {}
         self.people: list[Person] = []
 
     async def _register(self, c, label: str) -> tuple[Person, dict]:
@@ -144,6 +145,7 @@ class World:
         a = await _call(c, "POST", "/api/v2/team-members", bearer=self.owner.token, json_body={"org_id": self.org, "project_id": self.proj, "type": "agent", "name": f"agent-{n}", "role": "developer"})
         assert a.status_code in (200, 201), a.text
         agent_id = _data(a)["id"]
+        self.api_keys[agent_id] = _data(a).get("api_key")
         self.agent_ids.append(agent_id)
         if creator is not None:
             await _sql("UPDATE members SET owner_member_id = :m WHERE id = :a", m=creator.org_member_id, a=agent_id)
@@ -275,5 +277,62 @@ async def test_b_a_creator_who_lost_the_seat_gets_403_on_every_route():
             out = await _run_state(c, w, plain, creator=None)
             not_403 = {k: v for k, v in out.items() if v != 403}
             assert not_403 == {}, f"plain member, not the creator: routes that did NOT answer 403: {not_403}"
+        finally:
+            await w.cleanup()
+
+
+@pytest.mark.anyio
+async def test_c_an_agent_made_by_an_agent_has_no_human_creator_and_the_seat_rule_reads_the_agents_own_grant():
+    """an agent that holds a project admin grant can create an agent (POST /team-members): the new agent's `created_by` is NULL (the view
+    projects the human creator only), so the creator branch cannot be reached by an agent creator — and the seat rule itself reads the
+    agent's own grant (`project_access.member_id`) and lets go of it when the grant is lowered."""
+    from app.services.project_auth import holds_agent_seat
+
+    async with _client() as c:
+        w = World()
+        try:
+            await w.build(c)
+            parent = await w.new_agent(c, None)
+            await _sql("UPDATE project_access SET role = 'admin' WHERE member_id = :a AND project_id = :p", a=parent, p=w.proj)
+            r = await _call(c, "POST", "/api/v2/team-members", bearer=w.api_keys[parent], json_body={"org_id": w.org, "project_id": w.proj, "type": "agent", "name": f"child-{w.sfx}", "role": "developer"})
+            assert r.status_code in (200, 201), r.text
+            child = _data(r)["id"]
+            w.agent_ids.append(child)
+            assert (await _sql("SELECT DISTINCT created_by FROM team_members WHERE id = :a", a=child)) == [(None,)]  # no human creator
+            # the parent agent is neither the creator nor an org admin: the ownership guard says 403 for the child
+            denied = await _call(c, "GET", f"/api/v2/agents/{child}/message-policy", bearer=w.api_keys[parent])
+            assert denied.status_code == 403, denied.text
+
+            eng = create_async_engine(_ASYNC, poolclass=NullPool)
+            try:
+                async with async_sessionmaker(eng)() as session:
+                    assert await holds_agent_seat(session, uuid.UUID(parent), [uuid.UUID(w.proj)]) is True  # its own project admin grant
+                    await _sql("UPDATE project_access SET role = 'member' WHERE member_id = :a AND project_id = :p", a=parent, p=w.proj)
+                    assert await holds_agent_seat(session, uuid.UUID(parent), [uuid.UUID(w.proj)]) is False  # lowered → the seat is gone
+            finally:
+                await eng.dispose()
+        finally:
+            await w.cleanup()
+
+
+@pytest.mark.anyio
+async def test_d_an_agent_with_no_project_is_out_of_reach_for_a_creator_who_lost_the_seat():
+    """an agent with zero project rows: the `team_members` view needs a project profile, so the guard finds no agent at all — a creator who lost
+    her seat gets nothing (never a 2xx), and the org-admin branch answers exactly as it did before (same status for the current org admin)."""
+    async with _client() as c:
+        w = World()
+        try:
+            await w.build(c)
+            demoted = await w.add_person(c, "demoted", org_role="admin")
+            org_admin = await w.add_person(c, "orgadmin", org_role="admin")
+            agent_id = await w.new_agent(c, demoted)
+            await _sql("DELETE FROM agent_project_profiles WHERE member_id = :a", a=agent_id)
+            await _sql("DELETE FROM project_access WHERE member_id = :a", a=agent_id)
+            assert (await _sql("SELECT count(*) FROM team_members WHERE id = :a", a=agent_id)) == [(0,)], "the agent must really have no project row left"
+            await _sql("UPDATE org_members SET role = 'member' WHERE id = :m", m=demoted.org_member_id)
+            url = f"/api/v2/agents/{agent_id}/message-policy"
+            as_creator = (await _call(c, "GET", url, bearer=demoted.token)).status_code
+            as_admin = (await _call(c, "GET", url, bearer=org_admin.token)).status_code
+            assert as_creator >= 400 and as_admin >= 400 and as_creator == as_admin, (as_creator, as_admin)
         finally:
             await w.cleanup()
