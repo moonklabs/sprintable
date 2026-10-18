@@ -25,10 +25,10 @@ def anyio_backend():
 
 
 def _mock_db(email_verified: bool | None, display_name: str | None = None) -> AsyncMock:
-    # story 4427 — get_auth_me reads email_verified and display_name in one query (a row of both, or None).
+    # story 4427 — get_auth_me reads email_verified and display_name (+ story 4725 reclaim_notice) in one query (a row of them, or None).
     session = AsyncMock()
     result = MagicMock()
-    result.one_or_none.return_value = (email_verified, display_name)
+    result.one_or_none.return_value = (email_verified, display_name, None)   # story 4725: + the person's «show once» notice (nothing here)
     session.execute = AsyncMock(return_value=result)
     return session
 
