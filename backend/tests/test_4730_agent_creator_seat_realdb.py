@@ -229,8 +229,10 @@ async def _run_state(c, w: World, who: Person, creator: Person | None):
     return out
 
 
-def _passed(out: dict) -> dict:
-    return {k: v for k, v in out.items() if v == 403}
+def _not_let_through(out: dict) -> dict:
+    """routes whose answer is not «the guard let the call through and the handler did its job» (2xx; 409 is the deployment status conflict):
+    a 403 from the guard — and also a 404 / 422 / 5xx, which would hide an unguarded or mis-built call behind a «not 403»"""
+    return {k: v for k, v in out.items() if not (v < 300 or v == 409)}
 
 
 @pytest.mark.anyio
@@ -244,10 +246,10 @@ async def test_a_current_holders_of_a_seat_pass_on_every_route():
             # creator and still an org admin / still a project admin → the creator branch holds
             for who in (org_admin, proj_admin):
                 out = await _run_state(c, w, who, creator=who)
-                assert _passed(out) == {}, f"{who.label}: guard said 403 for a person who still holds the seat: {_passed(out)}"
+                assert _not_let_through(out) == {}, f"{who.label}: a person who still holds the seat was not let through: {_not_let_through(out)}"
             # control: an org admin who did not create the agent (the admin branch, untouched by the fix)
             out = await _run_state(c, w, org_admin, creator=None)
-            assert _passed(out) == {}, f"non-creator org admin: {_passed(out)}"
+            assert _not_let_through(out) == {}, f"non-creator org admin: {_not_let_through(out)}"
         finally:
             await w.cleanup()
 
@@ -268,5 +270,10 @@ async def test_b_a_creator_who_lost_the_seat_gets_403_on_every_route():
                 out = await _run_state(c, w, who, creator=who)
                 not_403 = {k: v for k, v in out.items() if v != 403}
                 assert not_403 == {}, f"{who.label}: routes that did NOT answer 403 for a creator who lost the seat: {not_403}"
+            # control: an ordinary org member who never created the agent has no way in either (the guard denies, it is not blind)
+            plain = await w.add_person(c, "plain", org_role="member", project_role="member")  # in the project, but no admin seat
+            out = await _run_state(c, w, plain, creator=None)
+            not_403 = {k: v for k, v in out.items() if v != 403}
+            assert not_403 == {}, f"plain member, not the creator: routes that did NOT answer 403: {not_403}"
         finally:
             await w.cleanup()
