@@ -38,6 +38,11 @@ async def _seed(s) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
             f"VALUES (gen_random_uuid(),'{org}','{proj if i % 2 else other}','S{i}','{statuses[i % 5]}','medium')"
         ))
     await s.commit()
+    # story #4731 — the planner's choice between the old plain index and the 0415 one depends on the table statistics. This test used to lean on whatever
+    # rows (and whatever stale statistics) the tests that ran before it left in the shared `stories`; split into CI shards the table can be freshly
+    # filled and not yet analysed (the plan then estimated 1 row and took `idx_stories_project_id`). The statistics are made current here.
+    await s.execute(text("ANALYZE stories"))
+    await s.commit()
     return org, proj, other
 
 
