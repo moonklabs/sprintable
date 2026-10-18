@@ -1706,7 +1706,6 @@
     "inviteCheckFailed": "We couldn't check your invitations — your organization is made once they're checked",
     "accountCheckFailed": "We couldn't check your account — your organization is made once it's checked",
     "inviteCheckAgain": "Check again",
-    "invitedOwnOrg": "Make my own organization instead",
     "projectSubtitleNoOrg": "Create your first project.",
     "first": {
       "macTitle": "Your agents run on your Mac",
@@ -7209,7 +7208,16 @@
         "row": "{org} invited you as {role} · until {date}",
         "roleAdmin": "an admin",
         "roleMember": "a member",
-        "action": "Open the link in your invite email to start in that organization."
+        "join": "Join",
+        "joining": "Joining…",
+        "joinAria": "Join · {org}",
+        "createOwn": "Create my own organization",
+        "fail": {
+          "already": "You've already accepted this invitation — reload to see that organization.",
+          "expired": "This invitation has expired — ask the person who invited you to send it again.",
+          "notMine": "This invitation wasn't sent to this account — reload the list.",
+          "unknown": "Couldn't join — try again"
+        }
       },
       "rateLimited": "You've tried too often in a short time. Press Start again in {time}.",
       "rateLimitedSeconds": "{n, plural, one {# second} other {# seconds}}",

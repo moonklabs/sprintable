@@ -19,7 +19,7 @@ import { agentRoomOf, roomShort, setupFragment, isFolderRefused, moveConfirmBody
 import { agentLimitOf, type AgentLimit } from '@/lib/agent-limit';
 import { pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle'; // 4713: «{file}가 · {runtime}로» — the particle follows the word (the scoped honorific guard forbids a fixed one after a placeholder)
 import { defaultSoloRuntime, folderTracePick, shownProjectName, soloConfirmBody, soloNewOrgConfirmBody, soloOutcome, soloStartBlock, usableRuntimes } from '@/lib/desktop-setup-quick';
-import { ATTACHABLE_READ_LIMIT_MS, DesktopSetup, Failure, INSTALL, InvitedCard, MovedAgentNote, PROGRESS_FRAGMENT, RoomShortBox, RUNTIME_LABEL, SetupDoneReload, TooOldCard, fetchMyInvites, joinNewOrg, limitCounts, moveFailureForCode, useAppSetupLinks, type MyInvite } from './desktop-setup';
+import { ATTACHABLE_READ_LIMIT_MS, DesktopSetup, Failure, INSTALL, InvitedInApp, MovedAgentNote, PROGRESS_FRAGMENT, RoomShortBox, RUNTIME_LABEL, SetupDoneReload, TooOldCard, fetchMyInvites, joinNewOrg, limitCounts, moveFailureForCode, useAppSetupLinks, type MyInvite } from './desktop-setup';
 import { SetupProgressView } from './desktop-setup-progress';
 
 /**
@@ -250,12 +250,12 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
     }
   }
 
-  if (orgMode.kind === 'invited') return <InvitedCard invites={orgMode.invites} />;
   if (orgMode.kind === 'invite-failed') return <InviteCheckFailedCard onRetry={() => { setOrgMode({ kind: 'checking' }); void readInvites(); }} />;
   if (newOrg && verifyGate.kind === 'closed') return <EmailVerifyGateCard gate={verifyGate} />;
   if (orgMode.kind === 'checking' || (newOrg && verifyGate.kind === 'reading')) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   // the setup values are only in memory (the page took them off the address): a reload that lands on THIS page puts them back first
   const reloadKeepingSetup = () => { window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment(query)); window.location.reload(); };
+  if (orgMode.kind === 'invited') return <InvitedInApp invites={orgMode.invites} onReload={reloadKeepingSetup} />;
   if (orgMode.kind === 'has-org' && !isAdmin) return <Failure failure="not-admin" onReloadPage={reloadKeepingSetup} />;
   if (view.kind === 'done-reload') return <SetupDoneReload setupId={madeSetupId} />;
   if (view.kind === 'started') return <SetupProgressView setupId={madeSetupId} recipeName="" phoneControlFailed={phoneControlFailed} onPhoneRetry={retryPhoneControl} />;

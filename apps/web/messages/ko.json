@@ -1706,7 +1706,6 @@
     "inviteCheckFailed": "초대를 확인하지 못했어요 — 확인한 뒤에 조직을 만들어요",
     "accountCheckFailed": "계정을 확인하지 못했어요 — 확인한 뒤에 조직을 만들어요",
     "inviteCheckAgain": "다시 확인",
-    "invitedOwnOrg": "초대와 따로 내 조직 만들기",
     "projectSubtitleNoOrg": "첫 프로젝트를 만들어 보세요.",
     "first": {
       "macTitle": "에이전트는 내 Mac에서 돌아가요",
@@ -7209,7 +7208,16 @@
         "row": "{org}에서 {role}{josa} 초대했어요 · {date}까지",
         "roleAdmin": "관리자",
         "roleMember": "멤버",
-        "action": "초대 메일의 링크로 들어가면 그 조직에서 바로 시작할 수 있어요."
+        "join": "들어가기",
+        "joining": "들어가는 중이에요…",
+        "joinAria": "들어가기 · {org}",
+        "createOwn": "내 조직을 새로 만들기",
+        "fail": {
+          "already": "이 초대는 이미 수락됐어요 — 다시 불러오면 그 조직이 보여요.",
+          "expired": "이 초대는 기한이 지났어요 — 초대한 사람에게 다시 보내 달라고 해 주세요.",
+          "notMine": "이 계정으로 받은 초대가 아니에요 — 목록을 다시 불러와 주세요.",
+          "unknown": "들어가지 못했어요 — 다시 눌러 주세요"
+        }
       },
       "rateLimited": "잠깐 사이에 너무 자주 시도했어요. {time} 뒤에 다시 «시작»을 눌러 주세요.",
       "rateLimitedSeconds": "{n}초",

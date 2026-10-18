@@ -372,12 +372,7 @@ export function OnboardingForm({
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4">
         <div className="w-full max-w-md space-y-3" data-testid="onboarding-invited">
-          <InvitedCard invites={invites} />
-          <p className="break-keep text-center text-xs text-muted-foreground">
-            <Button variant="link" size="sm" className="h-auto whitespace-normal px-0 py-0 text-xs" onClick={() => void arrive(true)} data-testid="onboarding-invited-own-org">
-              {t('invitedOwnOrg')}
-            </Button>
-          </p>
+          <InvitedCard invites={invites} onReload={() => window.location.reload()} onCreateOwn={() => void arrive(true)} />
         </div>
       </div>
     );

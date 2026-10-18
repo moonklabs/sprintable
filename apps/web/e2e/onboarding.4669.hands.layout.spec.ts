@@ -103,8 +103,9 @@ async function openAfterGoogle(page: Page, requests: { method: string; path: str
 async function countHands(page: Page): Promise<number> {
   const heading = page.locator('h1');
   // the page's own offered action: the first visible button or link in the card (a retry, «초대와 따로 내 조직 만들기», a continue) — one press each
+  // (the invited card's own press is its «내 조직을 새로 만들기» link — its [들어가기] takes the invite, which is another road: 4711 AC4)
   const primaries = page.locator(
-    ['onboarding-card', 'onboarding-invited'].map((id) => `[data-testid="${id}"] button:visible, [data-testid="${id}"] a:visible`).join(', '),
+    ['[data-testid="onboarding-card"] button:visible', '[data-testid="onboarding-card"] a:visible', '[data-testid="setup-invited-own-org"]:visible'].join(', '),
   );
   let hands = 0;
   for (;;) {
