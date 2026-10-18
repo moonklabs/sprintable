@@ -11,6 +11,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { OnboardingForm, onboardingProgress } from './onboarding-form';
 import koMessages from '../../../messages/ko.json';
+import { PhoneBridgeContext } from '@/components/providers/phone-bridge-context';
 
 // the phone app has a store link to show (as the card's own test) — so «is the card on this screen» can be told apart from «nothing to get»
 vi.mock('@/lib/phone-app-store', async (orig) => ({
@@ -270,5 +271,28 @@ describe('onboardingProgress — only the web way\'s three steps', () => {
     expect(onboardingProgress('project')).toEqual({ fraction: 1 / 3, label: { current: 1, total: 3 } });
     expect(onboardingProgress('agent')).toEqual({ fraction: 2 / 3, label: { current: 2, total: 3 } });
     expect(onboardingProgress('connect')).toEqual({ fraction: 1, label: { current: 3, total: 3 } });
+  });
+});
+
+describe('[4714 AC2] the form hands the server\'s download judgement to the phone app\'s first screen', () => {
+  async function mountPhone(macDownloadEnabled: boolean) {
+    await act(async () => {
+      root.render(wrap(
+        <PhoneBridgeContext.Provider value={{ inPhoneApp: true, phoneCall: (async () => ({ id: 'k', ok: false, code: 'no_screen_lock' })) as never }}>
+          <OnboardingForm todayHref="/today" chatsHref="/chats" macDownloadEnabled={macDownloadEnabled} />
+        </PhoneBridgeContext.Provider>,
+      ));
+    });
+    await flush();
+  }
+  it('macDownloadEnabled reaches the no-Mac screen\'s mail button; absent/false draws none', async () => {
+    setUserAgent(PHONE_UA);
+    await mountPhone(false);
+    expect(byTestId('onboarding-phone-no-mac')).not.toBeNull();
+    expect(byTestId('onboarding-phone-mail')).toBeNull();
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await mountPhone(true);
+    expect(byTestId('onboarding-phone-mail-button')).not.toBeNull();
   });
 });

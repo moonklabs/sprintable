@@ -880,6 +880,11 @@
 "kind": "object"
 },
 {
+"method": "POST",
+"path": "/api/v2/desktop/mac-link-mail",
+"kind": "unknown"
+},
+{
 "method": "GET",
 "path": "/api/v2/desktop/recipes",
 "kind": "object"

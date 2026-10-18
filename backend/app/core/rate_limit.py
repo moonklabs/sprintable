@@ -104,3 +104,43 @@ def hit_person_limits(scope: str, user_id: str, *specs: str) -> int | None:
 def reset_person_limits() -> None:
     """Tests only: forget every count."""
     _person_limit_storage.reset()
+
+
+# story 4714 (AC2 · mail me the Mac link) — a person-keyed limit that FAILS CLOSED, for the one route that sends mail to the
+# outside. Same reason as `resend_verification_limiter` (abuse of a mail sender must not slip through when counting breaks):
+# Redis when the deployment has one (a count shared by every instance), memory otherwise (single-instance dev), and a storage
+# problem raises `limits.errors.StorageError` — `main.py` answers it 503. The key is the signed-in person (counted in the
+# handler with the id `get_current_user` verified — never a header read before authentication, the 4828 trap), not an IP: a
+# phone network's address is shared by many people.
+from limits.storage import storage_from_string as _storage_from_string  # noqa: E402
+
+_strict_person_limit_storage = _storage_from_string(settings.redis_url or "memory://", wrap_exceptions=True)
+_strict_person_limiter = _MovingWindow(_strict_person_limit_storage)
+
+
+def hit_person_limits_strict(scope: str, user_id: str, *specs: str) -> int | None:
+    """Counts one request of `user_id` in `scope` against every limit in `specs`, TIGHTEST FIRST ("1/minute", "3/hour"). None =
+    allowed; otherwise the seconds until a retry can pass (for `Retry-After`).
+
+    Each window is `hit()` — one atomic step that counts and answers (Redis: one script; memory: one lock) — never a `test()` then
+    a `hit()`: two requests that arrive together would both pass the test before either was counted (codex 01a15033). A refusal
+    stops at the first window that is full, so the looser windows after it are not used up by a request that never got through;
+    the looser window counts only requests the tighter ones let by. A storage problem is NOT swallowed: it raises `StorageError`,
+    so the caller refuses instead of sending."""
+    import time
+
+    hit_items = []
+    for spec in specs:
+        item = _parse_limit(spec)
+        hit_items.append(item)
+        if not _strict_person_limiter.hit(item, scope, user_id):
+            # the answer is the LAST of the resets of every window this request touched: the tighter windows it already counted in stay
+            # recorded, so a retry earlier than the longest of them would only be refused again (codex 01a1506a)
+            reset_at = max(_strict_person_limiter.get_window_stats(i, scope, user_id)[0] for i in hit_items)
+            return max(1, int(reset_at - time.time()) + 1)
+    return None
+
+
+def reset_strict_person_limits() -> None:
+    """Tests only: forget every count."""
+    _strict_person_limit_storage.reset()

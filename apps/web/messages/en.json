@@ -1728,7 +1728,14 @@
       "noMac": {
         "title": "Agents run on your Mac",
         "body": "Get the app on your Mac, sign in with the same account and pair this phone — then you can answer, stop and instruct agents from here.",
-        "pair": "I already have the app on my Mac — pair"
+        "pair": "I already have the app on my Mac — pair",
+        "mail": "Email me a link to open on my Mac",
+        "mailSending": "Sending…",
+        "mailSent": "Sent to {email} — open the email on your Mac and click the link.",
+        "mailAgain": "Send again",
+        "mailLimited": "You've asked too often in a short time — check whether the email already arrived, then try again in a little while.",
+        "mailNeedVerify": "Email verification is needed — verify your email first to get the link.",
+        "mailFailed": "Couldn't send the email — tap again"
       },
       "noAgent": {
         "line": "{device} has no agents yet — pick a folder at your Mac and start the first agent.",

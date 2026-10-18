@@ -70,13 +70,15 @@ interface OnboardingFormProps {
   // (기본값 없음) 호출부가 빠뜨리면 타입 에러로 즉시 걸린다 — 가드 예외(리터럴 기본값)도
   // 이걸로 사라진다.
   chatsHref: string;
+  /** story 4714 AC2: resolved by the server page (`isDesktopDownloadEnabled`) — whether the phone app's first screen offers «메일로 받기» */
+  macDownloadEnabled?: boolean;
 }
 
 /** What arrival is doing: working on it · stopped because the invites could not be read (nothing made) · stopped on another failure */
 type Arrival = 'working' | 'account-check-failed' | 'invite-check-failed' | 'failed';
 
 export function OnboardingForm({
-  initialStep, initialOrgId, todayV3Enabled = false, todayHref, chatsHref,
+  initialStep, initialOrgId, todayV3Enabled = false, todayHref, chatsHref, macDownloadEnabled = false,
 }: OnboardingFormProps) {
   const t = useTranslations('onboarding');
   const tc = useTranslations('common');
@@ -468,7 +470,7 @@ export function OnboardingForm({
         )}
 
         {step === 'first' && (
-          <FirstScreen orgId={orgId} chatsHref={chatsHref} orgName={orgName} onConnectElsewhere={() => setStep('project')} onFinish={handleFinish} />
+          <FirstScreen orgId={orgId} chatsHref={chatsHref} macDownloadEnabled={macDownloadEnabled} orgName={orgName} onConnectElsewhere={() => setStep('project')} onFinish={handleFinish} />
         )}
 
         {step === 'project' && (

@@ -22,6 +22,8 @@ interface FirstScreenProps {
   orgId?: string | null;
   /** story 4714: where «대화» is (the server resolved it from the nav flags — never a literal here) */
   chatsHref?: string;
+  /** story 4714 AC2: the server's judgement that the Mac app is offered here — the phone screen's mail button is drawn only then */
+  macDownloadEnabled?: boolean;
   /** the organization's name when this page made it (or read it) — null: not known here, the line is not drawn (never made up) */
   orgName: string | null;
   /** the web way: project → agent → connect */
@@ -30,7 +32,7 @@ interface FirstScreenProps {
   onFinish: () => void;
 }
 
-export function FirstScreen({ orgId = null, chatsHref, orgName, onConnectElsewhere, onFinish }: FirstScreenProps) {
+export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = false, orgName, onConnectElsewhere, onFinish }: FirstScreenProps) {
   const t = useTranslations('onboarding.first');
   const to = useTranslations('onboarding');
   // the device is read after mount (null on the server and before the first read — no hydration mismatch), as the card does
@@ -43,7 +45,7 @@ export function FirstScreen({ orgId = null, chatsHref, orgName, onConnectElsewhe
   if (inPhoneApp) {
     return (
       <div className="space-y-4" data-testid="onboarding-first-phone-app">
-        <PhoneFirstScreen orgId={orgId} chatsHref={chatsHref} />
+        <PhoneFirstScreen orgId={orgId} chatsHref={chatsHref} macDownloadEnabled={macDownloadEnabled} />
         <p className="break-keep border-t border-border pt-4 text-xs text-muted-foreground" data-testid="onboarding-first-later">
           {to('download.laterNote')}{' '}
           <Button variant="link" size="sm" className="h-auto px-0 py-0 text-xs" onClick={onFinish} data-testid="onboarding-first-finish">
