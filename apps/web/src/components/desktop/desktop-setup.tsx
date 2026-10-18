@@ -690,7 +690,6 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     }
   }
 
-  if (orgMode.kind === 'invited') return <InvitedCard invites={orgMode.invites} />;
   if (orgMode.kind === 'invite-failed') return <InviteCheckFailedCard onRetry={() => { setOrgMode({ kind: 'checking' }); void readInvites(); }} />;
   if (newOrg && verifyGate.kind === 'closed') return <EmailVerifyGateCard gate={verifyGate} />;
   if (newOrg && verifyGate.kind === 'reading') return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
@@ -702,6 +701,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment({ code, runtimes: found, setupId, blocked, old, ...(canMove ? { canMove: true as const } : {}), ...(preselect ? { agent: preselect } : {}) }));
     window.location.reload();
   };
+  if (orgMode.kind === 'invited') return <InvitedInApp invites={orgMode.invites} onReload={reloadKeepingSetup} />;
   if (orgMode.kind === 'has-org' && !isAdmin && view.kind !== 'loading') return <Failure failure="not-admin" onReloadPage={reloadKeepingSetup} />;
   if (view.kind === 'loading') return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   if (view.kind === 'failed') {
@@ -1385,31 +1385,139 @@ export function inviteUntilDate(value: string, locale: string, timeZone: string,
   return formatLocaleDate(date, locale, { month: ko ? 'long' : 'short', day: 'numeric', ...(year(date) !== year(now) ? { year: 'numeric' } : {}) }, timeZone);
 }
 
+type JoinFail = 'already' | 'expired' | 'notMine' | 'unknown';
+const JOIN_FAIL_KEY: Record<string, string> = { already: 'invited.fail.already', expired: 'invited.fail.expired', notMine: 'invited.fail.notMine', unknown: 'invited.fail.unknown' };
+
 /**
- * (나) invited somewhere (Yuna f6cfda19 v2): the page makes nothing and has no button — the invite is taken through the mail link
- * (no token here). One line per invite: who invited · as what · until when.
+ * (나) invited somewhere (Yuna f6cfda19 v2 · 4711 AC4 덧 sheet 2026-10-17): one line per invite — who invited · as what · until when — each with its own [들어가기]
+ * that takes THAT invite from inside the app (`POST /api/invites/mine/{invite_id}/accept`: the list carries no token; the server decides and answers), then the
+ * person is in that organization (`/api/switch-org`) and the page is read again; and one small link at the bottom, «내 조직을 새로 만들기».
+ * One invite → a filled button; more → an outline button per line (one screen never has several filled ones). While a press is in flight every line's button is
+ * off (no second accept). A failure is its own line under that row: already accepted · expired (that row's button goes) · not this account's · unknown.
  */
-export function InvitedCard({ invites }: { invites: MyInvite[] }) {
+export function InvitedCard({ invites, onReload, onCreateOwn, ownBusy = false }: { invites: MyInvite[]; onReload: () => void; onCreateOwn: () => void; /** the caller's own-organization flow is on its way: the link waits */ ownBusy?: boolean }) {
   const t = useTranslations('desktop.setup');
   const locale = useLocale();
   const viewerTz = useViewerTimeZone(); // story #4443 PR2 — unknown yet: the row's place is held, no UTC day shown
+  const [busy, setBusy] = useState<string | null>(null);
+  const acceptedOrg = useRef<Record<string, string>>({}); // an invite that was taken but whose switch did not go through: the retry only switches (the invite is not pending any more)
+  const inFlight = useRef(false); // two presses in the same tick both see the old `busy`: the ref is what keeps the second one out
+  const [fails, setFails] = useState<Record<string, JoinFail>>({});
   const inviteRow = (i: MyInvite) => {
     const role = i.role === 'admin' ? t('invited.roleAdmin') : t('invited.roleMember');
     const row = t('invited.row', { org: i.org_name, role, josa: pickEuroJosa(role), date: inviteUntilDate(i.expires_at, locale, viewerTz ?? 'UTC') });
     return viewerTz ? row : <InvisibleSample>{row}</InvisibleSample>;
   };
+  async function join(invite: MyInvite) {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setBusy(invite.invite_id);
+    setFails((f) => { const { [invite.invite_id]: _gone, ...rest } = f; return rest; });
+    const fail = (why: JoinFail) => { setFails((f) => ({ ...f, [invite.invite_id]: why })); inFlight.current = false; setBusy(null); };
+    try {
+      let orgId: unknown = acceptedOrg.current[invite.invite_id];
+      if (!orgId) {
+        const res = await fetchWithAuth(`/api/invites/mine/${encodeURIComponent(invite.invite_id)}/accept`, { method: 'POST' });
+        if (!res.ok) { fail(res.status === 409 ? 'already' : res.status === 410 ? 'expired' : res.status === 403 || res.status === 404 ? 'notMine' : 'unknown'); return; }
+        const body = (await res.json().catch(() => null)) as { data?: { org_id?: unknown }; org_id?: unknown } | null;
+        orgId = body?.data?.org_id ?? body?.org_id;
+        if (typeof orgId !== 'string' || !orgId) { fail('unknown'); return; }
+        acceptedOrg.current[invite.invite_id] = orgId;
+      }
+      // the member now: the session was made before the membership, so the switch (which gives the session that organization) comes before the page is read again
+      const sw = await fetchWithAuth('/api/switch-org', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ org_id: orgId as string }) });
+      const swJson = (await sw.json().catch(() => null)) as { data?: { ok?: boolean } } | null;
+      if (!(sw.ok && swJson?.data?.ok)) { fail('unknown'); return; }
+      window.sessionStorage.removeItem(TAB_PROJECT_STORAGE_KEY);
+      onReload();
+    } catch {
+      fail('unknown');
+    }
+  }
+  const filled = invites.length === 1;
+  const failLine = (id: string) => {
+    const why = fails[id];
+    if (!why) return null;
+    const alert = why === 'notMine' || why === 'unknown';
+    return (
+      <div className="mt-1 flex flex-col gap-1 text-xs" role={alert ? 'alert' : 'status'} data-testid={`setup-invited-fail-${why}`}>
+        <p className={alert ? 'text-destructive' : 'text-muted-foreground'}>{t(JOIN_FAIL_KEY[why]!)}</p>
+        {why === 'already' || why === 'notMine' ? <div><Button variant="outline" size="sm" onClick={onReload}>{t('failure.has-org.action')}</Button></div> : null}
+      </div>
+    );
+  };
   return (
     <Card className="break-keep flex flex-col gap-3 p-6" data-testid="setup-invited">
       <h1 className="text-lg font-semibold">{t('invited.title')}</h1>
-      <ul className="flex flex-col gap-1">
+      <ul className="flex flex-col gap-3">
         {invites.map((i) => (
-          <li key={i.invite_id} className="text-sm">
-            {inviteRow(i)}
+          <li key={i.invite_id} className="flex flex-col text-sm" data-testid="setup-invited-row">
+            <span>{inviteRow(i)}</span>
+            {fails[i.invite_id] !== 'expired' ? (
+              <div className="mt-2">
+                <Button
+                  variant={filled ? 'default' : 'outline'} size="sm" className="whitespace-nowrap" disabled={busy !== null}
+                  aria-label={t('invited.joinAria', { org: i.org_name })} onClick={() => void join(i)} data-testid="setup-invited-join"
+                >
+                  {busy === i.invite_id ? t('invited.joining') : t('invited.join')}
+                </Button>
+              </div>
+            ) : null}
+            {failLine(i.invite_id)}
           </li>
         ))}
       </ul>
-      <p className="text-sm text-muted-foreground">{t('invited.action')}</p>
+      <div>
+        <Button variant="link" size="sm" className="h-auto whitespace-normal px-0 py-0 text-xs underline" disabled={busy !== null || ownBusy} onClick={onCreateOwn} data-testid="setup-invited-own-org">
+          {t('invited.createOwn')}
+        </Button>
+      </div>
     </Card>
+  );
+}
+
+/**
+ * The invited card as the app's setup page shows it: «내 조직을 새로 만들기» opens the same «새 조직 만들기» window the member card uses (the generic
+ * organization route — it has no pending-invite check; the confirm-new-org of the setup start has, and would send the person back here), then the person is in
+ * their new organization and the page is read again.
+ */
+export function InvitedInApp({ invites, onReload }: { invites: MyInvite[]; onReload: () => void }) {
+  const { userName } = useDashboardContext();
+  const tNewOrg = useTranslations('desktopOnboarding');
+  const t = useTranslations('desktop.setup');
+  const [open, setOpen] = useState(false);
+  const [madeOrgId, setMadeOrgId] = useState<string | null>(null); // made, but the switch into it did not go through: the link tries the switch again, it does not make another
+  const [entering, setEntering] = useState(false);
+  const [enterFailed, setEnterFailed] = useState(false);
+  async function enterOwnOrg(orgId: string) {
+    setEntering(true);
+    setEnterFailed(false);
+    try {
+      const res = await fetchWithAuth('/api/switch-org', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ org_id: orgId }) });
+      const json = (await res.json().catch(() => null)) as { data?: { ok?: boolean } } | null;
+      if (!(res.ok && json?.data?.ok)) { setEnterFailed(true); setEntering(false); return; }
+      window.sessionStorage.removeItem(TAB_PROJECT_STORAGE_KEY);
+      onReload();
+    } catch {
+      setEnterFailed(true);
+      setEntering(false);
+    }
+  }
+  return (
+    <>
+      <InvitedCard
+        invites={invites} onReload={onReload} ownBusy={entering}
+        onCreateOwn={() => { if (madeOrgId) void enterOwnOrg(madeOrgId); else setOpen(true); }}
+      />
+      {enterFailed ? <p className="mt-2 break-keep text-xs text-destructive" role="alert" data-testid="setup-invited-own-org-failed">{t('invited.fail.unknown')}</p> : null}
+      <CreateOrganizationDialog
+        open={open}
+        onOpenChange={setOpen}
+        initialName={defaultOrgName(userName, (n) => tNewOrg('defaultOrgNameWithName', { name: n }), tNewOrg('defaultOrgName'))}
+        slugOptional
+        onCreated={(id) => { setMadeOrgId(id); void enterOwnOrg(id); }}
+      />
+    </>
   );
 }
 

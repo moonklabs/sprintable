@@ -2132,7 +2132,7 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
     expect(container.querySelector('[data-testid=setup-new-org]')!.textContent).toContain('새 조직 «내 조직»도 함께 만들어요');
   });
 
-  it('invited → the invite card instead of the form: who · as what · until when; no recipe read, no «시작», no button', async () => {
+  it('invited → the invite card instead of the form: who · as what · until when; no recipe read, no «시작»; each line has [들어가기]', async () => {
     invitesNow = () => new Response(JSON.stringify({ invites: [INVITE, { ...INVITE, invite_id: 'i-2', org_name: '다른 팀', role: 'member' }] }), { status: 200 });
     stubNoOrg();
     await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} />);
@@ -2140,8 +2140,9 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
     expect(card.textContent).toContain('초대받은 조직이 있어요');
     expect(card.textContent).toContain('뭉클랩에서 관리자로 초대했어요 · 10월 6일까지'); // this year: no year (Yuna 02:46Z)
     expect(card.textContent).toContain('다른 팀에서 멤버로 초대했어요');
-    expect(card.textContent).toContain('초대 메일의 링크로 들어가면 그 조직에서 바로 시작할 수 있어요.');
-    expect(container.querySelectorAll('button')).toHaveLength(0);
+    expect(card.textContent).not.toContain('메일의 링크로'); // 4711 AC4 덧: the mail-link line is gone — the card has its own buttons now
+    expect(container.querySelectorAll('[data-testid=setup-invited-join]')).toHaveLength(2); // a [들어가기] per line
+    expect(container.querySelector('[data-testid=setup-invited-own-org]')!.textContent).toBe('내 조직을 새로 만들기');
     expect(urls().some((u) => u.includes('/api/desktop/recipes'))).toBe(false);
   });
 

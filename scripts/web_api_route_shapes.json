@@ -1870,6 +1870,11 @@
 "kind": "object"
 },
 {
+"method": "POST",
+"path": "/api/v2/invites/mine/{}/accept",
+"kind": "object"
+},
+{
 "method": "GET",
 "path": "/api/v2/invites/{}",
 "kind": "object"

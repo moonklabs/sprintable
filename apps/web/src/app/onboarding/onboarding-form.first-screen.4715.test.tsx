@@ -140,7 +140,7 @@ describe('[SID:4715] AC6 — pending invites first: no organization is made whil
     expect(orgPosts()).toHaveLength(0);
     expect(byTestId('setup-invited')?.textContent).toContain(koMessages.desktop.setup.invited.title);
     expect(byTestId('setup-invited')?.textContent).toContain('문클랩스');
-    await click(byTestId('onboarding-invited-own-org'));
+    await click(byTestId('setup-invited-own-org'));
     expect(orgPosts()).toHaveLength(1);
     expect(h1()).toBe(first.macTitle);
   });
@@ -193,7 +193,7 @@ describe('[SID:4715] self-QA — the choice «초대와 따로 내 조직 만들
     await mount();
     expect(byTestId('onboarding-invited')).not.toBeNull();
     opts.meFails = true;
-    await click(byTestId('onboarding-invited-own-org'));
+    await click(byTestId('setup-invited-own-org'));
     // reverted (the step stays «invited») → the card is still all there is, no line and no button
     expect(byTestId('onboarding-account-check-failed')?.textContent).toBe(koMessages.onboarding.accountCheckFailed);
     expect(byTestId('onboarding-invited')).toBeNull();

@@ -191,7 +191,7 @@ for (const width of [1440, 390]) {
       page.on('request', (r) => { if (r.method() === 'POST' && r.url().endsWith('/api/organizations')) made.push(r.url()); });
       await open(page, { width, theme, api: { 'GET /api/invites/mine': { invites: [INVITE] } } });
       await expect(page.getByTestId('setup-invited')).toContainText('초대받은 조직이 있어요');
-      await expect(page.getByTestId('onboarding-invited-own-org')).toHaveText('초대와 따로 내 조직 만들기');
+      await expect(page.getByTestId('setup-invited-own-org')).toHaveText('내 조직을 새로 만들기');
       expect(made).toHaveLength(0);
       await fitsViewport(page, width);
       await shot(page, page.getByTestId('onboarding-invited'), `4715-3-invited-${tag}`);
