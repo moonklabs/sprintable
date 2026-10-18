@@ -245,6 +245,33 @@ def _skills_block(skills: list[dict], locale: str = "ko") -> str:
     return "\n".join(lines)
 
 
+def kit_locale_of(text: str | None) -> str:
+    """The locale a recruited persona's text was composed in (recruit does not store it): the first line is `_SECTION_A_HEADER[locale]` of the role."""
+    first = (text or "").lstrip().split("\n", 1)[0]
+    return "en" if first.rstrip().endswith("— Sprintable Role Context") else "ko"
+
+
+def strip_integration_prompt(text: str | None) -> str:
+    """The text without the recruit's «reflect this into your memory» instruction (and what follows it — it is the kit's last section). That sentence is a ONE-TIME
+    instruction to an agent that was handed a file; carried into every session start it would send the agent to write its memory / instruction files each time."""
+    out = text or ""
+    for loc in _INTEGRATION_PROMPT_TEXT.values():
+        i = out.find(loc.split("\n", 1)[0])
+        if i != -1:
+            out = out[:i]
+    return out.rstrip()
+
+
+def compose_session_kit(role_template: Any, locale: str = "ko") -> str:
+    """story 4680 AC2 (PO 2026-10-18) — the SESSION edition of the recruit kit: only what keeps being true each time the agent starts. The role (role_context: what it
+    does in this organization) + the operating rules + the workflow pointer. NOT the tool table (the MCP connection already announces the tools), NOT the runtime notes,
+    NOT the skills list, and NOT the integration prompt (a one-time instruction at hire: «reflect this into your memory» — every start would send the agent to write its
+    memory / instruction files, a back door around «the app never writes the user's CLAUDE.md / AGENTS.md»). Pure, like `compose_kit` (which it reuses for the pieces)."""
+    kit = compose_kit(role_template, "claude-code", locale)
+    parts = [kit["role_context"], _AGILE_OPERATING_RULES[locale], kit["workflow_pointer"]]
+    return "\n\n".join(p for p in parts if p)
+
+
 def compose_kit(
     role_template: Any,
     runtime: str,

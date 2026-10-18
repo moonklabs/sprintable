@@ -10,6 +10,7 @@ Contract: doc «E-DESKTOP-2 C-5 — 에이전트 실행 프로필 계약» v1.1 
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import uuid
 from datetime import datetime, timezone
@@ -23,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.ownership import assert_agent_owner_mutable
 from app.models.agent_allowed_host import AgentAllowedHost
 from app.models.agent_run_profile import AgentRunProfile
+from app.models.agent_deployment import AgentPersona
 from app.models.member import Member
 
 # the runtimes a desktop agent can have, and the name the daemon knows each by (desktop_setup.RUNTIME_TYPES, the other way)
@@ -187,6 +189,83 @@ async def read_for_person(
     # story #4580: the «허용 주소» list (web «실행» group · Yuna ④) — who added it stays on the server
     view["allowed_hosts"] = [{"host": h.host, "added_at": _iso(h.added_at)} for h in await allowed_hosts(db, member.id)]
     return view
+
+
+PERSONA_TEXT_MAX = 16_000        # characters of the role text the daemon is handed (the role comes first in a recruited persona, so a cut keeps it)
+PERSONA_TEXT_MAX_BYTES = 32_000  # … and bytes (UTF-8): Korean is three bytes a character, so the character cap alone would let 48 KB through
+PERSONA_STYLE_MAX = 2_000
+PERSONA_ROLE_MAX = 200
+# every control character but \t and \n · the invisible / direction-changing format characters (bidi embeddings and isolates, zero-width, BOM, the line and paragraph
+# separators) — a text the person reads one way and the model another has no business in a session instruction (Kadir's lens, story 4680)
+_CONTROL = re.compile("[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f\\u200b-\\u200f\\u2028\\u2029\\u202a-\\u202e\\u2060-\\u2064\\u2066-\\u2069\\ufeff]")
+
+
+def _cut_bytes(text: str, max_bytes: int) -> str:
+    raw = text.encode("utf-8")
+    return text if len(raw) <= max_bytes else raw[:max_bytes].decode("utf-8", "ignore").rstrip()
+
+
+def _clean_persona_text(value: str | None, limit: int, max_bytes: int = PERSONA_TEXT_MAX_BYTES) -> str:
+    """One filter for every piece that reaches a session instruction (the persona's text, its base persona's, its style, its name · role): CRLF → LF, the characters above
+    out, trimmed, cut to `limit` characters AND `max_bytes` bytes."""
+    text = _CONTROL.sub("", (value or "").replace("\r\n", "\n").replace("\r", "\n")).strip()[:limit]
+    return _cut_bytes(text, max_bytes).strip()
+
+
+def _one_line(value: str | None, limit: int) -> str:
+    """A role / name sits inside the daemon's fixed sentence, on one line: the same filter, line breaks and runs of blanks folded to one space."""
+    return re.sub(r"\s+", " ", _clean_persona_text(value, limit, limit * 4)).strip()
+
+
+async def persona_for_daemon(db: AsyncSession, *, member: Member, project_id: uuid.UUID | None = None) -> dict | None:
+    """story 4680 AC2 — the role the agent was hired for, handed to the daemon so a session starts AS that role (a CLI started in a folder knows only its own files).
+
+    Only THIS agent's own default persona (`agent_personas.is_default` — the recruit's, or the one the org set; never a built-in) in its own organization: the agent
+    key reads its own row and nothing else. `project_id` (the project the start is for) picks that project's persona; without it, or when that project has none,
+    the agent's earliest default persona. `role` is the persona's name (the recruit writes the job template's name there — `members.agent_role` stays empty
+    for a recruited agent), `instructions` the text (base persona's + own), `style` likewise. Every piece goes through the same filter and the total stays inside one cap
+    (characters and bytes). `version` is a digest of what is handed — the daemon logs it (never the text) so «which version was in the session» can be answered.
+    No default persona → None (the field is left out: an agent that was never hired as a role starts as it did)."""
+    if getattr(member, "org_id", None) is None:
+        return None
+    base_q = select(AgentPersona).where(
+        AgentPersona.org_id == member.org_id, AgentPersona.agent_id == member.id,
+        AgentPersona.deleted_at.is_(None), AgentPersona.is_builtin.is_(False), AgentPersona.is_default.is_(True),
+    )
+    row = None
+    if project_id is not None:
+        row = (await db.execute(base_q.where(AgentPersona.project_id == project_id).order_by(AgentPersona.created_at.asc(), AgentPersona.id).limit(1))).scalar_one_or_none()
+    if row is None:
+        row = (await db.execute(base_q.order_by(AgentPersona.created_at.asc(), AgentPersona.id).limit(1))).scalar_one_or_none()
+    if row is None:
+        return None
+    from app.models.role_template import RoleTemplate
+    from app.repositories.agent_persona import AgentPersonaRepository
+    from app.services import agent_recruiter
+
+    base = await AgentPersonaRepository(db)._get_base(row.config or {}, row.org_id)
+    own = (row.system_prompt or "")
+    # a recruited persona carries its job template's id: the session edition is composed from that (role + operating rules + workflow pointer — not the tool table,
+    # not the one-time integration prompt). Without a template (hand-written, or the template is gone) the persona's own text, minus the integration prompt if it has one.
+    own_text: str | None = None
+    template_id = (row.config or {}).get("role_template_id")
+    if template_id:
+        try:
+            template = await db.get(RoleTemplate, uuid.UUID(str(template_id)))
+        except ValueError:
+            template = None
+        if template is not None:
+            own_text = agent_recruiter.compose_session_kit(template, agent_recruiter.kit_locale_of(own))
+    if own_text is None:
+        own_text = agent_recruiter.strip_integration_prompt(own)
+    # the base persona goes through the same filter, and base + own stay inside the one cap
+    instructions = _clean_persona_text("\n\n".join(p for p in (_clean_persona_text(base.system_prompt if base else None, PERSONA_TEXT_MAX), _clean_persona_text(own_text, PERSONA_TEXT_MAX)) if p), PERSONA_TEXT_MAX)
+    style = _clean_persona_text("\n\n".join(p for p in (_clean_persona_text(base.style_prompt if base else None, PERSONA_STYLE_MAX), _clean_persona_text(row.style_prompt, PERSONA_STYLE_MAX)) if p), PERSONA_STYLE_MAX, PERSONA_STYLE_MAX * 4) or None
+    role = _one_line(row.name, PERSONA_ROLE_MAX) or _one_line(getattr(member, "agent_role", None), PERSONA_ROLE_MAX)
+    if not instructions and not role:
+        return None
+    digest = hashlib.sha256("\x00".join([role, instructions, style or ""]).encode("utf-8")).hexdigest()[:16]
+    return {"role": role or None, "instructions": instructions, "style": style, "version": digest}
 
 
 async def read_for_daemon(db: AsyncSession, *, member: Member) -> dict:
