@@ -1604,8 +1604,16 @@ jobs:
     # [SID:4659 · PO 06:57Z] 백엔드 바뀐 PR에서만 돈다(웹만 바뀐 PR은 건너뜀). 건너뛰면 아래 Require 스텝이 skipped를 통과시킨다.
     needs: [detect-changed-scope]
     if: needs.detect-changed-scope.outputs.backend_relevant != 'false' && (github.event.action != 'edited' || github.event.changes.base != null)
-    # the suite's own ceiling as before (story #2285 AC4: body 7~8 min then, 10~15 now)
-    timeout-minutes: 25
+    # story #4731 — the suite ran in ONE runner at 22–23 minutes under a 25-minute ceiling (25m15s on develop a3e7f8ac9 → «exceeded the maximum
+    # execution time» → the required `Backend pytest` red → the dev deploy stopped). It is now split in 4 shards over the SAME collected tests
+    # (`backend/scripts/shard_nondestructive_tests.py`: whole files, greedy LPT by collected-test count, one pure function of the collection, so
+    # every shard computes the same split; shard 0 also checks that the split is disjoint and complete). `backend-test` (the required check) reads this
+    # job's aggregated result — any leg failed / cancelled / skipped makes it red, as before. The ceiling is for one shard (measured: see story 4731).
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
 
     services:
       postgres:
@@ -1647,11 +1655,23 @@ jobs:
         working-directory: backend
         run: uv run alembic upgrade heads
 
-      - name: Run pytest (non-destructive, real-PG auto-discovered via marker)
+      # story #4731 — shard 0 only: the split must be disjoint and cover every collected test (a test dropped by the split would be a silent hole).
+      - name: Verify the shard split is lossless (story #4731 — shard 0)
+        if: matrix.shard == 0
         working-directory: backend
         run: |
           set -o pipefail
-          uv run pytest -q -m "not destructive_schema" --durations=20 2>&1 | tee /tmp/pytest_output.log
+          uv run python scripts/shard_nondestructive_tests.py --verify --shard-count ${{ strategy.job-total }} | tee /tmp/shard_split.log
+          { echo "## Backend pytest shard split (story #4731)"; echo '```'; cat /tmp/shard_split.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run pytest (non-destructive shard ${{ matrix.shard }}/${{ strategy.job-total }}, real-PG auto-discovered via marker)
+        working-directory: backend
+        run: |
+          set -o pipefail
+          uv run python scripts/shard_nondestructive_tests.py --shard ${{ matrix.shard }} --shard-count ${{ strategy.job-total }} --counts-out /tmp/shard_counts.json > /tmp/shard_files.txt
+          echo "shard ${{ matrix.shard }}: $(cat /tmp/shard_counts.json)"
+          mapfile -t files < /tmp/shard_files.txt
+          uv run pytest -q -m "not destructive_schema" --durations=20 "${files[@]}" 2>&1 | tee /tmp/pytest_output.log
 
       # story #2285 AC5: 넘쳤을 때(취소) 무엇이 시간을 먹었는지 최소한이라도 보이게 —
       # --durations=20이 정상 완주 시엔 정확한 breakdown을 준다. ⛔한계를 그대로 적는다: job이
@@ -1663,7 +1683,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## Backend pytest — slowest 20 (여유: 천장 25분, 08-17 실측 본체 7~8분)"
+            echo "## Backend pytest shard ${{ matrix.shard }} — slowest 20 (story #4731: ceiling per shard, see timeout-minutes)"
             echo '```'
             awk '/slowest 20 durations/,0' /tmp/pytest_output.log 2>/dev/null || echo "(durations 출력 없음 — 타임아웃-취소로 이 스텝 자체가 못 돌았을 가능성)"
             echo '```'
