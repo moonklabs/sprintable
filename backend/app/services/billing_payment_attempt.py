@@ -48,7 +48,7 @@ from app.models.offering_version import OfferingVersion
 from app.models.org_subscription import OrgSubscription
 from app.services import org_subscription_checkout as checkout_svc
 from app.services import org_subscription_tier_change as tier_svc
-from app.services.billing_charge import ChargeSendDeadlinePassed, _confirm_with_ledger, charge_org
+from app.services.billing_charge import ChargeSendDeadlinePassed, OrganizationGone, _confirm_with_ledger, charge_org
 from app.services.billing_refund import RefundError, RefundResponseMalformed, refund_org
 from app.services.billing_charge_amount import ChargeAmountError, compute_charge_amount, compute_full_charge_for_new_offering
 from app.services.org_billing_key import issue_billing_key
@@ -426,6 +426,10 @@ async def drive_attempt(
                            attempt_id, exc.status_code, exc.code)
             return
         await _confirm_decline(session, attempt_id, lease_token, exc)
+        return
+    except OrganizationGone:
+        # story #4728 — 조직이 지워졌다: Toss 는 부르지 않았다(청구 0) — 진행 중으로 두지 않고 끝낸다.
+        await _finish(session, attempt_id, lease_token, status="failed", reason="organization gone — not charged")
         return
     except RuntimeError:
         # Toss 도달 실패 · 응답 대기 중 끊김 — 청구가 됐는지 모른다. 대사가 order_id 조회로 가린다.

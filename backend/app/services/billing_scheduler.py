@@ -34,6 +34,7 @@ from app.models.org_subscription import OrgSubscription
 from app.models.project import OrgMember
 from app.models.user import User
 from app.services.billing_charge import (
+    OrganizationGone,
     _confirm_with_ledger,
     _mark_failed_if_not_confirmed,
     charge_org,
@@ -611,6 +612,10 @@ async def trigger_due_charges(session: AsyncSession, *, now: datetime | None = N
                 session, org_id=sub.org_id, order_id=order_id, amount_minor=amount_minor,
                 currency=currency, order_name="Sprintable 정기결제(갱신)",
             )
+        except OrganizationGone:
+            # story #4728 — 조직이 없다(charge_org 가드가 구독 · 주문 · 빌링키를 이미 끝냈다): past_due 로 되돌리지도 메일을 보내지도 않는다.
+            logger.warning("trigger_due_charges: org_id=%s no longer exists — skipped", sub.org_id)
+            continue
         except Exception:
             logger.exception("trigger_due_charges: charge_org failed for org_id=%s order_id=%s", sub.org_id, order_id)
             order = (

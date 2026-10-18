@@ -431,3 +431,75 @@ async def test_g_charge_org_for_a_missing_organization_creates_nothing_and_calls
         assert (await _sql("SELECT count(*) FROM billing_orders WHERE order_id = :o", o=order_id)) == [(0,)]  # no claim row either
     finally:
         await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_h_an_organization_deleted_between_the_first_check_and_the_send_is_not_charged():
+    """the delete is not serialized with a charge in flight (no foreign key): charge_org looks again right before the provider call. Here
+    the organization disappears while the billing key is being decrypted — after the first check, before the send."""
+    from sqlalchemy import create_engine
+
+    import app.services.billing_charge as bc
+
+    _TossRecorder.calls = []
+    async with _client() as c:
+        w = World()
+        try:
+            await w.build(c)
+            await w.seed_billing()
+            order_id = f"t4728h-{uuid.uuid4()}"
+            real_decrypt = bc.decrypt_billing_key
+
+            def decrypt_then_delete_the_organization(token):
+                plain = real_decrypt(token)
+                eng = create_engine(_RAW)
+                with eng.begin() as conn:
+                    conn.execute(text("DELETE FROM organizations WHERE id = :o"), {"o": w.org})
+                eng.dispose()
+                return plain
+
+            eng = create_async_engine(_ASYNC, poolclass=NullPool)
+            try:
+                async with async_sessionmaker(eng, expire_on_commit=False)() as session:
+                    with patch.object(bc, "decrypt_billing_key", decrypt_then_delete_the_organization), pytest.raises(bc.OrganizationGone):
+                        await bc.charge_org(session, org_id=uuid.UUID(w.org), order_id=order_id, amount_minor=1000, currency="krw")
+            finally:
+                await eng.dispose()
+            assert _toss_for(order_id) == []  # the provider was not called
+            assert (await _sql("SELECT status FROM billing_orders WHERE order_id = :o", o=order_id)) == [("downgraded",)]  # the claim row is ended, not pending
+            assert (await w.state())["org_billing_keys"] == [("deleted", True)]
+        finally:
+            await w.cleanup()
+
+
+@pytest.mark.anyio
+async def test_i_a_due_renewal_of_a_deleted_organization_is_skipped_not_marked_past_due_or_mailed():
+    """trigger_due_charges used to turn any charge_org failure into past_due + a dunning mail: for an organization that no longer exists
+    that would undo the 'canceled' the charge_org guard just wrote and mail a deleted organization."""
+    from app.services import billing_scheduler
+
+    _TossRecorder.calls = []
+    async with _client() as c:
+        w = World()
+        try:
+            await w.build(c)
+            await w.seed_billing()
+            offering = (await _sql("SELECT id FROM offering_versions WHERE tier='starter' AND currency='krw' AND effective_to IS NULL"))[0][0]
+            await _sql("UPDATE org_subscriptions SET status='active', offering_version_id=:v WHERE org_id=:o", v=offering, o=w.org)
+            await _sql("UPDATE billing_orders SET status='downgraded' WHERE org_id=:o", o=w.org)  # only the due subscription is left to pick
+            await _sql("DELETE FROM organizations WHERE id = :o", o=w.org)  # the old delete: only the organizations row went
+
+            mailed = AsyncMock()
+            eng = create_async_engine(_ASYNC, poolclass=NullPool)
+            try:
+                async with async_sessionmaker(eng, expire_on_commit=False)() as session:
+                    with patch.object(billing_scheduler, "_notify_dunning_failure", mailed):
+                        await billing_scheduler.trigger_due_charges(session)
+            finally:
+                await eng.dispose()
+
+            assert (await w.state())["org_subscriptions"] == [("canceled",)]  # not turned back into past_due
+            assert not [call for call in mailed.await_args_list if str(call.args[1]) == str(w.org)]  # nobody was mailed
+            assert [k for k in _TossRecorder.calls if k["customer_key"] == f"org-{w.org}"] == []  # and the provider was not called
+        finally:
+            await w.cleanup()

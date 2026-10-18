@@ -49,6 +49,10 @@ class ChargeSendDeadlinePassed(RuntimeError):
     """story #4335 — 청구 호출 직전 시한을 넘겨 Toss를 부르지 않았다(청구 0 확정 · order는 failed)."""
 
 
+async def _organization_exists(session: AsyncSession, org_id: uuid.UUID) -> bool:
+    return await session.scalar(select(Organization.id).where(Organization.id == org_id)) is not None
+
+
 async def _mark_failed_if_not_confirmed(session: AsyncSession, order_id: str, reason: str) -> None:
     """⛔블로커1 최소-fix 가드(근본은 claim — 아래) — 이미 confirmed인 order를 failed가
     절대 덮어쓰지 못한다."""
@@ -203,7 +207,7 @@ async def charge_org(
     # story #4728 — 조직이 없으면 청구도 주문 claim 도 하지 않는다. org_billing_keys / billing_orders 는 org_id 에 외래키가 없어
     # 조직이 지워져도 남은 failed 주문 + 활성 빌링키가 dunning 스윕을 타고 계속 청구될 수 있다(이 가드 이전에 지워진 조직 포함).
     # 남은 결제 상태는 여기서 끝내 다음 스윕이 다시 고르지 않게 한다.
-    if await session.scalar(select(Organization.id).where(Organization.id == org_id)) is None:
+    if not await _organization_exists(session, org_id):
         await end_org_billing(session, org_id)
         await session.commit()
         raise OrganizationGone(f"organization {org_id} no longer exists — not charged")
@@ -260,6 +264,13 @@ async def charge_org(
     if send_deadline is not None and datetime.now(timezone.utc) > send_deadline:
         await _mark_failed_if_not_confirmed(session, order_id, "charge send deadline passed — not sent to Toss")
         raise ChargeSendDeadlinePassed(f"order_id={order_id}: send deadline {send_deadline.isoformat()} passed — not sent")
+    # story #4728 — 첫 확인과 이 호출 사이에 조직이 지워졌을 수 있다(삭제 트랜잭션은 이 주문 claim 을 직렬화하지 못한다 — 외래키 없음).
+    # 청구 직전 한 번 더 본다. 이 확인과 아래 호출 사이의 아주 짧은 틈은 남는다 — 외부 호출 내내 조직 행 잠금을 쥘 수는 없다.
+    if not await _organization_exists(session, org_id):
+        await _mark_failed_if_not_confirmed(session, order_id, "organization gone — not sent to Toss")
+        await end_org_billing(session, org_id)
+        await session.commit()
+        raise OrganizationGone(f"organization {org_id} no longer exists — not charged")
     try:
         result = await TossAdapter().charge(
             billing_key=billing_key_plaintext,
