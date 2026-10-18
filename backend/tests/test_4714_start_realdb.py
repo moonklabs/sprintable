@@ -81,13 +81,13 @@ async def test_01_the_computer_reports_ids_only_the_list_is_replaced_whole_and_a
         # no device token → 401 (a person is no device)
         assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ)), headers=_person(OWNER))).status_code == 401
         ok = await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ), (agent, PROJ2), (agent, PROJ), (agent, PROJ3)), headers=tok)
-        assert (ok.status_code, ok.json()) == (200, {"startable": 2})  # sorted · no repeat · (agent, PROJ3) dropped: the agent is not in that project
+        assert (ok.status_code, ok.json()) == (200, {"startable": 2, "dropped_agents": [], "applied": True})  # sorted · no repeat · (agent, PROJ3) dropped: the agent is not in that project
         stored = (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{sid}'"))[0][0]
         assert sorted(stored, key=lambda i: i["project_id"]) == [{"agent_member_id": agent, "project_id": str(PROJ)}, {"agent_member_id": agent, "project_id": str(PROJ2)}]
         # narrowed to what the agents can really have: a project that is gone (soft-deleted) is dropped too, and nothing else is stored
         await _sql(f"UPDATE projects SET deleted_at = now() WHERE id = '{PROJ2}'")
         try:
-            assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ), (agent, PROJ2)), headers=tok)).json() == {"startable": 1}
+            assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ), (agent, PROJ2)), headers=tok)).json() == {"startable": 1, "dropped_agents": [], "applied": True}
             assert (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{sid}'"))[0][0] == [{"agent_member_id": agent, "project_id": str(PROJ)}]
         finally:
             await _sql(f"UPDATE projects SET deleted_at = NULL WHERE id = '{PROJ2}'")
@@ -98,16 +98,24 @@ async def test_01_the_computer_reports_ids_only_the_list_is_replaced_whole_and_a
             f"INSERT INTO agent_project_profiles (id,member_id,project_id) VALUES (gen_random_uuid(),'{agent}','{other_org_project}')",
         )
         try:
-            assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ), (agent, other_org_project)), headers=tok)).json() == {"startable": 1}
+            assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ), (agent, other_org_project)), headers=tok)).json() == {"startable": 1, "dropped_agents": [], "applied": True}
             assert (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{sid}'"))[0][0] == [{"agent_member_id": agent, "project_id": str(PROJ)}]
         finally:
             await _sql(f"DELETE FROM agent_project_profiles WHERE project_id = '{other_org_project}'", f"DELETE FROM projects WHERE id = '{other_org_project}'")
         # replaced whole, not merged
-        assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ2)), headers=tok)).json() == {"startable": 1}
+        assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ2)), headers=tok)).json() == {"startable": 1, "dropped_agents": [], "applied": True}
         stored = (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{sid}'"))[0][0]
         assert stored == [{"agent_member_id": agent, "project_id": str(PROJ2)}]
         # an agent this device was not set up with · a path (or any extra field) · a pair without a project · too many
-        assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((str(uuid.uuid4()), PROJ)), headers=tok)).status_code == 422
+        # an agent this device was not set up with is LEFT OUT and named (not refused: one stale agent must not hide the others) — what was stored stays the agent's own
+        stranger = str(uuid.uuid4())
+        mixed = await c.put("/api/v2/desktop/relay/startable", json=_startable((stranger, PROJ), (agent, PROJ2)), headers=tok)
+        assert (mixed.status_code, mixed.json()) == (200, {"startable": 1, "dropped_agents": [stranger], "applied": True})
+        assert (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{sid}'"))[0][0] == [{"agent_member_id": agent, "project_id": str(PROJ2)}]
+        # only strangers: an empty list is stored (the computer says «nothing to start»), the strangers are named
+        only = await c.put("/api/v2/desktop/relay/startable", json=_startable((stranger, PROJ)), headers=tok)
+        assert (only.status_code, only.json()) == (200, {"startable": 0, "dropped_agents": [stranger], "applied": True})
+        assert (await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ2)), headers=tok)).json()["startable"] == 1
         item = {"agent_member_id": agent, "project_id": str(PROJ)}
         assert (await c.put("/api/v2/desktop/relay/startable", json={"startable": [{**item, "path": "/Users/x/work"}]}, headers=tok)).status_code == 422
         assert (await c.put("/api/v2/desktop/relay/startable", json={"startable": [item], "folders": ["/x"]}, headers=tok)).status_code == 422
@@ -563,3 +571,83 @@ async def test_16_the_whole_phone_read_drops_a_revoked_key_and_an_agent_the_pers
         assert [x["setup_id"] for x in (await _all(c, phone)).json()["computers"]] == [sid]
         await _sql(f"UPDATE remote_devices SET revoked_at = now() WHERE id = '{phone}'")
         assert (await _all(c, phone)).json()["computers"] == []
+
+
+async def test_17_a_report_numbered_at_or_below_the_highest_applied_is_ignored_so_a_late_request_cannot_cover_a_newer_list(world):
+    """PO 10-18 (daemon codex round 3): the computer's gave-up PUT can reach the server after a newer one. The computer numbers reports (only growing);
+    the server keeps the highest applied per computer and ignores a lower or equal one. Unnumbered (an older app) is applied and leaves the number alone."""
+    async with _client() as c:
+        device, agent, _phone, _der = await _setup(c, "d4424 mac 4714s1")
+        tok, sid = _tok(device["device_token"]), device["setup_id"]
+        stored = lambda: _sql(fetch=f"SELECT startable, startable_seq FROM desktop_setups WHERE id = '{sid}'")  # noqa: E731
+        put = lambda body: c.put("/api/v2/desktop/relay/startable", json=body, headers=tok)  # noqa: E731
+        r = await put({**_startable((agent, PROJ)), "seq": 10})
+        assert (r.status_code, r.json()) == (200, {"startable": 1, "dropped_agents": [], "applied": True})
+        assert (await stored())[0][1] == 10
+        # the late, lower one: ignored — the stored list is the newer one, the answer says so and counts what is stored
+        late = await put({**_startable((agent, PROJ), (agent, PROJ2)), "seq": 5})
+        assert (late.status_code, late.json()) == (200, {"startable": 1, "dropped_agents": [], "applied": False})
+        assert (await stored())[0] == ([{"agent_member_id": agent, "project_id": str(PROJ)}], 10)
+        # the same number again: ignored too (a number is applied once)
+        same = await put({**_startable((agent, PROJ), (agent, PROJ2)), "seq": 10})
+        assert same.json()["applied"] is False
+        assert (await stored())[0] == ([{"agent_member_id": agent, "project_id": str(PROJ)}], 10)  # nothing was overwritten by the ignored report
+        # an ignored report still counts as the computer being heard (liveness): its last_used_at moves
+        await _sql(f"UPDATE desktop_device_tokens SET last_used_at = now() - interval '5 minutes' WHERE setup_id = '{sid}' AND revoked_at IS NULL")
+        await put({**_startable((agent, PROJ)), "seq": 10})
+        assert (await _sql(fetch=f"SELECT last_used_at > now() - interval '1 minute' FROM desktop_device_tokens WHERE setup_id = '{sid}' AND revoked_at IS NULL"))[0][0] is True
+        # a higher one is applied and moves the number
+        up = await put({**_startable((agent, PROJ), (agent, PROJ2)), "seq": 11})
+        assert (up.json()["startable"], up.json()["applied"]) == (2, True)
+        assert (await stored())[0][1] == 11
+        # unnumbered (an older app): applied, the number stays
+        old = await put(_startable((agent, PROJ)))
+        assert (old.json()["startable"], old.json()["applied"]) == (1, True)
+        assert (await stored())[0][1] == 11
+        # not a positive whole number → refused, nothing changes
+        for bad in (0, -3, "7", 1.5):
+            assert (await put({**_startable((agent, PROJ2)), "seq": bad})).status_code == 422
+        assert (await stored())[0] == ([{"agent_member_id": agent, "project_id": str(PROJ)}], 11)
+        # another computer counts on its own
+        dev2, agent2, _p2, _d2 = await _setup(c, "d4424 mac 4714s2")
+        # (and an agent of ANOTHER computer of the same organization, with a profile in the project, is not this computer's to offer: left out and named)
+        await _sql(f"INSERT INTO agent_project_profiles (id,member_id,project_id) SELECT gen_random_uuid(),'{agent2}','{PROJ}' WHERE NOT EXISTS "
+                   f"(SELECT 1 FROM agent_project_profiles WHERE member_id = '{agent2}' AND project_id = '{PROJ}')")
+        foreign = await put({**_startable((agent, PROJ), (agent2, PROJ)), "seq": 12})
+        assert (foreign.json()["startable"], foreign.json()["dropped_agents"]) == (1, [agent2])
+        assert (await stored())[0] == ([{"agent_member_id": agent, "project_id": str(PROJ)}], 12)
+        other = await c.put("/api/v2/desktop/relay/startable", json={**_startable((agent2, PROJ)), "seq": 1}, headers=_tok(dev2["device_token"]))
+        assert other.json()["applied"] is True
+        # a new device token (a reinstall): the report number starts again — the daemon's first numbered report is applied, not ignored for ever by its predecessor's number
+        from app.core.database import async_session_factory
+        from app.services import desktop_relay as relay
+        async with async_session_factory() as sess:
+            new_tok = await relay.issue_device_token(sess, uuid.UUID(sid))
+            await sess.commit()
+        assert (await stored())[0][1] is None
+        again = await c.put("/api/v2/desktop/relay/startable", json={**_startable((agent, PROJ)), "seq": 1}, headers=_tok(new_tok))
+        assert (again.status_code, again.json()["applied"]) == (200, True)  # (mutant: the number kept → seq 1 <= 12 → ignored)
+
+
+async def test_18_an_agent_moved_to_another_computer_while_the_request_is_being_handled_is_left_out(world, monkeypatch):
+    """codex (server follow-up): `setup.members` was loaded before the request reached the narrowing; a setup exchange that moves an agent away in between
+    must not let the stale list accept it. The narrowing locks and re-reads the device row first."""
+    from app.services import desktop_relay as relay
+
+    async with _client() as c:
+        device, agent, _phone, _der = await _setup(c, "d4424 mac 4714m")
+        sid, tok = device["setup_id"], _tok(device["device_token"])
+        other = device["agents"][1]["member_id"]
+        await _sql(f"INSERT INTO agent_project_profiles (id,member_id,project_id) SELECT gen_random_uuid(),'{other}','{PROJ}' WHERE NOT EXISTS "
+                   f"(SELECT 1 FROM agent_project_profiles WHERE member_id = '{other}' AND project_id = '{PROJ}')")
+        real = relay.accessible_startable
+
+        async def moved_first(db, setup, snapshot):
+            await _sql(f"UPDATE desktop_setups SET members = (SELECT coalesce(jsonb_agg(m), '[]'::jsonb) FROM jsonb_array_elements(members) m "
+                       f"WHERE m->>'member_id' <> '{other}') WHERE id = '{sid}'")  # the move lands after this request loaded `setup`
+            return await real(db, setup, snapshot)
+
+        monkeypatch.setattr(relay, "accessible_startable", moved_first)
+        r = await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ), (other, PROJ)), headers=tok)
+        assert (r.status_code, r.json()["dropped_agents"], r.json()["startable"]) == (200, [other], 1), r.text
+        assert (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{sid}'"))[0][0] == [{"agent_member_id": agent, "project_id": str(PROJ)}]
