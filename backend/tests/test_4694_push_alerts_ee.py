@@ -229,3 +229,29 @@ def test_the_script_skips_existing_policies_and_reuses_given_channels():
     assert "policies list" in sh and "already exists, skipped" in sh, "a policy that exists is skipped, not created twice"
     # the skip comes before the create
     assert sh.index("already exists, skipped") < sh.index("policies create")
+
+
+# ─── the `sent` line's reasons are codes, never Expo's free text (PO 2026-10-19 · measured: Expo's `message` carries the token) ──────────
+
+@pytest.mark.anyio
+async def test_the_sent_line_copies_codes_never_expo_free_text(caplog):
+    caplog.set_level(logging.INFO, logger="ee.services.expo_push")
+    real_shape = {  # what the real API answers for a bad token (measured 2026-10-19): the token is in the message and in details
+        "status": "error", "message": f'"{TOKEN}" is not a valid Expo push token',
+        "details": {"error": "DeviceNotRegistered", "expoPushToken": TOKEN},
+    }
+    message_only = {"status": "error", "message": f'"{TOKEN}" went wrong for {EMAIL}'}
+    odd_code = {"status": "error", "details": {"error": f"free text with {TOKEN} and spaces"}}
+    for tickets in ([real_shape], [message_only], [odd_code], [real_shape, message_only, odd_code]):
+        caplog.clear()
+        await _send([_dev() for _ in tickets], tickets)
+        sent = [r.getMessage() for r in caplog.records if r.getMessage().startswith("expo push: sent")]
+        assert len(sent) == 1, [r.getMessage() for r in caplog.records]
+        assert "ExponentPushToken" not in sent[0] and "SECRET-DEVICE-TOKEN" not in sent[0] and EMAIL not in sent[0] and "@" not in sent[0], sent[0]
+    # the code word itself survives, and message-only / odd-shaped errors become «unknown»
+    caplog.clear()
+    await _send([_dev(), _dev(), _dev()], [real_shape, message_only, odd_code])
+    (line,) = [r.getMessage() for r in caplog.records if r.getMessage().startswith("expo push: sent")]
+    assert "DeviceNotRegistered" in line and "unknown" in line and "error=3" in line
+    assert expo._expo_error_code({"details": {"error": "InvalidCredentials"}}) == "InvalidCredentials"
+    assert expo._expo_error_code({"message": "x"}) == "unknown" and expo._expo_error_code({}) == "unknown" and expo._expo_error_code({"details": None}) == "unknown"

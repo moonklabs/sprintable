@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json as _json
 import logging
+import re
 import time
 import uuid
 
@@ -210,6 +211,17 @@ async def _deliver_expo_push_now(
         )
 
 
+_EXPO_CODE_SHAPE = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,63}")
+
+
+def _expo_error_code(ticket: dict) -> str:
+    """The ticket's error as a CODE word only — never Expo's free text (story 4694 · PO 2026-10-19). Measured on the real API: an error ticket's `message` carries the push token
+    verbatim (`"ExponentPushToken[…]" is not a valid Expo push token`, and `details.expoPushToken` too), so copying `message` into a log line (it used to be the fallback when
+    `details.error` was absent) could put a token in a log. `details.error` when it is a word of code shape (`DeviceNotRegistered`, `InvalidCredentials`, …), else `unknown`."""
+    code = (ticket.get("details") or {}).get("error")
+    return code if isinstance(code, str) and _EXPO_CODE_SHAPE.fullmatch(code) else "unknown"
+
+
 def _log_push_skipped(reason: str, org_id: uuid.UUID, event_type: str | None, *, recipients: int, muted: int) -> None:
     """one line, closed fields: ids · counts · a closed reason code. No member id, name, e-mail or token."""
     logger.info(
@@ -313,7 +325,7 @@ async def _send_expo_push_targets(
         for dev, ticket in zip(chunk_devices, tickets):
             if isinstance(ticket, dict) and ticket.get("status") == "error":
                 error_count += 1
-                err = (ticket.get("details") or {}).get("error") or ticket.get("message") or "unknown"
+                err = _expo_error_code(ticket)
                 error_reasons[err] = error_reasons.get(err, 0) + 1
                 if err == "DeviceNotRegistered":
                     dead_tokens.append(dev["expo_push_token"])
