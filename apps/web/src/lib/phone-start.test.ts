@@ -324,6 +324,14 @@ describe('[4714] waitForSession — started ≠ stood: the server\'s `running` w
     await expect(waitForSession(target, { phoneCall, wait: async (ms) => { t += ms; }, now: () => t })).resolves.toBe('waiting');
   });
 
+  it('a sleep that ended after the limit (a late timer) is not one more read: waiting, with no read after the limit', async () => {
+    const w = world([startable([{ setup_id: SETUP, agents: [agent(AGENT, false)] }])]);
+    let t = 0;
+    const late = { phoneCall, wait: async () => { t += 90_000; }, now: () => t };
+    await expect(waitForSession(target, late)).resolves.toBe('waiting');
+    expect(w.reads.length).toBe(1); // the first look only — the sleep jumped past the 30 s
+  });
+
   it('a bridge call that is rejected is no answer either — it asks again', async () => {
     const w = world([startable([{ setup_id: SETUP, agents: [agent(AGENT, true)] }])]);
     let n = 0;
@@ -380,6 +388,36 @@ describe('[4714] flows — one stop signal per press: what a stopped flow gets b
     await expect(startOnPhone(input, deps(signed, { flow }))).resolves.toEqual({ kind: 'stopped' });
     expect(polls).toBe(2);
     endFlow(flow);
+  });
+
+  it('PO 10-19: stopped AFTER the signature came back (while the post is out) the post still went — once — and nobody follows it', async () => {
+    const flow = beginFlow();
+    const posts: string[] = [];
+    currentFetch = async (_url, init) => { if (init?.method === 'POST') { posts.push('post'); flow.stopped = true; return json(201, { command_id: CMD, state: 'queued' }); } throw new Error('no poll expected'); };
+    await expect(startOnPhone(input, deps(signed, { flow }))).resolves.toEqual({ kind: 'stopped' });
+    expect(posts).toEqual(['post']);
+    endFlow(flow);
+  });
+
+  it('[결과 확인] of a stopped flow asks for nothing (no re-post · no poll)', async () => {
+    const urls: string[] = [];
+    currentFetch = async (url) => { urls.push(url); return json(200, {}); };
+    const flow = beginFlow(); flow.stopped = true;
+    const pending: Pending = { agentId: AGENT, key: 'k', body: {}, commandId: CMD };
+    await expect(checkStart(pending, deps(signed, { flow }))).resolves.toEqual({ kind: 'stopped' });
+    await expect(checkStart({ ...pending, commandId: undefined }, deps(signed, { flow }))).resolves.toEqual({ kind: 'stopped' });
+    expect(urls).toEqual([]);
+    endFlow(flow);
+  });
+
+  it('a sleep that ended after the command\'s two minutes is not one more look (a late timer buys nothing)', async () => {
+    const urls: string[] = [];
+    currentFetch = async (url) => { urls.push(url); return json(200, { state: 'running', result_code: null }); };
+    let t = 0;
+    const pending: Pending = { agentId: AGENT, key: 'k', body: {}, commandId: CMD };
+    const out = await checkStart(pending, { phoneCall: vi.fn(), newKey: () => 'k', wait: async () => { t += 500_000; }, now: () => t } as never);
+    expect(out).toEqual({ kind: 'unknown', pending });
+    expect(urls).toEqual([]);
   });
 
   it('markLeaving stops every flow that is out, once: the second call is false (a second tap) until the window is over; clearLeaving ends it', () => {

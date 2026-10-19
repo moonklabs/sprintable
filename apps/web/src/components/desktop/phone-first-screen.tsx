@@ -50,8 +50,9 @@ export function PhoneFirstScreen({ orgId, chatsHref, macDownloadEnabled = false 
   }, []);
   // one read at a time counts, and a read is a flow: a newer read · the end of the screen · a way out STOP the older one — a stopped read asks for nothing more and draws nothing
   const readFlow = useRef<Flow | null>(null);
-  const stopRead = useCallback(() => { if (readFlow.current) readFlow.current.stopped = true; }, []);
+  const stopRead = useCallback(() => { if (readFlow.current) { readFlow.current.stopped = true; endFlow(readFlow.current); } }, []);
   const readNow = useCallback(() => {
+    if (isLeaving()) return; // a page on its way out reads nothing new (a late «turned on» · «retry» must not start a flow under the pending move)
     const flow = beginFlow();
     readFlow.current = flow;
     void readStartable(phoneCall, () => flow.stopped).catch((): StartableRead => ({ kind: 'failed' })).then((r) => { endFlow(flow); if (!flow.stopped) land(r); });
@@ -61,6 +62,12 @@ export function PhoneFirstScreen({ orgId, chatsHref, macDownloadEnabled = false 
     readNow();
     return dropReads;
   }, [readNow, dropReads]);
+  // restored from the back-forward cache: a read that was stopped by a way out left this screen «reading» — read again (lib/phone-start.ts has released the way-out window by then)
+  useEffect(() => {
+    const onShow = (e: PageTransitionEvent) => { if (e.persisted) { setRead({ kind: 'reading' }); readNow(); } };
+    window.addEventListener('pageshow', onShow);
+    return () => window.removeEventListener('pageshow', onShow);
+  }, [readNow]);
   const reload = () => { setRead({ kind: 'reading' }); readNow(); }; // a press (retry · turned on · remote off found): the empty area, then read again
 
   // reading: an empty area (the device is read after mount — no flash)
@@ -235,7 +242,7 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
   // ONE stop signal per press (a `Flow`): the bridge call, the post, the command poll, the wait for the session to stand and the move all look at the same `stopped`.
   // A way out · the end of this screen stop it; what a stopped flow gets back later does nothing (no request · no drawing · no move).
   const flowRef = useRef<Flow | null>(null);
-  useEffect(() => () => { if (flowRef.current) flowRef.current.stopped = true; }, []);
+  useEffect(() => () => { if (flowRef.current) { flowRef.current.stopped = true; endFlow(flowRef.current); } }, []);
   // restored from the back-forward cache (the browser's back after the page moved on): the screen of a stopped flow must not stay «starting», and the way-out window is over
   useEffect(() => {
     const onShow = (e: PageTransitionEvent) => { if (e.persisted) { setBusy(false); setStanding(false); } }; // (the way-out window is released by lib/phone-start.ts itself)

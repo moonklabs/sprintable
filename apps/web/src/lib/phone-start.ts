@@ -146,6 +146,9 @@ export async function startOnPhone(input: StartInput, deps: StartDeps): Promise<
   } catch {
     return { kind: 'failed' }; // the bridge rejected the call: nothing was signed, nothing was posted — never a start left «busy»
   }
+  // PO 10-19: the person who SIGNED (the OS prompt is the confirmation) has started it — the post goes even if a way out was pressed afterwards (the way out only stops
+  // the waiting · the poll · the move). A way out pressed BEFORE the signature came back posts nothing.
+  if (deps.flow?.stopped) return { kind: 'stopped' };
   if (!signed.ok) return { kind: SHELL_REFUSALS[signed.code ?? ''] ?? 'failed' } as StartOutcome;
   if (typeof signed.signed !== 'string' || typeof signed.phone_key_id !== 'string') return { kind: 'failed' };
   const pending: Pending = {
@@ -159,11 +162,11 @@ export async function startOnPhone(input: StartInput, deps: StartDeps): Promise<
 
 /** [결과 확인]: the same start again — its id when known (follow it), else the same post (same key: the server gives back the command it made, if any) */
 export async function checkStart(pending: Pending, deps: StartDeps): Promise<StartOutcome> {
+  if (deps.flow?.stopped) return { kind: 'stopped' }; // nobody is on the page: no re-post, no poll
   return pending.commandId ? follow(pending, deps) : post(pending, deps);
 }
 
 async function post(pending: Pending, deps: StartDeps): Promise<StartOutcome> {
-  if (deps.flow?.stopped) return { kind: 'stopped' }; // left while the OS prompt was up (or before a [결과 확인] re-post): nothing is posted
   let res: Response;
   try {
     res = await fetchWithAuth(`/api/agents/${pending.agentId}/desktop-start`, {
@@ -199,6 +202,7 @@ async function follow(pending: Pending, deps: StartDeps): Promise<StartOutcome> 
   while (now() < deadline) {
     await wait(every);
     if (deps.flow?.stopped) return { kind: 'stopped' }; // every look at the command is preceded by this: a stopped flow makes no further request
+    if (now() > deadline) break; // … and a sleep that ended after the two minutes is not one more look
     let r: { state?: string; result_code?: string | null };
     try {
       const got = await fetchWithAuth(`/api/agents/${pending.agentId}/desktop-commands/${pending.commandId}`);
@@ -240,6 +244,7 @@ export async function waitForSession(
   const alive = deps.alive ?? (() => true);
   for (;;) {
     if (!alive()) return 'gone';
+    if (now() > deadline) return 'waiting'; // a sleep that ended after the limit (a late timer) does not buy one more read
     // the read is bounded by what is left of the limit: a bridge call can wait minutes (phone-bridge.ts) — the 30 s are 30 s, and a read that comes after them is dropped
     const left = Math.max(deadline - now(), 0);
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -273,6 +278,8 @@ export function beginFlow(): Flow {
   return flow;
 }
 export function endFlow(flow: Flow): void { flows.delete(flow); }
+/** how many flows are out (for tests: a screen that is gone leaves none behind) */
+export const openFlows = (): number => flows.size;
 
 /**
  * The person pressed a way OUT of this screen (the start screen's «대시보드로» · the onboarding's «오늘로 가기»): every flow that is out is stopped — nothing is moved,

@@ -17,7 +17,7 @@ vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetch
 vi.mock('@/lib/phone-app-store', async (orig) => ({ ...(await orig<typeof import('@/lib/phone-app-store')>()), PHONE_APP_PUBLISHED: { android: true, ios: false } }));
 const { PhoneFirstScreen } = await import('./phone-first-screen');
 const { FirstScreen } = await import('@/app/onboarding/first-screen');
-const { isLeaving, markLeaving, clearLeaving } = await import('@/lib/phone-start');
+const { isLeaving, markLeaving, clearLeaving, openFlows } = await import('@/lib/phone-start');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -815,10 +815,15 @@ describe('[4714] AC3 — started ≠ stood: the conversation with the started ag
     expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(true);
     markLeaving(); // …and the page moved on (a way out) — then the browser's back restores this very page
     await act(async () => { window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true })); });
+    await flush();
     expect(isLeaving()).toBe(false);
-    expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(false);
+    // the screen read itself again (a read a way out stopped would have left it «reading» for good): it is the idle start card, not «starting»
+    expect(byId('onboarding-phone-start-go')?.textContent).toBe('시작');
     expect(byId('onboarding-phone-standing')).toBeNull();
+    const reads = calls.filter((c) => c.url.startsWith('/api/desktop/startable')).length;
     await act(async () => { window.dispatchEvent(new Event('pageshow')); }); // a normal show (not restored) changes nothing
+    await flush();
+    expect(calls.filter((c) => c.url.startsWith('/api/desktop/startable')).length).toBe(reads);
   });
 
   it('the way-out window is released by the module itself on a restored page (Mirko · 5166): markLeaving → pageshow(persisted) → not leaving, and a screen mounted after it draws and works', async () => {
@@ -833,6 +838,33 @@ describe('[4714] AC3 — started ≠ stood: the conversation with the started ag
     await pickFromSheet('onboarding-phone-project', '결제 개편');
     await press(byId('onboarding-phone-start-go'));
     expect(assigned.length).toBe(1);
+  });
+
+  it('PO 10-19: a start signed at the OS prompt is posted even if a way out is pressed right after; only the waiting · poll · move stop (post 1 · poll 0 · move 0)', async () => {
+    let release: () => void = () => undefined;
+    world.hold = new Promise<void>((r) => { release = r; });
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await act(async () => { (byId('onboarding-phone-start-go') as HTMLElement).click(); });
+    await flush(); // the signature came back, the post is out (held)
+    expect(calls.filter((c) => c.method === 'POST').length).toBe(1);
+    markLeaving();
+    release();
+    await flush(); await settle();
+    expect(calls.filter((c) => c.method === 'POST').length).toBe(1);
+    expect(calls.filter((c) => c.url.includes('/desktop-commands/')).length).toBe(0);
+    expect(assigned).toEqual([]);
+  });
+
+  it('a late «retry» / «turned on» of a page on its way out reads nothing new', async () => {
+    keyAnswer = { id: 'k', ok: false, code: 'failed' }; // the first read fails: the retry card
+    await screen();
+    expect(byId('onboarding-phone-retry') ?? container.querySelector('button')).not.toBeNull();
+    markLeaving();
+    const keyReads = () => phoneCall.mock.calls.filter((c) => c[0] === 'device.key.info').length;
+    const before = keyReads();
+    await press(container.querySelector('button')); // the retry press lands after the way out
+    expect(keyReads()).toBe(before);
   });
 
   it('[결과 확인] is a flow too: a way out while it follows the command stops the poll', async () => {
@@ -852,6 +884,33 @@ describe('[4714] AC3 — started ≠ stood: the conversation with the started ag
     await waitMore(10_000);
     expect(polls()).toBe(before);
     expect(assigned).toEqual([]);
+  });
+
+  it('a screen that is gone leaves no flow behind (the module\'s set does not grow with every mount) — a press still out · a read still out', async () => {
+    const base = openFlows();
+    let answer: (a: Record<string, unknown>) => void = () => undefined;
+    phoneCall.mockImplementation(() => new Promise((r) => { answer = r as (a: Record<string, unknown>) => void; })); // the first read never comes back
+    await screen();
+    expect(openFlows()).toBe(base + 1); // the screen's own read
+    await act(async () => { root.unmount(); });
+    expect(openFlows()).toBe(base);
+    answer(keyAnswer);
+    await flush();
+    root = createRoot(container);
+    // a press that is out when the screen goes
+    phoneCall.mockReset(); phoneCall.mockImplementation(async (type: string) => (type === 'device.key.info' ? keyAnswer : signAnswer));
+    let release: () => void = () => undefined;
+    world.hold = new Promise<void>((r) => { release = r; });
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await act(async () => { (byId('onboarding-phone-start-go') as HTMLElement).click(); });
+    await flush();
+    expect(openFlows()).toBe(base + 1); // the press (the screen's own read is over)
+    await act(async () => { root.unmount(); });
+    expect(openFlows()).toBe(base);
+    release();
+    await flush();
+    root = createRoot(container);
   });
 
   it('the way out is one navigation however often it is tapped (the onboarding\'s finish runs once)', async () => {
