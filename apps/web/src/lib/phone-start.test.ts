@@ -273,6 +273,12 @@ describe('[4714] waitForSession — started ≠ stood: the server\'s `running` w
     expect(w.reads.length).toBe(16);
   });
 
+  it('the sleep between looks is cut by what is left of the limit: the last look is at the limit (5 s here), not 2 s after it', async () => {
+    const w = world([startable([{ setup_id: SETUP, agents: [agent(AGENT, false)] }])]);
+    await expect(waitForSession(target, { ...w.deps, pollMaxMs: 5000 })).resolves.toBe('waiting');
+    expect(w.reads).toEqual([0, 2000, 4000, 5000]);
+  });
+
   it('a read that fails (offline · 500 · not a view) is no answer — it asks again, and a later «runs» still lands', async () => {
     const w = world([new Error('offline'), { remote_control: 'x' }, startable([{ setup_id: SETUP, agents: [agent(AGENT, true)] }])]);
     await expect(waitForSession(target, w.deps)).resolves.toBe('stood');

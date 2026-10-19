@@ -245,7 +245,8 @@ export async function waitForSession(
       const agent = read.view.computers.find((c) => c.setup_id === target.setupId)?.agents.find((a) => a.agent_member_id === target.agentId);
       if (agent?.running === true) return 'stood';
     }
-    if (now() >= deadline) return 'waiting';
-    await wait(every);
+    const remaining = deadline - now();
+    if (remaining <= 0) return 'waiting';
+    await wait(Math.min(every, remaining)); // the sleep is cut by what is left too: the last look is AT the limit, never after it
   }
 }
