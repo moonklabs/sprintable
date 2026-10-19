@@ -746,6 +746,30 @@ describe('[4714] AC3 — started ≠ stood: the conversation with the started ag
     expect(calls.filter((c) => c.method === 'POST').length).toBe(1);
   });
 
+  it('the spinner is for the wait for the session only: not while the start is out (signing · posting), and not left over for a later press', async () => {
+    world.stand = false;
+    let release: () => void = () => undefined;
+    world.hold = new Promise<void>((r) => { release = r; });
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await act(async () => { (byId('onboarding-phone-start-go') as HTMLElement).click(); });
+    await flush();
+    expect(byId('onboarding-phone-start-go')?.textContent).toBe('시작하는 중이에요…'); // busy …
+    expect(byId('onboarding-phone-standing')).toBeNull(); // … but nothing is being waited for yet: no spinner
+    release();
+    await flush(); await settle();
+    expect(byId('onboarding-phone-standing')).not.toBeNull(); // the Mac said done: now the wait
+    await waitMore(31_000);
+    expect(byId('onboarding-phone-connecting')).not.toBeNull();
+    // a later press: while ITS start is out there is no spinner again (the wait of the first press is over)
+    world.hold = new Promise<void>((r) => { release = r; });
+    await act(async () => { (byId('onboarding-phone-start-go') as HTMLElement).click(); });
+    await flush();
+    expect(byId('onboarding-phone-standing')).toBeNull();
+    release();
+    await flush();
+  });
+
   it('several agents: the conversation is the one with the agent that was picked and started — not the first', async () => {
     const AGENT_B = '22222222-3333-4444-8555-777777777777';
     world.startable = { remote_control: true, computers: [computer({ agents: [
