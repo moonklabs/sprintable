@@ -92,6 +92,10 @@ async def _seed_two_orgs(session):
     session.add(ProjectAccess(
         id=uuid.uuid4(), project_id=project_a.id, member_id=agent_a.id, permission="granted", role="member",
     ))
+    # story #4730 — the creator passes only while she still holds a seat that may create the agent (org admin or admin of its project)
+    session.add(ProjectAccess(
+        id=uuid.uuid4(), project_id=project_a.id, org_member_id=caller_om.id, permission="granted", role="admin",
+    ))
     await session.commit()
 
     return {

@@ -337,7 +337,7 @@ async def create_team_member(
     # project)로 역할을 검사하던 것도 `body.project_id`(실제 target)로 정정(잠재적 자기-분기
     # target 불일치도 함께 봉합). auth.user_id는 API키(에이전트)=member.id·JWT(휴먼)=users.id라
     # has_project_role이 이미 양쪽을 다 매칭하는 단일 호출로 충분(신규 분기 불요).
-    from app.services.project_auth import assert_target_in_caller_org, get_project_role, has_project_role
+    from app.services.project_auth import assert_target_in_caller_org, get_project_role, has_project_role, holds_agent_seat
 
     target_project_org_id = (await session.execute(
         text("SELECT org_id FROM projects WHERE id = :pid"), {"pid": str(body.project_id)},
@@ -345,7 +345,7 @@ async def create_team_member(
     assert_target_in_caller_org(org_id, target_project_org_id, not_found_detail="Project not found")
 
     actor = await _resolve_actor(auth, session, org_id)
-    if not await has_project_role(session, uuid.UUID(auth.user_id), body.project_id, min_role="admin"):
+    if not await holds_agent_seat(session, uuid.UUID(auth.user_id), [body.project_id]):  # story #4730 — the same rule assert_agent_owner asks of a creator
         raise HTTPException(status_code=403, detail="project admin/owner role required to manage members")
 
     if actor is not None and actor.type == "agent":

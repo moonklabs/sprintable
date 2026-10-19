@@ -6,6 +6,7 @@ switch_project / switch_org / me/memberships의 인가 술어를 SSOT로 관리.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 
 from fastapi import HTTPException
 from sqlalchemy import or_, select, text, true
@@ -183,6 +184,23 @@ async def has_project_role(
     if role is None:
         return False
     return PROJECT_ROLE_RANK.get(role, 0) >= PROJECT_ROLE_RANK.get(min_role, 99)
+
+
+async def holds_agent_seat(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    project_ids: Sequence[uuid.UUID],
+) -> bool:
+    """story #4730 — does `user_id` hold, RIGHT NOW, a seat that may create an agent in one of `project_ids`?
+
+    The seat = effective admin or above on the project (an explicit project admin/owner grant, or org owner/admin, which is the floor in
+    `get_project_role`; an ended org membership grants nothing). One rule for both places that ask the question: `POST /team-members` (may
+    this person create an agent in this project) and `assert_agent_owner` (may the person who once created the agent still act as its
+    creator) — so the two cannot drift apart."""
+    for project_id in project_ids:
+        if await has_project_role(session, user_id, project_id, min_role="admin"):
+            return True
+    return False
 
 
 def _project_access_predicate(
