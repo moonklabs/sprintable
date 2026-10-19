@@ -73,6 +73,9 @@ async def test_the_style_cap_and_the_patch_route_have_the_same_rule():
             assert (await client.patch(f"/api/v2/agent-personas/{pid}", json={"style_prompt": "s" * 2_000})).status_code == 200
             style = await client.patch(f"/api/v2/agent-personas/{pid}", json={"style_prompt": "s" * 2_001})
             assert style.status_code == 422 and "2,001 characters" in style.json()["error"]["message"], style.text
+            assert (await client.patch(f"/api/v2/agent-personas/{pid}", json={"style_prompt": "😀" * 1_500})).status_code == 200            # 6,000 bytes: the byte cap's boundary
+            bytes_over = await client.patch(f"/api/v2/agent-personas/{pid}", json={"style_prompt": "😀" * 1_501})
+            assert bytes_over.status_code == 422 and "6,004 bytes" in bytes_over.json()["error"]["message"], bytes_over.text
             text = await client.patch(f"/api/v2/agent-personas/{pid}", json={"system_prompt": "y" * 16_001})
             assert text.status_code == 422 and text.json()["error"]["code"] == "PERSONA_TOO_LONG", text.text
             assert (await client.patch(f"/api/v2/agent-personas/{pid}", json={"system_prompt": "y" * 16_000})).status_code == 200
@@ -104,3 +107,22 @@ async def test_a_base_persona_counts_toward_the_same_cap():
             _clear_overrides()
     finally:
         await scenario["engine"].dispose()
+
+
+async def test_the_style_byte_cap_too_and_what_the_write_accepts_always_fits_the_daemons_session_cap():
+    """the two caps interlock (PO 2026-10-18): the LONGEST shape the write accepts — instructions at the cap, style at ITS cap, base joined, the longest role name, the daemon's fixed opening sentence — is inside the
+    daemon's session cap (40,000 bytes · 20,000 characters, mobile `PERSONA_TEXT_MAX_*`), so a persona that could be written is never cut by the daemon. Pinned in numbers: 32,000 + 6,000 + the role
+    and name at four bytes a character + the sentence + the labels ≤ 40,000."""
+    from app.services.agent_run_profile import (
+        PERSONA_ROLE_MAX, PERSONA_STYLE_MAX, PERSONA_STYLE_MAX_BYTES, PERSONA_TEXT_MAX, PERSONA_TEXT_MAX_BYTES, _clean_persona_text,
+    )
+
+    DAEMON_MAX_BYTES, DAEMON_MAX_CHARS = 40_000, 20_000     # mobile desktop-host/src/run-profile.ts PERSONA_TEXT_MAX_BYTES / PERSONA_TEXT_MAX_CHARS — keep equal
+    opening = "You are " + "N" * 80 + ", working as " + "R" * PERSONA_ROLE_MAX + " for your organization on Sprintable. Your organization gave this role the instructions below — follow them for this session."
+    worst_bytes = (len(opening.encode()) - 80 - PERSONA_ROLE_MAX) + 80 * 4 + PERSONA_ROLE_MAX * 4 + PERSONA_TEXT_MAX_BYTES + PERSONA_STYLE_MAX_BYTES + len("\n\nStyle: ") + len("\n\n")
+    assert worst_bytes <= DAEMON_MAX_BYTES, f"{worst_bytes} bytes: lower the write caps, not the daemon's"
+    worst_chars = len(opening) + PERSONA_TEXT_MAX + PERSONA_STYLE_MAX + len("\n\nStyle: ") + len("\n\n")
+    assert worst_chars <= DAEMON_MAX_CHARS, f"{worst_chars} characters"
+    # and the style's own byte cap is enforced where it is written (a 2,000-character style of four-byte characters is 8,000 bytes: refused)
+    assert len(_clean_persona_text("가" * 2_000, PERSONA_STYLE_MAX, PERSONA_STYLE_MAX_BYTES).encode()) == 6_000
+    assert len(_clean_persona_text("😀" * 2_000, PERSONA_STYLE_MAX, PERSONA_STYLE_MAX_BYTES).encode()) <= PERSONA_STYLE_MAX_BYTES

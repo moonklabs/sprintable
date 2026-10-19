@@ -195,6 +195,7 @@ async def read_for_person(
 PERSONA_TEXT_MAX = 16_000        # characters of the role text the daemon is handed (the role comes first in a recruited persona, so a cut keeps it)
 PERSONA_TEXT_MAX_BYTES = 32_000  # … and bytes (UTF-8): Korean is three bytes a character, so the character cap alone would let 48 KB through
 PERSONA_STYLE_MAX = 2_000
+PERSONA_STYLE_MAX_BYTES = 6_000   # 2,000 three-byte (Korean) characters — with the instructions' 32,000 and the sentence round them the whole stays inside the daemon's 40,000-byte session cap (pinned by test)
 PERSONA_ROLE_MAX = 200
 # the characters a session instruction must not carry, by Unicode category rather than a hand list (Kadir's lens, story 4680): every control (Cc — but \t and \n, which
 # is how a text is written), every format character (Cf: bidi marks · embeddings · isolates · zero-width · soft hyphen · the Arabic letter mark · the deprecated
@@ -245,8 +246,12 @@ async def persona_write_problem(
             )
     if style_prompt is not None:
         st = _clean_persona_text(style_prompt, 10**9, 10**9)
-        if len(st) > PERSONA_STYLE_MAX:
-            return f"The style is too long: {len(st):,} characters; the most it may take is {PERSONA_STYLE_MAX:,} characters — shorten it by {len(st) - PERSONA_STYLE_MAX:,} or more."
+        st_bytes = len(st.encode("utf-8"))
+        if len(st) > PERSONA_STYLE_MAX or st_bytes > PERSONA_STYLE_MAX_BYTES:
+            return (
+                f"The style is too long: {len(st):,} characters ({st_bytes:,} bytes); the most it may take is {PERSONA_STYLE_MAX:,} characters and {PERSONA_STYLE_MAX_BYTES:,} bytes — "
+                f"shorten it by {max(len(st) - PERSONA_STYLE_MAX, (st_bytes - PERSONA_STYLE_MAX_BYTES + 3) // 4):,} characters or more."
+            )
     return None
 
 
@@ -305,7 +310,7 @@ async def persona_for_daemon(db: AsyncSession, *, member: Member, project_id: uu
         own_text = agent_recruiter.strip_integration_prompt(own)
     # the base persona goes through the same filter, and base + own stay inside the one cap
     instructions = _clean_persona_text("\n\n".join(p for p in (_clean_persona_text(base.system_prompt if base else None, PERSONA_TEXT_MAX), _clean_persona_text(own_text, PERSONA_TEXT_MAX)) if p), PERSONA_TEXT_MAX)
-    style = _clean_persona_text("\n\n".join(p for p in (_clean_persona_text(base.style_prompt if base else None, PERSONA_STYLE_MAX), _clean_persona_text(row.style_prompt, PERSONA_STYLE_MAX)) if p), PERSONA_STYLE_MAX, PERSONA_STYLE_MAX * 4) or None
+    style = _clean_persona_text("\n\n".join(p for p in (_clean_persona_text(base.style_prompt if base else None, PERSONA_STYLE_MAX, PERSONA_STYLE_MAX_BYTES), _clean_persona_text(row.style_prompt, PERSONA_STYLE_MAX, PERSONA_STYLE_MAX_BYTES)) if p), PERSONA_STYLE_MAX, PERSONA_STYLE_MAX_BYTES) or None
     role = _one_line(row.name, PERSONA_ROLE_MAX) or _one_line(getattr(member, "agent_role", None), PERSONA_ROLE_MAX)
     if not instructions and not role:
         return None
