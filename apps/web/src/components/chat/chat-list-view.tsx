@@ -650,7 +650,6 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   }, [fetchConversations, fetchAllConversations]);
 
   const { connected, polling } = useChatSse({
-    currentTeamMemberId,
     onConversationMessage: handleConversationMessage,
     onSentHere: handleConversationMessage, // story #4442 — this tab's own sends (my message: up, never unread)
     onConversationRead: handleConversationRead,

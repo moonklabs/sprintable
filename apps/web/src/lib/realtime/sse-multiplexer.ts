@@ -17,6 +17,10 @@ import { createSseLivenessTracker, createVisibilityReconnectState } from './sse-
  * 재사용한다(발명 0) — 그 훅들이 각자 열던 EventSource 하나를 이 매니저가 대신 열고, 훅들은
  * `subscribe(eventName, handler)`로 같은 커넥션에 리스너만 얹는다.
  *
+ * story #4698 — 이 모듈이 탭에서 이벤트 스트림을 여는 **유일한** 자리다(롤아웃 플래그 · 독립 EventSource 폴백은 지웠다). 크롬은 끝나지 않는 높은
+ * 우선순위 요청이 3개 이상이면 낮은 우선순위 요청(대화 탭 청크 · 프리패치)을 15~20초 붙잡는다(4698 에뮬 실측). 새 소비처는 `subscribe*`만 쓰고, 스트림을 여는 코드를
+ * 다른 곳에 두면 sse-single-stream.guard.test.ts가 RED로 막는다.
+ *
  * ⚠️ 리스크(PO 지적): 이벤트 리스너 누락 — 예를 들어 A훅이 붙기 전에 B훅이 먼저 커넥션을
  * 열고, A훅이 나중에 subscribe해도 그 이벤트명에 대한 리스너가 실제 EventSource에 안 걸려
  * 있으면 이벤트가 조용히 유실된다. 이 매니저는 subscribe 호출 시점에 그 이벤트명이 처음이면
@@ -67,7 +71,7 @@ export interface SseMultiplexerHandle {
   isAlive: () => boolean;
 }
 
-export function useSseMultiplexer(memberId: string | undefined, enabled: boolean): SseMultiplexerHandle {
+export function useSseMultiplexer(memberId: string | undefined): SseMultiplexerHandle {
   const [connected, setConnected] = useState(false);
 
   const namedSubscribersRef = useRef(new Map<string, Set<EventHandler>>());
@@ -82,8 +86,8 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
   const livenessRef = useRef(createSseLivenessTracker());
   const memberIdRef = useRef(memberId);
   useEffect(() => { memberIdRef.current = memberId; }, [memberId]);
-  // story #2940 카디르 QA(PR#3388) HIGH — memberId가 진짜로 바뀐 재실행(마운트·enabled 단독
-  // 토글이 아니라)인지 판별용. 초기값을 memberId로 잡아 마운트 시점엔 항상 "안 바뀜"이 된다.
+  // story #2940 카디르 QA(PR#3388) HIGH — memberId가 진짜로 바뀐 재실행(마운트가
+  // 아니라)인지 판별용. 초기값을 memberId로 잡아 마운트 시점엔 항상 "안 바뀜"이 된다.
   const prevMemberIdForResetRef = useRef(memberId);
 
   const dispatchNamed = useCallback((eventName: string, data: string, eventId?: string) => {
@@ -125,14 +129,14 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
   }, []);
 
   useEffect(() => {
-    if (!enabled || typeof EventSource === 'undefined') return;
+    if (typeof EventSource === 'undefined') return;
 
     // story #2940 카디르 QA(PR#3388) HIGH — memberId가 실제로 바뀐 재실행이면(org 전환) 옛
     // org에서 받은 마지막 event id를 버린다. 안 버리면 새 org 커넥션 URL에 옛 org의
     // last_event_id가 그대로 실리고, BE(events.py)가 org/member 스코프 없이 그 id의
     // 생성시각만으로 백필 기준시각을 잡아 — 새 org의 더 이른 시각 이벤트가 조용히
-    // 백필에서 빠진다("재연결 안 됨"이 "잘못된 커서로 일부 누락"으로 증상만 이동). enabled
-    // 단독 토글이나 최초 마운트에선 리셋하지 않는다(불필요한 전량 백필 방지).
+    // 백필에서 빠진다("재연결 안 됨"이 "잘못된 커서로 일부 누락"으로 증상만 이동). 최초
+    // 마운트에선 리셋하지 않는다(불필요한 전량 백필 방지).
     if (prevMemberIdForResetRef.current !== memberId) lastEventIdRef.current = null;
     prevMemberIdForResetRef.current = memberId;
 
@@ -249,13 +253,13 @@ export function useSseMultiplexer(memberId: string | undefined, enabled: boolean
       esRef.current = null;
     };
   // story #2940(실사고 재현·codex 발견) — org 전환으로 memberId가 바뀌어도 이 effect가
-  // 재실행되지 않아(구 deps=[enabled]) 커넥션이 옛 member_id로 남아있었다. memberIdRef는
+  // 재실행되지 않아(구 deps=[]) 커넥션이 옛 member_id로 남아있었다. memberIdRef는
   // connect() 재호출 시점의 최신값을 읽으려는 용도였지 effect 재트리거는 못 준다 — ref 쓰기는
   // effect를 재실행시키지 않는다. memberId를 deps에 편입해 값이 실제로 바뀔 때만(문자열 값
   // 비교라 참조 흔들림에 안 낚임) 재구독을 강제한다 — 그 외 참조 안정적인 항목(attachIfNeeded
   // 등)은 여전히 의도적으로 제외라 disable 유지.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, memberId]);
+  }, [memberId]);
 
   // story #2144 — connectedRef는 매 렌더 최신 connected를 반영(렌더 중 ref 대입은 다음
   // 커밋 전에 끝나 안전 — React 규칙상 자기 자신이 렌더링 중인 컴포넌트의 ref를 렌더 중

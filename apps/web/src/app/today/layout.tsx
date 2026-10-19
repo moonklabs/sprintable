@@ -3,6 +3,7 @@ import { headers } from 'next/headers';
 import { getServerSession } from '@/lib/db/server';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { TabOwnerGate } from '@/components/auth/tab-owner-gate';
+import { RealtimeProvider } from '@/components/realtime-provider';
 
 /**
  * story #3962(E-UX-OVERHAUL·「오늘」 구현 3/N) — `/today`는 (authenticated) 레이아웃
@@ -20,5 +21,10 @@ export default async function TodayV3Layout({ children }: { children: React.Reac
   if (!session) redirect(buildLoginRedirect(currentPath));
 
   // story #4490 — the previous person's browser values go before anything below reads them
-  return <TabOwnerGate userId={session.user_id}>{children}</TabOwnerGate>;
+  // story #4698 — 이 화면의 하단 탭 배지(useChatUnreadTotal)는 Provider가 없어 지금까지 독립 EventSource로 폴백했다. 폴백을 지웠으니 스트림 하나(Provider)를 둔다.
+  return (
+    <TabOwnerGate userId={session.user_id}>
+      <RealtimeProvider>{children}</RealtimeProvider>
+    </TabOwnerGate>
+  );
 }

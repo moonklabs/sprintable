@@ -3,6 +3,7 @@ import { headers } from 'next/headers';
 import { getServerSession } from '@/lib/db/server';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { TabOwnerGate } from '@/components/auth/tab-owner-gate';
+import { RealtimeProvider } from '@/components/realtime-provider';
 
 /**
  * story #3982(E-UX-OVERHAUL·「연결·규칙」 구현 2/N) — `/connect-rules`는 (authenticated)
@@ -18,5 +19,10 @@ export default async function ConnectRulesV3Layout({ children }: { children: Rea
   if (!session) redirect(buildLoginRedirect(currentPath));
 
   // story #4490 — the previous person's browser values go before anything below reads them
-  return <TabOwnerGate userId={session.user_id}>{children}</TabOwnerGate>;
+  // story #4698 — 이 화면의 하단 탭 배지(useChatUnreadTotal)는 Provider가 없어 지금까지 독립 EventSource로 폴백했다. 폴백을 지웠으니 스트림 하나(Provider)를 둔다.
+  return (
+    <TabOwnerGate userId={session.user_id}>
+      <RealtimeProvider>{children}</RealtimeProvider>
+    </TabOwnerGate>
+  );
 }

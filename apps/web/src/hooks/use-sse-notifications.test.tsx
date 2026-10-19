@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { RealtimeProvider } from '@/components/realtime-provider';
 import { useSseNotifications, type SseEventNotification } from './use-sse-notifications';
 
 class FakeEventSource {
@@ -50,9 +51,14 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function Harness(props: Parameters<typeof useSseNotifications>[0]) {
+// story #4698 — 훅은 스트림을 열지 않는다(독립 EventSource 폴백 삭제). 스트림은 RealtimeProvider(멀티플렉서)의 것이라 시험도 Provider 안에서 돈다.
+// 재개 커서 · 가시성 재연결 · org 전환 시험은 멀티플렉서 시험(sse-multiplexer.test.tsx)이 같은 동작을 고정하고 있어 폴백 경로 전용이던 중복은 지웠다.
+function Inner(props: Parameters<typeof useSseNotifications>[0]) {
   useSseNotifications(props);
   return null;
+}
+function Harness(props: Parameters<typeof useSseNotifications>[0]) {
+  return <RealtimeProvider currentTeamMemberId="m1"><Inner {...props} /></RealtimeProvider>;
 }
 
 const TRUST_STAGE_PAYLOAD = {
@@ -65,7 +71,7 @@ const TRUST_STAGE_PAYLOAD = {
 describe('useSseNotifications — extraEventNames/onExtraEvent (additive, 9ef0f914)', () => {
   it('existing onNotification behavior is unaffected when no extra options are passed (regression guard)', () => {
     const onNotification = vi.fn();
-    act(() => { root.render(<Harness onNotification={onNotification} memberId="m1" />); });
+    act(() => { root.render(<Harness onNotification={onNotification} />); });
     const es = FakeEventSource.instances[0]!;
     const notif: SseEventNotification = {
       event_type: 'story_status_changed', source_entity_type: 'story', source_entity_id: 's1',
@@ -76,7 +82,7 @@ describe('useSseNotifications — extraEventNames/onExtraEvent (additive, 9ef0f9
   });
 
   it('does not register any extra listeners when extraEventNames is omitted', () => {
-    act(() => { root.render(<Harness onNotification={vi.fn()} memberId="m1" />); });
+    act(() => { root.render(<Harness onNotification={vi.fn()} />); });
     const es = FakeEventSource.instances[0]!;
     expect(es.listeners['story.trust_stage_changed']).toBeUndefined();
   });
@@ -85,7 +91,7 @@ describe('useSseNotifications — extraEventNames/onExtraEvent (additive, 9ef0f9
     const onExtraEvent = vi.fn();
     act(() => {
       root.render(
-        <Harness memberId="m1" extraEventNames={['story.trust_stage_changed']} onExtraEvent={onExtraEvent} />,
+        <Harness extraEventNames={['story.trust_stage_changed']} onExtraEvent={onExtraEvent} />,
       );
     });
     const es = FakeEventSource.instances[0]!;
@@ -97,7 +103,7 @@ describe('useSseNotifications — extraEventNames/onExtraEvent (additive, 9ef0f9
     const onExtraEvent = vi.fn();
     act(() => {
       root.render(
-        <Harness memberId="m1" extraEventNames={['story.trust_stage_changed']} onExtraEvent={onExtraEvent} />,
+        <Harness extraEventNames={['story.trust_stage_changed']} onExtraEvent={onExtraEvent} />,
       );
     });
     const es = FakeEventSource.instances[0]!;
@@ -109,7 +115,7 @@ describe('useSseNotifications — extraEventNames/onExtraEvent (additive, 9ef0f9
     const onExtraEvent = vi.fn();
     expect(() => {
       act(() => {
-        root.render(<Harness memberId="m1" extraEventNames={['story.trust_stage_changed']} onExtraEvent={onExtraEvent} />);
+        root.render(<Harness extraEventNames={['story.trust_stage_changed']} onExtraEvent={onExtraEvent} />);
       });
     }).not.toThrow();
     const es = FakeEventSource.instances[0]!;
@@ -118,127 +124,9 @@ describe('useSseNotifications — extraEventNames/onExtraEvent (additive, 9ef0f9
   });
 });
 
-// story #2162 — 재개 커서(last_event_id) B계열 오염 방지의 standalone-fallback 경로 회귀가드.
-describe('useSseNotifications — 재개 커서 B계열 오염 방지(#2162)', () => {
-  async function triggerTransientReconnect() {
-    const es = FakeEventSource.instances[FakeEventSource.instances.length - 1]!;
-    await act(async () => {
-      es.readyState = FakeEventSource.CONNECTING; // 정상 순단(#2160 세션 확認 경로 안 탐)
-      es.onerror?.();
-      await Promise.resolve();
-    });
-    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
-  }
-
-  beforeEach(() => { vi.useFakeTimers(); });
-  afterEach(() => { vi.useRealTimers(); });
-
-  it('extraEventNames로 받은 B계열(conversation.working) id는 커서로 승격되지 않는다', async () => {
-    await act(async () => {
-      root.render(
-        <Harness memberId="m1" extraEventNames={['conversation.working']} onExtraEvent={vi.fn()} />,
-      );
-    });
-    const es = FakeEventSource.instances[0]!;
-    act(() => { es.emit('conversation.working', JSON.stringify({}), 'transient-uuid-1'); });
-
-    await triggerTransientReconnect();
-
-    const reconnectUrl = new URL(FakeEventSource.instances[FakeEventSource.instances.length - 1]!.url);
-    expect(reconnectUrl.searchParams.get('last_event_id')).toBeNull();
-  });
-
-  it('extraEventNames로 받은 A계열(story.trust_stage_changed) id는 커서로 승격된다', async () => {
-    await act(async () => {
-      root.render(
-        <Harness memberId="m1" extraEventNames={['story.trust_stage_changed']} onExtraEvent={vi.fn()} />,
-      );
-    });
-    const es = FakeEventSource.instances[0]!;
-    act(() => { es.emit('story.trust_stage_changed', JSON.stringify(TRUST_STAGE_PAYLOAD), 'db-event-id-1'); });
-
-    await triggerTransientReconnect();
-
-    const reconnectUrl = new URL(FakeEventSource.instances[FakeEventSource.instances.length - 1]!.url);
-    expect(reconnectUrl.searchParams.get('last_event_id')).toBe('db-event-id-1');
-  });
-});
-
-// story #2964(sse-multiplexer.ts #2940과 동일 클래스, 폴백 경로 전용) — 이 파일 전체가 mux
-// OFF(Provider 밖) 조건이라 항상 폴백 분기를 탄다. mux ON이면 이 훅은 이 effect 자체를
-// 안 타므로(위 mux 분기) 이 회귀가드는 구조적으로 "폴백 경로 전용" 검증 — dev는 지금 mux
-// live라 급하진 않되(story 설명 그대로), 같은 클래스 결함을 사전에 닫는다.
-describe('useSseNotifications — org 전환(memberId 변경) 재연결(story #2964, mux OFF 폴백 경로 전용)', () => {
-  it('memberId가 바뀌면 옛 커넥션을 닫고 새 member_id로 재연결한다', async () => {
-    await act(async () => { root.render(<Harness onNotification={vi.fn()} memberId="member-org-a" />); });
-    expect(FakeEventSource.instances).toHaveLength(1);
-    expect(FakeEventSource.instances[0]!.url).toContain('member_id=member-org-a');
-    expect(FakeEventSource.instances[0]!.closed).toBe(false);
-
-    await act(async () => { root.render(<Harness onNotification={vi.fn()} memberId="member-org-b" />); });
-
-    expect(FakeEventSource.instances[0]!.closed).toBe(true);
-    expect(FakeEventSource.instances).toHaveLength(2);
-    expect(FakeEventSource.instances[1]!.url).toContain('member_id=member-org-b');
-  });
-
-  it('memberId 전환 시 옛 org의 last_event_id를 새 커넥션 URL에 안 싣는다', async () => {
-    await act(async () => { root.render(<Harness onNotification={vi.fn()} memberId="member-org-a" />); });
-    const es = FakeEventSource.instances[0]!;
-    act(() => { es.emit('notification', JSON.stringify({}), 'org-a-last-event-id'); });
-
-    await act(async () => { root.render(<Harness onNotification={vi.fn()} memberId="member-org-b" />); });
-
-    const url = new URL(FakeEventSource.instances[FakeEventSource.instances.length - 1]!.url);
-    expect(url.searchParams.get('member_id')).toBe('member-org-b');
-    expect(url.searchParams.get('last_event_id')).toBeNull(); // ⭐핵심 — 옛 org 커서가 안 샌다.
-  });
-
-  it('memberId가 안 바뀌면(무관한 리렌더) 재연결하지 않는다 — 과잉 재연결 금지', async () => {
-    await act(async () => { root.render(<Harness onNotification={vi.fn()} memberId="member-org-a" />); });
-    expect(FakeEventSource.instances).toHaveLength(1);
-
-    await act(async () => { root.render(<Harness onNotification={vi.fn()} memberId="member-org-a" />); });
-
-    expect(FakeEventSource.instances).toHaveLength(1);
-    expect(FakeEventSource.instances[0]!.closed).toBe(false);
-  });
-});
-
-// story #2987(PO beyond-diff 지적) — chat과 동일 좀비 커넥션 클래스가 알림 SSE의 mux OFF
-// 폴백 경로에도 있었다(mux ON이면 sse-multiplexer.ts 처방이 이미 커버 — 이 회귀가드는
-// fallback 전용). sse-multiplexer.test.tsx·use-chat-sse.test.tsx와 동형 시나리오.
-describe('useSseNotifications — 가시성 복귀 강제 재연결(#2987, mux OFF 폴백 경로 전용)', () => {
-  beforeEach(() => { vi.useFakeTimers(); });
-  afterEach(() => {
-    vi.useRealTimers();
-    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
-  });
-
-  function setVisibility(state: DocumentVisibilityState) {
-    Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
-    document.dispatchEvent(new Event('visibilitychange'));
-  }
-
-  it('임계값(3s) 이상 숨겨졌다 돌아오면 기존 커넥션을 닫고 새로 연다', async () => {
-    await act(async () => { root.render(<Harness onNotification={vi.fn()} memberId="m1" />); });
-    expect(FakeEventSource.instances).toHaveLength(1);
-
-    act(() => { setVisibility('hidden'); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
-    act(() => { setVisibility('visible'); });
-
-    expect(FakeEventSource.instances).toHaveLength(2);
-    expect(FakeEventSource.instances[0]!.closed).toBe(true);
-  });
-
-  it('임계값(3s) 미만의 짧은 전환은 재연결하지 않는다 — 처칭 방지', async () => {
-    await act(async () => { root.render(<Harness onNotification={vi.fn()} memberId="m1" />); });
-
-    act(() => { setVisibility('hidden'); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
-    act(() => { setVisibility('visible'); });
-
-    expect(FakeEventSource.instances).toHaveLength(1);
+describe('useSseNotifications — Provider 밖에서는 스트림을 열지 않는다(story #4698)', () => {
+  it('독립 EventSource로 폴백하지 않는다', () => {
+    act(() => { root.render(<Inner onNotification={vi.fn()} />); });
+    expect(FakeEventSource.instances).toHaveLength(0);
   });
 });

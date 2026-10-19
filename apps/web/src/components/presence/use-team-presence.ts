@@ -3,8 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
-import { createReconnectBackoffState } from '@/lib/realtime/sse-reconnect-backoff';
-import { isSessionAlive } from '@/lib/realtime/sse-session-guard';
 import { fetchWithAuth } from '@/lib/db/client';
 
 // 2505d27d: #1356 `GET /api/v2/team-presence` 응답 계약(검증 완료·mismatch 0).
@@ -28,8 +26,8 @@ export interface TeamPresenceItem {
  * 이벤트 + 탭 visible 복귀 catch-up(hidden 중 누락 이벤트 보정). presence 이벤트 payload 는 trigger({})라
  * 스냅샷은 refetch 로 확보(BE 계약). `document.hidden` 이면 fetch 0(낭비 가드 유지).
  *
- * story #2078 — 플래그 ON이면 RealtimeProvider의 공유 커넥션에 'presence' 이벤트만 구독한다
- * (독립 EventSource를 안 여는). 플래그 OFF/Provider 밖이면 기존과 동일하게 자체 연결.
+ * story #2078 — RealtimeProvider의 공유 커넥션에 'presence' 이벤트만 구독한다(독립 EventSource를 안 여는).
+ * story #4698 — 독립 연결 폴백은 지웠다: Provider 밖이면 스트림 없이 초기 스냅샷 + 탭 복귀 refetch만 한다.
  *
  * story #2139 — 폴백 정책 결정(PO): 주기 폴링은 재도입하지 않는다(#2074 인스턴스 기아 교훈 —
  * 그래서 애초에 걷어낸 것). 대신 **재연결 시 1회 강제 refetch**를 추가한다 — 새 메커니즘이
@@ -58,7 +56,7 @@ export interface TeamPresenceItem {
  */
 const PRESENCE_EVENT_DEBOUNCE_MS = 300;
 
-export function useTeamPresence(active: boolean, memberId?: string): TeamPresenceItem[] {
+export function useTeamPresence(active: boolean): TeamPresenceItem[] {
   const [items, setItems] = useState<TeamPresenceItem[]>([]);
   const mux = useSseMultiplexerContext();
 
@@ -109,48 +107,20 @@ export function useTeamPresence(active: boolean, memberId?: string): TeamPresenc
     const onVisible = () => { if (!document.hidden) void fetchPresence(); }; // hidden 중 누락 보정
     document.addEventListener('visibilitychange', onVisible);
 
-    if (mux) {
-      const unsubPresence = mux.subscribe('presence', () => { scheduleFetchPresence(); });
-      // story #2139 — 공유 커넥션이 끊겼다 재연결되면 그 구간에 놓쳤을 변경을 강제 refetch로 흡수.
-      const unsubReconnect = mux.subscribeReconnect(() => { void fetchPresence(); });
-      return () => {
-        unsubPresence();
-        unsubReconnect();
-        document.removeEventListener('visibilitychange', onVisible);
-        if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-      };
-    }
-
-    // 독립 연결 폴백(플래그 OFF 또는 Provider 밖) — story #2078 이전과 완전히 동일한 코드
-    // + story #2139의 재연결 refetch(use-chat-sse.ts와 동일한 backoff.isReconnect() 패턴).
-    if (typeof EventSource === 'undefined') {
+    if (!mux) {
+      // Provider 밖 — 스트림 없음(story #4698). 초기 스냅샷과 탭 복귀 refetch만.
       return () => document.removeEventListener('visibilitychange', onVisible);
     }
-    const backoff = createReconnectBackoffState();
-    const url = new URL('/api/event-stream', window.location.origin);
-    if (memberId) url.searchParams.set('member_id', memberId);
-    const es = new EventSource(url.toString(), { withCredentials: true });
-    es.onopen = () => {
-      const isReconnect = backoff.isReconnect();
-      backoff.onOpen();
-      if (isReconnect) void fetchPresence();
-    };
-    // 재연결 여부는 hadPriorError(직전 error 발생 이력)로 판정된다 — 이 훅은 수동 재시도를
-    // 걸지 않고 브라우저 native auto-reconnect에 맡기지만, onError를 호출해두지 않으면
-    // isReconnect()가 영원히 false로 남아 위 onopen의 refetch가 절대 안 켜진다.
-    es.onerror = () => {
-      backoff.onError();
-      // story #2160 — CLOSED면 브라우저가 자동재연결을 이미 포기한 것(non-2xx 등). 조용히
-      // 방치하지 않고 세션 상태를 확認해, 죽었으면 SessionExpiredDialog로 사용자에게 알린다.
-      if (es.readyState === EventSource.CLOSED) void isSessionAlive();
-    };
-    es.addEventListener('presence', () => { scheduleFetchPresence(); }); // 변경 시 push → 디바운스 후 refetch
+    const unsubPresence = mux.subscribe('presence', () => { scheduleFetchPresence(); });
+    // story #2139 — 공유 커넥션이 끊겼다 재연결되면 그 구간에 놓쳤을 변경을 강제 refetch로 흡수.
+    const unsubReconnect = mux.subscribeReconnect(() => { void fetchPresence(); });
     return () => {
-      es.close();
+      unsubPresence();
+      unsubReconnect();
       document.removeEventListener('visibilitychange', onVisible);
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     };
-  }, [active, fetchPresence, scheduleFetchPresence, memberId, mux]);
+  }, [active, fetchPresence, scheduleFetchPresence, mux]);
 
   return items;
 }

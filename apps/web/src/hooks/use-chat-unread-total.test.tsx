@@ -8,7 +8,7 @@
 //
 // 이 테스트는 정확히 그 계약을 고정한다: useChatUnreadTotal이 <RealtimeProvider> 자식으로
 // 렌더되면(수정 후 dashboard-shell.tsx의 ShellBody와 동일 조건) mux 공유 커넥션 하나만 열리고,
-// 독립 EventSource는 생기지 않는다.
+// 독립 EventSource는 생기지 않는다. story #4698 — 플래그 · 폴백은 지웠다(Provider 밖이면 스트림 0).
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
@@ -68,7 +68,6 @@ afterEach(async () => {
 describe('useChatUnreadTotal — story #2078 결함수정(Provider 자식 위치 고정)', () => {
   it('<RealtimeProvider>(mux ON) 자식으로 렌더되면 독립 EventSource를 열지 않고 mux 커넥션 1개만 공유한다', async () => {
     vi.resetModules();
-    vi.stubEnv('NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED', 'true');
     const { RealtimeProvider } = await import('@/components/realtime-provider');
     const { useChatUnreadTotal } = await import('./use-chat-unread-total');
 
@@ -90,9 +89,8 @@ describe('useChatUnreadTotal — story #2078 결함수정(Provider 자식 위치
     expect(instances).toHaveLength(1);
   });
 
-  it('Provider 밖(컨텍스트 기본값 null)에서 렌더되면 독립 EventSource로 폴백한다 — 폴백 경로 자체는 유효', async () => {
+  it('Provider 밖(컨텍스트 기본값 null)에서 렌더되면 스트림을 열지 않는다 — 독립 EventSource 폴백은 지웠다(story #4698)', async () => {
     vi.resetModules();
-    vi.stubEnv('NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED', 'true');
     const { useChatUnreadTotal } = await import('./use-chat-unread-total');
 
     function StandaloneConsumer() {
@@ -104,10 +102,8 @@ describe('useChatUnreadTotal — story #2078 결함수정(Provider 자식 위치
       root.render(<StandaloneConsumer />);
     });
 
-    // Provider 밖이므로 mux 컨텍스트가 없다 — 이 경우엔 독립 연결이 "의도된" 폴백이다
-    // (플래그 OFF와 동일하게 취급). 즉 결함은 "폴백이 존재한다"가 아니라 "정상 위치에서도
-    // 폴백을 탄다"였다 — 위 첫 테스트가 그 축을 고정한다.
-    expect(instances).toHaveLength(1);
+    // 스트림을 여는 곳은 RealtimeProvider(멀티플렉서) 하나뿐이다 — Provider 밖의 훅은 조용히 스트림 없이 마운트 조회만 한다.
+    expect(instances).toHaveLength(0);
   });
 });
 

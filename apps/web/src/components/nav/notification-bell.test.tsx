@@ -2,6 +2,7 @@
 //
 // story #2192 — 알림벨이 30건에서 조용히 잘리던 결함의 회귀가드. 「더 보기」가 hasMore일 때만
 // 뜨고, 누르면 offset을 이어서 다음 페이지를 붙이는지 실 렌더로 검증한다.
+import { RealtimeProvider } from '@/components/realtime-provider';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -22,7 +23,7 @@ function withIntl(node: React.ReactNode, locale: 'ko' | 'en' = 'ko') {
   const messages = locale === 'ko' ? koMessages : enMessages;
   return (
     <NextIntlClientProvider locale={locale} messages={messages} timeZone="Asia/Seoul">
-      {node}
+      <RealtimeProvider>{node}</RealtimeProvider>
     </NextIntlClientProvider>
   );
 }

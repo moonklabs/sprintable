@@ -184,6 +184,9 @@ afterEach(async () => {
 async function mount() {
   const { KanbanBoard } = await import('./kanban-board');
   const { ToastProvider, ToastContainer, useToast } = await import('@/components/ui/toast');
+  // story #4698 — 보드의 실시간은 RealtimeProvider(멀티플렉서)의 스트림 하나로 온다(훅의 독립 EventSource 폴백 삭제). resetModules 뒤라 KanbanBoard와 «같은» 새 모듈
+  // 인스턴스의 Provider를 같이 동적 import해야 같은 Context를 본다.
+  const { RealtimeProvider } = await import('@/components/realtime-provider');
 
   function TestToastRenderer() {
     const { toasts, dismissToast } = useToast();
@@ -192,10 +195,12 @@ async function mount() {
 
   await act(async () => {
     root.render(wrap(
-      <ToastProvider>
-        <KanbanBoard projectId="proj-1" wsSlug="ws-1" projSlug="proj-1" />
-        <TestToastRenderer />
-      </ToastProvider>,
+      <RealtimeProvider>
+        <ToastProvider>
+          <KanbanBoard projectId="proj-1" wsSlug="ws-1" projSlug="proj-1" />
+          <TestToastRenderer />
+        </ToastProvider>
+      </RealtimeProvider>,
     ));
   });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });

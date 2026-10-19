@@ -3,10 +3,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSseMultiplexerContext, useSseConnectedContext } from '@/components/realtime-provider';
 import { shouldSuppressDuplicateSseEvent, createSeenIdTracker } from '@/lib/realtime/sse-event-dedup';
-import { createReconnectBackoffState, type ReconnectBackoffState } from '@/lib/realtime/sse-reconnect-backoff';
-import { isSessionAlive } from '@/lib/realtime/sse-session-guard';
-import { isCursorEligibleEventName } from '@/lib/realtime/sse-cursor-eligibility';
-import { createSseLivenessTracker, createVisibilityReconnectState } from '@/lib/realtime/sse-visibility-reconnect';
 import { createPollBackoffState, POLL_THRESHOLD_MS } from '@/lib/realtime/sse-polling-fallback';
 
 // chat-attach: 메시지 전송 시 첨부 메타 (BE MessageAttachment 계약과 동일).
@@ -251,7 +247,6 @@ export interface SseConversationReadPayload {
 }
 
 interface UseChatSseOptions {
-  currentTeamMemberId?: string;
   onConversationMessage?: (payload: Record<string, unknown>) => void;
   // R2: 채팅 working/typing — 1.5s 폴(/conversations/{id}/working) 대체.
   onWorking?: (payload: SseWorkingPayload) => void;
@@ -273,28 +268,15 @@ interface UseChatSseOptions {
   onSentHere?: (payload: Record<string, unknown>) => void;
 }
 
-// story #2095 — 재연결 backoff는 sse-reconnect-backoff.ts(공용, sse-multiplexer.ts와
-// 동일 모듈 재사용)로 뽑았다.
-
-export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorking, onConversationRead, onReconnect, onPoll, onSentHere }: UseChatSseOptions) {
-  const [connected, setConnected] = useState(false);
-  const sourceRef = useRef<EventSource | null>(null);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // react-hooks/refs: 렌더 중 ref.current 조건부 대입 금지라 지연초기화는 useState(초기화 함수)로.
-  const [backoff] = useState<ReconnectBackoffState>(() => createReconnectBackoffState());
+export function useChatSse({ onConversationMessage, onWorking, onConversationRead, onReconnect, onPoll, onSentHere }: UseChatSseOptions) {
   // story #2163 — 이 훅 인스턴스 전용 dedup tracker(모듈 전역 아님). 이 컴포넌트가 언마운트되면
   // 같이 사라진다 — 다른 useChatSse 인스턴스(예: GNB 뱃지의 useChatUnreadTotal)를 굶기지 않는다.
   const seenIdsRef = useRef(createSeenIdTracker());
-  const lastEventIdRef = useRef<string | null>(null);
   const onConversationMessageRef = useRef(onConversationMessage);
   const onWorkingRef = useRef(onWorking);
   const onConversationReadRef = useRef(onConversationRead);
   const onReconnectRef = useRef(onReconnect);
   const onPollRef = useRef(onPoll);
-  const memberIdRef = useRef(currentTeamMemberId);
-  // story #2964(#2940과 동일 클래스, 폴백 경로 전용) — memberId가 진짜로 바뀐 재실행(마운트·
-  // mux 단독 토글이 아니라)인지 판별용.
-  const prevMemberIdForResetRef = useRef(currentTeamMemberId);
 
   // useLayoutEffect: DOM commit 후 동기 실행 — useEffect(비동기)보다 먼저 실행되어
   // SSE 이벤트 도달 전에 ref가 항상 최신 콜백을 가리킴 (stale closure 방지)
@@ -313,7 +295,6 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
   useLayoutEffect(() => { onConversationReadRef.current = onConversationRead; }, [onConversationRead]);
   useLayoutEffect(() => { onReconnectRef.current = onReconnect; }, [onReconnect]);
   useLayoutEffect(() => { onPollRef.current = onPoll; }, [onPoll]);
-  useLayoutEffect(() => { memberIdRef.current = currentTeamMemberId; }, [currentTeamMemberId]);
 
   const handleConversationMessage = (raw: string) => {
     if (shouldSuppressDuplicateSseEvent(raw, seenIdsRef.current)) return;
@@ -340,7 +321,7 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
     } catch { /* ignore parse errors */ }
   };
 
-  // story #2078 — 멀티플렉서(플래그 ON)가 있으면 공유 커넥션에 이름별 구독만 얹는다.
+  // story #2078 — 멀티플렉서의 공유 커넥션에 이름별 구독만 얹는다(story #4698 — 이 훅은 스트림을 열지 않는다).
   //
   // story #2136 — `chat:message`·`reply_created` 구독을 제거했다. 둘 다 BE emit 문자열과
   // 매치가 0(grep 확認, `reply_created`가 참조하던 `memos.py`는 backend에 아예 없음)이라
@@ -365,147 +346,11 @@ export function useChatSse({ currentTeamMemberId, onConversationMessage, onWorki
     return () => { for (const u of unsubs) u(); };
   }, [mux]);
 
-  // 독립 연결 폴백(플래그 OFF 또는 Provider 밖) — story #2078 이전과 완전히 동일한 코드.
-  useEffect(() => {
-    if (mux || typeof EventSource === 'undefined') return;
-
-    // story #2964(sse-multiplexer.ts #2940과 동일 클래스) — org 전환으로 currentTeamMemberId가
-    // 바뀌어도 이 effect가 재실행되지 않으면(구 deps=[mux, backoff]) 커넥션이 옛 member_id로
-    // 남는다. memberIdRef 쓰기는 effect를 재트리거하지 못한다 — currentTeamMemberId를 deps에
-    // 편입해 값이 실제로 바뀔 때만(문자열 값 비교) 재구독을 강제한다. 동시에 memberId가 진짜
-    // 바뀐 경우에만 옛 org의 lastEventIdRef를 버린다(#3388 카디르 QA와 동일 근거 — 새 org
-    // 커넥션에 옛 org의 last_event_id가 실리면 BE가 org 스코프 없이 그 id의 생성시각만으로
-    // 백필기준을 잡아 조용히 누락된다). mux 단독 토글이나 최초 마운트에선 리셋하지 않는다.
-    if (prevMemberIdForResetRef.current !== currentTeamMemberId) lastEventIdRef.current = null;
-    prevMemberIdForResetRef.current = currentTeamMemberId;
-
-    // story #2987 — sse-multiplexer.ts와 동일 처방(그쪽 주석 참고). 가시성 복귀 강제 재연결은
-    // backoff.isReconnect()를 안 거치므로(onError 미경유) 이 플래그로 onReconnect(=backfill)를
-    // 확실히 태운다.
-    let pendingForcedReconnect = false;
-    // story #4252 — sse-multiplexer.ts와 같은 처방: 최근에 받은 게 있는 OPEN 커넥션은 focus에서 끊지 않는다.
-    const liveness = createSseLivenessTracker();
-
-    function connect() {
-      sourceRef.current?.close();
-      sourceRef.current = null;
-
-      const url = new URL('/api/event-stream', window.location.origin);
-      if (memberIdRef.current) url.searchParams.set('member_id', memberIdRef.current);
-      if (lastEventIdRef.current) url.searchParams.set('last_event_id', lastEventIdRef.current);
-
-      const source = new EventSource(url.toString());
-      sourceRef.current = source;
-      liveness.reset();
-      // story #4252 — heartbeat(BE가 쉬는 동안 30초마다) · 이 훅이 받는 이벤트를 생존 신호로 센다.
-      for (const name of ['heartbeat', 'conversation.message_created', 'conversation.working', 'conversation.read']) {
-        source.addEventListener(name, () => { if (sourceRef.current === source) liveness.markActivity(); });
-      }
-
-      source.onopen = () => {
-        // story #4252(까디르 QA HIGH) — 지금 소스의 open만 생존 신호(옛 소스 큐의 open이 새 소스를 되살리지 않게 · 이름 있는 이벤트와 같은 가드).
-        if (sourceRef.current === source) liveness.markActivity();
-        const isReconnect = backoff.isReconnect() || pendingForcedReconnect;
-        pendingForcedReconnect = false;
-        setConnected(true);
-        backoff.onOpen();
-        // AC4: 재연결 시 backfill 트리거
-        if (isReconnect) onReconnectRef.current?.();
-      };
-
-      source.onerror = () => {
-        setConnected(false);
-        // story #2160 — CLOSED는 브라우저가 이미 "복구 불가"로 판정한 것(자동재연결 없음).
-        const wasFatal = source.readyState === EventSource.CLOSED;
-        source.close();
-        sourceRef.current = null;
-        const scheduleRetry = () => {
-          if (reconnectTimerRef.current) return;
-          const delay = backoff.onError();
-          reconnectTimerRef.current = setTimeout(() => {
-            reconnectTimerRef.current = null;
-            connect();
-          }, delay);
-        };
-        if (wasFatal) {
-          void isSessionAlive().then((alive) => { if (alive) scheduleRetry(); });
-          return;
-        }
-        scheduleRetry();
-      };
-
-      // conversation.message_created — realtime update for conversation list
-      // S-COMM-12: canonical 이름만 리슨. server가 legacy(conversation:message)도 병행 emit하므로
-      // 외부 consumer 하위호환은 server 레벨에서 처리됨 — 프론트가 둘 다 받으면 2회 발화됨.
-      source.addEventListener('conversation.message_created', (e: MessageEvent) => {
-        // story #2162 — B계열(presence·conversation.working)만 커서 승격 금지, 이 이벤트는 대상 아님.
-        if (e.lastEventId && isCursorEligibleEventName('conversation.message_created')) lastEventIdRef.current = e.lastEventId;
-        handleConversationMessage(e.data as string);
-      });
-
-      // R2(da9d1781): conversation.working — typing 인디케이터 1.5s 폴(/conversations/{id}/working) 대체.
-      // payload 가 working 목록을 실어 보내므로 refetch 없이 직접 갱신.
-      source.addEventListener('conversation.working', (e: MessageEvent) => {
-        // story #2162 — DB Event 행이 없는 B계열이라 재개 커서로 승격하지 않는다(근본 원인 자리).
-        if (e.lastEventId && isCursorEligibleEventName('conversation.working')) lastEventIdRef.current = e.lastEventId;
-        handleWorking(e.data as string);
-      });
-
-      // story #1977: conversation.read — #1976이 본인 타 커넥션에만 전파(read-receipt 아님).
-      // 다른 탭/기기에서 mark-read 하면 이 탭의 리스트 배지·GNB 총합을 서버 truth로 자가정정.
-      source.addEventListener('conversation.read', (e: MessageEvent) => {
-        // story #2162 — B계열만 커서 승격 금지, 이 이벤트는 대상 아님.
-        if (e.lastEventId && isCursorEligibleEventName('conversation.read')) lastEventIdRef.current = e.lastEventId;
-        handleConversationRead(e.data as string);
-      });
-    }
-
-    connect();
-
-    // story #2987 — sse-multiplexer.ts와 동일 처방(그쪽 주석 참고, sse-visibility-reconnect.ts
-    // 공용 모듈). readyState는 좀비 커넥션을 못 잡으므로 가시성 복귀 시 무조건 강제 재연결한다.
-    const visibilityState = createVisibilityReconnectState();
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        visibilityState.onHidden();
-        return;
-      }
-      if (visibilityState.onVisible()) {
-        pendingForcedReconnect = true;
-        connect();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    // story #3081 — visibilitychange 축과 독립: 데스크톱 셸(창은 계속 visible)에서 OS
-    // 포커스만 잃었다 되찾는 경우 위 handleVisibilityChange는 안 fire한다(sse-visibility-
-    // reconnect.ts의 onFocusRegained 주석 참고). sse-multiplexer.ts와 동일 처방.
-    const handleWindowFocus = () => {
-      if (visibilityState.onFocusRegained(liveness.isAlive(sourceRef.current?.readyState))) {
-        pendingForcedReconnect = true;
-        connect();
-      }
-    };
-    window.addEventListener('focus', handleWindowFocus);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('focus', handleWindowFocus);
-      // #3388 카디르 QA MEDIUM과 동일 근거 — clearTimeout만으론 stale ref가 남아, 재마운트
-      // (memberId 전환) 직후 대기 中이던 백오프 재시도가 stale ref에 걸려 건너뛸 수 있었다.
-      if (reconnectTimerRef.current) {
-        clearTimeout(reconnectTimerRef.current);
-        reconnectTimerRef.current = null;
-      }
-      sourceRef.current?.close();
-      sourceRef.current = null;
-    };
-  }, [mux, backoff, currentTeamMemberId]);
-
   // story 6ddaa086 — 이전 주석은 "mux.connected가 이미 반응형"이라 적었으나 틀렸다: mux
   // 핸들 자체는 참조안정적이라(realtime-provider.tsx) getter 뒤 값이 바뀌어도 이 컴포넌트가
   // 리렌더되지 않았다. muxConnected(위, 전용 컨텍스트)만 실제로 반응형이다.
-  const effectiveConnected = mux ? muxConnected : connected;
+  // story #4698 — 독립 연결 폴백은 지웠다: Provider 밖(mux 없음)이면 스트림이 없으니 연결됨=false(아래 폴링 폴백이 이어받는다).
+  const effectiveConnected = mux ? muxConnected : false;
 
   // story #3621 — connected가 threshold(기본 10s) 이상 false로 머물면 폴링 시작. mux
   // 경로·독립 연결 경로 둘 다 effectiveConnected 하나로 판정(경로 무관 동일 동작).
