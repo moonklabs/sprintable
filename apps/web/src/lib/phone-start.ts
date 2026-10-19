@@ -212,3 +212,34 @@ async function follow(pending: Pending, deps: StartDeps): Promise<StartOutcome> 
   }
   return { kind: 'unknown', pending };
 }
+
+/** after a start is done on the Mac the session still has to STAND (the server reads it as running): look every 2 s, half a minute at most */
+export const STAND_POLL_MS = 2_000;
+export const STAND_POLL_MAX_MS = 30_000;
+
+/**
+ * «started» is the Mac's word that it spawned the session — not that the agent is up (started ≠ stood). The start screen waits for the SERVER to say the agent
+ * runs on that computer (the same `running` word the landing reads) before it opens the conversation. `stood`: it runs · `waiting`: not within the limit ·
+ * `gone`: the screen left meanwhile (nothing is moved).
+ */
+export async function waitForSession(
+  target: { setupId: string; agentId: string },
+  deps: Pick<StartDeps, 'phoneCall' | 'wait' | 'now' | 'pollMs' | 'pollMaxMs'> & { alive?: () => boolean },
+): Promise<'stood' | 'waiting' | 'gone'> {
+  const wait = deps.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const now = deps.now ?? Date.now;
+  const every = deps.pollMs ?? STAND_POLL_MS;
+  const deadline = now() + (deps.pollMaxMs ?? STAND_POLL_MAX_MS);
+  const alive = deps.alive ?? (() => true);
+  for (;;) {
+    if (!alive()) return 'gone';
+    const read = await readStartable(deps.phoneCall); // never rejects: a read that failed is `failed` — not an answer, ask again
+    if (!alive()) return 'gone';
+    if (read && read.kind === 'view') {
+      const agent = read.view.computers.find((c) => c.setup_id === target.setupId)?.agents.find((a) => a.agent_member_id === target.agentId);
+      if (agent?.running === true) return 'stood';
+    }
+    if (now() >= deadline) return 'waiting';
+    await wait(every);
+  }
+}

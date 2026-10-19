@@ -1,7 +1,7 @@
 // story #4714 — a start from the phone app: what the web asks the shell, what it posts, how every end maps to one outcome
 // (contract 02d2cf71 §14 v1.17 · v1.18 · Yuna 4714-copy-1017).
 import { describe, expect, it, vi } from 'vitest';
-import { checkStart, parseStartable, readStartable, startOnPhone, type Pending, type StartDeps } from './phone-start';
+import { checkStart, parseStartable, readStartable, startOnPhone, waitForSession, type Pending, type StartDeps } from './phone-start';
 import type { PhoneAnswer } from './phone-bridge';
 
 let currentFetch: (url: string, init?: RequestInit) => Promise<Response> = async () => { throw new Error('no server'); };
@@ -220,5 +220,86 @@ describe('[4714] readStartable — this phone\'s key found by the number the ser
     await expect(readStartable(async () => answer())).resolves.toEqual({ kind: 'failed' });
     currentFetch = async () => { throw new Error('network'); };
     await expect(readStartable(async () => answer())).resolves.toEqual({ kind: 'failed' });
+  });
+});
+
+describe('[4714] waitForSession — started ≠ stood: the server\'s `running` word on THAT agent on THAT computer', () => {
+  const OTHER_SETUP = '11111111-2222-4333-8444-666666666666';
+  const OTHER_AGENT = '22222222-3333-4444-8555-777777777777';
+  const target = { setupId: SETUP, agentId: AGENT };
+  const agent = (id: string, running: unknown) => ({ agent_member_id: id, name: 'a', can_command: true, projects: [{ project_id: PROJECT, name: 'p' }], ...(running === undefined ? {} : { running }) });
+  const startable = (computers: Array<{ setup_id: string; agents: unknown[] }>) => ({ remote_control: true, computers: computers.map((c) => ({ device_name: 'm', reachable: true, ...c })) });
+  const phoneCall = async () => ({ id: 'k', ok: true, public_key: 'PK', key_number: '482 917' }) as PhoneAnswer;
+  /** each startable read answers the next body (the last one repeats); a clock the fake wait moves */
+  function world(bodies: unknown[]) {
+    let n = 0; let t = 0; const reads: number[] = [];
+    currentFetch = async (url) => {
+      if (url.startsWith('/api/remote-devices')) return json(200, { devices: [{ id: 'p-1', confirm_number: '482 917' }] });
+      reads.push(t);
+      const b = bodies[Math.min(n++, bodies.length - 1)];
+      if (b instanceof Error) throw b;
+      return json(200, b);
+    };
+    return { reads, deps: { phoneCall, wait: async (ms: number) => { t += ms; }, now: () => t } };
+  }
+
+  it('the agent runs on that computer → stood, with one read and no wait', async () => {
+    const w = world([startable([{ setup_id: SETUP, agents: [agent(AGENT, true)] }])]);
+    await expect(waitForSession(target, w.deps)).resolves.toBe('stood');
+    expect(w.reads).toEqual([0]);
+  });
+
+  it('not yet → it asks again every 2 s and answers stood on the read that says it runs', async () => {
+    const w = world([
+      startable([{ setup_id: SETUP, agents: [agent(AGENT, false)] }]),
+      startable([{ setup_id: SETUP, agents: [agent(AGENT, null)] }]),
+      startable([{ setup_id: SETUP, agents: [agent(AGENT, true)] }]),
+    ]);
+    await expect(waitForSession(target, w.deps)).resolves.toBe('stood');
+    expect(w.reads).toEqual([0, 2000, 4000]);
+  });
+
+  it('only THAT agent on THAT computer counts: another agent running, or the same agent id on another computer, is not it', async () => {
+    // the wrong ones come FIRST in each list: a lookup that took the first computer / the first agent would say «stood»
+    const w = world([startable([{ setup_id: OTHER_SETUP, agents: [agent(AGENT, true)] }, { setup_id: SETUP, agents: [agent(OTHER_AGENT, true), agent(AGENT, false)] }])]);
+    await expect(waitForSession(target, { ...w.deps, pollMaxMs: 6000 })).resolves.toBe('waiting');
+  });
+
+  it('never within the limit → waiting, after the last read at the limit (30 s by default) — not before, not forever', async () => {
+    const w = world([startable([{ setup_id: SETUP, agents: [agent(AGENT, false)] }])]);
+    await expect(waitForSession(target, w.deps)).resolves.toBe('waiting');
+    expect(w.reads[0]).toBe(0);
+    expect(w.reads[w.reads.length - 1]).toBe(30_000);
+    expect(w.reads.length).toBe(16);
+  });
+
+  it('a read that fails (offline · 500 · not a view) is no answer — it asks again, and a later «runs» still lands', async () => {
+    const w = world([new Error('offline'), { remote_control: 'x' }, startable([{ setup_id: SETUP, agents: [agent(AGENT, true)] }])]);
+    await expect(waitForSession(target, w.deps)).resolves.toBe('stood');
+    expect(w.reads).toEqual([0, 2000, 4000]);
+  });
+
+  it('a bridge call that is rejected is no answer either — it asks again', async () => {
+    const w = world([startable([{ setup_id: SETUP, agents: [agent(AGENT, true)] }])]);
+    let n = 0;
+    const flaky = async () => { if (n++ === 0) throw new Error('bridge gone'); return { id: 'k', ok: true, public_key: 'PK', key_number: '482 917' } as PhoneAnswer; };
+    await expect(waitForSession(target, { ...w.deps, phoneCall: flaky })).resolves.toBe('stood');
+    expect(w.reads).toEqual([2000]);
+  });
+
+  it('a `running` that is not the boolean true (a string · 1 · missing) is not «runs»', async () => {
+    for (const running of ['true', 1, undefined]) {
+      const w = world([startable([{ setup_id: SETUP, agents: [agent(AGENT, running)] }])]);
+      await expect(waitForSession(target, { ...w.deps, pollMaxMs: 2000 })).resolves.toBe('waiting');
+    }
+  });
+
+  it('the screen left (alive false) → gone: before the first read, or while it waits — and nothing more is read', async () => {
+    const w = world([startable([{ setup_id: SETUP, agents: [agent(AGENT, false)] }])]);
+    await expect(waitForSession(target, { ...w.deps, alive: () => false })).resolves.toBe('gone');
+    expect(w.reads).toEqual([]);
+    let reads = 0;
+    const w2 = world([startable([{ setup_id: SETUP, agents: [agent(AGENT, false)] }])]);
+    await expect(waitForSession(target, { ...w2.deps, alive: () => reads++ < 2 })).resolves.toBe('gone');
   });
 });

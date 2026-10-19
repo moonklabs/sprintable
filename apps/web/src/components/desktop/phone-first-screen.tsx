@@ -19,7 +19,8 @@ import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { useOrgRemoteControl, putOrgRemoteControl } from '@/lib/org-remote-control';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { sendMacLinkMail, type MacLinkMailOutcome } from '@/lib/phone-mac-link-mail';
-import { checkStart, readStartable, startOnPhone, type Pending, type StartOutcome, type StartableAgent, type StartableComputer, type StartableRead, type StartableView } from '@/lib/phone-start';
+import { firstInstructionHref } from '@/lib/onboarding/first-instruction';
+import { checkStart, readStartable, startOnPhone, waitForSession, type Pending, type StartOutcome, type StartableAgent, type StartableComputer, type StartableRead, type StartableView } from '@/lib/phone-start';
 
 type Read = { kind: 'reading' } | { kind: 'failed' } | { kind: 'no_phone' } | { kind: 'view'; view: StartableView };
 
@@ -212,6 +213,7 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
   const [sheet, setSheet] = useState<'computer' | 'agent' | 'project' | null>(null);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<StartOutcome | null>(null);
+  const [waitedOut, setWaitedOut] = useState(false); // started on the Mac, but the session did not stand within the limit
   // a start whose end is not known: the only way on is [결과 확인] (the same command) — a new press would sign again and could start it twice
   const locked = outcome?.kind === 'unknown';
   const frozen = busy || locked; // a start is in flight, or its end is not known: nothing the person picks may change the pick (or clear what [결과 확인] follows)
@@ -224,21 +226,31 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
     pending.current = o.kind === 'unknown' ? o.pending : null;
     if (o.kind === 'remote_off') onRemoteOff(); // the screen returns to «원격 제어가 꺼져 있어요»
   };
+  // started ≠ stood (story 4714 AC3): «started» is the Mac's word that it spawned the session. The conversation opens when the SERVER says the agent runs on
+  // that computer (the same `running` word the landing reads); until then the button stays «starting». Not within the limit: a line says so, the screen is free again.
+  const settle = async (o: StartOutcome) => {
+    apply(o);
+    if (o.kind === 'started' && agent) {
+      const seen = await waitForSession({ setupId: computer.setup_id, agentId: agent.agent_member_id }, { ...deps, alive: () => alive.current });
+      if (!alive.current) return;
+      if (seen === 'stood') { window.location.assign(firstInstructionHref(agent.agent_member_id)); return; } // leaves the page: the screen stays busy until it does
+      setWaitedOut(true);
+    }
+    setBusy(false);
+  };
   const start = async () => {
     if (busy || !agent || !project) return;
-    setBusy(true); setOutcome(null);
+    setBusy(true); setOutcome(null); setWaitedOut(false);
     const o = await startOnPhone({ setupId: computer.setup_id, agentId: agent.agent_member_id, projectId: project.project_id }, deps).catch((): StartOutcome => ({ kind: 'failed' }));
     if (!alive.current) return;
-    apply(o);
-    setBusy(false);
+    await settle(o);
   };
   const check = async () => {
     if (busy || !pending.current) return;
-    setBusy(true);
+    setBusy(true); setWaitedOut(false);
     const o = await checkStart(pending.current, deps).catch((): StartOutcome => ({ kind: 'failed' }));
     if (!alive.current) return;
-    apply(o);
-    setBusy(false);
+    await settle(o);
   };
 
   const reason = !agent ? t('start.needAgent') : !project ? t('start.needProject') : null;
@@ -285,6 +297,9 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
         </Button>
         {reason ? <p className="text-xs text-muted-foreground" data-testid="onboarding-phone-reason">{reason}</p> : null}
       </div>
+      {outcome?.kind === 'started' && waitedOut ? (
+        <p role="status" className="text-sm text-muted-foreground" data-testid="onboarding-phone-connecting">{t('result.connecting')}</p>
+      ) : null}
       {outcome && line ? (
         <div className="space-y-2" data-testid="onboarding-phone-result">
           <p role={outcome.kind === 'already_running' || outcome.kind === 'unknown' ? 'status' : 'alert'}
