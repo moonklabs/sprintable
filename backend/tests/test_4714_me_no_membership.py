@@ -30,9 +30,11 @@ class _Db:
 
     def __init__(self, org_elsewhere: bool = False, team_elsewhere: bool = False):
         self.org_elsewhere, self.team_elsewhere = org_elsewhere, team_elsewhere
+        self.sqls: list[str] = []
 
     async def execute(self, stmt):
         sql = str(stmt)
+        self.sqls.append(sql)
         if "org_members" in sql and "org_members.org_id" not in sql:  # the «anywhere» question
             row = uuid.uuid4() if self.org_elsewhere else None
             return SimpleNamespace(scalar_one_or_none=lambda: row)
@@ -99,6 +101,17 @@ async def test_removed_from_one_organization_but_still_in_another_is_not_no_memb
 async def test_a_team_member_row_in_another_organization_also_counts_as_belonging_somewhere(clean):
     _world(_Db(team_elsewhere=True))
     assert (await _me()).json()["error"]["reason"] == "membership_elsewhere"
+
+
+@pytest.mark.anyio
+async def test_the_belongs_somewhere_question_counts_live_rows_only(clean):
+    """a removed (soft-deleted) org row must not make someone «belong somewhere»: the question the 404 asks is `deleted_at IS NULL` and has no organization filter"""
+    db = _Db()
+    _world(db)
+    assert (await _me()).json()["error"]["reason"] == "no_membership"
+    anywhere = [q for q in db.sqls if "org_members" in q and "org_members.org_id" not in q]
+    assert len(anywhere) == 1
+    assert "org_members.deleted_at IS NULL" in anywhere[0] and "org_members.user_id" in anywhere[0]
 
 
 def test_the_two_reasons_are_distinct_words():
