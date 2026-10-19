@@ -712,6 +712,7 @@ async def test_20_the_presser_reads_what_became_of_their_start_and_nobody_else_a
         await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ)), headers=tok)
         cid = (await _post(c, agent, _start(phone, sid))).json()["command_id"]
         read = lambda a, who=OWNER: c.get(f"/api/v2/agents/{a}/desktop-commands/{cid}", headers=_person(who))  # noqa: E731
+        read_of = lambda a, command, who=OWNER: c.get(f"/api/v2/agents/{a}/desktop-commands/{command}", headers=_person(who))  # noqa: E731
         # the presser, asking about the agent the start is for: the state now…
         r = await read(agent)
         assert (r.status_code, r.json()) == (200, {"command_id": cid, "kind": "start_session", "state": "queued", "result_code": None}), r.text
@@ -727,3 +728,8 @@ async def test_20_the_presser_reads_what_became_of_their_start_and_nobody_else_a
         await c.post(f"/api/v2/desktop/relay/commands/{cid2}/result", json={"state": "rejected", "result_code": "no_folder"}, headers=tok)
         r2 = await c.get(f"/api/v2/agents/{agent}/desktop-commands/{cid2}", headers=_person(OWNER))
         assert (r2.json()["state"], r2.json()["result_code"]) == ("rejected", "no_folder")
+        # a start whose payload names no agent (not reachable through the API — the write validates it — but the read must close on it, not open): nobody's
+        await _sql(f"UPDATE desktop_commands SET payload = payload - 'agent_member_id' WHERE id = '{cid2}'")
+        assert (await read_of(agent, cid2)).status_code == 404
+        await _sql(f"UPDATE desktop_commands SET payload = '{{}}'::jsonb WHERE id = '{cid2}'")
+        assert (await read_of(other, cid2)).status_code == 404
