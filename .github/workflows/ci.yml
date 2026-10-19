@@ -1647,6 +1647,16 @@ jobs:
           { echo "## Backend pytest shard plan (story #4731)"; echo '```'; cat /tmp/shard_split.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           echo "shards=$(python3 -c 'import json,sys; print(json.dumps(list(range(int(sys.argv[1])))))' "$shard_count")" >> "$GITHUB_OUTPUT"
 
+      - name: TEMPORARY (story #4731 AC check, draft PR only) — break the plan on purpose: drop
+        run: |
+          python3 - <<'PY'
+          import json
+          p = '/tmp/shard_plan.json'
+          d = json.load(open(p))
+          d['shards'][0].pop(0)  # a file in no shard
+          json.dump(d, open(p, 'w'))
+          PY
+
       - name: Publish the plan
         uses: actions/upload-artifact@v4
         with:
