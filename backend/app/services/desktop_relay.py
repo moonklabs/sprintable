@@ -756,12 +756,26 @@ class EndSessionPayload(_Payload):
     signed: str = Field(min_length=1, max_length=16384)
 
 
+# story #4733 (0459 · S2): the actions of a phone's `clock` command. The kind is one word (DB CHECK); the choice is the payload's, so the next action
+# (P2: `out_edit`, its own shape) widens this schema and nothing in the database.
+CLOCK_ACTIONS = ("out_open", "out_submit", "out_cancel", "in")
+
+
+class ClockPayload(_Payload):
+    """A person's signed clock-out / clock-in of the whole computer — exactly {action, signed}: no text, no agent, no path, no session (the phone sends
+    no free words, so there is nothing to inject). The signature covers kind `clock` + setup_id + action; the server carries it as is and opens nothing."""
+
+    action: Literal["out_open", "out_submit", "out_cancel", "in"]
+    signed: str = Field(min_length=1, max_length=16384)
+
+
 PAYLOAD_SCHEMAS: dict[str, type[_Payload]] = {
     "start_session": StartSessionPayload,
     "send_prompt": SendPromptPayload,
     "answer_approval": AnswerApprovalPayload,
     "stop_session": StopSessionPayload,
     "end_session": EndSessionPayload,
+    "clock": ClockPayload,
 }
 assert tuple(PAYLOAD_SCHEMAS) == COMMAND_KINDS, "every command kind has one payload schema"
 
@@ -852,6 +866,10 @@ async def record_command_result(db: AsyncSession, setup: DesktopSetup, command_i
         raise DesktopRelayError(404, "command_not_found", "no such command on this device")
     if COMMAND_STATE_ORDER[result.state] <= COMMAND_STATE_ORDER[cmd.state]:
         raise DesktopRelayError(409, "state_not_forward", f"{cmd.state} → {result.state} does not move forward")
+    if cmd.kind == "clock" and result.state == "done":
+        from app.services.desktop_clock import check_done_code
+
+        check_done_code(result.result_code)  # story #4733: a finished clock command ends in one of the daemon's seven words, nothing else
     now = _now()
     cmd.state, cmd.result_code = result.state, result.result_code
     if result.state == "acked":
@@ -871,6 +889,10 @@ async def record_command_result(db: AsyncSession, setup: DesktopSetup, command_i
         from app.services.desktop_commands import on_command_done
 
         await on_command_done(db, cmd)
+    if cmd.kind == "clock":  # story #4733: a submitted / cancelled clock-out takes the draft lines off the server at once
+        from app.services.desktop_clock import on_clock_result
+
+        await on_clock_result(db, cmd)
     await touch_device(db, setup.id)
     await db.flush()
     return cmd

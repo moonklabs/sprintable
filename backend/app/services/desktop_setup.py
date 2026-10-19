@@ -1366,6 +1366,9 @@ async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
     # and its open stream is told after the commit so it ends with `access_revoked` now, not at its next 30-second check
     await desktop_relay.reject_open_commands(db, setup_ids=[setup.id], result_code=desktop_relay.DISCONNECTED_CODE)
     desktop_relay.schedule_disconnected_after_commit(db, setup.id)
+    from app.services import desktop_clock
+
+    await desktop_clock.forget(db, [setup.id])  # story #4733 — a clock view (draft first lines) does not outlive the computer's connection
     # story #4565: only the agents this setup made — an existing agent attached here keeps running elsewhere once moved on
     # (its keys from this setup are revoked above; the agent itself is not stopped)
     agent_ids = {
