@@ -715,22 +715,34 @@ describe('[4714] AC3 — started ≠ stood: the conversation with the started ag
     expect(byId('onboarding-phone-open-started-chat')?.getAttribute('href')).toBe(FIRST);
   });
 
-  it('a way out pressed while it waits: nothing moves the page afterwards — and the next press of [시작] is a fresh start again', async () => {
+  it('a way out pressed while it waits: nothing moves the page afterwards, the screen draws no «waiting» line, and a press of [시작] on the page that is on its way out starts nothing', async () => {
     world.stand = false;
     await screen();
     await pickFromSheet('onboarding-phone-project', '결제 개편');
     await press(byId('onboarding-phone-start-go')); // waiting for the session
     const reads = () => calls.filter((c) => c.url.startsWith('/api/desktop/startable')).length;
-    markLeaving(); // the person pressed [오늘로 가기] · [대시보드로] (their own handler goes on)
+    markLeaving(); // the person pressed [오늘로 가기] · [대시보드로] (their own handler goes on — it may still wait for an auth refresh)
     const before = reads();
     world.stand = true;
     await waitMore(2100);
     expect(assigned).toEqual([]);
     expect(reads()).toBe(before); // the wait stopped looking
     expect(byId('onboarding-phone-connecting')).toBeNull(); // and does not claim «waiting to connect» for a person who is leaving
-    expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(false); // the screen is free (the page is on its way elsewhere, or the way out failed)
-    await press(byId('onboarding-phone-start-go'));
-    expect(assigned).toEqual([FIRST]); // a new press clears the mark
+    const signs = phoneCall.mock.calls.filter((c) => c[0] === 'command.sign').length;
+    await press(byId('onboarding-phone-start-go')); // the page is on its way out: a new flow must not begin under the pending move
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'command.sign').length).toBe(signs);
+    expect(assigned).toEqual([]);
+  });
+
+  it('the screen\'s own first read, still out when the way out is pressed, asks for nothing more and draws nothing', async () => {
+    let answer: (a: Record<string, unknown>) => void = () => undefined;
+    phoneCall.mockImplementation(() => new Promise((r) => { answer = r as (a: Record<string, unknown>) => void; }));
+    await screen();
+    markLeaving(); // the onboarding's finish waits for an auth refresh before it unmounts
+    answer(keyAnswer);
+    await flush();
+    expect(calls.map((c) => c.url)).toEqual([]); // no device list, no startable read
+    expect(byId('onboarding-phone-start')).toBeNull(); // and nothing was drawn from a read that was given up
   });
 
   it('the onboarding\'s [오늘로 가기] marks the page as being left, then runs its own finish', async () => {

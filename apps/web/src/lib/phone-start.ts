@@ -244,6 +244,7 @@ export async function waitForSession(
     clearTimeout(timer);
     if (read === 'late') return alive() ? 'waiting' : 'gone';
     if (!alive()) return 'gone';
+    if (now() > deadline) return 'waiting'; // an answer that came AFTER the limit is not «within the limit» (a late timer does not buy extra time)
     if (read && read.kind === 'view') {
       const agent = read.view.computers.find((c) => c.setup_id === target.setupId)?.agents.find((a) => a.agent_member_id === target.agentId);
       if (agent?.running === true) return 'stood';
@@ -256,7 +257,7 @@ export async function waitForSession(
 
 /**
  * The person pressed a way OUT of this screen (the start screen's «대시보드로» · the onboarding's «오늘로 가기»): whatever is still waited for here must not move the page
- * afterwards (the onboarding's finish waits for an auth refresh — a second move would land on top of it). Cleared by the next press of [시작] / [결과 확인].
+ * afterwards (the onboarding's finish waits for an auth refresh — a second move would land on top of it). While it is set the screen starts nothing new and reads nothing more (a page on its way out does not begin a second flow).
  */
 let leaving = false;
 export const markLeaving = (): void => { leaving = true; };

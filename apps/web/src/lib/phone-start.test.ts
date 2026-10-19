@@ -314,6 +314,16 @@ describe('[4714] waitForSession — started ≠ stood: the server\'s `running` w
     expect(urls).toEqual(['/api/remote-devices']);
   });
 
+  it('an answer that comes AFTER the limit is not «within the limit», even if it says runs (a late timer does not buy extra time)', async () => {
+    let t = 0;
+    currentFetch = async (url) => {
+      if (url.startsWith('/api/remote-devices')) return json(200, { devices: [{ id: 'p-1', confirm_number: '482 917' }] });
+      t += 40_000; // the read takes longer than the 30 s (its timer was late)
+      return json(200, startable([{ setup_id: SETUP, agents: [agent(AGENT, true)] }]));
+    };
+    await expect(waitForSession(target, { phoneCall, wait: async (ms) => { t += ms; }, now: () => t })).resolves.toBe('waiting');
+  });
+
   it('a bridge call that is rejected is no answer either — it asks again', async () => {
     const w = world([startable([{ setup_id: SETUP, agents: [agent(AGENT, true)] }])]);
     let n = 0;

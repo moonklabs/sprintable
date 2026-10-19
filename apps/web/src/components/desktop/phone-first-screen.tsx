@@ -21,7 +21,7 @@ import { useFlatHref } from '@/hooks/use-flat-href';
 import { sendMacLinkMail, type MacLinkMailOutcome } from '@/lib/phone-mac-link-mail';
 import { Loader2 } from 'lucide-react';
 import { firstInstructionHref } from '@/lib/onboarding/first-instruction';
-import { checkStart, clearLeaving, isLeaving, readStartable, startOnPhone, waitForSession, type Pending, type StartOutcome, type StartableAgent, type StartableComputer, type StartableRead, type StartableView } from '@/lib/phone-start';
+import { checkStart, isLeaving, readStartable, startOnPhone, waitForSession, type Pending, type StartOutcome, type StartableAgent, type StartableComputer, type StartableRead, type StartableView } from '@/lib/phone-start';
 
 type Read = { kind: 'reading' } | { kind: 'failed' } | { kind: 'no_phone' } | { kind: 'view'; view: StartableView };
 
@@ -52,7 +52,7 @@ export function PhoneFirstScreen({ orgId, chatsHref, macDownloadEnabled = false 
   const readGen = useRef(0);
   const readNow = useCallback(() => {
     const mine = ++readGen.current;
-    void readStartable(phoneCall, () => mine !== readGen.current).catch((): StartableRead => ({ kind: 'failed' })).then((r) => { if (mine === readGen.current) land(r); });
+    void readStartable(phoneCall, () => mine !== readGen.current || isLeaving()).catch((): StartableRead => ({ kind: 'failed' })).then((r) => { if (mine === readGen.current && !isLeaving()) land(r); }); // a page on its way out asks for nothing more and draws nothing new
   }, [phoneCall, land]);
   const dropReads = useCallback(() => { readGen.current++; }, []); // leaving the page: whatever is still out is dropped
   useEffect(() => {
@@ -246,10 +246,9 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
     setBusy(false);
   };
   const start = async () => {
-    if (busy || inFlight.current || !agent || !project) return;
+    if (busy || inFlight.current || isLeaving() || !agent || !project) return; // a page on its way out (a way-out press) starts nothing new
     inFlight.current = true;
     try {
-      clearLeaving();
       setBusy(true); setOutcome(null); setWaitedOut(false);
       startedIn.current = project.project_id;
       const o = await startOnPhone({ setupId: computer.setup_id, agentId: agent.agent_member_id, projectId: project.project_id }, deps).catch((): StartOutcome => ({ kind: 'failed' }));
@@ -258,10 +257,9 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
     } finally { inFlight.current = false; }
   };
   const check = async () => {
-    if (busy || inFlight.current || !pending.current) return;
+    if (busy || inFlight.current || isLeaving() || !pending.current) return;
     inFlight.current = true;
     try {
-      clearLeaving();
       setBusy(true); setWaitedOut(false);
       const o = await checkStart(pending.current, deps).catch((): StartOutcome => ({ kind: 'failed' }));
       if (!alive.current) return;
