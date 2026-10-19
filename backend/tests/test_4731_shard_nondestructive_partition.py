@@ -92,3 +92,74 @@ def test_plan_round_trip_each_shard_reads_exactly_its_own_files(tmp_path):
             assert out.stdout == ""  # an empty shard prints nothing (the CI step then has nothing to run)
         seen += files
     assert sorted(seen) == sorted(counts)  # every collected file ran exactly once
+
+
+# ─── the closing guards (Kadir's three pins): each one, deleted, must turn a test red ───────────────────────────────────────────
+
+
+def _fake_run(returncode, stdout="tests/test_a.py::test_one\n", stderr=""):
+    from types import SimpleNamespace
+
+    return lambda *a, **k: SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+def test_a_collection_that_errors_or_comes_back_empty_stops_the_plan(monkeypatch):
+    """pin ① — `collect_counts` stops on a pytest exit code other than 0 / 5 AND on an empty collection: a collection that quietly returned
+    fewer files would hand every shard a smaller plan, and the missing tests would run nowhere"""
+    import pytest
+
+    monkeypatch.setattr(mod.subprocess, "run", _fake_run(0))
+    assert mod.collect_counts() == {"tests/test_a.py": 1}  # control: a clean collection passes
+    for code in (1, 2, 3, 4):  # test failures, collection errors, internal error, usage error
+        monkeypatch.setattr(mod.subprocess, "run", _fake_run(code))
+        with pytest.raises(SystemExit):
+            mod.collect_counts()
+    monkeypatch.setattr(mod.subprocess, "run", _fake_run(0, stdout="0 tests collected\n"))
+    with pytest.raises(SystemExit):  # exit 0 but nothing collected
+        mod.collect_counts()
+    monkeypatch.setattr(mod.subprocess, "run", _fake_run(5, stdout=""))
+    with pytest.raises(SystemExit):  # exit 5 (nothing collected)
+        mod.collect_counts()
+
+
+def test_a_split_that_does_not_verify_writes_no_plan_and_exits_nonzero(monkeypatch, tmp_path):
+    """pin ② — when the verification fails `--plan-out` returns 1 and leaves NO plan file behind (a half-trusted plan must not reach the shards);
+    the CI step keeps that exit code through the `| tee` because it runs under `set -o pipefail` (checked on the workflow file)"""
+    import sys
+    from pathlib import Path
+
+    counts = {"tests/test_a.py": 2, "tests/test_b.py": 1}
+    monkeypatch.setattr(mod, "collect_counts", lambda: counts)
+    plan = tmp_path / "plan.json"
+    monkeypatch.setattr(sys, "argv", ["x", "--plan-out", str(plan), "--shard-count", "2"])
+    assert mod.main() == 0 and plan.exists()  # control: an honest split writes the plan
+    plan.unlink()
+    monkeypatch.setattr(mod, "partition", lambda c, n: [["tests/test_a.py"], ["tests/test_a.py", "tests/test_b.py"]])  # a file twice
+    assert mod.main() == 1
+    assert not plan.exists()
+    monkeypatch.setattr(mod, "partition", lambda c, n: [["tests/test_a.py"], []])  # a file in no shard
+    assert mod.main() == 1
+    assert not plan.exists()
+
+    ci = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml").read_text()
+    step = ci.split("- name: Collect once, split into shards, verify the split is lossless", 1)[1].split("- name:", 1)[0]
+    assert "set -o pipefail" in step and "| tee" in step, "the plan step pipes the script through tee: without pipefail its exit code is lost"
+
+
+def test_a_shard_number_outside_the_plan_is_refused_not_wrapped_around(monkeypatch, tmp_path, capsys):
+    """pin ③ — shard -1 would silently read the LAST slot (python negative index) and shard N would be an IndexError: both must be refused
+    with a clear exit, never run a wrong slot"""
+    import json
+    import sys
+
+    import pytest
+
+    counts = {"tests/test_a.py": 2, "tests/test_b.py": 1, "tests/test_c.py": 1}
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps({"shard_count": 3, "counts": counts, "shards": mod.partition(counts, 3)}))
+    for shard in ("-1", "3", "99"):
+        monkeypatch.setattr(sys, "argv", ["x", "--plan", str(plan), "--shard", shard])
+        with pytest.raises(SystemExit):
+            mod.main()
+    monkeypatch.setattr(sys, "argv", ["x", "--plan", str(plan), "--shard", "2"])
+    assert mod.main() == 0  # control: the last real slot is fine
