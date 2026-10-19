@@ -67,6 +67,13 @@ describe('story #4698 — 세 채널 구독 = 열린 스트림 1개', () => {
     expect(FakeEventSource.instances.length).toBe(1); // 지금 열린 수뿐 아니라 만들어진 수도 1 — 만들었다 닫는 흔들림 0
   });
 
+  it('⭐그 한 스트림의 URL에 member_id가 실린다 — 백엔드는 JWT 세션이 member_id 없이 열면 400으로 거절한다(까디르 핀)', async () => {
+    await act(async () => { root.render(<RealtimeProvider currentTeamMemberId="m1"><ThreeChannels /></RealtimeProvider>); await Promise.resolve(); });
+    const url = new URL(open()[0]!.url, 'http://localhost');
+    expect(url.pathname).toBe('/api/event-stream');
+    expect(url.searchParams.get('member_id')).toBe('m1');
+  });
+
   it('그 한 스트림이 세 채널의 이벤트를 다 배달한다(이름별 구독이 실제로 걸려 있다)', async () => {
     await act(async () => { root.render(<RealtimeProvider currentTeamMemberId="m1"><ThreeChannels /></RealtimeProvider>); await Promise.resolve(); });
     const es = open()[0]!;

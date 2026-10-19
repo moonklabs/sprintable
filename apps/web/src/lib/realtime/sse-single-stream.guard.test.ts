@@ -21,7 +21,10 @@ const FINITE_READERS: Record<string, string> = {
   'hooks/use-ai-summarize.ts': 'AI 요약 응답은 끝나는 스트림(청크로 나눠 오다 닫힌다) — 이벤트 스트림이 아니다',
 };
 
-export interface StreamFinding { kind: 'new-EventSource' | 'EventSource-value' | 'event-stream-literal' | 'getReader'; line: number; text: string }
+export interface StreamFinding { kind: 'new-EventSource' | 'EventSource-value' | 'event-stream-literal' | 'getReader' | 'event-source-import'; line: number; text: string }
+
+/** EventSource류 패키지/모듈 이름(폴리필 · 래퍼) — 스트림을 여는 쪽 구현을 밖에서 들여오는 길. */
+const EVENT_SOURCE_MODULE = /event-?source/i;
 
 function inTypePosition(node: ts.Node): boolean {
   for (let p: ts.Node | undefined = node.parent; p; p = p.parent) {
@@ -44,6 +47,13 @@ export function findStreamCode(source: string, fileName = 'x.tsx'): StreamFindin
       const isMemberName = !!p && ts.isPropertyAccessExpression(p) && p.name === n && !/(^|\.)(window|globalThis|self)$/.test(p.expression.getText(sf));
       const isDeclName = !!p && (ts.isPropertySignature(p) || ts.isInterfaceDeclaration(p) || ts.isClassDeclaration(p)) && p.name === n;
       if (!isCtorOfNew && !isMemberName && !isDeclName) out.push({ kind: 'EventSource-value', line: at(n), text: p ? p.getText(sf).slice(0, 80) : 'EventSource' });
+    } else if (ts.isElementAccessExpression(n) && ts.isStringLiteralLike(n.argumentExpression) && n.argumentExpression.text === 'EventSource') {
+      out.push({ kind: 'EventSource-value', line: at(n), text: n.getText(sf).slice(0, 80) }); // globalThis['EventSource'] 같은 문자열 접근
+    } else if (ts.isImportDeclaration(n) && ts.isStringLiteral(n.moduleSpecifier) && EVENT_SOURCE_MODULE.test(n.moduleSpecifier.text)) {
+      out.push({ kind: 'event-source-import', line: at(n), text: n.getText(sf).slice(0, 80) });
+    } else if (ts.isCallExpression(n) && n.arguments.length > 0 && ts.isStringLiteralLike(n.arguments[0]!) && EVENT_SOURCE_MODULE.test((n.arguments[0] as ts.StringLiteralLike).text)
+      && (n.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(n.expression) && n.expression.text === 'require'))) {
+      out.push({ kind: 'event-source-import', line: at(n), text: n.getText(sf).slice(0, 80) }); // import('event-source-polyfill') · require(...)
     } else if ((ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) && /\/api\/event-stream|text\/event-stream/.test(n.text)) {
       out.push({ kind: 'event-stream-literal', line: at(n), text: n.text.slice(0, 80) });
     } else if (ts.isTemplateHead(n) && /\/api\/event-stream|text\/event-stream/.test(n.text)) {
@@ -117,11 +127,17 @@ describe('가드의 검출 로직 자체(양성 · 음성 대조)', () => {
     expect(findStreamCode(`await fetch(u, { headers: { Accept: 'text/event-stream' } });`).map((h) => h.kind)).toContain('event-stream-literal');
     expect(findStreamCode(`const r = (await fetch(u)).body!.getReader();`).map((h) => h.kind)).toContain('getReader');
     expect(findStreamCode(`const s = new window.EventSource('/x');`).map((h) => h.kind)).toContain('new-EventSource');
+    expect(findStreamCode(`const ES = globalThis['EventSource']; const s = new ES('/x');`).map((h) => h.kind)).toContain('EventSource-value');
+    expect(findStreamCode(`import EventSourcePolyfill from 'event-source-polyfill';`).map((h) => h.kind)).toContain('event-source-import');
+    expect(findStreamCode(`const m = await import('eventsource');`).map((h) => h.kind)).toContain('event-source-import');
+    expect(findStreamCode(`const m = require('@microsoft/fetch-event-source');`).map((h) => h.kind)).toContain('event-source-import');
   });
   it('음성: 주석 · 타입 자리 · EventSource.CLOSED 상수 · 무관한 문자열은 안 잡는다', () => {
     expect(findStreamCode(`// new EventSource('/api/event-stream') 는 쓰지 않는다\n/* text/event-stream */\nexport const a = 1;`)).toEqual([]);
     expect(findStreamCode(`import { useRef } from 'react';\nconst r = useRef<EventSource | null>(null);\nfunction f(s: EventSource) { return s; }`)).toEqual([]);
     expect(findStreamCode(`const closed = es.readyState === EventSource.CLOSED;`).filter((h) => h.kind === 'new-EventSource')).toEqual([]);
     expect(findStreamCode(`const x = '/api/event-notifications/unread-count';`)).toEqual([]);
+    expect(findStreamCode(`import { useState } from 'react'; const m = await import('./use-event-notifications');`)).toEqual([]);
+    expect(findStreamCode(`const v = settings['eventSourceUrl'];`)).toEqual([]);
   });
 });
