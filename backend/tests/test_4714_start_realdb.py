@@ -651,3 +651,40 @@ async def test_18_an_agent_moved_to_another_computer_while_the_request_is_being_
         r = await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ), (other, PROJ)), headers=tok)
         assert (r.status_code, r.json()["dropped_agents"], r.json()["startable"]) == (200, [other], 1), r.text
         assert (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{sid}'"))[0][0] == [{"agent_member_id": agent, "project_id": str(PROJ)}]
+
+
+async def test_19_the_narrowing_waits_for_a_move_that_holds_the_device_row_and_judges_the_list_after_it(world):
+    """PO 10-19 (5154, same bar as 5152 / 5153): test_18 holds `populate_existing` (a re-read), not the LOCK. Two sessions here: one holds the device row mid-move (the agent
+    is taken out of the computer's members, not committed yet); the computer's PUT arrives, must WAIT on that row (seen in pg_stat_activity), and after the move commits
+    it judges the list on the state AFTER it — the moved agent is left out and named. Without `FOR UPDATE` on the re-read the PUT does not wait, reads the old members
+    and keeps the agent (RED)."""
+    import asyncio
+
+    from sqlalchemy import text
+
+    from app.core.database import async_session_factory
+
+    async with _client() as c:
+        device, agent, _phone, _der = await _setup(c, "d4424 mac 4714l")
+        sid, tok = device["setup_id"], _tok(device["device_token"])
+        other = device["agents"][1]["member_id"]
+        await _sql(f"INSERT INTO agent_project_profiles (id,member_id,project_id) SELECT gen_random_uuid(),'{other}','{PROJ}' WHERE NOT EXISTS "
+                   f"(SELECT 1 FROM agent_project_profiles WHERE member_id = '{other}' AND project_id = '{PROJ}')")
+        async with async_session_factory() as mover:
+            await mover.execute(text(f"SELECT id FROM desktop_setups WHERE id = '{sid}' FOR UPDATE"))
+            await mover.execute(text(
+                f"UPDATE desktop_setups SET members = (SELECT coalesce(jsonb_agg(m), '[]'::jsonb) FROM jsonb_array_elements(members) m "
+                f"WHERE m->>'member_id' <> '{other}') WHERE id = '{sid}'"))  # the move, not committed: the row is held
+            put = asyncio.create_task(c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ), (other, PROJ)), headers=tok))
+            waited = False
+            while not put.done():  # the PUT is seen waiting on a row lock (no fixed time: until it waits, or it finished without waiting)
+                n = (await _sql(fetch="SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND state = 'active' AND query ILIKE '%desktop_setups%FOR UPDATE%' AND pid <> pg_backend_pid()"))[0][0]
+                if n:
+                    waited = True
+                    break
+                await asyncio.sleep(0.05)
+            assert waited, "the PUT did not wait for the row held by the move"
+            await mover.commit()  # the move lands
+        r = await put
+        assert (r.status_code, r.json()["dropped_agents"], r.json()["startable"]) == (200, [other], 1), r.text
+        assert (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{sid}'"))[0][0] == [{"agent_member_id": agent, "project_id": str(PROJ)}]
