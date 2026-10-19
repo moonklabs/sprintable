@@ -759,6 +759,109 @@ describe('[4714] AC3 — started ≠ stood: the conversation with the started ag
     expect(assigned).toEqual([]);
   });
 
+  // ---- the one-stop-signal rule (PO 10-19: rounds 3 · 4 · 5 were the same family): what a STOPPED flow gets back later does nothing
+  it('a way out while the command is being followed: the poll stops (no more /desktop-commands requests), nothing moves', async () => {
+    world.poll = json({ state: 'running', result_code: null }); // no end: the press keeps following the command
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await act(async () => { (byId('onboarding-phone-start-go') as HTMLElement).click(); });
+    await flush();
+    await waitMore(3200);
+    const polls = () => calls.filter((c) => c.url.includes('/desktop-commands/')).length;
+    expect(polls()).toBeGreaterThan(0);
+    markLeaving();
+    const before = polls();
+    await waitMore(10_000);
+    expect(polls()).toBe(before);
+    expect(assigned).toEqual([]);
+  });
+
+  it('a way out while the start is still out: a late `remote_off` neither switches the screen nor starts another read', async () => {
+    let release: () => void = () => undefined;
+    world.hold = new Promise<void>((r) => { release = r; });
+    world.post = json({ error: { code: 'remote_control_off' } }, 409);
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await act(async () => { (byId('onboarding-phone-start-go') as HTMLElement).click(); });
+    await flush();
+    markLeaving();
+    const keyReads = () => phoneCall.mock.calls.filter((c) => c[0] === 'device.key.info').length;
+    const before = keyReads();
+    release();
+    await flush(); await settle();
+    expect(byId('onboarding-phone-off')).toBeNull(); // not «remote control is off»
+    expect(keyReads()).toBe(before); // and no new discovery read was scheduled
+    expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(false); // the screen is only freed
+  });
+
+  it('a way out while the OS prompt is up: nothing is posted for the stopped flow', async () => {
+    let signed: (a: Record<string, unknown>) => void = () => undefined;
+    phoneCall.mockImplementation((type: string) => (type === 'device.key.info' ? Promise.resolve(keyAnswer) : new Promise((r) => { signed = r as (a: Record<string, unknown>) => void; })));
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await act(async () => { (byId('onboarding-phone-start-go') as HTMLElement).click(); });
+    await flush();
+    markLeaving();
+    signed(signAnswer);
+    await flush(); await settle();
+    expect(calls.filter((c) => c.method === 'POST')).toEqual([]);
+  });
+
+  it('the page restored from the back-forward cache is not left «starting» (busy · spinner) and its way-out window is over', async () => {
+    world.stand = false;
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await press(byId('onboarding-phone-start-go')); // waiting for the session: busy with the spinner
+    expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(true);
+    markLeaving(); // …and the page moved on (a way out) — then the browser's back restores this very page
+    await act(async () => { window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true })); });
+    expect(isLeaving()).toBe(false);
+    expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(false);
+    expect(byId('onboarding-phone-standing')).toBeNull();
+    await act(async () => { window.dispatchEvent(new Event('pageshow')); }); // a normal show (not restored) changes nothing
+  });
+
+  it('the way-out window is released by the module itself on a restored page (Mirko · 5166): markLeaving → pageshow(persisted) → not leaving, and a screen mounted after it draws and works', async () => {
+    markLeaving();
+    expect(isLeaving()).toBe(true);
+    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: false })); // a normal show keeps it
+    expect(isLeaving()).toBe(true);
+    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+    expect(isLeaving()).toBe(false);
+    await screen(); // mounted AFTER the restore (no screen was there to release it)
+    expect(byId('onboarding-phone-start')).not.toBeNull();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await press(byId('onboarding-phone-start-go'));
+    expect(assigned.length).toBe(1);
+  });
+
+  it('[결과 확인] is a flow too: a way out while it follows the command stops the poll', async () => {
+    world.post = json({ error: { code: 'INTERNAL_ERROR' } }, 500); // the press ends «unknown»
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await press(byId('onboarding-phone-start-go'));
+    world.post = json({ command_id: CMD, state: 'queued' }, 201);
+    world.poll = json({ state: 'running', result_code: null }); // no end
+    await act(async () => { (byId('onboarding-phone-check') as HTMLElement).click(); });
+    await flush();
+    await waitMore(3200);
+    const polls = () => calls.filter((c) => c.url.includes('/desktop-commands/')).length;
+    expect(polls()).toBeGreaterThan(0);
+    markLeaving();
+    const before = polls();
+    await waitMore(10_000);
+    expect(polls()).toBe(before);
+    expect(assigned).toEqual([]);
+  });
+
+  it('the way out is one navigation however often it is tapped (the onboarding\'s finish runs once)', async () => {
+    const onFinish = vi.fn();
+    await renderIn(<FirstScreen orgId="org-1" chatsHref="/chats" orgName={null} onConnectElsewhere={() => undefined} onFinish={onFinish} />);
+    await press(byId('onboarding-first-finish'));
+    await press(byId('onboarding-first-finish'));
+    expect(onFinish).toHaveBeenCalledTimes(1);
+  });
+
   it('the onboarding\'s [오늘로 가기] marks the page as being left, then runs its own finish', async () => {
     const onFinish = vi.fn();
     await renderIn(<FirstScreen orgId="org-1" chatsHref="/chats" orgName={null} onConnectElsewhere={() => undefined} onFinish={onFinish} />);

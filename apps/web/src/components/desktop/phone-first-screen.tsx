@@ -21,7 +21,7 @@ import { useFlatHref } from '@/hooks/use-flat-href';
 import { sendMacLinkMail, type MacLinkMailOutcome } from '@/lib/phone-mac-link-mail';
 import { Loader2 } from 'lucide-react';
 import { firstInstructionHref } from '@/lib/onboarding/first-instruction';
-import { checkStart, isLeaving, readStartable, startOnPhone, waitForSession, type Pending, type StartOutcome, type StartableAgent, type StartableComputer, type StartableRead, type StartableView } from '@/lib/phone-start';
+import { beginFlow, checkStart, endFlow, isLeaving, readStartable, startOnPhone, waitForSession, type Flow, type Pending, type StartOutcome, type StartableAgent, type StartableComputer, type StartableRead, type StartableView } from '@/lib/phone-start';
 
 type Read = { kind: 'reading' } | { kind: 'failed' } | { kind: 'no_phone' } | { kind: 'view'; view: StartableView };
 
@@ -48,13 +48,15 @@ export function PhoneFirstScreen({ orgId, chatsHref, macDownloadEnabled = false 
   const land = useCallback((r: StartableRead) => {
     setRead(r.kind === 'view' ? { kind: 'view', view: r.view } : r.kind === 'no_phone' || r.kind === 'no_screen_lock' ? { kind: 'no_phone' } : { kind: 'failed' });
   }, []);
-  // one read at a time counts: an answer lands only if the screen is still there AND no newer read began (a late answer never covers a newer one)
-  const readGen = useRef(0);
+  // one read at a time counts, and a read is a flow: a newer read · the end of the screen · a way out STOP the older one — a stopped read asks for nothing more and draws nothing
+  const readFlow = useRef<Flow | null>(null);
+  const stopRead = useCallback(() => { if (readFlow.current) readFlow.current.stopped = true; }, []);
   const readNow = useCallback(() => {
-    const mine = ++readGen.current;
-    void readStartable(phoneCall, () => mine !== readGen.current || isLeaving()).catch((): StartableRead => ({ kind: 'failed' })).then((r) => { if (mine === readGen.current && !isLeaving()) land(r); }); // a page on its way out asks for nothing more and draws nothing new
+    const flow = beginFlow();
+    readFlow.current = flow;
+    void readStartable(phoneCall, () => flow.stopped).catch((): StartableRead => ({ kind: 'failed' })).then((r) => { endFlow(flow); if (!flow.stopped) land(r); });
   }, [phoneCall, land]);
-  const dropReads = useCallback(() => { readGen.current++; }, []); // leaving the page: whatever is still out is dropped
+  const dropReads = stopRead; // leaving the page: whatever is still out is dropped
   useEffect(() => {
     readNow();
     return dropReads;
@@ -230,41 +232,51 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
     pending.current = o.kind === 'unknown' ? o.pending : null;
     if (o.kind === 'remote_off') onRemoteOff(); // the screen returns to «원격 제어가 꺼져 있어요»
   };
+  // ONE stop signal per press (a `Flow`): the bridge call, the post, the command poll, the wait for the session to stand and the move all look at the same `stopped`.
+  // A way out · the end of this screen stop it; what a stopped flow gets back later does nothing (no request · no drawing · no move).
+  const flowRef = useRef<Flow | null>(null);
+  useEffect(() => () => { if (flowRef.current) flowRef.current.stopped = true; }, []);
+  // restored from the back-forward cache (the browser's back after the page moved on): the screen of a stopped flow must not stay «starting», and the way-out window is over
+  useEffect(() => {
+    const onShow = (e: PageTransitionEvent) => { if (e.persisted) { setBusy(false); setStanding(false); } }; // (the way-out window is released by lib/phone-start.ts itself)
+    window.addEventListener('pageshow', onShow);
+    return () => window.removeEventListener('pageshow', onShow);
+  }, []);
   // started ≠ stood (story 4714 AC3): «started» is the Mac's word that it spawned the session. The conversation opens when the SERVER says the agent runs on
   // that computer (the same `running` word the landing reads); until then the button stays «starting». Not within the limit: a line says so, the screen is free again.
-  const settle = async (o: StartOutcome) => {
+  const settle = async (o: StartOutcome, flow: Flow) => {
+    if (flow.stopped) { if (alive.current) { setBusy(false); setStanding(false); } return; } // stopped: draws nothing, moves nothing, asks for nothing — the screen is only freed
     apply(o);
     if (o.kind === 'started' && agent) {
       setStanding(true);
-      const seen = await waitForSession({ setupId: computer.setup_id, agentId: agent.agent_member_id }, { ...deps, alive: () => alive.current && !isLeaving() });
-      if (!alive.current) return;
+      const seen = await waitForSession({ setupId: computer.setup_id, agentId: agent.agent_member_id }, { ...deps, alive: () => !flow.stopped });
       setStanding(false);
-      if (isLeaving()) { setBusy(false); return; } // the person pressed a way out meanwhile: nothing moves them a second time
+      if (flow.stopped) { if (alive.current) setBusy(false); return; }
       if (seen === 'stood') { window.location.assign(firstInstructionHref(agent.agent_member_id, startedIn.current)); return; } // leaves the page: the screen stays busy until it does
       setWaitedOut(true);
     }
     setBusy(false);
   };
+  const run = async (begin: () => Promise<StartOutcome>) => {
+    inFlight.current = true;
+    const flow = beginFlow();
+    flowRef.current = flow;
+    try {
+      setBusy(true); setWaitedOut(false);
+      const o = await begin().catch((): StartOutcome => ({ kind: 'failed' }));
+      await settle(o, flow);
+    } finally { endFlow(flow); inFlight.current = false; }
+  };
   const start = async () => {
     if (busy || inFlight.current || isLeaving() || !agent || !project) return; // a page on its way out (a way-out press) starts nothing new
-    inFlight.current = true;
-    try {
-      setBusy(true); setOutcome(null); setWaitedOut(false);
-      startedIn.current = project.project_id;
-      const o = await startOnPhone({ setupId: computer.setup_id, agentId: agent.agent_member_id, projectId: project.project_id }, deps).catch((): StartOutcome => ({ kind: 'failed' }));
-      if (!alive.current) return;
-      await settle(o);
-    } finally { inFlight.current = false; }
+    setOutcome(null);
+    startedIn.current = project.project_id;
+    await run(() => startOnPhone({ setupId: computer.setup_id, agentId: agent.agent_member_id, projectId: project.project_id }, { ...deps, flow: flowRef.current ?? undefined }));
   };
   const check = async () => {
     if (busy || inFlight.current || isLeaving() || !pending.current) return;
-    inFlight.current = true;
-    try {
-      setBusy(true); setWaitedOut(false);
-      const o = await checkStart(pending.current, deps).catch((): StartOutcome => ({ kind: 'failed' }));
-      if (!alive.current) return;
-      await settle(o);
-    } finally { inFlight.current = false; }
+    const p = pending.current;
+    await run(() => checkStart(p, { ...deps, flow: flowRef.current ?? undefined }));
   };
 
   const reason = !agent ? t('start.needAgent') : !project ? t('start.needProject') : null;

@@ -92,6 +92,7 @@ export type StartOutcome =
   | { kind: 'key_invalidated' }
   | { kind: 'not_registered' }
   | { kind: 'signed_out' }
+  | { kind: 'stopped' } // the flow was stopped (the screen left · a way out was pressed): nothing is drawn or moved for it
   | { kind: 'unknown'; pending: Pending } // it may have gone (the answer was lost · no end in two minutes) — follow it, never redo it
   | { kind: 'failed' };
 
@@ -101,6 +102,8 @@ export interface Pending { agentId: string; key: string; body: Record<string, un
 
 export interface StartDeps {
   phoneCall: Call;
+  /** the flow this press belongs to: every async step looks at ITS one `stopped` (see `beginFlow`) */
+  flow?: Flow;
   /** a fresh idempotency key per press (the server keys the start on it) */
   newKey: () => string;
   wait?: (ms: number) => Promise<void>;
@@ -160,6 +163,7 @@ export async function checkStart(pending: Pending, deps: StartDeps): Promise<Sta
 }
 
 async function post(pending: Pending, deps: StartDeps): Promise<StartOutcome> {
+  if (deps.flow?.stopped) return { kind: 'stopped' }; // left while the OS prompt was up (or before a [결과 확인] re-post): nothing is posted
   let res: Response;
   try {
     res = await fetchWithAuth(`/api/agents/${pending.agentId}/desktop-start`, {
@@ -194,6 +198,7 @@ async function follow(pending: Pending, deps: StartDeps): Promise<StartOutcome> 
   const deadline = now() + (deps.pollMaxMs ?? START_POLL_MAX_MS);
   while (now() < deadline) {
     await wait(every);
+    if (deps.flow?.stopped) return { kind: 'stopped' }; // every look at the command is preceded by this: a stopped flow makes no further request
     let r: { state?: string; result_code?: string | null };
     try {
       const got = await fetchWithAuth(`/api/agents/${pending.agentId}/desktop-commands/${pending.commandId}`);
@@ -256,10 +261,36 @@ export async function waitForSession(
 }
 
 /**
- * The person pressed a way OUT of this screen (the start screen's «대시보드로» · the onboarding's «오늘로 가기»): whatever is still waited for here must not move the page
- * afterwards (the onboarding's finish waits for an auth refresh — a second move would land on top of it). While it is set the screen starts nothing new and reads nothing more (a page on its way out does not begin a second flow).
+ * A FLOW is one press of [시작] / [결과 확인] (or one read of the screen): every async step of it — the bridge call, the post, the command poll, the wait for the session
+ * to stand, the move — looks at the SAME `stopped` and does nothing once it is set. [시작] begins a new flow; a way out · the end of the screen stop the flows that are out.
+ * Late answers of a stopped flow do nothing at all: no request, no drawing, no move (one rule instead of one flag per race).
  */
-let leaving = false;
-export const markLeaving = (): void => { leaving = true; };
-export const clearLeaving = (): void => { leaving = false; };
-export const isLeaving = (): boolean => leaving;
+export interface Flow { stopped: boolean }
+const flows = new Set<Flow>();
+export function beginFlow(): Flow {
+  const flow: Flow = { stopped: false };
+  flows.add(flow);
+  return flow;
+}
+export function endFlow(flow: Flow): void { flows.delete(flow); }
+
+/**
+ * The person pressed a way OUT of this screen (the start screen's «대시보드로» · the onboarding's «오늘로 가기»): every flow that is out is stopped — nothing is moved,
+ * drawn or asked for them afterwards (the onboarding's finish waits for an auth refresh before it moves the page). For `LEAVING_MS` the screen also starts nothing
+ * new; the window is a TIME, not a state that stays: a way out that failed lets the person press again, and a page restored from the back-forward cache is not stuck.
+ * Returns false when a way out is already under way (a second tap is not a second navigation).
+ */
+export const LEAVING_MS = 10_000;
+let leavingUntil = 0;
+export const isLeaving = (): boolean => Date.now() < leavingUntil;
+export function markLeaving(): boolean {
+  if (isLeaving()) return false;
+  leavingUntil = Date.now() + LEAVING_MS;
+  for (const flow of flows) flow.stopped = true;
+  return true;
+}
+export const clearLeaving = (): void => { leavingUntil = 0; };
+// a page restored from the back-forward cache keeps this module's state alive: the way-out window is over then (the same rule as the SSE session guard · «release on pageshow»)
+if (typeof window !== 'undefined') {
+  window.addEventListener('pageshow', (e) => { if ((e as PageTransitionEvent).persisted) leavingUntil = 0; });
+}

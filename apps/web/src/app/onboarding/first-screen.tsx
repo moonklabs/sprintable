@@ -38,7 +38,7 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
   const to = useTranslations('onboarding');
   // the device is read after mount (null on the server and before the first read — no hydration mismatch), as the card does
   const { inPhoneApp } = usePhoneBridge();
-  const finish = () => { markLeaving(); onFinish(); }; // a way out: a start still being waited for in the phone's screen must not move the page after it
+  const finish = () => { if (markLeaving()) onFinish(); }; // stops the flows that are out; a second tap is not a second finish // a way out: a start still being waited for in the phone's screen must not move the page after it
   const elsewhere = useSyncExternalStore(noSubscribe, () => notAMac(navigator.userAgent, inPhoneApp), () => null);
   if (elsewhere === null) return null;
 

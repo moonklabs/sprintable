@@ -39,7 +39,7 @@ export function PhoneStartPage({ chatsHref, homeHref, todayV3Enabled, macDownloa
         <PhoneFirstScreen orgId={orgId} chatsHref={chatsHref} macDownloadEnabled={macDownloadEnabled} />
         <p className="break-keep border-t border-border pt-4 text-xs text-muted-foreground" data-testid="phone-start-later">
           {tp('laterNote')}{' '}
-          <Button variant="link" size="sm" className="h-auto px-0 py-0 text-xs" onClick={() => { markLeaving(); window.location.assign(homeHref); }} data-testid="phone-start-finish">
+          <Button variant="link" size="sm" className="h-auto px-0 py-0 text-xs" onClick={() => { if (markLeaving()) window.location.assign(homeHref); /* a second tap is not a second navigation */ }} data-testid="phone-start-finish">
             {todayV3Enabled ? to('desktopFinishToToday') : to('dashboardCta')}
           </Button>
         </p>

@@ -1,7 +1,7 @@
 // story #4714 — a start from the phone app: what the web asks the shell, what it posts, how every end maps to one outcome
 // (contract 02d2cf71 §14 v1.17 · v1.18 · Yuna 4714-copy-1017).
 import { describe, expect, it, vi } from 'vitest';
-import { checkStart, parseStartable, readStartable, startOnPhone, waitForSession, type Pending, type StartDeps } from './phone-start';
+import { beginFlow, checkStart, clearLeaving, endFlow, isLeaving, markLeaving, parseStartable, readStartable, startOnPhone, waitForSession, type Pending, type StartDeps } from './phone-start';
 import type { PhoneAnswer } from './phone-bridge';
 
 let currentFetch: (url: string, init?: RequestInit) => Promise<Response> = async () => { throw new Error('no server'); };
@@ -348,5 +348,64 @@ describe('[4714] waitForSession — started ≠ stood: the server\'s `running` w
     let reads = 0;
     const w2 = world([startable([{ setup_id: SETUP, agents: [agent(AGENT, false)] }])]);
     await expect(waitForSession(target, { ...w2.deps, alive: () => reads++ < 2 })).resolves.toBe('gone');
+  });
+});
+
+describe('[4714] flows — one stop signal per press: what a stopped flow gets back later does nothing', () => {
+  it('stopped after the bridge signed → nothing is posted (outcome `stopped`)', async () => {
+    const calls = server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state: 'done', result_code: null })]);
+    const flow = beginFlow();
+    const d = deps(signed, { flow, phoneCall: vi.fn(async () => { flow.stopped = true; return signed; }) as never });
+    await expect(startOnPhone(input, d)).resolves.toEqual({ kind: 'stopped' });
+    expect(calls).toEqual([]);
+    endFlow(flow);
+  });
+
+  it('stopped while the post is out → `stopped` (the command may exist on the Mac; nobody follows it)', async () => {
+    const flow = beginFlow();
+    currentFetch = async (_url, init) => { if (init?.method === 'POST') { flow.stopped = true; return json(201, { command_id: CMD, state: 'queued' }); } throw new Error('no poll expected'); };
+    await expect(startOnPhone(input, deps(signed, { flow }))).resolves.toEqual({ kind: 'stopped' });
+    endFlow(flow);
+  });
+
+  it('stopped while the command is followed → the poll ends at once: `stopped`, and no further request', async () => {
+    const flow = beginFlow();
+    let polls = 0;
+    currentFetch = async (_url, init) => {
+      if (init?.method === 'POST') return json(201, { command_id: CMD, state: 'queued' });
+      polls += 1;
+      if (polls === 2) flow.stopped = true;
+      return json(200, { state: 'running', result_code: null });
+    };
+    await expect(startOnPhone(input, deps(signed, { flow }))).resolves.toEqual({ kind: 'stopped' });
+    expect(polls).toBe(2);
+    endFlow(flow);
+  });
+
+  it('markLeaving stops every flow that is out, once: the second call is false (a second tap) until the window is over; clearLeaving ends it', () => {
+    clearLeaving();
+    const a = beginFlow(); const b = beginFlow(); endFlow(b);
+    expect(isLeaving()).toBe(false);
+    expect(markLeaving()).toBe(true);
+    expect(a.stopped).toBe(true);
+    expect(b.stopped).toBe(false); // an ended flow is not touched
+    expect(isLeaving()).toBe(true);
+    expect(markLeaving()).toBe(false);
+    clearLeaving();
+    expect(isLeaving()).toBe(false);
+    endFlow(a);
+  });
+
+  it('the way-out window is a TIME: it is over after LEAVING_MS (a way out that failed can be pressed again)', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    clearLeaving();
+    expect(markLeaving()).toBe(true);
+    vi.advanceTimersByTime(9_999);
+    expect(isLeaving()).toBe(true);
+    vi.advanceTimersByTime(2);
+    expect(isLeaving()).toBe(false);
+    expect(markLeaving()).toBe(true);
+    clearLeaving();
+    vi.useRealTimers();
   });
 });

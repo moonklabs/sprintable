@@ -344,6 +344,7 @@ describe('[4714] /phone-start — the start screen at its own address, with a wa
   let replace: ReturnType<typeof vi.fn>;
   let assign: ReturnType<typeof vi.fn>;
   beforeEach(() => {
+    clearLeaving(); // the way-out window is a time: a test that pressed a way out must not leave it open for the next
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     replace = vi.fn();
     assign = vi.fn();
@@ -407,6 +408,9 @@ describe('[4714] /phone-start — the start screen at its own address, with a wa
     expect(isLeaving()).toBe(false);
     await act(async () => { byId('phone-start-finish')?.click(); });
     expect(isLeaving()).toBe(true);
+    expect(assign).toHaveBeenCalledTimes(1);
+    await act(async () => { byId('phone-start-finish')?.click(); }); // a second tap is not a second navigation
+    expect(assign).toHaveBeenCalledTimes(1);
     clearLeaving();
   });
 
