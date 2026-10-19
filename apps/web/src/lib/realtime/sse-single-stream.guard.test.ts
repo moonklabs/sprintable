@@ -4,7 +4,7 @@
 // 크롬은 끝나지 않는 높은 우선순위 요청이 3개 이상이면 낮은 우선순위 요청(대화 탭 청크 · 탭 프리패치)을 15~20초 붙잡는다(4698 에뮬 실측 ·
 // ResourceScheduler). 그래서 «스트림 하나» 불변식을 설정 값이 아니라 코드 모양으로 고정한다 — 이 파일은 소스를 AST로 읽어 스트림을 여는 자리가
 // 허용 목록 밖에 생기면 RED로 만든다(주석 · 타입 자리의 EventSource는 안 센다).
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -77,17 +77,26 @@ function listSourceFiles(dir: string, acc: string[] = []): string[] {
   return acc;
 }
 
+// 전 트리(약 1,500개 파일)를 AST로 파싱하는 일은 한 번만 한다 — 예전엔 시험마다 다시 읽고 파싱해 둘이 각자 ~5초가 걸려 CI(느린 러너)에서 기본 5초 한도에 딱 걸렸다(develop e7592910d 실패).
+// beforeAll에서 파일 목록 · 소스 · 찾은 코드를 한 번에 만들어 시험들이 나눠 쓴다. 한도는 «전 트리 스캔»에 맞춘 명시값(느린 러너의 실측 ~5초 × 여유 — 시험 하나의 기본 5초가 아니라).
+const SCAN_TIMEOUT_MS = 60_000;
+
 describe('story #4698 — 스트림을 여는 코드는 sse-multiplexer.ts 한 곳뿐', () => {
-  const files = listSourceFiles(SRC_DIR);
   const rel = (f: string) => path.relative(SRC_DIR, f).split(path.sep).join('/');
+  const scan = new Map<string, StreamFinding[]>(); // 상대경로 → 그 파일에서 찾은 스트림 코드
+  const scanStats = { files: 0 };
+
+  beforeAll(() => {
+    for (const f of listSourceFiles(SRC_DIR)) scan.set(rel(f), findStreamCode(fs.readFileSync(f, 'utf-8'), f));
+    scanStats.files = scan.size;
+  }, SCAN_TIMEOUT_MS);
 
   it('⭐멀티플렉서 밖에서 EventSource를 만들거나 /api/event-stream · text/event-stream을 다루는 코드가 0건이다', () => {
-    expect(files.length).toBeGreaterThan(500); // 스캔이 실제로 소스 트리를 읽었다(빈 목록으로 통과하는 가짜 초록 방지)
+    expect(scanStats.files).toBeGreaterThan(500); // 스캔이 실제로 소스 트리를 읽었다(빈 목록으로 통과하는 가짜 초록 방지)
     const offenders: string[] = [];
-    for (const f of files) {
-      const r = rel(f);
+    for (const [r, hits] of scan) {
       if (r === STREAM_OPENER) continue;
-      for (const hit of findStreamCode(fs.readFileSync(f, 'utf-8'), f)) {
+      for (const hit of hits) {
         if (hit.kind === 'getReader') continue; // 아래 시험이 따로 본다
         if (r === STREAM_SERVER && hit.kind === 'event-stream-literal') continue; // 내려주는 쪽의 Content-Type
         offenders.push(`${r}:${hit.line} [${hit.kind}] ${hit.text}`);
@@ -98,9 +107,8 @@ describe('story #4698 — 스트림을 여는 코드는 sse-multiplexer.ts 한 �
 
   it('⭐본문을 reader로 읽는 코드(스트리밍 fetch)는 «끝나는 응답» 허용 목록 밖에 없다', () => {
     const offenders: string[] = [];
-    for (const f of files) {
-      const r = rel(f);
-      for (const hit of findStreamCode(fs.readFileSync(f, 'utf-8'), f)) {
+    for (const [r, hits] of scan) {
+      for (const hit of hits) {
         if (hit.kind === 'getReader' && !(r in FINITE_READERS)) offenders.push(`${r}:${hit.line} ${hit.text}`);
       }
     }
@@ -108,12 +116,10 @@ describe('story #4698 — 스트림을 여는 코드는 sse-multiplexer.ts 한 �
   });
 
   it('허용 목록에 낡은 항목이 없다 — 열쇠 파일이 실제로 있고 그 안에 해당 코드가 아직 있다', () => {
-    const opener = findStreamCode(fs.readFileSync(path.join(SRC_DIR, STREAM_OPENER), 'utf-8'), STREAM_OPENER);
-    expect(opener.some((h) => h.kind === 'new-EventSource')).toBe(true);
-    const server = findStreamCode(fs.readFileSync(path.join(SRC_DIR, STREAM_SERVER), 'utf-8'), STREAM_SERVER);
-    expect(server.some((h) => h.kind === 'event-stream-literal')).toBe(true);
+    expect((scan.get(STREAM_OPENER) ?? []).some((h) => h.kind === 'new-EventSource')).toBe(true);
+    expect((scan.get(STREAM_SERVER) ?? []).some((h) => h.kind === 'event-stream-literal')).toBe(true);
     for (const f of Object.keys(FINITE_READERS)) {
-      expect(findStreamCode(fs.readFileSync(path.join(SRC_DIR, f), 'utf-8'), f).some((h) => h.kind === 'getReader')).toBe(true);
+      expect((scan.get(f) ?? []).some((h) => h.kind === 'getReader')).toBe(true);
     }
   });
 });
