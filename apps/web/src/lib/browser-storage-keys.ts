@@ -36,6 +36,9 @@ export const BROWSER_STORAGE_KEYS: readonly StorageKeyEntry[] = [
   // ── account: flows into the next account's screen or requests, or holds a person's words · state ──
   { key: 'sprintable_tab_project_id', area: 'session', scope: 'account', on: ['signout', 'switch'],
     where: ['app/dashboard/dashboard-shell.tsx', 'lib/project-context-client.ts', 'components/nav/org-hint-banner.tsx', 'hooks/use-unified-switcher.ts', 'components/desktop/desktop-setup.tsx'] },
+  // story 4714: «this app launch has had its landing» (the phone app opens the chat list · the start screen · the home by what the server knows, once) — the web
+  // view's own sessionStorage, gone with the launch; a sign-out or an account switch clears it so the next account gets its own landing
+  { key: 'sprintable.phoneLanding', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['lib/phone-landing.ts'] },
   // drafts are `…:u:<owner>:…` since story #4490 (owner-keyed: a switch keeps them, nobody else sees them); the head stays the
   // prefix so a sign-out also clears drafts written before then (no owner segment) — lib/tab-owner.ts adopts those
   { key: 'sprintable:field-draft:v1:', prefix: true, area: 'session', scope: 'account', on: ['signout'], where: ['hooks/use-field-draft.ts', 'lib/tab-owner.ts'] },

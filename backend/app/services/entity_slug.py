@@ -99,6 +99,8 @@ RESERVED_WORKSPACE_SLUGS: frozenset[str] = frozenset({
     "campaigns", "chat", "connect-rules", "content", "desktop", "gates", "loop-queue", "more",
     "native", "refund-policy", "set-password", "today", "unsubscribe",
     "flow", "goals", "hypotheses", "work-list",
+    # story 4714 — the phone app's landing and start screen (new top-level web routes)
+    "phone-landing", "phone-start",
 })
 
 

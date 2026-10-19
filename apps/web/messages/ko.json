@@ -1744,6 +1744,8 @@
       "start": {
         "title": "{device}에서 에이전트를 시작할까요?",
         "agentLabel": "에이전트",
+        "computerLabel": "컴퓨터",
+        "computerSheetTitle": "컴퓨터 고르기",
         "projectLabel": "프로젝트",
         "projectSheetTitle": "프로젝트 고르기",
         "newFolder": "새 폴더는 Mac 앞에서 골라요",

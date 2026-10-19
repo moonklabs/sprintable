@@ -1744,6 +1744,8 @@
       "start": {
         "title": "Start an agent on {device}?",
         "agentLabel": "Agent",
+        "computerLabel": "Computer",
+        "computerSheetTitle": "Choose a computer",
         "projectLabel": "Project",
         "projectSheetTitle": "Choose a project",
         "newFolder": "Pick a new folder at your Mac",

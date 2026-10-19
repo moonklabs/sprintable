@@ -6,6 +6,7 @@ import { isRecentlySuperseded } from '@/lib/auth/switch-epoch';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { MIGRATED_RESOURCES, RENAMED_RESOURCES, RETIRED_RESOURCES } from '@/lib/legacy-resource-tables';
+import { PHONE_LANDING_NEXT_PARAM, PHONE_LANDING_PATH, SHELL_NAV_HEADER } from '@/lib/phone-landing-address';
 import {
   fetchResolve,
   looksLikeWorkspaceSegment,
@@ -329,7 +330,10 @@ async function redirectLegacyResourcePath(
     return redirectToProjectPicker(request, pathname);
   }
 
-  return legacyResourceRedirect(request, resourceName, pathname, slugs, orgId, projectId);
+  const home = await legacyResourceRedirect(request, resourceName, pathname, slugs, orgId, projectId);
+  // story 4714 (AC3 · AC4): the shell's own home load (the header only a shell-started load carries) — the bare address only — is the phone app OPENING: it lands by
+  // what the server knows, not always on the home. Another flat address a shell started (a notification's path) is the usual redirect, untouched.
+  return pathname === '/glance' && request.headers.has(SHELL_NAV_HEADER) ? viaPhoneLanding(home, request) : home;
 }
 
 /**
@@ -353,6 +357,24 @@ function redirectToOnboarding(request: NextRequest): NextResponse {
   url.pathname = '/onboarding';
   url.search = '';
   return sessionDependentRedirect(url);
+}
+
+/**
+ * story 4714 (AC3 · AC4) — the phone app opens `/glance` (its home address) with the shell's own load header. For a person WITH an organization and a
+ * project the home it resolved to is not gone to at once: the same 307 points at `/phone-landing?next=<that home>` instead, which reads what the server knows
+ * (a paired computer · a live session) and sends the person to the chat list · the start screen · that very home. Only the Location changes — the
+ * status, `no-store` and the resolve cache cookie the redirect carried stay.
+ */
+function viaPhoneLanding(response: NextResponse, request: NextRequest): NextResponse {
+  const home = response.headers.get('location');
+  if (!home) return response;
+  const target = new URL(home, request.nextUrl.origin);
+  const url = request.nextUrl.clone();
+  url.pathname = PHONE_LANDING_PATH;
+  url.search = '';
+  url.searchParams.set(PHONE_LANDING_NEXT_PARAM, `${target.pathname}${target.search}`);
+  response.headers.set('location', url.toString());
+  return response;
 }
 
 /**

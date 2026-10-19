@@ -42,6 +42,14 @@ function makeRequest(path: string, cookies: Record<string, string> = {}): NextRe
   return req;
 }
 
+function makeRequestWithHeaders(path: string, headers: Record<string, string>, cookies: Record<string, string> = {}): NextRequest {
+  const req = new NextRequest(`https://app.example.com${path}`, { headers });
+  for (const [name, value] of Object.entries(cookies)) {
+    req.cookies.set(name, value);
+  }
+  return req;
+}
+
 describe('proxy', () => {
   beforeEach(() => {
     process.env['JWT_SECRET'] = JWT_SECRET;
@@ -1652,5 +1660,92 @@ describe('[SID:4397] a page GET with an org hint never switches the session', ()
     await middleware(makeRequest('/gates/g-1?org_id=11111111-2222-4333-8444-555555555555', { sp_at: token }));
     const switchCalls = mockFetch.mock.calls.filter((c: unknown[]) => String(c[0]).includes('/switch-org'));
     expect(switchCalls).toHaveLength(0);
+  });
+});
+
+describe('proxy — the phone app opening lands by what the server knows, through /phone-landing (story 4714 AC3 · AC4)', () => {
+  beforeEach(() => {
+    process.env['JWT_SECRET'] = JWT_SECRET;
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://localhost:8000';
+    mockFetch.mockReset();
+  });
+  afterEach(() => {
+    delete process.env['JWT_SECRET'];
+  });
+  // a person with an organization and a project (the usual answers of the legacy-address redirect)
+  const mockOrg = () => mockFetch.mockImplementation((url: string) => {
+    if (url.includes('/api/v2/me')) return Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) });
+    if (url.includes('/api/v2/organizations/org-1')) return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
+    if (url.includes('/api/v2/projects/proj-1')) return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-1', slug: 'sprintable' }) });
+    return Promise.resolve({ ok: false, status: 404 });
+  });
+  const SHELL = { 'X-Sprintable-Nav': '3', 'Cache-Control': 'no-cache' }; // what the shell puts on every load it starts (lib/initialSource.js)
+  const LANDING = 'https://app.example.com/phone-landing?next=%2Fmoonklabs%2Fsprintable%2Fflow';
+
+  it('the shell\'s own /glance (its header) with an organization → the same 307 (no-store) pointed at /phone-landing?next=<the home it resolved> — not the home itself', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+    mockOrg();
+    const res = await middleware(makeRequestWithHeaders('/glance', SHELL, { sp_at: token }));
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe(LANDING);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+  });
+
+  it('a browser\'s /glance (no shell header) is the home as before — the landing is the phone app\'s alone', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+    mockOrg();
+    const res = await middleware(makeRequest('/glance', { sp_at: token }));
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow');
+  });
+
+  it('only the bare home address: another flat address a shell started (a notification\'s path) is the usual redirect, not the landing — notification links are left alone', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+    mockOrg();
+    const docs = await middleware(makeRequestWithHeaders('/docs/my-doc', SHELL, { sp_at: token }));
+    expect(docs.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/docs/my-doc');
+    const other = await middleware(makeRequestWithHeaders('/docs', SHELL, { sp_at: token }));
+    expect(other.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/docs');
+  });
+
+  it('the landing\'s next IS the resolved home: a person who picked another project lands on THAT project\'s home (the session decides, as before)', async () => {
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/v2/me')) return Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) });
+      if (url.includes('/api/v2/organizations/org-1')) return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
+      if (url.includes('/api/v2/projects/proj-2')) return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-2', slug: 'other' }) });
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+    const res = await middleware(makeRequestWithHeaders('/glance', SHELL, { sp_at: token, sprintable_current_project_id: 'proj-2' }));
+    expect(res.headers.get('location')).toBe('https://app.example.com/phone-landing?next=%2Fmoonklabs%2Fother%2Fflow');
+  });
+
+  it('where the home could not be resolved (no project chosen yet → the project picker) the redirect is the usual one — nothing to land on', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    mockFetch.mockImplementation((url: string) => (url.includes('/api/v2/me')
+      ? Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) })
+      : Promise.resolve({ ok: false, status: 404 })));
+    const res = await middleware(makeRequestWithHeaders('/glance', SHELL, { sp_at: token }));
+    expect(res.headers.get('location') ?? '').not.toContain('/phone-landing');
+  });
+
+  it('a person with NO organization still goes to the onboarding (5155 first), and an organization the server could not tell about passes through as before', async () => {
+    const token = await makeAccessToken();
+    mockFetch.mockImplementation((url: string) => (url.includes('/api/v2/me')
+      ? Promise.resolve(new Response(JSON.stringify({ data: null, error: { code: 'NOT_FOUND', message: 'Member not found', reason: 'no_membership' }, meta: null }), { status: 404 }))
+      : Promise.resolve({ ok: false, status: 404 })));
+    const none = await middleware(makeRequestWithHeaders('/glance', SHELL, { sp_at: token }));
+    expect(none.headers.get('location')).toBe('https://app.example.com/onboarding');
+    mockFetch.mockImplementation((url: string) => (url.includes('/api/v2/me') ? Promise.resolve({ ok: false, status: 503 }) : Promise.resolve({ ok: false, status: 404 })));
+    const unknown = await middleware(makeRequestWithHeaders('/glance', SHELL, { sp_at: token }));
+    expect(unknown.status).toBe(200);
+  });
+
+  it('/phone-landing and /phone-start are behind the session like the onboarding: no session → /login', async () => {
+    for (const path of ['/phone-landing', '/phone-start']) {
+      mockFetch.mockImplementation(() => Promise.resolve({ ok: false, status: 401 }));
+      const res = await middleware(makeRequest(path));
+      expect([path, res.status, res.headers.get('location')?.includes('/login')]).toEqual([path, 307, true]);
+    }
   });
 });
