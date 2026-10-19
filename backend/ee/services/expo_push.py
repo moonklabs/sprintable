@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json as _json
 import logging
+import re
 import time
 import uuid
 
@@ -30,6 +31,15 @@ logger = logging.getLogger(__name__)
 
 _EXPO_SEND_URL = "https://exp.host/--/api/v2/push/send"
 _EXPO_MAX_BATCH = 100  # crux §2: 최대 100개/요청
+
+# story 4694 (PO 2026-10-19 · the week nobody knew): Expo ticket errors that are OURS — the push credentials of the project (the Firebase / FCM key) —
+# not the recipient's. One of them even once is a page, not a count: with InvalidCredentials every send of the dev app was refused for days (10-12: 12 sends,
+# 10-15: 1) and the log said only `reasons=InvalidCredentials:N` inside an INFO line nobody watched. A closed list: anything else (DeviceNotRegistered — a
+# dead token, MessageTooBig, free text) is not a credentials error and stays what it was.
+_EXPO_CREDENTIAL_ERRORS = frozenset({"InvalidCredentials", "MismatchSenderId"})
+# the structured events (Cloud Logging jsonPayload.event) the monitoring policy and the probe filter on — ids · counts · codes only, never a name, an e-mail or a token
+EXPO_CREDENTIALS_ERROR_EVENT = "expo_push_credentials_error"
+EXPO_PUSH_SKIPPED_EVENT = "expo_push_skipped"
 
 
 async def _expo_send_chunk(messages: list[dict]) -> list[dict]:
@@ -186,7 +196,7 @@ async def _deliver_expo_push_now(
     via_outbox=False 시그니처·거동 무변경). 워커는 이 함수를 안 부르고 세 조각을 직접
     호출해 fetch/finalize 사이(발송 구간)엔 세션을 안 쥔다."""
     try:
-        targets = await _fetch_expo_push_targets(db, org_id, member_ids, muted_member_ids=muted_member_ids)
+        targets = await _fetch_expo_push_targets(db, org_id, member_ids, muted_member_ids=muted_member_ids, event_type=event_type)
         dead_tokens = await _send_expo_push_targets(
             targets, title=title, body=body, event_type=event_type, org_id=org_id,
             reference_type=reference_type, reference_id=reference_id,
@@ -201,26 +211,57 @@ async def _deliver_expo_push_now(
         )
 
 
+_EXPO_CODE_SHAPE = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,63}")
+
+
+def _expo_error_code(ticket: dict) -> str:
+    """The ticket's error as a CODE word only — never Expo's free text (story 4694 · PO 2026-10-19). Measured on the real API: an error ticket's `message` carries the push token
+    verbatim (`"ExponentPushToken[…]" is not a valid Expo push token`, and `details.expoPushToken` too), so copying `message` into a log line (it used to be the fallback when
+    `details.error` was absent) could put a token in a log. `details.error` when it is a word of code shape (`DeviceNotRegistered`, `InvalidCredentials`, …), else `unknown`."""
+    code = (ticket.get("details") or {}).get("error")
+    return code if isinstance(code, str) and _EXPO_CODE_SHAPE.fullmatch(code) else "unknown"
+
+
+def _log_push_skipped(reason: str, org_id: uuid.UUID, event_type: str | None, *, recipients: int, muted: int) -> None:
+    """one line, closed fields: ids · counts · a closed reason code. No member id, name, e-mail or token."""
+    logger.info(
+        "expo push: skipped reason=%s org=%s event=%s recipients=%d muted=%d devices=0",
+        reason, org_id, event_type, recipients, muted,
+        extra={"structured": {
+            "event": EXPO_PUSH_SKIPPED_EVENT, "reason": reason, "org_id": str(org_id), "event_type": event_type,
+            "recipients": recipients, "muted": muted, "devices": 0,
+        }},
+    )
+
+
 async def _fetch_expo_push_targets(
     db: AsyncSession,
     org_id: uuid.UUID,
     member_ids: list[uuid.UUID],
     *,
     muted_member_ids: set[uuid.UUID] | None = None,
+    event_type: str | None = None,
 ) -> list[dict]:
     """활성 push_devices를 조회해 mute 필터까지 마친 순수 dict 리스트로 반환한다. 세션 I/O는
-    이 함수에서 끝(story #2460 PO 리뷰 F1)."""
+    이 함수에서 끝(story #2460 PO 리뷰 F1).
+
+    story 4694: an empty answer is no longer silent. When recipients exist but nothing goes out — everyone muted, or nobody has an active device — one structured line
+    says which (`reason`) and how many (recipients · muted · devices 0). Before, `devices=0` never appeared anywhere (the send path returns before its log line), so
+    «nobody to send to» and «nothing was tried» could not be told apart."""
     if not member_ids:
         return []
     muted = muted_member_ids or set()
     targets = [m for m in member_ids if m not in muted]
     if not targets:
+        _log_push_skipped("all_muted", org_id, event_type, recipients=len(member_ids), muted=len(member_ids) - len(targets))
         return []
 
     from ee.services.push_targets import select_active_devices
 
     # story #4397 — by person when `push_devices_by_user` is on (a device is a person's, not one org's).
     devices = await select_active_devices(db, org_id, targets, PushDevice.expo_push_token.is_not(None))
+    if not devices:
+        _log_push_skipped("no_devices", org_id, event_type, recipients=len(member_ids), muted=len(member_ids) - len(targets))
     # story #4396 — id · platform: an ok ticket is remembered by device (not token) for the later receipt check.
     return [{"expo_push_token": d.expo_push_token, "id": d.id, "platform": d.platform} for d in devices]
 
@@ -284,7 +325,7 @@ async def _send_expo_push_targets(
         for dev, ticket in zip(chunk_devices, tickets):
             if isinstance(ticket, dict) and ticket.get("status") == "error":
                 error_count += 1
-                err = (ticket.get("details") or {}).get("error") or ticket.get("message") or "unknown"
+                err = _expo_error_code(ticket)
                 error_reasons[err] = error_reasons.get(err, 0) + 1
                 if err == "DeviceNotRegistered":
                     dead_tokens.append(dev["expo_push_token"])
@@ -301,6 +342,17 @@ async def _send_expo_push_targets(
         "expo push: sent org=%s event=%s devices=%d ok=%d error=%d reasons=%s",
         org_id, event_type, len(devices), ok_count, error_count, error_reasons or None,
     )
+    # story 4694: the credentials class is an ERROR line of its own (the alert policy keys on `jsonPayload.event`) — the closed codes only, counts only
+    credential_errors = {code: n for code, n in error_reasons.items() if code in _EXPO_CREDENTIAL_ERRORS}
+    if credential_errors:
+        logger.error(
+            "expo push: credentials error org=%s event=%s codes=%s errors=%d of %d device(s)",
+            org_id, event_type, credential_errors, sum(credential_errors.values()), len(devices),
+            extra={"structured": {
+                "event": EXPO_CREDENTIALS_ERROR_EVENT, "org_id": str(org_id), "event_type": event_type,
+                "codes": credential_errors, "errors": sum(credential_errors.values()), "devices": len(devices),
+            }},
+        )
     if ok_tickets:
         from ee.services.expo_receipts import record_expo_tickets
 
