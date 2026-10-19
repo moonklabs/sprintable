@@ -61,17 +61,32 @@ function resolveModule(from: string, specifier: string): string | null {
   return null;
 }
 
-/** a module is a client module when it says `'use client'` — or when it only re-exports from one (a barrel in front of a client file is still a client reference on the server) */
+/** a module is a client module when it says `'use client'` — or when it passes a client module's value on: `export … from` it, or a value it imported from one that it exports again (`export { a }` · `export default a`) — a barrel in front of a client file is still a client reference on the server */
 function isClientModule(file: string, seen = new Set<string>()): boolean {
   if (seen.has(file)) return false;
   seen.add(file);
   const source = readFileSync(file, 'utf8');
   if (hasUseClient(source)) return true;
   const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TSX);
+  const fromClient = (specifier: string) => { const target = resolveModule(file, specifier); return target !== null && isClientModule(target, seen); };
+  const imported = new Set<string>(); // local names of values imported from a client module
+  for (const st of parsed.statements) {
+    if (!ts.isImportDeclaration(st) || !ts.isStringLiteral(st.moduleSpecifier) || st.importClause?.isTypeOnly || !fromClient(st.moduleSpecifier.text)) continue;
+    const clause = st.importClause;
+    if (!clause) continue;
+    if (clause.name) imported.add(clause.name.text);
+    const b = clause.namedBindings;
+    if (b && ts.isNamedImports(b)) for (const el of b.elements) if (!el.isTypeOnly) imported.add(el.name.text);
+    if (b && ts.isNamespaceImport(b)) imported.add(b.name.text);
+  }
   return parsed.statements.some((st) => {
-    if (!ts.isExportDeclaration(st) || st.isTypeOnly || !st.moduleSpecifier || !ts.isStringLiteral(st.moduleSpecifier)) return false;
-    const target = resolveModule(file, st.moduleSpecifier.text);
-    return target !== null && isClientModule(target, seen);
+    if (ts.isExportDeclaration(st)) {
+      if (st.isTypeOnly) return false;
+      if (st.moduleSpecifier) return ts.isStringLiteral(st.moduleSpecifier) && fromClient(st.moduleSpecifier.text);
+      const named = st.exportClause && ts.isNamedExports(st.exportClause) ? st.exportClause.elements : [];
+      return named.some((el) => !el.isTypeOnly && imported.has((el.propertyName ?? el.name).text));
+    }
+    return ts.isExportAssignment(st) && ts.isIdentifier(st.expression) && imported.has(st.expression.text);
   });
 }
 
@@ -104,11 +119,19 @@ describe('[4714] a server page never calls a function imported from a client mod
       writeFileSync(path.join(dir, 'barrel.ts'), `export { resolveHref } from './client';\n`);
       writeFileSync(path.join(dir, 'outer.ts'), `export * from './barrel';\n`);
       writeFileSync(path.join(dir, 'plain-barrel.ts'), `export { pure } from './plain';\n`);
+      writeFileSync(path.join(dir, 'local.ts'), `import { resolveHref } from './client';\nexport { resolveHref };\n`);
+      writeFileSync(path.join(dir, 'renamed.ts'), `import { resolveHref as go } from './client';\nexport { go as href };\n`);
+      writeFileSync(path.join(dir, 'dflt.ts'), `import { resolveHref } from './client';\nexport default resolveHref;\n`);
+      writeFileSync(path.join(dir, 'uses-only.ts'), `import { resolveHref } from './client';\nexport const mine = () => resolveHref();\n`);
       writeFileSync(path.join(dir, 'loop-a.ts'), `export * from './loop-b';\n`);
       writeFileSync(path.join(dir, 'loop-b.ts'), `export * from './loop-a';\n`);
       expect(isClientModule(path.join(dir, 'client.ts'))).toBe(true);
       expect(isClientModule(path.join(dir, 'barrel.ts'))).toBe(true);
       expect(isClientModule(path.join(dir, 'outer.ts'))).toBe(true);
+      expect(isClientModule(path.join(dir, 'local.ts'))).toBe(true); // import { a }; export { a }
+      expect(isClientModule(path.join(dir, 'renamed.ts'))).toBe(true);
+      expect(isClientModule(path.join(dir, 'dflt.ts'))).toBe(true);
+      expect(isClientModule(path.join(dir, 'uses-only.ts'))).toBe(false); // uses it inside its own function: the server module's own function, not the client reference
       expect(isClientModule(path.join(dir, 'plain-barrel.ts'))).toBe(false);
       expect(isClientModule(path.join(dir, 'loop-a.ts'))).toBe(false); // a cycle ends, it does not hang
     } finally { rmSync(dir, { recursive: true, force: true }); }

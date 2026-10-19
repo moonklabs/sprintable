@@ -9,14 +9,6 @@ export const PHONE_START_PATH = '/phone-start';
 export const PHONE_LANDING_NEXT_PARAM = 'next';
 
 /**
- * Where the start screen's way out goes: the Today address when the Today flag is on, else the chat list — the onboarding's own finish rule. Lives here, not
- * in the onboarding form: that file is a client module, and a server page cannot call a function it exports (the page would answer 500).
- */
-export function phoneStartHome(todayV3Enabled: boolean, todayHref: string, chatsHref: string): string {
-  return todayV3Enabled ? todayHref : chatsHref;
-}
-
-/**
  * The home the landing goes to when there is nothing to open instead: the address the proxy resolved (`next`). Only an address of this app — one path,
  * no host, no `//`, no backslash (an open redirect must never come out of a link someone sends) — and never the landing itself (`/phone-landing?next=/phone-landing`
  * would send the person round and round); anything else is the site root, which the session sends on to the person's own home.

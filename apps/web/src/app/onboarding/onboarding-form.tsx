@@ -15,16 +15,7 @@ import { FirstScreen } from './first-screen';
 import { existingOrgIdFromMe } from './existing-org';
 import { emitOnboardingEvent } from './onboarding-telemetry';
 import { withProjectParam } from '@/hooks/use-flat-href';
-
-// story #3983(PO 확定 2026-09-17 01:41Z) — 끝 착지 결정을 순수함수로 뽑아
-// 낸다(closure 안에 묻어 두면 폼 전체를 org→project→agent→connect까지
-// 몰아야 테스트가 되는 자리 — 결정 자체는 이 한 줄뿐이라 여기만 pin한다).
-// story #4017 CHANGES 2(rebase 시점 재정정 2026-09-22) — todayHref·chatsHref 둘 다
-// 더 이상 이 함수가 리터럴을 재조립하지 않는다. 부모(page.tsx)가
-// resolveNavV3Destinations(flags)로 구한 값을 그대로 받는다 — 목적지 모듈 한 곳에서만.
-export function resolveOnboardingLandingHref(todayV3Enabled: boolean, todayHref: string, chatsHref: string): string {
-  return todayV3Enabled ? todayHref : chatsHref;
-}
+import { resolveOnboardingLandingHref } from '@/lib/onboarding-landing-href';
 
 const AGENT_ROLES = ['developer', 'designer', 'pm', 'qa', 'devops'];
 // story #3196 ⑥ — 값(BE role 필드, 영문 enum 그대로 무변경)과 표시 라벨을 분리. 예전엔
