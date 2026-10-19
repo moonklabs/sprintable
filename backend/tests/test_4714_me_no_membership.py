@@ -114,6 +114,18 @@ async def test_the_belongs_somewhere_question_counts_live_rows_only(clean):
     assert "org_members.deleted_at IS NULL" in anywhere[0] and "org_members.user_id" in anywhere[0]
 
 
+@pytest.mark.anyio
+async def test_an_api_key_caller_is_never_asked_the_belongs_somewhere_question(clean):
+    """an API key's `user_id` is a team member id, not a person: the «belongs somewhere» lookup (by person) is skipped for it — it keeps the plain
+    `no_membership` and the query is never sent, even where a person row would exist (the web proxy never sees an API key; this keeps the branch honest)"""
+    db = _Db(org_elsewhere=True, team_elsewhere=True)
+    _world(db, claims={"app_metadata": {"api_key_id": "k-1"}})
+    r = await _me()
+    assert r.status_code == 404
+    assert r.json()["error"]["reason"] == "no_membership"
+    assert not [q for q in db.sqls if "org_members" in q and "org_members.org_id" not in q]  # the question was not asked
+
+
 def test_the_two_reasons_are_distinct_words():
     assert NO_MEMBERSHIP_REASON != MEMBERSHIP_ELSEWHERE_REASON
 
