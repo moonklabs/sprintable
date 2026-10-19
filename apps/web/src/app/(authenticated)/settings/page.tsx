@@ -31,6 +31,7 @@ import { TwoFactorSection } from '@/components/settings/two-factor-section';
 import { OtherSessionsSection } from '@/components/settings/other-sessions-section';
 import { SetPasswordSection } from '@/components/settings/set-password-section';
 import { LinkedAccountsSection } from '@/components/settings/linked-accounts-section';
+import { PushRegisterNotice } from '@/components/settings/push-register-notice';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { canSubmitOrgDelete } from './org-delete-gate';
 import { Badge } from '@/components/ui/badge';
@@ -953,6 +954,8 @@ export default function SettingsPage() {
                   </div>
                 </SectionCardHeader>
                 <SectionCardBody>
+                  {/* story #4694 AC2 ② — the phone's «could not register for notifications» line (phone app only · nothing when fine) */}
+                  <PushRegisterNotice />
                   {loading ? (
                     <div className="space-y-3">
                       {[1, 2, 3].map((i) => (

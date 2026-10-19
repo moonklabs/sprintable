@@ -11,7 +11,7 @@ declare global {
     // "무엇인지"(셸의 진실)를 말하고, 웹은 "보여줄지"(AC0 노출 정책)만 판단한다. 셸은
     // Android도 숨기지 않고 참값을 넣는다(injectedJavaScriptBeforeContentLoaded/Tauri
     // initialization_script — hydrate 전 값이 서 있어야 fail-closed가 실제로 안전).
-    __SPRINTABLE_SHELL__?: { platform: 'ios' | 'android' | 'macos' };
+    __SPRINTABLE_SHELL__?: { platform: 'ios' | 'android' | 'macos'; pushRegister?: unknown };
   }
 }
 
@@ -98,4 +98,75 @@ export function openExternal(url: string) {
     return;
   }
   window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+// story #4694 AC2 ② — the phone's «this phone could not be registered for notifications» state. The shell (sprintable-mobile
+// App.js · lib/pushRetry.js) merges `pushRegister` into `window.__SPRINTABLE_SHELL__` and fires `sprintable-shell-push` whenever it changes
+// (after every retry too, even when the state is the same). Shape is closed: anything else reads as «nothing to show» (a wrong «notifications are
+// off» is worse than no line). Outside the native shell it is always null. The raw error code never reaches the web — two causes only.
+// `register` (the server refused the registration) is accepted for when the shell starts reporting it; today the shell sends the three token-side stages.
+export type PushRegisterFailed = { state: 'failed'; stage: 'permission' | 'device_token' | 'expo_token' | 'register'; cause: 'permission' | 'other'; retried: boolean };
+
+export const PUSH_REGISTER_EVENT = 'sprintable-shell-push';
+const PUSH_STAGES = ['permission', 'device_token', 'expo_token', 'register'];
+
+export function readPushRegisterFailure(): PushRegisterFailed | null {
+  if (typeof window === 'undefined' || !window.ReactNativeWebView) return null;
+  const v = window.__SPRINTABLE_SHELL__?.pushRegister as Partial<PushRegisterFailed> | undefined;
+  if (!v || typeof v !== 'object' || v.state !== 'failed') return null;
+  if (typeof v.stage !== 'string' || !PUSH_STAGES.includes(v.stage)) return null;
+  if (v.cause !== 'permission' && v.cause !== 'other') return null;
+  if (typeof v.retried !== 'boolean') return null;
+  return { state: 'failed', stage: v.stage as PushRegisterFailed['stage'], cause: v.cause, retried: v.retried };
+}
+
+// «registering…» lives here, not in the component: Settings tabs unmount their content, and a person who switches tabs during a slow
+// retry must come back to the same «registering…» (the shell may still be busy and would ignore a second message). One press = one message.
+// The shell answers every attempt with the event; if it never does (webview paused) the pending state gives up so the button is not off for ever.
+const RETRY_GIVE_UP_MS = 20_000; // longer than the shell's own attempt (a few seconds) · short enough that a stale «registering…» (a client-side sign-out → sign-in that keeps this module) clears itself
+let retryPending = false;
+let retryGiveUp: ReturnType<typeof setTimeout> | null = null;
+// the one-shot listener that ends «pending» when nobody is subscribed (panel unmounted) — removed on every way out, so repeated give-ups never pile listeners up
+let retryAnswerListener: (() => void) | null = null;
+const changeListeners = new Set<() => void>();
+const emitChange = () => changeListeners.forEach((l) => l());
+
+function endRetryPending() {
+  retryPending = false;
+  if (retryGiveUp) { clearTimeout(retryGiveUp); retryGiveUp = null; }
+  if (retryAnswerListener) { window.removeEventListener(PUSH_REGISTER_EVENT, retryAnswerListener); retryAnswerListener = null; }
+}
+
+export function isPushRetryPending(): boolean {
+  return retryPending;
+}
+
+export function subscribePushRegister(onChange: () => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+  const onShell = () => { endRetryPending(); onChange(); };
+  changeListeners.add(onChange);
+  window.addEventListener(PUSH_REGISTER_EVENT, onShell);
+  return () => {
+    changeListeners.delete(onChange);
+    window.removeEventListener(PUSH_REGISTER_EVENT, onShell);
+  };
+}
+
+// «다시 시도» — one closed message; the shell answers with a new `sprintable-shell-push` event when the attempt is over.
+// Fail closed: outside the shell → nothing is sent and nothing goes pending; a bridge whose postMessage is missing or throws leaves nothing pending either.
+export function requestPushRetry() {
+  if (typeof window === 'undefined' || retryPending) return;
+  const bridge = window.ReactNativeWebView;
+  if (!bridge) return;
+  retryPending = true;
+  retryGiveUp = setTimeout(() => { endRetryPending(); emitChange(); }, RETRY_GIVE_UP_MS);
+  // the shell's answer ends the pending state even when nobody is subscribed (the Settings panel unmounted meanwhile)
+  retryAnswerListener = endRetryPending;
+  window.addEventListener(PUSH_REGISTER_EVENT, retryAnswerListener);
+  try {
+    bridge.postMessage(JSON.stringify({ type: 'push-retry' }));
+  } catch {
+    endRetryPending();
+  }
+  emitChange();
 }
