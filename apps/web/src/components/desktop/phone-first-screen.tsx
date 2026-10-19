@@ -21,7 +21,7 @@ import { useFlatHref } from '@/hooks/use-flat-href';
 import { sendMacLinkMail, type MacLinkMailOutcome } from '@/lib/phone-mac-link-mail';
 import { Loader2 } from 'lucide-react';
 import { firstInstructionHref } from '@/lib/onboarding/first-instruction';
-import { checkStart, readStartable, startOnPhone, waitForSession, type Pending, type StartOutcome, type StartableAgent, type StartableComputer, type StartableRead, type StartableView } from '@/lib/phone-start';
+import { checkStart, clearLeaving, isLeaving, readStartable, startOnPhone, waitForSession, type Pending, type StartOutcome, type StartableAgent, type StartableComputer, type StartableRead, type StartableView } from '@/lib/phone-start';
 
 type Read = { kind: 'reading' } | { kind: 'failed' } | { kind: 'no_phone' } | { kind: 'view'; view: StartableView };
 
@@ -52,7 +52,7 @@ export function PhoneFirstScreen({ orgId, chatsHref, macDownloadEnabled = false 
   const readGen = useRef(0);
   const readNow = useCallback(() => {
     const mine = ++readGen.current;
-    void readStartable(phoneCall).catch((): StartableRead => ({ kind: 'failed' })).then((r) => { if (mine === readGen.current) land(r); });
+    void readStartable(phoneCall, () => mine !== readGen.current).catch((): StartableRead => ({ kind: 'failed' })).then((r) => { if (mine === readGen.current) land(r); });
   }, [phoneCall, land]);
   const dropReads = useCallback(() => { readGen.current++; }, []); // leaving the page: whatever is still out is dropped
   useEffect(() => {
@@ -236,9 +236,10 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
     apply(o);
     if (o.kind === 'started' && agent) {
       setStanding(true);
-      const seen = await waitForSession({ setupId: computer.setup_id, agentId: agent.agent_member_id }, { ...deps, alive: () => alive.current });
+      const seen = await waitForSession({ setupId: computer.setup_id, agentId: agent.agent_member_id }, { ...deps, alive: () => alive.current && !isLeaving() });
       if (!alive.current) return;
       setStanding(false);
+      if (isLeaving()) { setBusy(false); return; } // the person pressed a way out meanwhile: nothing moves them a second time
       if (seen === 'stood') { window.location.assign(firstInstructionHref(agent.agent_member_id, startedIn.current)); return; } // leaves the page: the screen stays busy until it does
       setWaitedOut(true);
     }
@@ -248,6 +249,7 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
     if (busy || inFlight.current || !agent || !project) return;
     inFlight.current = true;
     try {
+      clearLeaving();
       setBusy(true); setOutcome(null); setWaitedOut(false);
       startedIn.current = project.project_id;
       const o = await startOnPhone({ setupId: computer.setup_id, agentId: agent.agent_member_id, projectId: project.project_id }, deps).catch((): StartOutcome => ({ kind: 'failed' }));
@@ -259,6 +261,7 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
     if (busy || inFlight.current || !pending.current) return;
     inFlight.current = true;
     try {
+      clearLeaving();
       setBusy(true); setWaitedOut(false);
       const o = await checkStart(pending.current, deps).catch((): StartOutcome => ({ kind: 'failed' }));
       if (!alive.current) return;

@@ -253,3 +253,12 @@ export async function waitForSession(
     await wait(Math.min(every, remaining)); // the sleep is cut by what is left too: the last look is AT the limit, never after it
   }
 }
+
+/**
+ * The person pressed a way OUT of this screen (the start screen's «대시보드로» · the onboarding's «오늘로 가기»): whatever is still waited for here must not move the page
+ * afterwards (the onboarding's finish waits for an auth refresh — a second move would land on top of it). Cleared by the next press of [시작] / [결과 확인].
+ */
+let leaving = false;
+export const markLeaving = (): void => { leaving = true; };
+export const clearLeaving = (): void => { leaving = false; };
+export const isLeaving = (): boolean => leaving;

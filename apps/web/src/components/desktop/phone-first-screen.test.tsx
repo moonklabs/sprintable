@@ -17,6 +17,7 @@ vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetch
 vi.mock('@/lib/phone-app-store', async (orig) => ({ ...(await orig<typeof import('@/lib/phone-app-store')>()), PHONE_APP_PUBLISHED: { android: true, ios: false } }));
 const { PhoneFirstScreen } = await import('./phone-first-screen');
 const { FirstScreen } = await import('@/app/onboarding/first-screen');
+const { isLeaving, markLeaving, clearLeaving } = await import('@/lib/phone-start');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -75,6 +76,7 @@ beforeEach(() => {
   __resetOrgRemoteControlForTest();
   server();
   assigned = [];
+  clearLeaving();
   vi.stubGlobal('location', { ...window.location, assign: (href: string) => { assigned.push(href); } });
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -711,6 +713,44 @@ describe('[4714] AC3 — started ≠ stood: the conversation with the started ag
     await waitMore(31_000);
     expect(byId('onboarding-phone-connecting')?.textContent).toBe('Started on the Mac — waiting for it to connect');
     expect(byId('onboarding-phone-open-started-chat')?.getAttribute('href')).toBe(FIRST);
+  });
+
+  it('a way out pressed while it waits: nothing moves the page afterwards — and the next press of [시작] is a fresh start again', async () => {
+    world.stand = false;
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await press(byId('onboarding-phone-start-go')); // waiting for the session
+    const reads = () => calls.filter((c) => c.url.startsWith('/api/desktop/startable')).length;
+    markLeaving(); // the person pressed [오늘로 가기] · [대시보드로] (their own handler goes on)
+    const before = reads();
+    world.stand = true;
+    await waitMore(2100);
+    expect(assigned).toEqual([]);
+    expect(reads()).toBe(before); // the wait stopped looking
+    expect(byId('onboarding-phone-connecting')).toBeNull(); // and does not claim «waiting to connect» for a person who is leaving
+    expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(false); // the screen is free (the page is on its way elsewhere, or the way out failed)
+    await press(byId('onboarding-phone-start-go'));
+    expect(assigned).toEqual([FIRST]); // a new press clears the mark
+  });
+
+  it('the onboarding\'s [오늘로 가기] marks the page as being left, then runs its own finish', async () => {
+    const onFinish = vi.fn();
+    await renderIn(<FirstScreen orgId="org-1" chatsHref="/chats" orgName={null} onConnectElsewhere={() => undefined} onFinish={onFinish} />);
+    expect(isLeaving()).toBe(false);
+    await press(byId('onboarding-first-finish'));
+    expect(isLeaving()).toBe(true);
+    expect(onFinish).toHaveBeenCalledTimes(1);
+  });
+
+  it('the discovery read of a screen that is gone asks for nothing more: the bridge answers after the screen left → no device list · no startable read', async () => {
+    let answer: (a: Record<string, unknown>) => void = () => undefined;
+    phoneCall.mockImplementation(() => new Promise((r) => { answer = r as (a: Record<string, unknown>) => void; }));
+    await screen();
+    await act(async () => { root.unmount(); });
+    answer(keyAnswer);
+    await flush();
+    expect(calls.map((c) => c.url)).toEqual([]);
+    root = createRoot(container); // afterEach unmounts it
   });
 
   it('the screen left while it waits → nothing moves afterwards (a late «runs» goes nowhere)', async () => {

@@ -4,6 +4,7 @@
 // whose agents are not running. It was only inside the onboarding's first screen, which a person with an organization never sees. Same screen, same
 // words, except the note above the way out (it says «you don't have to do this now», not the onboarding's «…reopen from Settings›download»); the way out is the
 // onboarding's own button — [오늘로 가기] — so no launch traps anyone here.
+import { markLeaving } from '@/lib/phone-start';
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
@@ -38,7 +39,7 @@ export function PhoneStartPage({ chatsHref, homeHref, todayV3Enabled, macDownloa
         <PhoneFirstScreen orgId={orgId} chatsHref={chatsHref} macDownloadEnabled={macDownloadEnabled} />
         <p className="break-keep border-t border-border pt-4 text-xs text-muted-foreground" data-testid="phone-start-later">
           {tp('laterNote')}{' '}
-          <Button variant="link" size="sm" className="h-auto px-0 py-0 text-xs" onClick={() => window.location.assign(homeHref)} data-testid="phone-start-finish">
+          <Button variant="link" size="sm" className="h-auto px-0 py-0 text-xs" onClick={() => { markLeaving(); window.location.assign(homeHref); }} data-testid="phone-start-finish">
             {todayV3Enabled ? to('desktopFinishToToday') : to('dashboardCta')}
           </Button>
         </p>

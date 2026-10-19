@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { DesktopDownloadCard, notAMac } from '@/components/desktop/desktop-download-card';
 import { PhoneAppCard } from '@/components/desktop/phone-app-card';
 import { PhoneFirstScreen } from '@/components/desktop/phone-first-screen';
+import { markLeaving } from '@/lib/phone-start';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { emitOnboardingEvent } from './onboarding-telemetry';
 
@@ -37,6 +38,7 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
   const to = useTranslations('onboarding');
   // the device is read after mount (null on the server and before the first read — no hydration mismatch), as the card does
   const { inPhoneApp } = usePhoneBridge();
+  const finish = () => { markLeaving(); onFinish(); }; // a way out: a start still being waited for in the phone's screen must not move the page after it
   const elsewhere = useSyncExternalStore(noSubscribe, () => notAMac(navigator.userAgent, inPhoneApp), () => null);
   if (elsewhere === null) return null;
 
@@ -48,7 +50,7 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
         <PhoneFirstScreen orgId={orgId} chatsHref={chatsHref} macDownloadEnabled={macDownloadEnabled} />
         <p className="break-keep border-t border-border pt-4 text-xs text-muted-foreground" data-testid="onboarding-first-later">
           {to('download.laterNote')}{' '}
-          <Button variant="link" size="sm" className="h-auto px-0 py-0 text-xs" onClick={onFinish} data-testid="onboarding-first-finish">
+          <Button variant="link" size="sm" className="h-auto px-0 py-0 text-xs" onClick={finish} data-testid="onboarding-first-finish">
             {to('desktopFinishToToday')}
           </Button>
         </p>
@@ -101,7 +103,7 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
       {/* a text line out, not a button in the hierarchy (Yuna A-2 · PO ②) */}
       <p className="break-keep border-t border-border pt-4 text-xs text-muted-foreground" data-testid="onboarding-first-later">
         {to('download.laterNote')}{' '}
-        <Button variant="link" size="sm" className="h-auto px-0 py-0 text-xs" onClick={onFinish} data-testid="onboarding-first-finish">
+        <Button variant="link" size="sm" className="h-auto px-0 py-0 text-xs" onClick={finish} data-testid="onboarding-first-finish">
           {to('desktopFinishToToday')}
         </Button>
       </p>
