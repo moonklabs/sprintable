@@ -154,7 +154,6 @@ class OrgInviteRepository:
             )
             # story #4729 — locked like accept / cancel: an invite cancelled or accepted a moment ago is not «pending» any more and is not re-sent
             .with_for_update()
-            .execution_options(populate_existing=True)
         )
         invite = result.scalar_one_or_none()
         if invite is None:
