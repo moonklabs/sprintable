@@ -14,7 +14,6 @@ import { ConnectStep } from './connect-step';
 import { FirstScreen } from './first-screen';
 import { existingOrgIdFromMe } from './existing-org';
 import { emitOnboardingEvent } from './onboarding-telemetry';
-import { RealtimeProvider } from '@/components/realtime-provider';
 import { withProjectParam } from '@/hooks/use-flat-href';
 import { resolveOnboardingLandingHref } from '@/lib/onboarding-landing-href';
 
@@ -541,19 +540,15 @@ export function OnboardingForm({
         )}
 
         {step === 'connect' && (
-          // story #4698 — 이 단계의 검증 레일(useVerificationRail → useSseNotifications)은 온보딩이 대시보드 셸 밖이라 지금까지 독립 EventSource로 폴백했다.
-          // 폴백을 지웠으니 이 단계에서만 공유 스트림(Provider) 하나를 연다 — 다른 온보딩 단계는 스트림을 열지 않는다.
-          <RealtimeProvider>
-            <ConnectStep
-              agentId={agentId}
-              apiKey={newApiKey}
-              projectId={projectId}
-              orgId={orgId}
-              onFinish={handleFinish}
-              todayV3Enabled={todayV3Enabled}
-              onMakeAgent={() => setStep('agent')}
-            />
-          </RealtimeProvider>
+          <ConnectStep
+            agentId={agentId}
+            apiKey={newApiKey}
+            projectId={projectId}
+            orgId={orgId}
+            onFinish={handleFinish}
+            todayV3Enabled={todayV3Enabled}
+            onMakeAgent={() => setStep('agent')}
+          />
         )}
       </div>
       {showUpgrade && <UpgradeModal message={upgradeReason} onClose={() => setShowUpgrade(false)} />}

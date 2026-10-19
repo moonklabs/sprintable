@@ -9,6 +9,10 @@ import { useSseMultiplexer, type SseMultiplexerHandle } from '@/lib/realtime/sse
 // story #4698 — 롤아웃 플래그(NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED)를 끝냈다: «끔» 길(훅마다 독립 EventSource)은 지웠고 **늘 이 한 줄기**뿐이다.
 // 끔 길의 탭당 스트림 3~4개가 크롬의 낮은 우선순위 요청 대기(대화 탭 청크 · 프리패치 15~20초)의 원인이었다(4698 에뮬 실측). 스트림을 여는 자리가 이
 // 한 곳을 벗어나지 않게 lib/realtime/sse-single-stream.guard.test.ts가 지킨다.
+//
+// Provider를 두는 곳은 대시보드 셸과 (v3) 레이아웃뿐이다(둘 다 member_id를 안다 — BE는 JWT 세션이 member_id 없이 /events/stream을 열면 400으로 거절한다).
+// /today · /connect-rules 레이아웃과 온보딩 연결 단계는 member_id를 모른 채 훅이 독립 EventSource로 폴백했고 그 스트림은 늘 400이었다 — 폴백을 지운 지금 그 자리는
+// 스트림이 없다(실제로 받던 실시간 0). 그 자리에 실시간이 필요하면 member_id를 공급하는 Provider를 따로 둔다(이 스토리 밖).
 
 const SseMultiplexerContext = createContext<SseMultiplexerHandle | null>(null);
 

@@ -4,9 +4,6 @@
 // 멀티플렉스를 «끔»으로 두던 시절엔 훅마다 독립 EventSource가 열려 탭당 3~4개였고, 크롬이 끝나지 않는 스트림 3개 이상에서 낮은 우선순위 요청(대화 탭
 // 청크 · 프리패치)을 15~20초 붙잡았다(4698 에뮬 실측). 실 훅을 모의하지 않고 실 Provider로 감싸 «지금 열려 있는 EventSource 수»를 직접 잰다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { RealtimeProvider } from '@/components/realtime-provider';
@@ -97,14 +94,5 @@ describe('story #4698 — 세 채널 구독 = 열린 스트림 1개', () => {
       await Promise.resolve();
     });
     expect(open().length).toBe(1);
-  });
-});
-
-// story #4698 — 대시보드 셸 · (v3) 레이아웃 밖에서 이 훅들을 쓰던 자리(독립 EventSource 폴백을 타던 곳)는 폴백이 지워졌으니 Provider 하나를 둔다. today · connect-rules
-// 레이아웃은 각자 layout.test.tsx가 맡고, 온보딩 연결 단계(검증 레일의 useSseNotifications)는 여기서 소스 모양으로 못박는다.
-describe('Provider 밖에 있던 실시간 소비처는 Provider로 감싸 있다(story #4698)', () => {
-  it('온보딩 연결 단계: ConnectStep(검증 레일)은 RealtimeProvider 안에서 렌더된다', () => {
-    const src = fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../app/onboarding/onboarding-form.tsx'), 'utf-8');
-    expect(src).toMatch(/<RealtimeProvider>\s*<ConnectStep/);
   });
 });

@@ -302,6 +302,22 @@ describe('useChatSse — 폴링 fallback(story #3621)', () => {
 });
 
 
+describe('useChatSse — 세 이벤트 채널이 공유 스트림으로 각자의 콜백에 닿는다(story #4698)', () => {
+  it('conversation.message_created · conversation.working · conversation.read가 각각 onConversationMessage · onWorking · onConversationRead로 간다', async () => {
+    const onMessage = vi.fn(); const onWorking = vi.fn(); const onRead = vi.fn();
+    await act(async () => { root.render(<Harness onConversationMessage={onMessage} onWorking={onWorking} onConversationRead={onRead} />); });
+    expect(FakeEventSource.instances).toHaveLength(1);
+    const es = FakeEventSource.instances[0]!;
+    act(() => { es.emit('conversation.message_created', { id: 'm1', event_id: 'e-msg' }); });
+    act(() => { es.emit('conversation.working', { conversation_id: 'c1', working: [] }); });
+    act(() => { es.emit('conversation.read', { conversation_id: 'c1', member_id: 'm1' }); });
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(onWorking).toHaveBeenCalledTimes(1);
+    expect(onRead).toHaveBeenCalledTimes(1);
+  });
+});
+
+
 describe('story #4430 — delivery_withheld is kept on the way in (a dropped field would be a quiet success again)', () => {
   it('normalizeToMessage keeps a read\'s delivery_withheld; absent stays absent', () => {
     const m = normalizeToMessage({ id: 'm1', content: 'x', delivery_withheld: { withheld_count: 2, reason: 'recipient_blocked_sender', conversation_type: 'group' } });

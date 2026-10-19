@@ -4,8 +4,6 @@
 // `/today`가 (authenticated) 레이아웃 밖이라도 그 레이아웃이 맡던 세션 가드는
 // 그대로 서야 한다 — 비로그인 접근이 /login으로 리다이렉트되는지 직접 고정.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ReactElement } from 'react';
-import { RealtimeProvider } from '@/components/realtime-provider';
 
 const { getServerSessionMock, redirectMock, headersMock } = vi.hoisted(() => ({
   getServerSessionMock: vi.fn(),
@@ -38,13 +36,4 @@ describe('/today layout — 세션 가드', () => {
     expect(redirectMock).not.toHaveBeenCalled();
     expect(result).toBeTruthy();
   });
-  // story #4698 — 하단 탭 배지(useChatUnreadTotal)가 독립 EventSource로 폴백하던 길을 지웠으니, 이 레이아웃이 스트림 하나(RealtimeProvider)를 둔다.
-  it('⭐세션 있음 — children을 RealtimeProvider(탭당 스트림 1개)로 감싼다', async () => {
-    getServerSessionMock.mockResolvedValue({ user_id: 'u1', email: 'a@b.com', access_token: 'tok' });
-    const result = (await TodayV3Layout({ children: 'children-marker' })) as ReactElement<{ children: ReactElement }>;
-    const inner = result.props.children;
-    expect(inner.type).toBe(RealtimeProvider);
-    expect((inner.props as { children: unknown }).children).toBe('children-marker');
-  });
-
 });
