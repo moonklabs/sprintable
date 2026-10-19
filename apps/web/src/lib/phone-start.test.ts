@@ -331,8 +331,10 @@ describe('[4714] waitForSession — started ≠ stood: the server\'s `running` w
 
   it('the screen left (alive false) → gone: before the first read, or while it waits — and nothing more is read', async () => {
     const w = world([startable([{ setup_id: SETUP, agents: [agent(AGENT, false)] }])]);
-    await expect(waitForSession(target, { ...w.deps, alive: () => false })).resolves.toBe('gone');
+    const spy = vi.fn(w.deps.phoneCall);
+    await expect(waitForSession(target, { ...w.deps, phoneCall: spy, alive: () => false })).resolves.toBe('gone');
     expect(w.reads).toEqual([]);
+    expect(spy).not.toHaveBeenCalled(); // not even the bridge is asked for a screen that has left
     let reads = 0;
     const w2 = world([startable([{ setup_id: SETUP, agents: [agent(AGENT, false)] }])]);
     await expect(waitForSession(target, { ...w2.deps, alive: () => reads++ < 2 })).resolves.toBe('gone');
