@@ -28,7 +28,13 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
     world,
 )
 
-pytestmark = pytest.mark.anyio
+# story #4731 — the «not sent» marker must be a value nothing else in the stream can contain. It used to be "4569" (this test's own story number):
+# ids and timestamps in the SSE text contain random digits, so «4569» appeared by chance and failed the assertion (seen in #5155 and #5156, unrelated to the
+# shard split). Going back to a short digit marker brings that flake back.
+_NEW = f"new-message-{uuid.uuid4().hex}"
+
+# story #4731 — these SSE tests read a real stream over a long backlog: 16 – 21.5 s measured on the CI runners against the default 30 s per-test timeout
+pytestmark = [pytest.mark.anyio, pytest.mark.timeout(120)]
 
 BACKLOG = 2_400
 IDLE = 10.0  # no frame for this long = the stream is waiting for a wake (nothing more is coming on this one)
@@ -63,7 +69,7 @@ async def _put_backlog_and_a_message(agent_id: str) -> int:
                 FROM generate_series(0, :n - 1) AS i
             """), {**params, "first": first})
             message = Event(project_id=PROJ, org_id=ORG, event_type="conversation.message_created", recipient_id=uuid.UUID(agent_id),
-                            recipient_type="agent", payload={"content": "4569 the new message", "conversation_id": str(uuid.uuid4())},
+                            recipient_type="agent", payload={"content": _NEW, "conversation_id": str(uuid.uuid4())},
                             status="pending")
             s.add(message)
             await s.flush()
@@ -111,7 +117,7 @@ async def _read_until_idle(agen, first: asyncio.Future | None = None) -> list[st
 
 def _assert_all_went_out_once_in_order(frames: list[str], message_seq: int) -> None:
     seqs = [s for s in (_seq(f) for f in frames) if s is not None]
-    assert "4569 the new message" in "".join(frames), f"the new message must go out on this one pass ({len(seqs)} rows went out)"
+    assert _NEW in "".join(frames), f"the new message must go out on this one pass ({len(seqs)} rows went out)"
     assert seqs == sorted(seqs) and len(seqs) == len(set(seqs)), "seq order, each seq once"
     assert seqs[-1] == message_seq
     backlog = [s for s in seqs if s > message_seq - BACKLOG - 1]
@@ -163,7 +169,7 @@ async def test_one_wake_sends_the_whole_backlog_and_the_new_message(world, monke
                 await asyncio.sleep(0.2)
                 if not pending.done():
                     break
-                assert "4569" not in pending.result()
+                assert _NEW not in pending.result()  # a marker nothing else can contain (story #4731)
                 pending = asyncio.ensure_future(agen.__anext__())
             assert not pending.done()
             message_seq = await _put_backlog_and_a_message(agent_id)  # one commit → one wake
@@ -427,7 +433,7 @@ async def test_a_long_catch_up_to_a_slow_reader_keeps_presence_and_lease_fresh(w
             message_seq = await _put_backlog_and_a_message(agent_id)
             refreshes_before = sse_lease.refresh.await_count
             frames = [await pending]
-            while "4569 the new message" not in frames[-1]:
+            while _NEW not in frames[-1]:
                 await asyncio.sleep(0.002)  # the slow reader
                 frames.append(await agen.__anext__())
             refreshes_during = sse_lease.refresh.await_count - refreshes_before
@@ -478,5 +484,5 @@ async def test_a_long_catch_up_never_keeps_the_stream_past_its_lifespan(world, m
         finally:
             shutdown_module.reset_shutdown_event()
     assert short and short[-1].startswith("event: lifespan_reconnect"), f"the pass ends at the lifespan: {short[-1][:60] if short else None}"
-    assert "4569 the new message" not in "".join(short), "the pass stopped before the end of the backlog"
+    assert _NEW not in "".join(short), "the pass stopped before the end of the backlog"
     _assert_all_went_out_once_in_order(again, message_seq)  # nothing acked → the next connection sends all after the ack
