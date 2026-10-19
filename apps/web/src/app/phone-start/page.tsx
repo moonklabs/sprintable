@@ -1,5 +1,5 @@
 import { PhoneStartPage } from '@/components/desktop/phone-start-page';
-import { resolveOnboardingLandingHref } from '@/app/onboarding/onboarding-form';
+import { resolveOnboardingLandingHref } from '@/lib/onboarding-landing-href';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { resolveChatsHref, resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { isDesktopDownloadEnabled } from '@/lib/desktop-download-gate';

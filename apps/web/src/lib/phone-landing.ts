@@ -6,8 +6,9 @@
 //   · an agent runs on a paired computer → the chat list (AC4: nothing to start — the running agent's chat is where the person goes);
 //   · paired, and nothing runs → the start screen («○○ 맥에서 에이전트를 시작할까요?», AC3);
 //   · not paired with any computer → the usual home (a person with no organization was already sent to the onboarding by the proxy).
-// Anything not known — a read that fails · a computer that has not been heard from (`running: null`) · a server that does not say — is the usual home:
-// never a dead end made of a missing answer.
+// Anything not known — a read that fails · an agent on a heard-from computer the server cannot tell about (`running: null`) · a server that does not say — is
+// the usual home: never a dead end made of a missing answer. A computer that has not been heard from at all is left out of the decision (not paired with any
+// computer that is up → the usual home).
 //
 // Once per app launch: the landing is the app OPENING, not every time the shell asks for the home address (a back press that is absorbed into the home goes
 // there again). The mark lives in sessionStorage — the web view's own storage, gone with the launch. A storage that cannot be read or written cannot keep
@@ -22,8 +23,11 @@ type PhoneCall = Parameters<typeof readStartable>[0];
 export async function decideLanding(phoneCall: PhoneCall): Promise<Landing> {
   const read = await readStartable(phoneCall).catch(() => null);
   if (!read || read.kind !== 'view') return 'home'; // no key on the server (paired with nothing) · no screen lock · a read that failed
-  const agents = read.view.computers.flatMap((c) => c.agents);
-  if (read.view.computers.length === 0) return 'home';
+  // only a computer that was heard from counts: a silent one (an old Mac the person stopped using) can start nothing and says `running: null` about everything —
+  // letting it in would keep a person with a working Mac at the usual home for good
+  const heard = read.view.computers.filter((c) => c.reachable);
+  if (heard.length === 0) return 'home';
+  const agents = heard.flatMap((c) => c.agents);
   if (agents.some((a) => a.running === true)) return 'chats'; // any agent on any paired computer that runs: that is the running agent
   if (agents.some((a) => a.running === null)) return 'home'; // one we could not tell about: not «nothing is running»
   return 'start';

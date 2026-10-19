@@ -95,7 +95,7 @@ describe('[4714] decideLanding — what the server says decides', () => {
     expect(await decideLanding(phoneCall as never)).toBe('start');
   });
 
-  it('what is not known is the usual home: a computer that was not heard from (`running: null`) or a server that does not say; a known live agent still wins over it', async () => {
+  it('what is not known is the usual home: an agent on a heard-from computer the server cannot tell about (`running: null`) or a server that does not say; a known live agent still wins over it', async () => {
     startable(computer(SETUP_A, '윤재의 맥북', false), computer(SETUP_B, '사무실 맥', null, AGENT2));
     expect(await decideLanding(phoneCall as never)).toBe('home');
     startable(computer(SETUP_A, '윤재의 맥북', undefined)); // an older server: no word — never read as «not running»
@@ -104,6 +104,19 @@ describe('[4714] decideLanding — what the server says decides', () => {
     expect(await decideLanding(phoneCall as never)).toBe('home');
     startable(computer(SETUP_A, '윤재의 맥북', true), computer(SETUP_B, '사무실 맥', null, AGENT2));
     expect(await decideLanding(phoneCall as never)).toBe('chats');
+  });
+
+  it('a computer that was not heard from is left out: an old silent Mac beside a working one does not hold the person at the usual home (wheel 2 · 10-19); with no computer heard from → the usual home', async () => {
+    const silent = (setup_id: string, name: string, agentId: string) => ({ ...computer(setup_id, name, null, agentId), reachable: false });
+    startable(computer(SETUP_A, '새 맥', false), silent(SETUP_B, '옛 맥', AGENT2));
+    expect(await decideLanding(phoneCall as never)).toBe('start');
+    startable(silent(SETUP_B, '옛 맥', AGENT2), computer(SETUP_A, '새 맥', true));
+    expect(await decideLanding(phoneCall as never)).toBe('chats');
+    startable(silent(SETUP_A, '옛 맥', AGENT), silent(SETUP_B, '옛 맥 2', AGENT2));
+    expect(await decideLanding(phoneCall as never)).toBe('home');
+    // a silent computer is out even when its word says «runs» (it cannot be told to do anything) — the heard one decides
+    startable({ ...computer(SETUP_B, '옛 맥', true, AGENT2), reachable: false }, computer(SETUP_A, '새 맥', false));
+    expect(await decideLanding(phoneCall as never)).toBe('start');
   });
 
   it('a read that fails is the usual home, never a screen made of a missing answer (the start read · the key list · the bridge)', async () => {

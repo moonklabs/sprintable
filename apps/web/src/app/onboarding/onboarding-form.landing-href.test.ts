@@ -4,7 +4,7 @@
 // onboarding-form.tsx의 closure 안 finishToHome을 통째로 못 도는(org→project→agent→
 // connect 왕복 필요) 대신 결정 로직만 뽑아 pin.
 import { describe, expect, it } from 'vitest';
-import { resolveOnboardingLandingHref } from './onboarding-form';
+import { resolveOnboardingLandingHref } from '@/lib/onboarding-landing-href';
 
 describe('resolveOnboardingLandingHref(story #3983 AC3)', () => {
   it('⭐ON이면 chatsHref 무관 todayHref', () => {
