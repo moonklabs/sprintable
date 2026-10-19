@@ -142,14 +142,30 @@ const CURRENT_PROJECT_COOKIE = 'sprintable_current_project_id';
 // 검증값)와 달라질 수 있다(curl 대조: JWT org로 X-Org-Id 조회→404, me.org_id로 조회→200 —
 // layout.tsx는 이미 /api/v2/me를 써서 이 함정을 안 밟았다). 같은 SSOT(/api/v2/me)로 맞춘다 —
 // JWT 클레임 직접 디코드 대신 실 조회.
-async function getVerifiedOrgId(fastapiUrl: string, accessToken: string): Promise<string | null> {
+/**
+ * What `/api/v2/me` says about this session's organization — three answers, not two (story 4714 AC6):
+ *  · `org`     the server answered and the person works in `orgId`;
+ *  · `none`    the server answered 404 NOT_FOUND with `reason: 'no_membership'` (`me.py`): the account exists but has no organization yet — a brand-new person;
+ *  · `unknown` anything else (a 5xx, a network error, a 200 without an org, a 404 that is not that answer): the call did not tell us.
+ * Only `none` may send a person to the onboarding: an `unknown` is a moment of trouble, and an organization member must never be bounced to
+ * «create an organization» because of it (it passes through, as it always did).
+ */
+type OrgLookup = { kind: 'org'; orgId: string } | { kind: 'none' } | { kind: 'unknown' };
+async function lookupVerifiedOrg(fastapiUrl: string, accessToken: string): Promise<OrgLookup> {
   try {
     const res = await fetch(`${fastapiUrl}/api/v2/me`, { headers: { Authorization: `Bearer ${accessToken}` } });
-    if (!res.ok) return null;
+    if (res.status === 404) {
+      // the machine-readable field the backend writes for exactly this answer (`me.py` NO_MEMBERSHIP_REASON) — never the message's words, so a
+      // rewording of the message can not quietly bring the 404 trap back. Without it (an older backend during a rollout, a gateway's 404, a 404
+      // of another route) the answer is `unknown`: pass through, never a redirect.
+      const body = await res.json().catch(() => null) as { error?: { code?: unknown; reason?: unknown } } | null;
+      return body?.error?.code === 'NOT_FOUND' && body?.error?.reason === 'no_membership' ? { kind: 'none' } : { kind: 'unknown' };
+    }
+    if (!res.ok) return { kind: 'unknown' };
     const me = await res.json() as { org_id?: string };
-    return typeof me.org_id === 'string' ? me.org_id : null;
+    return typeof me.org_id === 'string' && me.org_id !== '' ? { kind: 'org', orgId: me.org_id } : { kind: 'unknown' }; // an empty id is not an organization: pass through, as `!orgId` always did
   } catch {
-    return null;
+    return { kind: 'unknown' };
   }
 }
 
@@ -253,11 +269,16 @@ async function redirectLegacyResourcePath(
   if (excluded.some((sub) => pathname.startsWith(`/${resourceName}/${sub}`))) return null;
 
   const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
-  const orgId = await getVerifiedOrgId(fastapiUrl, accessToken);
-  // orgId조차 없으면(토큰 자체가 org_id를 못 실은 예외적 경우) 개입할 근거가 없어 그대로 통과
-  // (Next 자체 404) — verifyAccessToken 통과 후 이론상 가능하나 실사용 재현 없음, story #2212
-  // 스코프 밖(그 경우엔 org조차 모르니 org-briefing으로도 못 보낸다).
-  if (!orgId) return null;
+  const orgLookup = await lookupVerifiedOrg(fastapiUrl, accessToken);
+  // story 4714 AC6 — 서버가 «이 계정은 조직이 없다»고 답한 새 사람(me 404 Member not found)은 org-briefing도 project picker도 못 가는 자리다.
+  // 앱은 늘 `/glance`로 열어서(셸 HOME_PATH) 폰으로 처음 온 사람이 여기서 Next 404에 갇혔다 — 온보딩(`/onboarding`)으로 보낸다. 세션 의존 307
+  // (no-store)이고 쿼리는 뗀다(조직이 없는 사람에겐 옮겨 갈 스토리 · 프로젝트가 없다). «모름»(me 5xx · 네트워크 · 모양이 다른 404)은 아래처럼
+  // 개입 없이 통과 — 조직이 있는 사람을 순간의 실패로 온보딩에 튕기지 않는다.
+  if (orgLookup.kind === 'none') return redirectToOnboarding(request);
+  // orgId조차 모르면(토큰 자체가 org_id를 못 실은 예외적 경우 · me 실패) 개입할 근거가 없어 그대로 통과
+  // (Next 자체 404) — story #2212 스코프 밖(그 경우엔 org조차 모르니 org-briefing으로도 못 보낸다).
+  if (orgLookup.kind !== 'org') return null;
+  const orgId = orgLookup.orgId;
 
   // story #3208 — artifacts는 «현재 project 추측»이 아니라 «자기 자신이 속한 project»로
   // 해소한다(doc #2168과 동형). id가 UUID 모양일 때만 시도하고, 실패하면(대상 없음·접근권
@@ -324,6 +345,14 @@ function sessionDependentRedirect(url: URL): NextResponse {
   const response = NextResponse.redirect(url, 307);
   response.headers.set('Cache-Control', 'no-store');
   return response;
+}
+
+/** story 4714 AC6 — a person with no organization yet: the onboarding is where they go (no query: nothing of a link they carried applies to them). */
+function redirectToOnboarding(request: NextRequest): NextResponse {
+  const url = request.nextUrl.clone();
+  url.pathname = '/onboarding';
+  url.search = '';
+  return sessionDependentRedirect(url);
 }
 
 /**
