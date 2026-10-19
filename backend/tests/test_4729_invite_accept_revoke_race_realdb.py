@@ -284,3 +284,23 @@ async def test_g_the_cancel_route_answers_409_for_an_accepted_invite_and_the_inv
         await _cleanup(d1)
         await _cleanup(d2)
         await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_h_a_cancel_with_another_organizations_id_leaves_the_invite_pending():
+    """the conditional UPDATE itself carries the organization: an invite of organization A must not be turned into «revoked» by a cancel addressed to
+    organization B (the answer is None either way — what matters is that the row is not written)."""
+    from app.repositories.org_invite import OrgInviteRepository
+
+    eng = create_async_engine(_ASYNC, poolclass=NullPool)
+    Session = async_sessionmaker(eng, expire_on_commit=False)
+    d1, d2 = await _seed(), await _seed()
+    try:
+        async with Session() as s:
+            assert await OrgInviteRepository(s).revoke(invite_id=d1.invite, org_id=d2.org) is None
+            await s.commit()  # a caller that commits after the None must not have written anything
+        assert await _state(d1) == {"invite": "pending", "member": 0}
+    finally:
+        await _cleanup(d1)
+        await _cleanup(d2)
+        await eng.dispose()
