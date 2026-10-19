@@ -153,7 +153,11 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
   const block = soloStartBlock(runtime, folder, wideOk);
   // story 4717 (follow-up · PO 05:04Z): the one new agent this card makes does not fit the plan — «시작» off, said before the press
   const roomFull = !agent && roomShort(agentRoom, 1); // the `agent=` move confirmation makes no new agent — the room never holds it
-  const folderLink = appSetupLink(app, 'folder', { pick: runtime });
+  // story 4713 (Yuna's walk 10-17 · PO 10-17): what goes to the Mac folder window — and comes back in the next folder's address — is only what the PERSON chose
+  // (their radio · an earlier echo of theirs), never the program a folder's CLAUDE.md / AGENTS.md picked: a mark's pick belongs to that folder and is gone with it,
+  // so the next folder (no mark) starts from the usual default again; a person's own choice stays.
+  const echoRuntime = agent ? runtime : pickedRuntime && usable.includes(pickedRuntime) ? pickedRuntime : defaultSoloRuntime(usable, query.pick);
+  const folderLink = appSetupLink(app, 'folder', { pick: echoRuntime });
 
   // codex self-QA: two presses before the state commits must not send two confirmations (and two phone-control PUTs)
   const startInFlight = useRef(false);
@@ -310,7 +314,7 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
             <div role="radiogroup" aria-labelledby="quick-step-agent" className="flex flex-col gap-1">
               {usable.map((r) => (
                 <label key={r} className="flex items-center gap-2 text-sm">
-                  <input type="radio" name="quick-runtime" checked={runtime === r} onChange={() => setPickedFor({ folderKey, runtime: r })} />
+                  <input type="radio" name="quick-runtime" checked={runtime === r} onChange={() => setPickedFor({ folderKey, runtime: r })} onClick={() => setPickedFor({ folderKey, runtime: r })} /> {/* onClick too: pressing the radio a folder's mark already picked fires no change event, yet it is the person's own choice (4713 · codex 01a151a1) */}
                   <span>{RUNTIME_LABEL[r]}</span>
                   {withVersion(r) ? <span className="text-xs text-muted-foreground">{withVersion(r)}</span> : null}
                 </label>

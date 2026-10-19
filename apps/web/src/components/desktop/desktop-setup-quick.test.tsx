@@ -776,6 +776,55 @@ describe('[SID:4713 AC2] the card picks the program a folder\'s CLAUDE.md / AGEN
     expect(line()).toContain('AGENTS.md');
   });
 
+  // story 4713 (Yuna 10-17): Codex was picked by AGENTS.md in folder A; the next folder (no mark) kept it, because the folder window got the SHOWN program back as `pick=`.
+  const pickOf = (label: string) => new URL((linkOf(label)!.getAttribute('href') as string).replace('ai.sprintable:', 'https://x')).searchParams.get('pick');
+
+  it('a program a folder\'s mark picked is NOT sent back to the folder window: the next folder (no mark) starts from the usual default again', async () => {
+    const query = (extra: string) => parseSetupFragment(frag(extra))!;
+    ctx.mockReturnValue({ projectId: undefined, currentProjectSlug: 'proj', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'owner' }], projectMemberships: [] });
+    const render = async (extra: string) => { await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DesktopSetupQuick query={query(extra)} onTeam={() => undefined} /></NextIntlClientProvider>); }); for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); }); };
+    await render(`${F}&ftrace=AGENTS.md`);
+    expect(checked()).toContain('Codex'); // the mark picked it
+    expect(pickOf('바꾸기')).toBe('claude'); // …but what the folder window gets back is the default, not the mark's pick
+    // the app opens the next folder's address with the echo it was given
+    await render(`&fshown=~/code/other&fname=other&pick=${pickOf('바꾸기')}`);
+    expect(checked()).toContain('Claude Code');
+    expect(line()).toBeNull();
+  });
+
+  it('the person\'s OWN radio choice is sent back and stays for the next folder (no mark there)', async () => {
+    const query = (extra: string) => parseSetupFragment(frag(extra))!;
+    ctx.mockReturnValue({ projectId: undefined, currentProjectSlug: 'proj', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'owner' }], projectMemberships: [] });
+    const render = async (extra: string) => { await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DesktopSetupQuick query={query(extra)} onTeam={() => undefined} /></NextIntlClientProvider>); }); for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); }); };
+    await render(F); // a folder with no mark: Claude Code by default
+    await act(async () => { [...container.querySelectorAll<HTMLInputElement>('input[name=quick-runtime]')].find((r) => r.parentElement!.textContent!.includes('Codex'))!.click(); });
+    expect(checked()).toContain('Codex');
+    expect(pickOf('바꾸기')).toBe('codex'); // the person's choice goes to the folder window
+    await render(`&fshown=~/code/other&fname=other&pick=${pickOf('바꾸기')}`);
+    expect(checked()).toContain('Codex'); // …and is still there in the next folder
+    expect(line()).toBeNull();
+  });
+
+  it('pressing the radio a folder\'s mark already picked is the person\'s own choice too: it goes to the folder window and stays for the next folder (codex 01a151a1)', async () => {
+    const query = (extra: string) => parseSetupFragment(frag(extra))!;
+    ctx.mockReturnValue({ projectId: undefined, currentProjectSlug: 'proj', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'owner' }], projectMemberships: [] });
+    const render = async (extra: string) => { await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DesktopSetupQuick query={query(extra)} onTeam={() => undefined} /></NextIntlClientProvider>); }); for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); }); };
+    await render(`${F}&ftrace=AGENTS.md`);
+    expect(checked()).toContain('Codex'); // the mark picked it
+    expect(pickOf('바꾸기')).toBe('claude'); // not the person's choice yet
+    await act(async () => { [...container.querySelectorAll<HTMLInputElement>('input[name=quick-runtime]')].find((r) => r.parentElement!.textContent!.includes('Codex'))!.click(); }); // already checked: no change event, still a choice
+    expect(pickOf('바꾸기')).toBe('codex');
+    await render(`&fshown=~/code/other&fname=other&pick=${pickOf('바꾸기')}`);
+    expect(checked()).toContain('Codex');
+    expect(line()).toBeNull();
+  });
+
+  it('a person\'s choice that went to the folder window beats nothing but never a mark: the next folder WITH a mark still follows its mark', async () => {
+    await mount(frag(`${F}&pick=claude&ftrace=AGENTS.md`));
+    expect(checked()).toContain('Codex');
+    expect(line()).toContain('AGENTS.md');
+  });
+
   it('English words', async () => {
     await mount(frag(`${F}&ftrace=AGENTS.md`), {}, 'en');
     expect(line()).toBe('This folder has AGENTS.md · Codex is picked for it');
