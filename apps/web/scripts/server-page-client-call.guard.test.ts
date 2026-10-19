@@ -6,7 +6,8 @@
 //
 // 규칙: `src/app` 아래 `'use client'`가 없는 page · layout · template · default · not-found · loading 파일이, `'use client'` 모듈에서 가져온 이름을
 // 호출(`name(…)`)하면 RED. 컴포넌트로 그리는 것 · 타입 import는 괜찮다. 고치는 법: 순수 함수는 `'use client'`가 없는 lib로 옮길 것.
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
@@ -60,6 +61,20 @@ function resolveModule(from: string, specifier: string): string | null {
   return null;
 }
 
+/** a module is a client module when it says `'use client'` — or when it only re-exports from one (a barrel in front of a client file is still a client reference on the server) */
+function isClientModule(file: string, seen = new Set<string>()): boolean {
+  if (seen.has(file)) return false;
+  seen.add(file);
+  const source = readFileSync(file, 'utf8');
+  if (hasUseClient(source)) return true;
+  const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TSX);
+  return parsed.statements.some((st) => {
+    if (!ts.isExportDeclaration(st) || st.isTypeOnly || !st.moduleSpecifier || !ts.isStringLiteral(st.moduleSpecifier)) return false;
+    const target = resolveModule(file, st.moduleSpecifier.text);
+    return target !== null && isClientModule(target, seen);
+  });
+}
+
 function serverEntries(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.isSymbolicLink()) continue;
@@ -81,6 +96,24 @@ describe('[4714] a server page never calls a function imported from a client mod
     expect(clientCalls(fine, client)).toEqual([]);
   });
 
+  it('a barrel that re-exports a client module is a client module too (and a barrel of plain modules is not)', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'guard-4714-'));
+    try {
+      writeFileSync(path.join(dir, 'client.ts'), `'use client';\nexport const resolveHref = () => '/';\n`);
+      writeFileSync(path.join(dir, 'plain.ts'), `export const pure = () => '/';\n`);
+      writeFileSync(path.join(dir, 'barrel.ts'), `export { resolveHref } from './client';\n`);
+      writeFileSync(path.join(dir, 'outer.ts'), `export * from './barrel';\n`);
+      writeFileSync(path.join(dir, 'plain-barrel.ts'), `export { pure } from './plain';\n`);
+      writeFileSync(path.join(dir, 'loop-a.ts'), `export * from './loop-b';\n`);
+      writeFileSync(path.join(dir, 'loop-b.ts'), `export * from './loop-a';\n`);
+      expect(isClientModule(path.join(dir, 'client.ts'))).toBe(true);
+      expect(isClientModule(path.join(dir, 'barrel.ts'))).toBe(true);
+      expect(isClientModule(path.join(dir, 'outer.ts'))).toBe(true);
+      expect(isClientModule(path.join(dir, 'plain-barrel.ts'))).toBe(false);
+      expect(isClientModule(path.join(dir, 'loop-a.ts'))).toBe(false); // a cycle ends, it does not hang
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
   it('no page · layout under src/app does', () => {
     const offenders: string[] = [];
     let checked = 0;
@@ -90,7 +123,7 @@ describe('[4714] a server page never calls a function imported from a client mod
       checked += 1;
       const calls = clientCalls(source, (specifier) => {
         const target = resolveModule(file, specifier);
-        return target !== null && hasUseClient(readFileSync(target, 'utf8'));
+        return target !== null && isClientModule(target);
       });
       if (calls.length) offenders.push(`${path.relative(SRC, file)}: ${calls.join(', ')}`);
     }
