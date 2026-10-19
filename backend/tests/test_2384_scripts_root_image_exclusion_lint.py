@@ -60,6 +60,7 @@ _CI_OR_LOCAL_ONLY_ALLOWLIST = frozenset({
                                                    # 그 자신의 docstring에 실측 확認 명시).
     "model_db_drift_audit.py",                    # story #2181 — 로컬 1회성 감사(읽기 전용)
     "shard_destructive_tests.py",                 # story #2293 — CI 매트릭스 샤딩 유틸
+    "shard_nondestructive_tests.py",              # story #4731 — CI 매트릭스 샤딩 유틸(비파괴 pytest 분할표 + shard 선택, DB 접속 없음)
     "build_destructive_schema_template.py",       # story #3383 — CI 전용, backend-test-destructive
                                                    # 잡이 샤드마다 부르는 스텝(ci.yml). 접속 대상은
                                                    # CI/로컬 Postgres 서비스 컨테이너의 throwaway

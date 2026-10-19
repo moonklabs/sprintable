@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, model_validator
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -90,6 +90,8 @@ async def issue_device_token(db: AsyncSession, setup_id: uuid.UUID) -> str:
     # story #4554 ③ (PO 11:45Z): a new token = a daemon that may start counting from 1 again (a reinstall · §1.1) — the device's
     # report baseline goes back to 0 with it, so its first report is not refused as stale for ever
     await db.execute(update(DesktopSession).where(DesktopSession.setup_id == setup_id).values(last_report_seq=0))
+    # story #4714: the same for the startable report number — a daemon that starts again must not be ignored for ever by the number its predecessor reached
+    await db.execute(update(DesktopSetup).where(DesktopSetup.id == setup_id).values(startable_seq=None))
     await db.flush()
     return token
 
@@ -313,6 +315,9 @@ class StartableSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     startable: list[StartableItem] = Field(max_length=STARTABLE_MAX)
+    # story #4714 (PO 10-18): the computer numbers its reports (one that only grows, even across a restart); the server keeps the highest it has applied
+    # and ignores a lower one — a request the computer gave up but that reached the server late cannot cover a newer list. Absent = an older app: applied as before.
+    seq: int | None = Field(default=None, ge=1, le=2**62, strict=True)
 
 
 def _setup_agents(setup: DesktopSetup) -> set[uuid.UUID]:
@@ -603,41 +608,58 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
     return len(snapshot.sessions)
 
 
-async def accessible_startable(db: AsyncSession, setup: DesktopSetup, snapshot: StartableSnapshot) -> StartableSnapshot:
+async def accessible_startable(db: AsyncSession, setup: DesktopSetup, snapshot: StartableSnapshot) -> tuple[StartableSnapshot, list[uuid.UUID]]:
     """story #4714: narrow the computer's list to the pairs its own agents can really have: the agent is one this device was set up with
-    (else 422 `agent_not_on_device`, as a session report) AND the agent belongs to the project (its project profile) AND the project is a live
-    project of this device's organization. A pair outside that is dropped, not refused: the computer works from its own files and a refusal would
-    only make it send the same list again. The phone's reads cut the list by who may open what; this keeps the stored list itself to what is possible."""
+    AND the agent belongs to the project (its project profile) AND the project is a live project of this device's organization. A pair outside
+    that is dropped, not refused: the computer works from its own files and a refusal would only make it send the same list again. An agent this
+    device was NOT set up with is dropped the same way (it used to refuse the whole list with 422, which hid every other agent behind one stale
+    one) — and named in the second value, so the computer can stop offering it. The phone's reads cut the list by who may open what; this keeps the
+    stored list itself to what is possible."""
     from app.models.member import AgentProjectProfile
     from app.models.project import Project
 
-    for item in snapshot.startable:
-        _check_agent(setup, item.agent_member_id)
+    # the device row is locked and READ AGAIN first: the `setup` this request loaded may be older than a setup exchange that moved an agent to another computer
+    # (a stale member list would accept that agent here); the same lock orders this report against such a move
+    fresh = (await db.execute(
+        select(DesktopSetup).where(DesktopSetup.id == setup.id).with_for_update().execution_options(populate_existing=True)
+    )).scalar_one()
+    mine = _setup_agents(fresh)
+    dropped = sorted({i.agent_member_id for i in snapshot.startable if i.agent_member_id not in mine}, key=str)
+    snapshot = snapshot.model_copy(update={"startable": [i for i in snapshot.startable if i.agent_member_id in mine]})
     agents = {i.agent_member_id for i in snapshot.startable}
     if not agents:
-        return snapshot
+        return snapshot, dropped
     rows = (await db.execute(
         select(AgentProjectProfile.member_id, AgentProjectProfile.project_id)
         .join(Project, Project.id == AgentProjectProfile.project_id)
         .where(AgentProjectProfile.member_id.in_(agents), Project.org_id == setup.org_id, Project.deleted_at.is_(None))
     )).all()
     possible = {(m, p) for m, p in rows}
-    return StartableSnapshot(startable=[i for i in snapshot.startable if (i.agent_member_id, i.project_id) in possible])
+    return snapshot.model_copy(update={"startable": [i for i in snapshot.startable if (i.agent_member_id, i.project_id) in possible]}), dropped
 
 
-async def replace_startable(db: AsyncSession, setup: DesktopSetup, snapshot: StartableSnapshot) -> int:
-    """story #4714: the computer's startable pairs, as it says them (a pair for an agent this device was not set up with is refused —
-    the same rule as a session report). Stored as given, sorted and without repeats."""
-    for item in snapshot.startable:
-        _check_agent(setup, item.agent_member_id)
+async def replace_startable(db: AsyncSession, setup: DesktopSetup, snapshot: StartableSnapshot) -> tuple[int, bool, int | None]:
+    """story #4714: the computer's startable pairs, as it says them (already narrowed by `accessible_startable`). Stored as given, sorted and without
+    repeats. A numbered report is applied by ONE statement that holds the guard itself (`startable_seq IS NULL OR startable_seq < seq`): a report at or
+    below the highest applied is IGNORED (returns the stored count, applied False) — a late request cannot cover a newer list, lock or no lock.
+    An unnumbered report (an older app) is applied and leaves the number alone. `seq` is bounded to 2**62 on purpose (well inside BIGINT).
+    The third value is the number the server holds AFTER this report (NULL = no numbered report yet): the computer reads it when its report was ignored and goes on
+    from there, instead of guessing how far behind it is (its clock may have gone back since a restart)."""
     pairs = sorted({(str(i.agent_member_id), str(i.project_id)) for i in snapshot.startable})
-    await db.execute(
-        update(DesktopSetup).where(DesktopSetup.id == setup.id)
-        .values(startable=[{"agent_member_id": a, "project_id": p} for a, p in pairs])
-    )
+    values: dict = {"startable": [{"agent_member_id": a, "project_id": p} for a, p in pairs]}
+    stmt = update(DesktopSetup).where(DesktopSetup.id == setup.id)
+    if snapshot.seq is not None:
+        values["startable_seq"] = snapshot.seq
+        stmt = stmt.where(or_(DesktopSetup.startable_seq.is_(None), DesktopSetup.startable_seq < snapshot.seq))
+    row = (await db.execute(stmt.values(**values).returning(DesktopSetup.startable_seq))).first()
+    if row is None:
+        kept, held = (await db.execute(select(DesktopSetup.startable, DesktopSetup.startable_seq).where(DesktopSetup.id == setup.id))).one()
+        await touch_device(db, setup.id)  # an ignored report is still the computer speaking: it was heard
+        await db.flush()
+        return len(kept or []), False, held
     await touch_device(db, setup.id)
     await db.flush()
-    return len(pairs)
+    return len(pairs), True, row[0]
 
 
 async def device_sessions_view(

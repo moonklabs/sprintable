@@ -404,12 +404,15 @@ async def put_startable(body: relay.StartableSnapshot, setup: DesktopSetup = Dep
     """story #4714: the computer's own list of the (agent, project) pairs it has a usable folder for — ids only; replaces the whole list. The list is
     narrowed first to the pairs its agents can really have (`accessible_startable`: the agent's project profile · a live project of this organization)."""
     try:
-        n = await relay.replace_startable(db, setup, await relay.accessible_startable(db, setup, body))
+        narrowed, dropped = await relay.accessible_startable(db, setup, body)
+        n, applied, held = await relay.replace_startable(db, setup, narrowed)
     except relay.DesktopRelayError as exc:
         await db.rollback()
         return _error(exc)
     await db.commit()
-    return {"startable": n}
+    # `dropped_agents`: agents in the list this device was not set up with (left out, not refused) · `applied` False = a newer report had already been applied
+    # `startable_seq`: the report number the server holds after this report (null = none yet) — when `applied` is false the computer goes on from it
+    return {"startable": n, "dropped_agents": [str(a) for a in dropped], "applied": applied, "startable_seq": held}
 
 
 @router.put("/relay/pairings")
