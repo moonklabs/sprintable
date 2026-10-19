@@ -3,38 +3,23 @@ chat list or the start screen. Pure function; the realdb test (`test_4714_start_
 Each case goes red without the line it names (mutants in the PR body)."""
 from __future__ import annotations
 
-import uuid
-
 from app.services.desktop_commands import _agent_running
 
-A = uuid.UUID("22222222-3333-4444-8555-666666666666")
-B = uuid.UUID("22222222-3333-4444-8555-777777777777")
+
+def test_a_session_that_is_not_over_is_running_on_a_computer_that_is_heard():
+    for live in ("running", "idle", "waiting_input", "error", "paused_limit"):
+        assert _agent_running(["stopped", live], True) is True
+    assert _agent_running(["running", "running"], True) is True
 
 
-def _row(agent: uuid.UUID, state: str) -> dict:
-    return {"agent_member_id": str(agent), "session_key": f"k-{state}", "state": state}
+def test_none_at_all_or_every_one_over_on_a_computer_that_is_heard_is_not_running():
+    assert _agent_running([], True) is False
+    assert _agent_running(["stopped"], True) is False
+    assert _agent_running(["stopped", "stopped"], True) is False
 
 
-def test_a_session_that_lives_is_running_whatever_else_there_is():
-    for live in ("running", "idle", "waiting_input"):
-        assert _agent_running([_row(A, "stopped"), _row(A, live)], A, True) is True
-    assert _agent_running([_row(A, "running")], A, False) is True  # a live row is known even when the computer is quiet now
-
-
-def test_every_session_over_or_none_at_all_on_a_computer_that_is_heard_is_not_running():
-    assert _agent_running([], A, True) is False
-    assert _agent_running([_row(A, "stopped"), _row(A, "stopped")], A, True) is False
-
-
-def test_what_cannot_be_known_is_none_never_a_no():
-    # a session of a computer that was not heard from reads `unknown` — it may still live; and a quiet computer with nothing on record says nothing either
-    assert _agent_running([_row(A, "unknown")], A, True) is None  # the rows alone say it, even when the caller believes the computer is heard
-    assert _agent_running([_row(A, "stopped"), _row(A, "unknown")], A, True) is None
-    assert _agent_running([], A, False) is None
-    assert _agent_running([_row(A, "stopped")], A, False) is None
-
-
-def test_only_this_agents_own_sessions_count():
-    assert _agent_running([_row(B, "running")], A, True) is False
-    assert _agent_running([_row(B, "running"), _row(A, "stopped")], A, True) is False
-    assert _agent_running([_row(B, "unknown")], A, True) is False
+def test_a_computer_that_was_not_heard_from_says_nothing_never_a_no():
+    # a session it had may still live, and an empty list is no «no» from a silent computer either
+    assert _agent_running(["running"], False) is None
+    assert _agent_running(["stopped"], False) is None
+    assert _agent_running([], False) is None

@@ -24,9 +24,7 @@ from app.services.desktop_relay import (
     INSTRUCT_NOW_MAX,
     PROMPT_MAX,
     SESSION_KEY_PATTERN,
-    SESSIONS_PAGE_MAX,
     DesktopRelayError,
-    device_sessions_view,
     inbox_view,
     legacy_state,
     limit_view,
@@ -461,25 +459,23 @@ async def startable_view(db: AsyncSession, *, member_id: uuid.UUID, member_role:
     return {"remote_control": await remote_control.is_enabled(db, org_id), "computers": computers}
 
 
-def _agent_running(rows: list[dict], agent_id: uuid.UUID, heard: bool) -> bool | None:
+def _agent_running(states: list[str], heard: bool) -> bool | None:
     """story 4714 (AC3 · AC4): whether the agent has a live session on this computer, as the computer reports it — the phone opens the chat list for a running
-    agent and the start screen for one that is not. `True`: a session that lives. `False`: it has none, or every one is over. `None`: the computer has not been
-    heard from, so a session it had may still live — «not running» cannot be said (the phone goes to its usual home). Read here, from the same rows a person
-    sees for a device, so it holds for every person who may open the agent (the device's own list is for owners and admins only)."""
-    states = [r["state"] for r in rows if r["agent_member_id"] == str(agent_id)]
-    if any(st not in ("stopped", "unknown") for st in states):
-        return True
-    if any(st == "unknown" for st in states) or not heard:
+    agent and the start screen for one that is not. `None`: the computer has not been heard from, so a session it had may still live — «not running» cannot
+    be said (the phone goes to its usual home). Otherwise `True` when any session of the agent there is not over (`stopped` is the one word for over), and
+    `False` when it has none or every one is over. Read here, from the computer's own session rows, so it holds for every person who may open the agent (the
+    device's own session list is for owners and admins only)."""
+    if not heard:
         return None
-    return False
+    return any(st != "stopped" for st in states)
 
 
 async def startable_computers_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: str | None, user_id: uuid.UUID,
                                    org_id: uuid.UUID, phone_key_id: uuid.UUID) -> dict:
     """The phone's whole first screen in one read (contract v1.18): every computer of this organization THIS person's phone is paired
     with, whether it is heard from, and for each the agents it was set up with that the person can open (active ones) — each with
-    whether the person may command it and the projects it can be started for. A paired computer with no agent lists `agents: []`
-    (the phone then says «start the first setup at the Mac» — a per-agent read cannot say that, there is no agent to ask about).
+    whether the person may command it, the projects it can be started for and (story 4714) whether it runs there. A paired computer with no agent
+    lists `agents: []` (the phone then says «start the first setup at the Mac» — a per-agent read cannot say that, there is no agent to ask about).
     Ids and names only, never a path; a key that is not the asker's own (or is revoked) lists nothing."""
     from app.models.agent_permission import RemoteDevice, RemoteDevicePairing
     from app.models.member import Member
@@ -496,7 +492,7 @@ async def startable_computers_view(db: AsyncSession, *, member_id: uuid.UUID, me
         .order_by(DesktopSetup.exchanged_at.desc(), DesktopSetup.id)
     )).scalars().all()
     reachable = await _reachable(db, {s.id for s in setups}, _now())
-    computers: list[dict] = []
+    agent_ids_by_setup: dict[uuid.UUID, list[uuid.UUID]] = {}
     for setup in setups:
         agent_ids: list[uuid.UUID] = []
         for m in setup.members or []:
@@ -507,9 +503,20 @@ async def startable_computers_view(db: AsyncSession, *, member_id: uuid.UUID, me
                     continue
                 if aid not in agent_ids:
                     agent_ids.append(aid)
+        agent_ids_by_setup[setup.id] = agent_ids
+    # every session state of these agents on these computers in ONE read (a session of the agent on another computer does not count here)
+    wanted = {aid for ids in agent_ids_by_setup.values() for aid in ids}
+    session_states: dict[tuple[uuid.UUID, uuid.UUID], list[str]] = {}
+    if setups and wanted:
+        for sid, aid, st in (await db.execute(
+            select(DesktopSession.setup_id, DesktopSession.agent_member_id, DesktopSession.state)
+            .where(DesktopSession.setup_id.in_([s.id for s in setups]), DesktopSession.agent_member_id.in_(wanted))
+        )).all():
+            session_states.setdefault((sid, aid), []).append(st)
+    computers: list[dict] = []
+    for setup in setups:
         agents: list[dict] = []
-        session_rows = await device_sessions_view(db, setup.id, limit=SESSIONS_PAGE_MAX) if agent_ids else []
-        for aid in agent_ids:
+        for aid in agent_ids_by_setup[setup.id]:
             agent = (await db.execute(
                 select(Member).where(Member.id == aid, Member.org_id == org_id, Member.type == "agent", Member.deleted_at.is_(None),
                                      Member.is_active.is_(True))
@@ -520,7 +527,7 @@ async def startable_computers_view(db: AsyncSession, *, member_id: uuid.UUID, me
                 "agent_member_id": str(aid), "name": agent.name,
                 "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup),
                 "projects": await _openable_startable_projects(db, setup, aid, user_id=user_id, org_id=org_id),
-                "running": _agent_running(session_rows, aid, setup.id in reachable),
+                "running": _agent_running(session_states.get((setup.id, aid), []), setup.id in reachable),
             })
         agents.sort(key=lambda a: (a["name"] or "", a["agent_member_id"]))
         computers.append({"setup_id": str(setup.id), "device_name": setup.device_name, "reachable": setup.id in reachable, "agents": agents})

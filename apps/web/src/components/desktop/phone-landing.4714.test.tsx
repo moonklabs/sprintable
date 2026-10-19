@@ -236,6 +236,10 @@ describe('[4714] the landing door — an empty area, one go, once per launch', (
     expect(replace).toHaveBeenCalledWith('/phone-start');
   });
 
+  it('the limit is four seconds (the empty area is never longer than that)', () => {
+    expect(LANDING_MAX_MS).toBe(4000);
+  });
+
   it('a read that never answers is the usual home after the limit — and a late answer does not move the person a second time', async () => {
     let release: (r: Response) => void = () => undefined;
     fetchWithAuth.mockImplementation(async (url: string) => {

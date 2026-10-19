@@ -1708,6 +1708,15 @@ describe('proxy — the phone app opening lands by what the server knows, throug
     expect(other.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/docs');
   });
 
+  it('a `/glance` that carries a query (a notification\'s org hint · a link\'s ?story=) is a deep link, not the app opening: the usual redirect, the query kept as before', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+    mockOrg();
+    for (const search of ['?org=11111111-2222-4333-8444-555555555555', '?story=abc']) {
+      const res = await middleware(makeRequestWithHeaders(`/glance${search}`, SHELL, { sp_at: token }));
+      expect([search, res.headers.get('location')]).toEqual([search, `https://app.example.com/moonklabs/sprintable/flow${search}`]);
+    }
+  });
+
   it('the landing\'s next IS the resolved home: a person who picked another project lands on THAT project\'s home (the session decides, as before)', async () => {
     mockFetch.mockImplementation((url: string) => {
       if (url.includes('/api/v2/me')) return Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) });

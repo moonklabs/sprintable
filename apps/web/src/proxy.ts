@@ -331,9 +331,10 @@ async function redirectLegacyResourcePath(
   }
 
   const home = await legacyResourceRedirect(request, resourceName, pathname, slugs, orgId, projectId);
-  // story 4714 (AC3 · AC4): the shell's own home load (the header only a shell-started load carries) — the bare address only — is the phone app OPENING: it lands by
+  // story 4714 (AC3 · AC4): the shell's own home load (the header only a shell-started load carries) — the bare address only, no query (a notification's org hint or a
+  // link's `?story=` is a deep link, not the app opening) — is the phone app OPENING: it lands by
   // what the server knows, not always on the home. Another flat address a shell started (a notification's path) is the usual redirect, untouched.
-  return pathname === '/glance' && request.headers.has(SHELL_NAV_HEADER) ? viaPhoneLanding(home, request) : home;
+  return pathname === '/glance' && !request.nextUrl.search && request.headers.has(SHELL_NAV_HEADER) ? viaPhoneLanding(home, request) : home;
 }
 
 /**
