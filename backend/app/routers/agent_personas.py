@@ -15,6 +15,17 @@ from app.services.member_resolver import resolve_member_db_verified
 router = APIRouter(prefix="/api/v2/agent-personas", tags=["agent-personas", "Organization"])
 
 
+def _text_fields(body: CreatePersonaRequest | UpdatePersonaRequest) -> dict[str, str | None]:
+    """every string the body carries — a list of strings (the tool allow-list) as one, so a NUL hidden in it is seen too"""
+    out: dict[str, str | None] = {}
+    for key, value in body.model_dump().items():
+        if isinstance(value, str):
+            out[key] = value
+        elif isinstance(value, list) and all(isinstance(x, str) for x in value):
+            out[key] = "".join(value)
+    return out
+
+
 def _repo(session: AsyncSession = Depends(get_db)) -> AgentPersonaRepository:
     return AgentPersonaRepository(session)
 
@@ -65,7 +76,7 @@ async def create_persona(
     await assert_agent_owner(body.agent_id, repo.session, org_id, uuid.UUID(auth.user_id))
     # story 4680 AC2: the text goes into the agent's session. A control character (a NUL was a 500) is refused readably; the invisible format characters and the unusual line breaks are
     # normalized at the write — saved = run, nothing visible changes for the person; over the cap it is refused here, readably, and nothing is written (never cut silently on its way in)
-    invalid = persona_text_problem({k: v for k, v in body.model_dump().items() if isinstance(v, str)})
+    invalid = persona_text_problem(_text_fields(body))
     if invalid:
         return _err("PERSONA_TEXT_INVALID", invalid, 422)
     body.system_prompt = normalize_persona_text(body.system_prompt)
@@ -140,11 +151,14 @@ async def update_persona(
     if agent_id is None:
         return _err("NOT_FOUND", "Persona not found", 404)
     await assert_agent_owner(agent_id, repo.session, org_id, uuid.UUID(auth.user_id))
-    invalid = persona_text_problem({k: v for k, v in body.model_dump().items() if isinstance(v, str)})
+    invalid = persona_text_problem(_text_fields(body))
     if invalid:
         return _err("PERSONA_TEXT_INVALID", invalid, 422)
     body.system_prompt = normalize_persona_text(body.system_prompt)
     body.style_prompt = normalize_persona_text(body.style_prompt)
+    if body.system_prompt is not None and not body.system_prompt.strip():
+        # nothing is left of the instructions (blank, or only invisible characters): the column cannot be empty — a readable refusal, not a 500
+        return _err("PERSONA_TEXT_INVALID", "The system prompt has nothing visible in it — write the instructions, or leave the field out to keep the current ones.", 422)
     # a PATCH is judged on what the persona WOULD be: the fields it changes and the ones it keeps (only when it touches the instructions, the style or the base persona)
     if body.system_prompt is not None or body.style_prompt is not None or body.base_persona_id is not None:
         current = await repo.get_texts(id, org_id, project_id)

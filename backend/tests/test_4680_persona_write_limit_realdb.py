@@ -288,3 +288,27 @@ async def test_a_long_kept_style_is_judged_when_only_the_instructions_are_patche
             _clear_overrides()
     finally:
         await scenario["engine"].dispose()
+
+
+async def test_codex_5157_blank_after_normalization_and_a_nul_in_a_list_are_readable_422s_not_500s():
+    scenario = await _build_persona_scenario()
+    try:
+        client = await _as_owner(scenario)
+        try:
+            pid = scenario["persona_id"]
+            agent = str(scenario["agent_id"])
+            for blank in ("​", "‮﻿", "   ", ""):
+                r = await client.patch(f"/api/v2/agent-personas/{pid}", json={"system_prompt": blank})
+                assert r.status_code == 422 and r.json()["error"]["code"] == "PERSONA_TEXT_INVALID", (blank, r.status_code, r.text)
+            assert (await client.get(f"/api/v2/agent-personas/{pid}")).json()["data"]["system_prompt"] == "hi"                    # unchanged
+            lst = await client.patch(f"/api/v2/agent-personas/{pid}", json={"tool_allowlist": ["stories", "ta\x00sks"]})
+            assert lst.status_code == 422 and lst.json()["error"]["code"] == "PERSONA_TEXT_INVALID", lst.text
+            created = await client.post("/api/v2/agent-personas", json={"agent_id": agent, "name": "List nul", "system_prompt": "ok", "tool_allowlist": ["x\x00"]})
+            assert created.status_code == 422 and created.json()["error"]["code"] == "PERSONA_TEXT_INVALID", created.text
+            invisible_only = await client.post("/api/v2/agent-personas", json={"agent_id": agent, "name": "Invisible only", "system_prompt": "​"})
+            assert invisible_only.status_code != 500, invisible_only.text
+        finally:
+            await client.aclose()
+            _clear_overrides()
+    finally:
+        await scenario["engine"].dispose()
