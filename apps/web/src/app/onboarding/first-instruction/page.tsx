@@ -41,13 +41,15 @@ export default async function FirstInstructionPage({ searchParams }: FirstInstru
   // project_id로 쓴다. null이면 클라이언트가 «대화를 열 수 없어요» 안내로 간다(AC3).
   // story 4714: the phone's start screen names the project the session was started in (`project` · a uuid only) — the conversation opens THERE; the server still
   // checks membership on every read and on the create. Absent or not a uuid: the session's default project, as before.
-  const projectId = project && UUID_RE.test(project) ? project : session.project_id;
+  const projectPinned = Boolean(project && UUID_RE.test(project));
+  const projectId = projectPinned ? (project as string) : session.project_id;
 
   return (
     <FirstInstructionRedirect
       agentId={agent ?? null}
       compose={compose ?? ''}
       projectId={projectId}
+      projectPinned={projectPinned}
       flags={readNavV3FlagsFromEnv()}
     />
   );

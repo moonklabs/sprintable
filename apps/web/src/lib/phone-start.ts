@@ -50,9 +50,10 @@ export type StartableRead =
  * the shell's `key_number` is the «phone check number» the server's own list prints (`confirm_number`), so a read-only match on the list;
  * nothing is registered from here.
  */
-export async function readStartable(phoneCall: Call): Promise<StartableRead> {
+export async function readStartable(phoneCall: Call, stop?: () => boolean): Promise<StartableRead> {
   let key: PhoneAnswer;
   try { key = await phoneCall('device.key.info', {}); } catch { return { kind: 'failed' }; } // a bridge call that is rejected is a failed read, not a screen stuck on «reading»
+  if (stop?.()) return { kind: 'failed' }; // `stop`: the caller gave up on this read (its limit · its screen) — no further request is made for it
   if (!key.ok) return key.code === 'no_screen_lock' ? { kind: 'no_screen_lock' } : { kind: 'failed' };
   if (typeof key.key_number !== 'string') return { kind: 'failed' };
   let id: string | null = null;
@@ -67,6 +68,7 @@ export async function readStartable(phoneCall: Call): Promise<StartableRead> {
     return { kind: 'failed' };
   }
   if (id === null) return { kind: 'no_phone' };
+  if (stop?.()) return { kind: 'failed' };
   try {
     const res = await fetchWithAuth(`/api/desktop/startable?phone_key_id=${encodeURIComponent(id)}`);
     if (!res.ok) return { kind: 'failed' };
@@ -236,8 +238,9 @@ export async function waitForSession(
     // the read is bounded by what is left of the limit: a bridge call can wait minutes (phone-bridge.ts) — the 30 s are 30 s, and a read that comes after them is dropped
     const left = Math.max(deadline - now(), 0);
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const late = new Promise<'late'>((resolve) => { timer = setTimeout(() => resolve('late'), left); });
-    const read = await Promise.race([readStartable(deps.phoneCall), late]); // readStartable never rejects: a read that failed is `failed` — not an answer, ask again
+    let over = false; // this read is given up (its limit passed · the screen left): readStartable makes no further request for it
+    const late = new Promise<'late'>((resolve) => { timer = setTimeout(() => { over = true; resolve('late'); }, left); });
+    const read = await Promise.race([readStartable(deps.phoneCall, () => over || !alive()), late]); // readStartable never rejects: a read that failed is `failed` — not an answer, ask again
     clearTimeout(timer);
     if (read === 'late') return alive() ? 'waiting' : 'gone';
     if (!alive()) return 'gone';

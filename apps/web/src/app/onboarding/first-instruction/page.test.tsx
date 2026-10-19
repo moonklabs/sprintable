@@ -63,6 +63,10 @@ describe('FirstInstructionPage (서버)', () => {
     const PROJECT = '33333333-4444-4555-8666-777777777777';
     const out = async (project?: string) => ((await FirstInstructionPage({ searchParams: Promise.resolve({ agent: 'agent-1', ...(project ? { project } : {}) }) })) as unknown as { props: { projectId: string } }).props.projectId;
     expect(await out(PROJECT)).toBe(PROJECT);
+    const pinned = async (project?: string) => ((await FirstInstructionPage({ searchParams: Promise.resolve({ agent: 'agent-1', ...(project ? { project } : {}) }) })) as unknown as { props: { projectPinned: boolean } }).props.projectPinned;
+    expect(await pinned(PROJECT)).toBe(true); // named: the checklist conversation of another project does not win
+    expect(await pinned()).toBe(false);
+    expect(await pinned('not-a-uuid')).toBe(false);
     expect(await out()).toBe('proj-9');
     expect(await out('not-a-uuid')).toBe('proj-9');
     expect(await out('../../x')).toBe('proj-9');

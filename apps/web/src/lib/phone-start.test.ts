@@ -292,6 +292,28 @@ describe('[4714] waitForSession — started ≠ stood: the server\'s `running` w
     expect(Date.now() - t0).toBeLessThan(2000);
   });
 
+  it('a read the caller gave up (the limit passed while the bridge was still answering) makes no further request: no remote-devices, no startable', async () => {
+    const urls: string[] = [];
+    currentFetch = async (url) => { urls.push(url); return json(200, {}); };
+    let answer: (a: PhoneAnswer) => void = () => undefined;
+    const slow = () => new Promise<PhoneAnswer>((r) => { answer = r; });
+    await expect(waitForSession(target, { phoneCall: slow, pollMaxMs: 40 })).resolves.toBe('waiting'); // the bridge has not answered by the limit
+    answer({ id: 'k', ok: true, public_key: 'PK', key_number: '482 917' } as PhoneAnswer); // … and answers afterwards
+    await new Promise((r) => setTimeout(r, 20));
+    expect(urls).toEqual([]);
+  });
+
+  it('readStartable(phoneCall, stop): stopped after the key answer → no request; stopped after the device list → no startable read', async () => {
+    const urls: string[] = [];
+    currentFetch = async (url) => { urls.push(url); return url.startsWith('/api/remote-devices') ? json(200, { devices: [{ id: 'p-1', confirm_number: '482 917' }] }) : json(200, { remote_control: true, computers: [] }); };
+    const ok = async () => ({ id: 'k', ok: true, public_key: 'PK', key_number: '482 917' }) as PhoneAnswer;
+    await expect(readStartable(ok, () => true)).resolves.toEqual({ kind: 'failed' });
+    expect(urls).toEqual([]);
+    let calls = 0;
+    await expect(readStartable(ok, () => ++calls > 1)).resolves.toEqual({ kind: 'failed' });
+    expect(urls).toEqual(['/api/remote-devices']);
+  });
+
   it('a bridge call that is rejected is no answer either — it asks again', async () => {
     const w = world([startable([{ setup_id: SETUP, agents: [agent(AGENT, true)] }])]);
     let n = 0;
