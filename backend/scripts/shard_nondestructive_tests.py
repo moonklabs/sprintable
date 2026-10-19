@@ -22,6 +22,7 @@ The number of tests per file is a proxy for its time (the suite is mostly small 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -67,47 +68,69 @@ def collect_counts() -> dict[str, int]:
     return counts
 
 
+def verify_partition(counts: dict[str, int], shards: list[list[str]]) -> tuple[list[str], list[str]]:
+    """(problems, report lines): the shards must be disjoint and their union exactly the collected files / tests"""
+    flat = [f for s in shards for f in s]
+    problems = []
+    if len(flat) != len(set(flat)):
+        problems.append("a file is in more than one shard")
+    if set(flat) != set(counts):
+        problems.append(f"union differs from the collected files: missing={sorted(set(counts) - set(flat))} extra={sorted(set(flat) - set(counts))}")
+    total = sum(counts.values())
+    per = [sum(counts.get(f, 0) for f in s) for s in shards]
+    if sum(per) != total:
+        problems.append(f"test count differs: shards={sum(per)} collected={total}")
+    lines = [f"shard {i}: {len(s)} files, {per[i]} tests" for i, s in enumerate(shards)]
+    lines.append(f"collected: {len(counts)} files, {total} tests; shards: {len(flat)} files, {sum(per)} tests")
+    return problems, lines
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--shard", type=int)
-    ap.add_argument("--shard-count", type=int, required=True)
+    ap.add_argument("--shard-count", type=int)
+    ap.add_argument("--plan-out")
+    ap.add_argument("--plan")
     ap.add_argument("--verify", action="store_true")
     ap.add_argument("--counts-out")
     ap.add_argument("--order", choices=("name", "reverse"), default="name")
     args = ap.parse_args()
 
-    counts = collect_counts()
-    shards = partition(counts, args.shard_count)
-
-    if args.verify:
-        flat = [f for s in shards for f in s]
-        problems = []
-        if len(flat) != len(set(flat)):
-            problems.append("a file is in more than one shard")
-        if set(flat) != set(counts):
-            problems.append(f"union differs from the collected files: missing={sorted(set(counts) - set(flat))} extra={sorted(set(flat) - set(counts))}")
-        total = sum(counts.values())
-        per = [sum(counts[f] for f in s) for s in shards]
-        if sum(per) != total:
-            problems.append(f"test count differs: shards={sum(per)} collected={total}")
-        for i, s in enumerate(shards):
-            print(f"shard {i}: {len(s)} files, {per[i]} tests")
-        print(f"collected: {len(counts)} files, {total} tests; shards: {len(flat)} files, {sum(per)} tests")
+    if args.plan_out or args.verify:
+        if not args.shard_count:
+            raise SystemExit("--shard-count is required with --plan-out / --verify")
+        counts = collect_counts()
+        shards = partition(counts, args.shard_count)
+        problems, lines = verify_partition(counts, shards)
+        print("\n".join(lines))
         if problems:
-            for p in problems:
-                print("FAIL:", p)
+            for problem in problems:
+                print("FAIL:", problem)
             return 1
         print("OK: the shards are disjoint and cover every collected test")
+        if args.plan_out:
+            digest = hashlib.sha256(json.dumps(counts, sort_keys=True).encode()).hexdigest()
+            Path(args.plan_out).write_text(json.dumps({
+                "shard_count": args.shard_count, "collection_sha256": digest, "collected_files": len(counts),
+                "collected_tests": sum(counts.values()), "counts": counts, "shards": shards,
+            }))
         return 0
 
-    if args.shard is None or not 0 <= args.shard < args.shard_count:
-        raise SystemExit("--shard must be in [0, shard-count)")
+    if not args.plan or args.shard is None:
+        raise SystemExit("give --plan FILE --shard I (a shard run), or --plan-out FILE / --verify with --shard-count N")
+    plan = json.loads(Path(args.plan).read_text())
+    shards = plan["shards"]
+    if not 0 <= args.shard < len(shards):
+        raise SystemExit(f"--shard must be in [0, {len(shards)})")
+    problems, _lines = verify_partition(plan["counts"], shards)  # the plan is checked again where it is used
+    if problems:
+        raise SystemExit("the plan is not a valid split: " + "; ".join(problems))
     mine = shards[args.shard]
     if args.order == "reverse":
         mine = list(reversed(mine))
     if args.counts_out:
-        Path(args.counts_out).write_text(json.dumps({"shard": args.shard, "files": len(mine), "tests": sum(counts[f] for f in mine)}))
-    sys.stdout.write("\n".join(mine) + "\n")
+        Path(args.counts_out).write_text(json.dumps({"shard": args.shard, "files": len(mine), "tests": sum(plan["counts"][f] for f in mine)}))
+    sys.stdout.write("\n".join(mine) + ("\n" if mine else ""))
     return 0
 
 

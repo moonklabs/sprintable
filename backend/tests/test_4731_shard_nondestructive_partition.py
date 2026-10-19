@@ -57,8 +57,38 @@ def test_the_reverse_order_option_keeps_the_same_files():
 
     counts = {f"tests/test_{i}.py": 1 + i % 3 for i in range(12)}
     forward = mod.partition(counts, 3)[0]
-    assert sorted(forward) == sorted(reversed(forward))
     assert list(reversed(forward)) == forward[::-1]
     # the CLI wiring: the flag exists and is accepted
     out = subprocess.run([sys.executable, str(_PATH), "--help"], capture_output=True, text=True, check=False).stdout
     assert "--order" in out
+
+
+def test_verify_partition_catches_a_dropped_a_doubled_and_a_miscounted_file():
+    counts = {"a.py": 3, "b.py": 2, "c.py": 1}
+    ok = mod.partition(counts, 2)
+    assert mod.verify_partition(counts, ok)[0] == []
+    assert mod.verify_partition(counts, [["a.py"], ["b.py"]])[0], "c.py dropped"
+    assert mod.verify_partition(counts, [["a.py", "b.py"], ["b.py", "c.py"]])[0], "b.py doubled"
+    assert mod.verify_partition(counts, [["a.py", "b.py", "c.py"], ["d.py"]])[0], "d.py is not a collected file"
+
+
+def test_plan_round_trip_each_shard_reads_exactly_its_own_files(tmp_path):
+    """the plan is written once and every shard reads its slot: no shard needs to collect, and an empty shard prints nothing"""
+    import json
+    import subprocess
+    import sys
+
+    counts = {f"tests/test_{i}.py": 1 + i % 4 for i in range(9)}
+    shards = mod.partition(counts, 12)  # more shards than files → some stay empty
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps({"shard_count": 12, "counts": counts, "shards": shards}))
+    seen = []
+    for i in range(12):
+        out = subprocess.run([sys.executable, str(_PATH), "--plan", str(plan), "--shard", str(i)], capture_output=True, text=True, check=False)
+        assert out.returncode == 0, out.stderr
+        files = out.stdout.split()
+        assert files == shards[i]
+        if not shards[i]:
+            assert out.stdout == ""  # an empty shard prints nothing (the CI step then has nothing to run)
+        seen += files
+    assert sorted(seen) == sorted(counts)  # every collected file ran exactly once

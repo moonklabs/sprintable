@@ -104,9 +104,13 @@ async def test_tag_lookup_is_written_for_the_tag_index():
             )
         assert len(captured) == 1, "태그 조회 문장을 정확히 하나 잡아야 가드가 헛돌지 않는다"
         statement = " ".join(captured[0][0].split())
+        # the expressions are also in the SELECT list, so look at the filter itself: the part after WHERE (before ORDER BY) — a bound-key version
+        # (`metadata[$1] ->> $2`) of the filter is what no index can serve
+        where = statement.split(" WHERE ", 1)[1].split(" ORDER BY ", 1)[0]
         for expression in ("(conversation_messages.metadata->'work_item'->>'type')", "(conversation_messages.metadata->'work_item'->>'id')"):
-            assert expression in statement, f"the tag statement no longer uses the index expression {expression}:\n{statement[:500]}"
-        assert "conversation_messages.created_at DESC" in statement, statement[:500]  # the index order (type, id, created_at DESC)
+            assert expression in where, f"the tag filter no longer uses the index expression {expression}:\n{where[:500]}"
+        order_by = statement.split(" ORDER BY ", 1)[1]
+        assert "conversation_messages.created_at DESC" in order_by, order_by[:300]  # the index order (type, id, created_at DESC)
     finally:
         await engine.dispose()
 
