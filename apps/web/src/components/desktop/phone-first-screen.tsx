@@ -53,10 +53,11 @@ export function PhoneFirstScreen({ orgId, chatsHref, macDownloadEnabled = false 
   const stopRead = useCallback(() => { if (readFlow.current) { readFlow.current.stopped = true; endFlow(readFlow.current); } }, []);
   const readNow = useCallback(() => {
     if (isLeaving()) return; // a page on its way out reads nothing new (a late «turned on» · «retry» must not start a flow under the pending move)
+    stopRead(); // a newer read STOPS the older one (a restored page reads again while an older read may still be out)
     const flow = beginFlow();
     readFlow.current = flow;
     void readStartable(phoneCall, () => flow.stopped).catch((): StartableRead => ({ kind: 'failed' })).then((r) => { endFlow(flow); if (!flow.stopped) land(r); });
-  }, [phoneCall, land]);
+  }, [phoneCall, land, stopRead]);
   const dropReads = stopRead; // leaving the page: whatever is still out is dropped
   useEffect(() => {
     readNow();

@@ -913,6 +913,21 @@ describe('[4714] AC3 — started ≠ stood: the conversation with the started ag
     root = createRoot(container);
   });
 
+  it('two reads overlap (a restored page reads again while the first is still out): the first one answering late draws nothing over the second', async () => {
+    const answers: Array<(a: Record<string, unknown>) => void> = [];
+    phoneCall.mockImplementation((type: string) => (type === 'device.key.info' ? new Promise((r) => { answers.push(r as (a: Record<string, unknown>) => void); }) : Promise.resolve(signAnswer)));
+    await screen(); // read 1 is out (the bridge has not answered)
+    await act(async () => { window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true })); }); // read 2 begins
+    expect(answers.length).toBe(2);
+    answers[1](keyAnswer); // the second answers: the usual start card
+    await flush();
+    expect(byId('onboarding-phone-start')).not.toBeNull();
+    answers[0]({ id: 'k', ok: true, public_key: 'PK', key_number: '000 000' }); // the first answers late with a key the server does not list → «no Mac»
+    await flush();
+    expect(byId('onboarding-phone-no-mac')).toBeNull(); // and did not draw over the second
+    expect(byId('onboarding-phone-start')).not.toBeNull();
+  });
+
   it('the way out is one navigation however often it is tapped (the onboarding\'s finish runs once)', async () => {
     const onFinish = vi.fn();
     await renderIn(<FirstScreen orgId="org-1" chatsHref="/chats" orgName={null} onConnectElsewhere={() => undefined} onFinish={onFinish} />);
