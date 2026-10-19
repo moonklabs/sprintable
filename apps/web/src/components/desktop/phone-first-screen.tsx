@@ -75,11 +75,21 @@ export function PhoneFirstScreen({ orgId, chatsHref, macDownloadEnabled = false 
   if (read.kind === 'view' && !read.view.remote_control) return <RemoteOff orgId={orgId} onTurnedOn={reload} />;
   if (read.kind === 'no_phone' || read.view.computers.length === 0) return <NoMac pairHref={flat('/desktop/pair')} mailEnabled={macDownloadEnabled} />;
 
-  // the computers this phone is paired with; one screen per computer in v1 is the first one that can take a start (reachable first)
-  const computers = read.view.computers;
-  // only an agent the person may command can be started from here (`can_command`) — the others are not offered
-  const commandable = (c: StartableComputer) => c.agents.filter((a) => a.can_command);
-  const computer = computers.find((c) => c.reachable && commandable(c).length > 0) ?? computers.find((c) => commandable(c).length > 0) ?? computers[0];
+  return <Computers computers={read.view.computers} chatsHref={chatsHref} onRemoteOff={reload} />;
+}
+
+// only an agent the person may command can be started from here (`can_command`) — the others are not offered
+const commandable = (c: StartableComputer) => c.agents.filter((a) => a.can_command);
+
+/** the computers this phone is paired with: the first one that can take a start (reachable first) is the one shown; with more than one such computer the person may choose (story 4714 · PO 10-19: never «one Mac» assumed) */
+function Computers({ computers, chatsHref, onRemoteOff }: { computers: StartableComputer[]; chatsHref?: string; onRemoteOff: () => void }) {
+  const t = useTranslations('onboarding.phone');
+  const startable = computers.filter((c) => commandable(c).length > 0);
+  // a computer none of whose agents has a project to start is no choice (a card with an empty list and a start that cannot be pressed); if none has one the card says so as before
+  const offered = startable.filter((c) => commandable(c).some((a) => a.projects.length > 0));
+  const choices = offered.length > 0 ? offered : startable;
+  const [picked, setPicked] = useState<string | null>(null);
+  const computer = choices.find((c) => c.setup_id === picked) ?? choices.find((c) => c.reachable) ?? choices[0] ?? computers[0];
   if (commandable(computer).length === 0) {
     return (
       <Card className="break-keep p-6" data-testid="onboarding-phone-no-agent">
@@ -88,7 +98,11 @@ export function PhoneFirstScreen({ orgId, chatsHref, macDownloadEnabled = false 
       </Card>
     );
   }
-  return <StartCard computer={computer} agents={commandable(computer)} chatHref={chatsHref} onRemoteOff={reload} />;
+  // keyed by the computer: another computer is another screen — the agent · project picks and any result line of the first are not carried over
+  return (
+    <StartCard key={computer.setup_id} computer={computer} agents={commandable(computer)} chatHref={chatsHref} onRemoteOff={onRemoteOff}
+      computers={choices.length > 1 ? choices : null} onPickComputer={setPicked} />
+  );
 }
 
 type MailState = { kind: 'idle' } | { kind: 'sending' } | { kind: 'sent'; email: string } | { kind: 'limited' } | { kind: 'need_verify' } | { kind: 'failed' } | { kind: 'hidden' };
@@ -187,7 +201,7 @@ function RemoteOff({ orgId, onTurnedOn }: { orgId: string | null; onTurnedOn: ()
   );
 }
 
-function StartCard({ computer, agents, chatHref, onRemoteOff }: { computer: StartableComputer; agents: StartableAgent[]; chatHref?: string; onRemoteOff: () => void }) {
+function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickComputer }: { computer: StartableComputer; agents: StartableAgent[]; chatHref?: string; onRemoteOff: () => void; computers: StartableComputer[] | null; onPickComputer: (setupId: string) => void }) {
   const t = useTranslations('onboarding.phone');
   const { phoneCall } = usePhoneBridge();
   const [agentId, setAgentId] = useState<string | null>(agents.length === 1 ? agents[0].agent_member_id : null); // one agent → picked already
@@ -195,7 +209,7 @@ function StartCard({ computer, agents, chatHref, onRemoteOff }: { computer: Star
   const [projectId, setProjectId] = useState<string | null>(null);
   const projects = agent?.projects ?? [];
   const project = projects.find((p) => p.project_id === projectId);
-  const [sheet, setSheet] = useState<'agent' | 'project' | null>(null);
+  const [sheet, setSheet] = useState<'computer' | 'agent' | 'project' | null>(null);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<StartOutcome | null>(null);
   // a start whose end is not known: the only way on is [결과 확인] (the same command) — a new press would sign again and could start it twice
@@ -251,6 +265,9 @@ function StartCard({ computer, agents, chatHref, onRemoteOff }: { computer: Star
     <div className="space-y-4" data-testid="onboarding-phone-start">
       <h1 id="onboarding-step-title" className="break-keep text-center text-2xl font-bold text-foreground">{t('start.title', { device: computer.device_name })}</h1>
       <Card className="break-keep flex flex-col gap-3 p-4">
+        {computers ? (
+          <PickRow label={t('start.computerLabel')} value={computer.device_name} onOpen={() => setSheet('computer')} disabled={frozen} testId="onboarding-phone-computer" />
+        ) : null}
         {agents.length > 1 ? (
           <PickRow label={t('start.agentLabel')} value={agent?.name ?? null} onOpen={() => setSheet('agent')} disabled={frozen} testId="onboarding-phone-agent" />
         ) : (
@@ -280,11 +297,12 @@ function StartCard({ computer, agents, chatHref, onRemoteOff }: { computer: Star
       ) : null}
       {sheet ? (
         <PickSheet
-          title={sheet === 'agent' ? t('start.agentLabel') : t('start.projectSheetTitle')}
-          rows={sheet === 'agent' ? agents.map((a) => ({ id: a.agent_member_id, name: a.name })) : projects.map((p) => ({ id: p.project_id, name: p.name }))}
-          selected={sheet === 'agent' ? agentId : projectId}
+          title={sheet === 'computer' ? t('start.computerSheetTitle') : sheet === 'agent' ? t('start.agentLabel') : t('start.projectSheetTitle')}
+          rows={sheet === 'computer' ? (computers ?? []).map((c) => ({ id: c.setup_id, name: c.device_name })) : sheet === 'agent' ? agents.map((a) => ({ id: a.agent_member_id, name: a.name })) : projects.map((p) => ({ id: p.project_id, name: p.name }))}
+          selected={sheet === 'computer' ? computer.setup_id : sheet === 'agent' ? agentId : projectId}
           onPick={(id) => {
             if (frozen) { setSheet(null); return; }
+            if (sheet === 'computer') { setSheet(null); if (id !== computer.setup_id) onPickComputer(id); return; } // the screen is rebuilt for the other computer
             if (sheet === 'agent') setAgentId(id); else setProjectId(id); // a project the other agent does not have reads as «not picked»: it is looked up in THAT agent's list
             setOutcome(null); pending.current = null; setSheet(null);
           }}

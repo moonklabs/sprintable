@@ -346,7 +346,7 @@ async def test_09_the_first_screen_in_one_read_every_paired_computer_with_its_ag
         assert set(comp) == {"setup_id", "device_name", "reachable", "agents"} and comp["setup_id"] == sid and comp["reachable"] is True
         by_id = {a["agent_member_id"]: a for a in comp["agents"]}
         assert set(by_id) == {agent, other_agent}  # every agent this computer was set up with (the owner opens them all)
-        assert all(set(a) == {"agent_member_id", "name", "can_command", "projects"} for a in comp["agents"])
+        assert all(set(a) == {"agent_member_id", "name", "can_command", "projects", "running"} for a in comp["agents"])
         assert sorted(p["project_id"] for p in by_id[agent]["projects"]) == sorted([str(PROJ), str(PROJ2)]) and by_id[other_agent]["projects"] == []
         assert all(set(p) == {"project_id", "name"} for a in comp["agents"] for p in a["projects"])
         # a key that is not the asker's (even one paired with this computer) · a key paired with nothing lists no computer
@@ -375,6 +375,68 @@ async def test_09_the_first_screen_in_one_read_every_paired_computer_with_its_ag
             assert (r.status_code) == 403
         finally:
             await _sql(f"DELETE FROM human_api_keys WHERE member_id = '{OWNER_TM}'")
+
+
+async def test_09b_the_first_screen_read_says_whether_each_agent_runs_so_the_phone_can_land_on_its_chat_or_on_the_start_screen(world):
+    """story 4714 (AC3 · AC4): `running` per agent — True a session that lives · False none / every one over · None the computer has not been heard
+    from (a session it had may still live). It is read from the computer's own session rows, for every person who may open the agent: the device's
+    session list is for owners and admins only, and a plain member who owns an agent still has a phone to land."""
+    plain_tm = await _plain_member()
+    await _sql(f"INSERT INTO project_access (id,project_id,member_id,permission) VALUES (gen_random_uuid(),'{PROJ}','{plain_tm}','granted')")
+    async with _client() as c:
+        device, agent, phone, owner_der = await _setup(c, "d4424 mac 4714j")  # _setup reports the first agent `idle` — a live session
+        other_agent = device["agents"][1]["member_id"]
+        sid = device["setup_id"]
+
+        async def running(who=OWNER, key=phone):
+            comp = (await _all(c, key, who=who)).json()["computers"][0]
+            return {a["agent_member_id"]: a["running"] for a in comp["agents"]}
+
+        assert await running() == {agent: True, other_agent: False}  # a live session · an agent with no session at all
+        await _state(c, device, agent, "stopped", 2)
+        assert await running() == {agent: False, other_agent: False}  # every session of it is over
+        await _state(c, device, agent, "idle", 3, key="s-2")
+        assert (await running())[agent] is True  # one more session that lives is enough
+        # the same truth for a plain member (no right to list the device's sessions): their own paired phone lands the same way
+        plain_phone, plain_der = await _register(c, PLAIN)
+        await _pair(c, device["device_token"], owner_der, plain_der)
+        got = await running(who=PLAIN, key=plain_phone)
+        assert got.get(agent) is True
+        denied = await c.get(f"/api/v2/desktop/setups/{sid}/sessions", headers=_person(PLAIN))
+        assert denied.status_code == 403  # … which the sessions list itself would have refused
+        # a computer that has not been heard from: a session it had may still live → «unknown», never «not running»; and no session rows is not a «no» either
+        await _sql(f"UPDATE desktop_device_tokens SET last_used_at = now() - interval '5 minutes' WHERE setup_id = '{sid}'")
+        assert await running() == {agent: None, other_agent: None}
+        await _sql(f"DELETE FROM desktop_sessions WHERE setup_id = '{sid}'")
+        assert await running() == {agent: None, other_agent: None}  # silent and nothing on record: still not a «no»
+
+
+async def test_09c_running_is_per_computer_the_same_agent_on_two_computers_is_two_answers(world):
+    """story 4714 (Kadir's pin on PR 5163): the word is keyed by (computer, agent). The same agent with a session that lives on ANOTHER computer must not make it
+    «running» on this one — not when the phone is paired with only one of them (the other's rows are not even read), and not when it is paired with both
+    (each computer says its own: the old computer an agent was moved away from keeps its rows and keeps listing the agent)."""
+    async with _client() as c:
+        dev1, agent, phone, owner_der = await _setup(c, "d4424 mac 4714l")
+        dev2 = await _device(c, name="d4424 mac 4714m")  # a second computer
+        await _state(c, dev1, agent, "stopped", 2)  # not running on the first …
+        # … while a session of the same agent lives on the second (a row of that computer — the helpers cannot set one agent up on two computers)
+        await _sql(f"INSERT INTO desktop_sessions (id, setup_id, session_key, agent_member_id, runtime, state, last_report_seq, state_at) "
+                   f"VALUES (gen_random_uuid(), '{dev2['setup_id']}', 'other-1', '{agent}', 'claude', 'idle', 1, now())")
+
+        async def running():
+            comps = (await _all(c, phone)).json()["computers"]
+            return {comp["setup_id"]: {a["agent_member_id"]: a["running"] for a in comp["agents"]}.get(agent) for comp in comps}
+
+        assert await running() == {dev1["setup_id"]: False}  # paired with the first only: it says «no» — the second computer's live session is not its own
+        # paired with both, and the second lists the agent too: each says its own
+        await _pair(c, dev2["device_token"], owner_der)
+        await _sql(f"UPDATE desktop_setups SET members = members || (SELECT jsonb_agg(e) FROM desktop_setups d1, jsonb_array_elements(d1.members) e "
+                   f"WHERE d1.id = '{dev1['setup_id']}' AND e->>'member_id' = '{agent}') WHERE id = '{dev2['setup_id']}'")
+        assert await running() == {dev1["setup_id"]: False, dev2["setup_id"]: True}
+        # and the other way round: a live session on the first, none on the second
+        await _sql(f"DELETE FROM desktop_sessions WHERE setup_id = '{dev2['setup_id']}'")
+        await _state(c, dev1, agent, "idle", 3, key="s-2")
+        assert await running() == {dev1["setup_id"]: True, dev2["setup_id"]: False}
 
 
 async def test_10_a_gone_pairing_a_disconnected_computer_and_a_deleted_project_leave_both_reads_and_a_list_that_changes_while_a_press_waits_is_the_new_one(world, monkeypatch):

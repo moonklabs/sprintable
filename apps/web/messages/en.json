@@ -1741,9 +1741,12 @@
         "line": "{device} has no agents yet — pick a folder at your Mac and start the first agent.",
         "lineNoAccess": "There's no agent on {device} that you can start."
       },
+      "laterNote": "You don't have to do this now.",
       "start": {
         "title": "Start an agent on {device}?",
         "agentLabel": "Agent",
+        "computerLabel": "Computer",
+        "computerSheetTitle": "Choose a computer",
         "projectLabel": "Project",
         "projectSheetTitle": "Choose a project",
         "newFolder": "Pick a new folder at your Mac",

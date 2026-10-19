@@ -342,6 +342,84 @@ describe('[4714] branch 4 — start (AC3)', () => {
   });
 });
 
+describe('[4714] two paired computers — the person chooses the computer (PO 10-19: never «one Mac» assumed)', () => {
+  const SETUP2 = '11111111-2222-4333-8444-666666666666';
+  const two = (over: Record<string, unknown> = {}) => ({ remote_control: true, computers: [computer(), computer({ setup_id: SETUP2, device_name: '사무실 맥', ...over })] });
+
+  it('with ONE computer that can take a start there is no computer row; with two there is one, and it shows the computer the screen is for', async () => {
+    await screen();
+    expect(byId('onboarding-phone-computer')).toBeNull();
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    world.startable = two();
+    await screen();
+    expect(byId('onboarding-phone-computer')?.textContent).toContain('컴퓨터');
+    expect(byId('onboarding-phone-computer')?.textContent).toContain('윤재의 맥북'); // the first one that can take a start (reachable first) is the shown one
+    expect(text()).toContain('윤재의 맥북에서 에이전트를 시작할까요?');
+  });
+
+  it('choosing the other computer rebuilds the screen for it: its name in the title, the project pick cleared, and the start is signed for THAT computer', async () => {
+    world.startable = two();
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(false);
+    await pickFromSheet('onboarding-phone-computer', '사무실 맥');
+    expect(text()).toContain('사무실 맥에서 에이전트를 시작할까요?');
+    expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(true); // the project of the first computer is not carried over
+    await pickFromSheet('onboarding-phone-project', '정산');
+    await press(byId('onboarding-phone-start-go'));
+    expect(phoneCall).toHaveBeenCalledWith('command.sign', { kind: 'start_session', setup_id: SETUP2, agent_member_id: AGENT, project_id: PROJECT2 });
+  });
+
+  it('a computer the person cannot command anything on is not offered as a choice; the unreachable one is only the second choice', async () => {
+    world.startable = { remote_control: true, computers: [
+      computer({ setup_id: SETUP2, device_name: '꺼진 맥', reachable: false }),
+      computer({ setup_id: '11111111-2222-4333-8444-777777777777', device_name: '권한 없는 맥', agents: [{ agent_member_id: AGENT, name: '결제 담당', can_command: false, projects: [{ project_id: PROJECT, name: '결제 개편' }] }] }),
+      computer(),
+    ] };
+    await screen();
+    expect(text()).toContain('윤재의 맥북에서 에이전트를 시작할까요?'); // the reachable one first
+    await press(byId('onboarding-phone-computer'));
+    const names = Array.from(container.querySelectorAll('[data-testid="onboarding-phone-sheet-row"]')).map((r) => r.textContent);
+    expect(names.some((n) => n?.includes('꺼진 맥'))).toBe(true);
+    expect(names.some((n) => n?.includes('윤재의 맥북'))).toBe(true);
+    expect(names.some((n) => n?.includes('권한 없는 맥'))).toBe(false);
+  });
+
+  it('a computer none of whose agents has a project to start is no choice (an empty list with a start that cannot be pressed); with none to choose between there is no row', async () => {
+    world.startable = two({ agents: [{ agent_member_id: AGENT, name: '결제 담당', can_command: true, projects: [] }] });
+    await screen();
+    expect(byId('onboarding-phone-computer')).toBeNull(); // only the first computer has a project to start
+    expect(text()).toContain('윤재의 맥북에서 에이전트를 시작할까요?');
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    world.startable = { remote_control: true, computers: [
+      computer({ agents: [{ agent_member_id: AGENT, name: '결제 담당', can_command: true, projects: [] }] }),
+      computer({ setup_id: SETUP2, device_name: '사무실 맥', agents: [{ agent_member_id: AGENT, name: '결제 담당', can_command: true, projects: [] }] }),
+      computer({ setup_id: '11111111-2222-4333-8444-777777777777', device_name: '권한 없는 맥', agents: [{ agent_member_id: AGENT, name: '결제 담당', can_command: false, projects: [] }] }),
+    ] };
+    await screen();
+    expect(byId('onboarding-phone-computer')).not.toBeNull(); // none has a project: the two the person may command are offered, the card says what it can
+    await press(byId('onboarding-phone-computer'));
+    const names = Array.from(container.querySelectorAll('[data-testid="onboarding-phone-sheet-row"]')).map((r) => r.textContent ?? '');
+    expect(names.length).toBe(2);
+    expect(names.some((n) => n.includes('권한 없는 맥'))).toBe(false); // …and a computer with nothing the person may command is no choice even then
+  });
+
+  it('while a start is out the computer row is off — switching would drop the result of a start that is already on its way', async () => {
+    world.startable = two();
+    let release: () => void = () => undefined;
+    world.hold = new Promise<void>((r) => { release = r; });
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await act(async () => { (byId('onboarding-phone-start-go') as HTMLElement).click(); });
+    await flush();
+    expect((byId('onboarding-phone-computer') as HTMLButtonElement).disabled).toBe(true);
+    release();
+    await flush();
+  });
+});
+
 describe('[4714] branch 5 — the result lines', () => {
   const start = async () => { await screen(); await pickFromSheet('onboarding-phone-project', '결제 개편'); await press(byId('onboarding-phone-start-go')); };
   const line = () => byId('onboarding-phone-result')?.querySelector('p');
