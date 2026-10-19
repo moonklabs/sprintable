@@ -434,7 +434,6 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   }, [projectId, currentTeamMemberId, stories, adjustColumnTotal, addToast, t, patchStoryFromSse]);
 
   useSseNotifications({
-    memberId: currentTeamMemberId,
     extraEventNames: ['story.status_changed', 'story.assignee_changed', 'story.position_changed'],
     onExtraEvent: handleBoardSseEvent,
   });

@@ -3,6 +3,7 @@
 // story #4440 — the legacy chat view with the real SSE hook: my message sent from another tab or device appears here live,
 // and a reply sent there bumps the parent's reply count once; a reply this tab sent (its own echo) does not bump it again.
 // Harness as chat-view.4311.test.tsx, except useChatSse is real (a fake EventSource stands in for the stream).
+import { RealtimeProvider } from '@/components/realtime-provider';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -42,7 +43,7 @@ let root: Root;
 function wrap(node: React.ReactNode) {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      {node}
+      <RealtimeProvider>{node}</RealtimeProvider>
     </NextIntlClientProvider>
   );
 }

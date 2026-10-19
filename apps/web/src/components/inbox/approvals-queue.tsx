@@ -291,16 +291,15 @@ export function ApprovalsQueue() {
   //
   // story #3069(P1, 2026-08-25 PO 실측·디디 그라운딩) — 이 세 이벤트를 예전엔
   // `useSseMultiplexerContext()`가 준 mux에 직접 `mux.subscribe(...)`로만 걸었다. mux는
-  // 피처플래그(SSE_MULTIPLEX_ENABLED) off거나 이 컴포넌트 마운트 시점에 미연결이면 null을
+  // (그 시절 피처플래그 off이거나) 이 컴포넌트 마운트 시점에 미연결이면 null을
   // 주고, 그 경우 `if (!mux) return;`으로 조용히 no-op — 즉 폴백 경로가 아예 없어 세 이벤트
   // 전부가 페이지 전체에서 리스너 자체를 잃었다(BE는 정상 발화·delivered 마킹했는데도 화면
   // 카드는 0건, 실사고 재현). `use-chat-sse.ts`/`use-sse-notifications.ts`(원 3훅)는 이미
   // mux 없으면 자체 독립 EventSource로 폴백하는 설계라 그 사이드에선 안 죽었다 — 이 컴포넌트만
   // 그 불변식(мux 유무 무관 항상 최소 1곳에서 리스닝)을 안 지켰던 것.
   // 처방: 새 EventSource를 직접 열지 않고(발명 0) `useSseNotifications`의 `extraEventNames`
-  // 경로를 재사용한다 — 그 훅이 mux 有=mux.subscribe, mux 無=자체 폴백 EventSource를 이미
-  // 구조적으로 갈라주므로 이 컴포넌트는 mux 존재 여부를 더 이상 알 필요가 없다(그 훅의 dedup
-  // ·backoff·visibility-reconnect·cursor 승격까지 전부 공짜로 상속).
+  // 경로를 재사용한다 — 그 훅이 mux에 이름별로 구독하므로 이 컴포넌트는 mux 존재 여부를 더 이상 알 필요가 없다(그 훅의 dedup · 재연결 · 커서 승격은
+  // mux가 맡는다). story #4698 — 훅의 독립 폴백 EventSource는 지웠다: mux 無(Provider 밖)는 스트림 없음이고, 스트림은 RealtimeProvider 하나뿐이다.
   const handleGateEvent = useCallback((eventName: string, data: unknown) => {
     if (typeof data !== 'object' || data === null) return;
     const payload = data as { gate_id?: string; status?: 'approved' | 'rejected' };
@@ -342,7 +341,6 @@ export function ApprovalsQueue() {
   }, []);
 
   useSseNotifications({
-    memberId: currentTeamMemberId,
     extraEventNames: ['conversation.gate_resolved', 'conversation.gate_delegated', 'conversation.gate_created'],
     onExtraEvent: handleGateEvent,
   });

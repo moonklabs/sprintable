@@ -64,8 +64,8 @@ let container: HTMLDivElement;
 let root: Root;
 let handle: SseMultiplexerHandle | null = null;
 
-function Harness({ memberId, enabled }: { memberId?: string; enabled: boolean }) {
-  const h = useSseMultiplexer(memberId, enabled);
+function Harness({ memberId }: { memberId?: string }) {
+  const h = useSseMultiplexer(memberId);
   useEffect(() => { handle = h; });
   return null;
 }
@@ -87,24 +87,17 @@ afterEach(async () => {
 });
 
 describe('useSseMultiplexer — story #2078', () => {
-  it('enabled=true면 EventSource를 정확히 1개만 연다', async () => {
+  it('EventSource를 정확히 1개만 연다(story #4698 — 늘 켬 · 플래그 없음)', async () => {
     await act(async () => {
-      root.render(<Harness memberId="me-1" enabled />);
+      root.render(<Harness memberId="me-1" />);
     });
     expect(instances).toHaveLength(1);
-  });
-
-  it('enabled=false면 EventSource를 아예 열지 않는다(피처플래그 롤백 경로)', async () => {
-    await act(async () => {
-      root.render(<Harness memberId="me-1" enabled={false} />);
-    });
-    expect(instances).toHaveLength(0);
   });
 
   describe('org 전환(memberId 변경) 재연결 — story #2940(실사고 재현)', () => {
     it('memberId가 바뀌면 옛 커넥션을 닫고 새 member_id로 재연결한다', async () => {
       await act(async () => {
-        root.render(<Harness memberId="member-org-a" enabled />);
+        root.render(<Harness memberId="member-org-a" />);
       });
       expect(instances).toHaveLength(1);
       expect(instances[0]!.url).toContain('member_id=member-org-a');
@@ -112,7 +105,7 @@ describe('useSseMultiplexer — story #2078', () => {
 
       // org 전환 흉내 — 부모가 새 memberId로 리렌더.
       await act(async () => {
-        root.render(<Harness memberId="member-org-b" enabled />);
+        root.render(<Harness memberId="member-org-b" />);
       });
 
       expect(instances[0]!.closed).toBe(true); // 옛 커넥션은 닫힘.
@@ -123,7 +116,7 @@ describe('useSseMultiplexer — story #2078', () => {
 
     it('재연결 후에도 전환 前 구독이 그대로 살아 새 커넥션의 이벤트를 받는다(구독 복원)', async () => {
       await act(async () => {
-        root.render(<Harness memberId="member-org-a" enabled />);
+        root.render(<Harness memberId="member-org-a" />);
       });
       const handler = vi.fn();
       await act(async () => { handle!.subscribe('notification', handler); });
@@ -131,7 +124,7 @@ describe('useSseMultiplexer — story #2078', () => {
       expect(handler).toHaveBeenCalledTimes(1);
 
       await act(async () => {
-        root.render(<Harness memberId="member-org-b" enabled />);
+        root.render(<Harness memberId="member-org-b" />);
       });
 
       // ⭐핵심 — 재연결 前에 구독한 handler가, 재연결로 새로 열린 커넥션의 이벤트도 받아야 한다
@@ -145,13 +138,13 @@ describe('useSseMultiplexer — story #2078', () => {
       // 새 org 커넥션이 옛 org의 last_event_id를 그대로 보낸다 — BE가 org 스코프 없이 그
       // id의 생성시각만으로 백필기준을 잡아, 새 org의 더 이른 이벤트가 조용히 누락된다.
       await act(async () => {
-        root.render(<Harness memberId="member-org-a" enabled />);
+        root.render(<Harness memberId="member-org-a" />);
       });
       await act(async () => { handle!.subscribe('story.status_changed', vi.fn()); });
       act(() => { dispatchNamed(instances[0]!, 'story.status_changed', {}, 'org-a-last-event-id'); });
 
       await act(async () => {
-        root.render(<Harness memberId="member-org-b" enabled />);
+        root.render(<Harness memberId="member-org-b" />);
       });
 
       const reconnectUrl = new URL(instances[instances.length - 1]!.url, 'http://localhost');
@@ -162,13 +155,13 @@ describe('useSseMultiplexer — story #2078', () => {
 
     it('memberId가 안 바뀌면(무관한 리렌더) 재연결하지 않는다 — 과잉 재연결 금지', async () => {
       await act(async () => {
-        root.render(<Harness memberId="member-org-a" enabled />);
+        root.render(<Harness memberId="member-org-a" />);
       });
       expect(instances).toHaveLength(1);
 
       // 같은 memberId로 리렌더(예: 부모가 다른 이유로 리렌더된 경우).
       await act(async () => {
-        root.render(<Harness memberId="member-org-a" enabled />);
+        root.render(<Harness memberId="member-org-a" />);
       });
 
       expect(instances).toHaveLength(1); // 새 커넥션 없음.
@@ -178,7 +171,7 @@ describe('useSseMultiplexer — story #2078', () => {
 
   it('같은 이벤트명에 구독자 여러 개(다른 훅 흉내)가 전부 이벤트를 받는다 — 멀티플렉싱 핵심', async () => {
     await act(async () => {
-      root.render(<Harness memberId="me-1" enabled />);
+      root.render(<Harness memberId="me-1" />);
     });
     const a = vi.fn();
     const b = vi.fn();
@@ -193,7 +186,7 @@ describe('useSseMultiplexer — story #2078', () => {
 
   it('커넥션이 이미 열린 뒤(늦게) 구독해도 이후 이벤트를 놓치지 않는다 — "구독 순서 무관"', async () => {
     await act(async () => {
-      root.render(<Harness memberId="me-1" enabled />);
+      root.render(<Harness memberId="me-1" />);
     });
     // 이 시점엔 아직 아무도 'chat:message'를 구독하지 않음(커넥션은 이미 열려있음).
     const late = vi.fn();
@@ -206,7 +199,7 @@ describe('useSseMultiplexer — story #2078', () => {
 
   it('unsubscribe 후에는 그 핸들러만 더 이상 이벤트를 받지 않는다', async () => {
     await act(async () => {
-      root.render(<Harness memberId="me-1" enabled />);
+      root.render(<Harness memberId="me-1" />);
     });
     const handler = vi.fn();
     let unsub: () => void = () => {};
@@ -220,7 +213,7 @@ describe('useSseMultiplexer — story #2078', () => {
 
   it('이름 없는 message 이벤트도 subscribeMessage로 받는다', async () => {
     await act(async () => {
-      root.render(<Harness memberId="me-1" enabled />);
+      root.render(<Harness memberId="me-1" />);
     });
     const handler = vi.fn();
     await act(async () => { handle!.subscribeMessage(handler); });
@@ -233,7 +226,7 @@ describe('useSseMultiplexer — story #2078', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
       vi.setSystemTime(new Date('2026-09-24T00:00:00Z'));
-      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      await act(async () => { root.render(<Harness memberId="me-1" />); });
       expect(handle!.isAlive()).toBe(false);
       instances[0]!.readyState = 1;
       act(() => { instances[0]!.onopen?.(); });
@@ -251,7 +244,7 @@ describe('useSseMultiplexer — story #2078', () => {
 
   it('onopen 시 connected=true, onerror 시 connected=false', async () => {
     await act(async () => {
-      root.render(<Harness memberId="me-1" enabled />);
+      root.render(<Harness memberId="me-1" />);
     });
     expect(handle!.connected).toBe(false);
     act(() => { instances[0]!.onopen?.(); });
@@ -262,7 +255,7 @@ describe('useSseMultiplexer — story #2078', () => {
 
   it('재연결(두 번째 open)에서만 subscribeReconnect 핸들러가 불린다 — 최초 연결은 재연결 아님', async () => {
     await act(async () => {
-      root.render(<Harness memberId="me-1" enabled />);
+      root.render(<Harness memberId="me-1" />);
     });
     const onReconnect = vi.fn();
     await act(async () => { handle!.subscribeReconnect(onReconnect); });
@@ -280,7 +273,7 @@ describe('useSseMultiplexer — story #2078', () => {
   // 소비처(presence·chat·notifications)가 재연결마다 구독을 해지·재구독하게 된다.
   it('connected가 false→true→false로 토글돼도 반환 핸들의 참조는 그대로다', async () => {
     await act(async () => {
-      root.render(<Harness memberId="me-1" enabled />);
+      root.render(<Harness memberId="me-1" />);
     });
     const initial = handle;
     expect(initial).not.toBeNull();
@@ -296,7 +289,7 @@ describe('useSseMultiplexer — story #2078', () => {
 
   it('구독 함수 자체도 connected 토글 전후로 동일 참조다(consumer useEffect deps 안정성의 실질)', async () => {
     await act(async () => {
-      root.render(<Harness memberId="me-1" enabled />);
+      root.render(<Harness memberId="me-1" />);
     });
     const subscribeBefore = handle!.subscribe;
     act(() => { instances[0]!.onopen?.(); });
@@ -309,7 +302,7 @@ describe('useSseMultiplexer — story #2078', () => {
       vi.useFakeTimers();
       vi.mocked(fetchWithAuth).mockResolvedValue({ ok: false } as Response);
       await act(async () => {
-        root.render(<Harness memberId="me-1" enabled />);
+        root.render(<Harness memberId="me-1" />);
       });
       expect(instances).toHaveLength(1);
       await act(async () => {
@@ -327,7 +320,7 @@ describe('useSseMultiplexer — story #2078', () => {
       vi.useFakeTimers();
       vi.mocked(fetchWithAuth).mockResolvedValue({ ok: true } as Response);
       await act(async () => {
-        root.render(<Harness memberId="me-1" enabled />);
+        root.render(<Harness memberId="me-1" />);
       });
       await act(async () => {
         instances[0]!.readyState = 2; // EventSource.CLOSED
@@ -342,7 +335,7 @@ describe('useSseMultiplexer — story #2078', () => {
     it('CONNECTING(transient) onerror는 세션 확認 없이 곧장 백오프 재시도한다', async () => {
       vi.useFakeTimers();
       await act(async () => {
-        root.render(<Harness memberId="me-1" enabled />);
+        root.render(<Harness memberId="me-1" />);
       });
       await act(async () => {
         instances[0]!.readyState = 0; // EventSource.CONNECTING — 정상 순단
@@ -371,7 +364,7 @@ describe('useSseMultiplexer — story #2078', () => {
 
     it('B계열(presence) id는 커서로 승격되지 않는다 — 재연결 URL에 안 실린다', async () => {
       vi.useFakeTimers();
-      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      await act(async () => { root.render(<Harness memberId="me-1" />); });
       // attachIfNeeded는 subscribe 시점에만 fake EventSource.addEventListener를 실제로 건다 —
       // subscribe 없이 dispatchNamed(fake)만 부르면 리스너가 없어 아무 일도 안 일어나는(공허한
       // 통과) 자리라, 먼저 구독해서 진짜 훅의 dispatchNamed 경로를 태운다.
@@ -387,7 +380,7 @@ describe('useSseMultiplexer — story #2078', () => {
 
     it('A계열(story.status_changed) id는 커서로 승격된다 — 재연결 URL에 실린다', async () => {
       vi.useFakeTimers();
-      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      await act(async () => { root.render(<Harness memberId="me-1" />); });
       await act(async () => { handle!.subscribe('story.status_changed', vi.fn()); });
       act(() => { dispatchNamed(instances[0]!, 'story.status_changed', {}, 'db-event-id-1'); });
 
@@ -400,7 +393,7 @@ describe('useSseMultiplexer — story #2078', () => {
 
     it('핵심 시나리오 — A계열 수신 뒤 B계열이 마지막으로 와도 커서는 A계열 id를 유지한다', async () => {
       vi.useFakeTimers();
-      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      await act(async () => { root.render(<Harness memberId="me-1" />); });
       await act(async () => {
         handle!.subscribe('story.status_changed', vi.fn());
         handle!.subscribe('presence', vi.fn());
@@ -431,7 +424,7 @@ describe('useSseMultiplexer — story #2078', () => {
 
     it('임계값(3s) 이상 숨겨졌다 돌아오면 기존 커넥션을 닫고 새로 연다', async () => {
       vi.useFakeTimers();
-      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      await act(async () => { root.render(<Harness memberId="me-1" />); });
       act(() => { instances[0]!.onopen?.(); });
       expect(instances).toHaveLength(1);
 
@@ -446,7 +439,7 @@ describe('useSseMultiplexer — story #2078', () => {
 
     it('임계값(3s) 미만의 짧은 전환은 재연결하지 않는다 — 처칭 방지', async () => {
       vi.useFakeTimers();
-      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      await act(async () => { root.render(<Harness memberId="me-1" />); });
       act(() => { instances[0]!.onopen?.(); });
 
       act(() => { setVisibility('hidden'); });
@@ -459,7 +452,7 @@ describe('useSseMultiplexer — story #2078', () => {
 
     it('강제 재연결이 열리면 backoff 이력과 무관하게 subscribeReconnect 핸들러가 불린다(backfill 트리거)', async () => {
       vi.useFakeTimers();
-      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      await act(async () => { root.render(<Harness memberId="me-1" />); });
       const onReconnect = vi.fn();
       await act(async () => { handle!.subscribeReconnect(onReconnect); });
       act(() => { instances[0]!.onopen?.(); }); // 최초 open(onError 이력 없음)
@@ -481,7 +474,7 @@ describe('useSseMultiplexer — story #2078', () => {
   // story #4252 — 아래 세 개는 fake의 readyState가 OPEN이 아닌(=생존 확認 안 된) 커넥션이라 예전처럼 강제 재연결한다.
   describe('window.focus 강제 재연결(#3081, 가시성 축과 독립)', () => {
     it('document.visibilityState가 계속 visible이었어도(hidden 이력 0) window.focus만으로 강제 재연결한다', async () => {
-      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      await act(async () => { root.render(<Harness memberId="me-1" />); });
       act(() => { instances[0]!.onopen?.(); });
       expect(instances).toHaveLength(1);
 
@@ -493,7 +486,7 @@ describe('useSseMultiplexer — story #2078', () => {
 
     it('짧은 시간 내 중복 focus는 throttle되어 추가 재연결을 안 만든다', async () => {
       vi.useFakeTimers();
-      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      await act(async () => { root.render(<Harness memberId="me-1" />); });
       act(() => { instances[0]!.onopen?.(); });
 
       act(() => { window.dispatchEvent(new Event('focus')); });
@@ -508,7 +501,7 @@ describe('useSseMultiplexer — story #2078', () => {
     });
 
     it('focus 강제 재연결도 subscribeReconnect 핸들러를 불러 backfill을 트리거한다', async () => {
-      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      await act(async () => { root.render(<Harness memberId="me-1" />); });
       const onReconnect = vi.fn();
       await act(async () => { handle!.subscribeReconnect(onReconnect); });
       act(() => { instances[0]!.onopen?.(); });
@@ -525,7 +518,7 @@ describe('useSseMultiplexer — story #2078', () => {
   // OPEN이면서 heartbeat 주기 + 여유(45초) 안에 받은 게 있으면 살아 있는 커넥션이라 focus에서 끊지 않는다. 좀비(오래 조용함)는 그대로 재연결.
   describe('window.focus — 살아 있는 커넥션은 끊지 않는다(#4252)', () => {
     it('⭐OPEN · 방금 열림 → focus가 와도 재연결하지 않는다(커넥션 1 · 닫힘 없음 · backfill 없음)', async () => {
-      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      await act(async () => { root.render(<Harness memberId="me-1" />); });
       const onReconnect = vi.fn();
       await act(async () => { handle!.subscribeReconnect(onReconnect); });
       act(() => { instances[0]!.readyState = 1; instances[0]!.onopen?.(); });
@@ -539,7 +532,7 @@ describe('useSseMultiplexer — story #2078', () => {
 
     it('⭐OPEN을 자칭해도 45초 넘게 아무것도 못 받았으면(좀비) focus에서 강제 재연결한다', async () => {
       vi.useFakeTimers();
-      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      await act(async () => { root.render(<Harness memberId="me-1" />); });
       act(() => { instances[0]!.readyState = 1; instances[0]!.onopen?.(); });
       await act(async () => { await vi.advanceTimersByTimeAsync(46_000); });
 
@@ -552,7 +545,7 @@ describe('useSseMultiplexer — story #2078', () => {
 
     it('⭐heartbeat이 생존을 이어 준다 — 40초 뒤 heartbeat, 다시 40초 뒤 focus → 재연결 없음 · 그 뒤 46초 조용하면 재연결', async () => {
       vi.useFakeTimers();
-      await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+      await act(async () => { root.render(<Harness memberId="me-1" />); });
       act(() => { instances[0]!.readyState = 1; instances[0]!.onopen?.(); });
       await act(async () => { await vi.advanceTimersByTimeAsync(40_000); });
       act(() => { dispatchNamed(instances[0]!, 'heartbeat', {}); });
@@ -576,7 +569,7 @@ describe('useSseMultiplexer — story #2078', () => {
     ] as const)('⭐옛 소스의 %s는 새 소스의 생존으로 세지 않는다 → 좀비 새 소스는 focus에서 재연결', async (_label, fireOld) => {
       vi.useFakeTimers();
       try {
-        await act(async () => { root.render(<Harness memberId="me-1" enabled />); });
+        await act(async () => { root.render(<Harness memberId="me-1" />); });
         await act(async () => { handle!.subscribe('conversation.gate_resolved', () => {}); });
         act(() => { instances[0]!.readyState = 1; instances[0]!.onopen?.(); });
         await act(async () => { await vi.advanceTimersByTimeAsync(46_000); });

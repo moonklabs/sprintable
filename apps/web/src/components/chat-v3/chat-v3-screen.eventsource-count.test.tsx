@@ -2,21 +2,18 @@
 //
 // story #4008(E-UX-OVERHAUL·v3 셸 실시간) AC7 CHANGES 2(PO 지적) — "탭당 SSE 연결 1개"의
 // 주 증거는 소스 grep(verify-chat-v3-no-raw-eventsource.test.ts)이 아니라 실제 런타임
-// 연결 개수여야 한다: 멀티플렉서(SSE_MULTIPLEX_ENABLED)가 꺼진 설정(prod 기본값,
-// cloud-build.yml)에서는 `useChatSse` 호출마다 독립 `EventSource`가 열린다(use-chat-sse.ts
-// 폴백 경로) — 훅을 몇 곳에서 부르느냐가 그대로 연결 개수다. 이 파일은 `useChatSse`를
-// 모의하지 않고 실 훅을 그대로 태워, ChatV3Screen 트리 전체(스레드 레일+대화 열)가
-// 마운트됐을 때 `new EventSource(...)`가 정확히 1번만 불리는지를 직접 잰다.
+// 연결 개수여야 한다. 이 파일은 `useChatSse`를 모의하지 않고 실 훅을 그대로 태워,
+// ChatV3Screen 트리 전체(스레드 레일+대화 열)가 <RealtimeProvider> 안에 마운트됐을 때
+// `new EventSource(...)`가 정확히 1번만 불리는지를 직접 잰다.
 //
-// SSE_MULTIPLEX_ENABLED는 모듈 로드 시점에 `process.env['NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED']`
-// 를 읽어 고정되므로(realtime-provider.tsx), 이 값을 세팅 안 한 채(undefined → false) 도는
-// 이 테스트 프로세스는 그 자체로 prod와 동일한 "멀티플렉서 없음" 경로를 자연히 재현한다 —
-// RealtimeProvider로 감쌀 필요조차 없다(mux=null인 폴백 경로가 정확히 이 상태).
+// story #4698 — 멀티플렉서 «끔» 길(훅마다 독립 EventSource)은 지웠다: 스트림은 RealtimeProvider(sse-multiplexer.ts) 하나뿐이고, 이 화면은 (v3) 레이아웃에서
+// 늘 Provider 안이다. 그래서 이 시험도 Provider로 감싸 «지금 열린 스트림 수»를 잰다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
+import { RealtimeProvider } from '@/components/realtime-provider';
 import { DEFAULT_NAV_V3_FLAGS } from '@/lib/nav-v3-destinations';
 
 // story #4018 — usePathname/useSearchParams 추가(주소 쿼리 `conversation` 딥링크).
@@ -53,7 +50,7 @@ let root: Root;
 function wrap(node: React.ReactNode) {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      {node}
+      <RealtimeProvider>{node}</RealtimeProvider>
     </NextIntlClientProvider>
   );
 }
@@ -106,7 +103,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-describe('ChatV3Screen — 실 EventSource 연결 개수(story #4008 AC7, 멀티플렉서 OFF=prod 기본)', () => {
+describe('ChatV3Screen — 실 EventSource 연결 개수(story #4008 AC7 · #4698 늘 한 스트림)', () => {
   it('⭐스레드 레일+대화 열이 함께 마운트돼도 EventSource는 정확히 1개만 열린다', async () => {
     stub();
     const { ChatV3Screen } = await import('./chat-v3-screen');
