@@ -690,7 +690,7 @@ async def test_19_the_narrowing_waits_for_a_move_that_holds_the_device_row_and_j
                 # the old members, and only its later UPDATE waits (a different statement)
                 assert blocked and all("FOR UPDATE" in q.upper() and "desktop_setups" in q.lower() for q in blocked), f"the re-read did not wait on the moving row: {blocked or 'no wait seen'}"
                 await mover.commit()  # the move lands
-                r = await put
+                r = await asyncio.wait_for(put, 120)  # bounded: a PUT that does not come back after the move lands is a failure, not a hang
             finally:
                 if not put.done():
                     put.cancel()
