@@ -671,20 +671,30 @@ async def test_19_the_narrowing_waits_for_a_move_that_holds_the_device_row_and_j
         await _sql(f"INSERT INTO agent_project_profiles (id,member_id,project_id) SELECT gen_random_uuid(),'{other}','{PROJ}' WHERE NOT EXISTS "
                    f"(SELECT 1 FROM agent_project_profiles WHERE member_id = '{other}' AND project_id = '{PROJ}')")
         async with async_session_factory() as mover:
+            mover_pid = (await mover.execute(text("SELECT pg_backend_pid()"))).scalar_one()
             await mover.execute(text(f"SELECT id FROM desktop_setups WHERE id = '{sid}' FOR UPDATE"))
             await mover.execute(text(
                 f"UPDATE desktop_setups SET members = (SELECT coalesce(jsonb_agg(m), '[]'::jsonb) FROM jsonb_array_elements(members) m "
                 f"WHERE m->>'member_id' <> '{other}') WHERE id = '{sid}'"))  # the move, not committed: the row is held
             put = asyncio.create_task(c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ), (other, PROJ)), headers=tok))
-            waited = False
-            while not put.done():  # the PUT is seen waiting on a row lock (no fixed time: until it waits, or it finished without waiting)
-                n = (await _sql(fetch="SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND state = 'active' AND query ILIKE '%desktop_setups%FOR UPDATE%' AND pid <> pg_backend_pid()"))[0][0]
-                if n:
-                    waited = True
-                    break
-                await asyncio.sleep(0.05)
-            assert waited, "the PUT did not wait for the row held by the move"
-            await mover.commit()  # the move lands
-        r = await put
+            blocked: list[str] = []
+            try:
+                for _ in range(1200):  # until a statement is blocked BY THE MOVER's transaction (or the PUT finished without waiting) — polled, never a fixed wait for a result
+                    if put.done():
+                        break
+                    blocked = [r[0] for r in await _sql(fetch=f"SELECT query FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND state = 'active' AND {mover_pid} = ANY(pg_blocking_pids(pid))")]
+                    if blocked:
+                        break
+                    await asyncio.sleep(0.05)
+                # the statement that waits on the mover is the RE-READ of the device row (SELECT … FOR UPDATE): that is the lock under test — without it the PUT goes on, reads
+                # the old members, and only its later UPDATE waits (a different statement)
+                assert blocked and all("FOR UPDATE" in q.upper() and "desktop_setups" in q.lower() for q in blocked), f"the re-read did not wait on the moving row: {blocked or 'no wait seen'}"
+                await mover.commit()  # the move lands
+                r = await put
+            finally:
+                if not put.done():
+                    put.cancel()
+                    await mover.rollback()
+                    await asyncio.gather(put, return_exceptions=True)
         assert (r.status_code, r.json()["dropped_agents"], r.json()["startable"]) == (200, [other], 1), r.text
         assert (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{sid}'"))[0][0] == [{"agent_member_id": agent, "project_id": str(PROJ)}]
