@@ -743,6 +743,20 @@ describe('[4714] AC3 — started ≠ stood: the conversation with the started ag
     await flush();
     expect(calls.map((c) => c.url)).toEqual([]); // no device list, no startable read
     expect(byId('onboarding-phone-start')).toBeNull(); // and nothing was drawn from a read that was given up
+    expect(text()).not.toContain('불러오지 못했어요'); // not even the «read failed» card of a read that was only given up
+  });
+
+  it('a page on its way out does not follow a [결과 확인] either (no poll, no new post)', async () => {
+    world.post = json({ error: { code: 'INTERNAL_ERROR' } }, 500); // the press ends «unknown»: [결과 확인] is offered
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await press(byId('onboarding-phone-start-go'));
+    expect(byId('onboarding-phone-check')).not.toBeNull();
+    markLeaving();
+    const before = calls.length;
+    await press(byId('onboarding-phone-check'));
+    expect(calls.length).toBe(before);
+    expect(assigned).toEqual([]);
   });
 
   it('the onboarding\'s [오늘로 가기] marks the page as being left, then runs its own finish', async () => {
