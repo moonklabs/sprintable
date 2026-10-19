@@ -13,7 +13,7 @@ import pytest
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.main import app
-from app.routers.me import NO_MEMBERSHIP_REASON
+from app.routers.me import MEMBERSHIP_ELSEWHERE_REASON, NO_MEMBERSHIP_REASON
 
 USER = uuid.UUID("47140000-0000-0000-0000-0000000000b1")
 
@@ -23,22 +23,37 @@ def anyio_backend():
     return "asyncio"
 
 
-class _NoRows:
-    """get_db stand-in: no team member, no org member — a brand-new account"""
+class _Db:
+    """get_db stand-in. `get_me` asks four things, told apart by the SQL it compiles:
+      the team member of this person (+ project) → none · the org member of the TOKEN's organization (the fallback, filters org_id) → none ·
+      then, to word the 404, «any live org membership anywhere» (org_members, no org filter) and «any team member row» → what the test says."""
 
-    async def execute(self, _stmt):
+    def __init__(self, org_elsewhere: bool = False, team_elsewhere: bool = False):
+        self.org_elsewhere, self.team_elsewhere = org_elsewhere, team_elsewhere
+
+    async def execute(self, stmt):
+        sql = str(stmt)
+        if "org_members" in sql and "org_members.org_id" not in sql:  # the «anywhere» question
+            row = uuid.uuid4() if self.org_elsewhere else None
+            return SimpleNamespace(scalar_one_or_none=lambda: row)
+        if "SELECT team_members.id" in sql and "JOIN" not in sql:  # the «any team member row» question
+            row = uuid.uuid4() if self.team_elsewhere else None
+            return SimpleNamespace(scalar_one_or_none=lambda: row)
         return SimpleNamespace(scalars=lambda: SimpleNamespace(first=lambda: None, all=lambda: []), scalar_one_or_none=lambda: None)
 
 
-@pytest.fixture
-def world():
+def _world(db: _Db, claims: dict | None = None):
     from tests.conftest import override_db_and_read  # story #2451: the one way a get_db override is hung
 
     async def _db():
-        yield _NoRows()
+        yield db
 
-    app.dependency_overrides[get_current_user] = lambda: AuthContext(user_id=str(USER), email="new@example.test", claims={})
+    app.dependency_overrides[get_current_user] = lambda: AuthContext(user_id=str(USER), email="p@example.test", claims=claims or {})
     override_db_and_read(app, _db)
+
+
+@pytest.fixture
+def clean():
     yield
     from app.dependencies.database import get_db, get_read_db
 
@@ -46,16 +61,48 @@ def world():
         app.dependency_overrides.pop(k, None)
 
 
-@pytest.mark.anyio
-async def test_a_no_organization_account_gets_404_not_found_with_a_machine_readable_reason(world):
+async def _me():
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
-        r = await c.get("/api/v2/me")
+        return await c.get("/api/v2/me")
+
+
+@pytest.mark.anyio
+async def test_a_brand_new_account_has_no_membership_anywhere_and_says_so(clean):
+    _world(_Db())
+    r = await _me()
     assert r.status_code == 404
     body = r.json()
     assert body["data"] is None
     assert body["error"]["code"] == "NOT_FOUND"  # unchanged: every other reader of the envelope still works
     assert body["error"]["message"] == "Member not found"  # unchanged words
     assert body["error"]["reason"] == NO_MEMBERSHIP_REASON == "no_membership"
+
+
+@pytest.mark.anyio
+async def test_a_person_of_another_organization_whose_token_points_at_one_they_are_not_in_is_not_no_membership(clean):
+    # Y-only person, the token carries X's id (Kadir's second person): the organization they are NOT in has no row for them, but another one does
+    _world(_Db(org_elsewhere=True), claims={"app_metadata": {"org_id": str(uuid.uuid4())}})
+    r = await _me()
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "NOT_FOUND" and r.json()["error"]["message"] == "Member not found"
+    assert r.json()["error"]["reason"] == MEMBERSHIP_ELSEWHERE_REASON == "membership_elsewhere"
+
+
+@pytest.mark.anyio
+async def test_removed_from_one_organization_but_still_in_another_is_not_no_membership(clean):
+    # the third person: out of X (soft-deleted row — the «anywhere» question counts live rows only and finds Y's), still a member of Y
+    _world(_Db(org_elsewhere=True), claims={"app_metadata": {"org_id": str(uuid.uuid4()), "project_id": ""}})
+    assert (await _me()).json()["error"]["reason"] == "membership_elsewhere"
+
+
+@pytest.mark.anyio
+async def test_a_team_member_row_in_another_organization_also_counts_as_belonging_somewhere(clean):
+    _world(_Db(team_elsewhere=True))
+    assert (await _me()).json()["error"]["reason"] == "membership_elsewhere"
+
+
+def test_the_two_reasons_are_distinct_words():
+    assert NO_MEMBERSHIP_REASON != MEMBERSHIP_ELSEWHERE_REASON
 
 
 def test_the_reason_word_is_the_one_the_web_proxy_reads():

@@ -979,6 +979,15 @@ describe('proxy — a person with no organization yet is sent to the onboarding,
     }
   });
 
+  it('a person of ANOTHER organization is never sent to «create an organization»: membership_elsewhere passes through, whatever the words (Kadir 5155 lens)', async () => {
+    const token = await makeAccessToken({ orgId: 'org-x' });
+    for (const message of ['Member not found', 'No membership yet']) {
+      withMe(() => new Response(JSON.stringify({ data: null, error: { code: 'NOT_FOUND', message, reason: 'membership_elsewhere' }, meta: null }), { status: 404 }));
+      const res = await middleware(makeRequest('/glance', { sp_at: token }));
+      expect([message, res.status, res.headers.get('location')]).toEqual([message, 200, null]); // no redirect to the onboarding: the person is a member somewhere
+    }
+  });
+
   it('a person WITH an organization is unchanged: /glance still goes to their own org and project', async () => {
     const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
     mockFetch.mockImplementation((url: string) => {
@@ -1000,6 +1009,7 @@ describe('proxy — a person with no organization yet is sent to the onboarding,
       ['404 other code even with the reason', () => new Response(JSON.stringify({ error: { code: 'ROUTE_NOT_FOUND', message: 'Not Found', reason: 'no_membership' } }), { status: 404 })],
       ['404 NOT_FOUND with the old words but no reason (an older backend · another route)', () => new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Member not found' } }), { status: 404 })],
       ['404 another reason', () => new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Member not found', reason: 'something_else' } }), { status: 404 })],
+      ['404 membership_elsewhere (belongs to another organization, not to the one the token points at)', () => new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Member not found', reason: 'membership_elsewhere' } }), { status: 404 })],
       ['404 not JSON', () => new Response('<html>gateway</html>', { status: 404 })],
       ['200 without org_id', () => new Response('{}', { status: 200 })],
       ['200 with an empty org_id', () => new Response(JSON.stringify({ org_id: '' }), { status: 200 })],
