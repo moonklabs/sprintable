@@ -6,6 +6,8 @@
 //
 // 규칙: `src/app` 아래 `'use client'`가 없는 page · layout · template · default · not-found · loading 파일이, `'use client'` 모듈에서 가져온 이름을
 // 호출(`name(…)`)하면 RED. 컴포넌트로 그리는 것 · 타입 import는 괜찮다. 고치는 법: 순수 함수는 `'use client'`가 없는 lib로 옮길 것.
+// 한계(정직하게): 정적 검사라 직접 호출 · 재수출(export from · import 뒤 export · 이름 바꿔 · default)만 본다. 변수에 담아 부르기(`const g = f; g()`) · 서버 모듈이 감싼 함수 안에서
+// 부르기 · `export const alias = f`는 못 본다 — 그 몫은 실제 서버 렌더 확인(배포 뒤 해당 주소가 200인지)이다.
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -62,13 +64,20 @@ function resolveModule(from: string, specifier: string): string | null {
 }
 
 /** a module is a client module when it says `'use client'` — or when it passes a client module's value on: `export … from` it, or a value it imported from one that it exports again (`export { a }` · `export default a`) — a barrel in front of a client file is still a client reference on the server */
-function isClientModule(file: string, seen = new Set<string>()): boolean {
-  if (seen.has(file)) return false;
-  seen.add(file);
+function isClientModule(file: string, known = new Map<string, boolean>()): boolean {
+  const cached = known.get(file);
+  if (cached !== undefined) return cached; // a module asked twice answers the same (a cycle in progress counts as «not yet»)
+  known.set(file, false);
+  const answer = classify(file, known);
+  known.set(file, answer);
+  return answer;
+}
+
+function classify(file: string, known: Map<string, boolean>): boolean {
   const source = readFileSync(file, 'utf8');
   if (hasUseClient(source)) return true;
   const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TSX);
-  const fromClient = (specifier: string) => { const target = resolveModule(file, specifier); return target !== null && isClientModule(target, seen); };
+  const fromClient = (specifier: string) => { const target = resolveModule(file, specifier); return target !== null && isClientModule(target, known); };
   const imported = new Set<string>(); // local names of values imported from a client module
   for (const st of parsed.statements) {
     if (!ts.isImportDeclaration(st) || !ts.isStringLiteral(st.moduleSpecifier) || st.importClause?.isTypeOnly || !fromClient(st.moduleSpecifier.text)) continue;
@@ -123,6 +132,7 @@ describe('[4714] a server page never calls a function imported from a client mod
       writeFileSync(path.join(dir, 'renamed.ts'), `import { resolveHref as go } from './client';\nexport { go as href };\n`);
       writeFileSync(path.join(dir, 'dflt.ts'), `import { resolveHref } from './client';\nexport default resolveHref;\n`);
       writeFileSync(path.join(dir, 'uses-only.ts'), `import { resolveHref } from './client';\nexport const mine = () => resolveHref();\n`);
+      writeFileSync(path.join(dir, 'both.ts'), `import { resolveHref } from './client';\nexport { resolveHref } from './client';\n`);
       writeFileSync(path.join(dir, 'loop-a.ts'), `export * from './loop-b';\n`);
       writeFileSync(path.join(dir, 'loop-b.ts'), `export * from './loop-a';\n`);
       expect(isClientModule(path.join(dir, 'client.ts'))).toBe(true);
@@ -132,6 +142,7 @@ describe('[4714] a server page never calls a function imported from a client mod
       expect(isClientModule(path.join(dir, 'renamed.ts'))).toBe(true);
       expect(isClientModule(path.join(dir, 'dflt.ts'))).toBe(true);
       expect(isClientModule(path.join(dir, 'uses-only.ts'))).toBe(false); // uses it inside its own function: the server module's own function, not the client reference
+      expect(isClientModule(path.join(dir, 'both.ts'))).toBe(true); // the same client file reached by an import and by a re-export
       expect(isClientModule(path.join(dir, 'plain-barrel.ts'))).toBe(false);
       expect(isClientModule(path.join(dir, 'loop-a.ts'))).toBe(false); // a cycle ends, it does not hang
     } finally { rmSync(dir, { recursive: true, force: true }); }
