@@ -40,6 +40,6 @@ export async function createFirstInstructionConversation(
  * The address that opens «my conversation with this agent» — the onboarding's own find-or-create route (app/onboarding/first-instruction: the newest DM with
  * the agent, else one is made, then the chat opens). The phone's start screen goes there once the started session stands (story 4714 AC3 · PO 10-19).
  */
-export function firstInstructionHref(agentId: string): string {
-  return `/onboarding/first-instruction?agent=${encodeURIComponent(agentId)}`;
+export function firstInstructionHref(agentId: string, projectId?: string | null): string {
+  return `/onboarding/first-instruction?agent=${encodeURIComponent(agentId)}${projectId ? `&project=${encodeURIComponent(projectId)}` : ''}`;
 }

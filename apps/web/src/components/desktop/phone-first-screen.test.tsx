@@ -324,7 +324,7 @@ describe('[4714] branch 4 — start (AC3)', () => {
     expect(post.url).toBe(`/api/agents/${AGENT}/desktop-start`);
     expect(Object.keys(post.body!).sort()).toEqual(['idempotency_key', 'phone_key_id', 'project_id', 'setup_id', 'signed']);
     expect(byId('onboarding-phone-result')).toBeNull(); // started: no refusal line
-    expect(assigned).toEqual([`/onboarding/first-instruction?agent=${AGENT}`]); // the session stood → the conversation with THIS agent (the onboarding's own find-or-create route)
+    expect(assigned).toEqual([`/onboarding/first-instruction?agent=${AGENT}&project=${PROJECT}`]); // the session stood → the conversation with THIS agent (the onboarding's own find-or-create route)
   });
 
   it('several agents: each has its own projects; choosing another agent clears the project', async () => {
@@ -489,7 +489,7 @@ describe('[4714] branch 5 — the result lines', () => {
     await press(byId('onboarding-phone-check'));
     expect(phoneCall.mock.calls.filter((c) => c[0] === 'command.sign').length).toBe(signs);
     expect(byId('onboarding-phone-result')).toBeNull(); // it started
-    expect(assigned).toEqual([`/onboarding/first-instruction?agent=${AGENT}`]); // [결과 확인] that ends «started» goes on the same way as a press that did
+    expect(assigned).toEqual([`/onboarding/first-instruction?agent=${AGENT}&project=${PROJECT}`]); // [결과 확인] that ends «started» goes on the same way as a press that did
     const posts = calls.filter((c) => c.method === 'POST');
     expect(posts[0]!.body!.idempotency_key).toBe(posts[1]!.body!.idempotency_key);
   });
@@ -665,7 +665,7 @@ describe('[4714] the words (Yuna\'s sheet)', () => {
 });
 
 describe('[4714] AC3 — started ≠ stood: the conversation with the started agent opens when the server says it runs', () => {
-  const FIRST = `/onboarding/first-instruction?agent=${AGENT}`;
+  const FIRST = `/onboarding/first-instruction?agent=${AGENT}&project=${PROJECT}`;
   const waitMore = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); await flush(); };
 
   it('«started» alone moves nothing: until the server says the agent runs the button stays «starting» and the screen stays; the moment it does, the conversation opens', async () => {
@@ -728,6 +728,24 @@ describe('[4714] AC3 — started ≠ stood: the conversation with the started ag
     root = createRoot(container); // afterEach unmounts it
   });
 
+  it('the conversation opens in the project the start was made in — a project other than the first one (the route would use the session\'s default otherwise)', async () => {
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '정산'); // the second offered project
+    await press(byId('onboarding-phone-start-go'));
+    expect(assigned).toEqual([`/onboarding/first-instruction?agent=${AGENT}&project=${PROJECT2}`]);
+  });
+
+  it('two presses in the same tick sign and start ONCE (the second sees the old `busy` — a ref stops it)', async () => {
+    world.stand = false;
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    const go = byId('onboarding-phone-start-go') as HTMLButtonElement;
+    await act(async () => { go.click(); go.click(); });
+    await flush(); await settle();
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'command.sign').length).toBe(1);
+    expect(calls.filter((c) => c.method === 'POST').length).toBe(1);
+  });
+
   it('several agents: the conversation is the one with the agent that was picked and started — not the first', async () => {
     const AGENT_B = '22222222-3333-4444-8555-777777777777';
     world.startable = { remote_control: true, computers: [computer({ agents: [
@@ -738,7 +756,7 @@ describe('[4714] AC3 — started ≠ stood: the conversation with the started ag
     await pickFromSheet('onboarding-phone-agent', '정산 담당');
     await pickFromSheet('onboarding-phone-project', '정산');
     await press(byId('onboarding-phone-start-go'));
-    expect(assigned).toEqual([`/onboarding/first-instruction?agent=${AGENT_B}`]);
+    expect(assigned).toEqual([`/onboarding/first-instruction?agent=${AGENT_B}&project=${PROJECT2}`]);
   });
 
   it('inside the onboarding\'s first screen (the phone app) the same start goes the same way — the one behaviour for both places', async () => {

@@ -279,6 +279,13 @@ describe('[4714] waitForSession — started ≠ stood: the server\'s `running` w
     expect(w.reads).toEqual([0, 2000, 4000]);
   });
 
+  it('a read that never answers is cut at the limit: waiting after pollMaxMs, not after the bridge\'s own minutes (a late read is dropped)', async () => {
+    const hang = () => new Promise<PhoneAnswer>(() => {});
+    const t0 = Date.now();
+    await expect(waitForSession(target, { phoneCall: hang, pollMaxMs: 60 })).resolves.toBe('waiting');
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
+
   it('a bridge call that is rejected is no answer either — it asks again', async () => {
     const w = world([startable([{ setup_id: SETUP, agents: [agent(AGENT, true)] }])]);
     let n = 0;

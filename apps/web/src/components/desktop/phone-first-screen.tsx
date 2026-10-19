@@ -220,6 +220,8 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
   const locked = outcome?.kind === 'unknown';
   const frozen = busy || locked; // a start is in flight, or its end is not known: nothing the person picks may change the pick (or clear what [결과 확인] follows)
   const pending = useRef<Pending | null>(null);
+  const inFlight = useRef(false); // a press is out (a second click in the same tick sees the old `busy`: this ref is what stops a second signing)
+  const startedIn = useRef<string | null>(null); // the project the press started in (the conversation opens in it)
   const alive = useAlive();
   const deps = { phoneCall, newKey };
 
@@ -237,24 +239,31 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
       const seen = await waitForSession({ setupId: computer.setup_id, agentId: agent.agent_member_id }, { ...deps, alive: () => alive.current });
       if (!alive.current) return;
       setStanding(false);
-      if (seen === 'stood') { window.location.assign(firstInstructionHref(agent.agent_member_id)); return; } // leaves the page: the screen stays busy until it does
+      if (seen === 'stood') { window.location.assign(firstInstructionHref(agent.agent_member_id, startedIn.current)); return; } // leaves the page: the screen stays busy until it does
       setWaitedOut(true);
     }
     setBusy(false);
   };
   const start = async () => {
-    if (busy || !agent || !project) return;
-    setBusy(true); setOutcome(null); setWaitedOut(false);
-    const o = await startOnPhone({ setupId: computer.setup_id, agentId: agent.agent_member_id, projectId: project.project_id }, deps).catch((): StartOutcome => ({ kind: 'failed' }));
-    if (!alive.current) return;
-    await settle(o);
+    if (busy || inFlight.current || !agent || !project) return;
+    inFlight.current = true;
+    try {
+      setBusy(true); setOutcome(null); setWaitedOut(false);
+      startedIn.current = project.project_id;
+      const o = await startOnPhone({ setupId: computer.setup_id, agentId: agent.agent_member_id, projectId: project.project_id }, deps).catch((): StartOutcome => ({ kind: 'failed' }));
+      if (!alive.current) return;
+      await settle(o);
+    } finally { inFlight.current = false; }
   };
   const check = async () => {
-    if (busy || !pending.current) return;
-    setBusy(true); setWaitedOut(false);
-    const o = await checkStart(pending.current, deps).catch((): StartOutcome => ({ kind: 'failed' }));
-    if (!alive.current) return;
-    await settle(o);
+    if (busy || inFlight.current || !pending.current) return;
+    inFlight.current = true;
+    try {
+      setBusy(true); setWaitedOut(false);
+      const o = await checkStart(pending.current, deps).catch((): StartOutcome => ({ kind: 'failed' }));
+      if (!alive.current) return;
+      await settle(o);
+    } finally { inFlight.current = false; }
   };
 
   const reason = !agent ? t('start.needAgent') : !project ? t('start.needProject') : null;
@@ -304,7 +313,7 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
       {outcome?.kind === 'started' && waitedOut ? (
         <div className="space-y-2" data-testid="onboarding-phone-connecting-box">
           <p role="status" className="break-keep text-sm text-muted-foreground" data-testid="onboarding-phone-connecting">{t('result.connecting')}</p>
-          {agent ? <div><Button variant="outline" asChild><a href={firstInstructionHref(agent.agent_member_id)} data-testid="onboarding-phone-open-started-chat">{t('result.openChat')}</a></Button></div> : null}
+          {agent ? <div><Button variant="outline" asChild><a href={firstInstructionHref(agent.agent_member_id, startedIn.current)} data-testid="onboarding-phone-open-started-chat">{t('result.openChat')}</a></Button></div> : null}
         </div>
       ) : null}
       {outcome && line ? (

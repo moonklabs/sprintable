@@ -233,7 +233,13 @@ export async function waitForSession(
   const alive = deps.alive ?? (() => true);
   for (;;) {
     if (!alive()) return 'gone';
-    const read = await readStartable(deps.phoneCall); // never rejects: a read that failed is `failed` — not an answer, ask again
+    // the read is bounded by what is left of the limit: a bridge call can wait minutes (phone-bridge.ts) — the 30 s are 30 s, and a read that comes after them is dropped
+    const left = Math.max(deadline - now(), 0);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<'late'>((resolve) => { timer = setTimeout(() => resolve('late'), left); });
+    const read = await Promise.race([readStartable(deps.phoneCall), late]); // readStartable never rejects: a read that failed is `failed` — not an answer, ask again
+    clearTimeout(timer);
+    if (read === 'late') return alive() ? 'waiting' : 'gone';
     if (!alive()) return 'gone';
     if (read && read.kind === 'view') {
       const agent = read.view.computers.find((c) => c.setup_id === target.setupId)?.agents.find((a) => a.agent_member_id === target.agentId);

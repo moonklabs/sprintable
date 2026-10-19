@@ -67,6 +67,9 @@ describe('[4714] firstInstructionHref — the address the phone\'s start screen 
   it('the onboarding\'s own find-or-create route with the agent id (encoded) — and that route is really there', () => {
     expect(firstInstructionHref('a-1')).toBe('/onboarding/first-instruction?agent=a-1');
     expect(firstInstructionHref('a b&c')).toBe('/onboarding/first-instruction?agent=a%20b%26c');
+    expect(firstInstructionHref('a-1', 'p-1')).toBe('/onboarding/first-instruction?agent=a-1&project=p-1'); // the project the session was started in
+    expect(firstInstructionHref('a-1', 'p 1&x')).toBe('/onboarding/first-instruction?agent=a-1&project=p%201%26x');
+    expect(firstInstructionHref('a-1', null)).toBe('/onboarding/first-instruction?agent=a-1');
     expect(existsSync(path.resolve(__dirname, '../../app/onboarding/first-instruction/page.tsx'))).toBe(true);
   });
 });
