@@ -267,6 +267,28 @@ describe('[4714] branch 1 — remote control is off', () => {
     expect(text()).not.toContain('켜졌어요');
   });
 
+  it('the switch answers AFTER a way out was pressed: the screen is not blanked by a read that is refused (it stays as it was)', async () => {
+    world.startable = { remote_control: false, computers: [computer()] };
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((r) => { release = r; });
+    fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/remote-control') && init?.method === 'PUT') { await held; return json({ data: { enabled: true, enabled_at: null, can_change: true } }); }
+      if (url === '/api/remote-devices') return json({ devices: [{ id: 'p-1', confirm_number: '482 917' }] });
+      if (url.startsWith('/api/desktop/startable')) return json(world.startable);
+      if (url.endsWith('/remote-control')) return json({ data: { enabled: false, enabled_at: null, can_change: true } });
+      if (url === '/api/auth/me') return json({ data: { org_id: 'org-1', org_member_id: 'om-1' } });
+      throw new Error(`unexpected ${url}`);
+    });
+    await screen();
+    await act(async () => { (byId('onboarding-phone-turn-on') as HTMLElement).click(); });
+    await flush();
+    markLeaving();
+    release();
+    await flush(); await settle();
+    expect(byId('onboarding-phone-reading')).toBeNull(); // not the blank «reading» area
+    expect(byId('onboarding-phone-off')).not.toBeNull(); // the card it was
+  });
+
   it('a person who cannot switch it gets the body only — no button', async () => {
     world.startable = { remote_control: false, computers: [computer()] };
     world.remote = { data: { enabled: false, enabled_at: null, can_change: false } };

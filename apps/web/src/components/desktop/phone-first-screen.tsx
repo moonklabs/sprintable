@@ -69,7 +69,7 @@ export function PhoneFirstScreen({ orgId, chatsHref, macDownloadEnabled = false 
     window.addEventListener('pageshow', onShow);
     return () => window.removeEventListener('pageshow', onShow);
   }, [readNow]);
-  const reload = () => { setRead({ kind: 'reading' }); readNow(); }; // a press (retry · turned on · remote off found): the empty area, then read again
+  const reload = () => { if (isLeaving()) return; setRead({ kind: 'reading' }); readNow(); }; // a press (retry · turned on · remote off found): the empty area, then read again — not on a page that is on its way out (it would blank the screen for a read that is refused)
 
   // reading: an empty area (the device is read after mount — no flash)
   if (read.kind === 'reading') return <div data-testid="onboarding-phone-reading" aria-busy="true" />;
