@@ -152,6 +152,9 @@ class OrgInviteRepository:
                 OrgInvite.organization_id == org_id,
                 OrgInvite.status == "pending",
             )
+            # story #4729 — locked like accept / cancel: an invite cancelled or accepted a moment ago is not «pending» any more and is not re-sent
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         invite = result.scalar_one_or_none()
         if invite is None:
@@ -240,7 +243,9 @@ class OrgInviteRepository:
         result = await self.session.execute(
             # story #4729 — the invite row is locked until the caller commits: a cancel that runs at the same time waits here and then sees the
             # accepted invite (and leaves it alone); a cancel that committed first is read as «revoked» and the accept is refused.
-            select(OrgInvite).where(OrgInvite.token == token).with_for_update()
+            # populate_existing: the sign-in fallback has already loaded this invite as «pending» in the same session — the locked read must
+            # overwrite that copy with what is committed now, or a cancel that committed in between is accepted over.
+            select(OrgInvite).where(OrgInvite.token == token).with_for_update().execution_options(populate_existing=True)
         )
         invite = result.scalar_one_or_none()
         if invite is None:

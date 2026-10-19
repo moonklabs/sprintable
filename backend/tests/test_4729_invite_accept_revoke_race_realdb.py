@@ -197,3 +197,90 @@ async def test_d_a_pending_invite_is_still_accepted_and_revoked_as_before():
         await _cleanup(d1)
         await _cleanup(d2)
         await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_e_a_stale_pending_copy_in_the_same_session_does_not_win_over_a_committed_cancel():
+    """the sign-in fallback loads the invite as «pending» and then calls accept in the SAME session; a cancel that commits in between must still be
+    seen (the locked read refreshes the loaded copy) — otherwise the accept makes a member and writes accepted over revoked."""
+    from sqlalchemy import select
+
+    from app.models.org_invite import OrgInvite
+    from app.repositories.org_invite import OrgInviteRepository
+
+    eng = create_async_engine(_ASYNC, poolclass=NullPool)
+    Session = async_sessionmaker(eng, expire_on_commit=False)
+    d = await _seed()
+    try:
+        async with Session() as s:
+            loaded = (await s.execute(select(OrgInvite).where(OrgInvite.id == d.invite, OrgInvite.status == "pending"))).scalar_one()
+            assert loaded.status == "pending"
+            assert await _revoke(Session, d) == "revoked"  # another session cancels and commits
+            result = await OrgInviteRepository(s).accept(d.token, d.user, d.email)
+            await s.commit()
+        assert result == {"ok": False, "reason": "invalid_status"}, result
+        assert await _state(d) == {"invite": "revoked", "member": 0}
+    finally:
+        await _cleanup(d)
+        await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_f_resend_waits_for_a_cancel_in_flight_and_then_finds_nothing_to_resend():
+    from app.repositories.org_invite import OrgInviteRepository
+
+    eng = create_async_engine(_ASYNC, poolclass=NullPool)
+    Session = async_sessionmaker(eng, expire_on_commit=False)
+    d = await _seed()
+    try:
+        async with Session() as canceller:
+            assert (await OrgInviteRepository(canceller).revoke(invite_id=d.invite, org_id=d.org)).status == "revoked"  # not committed yet
+
+            async def resend():
+                async with Session() as s:
+                    out = await OrgInviteRepository(s).resend(d.invite, d.org)
+                    await s.commit()
+                    return out
+
+            t = asyncio.create_task(resend())
+            await asyncio.wait({t}, timeout=1.5)  # without the lock the resend reads «pending» and updates the row once the cancel lets go
+            await canceller.commit()
+            assert await asyncio.wait_for(t, 20) is None  # the invite is revoked: nothing to resend (the route answers 404)
+        assert await _state(d) == {"invite": "revoked", "member": 0}
+    finally:
+        await _cleanup(d)
+        await eng.dispose()
+
+
+@pytest.mark.anyio
+async def test_g_the_cancel_route_answers_409_for_an_accepted_invite_and_the_invite_stays_accepted():
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from app.repositories.org_invite import OrgInviteRepository
+    from app.routers.org_invites import revoke_org_invite
+
+    class _OwnerOrgRepo:
+        async def get_member_role(self, org_id, user_id):
+            return "owner"
+
+    eng = create_async_engine(_ASYNC, poolclass=NullPool)
+    Session = async_sessionmaker(eng, expire_on_commit=False)
+    d1, d2 = await _seed(), await _seed()
+    auth = SimpleNamespace(user_id=str(uuid.uuid4()))
+    try:
+        assert (await _accept(Session, d1))["ok"] is True
+        async with Session() as s:
+            with pytest.raises(HTTPException) as exc:
+                await revoke_org_invite(id=d1.org, invite_id=d1.invite, auth=auth, invite_repo=OrgInviteRepository(s), org_repo=_OwnerOrgRepo(), session=s)
+        assert exc.value.status_code == 409
+        assert await _state(d1) == {"invite": "accepted", "member": 1}
+        async with Session() as s:  # a pending invite is cancelled as before
+            out = await revoke_org_invite(id=d2.org, invite_id=d2.invite, auth=auth, invite_repo=OrgInviteRepository(s), org_repo=_OwnerOrgRepo(), session=s)
+        assert out.status == "revoked"
+        assert await _state(d2) == {"invite": "revoked", "member": 0}
+    finally:
+        await _cleanup(d1)
+        await _cleanup(d2)
+        await eng.dispose()
