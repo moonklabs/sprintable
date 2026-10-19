@@ -19,6 +19,7 @@ import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { useOrgRemoteControl, putOrgRemoteControl } from '@/lib/org-remote-control';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { sendMacLinkMail, type MacLinkMailOutcome } from '@/lib/phone-mac-link-mail';
+import { Loader2 } from 'lucide-react';
 import { firstInstructionHref } from '@/lib/onboarding/first-instruction';
 import { checkStart, readStartable, startOnPhone, waitForSession, type Pending, type StartOutcome, type StartableAgent, type StartableComputer, type StartableRead, type StartableView } from '@/lib/phone-start';
 
@@ -214,6 +215,7 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<StartOutcome | null>(null);
   const [waitedOut, setWaitedOut] = useState(false); // started on the Mac, but the session did not stand within the limit
+  const [standing, setStanding] = useState(false); // started on the Mac, waiting for the server to say the agent runs (the spinner shows only now)
   // a start whose end is not known: the only way on is [결과 확인] (the same command) — a new press would sign again and could start it twice
   const locked = outcome?.kind === 'unknown';
   const frozen = busy || locked; // a start is in flight, or its end is not known: nothing the person picks may change the pick (or clear what [결과 확인] follows)
@@ -231,8 +233,10 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
   const settle = async (o: StartOutcome) => {
     apply(o);
     if (o.kind === 'started' && agent) {
+      setStanding(true);
       const seen = await waitForSession({ setupId: computer.setup_id, agentId: agent.agent_member_id }, { ...deps, alive: () => alive.current });
       if (!alive.current) return;
+      setStanding(false);
       if (seen === 'stood') { window.location.assign(firstInstructionHref(agent.agent_member_id)); return; } // leaves the page: the screen stays busy until it does
       setWaitedOut(true);
     }
@@ -293,12 +297,15 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
       </Card>
       <div className="space-y-1">
         <Button size="lg" className="w-full whitespace-nowrap" disabled={busy || locked || reason !== null} onClick={() => void start()} data-testid="onboarding-phone-start-go">
-          {busy ? t('start.starting') : t('start.action')}
+          {busy ? <>{standing ? <Loader2 className="size-4 animate-spin" aria-hidden="true" data-testid="onboarding-phone-standing" /> : null}{t('start.starting')}</> : t('start.action')}
         </Button>
         {reason ? <p className="text-xs text-muted-foreground" data-testid="onboarding-phone-reason">{reason}</p> : null}
       </div>
       {outcome?.kind === 'started' && waitedOut ? (
-        <p role="status" className="text-sm text-muted-foreground" data-testid="onboarding-phone-connecting">{t('result.connecting')}</p>
+        <div className="space-y-2" data-testid="onboarding-phone-connecting-box">
+          <p role="status" className="break-keep text-sm text-muted-foreground" data-testid="onboarding-phone-connecting">{t('result.connecting')}</p>
+          {agent ? <div><Button variant="outline" asChild><a href={firstInstructionHref(agent.agent_member_id)} data-testid="onboarding-phone-open-started-chat">{t('result.openChat')}</a></Button></div> : null}
+        </div>
       ) : null}
       {outcome && line ? (
         <div className="space-y-2" data-testid="onboarding-phone-result">

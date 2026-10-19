@@ -1769,7 +1769,7 @@
         "signedOut": "You were signed out, so it couldn't start — sign in again, then tap",
         "unknown": "We don't know yet whether it started — tap [Check result] in a moment",
         "check": "Check result",
-        "connecting": "Started on the Mac · waiting for it to connect",
+        "connecting": "Started on the Mac — waiting for it to connect",
         "failed": "Couldn't start — tap again",
         "readFailed": "Couldn't load — tap again",
         "retry": "Load again"

@@ -672,11 +672,14 @@ describe('[4714] AC3 — started ≠ stood: the conversation with the started ag
     world.stand = false;
     await screen();
     await pickFromSheet('onboarding-phone-project', '결제 개편');
+    expect(byId('onboarding-phone-standing')).toBeNull(); // idle: no spinner
     await press(byId('onboarding-phone-start-go')); // the Mac says done; the server does not say «runs» yet
     expect(assigned).toEqual([]);
     expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(true);
     expect(byId('onboarding-phone-start-go')?.textContent).toBe('시작하는 중이에요…');
+    expect(byId('onboarding-phone-standing')).not.toBeNull(); // waiting for the server: one small spinner in the button (Yuna) — the same shape as the landing's
     expect(byId('onboarding-phone-connecting')).toBeNull(); // within the limit: no line yet
+    expect(byId('onboarding-phone-open-started-chat')).toBeNull(); // and no way-in button yet
     world.stand = true; // the session stands
     await waitMore(2100);
     expect(assigned).toEqual([FIRST]);
@@ -689,10 +692,25 @@ describe('[4714] AC3 — started ≠ stood: the conversation with the started ag
     await press(byId('onboarding-phone-start-go'));
     await waitMore(31_000);
     expect(assigned).toEqual([]);
-    expect(byId('onboarding-phone-connecting')?.textContent).toBe('Mac에서 시작됐어요 · 연결을 기다리는 중');
+    expect(byId('onboarding-phone-connecting')?.textContent).toBe('Mac에서 시작됐어요 — 연결을 기다리고 있어요');
     expect(byId('onboarding-phone-connecting')?.getAttribute('role')).toBe('status');
+    expect(byId('onboarding-phone-connecting')?.className).toContain('break-keep');
+    expect(byId('onboarding-phone-standing')).toBeNull(); // the wait is over: no spinner
+    // no dead end (PO): beside the line, the existing word [대화 열기] goes to the conversation with the started agent
+    expect(byId('onboarding-phone-open-started-chat')?.textContent).toBe('대화 열기');
+    expect(byId('onboarding-phone-open-started-chat')?.getAttribute('href')).toBe(FIRST);
     expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(false);
     expect(byId('onboarding-phone-result')).toBeNull(); // not a refusal
+  });
+
+  it('in English the same shape: «Started on the Mac — waiting for it to connect» and [Open chat]', async () => {
+    world.stand = false;
+    await screen({ locale: 'en' });
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await press(byId('onboarding-phone-start-go'));
+    await waitMore(31_000);
+    expect(byId('onboarding-phone-connecting')?.textContent).toBe('Started on the Mac — waiting for it to connect');
+    expect(byId('onboarding-phone-open-started-chat')?.getAttribute('href')).toBe(FIRST);
   });
 
   it('the screen left while it waits → nothing moves afterwards (a late «runs» goes nowhere)', async () => {
