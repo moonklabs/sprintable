@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shlex
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -255,3 +256,68 @@ async def test_the_sent_line_copies_codes_never_expo_free_text(caplog):
     assert "DeviceNotRegistered" in line and "unknown" in line and "error=3" in line
     assert expo._expo_error_code({"details": {"error": "InvalidCredentials"}}) == "InvalidCredentials"
     assert expo._expo_error_code({"message": "x"}) == "unknown" and expo._expo_error_code({}) == "unknown" and expo._expo_error_code({"details": None}) == "unknown"
+
+
+# ─── Kadir's pins on d142f7d58 (PO 2026-10-19): the code-shape bound and the script's skip, each pinned by BEHAVIOUR ───────────────────────────
+
+def test_a_code_is_at_most_64_characters_of_code_shape_anything_else_is_unknown():
+    code64 = "A" + "b" * 63
+    assert len(code64) == 64 and expo._expo_error_code({"details": {"error": code64}}) == code64          # the bound itself: 64 passes …
+    assert expo._expo_error_code({"details": {"error": code64 + "x"}}) == "unknown"                         # … 65 does not (raising the bound turns this RED)
+    assert expo._expo_error_code({"details": {"error": "Invalid_Credentials2"}}) == "Invalid_Credentials2"  # underscores · digits after the first letter
+    for bad in ("9Starts", "has space", "dash-ed", "tok[en]", "", "x" * 200, "ünï", "A\n"):
+        assert expo._expo_error_code({"details": {"error": bad}}) == "unknown", bad                          # lowering the bound / loosening the shape turns one of these RED
+
+
+def _run_alerts_script(tmp_path: Path, existing: list[str], channel_ids: str | None):
+    """Run `setup_monitoring.sh alerts` against a fake `gcloud` that records every call — the real script, the real policy file, no network."""
+    import os
+    import subprocess
+
+    calls, created = tmp_path / "calls.log", tmp_path / "created"
+    created.mkdir(exist_ok=True)
+    fake = tmp_path / "bin"
+    fake.mkdir(exist_ok=True)
+    (fake / "gcloud").write_text(
+        "#!/bin/bash\n"
+        f'echo "$*" >> "{calls}"\n'
+        'case "$*" in\n'
+        '  *"monitoring policies list"*) printf "%s\\n" ' + " ".join(shlex.quote(n) for n in existing) + " ;;\n"
+        f'  *"monitoring policies create"*) cat > "$(mktemp "{created}/policy.XXXXXX")" ;;\n'
+        f'  *"monitoring channels create"*) echo "projects/x/notificationChannels/NEW" ;;\n'
+        "esac\n"
+    )
+    (fake / "gcloud").chmod(0o755)
+    env = {**os.environ, "PATH": f"{fake}:{os.environ['PATH']}", "GCP_PROJECT": "p-test", "ALERT_EMAIL": "", "DISCORD_WEBHOOK_URL": ""}
+    env.pop("ALERT_CHANNEL_IDS", None)
+    if channel_ids is not None:
+        env["ALERT_CHANNEL_IDS"] = channel_ids
+    r = subprocess.run(["bash", str(BACKEND / "scripts" / "setup_monitoring.sh"), "alerts"], env=env, capture_output=True, text=True, timeout=60)
+    made = [json.loads(p.read_text()) for p in sorted(created.glob("policy.*"))]
+    return r, calls.read_text().splitlines() if calls.exists() else [], made
+
+
+NEW_POLICY = "Sprintable — Expo push credentials error (dev · prod)"
+
+
+def test_the_script_creates_only_the_missing_policy_with_the_given_channel_and_no_channel(tmp_path):
+    existing = [p["displayName"] for p in _policies() if p["displayName"] != NEW_POLICY]
+    r, calls, made = _run_alerts_script(tmp_path, existing, "projects/x/notificationChannels/EXISTING")
+    assert r.returncode == 0, r.stderr[-600:]
+    assert [m["displayName"] for m in made] == [NEW_POLICY], [m["displayName"] for m in made]                # the three that exist are skipped by name
+    assert made[0]["notificationChannels"] == ["projects/x/notificationChannels/EXISTING"]                   # the channel given is the channel used
+    assert not any("channels create" in c for c in calls), calls                                              # none created
+
+
+def test_a_second_run_creates_nothing(tmp_path):
+    names = [p["displayName"] for p in _policies()]
+    r, calls, made = _run_alerts_script(tmp_path, names, "projects/x/notificationChannels/EXISTING")
+    assert r.returncode == 0, r.stderr[-600:]
+    assert made == [], [m["displayName"] for m in made]                                                       # removing the skip turns this RED (it would create all four)
+    assert not any("policies create" in c for c in calls) and not any("channels create" in c for c in calls)
+
+
+def test_without_given_channels_the_old_way_still_applies_and_a_fresh_project_gets_every_policy(tmp_path):
+    r, calls, made = _run_alerts_script(tmp_path, [], None)                                                  # no ALERT_CHANNEL_IDS, no e-mail / webhook → no channel to create either
+    assert r.returncode == 0, r.stderr[-600:]
+    assert sorted(m["displayName"] for m in made) == sorted(p["displayName"] for p in _policies())
