@@ -1020,9 +1020,11 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
               </li>
             ))}
           </ul>
-          {/* story 4678 (Yuna §J): the organization's agents that are not on this project's team — one folded list, a button per line */}
+          {/* story 4678 (Yuna §J): the organization's agents that are not on this project's team — one list, a button per line.
+              AC3 (PO 2026-10-19 · Yuna's wheel: «넣기 → 고르기 → [시작]» = 3 hands, the folded list made it 4): OPEN from the start whenever there is at least one
+              (zero → not drawn at all, as before). A person can still fold it; a re-render does not open it again (the prop never changes). */}
           {outsiders.length > 0 ? (
-            <details className="mt-2 rounded-md border" data-testid="setup-not-on-team">
+            <details open className="mt-2 rounded-md border" data-testid="setup-not-on-team">
               <summary className="cursor-pointer break-keep px-3 py-2 text-sm">{t('notOnTeamGroup', { n: outsiders.length })}</summary>
               <ul className="divide-y border-t">
                 {outsiders.map((a) => (
