@@ -1638,7 +1638,6 @@ jobs:
       DATABASE_URL: postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test
       JWT_SECRET: ci-test-secret-at-least-32-chars-long
       SECRET_KEY: ci-test-secret-at-least-32-chars-long
-      BACKEND_SHARD_ORDER: reverse  # TEMPORARY (story #4731): one run with every shard's files in reverse order — reverted right after
 
     steps:
       - name: Checkout
