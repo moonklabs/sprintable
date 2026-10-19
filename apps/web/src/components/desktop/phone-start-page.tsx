@@ -13,7 +13,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { existingOrgIdFromMe } from '@/app/onboarding/existing-org';
 import { BRIDGE_WAIT_MS } from '@/components/desktop/phone-landing';
 
-/** `homeHref`: where the way out goes — the onboarding's own landing address, resolved by the server from the nav flags (`resolveOnboardingLandingHref`); its words follow the same flag as the onboarding's own finish button */
+/** `homeHref`: where the way out goes — the onboarding's own landing address, resolved by the server from the nav flags (`phoneStartHome`); its words follow the same flag as the onboarding's own finish button */
 export function PhoneStartPage({ chatsHref, homeHref, todayV3Enabled, macDownloadEnabled }: { chatsHref: string; homeHref: string; todayV3Enabled: boolean; macDownloadEnabled: boolean }) {
   const to = useTranslations('onboarding');
   const tp = useTranslations('onboarding.phone');

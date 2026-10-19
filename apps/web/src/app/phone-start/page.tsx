@@ -1,5 +1,5 @@
 import { PhoneStartPage } from '@/components/desktop/phone-start-page';
-import { resolveOnboardingLandingHref } from '@/app/onboarding/onboarding-form';
+import { phoneStartHome } from '@/lib/phone-landing-address';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { resolveChatsHref, resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { isDesktopDownloadEnabled } from '@/lib/desktop-download-gate';
@@ -15,7 +15,7 @@ export default function PhoneStartRoute() {
   return (
     <PhoneStartPage
       chatsHref={chatsHref}
-      homeHref={resolveOnboardingLandingHref(flags.todayV3Enabled, todayHref, chatsHref)}
+      homeHref={phoneStartHome(flags.todayV3Enabled, todayHref, chatsHref)}
       todayV3Enabled={flags.todayV3Enabled}
       macDownloadEnabled={isDesktopDownloadEnabled(process.env.DESKTOP_DOWNLOAD_ENABLED)}
     />
