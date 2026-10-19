@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PersonaBaseResponse(BaseModel):
@@ -42,13 +42,18 @@ class PersonaSummaryResponse(PersonaBaseResponse):
     change_history: list[dict[str, Any]]
 
 
+PERSONA_SECRET_NOTE = (
+    "This text goes in as an instruction every time the agent starts — don't write keys, passwords or tokens here. "
+    "Other programs on the computer the agent runs on may see it, and it is passed to the model."
+)  # story 4680 AC2 (Yuna's help line, en) — for a screen that edits a persona, and for what the API's own documentation says of these fields
+
 class CreatePersonaRequest(BaseModel):
     agent_id: uuid.UUID
     name: str
     slug: str | None = None
     description: str | None = None
-    system_prompt: str | None = None
-    style_prompt: str | None = None
+    system_prompt: str | None = Field(default=None, description=PERSONA_SECRET_NOTE)
+    style_prompt: str | None = Field(default=None, description=PERSONA_SECRET_NOTE)
     model: str | None = None
     expected_cost_note: str | None = None
     stop_condition_note: str | None = None
@@ -61,8 +66,8 @@ class UpdatePersonaRequest(BaseModel):
     name: str | None = None
     slug: str | None = None
     description: str | None = None
-    system_prompt: str | None = None
-    style_prompt: str | None = None
+    system_prompt: str | None = Field(default=None, description=PERSONA_SECRET_NOTE)
+    style_prompt: str | None = Field(default=None, description=PERSONA_SECRET_NOTE)
     model: str | None = None
     expected_cost_note: str | None = None
     stop_condition_note: str | None = None
