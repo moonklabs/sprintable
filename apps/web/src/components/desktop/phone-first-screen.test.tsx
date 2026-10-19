@@ -386,6 +386,26 @@ describe('[4714] two paired computers — the person chooses the computer (PO 10
     expect(names.some((n) => n?.includes('권한 없는 맥'))).toBe(false);
   });
 
+  it('a computer none of whose agents has a project to start is no choice (an empty list with a start that cannot be pressed); with none to choose between there is no row', async () => {
+    world.startable = two({ agents: [{ agent_member_id: AGENT, name: '결제 담당', can_command: true, projects: [] }] });
+    await screen();
+    expect(byId('onboarding-phone-computer')).toBeNull(); // only the first computer has a project to start
+    expect(text()).toContain('윤재의 맥북에서 에이전트를 시작할까요?');
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    world.startable = { remote_control: true, computers: [
+      computer({ agents: [{ agent_member_id: AGENT, name: '결제 담당', can_command: true, projects: [] }] }),
+      computer({ setup_id: SETUP2, device_name: '사무실 맥', agents: [{ agent_member_id: AGENT, name: '결제 담당', can_command: true, projects: [] }] }),
+      computer({ setup_id: '11111111-2222-4333-8444-777777777777', device_name: '권한 없는 맥', agents: [{ agent_member_id: AGENT, name: '결제 담당', can_command: false, projects: [] }] }),
+    ] };
+    await screen();
+    expect(byId('onboarding-phone-computer')).not.toBeNull(); // none has a project: the two the person may command are offered, the card says what it can
+    await press(byId('onboarding-phone-computer'));
+    const names = Array.from(container.querySelectorAll('[data-testid="onboarding-phone-sheet-row"]')).map((r) => r.textContent ?? '');
+    expect(names.length).toBe(2);
+    expect(names.some((n) => n.includes('권한 없는 맥'))).toBe(false); // …and a computer with nothing the person may command is no choice even then
+  });
+
   it('while a start is out the computer row is off — switching would drop the result of a start that is already on its way', async () => {
     world.startable = two();
     let release: () => void = () => undefined;

@@ -12,8 +12,8 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { existingOrgIdFromMe } from '@/app/onboarding/existing-org';
 import { BRIDGE_WAIT_MS } from '@/components/desktop/phone-landing';
 
-/** `homeHref`: where [오늘로 가기] goes — the onboarding's own landing address, resolved by the server from the nav flags (`resolveOnboardingLandingHref`) */
-export function PhoneStartPage({ chatsHref, homeHref, macDownloadEnabled }: { chatsHref: string; homeHref: string; macDownloadEnabled: boolean }) {
+/** `homeHref`: where the way out goes — the onboarding's own landing address, resolved by the server from the nav flags (`resolveOnboardingLandingHref`); its words follow the same flag as the onboarding's own finish button */
+export function PhoneStartPage({ chatsHref, homeHref, todayV3Enabled, macDownloadEnabled }: { chatsHref: string; homeHref: string; todayV3Enabled: boolean; macDownloadEnabled: boolean }) {
   const to = useTranslations('onboarding');
   const { inPhoneApp } = usePhoneBridge();
   const [orgId, setOrgId] = useState<string | null>(null);
@@ -37,7 +37,7 @@ export function PhoneStartPage({ chatsHref, homeHref, macDownloadEnabled }: { ch
         <p className="break-keep border-t border-border pt-4 text-xs text-muted-foreground" data-testid="phone-start-later">
           {to('download.laterNote')}{' '}
           <Button variant="link" size="sm" className="h-auto px-0 py-0 text-xs" onClick={() => window.location.assign(homeHref)} data-testid="phone-start-finish">
-            {to('desktopFinishToToday')}
+            {todayV3Enabled ? to('desktopFinishToToday') : to('dashboardCta')}
           </Button>
         </p>
       </div>

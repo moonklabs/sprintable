@@ -24,7 +24,9 @@ from app.services.desktop_relay import (
     INSTRUCT_NOW_MAX,
     PROMPT_MAX,
     SESSION_KEY_PATTERN,
+    SESSIONS_PAGE_MAX,
     DesktopRelayError,
+    device_sessions_view,
     inbox_view,
     legacy_state,
     limit_view,
@@ -459,6 +461,19 @@ async def startable_view(db: AsyncSession, *, member_id: uuid.UUID, member_role:
     return {"remote_control": await remote_control.is_enabled(db, org_id), "computers": computers}
 
 
+def _agent_running(rows: list[dict], agent_id: uuid.UUID, heard: bool) -> bool | None:
+    """story 4714 (AC3 · AC4): whether the agent has a live session on this computer, as the computer reports it — the phone opens the chat list for a running
+    agent and the start screen for one that is not. `True`: a session that lives. `False`: it has none, or every one is over. `None`: the computer has not been
+    heard from, so a session it had may still live — «not running» cannot be said (the phone goes to its usual home). Read here, from the same rows a person
+    sees for a device, so it holds for every person who may open the agent (the device's own list is for owners and admins only)."""
+    states = [r["state"] for r in rows if r["agent_member_id"] == str(agent_id)]
+    if any(st not in ("stopped", "unknown") for st in states):
+        return True
+    if any(st == "unknown" for st in states) or not heard:
+        return None
+    return False
+
+
 async def startable_computers_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: str | None, user_id: uuid.UUID,
                                    org_id: uuid.UUID, phone_key_id: uuid.UUID) -> dict:
     """The phone's whole first screen in one read (contract v1.18): every computer of this organization THIS person's phone is paired
@@ -493,6 +508,7 @@ async def startable_computers_view(db: AsyncSession, *, member_id: uuid.UUID, me
                 if aid not in agent_ids:
                     agent_ids.append(aid)
         agents: list[dict] = []
+        session_rows = await device_sessions_view(db, setup.id, limit=SESSIONS_PAGE_MAX) if agent_ids else []
         for aid in agent_ids:
             agent = (await db.execute(
                 select(Member).where(Member.id == aid, Member.org_id == org_id, Member.type == "agent", Member.deleted_at.is_(None),
@@ -504,6 +520,7 @@ async def startable_computers_view(db: AsyncSession, *, member_id: uuid.UUID, me
                 "agent_member_id": str(aid), "name": agent.name,
                 "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup),
                 "projects": await _openable_startable_projects(db, setup, aid, user_id=user_id, org_id=org_id),
+                "running": _agent_running(session_rows, aid, setup.id in reachable),
             })
         agents.sort(key=lambda a: (a["name"] or "", a["agent_member_id"]))
         computers.append({"setup_id": str(setup.id), "device_name": setup.device_name, "reachable": setup.id in reachable, "agents": agents})

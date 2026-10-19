@@ -85,8 +85,11 @@ const commandable = (c: StartableComputer) => c.agents.filter((a) => a.can_comma
 function Computers({ computers, chatsHref, onRemoteOff }: { computers: StartableComputer[]; chatsHref?: string; onRemoteOff: () => void }) {
   const t = useTranslations('onboarding.phone');
   const startable = computers.filter((c) => commandable(c).length > 0);
+  // a computer none of whose agents has a project to start is no choice (a card with an empty list and a start that cannot be pressed); if none has one the card says so as before
+  const offered = startable.filter((c) => commandable(c).some((a) => a.projects.length > 0));
+  const choices = offered.length > 0 ? offered : startable;
   const [picked, setPicked] = useState<string | null>(null);
-  const computer = startable.find((c) => c.setup_id === picked) ?? startable.find((c) => c.reachable) ?? startable[0] ?? computers[0];
+  const computer = choices.find((c) => c.setup_id === picked) ?? choices.find((c) => c.reachable) ?? choices[0] ?? computers[0];
   if (commandable(computer).length === 0) {
     return (
       <Card className="break-keep p-6" data-testid="onboarding-phone-no-agent">
@@ -98,7 +101,7 @@ function Computers({ computers, chatsHref, onRemoteOff }: { computers: Startable
   // keyed by the computer: another computer is another screen — the agent · project picks and any result line of the first are not carried over
   return (
     <StartCard key={computer.setup_id} computer={computer} agents={commandable(computer)} chatHref={chatsHref} onRemoteOff={onRemoteOff}
-      computers={startable.length > 1 ? startable : null} onPickComputer={setPicked} />
+      computers={choices.length > 1 ? choices : null} onPickComputer={setPicked} />
   );
 }
 

@@ -166,7 +166,7 @@ describe('[4714] parseStartable — only what the screen draws', () => {
       remote_control: true,
       computers: [{ setup_id: SETUP, device_name: 'Mac', reachable: true, path: '/Users/x', agents: [{ agent_member_id: AGENT, name: 'Dev', can_command: true, cwd: '/x', projects: [{ project_id: PROJECT, name: 'Pay', folder: '/y' }] }] }],
     });
-    expect(view).toEqual({ remote_control: true, computers: [{ setup_id: SETUP, device_name: 'Mac', reachable: true, agents: [{ agent_member_id: AGENT, name: 'Dev', can_command: true, projects: [{ project_id: PROJECT, name: 'Pay' }] }] }] });
+    expect(view).toEqual({ remote_control: true, computers: [{ setup_id: SETUP, device_name: 'Mac', reachable: true, agents: [{ agent_member_id: AGENT, name: 'Dev', can_command: true, projects: [{ project_id: PROJECT, name: 'Pay' }], running: null }] }] });
     expect(JSON.stringify(view)).not.toMatch(/\/Users|\/x|\/y|folder|cwd|path/);
   });
   it('a shape that is not ours is null; rows without their ids are dropped; can_command is true only when true', () => {
@@ -175,7 +175,18 @@ describe('[4714] parseStartable — only what the screen draws', () => {
     expect(parseStartable({ computers: [] })).toBeNull();
     expect(parseStartable({ remote_control: 'yes', computers: [] })).toBeNull();
     expect(parseStartable({ remote_control: false, computers: [{ device_name: 'x', agents: [] }, { setup_id: SETUP, device_name: 'M', agents: [{ name: 'noid', projects: [] }, { agent_member_id: AGENT, name: 'A', can_command: 'true', projects: [{ name: 'noid' }] }] }] }))
-      .toEqual({ remote_control: false, computers: [{ setup_id: SETUP, device_name: 'M', reachable: false, agents: [{ agent_member_id: AGENT, name: 'A', can_command: false, projects: [] }] }] });
+      .toEqual({ remote_control: false, computers: [{ setup_id: SETUP, device_name: 'M', reachable: false, agents: [{ agent_member_id: AGENT, name: 'A', can_command: false, projects: [], running: null }] }] });
+  });
+});
+
+describe('[4714] parseStartable — `running`: what the server says about an agent, and nothing it does not say', () => {
+  const one = (running: unknown) => parseStartable({ remote_control: true, computers: [{ setup_id: SETUP, device_name: 'M', reachable: true, agents: [{ agent_member_id: AGENT, name: 'A', can_command: true, projects: [], ...(running === undefined ? {} : { running }) }] }] })!.computers[0].agents[0].running;
+  it('true and false are kept; null · missing (an older server) · any other value is null — never read as «not running»', () => {
+    expect(one(true)).toBe(true);
+    expect(one(false)).toBe(false);
+    expect(one(null)).toBeNull();
+    expect(one(undefined)).toBeNull();
+    for (const odd of ['true', 'false', 0, 1, {}, []]) expect([odd, one(odd)]).toEqual([odd, null]);
   });
 });
 

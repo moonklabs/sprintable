@@ -12,7 +12,8 @@ import { fetchWithAuth } from '@/lib/db/client';
 import type { PhoneAnswer } from './phone-bridge';
 
 export interface StartableProject { project_id: string; name: string }
-export interface StartableAgent { agent_member_id: string; name: string; can_command: boolean; projects: StartableProject[] }
+/** `running` (story 4714): true a session lives · false none / all over · null the computer has not been heard from — or a server that does not say (never read as «not running») */
+export interface StartableAgent { agent_member_id: string; name: string; can_command: boolean; projects: StartableProject[]; running: boolean | null }
 export interface StartableComputer { setup_id: string; device_name: string; reachable: boolean; agents: StartableAgent[] }
 export interface StartableView { remote_control: boolean; computers: StartableComputer[] }
 
@@ -29,7 +30,7 @@ export function parseStartable(raw: unknown): StartableView | null {
     for (const a of c.agents) {
       if (!isObj(a) || !isStr(a.agent_member_id) || !isStr(a.name) || !Array.isArray(a.projects)) continue;
       const projects = a.projects.filter((p): p is Record<string, unknown> => isObj(p) && isStr(p.project_id) && isStr(p.name)).map((p) => ({ project_id: p.project_id as string, name: p.name as string }));
-      agents.push({ agent_member_id: a.agent_member_id, name: a.name, can_command: a.can_command === true, projects });
+      agents.push({ agent_member_id: a.agent_member_id, name: a.name, can_command: a.can_command === true, projects, running: typeof a.running === 'boolean' ? a.running : null });
     }
     computers.push({ setup_id: c.setup_id, device_name: c.device_name, reachable: c.reachable === true, agents });
   }

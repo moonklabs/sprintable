@@ -16,6 +16,7 @@ export default function PhoneStartRoute() {
     <PhoneStartPage
       chatsHref={chatsHref}
       homeHref={resolveOnboardingLandingHref(flags.todayV3Enabled, todayHref, chatsHref)}
+      todayV3Enabled={flags.todayV3Enabled}
       macDownloadEnabled={isDesktopDownloadEnabled(process.env.DESKTOP_DOWNLOAD_ENABLED)}
     />
   );
