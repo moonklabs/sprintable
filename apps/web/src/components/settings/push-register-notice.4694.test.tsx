@@ -87,6 +87,8 @@ describe('PushRegisterNotice — drawn only when the phone says it failed', () =
     expect(button()?.textContent).toBe(koMessages.common.retry);
     // quiet outline button, normal text colour — not red and not the primary (the section's own primary, if any, stays the primary)
     expect(button()!.className).toContain('border-border');
+    expect(button()!.className).toContain('min-h-11'); // default size = 44px touch target (the line's only action; shown only in the phone app)
+    expect(button()!.className).not.toContain('h-7');
     expect(button()!.className).not.toContain('bg-primary');
     expect(container.querySelector('p')!.className).toContain('text-foreground');
     expect(button()!.className).not.toContain('bg-destructive-tint');
@@ -125,6 +127,27 @@ describe('the sentence added after a failed retry (general cause only)', () => {
     expect(text()).not.toContain('«문의·고객지원»');
   });
 
+  it('«으로/로» follows the tab name: a name without a final consonant gets «로» (not a fixed «으로»); the current name keeps «으로»', () => {
+    vi.stubEnv('NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED', 'true');
+    setShell({ ...FAILED, retried: true });
+    const mountWith = (name: string) => {
+      act(() => {
+        root.render(
+          <NextIntlClientProvider locale="ko" messages={{ ...koMessages, settings: { ...koMessages.settings, tabSupport: name } }} timeZone="Asia/Seoul">
+            <PushRegisterNotice />
+          </NextIntlClientProvider>,
+        );
+      });
+    };
+    mountWith('도우미'); // ends in a vowel
+    expect(text()).toContain('«도우미»로 알려 주세요');
+    expect(text()).not.toContain('«도우미»으로');
+    mountWith('문의·고객지원'); // the real name (ends in ㄴ... 원)
+    expect(text()).toContain('«문의·고객지원»으로 알려 주세요');
+    mountWith('도움말'); // ends in ㄹ → «로»
+    expect(text()).toContain('«도움말»로 알려 주세요');
+  });
+
   it('first display: no added sentence', () => {
     setShell(FAILED);
     mount();
@@ -135,7 +158,7 @@ describe('the sentence added after a failed retry (general cause only)', () => {
     vi.stubEnv('NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED', 'true');
     setShell({ ...FAILED, retried: true });
     mount();
-    const contact = koMessages.settings.pushRegisterContactSupport.replace('{support}', koMessages.settings.tabSupport);
+    const contact = koMessages.settings.pushRegisterContactSupport.replace('{support}', koMessages.settings.tabSupport).replace('{josa}', '으로'); // «문의·고객지원» ends in a consonant → «으로»
     expect(text()).toContain(koMessages.settings.pushRegisterStillFailed);
     expect(text()).toContain(contact);
     expect(text().split('앱을 완전히 닫았다가').length - 1).toBe(1);
