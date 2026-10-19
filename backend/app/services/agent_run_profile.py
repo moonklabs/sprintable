@@ -223,6 +223,33 @@ def _one_line(value: str | None, limit: int) -> str:
     return re.sub(r"\s+", " ", _clean_persona_text(value, limit, limit * 4)).strip()
 
 
+async def persona_write_problem(
+    db: AsyncSession, *, org_id: uuid.UUID, system_prompt: str | None, style_prompt: str | None, base_persona_id: uuid.UUID | None = None,
+) -> str | None:
+    """story 4680 AC2 (PO 2026-10-18) — the same caps the daemon is handed, checked where the text is WRITTEN: a persona's instructions (its own, plus its base persona's when one is
+    named) are at most PERSONA_TEXT_MAX characters and PERSONA_TEXT_MAX_BYTES bytes, its style PERSONA_STYLE_MAX characters. Over → a readable sentence (how many, how many at most); the
+    route answers 422 and writes nothing — so a text the person wrote is never silently cut on its way into a session. Counts what would be handed (after the same filter)."""
+    own = _clean_persona_text(system_prompt, 10**9, 10**9)
+    base_text = ""
+    if base_persona_id is not None and system_prompt is not None:
+        base = (await db.execute(select(AgentPersona).where(AgentPersona.id == base_persona_id, AgentPersona.org_id == org_id, AgentPersona.deleted_at.is_(None)))).scalar_one_or_none()
+        if base is not None:
+            base_text = _clean_persona_text(base.system_prompt, 10**9, 10**9)
+    if system_prompt is not None:
+        total = "\n\n".join(p for p in (base_text, own) if p)
+        chars, size = len(total), len(total.encode("utf-8"))
+        if chars > PERSONA_TEXT_MAX or size > PERSONA_TEXT_MAX_BYTES:
+            return (
+                f"The instructions are too long: {chars:,} characters ({size:,} bytes{' with its base persona' if base_text else ''}); the most a role's instructions may take is "
+                f"{PERSONA_TEXT_MAX:,} characters and {PERSONA_TEXT_MAX_BYTES:,} bytes — shorten them by {max(chars - PERSONA_TEXT_MAX, (size - PERSONA_TEXT_MAX_BYTES + 3) // 4):,} characters or more."
+            )
+    if style_prompt is not None:
+        st = _clean_persona_text(style_prompt, 10**9, 10**9)
+        if len(st) > PERSONA_STYLE_MAX:
+            return f"The style is too long: {len(st):,} characters; the most it may take is {PERSONA_STYLE_MAX:,} characters — shorten it by {len(st) - PERSONA_STYLE_MAX:,} or more."
+    return None
+
+
 async def persona_for_daemon(db: AsyncSession, *, member: Member, project_id: uuid.UUID | None = None) -> dict | None:
     """story 4680 AC2 — the role the agent was hired for, handed to the daemon so a session starts AS that role (a CLI started in a folder knows only its own files).
 

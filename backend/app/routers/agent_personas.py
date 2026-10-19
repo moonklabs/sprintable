@@ -9,6 +9,7 @@ from app.dependencies.database import get_db
 from app.dependencies.ownership import assert_agent_owner
 from app.repositories.agent_persona import AgentPersonaRepository
 from app.schemas.agent_persona import CreatePersonaRequest, UpdatePersonaRequest
+from app.services.agent_run_profile import persona_write_problem
 from app.services.member_resolver import resolve_member_db_verified
 
 router = APIRouter(prefix="/api/v2/agent-personas", tags=["agent-personas", "Organization"])
@@ -62,6 +63,10 @@ async def create_persona(
     # 붙일 수 있었다(SEC-S7이 막은 건 타 org 축뿐, 같은 org 안 타 agent 축은 열려 있었다).
     # assert_agent_owner가 존재+org+ownership(생성자 or org admin)을 한 번에 검증.
     await assert_agent_owner(body.agent_id, repo.session, org_id, uuid.UUID(auth.user_id))
+    # story 4680 AC2: the text goes into the agent's session — over the cap it is refused here, readably, and nothing is written (never cut silently on its way in)
+    too_long = await persona_write_problem(repo.session, org_id=org_id, system_prompt=body.system_prompt, style_prompt=body.style_prompt, base_persona_id=body.base_persona_id)
+    if too_long:
+        return _err("PERSONA_TOO_LONG", too_long, 422)
     try:
         # story #3370 회귀 클래스(페드루 PO 지시 2026-09-11) — actor_id는
         # AgentPersona.created_by로 영속된다. resolve_member_db_verified()의 영속
@@ -129,6 +134,9 @@ async def update_persona(
     if agent_id is None:
         return _err("NOT_FOUND", "Persona not found", 404)
     await assert_agent_owner(agent_id, repo.session, org_id, uuid.UUID(auth.user_id))
+    too_long = await persona_write_problem(repo.session, org_id=org_id, system_prompt=body.system_prompt, style_prompt=body.style_prompt, base_persona_id=body.base_persona_id)
+    if too_long:
+        return _err("PERSONA_TOO_LONG", too_long, 422)
     try:
         # story #3370 회귀 클래스 — create_persona와 같은 actor_id 축(위 참고).
         resolved = await resolve_member_db_verified(auth, org_id, repo.session)
