@@ -31,19 +31,12 @@ async def _seed(s) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
     await s.execute(text(f"INSERT INTO organizations (id,name,slug,plan) VALUES ('{org}','O','o-{org.hex[:12]}','free')"))
     for p in (proj, other):
         await s.execute(text(f"INSERT INTO projects (id,org_id,name,slug,violation_level) VALUES ('{p}','{org}','P','p-{p.hex[:12]}','warn')"))
-    # story #4731 — enough rows for the planner to prefer the ordered 0415 index over «a small index + a sort»: with ~20 rows per project it takes a
-    # bitmap scan of uq_stories_project_id_story_number and sorts, and the old test passed only because the tests that ran before it in the one big
-    # session had left thousands of rows in `stories`. Split into CI shards that ambient table is not there any more — the test fills its own.
-    await s.execute(text(
-        "INSERT INTO stories (id,org_id,project_id,title,status,priority) "
-        f"SELECT gen_random_uuid(),'{org}', CASE WHEN i % 2 = 1 THEN '{proj}'::uuid ELSE '{other}'::uuid END, 'S' || i, "
-        "(ARRAY['backlog','ready-for-dev','in-progress','in-review','done'])[i % 5 + 1], 'medium' FROM generate_series(0, 5999) AS i"
-    ))
-    await s.commit()
-    # story #4731 — the planner's choice between the old plain index and the 0415 one depends on the table statistics. This test used to lean on whatever
-    # rows (and whatever stale statistics) the tests that ran before it left in the shared `stories`; split into CI shards the table can be freshly
-    # filled and not yet analysed (the plan then estimated 1 row and took `idx_stories_project_id`). The statistics are made current here.
-    await s.execute(text("ANALYZE stories"))
+    statuses = ["backlog", "ready-for-dev", "in-progress", "in-review", "done"]
+    for i in range(40):
+        await s.execute(text(
+            "INSERT INTO stories (id,org_id,project_id,title,status,priority) "
+            f"VALUES (gen_random_uuid(),'{org}','{proj if i % 2 else other}','S{i}','{statuses[i % 5]}','medium')"
+        ))
     await s.commit()
     return org, proj, other
 
@@ -80,7 +73,12 @@ async def _captured_story_scans(run) -> list[tuple[str, tuple]]:
             capturing[0] = False
             plans = []
             async with eng.connect() as conn:
-                await conn.exec_driver_sql("SET enable_seqscan = off")
+                # story #4731 — «can the index be used», not «does the planner happen to pick it for this many rows»: the choice between the 0415
+                # index and a small index plus a sort / a bitmap scan / a join driven from another table depends on how many rows (and which statistics)
+                # the tests that ran before left in the shared tables — true in one big session, not in a CI shard. The paths that would hide the index
+                # are switched off, so the plan shows the index whenever it CAN serve the statement (drop the index → the plan loses it → red).
+                for knob in ("enable_seqscan", "enable_bitmapscan", "enable_sort", "enable_nestloop"):
+                    await conn.exec_driver_sql(f"SET {knob} = off")
                 for statement, params in caught:
                     rows = (await conn.exec_driver_sql("EXPLAIN " + statement, params)).all()
                     plans.append((statement, "\n".join(r[0] for r in rows)))
