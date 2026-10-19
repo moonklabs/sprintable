@@ -698,3 +698,32 @@ async def test_19_the_narrowing_waits_for_a_move_that_holds_the_device_row_and_j
                     await asyncio.gather(put, return_exceptions=True)
         assert (r.status_code, r.json()["dropped_agents"], r.json()["startable"]) == (200, [other], 1), r.text
         assert (await _sql(fetch=f"SELECT startable FROM desktop_setups WHERE id = '{sid}'"))[0][0] == [{"agent_member_id": agent, "project_id": str(PROJ)}]
+
+
+async def test_20_the_presser_reads_what_became_of_their_start_and_nobody_else_and_no_other_agent_does(world):
+    """The live phone round (10-19): the Mac started the session (`start_session done`) but the phone's result read answered 404 `command_not_found` every time — the
+    read looked only at stop · prompt · end and matched the agent through a session a start does not have yet. A start belongs to the agent its payload names."""
+    plain_tm = await _plain_member()
+    await _sql(f"INSERT INTO project_access (id,project_id,member_id,permission) VALUES (gen_random_uuid(),'{PROJ}','{plain_tm}','granted')")
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4714t1")
+        other = device["agents"][1]["member_id"]
+        sid, tok = device["setup_id"], _tok(device["device_token"])
+        await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ)), headers=tok)
+        cid = (await _post(c, agent, _start(phone, sid))).json()["command_id"]
+        read = lambda a, who=OWNER: c.get(f"/api/v2/agents/{a}/desktop-commands/{cid}", headers=_person(who))  # noqa: E731
+        # the presser, asking about the agent the start is for: the state now…
+        r = await read(agent)
+        assert (r.status_code, r.json()) == (200, {"command_id": cid, "kind": "start_session", "state": "queued", "result_code": None}), r.text
+        # …and what the computer said (done · a refusal with its word)
+        await c.post(f"/api/v2/desktop/relay/commands/{cid}/result", json={"state": "done"}, headers=tok)
+        assert (await read(agent)).json()["state"] == "done"
+        # another agent of the same computer: not this start's
+        assert (await read(other)).status_code == 404
+        # another person (even one who may open the project): not theirs
+        assert (await read(agent, who=PLAIN)).status_code == 404
+        # a refusal carries its word
+        cid2 = (await _post(c, agent, _start(phone, sid))).json()["command_id"]
+        await c.post(f"/api/v2/desktop/relay/commands/{cid2}/result", json={"state": "rejected", "result_code": "no_folder"}, headers=tok)
+        r2 = await c.get(f"/api/v2/agents/{agent}/desktop-commands/{cid2}", headers=_person(OWNER))
+        assert (r2.json()["state"], r2.json()["result_code"]) == ("rejected", "no_folder")

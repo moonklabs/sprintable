@@ -538,15 +538,22 @@ async def _write_prompt_line(db: AsyncSession, *, org_id, conversation_id, sende
 
 
 async def get_command(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, agent_id: uuid.UUID, command_id: uuid.UUID) -> dict:
+    """The presser's own read of what became of a command: its state and the daemon's result word. A stop · prompt · end belongs to the agent of its
+    session (`session_key`); a start (story #4714 · the phone's result line) has no session yet — it belongs to the agent its payload names."""
     row = (await db.execute(
         select(DesktopCommand, DesktopSetup).join(DesktopSetup, DesktopSetup.id == DesktopCommand.setup_id).where(
             DesktopCommand.id == command_id, DesktopCommand.requested_by == member_id, DesktopSetup.org_id == org_id,
-            DesktopCommand.kind.in_(("stop_session", "send_prompt", "end_session")),
+            DesktopCommand.kind.in_(("stop_session", "send_prompt", "end_session", "start_session")),
         )
     )).first()
     if row is None:
         raise DesktopRelayError(404, "command_not_found", "no such command of yours")
     cmd, setup = row
+    if cmd.kind == "start_session":
+        owner = (cmd.payload or {}).get("agent_member_id")
+        if owner != str(agent_id):
+            raise DesktopRelayError(404, "command_not_found", "no such command of yours")
+        return {"command_id": str(cmd.id), "kind": cmd.kind, "state": cmd.state, "result_code": cmd.result_code}
     session = (await db.execute(
         select(DesktopSession.agent_member_id).where(DesktopSession.setup_id == setup.id, DesktopSession.session_key == cmd.session_key)
     )).scalar_one_or_none()
