@@ -411,6 +411,34 @@ async def test_09b_the_first_screen_read_says_whether_each_agent_runs_so_the_pho
         assert await running() == {agent: None, other_agent: None}  # silent and nothing on record: still not a «no»
 
 
+async def test_09c_running_is_per_computer_the_same_agent_on_two_computers_is_two_answers(world):
+    """story 4714 (Kadir's pin on PR 5163): the word is keyed by (computer, agent). The same agent with a session that lives on ANOTHER computer must not make it
+    «running» on this one — not when the phone is paired with only one of them (the other's rows are not even read), and not when it is paired with both
+    (each computer says its own: the old computer an agent was moved away from keeps its rows and keeps listing the agent)."""
+    async with _client() as c:
+        dev1, agent, phone, owner_der = await _setup(c, "d4424 mac 4714l")
+        dev2 = await _device(c, name="d4424 mac 4714m")  # a second computer
+        await _state(c, dev1, agent, "stopped", 2)  # not running on the first …
+        # … while a session of the same agent lives on the second (a row of that computer — the helpers cannot set one agent up on two computers)
+        await _sql(f"INSERT INTO desktop_sessions (id, setup_id, session_key, agent_member_id, runtime, state, last_report_seq, state_at) "
+                   f"VALUES (gen_random_uuid(), '{dev2['setup_id']}', 'other-1', '{agent}', 'claude', 'idle', 1, now())")
+
+        async def running():
+            comps = (await _all(c, phone)).json()["computers"]
+            return {comp["setup_id"]: {a["agent_member_id"]: a["running"] for a in comp["agents"]}.get(agent) for comp in comps}
+
+        assert await running() == {dev1["setup_id"]: False}  # paired with the first only: it says «no» — the second computer's live session is not its own
+        # paired with both, and the second lists the agent too: each says its own
+        await _pair(c, dev2["device_token"], owner_der)
+        await _sql(f"UPDATE desktop_setups SET members = members || (SELECT jsonb_agg(e) FROM desktop_setups d1, jsonb_array_elements(d1.members) e "
+                   f"WHERE d1.id = '{dev1['setup_id']}' AND e->>'member_id' = '{agent}') WHERE id = '{dev2['setup_id']}'")
+        assert await running() == {dev1["setup_id"]: False, dev2["setup_id"]: True}
+        # and the other way round: a live session on the first, none on the second
+        await _sql(f"DELETE FROM desktop_sessions WHERE setup_id = '{dev2['setup_id']}'")
+        await _state(c, dev1, agent, "idle", 3, key="s-2")
+        assert await running() == {dev1["setup_id"]: True, dev2["setup_id"]: False}
+
+
 async def test_10_a_gone_pairing_a_disconnected_computer_and_a_deleted_project_leave_both_reads_and_a_list_that_changes_while_a_press_waits_is_the_new_one(world, monkeypatch):
     """codex 5132 round 4 ⑥: each filter of the two reads is pinned by what it removes — an unpaired phone (removed_at), a disconnected computer (revoked_at),
     a soft-deleted project; and ⑤ (nearest part): the press reads the computer's row again under its lock, so a folder list the computer replaced

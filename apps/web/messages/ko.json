@@ -1741,6 +1741,7 @@
         "line": "{device}에는 아직 에이전트가 없어요 — Mac 앞에서 폴더를 고르고 첫 에이전트를 시작해 주세요.",
         "lineNoAccess": "{device}에는 내가 시작할 수 있는 에이전트가 없어요."
       },
+      "laterNote": "지금 하지 않아도 돼요.",
       "start": {
         "title": "{device}에서 에이전트를 시작할까요?",
         "agentLabel": "에이전트",

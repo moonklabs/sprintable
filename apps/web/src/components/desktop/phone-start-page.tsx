@@ -2,7 +2,8 @@
 
 // story 4714 (AC3) — «○○ 맥에서 에이전트를 시작할까요?» at its own address: the phone app's start screen for a person who is paired with a computer and
 // whose agents are not running. It was only inside the onboarding's first screen, which a person with an organization never sees. Same screen, same
-// words (nothing new); the way out is the onboarding's own line — [오늘로 가기] — so no launch traps anyone here.
+// words, except the note above the way out (it says «you don't have to do this now», not the onboarding's «…reopen from Settings›download»); the way out is the
+// onboarding's own button — [오늘로 가기] — so no launch traps anyone here.
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
@@ -15,6 +16,7 @@ import { BRIDGE_WAIT_MS } from '@/components/desktop/phone-landing';
 /** `homeHref`: where the way out goes — the onboarding's own landing address, resolved by the server from the nav flags (`resolveOnboardingLandingHref`); its words follow the same flag as the onboarding's own finish button */
 export function PhoneStartPage({ chatsHref, homeHref, todayV3Enabled, macDownloadEnabled }: { chatsHref: string; homeHref: string; todayV3Enabled: boolean; macDownloadEnabled: boolean }) {
   const to = useTranslations('onboarding');
+  const tp = useTranslations('onboarding.phone');
   const { inPhoneApp } = usePhoneBridge();
   const [orgId, setOrgId] = useState<string | null>(null);
   // the organization's id is only for «turn remote control on» (the screen's first branch) — read here, as the onboarding does
@@ -35,7 +37,7 @@ export function PhoneStartPage({ chatsHref, homeHref, todayV3Enabled, macDownloa
       <div className="w-full max-w-md space-y-4" data-testid="phone-start-page">
         <PhoneFirstScreen orgId={orgId} chatsHref={chatsHref} macDownloadEnabled={macDownloadEnabled} />
         <p className="break-keep border-t border-border pt-4 text-xs text-muted-foreground" data-testid="phone-start-later">
-          {to('download.laterNote')}{' '}
+          {tp('laterNote')}{' '}
           <Button variant="link" size="sm" className="h-auto px-0 py-0 text-xs" onClick={() => window.location.assign(homeHref)} data-testid="phone-start-finish">
             {todayV3Enabled ? to('desktopFinishToToday') : to('dashboardCta')}
           </Button>

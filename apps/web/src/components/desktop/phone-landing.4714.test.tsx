@@ -16,7 +16,7 @@ vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetch
 vi.mock('@/lib/phone-app-store', async (orig) => ({ ...(await orig<typeof import('@/lib/phone-app-store')>()), PHONE_APP_PUBLISHED: { android: true, ios: false } }));
 const { decideLanding, landedThisLaunch, markLanded } = await import('@/lib/phone-landing');
 const { landingHome } = await import('@/lib/phone-landing-address');
-const { PhoneLanding, BRIDGE_WAIT_MS, LANDING_MAX_MS } = await import('./phone-landing');
+const { PhoneLanding, BRIDGE_WAIT_MS, LANDING_MAX_MS, SPINNER_AFTER_MS } = await import('./phone-landing');
 const { PhoneStartPage } = await import('./phone-start-page');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -236,6 +236,21 @@ describe('[4714] the landing door — an empty area, one go, once per launch', (
     expect(replace).toHaveBeenCalledWith('/phone-start');
   });
 
+  it('the area is EMPTY for the first second (a quick answer flashes nothing) and then a small spinner says the app is working — by the common «loading» word, no new words', async () => {
+    fetchWithAuth.mockImplementation(() => new Promise<Response>(() => undefined)); // the read is out
+    await door();
+    const area = () => container.querySelector('[data-testid="phone-landing"]');
+    expect(area()?.querySelector('[data-testid="phone-landing-spinner"]')).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(SPINNER_AFTER_MS - 100); });
+    expect(area()?.querySelector('[data-testid="phone-landing-spinner"]')).toBeNull(); // not early
+    await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+    const spinner = area()?.querySelector('[data-testid="phone-landing-spinner"]');
+    expect(spinner?.getAttribute('aria-label')).toBe(koMessages.common.loading);
+    expect(spinner?.getAttribute('role')).toBe('status');
+    expect(area()?.getAttribute('aria-busy')).toBe('true');
+    expect(SPINNER_AFTER_MS).toBe(1000);
+  });
+
   it('the limit is four seconds (the empty area is never longer than that)', () => {
     expect(LANDING_MAX_MS).toBe(4000);
   });
@@ -351,6 +366,18 @@ describe('[4714] /phone-start — the start screen at its own address, with a wa
     expect(out?.textContent).toBe('오늘로 가기');
     await act(async () => { out?.click(); });
     expect(assign).toHaveBeenCalledWith('/today'); // the onboarding's own finish address — never back to the landing
+  });
+
+  it('the note above the way out says «you don\'t have to do this now» — NOT the onboarding\'s «reopen from Settings › Get the desktop app» (nothing to download here, and this screen is not reopened from Settings)', async () => {
+    await page();
+    const later = byId('phone-start-later')?.textContent ?? '';
+    expect(later).toContain('지금 하지 않아도 돼요.');
+    expect(later).not.toMatch(/설정|데스크톱 앱 받기|받지 않아도/);
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await page(true, false); // Today off: the same note, the button says the dashboard
+    expect(byId('phone-start-later')?.textContent).toContain('지금 하지 않아도 돼요.');
+    expect(byId('phone-start-later')?.textContent).not.toMatch(/설정|데스크톱 앱 받기/);
   });
 
   it('where «today» is off the way out says what it goes to (the dashboard · the chat list), as the onboarding\'s own finish button does', async () => {
