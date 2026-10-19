@@ -175,10 +175,15 @@ async def test_05_only_the_agents_own_default_persona_in_its_org(world):
         agent, other = device["agents"][0]["member_id"], device["agents"][1]["member_id"]
         await _persona(other, name="The Other One", system_prompt="not yours")                       # another agent's
         await _persona(agent, name="Not default", system_prompt="x", default=False)                     # not the default
-        p = lambda n: uuid.UUID(f"d4680000-0000-0000-0000-0000000000{n}")  # noqa: E731 — one project each (one default per project and agent)
-        await _persona(agent, name="A built-in", system_prompt="x", builtin=True, project=p("d1"))      # a built-in
-        await _persona(agent, name="Deleted", system_prompt="x", deleted=True, project=p("d2"))         # deleted
-        await _persona(agent, name="Other org", system_prompt="x", project=p("d3"), org=uuid.UUID("d4680000-0000-0000-0000-0000000000f0"))   # another organization's row
+        # each kind of row that must NOT be handed over, in the START's own project (Kadir's second review: pinned there, not in some other project), one at a time
+        for label, kw in (
+            ("a built-in", {"builtin": True}),
+            ("deleted", {"deleted": True}),
+            ("another organization's row", {"org": uuid.UUID("d4680000-0000-0000-0000-0000000000f0")}),
+        ):
+            pid = await _persona(agent, name=label, system_prompt="x", **kw)
+            assert "persona" not in (await c.get(OWN, params=P, headers=_key(device))).json(), label
+            await _sql(f"DELETE FROM agent_personas WHERE id = '{pid}'")
         assert "persona" not in (await c.get(OWN, params=P, headers=_key(device))).json()
         theirs = (await c.get(OWN, params=P, headers=_key(device, 1))).json()["persona"]
         assert theirs["role"] == "The Other One"

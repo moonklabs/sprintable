@@ -173,6 +173,24 @@ class AgentPersonaRepository:
         base = (row.config or {}).get("base_persona_id")
         return row.system_prompt, row.style_prompt, base if isinstance(base, str) else None
 
+    async def children_of(self, base_id: uuid.UUID, org_id: uuid.UUID, project_id: uuid.UUID) -> list[tuple[uuid.UUID, str, str | None, str | None]]:
+        """story 4680 — the personas of this org and project that name `base_id` as their base (the same agent's: a base is joined only for the same agent and project):
+        (id, name, system_prompt, style_prompt)."""
+        agent = await self.get_agent_id(base_id, org_id, project_id)
+        if agent is None:
+            return []
+        r = await self.session.execute(
+            select(AgentPersona.id, AgentPersona.name, AgentPersona.system_prompt, AgentPersona.style_prompt).where(
+                AgentPersona.org_id == org_id,
+                AgentPersona.project_id == project_id,
+                AgentPersona.agent_id == agent,
+                AgentPersona.deleted_at.is_(None),
+                AgentPersona.id != base_id,
+                AgentPersona.config["base_persona_id"].astext == str(base_id),
+            ).order_by(AgentPersona.created_at.asc(), AgentPersona.id)
+        )
+        return [(row.id, row.name, row.system_prompt, row.style_prompt) for row in r.all()]
+
     async def get_recruited(
         self, org_id: uuid.UUID, project_id: uuid.UUID, agent_id: uuid.UUID
     ) -> AgentPersona | None:

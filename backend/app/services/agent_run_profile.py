@@ -224,8 +224,44 @@ def _one_line(value: str | None, limit: int) -> str:
     return re.sub(r"\s+", " ", _clean_persona_text(value, limit, limit * 4)).strip()
 
 
+def persona_text_problem(fields: dict[str, str | None]) -> str | None:
+    """story 4680 AC2 (Kadir's second review): a control character (NUL above all — Postgres text cannot hold it and the write answered 500) cannot be saved, nor sent to an agent. A readable
+    sentence naming the field, before anything is written. Tab, newline and carriage return are text; every other Cc is not."""
+    for name, value in fields.items():
+        if value and any(ch not in "\t\n\r" and unicodedata.category(ch) == "Cc" for ch in value):
+            return f"The {name} has a control character (for example a NUL byte) that cannot be saved or sent to an agent — remove it and try again."
+    return None
+
+
+def normalize_persona_text(value: str | None) -> str | None:
+    """Saved = run: what the session will get, written at the write. Line endings and U+2028/2029 become plain newlines (the same line break the person saw), invisible format characters
+    (bidi marks and overrides, zero-width, soft hyphen, BOM, tag characters — `Cf`) are dropped. Nothing visible changes for the person; the text in the editor IS the text of the session."""
+    if value is None:
+        return None
+    text = value.replace("\r\n", "\n").replace("\r", "\n").replace("\u2028", "\n").replace("\u2029", "\n")
+    return "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+
+
+async def base_children_problem(
+    db: AsyncSession, *, org_id: uuid.UUID, base_id: uuid.UUID, children: list[tuple[uuid.UUID, str, str | None, str | None]], new_system: str | None, new_style: str | None,
+) -> str | None:
+    """A base persona is joined into every persona that names it: when the base is PATCHed longer, each of those would be re-judged on what it would leave (the daemon would otherwise cut
+    it silently). A readable sentence naming up to three of them with their numbers, or None."""
+    found: list[str] = []
+    for _cid, name, system_prompt, style_prompt in children:
+        problem = await persona_write_problem(
+            db, org_id=org_id, system_prompt=system_prompt, style_prompt=style_prompt, base_persona_id=base_id, base_override=(new_system, new_style),
+        )
+        if problem:
+            found.append(f"\"{name}\" (it uses this persona as its base): {problem}")
+        if len(found) == 3:
+            break
+    return " | ".join(found) if found else None
+
+
 async def persona_write_problem(
     db: AsyncSession, *, org_id: uuid.UUID, system_prompt: str | None, style_prompt: str | None, base_persona_id: uuid.UUID | str | None = None,
+    base_override: tuple[str | None, str | None] | None = None,
 ) -> str | None:
     """story 4680 AC2 (PO 2026-10-18) — the same caps the daemon is handed, checked where the text is WRITTEN: a persona's instructions (its own, plus its base persona's when one is
     named) are at most PERSONA_TEXT_MAX characters and PERSONA_TEXT_MAX_BYTES bytes, its style (base's + own) PERSONA_STYLE_MAX characters and PERSONA_STYLE_MAX_BYTES bytes. Over → a readable
@@ -239,8 +275,10 @@ async def persona_write_problem(
             bid = None
         if bid is not None:
             base = (await db.execute(select(AgentPersona).where(AgentPersona.id == bid, AgentPersona.org_id == org_id, AgentPersona.deleted_at.is_(None)))).scalar_one_or_none()
+    # `base_override`: the base's texts as they are ABOUT to be (its own PATCH) — the stored ones are the old ones
+    base_system, base_style = (base_override if base_override is not None else (base.system_prompt, base.style_prompt) if base is not None else (None, None))
     own = _clean_persona_text(system_prompt, 10**9, 10**9)
-    base_text = _clean_persona_text(base.system_prompt, 10**9, 10**9) if base is not None else ""
+    base_text = _clean_persona_text(base_system, 10**9, 10**9) if base is not None else ""
     total = "\n\n".join(p for p in (base_text, own) if p)
     chars, size = len(total), len(total.encode("utf-8"))
     if chars > PERSONA_TEXT_MAX or size > PERSONA_TEXT_MAX_BYTES:
@@ -248,7 +286,7 @@ async def persona_write_problem(
             f"The instructions are too long: {chars:,} characters ({size:,} bytes{' with its base persona' if base_text else ''}); the most a role's instructions may take is "
             f"{PERSONA_TEXT_MAX:,} characters and {PERSONA_TEXT_MAX_BYTES:,} bytes — shorten them by {max(chars - PERSONA_TEXT_MAX, (size - PERSONA_TEXT_MAX_BYTES + 3) // 4):,} characters or more."
         )
-    style_parts = [_clean_persona_text(base.style_prompt if base is not None else None, 10**9, 10**9), _clean_persona_text(style_prompt, 10**9, 10**9)]
+    style_parts = [_clean_persona_text(base_style if base is not None else None, 10**9, 10**9), _clean_persona_text(style_prompt, 10**9, 10**9)]
     st = "\n\n".join(p for p in style_parts if p)
     st_bytes = len(st.encode("utf-8"))
     if len(st) > PERSONA_STYLE_MAX or st_bytes > PERSONA_STYLE_MAX_BYTES:

@@ -185,3 +185,106 @@ async def test_the_kept_base_persona_and_the_base_style_count_on_a_patch_and_on_
             _clear_overrides()
     finally:
         await scenario["engine"].dispose()
+
+
+async def test_a_control_character_is_a_readable_422_not_a_500_and_nothing_is_written():
+    scenario = await _build_scenario()
+    try:
+        client = await _as_owner(scenario)
+        try:
+            agent = str(scenario["agent_id"])
+            for field, body in (
+                ("system_prompt", {"name": "Nul text", "system_prompt": "a\x00b"}),
+                ("style_prompt", {"name": "Nul style", "system_prompt": "ok", "style_prompt": "s\x00"}),
+                ("name", {"name": "Nul\x00name", "system_prompt": "ok"}),
+                ("system_prompt", {"name": "Esc text", "system_prompt": "a\x1bb"}),
+            ):
+                r = await client.post("/api/v2/agent-personas", json={"agent_id": agent, **body})
+                assert r.status_code == 422 and r.json()["error"]["code"] == "PERSONA_TEXT_INVALID", (field, r.status_code, r.text)
+                assert field.replace("_", " ") in r.json()["error"]["message"] or field in r.json()["error"]["message"], r.text
+            assert await _count(scenario, "Nul text") == 0 and await _count(scenario, "Esc text") == 0
+            ok = await client.post("/api/v2/agent-personas", json={"agent_id": agent, "name": "Tabs ok", "system_prompt": "line1\n\tindented\r\nline3"})
+            assert ok.status_code == 201, ok.text                                                       # tab, newline and carriage return are text
+            pid = ok.json()["data"]["id"]
+            bad = await client.patch(f"/api/v2/agent-personas/{pid}", json={"system_prompt": "x\x00"})
+            assert bad.status_code == 422 and bad.json()["error"]["code"] == "PERSONA_TEXT_INVALID", bad.text
+        finally:
+            await client.aclose()
+            _clear_overrides()
+    finally:
+        await scenario["engine"].dispose()
+
+
+async def test_saved_equals_run_invisible_characters_and_odd_line_breaks_are_normalized_at_the_write():
+    from app.services.agent_run_profile import _clean_persona_text
+
+    scenario = await _build_scenario()
+    try:
+        client = await _as_owner(scenario)
+        try:
+            agent = str(scenario["agent_id"])
+            typed = "a‮b​c d\r\ne f﻿g­h\U000e0041i"
+            r = await client.post("/api/v2/agent-personas", json={"agent_id": agent, "name": "Normalized", "system_prompt": typed, "style_prompt": "x‏y z"})
+            assert r.status_code == 201, r.text
+            saved = r.json()["data"]
+            assert saved["system_prompt"] == "abc\nd\ne\nfghi" and saved["style_prompt"] == "xy\nz", saved                     # the line breaks stay line breaks; nothing visible changed
+            assert _clean_persona_text(saved["system_prompt"], 16_000, 32_000) == saved["system_prompt"]                       # the session's text IS the saved text
+            pid = saved["id"]
+            p = await client.patch(f"/api/v2/agent-personas/{pid}", json={"system_prompt": "p‮q r"})
+            assert p.status_code == 200 and p.json()["data"]["system_prompt"] == "pq\nr", p.text
+        finally:
+            await client.aclose()
+            _clear_overrides()
+    finally:
+        await scenario["engine"].dispose()
+
+
+async def test_a_base_patched_longer_is_judged_against_every_persona_that_uses_it():
+    scenario = await _build_scenario()
+    try:
+        client = await _as_owner(scenario)
+        try:
+            agent = str(scenario["agent_id"])
+            base = await client.post("/api/v2/agent-personas", json={"agent_id": agent, "name": "Shared base", "system_prompt": "b" * 3_000, "style_prompt": "s" * 100})
+            bid = base.json()["data"]["id"]
+            for name, size in (("Child big", 12_000), ("Child small", 1_000)):
+                c = await client.post("/api/v2/agent-personas", json={"agent_id": agent, "name": name, "system_prompt": "c" * size, "base_persona_id": bid})
+                assert c.status_code == 201, c.text
+            lone = await client.post("/api/v2/agent-personas", json={"agent_id": agent, "name": "Not a child", "system_prompt": "n" * 15_000})
+            assert lone.status_code == 201
+            over = await client.patch(f"/api/v2/agent-personas/{bid}", json={"system_prompt": "b" * 5_000})                  # 5,000 + 2 + 12,000 > 16,000 for "Child big"
+            assert over.status_code == 422 and over.json()["error"]["code"] == "PERSONA_TOO_LONG", over.text
+            msg = over.json()["error"]["message"]
+            assert '"Child big"' in msg and "Child small" not in msg and "Not a child" not in msg and "17,002 characters" in msg, msg
+            assert (await client.get(f"/api/v2/agent-personas/{bid}")).json()["data"]["system_prompt"] == "b" * 3_000        # nothing was written
+            style = await client.patch(f"/api/v2/agent-personas/{bid}", json={"style_prompt": "s" * 1_950})                 # the base style joins the child styles too (own style none → 1,950 fits)
+            assert style.status_code == 200, style.text
+            fits = await client.patch(f"/api/v2/agent-personas/{bid}", json={"system_prompt": "b" * 3_500})                  # 3,500 + 2 + 12,000 fits
+            assert fits.status_code == 200, fits.text
+            rename = await client.patch(f"/api/v2/agent-personas/{bid}", json={"name": "Renamed base"})
+            assert rename.status_code == 200
+        finally:
+            await client.aclose()
+            _clear_overrides()
+    finally:
+        await scenario["engine"].dispose()
+
+
+async def test_a_long_kept_style_is_judged_when_only_the_instructions_are_patched():
+    scenario = await _build_persona_scenario()
+    try:
+        client = await _as_owner(scenario)
+        try:
+            from sqlalchemy import text as sql
+
+            pid = scenario["persona_id"]
+            async with scenario["Session"]() as s:
+                await s.execute(sql("UPDATE agent_personas SET style_prompt = :t WHERE id = :i"), {"t": "s" * 2_500, "i": pid})
+                await s.commit()
+            r = await client.patch(f"/api/v2/agent-personas/{pid}", json={"system_prompt": "short"})
+            assert r.status_code == 422 and "The style is too long: 2,500 characters" in r.json()["error"]["message"], r.text
+        finally:
+            await client.aclose()
+            _clear_overrides()
+    finally:
+        await scenario["engine"].dispose()
