@@ -33,7 +33,8 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
 # shard split). Going back to a short digit marker brings that flake back.
 _NEW = f"new-message-{uuid.uuid4().hex}"
 
-pytestmark = pytest.mark.anyio
+# story #4731 — these SSE tests read a real stream over a long backlog: 16 – 21.5 s measured on the CI runners against the default 30 s per-test timeout
+pytestmark = [pytest.mark.anyio, pytest.mark.timeout(120)]
 
 BACKLOG = 2_400
 IDLE = 10.0  # no frame for this long = the stream is waiting for a wake (nothing more is coming on this one)

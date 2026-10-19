@@ -307,6 +307,8 @@ _ENDED = {
 
 
 @pytest.mark.anyio
+# story #4731 — measured 21.5 s (two organizations built through the real routes) on the CI runners against the default 30 s per-test timeout (a slower runner would fail it for no reason in the code under test):
+@pytest.mark.timeout(120)
 async def test_d_deleting_one_organization_changes_nothing_of_another():
     """two organizations: deleting A ends A's rows in every table and leaves B's rows exactly as they were — each ending statement is
     filtered by the organization's id, and a filter that widens (the whole table) would end B's rows too."""
