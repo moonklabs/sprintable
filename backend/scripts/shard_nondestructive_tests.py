@@ -14,6 +14,8 @@ have at least one collected test (a file is never cut in two; a test is never dr
   --verify --shard-count N       collect once more, check that the N shards are disjoint and their union is the whole collected set, print the
                                   per-shard file / test counts (exit 1 otherwise)
   --counts-out FILE              (with --shard) also write {"shard": I, "files": F, "tests": T} for the run summary
+  --order name|reverse           the order of this shard's files (default: by name). `reverse` is for checking that no test leans on an earlier
+                                  one — a green run in the reverse order is part of the evidence for a change to the split.
 
 The number of tests per file is a proxy for its time (the suite is mostly small real-DB tests); the measured per-shard times are in the PR / story.
 """
@@ -71,6 +73,7 @@ def main() -> int:
     ap.add_argument("--shard-count", type=int, required=True)
     ap.add_argument("--verify", action="store_true")
     ap.add_argument("--counts-out")
+    ap.add_argument("--order", choices=("name", "reverse"), default="name")
     args = ap.parse_args()
 
     counts = collect_counts()
@@ -100,6 +103,8 @@ def main() -> int:
     if args.shard is None or not 0 <= args.shard < args.shard_count:
         raise SystemExit("--shard must be in [0, shard-count)")
     mine = shards[args.shard]
+    if args.order == "reverse":
+        mine = list(reversed(mine))
     if args.counts_out:
         Path(args.counts_out).write_text(json.dumps({"shard": args.shard, "files": len(mine), "tests": sum(counts[f] for f in mine)}))
     sys.stdout.write("\n".join(mine) + "\n")

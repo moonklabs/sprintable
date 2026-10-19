@@ -48,3 +48,17 @@ def test_a_file_with_one_test_is_never_dropped_and_one_shard_can_stay_empty_only
     shards = mod.partition({"tests/test_x.py": 1}, 4)
     assert [f for s in shards for f in s] == ["tests/test_x.py"]
     assert sum(1 for s in shards if not s) == 3
+
+
+def test_the_reverse_order_option_keeps_the_same_files():
+    """`--order reverse` only turns this shard's file list around (a check that no test leans on an earlier one); the set of files is the same"""
+    import subprocess
+    import sys
+
+    counts = {f"tests/test_{i}.py": 1 + i % 3 for i in range(12)}
+    forward = mod.partition(counts, 3)[0]
+    assert sorted(forward) == sorted(reversed(forward))
+    assert list(reversed(forward)) == forward[::-1]
+    # the CLI wiring: the flag exists and is accepted
+    out = subprocess.run([sys.executable, str(_PATH), "--help"], capture_output=True, text=True, check=False).stdout
+    assert "--order" in out

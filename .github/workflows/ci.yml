@@ -1668,7 +1668,7 @@ jobs:
         working-directory: backend
         run: |
           set -o pipefail
-          uv run python scripts/shard_nondestructive_tests.py --shard ${{ matrix.shard }} --shard-count ${{ strategy.job-total }} --counts-out /tmp/shard_counts.json > /tmp/shard_files.txt
+          uv run python scripts/shard_nondestructive_tests.py --shard ${{ matrix.shard }} --shard-count ${{ strategy.job-total }} --order "${BACKEND_SHARD_ORDER:-name}" --counts-out /tmp/shard_counts.json > /tmp/shard_files.txt
           echo "shard ${{ matrix.shard }}: $(cat /tmp/shard_counts.json)"
           mapfile -t files < /tmp/shard_files.txt
           uv run pytest -q -m "not destructive_schema" --durations=20 "${files[@]}" 2>&1 | tee /tmp/pytest_output.log
