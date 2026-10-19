@@ -126,3 +126,62 @@ async def test_the_style_byte_cap_too_and_what_the_write_accepts_always_fits_the
     # and the style's own byte cap is enforced where it is written (a 2,000-character style of four-byte characters is 8,000 bytes: refused)
     assert len(_clean_persona_text("가" * 2_000, PERSONA_STYLE_MAX, PERSONA_STYLE_MAX_BYTES).encode()) == 6_000
     assert len(_clean_persona_text("😀" * 2_000, PERSONA_STYLE_MAX, PERSONA_STYLE_MAX_BYTES).encode()) <= PERSONA_STYLE_MAX_BYTES
+
+
+async def test_a_patch_is_judged_on_what_the_persona_would_be_not_only_the_fields_it_sends():
+    """codex 5157: PATCH checked only the fields it carried — a base persona swapped in, or a style added next to a long kept text, could push the effective persona over the cap
+    (the daemon would then cut it). Now the kept fields count; a PATCH that touches none of them (a rename) never fails on a long legacy text."""
+    scenario = await _build_scenario()
+    try:
+        client = await _as_owner(scenario)
+        try:
+            agent = str(scenario["agent_id"])
+            big_base = await client.post("/api/v2/agent-personas", json={"agent_id": agent, "name": "Big base", "system_prompt": "b" * 12_000})
+            assert big_base.status_code == 201, big_base.text
+            mine = await client.post("/api/v2/agent-personas", json={"agent_id": agent, "name": "Mine", "system_prompt": "m" * 6_000})
+            assert mine.status_code == 201, mine.text
+            pid = mine.json()["data"]["id"]
+            swap = await client.patch(f"/api/v2/agent-personas/{pid}", json={"base_persona_id": big_base.json()["data"]["id"]})   # 12,000 + 6,000 kept > 16,000
+            assert swap.status_code == 422 and "with its base persona" in swap.json()["error"]["message"], swap.text
+            got = (await client.get(f"/api/v2/agent-personas/{pid}")).json()["data"]
+            assert not got.get("base_persona_id")                                                                                 # nothing was written
+            # a rename touches none of the three: it passes even for a text that is over the cap today
+            from sqlalchemy import text as sql
+
+            async with scenario["Session"]() as s:
+                await s.execute(sql("UPDATE agent_personas SET system_prompt = :t WHERE id = :i"), {"t": "z" * 20_000, "i": pid})
+                await s.commit()
+            assert (await client.patch(f"/api/v2/agent-personas/{pid}", json={"name": "Renamed"})).status_code == 200
+            # but touching the style with that kept 20,000-character text is judged on it
+            assert (await client.patch(f"/api/v2/agent-personas/{pid}", json={"style_prompt": "ok"})).status_code == 422
+        finally:
+            await client.aclose()
+            _clear_overrides()
+    finally:
+        await scenario["engine"].dispose()
+
+
+async def test_the_kept_base_persona_and_the_base_style_count_on_a_patch_and_on_create():
+    scenario = await _build_scenario()
+    try:
+        client = await _as_owner(scenario)
+        try:
+            agent = str(scenario["agent_id"])
+            base = await client.post("/api/v2/agent-personas", json={"agent_id": agent, "name": "Base", "system_prompt": "b" * 12_000, "style_prompt": "s" * 1_500})
+            assert base.status_code == 201, base.text
+            bid = base.json()["data"]["id"]
+            mine = await client.post("/api/v2/agent-personas", json={"agent_id": agent, "name": "Mine", "system_prompt": "m" * 1_000, "base_persona_id": bid})
+            assert mine.status_code == 201, mine.text
+            pid = mine.json()["data"]["id"]
+            # the base is KEPT (the patch sends no base id): 12,000 + 2 + 5,000 > 16,000
+            kept = await client.patch(f"/api/v2/agent-personas/{pid}", json={"system_prompt": "m" * 5_000})
+            assert kept.status_code == 422 and "with its base persona" in kept.json()["error"]["message"], kept.text
+            # the base's style counts with the own style: 1,500 + 2 + 600 > 2,000
+            style = await client.patch(f"/api/v2/agent-personas/{pid}", json={"style_prompt": "t" * 600})
+            assert style.status_code == 422 and "with its base persona" in style.json()["error"]["message"], style.text
+            assert (await client.patch(f"/api/v2/agent-personas/{pid}", json={"style_prompt": "t" * 400})).status_code == 200      # 1,500 + 2 + 400 fits
+        finally:
+            await client.aclose()
+            _clear_overrides()
+    finally:
+        await scenario["engine"].dispose()

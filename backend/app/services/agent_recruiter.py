@@ -246,9 +246,12 @@ def _skills_block(skills: list[dict], locale: str = "ko") -> str:
 
 
 def kit_locale_of(text: str | None) -> str:
-    """The locale a recruited persona's text was composed in (recruit does not store it): the first line is `_SECTION_A_HEADER[locale]` of the role."""
-    first = (text or "").lstrip().split("\n", 1)[0]
-    return "en" if first.rstrip().endswith("— Sprintable Role Context") else "ko"
+    """The locale a recruited persona's text was composed in (recruit does not store it): the role section's header line is `_SECTION_A_HEADER[locale]`. The stored text is the kit AFTER
+    the family renderer (Claude wraps a section in `<role_context>` tags, GPT puts a `# Role & Objective` title above it), so the header is looked for in the first lines, not only the first."""
+    for line in (text or "").lstrip().split("\n", 6)[:6]:
+        if line.rstrip().endswith("— Sprintable Role Context"):
+            return "en"
+    return "ko"
 
 
 def strip_integration_prompt(text: str | None) -> str:
@@ -259,7 +262,12 @@ def strip_integration_prompt(text: str | None) -> str:
         i = out.find(loc.split("\n", 1)[0])
         if i != -1:
             out = out[:i]
-    return out.rstrip()
+    # the family renderer put a title or an opening tag above that section (`<integration_prompt>` · `# Integration Notes`): the cut leaves it dangling
+    out = out.rstrip()
+    for dangling in ("<integration_prompt>", "# Integration Notes"):
+        if out.endswith(dangling):
+            out = out[: -len(dangling)].rstrip()
+    return out
 
 
 def compose_session_kit(role_template: Any, locale: str = "ko") -> str:

@@ -66,16 +66,21 @@ async def _persona(agent, *, name="Bug Triage Lead", system_prompt="", style=Non
     return pid
 
 
-def _recruit_text(locale: str = "ko") -> str:
+def _recruit_text(locale: str = "ko", runtime: str | None = None) -> str:
+    """what the recruit STORES: the kit, then (with a runtime) the family renderer — Claude wraps each section in tags, GPT puts a title above it — joined"""
     from types import SimpleNamespace
 
     from app.services.agent_recruiter import compose_kit
+    from app.services.model_family import render_kit_for_family, resolve_model_family
 
     tpl = SimpleNamespace(
         name="Bug Triage Lead", role_behaviors="Triage every new bug: severity first, then an owner.",
         role_behaviors_i18n={"en": "EN: Triage every new bug: severity first, then an owner."}, default_tool_groups=["stories", "tasks"], runtime_overrides={}, skills=[],
     )
-    return "\n\n".join(compose_kit(tpl, "claude-code", locale).values())
+    kit = compose_kit(tpl, runtime or "claude-code", locale)
+    if runtime:
+        kit = render_kit_for_family(kit, resolve_model_family(runtime))
+    return "\n\n".join(kit.values())
 
 
 async def test_01_an_agent_that_was_never_hired_as_a_role_gets_no_persona_field(world):
@@ -119,6 +124,34 @@ async def test_03_the_english_kit_gives_the_english_session_edition(world):
         text = (await c.get(OWN, params=P, headers=_key(device))).json()["persona"]["instructions"]
         assert "EN: Triage every new bug" in text and "Sprintable Role Context" in text
         assert _INTEGRATION_PROMPT_TEXT["en"].split("\n", 1)[0] not in text
+
+
+async def test_03b_the_stored_text_after_the_family_renderer_still_gives_its_own_locale(world):
+    """codex 5157: the recruit stores the kit AFTER render_kit_for_family (Claude: `<role_context>` tags; GPT: a `# Role & Objective` title) — the locale must still be found, the
+    session edition must be the English one, and nothing of the integration prompt (nor its dangling tag/title) may remain."""
+    from app.services.agent_recruiter import _INTEGRATION_PROMPT_TEXT, kit_locale_of
+
+    await _template()
+    for runtime in ("claude-code", "codex", "gemini"):
+        for locale in ("en", "ko"):
+            stored = _recruit_text(locale, runtime)
+            assert kit_locale_of(stored) == locale, (runtime, locale, stored[:80])
+    async with _client() as c:
+        device = await _device(c, name="d4680 mac k")
+        agent = device["agents"][0]["member_id"]
+        for runtime in ("claude-code", "codex"):
+            await _sql(f"DELETE FROM agent_personas WHERE agent_id = '{agent}'")
+            await _persona(agent, system_prompt=_recruit_text("en", runtime), config={"role_template_id": str(TEMPLATE)})
+            text = (await c.get(OWN, params=P, headers=_key(device))).json()["persona"]["instructions"]
+            assert "EN: Triage every new bug" in text and "Sprintable Role Context" in text, runtime
+            assert _INTEGRATION_PROMPT_TEXT["en"].split("\n", 1)[0] not in text
+    # a gone template: the fallback is the stored text minus the integration prompt, with no dangling opener
+    async with _client() as c:
+        device = await _device(c, name="d4680 mac l")
+        agent = device["agents"][0]["member_id"]
+        await _persona(agent, system_prompt=_recruit_text("en", "claude-code"), config={})
+        text = (await c.get(OWN, params=P, headers=_key(device))).json()["persona"]["instructions"]
+        assert _INTEGRATION_PROMPT_TEXT["en"].split("\n", 1)[0] not in text and not text.endswith("<integration_prompt>")
 
 
 async def test_04_a_hand_written_persona_goes_as_it_is_and_a_gone_template_falls_back_to_the_text_minus_the_integration_prompt(world):

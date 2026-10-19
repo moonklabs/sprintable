@@ -134,9 +134,18 @@ async def update_persona(
     if agent_id is None:
         return _err("NOT_FOUND", "Persona not found", 404)
     await assert_agent_owner(agent_id, repo.session, org_id, uuid.UUID(auth.user_id))
-    too_long = await persona_write_problem(repo.session, org_id=org_id, system_prompt=body.system_prompt, style_prompt=body.style_prompt, base_persona_id=body.base_persona_id)
-    if too_long:
-        return _err("PERSONA_TOO_LONG", too_long, 422)
+    # a PATCH is judged on what the persona WOULD be: the fields it changes and the ones it keeps (only when it touches the instructions, the style or the base persona)
+    if body.system_prompt is not None or body.style_prompt is not None or body.base_persona_id is not None:
+        current = await repo.get_texts(id, org_id, project_id)
+        if current is not None:
+            too_long = await persona_write_problem(
+                repo.session, org_id=org_id,
+                system_prompt=body.system_prompt if body.system_prompt is not None else current[0],
+                style_prompt=body.style_prompt if body.style_prompt is not None else current[1],
+                base_persona_id=body.base_persona_id if body.base_persona_id is not None else current[2],
+            )
+            if too_long:
+                return _err("PERSONA_TOO_LONG", too_long, 422)
     try:
         # story #3370 회귀 클래스 — create_persona와 같은 actor_id 축(위 참고).
         resolved = await resolve_member_db_verified(auth, org_id, repo.session)

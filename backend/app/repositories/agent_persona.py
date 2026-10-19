@@ -157,6 +157,22 @@ class AgentPersonaRepository:
         )
         return r.scalar_one_or_none()
 
+    async def get_texts(self, persona_id: uuid.UUID, org_id: uuid.UUID, project_id: uuid.UUID) -> tuple[str | None, str | None, str | None] | None:
+        """story 4680 — (system_prompt, style_prompt, base_persona_id) of one persona in this org and project, for a PATCH to be judged on what the persona WOULD be."""
+        r = await self.session.execute(
+            select(AgentPersona.system_prompt, AgentPersona.style_prompt, AgentPersona.config).where(
+                AgentPersona.id == persona_id,
+                AgentPersona.org_id == org_id,
+                AgentPersona.project_id == project_id,
+                AgentPersona.deleted_at.is_(None),
+            )
+        )
+        row = r.one_or_none()
+        if row is None:
+            return None
+        base = (row.config or {}).get("base_persona_id")
+        return row.system_prompt, row.style_prompt, base if isinstance(base, str) else None
+
     async def get_recruited(
         self, org_id: uuid.UUID, project_id: uuid.UUID, agent_id: uuid.UUID
     ) -> AgentPersona | None:
