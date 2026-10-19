@@ -160,6 +160,13 @@ async def _client_and_session():
 
     org_id = uuid.uuid4()
     actor_id = uuid.uuid4()
+    # story #4730 — «the creator» passes only while she still holds a seat that may create the agent: here, an org admin
+    from app.models.project import OrgMember
+
+    async with Session() as _s:
+        await _bypass_fk(_s)
+        _s.add(OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=actor_id, role="admin"))
+        await _s.commit()
 
     async def override_db():
         async with Session() as s:

@@ -9,9 +9,21 @@ from app.dependencies.database import get_db
 from app.dependencies.ownership import assert_agent_owner
 from app.repositories.agent_persona import AgentPersonaRepository
 from app.schemas.agent_persona import CreatePersonaRequest, UpdatePersonaRequest
+from app.services.agent_run_profile import base_children_problem, normalize_persona_text, persona_text_problem, persona_write_problem
 from app.services.member_resolver import resolve_member_db_verified
 
 router = APIRouter(prefix="/api/v2/agent-personas", tags=["agent-personas", "Organization"])
+
+
+def _text_fields(body: CreatePersonaRequest | UpdatePersonaRequest) -> dict[str, str | None]:
+    """every string the body carries — a list of strings (the tool allow-list) as one, so a NUL hidden in it is seen too"""
+    out: dict[str, str | None] = {}
+    for key, value in body.model_dump().items():
+        if isinstance(value, str):
+            out[key] = value
+        elif isinstance(value, list) and all(isinstance(x, str) for x in value):
+            out[key] = "".join(value)
+    return out
 
 
 def _repo(session: AsyncSession = Depends(get_db)) -> AgentPersonaRepository:
@@ -62,6 +74,16 @@ async def create_persona(
     # 붙일 수 있었다(SEC-S7이 막은 건 타 org 축뿐, 같은 org 안 타 agent 축은 열려 있었다).
     # assert_agent_owner가 존재+org+ownership(생성자 or org admin)을 한 번에 검증.
     await assert_agent_owner(body.agent_id, repo.session, org_id, uuid.UUID(auth.user_id))
+    # story 4680 AC2: the text goes into the agent's session. A control character (a NUL was a 500) is refused readably; the invisible format characters and the unusual line breaks are
+    # normalized at the write — saved = run, nothing visible changes for the person; over the cap it is refused here, readably, and nothing is written (never cut silently on its way in)
+    invalid = persona_text_problem(_text_fields(body))
+    if invalid:
+        return _err("PERSONA_TEXT_INVALID", invalid, 422)
+    body.system_prompt = normalize_persona_text(body.system_prompt)
+    body.style_prompt = normalize_persona_text(body.style_prompt)
+    too_long = await persona_write_problem(repo.session, org_id=org_id, system_prompt=body.system_prompt, style_prompt=body.style_prompt, base_persona_id=body.base_persona_id)
+    if too_long:
+        return _err("PERSONA_TOO_LONG", too_long, 422)
     try:
         # story #3370 회귀 클래스(페드루 PO 지시 2026-09-11) — actor_id는
         # AgentPersona.created_by로 영속된다. resolve_member_db_verified()의 영속
@@ -129,6 +151,40 @@ async def update_persona(
     if agent_id is None:
         return _err("NOT_FOUND", "Persona not found", 404)
     await assert_agent_owner(agent_id, repo.session, org_id, uuid.UUID(auth.user_id))
+    invalid = persona_text_problem(_text_fields(body))
+    if invalid:
+        return _err("PERSONA_TEXT_INVALID", invalid, 422)
+    body.system_prompt = normalize_persona_text(body.system_prompt)
+    body.style_prompt = normalize_persona_text(body.style_prompt)
+    if body.base_persona_id is not None and body.base_persona_id == id:
+        return _err("PERSONA_BASE_INVALID", "A persona cannot be its own base persona.", 422)
+    if body.system_prompt is not None and not body.system_prompt.strip():
+        # nothing is left of the instructions (blank, or only invisible characters): the column cannot be empty — a readable refusal, not a 500
+        return _err("PERSONA_TEXT_INVALID", "The system prompt has nothing visible in it — write the instructions, or leave the field out to keep the current ones.", 422)
+    # a PATCH is judged on what the persona WOULD be: the fields it changes and the ones it keeps (only when it touches the instructions, the style or the base persona)
+    if body.system_prompt is not None or body.style_prompt is not None or body.base_persona_id is not None:
+        current = await repo.get_texts(id, org_id, project_id)
+        if current is not None:
+            too_long = await persona_write_problem(
+                repo.session, org_id=org_id,
+                system_prompt=body.system_prompt if body.system_prompt is not None else current[0],
+                style_prompt=body.style_prompt if body.style_prompt is not None else current[1],
+                base_persona_id=body.base_persona_id if body.base_persona_id is not None else current[2],
+            )
+            if too_long:
+                return _err("PERSONA_TOO_LONG", too_long, 422)
+    # a persona that others use as their BASE is joined into each of them: PATCHed longer, each is judged again on what it would leave (the daemon would cut it silently otherwise)
+    if body.system_prompt is not None or body.style_prompt is not None:
+        current = await repo.get_texts(id, org_id, project_id)
+        children = await repo.children_of(id, org_id, project_id) if current is not None else []
+        if children:
+            overflow = await base_children_problem(
+                repo.session, org_id=org_id, base_id=id, children=children,
+                new_system=body.system_prompt if body.system_prompt is not None else current[0],
+                new_style=body.style_prompt if body.style_prompt is not None else current[1],
+            )
+            if overflow:
+                return _err("PERSONA_TOO_LONG", overflow, 422)
     try:
         # story #3370 회귀 클래스 — create_persona와 같은 actor_id 축(위 참고).
         resolved = await resolve_member_db_verified(auth, org_id, repo.session)

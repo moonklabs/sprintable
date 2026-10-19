@@ -229,6 +229,10 @@ async def test_06_many_at_once_only_among_one_runtime_and_all_or_nothing(world):
         # rights are checked for EVERY agent before anything is written: PLAIN's own agent first, someone else's after → 403, the
         # first one is not written either (까디르 4943 ①)
         await _sql(f"UPDATE members SET owner_member_id = '{plain_tm}' WHERE id = '{a}'")
+        # story #4730 — «the creator» passes only while the creator still holds a seat that may create the agent (org admin or admin of its
+        # project): PLAIN is made admin of the agent's project, so `a` is still hers and `b` (someone else's) still is not
+        a_project = (await _sql(fetch=f"SELECT project_id FROM team_members WHERE id = '{a}' LIMIT 1"))[0][0]
+        await _sql(f"INSERT INTO project_access (id, project_id, org_member_id, role, permission) VALUES ('{uuid.uuid4()}', '{a_project}', '{plain_tm}', 'admin', 'granted')")
         assert (await c.put(_one(a), json={"model": None, "effort": "high"}, headers=_person(PLAIN))).status_code == 200  # a is PLAIN's
         mine_first = (await _row(a), await _row(b))
         late = await c.put(MANY, json={"agent_ids": [a, b], "effort": "low"}, headers=_person(PLAIN))
