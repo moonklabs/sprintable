@@ -1403,8 +1403,6 @@ def setup_state(setup: DesktopSetup, now: datetime | None = None) -> str:
 
 async def list_setups(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID) -> list[dict]:
     """The org's confirmed setups, newest first, with how many of each one's keys are still active (org owner/admin)."""
-    from sqlalchemy import func
-
     from app.services.project_auth import is_org_owner_or_admin
 
     if not await is_org_owner_or_admin(db, user_id, org_id):
@@ -1417,6 +1415,13 @@ async def list_setups(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID
             DesktopSetup.revoked_reason.is_distinct_from("replaced_by_new_setup"),
         ).order_by(DesktopSetup.confirmed_at.desc()).limit(200)
     )).scalars().all()
+    return await setup_items(db, rows, org_id=org_id)
+
+
+async def setup_items(db: AsyncSession, rows: list[DesktopSetup], *, org_id: uuid.UUID) -> list[dict]:
+    """The web list's item of each setup row, in the rows' order (story 4424/4660 — shared by the setup list and story 4734's computer list)."""
+    from sqlalchemy import func
+
     # story 4660 — newest heard-from time per setup (over its tokens; a setup never heard from has none)
     from app.models.desktop_relay import DesktopDeviceToken
 

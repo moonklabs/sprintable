@@ -56,6 +56,8 @@ _STATUS = {
     "code_expired": 410,
     "code_used": 410,
     "already_confirmed": 409,
+    "computer_changing": 409,  # story 4734: setups of the computer kept appearing while it was being locked — nothing was changed, try again
+    "computer_too_large": 409,  # story 4734: the org has more setups than the grouping reads — a computer-wide act would leave some out
     "setup_disconnected": 409,
     "remote_control_off": 409,  # story #4535 — the device's org turned «원격 제어» off  # story #4548 — the device was disconnected (its token code can no longer be confirmed or exchanged)
     "roles_invalid": 422,
@@ -541,6 +543,29 @@ class SetupListResponse(BaseModel):
     setups: list[SetupItem]
 
 
+class ComputerSetupItem(SetupItem):
+    paired_phones: int = 0  # phones with a live pair with this setup (story 4734: the web's «paired with fewer phones than the others» line)
+
+
+class ComputerItem(BaseModel):
+    """story 4734 — one computer (one Mac · one person · one organization): its setups inside, the same item the setup list gives."""
+    computer_id: uuid.UUID
+    device_name: str
+    state: Literal["waiting_for_app", "handed_over", "not_handed_over", "disconnected"]  # as alive as its best setup
+    confirmed_by: uuid.UUID | None
+    confirmed_by_name: str | None = None
+    confirmed_at: datetime | None
+    last_used_at: datetime | None = None  # the newest heard-from time over its setups
+    live_setups: int  # setups still connected
+    active_keys: int
+    setups: list[ComputerSetupItem]
+
+
+class ComputerListResponse(BaseModel):
+    computers: list[ComputerItem]
+    truncated: bool = False  # more computers than the list holds (the newest are here)
+
+
 class SetupRecipeRole(BaseModel):
     role: str
     kind: Literal["human", "agent", "either"]  # human → the person confirming · agent → a runtime · either → a runtime or owner «me»
@@ -773,6 +798,57 @@ class RevokeResponse(BaseModel):
     already_disconnected: bool
     revoked_at: datetime
     revoked_by_name: str | None
+
+
+@router.get("/computers", response_model=ComputerListResponse)
+async def get_computers(
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story 4734 — the org's desktop setups grouped into computers for the web «연결된 기기» (one line per computer; its setups inside)."""
+    from app.services.desktop_computers import list_computers
+
+    user_id = _human_only(auth)
+    try:
+        return ComputerListResponse(**await list_computers(db, user_id=user_id, org_id=org_id))
+    except DesktopSetupError as e:
+        raise _error(e) from None
+
+
+class ComputerRevokeResponse(BaseModel):
+    setups_disconnected: int  # setups this call disconnected (0 when the computer had none connected)
+    revoked_keys: int
+    already_disconnected: bool  # nothing of it was connected before this call
+    revoked_at: datetime | None
+    revoked_by_name: str | None
+
+
+@router.delete("/computers/{computer_id}", response_model=ComputerRevokeResponse)
+async def delete_computer(
+    computer_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story 4734 — «disconnect this computer»: every setup of it that is still connected, in one transaction (org owner/admin only)."""
+    from app.services.desktop_computers import revoke_computer
+    from app.services.project_auth import is_org_owner_or_admin
+
+    user_id = _human_only(auth)
+    if not await is_org_owner_or_admin(db, user_id, org_id):
+        raise _error(DesktopSetupError("not_org_admin"))
+    try:
+        done = await revoke_computer(db, computer_id=computer_id, user_id=user_id, org_id=org_id)
+        names = await person_names(db, org_id, {done["revoked_by"]} if done["revoked_by"] else set())
+    except DesktopSetupError as e:
+        await db.rollback()
+        raise _error(e) from None
+    await db.commit()
+    return ComputerRevokeResponse(
+        setups_disconnected=done["setups"], revoked_keys=done["keys"], already_disconnected=done["already"], revoked_at=done["revoked_at"],
+        revoked_by_name=names.get(done["revoked_by"]) if done["revoked_by"] else None,
+    )
 
 
 @router.delete("/setups/{setup_id}", response_model=RevokeResponse)
