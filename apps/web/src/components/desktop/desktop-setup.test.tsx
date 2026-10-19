@@ -554,13 +554,13 @@ describe('[SID:4565] existing agents moved to this computer', () => {
   const doneLine = () => container.querySelector('[data-testid=setup-put-on-team-done]') as HTMLElement;
   const failedLine = () => container.querySelector('[data-testid=setup-put-on-team-failed]') as HTMLElement | null;
 
-  it('[SID:4678] not on the team → no option in the select; a line in a folded list with [프로젝트 팀에 넣기] · a runtime this computer lacks gets no button', async () => {
+  it('[SID:4678] not on the team → no option in the select; a line in an open list with [프로젝트 팀에 넣기] · a runtime this computer lacks gets no button', async () => {
     stubGrant(() => new Response('{}', { status: 201 }));
     agentsNow = agentsWith([outsider(ZED, '제드', 'codex')]);
     await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
     expect(optionText(selectOf('조사'), `agent:${OUT}`)).toBeUndefined(); // reverted (a disabled option again) → defined
     const group = container.querySelector('[data-testid=setup-not-on-team]') as HTMLDetailsElement;
-    expect(group.open).toBe(false);
+    expect(group.open).toBe(true); // AC3: open from the start — «넣기 → 고르기 → [시작]» is 3 hands, not 4 (a folded list needed one to open it)
     expect(group.querySelector('summary')!.textContent).toBe('프로젝트 팀에 없는 에이전트 1개');
     expect(group.textContent).not.toContain('제드');
     const [b] = putButtons();
@@ -568,6 +568,22 @@ describe('[SID:4565] existing agents moved to this computer', () => {
     expect([b.textContent, b.getAttribute('aria-label')]).toEqual(['프로젝트 팀에 넣기', '프로젝트 팀에 넣기 · 바깥']);
     expect(group.querySelector('[data-testid=setup-not-on-team-row]')!.textContent).toContain('바깥 · 이 프로젝트 팀에 아직 없어요');
     expect(doneLine().textContent).toBe('');
+  });
+
+  it('[SID:4678 AC3] the list is OPEN from the start for one, two or more not on the team (the button is reachable without a hand to open it); none → not drawn; a person can fold it and a re-render leaves it as they left it', async () => {
+    stubGrant(() => new Response('{}', { status: 201 }));
+    agentsNow = agentsWith([outsider(OUT2, '바깥 둘')]);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    let group = container.querySelector('[data-testid=setup-not-on-team]') as HTMLDetailsElement;
+    expect(group.open).toBe(true);
+    expect(group.querySelector('summary')!.textContent).toBe('프로젝트 팀에 없는 에이전트 2개');
+    expect(putButtons()).toHaveLength(2);
+    // a person folds it; another agent goes onto the team (a re-render) → it stays folded (never forced open again)
+    await act(async () => { group.open = false; });
+    await press(putButtons()[0]);
+    group = container.querySelector('[data-testid=setup-not-on-team]') as HTMLDetailsElement;
+    expect(group.querySelector('summary')!.textContent).toBe('프로젝트 팀에 없는 에이전트 1개');
+    expect(group.open).toBe(false);
   });
 
   it('[SID:4678] [프로젝트 팀에 넣기] → one POST {member_id}, the list read again, the agent is an option (not picked), one line says so, focus goes to the role select, the code is not touched', async () => {
