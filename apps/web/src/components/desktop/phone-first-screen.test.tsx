@@ -267,6 +267,12 @@ describe('[4714] branch 1 — remote control is off', () => {
     expect(text()).not.toContain('켜졌어요');
   });
 
+  it('a screen MOUNTED inside the way-out window still reads and draws (the window stops what is out and blocks presses — it never blanks a fresh screen)', async () => {
+    markLeaving();
+    await screen();
+    expect(byId('onboarding-phone-start')).not.toBeNull();
+  });
+
   it('the switch answers AFTER a way out was pressed: the screen is not blanked by a read that is refused (it stays as it was)', async () => {
     world.startable = { remote_control: false, computers: [computer()] };
     let release: () => void = () => undefined;
@@ -814,6 +820,21 @@ describe('[4714] AC3 — started ≠ stood: the conversation with the started ag
     expect(byId('onboarding-phone-off')).toBeNull(); // not «remote control is off»
     expect(keyReads()).toBe(before); // and no new discovery read was scheduled
     expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(false); // the screen is only freed
+  });
+
+  it('a stopped flow\'s late refusal draws no result line (a way out, then the post answers «computer unreachable»)', async () => {
+    let release: () => void = () => undefined;
+    world.hold = new Promise<void>((r) => { release = r; });
+    world.post = json({ error: { code: 'device_unreachable' } }, 409);
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await act(async () => { (byId('onboarding-phone-start-go') as HTMLElement).click(); });
+    await flush();
+    markLeaving();
+    release();
+    await flush(); await settle();
+    expect(byId('onboarding-phone-result')).toBeNull();
+    expect(text()).not.toContain('닿지 않아요');
   });
 
   it('a way out while the OS prompt is up: nothing is posted for the stopped flow', async () => {
