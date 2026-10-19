@@ -240,6 +240,16 @@ async def test_06b_a_base_persona_is_joined_only_for_the_same_agent_and_project_
             assert got == expected, (expected, got)
 
 
+async def test_06c_a_persona_that_names_itself_as_its_base_is_not_joined_twice(world):
+    async with _client() as c:
+        device = await _device(c, name="d4680 mac m")
+        agent = device["agents"][0]["member_id"]
+        pid = await _persona(agent, name="Ouroboros", system_prompt="ONCE", config={})
+        await _sql(f"UPDATE agent_personas SET config = jsonb_build_object('base_persona_id', id::text) WHERE id = '{pid}'")      # written around the API: the read must still hold
+        got = (await c.get(OWN, params=P, headers=_key(device))).json()["persona"]["instructions"]
+        assert got == "ONCE", got
+
+
 async def test_07_the_text_is_capped_by_characters_and_bytes_and_control_and_format_characters_are_gone(world):
     async with _client() as c:
         device = await _device(c, name="d4680 mac g")

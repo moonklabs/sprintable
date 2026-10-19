@@ -156,6 +156,8 @@ async def update_persona(
         return _err("PERSONA_TEXT_INVALID", invalid, 422)
     body.system_prompt = normalize_persona_text(body.system_prompt)
     body.style_prompt = normalize_persona_text(body.style_prompt)
+    if body.base_persona_id is not None and body.base_persona_id == id:
+        return _err("PERSONA_BASE_INVALID", "A persona cannot be its own base persona.", 422)
     if body.system_prompt is not None and not body.system_prompt.strip():
         # nothing is left of the instructions (blank, or only invisible characters): the column cannot be empty — a readable refusal, not a 500
         return _err("PERSONA_TEXT_INVALID", "The system prompt has nothing visible in it — write the instructions, or leave the field out to keep the current ones.", 422)

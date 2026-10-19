@@ -312,3 +312,19 @@ async def test_codex_5157_blank_after_normalization_and_a_nul_in_a_list_are_read
             _clear_overrides()
     finally:
         await scenario["engine"].dispose()
+
+
+async def test_codex_5157_a_persona_cannot_be_its_own_base_and_the_read_ignores_such_a_row():
+    scenario = await _build_persona_scenario()
+    try:
+        client = await _as_owner(scenario)
+        try:
+            pid = scenario["persona_id"]
+            r = await client.patch(f"/api/v2/agent-personas/{pid}", json={"base_persona_id": str(pid)})
+            assert r.status_code == 422 and r.json()["error"]["code"] == "PERSONA_BASE_INVALID", r.text
+            assert not (await client.get(f"/api/v2/agent-personas/{pid}")).json()["data"].get("base_persona_id")
+        finally:
+            await client.aclose()
+            _clear_overrides()
+    finally:
+        await scenario["engine"].dispose()

@@ -334,8 +334,8 @@ async def persona_for_daemon(db: AsyncSession, *, member: Member, project_id: uu
     base = await AgentPersonaRepository(db)._get_base(row.config or {}, row.org_id)
     # a base persona is joined only when it is a built-in or belongs to this same agent in this same project — the lookup itself knows only the organization, and another
     # agent's or project's text must not ride into this agent's session
-    if base is not None and not (base.is_builtin or (base.agent_id == row.agent_id and base.project_id == row.project_id)):
-        base = None
+    if base is not None and (base.id == row.id or not (base.is_builtin or (base.agent_id == row.agent_id and base.project_id == row.project_id))):
+        base = None   # (a persona that names ITSELF as its base would be joined twice)
     own = (row.system_prompt or "")
     # a recruited persona carries its job template's id: the session edition is composed from that (role + operating rules + workflow pointer — not the tool table,
     # not the one-time integration prompt). Without a template (hand-written, or the template is gone) the persona's own text, minus the integration prompt if it has one.
