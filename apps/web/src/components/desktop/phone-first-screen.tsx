@@ -244,12 +244,6 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
   // A way out · the end of this screen stop it; what a stopped flow gets back later does nothing (no request · no drawing · no move).
   const flowRef = useRef<Flow | null>(null);
   useEffect(() => () => { if (flowRef.current) { flowRef.current.stopped = true; endFlow(flowRef.current); } }, []);
-  // restored from the back-forward cache (the browser's back after the page moved on): the screen of a stopped flow must not stay «starting», and the way-out window is over
-  useEffect(() => {
-    const onShow = (e: PageTransitionEvent) => { if (e.persisted) { setBusy(false); setStanding(false); } }; // (the way-out window is released by lib/phone-start.ts itself)
-    window.addEventListener('pageshow', onShow);
-    return () => window.removeEventListener('pageshow', onShow);
-  }, []);
   // started ≠ stood (story 4714 AC3): «started» is the Mac's word that it spawned the session. The conversation opens when the SERVER says the agent runs on
   // that computer (the same `running` word the landing reads); until then the button stays «starting». Not within the limit: a line says so, the screen is free again.
   const settle = async (o: StartOutcome, flow: Flow) => {
