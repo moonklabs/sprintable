@@ -841,3 +841,34 @@ def test_26_forget_without_its_own_lock_is_called_only_where_the_rows_are_alread
         "async def d(db, ids):\n    await desktop_clock.forget(db, ids)\n"
     )
     assert _forget_without_lock_sites(pkg) == {("app/x.py", "a"), ("app/x.py", "b")}
+
+
+# ── Kadir lens (PO 05:5xZ): a control character in free text must be a 422, never a database error whose log line carries the draft ─────────────────────────────────
+
+
+async def test_27_a_control_character_in_any_free_text_is_refused_and_nothing_of_it_is_logged(world, caplog):
+    from app.main import app  # noqa: F401 — importing the app configures logging and clears the root handlers: attach caplog's again
+
+    logging.getLogger().addHandler(caplog.handler)
+    caplog.set_level(logging.DEBUG)
+    secret = "초안-본문-비밀"
+    async with _client() as c:
+        device, agent, _phone, _der = await _setup(c, "d4424 mac 4733z")
+        sid = device["setup_id"]
+        ok_out = {"at": _iso(), "came": 0, "warn": "none", "still_working": [], "left": ["Writer"]}
+        for bad in ("\x00", "\x01", "\x08", "\x1b", "\x7f", "\u0085", " ", " "):
+            bodies = [
+                _panel(1, agent, rows=[_row(agent, first_line=f"{secret}{bad}x")]),                                      # the draft's first line
+                _report(1, "out", out={**ok_out, "left": [f"{secret}{bad}"]}),                                           # names inside out / in
+                _report(1, "out", out={**ok_out, "still_working": [f"{secret}{bad}"]}),
+                _report(1, "in", **{"in": {"unread": [f"{secret}{bad}"]}}),
+                _report(1, "in", **{"in": {"failed": [{"name": f"{secret}{bad}", "code": "no_folder"}]}}),
+            ]
+            for body in bodies:
+                r = await _put(c, device, body)
+                assert r.status_code == 422, (repr(bad), str(body)[:120], r.status_code)
+        assert await _views(sid) == [] and (await _seq(sid))[0] is None
+        # an ordinary tab and Korean text stay fine
+        assert (await _put(c, device, _panel(1, agent, rows=[_row(agent, first_line=f"{secret}\t다음 줄 없음")]))).status_code == 200
+    leaked = [(r.name, r.levelname) for r in caplog.records if secret in r.getMessage() or secret in str(r.args)]
+    assert leaked == [], leaked

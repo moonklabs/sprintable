@@ -209,8 +209,8 @@ class ClockRow(BaseModel):
         if self.first_line is not None:
             if self.state not in DRAFT_ROW_STATES:
                 raise ValueError("a first line belongs to a draft, not to a saved or ended row")
-            if "\n" in self.first_line or "\r" in self.first_line:
-                raise ValueError("a first line is one line")
+            if not _plain_line(self.first_line):
+                raise ValueError("a first line is one line of plain text")
         if len(set(self.missing)) != len(self.missing):
             raise ValueError("missing has no repeats")
         if self.idle and (self.first_line is not None or self.missing):
@@ -267,6 +267,11 @@ class ClockFailed(BaseModel):
     code: str = Field(pattern=r"^[a-z_]{1,40}$")
     limit: int | None = Field(default=None, ge=0, le=100000, strict=True)
 
+    @model_validator(mode="after")
+    def _plain(self) -> ClockFailed:
+        _check_names([self.name])
+        return self
+
 
 class ClockIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -284,10 +289,17 @@ class ClockIn(BaseModel):
         return self
 
 
+def _plain_line(text: str) -> bool:
+    """One line of plain text: no control character (C0, DEL, the C1 controls, the Unicode line / paragraph separators) — a tab is the one allowed (an indented
+    draft line is ordinary). A NUL among them would pass this schema and be refused by the database (jsonb) as a 500 whose error log carries the bound
+    parameters — the draft's line included — so it is refused HERE, as a 422 (a refused report is not logged). The computer replaces such characters before it sends."""
+    return not any((ord(ch) < 32 and ch != "\t") or 0x7F <= ord(ch) <= 0x9F or ch in "\u2028\u2029" for ch in text)
+
+
 def _check_names(*lists: list[str]) -> None:
     for names in lists:
         for n in names:
-            if not 1 <= len(n) <= NAME_MAX or any(ord(ch) < 32 for ch in n):
+            if not 1 <= len(n) <= NAME_MAX or not _plain_line(n):
                 raise ValueError("a name is 1 to 80 characters on one line")
 
 
