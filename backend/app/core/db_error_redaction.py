@@ -18,7 +18,7 @@ import re
 from types import TracebackType
 from typing import Any
 
-from sqlalchemy.exc import DBAPIError, StatementError
+from sqlalchemy.exc import DBAPIError, InvalidRequestError, PendingRollbackError, StatementError
 
 _DRIVER_MODULES = ("asyncpg", "psycopg2", "psycopg", "pg8000")
 _IDENT = re.compile(r"^[A-Za-z0-9_$.]{1,128}$")
@@ -27,10 +27,12 @@ def _is_db_error(exc: BaseException) -> bool:
     own exceptions and the dialect's adapter exceptions (`sqlalchemy.dialects.*`, whose text quotes the driver's). Configuration / usage errors of SQLAlchemy itself
     (ArgumentError, InvalidRequestError, NoResultFound…) say nothing about a row and keep their words."""
     module = type(exc).__module__
+    if isinstance(exc, PendingRollbackError) or (isinstance(exc, InvalidRequestError) and "Original exception was" in str(exc)):
+        return True  # a session used again after a failed flush: its text quotes the ORIGINAL database error («Original exception was: …»)
     return isinstance(exc, (DBAPIError, StatementError)) or module.split(".")[0] in _DRIVER_MODULES or module.startswith("sqlalchemy.dialects")
 
 
-_GRAPH_LIMIT = 32
+_GRAPH_LIMIT = 50
 
 
 def _children(exc: BaseException) -> list[BaseException]:

@@ -350,3 +350,96 @@ async def test_10_a_handled_catch_all_that_answers_with_the_exception_text_gets_
     with pytest.raises(HTTPException) as caught:
         await retros.advance_phase(uuid.uuid4(), types.SimpleNamespace(phase="x"), None, types.SimpleNamespace(user_id=str(uuid.uuid4())), Plain())
     assert caught.value.detail == "phase must be one of discuss, vote"
+
+
+# ── Kadir lens on #5174 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+def test_11_a_session_used_again_after_a_failed_flush_carries_the_original_error_and_is_redacted(caplog):
+    from sqlalchemy.exc import InvalidRequestError, PendingRollbackError
+
+    from app.core.db_error_redaction import has_db_error, safe_exception_text
+
+    original = f"(sqlalchemy.dialects.postgresql.asyncpg.IntegrityError) duplicate key value violates unique constraint \"uq_x\" DETAIL: Key (slug)=({MARK}) already exists. [SQL: INSERT INTO x (slug) VALUES ($1)]"
+    for exc in (
+        PendingRollbackError(f"This Session's transaction has been rolled back due to a previous exception during flush. Original exception was: {original}"),
+        InvalidRequestError(f"Can't reconnect until invalid transaction is rolled back. Original exception was: {original}"),
+    ):
+        assert has_db_error(exc) and MARK not in safe_exception_text(exc)
+    _watch(caplog)
+    logging.getLogger("app.services.session_reuse").error("again", exc_info=PendingRollbackError(f"rolled back. Original exception was: {original}"))
+    assert MARK not in _record_texts([r for r in caplog.records if r.name == "app.services.session_reuse"])
+    # a usage error of SQLAlchemy that says nothing about a row keeps its words
+    assert not has_db_error(InvalidRequestError("Object is already attached to session"))
+
+
+def test_12_a_chain_of_fifty_levels_is_followed_to_the_database_error():
+    from app.core.db_error_redaction import has_db_error
+
+    e = _db_error()
+    for i in range(45):
+        nxt = RuntimeError(f"level {i}")
+        nxt.__cause__ = e
+        e = nxt
+    assert has_db_error(e)
+
+
+_LOG_METHODS = {"debug", "info", "warning", "warn", "error", "exception", "critical", "fatal", "log"}
+_EXC_NAMES = {"exc", "e", "ex", "err", "error", "exception"}
+
+
+def _log_calls_that_print_exception_text(root) -> set[tuple[str, int]]:
+    """Log calls under backend/app whose message or arguments build text out of an exception: `str(exc)`, `exc.args`, an f-string with `{exc}`, `repr(exc)`, `"…" % exc`
+    or `.format(exc)`. A database error's text carries the row's values, and the record redaction only sees exception OBJECTS — text built before the call gets past it."""
+    import ast
+    from pathlib import Path
+
+    def mentions_exception_text(node) -> bool:
+        for n in ast.walk(node):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in {"str", "repr"} and n.args and isinstance(n.args[0], ast.Name) and n.args[0].id in _EXC_NAMES:
+                return True
+            if isinstance(n, ast.Attribute) and n.attr == "args" and isinstance(n.value, ast.Name) and n.value.id in _EXC_NAMES:
+                return True
+            if isinstance(n, ast.JoinedStr) and any(isinstance(v, ast.FormattedValue) and isinstance(v.value, ast.Name) and v.value.id in _EXC_NAMES for v in n.values):
+                return True
+            if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Mod) and isinstance(n.left, ast.Constant) and isinstance(n.left.value, str) and (
+                (isinstance(n.right, ast.Name) and n.right.id in _EXC_NAMES) or (isinstance(n.right, ast.Tuple) and any(isinstance(x, ast.Name) and x.id in _EXC_NAMES for x in n.right.elts))
+            ):
+                return True
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "format" and any(isinstance(a, ast.Name) and a.id in _EXC_NAMES for a in n.args):
+                return True
+        return False
+
+    found: set[tuple[str, int]] = set()
+    for path in sorted(Path(root).rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        rel = str(path.relative_to(Path(root).parent))
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in _LOG_METHODS:
+                base = n.func.value
+                name = base.id if isinstance(base, ast.Name) else getattr(base, "attr", "")
+                if name in {"logger", "_logger", "log", "logging", "LOGGER", "_log"} and any(mentions_exception_text(a) for a in [*n.args, *[k.value for k in n.keywords]]):
+                    found.add((rel, n.lineno))
+    return found
+
+
+def test_13_no_log_call_in_the_app_builds_text_out_of_an_exception_before_the_record(tmp_path):
+    from pathlib import Path
+
+    app = Path(__file__).resolve().parent.parent / "app"
+    assert _log_calls_that_print_exception_text(app) == set(), (
+        "a log call builds text from an exception (str(exc) / exc.args / f\"{exc}\" / % exc / .format(exc)) — pass the exception OBJECT (a %s argument or exc_info) so the record "
+        "redaction sees it, or use app.core.db_error_redaction.safe_exception_text"
+    )
+    pkg = tmp_path / "app"
+    pkg.mkdir()
+    (pkg / "z.py").write_text(
+        "def a(exc):\n    logger.error(str(exc))\n"
+        "def b(e):\n    logger.warning(f'failed {e}')\n"
+        "def c(err):\n    _logger.info('x %s' % err)\n"
+        "def d(exc):\n    log.error('x', exc.args)\n"
+        "def e2(exc):\n    logger.error('x %s', exc)\n"
+        "def f(exc):\n    logger.exception('x')\n"
+        "def g(exc):\n    other.error(str(exc))\n"
+    )
+    assert _log_calls_that_print_exception_text(pkg) == {("app/z.py", 2), ("app/z.py", 4), ("app/z.py", 6), ("app/z.py", 8)}

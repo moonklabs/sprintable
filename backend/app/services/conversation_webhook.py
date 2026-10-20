@@ -18,6 +18,7 @@ from typing import NamedTuple
 
 import httpx
 
+from app.core.db_error_redaction import safe_exception_text
 from app.models.conversation_webhook_delivery import ConversationWebhookDelivery
 from app.models.webhook_config import WebhookConfig
 # c60dd33c: Discord payload 변환은 공용 헬퍼(discord_webhook)로 단일화 — fire_webhooks 와 공유.
@@ -131,7 +132,7 @@ async def deliver_injected_event_webhook(
                 else:
                     logger.warning(
                         "injected-event webhook delivery failed recipient=%s event=%s url=%s: %s",
-                        recipient_id, event_type, wh.url, str(exc)[:200],
+                        recipient_id, event_type, wh.url, safe_exception_text(exc)[:200],  # story #4741: no text built from an exception before the record
                     )
 
 
