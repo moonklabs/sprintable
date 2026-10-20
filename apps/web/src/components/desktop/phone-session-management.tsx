@@ -34,9 +34,15 @@ const bareName = (name: string, device: string): string => (name.endsWith(` · $
 type Section = { kind: 'reading' } | { kind: 'failed' } | { kind: 'none' } | { kind: 'remote_off' } | { kind: 'computers'; computers: StartableComputer[]; phoneKeyId: string };
 
 export function PhoneSessionManagement() {
+  const { orgId, orgSyncPending } = useDashboardContext();
+  // the list is this organization's: another organization (a client-side switch) REMOUNTS the section, so it starts from a clean slate — nothing of the other one stays
+  // drawn or pressable (state is reset by the key, not by a setState in an effect)
+  return <SessionsForOrg key={orgId ?? ''} orgId={orgId} orgSyncPending={orgSyncPending === true} />;
+}
+
+function SessionsForOrg({ orgId, orgSyncPending }: { orgId: string | undefined; orgSyncPending: boolean }) {
   const t = useTranslations('desktop.phoneSessions');
   const { inPhoneApp, phoneCall } = usePhoneBridge();
-  const { orgId, orgSyncPending } = useDashboardContext();
   const [section, setSection] = useState<Section>({ kind: 'reading' });
   const flowRef = useRef<Flow | null>(null);
   const alive = useRef(true);
@@ -57,14 +63,12 @@ export function PhoneSessionManagement() {
     });
   }, [phoneCall]);
 
-  // the list is this organization's: another organization (a client-side switch) starts from a clean slate — nothing of the other one stays drawn or pressable
   useEffect(() => {
     if (!inPhoneApp) return undefined;
-    setSection({ kind: 'reading' });
     readList();
     const timer = setInterval(readList, LIST_POLL_MS);
     return () => { clearInterval(timer); if (flowRef.current) { flowRef.current.stopped = true; endFlow(flowRef.current); } };
-  }, [inPhoneApp, readList, orgId]);
+  }, [inPhoneApp, readList]);
 
   if (!inPhoneApp || section.kind === 'reading' || section.kind === 'none') return null;
   if (section.kind === 'failed') {
@@ -89,7 +93,7 @@ export function PhoneSessionManagement() {
     <section className="space-y-3" data-testid="phone-sessions" aria-labelledby="phone-sessions-heading">
       <h2 id="phone-sessions-heading" className="text-sm font-semibold text-foreground">{t('title')}</h2>
       {section.computers.map((c) => (
-        <ComputerCard key={`${orgId ?? ''}:${c.setup_id}`} computer={c} phoneKeyId={section.phoneKeyId} onChanged={readList} frozen={orgSyncPending === true} />
+        <ComputerCard key={`${orgId ?? ''}:${c.setup_id}`} computer={c} phoneKeyId={section.phoneKeyId} onChanged={readList} frozen={orgSyncPending} />
       ))}
     </section>
   );

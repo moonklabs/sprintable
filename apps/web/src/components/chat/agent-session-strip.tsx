@@ -186,10 +186,10 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
   // `clock` and this person may command it); an old app or a person without the right gets no line that points at nothing. Asked when the dialog opens.
   const [clockAvailable, setClockAvailable] = useState(false);
   useEffect(() => {
-    setClockAvailable(false); // every opening asks again: the last answer is not this one's
     if (!endOpen || !phone) return undefined;
     let live = true;
     void (async () => {
+      setClockAvailable(false); // every opening asks again (set in the async step, not in the effect body): the last answer is not this one's
       const list = await readStartableKeyed(phoneCall);
       if (!live) return;
       if (list.kind !== 'view') return;

@@ -7468,9 +7468,9 @@
         "alreadyRunning": "이미 일하고 있어요",
         "failed": "하지 못했어요 — 잠시 뒤 다시 눌러 주세요",
         "notAllowed": "이 컴퓨터의 세션은 조직 소유자나 관리자만 폰에서 종료하거나 시작할 수 있어요",
-        "notPaired": "이 폰은 그 컴퓨터와 짝이 아니에요",
+        "notPaired": "이 폰은 그 컴퓨터와 페어링되어 있지 않아요",
         "signInAgain": "다시 로그인해 주세요",
-        "pairAgain": "폰을 다시 짝지어 주세요",
+        "pairAgain": "폰을 다시 페어링해 주세요",
         "biometricRequired": "폰에서 지문이나 얼굴 확인을 켜 주세요",
         "noScreenLock": "폰에 화면 잠금을 먼저 설정해 주세요"
       },
