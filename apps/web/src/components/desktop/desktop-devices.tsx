@@ -13,7 +13,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { fetchWithAuth } from '@/lib/db/client';
 import { pickIGaJosa } from '@/lib/korean-particle';
 import {
-  canDisconnect, canManageDevices, deviceAgentCount, deviceAgents, deviceDateOptions, linkedSetupId, readRevoked, type DesktopDevice,
+  canDisconnect, canManageDevices, deviceAgentCount, deviceAgents, agentNameList, deviceDateOptions, linkedSetupId, readRevoked, type DesktopDevice,
 } from '@/lib/desktop-devices';
 import {
   canDisconnectComputer, computerAgents, computerOfSetup, computerSetupCount, liveSetups, markComputerDisconnected, markSetupDisconnected, orderComputers,
@@ -157,6 +157,7 @@ export function DesktopDevices() {
 
   // the dialogs say the agents of what is about to stop; the particle follows that word (ko — en ignores {josa})
   const setupAgents = t('agents', { count: askedSetup ? deviceAgentCount(askedSetup) : 0 });
+  const askedNames = askedSetup ? agentNameList(askedSetup) : [];
   const allAgents = t('agents', { count: askedComputer ? computerAgents(askedComputer).length : 0 });
   const otherLive = askedComputer && askedSetup && canDisconnect(askedSetup) ? liveSetups(askedComputer).filter((s) => s.setup_id !== askedSetup.setup_id).length : 0;
   const onlyThis = asking?.kind === 'setup' && otherLive > 0;
@@ -233,6 +234,7 @@ export function DesktopDevices() {
               <DialogHeader>
                 <DialogTitle className="truncate" title={askedComputer.device_name}>{t('confirmTitle', { device: askedComputer.device_name })}</DialogTitle>
                 {/* the v3 body is long (story #4434) — keep Korean words whole at 360, as the list rows do (Yuna) */}
+                {askedNames.length > 0 ? <p className="break-keep text-xs text-muted-foreground [overflow-wrap:anywhere]" data-testid="desktop-devices-confirm-agents">{t('confirmAgentsLine', { names: namesText(askedNames, t) })}</p> : null}
                 <DialogDescription className="break-keep" data-testid="desktop-devices-confirm-body">
                   {t('confirmBodyHead', { agents: setupAgents, josa: pickIGaJosa(setupAgents) })}{' '}
                   {onlyThis ? <><strong className="font-semibold text-foreground" data-testid="desktop-devices-only-this">{t('confirmOnlyThis', { m: otherLive })}</strong>{' '}</> : null}
@@ -321,6 +323,11 @@ function ComputerRow({ computer, linked, onDisconnectAll, onDisconnectSetup }: {
   );
 }
 
+/** story 4734 (Yuna §A-2b): one or two names joined « · »; three or more — the first two and «외 {k}» («and {k} more») */
+function namesText(names: string[], t: (key: string, values?: Record<string, string | number>) => string): string {
+  return names.length >= 3 ? t('namesMore', { a: names[0]!, b: names[1]!, k: names.length - 2 }) : names.join(' · ');
+}
+
 function DeviceRow({ device, deviceName, linked = false, onDisconnect }: { device: DesktopDevice; deviceName: string; linked?: boolean; onDisconnect: () => void }) {
   const t = useTranslations('desktop.devices');
   const tOrg = useTranslations('organization');
@@ -328,6 +335,7 @@ function DeviceRow({ device, deviceName, linked = false, onDisconnect }: { devic
   const format = useFormatter();
   const off = device.state === 'disconnected';
   const count = deviceAgentCount(device);
+  const names = agentNameList(device); // the row says WHICH setup it is by its agents' names (no names known → the count, as before)
   // story 4675 (F2 · Yuna §I ④): the row opens to its agents (name → the workforce page · role); a device with no agent is the
   // row alone. A link from the workforce detail (`#device=`) opens it and brings it into view.
   const agents = deviceAgents(device);
@@ -356,14 +364,14 @@ function DeviceRow({ device, deviceName, linked = false, onDisconnect }: { devic
         </p>
         {device.state === 'not_handed_over' ? <p className="mt-0.5 break-keep text-xs text-muted-foreground">{t('notHandedOverWhy')}</p> : null}
         <p className="mt-0.5 break-keep text-xs text-muted-foreground" data-testid="desktop-device-meta">
-          {t('agents', { count })}
+          {names.length > 0 ? <span className="[overflow-wrap:anywhere]" data-testid="desktop-device-names">{namesText(names, t)}</span> : t('agents', { count })}
           {dateText ? <>{' · '}{tz ? dateText : <InvisibleSample>{dateText}</InvisibleSample>}</> : null}
           {who ? <>{' · '}{t(off ? 'disconnectedBy' : 'connectedBy', { name: who })}</> : null}
         </p>
       </div>
       {canDisconnect(device) ? (
         // inside a <summary> a button's click would also open/close the row — the button keeps its one meaning
-        <Button variant="outline" size="sm" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDisconnect(); }} aria-label={t('disconnectSetupAria', { device: deviceName, date: date ?? '' })} data-testid="desktop-device-disconnect">
+        <Button variant="outline" size="sm" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDisconnect(); }} aria-label={names[0] ? t('disconnectSetupAriaNamed', { device: deviceName, name: names[0], date: date ?? '' }) : t('disconnectSetupAria', { device: deviceName, date: date ?? '' })} data-testid="desktop-device-disconnect">
           {t('disconnect')}
         </Button>
       ) : null}

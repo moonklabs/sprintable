@@ -73,7 +73,7 @@ const COMPUTERS = {
   truncated: false,
   computers: [
     { computer_id: 'c1111111-1111-4111-8111-111111111111', device_name: MAC_A, state: 'handed_over', confirmed_by_name: '김지우', confirmed_at: '2026-10-12T01:00:00Z', last_used_at: null, live_setups: 3, active_keys: 3,
-      setups: [setup(1, MAC_A, 12), setup(2, MAC_A, 15, { paired_phones: 2 }), setup(3, MAC_A, 19)] },
+      setups: [setup(1, MAC_A, 12), setup(2, MAC_A, 15, { paired_phones: 2 }), setup(3, MAC_A, 19, { members: ['결제 담당', '문서 정리', '리뷰 도우미', '사무실 점검'].map((name, i) => ({ kind: 'agent', member_id: `a3-${i}`, name, role: 'Dev' })) })] },
     { computer_id: 'c2222222-2222-4222-8222-222222222222', device_name: '사무실 맥 스튜디오 · 3층 회의실 옆', state: 'handed_over', confirmed_by_name: '김지우', confirmed_at: '2026-10-18T01:00:00Z', last_used_at: null, live_setups: 1, active_keys: 1,
       setups: [setup(4, '사무실 맥 스튜디오 · 3층 회의실 옆', 18)] },
   ],
@@ -138,12 +138,15 @@ for (const theme of ['L', 'D'] as const) {
   test(`390 · ${tag(theme)} · devices: one line per computer (folded), then the first computer's fold open`, async ({ page }) => {
     await open(page, { theme, locale: 'ko', which: 'devices' });
     await expect(page.getByTestId('desktop-computer-row')).toHaveCount(2);
-    await expect(page.getByTestId('desktop-computer-meta').first()).toContainText('에이전트 3개 · 설정 3곳');
+    await expect(page.getByTestId('desktop-computer-meta').first()).toContainText('에이전트 6개 · 설정 3곳');
     await fits(page, '[data-testid=desktop-devices]');
     await page.mouse.move(0, 0);
     await page.getByTestId('desktop-devices').screenshot({ path: path.join(outDir(), `4734-390-${tag(theme)}-1-folded.png`) });
     await page.getByTestId('desktop-computer-row').first().locator('summary').first().click();
     await expect(page.getByTestId('desktop-device-row').first()).toBeVisible();
+    // story 4734 §A-2b: a setup row says WHICH setup it is by its agents' names — one name, and the third row's four names as «앞 둘 외 2»
+    await expect(page.getByTestId('desktop-device-names').first()).toContainText('문서 정리');
+    await expect(page.getByTestId('desktop-device-names').nth(2)).toContainText('결제 담당 · 문서 정리 외 2');
     await fits(page, '[data-testid=desktop-devices]');
     await page.mouse.move(0, 0);
     await page.getByTestId('desktop-devices').screenshot({ path: path.join(outDir(), `4734-390-${tag(theme)}-2-open.png`) });
@@ -176,6 +179,7 @@ for (const theme of ['L', 'D'] as const) {
     await page.getByTestId('desktop-computer-row').first().locator('summary').first().click();
     await page.getByTestId('desktop-device-disconnect').first().click();
     await expect(page.getByTestId('desktop-devices-only-this')).toContainText('이 설정만 끊어요 — 이 컴퓨터의 다른 설정 2곳은 그대로예요.');
+    await expect(page.getByTestId('desktop-devices-confirm-agents')).toContainText('이 설정의 에이전트: 문서 정리');
     await expect(page.getByRole('dialog')).toHaveCSS('opacity', '1');
     await fits(page, '[role=dialog]');
     await page.mouse.move(0, 0);
@@ -193,7 +197,7 @@ for (const theme of ['L', 'D'] as const) {
 
 test('390 · en · the folded list and the confirm read in English with plurals', async ({ page }) => {
   await open(page, { theme: 'L', locale: 'en', which: 'devices' });
-  await expect(page.getByTestId('desktop-computer-meta').first()).toContainText('3 agents · 3 setups');
+  await expect(page.getByTestId('desktop-computer-meta').first()).toContainText('6 agents · 3 setups');
   await expect(page.getByTestId('desktop-computer-meta').nth(1)).toContainText('1 agent · 1 setup');
   await page.getByTestId('desktop-computer-disconnect-all').first().click();
   await expect(page.getByTestId('desktop-computers-confirm-all')).toHaveText('Disconnect all 3 setups');

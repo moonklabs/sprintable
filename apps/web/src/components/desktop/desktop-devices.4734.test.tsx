@@ -90,7 +90,7 @@ describe('[4734 AC3] one line per computer', () => {
     expect(summary.textContent).toContain('설정 접기'); // (both words are in the DOM; the CSS shows the one that fits the state)
     expect(q('desktop-computer-disconnect-all')[0].getAttribute('aria-label')).toBe('SYJ-MacBook-Pro 연결 모두 끊기');
     expect(q('desktop-computer-disconnect-all')[0].textContent).toBe('이 컴퓨터 모두 끊기');
-    expect(q('desktop-device-disconnect')[0].getAttribute('aria-label')).toMatch(/^SYJ-MacBook-Pro의 설정 연결 끊기 · \d+월 \d+일$/);
+    expect(q('desktop-device-disconnect')[0].getAttribute('aria-label')).toMatch(/^SYJ-MacBook-Pro의 설정 연결 끊기 · 에이전트1 · \d+월 \d+일$/); // (the first agent's name rides along — story 4734 §A-2b)
     expect(q('desktop-device-disconnect')).toHaveLength(4); // a setup row each (3 + 1)
     // the setups of one computer are told apart by their date, in the agents fold's name as well as the button's
     const folds = [...q('desktop-computer-setups')[0].querySelectorAll('summary')].map((n) => n.getAttribute('aria-label'));
@@ -260,5 +260,54 @@ describe('[4734] the in-between line (a computer\'s setups hold different number
     listBody = list(computer(C1, 'SYJ-MacBook-Pro', [setup(1, { paired_phones: 2 }), setup(2, { paired_phones: 0 })]));
     await render();
     expect(q('desktop-computer-pair-gap')[0].textContent).toBe('폰 페어링이 설정 2곳 중 1곳에만 돼 있어요 — 그 컴퓨터의 앱을 최신으로 업데이트하면 모두 맞춰져요.');
+  });
+});
+
+
+describe('[4734 · Yuna §A-2b] a setup row names its agents', () => {
+  const named = (n: number, names: Array<string | null>, over: Record<string, unknown> = {}) => setup(n, {
+    members: names.flatMap((name, i) => [{ kind: 'agent', member_id: `ag-${n}-${i}`, name, role: 'Dev' }, { kind: 'agent', member_id: `ag-${n}-${i}`, name, role: 'Reviewer' }]).concat([{ kind: 'human', member_id: 'person', name: '김지우', role: 'direct' } as never]),
+    ...over,
+  });
+  const openFold = async () => { await render(); await click(q('desktop-computer-row')[0].querySelector('summary')!); };
+  const rowMeta = (i: number) => q('desktop-device-meta')[i].textContent;
+
+  it('1 · 2 · 3+ names and the fallback: «A» · «A · B» · «A · B 외 k» · no name → «에이전트 n개» (the same agent holding two stages is one name)', async () => {
+    listBody = list(computer(C1, 'SYJ-MacBook-Pro', [
+      named(1, ['결제 담당']), named(2, ['결제 담당', '문서 정리']), named(3, ['결제 담당', '문서 정리', '리뷰 도우미', '사무실 점검']), named(5, [null, '  ']),
+    ]));
+    await openFold();
+    expect(rowMeta(0)).toMatch(/^결제 담당 · \d+월 \d+일 연결 · 연결한 사람 김지우$/);
+    expect(rowMeta(1)).toMatch(/^결제 담당 · 문서 정리 · \d+월 \d+일 연결/);
+    expect(rowMeta(2)).toMatch(/^결제 담당 · 문서 정리 외 2 · \d+월 \d+일 연결/);
+    expect(rowMeta(3)).toMatch(/^에이전트 2개 · \d+월 \d+일 연결/); // two agents with no usable name: the count, as before
+    expect(q('desktop-computer-meta')[0].textContent).toMatch(/^에이전트 \d+개 · 설정 4곳/); // the computer's line keeps the totals
+  });
+
+  it('en: «A · B and 2 more» and the aria label carries the first name', async () => {
+    listBody = list(computer(C1, 'Mac', [named(3, ['Pay', 'Docs', 'Review', 'Office'])]));
+    await render('en');
+    await click(q('desktop-computer-row')[0].querySelector('summary')!);
+    expect(rowMeta(0)).toMatch(/^Pay · Docs and 2 more · /);
+    expect(q('desktop-device-disconnect')[0].getAttribute('aria-label')).toMatch(/^Disconnect one setup of Mac · Pay · /);
+  });
+
+  it('the button\'s aria-label: «{device}의 설정 연결 끊기 · {첫 이름} · {날짜}» (no name → as before)', async () => {
+    listBody = list(computer(C1, 'SYJ-MacBook-Pro', [named(1, ['결제 담당', '문서 정리']), named(2, [null])]));
+    await openFold();
+    const labels = q('desktop-device-disconnect').map((b) => b.getAttribute('aria-label'));
+    expect(labels[0]).toMatch(/^SYJ-MacBook-Pro의 설정 연결 끊기 · 결제 담당 · \d+월 \d+일$/);
+    expect(labels[1]).toMatch(/^SYJ-MacBook-Pro의 설정 연결 끊기 · \d+월 \d+일$/);
+  });
+
+  it('the single-setup confirm gets a muted first line «이 설정의 에이전트: …» — the old sentence stays untouched; no names → no line', async () => {
+    listBody = list(computer(C1, 'SYJ-MacBook-Pro', [named(1, ['결제 담당', '문서 정리', '리뷰 도우미']), named(2, [null])]));
+    await openFold();
+    await click(q('desktop-device-disconnect')[0]);
+    expect(q('desktop-devices-confirm-agents')[0].textContent).toBe('이 설정의 에이전트: 결제 담당 · 문서 정리 외 1');
+    expect(q('desktop-devices-confirm-body')[0].textContent).toContain('끊으면 이 기기의 에이전트 3개가 멈춰요'); // (the particle sentence is the old one)
+    await click([...document.querySelectorAll('button')].find((b) => b.textContent === '취소')!);
+    await click(q('desktop-device-disconnect')[1]);
+    expect(q('desktop-devices-confirm-agents')).toHaveLength(0);
   });
 });

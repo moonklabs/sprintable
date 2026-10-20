@@ -31,6 +31,11 @@ export function deviceAgents(device: DesktopDevice): { member_id: string; name: 
   return out;
 }
 
+/** story 4734 (Yuna §A-2b): the names of a setup's agents for its row — the distinct agents in the setup's order, a missing or blank name left out (the row then falls back to the count) */
+export function agentNameList(device: DesktopDevice): string[] {
+  return deviceAgents(device).map((a) => (a.name ?? '').trim()).filter((n) => n !== '');
+}
+
 /** story 4675: the device a link points at (`/desktop#device=<setup_id>` — the workforce detail's «연결된 기기 보기») */
 export function linkedSetupId(hash: string): string | null {
   const m = /(?:^#|[#&])device=([0-9a-f-]{36})(?:&|$)/i.exec(hash);
