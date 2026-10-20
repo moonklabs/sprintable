@@ -11,6 +11,7 @@ import pytest
 from app.dependencies.auth import get_current_user
 from app.dependencies.database import get_db, get_read_db
 from app.main import app
+from tests.conftest import override_db_and_read
 
 
 async def _stranger():
@@ -30,8 +31,8 @@ def _overrides_set_before_the_tests():
 def test_01_a_test_that_sets_overrides_and_never_clears_them(_overrides_set_before_the_tests):
     assert app.dependency_overrides.get(get_read_db) is _stranger
     app.dependency_overrides[get_current_user] = _stranger
-    app.dependency_overrides[get_db] = _stranger
-    app.dependency_overrides[get_read_db] = lambda: None  # also replaces a key the module fixture had set
+    override_db_and_read(app, _stranger)  # the one way a test may set get_db (story #2451 lint): sets get_read_db too
+    app.dependency_overrides[get_read_db] = lambda: None  # a key the module fixture had set, replaced
 
 
 def test_02_the_next_test_starts_without_them_and_keeps_what_the_module_set(_overrides_set_before_the_tests):
