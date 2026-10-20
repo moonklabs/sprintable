@@ -24,6 +24,7 @@ from app.core.database import async_session_factory
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
 from app.models.desktop_setup import DesktopSetup
+from app.services import desktop_clock
 from app.services import desktop_relay as relay
 from app.services.agent_permissions import HostAdded, HostConfirm, PairingReveal, PairingSnapshot, PermissionRequestReport, Withdrawal
 from app.services.desktop_relay import SESSION_KEY_PATTERN
@@ -271,6 +272,78 @@ async def get_startable_computers(
     )
 
 
+async def _phone_person(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
+    """A person's own session (an API key or an agent key is 403) — the phone's presses and reads of a computer's clock."""
+    from app.routers.auth import _requires_interactive_session
+    from app.services.member_resolver import resolve_member
+
+    if _requires_interactive_session(auth):
+        raise HTTPException(status_code=403, detail={"code": "person_session_required", "message": "a person's session is required"})
+    member = await resolve_member(auth, org_id, db)
+    if member.type != "human":
+        raise HTTPException(status_code=403, detail={"code": "person_session_required", "message": "a person's session is required"})
+    return member
+
+
+@router.post("/setups/{setup_id}/clock")
+async def post_clock(
+    setup_id: uuid.UUID,
+    body: desktop_clock.ClockRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story #4733 (S2): a phone's signed clock-out / clock-in of one whole computer (`clock` command: action out_open · out_submit · out_cancel · in).
+    A person's own session; who may press and the phone's pairing are checked in services.desktop_clock. The daemon judges whether the action fits."""
+    member = await _phone_person(db, auth, org_id)
+    try:
+        cmd, state = await desktop_clock.create_clock(
+            db, member_id=uuid.UUID(str(member.id)), user_id=uuid.UUID(str(auth.user_id)), org_id=org_id, setup_id=setup_id, body=body,
+        )
+    except relay.DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await db.commit()
+    return JSONResponse(status_code=201, content={"command_id": str(cmd.id), "state": state})
+
+
+@router.get("/setups/{setup_id}/clock")
+async def get_clock(
+    setup_id: uuid.UUID,
+    phone_key_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story #4733 (S2): the closed clock view the computer reported (null when no flow is open), for the paired phone of a person who may command it."""
+    member = await _phone_person(db, auth, org_id)
+    try:
+        body = await desktop_clock.clock_view_read(
+            db, member_id=uuid.UUID(str(member.id)), user_id=uuid.UUID(str(auth.user_id)), org_id=org_id, setup_id=setup_id, phone_key_id=phone_key_id,
+        )
+    except relay.DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await db.commit()  # an expired view is deleted by the read
+    return body
+
+
+@router.get("/setups/{setup_id}/clock/commands/{command_id}")
+async def get_clock_command(
+    setup_id: uuid.UUID,
+    command_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story #4733 (S2): the result line of a clock press — for the person who pressed only."""
+    member = await _phone_person(db, auth, org_id)
+    try:
+        return await desktop_clock.get_clock_command(db, member_id=uuid.UUID(str(member.id)), org_id=org_id, setup_id=setup_id, command_id=command_id)
+    except relay.DesktopRelayError as exc:
+        return _error(exc)
+
+
 @router.get("/setups/{setup_id}/sessions")
 async def get_device_sessions(
     setup_id: uuid.UUID,
@@ -413,6 +486,19 @@ async def put_startable(body: relay.StartableSnapshot, setup: DesktopSetup = Dep
     # `dropped_agents`: agents in the list this device was not set up with (left out, not refused) · `applied` False = a newer report had already been applied
     # `startable_seq`: the report number the server holds after this report (null = none yet) — when `applied` is false the computer goes on from it
     return {"startable": n, "dropped_agents": [str(a) for a in dropped], "applied": applied, "startable_seq": held}
+
+
+@router.put("/relay/clock-view")
+async def put_clock_view(body: desktop_clock.ClockViewReport, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story #4733 (S2): the computer's closed clock view while a clock-out / clock-in flow is open; `none` ends it. Numbered like the startable list: a report
+    at or below the highest applied is ignored (`applied` false) and the computer goes on from `clock_view_seq`. Nothing of the body is logged."""
+    try:
+        applied, held, dropped = await desktop_clock.apply_clock_view(db, setup, body)
+    except relay.DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await db.commit()
+    return {"applied": applied, "clock_view_seq": held, "dropped_rows": dropped}
 
 
 @router.put("/relay/pairings")

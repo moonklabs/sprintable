@@ -14,7 +14,9 @@ from app.core.database import Base
 
 # story #4599 (0443 · contract v1.13.2 · PO 14:08Z): `end_session` — a person's signed end of the whole session (the one handle on
 # a turn held by a macOS window, where a stop cannot reach); always ends, what was signed is what happens
-COMMAND_KINDS = ("start_session", "send_prompt", "answer_approval", "stop_session", "end_session")
+# story #4733 (0459 · S2 · design 4733-phone-clock-design-1020.md): `clock` — a person's signed clock-out / clock-in of one whole computer from the phone;
+# the word is one, the choice (out_open · out_submit · out_cancel · in) is the payload's `action` (so a new action needs no migration)
+COMMAND_KINDS = ("start_session", "send_prompt", "answer_approval", "stop_session", "end_session", "clock")
 COMMAND_STATES = ("queued", "delivered", "acked", "done", "failed", "rejected")
 # a command's state moves forward only: queued → delivered → acked → one end
 COMMAND_STATE_ORDER = {"queued": 0, "delivered": 1, "acked": 2, "done": 3, "failed": 3, "rejected": 3}
@@ -38,6 +40,9 @@ SESSION_LIMIT_HELD = ("screen", "esc_not_taken")
 # story #4684 (0454): why a computer's subscription for an agent is stopped — the app board's own closed words (the daemon's InboxStreamStatus stops)
 SESSION_INBOX_STREAMS = ("stopped_other_receiver", "stopped_taken_over", "stopped_auth", "stopped_inbox_full")
 SESSION_RUNTIMES = ("claude", "codex")
+# story #4733 (0459): the clock view a computer reports. A row exists while a flow is open (panel · out · in) — or, in mode `none`, only while some agents stand
+# clocked out one by one (`outs`: ids and times, so the phone can draw each one's [출근]); a `none` report with nothing in it deletes the row
+CLOCK_VIEW_MODES = ("none", "panel", "out", "in")
 
 
 def _in(column: str, values: tuple[str, ...]) -> str:
@@ -162,6 +167,24 @@ class DesktopCommand(Base):
     # story #4534 (0434) — a [지금 지시]'s conversation, and its turn's end told once to the person who sent it
     conversation_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     turn_end_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DesktopClockView(Base):
+    """story #4733 (0459): the latest closed clock view of one computer — at most one row per computer, only while a flow is open or some agents stand clocked
+    out one by one (an empty `none` report deletes it; `expires_at` ends it otherwise). Holds the draft's first lines while the clock-out is being drafted: read by the paired phone of a person who
+    may command that computer, never logged. The report numbering lives on desktop_setups (`clock_view_seq`), not here, so a deleted row cannot be brought
+    back by a late lower-numbered report."""
+
+    __tablename__ = "desktop_clock_views"
+    __table_args__ = (CheckConstraint(_in("mode", CLOCK_VIEW_MODES), name="ck_desktop_clock_views_mode"),)
+
+    setup_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("desktop_setups.id", ondelete="CASCADE"), primary_key=True,
+    )
+    mode: Mapped[str] = mapped_column(Text, nullable=False)
+    view: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class DesktopDeviceTokenCode(Base):

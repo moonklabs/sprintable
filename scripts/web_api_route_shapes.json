@@ -895,6 +895,11 @@
 "kind": "object"
 },
 {
+"method": "PUT",
+"path": "/api/v2/desktop/relay/clock-view",
+"kind": "unknown"
+},
+{
 "method": "POST",
 "path": "/api/v2/desktop/relay/commands/{}/result",
 "kind": "unknown"
@@ -1008,6 +1013,21 @@
 "method": "GET",
 "path": "/api/v2/desktop/setups/{}",
 "kind": "object"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/setups/{}/clock",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/desktop/setups/{}/clock",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/setups/{}/clock/commands/{}",
+"kind": "unknown"
 },
 {
 "method": "GET",

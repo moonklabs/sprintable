@@ -995,14 +995,18 @@ async def answer_request(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid
     return row
 
 
-async def paired_phone(db: AsyncSession, *, member_id: uuid.UUID, phone_id: uuid.UUID, setup_id: uuid.UUID) -> RemoteDevice | None:
+async def paired_phone(db: AsyncSession, *, member_id: uuid.UUID, phone_id: uuid.UUID, setup_id: uuid.UUID, lock: bool = False) -> RemoteDevice | None:
     """The person's own phone key, paired with that computer now (not removed) — or None. One check for a permission answer
-    (§9 ③) and a stop/instruction (§11 ②, story #4534)."""
-    return (await db.execute(
+    (§9 ③) and a stop/instruction (§11 ②, story #4534). `lock`: hold the key and the pairing rows with a share lock until the transaction ends (story #4733 —
+    a pairing removal or a key revocation that comes meanwhile waits for the press that relies on them)."""
+    stmt = (
         select(RemoteDevice).join(RemoteDevicePairing, RemoteDevicePairing.remote_device_id == RemoteDevice.id)
         .where(RemoteDevice.id == phone_id, RemoteDevice.member_id == member_id, RemoteDevice.revoked_at.is_(None),
                RemoteDevicePairing.setup_id == setup_id, RemoteDevicePairing.removed_at.is_(None))
-    )).scalar_one_or_none()
+    )
+    if lock:
+        stmt = stmt.with_for_update(read=True)
+    return (await db.execute(stmt)).scalar_one_or_none()
 
 
 # ── ④ the daemon's verdict on the answer ────────────────────────────────────────────────────────────────────────────────

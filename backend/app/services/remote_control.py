@@ -115,6 +115,9 @@ async def set_enabled(db: AsyncSession, *, org: Organization, actor_id: uuid.UUI
 
         setup_ids = list((await db.execute(select(DesktopSetup.id).where(DesktopSetup.org_id == org.id))).scalars().all())
         rejected = await reject_open_commands(db, setup_ids=setup_ids, result_code=OFF_CODE)
+        from app.services import desktop_clock
+
+        await desktop_clock.forget(db, setup_ids)  # story #4733 — the line is off: no clock view stays on the server
         await db.flush()
         return rejected
     return await _wake_devices(db, org.id)

@@ -1186,6 +1186,9 @@ async def _retire_same_machine(
         o.revoked_at = now
         o.revoked_reason = "replaced_by_new_setup"
     if old:
+        from app.services import desktop_clock
+
+        await desktop_clock.forget(db, [o.id for o in old], lock=False)  # story #4733 — a replaced line keeps no clock view (its row is already held: `_lock_in_order` in the exchange)
         await db.execute(
             update(DesktopDeviceToken)
             .where(DesktopDeviceToken.setup_id.in_([o.id for o in old]), DesktopDeviceToken.revoked_at.is_(None))
@@ -1366,6 +1369,9 @@ async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
     # and its open stream is told after the commit so it ends with `access_revoked` now, not at its next 30-second check
     await desktop_relay.reject_open_commands(db, setup_ids=[setup.id], result_code=desktop_relay.DISCONNECTED_CODE)
     desktop_relay.schedule_disconnected_after_commit(db, setup.id)
+    from app.services import desktop_clock
+
+    await desktop_clock.forget(db, [setup.id], lock=False)  # story #4733 — a clock view (draft first lines) does not outlive the computer's connection (the row is held: `_lock_in_order` above)
     # story #4565: only the agents this setup made — an existing agent attached here keeps running elsewhere once moved on
     # (its keys from this setup are revoked above; the agent itself is not stopped)
     agent_ids = {
