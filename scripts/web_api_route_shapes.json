@@ -860,6 +860,16 @@
 "kind": "object"
 },
 {
+"method": "GET",
+"path": "/api/v2/desktop/computers",
+"kind": "object"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/desktop/computers/{}",
+"kind": "object"
+},
+{
 "method": "POST",
 "path": "/api/v2/desktop/device-token-codes",
 "kind": "object"
@@ -3107,6 +3117,11 @@
 {
 "method": "DELETE",
 "path": "/api/v2/remote-devices/{}",
+"kind": "unknown"
+},
+{
+"method": "DELETE",
+"path": "/api/v2/remote-devices/{}/computers/{}",
 "kind": "unknown"
 },
 {

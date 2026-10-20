@@ -447,12 +447,16 @@ async def startable_view(db: AsyncSession, *, member_id: uuid.UUID, member_role:
     agent = await _agent(db, org_id, agent_id)
     setups = await _agent_setups(db, org_id, agent_id) if agent.is_active else []  # a deactivated agent has nothing to start
     reachable = await _reachable(db, {s.id for s in setups}, _now())
+    from app.services.desktop_computers import computer_index
+
+    computer_of = await computer_index(db, org_id)  # story 4734: the computer each entry's setup belongs to — an ADDED id; the entry stays one per setup
     computers: list[dict] = []
     for setup in setups:
         if await paired_phone(db, member_id=member_id, phone_id=phone_key_id, setup_id=setup.id) is None:
             continue
         computers.append({
-            "setup_id": str(setup.id), "device_name": setup.device_name, "reachable": setup.id in reachable,
+            "setup_id": str(setup.id), "computer_id": str(computer_of[setup.id]) if setup.id in computer_of else None,
+            "device_name": setup.device_name, "reachable": setup.id in reachable,
             "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup),
             "projects": await _openable_startable_projects(db, setup, agent_id, user_id=user_id, org_id=org_id),
         })
@@ -492,6 +496,9 @@ async def startable_computers_view(db: AsyncSession, *, member_id: uuid.UUID, me
         .order_by(DesktopSetup.exchanged_at.desc(), DesktopSetup.id)
     )).scalars().all()
     reachable = await _reachable(db, {s.id for s in setups}, _now())
+    from app.services.desktop_computers import computer_index
+
+    computer_of = await computer_index(db, org_id)  # story 4734: an ADDED id per entry (the entry stays one per setup — the phone shell reads it by `setup_id`)
     agent_ids_by_setup: dict[uuid.UUID, list[uuid.UUID]] = {}
     for setup in setups:
         agent_ids: list[uuid.UUID] = []
@@ -530,7 +537,10 @@ async def startable_computers_view(db: AsyncSession, *, member_id: uuid.UUID, me
                 "running": _agent_running(session_states.get((setup.id, aid), []), setup.id in reachable),
             })
         agents.sort(key=lambda a: (a["name"] or "", a["agent_member_id"]))
-        computers.append({"setup_id": str(setup.id), "device_name": setup.device_name, "reachable": setup.id in reachable, "agents": agents})
+        computers.append({
+            "setup_id": str(setup.id), "computer_id": str(computer_of[setup.id]) if setup.id in computer_of else None,
+            "device_name": setup.device_name, "reachable": setup.id in reachable, "agents": agents,
+        })
     return {"remote_control": await remote_control.is_enabled(db, org_id), "computers": computers}
 
 

@@ -195,8 +195,16 @@ async def device_setup_facts(setup: DesktopSetup = Depends(_device), db: AsyncSe
     here, with its own device token. Not a secret: `X-Desktop-Org-Id` on the stream already names the org to this token's holder."""
     from app.models.organization import Organization
 
+    from app.services import agent_permissions
+    from app.services.desktop_computers import computer_index
+
     name = (await db.execute(select(Organization.name).where(Organization.id == setup.org_id))).scalar_one_or_none()
-    return {"org_id": str(setup.org_id), "org_name": name}
+    # story 4734: the computer this setup belongs to, and the phones a person removed from a setup of it (the device's one-time merge leaves them out)
+    return {
+        "org_id": str(setup.org_id), "org_name": name,
+        "computer_id": str((await computer_index(db, setup.org_id)).get(setup.id) or ""),  # (null removed_phones: the grouping is incomplete — do not merge now)
+        "removed_phones": await agent_permissions.phones_removed_by_a_person(db, setup=setup),
+    }
 
 
 @router.put("/relay/sessions")

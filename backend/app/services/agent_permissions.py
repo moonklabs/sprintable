@@ -200,17 +200,21 @@ async def list_phones(db: AsyncSession, *, member_id: uuid.UUID | None, org_id: 
     phones = (await db.execute(q)).scalars().all()
     if not phones:
         return []
+    from app.services.desktop_computers import computer_index
+
+    computers = await computer_index(db, org_id)  # story 4734: the computer each pair's setup belongs to (the web groups a phone's pairs by it)
     pairs = (await db.execute(
         select(RemoteDevicePairing.remote_device_id, RemoteDevicePairing.setup_id, RemoteDevicePairing.paired_at, DesktopSetup.device_name)
         .join(DesktopSetup, DesktopSetup.id == RemoteDevicePairing.setup_id)
         .where(RemoteDevicePairing.remote_device_id.in_([p.id for p in phones]), RemoteDevicePairing.removed_at.is_(None),
-               DesktopSetup.revoked_at.is_(None))
+               DesktopSetup.revoked_at.is_(None), DesktopSetup.org_id == org_id)  # story 4734 (codex): a pair whose setup is of another org lists nothing of it
         .order_by(RemoteDevicePairing.paired_at)
     )).all()
     by_phone: dict[uuid.UUID, list[dict]] = {}
     for phone_id, setup_id, paired_at, device_name in pairs:
         by_phone.setdefault(phone_id, []).append(
-            {"setup_id": str(setup_id), "device_name": device_name, "paired_at": paired_at.isoformat()}
+            {"setup_id": str(setup_id), "device_name": device_name, "paired_at": paired_at.isoformat(),
+             **({"computer_id": str(computers[setup_id])} if setup_id in computers else {})}
         )
     return [_device_view(p, by_phone.get(p.id, [])) for p in phones]
 
@@ -237,6 +241,67 @@ async def remove_pair(
     await db.flush()
     _wake_device_after_commit(db, setup_id)
     return True
+
+
+async def remove_computer_pairs(
+    db: AsyncSession, *, phone_id: uuid.UUID, computer_id: uuid.UUID, actor_member_id: uuid.UUID | None, actor_is_admin: bool, org_id: uuid.UUID,
+) -> int:
+    """story 4734 — [빼기] for the COMPUTER: the phone's pair with every setup of it, at once on the server (as `remove_pair` does for one) and sent down
+    as `pairing_removed` to each setup's device until its snapshot drops it. The same people may do it (the phone's owner · an owner/admin of the org).
+    Returns how many pairs were removed now (0: every pair of this computer was already removed). A computer the phone is not paired with · another org's
+    computer → 404 `pairing_not_found`."""
+    from app.services.desktop_computers import ComputerGroupingIncomplete, setup_ids_of_computer
+
+    phone = (await db.execute(
+        select(RemoteDevice).where(RemoteDevice.id == phone_id, RemoteDevice.org_id == org_id)
+    )).scalar_one_or_none()
+    if phone is None or not (actor_is_admin or phone.member_id == actor_member_id):
+        raise DesktopRelayError(404, "pairing_not_found", "no such pairing")
+    try:
+        setup_ids = await setup_ids_of_computer(db, org_id, computer_id, live_only=False, complete=True)
+    except ComputerGroupingIncomplete:  # more setups than the grouping reads: part of the computer might be left out — refuse rather than do part
+        raise DesktopRelayError(409, "computer_too_large", "this organization has more setups than a computer can be removed from in one step") from None
+    pairs = (await db.execute(
+        select(RemoteDevicePairing).where(RemoteDevicePairing.remote_device_id == phone_id, RemoteDevicePairing.setup_id.in_(setup_ids))
+        .order_by(RemoteDevicePairing.setup_id).with_for_update()
+    )).scalars().all() if setup_ids else []
+    if not pairs:
+        raise DesktopRelayError(404, "pairing_not_found", "no such pairing")
+    now = _now()
+    removed = 0
+    for pair in pairs:
+        if pair.removed_at is not None:
+            continue
+        pair.removed_at, pair.removed_by, pair.removal_acked_at = now, actor_member_id, None
+        _wake_device_after_commit(db, pair.setup_id)
+        removed += 1
+    await db.flush()
+    return removed
+
+
+async def phones_removed_by_a_person(db: AsyncSession, *, setup: DesktopSetup) -> list[str] | None:
+    """story 4734 (PO 10-20 · M2): the fingerprints of phones a PERSON removed (`removed_by` set — not a device dropping its own pin) from some
+    still-connected setup of this setup's computer (a removed phone KEY counts: removing the key removes its pairs). The device uses it once, when it first merges its setups' phone keys into one computer-wide
+    list: a phone a person took away from a setup is not brought back to it by the merge. Removal-direction information only — it cannot add a key.
+    «A person» is ANY person: a phone another person of the same organization removed from one setup of this Mac is named to this computer's other setups too (a key hash,
+    on the same Mac that held the pin, removal-only — lens review 10-20 · PO). Never from another organization's phone keys, and never from a disconnected setup."""
+    from app.services.desktop_computers import ComputerGroupingIncomplete, computer_index, setup_ids_of_computer
+
+    try:
+        index = await computer_index(db, setup.org_id, complete=True)  # ONE grouping read: this setup's computer and its siblings come from the same snapshot
+        mine = index.get(setup.id)
+        if mine is None:
+            return []
+        siblings = await setup_ids_of_computer(db, setup.org_id, mine, live_only=True, index=index)
+    except ComputerGroupingIncomplete:
+        return None  # the grouping is incomplete (an org past the cap): the answer would be a partial list — «not now», never a short list the device merges on
+    if not siblings:
+        return []
+    return sorted({fp for (fp,) in (await db.execute(
+        select(RemoteDevice.fingerprint).join(RemoteDevicePairing, RemoteDevicePairing.remote_device_id == RemoteDevice.id)
+        .where(RemoteDevicePairing.setup_id.in_(siblings), RemoteDevicePairing.removed_at.is_not(None),
+               RemoteDevicePairing.removed_by.is_not(None), RemoteDevice.org_id == setup.org_id)  # a revoked KEY counts too: removing the key removes its pairs by a person
+    )).all()})
 
 
 async def _end_phone_session(db: AsyncSession, phone: RemoteDevice, now: datetime) -> Literal["ended", "not_found"]:
@@ -999,13 +1064,16 @@ async def paired_phone(db: AsyncSession, *, member_id: uuid.UUID, phone_id: uuid
     """The person's own phone key, paired with that computer now (not removed) — or None. One check for a permission answer
     (§9 ③) and a stop/instruction (§11 ②, story #4534). `lock`: hold the key and the pairing rows with a share lock until the transaction ends (story #4733 —
     a pairing removal or a key revocation that comes meanwhile waits for the press that relies on them)."""
+    # story 4734: a DISCONNECTED setup holds no pair — «disconnect this computer» takes its paired phones' hands off it by this gate too (the
+    # other gates — the setup list, the device token, the command queue — already refuse; this one no longer relies on them)
     stmt = (
         select(RemoteDevice).join(RemoteDevicePairing, RemoteDevicePairing.remote_device_id == RemoteDevice.id)
+        .join(DesktopSetup, DesktopSetup.id == RemoteDevicePairing.setup_id)
         .where(RemoteDevice.id == phone_id, RemoteDevice.member_id == member_id, RemoteDevice.revoked_at.is_(None),
-               RemoteDevicePairing.setup_id == setup_id, RemoteDevicePairing.removed_at.is_(None))
+               RemoteDevicePairing.setup_id == setup_id, RemoteDevicePairing.removed_at.is_(None), DesktopSetup.revoked_at.is_(None))
     )
     if lock:
-        stmt = stmt.with_for_update(read=True)
+        stmt = stmt.with_for_update(read=True, of=(RemoteDevice, RemoteDevicePairing))  # (the setup row is only read: a disconnect is not held by a press)
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
