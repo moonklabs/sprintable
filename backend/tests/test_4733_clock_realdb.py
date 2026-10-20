@@ -807,6 +807,28 @@ _LOCKED_FORGET_SITES = {
 }
 
 
+def _forget_pointers_that_are_not_calls(root) -> set[tuple[str, int]]:
+    """Every place under backend/app that POINTS at `forget` without calling it — `alias = desktop_clock.forget`, `from app.services.desktop_clock import forget`, a callback
+    list `[desktop_clock.forget]`. A call through such an alias would carry `lock=False` where the call-site scan above cannot see it, so the only pointers allowed are none:
+    a caller calls `desktop_clock.forget(...)` by its name (the definition itself is a `def`, not a pointer)."""
+    import ast
+    from pathlib import Path
+
+    found: set[tuple[str, int]] = set()
+    for path in sorted(Path(root).rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        called = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
+        rel = str(path.relative_to(Path(root).parent))
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Attribute) and n.attr == "forget" and isinstance(n.value, ast.Name) and n.value.id == "desktop_clock" and id(n) not in called:
+                found.add((rel, n.lineno))
+            elif isinstance(n, ast.ImportFrom) and any(a.name == "forget" for a in n.names) and (n.module or "").endswith("desktop_clock"):
+                found.add((rel, n.lineno))
+            elif isinstance(n, ast.Name) and n.id == "forget" and isinstance(n.ctx, ast.Load) and id(n) not in called and rel != "app/services/desktop_clock.py":
+                found.add((rel, n.lineno))
+    return found
+
+
 def _forget_without_lock_sites(root) -> set[tuple[str, str]]:
     """Every call of `forget(..., lock=False)` under backend/app (the file relative to backend/, the function it sits in)."""
     import ast
@@ -831,6 +853,10 @@ def test_26_forget_without_its_own_lock_is_called_only_where_the_rows_are_alread
         "a call of desktop_clock.forget(lock=False) outside the two paths that hold the setup rows through _lock_in_order would delete a view without waiting for a "
         "report in flight — take the rows first (the default) or add the path here with the reason it already holds them"
     )
+    assert _forget_pointers_that_are_not_calls(app) == set(), (
+        "desktop_clock.forget is pointed at without being called (an alias, an import of the bare name, a callback): a call through it would carry lock=False unseen by this scan — "
+        "call it as desktop_clock.forget(...)"
+    )
     # the scan sees a new call, a dynamic value, and does not mistake a locked one for it
     pkg = tmp_path / "app"
     pkg.mkdir()
@@ -841,6 +867,14 @@ def test_26_forget_without_its_own_lock_is_called_only_where_the_rows_are_alread
         "async def d(db, ids):\n    await desktop_clock.forget(db, ids)\n"
     )
     assert _forget_without_lock_sites(pkg) == {("app/x.py", "a"), ("app/x.py", "b")}
+    # …and the pointer scan sees an alias, a bare import and a callback list, and ignores the ordinary calls
+    (pkg / "y.py").write_text(
+        "from app.services.desktop_clock import forget\n"
+        "async def e(db, ids):\n    alias = desktop_clock.forget\n    await alias(db, ids, lock=False)\n"
+        "def f():\n    return [desktop_clock.forget]\n"
+        "async def g(db, ids):\n    await desktop_clock.forget(db, ids)\n"
+    )
+    assert _forget_pointers_that_are_not_calls(pkg) == {("app/y.py", 1), ("app/y.py", 3), ("app/y.py", 6)}
 
 
 # ── Kadir lens (PO 05:5xZ): a control character in free text must be a 422, never a database error whose log line carries the draft ─────────────────────────────────
