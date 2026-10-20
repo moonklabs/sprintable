@@ -795,3 +795,49 @@ async def test_25_an_account_reclaim_waits_for_the_report_in_flight_and_then_lea
     await asyncio.wait_for(task, 20)
     assert await _views(str(sid)) == []  # the report's view was written first and taken off after
     assert (await _sql(fetch=f"SELECT revoked_reason FROM desktop_setups WHERE id = '{sid}'"))[0][0] == "account_reclaimed"
+
+
+# ── PO 10-20 05:3xZ: `forget(lock=False)` is for the paths that already hold the computers' rows in the service's one lock order — and only those ────────────────────────
+
+
+_LOCKED_FORGET_SITES = {
+    # (file, enclosing function): both are inside desktop_setup's exchange / disconnect, which take the setup rows through `_lock_in_order` before they get here
+    ("app/services/desktop_setup.py", "_retire_same_machine"),
+    ("app/services/desktop_setup.py", "revoke_setup"),
+}
+
+
+def _forget_without_lock_sites(root) -> set[tuple[str, str]]:
+    """Every call of `forget(..., lock=False)` under backend/app (the file relative to backend/, the function it sits in)."""
+    import ast
+    from pathlib import Path
+
+    found: set[tuple[str, str]] = set()
+    for path in sorted(Path(root).rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for fn in (n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))):
+            for call in (n for n in ast.walk(fn) if isinstance(n, ast.Call)):
+                name = call.func.attr if isinstance(call.func, ast.Attribute) else getattr(call.func, "id", "")
+                if name == "forget" and any(k.arg == "lock" and not (isinstance(k.value, ast.Constant) and k.value.value is True) for k in call.keywords):
+                    found.add((str(path.relative_to(Path(root).parent)), fn.name))
+    return found
+
+
+def test_26_forget_without_its_own_lock_is_called_only_where_the_rows_are_already_held_in_order(tmp_path):
+    from pathlib import Path
+
+    app = Path(__file__).resolve().parent.parent / "app"
+    assert _forget_without_lock_sites(app) == _LOCKED_FORGET_SITES, (
+        "a call of desktop_clock.forget(lock=False) outside the two paths that hold the setup rows through _lock_in_order would delete a view without waiting for a "
+        "report in flight — take the rows first (the default) or add the path here with the reason it already holds them"
+    )
+    # the scan sees a new call, a dynamic value, and does not mistake a locked one for it
+    pkg = tmp_path / "app"
+    pkg.mkdir()
+    (pkg / "x.py").write_text(
+        "async def a(db, ids):\n    await desktop_clock.forget(db, ids, lock=False)\n"
+        "async def b(db, ids, flag):\n    await desktop_clock.forget(db, ids, lock=flag)\n"
+        "async def c(db, ids):\n    await desktop_clock.forget(db, ids, lock=True)\n"
+        "async def d(db, ids):\n    await desktop_clock.forget(db, ids)\n"
+    )
+    assert _forget_without_lock_sites(pkg) == {("app/x.py", "a"), ("app/x.py", "b")}
