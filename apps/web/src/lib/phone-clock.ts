@@ -54,6 +54,9 @@ export function parseClockRead(raw: unknown): ClockRead | null {
   if (v.mode === 'panel' && v.scope !== 'computer' && v.scope !== 'one') return null;
   // …and one agent's panel is exactly one row (a cancel / submit for "the row" must have a row to name)
   if (v.mode === 'panel' && v.scope === 'one' && !(Array.isArray(v.rows) && v.rows.length === 1)) return null;
+  // …and the card after (`out`) / the start (`in`) must carry what it is about: without it the page would fall back to the idle card's buttons for a state it cannot read
+  if (v.mode === 'out' && !(isObj(v.out) && isStr(v.out.at))) return null;
+  if (v.mode === 'in' && !isObj(v.in)) return null;
   const rows: ClockRowView[] = [];
   for (const r of Array.isArray(v.rows) ? v.rows : []) {
     // a row this page cannot read makes the whole view unreadable — never a view with fewer rows than the computer sent (the counts and the consent would then be about rows the person

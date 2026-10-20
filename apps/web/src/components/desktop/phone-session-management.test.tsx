@@ -364,6 +364,38 @@ describe('[4733 S4b] codex round 2 — pending holds the presses · overlapping 
     expect(byId('phone-sessions-submit')).toBeNull();
   });
 
+  it('an UNKNOWN end survives the list turning to «remote control off» and back: the same command is followed (no second press, no new signature)', async () => {
+    world.post = new Response('boom', { status: 500 });
+    await screen();
+    await press(byId('phone-sessions-end-all'));
+    expect(byId('phone-sessions-check')).not.toBeNull();
+    const signs = () => phoneCall.mock.calls.filter((c) => c[0] === 'command.sign').length;
+    expect(signs()).toBe(1);
+    world.startable = { remote_control: false, computers: [] };
+    await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+    await flush();
+    expect(byId('phone-session-card')).toBeNull(); // the section says remote control is off
+    world.startable = undefined;
+    world.post = undefined;
+    await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+    await flush();
+    expect(byId('phone-sessions-check')).not.toBeNull(); // the card is back — with its [결과 확인]
+    const before = posts().length;
+    await press(byId('phone-sessions-check'));
+    expect(posts()[before]!.body!.idempotency_key).toBe(posts()[0]!.body!.idempotency_key); // the SAME key (no command id was ever known): the server hands back the command it made
+    expect(signs()).toBe(1);
+  });
+
+  it('an agent that ended on its own on a computer that cannot be reached: its [세션 시작] is off AND says why', async () => {
+    world.running = false;
+    world.reachable = false;
+    world.view = { mode: 'none', outs: [{ agent_member_id: AGENT, name: '결제 담당', at: '2026-10-20T01:00:00Z' }] };
+    await screen();
+    expect((byId('phone-sessions-agent-ended')!.querySelector('button') as HTMLButtonElement).disabled).toBe(true);
+    expect(byId('phone-sessions-unreachable')?.textContent).toBe(koMessages.desktop.phoneSessions.unreachable);
+    expect(byId('phone-sessions-end-all')).toBeNull();
+  });
+
   it('the list is read one at a time: while the bridge has not answered, the poll starts no second read', async () => {
     phoneCall.mockImplementation((type: string) => (type === 'device.key.info' ? new Promise(() => {}) : Promise.resolve(signAnswer)));
     await screen();

@@ -255,6 +255,13 @@ describe('[4733 S4b] readClock · parseClockRead', () => {
     }
   });
 
+  it('an `out` without its card, or an `in` without its steps, is no view (the page would fall back to the idle buttons for a state it cannot read)', () => {
+    expect(parseClockRead({ ...READ, view: { mode: 'out', opened_from: 'mac', outs: [] } })).toBeNull();
+    expect(parseClockRead({ ...READ, view: { mode: 'out', out: { came: 1 }, outs: [] } })).toBeNull();
+    expect(parseClockRead({ ...READ, view: { mode: 'in', outs: [] } })).toBeNull();
+    expect(parseClockRead({ ...READ, view: { mode: 'out', out: { at: '2026-10-20T01:00:00Z' }, outs: [] } })).not.toBeNull();
+  });
+
   it('a one-agent panel is exactly one row: none or two is no view', () => {
     expect(parseClockRead(panel({ scope: 'one', rows: [] }))).toBeNull();
     expect(parseClockRead(panel({ scope: 'one', rows: [row({}), row({ agent_member_id: 'c'.repeat(8) })] }))).toBeNull();

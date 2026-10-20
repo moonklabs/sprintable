@@ -31,6 +31,9 @@ const NAMES_MAX = 6;
 /** an agent's name as the person knows it: the list prints «Dev · SYJ-MacBook-Pro» — the computer is already the card's head */
 const bareName = (name: string, device: string): string => (name.endsWith(` · ${device}`) ? name.slice(0, -(` · ${device}`).length) : name);
 
+/** a press whose end is not known — kept ABOVE the cards so it survives a card leaving (the list turning to «remote control off» and back): coming back, [결과 확인] follows the SAME command */
+type Held = { pending: Pending; start: boolean };
+
 type Section = { kind: 'reading' } | { kind: 'failed' } | { kind: 'none' } | { kind: 'remote_off' } | { kind: 'computers'; computers: StartableComputer[]; phoneKeyId: string };
 
 export function PhoneSessionManagement() {
@@ -41,6 +44,7 @@ export function PhoneSessionManagement() {
 }
 
 function SessionsForOrg({ orgId, orgSyncPending }: { orgId: string | undefined; orgSyncPending: boolean }) {
+  const [held] = useState(() => new Map<string, Held>()); // one Map for this component's life (read in handlers · written in handlers), by computer; this organization's only (another organization remounts this whole component)
   const t = useTranslations('desktop.phoneSessions');
   const { inPhoneApp, phoneCall } = usePhoneBridge();
   const [section, setSection] = useState<Section>({ kind: 'reading' });
@@ -97,7 +101,7 @@ function SessionsForOrg({ orgId, orgSyncPending }: { orgId: string | undefined; 
     <section className="space-y-3" data-testid="phone-sessions" aria-labelledby="phone-sessions-heading">
       <h2 id="phone-sessions-heading" className="text-sm font-semibold text-foreground">{t('title')}</h2>
       {section.computers.map((c) => (
-        <ComputerCard key={`${orgId ?? ''}:${c.setup_id}`} computer={c} phoneKeyId={section.phoneKeyId} onChanged={readList} frozen={orgSyncPending} />
+        <ComputerCard key={`${orgId ?? ''}:${c.setup_id}`} computer={c} phoneKeyId={section.phoneKeyId} onChanged={readList} frozen={orgSyncPending} held={held} />
       ))}
     </section>
   );
@@ -160,7 +164,7 @@ function lineOf(o: PressOutcome, start: boolean): Line {
   }
 }
 
-function ComputerCard({ computer, phoneKeyId, onChanged, frozen }: { computer: StartableComputer; phoneKeyId: string; onChanged: () => void; frozen: boolean }) {
+function ComputerCard({ computer, phoneKeyId, onChanged, frozen, held }: { computer: StartableComputer; phoneKeyId: string; onChanged: () => void; frozen: boolean; held: Map<string, Held> }) {
   const t = useTranslations('desktop.phoneSessions');
   const locale = useLocale();
   const { phoneCall } = usePhoneBridge();
@@ -168,7 +172,8 @@ function ComputerCard({ computer, phoneKeyId, onChanged, frozen }: { computer: S
   const [hidden, setHidden] = useState(false);
   const [busy, setBusy] = useState(false);
   const [line, setLine] = useState<Line>(null);
-  const [pending, setPending] = useState<{ pending: Pending; start: boolean } | null>(null);
+  const [pending, setPendingState] = useState<Held | null>(() => held.get(computer.setup_id) ?? null);
+  const setPending = (h: Held | null) => { if (h) held.set(computer.setup_id, h); else held.delete(computer.setup_id); setPendingState(h); };
   const [pressedHere, setPressedHere] = useState(false);
   const [failures, setFailures] = useState(0); // looks in a row that did not answer: the card drawn may no longer be true
   const flows = useRef(new Set<Flow>()); // every press / check out from this card: the card going away stops them all
@@ -337,11 +342,10 @@ function Idle({ computer, view, t, time, nameOf, busy, unreachable, runningCount
   return (
     <div className="space-y-3">
       {runningCount > 0 ? (
-        <div className="space-y-1">
-          <Button variant="outline" className="min-h-11" disabled={busy || unreachable} onClick={onEndAll} data-testid="phone-sessions-end-all">{t('endAll')}</Button>
-          {unreachable ? <p className="text-xs text-muted-foreground" data-testid="phone-sessions-unreachable">{t('unreachable')}</p> : null}
-        </div>
+        <Button variant="outline" className="min-h-11" disabled={busy || unreachable} onClick={onEndAll} data-testid="phone-sessions-end-all">{t('endAll')}</Button>
       ) : null}
+      {/* a disabled button always has its reason as text — also the [세션 시작] of an agent that ended on its own */}
+      {unreachable && (runningCount > 0 || outs.length > 0) ? <p className="text-xs text-muted-foreground" data-testid="phone-sessions-unreachable">{t('unreachable')}</p> : null}
       <ul className="space-y-2">
         {computer.agents.map((a) => {
           const own = endedOnOwn.get(a.agent_member_id);
