@@ -60,6 +60,10 @@ def configure_logging(json_logs: bool = True) -> None:
     root = logging.getLogger()
     root.setLevel(logging.INFO)
     root.handlers.clear()
+    # story #4741 — a database error never reaches a log line with the values of its row: redacted at the LogRecord, before any handler (app/core/db_error_redaction.py)
+    from app.core.db_error_redaction import install_record_redaction
+
+    install_record_redaction()
 
     handler = logging.StreamHandler(sys.stdout)
     if json_logs:

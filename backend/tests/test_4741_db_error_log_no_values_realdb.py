@@ -1,0 +1,231 @@
+"""story #4741 (Kadir lens on #5172) — a database error never reaches a log line, an error event or a response with the values of the row it was about.
+
+The marker is planted in the value the database refuses, once per way a database can refuse it (a NUL, a CHECK, a length, a UNIQUE, and a value asyncpg itself refuses before the
+server sees it — its message quotes the value); each goes through the REAL unhandled-exception handler (app/main.py) of the REAL app against a real database, and the marker is
+looked for in every log record of every logger (message, arguments, formatted traceback, Cloud Logging JSON), in the `unhandled_error_events` row and in the response.
+What must stay (debugging): the SQLSTATE and the constraint / table names, no values.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import uuid
+
+import pytest
+
+from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures
+    _client,
+    _dispose_global_engine_after_test,
+    anyio_backend,
+)
+
+pytestmark = pytest.mark.anyio
+
+MARK = "secret-MARK-4741"
+PATH = "/__t4741_db_error/{kind}"
+
+
+def _boom_route():
+    from sqlalchemy import text
+
+    from app.core.database import async_session_factory
+
+    async def boom(kind: str):
+        async with async_session_factory() as s:
+            await s.execute(text("CREATE TEMP TABLE t4741 (a text CHECK (a NOT LIKE 'bad%'), b varchar(5), c text UNIQUE, n integer, j jsonb)"))
+            if kind == "nul":
+                await s.execute(text("INSERT INTO t4741 (a) VALUES (:v)"), {"v": f"{MARK}\x00x"})
+            elif kind == "jsonb_nul":
+                await s.execute(text("INSERT INTO t4741 (j) VALUES (CAST(:v AS jsonb))"), {"v": json.dumps({"k": f"{MARK}\x00x"}).replace("\\u0000", "\\u0000")})
+            elif kind == "check":
+                await s.execute(text("INSERT INTO t4741 (a) VALUES (:v)"), {"v": f"bad-{MARK}"})
+            elif kind == "toolong":
+                await s.execute(text("INSERT INTO t4741 (b) VALUES (:v)"), {"v": f"{MARK}-way-too-long"})
+            elif kind == "unique":
+                await s.execute(text("INSERT INTO t4741 (c) VALUES (:v)"), {"v": MARK})
+                await s.execute(text("INSERT INTO t4741 (c) VALUES (:v)"), {"v": MARK})
+            elif kind == "datatype":  # asyncpg refuses it before the server sees it — and quotes the value in its own message
+                await s.execute(text("INSERT INTO t4741 (n) VALUES (:v)"), {"v": MARK})
+        return {"ok": True}
+
+    return boom
+
+
+@pytest.fixture
+def boom_route():
+    from app.main import app
+
+    before = list(app.router.routes)
+    app.add_api_route(PATH, _boom_route(), methods=["GET"])
+    yield
+    app.router.routes[:] = before
+
+
+def _watch(caplog):
+    """Attach the capture again (importing the app configures logging and clears the root handlers) and keep every logger at DEBUG."""
+    from app.main import app  # noqa: F401
+
+    logging.getLogger().addHandler(caplog.handler)
+    caplog.set_level(logging.DEBUG)
+
+
+def _everything_a_record_can_say(caplog) -> list[str]:
+    from app.core.logging_config import JsonFormatter
+
+    fmt = JsonFormatter()
+    texts: list[str] = []
+    for r in caplog.records:
+        texts += [r.getMessage(), str(r.args), fmt.format(r)]
+        if r.exc_info:
+            texts.append(logging.Formatter().formatException(r.exc_info))
+    return texts
+
+
+async def _event(error_id: str):
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.unhandled_error_event import UnhandledErrorEvent
+
+    async with async_session_factory() as s:
+        return (await s.execute(select(UnhandledErrorEvent).where(UnhandledErrorEvent.id == uuid.UUID(error_id)))).scalar_one_or_none()
+
+
+@pytest.mark.parametrize("kind,expect", [
+    ("nul", {"sqlstate": None}),
+    ("jsonb_nul", {"sqlstate": None}),
+    ("check", {"sqlstate": "23514", "constraint": "t4741_a_check", "table": "t4741"}),
+    ("toolong", {"sqlstate": "22001"}),
+    ("unique", {"sqlstate": "23505", "constraint": "t4741_c_key", "table": "t4741"}),
+    ("datatype", {"sqlstate": None}),
+])
+async def test_01_a_database_error_is_logged_stored_and_answered_without_the_value_but_with_its_sqlstate_and_constraint(boom_route, caplog, kind, expect):
+    _watch(caplog)
+    async with _client() as c:
+        r = await c.get(PATH.format(kind=kind))
+    assert r.status_code == 500, r.text
+    error_id = r.json()["error"]["error_id"]
+    assert MARK not in r.text
+    # the log: not one record of any logger carries the value — in its message, its arguments, its traceback text or its Cloud Logging JSON
+    leaked = [t[:300] for t in _everything_a_record_can_say(caplog) if MARK in t]
+    assert leaked == [], leaked
+    # …and the line that remains is enough to debug: the handler's own record names the class and the SQLSTATE / constraint / table
+    lines = [r.getMessage() for r in caplog.records if r.name == "app.main" and error_id in r.getMessage()]
+    assert len(lines) == 1, lines
+    assert "Unhandled exception on GET" in lines[0]
+    for label, want in expect.items():
+        if want is not None:
+            assert f"{label}={want}" in lines[0], (label, lines[0])
+    # the event row (30 days in the database) holds the same safe text, not the exception's
+    event = await _event(error_id)
+    assert event is not None and MARK not in (event.message or ""), event and event.message
+    if expect.get("sqlstate"):
+        assert f"sqlstate={expect['sqlstate']}" in (event.message or "")
+
+
+async def test_02_the_debug_response_carries_the_safe_text_not_the_exception(boom_route, caplog, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "debug", True)
+    _watch(caplog)
+    async with _client() as c:
+        r = await c.get(PATH.format(kind="check"))
+    assert r.status_code == 500 and MARK not in r.text, r.text
+    assert "sqlstate=23514" in r.json()["error"]["message"] and "constraint=t4741_a_check" in r.json()["error"]["message"]
+
+
+def test_03_every_engine_hides_the_bound_parameters():
+    from app.core.database import _build_engine_kwargs, engine, read_engine, worker_engine
+    from app.core.config import settings
+
+    for e in (engine, read_engine, worker_engine):
+        assert e.sync_engine.hide_parameters is True
+    assert _build_engine_kwargs()["hide_parameters"] is True
+    # also on the PgBouncer branch
+    original = settings.db_pgbouncer
+    try:
+        settings.db_pgbouncer = True
+        assert _build_engine_kwargs()["hide_parameters"] is True
+    finally:
+        settings.db_pgbouncer = original
+
+
+async def test_04_other_log_sites_are_covered_too_a_wrapped_cause_a_message_argument_an_exc_info_and_a_dict_argument(boom_route, caplog):
+    """The redaction is at the LogRecord, so it does not matter which module logs the error or how: `logger.exception`, `logger.error("…%s", exc)`, `exc_info=exc`,
+    a named argument — and an exception that merely HAS a database error as its cause."""
+    from sqlalchemy import text
+
+    from app.core.database import async_session_factory
+
+    _watch(caplog)
+    other = logging.getLogger("app.services.some_background_job")
+    errors: list[BaseException] = []
+    async with async_session_factory() as s:
+        try:
+            await s.execute(text("CREATE TEMP TABLE t4741b (c text UNIQUE)"))
+            await s.execute(text("INSERT INTO t4741b (c) VALUES (:v)"), {"v": MARK})
+            await s.execute(text("INSERT INTO t4741b (c) VALUES (:v)"), {"v": MARK})
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+            other.exception("job failed")                                    # exc_info from the active exception
+            other.error("save failed: %s", exc)                              # the exception as a %s argument
+            other.warning("again", exc_info=exc)                             # exc_info=exception
+            other.error("named %(why)s", {"why": exc})                       # a mapping argument
+            try:
+                raise RuntimeError("the job gave up") from exc
+            except RuntimeError as wrapped:
+                other.exception("wrapped")                                    # a non-database exception whose cause is one
+                assert wrapped.__cause__ is exc
+    assert errors
+    texts = _everything_a_record_can_say(caplog)
+    assert MARK not in " ".join(texts)
+    mine = [r for r in caplog.records if r.name == "app.services.some_background_job"]
+    assert len(mine) == 5
+    assert all("sqlstate=23505" in " ".join(t for t in _everything_a_record_can_say_for(r)) or "wrapped" in r.getMessage() or "job gave up" in " ".join(_everything_a_record_can_say_for(r))
+               for r in mine)
+    # the wrapper keeps its own words, the database error inside it is the safe line
+    wrapped_text = " ".join(_everything_a_record_can_say_for(mine[-1]))
+    assert "the job gave up" in wrapped_text and "sqlstate=23505" in wrapped_text and "constraint=t4741b_c_key" in wrapped_text
+
+
+def _everything_a_record_can_say_for(record) -> list[str]:
+    from app.core.logging_config import JsonFormatter
+
+    out = [record.getMessage(), JsonFormatter().format(record)]
+    if record.exc_info:
+        out.append(logging.Formatter().formatException(record.exc_info))
+    return out
+
+
+def test_05_a_record_without_a_database_error_is_left_exactly_as_it_was():
+    from app.core.db_error_redaction import install_record_redaction, redact_record
+
+    install_record_redaction()
+    plain = ValueError(f"bad input {MARK}")
+    rec = logging.getLogger("x").makeRecord("x", logging.ERROR, __file__, 1, "failed: %s", (plain,), (type(plain), plain, None))
+    assert rec.args == (plain,) and rec.exc_info == (type(plain), plain, None) and rec.getMessage() == f"failed: bad input {MARK}"
+    assert redact_record(rec) is rec and rec.args[0] is plain
+
+
+def test_06_the_summary_names_classes_sqlstate_and_identifiers_only():
+    from sqlalchemy.exc import IntegrityError
+
+    from app.core.db_error_redaction import db_error_summary, has_db_error, redact_exception
+
+    class Cause(Exception):
+        sqlstate = "23505"
+        constraint_name = "uq_things_slug"
+        table_name = "things"
+        detail = f"Key (slug)=({MARK}) already exists."
+
+    orig = Cause(f"duplicate key value violates unique constraint — {MARK}")
+    exc = IntegrityError("INSERT INTO things VALUES (%s)", (MARK,), orig)
+    exc.orig.__cause__ = None
+    assert has_db_error(exc)
+    summary = db_error_summary(exc)
+    assert MARK not in summary and "sqlstate=23505" in summary and "constraint=uq_things_slug" in summary and "table=things" in summary and summary.startswith("IntegrityError")
+    # an identifier with spaces, quotes or a value-like tail is not echoed
+    orig.constraint_name = f"x y '{MARK}'"
+    assert MARK not in db_error_summary(exc) and "constraint=" not in db_error_summary(exc)
+    # a chain with no database error has nothing to hide
+    assert redact_exception(RuntimeError("plain")) is None and not has_db_error(RuntimeError("plain"))
