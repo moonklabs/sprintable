@@ -13,6 +13,8 @@ import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off
 import { useFieldDraft } from '@/hooks/use-field-draft';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
+import { readStartableKeyed } from '@/lib/phone-start';
+import { readClock } from '@/lib/phone-clock';
 import { checkCommand, commandOnPhone, type CommandDeps, type CommandOutcome, type Pending, type Verb } from '@/lib/phone-command';
 import { limitHeld, limitLine, limitLooksAgain, limitTime, type SessionLimit } from '@/lib/agent-session-limit';
 import { runInfoLine, type SessionRun } from '@/lib/agent-session-run';
@@ -180,6 +182,25 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
   // story #4599 (Yuna ① · PO 14:25Z): [세션 끝내기] asks once — it cannot be undone (the destructive weight of 4580's second card); the
   // first focus is [취소]
   const [endOpen, setEndOpen] = useState(false);
+  // story #4733 (Yuna 4733 §6): the hard end's dialog points at the phone's own [세션 종료] — drawn only where that button exists for this agent (its computer speaks
+  // `clock` and this person may command it); an old app or a person without the right gets no line that points at nothing. Asked when the dialog opens.
+  const [clockAvailable, setClockAvailable] = useState(false);
+  useEffect(() => {
+    setClockAvailable(false); // every opening asks again: the last answer is not this one's
+    if (!endOpen || !phone) return undefined;
+    let live = true;
+    void (async () => {
+      const list = await readStartableKeyed(phoneCall);
+      if (!live) return;
+      if (list.kind !== 'view') return;
+      // the phone's [세션 종료] is on a RUNNING agent's row of a computer that speaks `clock` and that this person may command
+      const computer = list.view.computers.find((c) => c.agents.some((a) => a.agent_member_id === agentId && a.running === true));
+      if (!computer) return;
+      const read = await readClock(computer.setup_id, list.phoneKeyId);
+      if (live) setClockAvailable(read.kind === 'read' && read.read.supported && read.read.remoteControl && read.read.reachable);
+    })().catch(() => { if (live) setClockAvailable(false); });
+    return () => { live = false; };
+  }, [endOpen, phone, phoneCall, agentId]);
   const endCancelRef = useRef<HTMLButtonElement>(null);
   // what was written stays until it went somewhere (spec B-3: «쓴 글은 남김») — kept as a draft per agent · conversation (#4370)
   const [draft, setDraft, clearDraft] = useFieldDraft({ surface: 'agent-instruct', targetId: `${agentId}:${conversationId}`, field: 'text' });
@@ -280,6 +301,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
           <DialogHeader>
             <DialogTitle>{t('endDialog.title')}</DialogTitle>
             <DialogDescription className="break-keep">{t('endDialog.body')}</DialogDescription>
+            {clockAvailable ? <p className="break-keep text-sm text-muted-foreground" data-testid="agent-end-use-clock">{t('endDialog.useEnd')}</p> : null}
           </DialogHeader>
           <DialogFooter>
             <Button ref={endCancelRef} variant="outline" onClick={() => setEndOpen(false)}>{t('endDialog.cancel')}</Button>

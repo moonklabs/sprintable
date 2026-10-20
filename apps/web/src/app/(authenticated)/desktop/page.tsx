@@ -3,6 +3,7 @@ import { DesktopDevices } from '@/components/desktop/desktop-devices';
 import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
 import { DesktopRemoteControlCard } from '@/components/desktop/desktop-remote-control-card';
 import { DesktopRemoteDevices } from '@/components/desktop/desktop-remote-devices';
+import { PhoneSessionManagement } from '@/components/desktop/phone-session-management';
 import { isDesktopDownloadEnabled } from '@/lib/desktop-download-gate';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
@@ -38,6 +39,8 @@ export default function DesktopPage() {
       <DesktopRemoteControlCard />
       {/* story #4533 — «원격 기기»: my phones as pairs, [빼기] only (the web never pairs) */}
       <DesktopRemoteDevices />
+      {/* story #4733 — «세션 관리»: end and start the sessions of a paired computer from the phone app (nothing outside the phone app) */}
+      <PhoneSessionManagement />
       {/* story #4424 — «연결된 기기» (org owner/admin only; nothing for a member) */}
       <DesktopDevices />
     </div>

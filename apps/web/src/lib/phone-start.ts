@@ -51,6 +51,13 @@ export type StartableRead =
  * nothing is registered from here.
  */
 export async function readStartable(phoneCall: Call, stop?: () => boolean): Promise<StartableRead> {
+  const r = await readStartableKeyed(phoneCall, stop);
+  return r.kind === 'view' ? { kind: 'view', view: r.view } : r;
+}
+
+/** story #4733 (S4b): the same read, with the id the server lists THIS phone's key under — the clock view is asked for per key (`…/clock?phone_key_id=`) */
+export type StartableKeyedRead = Exclude<StartableRead, { kind: 'view' }> | { kind: 'view'; view: StartableView; phoneKeyId: string };
+export async function readStartableKeyed(phoneCall: Call, stop?: () => boolean): Promise<StartableKeyedRead> {
   let key: PhoneAnswer;
   try { key = await phoneCall('device.key.info', {}); } catch { return { kind: 'failed' }; } // a bridge call that is rejected is a failed read, not a screen stuck on «reading»
   if (stop?.()) return { kind: 'failed' }; // `stop`: the caller gave up on this read (its limit · its screen) — no further request is made for it
@@ -73,7 +80,7 @@ export async function readStartable(phoneCall: Call, stop?: () => boolean): Prom
     const res = await fetchWithAuth(`/api/desktop/startable?phone_key_id=${encodeURIComponent(id)}`);
     if (!res.ok) return { kind: 'failed' };
     const view = parseStartable(await res.json());
-    return view ? { kind: 'view', view } : { kind: 'failed' };
+    return view ? { kind: 'view', view, phoneKeyId: id } : { kind: 'failed' };
   } catch {
     return { kind: 'failed' };
   }
