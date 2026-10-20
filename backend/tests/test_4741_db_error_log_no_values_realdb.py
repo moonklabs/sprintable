@@ -229,3 +229,124 @@ def test_06_the_summary_names_classes_sqlstate_and_identifiers_only():
     assert MARK not in db_error_summary(exc) and "constraint=" not in db_error_summary(exc)
     # a chain with no database error has nothing to hide
     assert redact_exception(RuntimeError("plain")) is None and not has_db_error(RuntimeError("plain"))
+
+
+# ── codex read of the first head: branches and groups, nested arguments and `extra`, the realtime process, a handled catch-all that answers with the text ───────────────────
+
+
+def _db_error(text_marker: str = MARK):
+    """A database error as SQLAlchemy builds it — the statement, its parameters, and a driver error whose own words quote the value."""
+    from sqlalchemy.exc import IntegrityError
+
+    class DriverError(Exception):
+        sqlstate = "23505"
+        constraint_name = "uq_things_slug"
+        table_name = "things"
+
+    return IntegrityError("INSERT INTO things (slug) VALUES (%s)", (text_marker,), DriverError(f"duplicate key value … Key (slug)=({text_marker})"))
+
+
+def _record_texts(records) -> str:
+    return " ".join(t for r in records for t in _everything_a_record_can_say_for_record(r))
+
+
+def _everything_a_record_can_say_for_record(record) -> list[str]:
+    from app.core.logging_config import JsonFormatter
+
+    out = [record.getMessage(), str(record.args), JsonFormatter().format(record), *(str(v) for k, v in record.__dict__.items() if k in ("err", "errs", "wrap"))]
+    if record.exc_info:
+        out.append(logging.Formatter().formatException(record.exc_info))
+    return out
+
+
+def test_07_a_branch_a_group_or_a_deep_chain_with_a_database_error_in_it_is_still_redacted(caplog):
+    _watch(caplog)
+    log = logging.getLogger("app.services.graph")
+    # 1. an exception with a cause that is NOT a database error and a context that IS one (a second way back)
+    try:
+        try:
+            raise _db_error()
+        except Exception as db:
+            try:
+                raise ValueError("plain cause")
+            except ValueError as plain:
+                raise RuntimeError("wrapper") from plain  # cause = plain, context = plain (raised while handling db? plain was raised in the db handler)
+    except RuntimeError as e:
+        e.__context__ = _db_error()  # a context that is a database error, beside a cause that is not
+        log.error("branch", exc_info=e)
+    # 2. an ExceptionGroup whose member is one
+    try:
+        raise ExceptionGroup("several things failed", [ValueError("a"), _db_error()])
+    except ExceptionGroup as g:
+        log.error("group", exc_info=g)
+    # 3. a chain deeper than the old cap with the database error at the bottom
+    e = _db_error()
+    for i in range(12):
+        nxt = RuntimeError(f"level {i}")
+        nxt.__cause__ = e
+        e = nxt
+    log.error("deep", exc_info=e)
+    mine = [r for r in caplog.records if r.name == "app.services.graph"]
+    assert len(mine) == 3
+    assert MARK not in _record_texts(mine)
+    assert all("sqlstate=23505" in _record_texts([r]) for r in mine)
+
+
+def test_08_exceptions_nested_in_log_arguments_or_extra_fields_are_redacted_too(caplog):
+    _watch(caplog)
+    log = logging.getLogger("app.services.nested")
+    exc = _db_error()
+    log.error("list %s", [exc])
+    log.error("tuple-in-dict %(why)s", {"why": (exc, "x")})
+    log.error("extra", extra={"err": exc, "errs": [exc, exc], "wrap": {"inner": exc}})
+    mine = [r for r in caplog.records if r.name == "app.services.nested"]
+    assert len(mine) == 3
+    assert MARK not in _record_texts(mine)
+    assert "sqlstate=23505" in _record_texts(mine)
+
+
+async def test_09_the_realtime_process_answers_and_stores_the_safe_text_too(caplog, monkeypatch):
+    from starlette.requests import Request
+
+    from app.core.config import settings
+    from app.realtime_main import unhandled_exception_handler
+
+    monkeypatch.setattr(settings, "debug", True)
+    _watch(caplog)
+    request = Request({"type": "http", "method": "GET", "path": "/realtime-probe", "headers": [], "query_string": b"", "state": {}})
+    response = await unhandled_exception_handler(request, _db_error())
+    body = json.loads(response.body)
+    assert response.status_code == 500 and MARK not in response.body.decode() and "sqlstate=23505" in body["error"]["message"]
+    event = await _event(body["error"]["error_id"])
+    assert event is not None and MARK not in (event.message or "") and "sqlstate=23505" in event.message
+    assert MARK not in _record_texts(caplog.records)
+
+
+async def test_10_a_handled_catch_all_that_answers_with_the_exception_text_gets_the_safe_text(monkeypatch):
+    import types
+
+    from fastapi import HTTPException
+
+    from app.routers import retros
+
+    async def allowed(*_a, **_k):
+        return None
+
+    class Repo:
+        org_id = uuid.uuid4()
+
+        async def set_phase(self, *_a):
+            raise _db_error()
+
+    monkeypatch.setattr(retros, "_require_retro_project_access", allowed)
+    with pytest.raises(HTTPException) as caught:
+        await retros.advance_phase(uuid.uuid4(), types.SimpleNamespace(phase="x"), None, types.SimpleNamespace(user_id=str(uuid.uuid4())), Repo())
+    assert caught.value.status_code == 400 and MARK not in str(caught.value.detail) and "sqlstate=23505" in caught.value.detail
+    # a plain ValueError keeps its words
+    class Plain(Repo):
+        async def set_phase(self, *_a):
+            raise ValueError("phase must be one of discuss, vote")
+
+    with pytest.raises(HTTPException) as caught:
+        await retros.advance_phase(uuid.uuid4(), types.SimpleNamespace(phase="x"), None, types.SimpleNamespace(user_id=str(uuid.uuid4())), Plain())
+    assert caught.value.detail == "phase must be one of discuss, vote"

@@ -12,7 +12,7 @@ from limits.errors import StorageError
 from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
-from app.core.db_error_redaction import db_error_summary, has_db_error
+from app.core.db_error_redaction import safe_exception_text
 from app.core.logging_config import configure_logging
 from app.core.rate_limit import limiter
 from app.models.conversation import MessageContentTooLong
@@ -371,8 +371,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     )
     # story #4741 — a database error's text carries the rejected row's values (SQL echo, the driver's message): the log record is redacted at its creation
     # (app/core/db_error_redaction.py), and the event row and a debug response below take the same safe summary
-    _safe_text = db_error_summary(exc) if has_db_error(exc) else None
-    detail = (_safe_text or str(exc)) if settings.debug else "Internal server error"
+    _safe_text = safe_exception_text(exc)
+    detail = _safe_text if settings.debug else "Internal server error"
 
     try:
         from app.services.unhandled_error_events import record_unhandled_error_event
@@ -393,7 +393,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
         await record_unhandled_error_event(
             error_id=error_id, method=request.method, path=request.url.path,
             exception_class=type(exc).__name__,
-            message=(_safe_text or str(exc))[:2000] if (_safe_text or str(exc)) else None,
+            message=_safe_text[:2000] if _safe_text else None,
             org_id=uuid.UUID(_raw_org_id) if _raw_org_id else None,
             user_id=uuid.UUID(_raw_user_id) if _raw_user_id else None,
             request_id=_request_id,
