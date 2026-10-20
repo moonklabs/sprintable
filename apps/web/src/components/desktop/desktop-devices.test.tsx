@@ -25,6 +25,12 @@ const device = (setup_id: string, device_name: string, state = 'handed_over') =>
   // one entry per stage: agent-1 holds two stages — still two agents (Qadir 4830 ②)
   members: [{ kind: 'agent', member_id: 'agent-1' }, { kind: 'agent', member_id: 'agent-1' }, { kind: 'agent', member_id: 'agent-2' }, { kind: 'human', member_id: 'person' }],
 });
+// story 4734: the list is computers — each device here is a computer of its own with the one setup (the many-setups cases are in desktop-devices.4734.test.tsx)
+const computerOf = (d: ReturnType<typeof device>) => ({
+  computer_id: d.setup_id.replace(/^\w/, '9'), device_name: d.device_name, state: d.state, confirmed_by_name: d.confirmed_by_name, confirmed_at: d.confirmed_at,
+  last_used_at: null, live_setups: d.state === 'disconnected' ? 0 : 1, active_keys: d.active_keys, setups: [d],
+});
+const listOf = (...ds: ReturnType<typeof device>[]) => JSON.stringify({ computers: ds.map(computerOf), truncated: false });
 const revoked = (already: boolean, by: string | null) => ({ revoked_keys: already ? 0 : 2, already_disconnected: already, revoked_at: '2026-09-30T05:00:00Z', revoked_by_name: by });
 
 let container: HTMLDivElement;
@@ -55,7 +61,7 @@ beforeEach(() => {
   root = createRoot(container);
   fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     if (init?.method === 'DELETE') return new Response(JSON.stringify(revoked(false, '김지우')), { status: 200 });
-    return new Response(JSON.stringify({ setups: [device(B, 'old laptop', 'disconnected'), device(A, 'studio mac')] }), { status: 200 });
+    return new Response(listOf(device(B, 'old laptop', 'disconnected'), device(A, 'studio mac')), { status: 200 });
   });
   vi.stubGlobal('fetch', fetchMock);
 });
@@ -89,7 +95,7 @@ describe('DesktopDevices (Yuna 0ebe65ef)', () => {
 
   it('an admin with no device: the empty box', async () => {
     asRole('owner');
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ setups: [] }), { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response(listOf(), { status: 200 }));
     await render();
     expect(q('desktop-devices-empty')[0].textContent).toContain('아직 연결된 기기가 없어요');
   });
@@ -97,18 +103,18 @@ describe('DesktopDevices (Yuna 0ebe65ef)', () => {
   it('an admin: connected first, state in words, «에이전트 N개 · 날짜 연결 · 연결한 사람»; disconnected last with no button', async () => {
     asRole('admin');
     await render();
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/desktop/setups');
-    expect([...q('desktop-device-name')].map((n) => n.textContent)).toEqual(['studio mac', 'old laptop']);
-    expect([...q('desktop-device-state')].map((n) => n.textContent)).toEqual(['연결됨', '연결 끊김']);
-    expect(q('desktop-device-meta')[0].textContent).toMatch(/^에이전트 2개 · \d+월 \d+일 연결 · 연결한 사람 김지우$/);
-    expect(q('desktop-device-meta')[1].textContent).toMatch(/^에이전트 2개 · \d+월 \d+일 연결 끊음 · 끊은 사람 박서연$/);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/desktop/computers');
+    expect([...q('desktop-computer-name')].map((n) => n.textContent)).toEqual(['studio mac', 'old laptop']);
+    expect([...q('desktop-computer-state')].map((n) => n.textContent)).toEqual(['연결됨', '연결 끊김']);
+    expect(q('desktop-computer-meta')[0].textContent).toMatch(/^에이전트 2개 · 설정 1곳 · \d+월 \d+일 연결 · 연결한 사람 김지우$/);
+    expect(q('desktop-computer-meta')[1].textContent).toMatch(/^에이전트 2개 · 설정 1곳 · \d+월 \d+일 연결 끊음 · 끊은 사람 박서연$/);
     expect(q('desktop-device-disconnect')).toHaveLength(1);
     expect(container.textContent).not.toContain('뭉클랩'); // no org column (Yuna: the list is this org's only)
   });
 
   it('«연결 끊기» asks once, deletes only that setup, says so in one line and moves it down disconnected — the other device untouched', async () => {
     asRole('owner');
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ setups: [device(A, 'studio mac'), device(B, 'office mac')] }), { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response(listOf(device(A, 'studio mac'), device(B, 'office mac')), { status: 200 }));
     await render();
     await click(q('desktop-device-disconnect')[0]);
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(0); // nothing before the confirmation
@@ -119,11 +125,11 @@ describe('DesktopDevices (Yuna 0ebe65ef)', () => {
     await click(q('desktop-devices-confirm')[0]);
     await act(async () => { await Promise.resolve(); });
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE').map(([url]) => url)).toEqual([`/api/desktop/setups/${A}`]);
-    expect([...q('desktop-device-name')].map((n) => n.textContent)).toEqual(['office mac', 'studio mac']);
-    expect([...q('desktop-device-state')].map((n) => n.textContent)).toEqual(['연결됨', '연결 끊김']);
+    expect([...q('desktop-computer-name')].map((n) => n.textContent)).toEqual(['office mac', 'studio mac']);
+    expect([...q('desktop-computer-state')].map((n) => n.textContent)).toEqual(['연결됨', '연결 끊김']);
     expect(q('desktop-devices-done')[0].textContent).toBe('studio mac 연결을 끊었어요');
     // who disconnected it shows at once (the person pressing), not only after a reload
-    expect(q('desktop-device-meta')[1].textContent).toMatch(/끊은 사람 김지우$/);
+    expect(q('desktop-computer-meta')[1].textContent).toMatch(/끊은 사람 김지우$/);
     expect(q('desktop-device-disconnect')).toHaveLength(1);
     expect(document.activeElement?.id).toBe('desktop-devices-heading');
     expect(q('desktop-devices-confirm')).toHaveLength(0); // the dialog closed
@@ -153,7 +159,7 @@ describe('DesktopDevices (Yuna 0ebe65ef)', () => {
     await act(async () => { await Promise.resolve(); });
     expect(q('desktop-devices-failed')[0].textContent).toBe('연결을 끊지 못했어요 — 다시 시도해 주세요');
     expect(q('desktop-devices-confirm')).toHaveLength(1);
-    expect(q('desktop-device-state')[0].textContent).toBe('연결됨');
+    expect(q('desktop-computer-state')[0].textContent).toBe('연결됨');
   });
 
   // Qadir 4830 ④ — another admin disconnected it first: the line says so and the row shows that admin, not the person pressing
@@ -165,7 +171,7 @@ describe('DesktopDevices (Yuna 0ebe65ef)', () => {
     await click(q('desktop-devices-confirm')[0]);
     await act(async () => { await Promise.resolve(); });
     expect(q('desktop-devices-done')[0].textContent).toBe('studio mac 연결은 이미 끊겨 있었어요');
-    const metas = [...q('desktop-device-meta')].map((n) => n.textContent);
+    const metas = [...q('desktop-computer-meta')].map((n) => n.textContent);
     expect(metas.filter((m) => m?.endsWith('끊은 사람 박서연'))).toHaveLength(2); // studio mac now, old laptop before
     expect(metas.some((m) => m?.endsWith('끊은 사람 김지우'))).toBe(false);
   });
@@ -178,7 +184,7 @@ describe('DesktopDevices (Yuna 0ebe65ef)', () => {
     await click(q('desktop-devices-confirm')[0]);
     await act(async () => { await Promise.resolve(); });
     await act(async () => { await Promise.resolve(); });
-    expect(fetchMock.mock.calls.filter(([url, init]) => url === '/api/desktop/setups' && !init?.method)).toHaveLength(2);
+    expect(fetchMock.mock.calls.filter(([url, init]) => url === '/api/desktop/computers' && !init?.method)).toHaveLength(2);
     // Qadir 4839 T1 ① — the result is unknown, so the list says what happened; the line never claims «연결을 끊었어요»
     expect(q('desktop-devices-done')[0].textContent).toBe('');
   });
@@ -192,13 +198,13 @@ describe('DesktopDevices (Yuna 0ebe65ef)', () => {
     let late!: (r: Response) => void;
     fetchMock.mockImplementationOnce(() => new Promise<Response>((r) => { late = r; }));
     await click([...document.querySelectorAll('button')].find((b) => b.textContent === '다시 시도')!);
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ setups: [device(A.replace('1', '3'), 'second org mac')] }), { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response(listOf(device(A.replace('1', '3'), 'second org mac')), { status: 200 }));
     asRole('admin', 'org-2');
     await render();
-    expect([...q('desktop-device-name')].map((n) => n.textContent)).toEqual(['second org mac']);
-    await act(async () => { late(new Response(JSON.stringify({ setups: [device(A, 'studio mac')] }), { status: 200 })); });
+    expect([...q('desktop-computer-name')].map((n) => n.textContent)).toEqual(['second org mac']);
+    await act(async () => { late(new Response(listOf(device(A, 'studio mac')), { status: 200 })); });
     await act(async () => { await Promise.resolve(); });
-    expect([...q('desktop-device-name')].map((n) => n.textContent)).toEqual(['second org mac']);
+    expect([...q('desktop-computer-name')].map((n) => n.textContent)).toEqual(['second org mac']);
   });
 
   it('a late list answer from before an org switch (the re-read after an unreadable disconnect answer) is dropped', async () => {
@@ -210,13 +216,13 @@ describe('DesktopDevices (Yuna 0ebe65ef)', () => {
     await click(q('desktop-device-disconnect')[0]);
     await click(q('desktop-devices-confirm')[0]);
     await act(async () => { await Promise.resolve(); });
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ setups: [device(A.replace('1', '3'), 'second org mac')] }), { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response(listOf(device(A.replace('1', '3'), 'second org mac')), { status: 200 }));
     asRole('owner', 'org-2');
     await render();
-    expect([...q('desktop-device-name')].map((n) => n.textContent)).toEqual(['second org mac']);
-    await act(async () => { late(new Response(JSON.stringify({ setups: [device(A, 'studio mac'), device(B, 'old laptop', 'disconnected')] }), { status: 200 })); });
+    expect([...q('desktop-computer-name')].map((n) => n.textContent)).toEqual(['second org mac']);
+    await act(async () => { late(new Response(listOf(device(A, 'studio mac'), device(B, 'old laptop', 'disconnected')), { status: 200 })); });
     await act(async () => { await Promise.resolve(); });
-    expect([...q('desktop-device-name')].map((n) => n.textContent)).toEqual(['second org mac']);
+    expect([...q('desktop-computer-name')].map((n) => n.textContent)).toEqual(['second org mac']);
   });
 
   // Qadir 4830 ① — a client-side org switch keeps /desktop mounted: the list is read again for the new org, and nothing of
@@ -228,11 +234,11 @@ describe('DesktopDevices (Yuna 0ebe65ef)', () => {
     await click(q('desktop-devices-confirm')[0]);
     await act(async () => { await Promise.resolve(); });
     expect(q('desktop-devices-done')[0].textContent).toBe('studio mac 연결을 끊었어요');
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ setups: [device(A.replace('1', '3'), 'second org mac')] }), { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response(listOf(device(A.replace('1', '3'), 'second org mac')), { status: 200 }));
     asRole('admin', 'org-2');
     await render();
-    expect([...q('desktop-device-name')].map((n) => n.textContent)).toEqual(['second org mac']);
+    expect([...q('desktop-computer-name')].map((n) => n.textContent)).toEqual(['second org mac']);
     expect(q('desktop-devices-done')[0].textContent).toBe('');
-    expect(fetchMock.mock.calls.filter(([url, init]) => url === '/api/desktop/setups' && !init?.method)).toHaveLength(2);
+    expect(fetchMock.mock.calls.filter(([url, init]) => url === '/api/desktop/computers' && !init?.method)).toHaveLength(2);
   });
 });

@@ -28,6 +28,11 @@ const WITH_AGENTS = device(A, 'studio mac', [
   { kind: 'agent', member_id: AG1, name: '조사', role: 'Dev' }, { kind: 'agent', member_id: AG1, name: '조사', role: 'Reviewer' },
   { kind: 'agent', member_id: AG2, name: '작성', role: 'Writer' }, { kind: 'human', member_id: 'person', name: '김지우', role: 'direct' },
 ]);
+// story 4734: the list is computers — each device here is a computer of its own with the one setup
+const computerOf = (d: DesktopDevice) => ({
+  computer_id: d.setup_id.replace(/^\w/, '9'), device_name: d.device_name, state: d.state, confirmed_by_name: d.confirmed_by_name, confirmed_at: d.confirmed_at,
+  last_used_at: null, live_setups: 1, active_keys: d.active_keys, setups: [d],
+});
 const NO_AGENTS = device(B, 'empty mac', [{ kind: 'human', member_id: 'person', name: '김지우', role: 'direct' }]);
 
 let container: HTMLDivElement;
@@ -35,7 +40,7 @@ let root: Root;
 beforeEach(() => {
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   useDashboardContextMock.mockReturnValue({ orgId: 'org-1', orgMemberships: [{ orgId: 'org-1', orgName: '뭉클랩', orgSlug: 'moonklabs', role: 'owner' }], projectMemberships: [], userName: '김지우' });
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ setups: [WITH_AGENTS, NO_AGENTS] }), { status: 200 })));
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ computers: [computerOf(WITH_AGENTS), computerOf(NO_AGENTS)], truncated: false }), { status: 200 })));
   window.location.hash = '';
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); document.body.innerHTML = ''; vi.unstubAllGlobals(); window.location.hash = ''; });
@@ -66,13 +71,13 @@ describe('[SID:4675] DesktopDevices — the row opens to its agents', () => {
     const details = withAgents.querySelector('details') as HTMLDetailsElement;
     expect(details).not.toBeNull(); // reverted → null
     expect(details.open).toBe(false);
-    expect(details.querySelector('summary')?.getAttribute('aria-label')).toBe('studio mac의 에이전트 보기');
+    expect(details.querySelector('summary')?.getAttribute('aria-label')).toMatch(/^studio mac의 설정 에이전트 보기 · \d+월 \d+일$/); // story 4734: dated — the setups of one computer are told apart
     await act(async () => { details.open = true; });
     const lines = [...withAgents.querySelectorAll('[data-testid=desktop-device-agent]')];
     expect(lines.map((l) => l.textContent)).toEqual([`조사 · ${koMessages.organization.stageRoleLabelDev}`, '작성 · Writer']); // a preset → its word · an own role as it is
     expect(lines.map((l) => l.querySelector('a')?.getAttribute('href'))).toEqual([`/organization/workforce/${AG1}`, `/organization/workforce/${AG2}`]);
     expect(noAgents.querySelector('details')).toBeNull();
-    expect(noAgents.textContent).toContain('empty mac');
+    expect(document.body.textContent).toContain('empty mac'); // (the computer's line carries the name — the setup row inside it does not repeat it)
   });
 
   it('[연결 끊기] inside the row opens the dialog and leaves the row as it was', async () => {

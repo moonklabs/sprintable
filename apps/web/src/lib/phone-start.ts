@@ -13,8 +13,13 @@ import type { PhoneAnswer } from './phone-bridge';
 
 export interface StartableProject { project_id: string; name: string }
 /** `running` (story 4714): true a session lives · false none / all over · null the computer has not been heard from — or a server that does not say (never read as «not running») */
-export interface StartableAgent { agent_member_id: string; name: string; can_command: boolean; projects: StartableProject[]; running: boolean | null }
-export interface StartableComputer { setup_id: string; device_name: string; reachable: boolean; agents: StartableAgent[] }
+export interface StartableAgent {
+  agent_member_id: string; name: string; can_command: boolean; projects: StartableProject[]; running: boolean | null;
+  /** story 4734: the setup this agent belongs to — set when the screen groups a computer's setups into one; a start for the agent names THIS setup (the shell and the daemon find it by it) */
+  setup_id?: string;
+}
+/** `computer_id` (story 4734): the server's id of the computer this entry's setup belongs to — an older server sends none (the entry is then its own computer) */
+export interface StartableComputer { setup_id: string; device_name: string; reachable: boolean; agents: StartableAgent[]; computer_id?: string }
 export interface StartableView { remote_control: boolean; computers: StartableComputer[] }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -32,9 +37,39 @@ export function parseStartable(raw: unknown): StartableView | null {
       const projects = a.projects.filter((p): p is Record<string, unknown> => isObj(p) && isStr(p.project_id) && isStr(p.name)).map((p) => ({ project_id: p.project_id as string, name: p.name as string }));
       agents.push({ agent_member_id: a.agent_member_id, name: a.name, can_command: a.can_command === true, projects, running: typeof a.running === 'boolean' ? a.running : null });
     }
-    computers.push({ setup_id: c.setup_id, device_name: c.device_name, reachable: c.reachable === true, agents });
+    computers.push({ setup_id: c.setup_id, device_name: c.device_name, reachable: c.reachable === true, agents, ...(isStr(c.computer_id) ? { computer_id: c.computer_id } : {}) });
   }
   return { remote_control: raw.remote_control, computers };
+}
+
+/**
+ * story 4734: the server lists one entry per SETUP; the person sees one computer. Entries of one `computer_id` become one computer whose agents come from all of them,
+ * each agent carrying the `setup_id` of the setup it belongs to — the start for it names that setup (the shell finds the entry by it, the daemon of that setup owns the
+ * agent). The entry stays one per setup on the wire; nothing is merged server-side. A computer is `reachable` when any of its setups is; the first reachable setup is the
+ * one named for the card itself. An agent listed by two setups of one computer is shown once: from the setup that is reachable, then the one it runs on.
+ */
+export function groupByComputer(entries: readonly StartableComputer[]): StartableComputer[] {
+  const order: string[] = [];
+  const groups = new Map<string, StartableComputer[]>();
+  for (const e of entries) {
+    const key = e.computer_id ?? `setup:${e.setup_id}`;
+    if (!groups.has(key)) { groups.set(key, []); order.push(key); }
+    groups.get(key)!.push(e);
+  }
+  return order.map((key) => {
+    const members = groups.get(key)!;
+    if (members.length === 1 && !members[0]!.computer_id) return members[0]!;
+    const ranked = [...members].sort((a, b) => Number(b.reachable) - Number(a.reachable));
+    const rep = ranked[0]!;
+    const seen = new Map<string, StartableAgent>();
+    for (const m of ranked) {
+      for (const a of m.agents) {
+        const have = seen.get(a.agent_member_id);
+        if (!have || (have.running !== true && a.running === true && m.reachable)) seen.set(a.agent_member_id, { ...a, setup_id: m.setup_id });
+      }
+    }
+    return { ...rep, reachable: members.some((m) => m.reachable), agents: [...seen.values()] };
+  });
 }
 
 type Call = (type: string, args: Record<string, unknown>) => Promise<PhoneAnswer>;

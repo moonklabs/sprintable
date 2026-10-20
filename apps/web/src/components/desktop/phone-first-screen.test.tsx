@@ -1076,3 +1076,40 @@ describe('[4714] AC3 — started ≠ stood: the conversation with the started ag
     expect(assigned).toEqual([FIRST]);
   });
 });
+
+
+describe('[4734] one computer, its setups\' agents together — a start names the agent\'s OWN setup', () => {
+  const COMPUTER_ID = '99999999-9999-4999-8999-999999999999';
+  const SETUP2 = '11111111-2222-4333-8444-666666666666';
+  // the server lists one entry per SETUP (the phone shell finds an entry by `setup_id`); two setups of one Mac share a computer_id
+  const sharedMac = () => ({ remote_control: true, computers: [
+    computer({ computer_id: COMPUTER_ID, agents: [{ agent_member_id: AGENT, name: '결제 담당', can_command: true, projects: [{ project_id: PROJECT, name: '결제 개편' }] }] }),
+    computer({ computer_id: COMPUTER_ID, setup_id: SETUP2, agents: [{ agent_member_id: AGENT2, name: '문서 담당', can_command: true, projects: [{ project_id: PROJECT2, name: '정산' }] }] }),
+  ] });
+
+  it('two setups of one computer are ONE card (no «computer» picker), with both setups\' agents in the agent sheet', async () => {
+    world.startable = sharedMac();
+    await screen();
+    expect(byId('onboarding-phone-computer')).toBeNull(); // reverted (one card per setup) → a computer picker with two «윤재의 맥북»
+    await press(byId('onboarding-phone-agent'));
+    const names = Array.from(container.querySelectorAll('[data-testid="onboarding-phone-sheet-row"]')).map((r) => r.textContent);
+    expect(names).toEqual(expect.arrayContaining(['결제 담당', '문서 담당']));
+    expect(names).toHaveLength(2);
+  });
+
+  it('starting the SECOND setup\'s agent signs for THAT setup (the shell finds the entry by it) — never for the card\'s first setup', async () => {
+    world.startable = sharedMac();
+    await screen();
+    await pickFromSheet('onboarding-phone-agent', '문서 담당');
+    await pickFromSheet('onboarding-phone-project', '정산');
+    await press(byId('onboarding-phone-start-go'));
+    expect(phoneCall).toHaveBeenCalledWith('command.sign', { kind: 'start_session', setup_id: SETUP2, agent_member_id: AGENT2, project_id: PROJECT2 });
+    expect(phoneCall).not.toHaveBeenCalledWith('command.sign', expect.objectContaining({ agent_member_id: AGENT2, setup_id: SETUP }));
+  });
+
+  it('an older server (no computer_id) keeps one entry per setup, exactly as before', async () => {
+    world.startable = { remote_control: true, computers: [computer(), computer({ setup_id: SETUP2, device_name: '사무실 맥' })] };
+    await screen();
+    expect(byId('onboarding-phone-computer')).not.toBeNull(); // two computers to choose between, as before
+  });
+});

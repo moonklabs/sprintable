@@ -23,8 +23,21 @@ import { PhonePairEntry } from './phone-pairing';
  * was one line per pair, so a key holding a place with no pair was invisible and could never be removed. The longest unused first.
  * story #4532 — inside the phone app (its bridge claimed) one more button: [컴퓨터와 짝짓기] → the phone's pairing screen.
  */
-interface Pair { setup_id: string; device_name: string | null; paired_at: string }
+interface Pair { setup_id: string; /** story 4734: the computer this pair's setup belongs to (an older server sends none) */ computer_id?: string; device_name: string | null; paired_at: string }
 interface Phone { id: string; label: string; confirm_number: string; last_used_at: string | null; created_at?: string | null; pairs: Pair[] }
+
+/** story 4734: a phone's pairs are per setup on the wire; the person sees one line per COMPUTER (an older server sends no computer_id: one line per setup, as before) */
+function collapsePairs(phone: Phone): Phone {
+  const seen = new Set<string>();
+  const pairs: Pair[] = [];
+  for (const p of phone.pairs) {
+    const key = p.computer_id ?? `setup:${p.setup_id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    pairs.push(p);
+  }
+  return { ...phone, pairs };
+}
 
 /** what is being confirmed: one pair (`${phone}:${setup}`) or a whole phone (`phone:${id}`) */
 type Asking = string | null;
@@ -68,7 +81,7 @@ export function DesktopRemoteDevices() {
     try {
       const res = await fetchWithAuth('/api/remote-devices');
       const body = res.ok ? ((await res.json()) as { devices?: Phone[] }) : null;
-      setPhones(Array.isArray(body?.devices) ? body.devices : null);
+      setPhones(Array.isArray(body?.devices) ? body.devices.map(collapsePairs) : null);
     } catch {
       setPhones(null);
     }
@@ -94,7 +107,7 @@ export function DesktopRemoteDevices() {
     }
   }, [load, t]);
   // the name in the label place, no particle after it (Yuna 14:15Z ① — a phone's name is often Latin: «iPhone와» is wrong)
-  const removePair = (phone: Phone, pair: Pair) => ask(`/api/remote-devices/${phone.id}/pairs/${pair.setup_id}`,
+  const removePair = (phone: Phone, pair: Pair) => ask(pair.computer_id ? `/api/remote-devices/${phone.id}/computers/${pair.computer_id}` : `/api/remote-devices/${phone.id}/pairs/${pair.setup_id}`, // story 4734: the computer's, once
     ({ removed }) => (removed ? t('removed', { phone: phone.label }) : t('alreadyRemoved', { phone: phone.label })));
   // story #4629: whether that phone's login was ended too · a server that does not say (older) → the line as before, no claim either way
   const removePhone = (phone: Phone) => ask(`/api/remote-devices/${phone.id}`, ({ removed, session }) => {
