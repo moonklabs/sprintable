@@ -283,8 +283,11 @@ function ComputerRow({ computer, linked, onDisconnectAll, onDisconnectSetup }: {
         >
           <div className="min-w-0">
             <p className={`flex flex-wrap items-center gap-2 text-sm ${off ? 'font-medium text-muted-foreground' : 'font-semibold text-foreground'}`}>
-              <ChevronDown className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden />
-              <span className="truncate" data-testid="desktop-computer-name">{computer.device_name}</span>
+              {/* the chevron and the name are one item: a long name wraps inside its own box and the state drops to the next line, never the chevron alone above the name */}
+              <span className="flex min-w-0 max-w-full items-center gap-2">
+                <ChevronDown className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" aria-hidden />
+                <span className="min-w-0 break-words" data-testid="desktop-computer-name">{computer.device_name}</span>
+              </span>
               <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground" data-testid="desktop-computer-state">
                 <StateDot state={computer.state} />
                 <span className={computer.state === 'handed_over' ? 'text-success' : undefined}>{stateLabel}</span>
