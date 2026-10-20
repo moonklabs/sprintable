@@ -7472,7 +7472,8 @@
         "signInAgain": "Please sign in again",
         "pairAgain": "Please pair the phone again",
         "biometricRequired": "Turn on fingerprint or face check on the phone",
-        "noScreenLock": "Set a screen lock on the phone first"
+        "noScreenLock": "Set a screen lock on the phone first",
+        "unreachable": "Can't reach that computer — press again once it's on"
       },
       "oldApp": "Update the app on this Mac to end and start sessions from the phone"
     }

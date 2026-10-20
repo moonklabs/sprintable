@@ -243,10 +243,22 @@ describe('[4733 S4b] readClock · parseClockRead', () => {
     expect(r.view!.rows).toEqual([{ agentId: AGENT, name: 'Dev', state: 'ready', missing: [], firstLine: '오늘 한 일', idle: false }]);
   });
 
-  it('the draft\'s first line is kept as plain characters (a tag · url · newline is data, not markup) — and a row without its id or with an unknown state is dropped', () => {
-    const r = parseClockRead(panel({ rows: [row({ first_line: '<b>x</b> https://evil.example' }), row({ agent_member_id: undefined }), row({ state: 'confused' }), row({ agent_member_id: 'b'.repeat(8), state: 'needs_you', missing: ['done', 'plan', 'x'], first_line: null })] }))!;
+  it('the draft\'s first line is kept as plain characters (a tag · url · newline is data, not markup); a row with missing flags keeps only the known ones', () => {
+    const r = parseClockRead(panel({ rows: [row({ first_line: '<b>x</b> https://evil.example' }), row({ agent_member_id: 'b'.repeat(8), state: 'needs_you', missing: ['done', 'plan', 'x'], first_line: null })] }))!;
     expect(r.view!.rows.map((x) => x.firstLine)).toEqual(['<b>x</b> https://evil.example', null]);
     expect(r.view!.rows[1]!.missing).toEqual(['done', 'plan']);
+  });
+
+  it('a row this page cannot read (no id · a state it does not know) makes the WHOLE view unreadable — never a view with fewer rows than the computer sent', () => {
+    for (const bad of [row({ agent_member_id: undefined }), row({ state: 'confused' }), null, 'x', row({ agent_member_id: '' })]) {
+      expect(parseClockRead(panel({ rows: [row({}), bad] }))).toBeNull();
+    }
+  });
+
+  it('a one-agent panel is exactly one row: none or two is no view', () => {
+    expect(parseClockRead(panel({ scope: 'one', rows: [] }))).toBeNull();
+    expect(parseClockRead(panel({ scope: 'one', rows: [row({}), row({ agent_member_id: 'c'.repeat(8) })] }))).toBeNull();
+    expect(parseClockRead(panel({ scope: 'one', rows: [row({})] }))).not.toBeNull();
   });
 
   it('out: the ended names, what came in, the warning, how many ended one by one; in: the steps, the failures; outs: who is out on their own', () => {

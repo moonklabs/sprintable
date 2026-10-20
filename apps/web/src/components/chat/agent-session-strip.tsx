@@ -38,6 +38,8 @@ type SessionState = 'starting' | 'working' | 'idle' | 'waiting_permission' | 'wa
   // story #4534 (Yuna 05:41Z): a word this page does not know — not the server's `unknown` (= the computer lost): its own line
   | 'unrecognized';
 interface View {
+  // story #4733: the computer this session runs on (the server sends it with the session; an older one sends none)
+  setup_id?: string | null;
   device_name: string | null;
   // story #4534 (Kadir 4960 · PO 05:36Z): `state` = the five words a reader from before knows · `activity` = the board's own word
   state: SessionState | null;
@@ -194,13 +196,15 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
       if (!live) return;
       if (list.kind !== 'view') return;
       // the phone's [세션 종료] is on a RUNNING agent's row of a computer that speaks `clock` and that this person may command
-      const computer = list.view.computers.find((c) => c.agents.some((a) => a.agent_member_id === agentId && a.running === true));
+      // THIS session's computer: the one the server names; with no name, only when exactly one computer has this agent running (never a guess between two)
+      const running = list.view.computers.filter((c) => c.agents.some((a) => a.agent_member_id === agentId && a.running === true));
+      const computer = typeof view.setup_id === 'string' ? running.find((c) => c.setup_id === view.setup_id) : running.length === 1 ? running[0] : undefined;
       if (!computer) return;
       const read = await readClock(computer.setup_id, list.phoneKeyId);
       if (live) setClockAvailable(read.kind === 'read' && read.read.supported && read.read.remoteControl && read.read.reachable);
     })().catch(() => { if (live) setClockAvailable(false); });
     return () => { live = false; };
-  }, [endOpen, phone, phoneCall, agentId]);
+  }, [endOpen, phone, phoneCall, agentId, view?.setup_id]);
   const endCancelRef = useRef<HTMLButtonElement>(null);
   // what was written stays until it went somewhere (spec B-3: «쓴 글은 남김») — kept as a draft per agent · conversation (#4370)
   const [draft, setDraft, clearDraft] = useFieldDraft({ surface: 'agent-instruct', targetId: `${agentId}:${conversationId}`, field: 'text' });

@@ -48,11 +48,15 @@ function SessionsForOrg({ orgId, orgSyncPending }: { orgId: string | undefined; 
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
 
+  const listBusy = useRef(false); // one list read at a time: a poll does not start another while the last still waits on the bridge (it cannot be cancelled once asked)
   const readList = useCallback(() => {
+    if (listBusy.current) return;
+    listBusy.current = true;
     if (flowRef.current) { flowRef.current.stopped = true; endFlow(flowRef.current); }
     const flow = beginFlow();
     flowRef.current = flow;
     void readStartableKeyed(phoneCall, () => flow.stopped).catch(() => ({ kind: 'failed' as const })).then((r) => {
+      listBusy.current = false;
       endFlow(flow);
       if (flow.stopped || !alive.current) return;
       if (r.kind === 'view') {
@@ -102,7 +106,7 @@ function SessionsForOrg({ orgId, orgSyncPending }: { orgId: string | undefined; 
 type T = ReturnType<typeof useTranslations>;
 
 type LineKey =
-  | 'remoteOff' | 'already' | 'nothingRunning' | 'notOpen' | 'notReady' | 'needsHands' | 'notClockedOut' | 'unknownAgent' | 'alreadyRunning' | 'expired' | 'expiredStart'
+  | 'remoteOff' | 'already' | 'nothingRunning' | 'notOpen' | 'notReady' | 'needsHands' | 'notClockedOut' | 'unknownAgent' | 'alreadyRunning' | 'expired' | 'expiredStart' | 'unreachable'
   | 'unknown' | 'unknownStart' | 'notAllowed' | 'notPaired' | 'signInAgain' | 'pairAgain' | 'biometricRequired' | 'noScreenLock' | 'failed';
 type Line = { key: LineKey } | null;
 
@@ -124,6 +128,7 @@ function resultText(t: T, key: LineKey): string {
     case 'alreadyRunning': return t('result.alreadyRunning');
     case 'expired': return t('result.expired');
     case 'expiredStart': return t('result.expiredStart');
+    case 'unreachable': return t('result.unreachable');
     case 'unknown': return t('result.unknown');
     case 'unknownStart': return t('result.unknownStart');
     case 'notAllowed': return t('result.notAllowed');
@@ -140,7 +145,8 @@ function resultText(t: T, key: LineKey): string {
 function lineOf(o: PressOutcome, start: boolean): Line {
   switch (o.kind) {
     case 'done': return DONE_LINES[o.result] ? { key: DONE_LINES[o.result]! } : null;
-    case 'unreachable': case 'expired': return { key: start ? 'expiredStart' : 'expired' };
+    case 'unreachable': return { key: 'unreachable' }; // the server refused before making anything: certainly nothing happened, but it is not the «never taken» proof
+    case 'expired': return { key: start ? 'expiredStart' : 'expired' };
     case 'unknown': return { key: start ? 'unknownStart' : 'unknown' };
     case 'remote_off': return { key: 'remoteOff' }; // (the section turns to its own remote-off line at the next list read)
     case 'not_allowed': return { key: 'notAllowed' };
@@ -180,9 +186,11 @@ function ComputerCard({ computer, phoneKeyId, onChanged, frozen }: { computer: S
   useEffect(() => { if (view?.mode === 'none') setPressedHere(false); }, [view?.mode]);
   const fast = busy || (view !== null && view.mode !== 'none');
 
+  const lookSeq = useRef(0);
   const look = useCallback(async () => {
+    const mine = ++lookSeq.current; // only the latest look commits: an older answer arriving late must not overwrite a newer state (remote-off · failures · the view)
     const r = await readClock(computer.setup_id, phoneKeyId);
-    if (!alive.current) return;
+    if (!alive.current || mine !== lookSeq.current) return;
     if (r.kind === 'not_allowed' || r.kind === 'not_paired') { setHidden(true); return; } // not this person's to command / not this phone's: the card is not drawn
     if (r.kind === 'read') { setHidden(false); setRead(r.read); setFailures(0); } else setFailures((n) => n + 1);
   }, [computer.setup_id, phoneKeyId]);
@@ -244,7 +252,22 @@ function ComputerCard({ computer, phoneKeyId, onChanged, frozen }: { computer: S
   const zone = useViewerTimeZone(); // the viewer's own zone (the phone's) — a clock time is the person's, not the server's
   const time = (iso: string | null | undefined): string => { const d = iso ? new Date(iso) : null; return d && !Number.isNaN(d.getTime()) ? (formatViewerDate(d, locale, zone, { hour: 'numeric', minute: '2-digit' }) ?? '') : ''; };
 
-  if (hidden || !read) return null;
+  if (hidden) return null;
+  if (!read) {
+    // the first look has not answered: after a failed one the card says so (with a way to try again) instead of silently not being there
+    if (failures < 1) return null;
+    return (
+      <Card className="break-keep space-y-2 p-4" data-testid="phone-session-card" data-setup={computer.setup_id}>
+        <header>
+          <p className="text-sm font-semibold text-foreground">{computer.device_name}</p>
+          <p className="text-xs text-muted-foreground">{t('title')}</p>
+        </header>
+        <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="phone-sessions-stale">
+          {t('readFailed')} <Button variant="outline" size="sm" className="min-h-11" onClick={() => void look()}>{t('retry')}</Button>
+        </p>
+      </Card>
+    );
+  }
   // an older app on that computer (it has never reported a clock view = no `clock`): a press could only fail — no buttons, one line saying what to do (PO 5585)
   if (!read.supported) {
     return (
@@ -259,7 +282,8 @@ function ComputerCard({ computer, phoneKeyId, onChanged, frozen }: { computer: S
   }
   // what is drawn may no longer be true: two looks in a row did not answer, remote control went off, or the organization is being switched — nothing is pressable then
   const stale = failures >= 2;
-  const locked = stale || !read.remoteControl || frozen;
+  const locked = stale || !read.remoteControl || frozen || pending !== null; // an unknown end holds every other press until it is looked into (the next press must not overwrite it)
+  const checkLocked = busy || stale || !read.remoteControl || frozen;
   const device = computer.device_name;
   const nameOf = (id: string, serverName: string | null): string => {
     const a = computer.agents.find((x) => x.agent_member_id === id);
@@ -299,7 +323,7 @@ function ComputerCard({ computer, phoneKeyId, onChanged, frozen }: { computer: S
       <p role="status" aria-live="polite" className="text-xs text-foreground" data-testid="phone-sessions-line">
         {line ? resultText(t, line.key) : ''}
       </p>
-      {pending ? <Button variant="outline" size="sm" className="min-h-11" disabled={busy} onClick={() => void check()} data-testid="phone-sessions-check">{t('result.checkResult')}</Button> : null}
+      {pending ? <Button variant="outline" size="sm" className="min-h-11" disabled={checkLocked} onClick={() => void check()} data-testid="phone-sessions-check">{t('result.checkResult')}</Button> : null}
     </Card>
   );
 }

@@ -52,9 +52,13 @@ export function parseClockRead(raw: unknown): ClockRead | null {
   if (!isObj(v) || !(v.mode === 'none' || v.mode === 'panel' || v.mode === 'out' || v.mode === 'in')) return null; // a mode this page does not know: not a view it can draw
   // a panel is the whole computer's or one agent's: one that does not say which is not a view this page can act on (it would otherwise press for the whole computer)
   if (v.mode === 'panel' && v.scope !== 'computer' && v.scope !== 'one') return null;
+  // …and one agent's panel is exactly one row (a cancel / submit for "the row" must have a row to name)
+  if (v.mode === 'panel' && v.scope === 'one' && !(Array.isArray(v.rows) && v.rows.length === 1)) return null;
   const rows: ClockRowView[] = [];
   for (const r of Array.isArray(v.rows) ? v.rows : []) {
-    if (!isObj(r) || !isStr(r.agent_member_id) || !(ROW_STATES as readonly unknown[]).includes(r.state)) continue;
+    // a row this page cannot read makes the whole view unreadable — never a view with fewer rows than the computer sent (the counts and the consent would then be about rows the person
+    // is not looking at)
+    if (!isObj(r) || !isStr(r.agent_member_id) || !(ROW_STATES as readonly unknown[]).includes(r.state)) return null;
     rows.push({
       agentId: r.agent_member_id,
       name: isStr(r.name) ? r.name : null,

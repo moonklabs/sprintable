@@ -609,6 +609,38 @@ describe('[4733 S4b] the hard end\'s dialog points at the phone\'s own [세션 �
     expect(document.querySelector('[data-testid="agent-end-use-clock"]')).toBeNull();
   });
 
+  it('the session\'s OWN computer decides: the server names it (`setup_id`) → that computer\'s `clock` answer counts, not another computer\'s where the agent also runs', async () => {
+    const OTHER = '99999999-2222-4333-8444-555555555555';
+    serverWithClock({
+      startable: { remote_control: true, computers: [
+        { setup_id: OTHER, device_name: 'Mini', reachable: true, agents: [{ agent_member_id: AGENT, name: 'Dev', can_command: true, projects: [], running: true }] },
+        { setup_id: SETUP, device_name: 'M', reachable: true, agents: [{ agent_member_id: AGENT, name: 'Dev', can_command: true, projects: [], running: true }] },
+      ] },
+    });
+    const base = fetchWithAuth.getMockImplementation()!;
+    fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => (url.includes(`/api/desktop/setups/${OTHER}/clock?`) ? res(200, { remote_control: true, reachable: true, supported: false, view: null }) : base(url, init)));
+    sessionView = { ...sessionView, setup_id: SETUP };
+    await openDialog();
+    expect(document.querySelector('[data-testid="agent-end-use-clock"]')).not.toBeNull(); // SETUP speaks clock
+    // the same two computers, but the session runs on the one that does NOT speak it
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    sessionView = { ...sessionView, setup_id: OTHER };
+    await openDialog();
+    expect(document.querySelector('[data-testid="agent-end-use-clock"]')).toBeNull();
+  });
+
+  it('two computers run the agent and the server names none → no guess: no paragraph', async () => {
+    serverWithClock({
+      startable: { remote_control: true, computers: [
+        { setup_id: SETUP, device_name: 'M', reachable: true, agents: [{ agent_member_id: AGENT, name: 'Dev', can_command: true, projects: [], running: true }] },
+        { setup_id: '88888888-2222-4333-8444-555555555555', device_name: 'Mini', reachable: true, agents: [{ agent_member_id: AGENT, name: 'Dev', can_command: true, projects: [], running: true }] },
+      ] },
+    });
+    await openDialog();
+    expect(document.querySelector('[data-testid="agent-end-use-clock"]')).toBeNull();
+  });
+
   it('English: the same structure with the English words', async () => {
     serverWithClock({});
     sessionView = { ...sessionView, state: 'working', activity: 'waiting_system' };

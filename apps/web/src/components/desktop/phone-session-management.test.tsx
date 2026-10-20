@@ -47,6 +47,7 @@ function server() {
     }
     if (url.includes('/clock/commands/')) return world.poll ? world.poll.clone() : json({ command_id: CMD, state: 'done', result_code: 'ok' }); // a Response body can be read once: every look gets its own
     if (url.includes('/clock?phone_key_id=')) {
+      if (typeof world.clock === 'function') return (world.clock as () => Promise<Response> | Response)();
       if (world.clock instanceof Response) return world.clock.clone();
       return json(world.clock ?? { remote_control: true, reachable: world.reachable !== false, supported: world.supported !== false, view: world.view ?? null });
     }
@@ -281,17 +282,93 @@ describe('[4733 S4b] the consent is judged from the rows themselves (fail closed
     expect((byId('phone-sessions-submit') as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('a one-agent panel that carries two rows is not submitted', async () => {
+  it('a one-agent panel that carries two rows is not a view this page acts on: no submit, no cancel', async () => {
     world.view = panel([row({}), row({ agent_member_id: AGENT2, name: '문서 담당' })], { ready: 2, needs_you: 0, drafting: 0 }, { scope: 'one' });
     await screen();
-    expect((byId('phone-sessions-submit') as HTMLButtonElement).disabled).toBe(true);
+    expect(byId('phone-sessions-submit')).toBeNull();
+    expect(byId('phone-sessions-cancel')).toBeNull();
   });
 
-  it('a panel with no scope (or a scope this page does not know) is not drawn as the whole computer\'s: no card, no submit', async () => {
+  it('a panel with no scope (or a scope this page does not know) is not drawn as the whole computer\'s: no submit, no cancel — the card says it cannot read', async () => {
     world.view = panel([row({})], { ready: 1, needs_you: 0, drafting: 0 }, { scope: undefined });
     await screen();
     expect(byId('phone-sessions-submit')).toBeNull();
-    expect(byId('phone-session-card')).toBeNull();
+    expect(byId('phone-sessions-cancel')).toBeNull();
+    expect(byId('phone-sessions-stale')).not.toBeNull();
+  });
+});
+
+describe('[4733 S4b] codex round 2 — pending holds the presses · overlapping looks · a failed first look · unreachable', () => {
+  it('after an UNKNOWN end every other press is held (the next press must not overwrite it); only [결과 확인] is on', async () => {
+    world.post = new Response('boom', { status: 500 });
+    await screen();
+    await press(byId('phone-sessions-end-all'));
+    expect(byId('phone-sessions-check')).not.toBeNull();
+    expect((byId('phone-sessions-end-all') as HTMLButtonElement).disabled).toBe(true);
+    expect((all('phone-sessions-agent')[0]!.querySelector('button') as HTMLButtonElement).disabled).toBe(true);
+    expect((byId('phone-sessions-check') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('[결과 확인] is off while the card cannot be trusted (stale · remote off · org sync)', async () => {
+    world.post = new Response('boom', { status: 500 });
+    await screen();
+    await press(byId('phone-sessions-end-all'));
+    world.clock = { remote_control: false, reachable: true, supported: true, view: null };
+    await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+    await flush();
+    expect((byId('phone-sessions-check') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('an OLDER look that answers late does not overwrite a newer one (the late «remote control off» must not lock a card the newer look found fine)', async () => {
+    await screen();
+    let releaseOld!: (r: Response) => void;
+    world.clock = () => new Promise<Response>((r) => { releaseOld = r; }); // the poll's look hangs…
+    await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+    world.clock = undefined; // …a newer look (after a press) answers at once
+    await press(byId('phone-sessions-end-all'));
+    releaseOld(json({ remote_control: false, reachable: true, supported: true, view: null })); // …and the old one arrives last
+    await flush();
+    expect(byId('phone-sessions-card-remote-off')).toBeNull();
+    expect((byId('phone-sessions-end-all') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('the FIRST look failing leaves the card in place with «세션 상태를 읽지 못했어요» and a way to try again (not a silent hole)', async () => {
+    world.clock = new Response('boom', { status: 500 });
+    await screen();
+    expect(byId('phone-session-card')).not.toBeNull();
+    expect(byId('phone-sessions-stale')?.textContent).toContain(koMessages.desktop.phoneSessions.readFailed);
+    world.clock = undefined;
+    await press(byId('phone-sessions-stale')!.querySelector('button'));
+    expect(byId('phone-sessions-stale')).toBeNull();
+    expect(byId('phone-sessions-end-all')).not.toBeNull();
+  });
+
+  it('«연결이 끊겨 있어요» for a press the server refused as unreachable — NOT the «아무것도 멈추지 않았어요» of an expired one', async () => {
+    world.post = new Response(JSON.stringify({ error: { code: 'device_unreachable' } }), { status: 409 });
+    await screen();
+    await press(byId('phone-sessions-end-all'));
+    expect(byId('phone-sessions-line')?.textContent).toBe(koMessages.desktop.phoneSessions.result.unreachable);
+    expect(byId('phone-sessions-line')?.textContent).not.toContain('아무것도 멈추지 않았어요');
+  });
+
+  it('a one-agent panel the page cannot read as exactly one row is no card (no cancel that would name the whole computer)', async () => {
+    world.view = panel([], { ready: 0, needs_you: 0, drafting: 0 }, { scope: 'one' });
+    await screen();
+    expect(byId('phone-sessions-cancel')).toBeNull();
+    expect(byId('phone-sessions-submit')).toBeNull();
+  });
+
+  it('a panel with a row the page cannot read is no panel (the counts would be about rows nobody is looking at)', async () => {
+    world.view = panel([row({}), row({ agent_member_id: AGENT2, state: 'confused' })], { ready: 2, needs_you: 0, drafting: 0 });
+    await screen();
+    expect(byId('phone-sessions-submit')).toBeNull();
+  });
+
+  it('the list is read one at a time: while the bridge has not answered, the poll starts no second read', async () => {
+    phoneCall.mockImplementation((type: string) => (type === 'device.key.info' ? new Promise(() => {}) : Promise.resolve(signAnswer)));
+    await screen();
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'device.key.info')).toHaveLength(1);
   });
 });
 
