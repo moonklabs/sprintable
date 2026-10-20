@@ -395,12 +395,15 @@ async def apply_clock_view(db: AsyncSession, setup: DesktopSetup, report: ClockV
     return True, row[0], dropped
 
 
-async def forget(db: AsyncSession, setup_ids: list[uuid.UUID]) -> None:
+async def forget(db: AsyncSession, setup_ids: list[uuid.UUID], *, lock: bool = True) -> None:
     """The computers' views go (a disconnect · the organization's remote control turned off): nothing of a flow stays for a computer that cannot be reached."""
     if setup_ids:
         # the computers' rows are locked first: a report in flight holds its computer's lock until it commits, so this waits for it and deletes what it wrote
-        # (and a report that starts after this waits for the lock, then finds the computer disconnected / remote control off and writes nothing)
-        await db.execute(select(DesktopSetup.id).where(DesktopSetup.id.in_(setup_ids)).order_by(DesktopSetup.id).with_for_update())
+        # (and a report that starts after this waits for the lock, then finds the computer disconnected / remote control off and writes nothing).
+        # `lock=False` for a caller that already holds those rows in the service's one lock order (`desktop_setup._lock_in_order`: the exchange and the
+        # disconnect) — a second lock statement there would be a second place that takes setup rows.
+        if lock:
+            await db.execute(select(DesktopSetup.id).where(DesktopSetup.id.in_(setup_ids)).order_by(DesktopSetup.id).with_for_update())
         await db.execute(delete(DesktopClockView).where(DesktopClockView.setup_id.in_(setup_ids)))
 
 
