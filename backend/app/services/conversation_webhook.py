@@ -517,7 +517,7 @@ async def _retry_deliver(
             return
 
         except Exception as exc:
-            error_msg = str(exc)[:500]
+            error_msg = safe_exception_text(exc)[:500]  # story #4741: logged and stored below — a database error's text carries the row's values
             if attempt < _MAX_RETRIES:
                 backoff = _BACKOFF_BASE * (2 ** (attempt - 1))
                 logger.warning(

@@ -410,16 +410,31 @@ def _log_calls_that_print_exception_text(root) -> set[tuple[str, int]]:
                 return True
         return False
 
+    def text_names(func) -> set[str]:
+        """Names a function sets from exception text (`error_msg = str(exc)[:500]`) — handing such a name to a log call is the same as building the text in the call."""
+        names: set[str] = set()
+        for n in ast.walk(func):
+            if isinstance(n, ast.Assign) and mentions_exception_text(n.value):
+                names.update(t.id for t in n.targets if isinstance(t, ast.Name))
+            elif isinstance(n, ast.AnnAssign) and n.value is not None and mentions_exception_text(n.value) and isinstance(n.target, ast.Name):
+                names.add(n.target.id)
+        return names
+
     found: set[tuple[str, int]] = set()
     for path in sorted(Path(root).rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         rel = str(path.relative_to(Path(root).parent))
-        for n in ast.walk(tree):
-            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in _LOG_METHODS:
-                base = n.func.value
-                name = base.id if isinstance(base, ast.Name) else getattr(base, "attr", "")
-                if name in {"logger", "_logger", "log", "logging", "LOGGER", "_log"} and any(mentions_exception_text(a) for a in [*n.args, *[k.value for k in n.keywords]]):
-                    found.add((rel, n.lineno))
+        funcs = [f for f in ast.walk(tree) if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        for func in funcs:
+            names = text_names(func)
+            for n in ast.walk(func):
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in _LOG_METHODS:
+                    base = n.func.value
+                    name = base.id if isinstance(base, ast.Name) else getattr(base, "attr", "")
+                    if name in {"logger", "_logger", "log", "logging", "LOGGER", "_log"}:
+                        args = [*n.args, *[k.value for k in n.keywords]]
+                        if any(mentions_exception_text(a) or any(isinstance(x, ast.Name) and x.id in names for x in ast.walk(a)) for a in args):
+                            found.add((rel, n.lineno))
     return found
 
 
@@ -441,5 +456,37 @@ def test_13_no_log_call_in_the_app_builds_text_out_of_an_exception_before_the_re
         "def e2(exc):\n    logger.error('x %s', exc)\n"
         "def f(exc):\n    logger.exception('x')\n"
         "def g(exc):\n    other.error(str(exc))\n"
+        "def h(exc):\n    msg = str(exc)[:500]\n    logger.warning('x %s', msg)\n"
+        "def i(exc):\n    msg = 'fixed'\n    logger.warning('x %s', msg)\n"
     )
-    assert _log_calls_that_print_exception_text(pkg) == {("app/z.py", 2), ("app/z.py", 4), ("app/z.py", 6), ("app/z.py", 8)}
+    assert _log_calls_that_print_exception_text(pkg) == {("app/z.py", 2), ("app/z.py", 4), ("app/z.py", 6), ("app/z.py", 8), ("app/z.py", 17)}
+
+
+async def test_14_a_delivery_status_update_that_the_database_refuses_leaves_no_value_in_the_log_or_the_stored_last_error(caplog, monkeypatch):
+    """`_retry_deliver` turned the exception into text (`error_msg`) BEFORE logging it and storing it in `last_error` — the record redaction never saw an exception object."""
+    import uuid as _uuid
+
+    from app.services import conversation_webhook as cw
+
+    stored: list[dict] = []
+
+    async def _attempt_ok(url, secret, payload):
+        return None
+
+    async def _update(delivery_id, status, **kw):
+        if status == "gateway_accepted":
+            raise _db_error()
+        stored.append({"status": status, **kw})
+
+    async def _no_sleep(_):
+        return None
+
+    monkeypatch.setattr(cw, "_attempt_delivery", _attempt_ok)
+    monkeypatch.setattr(cw, "_update_delivery_status", _update)
+    monkeypatch.setattr(cw.asyncio, "sleep", _no_sleep)
+    caplog.set_level(logging.DEBUG)
+    await cw._retry_deliver(_uuid.uuid4(), "https://example.invalid/hook", None, {})
+    assert MARK not in _record_texts(caplog.records)
+    assert stored and stored[-1]["status"] == "failed"
+    assert MARK not in json.dumps(stored, default=str)
+    assert "sqlstate=23505" in stored[-1]["last_error"] and "uq_things_slug" in stored[-1]["last_error"]
