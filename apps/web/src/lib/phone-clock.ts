@@ -42,7 +42,10 @@ export interface ClockRead { remoteControl: boolean; reachable: boolean; support
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isStr = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
-const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+/** the server's names and an agent's draft line are text from outside: direction overrides and isolates (U+202A–202E · U+2066–2069) and the plain direction marks (U+200E · U+200F · U+061C) are taken out before they are drawn — a line must not be able to reorder what stands beside it */
+const BIDI = /[\u202A-\u202E\u2066-\u2069\u200E\u200F\u061C]/g;
+export const plain = (v: string): string => v.replace(BIDI, '');
+const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').map(plain) : []);
 
 export function parseClockRead(raw: unknown): ClockRead | null {
   if (!isObj(raw) || typeof raw.remote_control !== 'boolean' || typeof raw.reachable !== 'boolean' || typeof raw.supported !== 'boolean') return null;
@@ -64,10 +67,10 @@ export function parseClockRead(raw: unknown): ClockRead | null {
     if (!isObj(r) || !isStr(r.agent_member_id) || !(ROW_STATES as readonly unknown[]).includes(r.state)) return null;
     rows.push({
       agentId: r.agent_member_id,
-      name: isStr(r.name) ? r.name : null,
+      name: isStr(r.name) ? plain(r.name) : null,
       state: r.state as RowState,
       missing: (Array.isArray(r.missing) ? r.missing : []).filter((m): m is 'done' | 'plan' | 'blockers' => m === 'done' || m === 'plan' || m === 'blockers'),
-      firstLine: isStr(r.first_line) ? r.first_line : null, // plain text only — drawn as characters (never a link, never HTML)
+      firstLine: isStr(r.first_line) ? (plain(r.first_line).trim() === '' ? null : plain(r.first_line)) : null, // plain text only — drawn as characters (never a link, never HTML)
       idle: r.idle === true,
     });
   }
@@ -83,7 +86,7 @@ export function parseClockRead(raw: unknown): ClockRead | null {
       starting: isObj(i.starting) && num(i.starting.k) !== null && num(i.starting.n) !== null ? { k: i.starting.k as number, n: i.starting.n as number } : null,
       handing: isObj(i.handing) && num(i.handing.k) !== null && num(i.handing.m) !== null ? { k: i.handing.k as number, m: i.handing.m as number } : null,
       came: isObj(i.came) && num(i.came.total) !== null ? { total: i.came.total as number } : null,
-      failed: (Array.isArray(i.failed) ? i.failed : []).filter((f): f is Record<string, unknown> => isObj(f) && isStr(f.name) && isStr(f.code)).map((f) => ({ name: f.name as string, code: f.code as string, limit: num(f.limit) })),
+      failed: (Array.isArray(i.failed) ? i.failed : []).filter((f): f is Record<string, unknown> => isObj(f) && isStr(f.name) && isStr(f.code)).map((f) => ({ name: plain(f.name as string), code: f.code as string, limit: num(f.limit) })),
       unread: strs(i.unread),
     };
   }
@@ -91,7 +94,7 @@ export function parseClockRead(raw: unknown): ClockRead | null {
     ? { ready: v.count.ready as number, needsYou: v.count.needs_you as number, drafting: v.count.drafting as number } : null;
   const outs: ClockOneView[] = (Array.isArray(v.outs) ? v.outs : [])
     .filter((o): o is Record<string, unknown> => isObj(o) && isStr(o.agent_member_id) && isStr(o.at))
-    .map((o) => ({ agentId: o.agent_member_id as string, name: isStr(o.name) ? o.name : null, at: o.at as string }));
+    .map((o) => ({ agentId: o.agent_member_id as string, name: isStr(o.name) ? plain(o.name) : null, at: o.at as string }));
   return {
     ...base,
     view: {

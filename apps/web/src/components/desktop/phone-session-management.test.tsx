@@ -276,6 +276,46 @@ describe('[4733 S4b] the consent is judged from the rows themselves (fail closed
     expect((byId('phone-sessions-submit') as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('the counts must agree with the rows: ready 3 but two rows shown → OFF (the counts that disagree with the rows never turn the button on)', async () => {
+    world.view = panel([row({}), row({ agent_member_id: AGENT2, name: '문서 담당', first_line: '문서를 정리했어요' })], { ready: 3, needs_you: 0, drafting: 0 });
+    await screen();
+    expect((byId('phone-sessions-submit') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('the counts say a draft is still coming while every row shown is ready → OFF (the count wins when it says «not yet»)', async () => {
+    world.view = panel([row({}), row({ agent_member_id: AGENT2, name: '문서 담당', first_line: '문서를 정리했어요' })], { ready: 2, needs_you: 0, drafting: 1 });
+    await screen();
+    expect((byId('phone-sessions-submit') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('the counts say a row needs a hand while every row shown is ready → OFF (the count that says «needs you» is never ignored)', async () => {
+    world.view = panel([row({}), row({ agent_member_id: AGENT2, name: '문서 담당', first_line: '문서를 정리했어요' })], { ready: 2, needs_you: 1, drafting: 0 });
+    await screen();
+    expect((byId('phone-sessions-submit') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('a draft line with direction overrides draws without them', async () => {
+    world.view = panel([row({ first_line: '\u202E결제\u2066 연동\u2069' })], { ready: 1, needs_you: 0, drafting: 0 });
+    await screen();
+    const line = byId('phone-sessions-first-line')?.textContent ?? '';
+    expect(line).toBe('결제 연동 · ✓');
+    expect(/[\u202A-\u202E\u2066-\u2069]/.test(line)).toBe(false);
+  });
+
+  it('another organization starts from a clean slate: the card and the held unknown press of the first organization are gone', async () => {
+    world.post = new Response('boom', { status: 500 });
+    await screen();
+    await press(byId('phone-sessions-end-all'));
+    expect(byId('phone-sessions-check')).not.toBeNull();
+    dash = { orgId: 'org-2', orgSyncPending: false };
+    world.startable = { remote_control: true, computers: [{ setup_id: '55555555-6666-4777-8888-999999999999', device_name: '다른 조직 맥', reachable: true, agents: agents(true) }] };
+    await screen();
+    expect(byId('phone-sessions-check')).toBeNull();
+    expect(byId('phone-session-card')?.textContent).toContain('다른 조직 맥');
+    expect(all('phone-session-card')).toHaveLength(1);
+    expect(byId('phone-session-card')?.getAttribute('data-setup')).toBe('55555555-6666-4777-8888-999999999999'); // only the new organization\'s computer
+  });
+
   it('an idle row has no draft to show and does not hold the button', async () => {
     world.view = panel([row({}), row({ agent_member_id: AGENT2, name: '문서 담당', idle: true, first_line: null })], { ready: 2, needs_you: 0, drafting: 0 });
     await screen();

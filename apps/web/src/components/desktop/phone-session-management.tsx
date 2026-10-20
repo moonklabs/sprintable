@@ -388,7 +388,10 @@ function Panel({ view, t, nameOf, busy, unreachable, runningCount, names, onSubm
   // the consent: [모두 그대로 인계하고 세션 종료] is on only when EVERY row in front of the person is ready AND shows its first line (an idle row has no draft to show) — judged
   // from the rows themselves, not from the counts (a row the server withheld or dropped must not hide behind «all ready»)
   const everyRowReady = view.rows.length > 0 && view.rows.every((r) => r.state === 'ready' && (r.idle || r.firstLine !== null)) && (!one || view.rows.length === 1);
-  const allReady = count.drafting === 0 && count.needsYou === 0 && everyRowReady;
+  // …and the counts the computer sent must agree with the rows in front of the person: all rows ready means the READY count is exactly the number of rows (a count that says more or less than the
+  // rows shown — a row dropped on the way, a count that lags — is not a consent to hand over those rows)
+  const countsAgree = count.ready === view.rows.length && count.needsYou === 0 && count.drafting === 0;
+  const allReady = countsAgree && everyRowReady;
   const unseenLine = view.rows.some((r) => r.state === 'ready' && !r.idle && r.firstLine === null);
   const reason = count.drafting > 0 ? t('action.draftsComing') : count.needsYou > 0 ? t(one ? 'action.needsHandOne' : 'action.needsHand', { m: count.needsYou }) : unseenLine ? t('action.lineHidden') : null;
   const idleOnly = one && oneRow?.idle === true;
@@ -405,12 +408,14 @@ function Panel({ view, t, nameOf, busy, unreachable, runningCount, names, onSubm
       {allReady && !one ? <p role="status" className="text-xs text-foreground">{t('action.allReady')}</p> : null}
       {!allReady && reason ? <p className="text-xs text-muted-foreground" data-testid="phone-sessions-reason">{reason}</p> : null}
       {unreachable ? <p className="text-xs text-muted-foreground">{t('unreachable')}</p> : null}
+      {one && agentId === undefined ? null : (
       <div className="flex gap-2">
         <Button className="min-h-11" disabled={busy || unreachable || !allReady} onClick={() => onSubmit(agentId)} data-testid="phone-sessions-submit">
           {busy ? t('action.running') : one ? t(idleOnly ? 'action.submitOneIdle' : 'action.submitOne') : t('action.submitAll')}
         </Button>
         <Button variant="outline" className="min-h-11" disabled={busy || unreachable} onClick={() => onCancel(agentId)} data-testid="phone-sessions-cancel">{t('panel.cancel')}</Button>
       </div>
+      )}
     </div>
   );
 }

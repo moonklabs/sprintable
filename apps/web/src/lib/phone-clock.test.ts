@@ -249,6 +249,18 @@ describe('[4733 S4b] readClock · parseClockRead', () => {
     expect(r.view!.rows[1]!.missing).toEqual(['done', 'plan']);
   });
 
+  it('direction overrides / isolates / marks in a draft line or a name are taken out before it is drawn (a line must not reorder what stands beside it); a line of nothing else is no line', () => {
+    const bidi = '\u202E\u202A\u2066\u2069\u200F\u061C';
+    const r = parseClockRead(panel({ rows: [row({ first_line: `${bidi}끝낸 일${bidi}`, name: `Dev${bidi}`, state: 'ready' }), row({ agent_member_id: 'd'.repeat(8), first_line: bidi, state: 'ready' })] }))!;
+    expect(r.view!.rows[0]!.firstLine).toBe('끝낸 일');
+    expect(r.view!.rows[0]!.name).toBe('Dev');
+    expect(r.view!.rows[1]!.firstLine).toBeNull();
+    const o = parseClockRead({ ...READ, view: { mode: 'out', out: { at: '2026-10-20T01:00:00Z', left: [`A${bidi}`], still_working: [`B${bidi}`] }, outs: [{ agent_member_id: AGENT, name: `C${bidi}`, at: '2026-10-20T01:00:00Z' }] } })!;
+    expect(o.view!.out!.left).toEqual(['A']);
+    expect(o.view!.out!.stillWorking).toEqual(['B']);
+    expect(o.view!.outs[0]!.name).toBe('C');
+  });
+
   it('a row this page cannot read (no id · a state it does not know) makes the WHOLE view unreadable — never a view with fewer rows than the computer sent', () => {
     for (const bad of [row({ agent_member_id: undefined }), row({ state: 'confused' }), null, 'x', row({ agent_member_id: '' })]) {
       expect(parseClockRead(panel({ rows: [row({}), bad] }))).toBeNull();
