@@ -9,6 +9,9 @@ computer's id is DERIVED from what each setup already records, so nothing migrat
 - A setup made before the app sent its device id has no `machine_key` (dev: 222 of 251 live lines). It joins the computer that has the same device
   name and the same person when exactly ONE machine key carries that pair; otherwise it forms its own computer by (device name, person).
 
+A computer's id is NOT a secret and NEVER a capability: anyone can compute a keyless computer's id from public values (organization · device name · person); it opens nothing —
+every act on it is checked against the caller's role in the organization and the organization of the rows it names (lens review 10-20).
+
 The authority to command stays per setup (`remote_device_pairings.setup_id` · the daemon's own pins): nothing here widens who may do what. This module only
 says which setups are one computer — for the web list, the phone's `/startable` entries (an added id), and the removal of a phone / a disconnect that
 the person does once for the computer.

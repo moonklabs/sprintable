@@ -557,3 +557,104 @@ async def test_a_computer_regrouped_between_the_read_and_the_locks_is_not_report
         assert gone.status_code == 409 and gone.json()["error"]["code"] == "computer_changing", gone.text  # not «already disconnected» while three lines are still connected
         rows = await _sql(fetch=f"SELECT count(*) FROM desktop_setups WHERE org_id = '{ORG}' AND revoked_at IS NULL")
         assert rows[0][0] == 3
+
+
+# ── the pins the lens review (Kadir, 10-20) named: lines that no test held ───────────────────────────────────────────────────
+
+
+async def _foreign_phone() -> tuple[str, bytes]:
+    """a phone key of ANOTHER organization (ORG2), written directly — a row nothing writes in the product, the shape a restore or a hand edit could leave"""
+    key, der = _phone_key()
+    pid = uuid.uuid4()
+    await _sql(
+        "INSERT INTO remote_devices (id, member_id, org_id, label, public_key, fingerprint) "
+        f"VALUES ('{pid}', '{OWNER_TM}', '{ORG2}', 'foreign', '{key}', '{_fp(der)}')"
+    )
+    return str(pid), der
+
+
+async def test_removed_phones_never_names_a_phone_key_of_another_organization(world, secret):
+    async with _client() as c:
+        a, b, _computer = await _two_setups_one_mac(c)
+        foreign, der = await _foreign_phone()
+        await _sql(
+            "INSERT INTO remote_device_pairings (id, remote_device_id, setup_id, paired_at, removed_at, removed_by) "
+            f"VALUES (gen_random_uuid(), '{foreign}', '{a['setup_id']}', now(), now(), '{OWNER_TM}')"
+        )
+        facts = await c.get("/api/v2/desktop/relay/setup", headers=_tok(b["device_token"]))
+        assert facts.status_code == 200 and facts.json()["removed_phones"] == [], facts.text  # reverted (no organization filter on the phone) → names the foreign key
+
+
+async def test_removed_phones_ignores_what_was_removed_on_a_disconnected_sibling(world, secret):
+    async with _client() as c:
+        a, b, _computer = await _two_setups_one_mac(c)
+        phone, der = await _register(c)
+        dead = await _row("d4734 mac", None)  # a keyless line of the same name and person: the same computer
+        await _sql(
+            "INSERT INTO remote_device_pairings (id, remote_device_id, setup_id, paired_at, removed_at, removed_by) "
+            f"VALUES (gen_random_uuid(), '{phone}', '{dead}', now(), now(), '{OWNER_TM}')"
+        )
+        live = await c.get("/api/v2/desktop/relay/setup", headers=_tok(a["device_token"]))
+        assert live.json()["removed_phones"] == [_fp(der)], live.text  # while that sibling is connected, its person-removal counts
+        await _sql(f"UPDATE desktop_setups SET revoked_at = now() WHERE id = '{dead}'")
+        gone = await c.get("/api/v2/desktop/relay/setup", headers=_tok(a["device_token"]))
+        assert gone.json()["removed_phones"] == [], gone.text  # …and once it is disconnected it is not a sibling any more (reverted: live_only off → still named)
+
+
+async def test_a_phone_of_another_organization_cannot_be_removed_from_a_computer_by_that_organizations_admin(world, secret):
+    async with _client() as c:
+        a, b, _computer = await _two_setups_one_mac(c)
+        phone, der = await _register(c)  # the OWNER's phone, in ORG
+        # the other organization's admin needs a member row for the phone routes to take them as a person at all (else every answer is 404 and this test pins nothing)
+        out_tm = (await _sql(fetch=f"SELECT id FROM org_members WHERE org_id = '{ORG2}' AND user_id = '{OUTSIDER}'"))[0][0]  # (the member row shares the org-member row's id, as the owner's does)
+        await _sql(f"INSERT INTO members (id,org_id,user_id,type,name,is_active) VALUES ('{out_tm}','{ORG2}','{OUTSIDER}','human','Outsider',true)")
+        theirs = await _row("Org2 Mac", MAC_2, org=ORG2, by=OUTSIDER)
+        computer2 = (await _computers(c, OUTSIDER, ORG2))["computers"][0]["computer_id"]
+        # an inconsistent row nothing writes: ORG's phone «paired» with ORG2's setup — ORG2's admin knows the computer, not the phone
+        await _sql(f"INSERT INTO remote_device_pairings (id, remote_device_id, setup_id, paired_at) VALUES (gen_random_uuid(), '{phone}', '{theirs}', now())")
+        r = await c.delete(f"{PHONES}/{phone}/computers/{computer2}", headers=_person(OUTSIDER, ORG2))
+        # control: the same admin removing a phone of THEIR organization from that computer succeeds (so the 404 below is the phone's organization, not the caller)
+        mine_key, mine_der = _phone_key()
+        mine_phone = uuid.uuid4()
+        await _sql(f"INSERT INTO remote_devices (id, member_id, org_id, label, public_key, fingerprint) VALUES ('{mine_phone}', '{out_tm}', '{ORG2}', 'theirs', '{mine_key}', '{_fp(mine_der)}')")
+        await _sql(f"INSERT INTO remote_device_pairings (id, remote_device_id, setup_id, paired_at) VALUES (gen_random_uuid(), '{mine_phone}', '{theirs}', now())")
+        ok = await c.delete(f"{PHONES}/{mine_phone}/computers/{computer2}", headers=_person(OUTSIDER, ORG2))
+        assert ok.status_code == 200 and ok.json()["pairs"] == 1, ok.text
+        assert r.status_code == 404, (r.status_code, r.text)  # the phone is not in ORG2: reverted (phone looked up without its organization) → 200 and the pair is removed
+        live = await _sql(fetch=f"SELECT count(*) FROM remote_device_pairings WHERE remote_device_id = '{phone}' AND setup_id = '{theirs}' AND removed_at IS NULL")
+        assert live[0][0] == 1
+
+
+async def test_a_line_a_new_setup_replaced_is_not_a_computers_line(world):
+    async with _client() as c:
+        live = await _row("Replaced Mac", MAC_1, minutes_ago=5)
+        old = await _row("Replaced Mac", MAC_1, minutes_ago=50)
+        await _sql(f"UPDATE desktop_setups SET revoked_at = now(), revoked_reason = 'replaced_by_new_setup' WHERE id = '{old}'")  # what story 4660 does to the older line
+        body = await _computers(c)
+        assert [[s["setup_id"] for s in x["setups"]] for x in body["computers"]] == [[live]]  # reverted (the 4660 filter) → the replaced line is listed too
+
+
+async def test_the_services_check_the_admin_role_themselves_not_only_the_routes(world):
+    from app.core.database import async_session_factory
+    from app.services.desktop_computers import list_computers, revoke_computer
+    from app.services.desktop_setup import DesktopSetupError
+
+    await _plain_member()
+    async with _client() as c:
+        await _row("Admin Mac", MAC_1)
+        computer = (await _computers(c))["computers"][0]["computer_id"]
+    async with async_session_factory() as s:
+        with pytest.raises(DesktopSetupError) as listed:
+            await list_computers(s, user_id=PLAIN, org_id=ORG)
+        assert listed.value.code == "not_org_admin"
+        with pytest.raises(DesktopSetupError) as gone:
+            await revoke_computer(s, computer_id=uuid.UUID(computer), user_id=PLAIN, org_id=ORG)
+        assert gone.value.code == "not_org_admin"  # the second gate (the route has its own): reverted → a caller that skips the route could disconnect
+    # the setup's own disconnect checks the role too, so the service-level gate is only seen where nothing is left to disconnect: an emptied computer must not answer a plain member «already disconnected»
+    await _sql(f"UPDATE desktop_setups SET revoked_at = now() WHERE org_id = '{ORG}'")
+    async with async_session_factory() as s:
+        with pytest.raises(DesktopSetupError) as emptied:
+            await revoke_computer(s, computer_id=uuid.UUID(computer), user_id=PLAIN, org_id=ORG)
+        assert emptied.value.code == "not_org_admin"  # reverted (no gate of its own) → {already_disconnected: True} for anyone
+    rows = await _sql(fetch=f"SELECT count(*) FROM desktop_setups WHERE org_id = '{ORG}' AND revoked_at IS NULL")
+    assert rows[0][0] == 0  # (only the row this test ended itself)

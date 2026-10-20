@@ -282,7 +282,9 @@ async def remove_computer_pairs(
 async def phones_removed_by_a_person(db: AsyncSession, *, setup: DesktopSetup) -> list[str] | None:
     """story 4734 (PO 10-20 · M2): the fingerprints of phones a PERSON removed (`removed_by` set — not a device dropping its own pin) from some
     still-connected setup of this setup's computer (a removed phone KEY counts: removing the key removes its pairs). The device uses it once, when it first merges its setups' phone keys into one computer-wide
-    list: a phone a person took away from a setup is not brought back to it by the merge. Removal-direction information only — it cannot add a key."""
+    list: a phone a person took away from a setup is not brought back to it by the merge. Removal-direction information only — it cannot add a key.
+    «A person» is ANY person: a phone another person of the same organization removed from one setup of this Mac is named to this computer's other setups too (a key hash,
+    on the same Mac that held the pin, removal-only — lens review 10-20 · PO). Never from another organization's phone keys, and never from a disconnected setup."""
     from app.services.desktop_computers import ComputerGroupingIncomplete, computer_index, setup_ids_of_computer
 
     try:
