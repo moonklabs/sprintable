@@ -1186,6 +1186,9 @@ async def _retire_same_machine(
         o.revoked_at = now
         o.revoked_reason = "replaced_by_new_setup"
     if old:
+        from app.services import desktop_clock
+
+        await desktop_clock.forget(db, [o.id for o in old])  # story #4733 — a replaced line keeps no clock view
         await db.execute(
             update(DesktopDeviceToken)
             .where(DesktopDeviceToken.setup_id.in_([o.id for o in old]), DesktopDeviceToken.revoked_at.is_(None))

@@ -108,19 +108,20 @@ async def test_01_a_press_queues_one_clock_command_whose_payload_is_exactly_the_
         assert len(await _commands(sid)) == 4
 
 
-async def test_02_the_press_forbids_everything_but_its_four_fields_and_four_actions(world):
+async def test_02_the_press_forbids_everything_but_its_five_fields_and_four_actions(world):
     async with _client() as c:
-        device, agent, phone, _der = await _setup(c, "d4424 mac 4733b")
+        device, _agent, phone, _der = await _setup(c, "d4424 mac 4733b")
         sid = device["setup_id"]
         bad = [
-            {**_press(phone), "agent_member_id": agent}, {**_press(phone), "text": "rm -rf ~"}, {**_press(phone), "session_key": "s-1"},
+            {**_press(phone), "text": "rm -rf ~"}, {**_press(phone), "session_key": "s-1"},
             {**_press(phone), "path": "/Users/x"}, _press(phone, "out_edit"), _press(phone, "out_open", signed=""),
             {k: v for k, v in _press(phone).items() if k != "phone_key_id"}, {k: v for k, v in _press(phone).items() if k != "signed"},
             _press(phone, key=""), _press(phone, key="k" * 101), _press(phone, signed="s" * 16385),
+            {**_press(phone), "agent_member_id": "not-a-uuid"}, {**_press(phone), "agent_member_id": ""},
         ]
         for body in bad:
             r = await _post(c, sid, body)
-            assert r.status_code == 422, body
+            assert r.status_code == 422, str(body)[-160:]
         assert await _commands(sid) == []
 
 
@@ -214,7 +215,7 @@ async def test_05_remote_control_the_computer_heard_and_the_pairing_are_asked_in
         assert (again.status_code, len(await _commands(sid))) == (201, 1)
 
 
-async def test_06_the_daemons_finished_clock_command_ends_in_one_of_seven_words_and_the_presser_reads_it(world):
+async def test_06_the_daemons_finished_clock_command_ends_in_one_of_nine_words_and_the_presser_reads_it(world):
     async with _client() as c:
         device, _agent, phone, _der = await _setup(c, "d4424 mac 4733f")
         sid = device["setup_id"]
@@ -232,8 +233,8 @@ async def test_06_the_daemons_finished_clock_command_ends_in_one_of_seven_words_
         assert (await _result(c, device, made, "done", "ok")).status_code == 200
         read = await c.get(f"/api/v2/desktop/setups/{sid}/clock/commands/{made}", headers=_person(OWNER))
         assert read.json()["state"] == "done" and read.json()["result_code"] == "ok"
-        # each of the seven is accepted on its own command
-        for i, code in enumerate(("already", "nothing_running", "not_open", "not_ready", "needs_hands", "not_clocked_out")):
+        # each of the nine is accepted on its own command
+        for i, code in enumerate(("already", "nothing_running", "not_open", "not_ready", "needs_hands", "not_clocked_out", "unknown_agent", "already_running")):
             cid = (await _post(c, sid, _press(phone, "in", key=f"k{i}"))).json()["command_id"]
             assert (await _result(c, device, cid, "done", code)).status_code == 200, code
         # a failed or rejected one keeps the ordinary pattern (the daemon refused the signature, the command was too old…)
@@ -281,6 +282,11 @@ async def test_07_the_report_is_closed_a_field_that_does_not_fit_its_mode_is_ref
             _report(1, "out", out={**ok_out, "left": ["a" * 81]}),
             _report(1, "out", out={**ok_out, "left": ["a\nb"]}),
             _report(1, "out", out={**ok_out, "path": "/x"}),
+            _report(1, "out", out={**ok_out, "alone": -1}), _report(1, "out", out={**ok_out, "alone": 1.5}),
+            _report(1, "none", outs=[{"agent_member_id": agent, "at": "2026-10-20T00:00:00Z"}] * 2),         # an agent is one entry
+            _report(1, "none", outs=[{"agent_member_id": str(uuid.uuid4()), "at": "2026-10-20T00:00:00Z"} for _ in range(65)]),
+            _report(1, "none", outs=[{"agent_member_id": agent}]), _report(1, "none", outs=[{"agent_member_id": agent, "at": "yesterday"}]),
+            _report(1, "none", outs=[{"agent_member_id": agent, "at": "2026-10-20T00:00:00Z", "name": "Writer"}]),
             _report(1, "in", **{"in": {"failed": [{"name": "W", "code": "No Folder"}]}}),
             _report(1, "in", **{"in": {"failed": [{"name": "W", "code": "no_folder", "path": "/x"}]}}),
             _report(1, "in", **{"in": {"starting": {"k": 1}}}),
@@ -296,6 +302,8 @@ async def test_07_the_report_is_closed_a_field_that_does_not_fit_its_mode_is_ref
                    "failed": [{"name": "Writer", "code": "no_folder", "limit": 3}], "unread": ["Reviewer"]}
         assert (await _put(c, device, _report(3, "in", **{"in": full_in}))).status_code == 200
         assert (await _put(c, device, _report(4, "none"))).status_code == 200
+        assert (await _put(c, device, _report(5, "none", outs=[{"agent_member_id": agent, "at": "2026-10-20T00:00:00Z"}]))).status_code == 200
+        assert (await _put(c, device, _report(6, "out", out={**ok_out, "alone": 1}, outs=[{"agent_member_id": agent, "at": "2026-10-20T00:00:00Z"}]))).status_code == 200
 
 
 async def test_08_the_numbering_a_late_lower_number_neither_covers_nor_brings_back(world):
@@ -479,14 +487,254 @@ async def test_15_the_database_holds_the_same_lists_as_the_code(world):
     import re
 
     assert set(re.findall(r"'([a-z_]+)'", defs["ck_desktop_commands_kind"])) == set(COMMAND_KINDS)
-    assert set(re.findall(r"'([a-z_]+)'", defs["ck_desktop_clock_views_mode"])) == set(CLOCK_VIEW_MODES) and "none" not in CLOCK_VIEW_MODES
-    # a row of mode none cannot be stored even by hand; a clock command row is a legal row
+    assert set(re.findall(r"'([a-z_]+)'", defs["ck_desktop_clock_views_mode"])) == set(CLOCK_VIEW_MODES) == {"none", "panel", "out", "in"}
+    # a row of a made-up mode cannot be stored even by hand
     async with _client() as c:
         device, _agent, _phone, _der = await _setup(c, "d4424 mac 4733o")
         sid = device["setup_id"]
         with pytest.raises(Exception):  # noqa: B017 — the CHECK
-            await _sql(f"INSERT INTO desktop_clock_views (setup_id, mode, view, expires_at) VALUES ('{sid}','none','{{}}', now())")
+            await _sql(f"INSERT INTO desktop_clock_views (setup_id, mode, view, expires_at) VALUES ('{sid}','tomorrow','{{}}', now())")
         await _sql(f"INSERT INTO desktop_clock_views (setup_id, mode, view, expires_at) VALUES ('{sid}','out','{{}}', now())")
         # the view goes with its computer (ON DELETE CASCADE)
         await _sql(f"DELETE FROM desktop_setups WHERE id = '{sid}'")
         assert await _views(sid) == []
+
+
+# ── the lifecycle edges (codex read of the first head): races, rotation, the other ways a computer is cut off ────────────────────────
+
+
+async def test_16_a_press_holds_its_pairing_and_phone_key_until_it_commits(world):
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from app.core.database import async_session_factory
+    from app.services import desktop_clock
+    from tests.test_4424_desktop_setup_realdb import _ASYNC
+
+    async with _client() as c:
+        device, _agent, phone, _der = await _setup(c, "d4424 mac 4733p")
+    sid = uuid.UUID(device["setup_id"])
+    async with async_session_factory() as s:
+        cmd, state = await desktop_clock.create_clock(
+            s, member_id=OWNER_TM, user_id=OWNER, org_id=ORG, setup_id=sid, body=desktop_clock.ClockRequest(**_press(phone)),
+        )
+        assert state == "queued"  # not committed yet
+
+        async def other(sql):
+            eng = create_async_engine(_ASYNC, poolclass=NullPool)
+            try:
+                async with eng.begin() as conn:
+                    await conn.execute(text("SET LOCAL lock_timeout = '300ms'"))
+                    await conn.execute(text(sql))
+            finally:
+                await eng.dispose()
+
+        # an [빼기] and a key revocation that come now WAIT for the press (here: give up after 300 ms) — they cannot slip in behind the check
+        with pytest.raises(Exception, match="lock"):
+            await other(f"UPDATE remote_device_pairings SET removed_at = now() WHERE setup_id = '{sid}'")
+        with pytest.raises(Exception, match="lock"):
+            await other(f"UPDATE remote_devices SET revoked_at = now() WHERE id = '{phone}'")
+        await s.rollback()
+    await other(f"UPDATE remote_device_pairings SET removed_at = now() WHERE setup_id = '{sid}'")  # nothing holds them any more
+
+
+async def test_17_a_report_that_waited_for_the_lock_sees_a_disconnect_or_remote_control_off_and_writes_nothing(world):
+    from app.core.database import async_session_factory
+    from app.models.desktop_setup import DesktopSetup
+    from app.services import desktop_clock
+    from app.services.desktop_relay import DesktopRelayError
+
+    async with _client() as c:
+        device, agent, _phone, _der = await _setup(c, "d4424 mac 4733q")
+        other_device, _a2, _p2, _d2 = await _setup(c, "d4424 mac 4733q2")
+    sid = uuid.UUID(device["setup_id"])
+    assert other_device["setup_id"] != device["setup_id"]
+    report = desktop_clock.ClockViewReport.model_validate(_panel(1, agent))
+    async with async_session_factory() as s:
+        setup = await s.get(DesktopSetup, sid)  # loaded before what follows commits
+        await _sql(f"UPDATE organizations SET remote_control_enabled_at = NULL WHERE id = '{ORG}'")
+        with pytest.raises(DesktopRelayError) as exc:
+            await desktop_clock.apply_clock_view(s, setup, report)
+        assert exc.value.code == "remote_control_off"
+        await s.rollback()
+    await _sql(f"UPDATE organizations SET remote_control_enabled_at = now() WHERE id = '{ORG}'", f"UPDATE desktop_setups SET revoked_at = now() WHERE id = '{sid}'")
+    async with async_session_factory() as s:
+        setup = await s.get(DesktopSetup, sid)
+        with pytest.raises(DesktopRelayError) as exc:
+            await desktop_clock.apply_clock_view(s, setup, report)
+        assert exc.value.code == "device_disconnected"
+        await s.rollback()
+    assert await _views(str(sid)) == [] and (await _seq(str(sid)))[0] is None
+    # a view that ran out of time goes with the next report of ANY computer (a disconnected computer's included)
+    await _sql(f"INSERT INTO desktop_clock_views (setup_id, mode, view, expires_at) VALUES ('{sid}','out','{{}}', now() - interval '1 minute')")
+    assert len(await _views(str(sid))) == 1
+    async with _client() as c:
+        assert (await _put(c, other_device, _report(1))).status_code == 200
+    assert await _views(str(sid)) == []
+
+
+async def test_18_a_new_device_token_starts_the_clock_numbering_over_and_drops_the_old_view_and_an_ignored_report_still_counts_as_spoken(world):
+    from app.core.database import async_session_factory
+    from app.services import desktop_relay
+
+    async with _client() as c:
+        device, agent, _phone, _der = await _setup(c, "d4424 mac 4733r")
+        sid = device["setup_id"]
+        await _put(c, device, _panel(50, agent))
+        assert (await _seq(sid))[0] == 50 and len(await _views(sid)) == 1
+        # an ignored (lower) report still marks that the computer speaks of the clock
+        await _sql(f"UPDATE desktop_setups SET clock_seen_at = NULL WHERE id = '{sid}'")
+        assert (await _put(c, device, _report(10))).json()["applied"] is False
+        assert (await _seq(sid))[1] is not None
+        # a reinstall: the exchange issues a new token
+        async with async_session_factory() as s:
+            token = await desktop_relay.issue_device_token(s, uuid.UUID(sid))
+            await s.commit()
+        assert (await _seq(sid)) == (None, None) and await _views(sid) == []
+        assert (await _put(c, {**device, "device_token": token}, _panel(1, agent))).json() == {"applied": True, "clock_view_seq": 1, "dropped_rows": 0}
+
+
+async def test_19_a_submitted_clock_out_raises_the_numbering_floor_so_a_report_already_in_flight_cannot_bring_the_lines_back(world):
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4733s")
+        sid = device["setup_id"]
+        await _put(c, device, _panel(5, agent))
+        made = (await _post(c, sid, _press(phone, "out_submit"))).json()["command_id"]
+        assert (await _result(c, device, made, "done", "ok")).status_code == 200
+        assert (await _views(sid))[0][1]["rows"][0]["first_line"] is None and (await _seq(sid))[0] == 1005
+        # the panel report the computer had already sent (number just above what was applied) arrives now: ignored, told where to go on from
+        late = await _put(c, device, _panel(6, agent))
+        assert (late.status_code, late.json()) == (200, {"applied": False, "clock_view_seq": 1005, "dropped_rows": 0})
+        assert (await _views(sid))[0][1]["rows"][0]["first_line"] is None
+        # the computer goes on from the number it was told: applied
+        assert (await _put(c, device, _report(1006, "out", out={"at": datetime.now(timezone.utc).isoformat(), "came": 0, "warn": "none", "left": ["Writer"]}))).json()["applied"] is True
+        # a cancel does the same, and a computer that never reported (no number) is not given one
+        await _put(c, device, _panel(1007, agent))
+        cid = (await _post(c, sid, _press(phone, "out_cancel", key="kc"))).json()["command_id"]
+        assert (await _result(c, device, cid, "done", "ok")).status_code == 200
+        assert (await _seq(sid))[0] == 2007
+        await _sql(f"UPDATE desktop_setups SET clock_view_seq = NULL WHERE id = '{sid}'")
+        cid = (await _post(c, sid, _press(phone, "out_cancel", key="kc2"))).json()["command_id"]
+        assert (await _result(c, device, cid, "done", "ok")).status_code == 200
+        assert (await _seq(sid))[0] is None
+
+
+async def test_20_the_other_ways_a_computer_is_cut_off_take_its_view_too(world):
+    from app.core.database import async_session_factory
+    from app.models.desktop_setup import DesktopSetup
+    from app.models.user import User
+    from app.routers.auth import _reclaim_unproved_account
+    from app.services.desktop_setup import _retire_same_machine
+
+    async with _client() as c:
+        device, agent, _phone, _der = await _setup(c, "d4424 mac 4733t")
+        sid = device["setup_id"]
+        await _put(c, device, _panel(1, agent))
+        assert len(await _views(sid)) == 1
+        # a new setup on the same machine replaces this line
+        await _sql(f"UPDATE desktop_setups SET machine_key = 'mk-4733' WHERE id = '{sid}'")
+        async with async_session_factory() as s:
+            setup = await s.get(DesktopSetup, uuid.UUID(sid))
+            agents = frozenset(uuid.UUID(str(m["member_id"])) for m in (setup.members or []) if m.get("kind") == "agent")
+            assert await _retire_same_machine(s, machine_key="mk-4733", others=[setup], now=datetime.now(timezone.utc), new_agents=agents,
+                                              before={setup.id: agents}) == 1
+            await s.commit()
+        assert await _views(sid) == []
+        assert (await _sql(fetch=f"SELECT revoked_reason FROM desktop_setups WHERE id = '{sid}'"))[0][0] == "replaced_by_new_setup"
+        # an unproved account is reclaimed: the computers it confirmed are cut off
+        device2, agent2, _phone2, _der2 = await _setup(c, "d4424 mac 4733t2")
+        sid2 = device2["setup_id"]
+        await _put(c, device2, _panel(1, agent2))
+        await _sql(f"UPDATE users SET email_verified = false WHERE id = '{PLAIN}'", f"UPDATE desktop_setups SET confirmed_by = '{PLAIN}' WHERE id = '{sid2}'")
+        assert len(await _views(sid2)) == 1
+        async with async_session_factory() as s:
+            user = await s.get(User, PLAIN)
+            assert await _reclaim_unproved_account(s, user, why="test 4733") is not None
+            await s.commit()
+        assert (await _sql(fetch=f"SELECT revoked_reason FROM desktop_setups WHERE id = '{sid2}'"))[0][0] == "account_reclaimed"
+        assert await _views(sid2) == []
+
+
+# ── PO 10-20 00:23Z (AC1b): one agent of the computer ─────────────────────────────────────────────────────────────────────────────
+
+
+async def test_21_a_press_may_name_one_agent_of_that_computer_and_only_one_the_computer_was_set_up_with(world):
+    await _plain_member()
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4733u")
+        sid = device["setup_id"]
+        other_agent = device["agents"][1]["member_id"]
+        # the whole computer: exactly {action, signed}; one agent: the agent's id rides in the payload too (the signature covers it — the daemon checks)
+        whole = await _post(c, sid, _press(phone, "out_open", key="w"))
+        one = await _post(c, sid, _press(phone, "out_open", key="o", agent_member_id=agent))
+        assert (whole.status_code, one.status_code) == (201, 201)
+        rows = await _commands(sid)
+        assert [p for _k, p, _by, _key, _st in rows] == [
+            {"action": "out_open", "signed": "eyJ2IjoxfQ.signed-by-the-phone"},
+            {"action": "out_open", "signed": "eyJ2IjoxfQ.signed-by-the-phone", "agent_member_id": agent},
+        ]
+        assert (await _post(c, sid, _press(phone, "in", key="i", agent_member_id=other_agent))).status_code == 201
+        # an agent this computer was not set up with — a stranger id, an agent of another computer, a person, another organization's member — is no target; nothing queued
+        stranger = str(uuid.uuid4())
+        for target in (stranger, str(OWNER_TM)):
+            r = await _post(c, sid, _press(phone, "out_open", key=f"x-{target}", agent_member_id=target))
+            assert (r.status_code, r.json()["error"]["code"]) == (422, "agent_not_on_device"), target
+        device2, agent2, _p2, _d2 = await _setup(c, "d4424 mac 4733u2")
+        r = await _post(c, sid, _press(phone, "out_open", key="x-other-computer", agent_member_id=agent2))
+        assert (r.status_code, r.json()["error"]["code"]) == (422, "agent_not_on_device")
+        assert len(await _commands(sid)) == 3 and len(await _commands(device2["setup_id"])) == 0
+        # who may press does not change with the target: a plain member's press for an agent is refused like the whole computer's
+        plain_phone, plain_der = await _register(c, PLAIN)
+        await _pair(c, device["device_token"], _der, plain_der)
+        r = await _post(c, sid, _press(plain_phone, "out_open", key="p", agent_member_id=agent), who=PLAIN)
+        assert (r.status_code, r.json()["error"]["code"]) == (403, "not_allowed_to_command")
+
+
+async def test_22_a_panel_of_one_agent_is_one_scope_with_that_one_row(world):
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4733v")
+        other = device["agents"][1]["member_id"]
+        sid = device["setup_id"]
+        for rows in ([], [_row(agent), _row(other)]):
+            r = await _put(c, device, _report(1, "panel", scope="one", opened_from="phone", rows=rows))
+            assert r.status_code == 422, rows
+        assert (await _put(c, device, _report(1, "panel", scope="one", opened_from="phone", rows=[_row(agent, first_line=LINE)]))).json()["applied"] is True
+        view = (await _read(c, sid, phone)).json()["view"]
+        assert view["scope"] == "one" and [r["agent_member_id"] for r in view["rows"]] == [agent]
+        # the whole computer's panel may hold any number of rows
+        assert (await _put(c, device, _report(2, "panel", scope="computer", rows=[_row(agent), _row(other)]))).status_code == 200
+
+
+# ── PO 10-20 00:26Z (4735): the agents that clocked out one by one — `outs` in every mode, `out.alone` ──────────────────────────────────
+
+
+async def test_23_agents_clocked_out_one_by_one_are_kept_in_every_mode_even_when_no_flow_is_open(world):
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4733w")
+        sid = device["setup_id"]
+        other = device["agents"][1]["member_id"]
+        gone = str(uuid.uuid4())
+        outs = [{"agent_member_id": agent, "at": "2026-10-20T00:10:00Z"}, {"agent_member_id": gone, "at": "2026-10-20T00:11:00Z"}]
+        # mode none with nothing deletes; mode none WITH one-by-one agents keeps a row (the phone draws their [출근] with no flow open) — a stranger agent is dropped
+        assert (await _put(c, device, _report(1, "none"))).json()["dropped_rows"] == 0 and await _views(sid) == []
+        r = await _put(c, device, _report(2, "none", outs=outs))
+        assert (r.status_code, r.json()) == (200, {"applied": True, "clock_view_seq": 2, "dropped_rows": 1})
+        mode, view, term = (await _views(sid))[0]
+        assert mode == "none" and view["outs"] == [{"agent_member_id": agent, "at": view["outs"][0]["at"]}] and term == timedelta(hours=36)  # the night's term
+        # the phone reads them with the board's names; an agent that is gone from the board is not listed
+        name = (await _sql(fetch=f"SELECT name FROM members WHERE id = '{agent}'"))[0][0]
+        read = (await _read(c, sid, phone)).json()["view"]
+        assert read["mode"] == "none" and read["outs"] == [{"agent_member_id": agent, "at": read["outs"][0]["at"], "name": name}] and read["rows"] == []
+        # in every other mode too, beside the flow's own fields
+        assert (await _put(c, device, _panel(3, agent, rows=[_row(other)], outs=[{"agent_member_id": agent, "at": "2026-10-20T00:10:00Z"}]))).json()["applied"] is True
+        assert (await _views(sid))[0][1]["outs"][0]["agent_member_id"] == agent and (await _views(sid))[0][2] == timedelta(minutes=30)
+        ok_out = {"at": "2026-10-20T00:20:00Z", "came": 2, "warn": "none", "still_working": [], "left": ["Writer"], "alone": 1}
+        assert (await _put(c, device, _report(4, "out", out=ok_out, outs=[{"agent_member_id": agent, "at": "2026-10-20T00:10:00Z"}]))).json()["applied"] is True
+        assert (await _read(c, sid, phone)).json()["view"]["out"]["alone"] == 1
+        # the agents' clock-in empties it: an empty none deletes the row
+        assert (await _put(c, device, _report(5, "none"))).json()["applied"] is True and await _views(sid) == []
+        # an agent that is deleted from the board is not listed
+        await _put(c, device, _report(6, "none", outs=[{"agent_member_id": agent, "at": "2026-10-20T00:10:00Z"}]))
+        await _sql(f"UPDATE members SET deleted_at = now() WHERE id = '{agent}'")
+        assert (await _read(c, sid, phone)).json()["view"]["outs"] == []

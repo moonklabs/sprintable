@@ -22,13 +22,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, model_validator
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.models.desktop_relay import (
     COMMAND_KINDS,
     COMMAND_STATE_ORDER,
+    DesktopClockView,
     DesktopCommand,
     DesktopDeviceToken,
     DesktopSession,
@@ -92,6 +93,10 @@ async def issue_device_token(db: AsyncSession, setup_id: uuid.UUID) -> str:
     await db.execute(update(DesktopSession).where(DesktopSession.setup_id == setup_id).values(last_report_seq=0))
     # story #4714: the same for the startable report number — a daemon that starts again must not be ignored for ever by the number its predecessor reached
     await db.execute(update(DesktopSetup).where(DesktopSetup.id == setup_id).values(startable_seq=None))
+    # story #4733: and for the clock view — a daemon that starts again must not be ignored for ever by its predecessor's number, nor show its predecessor's
+    # view or claim an older app's `supported`; the view goes with the old token (the new daemon reports its own, and one `none` at start)
+    await db.execute(update(DesktopSetup).where(DesktopSetup.id == setup_id).values(clock_view_seq=None, clock_seen_at=None))
+    await db.execute(delete(DesktopClockView).where(DesktopClockView.setup_id == setup_id))
     await db.flush()
     return token
 
@@ -767,6 +772,9 @@ class ClockPayload(_Payload):
 
     action: Literal["out_open", "out_submit", "out_cancel", "in"]
     signed: str = Field(min_length=1, max_length=16384)
+    # PO 10-20 00:23Z (AC1b): ONE agent of the computer instead of the whole computer — the signature then covers the agent too (kind + setup_id + action +
+    # agent_member_id; none = a fixed empty value). Absent = the whole computer, exactly the payload as before (the key is left out of the stored payload).
+    agent_member_id: uuid.UUID | None = None
 
 
 PAYLOAD_SCHEMAS: dict[str, type[_Payload]] = {
@@ -803,6 +811,8 @@ async def enqueue_command(
     parsed = validate_payload(kind, payload)
     if isinstance(parsed, StartSessionPayload):
         _check_agent(setup, parsed.agent_member_id)
+    if isinstance(parsed, ClockPayload) and parsed.agent_member_id is not None:
+        _check_agent(setup, parsed.agent_member_id)
     if not 1 <= len(idempotency_key) <= 128:
         raise DesktopRelayError(422, "invalid_idempotency_key", "an idempotency key of 1 to 128 characters")
     existing = (await db.execute(
@@ -818,6 +828,8 @@ async def enqueue_command(
     body = parsed.model_dump(mode="json")
     if kind == "answer_approval":  # story #4580: a first answer carries no stage · host (the same bytes as before)
         body = {k: v for k, v in body.items() if not (k in ("stage", "host") and v is None)}
+    if kind == "clock" and body.get("agent_member_id") is None:  # story #4733: the whole computer's press is exactly {action, signed}
+        body.pop("agent_member_id", None)
     cmd = DesktopCommand(
         id=uuid.uuid4(), setup_id=setup.id, device_seq=seq, kind=kind, session_key=body.get("session_key"), payload=body,
         idempotency_key=idempotency_key, requested_by=requested_by, state="queued",

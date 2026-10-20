@@ -3,14 +3,16 @@
 The server's part is small and dumb on purpose: the ClockFlow (the state machine) lives in the computer's daemon and decides; the server
 - takes a person's signed `clock` press and queues it for that computer (`create_clock` — the same checks as every phone command, at the computer's level);
 - keeps the closed view the computer reports while a flow is open (`apply_clock_view`) and gives it to the person's paired phone (`clock_view_read`);
-- carries the daemon's seven result words and takes the draft lines off the moment a clock-out is submitted or cancelled (`on_clock_result`).
+- carries the daemon's nine result words and takes the draft lines off the moment a clock-out is submitted or cancelled (`on_clock_result`).
 
 Who may press / look (computer level — Dan 10-20, no new power): an org owner/admin, or whoever confirmed the device. The agent-owner leg of a stop is per
-agent and has no computer-level meaning. The phone must be that person's own and paired with that computer. `signed` is carried as is and never opened.
+agent and has no computer-level meaning — and it is NOT added for the one-agent press either (PO 10-20 00:23Z AC1b: `agent_member_id` names one agent of
+that computer; the same two legs judge it; a plain agent owner pressing for their own agent is an open question, not an assumption). The phone must be that
+person's own and paired with that computer. `signed` (its scope covers the agent too) is carried as is and never opened.
 
 What the server holds (PO 10-20: «only for the clock-out flow · log 0 · only to the phone paired with that computer»): one row per computer in
 desktop_clock_views, ids and closed words plus the names the daemon sent and — only while a row is a draft — the draft's first line (≤ 60 characters).
-A report with mode `none` deletes the row; so does an expiry, a disconnect, the organization's remote control turning off, and a submitted or cancelled
+A report with mode `none` and no agent clocked out one by one deletes the row; so does an expiry, a disconnect, the organization's remote control turning off, and a submitted or cancelled
 clock-out (its first lines at once). Nothing here logs a report, a view or a line.
 """
 from __future__ import annotations
@@ -20,17 +22,21 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.datetime_query import OffsetDatetime
 from app.models.desktop_relay import DesktopClockView, DesktopCommand
 from app.models.desktop_setup import DesktopSetup
-from app.services.desktop_relay import CLOCK_ACTIONS, DesktopRelayError, touch_device
+from app.services.desktop_relay import CLOCK_ACTIONS, DISCONNECTED_CODE, DesktopRelayError, touch_device
 
-# the words the daemon's ClockFlow gives back when a clock command is done (Dan 10-20 (d)); a done result is one of these or it is refused
-CLOCK_DONE_CODES = ("ok", "already", "nothing_running", "not_open", "not_ready", "needs_hands", "not_clocked_out")
+# the words the daemon's ClockFlow gives back when a clock command is done (Dan 10-20 (d) · 00:23Z: nine with the one-agent press); a done result is one of these or it is refused
+CLOCK_DONE_CODES = (
+    "ok", "already", "nothing_running", "not_open", "not_ready", "needs_hands", "not_clocked_out",
+    "unknown_agent",     # the one agent named is not a profile of that computer (the daemon asks again)
+    "already_running",   # a clock-in of one agent that already runs
+)
 ROW_STATES = ("drafting", "ready", "needs_you", "saving", "saved", "ended", "not_ended", "failed")
 # a first line belongs to a draft that is still being made or kept: a row already saved (or ended) carries none
 DRAFT_ROW_STATES = ("drafting", "ready", "needs_you", "saving", "failed")
@@ -89,6 +95,7 @@ class ClockRequest(BaseModel):
     idempotency_key: str = Field(min_length=1, max_length=100)
     signed: str = Field(min_length=1, max_length=16384)
     phone_key_id: uuid.UUID
+    agent_member_id: uuid.UUID | None = None  # one agent of the computer (the signature covers it); absent = the whole computer
 
 
 assert tuple(ClockRequest.model_fields["action"].annotation.__args__) == CLOCK_ACTIONS, "the request and the payload speak the same actions"
@@ -118,11 +125,14 @@ async def create_clock(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.
         raise DesktopRelayError(409, remote_control.OFF_CODE, "remote control is off for this organization")
     if setup.id not in await _reachable(db, {setup.id}, _now()):
         raise DesktopRelayError(409, "device_unreachable", "that computer has not been heard from")
-    if await paired_phone(db, member_id=member_id, phone_id=body.phone_key_id, setup_id=setup.id) is None:
+    # the pairing (and the phone key) is held with a share lock until this press commits: an [빼기] or a key revocation that comes meanwhile waits, so a press can
+    # not be queued behind a pairing that was just taken away
+    if await paired_phone(db, member_id=member_id, phone_id=body.phone_key_id, setup_id=setup.id, lock=True) is None:
         raise DesktopRelayError(409, "phone_not_paired", "this phone is not paired with that computer")
-    cmd = await enqueue_command(
-        db, setup=setup, kind="clock", payload={"action": body.action, "signed": body.signed}, idempotency_key=key, requested_by=member_id,
-    )
+    payload = {"action": body.action, "signed": body.signed}
+    if body.agent_member_id is not None:
+        payload["agent_member_id"] = str(body.agent_member_id)  # enqueue_command refuses an agent this computer was not set up with (another organization's included)
+    cmd = await enqueue_command(db, setup=setup, kind="clock", payload=payload, idempotency_key=key, requested_by=member_id)
     return cmd, cmd.state
 
 
@@ -150,13 +160,23 @@ async def on_clock_result(db: AsyncSession, cmd: DesktopCommand) -> None:
         await _drop_first_lines(db, cmd.setup_id)
 
 
+# a clock-out submitted or cancelled raises the computer's report-number floor by this much: a report the computer had already sent (still on its way, with a number
+# a little above the highest applied) would otherwise put the draft lines back a moment after they were taken off. The computer goes on from the number the
+# server tells it (`clock_view_seq` in the answer to an ignored report — the same rule as the startable list); its next report is applied.
+IN_FLIGHT_FLOOR = 1000
+
+
 async def _drop_first_lines(db: AsyncSession, setup_id: uuid.UUID) -> None:
+    await db.execute(select(DesktopSetup.id).where(DesktopSetup.id == setup_id).with_for_update())  # after any report in flight on this computer
     row = (await db.execute(select(DesktopClockView).where(DesktopClockView.setup_id == setup_id).with_for_update())).scalar_one_or_none()
-    if row is None:
-        return
-    view = dict(row.view or {})
-    view["rows"] = [{**r, "first_line": None} for r in view.get("rows") or []]
-    row.view = view
+    if row is not None:
+        view = dict(row.view or {})
+        view["rows"] = [{**r, "first_line": None} for r in view.get("rows") or []]
+        row.view = view
+    await db.execute(
+        update(DesktopSetup).where(DesktopSetup.id == setup_id, DesktopSetup.clock_view_seq.is_not(None))
+        .values(clock_view_seq=func.least(DesktopSetup.clock_view_seq + IN_FLIGHT_FLOOR, SEQ_MAX))
+    )
     await db.flush()
 
 
@@ -205,6 +225,7 @@ class ClockOut(BaseModel):
     warn: Literal["none", "many", "full"]
     still_working: list[str] = Field(default_factory=list, max_length=LIST_MAX)
     left: list[str] = Field(default_factory=list, max_length=LIST_MAX)
+    alone: int = Field(default=0, ge=0, le=100000, strict=True)  # of those, how many clocked out one by one before
 
     @model_validator(mode="after")
     def _names(self) -> ClockOut:
@@ -269,6 +290,14 @@ def _check_names(*lists: list[str]) -> None:
                 raise ValueError("a name is 1 to 80 characters on one line")
 
 
+class ClockOne(BaseModel):
+    """An agent that clocked out on its own (one by one) and stands so — the phone draws its [출근]. Kept by the computer across a restart."""
+    model_config = ConfigDict(extra="forbid")
+
+    agent_member_id: uuid.UUID
+    at: OffsetDatetime
+
+
 class ClockViewReport(BaseModel):
     """The computer's closed clock view (`mode` is ClockFlow.view's own word). Nothing outside these fields is accepted — every body forbids extra.
     A field that does not belong to the mode is refused, not dropped: it would mean the computer and the server read the contract differently."""
@@ -283,6 +312,7 @@ class ClockViewReport(BaseModel):
     rows: list[ClockRow] = Field(default_factory=list, max_length=LIST_MAX)
     out: ClockOut | None = None
     in_: ClockIn | None = Field(default=None, alias="in")
+    outs: list[ClockOne] = Field(default_factory=list, max_length=LIST_MAX)  # in every mode — also with mode none
 
     @model_validator(mode="after")
     def _fits_the_mode(self) -> ClockViewReport:
@@ -291,6 +321,8 @@ class ClockViewReport(BaseModel):
             raise ValueError("a report with mode none carries nothing")
         if self.scope is not None and m != "panel":
             raise ValueError("scope belongs to a panel")
+        if self.scope == "one" and len(self.rows) != 1:
+            raise ValueError("a panel of one agent has that one row")
         if (self.count is not None or self.rows) and m != "panel":
             raise ValueError("count and rows belong to a panel (an out is names, an in is steps)")
         if self.out is not None and m != "out":
@@ -300,12 +332,15 @@ class ClockViewReport(BaseModel):
         ids = [r.agent_member_id for r in self.rows]
         if len(set(ids)) != len(ids):
             raise ValueError("an agent is one row")
+        one_ids = [o.agent_member_id for o in self.outs]
+        if len(set(one_ids)) != len(one_ids):
+            raise ValueError("an agent is one entry of outs")
         return self
 
 def expires_after(report: ClockViewReport) -> timedelta:
     """A moving flow (panel · in; only a panel holds draft lines): the short term — the computer re-reports every ten minutes. An out (the night's clocked-out
-    state, names only) stays until the morning's clock-in: the long term, bounded."""
-    return RESTING_OUT_TTL if report.mode == "out" else FLOW_TTL
+    state, names only) and a `none` that only holds the agents clocked out one by one stay until the morning's clock-in: the long term, bounded."""
+    return RESTING_OUT_TTL if report.mode in ("out", "none") else FLOW_TTL
 
 
 async def apply_clock_view(db: AsyncSession, setup: DesktopSetup, report: ClockViewReport) -> tuple[bool, int | None, int]:
@@ -319,10 +354,21 @@ async def apply_clock_view(db: AsyncSession, setup: DesktopSetup, report: ClockV
     fresh = (await db.execute(
         select(DesktopSetup).where(DesktopSetup.id == setup.id).with_for_update().execution_options(populate_existing=True)
     )).scalar_one()
+    # what committed while this report waited for the lock counts: a computer disconnected meanwhile, or the organization's remote control turned off
+    # (both delete the view — a report that slipped in behind them must not put one back)
+    if fresh.revoked_at is not None:
+        raise DesktopRelayError(409, DISCONNECTED_CODE, "this computer was disconnected")
+    from app.services import remote_control
+
+    if not await remote_control.is_enabled(db, fresh.org_id):
+        raise DesktopRelayError(409, remote_control.OFF_CODE, "remote control is off for this organization")
     mine = _setup_agents(fresh)
     kept = [r for r in report.rows if r.agent_member_id in mine]
-    dropped = len(report.rows) - len(kept)
+    kept_outs = [o for o in report.outs if o.agent_member_id in mine]
+    dropped = len(report.rows) - len(kept) + len(report.outs) - len(kept_outs)
     now = _now()
+    # a view that ran out of time goes whoever it belonged to (a disconnected computer's included) — the table has one row per computer, so this is small
+    await db.execute(delete(DesktopClockView).where(DesktopClockView.expires_at <= now))
     row = (await db.execute(
         update(DesktopSetup).where(DesktopSetup.id == setup.id)
         .where((DesktopSetup.clock_view_seq.is_(None)) | (DesktopSetup.clock_view_seq < report.seq))
@@ -332,12 +378,13 @@ async def apply_clock_view(db: AsyncSession, setup: DesktopSetup, report: ClockV
     await touch_device(db, setup.id)  # an ignored report is still the computer speaking: it was heard
     if row is None:
         held = (await db.execute(select(DesktopSetup.clock_view_seq).where(DesktopSetup.id == setup.id))).scalar_one()
+        await db.execute(update(DesktopSetup).where(DesktopSetup.id == setup.id).values(clock_seen_at=now))  # …and it spoke of the clock: `supported`
         await db.flush()
         return False, held, 0
-    if report.mode == "none":
+    if report.mode == "none" and not kept_outs:
         await db.execute(delete(DesktopClockView).where(DesktopClockView.setup_id == setup.id))
     else:
-        body = report.model_copy(update={"rows": kept}).model_dump(mode="json", by_alias=True, exclude={"seq"})
+        body = report.model_copy(update={"rows": kept, "outs": kept_outs}).model_dump(mode="json", by_alias=True, exclude={"seq"})
         values = {"mode": report.mode, "view": body, "reported_at": now, "expires_at": now + expires_after(report)}
         await db.execute(
             pg_insert(DesktopClockView).values(setup_id=setup.id, **values)
@@ -350,6 +397,9 @@ async def apply_clock_view(db: AsyncSession, setup: DesktopSetup, report: ClockV
 async def forget(db: AsyncSession, setup_ids: list[uuid.UUID]) -> None:
     """The computers' views go (a disconnect · the organization's remote control turned off): nothing of a flow stays for a computer that cannot be reached."""
     if setup_ids:
+        # the computers' rows are locked first: a report in flight holds its computer's lock until it commits, so this waits for it and deletes what it wrote
+        # (and a report that starts after this waits for the lock, then finds the computer disconnected / remote control off and writes nothing)
+        await db.execute(select(DesktopSetup.id).where(DesktopSetup.id.in_(setup_ids)).order_by(DesktopSetup.id).with_for_update())
         await db.execute(delete(DesktopClockView).where(DesktopClockView.setup_id.in_(setup_ids)))
 
 
@@ -382,7 +432,7 @@ async def clock_view_read(db: AsyncSession, *, member_id: uuid.UUID, user_id: uu
         await db.execute(delete(DesktopClockView).where(DesktopClockView.setup_id == setup.id))
         return out
     view = dict(row.view)
-    ids = [uuid.UUID(r["agent_member_id"]) for r in view.get("rows") or []]
+    ids = [uuid.UUID(r["agent_member_id"]) for r in (view.get("rows") or []) + (view.get("outs") or [])]
     names: dict[uuid.UUID, str | None] = {}
     if ids:
         names = dict((await db.execute(
@@ -398,5 +448,6 @@ async def clock_view_read(db: AsyncSession, *, member_id: uuid.UUID, user_id: uu
             line = None
         rows.append({**r, "name": names[aid], "first_line": line})
     view["rows"] = rows
+    view["outs"] = [{**o, "name": names[uuid.UUID(o["agent_member_id"])]} for o in view.get("outs") or [] if uuid.UUID(o["agent_member_id"]) in names]
     out["view"] = {"mode": row.mode, **view, "reported_at": row.reported_at.isoformat()}
     return out

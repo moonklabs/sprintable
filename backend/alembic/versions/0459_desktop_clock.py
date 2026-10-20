@@ -3,8 +3,8 @@
 - desktop_commands.kind takes one more word: `clock` (payload exactly {action, signed}; the action is the payload's, so the next action needs no migration).
   The CHECK is dropped and made again with the six kinds (the code side is app/models/desktop_relay.COMMAND_KINDS — a test holds them together). No row
   changes: every stored value is still one of the five.
-- desktop_clock_views: the computer's latest closed clock view, one row per computer, only while a flow is open (a `none` report deletes it · `expires_at`
-  ends it otherwise). Holds the clock-out draft's first lines while drafting — so it is its own table: nothing that loads a desktop_setups row loads it.
+- desktop_clock_views: the computer's latest closed clock view, one row per computer, only while a flow is open or some agents stand clocked out one by one
+  (an empty `none` report deletes it · `expires_at` ends it otherwise). Holds the clock-out draft's first lines while drafting — so it is its own table: nothing that loads a desktop_setups row loads it.
 - desktop_setups.clock_view_seq BIGINT NULL — the highest report number applied (kept when the view row is deleted: a late lower number cannot bring it back);
   clock_seen_at TIMESTAMPTZ NULL — when the computer last spoke of the clock (NULL = never = an older app).
 
@@ -40,7 +40,7 @@ def upgrade() -> None:
         sa.Column("view", postgresql.JSONB(), nullable=False),
         sa.Column("reported_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
-        sa.CheckConstraint(_in("mode", ("panel", "out", "in")), name="ck_desktop_clock_views_mode"),
+        sa.CheckConstraint(_in("mode", ("none", "panel", "out", "in")), name="ck_desktop_clock_views_mode"),
     )
 
 

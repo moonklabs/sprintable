@@ -40,8 +40,9 @@ SESSION_LIMIT_HELD = ("screen", "esc_not_taken")
 # story #4684 (0454): why a computer's subscription for an agent is stopped — the app board's own closed words (the daemon's InboxStreamStatus stops)
 SESSION_INBOX_STREAMS = ("stopped_other_receiver", "stopped_taken_over", "stopped_auth", "stopped_inbox_full")
 SESSION_RUNTIMES = ("claude", "codex")
-# story #4733 (0459): the clock view a computer reports while a clock-out / clock-in flow is open — only these modes are stored (`none` = no row)
-CLOCK_VIEW_MODES = ("panel", "out", "in")
+# story #4733 (0459): the clock view a computer reports. A row exists while a flow is open (panel · out · in) — or, in mode `none`, only while some agents stand
+# clocked out one by one (`outs`: ids and times, so the phone can draw each one's [출근]); a `none` report with nothing in it deletes the row
+CLOCK_VIEW_MODES = ("none", "panel", "out", "in")
 
 
 def _in(column: str, values: tuple[str, ...]) -> str:
@@ -169,8 +170,8 @@ class DesktopCommand(Base):
 
 
 class DesktopClockView(Base):
-    """story #4733 (0459): the latest closed clock view of one computer — at most one row per computer, only while a flow is open (a report with mode `none`
-    deletes it; `expires_at` ends it otherwise). Holds the draft's first lines while the clock-out is being drafted: read by the paired phone of a person who
+    """story #4733 (0459): the latest closed clock view of one computer — at most one row per computer, only while a flow is open or some agents stand clocked
+    out one by one (an empty `none` report deletes it; `expires_at` ends it otherwise). Holds the draft's first lines while the clock-out is being drafted: read by the paired phone of a person who
     may command that computer, never logged. The report numbering lives on desktop_setups (`clock_view_seq`), not here, so a deleted row cannot be brought
     back by a late lower-numbered report."""
 
