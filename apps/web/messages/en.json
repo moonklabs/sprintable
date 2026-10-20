@@ -7390,7 +7390,7 @@
       "startOne": "Start session",
       "startOneAria": "Start session of {name}",
       "unreachable": "Can't reach that computer — you can end the sessions once it's on",
-      "readFailed": "Couldn't read the session state",
+      "readFailed": "Couldn't load the session state",
       "retry": "Try again",
       "remoteOff": "Remote control is off, so you can't end or start sessions from the phone",
       "panel": {
@@ -7460,14 +7460,14 @@
         "expiredStart": "Lost the connection to that computer, so no session started. Press again once it's on",
         "already": "Already in progress — showing where it is now",
         "nothingRunning": "No session to end",
-        "notOpen": "Getting ready to end isn't open — press again",
-        "notReady": "Not ready yet — you can press once all the drafts arrive",
+        "notOpen": "Getting ready to end sessions was already closed — start again from [End all sessions]",
+        "notReady": "Drafts are still coming — you can press once they arrive",
         "needsHands": "Some agents need you — fill them in on that computer",
         "notClockedOut": "No session to start",
         "unknownAgent": "That agent isn't on that computer",
         "alreadyRunning": "It's already working",
-        "failed": "Couldn't do that — press again in a moment",
-        "notAllowed": "Only an organization owner or admin can end or start this computer's sessions from the phone",
+        "failed": "Couldn't do it — try again in a moment",
+        "notAllowed": "Only an organization owner or admin can end or start that computer's sessions from the phone",
         "notPaired": "This phone isn't paired with that computer",
         "signInAgain": "Please sign in again",
         "pairAgain": "Please pair the phone again",
@@ -7475,7 +7475,7 @@
         "noScreenLock": "Set a screen lock on the phone first",
         "unreachable": "Can't reach that computer — press again once it's on"
       },
-      "oldApp": "Update the app on this Mac to end and start sessions from the phone"
+      "oldApp": "Update the app on that computer to end and start sessions from the phone"
     }
   },
   "agentPermissions": {

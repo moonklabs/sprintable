@@ -246,7 +246,7 @@ describe('[4733 S4b] a press', () => {
     expect(phoneCall.mock.calls.filter((c) => c[0] === 'command.sign')).toHaveLength(2); // …and never a new signature for it
   });
 
-  it.each([['already', '이미 하고 있어요'], ['not_open', '다시 눌러 주세요'], ['not_ready', '초안이 모두 오면'], ['needs_hands', '그 컴퓨터에서 채워 주세요']])('the computer\'s word «%s» has its own line', async (code, part) => {
+  it.each([['already', '이미 하고 있어요'], ['not_open', '이미 닫혔어요'], ['not_ready', '초안이 오는 중이에요'], ['needs_hands', '그 컴퓨터에서 채워 주세요']])('the computer\'s word «%s» has its own line', async (code, part) => {
     world.poll = json({ command_id: CMD, state: 'done', result_code: code });
     await screen();
     await press(byId('phone-sessions-end-all'));
@@ -332,7 +332,7 @@ describe('[4733 S4b] codex round 2 — pending holds the presses · overlapping 
     expect((byId('phone-sessions-end-all') as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('the FIRST look failing leaves the card in place with «세션 상태를 읽지 못했어요» and a way to try again (not a silent hole)', async () => {
+  it('the FIRST look failing leaves the card in place with «세션 상태를 불러오지 못했어요» and a way to try again (not a silent hole)', async () => {
     world.clock = new Response('boom', { status: 500 });
     await screen();
     expect(byId('phone-session-card')).not.toBeNull();
