@@ -872,3 +872,100 @@ async def test_27_a_control_character_in_any_free_text_is_refused_and_nothing_of
         assert (await _put(c, device, _panel(1, agent, rows=[_row(agent, first_line=f"{secret}\t다음 줄 없음")]))).status_code == 200
     leaked = [(r.name, r.levelname) for r in caplog.records if secret in r.getMessage() or secret in str(r.args)]
     assert leaked == [], leaked
+
+
+# ── Kadir pin (PR 5172): forget() waits for the lock — fixed by behaviour, not by reading ──────────────────────────────────────────────────────────────────────────────────
+
+
+async def _hold_report_open(sid, agent):
+    """A clock-view report in flight: it holds its computer's row (the lock `apply_clock_view` takes) and has written its view, but has not committed."""
+    from app.core.database import async_session_factory
+    from app.models.desktop_setup import DesktopSetup
+    from app.services import desktop_clock
+
+    s = async_session_factory()
+    session = await s.__aenter__()
+    setup = await session.get(DesktopSetup, uuid.UUID(sid))
+    await desktop_clock.apply_clock_view(session, setup, desktop_clock.ClockViewReport.model_validate(_panel(1, agent)))
+    return s, session
+
+
+async def test_28_forget_waits_for_the_report_in_flight_then_deletes_what_it_wrote_and_two_forgets_in_opposite_order_do_not_deadlock(world):
+    import asyncio
+
+    from app.core.database import async_session_factory
+    from app.services import desktop_clock
+
+    async with _client() as c:
+        d1, a1, _p1, _x1 = await _setup(c, "d4424 mac 4733-28a")
+        d2, a2, _p2, _x2 = await _setup(c, "d4424 mac 4733-28b")
+    first, second = sorted([(d1["setup_id"], a1), (d2["setup_id"], a2)])
+    (sid_a, agent_a), (sid_b, _agent_b) = first, second  # sid_a sorts before sid_b: the order every lock taker uses
+    ctx, inflight = await _hold_report_open(sid_a, agent_a)
+
+    async def forget(ids):
+        async with async_session_factory() as s:
+            await desktop_clock.forget(s, [uuid.UUID(i) for i in ids])
+            await s.commit()
+
+    tasks = []
+    try:
+        # two cut-offs that name the same two computers in opposite order — both must queue behind the report and then finish, neither may deadlock the other
+        tasks = [asyncio.create_task(forget([sid_a, sid_b])), asyncio.create_task(forget([sid_b, sid_a]))]
+        await asyncio.sleep(1.0)
+        assert not any(t.done() for t in tasks), "forget waits for the report in flight (its computer's row is locked by it)"
+        await inflight.commit()
+    finally:
+        await ctx.__aexit__(None, None, None)  # releases the lock when an assertion above failed, so a red run ends instead of hanging the cleanup
+    await asyncio.wait_for(asyncio.gather(*tasks), 20)
+    assert await _views(sid_a) == [], "what the report wrote is deleted after it, not before"
+
+
+async def test_29_the_organizations_remote_control_off_waits_for_the_report_in_flight_and_leaves_no_view(world):
+    import asyncio
+
+    async with _client() as c:
+        device, agent, _phone, _der = await _setup(c, "d4424 mac 4733-29")
+        sid = device["setup_id"]
+        ctx, inflight = await _hold_report_open(sid, agent)
+        off = asyncio.create_task(c.put(f"/api/v2/organizations/{ORG}/remote-control", json={"enabled": False}, headers=_person(OWNER)))
+        try:
+            await asyncio.sleep(1.0)
+            assert not off.done(), "turning remote control off waits for the report in flight"
+            await inflight.commit()
+        finally:
+            await ctx.__aexit__(None, None, None)  # releases the lock when the assertion failed, so a red run ends instead of hanging the cleanup
+        r = await asyncio.wait_for(off, 20)
+        assert r.status_code == 200, r.text
+        assert await _views(sid) == []
+
+
+async def test_30_forget_takes_the_computers_rows_in_id_order_in_one_statement(world):
+    """The one lock order of the service (rows by id, one statement) — watched at the SQL, like the 4565 lock-order test: an unordered lock statement lets two cut-offs
+    that name the same computers in opposite order deadlock; no timing can show that reliably, the statement can."""
+    from sqlalchemy import event
+
+    from app.core.database import async_session_factory, engine
+    from app.services import desktop_clock
+
+    async with _client() as c:
+        d1, _a1, _p1, _x1 = await _setup(c, "d4424 mac 4733-30a")
+        d2, _a2, _p2, _x2 = await _setup(c, "d4424 mac 4733-30b")
+    ids = [uuid.UUID(d2["setup_id"]), uuid.UUID(d1["setup_id"])]
+    seen: list[str] = []
+
+    def watch(conn, cursor, statement, parameters, context, executemany):
+        if "FOR UPDATE" in statement:
+            seen.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", watch)
+    try:
+        async with async_session_factory() as s:
+            await desktop_clock.forget(s, ids)
+            await s.commit()
+            await desktop_clock.forget(s, ids, lock=False)
+            await s.commit()
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", watch)
+    assert len(seen) == 1, seen  # the locking forget: one statement; lock=False: none
+    assert "FROM desktop_setups" in seen[0] and "ORDER BY desktop_setups.id" in seen[0] and "FOR UPDATE" in seen[0], seen[0]
