@@ -240,7 +240,19 @@ function ComputerCard({ computer, phoneKeyId, onChanged, frozen }: { computer: S
   const zone = useViewerTimeZone(); // the viewer's own zone (the phone's) — a clock time is the person's, not the server's
   const time = (iso: string | null | undefined): string => { const d = iso ? new Date(iso) : null; return d && !Number.isNaN(d.getTime()) ? (formatViewerDate(d, locale, zone, { hour: 'numeric', minute: '2-digit' }) ?? '') : ''; };
 
-  if (hidden || !read || !read.supported) return null; // an older app on that computer (no `clock`): no buttons, no line
+  if (hidden || !read) return null;
+  // an older app on that computer (it has never reported a clock view = no `clock`): a press could only fail — no buttons, one line saying what to do (PO 5585)
+  if (!read.supported) {
+    return (
+      <Card className="break-keep space-y-2 p-4" data-testid="phone-session-card" data-setup={computer.setup_id}>
+        <header>
+          <p className="text-sm font-semibold text-foreground">{computer.device_name}</p>
+          <p className="text-xs text-muted-foreground">{t('title')}</p>
+        </header>
+        <p role="status" className="text-xs text-muted-foreground" data-testid="phone-sessions-old-app">{t('oldApp')}</p>
+      </Card>
+    );
+  }
   // what is drawn may no longer be true: two looks in a row did not answer, remote control went off, or the organization is being switched — nothing is pressable then
   const stale = failures >= 2;
   const locked = stale || !read.remoteControl || frozen;

@@ -169,6 +169,7 @@ const SHELL_REFUSALS: Record<string, PressOutcome['kind']> = {
   remote_control_off: 'remote_off',
   computer_not_found: 'not_paired',
   device_unreachable: 'unreachable',
+  not_allowed: 'not_allowed', // the shell found no agent of that computer the person may command (before any prompt)
 };
 
 async function codeOf(res: Response): Promise<string> {

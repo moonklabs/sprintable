@@ -7473,7 +7473,8 @@
         "pairAgain": "Please pair the phone again",
         "biometricRequired": "Turn on fingerprint or face check on the phone",
         "noScreenLock": "Set a screen lock on the phone first"
-      }
+      },
+      "oldApp": "Update the app on this Mac to end and start sessions from the phone"
     }
   },
   "agentPermissions": {

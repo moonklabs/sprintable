@@ -105,11 +105,26 @@ describe('[4733 S4b] the card', () => {
     expect(fetchWithAuth).not.toHaveBeenCalled();
   });
 
-  it('a computer whose app does not speak `clock` (an older app) → no buttons, no line', async () => {
+  it('a computer whose app does not speak `clock` (an older daemon) → NO buttons (a press could only fail), one line saying what to do', async () => {
     world.supported = false;
     await screen();
-    expect(byId('phone-session-card')).toBeNull();
-    expect(text()).not.toMatch(/세션 (종료|시작)/);
+    expect(byId('phone-sessions-old-app')?.textContent).toBe(koMessages.desktop.phoneSessions.oldApp);
+    expect(byId('phone-session-card')?.textContent).toContain('윤재의 맥북');
+    expect(container.querySelectorAll('button')).toHaveLength(0);
+    expect(byId('phone-sessions-end-all')).toBeNull();
+    expect(posts()).toHaveLength(0);
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'command.sign')).toHaveLength(0);
+  });
+
+  it('…and the same card in English; once the computer\'s app speaks `clock` the line gives way to the buttons', async () => {
+    world.supported = false;
+    await screen({ locale: 'en' });
+    expect(byId('phone-sessions-old-app')?.textContent).toBe(enMessages.desktop.phoneSessions.oldApp);
+    world.supported = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+    await flush();
+    expect(byId('phone-sessions-old-app')).toBeNull();
+    expect(byId('phone-sessions-end-all')).not.toBeNull();
   });
 
   it('a person who may not command that computer (403) → the card is not drawn', async () => {
