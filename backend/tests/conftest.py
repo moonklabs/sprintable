@@ -329,6 +329,34 @@ def _no_real_network_requests():
         pytest.fail(f"a real request left the test — mock it (tests/_no_real_network.py): {caught}", pytrace=False)
 
 
+_APP_MODULES_WITH_OVERRIDES = ("app.main", "app.realtime_main")
+
+
+@pytest.fixture(autouse=True)
+def _restore_app_dependency_overrides():
+    """story #4742 — a test hands the app a fake user / a session of its own with `app.dependency_overrides[...] = ...`; the dict is process-wide, so the one that does
+    not take it away again (588 test files use it, 7 never clear it, the rest clear by hand — outside a `finally`, one key, or not when the run is cut) makes the next
+    test in the same shard ask as that stranger. #5174's `test_4299` got a 403 as another organization's owner that `test_3997` had left — deterministic once the
+    shard split put the two side by side.
+
+    The root, once: copy the dict when a test starts, put the copy back when it ends (passed, failed or raised). What a module-scoped fixture set before the test stays;
+    what the test set is gone. A plain sync fixture on purpose (story #3330 below: an async autouse fixture on a sync test is refused). Looks only at apps already
+    imported — a test that never imports the app pays nothing."""
+    before = {}
+    for name in _APP_MODULES_WITH_OVERRIDES:
+        module = sys.modules.get(name)
+        if module is not None and hasattr(module, "app"):
+            before[name] = dict(module.app.dependency_overrides)
+    yield
+    for name in _APP_MODULES_WITH_OVERRIDES:
+        module = sys.modules.get(name)
+        if module is None or not hasattr(module, "app"):
+            continue
+        overrides = module.app.dependency_overrides
+        overrides.clear()
+        overrides.update(before.get(name, {}))
+
+
 @pytest.fixture(autouse=True)
 def _tag_global_engine_connections_for_destructive_tests(request):
     """destructive 테스트마다 이름을 바꿔 단다. 테스트가 끝나도 지우지 않는다 — 테스트 뒤에 뜬 태스크가 연 커넥션도 «마지막
