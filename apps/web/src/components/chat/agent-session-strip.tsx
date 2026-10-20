@@ -13,6 +13,8 @@ import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off
 import { useFieldDraft } from '@/hooks/use-field-draft';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
+import { readStartableKeyed } from '@/lib/phone-start';
+import { readClock } from '@/lib/phone-clock';
 import { checkCommand, commandOnPhone, type CommandDeps, type CommandOutcome, type Pending, type Verb } from '@/lib/phone-command';
 import { limitHeld, limitLine, limitLooksAgain, limitTime, type SessionLimit } from '@/lib/agent-session-limit';
 import { runInfoLine, type SessionRun } from '@/lib/agent-session-run';
@@ -36,6 +38,8 @@ type SessionState = 'starting' | 'working' | 'idle' | 'waiting_permission' | 'wa
   // story #4534 (Yuna 05:41Z): a word this page does not know — not the server's `unknown` (= the computer lost): its own line
   | 'unrecognized';
 interface View {
+  // story #4733: the computer this session runs on (the server sends it with the session; an older one sends none)
+  setup_id?: string | null;
   device_name: string | null;
   // story #4534 (Kadir 4960 · PO 05:36Z): `state` = the five words a reader from before knows · `activity` = the board's own word
   state: SessionState | null;
@@ -180,6 +184,27 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
   // story #4599 (Yuna ① · PO 14:25Z): [세션 끝내기] asks once — it cannot be undone (the destructive weight of 4580's second card); the
   // first focus is [취소]
   const [endOpen, setEndOpen] = useState(false);
+  // story #4733 (Yuna 4733 §6): the hard end's dialog points at the phone's own [세션 종료] — drawn only where that button exists for this agent (its computer speaks
+  // `clock` and this person may command it); an old app or a person without the right gets no line that points at nothing. Asked when the dialog opens.
+  const [clockAvailable, setClockAvailable] = useState(false);
+  useEffect(() => {
+    if (!endOpen || !phone) return undefined;
+    let live = true;
+    void (async () => {
+      setClockAvailable(false); // every opening asks again (set in the async step, not in the effect body): the last answer is not this one's
+      const list = await readStartableKeyed(phoneCall);
+      if (!live) return;
+      if (list.kind !== 'view') return;
+      // the phone's [세션 종료] is on a RUNNING agent's row of a computer that speaks `clock` and that this person may command
+      // THIS session's computer: the one the server names; with no name, only when exactly one computer has this agent running (never a guess between two)
+      const running = list.view.computers.filter((c) => c.agents.some((a) => a.agent_member_id === agentId && a.running === true));
+      const computer = typeof view.setup_id === 'string' ? running.find((c) => c.setup_id === view.setup_id) : running.length === 1 ? running[0] : undefined;
+      if (!computer) return;
+      const read = await readClock(computer.setup_id, list.phoneKeyId);
+      if (live) setClockAvailable(read.kind === 'read' && read.read.supported && read.read.remoteControl && read.read.reachable);
+    })().catch(() => { if (live) setClockAvailable(false); });
+    return () => { live = false; };
+  }, [endOpen, phone, phoneCall, agentId, view?.setup_id]);
   const endCancelRef = useRef<HTMLButtonElement>(null);
   // what was written stays until it went somewhere (spec B-3: «쓴 글은 남김») — kept as a draft per agent · conversation (#4370)
   const [draft, setDraft, clearDraft] = useFieldDraft({ surface: 'agent-instruct', targetId: `${agentId}:${conversationId}`, field: 'text' });
@@ -280,6 +305,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
           <DialogHeader>
             <DialogTitle>{t('endDialog.title')}</DialogTitle>
             <DialogDescription className="break-keep">{t('endDialog.body')}</DialogDescription>
+            {clockAvailable ? <p className="break-keep text-sm text-muted-foreground" data-testid="agent-end-use-clock">{t('endDialog.useEnd')}</p> : null}
           </DialogHeader>
           <DialogFooter>
             <Button ref={endCancelRef} variant="outline" onClick={() => setEndOpen(false)}>{t('endDialog.cancel')}</Button>

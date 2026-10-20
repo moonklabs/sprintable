@@ -413,6 +413,16 @@ export function findMemberSynonymCollisions(
 // 낀 세 쌍(3402 2·3575 1) 전부 그래서 삭제(양성대조: 제외 로직을 끄면 다시 RED가 되어야
 // 한다).
 export const EXEMPT_PAIRS = new Set<string>([
+  // story #4733 (S4b · Yuna 4733 sheet §2/§4/§5 — «세션 관리» on the phone) — three pairs that are the sheet's own words on purpose:
+  //  · `startOne` («세션 시작», the row button) inside `out.alone` («이 중 {k}개는 먼저 따로 종료했어요 — 모든 세션 시작을 누르면 함께 시작해요.») and `startAll`
+  //    («모든 세션 시작») inside it: the sentence POINTS at the card's own button by its label, so the label's words are the point. The row button is drawn only in the
+  //    idle card (no step open), the sentence only in the card after the sessions ended (the two never stand together).
+  //  · `endedRow` («세션을 종료했어요 · {time} — …») and `out.head` («세션을 종료했어요 · {time}»): one head sentence for one act at two units (an agent that ended on its
+  //    own / the computer) — the sheet keeps ONE word per act whatever the unit (its rule 1). They are also never on the screen together.
+  // Look again if the idle card and the card after ever draw at once.
+  'desktop.phoneSessions.out.alone <-> desktop.phoneSessions.startOne',
+  'desktop.phoneSessions.out.alone <-> desktop.phoneSessions.startAll',
+  'desktop.phoneSessions.endedRow <-> desktop.phoneSessions.out.head',
   // story 4717 (agent room before «시작») — the room lines («이 레시피는 새 에이전트 {need}개가 필요한데, 지금 {left}개만 더 만들 수 있어요.» ·
   // «…지금은 더 만들 수 없어요.») contain «레시피», the recipe card's own label (`desktop.setup.recipe`). Not the shape this guard is for
   // (#2352/#2365: two counted phrases read as one another): the label counts nothing — it names the card the person chose — and the

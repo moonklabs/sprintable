@@ -5289,10 +5289,10 @@
       },
       "line": {
         "onPhone": "You can stop or instruct it from a paired phone",
-        "waitingSystem": "macOS is asking on that computer's screen whether to use a folder — it can't be answered here. Answer the prompt at that computer, press [End session] on your phone, or [End] in the desktop app",
-        "waitingSystemFolder": "macOS is asking on that computer's screen whether to use {folder} — it can't be answered here. Answer the prompt at that computer, press [End session] on your phone, or [End] in the desktop app",
-        "waitingSystemPhone": "macOS is asking on that computer's screen whether to use a folder — it can't be answered here. Answer the prompt at that computer, or press [End session] here",
-        "waitingSystemFolderPhone": "macOS is asking on that computer's screen whether to use {folder} — it can't be answered here. Answer the prompt at that computer, or press [End session] here",
+        "waitingSystem": "macOS is asking on that computer's screen whether to use a folder — it can't be answered here. Answer the prompt at that computer, press [End without a handoff] on your phone, or [End] in the desktop app",
+        "waitingSystemFolder": "macOS is asking on that computer's screen whether to use {folder} — it can't be answered here. Answer the prompt at that computer, press [End without a handoff] on your phone, or [End] in the desktop app",
+        "waitingSystemPhone": "macOS is asking on that computer's screen whether to use a folder — it can't be answered here. Answer the prompt at that computer, or press [End without a handoff] here",
+        "waitingSystemFolderPhone": "macOS is asking on that computer's screen whether to use {folder} — it can't be answered here. Answer the prompt at that computer, or press [End without a handoff] here",
         "inbox": "The permission request is in the approvals inbox",
         "unknown": "The connection to that computer was lost, so its state is unknown — this updates here as soon as it reconnects",
         "inboxPhone": "You can answer it in Approvals",
@@ -5317,13 +5317,14 @@
         "stop": "Stop",
         "instruct": "Instruct now",
         "checkResult": "Check again",
-        "endSession": "End session"
+        "endSession": "End without a handoff"
       },
       "endDialog": {
-        "title": "End this session?",
+        "title": "End the session without a handoff?",
         "body": "The current turn stops and the session closes. To put this agent back to work, start it again in the desktop app. Unlike [Stop], this can't be undone.",
-        "confirm": "End session",
-        "cancel": "Cancel"
+        "confirm": "End without a handoff",
+        "cancel": "Cancel",
+        "useEnd": "No handoff is left — to leave one, use [End session]."
       },
       "sheet": {
         "title": "Add to what the agent is doing now",
@@ -5338,7 +5339,7 @@
         "stopped": "Stopped — the session is still there; send the next instruction and it carries on",
         "alreadyStopped": "It had already stopped",
         "stopUnreachable": "Lost the connection to that computer, so it wasn't stopped",
-        "stopSystemWait": "macOS is asking on that computer's screen whether to use a folder, so it couldn't be stopped — only [End session] works right now. Answer the prompt at that computer and the agent carries on",
+        "stopSystemWait": "macOS is asking on that computer's screen whether to use a folder, so it couldn't be stopped — only [End without a handoff] works right now. Answer the prompt at that computer and the agent carries on",
         "endNotHeld": "The macOS prompt was answered on that computer in the meantime, so it's working again — the session wasn't ended",
         "stopUnknown": "Couldn't confirm whether it stopped — it may already have stopped",
         "sentNow": "Sent · it went into the current turn",
@@ -7379,6 +7380,102 @@
       "empty": "No paired phone yet",
       "pairHint": "Pair a phone with [Pair phone] in the bar at the bottom of the desktop app",
       "orgOff": "Remote control is off for this organization ({org}) — paired devices show the state but can't control anything"
+    },
+    "phoneSessions": {
+      "title": "Session management",
+      "endAll": "End all sessions",
+      "startAll": "Start all sessions",
+      "endOne": "End session",
+      "endOneAria": "End session of {name}",
+      "startOne": "Start session",
+      "startOneAria": "Start session of {name}",
+      "unreachable": "Can't reach that computer — you can end the sessions once it's on",
+      "readFailed": "Couldn't load the session state",
+      "retry": "Try again",
+      "remoteOff": "Remote control is off, so you can't end or start sessions from the phone",
+      "panel": {
+        "title": "Getting ready to end sessions",
+        "lead": "Ending all sessions stops {n, plural, one {# agent} other {# agents}} on that computer — those that did some work leave a handoff",
+        "leadOne": "Ending the session stops this agent — what it did is left as a handoff.",
+        "leadIdle": "Nothing done this time, so it ends without a handoff — the last handoff carries over when the session starts again.",
+        "titleOne": "{name} — end session",
+        "windowClosed": "You can end the sessions even if the app window on that computer is closed — the computer just has to be on",
+        "count": "Drafts ready {ready} · Needs you {needs}",
+        "countDrafting": "Drafts ready {ready} · Needs you {needs} · Drafting {drafting}",
+        "cancel": "Cancel"
+      },
+      "row": {
+        "drafting": "Drafting…",
+        "readyNoLine": "The draft is ready",
+        "needsNoDraft": "Needs you — no draft came",
+        "needsEmpty": "Needs you — a field is empty",
+        "idle": "Nothing done — stops without a handoff",
+        "saving": "Saving…",
+        "saved": "Saved",
+        "ended": "✓ Handoff left · stopped",
+        "notEnded": "Handoff left — it didn't stop",
+        "idleNotEnded": "Couldn't stop — it's still working",
+        "failed": "Couldn't leave the handoff — it keeps working",
+        "lineReady": "{line} · ✓"
+      },
+      "action": {
+        "submitAll": "Hand over as is and end sessions",
+        "submitOne": "Leave the handoff and end the session",
+        "submitOneIdle": "End session",
+        "allReady": "All ready — hand over as is and end the sessions",
+        "draftsComing": "Drafts are still coming — you can press once they arrive",
+        "needsHand": "The {m} that need you have to be filled in on that computer — you can't edit text from the phone yet",
+        "needsHandOne": "The «Done» and «Next» fields have to be filled in on that computer — you can't edit text from the phone yet",
+        "needsList": "Needs you · {names}",
+        "namesMore": "{names} and {k} more",
+        "running": "Leaving the handoff…",
+        "lineHidden": "Some agents' draft lines can't be shown here — check them on that computer"
+      },
+      "out": {
+        "head": "Sessions ended · {time}",
+        "names": "Ended: {names}",
+        "came": "{n, plural, one {# item} other {# items}} came in since — handed over one by one when the sessions start",
+        "warnMany": "A lot is waiting ({n}/200) — please start the sessions",
+        "warnFull": "No room for new work — please start the sessions",
+        "stillWorking": "Couldn't end the session and still working · {names}",
+        "alone": "{k} of these ended on their own earlier — starting all sessions starts them too."
+      },
+      "endedRow": "Session ended · {time} — start it to carry on from the handoff",
+      "in": {
+        "starting": "Starting the sessions ({k}/{n})",
+        "handing": "Sessions started — handed over {k}/{m}",
+        "startedCame": "Sessions started — {n, plural, one {# item} other {# items}} came in since they ended ({time})",
+        "startedNone": "Sessions started — nothing came in meanwhile",
+        "retryAtComputer": "Press [Try again] on that computer"
+      },
+      "elsewhere": {
+        "mac": "This was started on that computer — it's the same screen, so you can carry on here",
+        "phone": "This was started from a phone — it's the same screen, so you can carry on here"
+      },
+      "result": {
+        "unknown": "Couldn't tell whether ending the sessions started — look at this card again in a moment",
+        "unknownStart": "Couldn't tell whether starting the sessions worked — look at this card again in a moment",
+        "checkResult": "Check the result",
+        "expired": "Lost the connection to that computer, so no session ended — nothing was stopped. Press again once it's on",
+        "expiredStart": "Lost the connection to that computer, so no session started. Press again once it's on",
+        "already": "Already in progress — showing where it is now",
+        "nothingRunning": "No session to end",
+        "notOpen": "Getting ready to end sessions was already closed — start again from [End all sessions]",
+        "notReady": "Drafts are still coming — you can press once they arrive",
+        "needsHands": "Some agents need you — fill them in on that computer",
+        "notClockedOut": "No session to start",
+        "unknownAgent": "That agent isn't on that computer",
+        "alreadyRunning": "It's already working",
+        "failed": "Couldn't do it — try again in a moment",
+        "notAllowed": "Only an organization owner or admin can end or start that computer's sessions from the phone",
+        "notPaired": "This phone isn't paired with that computer",
+        "signInAgain": "Please sign in again",
+        "pairAgain": "Please pair the phone again",
+        "biometricRequired": "Turn on fingerprint or face check on the phone",
+        "noScreenLock": "Set a screen lock on the phone first",
+        "unreachable": "Can't reach that computer — press again once it's on"
+      },
+      "oldApp": "Update the app on that computer to end and start sessions from the phone"
     }
   },
   "agentPermissions": {
