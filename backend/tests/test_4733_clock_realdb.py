@@ -33,6 +33,11 @@ from tests.test_4534_desktop_commands_realdb import _commands, _remote_control_o
 
 pytestmark = pytest.mark.anyio
 
+def _iso(minutes_ago: int = 0) -> str:
+    """A time relative to now — a fixed wall-clock literal rots (lint_no_hardcoded_iso_timestamp)."""
+    return (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)).isoformat()
+
+
 LINE = "배포 스크립트 고치다가 멈춘 곳까지 정리함"  # a draft's first line (the kind of text that must not leak into logs)
 
 
@@ -283,10 +288,10 @@ async def test_07_the_report_is_closed_a_field_that_does_not_fit_its_mode_is_ref
             _report(1, "out", out={**ok_out, "left": ["a\nb"]}),
             _report(1, "out", out={**ok_out, "path": "/x"}),
             _report(1, "out", out={**ok_out, "alone": -1}), _report(1, "out", out={**ok_out, "alone": 1.5}),
-            _report(1, "none", outs=[{"agent_member_id": agent, "at": "2026-10-20T00:00:00Z"}] * 2),         # an agent is one entry
-            _report(1, "none", outs=[{"agent_member_id": str(uuid.uuid4()), "at": "2026-10-20T00:00:00Z"} for _ in range(65)]),
+            _report(1, "none", outs=[{"agent_member_id": agent, "at": _iso(0)}] * 2),         # an agent is one entry
+            _report(1, "none", outs=[{"agent_member_id": str(uuid.uuid4()), "at": _iso(0)} for _ in range(65)]),
             _report(1, "none", outs=[{"agent_member_id": agent}]), _report(1, "none", outs=[{"agent_member_id": agent, "at": "yesterday"}]),
-            _report(1, "none", outs=[{"agent_member_id": agent, "at": "2026-10-20T00:00:00Z", "name": "Writer"}]),
+            _report(1, "none", outs=[{"agent_member_id": agent, "at": _iso(0), "name": "Writer"}]),
             _report(1, "in", **{"in": {"failed": [{"name": "W", "code": "No Folder"}]}}),
             _report(1, "in", **{"in": {"failed": [{"name": "W", "code": "no_folder", "path": "/x"}]}}),
             _report(1, "in", **{"in": {"starting": {"k": 1}}}),
@@ -302,8 +307,8 @@ async def test_07_the_report_is_closed_a_field_that_does_not_fit_its_mode_is_ref
                    "failed": [{"name": "Writer", "code": "no_folder", "limit": 3}], "unread": ["Reviewer"]}
         assert (await _put(c, device, _report(3, "in", **{"in": full_in}))).status_code == 200
         assert (await _put(c, device, _report(4, "none"))).status_code == 200
-        assert (await _put(c, device, _report(5, "none", outs=[{"agent_member_id": agent, "at": "2026-10-20T00:00:00Z"}]))).status_code == 200
-        assert (await _put(c, device, _report(6, "out", out={**ok_out, "alone": 1}, outs=[{"agent_member_id": agent, "at": "2026-10-20T00:00:00Z"}]))).status_code == 200
+        assert (await _put(c, device, _report(5, "none", outs=[{"agent_member_id": agent, "at": _iso(0)}]))).status_code == 200
+        assert (await _put(c, device, _report(6, "out", out={**ok_out, "alone": 1}, outs=[{"agent_member_id": agent, "at": _iso(0)}]))).status_code == 200
 
 
 async def test_08_the_numbering_a_late_lower_number_neither_covers_nor_brings_back(world):
@@ -715,7 +720,7 @@ async def test_23_agents_clocked_out_one_by_one_are_kept_in_every_mode_even_when
         sid = device["setup_id"]
         other = device["agents"][1]["member_id"]
         gone = str(uuid.uuid4())
-        outs = [{"agent_member_id": agent, "at": "2026-10-20T00:10:00Z"}, {"agent_member_id": gone, "at": "2026-10-20T00:11:00Z"}]
+        outs = [{"agent_member_id": agent, "at": _iso(10)}, {"agent_member_id": gone, "at": _iso(11)}]
         # mode none with nothing deletes; mode none WITH one-by-one agents keeps a row (the phone draws their [출근] with no flow open) — a stranger agent is dropped
         assert (await _put(c, device, _report(1, "none"))).json()["dropped_rows"] == 0 and await _views(sid) == []
         r = await _put(c, device, _report(2, "none", outs=outs))
@@ -727,15 +732,15 @@ async def test_23_agents_clocked_out_one_by_one_are_kept_in_every_mode_even_when
         read = (await _read(c, sid, phone)).json()["view"]
         assert read["mode"] == "none" and read["outs"] == [{"agent_member_id": agent, "at": read["outs"][0]["at"], "name": name}] and read["rows"] == []
         # in every other mode too, beside the flow's own fields
-        assert (await _put(c, device, _panel(3, agent, rows=[_row(other)], outs=[{"agent_member_id": agent, "at": "2026-10-20T00:10:00Z"}]))).json()["applied"] is True
+        assert (await _put(c, device, _panel(3, agent, rows=[_row(other)], outs=[{"agent_member_id": agent, "at": _iso(10)}]))).json()["applied"] is True
         assert (await _views(sid))[0][1]["outs"][0]["agent_member_id"] == agent and (await _views(sid))[0][2] == timedelta(minutes=30)
-        ok_out = {"at": "2026-10-20T00:20:00Z", "came": 2, "warn": "none", "still_working": [], "left": ["Writer"], "alone": 1}
-        assert (await _put(c, device, _report(4, "out", out=ok_out, outs=[{"agent_member_id": agent, "at": "2026-10-20T00:10:00Z"}]))).json()["applied"] is True
+        ok_out = {"at": _iso(20), "came": 2, "warn": "none", "still_working": [], "left": ["Writer"], "alone": 1}
+        assert (await _put(c, device, _report(4, "out", out=ok_out, outs=[{"agent_member_id": agent, "at": _iso(10)}]))).json()["applied"] is True
         assert (await _read(c, sid, phone)).json()["view"]["out"]["alone"] == 1
         # the agents' clock-in empties it: an empty none deletes the row
         assert (await _put(c, device, _report(5, "none"))).json()["applied"] is True and await _views(sid) == []
         # an agent that is deleted from the board is not listed
-        await _put(c, device, _report(6, "none", outs=[{"agent_member_id": agent, "at": "2026-10-20T00:10:00Z"}]))
+        await _put(c, device, _report(6, "none", outs=[{"agent_member_id": agent, "at": _iso(10)}]))
         await _sql(f"UPDATE members SET deleted_at = now() WHERE id = '{agent}'")
         assert (await _read(c, sid, phone)).json()["view"]["outs"] == []
 
