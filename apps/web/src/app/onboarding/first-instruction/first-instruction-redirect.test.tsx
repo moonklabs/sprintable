@@ -78,7 +78,7 @@ function stubFetch(opts: StubOpts) {
 let container: HTMLDivElement;
 let root: Root;
 
-async function renderRedirect(props: { agentId: string | null; compose: string; projectId: string | null; flags?: NavV3Flags }) {
+async function renderRedirect(props: { agentId: string | null; compose: string; projectId: string | null; projectPinned?: boolean; flags?: NavV3Flags }) {
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
@@ -195,6 +195,39 @@ describe('FirstInstructionRedirect (동작)', () => {
     });
     await renderRedirect({ agentId, compose: '', projectId: 'proj-1' });
     expect(routerReplaceMock).toHaveBeenCalledWith('/chats/c-check?p=proj-9');
+  });
+
+  // story 4714: the phone's start screen NAMES the project it started the session in — a checklist conversation of another project does not win over it
+  it('⭐4714 project named (pinned): a checklist conversation of ANOTHER project is skipped — the newest DM of the named project opens', async () => {
+    stubFetch({
+      checklistId: 'c-check',
+      checklistProjectId: 'proj-9',
+      conversations: [agentDm('c-list', '2026-09-17T02:00:00Z')],
+      byId: { 'c-check': { participants: [{ member_id: agentId }, { member_id: 'me' }] } },
+    });
+    await renderRedirect({ agentId, compose: '', projectId: 'proj-1', projectPinned: true });
+    expect(routerReplaceMock).toHaveBeenCalledWith('/chats/c-list?p=proj-1');
+  });
+
+  it('4714 pinned: a checklist conversation OF the named project is still taken; one whose project the server did not say is not', async () => {
+    stubFetch({
+      checklistId: 'c-check',
+      checklistProjectId: 'proj-1',
+      conversations: [agentDm('c-list', '2026-09-17T02:00:00Z')],
+      byId: { 'c-check': { participants: [{ member_id: agentId }, { member_id: 'me' }] } },
+    });
+    await renderRedirect({ agentId, compose: '', projectId: 'proj-1', projectPinned: true });
+    expect(routerReplaceMock).toHaveBeenCalledWith('/chats/c-check?p=proj-1');
+    routerReplaceMock.mockClear();
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    stubFetch({
+      checklistId: 'c-check',
+      conversations: [agentDm('c-list', '2026-09-17T02:00:00Z')],
+      byId: { 'c-check': { participants: [{ member_id: agentId }, { member_id: 'me' }] } },
+    });
+    await renderRedirect({ agentId, compose: '', projectId: 'proj-1', projectPinned: true });
+    expect(routerReplaceMock).toHaveBeenCalledWith('/chats/c-list?p=proj-1');
   });
 
   it('생성 뒤 재마운트(새로고침 동형)면 ②에서 찾아 생성 0', async () => {

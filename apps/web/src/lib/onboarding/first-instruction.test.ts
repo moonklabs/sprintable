@@ -5,7 +5,9 @@
 // 폴백이 그리로 첫 지시 DM을 열어버릴 잠재 결함(연결 대상이 아닌 내부 멤버 — 지시를
 // 보내도 아무 반응이 없다) — 골라내고 그다음 실 에이전트를 쓴다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createFirstInstructionConversation } from './first-instruction';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { createFirstInstructionConversation, firstInstructionHref } from './first-instruction';
 
 const fetchMock = vi.fn();
 
@@ -58,5 +60,16 @@ describe('createFirstInstructionConversation — 시스템 발행 제외(story #
     const conversationId = await createFirstInstructionConversation('p1', 'a-explicit');
     expect(conversationId).toBe('conv-a-explicit');
     expect(fetchMock.mock.calls.some((c) => String(c[0]).startsWith('/api/team-members'))).toBe(false);
+  });
+});
+
+describe('[4714] firstInstructionHref — the address the phone\'s start screen opens the started agent\'s conversation at', () => {
+  it('the onboarding\'s own find-or-create route with the agent id (encoded) — and that route is really there', () => {
+    expect(firstInstructionHref('a-1')).toBe('/onboarding/first-instruction?agent=a-1');
+    expect(firstInstructionHref('a b&c')).toBe('/onboarding/first-instruction?agent=a%20b%26c');
+    expect(firstInstructionHref('a-1', 'p-1')).toBe('/onboarding/first-instruction?agent=a-1&project=p-1'); // the project the session was started in
+    expect(firstInstructionHref('a-1', 'p 1&x')).toBe('/onboarding/first-instruction?agent=a-1&project=p%201%26x');
+    expect(firstInstructionHref('a-1', null)).toBe('/onboarding/first-instruction?agent=a-1');
+    expect(existsSync(path.resolve(__dirname, '../../app/onboarding/first-instruction/page.tsx'))).toBe(true);
   });
 });

@@ -19,7 +19,9 @@ import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { useOrgRemoteControl, putOrgRemoteControl } from '@/lib/org-remote-control';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { sendMacLinkMail, type MacLinkMailOutcome } from '@/lib/phone-mac-link-mail';
-import { checkStart, readStartable, startOnPhone, type Pending, type StartOutcome, type StartableAgent, type StartableComputer, type StartableRead, type StartableView } from '@/lib/phone-start';
+import { Loader2 } from 'lucide-react';
+import { firstInstructionHref } from '@/lib/onboarding/first-instruction';
+import { beginFlow, checkStart, endFlow, isLeaving, readStartable, startOnPhone, waitForSession, type Flow, type Pending, type StartOutcome, type StartableAgent, type StartableComputer, type StartableRead, type StartableView } from '@/lib/phone-start';
 
 type Read = { kind: 'reading' } | { kind: 'failed' } | { kind: 'no_phone' } | { kind: 'view'; view: StartableView };
 
@@ -46,18 +48,27 @@ export function PhoneFirstScreen({ orgId, chatsHref, macDownloadEnabled = false 
   const land = useCallback((r: StartableRead) => {
     setRead(r.kind === 'view' ? { kind: 'view', view: r.view } : r.kind === 'no_phone' || r.kind === 'no_screen_lock' ? { kind: 'no_phone' } : { kind: 'failed' });
   }, []);
-  // one read at a time counts: an answer lands only if the screen is still there AND no newer read began (a late answer never covers a newer one)
-  const readGen = useRef(0);
+  // one read at a time counts, and a read is a flow: a newer read · the end of the screen · a way out STOP the older one — a stopped read asks for nothing more and draws nothing
+  const readFlow = useRef<Flow | null>(null);
+  const stopRead = useCallback(() => { if (readFlow.current) { readFlow.current.stopped = true; endFlow(readFlow.current); } }, []);
   const readNow = useCallback(() => {
-    const mine = ++readGen.current;
-    void readStartable(phoneCall).catch((): StartableRead => ({ kind: 'failed' })).then((r) => { if (mine === readGen.current) land(r); });
-  }, [phoneCall, land]);
-  const dropReads = useCallback(() => { readGen.current++; }, []); // leaving the page: whatever is still out is dropped
+    stopRead(); // a newer read STOPS the older one (a restored page reads again while an older read may still be out)
+    const flow = beginFlow();
+    readFlow.current = flow;
+    void readStartable(phoneCall, () => flow.stopped).catch((): StartableRead => ({ kind: 'failed' })).then((r) => { endFlow(flow); if (!flow.stopped) land(r); });
+  }, [phoneCall, land, stopRead]);
+  const dropReads = stopRead; // leaving the page: whatever is still out is dropped
   useEffect(() => {
     readNow();
     return dropReads;
   }, [readNow, dropReads]);
-  const reload = () => { setRead({ kind: 'reading' }); readNow(); }; // a press (retry · turned on · remote off found): the empty area, then read again
+  // restored from the back-forward cache: a read that was stopped by a way out left this screen «reading» — read again (lib/phone-start.ts has released the way-out window by then)
+  useEffect(() => {
+    const onShow = (e: PageTransitionEvent) => { if (e.persisted) { setRead({ kind: 'reading' }); readNow(); } };
+    window.addEventListener('pageshow', onShow);
+    return () => window.removeEventListener('pageshow', onShow);
+  }, [readNow]);
+  const reload = () => { if (isLeaving()) return; setRead({ kind: 'reading' }); readNow(); }; // a press (retry · turned on · remote off found): the empty area, then read again — not on a page that is on its way out (it would blank the screen for a read that is refused)
 
   // reading: an empty area (the device is read after mount — no flash)
   if (read.kind === 'reading') return <div data-testid="onboarding-phone-reading" aria-busy="true" />;
@@ -212,10 +223,14 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
   const [sheet, setSheet] = useState<'computer' | 'agent' | 'project' | null>(null);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<StartOutcome | null>(null);
+  const [waitedOut, setWaitedOut] = useState(false); // started on the Mac, but the session did not stand within the limit
+  const [standing, setStanding] = useState(false); // started on the Mac, waiting for the server to say the agent runs (the spinner shows only now)
   // a start whose end is not known: the only way on is [결과 확인] (the same command) — a new press would sign again and could start it twice
   const locked = outcome?.kind === 'unknown';
   const frozen = busy || locked; // a start is in flight, or its end is not known: nothing the person picks may change the pick (or clear what [결과 확인] follows)
   const pending = useRef<Pending | null>(null);
+  const inFlight = useRef(false); // a press is out (a second click in the same tick sees the old `busy`: this ref is what stops a second signing)
+  const startedIn = useRef<string | null>(null); // the project the press started in (the conversation opens in it)
   const alive = useAlive();
   const deps = { phoneCall, newKey };
 
@@ -224,21 +239,45 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
     pending.current = o.kind === 'unknown' ? o.pending : null;
     if (o.kind === 'remote_off') onRemoteOff(); // the screen returns to «원격 제어가 꺼져 있어요»
   };
-  const start = async () => {
-    if (busy || !agent || !project) return;
-    setBusy(true); setOutcome(null);
-    const o = await startOnPhone({ setupId: computer.setup_id, agentId: agent.agent_member_id, projectId: project.project_id }, deps).catch((): StartOutcome => ({ kind: 'failed' }));
-    if (!alive.current) return;
+  // ONE stop signal per press (a `Flow`): the bridge call, the post, the command poll, the wait for the session to stand and the move all look at the same `stopped`.
+  // A way out · the end of this screen stop it; what a stopped flow gets back later does nothing (no request · no drawing · no move).
+  const flowRef = useRef<Flow | null>(null);
+  useEffect(() => () => { if (flowRef.current) { flowRef.current.stopped = true; endFlow(flowRef.current); } }, []);
+  // started ≠ stood (story 4714 AC3): «started» is the Mac's word that it spawned the session. The conversation opens when the SERVER says the agent runs on
+  // that computer (the same `running` word the landing reads); until then the button stays «starting». Not within the limit: a line says so, the screen is free again.
+  const settle = async (o: StartOutcome, flow: Flow) => {
+    if (flow.stopped) { if (alive.current) { setBusy(false); setStanding(false); } return; } // stopped: draws nothing, moves nothing, asks for nothing — the screen is only freed
     apply(o);
+    if (o.kind === 'started' && agent) {
+      setStanding(true);
+      const seen = await waitForSession({ setupId: computer.setup_id, agentId: agent.agent_member_id }, { ...deps, alive: () => !flow.stopped });
+      setStanding(false);
+      if (flow.stopped) { if (alive.current) setBusy(false); return; }
+      if (seen === 'stood') { window.location.assign(firstInstructionHref(agent.agent_member_id, startedIn.current)); return; } // leaves the page: the screen stays busy until it does
+      setWaitedOut(true);
+    }
     setBusy(false);
   };
+  const run = async (begin: () => Promise<StartOutcome>) => {
+    inFlight.current = true;
+    const flow = beginFlow();
+    flowRef.current = flow;
+    try {
+      setBusy(true); setWaitedOut(false);
+      const o = await begin().catch((): StartOutcome => ({ kind: 'failed' }));
+      await settle(o, flow);
+    } finally { endFlow(flow); inFlight.current = false; }
+  };
+  const start = async () => {
+    if (busy || inFlight.current || isLeaving() || !agent || !project) return; // a page on its way out (a way-out press) starts nothing new
+    setOutcome(null);
+    startedIn.current = project.project_id;
+    await run(() => startOnPhone({ setupId: computer.setup_id, agentId: agent.agent_member_id, projectId: project.project_id }, { ...deps, flow: flowRef.current ?? undefined }));
+  };
   const check = async () => {
-    if (busy || !pending.current) return;
-    setBusy(true);
-    const o = await checkStart(pending.current, deps).catch((): StartOutcome => ({ kind: 'failed' }));
-    if (!alive.current) return;
-    apply(o);
-    setBusy(false);
+    if (busy || inFlight.current || isLeaving() || !pending.current) return;
+    const p = pending.current;
+    await run(() => checkStart(p, { ...deps, flow: flowRef.current ?? undefined }));
   };
 
   const reason = !agent ? t('start.needAgent') : !project ? t('start.needProject') : null;
@@ -281,10 +320,16 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
       </Card>
       <div className="space-y-1">
         <Button size="lg" className="w-full whitespace-nowrap" disabled={busy || locked || reason !== null} onClick={() => void start()} data-testid="onboarding-phone-start-go">
-          {busy ? t('start.starting') : t('start.action')}
+          {busy ? <>{standing ? <Loader2 className="size-4 animate-spin" aria-hidden="true" data-testid="onboarding-phone-standing" /> : null}{t('start.starting')}</> : t('start.action')}
         </Button>
         {reason ? <p className="text-xs text-muted-foreground" data-testid="onboarding-phone-reason">{reason}</p> : null}
       </div>
+      {outcome?.kind === 'started' && waitedOut ? (
+        <div className="space-y-2" data-testid="onboarding-phone-connecting-box">
+          <p role="status" className="break-keep text-sm text-muted-foreground" data-testid="onboarding-phone-connecting">{t('result.connecting')}</p>
+          {agent ? <div><Button variant="outline" asChild><a href={firstInstructionHref(agent.agent_member_id, startedIn.current)} data-testid="onboarding-phone-open-started-chat">{t('result.openChat')}</a></Button></div> : null}
+        </div>
+      ) : null}
       {outcome && line ? (
         <div className="space-y-2" data-testid="onboarding-phone-result">
           <p role={outcome.kind === 'already_running' || outcome.kind === 'unknown' ? 'status' : 'alert'}

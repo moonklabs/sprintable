@@ -1,7 +1,7 @@
 // story #4714 — a start from the phone app: what the web asks the shell, what it posts, how every end maps to one outcome
 // (contract 02d2cf71 §14 v1.17 · v1.18 · Yuna 4714-copy-1017).
 import { describe, expect, it, vi } from 'vitest';
-import { checkStart, parseStartable, readStartable, startOnPhone, type Pending, type StartDeps } from './phone-start';
+import { beginFlow, checkStart, clearLeaving, endFlow, isLeaving, markLeaving, parseStartable, readStartable, startOnPhone, waitForSession, type Pending, type StartDeps } from './phone-start';
 import type { PhoneAnswer } from './phone-bridge';
 
 let currentFetch: (url: string, init?: RequestInit) => Promise<Response> = async () => { throw new Error('no server'); };
@@ -220,5 +220,230 @@ describe('[4714] readStartable — this phone\'s key found by the number the ser
     await expect(readStartable(async () => answer())).resolves.toEqual({ kind: 'failed' });
     currentFetch = async () => { throw new Error('network'); };
     await expect(readStartable(async () => answer())).resolves.toEqual({ kind: 'failed' });
+  });
+});
+
+describe('[4714] waitForSession — started ≠ stood: the server\'s `running` word on THAT agent on THAT computer', () => {
+  const OTHER_SETUP = '11111111-2222-4333-8444-666666666666';
+  const OTHER_AGENT = '22222222-3333-4444-8555-777777777777';
+  const target = { setupId: SETUP, agentId: AGENT };
+  const agent = (id: string, running: unknown) => ({ agent_member_id: id, name: 'a', can_command: true, projects: [{ project_id: PROJECT, name: 'p' }], ...(running === undefined ? {} : { running }) });
+  const startable = (computers: Array<{ setup_id: string; agents: unknown[] }>) => ({ remote_control: true, computers: computers.map((c) => ({ device_name: 'm', reachable: true, ...c })) });
+  const phoneCall = async () => ({ id: 'k', ok: true, public_key: 'PK', key_number: '482 917' }) as PhoneAnswer;
+  /** each startable read answers the next body (the last one repeats); a clock the fake wait moves */
+  function world(bodies: unknown[]) {
+    let n = 0; let t = 0; const reads: number[] = [];
+    currentFetch = async (url) => {
+      if (url.startsWith('/api/remote-devices')) return json(200, { devices: [{ id: 'p-1', confirm_number: '482 917' }] });
+      reads.push(t);
+      const b = bodies[Math.min(n++, bodies.length - 1)];
+      if (b instanceof Error) throw b;
+      return json(200, b);
+    };
+    return { reads, deps: { phoneCall, wait: async (ms: number) => { t += ms; }, now: () => t } };
+  }
+
+  it('the agent runs on that computer → stood, with one read and no wait', async () => {
+    const w = world([startable([{ setup_id: SETUP, agents: [agent(AGENT, true)] }])]);
+    await expect(waitForSession(target, w.deps)).resolves.toBe('stood');
+    expect(w.reads).toEqual([0]);
+  });
+
+  it('not yet → it asks again every 2 s and answers stood on the read that says it runs', async () => {
+    const w = world([
+      startable([{ setup_id: SETUP, agents: [agent(AGENT, false)] }]),
+      startable([{ setup_id: SETUP, agents: [agent(AGENT, null)] }]),
+      startable([{ setup_id: SETUP, agents: [agent(AGENT, true)] }]),
+    ]);
+    await expect(waitForSession(target, w.deps)).resolves.toBe('stood');
+    expect(w.reads).toEqual([0, 2000, 4000]);
+  });
+
+  it('only THAT agent on THAT computer counts: another agent running, or the same agent id on another computer, is not it', async () => {
+    // the wrong ones come FIRST in each list: a lookup that took the first computer / the first agent would say «stood»
+    const w = world([startable([{ setup_id: OTHER_SETUP, agents: [agent(AGENT, true)] }, { setup_id: SETUP, agents: [agent(OTHER_AGENT, true), agent(AGENT, false)] }])]);
+    await expect(waitForSession(target, { ...w.deps, pollMaxMs: 6000 })).resolves.toBe('waiting');
+  });
+
+  it('never within the limit → waiting, after the last read at the limit (30 s by default) — not before, not forever', async () => {
+    const w = world([startable([{ setup_id: SETUP, agents: [agent(AGENT, false)] }])]);
+    await expect(waitForSession(target, w.deps)).resolves.toBe('waiting');
+    expect(w.reads[0]).toBe(0);
+    expect(w.reads[w.reads.length - 1]).toBe(30_000);
+    expect(w.reads.length).toBe(16);
+  });
+
+  it('the sleep between looks is cut by what is left of the limit: the last look is at the limit (5 s here), not 2 s after it', async () => {
+    const w = world([startable([{ setup_id: SETUP, agents: [agent(AGENT, false)] }])]);
+    await expect(waitForSession(target, { ...w.deps, pollMaxMs: 5000 })).resolves.toBe('waiting');
+    expect(w.reads).toEqual([0, 2000, 4000, 5000]);
+  });
+
+  it('a read that fails (offline · 500 · not a view) is no answer — it asks again, and a later «runs» still lands', async () => {
+    const w = world([new Error('offline'), { remote_control: 'x' }, startable([{ setup_id: SETUP, agents: [agent(AGENT, true)] }])]);
+    await expect(waitForSession(target, w.deps)).resolves.toBe('stood');
+    expect(w.reads).toEqual([0, 2000, 4000]);
+  });
+
+  it('a read that never answers is cut at the limit: waiting after pollMaxMs, not after the bridge\'s own minutes (a late read is dropped)', async () => {
+    const hang = () => new Promise<PhoneAnswer>(() => {});
+    const t0 = Date.now();
+    await expect(waitForSession(target, { phoneCall: hang, pollMaxMs: 60 })).resolves.toBe('waiting');
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
+
+  it('a read the caller gave up (the limit passed while the bridge was still answering) makes no further request: no remote-devices, no startable', async () => {
+    const urls: string[] = [];
+    currentFetch = async (url) => { urls.push(url); return json(200, {}); };
+    let answer: (a: PhoneAnswer) => void = () => undefined;
+    const slow = () => new Promise<PhoneAnswer>((r) => { answer = r; });
+    await expect(waitForSession(target, { phoneCall: slow, pollMaxMs: 40 })).resolves.toBe('waiting'); // the bridge has not answered by the limit
+    answer({ id: 'k', ok: true, public_key: 'PK', key_number: '482 917' } as PhoneAnswer); // … and answers afterwards
+    await new Promise((r) => setTimeout(r, 20));
+    expect(urls).toEqual([]);
+  });
+
+  it('readStartable(phoneCall, stop): stopped after the key answer → no request; stopped after the device list → no startable read', async () => {
+    const urls: string[] = [];
+    currentFetch = async (url) => { urls.push(url); return url.startsWith('/api/remote-devices') ? json(200, { devices: [{ id: 'p-1', confirm_number: '482 917' }] }) : json(200, { remote_control: true, computers: [] }); };
+    const ok = async () => ({ id: 'k', ok: true, public_key: 'PK', key_number: '482 917' }) as PhoneAnswer;
+    await expect(readStartable(ok, () => true)).resolves.toEqual({ kind: 'failed' });
+    expect(urls).toEqual([]);
+    let calls = 0;
+    await expect(readStartable(ok, () => ++calls > 1)).resolves.toEqual({ kind: 'failed' });
+    expect(urls).toEqual(['/api/remote-devices']);
+  });
+
+  it('an answer that comes AFTER the limit is not «within the limit», even if it says runs (a late timer does not buy extra time)', async () => {
+    let t = 0;
+    currentFetch = async (url) => {
+      if (url.startsWith('/api/remote-devices')) return json(200, { devices: [{ id: 'p-1', confirm_number: '482 917' }] });
+      t += 40_000; // the read takes longer than the 30 s (its timer was late)
+      return json(200, startable([{ setup_id: SETUP, agents: [agent(AGENT, true)] }]));
+    };
+    await expect(waitForSession(target, { phoneCall, wait: async (ms) => { t += ms; }, now: () => t })).resolves.toBe('waiting');
+  });
+
+  it('a sleep that ended after the limit (a late timer) is not one more read: waiting, with no read after the limit', async () => {
+    const w = world([startable([{ setup_id: SETUP, agents: [agent(AGENT, false)] }])]);
+    let t = 0;
+    const late = { phoneCall, wait: async () => { t += 90_000; }, now: () => t };
+    await expect(waitForSession(target, late)).resolves.toBe('waiting');
+    expect(w.reads.length).toBe(1); // the first look only — the sleep jumped past the 30 s
+  });
+
+  it('a bridge call that is rejected is no answer either — it asks again', async () => {
+    const w = world([startable([{ setup_id: SETUP, agents: [agent(AGENT, true)] }])]);
+    let n = 0;
+    const flaky = async () => { if (n++ === 0) throw new Error('bridge gone'); return { id: 'k', ok: true, public_key: 'PK', key_number: '482 917' } as PhoneAnswer; };
+    await expect(waitForSession(target, { ...w.deps, phoneCall: flaky })).resolves.toBe('stood');
+    expect(w.reads).toEqual([2000]);
+  });
+
+  it('a `running` that is not the boolean true (a string · 1 · missing) is not «runs»', async () => {
+    for (const running of ['true', 1, undefined]) {
+      const w = world([startable([{ setup_id: SETUP, agents: [agent(AGENT, running)] }])]);
+      await expect(waitForSession(target, { ...w.deps, pollMaxMs: 2000 })).resolves.toBe('waiting');
+    }
+  });
+
+  it('the screen left (alive false) → gone: before the first read, or while it waits — and nothing more is read', async () => {
+    const w = world([startable([{ setup_id: SETUP, agents: [agent(AGENT, false)] }])]);
+    const spy = vi.fn(w.deps.phoneCall);
+    await expect(waitForSession(target, { ...w.deps, phoneCall: spy, alive: () => false })).resolves.toBe('gone');
+    expect(w.reads).toEqual([]);
+    expect(spy).not.toHaveBeenCalled(); // not even the bridge is asked for a screen that has left
+    let reads = 0;
+    const w2 = world([startable([{ setup_id: SETUP, agents: [agent(AGENT, false)] }])]);
+    await expect(waitForSession(target, { ...w2.deps, alive: () => reads++ < 2 })).resolves.toBe('gone');
+  });
+});
+
+describe('[4714] flows — one stop signal per press: what a stopped flow gets back later does nothing', () => {
+  it('stopped after the bridge signed → nothing is posted (outcome `stopped`)', async () => {
+    const calls = server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state: 'done', result_code: null })]);
+    const flow = beginFlow();
+    const d = deps(signed, { flow, phoneCall: vi.fn(async () => { flow.stopped = true; return signed; }) as never });
+    await expect(startOnPhone(input, d)).resolves.toEqual({ kind: 'stopped' });
+    expect(calls).toEqual([]);
+    endFlow(flow);
+  });
+
+  it('stopped while the post is out → `stopped` (the command may exist on the Mac; nobody follows it)', async () => {
+    const flow = beginFlow();
+    currentFetch = async (_url, init) => { if (init?.method === 'POST') { flow.stopped = true; return json(201, { command_id: CMD, state: 'queued' }); } throw new Error('no poll expected'); };
+    await expect(startOnPhone(input, deps(signed, { flow }))).resolves.toEqual({ kind: 'stopped' });
+    endFlow(flow);
+  });
+
+  it('stopped while the command is followed → the poll ends at once: `stopped`, and no further request', async () => {
+    const flow = beginFlow();
+    let polls = 0;
+    currentFetch = async (_url, init) => {
+      if (init?.method === 'POST') return json(201, { command_id: CMD, state: 'queued' });
+      polls += 1;
+      if (polls === 2) flow.stopped = true;
+      return json(200, { state: 'running', result_code: null });
+    };
+    await expect(startOnPhone(input, deps(signed, { flow }))).resolves.toEqual({ kind: 'stopped' });
+    expect(polls).toBe(2);
+    endFlow(flow);
+  });
+
+  it('PO 10-19: stopped AFTER the signature came back (while the post is out) the post still went — once — and nobody follows it', async () => {
+    const flow = beginFlow();
+    const posts: string[] = [];
+    currentFetch = async (_url, init) => { if (init?.method === 'POST') { posts.push('post'); flow.stopped = true; return json(201, { command_id: CMD, state: 'queued' }); } throw new Error('no poll expected'); };
+    await expect(startOnPhone(input, deps(signed, { flow }))).resolves.toEqual({ kind: 'stopped' });
+    expect(posts).toEqual(['post']);
+    endFlow(flow);
+  });
+
+  it('[결과 확인] of a stopped flow asks for nothing (no re-post · no poll)', async () => {
+    const urls: string[] = [];
+    currentFetch = async (url) => { urls.push(url); return json(200, {}); };
+    const flow = beginFlow(); flow.stopped = true;
+    const pending: Pending = { agentId: AGENT, key: 'k', body: {}, commandId: CMD };
+    await expect(checkStart(pending, deps(signed, { flow }))).resolves.toEqual({ kind: 'stopped' });
+    await expect(checkStart({ ...pending, commandId: undefined }, deps(signed, { flow }))).resolves.toEqual({ kind: 'stopped' });
+    expect(urls).toEqual([]);
+    endFlow(flow);
+  });
+
+  it('a sleep that ended after the command\'s two minutes is not one more look (a late timer buys nothing)', async () => {
+    const urls: string[] = [];
+    currentFetch = async (url) => { urls.push(url); return json(200, { state: 'running', result_code: null }); };
+    let t = 0;
+    const pending: Pending = { agentId: AGENT, key: 'k', body: {}, commandId: CMD };
+    const out = await checkStart(pending, { phoneCall: vi.fn(), newKey: () => 'k', wait: async () => { t += 500_000; }, now: () => t } as never);
+    expect(out).toEqual({ kind: 'unknown', pending });
+    expect(urls).toEqual([]);
+  });
+
+  it('markLeaving stops every flow that is out, once: the second call is false (a second tap) until the window is over; clearLeaving ends it', () => {
+    clearLeaving();
+    const a = beginFlow(); const b = beginFlow(); endFlow(b);
+    expect(isLeaving()).toBe(false);
+    expect(markLeaving()).toBe(true);
+    expect(a.stopped).toBe(true);
+    expect(b.stopped).toBe(false); // an ended flow is not touched
+    expect(isLeaving()).toBe(true);
+    expect(markLeaving()).toBe(false);
+    clearLeaving();
+    expect(isLeaving()).toBe(false);
+    endFlow(a);
+  });
+
+  it('the way-out window is a TIME: it is over after LEAVING_MS (a way out that failed can be pressed again)', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    clearLeaving();
+    expect(markLeaving()).toBe(true);
+    vi.advanceTimersByTime(9_999);
+    expect(isLeaving()).toBe(true);
+    vi.advanceTimersByTime(2);
+    expect(isLeaving()).toBe(false);
+    expect(markLeaving()).toBe(true);
+    clearLeaving();
+    vi.useRealTimers();
   });
 });

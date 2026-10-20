@@ -17,6 +17,7 @@ vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetch
 vi.mock('@/lib/phone-app-store', async (orig) => ({ ...(await orig<typeof import('@/lib/phone-app-store')>()), PHONE_APP_PUBLISHED: { android: true, ios: false } }));
 const { PhoneFirstScreen } = await import('./phone-first-screen');
 const { FirstScreen } = await import('@/app/onboarding/first-screen');
+const { isLeaving, markLeaving, clearLeaving, openFlows } = await import('@/lib/phone-start');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -33,19 +34,26 @@ const computer = (over: Record<string, unknown> = {}) => ({
   agents: [{ agent_member_id: AGENT, name: '결제 담당', can_command: true, projects: [{ project_id: PROJECT, name: '결제 개편' }, { project_id: PROJECT2, name: '정산' }] }], ...over,
 });
 
-interface World { mail?: Response; devices?: unknown[]; startable?: unknown; remote?: unknown; post?: Response; poll?: Response; remotePut?: Response; hold?: Promise<void> }
+interface World { stand?: boolean; mail?: Response; devices?: unknown[]; startable?: unknown; remote?: unknown; post?: Response; poll?: Response; remotePut?: Response; hold?: Promise<void> }
 let world: World;
 let calls: Array<{ url: string; method: string; body?: Record<string, unknown> }>;
+let started: boolean; // a start was posted: from then on the server's startable read says the agent RUNS (story 4714: started ≠ stood — the screen waits for this word)
+let assigned: string[]; // the addresses the screen moved to (window.location.assign)
 function server() {
   calls = [];
+  started = false;
   fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
     calls.push({ url, method, body: init?.body ? JSON.parse(init.body as string) : undefined });
     if (url === '/api/desktop/mac-link-mail') return world.mail ?? json({ delivered: true, email: 'me@example.test' });
     if (url === '/api/remote-devices') return json({ devices: world.devices ?? [{ id: 'p-1', confirm_number: '482 917' }] });
-    if (url.startsWith('/api/desktop/startable')) return json(world.startable ?? { remote_control: true, computers: [computer()] });
+    if (url.startsWith('/api/desktop/startable')) {
+      const body = (world.startable ?? { remote_control: true, computers: [computer()] }) as { computers?: Array<{ agents?: Array<Record<string, unknown>> }> };
+      if (!started || world.stand === false || !Array.isArray(body.computers)) return json(body);
+      return json({ ...body, computers: body.computers.map((c) => ({ ...c, agents: (c.agents ?? []).map((a) => ({ ...a, running: true })) })) });
+    }
     if (url.endsWith('/remote-control')) return method === 'PUT' ? (world.remotePut ?? json({ data: { enabled: true, enabled_at: null, can_change: true } })) : json(world.remote ?? { data: { enabled: false, enabled_at: null, can_change: true } });
-    if (url.endsWith('/desktop-start')) { if (world.hold) await world.hold; return world.post ?? json({ command_id: CMD, state: 'queued' }, 201); }
+    if (url.endsWith('/desktop-start')) { if (world.hold) await world.hold; started = true; return world.post ?? json({ command_id: CMD, state: 'queued' }, 201); }
     if (url.includes('/desktop-commands/')) return world.poll ?? json({ state: 'done', result_code: null });
     throw new Error(`unexpected ${method} ${url}`);
   });
@@ -63,10 +71,13 @@ beforeEach(() => {
   signAnswer = { id: 's', ok: true, signed: 'SIGNED', phone_key_id: 'p-1' };
   phoneCall = vi.fn(async (type: string) => (type === 'device.key.info' ? keyAnswer : signAnswer));
   // the command is followed every 1.5 s (contract §11): the wait is faked, so a press runs to its END before the line is read
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] }); // Date too: the wait for the session stands is on the wall clock
   fetchWithAuth.mockReset();
   __resetOrgRemoteControlForTest();
   server();
+  assigned = [];
+  clearLeaving();
+  vi.stubGlobal('location', { ...window.location, assign: (href: string) => { assigned.push(href); } });
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -74,6 +85,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => { root.unmount(); });
   container.remove();
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
@@ -255,6 +267,34 @@ describe('[4714] branch 1 — remote control is off', () => {
     expect(text()).not.toContain('켜졌어요');
   });
 
+  it('a screen MOUNTED inside the way-out window still reads and draws (the window stops what is out and blocks presses — it never blanks a fresh screen)', async () => {
+    markLeaving();
+    await screen();
+    expect(byId('onboarding-phone-start')).not.toBeNull();
+  });
+
+  it('the switch answers AFTER a way out was pressed: the screen is not blanked by a read that is refused (it stays as it was)', async () => {
+    world.startable = { remote_control: false, computers: [computer()] };
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((r) => { release = r; });
+    fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/remote-control') && init?.method === 'PUT') { await held; return json({ data: { enabled: true, enabled_at: null, can_change: true } }); }
+      if (url === '/api/remote-devices') return json({ devices: [{ id: 'p-1', confirm_number: '482 917' }] });
+      if (url.startsWith('/api/desktop/startable')) return json(world.startable);
+      if (url.endsWith('/remote-control')) return json({ data: { enabled: false, enabled_at: null, can_change: true } });
+      if (url === '/api/auth/me') return json({ data: { org_id: 'org-1', org_member_id: 'om-1' } });
+      throw new Error(`unexpected ${url}`);
+    });
+    await screen();
+    await act(async () => { (byId('onboarding-phone-turn-on') as HTMLElement).click(); });
+    await flush();
+    markLeaving();
+    release();
+    await flush(); await settle();
+    expect(byId('onboarding-phone-reading')).toBeNull(); // not the blank «reading» area
+    expect(byId('onboarding-phone-off')).not.toBeNull(); // the card it was
+  });
+
   it('a person who cannot switch it gets the body only — no button', async () => {
     world.startable = { remote_control: false, computers: [computer()] };
     world.remote = { data: { enabled: false, enabled_at: null, can_change: false } };
@@ -313,7 +353,8 @@ describe('[4714] branch 4 — start (AC3)', () => {
     const post = calls.find((c) => c.method === 'POST')!;
     expect(post.url).toBe(`/api/agents/${AGENT}/desktop-start`);
     expect(Object.keys(post.body!).sort()).toEqual(['idempotency_key', 'phone_key_id', 'project_id', 'setup_id', 'signed']);
-    expect(byId('onboarding-phone-result')).toBeNull(); // started: no line, the chat is where it goes on
+    expect(byId('onboarding-phone-result')).toBeNull(); // started: no refusal line
+    expect(assigned).toEqual([`/onboarding/first-instruction?agent=${AGENT}&project=${PROJECT}`]); // the session stood → the conversation with THIS agent (the onboarding's own find-or-create route)
   });
 
   it('several agents: each has its own projects; choosing another agent clears the project', async () => {
@@ -478,6 +519,7 @@ describe('[4714] branch 5 — the result lines', () => {
     await press(byId('onboarding-phone-check'));
     expect(phoneCall.mock.calls.filter((c) => c[0] === 'command.sign').length).toBe(signs);
     expect(byId('onboarding-phone-result')).toBeNull(); // it started
+    expect(assigned).toEqual([`/onboarding/first-instruction?agent=${AGENT}&project=${PROJECT}`]); // [결과 확인] that ends «started» goes on the same way as a press that did
     const posts = calls.filter((c) => c.method === 'POST');
     expect(posts[0]!.body!.idempotency_key).toBe(posts[1]!.body!.idempotency_key);
   });
@@ -497,7 +539,8 @@ describe('[4714] codex round 1 — a start of unknown end is locked; only agents
     expect(phoneCall.mock.calls.filter((c) => c[0] === 'command.sign').length).toBe(signs);
     world.post = json({ command_id: CMD, state: 'queued' }, 201);
     await press(byId('onboarding-phone-check'));
-    expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(false); // it started — the screen is ready again
+    expect((byId('onboarding-phone-check'))).toBeNull(); // it started — the lock is lifted (the screen is on its way to the conversation)
+    expect(assigned.length).toBe(1);
   });
 
   it('while a start is in flight the pickers and [시작] are off; a choice made on a sheet that was already open is ignored once the end is unknown', async () => {
@@ -643,10 +686,393 @@ describe('[4714] the words (Yuna\'s sheet)', () => {
     }
     expect(ko['noMac.mailSent']).not.toMatch(/\{email\}[은는이가을를의에도]/); // a particle straight after an address is not safe
   });
-  it('the refusals reuse the phone lines\' shape: each ends in an instruction, a started or cancelled start has no key', () => {
+  it('the refusals reuse the phone lines\' shape: each ends in an instruction (a started start has only the «waiting to connect» line · a cancelled one none)', () => {
     expect(Object.keys(ko).filter((k) => k.startsWith('result.')).sort()).toEqual([
-      'result.alreadyRunning', 'result.biometricRequired', 'result.check', 'result.failed', 'result.keyInvalidated', 'result.noFolder', 'result.noScreenLock', 'result.notPaired',
+      'result.alreadyRunning', 'result.biometricRequired', 'result.check', 'result.connecting', 'result.failed', 'result.keyInvalidated', 'result.noFolder', 'result.noScreenLock', 'result.notPaired',
       'result.notRegistered', 'result.openChat', 'result.readFailed', 'result.remoteOff', 'result.retry', 'result.signedOut', 'result.unknown', 'result.unreachable',
     ].sort());
+  });
+});
+
+describe('[4714] AC3 — started ≠ stood: the conversation with the started agent opens when the server says it runs', () => {
+  const FIRST = `/onboarding/first-instruction?agent=${AGENT}&project=${PROJECT}`;
+  const waitMore = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); await flush(); };
+
+  it('«started» alone moves nothing: until the server says the agent runs the button stays «starting» and the screen stays; the moment it does, the conversation opens', async () => {
+    world.stand = false;
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    expect(byId('onboarding-phone-standing')).toBeNull(); // idle: no spinner
+    await press(byId('onboarding-phone-start-go')); // the Mac says done; the server does not say «runs» yet
+    expect(assigned).toEqual([]);
+    expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(true);
+    expect(byId('onboarding-phone-start-go')?.textContent).toBe('시작하는 중이에요…');
+    expect(byId('onboarding-phone-standing')).not.toBeNull(); // waiting for the server: one small spinner in the button (Yuna) — the same shape as the landing's
+    expect(byId('onboarding-phone-connecting')).toBeNull(); // within the limit: no line yet
+    expect(byId('onboarding-phone-open-started-chat')).toBeNull(); // and no way-in button yet
+    world.stand = true; // the session stands
+    await waitMore(2100);
+    expect(assigned).toEqual([FIRST]);
+  });
+
+  it('the session does not stand within the limit → «Mac에서 시작됐어요 · 연결을 기다리는 중» + the screen is free again (the way out is on the page · nothing moved); a later press is the usual one', async () => {
+    world.stand = false;
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await press(byId('onboarding-phone-start-go'));
+    await waitMore(31_000);
+    expect(assigned).toEqual([]);
+    expect(byId('onboarding-phone-connecting')?.textContent).toBe('Mac에서 시작됐어요 — 연결을 기다리고 있어요');
+    expect(byId('onboarding-phone-connecting')?.getAttribute('role')).toBe('status');
+    expect(byId('onboarding-phone-connecting')?.className).toContain('break-keep');
+    expect(byId('onboarding-phone-standing')).toBeNull(); // the wait is over: no spinner
+    // no dead end (PO): beside the line, the existing word [대화 열기] goes to the conversation with the started agent
+    expect(byId('onboarding-phone-open-started-chat')?.textContent).toBe('대화 열기');
+    expect(byId('onboarding-phone-open-started-chat')?.getAttribute('href')).toBe(FIRST);
+    expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(false);
+    expect(byId('onboarding-phone-result')).toBeNull(); // not a refusal
+  });
+
+  it('in English the same shape: «Started on the Mac — waiting for it to connect» and [Open chat]', async () => {
+    world.stand = false;
+    await screen({ locale: 'en' });
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await press(byId('onboarding-phone-start-go'));
+    await waitMore(31_000);
+    expect(byId('onboarding-phone-connecting')?.textContent).toBe('Started on the Mac — waiting for it to connect');
+    expect(byId('onboarding-phone-open-started-chat')?.getAttribute('href')).toBe(FIRST);
+  });
+
+  it('a way out pressed while it waits: nothing moves the page afterwards, the screen draws no «waiting» line, and a press of [시작] on the page that is on its way out starts nothing', async () => {
+    world.stand = false;
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await press(byId('onboarding-phone-start-go')); // waiting for the session
+    const reads = () => calls.filter((c) => c.url.startsWith('/api/desktop/startable')).length;
+    markLeaving(); // the person pressed [오늘로 가기] · [대시보드로] (their own handler goes on — it may still wait for an auth refresh)
+    const before = reads();
+    world.stand = true;
+    await waitMore(2100);
+    expect(assigned).toEqual([]);
+    expect(reads()).toBe(before); // the wait stopped looking
+    expect(byId('onboarding-phone-connecting')).toBeNull(); // and does not claim «waiting to connect» for a person who is leaving
+    const signs = phoneCall.mock.calls.filter((c) => c[0] === 'command.sign').length;
+    await press(byId('onboarding-phone-start-go')); // the page is on its way out: a new flow must not begin under the pending move
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'command.sign').length).toBe(signs);
+    expect(assigned).toEqual([]);
+  });
+
+  it('the screen\'s own first read, still out when the way out is pressed, asks for nothing more and draws nothing', async () => {
+    let answer: (a: Record<string, unknown>) => void = () => undefined;
+    phoneCall.mockImplementation(() => new Promise((r) => { answer = r as (a: Record<string, unknown>) => void; }));
+    await screen();
+    markLeaving(); // the onboarding's finish waits for an auth refresh before it unmounts
+    answer(keyAnswer);
+    await flush();
+    expect(calls.map((c) => c.url)).toEqual([]); // no device list, no startable read
+    expect(byId('onboarding-phone-start')).toBeNull(); // and nothing was drawn from a read that was given up
+    expect(text()).not.toContain('불러오지 못했어요'); // not even the «read failed» card of a read that was only given up
+  });
+
+  it('a page on its way out does not follow a [결과 확인] either (no poll, no new post)', async () => {
+    world.post = json({ error: { code: 'INTERNAL_ERROR' } }, 500); // the press ends «unknown»: [결과 확인] is offered
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await press(byId('onboarding-phone-start-go'));
+    expect(byId('onboarding-phone-check')).not.toBeNull();
+    markLeaving();
+    const before = calls.length;
+    await press(byId('onboarding-phone-check'));
+    expect(calls.length).toBe(before);
+    expect(assigned).toEqual([]);
+  });
+
+  // ---- the one-stop-signal rule (PO 10-19: rounds 3 · 4 · 5 were the same family): what a STOPPED flow gets back later does nothing
+  it('a way out while the command is being followed: the poll stops (no more /desktop-commands requests), nothing moves', async () => {
+    world.poll = json({ state: 'running', result_code: null }); // no end: the press keeps following the command
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await act(async () => { (byId('onboarding-phone-start-go') as HTMLElement).click(); });
+    await flush();
+    await waitMore(3200);
+    const polls = () => calls.filter((c) => c.url.includes('/desktop-commands/')).length;
+    expect(polls()).toBeGreaterThan(0);
+    markLeaving();
+    const before = polls();
+    await waitMore(10_000);
+    expect(polls()).toBe(before);
+    expect(assigned).toEqual([]);
+  });
+
+  it('a way out while the start is still out: a late `remote_off` neither switches the screen nor starts another read', async () => {
+    let release: () => void = () => undefined;
+    world.hold = new Promise<void>((r) => { release = r; });
+    world.post = json({ error: { code: 'remote_control_off' } }, 409);
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await act(async () => { (byId('onboarding-phone-start-go') as HTMLElement).click(); });
+    await flush();
+    markLeaving();
+    const keyReads = () => phoneCall.mock.calls.filter((c) => c[0] === 'device.key.info').length;
+    const before = keyReads();
+    release();
+    await flush(); await settle();
+    expect(byId('onboarding-phone-off')).toBeNull(); // not «remote control is off»
+    expect(keyReads()).toBe(before); // and no new discovery read was scheduled
+    expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(false); // the screen is only freed
+  });
+
+  it('a stopped flow\'s late refusal draws no result line (a way out, then the post answers «computer unreachable»)', async () => {
+    let release: () => void = () => undefined;
+    world.hold = new Promise<void>((r) => { release = r; });
+    world.post = json({ error: { code: 'device_unreachable' } }, 409);
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await act(async () => { (byId('onboarding-phone-start-go') as HTMLElement).click(); });
+    await flush();
+    markLeaving();
+    release();
+    await flush(); await settle();
+    expect(byId('onboarding-phone-result')).toBeNull();
+    expect(text()).not.toContain('닿지 않아요');
+  });
+
+  it('a way out while the OS prompt is up: nothing is posted for the stopped flow', async () => {
+    let signed: (a: Record<string, unknown>) => void = () => undefined;
+    phoneCall.mockImplementation((type: string) => (type === 'device.key.info' ? Promise.resolve(keyAnswer) : new Promise((r) => { signed = r as (a: Record<string, unknown>) => void; })));
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await act(async () => { (byId('onboarding-phone-start-go') as HTMLElement).click(); });
+    await flush();
+    markLeaving();
+    signed(signAnswer);
+    await flush(); await settle();
+    expect(calls.filter((c) => c.method === 'POST')).toEqual([]);
+  });
+
+  it('the page restored from the back-forward cache is not left «starting» (busy · spinner) and its way-out window is over', async () => {
+    world.stand = false;
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await press(byId('onboarding-phone-start-go')); // waiting for the session: busy with the spinner
+    expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(true);
+    markLeaving(); // …and the page moved on (a way out) — then the browser's back restores this very page
+    await act(async () => { window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true })); });
+    await flush();
+    expect(isLeaving()).toBe(false);
+    // the screen read itself again (a read a way out stopped would have left it «reading» for good): it is the idle start card, not «starting»
+    expect(byId('onboarding-phone-start-go')?.textContent).toBe('시작');
+    expect(byId('onboarding-phone-standing')).toBeNull();
+    const reads = calls.filter((c) => c.url.startsWith('/api/desktop/startable')).length;
+    await act(async () => { window.dispatchEvent(new Event('pageshow')); }); // a normal show (not restored) changes nothing
+    await flush();
+    expect(calls.filter((c) => c.url.startsWith('/api/desktop/startable')).length).toBe(reads);
+  });
+
+  it('the way-out window is released by the module itself on a restored page (Mirko · 5166): markLeaving → pageshow(persisted) → not leaving, and a screen mounted after it draws and works', async () => {
+    markLeaving();
+    expect(isLeaving()).toBe(true);
+    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: false })); // a normal show keeps it
+    expect(isLeaving()).toBe(true);
+    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+    expect(isLeaving()).toBe(false);
+    await screen(); // mounted AFTER the restore (no screen was there to release it)
+    expect(byId('onboarding-phone-start')).not.toBeNull();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await press(byId('onboarding-phone-start-go'));
+    expect(assigned.length).toBe(1);
+  });
+
+  it('PO 10-19: a start signed at the OS prompt is posted even if a way out is pressed right after; only the waiting · poll · move stop (post 1 · poll 0 · move 0)', async () => {
+    let release: () => void = () => undefined;
+    world.hold = new Promise<void>((r) => { release = r; });
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await act(async () => { (byId('onboarding-phone-start-go') as HTMLElement).click(); });
+    await flush(); // the signature came back, the post is out (held)
+    expect(calls.filter((c) => c.method === 'POST').length).toBe(1);
+    markLeaving();
+    release();
+    await flush(); await settle();
+    expect(calls.filter((c) => c.method === 'POST').length).toBe(1);
+    expect(calls.filter((c) => c.url.includes('/desktop-commands/')).length).toBe(0);
+    expect(assigned).toEqual([]);
+  });
+
+  it('a late «retry» / «turned on» of a page on its way out reads nothing new', async () => {
+    keyAnswer = { id: 'k', ok: false, code: 'failed' }; // the first read fails: the retry card
+    await screen();
+    expect(byId('onboarding-phone-retry') ?? container.querySelector('button')).not.toBeNull();
+    markLeaving();
+    const keyReads = () => phoneCall.mock.calls.filter((c) => c[0] === 'device.key.info').length;
+    const before = keyReads();
+    await press(container.querySelector('button')); // the retry press lands after the way out
+    expect(keyReads()).toBe(before);
+  });
+
+  it('[결과 확인] is a flow too: a way out while it follows the command stops the poll', async () => {
+    world.post = json({ error: { code: 'INTERNAL_ERROR' } }, 500); // the press ends «unknown»
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await press(byId('onboarding-phone-start-go'));
+    world.post = json({ command_id: CMD, state: 'queued' }, 201);
+    world.poll = json({ state: 'running', result_code: null }); // no end
+    await act(async () => { (byId('onboarding-phone-check') as HTMLElement).click(); });
+    await flush();
+    await waitMore(3200);
+    const polls = () => calls.filter((c) => c.url.includes('/desktop-commands/')).length;
+    expect(polls()).toBeGreaterThan(0);
+    markLeaving();
+    const before = polls();
+    await waitMore(10_000);
+    expect(polls()).toBe(before);
+    expect(assigned).toEqual([]);
+  });
+
+  it('a screen that is gone leaves no flow behind (the module\'s set does not grow with every mount) — a press still out · a read still out', async () => {
+    const base = openFlows();
+    let answer: (a: Record<string, unknown>) => void = () => undefined;
+    phoneCall.mockImplementation(() => new Promise((r) => { answer = r as (a: Record<string, unknown>) => void; })); // the first read never comes back
+    await screen();
+    expect(openFlows()).toBe(base + 1); // the screen's own read
+    await act(async () => { root.unmount(); });
+    expect(openFlows()).toBe(base);
+    answer(keyAnswer);
+    await flush();
+    root = createRoot(container);
+    // a press that is out when the screen goes
+    phoneCall.mockReset(); phoneCall.mockImplementation(async (type: string) => (type === 'device.key.info' ? keyAnswer : signAnswer));
+    let release: () => void = () => undefined;
+    world.hold = new Promise<void>((r) => { release = r; });
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await act(async () => { (byId('onboarding-phone-start-go') as HTMLElement).click(); });
+    await flush();
+    expect(openFlows()).toBe(base + 1); // the press (the screen's own read is over)
+    await act(async () => { root.unmount(); });
+    expect(openFlows()).toBe(base);
+    release();
+    await flush();
+    root = createRoot(container);
+  });
+
+  it('two reads overlap (a restored page reads again while the first is still out): the first one answering late draws nothing over the second', async () => {
+    const answers: Array<(a: Record<string, unknown>) => void> = [];
+    phoneCall.mockImplementation((type: string) => (type === 'device.key.info' ? new Promise((r) => { answers.push(r as (a: Record<string, unknown>) => void); }) : Promise.resolve(signAnswer)));
+    await screen(); // read 1 is out (the bridge has not answered)
+    await act(async () => { window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true })); }); // read 2 begins
+    expect(answers.length).toBe(2);
+    answers[1](keyAnswer); // the second answers: the usual start card
+    await flush();
+    expect(byId('onboarding-phone-start')).not.toBeNull();
+    answers[0]({ id: 'k', ok: true, public_key: 'PK', key_number: '000 000' }); // the first answers late with a key the server does not list → «no Mac»
+    await flush();
+    expect(byId('onboarding-phone-no-mac')).toBeNull(); // and did not draw over the second
+    expect(byId('onboarding-phone-start')).not.toBeNull();
+  });
+
+  it('the way out is one navigation however often it is tapped (the onboarding\'s finish runs once)', async () => {
+    const onFinish = vi.fn();
+    await renderIn(<FirstScreen orgId="org-1" chatsHref="/chats" orgName={null} onConnectElsewhere={() => undefined} onFinish={onFinish} />);
+    await press(byId('onboarding-first-finish'));
+    await press(byId('onboarding-first-finish'));
+    expect(onFinish).toHaveBeenCalledTimes(1);
+  });
+
+  it('the onboarding\'s [오늘로 가기] marks the page as being left, then runs its own finish', async () => {
+    const onFinish = vi.fn();
+    await renderIn(<FirstScreen orgId="org-1" chatsHref="/chats" orgName={null} onConnectElsewhere={() => undefined} onFinish={onFinish} />);
+    expect(isLeaving()).toBe(false);
+    await press(byId('onboarding-first-finish'));
+    expect(isLeaving()).toBe(true);
+    expect(onFinish).toHaveBeenCalledTimes(1);
+  });
+
+  it('the discovery read of a screen that is gone asks for nothing more: the bridge answers after the screen left → no device list · no startable read', async () => {
+    let answer: (a: Record<string, unknown>) => void = () => undefined;
+    phoneCall.mockImplementation(() => new Promise((r) => { answer = r as (a: Record<string, unknown>) => void; }));
+    await screen();
+    await act(async () => { root.unmount(); });
+    answer(keyAnswer);
+    await flush();
+    expect(calls.map((c) => c.url)).toEqual([]);
+    root = createRoot(container); // afterEach unmounts it
+  });
+
+  it('the screen left while it waits → nothing moves afterwards (a late «runs» goes nowhere)', async () => {
+    world.stand = false;
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await press(byId('onboarding-phone-start-go'));
+    await act(async () => { root.unmount(); });
+    const reads = () => calls.filter((c) => c.url.startsWith('/api/desktop/startable')).length;
+    const before = reads();
+    world.stand = true;
+    await waitMore(5000);
+    expect(assigned).toEqual([]);
+    expect(reads()).toBe(before); // and it asks no more (a left screen does not keep reading for half a minute)
+    root = createRoot(container); // afterEach unmounts it
+  });
+
+  it('the conversation opens in the project the start was made in — a project other than the first one (the route would use the session\'s default otherwise)', async () => {
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '정산'); // the second offered project
+    await press(byId('onboarding-phone-start-go'));
+    expect(assigned).toEqual([`/onboarding/first-instruction?agent=${AGENT}&project=${PROJECT2}`]);
+  });
+
+  it('two presses in the same tick sign and start ONCE (the second sees the old `busy` — a ref stops it)', async () => {
+    world.stand = false;
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    const go = byId('onboarding-phone-start-go') as HTMLButtonElement;
+    await act(async () => { go.click(); go.click(); });
+    await flush(); await settle();
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'command.sign').length).toBe(1);
+    expect(calls.filter((c) => c.method === 'POST').length).toBe(1);
+  });
+
+  it('the spinner is for the wait for the session only: not while the start is out (signing · posting), and not left over for a later press', async () => {
+    world.stand = false;
+    let release: () => void = () => undefined;
+    world.hold = new Promise<void>((r) => { release = r; });
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await act(async () => { (byId('onboarding-phone-start-go') as HTMLElement).click(); });
+    await flush();
+    expect(byId('onboarding-phone-start-go')?.textContent).toBe('시작하는 중이에요…'); // busy …
+    expect(byId('onboarding-phone-standing')).toBeNull(); // … but nothing is being waited for yet: no spinner
+    release();
+    await flush(); await settle();
+    expect(byId('onboarding-phone-standing')).not.toBeNull(); // the Mac said done: now the wait
+    await waitMore(31_000);
+    expect(byId('onboarding-phone-connecting')).not.toBeNull();
+    // a later press: while ITS start is out there is no spinner again (the wait of the first press is over)
+    world.hold = new Promise<void>((r) => { release = r; });
+    await act(async () => { (byId('onboarding-phone-start-go') as HTMLElement).click(); });
+    await flush();
+    expect(byId('onboarding-phone-standing')).toBeNull();
+    release();
+    await flush();
+  });
+
+  it('several agents: the conversation is the one with the agent that was picked and started — not the first', async () => {
+    const AGENT_B = '22222222-3333-4444-8555-777777777777';
+    world.startable = { remote_control: true, computers: [computer({ agents: [
+      { agent_member_id: AGENT, name: '결제 담당', can_command: true, projects: [{ project_id: PROJECT, name: '결제 개편' }] },
+      { agent_member_id: AGENT_B, name: '정산 담당', can_command: true, projects: [{ project_id: PROJECT2, name: '정산' }] },
+    ] })] };
+    await screen();
+    await pickFromSheet('onboarding-phone-agent', '정산 담당');
+    await pickFromSheet('onboarding-phone-project', '정산');
+    await press(byId('onboarding-phone-start-go'));
+    expect(assigned).toEqual([`/onboarding/first-instruction?agent=${AGENT_B}&project=${PROJECT2}`]);
+  });
+
+  it('inside the onboarding\'s first screen (the phone app) the same start goes the same way — the one behaviour for both places', async () => {
+    await renderIn(<FirstScreen orgId="org-1" chatsHref="/chats" orgName={null} onConnectElsewhere={() => undefined} onFinish={() => undefined} />);
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await press(byId('onboarding-phone-start-go'));
+    expect(assigned).toEqual([FIRST]);
   });
 });

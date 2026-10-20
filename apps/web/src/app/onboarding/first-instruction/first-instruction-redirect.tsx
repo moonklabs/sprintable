@@ -134,11 +134,13 @@ interface FirstInstructionRedirectProps {
   agentId: string | null;
   compose: string;
   projectId: string | null;
+  /** story 4714: the project was NAMED by the caller (the phone's start screen) — the checklist conversation is taken only if it is in that project */
+  projectPinned?: boolean;
   flags?: NavV3Flags;
 }
 
 export function FirstInstructionRedirect({
-  agentId, compose, projectId, flags = DEFAULT_NAV_V3_FLAGS,
+  agentId, compose, projectId, projectPinned = false, flags = DEFAULT_NAV_V3_FLAGS,
 }: FirstInstructionRedirectProps) {
   const t = useTranslations('onboarding');
   const router = useRouter();
@@ -188,7 +190,8 @@ export function FirstInstructionRedirect({
         let conversationProjectId: string = projectId;
         const checklist = await fetchChecklistConversation();
         if (cancelled) return;
-        if (checklist) {
+        // a project named by the caller is where the conversation opens: a checklist conversation of ANOTHER project (or of one the server did not say) does not win over it
+        if (checklist && (!projectPinned || checklist.projectId === projectId)) {
           const parts = await fetchConversationParticipants(checklist.id);
           if (cancelled) return;
           if (parts && participantsIncludeAgent(parts, agentId)) {
@@ -238,7 +241,7 @@ export function FirstInstructionRedirect({
     return () => {
       cancelled = true;
     };
-  }, [agentId, projectId, compose, router, flags]);
+  }, [agentId, projectId, projectPinned, compose, router, flags]);
 
   // 안내 화면의 「목록으로」 폴백 — 목적지 모듈 한 곳(AC3, 파일 안 경로 리터럴 0).
   const chatsListHref = withProjectParam(resolveNavV3Destinations(flags).chats.path, projectId);

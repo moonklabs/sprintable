@@ -18,6 +18,7 @@ const { decideLanding, landedThisLaunch, markLanded } = await import('@/lib/phon
 const { landingHome } = await import('@/lib/phone-landing-address');
 const { PhoneLanding, BRIDGE_WAIT_MS, LANDING_MAX_MS, SPINNER_AFTER_MS } = await import('./phone-landing');
 const { PhoneStartPage } = await import('./phone-start-page');
+const { isLeaving, clearLeaving } = await import('@/lib/phone-start');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -343,6 +344,7 @@ describe('[4714] /phone-start — the start screen at its own address, with a wa
   let replace: ReturnType<typeof vi.fn>;
   let assign: ReturnType<typeof vi.fn>;
   beforeEach(() => {
+    clearLeaving(); // the way-out window is a time: a test that pressed a way out must not leave it open for the next
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     replace = vi.fn();
     assign = vi.fn();
@@ -398,6 +400,18 @@ describe('[4714] /phone-start — the start screen at its own address, with a wa
     expect(byId('phone-start-finish')?.textContent).toBe('대시보드로');
     await act(async () => { byId('phone-start-finish')?.click(); });
     expect(assign).toHaveBeenCalledWith('/chats');
+  });
+
+  it('pressing the way out marks the page as being left — a start still waited for must not move it a second time (the onboarding\'s finish waits for an auth refresh)', async () => {
+    clearLeaving();
+    await page(true, false);
+    expect(isLeaving()).toBe(false);
+    await act(async () => { byId('phone-start-finish')?.click(); });
+    expect(isLeaving()).toBe(true);
+    expect(assign).toHaveBeenCalledTimes(1);
+    await act(async () => { byId('phone-start-finish')?.click(); }); // a second tap is not a second navigation
+    expect(assign).toHaveBeenCalledTimes(1);
+    clearLeaving();
   });
 
   it('the way out is there on EVERY branch of the screen (no Mac · no agent · remote control off), not only on the start card', async () => {
