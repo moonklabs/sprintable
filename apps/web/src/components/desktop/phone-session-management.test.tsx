@@ -599,7 +599,7 @@ describe('[4733 S4b] the card after (mode out) and the start (mode in)', () => {
   it('mode in: the steps, then the summary', async () => {
     world.view = { mode: 'in', opened_from: 'phone', in: { at: '2026-10-20T01:00:00Z', starting: { k: 1, n: 3 }, handing: null, came: null, failed: [], unread: [] }, outs: [] };
     await screen();
-    expect(byId('phone-sessions-in')?.textContent).toContain('세션을 시작하는 중이에요… 1/3');
+    expect(byId('phone-sessions-in')?.textContent).toContain('세션을 시작하는 중이에요 (1/3)');
     expect(byId('phone-sessions-start-all')).toBeNull();
   });
 });
@@ -629,6 +629,24 @@ describe('[4733 S4b] «started elsewhere» (Yuna §5) — only where it is true'
     await flush();
     expect(byId('phone-sessions-panel')).not.toBeNull();
     expect(byId('phone-sessions-elsewhere')).toBeNull();
+  });
+});
+
+describe('[4733 S4b] touch targets (Yuna: 44 px)', () => {
+  it('every `size="sm"` button of this screen carries `min-h-11` (the list-step «다시 시도» was missed once) — read off the source, so a new small button without it turns this red', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const src = fs.readFileSync(path.join(__dirname, 'phone-session-management.tsx'), 'utf8');
+    const smalls = src.split('\n').filter((l) => l.includes('size="sm"'));
+    expect(smalls.length).toBeGreaterThanOrEqual(6);
+    for (const l of smalls) expect(l, l.trim().slice(0, 80)).toContain('min-h-11');
+  });
+
+  it('the list-step read failure draws its [다시 시도] at 44 px', async () => {
+    phoneCall.mockImplementation(async () => ({ id: 'k', ok: false, code: 'failed' }));
+    await screen();
+    const retry = byId('phone-sessions-read-failed')?.querySelector('button');
+    expect(retry?.className).toContain('min-h-11');
   });
 });
 

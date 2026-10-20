@@ -7442,7 +7442,7 @@
       },
       "endedRow": "Session ended · {time} — start it to carry on from the handoff",
       "in": {
-        "starting": "Starting sessions… {k}/{n}",
+        "starting": "Starting the sessions ({k}/{n})",
         "handing": "Sessions started — handed over {k}/{m}",
         "startedCame": "Sessions started — {n, plural, one {# item} other {# items}} came in since they ended ({time})",
         "startedNone": "Sessions started — nothing came in meanwhile",
