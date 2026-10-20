@@ -738,3 +738,55 @@ async def test_23_agents_clocked_out_one_by_one_are_kept_in_every_mode_even_when
         await _put(c, device, _report(6, "none", outs=[{"agent_member_id": agent, "at": "2026-10-20T00:10:00Z"}]))
         await _sql(f"UPDATE members SET deleted_at = now() WHERE id = '{agent}'")
         assert (await _read(c, sid, phone)).json()["view"]["outs"] == []
+
+
+# ── codex read of the second head ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+async def test_24_a_press_for_one_agent_takes_that_agents_line_only(world):
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4733x")
+        sid = device["setup_id"]
+        other = device["agents"][1]["member_id"]
+        await _put(c, device, _panel(1, agent, rows=[_row(agent, first_line=LINE), _row(other, first_line="다른 에이전트의 초안")]))
+        made = (await _post(c, sid, _press(phone, "out_submit", agent_member_id=agent))).json()["command_id"]
+        assert (await _result(c, device, made, "done", "ok")).status_code == 200
+        lines = {r["agent_member_id"]: r["first_line"] for r in (await _views(sid))[0][1]["rows"]}
+        assert lines == {agent: None, other: "다른 에이전트의 초안"}
+        # the whole computer's submit takes every line
+        made = (await _post(c, sid, _press(phone, "out_cancel", key="whole"))).json()["command_id"]
+        assert (await _result(c, device, made, "done", "ok")).status_code == 200
+        assert {r["first_line"] for r in (await _views(sid))[0][1]["rows"]} == {None}
+
+
+async def test_25_an_account_reclaim_waits_for_the_report_in_flight_and_then_leaves_no_view(world):
+    import asyncio
+
+    from app.core.database import async_session_factory
+    from app.models.desktop_setup import DesktopSetup
+    from app.models.user import User
+    from app.routers.auth import _reclaim_unproved_account
+    from app.services import desktop_clock
+
+    async with _client() as c:
+        device, agent, _phone, _der = await _setup(c, "d4424 mac 4733y")
+    sid = uuid.UUID(device["setup_id"])
+    await _sql(f"UPDATE users SET email_verified = false WHERE id = '{PLAIN}'", f"UPDATE desktop_setups SET confirmed_by = '{PLAIN}' WHERE id = '{sid}'")
+    report = desktop_clock.ClockViewReport.model_validate(_panel(1, agent))
+
+    async def reclaim():
+        async with async_session_factory() as s:
+            user = await s.get(User, PLAIN)
+            await _reclaim_unproved_account(s, user, why="test 4733 race")
+            await s.commit()
+
+    async with async_session_factory() as inflight:
+        setup = await inflight.get(DesktopSetup, sid)
+        await desktop_clock.apply_clock_view(inflight, setup, report)  # holds the computer's row lock, not committed
+        task = asyncio.create_task(reclaim())
+        await asyncio.sleep(1.0)
+        assert not task.done(), "the reclaim waits for the report in flight (the computer's row is locked by it)"
+        await inflight.commit()
+    await asyncio.wait_for(task, 20)
+    assert await _views(str(sid)) == []  # the report's view was written first and taken off after
+    assert (await _sql(fetch=f"SELECT revoked_reason FROM desktop_setups WHERE id = '{sid}'"))[0][0] == "account_reclaimed"

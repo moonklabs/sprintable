@@ -477,10 +477,13 @@ async def _reclaim_unproved_account(
     phones_cut = (await session.execute(update(RemoteDevice).where(RemoteDevice.member_id.in_(human_members), RemoteDevice.revoked_at.is_(None)).values(revoked_at=now))).rowcount or 0
     setups = select(DesktopSetup.id).where(DesktopSetup.confirmed_by == user.id, DesktopSetup.revoked_at.is_(None))
     await session.execute(update(DesktopDeviceToken).where(DesktopDeviceToken.setup_id.in_(setups), DesktopDeviceToken.revoked_at.is_(None)).values(revoked_at=now))
-    from app.models.desktop_relay import DesktopClockView
-
-    await session.execute(delete(DesktopClockView).where(DesktopClockView.setup_id.in_(setups)))  # story #4733 — the cut computers keep no clock view
+    cut_ids = list((await session.execute(setups)).scalars().all())
     computers_cut = (await session.execute(update(DesktopSetup).where(DesktopSetup.confirmed_by == user.id, DesktopSetup.revoked_at.is_(None)).values(revoked_at=now, revoked_reason="account_reclaimed"))).rowcount or 0
+    # story #4733 — the cut computers keep no clock view. AFTER the update: it row-locks the computers (so a report in flight finishes first) and a report that
+    # starts later finds them revoked; deleted before, the in-flight report's commit would put a view back behind the delete
+    from app.services import desktop_clock
+
+    await desktop_clock.forget(session, cut_ids)
     await session.execute(update(OAuthHandoffCode).where(OAuthHandoffCode.user_id == user.id, OAuthHandoffCode.consumed_at.is_(None)).values(consumed_at=now))
     # the cut-off: the last microsecond before the NEXT whole second (tokens carry whole seconds)
     # written LAST (after every revocation above): a slow reclaim that crosses a second must not leave the cut-off earlier than the end of its own work

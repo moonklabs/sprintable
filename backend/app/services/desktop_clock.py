@@ -157,7 +157,7 @@ def check_done_code(result_code: str | None) -> None:
 async def on_clock_result(db: AsyncSession, cmd: DesktopCommand) -> None:
     """A clock-out submitted or cancelled (done): the draft's first lines leave the server now — not at the computer's next report."""
     if cmd.state == "done" and (cmd.payload or {}).get("action") in ("out_submit", "out_cancel"):
-        await _drop_first_lines(db, cmd.setup_id)
+        await _drop_first_lines(db, cmd.setup_id, (cmd.payload or {}).get("agent_member_id"))
 
 
 # a clock-out submitted or cancelled raises the computer's report-number floor by this much: a report the computer had already sent (still on its way, with a number
@@ -166,12 +166,13 @@ async def on_clock_result(db: AsyncSession, cmd: DesktopCommand) -> None:
 IN_FLIGHT_FLOOR = 1000
 
 
-async def _drop_first_lines(db: AsyncSession, setup_id: uuid.UUID) -> None:
+async def _drop_first_lines(db: AsyncSession, setup_id: uuid.UUID, agent_id: str | None = None) -> None:
     await db.execute(select(DesktopSetup.id).where(DesktopSetup.id == setup_id).with_for_update())  # after any report in flight on this computer
     row = (await db.execute(select(DesktopClockView).where(DesktopClockView.setup_id == setup_id).with_for_update())).scalar_one_or_none()
     if row is not None:
         view = dict(row.view or {})
-        view["rows"] = [{**r, "first_line": None} for r in view.get("rows") or []]
+        # a press for ONE agent takes that agent's line only (the panel of the whole computer may hold other agents' drafts)
+        view["rows"] = [{**r, "first_line": None} if agent_id is None or r.get("agent_member_id") == agent_id else r for r in view.get("rows") or []]
         row.view = view
     await db.execute(
         update(DesktopSetup).where(DesktopSetup.id == setup_id, DesktopSetup.clock_view_seq.is_not(None))
