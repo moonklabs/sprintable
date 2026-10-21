@@ -21,7 +21,7 @@ import { useFlatHref } from '@/hooks/use-flat-href';
 import { sendMacLinkMail, type MacLinkMailOutcome } from '@/lib/phone-mac-link-mail';
 import { Loader2 } from 'lucide-react';
 import { firstInstructionHref } from '@/lib/onboarding/first-instruction';
-import { beginFlow, checkStart, endFlow, isLeaving, readStartable, startOnPhone, waitForSession, type Flow, type Pending, type StartOutcome, type StartableAgent, type StartableComputer, type StartableRead, type StartableView } from '@/lib/phone-start';
+import { beginFlow, checkStart, endFlow, groupByComputer, isLeaving, readStartable, startOnPhone, waitForSession, type Flow, type Pending, type StartOutcome, type StartableAgent, type StartableComputer, type StartableRead, type StartableView } from '@/lib/phone-start';
 
 type Read = { kind: 'reading' } | { kind: 'failed' } | { kind: 'no_phone' } | { kind: 'view'; view: StartableView };
 
@@ -86,7 +86,7 @@ export function PhoneFirstScreen({ orgId, chatsHref, macDownloadEnabled = false 
   if (read.kind === 'view' && !read.view.remote_control) return <RemoteOff orgId={orgId} onTurnedOn={reload} />;
   if (read.kind === 'no_phone' || read.view.computers.length === 0) return <NoMac pairHref={flat('/desktop/pair')} mailEnabled={macDownloadEnabled} />;
 
-  return <Computers computers={read.view.computers} chatsHref={chatsHref} onRemoteOff={reload} />;
+  return <Computers computers={groupByComputer(read.view.computers)} chatsHref={chatsHref} onRemoteOff={reload} />; // story 4734: one computer, its setups' agents together
 }
 
 // only an agent the person may command can be started from here (`can_command`) — the others are not offered
@@ -250,7 +250,7 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
     apply(o);
     if (o.kind === 'started' && agent) {
       setStanding(true);
-      const seen = await waitForSession({ setupId: computer.setup_id, agentId: agent.agent_member_id }, { ...deps, alive: () => !flow.stopped });
+      const seen = await waitForSession({ setupId: agent.setup_id ?? computer.setup_id, agentId: agent.agent_member_id }, { ...deps, alive: () => !flow.stopped });
       setStanding(false);
       if (flow.stopped) { if (alive.current) setBusy(false); return; }
       if (seen === 'stood') { window.location.assign(firstInstructionHref(agent.agent_member_id, startedIn.current)); return; } // leaves the page: the screen stays busy until it does
@@ -272,7 +272,7 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
     if (busy || inFlight.current || isLeaving() || !agent || !project) return; // a page on its way out (a way-out press) starts nothing new
     setOutcome(null);
     startedIn.current = project.project_id;
-    await run(() => startOnPhone({ setupId: computer.setup_id, agentId: agent.agent_member_id, projectId: project.project_id }, { ...deps, flow: flowRef.current ?? undefined }));
+    await run(() => startOnPhone({ setupId: agent.setup_id ?? computer.setup_id, agentId: agent.agent_member_id, projectId: project.project_id }, { ...deps, flow: flowRef.current ?? undefined }));
   };
   const check = async () => {
     if (busy || inFlight.current || isLeaving() || !pending.current) return;

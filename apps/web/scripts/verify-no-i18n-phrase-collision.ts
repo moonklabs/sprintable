@@ -428,6 +428,15 @@ export const EXEMPT_PAIRS = new Set<string>([
   // (#2352/#2365: two counted phrases read as one another): the label counts nothing — it names the card the person chose — and the
   // sentence says what THAT recipe needs, so the same word is the point (the old failure card said the same: «이 레시피는 에이전트 {need}개가
   // 필요한데»). Look again if the recipe label ever carries a count («레시피 · {n}»).
+  // story 4734 (Yuna 4734-pairing-unit-copy-1020.md §A) — the computer's line counts its setups («에이전트 {count}개 · 설정 {n}곳»: `desktop.devices.setupCount` is the
+  // second half of that line), and three sentences elsewhere say «설정 {n}곳» again with the SAME number on purpose: the big confirm's scope («이 컴퓨터에서 연결한
+  // 설정 {n}곳이 모두 끊기고, …») and its button («설정 {n}곳 모두 끊기») must read the same count the line showed (the sheet: «the press confirms the same thing the
+  // paragraph said»), and the in-between line («폰 페어링이 설정 {n}곳 중 {k}곳에만 …») names the connected setups of that same line. They are never on screen together
+  // as two readings of one number (the dialog covers the list; the in-between line sits inside the fold, not beside the count). Look again if the counts could differ
+  // (the dialog counting more than the line).
+  'desktop.devices.allScope <-> desktop.devices.setupCount',
+  'desktop.devices.allButton <-> desktop.devices.setupCount',
+  'desktop.devices.pairGap <-> desktop.devices.setupCount', // (the guard's pair key is in key order)
   'desktop.setup.recipe <-> desktop.setup.room.shortNone',
   'desktop.setup.recipe <-> desktop.setup.room.short',
   // story #4624 (Yuna «미르코 범위» 08:0xZ) — [이 폰 빼기]'s confirmation («… 짝지은 컴퓨터 {n}대와 모두 끊겨요. 원격 기기 자리 하나가
