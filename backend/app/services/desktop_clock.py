@@ -23,19 +23,23 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import delete, func, select, update
+from sqlalchemy import text as sql_text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.datetime_query import OffsetDatetime
 from app.models.desktop_relay import DesktopClockView, DesktopCommand
 from app.models.desktop_setup import DesktopSetup
-from app.services.desktop_relay import CLOCK_ACTIONS, DISCONNECTED_CODE, DesktopRelayError, touch_device
+from app.services.desktop_relay import CLOCK_ACTIONS, CLOCK_REV_MAX, DISCONNECTED_CODE, ClockEdit, DesktopRelayError, touch_device
 
 # the words the daemon's ClockFlow gives back when a clock command is done (Dan 10-20 (d) · 00:23Z: nine with the one-agent press); a done result is one of these or it is refused
 CLOCK_DONE_CODES = (
     "ok", "already", "nothing_running", "not_open", "not_ready", "needs_hands", "not_clocked_out",
     "unknown_agent",     # the one agent named is not a profile of that computer (the daemon asks again)
     "already_running",   # a clock-in of one agent that already runs
+    # story #4733 (S5 · P2): the two more words of a phone's edit — `stale` (the row moved on since the report the phone read: nothing was written) and
+    # `not_editable` (the row is being drafted or saved, or has no draft to fix: nothing was written)
+    "stale", "not_editable",
 )
 ROW_STATES = ("drafting", "ready", "needs_you", "saving", "saved", "ended", "not_ended", "failed")
 # a first line belongs to a draft that is still being made or kept: a row already saved (or ended) carries none
@@ -88,14 +92,24 @@ async def _authorized_computer(db: AsyncSession, *, user_id: uuid.UUID, org_id: 
 
 
 class ClockRequest(BaseModel):
-    """The phone's press: the action, its signature (carried as is), the key it signed with, the press's own key. Nothing else — no text, agent or path."""
+    """The phone's press: the action, its signature (carried as is), the key it signed with, the press's own key. Nothing else — no text, agent or path;
+    the one exception is `out_edit` (S5 · P2): the agent it names and the fields the person typed into that agent's draft."""
     model_config = ConfigDict(extra="forbid")
 
-    action: Literal["out_open", "out_submit", "out_cancel", "in"]
+    action: Literal["out_open", "out_submit", "out_cancel", "in", "out_edit"]
     idempotency_key: str = Field(min_length=1, max_length=100)
     signed: str = Field(min_length=1, max_length=16384)
     phone_key_id: uuid.UUID
     agent_member_id: uuid.UUID | None = None  # one agent of the computer (the signature covers it); absent = the whole computer
+    edit: ClockEdit | None = None  # only with out_edit
+
+    @model_validator(mode="after")
+    def _edit_only_for_edit(self) -> ClockRequest:
+        if (self.action == "out_edit") != (self.edit is not None):
+            raise ValueError("an edit rides with the action out_edit, and only with it")
+        if self.action == "out_edit" and self.agent_member_id is None:
+            raise ValueError("an edit names its agent")
+        return self
 
 
 assert tuple(ClockRequest.model_fields["action"].annotation.__args__) == CLOCK_ACTIONS, "the request and the payload speak the same actions"
@@ -115,6 +129,7 @@ async def create_clock(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.
     setup = await _authorized_computer(db, user_id=user_id, org_id=org_id, setup_id=setup_id)
     await db.execute(select(DesktopSetup).where(DesktopSetup.id == setup.id).with_for_update().execution_options(populate_existing=True))
     setup = await _authorized_computer(db, user_id=user_id, org_id=org_id, setup_id=setup_id)
+    await scrub_clock_edits(db, setup_id=setup.id)  # a typed field that outlived its minutes (a press nobody answered) goes before a new one is taken
     key = f"b5:{member_id}:{body.idempotency_key}"
     existing = (await db.execute(
         select(DesktopCommand).where(DesktopCommand.setup_id == setup.id, DesktopCommand.idempotency_key == key)
@@ -129,9 +144,19 @@ async def create_clock(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.
     # not be queued behind a pairing that was just taken away
     if await paired_phone(db, member_id=member_id, phone_id=body.phone_key_id, setup_id=setup.id, lock=True) is None:
         raise DesktopRelayError(409, "phone_not_paired", "this phone is not paired with that computer")
+    if body.action == "out_edit":
+        # S5 · P2: the phone shows a draft's first line only to a person who can open that agent — the same person is the only one who writes into it
+        from app.services.desktop_commands import can_view
+        from app.services.desktop_relay import _check_agent
+
+        _check_agent(setup, body.agent_member_id)  # an agent this computer was not set up with is no target — before anything is said of who may see it
+        if not await can_view(db, user_id=user_id, org_id=org_id, agent_id=body.agent_member_id):
+            raise DesktopRelayError(403, "not_allowed_to_command", "you cannot edit that agent's draft")
     payload = {"action": body.action, "signed": body.signed}
     if body.agent_member_id is not None:
         payload["agent_member_id"] = str(body.agent_member_id)  # enqueue_command refuses an agent this computer was not set up with (another organization's included)
+    if body.edit is not None:
+        payload["edit"] = body.edit.model_dump(exclude_none=True)  # only the fields the person touched; an absent one is left as it is
     cmd = await enqueue_command(db, setup=setup, kind="clock", payload=payload, idempotency_key=key, requested_by=member_id)
     return cmd, cmd.state
 
@@ -152,6 +177,21 @@ async def get_clock_command(db: AsyncSession, *, member_id: uuid.UUID, org_id: u
 def check_done_code(result_code: str | None) -> None:
     if result_code not in CLOCK_DONE_CODES:
         raise DesktopRelayError(422, "invalid_result_code", "a finished clock command ends in one of the clock words")
+
+
+# story #4733 (S5 · P2): the text a person typed into a draft rides in the stored command only while the command is open: when it ends (done · failed · rejected)
+# or when its minutes are up, the fields are taken out of the row and only the revision stays — «흐름 동안만 · 끝나면 지움 · 로그 0»
+EDIT_TEXT_TTL = timedelta(minutes=10)
+_SCRUB_EDIT_SQL = sql_text(
+    "UPDATE desktop_commands SET payload = jsonb_set(payload, '{edit}', jsonb_build_object('base_rev', payload #> '{edit,base_rev}')) "
+    "WHERE setup_id = :setup_id AND kind = 'clock' AND jsonb_exists(payload, 'edit') "
+    "AND (payload #> '{edit}') <> jsonb_build_object('base_rev', payload #> '{edit,base_rev}') "
+    "AND (state IN ('done', 'failed', 'rejected') OR created_at < :cutoff)"
+)
+
+
+async def scrub_clock_edits(db: AsyncSession, *, setup_id: uuid.UUID) -> None:
+    await db.execute(_SCRUB_EDIT_SQL, {"setup_id": setup_id, "cutoff": _now() - EDIT_TEXT_TTL})
 
 
 async def on_clock_result(db: AsyncSession, cmd: DesktopCommand) -> None:
@@ -203,6 +243,12 @@ class ClockRow(BaseModel):
     first_line: str | None = Field(default=None, min_length=1, max_length=FIRST_LINE_MAX)
     # a session that never ran a turn (the Mac's words differ: «한 일 없음 — 인계 없이 멈춰요») — a mark on top of the state, not a state
     idle: bool = Field(default=False, strict=True)
+    # story #4733 (S5 · P2): the row's revision — it moves whenever the draft, a field or the row's state changes on the computer; a phone's edit names the one it
+    # saw and the computer refuses it (`stale`) when the row has moved. A computer of the older build sends none (0).
+    rev: int = Field(default=0, ge=0, le=CLOCK_REV_MAX, strict=True)
+    # story #4733 (S5 · P2): a person's hand has been on this row (the Mac's or a phone's) — its first line is then the person's own words, not the agent's draft; the phone
+    # says so in front of the line («고친 글»). A closed mark on top of the state, like `idle` — not a state of its own.
+    edited: bool = Field(default=False, strict=True)
 
     @model_validator(mode="after")
     def _closed(self) -> ClockRow:
@@ -211,6 +257,8 @@ class ClockRow(BaseModel):
                 raise ValueError("a first line belongs to a draft, not to a saved or ended row")
             if not _plain_line(self.first_line):
                 raise ValueError("a first line is one line of plain text")
+        if self.edited and self.state not in DRAFT_ROW_STATES:
+            raise ValueError("a person's hand is a mark on a draft, not on a saved or ended row")
         if len(set(self.missing)) != len(self.missing):
             raise ValueError("missing has no repeats")
         if self.idle and (self.first_line is not None or self.missing):
