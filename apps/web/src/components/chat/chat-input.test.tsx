@@ -9,6 +9,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ChatInput } from './chat-input';
+import { invalidateOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 
 // story #3289(도메인탈고정·축1 Phase1 FE잔여, AC2) — kanban-board.test.tsx와 동형 mock.
 // orgId를 안 주면(기본 beforeEach) useOrgDomainLabels가 no-op이라 기존 44개 테스트는 무회귀.
@@ -49,6 +50,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  invalidateOrgDomainLabels(); // story #4748 — 라벨은 조직당 한 번 받아 두는 훅이라, 시험끼리 받아 둔 값을 물려주지 않게 비운다
   stubLocalStorage();
   stubMatchMedia(false); // 기본은 데스크톱(포인터 정밀) — AC1 대상
   useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human' });
