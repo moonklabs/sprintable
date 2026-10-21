@@ -475,3 +475,100 @@ async def test_21_a_person_with_two_phones_paired_is_told_once(world):
         await _report(c, d, a, "working", 1)
         await _report(c, d, a, "waiting_input", 2, limit=LOOKS)
         assert len(await _notices(STOOD, PLAIN_TM)) == 1
+
+
+# ── codex read (4685 AC8/AC9): the promise stays with its person · one person's failure is only theirs · two lifts at once ───────────────────
+
+async def test_22_the_working_again_line_is_kept_to_the_person_it_was_promised_to_even_when_the_pairing_is_gone(world):
+    await _second_person()
+    async with _client() as c:
+        d = await _device(c, "d4685 mac t1")
+        await _pair(d["setup_id"], PLAIN_TM)
+        a = d["agents"][0]["member_id"]
+        await _report(c, d, a, "working", 1)
+        await _report(c, d, a, "waiting_input", 2, limit=LOOKS)
+        assert len(await _notices(STOOD, PLAIN_TM)) == 1
+        await _sql(f"UPDATE remote_device_pairings SET removed_at = now() WHERE setup_id = '{d['setup_id']}'")  # the phone is taken off meanwhile
+        await _report(c, d, a, "working", 3)
+        assert len(await _notices(LIFTED, PLAIN_TM)) == 1, "told «stopped», so told «working again» — the pairing that made them the recipient is gone, the promise is not"
+        assert await _notices(LIFTED, OWNER_TM) == [], "and nothing was promised to the person who only connected it"
+
+
+@pytest.mark.parametrize("fails,how", [("owner", "python"), ("plain", "sql")])
+async def test_23_one_persons_failure_takes_back_only_their_own_notice(world, monkeypatch, fails, how):
+    """Two people have phones paired with the setup (told in a fixed order: the owner, then the second person). Telling one of them fails — as a Python
+    error, or as an SQL error that aborts the transaction (the second's, after the first was told). The other is told all the same and the report stands."""
+    await _second_person()
+    import app.services.notification_dispatch as nd
+    from sqlalchemy import text
+
+    real = nd.dispatch_notification
+    failing = OWNER_TM if fails == "owner" else PLAIN_TM
+
+    async def flaky(db, *a, **kw):
+        if kw.get("target_member_ids") == [failing]:
+            if how == "python":
+                raise RuntimeError("boom")
+            await db.execute(text("SELECT 1/0"))  # an SQL error: the transaction would be unusable without a savepoint of this person's own
+        return await real(db, *a, **kw)
+
+    monkeypatch.setattr(nd, "dispatch_notification", flaky)
+    async with _client() as c:
+        d = await _device(c, "d4685 mac u1")
+        await _pair(d["setup_id"], OWNER_TM)
+        await _pair(d["setup_id"], PLAIN_TM)
+        a = d["agents"][0]["member_id"]
+        await _report(c, d, a, "working", 1)
+        await _report(c, d, a, "waiting_input", 2, limit=LOOKS)  # 200: the report stands
+        other = PLAIN_TM if fails == "owner" else OWNER_TM
+        assert await _notices(STOOD, failing) == []
+        assert len(await _notices(STOOD, other)) == 1, "one person's failure must neither silence nor take back the other person's notice"
+
+
+async def test_24_two_of_one_persons_setups_coming_back_at_the_same_moment_still_tell_working_again_once(world):
+    """Each transaction sees the OTHER's session still standing (not committed yet) and would return: nobody would tell «working again». The lift is
+    serialised per person — the second waits for the first's commit, counts again, and tells."""
+    import asyncio
+
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.desktop_relay import DesktopSession
+    from app.models.desktop_setup import DesktopSetup
+    from app.services import desktop_limit_notice as dln
+
+    async with _client() as c:
+        d1, d2 = await _device(c, "d4685 mac v1"), await _device(c, "d4685 mac v2")
+        a1, a2 = d1["agents"][0]["member_id"], d2["agents"][0]["member_id"]
+        for seq, (d, a) in enumerate(((d1, a1), (d2, a2)), start=1):
+            await _report(c, d, a, "working", seq)
+        for seq, (d, a) in enumerate(((d1, a1), (d2, a2)), start=10):
+            await _report(c, d, a, "waiting_input", seq, limit=LOOKS)
+        assert len(await _notices(STOOD)) == 1
+
+    async def load(s, setup_id):
+        setup = await s.get(DesktopSetup, uuid.UUID(setup_id))
+        row = (await s.execute(select(DesktopSession).where(DesktopSession.setup_id == setup.id))).scalars().one()
+        return setup, row
+
+    s1, s2 = async_session_factory(), async_session_factory()
+    try:
+        setup1, row1 = await load(s1, d1["setup_id"])
+        row1.limited, row1.state = False, "working"
+        await s1.flush()
+        await dln.after_report(s1, setup1, row1, was_limited=True)  # the other is still standing (as far as this transaction can see): nothing to tell
+        assert await _notices(LIFTED) == []
+
+        setup2, row2 = await load(s2, d2["setup_id"])
+        row2.limited, row2.state = False, "working"
+        await s2.flush()
+        second = asyncio.create_task(dln.after_report(s2, setup2, row2, was_limited=True))
+        await asyncio.sleep(0.6)  # fixed-sleep-ok: the second must be WAITING on the first's lock, not finished
+        assert not second.done(), "the second lift must wait for the first transaction"
+        await s1.commit()
+        await asyncio.wait_for(second, timeout=10)
+        await s2.commit()
+    finally:
+        await s1.close()
+        await s2.close()
+    assert len(await _notices(LIFTED)) == 1

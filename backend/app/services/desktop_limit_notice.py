@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.desktop_relay import DesktopSession
@@ -144,15 +144,29 @@ def _usable_pairing_filters():
     )
 
 
+async def _with_locales(db: AsyncSession, org_id: uuid.UUID, people: dict[uuid.UUID, uuid.UUID]) -> list[Recipient]:
+    """{user id: member id} → the Recipients, each in their own language (the org's when they have none). Ordered by user id: a fixed order for
+    the per-person locks the «working again» path takes, so two reports never wait on each other in a circle."""
+    from app.models.user import User
+    from app.services.agent_onboarding_config import SUPPORTED_LOCALES
+    from app.services.org_locale import resolve_org_locale
+
+    out: list[Recipient] = []
+    org_locale: str | None = None
+    for user_id in sorted(people, key=str):
+        locale = (await db.execute(select(User.locale).where(User.id == user_id))).scalar_one_or_none()
+        if locale not in SUPPORTED_LOCALES:
+            org_locale = org_locale or await resolve_org_locale(db, org_id)
+            locale = org_locale
+        out.append(Recipient(user_id, people[user_id], locale))
+    return out
+
+
 async def _recipients(db: AsyncSession, setup: DesktopSetup) -> list[Recipient]:
     """Who is told about this setup (story 4685 AC9): the owners of the phones paired with it, one entry per person (a person with two phones
     is told once); with no usable pairing, whoever connected the computer if still an active member of the org. Empty = nobody to tell."""
     from app.models.agent_permission import RemoteDevice, RemoteDevicePairing
     from app.models.member import Member
-    from app.models.user import User
-    from app.services.agent_onboarding_config import SUPPORTED_LOCALES
-    from app.services.org_locale import resolve_org_locale
-
     people: dict[uuid.UUID, uuid.UUID] = {}
     paired = await db.execute(
         select(Member.user_id, Member.id)
@@ -173,15 +187,7 @@ async def _recipients(db: AsyncSession, setup: DesktopSetup) -> list[Recipient]:
         )).scalars().first()
         if member_id is not None:
             people[setup.confirmed_by] = member_id
-    out: list[Recipient] = []
-    org_locale: str | None = None
-    for user_id, member_id in people.items():
-        locale = (await db.execute(select(User.locale).where(User.id == user_id))).scalar_one_or_none()
-        if locale not in SUPPORTED_LOCALES:
-            org_locale = org_locale or await resolve_org_locale(db, setup.org_id)
-            locale = org_locale
-        out.append(Recipient(user_id, member_id, locale))
-    return out
+    return await _with_locales(db, setup.org_id, people)
 
 
 def format_time(at: datetime, tz: ZoneInfo, locale: str, *, now: datetime) -> str:
@@ -260,8 +266,12 @@ async def _stood(db: AsyncSession, setup: DesktopSetup, row: DesktopSession) -> 
     if not who:
         logger.info("desktop limit notice: nobody to tell setup=%s (no phone paired, and not connected by an active member)", setup.id)
         return
-    for person in who:  # each person once
-        await _stood_for(db, setup, row, person)
+    for person in who:  # each person once — and each in a savepoint of their own: one person's failure takes back only their own echo, never another person's
+        try:
+            async with db.begin_nested():
+                await _stood_for(db, setup, row, person)
+        except Exception:  # noqa: BLE001 — the window is let go in `_stood_for`; the next report may still tell this person
+            logger.warning("desktop limit notice: telling one person failed setup=%s session=%s", setup.id, row.session_key, exc_info=True)
 
 
 async def _stood_for(db: AsyncSession, setup: DesktopSetup, row: DesktopSession, person: Recipient) -> None:
@@ -317,15 +327,52 @@ async def _stood_for(db: AsyncSession, setup: DesktopSetup, row: DesktopSession,
         raise
 
 
+async def _lifted_candidates(db: AsyncSession, setup: DesktopSetup) -> list[Recipient]:
+    """Who may be owed a «working again» line for this setup: the people it tells NOW, and everyone it could have told when the limit stood — the owners of
+    phones that were once paired with it (a pairing since removed, a key since revoked) and whoever connected it. The promise is kept to the person it was
+    made to, even if the pairing that made them its recipient is gone by the time the limit lifts."""
+    from app.models.agent_permission import RemoteDevice, RemoteDevicePairing
+    from app.models.member import Member
+    people: dict[uuid.UUID, uuid.UUID] = {r.user_id: r.member_id for r in await _recipients(db, setup)}
+    former = await db.execute(
+        select(Member.user_id, Member.id)
+        .select_from(RemoteDevicePairing)
+        .join(RemoteDevice, RemoteDevice.id == RemoteDevicePairing.remote_device_id)
+        .join(Member, Member.id == RemoteDevice.member_id)
+        .where(RemoteDevicePairing.setup_id == setup.id, Member.org_id == setup.org_id, Member.type == "human", Member.is_active.is_(True),
+               Member.deleted_at.is_(None), Member.user_id.is_not(None))
+    )
+    for user_id, member_id in former.all():
+        people.setdefault(user_id, member_id)
+    if setup.confirmed_by is not None and setup.confirmed_by not in people:
+        member_id = (await db.execute(
+            select(Member.id).where(
+                Member.org_id == setup.org_id, Member.type == "human", Member.user_id == setup.confirmed_by,
+                Member.deleted_at.is_(None), Member.is_active.is_(True),
+            )
+        )).scalars().first()
+        if member_id is not None:
+            people[setup.confirmed_by] = member_id
+    return await _with_locales(db, setup.org_id, people)
+
+
 async def _lifted(db: AsyncSession, setup: DesktopSetup, row: DesktopSession) -> None:
-    for person in await _recipients(db, setup):
-        await _lifted_for(db, setup, row, person)
+    for person in await _lifted_candidates(db, setup):
+        try:
+            async with db.begin_nested():
+                await _lifted_for(db, setup, row, person)
+        except Exception:  # noqa: BLE001 — one person's failure takes back only their own echo
+            logger.warning("desktop limit notice: the working-again line for one person failed setup=%s session=%s", setup.id, row.session_key, exc_info=True)
 
 
 async def _lifted_for(db: AsyncSession, setup: DesktopSetup, row: DesktopSession, person: Recipient) -> None:
     from app.services.i18n_catalog import t
     from app.services.notification_dispatch import dispatch_notification
 
+    # Serialised per person: two of one person's setups can come back at the same moment in two transactions, each of which would see the OTHER's row
+    # still standing (it is not committed yet) and return — and nobody would tell «working again». The second to ask waits for the first's commit, then
+    # counts again and sees the whole picture.
+    await db.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"desktop-limit-lifted:{setup.org_id}:{person.user_id}"))))
     if await _limited_rows(db, setup.org_id, person.user_id):
         return  # some are still standing — «all working again» would be false
     record = await _take_open(setup.org_id, person.user_id)
