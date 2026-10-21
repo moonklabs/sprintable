@@ -104,46 +104,56 @@ async def _save_open(org_id: uuid.UUID, user_id: uuid.UUID, record: dict) -> Non
     await redis_shared.with_fallback(_op, _fallback)
 
 
-async def _peek_open(org_id: uuid.UUID, user_id: uuid.UUID) -> dict | None:
-    """The outstanding «stood» record, left where it is."""
-    key = _key("open", org_id, user_id)
-
-    async def _op(client) -> str | None:
-        raw = await client.get(key)
-        return None if raw is None else (raw.decode() if isinstance(raw, (bytes, bytearray)) else str(raw))
-
-    def _fallback() -> str | None:
-        return _local_get(key)
-
-    raw = await redis_shared.with_fallback(_op, _fallback)
-    try:
-        return json.loads(raw) if raw else None
-    except ValueError:
-        return None
-
-
-async def _fold_into_open(org_id: uuid.UUID, user_id: uuid.UUID, setup_id: uuid.UUID) -> None:
-    """A session that stood inside the window is folded into the notice already told — and into the promise made with it: «working again» waits for
-    this setup as well, even if the pairing that makes it theirs is gone by then. (Two folds at the same instant can lose one; the cost is the narrow
-    count, never a duplicate line.)"""
-    record = await _peek_open(org_id, user_id)
-    if record is None:
+async def _add_promised_setups(org_id: uuid.UUID, user_id: uuid.UUID, setup_ids) -> None:
+    """The setups the person's outstanding «stopped» notice is about. A SET with an atomic add (Redis SADD) — never a read-modify-write of the
+    record: a stand after the window, and a session folded in at the same instant as another, only ever ADD to it (Kadir-lens/codex 4685)."""
+    ids = sorted({str(i) for i in setup_ids})
+    if not ids:
         return
-    setups = sorted(set(record.get("setups") or []) | {str(setup_id)})
-    await _save_open(org_id, user_id, {**record, "setups": setups})
+    key = _key("promised", org_id, user_id)
+
+    async def _op(client) -> None:
+        await client.sadd(key, *ids)
+        await client.expire(key, OPEN_TTL_SEC)
+
+    def _fallback() -> None:
+        have = set(json.loads(_local_get(key) or "[]"))
+        _local[key] = (time.monotonic() + OPEN_TTL_SEC, json.dumps(sorted(have | set(ids))))
+
+    await redis_shared.with_fallback(_op, _fallback)
+
+
+async def _promised_setups(org_id: uuid.UUID, user_id: uuid.UUID) -> frozenset[uuid.UUID]:
+    key = _key("promised", org_id, user_id)
+
+    async def _op(client) -> list:
+        return [m.decode() if isinstance(m, (bytes, bytearray)) else str(m) for m in await client.smembers(key)]
+
+    def _fallback() -> list:
+        return json.loads(_local_get(key) or "[]")
+
+    out: set[uuid.UUID] = set()
+    for raw in await redis_shared.with_fallback(_op, _fallback):
+        try:
+            out.add(uuid.UUID(raw))
+        except ValueError:
+            continue
+    return frozenset(out)
 
 
 async def _take_open(org_id: uuid.UUID, user_id: uuid.UUID) -> dict | None:
     """The outstanding «stood» record, removed in the same step (the «lifted» line goes once)."""
-    key = _key("open", org_id, user_id)
+    key, promised = _key("open", org_id, user_id), _key("promised", org_id, user_id)
 
     async def _op(client) -> str | None:
         raw = await client.getdel(key)
+        await client.delete(promised)  # the record and what it was about go together
         return None if raw is None else (raw.decode() if isinstance(raw, (bytes, bytearray)) else str(raw))
 
     def _fallback() -> str | None:
         raw = _local_get(key)
         _local.pop(key, None)
+        _local.pop(promised, None)
         return raw
 
     raw = await redis_shared.with_fallback(_op, _fallback)
@@ -317,7 +327,7 @@ async def _stood_for(db: AsyncSession, setup: DesktopSetup, row: DesktopSession,
 
     locale = person.locale
     if not await _claim_window(setup.org_id, person.user_id):
-        await _fold_into_open(setup.org_id, person.user_id, setup.id)  # folded into the notice that went: its promise covers this setup too
+        await _add_promised_setups(setup.org_id, person.user_id, [setup.id])  # folded into the notice that went: its promise covers this setup too
         return
     try:
         rows = await _limited_rows(db, setup.org_id, person.user_id)
@@ -357,8 +367,8 @@ async def _stood_for(db: AsyncSession, setup: DesktopSetup, row: DesktopSession,
             await _release_window(setup.org_id, person.user_id)
             logger.warning("desktop limit notice: the stood notice reached nobody setup=%s session=%s", setup.id, row.session_key)
             return
-        standing_setups = sorted({str(setup.id)} | {str(r.setup_id) for r in rows})  # the promise is about THESE setups
-        await _save_open(setup.org_id, person.user_id, {"agent": str(agents[0]), "others": others, "setups": standing_setups})
+        await _add_promised_setups(setup.org_id, person.user_id, [setup.id, *(r.setup_id for r in rows)])  # the promise is about THESE setups (merged, never replaced)
+        await _save_open(setup.org_id, person.user_id, {"agent": str(agents[0]), "others": others})
     except Exception:
         await _release_window(setup.org_id, person.user_id)  # nothing was told: the next report may still tell it
         raise
@@ -410,8 +420,7 @@ async def _lifted_for(db: AsyncSession, setup: DesktopSetup, row: DesktopSession
     # still standing (it is not committed yet) and return — and nobody would tell «working again». The second to ask waits for the first's commit, then
     # counts again and sees the whole picture.
     await db.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"desktop-limit-lifted:{setup.org_id}:{person.user_id}"))))
-    record = await _peek_open(setup.org_id, person.user_id)
-    promised = frozenset(uuid.UUID(x) for x in ((record or {}).get("setups") or []))
+    promised = await _promised_setups(setup.org_id, person.user_id)
     if await _limited_rows(db, setup.org_id, person.user_id, also_setups=promised):
         return  # some are still standing — «all working again» would be false
     record = await _take_open(setup.org_id, person.user_id)

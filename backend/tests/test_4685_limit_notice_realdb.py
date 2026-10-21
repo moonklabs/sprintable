@@ -7,6 +7,7 @@ only output. Each claim has a test that goes red without it (mutants in the PR).
 """
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -494,7 +495,7 @@ async def test_22_the_working_again_line_is_kept_to_the_person_it_was_promised_t
         assert await _notices(LIFTED, OWNER_TM) == [], "and nothing was promised to the person who only connected it"
 
 
-async def test_25_a_removed_pairing_does_not_make_the_still_standing_sessions_of_that_setup_invisible_to_the_working_again_gate(world):
+async def test_25_a_removed_pairing_does_not_make_the_still_standing_sessions_of_that_setup_invisible_to_the_working_again_gate(world, store):
     await _second_person()
     async with _client() as c:
         d = await _device(c, "d4685 mac t1")
@@ -529,7 +530,7 @@ async def test_26_a_pairing_that_ended_before_the_episode_never_holds_a_persons_
         assert len(await _notices(LIFTED, PLAIN_TM)) == 1, "the setup this person was told about is back; another person's setup standing does not hold it"
 
 
-async def test_27_a_setup_that_stood_inside_the_window_is_part_of_the_promise_even_when_its_pairing_goes_meanwhile(world):
+async def test_27_a_setup_that_stood_inside_the_window_is_part_of_the_promise_even_when_its_pairing_goes_meanwhile(world, store):
     await _second_person()
     async with _client() as c:
         a, b = [await _device(c, f"d4685 mac w{i}") for i in (1, 2)]
@@ -546,6 +547,39 @@ async def test_27_a_setup_that_stood_inside_the_window_is_part_of_the_promise_ev
         assert await _notices(LIFTED, PLAIN_TM) == [], "b still stands and the person was told about it (folded): not «all working again»"
         await _report(c, b, ab, "working", 6)
         assert len(await _notices(LIFTED, PLAIN_TM)) == 1
+
+
+async def test_28_a_stand_after_the_window_adds_to_the_promise_it_does_not_replace_it(world, store):
+    from app.services import desktop_limit_notice as dln
+
+    await _second_person()
+    async with _client() as c:
+        a, b = [await _device(c, f"d4685 mac x{i}") for i in (1, 2)]
+        await _pair(a["setup_id"], PLAIN_TM)
+        await _pair(b["setup_id"], PLAIN_TM)
+        aa, ab = a["agents"][0]["member_id"], b["agents"][0]["member_id"]
+        await _report(c, a, aa, "working", 1)
+        await _report(c, b, ab, "working", 2)
+        await _report(c, a, aa, "waiting_input", 3, limit=LOOKS)
+        assert len(await _notices(STOOD, PLAIN_TM)) == 1
+        await _sql(f"UPDATE remote_device_pairings SET removed_at = now() WHERE setup_id = '{a['setup_id']}'")  # the phone leaves a while it stands
+        await dln._release_window(ORG, PLAIN_USER)  # the 5 minutes are over
+        await _report(c, b, ab, "waiting_input", 4, limit=LOOKS)
+        assert len(await _notices(STOOD, PLAIN_TM)) == 2, "a new window, a new notice"
+        await _report(c, b, ab, "working", 5)
+        assert await _notices(LIFTED, PLAIN_TM) == [], "a still stands and the person was told about it: the second notice did not make them forget it"
+        await _report(c, a, aa, "working", 6)
+        assert len(await _notices(LIFTED, PLAIN_TM)) == 1
+
+
+async def test_29_setups_added_to_the_promise_at_the_same_instant_are_all_kept(world, store):
+    from app.services import desktop_limit_notice as dln
+
+    ids = [uuid.uuid4() for _ in range(6)]
+    await asyncio.gather(*(dln._add_promised_setups(ORG, PLAIN_USER, [i]) for i in ids))
+    assert await dln._promised_setups(ORG, PLAIN_USER) == frozenset(ids)
+    await dln._take_open(ORG, PLAIN_USER)
+    assert await dln._promised_setups(ORG, PLAIN_USER) == frozenset(), "taking the record takes what it was about"
 
 
 @pytest.mark.parametrize("fails,how", [("owner", "python"), ("plain", "sql")])
