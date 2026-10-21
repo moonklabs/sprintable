@@ -494,6 +494,24 @@ async def test_22_the_working_again_line_is_kept_to_the_person_it_was_promised_t
         assert await _notices(LIFTED, OWNER_TM) == [], "and nothing was promised to the person who only connected it"
 
 
+async def test_25_a_removed_pairing_does_not_make_the_still_standing_sessions_of_that_setup_invisible_to_the_working_again_gate(world):
+    await _second_person()
+    async with _client() as c:
+        d = await _device(c, "d4685 mac t1")
+        await _pair(d["setup_id"], PLAIN_TM)
+        a = d["agents"][0]["member_id"]
+        for seq, key in ((1, "s-1"), (2, "s-2")):
+            await _report(c, d, a, "working", seq, key=key)
+        for seq, key in ((3, "s-1"), (4, "s-2")):
+            await _report(c, d, a, "waiting_input", seq, key=key, limit=LOOKS)
+        assert len(await _notices(STOOD, PLAIN_TM)) == 1
+        await _sql(f"UPDATE remote_device_pairings SET removed_at = now() WHERE setup_id = '{d['setup_id']}'")  # the phone is taken off while both stand
+        await _report(c, d, a, "working", 5, key="s-1")
+        assert await _notices(LIFTED, PLAIN_TM) == [], "s-2 of the same setup still stands: «all working again» would be false, pairing or not"
+        await _report(c, d, a, "working", 6, key="s-2")
+        assert len(await _notices(LIFTED, PLAIN_TM)) == 1, "the last one back tells it once"
+
+
 @pytest.mark.parametrize("fails,how", [("owner", "python"), ("plain", "sql")])
 async def test_23_one_persons_failure_takes_back_only_their_own_notice(world, monkeypatch, fails, how):
     """Two people have phones paired with the setup (told in a fixed order: the owner, then the second person). Telling one of them fails — as a Python

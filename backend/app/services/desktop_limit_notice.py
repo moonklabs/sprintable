@@ -228,10 +228,13 @@ def where_text(rows: list[DesktopSession], locale: str) -> str | None:
     return t("desktop_limit_notice.where", locale, where=where)
 
 
-async def _limited_rows(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> list[DesktopSession]:
+async def _limited_rows(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, *, ever: bool = False) -> list[DesktopSession]:
     """The sessions standing at the limit that are THIS person's to hear about (AC8): those of every live setup of the organization whose
     recipients include them — a setup with a phone of theirs paired, or a setup with no usable pairing that they connected (the same two
-    cases as `_recipients`). A revoked setup is not theirs any more: its stale row must not hold the «working again» line back."""
+    cases as `_recipients`). A revoked setup is not theirs any more: its stale row must not hold the «working again» line back.
+    `ever=True` is the wider reading the «working again» gate needs (same as `_lifted_candidates`): also a setup a phone of theirs was once
+    paired with (pairing since removed, key since revoked) — the notice they were promised may have been made for it, so it still counts as
+    standing for them. (A setup they merely connected, with someone else's phone paired, never told them: it does not hold their line back.)"""
     from app.models.agent_permission import RemoteDevice, RemoteDevicePairing
     from app.models.member import Member
 
@@ -246,10 +249,20 @@ async def _limited_rows(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID)
 
     theirs_paired = _pairing_of_this_setup(Member.user_id == user_id)
     nobody_paired = ~_pairing_of_this_setup()
+    scope = or_(theirs_paired, and_(DesktopSetup.confirmed_by == user_id, nobody_paired))
+    if ever:
+        was_theirs = (
+            select(RemoteDevicePairing.id)
+            .join(RemoteDevice, RemoteDevice.id == RemoteDevicePairing.remote_device_id)
+            .join(Member, Member.id == RemoteDevice.member_id)
+            .where(RemoteDevicePairing.setup_id == DesktopSetup.id, Member.org_id == org_id, Member.user_id == user_id)
+            .exists()
+        )
+        scope = or_(scope, was_theirs)
     return list((await db.execute(
         select(DesktopSession).join(DesktopSetup, DesktopSetup.id == DesktopSession.setup_id).where(
             DesktopSetup.org_id == org_id, DesktopSetup.revoked_at.is_(None),
-            or_(theirs_paired, and_(DesktopSetup.confirmed_by == user_id, nobody_paired)),
+            scope,
             DesktopSession.limited.is_(True), DesktopSession.state != "stopped",
         ).order_by(DesktopSession.state_at.asc(), DesktopSession.id.asc())
     )).scalars().all())
@@ -373,7 +386,7 @@ async def _lifted_for(db: AsyncSession, setup: DesktopSetup, row: DesktopSession
     # still standing (it is not committed yet) and return — and nobody would tell «working again». The second to ask waits for the first's commit, then
     # counts again and sees the whole picture.
     await db.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"desktop-limit-lifted:{setup.org_id}:{person.user_id}"))))
-    if await _limited_rows(db, setup.org_id, person.user_id):
+    if await _limited_rows(db, setup.org_id, person.user_id, ever=True):
         return  # some are still standing — «all working again» would be false
     record = await _take_open(setup.org_id, person.user_id)
     if record is None or row.state == "stopped":
