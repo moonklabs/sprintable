@@ -358,6 +358,21 @@ def _restore_app_dependency_overrides():
 
 
 @pytest.fixture(autouse=True)
+def _forget_limit_notice_windows():
+    """story 4685 AC8 — the limit notice's 5-minute window and its outstanding «working again» promise are kept per PERSON of an organization (not per
+    setup), in this process when there is no Redis. Tests share one person (and one org) and run one after another inside those five minutes, so the
+    first test's window would silence every later test's notice. Forgotten before and after each test (the service module is only looked at when it
+    was already imported — a test that never reaches it pays nothing)."""
+    mod = sys.modules.get("app.services.desktop_limit_notice")
+    if mod is not None:
+        mod._local.clear()
+    yield
+    mod = sys.modules.get("app.services.desktop_limit_notice")
+    if mod is not None:
+        mod._local.clear()
+
+
+@pytest.fixture(autouse=True)
 def _tag_global_engine_connections_for_destructive_tests(request):
     """destructive 테스트마다 이름을 바꿔 단다. 테스트가 끝나도 지우지 않는다 — 테스트 뒤에 뜬 태스크가 연 커넥션도 «마지막
     destructive 테스트» 이름을 달아야 범인을 가리킬 수 있다."""
