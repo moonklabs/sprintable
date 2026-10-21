@@ -279,29 +279,50 @@ async def remove_computer_pairs(
     return removed
 
 
-async def phones_removed_by_a_person(db: AsyncSession, *, setup: DesktopSetup) -> list[str] | None:
-    """story 4734 (PO 10-20 · M2): the fingerprints of phones a PERSON removed (`removed_by` set — not a device dropping its own pin) from some
-    still-connected setup of this setup's computer (a removed phone KEY counts: removing the key removes its pairs). The device uses it once, when it first merges its setups' phone keys into one computer-wide
-    list: a phone a person took away from a setup is not brought back to it by the merge. Removal-direction information only — it cannot add a key.
-    «A person» is ANY person: a phone another person of the same organization removed from one setup of this Mac is named to this computer's other setups too (a key hash,
-    on the same Mac that held the pin, removal-only — lens review 10-20 · PO). Never from another organization's phone keys, and never from a disconnected setup."""
+async def phone_removals(db: AsyncSession, *, setup: DesktopSetup) -> tuple[list[str], list[str]] | None:
+    """story 4734: what a person took off this setup's computer, in two lists from ONE grouping read and ONE clock (the server's rows) — or None when the grouping is incomplete
+    (an org past the cap: the answer would be a partial list — «not now», never a short list the device acts on).
+    (1) `removed`: the fingerprints of phones a PERSON removed (`removed_by` set — not a device dropping its own pin) from some still-connected setup of this computer (a removed
+        phone KEY counts: removing the key removes its pairs). The device uses it once, when it first merges its setups' phone keys into one computer-wide list: a phone a person took
+        away from a setup is not brought back to it by the merge. «A person» is ANY person: a phone another person of the same organization removed from one setup of this Mac is
+        named to this computer's other setups too (a key hash, on the same Mac that held the pin, removal-only — lens review 10-20 · PO). Never from another organization's phone keys,
+        and never from a disconnected setup.
+    (2) `vetoed_now`: of those, the ones NOT paired with this computer now — no still-connected setup of it holds an ACTIVE pairing (removed_at null) of that key. A phone paired again
+        through a QR is reported again by the setups that hear it and their pairing rows come back to life, but a setup that never reports again (an old one this Mac does not run)
+        keeps its removal for good — so list (1) alone would take a phone away from a person who removed it and paired it again, on every connect. The device adds exactly this list to
+        its own record of removed phones on every connect (a removal that could not be kept in its files is then still known after a restart). Removal-direction information only —
+        it cannot add a key; a phone removed from ONE setup while another still holds it is in (1) and not here (it is still paired with the computer)."""
     from app.services.desktop_computers import ComputerGroupingIncomplete, computer_index, setup_ids_of_computer
 
     try:
         index = await computer_index(db, setup.org_id, complete=True)  # ONE grouping read: this setup's computer and its siblings come from the same snapshot
         mine = index.get(setup.id)
         if mine is None:
-            return []
+            return [], []
         siblings = await setup_ids_of_computer(db, setup.org_id, mine, live_only=True, index=index)
     except ComputerGroupingIncomplete:
-        return None  # the grouping is incomplete (an org past the cap): the answer would be a partial list — «not now», never a short list the device merges on
+        return None
     if not siblings:
-        return []
-    return sorted({fp for (fp,) in (await db.execute(
+        return [], []
+    removed = {fp for (fp,) in (await db.execute(
         select(RemoteDevice.fingerprint).join(RemoteDevicePairing, RemoteDevicePairing.remote_device_id == RemoteDevice.id)
         .where(RemoteDevicePairing.setup_id.in_(siblings), RemoteDevicePairing.removed_at.is_not(None),
                RemoteDevicePairing.removed_by.is_not(None), RemoteDevice.org_id == setup.org_id)  # a revoked KEY counts too: removing the key removes its pairs by a person
-    )).all()})
+    )).all()}
+    if not removed:
+        return [], []
+    active = {fp for (fp,) in (await db.execute(
+        select(RemoteDevice.fingerprint).join(RemoteDevicePairing, RemoteDevicePairing.remote_device_id == RemoteDevice.id)
+        .where(RemoteDevicePairing.setup_id.in_(siblings), RemoteDevicePairing.removed_at.is_(None),
+               RemoteDevice.org_id == setup.org_id, RemoteDevice.revoked_at.is_(None), RemoteDevice.fingerprint.in_(removed))
+    )).all()}
+    return sorted(removed), sorted(removed - active)
+
+
+async def phones_removed_by_a_person(db: AsyncSession, *, setup: DesktopSetup) -> list[str] | None:
+    """story 4734 (PO 10-20 · M2): list (1) of `phone_removals` — None when the grouping is incomplete."""
+    both = await phone_removals(db, setup=setup)
+    return None if both is None else both[0]
 
 
 async def _end_phone_session(db: AsyncSession, phone: RemoteDevice, now: datetime) -> Literal["ended", "not_found"]:

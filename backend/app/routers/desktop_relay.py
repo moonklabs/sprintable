@@ -199,11 +199,14 @@ async def device_setup_facts(setup: DesktopSetup = Depends(_device), db: AsyncSe
     from app.services.desktop_computers import computer_index
 
     name = (await db.execute(select(Organization.name).where(Organization.id == setup.org_id))).scalar_one_or_none()
-    # story 4734: the computer this setup belongs to, and the phones a person removed from a setup of it (the device's one-time merge leaves them out)
+    # story 4734: the computer this setup belongs to, and the phones a person removed from a setup of it (the device's one-time merge leaves them out) — and, on the same
+    # grouping read, the ones of those that are NOT paired with the computer now (the device keeps these in its own record on every connect)
+    removals = await agent_permissions.phone_removals(db, setup=setup)
     return {
         "org_id": str(setup.org_id), "org_name": name,
         "computer_id": str((await computer_index(db, setup.org_id)).get(setup.id) or ""),  # (null removed_phones: the grouping is incomplete — do not merge now)
-        "removed_phones": await agent_permissions.phones_removed_by_a_person(db, setup=setup),
+        "removed_phones": None if removals is None else removals[0],
+        "removed_phones_now": None if removals is None else removals[1],
     }
 
 
