@@ -29,8 +29,21 @@ describe('POST /api/desktop/setups/[id]/clock', () => {
     expect(path).toBe(`/api/v2/desktop/setups/${SETUP}/clock`);
     expect(req.method).toBe('POST');
     expect(await req.json()).toEqual(GOOD);
-    expect([...DESKTOP_CLOCK_KEYS].sort()).toEqual(['action', 'agent_member_id', 'idempotency_key', 'phone_key_id', 'signed']);
-    expect([...DESKTOP_CLOCK_ACTIONS]).toEqual(['out_open', 'out_submit', 'out_cancel', 'in']);
+    expect([...DESKTOP_CLOCK_KEYS].sort()).toEqual(['action', 'agent_member_id', 'edit', 'idempotency_key', 'phone_key_id', 'signed']);
+    expect([...DESKTOP_CLOCK_ACTIONS]).toEqual(['out_open', 'out_submit', 'out_cancel', 'in', 'out_edit']);
+  });
+
+  it('an edit (S5 · P2) carries the four keys of `edit` and nothing else in it; a caller\'s extra key inside the edit is dropped, and an edit that is not an object is a 422', async () => {
+    const edit = { base_rev: 3, plan: '내일', done: 'd', blockers: '', session_key: 's', path: '/x', text: 't' };
+    await POST(post({ ...GOOD, action: 'out_edit', agent_member_id: 'a-1', edit }), params(SETUP));
+    const [req] = proxy.mock.calls[0] as [Request];
+    expect(await req.json()).toEqual({ ...GOOD, action: 'out_edit', agent_member_id: 'a-1', edit: { base_rev: 3, plan: '내일', done: 'd', blockers: '' } });
+    proxy.mockClear();
+    for (const bad of [null, 'plan', ['plan'], 5]) expect((await POST(post({ ...GOOD, action: 'out_edit', agent_member_id: 'a-1', edit: bad }), params(SETUP))).status).toBe(422);
+    expect(proxy).not.toHaveBeenCalled();
+    // a press without an edit never gains one
+    await POST(post(GOOD), params(SETUP));
+    expect(await (proxy.mock.calls[0]![0] as Request).json()).toEqual(GOOD);
   });
 
   it('a press on one agent carries the agent id; nothing else rides on it (text · name · path · setup_id · kind · expiry sent by a caller is dropped here)', async () => {

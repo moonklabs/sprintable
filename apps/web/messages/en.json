@@ -1760,6 +1760,9 @@
         "alreadyRunning": "This agent is already running — continue in its chat",
         "openChat": "Open chat",
         "unreachable": "Can't reach that computer right now — check that the Sprintable app is open there, then tap again",
+        "stale": "That agent's text changed on the computer in the meantime — check the line above and save again",
+        "notEditable": "This text can't be edited right now — the draft is still coming, or the handoff is already being left",
+        "unknownEdit": "Couldn't tell whether it was saved — look at this card again in a moment",
         "notPaired": "This phone isn't paired with that computer, so it couldn't start — pair it, then tap again",
         "remoteOff": "Remote control is off, so it couldn't start — an owner or admin can turn it on",
         "noScreenLock": "A phone without a screen lock can't start agents — turn on a screen lock in Settings",
@@ -7438,7 +7441,9 @@
         "notEnded": "Handoff left — it didn't stop",
         "idleNotEnded": "Couldn't stop — it's still working",
         "failed": "Couldn't leave the handoff — it keeps working",
-        "lineReady": "{line} · ✓"
+        "lineReady": "{line} · ✓",
+        "lineEdited": "Edited · {line}",
+        "lineEditedReady": "Edited · {line} · ✓"
       },
       "action": {
         "submitAll": "Hand over as is and end sessions",
@@ -7446,12 +7451,28 @@
         "submitOneIdle": "End session",
         "allReady": "All ready — hand over as is and end the sessions",
         "draftsComing": "Drafts are still coming — you can press once they arrive",
-        "needsHand": "The {m} that need you have to be filled in on that computer — you can't edit text from the phone yet",
-        "needsHandOne": "The «Done» and «Next» fields have to be filled in on that computer — you can't edit text from the phone yet",
+        "needsHand": "The {m} that need you have to be filled in before the sessions can end — use [Fill in] below, right on the phone",
+        "needsHandOne": "The «Done» and «Next» fields have to be filled in before the session can end — use [Fill in] below, right on the phone",
         "needsList": "Needs you · {names}",
         "namesMore": "{names} and {k} more",
         "running": "Leaving the handoff…",
         "lineHidden": "Some agents' draft lines can't be shown here — check them on that computer"
+      },
+      "edit": {
+        "fill": "Fill in",
+        "fix": "Edit",
+        "fillAria": "Fill in the handoff of {name}",
+        "fixAria": "Edit the handoff of {name}",
+        "lead": "Only the fields you type into change — a field you type into is replaced as a whole, an empty one stays as it is",
+        "field": { "done": "Done", "plan": "Next", "blockers": "Blockers" },
+        "placeholderEmpty": "Empty — write it here",
+        "placeholderKeep": "Leave empty to keep what is there now",
+        "moved": "That agent's text changed on the computer in the meantime — check the line above and press [Save] again",
+        "nothingTyped": "Nothing typed yet",
+        "tooLong": "One field takes up to {max} characters",
+        "save": "Save",
+        "saving": "Saving…",
+        "close": "Close"
       },
       "out": {
         "head": "Sessions ended · {time}",
@@ -7480,11 +7501,12 @@
         "checkResult": "Check the result",
         "expired": "Lost the connection to that computer, so no session ended — nothing was stopped. Press again once it's on",
         "expiredStart": "Lost the connection to that computer, so no session started. Press again once it's on",
+        "expiredEdit": "Lost the connection to that computer, so your words were not sent — save again once it's on",
         "already": "Already in progress — showing where it is now",
         "nothingRunning": "No session to end",
         "notOpen": "Getting ready to end sessions was already closed — start again from [End all sessions]",
         "notReady": "Drafts are still coming — you can press once they arrive",
-        "needsHands": "Some agents need you — fill them in on that computer",
+        "needsHands": "Some agents need you — fill them in with [Fill in] below",
         "notClockedOut": "No session to start",
         "unknownAgent": "That agent isn't on that computer",
         "alreadyRunning": "It's already working",
@@ -7495,7 +7517,10 @@
         "pairAgain": "Please pair the phone again",
         "biometricRequired": "Turn on fingerprint or face check on the phone",
         "noScreenLock": "Set a screen lock on the phone first",
-        "unreachable": "Can't reach that computer — press again once it's on"
+        "unreachable": "Can't reach that computer — press again once it's on",
+        "stale": "That agent's text changed on the computer in the meantime — check the line above and save again",
+        "notEditable": "This text can't be edited right now — the draft is still coming, or the handoff is already being left",
+        "unknownEdit": "Couldn't tell whether it was saved — look at this card again in a moment"
       },
       "oldApp": "Update the app on that computer to end and start sessions from the phone"
     }

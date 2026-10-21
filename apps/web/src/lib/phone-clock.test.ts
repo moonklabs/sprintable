@@ -1,7 +1,7 @@
 // story #4733 (S4b) — session management from the phone app: what the web asks the shell, what it posts, how every end maps to one outcome, and what of the
 // computer's closed view the screen keeps (copy yuna/4733-phone-clock-copy-1020.md · design §7 · §9).
 import { describe, expect, it, vi } from 'vitest';
-import { CLOCK_RESULTS, checkPress, parseClockRead, pressClock, readClock, type Pending, type PressDeps } from './phone-clock';
+import { CLOCK_RESULTS, checkPress, editClock, parseClockRead, pressClock, readClock, type Pending, type PressDeps } from './phone-clock';
 import { beginFlow, endFlow } from './phone-start';
 import type { PhoneAnswer } from './phone-bridge';
 
@@ -240,7 +240,7 @@ describe('[4733 S4b] readClock · parseClockRead', () => {
   it('a panel: counts, rows (name · state · missing · first line · idle), who opened it', () => {
     const r = parseClockRead(panel())!;
     expect(r.view).toMatchObject({ mode: 'panel', scope: 'computer', openedFrom: 'mac', count: { ready: 1, needsYou: 0, drafting: 0 }, reportedAt: '2026-10-20T01:00:00Z' });
-    expect(r.view!.rows).toEqual([{ agentId: AGENT, name: 'Dev', state: 'ready', missing: [], firstLine: '오늘 한 일', idle: false }]);
+    expect(r.view!.rows).toEqual([{ agentId: AGENT, name: 'Dev', state: 'ready', missing: [], firstLine: '오늘 한 일', idle: false, rev: 0, edited: false }]);
   });
 
   it('the draft\'s first line is kept as plain characters (a tag · url · newline is data, not markup); a row with missing flags keeps only the known ones', () => {
@@ -300,5 +300,72 @@ describe('[4733 S4b] readClock · parseClockRead', () => {
     expect(parseClockRead({ ...READ, supported: false })!.supported).toBe(false);
     expect(parseClockRead(null)).toBeNull();
     expect(parseClockRead({ remote_control: 'yes', reachable: true, supported: true })).toBeNull();
+  });
+});
+
+
+describe('[4733 S5·P2] editClock — a person\'s words for one agent\'s draft', () => {
+  const EDIT = { setupId: SETUP, agentId: AGENT, baseRev: 4, fields: { plan: '내일 이어서 함' } };
+  const edited: PhoneAnswer = { id: 'e1', ok: true, signed: 'SIGNED', phone_key_id: KEY, edit: { base_rev: 4, plan: '내일 이어서 함' } };
+
+  it('the shell gets the computer, the action out_edit, the agent and the edit (the revision + the touched fields); the post carries what the shell handed back', async () => {
+    const calls = server(json(201, { command_id: CMD }), [json(200, { state: 'done', result_code: 'ok' })]);
+    const d = deps(edited);
+    await expect(editClock(EDIT, d)).resolves.toEqual({ kind: 'done', result: 'ok' });
+    expect(d.phoneCall).toHaveBeenCalledWith('command.sign', { kind: 'clock', setup_id: SETUP, action: 'out_edit', agent_member_id: AGENT, edit: { base_rev: 4, plan: '내일 이어서 함' } });
+    expect(JSON.parse(calls[0]!.init!.body as string)).toEqual({ action: 'out_edit', signed: 'SIGNED', phone_key_id: KEY, agent_member_id: AGENT, edit: { base_rev: 4, plan: '내일 이어서 함' }, idempotency_key: 'idem-1' });
+  });
+
+  it('only the touched fields: an untouched field is not a key on the shell call or the post; an edit that touches nothing is failed before anything is asked', async () => {
+    const calls = server(json(201, { command_id: CMD }), [json(200, { state: 'done', result_code: 'ok' })]);
+    const d = deps({ ...edited, edit: { base_rev: 4, done: 'D', blockers: '' } });
+    await editClock({ ...EDIT, fields: { done: 'D', blockers: '' } }, d);
+    expect(Object.keys((d.phoneCall.mock.calls[0]![1] as { edit: object }).edit).sort()).toEqual(['base_rev', 'blockers', 'done']);
+    expect(Object.keys(JSON.parse(calls[0]!.init!.body as string).edit).sort()).toEqual(['base_rev', 'blockers', 'done']);
+    const none = deps(edited);
+    await expect(editClock({ ...EDIT, fields: {} }, none)).resolves.toEqual({ kind: 'failed' });
+    expect(none.phoneCall).not.toHaveBeenCalled();
+  });
+
+  it.each(['stale', 'not_editable', 'not_open', 'unknown_agent'])('the computer ends the edit with «%s» → done with that word', async (result) => {
+    server(json(201, { command_id: CMD }), [json(200, { state: 'done', result_code: result })]);
+    await expect(editClock(EDIT, deps(edited))).resolves.toEqual({ kind: 'done', result });
+  });
+
+  it('the shell\'s answer must be the edit that was asked (revision · field set · text): anything else is failed and nothing is posted', async () => {
+    const wrong: unknown[] = [undefined, null, 'plan', [], { plan: 'x' }, { base_rev: 5, plan: 'x' }, { base_rev: 4, done: 'x' }, { base_rev: 4, plan: 'x', done: 'y' }, { base_rev: 4, plan: 7 }, { base_rev: 4 }];
+    for (const edit of wrong) {
+      const calls = server(json(201, { command_id: CMD }), [json(200, { state: 'done', result_code: 'ok' })]);
+      await expect(editClock(EDIT, deps({ ...edited, edit } as PhoneAnswer)), JSON.stringify(edit)).resolves.toEqual({ kind: 'failed' });
+      expect(calls, JSON.stringify(edit)).toHaveLength(0);
+    }
+  });
+
+  it('the shell\'s refusals map as a press\'s do; a cleaned text is posted as cleaned', async () => {
+    const calls = server(json(201, {}));
+    await expect(editClock(EDIT, deps({ id: 'e', ok: false, code: 'cancelled' }))).resolves.toEqual({ kind: 'cancelled' });
+    await expect(editClock(EDIT, deps({ id: 'e', ok: false, code: 'agent_not_found' }))).resolves.toEqual({ kind: 'failed' });
+    await expect(editClock(EDIT, deps({ id: 'e', ok: false, code: 'not_allowed' }))).resolves.toEqual({ kind: 'not_allowed' });
+    expect(calls).toHaveLength(0);
+    const c2 = server(json(201, { command_id: CMD }), [json(200, { state: 'done', result_code: 'ok' })]);
+    await editClock({ ...EDIT, fields: { plan: 'a\u200bb' } }, deps({ ...edited, edit: { base_rev: 4, plan: 'ab' } }));
+    expect(JSON.parse(c2[0]!.init!.body as string).edit).toEqual({ base_rev: 4, plan: 'ab' });
+  });
+
+  it('a lost answer is `unknown` (followed with the same key and body, never redone with a new signature)', async () => {
+    server(new Response('x', { status: 502 }));
+    const out = await editClock(EDIT, deps(edited));
+    expect(out.kind).toBe('unknown');
+    expect((out as { pending: Pending }).pending.body).toMatchObject({ action: 'out_edit', agent_member_id: AGENT, edit: { base_rev: 4, plan: '내일 이어서 함' } });
+  });
+
+  it('the rows keep their revision and the mark of a person\'s hand; an older computer\'s row has neither (0 · not edited)', () => {
+    const base = { remote_control: true, reachable: true, supported: true };
+    const r = (o: Record<string, unknown>) => ({ agent_member_id: AGENT, state: 'ready', missing: [], first_line: '줄', idle: false, ...o });
+    const view = (rows: unknown[]) => parseClockRead({ ...base, view: { mode: 'panel', scope: 'computer', count: { ready: 1, needs_you: 0, drafting: 0 }, rows, outs: [] } })!.view!;
+    expect(view([r({ rev: 7, edited: true })]).rows[0]).toMatchObject({ rev: 7, edited: true });
+    expect(view([r({})]).rows[0]).toMatchObject({ rev: 0, edited: false });
+    for (const rev of [-1, 1.5, '3', null]) expect(view([r({ rev })]).rows[0]!.rev).toBe(0);
+    expect(view([r({ edited: 'yes' })]).rows[0]!.edited).toBe(false);
   });
 });

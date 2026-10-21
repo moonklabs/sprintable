@@ -2,7 +2,8 @@
 
 // story #4733 (S4b · copy yuna/4733-phone-clock-copy-1020.md · design dan/4733-phone-clock-design-1020.md §7): «세션 관리» in the phone app — end and start the sessions
 // of a paired computer, all of them or one agent's. The computer's own flow decides (its daemon; the app window may be closed); this screen only looks at the closed
-// view it reported and sends the person's signed presses. Nothing here edits a handoff in P1: a row that needs a hand is filled in at the computer.
+// view it reported and sends the person's signed presses. A row that needs a hand can be filled in here too (S5 · P2): the person types into the fields, the shell signs a hash of exactly
+// those fields and the computer writes only them, only into the revision of the row this screen read.
 //
 // Words: «퇴근» / «출근» are in no string of this screen — the card is «세션 관리»; the buttons [모든 세션 종료] · [모든 세션 시작] · [세션 종료] · [세션 시작].
 // Disabled means a visible reason in text next to the button (never `title`); results are `role="status"` lines (not red, no toasts).
@@ -16,7 +17,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { formatViewerDate } from '@/lib/viewer-time-zone';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { beginFlow, endFlow, readStartableKeyed, type Flow, type StartableComputer } from '@/lib/phone-start';
-import { checkPress, pressClock, readClock, type ClockAction, type ClockRead, type ClockView, type Pending, type PressOutcome } from '@/lib/phone-clock';
+import { checkPress, editClock, pressClock, readClock, type ClockAction, type ClockEditFields, type ClockRead, type ClockView, type Pending, type PressOutcome } from '@/lib/phone-clock';
 
 const newKey = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`);
 
@@ -110,12 +111,14 @@ function SessionsForOrg({ orgId, orgSyncPending }: { orgId: string | undefined; 
 type T = ReturnType<typeof useTranslations>;
 
 type LineKey =
-  | 'remoteOff' | 'already' | 'nothingRunning' | 'notOpen' | 'notReady' | 'needsHands' | 'notClockedOut' | 'unknownAgent' | 'alreadyRunning' | 'expired' | 'expiredStart' | 'unreachable'
+  | 'remoteOff' | 'already' | 'nothingRunning' | 'notOpen' | 'notReady' | 'needsHands' | 'notClockedOut' | 'unknownAgent' | 'alreadyRunning' | 'expired' | 'expiredStart' | 'expiredEdit' | 'unreachable'
+  | 'stale' | 'notEditable' | 'unknownEdit'
   | 'unknown' | 'unknownStart' | 'notAllowed' | 'notPaired' | 'signInAgain' | 'pairAgain' | 'biometricRequired' | 'noScreenLock' | 'failed';
 type Line = { key: LineKey } | null;
 
 const DONE_LINES: Record<string, LineKey> = {
   already: 'already', nothing_running: 'nothingRunning', not_open: 'notOpen', not_ready: 'notReady', needs_hands: 'needsHands', not_clocked_out: 'notClockedOut', unknown_agent: 'unknownAgent', already_running: 'alreadyRunning',
+  stale: 'stale', not_editable: 'notEditable',
 };
 
 /** the words of a line — every key written out, so a key nobody reads is seen as one */
@@ -132,7 +135,11 @@ function resultText(t: T, key: LineKey): string {
     case 'alreadyRunning': return t('result.alreadyRunning');
     case 'expired': return t('result.expired');
     case 'expiredStart': return t('result.expiredStart');
+    case 'expiredEdit': return t('result.expiredEdit');
     case 'unreachable': return t('result.unreachable');
+    case 'stale': return t('result.stale');
+    case 'notEditable': return t('result.notEditable');
+    case 'unknownEdit': return t('result.unknownEdit');
     case 'unknown': return t('result.unknown');
     case 'unknownStart': return t('result.unknownStart');
     case 'notAllowed': return t('result.notAllowed');
@@ -146,12 +153,12 @@ function resultText(t: T, key: LineKey): string {
 }
 
 /** every end of a press is one line (or none): `ok` changes the card itself, a «no» of the person or a leaving screen says nothing */
-function lineOf(o: PressOutcome, start: boolean): Line {
+function lineOf(o: PressOutcome, start: boolean, edit = false): Line {
   switch (o.kind) {
     case 'done': return DONE_LINES[o.result] ? { key: DONE_LINES[o.result]! } : null;
     case 'unreachable': return { key: 'unreachable' }; // the server refused before making anything: certainly nothing happened, but it is not the «never taken» proof
-    case 'expired': return { key: start ? 'expiredStart' : 'expired' };
-    case 'unknown': return { key: start ? 'unknownStart' : 'unknown' };
+    case 'expired': return { key: edit ? 'expiredEdit' : start ? 'expiredStart' : 'expired' };
+    case 'unknown': return { key: edit ? 'unknownEdit' : start ? 'unknownStart' : 'unknown' };
     case 'remote_off': return { key: 'remoteOff' }; // (the section turns to its own remote-off line at the next list read)
     case 'not_allowed': return { key: 'notAllowed' };
     case 'not_paired': return { key: 'notPaired' };
@@ -254,6 +261,28 @@ function ComputerCard({ computer, phoneKeyId, onChanged, frozen, held }: { compu
     }
   };
 
+  /** S5 · P2: a person's words for one agent's draft. One thing out at a time (the same guard as a press); an unknown end is NOT held like a press's (nothing to redo: the next look shows what the computer has) */
+  const edit = async (agentId: string, baseRev: number, fields: ClockEditFields): Promise<PressOutcome> => {
+    if (busyRef.current) return { kind: 'stopped' };
+    busyRef.current = true;
+    setBusy(true);
+    setLine(null);
+    const flow = beginFlow();
+    flows.current.add(flow);
+    let out: PressOutcome = { kind: 'failed' };
+    try {
+      out = await editClock({ setupId: computer.setup_id, agentId, baseRev, fields }, { phoneCall, flow, newKey });
+      if (!alive.current) return out;
+      setLine(lineOf(out, false, true));
+    } finally {
+      endFlow(flow);
+      flows.current.delete(flow);
+      busyRef.current = false;
+      if (alive.current) { setBusy(false); void look(); onChanged(); }
+    }
+    return out;
+  };
+
   const zone = useViewerTimeZone(); // the viewer's own zone (the phone's) — a clock time is the person's, not the server's
   const time = (iso: string | null | undefined): string => { const d = iso ? new Date(iso) : null; return d && !Number.isNaN(d.getTime()) ? (formatViewerDate(d, locale, zone, { hour: 'numeric', minute: '2-digit' }) ?? '') : ''; };
 
@@ -309,7 +338,7 @@ function ComputerCard({ computer, phoneKeyId, onChanged, frozen, held }: { compu
 
       {view?.mode === 'panel' ? (
         <Panel view={view} t={t} nameOf={nameOf} busy={busy || locked} unreachable={!read.reachable} runningCount={runningCount} names={names}
-          onSubmit={(agentId) => void run('out_submit', agentId)} onCancel={(agentId) => void run('out_cancel', agentId)} />
+          onSubmit={(agentId) => void run('out_submit', agentId)} onCancel={(agentId) => void run('out_cancel', agentId)} onEdit={edit} />
       ) : view?.mode === 'in' ? (
         <InProgress view={view} t={t} time={time} />
       ) : view?.mode === 'out' && view.out ? (
@@ -376,9 +405,10 @@ function Idle({ computer, view, t, time, nameOf, busy, unreachable, runningCount
   );
 }
 
-function Panel({ view, t, nameOf, busy, unreachable, runningCount, names, onSubmit, onCancel }: {
+function Panel({ view, t, nameOf, busy, unreachable, runningCount, names, onSubmit, onCancel, onEdit }: {
   view: ClockView; t: T; nameOf: (id: string, n: string | null) => string; busy: boolean; unreachable: boolean; runningCount: number; names: (l: string[]) => string;
   onSubmit: (agentId?: string) => void; onCancel: (agentId?: string) => void;
+  onEdit: (agentId: string, baseRev: number, fields: ClockEditFields) => Promise<PressOutcome>;
 }) {
   const one = view.scope === 'one';
   const oneRow = one ? view.rows[0] ?? null : null;
@@ -402,7 +432,7 @@ function Panel({ view, t, nameOf, busy, unreachable, runningCount, names, onSubm
       <p className="text-xs text-muted-foreground">{t('panel.windowClosed')}</p>
       {!one ? <p className="text-xs text-foreground" data-testid="phone-sessions-count">{count.drafting > 0 ? t('panel.countDrafting', { ready: count.ready, needs: count.needsYou, drafting: count.drafting }) : t('panel.count', { ready: count.ready, needs: count.needsYou })}</p> : null}
       <ul className="space-y-2" data-testid="phone-sessions-rows">
-        {view.rows.map((r) => <PanelRow key={r.agentId} row={r} t={t} name={nameOf(r.agentId, r.name)} />)}
+        {view.rows.map((r) => <PanelRow key={r.agentId} row={r} t={t} name={nameOf(r.agentId, r.name)} busy={busy} unreachable={unreachable} onEdit={onEdit} />)}
       </ul>
       {count.needsYou > 0 && !one ? <p className="text-xs text-muted-foreground" data-testid="phone-sessions-needs-list">{t('action.needsList', { names: names(needsNames) })}</p> : null}
       {allReady && !one ? <p role="status" className="text-xs text-foreground">{t('action.allReady')}</p> : null}
@@ -420,7 +450,9 @@ function Panel({ view, t, nameOf, busy, unreachable, runningCount, names, onSubm
   );
 }
 
-function PanelRow({ row, t, name }: { row: ClockView['rows'][number]; t: T; name: string }) {
+function PanelRow({ row, t, name, busy, unreachable, onEdit }: {
+  row: ClockView['rows'][number]; t: T; name: string; busy: boolean; unreachable: boolean; onEdit: (agentId: string, baseRev: number, fields: ClockEditFields) => Promise<PressOutcome>;
+}) {
   const state = (() => {
     switch (row.state) {
       case 'drafting': return t('row.drafting');
@@ -435,12 +467,85 @@ function PanelRow({ row, t, name }: { row: ClockView['rows'][number]; t: T; name
     }
   })();
   // the agent's own text: plain characters in a text node — never a link, never HTML; one line, cut by the layout (the server already cut it at 59 + «…»)
-  const line = row.firstLine && (row.state === 'ready' || row.state === 'needs_you' || row.state === 'saving' || row.state === 'failed') ? (row.state === 'ready' ? t('row.lineReady', { line: row.firstLine }) : row.firstLine) : null;
+  // S5 · P2: a line a person typed (the Mac's or this phone's) is said so in front of it — «고친 글 · …» — it is not the agent's draft
+  const line = row.firstLine && (row.state === 'ready' || row.state === 'needs_you' || row.state === 'saving' || row.state === 'failed')
+    ? (row.state === 'ready' ? t(row.edited ? 'row.lineEditedReady' : 'row.lineReady', { line: row.firstLine }) : row.edited ? t('row.lineEdited', { line: row.firstLine }) : row.firstLine)
+    : null;
+  // a draft that is there (not still coming, not an idle session, not through) can be filled in or fixed
+  const editable = !row.idle && (row.state === 'ready' || row.state === 'needs_you');
   return (
     <li className="space-y-0.5" data-testid="phone-sessions-row" data-state={row.state}>
       <p className="text-sm">{name}{state ? <span className="text-muted-foreground"> · {state}</span> : null}</p>
-      {line ? <p className="truncate text-xs text-muted-foreground" data-testid="phone-sessions-first-line">{line}</p> : null}
+      {line ? <p className="truncate text-xs text-muted-foreground" data-testid="phone-sessions-first-line" data-edited={row.edited ? 'true' : 'false'}>{line}</p> : null}
+      {editable ? <RowEditor row={row} t={t} name={name} busy={busy} unreachable={unreachable} onEdit={onEdit} /> : null}
     </li>
+  );
+}
+
+const EDIT_FIELDS = ['done', 'plan', 'blockers'] as const;
+/** the Mac's own limit per field (a longer text is refused by the computer's gate and the server) */
+export const EDIT_FIELD_MAX = 2000;
+
+/**
+ * S5 · P2 — fill in or fix one agent's draft on the phone. The three fields start EMPTY (the phone is not shown their text — only the first line of «한 것»): a field the person types
+ * into replaces that whole field on the computer, a field left empty is not sent and stays exactly as it is. The revision the screen read when the editor was opened rides along;
+ * if the row moved on since (the computer says `stale`) nothing is written and the person is shown the row as it is now.
+ */
+function RowEditor({ row, t, name, busy, unreachable, onEdit }: {
+  row: ClockView['rows'][number]; t: T; name: string; busy: boolean; unreachable: boolean; onEdit: (agentId: string, baseRev: number, fields: ClockEditFields) => Promise<PressOutcome>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState<Record<(typeof EDIT_FIELDS)[number], string>>({ done: '', plan: '', blockers: '' });
+  const [baseRev, setBaseRev] = useState(row.rev);
+  const fields: ClockEditFields = {};
+  for (const k of EDIT_FIELDS) if (text[k].trim() !== '') fields[k] = text[k].trim(); // the ends' blanks are let go before the phone signs: the computer saves the words trimmed, so what is signed is what is stored
+  const typed = Object.keys(fields).length > 0;
+  const tooLong = EDIT_FIELDS.some((k) => [...text[k]].length > EDIT_FIELD_MAX);
+  const label = (k: (typeof EDIT_FIELDS)[number]): string => t(`edit.field.${k}`);
+  const fill = row.state === 'needs_you';
+  if (!open) {
+    return (
+      <Button variant="outline" size="sm" className="min-h-11" disabled={busy || unreachable} aria-label={t(fill ? 'edit.fillAria' : 'edit.fixAria', { name })}
+        onClick={() => { setBaseRev(row.rev); setOpen(true); }} data-testid="phone-sessions-edit-open">
+        {t(fill ? 'edit.fill' : 'edit.fix')}
+      </Button>
+    );
+  }
+  // the row moved on since the editor was opened (the screen read a newer revision): the person is told, and the first [저장] only takes the new revision as the one they have now
+  // looked at (the first line above is the row as it is) — it sends nothing; the typed words stay
+  const moved = row.rev !== baseRev;
+  const save = async () => {
+    if (!typed || tooLong) return;
+    if (moved) { setBaseRev(row.rev); return; }
+    const out = await onEdit(row.agentId, baseRev, fields);
+    if (out.kind === 'done' && out.result === 'ok') { setOpen(false); setText({ done: '', plan: '', blockers: '' }); }
+    // (`stale` from the computer: the next look brings the new revision and the notice above; nothing was written)
+  };
+  return (
+    <div className="space-y-2 rounded-md border p-2" data-testid="phone-sessions-editor">
+      <p className="text-xs text-muted-foreground">{t('edit.lead')}</p>
+      {moved ? <p role="status" className="text-xs text-foreground" data-testid="phone-sessions-edit-moved">{t('edit.moved')}</p> : null}
+      {EDIT_FIELDS.map((k) => (
+        <label key={k} className="block space-y-1 text-xs">
+          <span className="font-medium text-foreground">{label(k)}</span>
+          <textarea
+            className="min-h-16 w-full rounded-md border bg-background p-2 text-sm"
+            rows={3}
+            maxLength={EDIT_FIELD_MAX * 2}
+            value={text[k]}
+            placeholder={row.missing.includes(k) ? t('edit.placeholderEmpty') : t('edit.placeholderKeep')}
+            onChange={(e) => setText((prev) => ({ ...prev, [k]: e.target.value }))}
+            data-testid={`phone-sessions-edit-${k}`}
+          />
+        </label>
+      ))}
+      {tooLong ? <p role="status" className="text-xs text-muted-foreground" data-testid="phone-sessions-edit-too-long">{t('edit.tooLong', { max: EDIT_FIELD_MAX })}</p> : null}
+      {!typed ? <p className="text-xs text-muted-foreground" data-testid="phone-sessions-edit-nothing">{t('edit.nothingTyped')}</p> : null}
+      <div className="flex gap-2">
+        <Button className="min-h-11" disabled={busy || unreachable || !typed || tooLong} onClick={() => void save()} data-testid="phone-sessions-edit-save">{busy ? t('edit.saving') : t('edit.save')}</Button>
+        <Button variant="outline" className="min-h-11" onClick={() => setOpen(false)} data-testid="phone-sessions-edit-close">{t('edit.close')}</Button>
+      </div>
+    </div>
   );
 }
 

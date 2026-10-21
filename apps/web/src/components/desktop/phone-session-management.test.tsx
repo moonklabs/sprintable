@@ -246,7 +246,7 @@ describe('[4733 S4b] a press', () => {
     expect(phoneCall.mock.calls.filter((c) => c[0] === 'command.sign')).toHaveLength(2); // …and never a new signature for it
   });
 
-  it.each([['already', '이미 하고 있어요'], ['not_open', '이미 닫혔어요'], ['not_ready', '초안이 오는 중이에요'], ['needs_hands', '그 컴퓨터에서 채워 주세요']])('the computer\'s word «%s» has its own line', async (code, part) => {
+  it.each([['already', '이미 하고 있어요'], ['not_open', '이미 닫혔어요'], ['not_ready', '초안이 오는 중이에요'], ['needs_hands', '아래 [채우기]로 채워 주세요']])('the computer\'s word «%s» has its own line', async (code, part) => {
     world.poll = json({ command_id: CMD, state: 'done', result_code: code });
     await screen();
     await press(byId('phone-sessions-end-all'));
@@ -509,13 +509,14 @@ describe('[4733 S4b] the panel (mode panel)', () => {
     expect(byId('phone-sessions-reason')?.textContent).toBe(koMessages.desktop.phoneSessions.action.draftsComing);
   });
 
-  it('a row that needs a hand → the button is off, the reason + the names say so; no editing on the phone', async () => {
+  it('a row that needs a hand → the button is off, the reason + the names say so; the fields are filled in with [채우기] (S5 · P2)', async () => {
     world.view = panel([row({ state: 'needs_you', missing: ['done'], first_line: null })], { ready: 0, needs_you: 1, drafting: 0 });
     await screen();
     expect((byId('phone-sessions-submit') as HTMLButtonElement).disabled).toBe(true);
-    expect(byId('phone-sessions-reason')?.textContent).toContain('그 컴퓨터에서 채워야 세션을 종료할 수 있어요');
+    expect(byId('phone-sessions-reason')?.textContent).toContain('채워야 세션을 종료할 수 있어요');
     expect(byId('phone-sessions-needs-list')?.textContent).toBe('손 필요 · 결제 담당');
-    expect(container.querySelector('textarea, input')).toBeNull();
+    expect(container.querySelector('textarea, input')).toBeNull(); // (S5 · P2: the editor is closed until [채우기] is pressed)
+    expect(byId('phone-sessions-edit-open')?.textContent).toBe('채우기');
   });
 
   it('a panel that has no rows yet cannot be submitted (nothing to hand over)', async () => {
@@ -680,5 +681,246 @@ describe('[4733 S4b] words', () => {
       await act(async () => { root.unmount(); });
       root = createRoot(container);
     }
+  });
+});
+
+
+// ── S5 · P2: fill in and fix on the phone ──
+const typeInto = async (el: HTMLElement | null, value: string) => {
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+  await act(async () => { setter.call(el, value); el!.dispatchEvent(new Event('input', { bubbles: true })); });
+  await flush();
+};
+const needsPlan = (rev = 4, extra: Record<string, unknown> = {}) => row({ state: 'needs_you', missing: ['plan'], first_line: '결제 연동을 끝냈어요', rev, ...extra });
+const needsView = (rev = 4) => panel([needsPlan(rev)], { ready: 0, needs_you: 1, drafting: 0 });
+const editPosts = () => posts().filter((c) => c.body?.action === 'out_edit');
+
+describe('[4733 S5·P2] filling in and fixing on the phone', () => {
+  it('a row that needs a hand has [채우기]; it opens three EMPTY fields (the empty one says so), nothing is sendable until a field is typed into', async () => {
+    world.view = needsView();
+    await screen();
+    await press(byId('phone-sessions-edit-open'));
+    const ta = (k: string) => byId(`phone-sessions-edit-${k}`) as HTMLTextAreaElement;
+    expect([ta('done').value, ta('plan').value, ta('blockers').value]).toEqual(['', '', '']); // the phone is never shown the fields' text — a field it types into replaces the whole of it
+    expect(ta('plan').placeholder).toBe('비어 있어요 — 여기에 써 주세요');
+    expect(ta('done').placeholder).toBe('쓰지 않으면 지금 글 그대로예요');
+    expect(container.textContent).toContain('쓴 칸만 바뀌어요');
+    expect((byId('phone-sessions-edit-save') as HTMLButtonElement).disabled).toBe(true);
+    expect(byId('phone-sessions-edit-nothing')?.textContent).toBe('쓴 칸이 없어요');
+    await typeInto(ta('plan'), '   '); // spaces are no words
+    expect((byId('phone-sessions-edit-save') as HTMLButtonElement).disabled).toBe(true);
+    await press(byId('phone-sessions-edit-close'));
+    expect(byId('phone-sessions-editor')).toBeNull();
+  });
+
+  it('when the card cannot be read any more (two looks in a row do not answer) [저장] goes off but [닫기] stays — a person is never kept inside an editor (codex round 2)', async () => {
+    world.view = needsView(4);
+    await screen();
+    await press(byId('phone-sessions-edit-open'));
+    await typeInto(byId('phone-sessions-edit-plan'), '내일 이어서 함');
+    world.clock = new Response('boom', { status: 500 });
+    await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+    await flush();
+    expect(byId('phone-sessions-stale')).not.toBeNull();
+    expect((byId('phone-sessions-edit-save') as HTMLButtonElement).disabled).toBe(true);
+    expect((byId('phone-sessions-edit-close') as HTMLButtonElement).disabled).toBe(false);
+    await press(byId('phone-sessions-edit-close'));
+    expect(byId('phone-sessions-editor')).toBeNull();
+  });
+
+  it('the ends\' blanks of a typed field are let go before it is signed (the computer saves the words trimmed — what is signed is what is stored); a line break inside stays', async () => {
+    world.view = needsView(4);
+    signAnswer = { id: 's', ok: true, signed: 'SIGNED', phone_key_id: KEYID, edit: { base_rev: 4, plan: '첫째\n둘째' } };
+    await screen();
+    await press(byId('phone-sessions-edit-open'));
+    await typeInto(byId('phone-sessions-edit-plan'), '  첫째\n둘째\n ');
+    await press(byId('phone-sessions-edit-save'));
+    expect(phoneCall).toHaveBeenCalledWith('command.sign', expect.objectContaining({ edit: { base_rev: 4, plan: '첫째\n둘째' } }));
+  });
+
+  it('typing into one field signs an `out_edit` with the revision the screen read and ONLY that field; the shell\'s cleaned words are what is posted; ok closes the editor and shows the new view', async () => {
+    world.view = needsView(4);
+    signAnswer = { id: 's', ok: true, signed: 'SIGNED', phone_key_id: KEYID, edit: { base_rev: 4, plan: '내일 이어서 함' } };
+    await screen();
+    await press(byId('phone-sessions-edit-open'));
+    await typeInto(byId('phone-sessions-edit-plan'), '내일 이어서 함');
+    world.view = panel([row({ rev: 5, edited: true, first_line: '결제 연동을 끝냈어요' })], { ready: 1, needs_you: 0, drafting: 0 }); // what the computer reports after the write
+    await press(byId('phone-sessions-edit-save'));
+    expect(phoneCall).toHaveBeenCalledWith('command.sign', { kind: 'clock', setup_id: SETUP, action: 'out_edit', agent_member_id: AGENT, edit: { base_rev: 4, plan: '내일 이어서 함' } });
+    expect(editPosts()).toHaveLength(1);
+    expect(editPosts()[0]!.body).toMatchObject({ action: 'out_edit', signed: 'SIGNED', phone_key_id: KEYID, agent_member_id: AGENT, edit: { base_rev: 4, plan: '내일 이어서 함' } });
+    expect(Object.keys((editPosts()[0]!.body as { edit: object }).edit).sort()).toEqual(['base_rev', 'plan']); // done and blockers are not even keys
+    expect(byId('phone-sessions-editor')).toBeNull();
+    expect(byId('phone-sessions-line')?.textContent).toBe(''); // an `ok` says nothing: the row changes
+    expect(byId('phone-sessions-first-line')?.getAttribute('data-edited')).toBe('true');
+    expect(byId('phone-sessions-first-line')?.textContent).toBe('고친 글 · 결제 연동을 끝냈어요 · ✓');
+    expect((byId('phone-sessions-submit') as HTMLButtonElement).disabled).toBe(false); // the consent button is on: the edited row shows its line
+  });
+
+  it('the words that go to the server are the shell\'s, not the page\'s: cleaned text is posted as the shell handed it back', async () => {
+    world.view = needsView(2);
+    signAnswer = { id: 's', ok: true, signed: 'SIGNED', phone_key_id: KEYID, edit: { base_rev: 2, plan: 'ab' } }; // the shell took a hidden character out
+    await screen();
+    await press(byId('phone-sessions-edit-open'));
+    await typeInto(byId('phone-sessions-edit-plan'), 'a\u200bb');
+    await press(byId('phone-sessions-edit-save'));
+    expect(phoneCall).toHaveBeenCalledWith('command.sign', expect.objectContaining({ edit: { base_rev: 2, plan: 'a\u200bb' } }));
+    expect((editPosts()[0]!.body as { edit: unknown }).edit).toEqual({ base_rev: 2, plan: 'ab' });
+  });
+
+  it('a shell answer that does not match what was asked (another revision · another field · an extra key · a non-text field · none) is not posted — "처리하지 못했어요"', async () => {
+    for (const back of [{ base_rev: 9, plan: 'x' }, { base_rev: 4, done: 'x' }, { base_rev: 4, plan: 'x', done: 'y' }, { base_rev: 4, plan: 5 }, undefined, 'plan']) {
+      world.view = needsView(4);
+      signAnswer = { id: 's', ok: true, signed: 'SIGNED', phone_key_id: KEYID, ...(back === undefined ? {} : { edit: back }) };
+      calls.length = 0;
+      await screen();
+      await press(byId('phone-sessions-edit-open'));
+      await typeInto(byId('phone-sessions-edit-plan'), 'x');
+      await press(byId('phone-sessions-edit-save'));
+      expect(editPosts(), JSON.stringify(back)).toHaveLength(0);
+      expect(byId('phone-sessions-line')?.textContent, JSON.stringify(back)).toBe(koMessages.desktop.phoneSessions.result.failed);
+      await act(async () => { root.unmount(); }); container.remove();
+      container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    }
+  });
+
+  it('all three fields typed → all three are signed and sent; a field with only spaces is not (it stays as it is on the computer)', async () => {
+    world.view = needsView(0);
+    signAnswer = { id: 's', ok: true, signed: 'SIGNED', phone_key_id: KEYID, edit: { base_rev: 0, done: 'D', plan: 'P', blockers: 'B' } };
+    await screen();
+    await press(byId('phone-sessions-edit-open'));
+    await typeInto(byId('phone-sessions-edit-done'), 'D'); await typeInto(byId('phone-sessions-edit-plan'), 'P'); await typeInto(byId('phone-sessions-edit-blockers'), 'B');
+    await press(byId('phone-sessions-edit-save'));
+    expect(editPosts()[0]!.body).toMatchObject({ edit: { base_rev: 0, done: 'D', plan: 'P', blockers: 'B' } });
+    // …and with a blank one:
+    calls.length = 0; phoneCall.mockClear();
+    signAnswer = { id: 's', ok: true, signed: 'SIGNED', phone_key_id: KEYID, edit: { base_rev: 0, plan: 'P2' } };
+    world.view = needsView(0);
+    await act(async () => { root.unmount(); }); container.remove();
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    await screen();
+    await press(byId('phone-sessions-edit-open'));
+    await typeInto(byId('phone-sessions-edit-done'), '   '); await typeInto(byId('phone-sessions-edit-plan'), 'P2');
+    await press(byId('phone-sessions-edit-save'));
+    expect(phoneCall).toHaveBeenCalledWith('command.sign', expect.objectContaining({ edit: { base_rev: 0, plan: 'P2' } }));
+  });
+
+  it('an edit the computer never took (queued the whole window) says so — not the «no session ended» line of a press (codex round 3)', async () => {
+    world.view = needsView(4);
+    signAnswer = { id: 's', ok: true, signed: 'SIGNED', phone_key_id: KEYID, edit: { base_rev: 4, plan: '폰에서 쓴 글' } };
+    world.poll = json({ command_id: CMD, state: 'queued', result_code: null });
+    await screen();
+    await press(byId('phone-sessions-edit-open'));
+    await typeInto(byId('phone-sessions-edit-plan'), '폰에서 쓴 글');
+    await press(byId('phone-sessions-edit-save'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(130_000); });
+    await flush();
+    expect(byId('phone-sessions-line')?.textContent).toBe(koMessages.desktop.phoneSessions.result.expiredEdit);
+    expect(byId('phone-sessions-line')?.textContent).not.toContain('세션을 종료하지');
+  });
+
+  it('`stale` (the row moved on): the line says so, nothing was written, the editor stays with the typed words, and the next save names the NEW revision', async () => {
+    world.view = needsView(4);
+    signAnswer = { id: 's', ok: true, signed: 'SIGNED', phone_key_id: KEYID, edit: { base_rev: 4, plan: '폰에서 쓴 글' } };
+    world.poll = json({ command_id: CMD, state: 'done', result_code: 'stale' });
+    await screen();
+    await press(byId('phone-sessions-edit-open'));
+    await typeInto(byId('phone-sessions-edit-plan'), '폰에서 쓴 글');
+    world.view = needsView(6); // the computer moved the row on meanwhile
+    await press(byId('phone-sessions-edit-save'));
+    expect(byId('phone-sessions-line')?.textContent).toBe(koMessages.desktop.phoneSessions.result.stale);
+    expect(byId('phone-sessions-editor')).not.toBeNull();
+    expect((byId('phone-sessions-edit-plan') as HTMLTextAreaElement).value).toBe('폰에서 쓴 글');
+    // the screen has read the new revision: it says so, and the first [저장] only takes it (nothing is signed or sent)
+    expect(byId('phone-sessions-edit-moved')?.textContent).toBe(koMessages.desktop.phoneSessions.edit.moved);
+    signAnswer = { id: 's', ok: true, signed: 'SIGNED2', phone_key_id: KEYID, edit: { base_rev: 6, plan: '폰에서 쓴 글' } };
+    world.poll = json({ command_id: CMD, state: 'done', result_code: 'ok' });
+    phoneCall.mockClear();
+    const before = editPosts().length;
+    await press(byId('phone-sessions-edit-save'));
+    expect(phoneCall).not.toHaveBeenCalledWith('command.sign', expect.anything());
+    expect(editPosts()).toHaveLength(before);
+    expect(byId('phone-sessions-edit-moved')).toBeNull();
+    await press(byId('phone-sessions-edit-save')); // the person has looked at the row as it is now: this one names the NEW revision
+    expect(phoneCall).toHaveBeenCalledWith('command.sign', expect.objectContaining({ edit: { base_rev: 6, plan: '폰에서 쓴 글' } }));
+  });
+
+  it('`not_editable` has its own line; the editor stays', async () => {
+    world.view = needsView(1);
+    signAnswer = { id: 's', ok: true, signed: 'SIGNED', phone_key_id: KEYID, edit: { base_rev: 1, plan: 'x' } };
+    world.poll = json({ command_id: CMD, state: 'done', result_code: 'not_editable' });
+    await screen();
+    await press(byId('phone-sessions-edit-open'));
+    await typeInto(byId('phone-sessions-edit-plan'), 'x');
+    await press(byId('phone-sessions-edit-save'));
+    expect(byId('phone-sessions-line')?.textContent).toBe(koMessages.desktop.phoneSessions.result.notEditable);
+    expect(byId('phone-sessions-editor')).not.toBeNull();
+  });
+
+  it('a lost answer is "저장됐는지 확인하지 못했어요" — no [결과 확인] (nothing to redo: the next look shows what the computer holds), the edit is not repeated', async () => {
+    world.view = needsView(3);
+    signAnswer = { id: 's', ok: true, signed: 'SIGNED', phone_key_id: KEYID, edit: { base_rev: 3, plan: 'x' } };
+    world.post = new Response('boom', { status: 502 });
+    await screen();
+    await press(byId('phone-sessions-edit-open'));
+    await typeInto(byId('phone-sessions-edit-plan'), 'x');
+    await press(byId('phone-sessions-edit-save'));
+    expect(byId('phone-sessions-line')?.textContent).toBe(koMessages.desktop.phoneSessions.result.unknownEdit);
+    expect(byId('phone-sessions-check')).toBeNull();
+    expect(editPosts()).toHaveLength(1);
+  });
+
+  it('only a draft that is there can be edited: not a row still drafting, an idle one, a saved one — and not while the computer cannot be reached', async () => {
+    world.view = panel([row({ state: 'drafting', first_line: null }), row({ agent_member_id: AGENT2, name: '문서 담당', idle: true, first_line: null })], { ready: 1, needs_you: 0, drafting: 1 });
+    await screen();
+    expect(byId('phone-sessions-edit-open')).toBeNull();
+    await act(async () => { root.unmount(); }); container.remove();
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    world.view = needsView(); world.reachable = false;
+    await screen();
+    expect((byId('phone-sessions-edit-open') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('a ready row can be fixed too ([고치기]); a typed line is said so — «고친 글 · …» — and the consent button needs the row\'s line like any other', async () => {
+    world.view = panel([row({ rev: 2, edited: true, first_line: '사람이 쓴 문장' })], { ready: 1, needs_you: 0, drafting: 0 });
+    await screen();
+    expect(byId('phone-sessions-edit-open')?.textContent).toBe('고치기');
+    expect(byId('phone-sessions-first-line')?.textContent).toBe('고친 글 · 사람이 쓴 문장 · ✓');
+    expect((byId('phone-sessions-submit') as HTMLButtonElement).disabled).toBe(false);
+    // an older computer sends neither `rev` nor `edited`: 0 and not edited
+    await act(async () => { root.unmount(); }); container.remove();
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    world.view = panel([row({})], { ready: 1, needs_you: 0, drafting: 0 });
+    await screen();
+    expect(byId('phone-sessions-first-line')?.getAttribute('data-edited')).toBe('false');
+    expect(byId('phone-sessions-first-line')?.textContent).toBe('결제 연동을 끝냈어요 · ✓');
+  });
+
+  it('a field past 2000 characters cannot be saved (counted in characters, not bytes), and says so', async () => {
+    world.view = needsView();
+    await screen();
+    await press(byId('phone-sessions-edit-open'));
+    await typeInto(byId('phone-sessions-edit-plan'), '🙂'.repeat(2000));
+    expect((byId('phone-sessions-edit-save') as HTMLButtonElement).disabled).toBe(false);
+    expect(byId('phone-sessions-edit-too-long')).toBeNull();
+    await typeInto(byId('phone-sessions-edit-plan'), '🙂'.repeat(2001));
+    expect((byId('phone-sessions-edit-save') as HTMLButtonElement).disabled).toBe(true);
+    expect(byId('phone-sessions-edit-too-long')?.textContent).toBe('한 칸에 2000자까지 쓸 수 있어요');
+  });
+
+  it('the same in English: [Fill in] · the field names · the stale line', async () => {
+    world.view = needsView(4);
+    signAnswer = { id: 's', ok: true, signed: 'SIGNED', phone_key_id: KEYID, edit: { base_rev: 4, plan: 'x' } };
+    world.poll = json({ command_id: CMD, state: 'done', result_code: 'stale' });
+    await screen({ locale: 'en' });
+    expect(byId('phone-sessions-edit-open')?.textContent).toBe('Fill in');
+    await press(byId('phone-sessions-edit-open'));
+    expect(container.textContent).toContain('Done');
+    expect(container.textContent).toContain('Next');
+    expect(container.textContent).toContain('Blockers');
+    await typeInto(byId('phone-sessions-edit-plan'), 'x');
+    await press(byId('phone-sessions-edit-save'));
+    expect(byId('phone-sessions-line')?.textContent).toBe(enMessages.desktop.phoneSessions.result.stale);
   });
 });
