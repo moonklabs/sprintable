@@ -48,6 +48,81 @@ function pickLocaleLabel(entry: DomainLabelEntry, locale: string): string | unde
   return preferred ?? normalizeLabel(entry.label_ko) ?? normalizeLabel(entry.label_en);
 }
 
+// story #4748 — 같은 조직의 라벨은 이 모듈 한 곳에서 받는다. 대화방은 이벤트 블록 카드 · 입력창이 저마다 이 훅을 불러, 방을 열면 같은 요청이 30번 남짓
+// 나갔다(prod android-webview 기록 · 훅 자체에 캐시도 진행 중 요청 공유도 없었다). 이제: ① 진행 중인 요청은 모두 한 요청을 같이 기다린다
+// ② 받은 값은 TTL 동안 모든 소비처가 그대로 쓴다 ③ 실패는 짧게(FAILED_TTL) 기억해 실패하는 동안 소비처마다 다시 두드리는 폭풍을 막는다.
+// 라벨을 바꾸는 쪽(PUT/DELETE — 지금 웹 화면엔 쓰는 자리가 없고 BE · MCP로 바뀐다)은 invalidateOrgDomainLabels(orgId)를 부르고, 안 불러도
+// TTL 안에 새 값이 보인다(조직 설정 화면이 생기면 거기서 부른다).
+export const ORG_DOMAIN_LABELS_TTL_MS = 5 * 60_000;
+export const ORG_DOMAIN_LABELS_FAILED_TTL_MS = 30_000;
+
+type LabelSlot = { entries: DomainLabelEntry[]; expiresAt: number };
+const labelSlots = new Map<string, LabelSlot>();
+const labelRequests = new Map<string, Promise<DomainLabelEntry[]>>();
+const labelEpochs = new Map<string, number>(); // 무효화 때 올린다 — 무효화 前에 출발한 응답이 옛 값을 다시 쓰지 못하게
+
+/** 라벨을 바꾼 쪽이 부른다(orgId 없이 부르면 전부). 다음 읽기가 새로 받고, 이미 날아가 있는 요청의 응답은 버려진다. */
+export function invalidateOrgDomainLabels(orgId?: string): void {
+  const ids = orgId ? [orgId] : [...labelSlots.keys(), ...labelRequests.keys()];
+  for (const id of ids) {
+    labelSlots.delete(id);
+    labelRequests.delete(id);
+    labelEpochs.set(id, (labelEpochs.get(id) ?? 0) + 1);
+  }
+}
+
+function freshSlot(orgId: string): LabelSlot | undefined {
+  const slot = labelSlots.get(orgId);
+  if (!slot) return undefined;
+  if (slot.expiresAt <= Date.now()) { labelSlots.delete(orgId); return undefined; }
+  return slot;
+}
+
+/** 첫 렌더에 깜빡임 없이 쓸 수 있는 값 — 받아 둔 게 있으면 그것, 없으면 undefined. */
+function cachedEntries(orgId: string | undefined): DomainLabelEntry[] | undefined {
+  return orgId ? freshSlot(orgId)?.entries : undefined;
+}
+
+function requestOrgDomainLabels(orgId: string): Promise<DomainLabelEntry[]> {
+  const slot = freshSlot(orgId);
+  if (slot) return Promise.resolve(slot.entries);
+  const pending = labelRequests.get(orgId);
+  if (pending) return pending;
+  const epoch = labelEpochs.get(orgId) ?? 0;
+  const request: Promise<DomainLabelEntry[]> = (async (): Promise<DomainLabelEntry[]> => {
+    let entries: DomainLabelEntry[] = [];
+    let ttl = ORG_DOMAIN_LABELS_FAILED_TTL_MS;
+    try {
+      const res = await fetchWithAuth(`/api/organizations/${orgId}/domain-labels`);
+      // 카디르 재QA — 이 !res.ok 체크가 없어도 대개 결과가 같아서(에러 응답이 보통
+      // 배열이 아니라 아래 Array.isArray 방어가 같은 []를 낸다) 이 체크 자체를 지워도
+      // 기존 테스트가 안 틀렸다([못틀리는대조미자]). !res.ok는 응답 *모양*이 아니라
+      // *상태*를 보는 별개 방어라 명시적으로 먼저 걸러야 한다(회귀테스트가 배열 모양
+      // 에러 바디로 이 둘을 갈라 pin).
+      if (res.ok) {
+        const data = (await res.json()) as unknown;
+        // story #3881(customer-zero) 실측 — 이 `as` 단언은 런타임 검증이 아니라 컴파일 타임
+        // 힌트일 뿐이었다. 응답 body가 배열이 아닌 모양(예: 다른 엔드포인트 mock에 걸린
+        // 테스트·BE 계약 드리프트·프록시 중간 오류 페이지)이면 비배열 값을 그대로 state에
+        // 싣고, 다음 렌더의 `for (const e of entries)`가 즉시 TypeError로 터진다
+        // (EventBlockCard가 이 훅을 새로 쓰기 시작하면서 실측 발견). 네트워크 실패와
+        // 동일하게 빈 배열로 방어한다 — "무설정=기본값" 원칙 그대로, 응답 모양이 이상해도
+        // 이 장식 계층이 화면 전체를 깨면 안 된다.
+        if (Array.isArray(data)) { entries = data; ttl = ORG_DOMAIN_LABELS_TTL_MS; }
+      }
+    } catch {
+      // 네트워크 예외 — 아래 FAILED_TTL로 짧게 기억(원래처럼 조용히 빈 배열 폴백)
+    }
+    // 무효화가 이 요청이 나간 뒤에 있었으면 이 응답은 옛 값이다 — 기억하지 않는다(받은 쪽에는 그대로 준다).
+    if ((labelEpochs.get(orgId) ?? 0) === epoch) labelSlots.set(orgId, { entries, expiresAt: Date.now() + ttl });
+    return entries;
+  })().finally(() => {
+    if (labelRequests.get(orgId) === request) labelRequests.delete(orgId);
+  });
+  labelRequests.set(orgId, request);
+  return request;
+}
+
 /** orgId가 없으면(아직 로딩 중 등) 빈 오버라이드 — 전부 폴백(회귀 0). locale은 next-intl의
  * useLocale()을 호출부가 넘긴다(이 훅 자체는 next-intl 의존을 안 늘리려고 순수 string으로 받음).
  *
@@ -64,25 +139,8 @@ function pickLocaleLabel(entry: DomainLabelEntry, locale: string): string | unde
  * 정규화해 falsy 전부가 스킵되게 원본 semantics를 보존한다. */
 export function useOrgDomainLabels(orgId: string | undefined, locale: string): OrgDomainLabels {
   const { data: entries, loading } = useAsyncResource<string, DomainLabelEntry[]>(
-    orgId || undefined, [],
-    async (id) => {
-      const res = await fetchWithAuth(`/api/organizations/${id}/domain-labels`);
-      // 카디르 재QA — 이 !res.ok 체크가 없어도 대개 결과가 같아서(에러 응답이 보통
-      // 배열이 아니라 아래 Array.isArray 방어가 같은 []를 낸다) 이 체크 자체를 지워도
-      // 기존 테스트가 안 틀렸다([못틀리는대조미자]). !res.ok는 응답 *모양*이 아니라
-      // *상태*를 보는 별개 방어라 명시적으로 먼저 걸러야 한다(회귀테스트가 배열 모양
-      // 에러 바디로 이 둘을 갈라 pin).
-      if (!res.ok) return [];
-      const data = (await res.json()) as unknown;
-      // story #3881(customer-zero) 실측 — 이 `as` 단언은 런타임 검증이 아니라 컴파일 타임
-      // 힌트일 뿐이었다. 응답 body가 배열이 아닌 모양(예: 다른 엔드포인트 mock에 걸린
-      // 테스트·BE 계약 드리프트·프록시 중간 오류 페이지)이면 비배열 값을 그대로 state에
-      // 싣고, 다음 렌더의 `for (const e of entries)`가 즉시 TypeError로 터진다
-      // (EventBlockCard가 이 훅을 새로 쓰기 시작하면서 실측 발견). 네트워크 실패와
-      // 동일하게 빈 배열로 방어한다 — "무설정=기본값" 원칙 그대로, 응답 모양이 이상해도
-      // 이 장식 계층이 화면 전체를 깨면 안 된다.
-      return Array.isArray(data) ? data : [];
-    },
+    orgId || undefined, cachedEntries(orgId) ?? [],
+    (id) => requestOrgDomainLabels(id),
   );
 
   const byKey = new Map<string, DomainLabelEntry>();

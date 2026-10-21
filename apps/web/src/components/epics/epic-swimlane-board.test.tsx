@@ -10,6 +10,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ToastProvider, ToastContainer, useToast } from '@/components/ui/toast';
 import { EpicSwimlaneBoard } from './epic-swimlane-board';
+import { invalidateOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -105,6 +106,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  invalidateOrgDomainLabels(); // story #4748 — 라벨은 조직당 한 번 받아 두는 훅이라, 시험끼리 받아 둔 값을 물려주지 않게 비운다
   useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'human' });
   container = document.createElement('div');
   document.body.appendChild(container);

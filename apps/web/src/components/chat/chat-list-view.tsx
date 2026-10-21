@@ -398,7 +398,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const isAdminOrOwner = role === 'admin' || role === 'owner';
   // story #3888 CHANGES①(PO PR 코멘트, 2026-09-14 18:53Z) — useOrgDomainLabels를
   // ConversationRow(행 컴포넌트) 안에서 부르면 목록 1회 마운트에 대화 수만큼(최대 30+
-  // 에이전트 대화) 같은 domain-labels 요청이 중복 발사된다(훅 자체엔 캐시·dedupe가 없다).
+  // 에이전트 대화) 같은 domain-labels 요청이 중복 발사된다(story #4748 前엔 훅 자체에 캐시·dedupe가 없었다 — 지금은 훅이 한 조직 값을 한 번만 받아 이 부모 1회 호출은 렌더 수를 줄이는 몫만 남는다).
   // 이 부모(ChatListView)에서 1회만 호출해 domainLabels를 prop으로 내린다 — 행이 몇
   // 개든 요청은 항상 1건.
   const locale = useLocale();
