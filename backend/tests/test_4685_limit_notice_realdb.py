@@ -512,6 +512,42 @@ async def test_25_a_removed_pairing_does_not_make_the_still_standing_sessions_of
         assert len(await _notices(LIFTED, PLAIN_TM)) == 1, "the last one back tells it once"
 
 
+async def test_26_a_pairing_that_ended_before_the_episode_never_holds_a_persons_working_again_line_back(world):
+    await _second_person()
+    async with _client() as c:
+        old, mine = [await _device(c, f"d4685 mac u{i}") for i in (1, 2)]
+        await _pair(old["setup_id"], PLAIN_TM, removed=True)  # the person's phone was once on `old`, taken off long before
+        await _pair(mine["setup_id"], PLAIN_TM)
+        ao, am = old["agents"][0]["member_id"], mine["agents"][0]["member_id"]
+        await _report(c, mine, am, "working", 1)
+        await _report(c, mine, am, "waiting_input", 2, limit=LOOKS)
+        assert len(await _notices(STOOD, PLAIN_TM)) == 1
+        await _report(c, old, ao, "working", 3)
+        await _report(c, old, ao, "waiting_input", 4, limit=LOOKS)  # `old` now stands — for whoever connected it, not for this person
+        assert len(await _notices(STOOD, OWNER_TM)) == 1 and len(await _notices(STOOD, PLAIN_TM)) == 1
+        await _report(c, mine, am, "working", 5)
+        assert len(await _notices(LIFTED, PLAIN_TM)) == 1, "the setup this person was told about is back; another person's setup standing does not hold it"
+
+
+async def test_27_a_setup_that_stood_inside_the_window_is_part_of_the_promise_even_when_its_pairing_goes_meanwhile(world):
+    await _second_person()
+    async with _client() as c:
+        a, b = [await _device(c, f"d4685 mac w{i}") for i in (1, 2)]
+        await _pair(a["setup_id"], PLAIN_TM)
+        await _pair(b["setup_id"], PLAIN_TM)
+        aa, ab = a["agents"][0]["member_id"], b["agents"][0]["member_id"]
+        await _report(c, a, aa, "working", 1)
+        await _report(c, b, ab, "working", 2)
+        await _report(c, a, aa, "waiting_input", 3, limit=LOOKS)
+        await _report(c, b, ab, "waiting_input", 4, limit=LOOKS)  # inside the window: folded, no second notice
+        assert len(await _notices(STOOD, PLAIN_TM)) == 1
+        await _sql(f"UPDATE remote_device_pairings SET removed_at = now() WHERE setup_id = '{b['setup_id']}'")  # the phone leaves b while it stands
+        await _report(c, a, aa, "working", 5)
+        assert await _notices(LIFTED, PLAIN_TM) == [], "b still stands and the person was told about it (folded): not «all working again»"
+        await _report(c, b, ab, "working", 6)
+        assert len(await _notices(LIFTED, PLAIN_TM)) == 1
+
+
 @pytest.mark.parametrize("fails,how", [("owner", "python"), ("plain", "sql")])
 async def test_23_one_persons_failure_takes_back_only_their_own_notice(world, monkeypatch, fails, how):
     """Two people have phones paired with the setup (told in a fixed order: the owner, then the second person). Telling one of them fails — as a Python

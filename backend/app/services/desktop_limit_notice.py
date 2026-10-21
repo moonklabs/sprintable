@@ -104,6 +104,35 @@ async def _save_open(org_id: uuid.UUID, user_id: uuid.UUID, record: dict) -> Non
     await redis_shared.with_fallback(_op, _fallback)
 
 
+async def _peek_open(org_id: uuid.UUID, user_id: uuid.UUID) -> dict | None:
+    """The outstanding «stood» record, left where it is."""
+    key = _key("open", org_id, user_id)
+
+    async def _op(client) -> str | None:
+        raw = await client.get(key)
+        return None if raw is None else (raw.decode() if isinstance(raw, (bytes, bytearray)) else str(raw))
+
+    def _fallback() -> str | None:
+        return _local_get(key)
+
+    raw = await redis_shared.with_fallback(_op, _fallback)
+    try:
+        return json.loads(raw) if raw else None
+    except ValueError:
+        return None
+
+
+async def _fold_into_open(org_id: uuid.UUID, user_id: uuid.UUID, setup_id: uuid.UUID) -> None:
+    """A session that stood inside the window is folded into the notice already told — and into the promise made with it: «working again» waits for
+    this setup as well, even if the pairing that makes it theirs is gone by then. (Two folds at the same instant can lose one; the cost is the narrow
+    count, never a duplicate line.)"""
+    record = await _peek_open(org_id, user_id)
+    if record is None:
+        return
+    setups = sorted(set(record.get("setups") or []) | {str(setup_id)})
+    await _save_open(org_id, user_id, {**record, "setups": setups})
+
+
 async def _take_open(org_id: uuid.UUID, user_id: uuid.UUID) -> dict | None:
     """The outstanding «stood» record, removed in the same step (the «lifted» line goes once)."""
     key = _key("open", org_id, user_id)
@@ -228,13 +257,13 @@ def where_text(rows: list[DesktopSession], locale: str) -> str | None:
     return t("desktop_limit_notice.where", locale, where=where)
 
 
-async def _limited_rows(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, *, ever: bool = False) -> list[DesktopSession]:
+async def _limited_rows(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, *, also_setups: frozenset[uuid.UUID] = frozenset()) -> list[DesktopSession]:
     """The sessions standing at the limit that are THIS person's to hear about (AC8): those of every live setup of the organization whose
     recipients include them — a setup with a phone of theirs paired, or a setup with no usable pairing that they connected (the same two
     cases as `_recipients`). A revoked setup is not theirs any more: its stale row must not hold the «working again» line back.
-    `ever=True` is the wider reading the «working again» gate needs (same as `_lifted_candidates`): also a setup a phone of theirs was once
-    paired with (pairing since removed, key since revoked) — the notice they were promised may have been made for it, so it still counts as
-    standing for them. (A setup they merely connected, with someone else's phone paired, never told them: it does not hold their line back.)"""
+    `also_setups`: the setups the person's outstanding «stopped» notice was made for (the record carries them). They keep counting for that
+    person even if the pairing that made them its recipient is gone since — and ONLY those: a pairing that ended before the episode never held
+    this person's line back."""
     from app.models.agent_permission import RemoteDevice, RemoteDevicePairing
     from app.models.member import Member
 
@@ -250,15 +279,8 @@ async def _limited_rows(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID,
     theirs_paired = _pairing_of_this_setup(Member.user_id == user_id)
     nobody_paired = ~_pairing_of_this_setup()
     scope = or_(theirs_paired, and_(DesktopSetup.confirmed_by == user_id, nobody_paired))
-    if ever:
-        was_theirs = (
-            select(RemoteDevicePairing.id)
-            .join(RemoteDevice, RemoteDevice.id == RemoteDevicePairing.remote_device_id)
-            .join(Member, Member.id == RemoteDevice.member_id)
-            .where(RemoteDevicePairing.setup_id == DesktopSetup.id, Member.org_id == org_id, Member.user_id == user_id)
-            .exists()
-        )
-        scope = or_(scope, was_theirs)
+    if also_setups:
+        scope = or_(scope, DesktopSetup.id.in_(also_setups))
     return list((await db.execute(
         select(DesktopSession).join(DesktopSetup, DesktopSetup.id == DesktopSession.setup_id).where(
             DesktopSetup.org_id == org_id, DesktopSetup.revoked_at.is_(None),
@@ -295,6 +317,7 @@ async def _stood_for(db: AsyncSession, setup: DesktopSetup, row: DesktopSession,
 
     locale = person.locale
     if not await _claim_window(setup.org_id, person.user_id):
+        await _fold_into_open(setup.org_id, person.user_id, setup.id)  # folded into the notice that went: its promise covers this setup too
         return
     try:
         rows = await _limited_rows(db, setup.org_id, person.user_id)
@@ -334,7 +357,8 @@ async def _stood_for(db: AsyncSession, setup: DesktopSetup, row: DesktopSession,
             await _release_window(setup.org_id, person.user_id)
             logger.warning("desktop limit notice: the stood notice reached nobody setup=%s session=%s", setup.id, row.session_key)
             return
-        await _save_open(setup.org_id, person.user_id, {"agent": str(agents[0]), "others": others})
+        standing_setups = sorted({str(setup.id)} | {str(r.setup_id) for r in rows})  # the promise is about THESE setups
+        await _save_open(setup.org_id, person.user_id, {"agent": str(agents[0]), "others": others, "setups": standing_setups})
     except Exception:
         await _release_window(setup.org_id, person.user_id)  # nothing was told: the next report may still tell it
         raise
@@ -386,7 +410,9 @@ async def _lifted_for(db: AsyncSession, setup: DesktopSetup, row: DesktopSession
     # still standing (it is not committed yet) and return — and nobody would tell «working again». The second to ask waits for the first's commit, then
     # counts again and sees the whole picture.
     await db.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"desktop-limit-lifted:{setup.org_id}:{person.user_id}"))))
-    if await _limited_rows(db, setup.org_id, person.user_id, ever=True):
+    record = await _peek_open(setup.org_id, person.user_id)
+    promised = frozenset(uuid.UUID(x) for x in ((record or {}).get("setups") or []))
+    if await _limited_rows(db, setup.org_id, person.user_id, also_setups=promised):
         return  # some are still standing — «all working again» would be false
     record = await _take_open(setup.org_id, person.user_id)
     if record is None or row.state == "stopped":
