@@ -10,6 +10,9 @@
   ② 웹 요청 `/login?error=` — error 값 · 개수 · 처음/마지막 시각
   ③ 백엔드 `/oauth/callback` · `/oauth-handoff/` 의 4xx/5xx — 경로(상수) · 메서드 · 상태 · 개수 · 시각,
      + 백엔드 로그에서 허용 낱말(OAUTH_* · INVALID_STATE · 구글 토큰 오류 낱말)만 뽑은 개수 · 시각
+  ③c(2026-10-15 · story 4689) 백엔드 `/oauth-handoff/<동작>` 요청 **전부(상태 2xx 포함)** — 시간별 «동작 라벨 · 메서드 · 상태 · 개수». ③a 는 4xx·5xx 만 세서
+     «시도 때 consume 이 불렸나(→ 결과는 앱에 왔고 교환이 거절/성공) · 안 불렸나(→ 결과가 앱에 안 옴)» 를 못 가른다 — 이 칸이 그 대답이다.
+     (`issue` = 콜백이 앱 복귀용 코드를 낸 것 · `consume` = 앱이 마지막 POST 로 교환한 것) 동작 이름은 소스 목록 밖이면 «(other)».
   ④ 웹 요청 로그에서 앱 링크 길의 경로 셋 — `/native/oauth-return`(앱 링크가 앱 대신 브라우저로 열리면 여기에 찍힘) ·
      `/auth/oauth-handoff`(앱이 웹뷰로 마지막 POST) · `/.well-known/assetlinks.json`(안드로이드 앱 링크 검증) — 시간별
      «경로 라벨 · 메서드 · 상태 코드 · 브라우저 갈래(닫힌 목록 chrome / android-webview / other) · 개수». 경로는 정확히 일치하는
@@ -200,6 +203,25 @@ def agg_backend_requests(entries: list[dict], handoff_actions: frozenset[str]) -
         method = method if method in _METHODS else "?"
         spans[(label, method, status)].add(e.get("timestamp"))
     return [f"  {m} {label}  → {status}  {sp.text()}" for (label, m, status), sp in sorted(spans.items())]
+
+
+def agg_backend_handoff_all(entries: list[dict], handoff_actions: frozenset[str]) -> list[str]:
+    """story 4689 ③c — `/oauth-handoff/<동작>` 요청을 **상태 전부(2xx 포함)** 시간별로 센다. 라벨은 `_route_label` 의 상수(동작 이름이 소스 목록 밖이면
+    «(other)») · 메서드는 닫힌 집합 · 상태는 100~599 정수만(아니면 «?»). 쿼리 · 호스트 · 접두는 버린다. `/oauth/callback` 은 세지 않는다(③a)."""
+    counts: Counter[tuple[str, str, str, str]] = Counter()
+    for e in entries:
+        hr = e.get("httpRequest")
+        if not isinstance(hr, dict):
+            continue
+        label = _route_label(hr.get("requestUrl"), handoff_actions)
+        if label is None or not label.startswith("/oauth-handoff/"):
+            continue
+        method = hr.get("requestMethod")
+        method = method if method in _METHODS else "?"
+        status = hr.get("status")
+        status_text = str(status) if isinstance(status, int) and 100 <= status <= 599 else "?"
+        counts[(_hour(e.get("timestamp")), label, method, status_text)] += 1
+    return [f"  {hour}  {method} {label}  → {status}  {n}건" for (hour, label, method, status), n in sorted(counts.items())]
 
 
 def agg_backend_words(entries: list[dict], known_be_codes: frozenset[str]) -> list[str]:
@@ -819,6 +841,11 @@ def main() -> int:
             )
             return agg_backend_requests(es, handoff_actions), len(es)
         out += _section("③a 백엔드 /oauth/callback · /oauth-handoff/ 4xx·5xx", three)
+
+        def three_c():
+            es = _read(f'{_service_filter(backend)} AND {req_log} AND httpRequest.requestUrl:"/oauth-handoff/" AND {t}')
+            return agg_backend_handoff_all(es, handoff_actions), len(es)
+        out += _section("③c 백엔드 /oauth-handoff/ 요청 전부(2xx 포함 · 시간별) — issue 는 코드를 낸 것 · consume 은 앱이 교환한 것", three_c)
 
         def words():
             toks = " OR ".join(f'"{w}"' for w in ["OAUTH_", *sorted(known_be_codes), *_GOOGLE_ERRORS])
