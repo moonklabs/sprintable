@@ -658,3 +658,150 @@ async def test_the_services_check_the_admin_role_themselves_not_only_the_routes(
         assert emptied.value.code == "not_org_admin"  # reverted (no gate of its own) → {already_disconnected: True} for anyone
     rows = await _sql(fetch=f"SELECT count(*) FROM desktop_setups WHERE org_id = '{ORG}' AND revoked_at IS NULL")
     assert rows[0][0] == 0  # (only the row this test ended itself)
+
+
+# ── 4734 follow-up (lens note · PO 10-20): the RANGE of the lock a press takes · what the relay says is still vetoed NOW ──────────────────
+
+
+async def test_a_press_lock_holds_exactly_the_phone_key_and_its_pairing_shared_and_nothing_else(world, secret):
+    """`paired_phone(lock=True)` — the check a signed press relies on (4733) — holds the phone key row and the pairing row with a SHARE lock until the transaction ends:
+    a removal or a revocation that comes meanwhile waits. It must NOT hold the setup row, another setup's row, or the person's member row (a disconnect, a re-grouping or
+    a member update must not wait for a press), and it must stay SHARED (two presses must not wait for each other). The second transaction probes with FOR UPDATE / FOR SHARE NOWAIT."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from app.core.database import async_session_factory
+    from app.services.agent_permissions import paired_phone
+    from tests.test_4424_desktop_setup_realdb import _ASYNC
+
+    async with _client() as c:
+        a, b, _computer = await _two_setups_one_mac(c)
+        phone, der = await _register(c)
+        await _report(c, a["device_token"], der)
+    sid, other = uuid.UUID(a["setup_id"]), uuid.UUID(b["setup_id"])
+
+    async def probe(sql: str):
+        eng = create_async_engine(_ASYNC, poolclass=NullPool)
+        try:
+            async with eng.begin() as conn:
+                return (await conn.execute(text(sql))).all()
+        finally:
+            await eng.dispose()
+
+    key_row = f"SELECT id FROM remote_devices WHERE id = '{phone}'"
+    pair_row = f"SELECT id FROM remote_device_pairings WHERE remote_device_id = '{phone}' AND setup_id = '{sid}'"
+    setup_row = f"SELECT id FROM desktop_setups WHERE id = '{sid}'"
+    other_setup_row = f"SELECT id FROM desktop_setups WHERE id = '{other}'"
+    member_row = f"SELECT id FROM members WHERE id = '{OWNER_TM}'"
+    # positive controls: with nothing held, every row exists and can be taken exclusively (a «free» below is a row that was really read)
+    for sql in (key_row, pair_row, setup_row, other_setup_row, member_row):
+        assert len(await probe(sql + " FOR UPDATE NOWAIT")) == 1, sql
+
+    async with async_session_factory() as s:
+        held = await paired_phone(s, member_id=OWNER_TM, phone_id=uuid.UUID(phone), setup_id=sid, lock=True)
+        assert held is not None  # the check passed and the lock is taken (the transaction stays open)
+        for sql in (key_row, pair_row):  # held: an exclusive lock cannot be had, and does not wait
+            with pytest.raises(Exception, match="could not obtain lock"):
+                await probe(sql + " FOR UPDATE NOWAIT")
+            assert len(await probe(sql + " FOR SHARE NOWAIT")) == 1, sql  # …but it is SHARED: another press shares it
+        for sql in (setup_row, other_setup_row, member_row):  # free: a disconnect, a re-grouping or a member update never waits for a press
+            assert len(await probe(sql + " FOR UPDATE NOWAIT")) == 1, sql
+        await s.rollback()
+    for sql in (key_row, pair_row):  # released with the transaction
+        assert len(await probe(sql + " FOR UPDATE NOWAIT")) == 1, sql
+
+
+async def test_the_relay_names_the_phones_that_are_removed_and_not_paired_again_so_a_phone_paired_again_is_not_vetoed_for_ever(world, secret):
+    """`removed_phones` keeps naming a phone a person removed from ANY connected setup of the computer — also after it was paired again, when a setup that never reports again (an
+    old one this Mac does not run) keeps its removal for good. `removed_phones_now` is the same list minus the phones some connected setup of the computer holds an ACTIVE pairing of."""
+    async with _client() as c:
+        a, b, computer = await _two_setups_one_mac(c)
+        p, p_der = await _register(c)
+        q, q_der = await _register(c)
+        for dev in (a, b):
+            await _report(c, dev["device_token"], p_der, q_der)
+
+        async def facts(dev):
+            r = await c.get("/api/v2/desktop/relay/setup", headers=_tok(dev["device_token"]))
+            assert r.status_code == 200, r.text
+            return r.json()
+
+        before = await facts(a)
+        assert before["removed_phones"] == [] and before["removed_phones_now"] == []
+        # a person removes P from the whole computer (both setups' pairs), and Q from setup A only (B still holds it)
+        assert (await c.delete(f"{PHONES}/{p}/computers/{computer}", headers=_person(OWNER))).json() == {"removed": True, "pairs": 2}
+        assert (await c.delete(f"{PHONES}/{q}/pairs/{a['setup_id']}", headers=_person(OWNER))).json() == {"removed": True}
+        for dev in (a, b):
+            f = await facts(dev)
+            assert f["removed_phones"] == sorted([_fp(p_der), _fp(q_der)]), f  # both were removed by a person from some setup of it
+            assert f["removed_phones_now"] == [_fp(p_der)], f  # P is gone from the computer · Q is still paired with it through B (reverted: both → Q is taken away)
+        # setup A's daemon drops P (it heard the removal: the removal is acked), then P is paired again through a QR on this Mac and A reports it; B's daemon never does
+        # (an old setup this Mac does not run)
+        await _report(c, a["device_token"], q_der)
+        await _report(c, a["device_token"], p_der, q_der)
+        for dev in (a, b):
+            f = await facts(dev)
+            assert f["removed_phones"] == sorted([_fp(p_der), _fp(q_der)]), f  # B's removal of P stays on the books for good
+            assert f["removed_phones_now"] == [], f  # …but P is paired with the computer again: not vetoed (reverted: P would be taken away on every connect)
+
+
+async def test_removed_phones_now_a_revoked_key_has_no_active_pairing_so_it_stays_vetoed_and_another_mac_is_not_told(world, secret):
+    async with _client() as c:
+        a, b, _computer = await _two_setups_one_mac(c)
+        p, p_der = await _register(c)
+        await _report(c, a["device_token"], p_der)
+        await _report(c, b["device_token"], p_der)
+        assert (await c.delete(f"{PHONES}/{p}", headers=_person(OWNER))).status_code == 200  # the KEY is revoked: its pairs are removed by a person
+        marked = await _sql(fetch=f"SELECT count(*) FROM remote_device_pairings WHERE remote_device_id = '{p}' AND removed_at IS NOT NULL AND removed_by IS NOT NULL")
+        assert marked[0][0] == 2  # (the premise, read from the rows: both pairs are marked removed by a person)
+        f = (await c.get("/api/v2/desktop/relay/setup", headers=_tok(a["device_token"]))).json()
+        assert f["removed_phones"] == [_fp(p_der)] and f["removed_phones_now"] == [_fp(p_der)], f  # a revoked key has no active pairing: vetoed
+        elsewhere = await _device(c, "d4734 other mac now", MAC_2, EXISTING)
+        away = (await c.get("/api/v2/desktop/relay/setup", headers=_tok(elsewhere["device_token"]))).json()
+        assert away["removed_phones"] == [] and away["removed_phones_now"] == [], away  # another Mac is not told
+
+
+async def test_removed_phones_now_an_active_pairing_on_ANOTHER_computer_does_not_bring_the_phone_back_to_this_one(world, secret):
+    async with _client() as c:
+        a, b, computer = await _two_setups_one_mac(c)
+        elsewhere = await _device(c, "d4734 other mac now2", MAC_2, EXISTING)  # another Mac of the same person and organization
+        p, p_der = await _register(c)
+        for dev in (a, b, elsewhere):
+            await _report(c, dev["device_token"], p_der)
+        # a person takes P off THIS computer; the other Mac still holds it (a phone can be paired with several computers)
+        assert (await c.delete(f"{PHONES}/{p}/computers/{computer}", headers=_person(OWNER))).json() == {"removed": True, "pairs": 2}
+        still = await _sql(fetch=f"SELECT count(*) FROM remote_device_pairings WHERE remote_device_id = '{p}' AND removed_at IS NULL")
+        assert still[0][0] == 1  # the premise: exactly the other Mac's pairing is active
+        for dev in (a, b):
+            f = (await c.get("/api/v2/desktop/relay/setup", headers=_tok(dev["device_token"]))).json()
+            assert f["removed_phones"] == [_fp(p_der)] and f["removed_phones_now"] == [_fp(p_der)], f  # reverted (the active set not limited to this computer): [] — P would come back
+
+
+async def test_removed_phones_now_counts_the_active_pairing_of_a_connected_sibling_only_not_a_disconnected_one(world, secret):
+    async with _client() as c:
+        a, b, computer = await _two_setups_one_mac(c)
+        p, p_der = await _register(c)
+        await _report(c, a["device_token"], p_der)
+        await _report(c, b["device_token"], p_der)
+        dead = await _row("d4734 mac", None)  # a keyless line of the same name and person: a third setup of the same computer
+        assert (await c.delete(f"{PHONES}/{p}/computers/{computer}", headers=_person(OWNER))).status_code == 200
+        await _sql(
+            "INSERT INTO remote_device_pairings (id, remote_device_id, setup_id, paired_at) "
+            f"VALUES (gen_random_uuid(), '{p}', '{dead}', now())"  # …which holds P ACTIVE (a pairing nobody removed)
+        )
+        live = (await c.get("/api/v2/desktop/relay/setup", headers=_tok(a["device_token"]))).json()
+        assert live["removed_phones"] == [_fp(p_der)] and live["removed_phones_now"] == [], live  # positive control: a connected sibling holding it active is paired evidence
+        await _sql(f"UPDATE desktop_setups SET revoked_at = now() WHERE id = '{dead}'")
+        gone = (await c.get("/api/v2/desktop/relay/setup", headers=_tok(a["device_token"]))).json()
+        assert gone["removed_phones"] == [_fp(p_der)] and gone["removed_phones_now"] == [_fp(p_der)], gone  # disconnected: it holds no pair any more (reverted: live_only off → [])
+
+
+async def test_past_the_grouping_cap_removed_phones_now_is_null_like_removed_phones(world, secret, monkeypatch):
+    from app.services import desktop_computers
+
+    async with _client() as c:
+        a, b, _computer = await _two_setups_one_mac(c)
+        monkeypatch.setattr(desktop_computers, "GROUP_ROWS_MAX", 1)
+        f = (await c.get("/api/v2/desktop/relay/setup", headers=_tok(a["device_token"]))).json()
+        assert f["removed_phones"] is None and f["removed_phones_now"] is None, f  # «not now» for both — never a short list the device acts on

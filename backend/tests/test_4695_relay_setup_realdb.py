@@ -31,7 +31,7 @@ async def test_01_a_device_token_gets_its_own_orgs_id_and_name(world):
         body = r.json()
         assert r.status_code == 200 and (body["org_id"], body["org_name"]) == (str(ORG), name), r.text
         # story 4734: the computer this setup belongs to, and the phones a person removed from a setup of it (none here)
-        assert set(body) == {"org_id", "org_name", "computer_id", "removed_phones"} and body["computer_id"] and body["removed_phones"] == [], r.text
+        assert set(body) == {"org_id", "org_name", "computer_id", "removed_phones", "removed_phones_now"} and body["computer_id"] and body["removed_phones"] == [] and body["removed_phones_now"] == [], r.text
 
 
 async def test_02_nobody_else_is_a_device_here(world):
