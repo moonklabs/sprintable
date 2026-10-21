@@ -116,3 +116,35 @@ async def test_a_key_revoked_between_the_two_reads_says_key_revoked_not_agent_in
         gone = await _member_missing_401(db, key)
         assert gone.headers[AUTH_REASON_HEADER] == "key_revoked"  # reverted (no second read) → agent_inactive for a key that never comes back
         assert (gone.status_code, gone.detail) == (401, "API key member not found")
+
+
+STREAM = "/api/v2/agent/stream"
+ACK = "/api/v2/agent/events/ack"
+
+
+def _realtime_client():
+    """the stream is served by the realtime service too (same image, its own app and its own HTTPException handler)"""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.realtime_main import app
+
+    return AsyncClient(transport=ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test")
+
+
+@pytest.mark.anyio
+async def test_the_daemons_own_routes_carry_the_word_on_both_apps(attachable):
+    """what the daemon actually calls: GET stream (api app and realtime app) and POST events/ack — the word must survive each app's own error handler"""
+    key = await _plain_key(EXISTING)
+    unknown = "sk_live_" + secrets.token_urlsafe(24)
+    await _sql(f"UPDATE members SET is_active = false WHERE id = '{EXISTING}'")
+    for make in (_client, _realtime_client):
+        async with make() as c:
+            r = await c.get(STREAM, headers=_bearer(key))
+            assert (r.status_code, r.headers.get(AUTH_REASON_HEADER.lower())) == (401, "agent_inactive"), (make.__name__, r.text)
+            r = await c.get(STREAM, headers=_bearer(unknown))
+            assert (r.status_code, r.headers.get(AUTH_REASON_HEADER.lower())) == (401, "key_revoked"), (make.__name__, r.text)
+    async with _client() as c:
+        r = await c.post(ACK, headers=_bearer(key), json={"seq": 1})
+        assert (r.status_code, r.headers.get(AUTH_REASON_HEADER.lower())) == (401, "agent_inactive"), r.text
+        r = await c.post(ACK, headers=_bearer(unknown), json={"seq": 1})
+        assert (r.status_code, r.headers.get(AUTH_REASON_HEADER.lower())) == (401, "key_revoked"), r.text
