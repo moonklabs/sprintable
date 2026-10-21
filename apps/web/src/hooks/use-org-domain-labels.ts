@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useAsyncResource } from './use-async-resource';
 
@@ -52,7 +53,8 @@ function pickLocaleLabel(entry: DomainLabelEntry, locale: string): string | unde
 // 나갔다(prod android-webview 기록 · 훅 자체에 캐시도 진행 중 요청 공유도 없었다). 이제: ① 진행 중인 요청은 모두 한 요청을 같이 기다린다
 // ② 받은 값은 TTL 동안 모든 소비처가 그대로 쓴다 ③ 실패는 짧게(FAILED_TTL) 기억해 실패하는 동안 소비처마다 다시 두드리는 폭풍을 막는다.
 // 라벨을 바꾸는 쪽(PUT/DELETE — 지금 웹 화면엔 쓰는 자리가 없고 BE · MCP로 바뀐다)은 invalidateOrgDomainLabels(orgId)를 부르고, 안 불러도
-// TTL 안에 새 값이 보인다(조직 설정 화면이 생기면 거기서 부른다).
+// TTL 안에 새 값이 보인다(조직 설정 화면이 생기면 거기서 부른다). 이미 떠 있는 소비처도 같다: 무효화 · 슬롯 만료(성공 TTL · 실패 FAILED_TTL) 때 조직별 구독자에게
+// «다시 읽어라»가 가고, 각자 같은 공유 요청을 통해 새로 읽는다(떠 있는 대화방이 옛 값 · 실패 값에 영영 붙어 있지 않게 — codex QA).
 export const ORG_DOMAIN_LABELS_TTL_MS = 5 * 60_000;
 export const ORG_DOMAIN_LABELS_FAILED_TTL_MS = 30_000;
 
@@ -60,14 +62,40 @@ type LabelSlot = { entries: DomainLabelEntry[]; expiresAt: number };
 const labelSlots = new Map<string, LabelSlot>();
 const labelRequests = new Map<string, Promise<DomainLabelEntry[]>>();
 const labelEpochs = new Map<string, number>(); // 무효화 때 올린다 — 무효화 前에 출발한 응답이 옛 값을 다시 쓰지 못하게
+const labelListeners = new Map<string, Set<() => void>>(); // 떠 있는 소비처(조직별) — 슬롯이 무효 · 만료되면 다시 읽게 깨운다
+const labelTimers = new Map<string, ReturnType<typeof setTimeout>>(); // 조직별 슬롯 만료 알람(하나)
+
+function notifyOrgDomainLabels(orgId: string): void {
+  for (const wake of [...(labelListeners.get(orgId) ?? [])]) wake();
+}
+
+function subscribeOrgDomainLabels(orgId: string, wake: () => void): () => void {
+  const set = labelListeners.get(orgId) ?? new Set<() => void>();
+  set.add(wake);
+  labelListeners.set(orgId, set);
+  return () => { set.delete(wake); if (set.size === 0 && labelListeners.get(orgId) === set) labelListeners.delete(orgId); };
+}
+
+function scheduleLabelWake(orgId: string, ttl: number): void {
+  const old = labelTimers.get(orgId);
+  if (old !== undefined) clearTimeout(old);
+  labelTimers.set(orgId, setTimeout(() => {
+    labelTimers.delete(orgId);
+    if (!labelListeners.get(orgId)?.size) return; // 떠 있는 소비처가 없으면 깨울 일 없음(다음 마운트가 읽는다)
+    notifyOrgDomainLabels(orgId);
+  }, ttl + 1));
+}
 
 /** 라벨을 바꾼 쪽이 부른다(orgId 없이 부르면 전부). 다음 읽기가 새로 받고, 이미 날아가 있는 요청의 응답은 버려진다. */
 export function invalidateOrgDomainLabels(orgId?: string): void {
-  const ids = orgId ? [orgId] : [...labelSlots.keys(), ...labelRequests.keys()];
+  const ids = orgId ? [orgId] : [...new Set([...labelSlots.keys(), ...labelRequests.keys(), ...labelListeners.keys()])];
   for (const id of ids) {
     labelSlots.delete(id);
     labelRequests.delete(id);
     labelEpochs.set(id, (labelEpochs.get(id) ?? 0) + 1);
+    const timer = labelTimers.get(id);
+    if (timer !== undefined) { clearTimeout(timer); labelTimers.delete(id); }
+    notifyOrgDomainLabels(id); // 떠 있는 소비처는 새로 읽는다(같은 공유 요청 하나로)
   }
 }
 
@@ -114,7 +142,7 @@ function requestOrgDomainLabels(orgId: string): Promise<DomainLabelEntry[]> {
       // 네트워크 예외 — 아래 FAILED_TTL로 짧게 기억(원래처럼 조용히 빈 배열 폴백)
     }
     // 무효화가 이 요청이 나간 뒤에 있었으면 이 응답은 옛 값이다 — 기억하지 않는다(받은 쪽에는 그대로 준다).
-    if ((labelEpochs.get(orgId) ?? 0) === epoch) labelSlots.set(orgId, { entries, expiresAt: Date.now() + ttl });
+    if ((labelEpochs.get(orgId) ?? 0) === epoch) { labelSlots.set(orgId, { entries, expiresAt: Date.now() + ttl }); scheduleLabelWake(orgId, ttl); }
     return entries;
   })().finally(() => {
     if (labelRequests.get(orgId) === request) labelRequests.delete(orgId);
@@ -138,10 +166,12 @@ function requestOrgDomainLabels(orgId: string): Promise<DomainLabelEntry[]> {
  * "기존동작 무변" 계약이 깨진다(원본·신규 나란히 실행비교로 실증) — `orgId || undefined`로
  * 정규화해 falsy 전부가 스킵되게 원본 semantics를 보존한다. */
 export function useOrgDomainLabels(orgId: string | undefined, locale: string): OrgDomainLabels {
-  const { data: entries, loading } = useAsyncResource<string, DomainLabelEntry[]>(
+  const { data: entries, loading, refresh } = useAsyncResource<string, DomainLabelEntry[]>(
     orgId || undefined, cachedEntries(orgId) ?? [],
     (id) => requestOrgDomainLabels(id),
   );
+  // 무효화 · 슬롯 만료 때 깨운다 — 떠 있는 소비처가 옛 값(또는 실패로 비운 값)에 붙어 있지 않게(refresh는 안정 참조 · 같은 요청을 같이 기다린다)
+  useEffect(() => (orgId ? subscribeOrgDomainLabels(orgId, refresh) : undefined), [orgId, refresh]);
 
   const byKey = new Map<string, DomainLabelEntry>();
   for (const e of entries) byKey.set(`${e.domain}:${e.canonical_slug}`, e);
