@@ -108,6 +108,32 @@ async def _touch_api_key_last_used(api_key_id: uuid.UUID) -> None:
         logger.warning("_touch_api_key_last_used failed api_key_id=%s", api_key_id, exc_info=True)
 
 
+# story 4739 — what an AGENT key's 401 says in a closed word (a response header; the status and the `detail` text are unchanged — MCP, the web and realtime read those).
+# The desktop daemon reads it to tell «this key is gone for good» from «this agent cannot act right now» (stopped on the web · removed): the same words the open stream's
+# closing `access_revoked` frame carries (`stream_access.py`). A 401/403 without the header is UNKNOWN to the reader — never a revocation by itself.
+AUTH_REASON_HEADER = "X-Sprintable-Auth-Reason"
+AUTH_REASON_KEY_REVOKED = "key_revoked"  # no live key by this hash (unknown · revoked · expired — the lookup cannot tell them apart, and none of them comes back)
+AUTH_REASON_AGENT_INACTIVE = "agent_inactive"  # the key is live but its agent is not (stopped on the web · deleted · no project access): it can come back
+
+
+def _agent_key_401(detail: str, reason: str) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail, headers={AUTH_REASON_HEADER: reason})
+
+
+async def _member_missing_401(db: AsyncSession, api_key: object) -> HTTPException:
+    """«API key member not found» — the key was live when it was read, but its agent is not. The two are separate reads: a disconnect commits the key's revocation AND the
+    agent's deactivation together, and may land between them — then the agent is inactive BECAUSE the key was revoked, and saying `agent_inactive` (can come back) would make the
+    daemon retry a key that never will. So the key is read once more and a key that is no longer live says `key_revoked` (codex 4739). Revoked after this read as well: the next
+    request says it."""
+    from app.models.api_key import ApiKey
+
+    now = datetime.now(timezone.utc)
+    live = (await db.execute(
+        select(ApiKey.id).where(ApiKey.id == api_key.id, ApiKey.revoked_at.is_(None), (ApiKey.expires_at.is_(None)) | (ApiKey.expires_at > now))  # type: ignore[attr-defined]
+    )).first() is not None
+    return _agent_key_401("API key member not found", AUTH_REASON_AGENT_INACTIVE if live else AUTH_REASON_KEY_REVOKED)
+
+
 async def _resolve_api_key(
     raw_key: str, db: AsyncSession, transport: str | None = None,
     request: Request = None,  # type: ignore[assignment]
@@ -151,7 +177,7 @@ async def _resolve_api_key(
         # 절대 안 막는다(agent_auth_failure.py docstring 참고).
         from app.services.agent_auth_failure import record_auth_failure
         await record_auth_failure(raw_key)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+        raise _agent_key_401("Invalid API key", AUTH_REASON_KEY_REVOKED)
 
     # OB-4b seam(first_auth_seen): 이 키의 최초 인증(last_used_at None)을 갱신 전 캡처 — 1회 dedup.
     # api_key 경로 = 에이전트 인증(휴먼은 JWT). 실제 emit 은 member_id/org_id 해소 후(return 직전).
@@ -179,7 +205,7 @@ async def _resolve_api_key(
             )
         )).scalar_one_or_none()
         if not m:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key member not found")
+            raise await _member_missing_401(db, api_key)
         # 기본 project = legacy(team_members ORDER BY project_id LIMIT 1)와 동치 해소. team_members 뷰(0110)의
         # 에이전트 set = agent_project_profiles(profile) ∪ project_access(permission='granted', grant-only).
         # profile 만 보면 grant-only 최소 project_id 누락 → cut 후 기본프로젝트 드리프트(까심 BLOCKER). 두 anchor
@@ -197,7 +223,7 @@ async def _resolve_api_key(
         # union 이 비면(profile·grant 모두 없음) 인증 거부(무프로젝트 키를 project_id=None 으로 통과시키면
         # legacy 대비 인증 widening). 까심 finding①.
         if proj is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key member not found")
+            raise await _member_missing_401(db, api_key)
         member_id = m.id
         org_id = str(m.org_id)
         project_id = str(proj)
@@ -216,7 +242,7 @@ async def _resolve_api_key(
             .limit(1)
         )).scalar_one_or_none()
         if not member:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key member not found")
+            raise await _member_missing_401(db, api_key)
         member_id = member.id
         org_id = str(member.org_id)
         project_id = str(member.project_id)
