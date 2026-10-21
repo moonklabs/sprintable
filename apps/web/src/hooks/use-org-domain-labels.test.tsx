@@ -411,6 +411,25 @@ describe('useOrgDomainLabels — 떠 있는 소비처도 무효화 · 만료 때
     expect(dumps().every((d) => d.dataset.statusBacklog === '아이디어')).toBe(true);
   });
 
+  it('마지막 소비처가 내려가면 만료 알람도 걷히고, 다시 붙는 소비처가 남은 시간만큼 알람을 다시 건다', async () => {
+    fetchWithAuthMock.mockResolvedValue(okLabels());
+    await act(async () => { root.render(<Harness orgId="org-1" locale="ko" />); });
+    await flush();
+    expect(vi.getTimerCount()).toBe(1); // 떠 있는 소비처의 만료 알람
+    await act(async () => { root.render(<div />); });
+    expect(vi.getTimerCount()).toBe(0); // 아무도 없으면 알람도 없다(내려간 뒤 타이머가 남아 도는 일 없음)
+    await act(async () => { await vi.advanceTimersByTimeAsync(ORG_DOMAIN_LABELS_TTL_MS / 2); });
+    await act(async () => { root.render(<Harness orgId="org-1" locale="ko" />); }); // 받아 둔 값을 쓰며 다시 붙는다
+    await flush();
+    expect(fetchWithAuthMock).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(1); // 남은 절반 시간의 알람
+    fetchWithAuthMock.mockResolvedValue(okLabels([{ ...LABELS[0], label_ko: '캠페인' }]));
+    await act(async () => { await vi.advanceTimersByTimeAsync(ORG_DOMAIN_LABELS_TTL_MS / 2 + 5); });
+    await flush();
+    expect(fetchWithAuthMock).toHaveBeenCalledTimes(2);
+    expect(dumps()[0]!.dataset.statusBacklog).toBe('캠페인');
+  });
+
   it('성공 TTL이 지나면 떠 있는 소비처가 다시 읽어 바뀐 값을 본다(요청은 소비처 수와 무관하게 한 번)', async () => {
     fetchWithAuthMock.mockResolvedValue(okLabels());
     await act(async () => { root.render(<Crowd n={8} orgId="org-1" />); });

@@ -73,17 +73,28 @@ function subscribeOrgDomainLabels(orgId: string, wake: () => void): () => void {
   const set = labelListeners.get(orgId) ?? new Set<() => void>();
   set.add(wake);
   labelListeners.set(orgId, set);
-  return () => { set.delete(wake); if (set.size === 0 && labelListeners.get(orgId) === set) labelListeners.delete(orgId); };
+  // a slot that was written while nobody was mounted has no alarm: the first consumer to mount sets it for what is left of the slot
+  const slot = labelSlots.get(orgId);
+  if (slot && !labelTimers.has(orgId)) scheduleLabelWake(orgId, Math.max(0, slot.expiresAt - Date.now()));
+  return () => {
+    set.delete(wake);
+    if (set.size === 0 && labelListeners.get(orgId) === set) {
+      labelListeners.delete(orgId);
+      const timer = labelTimers.get(orgId); // nobody left to wake: no alarm either (the next mount sets it again)
+      if (timer !== undefined) { clearTimeout(timer); labelTimers.delete(orgId); }
+    }
+  };
 }
 
-function scheduleLabelWake(orgId: string, ttl: number): void {
+function scheduleLabelWake(orgId: string, ms: number): void {
   const old = labelTimers.get(orgId);
   if (old !== undefined) clearTimeout(old);
   labelTimers.set(orgId, setTimeout(() => {
     labelTimers.delete(orgId);
-    if (!labelListeners.get(orgId)?.size) return; // 떠 있는 소비처가 없으면 깨울 일 없음(다음 마운트가 읽는다)
-    notifyOrgDomainLabels(orgId);
-  }, ttl + 1));
+    const slot = labelSlots.get(orgId);
+    if (slot && slot.expiresAt <= Date.now()) labelSlots.delete(orgId); // an expired slot is not kept
+    if (labelListeners.get(orgId)?.size) notifyOrgDomainLabels(orgId);
+  }, ms + 1));
 }
 
 /** 라벨을 바꾼 쪽이 부른다(orgId 없이 부르면 전부). 다음 읽기가 새로 받고, 이미 날아가 있는 요청의 응답은 버려진다. */
@@ -142,7 +153,7 @@ function requestOrgDomainLabels(orgId: string): Promise<DomainLabelEntry[]> {
       // 네트워크 예외 — 아래 FAILED_TTL로 짧게 기억(원래처럼 조용히 빈 배열 폴백)
     }
     // 무효화가 이 요청이 나간 뒤에 있었으면 이 응답은 옛 값이다 — 기억하지 않는다(받은 쪽에는 그대로 준다).
-    if ((labelEpochs.get(orgId) ?? 0) === epoch) { labelSlots.set(orgId, { entries, expiresAt: Date.now() + ttl }); scheduleLabelWake(orgId, ttl); }
+    if ((labelEpochs.get(orgId) ?? 0) === epoch) { labelSlots.set(orgId, { entries, expiresAt: Date.now() + ttl }); if (labelListeners.get(orgId)?.size) scheduleLabelWake(orgId, ttl); }
     return entries;
   })().finally(() => {
     if (labelRequests.get(orgId) === request) labelRequests.delete(orgId);
