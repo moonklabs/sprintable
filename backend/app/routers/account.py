@@ -1,19 +1,22 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from jose import JWTError
 from pydantic import BaseModel
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import decode_jwt_ignore_exp, hash_token
-from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
+from app.models.auth_identity import AuthMigration
 from app.models.organization import Organization
 from app.models.team import TeamMember
 from app.models.user import RefreshToken, User
 from app.schemas.subscription import AccountDeleteResponse
+from app.services.account_purge import ACCOUNT_PURGE_GRACE_DAYS
 
 router = APIRouter(prefix="/api/v2/account", tags=["account", "Organization"])
 
@@ -118,32 +121,58 @@ async def resolve_accounts(
 
 @router.post("/delete", response_model=AccountDeleteResponse)
 async def delete_account(
-    org_id: uuid.UUID = Depends(get_verified_org_id),
     session: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
 ) -> AccountDeleteResponse:
-    # story #4400 — this endpoint failed on every call (asyncpg: `:uid::uuid` is a syntax error with bound parameters, and a
-    # str is not accepted for a timestamptz): CAST(... AS uuid) and a datetime.
-    now = datetime.now(timezone.utc)
-    uid = auth.user_id
+    """The person deletes their OWN account (a store requirement: it must be reachable from the app, whatever state the account is in).
 
+    story #4752 — three things this endpoint did not do:
+    ① it asked for an organization (`get_verified_org_id`): a person with none could not delete their account at all (403). The account is the person's own, whether or not an
+       organization stands: nothing here needs one.
+    ② the account stayed alive: only the memberships got `deleted_at`, so the same password still signed in (and the web's onboarding made the person a new organization).
+       Now the user row is closed — `is_active` false + `deleted_at` — and every lookup that signs a person in (password · refresh · provider id · reset mail) already
+       filters on `is_active`.
+    ③ nothing ever removed the personal data the copy promises («30일 유예 기간 후 …»): the purge job (`services/account_purge.py`, cron `account-purge`) counts from `deleted_at`.
+    Human only: a human API key (`hu_live_`) is a way to READ and write work, never to close the person's account; an agent key names a member, not a user, so no account is found.
+    """
+    if (auth.claims.get("app_metadata") or {}).get("human_api_key_id"):
+        raise HTTPException(status_code=403, detail="An API key cannot delete the account")
+    try:
+        uid = uuid.UUID(str(auth.user_id))
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Account not found") from None
+    user = (await session.execute(select(User).where(User.id == uid).with_for_update())).scalar_one_or_none()
+    if user is None or not user.is_active or user.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="Account not found")  # another person's id, an agent key's member, or an account already deleted: the same answer
+
+    now = datetime.now(timezone.utc)
     await session.execute(
-        text("UPDATE org_members SET deleted_at = :now WHERE user_id = CAST(:uid AS uuid)"),
+        text("UPDATE org_members SET deleted_at = :now WHERE user_id = CAST(:uid AS uuid) AND deleted_at IS NULL"),
         {"now": now, "uid": str(uid)},
     )
     # AC3-4 2-2: team_members 뷰 전환 — anchor-only. members가 is_active/deleted_at 유일 소스.
     await session.execute(
         text(
             "UPDATE members SET deleted_at = :now, is_active = false, updated_at = :now"
-            " WHERE user_id = CAST(:uid AS uuid)"
+            " WHERE user_id = CAST(:uid AS uuid) AND deleted_at IS NULL"
         ),
         {"now": now, "uid": str(uid)},
     )
+    user.is_active = False
+    user.deleted_at = now
     # story #4400 (Qadir 01a0e9fc) — end every session of the deleted account, like the admin removal does
     # (org_members._revoke_user_refresh_tokens · the same _explicit_revoke_values seam). Before, its refresh tokens stayed
     # valid and could keep re-issuing a departed org.
     from app.routers.org_members import _revoke_user_refresh_tokens
 
     await _revoke_user_refresh_tokens(session, uuid.UUID(str(uid)))
+    # …and every ACCESS token already issued: the per-user cut-off epoch (`auth_migrations.auth_valid_after`, read by `_reject_if_before_cutover` on every request) — the last instant of the
+    # CURRENT second, as the reclaim of an unproved account does it (tokens carry whole seconds). Without it a token minted before the deletion kept working until its own expiry.
+    epoch = now.replace(microsecond=0) + timedelta(seconds=1) - timedelta(microseconds=1)
+    upsert = pg_insert(AuthMigration).values(user_id=uid, state="legacy", auth_valid_after=epoch)
+    await session.execute(upsert.on_conflict_do_update(
+        index_elements=[AuthMigration.user_id],
+        set_={"auth_valid_after": func.greatest(AuthMigration.auth_valid_after, upsert.excluded.auth_valid_after)},
+    ))
 
-    return AccountDeleteResponse(ok=True, grace_period_days=30)
+    return AccountDeleteResponse(ok=True, grace_period_days=ACCOUNT_PURGE_GRACE_DAYS)

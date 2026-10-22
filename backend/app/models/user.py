@@ -20,6 +20,9 @@ class User(Base):
     password_set_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # story #3896 — DB has DEFAULT true, ORM lacked server_default (drift).
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    # story #4752 — alembic 0460: when the person deleted the account (NULL = live; `is_active` is false with it) and when the purge job removed the personal data (NULL = still there).
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    anonymized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     login_fail_count: Mapped[int] = mapped_column(nullable=False, default=0)
     login_locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

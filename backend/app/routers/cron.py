@@ -857,6 +857,24 @@ async def clock_edit_scrub(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+# ─── POST /api/v2/internal/cron/account-purge ─────────────────────────────────
+# story #4752: the personal data of an account deleted at least ACCOUNT_PURGE_GRACE_DAYS ago is anonymized (what the deletion copy promises). Bounded per run, idempotent.
+
+@router.post("/account-purge")
+async def account_purge(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.account_purge import purge_deleted_accounts
+        purged = await purge_deleted_accounts(session)  # (the session commits at the end of the request)
+        return _ok({"purged": purged})
+    except Exception as exc:
+        logger.exception("cron error (account-purge): %s", type(exc).__name__)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 @router.get("/storage-usage-warn")
 async def storage_usage_warn(
     request: Request,
