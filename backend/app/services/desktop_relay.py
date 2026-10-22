@@ -762,19 +762,60 @@ class EndSessionPayload(_Payload):
 
 
 # story #4733 (0459 · S2): the actions of a phone's `clock` command. The kind is one word (DB CHECK); the choice is the payload's, so the next action
-# (P2: `out_edit`, its own shape) widens this schema and nothing in the database.
-CLOCK_ACTIONS = ("out_open", "out_submit", "out_cancel", "in")
+# (P2 · S5: `out_edit`, its own shape) widens this schema and nothing in the database.
+CLOCK_ACTIONS = ("out_open", "out_submit", "out_cancel", "in", "out_edit")
+# story #4733 (S5 · P2): the fields of a phone's edit are the Mac's own three, with the Mac's own limit (ClockFlow.edit cuts a field at 2000 characters)
+CLOCK_EDIT_FIELD_MAX = 2000
+CLOCK_REV_MAX = 2**31 - 1
+
+
+def plain_text(text: str) -> bool:
+    """Plain text of a field: line breaks (\\n) are the person's own; every other control character (C0 — a tab and a carriage return included: the phone sends \\n —,
+    DEL, the C1 controls, the Unicode line / paragraph separators) is refused, so what reaches the Mac is what the phone signed and shows. (The computer refuses
+    the hidden format characters too — it holds the same cleaner as for an instruction — and answers `rejected`; the server does not carry that list.)"""
+    return not any((ord(ch) < 32 and ch != "\n") or 0x7F <= ord(ch) <= 0x9F or ch in "\u2028\u2029" for ch in text)
+
+
+class ClockEdit(_Payload):
+    """story #4733 (S5 · P2): what a phone typed into a clock-out draft of ONE agent. `base_rev` = the row's revision the phone saw in the computer's report (the
+    daemon refuses the edit when the row moved on since — `stale` — so a phone never writes over what it did not see). Only the fields the person touched are
+    here (one to three; an absent field is left exactly as it is). The signature covers a hash of exactly these fields (the server never opens it)."""
+
+    base_rev: int = Field(ge=0, le=CLOCK_REV_MAX, strict=True)
+    done: str | None = Field(default=None, max_length=CLOCK_EDIT_FIELD_MAX)
+    plan: str | None = Field(default=None, max_length=CLOCK_EDIT_FIELD_MAX)
+    blockers: str | None = Field(default=None, max_length=CLOCK_EDIT_FIELD_MAX)
+
+    @model_validator(mode="after")
+    def _touched(self) -> ClockEdit:
+        fields = [t for t in (self.done, self.plan, self.blockers) if t is not None]
+        if not fields:
+            raise ValueError("an edit touches at least one field")
+        if not all(plain_text(t) for t in fields):
+            raise ValueError("an edited field is plain text: line breaks only, no other control character")
+        return self
 
 
 class ClockPayload(_Payload):
     """A person's signed clock-out / clock-in of the whole computer — exactly {action, signed}: no text, no agent, no path, no session (the phone sends
-    no free words, so there is nothing to inject). The signature covers kind `clock` + setup_id + action; the server carries it as is and opens nothing."""
+    no free words, so there is nothing to inject). The signature covers kind `clock` + setup_id + action; the server carries it as is and opens nothing.
+    The one exception is `out_edit` (S5 · P2): one agent's draft fields, typed on the phone — {action, signed, agent_member_id, edit}, the signature
+    covering the agent, the revision it saw and a hash of exactly the fields sent."""
 
-    action: Literal["out_open", "out_submit", "out_cancel", "in"]
+    action: Literal["out_open", "out_submit", "out_cancel", "in", "out_edit"]
     signed: str = Field(min_length=1, max_length=16384)
     # PO 10-20 00:23Z (AC1b): ONE agent of the computer instead of the whole computer — the signature then covers the agent too (kind + setup_id + action +
     # agent_member_id; none = a fixed empty value). Absent = the whole computer, exactly the payload as before (the key is left out of the stored payload).
     agent_member_id: uuid.UUID | None = None
+    edit: ClockEdit | None = None
+
+    @model_validator(mode="after")
+    def _edit_only_for_edit(self) -> ClockPayload:
+        if (self.action == "out_edit") != (self.edit is not None):
+            raise ValueError("an edit rides with the action out_edit, and only with it")
+        if self.action == "out_edit" and self.agent_member_id is None:
+            raise ValueError("an edit names its agent")
+        return self
 
 
 PAYLOAD_SCHEMAS: dict[str, type[_Payload]] = {
@@ -830,6 +871,11 @@ async def enqueue_command(
         body = {k: v for k, v in body.items() if not (k in ("stage", "host") and v is None)}
     if kind == "clock" and body.get("agent_member_id") is None:  # story #4733: the whole computer's press is exactly {action, signed}
         body.pop("agent_member_id", None)
+    if kind == "clock":  # S5 · P2: no `edit` key for any other press; in an edit only the fields the person touched are stored (an absent one is "left as it is")
+        if body.get("edit") is None:
+            body.pop("edit", None)
+        else:
+            body["edit"] = {k: v for k, v in body["edit"].items() if v is not None}
     cmd = DesktopCommand(
         id=uuid.uuid4(), setup_id=setup.id, device_seq=seq, kind=kind, session_key=body.get("session_key"), payload=body,
         idempotency_key=idempotency_key, requested_by=requested_by, state="queued",
@@ -902,9 +948,11 @@ async def record_command_result(db: AsyncSession, setup: DesktopSetup, command_i
 
         await on_command_done(db, cmd)
     if cmd.kind == "clock":  # story #4733: a submitted / cancelled clock-out takes the draft lines off the server at once
-        from app.services.desktop_clock import on_clock_result
+        from app.services.desktop_clock import on_clock_result, scrub_clock_edits
 
         await on_clock_result(db, cmd)
+        await db.flush()
+        await scrub_clock_edits(db, setup_id=setup.id)  # S5 · P2: the typed fields of an edit that just ended leave the stored command
     await touch_device(db, setup.id)
     await db.flush()
     return cmd
@@ -938,6 +986,11 @@ async def reject_open_commands(db: AsyncSession, *, setup_ids: list[uuid.UUID], 
         .values(state="rejected", result_code=result_code, finished_at=now)
         .returning(DesktopCommand.setup_id, DesktopCommand.kind, DesktopCommand.payload)
     )).all()
+    if any(kind == "clock" for _, kind, _p in rejected):  # S5 · P2: an edit that never reached the computer leaves no typed text behind
+        from app.services.desktop_clock import scrub_clock_edits
+
+        for sid in {sid for sid, kind, _p in rejected if kind == "clock"}:
+            await scrub_clock_edits(db, setup_id=sid)
     for setup_id, kind, payload in rejected:
         if kind == "answer_approval" and (payload or {}).get("request_id"):
             # story #4580 (Kadir 02:08Z): the stage the command answered — a late result of the first answer never moves the second

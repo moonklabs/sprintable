@@ -229,6 +229,14 @@
       "schedule": "15 5 * * *",
       "time_zone": "Asia/Seoul",
       "basis": "story #4234 신규 — «이 cron의 응답+로그가 이 스토리의 「도는 자리」 전부»(cron.py 주석). 읽기 전용 집계라 하루 1회."
+    },
+    {
+      "name": "clock-edit-scrub",
+      "route": "clock-edit-scrub",
+      "method": "POST",
+      "schedule": "*/5 * * * *",
+      "time_zone": "Etc/UTC",
+      "basis": "story #4733 S5·P2 (까디르군 렌즈 5182의 핀) — 폰에서 친 글이 시한(10분)을 넘기지 않게: 컴퓨터가 안 돌아오고 아무도 다시 누르지 않아도 서버가 스스로 지운다."
     }
   ],
   "unscheduled": [

@@ -364,7 +364,7 @@ async def test_10_the_paired_phone_of_a_person_who_may_command_reads_it_names_ar
         view = (await _read(c, sid, phone)).json()["view"]
         name = (await _sql(fetch=f"SELECT name FROM members WHERE id = '{agent}'"))[0][0]
         assert view["mode"] == "panel" and view["scope"] == "computer" and view["opened_from"] == "phone"
-        assert view["rows"] == [{"agent_member_id": agent, "state": "ready", "missing": [], "first_line": LINE, "idle": False, "name": name}]
+        assert view["rows"] == [{"agent_member_id": agent, "state": "ready", "missing": [], "first_line": LINE, "idle": False, "rev": 0, "edited": False, "name": name}]
         assert view["count"] == {"ready": 1, "needs_you": 0, "drafting": 0} and view["reported_at"]
         # another person who may command (the device's confirmer) but has NO access to that agent: the row, not the line
         plain_phone, plain_der = await _register(c, PLAIN)
@@ -1003,3 +1003,354 @@ async def test_30_forget_takes_the_computers_rows_in_id_order_in_one_statement(w
         event.remove(engine.sync_engine, "before_cursor_execute", watch)
     assert len(seen) == 1, seen  # the locking forget: one statement; lock=False: none
     assert "FROM desktop_setups" in seen[0] and "ORDER BY desktop_setups.id" in seen[0] and "FOR UPDATE" in seen[0], seen[0]
+
+
+# ── S5 · P2 (story 4733): a phone edits ONE agent's clock-out draft ─────────────────────────────────────────────────────────────────────────────────────────────────────
+SIGNED = "eyJ2IjoxfQ.signed-by-the-phone"
+TYPED = "손으로 친 다음 할 일 — 비밀스러운 문장"  # what a person typed on the phone (the kind of text that must not outlive its command or reach a log)
+
+
+def _edit(phone, agent, *, key=None, base_rev=0, **fields):
+    """A phone's edit press: only the fields the person touched ride in `edit`."""
+    return _press(phone, "out_edit", key=key, agent_member_id=agent, edit={"base_rev": base_rev, **fields})
+
+
+async def test_31_an_edit_press_stores_the_agent_the_revision_and_only_the_fields_the_person_touched(world):
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4733s31")
+        sid = device["setup_id"]
+        r = await _post(c, sid, _edit(phone, agent, key="e1", base_rev=3, plan="내일 이어서 함"))
+        assert (r.status_code, r.json()["state"]) == (201, "queued"), r.text
+        r = await _post(c, sid, _edit(phone, agent, key="e2", base_rev=3, done="한 줄\n둘째 줄", plan="", blockers="막힌 곳 없음"))
+        assert r.status_code == 201, r.text
+        r = await _post(c, sid, _edit(phone, agent, key="e3", base_rev=0, done="x" * 2000))  # the Mac's own limit is the edge
+        assert r.status_code == 201, r.text
+        rows = await _commands(sid)
+        assert [p for _k, p, _by, _key, _st in rows] == [
+            {"action": "out_edit", "signed": SIGNED, "agent_member_id": agent, "edit": {"base_rev": 3, "plan": "내일 이어서 함"}},  # the untouched fields are absent, never null
+            {"action": "out_edit", "signed": SIGNED, "agent_member_id": agent, "edit": {"base_rev": 3, "done": "한 줄\n둘째 줄", "plan": "", "blockers": "막힌 곳 없음"}},
+            {"action": "out_edit", "signed": SIGNED, "agent_member_id": agent, "edit": {"base_rev": 0, "done": "x" * 2000}},
+        ]
+        # every other press keeps exactly its old bytes: no `edit` key rides with it
+        other = await _post(c, sid, _press(phone, "out_open", key="o1", agent_member_id=agent))
+        assert other.status_code == 201
+        assert (await _commands(sid))[-1][1] == {"action": "out_open", "signed": SIGNED, "agent_member_id": agent}
+
+
+async def test_32_an_edit_is_closed_one_agent_one_revision_one_to_three_plain_fields_and_nothing_else(world):
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4733s32")
+        sid = device["setup_id"]
+        ok = {"base_rev": 0, "plan": "x"}
+        bad = [
+            _press(phone, "out_edit"), _press(phone, "out_edit", agent_member_id=agent),                      # no edit
+            _press(phone, "out_edit", edit=ok),                                                               # no agent (an edit is always one agent's)
+            _press(phone, "out_open", agent_member_id=agent, edit=ok), _press(phone, "in", agent_member_id=agent, edit=ok),  # an edit rides with out_edit only
+            _press(phone, "out_submit", edit=ok),
+            _edit(phone, agent), _edit(phone, agent, plan=None), _edit(phone, agent, done=None, plan=None, blockers=None),  # touches nothing
+            _press(phone, "out_edit", agent_member_id=agent, edit={**ok, "session_key": "s-1"}),              # no field but the three
+            _press(phone, "out_edit", agent_member_id=agent, edit={**ok, "no_blockers": True}),
+            _press(phone, "out_edit", agent_member_id=agent, edit={"plan": "x"}),                             # no revision
+            _press(phone, "out_edit", agent_member_id=agent, edit="plan"), _press(phone, "out_edit", agent_member_id=agent, edit=[ok]),
+            _edit(phone, agent, plan="x" * 2001),
+            _edit(phone, agent, plan=5), _edit(phone, agent, plan=["a"]), _edit(phone, agent, plan=True),
+        ]
+        for rev in (-1, 1.5, True, 2**31, "1", None):
+            bad.append(_edit(phone, agent, base_rev=rev, plan="x"))
+        for ch in ("\x00", "\x01", "\x08", "\t", "\x0b", "\x0c", "\r", "\x1b", "\x7f", "\u0085", "\u009f", " ", " "):
+            bad += [_edit(phone, agent, done=f"a{ch}b"), _edit(phone, agent, plan=f"a{ch}"), _edit(phone, agent, blockers=f"{ch}a")]
+        for body in bad:
+            r = await _post(c, sid, body)
+            assert r.status_code == 422, str(body)[-170:]
+        assert await _commands(sid) == []
+        # …and the ordinary text people type is fine: Korean, a line break, an emoji
+        for i, t in enumerate(("한글", "줄\n바꿈", "이모지 🙂")):
+            assert (await _post(c, sid, _edit(phone, agent, key=f"g{i}", plan=t))).status_code == 201, t
+
+
+async def test_33_an_edit_is_for_an_agent_of_that_computer_and_a_person_who_can_open_it(world):
+    plain_tm = await _plain_member()
+    async with _client() as c:
+        device, agent, phone, owner_der = await _setup(c, "d4424 mac 4733s33")
+        sid = device["setup_id"]
+        # an agent this computer was not set up with is no target (nothing queued)
+        device2, agent2, _p2, _d2 = await _setup(c, "d4424 mac 4733s33b")
+        for target in (str(uuid.uuid4()), str(OWNER_TM), agent2):
+            r = await _post(c, sid, _edit(phone, target, key=f"t-{target}", plan="x"))
+            assert (r.status_code, r.json()["error"]["code"]) == (422, "agent_not_on_device"), target
+        assert await _commands(sid) == []
+        # the device's confirmer may press the computer, but with NO access to the agent may not write into its draft (the phone shows him no line either)
+        plain_phone, plain_der = await _register(c, PLAIN)
+        await _pair(c, device["device_token"], owner_der, plain_der)
+        await _sql(f"UPDATE desktop_setups SET confirmed_by = '{PLAIN}' WHERE id = '{sid}'")
+        assert (await _post(c, sid, _press(plain_phone, "out_open", key="p-open"), who=PLAIN)).status_code == 201  # the whole computer: unchanged
+        r = await _post(c, sid, _edit(plain_phone, agent, key="p-edit", plan="x"), who=PLAIN)
+        assert (r.status_code, r.json()["error"]["code"]) == (403, "not_allowed_to_command")
+        assert [k for _k, _p, _by, k, _st in await _commands(sid)] == [f"b5:{plain_tm}:p-open"]
+        # …with access to the agent's project: the edit is queued
+        await _sql(f"INSERT INTO project_access (id,project_id,member_id,permission) VALUES (gen_random_uuid(),'{PROJ}','{plain_tm}','granted')",
+                   f"INSERT INTO agent_project_profiles (id,member_id,project_id) VALUES (gen_random_uuid(),'{agent}','{PROJ}') ON CONFLICT DO NOTHING")
+        r = await _post(c, sid, _edit(plain_phone, agent, key="p-edit2", plan="x"), who=PLAIN)
+        assert r.status_code == 201, r.text
+
+
+async def test_34_the_daemons_two_edit_words_are_taken_and_a_third_is_not(world):
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4733s34")
+        sid = device["setup_id"]
+        for i, code in enumerate(("ok", "stale", "not_editable", "not_open", "unknown_agent")):
+            cid = (await _post(c, sid, _edit(phone, agent, key=f"w{i}", plan="x"))).json()["command_id"]
+            assert (await _result(c, device, cid, "done", code)).status_code == 200, code
+            read = await c.get(f"/api/v2/desktop/setups/{sid}/clock/commands/{cid}", headers=_person(OWNER))
+            assert (read.json()["action"], read.json()["state"], read.json()["result_code"]) == ("out_edit", "done", code)
+        cid = (await _post(c, sid, _edit(phone, agent, key="w-bad", plan="x"))).json()["command_id"]
+        for code in (None, "edited", "stale_", "row_busy", "bad_edit"):
+            r = await _result(c, device, cid, "done", code)
+            assert (r.status_code, r.json()["error"]["code"]) == (422, "invalid_result_code"), code
+        assert (await _result(c, device, cid, "done", "Stale")).status_code == 422  # not even the ordinary word shape
+
+
+async def test_35_the_typed_text_leaves_the_stored_command_when_it_ends_and_never_outlives_its_minutes(world):
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4733s35")
+        sid = device["setup_id"]
+        gone = {"action": "out_edit", "signed": SIGNED, "agent_member_id": agent, "edit": {"base_rev": 4}}  # only the revision stays
+
+        async def stored(key):
+            return {k: p for _k, p, _by, k, _st in await _commands(sid)}[f"b5:{OWNER_TM}:{key}"]
+
+        full = {**gone, "edit": {"base_rev": 4, "plan": TYPED, "done": TYPED}}
+        # while it is open (queued · delivered · acked — the daemon is working on it) the text is there
+        cid = (await _post(c, sid, _edit(phone, agent, key="a", base_rev=4, plan=TYPED, done=TYPED))).json()["command_id"]
+        assert await stored("a") == full
+        assert (await _result(c, device, cid, "acked")).status_code == 200
+        assert await stored("a") == full
+        # it ends done → gone; failed → gone; rejected → gone
+        assert (await _result(c, device, cid, "done", "ok")).status_code == 200
+        assert await stored("a") == gone
+        for key, state, code in (("f", "failed", "signature_invalid"), ("r", "rejected", "schema_rejected")):
+            cid = (await _post(c, sid, _edit(phone, agent, key=key, base_rev=4, plan=TYPED, done=TYPED))).json()["command_id"]
+            assert await stored(key) == full
+            assert (await _result(c, device, cid, state, code)).status_code == 200
+            assert await stored(key) == gone, key
+        # another command ending does not touch a still-open edit of the same computer
+        open_cid = (await _post(c, sid, _edit(phone, agent, key="open", base_rev=4, plan=TYPED, done=TYPED))).json()["command_id"]
+        other = (await _post(c, sid, _press(phone, "out_open", key="o"))).json()["command_id"]
+        assert (await _result(c, device, other, "done", "ok")).status_code == 200
+        assert await stored("open") == full
+        # an edit nobody answered: its minutes are up (10) → the next press of that computer takes the text out (the command itself stays as it was)
+        await _sql(f"UPDATE desktop_commands SET created_at = now() - interval '11 minutes' WHERE id = '{open_cid}'")
+        assert (await _post(c, sid, _press(phone, "out_cancel", key="c"))).status_code == 201
+        assert await stored("open") == gone
+        assert dict((str(r[0]), r[1]) for r in await _sql(fetch=f"SELECT id, state FROM desktop_commands WHERE id = '{open_cid}'"))[open_cid] in ("queued", "delivered")
+        # an open edit the organization's remote control switch cuts off ends rejected — and takes its text with it
+        cid3 = (await _post(c, sid, _edit(phone, agent, key="rc", base_rev=4, plan=TYPED))).json()["command_id"]
+        assert (await c.put(f"/api/v2/organizations/{ORG}/remote-control", json={"enabled": False}, headers=_person(OWNER))).status_code == 200
+        assert await stored("rc") == gone
+        assert (await _sql(fetch=f"SELECT state FROM desktop_commands WHERE id = '{cid3}'"))[0][0] == "rejected"
+        # no other command's payload was changed by any of this
+        assert (await stored("o")) == {"action": "out_open", "signed": SIGNED}
+
+
+async def test_36_a_row_carries_its_revision_in_the_report_and_the_phones_read(world):
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4733s36")
+        sid = device["setup_id"]
+        assert (await _put(c, device, _panel(1, agent, rows=[_row(agent, first_line=LINE, rev=7)]))).status_code == 200
+        assert (await _read(c, sid, phone)).json()["view"]["rows"][0]["rev"] == 7
+        # an older computer sends none → 0 (the phone then edits with base_rev 0 and the daemon, which has no revision either, refuses nothing it does not know)
+        assert (await _put(c, device, _panel(2, agent))).status_code == 200
+        assert (await _read(c, sid, phone)).json()["view"]["rows"][0]["rev"] == 0
+        for rev in (-1, 1.5, True, 2**31, "3", None):
+            r = await _put(c, device, _panel(3, agent, rows=[_row(agent, first_line=LINE, rev=rev)]))
+            assert r.status_code == 422, rev
+        assert (await _read(c, sid, phone)).json()["view"]["rows"][0]["rev"] == 0  # nothing of the refused ones was applied
+        # the mark of a person's hand: a closed boolean, said of a draft row only (a saved or ended row carries no draft, so no mark and no line)
+        assert (await _put(c, device, _panel(4, agent, rows=[_row(agent, first_line=LINE, rev=2, edited=True)]))).status_code == 200
+        assert (await _read(c, sid, phone)).json()["view"]["rows"][0]["edited"] is True
+        for edited in ("yes", 1, None):
+            assert (await _put(c, device, _panel(5, agent, rows=[_row(agent, first_line=LINE, edited=edited)]))).status_code == 422, edited
+        assert (await _put(c, device, _panel(6, agent, rows=[_row(agent, "saved", edited=True)]))).status_code == 422  # not a draft: no mark
+
+
+async def test_37_no_log_line_carries_what_a_person_typed_on_any_edit_road(world, caplog):
+    from app.main import app  # noqa: F401 — importing the app configures logging and clears the root handlers (caplog's included): attach it again
+
+    logging.getLogger().addHandler(caplog.handler)
+    caplog.set_level(logging.DEBUG)
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4733s37")
+        sid = device["setup_id"]
+        await _put(c, device, _panel(1, agent, rows=[_row(agent, first_line=LINE, rev=1)]))
+        made = (await _post(c, sid, _edit(phone, agent, key="l1", base_rev=1, plan=TYPED, done=TYPED, blockers=TYPED))).json()["command_id"]
+        await _result(c, device, made, "acked")
+        await _result(c, device, made, "done", "ok")
+        refused = await _post(c, sid, _edit(phone, agent, key="l2", base_rev=1, plan=f"{TYPED}\x00"))  # a refused one is not logged either
+        assert refused.status_code == 422
+        too_long = await _post(c, sid, _edit(phone, agent, key="l3", base_rev=1, plan=TYPED * 400))
+        assert too_long.status_code == 422
+        await _read(c, sid, phone)
+    text = "\n".join(f"{r.getMessage()} {r.args}" for r in caplog.records)
+    assert len(caplog.records) > 5, "the capture really sees the app's log lines (the requests are logged)"
+    assert TYPED not in text and "비밀스러운" not in text and SIGNED not in text
+
+
+async def test_39_a_refused_press_on_the_clock_road_is_answered_without_the_words_that_were_typed(world):
+    """FastAPI's default 422 echoes each error's `input` — for an error in the edit that is the person's own text, and for an error elsewhere in the body (a missing action, a bad key) it is the WHOLE body,
+    edit included. On the clock road no error carries it; any other road's refusal is unchanged."""
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4733s39")
+        sid = device["setup_id"]
+        typed = {"base_rev": 1, "plan": TYPED}
+        bodies = [
+            _edit(phone, agent, key="e1", plan=TYPED * 400), _edit(phone, agent, key="e2", done=f"{TYPED}\x00"), _edit(phone, agent, key="e3", blockers=5),   # an error in the edit
+            {k: v for k, v in _press(phone, "out_edit", agent_member_id=agent, edit=typed).items() if k != "action"},                                          # …a missing action
+            _press(phone, "out_open", agent_member_id=agent, edit=typed),                                                                                      # …an edit on another action
+            _press(phone, "out_edit", agent_member_id=agent, edit=typed, phone_key_id=12),                                                                     # …a bad key beside a good edit
+        ]
+        for body in bodies:
+            r = await _post(c, sid, body)
+            assert r.status_code == 422, str(body)[-120:]
+            assert "비밀스러운" not in r.text and TYPED not in r.text, r.text[:300]
+            assert r.json()["detail"], "the refusal still says which field and why"
+        # another road keeps the default answer, `input` and all (no change of shape for anything else)
+        other = await _put(c, device, {"seq": "not a number"})
+        assert other.status_code == 422 and "input" in other.text
+
+
+async def test_40_an_edit_nobody_answers_loses_its_text_on_the_servers_own_clock_without_any_press(world, monkeypatch):
+    """Kadir's pin on 5182: a computer that never comes back and is never pressed again must not keep the typed words past their minutes. The Cloud Scheduler job `clock-edit-scrub`
+    (POST /api/v2/internal/cron/clock-edit-scrub) takes them out — an old open edit loses its fields (only the revision stays), a young one keeps them, nothing else is touched."""
+    from app.routers import cron as cron_module
+
+    monkeypatch.setattr(cron_module, "CRON_SECRET", "test-cron-secret")
+    url = "/api/v2/internal/cron/clock-edit-scrub"
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4733s40")
+        sid = device["setup_id"]
+
+        async def stored(key):
+            return {k: p for _k, p, _by, k, _st in await _commands(sid)}[f"b5:{OWNER_TM}:{key}"]
+
+        # a second computer of the same person: its old edit is taken by the same sweep (the sweep is not per computer)
+        device2, agent2, phone2, _der2 = await _setup(c, "d4424 mac 4733s40b")
+        sid2 = device2["setup_id"]
+        old2 = (await _post(c, sid2, _edit(phone2, agent2, key="old2", base_rev=1, plan=TYPED))).json()["command_id"]
+        await _sql(f"UPDATE desktop_commands SET created_at = now() - interval '1 day' WHERE id = '{old2}'")
+        old = (await _post(c, sid, _edit(phone, agent, key="old", base_rev=4, plan=TYPED, done=TYPED))).json()["command_id"]
+        assert (await _post(c, sid, _edit(phone, agent, key="young", base_rev=4, plan=TYPED))).status_code == 201
+        assert (await _post(c, sid, _press(phone, "out_open", key="o"))).status_code == 201
+        await _sql(f"UPDATE desktop_commands SET created_at = now() - interval '3 days' WHERE id = '{old}'")
+        # the road is the cron's: no secret / a wrong one is refused and nothing is taken out
+        assert (await c.post(url)).status_code == 401
+        assert (await c.post(url, headers={"Authorization": "Bearer wrong"})).status_code == 401
+        assert (await stored("old"))["edit"] == {"base_rev": 4, "plan": TYPED, "done": TYPED}
+        # the sweep: no press of that computer in between
+        r = await c.post(url, headers={"Authorization": "Bearer test-cron-secret"})
+        assert r.status_code == 200 and r.json()["data"]["scrubbed"] == 2, r.text
+        assert dict((str(x[0]), x[1]) for x in await _sql(fetch=f"SELECT id, payload->'edit' FROM desktop_commands WHERE id = '{old2}'"))[old2] == {"base_rev": 1}  # the other computer's
+        assert (await stored("old"))["edit"] == {"base_rev": 4}
+        assert (await stored("young"))["edit"] == {"base_rev": 4, "plan": TYPED}   # its minutes are not up
+        assert (await stored("o")) == {"action": "out_open", "signed": SIGNED}
+        assert dict((str(r_[0]), r_[1]) for r_ in await _sql(fetch=f"SELECT id, state FROM desktop_commands WHERE id = '{old}'"))[old] in ("queued", "delivered")  # the command itself stays as it was
+        # a second sweep finds nothing more
+        again = await c.post(url, headers={"Authorization": "Bearer test-cron-secret"})
+        assert again.json()["data"]["scrubbed"] == 0
+
+
+async def test_41_the_sweep_takes_a_bounded_batch_and_leaves_the_rest_for_the_next_tick(world, monkeypatch):
+    from app.routers import cron as cron_module
+    from app.services import desktop_clock
+
+    monkeypatch.setattr(cron_module, "CRON_SECRET", "test-cron-secret")
+    monkeypatch.setattr(desktop_clock, "SCRUB_SWEEP_BATCH", 2)
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4733s41")
+        sid = device["setup_id"]
+        ids = [(await _post(c, sid, _edit(phone, agent, key=f"k{i}", base_rev=1, plan=TYPED))).json()["command_id"] for i in range(5)]
+        for i in ids:
+            await _sql(f"UPDATE desktop_commands SET created_at = now() - interval '1 hour' WHERE id = '{i}'")
+        got = []
+        for _tick in range(4):
+            r = await c.post("/api/v2/internal/cron/clock-edit-scrub", headers={"Authorization": "Bearer test-cron-secret"})
+            got.append(r.json()["data"]["scrubbed"])
+        assert got == [2, 2, 1, 0], got   # at most the batch a tick; the next tick takes the rest; then nothing
+
+
+async def test_42_the_sweep_skips_a_row_someone_holds_and_the_next_tick_takes_it(world, monkeypatch):
+    """A row another transaction holds (the result path ending that very command) is not waited for: the tick takes the rest and goes on; the held row is taken once it is let go."""
+    import asyncio
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from app.routers import cron as cron_module
+    from tests.test_4424_desktop_setup_realdb import _ASYNC
+
+    monkeypatch.setattr(cron_module, "CRON_SECRET", "test-cron-secret")
+    url, auth = "/api/v2/internal/cron/clock-edit-scrub", {"Authorization": "Bearer test-cron-secret"}
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4733s42")
+        sid = device["setup_id"]
+        ids = [(await _post(c, sid, _edit(phone, agent, key=f"h{i}", base_rev=1, plan=TYPED))).json()["command_id"] for i in range(3)]
+        for i in ids:
+            await _sql(f"UPDATE desktop_commands SET created_at = now() - interval '1 hour' WHERE id = '{i}'")
+
+        async def edit_of(cid):
+            return (await _sql(fetch=f"SELECT payload->'edit' FROM desktop_commands WHERE id = '{cid}'"))[0][0]
+
+        eng = create_async_engine(_ASYNC, poolclass=NullPool)
+        try:
+            async with eng.connect() as holder:
+                await holder.execute(text(f"SELECT 1 FROM desktop_commands WHERE id = '{ids[0]}' FOR UPDATE"))   # the row is held in an open transaction
+                r = await asyncio.wait_for(c.post(url, headers=auth), 20)                                         # …and the tick does not wait for it
+                assert r.status_code == 200 and r.json()["data"]["scrubbed"] == 2, r.text
+                assert (await edit_of(ids[0])) == {"base_rev": 1, "plan": TYPED}
+                assert (await edit_of(ids[1])) == {"base_rev": 1} and (await edit_of(ids[2])) == {"base_rev": 1}
+                await holder.rollback()
+        finally:
+            await eng.dispose()
+        again = await c.post(url, headers=auth)
+        assert again.json()["data"]["scrubbed"] == 1
+        assert (await edit_of(ids[0])) == {"base_rev": 1}
+
+
+async def test_43_the_sweep_touches_clock_commands_only(world, monkeypatch):
+    """Another kind of command with an `edit` key in its payload (it is not ours) is left exactly as it was, however old."""
+    from app.routers import cron as cron_module
+
+    monkeypatch.setattr(cron_module, "CRON_SECRET", "test-cron-secret")
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4733s43")
+        sid = device["setup_id"]
+        cid = (await _post(c, sid, _edit(phone, agent, key="k", base_rev=1, plan=TYPED))).json()["command_id"]
+        await _sql(f"UPDATE desktop_commands SET kind = 'stop_session', created_at = now() - interval '1 day' WHERE id = '{cid}'")   # not a clock command any more
+        r = await c.post("/api/v2/internal/cron/clock-edit-scrub", headers={"Authorization": "Bearer test-cron-secret"})
+        assert r.status_code == 200 and r.json()["data"]["scrubbed"] == 0, r.text
+        assert (await _sql(fetch=f"SELECT payload->'edit' FROM desktop_commands WHERE id = '{cid}'"))[0][0] == {"base_rev": 1, "plan": TYPED}
+
+
+def test_38_each_of_the_two_schemas_refuses_an_edit_that_does_not_fit_its_action_on_its_own():
+    """The press request (what the web posts) and the stored payload (what the daemon is handed) both close the edit's shape — either would catch what the other missed,
+    so each is pinned by itself (the HTTP road alone cannot tell which of the two refused)."""
+    from pydantic import ValidationError
+
+    from app.services.desktop_clock import ClockRequest
+    from app.services.desktop_relay import ClockPayload
+
+    agent = str(uuid.uuid4())
+    edit = {"base_rev": 1, "plan": "x"}
+    req = {"idempotency_key": "k", "signed": "s", "phone_key_id": str(uuid.uuid4())}
+    pay = {"signed": "s"}
+    for schema, base in ((ClockRequest, req), (ClockPayload, pay)):
+        assert schema.model_validate({**base, "action": "out_edit", "agent_member_id": agent, "edit": edit}).edit is not None
+        for bad in (
+            {"action": "out_edit", "agent_member_id": agent},                       # an edit without its fields
+            {"action": "out_edit", "edit": edit},                                    # …without its agent
+            {"action": "out_open", "agent_member_id": agent, "edit": edit},          # fields on another action
+            {"action": "in", "edit": edit}, {"action": "out_submit", "edit": edit}, {"action": "out_cancel", "agent_member_id": agent, "edit": edit},
+            {"action": "out_edit", "agent_member_id": agent, "edit": {"base_rev": 1}},  # touching nothing
+        ):
+            with pytest.raises(ValidationError):
+                schema.model_validate({**base, **bad})

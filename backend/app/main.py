@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import uuid
 from contextlib import asynccontextmanager
 
@@ -298,6 +299,9 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     )
 
 
+_CLOCK_PRESS_PATH = re.compile(r"/api/v2/desktop/setups/[^/]+/clock")
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     """story #4330 — 본문 일시가 오프셋 없어 `OffsetDatetime`에 걸린 오류만 쿼리(4294)와 같은 422 `DATETIME_OFFSET_REQUIRED`
@@ -310,6 +314,10 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             return await http_exception_handler(
                 request, HTTPException(status_code=422, detail=offset_required_detail(".".join(loc), request)),
             )
+    # story #4733 (S5 · P2): what a person typed into a clock edit is never sent back in a refusal — FastAPI's default 422 carries each error's `input` (for a body-level error, the WHOLE body). On the phone's
+    # clock route no error carries it; the rest of the answer is the default's, and every other route's answer is untouched.
+    if _CLOCK_PRESS_PATH.fullmatch(request.url.path):
+        exc = RequestValidationError([{k: v for k, v in err.items() if k != "input"} for err in exc.errors()])
     return await request_validation_exception_handler(request, exc)
 
 
