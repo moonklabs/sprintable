@@ -530,7 +530,7 @@ function RowEditor({ row, t, name, busy, unreachable, onEdit }: {
         <label key={k} className="block space-y-1 text-xs">
           <span className="font-medium text-foreground">{label(k)}</span>
           <textarea
-            className="min-h-16 w-full rounded-md border bg-background p-2 text-sm"
+            className="min-h-16 w-full rounded-md border bg-background p-2 text-base lg:text-sm"
             rows={3}
             maxLength={EDIT_FIELD_MAX * 2}
             value={text[k]}
