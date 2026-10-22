@@ -213,9 +213,12 @@ jobs:
             echo "git diff 실패 — 웹 e2e 실행(fail-closed)."
             exit 0
           fi
-          if grep -q '^apps/web/' <<< "${CHANGED}"; then
+          # story #4750 — a change to this workflow file runs the web e2e too (same «self-safety» as the gateway filter above): the
+          # Contrast guard job's own steps live in this file, and a change to them that no run exercises merges untested (PR 5186 —
+          # the apt-cache change of that job was skipped by this very filter).
+          if grep -qE '^apps/web/|^\.github/workflows/ci\.yml$' <<< "${CHANGED}"; then
             echo "web_changed=true" >> "$GITHUB_OUTPUT"
-            echo "apps/web/ 변경 있음 — 웹 e2e 실행."
+            echo "apps/web/ 또는 ci.yml 변경 있음 — 웹 e2e 실행."
           else
             echo "web_changed=false" >> "$GITHUB_OUTPUT"
             echo "apps/web/ 밖 변경만 — 웹 e2e skip."
