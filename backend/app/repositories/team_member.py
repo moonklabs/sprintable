@@ -136,12 +136,29 @@ class TeamMemberRepository(BaseRepository[TeamMember]):
             if a_set["role"] is None:
                 raise ValueError("team member role cannot be None — omit it to leave the role unchanged")
             a_set["role"] = clamp_project_role(a_set["role"])
+        # story 4739: the ONE place a member's is_active goes false → true (PATCH · …; `deactivate` and the account delete only write false). The turn on is
+        # a conditional UPDATE of its own — «WHERE is_active = false … RETURNING» is the database's own word that the row really changed, so a PATCH of an
+        # agent that is already on (a name · an avatar) writes its other fields as before and signals nothing, and two requests at once signal once. A computer
+        # that is waiting out an agent's refusal is told after the commit (services.desktop_relay.schedule_agent_reactivated_after_commit).
+        turned_on = False
+        if m_set.get("is_active") is True:
+            m_set.pop("is_active")
+            turned_on = (await self.session.execute(
+                sa_update(Member)
+                .where(Member.id == member.id, Member.is_active.is_(False))
+                .values(is_active=True, updated_at=func.now())
+                .returning(Member.id)
+            )).first() is not None
         if m_set:
             await self.session.execute(
                 sa_update(Member)
                 .where(Member.id == member.id)
                 .values(**m_set, updated_at=func.now())
             )
+        if turned_on and member.type == "agent":
+            from app.services.desktop_relay import schedule_agent_reactivated_after_commit
+
+            await schedule_agent_reactivated_after_commit(self.session, self.org_id, member.id)
         if a_set:
             await self.session.execute(
                 sa_update(ProjectAccess)

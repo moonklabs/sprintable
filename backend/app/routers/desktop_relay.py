@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session_factory
+from app.core.sse_event_name import sse_event_name
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
 from app.models.desktop_setup import DesktopSetup
@@ -113,6 +114,7 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
         last_beat = last_check = time.monotonic()
         removals_sent: set[str] = set()  # each connection sends a removal once; the next connection again until it is dropped
         offers_sent: set[str] = set()  # story #4531 — each live pairing offer once per connection, again on the next
+        reactivated_marks: set[str] = set()  # story 4739 — agents a wake named as turned on again (read below; each is looked at again before its frame)
         try:
             # story #4607 (run13b ⑪ · PO 21:02Z): a first byte now — the front end holds the response head until the body's first byte,
             # and the first heartbeat is 30 s away: the daemon counted every reconnect (each ~5 min 20 s) as 30 s closed and held its
@@ -140,6 +142,8 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
                     commands = await relay.commands_to_send(s, setup_id, last_seq)
                     removals = [fp for fp in await agent_permissions.removals_to_send(s, setup_id) if fp not in removals_sent]
                     offers = [o for o in await agent_permissions.offers_to_send(s, setup_id) if o["offer_id"] not in offers_sent]
+                    reactivated = await relay.reactivated_to_send(s, setup_id, reactivated_marks) if reactivated_marks else []
+                    reactivated_marks.clear()
                     if now - last_beat >= _HEARTBEAT_SEC:
                         await relay.touch_device(s, setup_id)
                     await s.commit()
@@ -149,6 +153,8 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
                 for o in offers:  # story #4531 — adds nothing by itself: the daemon pins only an offer it opened, its MAC and a person's [같아요]
                     offers_sent.add(o["offer_id"])
                     yield f"event: pairing_offer\ndata: {json.dumps(o)}\n\n"
+                for aid in reactivated:  # story 4739 — a hint only: this agent's receiving may skip its wait now (the key still proves itself at the connect)
+                    yield f"event: {sse_event_name(relay.AGENT_REACTIVATED_CODE)}\ndata: {json.dumps({'agent_member_id': str(aid)})}\n\n"
                 for c in commands:
                     frame = {"command_id": str(c.id), "kind": c.kind, "session_key": c.session_key, "payload": c.payload,
                              "created_at": c.created_at.isoformat() if c.created_at else None}
@@ -165,6 +171,11 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
                     # story #4554 ④: the disconnect's own signal — recheck now, not at the next 30-second check
                     if any(isinstance(w, dict) and w.get(relay.DISCONNECTED_CODE) for w in woke):
                         last_check = float("-inf")
+                    # story 4739: an agent turned on again — its id is kept for the next read (which looks again before sending). The stream's wake queue holds 50, so one read
+                    # never names more than 50 agents; a wake the full queue pushed out costs the daemon nothing worse than its own back-off (the frame is a hint, never the only way back)
+                    for w in woke:
+                        if isinstance(w, dict) and isinstance(w.get(relay.AGENT_REACTIVATED_CODE), str) and len(reactivated_marks) < 50:
+                            reactivated_marks.add(w[relay.AGENT_REACTIVATED_CODE])
                 except asyncio.TimeoutError:
                     pass
         finally:

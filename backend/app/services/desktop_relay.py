@@ -1020,6 +1020,60 @@ def schedule_disconnected_after_commit(db: AsyncSession, setup_id: uuid.UUID) ->
     schedule_after_commit(db, [functools.partial(_fire_disconnected, setup_id)])
 
 
+AGENT_REACTIVATED_CODE = "agent_reactivated"  # story 4739: the stream's frame name · the wake mark's key (its value: the agent's member id)
+
+
+def _fire_agent_reactivated(setup_id: uuid.UUID, agent_id: uuid.UUID) -> None:
+    """story 4739: the computer's open stream is told that this agent was turned on again — carried like a wake (this instance at once · other
+    instances through the same backplane). The stream reads the mark, then looks again itself (the agent still bound to this computer · still on)
+    before it sends the frame: the mark only says which agent to look at."""
+    from app.routers.events import _push_to_agent
+
+    try:
+        _push_to_agent(wake_key(setup_id), {"__wake__": True, "seq": 0, AGENT_REACTIVATED_CODE: str(agent_id)})
+    except Exception:  # noqa: BLE001 — the daemon's own back-off still brings it back (at worst a few minutes later)
+        logger.warning("desktop relay agent_reactivated signal failed setup=%s", setup_id, exc_info=True)
+
+
+async def schedule_agent_reactivated_after_commit(db: AsyncSession, org_id: uuid.UUID, agent_id: uuid.UUID) -> None:
+    """story 4739: after the commit that turned the agent on (before it, the agent would still read as off), each computer of the organization that
+    this agent is bound to (not revoked · exchanged — `desktop_commands._agent_setups`, the same «this agent's computers» every press uses) is told.
+    Nothing is sent for an agent no computer holds."""
+    if not isinstance(db.sync_session, Session):
+        return
+    from app.services.after_commit import schedule_after_commit
+    from app.services.desktop_commands import _agent_setups
+
+    setups = await _agent_setups(db, org_id, agent_id)
+    schedule_after_commit(db, [functools.partial(_fire_agent_reactivated, s.id, agent_id) for s in setups])
+
+
+async def reactivated_to_send(db: AsyncSession, setup_id: uuid.UUID, marks: set[str]) -> list[uuid.UUID]:
+    """story 4739: of the agents a wake named, the ones this computer's stream may announce NOW: ids that parse · still bound to this computer (its
+    `members`) · computer not revoked · the agent is an agent of the computer's organization, not deleted, and on. Anything else is dropped — a mark
+    that went stale (turned off again meanwhile · a regrouped computer) never reaches the device."""
+    ids: set[uuid.UUID] = set()
+    for m in marks:
+        try:
+            ids.add(uuid.UUID(m))
+        except (ValueError, AttributeError, TypeError):
+            continue
+    if not ids:
+        return []
+    setup = (await db.execute(select(DesktopSetup).where(DesktopSetup.id == setup_id, DesktopSetup.revoked_at.is_(None)))).scalar_one_or_none()
+    if setup is None or setup.org_id is None:
+        return []
+    ids &= _setup_agents(setup)
+    if not ids:
+        return []
+    from app.models.member import Member
+
+    on = (await db.execute(
+        select(Member.id).where(Member.id.in_(ids), Member.org_id == setup.org_id, Member.type == "agent", Member.is_active.is_(True), Member.deleted_at.is_(None))
+    )).scalars().all()
+    return sorted(on)
+
+
 def _fire_wake(setup_id: uuid.UUID, seq: int) -> None:
     from app.routers.agent_gateway import wake_agent
 
