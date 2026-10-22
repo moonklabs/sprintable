@@ -497,6 +497,29 @@ describe('[4733 S4b] what is drawn may stop being true', () => {
 });
 
 describe('[4733 S4b] the panel (mode panel)', () => {
+  it('[S5 · fixes] the lead line counts the flow\'s own rows — the running list may already say «none» while the ends are being saved (seen live: «stops 0 agents»)', async () => {
+    world.running = false; // the list: nobody is running any more (the sessions are down while the draft is being saved)
+    world.view = panel([row(), row({ agent_member_id: AGENT2, name: '문서 담당' })], { ready: 2, needs_you: 0, drafting: 0 });
+    await screen();
+    expect(byId('phone-sessions-panel')?.textContent).toContain('에이전트 2개가 멈춰요');
+    expect(byId('phone-sessions-panel')?.textContent).not.toContain('에이전트 0개');
+  });
+
+  it.each([
+    ['a view at rest', { mode: 'none', outs: [] }],
+    ['no view at all (the server drops an empty report — the usual way a flow closes)', null],
+  ])('[S5 · fixes] the list of who is running is read again at once when the flow closes (%s) — not up to a whole slow poll later (seen live: an ended agent drawn with [End session] for 16 s)', async (_name, rest) => {
+    world.view = panel([row()], { ready: 1, needs_you: 0, drafting: 0 });
+    await screen();
+    const lists = () => calls.filter((c) => c.url.startsWith('/api/desktop/startable')).length;
+    const before = lists();
+    world.view = rest as Record<string, unknown> | null; // the computer is at rest again
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_100); }); // one fast look at the view (3 s) — far less than a list poll (15 s)
+    await flush();
+    expect(byId('phone-sessions-panel')).toBeNull();
+    expect(lists()).toBeGreaterThan(before);
+  });
+
   it('counts, the rows with the draft\'s first line as PLAIN TEXT (a tag or url is characters), «· ✓» on a ready row; the primary button is OFF while drafts come, with its reason as text', async () => {
     world.view = panel([row({ first_line: '<b>x</b> https://evil.example' }), row({ agent_member_id: AGENT2, name: '문서 담당', state: 'drafting', first_line: null })], { ready: 1, needs_you: 0, drafting: 1 });
     await screen();
