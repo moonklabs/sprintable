@@ -20,6 +20,7 @@ import pytest
 
 from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (autouse ones apply here too)
     ORG,
+    ORG2,
     OWNER,
     _addresses,
     _client,
@@ -197,3 +198,62 @@ async def test_05_the_one_place_a_direct_turn_on_signals_the_bound_computers_not
             await s.rollback()
         assert len(fired) == 1 and (await _row(str(agent)))[0] is False
 
+
+
+async def _bind(member: str, setup_id: str, kind: str = "agent") -> None:
+    """put a member on a computer's list of members (the exchange does this for the agents it hands a key to; here for the cases it does not make)"""
+    await _sql(
+        "UPDATE desktop_setups SET members = members || CAST(:m AS jsonb) WHERE id = :sid",
+        params={"m": json.dumps([{"stage": "writer", "member_id": member, "kind": kind, "runtime": "claude"}]), "sid": setup_id},
+    )
+
+
+async def test_06_a_computer_of_another_organization_naming_this_agent_is_not_told_and_a_crafted_mark_is_dropped(world, monkeypatch):
+    """the organization is a line of its own at both ends: the sender asks only this organization's computers, and the stream's second look takes only an agent of the computer's organization"""
+    from app.core.database import async_session_factory
+    from app.repositories.team_member import TeamMemberRepository
+    from app.services import desktop_relay as relay
+
+    fired: list[tuple[uuid.UUID, uuid.UUID]] = []
+    monkeypatch.setattr(relay, "_fire_agent_reactivated", lambda sid, aid: fired.append((sid, aid)))
+    async with _client() as c:
+        mine = await _device(c, name="d4739 mine")
+        foreign = await _device(c, name="d4739 foreign")
+        agent = uuid.UUID(mine["agents"][0]["member_id"])
+        await _bind(str(agent), foreign["setup_id"])
+        await _sql(f"UPDATE desktop_setups SET org_id = '{ORG2}' WHERE id = '{foreign['setup_id']}'")  # the second computer belongs to ANOTHER organization, its list names this agent
+        assert (await _set(c, str(agent), is_active=False)).status_code == 200
+        fired.clear()
+        async with async_session_factory() as s:
+            repo = TeamMemberRepository(s, ORG)
+            member = await repo.get(agent)
+            await repo.apply_anchor_update(member, {"is_active": True})
+            await s.commit()
+        assert fired == [(uuid.UUID(mine["setup_id"]), agent)]  # this organization's computer only
+        async with async_session_factory() as s:
+            # a mark naming this agent put in front of the other organization's stream read is dropped there
+            assert await relay.reactivated_to_send(s, uuid.UUID(foreign["setup_id"]), {str(agent)}) == []
+
+
+async def test_07_a_human_member_turned_on_signals_nothing_and_a_mark_naming_a_human_is_dropped(world, monkeypatch):
+    """only an AGENT is waited out by a daemon: a human turned on (or a computer's list that wrongly names one) never produces or carries a signal"""
+    from app.core.database import async_session_factory
+    from app.repositories.team_member import TeamMemberRepository
+    from app.services import desktop_relay as relay
+
+    fired: list[tuple[uuid.UUID, uuid.UUID]] = []
+    monkeypatch.setattr(relay, "_fire_agent_reactivated", lambda sid, aid: fired.append((sid, aid)))
+    async with _client() as c:
+        d = await _device(c, name="d4739 human")
+        human = uuid.UUID(str((await _sql(fetch=f"SELECT id FROM members WHERE org_id = '{ORG}' AND type = 'human' AND deleted_at IS NULL LIMIT 1"))[0][0]))
+        await _bind(str(human), d["setup_id"], kind="agent")  # a computer's list that wrongly names a human as an agent
+        await _sql(f"UPDATE members SET is_active = false WHERE id = '{human}'")
+        async with async_session_factory() as s:
+            repo = TeamMemberRepository(s, ORG)
+            member = await repo.get(human)
+            await repo.apply_anchor_update(member, {"is_active": True})
+            await s.commit()
+        assert fired == []  # turned on for real (below), and no signal for it
+        assert (await _row(str(human)))[0] is True
+        async with async_session_factory() as s:
+            assert await relay.reactivated_to_send(s, uuid.UUID(d["setup_id"]), {str(human)}) == []
