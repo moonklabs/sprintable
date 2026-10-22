@@ -3,7 +3,7 @@
 A deleted account (`users.deleted_at`, see routers/account.py) has been closed at once; this job, run daily by Cloud Scheduler (`account-purge`), removes the personal data of the ones whose
 grace period (ACCOUNT_PURGE_GRACE_DAYS) is over and which are not anonymized yet (`users.anonymized_at IS NULL`). The user row stays — its id is what what the person wrote points at — with
 no name, no e-mail address, no password hash, no second factor, no provider id; the person's human member rows lose their name and picture (a neutral label stands for them); the
-rows that only exist to sign the person in (provider identities · registered devices · session and hand-over codes) are deleted.
+rows that only exist to sign the person in or to reach them (provider identities · device proofs and registered devices · push device tokens · session and hand-over codes) are deleted, and every provider id (Google · GitHub · Apple · Firebase) is cleared.
 
 What this does NOT touch (named here so nobody reads «everything» in the copy as more than it is — each is its own follow-up): the text of what the person wrote, an invitation sent TO the
 person's address by another member (org_invites.email), a project API key's label, files they uploaded, an e-mail a mail provider has already sent. The job is idempotent and bounded:
@@ -55,6 +55,10 @@ async def purge_deleted_accounts(session: AsyncSession, *, now: datetime | None 
         {**arg, "label": DELETED_MEMBER_NAME},
     )
     await session.execute(text("UPDATE auth_migrations SET firebase_uid = NULL WHERE user_id = ANY(CAST(:ids AS uuid[]))"), arg)  # the row stays: its `auth_valid_after` keeps the old access tokens dead
+    # the device token is personal data: the push rows of the person, by user and by the member rows not backfilled (before the members are touched — they stay, only renamed)
+    await session.execute(
+        text("DELETE FROM push_devices WHERE user_id = ANY(CAST(:ids AS uuid[])) OR member_id IN (SELECT id FROM members WHERE user_id = ANY(CAST(:ids AS uuid[])))"), arg,
+    )
     for table in ("auth_identities", "device_proof_challenges", "device_installations", "refresh_tokens", "oauth_handoff_codes", "auth_native_bootstrap_codes"):
         await session.execute(text(f"DELETE FROM {table} WHERE user_id = ANY(CAST(:ids AS uuid[]))"), arg)  # noqa: S608 — the table names are this module's own constants
     return len(ids)

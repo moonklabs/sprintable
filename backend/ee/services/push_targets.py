@@ -17,6 +17,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.models.member import Member
 from app.models.project import OrgMember
 from app.models.push_device import PushDevice
 
@@ -27,7 +28,10 @@ async def select_active_devices(
     """Active devices for these members of `org_id` (mute filtering is the caller's, at member level)."""
     if not member_ids:
         return []
-    by_org_member = and_(PushDevice.org_id == org_id, PushDevice.member_id.in_(member_ids))
+    # story #4752: a member whose seat is closed (the person deleted the account, or was removed) gets no push — the notice that reaches the in-app list and the webhooks already drops a closed member
+    # (the `team_members` view), so the push must not keep sending to the device of a person who is gone. (NOT-IN a closed list, so an id that is not a `members` row at all keeps working as before.)
+    closed = select(Member.id).where(Member.id.in_(member_ids), Member.deleted_at.is_not(None))
+    by_org_member = and_(PushDevice.org_id == org_id, PushDevice.member_id.in_(member_ids), PushDevice.member_id.not_in(closed))
     if settings.push_devices_by_user:
         people = (
             select(OrgMember.user_id)

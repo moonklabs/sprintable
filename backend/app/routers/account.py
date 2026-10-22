@@ -158,6 +158,14 @@ async def delete_account(
         ),
         {"now": now, "uid": str(uid)},
     )
+    # the person's phones stop receiving pushes with the deletion, in the same transaction (rows not backfilled carry `user_id` NULL, so the member side is needed too — story #4752, Kadir's K8)
+    await session.execute(
+        text(
+            "UPDATE push_devices SET is_active = false WHERE is_active AND (user_id = CAST(:uid AS uuid)"
+            " OR member_id IN (SELECT id FROM members WHERE user_id = CAST(:uid AS uuid)))"
+        ),
+        {"uid": str(uid)},
+    )
     user.is_active = False
     user.deleted_at = now
     # story #4400 (Qadir 01a0e9fc) — end every session of the deleted account, like the admin removal does

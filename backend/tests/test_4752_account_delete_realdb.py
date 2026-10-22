@@ -72,8 +72,9 @@ class _World:
                 s.add(o)
                 await s.commit()
                 s.add(Project(id=uuid.uuid4(), org_id=o.id, name="P"))
-                s.add(OrgMember(id=uuid.uuid4(), org_id=o.id, user_id=uid, role="owner"))
-                s.add(Member(id=uuid.uuid4(), org_id=o.id, type="human", user_id=uid, name=name, avatar_url="https://x/avatar.png", handle="real-handle"))
+                seat = uuid.uuid4()   # one id for the seat: the org_members row and the members anchor row share it, as in the product
+                s.add(OrgMember(id=seat, org_id=o.id, user_id=uid, role="owner"))
+                s.add(Member(id=seat, org_id=o.id, type="human", user_id=uid, name=name, avatar_url="https://x/avatar.png", handle="real-handle"))
                 await s.commit()
                 u = await s.get(User, uid)
                 u.last_org_id = o.id
@@ -380,5 +381,58 @@ async def test_10_the_mac_link_mail_is_not_sent_to_a_deleted_account():
         w.app.dependency_overrides.pop(get_current_user, None)
         assert r.status_code == 404, r.text
         sent.assert_not_called()
+    finally:
+        await _close(engine, w)
+
+
+async def test_11_after_the_deletion_no_push_goes_to_the_persons_device_and_the_token_is_gone_after_the_purge():
+    """Kadir's K8 on 5187 (PO 5768): the deleted person's phone kept getting pushes — `select_active_devices` (the one function both push senders use) returned the device (default branch:
+    org + member + device.is_active, nothing about the person), and the token row outlived the purge. A device registered with the person (`user_id`) and one not backfilled (`user_id` NULL,
+    tied by the member id) are closed at the deletion and deleted by the purge; another person's device is untouched; a device of a CLOSED SEAT is never selected."""
+    from app.core.config import settings
+    from ee.services.push_targets import select_active_devices
+
+    engine, w = await _world()
+    try:
+        uid, email, org_id = await w.person(org=True, name="Push Receiver")
+        other, _other_email, other_org = await w.person(org=True, name="Other Receiver")
+        mid = (await w.sql("SELECT id FROM members WHERE user_id = :u AND type = 'human'", u=uid)).scalar_one()
+        omid = (await w.sql("SELECT id FROM members WHERE user_id = :u AND type = 'human'", u=other)).scalar_one()
+        t_user, t_member, t_other, t_closed = (f"ExponentPushToken[k8-{uid.hex[:10]}-{n}]" for n in ("u", "m", "o", "c"))
+        ins = ("INSERT INTO push_devices (id, org_id, member_id, user_id, expo_push_token, platform, is_active) "
+               "VALUES (gen_random_uuid(), :o, :m, :u, :t, 'ios', true)")
+        await w.sql(ins, o=org_id, m=uuid.uuid4(), u=uid, t=t_user)      # tied to the person only by `user_id` (its member id is not one of the person's seats)
+        await w.sql(ins, o=org_id, m=mid, u=None, t=t_member)            # not backfilled: tied to the person only by its member
+        await w.sql(ins, o=other_org, m=omid, u=other, t=t_other)
+
+        async def selected(by_user: bool, member=None) -> int:
+            old = settings.push_devices_by_user
+            settings.push_devices_by_user = by_user
+            try:
+                async with w.Session() as s:
+                    org, seat = (org_id, mid) if member is None else (other_org, member)
+                    return len(await select_active_devices(s, org, [seat]))
+            finally:
+                settings.push_devices_by_user = old
+
+        assert await selected(False) == 1 and await selected(True) == 2   # live: by member 1 (flag off, the default) · by person 2 (flag on)
+        assert (await w.delete(await w.tokens(email))).status_code == 200
+        assert await selected(False) == 0 and await selected(True) == 0   # before: 1 with the flag off (the default)
+        active = (await w.sql("SELECT count(*) FROM push_devices WHERE expo_push_token IN (:a, :b) AND is_active", a=t_user, b=t_member)).scalar_one()
+        assert active == 0                                                # closed in the deletion's own transaction (by user_id AND by member)
+        assert (await w.sql("SELECT is_active FROM push_devices WHERE expo_push_token = :t", t=t_other)).scalar_one() is True   # another person's phone untouched
+        assert await selected(False, omid) == 1                           # …and still selected
+        # a SEAT that is closed (a person removed from the organization — not a deletion): its device row is still active, yet no push is selected for it
+        # (the in-app list and the webhooks already skip it)
+        await w.sql(ins, o=other_org, m=omid, u=None, t=t_closed)
+        await w.sql("UPDATE members SET deleted_at = now(), is_active = false WHERE id = :m", m=omid)
+        await w.sql("UPDATE org_members SET deleted_at = now() WHERE id = :m", m=omid)   # the seat is one id in both rows; an admin's removal closes both
+        assert (await w.sql("SELECT is_active FROM push_devices WHERE expo_push_token = :t", t=t_closed)).scalar_one() is True
+        assert await selected(False, omid) == 0 and await selected(True, omid) == 0
+        await w.sql("UPDATE users SET deleted_at = now() - interval '31 days' WHERE id = :u", u=uid)
+        assert await _purge(w) >= 1
+        gone = (await w.sql("SELECT count(*) FROM push_devices WHERE expo_push_token IN (:a, :b)", a=t_user, b=t_member)).scalar_one()
+        assert gone == 0                                                  # the token outlives nothing — by user_id (t_user) and by member (t_member)
+        assert (await w.sql("SELECT count(*) FROM push_devices WHERE expo_push_token IN (:a, :b)", a=t_other, b=t_closed)).scalar_one() == 2
     finally:
         await _close(engine, w)
