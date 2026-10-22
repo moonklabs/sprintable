@@ -181,6 +181,7 @@ def check_done_code(result_code: str | None) -> None:
 
 # story #4733 (S5 · P2): the text a person typed into a draft rides in the stored command only while the command is open: when it ends (done · failed · rejected)
 # or when its minutes are up, the fields are taken out of the row and only the revision stays — «흐름 동안만 · 끝나면 지움 · 로그 0»
+# (the words are out of the row at the latest EDIT_TEXT_TTL plus one tick of the server's own sweep — 10 + 5 = 15 minutes — and at once when the command ends)
 EDIT_TEXT_TTL = timedelta(minutes=10)
 _SCRUB_EDIT_WHERE = (
     "kind = 'clock' AND jsonb_exists(payload, 'edit') "

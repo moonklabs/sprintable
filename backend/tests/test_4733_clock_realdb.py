@@ -1277,6 +1277,60 @@ async def test_41_the_sweep_takes_a_bounded_batch_and_leaves_the_rest_for_the_ne
         assert got == [2, 2, 1, 0], got   # at most the batch a tick; the next tick takes the rest; then nothing
 
 
+async def test_42_the_sweep_skips_a_row_someone_holds_and_the_next_tick_takes_it(world, monkeypatch):
+    """A row another transaction holds (the result path ending that very command) is not waited for: the tick takes the rest and goes on; the held row is taken once it is let go."""
+    import asyncio
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from app.routers import cron as cron_module
+    from tests.test_4424_desktop_setup_realdb import _ASYNC
+
+    monkeypatch.setattr(cron_module, "CRON_SECRET", "test-cron-secret")
+    url, auth = "/api/v2/internal/cron/clock-edit-scrub", {"Authorization": "Bearer test-cron-secret"}
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4733s42")
+        sid = device["setup_id"]
+        ids = [(await _post(c, sid, _edit(phone, agent, key=f"h{i}", base_rev=1, plan=TYPED))).json()["command_id"] for i in range(3)]
+        for i in ids:
+            await _sql(f"UPDATE desktop_commands SET created_at = now() - interval '1 hour' WHERE id = '{i}'")
+
+        async def edit_of(cid):
+            return (await _sql(fetch=f"SELECT payload->'edit' FROM desktop_commands WHERE id = '{cid}'"))[0][0]
+
+        eng = create_async_engine(_ASYNC, poolclass=NullPool)
+        try:
+            async with eng.connect() as holder:
+                await holder.execute(text(f"SELECT 1 FROM desktop_commands WHERE id = '{ids[0]}' FOR UPDATE"))   # the row is held in an open transaction
+                r = await asyncio.wait_for(c.post(url, headers=auth), 20)                                         # …and the tick does not wait for it
+                assert r.status_code == 200 and r.json()["data"]["scrubbed"] == 2, r.text
+                assert (await edit_of(ids[0])) == {"base_rev": 1, "plan": TYPED}
+                assert (await edit_of(ids[1])) == {"base_rev": 1} and (await edit_of(ids[2])) == {"base_rev": 1}
+                await holder.rollback()
+        finally:
+            await eng.dispose()
+        again = await c.post(url, headers=auth)
+        assert again.json()["data"]["scrubbed"] == 1
+        assert (await edit_of(ids[0])) == {"base_rev": 1}
+
+
+async def test_43_the_sweep_touches_clock_commands_only(world, monkeypatch):
+    """Another kind of command with an `edit` key in its payload (it is not ours) is left exactly as it was, however old."""
+    from app.routers import cron as cron_module
+
+    monkeypatch.setattr(cron_module, "CRON_SECRET", "test-cron-secret")
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4733s43")
+        sid = device["setup_id"]
+        cid = (await _post(c, sid, _edit(phone, agent, key="k", base_rev=1, plan=TYPED))).json()["command_id"]
+        await _sql(f"UPDATE desktop_commands SET kind = 'stop_session', created_at = now() - interval '1 day' WHERE id = '{cid}'")   # not a clock command any more
+        r = await c.post("/api/v2/internal/cron/clock-edit-scrub", headers={"Authorization": "Bearer test-cron-secret"})
+        assert r.status_code == 200 and r.json()["data"]["scrubbed"] == 0, r.text
+        assert (await _sql(fetch=f"SELECT payload->'edit' FROM desktop_commands WHERE id = '{cid}'"))[0][0] == {"base_rev": 1, "plan": TYPED}
+
+
 def test_38_each_of_the_two_schemas_refuses_an_edit_that_does_not_fit_its_action_on_its_own():
     """The press request (what the web posts) and the stored payload (what the daemon is handed) both close the edit's shape — either would catch what the other missed,
     so each is pinned by itself (the HTTP road alone cannot tell which of the two refused)."""
