@@ -14,14 +14,18 @@ import type { Flow } from './phone-start';
 
 export type ClockAction = (typeof DESKTOP_CLOCK_ACTIONS)[number];
 
-/** the nine words a finished clock command ends in (the daemon's; the server refuses any other) */
-export const CLOCK_RESULTS = ['ok', 'already', 'nothing_running', 'not_open', 'not_ready', 'needs_hands', 'not_clocked_out', 'unknown_agent', 'already_running'] as const;
+/** the words a finished clock command ends in (the daemon's; the server refuses any other) — the nine of a press and, S5 · P2, the two more of an edit */
+export const CLOCK_RESULTS = ['ok', 'already', 'nothing_running', 'not_open', 'not_ready', 'needs_hands', 'not_clocked_out', 'unknown_agent', 'already_running', 'stale', 'not_editable'] as const;
 export type ClockResult = (typeof CLOCK_RESULTS)[number];
 
 // ── the computer's closed view (GET …/clock) — kept only as far as the screen draws it; anything not ours is dropped ─────────────────────────────────────────────
 export const ROW_STATES = ['drafting', 'ready', 'needs_you', 'saving', 'saved', 'ended', 'not_ended', 'failed'] as const;
 export type RowState = (typeof ROW_STATES)[number];
-export interface ClockRowView { agentId: string; name: string | null; state: RowState; missing: Array<'done' | 'plan' | 'blockers'>; firstLine: string | null; idle: boolean }
+export interface ClockRowView {
+  agentId: string; name: string | null; state: RowState; missing: Array<'done' | 'plan' | 'blockers'>; firstLine: string | null; idle: boolean;
+  /** S5 · P2: the row's revision (an edit names the one it read — the computer refuses it when the row has moved) · a person's hand has been on the row: its line is the person's own words */
+  rev: number; edited: boolean;
+}
 export interface ClockOutView { at: string; came: number; warn: 'none' | 'many' | 'full'; stillWorking: string[]; left: string[]; alone: number }
 export interface ClockInView { at: string | null; starting: { k: number; n: number } | null; handing: { k: number; m: number } | null; came: { total: number } | null; failed: Array<{ name: string; code: string; limit: number | null }>; unread: string[] }
 export interface ClockOneView { agentId: string; name: string | null; at: string }
@@ -72,6 +76,8 @@ export function parseClockRead(raw: unknown): ClockRead | null {
       missing: (Array.isArray(r.missing) ? r.missing : []).filter((m): m is 'done' | 'plan' | 'blockers' => m === 'done' || m === 'plan' || m === 'blockers'),
       firstLine: isStr(r.first_line) ? (plain(r.first_line).trim() === '' ? null : plain(r.first_line)) : null, // plain text only — drawn as characters (never a link, never HTML)
       idle: r.idle === true,
+      rev: typeof r.rev === 'number' && Number.isSafeInteger(r.rev) && r.rev >= 0 ? r.rev : 0, // (an older computer sends none: 0)
+      edited: r.edited === true,
     });
   }
   let out: ClockOutView | null = null;
@@ -209,6 +215,42 @@ export async function pressClock(input: PressInput, deps: PressDeps): Promise<Pr
     key: deps.newKey(),
     // closed: the action + the agent the person picked + the shell's two values — never a text · name · path (the signature covers the rest)
     body: { action: input.action, signed: signed.signed, phone_key_id: signed.phone_key_id, ...(input.agentId !== undefined ? { agent_member_id: input.agentId } : {}) },
+  };
+  return post(pending, deps);
+}
+
+export type ClockEditFields = { done?: string; plan?: string; blockers?: string };
+export interface EditInput { setupId: string; agentId: string; /** the revision of the row in the report the person read */ baseRev: number; /** ONLY the fields the person touched */ fields: ClockEditFields }
+const EDIT_FIELDS = ['done', 'plan', 'blockers'] as const;
+
+/**
+ * story #4733 (S5 · P2): a person's edit of ONE agent's clock-out draft, typed on the phone. Same road as a press: the shell reads the list itself, cleans the words (the daemon's own
+ * cleaner) and signs a hash of exactly the revision and the touched fields; the web posts what the shell handed back — the cleaned words, never the page's own copy — and follows the command.
+ * Only the touched fields are sent: a field the person did not type into is not in the edit, so the computer leaves it exactly as it is.
+ */
+export async function editClock(input: EditInput, deps: PressDeps): Promise<PressOutcome> {
+  const touched = EDIT_FIELDS.filter((k) => typeof input.fields[k] === 'string');
+  if (touched.length === 0) return { kind: 'failed' };
+  const edit: Record<string, unknown> = { base_rev: input.baseRev };
+  for (const k of touched) edit[k] = input.fields[k];
+  let signed: PhoneAnswer;
+  try {
+    signed = await deps.phoneCall('command.sign', { kind: 'clock', setup_id: input.setupId, action: 'out_edit', agent_member_id: input.agentId, edit });
+  } catch {
+    return { kind: 'failed' };
+  }
+  if (deps.flow?.stopped) return { kind: 'stopped' };
+  if (!signed.ok) return { kind: SHELL_REFUSALS[signed.code ?? ''] ?? 'failed' } as PressOutcome;
+  if (typeof signed.signed !== 'string' || typeof signed.phone_key_id !== 'string') return { kind: 'failed' };
+  // the words the shell signed (cleaned) are the words posted: the same revision, the same fields — anything else is not what the person approved
+  const back = (signed as unknown as { edit?: unknown }).edit;
+  if (!isObj(back) || back.base_rev !== input.baseRev) return { kind: 'failed' };
+  const backKeys = Object.keys(back).filter((k) => k !== 'base_rev').sort();
+  if (backKeys.length !== touched.length || !backKeys.every((k, i) => k === [...touched].sort()[i] && typeof back[k] === 'string')) return { kind: 'failed' };
+  const pending: Pending = {
+    setupId: input.setupId,
+    key: deps.newKey(),
+    body: { action: 'out_edit', signed: signed.signed, phone_key_id: signed.phone_key_id, agent_member_id: input.agentId, edit: { ...back } },
   };
   return post(pending, deps);
 }

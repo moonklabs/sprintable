@@ -50,6 +50,7 @@ const EXEMPT: Record<string, string> = {
   'components/agents/agent-api-key-manager.tsx': '읽기 전용 키 표시(readOnly) — 쓰는 칸 아님',
   'components/agents/agent-connection-settings-section.tsx': '에이전트 상세 페이지 섹션 — 창 밖',
   'components/chat/chat-input.tsx': '자체 보존(스레드 답글 localStorage) — 4370 인벤토리 19행 NO',
+  'components/desktop/phone-session-management.tsx': '퇴근 인계 편집 칸: 친 글은 흐름 동안만 · 기기 저장 금지 — 4733 AC4 (초안 훅은 친 글을 기기 저장소에 남긴다. 저장소에 0인 시험은 phone-session-management.test)',
   'components/docs/doc-editor.tsx': '문서 편집기 — 페이지 본문, 창 밖',
   'components/epics/hypothesis-declaration-card.tsx': '제어형 부품 — 값을 소유한 폼(목표 만들기 초안)이 판단',
   'components/sprints/hypothesis-declaration-card.tsx': '제어형 부품 — 값을 소유한 폼(스프린트 만들기 · 빠른 선언 초안)이 판단',
