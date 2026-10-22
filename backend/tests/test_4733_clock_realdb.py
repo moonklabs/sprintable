@@ -1232,6 +1232,11 @@ async def test_40_an_edit_nobody_answers_loses_its_text_on_the_servers_own_clock
         async def stored(key):
             return {k: p for _k, p, _by, k, _st in await _commands(sid)}[f"b5:{OWNER_TM}:{key}"]
 
+        # a second computer of the same person: its old edit is taken by the same sweep (the sweep is not per computer)
+        device2, agent2, phone2, _der2 = await _setup(c, "d4424 mac 4733s40b")
+        sid2 = device2["setup_id"]
+        old2 = (await _post(c, sid2, _edit(phone2, agent2, key="old2", base_rev=1, plan=TYPED))).json()["command_id"]
+        await _sql(f"UPDATE desktop_commands SET created_at = now() - interval '1 day' WHERE id = '{old2}'")
         old = (await _post(c, sid, _edit(phone, agent, key="old", base_rev=4, plan=TYPED, done=TYPED))).json()["command_id"]
         assert (await _post(c, sid, _edit(phone, agent, key="young", base_rev=4, plan=TYPED))).status_code == 201
         assert (await _post(c, sid, _press(phone, "out_open", key="o"))).status_code == 201
@@ -1242,7 +1247,8 @@ async def test_40_an_edit_nobody_answers_loses_its_text_on_the_servers_own_clock
         assert (await stored("old"))["edit"] == {"base_rev": 4, "plan": TYPED, "done": TYPED}
         # the sweep: no press of that computer in between
         r = await c.post(url, headers={"Authorization": "Bearer test-cron-secret"})
-        assert r.status_code == 200 and r.json()["data"]["scrubbed"] == 1, r.text
+        assert r.status_code == 200 and r.json()["data"]["scrubbed"] == 2, r.text
+        assert dict((str(x[0]), x[1]) for x in await _sql(fetch=f"SELECT id, payload->'edit' FROM desktop_commands WHERE id = '{old2}'"))[old2] == {"base_rev": 1}  # the other computer's
         assert (await stored("old"))["edit"] == {"base_rev": 4}
         assert (await stored("young"))["edit"] == {"base_rev": 4, "plan": TYPED}   # its minutes are not up
         assert (await stored("o")) == {"action": "out_open", "signed": SIGNED}
@@ -1250,6 +1256,25 @@ async def test_40_an_edit_nobody_answers_loses_its_text_on_the_servers_own_clock
         # a second sweep finds nothing more
         again = await c.post(url, headers={"Authorization": "Bearer test-cron-secret"})
         assert again.json()["data"]["scrubbed"] == 0
+
+
+async def test_41_the_sweep_takes_a_bounded_batch_and_leaves_the_rest_for_the_next_tick(world, monkeypatch):
+    from app.routers import cron as cron_module
+    from app.services import desktop_clock
+
+    monkeypatch.setattr(cron_module, "CRON_SECRET", "test-cron-secret")
+    monkeypatch.setattr(desktop_clock, "SCRUB_SWEEP_BATCH", 2)
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4733s41")
+        sid = device["setup_id"]
+        ids = [(await _post(c, sid, _edit(phone, agent, key=f"k{i}", base_rev=1, plan=TYPED))).json()["command_id"] for i in range(5)]
+        for i in ids:
+            await _sql(f"UPDATE desktop_commands SET created_at = now() - interval '1 hour' WHERE id = '{i}'")
+        got = []
+        for _tick in range(4):
+            r = await c.post("/api/v2/internal/cron/clock-edit-scrub", headers={"Authorization": "Bearer test-cron-secret"})
+            got.append(r.json()["data"]["scrubbed"])
+        assert got == [2, 2, 1, 0], got   # at most the batch a tick; the next tick takes the rest; then nothing
 
 
 def test_38_each_of_the_two_schemas_refuses_an_edit_that_does_not_fit_its_action_on_its_own():

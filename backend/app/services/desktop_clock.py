@@ -189,7 +189,12 @@ _SCRUB_EDIT_WHERE = (
 )
 _SCRUB_EDIT_HEAD = "UPDATE desktop_commands SET payload = jsonb_set(payload, '{edit}', jsonb_build_object('base_rev', payload #> '{edit,base_rev}')) WHERE "
 _SCRUB_EDIT_SQL = sql_text(_SCRUB_EDIT_HEAD + "setup_id = :setup_id AND " + _SCRUB_EDIT_WHERE)
-_SCRUB_EDIT_ALL_SQL = sql_text(_SCRUB_EDIT_HEAD + _SCRUB_EDIT_WHERE)
+# the server's own clock takes at most this many rows a tick, in id order, skipping a row somebody else holds (the result path and a press scrub their own computer's rows): no lock order
+# to quarrel over, no long transaction — what is left is taken by the next tick
+SCRUB_SWEEP_BATCH = 500
+_SCRUB_EDIT_ALL_SQL = sql_text(
+    _SCRUB_EDIT_HEAD + "id IN (SELECT id FROM desktop_commands WHERE " + _SCRUB_EDIT_WHERE + " ORDER BY id LIMIT :batch FOR UPDATE SKIP LOCKED)"
+)
 
 
 async def scrub_clock_edits(db: AsyncSession, *, setup_id: uuid.UUID) -> None:
@@ -199,7 +204,7 @@ async def scrub_clock_edits(db: AsyncSession, *, setup_id: uuid.UUID) -> None:
 async def scrub_all_clock_edits(db: AsyncSession) -> int:
     """The clock for the typed words, kept by the server itself (Kadir's pin on 5182): every computer's edit that is ended or older than its minutes loses its fields — a computer that
     never comes back (switched off, given up) and is never pressed again keeps nothing past the time. The Cloud Scheduler job `clock-edit-scrub` calls this."""
-    res = await db.execute(_SCRUB_EDIT_ALL_SQL, {"cutoff": _now() - EDIT_TEXT_TTL})
+    res = await db.execute(_SCRUB_EDIT_ALL_SQL, {"cutoff": _now() - EDIT_TEXT_TTL, "batch": SCRUB_SWEEP_BATCH})
     return int(res.rowcount or 0)
 
 
