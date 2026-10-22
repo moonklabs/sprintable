@@ -77,6 +77,7 @@ afterEach(async () => {
   await act(async () => { root.unmount(); });
   container.remove();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 const flush = async () => { for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); }); };
@@ -711,6 +712,35 @@ describe('[4733 S5·P2] filling in and fixing on the phone', () => {
     expect((byId('phone-sessions-edit-save') as HTMLButtonElement).disabled).toBe(true);
     await press(byId('phone-sessions-edit-close'));
     expect(byId('phone-sessions-editor')).toBeNull();
+  });
+
+  it('what is typed lives in the editor only: not in localStorage, sessionStorage, the address or the history state — typing, closing, saving (4733 AC4: no field-draft hook)', async () => {
+    const SECRET = '지울수없는비밀문장-7f3a';
+    // the environment's own storages may be missing or unusable: two recording in-memory ones stand in, so every write the card makes is seen
+    const makeStorage = (): Storage => {
+      const m = new Map<string, string>();
+      return {
+        get length() { return m.size; }, clear: () => m.clear(), getItem: (k) => m.get(k) ?? null, key: (i) => [...m.keys()][i] ?? null,
+        removeItem: (k) => { m.delete(k); }, setItem: (k, v) => { m.set(k, String(v)); },
+        toJSON: () => Object.fromEntries(m),
+      } as Storage;
+    };
+    const local = makeStorage();
+    const session = makeStorage();
+    vi.stubGlobal('localStorage', local);
+    vi.stubGlobal('sessionStorage', session);
+    const where = () => JSON.stringify([local, session, window.location.href, window.history.state]);
+    world.view = needsView(4);
+    signAnswer = { id: 's', ok: true, signed: 'SIGNED', phone_key_id: KEYID, edit: { base_rev: 4, plan: SECRET } };
+    await screen();
+    await press(byId('phone-sessions-edit-open'));
+    await typeInto(byId('phone-sessions-edit-plan'), SECRET);
+    expect(where()).not.toContain(SECRET);
+    await press(byId('phone-sessions-edit-close'));
+    expect(where()).not.toContain(SECRET);
+    await press(byId('phone-sessions-edit-open'));
+    await press(byId('phone-sessions-edit-save'));
+    expect(where()).not.toContain(SECRET);
   });
 
   it('when the card cannot be read any more (two looks in a row do not answer) [저장] goes off but [닫기] stays — a person is never kept inside an editor (codex round 2)', async () => {

@@ -7466,7 +7466,7 @@
         "placeholderKeep": "Leave empty to keep what is there now",
         "moved": "That agent's text changed on the computer in the meantime — check the line above and press [Save] again",
         "nothingTyped": "Nothing typed yet",
-        "tooLong": "One field takes up to {max} characters",
+        "tooLong": "One field takes up to {max, plural, one {# character} other {# characters}}",
         "save": "Save",
         "saving": "Saving…",
         "close": "Close"
