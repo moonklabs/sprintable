@@ -501,7 +501,8 @@ function RowEditor({ row, t, name, busy, unreachable, onEdit }: {
   for (const k of EDIT_FIELDS) if (text[k].trim() !== '') fields[k] = text[k].trim(); // the ends' blanks are let go before the phone signs: the computer saves the words trimmed, so what is signed is what is stored
   const typed = Object.keys(fields).length > 0;
   const tooLong = EDIT_FIELDS.some((k) => [...text[k]].length > EDIT_FIELD_MAX);
-  const label = (k: (typeof EDIT_FIELDS)[number]): string => t(`edit.field.${k}`);
+  // literal keys, so the dead-key guard (verify:no-unused-i18n-keys) sees every label is read
+  const label = (k: (typeof EDIT_FIELDS)[number]): string => (k === 'done' ? t('edit.field.done') : k === 'plan' ? t('edit.field.plan') : t('edit.field.blockers'));
   const fill = row.state === 'needs_you';
   if (!open) {
     return (
