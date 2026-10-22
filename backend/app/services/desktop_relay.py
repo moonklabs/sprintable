@@ -764,6 +764,7 @@ class EndSessionPayload(_Payload):
 # story #4733 (0459 · S2): the actions of a phone's `clock` command. The kind is one word (DB CHECK); the choice is the payload's, so the next action
 # (P2 · S5: `out_edit`, its own shape) widens this schema and nothing in the database.
 CLOCK_ACTIONS = ("out_open", "out_submit", "out_cancel", "in", "out_edit")
+CLOCK_SCOPE_MAX = 500  # the most agents one computer-wide press names (story #4734 B)
 # story #4733 (S5 · P2): the fields of a phone's edit are the Mac's own three, with the Mac's own limit (ClockFlow.edit cuts a field at 2000 characters)
 CLOCK_EDIT_FIELD_MAX = 2000
 CLOCK_REV_MAX = 2**31 - 1
@@ -808,6 +809,13 @@ class ClockPayload(_Payload):
     # agent_member_id; none = a fixed empty value). Absent = the whole computer, exactly the payload as before (the key is left out of the stored payload).
     agent_member_id: uuid.UUID | None = None
     edit: ClockEdit | None = None
+    # story #4734 (B): the WHOLE-COMPUTER press — `computer: true` rides inside the signed bytes too (the daemon builds what it expects from this very field, so a mark the phone did
+    # not sign, or a signed mark the server dropped, is a `mismatch`); `scope` is the agents of THIS computer's setups the person may press one setup at a time — collected by the
+    # server (the sole place of that judgement, as for a one-setup press) and filtered again by the daemon to its own profiles; `scope_total` = every agent the computer's live
+    # setups hold («N개 중 K개»). All three are absent from every other press: the payload of a press without the mark is exactly as before.
+    computer: Literal[True] | None = None
+    scope: list[uuid.UUID] | None = Field(default=None, max_length=CLOCK_SCOPE_MAX)
+    scope_total: int | None = Field(default=None, ge=0, le=100000, strict=True)
 
     @model_validator(mode="after")
     def _edit_only_for_edit(self) -> ClockPayload:
@@ -815,6 +823,12 @@ class ClockPayload(_Payload):
             raise ValueError("an edit rides with the action out_edit, and only with it")
         if self.action == "out_edit" and self.agent_member_id is None:
             raise ValueError("an edit names its agent")
+        if (self.computer is not None) != (self.scope is not None) or (self.computer is not None) != (self.scope_total is not None):
+            raise ValueError("the computer mark, its scope and its total come together")
+        if self.computer is not None and (self.action == "out_edit" or self.agent_member_id is not None or self.edit is not None):
+            raise ValueError("the computer mark is for the whole-computer actions only: no agent, no edit")
+        if self.scope is not None and (len(set(self.scope)) != len(self.scope) or (self.scope_total or 0) < len(self.scope)):
+            raise ValueError("a scope has no repeats and is no larger than its total")
         return self
 
 
@@ -871,6 +885,9 @@ async def enqueue_command(
         body = {k: v for k, v in body.items() if not (k in ("stage", "host") and v is None)}
     if kind == "clock" and body.get("agent_member_id") is None:  # story #4733: the whole computer's press is exactly {action, signed}
         body.pop("agent_member_id", None)
+    if kind == "clock" and body.get("computer") is None:  # story #4734 (B): a press without the mark carries none of its three keys (the same bytes as before)
+        for k in ("computer", "scope", "scope_total"):
+            body.pop(k, None)
     if kind == "clock":  # S5 · P2: no `edit` key for any other press; in an edit only the fields the person touched are stored (an absent one is "left as it is")
         if body.get("edit") is None:
             body.pop("edit", None)
