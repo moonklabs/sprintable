@@ -2910,9 +2910,12 @@ jobs:
           # before/after listing: apt stamps a download with the mirror's Last-Modified, and a .deb the image already held in the
           # archive dir is neither new nor newer (PR 5186 run 1: 12 of 13 caught by file time, fonts-freefont-ttf missed).
           echo 'APT::Keep-Downloaded-Packages "true";' | sudo tee /etc/apt/apt.conf.d/99keep-debs > /dev/null
-          dpkg-query -W -f='${Package}=${Version}\n' | sort -u > /tmp/pkgs-before.txt
+          # «installed» only: dpkg-query -W also lists packages left in the `rc` state (removed, config kept), which a later
+          # reinstall of the same version would not show as a change
+          installed() { dpkg-query -W -f='${db:Status-Abbrev} ${Package}=${Version}\n' | awk '$1 == "ii" { print $2 }' | sort -u; }
+          installed > /tmp/pkgs-before.txt
           pnpm --filter web exec playwright install --with-deps chromium
-          dpkg-query -W -f='${Package}=${Version}\n' | sort -u > /tmp/pkgs-after.txt
+          installed > /tmp/pkgs-after.txt
           comm -13 /tmp/pkgs-before.txt /tmp/pkgs-after.txt > /tmp/pw-pkgs.txt
           echo "packages this install added or upgraded: $(wc -l < /tmp/pw-pkgs.txt)"; cat /tmp/pw-pkgs.txt
           mkdir -p "$HOME/pw-os-debs"
@@ -2955,9 +2958,9 @@ jobs:
           sudo dpkg -i "$HOME"/pw-os-debs/*.deb
           # the same package set the miss run installed: every name=version of the manifest is now what dpkg has
           while IFS='=' read -r name want; do
-            have="$(dpkg-query -W -f='${Version}' "$name" 2>/dev/null || true)"
-            if [ "$have" != "$want" ]; then
-              echo "::error title=Playwright OS deps differ from the cached set (story #4750)::$name want $want have ${have:-none}"
+            have="$(dpkg-query -W -f='${db:Status-Abbrev}${Version}\n' "$name" 2>/dev/null || true)"
+            if ! grep -qxF -- "ii $want" <<< "$have"; then
+              echo "::error title=Playwright OS deps differ from the cached set (story #4750)::$name want ii $want have ${have:-none}"
               exit 1
             fi
           done < "$HOME/pw-os-debs/pkgs.txt"
