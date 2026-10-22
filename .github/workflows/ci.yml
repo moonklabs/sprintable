@@ -2851,6 +2851,27 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # story #4750 (PO 청 2026-10-22 20:04Z · PR 5185 run 39837455135) — `playwright install --with-deps`의 apt 단계가 거울
+      # (azure.archive.ubuntu.com)에서 글꼴 · xvfb 계열 .deb 13개(19.7MB)를 받는데, 거울이 느린 시각엔 29 kB/s에 11분 21초가 걸려
+      # 이 잡이 25분 한도에 걸렸다(같은 단계: 15:27~16:39 13~39초 · 17:00 3분 · 19:09 · 19:37 11분). 한도만 늘리는 길은 거울이
+      # 느리면 또 걸린다 — 그래서 그 .deb를 (러너 이미지 판 · playwright 판) 키로 캐시하고, 적중하면 apt 없이 `dpkg -i`만 한다.
+      # 글꼴은 빼지 않는다(렌더가 달라지면 axe · 레이아웃 판정이 흔들린다). 못 맞으면(첫 실행 · 이미지 갱신) 옛 길(--with-deps)을
+      # 그대로 타고 받은 .deb를 남긴다. push(develop · main)에서도 이 잡이 돌아 거기서 저장된 캐시를 모든 PR이 읽는다.
+      - name: "Playwright OS-deps cache key (story #4750)"
+        id: pw-deps-key
+        run: |
+          set -euo pipefail
+          PW_VERSION="$(pnpm --filter web exec playwright --version | awk '{print $NF}')"
+          . /etc/os-release
+          echo "key=pw-os-debs-v1-${ID}${VERSION_ID}-${ImageVersion:-noimage}-pw${PW_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: "Restore Playwright OS-deps .deb cache (story #4750)"
+        id: pw-debs
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/pw-os-debs
+          key: ${{ steps.pw-deps-key.outputs.key }}
+
       # story #3751(PO 실측 2026-09-09 17:31Z~) — `playwright install --with-deps`가 내부
       # `apt-get update`를 돌리는데, GH 러너 이미지에 기본 등록된 google-chrome apt 소스
       # (dl.google.com)가 이따금 Hash Sum mismatch로 죽어 코드와 무관하게 이 잡을 통째로
@@ -2866,6 +2887,7 @@ jobs:
       # 찾아 지우고, 지운 뒤에도 apt update가 그 호스트를 당기면 **fail-closed**(양성대조를
       # 이 스텝 자체가 강제) — 미러가 멀쩡해도 소스가 안 지워졌으면 빨강이어야 한다.
       - name: Remove google-chrome apt source (story #3751)
+        if: steps.pw-debs.outputs.cache-hit != 'true'
         run: |
           sudo grep -rlE 'dl\.google\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null | tee /tmp/google-src.txt
           xargs -r -a /tmp/google-src.txt sudo rm -f
@@ -2875,8 +2897,69 @@ jobs:
             exit 1
           fi
 
-      - name: Install Playwright chromium
-        run: pnpm --filter web exec playwright install --with-deps chromium
+      - name: "Install Playwright chromium + OS deps (apt · cache miss · story #4750)"
+        if: steps.pw-debs.outputs.cache-hit != 'true'
+        id: pw-install-miss
+        run: |
+          set -euo pipefail
+          # keep the downloaded .debs (the runner VM keeps them by default; this makes it explicit) and mark the moment, so the .debs
+          # this install pulls — and only those — are copied into the cache dir afterwards
+          echo 'APT::Keep-Downloaded-Packages "true";' | sudo tee /etc/apt/apt.conf.d/99keep-debs > /dev/null
+          dpkg-query -W -f='${Package}=${Version}\n' | sort -u > /tmp/pkgs-before.txt
+          touch /tmp/pw-marker
+          pnpm --filter web exec playwright install --with-deps chromium
+          dpkg-query -W -f='${Package}=${Version}\n' | sort -u > /tmp/pkgs-after.txt
+          comm -13 /tmp/pkgs-before.txt /tmp/pkgs-after.txt > /tmp/pw-pkgs.txt
+          echo "packages this install added or upgraded: $(wc -l < /tmp/pw-pkgs.txt)"; cat /tmp/pw-pkgs.txt
+          mkdir -p "$HOME/pw-os-debs"
+          sudo find /var/cache/apt/archives -maxdepth 1 -name '*.deb' -newer /tmp/pw-marker -exec cp -t "$HOME/pw-os-debs" {} +
+          sudo chown -R "$(id -u):$(id -g)" "$HOME/pw-os-debs"
+          # the cache is only worth saving when every package the install added is among the copied .debs — otherwise a later
+          # restore would install a partial set. A short copy is a warning (this run is still green), never a failure.
+          : > /tmp/pw-debset.txt
+          # shellcheck disable=SC2016 # (dpkg format fields, not shell variables)
+          for d in "$HOME"/pw-os-debs/*.deb; do [ -e "$d" ] && dpkg-deb -W --showformat='${Package}=${Version}\n' "$d" >> /tmp/pw-debset.txt; done
+          sort -u -o /tmp/pw-debset.txt /tmp/pw-debset.txt
+          MISSING="$(sort -u /tmp/pw-pkgs.txt | comm -23 - /tmp/pw-debset.txt)"
+          if [ -s /tmp/pw-pkgs.txt ] && [ -z "$MISSING" ]; then
+            cp /tmp/pw-pkgs.txt "$HOME/pw-os-debs/pkgs.txt"
+            echo "captured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning title=Playwright OS-deps .debs not captured (story #4750)::cache not saved; missing: ${MISSING:-<no package list>}"
+          fi
+
+      - name: "Save Playwright OS-deps .deb cache (story #4750)"
+        if: steps.pw-debs.outputs.cache-hit != 'true' && steps.pw-install-miss.outputs.captured == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/pw-os-debs
+          key: ${{ steps.pw-deps-key.outputs.key }}
+
+      - name: "Install Playwright chromium (OS deps from cache · no apt · story #4750)"
+        if: steps.pw-debs.outputs.cache-hit == 'true'
+        run: |
+          # the '${Version}' below is a dpkg format field, not a shell variable
+          # shellcheck disable=SC2016
+          set -euo pipefail
+          APT_RUNS_BEFORE="$(grep -c '^Start-Date' /var/log/apt/history.log 2>/dev/null || true)"
+          sudo dpkg -i "$HOME"/pw-os-debs/*.deb
+          # the same package set the miss run installed: every name=version of the manifest is now what dpkg has
+          while IFS='=' read -r name want; do
+            have="$(dpkg-query -W -f='${Version}' "$name" 2>/dev/null || true)"
+            if [ "$have" != "$want" ]; then
+              echo "::error title=Playwright OS deps differ from the cached set (story #4750)::$name want $want have ${have:-none}"
+              exit 1
+            fi
+          done < "$HOME/pw-os-debs/pkgs.txt"
+          echo "cached OS deps in place: $(wc -l < "$HOME/pw-os-debs/pkgs.txt") packages"
+          pnpm --filter web exec playwright install chromium
+          # self-check: this path must not have run apt at all (apt appends one Start-Date entry per install/upgrade run). A path
+          # that goes back to `--with-deps` here would bring the mirror dependency back — and turn this step red.
+          APT_RUNS_AFTER="$(grep -c '^Start-Date' /var/log/apt/history.log 2>/dev/null || true)"
+          if [ "${APT_RUNS_BEFORE:-0}" != "${APT_RUNS_AFTER:-0}" ]; then
+            echo "::error title=apt ran on the cache-hit path (story #4750)::apt history entries ${APT_RUNS_BEFORE:-0} -> ${APT_RUNS_AFTER:-0}"
+            exit 1
+          fi
 
       # story #4586 — the shared stub plugin of the layout specs, checked by esbuild alone (no browser): an unlisted next/ or
       # @/app import still bundles and runs, and an unlisted module fails by name. A red step fails this job.
