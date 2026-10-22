@@ -2905,19 +2905,24 @@ jobs:
         id: pw-install-miss
         run: |
           set -euo pipefail
-          # keep the downloaded .debs (the runner VM keeps them by default; this makes it explicit) and list the archive dir before and
-          # after, so the .debs this install pulls — and only those — are copied into the cache dir afterwards. (Not by file time:
-          # apt stamps a download with the mirror's Last-Modified, which is older than any marker of ours.)
+          # keep the downloaded .debs (the runner VM keeps them by default; this makes it explicit). Which .debs to cache is decided
+          # by package identity afterwards (name=version of what this install added or upgraded) — not by file time or by a
+          # before/after listing: apt stamps a download with the mirror's Last-Modified, and a .deb the image already held in the
+          # archive dir is neither new nor newer (PR 5186 run 1: 12 of 13 caught by file time, fonts-freefont-ttf missed).
           echo 'APT::Keep-Downloaded-Packages "true";' | sudo tee /etc/apt/apt.conf.d/99keep-debs > /dev/null
           dpkg-query -W -f='${Package}=${Version}\n' | sort -u > /tmp/pkgs-before.txt
-          sudo find /var/cache/apt/archives -maxdepth 1 -name '*.deb' | sort > /tmp/debs-before.txt
           pnpm --filter web exec playwright install --with-deps chromium
           dpkg-query -W -f='${Package}=${Version}\n' | sort -u > /tmp/pkgs-after.txt
           comm -13 /tmp/pkgs-before.txt /tmp/pkgs-after.txt > /tmp/pw-pkgs.txt
           echo "packages this install added or upgraded: $(wc -l < /tmp/pw-pkgs.txt)"; cat /tmp/pw-pkgs.txt
           mkdir -p "$HOME/pw-os-debs"
-          sudo find /var/cache/apt/archives -maxdepth 1 -name '*.deb' | sort > /tmp/debs-after.txt
-          comm -13 /tmp/debs-before.txt /tmp/debs-after.txt | while IFS= read -r f; do sudo cp "$f" "$HOME/pw-os-debs/"; done
+          sort -u /tmp/pw-pkgs.txt > /tmp/pw-want.txt
+          # shellcheck disable=SC2016 # (dpkg format fields, not shell variables)
+          for f in /var/cache/apt/archives/*.deb; do
+            [ -e "$f" ] || continue
+            id="$(dpkg-deb -W --showformat='${Package}=${Version}\n' "$f")"
+            if grep -qxF -- "$id" /tmp/pw-want.txt; then sudo cp "$f" "$HOME/pw-os-debs/"; fi
+          done
           sudo chown -R "$(id -u):$(id -g)" "$HOME/pw-os-debs"
           # the cache is only worth saving when every package the install added is among the copied .debs — otherwise a later
           # restore would install a partial set. A short copy is a warning (this run is still green), never a failure.
