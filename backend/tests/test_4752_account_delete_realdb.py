@@ -322,9 +322,9 @@ async def test_08_the_purge_takes_only_what_the_deletion_stamped_never_a_live_pe
         await w.sql("UPDATE members SET deleted_at = now() - interval '90 days', is_active = false WHERE user_id = :u", u=removed)
         # a deactivation that is not the person's deletion (no `deleted_at`)
         await w.sql("UPDATE users SET is_active = false WHERE id = :u", u=deactivated)
-        # an account as it was before migration 0460: both new columns NULL
+        # an account with both new columns NULL — what every account is right after migration 0460 (no backfill; the migration itself is measured by Kadir's probe, not here)
         assert (await w.row(pre))["deleted_at"] is None and (await w.row(pre))["anonymized_at"] is None
-        assert await _purge(w) == 0
+        await _purge(w)   # (the count is not asserted: the database is shared with other tests — what matters is that none of THESE three is touched, below)
         for u, n in ((removed, "Removed Name"), (deactivated, "Deactivated Name"), (pre, "Pre Name")):
             r = await w.row(u)
             assert r["display_name"] == n and r["anonymized_at"] is None and r["email"].startswith("story4752-")
@@ -359,5 +359,26 @@ async def test_09_a_deleted_account_is_not_a_mail_candidate_the_onboarding_remin
         await w.sql("UPDATE users SET deleted_at = now() - interval '31 days' WHERE id = :u", u=gone)
         assert await _purge(w) >= 1
         assert gone not in await candidates()
+    finally:
+        await _close(engine, w)
+
+
+async def test_10_the_mac_link_mail_is_not_sent_to_a_deleted_account():
+    """Codex on the lens fix: `/desktop/mac-link-mail` read the user by id without `is_active`. Its callers hold a live session (a deleted account's tokens are cut off), so this is the same answer
+    if one slips through — a stale-auth request for a deleted account is 404 and nothing is sent."""
+    from unittest.mock import patch
+
+    from app.dependencies.auth import AuthContext, get_current_user
+
+    engine, w = await _world()
+    try:
+        uid, email, _ = await w.person(org=False)
+        assert (await w.delete(await w.tokens(email))).status_code == 200
+        w.app.dependency_overrides[get_current_user] = lambda: AuthContext(user_id=str(uid), email=email, claims={"sub": str(uid)})
+        with patch("app.services.email.send_email") as sent:
+            r = await w.client.post("/api/v2/desktop/mac-link-mail")
+        w.app.dependency_overrides.pop(get_current_user, None)
+        assert r.status_code == 404, r.text
+        sent.assert_not_called()
     finally:
         await _close(engine, w)
