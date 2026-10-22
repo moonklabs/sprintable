@@ -1765,6 +1765,11 @@
 "kind": "unknown"
 },
 {
+"method": "POST",
+"path": "/api/v2/internal/cron/clock-edit-scrub",
+"kind": "unknown"
+},
+{
 "method": "GET",
 "path": "/api/v2/internal/cron/db-connection-stats",
 "kind": "unknown"
