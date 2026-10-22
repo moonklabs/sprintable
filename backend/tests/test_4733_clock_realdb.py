@@ -1218,6 +1218,40 @@ async def test_39_a_refused_press_on_the_clock_road_is_answered_without_the_word
         assert other.status_code == 422 and "input" in other.text
 
 
+async def test_40_an_edit_nobody_answers_loses_its_text_on_the_servers_own_clock_without_any_press(world, monkeypatch):
+    """Kadir's pin on 5182: a computer that never comes back and is never pressed again must not keep the typed words past their minutes. The Cloud Scheduler job `clock-edit-scrub`
+    (POST /api/v2/internal/cron/clock-edit-scrub) takes them out — an old open edit loses its fields (only the revision stays), a young one keeps them, nothing else is touched."""
+    from app.routers import cron as cron_module
+
+    monkeypatch.setattr(cron_module, "CRON_SECRET", "test-cron-secret")
+    url = "/api/v2/internal/cron/clock-edit-scrub"
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4733s40")
+        sid = device["setup_id"]
+
+        async def stored(key):
+            return {k: p for _k, p, _by, k, _st in await _commands(sid)}[f"b5:{OWNER_TM}:{key}"]
+
+        old = (await _post(c, sid, _edit(phone, agent, key="old", base_rev=4, plan=TYPED, done=TYPED))).json()["command_id"]
+        assert (await _post(c, sid, _edit(phone, agent, key="young", base_rev=4, plan=TYPED))).status_code == 201
+        assert (await _post(c, sid, _press(phone, "out_open", key="o"))).status_code == 201
+        await _sql(f"UPDATE desktop_commands SET created_at = now() - interval '3 days' WHERE id = '{old}'")
+        # the road is the cron's: no secret / a wrong one is refused and nothing is taken out
+        assert (await c.post(url)).status_code == 401
+        assert (await c.post(url, headers={"Authorization": "Bearer wrong"})).status_code == 401
+        assert (await stored("old"))["edit"] == {"base_rev": 4, "plan": TYPED, "done": TYPED}
+        # the sweep: no press of that computer in between
+        r = await c.post(url, headers={"Authorization": "Bearer test-cron-secret"})
+        assert r.status_code == 200 and r.json()["data"]["scrubbed"] == 1, r.text
+        assert (await stored("old"))["edit"] == {"base_rev": 4}
+        assert (await stored("young"))["edit"] == {"base_rev": 4, "plan": TYPED}   # its minutes are not up
+        assert (await stored("o")) == {"action": "out_open", "signed": SIGNED}
+        assert dict((str(r_[0]), r_[1]) for r_ in await _sql(fetch=f"SELECT id, state FROM desktop_commands WHERE id = '{old}'"))[old] in ("queued", "delivered")  # the command itself stays as it was
+        # a second sweep finds nothing more
+        again = await c.post(url, headers={"Authorization": "Bearer test-cron-secret"})
+        assert again.json()["data"]["scrubbed"] == 0
+
+
 def test_38_each_of_the_two_schemas_refuses_an_edit_that_does_not_fit_its_action_on_its_own():
     """The press request (what the web posts) and the stored payload (what the daemon is handed) both close the edit's shape — either would catch what the other missed,
     so each is pinned by itself (the HTTP road alone cannot tell which of the two refused)."""

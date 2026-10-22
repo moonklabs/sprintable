@@ -182,16 +182,25 @@ def check_done_code(result_code: str | None) -> None:
 # story #4733 (S5 · P2): the text a person typed into a draft rides in the stored command only while the command is open: when it ends (done · failed · rejected)
 # or when its minutes are up, the fields are taken out of the row and only the revision stays — «흐름 동안만 · 끝나면 지움 · 로그 0»
 EDIT_TEXT_TTL = timedelta(minutes=10)
-_SCRUB_EDIT_SQL = sql_text(
-    "UPDATE desktop_commands SET payload = jsonb_set(payload, '{edit}', jsonb_build_object('base_rev', payload #> '{edit,base_rev}')) "
-    "WHERE setup_id = :setup_id AND kind = 'clock' AND jsonb_exists(payload, 'edit') "
+_SCRUB_EDIT_WHERE = (
+    "kind = 'clock' AND jsonb_exists(payload, 'edit') "
     "AND (payload #> '{edit}') <> jsonb_build_object('base_rev', payload #> '{edit,base_rev}') "
     "AND (state IN ('done', 'failed', 'rejected') OR created_at < :cutoff)"
 )
+_SCRUB_EDIT_HEAD = "UPDATE desktop_commands SET payload = jsonb_set(payload, '{edit}', jsonb_build_object('base_rev', payload #> '{edit,base_rev}')) WHERE "
+_SCRUB_EDIT_SQL = sql_text(_SCRUB_EDIT_HEAD + "setup_id = :setup_id AND " + _SCRUB_EDIT_WHERE)
+_SCRUB_EDIT_ALL_SQL = sql_text(_SCRUB_EDIT_HEAD + _SCRUB_EDIT_WHERE)
 
 
 async def scrub_clock_edits(db: AsyncSession, *, setup_id: uuid.UUID) -> None:
     await db.execute(_SCRUB_EDIT_SQL, {"setup_id": setup_id, "cutoff": _now() - EDIT_TEXT_TTL})
+
+
+async def scrub_all_clock_edits(db: AsyncSession) -> int:
+    """The clock for the typed words, kept by the server itself (Kadir's pin on 5182): every computer's edit that is ended or older than its minutes loses its fields — a computer that
+    never comes back (switched off, given up) and is never pressed again keeps nothing past the time. The Cloud Scheduler job `clock-edit-scrub` calls this."""
+    res = await db.execute(_SCRUB_EDIT_ALL_SQL, {"cutoff": _now() - EDIT_TEXT_TTL})
+    return int(res.rowcount or 0)
 
 
 async def on_clock_result(db: AsyncSession, cmd: DesktopCommand) -> None:
