@@ -505,12 +505,15 @@ describe('[4733 S4b] the panel (mode panel)', () => {
     expect(byId('phone-sessions-panel')?.textContent).not.toContain('에이전트 0개');
   });
 
-  it('[S5 · fixes] the list of who is running is read again at once when the flow closes — not up to a whole slow poll later (seen live: an ended agent drawn with [End session] for 16 s)', async () => {
+  it.each([
+    ['a view at rest', { mode: 'none', outs: [] }],
+    ['no view at all (the server drops an empty report — the usual way a flow closes)', null],
+  ])('[S5 · fixes] the list of who is running is read again at once when the flow closes (%s) — not up to a whole slow poll later (seen live: an ended agent drawn with [End session] for 16 s)', async (_name, rest) => {
     world.view = panel([row()], { ready: 1, needs_you: 0, drafting: 0 });
     await screen();
     const lists = () => calls.filter((c) => c.url.startsWith('/api/desktop/startable')).length;
     const before = lists();
-    world.view = { mode: 'none', outs: [] }; // the computer is at rest again
+    world.view = rest as Record<string, unknown> | null; // the computer is at rest again
     await act(async () => { await vi.advanceTimersByTimeAsync(3_100); }); // one fast look at the view (3 s) — far less than a list poll (15 s)
     await flush();
     expect(byId('phone-sessions-panel')).toBeNull();
