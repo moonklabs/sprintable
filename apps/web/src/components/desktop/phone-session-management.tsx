@@ -196,6 +196,14 @@ function ComputerCard({ computer, phoneKeyId, onChanged, frozen, held }: { compu
   const view: ClockView | null = read?.view ?? null;
   // «pressed on this page» only matters while a flow is open: once the computer is at rest again the next flow is somebody's again
   useEffect(() => { if (view?.mode === 'none') setPressedHere(false); }, [view?.mode]);
+  // a flow that closes (the computer's view goes back to rest) has just stopped or started agents: the list of who is running is read again at once — it is read slowly (LIST_POLL_MS) and would draw an
+  // agent that is already ended with [End session] for up to a whole poll (seen live: 18:13:52Z, 16 s until the next read)
+  const lastMode = useRef<ClockView['mode'] | null>(null);
+  useEffect(() => {
+    const mode = view?.mode ?? null;
+    if (lastMode.current !== null && lastMode.current !== 'none' && mode === 'none') onChanged();
+    lastMode.current = mode;
+  }, [view?.mode, onChanged]);
   const fast = busy || (view !== null && view.mode !== 'none');
 
   const lookSeq = useRef(0);
@@ -424,11 +432,12 @@ function Panel({ view, t, nameOf, busy, unreachable, runningCount, names, onSubm
   const allReady = countsAgree && everyRowReady;
   const unseenLine = view.rows.some((r) => r.state === 'ready' && !r.idle && r.firstLine === null);
   const reason = count.drafting > 0 ? t('action.draftsComing') : count.needsYou > 0 ? t(one ? 'action.needsHandOne' : 'action.needsHand', { m: count.needsYou }) : unseenLine ? t('action.lineHidden') : null;
+  // the lead line counts the agents the flow is about — its own rows: the list of who is running can already say none while the ends are being saved (seen live: «stops 0 agents»)
   const idleOnly = one && oneRow?.idle === true;
   return (
     <div className="space-y-3" data-testid="phone-sessions-panel">
       <p className="text-sm font-semibold">{one ? t('panel.titleOne', { name: nameOf(oneRow?.agentId ?? '', oneRow?.name ?? null) }) : t('panel.title')}</p>
-      <p className="text-xs text-muted-foreground">{one ? t(idleOnly ? 'panel.leadIdle' : 'panel.leadOne') : t('panel.lead', { n: runningCount })}</p>
+      <p className="text-xs text-muted-foreground">{one ? t(idleOnly ? 'panel.leadIdle' : 'panel.leadOne') : t('panel.lead', { n: view.rows.length > 0 ? view.rows.length : runningCount })}</p>
       <p className="text-xs text-muted-foreground">{t('panel.windowClosed')}</p>
       {!one ? <p className="text-xs text-foreground" data-testid="phone-sessions-count">{count.drafting > 0 ? t('panel.countDrafting', { ready: count.ready, needs: count.needsYou, drafting: count.drafting }) : t('panel.count', { ready: count.ready, needs: count.needsYou })}</p> : null}
       <ul className="space-y-2" data-testid="phone-sessions-rows">
