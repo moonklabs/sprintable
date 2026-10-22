@@ -307,3 +307,57 @@ async def test_07_the_cron_road_is_the_schedulers_and_runs_the_purge(monkeypatch
         assert (await w.row(uid))["anonymized_at"] is not None
     finally:
         await _close(engine, w)
+
+
+async def test_08_the_purge_takes_only_what_the_deletion_stamped_never_a_live_person_whose_membership_is_gone_or_who_was_deactivated_by_someone_else():
+    """Kadir's lens (PO 5764): the job's target is `users.deleted_at` and nothing else — migration 0460 backfills nothing (the columns start NULL), and an organization admin who removes a
+    person from the organization, or a deactivation that is not a deletion, never makes the person a purge target."""
+    engine, w = await _world()
+    try:
+        removed, removed_email, _ = await w.person(org=True, name="Removed Name")
+        deactivated, deact_email, _ = await w.person(org=False, name="Deactivated Name")
+        pre, pre_email, _ = await w.person(org=True, name="Pre Name")
+        # an admin removed the person from the organization (what the old deletion did, without any deletion by the person): the person lives, the membership is closed
+        await w.sql("UPDATE org_members SET deleted_at = now() - interval '90 days' WHERE user_id = :u", u=removed)
+        await w.sql("UPDATE members SET deleted_at = now() - interval '90 days', is_active = false WHERE user_id = :u", u=removed)
+        # a deactivation that is not the person's deletion (no `deleted_at`)
+        await w.sql("UPDATE users SET is_active = false WHERE id = :u", u=deactivated)
+        # an account as it was before migration 0460: both new columns NULL
+        assert (await w.row(pre))["deleted_at"] is None and (await w.row(pre))["anonymized_at"] is None
+        assert await _purge(w) == 0
+        for u, n in ((removed, "Removed Name"), (deactivated, "Deactivated Name"), (pre, "Pre Name")):
+            r = await w.row(u)
+            assert r["display_name"] == n and r["anonymized_at"] is None and r["email"].startswith("story4752-")
+        assert (await w.sql("SELECT name FROM members WHERE user_id = :u AND type = 'human'", u=removed)).scalar_one() == "Removed Name"
+        # …and the first run after the migration finds no target at all (no backfill): only the deletion makes one
+        assert (await w.sql("SELECT count(*) FROM users WHERE deleted_at IS NOT NULL AND anonymized_at IS NULL AND id = ANY(CAST(:ids AS uuid[]))", ids=[removed, deactivated, pre])).scalar_one() == 0
+    finally:
+        await _close(engine, w)
+
+
+async def test_09_a_deleted_account_is_not_a_mail_candidate_the_onboarding_reminder_skips_it():
+    """Kadir's lens on 5187 (PO 5765): a person who deleted the account must not be mailed. The onboarding reminder picks people by their SIGN-UP time (no organization membership
+    in the way), so it is the road that kept a deleted person on its list; the other recipient queries go through an open membership, which the deletion closes."""
+    from app.services.onboarding_activation import find_reminder_candidates
+
+    engine, w = await _world()
+    try:
+        live, live_email, _ = await w.person(org=False)
+        gone, gone_email, _ = await w.person(org=False)
+        for u in (live, gone):
+            await w.sql("UPDATE users SET created_at = now() - interval '30 hours' WHERE id = :u", u=u)
+
+        async def candidates() -> set:
+            async with w.Session() as s:
+                return {u.id for u in await find_reminder_candidates(s)}
+
+        assert {live, gone} <= await candidates()            # both are due before the deletion
+        assert (await w.delete(await w.tokens(gone_email))).status_code == 200
+        got = await candidates()
+        assert live in got and gone not in got               # the deleted account is out, the live one stays
+        # anonymized later: still out
+        await w.sql("UPDATE users SET deleted_at = now() - interval '31 days' WHERE id = :u", u=gone)
+        assert await _purge(w) >= 1
+        assert gone not in await candidates()
+    finally:
+        await _close(engine, w)
