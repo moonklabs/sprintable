@@ -505,3 +505,33 @@ async def test_13_the_participant_payload_carries_the_departed_marker():
     by_id = {p["member_id"]: p for p in out}
     assert by_id[str(gone)]["departed"] is True and by_id[str(gone)]["name"] is None and by_id[str(gone)]["resolved"] is True
     assert by_id[str(here)]["departed"] is False
+
+
+async def test_14_the_by_person_push_branch_skips_a_closed_seat_too():
+    """PO 5770 (Kadir's note on the K8 fix): with `push_devices_by_user` on, the branch that selects by the PERSON looked only at `org_members.deleted_at`, so a seat closed on the `members` side
+    (`members.is_active = false`, as an admin's removal does) with a live `org_members` row still got the push. Both branches use the same «closed» now."""
+    from app.core.config import settings
+    from ee.services.push_targets import select_active_devices
+
+    engine, w = await _world()
+    try:
+        uid, _email, org_id = await w.person(org=True, name="Removed On One Side")
+        mid = (await w.sql("SELECT id FROM members WHERE user_id = :u AND type = 'human'", u=uid)).scalar_one()
+        await w.sql("INSERT INTO push_devices (id, org_id, member_id, user_id, expo_push_token, platform, is_active) VALUES (gen_random_uuid(), :o, :m, :u, :t, 'ios', true)",
+                    o=org_id, m=mid, u=uid, t=f"ExponentPushToken[k14-{uid.hex[:10]}]")
+
+        async def selected() -> int:
+            old = settings.push_devices_by_user
+            settings.push_devices_by_user = True
+            try:
+                async with w.Session() as s:
+                    return len(await select_active_devices(s, org_id, [mid]))
+            finally:
+                settings.push_devices_by_user = old
+
+        assert await selected() == 1                                                     # live
+        await w.sql("UPDATE members SET is_active = false WHERE id = :m", m=mid)        # closed on the members side only; org_members.deleted_at stays NULL
+        assert (await w.sql("SELECT deleted_at IS NULL FROM org_members WHERE id = :m", m=mid)).scalar_one() is True
+        assert await selected() == 0
+    finally:
+        await _close(engine, w)
