@@ -309,3 +309,51 @@ async def test_06_closing_ends_a_stale_checkout_claim_so_a_late_confirmed_charge
     finally:
         await _cleanup(maker, org_id)
         await engine.dispose()
+
+
+async def test_07_a_webhook_that_fails_after_taking_the_row_lets_go_of_it_at_once():
+    """Kadir K1 on 5193: `_update_subscription` locks the organization row first; if it fails afterwards, the request session is still open and kept the row locked (the `except` re-raised without a
+    rollback) — an account deletion / organization delete would wait on that row. The failure now rolls back: another connection takes the row immediately (NOWAIT)."""
+    from sqlalchemy import text
+    import ee.routers.billing as billing
+
+    engine, maker = await _factory()
+    try:
+        org_id = await _seed_org(maker)
+        original = billing._current_pricing_version_id
+
+        async def boom(session, tier, cycle, currency="usd"):
+            raise RuntimeError("a failure after the lock")
+
+        billing._current_pricing_version_id = boom
+        try:
+            async with maker() as hook:                                # the request session stays open, as in a request that has not ended yet
+                with pytest.raises(RuntimeError):
+                    await billing._update_subscription(hook, org_id, "pro", "monthly", "cus_4753", "sub_4753", "active", None)
+                async with maker() as other:
+                    await other.execute(text("SELECT 1 FROM organizations WHERE id = :o FOR UPDATE NOWAIT"), {"o": str(org_id)})   # raises if the row is still locked
+        finally:
+            billing._current_pricing_version_id = original
+    finally:
+        await _cleanup(maker, org_id)
+        await engine.dispose()
+
+
+async def test_08_the_admin_grant_route_lets_go_of_the_row_when_it_refuses():
+    """The same for the admin grant: a refusal (`AdminBillingError`) after the organization row was taken rolls the session back before the HTTP error is raised."""
+    from unittest.mock import AsyncMock, patch
+
+    from fastapi import HTTPException
+
+    from app.routers import admin_billing
+    from app.services.admin_billing import AdminBillingError
+
+    session = AsyncMock()
+    body = admin_billing.CreditGrantRequest(target_tier="team", months=1, reason="CS", currency="krw")
+    operator = type("Op", (), {"email": "op@moonklabs.com"})()
+    with patch.object(admin_billing, "_reject_prod", lambda: None), \
+         patch.object(admin_billing, "grant_credit", AsyncMock(side_effect=AdminBillingError(422, "GRANT_WOULD_DOWNGRADE", "x"))):
+        with pytest.raises(HTTPException) as e:
+            await admin_billing.credit_grant(uuid.uuid4(), body, "idem-1", operator, session)
+    assert e.value.status_code == 422
+    session.rollback.assert_awaited_once()

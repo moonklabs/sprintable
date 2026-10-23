@@ -104,6 +104,7 @@ async def credit_grant(
             idempotency_key=idempotency_key, actor_email=operator.email,
         )
     except AdminBillingError as e:
+        await session.rollback()   # story #4753: the grant took the organization row first; a refusal after that must let go of it at once, not when the request ends
         raise HTTPException(status_code=e.status_code, detail={"code": e.code, "message": e.message}) from e
     return {
         "entry_id": str(entry.id),

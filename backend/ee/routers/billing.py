@@ -533,4 +533,10 @@ async def _update_subscription(
             "polar_subscription_id=%s) — background task, Polar already ACKed, no retry",
             org_id, tier, billing_cycle, polar_subscription_id, exc_info=True,
         )
+        # story #4753 (Kadir K1): the organization row was locked at the top; a failure after that must not leave it locked for as long as this request session lives — the closing paths
+        # (account deletion · organization delete) would wait on the row. Roll back (releases the lock), then raise as before.
+        try:
+            await session.rollback()
+        except Exception:
+            logger.exception("Subscription upsert: rollback after failure failed for org %s", org_id)
         raise
