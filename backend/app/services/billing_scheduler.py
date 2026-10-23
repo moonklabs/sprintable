@@ -339,18 +339,18 @@ async def _sync_renewal_retry_outcome(
         # populate_existing — 스윕이 이미 읽어 둔 객체가 아니라 DB의 지금 상태(charge_org 가드가 raw SQL로 끝낸 주문 포함)를 본다.
         await session.execute(select(BillingOrder).where(BillingOrder.order_id == order_id).execution_options(populate_existing=True))
     ).scalar_one()
-    sub = (
-        await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))
-    ).scalar_one_or_none()
-    if sub is None:
-        return
-    # story #4755 — the organization row first. An organization closed while the retry was being charged is gone now: a confirmed charge is refunded (never turned into a live subscription of
-    # a closed organization), anything else has nothing left to write.
+    # story #4755 — the organization row first (before the subscription row is even looked for). An organization closed while the retry was being charged is gone now: a confirmed charge is refunded
+    # (never turned into a live subscription of a closed organization, and never left unserved because the subscription row is missing too), anything else has nothing left to write.
     if not await lock_org_for_billing_write(session, org_id):
         if order.status == "confirmed":
             await void_confirmed_order_of_closed_org(session, org_id=org_id, order_id=order_id)
         else:
             await session.commit()
+        return
+    sub = (
+        await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))
+    ).scalar_one_or_none()
+    if sub is None:
         return
     if order.status == "downgraded":
         return  # story #4728 — 조직이 없어져 주문이 끝났다(charge_org 가드) — past_due 로 되돌리지도, 메일을 보내지도 않는다.

@@ -469,3 +469,22 @@ async def test_07_the_scheduler_holds_the_row_the_closing_waits_and_then_sees_th
     finally:
         await _cleanup_money(maker, org_id)
         await engine.dispose()
+
+
+async def test_08_a_confirmed_retry_charge_of_an_organization_with_no_subscription_row_and_no_organization_is_still_refunded(fake_toss):
+    """Codex: the early `return` for a missing subscription row came before the organization was looked at — a confirmed charge could stay charged, unserved and never refunded. The organization row is looked at first."""
+    from app.services.billing_scheduler import _sync_renewal_retry_outcome
+
+    engine, maker = await _factory()
+    try:
+        org_id = uuid.uuid4()                                                      # no organization, no subscription row at all
+        order_id = f"renewal:4755-{uuid.uuid4().hex[:8]}"
+        await _seed_order(maker, org_id, order_id, status="confirmed")
+        async with maker() as s:
+            await _sync_renewal_retry_outcome(s, org_id, order_id, grace_days=7, now=datetime.now(timezone.utc))
+        att = await _attempt_of(maker, order_id)
+        assert (att["kind"], att["status"], att["refund_status"]) == ("renewal", "voided", "confirmed")
+        assert [c["idempotency_key"] for c in fake_toss.calls] == [_key(att["id"])]
+    finally:
+        await _cleanup_money(maker, org_id)
+        await engine.dispose()
