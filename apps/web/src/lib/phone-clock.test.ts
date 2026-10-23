@@ -51,6 +51,13 @@ describe('[4733 S4b] pressClock — what the web asks and posts', () => {
     await expect(pressClock({ ...WHOLE, computer: true }, deps(signed))).resolves.toEqual({ kind: 'failed' }); // (press again: the computer changed meanwhile)
   });
 
+  it('[4734 K1] the server\'s 409 computer_press_unsupported (the Mac\'s app has not said it takes the press) is `computer_app_old` — its own word, not the generic «try again» and not the phone shell\'s `app_too_old`', async () => {
+    server(json(409, { error: { code: 'computer_press_unsupported' } }));
+    await expect(pressClock({ ...WHOLE, computer: true }, deps(signed))).resolves.toEqual({ kind: 'computer_app_old' });
+    server(json(409, { error: { code: 'something_else' } }));
+    await expect(pressClock({ ...WHOLE, computer: true }, deps(signed))).resolves.toEqual({ kind: 'failed' });
+  });
+
   it('[4734 B] the whole-computer press signs and posts the mark `computer: true` (no agent); the mark with an agent signs nothing; an older shell\'s refusal is `app_too_old` (nothing posted) — and only for the mark', async () => {
     const calls = server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state: 'done', result_code: 'ok' })]);
     const d = deps(signed);

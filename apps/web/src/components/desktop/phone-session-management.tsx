@@ -113,7 +113,7 @@ type T = ReturnType<typeof useTranslations>;
 
 type LineKey =
   | 'remoteOff' | 'already' | 'nothingRunning' | 'notOpen' | 'notReady' | 'needsHands' | 'notClockedOut' | 'unknownAgent' | 'alreadyRunning' | 'expired' | 'expiredStart' | 'expiredEdit' | 'unreachable'
-  | 'stale' | 'notEditable' | 'unknownEdit' | 'appTooOld' | 'computerTooBig'
+  | 'stale' | 'notEditable' | 'unknownEdit' | 'appTooOld' | 'computerAppOld' | 'computerTooBig'
   | 'unknown' | 'unknownStart' | 'notAllowed' | 'notPaired' | 'signInAgain' | 'pairAgain' | 'biometricRequired' | 'noScreenLock' | 'failed';
 type Line = { key: LineKey } | null;
 
@@ -142,6 +142,7 @@ function resultText(t: T, key: LineKey): string {
     case 'notEditable': return t('result.notEditable');
     case 'unknownEdit': return t('result.unknownEdit');
     case 'appTooOld': return t('result.appTooOld');
+    case 'computerAppOld': return t('result.computerAppOld');
     case 'computerTooBig': return t('result.computerTooBig');
     case 'unknown': return t('result.unknown');
     case 'unknownStart': return t('result.unknownStart');
@@ -170,6 +171,7 @@ function lineOf(o: PressOutcome, start: boolean, edit = false): Line {
     case 'biometric_required': return { key: 'biometricRequired' };
     case 'no_screen_lock': return { key: 'noScreenLock' };
     case 'app_too_old': return { key: 'appTooOld' };
+    case 'computer_app_old': return { key: 'computerAppOld' };
     case 'computer_too_big': return { key: 'computerTooBig' };
     case 'cancelled': case 'stopped': return null;
     default: return { key: 'failed' };

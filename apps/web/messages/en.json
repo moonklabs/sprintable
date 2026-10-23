@@ -7531,6 +7531,7 @@
         "notEditable": "This text can't be edited right now — the draft is still coming, or the handoff is already being left",
         "unknownEdit": "Couldn't tell whether it was saved — look at this card again in a moment",
         "appTooOld": "This version of the app cannot handle the whole computer's sessions in one press — please update the app",
+        "computerAppOld": "This computer's app does not know the whole-computer press yet — update the app on the Mac",
         "computerTooBig": "This computer has too many agents to handle in one press — press the agents one by one"
       },
       "oldApp": "Update the app on that computer to end and start sessions from the phone"

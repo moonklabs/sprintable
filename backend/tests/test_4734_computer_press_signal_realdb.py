@@ -17,7 +17,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
 )
 from tests.test_4529_desktop_relay_realdb import _tok
 from tests.test_4534_desktop_commands_realdb import _remote_control_on  # noqa: F401
-from tests.test_4734_computer_clock_realdb import _computer
+from tests.test_4734_computer_clock_realdb import _clean_onboarding_events, _computer  # noqa: F401 — the autouse fixture removes the `d4734` setups' onboarding events
 
 pytestmark = pytest.mark.anyio
 
@@ -34,7 +34,7 @@ async def _caps(sid):
 
 async def test_the_computers_list_says_computer_press_per_entry_kept_in_capabilities_and_taken_out_when_a_list_comes_without_it(world):
     async with _client() as c:
-        phone, devs = await _computer(c, 2)
+        phone, devs = await _computer(c, 2, says_press=False)
         (d0, _a0), (d1, _a1) = devs
         await _sql(f"UPDATE desktop_setups SET capabilities = '[\"move\"]'::jsonb WHERE id = '{d0['setup_id']}'")
         seen = await _entries(c, phone)
@@ -52,7 +52,7 @@ async def test_the_computers_list_says_computer_press_per_entry_kept_in_capabili
 
 async def test_the_word_is_the_boolean_true_and_nothing_else(world):
     async with _client() as c:
-        _phone, devs = await _computer(c, 1)
+        _phone, devs = await _computer(c, 1, says_press=False)
         tok = _tok(devs[0][0]["device_token"])
         for bad in (False, "true", 1, None, "yes"):
             r = await c.put("/api/v2/desktop/relay/startable", json={"startable": [], "computer_press": bad}, headers=tok)
@@ -62,7 +62,7 @@ async def test_the_word_is_the_boolean_true_and_nothing_else(world):
 
 async def test_a_stale_numbered_list_changes_nothing_about_the_signal(world):
     async with _client() as c:
-        phone, devs = await _computer(c, 1)
+        phone, devs = await _computer(c, 1, says_press=False)
         d = devs[0][0]
         tok = _tok(d["device_token"])
         assert (await c.put("/api/v2/desktop/relay/startable", json={"startable": [], "seq": 5, "computer_press": True}, headers=tok)).json()["applied"] is True
@@ -73,3 +73,25 @@ async def test_a_stale_numbered_list_changes_nothing_about_the_signal(world):
         assert (await _entries(c, phone))[d["setup_id"]]["computer_press"] is False, "a newer list without it does"
         assert (await c.put("/api/v2/desktop/relay/startable", json={"startable": [], "seq": 4, "computer_press": True}, headers=tok)).json()["applied"] is False
         assert (await _entries(c, phone))[d["setup_id"]]["computer_press"] is False, "…and a late one WITH it does not give it back"
+
+
+async def test_a_marked_press_of_a_setup_whose_app_has_not_said_it_is_refused_at_the_door(world):
+    from tests.test_4734_computer_clock_realdb import _commands, _mark, _post, _press
+
+    async with _client() as c:
+        phone, devs = await _computer(c, 2, says_press=False)
+        sid = devs[0][0]["setup_id"]
+        for action in ("out_open", "out_submit", "out_cancel", "in"):  # every one of the four whole actions meets the same door
+            r = await _post(c, sid, _mark(phone, action, key=f"k-old-{action}"))
+            assert (r.status_code, r.json()["error"]["code"]) == (409, "computer_press_unsupported"), (action, r.text)
+            assert await _commands(sid) == [], f"{action}: nothing was queued"
+        # a press WITHOUT the mark never needed the word; the same setup, once it says it takes the press, is pressed as before
+        assert (await _post(c, sid, _press(phone, "out_open", key="k-plain"))).status_code == 201
+        put = await c.put("/api/v2/desktop/relay/startable", json={"startable": [], "computer_press": True}, headers=_tok(devs[0][0]["device_token"]))
+        assert put.status_code == 200
+        ok = await _post(c, sid, _mark(phone, key="k-new"))
+        assert ok.status_code == 201, ok.text
+        # …and the SAME marked press again (its command exists) is answered with that command even if the word is taken away later
+        assert (await c.put("/api/v2/desktop/relay/startable", json={"startable": []}, headers=_tok(devs[0][0]["device_token"]))).status_code == 200
+        again = await _post(c, sid, _mark(phone, key="k-new"))
+        assert (again.status_code, again.json()["command_id"]) == (201, ok.json()["command_id"])

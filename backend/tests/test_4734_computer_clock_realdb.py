@@ -38,12 +38,16 @@ async def _clean_onboarding_events(world):
 NAME = "d4734 mac clock"
 
 
-async def _computer(c, n, name=NAME):
-    """`n` setups of ONE computer (the same device name · the same person), one agent each, each heard from, the one phone paired with every one of them."""
+async def _computer(c, n, name=NAME, says_press=True):
+    """`n` setups of ONE computer (the same device name · the same person), one agent each, each heard from, the one phone paired with every one of them. Each says (with its startable list) that
+    its app takes the press of the whole computer — `says_press=False`: an app from before, which says nothing."""
     phone, der = await _register(c)
     out = []
     for _ in range(n):
         device = await _device(c, name=name)
+        if says_press:
+            put = await c.put("/api/v2/desktop/relay/startable", json={"startable": [], "computer_press": True}, headers=_tok(device["device_token"]))
+            assert put.status_code == 200, put.text
         agent = device["agents"][0]["member_id"]
         await _state(c, device, agent, "idle", 1)
         await _pair(c, device["device_token"], der)
