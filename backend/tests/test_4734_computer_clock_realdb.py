@@ -13,6 +13,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
     ORG,
     ORG2,
     OWNER,
+    _addresses,
     _client,
     _person,
     _dispose_global_engine_after_test,
@@ -47,6 +48,11 @@ def _mark(phone, action="out_open", key=None, **extra):
     return _press(phone, action, key=key, computer=True, **extra)
 
 
+def _ids(device):
+    """every agent a setup holds (the exchange makes more than one per setup): a one-setup press reaches all of them"""
+    return sorted(a["member_id"] for a in device["agents"])
+
+
 async def _payloads(sid):
     return [p for _k, p, _by, _key, _st in await _commands(sid)]
 
@@ -55,19 +61,20 @@ async def test_01_a_marked_press_carries_the_scope_of_every_setup_of_the_compute
     async with _client() as c:
         phone, devs = await _computer(c, 3)
         sid = devs[0][0]["setup_id"]
-        agents = sorted(a for _d, a in devs)
+        agents = sorted(i for d, _a in devs for i in _ids(d))
+        k = len(agents)  # (3 setups · every agent each holds)
         r = await _post(c, sid, _mark(phone, key="k-all"))
         assert (r.status_code, r.json()["state"]) == (201, "queued"), r.text
-        assert r.json()["agents"] == {"total": 3, "pressable": 3}
+        assert r.json()["agents"] == {"total": k, "pressable": k}
         [payload] = await _payloads(sid)
-        assert payload == {"action": "out_open", "signed": "eyJ2IjoxfQ.signed-by-the-phone", "computer": True, "scope": agents, "scope_total": 3}
+        assert payload == {"action": "out_open", "signed": "eyJ2IjoxfQ.signed-by-the-phone", "computer": True, "scope": agents, "scope_total": k}
         # a press WITHOUT the mark on the same computer is exactly what it was (two keys, no scope, no `agents` in the answer)
         r2 = await _post(c, sid, _press(phone, "out_open", key="k-one-setup"))
         assert (r2.status_code, "agents" in r2.json()) == (201, False)
         assert (await _payloads(sid))[1] == {"action": "out_open", "signed": "eyJ2IjoxfQ.signed-by-the-phone"}
         # the same marked press again (the same key) gets its own command back
         again = await _post(c, sid, _mark(phone, key="k-all"))
-        assert (again.json()["command_id"], again.json()["agents"]) == (r.json()["command_id"], {"total": 3, "pressable": 3})
+        assert (again.json()["command_id"], again.json()["agents"]) == (r.json()["command_id"], {"total": k, "pressable": k})
 
 
 async def test_02_only_what_a_press_of_that_setup_could_do_counts_a_disconnected_a_silent_and_an_unpaired_setup_are_left_out(world):
@@ -81,10 +88,11 @@ async def test_02_only_what_a_press_of_that_setup_could_do_counts_a_disconnected
         r = await _post(c, sid, _mark(phone, key="k-some"))
         assert r.status_code == 201, r.text
         # N = what the computer's live setups hold (the disconnected one is not live); K = what a one-setup press of each could reach — here only the pressed setup's own
-        assert r.json()["agents"] == {"total": 3, "pressable": 1}
+        per = len(_ids(d0))
+        assert r.json()["agents"] == {"total": 3 * per, "pressable": per}
         [payload] = await _payloads(sid)
-        assert payload["scope"] == [a0] and payload["scope_total"] == 3
-        assert a1 not in payload["scope"]
+        assert payload["scope"] == _ids(d0) and payload["scope_total"] == 3 * per
+        assert not set(_ids(d1)) & set(payload["scope"])
 
 
 async def test_03_the_person_may_press_a_setup_only_through_can_clock_not_through_the_computer(world, monkeypatch):
@@ -97,9 +105,10 @@ async def test_03_the_person_may_press_a_setup_only_through_can_clock_not_throug
         monkeypatch.setattr(desktop_clock, "can_clock", lambda *, member_role, user_id, setup: False if str(setup.id) == d1["setup_id"] else real(member_role=member_role, user_id=user_id, setup=setup))
         # the pressed setup is judged first, as in every press (it passes); the other is left out when the person could not press IT
         r = await _post(c, d0["setup_id"], _mark(phone, key="k-can"))
-        assert (r.status_code, r.json()["agents"]) == (201, {"total": 2, "pressable": 1})
+        per = len(_ids(d0))
+        assert (r.status_code, r.json()["agents"]) == (201, {"total": 2 * per, "pressable": per})
         [payload] = await _payloads(d0["setup_id"])
-        assert payload["scope"] == [a0]
+        assert payload["scope"] == _ids(d0)
 
 
 async def test_04_another_persons_and_another_organizations_setups_of_the_same_name_are_not_this_computer(world):
@@ -111,9 +120,10 @@ async def test_04_another_persons_and_another_organizations_setups_of_the_same_n
         other = await _device(c, name=NAME)
         await _sql(f"UPDATE desktop_setups SET confirmed_by = '{uuid.uuid4()}' WHERE id = '{other['setup_id']}'")
         r = await _post(c, d0["setup_id"], _mark(phone, key="k-other"))
-        assert (r.status_code, r.json()["agents"]) == (201, {"total": 1, "pressable": 1})
+        per = len(_ids(d0))
+        assert (r.status_code, r.json()["agents"]) == (201, {"total": per, "pressable": per})
         [payload] = await _payloads(d0["setup_id"])
-        assert payload["scope"] == [a0]
+        assert payload["scope"] == _ids(d0)
 
 
 async def test_04b_a_machine_key_shared_with_another_confirmer_is_another_computer_and_a_setup_not_yet_exchanged_is_not_pressed(world):
@@ -125,9 +135,10 @@ async def test_04b_a_machine_key_shared_with_another_confirmer_is_another_comput
         await _sql(f"UPDATE desktop_setups SET confirmed_by = '{uuid.uuid4()}' WHERE id = '{d1['setup_id']}'")  # …but ANOTHER person confirmed this setup: another computer (4618)
         await _sql(f"UPDATE desktop_setups SET exchanged_at = NULL WHERE id = '{d2['setup_id']}'")  # handed over to nobody yet
         r = await _post(c, d0["setup_id"], _mark(phone, key="k-mk"))
-        assert (r.status_code, r.json()["agents"]) == (201, {"total": 1, "pressable": 1}), r.text
+        per = len(_ids(d0))
+        assert (r.status_code, r.json()["agents"]) == (201, {"total": per, "pressable": per}), r.text
         [payload] = await _payloads(d0["setup_id"])
-        assert payload["scope"] == [a0]
+        assert payload["scope"] == _ids(d0)
 
 
 async def test_04c_the_press_locks_every_live_setup_of_the_computer_in_the_one_order_before_it_reads_them_and_a_press_without_the_mark_locks_no_sibling(world, monkeypatch):
@@ -207,8 +218,9 @@ async def test_06b_the_phones_read_says_n_of_k_before_it_signs_counts_only_and_o
         plain = await _read(c, d0["setup_id"], phone)
         assert plain.status_code == 200 and "computer" not in plain.json()
         r = await c.get(f"/api/v2/desktop/setups/{d0['setup_id']}/clock", params={"phone_key_id": phone, "computer": "true"}, headers=_person(OWNER))
-        assert (r.status_code, r.json()["computer"]) == (200, {"agents": {"total": 3, "pressable": 2}}), r.text
-        assert a2 not in r.text and a1 not in r.text, "counts only: no id of what was left out (nor of what was kept)"
+        per = len(_ids(d0))
+        assert (r.status_code, r.json()["computer"]) == (200, {"agents": {"total": 3 * per, "pressable": 2 * per}}), r.text
+        assert not any(i in r.text for d in (d0, d1, d2) for i in _ids(d)), "counts only: no id of what was left out (nor of what was kept)"
 
 
 async def test_07_a_computer_wide_report_keeps_the_rows_of_the_computers_other_setups_and_the_read_gives_each_person_only_what_they_may_press(world, monkeypatch):
