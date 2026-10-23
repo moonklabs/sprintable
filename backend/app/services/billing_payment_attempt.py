@@ -815,6 +815,50 @@ async def run_pending_refund(session: AsyncSession, attempt_id: uuid.UUID) -> st
     return result
 
 
+async def void_confirmed_order_of_closed_org(session: AsyncSession, *, org_id: uuid.UUID, order_id: str) -> uuid.UUID | None:
+    """story #4755 — a renewal charge (made by the scheduler: no attempt row) was confirmed, and its organization is closed by the time it settles. Nothing can be given for it, so it is refunded
+    in full — through the road every refund takes here (this module is the only place a refund goes out): a VOIDED attempt of kind `renewal` becomes the order's owner (`order_id` is unique, the order's
+    `payment_attempt_id` points at it, so dunning and the stale-order sweep leave it alone), the operator alert `payment_voided` goes out once, and `run_pending_refund` sends the refund with the attempt's
+    own idempotency key. A refund the provider does not answer stays `pending` and the 5-minute sweep tries again with the same key; a definitive failure is `failed` with the `refund_failed` alert.
+    Calling it again for the same order never creates a second attempt or a second refund. Returns the attempt id (None when there is nothing to refund)."""
+    order = (
+        await session.execute(select(BillingOrder).where(BillingOrder.order_id == order_id).execution_options(populate_existing=True))
+    ).scalar_one_or_none()
+    if order is None or order.org_id != org_id or order.status != "confirmed" or not order.payment_key:
+        logger.error("void_confirmed_order_of_closed_org: nothing to refund for order %s of org %s", order_id, org_id)
+        return None
+    existing = (await session.execute(select(BillingPaymentAttempt.id).where(BillingPaymentAttempt.order_id == order_id))).scalar_one_or_none()
+    if existing is not None:
+        attempt_id = existing                                     # the order already has its owner (an earlier call, or an attempt): only its refund road is continued below
+    else:
+        amount, tier, cycle = order.amount_minor, None, None
+        sub = (await session.execute(select(OrgSubscription.tier, OrgSubscription.billing_cycle).where(OrgSubscription.org_id == org_id))).first()
+        if sub is not None:
+            tier, cycle = sub[0], sub[1]
+        attempt_id = uuid.uuid4()
+        now = _now()
+        inserted = await session.execute(
+            pg_insert(BillingPaymentAttempt).values(
+                id=attempt_id, org_id=org_id, requested_by=None, kind="renewal", tier=tier or "unknown", billing_cycle=cycle,
+                status="voided", stage="charged", order_id=order_id, lease_token=None, lease_expires_at=None, claim_value=None,
+                reason="renewal charge confirmed; the organization is closed — refunding in full", finished_at=now,
+                refund_target_order_id=order_id, refund_amount_minor=amount, refund_status="pending", refund_lease_until=None, next_check_at=None,
+            ).on_conflict_do_nothing(index_elements=["order_id"])
+        )
+        if inserted.rowcount == 1:
+            await session.execute(update(BillingOrder).where(BillingOrder.order_id == order_id).values(payment_attempt_id=attempt_id))
+            await session.commit()
+            await _alert(
+                "payment_voided", attempt_id, f"renewal order {order_id} charged but its organization is closed — refunding in full",
+                org_id=org_id, facts={"amount_minor": amount},
+            )
+        else:                                                    # lost a race with another caller: theirs is the owner
+            await session.rollback()
+            attempt_id = (await session.execute(select(BillingPaymentAttempt.id).where(BillingPaymentAttempt.order_id == order_id))).scalar_one()
+    await run_pending_refund(session, attempt_id)
+    return attempt_id
+
+
 # ── 조회 대사 ───────────────────────────────────────────────────────────────────────────────────────
 
 async def reconcile_attempt(session: AsyncSession, attempt_id: uuid.UUID) -> BillingPaymentAttempt:

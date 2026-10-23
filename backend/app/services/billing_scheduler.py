@@ -40,7 +40,7 @@ from app.services.billing_charge import (
     charge_org,
 )
 from app.services.billing_charge_amount import ChargeAmountError, compute_charge_amount
-from app.services.billing_closed_org_refund import refund_charge_for_closed_org, retry_failed_closed_org_refunds
+from app.services.billing_payment_attempt import void_confirmed_order_of_closed_org
 from app.services.billing_period import compute_period_end
 from app.services.email import send_email
 from app.services.org_billing_lock import lock_org_for_billing_write
@@ -326,11 +326,6 @@ async def sweep_dunning_retries(session: AsyncSession, *, now: datetime | None =
             await downgrade_to_free(session, order.org_id, order.order_id)
             downgraded += 1
 
-    try:
-        await retry_failed_closed_org_refunds(session)   # story #4755 — refunds that failed for a closed organization are tried again, same idempotency key
-    except Exception:
-        logger.exception("sweep_dunning_retries: retrying failed closed-organization refunds failed")
-
     return {"failed_orders_seen": len(failed_orders), "retried": retried, "downgraded": downgraded}
 
 
@@ -353,7 +348,7 @@ async def _sync_renewal_retry_outcome(
     # a closed organization), anything else has nothing left to write.
     if not await lock_org_for_billing_write(session, org_id):
         if order.status == "confirmed":
-            await refund_charge_for_closed_org(session, org_id=org_id, order_id=order_id)
+            await void_confirmed_order_of_closed_org(session, org_id=org_id, order_id=order_id)
         else:
             await session.commit()
         return
@@ -660,7 +655,7 @@ async def trigger_due_charges(session: AsyncSession, *, now: datetime | None = N
 
         if order is not None and order.status == "confirmed" and not await lock_org_for_billing_write(session, sub.org_id):
             # story #4755 — the organization was closed while the renewal was being charged: refund the confirmed charge, do not roll a subscription of a closed organization forward.
-            await refund_charge_for_closed_org(session, org_id=sub.org_id, order_id=order_id)
+            await void_confirmed_order_of_closed_org(session, org_id=sub.org_id, order_id=order_id)
             continue
         if order is not None and order.status == "confirmed":
             new_end = compute_period_end(sub.current_period_end, sub.billing_cycle)

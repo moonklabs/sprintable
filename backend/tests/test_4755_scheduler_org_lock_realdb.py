@@ -2,7 +2,7 @@
 
 4753 gave the webhook and the admin grant the lock the closing paths take (organization row → subscription). The scheduler's own writes — the renewal retry that turns a subscription `active`, the renewal
 roll-forward, the `free` downgrade, the restore when an expired grant ends — and the `subscription.canceled` webhook branch did not. Real PG, two connections (one holds the lock, the other is seen
-waiting in pg_stat_activity). A confirmed charge for an organization that is gone is refunded in full with one idempotency key and an operator alert; a failed refund is recorded and retried, never doubled.
+waiting in pg_stat_activity). A confirmed charge for an organization that is gone is refunded in full THROUGH THE PAYMENT-ATTEMPT ROAD (a voided `renewal` attempt owns it: one idempotency key, the operator alert, the sweep that retries an unanswered refund); never doubled.
 """
 from __future__ import annotations
 
@@ -109,11 +109,15 @@ async def _webhook_event(maker, event_id: str) -> None:
 class _FakeToss:
     calls: list[dict] = []
     fail_next = 0
+    fail_kind = "unknown"          # "unknown": the provider does not answer (the refund stays pending, the sweep tries again) · "definitive": a refusal (failed + operator alert)
 
     async def refund(self, **kw):
         _FakeToss.calls.append(kw)
         if _FakeToss.fail_next > 0:
             _FakeToss.fail_next -= 1
+            if _FakeToss.fail_kind == "definitive":
+                from app.services.billing_refund import RefundError
+                raise RefundError("the provider refused")
             raise RuntimeError("provider unreachable")
         return {"cancels": [{"transactionKey": f"tx-{len(_FakeToss.calls)}-{uuid.uuid4().hex[:6]}", "cancelAmount": 12000}]}
 
@@ -124,6 +128,7 @@ def fake_toss(monkeypatch):
 
     _FakeToss.calls = []
     _FakeToss.fail_next = 0
+    _FakeToss.fail_kind = "unknown"
     monkeypatch.setattr(br, "TossAdapter", _FakeToss)
     return _FakeToss
 
@@ -155,24 +160,40 @@ async def _cleanup_money(maker, *org_ids) -> None:
 
     async with maker() as s:
         for o in org_ids:
-            for t in ("billing_orders", "org_billing_keys"):                  # (the ledger is append-only: its rows stay, keyed by a random organization id)
+            await s.execute(text("UPDATE billing_orders SET payment_attempt_id = NULL WHERE org_id = :o"), {"o": o})
+            for t in ("billing_payment_attempts", "billing_orders", "org_billing_keys"):       # (the ledger is append-only: its rows stay, keyed by a random organization id)
                 await s.execute(text(f"DELETE FROM {t} WHERE org_id = :o"), {"o": o})
-        await s.execute(text("DELETE FROM operator_alerts WHERE dedupe_key LIKE 'billing.charge_refund%'"))
+        await s.execute(text("DELETE FROM operator_alerts WHERE dedupe_key LIKE 'billing.payment_voided:%' OR dedupe_key LIKE 'billing.refund_failed:%' OR dedupe_key LIKE 'billing.refund_unconfirmed:%'"))
         await s.commit()
     await _cleanup(maker, *org_ids)
 
 
-async def _alert_kinds(maker, order_id: str) -> list[str]:
+async def _attempt_of(maker, order_id: str) -> dict:
+    """The owner row of an order: its attempt (voided · kind renewal), the refund state, and the order's own pointer back."""
     from sqlalchemy import text
 
     async with maker() as s:
-        rows = (await s.execute(text("SELECT kind FROM operator_alerts WHERE dedupe_key LIKE :k ORDER BY kind"), {"k": f"billing.charge_refund%:{order_id}"})).all()
+        row = (await s.execute(text(
+            "SELECT a.id, a.kind, a.status, a.refund_status, o.payment_attempt_id = a.id AS owned, o.refund_status AS order_refund "
+            "FROM billing_payment_attempts a JOIN billing_orders o ON o.order_id = a.order_id WHERE a.order_id = :o"), {"o": order_id})).one()
+    return dict(row._mapping)
+
+
+async def _alert_kinds(maker, attempt_id) -> list[str]:
+    from sqlalchemy import text
+
+    async with maker() as s:
+        rows = (await s.execute(text("SELECT kind FROM operator_alerts WHERE dedupe_key LIKE :k ORDER BY kind"), {"k": f"billing.%:{attempt_id}"})).all()
     return [r[0] for r in rows]
 
 
+def _key(attempt_id) -> str:
+    return f"attempt-void-refund-{attempt_id.hex}"
+
+
 async def test_01_a_renewal_retry_charged_while_the_organization_closes_is_refunded_not_turned_into_a_subscription(fake_toss):
-    """The closing holds the row (a past_due subscription does not stop it); the retry's outcome sync waits, finds the organization gone, and — the charge being confirmed — refunds it in full
-    (one idempotency key), leaves NO live subscription, records the refund on the order and alerts."""
+    """The closing holds the row (a past_due subscription does not stop it); the retry's outcome sync waits, finds the organization gone, and — the charge being confirmed — hands it to the payment-attempt
+    road: a VOIDED `renewal` attempt owns the order, the refund goes out in full with that attempt's own key, the operator alert goes out, and NO live subscription is left."""
     from sqlalchemy import text
 
     from app.repositories.organization import OrganizationRepository
@@ -193,18 +214,19 @@ async def test_01_a_renewal_retry_charged_while_the_organization_closes_is_refun
             await asyncio.wait_for(task, timeout=20)
         assert await _scalar(maker, "SELECT count(*) FROM organizations WHERE id = :o", o=org_id) == 0
         assert await _scalar(maker, "SELECT status FROM org_subscriptions WHERE org_id = :o", o=org_id) == "canceled"      # not turned `active`
-        assert [c["idempotency_key"] for c in fake_toss.calls] == [f"orgclosed-refund:{order_id}"]                            # refunded once, with the order's own key
-        assert await _scalar(maker, "SELECT refund_status FROM billing_orders WHERE order_id = :o", o=order_id) == "confirmed"
-        assert await _alert_kinds(maker, order_id) == ["billing.charge_refunded_org_closed"]
+        att = await _attempt_of(maker, order_id)
+        assert (att["kind"], att["status"], att["refund_status"], att["owned"], att["order_refund"]) == ("renewal", "voided", "confirmed", True, "confirmed")
+        assert [c["idempotency_key"] for c in fake_toss.calls] == [_key(att["id"])]                                            # refunded once, with the attempt's own key
+        assert await _alert_kinds(maker, att["id"]) == ["billing.payment_voided"]
     finally:
         await _cleanup_money(maker, org_id)
         await engine.dispose()
 
 
-async def test_02_a_refund_that_fails_is_recorded_alerted_retried_and_never_doubled(fake_toss):
-    """The provider is down: the order says `refund_status = failed`, the failure alert goes out, the next sweep retries with the SAME key and it goes through; running the retry again (or the
-    first path again) refunds nothing more — one ledger refund, one provider success."""
-    from app.services.billing_closed_org_refund import refund_charge_for_closed_org, retry_failed_closed_org_refunds
+async def test_02_an_unanswered_refund_stays_pending_and_the_sweep_sends_it_again_with_the_same_key_never_twice(fake_toss):
+    """The provider does not answer: the attempt's refund stays `pending` (the outcome is unknown — it may have gone out), the sweep takes it again with the SAME key and it goes through; asking again
+    (another sweep, or the same call) refunds nothing more — one ledger refund. A refusal is `failed` with the `refund_failed` alert instead."""
+    from app.services.billing_payment_attempt import run_pending_refund, sweep_processing_attempts, void_confirmed_order_of_closed_org
 
     engine, maker = await _factory()
     try:
@@ -217,20 +239,30 @@ async def test_02_a_refund_that_fails_is_recorded_alerted_retried_and_never_doub
             await s.commit()
         fake_toss.fail_next = 1
         async with maker() as s:
-            assert await refund_charge_for_closed_org(s, org_id=org_id, order_id=order_id) is False
-        assert await _scalar(maker, "SELECT refund_status FROM billing_orders WHERE order_id = :o", o=order_id) == "failed"
-        assert await _alert_kinds(maker, order_id) == ["billing.charge_refund_failed_org_closed"]
+            attempt_id = await void_confirmed_order_of_closed_org(s, org_id=org_id, order_id=order_id)
+        assert (await _attempt_of(maker, order_id))["refund_status"] == "pending"          # unknown outcome: not «failed», not «confirmed»
+        async with maker() as s:                                                            # time passes: the attempt's next check comes due
+            await s.execute(__import__("sqlalchemy").text("UPDATE billing_payment_attempts SET next_check_at = now() - interval '1 minute' WHERE id = :i"), {"i": attempt_id})
+            await s.commit()
         async with maker() as s:
-            assert await retry_failed_closed_org_refunds(s) >= 1             # the next sweep takes it up
-        assert await _scalar(maker, "SELECT refund_status FROM billing_orders WHERE order_id = :o", o=order_id) == "confirmed"
-        calls_after_success = len(fake_toss.calls)
-        keys = {c["idempotency_key"] for c in fake_toss.calls}
-        assert keys == {f"orgclosed-refund:{order_id}"} and calls_after_success == 2      # the failed try and the good one: the same key
+            await sweep_processing_attempts(s)                                              # the next tick of the existing sweep
+        mine = [c for c in fake_toss.calls if c["idempotency_key"] == _key(attempt_id)]
+        assert (await _attempt_of(maker, order_id))["refund_status"] == "confirmed" and len(mine) == 2        # the failed try and the good one: the same key
         async with maker() as s:
-            assert await retry_failed_closed_org_refunds(s) == 0             # nothing left to retry
-            assert await refund_charge_for_closed_org(s, org_id=org_id, order_id=order_id) is True   # asked again: already refunded
-        assert len(fake_toss.calls) == calls_after_success                     # the provider was not called a third time
+            await sweep_processing_attempts(s)
+            await run_pending_refund(s, attempt_id)
+            assert await void_confirmed_order_of_closed_org(s, org_id=org_id, order_id=order_id) == attempt_id    # asked again for the same order: the same owner, nothing new
+        assert len([c for c in fake_toss.calls if c["idempotency_key"] == _key(attempt_id)]) == 2              # the provider was not called a third time
+        assert await _scalar(maker, "SELECT count(*) FROM billing_payment_attempts WHERE order_id = :o", o=order_id) == 1
         assert await _scalar(maker, "SELECT count(*) FROM billing_ledger_entries WHERE org_id = :o AND entry_type = 'refund'", o=org_id) == 1
+        # a definitive refusal on another order: `failed` + the operator alert
+        order2 = f"renewal:4755-{uuid.uuid4().hex[:8]}"
+        await _seed_order(maker, org_id, order2, status="confirmed")
+        fake_toss.fail_next, fake_toss.fail_kind = 1, "definitive"
+        async with maker() as s:
+            attempt2 = await void_confirmed_order_of_closed_org(s, org_id=org_id, order_id=order2)
+        assert (await _attempt_of(maker, order2))["refund_status"] == "failed"
+        assert await _alert_kinds(maker, attempt2) == ["billing.payment_voided", "billing.refund_failed"]
     finally:
         await _cleanup_money(maker, org_id)
         await engine.dispose()
@@ -276,12 +308,13 @@ async def test_03_a_renewal_charged_while_the_organization_goes_is_refunded_and_
         async with maker() as s:
             await bs.trigger_due_charges(s)
         # the vanished organization: refunded once with the order's key, period untouched, alerted
-        assert [c["idempotency_key"] for c in fake_toss.calls] == [f"orgclosed-refund:{orders[gone_org]}"]
+        att = await _attempt_of(maker, orders[gone_org])
+        assert [c["idempotency_key"] for c in fake_toss.calls] == [_key(att["id"])]
         assert await _scalar(maker, "SELECT current_period_end FROM org_subscriptions WHERE org_id = :o", o=gone_org) == period_before
-        assert await _alert_kinds(maker, orders[gone_org]) == ["billing.charge_refunded_org_closed"]
+        assert await _alert_kinds(maker, att["id"]) == ["billing.payment_voided"]
         # the live organization: the period rolled forward as before, no refund
         assert await _scalar(maker, "SELECT current_period_end > now() FROM org_subscriptions WHERE org_id = :o", o=live_org) is True
-        assert await _alert_kinds(maker, orders[live_org]) == []
+        assert await _scalar(maker, "SELECT count(*) FROM billing_payment_attempts WHERE order_id = :o", o=orders[live_org]) == 0
     finally:
         await _cleanup_money(maker, gone_org, live_org)
         await engine.dispose()
@@ -433,33 +466,6 @@ async def test_07_the_scheduler_holds_the_row_the_closing_waits_and_then_sees_th
         assert await _scalar(maker, "SELECT count(*) FROM organizations WHERE id = :o", o=org_id) == 1
         assert await _scalar(maker, "SELECT status FROM org_subscriptions WHERE org_id = :o", o=org_id) == "active"
         assert fake_toss.calls == []                       # a live organization: nothing refunded
-    finally:
-        await _cleanup_money(maker, org_id)
-        await engine.dispose()
-
-
-async def test_08_the_dunning_sweep_takes_up_a_failed_closed_organization_refund_again(fake_toss, monkeypatch):
-    """The sweep (not only a direct call) retries a refund that failed for a closed organization — with the same key — and does nothing once it is refunded."""
-    import app.services.billing_scheduler as bs
-
-    engine, maker = await _factory()
-    try:
-        org_id = await _seed_org(maker)
-        order_id = f"renewal:4755-{uuid.uuid4().hex[:8]}"
-        await _seed_order(maker, org_id, order_id, status="confirmed")
-        from sqlalchemy import text
-        async with maker() as s:
-            await s.execute(text("UPDATE billing_orders SET refund_status = 'failed' WHERE order_id = :o"), {"o": order_id})
-            await s.execute(text("DELETE FROM organizations WHERE id = :o"), {"o": org_id})
-            await s.commit()
-        monkeypatch.setattr(bs, "next_dunning_action", lambda *a, **k: "wait")      # the sweep's own dunning decisions are not what this test is about; other rows of the shared database stay untouched
-        async with maker() as s:
-            await bs.sweep_dunning_retries(s)
-        assert await _scalar(maker, "SELECT refund_status FROM billing_orders WHERE order_id = :o", o=order_id) == "confirmed"
-        assert [c["idempotency_key"] for c in fake_toss.calls] == [f"orgclosed-refund:{order_id}"]
-        async with maker() as s:
-            await bs.sweep_dunning_retries(s)
-        assert len(fake_toss.calls) == 1                                               # a second sweep refunds nothing more
     finally:
         await _cleanup_money(maker, org_id)
         await engine.dispose()

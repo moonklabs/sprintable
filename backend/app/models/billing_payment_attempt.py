@@ -23,7 +23,7 @@ ATTEMPT_STAGES = ("received", "key_issued", "charge_started", "charged")
 class BillingPaymentAttempt(Base, TimestampMixin, OrgScopedMixin):
     __tablename__ = "billing_payment_attempts"
     __table_args__ = (
-        CheckConstraint("kind IN ('checkout', 'change_tier')", name="ck_billing_payment_attempts_kind"),
+        CheckConstraint("kind IN ('checkout', 'change_tier', 'renewal')", name="ck_billing_payment_attempts_kind"),
         CheckConstraint(
             "status IN ('processing', 'succeeded', 'declined', 'failed', 'voided')", name="ck_billing_payment_attempts_status",
         ),
