@@ -16,7 +16,7 @@ import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { formatViewerDate } from '@/lib/viewer-time-zone';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
-import { beginFlow, endFlow, readStartableKeyed, type Flow, type StartableComputer } from '@/lib/phone-start';
+import { beginFlow, endFlow, groupByComputer, readStartableKeyed, type Flow, type StartableComputer } from '@/lib/phone-start';
 import { checkPress, editClock, pressClock, readClock, type ClockAction, type ClockEditFields, type ClockRead, type ClockView, type Pending, type PressOutcome } from '@/lib/phone-clock';
 
 const newKey = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`);
@@ -66,7 +66,7 @@ function SessionsForOrg({ orgId, orgSyncPending }: { orgId: string | undefined; 
       if (flow.stopped || !alive.current) return;
       if (r.kind === 'view') {
         if (!r.view.remote_control) setSection({ kind: 'remote_off' });
-        else setSection(r.view.computers.length > 0 ? { kind: 'computers', computers: r.view.computers, phoneKeyId: r.phoneKeyId } : { kind: 'none' });
+        else setSection(r.view.computers.length > 0 ? { kind: 'computers', computers: groupByComputer(r.view.computers), phoneKeyId: r.phoneKeyId } : { kind: 'none' }); // story 4734 (B): one card per COMPUTER — the server lists a setup each
       } else if (r.kind === 'no_phone' || r.kind === 'no_screen_lock') setSection({ kind: 'none' }); // paired with nothing: nothing to manage, no line
       else setSection((s) => (s.kind === 'computers' ? s : { kind: 'failed' })); // a later read that failed keeps what is drawn
     });
@@ -102,7 +102,7 @@ function SessionsForOrg({ orgId, orgSyncPending }: { orgId: string | undefined; 
     <section className="space-y-3" data-testid="phone-sessions" aria-labelledby="phone-sessions-heading">
       <h2 id="phone-sessions-heading" className="text-sm font-semibold text-foreground">{t('title')}</h2>
       {section.computers.map((c) => (
-        <ComputerCard key={`${orgId ?? ''}:${c.setup_id}`} computer={c} phoneKeyId={section.phoneKeyId} onChanged={readList} frozen={orgSyncPending} held={held} />
+        <ComputerCard key={`${orgId ?? ''}:${c.computer_id ?? c.setup_id}`} computer={c} phoneKeyId={section.phoneKeyId} onChanged={readList} frozen={orgSyncPending} held={held} />
       ))}
     </section>
   );
@@ -112,7 +112,7 @@ type T = ReturnType<typeof useTranslations>;
 
 type LineKey =
   | 'remoteOff' | 'already' | 'nothingRunning' | 'notOpen' | 'notReady' | 'needsHands' | 'notClockedOut' | 'unknownAgent' | 'alreadyRunning' | 'expired' | 'expiredStart' | 'expiredEdit' | 'unreachable'
-  | 'stale' | 'notEditable' | 'unknownEdit'
+  | 'stale' | 'notEditable' | 'unknownEdit' | 'appTooOld'
   | 'unknown' | 'unknownStart' | 'notAllowed' | 'notPaired' | 'signInAgain' | 'pairAgain' | 'biometricRequired' | 'noScreenLock' | 'failed';
 type Line = { key: LineKey } | null;
 
@@ -140,6 +140,7 @@ function resultText(t: T, key: LineKey): string {
     case 'stale': return t('result.stale');
     case 'notEditable': return t('result.notEditable');
     case 'unknownEdit': return t('result.unknownEdit');
+    case 'appTooOld': return t('result.appTooOld');
     case 'unknown': return t('result.unknown');
     case 'unknownStart': return t('result.unknownStart');
     case 'notAllowed': return t('result.notAllowed');
@@ -166,6 +167,7 @@ function lineOf(o: PressOutcome, start: boolean, edit = false): Line {
     case 'not_registered': case 'key_invalidated': return { key: 'pairAgain' };
     case 'biometric_required': return { key: 'biometricRequired' };
     case 'no_screen_lock': return { key: 'noScreenLock' };
+    case 'app_too_old': return { key: 'appTooOld' };
     case 'cancelled': case 'stopped': return null;
     default: return { key: 'failed' };
   }
@@ -179,8 +181,11 @@ function ComputerCard({ computer, phoneKeyId, onChanged, frozen, held }: { compu
   const [hidden, setHidden] = useState(false);
   const [busy, setBusy] = useState(false);
   const [line, setLine] = useState<Line>(null);
-  const [pending, setPendingState] = useState<Held | null>(() => held.get(computer.setup_id) ?? null);
-  const setPending = (h: Held | null) => { if (h) held.set(computer.setup_id, h); else held.delete(computer.setup_id); setPendingState(h); };
+  // story 4734 (B): the card is the COMPUTER's (its setups together); the setup named for the card itself is the first reachable one and may change between two reads — what is held, is held by the computer
+  const cardId = computer.computer_id ?? computer.setup_id;
+  const markable = computer.computer_id !== undefined; // an older server names no computer: the entry is its own and a press is the one-setup press it always was
+  const [pending, setPendingState] = useState<Held | null>(() => held.get(cardId) ?? null);
+  const setPending = (h: Held | null) => { if (h) held.set(cardId, h); else held.delete(cardId); setPendingState(h); };
   const [pressedHere, setPressedHere] = useState(false);
   const [failures, setFailures] = useState(0); // looks in a row that did not answer: the card drawn may no longer be true
   const flows = useRef(new Set<Flow>()); // every press / check out from this card: the card going away stops them all
@@ -213,11 +218,11 @@ function ComputerCard({ computer, phoneKeyId, onChanged, frozen, held }: { compu
   const lookSeq = useRef(0);
   const look = useCallback(async () => {
     const mine = ++lookSeq.current; // only the latest look commits: an older answer arriving late must not overwrite a newer state (remote-off · failures · the view)
-    const r = await readClock(computer.setup_id, phoneKeyId);
+    const r = await readClock(computer.setup_id, phoneKeyId, undefined, { computer: markable });
     if (!alive.current || mine !== lookSeq.current) return;
     if (r.kind === 'not_allowed' || r.kind === 'not_paired') { setHidden(true); return; } // not this person's to command / not this phone's: the card is not drawn
     if (r.kind === 'read') { setHidden(false); setRead(r.read); setFailures(0); } else setFailures((n) => n + 1);
-  }, [computer.setup_id, phoneKeyId]);
+  }, [computer.setup_id, phoneKeyId, markable]);
 
   // the view is looked at again: quickly while a flow is open or a press is out, slowly otherwise
   useEffect(() => {
@@ -240,7 +245,9 @@ function ComputerCard({ computer, phoneKeyId, onChanged, frozen, held }: { compu
     flows.current.add(flow);
     const start = action === 'in';
     try {
-      const out = await pressClock({ setupId: computer.setup_id, action, ...(agentId ? { agentId } : {}) }, { phoneCall, flow, newKey });
+      // one agent: the setup THAT agent belongs to (the shell and the daemon find it by it); the whole computer: from the card's setup, with the computer mark — the server collects the setups the person may press one at a time
+      const own = agentId ? computer.agents.find((x) => x.agent_member_id === agentId)?.setup_id ?? computer.setup_id : computer.setup_id;
+      const out = await pressClock({ setupId: own, action, ...(agentId ? { agentId } : markable ? { computer: true as const } : {}) }, { phoneCall, flow, newKey });
       if (!alive.current) return;
       if (out.kind === 'unknown') setPending({ pending: out.pending, start }); else setPending(null);
       if (out.kind === 'done' || out.kind === 'unknown') setPressedHere(action === 'out_open' || action === 'in' ? true : pressedHere);
@@ -283,7 +290,7 @@ function ComputerCard({ computer, phoneKeyId, onChanged, frozen, held }: { compu
     flows.current.add(flow);
     let out: PressOutcome = { kind: 'failed' };
     try {
-      out = await editClock({ setupId: computer.setup_id, agentId, baseRev, fields }, { phoneCall, flow, newKey });
+      out = await editClock({ setupId: computer.agents.find((x) => x.agent_member_id === agentId)?.setup_id ?? computer.setup_id, agentId, baseRev, fields }, { phoneCall, flow, newKey });
       if (!alive.current) return out;
       setLine(lineOf(out, false, true));
     } finally {
@@ -335,7 +342,8 @@ function ComputerCard({ computer, phoneKeyId, onChanged, frozen, held }: { compu
     const a = computer.agents.find((x) => x.agent_member_id === id);
     return bareName(serverName ?? a?.name ?? '', device) || '—';
   };
-  const runningCount = computer.agents.filter((a) => a.running === true).length;
+  const mine = computer.agents.filter((a) => a.can_command); // (a computer's setups may differ in who may press them: only these have controls here)
+  const runningCount = mine.filter((a) => a.running === true).length;
   const names = (list: string[]): string => (list.length > NAMES_MAX ? t('action.namesMore', { names: list.slice(0, 3).join(' · '), k: list.length - 3 }) : list.join(' · '));
 
   const elsewhere = view && view.mode !== 'none' && !pressedHere && (view.openedFrom === 'mac' || view.openedFrom === 'phone') ? view.openedFrom : null;
@@ -356,7 +364,7 @@ function ComputerCard({ computer, phoneKeyId, onChanged, frozen, held }: { compu
       ) : view?.mode === 'out' && view.out ? (
         <OutCard view={view} t={t} time={time} names={names} busy={busy || locked} unreachable={!read.reachable} onStart={() => void run('in')} />
       ) : (
-        <Idle computer={computer} view={view} t={t} time={time} nameOf={nameOf} busy={busy || locked} unreachable={!read.reachable} runningCount={runningCount}
+        <Idle agents={mine} counts={markable ? read.computer : null} view={view} t={t} time={time} nameOf={nameOf} busy={busy || locked} unreachable={!read.reachable} runningCount={runningCount}
           onEndAll={() => void run('out_open')} onEndOne={(id) => void run('out_open', id)} onStartOne={(id) => void run('in', id)} />
       )}
 
@@ -374,8 +382,8 @@ function ComputerCard({ computer, phoneKeyId, onChanged, frozen, held }: { compu
   );
 }
 
-function Idle({ computer, view, t, time, nameOf, busy, unreachable, runningCount, onEndAll, onEndOne, onStartOne }: {
-  computer: StartableComputer; view: ClockView | null; t: T; time: (iso: string | null | undefined) => string; nameOf: (id: string, n: string | null) => string; busy: boolean; unreachable: boolean; runningCount: number;
+function Idle({ agents, counts, view, t, time, nameOf, busy, unreachable, runningCount, onEndAll, onEndOne, onStartOne }: {
+  agents: StartableComputer['agents']; counts: { total: number; pressable: number } | null; view: ClockView | null; t: T; time: (iso: string | null | undefined) => string; nameOf: (id: string, n: string | null) => string; busy: boolean; unreachable: boolean; runningCount: number;
   onEndAll: () => void; onEndOne: (id: string) => void; onStartOne: (id: string) => void;
 }) {
   const outs = view?.outs ?? [];
@@ -383,12 +391,16 @@ function Idle({ computer, view, t, time, nameOf, busy, unreachable, runningCount
   return (
     <div className="space-y-3">
       {runningCount > 0 ? (
-        <Button variant="outline" className="min-h-11" disabled={busy || unreachable} onClick={onEndAll} data-testid="phone-sessions-end-all">{t('endAll')}</Button>
+        <div className="space-y-1">
+          {/* story 4734 (B): the ONE button of the computer, and — before the person signs — what it reaches: «N개 중 K개» (the server's count of the setups this person may press one at a time) */}
+          {counts ? <p className="text-xs text-foreground" data-testid="phone-sessions-end-all-count">{counts.pressable > 0 ? t('endAllCount', { k: counts.pressable, n: counts.total }) : t('endAllNone')}</p> : null}
+          <Button variant="outline" className="min-h-11" disabled={busy || unreachable || (counts !== null && counts.pressable === 0)} onClick={onEndAll} data-testid="phone-sessions-end-all">{t('endAll')}</Button>
+        </div>
       ) : null}
       {/* a disabled button always has its reason as text — also the [세션 시작] of an agent that ended on its own */}
       {unreachable && (runningCount > 0 || outs.length > 0) ? <p className="text-xs text-muted-foreground" data-testid="phone-sessions-unreachable">{t('unreachable')}</p> : null}
       <ul className="space-y-2">
-        {computer.agents.map((a) => {
+        {agents.map((a) => {
           const own = endedOnOwn.get(a.agent_member_id);
           const name = nameOf(a.agent_member_id, null);
           if (a.running === true) {

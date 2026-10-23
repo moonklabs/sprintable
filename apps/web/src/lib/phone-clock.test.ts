@@ -40,6 +40,22 @@ const deps = (answer: PhoneAnswer, extra: Partial<PressDeps> = {}) =>
   ({ phoneCall: vi.fn(async () => answer), newKey: () => 'idem-1', wait: async () => {}, ...extra }) as PressDeps & { phoneCall: ReturnType<typeof vi.fn> };
 
 describe('[4733 S4b] pressClock — what the web asks and posts', () => {
+  it('[4734 B] the whole-computer press signs and posts the mark `computer: true` (no agent); the mark with an agent signs nothing; an older shell\'s refusal is `app_too_old` (nothing posted) — and only for the mark', async () => {
+    const calls = server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state: 'done', result_code: 'ok' })]);
+    const d = deps(signed);
+    await expect(pressClock({ ...WHOLE, computer: true }, d)).resolves.toEqual({ kind: 'done', result: 'ok' });
+    expect(d.phoneCall).toHaveBeenCalledWith('command.sign', { kind: 'clock', setup_id: SETUP, action: 'out_open', computer: true });
+    expect(JSON.parse(calls[0]!.init!.body as string)).toEqual({ action: 'out_open', signed: 'SIGNED', phone_key_id: KEY, computer: true, idempotency_key: 'idem-1' });
+    const d2 = deps(signed);
+    await expect(pressClock({ ...WHOLE, agentId: AGENT, computer: true }, d2)).resolves.toEqual({ kind: 'failed' });
+    expect(d2.phoneCall).not.toHaveBeenCalled();
+    const old = server(json(201, {}), []);
+    const d3 = deps({ id: 's', ok: false, code: 'bad_request' } as PhoneAnswer);
+    await expect(pressClock({ ...WHOLE, computer: true }, d3)).resolves.toEqual({ kind: 'app_too_old' });
+    await expect(pressClock(WHOLE, deps({ id: 's', ok: false, code: 'bad_request' } as PhoneAnswer))).resolves.toEqual({ kind: 'failed' }); // (an unmarked press keeps its old word)
+    expect(old).toHaveLength(0);
+  });
+
   it('the shell gets the kind, the computer, the action (and the agent for one agent) — nothing else; the post carries the action + the shell\'s two values + the key', async () => {
     const calls = server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state: 'done', result_code: 'ok' })]);
     const d = deps(signed);
@@ -211,8 +227,18 @@ describe('[4733 S4b] readClock · parseClockRead', () => {
 
   it('asks for exactly the computer\'s clock with this phone key id', async () => {
     const calls = serverGet(() => json(200, READ));
-    await expect(readClock(SETUP, KEY)).resolves.toEqual({ kind: 'read', read: { remoteControl: true, reachable: true, supported: true, view: null } });
+    await expect(readClock(SETUP, KEY)).resolves.toEqual({ kind: 'read', read: { remoteControl: true, reachable: true, supported: true, view: null, computer: null } });
     expect(calls[0]!.url).toBe(`/api/desktop/setups/${SETUP}/clock?phone_key_id=${KEY}`);
+  });
+
+  it('[4734 B] asked with `computer`, the read carries `&computer=true` and keeps the server\'s counts (only plain numbers, pressable never above total)', async () => {
+    const calls = serverGet(() => json(200, { ...READ, computer: { agents: { total: 3, pressable: 2 } } }));
+    await expect(readClock(SETUP, KEY, undefined, { computer: true })).resolves.toMatchObject({ kind: 'read', read: { computer: { total: 3, pressable: 2 } } });
+    expect(calls[0]!.url).toBe(`/api/desktop/setups/${SETUP}/clock?phone_key_id=${KEY}&computer=true`);
+    for (const bad of [{ agents: { total: 2, pressable: 3 } }, { agents: { total: -1, pressable: 0 } }, { agents: { total: '3', pressable: 2 } }, { agents: null }, 'x', null]) {
+      expect(parseClockRead({ ...READ, computer: bad })!.computer).toBeNull();
+    }
+    expect(parseClockRead(READ)!.computer).toBeNull(); // an older server: none
   });
 
   it('403 → not_allowed (the card is not drawn) · 409 phone_not_paired → not_paired · anything else → failed', async () => {

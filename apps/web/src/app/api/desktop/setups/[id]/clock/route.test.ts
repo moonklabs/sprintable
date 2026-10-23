@@ -29,8 +29,19 @@ describe('POST /api/desktop/setups/[id]/clock', () => {
     expect(path).toBe(`/api/v2/desktop/setups/${SETUP}/clock`);
     expect(req.method).toBe('POST');
     expect(await req.json()).toEqual(GOOD);
-    expect([...DESKTOP_CLOCK_KEYS].sort()).toEqual(['action', 'agent_member_id', 'edit', 'idempotency_key', 'phone_key_id', 'signed']);
+    expect([...DESKTOP_CLOCK_KEYS].sort()).toEqual(['action', 'agent_member_id', 'computer', 'edit', 'idempotency_key', 'phone_key_id', 'signed']);
     expect([...DESKTOP_CLOCK_ACTIONS]).toEqual(['out_open', 'out_submit', 'out_cancel', 'in', 'out_edit']);
+  });
+
+  it('[4734 B] the whole-computer mark goes on only as the boolean true, never beside an agent; anything else is a 422 and nothing is proxied', async () => {
+    await POST(post({ ...GOOD, computer: true }), params(SETUP));
+    const [req] = proxy.mock.calls[0] as [Request];
+    expect(await req.json()).toEqual({ ...GOOD, computer: true });
+    proxy.mockClear();
+    for (const bad of [{ computer: false }, { computer: 'true' }, { computer: 1 }, { computer: null }, { computer: true, agent_member_id: 'a-1' }]) {
+      expect((await POST(post({ ...GOOD, ...bad }), params(SETUP))).status).toBe(422);
+    }
+    expect(proxy).not.toHaveBeenCalled();
   });
 
   it('an edit (S5 · P2) carries the four keys of `edit` and nothing else in it; a caller\'s extra key inside the edit is dropped, and an edit that is not an object is a 422', async () => {
@@ -76,6 +87,14 @@ describe('GET /api/desktop/setups/[id]/clock', () => {
     expect(path).toBe(`/api/v2/desktop/setups/${SETUP}/clock`);
     expect(req.method).toBe('GET');
     expect(new URL(req.url).search).toBe(`?phone_key_id=${KEY}`);
+  });
+
+  it('[4734 B] a read may carry `computer=true` (and only that word, only that value) — «N개 중 K개» before the phone signs', async () => {
+    await GET(new Request(url(`?phone_key_id=${KEY}&computer=true&path=/x`)), params(SETUP));
+    expect(new URL((proxy.mock.calls[0] as [Request])[0].url).search).toBe(`?phone_key_id=${KEY}&computer=true`);
+    proxy.mockClear();
+    await GET(new Request(url(`?phone_key_id=${KEY}&computer=1`)), params(SETUP));
+    expect(new URL((proxy.mock.calls[0] as [Request])[0].url).search).toBe(`?phone_key_id=${KEY}`);
   });
 
   it('a key id that is missing or not a UUID is a 422; a non-UUID computer a 404; nothing is proxied', async () => {

@@ -977,3 +977,149 @@ describe('[4733 S5·P2] filling in and fixing on the phone', () => {
     expect(byId('phone-sessions-line')?.textContent).toBe(enMessages.desktop.phoneSessions.result.stale);
   });
 });
+
+describe('[4734 B] one card per computer — one [End all sessions], « N of K » before the signature', () => {
+  const COMP = 'cccccccc-1111-4222-8333-444444444444';
+  const SETUP2 = '11111111-2222-4333-8444-999999999999';
+  const two = (over: { a2can?: boolean; reachable1?: boolean; withComputerId?: boolean } = {}) => ({
+    remote_control: true,
+    computers: [
+      { setup_id: SETUP, ...(over.withComputerId === false ? {} : { computer_id: COMP }), device_name: '윤재의 맥북', reachable: over.reachable1 !== false, agents: [{ agent_member_id: AGENT, name: '결제 담당 · 윤재의 맥북', can_command: true, projects: [], running: true }] },
+      { setup_id: SETUP2, ...(over.withComputerId === false ? {} : { computer_id: COMP }), device_name: '윤재의 맥북', reachable: true, agents: [{ agent_member_id: AGENT2, name: '문서 담당 · 윤재의 맥북', can_command: over.a2can !== false, projects: [], running: true }] },
+    ],
+  });
+  const counts = (total: number, pressable: number) => ({ remote_control: true, reachable: true, supported: true, view: null, computer: { agents: { total, pressable } } });
+  const signs = () => phoneCall.mock.calls.filter((c) => c[0] === 'command.sign').map((c) => c[1] as Record<string, unknown>);
+
+  it('two setups of one computer are ONE card with ONE [모든 세션 종료] — and both agents have a row on it', async () => {
+    world.startable = two();
+    world.clock = counts(2, 2);
+    await screen();
+    expect(all('phone-session-card')).toHaveLength(1);
+    expect(all('phone-sessions-end-all')).toHaveLength(1);
+    expect(all('phone-sessions-agent')).toHaveLength(2);
+    expect(byId('phone-session-card')?.textContent).toContain('결제 담당');
+    expect(byId('phone-session-card')?.textContent).toContain('문서 담당');
+  });
+
+  it('before the person signs the card says «N개 중 K개» (counts from the server); K = 0 disables the button and says why', async () => {
+    world.startable = two();
+    world.clock = counts(3, 2);
+    await screen();
+    expect(byId('phone-sessions-end-all-count')?.textContent).toBe('3개 중 2개의 에이전트를 끝내요');
+    expect(signs()).toHaveLength(0);
+    world.clock = counts(3, 0);
+    await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+    await flush();
+    expect(byId('phone-sessions-end-all-count')?.textContent).toBe(koMessages.desktop.phoneSessions.endAllNone);
+    expect((byId('phone-sessions-end-all') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('…the same in English', async () => {
+    world.startable = two();
+    world.clock = counts(3, 2);
+    await screen({ locale: 'en' });
+    expect(byId('phone-sessions-end-all-count')?.textContent).toBe('Ends 2 of 3 agents');
+  });
+
+  it('[모든 세션 종료] signs ONE press of the computer — the computer mark, no agent — from the card\'s setup, and posts the same (the read asked for the counts)', async () => {
+    world.startable = two();
+    world.clock = counts(2, 2);
+    await screen();
+    expect(calls.some((c) => c.url.includes(`/api/desktop/setups/${SETUP}/clock?phone_key_id=${KEYID}&computer=true`))).toBe(true);
+    await press(byId('phone-sessions-end-all'));
+    expect(signs()).toEqual([{ kind: 'clock', setup_id: SETUP, action: 'out_open', computer: true }]);
+    expect(posts()).toHaveLength(1);
+    expect(posts()[0]!.url).toContain(`/api/desktop/setups/${SETUP}/clock`);
+    expect(posts()[0]!.body).toMatchObject({ action: 'out_open', computer: true, signed: 'SIGNED', phone_key_id: KEYID });
+    expect(posts()[0]!.body).not.toHaveProperty('agent_member_id');
+  });
+
+  it('one agent\'s [세션 종료] names the setup THAT agent belongs to (the second setup\'s agent → the second setup), with no mark', async () => {
+    world.startable = two();
+    world.clock = counts(2, 2);
+    await screen();
+    const buttons = all('phone-sessions-agent').map((li) => li.querySelector('button')!);
+    await press(buttons[1]!);
+    expect(signs()).toEqual([{ kind: 'clock', setup_id: SETUP2, action: 'out_open', agent_member_id: AGENT2 }]);
+    expect(posts()[0]!.url).toContain(`/api/desktop/setups/${SETUP2}/clock`);
+    expect(posts()[0]!.body).not.toHaveProperty('computer');
+  });
+
+  it('the panel\'s [그대로 인계…] and [취소] and the card after\'s [모든 세션 시작] are presses of the computer too (marked), from the card\'s setup', async () => {
+    world.startable = two();
+    world.view = panel([row({ agent_member_id: AGENT }), row({ agent_member_id: AGENT2, name: '문서 담당' })], { ready: 2, needs_you: 0, drafting: 0 });
+    world.clock = { remote_control: true, reachable: true, supported: true, view: world.view, computer: { agents: { total: 2, pressable: 2 } } };
+    await screen();
+    await press(byId('phone-sessions-submit'));
+    await press(byId('phone-sessions-cancel'));
+    expect(signs().map((a) => [a.action, a.setup_id, a.computer, 'agent_member_id' in a])).toEqual([['out_submit', SETUP, true, false], ['out_cancel', SETUP, true, false]]);
+  });
+
+  it('an agent this person may not command has no control on the card (the setups of a computer may differ in who can press them)', async () => {
+    world.startable = two({ a2can: false });
+    world.clock = counts(2, 1);
+    await screen();
+    expect(all('phone-sessions-agent')).toHaveLength(1);
+    expect(byId('phone-session-card')?.textContent).not.toContain('문서 담당');
+  });
+
+  it('one setup\'s flow does not show on another setup\'s agent as «끝남»: the closed view is the card\'s setup\'s, and only the agent it lists as ended on its own gets [세션 시작] + the ended line', async () => {
+    const s = two();
+    for (const c of s.computers) for (const a of c.agents) a.running = false;
+    world.startable = s;
+    world.view = { mode: 'none', scope: null, opened_from: null, count: null, rows: [], outs: [{ agent_member_id: AGENT, name: '결제 담당', at: '2026-10-20T01:00:00Z' }], reported_at: '2026-10-20T01:00:00Z' };
+    world.clock = { remote_control: true, reachable: true, supported: true, view: world.view, computer: { agents: { total: 2, pressable: 2 } } };
+    await screen();
+    expect(all('phone-sessions-agent-ended')).toHaveLength(1);
+    expect(byId('phone-sessions-agent-ended')?.textContent).toContain('결제 담당');
+    expect(byId('phone-session-card')?.textContent).not.toContain('문서 담당');
+    expect(byId('phone-sessions-end-all')).toBeNull(); // nothing runs: no [모든 세션 종료] to press by mistake
+  });
+
+  it('an older phone-app shell (it does not know the computer mark) refuses the call: «앱을 새로 받아 주세요» — nothing is posted, and the one-agent press is untouched', async () => {
+    world.startable = two();
+    world.clock = counts(2, 2);
+    signAnswer = { id: 's', ok: false, code: 'bad_request' };
+    await screen();
+    await press(byId('phone-sessions-end-all'));
+    expect(byId('phone-sessions-line')?.textContent).toBe(koMessages.desktop.phoneSessions.result.appTooOld);
+    expect(posts()).toHaveLength(0);
+  });
+
+  it('a server that names no computer (an older one): each entry is its own card, a press is the one-setup press it was — no mark, and the read asks no counts', async () => {
+    world.startable = two({ withComputerId: false });
+    await screen();
+    expect(all('phone-session-card')).toHaveLength(2);
+    expect(calls.some((c) => c.url.includes('computer=true'))).toBe(false);
+    await press(all('phone-sessions-end-all')[0]!);
+    expect(signs()[0]).not.toHaveProperty('computer');
+  });
+
+  it('filling in a row of the SECOND setup\'s agent signs the edit on THAT setup (the agent\'s own), not the card\'s', async () => {
+    world.startable = two();
+    world.view = panel([needsPlan(4, { agent_member_id: AGENT2, name: '문서 담당' })], { ready: 0, needs_you: 1, drafting: 0 });
+    world.clock = { remote_control: true, reachable: true, supported: true, view: world.view, computer: { agents: { total: 2, pressable: 2 } } };
+    signAnswer = { id: 's', ok: true, signed: 'SIGNED', phone_key_id: KEYID, edit: { base_rev: 4, plan: '내일 이어서 함' } };
+    await screen();
+    await press(byId('phone-sessions-edit-open'));
+    await typeInto(byId('phone-sessions-edit-plan'), '내일 이어서 함');
+    await press(byId('phone-sessions-edit-save'));
+    expect(signs().map((a) => [a.action, a.setup_id, a.agent_member_id])).toEqual([['out_edit', SETUP2, AGENT2]]);
+    expect(editPosts()[0]!.url).toContain(`/api/desktop/setups/${SETUP2}/clock`);
+  });
+
+  it('the card stays one card when the setup named for it changes between two reads (the first one drops off) — what is held by an unknown end is held by the COMPUTER', async () => {
+    world.startable = two();
+    world.clock = counts(2, 2);
+    await screen();
+    world.post = json({ error: { code: 'x' } }, 503);
+    await press(byId('phone-sessions-end-all'));
+    expect(byId('phone-sessions-check')).not.toBeNull(); // an unknown end → [결과 확인]
+    world.startable = two({ reachable1: false }); // the representative setup is now the second one
+    await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+    await flush();
+    expect(all('phone-session-card')).toHaveLength(1);
+    expect(byId('phone-sessions-check')).not.toBeNull();
+  });
+});
