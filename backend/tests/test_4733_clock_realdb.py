@@ -1376,17 +1376,23 @@ async def test_43_the_sweep_picks_its_batch_once_whatever_plan_the_database_choo
         params = {"cutoff": dc._now() - dc.EDIT_TEXT_TTL, "batch": 2}
         eng = create_async_engine(_ASYNC, poolclass=NullPool)
         try:
-            async with eng.connect() as conn:
-                plan = "\n".join(r[0] for r in await conn.execute(text("EXPLAIN " + str(dc._SCRUB_EDIT_ALL_SQL)), params))
-                assert "InitPlan" in plan, plan
-                await conn.rollback()
-            for settings in ([], ["enable_hashjoin = off", "enable_mergejoin = off", "enable_material = off", "enable_indexscan = off", "enable_bitmapscan = off"],
-                             ["enable_seqscan = off", "enable_hashagg = off", "enable_sort = off"]):
+            async def plan_of(conn) -> str:
+                return "\n".join(r[0] for r in await conn.execute(text("EXPLAIN " + str(dc._SCRUB_EDIT_ALL_SQL)), params))
+
+            pushes = ([], ["enable_hashjoin = off", "enable_mergejoin = off", "enable_material = off", "enable_indexscan = off", "enable_bitmapscan = off"],
+                      ["enable_seqscan = off", "enable_hashagg = off", "enable_sort = off"])
+            for settings in pushes:
                 async with eng.connect() as conn:
                     for s in settings:
                         await conn.execute(text(f"SET LOCAL {s}"))
+                    assert "InitPlan" in await plan_of(conn), settings                       # the batch is chosen once, under these settings too
                     res = await conn.execute(dc._SCRUB_EDIT_ALL_SQL, params)
-                    assert res.rowcount <= 2, (settings, res.rowcount)
+                    assert res.rowcount == 2, (settings, res.rowcount)                        # exactly the batch (8 stale rows, none held): not fewer, not more
                     await conn.rollback()
+            async with eng.begin() as conn:                                                  # …and once for real: exactly two of the eight lose their words, the lowest ids
+                res = await conn.execute(dc._SCRUB_EDIT_ALL_SQL, params)
+                assert res.rowcount == 2
+            edits = [(await _sql(fetch=f"SELECT payload->'edit' FROM desktop_commands WHERE id = '{i}'"))[0][0] for i in sorted(ids)]
+            assert [e == {"base_rev": 1} for e in edits] == [True, True] + [False] * 6, edits
         finally:
             await eng.dispose()
