@@ -119,6 +119,76 @@ async def resolve_accounts(
     return AccountResolveResponse(accounts=list(by_sub.values()))
 
 
+async def _plan_organizations(session: AsyncSession, uid: uuid.UUID, *, lock: bool) -> tuple[list[dict], list[dict]]:
+    """story #4752 AC4: «other people» are exactly the people the members screen shows: the live `org_members` rows of the organization (`GET /api/v2/org-members` — `deleted_at IS NULL`,
+    whatever the state of their own account; routers/org_members.py `list_org_members`, the screen the 409 sends the person to). A human who exists only as a `members` row (no live seat) is
+    not on that screen, so they are not counted (nobody to hand over to; closing deletes nothing a person can see); an account that is deactivated but still seated IS on it, so it counts
+    (closing would delete someone's visible data). Agents are `members` rows, not seats: not counted.
+    The organizations that CLOSE with the person's account (nobody else active in them) and the ones that BLOCK the deletion — `reason`
+    `other_members` (the person is the only active owner and others are in it: hand it over) or `active_subscription` (a closing organization with a paid/in-flight subscription:
+    cancel it first). `lock` locks the organization rows in id order (the deletion); the preview does not."""
+    from app.repositories.organization import OrganizationRepository
+
+    if lock:
+        # The LOCK is a statement of its own and the COUNT a later one: under READ COMMITTED a statement that waits for a row lock still reads its other tables (org_members) as of the
+        # statement's start, so counting in the same statement would not see an owner who left while this one waited (two co-owners deleting at once both got through and the
+        # organization kept no owner — Kadir on 5189, pinned by test_20/21). Rows in id order, so two of these cannot deadlock.
+        await session.execute(
+            text(
+                "SELECT o.id FROM organizations o WHERE o.id IN ("
+                " SELECT om.org_id FROM org_members om WHERE om.user_id = CAST(:uid AS uuid) AND om.deleted_at IS NULL)"
+                " ORDER BY o.id FOR UPDATE OF o"
+            ),
+            {"uid": str(uid)},
+        )
+    rows = (await session.execute(
+        text(
+            "SELECT o.id, o.name, om.role,"
+            " (SELECT count(*) FROM org_members x"
+            "   WHERE x.org_id = o.id AND x.deleted_at IS NULL AND x.user_id <> CAST(:uid AS uuid)) AS other_members,"
+            " (SELECT count(*) FROM org_members x"
+            "   WHERE x.org_id = o.id AND x.deleted_at IS NULL AND x.role = 'owner' AND x.user_id <> CAST(:uid AS uuid)) AS other_owners"
+            " FROM organizations o JOIN org_members om ON om.org_id = o.id"
+            " WHERE om.user_id = CAST(:uid AS uuid) AND om.deleted_at IS NULL"
+            " ORDER BY o.id"
+        ),
+        {"uid": str(uid)},
+    )).all()
+    repo = OrganizationRepository(session)
+    closing: list[dict] = []
+    blocked: list[dict] = []
+    for row in rows:
+        entry = {"id": str(row.id), "name": row.name}
+        if row.other_members == 0:
+            if await repo._has_active_or_in_flight_subscription(row.id):
+                blocked.append({**entry, "reason": "active_subscription"})
+            else:
+                closing.append(entry)
+        elif row.role == "owner" and row.other_owners == 0:
+            blocked.append({**entry, "reason": "other_members"})
+    return closing, blocked
+
+
+@router.get("/delete-preview")
+async def delete_account_preview(
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> dict:
+    """story #4752 AC4: what the account deletion would do to the person's organizations — `closing` (they close with the account) and `blocked` (the deletion is refused until each is
+    dealt with; `reason` as in the 409 of the deletion). Read only; the confirmation window shows it before «삭제 확인»."""
+    if (auth.claims.get("app_metadata") or {}).get("human_api_key_id"):
+        raise HTTPException(status_code=403, detail="An API key cannot delete the account")
+    try:
+        uid = uuid.UUID(str(auth.user_id))
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Account not found") from None
+    user = (await session.execute(select(User).where(User.id == uid))).scalar_one_or_none()
+    if user is None or not user.is_active or user.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    closing, blocked = await _plan_organizations(session, uid, lock=False)
+    return {"closing": closing, "blocked": blocked}
+
+
 @router.post("/delete", response_model=AccountDeleteResponse)
 async def delete_account(
     session: AsyncSession = Depends(get_db),
@@ -144,6 +214,35 @@ async def delete_account(
     user = (await session.execute(select(User).where(User.id == uid).with_for_update())).scalar_one_or_none()
     if user is None or not user.is_active or user.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Account not found")  # another person's id, an agent key's member, or an account already deleted: the same answer
+
+    # story #4752 AC4 (PO rule, revised 5779): what happens to the organizations of the person —
+    #   · nobody else is active in it → it CLOSES with the account (the owner's organization delete, whatever the person's role); an active/in-flight subscription stops it;
+    #   · other people are in it and the person is its only active owner → the account cannot be deleted until ownership is handed over (or the organization is dealt with);
+    #   · another owner stays, or the person is not an owner of a populated organization → nothing to do.
+    # Without this the organization would stay with no owner / as an empty shell / with a subscription nobody can cancel. The organization rows are locked in id order so two
+    # co-owners deleting at once cannot both pass (the second then finds itself the only owner left).
+    closing, blocked = await _plan_organizations(session, uid, lock=True)
+    if blocked:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "ORG_BLOCKS_ACCOUNT_DELETE",
+                "message": "An organization of the account needs attention first: hand it to another owner, or cancel its subscription",
+                "orgs": blocked,
+            },
+        )
+    from app.repositories.organization import OrganizationRepository
+
+    repo = OrganizationRepository(session)
+    for org in closing:
+        closed = await repo.delete_for_account_closure(uuid.UUID(org["id"]), uid)
+        if not closed["ok"] and closed.get("reason") != "not_found":
+            await session.rollback()   # a subscription began between the check and the closing: nothing of this deletion is kept
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "ORG_BLOCKS_ACCOUNT_DELETE", "message": "An organization of the account needs attention first: hand it to another owner, or cancel its subscription",
+                        "orgs": [{"id": org["id"], "name": org["name"], "reason": "other_members" if closed.get("reason") == "members_joined" else "active_subscription"}]},
+            )
 
     now = datetime.now(timezone.utc)
     await session.execute(

@@ -37,6 +37,7 @@ import { canSubmitOrgDelete } from './org-delete-gate';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { DeleteAccountDialog } from '@/components/settings/delete-account-dialog';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { LegalLinks, BusinessInfoBlock } from '@/components/legal/legal-footer';
@@ -204,7 +205,6 @@ export default function SettingsPage() {
   const [savingPreferenceLevel, setSavingPreferenceLevel] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const [webhooks, setWebhooks] = useState<WebhookConfig[]>([]);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [createdProjectMembership, setCreatedProjectMembership] = useState<{ projectId: string; projectName: string } | null>(null);
@@ -1595,40 +1595,7 @@ export default function SettingsPage() {
         </Dialog>
       ) : null}
 
-      {showDeleteConfirm ? (
-        <Dialog open={showDeleteConfirm} onOpenChange={(open) => { if (!open && !deleting) setShowDeleteConfirm(false); }}>
-          <DialogContent className="max-w-sm" showCloseButton={false}>
-            <DialogTitle className="text-lg font-semibold text-destructive">{t('deleteConfirmTitle')}</DialogTitle>
-            <p className="mt-2 text-sm text-muted-foreground">{t('deleteConfirmDesc')}</p>
-            <div className="mt-6 flex gap-3">
-              <Button variant="glass" className="flex-1" onClick={() => setShowDeleteConfirm(false)}>
-                {tc('cancel')}
-              </Button>
-              <Button
-                variant="destructive"
-                className="flex-1"
-                onClick={async () => {
-                  setDeleting(true);
-                  const res = await fetch('/api/account/delete', { method: 'POST' });
-                  if (res.ok) {
-                    router.push('/login');
-                  } else {
-                    const json = await res.json().catch(() => null);
-                    if (json?.error?.code === 'REAUTHENTICATION_REQUIRED') {
-                      alert(t('reauthRequired'));
-                    }
-                    setDeleting(false);
-                    setShowDeleteConfirm(false);
-                  }
-                }}
-                disabled={deleting}
-              >
-                {deleting ? '...' : t('confirmDelete')}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      ) : null}
+      {showDeleteConfirm ? <DeleteAccountDialog onClose={() => setShowDeleteConfirm(false)} onDeleted={() => router.push('/login')} /> : null}
 
       {deleteProjectConfirmId ? (
         <Dialog

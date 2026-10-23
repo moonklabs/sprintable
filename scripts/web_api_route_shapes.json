@@ -25,6 +25,11 @@
 "kind": "object"
 },
 {
+"method": "GET",
+"path": "/api/v2/account/delete-preview",
+"kind": "unknown"
+},
+{
 "method": "POST",
 "path": "/api/v2/accounts/resolve",
 "kind": "object"

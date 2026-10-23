@@ -35,7 +35,7 @@ async def select_active_devices(
     if settings.push_devices_by_user:
         people = (
             select(OrgMember.user_id)
-            .where(OrgMember.org_id == org_id, OrgMember.id.in_(member_ids), OrgMember.deleted_at.is_(None))
+            .where(OrgMember.org_id == org_id, OrgMember.id.in_(member_ids), OrgMember.deleted_at.is_(None), OrgMember.id.not_in(closed))   # (the same «closed» as the by-member branch — story #4752)
             .scalar_subquery()
         )
         who = or_(PushDevice.user_id.in_(people), and_(PushDevice.user_id.is_(None), by_org_member))
