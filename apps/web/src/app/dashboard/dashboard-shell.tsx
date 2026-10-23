@@ -36,6 +36,7 @@ import { RefreshProvider } from '@/contexts/refresh-context';
 import { TeamPresenceToggleProvider } from '@/components/presence/team-presence-toggle';
 import { ActivationChecklistBanner } from '@/components/dashboard/activation-checklist-banner';
 import { OrgHintBanner } from '@/components/nav/org-hint-banner';
+import { ReclaimNoticeAlert } from '@/components/auth/reclaim-notice';
 import type { OrgSwitcherItem } from '@/components/nav/unified-switcher';
 import { withProjectParam } from '@/lib/with-project-param';
 import { usePendingProjectTarget } from '@/lib/pending-project-switch';
@@ -246,7 +247,7 @@ function ScrollShell({
   const panel = useContextualPanelState({ storageKey: 'team-presence', defaultOpen: true });
   // R2(da9d1781): presence SSE event-driven(3s 폴 제거). member_id 로 event-stream 구독.
   const { currentTeamMemberId, userName } = useDashboardContext();
-  const items = useTeamPresence(true, currentTeamMemberId);
+  const items = useTeamPresence(true);
   const workingCount = items.filter((i) => i.working).length;
   // story #2852(2836 FE 조각) — presence 패널은 전역 상시 마운트라 「인증 실패」 뱃지 원자료도
   // 여기서 함께 폴한다(org-briefing 진입과 무관하게 늘 최신).
@@ -275,6 +276,10 @@ function ScrollShell({
         {/* story #4397 — a notification of another of the person's orgs: offer the switch (never automatic). */}
         <div className="px-3 pt-3 empty:hidden">
           <OrgHintBanner />
+        </div>
+        {/* story 4725 decision 2 — once: what was cut when this account's mailbox was proved (the server holds the mark; it is gone after [닫기]) */}
+        <div className="px-3 pt-3 empty:hidden">
+          <ReclaimNoticeAlert />
         </div>
         {/* story #4130(PO 라이브 실측, 2026-09-21 23:23~23:31Z) — 이 아래 `min-h-0`를 뺐다.
             바깥 스크롤러(위 :199 `overflow-y-auto`) 「안」에서 다시 `min-h-0`+`flex-1`을 쓰면

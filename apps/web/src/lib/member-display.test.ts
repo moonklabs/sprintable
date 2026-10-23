@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { actorRowLabels, disambiguateFallbackLabels, splitRowLabel, memberDisplayLabel, memberLookup, memberNameById, memberOptionLabels, memberOrAgentLabel, memberRowLabels, participantDisplayLabel, publishHistorySenderLabel } from './member-display';
 
 function t(key: string): string {
-  const table: Record<string, string> = { memberUnnamed: '이름 없는 구성원', memberUnknown: '알 수 없는 구성원', agentUnnamed: '이름 없는 에이전트' };
+  const table: Record<string, string> = { memberUnnamed: '이름 없는 구성원', memberDeparted: '탈퇴한 사용자', memberUnknown: '알 수 없는 구성원', agentUnnamed: '이름 없는 에이전트' };
   return table[key] ?? key;
 }
 
@@ -69,6 +69,15 @@ describe('participantDisplayLabel — story #3758', () => {
 
   // ⭐되돌리면 RED — resolved=true인데 name이 null(실존 구성원, 표시명만 없음)이면
   // 「이름 없는 구성원」이어야 한다(orphan과 다른 문구 — 같은 사실이 아니므로).
+  // story #4752 ⭐되돌리면 RED — the server keeps no «탈퇴한 사용자» text (story #3779): an anonymized member arrives as name null + `departed: true`, and the screen words it in its own locale.
+  // It is a real member (resolved), so it is neither «알 수 없는 구성원» nor «이름 없는 구성원».
+  it('⭐departed=true → 「탈퇴한 사용자」(이름 null · resolved true 여도 «이름 없는 구성원»이 아님)', () => {
+    expect(participantDisplayLabel({ name: null, resolved: true, departed: true }, t)).toBe('탈퇴한 사용자');
+    expect(participantDisplayLabel({ name: null, departed: true }, t)).toBe('탈퇴한 사용자');
+    expect(participantDisplayLabel({ name: null, resolved: true, departed: false }, t)).toBe('이름 없는 구성원');
+    expect(participantDisplayLabel({ name: null, resolved: true }, t)).toBe('이름 없는 구성원');   // a payload from before the marker existed
+  });
+
   it('⭐resolved=true인데 name이 null이면 「이름 없는 구성원」(orphan과 다른 문구)', () => {
     expect(participantDisplayLabel({ name: null, resolved: true }, t)).toBe('이름 없는 구성원');
   });

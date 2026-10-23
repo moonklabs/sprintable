@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from dataclasses import dataclass, field
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -152,6 +152,8 @@ class OrgInviteRepository:
                 OrgInvite.organization_id == org_id,
                 OrgInvite.status == "pending",
             )
+            # story #4729 — locked like accept / cancel: an invite cancelled or accepted a moment ago is not «pending» any more and is not re-sent
+            .with_for_update()
         )
         invite = result.scalar_one_or_none()
         if invite is None:
@@ -238,7 +240,11 @@ class OrgInviteRepository:
 
         await lock_first_org_path(self.session, user_id)
         result = await self.session.execute(
-            select(OrgInvite).where(OrgInvite.token == token)
+            # story #4729 — the invite row is locked until the caller commits: a cancel that runs at the same time waits here and then sees the
+            # accepted invite (and leaves it alone); a cancel that committed first is read as «revoked» and the accept is refused.
+            # populate_existing: the sign-in fallback has already loaded this invite as «pending» in the same session — the locked read must
+            # overwrite that copy with what is committed now, or a cancel that committed in between is accepted over.
+            select(OrgInvite).where(OrgInvite.token == token).with_for_update().execution_options(populate_existing=True)
         )
         invite = result.scalar_one_or_none()
         if invite is None:
@@ -402,16 +408,20 @@ class OrgInviteRepository:
         await self.session.flush()
 
     async def revoke(self, invite_id: uuid.UUID, org_id: uuid.UUID) -> OrgInvite | None:
+        """Cancel an invite. Only a `pending` invite becomes `revoked` (story #4729): an invite that was accepted in the meantime keeps its status and the
+        caller reads it from the returned row (`status == "accepted"`); a conditional UPDATE, so it cannot overwrite a concurrent accept's state."""
+        await self.session.execute(
+            update(OrgInvite)
+            .where(OrgInvite.id == invite_id, OrgInvite.organization_id == org_id, OrgInvite.status == "pending")
+            .values(status="revoked")
+        )
         result = await self.session.execute(
             select(OrgInvite).where(
                 OrgInvite.id == invite_id,
                 OrgInvite.organization_id == org_id,
-            )
+            ).execution_options(populate_existing=True)
         )
         invite = result.scalar_one_or_none()
         if invite is None:
             return None
-        invite.status = "revoked"
-        await self.session.flush()
-        await self.session.refresh(invite)
         return invite

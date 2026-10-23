@@ -17,7 +17,8 @@
     "story #3748(잔여②, 페드루 PO 確定 2026-09-09) — org-briefing-shell.tsx:65 안내 배너는 손코딩 카드가 아니라 Card도 아닌 안내 패널이었다(판정: 집안 Alert role=\"status\"로 이관, default variant 값이 이 리터럴과 동일). 이관 뒤 이 키 소멸 — 새 부품·새 키 0. 268키 → 267키.",
     "story #4309(2026-09-25) — doc-content-renderer.tsx 페이지 임베드 카드(링크 카드 · 공개 보기 비활성 카드) 2건을 cardVariants(surface subtle · radius compact)로 이관해 여기서 뺐다. 263키 → 261키.",
     "story #4316(2026-09-25) — 유나 결정 · doc-content-renderer.tsx 일반 embedBlock 링크 카드에 글자색 토큰 `text-brand-text` 추가 · 같은 카드(키 문자열만 바꿔 치기 · 1 빼고 1 넣음 · 개수 무변) · PO 승인.",
-    "story #4349(2026-09-26) — scale-ladder.tsx 안내 팝오버 두 갈래(compact · 전체판)를 부모 overflow 밖 body로 포털(AnchoredPopover)하며 `absolute left-* top-full z-20 mt-2`를 걷고 `z-50`만 남겼다. 같은 두 자리 · 면 무변 — 두 키가 같은 문자열 한 키로 합쳐져 2 빼고 1 넣음(261 → 260) · PO 승인 대기."
+    "story #4349(2026-09-26) — scale-ladder.tsx 안내 팝오버 두 갈래(compact · 전체판)를 부모 overflow 밖 body로 포털(AnchoredPopover)하며 `absolute left-* top-full z-20 mt-2`를 걷고 `z-50`만 남겼다. 같은 두 자리 · 면 무변 — 두 키가 같은 문자열 한 키로 합쳐져 2 빼고 1 넣음(261 → 260) · PO 승인 대기.",
+    "story 4707(2026-10-16) — 문서 표 규칙 한 줄([&_table]… 표 감싸개 표면)이 doc-content-renderer.tsx에서 docs/doc-table.tsx(챗 미리보기와 «표 정의 하나»)로 옮겨 가 키의 파일 경로만 바꿨다 · 1 빼고 1 넣음 · 개수 무변 · 새 카드 아님(표 표면) — PO 승인 요청(PR 본문). 챗 미리보기 카드는 cardVariants()로 그려 baseline에 안 들어온다."
   ],
   "keys": [
     "app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx::mx-2 mt-1.5 space-y-1.5 rounded-lg border border-border bg-card p-2",
@@ -125,7 +126,7 @@
     "components/dashboard/activation-checklist-banner.tsx::flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-muted/50 px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted",
     "components/docs/doc-assignee-control.tsx::absolute right-0 top-full z-50 mt-1 w-72 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-2 shadow-[var(--elev-overlay)]",
     "components/docs/doc-content-renderer.tsx::[&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:border [&_pre]:border-border [&_pre]:bg-muted [&_pre]:text-foreground [&_pre]:p-4 [&_pre]:text-xs [&_pre]:leading-6",
-    "components/docs/doc-content-renderer.tsx::[&_table]:w-full [&_table]:border-collapse [&_table]:overflow-hidden [&_table]:rounded-xl [&_table]:border [&_table]:border-border [&_table]:bg-muted/20",
+    "components/docs/doc-table.tsx::[&_table]:w-full [&_table]:border-collapse [&_table]:overflow-hidden [&_table]:rounded-xl [&_table]:border [&_table]:border-border [&_table]:bg-muted/20",
     "components/docs/doc-content-renderer.tsx::flex items-center gap-2 rounded-xl border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground",
     "components/docs/doc-content-renderer.tsx::flex items-center gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm text-brand-text transition-colors hover:bg-muted/40 no-underline",
     "components/docs/doc-content-renderer.tsx::my-2 block aspect-[4/3] w-full max-w-sm animate-pulse rounded-xl border border-border bg-muted",

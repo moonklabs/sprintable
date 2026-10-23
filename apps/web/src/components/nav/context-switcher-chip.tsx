@@ -26,6 +26,7 @@ import { useAccountSwitcher } from '@/hooks/use-account-switcher';
 import { orgRoleLabel } from '@/lib/org-member-role';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { ProjectLimitBanner } from '@/components/nav/project-limit-banner';
+import { NewProjectMacBlock } from '@/components/nav/new-project-mac-block';
 
 interface ContextSwitcherChipProps {
   orgs: OrgSwitcherItem[];
@@ -359,6 +360,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
           <DialogHeader>
             <DialogTitle>{t('switcherNewProjectDialogTitle')}</DialogTitle>
           </DialogHeader>
+          <NewProjectMacBlock orgId={s.currentOrg?.orgId} />
           <form onSubmit={(e) => { e.preventDefault(); void s.createProject(s.newProjectName, s.newProjectDesc); }} className="space-y-3">
             {/* [SID:4681] (Yuna §K): the plan's project limit — a warning banner at the form's top (in place of the general failure line below) */}
             {s.createProjectLimit && <ProjectLimitBanner key={s.createProjectLimitNonce} limit={s.createProjectLimit.limit} free={s.createProjectLimit.free} />}

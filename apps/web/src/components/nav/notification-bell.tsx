@@ -420,7 +420,7 @@ function plainSummary(summary: string | null | undefined, fallback: string): str
 export function NotificationBell() {
   const router = useRouter();
   const t = useTranslations('inbox');
-  const { currentTeamMemberId, projectId } = useDashboardContext();
+  const { projectId } = useDashboardContext();
   const { addToast } = useToast();
   const [open, setOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -509,7 +509,6 @@ export function NotificationBell() {
 
   useSseNotifications({
     onNotification: handleSseNotification,
-    memberId: currentTeamMemberId,
     extraEventNames: BELL_EXTRA_EVENT_NAMES,
     onExtraEvent: handleExtraEvent,
   });

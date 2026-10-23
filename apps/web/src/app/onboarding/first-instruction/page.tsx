@@ -13,13 +13,15 @@ import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 // 대화 화면으로 교체 이동한다(story #4158 — chatV3Enabled면 v3 셸 딥링크, OFF면 기존
 // `/chats/<id>?compose=<문구>` 그대로). 전송은 사람이 대화 화면에서 누른다(에이전트
 // 발신 0). 새 BE 0.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 interface FirstInstructionPageProps {
   // `agent` = 대상 에이전트 member_id · `compose` = 미리 채울 첫 지시 문구(URL 인코딩·빈값 허용).
-  searchParams: Promise<{ agent?: string; compose?: string }>;
+  searchParams: Promise<{ agent?: string; compose?: string; project?: string }>;
 }
 
 export default async function FirstInstructionPage({ searchParams }: FirstInstructionPageProps) {
-  const { agent, compose } = await searchParams;
+  const { agent, compose, project } = await searchParams;
 
   // AC2 — 로그인 안 됨 → 기존 `/login?next=` 경로 그대로(invite/accept와 동일 패턴). 세션 복귀 뒤
   // 이 주소로 돌아와 아래 흐름을 탄다. proxy의 인증 가드도 같은 방향으로 튕기지만(양쪽 방어),
@@ -29,6 +31,7 @@ export default async function FirstInstructionPage({ searchParams }: FirstInstru
     const qs = new URLSearchParams();
     if (agent) qs.set('agent', agent);
     if (compose) qs.set('compose', compose);
+    if (project) qs.set('project', project);
     const self = `/onboarding/first-instruction${qs.toString() ? `?${qs.toString()}` : ''}`;
     redirect(`/login?next=${encodeURIComponent(self)}`);
   }
@@ -36,13 +39,17 @@ export default async function FirstInstructionPage({ searchParams }: FirstInstru
   // AC1 — 프로젝트 id는 세션 기본 프로젝트(`getServerSession().project_id`). Firebase 세션 경로는
   // 이 값에 이미 `resolved_default_project_id` 폴백이 접혀 있다(lib/db/server.ts:101). 대화 생성 시
   // project_id로 쓴다. null이면 클라이언트가 «대화를 열 수 없어요» 안내로 간다(AC3).
-  const projectId = session.project_id;
+  // story 4714: the phone's start screen names the project the session was started in (`project` · a uuid only) — the conversation opens THERE; the server still
+  // checks membership on every read and on the create. Absent or not a uuid: the session's default project, as before.
+  const projectPinned = Boolean(project && UUID_RE.test(project));
+  const projectId = projectPinned ? (project as string) : session.project_id;
 
   return (
     <FirstInstructionRedirect
       agentId={agent ?? null}
       compose={compose ?? ''}
       projectId={projectId}
+      projectPinned={projectPinned}
       flags={readNavV3FlagsFromEnv()}
     />
   );

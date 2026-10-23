@@ -1083,6 +1083,9 @@ def test_audit_durations_mode_drift_state_normal_run_resets_streak(tmp_path, cap
 # ─── story #3642 AC1 — 재실측 반영값(test_2813·test_3516·test_3414) + 샤드 균형 ──
 
 
+# story #4731 — this test collects the whole real repository in a subprocess (`uv run pytest --collect-only`, ~15k tests): measured 19.3 – 24.4 s on the CI runners
+# (four runs), i.e. 64 – 81 % of the default 30 s per-test timeout, so a slightly slower runner fails it for no reason in the code under test. Its own ceiling:
+@pytest.mark.timeout(120)
 def test_shard_balance_stays_even_after_remeasure():
     """AC2 — 갱신 뒤에도 partition()의 weight-sum 균형이 샤드 4(또는 무거운 파일이
     떨어지는 아무 샤드)를 편중시키지 않는다(그리디 LPT가 자동 재배치 — 샤드 «번호»가
@@ -2160,6 +2163,8 @@ def test_4283_import_expanded_cross_shard_rule():
     assert mod.import_expanded_cross_shard_red({3: ["tests/a.py"], 7: ["tests/b.py"]}) == [3, 7]
 
 
+# story #4731 — measured 20.1 s (collects the real repo) on the CI runners against the default 30 s per-test timeout (a slower runner would fail it for no reason in the code under test):
+@pytest.mark.timeout(120)
 def test_4283_the_false_red_file_is_an_import_expanded_test_of_the_hub():
     """AC5 입력 전제 — test_2636은 PR 4656이 바꾼 허브(app/routers/events.py)를 import해서 narrowing에 들어온 파일(직접 변경 아님)."""
     mod = _load()
@@ -2265,6 +2270,8 @@ def test_4283_ac5_the_false_red_run_is_green_across_shards(tmp_path, capsys):
     assert f"샤드 11 하나에만 있음({_T2636})" in out
 
 
+# story #4731 — measured 19.9 s (collects the real repo) on the CI runners against the default 30 s per-test timeout (a slower runner would fail it for no reason in the code under test):
+@pytest.mark.timeout(120)
 def test_4283_ac5_hub_slowdown_across_shards_is_red(tmp_path, capsys):
     """⭐AC5 ② 양성 대조 — 허브가 정말 느려져 import 테스트가 서로 다른 샤드 둘 이상에서 같이 넘으면 Audit exit 1 + ::error::.
     뮤테이션: IMPORT_EXPANDED_MIN_SHARDS를 올리거나 교차 샤드 검사를 빼면 이 테스트 RED."""

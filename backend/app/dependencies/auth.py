@@ -107,6 +107,32 @@ async def _touch_api_key_last_used(api_key_id: uuid.UUID) -> None:
         logger.warning("_touch_api_key_last_used failed api_key_id=%s", api_key_id, exc_info=True)
 
 
+# story 4739 — what an AGENT key's 401 says in a closed word (a response header; the status and the `detail` text are unchanged — MCP, the web and realtime read those).
+# The desktop daemon reads it to tell «this key is gone for good» from «this agent cannot act right now» (stopped on the web · removed): the same words the open stream's
+# closing `access_revoked` frame carries (`stream_access.py`). A 401/403 without the header is UNKNOWN to the reader — never a revocation by itself.
+AUTH_REASON_HEADER = "X-Sprintable-Auth-Reason"
+AUTH_REASON_KEY_REVOKED = "key_revoked"  # no live key by this hash (unknown · revoked · expired — the lookup cannot tell them apart, and none of them comes back)
+AUTH_REASON_AGENT_INACTIVE = "agent_inactive"  # the key is live but its agent is not (stopped on the web · deleted · no project access): it can come back
+
+
+def _agent_key_401(detail: str, reason: str) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail, headers={AUTH_REASON_HEADER: reason})
+
+
+async def _member_missing_401(db: AsyncSession, api_key: object) -> HTTPException:
+    """«API key member not found» — the key was live when it was read, but its agent is not. The two are separate reads: a disconnect commits the key's revocation AND the
+    agent's deactivation together, and may land between them — then the agent is inactive BECAUSE the key was revoked, and saying `agent_inactive` (can come back) would make the
+    daemon retry a key that never will. So the key is read once more and a key that is no longer live says `key_revoked` (codex 4739). Revoked after this read as well: the next
+    request says it."""
+    from app.models.api_key import ApiKey
+
+    now = datetime.now(timezone.utc)
+    live = (await db.execute(
+        select(ApiKey.id).where(ApiKey.id == api_key.id, ApiKey.revoked_at.is_(None), (ApiKey.expires_at.is_(None)) | (ApiKey.expires_at > now))  # type: ignore[attr-defined]
+    )).first() is not None
+    return _agent_key_401("API key member not found", AUTH_REASON_AGENT_INACTIVE if live else AUTH_REASON_KEY_REVOKED)
+
+
 async def _resolve_api_key(
     raw_key: str, db: AsyncSession, transport: str | None = None,
     request: Request = None,  # type: ignore[assignment]
@@ -150,7 +176,7 @@ async def _resolve_api_key(
         # 절대 안 막는다(agent_auth_failure.py docstring 참고).
         from app.services.agent_auth_failure import record_auth_failure
         await record_auth_failure(raw_key)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+        raise _agent_key_401("Invalid API key", AUTH_REASON_KEY_REVOKED)
 
     # OB-4b seam(first_auth_seen): 이 키의 최초 인증(last_used_at None)을 갱신 전 캡처 — 1회 dedup.
     # api_key 경로 = 에이전트 인증(휴먼은 JWT). 실제 emit 은 member_id/org_id 해소 후(return 직전).
@@ -178,7 +204,7 @@ async def _resolve_api_key(
             )
         )).scalar_one_or_none()
         if not m:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key member not found")
+            raise await _member_missing_401(db, api_key)
         # 기본 project = legacy(team_members ORDER BY project_id LIMIT 1)와 동치 해소. team_members 뷰(0110)의
         # 에이전트 set = agent_project_profiles(profile) ∪ project_access(permission='granted', grant-only).
         # profile 만 보면 grant-only 최소 project_id 누락 → cut 후 기본프로젝트 드리프트(까심 BLOCKER). 두 anchor
@@ -196,7 +222,7 @@ async def _resolve_api_key(
         # union 이 비면(profile·grant 모두 없음) 인증 거부(무프로젝트 키를 project_id=None 으로 통과시키면
         # legacy 대비 인증 widening). 까심 finding①.
         if proj is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key member not found")
+            raise await _member_missing_401(db, api_key)
         member_id = m.id
         org_id = str(m.org_id)
         project_id = str(proj)
@@ -215,7 +241,7 @@ async def _resolve_api_key(
             .limit(1)
         )).scalar_one_or_none()
         if not member:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key member not found")
+            raise await _member_missing_401(db, api_key)
         member_id = member.id
         org_id = str(member.org_id)
         project_id = str(member.project_id)
@@ -386,6 +412,29 @@ async def _reject_if_before_cutover(user_id: str | uuid.UUID, unix_timestamp: in
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked")
 
 
+async def verify_access_token(token: str, db: AsyncSession) -> dict:
+    """story 4725 — THE one place an access token WE issued is turned into claims: signature + expiry, the token TYPE (a refresh token is not an access token),
+    a subject, and the per-user cut-off (`auth_valid_after`: a reclaimed account's older tokens, and any other revoke). Every route that authenticates a
+    person's access token by hand (websocket, the onboarding event, the two `get_current_user` variants) comes through here, so a new revoke reason is added in
+    one place; `tests/test_4725_access_token_decode_ratchet.py` fails when a new hand decode appears elsewhere. Raises 401 HTTPException."""
+    try:
+        payload = decode_jwt(token)
+    except JWTError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+    # E-SECURITY SEC-S5(story 278fe427·P0 핫픽스): refresh 토큰이 access 토큰 자리로 통과하던 타입혼동 봉인(모든 호출부 공통)
+    if payload.get("type") != "access":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing sub claim")
+    try:
+        await _reject_if_before_cutover(user_id, payload.get("iat"), db)
+    except ValueError as exc:
+        # a signed token whose subject is not a UUID (only ours are signed, and ours carry UUIDs): refused like any other bad token, not an unhandled error
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token subject") from exc
+    return payload
+
+
 async def _resolve_firebase_session(token: str, db: AsyncSession) -> AuthContext:
     """story 455e528d(doc §3.3): Firebase 세션 검증 후 resource-actual AuthContext 구성.
 
@@ -443,7 +492,7 @@ async def _resolve_firebase_session(token: str, db: AsyncSession) -> AuthContext
     return AuthContext(
         user_id=str(user.id),
         email=user.email,
-        claims={"auth_issuer": verified.issuer, "app_metadata": app_metadata},
+        claims={"auth_issuer": verified.issuer, "auth_time": verified.auth_time, "app_metadata": app_metadata},
         org_id=org_id,
     )
 
@@ -539,27 +588,10 @@ async def _resolve_current_user_auth_context(
         async with async_session_factory() as db:
             return await _resolve_firebase_session(token, db)
 
-    # JWT 경로 (기존)
-    try:
-        payload = decode_jwt(token)
-    except JWTError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
-
-    # E-SECURITY SEC-S5(story 278fe427·P0 핫픽스): refresh 토큰이 이 경로로 그대로 Bearer 인증을
-    # 통과하던 타입혼동 — create_access_token/create_refresh_token 둘 다 payload에 "type"을 이미
-    # 싣고 있었으나(access/refresh) 여기서 검사한 적이 없었다. refresh 토큰은 /auth/refresh 전용
-    # RefreshToken 테이블(revoked_at)로만 무효화되는데, get_current_user는 그 테이블을 전혀 보지
-    # 않고 서명·exp만 확인해 통과시켜 왔다 — 제거된 멤버의 (아직 만료 안 된) refresh 토큰이 access
-    # 토큰 대신 그대로 쓰일 수 있어 revoke가 사실상 무력화(까심 라이브 재현). access 전용으로 강제.
-    if payload.get("type") != "access":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
-
-    user_id: str | None = payload.get("sub")
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing sub claim")
-
+    # JWT 경로 (기존) — story 4725: 서명·타입·sub·cut-off는 verify_access_token 한 곳
     async with async_session_factory() as db:
-        await _reject_if_before_cutover(user_id, payload.get("iat"), db)
+        payload = await verify_access_token(token, db)
+    user_id: str = payload["sub"]
 
     org_id: str | None = payload.get("app_metadata", {}).get("org_id")
 
@@ -1103,24 +1135,10 @@ async def get_current_user_streaming(
         async with async_session_factory() as db:
             return await _resolve_firebase_session(token, db)
 
-    try:
-        payload = decode_jwt(token)
-    except JWTError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
-
-    # E-SECURITY SEC-S5(story 278fe427·P0 핫픽스): get_current_user와 동일 타입혼동 갭 — SSE 전용
-    # 변형도 동일하게 refresh 토큰을 Bearer로 받아버려 별도 봉인 필요.
-    if payload.get("type") != "access":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
-
-    user_id: str | None = payload.get("sub")
-    if not user_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing sub claim")
-
-    # story bea25062: legacy 경로도 cutover epoch 검사 필요 — API key/Firebase 경로와 동형으로
-    # 단명 세션(async with)만 이 검사를 위해 열고 즉시 close(스트림 yield 구간 미점유 유지).
+    # 단명 세션(async with)만 열고 즉시 close(스트림 yield 구간 미점유 유지) — story 4725: 서명·타입·sub·cut-off는 verify_access_token 한 곳
     async with async_session_factory() as db:
-        await _reject_if_before_cutover(user_id, payload.get("iat"), db)
+        payload = await verify_access_token(token, db)
+    user_id = payload["sub"]
 
     return AuthContext(
         user_id=user_id,

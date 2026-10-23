@@ -321,6 +321,231 @@ async def create_command(db: AsyncSession, *, member_id: uuid.UUID, member_role:
     return cmd, cmd.state
 
 
+# ── ②b a phone's signed start (story #4714 · design 4714-design.md) ─────────────────────────────────────────────────────────────
+
+
+class StartRequest(BaseModel):
+    """The phone's start of an agent on one of its paired computers for one project. No folder, path, mode, argument or runtime — the
+    computer reads its own folder for the project and uses the agent's own profile; the server does not open `signed`."""
+    model_config = ConfigDict(extra="forbid")
+
+    setup_id: uuid.UUID
+    project_id: uuid.UUID
+    idempotency_key: str = Field(min_length=1, max_length=100)
+    signed: str = Field(min_length=1, max_length=16384)
+    phone_key_id: uuid.UUID
+
+
+async def _agent_projects(db: AsyncSession, agent_id: uuid.UUID) -> set[uuid.UUID]:
+    from app.models.member import AgentProjectProfile
+
+    return set((await db.execute(select(AgentProjectProfile.project_id).where(AgentProjectProfile.member_id == agent_id))).scalars().all())
+
+
+def _startable_pairs(setup: DesktopSetup, agent_id: uuid.UUID) -> set[uuid.UUID]:
+    """The projects the computer said it has a usable folder for, for this agent (ids only)."""
+    out: set[uuid.UUID] = set()
+    for item in setup.startable or []:
+        if item.get("agent_member_id") == str(agent_id):
+            try:
+                out.add(uuid.UUID(str(item.get("project_id"))))
+            except ValueError:
+                continue
+    return out
+
+
+async def create_start(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID,
+                       agent_id: uuid.UUID, body: StartRequest) -> tuple[DesktopCommand, str]:
+    """A phone's signed `start_session` → (the command, its state). The same checks as a stop (`create_command`) — who may press, the
+    computer is the agent's and of this org, remote control on, the computer heard from, the phone the person's own and paired with
+    it — then the start's own: the project is one the agent belongs to and the person can open, and the computer has said it has a
+    folder for that pair. That last line is for showing: the computer reads its own files again and refuses a start it cannot do
+    (`no_folder`), whatever the server believes."""
+    from app.services import remote_control
+    from app.services.agent_permissions import _reachable, paired_phone
+    from app.services.desktop_relay import enqueue_command
+    from app.services.project_auth import has_project_access
+
+    async def authorize() -> tuple[Member, DesktopSetup]:
+        """Who may press, for whom, on which computer, for which project — read from the rows as they are NOW (the agent is read again, not
+        taken from the session's copy). Asked twice: first for the answer, then again under the computer's row lock, because a grant
+        taken back, an agent deactivated or a computer disconnected while this press waited for the lock is not seen by the first."""
+        agent = await _agent(db, org_id, agent_id)
+        await db.refresh(agent)
+        if not agent.is_active:  # a deactivated agent starts nothing (a stop / end stays possible — they end a session that may still run)
+            raise DesktopRelayError(409, "agent_inactive", "this agent is not active")
+        setup = next((s for s in await _agent_setups(db, org_id, agent_id) if s.id == body.setup_id), None)
+        if setup is None or setup.revoked_at is not None:  # no such computer of this agent in this org — another org's, another agent's or none: the same answer
+            raise DesktopRelayError(404, "computer_not_found", "no such computer for this agent")
+        # the person's role is read here, in every judgement — not handed in from before the lock (a demotion that committed while this press waited counts)
+        if not can_command(member_id=member_id, member_role=await org_role(db, org_id, user_id), user_id=user_id, agent=agent, setup=setup):
+            raise DesktopRelayError(403, "not_allowed_to_command", "you cannot command this agent")
+        if body.project_id not in await _agent_projects(db, agent_id) or not await has_project_access(db, user_id, body.project_id, org_id):
+            raise DesktopRelayError(404, "project_not_found", "no such project of this agent")
+        return agent, setup
+
+    agent, setup = await authorize()
+    # two presses of the same key at once must not both miss the first row and meet the UNIQUE key at the insert (a 500): the computer's row
+    # is locked here, so the second waits for the first commit and then finds its command (enqueue_command takes the same row's lock later)
+    # (the row is read again under the lock — `populate_existing` — so the folder list and the computer's state the rest of this function reads are the
+    # ones committed at this moment, not the ones read before waiting: a replaced list or a disconnect that committed meanwhile is seen, not the old copy)
+    await db.execute(select(DesktopSetup).where(DesktopSetup.id == setup.id).with_for_update().execution_options(populate_existing=True))
+    agent, setup = await authorize()  # again, under the lock: what committed while this press waited is seen
+    # the same press again (the same key) gets back the command it made — asked after who may press and whose computer it is
+    existing = (await db.execute(
+        select(DesktopCommand).where(DesktopCommand.setup_id == setup.id,
+                                     DesktopCommand.idempotency_key == f"b4:{member_id}:{body.idempotency_key}")
+    )).scalar_one_or_none()
+    if existing is not None:
+        return existing, existing.state
+    if not await remote_control.is_enabled(db, org_id):
+        raise DesktopRelayError(409, remote_control.OFF_CODE, "remote control is off for this organization")
+    if setup.id not in await _reachable(db, {setup.id}, _now()):
+        raise DesktopRelayError(409, "device_unreachable", "that computer has not been heard from")
+    if await paired_phone(db, member_id=member_id, phone_id=body.phone_key_id, setup_id=setup.id) is None:
+        raise DesktopRelayError(409, "phone_not_paired", "this phone is not paired with that computer")
+    if body.project_id not in _startable_pairs(setup, agent_id):
+        raise DesktopRelayError(409, "no_folder", "that computer has no folder for this project — pick one at the computer")
+    cmd = await enqueue_command(
+        db, setup=setup, kind="start_session",
+        payload={"agent_member_id": str(agent_id), "project_id": str(body.project_id), "signed": body.signed},
+        idempotency_key=f"b4:{member_id}:{body.idempotency_key}", requested_by=member_id,
+    )
+    return cmd, cmd.state
+
+
+async def _openable_startable_projects(db: AsyncSession, setup: DesktopSetup, agent_id: uuid.UUID, *, user_id: uuid.UUID,
+                                       org_id: uuid.UUID) -> list[dict]:
+    """The projects the computer says it has a folder for, for this agent, that the agent is in and the person can open — ids and names
+    only (never a path), ordered by name. The one place both startable reads take their project list from."""
+    from app.models.project import Project
+    from app.services.project_auth import has_project_access
+
+    wanted = _startable_pairs(setup, agent_id) & await _agent_projects(db, agent_id)
+    projects: list[dict] = []
+    if wanted:
+        rows = (await db.execute(
+            select(Project.id, Project.name).where(Project.id.in_(wanted), Project.org_id == org_id, Project.deleted_at.is_(None))
+            .order_by(Project.name.asc(), Project.id)
+        )).all()
+        for pid, name in rows:
+            if await has_project_access(db, user_id, pid, org_id):
+                projects.append({"project_id": str(pid), "name": name})
+    return projects
+
+
+async def startable_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: str | None, user_id: uuid.UUID, org_id: uuid.UUID,
+                         agent_id: uuid.UUID, phone_key_id: uuid.UUID) -> dict:
+    """What the phone may offer for starting this agent: each computer of the agent that THIS person's phone is paired with, whether it is
+    heard from, whether the person may command, and the projects the computer says it has a folder for that the person can open — ids
+    and names, never a path. A computer that has said nothing lists none (the phone then says «start it at the Mac»)."""
+    from app.services import remote_control
+    from app.services.agent_permissions import _reachable, paired_phone
+
+    if not await can_view(db, user_id=user_id, org_id=org_id, agent_id=agent_id):
+        raise DesktopRelayError(404, "agent_not_found", "no such agent")
+    agent = await _agent(db, org_id, agent_id)
+    setups = await _agent_setups(db, org_id, agent_id) if agent.is_active else []  # a deactivated agent has nothing to start
+    reachable = await _reachable(db, {s.id for s in setups}, _now())
+    from app.services.desktop_computers import computer_index
+
+    computer_of = await computer_index(db, org_id)  # story 4734: the computer each entry's setup belongs to — an ADDED id; the entry stays one per setup
+    computers: list[dict] = []
+    for setup in setups:
+        if await paired_phone(db, member_id=member_id, phone_id=phone_key_id, setup_id=setup.id) is None:
+            continue
+        computers.append({
+            "setup_id": str(setup.id), "computer_id": str(computer_of[setup.id]) if setup.id in computer_of else None,
+            "device_name": setup.device_name, "reachable": setup.id in reachable,
+            "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup),
+            "projects": await _openable_startable_projects(db, setup, agent_id, user_id=user_id, org_id=org_id),
+        })
+    return {"remote_control": await remote_control.is_enabled(db, org_id), "computers": computers}
+
+
+def _agent_running(states: list[str], heard: bool) -> bool | None:
+    """story 4714 (AC3 · AC4): whether the agent has a live session on this computer, as the computer reports it — the phone opens the chat list for a running
+    agent and the start screen for one that is not. `None`: the computer has not been heard from, so a session it had may still live — «not running» cannot
+    be said (the phone goes to its usual home). Otherwise `True` when any session of the agent there is not over (`stopped` is the one word for over), and
+    `False` when it has none or every one is over. Read here, from the computer's own session rows, so it holds for every person who may open the agent (the
+    device's own session list is for owners and admins only)."""
+    if not heard:
+        return None
+    return any(st != "stopped" for st in states)
+
+
+async def startable_computers_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: str | None, user_id: uuid.UUID,
+                                   org_id: uuid.UUID, phone_key_id: uuid.UUID) -> dict:
+    """The phone's whole first screen in one read (contract v1.18): every computer of this organization THIS person's phone is paired
+    with, whether it is heard from, and for each the agents it was set up with that the person can open (active ones) — each with
+    whether the person may command it, the projects it can be started for and (story 4714) whether it runs there. A paired computer with no agent
+    lists `agents: []` (the phone then says «start the first setup at the Mac» — a per-agent read cannot say that, there is no agent to ask about).
+    Ids and names only, never a path; a key that is not the asker's own (or is revoked) lists nothing."""
+    from app.models.agent_permission import RemoteDevice, RemoteDevicePairing
+    from app.models.member import Member
+    from app.services import remote_control
+    from app.services.agent_permissions import _reachable
+
+    setups = (await db.execute(
+        select(DesktopSetup)
+        .join(RemoteDevicePairing, RemoteDevicePairing.setup_id == DesktopSetup.id)
+        .join(RemoteDevice, RemoteDevice.id == RemoteDevicePairing.remote_device_id)
+        .where(RemoteDevice.id == phone_key_id, RemoteDevice.member_id == member_id, RemoteDevice.revoked_at.is_(None),
+               RemoteDevicePairing.removed_at.is_(None),
+               DesktopSetup.org_id == org_id, DesktopSetup.revoked_at.is_(None), DesktopSetup.exchanged_at.is_not(None))
+        .order_by(DesktopSetup.exchanged_at.desc(), DesktopSetup.id)
+    )).scalars().all()
+    reachable = await _reachable(db, {s.id for s in setups}, _now())
+    from app.services.desktop_computers import computer_index
+
+    computer_of = await computer_index(db, org_id)  # story 4734: an ADDED id per entry (the entry stays one per setup — the phone shell reads it by `setup_id`)
+    agent_ids_by_setup: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for setup in setups:
+        agent_ids: list[uuid.UUID] = []
+        for m in setup.members or []:
+            if m.get("kind") == "agent" and m.get("member_id"):
+                try:
+                    aid = uuid.UUID(str(m["member_id"]))
+                except ValueError:
+                    continue
+                if aid not in agent_ids:
+                    agent_ids.append(aid)
+        agent_ids_by_setup[setup.id] = agent_ids
+    # every session state of these agents on these computers in ONE read (a session of the agent on another computer does not count here)
+    wanted = {aid for ids in agent_ids_by_setup.values() for aid in ids}
+    session_states: dict[tuple[uuid.UUID, uuid.UUID], list[str]] = {}
+    if setups and wanted:
+        for sid, aid, st in (await db.execute(
+            select(DesktopSession.setup_id, DesktopSession.agent_member_id, DesktopSession.state)
+            .where(DesktopSession.setup_id.in_([s.id for s in setups]), DesktopSession.agent_member_id.in_(wanted))
+        )).all():
+            session_states.setdefault((sid, aid), []).append(st)
+    computers: list[dict] = []
+    for setup in setups:
+        agents: list[dict] = []
+        for aid in agent_ids_by_setup[setup.id]:
+            agent = (await db.execute(
+                select(Member).where(Member.id == aid, Member.org_id == org_id, Member.type == "agent", Member.deleted_at.is_(None),
+                                     Member.is_active.is_(True))
+            )).scalar_one_or_none()
+            if agent is None or not await can_view(db, user_id=user_id, org_id=org_id, agent_id=aid):
+                continue
+            agents.append({
+                "agent_member_id": str(aid), "name": agent.name,
+                "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup),
+                "projects": await _openable_startable_projects(db, setup, aid, user_id=user_id, org_id=org_id),
+                "running": _agent_running(session_states.get((setup.id, aid), []), setup.id in reachable),
+            })
+        agents.sort(key=lambda a: (a["name"] or "", a["agent_member_id"]))
+        computers.append({
+            "setup_id": str(setup.id), "computer_id": str(computer_of[setup.id]) if setup.id in computer_of else None,
+            "device_name": setup.device_name, "reachable": setup.id in reachable, "agents": agents,
+            # story #4734 (B): this computer's app takes the press of the WHOLE computer (it said so with its startable list) — the screen offers the one button only then
+            "computer_press": "computer_press" in (setup.capabilities or []),
+        })
+    return {"remote_control": await remote_control.is_enabled(db, org_id), "computers": computers}
+
+
 async def _line_written(db: AsyncSession, command_id: uuid.UUID) -> bool:
     from app.models.conversation import ConversationMessage
 
@@ -349,15 +574,22 @@ async def _write_prompt_line(db: AsyncSession, *, org_id, conversation_id, sende
 
 
 async def get_command(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, agent_id: uuid.UUID, command_id: uuid.UUID) -> dict:
+    """The presser's own read of what became of a command: its state and the daemon's result word. A stop · prompt · end belongs to the agent of its
+    session (`session_key`); a start (story #4714 · the phone's result line) has no session yet — it belongs to the agent its payload names."""
     row = (await db.execute(
         select(DesktopCommand, DesktopSetup).join(DesktopSetup, DesktopSetup.id == DesktopCommand.setup_id).where(
             DesktopCommand.id == command_id, DesktopCommand.requested_by == member_id, DesktopSetup.org_id == org_id,
-            DesktopCommand.kind.in_(("stop_session", "send_prompt", "end_session")),
+            DesktopCommand.kind.in_(("stop_session", "send_prompt", "end_session", "start_session")),
         )
     )).first()
     if row is None:
         raise DesktopRelayError(404, "command_not_found", "no such command of yours")
     cmd, setup = row
+    if cmd.kind == "start_session":
+        owner = (cmd.payload or {}).get("agent_member_id")
+        if owner != str(agent_id):
+            raise DesktopRelayError(404, "command_not_found", "no such command of yours")
+        return {"command_id": str(cmd.id), "kind": cmd.kind, "state": cmd.state, "result_code": cmd.result_code}
     session = (await db.execute(
         select(DesktopSession.agent_member_id).where(DesktopSession.setup_id == setup.id, DesktopSession.session_key == cmd.session_key)
     )).scalar_one_or_none()

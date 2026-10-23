@@ -35,6 +35,7 @@ import { buildCodexConfigToml } from '@/lib/codex-mcp-config';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { AgentLimitBanner } from '@/components/agents/agent-limit-banner';
 import { agentLimitOf, type AgentLimit } from '@/lib/agent-limit';
+import { useOrgRemoteControl, connectedSetupsOf } from '@/lib/org-remote-control';
 
 // ─── 상수/헬퍼 ──────────────────────────────────────────────────────────────
 
@@ -351,7 +352,7 @@ interface RecruiterClientProps {
   onExit?: () => void;
 }
 
-export function RecruiterClient({ projectId, showTopBar = true, onExit }: RecruiterClientProps) {
+export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }: RecruiterClientProps) {
   const flatHref = useFlatHref(); // story #4231 4차 B — 옛 자원 경로(flat 목적지)에 프로젝트
   // story #4017(PO 확定 2026-09-17) — 아래 「완료」 CTA(/chats)를 목적지 모듈로.
   const chatsHref = useChatsHref();
@@ -730,7 +731,15 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   // 이미 가진 활성 키를 여전히 rotate한다(생성 시점 키 발급을 그대로 두는 게 맞는 경로 — equip-skip
   // 으로 만들어졌을 수 있어 그 키를 사용자가 이미 배선했을 가능성이 있다). PO ⓒ: 이 경로는 없애지
   // 않고 대신 명시 고지+확認으로 막는다. 같은 에이전트를 다시 고르면 재확認(경솔한 1회성 방지).
-  const [existingKeyRotateWarning, setExistingKeyRotateWarning] = useState<{ agentId: string; agentName: string } | null>(null);
+  const [existingKeyRotateWarning, setExistingKeyRotateWarning] = useState<{ agentId: string; agentName: string; startAfter?: 'app' | 'link' } | null>(null);
+  // story 4710: inside the app the recruiter is ONE screen («직무») whose hero hires and starts — no key is drawn. [다른 곳에서 돌고 있는
+  // 에이전트로 연결하기] (`elsewhere`) is the way to the screens as before (a runtime the app cannot start · a key to hold). `scopeOpen`: the
+  // access line's [바꾸기] opens today's scope choices in place. `hired`: the hire went through but the start did not — a retry starts, never hires again.
+  const [elsewhere, setElsewhere] = useState(false);
+  const [scopeOpen, setScopeOpen] = useState(false);
+  const [hired, setHired] = useState<{ agentId: string; name: string } | null>(null);
+  // the hero's agent is made before the recruit call; when the recruit fails the next press hires THAT agent (same name · same scope), never a second one
+  const heroCreated = useRef<{ sig: string; id: string } | null>(null);
   const [recruiting, setRecruiting] = useState(false);
   const [recruitError, setRecruitError] = useState<string | null>(null);
   const [recruitLimit, setRecruitLimit] = useState<AgentLimit | null>(null); // story 4680: the same in the full recruit road
@@ -795,7 +804,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
   const runtimePromptFileConvention = runtimeCapabilities?.find((r) => r.slug === runtime)?.prompt_file
     ?? RUNTIME_GUIDE_FILENAME_FALLBACK[runtime] ?? 'CLAUDE.md';
 
-  const handleRecruit = async (confirmedExistingAgentId?: string) => {
+  const handleRecruit = async (confirmedExistingAgentId?: string, startAfter?: 'app' | 'link') => {
     if (!selectedRoleSlug) return;
     setRecruiting(true);
     setRecruitError(null);
@@ -813,23 +822,30 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
         // create가 키를 먼저 발급하면 recruit의 rotate가 그 키를 무고지로 죽인다(create 응답의
         // 키는 여기서 애초에 읽지도 않는다 — 화면에 노출된 적 없는 키가 조용히 사라지는 게 실사고
         // 원인). recruit이 유일한 발급처가 되게 한다.
-        const createRes = await fetch('/api/agents', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name,
-            scope_mode: scopeMode,
-            project_ids: scopeMode === 'projects' ? scopeProjectIds : [],
-            defer_key_issuance: true,
-          }),
-        });
-        const createJson = (await createRes.json().catch(() => null)) as { data?: { id: string } } | null;
-        // story 4680 (Yuna §N): the plan's agent limit (402 · resource agent) → its banner (the finally below frees the button); anything else as before
-        const limitHit = createRes.ok ? null : agentLimitOf(createRes.status, createJson);
-        if (limitHit) { setRecruitLimit(limitHit); return; }
-        if (!createRes.ok || !createJson?.data?.id) throw new Error(t('recruitFailed'));
-        agentId = createJson.data.id;
-        agentName = name;
+        const sig = JSON.stringify([name, scopeMode, scopeMode === 'projects' ? scopeProjectIds : []]);
+        if (startAfter && heroCreated.current?.sig === sig) {
+          agentId = heroCreated.current.id; // story 4710: the hero's earlier recruit failed after the agent was made — hire that one
+          agentName = name;
+        } else {
+          const createRes = await fetch('/api/agents', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name,
+              scope_mode: scopeMode,
+              project_ids: scopeMode === 'projects' ? scopeProjectIds : [],
+              defer_key_issuance: true,
+            }),
+          });
+          const createJson = (await createRes.json().catch(() => null)) as { data?: { id: string } } | null;
+          // story 4680 (Yuna §N): the plan's agent limit (402 · resource agent) → its banner (the finally below frees the button); anything else as before
+          const limitHit = createRes.ok ? null : agentLimitOf(createRes.status, createJson);
+          if (limitHit) { setRecruitLimit(limitHit); return; }
+          if (!createRes.ok || !createJson?.data?.id) throw new Error(t('recruitFailed'));
+          agentId = createJson.data.id;
+          agentName = name;
+          if (startAfter) heroCreated.current = { sig, id: agentId };
+        }
       } else {
         if (!selectedExistingAgentId) { setRecruitError(t('agentSelectRequired')); setRecruiting(false); return; }
         agentId = selectedExistingAgentId;
@@ -859,7 +875,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
             // 네트워크 예외도 동일하게 fail-closed(true) 유지.
           }
           if (hasActiveKeyOrUnknown) {
-            setExistingKeyRotateWarning({ agentId, agentName });
+            setExistingKeyRotateWarning({ agentId, agentName, startAfter });
             setRecruiting(false);
             return;
           }
@@ -870,18 +886,28 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
       const recruitRes = await fetch(`/api/agents/${agentId}/recruit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role_template_slug: selectedRoleSlug, runtime, locale }),
+        // story 4710 (Kadir 5123 · key lens): the hero path hires WITHOUT a key — the app takes the agent over and the setup exchange makes the
+        // one key it needs (`_rotate_existing_agent` + the exchange's new key), so the browser never receives a key nobody uses. The screens
+        // as before (`startAfter` unset) keep the default and show the key once.
+        body: JSON.stringify({ role_template_slug: selectedRoleSlug, runtime, locale, ...(startAfter ? { issue_key: false } : {}) }),
       });
       const recruitJson = (await recruitRes.json().catch(() => null)) as { data?: RecruitResponse } | null;
       if (!recruitRes.ok || !recruitJson?.data) throw new Error(t('recruitFailed'));
 
+      // story 4710: the hero path hires and starts — the key the recruit answer carries is never put in state, never drawn (the app takes the
+      // agent over and issues its own; the key shown here would be erased anyway · backend desktop_setup.py)
+      if (startAfter) {
+        heroCreated.current = null;
+        await launchStart(recruitJson.data.agent_id, startAfter, agentName);
+        return;
+      }
       setRecruitResult(recruitJson.data);
       setActiveAgentName(agentName);
       setCopiedGuide(false);
       setCopiedMcp(false);
       setStep(4);
     } catch (err) {
-      setRecruitError(err instanceof Error ? err.message : t('recruitFailed'));
+      setRecruitError(startAfter ? t('hireFailedHero') : err instanceof Error ? err.message : t('recruitFailed'));
     } finally {
       setRecruiting(false);
     }
@@ -983,6 +1009,47 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
     }
   };
 
+  // story 4710: the start after a hero hire. In the app the bridge opens the setup card for that agent; in a browser the app link with
+  // `?agent=` does. A failure leaves `hired` set: pressing the hero again only starts (never a second hire).
+  const launchStart = async (agentId: string, mode: 'app' | 'link', name: string) => {
+    setHired({ agentId, name });
+    emitOnboardingEvent('desktop_handoff_selected', { agent_id: agentId, flow: 'recruit' });
+    if (mode === 'app' && bridge) {
+      setStartHere({ kind: 'busy' });
+      try {
+        const r = await bridge.startHere({ agentId });
+        if (r.ok) { leftRef.current = true; setStartHere({ kind: 'ok' }); } else setStartHere({ kind: 'failed', code: r.code });
+      } catch {
+        setStartHere({ kind: 'failed' });
+      }
+      return;
+    }
+    leftRef.current = true;
+    setStartHere({ kind: 'ok' });
+    window.location.assign(appSetupLink(null, undefined, { agent: agentId }));
+  };
+
+  // story 4710: where the hero stands. Inside the app: always for a runtime the app runs (it is the one screen). In a browser: only when
+  // a Mac app is connected to this account (the org's connected setups · a person who cannot read it gets today's screen).
+  const [orgRemote] = useOrgRemoteControl(orgId);
+  const macAppConnected = orgRemote ? connectedSetupsOf(orgRemote) >= 1 : false;
+  const startMode = startHereMode(Boolean(bridge), currentCapability);
+  const heroStart: 'app' | 'link' | null = startMode === 'app' ? 'app' : startMode === 'link' && macAppConnected ? 'link' : null;
+  const oneScreen = heroStart === 'app' && !elsewhere && !equipSkip;
+  const scopeEmpty = scopeMode === 'projects' && scopeProjectIds.length === 0;
+  const pressHero = () => {
+    if (!heroStart) return;
+    if (hired) { void launchStart(hired.agentId, heroStart, hired.name); return; }
+    void handleRecruit(undefined, heroStart);
+  };
+  const scopeLine = (() => {
+    if (scopeMode === 'org') return t('scopeLineOrg');
+    const names = scopeProjectIds.map((id) => orgProjects?.find((p) => p.id === id)?.name).filter((n): n is string => Boolean(n));
+    if (names.length === 0) return ''; // the project list is still being read — the line appears with it
+    if (names.length >= 2) return t('scopeLineMany', { n: names.length, projects: names.join(', ') });
+    return t('scopeLine', { project: names[0]! });
+  })();
+
   // story #4180 — Codex는 TOML(`.codex/config.toml`), 그 외 런타임은 기존 JSON(`.mcp.json`)
   // 그대로. BE mcp_config 값 자체는 무변경 — 이 화면의 재직렬화(포맷)만 runtime으로 가른다.
   const mcpConfigFilename = resolveMcpConfigFilename(runtime);
@@ -1006,6 +1073,81 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
         { n: 5, label: t('stepVerify') },
       ];
 
+  // story 4710: the scope choices (story d82c1092 · AddAgentForm harvest) — step 2 of the screens as before, and the one screen's [바꾸기] in place
+  const renderScopeChooser = () => (
+      <div className="space-y-2">
+        <p className="text-sm font-semibold text-foreground">{t('scopeQuestion')}</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {(['org', 'projects'] as const).map((mode) => {
+            const selected = scopeMode === mode;
+            return (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setScopeMode(mode)}
+                aria-pressed={selected}
+                className={cn(
+                  'rounded-md border px-4 py-4 text-left transition',
+                  selected ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted',
+                )}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">
+                      {mode === 'org' ? tSettings('agentScopeAllProjects') : tSettings('agentScopeSpecificProjects')}
+                    </p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {mode === 'org' ? tSettings('agentScopeAllProjectsBody') : tSettings('agentScopeSpecificProjectsBody')}
+                    </p>
+                  </div>
+                  {selected ? <CheckCircle2 className="size-5 shrink-0 text-primary" aria-hidden /> : null}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {scopeMode === 'projects' && !orgProjects ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {[0, 1].map((i) => <Skeleton key={i} className="h-14 rounded-md" />)}
+          </div>
+        ) : scopeMode === 'projects' ? (
+          <div className="focus-inset grid max-h-56 gap-3 overflow-y-auto sm:grid-cols-2">
+            {(orgProjects ?? []).map((project) => {
+              const selected = scopeProjectIds.includes(project.id);
+              return (
+                <button
+                  key={project.id}
+                  type="button"
+                  onClick={() => toggleScopeProject(project.id)}
+                  aria-pressed={selected}
+                  className={cn(
+                    'rounded-md border px-4 py-4 text-left transition',
+                    selected ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted',
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="truncate text-sm font-semibold text-foreground">{project.name}</p>
+                    {selected ? <CheckCircle2 className="size-5 shrink-0 text-primary" aria-hidden /> : null}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="rounded-md border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+            {tSettings('agentScopeAllProjectsHint', { count: orgProjects?.length ?? 0 })}
+          </div>
+        )}
+
+        <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          {t('scopeStepGuide')}
+        </p>
+        <p className="text-xs text-muted-foreground">{tSettings('agentSeatCaption')}</p>
+      </div>
+  );
+
   return (
     <div className="mx-auto flex max-w-2xl flex-1 flex-col gap-4 p-4">
       {showTopBar ? (
@@ -1023,9 +1165,11 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
       ) : null}
 
       <SectionCard>
-        <SectionCardHeader>
-          <StepperHeader step={step} stages={stages} />
-        </SectionCardHeader>
+        {oneScreen ? null : (
+          <SectionCardHeader>
+            <StepperHeader step={step} stages={stages} />
+          </SectionCardHeader>
+        )}
         <SectionCardBody className="space-y-4">
 
           {/* ── STEP 1 : 직무 선택 ── */}
@@ -1080,7 +1224,7 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                               <button
                                 key={role.id}
                                 type="button"
-                                onClick={() => { setSelectedRoleSlug(role.slug); setEquipSkip(false); }}
+                                onClick={() => { setSelectedRoleSlug(role.slug); setEquipSkip(false); setHired(null); setStartHere({ kind: 'idle' }); }}
                                 className={cn(
                                   'relative flex flex-col gap-2 rounded-xl border p-3 text-left transition-colors',
                                   sel ? 'border-primary/60 ring-1 ring-primary/40' : 'border-border hover:border-primary/30',
@@ -1133,6 +1277,50 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
                 {t('roleGuide')}
               </p>
+              {oneScreen ? (
+                // story 4710 (Yuna 4710-copy §1 · PO 03:3xZ): inside the app the recruiter is this one screen — the role, the access as a default
+                // line with [바꾸기], the hero that hires and starts (no key drawn), and the way to the screens as before for anything else
+                <div className="space-y-3 border-t border-border pt-3" data-testid="recruiter-one-screen">
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      {scopeLine ? <p className="break-keep text-sm text-foreground" data-testid="recruiter-scope-line">{scopeLine}</p> : null}
+                      <Button variant="ghost" size="sm" onClick={() => setScopeOpen((v) => !v)} aria-expanded={scopeOpen} data-testid="recruiter-scope-change">
+                        {t('scopeChange')}
+                      </Button>
+                    </div>
+                    {scopeOpen || scopeEmpty ? renderScopeChooser() : null}
+                  </div>
+                  {recruitLimit ? <AgentLimitBanner limit={recruitLimit.limit} free={recruitLimit.free} />
+                    : recruitError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive" data-testid="recruiter-hire-failed">{recruitError}</p>}
+                  <div className="space-y-2">
+                    <Button
+                      variant="hero"
+                      onClick={pressHero}
+                      disabled={!selectedRoleSlug || scopeEmpty || recruiting || startHere.kind === 'busy'}
+                      data-testid="recruiter-start-here-button"
+                    >
+                      {recruiting ? t('hiringShort') : t('startHere')}
+                    </Button>
+                    <p className="break-keep text-xs text-muted-foreground" data-testid="recruiter-hero-line">
+                      {scopeEmpty ? t('startHereNeedProject') : selectedRole ? t('startHereLine', { role: selectedRole.name }) : t('startHereNeedRole')}
+                    </p>
+                    {startHere.kind === 'failed' ? (
+                      <p role="alert" aria-live="assertive" className="text-xs text-foreground" data-testid="recruiter-start-here-failed">{t('startHereFailed')}</p>
+                    ) : null}
+                  </div>
+                  <div className="space-y-1">
+                    <Button
+                      variant="link"
+                      onClick={() => setElsewhere(true)}
+                      className="h-auto min-h-0 min-w-0 whitespace-normal px-0 py-0 text-left"
+                      data-testid="recruiter-connect-elsewhere"
+                    >
+                      {t('connectElsewhere')}
+                    </Button>
+                    <p className="break-keep text-xs text-muted-foreground">{t('connectElsewhereNote')}</p>
+                  </div>
+                </div>
+              ) : (
               <div className="flex justify-end border-t border-border pt-3">
                 <Button
                   variant="hero"
@@ -1142,83 +1330,14 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                   {t('next')}
                 </Button>
               </div>
+              )}
             </div>
           )}
 
           {/* ── STEP 2 : 스코프(story d82c1092·NEW·AddAgentForm scope UI 하베스트) ── */}
           {step === 2 && (
             <div className="space-y-4">
-              <div className="space-y-2">
-                <p className="text-sm font-semibold text-foreground">{t('scopeQuestion')}</p>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {(['org', 'projects'] as const).map((mode) => {
-                    const selected = scopeMode === mode;
-                    return (
-                      <button
-                        key={mode}
-                        type="button"
-                        onClick={() => setScopeMode(mode)}
-                        aria-pressed={selected}
-                        className={cn(
-                          'rounded-md border px-4 py-4 text-left transition',
-                          selected ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted',
-                        )}
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-semibold text-foreground">
-                              {mode === 'org' ? tSettings('agentScopeAllProjects') : tSettings('agentScopeSpecificProjects')}
-                            </p>
-                            <p className="mt-1 text-sm text-muted-foreground">
-                              {mode === 'org' ? tSettings('agentScopeAllProjectsBody') : tSettings('agentScopeSpecificProjectsBody')}
-                            </p>
-                          </div>
-                          {selected ? <CheckCircle2 className="size-5 shrink-0 text-primary" aria-hidden /> : null}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {scopeMode === 'projects' && !orgProjects ? (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {[0, 1].map((i) => <Skeleton key={i} className="h-14 rounded-md" />)}
-                  </div>
-                ) : scopeMode === 'projects' ? (
-                  <div className="focus-inset grid max-h-56 gap-3 overflow-y-auto sm:grid-cols-2">
-                    {(orgProjects ?? []).map((project) => {
-                      const selected = scopeProjectIds.includes(project.id);
-                      return (
-                        <button
-                          key={project.id}
-                          type="button"
-                          onClick={() => toggleScopeProject(project.id)}
-                          aria-pressed={selected}
-                          className={cn(
-                            'rounded-md border px-4 py-4 text-left transition',
-                            selected ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted',
-                          )}
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <p className="truncate text-sm font-semibold text-foreground">{project.name}</p>
-                            {selected ? <CheckCircle2 className="size-5 shrink-0 text-primary" aria-hidden /> : null}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="rounded-md border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-                    {tSettings('agentScopeAllProjectsHint', { count: orgProjects?.length ?? 0 })}
-                  </div>
-                )}
-
-                <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-                  {t('scopeStepGuide')}
-                </p>
-                <p className="text-xs text-muted-foreground">{tSettings('agentSeatCaption')}</p>
-              </div>
+              {renderScopeChooser()}
 
               {equipSkip ? (
                 <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-3">
@@ -1351,8 +1470,9 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                       disabled={recruiting}
                       onClick={() => {
                         const confirmedId = existingKeyRotateWarning.agentId;
+                        const confirmedStart = existingKeyRotateWarning.startAfter;
                         setExistingKeyRotateWarning(null);
-                        void handleRecruit(confirmedId);
+                        void handleRecruit(confirmedId, confirmedStart);
                       }}
                     >
                       {recruiting ? t('recruiting') : t('recruitExistingKeyWarningCta')}
@@ -1361,12 +1481,47 @@ export function RecruiterClient({ projectId, showTopBar = true, onExit }: Recrui
                 </div>
               )}
 
+              {heroStart === 'link' ? (
+                // story 4710 (AC2 · Yuna §3): a browser whose account has a Mac app connected — [이 컴퓨터에서 시작] (hire, then the app link
+                // with `?agent=`) is the primary; the key and settings screens are the secondary text link, as before
+                <div className="space-y-3 border-t border-border pt-3" data-testid="recruiter-browser-hero">
+                  <div className="space-y-2">
+                    <Button variant="hero" onClick={pressHero} disabled={recruiting || startHere.kind === 'busy' || scopeEmpty} data-testid="recruiter-start-here-link-button">
+                      {recruiting ? t('hiringShort') : t('startHere')}
+                    </Button>
+                    <p className="break-keep text-xs text-muted-foreground">{scopeEmpty ? t('startHereNeedProject') : selectedRole ? t('startHereLine', { role: selectedRole.name }) : ''}</p>
+                    {startHere.kind === 'ok' ? (
+                      <p role="status" aria-live="polite" className="text-xs text-foreground" data-testid="recruiter-start-here-opened">{t('startHereOpened')}</p>
+                    ) : null}
+                    {startHere.kind === 'failed' ? (
+                      <p role="alert" aria-live="assertive" className="text-xs text-foreground" data-testid="recruiter-start-here-failed">{t('startHereFailed')}</p>
+                    ) : null}
+                    <DesktopDownloadCard ctaVariant="outline" />
+                  </div>
+                  <div className="space-y-1">
+                    <Button
+                      variant="link"
+                      disabled={recruiting}
+                      onClick={() => void handleRecruit()}
+                      className="h-auto min-h-0 min-w-0 whitespace-normal px-0 py-0 text-left"
+                      data-testid="recruiter-connect-elsewhere"
+                    >
+                      {t('connectElsewhere')}
+                    </Button>
+                    <p className="break-keep text-xs text-muted-foreground">{t('connectElsewhereNote')}</p>
+                  </div>
+                  <div className="flex justify-start pt-1">
+                    <Button variant="ghost" onClick={() => setStep(2)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
+                  </div>
+                </div>
+              ) : (
               <div className="flex justify-between gap-2 pt-2">
                 <Button variant="ghost" onClick={() => setStep(2)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
                 <Button variant="hero" disabled={recruiting} onClick={() => void handleRecruit()}>
                   {recruiting ? t('recruiting') : t('recruitCta')}
                 </Button>
               </div>
+              )}
             </div>
           )}
 

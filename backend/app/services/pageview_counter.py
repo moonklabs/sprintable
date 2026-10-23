@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.org_metering_key import OrgMeteringKey
 from app.models.org_pageview_daily import OrgPageviewDaily
 from app.models.org_pageview_utm_daily import OrgPageviewUtmDaily
+from app.models.organization import Organization
 from app.services.org_time import get_org_timezone, to_org_date
 
 _KEY_BYTES = 32  # doc_share.py의 secrets.token_urlsafe(32)와 동일 관례
@@ -97,10 +98,12 @@ async def get_beacon_status(db: AsyncSession, *, org_id: uuid.UUID, now: datetim
 
 
 async def resolve_org_by_public_key(db: AsyncSession, public_key: str) -> uuid.UUID | None:
+    # story 4728 — joined to organizations: org_metering_keys has no foreign key to it, so the key of a deleted organization would still
+    # resolve (and its published site posts, which stay in their table, would still be served). Only an organization that exists resolves.
     row = (await db.execute(
-        select(OrgMeteringKey.org_id).where(
-            OrgMeteringKey.public_key == public_key, OrgMeteringKey.revoked_at.is_(None),
-        )
+        select(OrgMeteringKey.org_id)
+        .join(Organization, Organization.id == OrgMeteringKey.org_id)
+        .where(OrgMeteringKey.public_key == public_key, OrgMeteringKey.revoked_at.is_(None))
     )).scalar_one_or_none()
     return row
 

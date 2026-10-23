@@ -55,6 +55,13 @@ async def _seed_agent_with_key(session, *, org_id: uuid.UUID, project_id: uuid.U
         id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="agent",
         name="2087 Owner Test Agent", role="member", created_by=created_by,
     )
+    # story #4730 — «the creator» passes only while she still holds a seat that may create the agent: here, an org admin
+    from sqlalchemy import select as _select
+
+    from app.models.project import OrgMember
+
+    if (await session.execute(_select(OrgMember.id).where(OrgMember.org_id == org_id, OrgMember.user_id == created_by))).first() is None:
+        session.add(OrgMember(id=uuid.uuid4(), org_id=org_id, user_id=created_by, role="admin"))
     session.add(agent)
     await session.flush()
     key, _plaintext = await ApiKeyRepository(session).create(

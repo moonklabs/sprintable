@@ -129,10 +129,10 @@ describe('AgentSessionStrip — the board\'s own words (story #4534 · contract 
     [{ state: 'idle', activity: 'error', limit: { at: earlier } }, '오류', '한도가 풀렸어요 — 그 컴퓨터에서 다시 시작해 주세요', 'text-destructive'],
     // story #4599 (contract v1.13 · Yuna ①): held by a macOS window — a reader from before sees `working`; this page sees the word; the
     // folder named only when the daemon read it (macOS's own «데스크탑» · «네트워크 볼륨을» without «폴더»)
-    [{ state: 'working', activity: 'waiting_system' }, 'macOS 창 대기', 'macOS가 그 컴퓨터 화면에서 폴더를 쓸지 묻고 있어요 — 여기서는 답할 수 없어요. 그 컴퓨터 앞에서 창에 답하거나, 폰에서 [세션 끝내기]를 누르거나, 데스크톱 앱에서 [끝내기]를 눌러 주세요', 'text-warning'],
-    [{ state: 'working', activity: 'waiting_system', system: { folder: 'desktop' } }, 'macOS 창 대기', 'macOS가 그 컴퓨터 화면에서 데스크탑 폴더를 쓸지 묻고 있어요 — 여기서는 답할 수 없어요. 그 컴퓨터 앞에서 창에 답하거나, 폰에서 [세션 끝내기]를 누르거나, 데스크톱 앱에서 [끝내기]를 눌러 주세요', 'text-warning'],
-    [{ state: 'working', activity: 'waiting_system', system: { folder: 'network_volume' } }, 'macOS 창 대기', 'macOS가 그 컴퓨터 화면에서 네트워크 볼륨을 쓸지 묻고 있어요 — 여기서는 답할 수 없어요. 그 컴퓨터 앞에서 창에 답하거나, 폰에서 [세션 끝내기]를 누르거나, 데스크톱 앱에서 [끝내기]를 눌러 주세요', 'text-warning'],
-    [{ state: 'working', activity: 'waiting_system', system: { folder: null } }, 'macOS 창 대기', 'macOS가 그 컴퓨터 화면에서 폴더를 쓸지 묻고 있어요 — 여기서는 답할 수 없어요. 그 컴퓨터 앞에서 창에 답하거나, 폰에서 [세션 끝내기]를 누르거나, 데스크톱 앱에서 [끝내기]를 눌러 주세요', 'text-warning'],
+    [{ state: 'working', activity: 'waiting_system' }, 'macOS 창 대기', 'macOS가 그 컴퓨터 화면에서 폴더를 쓸지 묻고 있어요 — 여기서는 답할 수 없어요. 그 컴퓨터 앞에서 창에 답하거나, 폰에서 [인계 없이 끝내기]를 누르거나, 데스크톱 앱에서 [끝내기]를 눌러 주세요', 'text-warning'],
+    [{ state: 'working', activity: 'waiting_system', system: { folder: 'desktop' } }, 'macOS 창 대기', 'macOS가 그 컴퓨터 화면에서 데스크탑 폴더를 쓸지 묻고 있어요 — 여기서는 답할 수 없어요. 그 컴퓨터 앞에서 창에 답하거나, 폰에서 [인계 없이 끝내기]를 누르거나, 데스크톱 앱에서 [끝내기]를 눌러 주세요', 'text-warning'],
+    [{ state: 'working', activity: 'waiting_system', system: { folder: 'network_volume' } }, 'macOS 창 대기', 'macOS가 그 컴퓨터 화면에서 네트워크 볼륨을 쓸지 묻고 있어요 — 여기서는 답할 수 없어요. 그 컴퓨터 앞에서 창에 답하거나, 폰에서 [인계 없이 끝내기]를 누르거나, 데스크톱 앱에서 [끝내기]를 눌러 주세요', 'text-warning'],
+    [{ state: 'working', activity: 'waiting_system', system: { folder: null } }, 'macOS 창 대기', 'macOS가 그 컴퓨터 화면에서 폴더를 쓸지 묻고 있어요 — 여기서는 답할 수 없어요. 그 컴퓨터 앞에서 창에 답하거나, 폰에서 [인계 없이 끝내기]를 누르거나, 데스크톱 앱에서 [끝내기]를 눌러 주세요', 'text-warning'],
     // story #4560 (Yuna `4560-limit-resume-copy.md` §③ · contract v2.1 §5): the app held off at the limit's end — «사용 한도» · its line ·
     // no button, on whichever limit word it comes
     [{ state: 'idle', activity: 'error', limit: { at: earlier, held: 'screen' } }, '사용 한도', '한도가 풀릴 때가 됐지만 그 컴퓨터의 터미널 화면이 예상과 달라 앱이 손대지 않았어요 — 그 컴퓨터의 터미널에서 확인해 주세요', 'text-warning'],

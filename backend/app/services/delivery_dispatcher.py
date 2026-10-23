@@ -174,6 +174,7 @@ async def _deliver_one(job: dict) -> None:
                 targets = await _fetch_expo_push_targets(
                     session, org_id, [uuid.UUID(m) for m in payload["member_ids"]],
                     muted_member_ids=_uuid_set_or_none(payload.get("muted_member_ids")),
+                    event_type=payload["event_type"],
                 )
                 await session.commit()
             dead_tokens = await _send_expo_push_targets(

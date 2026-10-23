@@ -18,6 +18,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 import lint_destructive_schema_weights_registered as lint_mod  # noqa: E402
 
@@ -216,6 +218,9 @@ def test_mutation_removing_provisional_flag_reintroduces_false_negative(monkeypa
     assert "tests/test_a.py" in out
 
 
+# story #4731 — this test collects the whole real repository in a subprocess (`uv run pytest --collect-only`, ~15k tests): measured 19.3 – 24.4 s on the CI runners
+# (four runs), i.e. 64 – 81 % of the default 30 s per-test timeout, so a slightly slower runner fails it for no reason in the code under test. Its own ceiling:
+@pytest.mark.timeout(120)
 def test_real_repo_state_smoke(capsys):
     """합성 fixture가 아니라 실물 repo 상태로 한 번 — discover_files()가 실제
     subprocess를 태워 217개(2026-09-04 실측)를 찾고, 그 시점 weights.json이 전부

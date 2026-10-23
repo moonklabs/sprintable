@@ -16,6 +16,7 @@ import { resolveScopedEntityHref, storyBoardUrl, goalUrl, sprintUrl, assetStorag
 import { renderEntityStatusLabel, translateEntityStatus, type EntityStatusFetchState } from './entity-status-labels';
 import { ArtifactThumbnail } from '@/components/canvas/artifact-thumbnail';
 import { sanitizeDocHtml } from '@/components/docs/doc-content-renderer';
+import { DOC_TABLE_RULES, DocTable, wrapTablesInScrollShell } from '@/components/docs/doc-table';
 import { fetchWithAuth } from '@/lib/db/client';
 import { fetchGateById } from '@/lib/fetch-gate';
 import { gateStatusLabel } from '@/lib/gate-status-label';
@@ -173,7 +174,7 @@ const makeMdBodyComponents = (withProject: (href: string) => string) => ({
     if (ref && ref.entityType.toLowerCase() !== 'asset') {
       return <EntityChip entityType={ref.entityType} entityId={ref.entityId} label={String(children)} href={getEntityHref(ref.entityType, ref.entityId, withProject)} />;
     }
-    return <a href={href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">{children}</a>;
+    return <a href={href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 [overflow-wrap:anywhere]">{children}</a>;
   },
   p: ({ children }: { children?: React.ReactNode }) => <p className="mb-2 text-sm leading-6">{children}</p>,
   h1: ({ children }: { children?: React.ReactNode }) => <h1 className="mb-2 text-lg font-bold">{children}</h1>,
@@ -184,7 +185,12 @@ const makeMdBodyComponents = (withProject: (href: string) => string) => ({
   li: ({ children }: { children?: React.ReactNode }) => <li className="text-sm leading-6">{children}</li>,
   // story #2165: 코드블럭은 전역 스크롤바 숨김 예외.
   pre: ({ children }: { children?: React.ReactNode }) => <pre className="mb-2 overflow-x-auto scrollbar-visible rounded-lg p-3 text-[13px] bg-muted">{children}</pre>,
-  code: ({ children }: { children?: React.ReactNode }) => <code className="rounded px-1 py-0.5 font-mono text-[13px] bg-muted">{children}</code>,
+  // story 4707: 긴 경로 · `GET /api/…/{id}` 토큰이 표 칸의 최소 폭을 키워 본문을 옆으로 미는 것을 막는다 — 어디서든 줄을 바꾼다.
+  code: ({ children }: { children?: React.ReactNode }) => <code className="rounded px-1 py-0.5 font-mono text-[13px] bg-muted [overflow-wrap:anywhere]">{children}</code>,
+  // story 4707 (Yuna AC0 · 선생님 폰 지적): 이 둘째 렌더러에는 표 · 구분선 처리기가 0이라 표 칸이 서로 붙고 넓은 표가 문서 전체를 옆으로 밀었다.
+  // 표는 전체 보기와 «정의 하나»(docs/doc-table.tsx) — 폰(<640)에서 4열 이상은 행마다 카드, 그 밖은 표만 가로 스크롤.
+  table: ({ children }: { children?: React.ReactNode }) => <DocTable phoneCards>{children}</DocTable>,
+  hr: () => <hr className="my-4 border-border" />,
   blockquote: ({ children }: { children?: React.ReactNode }) => <blockquote className="mb-2 border-l-2 pl-3 border-border text-muted-foreground">{children}</blockquote>,
   strong: ({ children }: { children?: React.ReactNode }) => <strong className="font-semibold">{children}</strong>,
   em: ({ children }: { children?: React.ReactNode }) => <em className="italic">{children}</em>,
@@ -197,13 +203,16 @@ export const MdBody = ({ content }: { content: string }) => {
   // 대상-프로젝트: 본문 · 상세 안 중첩 엔티티 토큰은 type · id뿐이라 대상 프로젝트를 모른다(칩을 열면 미리보기가 자기 프로젝트로 해소).
   const components = useMemo(() => makeMdBodyComponents(flatHref), [flatHref]);
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      urlTransform={(url) => (url.startsWith('entity:') ? url : defaultUrlTransform(url))}
-      components={components}
-    >
-      {content}
-    </ReactMarkdown>
+    // story 4707: 표 규칙은 전체 보기와 같은 상수 · 표 글은 본문과 같은 14px · min-w-0 = 긴 줄이 본문 상자를 옆으로 밀지 않는다
+    <div className={`min-w-0 ${DOC_TABLE_RULES} [&_th]:text-sm [&_td]:text-sm`}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        urlTransform={(url) => (url.startsWith('entity:') ? url : defaultUrlTransform(url))}
+        components={components}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
   );
 };
 
@@ -260,12 +269,11 @@ function renderEntityDetail(entityType: string, entityId: string, detail: Record
     if (!d.content) return null;
     if (d.content_format === 'html') {
       // 유나 design PASS 관찰(비차단, PR#3481) — table/code가 미스타일이었다. mdBodyComponents
-      // (markdown 경로)의 pre/code 사이징을 그대로 옮기고, table은 이 렌더러의 첫 소비처라
-      // 신규 최소셋(테두리+헤더 강조)만 준다 — 과설계 금지.
+      // (markdown 경로)의 pre/code 사이징을 그대로 옮긴다. story 4707: 표는 «정의 하나»(docs/doc-table.tsx — 규칙 상수 + 가로 스크롤 상자).
       return (
         <div
-          className="text-sm leading-6 [&_h1]:mb-2 [&_h1]:text-lg [&_h1]:font-bold [&_h2]:mb-2 [&_h2]:text-base [&_h2]:font-bold [&_h3]:mb-1.5 [&_h3]:text-sm [&_h3]:font-bold [&_p]:mb-2 [&_ul]:mb-2 [&_ul]:ml-4 [&_ul]:list-disc [&_ol]:mb-2 [&_ol]:ml-4 [&_ol]:list-decimal [&_pre]:mb-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:text-[13px] [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[13px] [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_table]:mb-2 [&_table]:w-full [&_table]:border-collapse [&_table]:text-[13px] [&_th]:border [&_th]:border-border [&_th]:bg-muted [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_th]:font-semibold [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1"
-          dangerouslySetInnerHTML={{ __html: sanitizeDocHtml(d.content) }}
+          className={`min-w-0 text-sm leading-6 [&_h1]:mb-2 [&_h1]:text-lg [&_h1]:font-bold [&_h2]:mb-2 [&_h2]:text-base [&_h2]:font-bold [&_h3]:mb-1.5 [&_h3]:text-sm [&_h3]:font-bold [&_p]:mb-2 [&_ul]:mb-2 [&_ul]:ml-4 [&_ul]:list-disc [&_ol]:mb-2 [&_ol]:ml-4 [&_ol]:list-decimal [&_pre]:mb-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:text-[13px] [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[13px] [&_pre_code]:bg-transparent [&_pre_code]:p-0 ${DOC_TABLE_RULES} [&_th]:text-sm [&_td]:text-sm`}
+          dangerouslySetInnerHTML={{ __html: wrapTablesInScrollShell(sanitizeDocHtml(d.content)) }}
         />
       );
     }
@@ -713,7 +721,7 @@ export function EntityPreviewModal({
   // 동일 재사용한다. embedded일 땐 DialogTitle(base-ui Dialog.Title — Dialog.Root 컨텍스트
   // 밖에서 쓰면 안전하지 않다)을 평범한 span으로 바꾸는 것만 다르다.
   const header = (TitleTag: 'dialog-title' | 'span') => (
-    <div className="flex flex-shrink-0 items-start gap-3 border-b border-border px-6 pt-5 pb-3">
+    <div className="flex flex-shrink-0 items-start gap-3 border-b border-border px-4 pt-4 pb-3 sm:px-6 sm:pt-5">
       <div className={`flex min-w-0 flex-1 items-center gap-2 rounded-md border px-3 py-1.5 text-sm ${colorClass}`}>
         <EntityGlyph Icon={resolveEntityIcon(entityType)} label={label} />
         {TitleTag === 'dialog-title' ? (
@@ -746,7 +754,8 @@ export function EntityPreviewModal({
   const gateSummary = detail && entityType === 'gate' ? renderGateSummary(detail, tWorkList, tDashboard, tCage) : null;
 
   const body = (
-    <div className="flex-1 overflow-y-auto px-6 py-4">
+    // story 4707: min-w-0 + 폰 px-4 — 본문이 옆으로 밀리지 않고 가장자리 여백이 12%를 먹지 않는다
+    <div className="min-w-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
       {loading ? (
         <div className="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground">
           <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -767,7 +776,7 @@ export function EntityPreviewModal({
   // Footer — story #2302 AC4: ㉠/㉡-b는 회색·기본커서로 "죽는 건 링크뿐"(카드 전체 안 죽음).
   // 색은 회색 하나(노랑 금지 — 위 GRAY_STATE_COLOR 주석 참고), 구별은 문구로.
   const footer = !loading && (
-    <div className="flex-shrink-0 border-t border-border px-6 py-3">
+    <div className="flex-shrink-0 border-t border-border px-4 py-3 sm:px-6">
       {notFound ? (
         <span className="flex cursor-default items-center gap-1.5 text-sm text-muted-foreground">{t('entityTargetMissing')}</span>
       ) : resolvedHref ? (

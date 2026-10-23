@@ -6,6 +6,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 from lint_no_hardcoded_iso_timestamp import main as lint_main, scan_source  # noqa: E402
 
@@ -65,5 +67,7 @@ def foo():
 
 # ─── AC — 실물 backend/app/**이 지금 실제로 깨끗한지 ────────────────────────────
 
+# story #4731 — measured 17.3 s (scans the real backend/app tree) on the CI runners against the default 30 s per-test timeout (a slower runner would fail it for no reason in the code under test):
+@pytest.mark.timeout(120)
 def test_current_repo_passes_the_guard():
     assert lint_main() == 0

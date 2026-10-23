@@ -21,9 +21,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session_factory
+from app.core.sse_event_name import sse_event_name
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
 from app.models.desktop_setup import DesktopSetup
+from app.services import desktop_clock
 from app.services import desktop_relay as relay
 from app.services.agent_permissions import HostAdded, HostConfirm, PairingReveal, PairingSnapshot, PermissionRequestReport, Withdrawal
 from app.services.desktop_relay import SESSION_KEY_PATTERN
@@ -112,6 +114,7 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
         last_beat = last_check = time.monotonic()
         removals_sent: set[str] = set()  # each connection sends a removal once; the next connection again until it is dropped
         offers_sent: set[str] = set()  # story #4531 — each live pairing offer once per connection, again on the next
+        reactivated_marks: set[str] = set()  # story 4739 — agents a wake named as turned on again (read below; each is looked at again before its frame)
         try:
             # story #4607 (run13b ⑪ · PO 21:02Z): a first byte now — the front end holds the response head until the body's first byte,
             # and the first heartbeat is 30 s away: the daemon counted every reconnect (each ~5 min 20 s) as 30 s closed and held its
@@ -139,6 +142,8 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
                     commands = await relay.commands_to_send(s, setup_id, last_seq)
                     removals = [fp for fp in await agent_permissions.removals_to_send(s, setup_id) if fp not in removals_sent]
                     offers = [o for o in await agent_permissions.offers_to_send(s, setup_id) if o["offer_id"] not in offers_sent]
+                    reactivated = await relay.reactivated_to_send(s, setup_id, reactivated_marks) if reactivated_marks else []
+                    reactivated_marks.clear()
                     if now - last_beat >= _HEARTBEAT_SEC:
                         await relay.touch_device(s, setup_id)
                     await s.commit()
@@ -148,6 +153,8 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
                 for o in offers:  # story #4531 — adds nothing by itself: the daemon pins only an offer it opened, its MAC and a person's [같아요]
                     offers_sent.add(o["offer_id"])
                     yield f"event: pairing_offer\ndata: {json.dumps(o)}\n\n"
+                for aid in reactivated:  # story 4739 — a hint only: this agent's receiving may skip its wait now (the key still proves itself at the connect)
+                    yield f"event: {sse_event_name(relay.AGENT_REACTIVATED_CODE)}\ndata: {json.dumps({'agent_member_id': str(aid)})}\n\n"
                 for c in commands:
                     frame = {"command_id": str(c.id), "kind": c.kind, "session_key": c.session_key, "payload": c.payload,
                              "created_at": c.created_at.isoformat() if c.created_at else None}
@@ -164,6 +171,11 @@ async def device_stream(request: Request, setup: DesktopSetup = Depends(_device)
                     # story #4554 ④: the disconnect's own signal — recheck now, not at the next 30-second check
                     if any(isinstance(w, dict) and w.get(relay.DISCONNECTED_CODE) for w in woke):
                         last_check = float("-inf")
+                    # story 4739: an agent turned on again — its id is kept for the next read (which looks again before sending). The stream's wake queue holds 50, so one read
+                    # never names more than 50 agents; a wake the full queue pushed out costs the daemon nothing worse than its own back-off (the frame is a hint, never the only way back)
+                    for w in woke:
+                        if isinstance(w, dict) and isinstance(w.get(relay.AGENT_REACTIVATED_CODE), str) and len(reactivated_marks) < 50:
+                            reactivated_marks.add(w[relay.AGENT_REACTIVATED_CODE])
                 except asyncio.TimeoutError:
                     pass
         finally:
@@ -194,8 +206,19 @@ async def device_setup_facts(setup: DesktopSetup = Depends(_device), db: AsyncSe
     here, with its own device token. Not a secret: `X-Desktop-Org-Id` on the stream already names the org to this token's holder."""
     from app.models.organization import Organization
 
+    from app.services import agent_permissions
+    from app.services.desktop_computers import computer_index
+
     name = (await db.execute(select(Organization.name).where(Organization.id == setup.org_id))).scalar_one_or_none()
-    return {"org_id": str(setup.org_id), "org_name": name}
+    # story 4734: the computer this setup belongs to, and the phones a person removed from a setup of it (the device's one-time merge leaves them out) — and, on the same
+    # grouping read, the ones of those that are NOT paired with the computer now (the device keeps these in its own record on every connect)
+    removals = await agent_permissions.phone_removals(db, setup=setup)
+    return {
+        "org_id": str(setup.org_id), "org_name": name,
+        "computer_id": str((await computer_index(db, setup.org_id)).get(setup.id) or ""),  # (null removed_phones: the grouping is incomplete — do not merge now)
+        "removed_phones": None if removals is None else removals[0],
+        "removed_phones_now": None if removals is None else removals[1],
+    }
 
 
 @router.put("/relay/sessions")
@@ -244,6 +267,108 @@ async def post_command_result(
         return _error(exc)
     await db.commit()
     return {"command_id": str(cmd.id), "state": cmd.state}
+
+
+@router.get("/startable")
+async def get_startable_computers(
+    phone_key_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story #4714 (contract v1.18): the phone's first screen in one read — this person's phone's paired computers, each with its agents
+    and the projects an agent can be started for. A person's own session (an API key or an agent key is 403); ids and names, never a path."""
+    from app.routers.auth import _requires_interactive_session
+    from app.services import desktop_commands
+    from app.services.member_resolver import resolve_member
+
+    if _requires_interactive_session(auth):
+        raise HTTPException(status_code=403, detail={"code": "person_session_required", "message": "a person's session is required"})
+    member = await resolve_member(auth, org_id, db)
+    if member.type != "human":
+        raise HTTPException(status_code=403, detail={"code": "person_session_required", "message": "a person's session is required"})
+    user_id = uuid.UUID(str(auth.user_id))
+    return await desktop_commands.startable_computers_view(
+        db, member_id=uuid.UUID(str(member.id)), member_role=await desktop_commands.org_role(db, org_id, user_id), user_id=user_id,
+        org_id=org_id, phone_key_id=phone_key_id,
+    )
+
+
+async def _phone_person(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID):
+    """A person's own session (an API key or an agent key is 403) — the phone's presses and reads of a computer's clock."""
+    from app.routers.auth import _requires_interactive_session
+    from app.services.member_resolver import resolve_member
+
+    if _requires_interactive_session(auth):
+        raise HTTPException(status_code=403, detail={"code": "person_session_required", "message": "a person's session is required"})
+    member = await resolve_member(auth, org_id, db)
+    if member.type != "human":
+        raise HTTPException(status_code=403, detail={"code": "person_session_required", "message": "a person's session is required"})
+    return member
+
+
+@router.post("/setups/{setup_id}/clock")
+async def post_clock(
+    setup_id: uuid.UUID,
+    body: desktop_clock.ClockRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story #4733 (S2): a phone's signed clock-out / clock-in of one whole computer (`clock` command: action out_open · out_submit · out_cancel · in).
+    A person's own session; who may press and the phone's pairing are checked in services.desktop_clock. The daemon judges whether the action fits."""
+    member = await _phone_person(db, auth, org_id)
+    try:
+        cmd, state = await desktop_clock.create_clock(
+            db, member_id=uuid.UUID(str(member.id)), user_id=uuid.UUID(str(auth.user_id)), org_id=org_id, setup_id=setup_id, body=body,
+        )
+    except relay.DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await db.commit()
+    content: dict = {"command_id": str(cmd.id), "state": state}
+    if (cmd.payload or {}).get("computer"):  # story #4734 (B): a computer-wide press says how many of the computer's agents it covers — «N개 중 K개»; any other press answers as before
+        content["agents"] = {"total": cmd.payload["scope_total"], "pressable": len(cmd.payload["scope"])}
+    return JSONResponse(status_code=201, content=content)
+
+
+@router.get("/setups/{setup_id}/clock")
+async def get_clock(
+    setup_id: uuid.UUID,
+    phone_key_id: uuid.UUID,
+    computer: bool = False,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story #4733 (S2): the closed clock view the computer reported (null when no flow is open), for the paired phone of a person who may command it.
+    story #4734 (B): `computer=true` also says how many of the computer's agents a whole-computer press would name («N개 중 K개», counts only) — for the phone's confirm screen, before it signs."""
+    member = await _phone_person(db, auth, org_id)
+    try:
+        body = await desktop_clock.clock_view_read(
+            db, member_id=uuid.UUID(str(member.id)), user_id=uuid.UUID(str(auth.user_id)), org_id=org_id, setup_id=setup_id, phone_key_id=phone_key_id, computer=computer,
+        )
+    except relay.DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await db.commit()  # an expired view is deleted by the read
+    return body
+
+
+@router.get("/setups/{setup_id}/clock/commands/{command_id}")
+async def get_clock_command(
+    setup_id: uuid.UUID,
+    command_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story #4733 (S2): the result line of a clock press — for the person who pressed only."""
+    member = await _phone_person(db, auth, org_id)
+    try:
+        return await desktop_clock.get_clock_command(db, member_id=uuid.UUID(str(member.id)), org_id=org_id, setup_id=setup_id, command_id=command_id)
+    except relay.DesktopRelayError as exc:
+        return _error(exc)
 
 
 @router.get("/setups/{setup_id}/sessions")
@@ -372,6 +497,37 @@ async def post_pairing_reveal(offer_id: uuid.UUID, body: PairingReveal, setup: D
         return _error(exc)
     await db.commit()
     return {"state": "revealed"}
+
+
+@router.put("/relay/startable")
+async def put_startable(body: relay.StartableSnapshot, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story #4714: the computer's own list of the (agent, project) pairs it has a usable folder for — ids only; replaces the whole list. The list is
+    narrowed first to the pairs its agents can really have (`accessible_startable`: the agent's project profile · a live project of this organization)."""
+    try:
+        narrowed, dropped = await relay.accessible_startable(db, setup, body)
+        n, applied, held = await relay.replace_startable(db, setup, narrowed)
+        if applied:  # story #4734 (B): a report a newer one has already covered says nothing about what the computer takes NOW
+            await relay.note_computer_press(db, setup, body.computer_press is True)
+    except relay.DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await db.commit()
+    # `dropped_agents`: agents in the list this device was not set up with (left out, not refused) · `applied` False = a newer report had already been applied
+    # `startable_seq`: the report number the server holds after this report (null = none yet) — when `applied` is false the computer goes on from it
+    return {"startable": n, "dropped_agents": [str(a) for a in dropped], "applied": applied, "startable_seq": held}
+
+
+@router.put("/relay/clock-view")
+async def put_clock_view(body: desktop_clock.ClockViewReport, setup: DesktopSetup = Depends(_device), db: AsyncSession = Depends(get_db)):
+    """story #4733 (S2): the computer's closed clock view while a clock-out / clock-in flow is open; `none` ends it. Numbered like the startable list: a report
+    at or below the highest applied is ignored (`applied` false) and the computer goes on from `clock_view_seq`. Nothing of the body is logged."""
+    try:
+        applied, held, dropped = await desktop_clock.apply_clock_view(db, setup, body)
+    except relay.DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await db.commit()
+    return {"applied": applied, "clock_view_seq": held, "dropped_rows": dropped}
 
 
 @router.put("/relay/pairings")

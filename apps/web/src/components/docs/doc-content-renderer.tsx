@@ -29,6 +29,7 @@ import { docUrl } from './lib/doc-project-url';
 import { remarkWikiLinks } from './lib/remark-wiki-links';
 import { safeAttachmentDataUrl, safeHttpUrl } from './lib/safe-content-url';
 import { formatFileSize } from './extensions/file-node';
+import { DOC_TABLE_RULES, DocTable, wrapTablesInScrollShell } from './doc-table';
 
 interface DocContentRendererProps {
   content: string;
@@ -842,12 +843,8 @@ export function DocContentRenderer({
       }
       return <NextImage src={hasSrc ? (src as string) : ''} alt={alt ?? ''} width={800} height={600} style={{ maxWidth: '100%', height: 'auto' }} unoptimized />;
     },
-    table: ({ children }: { children?: ReactNode }) => (
-      // story #2165: 표도 코드블럭과 같은 성격 — 가로로 잘린 열이 있다는 것을 알려야 한다.
-      <div className="not-prose overflow-x-auto scrollbar-visible rounded-xl border border-border">
-        <table>{children}</table>
-      </div>
-    ),
+    // story #2165: 표도 코드블럭과 같은 성격 — 가로로 잘린 열이 있다는 것을 알려야 한다. story 4707: 챗 미리보기와 같은 «표 정의 하나»(doc-table.tsx).
+    table: ({ children }: { children?: ReactNode }) => <DocTable>{children}</DocTable>,
     pre: ({ children }: { children?: ReactNode }) => <>{children}</>,
     code: (props) => {
       const { children, className: codeClassName } = props as { children?: ReactNode; className?: string };
@@ -891,9 +888,7 @@ export function DocContentRenderer({
     '[&_a:not(:where([data-doc-part],[data-doc-part]_*))]:text-brand-text [&_a:not(:where([data-doc-part],[data-doc-part]_*))]:underline [&_a:not(:where([data-doc-part],[data-doc-part]_*))]:underline-offset-4',
     '[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:bg-muted/30 [&_blockquote]:px-4 [&_blockquote]:py-3 [&_blockquote]:text-muted-foreground',
     '[&_img]:max-h-[32rem] [&_img]:w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border [&_img]:object-contain',
-    '[&_table]:w-full [&_table]:border-collapse [&_table]:overflow-hidden [&_table]:rounded-xl [&_table]:border [&_table]:border-border [&_table]:bg-muted/20',
-    '[&_thead]:bg-muted/50 [&_th]:border [&_th]:border-border [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold',
-    '[&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2',
+    DOC_TABLE_RULES, // story 4707: 표 규칙 한 줄 — 챗 미리보기 본문 감싸개와 같은 상수
     '[&_hr]:my-8 [&_hr]:border-border',
     '[&_ul]:space-y-2 [&_ol]:space-y-2',
     '[&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:border [&_pre]:border-border [&_pre]:bg-muted [&_pre]:text-foreground [&_pre]:p-4 [&_pre]:text-xs [&_pre]:leading-6',
@@ -1148,9 +1143,7 @@ function decorateHtmlContent(content: string, headings: ReturnType<typeof extrac
     return `<h${level} id="${escapeHtmlAttribute(heading.id)}">${sanitizeHeadingInner(inner)}</h${level}>`;
   });
 
-  const withTableShells = withHeadingIds.replace(/<table\b[\s\S]*?<\/table>/gi, (tableMarkup) => {
-    return `<div class="not-prose overflow-x-auto scrollbar-visible rounded-xl border border-border">${tableMarkup}</div>`;
-  });
+  const withTableShells = wrapTablesInScrollShell(withHeadingIds); // story 4707: 챗 미리보기 html 경로와 같은 감싸개
 
   return withTableShells.replace(/<pre>([\s\S]*?)<\/pre>/gi, (_match, inner) => {
     return [

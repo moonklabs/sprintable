@@ -12,6 +12,8 @@ Mutation (local): the owner check removed → RED. The `desktop.run_profile` tri
 """
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (autouse ones apply here too)
@@ -19,6 +21,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
     OWNER,
     OWNER_TM,
     PLAIN,
+    PROJ,
     _addresses,
     _client,
     _dispose_global_engine_after_test,
@@ -208,6 +211,11 @@ async def test_03d_the_other_way_round_the_two_switches_answer_alike_on_both_bra
         device = await _device(c, name="d4424 mac 4598c4")
         a = device["agents"][0]["member_id"]
         await _set_runtime(a, "claude-code")
+        # story #4730 — «the creator» of the agent passes the ownership guard only while she still holds a seat that may create it (the
+        # rule POST /team-members applies, read from org_members + project_access). This test demotes ONLY the legacy org_members column to
+        # measure the two switches, so the owner keeps an explicit admin grant on the project: the creator seat is not what is under test.
+        grant = uuid.uuid4()
+        await _sql(f"INSERT INTO project_access (id, project_id, org_member_id, permission, role) VALUES ('{grant}', '{PROJ}', '{OWNER_TM}', 'granted', 'admin')")
         try:
             await _sql(f"UPDATE members SET org_role = 'owner' WHERE id = '{OWNER_TM}'")
             await _sql(f"UPDATE org_members SET role = 'member' WHERE id = '{OWNER_TM}'")
@@ -231,6 +239,7 @@ async def test_03d_the_other_way_round_the_two_switches_answer_alike_on_both_bra
         finally:
             await _sql(f"UPDATE org_members SET role = 'owner' WHERE id = '{OWNER_TM}'")
             await _sql(f"UPDATE members SET org_role = 'owner' WHERE id = '{OWNER_TM}'")
+            await _sql(f"DELETE FROM project_access WHERE id = '{grant}'")
 
 
 async def test_04_many_at_once_and_what_keeps_the_flag(world):

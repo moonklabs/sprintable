@@ -54,7 +54,6 @@ export function useChatUnreadTotal(currentTeamMemberId?: string): number {
   }, []);
 
   useChatSse({
-    currentTeamMemberId,
     // story #4440 — my own message (now echoed to my other tabs) is never unread
     onConversationMessage: (payload) => { if (!isOwnMessage(payload, currentTeamMemberId)) setTotal((prev) => prev + 1); },
     onConversationRead: () => fetchTotalRef.current?.(),

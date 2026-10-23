@@ -5,7 +5,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -302,11 +302,75 @@ class OrganizationRepository:
             if impact.has_active_subscription:
                 return {"ok": False, "reason": "active_subscription"}
 
+        return await self._close_organization(org, actor_user_id=user_id, note=impact_note)
+
+    async def delete_for_account_closure(self, org_id: uuid.UUID, user_id: uuid.UUID) -> dict:
+        """story #4752 (AC4, PO rule): the account deletion closes an organization whose only active member is the person deleting the account — the same closing as the owner's
+        organization delete (`_close_organization`: audit row, people's seats, public links and keys, channel tokens), without the typed name or the impact preview (the
+        confirmation window of the account deletion names the organizations that close with it). Whatever the person's role. An active (or in-flight) subscription stops it —
+        `active_subscription`: a paid organization is cancelled first, by hand. The organization row is locked first, as in the owner's delete."""
+        lock_result = await self.session.execute(select(Organization).where(Organization.id == org_id).with_for_update())
+        org = lock_result.scalar_one_or_none()
+        if org is None:
+            return {"ok": False, "reason": "not_found"}
+        if await self._has_active_or_in_flight_subscription(org_id):
+            return {"ok": False, "reason": "active_subscription"}
+        # the plan said nobody else is active here; someone may have joined since (an accepted invite does not take this lock) — look again, now that the row is held (codex 5189)
+        joined = (await self.session.execute(
+            text(
+                "SELECT count(*) FROM org_members x"
+                " WHERE x.org_id = :o AND x.deleted_at IS NULL AND x.user_id <> :u"
+            ),
+            {"o": org_id, "u": user_id},
+        )).scalar_one()
+        if joined:
+            return {"ok": False, "reason": "members_joined"}
+        return await self._close_organization(org, actor_user_id=user_id, note="account deletion: the only member left, the organization closes with the account")
+
+    async def _close_organization(self, org: Organization, *, actor_user_id: uuid.UUID, note: str | None) -> dict:
+        """The closing of an organization both deletes share (the owner's delete and the account deletion): the checks (who may · name · impact · subscription) are the callers'."""
+        org_id = org.id
         self.session.add(DeletionAuditLog(
-            id=uuid.uuid4(), org_id=org_id, actor_id=user_id,
+            id=uuid.uuid4(), org_id=org_id, actor_id=actor_user_id,
             entity_type="organization", entity_id=org_id, entity_title=org.name,
-            note=impact_note,
+            note=note,
         ))
+        # story 4726 — `org_members.org_id` has no foreign key (baseline schema.sql: only a primary key and a unique on
+        # (org_id, user_id)), so deleting the organizations row below does not remove the people's rows: the owner row stayed
+        # with deleted_at NULL and kept counting in the free plan's owned-organization limit (ee/plan_limits.py
+        # check_org_create_limit) — the one person who deleted their only organization could not make a new one (402 on dev,
+        # 10-17). The rows of a deleted organization are ended with it, in the same transaction, the way an account or member
+        # removal ends them (deleted_at): every reader of org_members already filters `deleted_at IS NULL`, so the fix lives
+        # here once instead of in each of the readers (35 raw queries and 73 ORM selects).
+        await self.session.execute(
+            update(OrgMember)
+            .where(OrgMember.org_id == org_id, OrgMember.deleted_at.is_(None))
+            .values(deleted_at=func.now())
+        )
+        # story 4728 (AC0 measured on a real PG): the organization row going away leaves the public links, public keys and agent keys
+        # of that organization alive in tables with no foreign key to it (doc_share_tokens · org_metering_keys · site_posts · agent_api_keys
+        # all keep org_id as a plain column) — a doc share link kept answering 200 with the deleted organization's text. They are ended
+        # here, in the delete's own transaction, before `members` is cascaded away (that cascade turns agent_api_keys.member_id to NULL and
+        # the key could no longer be matched to its organization). The public readers also check that the organization exists
+        # (services/doc_share.resolve_public · services/pageview_counter.resolve_org_by_public_key), which covers organizations that were
+        # deleted before this change.
+        for stmt in (
+            "UPDATE doc_share_tokens SET status = 'revoked', revoked_at = now() WHERE org_id = :o AND status = 'active'",
+            "UPDATE org_metering_keys SET revoked_at = now() WHERE org_id = :o AND revoked_at IS NULL",
+            "UPDATE site_posts SET unpublished_at = now() WHERE org_id = :o AND unpublished_at IS NULL",
+            # the same for what background jobs would keep using for a dead organization: the channel tokens its refresh cron renews, the
+            # GA4 tokens its scoring cron reads, and the posts that are still waiting to go out to an outside channel
+            "UPDATE channel_connections SET status = 'revoked', encrypted_access_token = NULL, encrypted_refresh_token = NULL"
+            " WHERE org_id = :o AND status <> 'revoked'",
+            "DELETE FROM ga4_connections WHERE org_id = :o",
+            "UPDATE publication_commands SET status = 'cancelled' WHERE org_id = :o AND status IN ('pending', 'blocked', 'blocked_unapproved')",
+            (
+                "UPDATE agent_api_keys SET revoked_at = now() WHERE revoked_at IS NULL"
+                " AND (member_id IN (SELECT id FROM members WHERE org_id = :o)"
+                " OR team_member_id IN (SELECT id FROM members WHERE org_id = :o))"
+            ),
+        ):
+            await self.session.execute(text(stmt), {"o": org_id})
         await self.session.delete(org)
         return {"ok": True}
 

@@ -43,6 +43,8 @@ interface Participant {
   // [conversation_id]/page.tsx의 Participant와 동일 계약). optional — BE 기본값(True)과
   // 짝 맞춰 필드 자체가 없으면 "실존"으로 읽는다(participantDisplayLabel).
   resolved?: boolean;
+  /** story #4752 — the account was deleted and anonymized: «탈퇴한 사용자 / Deleted user» (participantDisplayLabel). */
+  departed?: boolean;
   /** story 4675 (F2) — the computer an agent participant is bound to (the server's `_fetch_conversation_participants` · this
    *  org's setups only); null/absent for humans, agents with no live desktop key, and an older server */
   device_name?: string | null;
@@ -398,7 +400,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const isAdminOrOwner = role === 'admin' || role === 'owner';
   // story #3888 CHANGES①(PO PR 코멘트, 2026-09-14 18:53Z) — useOrgDomainLabels를
   // ConversationRow(행 컴포넌트) 안에서 부르면 목록 1회 마운트에 대화 수만큼(최대 30+
-  // 에이전트 대화) 같은 domain-labels 요청이 중복 발사된다(훅 자체엔 캐시·dedupe가 없다).
+  // 에이전트 대화) 같은 domain-labels 요청이 중복 발사된다(story #4748 前엔 훅 자체에 캐시·dedupe가 없었다 — 지금은 훅이 한 조직 값을 한 번만 받아 이 부모 1회 호출은 렌더 수를 줄이는 몫만 남는다).
   // 이 부모(ChatListView)에서 1회만 호출해 domainLabels를 prop으로 내린다 — 행이 몇
   // 개든 요청은 항상 1건.
   const locale = useLocale();
@@ -650,7 +652,6 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   }, [fetchConversations, fetchAllConversations]);
 
   const { connected, polling } = useChatSse({
-    currentTeamMemberId,
     onConversationMessage: handleConversationMessage,
     onSentHere: handleConversationMessage, // story #4442 — this tab's own sends (my message: up, never unread)
     onConversationRead: handleConversationRead,

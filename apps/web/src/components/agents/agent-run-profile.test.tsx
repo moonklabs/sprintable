@@ -9,6 +9,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
 import { effortsFor, keepEffortIfTaken, modelNameOk, saveErrorKey, sharedRuntime, type RunProfileOptions } from '@/lib/agent-run-profile';
 import { AgentRunProfileFields, CUSTOM, DEFAULT, KEEP, draftBody, draftReady, initialDraft, withModel, withRuntime } from './agent-run-profile-fields';
 import { AgentRunProfileSection } from './agent-run-profile-section';
@@ -297,6 +298,22 @@ describe('AgentRunProfileSection — «묻지 않고 일하기» (story #4598)',
     expect(saveButton()!.disabled).toBe(true);
   });
 
+  // story #4708 (Yuna `yuna/4708-copy-1016.md` row 2 · after the app stopped fencing an unattended session — mobile PR 564): the why-line says
+  // what is true now — tools run right away and the person's own Claude Code settings decide the rest. The old promises («건너뛰어요» ·
+  // «울타리는 그대로») are gone in both languages, and so is any word about one tool still asking (PO 02:1xZ: the webhook `ask` line is an
+  // app fence too and leaves with the next permission-mode PR — the copy promises nothing about it).
+  it("[4708] the why-line: Yuna's words in ko and en, and no old promise (skipped · fences stay) nor any word about a tool that still asks", () => {
+    const en = enMessages.agents as unknown as Record<string, string>;
+    expect(ag.runProfileUnattendedHelp).toBe(
+      '켜면 이 에이전트는 도구를 쓸 때 사람에게 묻지 않고 바로 해요. 폰·웹 승인 카드도 오지 않아요. 무엇을 하고 못 하게 할지는 그 컴퓨터의 Claude Code 설정을 따라요',
+    );
+    expect(en.runProfileUnattendedHelp).toBe(
+      'When on, this agent uses tools right away without asking a person. No approval cards reach your phone or web. What it may and may not do follows the Claude Code settings on that computer',
+    );
+    for (const old of ['건너뛰어요', '허용되지 않은', '울타리', '웹훅']) expect(ag.runProfileUnattendedHelp).not.toContain(old);
+    for (const old of ['skipped', 'not already allowed', 'fences', 'stay as they are', 'webhook']) expect(en.runProfileUnattendedHelp).not.toContain(old);
+  });
+
   it('an admin (may change model · effort, not the switch): no switch — the visible «소유자(윤재 · 도선)만» line with the value · a save carries no unattended', async () => {
     const puts = await render({ ...base, unattended: true, can_change_unattended: false });
     expect(unattendedSwitch()).toBeNull();
@@ -326,6 +343,13 @@ describe('AgentRunProfileSection — «묻지 않고 일하기» (story #4598)',
     const puts = await render({ ...base, runtime: 'codex', model: 'gpt-6-sol', effort: 'ultra', unattended: false, can_change_unattended: true });
     expect(unattendedSwitch()).toBeNull();
     expect(unattendedLine()).toBe(ag.runProfileUnattendedCodex);
+    // story 4708 (Yuna `4708-copy-1016.md` row 5): after the app stopped deciding what a Codex agent is asked, the line promises only what is true —
+    // Sprintable's own work goes without asking, the rest follows the Codex settings on that computer — and the old «지금처럼 물어요» is gone
+    expect(ag.runProfileUnattendedCodex).toBe('묻지 않고 일하기 · Claude Code 에이전트만 돼요 — 이 에이전트는 Sprintable 안의 일은 묻지 않고, 다른 도구는 그 컴퓨터의 Codex 설정대로 묻거나 바로 해요');
+    const enAg = enMessages.agents as unknown as Record<string, string>;
+    expect(enAg.runProfileUnattendedCodex).toBe('Work without asking · Claude Code agents only — this agent does Sprintable work without asking; other tools ask or go ahead as the Codex settings on its computer say');
+    for (const old of ['지금처럼', '도구를 쓸 때마다']) expect(ag.runProfileUnattendedCodex).not.toContain(old);
+    for (const old of ['keeps asking', 'as it does now', 'for each tool']) expect(enAg.runProfileUnattendedCodex).not.toContain(old);
     expect(unattendedLine()).not.toContain('소유자');
     const trigger = [...container.querySelectorAll('button[aria-labelledby]')].find((b) => nameOf(b).startsWith('모델')) as HTMLElement;
     await act(async () => {

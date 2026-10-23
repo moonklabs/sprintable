@@ -3,15 +3,20 @@
 import { createContext, useContext } from 'react';
 import { useSseMultiplexer, type SseMultiplexerHandle } from '@/lib/realtime/sse-multiplexer';
 
-// story #2078(E-ARCH 0단계) — 피처플래그: OFF(기본)면 presence·notification·chat 훅이 각자
-// 기존 방식대로 독립 EventSource를 연다(회귀 0, 이 스토리 이전 동작 그대로). ON이면 이
-// Provider가 탭당 1개만 열고 세 훅이 이름별로 구독만 얹는다. 문제가 생기면 이 값만
-// 되돌리면 즉시 롤백된다(코드 되돌림·재배포 불요 — env만 바꾸면 다음 배포에 반영).
-export const SSE_MULTIPLEX_ENABLED = process.env['NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED'] === 'true';
+// story #2078(E-ARCH 0단계) — presence · notification · chat이 각자 EventSource를 열어 탭당 연결이 3~4개였다. 이 Provider가 탭당 1개만 열고 세 훅이
+// 이름별로 구독만 얹는다.
+//
+// story #4698 — 롤아웃 플래그(NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED)를 끝냈다: «끔» 길(훅마다 독립 EventSource)은 지웠고 **늘 이 한 줄기**뿐이다.
+// 끔 길의 탭당 스트림 3~4개가 크롬의 낮은 우선순위 요청 대기(대화 탭 청크 · 프리패치 15~20초)의 원인이었다(4698 에뮬 실측). 스트림을 여는 자리가 이
+// 한 곳을 벗어나지 않게 lib/realtime/sse-single-stream.guard.test.ts가 지킨다.
+//
+// Provider를 두는 곳은 대시보드 셸과 (v3) 레이아웃뿐이다(둘 다 member_id를 안다 — BE는 JWT 세션이 member_id 없이 /events/stream을 열면 400으로 거절한다).
+// /today · /connect-rules 레이아웃과 온보딩 연결 단계는 member_id를 모른 채 훅이 독립 EventSource로 폴백했고 그 스트림은 늘 400이었다 — 폴백을 지운 지금 그 자리는
+// 스트림이 없다(실제로 받던 실시간 0). 그 자리에 실시간이 필요하면 member_id를 공급하는 Provider를 따로 둔다(이 스토리 밖).
 
 const SseMultiplexerContext = createContext<SseMultiplexerHandle | null>(null);
 
-/** null이면(플래그 OFF 또는 Provider 밖) 호출부가 기존 독립 EventSource 경로로 폴백한다. */
+/** null은 Provider 밖일 때뿐이다 — 그때 훅은 스트림을 열지 않는다(독립 EventSource 폴백 없음 · story #4698). 실시간이 필요한 화면은 Provider 안에 둔다. */
 export function useSseMultiplexerContext(): SseMultiplexerHandle | null {
   return useContext(SseMultiplexerContext);
 }
@@ -39,12 +44,11 @@ interface RealtimeProviderProps {
 }
 
 export function RealtimeProvider({ currentTeamMemberId, children }: RealtimeProviderProps) {
-  // 플래그 OFF면 enabled=false를 넘겨 훅 내부에서 EventSource를 아예 안 열게 한다(이중 연결 방지).
-  const multiplexer = useSseMultiplexer(currentTeamMemberId, SSE_MULTIPLEX_ENABLED);
+  const multiplexer = useSseMultiplexer(currentTeamMemberId);
 
   return (
-    <SseMultiplexerContext.Provider value={SSE_MULTIPLEX_ENABLED ? multiplexer : null}>
-      <SseConnectedContext.Provider value={SSE_MULTIPLEX_ENABLED ? multiplexer.connected : false}>
+    <SseMultiplexerContext.Provider value={multiplexer}>
+      <SseConnectedContext.Provider value={multiplexer.connected}>
         {children}
       </SseConnectedContext.Provider>
     </SseMultiplexerContext.Provider>

@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 //
 // story #2139 — 폴백 정책 결정(PO): 주기 폴링은 재도입하지 않고(#2074 인스턴스 기아 교훈),
-// 재연결 시 1회 강제 refetch만 추가한다. 이 테스트는 독립 EventSource 폴백 경로(mux 없음)에서
-// isReconnect() 판정이 정확히 작동하는지 고정한다 — onerror를 안 걸면 hadPriorError가 영원히
-// false라 재연결 refetch가 죽은 코드가 되는 함정이 있어(직접 확認), 그 회귀를 막는다.
+// 재연결 시 1회 강제 refetch만 추가한다. 이 테스트는 공유 스트림(RealtimeProvider)의 재연결에서 refetch가 1회 붙는지 고정한다.
+// story #4698 — 독립 EventSource 폴백은 지웠다(훅은 스트림을 열지 않는다).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { RealtimeProvider } from '@/components/realtime-provider';
 import { useTeamPresence } from './use-team-presence';
 
 class FakeEventSource {
@@ -17,7 +17,7 @@ class FakeEventSource {
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
   static readonly CLOSED = 2;
-  listeners: Record<string, Array<() => void>> = {};
+  listeners: Record<string, Array<(e?: unknown) => void>> = {};
   onopen: (() => void) | null = null;
   onerror: (() => void) | null = null;
   closed = false;
@@ -25,12 +25,12 @@ class FakeEventSource {
   constructor(public url: string, _opts?: unknown) {
     FakeEventSource.instances.push(this);
   }
-  addEventListener(type: string, cb: () => void) {
+  addEventListener(type: string, cb: (e?: unknown) => void) {
     (this.listeners[type] ??= []).push(cb);
   }
   close() { this.closed = true; }
   emit(type: string) {
-    for (const cb of this.listeners[type] ?? []) cb();
+    for (const cb of this.listeners[type] ?? []) cb({ data: '{}', lastEventId: '' }); // 멀티플렉서 리스너는 MessageEvent를 읽는다
   }
 }
 
@@ -57,12 +57,16 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function Harness({ active, memberId }: { active: boolean; memberId?: string }) {
-  useTeamPresence(active, memberId);
+// story #4698 — 훅은 스트림을 열지 않는다(독립 EventSource 폴백 삭제). 스트림은 RealtimeProvider(멀티플렉서)의 것이라 시험도 Provider 안에서 돈다.
+function Inner({ active }: { active: boolean }) {
+  useTeamPresence(active);
   return null;
 }
+function Harness({ active }: { active: boolean; memberId?: string }) {
+  return <RealtimeProvider currentTeamMemberId="m1"><Inner active={active} /></RealtimeProvider>;
+}
 
-describe('useTeamPresence — 독립 연결 폴백의 재연결 refetch(#2139)', () => {
+describe('useTeamPresence — 공유 스트림 재연결 refetch(#2139)', () => {
   it('최초 open은 refetch를 유발하지 않는다(초기 스냅샷 fetch 1회만)', async () => {
     await act(async () => {
       root.render(<Harness active memberId="m1" />);
@@ -179,7 +183,7 @@ describe('useTeamPresence — presence 폭주 가드(#2139)', () => {
 
     const renderedItemsRef: { current: Array<{ member_id: string }> } = { current: [] };
     function Consumer() {
-      const items = useTeamPresence(true, 'm1');
+      const items = useTeamPresence(true);
       useEffect(() => {
         renderedItemsRef.current = items as unknown as Array<{ member_id: string }>;
       });
@@ -187,7 +191,7 @@ describe('useTeamPresence — presence 폭주 가드(#2139)', () => {
     }
 
     await act(async () => {
-      root.render(<Consumer />);
+      root.render(<RealtimeProvider currentTeamMemberId="m1"><Consumer /></RealtimeProvider>);
       await Promise.resolve();
     });
     expect(fetchMock).toHaveBeenCalledTimes(1); // 초기 요청 — 아직 in-flight
@@ -225,12 +229,11 @@ describe('useTeamPresence — mux 공유 커넥션 경로의 connected 참조 �
 
   it('최초 connected flip(false→true)은 추가 fetchPresence를 유발하지 않는다', async () => {
     vi.resetModules();
-    vi.stubEnv('NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED', 'true');
     const { RealtimeProvider } = await import('@/components/realtime-provider');
     const { useTeamPresence: useTeamPresenceFresh } = await import('./use-team-presence');
 
     function Consumer() {
-      useTeamPresenceFresh(true, 'member-1');
+      useTeamPresenceFresh(true);
       return null;
     }
 
@@ -256,12 +259,11 @@ describe('useTeamPresence — mux 공유 커넥션 경로의 connected 참조 �
 
   it('실제 재연결(error→open)에서는 #2139의 subscribeReconnect refetch가 정확히 1회만 더 붙는다', async () => {
     vi.resetModules();
-    vi.stubEnv('NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED', 'true');
     const { RealtimeProvider } = await import('@/components/realtime-provider');
     const { useTeamPresence: useTeamPresenceFresh } = await import('./use-team-presence');
 
     function Consumer() {
-      useTeamPresenceFresh(true, 'member-1');
+      useTeamPresenceFresh(true);
       return null;
     }
 

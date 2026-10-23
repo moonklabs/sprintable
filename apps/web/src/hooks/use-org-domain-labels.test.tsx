@@ -9,7 +9,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { useOrgDomainLabels } from './use-org-domain-labels';
+import {
+  invalidateOrgDomainLabels, ORG_DOMAIN_LABELS_FAILED_TTL_MS, ORG_DOMAIN_LABELS_TTL_MS, useOrgDomainLabels,
+} from './use-org-domain-labels';
 
 const fetchWithAuthMock = vi.fn();
 vi.mock('@/lib/db/client', () => ({
@@ -26,6 +28,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   fetchWithAuthMock.mockReset();
+  invalidateOrgDomainLabels(); // story #4748 — 같은 파일 안 시험끼리 받아 둔 값을 물려주지 않는다
 });
 
 afterEach(async () => {
@@ -236,5 +239,205 @@ describe('useOrgDomainLabels — 라벨 API 인덱싱+로케일 선택(#3287 AC4
     await act(async () => { resolveFetch?.(); });
     await flush();
     expect(el().dataset.loading).toBe('false');
+  });
+});
+
+// story #4748 — 대화방은 이벤트 블록 카드 · 입력창이 저마다 이 훅을 불러 같은 조직 라벨 요청이 5초에 30번 남짓 나갔다(prod android-webview 기록).
+// 같은 조직 값은 진행 중 요청을 같이 기다리고(한 번), 받은 뒤엔 TTL 동안 그대로 쓰고, 바꾼 쪽이 무효화하면 새로 받는다. 되돌리면 아래가 RED.
+function Crowd({ n, orgId }: { n: number; orgId: string }) {
+  return <>{Array.from({ length: n }, (_, i) => <Harness key={i} orgId={orgId} locale="ko" />)}</>;
+}
+
+const LABELS = [{ domain: 'status', canonical_slug: 'backlog', label_ko: '아이디어', label_en: 'Idea' }];
+const okLabels = (entries: unknown[] = LABELS) => ({ ok: true, json: async () => entries });
+const dumps = () => [...container.querySelectorAll<HTMLElement>('[data-testid="dump"]')];
+
+describe('useOrgDomainLabels — 한 조직 값은 한 번만 받는다(#4748)', () => {
+  let now = 1_000_000;
+  beforeEach(() => {
+    now = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+  });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('같은 조직 라벨을 30개 소비처가 한꺼번에 불러도 요청은 한 번이고 모두 같은 값을 본다(대화방 · 핵심 회귀)', async () => {
+    fetchWithAuthMock.mockResolvedValue(okLabels());
+    await act(async () => { root.render(<Crowd n={30} orgId="org-1" />); });
+    await flush();
+    expect(fetchWithAuthMock).toHaveBeenCalledTimes(1);
+    expect(dumps()).toHaveLength(30);
+    expect(dumps().every((d) => d.dataset.statusBacklog === '아이디어' && d.dataset.loading === 'false')).toBe(true);
+  });
+
+  it('응답이 오기 前에 새로 붙은 소비처도 새 요청을 내지 않고 같은 응답을 기다린다', async () => {
+    let resolveFetch: (() => void) | null = null;
+    fetchWithAuthMock.mockImplementation(() => new Promise((resolve) => { resolveFetch = () => resolve(okLabels()); }));
+    await act(async () => { root.render(<Crowd n={5} orgId="org-1" />); });
+    await flush();
+    await act(async () => { root.render(<Crowd n={12} orgId="org-1" />); }); // 응답 前에 일곱이 더 붙는다
+    await flush();
+    expect(fetchWithAuthMock).toHaveBeenCalledTimes(1);
+    await act(async () => { resolveFetch?.(); });
+    await flush();
+    expect(dumps()).toHaveLength(12);
+    expect(dumps().every((d) => d.dataset.statusBacklog === '아이디어')).toBe(true);
+  });
+
+  it('받아 둔 값은 TTL 안에서 다시 마운트해도 요청 0이고 첫 렌더부터 값이 있다(깜빡임 없음)', async () => {
+    fetchWithAuthMock.mockResolvedValue(okLabels());
+    await act(async () => { root.render(<Harness orgId="org-1" locale="ko" />); });
+    await flush();
+    await act(async () => { root.render(<div />); });
+    now += ORG_DOMAIN_LABELS_TTL_MS - 1_000;
+    await act(async () => { root.render(<Harness orgId="org-1" locale="ko" />); });
+    expect(dumps()[0]!.dataset.statusBacklog).toBe('아이디어'); // flush 前 — 첫 렌더 값
+    await flush();
+    expect(fetchWithAuthMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('TTL이 지나면 다시 받는다(바뀐 값이 결국 보인다)', async () => {
+    fetchWithAuthMock.mockResolvedValue(okLabels());
+    await act(async () => { root.render(<Harness orgId="org-1" locale="ko" />); });
+    await flush();
+    await act(async () => { root.render(<div />); });
+    now += ORG_DOMAIN_LABELS_TTL_MS + 1;
+    fetchWithAuthMock.mockResolvedValue(okLabels([{ ...LABELS[0], label_ko: '캠페인' }]));
+    await act(async () => { root.render(<Harness orgId="org-1" locale="ko" />); });
+    await flush();
+    expect(fetchWithAuthMock).toHaveBeenCalledTimes(2);
+    expect(dumps()[0]!.dataset.statusBacklog).toBe('캠페인');
+  });
+
+  it('라벨을 바꾼 쪽이 invalidateOrgDomainLabels를 부르면 다음 읽기는 새 값이다(PUT · DELETE 뒤)', async () => {
+    fetchWithAuthMock.mockResolvedValue(okLabels());
+    await act(async () => { root.render(<Harness orgId="org-1" locale="ko" />); });
+    await flush();
+    expect(dumps()[0]!.dataset.statusBacklog).toBe('아이디어');
+    await act(async () => { root.render(<div />); });
+    fetchWithAuthMock.mockResolvedValue(okLabels([{ ...LABELS[0], label_ko: '캠페인' }]));
+    invalidateOrgDomainLabels('org-1');
+    await act(async () => { root.render(<Harness orgId="org-1" locale="ko" />); });
+    await flush();
+    expect(fetchWithAuthMock).toHaveBeenCalledTimes(2);
+    expect(dumps()[0]!.dataset.statusBacklog).toBe('캠페인');
+  });
+
+  it('무효화 前에 출발한 응답(옛 값)은 기억되지 않는다 — 떠 있는 소비처가 새로 읽은 값이 남고, 뒤늦은 옛 응답이 그 위를 덮지 못한다', async () => {
+    let resolveOld: (() => void) | null = null;
+    fetchWithAuthMock.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = () => resolve(okLabels()); }));
+    fetchWithAuthMock.mockResolvedValue(okLabels([{ ...LABELS[0], label_ko: '캠페인' }])); // 무효화 뒤 새로 읽는 요청의 답
+    await act(async () => { root.render(<Harness orgId="org-1" locale="ko" />); });
+    await flush();
+    await act(async () => { invalidateOrgDomainLabels('org-1'); }); // 옛 요청이 날아가 있는 동안 라벨이 바뀌었다 → 떠 있는 소비처가 새로 읽는다
+    await flush();
+    await act(async () => { resolveOld?.(); }); // 옛 응답이 이제 도착
+    await flush();
+    await act(async () => { root.render(<div />); });
+    await act(async () => { root.render(<Harness orgId="org-1" locale="ko" />); }); // 새로 붙는 소비처: 받아 둔 값을 쓴다
+    await flush();
+    expect(fetchWithAuthMock).toHaveBeenCalledTimes(2);
+    expect(dumps()[0]!.dataset.statusBacklog).toBe('캠페인'); // 옛 값('아이디어')이 슬롯에 남아 있으면 FAIL
+  });
+
+  it('조직이 다르면 따로 받는다(다른 조직 값을 물려주지 않는다)', async () => {
+    fetchWithAuthMock.mockImplementation(async (url: string) =>
+      okLabels([{ ...LABELS[0], label_ko: url.includes('org-2') ? '둘째' : '첫째' }]));
+    await act(async () => { root.render(<><Harness orgId="org-1" locale="ko" /><Harness orgId="org-2" locale="ko" /></>); });
+    await flush();
+    expect(fetchWithAuthMock).toHaveBeenCalledTimes(2);
+    expect(dumps().map((d) => d.dataset.statusBacklog)).toEqual(['첫째', '둘째']);
+  });
+
+  it('실패하면 FAILED_TTL 동안은 소비처마다 다시 두드리지 않고, 지나면 한 번 다시 시도한다', async () => {
+    fetchWithAuthMock.mockRejectedValue(new Error('network'));
+    await act(async () => { root.render(<Crowd n={10} orgId="org-1" />); });
+    await flush();
+    expect(fetchWithAuthMock).toHaveBeenCalledTimes(1);
+    await act(async () => { root.render(<div />); });
+    now += ORG_DOMAIN_LABELS_FAILED_TTL_MS - 1_000;
+    await act(async () => { root.render(<Crowd n={10} orgId="org-1" />); });
+    await flush();
+    expect(fetchWithAuthMock).toHaveBeenCalledTimes(1); // 실패를 기억하는 동안 폭풍 없음
+    await act(async () => { root.render(<div />); });
+    now += 2_000;
+    fetchWithAuthMock.mockResolvedValue(okLabels());
+    await act(async () => { root.render(<Crowd n={10} orgId="org-1" />); });
+    await flush();
+    expect(fetchWithAuthMock).toHaveBeenCalledTimes(2);
+    expect(dumps().every((d) => d.dataset.statusBacklog === '아이디어')).toBe(true);
+  });
+});
+
+// story #4748 (codex QA) — the hooks that are ALREADY MOUNTED (a chat room left open) must not stay on an old value or on a failure's empty list: the
+// invalidation and the slot's expiry wake them, and they read again through the one shared request.
+describe('useOrgDomainLabels — 떠 있는 소비처도 무효화 · 만료 때 새 값을 본다(#4748)', () => {
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] }); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('떠 있는 소비처 열 개는 invalidateOrgDomainLabels 뒤 다시 마운트 없이 새 값을 보고, 요청은 한 번 더뿐이다', async () => {
+    fetchWithAuthMock.mockResolvedValue(okLabels());
+    await act(async () => { root.render(<Crowd n={10} orgId="org-1" />); });
+    await flush();
+    expect(dumps().every((d) => d.dataset.statusBacklog === '아이디어')).toBe(true);
+    fetchWithAuthMock.mockResolvedValue(okLabels([{ ...LABELS[0], label_ko: '캠페인' }]));
+    await act(async () => { invalidateOrgDomainLabels('org-1'); });
+    await flush();
+    expect(fetchWithAuthMock).toHaveBeenCalledTimes(2);
+    expect(dumps().every((d) => d.dataset.statusBacklog === '캠페인')).toBe(true);
+  });
+
+  it('무효화 前에 출발한 옛 응답이 뒤늦게 와도 떠 있는 소비처는 옛 값으로 되돌아가지 않는다', async () => {
+    let resolveOld: (() => void) | null = null;
+    fetchWithAuthMock.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = () => resolve(okLabels()); }));
+    await act(async () => { root.render(<Crowd n={3} orgId="org-1" />); });
+    await flush();
+    fetchWithAuthMock.mockResolvedValue(okLabels([{ ...LABELS[0], label_ko: '캠페인' }]));
+    await act(async () => { invalidateOrgDomainLabels('org-1'); });
+    await flush();
+    await act(async () => { resolveOld?.(); }); // 옛 요청의 응답이 이제 도착
+    await flush();
+    expect(dumps().every((d) => d.dataset.statusBacklog === '캠페인')).toBe(true);
+  });
+
+  it('실패로 빈 값을 보던 떠 있는 소비처는 FAILED_TTL 뒤 스스로 다시 읽어 값을 얻는다', async () => {
+    fetchWithAuthMock.mockRejectedValueOnce(new Error('network'));
+    await act(async () => { root.render(<Crowd n={4} orgId="org-1" />); });
+    await flush();
+    expect(dumps().every((d) => d.dataset.statusBacklog === '')).toBe(true);
+    fetchWithAuthMock.mockResolvedValue(okLabels());
+    await act(async () => { await vi.advanceTimersByTimeAsync(ORG_DOMAIN_LABELS_FAILED_TTL_MS + 5); });
+    await flush();
+    expect(fetchWithAuthMock).toHaveBeenCalledTimes(2);
+    expect(dumps().every((d) => d.dataset.statusBacklog === '아이디어')).toBe(true);
+  });
+
+  it('마지막 소비처가 내려가면 만료 알람도 걷히고, 다시 붙는 소비처가 남은 시간만큼 알람을 다시 건다', async () => {
+    fetchWithAuthMock.mockResolvedValue(okLabels());
+    await act(async () => { root.render(<Harness orgId="org-1" locale="ko" />); });
+    await flush();
+    expect(vi.getTimerCount()).toBe(1); // 떠 있는 소비처의 만료 알람
+    await act(async () => { root.render(<div />); });
+    expect(vi.getTimerCount()).toBe(0); // 아무도 없으면 알람도 없다(내려간 뒤 타이머가 남아 도는 일 없음)
+    await act(async () => { await vi.advanceTimersByTimeAsync(ORG_DOMAIN_LABELS_TTL_MS / 2); });
+    await act(async () => { root.render(<Harness orgId="org-1" locale="ko" />); }); // 받아 둔 값을 쓰며 다시 붙는다
+    await flush();
+    expect(fetchWithAuthMock).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(1); // 남은 절반 시간의 알람
+    fetchWithAuthMock.mockResolvedValue(okLabels([{ ...LABELS[0], label_ko: '캠페인' }]));
+    await act(async () => { await vi.advanceTimersByTimeAsync(ORG_DOMAIN_LABELS_TTL_MS / 2 + 5); });
+    await flush();
+    expect(fetchWithAuthMock).toHaveBeenCalledTimes(2);
+    expect(dumps()[0]!.dataset.statusBacklog).toBe('캠페인');
+  });
+
+  it('성공 TTL이 지나면 떠 있는 소비처가 다시 읽어 바뀐 값을 본다(요청은 소비처 수와 무관하게 한 번)', async () => {
+    fetchWithAuthMock.mockResolvedValue(okLabels());
+    await act(async () => { root.render(<Crowd n={8} orgId="org-1" />); });
+    await flush();
+    fetchWithAuthMock.mockResolvedValue(okLabels([{ ...LABELS[0], label_ko: '캠페인' }]));
+    await act(async () => { await vi.advanceTimersByTimeAsync(ORG_DOMAIN_LABELS_TTL_MS + 5); });
+    await flush();
+    expect(fetchWithAuthMock).toHaveBeenCalledTimes(2);
+    expect(dumps().every((d) => d.dataset.statusBacklog === '캠페인')).toBe(true);
   });
 });

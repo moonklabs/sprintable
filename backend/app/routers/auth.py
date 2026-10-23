@@ -26,7 +26,7 @@ def _normalize_email(v: str) -> str:
         raise ValueError("Invalid email format")
     return v
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -55,7 +55,7 @@ from app.core.security import (
     create_refresh_token,
 )
 from app.core.rate_limit import limiter, resend_verification_limiter
-from app.dependencies.auth import AuthContext, get_current_user, resolve_request_org_id
+from app.dependencies.auth import AuthContext, _reject_if_before_cutover, get_current_user, resolve_request_org_id
 from app.services.project_auth import (
     accessible_project_ids_in_org, first_accessible_project_id, has_project_access,
 )
@@ -406,6 +406,133 @@ async def _revoke_other_sessions(
     return ended.rowcount or 0, keep_id
 
 
+_PROVIDER_ID_COLUMNS = ("google_id", "github_id", "apple_id")
+
+
+async def _reclaim_unproved_account(
+    session: AsyncSession, user: User, *, keep_provider: tuple[str, str] | None = None, new_password_hash: str | None = None,
+    ip_address: str | None = None, why: str,
+) -> datetime | None:
+    """story 4725 — the moment a mailbox is PROVED for an account that had not been proved before, everything that account held or made from before the proof
+    is dropped, because nothing says who made it (PO 2026-10-17, decisions 1 + 2). One transaction with the caller's commit:
+    - the account: verified; the password cleared (a mailed reset sets the new one in the same statement); every provider identity untied except `keep_provider`
+      (the one that has just proved the address); the two-factor secret and the failed-login counters cleared;
+    - every sign-in: live refresh tokens AND their grace windows, and EVERY ACCESS TOKEN already issued — through the per-user cut-off epoch
+      (`auth_migrations.auth_valid_after`, checked on every request by `_reject_if_before_cutover`), so one guard covers every route (two-factor setup, key
+      issuing, setup codes, phone registration…) instead of a check on each. The epoch is the last instant of the CURRENT second: a token carries whole seconds
+      (`iat`), so a token minted in the same second as the reclaim is refused too; a session made after the next second begins passes (the caller waits for
+      that second — `_wait_for_second_after`);
+    - what the account made before the proof: its personal API keys, the agents it created and their keys, the project keys it created, the phones it registered,
+      the desktop setups it confirmed (with their device tokens), its pending sign-in hand-over codes.
+    The account itself and what it owns stay (organizations, memberships). Returns the epoch, or None when the account was already proved (another proof got there
+    first — the UPDATE is conditional, so two overlapping proofs do not erase each other).
+    Named residuals: (1) a request of the old session that is IN FLIGHT while this transaction is still open can pass the cut-off check (the row is not visible yet) and
+    commit a lasting credential between this transaction's statements and its commit — a window of milliseconds; (2) an event stream a person's session already
+    opened ends by its own 90-second lifespan (a person's stream has no per-request recheck), after which it cannot reconnect; (3) a delegated support-gateway
+    token minted from the old session lives out its own 300-second TTL (the route that mints one is behind the cut-off, so none can be minted after the reclaim);
+    (4) an account in the Firebase-migration state `reset_required` stays rejected on every token by that state, as before — the reclaim does not change migration state."""
+    from datetime import timedelta
+
+    from app.models.api_key import ApiKey
+    from app.models.auth_identity import AuthIdentity, AuthMigration
+    from app.models.desktop_relay import DesktopDeviceToken
+    from app.models.desktop_setup import DesktopSetup
+    from app.models.human_api_key import HumanApiKey
+    from app.models.oauth_handoff_code import OAuthHandoffCode
+    from app.models.project_api_key import ProjectApiKey
+    from app.models.agent_permission import RemoteDevice
+    from sqlalchemy.dialects.postgresql import insert as _pg_insert
+
+    # what the account held BEFORE this runs (the ORM-enabled UPDATE below would also refresh the loaded object): the notice says only what was really cut
+    # (locked FOR UPDATE: the row is read and then overwritten in this one transaction, so a concurrent two-factor / provider / password change cannot slip in between
+    # and leave the notice naming a state that was not the one cut)
+    pre = (await session.execute(
+        select(User.hashed_password, User.google_id, User.github_id, User.apple_id, User.totp_enabled, User.totp_secret).where(User.id == user.id).with_for_update()
+    )).one()
+    pre_providers = dict(zip(_PROVIDER_ID_COLUMNS, (pre.google_id, pre.github_id, pre.apple_id)))
+    now = datetime.now(timezone.utc)
+    values: dict = {
+        "email_verified": True,
+        "hashed_password": new_password_hash or "",
+        "password_set_at": now,
+        "totp_enabled": False, "totp_secret": None, "totp_last_timestep": None, "totp_fail_count": 0, "totp_locked_until": None,
+        "login_fail_count": 0, "login_locked_until": None,
+    }
+    for col in _PROVIDER_ID_COLUMNS:
+        values[col] = None
+    if keep_provider is not None:
+        values[f"{keep_provider[0]}_id"] = keep_provider[1]
+    claimed = await session.execute(
+        update(User).where(User.id == user.id, User.email_verified.is_(False)).values(**values).returning(User.id)
+    )
+    if claimed.scalar_one_or_none() is None:
+        return None
+    ended, _ = await _revoke_other_sessions(session, user.id, None)
+
+    human_members = select(Member.id).where(Member.user_id == user.id)
+    agents = select(Member.id).where(Member.owner_member_id.in_(human_members))
+    keys_cut = (await session.execute(update(HumanApiKey).where(HumanApiKey.member_id.in_(human_members), HumanApiKey.revoked_at.is_(None)).values(revoked_at=now))).rowcount or 0
+    keys_cut += (await session.execute(update(ApiKey).where(or_(ApiKey.member_id.in_(agents), ApiKey.team_member_id.in_(agents)), ApiKey.revoked_at.is_(None)).values(revoked_at=now))).rowcount or 0
+    keys_cut += (await session.execute(update(ProjectApiKey).where(ProjectApiKey.created_by == user.id, ProjectApiKey.revoked_at.is_(None)).values(revoked_at=now))).rowcount or 0
+    phones_cut = (await session.execute(update(RemoteDevice).where(RemoteDevice.member_id.in_(human_members), RemoteDevice.revoked_at.is_(None)).values(revoked_at=now))).rowcount or 0
+    setups = select(DesktopSetup.id).where(DesktopSetup.confirmed_by == user.id, DesktopSetup.revoked_at.is_(None))
+    await session.execute(update(DesktopDeviceToken).where(DesktopDeviceToken.setup_id.in_(setups), DesktopDeviceToken.revoked_at.is_(None)).values(revoked_at=now))
+    # story #4733 — the computers to cut are row-locked in id order FIRST (a report in flight on one finishes before we go on; the order is the one `forget` and the
+    # other lock takers use, so two cut-offs cannot deadlock), then exactly those rows are revoked and exactly those lose their clock view: a computer confirmed
+    # after the lock is neither cut nor forgotten
+    cut_ids = list((await session.execute(
+        select(DesktopSetup.id).where(DesktopSetup.confirmed_by == user.id, DesktopSetup.revoked_at.is_(None)).order_by(DesktopSetup.id).with_for_update()
+    )).scalars().all())
+    computers_cut = (await session.execute(update(DesktopSetup).where(DesktopSetup.id.in_(cut_ids)).values(revoked_at=now, revoked_reason="account_reclaimed"))).rowcount or 0 if cut_ids else 0
+    from app.services import desktop_clock
+
+    await desktop_clock.forget(session, cut_ids)
+    await session.execute(update(OAuthHandoffCode).where(OAuthHandoffCode.user_id == user.id, OAuthHandoffCode.consumed_at.is_(None)).values(consumed_at=now))
+    # the cut-off: the last microsecond before the NEXT whole second (tokens carry whole seconds)
+    # written LAST (after every revocation above): a slow reclaim that crosses a second must not leave the cut-off earlier than the end of its own work
+    epoch = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(seconds=1) - timedelta(microseconds=1)
+    upsert = _pg_insert(AuthMigration).values(user_id=user.id, state="legacy", auth_valid_after=epoch)
+    stored_epoch = (await session.execute(upsert.on_conflict_do_update(
+        index_elements=[AuthMigration.user_id],
+        set_={"auth_valid_after": func.greatest(AuthMigration.auth_valid_after, upsert.excluded.auth_valid_after)},
+    ).returning(AuthMigration.auth_valid_after))).scalar_one()
+    # Firebase identities linked to the account are provider identities too (codex 01a1478d): untied with the others
+    # only ACTIVE links count as «cut» (an already-unlinked historical row is deleted too but was not a way in)
+    identities_cut = sum(1 for (unlinked_at,) in (await session.execute(delete(AuthIdentity).where(AuthIdentity.user_id == user.id).returning(AuthIdentity.unlinked_at))).all() if unlinked_at is None)
+    # story 4725 decision 2: the «show it once» mark — what was REALLY cut (a notice that says «cut» for what never existed would be false); nothing when nothing was
+    cut: list[str] = []
+    if ended:
+        cut.append("sessions")
+    if identities_cut or any(pre_providers.values()):
+        cut.append("providers")
+    if pre.totp_enabled or pre.totp_secret:
+        cut.append("two_step")
+    if keys_cut:
+        cut.append("keys")
+    if phones_cut:
+        cut.append("phones")
+    if computers_cut:
+        cut.append("computers")
+    password_cleared = bool(pre.hashed_password) and new_password_hash is None
+    if cut or password_cleared:
+        await session.execute(update(User).where(User.id == user.id).values(reclaim_notice={"cut": cut, "password_cleared": password_cleared}))
+    await _write_audit(session, "unverified_account_reclaimed", user_id=user.id, ip_address=ip_address, detail=f"{why}; sessions_ended={ended}")
+    return stored_epoch
+
+
+async def _wait_for_second_after(epoch: datetime) -> None:
+    """A session made right after a reclaim must carry an `iat` later than the cut-off. `iat` is whole seconds and the check rejects `iat <= cut-off`, so the
+    first safe instant is the first whole second STRICTLY after the cut-off (whatever its fraction — an older, larger epoch may carry arbitrary microseconds): wait
+    until the clock is past it, at most 2 s (a cut-off far in the future is an operational state this wait cannot fix and must not turn into a long sleep)."""
+    import asyncio
+    from datetime import timedelta
+
+    target = epoch.replace(microsecond=0) + timedelta(seconds=1)
+    wait = (target - datetime.now(timezone.utc)).total_seconds() + 0.02
+    if wait > 0:
+        await asyncio.sleep(min(wait, 2.0))
+
+
 _ROLE_RANK: dict[str, int] = {"owner": 4, "admin": 3, "manager": 2, "member": 1}
 
 
@@ -501,6 +628,18 @@ def _persist_resolved_context(user: User, md: dict) -> None:
         user.last_org_id = uuid.UUID(oid)
 
 
+def pending_invite_auto_accept_allowed(user: User) -> bool:
+    """story 4722 — the ONE place that decides whether signing in / up may turn a pending invite for this e-mail into a membership.
+
+    The fallback in `_build_app_metadata` finds an invite by the user's e-mail ADDRESS. An address typed into the sign-up form proves nothing about
+    who reads that mailbox, so the fallback runs only for an account whose mailbox was proved: `email_verified` (the verify-mail link, or an OAuth
+    provider that said the address is verified — `oauth_callback`). The other proof is the invite LINK itself: a token the invitee holds goes through
+    `_auto_accept_invitation` / `POST /api/v2/invites/accept`, never through this fallback. An unproved account leaves the invite pending and gets no
+    context of that organization in its token. All four roads (sign-up, sign-in, OAuth callback, refresh of a person with no organization) call
+    `_build_app_metadata`, so this is the single gate for them."""
+    return bool(getattr(user, "email_verified", False))
+
+
 async def _build_app_metadata(
     user: User, session: AsyncSession, org_id: uuid.UUID | None = None,
     project_id: uuid.UUID | None = None,
@@ -593,7 +732,8 @@ async def _build_app_metadata(
         # member.user_id is None은 사실상 미발현(뷰 휴먼 브랜치 user_id 채워짐); 레거시 미링크분만 보정.
         await session.execute(update(Member).where(Member.id == member.id).values(user_id=user.id))
 
-    if not member:
+    if not member and pending_invite_auto_accept_allowed(user):
+        # story 4722: only an account whose mailbox is proved (see pending_invite_auto_accept_allowed) — the invite stays pending otherwise
         # 2. 이메일로 pending 초대 조회 → 자동 수락 + org_member 생성
         # OrgInvite (org_invites 테이블 — canonical /api/v2/invites 경로).
         # 구 Invitation(invitations) 경로는 d3619e80 cutover로 제거 — org_invites가 단일 SSOT.
@@ -615,12 +755,15 @@ async def _build_app_metadata(
             # 동일). 인라인 복제 제거 → 3경로(명시·signup·login-fallback) divergence 방지. (이전엔 org_member
             # +status만 하고 grant 스킵 → invitee grant 0행 → /api/projects=[].)
             from app.repositories.org_invite import OrgInviteRepository
-            await OrgInviteRepository(session).accept(org_inv.token, user.id, user.email)
-            return {
-                "org_id": str(org_inv.organization_id),
-                "project_id": "",
-                "role": org_inv.role,
-            }
+            accepted = await OrgInviteRepository(session).accept(org_inv.token, user.id, user.email)
+            # story 4722 (codex 01a146b6): the org context is returned only when the accept really made the membership — an invite revoked /
+            # expired between the lookup above and the accept used to leave a token that names an organization the person is not a member of
+            if accepted.get("ok"):
+                return {
+                    "org_id": str(org_inv.organization_id),
+                    "project_id": "",
+                    "role": org_inv.role,
+                }
 
     if not member:
         # Path 4: org_members fallback — team_member 없지만 org에는 등록된 사용자.
@@ -1522,8 +1665,9 @@ class OAuthExchangeError(Exception):
 
 async def _exchange_oauth_code_for_userinfo(
     client: httpx.AsyncClient, provider: str, cfg: dict, code: str,
-) -> tuple[str, str]:
-    """code→access_token 교환 후 (oauth_id, email) 반환. email은 provider가 안 주면 ""(빈
+) -> tuple[str, str, bool]:
+    """code→access_token 교환 후 (oauth_id, email, email_verified) 반환. story 4722: `email_verified` = the PROVIDER said the address is verified
+    (Google userinfo / Apple id_token `email_verified`: `true` or `"true"`) — a missing or false claim is NOT verified. email은 provider가 안 주면 ""(빈
     문자열) — Apple은 최초 인가 이후 재인가에서 email을 아예 안 돌려주는 게 공식 동작이라
     "필수 여부" 판단은 호출부 책임으로 남긴다(oauth_callback은 신규가입에 이메일이 필수라
     직접 검사하고, oauth_link_callback은 oauth_id만 있으면 충분 — 이메일로 아무것도 안 함)."""
@@ -1564,7 +1708,14 @@ async def _exchange_oauth_code_for_userinfo(
 
     oauth_id = str(userinfo.get(cfg["id_field"], ""))
     email = (userinfo.get(cfg["email_field"]) or "").lower().strip()
-    return oauth_id, email
+    return oauth_id, email, _provider_says_verified(userinfo)
+
+
+def _provider_says_verified(userinfo: dict) -> bool:
+    """story 4722 AC2: only an explicit true counts (Google sends a boolean, Apple a boolean or the exact string "true"); absent / false / anything else → not verified.
+    Story 4725 (Didi's codex 01a1472e): no trimming and no case folding — `" TRUE "` is not what either provider sends."""
+    v = userinfo.get("email_verified")
+    return v is True or v == "true"
 
 
 class OAuthCallbackRequest(BaseModel):
@@ -1636,7 +1787,7 @@ async def oauth_callback(
 
     async with httpx.AsyncClient(timeout=15) as client:
         try:
-            oauth_id, email = await _exchange_oauth_code_for_userinfo(client, provider, cfg, body.code)
+            oauth_id, email, provider_email_verified = await _exchange_oauth_code_for_userinfo(client, provider, cfg, body.code)
         except OAuthExchangeError as exc:
             return _err(exc.code, exc.message, 400)
 
@@ -1668,13 +1819,38 @@ async def oauth_callback(
             await session.execute(select(User).where(User.email == email, User.is_active.is_(True)))
         ).scalar_one_or_none()
         if user:
-            await session.execute(
-                update(User).where(User.id == user.id).values(**{f"{provider}_id": oauth_id})
-            )
+            # story 4724 (found by the 4722 codex read): linking this provider identity to an EXISTING account because the e-mail text matches
+            # equates two identities on an address the provider itself did not vouch for. An attacker who controls a provider account that carries
+            # someone else's address unverified would get that person's account (and its token). Only a provider-VERIFIED address may be matched
+            # to an existing account. Decision for the other branch (below, a NEW account): it stays allowed with the provider's claim stored in
+            # `email_verified` — creating a fresh identity equates nothing, and the account is held back from everything a proved mailbox unlocks
+            # (4722: no invite auto-accept; creating an organization needs a verified mailbox).
+            if not provider_email_verified:
+                return _err(
+                    "OAUTH_EMAIL_NOT_VERIFIED",
+                    "The provider did not verify this e-mail address, so it cannot be linked to the existing account",
+                    403,
+                )
+            reclaimed_epoch = None
+            if not user.email_verified:
+                # story 4725: the provider has just proved the mailbox of an account NOBODY had proved — what it held before (a password, sessions,
+                # other provider ids, a two-factor secret, keys it made…) may be an earlier squatter's: dropped here, in this transaction
+                # (see `_reclaim_unproved_account`). None = another proof got there first → the plain tie below.
+                reclaimed_epoch = await _reclaim_unproved_account(
+                    session, user, keep_provider=(provider, oauth_id), why=f"provider={provider}",
+                    ip_address=request.client.host if request.client else None,
+                )
+            if reclaimed_epoch is None:
+                await session.execute(
+                    update(User).where(User.id == user.id).values(**{f"{provider}_id": oauth_id})
+                )
             await session.commit()
             await session.refresh(user)
+            if reclaimed_epoch is not None:
+                await _wait_for_second_after(reclaimed_epoch)  # the session made below must be later than the cut-off
         else:
-            # 신규 유저 생성 (비밀번호 없음 — OAuth 전용, 이메일 인증 완료)
+            # 신규 유저 생성 (비밀번호 없음 — OAuth 전용). story 4722 AC2: 이메일 인증 완료 = **공급자가 그렇게 말했을 때만**(Google/Apple
+            # `email_verified` 참) — 예전엔 무조건 True여서 공급자가 «미확인»이라 한 주소도 초대 자동 수락 문을 열었다.
             if not body.tos_accepted:
                 return _err("TOS_NOT_ACCEPTED", "You must accept the Terms of Service to register", 400)
             from app.services.agent_onboarding_config import resolve_locale_from_request
@@ -1682,7 +1858,7 @@ async def oauth_callback(
                 email=email,
                 hashed_password="",
                 is_active=True,
-                email_verified=True,
+                email_verified=provider_email_verified,
                 tos_accepted_at=datetime.now(timezone.utc),
                 # story #3205 — register()와 동일 포착(발명 0).
                 locale=resolve_locale_from_request(None, request.headers.get("accept-language")),
@@ -1800,7 +1976,7 @@ async def oauth_link_callback(
 
     async with httpx.AsyncClient(timeout=15) as client:
         try:
-            oauth_id, _email = await _exchange_oauth_code_for_userinfo(client, provider, cfg, body.code)
+            oauth_id, _email, _verified = await _exchange_oauth_code_for_userinfo(client, provider, cfg, body.code)
         except OAuthExchangeError as exc:
             return _err(exc.code, exc.message, 400)
 
@@ -1929,6 +2105,12 @@ async def reset_password(
     if _hashlib.sha256(user.hashed_password.encode()).hexdigest()[:16] != pw_sig:
         return _err("INVALID_TOKEN", "Reset token has already been used", 400)
 
+    if not user.email_verified:
+        # story 4725 (Didi): the mailed reset link proves the mailbox of an account nobody had proved — the owner takes it over: verified, the new password,
+        # and what an earlier squatter may have left (provider identities, a two-factor secret, every sign-in) dropped. A VERIFIED account keeps its
+        # provider links and its two-factor secret through a reset (only sessions end, below).
+        if await _reclaim_unproved_account(session, user, new_password_hash=hash_password(body.new_password), why="password-reset") is not None:
+            return _ok({"message": "Password reset successfully", "sessions_ended": None})
     await session.execute(
         update(User).where(User.id == user.id).values(
             hashed_password=hash_password(body.new_password),
@@ -2135,9 +2317,17 @@ async def verify_email(
     if user.email_verified:
         return _ok({"message": "Email already verified"})
 
-    await session.execute(
-        update(User).where(User.id == user.id).values(email_verified=True)
-    )
+    if not user.hashed_password:
+        # story 4725 (b): an account made by a provider that did NOT vouch for the address has no password — its holder is whoever signed in with that
+        # provider identity, which may be a squatter. The mailbox owner clicking this link proves the address now: the same reclaim as at the provider
+        # link (sessions and provider ids dropped; the owner comes back through a provider that vouches, or a mailed reset). An account WITH a password
+        # keeps it: the person who registered it clicks this link in the normal flow (a registration-time squatter is a separate design question).
+        if await _reclaim_unproved_account(session, user, why="mail-verification") is None:
+            await session.execute(update(User).where(User.id == user.id).values(email_verified=True))
+    else:
+        await session.execute(
+            update(User).where(User.id == user.id).values(email_verified=True)
+        )
     return _ok({"message": "Email verified successfully"})
 
 
@@ -2408,6 +2598,10 @@ class AuthMeResponse(BaseModel):
     # story 4427 — the desktop sign-up screen defaults the organization name to «{display_name}의 조직» (never the
     # e-mail's local part). Human sessions only; None when unset or for an API-key context.
     display_name: str | None = None
+    # story 4725 decision 2 — while the server has a «what was cut when your mailbox was proved» notice to show this person once: {"cut": ["sessions" | "providers" |
+    # "two_step" | "keys" | "phones" | "computers"], "password_cleared": bool} (set by the reclaim of an unproved account with what it really cut, cleared by
+    # POST /auth/reclaim-notice/dismiss). Nothing else is in it. Human sessions only; None when there is nothing to show or for an API-key context.
+    reclaim_notice: dict | None = None
     # story #4178(산티아고 prod 에스컬레이션 1d522e6d) — 사람(JWT) 세션의 `member_id`는
     # `auth.user_id`(=users.id) 그대로라 `/api/v2/events/stream`의 `resolve_member_identity`
     # (TeamMember.id/OrgMember.id만 허용)로 검증하면 404가 난다. `member_id` 자체의 의미는
@@ -2471,6 +2665,7 @@ async def get_auth_me(
     email_verification_required: bool | None = None
     email: str | None = None
     display_name: str | None = None
+    reclaim_notice: dict | None = None
     org_member_id: str | None = None
     org_id_raw = auth.org_id or meta.get("org_id")
     if meta.get("api_key_id"):
@@ -2492,10 +2687,12 @@ async def get_auth_me(
         # 컨텍스트는 위 분기라 여기 안 온다(불필요 쿼리 회피).
         try:
             user_row = (
-                await db.execute(select(User.email_verified, User.display_name).where(User.id == uuid.UUID(auth.user_id)))
+                await db.execute(select(User.email_verified, User.display_name, User.reclaim_notice).where(User.id == uuid.UUID(auth.user_id)))
             ).one_or_none()
             if user_row is not None:
-                email_verified, display_name = user_row
+                email_verified, display_name, reclaim_notice = user_row
+                if _requires_interactive_session(auth):
+                    reclaim_notice = None   # only a person at a screen is told (a personal API key is not)
         except Exception:
             logger.warning("get_auth_me: email_verified 조회 실패 — None으로 반환", exc_info=True)
         # story #4178 — org 미해소(org 없음·OrgMember 행 없음)는 예외가 아니라 None.
@@ -2526,8 +2723,28 @@ async def get_auth_me(
         email_verification_required=email_verification_required,
         email=email,
         display_name=display_name,
+        reclaim_notice=reclaim_notice,
         org_member_id=org_member_id,
     )
+
+
+@router.post("/reclaim-notice/dismiss")
+async def dismiss_reclaim_notice(
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> JSONResponse:
+    """story 4725 decision 2 — the person closes the «what was cut when your mailbox was proved» notice: the server's mark is cleared and it does not come
+    back. A person's own session only (an API key or an agent key is 403), and only the caller's own row — there is no id in the request."""
+    if _requires_interactive_session(auth):
+        return _err("REQUIRES_INTERACTIVE_SESSION", "이 작업은 브라우저 세션에서만 가능합니다", 403)
+    # a request that was admitted just before a reclaim waits here for the row the reclaim holds: after it commits, the session is checked against the cut-off AGAIN
+    # (under the lock), so an old session cannot erase the notice the reclaim just wrote
+    await session.execute(select(User.id).where(User.id == uuid.UUID(auth.user_id)).with_for_update())
+    # (a legacy session carries `iat`, a Firebase one `auth_time` — the same per-user cut-off applies to either)
+    await _reject_if_before_cutover(auth.user_id, auth.claims.get("iat") or auth.claims.get("auth_time"), session)
+    await session.execute(update(User).where(User.id == uuid.UUID(auth.user_id)).values(reclaim_notice=None))
+    await session.commit()
+    return _ok({"dismissed": True})
 
 
 class SetDefaultProjectRequest(BaseModel):

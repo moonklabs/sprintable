@@ -96,7 +96,8 @@ def _now() -> datetime:
 
 # story #4576 — what an app may say it can take when it asks for a code; anything else it names is left out (a newer app's word
 # this server does not know yet is no error)
-KNOWN_CAPABILITIES = ("move",)
+# story 4711: «solo» = the first setup in three steps (one new agent for the folder the person chose · no recipe)
+KNOWN_CAPABILITIES = ("move", "solo")
 
 
 async def create_setup_code(
@@ -170,13 +171,33 @@ async def verify_setup_event(
 
 
 async def _active_agent_count(db: AsyncSession, org_id: uuid.UUID) -> int:
-    """The org's active agents — the same count the plan limit uses (ee/plan_limits.check_agent_add_limit, read only)."""
-    from sqlalchemy import text
+    """The org's agents as the plan limit counts them — story 4717 AC4: the one count (app/services/agent_count.py) that
+    ee/plan_limits.check_agent_add_limit and GET /desktop/recipes also call, so «available» here is the number the page showed."""
+    from app.services.agent_count import plan_agent_count
 
-    return int((await db.execute(
-        text("SELECT COUNT(*) FROM members WHERE org_id = :oid AND type = 'agent' AND is_active = true AND deleted_at IS NULL"),
-        {"oid": str(org_id)},
-    )).scalar() or 0)
+    return await plan_agent_count(db, org_id)
+
+
+async def setup_agent_room(db: AsyncSession, org_id: uuid.UUID | None) -> dict | None:
+    """story 4717 AC1 — how many more agents this organization can make, read before [시작] so the setup page can say
+    «이 레시피는 에이전트 N개가 필요해요 · 지금 M개 더 만들 수 있어요» instead of meeting a 402 after it.
+    `{limit, current, available, tier}`: the limit and the count are the ones `check_agent_add_limit` holds a confirmation to
+    (ee/plan_limits.agent_room · the one count), `available` = limit − current, never below 0 — the same number a 402's
+    `available` carries (`_with_setup_numbers`). `org_id=None` = a person with no organization yet: a new organization starts
+    with none. None = no limit is enforced (OSS · an unlimited plan): the page says nothing about a limit."""
+    if not settings.is_ee_enabled:
+        return None
+    from ee.plan_limits import agent_room, new_org_agent_limit  # type: ignore[import]
+
+    if org_id is None:
+        limit = await new_org_agent_limit(db)
+        room = None if limit is None else (limit, 0, "free")
+    else:
+        room = await agent_room(db, org_id)
+    if room is None:
+        return None
+    limit, current, tier = room
+    return {"limit": limit, "current": current, "available": max(0, limit - current), "tier": tier}
 
 
 def _with_setup_numbers(exc: HTTPException, *, needed: int, agents_before: int) -> HTTPException:
@@ -285,6 +306,10 @@ def group_exchange_agents(members: list[dict], kind: str) -> dict[str, dict]:
     per_agent: dict[str, dict] = {}
     for m in members:
         if m["kind"] != "agent":
+            continue
+        if kind == "solo":
+            # story 4711: a solo setup's agent — made by the confirmation, so not «existing» (its key is made, not rotated); no recipe role
+            per_agent.setdefault(m["member_id"], {"member_id": m["member_id"], "runtime": m["runtime"], "name": m.get("name") or "", "tools": clean_agent_tools(m.get("tools"), m.get("runtime"))})
             continue
         if kind == "move":
             # story #4576 (PO 04:24Z): a move's agent — its id and runtime (its name is added with its new key below); no recipe
@@ -566,10 +591,13 @@ def clean_agent_tools(raw: object, runtime: str | None = None) -> list[str]:
 def setup_kind(setup: DesktopSetup) -> str | None:
     """story #4576 — which kind of setup this is (the web's progress: a move has two steps, ready → Sprintable connected, and no
     first task or result · the app attaches a move's agents with no recipe role or stages): «move» = confirmed with no recipe ·
-    «recipe» = confirmed with one · None before a confirmation."""
+    «recipe» = confirmed with one · «solo» (story 4711) = confirmed with no recipe, for one agent the confirmation made ·
+    None before a confirmation."""
     if setup.confirmed_at is None:
         return None
-    return "recipe" if setup.event_definition_key else "move"
+    if setup.event_definition_key:
+        return "recipe"
+    return "solo" if any(m.get("solo") for m in (setup.members or [])) else "move"
 
 
 async def confirm_move_setup(
@@ -640,6 +668,210 @@ async def confirm_move_setup(
         meta={"flow": "desktop_move", "human_hand": True, "agents": len(members)},
     )
     return setup.id, members, None
+
+
+async def _with_existing_project(db: AsyncSession, exc: HTTPException, *, org_id: uuid.UUID, user_id: uuid.UUID) -> HTTPException:
+    """story 4711 (PO 03:55Z): the plan's project limit (402) on a NEW folder project — when the organization has exactly one project
+    and the person can open it, the 402 also names it (`existing_project`), so the card can ask «이 폴더의 에이전트를 ‹{project}›에
+    넣어 시작할까요?» and the person's [넣고 시작] sends that `project_id`. Nothing is put there on the server's own: the plan is not
+    changed and no one is moved quietly. Any other error passes as it is."""
+    from app.models.project import Project
+    from app.services.project_auth import has_project_access
+
+    detail = exc.detail if isinstance(exc.detail, dict) else None
+    if exc.status_code != 402 or not detail or detail.get("code") != "PLAN_LIMIT_EXCEEDED" or detail.get("resource") != "project":
+        return exc
+    rows = (await db.execute(
+        select(Project.id, Project.name).where(Project.org_id == org_id, Project.deleted_at.is_(None)).limit(2)
+    )).all()
+    if len(rows) != 1 or not await has_project_access(db, user_id, rows[0].id, org_id):
+        return exc
+    return HTTPException(
+        status_code=402, detail={**detail, "existing_project": {"id": str(rows[0].id), "name": rows[0].name}}, headers=exc.headers,
+    )
+
+
+SOLO_AGENT_NAMES = {"claude": "Claude Code", "codex": "Codex"}  # story 4711 (Yuna): the agent is called what the person picked
+
+
+async def _unique_name(db: AsyncSession, model, *conds, base: str) -> str:
+    """`base`, or `base 2`, `base 3` … — the first not taken among the rows `conds` select (case-insensitive, trimmed)."""
+    taken = {" ".join((n or "").split()).casefold() for (n,) in (await db.execute(select(model.name).where(*conds))).all()}
+    name, n = base, 1
+    while " ".join(name.split()).casefold() in taken:
+        n += 1
+        name = f"{base} {n}"
+    return name
+
+
+async def confirm_solo_setup(
+    db: AsyncSession,
+    *,
+    code: str,
+    user_id: uuid.UUID,
+    org_id: uuid.UUID,
+    runtime: str,
+    project_id: uuid.UUID | None,
+    project_name: str | None,
+    auth,
+    workdir_hint: str | None = None,
+    tools: list[str] | None = None,
+) -> tuple[uuid.UUID, list[dict], uuid.UUID, uuid.UUID]:
+    """story 4711 (PO 03:36Z) — the first setup in three steps: one agent on the runtime the person picked, for the folder they
+    chose. No recipe, no story, nothing published. Returns (setup_id, members, project_id, conversation_id); never commits.
+
+    The project is the app's answer to «which project already uses this folder» (`project_id` — the app keeps folder → project,
+    the server never sees a path), else a new project named after the folder (`project_name`; a name already taken in the
+    organization becomes «{name} 2»). The agent is called by its program's name (a name taken becomes «Claude Code 2»). The
+    plan's agent limit (402) and project limit roll everything back. The person ↔ agent DM is made with it: it is the first
+    screen after the start. A replay by the same person returns what the code made."""
+    from app.models.member import Member
+    from app.models.organization import Organization
+    from app.models.project import Project
+    from app.repositories.team_member import TeamMemberRepository
+    from app.services.member_resolver import resolve_member
+    from app.services.org_agent import create_org_level_agent
+    from app.services.project_auth import is_org_owner_or_admin, require_project_access
+
+    setup = await _setup_by_code(db, code)
+    if _confirmed_again(setup, user_id, org_id):
+        members = list(setup.members or [])
+        if not (members and members[0].get("solo") and members[0].get("conversation_id")):
+            raise DesktopSetupError("already_confirmed")  # confirmed as a recipe or a move: not this request's answer
+        return setup.id, members, setup.project_id, uuid.UUID(str(members[0]["conversation_id"]))
+    if setup.revoked_at is not None or setup.exchanged_at is not None:
+        raise DesktopSetupError("code_used")
+    if _now() >= setup.expires_at:
+        raise DesktopSetupError("code_expired")
+    if setup.confirmed_at is not None:
+        raise DesktopSetupError("already_confirmed")
+    if "solo" not in (setup.capabilities or []):
+        raise DesktopSetupError("app_cannot_solo")
+    if runtime not in RUNTIME_TYPES:
+        raise DesktopSetupError("roles_invalid", "unknown runtime")
+    if not await is_org_owner_or_admin(db, user_id, org_id):
+        raise DesktopSetupError("not_org_admin")
+    if (project_id is None) == (not project_name):
+        raise DesktopSetupError("request_invalid", "exactly one of project_id and project_name")
+
+    if project_id is not None:
+        await require_project_access(db, user_id, project_id, org_id, not_found_detail="Project not found")
+    else:
+        from app.services.org_project_create import check_project_create_allowed, create_project_with_member
+
+        await db.execute(select(Organization.id).where(Organization.id == org_id).with_for_update())  # two codes at once see one name list
+        try:
+            await check_project_create_allowed(db, org_id)
+        except HTTPException as exc:
+            raise await _with_existing_project(db, exc, org_id=org_id, user_id=user_id) from None
+        name = await _unique_name(db, Project, Project.org_id == org_id, Project.deleted_at.is_(None), base=project_name)
+        project_id = (await create_project_with_member(
+            db, org_id=org_id, name=name, description=None, slug=None, user_id=str(user_id),
+        )).id
+
+    try:
+        person_member_id = uuid.UUID(str((await resolve_member(auth, org_id, db, project_id)).id))
+    except Exception as exc:  # noqa: BLE001 — no member row for the person in this project: say so, don't guess
+        raise DesktopSetupError("human_stage_needs_member") from exc
+
+    agents_before = await _active_agent_count(db, org_id) if settings.is_ee_enabled else 0
+    if settings.is_ee_enabled:
+        from ee.plan_limits import check_agent_add_limit  # type: ignore[import]
+
+        try:
+            await check_agent_add_limit(db, org_id)  # an HTTPException(402) here rolls the whole setup back
+        except HTTPException as exc:
+            raise _with_setup_numbers(exc, needed=1, agents_before=agents_before) from None
+    agent_name = await _unique_name(
+        db, Member, Member.org_id == org_id, Member.type == "agent", Member.is_active.is_(True), Member.deleted_at.is_(None),
+        base=SOLO_AGENT_NAMES[runtime],
+    )
+    agent, _no_key = await create_org_level_agent(
+        db, org_id=org_id, created_by=user_id, name=agent_name, role="member", project_ids=[project_id], defer_key_issuance=True,
+    )
+    await TeamMemberRepository(db, org_id).apply_anchor_update(agent, {"runtime_type": RUNTIME_TYPES[runtime]})
+
+    from app.services.approval_delivery import _get_or_create_approval_dm  # the person ↔ agent DM: one get-or-create room
+
+    conv = await _get_or_create_approval_dm(db, org_id=org_id, project_id=project_id, requester_id=person_member_id, approver_id=agent.id)
+    members = [{
+        "member_id": str(agent.id), "kind": "agent", "runtime": runtime, "solo": True, "name": agent_name,
+        "tools": clean_agent_tools(tools, runtime), "conversation_id": str(conv.id),
+    }]
+    setup.org_id = org_id
+    setup.project_id = project_id
+    setup.event_definition_key = None
+    setup.confirmed_by = user_id
+    setup.confirmed_at = _now()
+    setup.members = members
+    setup.workdir_hint = workdir_hint
+    await db.flush()
+    from app.services.onboarding_funnel import emit_onboarding_event
+
+    await emit_onboarding_event(
+        db, EVENT_CONFIRMED, session_id=setup.id, org_id=org_id, project_id=project_id,
+        meta={"flow": "desktop_solo", "human_hand": True, "agents": 1},
+    )
+    return setup.id, members, project_id, conv.id
+
+
+async def confirm_solo_setup_new_org(
+    db: AsyncSession,
+    *,
+    code: str,
+    user_id: uuid.UUID,
+    org_name: str,
+    project_name: str,
+    runtime: str,
+    auth,
+    workdir_hint: str | None = None,
+    tools: list[str] | None = None,
+) -> tuple[uuid.UUID, list[dict], uuid.UUID, uuid.UUID, uuid.UUID]:
+    """story 4711 AC4 (PO 03:42Z) — «시작» of the three steps for a person with no organization: the organization (its name is the
+    web's — the screen no longer asks for it), the folder's project and the solo setup in **one transaction**. The folder is the
+    only thing that makes a project: no empty «first project» beside it. Returns (setup_id, members, org_id, project_id,
+    conversation_id); never commits. Same order as `confirm_setup_new_org` (e-mail gate → per-user lock → the code → a replay →
+    the code's state → no organization yet → no pending invite → owned-org limit → create → the solo confirmation itself)."""
+    from app.models.user import User
+    from app.repositories.org_invite import OrgInviteRepository
+    from app.services.org_project_create import (
+        check_owned_org_limit,
+        create_org_with_owner,
+        has_active_org,
+        lock_first_org_path,
+        require_verified_email_for_org,
+    )
+
+    await require_verified_email_for_org(db, str(user_id))
+    await lock_first_org_path(db, user_id)
+    setup = await _setup_by_code(db, code)
+    if setup.confirmed_at is not None and setup.confirmed_by == user_id and setup.revoked_at is None:
+        members = list(setup.members or [])
+        if not (members and members[0].get("solo") and members[0].get("conversation_id")):
+            raise DesktopSetupError("already_confirmed")
+        return setup.id, members, setup.org_id, setup.project_id, uuid.UUID(str(members[0]["conversation_id"]))
+    if setup.revoked_at is not None or setup.exchanged_at is not None:
+        raise DesktopSetupError("code_used")
+    if _now() >= setup.expires_at:
+        raise DesktopSetupError("code_expired")
+    if setup.confirmed_at is not None:
+        raise DesktopSetupError("already_confirmed")
+    if "solo" not in (setup.capabilities or []):
+        raise DesktopSetupError("app_cannot_solo")
+    if await has_active_org(db, user_id):
+        raise DesktopSetupError("has_organization")
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if user is not None and user.email_verified and user.email:
+        if await OrgInviteRepository(db).pending_for_email(user.email, user.id):
+            raise DesktopSetupError("pending_invites")
+    await check_owned_org_limit(db, str(user_id))
+
+    org = await create_org_with_owner(db, name=org_name, slug=None, user_id=str(user_id), owner_member_id=None)
+    setup_id, members, project_id, conversation_id = await confirm_solo_setup(
+        db, code=code, user_id=user_id, org_id=org.id, runtime=runtime, project_id=None, project_name=project_name, auth=auth,
+        workdir_hint=workdir_hint, tools=tools,
+    )
+    return setup_id, members, org.id, project_id, conversation_id
 
 
 async def confirm_setup(
@@ -954,6 +1186,9 @@ async def _retire_same_machine(
         o.revoked_at = now
         o.revoked_reason = "replaced_by_new_setup"
     if old:
+        from app.services import desktop_clock
+
+        await desktop_clock.forget(db, [o.id for o in old], lock=False)  # story #4733 — a replaced line keeps no clock view (its row is already held: `_lock_in_order` in the exchange)
         await db.execute(
             update(DesktopDeviceToken)
             .where(DesktopDeviceToken.setup_id.in_([o.id for o in old]), DesktopDeviceToken.revoked_at.is_(None))
@@ -1134,6 +1369,9 @@ async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
     # and its open stream is told after the commit so it ends with `access_revoked` now, not at its next 30-second check
     await desktop_relay.reject_open_commands(db, setup_ids=[setup.id], result_code=desktop_relay.DISCONNECTED_CODE)
     desktop_relay.schedule_disconnected_after_commit(db, setup.id)
+    from app.services import desktop_clock
+
+    await desktop_clock.forget(db, [setup.id], lock=False)  # story #4733 — a clock view (draft first lines) does not outlive the computer's connection (the row is held: `_lock_in_order` above)
     # story #4565: only the agents this setup made — an existing agent attached here keeps running elsewhere once moved on
     # (its keys from this setup are revoked above; the agent itself is not stopped)
     agent_ids = {
@@ -1165,8 +1403,6 @@ def setup_state(setup: DesktopSetup, now: datetime | None = None) -> str:
 
 async def list_setups(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID) -> list[dict]:
     """The org's confirmed setups, newest first, with how many of each one's keys are still active (org owner/admin)."""
-    from sqlalchemy import func
-
     from app.services.project_auth import is_org_owner_or_admin
 
     if not await is_org_owner_or_admin(db, user_id, org_id):
@@ -1179,6 +1415,13 @@ async def list_setups(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID
             DesktopSetup.revoked_reason.is_distinct_from("replaced_by_new_setup"),
         ).order_by(DesktopSetup.confirmed_at.desc()).limit(200)
     )).scalars().all()
+    return await setup_items(db, rows, org_id=org_id)
+
+
+async def setup_items(db: AsyncSession, rows: list[DesktopSetup], *, org_id: uuid.UUID) -> list[dict]:
+    """The web list's item of each setup row, in the rows' order (story 4424/4660 — shared by the setup list and story 4734's computer list)."""
+    from sqlalchemy import func
+
     # story 4660 — newest heard-from time per setup (over its tokens; a setup never heard from has none)
     from app.models.desktop_relay import DesktopDeviceToken
 
@@ -1417,6 +1660,8 @@ async def setup_status(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
         "members": [{k: m.get(k) for k in ("stage", "role", "member_id", "kind", "runtime", "name")} for m in (setup.members or [])],
         # story #4576: «move» (no recipe · device and keys only) or «recipe»
         "setup_kind": setup_kind(setup),
+        # story 4711: a solo setup's person ↔ agent room — the progress screen's way into the first conversation (none otherwise)
+        "conversation_id": next((m["conversation_id"] for m in (setup.members or []) if m.get("solo") and m.get("conversation_id")), None),
         "signals": {
             "tools_connected": [{"member_id": k, "at": v} for k, v in tools.items()],
             "first_task_handed_at": handed[1] if handed else None,

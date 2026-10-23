@@ -70,6 +70,26 @@ async function fillAndSubmit() {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 
+describe('CreateOrganizationDialog — the switcher\'s request (story 4721 keeps its defaults)', () => {
+  it('slug required as before: the name and the address derived from it are both sent', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ data: { id: 'o-1', name: 'Test Org', slug: 'test-org' } }) }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { onCreated } = await mount();
+    await fillAndSubmit();
+    expect(JSON.parse((fetchMock.mock.calls[0] as unknown as [string, { body: string }])[1].body)).toEqual({ name: 'Test Org', slug: 'test-org' });
+    expect(onCreated).toHaveBeenCalledWith('o-1');
+  });
+});
+
+describe('CreateOrganizationDialog — a 403 EMAIL_VERIFICATION_REQUIRED (story 4721)', () => {
+  it('without a handler it is the generic error line, as before', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 403, json: async () => ({ error: { code: 'EMAIL_VERIFICATION_REQUIRED', message: 'x' } }) })));
+    await mount();
+    await fillAndSubmit();
+    expect(document.body.querySelector('[role=alert]')?.textContent).toBe('조직을 만들지 못했어요. 잠시 후 다시 시도해 주세요.');
+  });
+});
+
 describe('CreateOrganizationDialog — PLAN_LIMIT_EXCEEDED envelope (story #2470)', () => {
   it('실제 응답 envelope({error:{code}})으로 한도 배너가 실제로 뜬다 — raw 영문 message 노출 없음', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
@@ -271,28 +291,16 @@ describe('CreateOrganizationDialog — i18n (story #2482)', () => {
 // 온보딩 폼(onboarding.orgName/slug*)이 같은 입력(조직 이름·URL 슬러그)을 다른 낱말로
 // 부르던 것을 값 통일했다. 두 화면의 값이 다시 갈리면(한쪽만 고치는 재발) 즉시 잡는다.
 describe('CreateOrganizationDialog — 대화상자·온보딩 폼 낱말 일치(story #3910 AC2)', () => {
-  // story 4669 (U6): the onboarding form has no slug field any more (the server derives the slug) — only the name pair is
-  // shared now; the dialog keeps its own slug field and words (nav.createOrgSlug*).
-  it('ko: nav.createOrgName*와 onboarding.orgName*가 값으로 같다', () => {
-    expect(koMessages.nav.createOrgNameLabel).toBe(koMessages.onboarding.orgName);
-    expect(koMessages.nav.createOrgNamePlaceholder).toBe(koMessages.onboarding.orgNamePlaceholder);
-    expect('slug' in koMessages.onboarding).toBe(false);
-  });
-
-  it('en: nav.createOrgName*와 onboarding.orgName*가 값으로 같다', () => {
-    expect(enMessages.nav.createOrgNameLabel).toBe(enMessages.onboarding.orgName);
-    expect(enMessages.nav.createOrgNamePlaceholder).toBe(enMessages.onboarding.orgNamePlaceholder);
-    expect('slug' in enMessages.onboarding).toBe(false);
-  });
-
-  // 양성대조 — 한쪽만 바꾸면(다이얼로그 재-드리프트) RED가 된다는 것을 실제로 증명한다.
-  it('양성대조 — nav.createOrgNameLabel만 되돌리면(값 갈림) RED가 된다', () => {
-    const mutatedNav = { ...koMessages.nav, createOrgNameLabel: 'Org name' };
-    expect(mutatedNav.createOrgNameLabel).not.toBe(koMessages.onboarding.orgName);
+  // story 4669 (U6): the onboarding form lost its slug field; story 4715: it lost its organization-name field too (the organization is
+  // made with a made name). The pair this block kept equal has one side left — the dialog — so nothing can drift; what is pinned now is
+  // that the onboarding keeps no organization-name words of its own (a second, differing name for the same input cannot come back).
+  it.each([['ko', koMessages] as const, ['en', enMessages] as const])('%s: the onboarding has no organization-name or slug words — only the dialog names the input', (_l, messages) => {
+    for (const key of ['orgName', 'orgNamePlaceholder', 'slug']) expect(key in messages.onboarding).toBe(false);
+    expect(messages.nav.createOrgNameLabel).toBeTruthy();
   });
 
   // 무관 PR no-op — 이 4쌍과 무관한 다른 nav/onboarding 값 불일치는 이 가드가 안 본다.
   it('무관 PR no-op — 다른 nav/onboarding 키 쌍(switcherNewOrganization 등)은 이 가드 밖이다', () => {
-    expect(koMessages.nav.switcherNewOrganization).not.toBe(koMessages.onboarding.welcome);
+    expect(koMessages.nav.switcherNewOrganization).not.toBe(koMessages.onboarding.createProject);
   });
 });

@@ -99,9 +99,28 @@ describe('EntityPreviewModal doc 미리보기 — content_format 분기(story #3
     expect(container.querySelector('table')).not.toBeNull();
     expect(container.querySelector('th')).not.toBeNull();
     expect(container.querySelector('code')).not.toBeNull();
-    const wrapper = container.querySelector('table')?.parentElement;
+    // story 4707: 표는 가로 스크롤 상자(overflow-x-auto) 안에 있고, 그 상자의 부모가 규칙을 가진 래퍼다
+    const shell = container.querySelector('table')?.parentElement;
+    expect(shell?.className).toContain('overflow-x-auto');
+    const wrapper = shell?.parentElement;
     expect(wrapper?.className).toContain('[&_table]:border-collapse');
     expect(wrapper?.className).toContain('[&_th]:border');
     expect(wrapper?.className).toContain('[&_code]:font-mono');
+  });
+
+  // story 4707 (Yuna AC0 ③ ⑤): 본문 상자는 min-w-0(긴 줄이 상자를 옆으로 밀지 않는다) · 폰 가장자리는 px-4(640px부터 px-6) — 머리 · 풋터도 같은 여백
+  it('[SID:4707] 본문 상자 min-w-0 · 폰 px-4 → sm:px-6 · 머리와 풋터도 같은 여백', async () => {
+    await mount('본문 한 줄', 'markdown');
+    const body = container.querySelector('.overflow-y-auto') as HTMLElement;
+    expect(body.className).toContain('min-w-0');
+    expect(body.className).toContain('px-4');
+    expect(body.className).toContain('sm:px-6');
+    expect(body.className).not.toMatch(/(^|\s)px-6(\s|$)/); // 폰 기본 여백이 24px로 돌아가지 않는다
+    const header = container.querySelector('.border-b') as HTMLElement;
+    expect(header.className).toContain('px-4');
+    expect(header.className).toContain('sm:px-6');
+    const footer = container.querySelector('.border-t') as HTMLElement;
+    expect(footer.className).toContain('px-4');
+    expect(footer.className).toContain('sm:px-6');
   });
 });

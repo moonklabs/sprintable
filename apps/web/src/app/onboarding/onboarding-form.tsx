@@ -1,70 +1,21 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { UpgradeModal } from '@/components/ui/upgrade-modal';
 import { Button } from '@/components/ui/button';
 import { OperatorInput, OperatorTextarea, OperatorSelect } from '@/components/ui/operator-control';
 import { useTranslations } from 'next-intl';
 import { fetchWithAuth } from '@/lib/db/client';
+import { defaultOrgName } from '@/lib/default-org-name';
+import { fetchMyInvites, type MyInvite } from '@/lib/my-invites';
+import { InvitedCard } from '@/components/desktop/desktop-setup';
 import { ConnectStep } from './connect-step';
-import { WhereStep, type WhereChoice } from './where-step';
-import { DesktopGetStep } from './desktop-get-step';
+import { FirstScreen } from './first-screen';
 import { existingOrgIdFromMe } from './existing-org';
 import { emitOnboardingEvent } from './onboarding-telemetry';
 import { withProjectParam } from '@/hooks/use-flat-href';
-
-// story #3195 — 이메일 인증 왕복(가입 → 1/4 입력 → EMAIL_VERIFICATION_REQUIRED 400 →
-// 메일함에서 링크 클릭 → verify-email 페이지 → 「시작하기」로 복귀)이 풀 페이지 네비게이션이라
-// 이 컴포넌트가 통째로 리마운트돼 React state(orgName/orgSlug)가 사라졌다. sessionStorage는
-// 같은 탭 내 네비게이션 전체에서 살아남는다(탭을 아예 새로 열면 못 살리는 게 정상 — 메일
-// 클라이언트가 링크를 새 탭에서 열어도 verify-email 자체 접근엔 로그인 세션만 있으면 되고,
-// 왕복 자체가 "같은 탭"이어야 이 값이 필요한 시나리오라 sessionStorage로 충분하다).
-//
-// 카디르 QA(PR#3617) codex MED — 키가 고정 문자열이면 같은 탭에서 계정 전환(로그아웃→
-// 다른 계정 로그인) 시 前 계정이 타이핑한 값이 새 계정 온보딩 화면에 그대로 새 나간다.
-// member_id(uid)로 키잉해 계정마다 별도 슬롯을 쓴다 — uid는 /api/auth/me 응답이 와야
-// 알 수 있어(비동기) 초기 렌더 시점엔 아직 복원 못 하고, uid 확정 後 별도 effect에서
-// 복원한다(아래 참고).
-const ORG_DRAFT_STORAGE_PREFIX = 'sp_onboarding_org_draft:';
-
-// story #3983(PO 확定 2026-09-17 01:41Z) — 끝 착지 결정을 순수함수로 뽑아
-// 낸다(closure 안에 묻어 두면 폼 전체를 org→project→agent→connect까지
-// 몰아야 테스트가 되는 자리 — 결정 자체는 이 한 줄뿐이라 여기만 pin한다).
-// story #4017 CHANGES 2(rebase 시점 재정정 2026-09-22) — todayHref·chatsHref 둘 다
-// 더 이상 이 함수가 리터럴을 재조립하지 않는다. 부모(page.tsx)가
-// resolveNavV3Destinations(flags)로 구한 값을 그대로 받는다 — 목적지 모듈 한 곳에서만.
-export function resolveOnboardingLandingHref(todayV3Enabled: boolean, todayHref: string, chatsHref: string): string {
-  return todayV3Enabled ? todayHref : chatsHref;
-}
-
-// story 4669 (U6): the draft is the name only — the slug field is gone (the server derives the slug, as the app way's one screen
-// has had since 4427). A draft written before, `{orgName, orgSlug}`, still restores its name.
-function loadOrgDraft(uid: string): { orgName: string } | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = sessionStorage.getItem(ORG_DRAFT_STORAGE_PREFIX + uid);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { orgName?: unknown };
-    if (typeof parsed.orgName !== 'string') return null;
-    return { orgName: parsed.orgName };
-  } catch {
-    return null;
-  }
-}
-
-function saveOrgDraft(uid: string, orgName: string): void {
-  try {
-    const key = ORG_DRAFT_STORAGE_PREFIX + uid;
-    if (!orgName) { sessionStorage.removeItem(key); return; }
-    sessionStorage.setItem(key, JSON.stringify({ orgName }));
-  } catch {
-    // 시크릿 모드 등 sessionStorage 차단 — 이 스토리 前과 동일(비영속) 동작으로 조용히 저하.
-  }
-}
-
-function clearOrgDraft(uid: string): void {
-  try { sessionStorage.removeItem(ORG_DRAFT_STORAGE_PREFIX + uid); } catch { /* no-op */ }
-}
+import { resolveOnboardingLandingHref } from '@/lib/onboarding-landing-href';
 
 const AGENT_ROLES = ['developer', 'designer', 'pm', 'qa', 'devops'];
 // story #3196 ⑥ — 값(BE role 필드, 영문 enum 그대로 무변경)과 표시 라벨을 분리. 예전엔
@@ -78,24 +29,19 @@ const AGENT_ROLE_LABEL_KEYS: Record<string, string> = {
   devops: 'roleDevops',
 };
 
-// story 4668 (UX-1 · U1 · design mirko/4668-design.md): after the organization, one fork («where») — the app way goes to one
-// screen «데스크톱 앱 받기» («desktop») and ends there (the desktop setup makes the project and agents · 4496); the web way keeps
-// project → agent → connect. The agent step's [건너뛰기] now goes to connect (not home — that was a dead end: the app card was
-// never seen).
-type Step = 'org' | 'where' | 'desktop' | 'project' | 'agent' | 'connect';
+// story 4715 (UX-1 · plan yuna/4715-plan-1016.md): no organization-name step and no fork. On arrival the page finds the person's
+// organization, or their pending invites, or makes the organization with a made name («{name}의 조직» / «내 조직»), then shows ONE
+// screen («first»: on a Mac [Mac 앱 받기] · elsewhere «지금은 Mac 앱만 있어요»). The web way (an agent already running somewhere else)
+// keeps project → agent → connect.
+type Step = 'arrive' | 'invited' | 'first' | 'project' | 'agent' | 'connect';
 
-/** The progress strip (PO · Yuna 07:16Z): before the fork is chosen the total is unknown, so the organization and fork screens show
- * the bar only — its width follows the radio currently chosen (app = 3 screens, web = 5). From the screen after the fork on, the
- * fraction is shown: app «3 / 3» · web «3 / 5» «4 / 5» «5 / 5». */
-export function onboardingProgress(step: Step, choice: WhereChoice): { fraction: number; label: { current: number; total: number } | null } {
-  const total = choice === 'app' ? 3 : 5;
+/** The progress strip: only the web way's three steps have one (1/3 · 2/3 · 3/3) — arrival, invites and the one screen have none. */
+export function onboardingProgress(step: Step): { fraction: number; label: { current: number; total: number } } | null {
   switch (step) {
-    case 'org': return { fraction: 1 / total, label: null };
-    case 'where': return { fraction: 2 / total, label: null };
-    case 'desktop': return { fraction: 1, label: { current: 3, total: 3 } };
-    case 'project': return { fraction: 3 / 5, label: { current: 3, total: 5 } };
-    case 'agent': return { fraction: 4 / 5, label: { current: 4, total: 5 } };
-    case 'connect': return { fraction: 1, label: { current: 5, total: 5 } };
+    case 'project': return { fraction: 1 / 3, label: { current: 1, total: 3 } };
+    case 'agent': return { fraction: 2 / 3, label: { current: 2, total: 3 } };
+    case 'connect': return { fraction: 1, label: { current: 3, total: 3 } };
+    default: return null;
   }
 }
 
@@ -115,26 +61,25 @@ interface OnboardingFormProps {
   // (기본값 없음) 호출부가 빠뜨리면 타입 에러로 즉시 걸린다 — 가드 예외(리터럴 기본값)도
   // 이걸로 사라진다.
   chatsHref: string;
+  /** story 4714 AC2: resolved by the server page (`isDesktopDownloadEnabled`) — whether the phone app's first screen offers «메일로 받기» */
+  macDownloadEnabled?: boolean;
 }
 
+/** What arrival is doing: working on it · stopped because the invites could not be read (nothing made) · stopped on another failure */
+type Arrival = 'working' | 'account-check-failed' | 'invite-check-failed' | 'failed';
+
 export function OnboardingForm({
-  initialStep, initialOrgId, todayV3Enabled = false, todayHref, chatsHref,
+  initialStep, initialOrgId, todayV3Enabled = false, todayHref, chatsHref, macDownloadEnabled = false,
 }: OnboardingFormProps) {
   const t = useTranslations('onboarding');
   const tc = useTranslations('common');
+  const tNewOrg = useTranslations('desktopOnboarding');
 
-  const [step, setStep] = useState<Step>(initialStep ?? 'org');
-  // story 4668: the fork's choice — the app way is the default («권장»); the bar on the org/fork screens follows it
-  const [whereChoice, setWhereChoice] = useState<WhereChoice>('app');
-  const [orgName, setOrgName] = useState('');
-  // story #3195 — draft 저장/복원 키는 uid가 확정돼야(=/api/auth/me 응답 後) 정해진다.
-  const [draftUid, setDraftUid] = useState<string | null>(null);
-  // 유나 design:changes(PR#3617) — draft 복원이 post-mount effect라 응답 前엔 입력창이
-  // 항상 empty로 뜬 뒤 draft로 채워지는 깜빡임이 실측됐다("입력이 그대로 있다"는 인상이
-  // 이 스토리의 AC 자체). uid 해소(성공·실패 무관) 前까지 org 입력 2개를 게이팅해 빈
-  // 화면이 찍히는 순간 자체를 없앤다(PO 선택 ⓐ — lazy-init 무키 폴백(ⓑ)은 前 계정 draft가
-  // 잠깐 보일 위험이 있어 계정격리 축과 상충).
-  const [identityResolved, setIdentityResolved] = useState(false);
+  const [step, setStep] = useState<Step>(initialStep ?? 'arrive');
+  const [arrival, setArrival] = useState<Arrival>('working');
+  const [invites, setInvites] = useState<MyInvite[]>([]);
+  // the organization's name when this page made it — shown on the one screen; null when not known here (never made up)
+  const [orgName, setOrgName] = useState<string | null>(null);
   const [projectName, setProjectName] = useState('');
   const [projectDesc, setProjectDesc] = useState('');
   const [orgId, setOrgId] = useState<string | null>(initialOrgId ?? null);
@@ -156,128 +101,121 @@ export function OnboardingForm({
   const [emailVerifyBlocked, setEmailVerifyBlocked] = useState(false);
   const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [resendError, setResendError] = useState('');
+  // one arrival at a time — a second run (a remount in development · a double press) must never make a second organization
+  const arriving = useRef(false);
+  // the person's choice «초대와 따로 내 조직 만들기» — kept across the arrival's retries (a retry never asks the invites again)
+  const ownOrgChosen = useRef(false);
 
-  const progress = onboardingProgress(step, whereChoice);
+  const progress = onboardingProgress(step);
 
   // OB-4: wizard 진입 1회 emit. session_id는 telemetry가 sessionStorage로 1회차당 고정.
   useEffect(() => {
     emitOnboardingEvent('onboarding_started');
   }, []);
 
-  // story #3195 — org 단계 마운트 시 딱 1회, 신원(uid) + 미인증 여부를 함께 조회한다.
-  // 카디르 QA(PR#3617) 치명 — FE `/api/me`가 실제로 서빙하는 BE는 TeamMember 필수인
-  // `me.py::get_me()`라, 이 스토리가 겨냥하는 바로 그 "무 org" 상태에서 404가 나 email_
-  // verified·org_id 둘 다 못 읽었다(테스트는 mock이라 안 잡힘 — 3605와 동형 "실경로
-  // 미도달" 클래스). 대신 `/api/auth/me`(BFF 신설, BE app.routers.auth.get_auth_me)를
-  // 쓴다 — JWT claims만으로 응답해 TeamMember/무 org 여부와 무관하게 항상 200.
-  useEffect(() => {
-    if (step !== 'org') return;
-    let cancelled = false;
-    fetchWithAuth('/api/auth/me')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((json: { data?: { member_id?: string; email_verified?: boolean | null; org_id?: string | null; org_member_id?: string | null } } | null) => {
-        if (cancelled) return;
-        // story 4668: this account already has an organization (a reload at the fork or at the app download, a re-opened
-        // `/onboarding?signup=1`) — no second «조직 만들기» (the free plan allows one: it ended in the upgrade modal). On to the
-        // fork, with that organization; the fork is where the first run left off after the organization was made.
-        const existingOrgId = existingOrgIdFromMe(json);
-        if (existingOrgId) { setOrgId(existingOrgId); setStep('where'); return; }
-        // AC2 — email_verified가 명시 false일 때만 배너를 띄운다(true·null 둘 다 무표시 —
-        // null은 조회 실패/판정 불가란 뜻이라, 이전처럼 "제출해봐야 아는" 폴백으로 자연스럽게
-        // 저하할 뿐 새로운 오탐을 만들지 않는다).
-        if (json?.data?.email_verified === false) setEmailVerifyBlocked(true);
-
-        const uid = json?.data?.member_id;
-        if (!uid) { setIdentityResolved(true); return; }
-        setDraftUid(uid);
-        // 유저가 이 응답을 기다리는 동안 이미 타이핑을 시작했으면(레이스) 덮어쓰지 않는다
-        // — 함수형 업데이트로 "지금 이 순간의" 실제 값을 보고 판단(클로저 stale 없음).
-        const draft = loadOrgDraft(uid);
-        if (draft) {
-          setOrgName((prev) => prev || draft.orgName);
-        }
-        setIdentityResolved(true);
-      })
-      .catch(() => {
-        // 조용히 폴백 — 제출 시 400 분기가 그대로 안전망, draft 복원도 스킵. 실패해도
-        // 게이팅을 영영 풀지 않으면 폼 자체가 막히므로 반드시 resolved 처리한다.
-        if (!cancelled) setIdentityResolved(true);
-      });
-    return () => { cancelled = true; };
-  }, [step]);
-
-  // story #3195 — 매 키입력마다 draft 저장(디바운스 불요 — sessionStorage 쓰기는 로컬·저비용).
-  // uid가 아직 안 잡혔으면(위 fetch 응답 前 짧은 창) 저장을 건너뛴다 — 계정-무관 키로 쓰면
-  // codex MED가 지적한 계정간 누수가 재발한다.
-  useEffect(() => {
-    if (step !== 'org' || !draftUid) return;
-    saveOrgDraft(draftUid, orgName);
-  }, [step, draftUid, orgName]);
-
-  const handleCreateOrg = async () => {
-    if (!orgName.trim()) return;
-    setLoading(true);
-    setError('');
-    setEmailVerifyBlocked(false);
-    setResendState('idle');
-    setResendError('');
-
-    // story #2000: 아래 fetch/json 파싱이 네트워크 단에서 throw하면(오프라인 등) try 없이는
-    // setLoading(false)가 영영 안 불려 폼이 영구 로딩으로 멈춘다(온보딩 진입 자체를 막는 심각한
-    // 케이스) — try/catch/finally로 봉합, 기존 error 상태를 그대로 재사용.
+  // story 4715 (AC1 · AC6): the organization is never asked for — make it with a made name, but only once the invites are known to be none
+  const createOrg = async (name: string) => {
     try {
       const res = await fetch('/api/organizations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // story 4669: no slug — the server derives it from the name (ASCII part, or `workspace-<8 hex>` for a Korean-only name)
-        // and makes it unique, the same way the app way's one screen does (org_project_create.py · 4427)
-        body: JSON.stringify({ name: orgName.trim() }),
+        body: JSON.stringify({ name }),
       });
       const json = await res.json();
 
       if (!res.ok) {
-        // story #2441 — code로 분기(문자열 매칭은 반창고: 이 문구를 한국어로 바꾸는 판이라
-        // 영문 매칭은 곧 깨진다). 이 케이스만 별도 UI(재전송+메일함 안내)로 갈아탄다 — 게이트
-        // 자체는 BE가 그대로 지킨다(요구 완화 아님).
+        // story #2441 — code로 분기(문자열 매칭은 반창고). 이 케이스만 별도 UI(재전송+메일함 안내)로 갈아탄다.
         if (json?.error?.code === 'EMAIL_VERIFICATION_REQUIRED') {
           setEmailVerifyBlocked(true);
           setError(t('emailVerifyRequiredError'));
+          setArrival('failed');
           return;
         }
-        // story #2470 — #2441과 같은 클래스: BE는 이미 구조화 에러(code:PLAN_LIMIT_EXCEEDED·
-        // limit·upgrade_required)를 주는데 이전엔 여기서 raw 영문 message를 그대로 찍었다
-        // ("Free plan org limit (1) reached. Upgrade to Team or Pro."). upgrade_required가
-        // 있으면 UpgradeModal(이미 존재·다른 한도 케이스에서 재사용 중인 컴포넌트)로 안내한다 —
-        // showUpgrade/upgradeReason state는 이 스토리 前엔 세팅부가 없어 죽어있던 자리였다.
+        // story #2470 — BE의 구조화 에러(code:PLAN_LIMIT_EXCEEDED·limit·upgrade_required)는 UpgradeModal로 안내한다.
         if (json?.error?.code === 'PLAN_LIMIT_EXCEEDED' && json?.error?.upgrade_required) {
           setUpgradeReason(t('orgLimitExceededError', { limit: json.error.limit ?? 1 }));
           setShowUpgrade(true);
+          setArrival('failed');
           return;
         }
-        // story #2484 — 유나 design:changes(2026-08-06): 위 두 code는 분기하지만 그 «외»
-        // code는 raw 서버 message가 그대로 샜다(형제 3핸들러(resend/create-project/
-        // create-agent)만 고치고 이 자리를 놓친 것 — 가드도 위에 .code 토큰이 있어 못 잡는
-        // 사각이었다). 알려지지 않은 code는 다른 핸들러와 동일하게 generic 폴백만 쓴다.
+        // story #2484 — 알려지지 않은 code는 generic 폴백만(raw 서버 message 미노출).
         setError(t('createOrgFailed'));
+        setArrival('failed');
         return;
       }
 
       setOrgId(json.data.id);
-      // story #3195 — 조직 생성 성공(=이 값들이 이제 쓸모 없어짐) 시점에만 draft를 지운다.
-      // 실패(EMAIL_VERIFICATION_REQUIRED 포함) 시엔 절대 안 지운다 — 왕복 중 그대로 살아야 함.
-      if (draftUid) clearOrgDraft(draftUid);
+      setOrgName(name);
       // E-ONB S5 FINAL: org 생성 시 org_member가 최초 생성됨 → 즉시 토큰 refresh로
       // 새 JWT에 org_id(BE auth Path4 org_member fallback) 반영. 이래야 다음 단계 project 생성의
       // getAuthContext(/api/v2/me)가 통과한다(미refresh 시 fresh JWT엔 team_member 없어 me null → 401).
       await fetch('/api/auth/refresh', { method: 'POST' }).catch(() => null);
-      // story 4668: the fork comes next, not the project step
-      setStep('where');
+      setStep('first');
     } catch {
       setError(t('networkError'));
-    } finally {
-      setLoading(false);
+      setArrival('failed');
     }
   };
+
+  // story 4715: arrival. `ownOrg` — the person chose «초대와 따로 내 조직 만들기» on the invited screen: the invites are known, make it.
+  const arrive = async (ownOrg = ownOrgChosen.current) => {
+    if (arriving.current) return;
+    arriving.current = true;
+    ownOrgChosen.current = ownOrg;
+    // from the invited card the arrival's own screen takes over, so a failed read there is seen (with its retry), not hidden behind the card
+    if (ownOrg) setStep('arrive');
+    // from the invited card the arrival's own screen takes over, so a failed read there is seen (with its retry), not hidden behind the card
+    setArrival('working');
+    setError('');
+    setEmailVerifyBlocked(false);
+    setResendState('idle');
+    setResendError('');
+    try {
+      // `/api/auth/me` answers from the JWT claims — 200 with or without an organization (story #3195 · 카디르 QA PR#3617)
+      // rule 4832 for this read too (Kadir QA 5124): an answer that cannot be read is NOT «no organization» — folding it would make a second
+      // organization for a person who already has one. Stop with [다시 확인]; nothing is made.
+      let me: { data?: { member_id?: string | null; org_id?: string | null; org_member_id?: string | null; email_verified?: boolean | null; display_name?: string | null } } | null;
+      try {
+        const res = await fetchWithAuth('/api/auth/me');
+        if (!res.ok) throw new Error(String(res.status));
+        me = await res.json();
+        // a 200 that carries no account (`{}` · `{data:null}` · `{data:{}}`) is not an answer either — the contract's account always has
+        // `member_id` (backend AuthMeResponse), so only that counts as «read»
+        if (typeof me?.data?.member_id !== 'string' || !me.data.member_id) throw new Error('no account');
+      } catch {
+        setArrival('account-check-failed');
+        return;
+      }
+      // story 4668: already a member (a reload · a re-opened `/onboarding?signup=1`) — no second organization
+      const existing = existingOrgIdFromMe(me);
+      if (existing) { setOrgId(existing); setStep('first'); return; }
+      // the e-mail gate normally stands before this page; if it is still unverified, say so and make nothing (story #2441)
+      if (me?.data?.email_verified === false) { setEmailVerifyBlocked(true); setArrival('failed'); return; }
+      if (!ownOrg) {
+        let pending: MyInvite[];
+        try {
+          pending = await fetchMyInvites();
+        } catch {
+          // rule 4832: never make an organization while the invites are unknown
+          setArrival('invite-check-failed');
+          return;
+        }
+        if (pending.length > 0) { setInvites(pending); setStep('invited'); return; }
+      }
+      const name = defaultOrgName(me?.data?.display_name, (n) => tNewOrg('defaultOrgNameWithName', { name: n }), tNewOrg('defaultOrgName'));
+      setStep('arrive');
+      await createOrg(name);
+    } finally {
+      arriving.current = false;
+    }
+  };
+
+  useEffect(() => {
+    if (step === 'arrive') void arrive();
+    // arrival runs once, on mount; a retry is the person's press
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // story #2441 — BE `/auth/resend-verification`(auth.py, 3/hour rate-limit)의 BFF 프록시만
   // 새로 만들고, 여기서는 그 결과를 안내로 보여준다. 연타 방지는 BE 429가 최종 권위지만,
@@ -326,7 +264,7 @@ export function OnboardingForm({
     setError('');
 
     try {
-      // E-ONB S5 FINAL: org 생성 직후 refresh(handleCreateOrg)로 JWT에 org_id 반영됨 → X-Org-Id 불요(제거).
+      // E-ONB S5 FINAL: org 생성 직후 refresh로 JWT에 org_id 반영됨 → X-Org-Id 불요(제거).
       const res = await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -335,18 +273,13 @@ export function OnboardingForm({
       const json = await res.json();
 
       if (!res.ok) {
-        // story #2484 — 실측(#2484 그라운딩): 이 분기는 'UPGRADE_REQUIRED'를 봤으나 backend
-        // projects.py create_project()는 그 코드를 절대 내지 않는다(존재하지 않는 문자열이라
-        // FastAPI 어디에도 없음 grep 확認) — organizations.py의 PLAN_LIMIT_EXCEEDED와 정확히
-        // 같은 클래스(resource:"project")를 실제로 낸다. 그래서 이 UpgradeModal 경로는 지금껏
-        // 한 번도 안 탄 죽은 분기였다(항상 아래 raw fallback으로 샜음). 코드를 바로잡는다.
+        // story #2484 — backend projects.py create_project()는 'PLAN_LIMIT_EXCEEDED'(resource:"project")를 낸다.
         if (json?.error?.code === 'PLAN_LIMIT_EXCEEDED') {
           setUpgradeReason(t('projectLimitExceededError', { limit: json.error.limit ?? 1 }));
           setShowUpgrade(true);
           return;
         }
-        // 그 외(400 Invalid slug format·409 Slug already exists 등 — 온보딩은 explicit slug를
-        // 안 보내 실질 도달 희박하나 방어적으로) code만 보고 raw message는 안 씀.
+        // 그 외 code만 보고 raw message는 안 씀.
         setError(t('createProjectFailed'));
         return;
       }
@@ -360,7 +293,6 @@ export function OnboardingForm({
       setProjectId(project.id);
 
       // 휴먼 members 앵커는 BE가 org/project 생성 시 ensure_human_member로 보장한다(#1317 휴먼판).
-      // 과거 여기서 호출하던 /api/team-members(type=human) POST는 410 Gone(데드 경로)이라 제거.
 
       await fetch('/api/current-project', {
         method: 'POST',
@@ -398,8 +330,7 @@ export function OnboardingForm({
         }),
       });
       const memberJson = await memberRes.json() as { data?: { id: string; api_key?: string }; error?: { code?: string; message?: string } };
-      // story #2484 — 이 정확한 호출 형태(온보딩·human 호출자·user_id 없음)에서 도달 가능한
-      // 고유 code가 없어(그라운딩 확認) raw message 대신 통일된 안전 폴백만 사용.
+      // story #2484 — 도달 가능한 고유 code가 없어 raw message 대신 통일된 안전 폴백만 사용.
       if (!memberRes.ok) {
         setError(t('createAgentFailed'));
         return;
@@ -413,7 +344,6 @@ export function OnboardingForm({
       setAgentId(newAgentId);
 
       // 에이전트 생성 응답에 이미 plaintext api_key가 포함됨(BE team_members.py: type=agent 생성 시 항상 발급).
-      // 별도 발급 호출(POST /api/agents/{id}/api-key)은 BE가 body 필수라 빈 본문 시 422 → 응답 키를 그대로 사용.
       if (memberJson.data?.api_key) {
         setNewApiKey(memberJson.data.api_key);
       }
@@ -430,65 +360,60 @@ export function OnboardingForm({
     void finishToHome();
   };
 
-  // story 4668: [계속] at the fork. The app way is counted with the same signal the connect step's desktop button sends
-  // (3983 funnel · one axis for «went the desktop way»); no project or agent is made here.
-  const handleWhereContinue = () => {
-    if (whereChoice === 'app') {
-      emitOnboardingEvent('desktop_handoff_selected', { agent_id: null, flow: 'onboarding' });
-      setStep('desktop');
-      return;
-    }
-    setStep('project');
-  };
+  // story 4715 (AC6): pending invites — the invited card (the app setup's own · its words), and one way to make an organization anyway
+  if (step === 'invited') {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="w-full max-w-md space-y-3" data-testid="onboarding-invited">
+          <InvitedCard invites={invites} onReload={() => window.location.reload()} onCreateOwn={() => void arrive(true)} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className={`w-full ${step === 'connect' ? 'max-w-lg' : 'max-w-md'} space-y-6 rounded-2xl border border-border bg-card p-6 shadow-lg sm:p-8`} data-testid="onboarding-card">
-        {/* 진행 표시줄 — story 4668: bar only until the fork is chosen, the fraction from the screen after it (onboardingProgress) */}
-        <div className="space-y-1.5" data-testid="onboarding-progress">
-          {progress.label ? (
+        {/* 진행 표시줄 — story 4715: the web way's three steps only */}
+        {progress ? (
+          <div className="space-y-1.5" data-testid="onboarding-progress">
             <div className="flex justify-between text-xs text-muted-foreground">
               <span data-testid="onboarding-step-of">{t('stepOf', progress.label)}</span>
             </div>
-          ) : null}
-          <div className="h-1.5 w-full rounded-full bg-muted">
-            <div
-              className="h-1.5 rounded-full bg-primary transition-all duration-300"
-              style={{ width: `${progress.fraction * 100}%` }}
-              data-testid="onboarding-progress-bar"
-            />
+            <div className="h-1.5 w-full rounded-full bg-muted">
+              <div
+                className="h-1.5 rounded-full bg-primary transition-all duration-300"
+                style={{ width: `${progress.fraction * 100}%` }}
+                data-testid="onboarding-progress-bar"
+              />
+            </div>
           </div>
-        </div>
+        ) : null}
 
-        <div className="text-center">
-          <h1 id="onboarding-step-title" className="break-keep text-2xl font-bold text-foreground">
-            {step === 'org' && t('createOrg')}
-            {step === 'where' && t('where.title')}
-            {step === 'desktop' && t('download.title')}
-            {step === 'project' && t('createProject')}
-            {step === 'agent' && t('createAgent')}
-            {step === 'connect' && t('connectAgent')}
-          </h1>
-          <p className="mt-2 break-keep text-sm text-muted-foreground">
-            {step === 'org' && t('welcome')}
-            {step === 'where' && t('where.subtitle')}
-            {step === 'desktop' && t('download.lead')}
-            {step === 'project' && t('projectSubtitle', { orgName })}
-            {step === 'agent' && t('agentSubtitle')}
-            {step === 'connect' && t('connectSubtitle')}
-          </p>
-        </div>
+        {step === 'project' || step === 'agent' || step === 'connect' ? (
+          <div className="text-center">
+            <h1 id="onboarding-step-title" className="break-keep text-2xl font-bold text-foreground">
+              {step === 'project' && t('createProject')}
+              {step === 'agent' && t('createAgent')}
+              {step === 'connect' && t('connectAgent')}
+            </h1>
+            <p className="mt-2 break-keep text-sm text-muted-foreground">
+              {step === 'project' && (orgName ? t('projectSubtitle', { orgName }) : t('projectSubtitleNoOrg'))}
+              {step === 'agent' && t('agentSubtitle')}
+              {step === 'connect' && t('connectSubtitle')}
+            </p>
+          </div>
+        ) : null}
 
         {error && (
-          // story #2105 2차 — handleCreateOrg/handleCreateProject/handleCreateAgent 모두 재시도 전
-          // setError('')를 먼저 호출해(위 정의) 매 시도마다 언마운트→리마운트된다.
+          // story #2105 2차 — 재시도 전 setError('')를 먼저 호출해 매 시도마다 언마운트→리마운트된다.
           <div role="alert" aria-live="assertive" aria-atomic="true" className="rounded-lg border border-destructive/20 bg-destructive-tint p-3 text-sm text-foreground">
             {error}
           </div>
         )}
 
-        {/* story #2441 — #2437 실측: 이 게이트에서 다음 행동 안내가 0이라 완주 불가했다. 게이트
-            자체(요구)는 안 건드리고, "막다른 UX"만 재전송+메일함 안내로 닫는다. */}
+        {/* story #2441 — 이 게이트에서 다음 행동 안내가 0이라 완주 불가했다. 게이트 자체(요구)는 안 건드리고,
+            "막다른 UX"만 재전송+메일함 안내로 닫는다. */}
         {emailVerifyBlocked && (
           <div className="space-y-3 rounded-lg border border-border p-3 text-sm">
             <p className="text-foreground">{t('emailVerifyGuidance')}</p>
@@ -512,34 +437,31 @@ export function OnboardingForm({
           </div>
         )}
 
-        {step === 'org' && (
-          <div className="space-y-4">
-            {/* 유나 design:changes(PR#3617) — draft 복원(uid 확定 後 별도 effect)이 응답
-                前엔 항상 empty로 뜬 뒤 채워지는 깜빡임을 만들었다("입력이 그대로 있다"는
-                인상이 AC 자체). identityResolved 前까지 입력을 disabled로 게이팅해 그
-                순간 자체를 없앤다. */}
-            {/* story 4669 (U6): the name only — the URL slug field, its auto-derivation and its two hints (2750: a Korean-only
-                name derived nothing and blocked the button) are gone; the server derives and uniquifies the slug */}
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-foreground">{t('orgName')}</label>
-              <OperatorInput
-                type="text"
-                value={orgName}
-                onChange={(e) => setOrgName(e.target.value)}
-                placeholder={t('orgNamePlaceholder')}
-                disabled={!identityResolved}
-              />
-            </div>
-            <Button
-              variant="hero"
-              size="lg"
-              className="w-full"
-              onClick={() => void handleCreateOrg()}
-              disabled={!orgName.trim() || loading}
-            >
-              {loading ? tc('creating') : t('createOrg')}
-            </Button>
+        {step === 'arrive' && (
+          <div className="space-y-4 text-center" data-testid="onboarding-arrive">
+            {arrival === 'working' ? (
+              <p role="status" aria-live="polite" className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" aria-hidden />
+                <span id="onboarding-step-title">{t('arriving')}</span>
+              </p>
+            ) : arrival === 'account-check-failed' ? (
+              <div className="space-y-3">
+                <p role="alert" className="break-keep text-sm text-foreground" data-testid="onboarding-account-check-failed">{t('accountCheckFailed')}</p>
+                <Button variant="outline" onClick={() => void arrive()} data-testid="onboarding-account-check-again">{t('inviteCheckAgain')}</Button>
+              </div>
+            ) : arrival === 'invite-check-failed' ? (
+              <div className="space-y-3">
+                <p role="alert" className="break-keep text-sm text-foreground" data-testid="onboarding-invite-check-failed">{t('inviteCheckFailed')}</p>
+                <Button variant="outline" onClick={() => void arrive()} data-testid="onboarding-invite-check-again">{t('inviteCheckAgain')}</Button>
+              </div>
+            ) : (
+              <Button variant="outline" onClick={() => void arrive()} data-testid="onboarding-arrive-retry">{tc('retry')}</Button>
+            )}
           </div>
+        )}
+
+        {step === 'first' && (
+          <FirstScreen orgId={orgId} chatsHref={chatsHref} macDownloadEnabled={macDownloadEnabled} orgName={orgName} onConnectElsewhere={() => setStep('project')} onFinish={handleFinish} />
         )}
 
         {step === 'project' && (
@@ -615,14 +537,6 @@ export function OnboardingForm({
               {t('skip')}
             </Button>
           </div>
-        )}
-
-        {step === 'where' && (
-          <WhereStep choice={whereChoice} onChoose={setWhereChoice} onContinue={handleWhereContinue} titleId="onboarding-step-title" />
-        )}
-
-        {step === 'desktop' && (
-          <DesktopGetStep orgId={orgId} onBackToChoice={() => setStep('where')} onFinish={handleFinish} />
         )}
 
         {step === 'connect' && (

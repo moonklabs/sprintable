@@ -212,6 +212,22 @@
       "schedule": "15 5 * * *",
       "time_zone": "Asia/Seoul",
       "basis": "story #4234 신규 — «이 cron의 응답+로그가 이 스토리의 「도는 자리」 전부»(cron.py 주석). 읽기 전용 집계라 하루 1회."
+    },
+    {
+      "name": "clock-edit-scrub",
+      "route": "clock-edit-scrub",
+      "method": "POST",
+      "schedule": "*/5 * * * *",
+      "time_zone": "Etc/UTC",
+      "basis": "story #4733 S5·P2 (까디르군 렌즈 5182의 핀) — 폰에서 친 글이 시한(10분)을 넘기지 않게: 컴퓨터가 안 돌아오고 아무도 다시 누르지 않아도 서버가 스스로 지운다."
+    },
+    {
+      "name": "account-purge",
+      "route": "account-purge",
+      "method": "POST",
+      "schedule": "30 18 * * *",
+      "time_zone": "Etc/UTC",
+      "basis": "story #4752 — 계정 삭제 문구(«30일 유예 기간 후 모든 개인정보가 익명화돼요»)의 약속을 지키는 잡: 삭제한 지 30일이 지난 계정의 이름 · 메일 · 비밀번호 해시 · 2단계 · 제공자 id를 익명화한다(하루 한 번 · 한 번에 200개)."
     }
   ],
   "unscheduled": [

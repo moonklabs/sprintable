@@ -21,14 +21,15 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, model_validator
-from sqlalchemy import func, select, update
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, field_validator, model_validator
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.models.desktop_relay import (
     COMMAND_KINDS,
     COMMAND_STATE_ORDER,
+    DesktopClockView,
     DesktopCommand,
     DesktopDeviceToken,
     DesktopSession,
@@ -47,6 +48,10 @@ SESSION_KEY_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
 INT32_MAX = 2_147_483_647  # `desktop_sessions.last_report_seq` · `desktop_commands.device_seq` are int4 — a report past it → 422, never 500
 SESSION_ROWS_PER_DEVICE = 200  # the most recent rows a device keeps (live and ended) — a new key past it drops the oldest ended row first
 ENDED_SESSION_RETENTION = timedelta(days=7)  # an ended session is kept this long, then goes with the next report
+# story #4554 2선 (Kadir 5002 ② · PO 04:03Z): a report's `at` is the device's clock — one past now + this is held down to now. Not
+# refused: a state report's 422 is retried as is (desktop-host relay/client.ts), so a fast clock would freeze that device's board for
+# good. A future `at` stored as is would also keep a stopped row past ENDED_SESSION_RETENTION for ever (2099 measured).
+REPORT_CLOCK_SKEW = timedelta(minutes=5)
 SESSIONS_PAGE_DEFAULT = 50  # a person's read of a device's sessions: live first, newest first — `limit` (default · max)
 SESSIONS_PAGE_MAX = 200
 DISCONNECTED_CODE = "device_disconnected"  # the open commands of a disconnected device · the stream's access_revoked reason
@@ -86,6 +91,12 @@ async def issue_device_token(db: AsyncSession, setup_id: uuid.UUID) -> str:
     # story #4554 ③ (PO 11:45Z): a new token = a daemon that may start counting from 1 again (a reinstall · §1.1) — the device's
     # report baseline goes back to 0 with it, so its first report is not refused as stale for ever
     await db.execute(update(DesktopSession).where(DesktopSession.setup_id == setup_id).values(last_report_seq=0))
+    # story #4714: the same for the startable report number — a daemon that starts again must not be ignored for ever by the number its predecessor reached
+    await db.execute(update(DesktopSetup).where(DesktopSetup.id == setup_id).values(startable_seq=None))
+    # story #4733: and for the clock view — a daemon that starts again must not be ignored for ever by its predecessor's number, nor show its predecessor's
+    # view or claim an older app's `supported`; the view goes with the old token (the new daemon reports its own, and one `none` at start)
+    await db.execute(update(DesktopSetup).where(DesktopSetup.id == setup_id).values(clock_view_seq=None, clock_seen_at=None))
+    await db.execute(delete(DesktopClockView).where(DesktopClockView.setup_id == setup_id))
     await db.flush()
     return token
 
@@ -293,6 +304,37 @@ class SessionSnapshot(BaseModel):
     sessions: list[SnapshotSession] = Field(max_length=64)
 
 
+STARTABLE_MAX = 128
+
+
+class StartableItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agent_member_id: uuid.UUID
+    project_id: uuid.UUID
+
+
+class StartableSnapshot(BaseModel):
+    """story #4714: the computer's own list of the (agent, project) pairs it has a usable folder for — ids only (a path has no place in
+    it: every body forbids extra fields). Replaces the whole list; the computer decides at the start, this is what the phone is shown."""
+    model_config = ConfigDict(extra="forbid")
+
+    startable: list[StartableItem] = Field(max_length=STARTABLE_MAX)
+    # story #4714 (PO 10-18): the computer numbers its reports (one that only grows, even across a restart); the server keeps the highest it has applied
+    # and ignores a lower one — a request the computer gave up but that reached the server late cannot cover a newer list. Absent = an older app: applied as before.
+    seq: int | None = Field(default=None, ge=1, le=2**62, strict=True)
+    # story #4734 (B): this computer's app knows the press of the WHOLE computer (the `computer` mark of a clock press) — a closed word, sent with every list; absent = an app from before.
+    # The server keeps it in the setup's `capabilities` and tells the phone's list (`computer_press`), so a screen offers the one button only for a Mac that can take it.
+    computer_press: StrictBool | None = None  # (the boolean true and nothing else: 1 · "true" · false are refused below)
+
+    @field_validator("computer_press")
+    @classmethod
+    def _only_true(cls, v: bool | None) -> bool | None:
+        if v is False:
+            raise ValueError("computer_press is the word true, or absent")
+        return v
+
+
 def _setup_agents(setup: DesktopSetup) -> set[uuid.UUID]:
     return {uuid.UUID(str(m["member_id"])) for m in (setup.members or []) if m.get("kind") == "agent" and m.get("member_id")}
 
@@ -434,6 +476,11 @@ def _check_seq_range(seq: int) -> None:
         raise DesktopRelayError(422, "report_seq_out_of_range", f"report_seq must be at most {INT32_MAX}")
 
 
+def _reported_at(at: datetime, now: datetime) -> datetime:
+    """story #4554 2선: the device's `at`, or now when it is past now + REPORT_CLOCK_SKEW (see the constant)."""
+    return now if at > now + REPORT_CLOCK_SKEW else at
+
+
 async def _prune_expired(db: AsyncSession, setup_id: uuid.UUID, *, now: datetime) -> None:
     """story #4554 ① (PO 11:45Z): an ended session is kept ENDED_SESSION_RETENTION, then goes with the device's next report (no
     sweep job — the write path cleans its own device, under the device row's lock)."""
@@ -471,7 +518,9 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
     latest = await _lock_device_seq(db, setup.id)
     if report.report_seq <= latest:
         raise _stale(report.report_seq, latest)
-    await _prune_expired(db, setup.id, now=_now())  # story #4554 ①
+    now = _now()
+    await _prune_expired(db, setup.id, now=now)  # story #4554 ①
+    at = _reported_at(report.at, now)  # story #4554 2선
     row = (await db.execute(
         select(DesktopSession).where(DesktopSession.setup_id == setup.id, DesktopSession.session_key == session_key)
     )).scalar_one_or_none()
@@ -481,8 +530,8 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
         db.add(row)
     was_stopped = row.state == "stopped"  # captured before the row takes the new word (the new session under the same key)
     row.agent_member_id, row.runtime, row.state = report.agent_member_id, report.runtime, report.state
-    row.last_report_seq, row.state_at = report.report_seq, report.at
-    row.ended_at = report.at if report.state == "stopped" else None
+    row.last_report_seq, row.state_at = report.report_seq, at
+    row.ended_at = at if report.state == "stopped" else None
     was_limited = bool(row.limited)  # story #4685: read before this report overwrites it — the notice follows the move into / out of a limit
     _set_limit(row, report.limit)
     _set_run(row, report.run)  # story #4686
@@ -495,7 +544,7 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
     from app.services.desktop_commands import on_session_reported  # story #4534 — a [지금 지시]'s turn end
     from app.services.desktop_limit_notice import after_report  # story #4685 — the person who connected the computer is told
 
-    await on_session_reported(db, setup, session_key, report.state, report.at)
+    await on_session_reported(db, setup, session_key, report.state, at)
     await after_report(db, setup, row, was_limited=was_limited)
     return row
 
@@ -539,9 +588,10 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
             db.add(row)
         limit_moves.append((row, bool(row.limited)))
         was_stopped = row.state == "stopped"  # captured before the row takes the new word (a new session under the same key)
-        row.agent_member_id, row.runtime, row.state, row.state_at = s.agent_member_id, s.runtime, s.state, s.at
+        at = _reported_at(s.at, now)  # story #4554 2선 · 4709
+        row.agent_member_id, row.runtime, row.state, row.state_at = s.agent_member_id, s.runtime, s.state, at
         row.last_report_seq = snapshot.report_seq
-        row.ended_at = s.at if s.state == "stopped" else None
+        row.ended_at = at if s.state == "stopped" else None
         _set_limit(row, s.limit)
         _set_run(row, s.run)  # story #4686
         _set_inbox(row, s.inbox if s.state != "stopped" else None)  # story #4684
@@ -563,7 +613,7 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
     from app.services.desktop_commands import on_session_reported  # story #4534 — every line of a snapshot is a report too
 
     for s in snapshot.sessions:
-        await on_session_reported(db, setup, s.session_key, s.state, s.at)
+        await on_session_reported(db, setup, s.session_key, s.state, _reported_at(s.at, now))
     for row in existing.values():
         await on_session_reported(db, setup, row.session_key, "stopped", now)
     from app.services.desktop_limit_notice import after_report  # story #4685 — a snapshot's lines move sessions into / out of a limit too
@@ -571,6 +621,76 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
     for row, was_limited in limit_moves:
         await after_report(db, setup, row, was_limited=was_limited)
     return len(snapshot.sessions)
+
+
+async def accessible_startable(db: AsyncSession, setup: DesktopSetup, snapshot: StartableSnapshot) -> tuple[StartableSnapshot, list[uuid.UUID]]:
+    """story #4714: narrow the computer's list to the pairs its own agents can really have: the agent is one this device was set up with
+    AND the agent belongs to the project (its project profile) AND the project is a live project of this device's organization. A pair outside
+    that is dropped, not refused: the computer works from its own files and a refusal would only make it send the same list again. An agent this
+    device was NOT set up with is dropped the same way (it used to refuse the whole list with 422, which hid every other agent behind one stale
+    one) — and named in the second value, so the computer can stop offering it. The phone's reads cut the list by who may open what; this keeps the
+    stored list itself to what is possible."""
+    from app.models.member import AgentProjectProfile
+    from app.models.project import Project
+
+    # the device row is locked and READ AGAIN first: the `setup` this request loaded may be older than a setup exchange that moved an agent to another computer
+    # (a stale member list would accept that agent here); the same lock orders this report against such a move
+    fresh = (await db.execute(
+        select(DesktopSetup).where(DesktopSetup.id == setup.id).with_for_update().execution_options(populate_existing=True)
+    )).scalar_one()
+    mine = _setup_agents(fresh)
+    dropped = sorted({i.agent_member_id for i in snapshot.startable if i.agent_member_id not in mine}, key=str)
+    snapshot = snapshot.model_copy(update={"startable": [i for i in snapshot.startable if i.agent_member_id in mine]})
+    agents = {i.agent_member_id for i in snapshot.startable}
+    if not agents:
+        return snapshot, dropped
+    rows = (await db.execute(
+        select(AgentProjectProfile.member_id, AgentProjectProfile.project_id)
+        .join(Project, Project.id == AgentProjectProfile.project_id)
+        .where(AgentProjectProfile.member_id.in_(agents), Project.org_id == setup.org_id, Project.deleted_at.is_(None))
+    )).all()
+    possible = {(m, p) for m, p in rows}
+    return snapshot.model_copy(update={"startable": [i for i in snapshot.startable if (i.agent_member_id, i.project_id) in possible]}), dropped
+
+
+COMPUTER_PRESS = "computer_press"
+
+
+async def note_computer_press(db: AsyncSession, setup: DesktopSetup, knows: bool) -> None:
+    """story #4734 (B): the computer says (with each startable list) whether its app takes the whole-computer press; kept in `capabilities` next to what the setup's app
+    could take at its creation, and taken out again when a list comes without it (an app that went back). The other words of the list are left as they are."""
+    have = [c for c in (setup.capabilities or []) if isinstance(c, str)]
+    want = sorted({*have, COMPUTER_PRESS}) if knows else [c for c in have if c != COMPUTER_PRESS]
+    if want == have and setup.capabilities is not None:
+        return
+    if not want and setup.capabilities is None:
+        return
+    await db.execute(update(DesktopSetup).where(DesktopSetup.id == setup.id).values(capabilities=want))
+    await db.flush()
+
+
+async def replace_startable(db: AsyncSession, setup: DesktopSetup, snapshot: StartableSnapshot) -> tuple[int, bool, int | None]:
+    """story #4714: the computer's startable pairs, as it says them (already narrowed by `accessible_startable`). Stored as given, sorted and without
+    repeats. A numbered report is applied by ONE statement that holds the guard itself (`startable_seq IS NULL OR startable_seq < seq`): a report at or
+    below the highest applied is IGNORED (returns the stored count, applied False) — a late request cannot cover a newer list, lock or no lock.
+    An unnumbered report (an older app) is applied and leaves the number alone. `seq` is bounded to 2**62 on purpose (well inside BIGINT).
+    The third value is the number the server holds AFTER this report (NULL = no numbered report yet): the computer reads it when its report was ignored and goes on
+    from there, instead of guessing how far behind it is (its clock may have gone back since a restart)."""
+    pairs = sorted({(str(i.agent_member_id), str(i.project_id)) for i in snapshot.startable})
+    values: dict = {"startable": [{"agent_member_id": a, "project_id": p} for a, p in pairs]}
+    stmt = update(DesktopSetup).where(DesktopSetup.id == setup.id)
+    if snapshot.seq is not None:
+        values["startable_seq"] = snapshot.seq
+        stmt = stmt.where(or_(DesktopSetup.startable_seq.is_(None), DesktopSetup.startable_seq < snapshot.seq))
+    row = (await db.execute(stmt.values(**values).returning(DesktopSetup.startable_seq))).first()
+    if row is None:
+        kept, held = (await db.execute(select(DesktopSetup.startable, DesktopSetup.startable_seq).where(DesktopSetup.id == setup.id))).one()
+        await touch_device(db, setup.id)  # an ignored report is still the computer speaking: it was heard
+        await db.flush()
+        return len(kept or []), False, held
+    await touch_device(db, setup.id)
+    await db.flush()
+    return len(pairs), True, row[0]
 
 
 async def device_sessions_view(
@@ -625,8 +745,13 @@ class _Payload(BaseModel):
 
 
 class StartSessionPayload(_Payload):
+    """story #4714 (contract 02d2cf71 new version): a phone's signed start — the agent, the project (never a path, a mode, an argument or a
+    runtime: the computer reads its own folder for the project and the agent's own profile), and the phone's signed blob carried as is.
+    The old shape {agent_member_id, runtime} has no maker any more (the daemon refused it as `unsigned` since v1.9.1)."""
+
     agent_member_id: uuid.UUID
-    runtime: Literal["claude", "codex"]
+    project_id: uuid.UUID
+    signed: str = Field(min_length=1, max_length=16384)
 
 
 class SendPromptPayload(_Payload):
@@ -662,12 +787,84 @@ class EndSessionPayload(_Payload):
     signed: str = Field(min_length=1, max_length=16384)
 
 
+# story #4733 (0459 · S2): the actions of a phone's `clock` command. The kind is one word (DB CHECK); the choice is the payload's, so the next action
+# (P2 · S5: `out_edit`, its own shape) widens this schema and nothing in the database.
+CLOCK_ACTIONS = ("out_open", "out_submit", "out_cancel", "in", "out_edit")
+CLOCK_SCOPE_MAX = 500  # the most agents one computer-wide press names (story #4734 B)
+# story #4733 (S5 · P2): the fields of a phone's edit are the Mac's own three, with the Mac's own limit (ClockFlow.edit cuts a field at 2000 characters)
+CLOCK_EDIT_FIELD_MAX = 2000
+CLOCK_REV_MAX = 2**31 - 1
+
+
+def plain_text(text: str) -> bool:
+    """Plain text of a field: line breaks (\\n) are the person's own; every other control character (C0 — a tab and a carriage return included: the phone sends \\n —,
+    DEL, the C1 controls, the Unicode line / paragraph separators) is refused, so what reaches the Mac is what the phone signed and shows. (The computer refuses
+    the hidden format characters too — it holds the same cleaner as for an instruction — and answers `rejected`; the server does not carry that list.)"""
+    return not any((ord(ch) < 32 and ch != "\n") or 0x7F <= ord(ch) <= 0x9F or ch in "\u2028\u2029" for ch in text)
+
+
+class ClockEdit(_Payload):
+    """story #4733 (S5 · P2): what a phone typed into a clock-out draft of ONE agent. `base_rev` = the row's revision the phone saw in the computer's report (the
+    daemon refuses the edit when the row moved on since — `stale` — so a phone never writes over what it did not see). Only the fields the person touched are
+    here (one to three; an absent field is left exactly as it is). The signature covers a hash of exactly these fields (the server never opens it)."""
+
+    base_rev: int = Field(ge=0, le=CLOCK_REV_MAX, strict=True)
+    done: str | None = Field(default=None, max_length=CLOCK_EDIT_FIELD_MAX)
+    plan: str | None = Field(default=None, max_length=CLOCK_EDIT_FIELD_MAX)
+    blockers: str | None = Field(default=None, max_length=CLOCK_EDIT_FIELD_MAX)
+
+    @model_validator(mode="after")
+    def _touched(self) -> ClockEdit:
+        fields = [t for t in (self.done, self.plan, self.blockers) if t is not None]
+        if not fields:
+            raise ValueError("an edit touches at least one field")
+        if not all(plain_text(t) for t in fields):
+            raise ValueError("an edited field is plain text: line breaks only, no other control character")
+        return self
+
+
+class ClockPayload(_Payload):
+    """A person's signed clock-out / clock-in of the whole computer — exactly {action, signed}: no text, no agent, no path, no session (the phone sends
+    no free words, so there is nothing to inject). The signature covers kind `clock` + setup_id + action; the server carries it as is and opens nothing.
+    The one exception is `out_edit` (S5 · P2): one agent's draft fields, typed on the phone — {action, signed, agent_member_id, edit}, the signature
+    covering the agent, the revision it saw and a hash of exactly the fields sent."""
+
+    action: Literal["out_open", "out_submit", "out_cancel", "in", "out_edit"]
+    signed: str = Field(min_length=1, max_length=16384)
+    # PO 10-20 00:23Z (AC1b): ONE agent of the computer instead of the whole computer — the signature then covers the agent too (kind + setup_id + action +
+    # agent_member_id; none = a fixed empty value). Absent = the whole computer, exactly the payload as before (the key is left out of the stored payload).
+    agent_member_id: uuid.UUID | None = None
+    edit: ClockEdit | None = None
+    # story #4734 (B): the WHOLE-COMPUTER press — `computer: true` rides inside the signed bytes too (the daemon builds what it expects from this very field, so a mark the phone did
+    # not sign, or a signed mark the server dropped, is a `mismatch`); `scope` is the agents of THIS computer's setups the person may press one setup at a time — collected by the
+    # server (the sole place of that judgement, as for a one-setup press) and filtered again by the daemon to its own profiles; `scope_total` = every agent the computer's live
+    # setups hold («N개 중 K개»). All three are absent from every other press: the payload of a press without the mark is exactly as before.
+    computer: Literal[True] | None = None
+    scope: list[uuid.UUID] | None = Field(default=None, max_length=CLOCK_SCOPE_MAX)
+    scope_total: int | None = Field(default=None, ge=0, le=100000, strict=True)
+
+    @model_validator(mode="after")
+    def _edit_only_for_edit(self) -> ClockPayload:
+        if (self.action == "out_edit") != (self.edit is not None):
+            raise ValueError("an edit rides with the action out_edit, and only with it")
+        if self.action == "out_edit" and self.agent_member_id is None:
+            raise ValueError("an edit names its agent")
+        if (self.computer is not None) != (self.scope is not None) or (self.computer is not None) != (self.scope_total is not None):
+            raise ValueError("the computer mark, its scope and its total come together")
+        if self.computer is not None and (self.action == "out_edit" or self.agent_member_id is not None or self.edit is not None):
+            raise ValueError("the computer mark is for the whole-computer actions only: no agent, no edit")
+        if self.scope is not None and (len(set(self.scope)) != len(self.scope) or (self.scope_total or 0) < len(self.scope)):
+            raise ValueError("a scope has no repeats and is no larger than its total")
+        return self
+
+
 PAYLOAD_SCHEMAS: dict[str, type[_Payload]] = {
     "start_session": StartSessionPayload,
     "send_prompt": SendPromptPayload,
     "answer_approval": AnswerApprovalPayload,
     "stop_session": StopSessionPayload,
     "end_session": EndSessionPayload,
+    "clock": ClockPayload,
 }
 assert tuple(PAYLOAD_SCHEMAS) == COMMAND_KINDS, "every command kind has one payload schema"
 
@@ -695,6 +892,8 @@ async def enqueue_command(
     parsed = validate_payload(kind, payload)
     if isinstance(parsed, StartSessionPayload):
         _check_agent(setup, parsed.agent_member_id)
+    if isinstance(parsed, ClockPayload) and parsed.agent_member_id is not None:
+        _check_agent(setup, parsed.agent_member_id)
     if not 1 <= len(idempotency_key) <= 128:
         raise DesktopRelayError(422, "invalid_idempotency_key", "an idempotency key of 1 to 128 characters")
     existing = (await db.execute(
@@ -710,6 +909,16 @@ async def enqueue_command(
     body = parsed.model_dump(mode="json")
     if kind == "answer_approval":  # story #4580: a first answer carries no stage · host (the same bytes as before)
         body = {k: v for k, v in body.items() if not (k in ("stage", "host") and v is None)}
+    if kind == "clock" and body.get("agent_member_id") is None:  # story #4733: the whole computer's press is exactly {action, signed}
+        body.pop("agent_member_id", None)
+    if kind == "clock" and body.get("computer") is None:  # story #4734 (B): a press without the mark carries none of its three keys (the same bytes as before)
+        for k in ("computer", "scope", "scope_total"):
+            body.pop(k, None)
+    if kind == "clock":  # S5 · P2: no `edit` key for any other press; in an edit only the fields the person touched are stored (an absent one is "left as it is")
+        if body.get("edit") is None:
+            body.pop("edit", None)
+        else:
+            body["edit"] = {k: v for k, v in body["edit"].items() if v is not None}
     cmd = DesktopCommand(
         id=uuid.uuid4(), setup_id=setup.id, device_seq=seq, kind=kind, session_key=body.get("session_key"), payload=body,
         idempotency_key=idempotency_key, requested_by=requested_by, state="queued",
@@ -758,6 +967,10 @@ async def record_command_result(db: AsyncSession, setup: DesktopSetup, command_i
         raise DesktopRelayError(404, "command_not_found", "no such command on this device")
     if COMMAND_STATE_ORDER[result.state] <= COMMAND_STATE_ORDER[cmd.state]:
         raise DesktopRelayError(409, "state_not_forward", f"{cmd.state} → {result.state} does not move forward")
+    if cmd.kind == "clock" and result.state == "done":
+        from app.services.desktop_clock import check_done_code
+
+        check_done_code(result.result_code)  # story #4733: a finished clock command ends in one of the daemon's seven words, nothing else
     now = _now()
     cmd.state, cmd.result_code = result.state, result.result_code
     if result.state == "acked":
@@ -777,6 +990,12 @@ async def record_command_result(db: AsyncSession, setup: DesktopSetup, command_i
         from app.services.desktop_commands import on_command_done
 
         await on_command_done(db, cmd)
+    if cmd.kind == "clock":  # story #4733: a submitted / cancelled clock-out takes the draft lines off the server at once
+        from app.services.desktop_clock import on_clock_result, scrub_clock_edits
+
+        await on_clock_result(db, cmd)
+        await db.flush()
+        await scrub_clock_edits(db, setup_id=setup.id)  # S5 · P2: the typed fields of an edit that just ended leave the stored command
     await touch_device(db, setup.id)
     await db.flush()
     return cmd
@@ -810,6 +1029,11 @@ async def reject_open_commands(db: AsyncSession, *, setup_ids: list[uuid.UUID], 
         .values(state="rejected", result_code=result_code, finished_at=now)
         .returning(DesktopCommand.setup_id, DesktopCommand.kind, DesktopCommand.payload)
     )).all()
+    if any(kind == "clock" for _, kind, _p in rejected):  # S5 · P2: an edit that never reached the computer leaves no typed text behind
+        from app.services.desktop_clock import scrub_clock_edits
+
+        for sid in {sid for sid, kind, _p in rejected if kind == "clock"}:
+            await scrub_clock_edits(db, setup_id=sid)
     for setup_id, kind, payload in rejected:
         if kind == "answer_approval" and (payload or {}).get("request_id"):
             # story #4580 (Kadir 02:08Z): the stage the command answered — a late result of the first answer never moves the second
@@ -837,6 +1061,60 @@ def schedule_disconnected_after_commit(db: AsyncSession, setup_id: uuid.UUID) ->
     from app.services.after_commit import schedule_after_commit
 
     schedule_after_commit(db, [functools.partial(_fire_disconnected, setup_id)])
+
+
+AGENT_REACTIVATED_CODE = "agent_reactivated"  # story 4739: the stream's frame name · the wake mark's key (its value: the agent's member id)
+
+
+def _fire_agent_reactivated(setup_id: uuid.UUID, agent_id: uuid.UUID) -> None:
+    """story 4739: the computer's open stream is told that this agent was turned on again — carried like a wake (this instance at once · other
+    instances through the same backplane). The stream reads the mark, then looks again itself (the agent still bound to this computer · still on)
+    before it sends the frame: the mark only says which agent to look at."""
+    from app.routers.events import _push_to_agent
+
+    try:
+        _push_to_agent(wake_key(setup_id), {"__wake__": True, "seq": 0, AGENT_REACTIVATED_CODE: str(agent_id)})
+    except Exception:  # noqa: BLE001 — the daemon's own back-off still brings it back (at worst a few minutes later)
+        logger.warning("desktop relay agent_reactivated signal failed setup=%s", setup_id, exc_info=True)
+
+
+async def schedule_agent_reactivated_after_commit(db: AsyncSession, org_id: uuid.UUID, agent_id: uuid.UUID) -> None:
+    """story 4739: after the commit that turned the agent on (before it, the agent would still read as off), each computer of the organization that
+    this agent is bound to (not revoked · exchanged — `desktop_commands._agent_setups`, the same «this agent's computers» every press uses) is told.
+    Nothing is sent for an agent no computer holds."""
+    if not isinstance(db.sync_session, Session):
+        return
+    from app.services.after_commit import schedule_after_commit
+    from app.services.desktop_commands import _agent_setups
+
+    setups = await _agent_setups(db, org_id, agent_id)
+    schedule_after_commit(db, [functools.partial(_fire_agent_reactivated, s.id, agent_id) for s in setups])
+
+
+async def reactivated_to_send(db: AsyncSession, setup_id: uuid.UUID, marks: set[str]) -> list[uuid.UUID]:
+    """story 4739: of the agents a wake named, the ones this computer's stream may announce NOW: ids that parse · still bound to this computer (its
+    `members`) · computer not revoked · the agent is an agent of the computer's organization, not deleted, and on. Anything else is dropped — a mark
+    that went stale (turned off again meanwhile · a regrouped computer) never reaches the device."""
+    ids: set[uuid.UUID] = set()
+    for m in marks:
+        try:
+            ids.add(uuid.UUID(m))
+        except (ValueError, AttributeError, TypeError):
+            continue
+    if not ids:
+        return []
+    setup = (await db.execute(select(DesktopSetup).where(DesktopSetup.id == setup_id, DesktopSetup.revoked_at.is_(None)))).scalar_one_or_none()
+    if setup is None or setup.org_id is None:
+        return []
+    ids &= _setup_agents(setup)
+    if not ids:
+        return []
+    from app.models.member import Member
+
+    on = (await db.execute(
+        select(Member.id).where(Member.id.in_(ids), Member.org_id == setup.org_id, Member.type == "agent", Member.is_active.is_(True), Member.deleted_at.is_(None))
+    )).scalars().all()
+    return sorted(on)
 
 
 def _fire_wake(setup_id: uuid.UUID, seq: int) -> None:

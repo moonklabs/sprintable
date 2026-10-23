@@ -69,14 +69,21 @@ async def test_poll_activities_after_seq_cursor_and_org_scope():
             # 훨씬 많이 반환 — 소배치서는 우연히 통과(잔여 없음)·84파일 풀런서만 실패했다.
             # 삽입 直前 워터마크(MAX, 순차실행이라 동시쓰기 없음 — 안전)를 cursor 기준으로 삼아
             # "이 테스트가 심은 행만" 포착하도록 근본수정.
-            pre = (await s.execute(select(func.max(ActivityEvent.activity_seq)))).scalar() or 0
+            #
+            # story #4731 — the global MAX is not a safe watermark either: a test that ran earlier (any order — the split into CI shards and a reversed order
+            # both change it) can leave a row with a very high activity_seq, and then none of this test's rows is «after» it (0 rows instead of 4). The cursor is
+            # now this test's OWN first row, and rows of other orgs that happen to sit above it are filtered out by org id.
             s.add_all([_act(org_a), _act(org_a), _act(org_b), _act(org_a)])
             await s.commit()
+            pre = (await s.execute(
+                select(func.min(ActivityEvent.activity_seq)).where(ActivityEvent.org_id.in_([org_a, org_b]))
+            )).scalar() - 1
 
-            # org 생략 = 전 org poll. after_seq=pre(삽입 直前 워터마크)로 이 테스트의 4행만.
-            allrows, _ = await poll_activities_after_seq(s, pre, limit=100)
+            # org 생략 = 전 org poll. after_seq=pre(이 테스트가 넣은 첫 행 直前)부터, 이 테스트의 두 org 행만 골라 본다.
+            polled, _ = await poll_activities_after_seq(s, pre, limit=1000)
+            allrows = [r for r in polled if r.org_id in (org_a, org_b)]
             assert len(allrows) == 4
-            assert [r.activity_seq for r in allrows] == sorted(r.activity_seq for r in allrows)  # ASC
+            assert [r.activity_seq for r in polled] == sorted(r.activity_seq for r in polled)  # ASC
 
             # org_a 스코프 = 3행(org_b 제외).
             a_rows, _ = await poll_activities_after_seq(s, pre, limit=100, org_id=org_a)
@@ -132,7 +139,8 @@ async def test_fanout_yields_single_activity_no_duplicate_trigger():
             # 3 수신자 fan-out이 수렴된 canonical 1행(source 3).
             s.add(_act(org, object_id=obj, sources=3))
             await s.commit()
-            base = (await s.execute(select(ActivityEvent.activity_seq))).scalars().first()
+            # story #4731 — this test's own row (the first row of the whole table is whatever an earlier test left)
+            base = (await s.execute(select(ActivityEvent.activity_seq).where(ActivityEvent.org_id == org))).scalars().first()
 
             rows, _ = await poll_activities_after_seq(s, base - 1, org_id=org)
             assert len(rows) == 1  # fan-out N → poll 1행(중복 trigger 0)

@@ -78,7 +78,7 @@ async def test_02_last_event_id_not_a_number_is_400_and_past_the_latest_sends_no
     async with _client() as c:
         d = await _device(c, name="d4554 lei")
         sid, token, agent = d["setup_id"], d["device_token"], d["agents"][0]["member_id"]
-        await _enqueue(sid, "start_session", {"agent_member_id": agent, "runtime": "claude"}, "k1")
+        await _enqueue(sid, "start_session", {"agent_member_id": agent, "project_id": str(uuid.uuid4()), "signed": "sig"}, "k1")
         await _enqueue(sid, "stop_session", {"session_key": "s-1", "signed": "sig"}, "k2")
         first = await c.get(STREAM, headers=_tok(token))  # no cursor: both, as before
         assert first.status_code == 200 and first.text.count("event: command") == 2
@@ -207,6 +207,39 @@ async def test_01_rows_are_kept_7_days_and_200_per_device_live_first_in_a_person
         assert [v["session_key"] for v in two] == ["k7", "k6"]
         assert (await c.get(f"/api/v2/desktop/setups/{sid}/sessions?limit=201", headers=_person(OWNER))).status_code == 422
         assert (await c.get(f"/api/v2/desktop/setups/{sid}/sessions?limit=0", headers=_person(OWNER))).status_code == 422
+
+
+async def test_01b_a_future_at_is_held_to_now_so_a_stopped_row_still_ages_out(world):
+    """2선 (Kadir 5002 ② · PO 04:03Z): `at` = the device's clock. Measured before: 2099 stored as is → a stopped row the 7-day rule
+    never reached. Past now + REPORT_CLOCK_SKEW (5 min) it is held down to now — a single report and a snapshot alike; inside the skew
+    the device's time stands. Not refused: a 422 state report is retried as is by the daemon (a fast clock would freeze its board)."""
+    from app.services import desktop_relay as relay
+
+    assert relay.REPORT_CLOCK_SKEW.total_seconds() == 300
+    async with _client() as c:
+        d = await _device(c, name="d4554 future at")
+        sid, token, agent = d["setup_id"], d["device_token"], d["agents"][0]["member_id"]
+        far = "2099-01-01T00:00:00+00:00"
+        inside = datetime.fromtimestamp(time.time() + 240, timezone.utc).isoformat()  # 4 min ahead: inside the skew
+        # the snapshot FIRST and alone (a snapshot is the whole list — a session it does not name is stopped «now», which would hide a
+        # single report's own time: Kadir 5117 «only the single report path left unheld → still green»), then the single reports
+        snap = _snap(agent, 1, ["f3"], "stopped")
+        snap["sessions"][0]["at"] = far
+        assert (await c.put(SNAP, json=snap, headers=_tok(token))).status_code == 200
+        r = await c.post("/api/v2/desktop/relay/sessions/f1/state", json=_state(agent, 2, "stopped", at=far), headers=_tok(token))
+        assert r.status_code == 200, r.text
+        assert (await c.post("/api/v2/desktop/relay/sessions/f2/state", json=_state(agent, 3, "stopped", at=inside), headers=_tok(token))).status_code == 200
+        # seconds ahead of now: (state_at, ended_at) per key
+        rows = {k: (state_ahead, end_ahead) for k, state_ahead, end_ahead in await _sql(fetch=(
+            f"SELECT session_key, extract(epoch FROM state_at - now()), extract(epoch FROM ended_at - now()) FROM desktop_sessions WHERE setup_id = '{sid}'"))}
+        assert rows["f1"][0] <= 5 and rows["f1"][1] <= 5, ("a single report", rows["f1"])  # held to now — not 2099
+        assert rows["f3"][0] <= 5 and rows["f3"][1] <= 5, ("a snapshot line", rows["f3"])
+        assert 200 <= rows["f2"][1] <= 245, rows["f2"]  # 4 min ahead: kept as the device said
+        # and so each ages on its own: 8 days back from what was stored → gone with the next report
+        await _sql(f"UPDATE desktop_sessions SET ended_at = ended_at - interval '8 days' WHERE setup_id = '{sid}' AND session_key IN ('f1', 'f3')")
+        assert (await c.post("/api/v2/desktop/relay/sessions/f2/state", json=_state(agent, 4, "stopped"), headers=_tok(token))).status_code == 200
+        left = {r[0] for r in await _rows(sid)}
+        assert "f1" not in left and "f3" not in left, left
 
 
 async def test_04_a_disconnected_device_is_unknown_at_once_its_commands_rejected_its_stream_ended(world, monkeypatch):

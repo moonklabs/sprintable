@@ -118,6 +118,12 @@ class TeamMemberRepository(BaseRepository[TeamMember]):
         뷰가 읽는 소스에 직접 write: members(신원·is_active) / project_access(per-project role·color·권한) /
         agent_project_profiles(에이전트 설정). JSONB(agent_config)는 ORM 컬럼 타입으로 안전 직렬화.
         """
+        if "runtime_type" in data:
+            # story 4717: every write that sets runtime_type comes through here (PATCH · recruit · desktop setup) — the publisher's
+            # value is the server's alone (system_publisher_guard.assert_runtime_type_not_reserved)
+            from app.services.system_publisher_guard import assert_runtime_type_not_reserved
+
+            assert_runtime_type_not_reserved(data["runtime_type"])
         m_set = {k: v for k, v in data.items() if k in _MEMBERS_FIELDS}
         a_set = {k: v for k, v in data.items() if k in _ACCESS_FIELDS}
         p_set = {k: v for k, v in data.items() if k in _PROFILE_FIELDS}
@@ -130,12 +136,29 @@ class TeamMemberRepository(BaseRepository[TeamMember]):
             if a_set["role"] is None:
                 raise ValueError("team member role cannot be None — omit it to leave the role unchanged")
             a_set["role"] = clamp_project_role(a_set["role"])
+        # story 4739: the ONE place a member's is_active goes false → true (PATCH · …; `deactivate` and the account delete only write false). The turn on is
+        # a conditional UPDATE of its own — «WHERE is_active = false … RETURNING» is the database's own word that the row really changed, so a PATCH of an
+        # agent that is already on (a name · an avatar) writes its other fields as before and signals nothing, and two requests at once signal once. A computer
+        # that is waiting out an agent's refusal is told after the commit (services.desktop_relay.schedule_agent_reactivated_after_commit).
+        turned_on = False
+        if m_set.get("is_active") is True:
+            m_set.pop("is_active")
+            turned_on = (await self.session.execute(
+                sa_update(Member)
+                .where(Member.id == member.id, Member.is_active.is_(False))
+                .values(is_active=True, updated_at=func.now())
+                .returning(Member.id)
+            )).first() is not None
         if m_set:
             await self.session.execute(
                 sa_update(Member)
                 .where(Member.id == member.id)
                 .values(**m_set, updated_at=func.now())
             )
+        if turned_on and member.type == "agent":
+            from app.services.desktop_relay import schedule_agent_reactivated_after_commit
+
+            await schedule_agent_reactivated_after_commit(self.session, self.org_id, member.id)
         if a_set:
             await self.session.execute(
                 sa_update(ProjectAccess)

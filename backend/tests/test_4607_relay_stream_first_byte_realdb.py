@@ -11,6 +11,7 @@ I/O hangs). The heartbeat is pushed out of reach so only an immediate first byte
 from __future__ import annotations
 
 import asyncio
+import uuid
 
 import pytest
 
@@ -74,7 +75,7 @@ async def test_02_a_waiting_command_still_follows_the_open_comment(world, monkey
     monkeypatch.setattr(router_mod, "_LIFESPAN_JITTER_SEC", 0)
     async with _client() as c:
         d = await _device(c, name="d4607 then command")
-        await _enqueue(d["setup_id"], "start_session", {"agent_member_id": d["agents"][0]["member_id"], "runtime": "claude"}, "k1")
+        await _enqueue(d["setup_id"], "start_session", {"agent_member_id": d["agents"][0]["member_id"], "project_id": str(uuid.uuid4()), "signed": "sig"}, "k1")
     db, resp = await _open(d["device_token"])
     try:
         chunks = [await asyncio.wait_for(resp.body_iterator.__anext__(), timeout=20) for _ in range(2)]

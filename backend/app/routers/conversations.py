@@ -443,6 +443,7 @@ async def _fetch_conversation_participants(
             "type": resolved.type if resolved else "human",
             "runtime_type": runtime_type_map.get(r.member_id),
             "resolved": resolved.resolved if resolved else False,
+            "departed": bool(getattr(resolved, "departed", False)) if resolved else False,
             "device_name": (devices.get(r.member_id) or {}).get("device_name"),
         })
     return conv_participants

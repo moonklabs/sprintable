@@ -18,7 +18,8 @@ vi.mock('next/navigation', async (orig) => ({ ...(await orig<typeof import('next
 const { phonePub } = vi.hoisted(() => ({ phonePub: { android: true, ios: false } }));
 vi.mock('@/lib/phone-app-store', async (orig) => ({ ...(await orig<typeof import('@/lib/phone-app-store')>()), PHONE_APP_PUBLISHED: phonePub }));
 
-import { DesktopSetup, DesktopSetupEntry, Failure, OpenInDesktopApp, SETUP_APP_LINK, SETUP_REOPEN_LINK, ToolsNotConnected, failureForCode, inviteUntilDate } from './desktop-setup';
+import { ATTACHABLE_READ_LIMIT_MS, DesktopSetup, DesktopSetupEntry, Failure, OpenInDesktopApp, SETUP_APP_LINK, SETUP_REOPEN_LINK, ToolsNotConnected, failureForCode, inviteUntilDate } from './desktop-setup';
+import { pickEulReulJosa, pickEunNeunJosa } from '@/lib/korean-particle';
 import { DesktopSetupDocWatch } from './desktop-setup-doc-watch';
 import { SetupProgressView } from './desktop-setup-progress';
 import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
@@ -104,7 +105,13 @@ describe('[SID:4427] desktop setup page', () => {
     // PO 00:41Z · Yuna v17, placed by 4446 (Yuna b2d15f85 ②): the tool note ends the flow just above the start row; the row
     // itself carries «시작» and its one line
     const row = container.querySelector('[data-testid=setup-start-row]') as HTMLElement;
-    expect(row.previousElementSibling?.textContent).toBe('에이전트는 Sprintable 안의 일은 묻지 않고 하고, 이 컴퓨터의 파일을 바꾸거나 명령을 실행하거나 다른 도구를 쓸 땐 그때마다 물어봐요.');
+    // story 4708 (Yuna `4708-copy-1016.md` row 4): after the app stopped deciding what is asked, the note no longer promises «그때마다 물어봐요»
+    expect(row.previousElementSibling?.textContent).toBe('에이전트는 Sprintable 안의 일은 묻지 않고 해요. 이 컴퓨터의 파일 · 명령 · 다른 도구는 이 컴퓨터의 Claude Code · Codex 설정대로 묻거나 바로 해요.');
+    expect(row.previousElementSibling?.textContent).not.toContain('그때마다');
+    // the English note is pinned too (a literal — not read back from the JSON it comes from): no «ask each time» promise
+    const enNote = (enMessages as unknown as { desktop: { setup: { toolNote: string } } }).desktop.setup.toolNote;
+    expect(enNote).toBe("Agents work in Sprintable without asking. Files, commands and other tools on this computer follow this computer's Claude Code or Codex settings — they ask or go ahead as those settings say.");
+    expect(enNote).not.toContain('ask each time');
     expect([...row.querySelectorAll('p')][0].textContent).toBe('에이전트 2개를 이 컴퓨터에 만들고 첫 일감을 맡겨요 · 연출은 내가 맡아요');
     expect(text()).not.toContain('발행'); // channel stage → later
     expect(startButton().disabled).toBe(false);
@@ -161,6 +168,35 @@ describe('[SID:4427] desktop setup page', () => {
     expect(text()).toContain('연결이 끊겼어요');
   });
 
+
+  it('story 4721: a member who came for a recruited agent (agent=…) keeps it through [다시 확인] — the fragment carries the agent too', async () => {
+    vi.stubGlobal('location', { ...window.location, pathname: '/desktop/setup', search: '', hash: '', reload: vi.fn() } as unknown as Location);
+    let replaced = '';
+    const replaceState = vi.spyOn(window.history, 'replaceState').mockImplementation((_s, _t, url) => { replaced = String(url); });
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} setupId="s-1" preselect="agent-1" />, 'member');
+    await act(async () => { ([...container.querySelectorAll('button')].find((b) => b.textContent === '다시 확인') as HTMLButtonElement).click(); });
+    expect(new URLSearchParams(replaced.split('#')[1]).get('agent')).toBe('agent-1');
+    replaceState.mockRestore();
+  });
+
+  it('story 4721: the server refuses «시작» as not-admin (the page took them for an admin) → the member card, and [다시 확인] reloads WITH the setup values', async () => {
+    const order: string[] = [];
+    vi.stubGlobal('location', { ...window.location, pathname: '/desktop/setup', search: '', hash: '', reload: vi.fn(() => { order.push('reload'); }) } as unknown as Location);
+    let replaced = '';
+    const replaceState = vi.spyOn(window.history, 'replaceState').mockImplementation((_s, _t, url) => { replaced = String(url); order.push('replace'); });
+    stub(() => new Response(JSON.stringify({ error: { code: 'not_org_admin', message: 'x' } }), { status: 403 }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} setupId="s-1" />);
+    await act(async () => { startButton().click(); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(text()).toContain('에이전트를 만들려면 조직 관리자여야 해요');
+    await act(async () => { ([...container.querySelectorAll('button')].find((b) => b.textContent === '다시 확인') as HTMLButtonElement).click(); });
+    expect(order).toEqual(['replace', 'reload']);
+    expect(replaced.startsWith('/desktop/setup#')).toBe(true);
+    const q = new URLSearchParams(replaced.split('#')[1]);
+    expect([q.get('code'), q.get('setup'), q.get('runtimes')]).toEqual([CODE, 's-1', 'claude']); // not only the code: everything the page held
+    replaceState.mockRestore();
+  });
   it('confirm codes → screens (closed list); an unknown code is not guessed', () => {
     expect(failureForCode('not_org_admin')).toBe('not-admin');
     expect(failureForCode('person_session_required')).toBe('not-admin');
@@ -518,13 +554,13 @@ describe('[SID:4565] existing agents moved to this computer', () => {
   const doneLine = () => container.querySelector('[data-testid=setup-put-on-team-done]') as HTMLElement;
   const failedLine = () => container.querySelector('[data-testid=setup-put-on-team-failed]') as HTMLElement | null;
 
-  it('[SID:4678] not on the team → no option in the select; a line in a folded list with [프로젝트 팀에 넣기] · a runtime this computer lacks gets no button', async () => {
+  it('[SID:4678] not on the team → no option in the select; a line in an open list with [프로젝트 팀에 넣기] · a runtime this computer lacks gets no button', async () => {
     stubGrant(() => new Response('{}', { status: 201 }));
     agentsNow = agentsWith([outsider(ZED, '제드', 'codex')]);
     await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
     expect(optionText(selectOf('조사'), `agent:${OUT}`)).toBeUndefined(); // reverted (a disabled option again) → defined
     const group = container.querySelector('[data-testid=setup-not-on-team]') as HTMLDetailsElement;
-    expect(group.open).toBe(false);
+    expect(group.open).toBe(true); // AC3: open from the start — «넣기 → 고르기 → [시작]» is 3 hands, not 4 (a folded list needed one to open it)
     expect(group.querySelector('summary')!.textContent).toBe('프로젝트 팀에 없는 에이전트 1개');
     expect(group.textContent).not.toContain('제드');
     const [b] = putButtons();
@@ -532,6 +568,22 @@ describe('[SID:4565] existing agents moved to this computer', () => {
     expect([b.textContent, b.getAttribute('aria-label')]).toEqual(['프로젝트 팀에 넣기', '프로젝트 팀에 넣기 · 바깥']);
     expect(group.querySelector('[data-testid=setup-not-on-team-row]')!.textContent).toContain('바깥 · 이 프로젝트 팀에 아직 없어요');
     expect(doneLine().textContent).toBe('');
+  });
+
+  it('[SID:4678 AC3] the list is OPEN from the start for one, two or more not on the team (the button is reachable without a hand to open it); none → not drawn; a person can fold it and a re-render leaves it as they left it', async () => {
+    stubGrant(() => new Response('{}', { status: 201 }));
+    agentsNow = agentsWith([outsider(OUT2, '바깥 둘')]);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    let group = container.querySelector('[data-testid=setup-not-on-team]') as HTMLDetailsElement;
+    expect(group.open).toBe(true);
+    expect(group.querySelector('summary')!.textContent).toBe('프로젝트 팀에 없는 에이전트 2개');
+    expect(putButtons()).toHaveLength(2);
+    // a person folds it; another agent goes onto the team (a re-render) → it stays folded (never forced open again)
+    await act(async () => { group.open = false; });
+    await press(putButtons()[0]);
+    group = container.querySelector('[data-testid=setup-not-on-team]') as HTMLDetailsElement;
+    expect(group.querySelector('summary')!.textContent).toBe('프로젝트 팀에 없는 에이전트 1개');
+    expect(group.open).toBe(false);
   });
 
   it('[SID:4678] [프로젝트 팀에 넣기] → one POST {member_id}, the list read again, the agent is an option (not picked), one line says so, focus goes to the role select, the code is not touched', async () => {
@@ -727,6 +779,318 @@ describe('[SID:4565] existing agents moved to this computer', () => {
     expect(optionText(selectOf('조사'), `agent:${DAN}`)).toBeTruthy(); // the existing group, from the list that arrived first
     expect(selectOf('조사').value).toBe(`agent:${DAN}`);
     expect(selectOf('작성').value).not.toBe(`agent:${DAN}`);
+  });
+
+  // story 4701 (walk: «profile no» 2 of 7): with the recruiter's agent in the address, «시작» pressed BEFORE the agents list arrived sent
+  // «새로 만들기» rows — a new Creator · Publisher — and the recruited agent was on no setup. Now «시작» waits for the list.
+  // Reverted (`attachableHold` out of `canStart`) → the button is on while the list is late and the press posts a confirm with no agent_id.
+  it('[SID:4701] preselect + list late: «시작» is off with the reading line (a press posts nothing) · the list arrives → on, and the body sends the recruiter\'s agent', async () => {
+    stub(() => new Response(JSON.stringify({ data: { work_item_id: 'w-1' } }), { status: 200 }));
+    let release!: (r: Response) => void;
+    const late = new Promise<Response>((r) => { release = r; });
+    agentsNow = (() => late) as unknown as () => Response;
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+    expect(container.querySelector('select')).not.toBeNull(); // the recipe's rows are here — only the list is not
+    expect(startButton().disabled).toBe(true);
+    expect(container.querySelector('[data-testid=setup-attachable-reading]')?.textContent).toBe('이미 있는 에이전트 목록을 불러오고 있어요');
+    expect(container.querySelector('[data-testid=setup-attachable-reading]')?.getAttribute('role')).toBe('status'); // Yuna 4701-copy §1
+    expect(container.querySelector('[data-testid=setup-attachable-retry]')).toBeNull();
+    await act(async () => { startButton().click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(calls.some((c) => c.url.includes('/api/desktop/setup-codes/confirm'))).toBe(false);
+
+    await act(async () => { release(new Response(JSON.stringify({ agents: AGENTS }), { status: 200 })); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid=setup-attachable-reading]')).toBeNull();
+    expect(startButton().disabled).toBe(false);
+    expect(selectOf('조사').value).toBe(`agent:${DAN}`);
+    await act(async () => { startButton().click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    const post = calls.find((c) => c.url.includes('/api/desktop/setup-codes/confirm'))!;
+    expect((post.body as { roles: { role: string; agent_id?: string }[] }).roles[0]).toEqual({ role: '조사', agent_id: DAN });
+  });
+
+  // The read failing (a refusal · the network) never falls quietly to «새로 만들기»: «시작» stays off, the line says so, [다시 불러오기]
+  // reads again — and what it reads lands the recruiter's agent. Reverted (a failed read counts as «done») → «시작» is on after the failure.
+  it('[SID:4701] preselect + the list read fails → «시작» stays off · [다시 불러오기] reads again (the page is not reloaded) · then the agent lands', async () => {
+    stub(() => new Response(JSON.stringify({ data: { work_item_id: 'w-1' } }), { status: 200 }));
+    for (const failing of [() => new Response('{}', { status: 500 }), () => { throw new Error('offline'); }]) {
+      agentsNow = failing as unknown as () => Response;
+      await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+      expect(startButton().disabled).toBe(true);
+      expect(container.querySelector('[data-testid=setup-attachable-failed]')?.textContent).toBe('이미 있는 에이전트 목록을 불러오지 못했어요');
+      expect(container.querySelector('[data-testid=setup-attachable-failed]')?.getAttribute('role')).toBe('alert'); // Yuna 4701-copy §2
+      const retry = container.querySelector('[data-testid=setup-attachable-retry]') as HTMLButtonElement;
+      expect(retry.textContent).toBe('목록 다시 불러오기');
+      expect(retry.previousElementSibling).toBe(container.querySelector('[data-testid=setup-attachable-failed]')); // directly below the line
+      const reads = () => calls.filter((c) => c.url.includes('/api/desktop/setup/agents')).length;
+      const before = reads();
+      agentsNow = () => new Response(JSON.stringify({ agents: AGENTS }), { status: 200 });
+      await act(async () => { retry.click(); });
+      for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+      expect(reads()).toBe(before + 1);
+      expect(container.querySelector('[data-testid=setup-attachable-retry]')).toBeNull();
+      expect(startButton().disabled).toBe(false);
+      expect(selectOf('조사').value).toBe(`agent:${DAN}`);
+      await act(async () => { root.unmount(); }); root = createRoot(container); calls.length = 0;
+    }
+  });
+
+  // Yuna 4701-copy §2 (the press): the line goes back to «reading», the button STAYS with aria-disabled and ignores presses (keyboard focus
+  // stays on it — not `disabled`); the list arriving takes it away and focus goes to «시작»; failing again leaves focus on the button.
+  // Reverted (`disabled` instead of aria-disabled · no focus move) → the focus checks fail.
+  it('[SID:4701] [목록 다시 불러오기]: reading again keeps the button (aria-disabled · presses ignored · focus kept) · arrives → focus on «시작» · fails again → focus stays', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = () => new Response('{}', { status: 500 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+    const reads = () => calls.filter((c) => c.url.includes('/api/desktop/setup/agents')).length;
+    let retry = container.querySelector('[data-testid=setup-attachable-retry]') as HTMLButtonElement;
+    expect(retry.getAttribute('aria-disabled')).toBeNull();
+    retry.focus();
+    let release!: (r: Response) => void;
+    agentsNow = (() => new Promise<Response>((r) => { release = r; })) as unknown as () => Response;
+    const before = reads();
+    await act(async () => { retry.click(); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(reads()).toBe(before + 1);
+    retry = container.querySelector('[data-testid=setup-attachable-retry]') as HTMLButtonElement; // still here
+    expect(retry.getAttribute('aria-disabled')).toBe('true');
+    expect(retry.disabled).toBe(false);
+    expect(document.activeElement).toBe(retry);
+    expect(container.querySelector('[data-testid=setup-attachable-reading]')).not.toBeNull();
+    await act(async () => { retry.click(); });                                   // a press while it reads is ignored
+    expect(reads()).toBe(before + 1);
+
+    await act(async () => { release(new Response('{}', { status: 500 })); });    // fails again → the failure line · the button · focus kept
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid=setup-attachable-failed]')).not.toBeNull();
+    expect(document.activeElement).toBe(container.querySelector('[data-testid=setup-attachable-retry]'));
+
+    agentsNow = (() => new Promise<Response>((r) => { release = r; })) as unknown as () => Response;
+    await act(async () => { (container.querySelector('[data-testid=setup-attachable-retry]') as HTMLButtonElement).click(); });
+    await act(async () => { release(new Response(JSON.stringify({ agents: AGENTS }), { status: 200 })); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid=setup-attachable-retry]')).toBeNull();
+    expect(startButton().disabled).toBe(false);
+    expect(document.activeElement).toBe(startButton());
+  });
+
+  // Yuna 4701-copy §3: a read that never answers is a silent failure — after the limit the page says «failed» (button reads again); an answer
+  // that comes later still lands. Reverted (no limit) → the reading line goes on for ever.
+  it('[SID:4701] a read that never answers → after the limit the failure line and the button (the limit is not a wall-clock wait here: faked timers)', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      let release!: (r: Response) => void;
+      agentsNow = (() => new Promise<Response>((r) => { release = r; })) as unknown as () => Response;
+      await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+      expect(container.querySelector('[data-testid=setup-attachable-reading]')).not.toBeNull();
+      await act(async () => { vi.advanceTimersByTime(ATTACHABLE_READ_LIMIT_MS - 1); });
+      expect(container.querySelector('[data-testid=setup-attachable-reading]')).not.toBeNull(); // not yet
+      await act(async () => { vi.advanceTimersByTime(1); });
+      expect(container.querySelector('[data-testid=setup-attachable-reading]')).toBeNull();
+      expect(container.querySelector('[data-testid=setup-attachable-failed]')).not.toBeNull();
+      expect(container.querySelector('[data-testid=setup-attachable-retry]')).not.toBeNull();
+      expect(startButton().disabled).toBe(true);
+      await act(async () => { release(new Response(JSON.stringify({ agents: AGENTS }), { status: 200 })); }); // a late answer still lands
+      for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+      expect(container.querySelector('[data-testid=setup-attachable-failed]')).toBeNull();
+      expect(startButton().disabled).toBe(false);
+      expect(selectOf('조사').value).toBe(`agent:${DAN}`);
+    } finally { vi.useRealTimers(); }
+  });
+
+  // The road with no `agent=` (the first setup · a recipe) and the roads with no read to wait for are as they were: a late or failing list
+  // never holds «시작» (the group is left out; «새로 만들기» works) — AC2. Reverted (the hold applied without a preselect) → «시작» is off here.
+  it('[SID:4701] no preselect: a late or failing list does not hold «시작» · a preselect for a non-admin (no read) does not either', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = (() => new Promise<Response>(() => undefined)) as unknown as () => Response; // never arrives
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
+    expect(startButton().disabled).toBe(false);
+    expect(container.querySelector('[data-testid=setup-attachable-reading]')).toBeNull();
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+
+    agentsNow = () => new Response('{}', { status: 500 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
+    expect(startButton().disabled).toBe(false);
+    expect(container.querySelector('[data-testid=setup-attachable-retry]')).toBeNull();
+    await act(async () => { root.unmount(); }); root = createRoot(container); calls.length = 0;
+
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />, 'member');
+    expect(calls.some((c) => c.url.includes('/api/desktop/setup/agents'))).toBe(false); // not an admin: the list is not asked for
+    expect(container.querySelector('[data-testid=setup-attachable-reading]')).toBeNull(); // …so nothing waits for it
+    expect(container.querySelector('[data-testid=setup-attachable-retry]')).toBeNull();
+  });
+
+  // ── story 4703 (Yuna 4703-copy-1015): the recruiter's agent (`agent=`) cannot take a row although the list is here ────────────────────
+  // Before: it landed on no row and «시작» went on to the recipe's NEW agents without a word. Now «시작» is off, one line says why — from the
+  // list and the found runtimes — and the person chooses (the way that keeps the agent first; «새로 만들기로 바꾸기» last).
+  const FOREIGN = 'b2222222-0000-4000-8000-000000000001'; // another organization's agent: never in this organization's list
+  const NOBODY = 'b2222222-0000-4000-8000-000000000002'; // an id that exists nowhere
+  const holdBox = () => container.querySelector('[data-testid=setup-preselect-hold]') as HTMLElement | null;
+  const reasonLine = () => container.querySelector('[data-testid=setup-preselect-reason]') as HTMLElement | null;
+  const holdLabels = () => [...(holdBox()?.querySelectorAll('button, a') ?? [])].map((b) => (b.textContent ?? '').trim());
+  const settle = async () => { for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); }); };
+  const pressEl = async (el: Element) => { await act(async () => { (el as HTMLElement).click(); }); await settle(); };
+  const confirmCalls = () => calls.filter((c) => c.url.includes('/api/desktop/setup-codes/confirm'));
+  const listOf = (agents: object[]) => () => new Response(JSON.stringify({ agents }), { status: 200 });
+
+  it('[SID:4703] ① the id is not in the list → «시작» off · the one line (no name · no id) · one button · pressing «시작» posts nothing · «새로 만들기로 바꾸기» → the count line, «시작» on and focused, and the body has NO agent_id', async () => {
+    stub(() => new Response(JSON.stringify({ data: { work_item_id: 'w-1' } }), { status: 200 }));
+    agentsNow = listOf(AGENTS);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={FOREIGN} />);
+    expect(startButton().disabled).toBe(true); // reverted (no `preselectHold` in canStart) → on, and a press creates new agents
+    expect(reasonLine()?.textContent).toBe('고른 에이전트는 이 컴퓨터에서 시작할 수 없어요');
+    expect(reasonLine()?.getAttribute('role')).toBe('status');
+    expect(reasonLine()?.getAttribute('data-reason')).toBe('unlisted');
+    expect(holdLabels()).toEqual(['새로 만들기로 바꾸기']);
+    for (const a of AGENTS) expect(holdBox()!.textContent).not.toContain(a.name); // no name of anyone
+    expect(holdBox()!.innerHTML).not.toContain(FOREIGN); // and not the id that was asked
+    await act(async () => { startButton().click(); }); await settle();
+    expect(confirmCalls()).toHaveLength(0);
+
+    await pressEl(container.querySelector('[data-testid=setup-preselect-use-new]')!);
+    expect(holdBox()).toBeNull();
+    expect(text()).toContain('에이전트'); // the count line came back
+    expect(startButton().disabled).toBe(false);
+    expect(document.activeElement).toBe(startButton()); // Yuna: focus moves to «시작»
+    await pressEl(startButton());
+    const roles = (confirmCalls()[0]!.body as { roles: { agent_id?: string }[] }).roles;
+    expect(roles.every((r) => r.agent_id === undefined)).toBe(true); // a person chose «새로 만들기» — only now
+  });
+
+  it('[SID:4703] ③ another organization\'s agent and an id nobody has → the SAME page (same DOM · same text · no call that carries the id)', async () => {
+    const seen: Record<string, { html: string; start: boolean; calls: string[] }> = {};
+    for (const [name, id] of [['foreign', FOREIGN], ['nobody', NOBODY]] as const) {
+      stub(() => new Response('{}', { status: 200 }));
+      agentsNow = listOf(AGENTS);
+      await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={id} />);
+      seen[name] = { html: holdBox()!.outerHTML, start: startButton().disabled, calls: calls.map((c) => `${c.method ?? 'GET'} ${c.url.replace(id, '<id>')}`) };
+      expect(calls.some((c) => c.url.includes(id) || JSON.stringify(c.body ?? '').includes(id))).toBe(false); // the id is never sent anywhere
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+    }
+    expect(seen.foreign).toEqual(seen.nobody);
+  });
+
+  it('[SID:4703] an agent with no desktop runtime or one that is inactive is not in the list either → the same ① (nothing tells «exists» from «does not»)', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = listOf(AGENTS); // the server leaves them out of the list — the page cannot tell them from an id nobody has
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={'b2222222-0000-4000-8000-0000000000ff'} />);
+    expect(reasonLine()?.getAttribute('data-reason')).toBe('unlisted');
+    expect(reasonLine()?.textContent).toBe('고른 에이전트는 이 컴퓨터에서 시작할 수 없어요');
+  });
+
+  it('[SID:4703] ② outside the project → the line names it · [프로젝트 팀에 넣기] then [새로 만들기로 바꾸기] · putting it on the team lands it on the first agent row · focus «시작»', async () => {
+    let inProject = false;
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = () => new Response(JSON.stringify({ agents: AGENTS.map((a) => (a.id === OUT ? { ...a, in_project: inProject } : a)) }), { status: 200 });
+    const base = globalThis.fetch as unknown as (i: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/projects/') && url.endsWith('/access')) { calls.push({ url, method: init?.method, body: JSON.parse(String(init?.body)) }); inProject = true; return new Response('{}', { status: 201 }); }
+      return base(input, init);
+    }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={OUT} />);
+    expect(startButton().disabled).toBe(true);
+    expect(reasonLine()?.textContent).toBe('바깥 · 이 프로젝트 팀에 아직 없어요 — 팀에 넣으면 이 컴퓨터에서 시작할 수 있어요');
+    expect(holdLabels()).toEqual(['프로젝트 팀에 넣기', '새로 만들기로 바꾸기']); // the way that keeps the agent first
+    await pressEl(container.querySelector('[data-testid=setup-preselect-put]')!);
+    expect(calls.some((c) => c.url.includes('/access') && (c.body as { member_id: string }).member_id === OUT)).toBe(true);
+    expect(holdBox()).toBeNull();
+    expect(selectOf('조사').value).toBe(`agent:${OUT}`); // the recruiter's agent, on the first agent row (the preselect was not spent)
+    expect(startButton().disabled).toBe(false);
+    expect(document.activeElement).toBe(startButton());
+  });
+
+  it('[SID:4703] ② [프로젝트 팀에 넣기] fails → the failure line under it, focus stays on THAT button (not the list\'s), «시작» stays off', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = listOf(AGENTS);
+    const base = globalThis.fetch as unknown as (i: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/projects/') && url.endsWith('/access')) { calls.push({ url, method: init?.method }); return new Response('{}', { status: 500 }); }
+      return base(input, init);
+    }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={OUT} />);
+    await pressEl(container.querySelector('[data-testid=setup-preselect-put]')!);
+    expect(container.querySelector('[data-testid=setup-put-on-team-failed]')).not.toBeNull();
+    expect(document.activeElement).toBe(container.querySelector('[data-testid=setup-preselect-put]'));
+    expect(holdBox()).not.toBeNull();
+    expect(startButton().disabled).toBe(true);
+  });
+
+  it('[SID:4703] ③ its runtime is not on this computer → the line · the install row of THAT runtime · [다시 찾기] · [새로 만들기로 바꾸기] (no «프로젝트 팀에 넣기»)', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = listOf(AGENTS);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} preselect={MINI} />); // MINI = codex, in the project
+    expect(startButton().disabled).toBe(true);
+    expect(reasonLine()?.getAttribute('data-reason')).toBe('runtime_missing');
+    expect(reasonLine()?.textContent).toBe(`미니 · 이 컴퓨터에서 Codex${pickEulReulJosa('Codex')} 찾지 못했어요 — 설치하고 로그인한 뒤 다시 찾아 주세요`);
+    expect(container.querySelector('[data-testid=setup-preselect-install] code')?.textContent).toContain('codex'); // the codex install command
+    expect(container.querySelector('[data-testid=setup-preselect-install] code')?.textContent).not.toContain('claude.ai');
+    expect(holdLabels()).toEqual(['복사', '다시 찾기', '새로 만들기로 바꾸기']);
+    expect(container.querySelector('[data-testid=setup-preselect-look-again]')?.getAttribute('href')).toBe(SETUP_APP_LINK);
+  });
+
+  it('[SID:4703] ④ its runtime is blocked by the company → the blocked line (not blockedClaudeNote whole) · one button', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = listOf(AGENTS);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} blocked={['claude']} preselect={DAN} />);
+    expect(startButton().disabled).toBe(true);
+    expect(reasonLine()?.getAttribute('data-reason')).toBe('runtime_blocked');
+    expect(reasonLine()?.textContent).toBe(`댄 어윈 · Claude Code${pickEunNeunJosa('Claude Code')} 회사 설정 때문에 이 컴퓨터에서 Sprintable에 연결할 수 없어요`);
+    expect(reasonLine()?.textContent).not.toContain('Codex가 맡아요'); // the second half of blockedClaudeNote would be false here
+    expect(holdLabels()).toEqual(['새로 만들기로 바꾸기']);
+  });
+
+  it('[SID:4703] reasons together: one line — unlisted over blocked over missing over outside the project', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    // outside the project AND its runtime (codex) missing → the runtime line only
+    agentsNow = listOf([{ id: MINI, name: '미니', runtime: 'codex', live_keys: 0, last_used_at: null, in_project: false }]);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} preselect={MINI} />);
+    expect(container.querySelectorAll('[data-testid=setup-preselect-reason]')).toHaveLength(1);
+    expect(reasonLine()?.getAttribute('data-reason')).toBe('runtime_missing');
+    expect(container.querySelector('[data-testid=setup-preselect-put]')).toBeNull();
+  });
+
+  it('[SID:4703] the roads that do not change: it lands (no line) · no preselect · a row set by hand lets the line go', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = listOf(AGENTS);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
+    expect(holdBox()).toBeNull();
+    expect(startButton().disabled).toBe(false);
+    expect(selectOf('조사').value).toBe(`agent:${DAN}`);
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = listOf(AGENTS);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
+    expect(holdBox()).toBeNull();
+    expect(startButton().disabled).toBe(false);
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = listOf(AGENTS);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={FOREIGN} />);
+    expect(holdBox()).not.toBeNull();
+    await choose('조사', 'codex'); // the person sets a row → the recruiter's agent is let go; the line no longer holds «시작»
+    expect(holdBox()).toBeNull();
+    expect(startButton().disabled).toBe(false);
+  });
+
+  // ── folded in from PR 5110's non-blocking list (PO 10-15 · Yuna 4703-copy §«Carried over») ─────────────────────────────────────────
+  it('[SID:4701→4703] the retry button looks busy while it re-reads (aria-disabled dims it, like [프로젝트 팀에 넣기]) · after the list arrives focus goes to «시작», or to the first agent row\'s select when «시작» is still off', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    agentsNow = () => new Response('{}', { status: 500 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={FOREIGN} />);
+    const retry = container.querySelector('[data-testid=setup-attachable-retry]') as HTMLButtonElement;
+    expect(retry.className).toContain('aria-disabled:pointer-events-none');
+    expect(retry.className).toContain('aria-disabled:opacity-50');
+    agentsNow = listOf(AGENTS); // the list now arrives — but the recruiter's agent is not in it, so «시작» is off for ①
+    await pressEl(retry);
+    expect(container.querySelector('[data-testid=setup-attachable-retry]')).toBeNull();
+    expect(startButton().disabled).toBe(true);
+    expect(document.activeElement).toBe(container.querySelector('section select')); // not the page: the first agent row's select
   });
 
   it('no live key → no line under it (nothing would be cut)', async () => {
@@ -1533,7 +1897,9 @@ describe('[SID:4427] ③ limit and the recipe line (Yuna table)', () => {
     await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
     await act(async () => { startButton().click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
-    expect(text()).toContain('이 레시피는 에이전트 2개가 필요한데, 지금 1개만 더 만들 수 있어요. 쓰지 않는 에이전트를 정리하거나');
+    // story 4717 AC2: «새 에이전트» · no limit in this answer → no plan line (the number-less «모두 만들었어요» would contradict «1개만 더»)
+    expect(text()).toContain('이 레시피는 새 에이전트 2개가 필요한데, 지금 1개만 더 만들 수 있어요. 쓰지 않는 에이전트를 정리하거나');
+    expect(text()).not.toContain('모두 만들었어요');
     expect(([...container.querySelectorAll('a')].find((a) => a.textContent === '에이전트 정리하기') as HTMLAnchorElement).getAttribute('href')).toContain('/organization/workforce');
     await act(async () => { root.unmount(); }); root = createRoot(container);
 
@@ -1541,8 +1907,11 @@ describe('[SID:4427] ③ limit and the recipe line (Yuna table)', () => {
     await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
     await act(async () => { startButton().click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
-    expect(text()).toContain('이 조직에서 만들 수 있는 에이전트 수를 넘어요');
+    // story 4717 AC2: the recruiter's words — billing closed here: «한도에 도달했어요» + the free plan's limit, no upgrade way
+    expect(text()).toContain('한도에 도달했어요');
+    expect(text()).toContain('무료 플랜은 에이전트를 5개까지 만들 수 있어요.');
     expect(text()).not.toContain('필요한데');
+    expect(text()).not.toContain('요금제 업그레이드');
     await act(async () => { ([...container.querySelectorAll('button')].find((b) => b.textContent === '레시피 다시 고르기') as HTMLButtonElement).click(); });
     expect(startButton()).toBeTruthy(); // back to the choices
   });
@@ -1779,7 +2148,7 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
     expect(container.querySelector('[data-testid=setup-new-org]')!.textContent).toContain('새 조직 «내 조직»도 함께 만들어요');
   });
 
-  it('invited → the invite card instead of the form: who · as what · until when; no recipe read, no «시작», no button', async () => {
+  it('invited → the invite card instead of the form: who · as what · until when; no recipe read, no «시작»; each line has [들어가기]', async () => {
     invitesNow = () => new Response(JSON.stringify({ invites: [INVITE, { ...INVITE, invite_id: 'i-2', org_name: '다른 팀', role: 'member' }] }), { status: 200 });
     stubNoOrg();
     await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} />);
@@ -1787,8 +2156,9 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
     expect(card.textContent).toContain('초대받은 조직이 있어요');
     expect(card.textContent).toContain('뭉클랩에서 관리자로 초대했어요 · 10월 6일까지'); // this year: no year (Yuna 02:46Z)
     expect(card.textContent).toContain('다른 팀에서 멤버로 초대했어요');
-    expect(card.textContent).toContain('초대 메일의 링크로 들어가면 그 조직에서 바로 시작할 수 있어요.');
-    expect(container.querySelectorAll('button')).toHaveLength(0);
+    expect(card.textContent).not.toContain('메일의 링크로'); // 4711 AC4 덧: the mail-link line is gone — the card has its own buttons now
+    expect(container.querySelectorAll('[data-testid=setup-invited-join]')).toHaveLength(2); // a [들어가기] per line
+    expect(container.querySelector('[data-testid=setup-invited-own-org]')!.textContent).toBe('내 조직을 새로 만들기');
     expect(urls().some((u) => u.includes('/api/desktop/recipes'))).toBe(false);
   });
 
@@ -1805,15 +2175,22 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
     expect(inviteUntilDate('not-a-date', 'ko', 'Asia/Seoul', now)).toBe('');
   });
 
-  it('the invite read fails → sent to the one-screen «조직 만들기» ((가) · /onboarding?next=%2Fdesktop%2Fsetup) — not knowing is not «no invites»', async () => {
+  it('the invite read fails → the card says so in place (story 4711 AC4: no «조직 만들기» screen to be sent to) and [다시 확인] reads again — not knowing is not «no invites»', async () => {
     const assign = vi.fn();
     vi.stubGlobal('location', { ...window.location, assign } as unknown as Location);
     invitesNow = () => new Response('{}', { status: 503 });
     stubNoOrg();
     await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} />);
-    expect(assign).toHaveBeenCalledWith('/onboarding?next=%2Fdesktop%2Fsetup');
+    expect(assign).not.toHaveBeenCalled(); // nowhere to be sent
+    const card = container.querySelector('[data-testid=setup-invite-check-failed]')!;
+    expect(card.textContent).toContain('초대를 확인하지 못했어요 — 확인한 뒤에 조직을 만들어요');
     expect(urls().some((u) => u.includes('/api/desktop/recipes'))).toBe(false);
     expect(container.querySelector('[data-testid=setup-new-org]')).toBeNull();
+    // [다시 확인] reads the invites again; with none the page goes on as a new organization
+    invitesNow = () => new Response(JSON.stringify({ invites: [] }), { status: 200 });
+    await act(async () => { ([...container.querySelectorAll('button')].find((b) => b.textContent === '다시 확인') as HTMLButtonElement).click(); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid=setup-invite-check-failed]')).toBeNull();
   });
 
   it('refusals: an invite arrived meanwhile (409 pending_invites) → the invite card · an organization appeared (409 has_organization) → «이미 조직이 있어요» [다시 불러오기] · e-mail not verified · organization limit → the one-screen words', async () => {
@@ -2693,5 +3070,69 @@ describe('[SID:4670] «폰으로도 에이전트 다루기» — the tick above 
     await flushAll();
     expect(puts()).toHaveLength(1);
     expect(text()).toContain('에이전트를 시작하고 있어요');
+  });
+});
+
+describe('[SID:4717] the plan\'s agent room before «시작» (AC1) and one way of saying the limit (AC2)', () => {
+  const withRoom = (room: object) => () => new Response(JSON.stringify({ recipes: RECIPES, agent_room: room }), { status: 200 });
+  const confirms = () => calls.filter((c) => c.url.includes('/api/desktop/setup-codes/confirm'));
+
+  it('room enough → «시작» on and the count line says how many more can be made', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    recipesNow = withRoom({ limit: 3, current: 0, available: 3, tier: 'free' });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(container.querySelector('[data-testid=setup-agent-room]')?.textContent).toBe(' · 지금 3개 더 만들 수 있어요');
+    expect(startButton().disabled).toBe(false);
+    expect(container.querySelector('[data-testid=setup-room-short]')).toBeNull();
+  });
+
+  it('room short → «시작» off before the press: how many, the free plan\'s limit, the ways — and no confirmation is sent', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    recipesNow = withRoom({ limit: 3, current: 2, available: 1, tier: 'free' });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    const short = container.querySelector('[data-testid=setup-room-short]') as HTMLElement;
+    expect(short.textContent).toContain('이 레시피는 새 에이전트 2개가 필요한데, 지금 1개만 더 만들 수 있어요. 무료 플랜은 에이전트를 3개까지 만들 수 있어요.');
+    expect(startButton().disabled).toBe(true);
+    await act(async () => { startButton().click(); });
+    expect(confirms()).toHaveLength(0);
+    expect(([...short.querySelectorAll('a')].find((a) => a.textContent === '에이전트 정리하기') as HTMLAnchorElement).getAttribute('href')).toContain('/organization/workforce');
+    expect(short.textContent).not.toContain('요금제 업그레이드'); // billing closed in this build
+    expect(container.querySelector('[data-testid=setup-room-use-existing]')).toBeNull(); // no agent of the org can take a row
+  });
+
+  it('no room at all → its own sentence, never «0개만 더»', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    recipesNow = withRoom({ limit: 3, current: 3, available: 0, tier: 'free' });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(text()).toContain('이 레시피는 새 에이전트 2개가 필요한데, 지금은 더 만들 수 없어요.');
+    expect(text()).not.toContain('0개만');
+    expect(startButton().disabled).toBe(true);
+  });
+
+  it('an agent the organization has takes a row → one new agent fits and «시작» comes back on', async () => {
+    const DAN = 'a1111111-0000-4000-8000-000000000001';
+    stub(() => new Response('{}', { status: 200 }));
+    recipesNow = withRoom({ limit: 3, current: 2, available: 1, tier: 'free' });
+    agentsNow = () => new Response(JSON.stringify({ agents: [{ id: DAN, name: '댄 어윈', runtime: 'claude', live_keys: 0, last_used_at: null, in_project: true }] }), { status: 200 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    expect(container.querySelector('[data-testid=setup-room-use-existing]')?.textContent).toBe('역할 칸에서 «이미 있는 에이전트»를 고르면 새로 만들지 않아요.');
+    expect(startButton().disabled).toBe(true);
+    const sel = container.querySelector('select[aria-label^="조사"]') as HTMLSelectElement;
+    await act(async () => { sel.value = `agent:${DAN}`; sel.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(container.querySelector('[data-testid=setup-room-short]')).toBeNull();
+    expect(startButton().disabled).toBe(false);
+    expect(container.querySelector('[data-testid=setup-agent-room]')?.textContent).toBe(' · 지금 1개 더 만들 수 있어요');
+  });
+
+  it('no limit holds (null) or a shape the page does not read → nothing said, nothing held', async () => {
+    for (const room of [null, { limit: 3, current: 2, available: 5, tier: 'free' }, { limit: -1, current: 0, available: 0 }]) {
+      stub(() => new Response('{}', { status: 200 }));
+      recipesNow = withRoom(room as object);
+      await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+      expect(container.querySelector('[data-testid=setup-agent-room]'), JSON.stringify(room)).toBeNull();
+      expect(container.querySelector('[data-testid=setup-room-short]')).toBeNull();
+      expect(startButton().disabled).toBe(false);
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+    }
   });
 });
