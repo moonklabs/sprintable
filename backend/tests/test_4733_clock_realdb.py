@@ -1354,3 +1354,45 @@ def test_38_each_of_the_two_schemas_refuses_an_edit_that_does_not_fit_its_action
         ):
             with pytest.raises(ValidationError):
                 schema.model_validate({**base, **bad})
+
+
+async def test_43_the_sweep_picks_its_batch_once_whatever_plan_the_database_chooses(world):
+    """CI saw the sweep take 4 rows on a tick with a batch of 2 (then 1), twice, on a busy table: `id IN (SELECT … LIMIT n FOR UPDATE SKIP LOCKED)` is a semi-join, and a plan that runs the sub-select
+    again per row gets the NEXT n each time (a row this command already updated is skipped). The statement must choose the batch once — an InitPlan — so the bound does not depend on the plan.
+    Pinned two ways: the plan of the statement itself (an InitPlan, whatever else it does) and the bound under planner settings that push toward re-running the sub-select."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    import app.services.desktop_clock as dc
+    from tests.test_4424_desktop_setup_realdb import _ASYNC
+
+    async with _client() as c:
+        device, agent, phone, _der = await _setup(c, "d4424 mac 4733s43")
+        sid = device["setup_id"]
+        ids = [(await _post(c, sid, _edit(phone, agent, key=f"o{i}", base_rev=1, plan=TYPED))).json()["command_id"] for i in range(8)]
+        for i in ids:
+            await _sql(f"UPDATE desktop_commands SET created_at = now() - interval '1 hour' WHERE id = '{i}'")
+        params = {"cutoff": dc._now() - dc.EDIT_TEXT_TTL, "batch": 2}
+        eng = create_async_engine(_ASYNC, poolclass=NullPool)
+        try:
+            async def plan_of(conn) -> str:
+                return "\n".join(r[0] for r in await conn.execute(text("EXPLAIN " + str(dc._SCRUB_EDIT_ALL_SQL)), params))
+
+            pushes = ([], ["enable_hashjoin = off", "enable_mergejoin = off", "enable_material = off", "enable_indexscan = off", "enable_bitmapscan = off"],
+                      ["enable_seqscan = off", "enable_hashagg = off", "enable_sort = off"])
+            for settings in pushes:
+                async with eng.connect() as conn:
+                    for s in settings:
+                        await conn.execute(text(f"SET LOCAL {s}"))
+                    assert "InitPlan" in await plan_of(conn), settings                       # the batch is chosen once, under these settings too
+                    res = await conn.execute(dc._SCRUB_EDIT_ALL_SQL, params)
+                    assert res.rowcount == 2, (settings, res.rowcount)                        # exactly the batch (8 stale rows, none held): not fewer, not more
+                    await conn.rollback()
+            async with eng.begin() as conn:                                                  # …and once for real: exactly two of the eight lose their words, the lowest ids
+                res = await conn.execute(dc._SCRUB_EDIT_ALL_SQL, params)
+                assert res.rowcount == 2
+            edits = [(await _sql(fetch=f"SELECT payload->'edit' FROM desktop_commands WHERE id = '{i}'"))[0][0] for i in sorted(ids)]
+            assert [e == {"base_rev": 1} for e in edits] == [True, True] + [False] * 6, edits
+        finally:
+            await eng.dispose()
