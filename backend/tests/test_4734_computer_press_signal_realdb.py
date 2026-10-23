@@ -81,9 +81,10 @@ async def test_a_marked_press_of_a_setup_whose_app_has_not_said_it_is_refused_at
     async with _client() as c:
         phone, devs = await _computer(c, 2, says_press=False)
         sid = devs[0][0]["setup_id"]
-        r = await _post(c, sid, _mark(phone, key="k-old"))
-        assert (r.status_code, r.json()["error"]["code"]) == (409, "computer_press_unsupported"), r.text
-        assert await _commands(sid) == [], "nothing was queued"
+        for action in ("out_open", "out_submit", "out_cancel", "in"):  # every one of the four whole actions meets the same door
+            r = await _post(c, sid, _mark(phone, action, key=f"k-old-{action}"))
+            assert (r.status_code, r.json()["error"]["code"]) == (409, "computer_press_unsupported"), (action, r.text)
+            assert await _commands(sid) == [], f"{action}: nothing was queued"
         # a press WITHOUT the mark never needed the word; the same setup, once it says it takes the press, is pressed as before
         assert (await _post(c, sid, _press(phone, "out_open", key="k-plain"))).status_code == 201
         put = await c.put("/api/v2/desktop/relay/startable", json={"startable": [], "computer_press": True}, headers=_tok(devs[0][0]["device_token"]))
