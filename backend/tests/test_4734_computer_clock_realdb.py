@@ -210,6 +210,41 @@ async def test_06_a_grouping_too_large_to_read_in_full_is_refused_not_pressed_in
         assert await _commands(devs[0][0]["setup_id"]) == []
 
 
+async def test_06c_the_phones_read_of_a_grouping_too_large_is_refused_too_not_counted_in_part(world, monkeypatch):
+    from app.services import desktop_computers
+
+    async with _client() as c:
+        phone, devs = await _computer(c, 3)
+        monkeypatch.setattr(desktop_computers, "GROUP_ROWS_MAX", 1)
+        r = await c.get(f"/api/v2/desktop/setups/{devs[0][0]['setup_id']}/clock", params={"phone_key_id": phone, "computer": "true"}, headers=_person(OWNER))
+        assert (r.status_code, r.json()["error"]["code"]) == (409, "computer_too_large"), r.text
+
+
+def test_06d_the_relay_payload_holds_the_marks_three_keys_together_and_nothing_else_with_them():
+    """the stored payload's own shape (a second layer behind the request's): checked without the router"""
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    from app.services.desktop_relay import ClockPayload
+
+    a, b = str(uuid.uuid4()), str(uuid.uuid4())
+    ok = {"action": "out_open", "signed": "x", "computer": True, "scope": [a, b], "scope_total": 2}
+    assert ClockPayload(**ok).scope_total == 2
+    assert ClockPayload(action="out_open", signed="x").computer is None  # (a press without the mark)
+    for bad in (
+        {**ok, "agent_member_id": a},  # a mark names no agent
+        {**ok, "scope": [a, a]},  # a scope has no repeats
+        {**ok, "scope_total": 1},  # …and is no larger than its total
+        {k: v for k, v in ok.items() if k != "scope"},  # the three come together
+        {k: v for k, v in ok.items() if k != "scope_total"},
+        {**ok, "computer": None},
+    ):
+        with _pytest.raises(ValidationError):
+            ClockPayload(**bad)
+    with _pytest.raises(ValidationError):
+        ClockPayload(action="out_edit", signed="x", agent_member_id=a, edit={"base_rev": 1, "done": "x"}, computer=True, scope=[a], scope_total=1)
+
+
 async def test_06b_the_phones_read_says_n_of_k_before_it_signs_counts_only_and_only_when_asked(world):
     async with _client() as c:
         phone, devs = await _computer(c, 3)
