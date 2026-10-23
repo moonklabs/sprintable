@@ -303,10 +303,28 @@ class OrganizationRepository:
             if impact.has_active_subscription:
                 return {"ok": False, "reason": "active_subscription"}
 
+        return await self._close_organization(org, actor_user_id=user_id, note=impact_note)
+
+    async def delete_for_account_closure(self, org_id: uuid.UUID, user_id: uuid.UUID) -> dict:
+        """story #4752 (AC4, PO rule): the account deletion closes an organization whose only active member is the person deleting the account — the same closing as the owner's
+        organization delete (`_close_organization`: audit row, people's seats, public links and keys, channel tokens, billing), without the typed name or the impact preview (the
+        confirmation window of the account deletion names the organizations that close with it). Whatever the person's role. An active (or in-flight) subscription stops it —
+        `active_subscription`: a paid organization is cancelled first, by hand. The organization row is locked first, as in the owner's delete."""
+        lock_result = await self.session.execute(select(Organization).where(Organization.id == org_id).with_for_update())
+        org = lock_result.scalar_one_or_none()
+        if org is None:
+            return {"ok": False, "reason": "not_found"}
+        if await self._has_active_or_in_flight_subscription(org_id):
+            return {"ok": False, "reason": "active_subscription"}
+        return await self._close_organization(org, actor_user_id=user_id, note="account deletion: the only member left, the organization closes with the account")
+
+    async def _close_organization(self, org: Organization, *, actor_user_id: uuid.UUID, note: str | None) -> dict:
+        """The closing of an organization both deletes share (the owner's delete and the account deletion): the checks (who may · name · impact · subscription) are the callers'."""
+        org_id = org.id
         self.session.add(DeletionAuditLog(
-            id=uuid.uuid4(), org_id=org_id, actor_id=user_id,
+            id=uuid.uuid4(), org_id=org_id, actor_id=actor_user_id,
             entity_type="organization", entity_id=org_id, entity_title=org.name,
-            note=impact_note,
+            note=note,
         ))
         # story 4726 — `org_members.org_id` has no foreign key (baseline schema.sql: only a primary key and a unique on
         # (org_id, user_id)), so deleting the organizations row below does not remove the people's rows: the owner row stayed

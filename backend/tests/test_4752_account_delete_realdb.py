@@ -52,8 +52,11 @@ class _World:
     def __init__(self, app, Session, client):
         self.app, self.Session, self.client = app, Session, client
 
-    async def person(self, *, org: bool, name: str = "Real Name") -> tuple[uuid.UUID, str, uuid.UUID | None]:
-        """A person who can sign in with a password; with an organization (as its owner, with a human member row carrying a name) or without any."""
+    async def person(self, *, org: bool, name: str = "Real Name", spare_owner: bool = True) -> tuple[uuid.UUID, str, uuid.UUID | None]:
+        """A person who can sign in with a password; with an organization (as its owner, with a human member row carrying a name) or without any.
+
+        `spare_owner` (default on): the organization also has a second, active owner — so the person is NOT its only owner and the account deletion (rule A: a sole owner is blocked, AC4)
+        lets them go. The tests of the rule itself pass `spare_owner=False`."""
         from app.core.security import hash_password
         from app.models.member import Member
         from app.models.organization import Organization
@@ -80,7 +83,26 @@ class _World:
                 u.last_org_id = o.id
                 await s.commit()
                 org_id = o.id
+                if spare_owner:
+                    await self.add_member(org_id, role="owner", name="Spare Owner")
         return uid, email, org_id
+
+    async def add_member(self, org_id: uuid.UUID, *, role: str, name: str = "Teammate", active: bool = True, removed: bool = False) -> uuid.UUID:
+        """Another person in the organization (one seat id in org_members and members, as in the product); returns the user id."""
+        from app.core.security import hash_password
+        from app.models.member import Member
+        from app.models.project import OrgMember
+        from app.models.user import User
+
+        uid = uuid.uuid4()
+        async with self.Session() as s:
+            s.add(User(id=uid, email=f"story4752-m-{uid.hex[:10]}@test.com", hashed_password=hash_password(_PASSWORD), is_active=active, email_verified=True, display_name=name))
+            await s.commit()
+            seat = uuid.uuid4()
+            s.add(OrgMember(id=seat, org_id=org_id, user_id=uid, role=role, deleted_at=datetime.now(timezone.utc) if removed else None))   # `removed`: the seat was closed (an admin took the person out)
+            s.add(Member(id=seat, org_id=org_id, type="human", user_id=uid, name=name))
+            await s.commit()
+        return uid
 
     async def login(self, email: str):
         return await self.client.post("/api/v2/auth/token", json={"email": email, "password": _PASSWORD})
@@ -533,5 +555,128 @@ async def test_14_the_by_person_push_branch_skips_a_closed_seat_too():
         await w.sql("UPDATE members SET is_active = false WHERE id = :m", m=mid)        # closed on the members side only; org_members.deleted_at stays NULL
         assert (await w.sql("SELECT deleted_at IS NULL FROM org_members WHERE id = :m", m=mid)).scalar_one() is True
         assert await selected() == 0
+    finally:
+        await _close(engine, w)
+
+
+
+async def _org_exists(w, org_id) -> bool:
+    return bool((await w.sql("SELECT count(*) FROM organizations WHERE id = :o", o=org_id)).scalar_one())
+
+
+async def test_15_an_organization_with_nobody_else_in_it_closes_with_the_account_whatever_the_role():
+    """story #4752 AC4 (PO rule, revised): when nobody else is active in an organization it CLOSES with the account (the owner's organization delete, no typed name) — else the web's onboarding
+    would make a new one on every deletion and a person who uses it alone could never leave. Whatever the person's role there; a co-member whose own account is not active, or whose seat is
+    closed, is nobody. Another person's organization is untouched."""
+    engine, w = await _world()
+    try:
+        # ① alone as the owner
+        uid, email, org_id = await w.person(org=True, name="Alone Owner", spare_owner=False)
+        stranger, _e, stranger_org = await w.person(org=True, name="Someone Else", spare_owner=False)
+        r = await w.delete(await w.tokens(email))
+        assert r.status_code == 200, r.text
+        assert not await _org_exists(w, org_id)                                              # the organization closed with the account
+        assert await _org_exists(w, stranger_org)                                            # another person's organization is untouched
+        assert (await w.sql("SELECT count(*) FROM deletion_audit_logs WHERE entity_id = :o AND actor_id = :u", o=org_id, u=uid)).scalar_one() == 1   # the closing is on the record, as an owner's delete is
+        assert (await w.sql("SELECT count(*) FROM org_members WHERE org_id = :o AND deleted_at IS NULL", o=org_id)).scalar_one() == 0
+        # ② a co-owner whose ACCOUNT is not active, and one whose SEAT was closed, are nobody: still alone
+        uid2, email2, org2 = await w.person(org=True, name="Alone With Ghosts", spare_owner=False)
+        await w.add_member(org2, role="owner", name="Dead Account", active=False)
+        await w.add_member(org2, role="member", name="Removed Seat", removed=True)
+        assert (await w.delete(await w.tokens(email2))).status_code == 200 and not await _org_exists(w, org2)
+        # ③ alone, but only an admin there (the owner's seat was closed): the role does not matter
+        admin_uid, admin_email, _o = await w.person(org=False, name="Lone Admin")
+        _x, _xe, org3 = await w.person(org=True, name="Gone Owner", spare_owner=False)
+        await w.sql("UPDATE org_members SET deleted_at = now() WHERE org_id = :o AND role = 'owner'", o=org3)
+        await w.sql("INSERT INTO org_members (id, org_id, user_id, role) VALUES (gen_random_uuid(), :o, :u, 'admin')", o=org3, u=admin_uid)
+        assert (await w.delete(await w.tokens(admin_email))).status_code == 200 and not await _org_exists(w, org3)
+    finally:
+        await _close(engine, w)
+
+
+async def test_16_the_only_owner_of_an_organization_that_has_other_people_cannot_leave_until_it_is_handed_over():
+    """AC4 (PO rule): other active people are in the organization and the person is its only active owner → 409 `ORG_BLOCKS_ACCOUNT_DELETE` (the organizations by name, `reason`
+    `other_members`) and NOTHING changes (the organization stays, the person can still sign in). Another active owner, or being no owner there, or no organization → not blocked."""
+    engine, w = await _world()
+    try:
+        uid, email, org_id = await w.person(org=True, name="Only Owner", spare_owner=False)
+        await w.add_member(org_id, role="member", name="Teammate")
+        r = await w.delete(await w.tokens(email))
+        assert r.status_code == 409, r.text
+        err = r.json()["error"]
+        assert err["code"] == "ORG_BLOCKS_ACCOUNT_DELETE"
+        assert [(o["id"], o["reason"]) for o in err["orgs"]] == [(str(org_id), "other_members")] and err["orgs"][0]["name"].startswith("Org-")
+        row = await w.row(uid)
+        assert row["is_active"] is True and row["deleted_at"] is None and await _org_exists(w, org_id)
+        assert (await w.sql("SELECT count(*) FROM org_members WHERE user_id = :u AND deleted_at IS NULL", u=uid)).scalar_one() == 1
+        assert (await w.login(email)).status_code == 200
+        # a second owner whose own ACCOUNT is not active does not count as an owner who stays: with an active teammate in it, the person is still the only owner
+        uid_g, email_g, org_g = await w.person(org=True, name="Owner With Ghost Co-owner", spare_owner=False)
+        await w.add_member(org_g, role="owner", name="Dead Account Owner", active=False)
+        await w.add_member(org_g, role="member", name="Active Teammate")
+        assert (await w.delete(await w.tokens(email_g))).status_code == 409
+        # handing the organization over (a second owner) lets the person go; the organization stays with its owner
+        await w.sql("UPDATE org_members SET role = 'owner' WHERE org_id = :o AND role = 'member' AND deleted_at IS NULL", o=org_id)
+        assert (await w.delete(await w.tokens(email))).status_code == 200
+        assert await _org_exists(w, org_id)
+        assert (await w.sql("SELECT count(*) FROM org_members WHERE org_id = :o AND role = 'owner' AND deleted_at IS NULL", o=org_id)).scalar_one() == 1
+        # an admin of a populated organization (not its owner): not blocked, the organization stays
+        admin_uid, admin_email, _o = await w.person(org=False, name="Plain Admin")
+        owner_uid, _oe, org5 = await w.person(org=True, name="Org Owner", spare_owner=False)
+        await w.sql("INSERT INTO org_members (id, org_id, user_id, role) VALUES (gen_random_uuid(), :o, :u, 'admin')", o=org5, u=admin_uid)
+        assert (await w.delete(await w.tokens(admin_email))).status_code == 200 and await _org_exists(w, org5)
+    finally:
+        await _close(engine, w)
+
+
+async def test_17_an_organization_with_a_subscription_that_would_close_with_the_account_blocks_it():
+    """AC4: the person is alone in an organization that has an active subscription → 409 (`reason` active_subscription: cancel it first); nothing closes, the person stays. Once the
+    subscription is not active the account goes and the organization closes with it. (A populated organization with a subscription is the other_members case, not this one.)"""
+    from app.models.org_subscription import OrgSubscription
+
+    engine, w = await _world()
+    try:
+        uid, email, org_id = await w.person(org=True, name="Pays Alone", spare_owner=False)
+        async with w.Session() as s:
+            s.add(OrgSubscription(id=uuid.uuid4(), org_id=org_id, tier="pro", status="active"))
+            await s.commit()
+        r = await w.delete(await w.tokens(email))
+        assert r.status_code == 409
+        assert [(o["id"], o["reason"]) for o in r.json()["error"]["orgs"]] == [(str(org_id), "active_subscription")]
+        assert (await w.row(uid))["is_active"] is True and await _org_exists(w, org_id)
+        await w.sql("UPDATE org_subscriptions SET status = 'canceled' WHERE org_id = :o", o=org_id)
+        assert (await w.delete(await w.tokens(email))).status_code == 200 and not await _org_exists(w, org_id)
+    finally:
+        await _close(engine, w)
+
+
+async def test_18_the_preview_names_what_would_close_and_what_would_block():
+    """The confirmation window shows it before «삭제 확인»: `closing` (they close with the account) and `blocked` (with the reason). Read only — nothing is changed."""
+    engine, w = await _world()
+    try:
+        uid, email, alone_org = await w.person(org=True, name="Previewer", spare_owner=False)
+        tokens = await w.tokens(email)
+
+        async def preview():
+            r = await w.client.get("/api/v2/account/delete-preview", headers={"Authorization": f"Bearer {tokens['access_token']}"})
+            assert r.status_code == 200, r.text
+            return r.json()
+
+        p = await preview()
+        assert [o["id"] for o in p["closing"]] == [str(alone_org)] and p["blocked"] == []
+        sub_uid, sub_email, sub_org = await w.person(org=True, name="Pays", spare_owner=False)
+        from app.models.org_subscription import OrgSubscription
+        async with w.Session() as s2:
+            s2.add(OrgSubscription(id=uuid.uuid4(), org_id=sub_org, tier="pro", status="active"))
+            await s2.commit()
+        r = await w.client.get("/api/v2/account/delete-preview", headers={"Authorization": f"Bearer {(await w.tokens(sub_email))['access_token']}"})
+        assert r.json()["closing"] == [] and [(o["id"], o["reason"]) for o in r.json()["blocked"]] == [(str(sub_org), "active_subscription")]
+        await w.add_member(alone_org, role="member", name="Joins")
+        p = await preview()
+        assert p["closing"] == [] and [(o["id"], o["reason"]) for o in p["blocked"]] == [(str(alone_org), "other_members")]
+        assert await _org_exists(w, alone_org) and (await w.row(uid))["is_active"] is True        # nothing changed by looking
+        # not signed in as a person with an account: an API key / unknown id gets nothing
+        r = await w.client.get("/api/v2/account/delete-preview")
+        assert r.status_code in (401, 403)
     finally:
         await _close(engine, w)
