@@ -169,6 +169,7 @@ async def test_lookup_members_by_ids_legacy_org_member_no_display_name_is_none(m
     user = MagicMock()
     user.id = USER_ID
     user.display_name = None
+    user.anonymized_at = None   # a live account (story #4752: a bare MagicMock attribute would read as «departed»)
 
     session = AsyncMock()
     # TeamMember.in_ → []  /  OrgMember.in_(missing) → [om]  /  User.in_(user_ids) → [user]
