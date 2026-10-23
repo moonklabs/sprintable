@@ -137,7 +137,6 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx::/api/api-keys/rotate',
   'app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx::/api/team-members/',
   'app/(authenticated)/rewards/page.tsx::/api/rewards',
-  'app/(authenticated)/settings/page.tsx::/api/account/delete',
   'app/(authenticated)/settings/page.tsx::/api/notification-preferences',
   'app/(authenticated)/settings/page.tsx::/api/notification-settings',
   'app/(authenticated)/settings/page.tsx::/api/projects',
