@@ -1102,6 +1102,17 @@ describe('[4734 B] one card per computer — one [End all sessions], « N of K �
     expect(signs()).toHaveLength(0);
   });
 
+  it('a marked press the server refuses because the Mac\'s app has not said it takes it (409 computer_press_unsupported) says to update the app on the Mac — not «try again», in both languages', async () => {
+    world.startable = two();
+    world.clock = counts(2, 2);
+    world.post = json({ error: { code: 'computer_press_unsupported' } }, 409);
+    await screen();
+    await press(byId('phone-sessions-end-all'));
+    expect(byId('phone-sessions-line')?.textContent).toBe(koMessages.desktop.phoneSessions.result.computerAppOld);
+    expect(koMessages.desktop.phoneSessions.result.computerAppOld).not.toContain('다시 눌러');
+    expect(enMessages.desktop.phoneSessions.result.computerAppOld).not.toMatch(/try again/i);
+  });
+
   it('a computer too big for one press says so (not «try again»), in both languages; a marked 422 / 409 computer_too_large alike', async () => {
     world.startable = two();
     world.clock = counts(2, 2);

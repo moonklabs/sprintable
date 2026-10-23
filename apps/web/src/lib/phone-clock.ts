@@ -151,6 +151,7 @@ export type PressOutcome =
   | { kind: 'biometric_required' }
   | { kind: 'no_screen_lock' }
   | { kind: 'app_too_old' } // the phone app's shell does not know the whole-computer press yet — nothing was signed or posted
+  | { kind: 'computer_app_old' } // story 4734 (K1): the Mac's app has not said it takes the press of the whole computer (409 computer_press_unsupported) — said as the MAC's app to update; the phone app's own shell is `app_too_old`
   | { kind: 'computer_too_big' } // story 4734 (B): a computer with more agents / setups than one press can name — pressing again would be refused the same way (not a «try again»)
   | { kind: 'key_invalidated' }
   | { kind: 'not_registered' }
@@ -290,6 +291,7 @@ async function post(pending: Pending, deps: PressDeps): Promise<PressOutcome> {
     if (res.status >= 500) return { kind: 'unknown', pending }; // any 5xx may have come after the command was made — followed, never redone
     const code = await codeOf(res);
     // the whole-computer press of a computer too big for one press (the grouping, or the list of agents past the cap — the server's 422): the same answer every time, so never «try again»
+    if (code === 'computer_press_unsupported') return { kind: 'computer_app_old' };
     if (code === 'computer_too_large' || (res.status === 422 && pending.body.computer === true)) return { kind: 'computer_too_big' };
     if (res.status === 403 || code === 'not_allowed_to_command') return { kind: 'not_allowed' };
     if (code === 'device_unreachable') return { kind: 'unreachable' };
