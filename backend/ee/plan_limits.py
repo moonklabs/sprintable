@@ -351,7 +351,7 @@ async def check_agent_add_limit(session: AsyncSession, org_id) -> None:
 async def _agent_limit_of_tier(session: AsyncSession, tier: str) -> int | None:
     """A tier's agent limit as `check_agent_add_limit` enforces it — None when nothing is enforced (an unlimited tier, an
     unknown tier or no offering row: the same fail-open as the check, so a read never shows a limit the check would not hold)."""
-    if tier not in KNOWN_TIERS:
+    if tier not in _KNOWN_TIERS:
         return None
     offering = await _get_offering_limits(session, tier)
     if offering is None:
