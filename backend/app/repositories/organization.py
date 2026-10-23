@@ -319,8 +319,8 @@ class OrganizationRepository:
         # the plan said nobody else is active here; someone may have joined since (an accepted invite does not take this lock) — look again, now that the row is held (codex 5189)
         joined = (await self.session.execute(
             text(
-                "SELECT count(*) FROM org_members x JOIN users xu ON xu.id = x.user_id"
-                " WHERE x.org_id = :o AND x.deleted_at IS NULL AND x.user_id <> :u AND xu.is_active"
+                "SELECT count(*) FROM org_members x"
+                " WHERE x.org_id = :o AND x.deleted_at IS NULL AND x.user_id <> :u"
             ),
             {"o": org_id, "u": user_id},
         )).scalar_one()

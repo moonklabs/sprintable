@@ -120,21 +120,37 @@ async def resolve_accounts(
 
 
 async def _plan_organizations(session: AsyncSession, uid: uuid.UUID, *, lock: bool) -> tuple[list[dict], list[dict]]:
-    """story #4752 AC4: the organizations that CLOSE with the person's account (nobody else active in them) and the ones that BLOCK the deletion — `reason`
+    """story #4752 AC4: «other people» are exactly the people the members screen shows: the live `org_members` rows of the organization (`GET /api/v2/org-members` — `deleted_at IS NULL`,
+    whatever the state of their own account; routers/org_members.py `list_org_members`, the screen the 409 sends the person to). A human who exists only as a `members` row (no live seat) is
+    not on that screen, so they are not counted (nobody to hand over to; closing deletes nothing a person can see); an account that is deactivated but still seated IS on it, so it counts
+    (closing would delete someone's visible data). Agents are `members` rows, not seats: not counted.
+    The organizations that CLOSE with the person's account (nobody else active in them) and the ones that BLOCK the deletion — `reason`
     `other_members` (the person is the only active owner and others are in it: hand it over) or `active_subscription` (a closing organization with a paid/in-flight subscription:
     cancel it first). `lock` locks the organization rows in id order (the deletion); the preview does not."""
     from app.repositories.organization import OrganizationRepository
 
+    if lock:
+        # The LOCK is a statement of its own and the COUNT a later one: under READ COMMITTED a statement that waits for a row lock still reads its other tables (org_members) as of the
+        # statement's start, so counting in the same statement would not see an owner who left while this one waited (two co-owners deleting at once both got through and the
+        # organization kept no owner — Kadir on 5189, pinned by test_20/21). Rows in id order, so two of these cannot deadlock.
+        await session.execute(
+            text(
+                "SELECT o.id FROM organizations o WHERE o.id IN ("
+                " SELECT om.org_id FROM org_members om WHERE om.user_id = CAST(:uid AS uuid) AND om.deleted_at IS NULL)"
+                " ORDER BY o.id FOR UPDATE OF o"
+            ),
+            {"uid": str(uid)},
+        )
     rows = (await session.execute(
         text(
             "SELECT o.id, o.name, om.role,"
-            " (SELECT count(*) FROM org_members x JOIN users xu ON xu.id = x.user_id"
-            "   WHERE x.org_id = o.id AND x.deleted_at IS NULL AND x.user_id <> CAST(:uid AS uuid) AND xu.is_active) AS other_members,"
-            " (SELECT count(*) FROM org_members x JOIN users xu ON xu.id = x.user_id"
-            "   WHERE x.org_id = o.id AND x.deleted_at IS NULL AND x.role = 'owner' AND x.user_id <> CAST(:uid AS uuid) AND xu.is_active) AS other_owners"
+            " (SELECT count(*) FROM org_members x"
+            "   WHERE x.org_id = o.id AND x.deleted_at IS NULL AND x.user_id <> CAST(:uid AS uuid)) AS other_members,"
+            " (SELECT count(*) FROM org_members x"
+            "   WHERE x.org_id = o.id AND x.deleted_at IS NULL AND x.role = 'owner' AND x.user_id <> CAST(:uid AS uuid)) AS other_owners"
             " FROM organizations o JOIN org_members om ON om.org_id = o.id"
             " WHERE om.user_id = CAST(:uid AS uuid) AND om.deleted_at IS NULL"
-            " ORDER BY o.id" + (" FOR UPDATE OF o" if lock else "")
+            " ORDER BY o.id"
         ),
         {"uid": str(uid)},
     )).all()

@@ -591,11 +591,18 @@ async def test_15_an_organization_with_nobody_else_in_it_closes_with_the_account
         assert await _org_exists(w, stranger_org)                                            # another person's organization is untouched
         assert (await w.sql("SELECT count(*) FROM deletion_audit_logs WHERE entity_id = :o AND actor_id = :u", o=org_id, u=uid)).scalar_one() == 1   # the closing is on the record, as an owner's delete is
         assert (await w.sql("SELECT count(*) FROM org_members WHERE org_id = :o AND deleted_at IS NULL", o=org_id)).scalar_one() == 0
-        # ② a co-owner whose ACCOUNT is not active, and one whose SEAT was closed, are nobody: still alone
+        # ② nobody the members screen shows: a co-member whose SEAT was closed is not on it, and a human who exists only as a `members` row (no live seat) is not on it either → still alone, closes
         uid2, email2, org2 = await w.person(org=True, name="Alone With Ghosts", spare_owner=False)
-        await w.add_member(org2, role="owner", name="Dead Account", active=False)
+        await w.add_member(org2, role="owner", name="Removed Owner Seat", removed=True)
         await w.add_member(org2, role="member", name="Removed Seat", removed=True)
+        ghost = await w.add_member(org2, role="member", name="Ghost Row Only")
+        await w.sql("DELETE FROM org_members WHERE org_id = :o AND user_id = :u", o=org2, u=ghost)    # only the `members` row is left: not on the screen
+        assert (await w.sql("SELECT count(*) FROM members WHERE org_id = :o AND user_id = :u AND type = 'human'", o=org2, u=ghost)).scalar_one() == 1
         assert (await w.delete(await w.tokens(email2))).status_code == 200 and not await _org_exists(w, org2)
+        # ②b a co-member whose ACCOUNT is deactivated but who still has a live seat IS on the members screen: someone is there, so the organization is NOT deleted with the account
+        uid2b, email2b, org2b = await w.person(org=True, name="Not Alone", spare_owner=False)
+        await w.add_member(org2b, role="owner", name="Deactivated But Seated", active=False)
+        assert (await w.delete(await w.tokens(email2b))).status_code == 200 and await _org_exists(w, org2b)
         # ③ alone, but only an admin there (the owner's seat was closed): the role does not matter
         admin_uid, admin_email, _o = await w.person(org=False, name="Lone Admin")
         _x, _xe, org3 = await w.person(org=True, name="Gone Owner", spare_owner=False)
@@ -622,11 +629,23 @@ async def test_16_the_only_owner_of_an_organization_that_has_other_people_cannot
         assert row["is_active"] is True and row["deleted_at"] is None and await _org_exists(w, org_id)
         assert (await w.sql("SELECT count(*) FROM org_members WHERE user_id = :u AND deleted_at IS NULL", u=uid)).scalar_one() == 1
         assert (await w.login(email)).status_code == 200
-        # a second owner whose own ACCOUNT is not active does not count as an owner who stays: with an active teammate in it, the person is still the only owner
-        uid_g, email_g, org_g = await w.person(org=True, name="Owner With Ghost Co-owner", spare_owner=False)
-        await w.add_member(org_g, role="owner", name="Dead Account Owner", active=False)
+        # a second owner whose SEAT was closed is not on the members screen and is not an owner who stays: with a teammate in it, the person is still the only owner
+        uid_g, email_g, org_g = await w.person(org=True, name="Owner With A Gone Co-owner", spare_owner=False)
+        await w.add_member(org_g, role="owner", name="Removed Owner", removed=True)
         await w.add_member(org_g, role="member", name="Active Teammate")
         assert (await w.delete(await w.tokens(email_g))).status_code == 409
+        # a teammate who is only a `members` row (not on the screen) is nobody to hand over to → alone, closes (not a dead end «hand it over» with no one visible)
+        uid_h, email_h, org_h = await w.person(org=True, name="Owner With A Ghost Row", spare_owner=False)
+        ghost = await w.add_member(org_h, role="member", name="Ghost Row")
+        await w.sql("DELETE FROM org_members WHERE org_id = :o AND user_id = :u", o=org_h, u=ghost)
+        assert (await w.delete(await w.tokens(email_h))).status_code == 200 and not await _org_exists(w, org_h)
+        # K5 (Kadir): a plain MEMBER of an ownerless but populated organization is not blocked — only an owner who is the last owner is
+        member_uid, member_email, _o = await w.person(org=False, name="Plain Member")
+        _x2, _xe2, org_k5 = await w.person(org=True, name="Owner Who Left", spare_owner=False)
+        await w.sql("UPDATE org_members SET deleted_at = now() WHERE org_id = :o AND role = 'owner'", o=org_k5)
+        await w.sql("INSERT INTO org_members (id, org_id, user_id, role) VALUES (gen_random_uuid(), :o, :u, 'member')", o=org_k5, u=member_uid)
+        await w.add_member(org_k5, role="admin", name="Another Visible Person")
+        assert (await w.delete(await w.tokens(member_email))).status_code == 200 and await _org_exists(w, org_k5)
         # handing the organization over (a second owner) lets the person go; the organization stays with its owner
         await w.sql("UPDATE org_members SET role = 'owner' WHERE org_id = :o AND role = 'member' AND deleted_at IS NULL", o=org_id)
         assert (await w.delete(await w.tokens(email))).status_code == 200
@@ -709,5 +728,66 @@ async def test_19_someone_who_joined_after_the_plan_stops_the_closing_of_an_orga
             await s.rollback()
         assert res == {"ok": False, "reason": "members_joined"}, res
         assert await _org_exists(w, org_id)
+        # a joiner whose account is deactivated but who has a live seat is on the members screen too → also stops the closing
+        uid2, _e2, org2 = await w.person(org=True, name="Alone Then Joined 2", spare_owner=False)
+        await w.add_member(org2, role="member", name="Joined Late, Deactivated", active=False)
+        async with w.Session() as s:
+            res2 = await OrganizationRepository(s).delete_for_account_closure(org2, uid2)
+            await s.rollback()
+        assert res2 == {"ok": False, "reason": "members_joined"}, res2
+    finally:
+        await _close(engine, w)
+
+
+async def _delete_while_the_other_owner_leaves(w, *, with_member: bool):
+    """Kadir's concurrent probe on 5189, pinned: owner B presses «delete account» while owner A's own deletion holds the organization row; A's departure commits while B waits for the lock.
+    Two connections; B's request is held at the lock (seen in pg_stat_activity) before A's seat is closed and the lock is released. Returns (B's status, B's body, the organization)."""
+    import asyncio
+    from sqlalchemy import text
+
+    a_uid, _a_email, org_id = await w.person(org=True, name="Owner A", spare_owner=False)
+    b_uid = await w.add_member(org_id, role="owner", name="Owner B")
+    async with w.Session() as s:
+        b_email = (await s.execute(text("SELECT email FROM users WHERE id = :u"), {"u": b_uid})).scalar_one()
+    if with_member:
+        await w.add_member(org_id, role="member", name="Teammate")
+    b_tokens = await w.tokens(b_email)
+    async with w.Session() as holder:                                                    # A's deletion, in flight: holds the organization row
+        await holder.execute(text("SELECT id FROM organizations WHERE id = :o FOR UPDATE"), {"o": org_id})
+        task = asyncio.create_task(w.delete(b_tokens))
+        for _ in range(100):                                                             # B is waiting for that row (the lock), not finished
+            await asyncio.sleep(0.1)
+            waiting = (await w.sql("SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query ILIKE '%FOR UPDATE%organizations%'")).scalar_one()
+            if waiting or task.done():
+                break
+        assert not task.done(), "B finished without waiting for A's lock — the organization row is not locked first"
+        await holder.execute(text("UPDATE org_members SET deleted_at = now() WHERE user_id = :u AND org_id = :o"), {"u": a_uid, "o": org_id})   # A is gone…
+        await holder.commit()                                                            # …and the lock is released
+    r = await asyncio.wait_for(task, timeout=20)
+    return r.status_code, r.json(), org_id
+
+
+async def test_20_two_owners_deleting_at_once_one_of_them_finds_themself_the_only_owner_left():
+    """Kadir on 5189 (PO 5788): the locking statement and the counting sub-queries were one statement, so after waiting for the lock the counts still came from the statement's
+    first snapshot and did not see the owner who left meanwhile → both got through and the organization kept no owner. Lock first (its own statement), count after (a fresh one)."""
+    engine, w = await _world()
+    try:
+        # (a) two owners and a teammate: the second owner is the only owner left of a populated organization → 409, and the organization is untouched
+        status, body, org_id = await _delete_while_the_other_owner_leaves(w, with_member=True)
+        assert status == 409, (status, body)
+        assert body["error"]["code"] == "ORG_BLOCKS_ACCOUNT_DELETE" and [o["reason"] for o in body["error"]["orgs"]] == ["other_members"]
+        assert await _org_exists(w, org_id)
+        assert (await w.sql("SELECT count(*) FROM org_members WHERE org_id = :o AND role = 'owner' AND deleted_at IS NULL", o=org_id)).scalar_one() == 1   # B is still the owner
+    finally:
+        await _close(engine, w)
+
+
+async def test_21_two_owners_only_the_second_to_delete_closes_the_organization_with_the_account():
+    """The same race with nobody else in the organization: the second owner is then alone → the organization closes with the account (no ownerless empty shell)."""
+    engine, w = await _world()
+    try:
+        status, body, org_id = await _delete_while_the_other_owner_leaves(w, with_member=False)
+        assert status == 200, (status, body)
+        assert not await _org_exists(w, org_id)
     finally:
         await _close(engine, w)

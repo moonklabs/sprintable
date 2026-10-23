@@ -142,12 +142,13 @@ async def test_account_delete_updates_org_and_team_members():
         # + story #4630: the grace window of tokens a rotation just revoked closed too
         # + story #4752: the push devices closed (K8) + the per-user cut-off for every access token already issued
         # + story #4752 AC4: the organizations the account is the only owner of are looked up (and locked) right after the account row = 8
-        assert session.execute.call_count == 8
-        assert "organizations" in str(session.execute.call_args_list[1].args[0]) and "FOR UPDATE OF o" in str(session.execute.call_args_list[1].args[0])
+        assert session.execute.call_count == 9
+        assert "organizations" in str(session.execute.call_args_list[1].args[0]) and "FOR UPDATE OF o" in str(session.execute.call_args_list[1].args[0])   # the lock …
+        assert "other_owners" in str(session.execute.call_args_list[2].args[0]) and "FOR UPDATE" not in str(session.execute.call_args_list[2].args[0])    # … and the count, a later statement
         assert "FROM users" in str(session.execute.call_args_list[0].args[0])
-        revoke = str(session.execute.call_args_list[5].args[0])
+        revoke = str(session.execute.call_args_list[6].args[0])
         assert "UPDATE refresh_tokens" in revoke and "revoked_at" in revoke
-        window = str(session.execute.call_args_list[6].args[0])
+        window = str(session.execute.call_args_list[7].args[0])
         assert "UPDATE refresh_tokens" in window and "expires_at" in window
     finally:
         app.dependency_overrides.clear()
