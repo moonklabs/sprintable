@@ -35,6 +35,8 @@ interface Participant {
   // 인지 가르는 비트(conversations.py `_fetch_conversation_participants`가 채움). optional
   // — BE 기본값(True)과 짝 맞춰 필드 자체가 없으면 "실존"으로 읽는다(participantDisplayLabel).
   resolved?: boolean;
+  // story #4752 — the account was deleted and anonymized (name stays null): shown as «탈퇴한 사용자 / Deleted user» by participantDisplayLabel.
+  departed?: boolean;
 }
 
 interface ConversationMeta {

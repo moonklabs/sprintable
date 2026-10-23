@@ -215,7 +215,7 @@ async def test_lookup_members_by_ids_anchor_human_no_display_name_is_none(monkey
         if "email" in cols:
             return _sql_result(rows=[(USER_ID, NO_EMAIL_LEAK_SENTINEL)])  # email NOT NULL(실 제약) — 항상 값 있음.
         assert "display_name" in cols, f"예상 밖 컬럼 select: {cols}"
-        return _sql_result(rows=[(USER_ID, None)])  # 이 픽스처 사용자는 display_name 미설정.
+        return _sql_result(rows=[(USER_ID, None, None)])  # 이 픽스처 사용자는 display_name 미설정(셋째 칸 = anonymized_at, story #4752).
 
     session = AsyncMock()
     session.execute = AsyncMock(side_effect=_execute)

@@ -20,8 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 #: the days between «delete» and the purge (the copy says 30; the deletion endpoint and this job read the same number)
 ACCOUNT_PURGE_GRACE_DAYS = 30
 PURGE_BATCH = 200
-#: what stands for a person's name once it is gone (shown where a member's name was)
-DELETED_MEMBER_NAME = "탈퇴한 사용자"
+# (no name text here: the server keeps a marker, not a sentence — `ResolvedMember.departed` — and each screen words «탈퇴한 사용자 / Deleted user» in its own locale. story #3779)
 #: an address nobody can receive at (RFC 2606 `.invalid`); the unique constraint is kept by the id plus a random part, so nobody can register it beforehand to make the purge fail (codex 1)
 _DELETED_EMAIL_DOMAIN = "deleted.invalid"
 
@@ -51,8 +50,8 @@ async def purge_deleted_accounts(session: AsyncSession, *, now: datetime | None 
         {**arg, "now": now},
     )
     await session.execute(
-        text("UPDATE members SET name = :label, avatar_url = NULL, handle = NULL WHERE type = 'human' AND user_id = ANY(CAST(:ids AS uuid[]))"),
-        {**arg, "label": DELETED_MEMBER_NAME},
+        text("UPDATE members SET name = NULL, avatar_url = NULL, handle = NULL WHERE type = 'human' AND user_id = ANY(CAST(:ids AS uuid[]))"),
+        arg,
     )
     await session.execute(text("UPDATE auth_migrations SET firebase_uid = NULL WHERE user_id = ANY(CAST(:ids AS uuid[]))"), arg)  # the row stays: its `auth_valid_after` keeps the old access tokens dead
     # the device token is personal data: the push rows of the person, by user and by the member rows not backfilled (before the members are touched — they stay, only renamed)

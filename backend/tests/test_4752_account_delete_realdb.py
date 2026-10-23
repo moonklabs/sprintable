@@ -249,7 +249,7 @@ async def test_05_after_the_grace_period_the_personal_data_is_anonymized_and_wha
         assert row["google_id"] is None and row["totp_secret"] is None and row["totp_enabled"] is False and row["signup_utm_source"] is None
         assert row["is_active"] is False and row["anonymized_at"] is not None and row["deleted_at"] is not None
         mem = (await w.sql("SELECT name, avatar_url, handle FROM members WHERE user_id = :u AND type = 'human'", u=uid)).one()
-        assert tuple(mem) == ("탈퇴한 사용자", None, None)
+        assert tuple(mem) == (None, None, None)   # no name text on the server: a marker (`ResolvedMember.departed`) and the screens word it (story #3779)
         assert (await w.sql("SELECT count(*) FROM auth_identities WHERE user_id = :u", u=uid)).scalar_one() == 0
         assert (await w.sql("SELECT count(*) FROM refresh_tokens WHERE user_id = :u", u=uid)).scalar_one() == 0
         assert (await w.sql("SELECT count(*) FROM users WHERE id = :u", u=uid)).scalar_one() == 1      # the row stays: what the person wrote points at its id
@@ -436,3 +436,72 @@ async def test_11_after_the_deletion_no_push_goes_to_the_persons_device_and_the_
         assert (await w.sql("SELECT count(*) FROM push_devices WHERE expo_push_token IN (:a, :b)", a=t_other, b=t_closed)).scalar_one() == 2
     finally:
         await _close(engine, w)
+
+
+async def test_12_an_anonymized_person_reaches_the_screens_as_a_marker_not_as_a_sentence():
+    """story #3779 (the guard on 5187): the server carries no «탈퇴한 사용자» text. After the purge the member's name is NULL and the resolver — both of its branches —
+    answers `departed=True` with `name=None` (a real, resolved member); a live person stays `departed=False`, and the person is `departed` only after the purge (not at the deletion)."""
+    from app.core.config import settings
+    from app.services.member_resolver import lookup_members_by_ids
+
+    engine, w = await _world()
+    try:
+        uid, email, org_id = await w.person(org=True, name="Leaving Person")
+        other, _e, other_org = await w.person(org=True, name="Staying Person")
+        mid = (await w.sql("SELECT id FROM members WHERE user_id = :u AND type = 'human'", u=uid)).scalar_one()
+        omid = (await w.sql("SELECT id FROM members WHERE user_id = :u AND type = 'human'", u=other)).scalar_one()
+
+        async def look(shadow: bool):
+            old = settings.member_ssot_resolver_shadow
+            settings.member_ssot_resolver_shadow = shadow
+            try:
+                async with w.Session() as s:
+                    return await lookup_members_by_ids({mid, omid}, s)
+            finally:
+                settings.member_ssot_resolver_shadow = old
+
+        for shadow in (False, True):
+            got = await look(shadow)
+            assert (got[mid].departed, got[omid].departed) == (False, False)
+        assert (await w.delete(await w.tokens(email))).status_code == 200
+        await w.sql("UPDATE users SET deleted_at = now() - interval '31 days' WHERE id = :u", u=uid)
+        assert await _purge(w) >= 1
+        for shadow in (False, True):
+            got = await look(shadow)
+            assert got[mid].departed is True and got[mid].name is None and got[mid].resolved is True, shadow
+            assert got[omid].departed is False and got[omid].name == "Staying Person", shadow
+    finally:
+        await _close(engine, w)
+
+
+async def test_13_the_participant_payload_carries_the_departed_marker():
+    """story #3779/#4752: the chat participants payload (`_fetch_conversation_participants`) hands the resolver's `departed` to the screens — they word «탈퇴한 사용자 / Deleted user» in their own locale."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from app.routers.conversations import _fetch_conversation_participants
+    from app.services.member_resolver import ResolvedMember
+
+    conv, gone, here = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    org = uuid.uuid4()
+    resolved = {
+        gone: ResolvedMember(id=gone, user_id=uuid.uuid4(), name=None, type="human", role="member", org_id=org, departed=True),
+        here: ResolvedMember(id=here, user_id=uuid.uuid4(), name="Here", type="human", role="member", org_id=org),
+    }
+
+    class Db:
+        calls = 0
+
+        async def execute(self, _stmt):
+            Db.calls += 1
+            rows = [SimpleNamespace(conversation_id=conv, member_id=gone), SimpleNamespace(conversation_id=conv, member_id=here)] if Db.calls == 1 else []
+            return SimpleNamespace(all=lambda: rows)
+
+    async def fake_lookup(ids, _db):
+        return resolved
+
+    with patch("app.routers.conversations.lookup_members_by_ids", fake_lookup):
+        out = (await _fetch_conversation_participants([conv], Db()))[conv]
+    by_id = {p["member_id"]: p for p in out}
+    assert by_id[str(gone)]["departed"] is True and by_id[str(gone)]["name"] is None and by_id[str(gone)]["resolved"] is True
+    assert by_id[str(here)]["departed"] is False
