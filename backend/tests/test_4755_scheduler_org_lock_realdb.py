@@ -295,11 +295,11 @@ async def test_03_a_renewal_charged_while_the_organization_goes_is_refunded_and_
     try:
         async with maker() as s:
             await _seed_offering(s, tier="team", monthly_price_minor=12000)
-        gone_org, live_org = await _seed_org(maker), await _seed_org(maker)
+        gone_org, live_org, decoy_org = await _seed_org(maker), await _seed_org(maker), await _seed_org(maker)
         orders = {gone_org: f"renewal:4755-g{uuid.uuid4().hex[:6]}", live_org: f"renewal:4755-l{uuid.uuid4().hex[:6]}"}
         async with maker() as s:
             offering = (await s.execute(text("SELECT id FROM offering_versions WHERE tier = 'team' AND currency = 'krw' AND effective_to IS NULL LIMIT 1"))).scalar_one()
-            for o in (gone_org, live_org):
+            for o in (gone_org, live_org, decoy_org):                      # (the decoy: a due subscription of another organization, as the shared database of a CI shard has them left by other tests)
                 await s.execute(text("INSERT INTO org_subscriptions (id, org_id, tier, billing_cycle, status, offering_version_id, current_period_end) VALUES (gen_random_uuid(), :o, 'team', 'monthly', 'active', :v, now() - interval '1 day')"), {"o": o, "v": offering})
             await s.commit()
         period_before = await _scalar(maker, "SELECT current_period_end FROM org_subscriptions WHERE org_id = :o", o=gone_org)
@@ -320,7 +320,7 @@ async def test_03_a_renewal_charged_while_the_organization_goes_is_refunded_and_
 
         monkeypatch.setattr(bs, "compute_charge_amount", fake_amount)
         monkeypatch.setattr(bs, "charge_org", fake_charge)
-        monkeypatch.setattr(bs, "_renewal_order_id", lambda org_id, offering_id, period_end: orders[org_id])
+        monkeypatch.setattr(bs, "_renewal_order_id", lambda org_id, offering_id, period_end: orders.get(org_id, f"renewal:other-{org_id}"))      # (asked for EVERY due subscription of the shared database, before the amount is computed)
         async with maker() as s:
             await bs.trigger_due_charges(s)
         # the vanished organization: refunded once with the order's key, period untouched, alerted
@@ -332,7 +332,7 @@ async def test_03_a_renewal_charged_while_the_organization_goes_is_refunded_and_
         assert await _scalar(maker, "SELECT current_period_end > now() FROM org_subscriptions WHERE org_id = :o", o=live_org) is True
         assert await _scalar(maker, "SELECT count(*) FROM billing_payment_attempts WHERE order_id = :o", o=orders[live_org]) == 0
     finally:
-        await _cleanup_money(maker, gone_org, live_org)
+        await _cleanup_money(maker, gone_org, live_org, decoy_org)
         await engine.dispose()
 
 
