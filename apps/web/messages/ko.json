@@ -1999,7 +1999,7 @@
     "deleteOwnedOrgsTitle": "아래 조직을 먼저 처리해야 계정을 삭제할 수 있어요. 해당 조직으로 전환한 뒤 처리해 주세요.",
     "deleteOwnedOrgWithOthers": "{name} · 다른 구성원이 있어요 — 다른 소유자를 정하거나 조직을 삭제해 주세요",
     "deleteOrgSubscription": "{name} · 활성 구독이 있어요 — 먼저 구독을 취소해 주세요",
-    "deleteClosingOrgs": "함께 삭제되는 조직: {names} — 조직의 프로젝트와 데이터도 함께 제거돼요",
+    "deleteClosingOrgs": "함께 삭제되는 조직: {names} — 조직의 에이전트 · 프로젝트 · 데이터도 함께 제거돼요",
     "deleteGoMembers": "구성원 화면으로",
     "deleteGoBilling": "결제 관리로",
     "confirmDelete": "삭제 확인",

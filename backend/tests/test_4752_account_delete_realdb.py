@@ -104,6 +104,16 @@ class _World:
             await s.commit()
         return uid
 
+    async def add_agent(self, org_id: uuid.UUID, name: str = "Bot Agent") -> uuid.UUID:
+        """An agent member of the organization (a `members` row of type agent — org_members is human-only, so it is nobody's «other person»)."""
+        from app.models.member import Member
+
+        mid = uuid.uuid4()
+        async with self.Session() as s:
+            s.add(Member(id=mid, org_id=org_id, type="agent", name=name))
+            await s.commit()
+        return mid
+
     async def login(self, email: str):
         return await self.client.post("/api/v2/auth/token", json={"email": email, "password": _PASSWORD})
 
@@ -572,10 +582,12 @@ async def test_15_an_organization_with_nobody_else_in_it_closes_with_the_account
     try:
         # ① alone as the owner
         uid, email, org_id = await w.person(org=True, name="Alone Owner", spare_owner=False)
+        agent_id = await w.add_agent(org_id)                                                 # an agent is not «another person»: it neither takes the organization over nor owns it
         stranger, _e, stranger_org = await w.person(org=True, name="Someone Else", spare_owner=False)
         r = await w.delete(await w.tokens(email))
         assert r.status_code == 200, r.text
         assert not await _org_exists(w, org_id)                                              # the organization closed with the account
+        assert (await w.sql("SELECT count(*) FROM members WHERE id = :m", m=agent_id)).scalar_one() == 0   # …and its agent went with it
         assert await _org_exists(w, stranger_org)                                            # another person's organization is untouched
         assert (await w.sql("SELECT count(*) FROM deletion_audit_logs WHERE entity_id = :o AND actor_id = :u", o=org_id, u=uid)).scalar_one() == 1   # the closing is on the record, as an owner's delete is
         assert (await w.sql("SELECT count(*) FROM org_members WHERE org_id = :o AND deleted_at IS NULL", o=org_id)).scalar_one() == 0
@@ -655,6 +667,7 @@ async def test_18_the_preview_names_what_would_close_and_what_would_block():
     engine, w = await _world()
     try:
         uid, email, alone_org = await w.person(org=True, name="Previewer", spare_owner=False)
+        await w.add_agent(alone_org)                                                         # one person + an agent: the agent does not make it «populated»
         tokens = await w.tokens(email)
 
         async def preview():

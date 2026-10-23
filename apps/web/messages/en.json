@@ -1999,7 +1999,7 @@
     "deleteOwnedOrgsTitle": "Deal with the organizations below before you delete your account. Switch to each one to do it.",
     "deleteOwnedOrgWithOthers": "{name} · other people are in it — name another owner or delete the organization",
     "deleteOrgSubscription": "{name} · has an active subscription — cancel it first",
-    "deleteClosingOrgs": "Organizations deleted with it: {names} — their projects and data are removed too",
+    "deleteClosingOrgs": "Organizations deleted with it: {names} — their agents, projects and data are removed too",
     "deleteGoMembers": "Go to members",
     "deleteGoBilling": "Go to billing",
     "confirmDelete": "Confirm Delete",

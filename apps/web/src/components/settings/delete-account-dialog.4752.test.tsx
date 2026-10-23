@@ -122,9 +122,15 @@ describe('[SID:4752] the delete-account confirmation says what happened', () => 
   it('⭐the window shows what is deleted with the account before «삭제 확인», and the button stays usable', async () => {
     previewOf([{ id: 'o1', name: '혼자 쓰는 조직' }, { id: 'o2', name: '또 하나' }], []);
     await mount();
-    expect(document.body.querySelector('[data-testid="delete-account-closing-orgs"]')?.textContent).toBe('함께 삭제되는 조직: 혼자 쓰는 조직, 또 하나 — 조직의 프로젝트와 데이터도 함께 제거돼요');
+    expect(document.body.querySelector('[data-testid="delete-account-closing-orgs"]')?.textContent).toBe('함께 삭제되는 조직: 혼자 쓰는 조직, 또 하나 — 조직의 에이전트 · 프로젝트 · 데이터도 함께 제거돼요');
     expect(document.body.querySelector('[data-testid="delete-account-blocking-orgs"]')).toBeNull();
     expect(confirmButton().disabled).toBe(false);
+  });
+
+  it('⭐the English line names the agents too (what a person deleting the account must know first: their agents go with the organization)', async () => {
+    previewOf([{ id: 'o1', name: 'Solo Org' }], []);
+    await mount('en');
+    expect(document.body.querySelector('[data-testid="delete-account-closing-orgs"]')?.textContent).toBe('Organizations deleted with it: Solo Org — their agents, projects and data are removed too');
   });
 
   it('⭐a populated organization where the person is the only owner blocks: named, with the way to the members screen, and «삭제 확인» is off', async () => {
