@@ -9,6 +9,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import {
   isEchoOfSentHere, isOwnMessage, newClientNonce, sentMessageFromAnswer, useChatSse,
 } from './use-chat-sse';
+import { RealtimeProvider } from '@/components/realtime-provider';
 import { useChatUnreadTotal } from './use-chat-unread-total';
 
 class FakeEventSource {
@@ -52,9 +53,13 @@ const msg = (id: string, extra: Record<string, unknown> = {}) => ({
   id, conversation_id: 'c1', content: `body ${id}`, created_at: '2026-09-30T20:00:00Z', sender: { id: ME, name: '나', type: 'human' }, ...extra,
 });
 
-function ChatHarness({ onMessage }: { onMessage: (p: Record<string, unknown>) => void }) {
-  useChatSse({ currentTeamMemberId: ME, onConversationMessage: onMessage });
+function ChatInner({ onMessage }: { onMessage: (p: Record<string, unknown>) => void }) {
+  useChatSse({ onConversationMessage: onMessage });
   return null;
+}
+// story #4698 — 훅은 스트림을 열지 않는다: 스트림은 RealtimeProvider(멀티플렉서)의 것이라 Provider 안에서 돌린다.
+function ChatHarness({ onMessage }: { onMessage: (p: Record<string, unknown>) => void }) {
+  return <RealtimeProvider currentTeamMemberId={ME}><ChatInner onMessage={onMessage} /></RealtimeProvider>;
 }
 
 describe('useChatSse — this tab drops its own echo (#4440)', () => {
@@ -98,7 +103,7 @@ describe('useChatUnreadTotal — a message of mine is never unread (#4440)', () 
       return <span data-testid="total">{useChatUnreadTotal(ME)}</span>;
     }
     const total = () => Number(container.querySelector('[data-testid="total"]')?.textContent);
-    await act(async () => { root.render(<Totals />); await Promise.resolve(); });
+    await act(async () => { root.render(<RealtimeProvider currentTeamMemberId={ME}><Totals /></RealtimeProvider>); await Promise.resolve(); });
     const es = FakeEventSource.instances[FakeEventSource.instances.length - 1]!;
     const base = total();
     act(() => { es.emit('conversation.message_created', msg('mine-1', { client_nonce: 'from-the-desktop-app' })); });
@@ -112,7 +117,7 @@ describe('useChatUnreadTotal — a message of mine is never unread (#4440)', () 
 describe('useChatSse — onSentHere (#4442)', () => {
   it('a send answer from this tab reaches every onSentHere subscriber in the tab (the lists), with the message', async () => {
     const seen: Record<string, unknown>[] = [];
-    function Lists() { useChatSse({ currentTeamMemberId: ME, onSentHere: (p) => seen.push(p) }); return null; }
+    function Lists() { useChatSse({ onSentHere: (p) => seen.push(p) }); return null; }
     await act(async () => { root.render(<Lists />); });
     sentMessageFromAnswer({ data: msg('m-sent-here') });
     expect(seen.map((p) => p.id)).toEqual(['m-sent-here']);

@@ -67,5 +67,22 @@
     "alertStrategy": {"autoClose": "1800s"},
     "notificationChannels": [],
     "severity": "WARNING"
+  },
+  {
+    "displayName": "Sprintable — Expo push credentials error (dev · prod)",
+    "documentation": {
+      "mimeType": "text/markdown",
+      "content": "story 4694. The backend logged `expo_push_credentials_error`: Expo refused a push ticket with a credentials-class error (`InvalidCredentials` · `MismatchSenderId`) — the push credentials of the app's Firebase / FCM key, not the recipient. **Every push of that app is refused until it is fixed** (the 10-08~10-15 week: the dev Firebase key's restriction vs the .dev re-signed app). Look at the line's `codes` · `event_type` · `devices` (ids and counts only), then the key's Android restriction in the project's API keys. Receipts are another line (`expo receipts:`)."
+    },
+    "combiner": "OR",
+    "conditions": [{
+      "displayName": "expo_push_credentials_error logged by sprintable-backend-dev or sprintable-backend-prod",
+      "conditionMatchedLog": {
+        "filter": "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=~\"^sprintable-backend-(dev|prod)$\" AND jsonPayload.event=\"expo_push_credentials_error\""
+      }
+    }],
+    "alertStrategy": {"notificationRateLimit": {"period": "3600s"}, "autoClose": "86400s"},
+    "notificationChannels": [],
+    "severity": "ERROR"
   }
 ]

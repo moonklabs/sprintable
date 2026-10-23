@@ -42,6 +42,14 @@ function makeRequest(path: string, cookies: Record<string, string> = {}): NextRe
   return req;
 }
 
+function makeRequestWithHeaders(path: string, headers: Record<string, string>, cookies: Record<string, string> = {}): NextRequest {
+  const req = new NextRequest(`https://app.example.com${path}`, { headers });
+  for (const [name, value] of Object.entries(cookies)) {
+    req.cookies.set(name, value);
+  }
+  return req;
+}
+
 describe('proxy', () => {
   beforeEach(() => {
     process.env['JWT_SECRET'] = JWT_SECRET;
@@ -132,6 +140,12 @@ describe('proxy', () => {
     // 요청이 정상 케이스 — /auth/native와 동일 결함 클래스.
     const response = await middleware(makeRequest('/native/oauth-return?code=test-code'));
     expect(response.status).toBe(200);
+  });
+
+  it('story 4712: /native/continue reaches its page with no cookie (the page sends a signed-out person to the plain sign-in, not to the «session expired» one)', async () => {
+    const response = await middleware(makeRequest('/native/continue?code_challenge=x'));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('location')).toBeNull();
   });
 
   it('lets the session-less push unregister call through (story #4397 — the app calls it after logout · with an expired session)', async () => {
@@ -922,6 +936,110 @@ describe('proxy — legacy /docs bare-URL redirect (story a539c649 S2)', () => {
   });
 });
 
+describe('proxy — a person with no organization yet is sent to the onboarding, not left on a 404 (story 4714 AC6)', () => {
+  beforeEach(() => {
+    process.env['JWT_SECRET'] = JWT_SECRET;
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://localhost:8000';
+    mockFetch.mockReset();
+  });
+  afterEach(() => {
+    delete process.env['JWT_SECRET'];
+  });
+
+  // the server's own answer for an account that exists but has no organization (`me.py`): 404 · NOT_FOUND · a machine-readable `reason`
+  const meNoMember = (message = 'Member not found') => new Response(JSON.stringify({ data: null, error: { code: 'NOT_FOUND', message, reason: 'no_membership' }, meta: null }), { status: 404 });
+  const withMe = (answer: () => Response | Promise<Response>) => mockFetch.mockImplementation((url: string) => {
+    if (url.includes('/api/v2/me')) return Promise.resolve(answer());
+    return Promise.resolve({ ok: false, status: 404 });
+  });
+
+  it('/glance with no organization → 307 /onboarding (no-store) — the phone app opens /glance, a new person was left on a 404', async () => {
+    const token = await makeAccessToken();
+    withMe(() => meNoMember());
+    const res = await middleware(makeRequest('/glance', { sp_at: token }));
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe('https://app.example.com/onboarding');
+    expect(res.headers.get('cache-control')).toBe('no-store'); // the destination depends on the session: never cached
+  });
+
+  it('the query a link carried is dropped (a person with no organization has no story or project to move to)', async () => {
+    const token = await makeAccessToken();
+    withMe(() => meNoMember());
+    const res = await middleware(makeRequest('/glance?story=abc&p=11111111-2222-4333-8444-555555555555', { sp_at: token }));
+    expect(res.headers.get('location')).toBe('https://app.example.com/onboarding');
+  });
+
+  it('every flat address of the same table gets the same answer, not only /glance (one place)', async () => {
+    const token = await makeAccessToken();
+    withMe(() => meNoMember());
+    for (const path of ['/docs/my-doc', '/docs', '/glance']) {
+      const res = await middleware(makeRequest(path, { sp_at: token }));
+      expect([path, res.status, res.headers.get('location')]).toEqual([path, 307, 'https://app.example.com/onboarding']);
+    }
+  });
+
+  it('the words of the message do not matter: reworded or empty, the `reason` still sends a no-organization person to the onboarding', async () => {
+    const token = await makeAccessToken();
+    for (const message of ['Member not found', 'No membership yet', '', '멤버를 찾을 수 없어요']) {
+      withMe(() => meNoMember(message));
+      const res = await middleware(makeRequest('/glance', { sp_at: token }));
+      expect([message, res.status, res.headers.get('location')]).toEqual([message, 307, 'https://app.example.com/onboarding']);
+    }
+  });
+
+  it('a person of ANOTHER organization is never sent to «create an organization»: membership_elsewhere passes through, whatever the words (Kadir 5155 lens)', async () => {
+    const token = await makeAccessToken({ orgId: 'org-x' });
+    for (const message of ['Member not found', 'No membership yet']) {
+      withMe(() => new Response(JSON.stringify({ data: null, error: { code: 'NOT_FOUND', message, reason: 'membership_elsewhere' }, meta: null }), { status: 404 }));
+      const res = await middleware(makeRequest('/glance', { sp_at: token }));
+      expect([message, res.status, res.headers.get('location')]).toEqual([message, 200, null]); // no redirect to the onboarding: the person is a member somewhere
+    }
+  });
+
+  it('a person WITH an organization is unchanged: /glance still goes to their own org and project', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/v2/me')) return Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) });
+      if (url.includes('/api/v2/organizations/org-1')) return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
+      if (url.includes('/api/v2/projects/proj-1')) return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-1', slug: 'sprintable' }) });
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    const res = await middleware(makeRequest('/glance', { sp_at: token }));
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow');
+  });
+
+  it('«unknown» is not «no organization»: a 5xx, a network error, a 404 that is not «Member not found», a 200 without an org all pass through as before', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const unknowns: Array<[string, () => Response | Promise<Response>]> = [
+      ['500', () => new Response('{}', { status: 500 })],
+      ['503', () => new Response('{}', { status: 503 })],
+      ['404 other code even with the reason', () => new Response(JSON.stringify({ error: { code: 'ROUTE_NOT_FOUND', message: 'Not Found', reason: 'no_membership' } }), { status: 404 })],
+      ['404 NOT_FOUND with the old words but no reason (an older backend · another route)', () => new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Member not found' } }), { status: 404 })],
+      ['404 another reason', () => new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Member not found', reason: 'something_else' } }), { status: 404 })],
+      ['404 membership_elsewhere (belongs to another organization, not to the one the token points at)', () => new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Member not found', reason: 'membership_elsewhere' } }), { status: 404 })],
+      ['404 not JSON', () => new Response('<html>gateway</html>', { status: 404 })],
+      ['200 without org_id', () => new Response('{}', { status: 200 })],
+      ['200 with an empty org_id', () => new Response(JSON.stringify({ org_id: '' }), { status: 200 })],
+      ['network error', () => { throw new Error('network'); }],
+    ];
+    for (const [label, answer] of unknowns) {
+      mockFetch.mockReset();
+      withMe(answer);
+      const res = await middleware(makeRequest('/glance', { sp_at: token }));
+      expect([label, res.status, res.headers.get('location')]).toEqual([label, 200, null]); // no intervention: Next renders what it renders
+    }
+  });
+
+  it('the onboarding itself and other non-flat paths do not ask the server (no loop, no extra call)', async () => {
+    const token = await makeAccessToken();
+    withMe(() => meNoMember());
+    const res = await middleware(makeRequest('/onboarding', { sp_at: token }));
+    expect(res.status).toBe(200);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
 describe('proxy — legacy resource redirect generalized to non-docs resources (story a539c649 S3a/b)', () => {
   beforeEach(() => {
     process.env['JWT_SECRET'] = JWT_SECRET;
@@ -1542,5 +1660,101 @@ describe('[SID:4397] a page GET with an org hint never switches the session', ()
     await middleware(makeRequest('/gates/g-1?org_id=11111111-2222-4333-8444-555555555555', { sp_at: token }));
     const switchCalls = mockFetch.mock.calls.filter((c: unknown[]) => String(c[0]).includes('/switch-org'));
     expect(switchCalls).toHaveLength(0);
+  });
+});
+
+describe('proxy — the phone app opening lands by what the server knows, through /phone-landing (story 4714 AC3 · AC4)', () => {
+  beforeEach(() => {
+    process.env['JWT_SECRET'] = JWT_SECRET;
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://localhost:8000';
+    mockFetch.mockReset();
+  });
+  afterEach(() => {
+    delete process.env['JWT_SECRET'];
+  });
+  // a person with an organization and a project (the usual answers of the legacy-address redirect)
+  const mockOrg = () => mockFetch.mockImplementation((url: string) => {
+    if (url.includes('/api/v2/me')) return Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) });
+    if (url.includes('/api/v2/organizations/org-1')) return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
+    if (url.includes('/api/v2/projects/proj-1')) return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-1', slug: 'sprintable' }) });
+    return Promise.resolve({ ok: false, status: 404 });
+  });
+  const SHELL = { 'X-Sprintable-Nav': '3', 'Cache-Control': 'no-cache' }; // what the shell puts on every load it starts (lib/initialSource.js)
+  const LANDING = 'https://app.example.com/phone-landing?next=%2Fmoonklabs%2Fsprintable%2Fflow';
+
+  it('the shell\'s own /glance (its header) with an organization → the same 307 (no-store) pointed at /phone-landing?next=<the home it resolved> — not the home itself', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+    mockOrg();
+    const res = await middleware(makeRequestWithHeaders('/glance', SHELL, { sp_at: token }));
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe(LANDING);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+  });
+
+  it('a browser\'s /glance (no shell header) is the home as before — the landing is the phone app\'s alone', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+    mockOrg();
+    const res = await middleware(makeRequest('/glance', { sp_at: token }));
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow');
+  });
+
+  it('only the bare home address: another flat address a shell started (a notification\'s path) is the usual redirect, not the landing — notification links are left alone', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+    mockOrg();
+    const docs = await middleware(makeRequestWithHeaders('/docs/my-doc', SHELL, { sp_at: token }));
+    expect(docs.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/docs/my-doc');
+    const other = await middleware(makeRequestWithHeaders('/docs', SHELL, { sp_at: token }));
+    expect(other.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/docs');
+  });
+
+  it('a `/glance` that carries a query (a notification\'s org hint · a link\'s ?story=) is a deep link, not the app opening: the usual redirect, the query kept as before', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+    mockOrg();
+    for (const search of ['?org=11111111-2222-4333-8444-555555555555', '?story=abc']) {
+      const res = await middleware(makeRequestWithHeaders(`/glance${search}`, SHELL, { sp_at: token }));
+      expect([search, res.headers.get('location')]).toEqual([search, `https://app.example.com/moonklabs/sprintable/flow${search}`]);
+    }
+  });
+
+  it('the landing\'s next IS the resolved home: a person who picked another project lands on THAT project\'s home (the session decides, as before)', async () => {
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/v2/me')) return Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) });
+      if (url.includes('/api/v2/organizations/org-1')) return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
+      if (url.includes('/api/v2/projects/proj-2')) return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-2', slug: 'other' }) });
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+    const res = await middleware(makeRequestWithHeaders('/glance', SHELL, { sp_at: token, sprintable_current_project_id: 'proj-2' }));
+    expect(res.headers.get('location')).toBe('https://app.example.com/phone-landing?next=%2Fmoonklabs%2Fother%2Fflow');
+  });
+
+  it('where the home could not be resolved (no project chosen yet → the project picker) the redirect is the usual one — nothing to land on', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    mockFetch.mockImplementation((url: string) => (url.includes('/api/v2/me')
+      ? Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) })
+      : Promise.resolve({ ok: false, status: 404 })));
+    const res = await middleware(makeRequestWithHeaders('/glance', SHELL, { sp_at: token }));
+    expect(res.headers.get('location') ?? '').not.toContain('/phone-landing');
+  });
+
+  it('a person with NO organization still goes to the onboarding (5155 first), and an organization the server could not tell about passes through as before', async () => {
+    const token = await makeAccessToken();
+    mockFetch.mockImplementation((url: string) => (url.includes('/api/v2/me')
+      ? Promise.resolve(new Response(JSON.stringify({ data: null, error: { code: 'NOT_FOUND', message: 'Member not found', reason: 'no_membership' }, meta: null }), { status: 404 }))
+      : Promise.resolve({ ok: false, status: 404 })));
+    const none = await middleware(makeRequestWithHeaders('/glance', SHELL, { sp_at: token }));
+    expect(none.headers.get('location')).toBe('https://app.example.com/onboarding');
+    mockFetch.mockImplementation((url: string) => (url.includes('/api/v2/me') ? Promise.resolve({ ok: false, status: 503 }) : Promise.resolve({ ok: false, status: 404 })));
+    const unknown = await middleware(makeRequestWithHeaders('/glance', SHELL, { sp_at: token }));
+    expect(unknown.status).toBe(200);
+  });
+
+  it('/phone-landing and /phone-start are behind the session like the onboarding: no session → /login', async () => {
+    for (const path of ['/phone-landing', '/phone-start']) {
+      mockFetch.mockImplementation(() => Promise.resolve({ ok: false, status: 401 }));
+      const res = await middleware(makeRequest(path));
+      expect([path, res.status, res.headers.get('location')?.includes('/login')]).toEqual([path, 307, true]);
+    }
   });
 });

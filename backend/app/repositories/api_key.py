@@ -65,6 +65,12 @@ class ApiKeyRepository:
         )
         return list(result.scalars().all())
 
+    async def set_scope(self, api_key_id: uuid.UUID, scope: list[str]) -> None:
+        """story 4710 — store a scope on ONE active key (the caller computed it: `key_scope.narrowed_scope`, never wider than the key had)."""
+        await self.session.execute(
+            sa_update(ApiKey).where(ApiKey.id == api_key_id, ApiKey.revoked_at.is_(None)).values(scope=scope)
+        )
+
     async def create(
         self,
         team_member_id: uuid.UUID,

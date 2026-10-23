@@ -97,7 +97,10 @@ describe('[SID:4443] «연결된 기기» — the live RED', () => {
   }];
   async function mount(serverTimeZone: string | null) {
     useDashboardContextMock.mockReturnValue({ orgId: 'org-1', orgMemberships: [{ orgId: 'org-1', orgName: 'QA', orgSlug: 'qa', role: 'owner' }], projectMemberships: [], userName: '친절 오호' });
-    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ setups }), { status: 200 }));
+    // story 4734: the list is computers — this device is a computer of its own with the one setup
+    const computers = setups.map((d) => ({ computer_id: 'c9999999-9999-4999-8999-999999999999', device_name: d.device_name, state: d.state, confirmed_by_name: d.confirmed_by_name,
+      confirmed_at: d.confirmed_at, last_used_at: null, live_setups: 0, active_keys: 0, setups: [d] }));
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ computers, truncated: false }), { status: 200 }));
     const { DesktopDevices } = await import('./desktop/desktop-devices');
     await act(async () => { root.render(page(<DesktopDevices />, serverTimeZone)); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
@@ -105,7 +108,7 @@ describe('[SID:4443] «연결된 기기» — the live RED', () => {
 
   it('a viewer in Seoul reads the disconnect at 22:32Z as «10월 1일» — next-intl alone said «9월 30일»', async () => {
     await mount('Asia/Seoul');
-    const meta = container.querySelector('[data-testid="desktop-device-meta"]')!;
+    const meta = container.querySelector('[data-testid="desktop-computer-meta"]')!;
     expect(visibleText(meta)).toContain('10월 1일 연결 끊음');
     expect(meta.textContent).not.toContain('9월 30일');
   });
@@ -113,13 +116,13 @@ describe('[SID:4443] «연결된 기기» — the live RED', () => {
   it('a viewer in Los Angeles reads the same moment as «9월 30일» (their day, not Seoul\'s)', async () => {
     runtimeTz.value = 'America/Los_Angeles';
     await mount('America/Los_Angeles');
-    expect(visibleText(container.querySelector('[data-testid="desktop-device-meta"]')!)).toContain('9월 30일 연결 끊음');
+    expect(visibleText(container.querySelector('[data-testid="desktop-computer-meta"]')!)).toContain('9월 30일 연결 끊음');
   });
 
   it('the zone not known yet: the date\'s place is held invisible — no date can be read, not even a UTC one', async () => {
     runtimeTz.value = null; // a page that cannot tell its zone stays held
     await mount(null);
-    const meta = container.querySelector('[data-testid="desktop-device-meta"]')!;
+    const meta = container.querySelector('[data-testid="desktop-computer-meta"]')!;
     expect(visibleText(meta)).not.toMatch(/\d+월 \d+일/);
     expect(meta.querySelector('[data-testid="viewer-tz-pending"]')?.getAttribute('aria-hidden')).toBe('true');
   });

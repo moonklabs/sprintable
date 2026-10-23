@@ -7,6 +7,7 @@ only output. Each claim has a test that goes red without it (mutants in the PR).
 """
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -18,6 +19,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
     ORG2,
     OWNER,
     OWNER_TM,
+    PLAIN as PLAIN_USER,
     _addresses,
     _client,
     _dispose_global_engine_after_test,
@@ -142,13 +144,16 @@ async def test_05_a_known_reset_time_is_told_in_the_org_zone_and_a_past_one_is_n
         local = later.astimezone(__import__("zoneinfo").ZoneInfo("Asia/Seoul"))
         clock = f"{'오전' if local.hour < 12 else '오후'} {local.hour % 12 or 12}:{local.minute:02d}"
         assert n["body"] == f"사용 한도에 걸려 멈췄어요 — {local.month}월 {local.day}일 {clock}에 풀려요. 다시 일하기 시작하면 또 알려요."
-        # a second computer's session with a time that has already passed: never «풀려요» at a time that has gone
+        # another person's session with a time that has already passed: never «풀려요» at a time that has gone (the window is a PERSON's: the
+        # same person's second computer inside it would be folded into the first notice — see test_15)
+        await _second_person()
         other = await _device(c, "d4685 mac e2")
+        await _sql(f"UPDATE desktop_setups SET confirmed_by = '{PLAIN_USER}' WHERE id = '{other['setup_id']}'")
         o = other["agents"][0]["member_id"]
         await _report(c, other, o, "working", 1, key="s-o")
         await _report(c, other, o, "paused_limit", 2, key="s-o", limit={"at": (_now() - timedelta(minutes=5)).isoformat(), "again": True})
-        bodies = [x["body"] for x in await _notices(STOOD)]
-        assert UNKNOWN_BODY in bodies
+        bodies = [x["body"] for x in await _notices(STOOD, PLAIN_TM)]
+        assert bodies == [UNKNOWN_BODY]
 
 
 async def test_06_a_session_that_ends_is_not_working_again_and_clears_what_was_promised(world):
@@ -330,3 +335,328 @@ def test_09_the_turn_end_word_follows_the_same_decision_as_the_strip():
     assert _turn_end_kind(row(limit_looks=True, limit_held="screen")) == ("usage_limit", "usage_limit")
     assert _turn_end_kind(row()) == ("usage_limit", "usage_limit")
     assert _turn_end_kind(row(limit_self_resume=None)) == ("waiting_input", "waiting_input")
+
+
+# ── story 4685 AC8 (PO 10-21): the unit of the notice is the PERSON, not the setup ─────────────────────────────────────────────────
+# 10-20 16:12Z: one Mac's six agents have six setups; they stood within 17 seconds and the person got six notices (the window and the
+# promise were keyed by setup). A person's notice is one, and «working again» waits for ALL of that person's sessions.
+
+async def test_15_three_setups_of_one_person_standing_in_a_window_are_one_notice_and_one_working_again_line(world):
+    async with _client() as c:
+        d1, d2, d3 = [await _device(c, f"d4685 mac m{i}") for i in (1, 2, 3)]
+        a1, a2, a3 = [d["agents"][0]["member_id"] for d in (d1, d2, d3)]
+        for seq, (d, a) in enumerate(((d1, a1), (d2, a2), (d3, a3)), start=1):
+            await _report(c, d, a, "working", seq)
+        for seq, (d, a) in enumerate(((d1, a1), (d2, a2), (d3, a3)), start=10):
+            await _report(c, d, a, "waiting_input", seq, limit=LOOKS)
+        assert len(await _notices(STOOD)) == 1, "three setups, one person: one notice (the window is the person's)"
+        await _report(c, d1, a1, "working", 20)
+        await _report(c, d2, a2, "working", 21)
+        assert await _notices(LIFTED) == [], "the third setup still stands: «all working again» would be false"
+        await _report(c, d3, a3, "working", 22)
+        assert len(await _notices(LIFTED)) == 1, "the last of the person's sessions, in whichever setup, tells it once"
+
+
+async def test_16_two_people_are_two_notices_each_to_the_person_who_connected_their_own_setup(world):
+    plain_tm = PLAIN_TM
+    await _second_person()
+    async with _client() as c:
+        d1, d2 = await _device(c, "d4685 mac n1"), await _device(c, "d4685 mac n2")
+        await _sql(f"UPDATE desktop_setups SET confirmed_by = '{PLAIN_USER}' WHERE id = '{d2['setup_id']}'")
+        a1, a2 = d1["agents"][0]["member_id"], d2["agents"][0]["member_id"]
+        await _report(c, d1, a1, "working", 1)
+        await _report(c, d2, a2, "working", 2)
+        await _report(c, d1, a1, "waiting_input", 3, limit=LOOKS)
+        await _report(c, d2, a2, "waiting_input", 4, limit=LOOKS)
+        assert len(await _notices(STOOD, OWNER_TM)) == 1 and len(await _notices(STOOD, plain_tm)) == 1, "each person is told once, about their own"
+        await _report(c, d1, a1, "working", 5)
+        assert len(await _notices(LIFTED, OWNER_TM)) == 1 and await _notices(LIFTED, plain_tm) == [], "one person's setup being back says nothing for the other's"
+        await _report(c, d2, a2, "working", 6)
+        assert len(await _notices(LIFTED, plain_tm)) == 1
+
+
+async def test_17_a_revoked_setups_stale_limited_row_does_not_hold_the_working_again_line_back(world):
+    async with _client() as c:
+        d1, d2 = await _device(c, "d4685 mac o1"), await _device(c, "d4685 mac o2")
+        a1, a2 = d1["agents"][0]["member_id"], d2["agents"][0]["member_id"]
+        await _report(c, d2, a2, "working", 1)
+        await _report(c, d2, a2, "waiting_input", 2, limit=LOOKS)  # stands (the notice goes) ...
+        assert len(await _notices(STOOD)) == 1
+        await _sql(f"UPDATE desktop_setups SET revoked_at = now() WHERE id = '{d2['setup_id']}'")  # ... then its setup is disconnected: the row is stale
+        await _report(c, d1, a1, "working", 3)
+        await _report(c, d1, a1, "waiting_input", 4, limit=LOOKS)  # inside the window: no new notice
+        await _report(c, d1, a1, "working", 5)
+        assert len(await _notices(LIFTED)) == 1, "a disconnected setup's old row is not the person's any more"
+
+
+# ── story 4685 AC9 (PO 10-21): who is told — the owner of a phone paired with the setup, else whoever connected it ────────────────────
+# 10-20 16:12Z: five of six setups were connected by the teacher's second account, whose only device is a dead iOS one; the one phone that is
+# really paired (the DM account's android) heard about one agent of six. The phone that is paired is the person who holds the computer.
+
+PLAIN_TM = uuid.UUID("d4424000-0000-0000-0000-000000000099")
+
+
+async def _second_person():
+    """A second person of the org in the same shape as the owner (a person's members.id is their org_members.id · project access granted) — the
+    dispatcher resolves its targets through those."""
+    from tests.test_4424_desktop_setup_realdb import PROJ
+
+    await _sql(f"UPDATE org_members SET id = '{PLAIN_TM}' WHERE org_id = '{ORG}' AND user_id = '{PLAIN_USER}'",
+               f"INSERT INTO members (id,org_id,user_id,type,name,is_active) VALUES ('{PLAIN_TM}','{ORG}','{PLAIN_USER}','human','Plain',true)",
+               f"INSERT INTO project_access (id,project_id,member_id,permission) VALUES (gen_random_uuid(),'{PROJ}','{PLAIN_TM}','granted')",
+               f"UPDATE users SET locale = 'ko' WHERE id = '{PLAIN_USER}'")
+
+
+async def _pair(setup_id, owner_member, *, removed=False, revoked=False):
+    dev = uuid.uuid4()
+    await _sql(
+        f"INSERT INTO remote_devices (id,member_id,org_id,label,public_key,fingerprint,revoked_at) VALUES "
+        f"('{dev}','{owner_member}','{ORG}','phone','pk-{dev}','fp-{dev}',{'now()' if revoked else 'NULL'})",
+        f"INSERT INTO remote_device_pairings (id,remote_device_id,setup_id,paired_at,removed_at) VALUES "
+        f"(gen_random_uuid(),'{dev}','{setup_id}',now(),{'now()' if removed else 'NULL'})",
+    )
+
+
+async def test_18_the_owner_of_a_paired_phone_is_told_not_the_person_who_connected_the_setup(world):
+    await _second_person()
+    async with _client() as c:
+        d = await _device(c, "d4685 mac p1")  # connected by OWNER
+        await _pair(d["setup_id"], PLAIN_TM)
+        a = d["agents"][0]["member_id"]
+        await _report(c, d, a, "working", 1)
+        await _report(c, d, a, "waiting_input", 2, limit=LOOKS)
+        assert len(await _notices(STOOD, PLAIN_TM)) == 1, "the phone paired with the computer is told"
+        assert await _notices(STOOD, OWNER_TM) == [], "the person who only connected it is not — a paired phone is who holds the computer"
+        await _report(c, d, a, "working", 3)
+        assert len(await _notices(LIFTED, PLAIN_TM)) == 1 and await _notices(LIFTED, OWNER_TM) == []
+
+
+async def test_19_one_paired_setup_among_unpaired_ones_two_people_two_notices_each_counting_its_own(world):
+    """The 10-20 shape: one setup has the PO's phone, the other (older) setups have none and were connected by the second account."""
+    await _second_person()
+    async with _client() as c:
+        paired, u1, u2 = [await _device(c, f"d4685 mac q{i}") for i in (1, 2, 3)]
+        await _pair(paired["setup_id"], PLAIN_TM)  # u1 and u2 stay unpaired: connected by OWNER
+        agents = {k: d["agents"][0]["member_id"] for k, d in (("p", paired), ("1", u1), ("2", u2))}
+        for seq, (k, d) in enumerate((("p", paired), ("1", u1), ("2", u2)), start=1):
+            await _report(c, d, agents[k], "working", seq)
+        for seq, (k, d) in enumerate((("p", paired), ("1", u1), ("2", u2)), start=10):
+            await _report(c, d, agents[k], "waiting_input", seq, limit=LOOKS)
+        assert len(await _notices(STOOD, PLAIN_TM)) == 1 and len(await _notices(STOOD, OWNER_TM)) == 1, "two people, one notice each"
+        # the two unpaired are one person's: they come back together or not at all
+        await _report(c, u1, agents["1"], "working", 20)
+        assert await _notices(LIFTED, OWNER_TM) == []
+        await _report(c, u2, agents["2"], "working", 21)
+        assert len(await _notices(LIFTED, OWNER_TM)) == 1 and await _notices(LIFTED, PLAIN_TM) == []
+        await _report(c, paired, agents["p"], "working", 22)
+        assert len(await _notices(LIFTED, PLAIN_TM)) == 1
+
+
+async def test_20_a_removed_pairing_or_a_revoked_phone_key_is_no_pairing_the_connecter_is_told(world):
+    await _second_person()
+    async with _client() as c:
+        d1, d2 = await _device(c, "d4685 mac r1"), await _device(c, "d4685 mac r2")
+        await _pair(d1["setup_id"], PLAIN_TM, removed=True)   # the pairing was taken away
+        await _pair(d2["setup_id"], PLAIN_TM, revoked=True)   # the phone key was revoked
+        for seq, d in enumerate((d1, d2), start=1):
+            await _report(c, d, d["agents"][0]["member_id"], "working", seq)
+        for seq, d in enumerate((d1, d2), start=10):
+            await _report(c, d, d["agents"][0]["member_id"], "waiting_input", seq, limit=LOOKS)
+        assert await _notices(STOOD, PLAIN_TM) == [], "a dropped pairing / a revoked key is nobody's phone"
+        assert len(await _notices(STOOD, OWNER_TM)) == 1, "so the person who connected the computer is told, once"
+
+
+async def test_21_a_person_with_two_phones_paired_is_told_once(world):
+    await _second_person()
+    async with _client() as c:
+        d = await _device(c, "d4685 mac s1")
+        await _pair(d["setup_id"], PLAIN_TM)
+        await _pair(d["setup_id"], PLAIN_TM)
+        a = d["agents"][0]["member_id"]
+        await _report(c, d, a, "working", 1)
+        await _report(c, d, a, "waiting_input", 2, limit=LOOKS)
+        assert len(await _notices(STOOD, PLAIN_TM)) == 1
+
+
+# ── codex read (4685 AC8/AC9): the promise stays with its person · one person's failure is only theirs · two lifts at once ───────────────────
+
+async def test_22_the_working_again_line_is_kept_to_the_person_it_was_promised_to_even_when_the_pairing_is_gone(world):
+    await _second_person()
+    async with _client() as c:
+        d = await _device(c, "d4685 mac t1")
+        await _pair(d["setup_id"], PLAIN_TM)
+        a = d["agents"][0]["member_id"]
+        await _report(c, d, a, "working", 1)
+        await _report(c, d, a, "waiting_input", 2, limit=LOOKS)
+        assert len(await _notices(STOOD, PLAIN_TM)) == 1
+        await _sql(f"UPDATE remote_device_pairings SET removed_at = now() WHERE setup_id = '{d['setup_id']}'")  # the phone is taken off meanwhile
+        await _report(c, d, a, "working", 3)
+        assert len(await _notices(LIFTED, PLAIN_TM)) == 1, "told «stopped», so told «working again» — the pairing that made them the recipient is gone, the promise is not"
+        assert await _notices(LIFTED, OWNER_TM) == [], "and nothing was promised to the person who only connected it"
+
+
+async def test_25_a_removed_pairing_does_not_make_the_still_standing_sessions_of_that_setup_invisible_to_the_working_again_gate(world, store):
+    await _second_person()
+    async with _client() as c:
+        d = await _device(c, "d4685 mac t1")
+        await _pair(d["setup_id"], PLAIN_TM)
+        a = d["agents"][0]["member_id"]
+        for seq, key in ((1, "s-1"), (2, "s-2")):
+            await _report(c, d, a, "working", seq, key=key)
+        for seq, key in ((3, "s-1"), (4, "s-2")):
+            await _report(c, d, a, "waiting_input", seq, key=key, limit=LOOKS)
+        assert len(await _notices(STOOD, PLAIN_TM)) == 1
+        await _sql(f"UPDATE remote_device_pairings SET removed_at = now() WHERE setup_id = '{d['setup_id']}'")  # the phone is taken off while both stand
+        await _report(c, d, a, "working", 5, key="s-1")
+        assert await _notices(LIFTED, PLAIN_TM) == [], "s-2 of the same setup still stands: «all working again» would be false, pairing or not"
+        await _report(c, d, a, "working", 6, key="s-2")
+        assert len(await _notices(LIFTED, PLAIN_TM)) == 1, "the last one back tells it once"
+
+
+async def test_26_a_pairing_that_ended_before_the_episode_never_holds_a_persons_working_again_line_back(world):
+    await _second_person()
+    async with _client() as c:
+        old, mine = [await _device(c, f"d4685 mac u{i}") for i in (1, 2)]
+        await _pair(old["setup_id"], PLAIN_TM, removed=True)  # the person's phone was once on `old`, taken off long before
+        await _pair(mine["setup_id"], PLAIN_TM)
+        ao, am = old["agents"][0]["member_id"], mine["agents"][0]["member_id"]
+        await _report(c, mine, am, "working", 1)
+        await _report(c, mine, am, "waiting_input", 2, limit=LOOKS)
+        assert len(await _notices(STOOD, PLAIN_TM)) == 1
+        await _report(c, old, ao, "working", 3)
+        await _report(c, old, ao, "waiting_input", 4, limit=LOOKS)  # `old` now stands — for whoever connected it, not for this person
+        assert len(await _notices(STOOD, OWNER_TM)) == 1 and len(await _notices(STOOD, PLAIN_TM)) == 1
+        await _report(c, mine, am, "working", 5)
+        assert len(await _notices(LIFTED, PLAIN_TM)) == 1, "the setup this person was told about is back; another person's setup standing does not hold it"
+
+
+async def test_27_a_setup_that_stood_inside_the_window_is_part_of_the_promise_even_when_its_pairing_goes_meanwhile(world, store):
+    await _second_person()
+    async with _client() as c:
+        a, b = [await _device(c, f"d4685 mac w{i}") for i in (1, 2)]
+        await _pair(a["setup_id"], PLAIN_TM)
+        await _pair(b["setup_id"], PLAIN_TM)
+        aa, ab = a["agents"][0]["member_id"], b["agents"][0]["member_id"]
+        await _report(c, a, aa, "working", 1)
+        await _report(c, b, ab, "working", 2)
+        await _report(c, a, aa, "waiting_input", 3, limit=LOOKS)
+        await _report(c, b, ab, "waiting_input", 4, limit=LOOKS)  # inside the window: folded, no second notice
+        assert len(await _notices(STOOD, PLAIN_TM)) == 1
+        await _sql(f"UPDATE remote_device_pairings SET removed_at = now() WHERE setup_id = '{b['setup_id']}'")  # the phone leaves b while it stands
+        await _report(c, a, aa, "working", 5)
+        assert await _notices(LIFTED, PLAIN_TM) == [], "b still stands and the person was told about it (folded): not «all working again»"
+        await _report(c, b, ab, "working", 6)
+        assert len(await _notices(LIFTED, PLAIN_TM)) == 1
+
+
+async def test_28_a_stand_after_the_window_adds_to_the_promise_it_does_not_replace_it(world, store):
+    from app.services import desktop_limit_notice as dln
+
+    await _second_person()
+    async with _client() as c:
+        a, b = [await _device(c, f"d4685 mac x{i}") for i in (1, 2)]
+        await _pair(a["setup_id"], PLAIN_TM)
+        await _pair(b["setup_id"], PLAIN_TM)
+        aa, ab = a["agents"][0]["member_id"], b["agents"][0]["member_id"]
+        await _report(c, a, aa, "working", 1)
+        await _report(c, b, ab, "working", 2)
+        await _report(c, a, aa, "waiting_input", 3, limit=LOOKS)
+        assert len(await _notices(STOOD, PLAIN_TM)) == 1
+        await _sql(f"UPDATE remote_device_pairings SET removed_at = now() WHERE setup_id = '{a['setup_id']}'")  # the phone leaves a while it stands
+        await dln._release_window(ORG, PLAIN_USER)  # the 5 minutes are over
+        await _report(c, b, ab, "waiting_input", 4, limit=LOOKS)
+        assert len(await _notices(STOOD, PLAIN_TM)) == 2, "a new window, a new notice"
+        await _report(c, b, ab, "working", 5)
+        assert await _notices(LIFTED, PLAIN_TM) == [], "a still stands and the person was told about it: the second notice did not make them forget it"
+        await _report(c, a, aa, "working", 6)
+        assert len(await _notices(LIFTED, PLAIN_TM)) == 1
+
+
+async def test_29_setups_added_to_the_promise_at_the_same_instant_are_all_kept(world, store):
+    from app.services import desktop_limit_notice as dln
+
+    ids = [uuid.uuid4() for _ in range(6)]
+    await asyncio.gather(*(dln._add_promised_setups(ORG, PLAIN_USER, [i]) for i in ids))
+    assert await dln._promised_setups(ORG, PLAIN_USER) == frozenset(ids)
+    await dln._take_open(ORG, PLAIN_USER)
+    assert await dln._promised_setups(ORG, PLAIN_USER) == frozenset(), "taking the record takes what it was about"
+
+
+@pytest.mark.parametrize("fails,how", [("owner", "python"), ("plain", "sql")])
+async def test_23_one_persons_failure_takes_back_only_their_own_notice(world, monkeypatch, fails, how):
+    """Two people have phones paired with the setup (told in a fixed order: the owner, then the second person). Telling one of them fails — as a Python
+    error, or as an SQL error that aborts the transaction (the second's, after the first was told). The other is told all the same and the report stands."""
+    await _second_person()
+    import app.services.notification_dispatch as nd
+    from sqlalchemy import text
+
+    real = nd.dispatch_notification
+    failing = OWNER_TM if fails == "owner" else PLAIN_TM
+
+    async def flaky(db, *a, **kw):
+        if kw.get("target_member_ids") == [failing]:
+            if how == "python":
+                raise RuntimeError("boom")
+            await db.execute(text("SELECT 1/0"))  # an SQL error: the transaction would be unusable without a savepoint of this person's own
+        return await real(db, *a, **kw)
+
+    monkeypatch.setattr(nd, "dispatch_notification", flaky)
+    async with _client() as c:
+        d = await _device(c, "d4685 mac u1")
+        await _pair(d["setup_id"], OWNER_TM)
+        await _pair(d["setup_id"], PLAIN_TM)
+        a = d["agents"][0]["member_id"]
+        await _report(c, d, a, "working", 1)
+        await _report(c, d, a, "waiting_input", 2, limit=LOOKS)  # 200: the report stands
+        other = PLAIN_TM if fails == "owner" else OWNER_TM
+        assert await _notices(STOOD, failing) == []
+        assert len(await _notices(STOOD, other)) == 1, "one person's failure must neither silence nor take back the other person's notice"
+
+
+async def test_24_two_of_one_persons_setups_coming_back_at_the_same_moment_still_tell_working_again_once(world):
+    """Each transaction sees the OTHER's session still standing (not committed yet) and would return: nobody would tell «working again». The lift is
+    serialised per person — the second waits for the first's commit, counts again, and tells."""
+    import asyncio
+
+    from sqlalchemy import select
+
+    from app.core.database import async_session_factory
+    from app.models.desktop_relay import DesktopSession
+    from app.models.desktop_setup import DesktopSetup
+    from app.services import desktop_limit_notice as dln
+
+    async with _client() as c:
+        d1, d2 = await _device(c, "d4685 mac v1"), await _device(c, "d4685 mac v2")
+        a1, a2 = d1["agents"][0]["member_id"], d2["agents"][0]["member_id"]
+        for seq, (d, a) in enumerate(((d1, a1), (d2, a2)), start=1):
+            await _report(c, d, a, "working", seq)
+        for seq, (d, a) in enumerate(((d1, a1), (d2, a2)), start=10):
+            await _report(c, d, a, "waiting_input", seq, limit=LOOKS)
+        assert len(await _notices(STOOD)) == 1
+
+    async def load(s, setup_id):
+        setup = await s.get(DesktopSetup, uuid.UUID(setup_id))
+        row = (await s.execute(select(DesktopSession).where(DesktopSession.setup_id == setup.id))).scalars().one()
+        return setup, row
+
+    s1, s2 = async_session_factory(), async_session_factory()
+    try:
+        setup1, row1 = await load(s1, d1["setup_id"])
+        row1.limited, row1.state = False, "working"
+        await s1.flush()
+        await dln.after_report(s1, setup1, row1, was_limited=True)  # the other is still standing (as far as this transaction can see): nothing to tell
+        assert await _notices(LIFTED) == []
+
+        setup2, row2 = await load(s2, d2["setup_id"])
+        row2.limited, row2.state = False, "working"
+        await s2.flush()
+        second = asyncio.create_task(dln.after_report(s2, setup2, row2, was_limited=True))
+        await asyncio.sleep(0.6)  # fixed-sleep-ok: the second must be WAITING on the first's lock, not finished
+        assert not second.done(), "the second lift must wait for the first transaction"
+        await s1.commit()
+        await asyncio.wait_for(second, timeout=10)
+        await s2.commit()
+    finally:
+        await s1.close()
+        await s2.close()
+    assert len(await _notices(LIFTED)) == 1

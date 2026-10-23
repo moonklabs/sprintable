@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
+from app.models.org_invite import OrgInvite
 from app.models.user import User
 from app.repositories.org_invite import OrgInviteRepository
 from app.schemas.invite_accept import (
@@ -67,6 +68,64 @@ async def get_invite_preview(
     )
 
 
+def _raise_for_failed_accept(result: dict) -> None:
+    """The one mapping of a failed `OrgInviteRepository.accept` to its HTTP answer (the token route and the by-id route answer the same way)."""
+    if result["ok"]:
+        return
+    reason = result.get("reason")
+    if reason == "not_found":
+        raise HTTPException(status_code=404, detail="Invite not found")
+    if reason == "already_accepted":
+        raise HTTPException(status_code=409, detail="Invite already accepted")
+    if reason == "expired":
+        raise HTTPException(status_code=410, detail="Invite has expired")
+    if reason == "email_mismatch":
+        raise HTTPException(status_code=403, detail="Email does not match invite")
+    raise HTTPException(status_code=400, detail="Cannot accept invite")
+
+
+@router.post("/mine/{invite_id}/accept", response_model=AcceptInviteResponse)
+async def accept_my_invite(
+    invite_id: str,
+    auth: AuthContext = Depends(get_current_user),
+    repo: OrgInviteRepository = Depends(_get_repo),
+    session: AsyncSession = Depends(get_db),
+) -> AcceptInviteResponse:
+    """story 4711 AC4 (PO 2026-10-17) — a person takes an invite listed by `GET /invites/mine` from inside the app, by the `invite_id` that list gave (it gives no token).
+
+    Same meaning as the sign-in auto-accept, nothing wider: a person's own interactive session (an API key / agent key is 403), an account whose mailbox is
+    proved (`pending_invite_auto_accept_allowed` — the one gate, 403 otherwise), and an invite addressed to THIS account's e-mail; the token is read here, on
+    the server, and handed to the one `OrgInviteRepository.accept` (first-organization lock, e-mail match, expiry, already-accepted — all decided there).
+    Only a PENDING invite is found (the list shows only those): an old accepted invite is not a way back into an organization the person left. An id that is
+    not a pending invite to this e-mail and an id that does not exist are the same 404 with the same body: no way to learn whether another person's invite exists."""
+    from app.repositories.org_invite import invite_email_key, invite_email_key_sql
+    from app.routers.auth import _requires_interactive_session, pending_invite_auto_accept_allowed
+
+    if _requires_interactive_session(auth):
+        raise HTTPException(status_code=403, detail="This action needs a browser session")
+    try:
+        invite_uuid = uuid.UUID(invite_id)
+        user_uuid = uuid.UUID(auth.user_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=404, detail="Invite not found")
+    user = (await session.execute(select(User).where(User.id == user_uuid, User.is_active.is_(True)))).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not pending_invite_auto_accept_allowed(user):
+        raise HTTPException(status_code=403, detail="Verify your e-mail address first")
+    token = (await session.execute(
+        select(OrgInvite.token).where(
+            OrgInvite.id == invite_uuid, OrgInvite.status == "pending", invite_email_key_sql(OrgInvite.email) == invite_email_key(user.email),
+        )
+    )).scalar_one_or_none()
+    if token is None:
+        raise HTTPException(status_code=404, detail="Invite not found")
+    result = await repo.accept(token=token, user_id=user.id, user_email=user.email)
+    _raise_for_failed_accept(result)
+    await session.commit()
+    return AcceptInviteResponse(ok=True, org_id=result["org_id"], role=result["role"])
+
+
 @router.post("/accept", response_model=AcceptInviteResponse)
 async def accept_invite(
     body: AcceptInviteRequest,
@@ -90,17 +149,7 @@ async def accept_invite(
         user_email=user.email,
     )
 
-    if not result["ok"]:
-        reason = result.get("reason")
-        if reason == "not_found":
-            raise HTTPException(status_code=404, detail="Invite not found")
-        if reason == "already_accepted":
-            raise HTTPException(status_code=409, detail="Invite already accepted")
-        if reason == "expired":
-            raise HTTPException(status_code=410, detail="Invite has expired")
-        if reason == "email_mismatch":
-            raise HTTPException(status_code=403, detail="Email does not match invite")
-        raise HTTPException(status_code=400, detail="Cannot accept invite")
+    _raise_for_failed_accept(result)
 
     # story #3217(Referral 계측, 착지 후 PO 라이브 probe 발견) — 이메일 가입 경로 실
     # 여정은 register()가 invite_token을 받는 게 아니라: 비로그인 수락 → /login?

@@ -204,6 +204,10 @@ const NON_NUMBER_PLACEHOLDER_NAMES = new Set([
   // 아님) — verify.evidenceSignedBy="{name}{josa} 남김"·recruiter.verifyGuideMcp="…{runtime}{josa} 열어…"
   // 등 6키가 이 이름을 쓴다. 개별 EXEMPT_PAIRS 대신 규칙(이 이름은 수-인접이 아님)으로 안다.
   'josa',
+  // story 4713 AC2 — {iga} · {euro}: the same kind of name as {josa} (a Korean grammar particle from the korean-particle helpers — pickIGaJosa · pickEuroJosa —
+  // never a number): desktop.setup.quick.traceDefault «이 폴더에 {file}{iga} 있어요 · 에이전트는 {runtime}{euro} 골라 뒀어요». Two particles stand in one line, so
+  // one {josa} cannot serve both; the scoped honorific guard forbids a fixed particle after a placeholder, which is why they are placeholders at all.
+  'iga', 'euro',
   // story #4599 — {folder}: a folder's words. ko.json's three uses read directly (2026-10-07): docs.docTreeMovedIntoFolder
   // «{title}, {folder} 폴더로 이동했어요.» (a folder's name) · chats.agentSession.line.waitingSystemFolder / …FolderPhone
   // «macOS가 그 컴퓨터 화면에서 {folder} 쓸지 묻고 있어요 …» filled from a closed list of folder words with their particle
@@ -409,6 +413,32 @@ export function findMemberSynonymCollisions(
 // 낀 세 쌍(3402 2·3575 1) 전부 그래서 삭제(양성대조: 제외 로직을 끄면 다시 RED가 되어야
 // 한다).
 export const EXEMPT_PAIRS = new Set<string>([
+  // story #4733 (S4b · Yuna 4733 sheet §2/§4/§5 — «세션 관리» on the phone) — three pairs that are the sheet's own words on purpose:
+  //  · `startOne` («세션 시작», the row button) inside `out.alone` («이 중 {k}개는 먼저 따로 종료했어요 — 모든 세션 시작을 누르면 함께 시작해요.») and `startAll`
+  //    («모든 세션 시작») inside it: the sentence POINTS at the card's own button by its label, so the label's words are the point. The row button is drawn only in the
+  //    idle card (no step open), the sentence only in the card after the sessions ended (the two never stand together).
+  //  · `endedRow` («세션을 종료했어요 · {time} — …») and `out.head` («세션을 종료했어요 · {time}»): one head sentence for one act at two units (an agent that ended on its
+  //    own / the computer) — the sheet keeps ONE word per act whatever the unit (its rule 1). They are also never on the screen together.
+  // Look again if the idle card and the card after ever draw at once.
+  'desktop.phoneSessions.out.alone <-> desktop.phoneSessions.startOne',
+  'desktop.phoneSessions.out.alone <-> desktop.phoneSessions.startAll',
+  'desktop.phoneSessions.endedRow <-> desktop.phoneSessions.out.head',
+  // story 4717 (agent room before «시작») — the room lines («이 레시피는 새 에이전트 {need}개가 필요한데, 지금 {left}개만 더 만들 수 있어요.» ·
+  // «…지금은 더 만들 수 없어요.») contain «레시피», the recipe card's own label (`desktop.setup.recipe`). Not the shape this guard is for
+  // (#2352/#2365: two counted phrases read as one another): the label counts nothing — it names the card the person chose — and the
+  // sentence says what THAT recipe needs, so the same word is the point (the old failure card said the same: «이 레시피는 에이전트 {need}개가
+  // 필요한데»). Look again if the recipe label ever carries a count («레시피 · {n}»).
+  // story 4734 (Yuna 4734-pairing-unit-copy-1020.md §A) — the computer's line counts its setups («에이전트 {count}개 · 설정 {n}곳»: `desktop.devices.setupCount` is the
+  // second half of that line), and three sentences elsewhere say «설정 {n}곳» again with the SAME number on purpose: the big confirm's scope («이 컴퓨터에서 연결한
+  // 설정 {n}곳이 모두 끊기고, …») and its button («설정 {n}곳 모두 끊기») must read the same count the line showed (the sheet: «the press confirms the same thing the
+  // paragraph said»), and the in-between line («폰 페어링이 설정 {n}곳 중 {k}곳에만 …») names the connected setups of that same line. They are never on screen together
+  // as two readings of one number (the dialog covers the list; the in-between line sits inside the fold, not beside the count). Look again if the counts could differ
+  // (the dialog counting more than the line).
+  'desktop.devices.allScope <-> desktop.devices.setupCount',
+  'desktop.devices.allButton <-> desktop.devices.setupCount',
+  'desktop.devices.pairGap <-> desktop.devices.setupCount', // (the guard's pair key is in key order)
+  'desktop.setup.recipe <-> desktop.setup.room.shortNone',
+  'desktop.setup.recipe <-> desktop.setup.room.short',
   // story #4624 (Yuna «미르코 범위» 08:0xZ) — [이 폰 빼기]'s confirmation («… 짝지은 컴퓨터 {n}대와 모두 끊겨요. 원격 기기 자리 하나가
   // 비고 …» · {n} = the computers that phone is paired with) contains «원격 기기», the section's own title. Not the shape this guard
   // is for (#2352/#2365: two counted phrases read as one another): the title counts nothing, and the sentence names the remote
@@ -865,6 +895,9 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 주세요» sits right under that «시작» on purpose (the same word, so the person knows which one). Not two phrases that could
   // be mistaken for each other.
   'desktop.setup.rateLimited <-> desktop.setup.start',
+  // story 4711: the same line, drawn by the first-setup card too — «…다시 «시작»을 눌러 주세요» under that card's own «시작» button
+  // (`quick.start`), the same word on purpose as above (4429 ③). Not two phrases that could be mistaken for each other.
+  'desktop.setup.quick.start <-> desktop.setup.rateLimited',
 ]);
 
 // ⛔⭐오르테가군 지적(2026-07-31) — 이 목록에 «새로» 넣는 것은 PO 승인을 거친다. 이유 없이

@@ -30,6 +30,8 @@ from app.services.desktop_setup import (
     confirm_setup,
     confirm_setup_first_project,
     confirm_setup_new_org,
+    confirm_solo_setup,
+    confirm_solo_setup_new_org,
     create_setup_code,
     exchange_setup,
     exchange_urls,
@@ -37,6 +39,7 @@ from app.services.desktop_setup import (
     list_setups,
     person_names,
     revoke_setup,
+    setup_agent_room,
     setup_hands,
     setup_status,
 )
@@ -53,6 +56,8 @@ _STATUS = {
     "code_expired": 410,
     "code_used": 410,
     "already_confirmed": 409,
+    "computer_changing": 409,  # story 4734: setups of the computer kept appearing while it was being locked — nothing was changed, try again
+    "computer_too_large": 409,  # story 4734: the org has more setups than the grouping reads — a computer-wide act would leave some out
     "setup_disconnected": 409,
     "remote_control_off": 409,  # story #4535 — the device's org turned «원격 제어» off  # story #4548 — the device was disconnected (its token code can no longer be confirmed or exchanged)
     "roles_invalid": 422,
@@ -74,6 +79,8 @@ _STATUS = {
     "move_needs_existing_agents": 422,
     # story #4576 (PO 04:24Z): the app that made the code did not say it can take a move (an app from before) — update the app
     "app_cannot_move": 409,
+    # story 4711: the app that made the code did not say it can take a solo setup (an app from before) — update the app
+    "app_cannot_solo": 409,
 }
 
 
@@ -255,6 +262,76 @@ async def post_confirm(
     )
 
 
+class ConfirmSoloRequest(BaseModel):
+    """story 4711 — «시작» of the first setup in three steps: the runtime the person picked and the folder's project. Exactly one of
+    `project_id` (the app found a project that already uses the chosen folder) and `project_name` (the folder's name — a new
+    project). No path: the server never sees the folder."""
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = SETUP_CODE_FIELD
+    runtime: str = Field(min_length=1, max_length=32)
+    project_id: uuid.UUID | None = None
+    project_name: str | None = Field(default=None, min_length=1, max_length=100)
+    workdir_hint: str | None = Field(default=None, max_length=200)
+    tools: list[str] | None = Field(default=None, max_length=AGENT_TOOLS_CAP)
+
+    @field_validator("project_name")
+    @classmethod
+    def _project_name_trimmed(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            raise ValueError("must not be blank")
+        if any(ord(ch) < 32 or ord(ch) == 127 for ch in v):
+            raise ValueError("must not contain control characters")
+        return v
+
+    @field_validator("workdir_hint")
+    @classmethod
+    def _hint_no_control_characters(cls, v: str | None) -> str | None:
+        if v is not None and any(ord(ch) < 32 or ord(ch) == 127 for ch in v):
+            raise ValueError("workdir_hint must not contain control characters")
+        return v
+
+    @field_validator("tools")
+    @classmethod
+    def _tools_on_the_rule(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            bad = bad_agent_tool_names(v)
+            if bad:
+                raise ValueError(f"tool names outside the rule (lowercase letters, digits, - or _, 1-24 characters): {bad}")
+        return v
+
+
+class ConfirmSoloResponse(ConfirmResponse):
+    project_id: uuid.UUID
+    conversation_id: uuid.UUID  # the person ↔ agent room the first screen opens
+
+
+@router.post("/setup-codes/confirm-solo", response_model=ConfirmSoloResponse, response_model_exclude_unset=True)
+async def post_confirm_solo(
+    body: ConfirmSoloRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    user_id = _human_only(auth)
+    try:
+        setup_id, members, project_id, conversation_id = await confirm_solo_setup(
+            db, code=body.code, user_id=user_id, org_id=org_id, runtime=body.runtime, project_id=body.project_id,
+            project_name=body.project_name, auth=auth, workdir_hint=body.workdir_hint, tools=body.tools,
+        )
+    except DesktopSetupError as e:
+        # get_db rolls the whole session back: no project, agent or room is left by a failed start (the plan's 402 too)
+        raise _error(e) from None
+    await db.commit()
+    return ConfirmSoloResponse(
+        setup_id=setup_id, project_id=project_id, conversation_id=conversation_id,
+        members=[ConfirmedMember(**{k: m[k] for k in ("stage", "role", "member_id", "kind", "name") if k in m}) for m in members],
+    )
+
+
 # story 4427 (나) · design doc 9a4cb445 §1 · §8 · §10 — a person with no organization: «시작» makes the organization, its first
 # project and the setup in one transaction. No organization or project field at all (extra=forbid): this path can only make a
 # new organization, never point at an existing one.
@@ -329,6 +406,62 @@ async def post_confirm_new_org(
     )
 
 
+class ConfirmSoloNewOrgRequest(BaseModel):
+    """story 4711 AC4 — a person with no organization: the folder's project and the organization (named by the web) are made with
+    the start. No ids at all (extra=forbid): this path can only make a new organization."""
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = SETUP_CODE_FIELD
+    runtime: str = Field(min_length=1, max_length=32)
+    org_name: str = Field(min_length=1, max_length=100)
+    project_name: str = Field(min_length=1, max_length=100)
+    workdir_hint: str | None = Field(default=None, max_length=200)
+    tools: list[str] | None = Field(default=None, max_length=AGENT_TOOLS_CAP)
+
+    @field_validator("org_name", "project_name")
+    @classmethod
+    def _name_trimmed_no_control_characters(cls, v: str) -> str:
+        return ConfirmNewOrgRequest._name_trimmed_no_control_characters(v)
+
+    @field_validator("workdir_hint")
+    @classmethod
+    def _hint_no_control_characters(cls, v: str | None) -> str | None:
+        return ConfirmNewOrgRequest._hint_no_control_characters(v)
+
+    @field_validator("tools")
+    @classmethod
+    def _tools_on_the_rule(cls, v: list[str] | None) -> list[str] | None:
+        return ConfirmSoloRequest._tools_on_the_rule(v)
+
+
+class ConfirmSoloNewOrgResponse(ConfirmSoloResponse):
+    org_id: uuid.UUID
+
+
+@router.post("/setup-codes/confirm-solo-new-org", response_model=ConfirmSoloNewOrgResponse, response_model_exclude_unset=True)
+async def post_confirm_solo_new_org(
+    body: ConfirmSoloNewOrgRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+):
+    user_id = _human_only(auth)
+    retry = hit_person_limits("desktop-confirm-new-org", str(user_id), *CONFIRM_NEW_ORG_LIMITS)  # the same limit as the way an organization is made
+    if retry is not None:
+        raise _rate_limited(retry)
+    try:
+        setup_id, members, org_id, project_id, conversation_id = await confirm_solo_setup_new_org(
+            db, code=body.code, user_id=user_id, org_name=body.org_name, project_name=body.project_name, runtime=body.runtime,
+            auth=auth, workdir_hint=body.workdir_hint, tools=body.tools,
+        )
+    except DesktopSetupError as e:
+        raise _error(e) from None  # get_db rolls the whole session back: no organization, project, agent or room is left
+    await db.commit()
+    return ConfirmSoloNewOrgResponse(
+        setup_id=setup_id, org_id=org_id, project_id=project_id, conversation_id=conversation_id,
+        members=[ConfirmedMember(**{k: m[k] for k in ("stage", "role", "member_id", "kind", "name") if k in m}) for m in members],
+    )
+
+
 class ExchangeRequest(BaseModel):
     code: str = SETUP_CODE_FIELD
     verifier: str = Field(min_length=43, max_length=128)
@@ -361,7 +494,7 @@ async def post_exchange(request: Request, body: ExchangeRequest, db: AsyncSessio
             "setup_id": str(done.setup_id), "agents": done.agents, "api_url": api_url, "mcp_url": mcp_url,
             "workdir_hint": done.workdir_hint, "org_name": done.org_name,
             # story #4576 (PO 04:24Z): a move has no recipe — no recipe_name at all; «setup_kind» says which (an older app ignores it)
-            **({} if done.setup_kind == "move" else {"recipe_name": done.recipe_name}),
+            **({} if done.setup_kind in ("move", "solo") else {"recipe_name": done.recipe_name}),
             "setup_kind": done.setup_kind,
             # story 4470: the org's id (an added field — an older app ignores it)
             "org_id": str(done.org_id) if done.org_id else None,
@@ -403,11 +536,34 @@ class SetupItem(BaseModel):
     keys_issued: int
     active_keys: int
     members: list[SetupMember]
-    setup_kind: Literal["move", "recipe"] | None = None  # story #4576 — None before a confirmation
+    setup_kind: Literal["move", "recipe", "solo"] | None = None  # story #4576 — None before a confirmation
 
 
 class SetupListResponse(BaseModel):
     setups: list[SetupItem]
+
+
+class ComputerSetupItem(SetupItem):
+    paired_phones: int = 0  # phones with a live pair with this setup (story 4734: the web's «paired with fewer phones than the others» line)
+
+
+class ComputerItem(BaseModel):
+    """story 4734 — one computer (one Mac · one person · one organization): its setups inside, the same item the setup list gives."""
+    computer_id: uuid.UUID
+    device_name: str
+    state: Literal["waiting_for_app", "handed_over", "not_handed_over", "disconnected"]  # as alive as its best setup
+    confirmed_by: uuid.UUID | None
+    confirmed_by_name: str | None = None
+    confirmed_at: datetime | None
+    last_used_at: datetime | None = None  # the newest heard-from time over its setups
+    live_setups: int  # setups still connected
+    active_keys: int
+    setups: list[ComputerSetupItem]
+
+
+class ComputerListResponse(BaseModel):
+    computers: list[ComputerItem]
+    truncated: bool = False  # more computers than the list holds (the newest are here)
 
 
 class SetupRecipeRole(BaseModel):
@@ -425,8 +581,18 @@ class SetupRecipe(BaseModel):
     roles: list[SetupRecipeRole]
 
 
+class SetupAgentRoom(BaseModel):
+    """story 4717 AC1 — the plan's agent limit as the confirmation will hold it (see services.desktop_setup.setup_agent_room)."""
+    limit: int
+    current: int
+    available: int
+    tier: str  # as a 402's `tier` — the web words the limit with it (free names the plan)
+
+
 class SetupRecipesResponse(BaseModel):
     recipes: list[SetupRecipe]
+    # story 4717 AC1: how many more agents can be made — null = no limit is enforced (nothing to say before [시작])
+    agent_room: SetupAgentRoom | None = None
 
 
 @router.get("/recipes", response_model=SetupRecipesResponse)
@@ -438,7 +604,10 @@ async def get_setup_recipes(
     """PO 16:03Z — the recipes the desktop setup page can start, each with its setup rows worked out by the same function the
     confirmation checks with (the web draws them as they come)."""
     _human_only(auth)
-    return SetupRecipesResponse(recipes=[SetupRecipe(**r) for r in await list_setup_recipes(db, org_id=org_id)])
+    return SetupRecipesResponse(
+        recipes=[SetupRecipe(**r) for r in await list_setup_recipes(db, org_id=org_id)],
+        agent_room=await setup_agent_room(db, org_id),
+    )
 
 
 @router.get("/recipes/for-new-org", response_model=SetupRecipesResponse)
@@ -457,7 +626,10 @@ async def get_setup_recipes_for_new_org(
         raise _rate_limited(retry)
     if await has_active_org(db, user_id):
         raise _error(DesktopSetupError("has_organization"))
-    return SetupRecipesResponse(recipes=[SetupRecipe(**r) for r in await list_setup_recipes(db, org_id=None)])
+    return SetupRecipesResponse(
+        recipes=[SetupRecipe(**r) for r in await list_setup_recipes(db, org_id=None)],
+        agent_room=await setup_agent_room(db, None),
+    )
 
 
 class AttachableAgent(BaseModel):
@@ -577,7 +749,8 @@ class SetupStatusResponse(BaseModel):
     work_item_id: str | None
     members: list[SetupMember]
     # story #4576: «move» = no recipe, device and keys only (the web shows two steps · no first task or result) · «recipe»
-    setup_kind: Literal["move", "recipe"] | None = None
+    setup_kind: Literal["move", "recipe", "solo"] | None = None
+    conversation_id: uuid.UUID | None = None  # story 4711: a solo setup's person ↔ agent room (the progress screen opens it)
     signals: SetupSignals
 
 
@@ -625,6 +798,57 @@ class RevokeResponse(BaseModel):
     already_disconnected: bool
     revoked_at: datetime
     revoked_by_name: str | None
+
+
+@router.get("/computers", response_model=ComputerListResponse)
+async def get_computers(
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story 4734 — the org's desktop setups grouped into computers for the web «연결된 기기» (one line per computer; its setups inside)."""
+    from app.services.desktop_computers import list_computers
+
+    user_id = _human_only(auth)
+    try:
+        return ComputerListResponse(**await list_computers(db, user_id=user_id, org_id=org_id))
+    except DesktopSetupError as e:
+        raise _error(e) from None
+
+
+class ComputerRevokeResponse(BaseModel):
+    setups_disconnected: int  # setups this call disconnected (0 when the computer had none connected)
+    revoked_keys: int
+    already_disconnected: bool  # nothing of it was connected before this call
+    revoked_at: datetime | None
+    revoked_by_name: str | None
+
+
+@router.delete("/computers/{computer_id}", response_model=ComputerRevokeResponse)
+async def delete_computer(
+    computer_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story 4734 — «disconnect this computer»: every setup of it that is still connected, in one transaction (org owner/admin only)."""
+    from app.services.desktop_computers import revoke_computer
+    from app.services.project_auth import is_org_owner_or_admin
+
+    user_id = _human_only(auth)
+    if not await is_org_owner_or_admin(db, user_id, org_id):
+        raise _error(DesktopSetupError("not_org_admin"))
+    try:
+        done = await revoke_computer(db, computer_id=computer_id, user_id=user_id, org_id=org_id)
+        names = await person_names(db, org_id, {done["revoked_by"]} if done["revoked_by"] else set())
+    except DesktopSetupError as e:
+        await db.rollback()
+        raise _error(e) from None
+    await db.commit()
+    return ComputerRevokeResponse(
+        setups_disconnected=done["setups"], revoked_keys=done["keys"], already_disconnected=done["already"], revoked_at=done["revoked_at"],
+        revoked_by_name=names.get(done["revoked_by"]) if done["revoked_by"] else None,
+    )
 
 
 @router.delete("/setups/{setup_id}", response_model=RevokeResponse)

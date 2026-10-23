@@ -315,7 +315,8 @@ class GoalRepository(BaseRepository[Goal]):
             hv_row = hv_by_story.get(picked.id)
             hv_member = None
             if hv_row is not None and hv_row.created_by in member_name_by_id:
-                hv_member = {"name": member_name_by_id[hv_row.created_by]}
+                # story #4752: a verifier whose account was deleted and anonymized has members.name NULL — the schema wants a string, so «no name» is "" (as the hero route does for a missing member), never a 500
+                hv_member = {"name": member_name_by_id[hv_row.created_by] or ""}
             pending_gate = pending_gate_by_story.get(picked.id)
             merge_status = merge_status_by_story.get(picked.id)
 

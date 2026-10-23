@@ -21,7 +21,26 @@ from app.schemas.human_api_key import (
 )
 from app.schemas.me import MeResponse, UpdateMe
 
+# story 4714 AC6: `GET /api/v2/me` 404 «Member not found» says WHY in a machine-readable `reason` (the web proxy reads only that):
+#   no_membership         — this person has no live organization membership ANYWHERE (a brand-new account): the onboarding is where they go;
+#   membership_elsewhere  — they belong to another organization, but not to the one the token points at (not a member of X yet / removed from X but still in Y):
+#                           NOT «no organization» — sending them to «create an organization» would be wrong (Kadir 5155 lens), so the proxy leaves them as before.
+NO_MEMBERSHIP_REASON = "no_membership"
+MEMBERSHIP_ELSEWHERE_REASON = "membership_elsewhere"
+
 router = APIRouter(prefix="/api/v2/me", tags=["me", "Organization"])
+
+
+async def _has_live_membership_anywhere(session: AsyncSession, uid: uuid.UUID) -> bool:
+    """story 4714 AC6 — does this person belong to ANY organization (a live org membership row, or a team member row)? Used only to tell «no organization at
+    all» from «not a member of the organization the token points at»."""
+    org = await session.execute(select(OrgMember.id).where(OrgMember.user_id == uid, OrgMember.deleted_at.is_(None)).limit(1))
+    if org.scalar_one_or_none() is not None:
+        return True
+    team = await session.execute(select(TeamMember.id).where(TeamMember.user_id == uid).limit(1))
+    return team.scalar_one_or_none() is not None
+
+
 
 
 def _linked_providers(user: User) -> list[str]:
@@ -242,7 +261,13 @@ async def get_me(
                 )
 
     if member is None:
-        raise HTTPException(status_code=404, detail="Member not found")
+        # story 4714 AC6 — the web's proxy sends a person with NO organization at all to the onboarding and must not read it off the message's words:
+        # `reason` is the machine-readable field (code stays NOT_FOUND — every other reader of the envelope is unchanged). A person who belongs to another
+        # organization is a different case (the token points at one they are not in): `membership_elsewhere`, never «no organization».
+        reason = NO_MEMBERSHIP_REASON
+        if not is_api_key and await _has_live_membership_anywhere(session, uid):
+            reason = MEMBERSHIP_ELSEWHERE_REASON
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Member not found", "reason": reason})
 
     data = MeResponse.model_validate(member)
     data.project_name = member.project.name if member.project else None

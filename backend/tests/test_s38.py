@@ -101,11 +101,21 @@ async def test_subscription_status_grace_period_200():
 
 # ── Account Delete ────────────────────────────────────────────────────────────
 
+def _live_user_result():
+    """The account row the delete endpoint reads first (story #4752): a live account — the real closing (is_active · deleted_at) is held by tests/test_4752_account_delete_realdb.py."""
+    from types import SimpleNamespace
+
+    user = SimpleNamespace(is_active=True, deleted_at=None)
+    res = MagicMock()
+    res.scalar_one_or_none.return_value = user
+    return res
+
+
 @pytest.mark.anyio
 async def test_account_delete_200():
     client, session, app = await _client()
     try:
-        session.execute = AsyncMock(return_value=MagicMock())
+        session.execute = AsyncMock(return_value=_live_user_result())
 
         async with client as c:
             resp = await c.post("/api/v2/account/delete")
@@ -121,18 +131,24 @@ async def test_account_delete_200():
 async def test_account_delete_updates_org_and_team_members():
     client, session, app = await _client()
     try:
-        session.execute = AsyncMock(return_value=MagicMock())
+        session.execute = AsyncMock(return_value=_live_user_result())
 
         async with client as c:
             await c.post("/api/v2/account/delete")
 
+        # story #4752: the account row is read first (the endpoint no longer asks for an organization), then
         # AC3-4 2-2 anchor-only: org_members + **members**(anchor) UPDATE (레거시 team_members UPDATE 제거)
         # + story #4400: every refresh token of the account revoked
-        # + story #4630: the grace window of tokens a rotation just revoked closed too = 4
-        assert session.execute.call_count == 4
-        revoke = str(session.execute.call_args_list[2].args[0])
+        # + story #4630: the grace window of tokens a rotation just revoked closed too
+        # + story #4752: the push devices closed (K8) + the per-user cut-off for every access token already issued
+        # + story #4752 AC4: the organizations the account is the only owner of are looked up (and locked) right after the account row = 8
+        assert session.execute.call_count == 9
+        assert "organizations" in str(session.execute.call_args_list[1].args[0]) and "FOR UPDATE OF o" in str(session.execute.call_args_list[1].args[0])   # the lock …
+        assert "other_owners" in str(session.execute.call_args_list[2].args[0]) and "FOR UPDATE" not in str(session.execute.call_args_list[2].args[0])    # … and the count, a later statement
+        assert "FROM users" in str(session.execute.call_args_list[0].args[0])
+        revoke = str(session.execute.call_args_list[6].args[0])
         assert "UPDATE refresh_tokens" in revoke and "revoked_at" in revoke
-        window = str(session.execute.call_args_list[3].args[0])
+        window = str(session.execute.call_args_list[7].args[0])
         assert "UPDATE refresh_tokens" in window and "expires_at" in window
     finally:
         app.dependency_overrides.clear()

@@ -57,6 +57,10 @@ def _build_engine_kwargs() -> dict:
         "max_overflow": settings.db_pgbouncer_max_overflow if pgb else settings.db_max_overflow,
         "pool_pre_ping": True,
         "echo": settings.debug,
+        # story #4741 — a database error's text and SQL echo carry no bound values (a person's text, a handover draft, a secret-bearing column): SQLAlchemy prints
+        # `[SQL parameters hidden due to hide_parameters=True]` instead of `[parameters: (…)]`. The driver's own message is redacted at the log record
+        # (app/core/db_error_redaction.py).
+        "hide_parameters": True,
         "connect_args": connect_args,
         # story #4332 — 풀 체크아웃 대기를 요청 범위로 잰다(동작은 기본 AsyncAdaptedQueuePool과 같다). 까디르 4697 ①: 플래그가
         # 켜진 경우에만(꺼져 있으면 기본 풀 · 비용 0).
@@ -104,6 +108,7 @@ worker_engine = create_async_engine(
     max_overflow=settings.worker_db_max_overflow,
     pool_pre_ping=True,
     echo=settings.debug,
+    hide_parameters=True,  # story #4741 — see _build_engine_kwargs
     connect_args={
         **({"statement_cache_size": 0} if settings.db_pgbouncer else {}),
         "server_settings": {"application_name": db_application_name("worker")},

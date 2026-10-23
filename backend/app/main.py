@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import uuid
 from contextlib import asynccontextmanager
 
@@ -12,6 +13,7 @@ from limits.errors import StorageError
 from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
+from app.core.db_error_redaction import safe_exception_text
 from app.core.logging_config import configure_logging
 from app.core.rate_limit import limiter
 from app.models.conversation import MessageContentTooLong
@@ -232,7 +234,7 @@ async def lifespan(app: FastAPI):
             await worker_engine.dispose()
 
 
-from app.routers import a2a, chat_attachment_content, account, activation, activity_logs, admin_billing, background_jobs, admin_unhandled_errors, activity_stream, ads_boost, ads_boost_execution, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_permissions, desktop_commands, agent_personas, agent_run_profiles, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, desktop_relay, desktop_setup, remote_control, watches, api_keys, channel_post_comments, channel_post_comment_replies, engagement_items, insight_snapshots, insights_board, assets, billing_keys, toss_webhooks, org_subscription_checkout, billing_packs, campaigns, content_rules, context_pack, publishing_metrics, connectors, channel_connections, channel_posts, deeplink_manifest, domain_labels, gate_config, gate_metrics, attachments, audit_logs, auth, auth_firebase_internal, auth_native_bootstrap, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, device_installations, dispatch, docs, entities, goals, event_notifications, events, evidence, exclusion, file_locks, gates, github_integration, glance, health, hitl, hitl_config, hypotheses, integrations, invite_accept, judgments, labels, legal, loop_measure_due, loops, material_lineage, mcp, me, meetings, members, measurement_connections, merge_gate, newsletter_send, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_generation_connectors, org_members, organizations, oss, pageview_metering, participation, plan_features, platform_settings, policy_documents, project_access, project_settings, projects, public_docs, public_pageview, public_site_posts, recipe_repeat_schedules, reference_candidates, references, release_notes, resolve, retros, rewards, role_templates, runtime_capabilities, session_context, site_posts, sprints, standups, stories, subscription, support_gateway_token, tasks, team_members, team_presence, today, trust_scores, usage, user_blocks, verdict_capture, verdicts, visual_artifacts, webhooks, workflow_executions, workflow_line_config, workflow_report, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
+from app.routers import a2a, chat_attachment_content, account, activation, activity_logs, admin_billing, background_jobs, admin_unhandled_errors, activity_stream, ads_boost, ads_boost_execution, agent_deployments, agent_gateway, agent_inbox, agent_message_policy, agent_permissions, desktop_commands, agent_personas, agent_run_profiles, agent_routing_rules, agent_runs, agent_sessions, agents, analytics, desktop_mac_link, desktop_relay, desktop_setup, remote_control, watches, api_keys, channel_post_comments, channel_post_comment_replies, engagement_items, insight_snapshots, insights_board, assets, billing_keys, toss_webhooks, org_subscription_checkout, billing_packs, campaigns, content_rules, context_pack, publishing_metrics, connectors, channel_connections, channel_posts, deeplink_manifest, domain_labels, gate_config, gate_metrics, attachments, audit_logs, auth, auth_firebase_internal, auth_native_bootstrap, bridge, channel, command_center, conversations, cron, current_project, dashboard, dependencies, device_installations, dispatch, docs, entities, goals, event_notifications, events, evidence, exclusion, file_locks, gates, github_integration, glance, health, hitl, hitl_config, hypotheses, integrations, invite_accept, judgments, labels, legal, loop_measure_due, loops, material_lineage, mcp, me, meetings, members, measurement_connections, merge_gate, newsletter_send, notification_preferences, notifications, onboarding, open_api_keys, org_invites, org_generation_connectors, org_members, organizations, oss, pageview_metering, participation, plan_features, platform_settings, policy_documents, project_access, project_settings, projects, public_docs, public_pageview, public_site_posts, recipe_repeat_schedules, reference_candidates, references, release_notes, resolve, retros, rewards, role_templates, runtime_capabilities, session_context, site_posts, sprints, standups, stories, subscription, support_gateway_token, tasks, team_members, team_presence, today, trust_scores, usage, user_blocks, verdict_capture, verdicts, visual_artifacts, webhooks, workflow_executions, workflow_line_config, workflow_report, workflow_trigger, workflow_trigger_types, workflow_versions, ws_chat
 
 # 도메인 축 B(org-1st-class-surface-ia-design-b §3): OpenAPI 태그 조직-우선 위계.
 # 개별 라우터는 기존 세부 tag(예 "stories")를 그대로 유지하고 이 4축 태그를 추가로 보유(다중
@@ -297,6 +299,9 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     )
 
 
+_CLOCK_PRESS_PATH = re.compile(r"/api/v2/desktop/setups/[^/]+/clock")
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     """story #4330 — 본문 일시가 오프셋 없어 `OffsetDatetime`에 걸린 오류만 쿼리(4294)와 같은 422 `DATETIME_OFFSET_REQUIRED`
@@ -309,6 +314,10 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             return await http_exception_handler(
                 request, HTTPException(status_code=422, detail=offset_required_detail(".".join(loc), request)),
             )
+    # story #4733 (S5 · P2): what a person typed into a clock edit is never sent back in a refusal — FastAPI's default 422 carries each error's `input` (for a body-level error, the WHOLE body). On the phone's
+    # clock route no error carries it; the rest of the answer is the default's, and every other route's answer is untouched.
+    if _CLOCK_PRESS_PATH.fullmatch(request.url.path):
+        exc = RequestValidationError([{k: v for k, v in err.items() if k != "input"} for err in exc.errors()])
     return await request_validation_exception_handler(request, exc)
 
 
@@ -368,7 +377,10 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     _logger.exception(
         "Unhandled exception on %s %s [error_id=%s]: %s", request.method, request.url.path, error_id, exc
     )
-    detail = str(exc) if settings.debug else "Internal server error"
+    # story #4741 — a database error's text carries the rejected row's values (SQL echo, the driver's message): the log record is redacted at its creation
+    # (app/core/db_error_redaction.py), and the event row and a debug response below take the same safe summary
+    _safe_text = safe_exception_text(exc)
+    detail = _safe_text if settings.debug else "Internal server error"
 
     try:
         from app.services.unhandled_error_events import record_unhandled_error_event
@@ -388,7 +400,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
         )
         await record_unhandled_error_event(
             error_id=error_id, method=request.method, path=request.url.path,
-            exception_class=type(exc).__name__, message=str(exc)[:2000] if str(exc) else None,
+            exception_class=type(exc).__name__,
+            message=_safe_text[:2000] if _safe_text else None,
             org_id=uuid.UUID(_raw_org_id) if _raw_org_id else None,
             user_id=uuid.UUID(_raw_user_id) if _raw_user_id else None,
             request_id=_request_id,
@@ -639,6 +652,7 @@ app.include_router(cron.router)
 app.include_router(auth_firebase_internal.router)
 app.include_router(auth_native_bootstrap.router)
 app.include_router(desktop_setup.router)  # story #4424 — setup-codes/exchange take no login
+app.include_router(desktop_mac_link.router)  # story 4714 AC2 — mails the signed-in person a Mac link (own address only · counted per person)
 app.include_router(desktop_relay.router)  # story #4529 — the device relay (device token only)
 app.include_router(remote_control.router)  # story #4535 — the org's «원격 제어» switch
 app.include_router(agent_permissions.router)  # story #4533 — an agent's permission request · the phones that answer

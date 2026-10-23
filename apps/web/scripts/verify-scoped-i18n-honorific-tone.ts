@@ -223,7 +223,9 @@ export interface TotalLeafFloorViolation {
 // 재측정(story #4343 · 2026-09-27 00:02Z · develop 22e2dd44c + #4723 576d0aa74 위 실측 6233 leaf):
 // 4363(5454의 80%) → 4986(6233 × 0.8). ko leaf가 하한/0.7(≈7123)을 넘게 늘면 자기 테스트의 비 검사가
 // 다시 재측정을 요구한다(의도된 신호 — 하한이 실측과 멀어지면 대량 삭제를 못 잡기 때문).
-export const MIN_TOTAL_LEAF_COUNT = 4986;
+// 재측정(story 4703 · 2026-10-15 · develop 17f333f6d(5110) 위 4703 의 ko 키 +7 = 실측 7126 leaf — develop 단독은 4986/7119 = 0.7004 로 경계였음):
+// 4986 → 5701(7126 × 0.8).
+export const MIN_TOTAL_LEAF_COUNT = 5701;
 
 /** ko.json 전체 leaf 수가 하한을 밑도는지 검사하는 순수 함수 — 위반이면 길이 1 배열,
  * 아니면 빈 배열(다른 판정 함수들과 같은 결, main()이 반환값으로 exit 여부를 결정). */

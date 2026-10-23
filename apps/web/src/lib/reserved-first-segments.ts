@@ -73,7 +73,11 @@ export const RESERVED_FIRST_SEGMENTS = new Set([
   // + native/oauth-return 신설(verify-reserved-first-segments-sync.test.ts가 이 목록 누락을
   // 실측으로 잡았다).
   'native', 'onboarding',
-  'org-briefing', 'organization', 'privacy', 'refund-policy', 'register', 'reset-password',
+  'org-briefing', 'organization',
+  // story 4714 — the phone app's landing and start screen (new top-level routes outside the session layouts); unlisted, `/phone-start` could be read as a
+  // workspace slug (the same fault class as `desktop` · `today` above)
+  'phone-landing', 'phone-start',
+  'privacy', 'refund-policy', 'register', 'reset-password',
   'rewards', 'set-password', 'settings', 'share', 'terms',
   // story #3962(2026-09-17) — 새 최상위 app/today(v3 첫 화면, (authenticated) 밖
   // 별도 라우트 그룹) 신설. 미등재 시 '/today'가 워크스페이스 slug로 오인될 수 있다

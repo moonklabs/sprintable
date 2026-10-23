@@ -73,7 +73,12 @@ async def _captured_story_scans(run) -> list[tuple[str, tuple]]:
             capturing[0] = False
             plans = []
             async with eng.connect() as conn:
-                await conn.exec_driver_sql("SET enable_seqscan = off")
+                # story #4731 — «can the index be used», not «does the planner happen to pick it for this many rows»: the choice between the 0415
+                # index and a small index plus a sort / a bitmap scan / a join driven from another table depends on how many rows (and which statistics)
+                # the tests that ran before left in the shared tables — true in one big session, not in a CI shard. The paths that would hide the index
+                # are switched off, so the plan shows the index whenever it CAN serve the statement (drop the index → the plan loses it → red).
+                for knob in ("enable_seqscan", "enable_bitmapscan", "enable_sort", "enable_nestloop"):
+                    await conn.exec_driver_sql(f"SET {knob} = off")
                 for statement, params in caught:
                     rows = (await conn.exec_driver_sql("EXPLAIN " + statement, params)).all()
                     plans.append((statement, "\n".join(r[0] for r in rows)))
@@ -113,8 +118,9 @@ def test_outer_from_table_skips_select_list_subqueries():
 def _assert_uses_index(plans):
     assert plans, "잡힌 문장이 없다 — 가드가 헛돈다(조회 모양이 바뀌었으면 필터를 맞출 것)"
     for statement, plan in plans:
-        assert "Seq Scan on stories" not in plan, f"stories 순차 훑기가 남았다 — 0415 인덱스를 못 쓴다:\n{statement}\n{plan}"
-        assert _INDEX in plan, f"0415 인덱스를 안 탄다:\n{statement}\n{plan}"
+        # the plan comes FIRST and the statement is cut: a long statement used to push the plan out of the failure text (story #4731)
+        assert "Seq Scan on stories" not in plan, f"stories 순차 훑기가 남았다 — 0415 인덱스를 못 쓴다.\n플랜:\n{plan}\n문장(앞부분): {' '.join(statement.split())[:400]}"
+        assert _INDEX in plan, f"0415 인덱스를 안 탄다.\n플랜:\n{plan}\n문장(앞부분): {' '.join(statement.split())[:400]}"
 
 
 @pytest.mark.parametrize("unattached", [False, True], ids=["board-list", "unattached-bucket"])
@@ -127,12 +133,34 @@ async def test_story_list_can_use_the_project_index(unattached):
     _assert_uses_index(await _captured_story_scans(run))
 
 
-async def test_glance_attention_project_filters_can_use_the_project_index():
+async def test_glance_attention_project_filters_are_written_for_the_project_index():
+    """story #4731 — the attention statement joins evidence (EXISTS), gate and dependencies (NOT EXISTS) and orders by a sub-select, so which table the planner
+    starts from depends on the other tables' sizes: in one big session it started from `stories` through 0415, in a CI shard (small evidence / gate) it
+    did not, and no planner knob list ends that. What this test guards is what 4299 asked for: the project-filtered statement has the SHAPE the 0415 index
+    serves — its `stories` filter carries `project_id` (the index's leading column) and `deleted_at IS NULL` (its partial condition) — and the 0415 index
+    still has that definition (see the next test). The plan itself is proved for the two list statements, whose plans do not depend on other tables."""
     from app.routers.glance import _compute_attention_for_project
 
     async def run(s, org, proj):
         await _compute_attention_for_project(s, org, proj)
 
     plans = await _captured_story_scans(run)
-    # attention의 `FROM stories … project_id = …`(in-review · stalled 모집단 등)만 — 게이트 · 의존성에서 stories를 JOIN하는 문장은 별개.
-    _assert_uses_index([(st, pl) for st, pl in plans if _outer_from_table(st) == "stories"])
+    own = [(st, pl) for st, pl in plans if _outer_from_table(st) == "stories"]
+    assert own, "no attention statement filters stories by project any more — the guard has nothing to look at"
+    for statement, _plan in own:
+        low = " ".join(statement.split()).lower()
+        assert "stories.project_id =" in low, f"the attention statement lost its project_id filter:\n{low[:400]}"
+        assert "stories.deleted_at is null" in low, f"the attention statement lost the partial condition `deleted_at IS NULL` of 0415:\n{low[:400]}"
+
+
+async def test_the_0415_index_keeps_the_definition_the_queries_are_written_for():
+    eng = create_async_engine(_ASYNC)
+    try:
+        async with eng.connect() as conn:
+            rows = (await conn.execute(text("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname = :n"), {"n": _INDEX})).all()
+    finally:
+        await eng.dispose()
+    assert len(rows) == 1, f"{_INDEX} is missing"
+    definition = " ".join(rows[0][0].lower().split())
+    assert "(project_id, created_at desc, id desc)" in definition, definition
+    assert "where (deleted_at is null)" in definition, definition

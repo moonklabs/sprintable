@@ -81,6 +81,7 @@ const press = async (name: string) => {
 };
 const commandLine = () => container.querySelector('[data-testid="agent-command-line"]');
 const ko = koMessages.chats.agentSession;
+const enMessagesAgent = enMessages.chats.agentSession;
 /** run the polls: every 1.5 s */
 async function poll(times = 1) { for (let i = 0; i < times; i++) { await act(async () => { await vi.advanceTimersByTimeAsync(1_500); }); await settle(); } }
 
@@ -138,7 +139,7 @@ describe('[4534] the strip inside the phone app', () => {
     }
   });
 
-  it('story #4599 (Yuna ① · PO 14:25Z): held by a macOS window — the phone line («여기서 [세션 끝내기]») and one button, [세션 끝내기] ([멈춤] would not work there)', async () => {
+  it('story #4599 (Yuna ① · PO 14:25Z): held by a macOS window — the phone line («여기서 [인계 없이 끝내기]», story 4733: renamed) and one button, [인계 없이 끝내기] ([멈춤] would not work there)', async () => {
     sessionView = { ...sessionView, state: 'working', activity: 'waiting_system', system: { folder: 'documents' } };
     server(res(201, {}));
     await render();
@@ -159,7 +160,7 @@ describe('[4534] the strip inside the phone app', () => {
     }
   });
 
-  it('story #4599: [세션 끝내기] → the confirm dialog (title · body · [취소] focused first) → [취소] signs nothing', async () => {
+  it('story #4599: [인계 없이 끝내기] (story 4733: was [세션 끝내기]) → the confirm dialog (title · body · [취소] focused first) → [취소] signs nothing', async () => {
     sessionView = { ...sessionView, state: 'working', activity: 'waiting_system' };
     server(res(201, {}));
     await render();
@@ -170,7 +171,7 @@ describe('[4534] the strip inside the phone app', () => {
     expect(document.activeElement).toBe(cancel);
     await press(ko.endDialog.cancel);
     expect(document.body.textContent).not.toContain(ko.endDialog.title);
-    expect(phoneCall).not.toHaveBeenCalled();
+    expect(phoneCall.mock.calls.filter((c) => c[0] === 'command.sign')).toEqual([]); // nothing was signed (the dialog's one look at the key's id is a read)
     expect(buttons()).toEqual([ko.button.endSession]);
   });
 
@@ -558,5 +559,97 @@ describe('[4534] [지금 지시] only when the daemon can put it into the turn',
     await poll(1);
     expect(commandLine()?.textContent).toBe(ko.command.sentAsMessageNotNow);
     expect(calls.some((c) => c.url.endsWith('/messages'))).toBe(true);
+  });
+});
+
+
+describe('[4733 S4b] the hard end\'s dialog points at the phone\'s own [세션 종료] — only where that button exists (Yuna 4733 §6)', () => {
+  const SETUP = '11111111-2222-4333-8444-555555555555';
+  const KEY = 'p-1';
+  /** the BFF as above, plus the three reads the dialog makes when it opens */
+  function serverWithClock(world: { startable?: unknown; clock?: Response; devices?: unknown }) {
+    server(res(201, {}));
+    const base = fetchWithAuth.getMockImplementation()!;
+    fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === '/api/remote-devices') return res(200, { devices: world.devices ?? [{ id: KEY, confirm_number: '482 917' }] });
+      if (url.startsWith('/api/desktop/startable')) return res(200, world.startable ?? { remote_control: true, computers: [{ setup_id: SETUP, device_name: 'SYJ-MacBook-Pro', reachable: true, agents: [{ agent_member_id: AGENT, name: 'Dev', can_command: true, projects: [], running: true }] }] });
+      if (url.includes('/clock?phone_key_id=')) return (world.clock ?? res(200, { remote_control: true, reachable: true, supported: true, view: null })).clone();
+      return base(url, init);
+    });
+  }
+  const openDialog = async () => {
+    phoneCall.mockImplementation(async (type: string) => (type === 'device.key.info' ? { id: 'k', ok: true, key_number: '482 917' } : { id: 'x', ok: false, code: 'cancelled' }));
+    sessionView = { ...sessionView, state: 'working', activity: 'waiting_system' };
+    await render();
+    await press(ko.button.endSession);
+    await settle(12);
+  };
+
+  it('the dialog\'s new title, body and confirm are the renamed words; the extra paragraph is drawn when the agent\'s computer speaks `clock` and this person may command it', async () => {
+    serverWithClock({});
+    await openDialog();
+    expect(document.body.textContent).toContain('인계 없이 세션을 끝낼까요?');
+    expect(document.querySelector('[data-testid="agent-end-confirm"]')?.textContent).toBe('인계 없이 끝내기');
+    expect(document.querySelector('[data-testid="agent-end-use-clock"]')?.textContent).toBe('인계는 남기지 않아요 — 인계를 남기려면 [세션 종료]를 쓰세요.');
+  });
+
+  it.each([
+    ['an old app on that computer (`supported` false)', { clock: res(200, { remote_control: true, reachable: true, supported: false, view: null }) }],
+    ['a person who may not command that computer (403)', { clock: res(403, { error: { code: 'not_allowed_to_command' } }) }],
+    ['remote control off', { clock: res(200, { remote_control: false, reachable: true, supported: true, view: null }) }],
+    ['the agent is on none of this phone\'s computers', { startable: { remote_control: true, computers: [{ setup_id: SETUP, device_name: 'M', reachable: true, agents: [] }] } }],
+    ['the agent has no running session on that computer (no [세션 종료] row for it)', { startable: { remote_control: true, computers: [{ setup_id: SETUP, device_name: 'M', reachable: true, agents: [{ agent_member_id: AGENT, name: 'Dev', can_command: true, projects: [], running: false }] }] } }],
+    ['that computer cannot be reached now', { clock: res(200, { remote_control: true, reachable: false, supported: true, view: null }) }],
+    ['this phone is paired with nothing', { startable: { remote_control: true, computers: [] } }],
+    ['the phone\'s key is not on the server\'s list', { devices: [{ id: 'x', confirm_number: '000 000' }] }],
+  ])('%s → the paragraph is NOT drawn (it would point at nothing)', async (_name, world) => {
+    serverWithClock(world as never);
+    await openDialog();
+    expect(document.body.textContent).toContain('인계 없이 세션을 끝낼까요?');
+    expect(document.querySelector('[data-testid="agent-end-use-clock"]')).toBeNull();
+  });
+
+  it('the session\'s OWN computer decides: the server names it (`setup_id`) → that computer\'s `clock` answer counts, not another computer\'s where the agent also runs', async () => {
+    const OTHER = '99999999-2222-4333-8444-555555555555';
+    serverWithClock({
+      startable: { remote_control: true, computers: [
+        { setup_id: OTHER, device_name: 'Mini', reachable: true, agents: [{ agent_member_id: AGENT, name: 'Dev', can_command: true, projects: [], running: true }] },
+        { setup_id: SETUP, device_name: 'M', reachable: true, agents: [{ agent_member_id: AGENT, name: 'Dev', can_command: true, projects: [], running: true }] },
+      ] },
+    });
+    const base = fetchWithAuth.getMockImplementation()!;
+    fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => (url.includes(`/api/desktop/setups/${OTHER}/clock?`) ? res(200, { remote_control: true, reachable: true, supported: false, view: null }) : base(url, init)));
+    sessionView = { ...sessionView, setup_id: SETUP };
+    await openDialog();
+    expect(document.querySelector('[data-testid="agent-end-use-clock"]')).not.toBeNull(); // SETUP speaks clock
+    // the same two computers, but the session runs on the one that does NOT speak it
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    sessionView = { ...sessionView, setup_id: OTHER };
+    await openDialog();
+    expect(document.querySelector('[data-testid="agent-end-use-clock"]')).toBeNull();
+  });
+
+  it('two computers run the agent and the server names none → no guess: no paragraph', async () => {
+    serverWithClock({
+      startable: { remote_control: true, computers: [
+        { setup_id: SETUP, device_name: 'M', reachable: true, agents: [{ agent_member_id: AGENT, name: 'Dev', can_command: true, projects: [], running: true }] },
+        { setup_id: '88888888-2222-4333-8444-555555555555', device_name: 'Mini', reachable: true, agents: [{ agent_member_id: AGENT, name: 'Dev', can_command: true, projects: [], running: true }] },
+      ] },
+    });
+    await openDialog();
+    expect(document.querySelector('[data-testid="agent-end-use-clock"]')).toBeNull();
+  });
+
+  it('English: the same structure with the English words', async () => {
+    serverWithClock({});
+    sessionView = { ...sessionView, state: 'working', activity: 'waiting_system' };
+    phoneCall.mockImplementation(async (type: string) => (type === 'device.key.info' ? { id: 'k', ok: true, key_number: '482 917' } : { id: 'x', ok: false, code: 'cancelled' }));
+    await render('en');
+    await press(enMessagesAgent.button.endSession);
+    await settle(12);
+    expect(enMessagesAgent.button.endSession).toBe('End without a handoff');
+    expect(document.body.textContent).toContain('End the session without a handoff?');
+    expect(document.querySelector('[data-testid="agent-end-use-clock"]')?.textContent).toBe('No handoff is left — to leave one, use [End session].');
   });
 });

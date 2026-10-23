@@ -63,8 +63,10 @@ describe('verify-chat-v3-no-raw-eventsource(story #4008 AC7)', () => {
     expect(hasRawEventSource(commentOnlySource)).toBe(false);
   });
 
-  it('use-chat-sse.ts 훅 자체는 EventSource를 직접 연다(이 가드의 스캔 대상 밖 — hooks/ 디렉터리)', () => {
+  it('스트림을 여는 자리는 멀티플렉서 한 곳이다 — use-chat-sse.ts 훅은 더 이상 EventSource를 직접 열지 않는다(story #4698 · 이 가드의 스캔 대상 밖 — hooks/ 디렉터리)', () => {
     const hookSrc = fs.readFileSync(path.resolve(SCRIPT_DIR, '../src/hooks/use-chat-sse.ts'), 'utf-8');
-    expect(hasRawEventSource(hookSrc)).toBe(true);
+    expect(hasRawEventSource(hookSrc)).toBe(false);
+    const muxSrc = fs.readFileSync(path.resolve(SCRIPT_DIR, '../src/lib/realtime/sse-multiplexer.ts'), 'utf-8');
+    expect(hasRawEventSource(muxSrc)).toBe(true); // 양성 대조 — 이 가드의 검출 로직이 실제 연결 코드를 본다
   });
 });

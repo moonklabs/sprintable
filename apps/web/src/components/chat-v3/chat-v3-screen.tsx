@@ -297,7 +297,6 @@ export function ChatV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3Fl
   }, [me, loadConversations]);
 
   useChatSse({
-    currentTeamMemberId: me?.id,
     onConversationMessage: handleThreadMessage,
     // story #4442 — this tab's own sends update the rail row (the echo is dropped; the chat column already has the message);
     // my message never leaves an unread dot; a conversation the rail doesn't hold yet reads the rail again

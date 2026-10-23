@@ -1,14 +1,15 @@
 /**
- * story 4668 — Yuna's capture list (chat f7633ed9 07:16Z): the fork (default · changed) · «데스크톱 앱 받기» («더 보기» folded / open) ·
- * the connect step after [건너뛰기] · 390 wrapping. The real OnboardingForm (bundled here with esbuild — not copied) and the real
- * Tailwind build of globals.css, in Chromium. No server of ours: the page and its API answers are made here (the shared stub list
- * `support/layout-stubs.ts` + two modules this form takes more names from, overridden in this file only). Harness = PR 4972's
- * (`allowed-hosts.4580.layout.spec.ts`) via `remote-off.4583.layout.spec.ts`.
+ * story 4668 → 4715 — the onboarding's screens at 1440 and 390, light and dark. Story 4715 replaced the organization-name step, the fork
+ * and «데스크톱 앱 받기» with one first screen (plan yuna/4715-plan-1016.md): on a Mac «에이전트는 내 Mac에서 돌아가요» + [Mac 앱 받기];
+ * elsewhere «지금은 Mac 앱만 있어요» + the web way as the button; pending invites first (the invited card); the web way keeps project →
+ * agent → connect. The real OnboardingForm (bundled here with esbuild — not copied) and the real Tailwind build of globals.css, in
+ * Chromium. No server of ours: the page and its API answers are made here (the shared stub list `support/layout-stubs.ts` + two modules
+ * this form takes more names from, overridden in this file only). Harness = PR 4972's (`allowed-hosts.4580.layout.spec.ts`) via
+ * `remote-off.4583.layout.spec.ts`.
  *
- * Each scene is also an assertion: the h1 and the step label (bar only before the fork · «3 / 3» · «5 / 5») · the one primary control
- * on the download screen is the card's [다운로드] · «더 보기» folded hides the remote-control block and the way back · at 390 nothing
- * is wider than the viewport (no horizontal scroll) and the Korean lines wrap by words (break-keep). Names
- * `4668-{scene}-{L|D}-{width}.png`. Files go to CAPTURE_OUT when set, else this test's output folder.
+ * Each scene is also an assertion: the h1 · the step label (none on the first screen · «3 / 3» on connect) · the one primary control on
+ * the Mac screen is the card's [Mac 앱 받기] · at 390 nothing is wider than the viewport (no horizontal scroll) and the Korean lines wrap
+ * by words (break-keep). Names `4715-{scene}-{L|D}-{width}.png`. Files go to CAPTURE_OUT when set, else this test's output folder.
  */
 import { mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -74,8 +75,11 @@ const MANIFEST = {
   product: 'Sprintable Dev Setup', version: '0.4.0', build: 'abc1234', notarized: false,
   url: 'https://storage.googleapis.com/sprintable-desktop-releases-dev/Sprintable-Dev-Setup.dmg',
 };
+const INVITE = { invite_id: 'inv-1', org_id: 'org-x', org_name: '문클랩스', role: 'member', expires_at: '2026-10-30T00:00:00Z' };
 const API: Record<string, Answer> = {
-  'GET /api/auth/me': { data: { member_id: 'u-1', email_verified: true, email_verification_required: true } },
+  'GET /api/auth/me': { data: { member_id: 'u-1', email_verified: true, email_verification_required: true, org_id: null, org_member_id: null, display_name: '송윤재' } },
+  // story 4715: arrival reads the pending invites before it makes the organization (none here; the invited scene overrides it)
+  'GET /api/invites/mine': { invites: [] }, // the backend's one shape (MyInvitesResponse · no envelope)
   'POST /api/organizations': { data: { id: 'org-1' } },
   'POST /api/auth/refresh': {},
   'POST /api/projects': { data: { id: 'proj-1' } },
@@ -87,8 +91,9 @@ const API: Record<string, Answer> = {
   'GET /api/organizations/org-1/remote-control': { data: { enabled: false, enabled_at: null, can_change: true, owner_names: ['송윤재'], connected_setups: 0 } },
 };
 
-async function open(page: Page, o: { width: number; theme: 'L' | 'D'; locale?: 'ko' | 'en' }) {
+async function open(page: Page, o: { width: number; theme: 'L' | 'D'; locale?: 'ko' | 'en'; mac?: boolean; api?: Record<string, Answer> }) {
   const { js, css } = await build();
+  const api = { ...API, ...(o.api ?? {}) };
   await page.setViewportSize({ width: o.width, height: o.width < 500 ? 844 : 1000 });
   await page.unrouteAll();
   await page.route('http://preview.test/**', async (route) => {
@@ -96,15 +101,18 @@ async function open(page: Page, o: { width: number; theme: 'L' | 'D'; locale?: '
     if (url.pathname === '/') {
       return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="${o.locale ?? 'ko'}" class="${o.theme === 'D' ? 'dark' : ''}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body class="bg-background text-foreground"><div id="root"></div></body></html>` });
     }
-    const a = API[`${route.request().method()} ${url.pathname}`] ?? API[url.pathname];
+    const a = api[`${route.request().method()} ${url.pathname}`] ?? api[url.pathname];
     if (a === undefined) return route.fulfill({ status: 404, body: '{}' });
     const { __status, body, headers } = (a && typeof a === 'object' && '__status' in a ? a : { __status: 200, body: a }) as { __status: number; body: unknown; headers?: Record<string, string> };
     return route.fulfill({ status: __status, contentType: 'application/json', body: JSON.stringify(body), ...(headers ? { headers } : {}) });
   });
   await page.goto('about:blank');
   await page.goto('http://preview.test/');
-  // a Mac's user agent — the download card draws [다운로드] for a Mac only (the harness's Chromium reports Linux)
-  await page.evaluate(() => { Object.defineProperty(navigator, 'userAgent', { value: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36', configurable: true }); });
+  // a Mac's user agent unless the scene is the not-Mac face — the first screen and its download card follow the device (the harness's
+  // Chromium reports Linux)
+  if (o.mac !== false) {
+    await page.evaluate(() => { Object.defineProperty(navigator, 'userAgent', { value: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36', configurable: true }); });
+  }
   const thrown: string[] = [];
   page.on('pageerror', (e) => thrown.push(e.message));
   await page.addScriptTag({ content: js });
@@ -133,25 +141,14 @@ async function fitsViewport(page: Page, width: number) {
 const card = (page: Page) => page.getByTestId('onboarding-card');
 const stepOf = (page: Page) => page.getByTestId('onboarding-step-of');
 
-async function makeOrg(page: Page) {
-  const input = page.locator('input').first();
-  await expect(input).toBeEnabled(); // the draft gate opens once /api/auth/me answered
-  await input.fill('문클랩스'); // story 4669: the name alone — the slug field is gone (the server derives it)
-  await page.getByRole('button', { name: '조직 만들기' }).click();
-  await expect(page.locator('h1')).toHaveText('에이전트를 어디서 돌릴까요?');
-}
-
-async function toDownload(page: Page) {
-  await makeOrg(page);
-  await page.getByTestId('onboarding-where-continue').click();
-  await expect(page.locator('h1')).toHaveText('데스크톱 앱 받기');
-  await expect(page.getByTestId('desktop-download-button')).toBeVisible();
+/** story 4715: arrival makes the organization on its own (no name field) and lands on the one first screen */
+async function toFirst(page: Page, mac = true) {
+  await expect(page.locator('h1')).toHaveText(mac ? '에이전트는 내 Mac에서 돌아가요' : '지금은 Mac 앱만 있어요');
 }
 
 async function toSkippedConnect(page: Page) {
-  await makeOrg(page);
-  await page.locator('[data-testid=onboarding-where-web] input').check();
-  await page.getByTestId('onboarding-where-continue').click();
+  await toFirst(page);
+  await page.getByTestId('onboarding-first-connect').click();
   await expect(page.locator('h1')).toHaveText('첫 프로젝트 만들기');
   await page.locator('input').first().fill('첫 프로젝트');
   await page.getByRole('button', { name: '프로젝트 만들기' }).click();
@@ -165,50 +162,51 @@ for (const width of [1440, 390]) {
   for (const theme of ['L', 'D'] as const) {
     const tag = `${theme}-${width}`;
 
-    test(`fork · default (app) and changed (web) · ${tag}`, async ({ page }) => {
+    test(`first screen · a Mac · ${tag}`, async ({ page }) => {
       await open(page, { width, theme });
-      await makeOrg(page);
-      await expect(stepOf(page)).toHaveCount(0); // bar only before the fork is chosen
-      await expect(page.locator('[data-testid=onboarding-where-app] input')).toBeChecked();
-      await expect(page.getByTestId('onboarding-where-not-mac')).toHaveCount(0);
-      await fitsViewport(page, width);
-      await shot(page, card(page), `4668-1-fork-default-${tag}`);
-      await page.locator('[data-testid=onboarding-where-web] input').check();
-      await expect(page.getByTestId('onboarding-progress-bar')).toHaveCSS('width', /.+/);
-      await shot(page, card(page), `4668-1-fork-web-${tag}`);
-    });
-
-    test(`download · «더 보기» folded and open · ${tag}`, async ({ page }) => {
-      await open(page, { width, theme });
-      await toDownload(page);
-      await expect(stepOf(page)).toHaveText('3 / 3');
-      // the one primary control is the card's [다운로드]
+      await toFirst(page);
+      await expect(stepOf(page)).toHaveCount(0); // no progress strip on the first screen
+      // the one primary control is the card's [Mac 앱 받기]; the web way is a text link
       const primaries = page.locator('a[class*="bg-primary"], button[class*="bg-primary"]');
       await expect(primaries).toHaveCount(1);
       await expect(primaries.first()).toHaveAttribute('data-testid', 'desktop-download-button');
-      await expect(page.getByTestId('onboarding-download-more')).toHaveAttribute('aria-expanded', 'false');
-      await expect(page.getByTestId('onboarding-remote-control')).toHaveCount(0);
-      await expect(page.getByTestId('onboarding-download-back-to-choice')).toHaveCount(0);
+      await expect(primaries.first()).toHaveText('Mac 앱 받기');
+      await expect(page.getByTestId('onboarding-first-org')).toHaveText('송윤재의 조직에서 시작해요 · 이름은 설정에서 바꿀 수 있어요');
+      await expect(page.locator('input[type="radio"]')).toHaveCount(0);
       await fitsViewport(page, width);
-      await shot(page, card(page), `4668-2-download-folded-${tag}`);
-      await page.getByTestId('onboarding-download-more').click();
-      await expect(page.getByTestId('onboarding-download-more')).toHaveAttribute('aria-expanded', 'true');
-      await expect(page.getByTestId('onboarding-remote-control')).toBeVisible();
-      await expect(page.getByTestId('onboarding-download-back-to-choice')).toBeVisible();
+      await shot(page, card(page), `4715-1-first-mac-${tag}`);
+    });
+
+    test(`first screen · not a Mac · ${tag}`, async ({ page }) => {
+      await open(page, { width, theme, mac: false });
+      await toFirst(page, false);
+      await expect(page.getByTestId('onboarding-first-connect')).toHaveText('이미 돌고 있는 에이전트 연결하기');
+      await expect(page.getByTestId('desktop-download-card')).toHaveCount(0);
       await fitsViewport(page, width);
-      await shot(page, card(page), `4668-2-download-open-${tag}`);
+      await shot(page, card(page), `4715-2-first-not-mac-${tag}`);
+    });
+
+    test(`pending invite · the invited card, no organization made · ${tag}`, async ({ page }) => {
+      const made: string[] = [];
+      page.on('request', (r) => { if (r.method() === 'POST' && r.url().endsWith('/api/organizations')) made.push(r.url()); });
+      await open(page, { width, theme, api: { 'GET /api/invites/mine': { invites: [INVITE] } } });
+      await expect(page.getByTestId('setup-invited')).toContainText('초대받은 조직이 있어요');
+      await expect(page.getByTestId('setup-invited-own-org')).toHaveText('내 조직을 새로 만들기');
+      expect(made).toHaveLength(0);
+      await fitsViewport(page, width);
+      await shot(page, page.getByTestId('onboarding-invited'), `4715-3-invited-${tag}`);
     });
 
     test(`connect after [건너뛰기] · ${tag}`, async ({ page }) => {
       await open(page, { width, theme });
       await toSkippedConnect(page);
-      await expect(stepOf(page)).toHaveText('5 / 5');
+      await expect(stepOf(page)).toHaveText('3 / 3');
       await expect(page.getByTestId('connect-step-no-agent')).toBeVisible();
       await expect(page.getByTestId('connect-step-make-agent')).toBeVisible();
       await expect(page.getByText('API Key 발급에 실패했어요', { exact: false })).toHaveCount(0);
       await expect(page.getByRole('button', { name: '첫 지시 보내기' })).toHaveCount(0);
       await fitsViewport(page, width);
-      await shot(page, card(page), `4668-3-connect-skipped-${tag}`);
+      await shot(page, card(page), `4715-4-connect-skipped-${tag}`);
     });
   }
 }

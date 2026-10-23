@@ -29,6 +29,7 @@ import { useUnifiedSwitcher, withSwitchedSlugs, type OrgSwitcherItem, type Proje
 import { orgRoleLabel } from '@/lib/org-member-role';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { ProjectLimitBanner } from '@/components/nav/project-limit-banner';
+import { NewProjectMacBlock } from '@/components/nav/new-project-mac-block';
 
 // story #2076: 로직(withSwitchedSlugs 포함)이 hooks/use-unified-switcher.ts로 이동했다 —
 // 사이드바(UnifiedSwitcher, ≥1024)와 신규 ContextSwitcherChip(top-bar 칩+바텀시트, <1024)이
@@ -214,6 +215,7 @@ export function UnifiedSwitcher({
           <DialogHeader>
             <DialogTitle>{t('switcherNewProjectDialogTitle')}</DialogTitle>
           </DialogHeader>
+          <NewProjectMacBlock orgId={s.currentOrg?.orgId} />
           <form onSubmit={(e) => { e.preventDefault(); void s.createProject(s.newProjectName, s.newProjectDesc); }} className="space-y-3">
             {/* [SID:4681] (Yuna §K): the plan's project limit — a warning banner at the form's top (in place of the general failure line below) */}
             {s.createProjectLimit && <ProjectLimitBanner key={s.createProjectLimitNonce} limit={s.createProjectLimit.limit} free={s.createProjectLimit.free} />}

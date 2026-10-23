@@ -55,14 +55,9 @@ ARG NEXT_PUBLIC_OAUTH_ENABLED
 ENV NEXT_PUBLIC_OAUTH_ENABLED=${NEXT_PUBLIC_OAUTH_ENABLED}
 ARG NEXT_PUBLIC_GA4_MEASUREMENT_ID
 ENV NEXT_PUBLIC_GA4_MEASUREMENT_ID=${NEXT_PUBLIC_GA4_MEASUREMENT_ID}
-# story #2078(E-ARCH 0단계) — SSE 멀티플렉서 롤백 플래그. dev만 GO(오르테가군 판정,
-# 2026-07-21) — prod는 develop→main 48커밋 일괄승격에 얹으면 문제 발생 시 원인 격리가
-# 안 돼 별도 판단으로 미룬다. 기본값 false(미설정 시 dev-safe fallback).
-ARG NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED=false
-ENV NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED=${NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED}
 # story #2728 후속(2026-08-17) — apps/web/src/lib/ee.ts의 isEEEnabled()가 읽는 빌드타임
 # 인라인 값. 여태 ARG/ENV 어디에도 배선된 적이 없어 dev/prod 둘 다 항상 undefined(=false)
-# 였다 — 기본값 false(미설정 시 dev-safe fallback, SSE_MULTIPLEX_ENABLED와 동일 컨벤션).
+# 였다 — 기본값 false(미설정 시 dev-safe fallback).
 ARG NEXT_PUBLIC_EE_ENABLED=false
 ENV NEXT_PUBLIC_EE_ENABLED=${NEXT_PUBLIC_EE_ENABLED}
 # story #3260(2026-08-31, 페드루 PO 조건부 승인) — apps/web/src/lib/support-widget-flag.ts의

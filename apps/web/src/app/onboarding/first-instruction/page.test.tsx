@@ -57,6 +57,28 @@ describe('FirstInstructionPage (서버)', () => {
     expect(out.props.projectId).toBe('proj-9');
   });
 
+  // story 4714: the phone's start screen opens the started agent's conversation in the project the session was started in
+  it('`project` (a uuid) is the project the conversation opens in; absent or not a uuid → the session\'s default project', async () => {
+    getServerSessionMock.mockResolvedValue({ user_id: 'me', email: 'me@x.dev', access_token: 'tok', org_id: 'org-1', project_id: 'proj-9' });
+    const PROJECT = '33333333-4444-4555-8666-777777777777';
+    const out = async (project?: string) => ((await FirstInstructionPage({ searchParams: Promise.resolve({ agent: 'agent-1', ...(project ? { project } : {}) }) })) as unknown as { props: { projectId: string } }).props.projectId;
+    expect(await out(PROJECT)).toBe(PROJECT);
+    const pinned = async (project?: string) => ((await FirstInstructionPage({ searchParams: Promise.resolve({ agent: 'agent-1', ...(project ? { project } : {}) }) })) as unknown as { props: { projectPinned: boolean } }).props.projectPinned;
+    expect(await pinned(PROJECT)).toBe(true); // named: the checklist conversation of another project does not win
+    expect(await pinned()).toBe(false);
+    expect(await pinned('not-a-uuid')).toBe(false);
+    expect(await out()).toBe('proj-9');
+    expect(await out('not-a-uuid')).toBe('proj-9');
+    expect(await out('../../x')).toBe('proj-9');
+  });
+
+  it('logged out: the project survives the round trip through /login?next=', async () => {
+    getServerSessionMock.mockResolvedValue(null);
+    await expect(FirstInstructionPage({ searchParams: Promise.resolve({ agent: 'agent-1', project: '33333333-4444-4555-8666-777777777777' }) })).rejects.toThrow('REDIRECT:');
+    const target = redirectMock.mock.calls[0][0] as string;
+    expect(decodeURIComponent(target.slice('/login?next='.length))).toContain('project=33333333-4444-4555-8666-777777777777');
+  });
+
   // story #4158 — 임시 readNavV3Flags()가 개별 isXEnabled() 3개를 그대로 위임하는지.
   it('⭐chatV3Enabled 플래그를 읽어 자식에 넘김', async () => {
     const original = process.env.CHAT_V3_ENABLED;

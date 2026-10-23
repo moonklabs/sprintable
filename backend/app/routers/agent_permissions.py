@@ -191,6 +191,28 @@ async def delete_remote_device(
     return {"removed": removed, **({"session": session} if removed else {})}
 
 
+@router.delete("/remote-devices/{phone_id}/computers/{computer_id}")
+async def delete_remote_device_computer(
+    phone_id: uuid.UUID,
+    computer_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story 4734: [빼기] once for the computer — the phone's pair with every setup of it (the pairing unit is the computer)."""
+    member = await _person(db, auth, org_id, interactive=False)
+    try:
+        removed = await agent_permissions.remove_computer_pairs(
+            db, phone_id=phone_id, computer_id=computer_id, actor_member_id=uuid.UUID(str(member.id)),
+            actor_is_admin=await is_active_org_admin(db, member), org_id=org_id,
+        )
+    except DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await db.commit()
+    return {"removed": removed > 0, "pairs": removed}
+
+
 @router.delete("/remote-devices/{phone_id}/pairs/{setup_id}")
 async def delete_remote_device_pair(
     phone_id: uuid.UUID,

@@ -40,21 +40,20 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function fillOrgForm() {
-  const nameInput = container.querySelector('input') as HTMLInputElement;
-  const setNative = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
-  await act(async () => {
-    setNative.call(nameInput, 'Test Org');
-    nameInput.dispatchEvent(new Event('input', { bubbles: true }));
-  });
+// story 4715: no name field — arrival reads who the person is and their invites (none), then sends the organization itself
+function arrivalAnswer(url: string): Response | null {
+  if (url === '/api/auth/me') return { ok: true, json: async () => ({ data: { member_id: 'u-1', email_verified: true, org_id: null, org_member_id: null } }) } as Response;
+  if (url === '/api/invites/mine') return { ok: true, json: async () => ({ invites: [] }) } as Response; // the backend's one shape (no envelope)
+  return null;
 }
 
-function submitButton(): HTMLButtonElement {
-  const btns = Array.from(container.querySelectorAll('button'));
-  return btns.find((b) => /조직 만들기|Create Organization/.test(b.textContent ?? '')) as HTMLButtonElement;
+async function arrive() {
+  await act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); });
 }
 
 function planLimitFetchStub(url: string) {
+  const a = arrivalAnswer(url);
+  if (a) return a;
   if (url === '/api/onboarding/events') return { ok: true, json: async () => ({}) } as Response;
   if (url === '/api/organizations') {
     return {
@@ -79,9 +78,7 @@ describe('OnboardingForm — PLAN_LIMIT_EXCEEDED (story #2470)', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => planLimitFetchStub(url)));
 
     await act(async () => { root.render(wrap('ko')); });
-    await fillOrgForm();
-    await act(async () => { submitButton().click(); });
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    await arrive();
 
     // ⚠️UpgradeModal은 base-ui Dialog(portal)라 container 밖 document.body에 렌더된다
     // (E-UI-DAEGBYEON P1-01 교훈 — "base-ui Dialog portal은 document.body 렌더"). container만
@@ -100,9 +97,7 @@ describe('OnboardingForm — PLAN_LIMIT_EXCEEDED (story #2470)', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => planLimitFetchStub(url)));
 
     await act(async () => { root.render(wrap('en')); });
-    await fillOrgForm();
-    await act(async () => { submitButton().click(); });
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    await arrive();
 
     expect(document.body.textContent).toContain('The free plan allows up to 1 organization');
     expect(document.body.querySelector('a[href="/dashboard/settings"]')).not.toBeNull();
@@ -110,6 +105,8 @@ describe('OnboardingForm — PLAN_LIMIT_EXCEEDED (story #2470)', () => {
 
   it('limit이 1이 아닌 값이면 그 값 그대로 보간된다(하드코딩 아님)', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const a = arrivalAnswer(url);
+      if (a) return a;
       if (url === '/api/onboarding/events') return { ok: true, json: async () => ({}) } as Response;
       if (url === '/api/organizations') {
         return {
@@ -121,15 +118,15 @@ describe('OnboardingForm — PLAN_LIMIT_EXCEEDED (story #2470)', () => {
     }));
 
     await act(async () => { root.render(wrap('ko')); });
-    await fillOrgForm();
-    await act(async () => { submitButton().click(); });
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    await arrive();
 
     expect(document.body.textContent).toContain('3개');
   });
 
   it('다른 402/코드는 기존 일반 에러 배너로 가고, UpgradeModal은 안 뜬다(회귀 없음)', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const a = arrivalAnswer(url);
+      if (a) return a;
       if (url === '/api/onboarding/events') return { ok: true, json: async () => ({}) } as Response;
       if (url === '/api/organizations') {
         return {
@@ -141,9 +138,7 @@ describe('OnboardingForm — PLAN_LIMIT_EXCEEDED (story #2470)', () => {
     }));
 
     await act(async () => { root.render(wrap('ko')); });
-    await fillOrgForm();
-    await act(async () => { submitButton().click(); });
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    await arrive();
 
     // story #2484 — 유나 design:changes(2026-08-06): 이 폴백은 raw 서버 message를 그대로
     // 노출했었다(같은 병). 지금은 generic 번역 문구로 간다 — raw는 절대 안 보여야 한다.

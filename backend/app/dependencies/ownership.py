@@ -42,8 +42,16 @@ async def assert_agent_owner(
     agent = result.scalar_one_or_none()
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
+    # story #4730 — «the creator» counts only while the creator still holds a seat that may create this agent (org owner/admin, or admin of
+    # a project the agent belongs to — `holds_agent_seat`, the rule POST /team-members applies); a creator who was moved down or left passes nothing.
     if agent.created_by == current_user_id:
-        return agent
+        from app.services.project_auth import holds_agent_seat
+
+        project_ids = (await session.execute(
+            select(TeamMember.project_id).where(TeamMember.id == agent_id, TeamMember.org_id == org_id)
+        )).scalars().all()
+        if await holds_agent_seat(session, current_user_id, project_ids):
+            return agent
     if await _is_org_admin(session, org_id, current_user_id):
         return agent
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not the owner of this agent")

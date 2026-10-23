@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
+from app.core.db_error_redaction import safe_exception_text
 from app.models.pm import Sprint
 from app.models.retro import RetroItem, RetroSession, RetroVote
 from app.services import hypothesis as hyp_svc
@@ -510,7 +511,8 @@ async def advance_phase(
     try:
         session = await repo.set_phase(id, body.phase)
     except (ValueError, Exception) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # story #4741 — a database error's text carries the rejected row's values; the client gets the safe summary (a ValueError keeps its words)
+        raise HTTPException(status_code=400, detail=safe_exception_text(exc)) from exc
     return SessionListResponse.model_validate(session)
 
 

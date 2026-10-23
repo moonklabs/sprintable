@@ -245,6 +245,41 @@ def _skills_block(skills: list[dict], locale: str = "ko") -> str:
     return "\n".join(lines)
 
 
+def kit_locale_of(text: str | None) -> str:
+    """The locale a recruited persona's text was composed in (recruit does not store it): the role section's header line is `_SECTION_A_HEADER[locale]`. The stored text is the kit AFTER
+    the family renderer (Claude wraps a section in `<role_context>` tags, GPT puts a `# Role & Objective` title above it), so the header is looked for in the first lines, not only the first."""
+    for line in (text or "").lstrip().split("\n", 6)[:6]:
+        if line.rstrip().endswith("— Sprintable Role Context"):
+            return "en"
+    return "ko"
+
+
+def strip_integration_prompt(text: str | None) -> str:
+    """The text without the recruit's «reflect this into your memory» instruction (and what follows it — it is the kit's last section). That sentence is a ONE-TIME
+    instruction to an agent that was handed a file; carried into every session start it would send the agent to write its memory / instruction files each time."""
+    out = text or ""
+    for loc in _INTEGRATION_PROMPT_TEXT.values():
+        i = out.find(loc.split("\n", 1)[0])
+        if i != -1:
+            out = out[:i]
+    # the family renderer put a title or an opening tag above that section (`<integration_prompt>` · `# Integration Notes`): the cut leaves it dangling
+    out = out.rstrip()
+    for dangling in ("<integration_prompt>", "# Integration Notes"):
+        if out.endswith(dangling):
+            out = out[: -len(dangling)].rstrip()
+    return out
+
+
+def compose_session_kit(role_template: Any, locale: str = "ko") -> str:
+    """story 4680 AC2 (PO 2026-10-18) — the SESSION edition of the recruit kit: only what keeps being true each time the agent starts. The role (role_context: what it
+    does in this organization) + the operating rules + the workflow pointer. NOT the tool table (the MCP connection already announces the tools), NOT the runtime notes,
+    NOT the skills list, and NOT the integration prompt (a one-time instruction at hire: «reflect this into your memory» — every start would send the agent to write its
+    memory / instruction files, a back door around «the app never writes the user's CLAUDE.md / AGENTS.md»). Pure, like `compose_kit` (which it reuses for the pieces)."""
+    kit = compose_kit(role_template, "claude-code", locale)
+    parts = [kit["role_context"], _AGILE_OPERATING_RULES[locale], kit["workflow_pointer"]]
+    return "\n\n".join(p for p in parts if p)
+
+
 def compose_kit(
     role_template: Any,
     runtime: str,

@@ -79,8 +79,13 @@ async def test_latest_tagged_conversation_per_work_item():
         await engine.dispose()
 
 
-@pytest.mark.parametrize("untagged", [50, 1500])
-async def test_tag_lookup_can_use_the_index_not_a_full_scan(untagged):
+async def test_tag_lookup_is_written_for_the_tag_index():
+    """story #4731 — this used to EXPLAIN the statement with `enable_seqscan=off` and demand `ix_conversation_messages_work_item_tag` in the plan. The
+    table also has `ix_conversation_messages_conversation_id`, and the statement joins conversations / participants, so which one the planner picks (and
+    from which table it starts) depends on the sizes of the other tables — one big session picked the tag index, a CI shard picked the conversation index
+    ([50]: «Bitmap Index Scan on ix_conversation_messages_conversation_id»). No planner switch list ends that, so the guard is the pair that cannot flake:
+    the statement is written with the SAME literal expressions the index is built on (the original bug was a bound key, `metadata[$1]`, that no index
+    can match), and the index still has that definition (the next test)."""
     from app.services.work_item_conversation import derive_conversation_ids_for_tagged_work_items
 
     engine, Session = await _session_factory()
@@ -93,17 +98,34 @@ async def test_tag_lookup_can_use_the_index_not_a_full_scan(untagged):
 
     try:
         async with Session() as s:
-            org_id, member_id, work_item, _old, _new = await _seed(s, untagged=untagged)
+            org_id, member_id, work_item, _old, _new = await _seed(s, untagged=30)
             await derive_conversation_ids_for_tagged_work_items(
                 s, org_id=org_id, member_id=member_id, work_item_pairs={("story", work_item)},
             )
         assert len(captured) == 1, "태그 조회 문장을 정확히 하나 잡아야 가드가 헛돌지 않는다"
-        statement, parameters = captured[0]
-        async with engine.connect() as conn:
-            await conn.execute(text("SET enable_seqscan = off"))
-            await conn.execute(text("ANALYZE conversation_messages"))
-            plan = "\n".join(r[0] for r in (await conn.exec_driver_sql("EXPLAIN " + statement, parameters)).all())
-        assert "ix_conversation_messages_work_item_tag" in plan, plan
-        assert "Seq Scan on conversation_messages" not in plan, plan
+        statement = " ".join(captured[0][0].split())
+        # the expressions are also in the SELECT list, so look at the filter itself: the part after WHERE (before ORDER BY) — a bound-key version
+        # (`metadata[$1] ->> $2`) of the filter is what no index can serve
+        where = statement.split(" WHERE ", 1)[1].split(" ORDER BY ", 1)[0]
+        for expression in ("(conversation_messages.metadata->'work_item'->>'type')", "(conversation_messages.metadata->'work_item'->>'id')"):
+            assert expression in where, f"the tag filter no longer uses the index expression {expression}:\n{where[:500]}"
+        order_by = statement.split(" ORDER BY ", 1)[1]
+        assert "conversation_messages.created_at DESC" in order_by, order_by[:300]  # the index order (type, id, created_at DESC)
     finally:
         await engine.dispose()
+
+
+async def test_the_tag_index_keeps_the_definition_the_statement_is_written_for():
+    engine, _Session = await _session_factory()
+    try:
+        async with engine.connect() as conn:
+            rows = (await conn.execute(text(
+                "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'ix_conversation_messages_work_item_tag'"
+            ))).all()
+    finally:
+        await engine.dispose()
+    assert len(rows) == 1, "ix_conversation_messages_work_item_tag is missing"
+    definition = " ".join(rows[0][0].lower().split())
+    for part in ("((metadata -> 'work_item'::text) ->> 'type'::text)", "((metadata -> 'work_item'::text) ->> 'id'::text)", "created_at desc"):
+        assert part in definition, definition
+    assert "where (((metadata -> 'work_item'::text) ->> 'id'::text) is not null)" in definition, definition

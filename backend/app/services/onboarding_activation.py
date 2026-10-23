@@ -278,6 +278,10 @@ async def find_reminder_candidates(db: AsyncSession, *, now: datetime | None = N
             User.created_at < window_end,
             User.onboarding_reminder_sent_at.is_(None),
             User.marketing_email_opt_out.is_(False),
+            # story #4752: a person who deleted the account gets no mail (this is the one candidate query that picks people by their sign-up time, not through an organization
+            # membership — the membership-based ones (owner/admin notices) already skip a closed membership)
+            User.is_active.is_(True),
+            User.deleted_at.is_(None),
         )
     )).scalars().all()
 

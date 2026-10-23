@@ -117,7 +117,7 @@ export function AttentionRow({ item, highlighted, onNavigate }: {
  * 서버) — 4중 fan-out이던 v1 클라 파생과 달리 단일 저비용 호출이라 "전량 리페치 금지" 취지 위반
  * 아님. 이전 리스트와 diff해 신규/갱신 행만 1회 하이라이트(全행 반짝 금지·prefers-reduced-motion).
  */
-export function AttentionQueueView({ projectId, memberId }: { projectId: string; memberId?: string }) {
+export function AttentionQueueView({ projectId }: { projectId: string }) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const router = useRouter();
   const t = useTranslations('attentionQueue');
@@ -173,7 +173,6 @@ export function AttentionQueueView({ projectId, memberId }: { projectId: string;
   }, [projectId, refetchAndDiff]);
 
   useSseNotifications({
-    memberId,
     extraEventNames: ['story.trust_stage_changed'],
     onExtraEvent: handleTrustStageChanged,
   });

@@ -10,7 +10,9 @@ Contract: doc «E-DESKTOP-2 C-5 — 에이전트 실행 프로필 계약» v1.1 
 """
 from __future__ import annotations
 
+import hashlib
 import re
+import unicodedata
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -23,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies.ownership import assert_agent_owner_mutable
 from app.models.agent_allowed_host import AgentAllowedHost
 from app.models.agent_run_profile import AgentRunProfile
+from app.models.agent_deployment import AgentPersona
 from app.models.member import Member
 
 # the runtimes a desktop agent can have, and the name the daemon knows each by (desktop_setup.RUNTIME_TYPES, the other way)
@@ -189,6 +192,174 @@ async def read_for_person(
     return view
 
 
+PERSONA_TEXT_MAX = 16_000        # characters of the role text the daemon is handed (the role comes first in a recruited persona, so a cut keeps it)
+PERSONA_TEXT_MAX_BYTES = 32_000  # … and bytes (UTF-8): Korean is three bytes a character, so the character cap alone would let 48 KB through
+PERSONA_STYLE_MAX = 2_000
+PERSONA_STYLE_MAX_BYTES = 6_000   # 2,000 three-byte (Korean) characters — with the instructions' 32,000 and the sentence round them the whole stays inside the daemon's 40,000-byte session cap (pinned by test)
+PERSONA_ROLE_MAX = 200
+# the characters a session instruction must not carry, by Unicode category rather than a hand list (Kadir's lens, story 4680): every control (Cc — but \t and \n, which
+# is how a text is written), every format character (Cf: bidi marks · embeddings · isolates · zero-width · soft hyphen · the Arabic letter mark · the deprecated
+# U+206A–206F · BOM · the tag characters), the line and paragraph separators (Zl · Zp). The daemon applies the same rule (\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}).
+_DROP_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
+
+
+def _strip_unsafe(text: str) -> str:
+    return "".join(ch for ch in text if ch in "\t\n" or unicodedata.category(ch) not in _DROP_CATEGORIES)
+
+
+def _cut_bytes(text: str, max_bytes: int) -> str:
+    raw = text.encode("utf-8")
+    return text if len(raw) <= max_bytes else raw[:max_bytes].decode("utf-8", "ignore").rstrip()
+
+
+def _clean_persona_text(value: str | None, limit: int, max_bytes: int = PERSONA_TEXT_MAX_BYTES) -> str:
+    """One filter for every piece that reaches a session instruction (the persona's text, its base persona's, its style, its name · role): CRLF → LF, the characters above
+    out, trimmed, cut to `limit` characters AND `max_bytes` bytes."""
+    text = _strip_unsafe((value or "").replace("\r\n", "\n").replace("\r", "\n")).strip()[:limit]
+    return _cut_bytes(text, max_bytes).strip()
+
+
+def _one_line(value: str | None, limit: int) -> str:
+    """A role / name sits inside the daemon's fixed sentence, on one line: the same filter, line breaks and runs of blanks folded to one space."""
+    return re.sub(r"\s+", " ", _clean_persona_text(value, limit, limit * 4)).strip()
+
+
+def persona_text_problem(fields: dict[str, str | None]) -> str | None:
+    """story 4680 AC2 (Kadir's second review): a control character (NUL above all — Postgres text cannot hold it and the write answered 500) cannot be saved, nor sent to an agent. A readable
+    sentence naming the field, before anything is written. Tab, newline and carriage return are text; every other Cc is not."""
+    for name, value in fields.items():
+        if value and any(ch not in "\t\n\r" and unicodedata.category(ch) == "Cc" for ch in value):
+            return f"The {name} has a control character (for example a NUL byte) that cannot be saved or sent to an agent — remove it and try again."
+    return None
+
+
+def normalize_persona_text(value: str | None) -> str | None:
+    """Saved = run: what the session will get, written at the write. Line endings and U+2028/2029 become plain newlines (the same line break the person saw), invisible format characters
+    (bidi marks and overrides, zero-width, soft hyphen, BOM, tag characters — `Cf`) are dropped. Nothing visible changes for the person; the text in the editor IS the text of the session."""
+    if value is None:
+        return None
+    text = value.replace("\r\n", "\n").replace("\r", "\n").replace("\u2028", "\n").replace("\u2029", "\n")
+    return "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+
+
+async def base_children_problem(
+    db: AsyncSession, *, org_id: uuid.UUID, base_id: uuid.UUID, children: list[tuple[uuid.UUID, str, str | None, str | None]], new_system: str | None, new_style: str | None,
+) -> str | None:
+    """A base persona is joined into every persona that names it: when the base is PATCHed longer, each of those would be re-judged on what it would leave (the daemon would otherwise cut
+    it silently). A readable sentence naming up to three of them with their numbers, or None."""
+    found: list[str] = []
+    for _cid, name, system_prompt, style_prompt in children:
+        problem = await persona_write_problem(
+            db, org_id=org_id, system_prompt=system_prompt, style_prompt=style_prompt, base_persona_id=base_id, base_override=(new_system, new_style),
+        )
+        if problem:
+            found.append(f"\"{name}\" (it uses this persona as its base): {problem}")
+        if len(found) == 3:
+            break
+    return " | ".join(found) if found else None
+
+
+async def persona_write_problem(
+    db: AsyncSession, *, org_id: uuid.UUID, system_prompt: str | None, style_prompt: str | None, base_persona_id: uuid.UUID | str | None = None,
+    base_override: tuple[str | None, str | None] | None = None,
+) -> str | None:
+    """story 4680 AC2 (PO 2026-10-18) — the same caps the daemon is handed, checked where the text is WRITTEN: a persona's instructions (its own, plus its base persona's when one is
+    named) are at most PERSONA_TEXT_MAX characters and PERSONA_TEXT_MAX_BYTES bytes, its style (base's + own) PERSONA_STYLE_MAX characters and PERSONA_STYLE_MAX_BYTES bytes. Over → a readable
+    sentence (how many, how many at most); the route answers 422 and writes nothing — so a text the person wrote is never silently cut on its way into a session. The values are the EFFECTIVE
+    ones (a PATCH that changes one field is judged with the others it keeps), counted after the same filter the daemon's read applies."""
+    base = None
+    if base_persona_id:
+        try:
+            bid = base_persona_id if isinstance(base_persona_id, uuid.UUID) else uuid.UUID(str(base_persona_id))
+        except ValueError:
+            bid = None
+        if bid is not None:
+            base = (await db.execute(select(AgentPersona).where(AgentPersona.id == bid, AgentPersona.org_id == org_id, AgentPersona.deleted_at.is_(None)))).scalar_one_or_none()
+    # `base_override`: the base's texts as they are ABOUT to be (its own PATCH) — the stored ones are the old ones
+    base_system, base_style = (base_override if base_override is not None else (base.system_prompt, base.style_prompt) if base is not None else (None, None))
+    own = _clean_persona_text(system_prompt, 10**9, 10**9)
+    base_text = _clean_persona_text(base_system, 10**9, 10**9) if base is not None else ""
+    total = "\n\n".join(p for p in (base_text, own) if p)
+    chars, size = len(total), len(total.encode("utf-8"))
+    if chars > PERSONA_TEXT_MAX or size > PERSONA_TEXT_MAX_BYTES:
+        return (
+            f"The instructions are too long: {chars:,} characters ({size:,} bytes{' with its base persona' if base_text else ''}); the most a role's instructions may take is "
+            f"{PERSONA_TEXT_MAX:,} characters and {PERSONA_TEXT_MAX_BYTES:,} bytes — shorten them by {max(chars - PERSONA_TEXT_MAX, (size - PERSONA_TEXT_MAX_BYTES + 3) // 4):,} characters or more."
+        )
+    style_parts = [_clean_persona_text(base_style if base is not None else None, 10**9, 10**9), _clean_persona_text(style_prompt, 10**9, 10**9)]
+    st = "\n\n".join(p for p in style_parts if p)
+    st_bytes = len(st.encode("utf-8"))
+    if len(st) > PERSONA_STYLE_MAX or st_bytes > PERSONA_STYLE_MAX_BYTES:
+        return (
+            f"The style is too long: {len(st):,} characters ({st_bytes:,} bytes{' with its base persona' if style_parts[0] else ''}); the most it may take is {PERSONA_STYLE_MAX:,} characters and "
+            f"{PERSONA_STYLE_MAX_BYTES:,} bytes — shorten it by {max(len(st) - PERSONA_STYLE_MAX, (st_bytes - PERSONA_STYLE_MAX_BYTES + 3) // 4):,} characters or more."
+        )
+    return None
+
+
+async def persona_for_daemon(db: AsyncSession, *, member: Member, project_id: uuid.UUID | None = None) -> dict | None:
+    """story 4680 AC2 — the role the agent was hired for, handed to the daemon so a session starts AS that role (a CLI started in a folder knows only its own files).
+
+    Only THIS agent's own default persona (`agent_personas.is_default` — the recruit's, or the one the org set; never a built-in) in its own organization: the agent
+    key reads its own row and nothing else. `project_id` (the project the start is for — required, and the agent must be in it) picks that project's persona; without it, or when that project has none (or the
+    agent is not in it), there is no role (None). `role` is the persona's name (the recruit writes the job template's name there — `members.agent_role` stays empty
+    for a recruited agent), `instructions` the text (base persona's + own), `style` likewise. Every piece goes through the same filter and the total stays inside one cap
+    (characters and bytes). `version` is a digest of what is handed — the daemon logs it (never the text) so «which version was in the session» can be answered.
+    No default persona → None (the field is left out: an agent that was never hired as a role starts as it did)."""
+    if getattr(member, "org_id", None) is None:
+        return None
+    # the project the START is for, and only that one: no project, a project this agent is not in, or one with no default persona → no role at all (never another project's —
+    # a silent substitution would start the agent as a role it was not hired for there)
+    if project_id is None:
+        return None
+    from app.models.team import TeamMember
+
+    in_project = (await db.execute(
+        select(TeamMember.id).where(TeamMember.id == member.id, TeamMember.org_id == member.org_id, TeamMember.project_id == project_id).limit(1)
+    )).scalar_one_or_none()
+    if in_project is None:
+        return None
+    row = (await db.execute(
+        select(AgentPersona).where(
+            AgentPersona.org_id == member.org_id, AgentPersona.agent_id == member.id, AgentPersona.project_id == project_id,
+            AgentPersona.deleted_at.is_(None), AgentPersona.is_builtin.is_(False), AgentPersona.is_default.is_(True),
+        ).order_by(AgentPersona.created_at.asc(), AgentPersona.id).limit(1)
+    )).scalar_one_or_none()
+    if row is None:
+        return None
+    from app.models.role_template import RoleTemplate
+    from app.repositories.agent_persona import AgentPersonaRepository
+    from app.services import agent_recruiter
+
+    base = await AgentPersonaRepository(db)._get_base(row.config or {}, row.org_id)
+    # a base persona is joined only when it is a built-in or belongs to this same agent in this same project — the lookup itself knows only the organization, and another
+    # agent's or project's text must not ride into this agent's session
+    if base is not None and (base.id == row.id or not (base.is_builtin or (base.agent_id == row.agent_id and base.project_id == row.project_id))):
+        base = None   # (a persona that names ITSELF as its base would be joined twice)
+    own = (row.system_prompt or "")
+    # a recruited persona carries its job template's id: the session edition is composed from that (role + operating rules + workflow pointer — not the tool table,
+    # not the one-time integration prompt). Without a template (hand-written, or the template is gone) the persona's own text, minus the integration prompt if it has one.
+    own_text: str | None = None
+    template_id = (row.config or {}).get("role_template_id")
+    if template_id:
+        try:
+            template = await db.get(RoleTemplate, uuid.UUID(str(template_id)))
+        except ValueError:
+            template = None
+        if template is not None:
+            own_text = agent_recruiter.compose_session_kit(template, agent_recruiter.kit_locale_of(own))
+    if own_text is None:
+        own_text = agent_recruiter.strip_integration_prompt(own)
+    # the base persona goes through the same filter, and base + own stay inside the one cap
+    instructions = _clean_persona_text("\n\n".join(p for p in (_clean_persona_text(base.system_prompt if base else None, PERSONA_TEXT_MAX), _clean_persona_text(own_text, PERSONA_TEXT_MAX)) if p), PERSONA_TEXT_MAX)
+    style = _clean_persona_text("\n\n".join(p for p in (_clean_persona_text(base.style_prompt if base else None, PERSONA_STYLE_MAX, PERSONA_STYLE_MAX_BYTES), _clean_persona_text(row.style_prompt, PERSONA_STYLE_MAX, PERSONA_STYLE_MAX_BYTES)) if p), PERSONA_STYLE_MAX, PERSONA_STYLE_MAX_BYTES) or None
+    role = _one_line(row.name, PERSONA_ROLE_MAX) or _one_line(getattr(member, "agent_role", None), PERSONA_ROLE_MAX)
+    if not instructions and not role:
+        return None
+    digest = hashlib.sha256("\x00".join([role, instructions, style or ""]).encode("utf-8")).hexdigest()[:16]
+    return {"role": role or None, "instructions": instructions, "style": style, "version": digest}
+
+
 async def read_for_daemon(db: AsyncSession, *, member: Member) -> dict:
     """The agent's own profile, read with its own key right before a start (§4) — never another agent's.
 
@@ -208,8 +379,8 @@ async def read_for_daemon(db: AsyncSession, *, member: Member) -> dict:
         # story #4580: the hosts this agent may connect to without asking — the daemon writes them as its folder's
         # `WebFetch(domain:<host>)` lines (and takes out the ones it wrote that are gone from here)
         "allowed_hosts": [h.host for h in await allowed_hosts(db, member.id)],
-        # story #4598: on → the daemon starts the next session in the CLI's dontAsk mode — what is allowed beforehand runs, anything
-        # else is skipped without a question (PO 12:1xZ: never bypass — the fences stay up) (contract v0.1 §2)
+        # story #4598 → #4708: on → the daemon starts the next session in the CLI's bypassPermissions mode — tools run right away, and
+        # what the agent may and may not do follows the person's own Claude Code settings on that computer (contract v0.1 §2)
         "unattended": bool(profile.unattended) if profile else False,
     }
 

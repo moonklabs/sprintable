@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Text, false, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -20,9 +20,15 @@ class User(Base):
     password_set_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # story #3896 — DB has DEFAULT true, ORM lacked server_default (drift).
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    # story #4752 — alembic 0460: when the person deleted the account (NULL = live; `is_active` is false with it) and when the purge job removed the personal data (NULL = still there).
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    anonymized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     login_fail_count: Mapped[int] = mapped_column(nullable=False, default=0)
     login_locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # alembic 0457 (story 4725 decision 2) — the server's «show this once» mark: {"cut": [...], "password_cleared": bool}, written by the reclaim of an unproved
+    # account with what it REALLY cut, answered by GET /auth/me as `reclaim_notice`, set back to NULL by the person's own dismissal. NULL = nothing to show.
+    reclaim_notice: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     tos_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     totp_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
     # story #3896 — DB has DEFAULT false, ORM lacked server_default (drift).

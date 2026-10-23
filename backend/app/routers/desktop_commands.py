@@ -6,6 +6,10 @@ Contract: doc «E-DESKTOP-2 B-1 — 기기 줄 계약 v1» §11 (02d2cf71 v1.9 �
   person's own session — an API key or an agent key 403; who may press and the phone's pairing are checked in
   services.desktop_commands; story #4599: end_session = the whole session ended, the handle on a turn a macOS window holds)
 - GET  /api/v2/agents/{agent_member_id}/desktop-commands/{command_id}    — the result line, for the person who pressed only
+- GET  /api/v2/agents/{agent_member_id}/desktop-startable?phone_key_id=   — story #4714: the computers (paired with that phone) and the projects
+  each says it has a folder for — ids and names, never a path
+- POST /api/v2/agents/{agent_member_id}/desktop-start                    — story #4714: a phone's signed start of the agent on one computer for one
+  project (a person's own session; the computer reads its own folder and refuses what it cannot do)
 """
 from __future__ import annotations
 
@@ -81,6 +85,46 @@ async def post_desktop_command(
     await db.commit()
     if cmd is None:
         return JSONResponse(status_code=200, content={"state": state})
+    return JSONResponse(status_code=201, content={"command_id": str(cmd.id), "state": state})
+
+
+@router.get("/{agent_member_id}/desktop-startable")
+async def get_desktop_startable(
+    agent_member_id: uuid.UUID,
+    phone_key_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    member = await _person(db, auth, org_id, interactive=True)  # a person's own session, like the whole-phone read and the press itself (an API key or an agent key is 403)
+    user_id = uuid.UUID(str(auth.user_id))
+    try:
+        return await desktop_commands.startable_view(
+            db, member_id=uuid.UUID(str(member.id)), member_role=await desktop_commands.org_role(db, org_id, user_id), user_id=user_id,
+            org_id=org_id, agent_id=agent_member_id, phone_key_id=phone_key_id,
+        )
+    except DesktopRelayError as exc:
+        return _error(exc)
+
+
+@router.post("/{agent_member_id}/desktop-start")
+async def post_desktop_start(
+    agent_member_id: uuid.UUID,
+    body: desktop_commands.StartRequest,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    member = await _person(db, auth, org_id, interactive=True)
+    user_id = uuid.UUID(str(auth.user_id))
+    try:
+        cmd, state = await desktop_commands.create_start(
+            db, member_id=uuid.UUID(str(member.id)), user_id=user_id, org_id=org_id, agent_id=agent_member_id, body=body,
+        )
+    except DesktopRelayError as exc:
+        await db.rollback()
+        return _error(exc)
+    await db.commit()
     return JSONResponse(status_code=201, content={"command_id": str(cmd.id), "state": state})
 
 

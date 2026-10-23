@@ -129,6 +129,28 @@ _CATALOG: dict[str, dict[str, str]] = {
     "desktop_command.turn_end_title_bare.usage_limit": {"ko": "사용 한도", "en": "Usage limit"},
     "desktop_command.turn_end_title_bare.paused_limit": {"ko": "한도로 쉬는 중", "en": "Paused at usage limit"},
     "desktop_command.turn_end_title_bare.error": {"ko": "오류", "en": "Error"},
+    # story 4714 AC2 — the mail the phone app's no-Mac screen asks for («Mac에서 열 링크를 메일로 받기»): the words are Yuna's sheet
+    # `4714-ac2-mac-link-mail-copy-1018.md` §2, character for character. The link carries no token or code (a plain `{app_url}/desktop`),
+    # and two lines promise exactly that — `expiry_note` and `security_note` change with it if a token is ever added.
+    "mac_link_mail.subject": {"ko": "Mac에서 Sprintable을 시작할 링크예요", "en": "Your link to start Sprintable on your Mac"},
+    "mac_link_mail.intro_1": {"ko": "폰에서 요청하신 Mac용 Sprintable 링크예요.", "en": "Here is the link to Sprintable for Mac that you asked for on your phone."},
+    "mac_link_mail.intro_2": {
+        "ko": "Mac에서 이 메일을 열고 아래 버튼을 눌러 주세요. 로그인한 뒤 앱을 받고 첫 에이전트를 시작할 수 있어요.",
+        "en": "Open this email on your Mac and click the button below. After you sign in, you can get the app and start your first agent.",
+    },
+    "mac_link_mail.cta_label": {"ko": "Mac 앱 받기", "en": "Get the Mac app"},
+    "mac_link_mail.expiry_note": {
+        "ko": "이 링크는 계속 쓸 수 있어요. 열어도 로그인해야 계정에 들어가요.",
+        "en": "This link doesn't expire. You still have to sign in to get into your account.",
+    },
+    "mac_link_mail.security_note": {
+        "ko": "본인이 요청하지 않으셨다면 이 메일을 무시하셔도 돼요 — 링크에는 계정 정보가 들어 있지 않아요.",
+        "en": "If you didn't ask for this, you can safely ignore this email — the link holds no account information.",
+    },
+    "mac_link_mail.fallback_label": {
+        "ko": "버튼이 열리지 않으면 아래 주소를 브라우저에 붙여넣어 주세요:",
+        "en": "If the button doesn't work, paste this address into your browser:",
+    },
     "desktop_command.turn_end_body.waiting_input": {
         "ko": "그 컴퓨터의 터미널에서 답을 기다리고 있어요 — 눌러서 대화를 확인해 주세요",
         "en": "It's waiting for an answer in that computer's terminal — tap to check the conversation",

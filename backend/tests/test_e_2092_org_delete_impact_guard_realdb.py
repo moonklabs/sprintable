@@ -27,6 +27,19 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+async def _payment_entry_open():
+    """story #4752 (4756): an active subscription / claim only stops a deletion where payment entry is open (`platform_settings.billing_checkout_enabled`, off by default) — this file is
+    about that stop, so the switch is on for it and put back to the default after."""
+    engine = create_async_engine(_ASYNC)
+    async with engine.begin() as c:
+        await c.execute(text("UPDATE platform_settings SET billing_checkout_enabled = true"))
+    yield
+    async with engine.begin() as c:
+        await c.execute(text("UPDATE platform_settings SET billing_checkout_enabled = false"))
+    await engine.dispose()
+
+
 async def _seed_org_with_owner(session):
     org_id = uuid.uuid4()
     user_id = uuid.uuid4()

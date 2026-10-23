@@ -64,6 +64,9 @@ class ResolvedMember:
     # story #3758 — orphan-fallback placeholder(진짜 member/alias 해소 실패)만 False.
     # 실존 구성원(표시명만 없음)은 그대로 True — name=None과 독립된 축.
     resolved: bool = field(default=True)
+    # story #4752 — a human whose account was deleted and anonymized (`users.anonymized_at` set): the name is gone for good (None), and this marker lets a screen word «탈퇴한 사용자 / Deleted user»
+    # in its own locale (the server carries no Korean sentence — story #3779). Independent of `resolved` (the person is a real, resolved member).
+    departed: bool = field(default=False)
 
 
 def is_human_member_condition(member_id_col, *, user_id: uuid.UUID | None = None):
@@ -476,11 +479,13 @@ async def _lookup_members_by_ids_legacy(
         # (email 폴백 0 — #3747 resolve_member_display_name 계약).
         user_ids = {m.user_id for m in oms if m.user_id}
         users_map: dict[uuid.UUID, str | None] = {}
+        departed_users: set[uuid.UUID] = set()
         if user_ids:
             users = (await session.execute(
                 select(User).where(User.id.in_(user_ids))
             )).scalars().all()
             users_map = {u.id: u.display_name for u in users}
+            departed_users = {u.id for u in users if u.anonymized_at is not None}   # story #4752: the account was deleted and anonymized
 
         for om in oms:
             # story #2901 — om(OrgMember) 소싱, avatar_url 컬럼 없음(위 단일 resolve와 동일 사각).
@@ -493,6 +498,7 @@ async def _lookup_members_by_ids_legacy(
                 role=om.role,
                 org_id=om.org_id,
                 project_id=None,
+                departed=bool(om.user_id) and om.user_id in departed_users,
             )
 
     # orphan/삭제 멤버: TM도 OrgMember도 아닌 ID → fallback(크래시 방지). story #3203 —
@@ -600,11 +606,14 @@ async def _lookup_members_by_ids_anchor(
     # OrgMember path + 단일 resolve와 동일 계약 — #3747 resolve_member_display_name).
     human_user_ids = {m.user_id for m in resolved_member_for.values() if m.type == "human" and m.user_id}
     display_name_by_user: dict[uuid.UUID, str | None] = {}
+    departed_user_ids: set[uuid.UUID] = set()
     if human_user_ids:
-        for uid_, display_name in (await session.execute(
-            select(User.id, User.display_name).where(User.id.in_(human_user_ids))
+        for uid_, display_name, anonymized_at in (await session.execute(
+            select(User.id, User.display_name, User.anonymized_at).where(User.id.in_(human_user_ids))
         )).all():
             display_name_by_user[uid_] = display_name
+            if anonymized_at is not None:
+                departed_user_ids.add(uid_)
 
     # story #4303 — 이름 행 후보(휴먼 · user_id NULL · deleted_at 있음) 중 옛 사람 id인 것만 members.name을 쓴다(0414가 만든 행만).
     departed_candidates = {
@@ -631,6 +640,7 @@ async def _lookup_members_by_ids_anchor(
                 name=display_name_by_user.get(m.user_id) if m.user_id else (m.name if departed_name_row else None),
                 type="human", role=m.org_role or "member", org_id=m.org_id, project_id=None,
                 avatar_url=m.avatar_url,
+                departed=bool(m.user_id) and m.user_id in departed_user_ids,
             )
 
     # 3. 진짜 orphan(member/alias 모두 없음) — telemetry-only + 크래시 방지 placeholder.

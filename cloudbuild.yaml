@@ -102,7 +102,7 @@ substitutions:
   # substitution·GHA·Dockerfile 전부 무배선) billing 표면이 dev서 아예 렌더 안 됐다. 배포
   # SSOT/과거 스토리 grep으로 "의도된 결정"이 아님을 확認(manual-env-allowlist.yml에
   # declared_by:PO·미triage로만 남아있던 값 — 코드로 differentiate된 적이 없다). dev-safe
-  # 기본값 'false'(SSE_MULTIPLEX_ENABLED와 동일 컨벤션) — GHA가 dev 브랜치에서만 'true' 주입,
+  # 기본값 'false' — GHA가 dev 브랜치에서만 'true' 주입,
   # prod는 이 커밋으로 무접촉(기존 동작 그대로 유지, 명시 false로 durable화만).
   _EE_ENABLED: "false"
   # story #3260(2026-08-31, 페드루 PO 조건부 승인) — 「UI는 있는데 서버가 없음」 결함 클래스
@@ -190,11 +190,6 @@ substitutions:
   # (Secret Manager `APPLE_SIWA_PRIVATE_KEY`)로만 바인딩.
   _APPLE_SERVICES_ID: "ai.sprintable.web"
   _APPLE_KEY_ID: "DF2G3UV649"
-  # story #2078(E-ARCH 0단계) — SSE 멀티플렉서 롤백 플래그. dev-safe 기본값 'false'(수동
-  # `gcloud builds submit` override 없을 때 안전). GHA가 dev 브랜치에서만 'true' 주입 —
-  # prod는 develop→main 일괄승격에 검증 안 된 플래그를 얹지 않는다(오르테가군 판정,
-  # 2026-07-21 — 문제 생기면 48커밋 중 원인 격리 불가라 별도 판단으로 미룸).
-  _SSE_MULTIPLEX_ENABLED: "false"
   # story #2005(Phase B P1-c, E-A2A-PROTO 리라이어빌리티): Cloud Run 요청 타임아웃이
   # `deploy-backend` 스텝에 `--timeout` 플래그로 명시된 적이 한 번도 없어(grep 확認) 인프라
   # 기본값에 암묵 의존 중이었다(A2A `/rpc` 특히 `SendStreamingMessage` SSE가 사실상 무기한
@@ -525,8 +520,6 @@ steps:
       - NEXT_PUBLIC_OAUTH_ENABLED=true
       - --build-arg
       - NEXT_PUBLIC_GA4_MEASUREMENT_ID=${_GA4_MEASUREMENT_ID}
-      - --build-arg
-      - NEXT_PUBLIC_SSE_MULTIPLEX_ENABLED=${_SSE_MULTIPLEX_ENABLED}
       - --build-arg
       - NEXT_PUBLIC_EE_ENABLED=${_EE_ENABLED}
       - --build-arg

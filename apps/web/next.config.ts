@@ -84,6 +84,19 @@ const _SECURITY_HEADERS = [
   { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
 ];
 
+// the catch-all's headers with ONE changed (Referrer-Policy) and one added — repeated whole, so the frame ban and the rest never depend on how two
+// matching entries are merged, and no header key appears twice
+const _NATIVE_CONFIRM_PAGE_HEADERS = [
+  ..._SECURITY_HEADERS.filter((h) => h.key !== 'Referrer-Policy'),
+  { key: 'Referrer-Policy', value: 'same-origin' },
+  { key: 'Cache-Control', value: 'no-store' },
+];
+const _NATIVE_CODE_PAGE_HEADERS = [
+  ..._SECURITY_HEADERS.filter((h) => h.key !== 'Referrer-Policy'),
+  { key: 'Referrer-Policy', value: 'no-referrer' },
+  { key: 'Cache-Control', value: 'no-store' },
+];
+
 // story #3947(2026-09-16, 페드루 PO 판정) — apps/web/src/lib/public-app-host.ts의 런타임
 // 가드(NODE_ENV=production인데 env 부재면 throw)는 그 함수가 실제로 호출될 때만(클라
 // 렌더 시점) 걸린다 — create-organization-dialog.tsx/onboarding-form.tsx는 인증 뒤
@@ -138,6 +151,20 @@ const nextConfig: NextConfig = {
       {
         source: '/(.*)',
         headers: _SECURITY_HEADERS,
+      },
+      // story 4712 (Kadir v2 lens · cond. 5) — the two pages of «브라우저 이어받기» carry a one-time sign-in code in their address
+      // (`/native/oauth-return?code=…`) or the app's PKCE challenge (`/native/continue?…`): no Referer to anyone, never cached. The group repeats the
+      // catch-all's headers (only Referrer-Policy differs), so nothing here depends on how two matching entries merge.
+      {
+        source: '/native/oauth-return',
+        headers: _NATIVE_CODE_PAGE_HEADERS,
+      },
+      // …except the confirm page: its [열기] is a plain form POST, and a page served with `no-referrer` makes the browser send that POST with `Origin: null`
+      // (Fetch's «serializing a request origin» — a navigation-mode request under the no-referrer policy) which the CSRF check rightly refuses. The page carries only the
+      // app's PKCE *challenge* (a public hash), so `same-origin` — the Referer and a real Origin to this site, nothing to anyone else — gives up nothing.
+      {
+        source: '/native/continue',
+        headers: _NATIVE_CONFIRM_PAGE_HEADERS,
       },
     ];
   },

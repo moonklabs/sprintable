@@ -213,9 +213,12 @@ jobs:
             echo "git diff 실패 — 웹 e2e 실행(fail-closed)."
             exit 0
           fi
-          if grep -q '^apps/web/' <<< "${CHANGED}"; then
+          # story #4750 — a change to this workflow file runs the web e2e too (same «self-safety» as the gateway filter above): the
+          # Contrast guard job's own steps live in this file, and a change to them that no run exercises merges untested (PR 5186 —
+          # the apt-cache change of that job was skipped by this very filter).
+          if grep -qE '^apps/web/|^\.github/workflows/ci\.yml$' <<< "${CHANGED}"; then
             echo "web_changed=true" >> "$GITHUB_OUTPUT"
-            echo "apps/web/ 변경 있음 — 웹 e2e 실행."
+            echo "apps/web/ 또는 ci.yml 변경 있음 — 웹 e2e 실행."
           else
             echo "web_changed=false" >> "$GITHUB_OUTPUT"
             echo "apps/web/ 밖 변경만 — 웹 e2e skip."
@@ -1598,14 +1601,80 @@ jobs:
   # the web split (4467): PR 4887's run was a 25-min shard + 14 min of pytest. `backend-test` keeps its name, `if:`, the
   # edited-only Mirror step, the weights audit and «Require all destructive shards», and now also requires this job's success.
   # Not required itself (like ci-work); skipped on an edited-only event like the steps it took over.
+  # story #4731 — the ONE place that collects the non-destructive tests and decides which shard runs which file (see `backend-test-work`). Same condition as
+  # the shards (backend-relevant, not an edited-only event); a failure here skips every shard, which `backend-test` reads as red.
+  backend-test-shard-plan:
+    name: "Backend pytest shard plan (story #4731) — internal, not required"
+    runs-on: ubuntu-latest
+    needs: [detect-changed-scope]
+    if: needs.detect-changed-scope.outputs.backend_relevant != 'false' && (github.event.action != 'edited' || github.event.changes.base != null)
+    timeout-minutes: 10
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: sprintable
+          POSTGRES_PASSWORD: sprintable
+          POSTGRES_DB: sprintable_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ALEMBIC_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+      PARITY_TEST_DATABASE_URL: postgresql+psycopg2://sprintable:sprintable@localhost:5432/sprintable_test
+      DATABASE_URL: postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test
+      JWT_SECRET: ci-test-secret-at-least-32-chars-long
+      SECRET_KEY: ci-test-secret-at-least-32-chars-long
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 'latest'
+
+      - name: Collect once, split into shards, verify the split is lossless
+        id: plan
+        working-directory: backend
+        run: |
+          set -o pipefail
+          shard_count=6   # the only place the number of shards is written: the matrix of backend-test-work is built from it
+          uv run python scripts/shard_nondestructive_tests.py --plan-out /tmp/shard_plan.json --shard-count "$shard_count" | tee /tmp/shard_split.log
+          { echo "## Backend pytest shard plan (story #4731)"; echo '```'; cat /tmp/shard_split.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          echo "shards=$(python3 -c 'import json,sys; print(json.dumps(list(range(int(sys.argv[1])))))' "$shard_count")" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-shard-plan
+          path: /tmp/shard_plan.json
+          retention-days: 1
+          if-no-files-found: error
+
   backend-test-work:
     name: "Backend pytest work (non-destructive) — internal, not required"
     runs-on: ubuntu-latest
     # [SID:4659 · PO 06:57Z] 백엔드 바뀐 PR에서만 돈다(웹만 바뀐 PR은 건너뜀). 건너뛰면 아래 Require 스텝이 skipped를 통과시킨다.
-    needs: [detect-changed-scope]
     if: needs.detect-changed-scope.outputs.backend_relevant != 'false' && (github.event.action != 'edited' || github.event.changes.base != null)
-    # the suite's own ceiling as before (story #2285 AC4: body 7~8 min then, 10~15 now)
-    timeout-minutes: 25
+    # story #4731 — the suite ran in ONE runner at 22–23 minutes under a 25-minute ceiling (25m15s on develop a3e7f8ac9 → «exceeded the maximum
+    # execution time» → the required `Backend pytest` red → the dev deploy stopped). It is now split in shards over the SAME collected tests: the
+    # `backend-test-shard-plan` job collects ONCE, splits whole files by greedy LPT on the collected-test count, verifies that the split is disjoint and
+    # complete, and publishes it; every shard here runs exactly the files of its slot in that plan (no shard collects on its own, so a collection that
+    # differs between runners cannot drop or double a test). `backend-test` (the required check) reads this job's aggregated result — any leg failed /
+    # cancelled / skipped (and the plan job failing, which skips this job) makes it red, as before. The ceiling is per shard (measured: see story 4731).
+    needs: [detect-changed-scope, backend-test-shard-plan]
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.backend-test-shard-plan.outputs.shards) }}
 
     services:
       postgres:
@@ -1647,11 +1716,21 @@ jobs:
         working-directory: backend
         run: uv run alembic upgrade heads
 
-      - name: Run pytest (non-destructive, real-PG auto-discovered via marker)
+      - name: Fetch the shard plan (story #4731)
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-shard-plan
+          path: /tmp/plan
+
+      - name: Run pytest (non-destructive shard ${{ matrix.shard }}/${{ strategy.job-total }}, real-PG auto-discovered via marker)
         working-directory: backend
         run: |
           set -o pipefail
-          uv run pytest -q -m "not destructive_schema" --durations=20 2>&1 | tee /tmp/pytest_output.log
+          uv run python scripts/shard_nondestructive_tests.py --plan /tmp/plan/shard_plan.json --shard ${{ matrix.shard }} --order "${BACKEND_SHARD_ORDER:-name}" --counts-out /tmp/shard_counts.json > /tmp/shard_files.txt
+          echo "shard ${{ matrix.shard }}: $(cat /tmp/shard_counts.json)"
+          if [ ! -s /tmp/shard_files.txt ]; then echo "this shard has no files in the plan — nothing to run"; : > /tmp/pytest_output.log; exit 0; fi
+          mapfile -t files < /tmp/shard_files.txt
+          uv run pytest -q -m "not destructive_schema" --durations=20 "${files[@]}" 2>&1 | tee /tmp/pytest_output.log
 
       # story #2285 AC5: 넘쳤을 때(취소) 무엇이 시간을 먹었는지 최소한이라도 보이게 —
       # --durations=20이 정상 완주 시엔 정확한 breakdown을 준다. ⛔한계를 그대로 적는다: job이
@@ -1663,7 +1742,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## Backend pytest — slowest 20 (여유: 천장 25분, 08-17 실측 본체 7~8분)"
+            echo "## Backend pytest shard ${{ matrix.shard }} — slowest 20 (story #4731: ceiling per shard, see timeout-minutes)"
             echo '```'
             awk '/slowest 20 durations/,0' /tmp/pytest_output.log 2>/dev/null || echo "(durations 출력 없음 — 타임아웃-취소로 이 스텝 자체가 못 돌았을 가능성)"
             echo '```'
@@ -1672,7 +1751,7 @@ jobs:
   backend-test:
     name: Backend pytest
     runs-on: ubuntu-latest
-    needs: [backend-test-destructive, backend-test-work, detect-changed-scope]
+    needs: [backend-test-destructive, backend-test-work, backend-test-shard-plan, detect-changed-scope]
     # story #3929(2026-09-15) → story #4099로 폐기(2026-09-21, 머지 안전 실사고 — PR #4473).
     # required 체크("Backend pytest") 자신을 edited(base 무변)에서 job-level if:로 skip하던
     # 처방은 alembic-fresh-db 상단 주석과 동일한 이유로 폐기했다. 이제 항상 돌고,
@@ -1830,6 +1909,13 @@ jobs:
         if: needs.backend-test-work.result != 'success' && !(needs.backend-test-work.result == 'skipped' && needs.detect-changed-scope.outputs.backend_relevant == 'false') && (github.event.action != 'edited' || github.event.changes.base != null)
         run: |
           echo "backend-test-work result=${{ needs.backend-test-work.result }} — the non-destructive pytest (its only runner) failed or did not run"
+          exit 1
+
+      # story #4731 — the plan job decides which shard runs which file; if it failed, the shards were skipped (red above), and this names the cause.
+      - name: Require the non-destructive shard plan to have succeeded (story #4731)
+        if: needs.backend-test-shard-plan.result != 'success' && !(needs.backend-test-shard-plan.result == 'skipped' && needs.detect-changed-scope.outputs.backend_relevant == 'false') && (github.event.action != 'edited' || github.event.changes.base != null)
+        run: |
+          echo "backend-test-shard-plan result=${{ needs.backend-test-shard-plan.result }} — the split of the non-destructive pytest failed or did not run"
           exit 1
 
   # story #3273(CI사각, 2026-09-01 카디르 QA 발견) — support-gateway/ 디렉토리엔 pytest
@@ -2768,6 +2854,27 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # story #4750 (PO 청 2026-10-22 20:04Z · PR 5185 run 39837455135) — `playwright install --with-deps`의 apt 단계가 거울
+      # (azure.archive.ubuntu.com)에서 글꼴 · xvfb 계열 .deb 13개(19.7MB)를 받는데, 거울이 느린 시각엔 29 kB/s에 11분 21초가 걸려
+      # 이 잡이 25분 한도에 걸렸다(같은 단계: 15:27~16:39 13~39초 · 17:00 3분 · 19:09 · 19:37 11분). 한도만 늘리는 길은 거울이
+      # 느리면 또 걸린다 — 그래서 그 .deb를 (러너 이미지 판 · playwright 판) 키로 캐시하고, 적중하면 apt 없이 `dpkg -i`만 한다.
+      # 글꼴은 빼지 않는다(렌더가 달라지면 axe · 레이아웃 판정이 흔들린다). 못 맞으면(첫 실행 · 이미지 갱신) 옛 길(--with-deps)을
+      # 그대로 타고 받은 .deb를 남긴다. push(develop · main)에서도 이 잡이 돌아 거기서 저장된 캐시를 모든 PR이 읽는다.
+      - name: "Playwright OS-deps cache key (story #4750)"
+        id: pw-deps-key
+        run: |
+          set -euo pipefail
+          PW_VERSION="$(pnpm --filter web exec playwright --version | awk '{print $NF}')"
+          . /etc/os-release
+          echo "key=pw-os-debs-v1-${ID}${VERSION_ID}-${ImageVersion:-noimage}-pw${PW_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: "Restore Playwright OS-deps .deb cache (story #4750)"
+        id: pw-debs
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/pw-os-debs
+          key: ${{ steps.pw-deps-key.outputs.key }}
+
       # story #3751(PO 실측 2026-09-09 17:31Z~) — `playwright install --with-deps`가 내부
       # `apt-get update`를 돌리는데, GH 러너 이미지에 기본 등록된 google-chrome apt 소스
       # (dl.google.com)가 이따금 Hash Sum mismatch로 죽어 코드와 무관하게 이 잡을 통째로
@@ -2783,6 +2890,7 @@ jobs:
       # 찾아 지우고, 지운 뒤에도 apt update가 그 호스트를 당기면 **fail-closed**(양성대조를
       # 이 스텝 자체가 강제) — 미러가 멀쩡해도 소스가 안 지워졌으면 빨강이어야 한다.
       - name: Remove google-chrome apt source (story #3751)
+        if: steps.pw-debs.outputs.cache-hit != 'true'
         run: |
           sudo grep -rlE 'dl\.google\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null | tee /tmp/google-src.txt
           xargs -r -a /tmp/google-src.txt sudo rm -f
@@ -2792,8 +2900,79 @@ jobs:
             exit 1
           fi
 
-      - name: Install Playwright chromium
-        run: pnpm --filter web exec playwright install --with-deps chromium
+      - name: "Install Playwright chromium + OS deps (apt · cache miss · story #4750)"
+        if: steps.pw-debs.outputs.cache-hit != 'true'
+        id: pw-install-miss
+        run: |
+          set -euo pipefail
+          # keep the downloaded .debs (the runner VM keeps them by default; this makes it explicit). Which .debs to cache is decided
+          # by package identity afterwards (name=version of what this install added or upgraded) — not by file time or by a
+          # before/after listing: apt stamps a download with the mirror's Last-Modified, and a .deb the image already held in the
+          # archive dir is neither new nor newer (PR 5186 run 1: 12 of 13 caught by file time, fonts-freefont-ttf missed).
+          echo 'APT::Keep-Downloaded-Packages "true";' | sudo tee /etc/apt/apt.conf.d/99keep-debs > /dev/null
+          # «installed» only: dpkg-query -W also lists packages left in the `rc` state (removed, config kept), which a later
+          # reinstall of the same version would not show as a change
+          installed() { dpkg-query -W -f='${db:Status-Abbrev} ${Package}=${Version}\n' | awk '$1 == "ii" { print $2 }' | sort -u; }
+          installed > /tmp/pkgs-before.txt
+          pnpm --filter web exec playwright install --with-deps chromium
+          installed > /tmp/pkgs-after.txt
+          comm -13 /tmp/pkgs-before.txt /tmp/pkgs-after.txt > /tmp/pw-pkgs.txt
+          echo "packages this install added or upgraded: $(wc -l < /tmp/pw-pkgs.txt)"; cat /tmp/pw-pkgs.txt
+          mkdir -p "$HOME/pw-os-debs"
+          sort -u /tmp/pw-pkgs.txt > /tmp/pw-want.txt
+          # shellcheck disable=SC2016 # (dpkg format fields, not shell variables)
+          for f in /var/cache/apt/archives/*.deb; do
+            [ -e "$f" ] || continue
+            id="$(dpkg-deb -W --showformat='${Package}=${Version}\n' "$f")"
+            if grep -qxF -- "$id" /tmp/pw-want.txt; then sudo cp "$f" "$HOME/pw-os-debs/"; fi
+          done
+          sudo chown -R "$(id -u):$(id -g)" "$HOME/pw-os-debs"
+          # the cache is only worth saving when every package the install added is among the copied .debs — otherwise a later
+          # restore would install a partial set. A short copy is a warning (this run is still green), never a failure.
+          : > /tmp/pw-debset.txt
+          # shellcheck disable=SC2016 # (dpkg format fields, not shell variables)
+          for d in "$HOME"/pw-os-debs/*.deb; do [ -e "$d" ] && dpkg-deb -W --showformat='${Package}=${Version}\n' "$d" >> /tmp/pw-debset.txt; done
+          sort -u -o /tmp/pw-debset.txt /tmp/pw-debset.txt
+          MISSING="$(sort -u /tmp/pw-pkgs.txt | comm -23 - /tmp/pw-debset.txt)"
+          if [ -s /tmp/pw-pkgs.txt ] && [ -z "$MISSING" ]; then
+            cp /tmp/pw-pkgs.txt "$HOME/pw-os-debs/pkgs.txt"
+            echo "captured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning title=Playwright OS-deps .debs not captured (story #4750)::cache not saved; missing: ${MISSING:-<no package list>}"
+          fi
+
+      - name: "Save Playwright OS-deps .deb cache (story #4750)"
+        if: steps.pw-debs.outputs.cache-hit != 'true' && steps.pw-install-miss.outputs.captured == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/pw-os-debs
+          key: ${{ steps.pw-deps-key.outputs.key }}
+
+      - name: "Install Playwright chromium (OS deps from cache · no apt · story #4750)"
+        if: steps.pw-debs.outputs.cache-hit == 'true'
+        run: |
+          # the '${Version}' below is a dpkg format field, not a shell variable
+          # shellcheck disable=SC2016
+          set -euo pipefail
+          APT_RUNS_BEFORE="$(grep -c '^Start-Date' /var/log/apt/history.log 2>/dev/null || true)"
+          sudo dpkg -i "$HOME"/pw-os-debs/*.deb
+          # the same package set the miss run installed: every name=version of the manifest is now what dpkg has
+          while IFS='=' read -r name want; do
+            have="$(dpkg-query -W -f='${db:Status-Abbrev}${Version}\n' "$name" 2>/dev/null || true)"
+            if ! grep -qxF -- "ii $want" <<< "$have"; then
+              echo "::error title=Playwright OS deps differ from the cached set (story #4750)::$name want ii $want have ${have:-none}"
+              exit 1
+            fi
+          done < "$HOME/pw-os-debs/pkgs.txt"
+          echo "cached OS deps in place: $(wc -l < "$HOME/pw-os-debs/pkgs.txt") packages"
+          pnpm --filter web exec playwright install chromium
+          # self-check: this path must not have run apt at all (apt appends one Start-Date entry per install/upgrade run). A path
+          # that goes back to `--with-deps` here would bring the mirror dependency back — and turn this step red.
+          APT_RUNS_AFTER="$(grep -c '^Start-Date' /var/log/apt/history.log 2>/dev/null || true)"
+          if [ "${APT_RUNS_BEFORE:-0}" != "${APT_RUNS_AFTER:-0}" ]; then
+            echo "::error title=apt ran on the cache-hit path (story #4750)::apt history entries ${APT_RUNS_BEFORE:-0} -> ${APT_RUNS_AFTER:-0}"
+            exit 1
+          fi
 
       # story #4586 — the shared stub plugin of the layout specs, checked by esbuild alone (no browser): an unlisted next/ or
       # @/app import still bundles and runs, and an unlisted module fails by name. A red step fails this job.

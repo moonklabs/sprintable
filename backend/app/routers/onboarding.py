@@ -113,9 +113,10 @@ async def post_onboarding_event(
     person_id: uuid.UUID | None = None
     if raw_key and not raw_key.startswith("sk_"):
         try:
-            from app.core.security import decode_jwt
+            from app.dependencies.auth import verify_access_token
 
-            person_id = uuid.UUID(str(decode_jwt(raw_key).get("sub")))
+            # story 4725 (Mirko 6228236239): an access token only (not a refresh token), and not one older than the account's cut-off
+            person_id = uuid.UUID(str((await verify_access_token(raw_key, db)).get("sub")))
         except Exception:
             person_id = None
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useSearchParams } from 'next/navigation';
 import { Loader2, Smartphone } from 'lucide-react';
@@ -9,24 +9,32 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { fetchWithAuth } from '@/lib/db/client';
 import { presetDescription, presetName } from '@/lib/platform-preset-copy';
-import { pickEunNeunJosa, pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle';
+import { pickEulReulJosa, pickEunNeunJosa, pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { SetupProgressView } from './desktop-setup-progress';
-import { defaultOrgName } from '@/app/onboarding/desktop-create-org';
-import { onboardingRedirect } from '@/lib/auth/onboarding-next';
+import { DesktopSetupAgent, DesktopSetupQuick } from './desktop-setup-quick';
+import { showsQuickCard } from '@/lib/desktop-setup-quick';
+import { defaultOrgName } from '@/lib/default-org-name';
+import { InviteCheckFailedCard } from './invite-check-failed';
 import { formatLocaleDate } from '@/lib/i18n';
 import { InvisibleSample, useViewerTimeZone } from '@/components/viewer-time-zone';
 import { EmailVerifyGateCard, useEmailVerifyGate } from '@/components/auth/email-verify-gate';
 import {
-  agentRowCount, confirmBody, firstProjectConfirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type OldRuntime, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk, withPreselectedAgent,
-  type AttachableAgent, type DesktopRuntime, type SetupRecipe, type SetupRoleRow, movedRowCount, ownerKey, withAttachable, withDefaultRecipeFirst,
+  agentRoomOf, agentRowCount, confirmBody, firstProjectConfirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type OldRuntime, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk, withPreselectedAgent,
+  type AgentRoom, type AttachableAgent, type DesktopRuntime, roomShort, type PreselectHold, type SetupRecipe, type SetupRoleRow, movedRowCount, ownerKey, preselectHoldOf, withAttachable, withDefaultRecipeFirst,
   addAgentTool, hasSignInCheck, JUDGED_AGENT_TOOLS,
   moveConfirmBody, movableState, moveListOrder } from '@/lib/desktop-setup';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { appSetupLink, nativeReturnApp, RETURN_APP_PARAM } from '@/lib/auth/native-return-app';
 import { putOrgRemoteControl, useOrgRemoteControl } from '@/lib/org-remote-control';
+import { agentLimitOf, type AgentLimit } from '@/lib/agent-limit';
+import { isEEEnabled } from '@/lib/ee';
+import { limitCopy } from '@/lib/plan-limit-copy';
+import { CreateOrganizationDialog } from '@/components/nav/create-organization-dialog';
+import { memberCardFacts } from '@/lib/desktop-setup-member';
+import { TAB_PROJECT_STORAGE_KEY } from '@/lib/project-context-client';
 
 /**
  * story #4427(E-DESKTOP P2) — 웹 설정 페이지. 데스크톱 앱이 이 페이지를 설정 코드 + 찾은 에이전트 목록과 함께 연다.
@@ -42,14 +50,14 @@ export const SETUP_REOPEN_LINK = appSetupLink(null, 'reopen');
 
 /** story #4626: the links for the app that opened this page — `?app=` through the closed table (none · anything else = the
  *  default above, byte for byte; a typed address has none) */
-function useAppSetupLinks(): { open: string; reopen: string } {
+export function useAppSetupLinks(): { open: string; reopen: string } {
   const app = nativeReturnApp(useSearchParams()?.get(RETURN_APP_PARAM));
   return { open: appSetupLink(app), reopen: appSetupLink(app, 'reopen') };
 }
-const RUNTIME_LABEL: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex' };
+export const RUNTIME_LABEL: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex' };
 // each provider's recommended install (no Node.js needed; fixed provider addresses with no version in them — PO 13:10Z from
 // code.claude.com/docs/en/setup and github.com/openai/codex)
-const INSTALL: Record<DesktopRuntime, string> = { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh' };
+export const INSTALL: Record<DesktopRuntime, string> = { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh' };
 
 export type SetupFailure = 'no-agent' | 'not-admin' | 'agent-limit' | 'expired' | 'offline' | 'managed' | 'no-recipe' | 'recipes-offline' | 'recipe-too-big' | 'recipes-changed' | 'has-org' | 'disconnected'
   // story #4576 — the move's own refusals (Yuna «② 확인이 거절될 때»)
@@ -59,7 +67,7 @@ export type SetupFailure = 'no-agent' | 'not-admin' | 'agent-limit' | 'expired' 
 const FAILURE_KEY: Record<string, string> = {
   'no-agent.title': 'failure.no-agent.title', 'no-agent.body': 'failure.no-agent.body', 'no-agent.action': 'failure.no-agent.action',
   'not-admin.title': 'failure.not-admin.title', 'not-admin.body': 'failure.not-admin.body', 'not-admin.action': 'failure.not-admin.action',
-  'agent-limit.title': 'failure.agent-limit.title', 'agent-limit.body': 'failure.agent-limit.body', 'agent-limit.action': 'failure.agent-limit.action',
+  'agent-limit.body': 'failure.agent-limit.body', 'agent-limit.action': 'failure.agent-limit.action',
   'expired.title': 'failure.expired.title', 'expired.body': 'failure.expired.body', 'expired.action': 'failure.expired.action',
   'offline.title': 'failure.offline.title', 'offline.body': 'failure.offline.body', 'offline.action': 'failure.offline.action',
   'managed.title': 'failure.managed.title', 'managed.body': 'failure.managed.body', 'managed.action': 'failure.managed.action',
@@ -139,7 +147,7 @@ export function limitCounts(error: { needed?: unknown; available?: unknown } | u
  * project as the current one, a fresh token again — the order the one-screen «조직 만들기» uses (Mirko 02:26Z). The setup is
  * already committed, so a failed step here does not stop the progress view (it reads by the setup id).
  */
-async function joinNewOrg(body: { project_id?: string; data?: { project_id?: string } } | null): Promise<boolean> {
+export async function joinNewOrg(body: { project_id?: string; data?: { project_id?: string } } | null): Promise<boolean> {
   const projectId = body?.project_id ?? body?.data?.project_id;
   if (!(await renewToken())) return false;
   if (projectId) {
@@ -170,6 +178,17 @@ function reloadToProgress(setupId: string): void {
   window.location.reload();
 }
 
+/** The person's pending invites (`GET /api/invites/mine`); throws when the list cannot be read — not knowing is not «no invites».
+ *  One reading for the recipe setup and the first-setup card (story 4711). */
+export async function fetchMyInvites(): Promise<MyInvite[]> {
+  const res = await fetchWithAuth('/api/invites/mine');
+  if (!res.ok) throw new Error(String(res.status));
+  const body = await res.json();
+  const list: unknown = body?.invites ?? body?.data?.invites;
+  if (!Array.isArray(list)) throw new Error('no list');
+  return list as MyInvite[];
+}
+
 /**
  * The setup is saved but its progress cannot be read with the old token (4429 ① · Yuna 09:42Z): in the progress's place, not over
  * it — «앱이 받아 가기를 기다리는 중» would say what the page does not know. No red: only «seeing» is blocked.
@@ -195,7 +214,7 @@ type View =
   /** saved on the server, but the new token could not be had: the progress cannot be read here (4429 ①) */
   | { kind: 'done-reload' }
   /** `retry`: what «다시 시도 / 다시 확인» does — read the list again, or send the confirm again. */
-  | { kind: 'failed'; failure: SetupFailure; counts?: LimitCounts | null; retry?: 'load' | 'confirm' }
+  | { kind: 'failed'; failure: SetupFailure; counts?: LimitCounts | null; plan?: AgentLimit | null; retry?: 'load' | 'confirm' }
   /** `message`: a line the new-organization start can say instead of the generic one (e-mail not verified · org/project limit). */
   | { kind: 'error'; message?: string };
 
@@ -208,7 +227,7 @@ export interface MyInvite { invite_id: string; org_id: string; org_name: string;
  * invited somewhere, so the page makes nothing and says where to go. An invite read that fails sends them to 4832's one-screen
  * «조직 만들기» instead — not knowing is not taken as «no invites».
  */
-type OrgMode = { kind: 'has-org' } | { kind: 'checking' } | { kind: 'new' } | { kind: 'invited'; invites: MyInvite[] };
+type OrgMode = { kind: 'has-org' } | { kind: 'checking' } | { kind: 'new' } | { kind: 'invited'; invites: MyInvite[] } | { kind: 'invite-failed' };
 
 export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null, old = [], canMove = false, preselect = null }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[]; setupId?: string | null; old?: OldRuntime[]; canMove?: boolean; /** story 4680: the agent the recruiter just made — chosen for the first agent row once the list has it */ preselect?: string | null }) {
   // ⑥ 갈래 가: 찾았지만 회사 설정으로 도구를 못 붙이는 런타임은 고를 수 없고, 꺼진 선택지로만 보인다. PO 08:37Z · 유나 08:38Z.
@@ -255,6 +274,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const phoneControl = phoneControlPicked ?? !remoteReadFailed;
   const [phoneControlFailed, setPhoneControlFailed] = useState(false);
   const [recipes, setRecipes] = useState<SetupRecipe[]>([]);
+  // story 4717 AC1: how many more agents the plan has room for (null = no limit holds · not read) — read with the recipe list
+  const [agentRoom, setAgentRoom] = useState<AgentRoom | null>(null);
   const [recipeId, setRecipeId] = useState<string>('');
   const [rows, setRows] = useState<SetupRoleRow[]>([]);
   // story #4565: this org's existing agents the setup may move to this computer (owner/admin · this project) — none: no group
@@ -264,6 +285,19 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   // (what has arrived by then). The preselect is never marked spent on «this list would land» — with no rows yet that spent it
   // on nothing and the recipe's rows came up without it.
   const attachableRef = useRef<readonly AttachableAgent[]>([]);
+  // story 4701: which read of that list has ended — «<project>:<tick>» and how (ok / failed). The recruiter's agent (`agent=` · preselect)
+  // can only land on a row once the list is here, so «시작» waits for it (a press before it made a NEW Creator · Publisher and left the
+  // recruited agent on no setup). Derived from the key, not a flag set in the effect: the first render after a project / tick change is
+  // «reading» too, so there is no frame with «시작» on.
+  const [attachableRead, setAttachableRead] = useState<{ key: string; ok: boolean } | null>(null);
+  // Yuna 4701-copy-1015 §2: after [목록 다시 불러오기] the button stays (aria-disabled while it reads, so focus stays on it); once the list is
+  // here it goes and focus moves to «시작»
+  const [attachableRetried, setAttachableRetried] = useState(false);
+  // story 4703: the person let the recruiter's agent go — [새로 만들기로 바꾸기], or any row set by hand (setOwner). From then on no reason line
+  // holds «시작» for it (and the preselect is spent: it never lands after this)
+  const [preselectLetGo, setPreselectLetGo] = useState(false);
+  const startFocusAfter = useRef(false);
+  const startRef = useRef<HTMLButtonElement | null>(null);
   const [workdir, setWorkdir] = useState('');
   const [editingDir, setEditingDir] = useState(false);
   const [pickingRecipe, setPickingRecipe] = useState(false); // 4446: the recipe list is folded to the chosen one until [바꾸기]
@@ -313,16 +347,16 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   }, [setupId]);
 
   // (나) no organization: their invites decide the mode (0 → a new organization · some → where to go · unreadable → (가))
+  const inviteReads = useRef(0); // codex self-QA: only the LATEST read decides (a late failure must not overwrite a read that already succeeded)
   async function readInvites() {
+    const mine = ++inviteReads.current;
     try {
-      const res = await fetchWithAuth('/api/invites/mine');
-      if (!res.ok) throw new Error(String(res.status));
-      const body = await res.json();
-      const list: unknown = body?.invites ?? body?.data?.invites;
-      if (!Array.isArray(list)) throw new Error('no list');
-      setOrgMode(list.length ? { kind: 'invited', invites: list as MyInvite[] } : { kind: 'new' });
+      const list = await fetchMyInvites();
+      if (mine !== inviteReads.current) return;
+      setOrgMode(list.length ? { kind: 'invited', invites: list } : { kind: 'new' });
     } catch {
-      window.location.assign(onboardingRedirect(window.location.pathname)); // this page → /onboarding?next=… (4832)
+      if (mine !== inviteReads.current) return;
+      setOrgMode({ kind: 'invite-failed' }); // story 4711 AC4: not knowing is not "no invites" — the page says so and reads again (no organization is made meanwhile)
     }
   }
   useEffect(() => {
@@ -374,6 +408,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         // the default recipe first and chosen when it is there (PO 10:40Z ② · Yuna v23) — not whatever the server sorted first
         const usable = withDefaultRecipeFirst(list.filter((d) => listableRecipe(d, presetName(d, tPreset))));
         if (off) return;
+        setAgentRoom(agentRoomOf(body?.agent_room)); // the contract's one shape (no data-wrapped fallback — scripts/verify_web_api_response_shapes.py)
         setRecipes(usable);
         if (usable[0]) pick(usable[0]);
         setView(usable.length ? { kind: 'choose' } : { kind: 'failed', failure: 'no-recipe', retry: 'load' });
@@ -415,17 +450,51 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   useEffect(() => {
     if (orgMode.kind !== 'has-org' || !chosenProject || !isAdmin) { attachableRef.current = []; setAttachable([]); return; }
     let off = false;
+    const readKey = `${chosenProject}:${attachableTick}`;
+    // story 4701 (Yuna 4701-copy-1015 §3): a read that never answers is a silent failure — after the limit the page says «failed» (the
+    // button reads again); an answer that comes after that still lands (the list is applied and «시작» turns on)
+    const limit = setTimeout(() => { if (!off) setAttachableRead((cur) => (cur?.key === readKey ? cur : { key: readKey, ok: false })); }, ATTACHABLE_READ_LIMIT_MS);
     fetchWithAuth(`/api/desktop/setup/agents?project_id=${encodeURIComponent(chosenProject)}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((body: { agents?: AttachableAgent[] } | null) => {
         if (off) return;
         // the contract's one shape ({agents}) — anything else draws no group (never guessed from another field)
         applyAttachable(Array.isArray(body?.agents) ? body.agents : []);
+        setAttachableRead({ key: readKey, ok: body !== null });
       })
-      .catch(() => { if (!off) { attachableRef.current = []; setAttachable([]); } }); // the group is left out — «새로 만들기» still works
-    return () => { off = true; };
+      .catch(() => { if (!off) { attachableRef.current = []; setAttachable([]); setAttachableRead({ key: readKey, ok: false }); } })
+      .finally(() => clearTimeout(limit)); // the group is left out — «새로 만들기» still works (no preselect: as before; with one «시작» waits — story 4701)
+    return () => { off = true; clearTimeout(limit); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgMode.kind, chosenProject, isAdmin, attachableTick]);
+
+  // story 4701: with the recruiter's agent in the address (`agent=`), «시작» waits for the agents list this page reads (the same condition
+  // the read runs on). Still reading → «reading»; the read failed → «failed» (never a quiet fall to «새로 만들기»: [다시 불러오기] reads
+  // again). No `agent=` · no read to wait for (a new organization · not an admin · no project yet) → nothing waits — the road as before.
+  const appLinks = useAppSetupLinks();
+  const attachableReadKey = chosenProject ? `${chosenProject}:${attachableTick}` : null;
+  const attachableWanted = !!preselect && orgMode.kind === 'has-org' && !!chosenProject && isAdmin;
+  const attachableHold: 'reading' | 'failed' | null = !attachableWanted ? null
+    : attachableRead?.key !== attachableReadKey ? 'reading'
+      : attachableRead.ok ? null : 'failed';
+  // story 4703: why the recruiter's agent did not land although the list is here (Yuna 4703-copy-1015) — null while it is read, when the
+  // person let it go, or when it lands. «시작» is off while a reason shows; a reason is never a quiet fall to a new agent.
+  const preselectHold: PreselectHold | null = attachableWanted && attachableHold === null && !preselectLetGo
+    ? preselectHoldOf(attachable, preselect, runtimes, blocked) : null;
+  // «시작» when it is on; else the first agent row's role select — so focus never falls to the page (Yuna 4701 non-blocking ② · 4703 §②)
+  const focusStartOrRoles = () => {
+    const b = startRef.current;
+    if (b && !b.disabled) b.focus(); else rolesRef.current?.querySelector<HTMLElement>('select')?.focus();
+  };
+  // the list arrived after [목록 다시 불러오기] (its button went away) → focus «시작», now on, with the recruiter's agent already chosen —
+  // or, when «시작» is still off for another reason, the first agent row's role select
+  useEffect(() => {
+    if (attachableRetried && attachableHold === null) { setAttachableRetried(false); focusStartOrRoles(); }
+  }, [attachableRetried, attachableHold]);
+  // [새로 만들기로 바꾸기]: the reason line goes, the count line returns, focus moves to «시작»
+  useEffect(() => {
+    if (startFocusAfter.current && preselectHold === null) { startFocusAfter.current = false; focusStartOrRoles(); }
+  }, [preselectHold]);
 
   function pick(r: SetupRecipe) {
     setRecipeId(r.id);
@@ -446,11 +515,11 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const [putDone, setPutDone] = useState<string | null>(null);
   const pendingFocus = useRef<string | null>(null);
   const rolesRef = useRef<HTMLElement | null>(null);
-  async function putOnTeam(a: AttachableAgent, order: readonly AttachableAgent[]) {
+  async function putOnTeam(a: AttachableAgent, order: readonly AttachableAgent[], fromHold = false) {
     if (!chosenProject || teamState[a.id] === 'busy') return;
     setTeamState((s) => ({ ...s, [a.id]: 'busy' }));
     setPutDone(null);
-    const failed = () => { pendingFocus.current = `put:${a.id}`; setTeamState((s) => ({ ...s, [a.id]: 'failed' })); };
+    const failed = () => { pendingFocus.current = fromHold ? 'hold-put' : `put:${a.id}`; setTeamState((s) => ({ ...s, [a.id]: 'failed' })); };
     try {
       const res = await fetchWithAuth(`/api/projects/${chosenProject}/access`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -463,7 +532,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       // Yuna §J (필수): the pressed button goes away — focus goes to the next row's button, else where the agent can be picked
       const at = order.findIndex((x) => x.id === a.id);
       const next = order[at + 1] ?? order[at - 1];
-      pendingFocus.current = next ? `put:${next.id}` : moveMode ? `move:${a.id}` : 'select';
+      // story 4703 (Yuna §②): from the reason line, the agent lands on the first agent row — focus «시작» (or the row's select when it is still off)
+      pendingFocus.current = fromHold ? 'start' : next ? `put:${next.id}` : moveMode ? `move:${a.id}` : 'select';
       applyAttachable(body.agents);
       setTeamState((s) => { const rest = { ...s }; delete rest[a.id]; return rest; });
       setPutDone(a.name);
@@ -475,7 +545,9 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     const target = pendingFocus.current;
     if (!target) return;
     pendingFocus.current = null;
-    const el = target.startsWith('put:') ? document.querySelector<HTMLElement>(`[data-put-on-team="${target.slice(4)}"]`)
+    if (target === 'start') { focusStartOrRoles(); return; }
+    const el = target === 'hold-put' ? document.querySelector<HTMLElement>('[data-preselect-put]')
+      : target.startsWith('put:') ? document.querySelector<HTMLElement>(`[data-put-on-team="${target.slice(4)}"]`)
       : target.startsWith('move:') ? document.getElementById(`setup-move-${target.slice(5)}`)
         : rolesRef.current?.querySelector<HTMLElement>('select');
     el?.focus();
@@ -503,6 +575,9 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const humanList = humanRoles.join(' · ');
   const agents = agentRowCount(rows);
   const moved = movedRowCount(rows);
+  // story 4717 AC1: more new agents than the plan has room for — «시작» stays off and the ways show (never a 402 after the press)
+  const short = !moveMode && roomShort(agentRoom, agents);
+  const canUseExisting = rows.some((r) => r.owner.kind === 'agent' && r.choices.some((c) => c.kind === 'existing'));
 
   /**
    * story 4670 (AC1): the tick's one PUT — after the confirmation went through, for the org this setup belongs to (the one the server
@@ -576,7 +651,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         : null;
       if (message) { setView({ kind: 'error', message }); return; }
       const failure = failureForCode(error?.code, error?.resource);
-      setView(failure ? { kind: 'failed', failure, counts: failure === 'agent-limit' ? limitCounts(body?.error) : null, retry: failure === 'recipes-changed' ? 'load' : undefined } : { kind: 'error' });
+      setView(failure ? { kind: 'failed', failure, counts: failure === 'agent-limit' ? limitCounts(body?.error) : null, plan: failure === 'agent-limit' ? agentLimitOf(402, body) : null, retry: failure === 'recipes-changed' ? 'load' : undefined } : { kind: 'error' });
     } catch {
       setView({ kind: 'failed', failure: 'offline', retry: 'confirm' });
     }
@@ -615,11 +690,19 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     }
   }
 
-  if (orgMode.kind === 'invited') return <InvitedCard invites={orgMode.invites} />;
+  if (orgMode.kind === 'invite-failed') return <InviteCheckFailedCard onRetry={() => { setOrgMode({ kind: 'checking' }); void readInvites(); }} />;
   if (newOrg && verifyGate.kind === 'closed') return <EmailVerifyGateCard gate={verifyGate} />;
   if (newOrg && verifyGate.kind === 'reading') return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   // a person making a new organization is its owner-to-be: the server checks «no organization» itself (org_members 0 rows)
-  if (orgMode.kind === 'has-org' && !isAdmin && view.kind !== 'loading') return <Failure failure="not-admin" />;
+  // the setup values are only in memory (the page took them off the address): a reload that should land on THIS page puts them back first
+  // — «이미 조직이 있어요» [다시 불러오기] (4429 ②) and, story 4721, the member card's [다시 확인] and its switch into the new organization
+  const reloadKeepingSetup = () => {
+    // replaceState, not `location.hash =`: no hashchange (the page's own handler would take the values off again before the reload)
+    window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment({ code, runtimes: found, setupId, blocked, old, ...(canMove ? { canMove: true as const } : {}), ...(preselect ? { agent: preselect } : {}) }));
+    window.location.reload();
+  };
+  if (orgMode.kind === 'invited') return <InvitedInApp invites={orgMode.invites} onReload={reloadKeepingSetup} />;
+  if (orgMode.kind === 'has-org' && !isAdmin && view.kind !== 'loading') return <Failure failure="not-admin" onReloadPage={reloadKeepingSetup} />;
   if (view.kind === 'loading') return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   if (view.kind === 'failed') {
     // «목록 다시 불러오기» (move-changed): the agents are read again — the ticks that are no longer movable fall off by themselves
@@ -628,14 +711,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       : view.failure === 'offline' ? () => void start() : view.failure === 'move-offline' ? () => void moveStart() : undefined;
     // «이미 조직이 있어요» [다시 불러오기]: reload with the setup values put back into the fragment — they are only in memory now
     // (the page took them off the address), and a bare reload showed «데스크톱 앱에서 열어 주세요» (4429 ②)
-    const onReloadPage = view.failure === 'has-org'
-      // replaceState, not `location.hash =`: no hashchange (the page's own handler would take the values off again before the reload)
-      ? () => {
-        window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment({ code, runtimes: found, setupId, blocked, old, ...(canMove ? { canMove: true as const } : {}) }));
-        window.location.reload();
-      }
-      : undefined;
-    return <Failure failure={view.failure} counts={view.counts ?? null} onRetry={onRetry} onReloadPage={onReloadPage}
+    const onReloadPage = view.failure === 'has-org' || view.failure === 'not-admin' ? reloadKeepingSetup : undefined;
+    return <Failure failure={view.failure} counts={view.counts ?? null} plan={view.plan ?? null} onRetry={onRetry} onReloadPage={onReloadPage}
       onChooseRecipe={view.failure === 'agent-limit' || view.failure === 'recipe-too-big' ? () => setView({ kind: 'choose' }) : undefined} />;
   }
   // 쓸 수 있는 런타임이 하나도 없을 때: 막힌 것만 있으면 ⑥ 전체 화면, 아무것도 못 찾았으면 ①
@@ -648,13 +725,14 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
 
   const setOwner = (role: string, key: string) => {
     preselectSpent.current = true; // story 4680 (PO (나)): a person set a row — the recruiter's preselect never lands after this
+    setPreselectLetGo(true); // story 4703: …and no reason line holds «시작» for it any more
     setRows((rs) => rs.map((r) => (r.role === role ? { ...r, owner: r.choices.find((c) => ownerKey(c) === key) ?? r.owner } : r)));
   };
   // agents found but every either row set to «나»: «시작» off with the reason in the count line's place (Yuna v21 — n = 0 there
   // would be false); the server refuses the same with no_agent_role
   const noAgentRow = needsAnAgent(rows);
   const namesOk = firstProject ? !!projectName.trim() : !newOrg || (!!orgName.trim() && !!projectName.trim());
-  const canStart = !!recipe && (newOrg || firstProject || !!chosenProject) && namesOk && !noAgentRow && workdirInputOk(workdir) && view.kind === 'choose';
+  const canStart = !!recipe && (newOrg || firstProject || !!chosenProject) && namesOk && !noAgentRow && workdirInputOk(workdir) && view.kind === 'choose' && attachableHold === null && preselectHold === null && !short;
   const canMoveStart = !!chosenProject && moveChosen.length > 0 && view.kind === 'choose';
   const toggleMove = (id: string, on: boolean) => setMoving((ms) => (on ? [...new Set([...ms, id])] : ms.filter((m) => m !== id)));
 
@@ -942,9 +1020,11 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
               </li>
             ))}
           </ul>
-          {/* story 4678 (Yuna §J): the organization's agents that are not on this project's team — one folded list, a button per line */}
+          {/* story 4678 (Yuna §J): the organization's agents that are not on this project's team — one list, a button per line.
+              AC3 (PO 2026-10-19 · Yuna's wheel: «넣기 → 고르기 → [시작]» = 3 hands, the folded list made it 4): OPEN from the start whenever there is at least one
+              (zero → not drawn at all, as before). A person can still fold it; a re-render does not open it again (the prop never changes). */}
           {outsiders.length > 0 ? (
-            <details className="mt-2 rounded-md border" data-testid="setup-not-on-team">
+            <details open className="mt-2 rounded-md border" data-testid="setup-not-on-team">
               <summary className="cursor-pointer break-keep px-3 py-2 text-sm">{t('notOnTeamGroup', { n: outsiders.length })}</summary>
               <ul className="divide-y border-t">
                 {outsiders.map((a) => (
@@ -980,7 +1060,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       )}
 
       {/* what the agents ask and what they do not (PO 00:41Z · Yuna v17): Sprintable's own tools are pre-allowed; files ·
-          commands · other tools still ask each time — at the end of the flow, just above the start row (4446) */}
+          commands · other tools follow the person's own Claude Code · Codex settings on that computer (story 4708 — the app no longer
+          promises «ask each time») — at the end of the flow, just above the start row (4446) */}
       <p className="text-xs text-muted-foreground">{t('toolNote')}</p>
 
       {/* «시작» and its one line stay in sight (4446 · Yuna b2d15f85 ② · PO 00:31Z): stuck to the bottom of whatever scrolls —
@@ -997,16 +1078,74 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
             </label>
           </div>
         ) : null}
-        <Button onClick={() => void (moveMode ? moveStart() : start())} disabled={moveMode ? !canMoveStart : !canStart}>
+        <Button ref={startRef} onClick={() => void (moveMode ? moveStart() : start())} disabled={moveMode ? !canMoveStart : !canStart}>
           {view.kind === 'starting' ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}{moveMode ? t('move.start') : t('start')}
         </Button>
-        <p className="text-xs text-muted-foreground">
-          {moveMode ? (needsProjectPick ? t('projectPick.reason') : !anyMovable ? t('move.noneMovable') : moveChosen.length === 0 ? t('move.noneChosen') : t('move.startNote', { m: moveChosen.length }))
-            : noAgentRow ? t('noAgentRow')
-            // story 4496 (Yuna 10:05Z ②): several projects and none picked — why «시작» is off, in the count line's place
-            : needsProjectPick ? t('projectPick.reason')
-            : startNote(t, agents, moved, humanList, humanRoles.length > 0)}
-        </p>
+        {/* story 4701 (Yuna 4701-copy-1015): the recruiter's agent is not on a row until the list is read — «시작» is off and says why, in the
+            count line's place and before every other reason (the waiting IS the reason at that moment) */}
+        {attachableHold !== null && !moveMode ? (
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground" role={attachableHold === 'failed' ? 'alert' : 'status'} data-testid={attachableHold === 'failed' ? 'setup-attachable-failed' : 'setup-attachable-reading'}>
+            {attachableHold === 'reading' ? <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden /> : null}
+            {attachableHold === 'failed' ? t('attachableFailed') : t('attachableReading')}
+          </p>
+        ) : preselectHold !== null && !moveMode ? (
+          // story 4703 (Yuna 4703-copy-1015): the list is here and the recruiter's agent cannot take a row — «시작» is off, the line says why
+          // (from the list and the found runtimes — never a guess) and the way that keeps the agent comes before «새로 만들기로 바꾸기». The
+          // line takes the count line's place; the only control that starts is still «시작».
+          <div className="flex flex-col gap-2" data-testid="setup-preselect-hold">
+            <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]" role="status" data-testid="setup-preselect-reason" data-reason={preselectHold.reason}>
+              {preselectHold.reason === 'unlisted' ? t('preselect.notListed')
+                : preselectHold.reason === 'outside_project' ? t('preselect.notInProject', { name: preselectHold.agent.name })
+                  : preselectHold.reason === 'runtime_missing'
+                    ? t('preselect.runtimeMissing', { name: preselectHold.agent.name, runtime: RUNTIME_LABEL[preselectHold.agent.runtime], eulReul: pickEulReulJosa(RUNTIME_LABEL[preselectHold.agent.runtime]) })
+                    : t('preselect.runtimeBlocked', { name: preselectHold.agent.name, runtime: RUNTIME_LABEL[preselectHold.agent.runtime], eunNeun: pickEunNeunJosa(RUNTIME_LABEL[preselectHold.agent.runtime]) })}
+            </p>
+            {preselectHold.reason === 'runtime_missing' ? (
+              <div className="flex items-center justify-between gap-3 rounded-md border p-2" data-testid="setup-preselect-install">
+                <code className="min-w-0 truncate text-xs">{INSTALL[preselectHold.agent.runtime]}</code>
+                <Button
+                  variant="ghost" size="sm" aria-label={t('failure.copyAria', { runtime: RUNTIME_LABEL[preselectHold.agent.runtime] })}
+                  onClick={() => void navigator.clipboard?.writeText(INSTALL[preselectHold.agent.runtime]).catch(() => {})}
+                >{t('failure.copy')}</Button>
+              </div>
+            ) : null}
+            <div className="flex flex-wrap gap-2">
+              {preselectHold.reason === 'outside_project' ? (
+                <PutOnTeamButton agent={preselectHold.agent} state={teamState[preselectHold.agent.id]} onPress={() => void putOnTeam(preselectHold.agent, [preselectHold.agent], true)} fromHold />
+              ) : null}
+              {preselectHold.reason === 'runtime_missing' ? (
+                <Button asChild variant="outline" size="sm" data-testid="setup-preselect-look-again"><a href={appLinks.open}>{t('failure.no-agent.action')}</a></Button>
+              ) : null}
+              <Button
+                type="button" variant="outline" size="sm" data-testid="setup-preselect-use-new"
+                onClick={() => { preselectSpent.current = true; startFocusAfter.current = true; setPreselectLetGo(true); }}
+              >{t('preselect.useNew')}</Button>
+            </div>
+          </div>
+        ) : short && agentRoom ? (
+          // story 4717 AC1: the recipe needs more new agents than the plan has room for — said before the press, in the count line's place
+          <RoomShort room={agentRoom} need={agents} canUseExisting={canUseExisting} />
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            {moveMode ? (needsProjectPick ? t('projectPick.reason') : !anyMovable ? t('move.noneMovable') : moveChosen.length === 0 ? t('move.noneChosen') : t('move.startNote', { m: moveChosen.length }))
+              : noAgentRow ? t('noAgentRow')
+              // story 4496 (Yuna 10:05Z ②): several projects and none picked — why «시작» is off, in the count line's place
+              : needsProjectPick ? t('projectPick.reason')
+              : startNote(t, agents, moved, humanList, humanRoles.length > 0)}
+            {/* story 4717 AC1: the room, when a limit holds and this recipe makes new agents */}
+            {!moveMode && !noAgentRow && !needsProjectPick && agentRoom && agents > 0
+              ? <span data-testid="setup-agent-room"> · {t('room.left', { left: agentRoom.available })}</span> : null}
+          </p>
+        )}
+        {/* directly below the line · stays after a press (aria-disabled while it reads — not `disabled`: keyboard focus stays on it, as 4678's
+            [프로젝트 팀에 넣기]); the list arriving takes it away and focus goes to «시작» (effect above) */}
+        {!moveMode && (attachableHold === 'failed' || (attachableHold === 'reading' && attachableRetried)) ? (
+          <Button
+            type="button" variant="outline" size="sm" className="self-start aria-disabled:pointer-events-none aria-disabled:opacity-50" data-testid="setup-attachable-retry"
+            aria-disabled={attachableHold === 'reading' || undefined}
+            onClick={() => { if (attachableHold !== 'failed') return; setAttachableRetried(true); setAttachableTick((n) => n + 1); }}
+          >{t('move.failureChangedAction')}</Button>
+        ) : null}
         {rateLine ? <p className="text-xs text-muted-foreground" data-testid="setup-rate-limited">{rateLine}</p>
           : view.kind === 'error' ? <p className="text-xs text-muted-foreground">{view.message ?? t('genericError')}</p> : null}
       </footer>
@@ -1023,7 +1162,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
  * in place (the page's putOnTeam); while it works the button reads «넣는 중…» and ignores presses — `aria-disabled`, not `disabled`, so
  * keyboard focus stays on it (a disabled button drops focus to the page). A failure says so under the button; the line stays.
  */
-function PutOnTeamButton({ agent, state, onPress }: { agent: AttachableAgent; state?: 'busy' | 'failed'; onPress: () => void }) {
+function PutOnTeamButton({ agent, state, onPress, fromHold = false }: { agent: AttachableAgent; state?: 'busy' | 'failed'; onPress: () => void; /** story 4703: the one under the reason line (its failure focus finds it, not the row's) */ fromHold?: boolean }) {
   const t = useTranslations('desktop.setup');
   const busy = state === 'busy';
   return (
@@ -1034,7 +1173,7 @@ function PutOnTeamButton({ agent, state, onPress }: { agent: AttachableAgent; st
         aria-label={busy ? undefined : t('putOnTeamAria', { name: agent.name })}
         className="aria-disabled:pointer-events-none aria-disabled:opacity-50"
         onClick={() => { if (!busy) onPress(); }}
-        data-put-on-team={agent.id} data-testid="setup-put-on-team"
+        data-put-on-team={fromHold ? undefined : agent.id} data-preselect-put={fromHold ? '' : undefined} data-testid={fromHold ? 'setup-preselect-put' : 'setup-put-on-team'}
       >
         {busy ? t('putOnTeamBusy') : t('putOnTeam')}
       </Button>
@@ -1043,7 +1182,7 @@ function PutOnTeamButton({ agent, state, onPress }: { agent: AttachableAgent; st
   );
 }
 
-function MovedAgentNote({ agent }: { agent: AttachableAgent | undefined }) {
+export function MovedAgentNote({ agent }: { agent: AttachableAgent | undefined }) {
   const t = useTranslations('desktop.setup');
   const locale = useLocale();
   const viewerTz = useViewerTimeZone();
@@ -1058,6 +1197,50 @@ function MovedAgentNote({ agent }: { agent: AttachableAgent | undefined }) {
 }
 
 /** «시작» 아래 줄(4565 · Yuna 02:32Z ①): «만들고»는 새로 만드는 것만 세고, 옮겨 오는 것은 «옮겨»로 · 사람 역할이 있으면 꼬리. */
+/** story 4717 AC2: «N개 필요 · M개 더» — M = 0 is its own sentence («0개만 더» read as nonsense). */
+function roomCountsLine(t: ReturnType<typeof useTranslations<'desktop.setup'>>, need: number, left: number): string {
+  return left === 0 ? t('room.shortNone', { need }) : t('room.short', { need, left });
+}
+
+/**
+ * story 4717 AC1: before [시작], when the recipe as chosen makes more new agents than the plan has room for. «시작» is off (canStart);
+ * this says how many, in the plan's words (the recruiter's rule — lib/plan-limit-copy), and the ways: an agent the organization
+ * already has can take a row (no new agent · the rows' «이미 있는 에이전트» group, story #4565) · tidy up · upgrade where billing is open.
+ */
+function RoomShort({ room, need, canUseExisting }: { room: AgentRoom; need: number; canUseExisting: boolean }) {
+  const t = useTranslations('desktop.setup');
+  return (
+    <RoomShortBox room={room} line={roomCountsLine(t, need, room.available)}
+      hint={canUseExisting ? <p className="text-xs text-muted-foreground" data-testid="setup-room-use-existing">{t('room.useExisting')}</p> : null} />
+  );
+}
+
+/**
+ * story 4717 (follow-up · PO 05:04Z): the plan's agent room said before «시작» — one box for the recipe setup and the solo card
+ * (desktop-setup-quick): the line it is given (how many · in that screen's words), the plan's limit in the recruiter's words
+ * (lib/plan-limit-copy), an optional hint (the way that keeps the person's agents), then [에이전트 정리하기] · upgrade where billing is open.
+ */
+export function RoomShortBox({ room, line, hint = null }: { room: AgentRoom; line: string; hint?: ReactNode }) {
+  const t = useTranslations('desktop.setup');
+  const tNav = useTranslations('nav');
+  const tRecruiter = useTranslations('recruiter');
+  const flatHref = useFlatHref();
+  const copy = limitCopy({ resource: 'agent', limit: room.limit, free: room.free, billingOpen: isEEEnabled() });
+  return (
+    <div className="flex flex-col gap-2" data-testid="setup-room-short">
+      <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]" role="status">
+        {line}
+        {copy.reason ? <> {tRecruiter(copy.reason.key, copy.reason.withLimit ? { limit: room.limit } : undefined)}</> : null}
+      </p>
+      {hint}
+      <div className="flex flex-wrap gap-2">
+        <Button asChild variant="outline" size="sm"><a href={flatHref('/organization/workforce')}>{t('failure.agent-limit.manage')}</a></Button>
+        {copy.link ? <Button asChild variant="outline" size="sm"><a href={flatHref('/settings?tab=billing')}>{tNav('orgLimitUpgradeLink')}</a></Button> : null}
+      </div>
+    </div>
+  );
+}
+
 function startNote(t: ReturnType<typeof useTranslations<'desktop.setup'>>, made: number, moved: number, humanList: string, withMe: boolean): string {
   const me = withMe ? { roles: humanList, josa: pickEunNeunJosa(humanList) } : null;
   if (moved === 0) return me ? t('startNoteWithMe', { n: made, ...me }) : t('startNote', { n: made });
@@ -1083,18 +1266,66 @@ export function TooOldCard({ old }: { old: OldRuntime[] }) {
   );
 }
 
-export function Failure({ failure, onRetry, counts = null, onChooseRecipe, onReloadPage, todayHref }: { failure: SetupFailure; onRetry?: () => void; counts?: LimitCounts | null; onChooseRecipe?: () => void; onReloadPage?: () => void; todayHref?: string }) {
+export function Failure({ failure, onRetry, counts = null, plan = null, solo = false, onChooseRecipe, onReloadPage, todayHref }: { failure: SetupFailure; onRetry?: () => void; counts?: LimitCounts | null; plan?: AgentLimit | null; /** story 4717: the solo card (one agent, no recipe) — its own words, no «레시피» */ solo?: boolean; onChooseRecipe?: () => void; onReloadPage?: () => void; todayHref?: string }) {
   const t = useTranslations('desktop.setup');
+  const tNav = useTranslations('nav');
+  const tRecruiter = useTranslations('recruiter');
+  // story 4717 AC2: the agent limit is worded by the one rule the recruiter's banner uses (lib/plan-limit-copy) — title, plan line, upgrade way
+  const limit = failure === 'agent-limit' ? limitCopy({ resource: 'agent', limit: plan?.limit ?? null, free: plan?.free ?? true, billingOpen: isEEEnabled() }) : null;
   const flatHref = useFlatHref();
   const key = (part: 'title' | 'body' | 'action') => FAILURE_KEY[`${failure}.${part}`]!;
   const links = useAppSetupLinks();
   const appButton = (label: string) => <Button asChild><a href={links.open}>{label}</a></Button>;
+  // story 4721 (Yuna invited-member-card-1017 §3): a MEMBER on the not-admin card has two ways out beside «다시 확인» — ask an admin (the
+  // body says it) and start in an organization of their own (the primary, only while the plan lets them make one)
+  const { orgId, orgMemberships, userName } = useDashboardContext();
+  const tNewOrg = useTranslations('desktopOnboarding');
+  const [createOpen, setCreateOpen] = useState(false);
+  const [madeOrgId, setMadeOrgId] = useState<string | null>(null); // made, but the switch to it did not go through: the primary tries the switch again
+  const [enterFailed, setEnterFailed] = useState(false);
+  const [entering, setEntering] = useState(false); // the switch is on its way: a second press waits for it
+  // the server wants the e-mail verified before an organization is made (an invited person's account has its own «verified» mark): the gate that
+  // new-org mode already uses stands in the card's place until the mailbox is proved, then the card is back and the primary can be pressed again
+  const [verifyWanted, setVerifyWanted] = useState(false);
+  const verifyGate = useEmailVerifyGate(verifyWanted, () => setVerifyWanted(false));
+  // asked for the gate but the server's own answer says the mailbox is proved (or cannot be read): no gate to show — the generic line
+  const createRefused = verifyWanted && verifyGate.kind === 'open';
+  const member = failure === 'not-admin' ? memberCardFacts(orgId, orgMemberships, isEEEnabled()) : null;
+  const canCreate = !!member && (member.canCreateOwn || madeOrgId !== null);
+  const org = member?.orgName ?? '';
+  const memberBody = !member ? null
+    : member.orgName ? (member.canCreateOwn ? t('failure.not-admin.body', { org }) : t('failure.not-admin.bodyAsk', { org }))
+    : (member.canCreateOwn ? t('failure.not-admin.bodyNoName') : t('failure.not-admin.bodyNoNameAsk'));
+  const reloadPage = onReloadPage ?? (() => window.location.reload());
+  async function enterOwnOrg(newOrgId: string) {
+    setEntering(true);
+    setEnterFailed(false);
+    try {
+      const res = await fetchWithAuth('/api/switch-org', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ org_id: newOrgId }) });
+      const json = await res.json().catch(() => null) as { data?: { ok?: boolean } } | null;
+      if (!(res.ok && json?.data?.ok)) { setEnterFailed(true); setEntering(false); return; }
+      // the switcher's own order: the tab's project belongs to the organization left, so it goes before the page is read again
+      window.sessionStorage.removeItem(TAB_PROJECT_STORAGE_KEY);
+      reloadPage();
+    } catch {
+      setEnterFailed(true);
+      setEntering(false);
+    }
+  }
+  if (verifyWanted && verifyGate.kind === 'closed') return <EmailVerifyGateCard gate={verifyGate} />;
   return (
     <Card className="break-keep flex flex-col gap-3 p-6">
-      <h1 className="text-lg font-semibold">{t(key('title'))}</h1>
-      <p className="text-sm text-muted-foreground">
-        {failure === 'agent-limit' && counts ? <>{t('failure.agent-limit.bodyWithCounts', { need: counts.need, left: counts.left })} </> : null}{t(key('body'))}
-      </p>
+      <h1 className="text-lg font-semibold">{limit ? tNav(limit.title) : t(key('title'))}</h1>
+      {limit ? (
+        <p className="text-sm text-muted-foreground" data-testid="setup-agent-limit-body">
+          {solo ? <>{t('room.soloNone')} </> : counts ? <>{roomCountsLine(t, counts.need, counts.left)} </> : null}
+          {/* the plan line needs the server's limit when numbers are shown — the number-less «모두 만들었어요» would contradict «1개만 더» */}
+          {limit.reason && (plan?.limit != null || !counts) ? <>{tRecruiter(limit.reason.key, limit.reason.withLimit && plan?.limit != null ? { limit: plan.limit } : undefined)} </> : null}
+          {solo ? t('room.soloTidy') : t(key('body'))}
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">{memberBody ?? t(key('body'))}</p>
+      )}
       {failure === 'no-agent' ? (
         <ul className="flex flex-col gap-2">
           {(Object.keys(INSTALL) as DesktopRuntime[]).map((r) => (
@@ -1114,14 +1345,33 @@ export function Failure({ failure, onRetry, counts = null, onChooseRecipe, onRel
             {todayHref ? <Button asChild variant="outline"><a href={todayHref}>{t('goToday')}</a></Button> : null}
           </>
           : (failure === 'offline' || failure === 'no-recipe' || failure === 'recipes-offline' || failure === 'recipes-changed' || failure === 'move-changed' || failure === 'move-offline') && onRetry ? <Button onClick={onRetry}>{t(key('action'))}</Button>
-          : failure === 'not-admin' || failure === 'move-not-admin' || failure === 'managed' || failure === 'has-org' ? <Button onClick={onReloadPage ?? (() => window.location.reload())}>{t(key('action'))}</Button>
+          : failure === 'not-admin' && canCreate ? <>
+            <Button disabled={entering} onClick={() => { if (madeOrgId) void enterOwnOrg(madeOrgId); else setCreateOpen(true); }}>{t('failure.not-admin.create')}</Button>
+            {/* once the organization is made, «다시 확인» is the same way back as the primary: a plain reload would drop the made organization and
+                its switch (the new owner row would then close the primary) */}
+            <Button variant="outline" disabled={entering} onClick={() => { if (madeOrgId) void enterOwnOrg(madeOrgId); else reloadPage(); }}>{t(key('action'))}</Button>
+          </>
+          : failure === 'not-admin' || failure === 'move-not-admin' || failure === 'managed' || failure === 'has-org' ? <Button onClick={reloadPage}>{t(key('action'))}</Button>
           : failure === 'recipe-too-big' && onChooseRecipe ? <Button onClick={onChooseRecipe}>{t(key('action'))}</Button>
           : failure === 'agent-limit' ? <>
             {onChooseRecipe ? <Button onClick={onChooseRecipe}>{t(key('action'))}</Button> : null}
             <Button variant="outline" asChild><a href={flatHref('/organization/workforce')}>{t('failure.agent-limit.manage')}</a></Button>
+            {limit?.link ? <Button variant="outline" asChild><a href={flatHref('/settings?tab=billing')}>{tNav('orgLimitUpgradeLink')}</a></Button> : null}
           </>
           : null}
       </div>
+      {enterFailed ? <p role="alert" className="text-sm text-destructive">{tNav('switcherSwitchOrgError')}</p> : null}
+      {createRefused ? <p role="alert" className="text-sm text-destructive">{tNav('createOrgGenericError')}</p> : null}
+      {member?.canCreateOwn ? (
+        <CreateOrganizationDialog
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          initialName={defaultOrgName(userName, (n) => tNewOrg('defaultOrgNameWithName', { name: n }), tNewOrg('defaultOrgName'))}
+          slugOptional
+          onEmailVerificationRequired={() => setVerifyWanted(true)}
+          onCreated={(id) => { setMadeOrgId(id); void enterOwnOrg(id); }}
+        />
+      ) : null}
     </Card>
   );
 }
@@ -1137,31 +1387,140 @@ export function inviteUntilDate(value: string, locale: string, timeZone: string,
   return formatLocaleDate(date, locale, { month: ko ? 'long' : 'short', day: 'numeric', ...(year(date) !== year(now) ? { year: 'numeric' } : {}) }, timeZone);
 }
 
+type JoinFail = 'already' | 'expired' | 'notMine' | 'unknown';
+const JOIN_FAIL_KEY: Record<string, string> = { already: 'invited.fail.already', expired: 'invited.fail.expired', notMine: 'invited.fail.notMine', unknown: 'invited.fail.unknown' };
+
 /**
- * (나) invited somewhere (Yuna f6cfda19 v2): the page makes nothing and has no button — the invite is taken through the mail link
- * (no token here). One line per invite: who invited · as what · until when.
+ * (나) invited somewhere (Yuna f6cfda19 v2 · 4711 AC4 덧 sheet 2026-10-17): one line per invite — who invited · as what · until when — each with its own [들어가기]
+ * that takes THAT invite from inside the app (`POST /api/invites/mine/{invite_id}/accept`: the list carries no token; the server decides and answers), then the
+ * person is in that organization (`/api/switch-org`) and the page is read again; and one small link at the bottom, «내 조직을 새로 만들기».
+ * One invite → a filled button; more → an outline button per line (one screen never has several filled ones). While a press is in flight every line's button is
+ * off (no second accept). A failure is its own line under that row: already accepted · expired (that row's button goes) · not this account's · unknown.
  */
-export function InvitedCard({ invites }: { invites: MyInvite[] }) {
+export function InvitedCard({ invites, onReload, onCreateOwn, ownBusy = false }: { invites: MyInvite[]; onReload: () => void; onCreateOwn: () => void; /** the caller's own-organization flow is on its way: the link waits */ ownBusy?: boolean }) {
   const t = useTranslations('desktop.setup');
   const locale = useLocale();
   const viewerTz = useViewerTimeZone(); // story #4443 PR2 — unknown yet: the row's place is held, no UTC day shown
+  const [busy, setBusy] = useState<string | null>(null);
+  const acceptedOrg = useRef<Record<string, string>>({}); // an invite that was taken but whose switch did not go through: the retry only switches (the invite is not pending any more)
+  const inFlight = useRef(false); // two presses in the same tick both see the old `busy`: the ref is what keeps the second one out
+  const [fails, setFails] = useState<Record<string, JoinFail>>({});
   const inviteRow = (i: MyInvite) => {
     const role = i.role === 'admin' ? t('invited.roleAdmin') : t('invited.roleMember');
     const row = t('invited.row', { org: i.org_name, role, josa: pickEuroJosa(role), date: inviteUntilDate(i.expires_at, locale, viewerTz ?? 'UTC') });
     return viewerTz ? row : <InvisibleSample>{row}</InvisibleSample>;
   };
+  async function join(invite: MyInvite) {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setBusy(invite.invite_id);
+    setFails((f) => { const { [invite.invite_id]: _gone, ...rest } = f; return rest; });
+    const fail = (why: JoinFail) => { setFails((f) => ({ ...f, [invite.invite_id]: why })); inFlight.current = false; setBusy(null); };
+    try {
+      let orgId: unknown = acceptedOrg.current[invite.invite_id];
+      if (!orgId) {
+        const res = await fetchWithAuth(`/api/invites/mine/${encodeURIComponent(invite.invite_id)}/accept`, { method: 'POST' });
+        if (!res.ok) { fail(res.status === 409 ? 'already' : res.status === 410 ? 'expired' : res.status === 403 || res.status === 404 ? 'notMine' : 'unknown'); return; }
+        // the backend's one shape (schemas/invite_accept.py AcceptInviteResponse: `{ ok, org_id, role }`, no envelope — the BFF route passes it through as it is)
+        const body = (await res.json().catch(() => null)) as { org_id?: unknown } | null;
+        orgId = body?.org_id;
+        if (typeof orgId !== 'string' || !orgId) { fail('unknown'); return; }
+        acceptedOrg.current[invite.invite_id] = orgId;
+      }
+      // the member now: the session was made before the membership, so the switch (which gives the session that organization) comes before the page is read again
+      const sw = await fetchWithAuth('/api/switch-org', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ org_id: orgId as string }) });
+      const swJson = (await sw.json().catch(() => null)) as { data?: { ok?: boolean } } | null;
+      if (!(sw.ok && swJson?.data?.ok)) { fail('unknown'); return; }
+      window.sessionStorage.removeItem(TAB_PROJECT_STORAGE_KEY);
+      onReload();
+    } catch {
+      fail('unknown');
+    }
+  }
+  const filled = invites.length === 1;
+  const failLine = (id: string) => {
+    const why = fails[id];
+    if (!why) return null;
+    const alert = why === 'notMine' || why === 'unknown';
+    return (
+      <div className="mt-1 flex flex-col gap-1 text-xs" role={alert ? 'alert' : 'status'} data-testid={`setup-invited-fail-${why}`}>
+        <p className={alert ? 'text-destructive' : 'text-muted-foreground'}>{t(JOIN_FAIL_KEY[why]!)}</p>
+        {why === 'already' || why === 'notMine' ? <div><Button variant="outline" size="sm" onClick={onReload}>{t('failure.has-org.action')}</Button></div> : null}
+      </div>
+    );
+  };
   return (
     <Card className="break-keep flex flex-col gap-3 p-6" data-testid="setup-invited">
       <h1 className="text-lg font-semibold">{t('invited.title')}</h1>
-      <ul className="flex flex-col gap-1">
+      <ul className="flex flex-col gap-3">
         {invites.map((i) => (
-          <li key={i.invite_id} className="text-sm">
-            {inviteRow(i)}
+          <li key={i.invite_id} className="flex flex-col text-sm" data-testid="setup-invited-row">
+            <span>{inviteRow(i)}</span>
+            {fails[i.invite_id] !== 'expired' ? (
+              <div className="mt-2">
+                <Button
+                  variant={filled ? 'default' : 'outline'} size="sm" className="whitespace-nowrap" disabled={busy !== null}
+                  aria-label={t('invited.joinAria', { org: i.org_name })} aria-busy={busy === i.invite_id} onClick={() => void join(i)} data-testid="setup-invited-join"
+                >
+                  {busy === i.invite_id ? t('invited.joining') : t('invited.join')}
+                </Button>
+              </div>
+            ) : null}
+            {failLine(i.invite_id)}
           </li>
         ))}
       </ul>
-      <p className="text-sm text-muted-foreground">{t('invited.action')}</p>
+      <div>
+        <Button variant="link" size="sm" className="h-auto whitespace-normal px-0 py-0 text-xs underline" disabled={busy !== null || ownBusy} onClick={onCreateOwn} data-testid="setup-invited-own-org">
+          {t('invited.createOwn')}
+        </Button>
+      </div>
     </Card>
+  );
+}
+
+/**
+ * The invited card as the app's setup page shows it: «내 조직을 새로 만들기» opens the same «새 조직 만들기» window the member card uses (the generic
+ * organization route — it has no pending-invite check; the confirm-new-org of the setup start has, and would send the person back here), then the person is in
+ * their new organization and the page is read again.
+ */
+export function InvitedInApp({ invites, onReload }: { invites: MyInvite[]; onReload: () => void }) {
+  const { userName } = useDashboardContext();
+  const tNewOrg = useTranslations('desktopOnboarding');
+  const t = useTranslations('desktop.setup');
+  const [open, setOpen] = useState(false);
+  const [madeOrgId, setMadeOrgId] = useState<string | null>(null); // made, but the switch into it did not go through: the link tries the switch again, it does not make another
+  const [entering, setEntering] = useState(false);
+  const [enterFailed, setEnterFailed] = useState(false);
+  async function enterOwnOrg(orgId: string) {
+    setEntering(true);
+    setEnterFailed(false);
+    try {
+      const res = await fetchWithAuth('/api/switch-org', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ org_id: orgId }) });
+      const json = (await res.json().catch(() => null)) as { data?: { ok?: boolean } } | null;
+      if (!(res.ok && json?.data?.ok)) { setEnterFailed(true); setEntering(false); return; }
+      window.sessionStorage.removeItem(TAB_PROJECT_STORAGE_KEY);
+      onReload();
+    } catch {
+      setEnterFailed(true);
+      setEntering(false);
+    }
+  }
+  return (
+    <>
+      <InvitedCard
+        invites={invites} onReload={onReload} ownBusy={entering}
+        onCreateOwn={() => { if (madeOrgId) void enterOwnOrg(madeOrgId); else setOpen(true); }}
+      />
+      {enterFailed ? <p className="mt-2 break-keep text-xs text-destructive" role="alert" data-testid="setup-invited-own-org-failed">{t('invited.fail.unknown')}</p> : null}
+      <CreateOrganizationDialog
+        open={open}
+        onOpenChange={setOpen}
+        initialName={defaultOrgName(userName, (n) => tNewOrg('defaultOrgNameWithName', { name: n }), tNewOrg('defaultOrgName'))}
+        slugOptional
+        onCreated={(id) => { setMadeOrgId(id); void enterOwnOrg(id); }}
+      />
+    </>
   );
 }
 
@@ -1244,6 +1603,9 @@ export function DesktopSetupEntry() {
   return entry.query ? <SetupOrProgress key={entry.query.code} query={entry.query} /> : <OpenInDesktopApp />;
 }
 
+/** story 4701: how long «시작» waits for the existing-agents list before the page says it failed (Yuna 4701-copy-1015 §3: the limit is the implementer's call) */
+export const ATTACHABLE_READ_LIMIT_MS = 10_000;
+
 /** A setup id the server can hold (the same shape the /api/desktop/setups/{id} route lets through). */
 const SETUP_ID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -1259,6 +1621,7 @@ function SetupOrProgress({ query }: { query: SetupQuery }) {
   const t = useTranslations('desktop.setup');
   const id = query.setupId && SETUP_ID_SHAPE.test(query.setupId) ? query.setupId : null;
   const [started, setStarted] = useState<boolean | null>(id ? null : false);
+  const [teamPath, setTeamPath] = useState(false);
   useEffect(() => {
     if (!id) return;
     let off = false;
@@ -1275,6 +1638,11 @@ function SetupOrProgress({ query }: { query: SetupQuery }) {
   }, [id]);
   if (started === null) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   if (started && id) return <SetupProgressView setupId={id} recipeName="" />;
+  // story 4711: an app that can take the first setup in three steps gets that card; the recipe setup is one link away («팀 꾸리기»).
+  // A recruiter's agent (`agent=`) keeps the recipe page for now — its own branch of the card comes with the recruiter's PR.
+  // story 4711 (`agent=` branch): a recruiter's agent, an app that can move → the card with ① fixed to that agent (a move, never a new agent)
+  if (query.agent && query.canMove === true && !teamPath) return <DesktopSetupAgent query={query} onTeam={() => setTeamPath(true)} />;
+  if (showsQuickCard(query, teamPath) && !query.agent) return <DesktopSetupQuick query={query} onTeam={() => setTeamPath(true)} />;
   return <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} old={query.old ?? []} canMove={query.canMove === true} preselect={query.agent ?? null} />;
 }
 

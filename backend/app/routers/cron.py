@@ -838,6 +838,43 @@ async def agent_run_timeout_sweep(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+# ─── POST /api/v2/internal/cron/clock-edit-scrub ───────────────────────────────
+# story #4733 (S5 · P2 · Kadir's pin on 5182): the words a person typed into a clock-out edit are kept for the length of the flow and never past EDIT_TEXT_TTL — also when the
+# computer never answers and nobody presses it again (the scrub on a press / a result only runs when one comes).
+
+@router.post("/clock-edit-scrub")
+async def clock_edit_scrub(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.desktop_clock import scrub_all_clock_edits
+        scrubbed = await scrub_all_clock_edits(session)  # (the session commits at the end of the request, as the other sweeps rely on)
+        return _ok({"scrubbed": scrubbed})
+    except Exception as exc:
+        logger.exception("cron error (clock-edit-scrub): %s", type(exc).__name__)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
+# ─── POST /api/v2/internal/cron/account-purge ─────────────────────────────────
+# story #4752: the personal data of an account deleted at least ACCOUNT_PURGE_GRACE_DAYS ago is anonymized (what the deletion copy promises). Bounded per run, idempotent.
+
+@router.post("/account-purge")
+async def account_purge(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    verify_cron(request)
+    try:
+        from app.services.account_purge import purge_deleted_accounts
+        purged = await purge_deleted_accounts(session)  # (the session commits at the end of the request)
+        return _ok({"purged": purged})
+    except Exception as exc:
+        logger.exception("cron error (account-purge): %s", type(exc).__name__)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 @router.get("/storage-usage-warn")
 async def storage_usage_warn(
     request: Request,

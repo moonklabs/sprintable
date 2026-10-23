@@ -426,6 +426,7 @@ async def _recruit_agent_endpoint(
             runtime=body.runtime,
             actor_id=resolved.id,
             locale=resolved_locale,
+            issue_key=body.issue_key,  # story 4710: False → no key in the answer (and none made)
         )
     except ValueError as exc:
         # validate_tool_groups fail-closed(QA MINOR 하드닝) — 오염된 role_template 데이터 400.

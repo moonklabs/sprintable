@@ -14,6 +14,8 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+import logging
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +25,9 @@ from app.repositories.api_key import ApiKeyRepository
 from app.repositories.team_member import TeamMemberRepository
 from app.schemas.agent_persona import PersonaSummaryResponse
 from app.services.agent_recruiter import compose_kit, validate_tool_groups
+from app.services.key_scope import narrowed_scope
+
+logger = logging.getLogger(__name__)
 from app.services.model_family import render_kit_for_family, resolve_model_family
 
 
@@ -63,6 +68,21 @@ async def _rotate_or_create_key(
     return await key_repo.create(team_member_id=agent_id, scope=scope, expires_at=None)
 
 
+async def _plan_key_narrowing(
+    session: AsyncSession, agent_id: uuid.UUID, role_scope: list[str]
+) -> list[tuple[uuid.UUID, list[str] | None, list[str]]]:
+    """story 4710: what each ACTIVE key of the agent becomes (`key_scope.narrowed_scope` — never wider than the key had): (key id, the scope to
+    store — or None when the key and the role share no group, before scope). A key with nothing in common with the role cannot be written
+    as a narrower list (an empty list means «every group»); «no permission left» is expressed by revoking it (PO 10:3xZ)."""
+    plan: list[tuple[uuid.UUID, list[str] | None, list[str]]] = []
+    for key in await ApiKeyRepository(session).list_by_member(agent_id):
+        if key.revoked_at is not None:
+            continue
+        before = list(key.scope or [])
+        plan.append((key.id, narrowed_scope(before, role_scope), before))
+    return plan
+
+
 async def recruit_agent(
     session: AsyncSession,
     *,
@@ -72,6 +92,7 @@ async def recruit_agent(
     runtime: str,
     actor_id: uuid.UUID,
     locale: str = "ko",
+    issue_key: bool = True,
 ) -> dict[str, Any]:
     """recruit 본체 — 반환: ``{persona, api_key_plaintext, tool_allowlist}``.
 
@@ -102,6 +123,10 @@ async def recruit_agent(
     "family 미지정 시 기존 동작과 사실상 동일"이라는 회귀 요건도 자연히 충족한다.
     """
     await acquire_agent_mutation_lock(session, agent_member.id)
+
+    # story 4710: a hire without a key narrows the keys the agent already has (never widens them; a key with nothing in common with the
+    # role is revoked) — planned before anything is written, applied after the role is validated
+    key_plan = None if issue_key else await _plan_key_narrowing(session, agent_member.id, list(role_template.default_tool_groups))
 
     # story #2433(A, PO 예외 승인 2026-08-03 — 담당경계는 backend/=디디군이나 이 한 자리만
     # 예외로 미르코가 고침, 근거는 PR 본문 참고): recruit 은 runtime 을 받아 compose_kit·
@@ -153,9 +178,33 @@ async def recruit_agent(
             is_default=True,
         )
 
-    _new_key, api_key_plaintext = await _rotate_or_create_key(
-        session, agent_id=agent_member.id, scope=tool_allowlist
-    )
+    api_key_plaintext: str | None
+    if issue_key:
+        _new_key, api_key_plaintext = await _rotate_or_create_key(
+            session, agent_id=agent_member.id, scope=tool_allowlist
+        )
+    else:
+        # story 4710: no key is made, none is rotated (a rotate would hand a fresh plaintext to the caller). A key the agent already has
+        # keeps its id and its plaintext and is narrowed in place to (what it may do) ∩ (the role's scope) — never to the role's scope
+        # as it is (`sync_active_scope` assigns, which would widen a narrower key).
+        key_repo = ApiKeyRepository(session)
+        for key_id, scope, before in key_plan or []:
+            if scope is not None:
+                await key_repo.set_scope(key_id, scope)
+                continue
+            # nothing in common with the role: the narrowest scope there is = no permission = the key goes (no plaintext moves)
+            await key_repo.revoke(key_id)
+            logger.info("recruit.key_revoked_no_common_scope agent=%s key=%s role=%s key_scope=%s", agent_member.id, key_id, role_template.slug, before)
+            if agent_member.project_id is not None:
+                from app.models.agent_deployment import AgentAuditLog
+
+                session.add(AgentAuditLog(
+                    org_id=org_id, project_id=agent_member.project_id, agent_id=agent_member.id,
+                    event_type="agent_key_revoked_no_common_scope", severity="warning",
+                    summary="agent_key_revoked_no_common_scope",
+                    payload={"api_key_id": str(key_id), "key_scope": before, "role_slug": role_template.slug, "role_scope": tool_allowlist},
+                ))
+        api_key_plaintext = None
 
     return {
         "persona": persona,

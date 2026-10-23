@@ -19,9 +19,8 @@ import { newClientNonce, normalizeToMessage, sentMessageFromAnswer, type ChatMes
 import type { TodayNeedsMeItem } from '@/components/org-briefing/derive-today';
 
 // story #4008 CHANGES 2(PO 지적, 2026-09-17) — 이 컴포넌트가 chat-v3-screen.tsx와 각자
-// useChatSse를 불러 탭당 SSE 연결이 prod 설정(SSE_MULTIPLEX_ENABLED=false, cloud-build.yml)
-// 에서 2개로 늘었다(멀티플렉서 없으면 훅 호출마다 독립 EventSource — use-chat-sse.ts 폴백
-// 경로). 구독은 chat-v3-screen.tsx 한 곳으로 올리고, 이 컴포넌트는 그 결과를 ref로
+// useChatSse를 불러 탭당 SSE 연결이 (그 시절 prod 설정 = 멀티플렉서 끔)
+// 에서 2개로 늘었다(story #4698 — 끔 길과 훅의 독립 EventSource 폴백은 지웠다: 이제 스트림은 늘 RealtimeProvider 한 줄기). 구독은 chat-v3-screen.tsx 한 곳으로 올리고, 이 컴포넌트는 그 결과를 ref로
 // 받기만 한다(상태를 부모로 끌어올리는 대신 최소 변경 — messages 배열 자체는 여기 소유
 // 유지, 부모는 "새 메시지 왔다"만 알려준다).
 export interface ChatV3MessagesHandle {

@@ -358,6 +358,31 @@ async def test_focal_story_human_verified_by_resolves_name_from_latest_gate_appr
         await engine.dispose()
 
 
+async def test_an_anonymized_verifier_with_no_name_does_not_break_the_focal_story_or_the_hero():
+    """story #4752 (codex): an account deleted and anonymized leaves members.name NULL; `human_verified_by.name` is a required string in both projections (goals focal story, glance hero) — a NULL
+    must come out as "" (the screen has no name to show), never a validation 500."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            caller_id, caller_user_id = await _make_human_member(s, org.id, project.id, name="Caller")
+            verifier_id, _ = await _make_human_member(s, org.id, project.id, name=None)
+            goal = await _make_goal(s, org.id, project.id)
+            story = await _make_story(s, org.id, project.id, goal.id, assignee_id=caller_id, status="in-progress", title="Verified by a departed person")
+            await _make_evidence(s, org.id, story.id, created_by=verifier_id, type="gate_approval", ref="approved")
+
+        focal = await _fetch_focal(app, Session, caller_user_id, org.id, project.id)
+        assert focal is not None and focal["trust"]["human_verified"] is True
+        assert focal["trust"]["human_verified_by"] == {"name": ""}, focal
+        hero = await _fetch_hero(app, Session, caller_user_id, org.id, story.id)
+        assert hero["trust"]["human_verified"] is True and hero["trust"]["human_verified_by"]["name"] == "", hero
+    finally:
+        await engine.dispose()
+
+
 # ─── AC4 — 있는 만큼만 단다: 뺀 필드가 실제로 없어야 한다 ────────────────────
 
 

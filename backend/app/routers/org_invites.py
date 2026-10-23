@@ -183,6 +183,9 @@ async def revoke_org_invite(
     invite = await invite_repo.revoke(invite_id=invite_id, org_id=id)
     if invite is None:
         raise HTTPException(status_code=404, detail="Invite not found")
+    if invite.status == "accepted":  # story #4729 — the invitee got there first: say so, never show an accepted invite as «cancelled»
+        await session.commit()
+        raise HTTPException(status_code=409, detail="Invite already accepted")
 
     await session.commit()
     return _to_response(invite)

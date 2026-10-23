@@ -197,7 +197,7 @@ describe('DesktopRemoteDevices (story #4533)', () => {
     answers([phone({ label: 'Galaxy S24', pairs: [...phone().pairs, { setup_id: 's2', device_name: 'Studio', paired_at: '2026-09-30T03:00:00Z' }] })]);
     await render();
     await act(async () => { button('이 폰 빼기')[0].click(); });
-    expect(text()).toContain('이 폰을 뺄까요? · Galaxy S24 — 빼면 그 폰으로는 승인 · 멈춤 · 지시를 할 수 없고, 짝지은 컴퓨터 2대와 모두 끊겨요. 원격 기기 자리 하나가 비고, 그 폰을 다시 쓰려면 폰에서 짝짓기를 새로 해요.');
+    expect(text()).toContain('이 폰을 뺄까요? · Galaxy S24 — 빼면 그 폰으로는 승인 · 멈춤 · 지시를 할 수 없고, 페어링된 컴퓨터 2대와 모두 끊겨요. 원격 기기 자리 하나가 비고, 그 폰을 다시 쓰려면 폰에서 페어링을 새로 해요.');
     expect(document.activeElement?.textContent).toBe('취소');
     expect(button('빼기').every((b) => b.disabled || b.closest('[role="group"]'))).toBe(true); // the pair buttons wait while it asks
     fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => (
@@ -267,7 +267,7 @@ describe('DesktopRemoteDevices (story #4533)', () => {
     expect(container.querySelectorAll('[data-testid="desktop-remote-phone"]')[0].textContent).toContain('페어링 없음');
     await act(async () => { button('이 폰 빼기')[0].click(); });
     // Yuna 08:14Z: no pair → its own line, without a cost it does not have
-    expect(text()).toContain('이 폰을 뺄까요? · Galaxy (지운 앱) — 짝지은 컴퓨터는 없어요. 빼면 원격 기기 자리 하나가 비고, 그 폰을 다시 쓰려면 폰에서 짝짓기를 새로 해요.');
+    expect(text()).toContain('이 폰을 뺄까요? · Galaxy (지운 앱) — 페어링된 컴퓨터는 없어요. 빼면 원격 기기 자리 하나가 비고, 그 폰을 다시 쓰려면 폰에서 페어링을 새로 해요.');
     expect(text()).not.toContain('0대');
     await act(async () => { button('취소')[0].click(); });
     expect(document.activeElement).toBe(button('이 폰 빼기')[0]);
@@ -311,5 +311,51 @@ describe('DesktopRemoteDevices (story #4533)', () => {
     expect(text()).toContain('No paired computers');
     await act(async () => { button('Remove this phone')[0].click(); });
     expect(text()).toContain("Remove this phone? · iPhone — it isn't linked to any computer. One remote device place is freed; to use it again, set it up again from the phone.");
+  });
+});
+
+describe('DesktopRemoteDevices — the computer is the unit (story 4734)', () => {
+  const C1 = 'c1111111-1111-4111-8111-111111111111';
+  const C2 = 'c2222222-2222-4222-8222-222222222222';
+  const pair = (setup_id: string, computer_id: string | undefined, device_name: string) => ({ setup_id, ...(computer_id ? { computer_id } : {}), device_name, paired_at: '2026-10-02T03:00:00Z' });
+
+  it('pairs of one computer are ONE line (the name once); another computer is its own; a pair with no computer_id (an older server) stays a line each', async () => {
+    answers([phone({ pairs: [pair('s1', C1, 'SYJ-MacBook-Pro'), pair('s2', C1, 'SYJ-MacBook-Pro'), pair('s3', C1, 'SYJ-MacBook-Pro'), pair('s4', C2, '사무실 맥'), pair('s5', undefined, 'old'), pair('s6', undefined, 'old')] })]);
+    await render();
+    const rows = container.querySelectorAll('[data-testid="desktop-remote-device-row"]');
+    expect(rows).toHaveLength(4); // reverted (a line per setup) → 6
+    expect([...rows].map((r) => ['SYJ-MacBook-Pro', '사무실 맥', 'old'].find((n) => r.textContent?.includes(`페어링: ${n}`)))).toEqual(['SYJ-MacBook-Pro', '사무실 맥', 'old', 'old']);
+  });
+
+  it('[빼기] on a computer\'s line removes the phone from the COMPUTER once — the computer route, not one setup\'s', async () => {
+    answers([phone({ pairs: [pair('s1', C1, 'SYJ-MacBook-Pro'), pair('s2', C1, 'SYJ-MacBook-Pro')] })]);
+    await render();
+    await act(async () => { button('빼기')[0].click(); });
+    fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => (
+      init?.method === 'DELETE' ? json({ removed: true, pairs: 2 }) : url === '/api/remote-devices' ? json({ devices: [phone({ pairs: [] })] }) : json({ data: { enabled: true } })
+    ));
+    await act(async () => { button('해제')[0].click(); });
+    await flush();
+    const dels = fetchWithAuth.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE').map(([url]) => url);
+    expect(dels).toEqual([`/api/remote-devices/p1/computers/${C1}`]);
+  });
+
+  it('a pair with no computer_id still removes through its setup\'s route (an older server)', async () => {
+    answers([phone({ pairs: [pair('s1', undefined, 'old')] })]);
+    await render();
+    await act(async () => { button('빼기')[0].click(); });
+    fetchWithAuth.mockImplementation(async (url: string, init?: RequestInit) => (
+      init?.method === 'DELETE' ? json({ removed: true }) : url === '/api/remote-devices' ? json({ devices: [phone({ pairs: [] })] }) : json({ data: { enabled: true } })
+    ));
+    await act(async () => { button('해제')[0].click(); });
+    await flush();
+    expect(fetchWithAuth.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE')?.[0]).toBe('/api/remote-devices/p1/pairs/s1');
+  });
+
+  it('[이 폰 빼기] counts COMPUTERS («컴퓨터 N대»), not setups', async () => {
+    answers([phone({ pairs: [pair('s1', C1, 'a'), pair('s2', C1, 'a'), pair('s3', C2, 'b')] })]);
+    await render();
+    await act(async () => { button('이 폰 빼기')[0].click(); });
+    expect(text()).toContain('페어링된 컴퓨터 2대와 모두 끊겨요');
   });
 });

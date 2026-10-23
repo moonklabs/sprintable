@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.doc import Doc, DocShareToken
+from app.models.organization import Organization
 
 logger = logging.getLogger(__name__)
 
@@ -120,5 +121,11 @@ async def resolve_public(db: AsyncSession, token: str) -> Doc:
         select(Doc).where(Doc.id == tok.doc_id, Doc.deleted_at.is_(None)).limit(1)
     )).scalar_one_or_none()
     if doc is None:
+        raise ShareTokenError(410, "더 이상 유효하지 않은 링크")
+    # story 4728 — a deleted organization's docs stay in the table (no foreign key from docs to organizations): its links must not read them.
+    org_alive = (await db.execute(
+        select(Organization.id).where(Organization.id == doc.org_id).limit(1)
+    )).scalar_one_or_none()
+    if org_alive is None:
         raise ShareTokenError(410, "더 이상 유효하지 않은 링크")
     return doc

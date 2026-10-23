@@ -514,7 +514,6 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const handlePoll = useCallback(async () => (await fetchMessages()) !== undefined, [fetchMessages]);
 
   const { connected, polling } = useChatSse({
-    currentTeamMemberId,
     onConversationMessage: handleConversationMessage,
     onWorking: handleWorking,
     onReconnect: handleReconnect,

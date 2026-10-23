@@ -24,7 +24,28 @@ export interface SetupQuery { code: string; runtimes: DesktopRuntime[]; setupId:
   canMove?: true;
   /** story 4680 (D2): `agent=<member id>` — the agent the recruiter just made (the app's startHere({agentId}) put it in the fragment);
    *  the page chooses it for the first agent row once the «이미 있는 에이전트» list has it. Only a uuid-shaped value; absent otherwise. */
-  agent?: string }
+  agent?: string;
+  /** story 4711: the app said `caps=solo` — it can take the first setup in three steps (one new agent for a picked folder).
+   *  Absent = an app from before: the page is today's recipe setup. Only present when true. */
+  canSolo?: true;
+  /** story 4711: the runtime the person had picked before the Mac folder window (`pick=` — the app puts it back, the address is new). */
+  pick?: DesktopRuntime;
+  /** story 4711: the versions the app read (`rv=claude:2.1.289,codex:0.159.3`) — shown after the program's name; only well-shaped ones. */
+  versions?: Partial<Record<DesktopRuntime, string>>;
+  /** story 4711: what the Mac folder window answered — a folder (shown home-shortened · its name · the project already using it) or why not. */
+  folder?: SoloFolder | SoloFolderRefused }
+
+/** story 4711: the folder the person picked in the Mac window. `shown` is for the eyes only (home shortened to `~`); the server gets
+ *  `name` (the project's name) — never a path. `projectId`: the app found a project that already uses this folder (project-workdirs).
+ *  `wide`: the home folder itself or the top of the disk — the agent would work across all of it, so the card asks once. */
+/** story 4713 AC2: the two marks the app looks for in a picked folder (its `folder-traces.ts` table) and the program each one means — the closed set the address may carry. */
+export const SOLO_TRACE_RUNTIME = { 'CLAUDE.md': 'claude', 'AGENTS.md': 'codex' } as const satisfies Record<string, DesktopRuntime>;
+export type SoloTraceFile = keyof typeof SOLO_TRACE_RUNTIME;
+export interface SoloFolder { shown: string; name: string; projectId?: string; wide?: true; traces?: readonly SoloTraceFile[] }
+export const FOLDER_REFUSALS = ['missing', 'not_folder', 'app_folder', 'denied'] as const;
+export type FolderRefusal = (typeof FOLDER_REFUSALS)[number];
+export interface SoloFolderRefused { refused: FolderRefusal }
+export const isFolderRefused = (f: SoloFolder | SoloFolderRefused | undefined): f is SoloFolderRefused => !!f && 'refused' in f;
 
 /** story 4494 (PO 10:00Z (a)): the app's `old=codex:0.153.4:0.156.1` — a runtime installed only below its floor (its version · the
  * lowest that works). The page says «버전이 낮아» for it instead of «찾지 못했어요». */
@@ -59,7 +80,43 @@ export function parseSetupQuery(params: { get(name: string): string | null }): S
   const blockedAsked = new Set((params.get('blocked') ?? '').split(',').map((s) => s.trim()));
   const caps = new Set((params.get('caps') ?? '').split(',').map((s) => s.trim()));
   const agent = params.get('agent') ?? '';
-  return { code, runtimes, setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null, blocked: runtimes.filter((r) => blockedAsked.has(r)), ...withOld(parseOldRuntimes(params.get('old'), runtimes)), ...(caps.has('move') ? { canMove: true as const } : {}), ...(AGENT_ID_RE.test(agent) ? { agent } : {}) };
+  const solo = caps.has('solo') ? { canSolo: true as const } : {};
+  const pickAsked = params.get('pick') ?? '';
+  const pick = DESKTOP_RUNTIMES.find((r) => r === pickAsked && runtimes.includes(r));
+  const versions = parseRuntimeVersions(params.get('rv'), runtimes);
+  const folder = parseSoloFolder(params);
+  return { code, runtimes, setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null, blocked: runtimes.filter((r) => blockedAsked.has(r)), ...withOld(parseOldRuntimes(params.get('old'), runtimes)), ...(caps.has('move') ? { canMove: true as const } : {}), ...solo, ...(pick ? { pick } : {}), ...(Object.keys(versions).length ? { versions } : {}), ...(folder ? { folder } : {}), ...(AGENT_ID_RE.test(agent) ? { agent } : {}) };
+}
+
+
+/** `rv=claude:2.1.289,codex:0.159.3` → the versions of the found runtimes, each at most once; a broken entry is dropped. */
+export function parseRuntimeVersions(value: string | null, found: readonly DesktopRuntime[]): Partial<Record<DesktopRuntime, string>> {
+  const out: Partial<Record<DesktopRuntime, string>> = {};
+  for (const part of (value ?? '').split(',')) {
+    const [r, v, ...rest] = part.trim().split(':');
+    const runtime = DESKTOP_RUNTIMES.find((x) => x === r);
+    if (!runtime || rest.length || !found.includes(runtime) || out[runtime] !== undefined || !v || !VERSION_RE.test(v)) continue;
+    out[runtime] = v;
+  }
+  return out;
+}
+
+const NO_CONTROL = /^[^\u0000-\u001f\u007f\u2028\u2029]+$/;
+/** A folder NAME (what the web sends for a new project) is one path segment: never a path (codex self-QA — a made-up link must not carry one to the server). */
+const NO_PATH_SEPARATOR = /^[^/\\]+$/;
+/** The folder the app's Mac window answered, from `fshown` · `fname` (· `fproject` · `fwide=1`) — or `frefused=<code>`. Anything that
+ *  is not exactly one of the two shapes is no answer (the card then shows the button, as before the window). */
+export function parseSoloFolder(params: { get(name: string): string | null }): SoloFolder | SoloFolderRefused | undefined {
+  const refused = FOLDER_REFUSALS.find((r) => r === params.get('frefused'));
+  if (refused) return { refused };
+  const shown = params.get('fshown') ?? '';
+  const name = params.get('fname') ?? '';
+  if (!shown || shown.length > 300 || !NO_CONTROL.test(shown) || !name.trim() || name.length > 100 || !NO_CONTROL.test(name) || !NO_PATH_SEPARATOR.test(name)) return undefined; // a blank name is no name (the server would refuse it with a 422)
+  const project = params.get('fproject') ?? '';
+  // story 4713 AC2: `ftrace=CLAUDE.md,AGENTS.md` — only the table's two names count, once each, in the table's order (anything else is no mark)
+  const marks = (params.get('ftrace') ?? '').split(',');
+  const traces = (Object.keys(SOLO_TRACE_RUNTIME) as SoloTraceFile[]).filter((m) => marks.includes(m));
+  return { shown, name, ...(AGENT_ID_RE.test(project) ? { projectId: project } : {}), ...(params.get('fwide') === '1' ? { wide: true as const } : {}), ...(traces.length > 0 ? { traces } : {}) };
 }
 
 /** story 4680: a member id as the app puts it in `agent=` — a uuid; anything else is ignored (never put in a request) */
@@ -87,6 +144,32 @@ export type RowOwner = { kind: 'me' } | { kind: 'agent'; runtime: DesktopRuntime
  * runtime), its live key count (any → moving it cuts its current connection) and when one was last used. No key value. */
 /** `in_project` false (PO 04:37Z): the person has to add it to the project first — shown turned off with why, never chosen. */
 export interface AttachableAgent { id: string; name: string; runtime: DesktopRuntime; live_keys: number; last_used_at: string | null; in_project: boolean }
+
+/** story 4703 — why the recruiter's agent (`agent=` · the preselect) cannot take a row of this list, from the server's own list and the
+ * runtimes the app found (never a guessed reason). null = nothing to say: no preselect, or it lands (in the project, its runtime usable here).
+ * - `unlisted`: the id is not in the list — not an active agent of this organization with a desktop runtime. Another organization's agent,
+ *   an id that does not exist and an agent with no desktop runtime are ONE answer here (the list is this organization's only, and carries
+ *   no name or id of the missing one — nothing about whether it exists elsewhere can show).
+ * - `runtime_blocked` / `runtime_missing`: its runtime is found but cannot take tools (company-managed) / is not on this computer. The two exclude
+ *   each other (a blocked runtime is a found one). A runtime reason comes before `outside_project` when several meet (adding the agent to the
+ *   project would not make it run, and an install hint is the wrong thing to say about a blocked runtime). The order checked, as in Yuna's
+ *   4703 copy: unlisted → runtime_blocked → runtime_missing → outside_project.
+ * - `outside_project`: in the organization, its runtime usable here, but not in this project (the page's [프로젝트 팀에 넣기] road). */
+export type PreselectHold =
+  | { reason: 'unlisted' }
+  | { reason: 'runtime_missing' | 'runtime_blocked' | 'outside_project'; agent: AttachableAgent };
+
+export function preselectHoldOf(
+  list: readonly AttachableAgent[], preselect: string | null | undefined, usable: readonly DesktopRuntime[], blocked: readonly DesktopRuntime[] = [],
+): PreselectHold | null {
+  if (!preselect) return null;
+  const agent = list.find((a) => a.id === preselect);
+  if (!agent) return { reason: 'unlisted' };
+  if (blocked.includes(agent.runtime)) return { reason: 'runtime_blocked', agent };
+  if (!usable.includes(agent.runtime)) return { reason: 'runtime_missing', agent };
+  if (!agent.in_project) return { reason: 'outside_project', agent };
+  return null;
+}
 
 /** The «이미 있는 에이전트» choices of a row (agent · either rows only): every attachable agent whose runtime is on this computer.
  * The page draws the others (runtime not here · picked for another row) as disabled options with why. */
@@ -181,6 +264,28 @@ export function needsAnAgent(rows: readonly SetupRoleRow[]): boolean {
   // no row bound to an agent — agent rows with nothing found, or either rows all set to «나» (PO 05:21Z ⒜ · the server
   // refuses the same with no_agent_role: this setup exists to start agents on this device). A moved agent counts (4565).
   return !rows.some((r) => r.owner.kind === 'agent' || r.owner.kind === 'existing');
+}
+
+/**
+ * story 4717 AC1 — the plan's agent room as the recipe list carries it (`agent_room` · services/desktop_setup.setup_agent_room):
+ * the limit and the count are the ones the confirmation will be held to (one count on the server — the publisher «시스템 발행» is not
+ * in it), so «지금 M개 더» before [시작] is the 402's `available`. `free`: tier free or not named, as the recruiter reads a 402's
+ * tier (lib/agent-limit). null = no limit holds (OSS · an unlimited plan) or a shape this page does not read: nothing is said and
+ * nothing is held — a number is never made up.
+ */
+export interface AgentRoom { limit: number; available: number; free: boolean }
+const shownWhole = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 9999;
+export function agentRoomOf(value: unknown): AgentRoom | null {
+  if (!value || typeof value !== 'object') return null;
+  const { limit, current, available, tier } = value as { limit?: unknown; current?: unknown; available?: unknown; tier?: unknown };
+  if (!shownWhole(limit) || !shownWhole(current) || !shownWhole(available) || available !== Math.max(0, limit - current)) return null;
+  return { limit, available, free: typeof tier !== 'string' || tier === '' || tier === 'free' };
+}
+
+/** story 4717 AC1 — the recipe as chosen makes more new agents than the plan has room for: «시작» stays off and the page shows the
+ * ways (an agent the organization already has for a row · upgrade · tidy up) instead of meeting a 402 after the press. */
+export function roomShort(room: AgentRoom | null, made: number): boolean {
+  return !!room && made > room.available;
 }
 
 /** «에이전트 N개» — 새로 만들 에이전트 수(새 런타임을 고른 줄). 옮겨 오는 이미 있는 에이전트는 셈하지 않는다(4565). */
@@ -318,8 +423,19 @@ export function setupFragment(q: SetupQuery): string {
   if (q.setupId) p.set('setup', q.setupId);
   if (q.blocked.length) p.set('blocked', q.blocked.join(','));
   if (q.old?.length) p.set('old', q.old.map((o) => `${o.runtime}:${o.version}:${o.min}`).join(','));
-  if (q.canMove) p.set('caps', 'move');
+  const caps = [...(q.canMove ? ['move'] : []), ...(q.canSolo ? ['solo'] : [])];
+  if (caps.length) p.set('caps', caps.join(','));
   if (q.agent) p.set('agent', q.agent);
+  if (q.pick) p.set('pick', q.pick);
+  const rv = Object.entries(q.versions ?? {});
+  if (rv.length) p.set('rv', rv.map(([r, v]) => `${r}:${v}`).join(','));
+  if (isFolderRefused(q.folder)) p.set('frefused', q.folder.refused);
+  else if (q.folder) {
+    p.set('fshown', q.folder.shown); p.set('fname', q.folder.name);
+    if (q.folder.projectId) p.set('fproject', q.folder.projectId);
+    if (q.folder.wide) p.set('fwide', '1');
+    if (q.folder.traces?.length) p.set('ftrace', q.folder.traces.join(','));
+  }
   return `#${p.toString().replace(/%2C/g, ',')}`;
 }
 
@@ -384,7 +500,9 @@ export interface SetupStatus {
   members: { stage: string | null; role: string | null; member_id: string; kind: 'agent' | 'human'; runtime: DesktopRuntime | null; name?: string | null }[];
   /** story #4576: «move» = no recipe (device and keys only — two steps on the page, no first task or result) · «recipe» · null before
    *  the confirmation (an older server sends none: the recipe page as before) */
-  setup_kind?: 'move' | 'recipe' | null;
+  setup_kind?: 'move' | 'recipe' | 'solo' | null;
+  /** story 4711: a solo setup's person ↔ agent room — the page opens it once the app has taken the agent over (none otherwise) */
+  conversation_id?: string | null;
   signals: {
     tools_connected: { member_id: string; at: string }[];
     first_task_handed_at: string | null;

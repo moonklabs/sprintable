@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, Text, func
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, Integer, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -36,6 +36,15 @@ class DesktopSetup(Base):
     members: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     # alembic 0439 (story #4576) — what the app that made the code can take (["move"]); None = an app from before named none
     capabilities: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # alembic 0455 (story #4714) — the (agent, project) pairs the computer says it has a usable folder for: [{agent_member_id, project_id}], ids only
+    # (never a path), replaced whole by the computer's own PUT /relay/startable; NULL = it has said nothing. Shown to the phone; the computer decides.
+    startable: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # alembic 0458 (story #4714) — the highest report number applied to `startable`: a PUT numbered at or below it is ignored (a late request cannot cover a newer list)
+    startable_seq: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # alembic 0459 (story #4733) — the same ordering for the computer's clock view reports (kept when the view row is deleted), and when the computer first/last
+    # spoke of it (NULL = never: an older app — the phone hides [퇴근]/[출근]). No content here; the view itself is in desktop_clock_views.
+    clock_view_seq: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    clock_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # the folder chosen on the web — handed back as is in the exchange; the desktop app is the judge of the path
     workdir_hint: Mapped[str | None] = mapped_column(Text, nullable=True)
     # alembic 0423 — the story the confirmation created (its first work item); the status read and the first-result mark

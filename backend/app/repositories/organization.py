@@ -5,7 +5,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -177,6 +177,28 @@ class OrganizationRepository:
         await self.session.refresh(org)
         return org
 
+    async def _billing_is_live(self) -> bool:
+        """story #4752 (4756 prod promotion): is payment entry open on this deployment — `platform_settings.billing_checkout_enabled`, the one value every checkout road judges by
+        (`services/platform_settings.require_billing_checkout_enabled`; off by default, migration 0255). Where it is off the billing tab does not exist on the web and no checkout can
+        begin, so a subscription row there is not something the person can «cancel first» (an admin plan grant is enough to make one): it must not stop a deletion. A missing row
+        counts as open — the side that blocks, never the one that silently ends a subscription. One statement; no payment module is imported."""
+        row = (await self.session.execute(text("SELECT billing_checkout_enabled FROM platform_settings LIMIT 1"))).first()
+        return True if row is None else bool(row[0])
+
+    async def _carries_payment_ties(self, org_id: uuid.UUID) -> bool:
+        """story #4752 (codex): the «no money» premise of a closed payment entry is checked, not assumed — the switch may have been turned off after payments existed. An organization that
+        holds a provider subscription id (Polar), an active billing key or a confirmed order is not one the closing may end quietly (the provider side would go on charging / is owed a
+        refund): it keeps blocking, as on a deployment with payment entry open. A grant-only row has none of these."""
+        row = await self.session.execute(
+            text(
+                "SELECT 1 WHERE EXISTS (SELECT 1 FROM org_subscriptions WHERE org_id = :o AND polar_subscription_id IS NOT NULL)"
+                " OR EXISTS (SELECT 1 FROM org_billing_keys WHERE org_id = :o AND status = 'active')"
+                " OR EXISTS (SELECT 1 FROM billing_orders WHERE org_id = :o AND status = 'confirmed')"
+            ),
+            {"o": str(org_id)},
+        )
+        return row.first() is not None
+
     async def _has_active_or_in_flight_subscription(self, org_id: uuid.UUID) -> bool:
         """구독 status='active'뿐 아니라 #2511(결제②-D후속) checkout_claimed_at이
         STALE_CLAIM_WINDOW 안(=진행 中)인 claim도 "활성"으로 취급한다.
@@ -187,7 +209,11 @@ class OrganizationRepository:
         confirmed돼도 org가 이미 사라진 뒤라 **삭제된 org에 실 청구가 완료**될 수 있었다
         (#2896 step④ CAS는 org_id 매칭이라 org 삭제 자체는 못 막는 축). #2511과 동일
         STALE_CLAIM_WINDOW/SSOT로 "진행 中"을 판정 — 죽은/멈춘(stale) claim은 여전히
-        무시(자기치유 회귀 없음)."""
+        무시(자기치유 회귀 없음).
+
+        story #4752 (4756): where payment entry is closed (`_billing_is_live` false) and the organization carries no payment ties (`_carries_payment_ties`) nothing counts — the closing ends the row with the organization (no money moves)."""
+        if not await self._billing_is_live() and not await self._carries_payment_ties(org_id):
+            return False
         now = datetime.now(timezone.utc)
         row = await self.session.execute(
             text(
@@ -302,11 +328,86 @@ class OrganizationRepository:
             if impact.has_active_subscription:
                 return {"ok": False, "reason": "active_subscription"}
 
+        return await self._close_organization(org, actor_user_id=user_id, note=impact_note)
+
+    async def delete_for_account_closure(self, org_id: uuid.UUID, user_id: uuid.UUID) -> dict:
+        """story #4752 (AC4, PO rule): the account deletion closes an organization whose only active member is the person deleting the account — the same closing as the owner's
+        organization delete (`_close_organization`: audit row, people's seats, public links and keys, channel tokens), without the typed name or the impact preview (the
+        confirmation window of the account deletion names the organizations that close with it). Whatever the person's role. An active (or in-flight) subscription stops it —
+        `active_subscription`: a paid organization is cancelled first, by hand. The organization row is locked first, as in the owner's delete."""
+        lock_result = await self.session.execute(select(Organization).where(Organization.id == org_id).with_for_update())
+        org = lock_result.scalar_one_or_none()
+        if org is None:
+            return {"ok": False, "reason": "not_found"}
+        if await self._has_active_or_in_flight_subscription(org_id):
+            return {"ok": False, "reason": "active_subscription"}
+        # the plan said nobody else is active here; someone may have joined since (an accepted invite does not take this lock) — look again, now that the row is held (codex 5189)
+        joined = (await self.session.execute(
+            text(
+                "SELECT count(*) FROM org_members x"
+                " WHERE x.org_id = :o AND x.deleted_at IS NULL AND x.user_id <> :u"
+            ),
+            {"o": org_id, "u": user_id},
+        )).scalar_one()
+        if joined:
+            return {"ok": False, "reason": "members_joined"}
+        return await self._close_organization(org, actor_user_id=user_id, note="account deletion: the only member left, the organization closes with the account")
+
+    async def _close_organization(self, org: Organization, *, actor_user_id: uuid.UUID, note: str | None) -> dict:
+        """The closing of an organization both deletes share (the owner's delete and the account deletion): the checks (who may · name · impact · subscription) are the callers'."""
+        org_id = org.id
         self.session.add(DeletionAuditLog(
-            id=uuid.uuid4(), org_id=org_id, actor_id=user_id,
+            id=uuid.uuid4(), org_id=org_id, actor_id=actor_user_id,
             entity_type="organization", entity_id=org_id, entity_title=org.name,
-            note=impact_note,
+            note=note,
         ))
+        # story 4726 — `org_members.org_id` has no foreign key (baseline schema.sql: only a primary key and a unique on
+        # (org_id, user_id)), so deleting the organizations row below does not remove the people's rows: the owner row stayed
+        # with deleted_at NULL and kept counting in the free plan's owned-organization limit (ee/plan_limits.py
+        # check_org_create_limit) — the one person who deleted their only organization could not make a new one (402 on dev,
+        # 10-17). The rows of a deleted organization are ended with it, in the same transaction, the way an account or member
+        # removal ends them (deleted_at): every reader of org_members already filters `deleted_at IS NULL`, so the fix lives
+        # here once instead of in each of the readers (35 raw queries and 73 ORM selects).
+        await self.session.execute(
+            update(OrgMember)
+            .where(OrgMember.org_id == org_id, OrgMember.deleted_at.is_(None))
+            .values(deleted_at=func.now())
+        )
+        # story 4728 (AC0 measured on a real PG): the organization row going away leaves the public links, public keys and agent keys
+        # of that organization alive in tables with no foreign key to it (doc_share_tokens · org_metering_keys · site_posts · agent_api_keys
+        # all keep org_id as a plain column) — a doc share link kept answering 200 with the deleted organization's text. They are ended
+        # here, in the delete's own transaction, before `members` is cascaded away (that cascade turns agent_api_keys.member_id to NULL and
+        # the key could no longer be matched to its organization). The public readers also check that the organization exists
+        # (services/doc_share.resolve_public · services/pageview_counter.resolve_org_by_public_key), which covers organizations that were
+        # deleted before this change.
+        for stmt in (
+            "UPDATE doc_share_tokens SET status = 'revoked', revoked_at = now() WHERE org_id = :o AND status = 'active'",
+            "UPDATE org_metering_keys SET revoked_at = now() WHERE org_id = :o AND revoked_at IS NULL",
+            "UPDATE site_posts SET unpublished_at = now() WHERE org_id = :o AND unpublished_at IS NULL",
+            # the same for what background jobs would keep using for a dead organization: the channel tokens its refresh cron renews, the
+            # GA4 tokens its scoring cron reads, and the posts that are still waiting to go out to an outside channel
+            "UPDATE channel_connections SET status = 'revoked', encrypted_access_token = NULL, encrypted_refresh_token = NULL"
+            " WHERE org_id = :o AND status <> 'revoked'",
+            "DELETE FROM ga4_connections WHERE org_id = :o",
+            "UPDATE publication_commands SET status = 'cancelled' WHERE org_id = :o AND status IN ('pending', 'blocked', 'blocked_unapproved')",
+            (
+                "UPDATE agent_api_keys SET revoked_at = now() WHERE revoked_at IS NULL"
+                " AND (member_id IN (SELECT id FROM members WHERE org_id = :o)"
+                " OR team_member_id IN (SELECT id FROM members WHERE org_id = :o))"
+            ),
+        ):
+            await self.session.execute(text(stmt), {"o": org_id})
+        # story #4752 (4756): the organization's subscription row is ended HERE, by a statement of its own, not only by `end_org_billing` below — a deployment that does not carry the
+        # billing modules (prod while payment entry is closed) has no `end_org_billing`, and a row left `active` on a deleted organization is picked up by the renewal job (it tries to
+        # charge, finds no billing key, flips the row to past_due and, a grace period later, writes a free row for an organization that is gone). The same statement as the subscription
+        # line of `end_org_billing` (a subset, so running both changes nothing): develop and a deployment without billing end the row the same way. No money, key or order is touched here.
+        await self.session.execute(
+            text(
+                "UPDATE org_subscriptions SET status = 'canceled', checkout_claimed_at = NULL, updated_at = now()"
+                " WHERE org_id = :o AND status IN ('active', 'past_due', 'pending')"
+            ),
+            {"o": org_id},
+        )
         await self.session.delete(org)
         return {"ok": True}
 
