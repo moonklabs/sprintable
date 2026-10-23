@@ -225,7 +225,7 @@ async def grant_credit(
 
     # story #4753 — the organization row first (the closing paths' lock): a grant must not put a live tier on an organization that is closing or gone.
     if not await lock_org_for_billing_write(session, org_id):
-        raise AdminBillingError(404, "ORG_NOT_FOUND", "조직이 없음 — 닫혔거나 없는 조직에는 tier를 부여할 수 없다")
+        raise AdminBillingError(404, "ORG_NOT_FOUND", "Organization not found — a closed or missing organization cannot be granted a tier")
     sub = (
         await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))
     ).scalar_one_or_none()
