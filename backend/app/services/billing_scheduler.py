@@ -40,8 +40,10 @@ from app.services.billing_charge import (
     charge_org,
 )
 from app.services.billing_charge_amount import ChargeAmountError, compute_charge_amount
+from app.services.billing_closed_org_refund import refund_charge_for_closed_org, retry_failed_closed_org_refunds
 from app.services.billing_period import compute_period_end
 from app.services.email import send_email
+from app.services.org_billing_lock import lock_org_for_billing_write
 from app.services.org_subscription_checkout import STALE_CLAIM_WINDOW
 from app.services.payment.toss_adapter import TossAdapter, TossApiError
 from app.services.platform_settings import get_platform_settings
@@ -239,6 +241,16 @@ async def downgrade_to_free(session: AsyncSession, org_id: uuid.UUID, order_id: 
     # 실제 안전장치는 아래 UPSERT 자체의 WHERE(원래 checkout claim UPSERT와 동일 패턴)다
     # — SELECT-then-write가 아니라 write-time 원자적 가드로 이 창을 완전히 닫는다.
     if not (has_newer_confirmed_order or has_newly_issued_billing_key or has_active_checkout_claim):
+        # story #4755 — the organization row before the `free` row is written (the order the closing paths take: organization → subscription). An organization that is gone gets no `free`
+        # subscription row; the stale order is still closed below so the sweep never picks it again. (No money moves here: nothing to refund.)
+        if not await lock_org_for_billing_write(session, org_id):
+            await session.execute(
+                update(BillingOrder)
+                .where(BillingOrder.order_id == order_id, BillingOrder.status != "confirmed")
+                .values(status="downgraded", updated_at=func.now())
+            )
+            await session.commit()
+            return
         free_offering = (
             await session.execute(
                 select(OfferingVersion).where(
@@ -314,6 +326,11 @@ async def sweep_dunning_retries(session: AsyncSession, *, now: datetime | None =
             await downgrade_to_free(session, order.org_id, order.order_id)
             downgraded += 1
 
+    try:
+        await retry_failed_closed_org_refunds(session)   # story #4755 — refunds that failed for a closed organization are tried again, same idempotency key
+    except Exception:
+        logger.exception("sweep_dunning_retries: retrying failed closed-organization refunds failed")
+
     return {"failed_orders_seen": len(failed_orders), "retried": retried, "downgraded": downgraded}
 
 
@@ -331,6 +348,14 @@ async def _sync_renewal_retry_outcome(
         await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))
     ).scalar_one_or_none()
     if sub is None:
+        return
+    # story #4755 — the organization row first. An organization closed while the retry was being charged is gone now: a confirmed charge is refunded (never turned into a live subscription of
+    # a closed organization), anything else has nothing left to write.
+    if not await lock_org_for_billing_write(session, org_id):
+        if order.status == "confirmed":
+            await refund_charge_for_closed_org(session, org_id=org_id, order_id=order_id)
+        else:
+            await session.commit()
         return
     if order.status == "downgraded":
         return  # story #4728 — 조직이 없어져 주문이 끝났다(charge_org 가드) — past_due 로 되돌리지도, 메일을 보내지도 않는다.
@@ -509,7 +534,7 @@ async def sweep_expired_grants(session: AsyncSession, *, now: datetime | None = 
         )
     ).mappings().all()
 
-    reverted = skipped_tier_changed = skipped_not_expired = skipped_already_reverted = 0
+    reverted = skipped_tier_changed = skipped_not_expired = skipped_already_reverted = skipped_org_closed = 0
     for row in latest_grants:
         meta = row["entry_metadata"]
         expires_at = datetime.fromisoformat(meta["grant_expires_at"])
@@ -535,6 +560,17 @@ async def sweep_expired_grants(session: AsyncSession, *, now: datetime | None = 
             skipped_tier_changed += 1
             continue
 
+        # story #4755 — the organization row first: an organization that is gone has no tier to restore. Its grant is marked as moot (the same companion row, `org_closed`) so every sweep does not
+        # look at it again.
+        if not await lock_org_for_billing_write(session, org_id):
+            await record_ledger_entry(
+                session, org_id=org_id, entry_type="adjustment",
+                amount_minor=row["amount_minor"], currency=row["currency"], direction="debit",
+                provider_ref=f"grant-revert:{row['id']}",
+                metadata={"kind": "tier_grant_revert", "reverted_entry_id": str(row["id"]), "reverted_target_tier": meta["target_tier"], "org_closed": True},
+            )
+            skipped_org_closed += 1
+            continue
         prev_tier = meta["prev_tier"]
         sub.tier = prev_tier
         sub.status = "active"
@@ -565,7 +601,7 @@ async def sweep_expired_grants(session: AsyncSession, *, now: datetime | None = 
     return {
         "grants_seen": len(latest_grants), "reverted": reverted,
         "skipped_tier_changed": skipped_tier_changed, "skipped_not_expired": skipped_not_expired,
-        "skipped_already_reverted": skipped_already_reverted,
+        "skipped_already_reverted": skipped_already_reverted, "skipped_org_closed": skipped_org_closed,
     }
 
 
@@ -622,6 +658,10 @@ async def trigger_due_charges(session: AsyncSession, *, now: datetime | None = N
                 await session.execute(select(BillingOrder).where(BillingOrder.order_id == order_id))
             ).scalar_one_or_none()
 
+        if order is not None and order.status == "confirmed" and not await lock_org_for_billing_write(session, sub.org_id):
+            # story #4755 — the organization was closed while the renewal was being charged: refund the confirmed charge, do not roll a subscription of a closed organization forward.
+            await refund_charge_for_closed_org(session, org_id=sub.org_id, order_id=order_id)
+            continue
         if order is not None and order.status == "confirmed":
             new_end = compute_period_end(sub.current_period_end, sub.billing_cycle)
             await session.execute(
