@@ -42,6 +42,7 @@ from app.models.org_subscription import OrgSubscription
 from app.services.billing_charge import charge_org
 from app.services.billing_ledger import record_ledger_entry
 from app.services.billing_period import _add_months
+from app.services.org_billing_lock import lock_org_for_billing_write
 
 audit_logger = logging.getLogger("sprintable.audit.admin_billing")
 
@@ -222,6 +223,9 @@ async def grant_credit(
         )
         return existing
 
+    # story #4753 — the organization row first (the closing paths' lock): a grant must not put a live tier on an organization that is closing or gone.
+    if not await lock_org_for_billing_write(session, org_id):
+        raise AdminBillingError(404, "ORG_NOT_FOUND", "Organization not found — a closed or missing organization cannot be granted a tier")
     sub = (
         await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))
     ).scalar_one_or_none()

@@ -23,6 +23,7 @@ from app.models.org_subscription import OrgSubscription
 from app.models.pricing_version import PricingVersion
 from app.models.project import OrgMember
 from app.services.billing_payment_attempt import blocking_unresolved_attempt
+from app.services.org_billing_lock import lock_org_for_billing_write
 from app.services.payment.factory import get_payment_adapter
 from app.services.platform_settings import get_platform_settings, require_billing_checkout_enabled
 
@@ -359,7 +360,7 @@ async def polar_webhook(
         if org_id_str:
             background_tasks.add_task(
                 _update_subscription, session, uuid.UUID(org_id_str), tier, billing_cycle,
-                data.get("customer_id"), data.get("subscription_id"), "active",
+                data.get("customer_id"), data.get("subscription_id"), "active", event_id,
             )
 
     # AC4: subscription.updated → status/tier 갱신
@@ -381,7 +382,7 @@ async def polar_webhook(
             billing_cycle = "yearly" if data.get("recurring_interval") == "year" else "monthly"
             background_tasks.add_task(
                 _update_subscription, session, uuid.UUID(org_id_str), tier, billing_cycle,
-                data.get("customer_id"), data.get("id"), new_status,
+                data.get("customer_id"), data.get("id"), new_status, event_id,
             )
 
     # AC4: subscription.canceled → status=cancelled
@@ -418,6 +419,40 @@ async def _current_pricing_version_id(
     return row.scalar_one_or_none()
 
 
+async def _refuse_subscription_for_closed_org(
+    session: AsyncSession, org_id: uuid.UUID, event_id: str | None, tier: str, billing_cycle: str,
+    polar_customer_id: str | None, polar_subscription_id: str | None, status: str,
+) -> None:
+    """story #4753 — the provider says an organization that no longer exists has (or has changed) a subscription: no subscription row is written for it. What the provider already took cannot be
+    given back from here (`PolarAdapter.cancel` / `.refund` are not implemented — payment/polar_adapter.py: cancellation reaches us only through the provider's own webhook), so the case is kept
+    where a person can find it: the webhook event row says `refused_org_closed` (+ the organization id), the log carries one ERROR line with the provider's ids, and the platform's
+    OPERATOR ALERT (services/operator_alerts.py — a durable row, sent to the configured operations conversation, retried until delivered, once per event) tells the people who can refund by hand."""
+    log = logger.error if status in ("active", "trialing") else logger.warning
+    log(
+        "billing.orphan_subscription_refused org=%s event=%s status=%s tier=%s cycle=%s polar_customer=%s polar_subscription=%s — the organization no longer exists; "
+        "no subscription row written; refund/cancel by hand at the provider",
+        org_id, event_id, status, tier, billing_cycle, polar_customer_id, polar_subscription_id,
+    )
+    if event_id:
+        await session.execute(
+            text("UPDATE polar_webhook_events SET outcome = 'refused_org_closed', org_id = :o WHERE event_id = :e"),
+            {"o": org_id, "e": str(event_id)},
+        )
+    await session.commit()
+    try:
+        from app.services.operator_alerts import notify_operator
+
+        await notify_operator(
+            kind="billing.orphan_subscription_refused",
+            dedupe_key=f"billing.orphan_subscription_refused:{event_id or polar_subscription_id or org_id}",
+            target_org_id=org_id,
+            target={"org_id": org_id},
+            facts={"code": "ORPHAN_SUBSCRIPTION_REFUSED", "status": str(status).upper(), "tier": str(tier).upper(), "cycle": str(billing_cycle).upper()},
+        )
+    except Exception:
+        logger.exception("billing.orphan_subscription_refused: operator alert failed org=%s event=%s", org_id, event_id)
+
+
 async def _update_subscription(
     session: AsyncSession,
     org_id: uuid.UUID,
@@ -426,6 +461,7 @@ async def _update_subscription(
     polar_customer_id: str | None,
     polar_subscription_id: str | None,
     status: str = "active",
+    event_id: str | None = None,
 ) -> None:
     """Subscription 레코드 upsert. pricing_version_id는 매번(신규 가입뿐 아니라 플랜변경
     시에도) 현재 유효 버전으로 갱신 — 플랜변경은 새 플랜의 현재가를 grandfather 기준점으로
@@ -437,6 +473,12 @@ async def _update_subscription(
     반드시 여기서 직접 로그를 남긴다 — 조용한 실패 봉쇄가 핵심(풀 재시도 시스템은 후속)."""
     from sqlalchemy.dialects.postgresql import insert as pg_insert
     try:
+        # story #4753 — the organization row first, the order the closing paths take it in (organization delete · account deletion's «closes with it» · checkout claim). A webhook that wrote a
+        # subscription between a closing's look and its commit (or after it) put a live paid subscription on an organization that was going or gone (`org_subscriptions` has no foreign key
+        # to `organizations`). Closing holds the row → this waits → the organization is gone → refuse; this holds the row → the closing waits → it then SEES the subscription → 409.
+        if not await lock_org_for_billing_write(session, org_id):
+            await _refuse_subscription_for_closed_org(session, org_id, event_id, tier, billing_cycle, polar_customer_id, polar_subscription_id, status)
+            return
         now = datetime.now(timezone.utc)
         pricing_version_id = await _current_pricing_version_id(session, tier, billing_cycle)
         if pricing_version_id is None:
@@ -491,4 +533,10 @@ async def _update_subscription(
             "polar_subscription_id=%s) — background task, Polar already ACKed, no retry",
             org_id, tier, billing_cycle, polar_subscription_id, exc_info=True,
         )
+        # story #4753 (Kadir K1): the organization row was locked at the top; a failure after that must not leave it locked for as long as this request session lives — the closing paths
+        # (account deletion · organization delete) would wait on the row. Roll back (releases the lock), then raise as before.
+        try:
+            await session.rollback()
+        except Exception:
+            logger.exception("Subscription upsert: rollback after failure failed for org %s", org_id)
         raise

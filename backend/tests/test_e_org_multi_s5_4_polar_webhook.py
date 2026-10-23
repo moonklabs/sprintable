@@ -174,7 +174,9 @@ async def test_update_subscription_warns_when_no_pricing_version_matches(caplog)
     session = AsyncMock()
     empty_lookup = MagicMock()
     empty_lookup.scalar_one_or_none.return_value = None
-    session.execute = AsyncMock(side_effect=[empty_lookup, MagicMock()])
+    org_lock = MagicMock()
+    org_lock.first.return_value = (1,)   # story #4753: the first statement locks the organization row (it exists)
+    session.execute = AsyncMock(side_effect=[org_lock, empty_lookup, MagicMock()])
 
     with caplog.at_level(logging.WARNING, logger="ee.routers.billing"):
         await billing._update_subscription(
@@ -200,7 +202,9 @@ async def test_update_subscription_no_warning_when_pricing_version_matches(caplo
     session = AsyncMock()
     found_lookup = MagicMock()
     found_lookup.scalar_one_or_none.return_value = uuid_mod.uuid4()
-    session.execute = AsyncMock(side_effect=[found_lookup, MagicMock()])
+    org_lock = MagicMock()
+    org_lock.first.return_value = (1,)
+    session.execute = AsyncMock(side_effect=[org_lock, found_lookup, MagicMock()])
 
     with caplog.at_level(logging.WARNING, logger="ee.routers.billing"):
         await billing._update_subscription(
