@@ -7409,6 +7409,7 @@
       "endAll": "End all sessions",
       "endAllCount": "Ends {k} of {n} agents",
       "endAllNone": "There is no agent on this computer you can end right now",
+      "endAllCountWait": "Reading how many agents this reaches",
       "startAll": "Start all sessions",
       "endOne": "End session",
       "endOneAria": "End session of {name}",
@@ -7521,7 +7522,7 @@
         "stale": "That agent's text changed on the computer in the meantime — check the line above and save again",
         "notEditable": "This text can't be edited right now — the draft is still coming, or the handoff is already being left",
         "unknownEdit": "Couldn't tell whether it was saved — look at this card again in a moment",
-        "appTooOld": "This version of the app cannot end the whole computer in one press — please update the app"
+        "appTooOld": "This version of the app cannot handle the whole computer's sessions in one press — please update the app"
       },
       "oldApp": "Update the app on that computer to end and start sessions from the phone"
     }

@@ -1077,6 +1077,51 @@ describe('[4734 B] one card per computer — one [End all sessions], « N of K �
     expect(byId('phone-sessions-end-all')).toBeNull(); // nothing runs: no [모든 세션 종료] to press by mistake
   });
 
+  it('the card-after\'s [모든 세션 시작] is a marked press of the computer too (action `in`, the mark, no agent)', async () => {
+    world.startable = two();
+    world.view = { mode: 'out', scope: null, opened_from: null, count: null, rows: [], outs: [], out: { at: '2026-10-20T01:00:00Z', came: 0, warn: 'none', still_working: [], left: ['결제 담당', '문서 담당'], alone: 0 }, reported_at: '2026-10-20T01:00:00Z' };
+    world.clock = { remote_control: true, reachable: true, supported: true, view: world.view, computer: { agents: { total: 2, pressable: 2 } } };
+    await screen();
+    await press(byId('phone-sessions-start-all'));
+    expect(signs()).toEqual([{ kind: 'clock', setup_id: SETUP, action: 'in', computer: true }]);
+    expect(posts()[0]!.body).toMatchObject({ action: 'in', computer: true });
+    expect(posts()[0]!.body).not.toHaveProperty('agent_member_id');
+  });
+
+  it('a computer-wide card whose count is missing (a server that sends none) does not offer [모든 세션 종료]: it says it is reading, and nothing can be pressed', async () => {
+    world.startable = two();
+    world.clock = { remote_control: true, reachable: true, supported: true, view: null };
+    await screen();
+    expect(byId('phone-sessions-end-all-count-wait')?.textContent).toBe(koMessages.desktop.phoneSessions.endAllCountWait);
+    expect((byId('phone-sessions-end-all') as HTMLButtonElement).disabled).toBe(true);
+    await press(byId('phone-sessions-end-all'));
+    expect(signs()).toHaveLength(0);
+  });
+
+  it('an agent a one-agent panel names that the list does not carry (on a computer-wide card) is never pressed on the card\'s setup: «unknown agent», nothing signed', async () => {
+    world.startable = two();
+    const GHOST = '99999999-9999-4999-8999-999999999999';
+    world.view = { mode: 'panel', scope: 'one', opened_from: 'phone', count: { ready: 1, needs_you: 0, drafting: 0 }, rows: [row({ agent_member_id: GHOST, name: '떠난 담당' })], outs: [], reported_at: '2026-10-20T01:00:00Z' };
+    world.clock = { remote_control: true, reachable: true, supported: true, view: world.view, computer: { agents: { total: 2, pressable: 2 } } };
+    await screen();
+    await press(byId('phone-sessions-submit'));
+    expect(signs()).toHaveLength(0);
+    expect(byId('phone-sessions-line')?.textContent).toBe(koMessages.desktop.phoneSessions.result.unknownAgent);
+  });
+
+  it('when the setup named for the card changes, the old answer (its counts too) is not the card\'s: until the new setup answers nothing is pressable on stale counts', async () => {
+    world.startable = two();
+    world.clock = counts(2, 2);
+    await screen();
+    expect(byId('phone-sessions-end-all-count')?.textContent).toBe('2개 중 2개의 에이전트를 끝내요');
+    world.startable = two({ reachable1: false });
+    world.clock = () => new Promise<Response>(() => undefined); // the new representative setup does not answer
+    await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+    await flush();
+    expect(byId('phone-sessions-end-all-count')).toBeNull();
+    expect(byId('phone-sessions-end-all')).toBeNull();
+  });
+
   it('an older phone-app shell (it does not know the computer mark) refuses the call: «앱을 새로 받아 주세요» — nothing is posted, and the one-agent press is untouched', async () => {
     world.startable = two();
     world.clock = counts(2, 2);
@@ -1084,6 +1129,7 @@ describe('[4734 B] one card per computer — one [End all sessions], « N of K �
     await screen();
     await press(byId('phone-sessions-end-all'));
     expect(byId('phone-sessions-line')?.textContent).toBe(koMessages.desktop.phoneSessions.result.appTooOld);
+    expect(koMessages.desktop.phoneSessions.result.appTooOld).not.toContain('끝낼'); // (the same line serves the start of a whole computer too)
     expect(posts()).toHaveLength(0);
   });
 
