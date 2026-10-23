@@ -65,7 +65,7 @@ def test_next_dunning_action_same_day_retry_not_repeated():
 
 # ─── downgrade_to_free ──────────────────────────────────────────────────────
 # 호출 순서(#2509 가드 fix 後): ①order 조회 ②newer-confirmed-order 체크 ③newer-billing-key
-# 체크 ④(회복증거 없을 때만)조직 행 잠금(#4755) ⑤(동일)offering 조회 ⑥(동일)upsert ⑦order 종결 UPDATE.
+# 체크 ④(회복증거 없을 때만)offering 조회 ⑤(동일)upsert ⑥order 종결 UPDATE.
 
 def _stale_order_row(created_at):
     o = MagicMock()
@@ -84,14 +84,13 @@ def _no_recovery_evidence_side_effects(order_created_at, free_offering):
     key_check.first.return_value = None
     checkout_claim_check = MagicMock()
     checkout_claim_check.first.return_value = None
-    org_lock_result = MagicMock()                 # story #4755: the organization row is locked right before the free row is written (the lock helper only asks `.first() is not None`)
     offering_result = MagicMock()
     offering_result.scalar_one_or_none.return_value = free_offering
     upsert_result = MagicMock()
     close_order_result = MagicMock()
     return [
         order_result, confirmed_check, key_check, checkout_claim_check,
-        org_lock_result, offering_result, upsert_result, close_order_result,
+        offering_result, upsert_result, close_order_result,
     ]
 
 
@@ -113,7 +112,7 @@ async def test_downgrade_to_free_upserts_free_tier(monkeypatch):
 
     await downgrade_to_free(session, org_id, order_id)
 
-    upsert_call = session.execute.call_args_list[6]
+    upsert_call = session.execute.call_args_list[5]
     compiled = upsert_call.args[0].compile().params
     assert compiled["org_id"] == org_id
     assert compiled["tier"] == "free"
@@ -135,7 +134,7 @@ async def test_downgrade_to_free_handles_missing_offering_gracefully(monkeypatch
 
     await downgrade_to_free(session, uuid.uuid4(), "ord-downgrade-2")
 
-    upsert_call = session.execute.call_args_list[6]
+    upsert_call = session.execute.call_args_list[5]
     compiled = upsert_call.args[0].compile().params
     assert compiled["offering_version_id"] is None
 
@@ -160,7 +159,7 @@ async def test_downgrade_to_free_closes_the_order_po_blocker_fix(monkeypatch):
     await downgrade_to_free(session, org_id, order_id)
 
     # 마지막(7번째) 호출이 billing_orders를 'downgraded'로 닫는 UPDATE여야.
-    close_call = session.execute.call_args_list[7]
+    close_call = session.execute.call_args_list[6]
     compiled = close_call.args[0].compile().params
     assert compiled["status"] == "downgraded"
 
