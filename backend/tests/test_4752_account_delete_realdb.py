@@ -425,8 +425,8 @@ async def test_11_after_the_deletion_no_push_goes_to_the_persons_device_and_the_
         # a SEAT that is closed (a person removed from the organization — not a deletion): its device row is still active, yet no push is selected for it
         # (the in-app list and the webhooks already skip it)
         await w.sql(ins, o=other_org, m=omid, u=None, t=t_closed)
-        await w.sql("UPDATE members SET deleted_at = now(), is_active = false WHERE id = :m", m=omid)
-        await w.sql("UPDATE org_members SET deleted_at = now() WHERE id = :m", m=omid)   # the seat is one id in both rows; an admin's removal closes both
+        await w.sql("UPDATE members SET is_active = false WHERE id = :m", m=omid)        # how an admin's removal closes the anchor row: `is_active` (deleted_at stays NULL) …
+        await w.sql("UPDATE org_members SET deleted_at = now() WHERE id = :m", m=omid)   # … and the org_members row of the same seat id
         assert (await w.sql("SELECT is_active FROM push_devices WHERE expo_push_token = :t", t=t_closed)).scalar_one() is True
         assert await selected(False, omid) == 0 and await selected(True, omid) == 0
         await w.sql("UPDATE users SET deleted_at = now() - interval '31 days' WHERE id = :u", u=uid)
