@@ -1109,6 +1109,21 @@ describe('[4734 B] one card per computer — one [End all sessions], « N of K �
     expect(byId('phone-sessions-line')?.textContent).toBe(koMessages.desktop.phoneSessions.result.unknownAgent);
   });
 
+  it('…and an edit of a row whose agent the list does not carry signs nothing (no fallback to the card\'s setup)', async () => {
+    world.startable = two();
+    const GHOST = '99999999-9999-4999-8999-999999999999';
+    world.view = panel([needsPlan(4, { agent_member_id: GHOST, name: '떠난 담당' })], { ready: 0, needs_you: 1, drafting: 0 });
+    world.clock = { remote_control: true, reachable: true, supported: true, view: world.view, computer: { agents: { total: 2, pressable: 2 } } };
+    signAnswer = { id: 's', ok: true, signed: 'SIGNED', phone_key_id: KEYID, edit: { base_rev: 4, plan: 'x' } };
+    await screen();
+    await press(byId('phone-sessions-edit-open'));
+    await typeInto(byId('phone-sessions-edit-plan'), 'x');
+    await press(byId('phone-sessions-edit-save'));
+    expect(signs()).toHaveLength(0);
+    expect(editPosts()).toHaveLength(0);
+    expect(byId('phone-sessions-line')?.textContent).toBe(koMessages.desktop.phoneSessions.result.unknownAgent);
+  });
+
   it('when the setup named for the card changes, the old answer (its counts too) is not the card\'s: until the new setup answers nothing is pressable on stale counts', async () => {
     world.startable = two();
     world.clock = counts(2, 2);
