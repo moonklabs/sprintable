@@ -165,7 +165,13 @@ async def _world():
     return engine, _World(app, Session, client)
 
 
+async def _billing_entry(w: _World, on: bool) -> None:
+    """platform_settings.billing_checkout_enabled (story #2728; off by default) — the switch that says whether this deployment takes payments. `_close` puts it back to the default."""
+    await w.sql("UPDATE platform_settings SET billing_checkout_enabled = :v", v=on)
+
+
 async def _close(engine, w: _World):
+    await w.sql("UPDATE platform_settings SET billing_checkout_enabled = false")
     await w.client.aclose()
     w.app.dependency_overrides.clear()
     await engine.dispose()
@@ -666,6 +672,7 @@ async def test_17_an_organization_with_a_subscription_that_would_close_with_the_
     from app.models.org_subscription import OrgSubscription
 
     engine, w = await _world()
+    await _billing_entry(w, True)                                                           # story #4752 (4756): the 409 is what a deployment with payment entry OPEN does
     try:
         uid, email, org_id = await w.person(org=True, name="Pays Alone", spare_owner=False)
         async with w.Session() as s:
@@ -684,6 +691,7 @@ async def test_17_an_organization_with_a_subscription_that_would_close_with_the_
 async def test_18_the_preview_names_what_would_close_and_what_would_block():
     """The confirmation window shows it before «삭제 확인»: `closing` (they close with the account) and `blocked` (with the reason). Read only — nothing is changed."""
     engine, w = await _world()
+    await _billing_entry(w, True)
     try:
         uid, email, alone_org = await w.person(org=True, name="Previewer", spare_owner=False)
         await w.add_agent(alone_org)                                                         # one person + an agent: the agent does not make it «populated»

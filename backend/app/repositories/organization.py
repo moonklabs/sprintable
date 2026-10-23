@@ -178,6 +178,14 @@ class OrganizationRepository:
         await self.session.refresh(org)
         return org
 
+    async def _billing_is_live(self) -> bool:
+        """story #4752 (4756 prod promotion): is payment entry open on this deployment — `platform_settings.billing_checkout_enabled`, the one value every checkout road judges by
+        (`services/platform_settings.require_billing_checkout_enabled`; off by default, migration 0255). Where it is off the billing tab does not exist on the web and no checkout can
+        begin, so a subscription row there is not something the person can «cancel first» (an admin plan grant is enough to make one): it must not stop a deletion. A missing row
+        counts as open — the side that blocks, never the one that silently ends a subscription. One statement; no payment module is imported."""
+        row = (await self.session.execute(text("SELECT billing_checkout_enabled FROM platform_settings LIMIT 1"))).first()
+        return True if row is None else bool(row[0])
+
     async def _has_active_or_in_flight_subscription(self, org_id: uuid.UUID) -> bool:
         """구독 status='active'뿐 아니라 #2511(결제②-D후속) checkout_claimed_at이
         STALE_CLAIM_WINDOW 안(=진행 中)인 claim도 "활성"으로 취급한다.
@@ -188,7 +196,11 @@ class OrganizationRepository:
         confirmed돼도 org가 이미 사라진 뒤라 **삭제된 org에 실 청구가 완료**될 수 있었다
         (#2896 step④ CAS는 org_id 매칭이라 org 삭제 자체는 못 막는 축). #2511과 동일
         STALE_CLAIM_WINDOW/SSOT로 "진행 中"을 판정 — 죽은/멈춘(stale) claim은 여전히
-        무시(자기치유 회귀 없음)."""
+        무시(자기치유 회귀 없음).
+
+        story #4752 (4756): where payment entry is closed (`_billing_is_live` false) nothing counts — the closing ends the row with the organization (`end_org_billing`; no money moves)."""
+        if not await self._billing_is_live():
+            return False
         now = datetime.now(timezone.utc)
         row = await self.session.execute(
             text(
@@ -372,6 +384,17 @@ class OrganizationRepository:
             ),
         ):
             await self.session.execute(text(stmt), {"o": org_id})
+        # story #4752 (4756): the organization's subscription row is ended HERE, by a statement of its own, not only by `end_org_billing` below — a deployment that does not carry the
+        # billing modules (prod while payment entry is closed) has no `end_org_billing`, and a row left `active` on a deleted organization is picked up by the renewal job (it tries to
+        # charge, finds no billing key, flips the row to past_due and, a grace period later, writes a free row for an organization that is gone). The same statement as the subscription
+        # line of `end_org_billing` (a subset, so running both changes nothing): develop and a deployment without billing end the row the same way. No money, key or order is touched here.
+        await self.session.execute(
+            text(
+                "UPDATE org_subscriptions SET status = 'canceled', checkout_claimed_at = NULL, updated_at = now()"
+                " WHERE org_id = :o AND status IN ('active', 'past_due', 'pending')"
+            ),
+            {"o": org_id},
+        )
         await end_org_billing(self.session, org_id)  # failed 주문 · 빌링키 · 구독 — 같은 트랜잭션
         await self.session.delete(org)
         return {"ok": True}

@@ -33,6 +33,22 @@ async def _dispose_global_engine_after_test():
     await _global_engine.dispose()
 
 
+@pytest.fixture(autouse=True)
+async def _payment_entry_open():
+    """story #4752 (4756): an active subscription only stops a deletion where payment entry is open (`platform_settings.billing_checkout_enabled`, off by default) — this file is about
+    that stop, so the switch is on for it and put back to the default after."""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    engine = create_async_engine(_async_url())
+    async with engine.begin() as c:
+        await c.execute(text("UPDATE platform_settings SET billing_checkout_enabled = true"))
+    yield
+    async with engine.begin() as c:
+        await c.execute(text("UPDATE platform_settings SET billing_checkout_enabled = false"))
+    await engine.dispose()
+
+
 def _async_url() -> str:
     url = _REAL_DB_URL
     for prefix in ("postgresql+psycopg2://", "postgresql+asyncpg://", "postgresql://"):
