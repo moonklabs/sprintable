@@ -1098,6 +1098,17 @@ describe('[4734 B] one card per computer — one [End all sessions], « N of K �
     expect(signs()).toHaveLength(0);
   });
 
+  it('a computer too big for one press says so (not «try again»), in both languages; a marked 422 / 409 computer_too_large alike', async () => {
+    world.startable = two();
+    world.clock = counts(2, 2);
+    world.post = json({ error: { code: 'invalid_payload' } }, 422);
+    await screen();
+    await press(byId('phone-sessions-end-all'));
+    expect(byId('phone-sessions-line')?.textContent).toBe(koMessages.desktop.phoneSessions.result.computerTooBig);
+    expect(koMessages.desktop.phoneSessions.result.computerTooBig).not.toContain('다시 눌러');
+    expect(enMessages.desktop.phoneSessions.result.computerTooBig).not.toMatch(/try again/i);
+  });
+
   it('an agent a one-agent panel names that the list does not carry (on a computer-wide card) is never pressed on the card\'s setup: «unknown agent», nothing signed', async () => {
     world.startable = two();
     const GHOST = '99999999-9999-4999-8999-999999999999';

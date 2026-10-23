@@ -40,6 +40,17 @@ const deps = (answer: PhoneAnswer, extra: Partial<PressDeps> = {}) =>
   ({ phoneCall: vi.fn(async () => answer), newKey: () => 'idem-1', wait: async () => {}, ...extra }) as PressDeps & { phoneCall: ReturnType<typeof vi.fn> };
 
 describe('[4733 S4b] pressClock — what the web asks and posts', () => {
+  it('[4734 B] a marked press the server refuses as too big (409 computer_too_large · 422 past the cap) is `computer_too_big` — never a «try again»; an UNMARKED 422 stays `failed`', async () => {
+    server(json(409, { error: { code: 'computer_too_large' } }));
+    await expect(pressClock({ ...WHOLE, computer: true }, deps(signed))).resolves.toEqual({ kind: 'computer_too_big' });
+    server(json(422, { error: { code: 'invalid_payload' } }));
+    await expect(pressClock({ ...WHOLE, computer: true }, deps(signed))).resolves.toEqual({ kind: 'computer_too_big' });
+    server(json(422, { error: { code: 'invalid_payload' } }));
+    await expect(pressClock(WHOLE, deps(signed))).resolves.toEqual({ kind: 'failed' });
+    server(json(409, { error: { code: 'computer_changing' } }));
+    await expect(pressClock({ ...WHOLE, computer: true }, deps(signed))).resolves.toEqual({ kind: 'failed' }); // (press again: the computer changed meanwhile)
+  });
+
   it('[4734 B] the whole-computer press signs and posts the mark `computer: true` (no agent); the mark with an agent signs nothing; an older shell\'s refusal is `app_too_old` (nothing posted) — and only for the mark', async () => {
     const calls = server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state: 'done', result_code: 'ok' })]);
     const d = deps(signed);
