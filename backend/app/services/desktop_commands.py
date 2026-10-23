@@ -540,6 +540,8 @@ async def startable_computers_view(db: AsyncSession, *, member_id: uuid.UUID, me
         computers.append({
             "setup_id": str(setup.id), "computer_id": str(computer_of[setup.id]) if setup.id in computer_of else None,
             "device_name": setup.device_name, "reachable": setup.id in reachable, "agents": agents,
+            # story #4734 (B): this computer's app takes the press of the WHOLE computer (it said so with its startable list) — the screen offers the one button only then
+            "computer_press": "computer_press" in (setup.capabilities or []),
         })
     return {"remote_control": await remote_control.is_enabled(db, org_id), "computers": computers}
 

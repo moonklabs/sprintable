@@ -7415,6 +7415,9 @@
     "phoneSessions": {
       "title": "Session management",
       "endAll": "End all sessions",
+      "endAllCount": "{n, plural, one {Ends {k} of # agent} other {Ends {k} of # agents}}",
+      "endAllNone": "There is no agent on this computer you can end right now",
+      "endAllCountWait": "Reading how many agents this reaches",
       "startAll": "Start all sessions",
       "endOne": "End session",
       "endOneAria": "End session of {name}",
@@ -7526,7 +7529,9 @@
         "unreachable": "Can't reach that computer — press again once it's on",
         "stale": "That agent's text changed on the computer in the meantime — check the line above and save again",
         "notEditable": "This text can't be edited right now — the draft is still coming, or the handoff is already being left",
-        "unknownEdit": "Couldn't tell whether it was saved — look at this card again in a moment"
+        "unknownEdit": "Couldn't tell whether it was saved — look at this card again in a moment",
+        "appTooOld": "This version of the app cannot handle the whole computer's sessions in one press — please update the app",
+        "computerTooBig": "This computer has too many agents to handle in one press — press the agents one by one"
       },
       "oldApp": "Update the app on that computer to end and start sessions from the phone"
     }

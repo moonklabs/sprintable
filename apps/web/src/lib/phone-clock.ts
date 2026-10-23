@@ -41,7 +41,11 @@ export interface ClockView {
   reportedAt: string | null;
 }
 /** what the screen needs of one computer: `supported` = the computer's app speaks `clock` at all (an older one → no buttons, no line) */
-export interface ClockRead { remoteControl: boolean; reachable: boolean; supported: boolean; view: ClockView | null }
+export interface ClockRead {
+  remoteControl: boolean; reachable: boolean; supported: boolean; view: ClockView | null;
+  /** story 4734 (B): asked with `computer: true` — how many agents the computer's live setups hold (`total`) and how many a press of the whole computer would name (`pressable`); counts only. null: not asked, or an older server */
+  computer: { total: number; pressable: number } | null;
+}
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isStr = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
@@ -53,7 +57,9 @@ const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is st
 
 export function parseClockRead(raw: unknown): ClockRead | null {
   if (!isObj(raw) || typeof raw.remote_control !== 'boolean' || typeof raw.reachable !== 'boolean' || typeof raw.supported !== 'boolean') return null;
-  const base = { remoteControl: raw.remote_control, reachable: raw.reachable, supported: raw.supported };
+  const agents = isObj(raw.computer) && isObj(raw.computer.agents) ? raw.computer.agents : null;
+  const computer = agents && num(agents.total) !== null && num(agents.pressable) !== null && (agents.pressable as number) <= (agents.total as number) ? { total: agents.total as number, pressable: agents.pressable as number } : null;
+  const base = { remoteControl: raw.remote_control, reachable: raw.reachable, supported: raw.supported, computer };
   if (raw.view === null || raw.view === undefined) return { ...base, view: null };
   const v = raw.view;
   if (!isObj(v) || !(v.mode === 'none' || v.mode === 'panel' || v.mode === 'out' || v.mode === 'in')) return null; // a mode this page does not know: not a view it can draw
@@ -117,10 +123,10 @@ export type ClockReadOutcome =
   | { kind: 'failed' };
 
 /** the computer's closed view, for THIS phone's key (the server answers only the person's own paired phone) */
-export async function readClock(setupId: string, phoneKeyId: string, stop?: () => boolean): Promise<ClockReadOutcome> {
+export async function readClock(setupId: string, phoneKeyId: string, stop?: () => boolean, opts: { computer?: boolean } = {}): Promise<ClockReadOutcome> {
   if (stop?.()) return { kind: 'failed' };
   try {
-    const res = await fetchWithAuth(`/api/desktop/setups/${encodeURIComponent(setupId)}/clock?phone_key_id=${encodeURIComponent(phoneKeyId)}`);
+    const res = await fetchWithAuth(`/api/desktop/setups/${encodeURIComponent(setupId)}/clock?phone_key_id=${encodeURIComponent(phoneKeyId)}${opts.computer ? '&computer=true' : ''}`);
     if (stop?.()) return { kind: 'failed' };
     if (res.status === 403) return { kind: 'not_allowed' };
     if (res.status === 409) return (await codeOf(res)) === 'phone_not_paired' ? { kind: 'not_paired' } : { kind: 'failed' };
@@ -144,6 +150,8 @@ export type PressOutcome =
   | { kind: 'cancelled' } // the person said no on the OS prompt — not a failure, no line
   | { kind: 'biometric_required' }
   | { kind: 'no_screen_lock' }
+  | { kind: 'app_too_old' } // the phone app's shell does not know the whole-computer press yet — nothing was signed or posted
+  | { kind: 'computer_too_big' } // story 4734 (B): a computer with more agents / setups than one press can name — pressing again would be refused the same way (not a «try again»)
   | { kind: 'key_invalidated' }
   | { kind: 'not_registered' }
   | { kind: 'signed_out' }
@@ -151,7 +159,8 @@ export type PressOutcome =
   | { kind: 'unknown'; pending: Pending } // it may have gone (the answer was lost · no end in the window) — follow it, never redo it
   | { kind: 'failed' };
 
-export interface PressInput { setupId: string; action: ClockAction; agentId?: string }
+/** `computer: true` (story 4734 B): the press of the WHOLE computer (every setup of it the person may press) — from the setup named; never with an agent */
+export interface PressInput { setupId: string; action: ClockAction; agentId?: string; computer?: true }
 /** a press the web posted (or tried to): what the next look follows again — the same key and body, its id once known */
 export interface Pending { setupId: string; key: string; body: Record<string, unknown>; commandId?: string }
 
@@ -198,7 +207,8 @@ async function codeOf(res: Response): Promise<string> {
 }
 
 export async function pressClock(input: PressInput, deps: PressDeps): Promise<PressOutcome> {
-  const args: Record<string, unknown> = { kind: 'clock', setup_id: input.setupId, action: input.action, ...(input.agentId !== undefined ? { agent_member_id: input.agentId } : {}) };
+  if (input.computer && input.agentId !== undefined) return { kind: 'failed' }; // (the mark and an agent never go together — nothing is signed)
+  const args: Record<string, unknown> = { kind: 'clock', setup_id: input.setupId, action: input.action, ...(input.agentId !== undefined ? { agent_member_id: input.agentId } : {}), ...(input.computer ? { computer: true } : {}) };
   let signed: PhoneAnswer;
   try {
     signed = await deps.phoneCall('command.sign', args);
@@ -208,13 +218,17 @@ export async function pressClock(input: PressInput, deps: PressDeps): Promise<Pr
   // the person who SIGNED (the OS prompt is the confirmation) has pressed — the post goes even if the screen left afterwards (that only stops the waiting).
   // A flow stopped BEFORE the signature came back posts nothing.
   if (deps.flow?.stopped) return { kind: 'stopped' };
-  if (!signed.ok) return { kind: SHELL_REFUSALS[signed.code ?? ''] ?? 'failed' } as PressOutcome;
+  if (!signed.ok) {
+    // story 4734 (B): an older app shell does not know the whole-computer mark — its closed shape refuses the call before any prompt: said as such, never as a press that failed
+    if (input.computer && signed.code === 'bad_request') return { kind: 'app_too_old' };
+    return { kind: SHELL_REFUSALS[signed.code ?? ''] ?? 'failed' } as PressOutcome;
+  }
   if (typeof signed.signed !== 'string' || typeof signed.phone_key_id !== 'string') return { kind: 'failed' };
   const pending: Pending = {
     setupId: input.setupId,
     key: deps.newKey(),
     // closed: the action + the agent the person picked + the shell's two values — never a text · name · path (the signature covers the rest)
-    body: { action: input.action, signed: signed.signed, phone_key_id: signed.phone_key_id, ...(input.agentId !== undefined ? { agent_member_id: input.agentId } : {}) },
+    body: { action: input.action, signed: signed.signed, phone_key_id: signed.phone_key_id, ...(input.agentId !== undefined ? { agent_member_id: input.agentId } : {}), ...(input.computer ? { computer: true } : {}) },
   };
   return post(pending, deps);
 }
@@ -275,6 +289,8 @@ async function post(pending: Pending, deps: PressDeps): Promise<PressOutcome> {
   if (!res.ok) {
     if (res.status >= 500) return { kind: 'unknown', pending }; // any 5xx may have come after the command was made — followed, never redone
     const code = await codeOf(res);
+    // the whole-computer press of a computer too big for one press (the grouping, or the list of agents past the cap — the server's 422): the same answer every time, so never «try again»
+    if (code === 'computer_too_large' || (res.status === 422 && pending.body.computer === true)) return { kind: 'computer_too_big' };
     if (res.status === 403 || code === 'not_allowed_to_command') return { kind: 'not_allowed' };
     if (code === 'device_unreachable') return { kind: 'unreachable' };
     if (code === 'remote_control_off') return { kind: 'remote_off' };

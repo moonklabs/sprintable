@@ -1,7 +1,7 @@
 // story #4714 — a start from the phone app: what the web asks the shell, what it posts, how every end maps to one outcome
 // (contract 02d2cf71 §14 v1.17 · v1.18 · Yuna 4714-copy-1017).
 import { describe, expect, it, vi } from 'vitest';
-import { beginFlow, checkStart, clearLeaving, endFlow, isLeaving, markLeaving, parseStartable, readStartable, startOnPhone, waitForSession, type Pending, type StartDeps } from './phone-start';
+import { beginFlow, checkStart, clearLeaving, endFlow, groupForPress, isLeaving, markLeaving, parseStartable, readStartable, startOnPhone, waitForSession, type Pending, type StartDeps } from './phone-start';
 import type { PhoneAnswer } from './phone-bridge';
 
 let currentFetch: (url: string, init?: RequestInit) => Promise<Response> = async () => { throw new Error('no server'); };
@@ -445,5 +445,27 @@ describe('[4714] flows — one stop signal per press: what a stopped flow gets b
     expect(markLeaving()).toBe(true);
     clearLeaving();
     vi.useRealTimers();
+  });
+});
+
+describe('[4734 B] groupForPress — one card for a computer only when EVERY setup of it takes the press of the whole computer', () => {
+  const e = (id: string, o: Partial<import('./phone-start').StartableComputer> = {}): import('./phone-start').StartableComputer => ({
+    setup_id: id, device_name: 'Mac', reachable: true, agents: [{ agent_member_id: `a-${id}`, name: `n-${id}`, can_command: true, projects: [], running: true }], ...o,
+  });
+  it('parseStartable keeps `computer_press` only as the boolean true', () => {
+    const raw = (v: unknown) => ({ remote_control: true, computers: [{ setup_id: 's', device_name: 'Mac', agents: [], computer_id: 'c', computer_press: v }] });
+    expect(parseStartable(raw(true))!.computers[0]).toMatchObject({ computer_press: true });
+    for (const v of [false, 'true', 1, null, undefined]) expect(parseStartable(raw(v))!.computers[0]).not.toHaveProperty('computer_press');
+  });
+  it('every setup says it → ONE entry whose agents carry their own setup; the computer id stays', () => {
+    const out = groupForPress([e('s1', { computer_id: 'c', computer_press: true }), e('s2', { computer_id: 'c', computer_press: true })]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ computer_id: 'c' });
+    expect(out[0]!.agents.map((a) => [a.agent_member_id, a.setup_id])).toEqual([['a-s1', 's1'], ['a-s2', 's2']]);
+  });
+  it('one of them does not (or none does) → each setup stays its own entry and loses the computer id; a lone setup of a computer that says it is still marked', () => {
+    const mixed = groupForPress([e('s1', { computer_id: 'c', computer_press: true }), e('s2', { computer_id: 'c' }), e('s3', { computer_id: 'd', computer_press: true })]);
+    expect(mixed.map((m) => [m.setup_id, m.computer_id ?? null])).toEqual([['s1', null], ['s2', null], ['s3', 'd']]);
+    expect(groupForPress([e('s1')])).toHaveLength(1); // (an older server: no computer id at all)
   });
 });

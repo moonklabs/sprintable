@@ -506,6 +506,8 @@ async def put_startable(body: relay.StartableSnapshot, setup: DesktopSetup = Dep
     try:
         narrowed, dropped = await relay.accessible_startable(db, setup, body)
         n, applied, held = await relay.replace_startable(db, setup, narrowed)
+        if applied:  # story #4734 (B): a report a newer one has already covered says nothing about what the computer takes NOW
+            await relay.note_computer_press(db, setup, body.computer_press is True)
     except relay.DesktopRelayError as exc:
         await db.rollback()
         return _error(exc)

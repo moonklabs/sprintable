@@ -21,7 +21,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, field_validator, model_validator
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -323,6 +323,16 @@ class StartableSnapshot(BaseModel):
     # story #4714 (PO 10-18): the computer numbers its reports (one that only grows, even across a restart); the server keeps the highest it has applied
     # and ignores a lower one — a request the computer gave up but that reached the server late cannot cover a newer list. Absent = an older app: applied as before.
     seq: int | None = Field(default=None, ge=1, le=2**62, strict=True)
+    # story #4734 (B): this computer's app knows the press of the WHOLE computer (the `computer` mark of a clock press) — a closed word, sent with every list; absent = an app from before.
+    # The server keeps it in the setup's `capabilities` and tells the phone's list (`computer_press`), so a screen offers the one button only for a Mac that can take it.
+    computer_press: StrictBool | None = None  # (the boolean true and nothing else: 1 · "true" · false are refused below)
+
+    @field_validator("computer_press")
+    @classmethod
+    def _only_true(cls, v: bool | None) -> bool | None:
+        if v is False:
+            raise ValueError("computer_press is the word true, or absent")
+        return v
 
 
 def _setup_agents(setup: DesktopSetup) -> set[uuid.UUID]:
@@ -641,6 +651,22 @@ async def accessible_startable(db: AsyncSession, setup: DesktopSetup, snapshot: 
     )).all()
     possible = {(m, p) for m, p in rows}
     return snapshot.model_copy(update={"startable": [i for i in snapshot.startable if (i.agent_member_id, i.project_id) in possible]}), dropped
+
+
+COMPUTER_PRESS = "computer_press"
+
+
+async def note_computer_press(db: AsyncSession, setup: DesktopSetup, knows: bool) -> None:
+    """story #4734 (B): the computer says (with each startable list) whether its app takes the whole-computer press; kept in `capabilities` next to what the setup's app
+    could take at its creation, and taken out again when a list comes without it (an app that went back). The other words of the list are left as they are."""
+    have = [c for c in (setup.capabilities or []) if isinstance(c, str)]
+    want = sorted({*have, COMPUTER_PRESS}) if knows else [c for c in have if c != COMPUTER_PRESS]
+    if want == have and setup.capabilities is not None:
+        return
+    if not want and setup.capabilities is None:
+        return
+    await db.execute(update(DesktopSetup).where(DesktopSetup.id == setup.id).values(capabilities=want))
+    await db.flush()
 
 
 async def replace_startable(db: AsyncSession, setup: DesktopSetup, snapshot: StartableSnapshot) -> tuple[int, bool, int | None]:
