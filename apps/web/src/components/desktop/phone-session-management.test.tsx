@@ -1020,6 +1020,10 @@ describe('[4734 B] one card per computer — one [End all sessions], « N of K �
     world.clock = counts(3, 2);
     await screen({ locale: 'en' });
     expect(byId('phone-sessions-end-all-count')?.textContent).toBe('Ends 2 of 3 agents');
+    world.clock = counts(1, 1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+    await flush();
+    expect(byId('phone-sessions-end-all-count')?.textContent).toBe('Ends 1 of 1 agent'); // (one: singular)
   });
 
   it('[모든 세션 종료] signs ONE press of the computer — the computer mark, no agent — from the card\'s setup, and posts the same (the read asked for the counts)', async () => {

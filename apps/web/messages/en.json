@@ -7407,7 +7407,7 @@
     "phoneSessions": {
       "title": "Session management",
       "endAll": "End all sessions",
-      "endAllCount": "Ends {k} of {n} agents",
+      "endAllCount": "{n, plural, one {Ends {k} of # agent} other {Ends {k} of # agents}}",
       "endAllNone": "There is no agent on this computer you can end right now",
       "endAllCountWait": "Reading how many agents this reaches",
       "startAll": "Start all sessions",
