@@ -181,9 +181,9 @@ async def create_clock(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.
 
 async def _computer_agents(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID, setup: DesktopSetup, phone_id: uuid.UUID,
                            reach: bool) -> tuple[set[uuid.UUID], set[uuid.UUID], set[uuid.UUID]]:
-    """story #4734 (B): (the agents of this computer's live setups the person may press ONE SETUP AT A TIME, every agent those setups hold). The pressed setup is the one the caller already
-    judged (and, as in every press, is always in); each other live setup of the computer (not disconnected, handed over, the same organization — `setup_ids_of_computer`) counts only
-    when the same legs a press of THAT setup would ask are true now: `can_clock` for the person, the phone paired with it and (`reach`: a press) the computer heard from. So the
+    """story #4734 (B): (the agents of this computer's live setups the person may press ONE SETUP AT A TIME, every agent the setups HEARD from now hold — the pressed one always). The pressed setup is the one the caller already
+    judged (and, as in every press, is always in); each other live setup of the computer (not disconnected, handed over, the same organization — `setup_ids_of_computer`) counts — in the
+    first set and in N alike — only when the computer is heard from now, and in the first set only when the same legs a press of THAT setup would ask are true now: `can_clock` for the person, the phone paired with it and (`reach`: a press) the computer heard from. So the
     authority of a computer-wide press is never wider than the sum of one-setup presses — the server collects, the daemon cuts the list again to the pressing setup's own GROUP (organization + confirming person), the signature covers
     the mark (the daemon holds it to the command both ways). A grouping too large to read in full is refused (`computer_too_large`), never read in part."""
     from app.services.agent_permissions import _reachable, paired_phone
@@ -209,7 +209,8 @@ async def _computer_agents(db: AsyncSession, *, member_id: uuid.UUID, user_id: u
     pressable: set[uuid.UUID] = set()
     for sid, row in rows.items():
         mine = _setup_agents(row)
-        total |= mine
+        if sid == setup.id or sid in heard:  # N counts the agents of the setups that are HEARD from now (and the pressed one): an old setup that was never disconnected and is silent holds agents that no one can press — it does not swell N
+            total |= mine
         if sid == setup.id:
             if sid in heard:
                 pressable |= mine

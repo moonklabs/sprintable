@@ -98,11 +98,12 @@ async def test_02_only_what_a_press_of_that_setup_could_do_counts_a_disconnected
         await _sql(f"UPDATE remote_device_pairings SET removed_at = now() WHERE setup_id = '{d3['setup_id']}'")  # this phone is not paired with it (any more)
         r = await _post(c, sid, _mark(phone, key="k-some"))
         assert r.status_code == 201, r.text
-        # N = what the computer's live setups hold (the disconnected one is not live); K = what a one-setup press of each could reach — here only the pressed setup's own
+        # N = what the computer's live setups that are HEARD from hold (the disconnected one is not live; the silent one is not heard — an agent no one can press is not counted); the unpaired one is
+        # heard, so it counts in N but not in K; K = what a one-setup press of each could reach — here only the pressed setup's own
         per = len(_ids(d0))
-        assert r.json()["agents"] == {"total": 3 * per, "pressable": per}
+        assert r.json()["agents"] == {"total": 2 * per, "pressable": per}
         [payload] = await _payloads(sid)
-        assert payload["scope"] == _ids(d0) and payload["scope_total"] == 3 * per
+        assert payload["scope"] == _ids(d0) and payload["scope_total"] == 2 * per
         assert not set(_ids(d1)) & set(payload["scope"])
 
 
@@ -275,7 +276,7 @@ async def test_06b_the_phones_read_says_n_of_k_before_it_signs_counts_only_and_o
         assert plain.status_code == 200 and "computer" not in plain.json()
         r = await c.get(f"/api/v2/desktop/setups/{d0['setup_id']}/clock", params={"phone_key_id": phone, "computer": "true"}, headers=_person(OWNER))
         per = len(_ids(d0))
-        assert (r.status_code, r.json()["computer"]) == (200, {"agents": {"total": 3 * per, "pressable": 2 * per}}), r.text
+        assert (r.status_code, r.json()["computer"]) == (200, {"agents": {"total": 2 * per, "pressable": 2 * per}}), r.text
         assert not any(i in r.text for d in (d0, d1, d2) for i in _ids(d)), "counts only: no id of what was left out (nor of what was kept)"
 
 
@@ -310,3 +311,29 @@ async def test_07_a_computer_wide_report_keeps_the_rows_of_the_computers_other_s
         monkeypatch.setattr(desktop_clock, "can_clock", lambda *, member_role, user_id, setup: False if str(setup.id) == d1["setup_id"] else real(member_role=member_role, user_id=user_id, setup=setup))
         got2 = await _read(c, d0["setup_id"], phone)
         assert [r["agent_member_id"] for r in got2.json()["view"]["rows"]] == [a0]
+
+
+async def _silent_old_setups(c, name, n):
+    """`n` OLD setups of the same computer: connected once, never disconnected, not heard from for days (what an app installed again and again leaves behind) — none says `computer_press`, each holds agents"""
+    old = []
+    for _ in range(n):
+        device = await _device(c, name=name)
+        await _sql(f"UPDATE desktop_device_tokens SET last_used_at = now() - interval '3 days' WHERE setup_id = '{device['setup_id']}'")
+        old.append(device)
+    return old
+
+
+async def test_08_old_setups_that_are_never_heard_from_again_do_not_swell_n_nor_widen_the_scope(world):
+    async with _client() as c:
+        phone, devs = await _computer(c, 1)
+        (d0, a0) = devs[0]
+        old = await _silent_old_setups(c, NAME, 4)
+        per = len(_ids(d0))
+        sid = d0["setup_id"]
+        r = await c.get(f"/api/v2/desktop/setups/{sid}/clock", params={"phone_key_id": phone, "computer": "true"}, headers=_person(OWNER))
+        assert (r.status_code, r.json()["computer"]) == (200, {"agents": {"total": per, "pressable": per}}), r.text  # N = the heard setup's agents only — not (1 + 4) * per
+        p = await _post(c, sid, _mark(phone, key="k-old"))
+        assert (p.status_code, p.json()["agents"]) == (201, {"total": per, "pressable": per}), p.text
+        [payload] = await _payloads(sid)
+        assert payload["scope"] == _ids(d0) and payload["scope_total"] == per
+        assert not set(payload["scope"]) & {i for o in old for i in _ids(o)}

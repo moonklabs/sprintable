@@ -448,7 +448,7 @@ describe('[4714] flows — one stop signal per press: what a stopped flow gets b
   });
 });
 
-describe('[4734 B] groupForPress — one card for a computer only when EVERY setup of it takes the press of the whole computer', () => {
+describe('[4734 B] groupForPress — one card for a computer only when EVERY setup of it that is HEARD from takes the press of the whole computer', () => {
   const e = (id: string, o: Partial<import('./phone-start').StartableComputer> = {}): import('./phone-start').StartableComputer => ({
     setup_id: id, device_name: 'Mac', reachable: true, agents: [{ agent_member_id: `a-${id}`, name: `n-${id}`, can_command: true, projects: [], running: true }], ...o,
   });
@@ -467,5 +467,20 @@ describe('[4734 B] groupForPress — one card for a computer only when EVERY set
     const mixed = groupForPress([e('s1', { computer_id: 'c', computer_press: true }), e('s2', { computer_id: 'c' }), e('s3', { computer_id: 'd', computer_press: true })]);
     expect(mixed.map((m) => [m.setup_id, m.computer_id ?? null])).toEqual([['s1', null], ['s2', null], ['s3', 'd']]);
     expect(groupForPress([e('s1')])).toHaveLength(1); // (an older server: no computer id at all)
+  });
+  it('old setups that are not heard from (never disconnected, silent, no word) neither keep a computer from being one card nor put their agents on it', () => {
+    const silent = (id: string) => e(id, { computer_id: 'c', reachable: false });
+    const out = groupForPress([silent('o1'), silent('o2'), e('s1', { computer_id: 'c', computer_press: true }), silent('o3')]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ computer_id: 'c', reachable: true });
+    expect(out[0]!.agents.map((a) => a.agent_member_id)).toEqual(['a-s1']); // N is the heard setup's — the dead ones' agents are not on the card
+  });
+  it('a setup that IS heard from and says nothing (an older app, alive) still splits the computer into one card per setup — the silent ones stay as they were', () => {
+    const out = groupForPress([e('o1', { computer_id: 'c', reachable: false }), e('s1', { computer_id: 'c', computer_press: true }), e('s2', { computer_id: 'c' })]);
+    expect(out.map((m) => [m.setup_id, m.computer_id ?? null])).toEqual([['o1', null], ['s1', null], ['s2', null]]);
+  });
+  it('a computer none of whose setups is heard from is not made one card (nothing to press)', () => {
+    const out = groupForPress([e('o1', { computer_id: 'c', reachable: false, computer_press: true }), e('o2', { computer_id: 'c', reachable: false, computer_press: true })]);
+    expect(out.map((m) => m.computer_id ?? null)).toEqual([null, null]);
   });
 });
