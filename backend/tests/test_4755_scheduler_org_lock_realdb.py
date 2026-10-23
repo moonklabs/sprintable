@@ -488,3 +488,77 @@ async def test_08_a_confirmed_retry_charge_of_an_organization_with_no_subscripti
     finally:
         await _cleanup_money(maker, org_id)
         await engine.dispose()
+
+
+async def test_09_a_charge_the_provider_confirms_late_for_a_closed_organization_is_refunded(fake_toss, monkeypatch):
+    """Codex: `sweep_stale_pending_orders` confirms a stale pending order after the provider reports it done — if the organization is gone by then the charge is refunded through the attempt road, not left charged."""
+    import app.services.billing_scheduler as bs
+    from sqlalchemy import text
+
+    engine, maker = await _factory()
+    try:
+        org_id = uuid.uuid4()                                                      # the organization is gone
+        order_id = f"renewal:4755-{uuid.uuid4().hex[:8]}"
+        await _seed_order(maker, org_id, order_id, status="pending")
+        async with maker() as s:
+            await s.execute(text("UPDATE billing_orders SET created_at = now() - interval '2 hours' WHERE order_id = :o"), {"o": order_id})
+            await s.commit()
+
+        class _Lookup:
+            async def get_payment_by_order_id(self, *, order_id, quiet_codes=None):
+                if order_id == mine:
+                    return {"status": "DONE", "paymentKey": "pay-late-4755", "receipt": {"url": "https://example.invalid/r"}}
+                raise bs.TossApiError("NOT_FOUND_PAYMENT", "other rows of the shared database are left alone", 404)
+
+        mine = order_id
+        monkeypatch.setattr(bs, "TossAdapter", _Lookup)
+        async with maker() as s:
+            await bs.sweep_stale_pending_orders(s)
+        att = await _attempt_of(maker, order_id)
+        assert (att["kind"], att["status"], att["refund_status"]) == ("renewal", "voided", "confirmed")
+        assert [c["idempotency_key"] for c in fake_toss.calls] == [_key(att["id"])]
+    finally:
+        await _cleanup_money(maker, org_id)
+        await engine.dispose()
+
+
+async def test_10_an_already_confirmed_order_of_a_gone_organization_is_refunded_when_the_charge_guard_fires(fake_toss, monkeypatch):
+    """Codex: `charge_org`'s guard raises `OrganizationGone` before it looks at the order; an order of that id that is already confirmed is still sent back."""
+    import app.services.billing_scheduler as bs
+    from sqlalchemy import text
+    from tests.test_2777_admin_billing_realdb import _seed_offering
+
+    engine, maker = await _factory()
+    try:
+        async with maker() as s:
+            await _seed_offering(s, tier="team", monthly_price_minor=12000)
+        org_id = await _seed_org(maker)
+        order_id = f"renewal:4755-{uuid.uuid4().hex[:8]}"
+        async with maker() as s:
+            offering = (await s.execute(text("SELECT id FROM offering_versions WHERE tier = 'team' AND currency = 'krw' AND effective_to IS NULL LIMIT 1"))).scalar_one()
+            await s.execute(text("INSERT INTO org_subscriptions (id, org_id, tier, billing_cycle, status, offering_version_id, current_period_end) VALUES (gen_random_uuid(), :o, 'team', 'monthly', 'active', :v, now() - interval '1 day')"), {"o": org_id, "v": offering})
+            await s.commit()
+        await _seed_order(maker, org_id, order_id, status="confirmed")
+
+        async def fake_amount(session, *, org_id):
+            if org_id != mine:
+                raise bs.ChargeAmountError("not part of this test")
+            return 12000, "krw"
+
+        async def gone(session, **kw):
+            async with maker() as other:
+                await other.execute(text("DELETE FROM organizations WHERE id = :o"), {"o": kw["org_id"]})
+                await other.commit()
+            raise bs.OrganizationGone("the organization is gone")
+
+        mine = org_id
+        monkeypatch.setattr(bs, "compute_charge_amount", fake_amount)
+        monkeypatch.setattr(bs, "charge_org", gone)
+        monkeypatch.setattr(bs, "_renewal_order_id", lambda o, v, p: order_id)
+        async with maker() as s:
+            await bs.trigger_due_charges(s)
+        att = await _attempt_of(maker, order_id)
+        assert (att["kind"], att["refund_status"]) == ("renewal", "confirmed")
+    finally:
+        await _cleanup_money(maker, org_id)
+        await engine.dispose()

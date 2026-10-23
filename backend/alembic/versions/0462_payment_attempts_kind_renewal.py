@@ -18,5 +18,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # a renewal attempt cannot exist under the old two-value CHECK: its rows (voided · with their refund history) are relabelled `checkout`, the only kind that does not drive anything once an attempt is finished
+    op.execute("UPDATE billing_payment_attempts SET kind = 'checkout' WHERE kind = 'renewal'")
     op.drop_constraint("ck_billing_payment_attempts_kind", "billing_payment_attempts", type_="check")
     op.create_check_constraint("ck_billing_payment_attempts_kind", "billing_payment_attempts", "kind IN ('checkout', 'change_tier')")
