@@ -200,14 +200,15 @@ async def _computer_agents(db: AsyncSession, *, member_id: uuid.UUID, user_id: u
     rows[setup.id] = setup
     others = [i for i in rows if i != setup.id]
     role = await org_role(db, org_id, user_id)
-    heard = await _reachable(db, set(others), _now()) if (reach and others) else set(others)
+    heard = await _reachable(db, set(rows), _now()) if reach else set(rows)  # (the pressed setup too: a read must not count what a press of it would refuse — the press itself judged it before)
     total: set[uuid.UUID] = set()
     pressable: set[uuid.UUID] = set()
     for sid, row in rows.items():
         mine = _setup_agents(row)
         total |= mine
         if sid == setup.id:
-            pressable |= mine
+            if sid in heard:
+                pressable |= mine
         elif can_clock(member_role=role, user_id=user_id, setup=row) and sid in heard and await paired_phone(db, member_id=member_id, phone_id=phone_id, setup_id=sid) is not None:
             pressable |= mine
     return pressable, total, set(rows)
@@ -516,8 +517,8 @@ async def apply_clock_view(db: AsyncSession, setup: DesktopSetup, report: ClockV
     if not await remote_control.is_enabled(db, fresh.org_id):
         raise DesktopRelayError(409, remote_control.OFF_CODE, "remote control is off for this organization")
     mine = _setup_agents(fresh)
-    if ({r.agent_member_id for r in report.rows} | {o.agent_member_id for o in report.outs}) - mine:
-        # story #4734 (B): a computer-wide flow pressed from this setup names the agents of the computer's other live setups too — kept (the phone's read gives each person only
+    if report.scope != "one" and ({r.agent_member_id for r in report.rows} | {o.agent_member_id for o in report.outs}) - mine:
+        # story #4734 (B): (not the one-agent end at the Mac: it names its own single agent and nothing more) a computer-wide flow pressed from this setup names the agents of the computer's other live setups too — kept (the phone's read gives each person only
         # the rows of agents they may press, see `clock_view_read`); an agent of NO live setup of this computer is dropped as before
         mine = mine | await _sibling_agents(db, fresh)
     kept = [r for r in report.rows if r.agent_member_id in mine]

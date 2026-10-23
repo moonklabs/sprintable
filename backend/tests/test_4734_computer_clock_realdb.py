@@ -24,9 +24,16 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
 from tests.test_4529_desktop_relay_realdb import _device, _tok
 from tests.test_4533_agent_permissions_realdb import _pair, _register
 from tests.test_4534_desktop_commands_realdb import _commands, _remote_control_on, _state  # noqa: F401
-from tests.test_4733_clock_realdb import _panel, _post, _press, _put, _read, _row, _views
+from tests.test_4733_clock_realdb import _panel, _post, _press, _put, _read, _report, _row, _views
 
 pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture(autouse=True)
+async def _clean_onboarding_events(world):
+    """the shared cleanup removes the onboarding events of the `d4424…` setups only; the computers these tests make are named `d4734…`"""
+    yield
+    await _sql("DELETE FROM onboarding_events WHERE session_id IN (SELECT id FROM desktop_setups WHERE device_name LIKE 'd4734%')")
 
 NAME = "d4734 mac clock"
 
@@ -245,6 +252,16 @@ def test_06d_the_relay_payload_holds_the_marks_three_keys_together_and_nothing_e
         ClockPayload(action="out_edit", signed="x", agent_member_id=a, edit={"base_rev": 1, "done": "x"}, computer=True, scope=[a], scope_total=1)
 
 
+async def test_06e_the_phones_read_does_not_count_the_pressed_setup_when_it_is_silent_a_press_of_it_would_be_refused(world):
+    async with _client() as c:
+        phone, devs = await _computer(c, 3)
+        (d0, a0), (d1, a1), (d2, a2) = devs
+        await _sql(f"UPDATE desktop_device_tokens SET last_used_at = now() - interval '3 days' WHERE setup_id = '{d0['setup_id']}'")  # the PRESSED setup is not heard from
+        r = await c.get(f"/api/v2/desktop/setups/{d0['setup_id']}/clock", params={"phone_key_id": phone, "computer": "true"}, headers=_person(OWNER))
+        per = len(_ids(d0))
+        assert (r.status_code, r.json()["computer"]) == (200, {"agents": {"total": 3 * per, "pressable": 2 * per}}), r.text
+
+
 async def test_06b_the_phones_read_says_n_of_k_before_it_signs_counts_only_and_only_when_asked(world):
     async with _client() as c:
         phone, devs = await _computer(c, 3)
@@ -256,6 +273,17 @@ async def test_06b_the_phones_read_says_n_of_k_before_it_signs_counts_only_and_o
         per = len(_ids(d0))
         assert (r.status_code, r.json()["computer"]) == (200, {"agents": {"total": 3 * per, "pressable": 2 * per}}), r.text
         assert not any(i in r.text for d in (d0, d1, d2) for i in _ids(d)), "counts only: no id of what was left out (nor of what was kept)"
+
+
+async def test_07b_the_one_agent_end_at_the_mac_never_widens_to_the_computers_other_setups(world):
+    async with _client() as c:
+        phone, devs = await _computer(c, 2)
+        (d0, a0), (d1, a1) = devs
+        # a panel of ONE agent (scope «one») names exactly its own single agent: a row of a sibling's agent in it is dropped, as before this story
+        rep = await _put(c, d0, _report(1, "panel", scope="one", opened_from="phone", count={"ready": 1, "needs_you": 0, "drafting": 0}, rows=[_row(a1, first_line="not mine")]))
+        assert rep.status_code == 200, rep.text
+        assert (rep.json()["applied"], rep.json()["dropped_rows"]) == (True, 1)
+        assert (await _views(d0["setup_id"]))[0][1]["rows"] == []
 
 
 async def test_07_a_computer_wide_report_keeps_the_rows_of_the_computers_other_setups_and_the_read_gives_each_person_only_what_they_may_press(world, monkeypatch):
