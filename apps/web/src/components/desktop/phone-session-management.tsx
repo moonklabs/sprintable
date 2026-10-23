@@ -33,7 +33,8 @@ const NAMES_MAX = 6;
 const bareName = (name: string, device: string): string => (name.endsWith(` · ${device}`) ? name.slice(0, -(` · ${device}`).length) : name);
 
 /** a press whose end is not known — kept ABOVE the cards so it survives a card leaving (the list turning to «remote control off» and back): coming back, [결과 확인] follows the SAME command */
-type Held = { pending: Pending; start: boolean };
+/** `setups`: every setup of the card that pressed — the lock holds for any card that shares one of them, so a card that splits or regroups meanwhile (the computer\'s Macs differ in what they say) is still locked */
+type Held = { pending: Pending; start: boolean; setups?: string[] };
 
 type Section = { kind: 'reading' } | { kind: 'failed' } | { kind: 'none' } | { kind: 'remote_off' } | { kind: 'computers'; computers: StartableComputer[]; phoneKeyId: string };
 
@@ -45,7 +46,7 @@ export function PhoneSessionManagement() {
 }
 
 function SessionsForOrg({ orgId, orgSyncPending }: { orgId: string | undefined; orgSyncPending: boolean }) {
-  const [held] = useState(() => new Map<string, Held>()); // one Map for this component's life (read in handlers · written in handlers), by computer; this organization's only (another organization remounts this whole component)
+  const [held] = useState(() => new Map<string, Held>()); // one Map for this component's life (read in handlers · written in handlers), by press (idempotency key); this organization's only (another organization remounts this whole component)
   const t = useTranslations('desktop.phoneSessions');
   const { inPhoneApp, phoneCall } = usePhoneBridge();
   const [section, setSection] = useState<Section>({ kind: 'reading' });
@@ -186,10 +187,17 @@ function ComputerCard({ computer, phoneKeyId, onChanged, frozen, held }: { compu
   const [busy, setBusy] = useState(false);
   const [line, setLine] = useState<Line>(null);
   // story 4734 (B): the card is the COMPUTER's (its setups together); the setup named for the card itself is the first reachable one and may change between two reads — what is held, is held by the computer
-  const cardId = computer.computer_id ?? computer.setup_id;
   const markable = computer.computer_id !== undefined; // an older server names no computer: the entry is its own and a press is the one-setup press it always was
-  const [pending, setPendingState] = useState<Held | null>(() => held.get(cardId) ?? null);
-  const setPending = (h: Held | null) => { if (h) held.set(cardId, h); else held.delete(cardId); setPendingState(h); };
+  const mySetups = [computer.setup_id, ...computer.agents.map((a) => a.setup_id).filter((s): s is string => typeof s === 'string')];
+  const sharesSetup = (h: Held) => (h.setups ?? [h.pending.setupId]).some((s) => mySetups.includes(s));
+  const heldHere = (): Held | null => { for (const h of held.values()) if (sharesSetup(h)) return h; return null; };
+  const [pending, setPendingState] = useState<Held | null>(() => heldHere());
+  const setPending = (h: Held | null) => {
+    for (const [k, v] of [...held]) if (sharesSetup(v)) held.delete(k); // (one unknown end per card — and per setup it covers)
+    const next = h ? { ...h, setups: mySetups } : null;
+    if (next) held.set(next.pending.key, next);
+    setPendingState(next);
+  };
   const [pressedHere, setPressedHere] = useState(false);
   const [failures, setFailures] = useState(0); // looks in a row that did not answer: the card drawn may no longer be true
   const flows = useRef(new Set<Flow>()); // every press / check out from this card: the card going away stops them all

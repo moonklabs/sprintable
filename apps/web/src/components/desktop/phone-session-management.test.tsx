@@ -1195,6 +1195,21 @@ describe('[4734 B] one card per computer — one [End all sessions], « N of K �
     expect(editPosts()[0]!.url).toContain(`/api/desktop/setups/${SETUP2}/clock`);
   });
 
+  it('an unknown end of a marked press keeps its lock when the computer splits into per-setup cards meanwhile (one Mac says it no more): the cards that share its setups stay locked', async () => {
+    world.startable = two();
+    world.clock = counts(2, 2);
+    await screen();
+    world.post = json({ error: { code: 'x' } }, 503);
+    await press(byId('phone-sessions-end-all'));
+    expect(byId('phone-sessions-check')).not.toBeNull();
+    world.startable = two({ press2: false }); // a Mac that no longer says it: the card splits into two
+    await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+    await flush();
+    expect(all('phone-session-card')).toHaveLength(2);
+    expect(all('phone-sessions-check').length).toBeGreaterThan(0); // the press out is followed, not forgotten
+    expect(all('phone-sessions-end-all').every((b) => (b as HTMLButtonElement).disabled)).toBe(true);
+  });
+
   it('the card stays one card when the setup named for it changes between two reads (the first one drops off) — what is held by an unknown end is held by the COMPUTER', async () => {
     world.startable = two();
     world.clock = counts(2, 2);

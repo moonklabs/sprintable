@@ -58,3 +58,18 @@ async def test_the_word_is_the_boolean_true_and_nothing_else(world):
             r = await c.put("/api/v2/desktop/relay/startable", json={"startable": [], "computer_press": bad}, headers=tok)
             assert r.status_code == (200 if bad is None else 422), (bad, r.text)
         assert await _caps(devs[0][0]["setup_id"]) in (None, [])
+
+
+async def test_a_stale_numbered_list_changes_nothing_about_the_signal(world):
+    async with _client() as c:
+        phone, devs = await _computer(c, 1)
+        d = devs[0][0]
+        tok = _tok(d["device_token"])
+        assert (await c.put("/api/v2/desktop/relay/startable", json={"startable": [], "seq": 5, "computer_press": True}, headers=tok)).json()["applied"] is True
+        late = await c.put("/api/v2/desktop/relay/startable", json={"startable": [], "seq": 3}, headers=tok)  # a late request that lacks the word
+        assert late.json()["applied"] is False
+        assert (await _entries(c, phone))[d["setup_id"]]["computer_press"] is True, "the ignored report did not take the word away"
+        assert (await c.put("/api/v2/desktop/relay/startable", json={"startable": [], "seq": 6}, headers=tok)).json()["applied"] is True
+        assert (await _entries(c, phone))[d["setup_id"]]["computer_press"] is False, "a newer list without it does"
+        assert (await c.put("/api/v2/desktop/relay/startable", json={"startable": [], "seq": 4, "computer_press": True}, headers=tok)).json()["applied"] is False
+        assert (await _entries(c, phone))[d["setup_id"]]["computer_press"] is False, "…and a late one WITH it does not give it back"
