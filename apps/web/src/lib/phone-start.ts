@@ -19,7 +19,8 @@ export interface StartableAgent {
   setup_id?: string;
 }
 /** `computer_id` (story 4734): the server's id of the computer this entry's setup belongs to — an older server sends none (the entry is then its own computer) */
-export interface StartableComputer { setup_id: string; device_name: string; reachable: boolean; agents: StartableAgent[]; computer_id?: string }
+/** `computer_press` (story 4734 B): this computer's app takes the press of the WHOLE computer (the `computer` mark) — an older app or server says nothing: false */
+export interface StartableComputer { setup_id: string; device_name: string; reachable: boolean; agents: StartableAgent[]; computer_id?: string; computer_press?: boolean }
 export interface StartableView { remote_control: boolean; computers: StartableComputer[] }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -37,7 +38,7 @@ export function parseStartable(raw: unknown): StartableView | null {
       const projects = a.projects.filter((p): p is Record<string, unknown> => isObj(p) && isStr(p.project_id) && isStr(p.name)).map((p) => ({ project_id: p.project_id as string, name: p.name as string }));
       agents.push({ agent_member_id: a.agent_member_id, name: a.name, can_command: a.can_command === true, projects, running: typeof a.running === 'boolean' ? a.running : null });
     }
-    computers.push({ setup_id: c.setup_id, device_name: c.device_name, reachable: c.reachable === true, agents, ...(isStr(c.computer_id) ? { computer_id: c.computer_id } : {}) });
+    computers.push({ setup_id: c.setup_id, device_name: c.device_name, reachable: c.reachable === true, agents, ...(isStr(c.computer_id) ? { computer_id: c.computer_id } : {}), ...(c.computer_press === true ? { computer_press: true } : {}) });
   }
   return { remote_control: raw.remote_control, computers };
 }
@@ -70,6 +71,22 @@ export function groupByComputer(entries: readonly StartableComputer[]): Startabl
     }
     return { ...rep, reachable: members.some((m) => m.reachable), agents: [...seen.values()] };
   });
+}
+
+/**
+ * story 4734 (B): the cards of «세션 관리». The setups of one computer become ONE card (one [모든 세션 종료] = one press of the whole computer) only when EVERY setup of it says its
+ * app takes that press (`computer_press`): an older app rejects the computer mark, so a card over it could not end its agents at all. Any other computer stays as it was — one card per
+ * setup, each pressed on its own (`computer_id` is taken off those entries so nothing downstream treats them as a computer).
+ */
+export function groupForPress(entries: readonly StartableComputer[]): StartableComputer[] {
+  const byComputer = new Map<string, StartableComputer[]>();
+  for (const e of entries) if (e.computer_id) byComputer.set(e.computer_id, [...(byComputer.get(e.computer_id) ?? []), e]);
+  const oneCard = new Set([...byComputer].filter(([, members]) => members.every((m) => m.computer_press === true)).map(([id]) => id));
+  const kept = entries.map((e) => {
+    if (e.computer_id && !oneCard.has(e.computer_id)) { const { computer_id: _drop, ...rest } = e; void _drop; return rest as StartableComputer; }
+    return e;
+  });
+  return groupByComputer(kept);
 }
 
 type Call = (type: string, args: Record<string, unknown>) => Promise<PhoneAnswer>;

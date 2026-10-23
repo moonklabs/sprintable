@@ -343,7 +343,8 @@ async def test_09_the_first_screen_in_one_read_every_paired_computer_with_its_ag
         view = (await _all(c, phone)).json()
         assert set(view) == {"remote_control", "computers"} and view["remote_control"] is True
         comp = view["computers"][0]
-        assert set(comp) == {"setup_id", "computer_id", "device_name", "reachable", "agents"} and comp["setup_id"] == sid and comp["reachable"] is True  # story 4734: + computer_id
+        assert set(comp) == {"setup_id", "computer_id", "device_name", "reachable", "agents", "computer_press"} and comp["setup_id"] == sid and comp["reachable"] is True  # story 4734: + computer_id, + computer_press (B)
+        assert comp["computer_press"] is False  # (this device never said it takes the press of the whole computer)
         assert comp["computer_id"]
         by_id = {a["agent_member_id"]: a for a in comp["agents"]}
         assert set(by_id) == {agent, other_agent}  # every agent this computer was set up with (the owner opens them all)

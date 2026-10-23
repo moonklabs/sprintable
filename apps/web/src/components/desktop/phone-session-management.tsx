@@ -16,7 +16,7 @@ import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { formatViewerDate } from '@/lib/viewer-time-zone';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
-import { beginFlow, endFlow, groupByComputer, readStartableKeyed, type Flow, type StartableComputer } from '@/lib/phone-start';
+import { beginFlow, endFlow, groupForPress, readStartableKeyed, type Flow, type StartableComputer } from '@/lib/phone-start';
 import { checkPress, editClock, pressClock, readClock, type ClockAction, type ClockEditFields, type ClockRead, type ClockView, type Pending, type PressOutcome } from '@/lib/phone-clock';
 
 const newKey = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`);
@@ -66,7 +66,7 @@ function SessionsForOrg({ orgId, orgSyncPending }: { orgId: string | undefined; 
       if (flow.stopped || !alive.current) return;
       if (r.kind === 'view') {
         if (!r.view.remote_control) setSection({ kind: 'remote_off' });
-        else setSection(r.view.computers.length > 0 ? { kind: 'computers', computers: groupByComputer(r.view.computers), phoneKeyId: r.phoneKeyId } : { kind: 'none' }); // story 4734 (B): one card per COMPUTER — the server lists a setup each
+        else setSection(r.view.computers.length > 0 ? { kind: 'computers', computers: groupForPress(r.view.computers), phoneKeyId: r.phoneKeyId } : { kind: 'none' }); // story 4734 (B): one card per COMPUTER — the server lists a setup each
       } else if (r.kind === 'no_phone' || r.kind === 'no_screen_lock') setSection({ kind: 'none' }); // paired with nothing: nothing to manage, no line
       else setSection((s) => (s.kind === 'computers' ? s : { kind: 'failed' })); // a later read that failed keeps what is drawn
     });

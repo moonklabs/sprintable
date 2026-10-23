@@ -981,11 +981,11 @@ describe('[4733 S5·P2] filling in and fixing on the phone', () => {
 describe('[4734 B] one card per computer — one [End all sessions], « N of K » before the signature', () => {
   const COMP = 'cccccccc-1111-4222-8333-444444444444';
   const SETUP2 = '11111111-2222-4333-8444-999999999999';
-  const two = (over: { a2can?: boolean; reachable1?: boolean; withComputerId?: boolean } = {}) => ({
+  const two = (over: { a2can?: boolean; reachable1?: boolean; withComputerId?: boolean; press1?: boolean; press2?: boolean } = {}) => ({
     remote_control: true,
     computers: [
-      { setup_id: SETUP, ...(over.withComputerId === false ? {} : { computer_id: COMP }), device_name: '윤재의 맥북', reachable: over.reachable1 !== false, agents: [{ agent_member_id: AGENT, name: '결제 담당 · 윤재의 맥북', can_command: true, projects: [], running: true }] },
-      { setup_id: SETUP2, ...(over.withComputerId === false ? {} : { computer_id: COMP }), device_name: '윤재의 맥북', reachable: true, agents: [{ agent_member_id: AGENT2, name: '문서 담당 · 윤재의 맥북', can_command: over.a2can !== false, projects: [], running: true }] },
+      { setup_id: SETUP, ...(over.withComputerId === false ? {} : { computer_id: COMP }), ...(over.press1 === false ? {} : { computer_press: true }), device_name: '윤재의 맥북', reachable: over.reachable1 !== false, agents: [{ agent_member_id: AGENT, name: '결제 담당 · 윤재의 맥북', can_command: true, projects: [], running: true }] },
+      { setup_id: SETUP2, ...(over.withComputerId === false ? {} : { computer_id: COMP }), ...(over.press2 === false ? {} : { computer_press: true }), device_name: '윤재의 맥북', reachable: true, agents: [{ agent_member_id: AGENT2, name: '문서 담당 · 윤재의 맥북', can_command: over.a2can !== false, projects: [], running: true }] },
     ],
   });
   const counts = (total: number, pressable: number) => ({ remote_control: true, reachable: true, supported: true, view: null, computer: { agents: { total, pressable } } });
@@ -1157,6 +1157,20 @@ describe('[4734 B] one card per computer — one [End all sessions], « N of K �
     expect(byId('phone-sessions-line')?.textContent).toBe(koMessages.desktop.phoneSessions.result.appTooOld);
     expect(koMessages.desktop.phoneSessions.result.appTooOld).not.toContain('끝낼'); // (the same line serves the start of a whole computer too)
     expect(posts()).toHaveLength(0);
+  });
+
+  it('an older Mac in the computer (it does not say `computer_press`) keeps the old shape: the setups stay one card each, each pressed on its own — no mark, no counts asked (an older app would reject the key)', async () => {
+    for (const over of [{ press1: false, press2: false }, { press2: false }]) { // none of the Macs' setups says it · only one of them does
+      world.startable = two(over);
+      await screen();
+      expect(all('phone-session-card')).toHaveLength(2);
+      expect(calls.some((c) => c.url.includes('computer=true'))).toBe(false);
+      await press(all('phone-sessions-end-all')[0]!);
+      expect(signs().every((a) => !('computer' in a))).toBe(true);
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+      phoneCall.mockClear();
+    }
   });
 
   it('a server that names no computer (an older one): each entry is its own card, a press is the one-setup press it was — no mark, and the read asks no counts', async () => {
