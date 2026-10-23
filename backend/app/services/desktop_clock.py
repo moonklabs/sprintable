@@ -271,8 +271,11 @@ _SCRUB_EDIT_SQL = sql_text(_SCRUB_EDIT_HEAD + "setup_id = :setup_id AND " + _SCR
 # the server's own clock takes at most this many rows a tick, in id order, skipping a row somebody else holds (the result path and a press scrub their own computer's rows): no lock order
 # to quarrel over, no long transaction — what is left is taken by the next tick
 SCRUB_SWEEP_BATCH = 500
+# The batch is chosen ONCE, by an array sub-select (an InitPlan), not by `id IN (SELECT … LIMIT n FOR UPDATE SKIP LOCKED)`: a semi-join lets the planner run that sub-select again for every row it
+# meets, and each re-run skips the rows this very command already updated (a row it modified is not lockable again) and so hands back the NEXT n — more rows than the batch (the CI run of
+# 10-22/23 saw 4 then 1 with a batch of 2, twice). Which plan the database picks follows its statistics, so the bound held on a small table and broke on another.
 _SCRUB_EDIT_ALL_SQL = sql_text(
-    _SCRUB_EDIT_HEAD + "id IN (SELECT id FROM desktop_commands WHERE " + _SCRUB_EDIT_WHERE + " ORDER BY id LIMIT :batch FOR UPDATE SKIP LOCKED)"
+    _SCRUB_EDIT_HEAD + "id = ANY (ARRAY(SELECT id FROM desktop_commands WHERE " + _SCRUB_EDIT_WHERE + " ORDER BY id LIMIT :batch FOR UPDATE SKIP LOCKED))"
 )
 
 
