@@ -17,7 +17,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
 )
 from tests.test_4529_desktop_relay_realdb import _tok
 from tests.test_4534_desktop_commands_realdb import _remote_control_on  # noqa: F401
-from tests.test_4734_computer_clock_realdb import _computer
+from tests.test_4734_computer_clock_realdb import _clean_onboarding_events, _computer  # noqa: F401 — the autouse fixture removes the `d4734` setups' onboarding events
 
 pytestmark = pytest.mark.anyio
 
