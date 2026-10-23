@@ -85,13 +85,11 @@ async def test_03_payment_entry_open_the_409_is_unchanged_for_the_subscription_a
 
 async def test_04_the_deployment_without_the_billing_modules_ends_the_row_the_same_way(monkeypatch):
     """The production branch carries no `org_billing_end` (the closing of an organization there does not call `end_org_billing`): the same deletion still finishes and no subscription
-    row is left active / past_due / pending. (`end_org_billing` is replaced by nothing, as the branch has it.)"""
+    row is left active / past_due / pending. (`end_org_billing` is replaced by a no-op — the branch has the call removed; the rows are ended by the closing's own statement.)"""
     import app.repositories.organization as org_repo
 
-    called = []
-
     async def _absent(*a, **kw):
-        called.append(1)
+        return None
 
     monkeypatch.setattr(org_repo, "end_org_billing", _absent, raising=False)
     engine, w = await _world()
@@ -101,8 +99,32 @@ async def test_04_the_deployment_without_the_billing_modules_ends_the_row_the_sa
         assert (await w.delete(await w.tokens(email))).status_code == 200
         assert not await _org_exists(w, org_id)
         assert await _sub_statuses(w, org_id) == ["canceled"]
-        assert called == [1]                                                          # (the stand-in was what ran; the rows were ended by the closing's own statement)
     finally:
+        await _close(engine, w)
+
+
+@pytest.mark.parametrize("tie", ["polar_subscription", "billing_key", "confirmed_order"])
+async def test_04b_payment_entry_closed_but_the_organization_has_payment_ties_still_blocks(tie):
+    """The switch may have been turned off after payments existed (codex): an organization with a provider subscription id, an active billing key or a confirmed order is not closed
+    quietly — the 409 stays, the organization and the row stay."""
+    engine, w = await _world()
+    try:
+        uid, email, org_id = await w.person(org=True, name=f"Ties {tie}", spare_owner=False)
+        await _seed_subscription(w, org_id)
+        if tie == "polar_subscription":
+            await w.sql("UPDATE org_subscriptions SET polar_subscription_id = 'sub_ext_4752' WHERE org_id = :o", o=org_id)
+        elif tie == "billing_key":
+            await w.sql("INSERT INTO org_billing_keys (id, org_id, customer_key, encrypted_billing_key, status) VALUES (gen_random_uuid(), :o, :c, 'x', 'active')", o=org_id, c=f"ck-{org_id.hex[:12]}")
+        else:
+            await w.sql("INSERT INTO billing_orders (id, org_id, order_id, amount_minor, currency, status, purpose) VALUES (gen_random_uuid(), :o, :oid, 1000, 'krw', 'confirmed', 'charge')", o=org_id, oid=f"t4752-{org_id.hex[:10]}")
+        r = await w.delete(await w.tokens(email))
+        assert r.status_code == 409 and r.json()["error"]["orgs"][0]["reason"] == "active_subscription"
+        assert await _org_exists(w, org_id) and await _sub_statuses(w, org_id) == ["active"]
+        p = await _preview(w, await w.tokens(email))
+        assert p["closing"] == [] and p["blocked"][0]["reason"] == "active_subscription"
+    finally:
+        await w.sql("DELETE FROM billing_orders WHERE org_id = :o", o=org_id)
+        await w.sql("DELETE FROM org_billing_keys WHERE org_id = :o", o=org_id)
         await _close(engine, w)
 
 

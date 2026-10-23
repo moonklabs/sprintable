@@ -186,6 +186,20 @@ class OrganizationRepository:
         row = (await self.session.execute(text("SELECT billing_checkout_enabled FROM platform_settings LIMIT 1"))).first()
         return True if row is None else bool(row[0])
 
+    async def _carries_payment_ties(self, org_id: uuid.UUID) -> bool:
+        """story #4752 (codex): the «no money» premise of a closed payment entry is checked, not assumed — the switch may have been turned off after payments existed. An organization that
+        holds a provider subscription id (Polar), an active billing key or a confirmed order is not one the closing may end quietly (the provider side would go on charging / is owed a
+        refund): it keeps blocking, as on a deployment with payment entry open. A grant-only row has none of these."""
+        row = await self.session.execute(
+            text(
+                "SELECT 1 WHERE EXISTS (SELECT 1 FROM org_subscriptions WHERE org_id = :o AND polar_subscription_id IS NOT NULL)"
+                " OR EXISTS (SELECT 1 FROM org_billing_keys WHERE org_id = :o AND status = 'active')"
+                " OR EXISTS (SELECT 1 FROM billing_orders WHERE org_id = :o AND status = 'confirmed')"
+            ),
+            {"o": str(org_id)},
+        )
+        return row.first() is not None
+
     async def _has_active_or_in_flight_subscription(self, org_id: uuid.UUID) -> bool:
         """구독 status='active'뿐 아니라 #2511(결제②-D후속) checkout_claimed_at이
         STALE_CLAIM_WINDOW 안(=진행 中)인 claim도 "활성"으로 취급한다.
@@ -198,8 +212,8 @@ class OrganizationRepository:
         STALE_CLAIM_WINDOW/SSOT로 "진행 中"을 판정 — 죽은/멈춘(stale) claim은 여전히
         무시(자기치유 회귀 없음).
 
-        story #4752 (4756): where payment entry is closed (`_billing_is_live` false) nothing counts — the closing ends the row with the organization (`end_org_billing`; no money moves)."""
-        if not await self._billing_is_live():
+        story #4752 (4756): where payment entry is closed (`_billing_is_live` false) and the organization carries no payment ties (`_carries_payment_ties`) nothing counts — the closing ends the row with the organization (no money moves)."""
+        if not await self._billing_is_live() and not await self._carries_payment_ties(org_id):
             return False
         now = datetime.now(timezone.utc)
         row = await self.session.execute(
