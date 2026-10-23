@@ -21,7 +21,9 @@ _END_ORG_BILLING_SQL = (
         " WHERE org_id = :o AND (status <> 'deleted' OR encrypted_billing_key IS NOT NULL)"
     ),
     # 구독 행이 active / past_due 로 남지 않게 — 갱신 cron 은 status = 'active' 만, dunning 은 past_due 를 본다.
-    "UPDATE org_subscriptions SET status = 'canceled', updated_at = now() WHERE org_id = :o AND status IN ('active', 'past_due')",
+    # story #4753: a 'pending' row is a checkout claim — one old enough to be stale (STALE_CLAIM_WINDOW) does not stop the closing, and the late confirmed charge would then turn it 'active' on a
+    # closed organization (its CAS is «claim value still mine»). The claim is cleared with the row ended, so that CAS fails and the payment attempt takes its existing «claim lost → voided + refund» road.
+    "UPDATE org_subscriptions SET status = 'canceled', checkout_claimed_at = NULL, updated_at = now() WHERE org_id = :o AND status IN ('active', 'past_due', 'pending')",
 )
 
 

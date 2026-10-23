@@ -69,6 +69,7 @@ async def _cleanup(maker, *org_ids) -> None:
             await s.execute(text("DELETE FROM org_members WHERE org_id = :o"), {"o": o})
             await s.execute(text("DELETE FROM organizations WHERE id = :o"), {"o": o})
         await s.execute(text("DELETE FROM polar_webhook_events WHERE event_id LIKE 'evt-4753-%'"))
+        await s.execute(text("DELETE FROM operator_alerts WHERE dedupe_key LIKE 'billing.orphan_subscription_refused:%'"))
         await s.commit()
 
 
@@ -126,6 +127,9 @@ async def test_01_the_closing_holds_the_row_the_webhook_waits_and_then_writes_no
         assert await _scalar(maker, "SELECT count(*) FROM org_subscriptions WHERE org_id = :o", o=org_id) == 0               # no live subscription on a closed organization
         row = await _scalar(maker, "SELECT outcome || ':' || org_id::text FROM polar_webhook_events WHERE event_id = :e", e=event_id)
         assert row == f"refused_org_closed:{org_id}"
+        # …and it reaches people: a durable operator alert (the platform's channel to the operations conversation, retried until delivered), once per event
+        alert = await _scalar(maker, "SELECT kind || ':' || (facts->>'code') FROM operator_alerts WHERE dedupe_key = :k", k=f"billing.orphan_subscription_refused:{event_id}")
+        assert alert == "billing.orphan_subscription_refused:ORPHAN_SUBSCRIPTION_REFUSED"
     finally:
         await _cleanup(maker, org_id)
         await engine.dispose()
@@ -139,19 +143,21 @@ async def test_02_the_webhook_holds_the_row_the_closing_waits_and_then_sees_the_
 
     engine, maker = await _factory()
     gate = asyncio.Event()
+    arrived = asyncio.Event()
     try:
         org_id = await _seed_org(maker)
         original = billing._current_pricing_version_id
 
         async def held(session, tier, cycle, currency="usd"):
-            await gate.wait()                                   # the webhook is «in the middle of its write», holding the organization row
+            arrived.set()                                       # the webhook has taken the organization row and is at its next step…
+            await gate.wait()                                   # …parked there, «in the middle of its write», holding the row
             return await original(session, tier, cycle, currency)
 
         billing._current_pricing_version_id = held
         try:
             async with maker() as hook, maker() as closer:
                 hook_task = asyncio.create_task(billing._update_subscription(hook, org_id, "pro", "monthly", "cus_4753", "sub_4753", "active", None))
-                await asyncio.sleep(0.5)                       # it has taken the row and is parked at the gate
+                await asyncio.wait_for(arrived.wait(), timeout=20)   # it has taken the row and is parked at the gate
                 close_task = asyncio.create_task(OrganizationRepository(closer).delete_for_account_closure(org_id, uuid.uuid4()))
                 await _someone_waits_for_a_row_lock(maker, task=close_task)
                 gate.set()                                     # the webhook finishes and commits
@@ -176,6 +182,7 @@ async def test_03_the_owners_organization_delete_meets_the_webhook_the_same_way(
 
     engine, maker = await _factory()
     gate = asyncio.Event()
+    arrived = asyncio.Event()
     try:
         org_id = await _seed_org(maker)
         uid = uuid.uuid4()
@@ -187,6 +194,7 @@ async def test_03_the_owners_organization_delete_meets_the_webhook_the_same_way(
         original = billing._current_pricing_version_id
 
         async def held(session, tier, cycle, currency="usd"):
+            arrived.set()
             await gate.wait()
             return await original(session, tier, cycle, currency)
 
@@ -194,7 +202,7 @@ async def test_03_the_owners_organization_delete_meets_the_webhook_the_same_way(
         try:
             async with maker() as hook, maker() as closer:
                 hook_task = asyncio.create_task(billing._update_subscription(hook, org_id, "pro", "yearly", "cus_4753", "sub_4753b", "active", None))
-                await asyncio.sleep(0.5)
+                await asyncio.wait_for(arrived.wait(), timeout=20)
                 close_task = asyncio.create_task(OrganizationRepository(closer).delete_by_user(org_id, uid, "Org4753", confirm_without_impact=True))
                 await _someone_waits_for_a_row_lock(maker, task=close_task)
                 gate.set()
@@ -265,6 +273,39 @@ async def test_05_the_admin_grant_takes_the_same_row_and_refuses_a_closed_organi
             await closer.commit()
             assert await asyncio.wait_for(task, timeout=20) == "ORG_NOT_FOUND"
         assert await _scalar(maker, "SELECT count(*) FROM org_subscriptions WHERE org_id = :o", o=org_id) == 0
+    finally:
+        await _cleanup(maker, org_id)
+        await engine.dispose()
+
+
+async def test_06_closing_ends_a_stale_checkout_claim_so_a_late_confirmed_charge_cannot_activate_a_closed_organization():
+    """Codex on 5193: a checkout claim older than STALE_CLAIM_WINDOW does not stop the closing; the organization went, the `pending` row stayed with its claim, and the late confirmed charge's CAS
+    («the claim value is still mine») turned it `active` on a closed organization. The closing now ends the pending row and clears the claim: the CAS fails (the payment attempt then voids and refunds)."""
+    from datetime import timedelta
+
+    from sqlalchemy import text
+
+    from app.repositories.organization import OrganizationRepository
+    from app.services.org_subscription_checkout import STALE_CLAIM_WINDOW, activate_claimed_subscription
+
+    engine, maker = await _factory()
+    try:
+        org_id = await _seed_org(maker)
+        claim = datetime.now(timezone.utc) - STALE_CLAIM_WINDOW - timedelta(minutes=5)
+        async with maker() as s:
+            await s.execute(text("INSERT INTO org_subscriptions (id, org_id, tier, status, checkout_claimed_at) VALUES (gen_random_uuid(), :o, 'team', 'pending', :c)"), {"o": org_id, "c": claim})
+            await s.commit()
+        async with maker() as s:
+            res = await OrganizationRepository(s).delete_for_account_closure(org_id, uuid.uuid4())
+            assert res == {"ok": True}, res                      # a stale claim is not «in flight»: the closing goes through
+            await s.commit()
+        assert await _scalar(maker, "SELECT status FROM org_subscriptions WHERE org_id = :o", o=org_id) == "canceled"
+        assert await _scalar(maker, "SELECT checkout_claimed_at IS NULL FROM org_subscriptions WHERE org_id = :o", o=org_id) is True
+        async with maker() as s:
+            changed = await activate_claimed_subscription(s, org_id=org_id, claim_value=claim)
+            await s.commit()
+        assert changed == 0                                        # the late charge's CAS finds no claim of its own: no activation
+        assert await _scalar(maker, "SELECT status FROM org_subscriptions WHERE org_id = :o", o=org_id) == "canceled"
     finally:
         await _cleanup(maker, org_id)
         await engine.dispose()

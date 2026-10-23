@@ -425,7 +425,8 @@ async def _refuse_subscription_for_closed_org(
 ) -> None:
     """story #4753 — the provider says an organization that no longer exists has (or has changed) a subscription: no subscription row is written for it. What the provider already took cannot be
     given back from here (`PolarAdapter.cancel` / `.refund` are not implemented — payment/polar_adapter.py: cancellation reaches us only through the provider's own webhook), so the case is kept
-    where a person can find it: the webhook event row says `refused_org_closed` (+ the organization id) and the log carries one ERROR line with the provider's ids, for a refund by hand."""
+    where a person can find it: the webhook event row says `refused_org_closed` (+ the organization id), the log carries one ERROR line with the provider's ids, and the platform's
+    OPERATOR ALERT (services/operator_alerts.py — a durable row, sent to the configured operations conversation, retried until delivered, once per event) tells the people who can refund by hand."""
     log = logger.error if status in ("active", "trialing") else logger.warning
     log(
         "billing.orphan_subscription_refused org=%s event=%s status=%s tier=%s cycle=%s polar_customer=%s polar_subscription=%s — the organization no longer exists; "
@@ -438,6 +439,18 @@ async def _refuse_subscription_for_closed_org(
             {"o": org_id, "e": str(event_id)},
         )
     await session.commit()
+    try:
+        from app.services.operator_alerts import notify_operator
+
+        await notify_operator(
+            kind="billing.orphan_subscription_refused",
+            dedupe_key=f"billing.orphan_subscription_refused:{event_id or polar_subscription_id or org_id}",
+            target_org_id=org_id,
+            target={"org_id": org_id},
+            facts={"code": "ORPHAN_SUBSCRIPTION_REFUSED", "status": str(status).upper(), "tier": str(tier).upper(), "cycle": str(billing_cycle).upper()},
+        )
+    except Exception:
+        logger.exception("billing.orphan_subscription_refused: operator alert failed org=%s event=%s", org_id, event_id)
 
 
 async def _update_subscription(
