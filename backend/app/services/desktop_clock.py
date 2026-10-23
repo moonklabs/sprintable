@@ -163,6 +163,10 @@ async def create_clock(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.
         _check_agent(setup, body.agent_member_id)  # an agent this computer was not set up with is no target — before anything is said of who may see it
         if not await can_view(db, user_id=user_id, org_id=org_id, agent_id=body.agent_member_id):
             raise DesktopRelayError(403, "not_allowed_to_command", "you cannot edit that agent's draft")
+    if body.computer is not None and "computer_press" not in (setup.capabilities or []):
+        # story #4734 (B · lens K1): the pressed setup's app has not said it takes a press of the WHOLE computer (an older Mac would reject the new key and the phone would wait on «sending» before it failed) —
+        # refused at the door, nothing queued. A screen offers the mark only to computers whose setups all say so; this is for an old screen or another client. (After the replay check above: the same press again still gets its command back.)
+        raise DesktopRelayError(409, "computer_press_unsupported", "that computer's app cannot take a press of the whole computer yet")
     payload = {"action": body.action, "signed": body.signed}
     if body.computer is not None:
         scope, total = await _computer_scope(db, member_id=member_id, user_id=user_id, org_id=org_id, setup=setup, phone_id=body.phone_key_id, locked=found)
