@@ -102,6 +102,9 @@ class ClockRequest(BaseModel):
     phone_key_id: uuid.UUID
     agent_member_id: uuid.UUID | None = None  # one agent of the computer (the signature covers it); absent = the whole computer
     edit: ClockEdit | None = None  # only with out_edit
+    # story #4734 (B): the whole-COMPUTER press (every setup of this computer the person may press one setup at a time) — the signature covers the mark (the daemon expects it
+    # from the stored payload); only the four whole actions, never with an agent or an edit. Absent (the default) = this setup's press, exactly as before.
+    computer: Literal[True] | None = None
 
     @model_validator(mode="after")
     def _edit_only_for_edit(self) -> ClockRequest:
@@ -109,6 +112,8 @@ class ClockRequest(BaseModel):
             raise ValueError("an edit rides with the action out_edit, and only with it")
         if self.action == "out_edit" and self.agent_member_id is None:
             raise ValueError("an edit names its agent")
+        if self.computer is not None and (self.action == "out_edit" or self.agent_member_id is not None or self.edit is not None):
+            raise ValueError("the computer mark is for the whole-computer actions only: no agent, no edit")
         return self
 
 
@@ -127,6 +132,12 @@ async def create_clock(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.
     from app.services.desktop_relay import enqueue_command
 
     setup = await _authorized_computer(db, user_id=user_id, org_id=org_id, setup_id=setup_id)
+    found: set[uuid.UUID] | None = None
+    if body.computer is not None:
+        # story #4734 (B): a whole-computer press reads the grouping, then locks EVERY live setup of the computer in the service's one order (`desktop_setup._lock_in_order`: setup rows by id — the
+        # order a disconnect and an exchange keep) BEFORE it asks anything of the rows: a sibling disconnected while the list is made would otherwise leave a queued list that names an agent of a
+        # setup that is gone. Locking only the pressed row first (as below) could meet a disconnect that holds a sibling and waits for it: the one order is what makes that impossible.
+        found = await _lock_computer(db, org_id=org_id, setup=setup)
     await db.execute(select(DesktopSetup).where(DesktopSetup.id == setup.id).with_for_update().execution_options(populate_existing=True))
     setup = await _authorized_computer(db, user_id=user_id, org_id=org_id, setup_id=setup_id)
     await scrub_clock_edits(db, setup_id=setup.id)  # a typed field that outlived its minutes (a press nobody answered) goes before a new one is taken
@@ -153,12 +164,79 @@ async def create_clock(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.
         if not await can_view(db, user_id=user_id, org_id=org_id, agent_id=body.agent_member_id):
             raise DesktopRelayError(403, "not_allowed_to_command", "you cannot edit that agent's draft")
     payload = {"action": body.action, "signed": body.signed}
+    if body.computer is not None:
+        scope, total = await _computer_scope(db, member_id=member_id, user_id=user_id, org_id=org_id, setup=setup, phone_id=body.phone_key_id, locked=found)
+        payload.update({"computer": True, "scope": [str(a) for a in scope], "scope_total": total})
     if body.agent_member_id is not None:
         payload["agent_member_id"] = str(body.agent_member_id)  # enqueue_command refuses an agent this computer was not set up with (another organization's included)
     if body.edit is not None:
         payload["edit"] = body.edit.model_dump(exclude_none=True)  # only the fields the person touched; an absent one is left as it is
     cmd = await enqueue_command(db, setup=setup, kind="clock", payload=payload, idempotency_key=key, requested_by=member_id)
     return cmd, cmd.state
+
+
+async def _computer_agents(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID, setup: DesktopSetup, phone_id: uuid.UUID,
+                           reach: bool) -> tuple[set[uuid.UUID], set[uuid.UUID], set[uuid.UUID]]:
+    """story #4734 (B): (the agents of this computer's live setups the person may press ONE SETUP AT A TIME, every agent those setups hold). The pressed setup is the one the caller already
+    judged (and, as in every press, is always in); each other live setup of the computer (not disconnected, handed over, the same organization — `setup_ids_of_computer`) counts only
+    when the same legs a press of THAT setup would ask are true now: `can_clock` for the person, the phone paired with it and (`reach`: a press) the computer heard from. So the
+    authority of a computer-wide press is never wider than the sum of one-setup presses — the server collects, the daemon cuts the list again to the pressing setup's own GROUP (organization + confirming person), the signature covers
+    the mark (the daemon holds it to the command both ways). A grouping too large to read in full is refused (`computer_too_large`), never read in part."""
+    from app.services.agent_permissions import _reachable, paired_phone
+    from app.services.desktop_commands import org_role
+    from app.services.desktop_computers import ComputerGroupingIncomplete, computer_index, setup_ids_of_computer
+    from app.services.desktop_relay import _setup_agents
+
+    try:
+        index = await computer_index(db, org_id, complete=True)
+    except ComputerGroupingIncomplete:
+        raise DesktopRelayError(409, "computer_too_large", "this computer holds too many setups to press as one") from None
+    cid = index.get(setup.id)
+    ids = set(await setup_ids_of_computer(db, org_id, cid, live_only=True, index=index)) if cid is not None else set()
+    ids.add(setup.id)
+    rows = {r.id: r for r in (await db.execute(
+        select(DesktopSetup).where(DesktopSetup.id.in_(ids), DesktopSetup.org_id == org_id, DesktopSetup.revoked_at.is_(None), DesktopSetup.exchanged_at.is_not(None))
+    )).scalars().all()}
+    rows[setup.id] = setup
+    others = [i for i in rows if i != setup.id]
+    role = await org_role(db, org_id, user_id)
+    heard = await _reachable(db, set(rows), _now()) if reach else set(rows)  # (the pressed setup too: a read must not count what a press of it would refuse — the press itself judged it before)
+    total: set[uuid.UUID] = set()
+    pressable: set[uuid.UUID] = set()
+    for sid, row in rows.items():
+        mine = _setup_agents(row)
+        total |= mine
+        if sid == setup.id:
+            if sid in heard:
+                pressable |= mine
+        elif can_clock(member_role=role, user_id=user_id, setup=row) and sid in heard and await paired_phone(db, member_id=member_id, phone_id=phone_id, setup_id=sid) is not None:
+            pressable |= mine
+    return pressable, total, set(rows)
+
+
+async def _lock_computer(db: AsyncSession, *, org_id: uuid.UUID, setup: DesktopSetup) -> set[uuid.UUID]:
+    """story #4734 (B): the live setups of this setup's computer, locked once in the one order (the grouping read in FULL — too large is `computer_too_large`, never read in part). Returns the ids
+    that were locked; `_computer_scope` reads the grouping again under the locks and refuses (`computer_changing`) when it is no longer that set."""
+    from app.services.desktop_computers import ComputerGroupingIncomplete, computer_index, setup_ids_of_computer
+    from app.services.desktop_setup import _lock_in_order
+
+    try:
+        index = await computer_index(db, org_id, complete=True)
+    except ComputerGroupingIncomplete:
+        raise DesktopRelayError(409, "computer_too_large", "this computer holds too many setups to press as one") from None
+    cid = index.get(setup.id)
+    ids = set(await setup_ids_of_computer(db, org_id, cid, live_only=True, index=index)) if cid is not None else set()
+    ids.add(setup.id)
+    await _lock_in_order(db, member_ids=set(), setup_ids=ids)
+    return ids
+
+
+async def _computer_scope(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID, setup: DesktopSetup, phone_id: uuid.UUID,
+                          locked: set[uuid.UUID] | None = None) -> tuple[list[uuid.UUID], int]:
+    pressable, total, live = await _computer_agents(db, member_id=member_id, user_id=user_id, org_id=org_id, setup=setup, phone_id=phone_id, reach=True)
+    if locked is not None and live != locked:  # a setup joined this computer (or left it) between the first read and the locks — nothing is queued; the person presses again on what they now see
+        raise DesktopRelayError(409, "computer_changing", "this computer changed while the press was made — press again")
+    return sorted(pressable, key=str), len(total)
 
 
 async def get_clock_command(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid.UUID, setup_id: uuid.UUID, command_id: uuid.UUID) -> dict:
@@ -439,6 +517,10 @@ async def apply_clock_view(db: AsyncSession, setup: DesktopSetup, report: ClockV
     if not await remote_control.is_enabled(db, fresh.org_id):
         raise DesktopRelayError(409, remote_control.OFF_CODE, "remote control is off for this organization")
     mine = _setup_agents(fresh)
+    if report.scope != "one" and ({r.agent_member_id for r in report.rows} | {o.agent_member_id for o in report.outs}) - mine:
+        # story #4734 (B): (not the one-agent end at the Mac: it names its own single agent and nothing more) a computer-wide flow pressed from this setup names the agents of the computer's other live setups too — kept (the phone's read gives each person only
+        # the rows of agents they may press, see `clock_view_read`); an agent of NO live setup of this computer is dropped as before
+        mine = mine | await _sibling_agents(db, fresh)
     kept = [r for r in report.rows if r.agent_member_id in mine]
     kept_outs = [o for o in report.outs if o.agent_member_id in mine]
     dropped = len(report.rows) - len(kept) + len(report.outs) - len(kept_outs)
@@ -470,6 +552,28 @@ async def apply_clock_view(db: AsyncSession, setup: DesktopSetup, report: ClockV
     return True, row[0], dropped
 
 
+async def _sibling_agents(db: AsyncSession, setup: DesktopSetup) -> set[uuid.UUID]:
+    """story #4734 (B): the agents of the other live setups (handed over · not disconnected · the same organization) of this setup's computer. A grouping too large to read in
+    full gives none (a report then keeps only the setup's own, as before)."""
+    from app.services.desktop_computers import ComputerGroupingIncomplete, computer_index, setup_ids_of_computer
+    from app.services.desktop_relay import _setup_agents
+
+    try:
+        index = await computer_index(db, setup.org_id, complete=True)
+    except ComputerGroupingIncomplete:
+        return set()
+    cid = index.get(setup.id)
+    if cid is None:
+        return set()
+    ids = [i for i in await setup_ids_of_computer(db, setup.org_id, cid, live_only=True, index=index) if i != setup.id]
+    if not ids:
+        return set()
+    out: set[uuid.UUID] = set()
+    for row in (await db.execute(select(DesktopSetup).where(DesktopSetup.id.in_(ids), DesktopSetup.org_id == setup.org_id))).scalars().all():
+        out |= _setup_agents(row)
+    return out
+
+
 async def forget(db: AsyncSession, setup_ids: list[uuid.UUID], *, lock: bool = True) -> None:
     """The computers' views go (a disconnect · the organization's remote control turned off): nothing of a flow stays for a computer that cannot be reached."""
     if setup_ids:
@@ -486,7 +590,7 @@ async def forget(db: AsyncSession, setup_ids: list[uuid.UUID], *, lock: bool = T
 
 
 async def clock_view_read(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID, setup_id: uuid.UUID,
-                          phone_key_id: uuid.UUID) -> dict:
+                          phone_key_id: uuid.UUID, computer: bool = False) -> dict:
     """The paired phone's read of the computer's clock view. The same people as a press (a person's own session — checked by the route — whom
     `can_clock` lets command that computer, with their own paired phone). Remote control off → no view (the line is off). An expired row is not given and
     is deleted here. Names are the board's own; a draft's first line is shown only to a person who can open that agent (else null)."""
@@ -504,6 +608,11 @@ async def clock_view_read(db: AsyncSession, *, member_id: uuid.UUID, user_id: uu
            "supported": setup.clock_seen_at is not None, "view": None}
     if not enabled:
         return out
+    if computer:
+        # story #4734 (B): «N개 중 K개» BEFORE the phone signs (the answer to a press comes after the command is queued): N = the agents the computer's live setups hold, K = those a press of the whole
+        # computer would name (the same legs, `reach` included). Counts only — never an id or a name of what was left out.
+        pressable, total, _live = await _computer_agents(db, member_id=member_id, user_id=user_id, org_id=org_id, setup=setup, phone_id=phone_key_id, reach=True)
+        out["computer"] = {"agents": {"total": len(total), "pressable": len(pressable)}}
     row = (await db.execute(select(DesktopClockView).where(DesktopClockView.setup_id == setup.id))).scalar_one_or_none()
     if row is None:
         return out
@@ -513,6 +622,14 @@ async def clock_view_read(db: AsyncSession, *, member_id: uuid.UUID, user_id: uu
     view = dict(row.view)
     ids = [uuid.UUID(r["agent_member_id"]) for r in (view.get("rows") or []) + (view.get("outs") or [])]
     names: dict[uuid.UUID, str | None] = {}
+    # story #4734 (B): a row of an agent of the computer's OTHER setups (a computer-wide flow) is given only when this person may press that setup — the same legs as a press of it
+    from app.services.desktop_relay import _setup_agents
+
+    own = _setup_agents(setup)
+    foreign = {i for i in ids if i not in own}
+    if foreign:
+        pressable, _total, _live = await _computer_agents(db, member_id=member_id, user_id=user_id, org_id=org_id, setup=setup, phone_id=phone_key_id, reach=False)
+        ids = [i for i in ids if i in own or i in pressable]
     if ids:
         names = dict((await db.execute(
             select(Member.id, Member.name).where(Member.id.in_(ids), Member.org_id == org_id, Member.type == "agent", Member.deleted_at.is_(None))

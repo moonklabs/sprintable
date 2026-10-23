@@ -326,22 +326,27 @@ async def post_clock(
         await db.rollback()
         return _error(exc)
     await db.commit()
-    return JSONResponse(status_code=201, content={"command_id": str(cmd.id), "state": state})
+    content: dict = {"command_id": str(cmd.id), "state": state}
+    if (cmd.payload or {}).get("computer"):  # story #4734 (B): a computer-wide press says how many of the computer's agents it covers — «N개 중 K개»; any other press answers as before
+        content["agents"] = {"total": cmd.payload["scope_total"], "pressable": len(cmd.payload["scope"])}
+    return JSONResponse(status_code=201, content=content)
 
 
 @router.get("/setups/{setup_id}/clock")
 async def get_clock(
     setup_id: uuid.UUID,
     phone_key_id: uuid.UUID,
+    computer: bool = False,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
-    """story #4733 (S2): the closed clock view the computer reported (null when no flow is open), for the paired phone of a person who may command it."""
+    """story #4733 (S2): the closed clock view the computer reported (null when no flow is open), for the paired phone of a person who may command it.
+    story #4734 (B): `computer=true` also says how many of the computer's agents a whole-computer press would name («N개 중 K개», counts only) — for the phone's confirm screen, before it signs."""
     member = await _phone_person(db, auth, org_id)
     try:
         body = await desktop_clock.clock_view_read(
-            db, member_id=uuid.UUID(str(member.id)), user_id=uuid.UUID(str(auth.user_id)), org_id=org_id, setup_id=setup_id, phone_key_id=phone_key_id,
+            db, member_id=uuid.UUID(str(member.id)), user_id=uuid.UUID(str(auth.user_id)), org_id=org_id, setup_id=setup_id, phone_key_id=phone_key_id, computer=computer,
         )
     except relay.DesktopRelayError as exc:
         await db.rollback()
