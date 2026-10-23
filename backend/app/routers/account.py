@@ -225,7 +225,7 @@ async def delete_account(
             raise HTTPException(
                 status_code=409,
                 detail={"code": "ORG_BLOCKS_ACCOUNT_DELETE", "message": "An organization of the account needs attention first: hand it to another owner, or cancel its subscription",
-                        "orgs": [{"id": org["id"], "name": org["name"], "reason": "active_subscription"}]},
+                        "orgs": [{"id": org["id"], "name": org["name"], "reason": "other_members" if closed.get("reason") == "members_joined" else "active_subscription"}]},
             )
 
     now = datetime.now(timezone.utc)

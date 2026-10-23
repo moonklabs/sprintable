@@ -119,10 +119,10 @@ describe('[SID:4752] the delete-account confirmation says what happened', () => 
     expect(errorLine()).toBeNull();
   });
 
-  it('⭐the window shows what closes with the account before «삭제 확인», and the button stays usable', async () => {
+  it('⭐the window shows what is deleted with the account before «삭제 확인», and the button stays usable', async () => {
     previewOf([{ id: 'o1', name: '혼자 쓰는 조직' }, { id: 'o2', name: '또 하나' }], []);
     await mount();
-    expect(document.body.querySelector('[data-testid="delete-account-closing-orgs"]')?.textContent).toBe('함께 닫히는 조직: 혼자 쓰는 조직, 또 하나');
+    expect(document.body.querySelector('[data-testid="delete-account-closing-orgs"]')?.textContent).toBe('함께 삭제되는 조직: 혼자 쓰는 조직, 또 하나 — 조직의 프로젝트와 데이터도 함께 제거돼요');
     expect(document.body.querySelector('[data-testid="delete-account-blocking-orgs"]')).toBeNull();
     expect(confirmButton().disabled).toBe(false);
   });
@@ -131,7 +131,7 @@ describe('[SID:4752] the delete-account confirmation says what happened', () => 
     previewOf([], [{ id: 'o1', name: '둘이 쓰는 조직', reason: 'other_members' }]);
     await mount();
     const box = document.body.querySelector('[data-testid="delete-account-blocking-orgs"]')!;
-    expect([...box.querySelectorAll('li')].map((li) => li.textContent)).toEqual(['둘이 쓰는 조직 · 다른 구성원이 있어요 — 소유권을 넘기거나 조직을 삭제해 주세요']);
+    expect([...box.querySelectorAll('li')].map((li) => li.textContent)).toEqual(['둘이 쓰는 조직 · 다른 구성원이 있어요 — 다른 소유자를 정하거나 조직을 삭제해 주세요']);
     expect([...box.querySelectorAll('a')].map((a) => a.getAttribute('href'))).toEqual(['/organization/members?p=P']);
     expect(box.textContent).toContain(koMessages.settings.deleteOwnedOrgsTitle);
     expect(confirmButton().disabled).toBe(true);
@@ -142,8 +142,8 @@ describe('[SID:4752] the delete-account confirmation says what happened', () => 
     await mount();
     const box = document.body.querySelector('[data-testid="delete-account-blocking-orgs"]')!;
     expect([...box.querySelectorAll('li')].map((li) => li.textContent)).toEqual([
-      '유료 조직 · 활성 구독이 있어요 — 먼저 구독을 해지해 주세요',
-      '둘이 쓰는 조직 · 다른 구성원이 있어요 — 소유권을 넘기거나 조직을 삭제해 주세요',
+      '유료 조직 · 활성 구독이 있어요 — 먼저 구독을 취소해 주세요',
+      '둘이 쓰는 조직 · 다른 구성원이 있어요 — 다른 소유자를 정하거나 조직을 삭제해 주세요',
     ]);
     expect([...box.querySelectorAll('a')].map((a) => a.getAttribute('href'))).toEqual(['/organization/members?p=P', '/settings?tab=billing&p=P']);
   });
@@ -176,6 +176,16 @@ describe('[SID:4752] the delete-account confirmation says what happened', () => 
     expect(document.body.querySelector('[data-testid="delete-account-blocking-orgs"] li')?.textContent).toContain('새로 생긴 조직');
     expect(onDeleted).not.toHaveBeenCalled();
     expect(confirmButton().disabled).toBe(true);
+  });
+
+  it('⭐a stale preview that listed an organization as closing and the server now blocks: it moves out of the «deleted with it» line', async () => {
+    previewOf([{ id: 'o1', name: '곧 막힐 조직' }, { id: 'o2', name: '그대로 닫힐 조직' }], []);
+    await mount();
+    await press(answer(409, { error: { code: 'ORG_BLOCKS_ACCOUNT_DELETE', orgs: [{ id: 'o1', name: '곧 막힐 조직', reason: 'other_members' }] } }));
+    const closing = document.body.querySelector('[data-testid="delete-account-closing-orgs"]')?.textContent ?? '';
+    expect(closing).toContain('그대로 닫힐 조직');
+    expect(closing).not.toContain('곧 막힐 조직');
+    expect(document.body.querySelector('[data-testid="delete-account-blocking-orgs"]')?.textContent).toContain('곧 막힐 조직');
   });
 
   it('a 409 with no organization list is the generic «삭제하지 못했어요»', async () => {

@@ -316,6 +316,16 @@ class OrganizationRepository:
             return {"ok": False, "reason": "not_found"}
         if await self._has_active_or_in_flight_subscription(org_id):
             return {"ok": False, "reason": "active_subscription"}
+        # the plan said nobody else is active here; someone may have joined since (an accepted invite does not take this lock) — look again, now that the row is held (codex 5189)
+        joined = (await self.session.execute(
+            text(
+                "SELECT count(*) FROM org_members x JOIN users xu ON xu.id = x.user_id"
+                " WHERE x.org_id = :o AND x.deleted_at IS NULL AND x.user_id <> :u AND xu.is_active"
+            ),
+            {"o": org_id, "u": user_id},
+        )).scalar_one()
+        if joined:
+            return {"ok": False, "reason": "members_joined"}
         return await self._close_organization(org, actor_user_id=user_id, note="account deletion: the only member left, the organization closes with the account")
 
     async def _close_organization(self, org: Organization, *, actor_user_id: uuid.UUID, note: str | None) -> dict:

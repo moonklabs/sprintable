@@ -680,3 +680,21 @@ async def test_18_the_preview_names_what_would_close_and_what_would_block():
         assert r.status_code in (401, 403)
     finally:
         await _close(engine, w)
+
+
+async def test_19_someone_who_joined_after_the_plan_stops_the_closing_of_an_organization():
+    """codex on 5189: the plan saw nobody else, then somebody joined (an accepted invite does not take the organization lock). The closing looks again under the row lock and refuses —
+    `members_joined` — instead of deleting an organization that now has people in it."""
+    from app.repositories.organization import OrganizationRepository
+
+    engine, w = await _world()
+    try:
+        uid, _email, org_id = await w.person(org=True, name="Alone Then Joined", spare_owner=False)
+        await w.add_member(org_id, role="member", name="Joined Late")
+        async with w.Session() as s:
+            res = await OrganizationRepository(s).delete_for_account_closure(org_id, uid)
+            await s.rollback()
+        assert res == {"ok": False, "reason": "members_joined"}, res
+        assert await _org_exists(w, org_id)
+    finally:
+        await _close(engine, w)

@@ -55,7 +55,7 @@ export function DeleteAccountDialog({ onClose, onDeleted }: { onClose: () => voi
       if (res.ok || res.status === 404) { onDeleted(); return; }
       const json = await res.json().catch(() => null) as { error?: { code?: string; orgs?: BlockingOrg[] } } | null;
       if (json?.error?.code === 'REAUTHENTICATION_REQUIRED') setError(t('reauthRequired'));
-      else if (json?.error?.code === 'ORG_BLOCKS_ACCOUNT_DELETE' && Array.isArray(json.error.orgs) && json.error.orgs.length > 0) setPlan((p) => ({ ...p, blocked: json.error!.orgs! }));
+      else if (json?.error?.code === 'ORG_BLOCKS_ACCOUNT_DELETE' && Array.isArray(json.error.orgs) && json.error.orgs.length > 0) setPlan((p) => ({ closing: p.closing.filter((c) => !json.error!.orgs!.some((b) => b.id === c.id)), blocked: json.error!.orgs! }));   // an organization the server now blocks is no longer one that «closes»
       else if (res.status === 401) setError(t('deleteSessionEnded'));
       else setError(t('deleteFailed'));
     } catch {
