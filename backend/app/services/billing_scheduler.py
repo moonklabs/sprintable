@@ -40,8 +40,10 @@ from app.services.billing_charge import (
     charge_org,
 )
 from app.services.billing_charge_amount import ChargeAmountError, compute_charge_amount
+from app.services.billing_payment_attempt import void_confirmed_order_of_closed_org
 from app.services.billing_period import compute_period_end
 from app.services.email import send_email
+from app.services.org_billing_lock import lock_org_for_billing_write
 from app.services.org_subscription_checkout import STALE_CLAIM_WINDOW
 from app.services.payment.toss_adapter import TossAdapter, TossApiError
 from app.services.platform_settings import get_platform_settings
@@ -239,6 +241,16 @@ async def downgrade_to_free(session: AsyncSession, org_id: uuid.UUID, order_id: 
     # 실제 안전장치는 아래 UPSERT 자체의 WHERE(원래 checkout claim UPSERT와 동일 패턴)다
     # — SELECT-then-write가 아니라 write-time 원자적 가드로 이 창을 완전히 닫는다.
     if not (has_newer_confirmed_order or has_newly_issued_billing_key or has_active_checkout_claim):
+        # story #4755 — the organization row before the `free` row is written (the order the closing paths take: organization → subscription). An organization that is gone gets no `free`
+        # subscription row; the stale order is still closed below so the sweep never picks it again. (No money moves here: nothing to refund.)
+        if not await lock_org_for_billing_write(session, org_id):
+            await session.execute(
+                update(BillingOrder)
+                .where(BillingOrder.order_id == order_id, BillingOrder.status != "confirmed")
+                .values(status="downgraded", updated_at=func.now())
+            )
+            await session.commit()
+            return
         free_offering = (
             await session.execute(
                 select(OfferingVersion).where(
@@ -323,10 +335,20 @@ async def _sync_renewal_retry_outcome(
     """갱신 재시도(retry) 시도 直後 — 그 시도가 confirmed로 끝났으면 원 주기 유지한 채
     active로 복귀·period 롤오버(AC2 "성공 시 원 주기 유지"), 아직 failed면 past_due
     유지+이번 실패도 통보(AC3 "매 실패마다")."""
+    # story #4755 — the organization row FIRST (before the order and the subscription row are read, so what is read is what the lock left behind). An organization closed while the retry was being
+    # charged is gone now: a confirmed charge is refunded (never turned into a live subscription of a closed organization, and never left unserved because the subscription row is missing too),
+    # anything else has nothing left to write.
+    org_alive = await lock_org_for_billing_write(session, org_id)
     order = (
-        # populate_existing — 스윕이 이미 읽어 둔 객체가 아니라 DB의 지금 상태(charge_org 가드가 raw SQL로 끝낸 주문 포함)를 본다.
+        # populate_existing — 스윕이 이미 읽어 둔 객체가 아니라 DB의 지금 상태(charge_org 가드가 raw SQL로 끝낸 주문 포함, 잠금 뒤 다른 스케줄러가 확정한 것 포함)를 본다.
         await session.execute(select(BillingOrder).where(BillingOrder.order_id == order_id).execution_options(populate_existing=True))
     ).scalar_one()
+    if not org_alive:
+        if order.status == "confirmed":
+            await void_confirmed_order_of_closed_org(session, org_id=org_id, order_id=order_id)
+        else:
+            await session.commit()
+        return
     sub = (
         await session.execute(select(OrgSubscription).where(OrgSubscription.org_id == org_id))
     ).scalar_one_or_none()
@@ -414,6 +436,11 @@ async def sweep_stale_pending_orders(session: AsyncSession, *, now: datetime | N
                 receipt_url=(lookup.get("receipt") or {}).get("url"),
             )
             confirmed += 1
+            # story #4755 (codex): a charge the provider confirms after the organization is gone has nowhere to go — refund it through the payment-attempt road (nothing is written to a subscription here).
+            if not await lock_org_for_billing_write(session, order.org_id):
+                await void_confirmed_order_of_closed_org(session, org_id=order.org_id, order_id=order.order_id)
+            else:
+                await session.rollback()      # (the lock was only a look; nothing else to keep)
         else:
             await _mark_failed_if_not_confirmed(
                 session, order.order_id, f"stale pending — lookup status={lookup.get('status')}"
@@ -509,7 +536,7 @@ async def sweep_expired_grants(session: AsyncSession, *, now: datetime | None = 
         )
     ).mappings().all()
 
-    reverted = skipped_tier_changed = skipped_not_expired = skipped_already_reverted = 0
+    reverted = skipped_tier_changed = skipped_not_expired = skipped_already_reverted = skipped_org_closed = 0
     for row in latest_grants:
         meta = row["entry_metadata"]
         expires_at = datetime.fromisoformat(meta["grant_expires_at"])
@@ -535,6 +562,17 @@ async def sweep_expired_grants(session: AsyncSession, *, now: datetime | None = 
             skipped_tier_changed += 1
             continue
 
+        # story #4755 — the organization row first: an organization that is gone has no tier to restore. Its grant is marked as moot (the same companion row, `org_closed`) so every sweep does not
+        # look at it again.
+        if not await lock_org_for_billing_write(session, org_id):
+            await record_ledger_entry(
+                session, org_id=org_id, entry_type="adjustment",
+                amount_minor=row["amount_minor"], currency=row["currency"], direction="debit",
+                provider_ref=f"grant-revert:{row['id']}",
+                metadata={"kind": "tier_grant_revert", "reverted_entry_id": str(row["id"]), "reverted_target_tier": meta["target_tier"], "org_closed": True},
+            )
+            skipped_org_closed += 1
+            continue
         prev_tier = meta["prev_tier"]
         sub.tier = prev_tier
         sub.status = "active"
@@ -565,7 +603,7 @@ async def sweep_expired_grants(session: AsyncSession, *, now: datetime | None = 
     return {
         "grants_seen": len(latest_grants), "reverted": reverted,
         "skipped_tier_changed": skipped_tier_changed, "skipped_not_expired": skipped_not_expired,
-        "skipped_already_reverted": skipped_already_reverted,
+        "skipped_already_reverted": skipped_already_reverted, "skipped_org_closed": skipped_org_closed,
     }
 
 
@@ -615,6 +653,10 @@ async def trigger_due_charges(session: AsyncSession, *, now: datetime | None = N
         except OrganizationGone:
             # story #4728 — 조직이 없다(charge_org 가드가 구독 · 주문 · 빌링키를 이미 끝냈다): past_due 로 되돌리지도 메일을 보내지도 않는다.
             logger.warning("trigger_due_charges: org_id=%s no longer exists — skipped", sub.org_id)
+            # story #4755 (codex): the guard fires before the order is looked at — an order of this id that was already confirmed (a charge that went through earlier) is not left charged and unserved.
+            gone_order = (await session.execute(select(BillingOrder).where(BillingOrder.order_id == order_id))).scalar_one_or_none()
+            if gone_order is not None and gone_order.status == "confirmed" and gone_order.org_id == sub.org_id:
+                await void_confirmed_order_of_closed_org(session, org_id=sub.org_id, order_id=order_id)
             continue
         except Exception:
             logger.exception("trigger_due_charges: charge_org failed for org_id=%s order_id=%s", sub.org_id, order_id)
@@ -622,6 +664,10 @@ async def trigger_due_charges(session: AsyncSession, *, now: datetime | None = N
                 await session.execute(select(BillingOrder).where(BillingOrder.order_id == order_id))
             ).scalar_one_or_none()
 
+        if order is not None and order.status == "confirmed" and not await lock_org_for_billing_write(session, sub.org_id):
+            # story #4755 — the organization was closed while the renewal was being charged: refund the confirmed charge, do not roll a subscription of a closed organization forward.
+            await void_confirmed_order_of_closed_org(session, org_id=sub.org_id, order_id=order_id)
+            continue
         if order is not None and order.status == "confirmed":
             new_end = compute_period_end(sub.current_period_end, sub.billing_cycle)
             await session.execute(

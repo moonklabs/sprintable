@@ -387,15 +387,7 @@ async def polar_webhook(
 
     # AC4: subscription.canceled → status=cancelled
     elif event_type in ("subscription.canceled", "subscription.cancelled"):
-        polar_sub_id = data.get("id")
-        sub_row = await session.execute(
-            select(OrgSubscription).where(OrgSubscription.polar_subscription_id == polar_sub_id)
-        )
-        sub = sub_row.scalar_one_or_none()
-        if sub:
-            sub.status = "cancelled"
-            await session.commit()
-            logger.info("Subscription cancelled for polar_sub_id=%s", polar_sub_id)
+        await _cancel_subscription_by_provider_id(session, data.get("id"))
 
     return {"ok": True}
 
@@ -417,6 +409,24 @@ async def _current_pricing_version_id(
         .limit(1)
     )
     return row.scalar_one_or_none()
+
+
+async def _cancel_subscription_by_provider_id(session: AsyncSession, polar_sub_id: str | None) -> None:
+    """story #4755 — `subscription.canceled`: the organization row first (the order every subscription write and the closing paths use), then the cancellation. A closing that holds the row makes this
+    wait; once the organization is gone its subscription is already ended (`canceled`) and there is nothing left to change — the spelling the closing wrote is not overwritten."""
+    sub_row = await session.execute(
+        select(OrgSubscription.org_id).where(OrgSubscription.polar_subscription_id == polar_sub_id)
+    )
+    found = sub_row.first()
+    if not found:
+        return
+    await lock_org_for_billing_write(session, found[0])        # waits for a closing; True/False both lead to the guarded update below
+    result = await session.execute(
+        text("UPDATE org_subscriptions SET status = 'cancelled', updated_at = now() WHERE polar_subscription_id = :p AND status NOT IN ('canceled', 'cancelled')"),
+        {"p": polar_sub_id},
+    )
+    await session.commit()
+    logger.info("Subscription cancelled for polar_sub_id=%s (rows=%s)", polar_sub_id, result.rowcount)
 
 
 async def _refuse_subscription_for_closed_org(

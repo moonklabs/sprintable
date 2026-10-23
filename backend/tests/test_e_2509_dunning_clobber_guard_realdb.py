@@ -47,6 +47,8 @@ async def _seed_paid_org(session, *, tier="team"):
 
 
 async def _seed_stale_failed_order(session, *, org_id, created_days_ago=9):
+    # story #4755: the free row is written under the organization row lock; an organization that does not exist gets none — these tests seed a subscription for a live organization
+    await session.execute(text("INSERT INTO organizations (id, name, slug) VALUES (:o, 't4755', :s) ON CONFLICT (id) DO NOTHING"), {"o": org_id, "s": f"t4755-{uuid.uuid4().hex[:10]}"})
     order_id = f"ord-stale-{uuid.uuid4()}"
     created_at = datetime.now(timezone.utc) - timedelta(days=created_days_ago)
     await session.execute(
