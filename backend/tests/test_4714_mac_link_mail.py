@@ -43,7 +43,7 @@ class _Db:
 
 
 def _user(uid=USER, email="own@example.test", verified=True, locale="ko"):
-    return SimpleNamespace(id=uid, email=email, email_verified=verified, locale=locale)
+    return SimpleNamespace(id=uid, email=email, email_verified=verified, locale=locale, is_active=True, deleted_at=None)
 
 
 @pytest.fixture

@@ -43,6 +43,8 @@ interface Participant {
   // [conversation_id]/page.tsx의 Participant와 동일 계약). optional — BE 기본값(True)과
   // 짝 맞춰 필드 자체가 없으면 "실존"으로 읽는다(participantDisplayLabel).
   resolved?: boolean;
+  /** story #4752 — the account was deleted and anonymized: «탈퇴한 사용자 / Deleted user» (participantDisplayLabel). */
+  departed?: boolean;
   /** story 4675 (F2) — the computer an agent participant is bound to (the server's `_fetch_conversation_participants` · this
    *  org's setups only); null/absent for humans, agents with no live desktop key, and an older server */
   device_name?: string | null;

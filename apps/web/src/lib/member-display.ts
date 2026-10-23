@@ -93,9 +93,11 @@ export function memberNameById(
 // auditActorProps(actor_id 유무로 가름)·publishHistorySenderLabel(sender_id 유무)과 같은
 // 모양 — 여기는 신호가 BE가 직접 실어 보내는 `resolved` 비트라는 점만 다르다.
 export function participantDisplayLabel(
-  p: { name: string | null; resolved?: boolean },
+  p: { name: string | null; resolved?: boolean; departed?: boolean },
   tc: (key: string) => string,
 ): string {
+  // story #4752 — an account deleted and anonymized: the server keeps a marker, not a sentence (story #3779), so the screen words it in its own locale.
+  if (p.departed === true) return tc('memberDeparted');
   // BE ResolvedMember.resolved 기본값(True)과 짝 — 필드 자체가 없는 호출부(레거시 캐시·
   // 아직 안 지나간 필드)는 "모른다"가 아니라 "실존"으로 읽는다. orphan만 명시 false.
   // [SID:4286] «알 수 없는 구성원»은 common.memberUnknown 하나로 모았다(chats.unknownMember 폐기 · PO 決).

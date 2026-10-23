@@ -1740,6 +1740,11 @@
 "kind": "unknown"
 },
 {
+"method": "POST",
+"path": "/api/v2/internal/cron/account-purge",
+"kind": "unknown"
+},
+{
 "method": "GET",
 "path": "/api/v2/internal/cron/agent-run-timeout-sweep",
 "kind": "unknown"

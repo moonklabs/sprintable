@@ -572,7 +572,7 @@ async def glance_hero(
                 select(Member.name, Member.org_role).where(Member.id == hv_by)
             )
         ).first()
-        hv_member = HeroMember(member_id=hv_by, name=m[0] if m else "", role=m[1] if m else None)
+        hv_member = HeroMember(member_id=hv_by, name=(m[0] if m else None) or "", role=m[1] if m else None)   # story #4752: an anonymized verifier's members.name is NULL
 
     trust = HeroTrust(
         self_reported=proof_count > 0,

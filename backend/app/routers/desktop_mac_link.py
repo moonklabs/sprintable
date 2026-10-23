@@ -51,7 +51,7 @@ async def post_mac_link_mail(
     if _requires_interactive_session(auth):
         raise _refuse(403, "person_session_required", "a person's session is required")
     user = (await db.execute(select(User).where(User.id == uuid.UUID(str(auth.user_id))))).scalar_one_or_none()
-    if user is None or not user.email:
+    if user is None or not user.email or not user.is_active or user.deleted_at is not None:  # story #4752: a deleted account is mailed nothing (its tokens are cut off; this is the same answer if one slips through)
         raise _refuse(404, "user_not_found", "user not found")
     if not user.email_verified:
         raise _refuse(409, "email_not_verified", "verify your email first")
