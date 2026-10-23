@@ -74,15 +74,20 @@ export function groupByComputer(entries: readonly StartableComputer[]): Startabl
 }
 
 /**
- * story 4734 (B): the cards of «세션 관리». The setups of one computer become ONE card (one [모든 세션 종료] = one press of the whole computer) only when EVERY setup of it says its
- * app takes that press (`computer_press`): an older app rejects the computer mark, so a card over it could not end its agents at all. Any other computer stays as it was — one card per
- * setup, each pressed on its own (`computer_id` is taken off those entries so nothing downstream treats them as a computer).
+ * story 4734 (B): the cards of «세션 관리». The setups of one computer become ONE card (one [모든 세션 종료] = one press of the whole computer) only when EVERY setup of it that is HEARD from now
+ * (`reachable`) says its app takes that press (`computer_press`) and at least one is heard: an older app that is alive rejects the computer mark, so a card over it could not end its agents at
+ * all. A setup that is not heard from (an old one the person never disconnected — an app installed again and again leaves many) can say nothing and can be pressed by no one: it neither keeps
+ * the computer from being one card nor puts its agents on it. Any other computer stays as it was — one card per setup, each pressed on its own (`computer_id` is taken off those entries so
+ * nothing downstream treats them as a computer).
  */
 export function groupForPress(entries: readonly StartableComputer[]): StartableComputer[] {
   const byComputer = new Map<string, StartableComputer[]>();
   for (const e of entries) if (e.computer_id) byComputer.set(e.computer_id, [...(byComputer.get(e.computer_id) ?? []), e]);
-  const oneCard = new Set([...byComputer].filter(([, members]) => members.every((m) => m.computer_press === true)).map(([id]) => id));
-  const kept = entries.map((e) => {
+  const oneCard = new Set([...byComputer].filter(([, members]) => {
+    const heard = members.filter((m) => m.reachable);
+    return heard.length > 0 && heard.every((m) => m.computer_press === true);
+  }).map(([id]) => id));
+  const kept = entries.filter((e) => !(e.computer_id && oneCard.has(e.computer_id) && !e.reachable)).map((e) => {
     if (e.computer_id && !oneCard.has(e.computer_id)) { const { computer_id: _drop, ...rest } = e; void _drop; return rest as StartableComputer; }
     return e;
   });
