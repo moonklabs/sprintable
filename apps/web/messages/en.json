@@ -1534,6 +1534,7 @@
     "verifyFailed": "Verification failed.",
     "verifyError": "Something went wrong during verification.",
     "startButton": "Get started",
+    "backToApp": "Back to the app",
     "backToLogin": "Back to login"
   },
   "setPassword": {

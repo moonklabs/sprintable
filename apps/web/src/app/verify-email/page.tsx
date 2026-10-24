@@ -1,10 +1,14 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
+import { appScheme } from '@/lib/auth/native-return-app';
+import { buttonVariants } from '@/components/ui/button';
+
+const subscribeToNothing = () => () => {};
 
 export default function VerifyEmailPage() {
   const t = useTranslations('verifyEmail');
@@ -18,6 +22,12 @@ export default function VerifyEmailPage() {
   const [message, setMessage] = useState(
     () => (token ? '' : t('invalidLink'))
   );
+
+  // story #4762 (AC6) — a person who started in the phone app and opened the mail's link in a BROWSER (the app did not take it) is on a page that finishes in
+  // that browser. «Back to the app» opens the phone app by its own scheme (the dev web → `ai.sprintable.dev`, the production web → `ai.sprintable`); the app's «Waiting for verification» screen continues on its own once the server has verified. Shown on a phone
+  // only (the user agent is read after mount: no server/client mismatch). Not shown where the app cannot be: a desktop browser.
+  const onPhone = useSyncExternalStore(subscribeToNothing, () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent), () => false);
+  const appHref = `${appScheme(null)}:/`;
 
   // story #3195 — «시작하기»가 org 유무와 무관하게 항상 /inbox로 갔다. 온보딩 도중(org
   // 미생성) 이메일 인증 벽에 걸린 유저는 org가 없어 /inbox가 막다른 곳이었다(온보딩
@@ -107,6 +117,15 @@ export default function VerifyEmailPage() {
             >
               {t('startButton')}
             </button>
+            {onPhone ? (
+              <a
+                href={appHref}
+                data-testid="verify-back-to-app"
+                className={`${buttonVariants({ variant: 'outline' })} w-full min-h-[44px]`}
+              >
+                {t('backToApp')}
+              </a>
+            ) : null}
           </div>
         )}
 

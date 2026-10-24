@@ -1534,6 +1534,7 @@
     "verifyFailed": "인증에 실패했어요.",
     "verifyError": "인증 중 오류가 발생했어요.",
     "startButton": "시작하기",
+    "backToApp": "앱으로 돌아가기",
     "backToLogin": "로그인으로 돌아가기"
   },
   "setPassword": {
