@@ -58,14 +58,13 @@ async def _require_caller(api_key: str | None, token: str | None) -> TeamMember:
     return caller
 
 
-async def _resolve_agent(agent_id: uuid.UUID, caller: TeamMember, *, via_key: bool = False) -> TeamMember:
+async def _resolve_agent_and_project(agent_id: uuid.UUID, caller: TeamMember, *, via_key: bool = False) -> tuple[TeamMember, uuid.UUID]:
+    """The agent, and the project a NEW DM with it is scoped to — the lowest of the agent's projects the caller reaches (story #4775;
+    before: the agent's own lowest — a DM in a project REST then refuses its own person)."""
     async with async_session_factory() as db:
         # team_members 는 projection VIEW — org-agent 멀티프로젝트 grant 면 같은 id 가 N 행이라 무필터
-        # scalar_one_or_none 은 MultipleResultsFound. 이 결과의 .org_id(동형)뿐 아니라 .project_id 도
-        # _persist_and_broadcast → _get_or_create_conversation 에서 DM room 스코프에 소비되므로 임의
-        # .limit(1)(틀린 프로젝트 위험) 대신 deterministic grant-pick(order_by(project_id).limit(1))으로
-        # 크래시를 막고 안정적 default project 로 라우팅한다(ws_chat/agent_inbox Ⓑ stopgap 동형).
-        # ⚠️ known-limitation: 멀티프로젝트 agent 의 DM room 은 default(최저 project_id) project 로 스코프.
+        # scalar_one_or_none 은 MultipleResultsFound. 결정적 grant-pick(order_by(project_id).limit(1))으로 크래시를 막는다.
+        # ⚠️ known-limitation: 멀티프로젝트 agent 의 «신규» DM 은 한 프로젝트로 스코프 — 이제 «호출자가 닿는 최저 project_id».
         #   진짜 라우팅(기존 (agent,caller) DM 우선조회→그 conversation 의 project)은 follow-up story.
         agent = (await db.execute(
             select(TeamMember).where(
@@ -78,12 +77,18 @@ async def _resolve_agent(agent_id: uuid.UUID, caller: TeamMember, *, via_key: bo
         raise HTTPException(status_code=404, detail="Agent not found")
     if agent.org_id != caller.org_id:
         raise HTTPException(status_code=403, detail="Forbidden")
+    if caller.id == agent_id:
+        return agent, agent.project_id
     # story #4775 AC4 (the same gate as the WebSocket connect): not «same organization» alone — a line is delivered into a DM with this
     # agent only by someone who reaches a project the agent works in (the one project-access rule REST uses)
-    if caller.id != agent_id:
-        if not await _reachable_projects(agent_id, agent.org_id, _access_identity(caller, via_key=via_key)[0]):
-            raise HTTPException(status_code=403, detail="Forbidden")
-    return agent
+    reachable = await _reachable_projects(agent_id, agent.org_id, _access_identity(caller, via_key=via_key)[0])
+    if not reachable:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return agent, reachable[0]
+
+
+async def _resolve_agent(agent_id: uuid.UUID, caller: TeamMember, *, via_key: bool = False) -> TeamMember:
+    return (await _resolve_agent_and_project(agent_id, caller, via_key=via_key))[0]
 
 
 async def _persist_and_broadcast(
@@ -92,11 +97,12 @@ async def _persist_and_broadcast(
     caller: TeamMember,
     content: str,
     file_url: str | None = None,
+    project_id: uuid.UUID | None = None,
 ) -> None:
     # ws_chat._get_or_create_conversation 시그니처 = (agent_id, caller_id, org_id, project_id) 4인자.
     # 과거 caller_id 추가 전환 시 이 호출부 미갱신(한쪽만 전환)으로 3인자 → caller_id 누락 + 인자
     # 미스얼라인(org_id↔caller_id·project_id↔org_id) → /deliver·/upload 호출 시 TypeError. caller.id 보강.
-    conv_id = await _get_or_create_conversation(agent_id, caller.id, agent.org_id, agent.project_id)
+    conv_id = await _get_or_create_conversation(agent_id, caller.id, agent.org_id, project_id or agent.project_id)
 
     msg_content = content
     if file_url:
@@ -149,8 +155,8 @@ async def channel_deliver(
 ) -> None:
     """텍스트 메시지를 특정 에이전트 WS room으로 브로드캐스트."""
     caller = await _require_caller(api_key, token)
-    agent = await _resolve_agent(body.agent_id, caller, via_key=bool(api_key and api_key.startswith("sk_live_")))
-    await _persist_and_broadcast(body.agent_id, agent, caller, body.content)
+    agent, dm_project = await _resolve_agent_and_project(body.agent_id, caller, via_key=bool(api_key and api_key.startswith("sk_live_")))
+    await _persist_and_broadcast(body.agent_id, agent, caller, body.content, project_id=dm_project)
 
 
 @router.post("/upload", status_code=204)
@@ -163,7 +169,7 @@ async def channel_upload(
 ) -> None:
     """파일 업로드 + 메시지 전달 → WS room 브로드캐스트."""
     caller = await _require_caller(api_key, token)
-    agent = await _resolve_agent(agent_id, caller, via_key=bool(api_key and api_key.startswith("sk_live_")))
+    agent, dm_project = await _resolve_agent_and_project(agent_id, caller, via_key=bool(api_key and api_key.startswith("sk_live_")))
 
     file_url: str | None = None
     if file and file.filename:
@@ -175,7 +181,7 @@ async def channel_upload(
             (_FILES_DIR / filename).write_bytes(data)
             file_url = f"/api/v2/channel/files/{filename}"
 
-    await _persist_and_broadcast(agent_id, agent, caller, content, file_url)
+    await _persist_and_broadcast(agent_id, agent, caller, content, file_url, project_id=dm_project)
 
 
 @router.get("/files/{name}")

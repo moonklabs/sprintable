@@ -68,9 +68,8 @@ class _CallerIdentity:
 def _access_identity(caller: "TeamMember | _CallerIdentity", *, via_key: bool) -> tuple[uuid.UUID, bool]:
     """story #4775 — (the id `has_project_access` takes, whether the socket/route came in by an agent key): a person's user id (a
     `TeamMember` row of a person carries it, the owner-floor identity carries it); an agent key's member id."""
-    if via_key:
-        return caller.id, True
-    return (getattr(caller, "user_id", None) or caller.id), False
+    # a person's key is still the person (`TeamMember.user_id`); an agent has no user id, its member id is what the rule takes
+    return (getattr(caller, "user_id", None) or caller.id), via_key
 
 
 async def _reachable_projects(agent_id: uuid.UUID, org_id: uuid.UUID, access_user_id: uuid.UUID) -> list[uuid.UUID]:
@@ -410,6 +409,19 @@ async def ws_chat_hub(
                     continue
             assert target is not None
 
+            # story #4775 (codex round 1) — the same question REST asks before it keeps a line, asked of THIS socket's owner for THIS
+            # conversation on every line: a person whose project access was removed after they connected (or an agent that lost its) is
+            # not kept — the socket ends (4003). Nothing is saved first.
+            async with async_session_factory() as db:
+                still_allowed = await socket_can_read_conversation(
+                    db, target, caller.org_id,
+                    member_id=caller.id, access_user_id=access_user_id, via_agent_key=via_agent_key,
+                )
+            if not still_allowed:
+                await websocket.send_text(json.dumps({"error": "forbidden"}))
+                await websocket.close(code=4003, reason="Forbidden")
+                return
+
             # conversation_messages 영속화
             async with async_session_factory() as db:
                 try:
@@ -446,6 +458,7 @@ async def ws_chat_hub(
                 logger.error(
                     "ws_chat: broadcast failed after save agent_id=%s message_id=%s", agent_id, msg.id, exc_info=True,
                 )
+                # only the sender's OWN just-saved line goes back to the sender (it passed the check above for this very line)
                 await websocket.send_text(payload)
 
     except WebSocketDisconnect:

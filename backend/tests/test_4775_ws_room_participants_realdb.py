@@ -391,3 +391,95 @@ def test_the_channel_deliver_route_has_the_same_project_gate(world, client, monk
     assert allowed.status_code == 204
     rows = _run(_exec(fetch=f"SELECT m.content FROM conversation_messages m JOIN conversations c ON c.id=m.conversation_id WHERE c.org_id='{ORG}'"))
     assert [r[0] for r in rows] == ["from-A"]
+
+
+# ── codex round 1: the checks that must hold LIVE, and the other doors ──────────────────────────────────────────────────────
+
+def test_a_person_whose_project_access_is_removed_after_connecting_is_not_kept(world, client):
+    """the connect gate is not the only moment: every line is judged for its sender too — REST would 403 this person now"""
+    _make_dm(client, UA)
+    dm_a = _dm_of(MA)
+    with client.websocket_connect(_url_human(UA)) as wa:
+        _say(wa, "before-revoke")
+        assert _recv_until(wa, "before-revoke")[-1]["content"] == "before-revoke"
+        _run(_exec(f"DELETE FROM project_access WHERE member_id='{MA}'"))
+        _say(wa, "AFTER-REVOKE")
+        got = json.loads(wa.receive_text())
+        assert got == {"error": "forbidden"}
+    assert "AFTER-REVOKE" not in _saved_in(dm_a)
+
+
+def test_the_channel_route_scopes_a_new_dm_to_a_project_the_caller_reaches(world, client, monkeypatch):
+    """`/channel/deliver` made the DM in the agent's LOWEST project — a project the caller may not reach (REST then refuses the caller its own DM)"""
+    monkeypatch.setattr(
+        "app.routers.channel.async_session_factory",
+        async_sessionmaker(create_async_engine(_ASYNC, poolclass=NullPool), expire_on_commit=False),
+    )
+    _run(_exec(
+        f"INSERT INTO projects (id,org_id,name,slug,violation_level) VALUES ('{PROJ_LOW}','{ORG}','P0','d4775c-proj0','warn')",
+        f"INSERT INTO agent_project_profiles (id,member_id,project_id) VALUES (gen_random_uuid(),'{AGENT}','{PROJ_LOW}')",
+    ))
+    resp = client.post(f"/api/v2/channel/deliver?token={_token(UA)}", json={"agent_id": str(AGENT), "content": "via-route"})
+    assert resp.status_code == 204, resp.text
+    rows = _run(_exec(fetch=f"SELECT project_id FROM conversations WHERE org_id='{ORG}' AND type='dm'"))
+    assert [r[0] for r in rows] == [PROJ]
+
+
+def test_a_person_with_an_api_key_connects_and_hears_their_own_dm(world, client):
+    """a person's key (story 1940) is the person: the project rule takes their user id (not an agent's member id) — they still connect and
+    hear the lines of their own DM"""
+    from app.core.security import hash_token
+
+    human_key = "sk_live_" + "h4775" + "0" * 40
+    _run(_exec(
+        "INSERT INTO agent_api_keys (id,team_member_id,member_id,key_prefix,key_hash) VALUES "
+        f"(gen_random_uuid(),'{MA}','{MA}','sk_live_','{hash_token(human_key)}')",
+    ))
+    try:
+        with client.websocket_connect(f"/ws/chat/{AGENT}?api_key={human_key}") as w:
+            _say(w, "by-key")
+            assert _recv_until(w, "by-key")[-1]["content"] == "by-key"
+    finally:
+        _run(_exec(f"DELETE FROM agent_api_keys WHERE team_member_id='{MA}'"))
+
+
+def test_a_group_conversation_line_over_rest_reaches_its_participants_only(world, client):
+    """the REST fan-out also carries group conversations the agent is in: its participants hear it, the other people of the room do not"""
+    from app.dependencies.auth import AuthContext, get_current_user
+    from app.main import app
+    from tests.conftest import override_db_and_read
+
+    Session = async_sessionmaker(create_async_engine(_ASYNC, poolclass=NullPool), expire_on_commit=False)
+
+    async def _db():
+        async with Session() as s:
+            try:
+                yield s
+                await s.commit()
+            except Exception:
+                await s.rollback()
+                raise
+
+    async def _auth_a():
+        return AuthContext(user_id=str(UA), email="A@d4775c.test", claims={"app_metadata": {"org_id": str(ORG)}})
+
+    group = uuid.uuid4()
+    _run(_exec(
+        f"INSERT INTO conversations (id,org_id,project_id,type,title,created_by) VALUES ('{group}','{ORG}','{PROJ}','group','G','{MA}')",
+        f"INSERT INTO conversation_participants (conversation_id,member_id) VALUES ('{group}','{MA}'),('{group}','{MB}'),('{group}','{AGENT}')",
+    ))
+    _make_dm(client, UO)  # the org owner is in the room too, but not in the group
+    override_db_and_read(app, _db)
+    app.dependency_overrides[get_current_user] = _auth_a
+    try:
+        with client.websocket_connect(_url_human(UB)) as wb, client.websocket_connect(_url_human(UO)) as wo:
+            resp = client.post(f"/api/v2/conversations/{group}/messages", json={"content": "group-line"})
+            assert resp.status_code == 201, resp.text
+            assert _recv_until(wb, "group-line")[-1]["conversation_id"] == str(group)  # B is in the group
+            _say(wo, "owner-1")
+            owner_heard = _recv_until(wo, "owner-1")
+            _say(wo, "owner-2")
+            owner_heard += _recv_until(wo, "owner-2")
+    finally:
+        app.dependency_overrides.clear()
+    assert "group-line" not in [m["content"] for m in owner_heard], "a group line reached a person who is not in the group"

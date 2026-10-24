@@ -29,7 +29,7 @@ def _get_func():
     from app.routers import agent_gateway, agent_runs, channel, ws_chat
 
     return {
-        "channel._resolve_agent": channel._resolve_agent,
+        "channel._resolve_agent": channel._resolve_agent_and_project,  # story #4775: the query lives here now (_resolve_agent is its thin wrapper)
         "agent_gateway.agent_stream": agent_gateway.agent_stream,
         "agent_runs.create_agent_run": agent_runs.create_agent_run,
         "ws_chat._authenticate": ws_chat._authenticate,
@@ -56,7 +56,7 @@ def test_channel_resolve_agent_is_deterministic_grant_pick():
     """channel._resolve_agent 는 .project_id 소비(Ⓑ) → order_by(project_id)+limit(1)+known-limitation."""
     from app.routers import channel
 
-    src = inspect.getsource(channel._resolve_agent)
+    src = inspect.getsource(channel._resolve_agent_and_project)  # story #4775: the query moved here (_resolve_agent wraps it)
     assert "order_by(TeamMember.project_id)" in src, \
         "channel._resolve_agent: order_by(project_id) 누락 — project_id 비결정적(틀린 프로젝트)"
     assert ".limit(1)" in src, "channel._resolve_agent: .limit(1) 누락 — MultipleResultsFound 회귀"
