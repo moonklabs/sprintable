@@ -292,6 +292,22 @@ describe('AdvancedConnect — story 4766', () => {
     }
   });
 
+  it('the stuck hint (nothing seen after the wait) is the runtime\'s own: Claude\'s names the folder question it was measured on, Codex\'s claims nothing it was not measured on', async () => {
+    vi.useFakeTimers();
+    try {
+      await mount();
+      await act(async () => { q('advanced-make')!.click(); await vi.advanceTimersByTimeAsync(50); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_500); });
+      expect(q('advanced-timeout')?.textContent).toContain(ko.timeoutHint);
+      expect(q('advanced-timeout')?.textContent).toContain('폴더를 믿을지 묻는 곳');
+      await act(async () => { q('advanced-runtime-codex')!.click(); await vi.advanceTimersByTimeAsync(10); });
+      expect(q('advanced-timeout')?.textContent).toContain(ko.timeoutHintCodex);
+      expect(q('advanced-timeout')?.textContent).not.toContain('폴더');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('the finish button leaves the way the caller says (오늘 · 대시보드)', async () => {
     const onFinish = await mount();
     await press('advanced-make');
