@@ -5,7 +5,7 @@
 // the card asks, shows what comes back verbatim, and does no computing. «324 642» is the shared contract vector (SPKI = the ASCII bytes of
 // `sprintable-4762-check-number-vector`): backend/tests/test_4762_check_number_vector.py and the shell's lib/phoneCalls.test.js compute the same string.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
@@ -50,12 +50,35 @@ describe('[SID:4762] ThisPhoneCard — the phone\'s own check number', () => {
     expect(q('this-phone-hint')?.textContent).toBe(koMessages.settings.thisPhoneHint);
     expect(koMessages.settings.thisPhoneHint).toContain('페어링한 뒤'); // the product's word for the phone connection (story 4644: never «짝»)
     expect(koMessages.settings.thisPhoneHint).not.toContain('짝');
-    expect(koMessages.settings.thisPhoneHint).toContain('원격 기기');
-    expect(enMessages.settings.thisPhoneHint).toContain('after you pair');
+    expect(koMessages.settings.thisPhoneHint).toContain('데스크톱 앱 › 원격 기기'); // where the list really is (Yuna copy review)
+    expect(enMessages.settings.thisPhoneHint).toContain('pair it first');
     expect(enMessages.settings.thisPhoneHint).toContain('Remote devices');
     // the web list's own words are the same «폰 확인 숫자» (not another name for it)
     expect(koMessages.settings.thisPhoneTitle).toBe('폰 확인 숫자');
     expect(koMessages.desktop.remoteDevices.confirmNumber.replace('{number}', '').trim()).toBe(koMessages.settings.thisPhoneTitle);
+  });
+
+  it('under React StrictMode (the effect runs twice) the shell is still asked ONCE — asking can make the phone\'s key', async () => {
+    const call = vi.fn(async () => answer({ key_number: '324 642' }));
+    await act(async () => {
+      root.render(
+        <StrictMode>
+          <PhoneBridgeContext.Provider value={{ inPhoneApp: true, phoneCall: call }}>
+            <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC"><ThisPhoneCard /></NextIntlClientProvider>
+          </PhoneBridgeContext.Provider>
+        </StrictMode>,
+      );
+    });
+    await act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); });
+    expect(call).toHaveBeenCalledTimes(1); // reverted (a call per effect run) → 2
+    expect(q('this-phone-number')?.textContent).toBe('324 642');
+  });
+
+  it('the bridge\'s own «timeout» answer (a call that never came back) ends as a failed read with «read again», not as «reading» for ever', async () => {
+    await draw(async () => answer({ ok: false, code: 'timeout' }));
+    expect(q('this-phone-failed')).not.toBeNull();
+    expect(q('this-phone-retry')).not.toBeNull();
+    expect(q('this-phone-reading')).toBeNull();
   });
 
   it('while the shell has not answered: «reading», no number', async () => {
@@ -85,6 +108,17 @@ describe('[SID:4762] ThisPhoneCard — the phone\'s own check number', () => {
       expect(q('this-phone-number')).toBeNull();
       expect(q('this-phone-retry')).not.toBeNull();
     }
+  });
+
+  it('another bridge function (the claim changed) is asked afresh — the answer of the old one is not shown for it', async () => {
+    const first = vi.fn(async () => answer({ key_number: '324 642' }));
+    await draw(first);
+    expect(q('this-phone-number')?.textContent).toBe('324 642');
+    const second = vi.fn(async () => answer({ ok: false, code: 'key_invalidated' }));
+    await draw(second);
+    expect(second).toHaveBeenCalledTimes(1); // reverted (the first request is reused) → 0
+    expect(q('this-phone-failed')).not.toBeNull();
+    expect(q('this-phone-number')).toBeNull();
   });
 
   it('«read again» asks the shell again and then shows the number', async () => {

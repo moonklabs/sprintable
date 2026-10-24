@@ -3,7 +3,7 @@
 // settings › This phone → that's the phone» (`desktop.remoteDevices.confirmNumberHint`), and this is that place. The phone app computes the number from its own signing key
 // (the shell's `device.key.info` → `key_number`, the same six digits the server's `confirm_number` prints for that key); the web asks the shell, shows what comes
 // back and does no computing. Like the phone's start screen, asking makes the key if the phone has none yet (nothing is registered on the server by looking).
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -20,16 +20,23 @@ export function ThisPhoneCard() {
   const [nonce, setNonce] = useState(0);
   // the answer is stored with the request it answers: a new request (nonce) makes the old answer «not read yet» without a state write in the effect
   const [answer, setAnswer] = useState<{ nonce: number; result: Result } | null>(null);
+  // one bridge call per request: React may run the effect twice (StrictMode · a remount) and asking can make the phone's key — the second run shares the first run's call
+  const request = useRef<{ nonce: number; call: typeof phoneCall; result: Promise<Result> } | null>(null);
 
   useEffect(() => {
     if (!inPhoneApp) return;
     let stale = false;
-    phoneCall('device.key.info', {})
-      .then((a): Result => {
-        if (a.ok && typeof a.key_number === 'string' && CHECK_NUMBER.test(a.key_number)) return { kind: 'number', value: a.key_number };
-        return !a.ok && a.code === 'no_screen_lock' ? { kind: 'no_screen_lock' } : { kind: 'failed' };
-      }, (): Result => ({ kind: 'failed' })) // a rejected bridge call is a failed read, not a screen stuck on «reading»
-      .then((result) => { if (!stale) setAnswer({ nonce, result }); });
+    if (request.current?.nonce !== nonce || request.current.call !== phoneCall) { // a new request, or another bridge: ask again
+      request.current = {
+        nonce,
+        call: phoneCall,
+        result: phoneCall('device.key.info', {}).then((a): Result => {
+          if (a.ok && typeof a.key_number === 'string' && CHECK_NUMBER.test(a.key_number)) return { kind: 'number', value: a.key_number };
+          return !a.ok && a.code === 'no_screen_lock' ? { kind: 'no_screen_lock' } : { kind: 'failed' };
+        }, (): Result => ({ kind: 'failed' })), // a rejected bridge call is a failed read, not a screen stuck on «reading»
+      };
+    }
+    request.current.result.then((result) => { if (!stale) setAnswer({ nonce, result }); });
     return () => { stale = true; };
   }, [inPhoneApp, phoneCall, nonce]);
 

@@ -178,7 +178,7 @@ export default function SettingsPage() {
   useEffect(() => {
     const tab = searchParamsHook.get('tab');
     if (tab) setActiveTab(resolveSettingsTab(tab, inPhoneApp));
-  }, [searchParamsHook]);
+  }, [searchParamsHook, inPhoneApp]); // story 4762 — the phone claim can come after the first render: a `?tab=this-phone` link then lands on its tab once the tab exists
 
   const [orgId, setOrgId] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);

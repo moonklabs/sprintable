@@ -8,14 +8,13 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../messages/ko.json';
-import { PhoneBridgeContext } from '@/components/providers/phone-bridge-context';
 
-const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
+const { useDashboardContextMock, searchParams } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn(), searchParams: new URLSearchParams('tab=this-phone') }));
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => useDashboardContextMock() }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn(), prefetch: vi.fn() }),
-  useSearchParams: () => new URLSearchParams('tab=this-phone'),
+  useSearchParams: () => searchParams, // ONE object, as in the app: a fresh one per render would re-run the page's tab effect every render and hide a missing dependency
   usePathname: () => '/settings',
 }));
 vi.mock('@/lib/db/client', () => ({
@@ -40,9 +39,16 @@ afterEach(async () => {
   vi.resetModules();
 });
 
+// after `vi.resetModules()` (afterEach) a fresh import of the page gets a fresh copy of the bridge context module: the provider must come from the SAME copy as the page's
+async function load() {
+  const { default: SettingsPage } = await import('./page');
+  const { PhoneBridgeContext } = await import('@/components/providers/phone-bridge-context');
+  return { SettingsPage, PhoneBridgeContext };
+}
+
 async function drawPage(inPhoneApp: boolean) {
   const phoneCall = vi.fn(async () => ({ id: 'w1', ok: true, key_number: '324 642' }));
-  const { default: SettingsPage } = await import('./page');
+  const { SettingsPage, PhoneBridgeContext } = await load();
   await act(async () => {
     root.render(
       <PhoneBridgeContext.Provider value={{ inPhoneApp, phoneCall }}>
@@ -56,6 +62,24 @@ async function drawPage(inPhoneApp: boolean) {
 const tabNames = () => Array.from(container.querySelectorAll('[role="tab"]')).map((el) => el.textContent?.trim());
 
 describe('[SID:4762] SettingsPage — «이 폰» tab', () => {
+  it('a phone claim that comes AFTER the first render still lands the ?tab=this-phone link on its tab (the tab did not exist at first; the page follows the claim)', async () => {
+    const phoneCall = vi.fn(async () => ({ id: 'w1', ok: true, key_number: '324 642' }));
+    const { SettingsPage, PhoneBridgeContext } = await load();
+    const draw = (inPhoneApp: boolean) => act(async () => {
+      root.render(
+        <PhoneBridgeContext.Provider value={{ inPhoneApp, phoneCall }}>
+          <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><SettingsPage /></NextIntlClientProvider>
+        </PhoneBridgeContext.Provider>,
+      );
+    });
+    await draw(false);
+    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent?.trim()).toBe(koMessages.settings.tabProfile); // first render: not the phone app yet
+    await draw(true); // the claim arrives
+    await act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); });
+    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent?.trim()).toBe(koMessages.settings.tabThisPhone); // reverted (no dependency) → stays on the profile tab
+    expect(container.querySelector('[data-testid=this-phone-number]')?.textContent).toBe('324 642');
+  });
+
   it('inside the phone app: the tab is listed and ?tab=this-phone shows the phone\'s check number', async () => {
     const call = await drawPage(true);
     expect(tabNames()).toContain(koMessages.settings.tabThisPhone); // reverted (no trigger) → fails
