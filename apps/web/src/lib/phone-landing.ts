@@ -20,15 +20,21 @@ export type Landing = 'home' | 'chats' | 'start';
 
 type PhoneCall = Parameters<typeof readStartable>[0];
 
+const CHECKLIST_TIMEOUT_MS = 2_500;
+
 /**
  * story #4762 (AC7) — is this person still in the onboarding? The server's own checklist: no agent connected yet (`steps.agent_connected === false`). Anything else —
  * connected, a read that failed, an answer of another shape — is «no» (never a screen forced on someone because a read went wrong).
  */
 async function onboardingOpen(): Promise<boolean> {
   try {
-    const res = await fetchWithAuth('/api/activation/checklist');
+    // bounded well inside the landing's own 4 s limit: a checklist that does not answer in time is «no» (the usual home), and the request does not run on after the page left
+    const res = await fetchWithAuth('/api/activation/checklist', { timeoutMs: CHECKLIST_TIMEOUT_MS });
     if (!res.ok) return false;
-    const json = (await res.json()) as { data?: { steps?: { agent_connected?: unknown } } };
+    const json = (await res.json()) as { data?: { scope_is_requested_org?: unknown; steps?: { agent_connected?: unknown } } };
+    // the server may answer for ANOTHER organization than the one asked about (`scope_is_requested_org === false` — the activation banner treats it the same way):
+    // that is not this person's onboarding, so never a reason to send them to the start screen
+    if (json.data?.scope_is_requested_org === false) return false;
     return json.data?.steps?.agent_connected === false;
   } catch {
     return false;

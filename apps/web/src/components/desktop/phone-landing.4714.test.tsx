@@ -473,6 +473,22 @@ describe('[4762] decideLanding — the onboarding is open', () => {
     expect(await decideLanding(phoneCall as never)).toBe('home');
   });
 
+  it('a checklist that answers for ANOTHER organization (scope_is_requested_org: false) is not this person\'s onboarding → the usual home', async () => {
+    world.devices = [{ id: 'x', confirm_number: '000 000' }];
+    world.checklist = { data: { scope_is_requested_org: false, steps: { agent_connected: false } } };
+    expect(await decideLanding(phoneCall as never)).toBe('home');
+    world.checklist = { data: { scope_is_requested_org: true, steps: { agent_connected: false } } };
+    expect(await decideLanding(phoneCall as never)).toBe('start'); // the flag saying «yes, this org» changes nothing
+  });
+
+  it('the checklist read is bounded inside the landing\'s own limit (it must not outlive the 4 s the landing waits)', async () => {
+    world.devices = [{ id: 'x', confirm_number: '000 000' }];
+    world.checklist = open;
+    await decideLanding(phoneCall as never);
+    const call = fetchWithAuth.mock.calls.find((c) => c[0] === '/api/activation/checklist');
+    expect((call![1] as { timeoutMs?: number }).timeoutMs).toBeLessThan(LANDING_MAX_MS);
+  });
+
   it('a failed read of the phone\'s computers is not «paired with nothing»: the usual home even while the onboarding is open', async () => {
     world.checklist = open;
     world.devices = undefined;
