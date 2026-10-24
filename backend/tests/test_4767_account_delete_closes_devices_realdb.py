@@ -317,3 +317,135 @@ async def test_10_a_person_with_several_computers_gets_all_of_them_closed():
             assert await _live(w, "SELECT count(*) FROM agent_api_keys WHERE desktop_setup_id = :i AND revoked_at IS NULL", i=c["setup_id"]) == 0
     finally:
         await _close(engine, w)
+
+
+@pytest.mark.parametrize("half", ["is_active = false", "deleted_at = now()"])
+async def test_11_each_half_of_closed_or_deleted_refuses_on_its_own(half):
+    """Security lens 4767 (pin gap): the real deletion sets BOTH `is_active = false` and `deleted_at`; only a state with exactly one of them (an old row, an ops edit)
+    tells the halves apart. Each half alone must refuse, at all three sites."""
+    from app.models.desktop_setup import DesktopSetup
+    from app.services import desktop_setup
+    from app.services.desktop_relay import device_for_token, device_still_valid
+
+    engine, w = await _world()
+    try:
+        uid, _, org_id = await w.person(org=True, name="Admin M")
+        comp = await _computer(w, org_id, uid)
+        await _remote_control_on(w, org_id)
+        async with w.Session() as s:
+            assert await device_for_token(s, comp["token"]) is not None and await device_still_valid(s, comp["setup_id"]) is True
+        await w.sql(f"UPDATE users SET {half} WHERE id = :u", u=uid)
+        async with w.Session() as s:
+            assert await device_for_token(s, comp["token"]) is None                                  # site 1: device authentication
+            assert await device_still_valid(s, comp["setup_id"]) is False                            # site 2: the open stream's recheck
+            assert await desktop_setup.confirming_person_is_gone(s, await s.get(DesktopSetup, comp["setup_id"])) is True   # site 3: the exchange
+    finally:
+        await _close(engine, w)
+
+
+async def test_12_an_exchange_that_overlaps_an_open_deletion_waits_for_it_and_finds_the_person_gone():
+    """Security lens 4767 (Kadir ③): the deletion's closer ran before the person's confirmation, then confirm + exchange would both commit before the deletion
+    does — the exchange had read the user as alive and handed out a live agent key. The exchange now takes the confirming person's user row (shared) first, the order
+    the deletion keeps (user row → member rows → setup rows), so it waits for the open deletion and then refuses. The deletion is held open by a second session."""
+    import asyncio
+    import base64
+    import hashlib
+    import secrets
+
+    from sqlalchemy import select, text
+
+    from app.models.user import User
+
+    engine, w = await _world()
+    try:
+        uid, _, org_id = await w.person(org=True, name="Admin M")
+        verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
+        challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+        r = await w.client.post("/api/v2/desktop/setup-codes", json={"challenge": challenge, "device_name": "mac 4767"})
+        body = r.json()
+        await w.sql(
+            "UPDATE desktop_setups SET org_id = :o, confirmed_by = :u, confirmed_at = now(), project_id = (SELECT id FROM projects WHERE org_id = :o LIMIT 1) WHERE id = :i",
+            o=org_id, u=uid, i=uuid.UUID(body["setup_id"]),
+        )
+
+        async with w.Session() as deletion:   # what `delete_account` does first: the user row, FOR UPDATE, held until its commit
+            await deletion.execute(select(User).where(User.id == uid).with_for_update())
+            exchange = asyncio.create_task(w.client.post("/api/v2/desktop/setup-codes/exchange", json={"code": body["code"], "verifier": verifier}))
+            await asyncio.sleep(1.5)
+            assert not exchange.done(), "the exchange must wait for the open deletion (before: it ran straight through and handed out keys)"
+            await deletion.execute(text("UPDATE users SET is_active = false, deleted_at = now() WHERE id = :u"), {"u": uid})
+            await deletion.commit()
+        resp = await asyncio.wait_for(exchange, 15)
+        assert (resp.json().get("error") or {}).get("code") == "code_used", resp.text
+        assert "device_token" not in resp.text
+        assert await _live(w, "SELECT count(*) FROM desktop_device_tokens t JOIN desktop_setups s ON s.id = t.setup_id WHERE s.id = :i", i=uuid.UUID(body["setup_id"])) == 0
+    finally:
+        await _close(engine, w)
+
+
+def _migration_statements():
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent.parent / "alembic" / "versions" / "0463_close_computers_of_deleted_accounts.py"
+    spec = importlib.util.spec_from_file_location("m0463", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.STATEMENTS
+
+
+async def test_13_the_migration_closes_what_older_deletions_left_completely_and_twice_changes_nothing():
+    """Security lens 4767 (Kadir K2): closing a legacy row by token + setup row alone leaves a live agent key and an active agent. The migration writes the closer's
+    whole set. Seeded: a deleted person's open computer (token · key · made agent · open command · clock view), a living person's computer, an already-closed one."""
+    from sqlalchemy import text
+
+    from app.models.desktop_relay import DesktopClockView, DesktopCommand
+
+    engine, w = await _world()
+    try:
+        gone, _, org_id = await w.person(org=True, name="Gone")
+        alive = await w.add_member(org_id, role="admin", name="Alive")
+        legacy = await _computer(w, org_id, gone, name="Legacy")
+        mine = await _computer(w, org_id, alive, name="Alive Mac")
+        closed = await _computer(w, org_id, gone, name="Already closed")
+        await w.sql("UPDATE desktop_setups SET revoked_at = now() - interval '1 day', revoked_reason = 'kept' WHERE id = :i", i=closed["setup_id"])
+        async with w.Session() as s:
+            s.add(DesktopCommand(
+                id=uuid.uuid4(), setup_id=legacy["setup_id"], device_seq=1, kind="send_prompt", payload={}, idempotency_key="k", requested_by=gone, state="queued",
+            ))
+            s.add(DesktopClockView(setup_id=legacy["setup_id"], mode="panel", view={}, expires_at=datetime.now(UTC)))
+            await s.commit()
+        await w.sql("UPDATE users SET is_active = false, deleted_at = now() WHERE id = :u", u=gone)   # an older deletion: the closer never ran
+
+        async def _run():
+            async with w.Session() as s:
+                for statement in _migration_statements():
+                    await s.execute(text(statement))
+                await s.commit()
+
+        async def _state():
+            return {
+                "legacy": await _row(w, legacy["setup_id"]),
+                "tokens": await _live(w, "SELECT count(*) FROM desktop_device_tokens WHERE setup_id = :i AND revoked_at IS NULL", i=legacy["setup_id"]),
+                "keys": await _live(w, "SELECT count(*) FROM agent_api_keys WHERE desktop_setup_id = :i AND revoked_at IS NULL", i=legacy["setup_id"]),
+                "agent": await _live(w, "SELECT count(*) FROM members WHERE id = :i AND is_active", i=legacy["agent_id"]),
+                "open_commands": await _live(w, "SELECT count(*) FROM desktop_commands WHERE setup_id = :i AND state IN ('queued', 'delivered')", i=legacy["setup_id"]),
+                "rejected": await _live(w, "SELECT count(*) FROM desktop_commands WHERE setup_id = :i AND state = 'rejected' AND result_code = 'device_disconnected'", i=legacy["setup_id"]),
+                "views": await _live(w, "SELECT count(*) FROM desktop_clock_views WHERE setup_id = :i", i=legacy["setup_id"]),
+                "mine": await _row(w, mine["setup_id"]),
+                "mine_tokens": await _live(w, "SELECT count(*) FROM desktop_device_tokens WHERE setup_id = :i AND revoked_at IS NULL", i=mine["setup_id"]),
+                "mine_agent": await _live(w, "SELECT count(*) FROM members WHERE id = :i AND is_active", i=mine["agent_id"]),
+                "closed": await _row(w, closed["setup_id"]),
+                "closed_agent": await _live(w, "SELECT count(*) FROM members WHERE id = :i AND is_active", i=closed["agent_id"]),
+            }
+
+        await _run()
+        first = await _state()
+        assert first["legacy"] == {"revoked": True, "revoked_reason": "account_deleted", "revoked_by": gone}
+        assert (first["tokens"], first["keys"], first["agent"], first["open_commands"], first["rejected"], first["views"]) == (0, 0, 0, 0, 1, 0)
+        assert first["mine"]["revoked"] is False and first["mine_tokens"] == 1 and first["mine_agent"] == 1     # a living person's computer is untouched
+        assert first["closed"]["revoked_reason"] == "kept" and first["closed_agent"] == 1                       # an already-closed row is not rewritten (nor its agent touched)
+        await _run()
+        assert await _state() == first, "a second run changes nothing"
+    finally:
+        await _close(engine, w)

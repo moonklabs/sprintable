@@ -1219,11 +1219,21 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str, device_i
             DesktopSetup.exchanged_at.is_not(None),
         )
     )).scalars().all())
+    # security lens 4767 (Kadir ③): the confirming person's user row FIRST, shared — the account deletion takes that row (FOR UPDATE) before the member rows
+    # and the setup rows, so an exchange that overlaps an open deletion waits for it and then finds the person gone (`confirming_person_is_gone` below),
+    # instead of handing out keys the deletion's closer (which ran before the confirmation) will never see. Taking it after the setup rows would deadlock.
+    locked_confirmer = setup.confirmed_by
+    if locked_confirmer is not None:
+        from app.models.user import User
+
+        await db.execute(select(User.id).where(User.id == locked_confirmer).with_for_update(read=True))
     locked = await _lock_in_order(db, member_ids=attached, setup_ids={setup.id, *other_ids})
     setup = locked[setup.id]
     others = [locked[i] for i in sorted(other_ids) if i in locked]
     if not _attached_agents(setup) <= attached:
         return None  # confirmed between the read and the lock: its agents are not locked yet — the app asks again
+    if setup.confirmed_by != locked_confirmer:
+        return None  # confirmed (or confirmed by someone else) between the read and the lock: that person's row is not held — the app asks again
     if setup.exchanged_at is not None or setup.revoked_at is not None:
         raise DesktopSetupError("code_used")
     if _now() >= setup.expires_at:
