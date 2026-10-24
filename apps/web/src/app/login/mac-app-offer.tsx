@@ -32,7 +32,7 @@ export function MacAppOffer({ suppressed }: { suppressed: boolean }) {
   if (!enabled || suppressed || !onAMac) return null;
   return (
     <Card className="space-y-2 p-3 text-center" data-testid="login-mac-app-offer">
-      <p className="break-keep text-sm text-foreground/90">{t('macAppPitch')}</p>
+      <p className="break-keep text-sm text-foreground">{t('macAppPitch')}</p>
       <Link href="/register" className={`${buttonVariants({ variant: 'outline' })} w-full min-h-[44px]`}>
         {t('macAppGet')}
       </Link>

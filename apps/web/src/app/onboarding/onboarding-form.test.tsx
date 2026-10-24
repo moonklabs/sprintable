@@ -136,7 +136,7 @@ describe('OnboardingForm — error.code 분기 (story #2484)', () => {
       const a = arrivalAnswer(url);
       if (a) return a;
       if (url === '/api/organizations') return { ok: true, json: async () => ({ data: { id: 'org-1' } }) };
-      if (url === '/api/auth/refresh') return { ok: true, json: async () => ({}) };
+      if (url === '/api/auth/refresh') return { ok: true, json: async () => ({ data: { ok: true } }) };
       if (url === '/api/projects') return { ok: true, json: async () => ({ data: init?.method === 'POST' ? { id: 'proj-1' } : [] }) }; // GET = the list (an array)
       if (url === '/api/current-project') return { ok: true, json: async () => ({}) };
       if (url === '/api/team-members') {

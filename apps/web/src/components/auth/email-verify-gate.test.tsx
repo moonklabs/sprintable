@@ -7,7 +7,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
-import { EmailVerifyGate, VERIFY_POLL_MS, gateClosed, registerAgainHref } from './email-verify-gate';
+import { EmailVerifyGate, VERIFY_POLL_MS, gateClosed, registerAgainHref, useEmailVerifyGate } from './email-verify-gate';
 
 const { logoutUser } = vi.hoisted(() => ({ logoutUser: vi.fn(async () => undefined) }));
 vi.mock('@/lib/db/client', () => ({
@@ -165,6 +165,32 @@ describe('[SID:4453] the «verify your e-mail» gate', () => {
     await flush();
     expect(gate()).toBeNull(); // the older «not verified» answer is dropped
     expect(behind()).not.toBeNull();
+  });
+
+  it('[SID:4763 codex] a signal heard while the first read is still out makes `onOpened` run once when the gate opens (the screen\'s earlier reads — invites … — are old now)', async () => {
+    let reads = 0;
+    let releaseFirst!: () => void;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url !== '/api/auth/me') return new Response('{}', { status: 404 });
+      reads += 1;
+      if (reads === 1) {
+        await new Promise<void>((resolve) => { releaseFirst = resolve; });
+        return new Response(JSON.stringify({ data: { email_verified: false, email_verification_required: true } }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ data: { email_verified: true, email_verification_required: true } }), { status: 200 });
+    }));
+    const opened = vi.fn();
+    function Probe() { const g = useEmailVerifyGate(true, opened); return <span data-testid="kind">{g.kind}</span>; }
+    await act(async () => { root.render(<Probe />); });
+    await flush();
+    expect(container.querySelector('[data-testid=kind]')?.textContent).toBe('reading');
+    await act(async () => { window.dispatchEvent(new StorageEvent('storage', { key: 'sprintable-email-verified', newValue: '1' })); });
+    await flush();
+    expect(container.querySelector('[data-testid=kind]')?.textContent).toBe('open');
+    expect(opened).toHaveBeenCalledTimes(1);
+    await act(async () => { releaseFirst(); });
+    await flush();
+    expect(opened).toHaveBeenCalledTimes(1);
   });
 
   it('[SID:4763 AC7] some other storage key says nothing to the gate', async () => {

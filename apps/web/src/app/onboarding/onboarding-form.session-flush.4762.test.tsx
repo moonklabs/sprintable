@@ -24,7 +24,7 @@ let container: HTMLDivElement;
 let root: Root;
 const post = vi.fn();
 // what the refresh route answers: the session cookies were rotated, and the route says so (`markSessionChanged`)
-const rotated = () => ({ ok: true, headers: new Headers({ [SESSION_CHANGED_HEADER]: '1' }), json: async () => ({}) });
+const rotated = () => ({ ok: true, headers: new Headers({ [SESSION_CHANGED_HEADER]: '1' }), json: async () => ({ data: { ok: true } }) });
 let refreshAnswer: () => Promise<unknown> | unknown = rotated;
 const handler = vi.fn(async (_url: string): Promise<unknown> => ({ ok: false, status: 404, json: async () => ({}) }));
 
@@ -119,9 +119,11 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
     const form = readFileSync(resolve(__dirname, 'onboarding-form.tsx'), 'utf8');
     expect(form).not.toMatch(/fetch\(\s*'\/api\/auth\/refresh'/); // reverted (a bare fetch) → the shell is never told
     // each one swallows a failure like the bare fetch did (the leaving one has no screen to fall back on: a throw there would keep the person from going home)
-    // story 4763 added two: the renewal before the arrival decides there is no organization (AC11) and the one the organization-deleted screen makes before it asks who the person is (H6) — both read the result
-    expect(form.match(/await refreshAuthTokens\(\)\.catch\(\(\) => null\)/g)?.length).toBe(4);
-    expect(form.match(/refreshAuthTokens\(\)/g)?.length).toBe(4);
+    // story 4763: the other renewals — before the arrival decides there is no organization (AC11) and on the organization-deleted screen (H6) — go through ONE shared helper (`renewSession`, a single
+    // call in flight, its result read); it is the third place that calls `refreshAuthTokens()`
+    expect(form.match(/await refreshAuthTokens\(\)\.catch\(\(\) => null\)/g)?.length).toBe(2);
+    expect(form.match(/refreshAuthTokens\(\)/g)?.length).toBe(3);
+    expect(form.match(/renewSession\(\)/g)?.length).toBe(2);
     expect(form).toMatch(/import \{ fetchWithAuth, refreshAuthTokens \} from '@\/lib\/db\/client';/);
   });
 
