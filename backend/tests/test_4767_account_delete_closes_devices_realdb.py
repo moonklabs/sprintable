@@ -429,6 +429,17 @@ async def test_13_the_migration_closes_what_older_deletions_left_completely_and_
                 idempotency_key="k3", requested_by=gone, state="queued",
             ))
             await s.commit()
+        # an agent the setup only ATTACHED (`existing`) keeps running elsewhere: the migration must not stop it (the closer does not)
+        attached = uuid.uuid4()
+        async with w.Session() as s:
+            from app.models.member import Member
+
+            s.add(Member(id=attached, org_id=org_id, type="agent", name="Attached Agent", is_active=True))
+            await s.commit()
+        await w.sql(
+            "UPDATE desktop_setups SET members = members || CAST(:line AS jsonb) WHERE id = :i",
+            line=f'[{{"kind": "agent", "member_id": "{attached}", "existing": true}}]', i=legacy["setup_id"],
+        )
         # a legacy `members` line with an id that is no uuid must not abort the whole migration
         await w.sql(
             "UPDATE desktop_setups SET members = members || '[{\"kind\": \"agent\", \"member_id\": \"not-a-uuid\"}]'::jsonb WHERE id = :i", i=legacy["setup_id"],
@@ -457,6 +468,7 @@ async def test_13_the_migration_closes_what_older_deletions_left_completely_and_
                 "mine_agent": await _live(w, "SELECT count(*) FROM members WHERE id = :i AND is_active", i=mine["agent_id"]),
                 "closed": await _row(w, closed["setup_id"]),
                 "closed_agent": await _live(w, "SELECT count(*) FROM members WHERE id = :i AND is_active", i=closed["agent_id"]),
+                "attached": await _live(w, "SELECT count(*) FROM members WHERE id = :i AND is_active", i=attached),
             }
 
         await _run()
@@ -465,9 +477,74 @@ async def test_13_the_migration_closes_what_older_deletions_left_completely_and_
         assert (first["tokens"], first["keys"], first["agent"], first["open_commands"], first["rejected"], first["views"]) == (0, 0, 0, 0, 3, 0)
         assert first["request"] == 1, "the answer that never reached the device stops reading «answered»"
         assert first["typed"] == 0, "the typed words of the clock edit that never reached the computer are gone"
+        assert first["attached"] == 1, "an agent the setup only attached is not stopped by the migration (it keeps running elsewhere)"
         assert first["mine"]["revoked"] is False and first["mine_tokens"] == 1 and first["mine_agent"] == 1     # a living person's computer is untouched
         assert first["closed"]["revoked_reason"] == "kept" and first["closed_agent"] == 1                       # an already-closed row is not rewritten (nor its agent touched)
         await _run()
         assert await _state() == first, "a second run changes nothing"
+    finally:
+        await _close(engine, w)
+
+
+async def test_14_a_confirmation_that_appears_between_the_read_and_the_lock_makes_the_app_ask_again(monkeypatch):
+    """Security lens 4767 (pin gap 1): the exchange reads the setup, takes the confirming person's user row, THEN the setup rows. If `confirmed_by` is another person once the
+    setup row is read again under its lock, the user row it holds is the wrong one — it answers «pending» (the app asks again) instead of going on."""
+    import base64
+    import hashlib
+    import secrets
+
+    from app.services import desktop_setup
+
+    engine, w = await _world()
+    try:
+        uid, _, org_id = await w.person(org=True, name="First")
+        other = await w.add_member(org_id, role="admin", name="Second")
+        verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
+        challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+        r = await w.client.post("/api/v2/desktop/setup-codes", json={"challenge": challenge, "device_name": "mac 4767"})
+        body = r.json()
+        setup_id = uuid.UUID(body["setup_id"])
+        await w.sql(
+            "UPDATE desktop_setups SET org_id = :o, confirmed_by = :u, confirmed_at = now(), project_id = (SELECT id FROM projects WHERE org_id = :o LIMIT 1) WHERE id = :i",
+            o=org_id, u=uid, i=setup_id,
+        )
+        real = desktop_setup._lock_in_order
+
+        async def _confirmer_changes_first(db, *, member_ids, setup_ids):
+            await w.sql("UPDATE desktop_setups SET confirmed_by = :u WHERE id = :i", u=other, i=setup_id)   # between the read and the lock
+            return await real(db, member_ids=member_ids, setup_ids=setup_ids)
+
+        monkeypatch.setattr(desktop_setup, "_lock_in_order", _confirmer_changes_first)
+        resp = await w.client.post("/api/v2/desktop/setup-codes/exchange", json={"code": body["code"], "verifier": verifier})
+        assert resp.status_code == 202 and resp.json() == {"status": "pending"}, resp.text   # the app asks again; no keys, no token
+        assert await _live(w, "SELECT count(*) FROM desktop_device_tokens WHERE setup_id = :i", i=setup_id) == 0
+    finally:
+        await _close(engine, w)
+
+
+async def test_15_the_migration_reads_each_half_of_the_account_state_on_its_own():
+    """Security lens 4767 (pin gap 3): the migration-side twin of test 11 — a legacy row whose person has exactly `is_active = false` or exactly `deleted_at` set is closed;
+    a living person's is not."""
+    from sqlalchemy import text
+
+    engine, w = await _world()
+    try:
+        _, _, org_id = await w.person(org=True, name="Owner")
+        inactive_only = await w.add_member(org_id, role="admin", name="Inactive only")
+        deleted_only = await w.add_member(org_id, role="admin", name="Deleted only")
+        alive = await w.add_member(org_id, role="admin", name="Alive")
+        a = await _computer(w, org_id, inactive_only)
+        b = await _computer(w, org_id, deleted_only)
+        c = await _computer(w, org_id, alive)
+        await w.sql("UPDATE users SET is_active = false WHERE id = :u", u=inactive_only)
+        await w.sql("UPDATE users SET deleted_at = now() WHERE id = :u", u=deleted_only)
+        async with w.Session() as s:
+            for statement in _migration_statements():
+                await s.execute(text(statement))
+            await s.commit()
+        assert (await _row(w, a["setup_id"]))["revoked"] is True, "is_active = false alone closes"
+        assert (await _row(w, b["setup_id"]))["revoked"] is True, "deleted_at alone closes"
+        assert (await _row(w, c["setup_id"]))["revoked"] is False
+        assert await _live(w, "SELECT count(*) FROM agent_api_keys WHERE desktop_setup_id IN (:a, :b) AND revoked_at IS NULL", a=a["setup_id"], b=b["setup_id"]) == 0
     finally:
         await _close(engine, w)
