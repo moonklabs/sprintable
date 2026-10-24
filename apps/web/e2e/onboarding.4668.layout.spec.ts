@@ -86,7 +86,8 @@ const API: Record<string, Answer> = {
   'POST /api/projects': { data: { id: 'proj-1' } },
   'POST /api/current-project': {},
   // story 4766: the folded web way's one press — the agent and its key, the hosted address, the panel's first answer
-  'POST /api/team-members': { data: { id: 'agent-1', api_key: ['sk', 'live', 'abcdefghijklmnopqrstuvwxyz0123456789ABCD'].join('_') // built, not written: a literal `sk_live_…` reads as a Stripe key to push protection } },
+  // (the key's prefix is built, not written: a literal `sk_live_…` reads as a Stripe key to the push-protection scanner)
+  'POST /api/team-members': { data: { id: 'agent-1', api_key: ['sk', 'live', 'abcdefghijklmnopqrstuvwxyz0123456789ABCD'].join('_') } },
   'GET /api/agents/agent-1/connection-artifact': { data: { files: [{ filename: '.mcp.json', content: JSON.stringify({ mcpServers: { 'sprintable-mcp': { type: 'http', url: 'https://dev-mcp.sprintable.ai/mcp', headers: {} } } }) }] } },
   'GET /api/agents/agent-1/verification-status': { data: { verified: false, rail: [{ state: 'config_copied', status: 'done' }, { state: 'waiting', status: 'active' }, { state: 'mcp_reachable', status: 'pending' }, { state: 'verified', status: 'pending' }] } },
   'POST /api/onboarding/events': {},
