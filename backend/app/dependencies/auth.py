@@ -628,9 +628,13 @@ async def _verify_org_membership(
     db: AsyncSession,
     request: Request,
 ) -> None:
-    """caller가 org 멤버인지 DB 조회 — request.state 캐시로 N+1 방지."""
+    """caller가 org 멤버인지 DB 조회 — request.state 캐시로 N+1 방지.
+
+    story #4772 — the answer is kept for THIS request only (never longer): a removal must be seen by the very next request. `request` may be None for a direct call (no cache then),
+    and a user id that is not a uuid is simply not a member (403), never a 500."""
     cache_key = f"_org_mbr_{user_id}_{org_id}"
-    cached = getattr(request.state, cache_key, None)
+    state = getattr(request, "state", None)
+    cached = getattr(state, cache_key, None) if state is not None else None
     if cached is True:
         return
     if cached is False:
@@ -641,10 +645,14 @@ async def _verify_org_membership(
 
     from app.models.project import OrgMember
 
+    try:
+        user_uuid = uuid.UUID(str(user_id))
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="해당 조직의 멤버가 아닌") from None
     result = await db.execute(
         select(OrgMember.id).where(
             OrgMember.org_id == org_id,
-            OrgMember.user_id == uuid.UUID(user_id),
+            OrgMember.user_id == user_uuid,
             OrgMember.deleted_at.is_(None),
         )
     )
@@ -664,7 +672,7 @@ async def _verify_org_membership(
             select(TeamMember.id)
             .where(
                 TeamMember.org_id == org_id,
-                TeamMember.id == uuid.UUID(user_id),
+                TeamMember.id == user_uuid,
                 TeamMember.is_active.is_(True),
             )
             .limit(1)  # team_members는 0088 이후 projection VIEW — 멀티프로젝트 에이전트는
@@ -672,7 +680,8 @@ async def _verify_org_membership(
             # MultipleResultsFound로 크래시하므로 limit(1)+first()로 존재만 본다.
         )
         is_member = agent_result.first() is not None
-    setattr(request.state, cache_key, is_member)
+    if state is not None:
+        setattr(state, cache_key, is_member)
     if not is_member:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

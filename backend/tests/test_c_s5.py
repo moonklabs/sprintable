@@ -171,8 +171,16 @@ async def test_get_scope_context_returns_org_and_project():
 async def test_get_scope_context_project_none_when_not_provided():
     from app.dependencies.auth import get_scope_context
     org = uuid.uuid4()
-    auth = _make_auth(org_id=str(org))
-    ctx = await get_scope_context(auth=auth, x_org_id=None, x_project_id=None, request=None)
+    from app.dependencies import auth as auth_module
+    from tests.conftest import FakeAsyncSessionCtx
+
+    auth = _make_auth(org_id=str(org), user_id=str(uuid.uuid4()))
+    seat = MagicMock()
+    seat.scalar_one_or_none.return_value = uuid.uuid4()   # story #4772: the live seat of the token's organization is asked for
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=seat)
+    with patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(mock_db)):
+        ctx = await get_scope_context(auth=auth, x_org_id=None, x_project_id=None, request=None)
     assert ctx["org_id"] == org
     assert ctx["project_id"] is None
 
@@ -239,24 +247,51 @@ async def test_get_verified_org_id_pass_when_member():
 
 
 @pytest.mark.anyio
-async def test_get_verified_org_id_jwt_org_skips_db():
-    """JWT에 org_id 있으면 DB 조회 없이 통과 (N+1 방지 경로 확인)."""
+async def test_get_verified_org_id_jwt_org_is_asked_once_not_skipped():
+    """story #4772 — the organization a signed token names is no longer taken as it is: the live seat is asked for (once per request: the answer is kept on `request.state`).
+    (Before, this test pinned «no DB read for a JWT org» — the hole: a removed member's old token kept naming the organization.)"""
     from app.dependencies import auth as auth_module
     from app.dependencies.auth import get_verified_org_id
     from tests.conftest import FakeAsyncSessionCtx
     org = uuid.uuid4()
-    auth = _make_auth(org_id=str(org))
+    auth = _make_auth(org_id=str(org), user_id=str(uuid.uuid4()))
 
+    seat = MagicMock()
+    seat.scalar_one_or_none.return_value = uuid.uuid4()   # a live org_members row
     mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=seat)
     mock_request = MagicMock()
     mock_request.state = types.SimpleNamespace()
 
     with patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(mock_db)):
-        result = await get_verified_org_id(
-            auth=auth, x_org_id=None, x_project_id=None, request=mock_request,
-        )
-    assert result == org
-    mock_db.execute.assert_not_called()
+        result = await get_verified_org_id(auth=auth, x_org_id=None, x_project_id=None, request=mock_request)
+        again = await get_verified_org_id(auth=auth, x_org_id=None, x_project_id=None, request=mock_request)
+    assert result == again == org
+    assert mock_db.execute.await_count == 1, "one seat lookup for the request, the second call is answered from request.state"
+
+
+@pytest.mark.anyio
+async def test_get_verified_org_id_jwt_org_without_a_live_seat_is_403():
+    """story #4772 — the same judgement as with a header: no live seat (and no active agent row) → 403, with nothing of the organization in the answer."""
+    from app.dependencies import auth as auth_module
+    from app.dependencies.auth import get_verified_org_id
+    from tests.conftest import FakeAsyncSessionCtx
+    org = uuid.uuid4()
+    auth = _make_auth(org_id=str(org), user_id=str(uuid.uuid4()))
+
+    nobody = MagicMock()
+    nobody.scalar_one_or_none.return_value = None
+    nobody.first.return_value = None
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(return_value=nobody)
+    mock_request = MagicMock()
+    mock_request.state = types.SimpleNamespace()
+
+    with patch.object(auth_module, "async_session_factory", return_value=FakeAsyncSessionCtx(mock_db)):
+        with pytest.raises(HTTPException) as exc_info:
+            await get_verified_org_id(auth=auth, x_org_id=None, x_project_id=None, request=mock_request)
+    assert exc_info.value.status_code == 403
+    assert str(org) not in str(exc_info.value.detail)
 
 
 @pytest.mark.anyio
@@ -266,12 +301,14 @@ async def test_get_verified_org_id_403_on_foreign_project():
     from app.dependencies.auth import get_verified_org_id
     from tests.conftest import FakeAsyncSessionCtx
     org = uuid.uuid4()
-    auth = _make_auth(org_id=str(org), user_id=str(uuid.uuid4()))  # JWT에 org_id 있음 (org 검증 skip)
+    auth = _make_auth(org_id=str(org), user_id=str(uuid.uuid4()))  # JWT에 org_id 있음 (story #4772: 그 org의 소속은 먼저 확인된다 — 아래 첫 조회가 통과)
 
+    seat = MagicMock()
+    seat.scalar_one_or_none.return_value = uuid.uuid4()   # the seat lookup passes …
     mock_result = MagicMock()
-    mock_result.scalar_one_or_none.return_value = None  # has_project_access → False(멤버 아님)
+    mock_result.scalar_one_or_none.return_value = None  # … then has_project_access → False(멤버 아님)
     mock_db = AsyncMock()
-    mock_db.execute = AsyncMock(return_value=mock_result)
+    mock_db.execute = AsyncMock(side_effect=[seat, mock_result])
     mock_request = MagicMock()
     mock_request.state = types.SimpleNamespace()
 
