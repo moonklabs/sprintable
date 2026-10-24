@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, X, Loader2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
@@ -318,11 +318,16 @@ export function useVerificationRail({
   const [timedOut, setTimedOut] = useState(false);
   const [verifyNonce, setVerifyNonce] = useState(0);
 
+  // story #4761 — asks overlap now (a beat every 3 s, [다시 테스트], a push): only the newest answer may be applied, or a slow «not
+  // yet» arriving after a newer «verified» would take the panel back
+  const askSeq = useRef(0);
   const pollStatus = useCallback(async (forAgentId: string, forTransport: Transport) => {
+    const mine = ++askSeq.current;
     try {
       const res = await fetchWithAuth(`/api/agents/${forAgentId}/verification-status?transport=${forTransport}`);
       if (!res.ok) return; // 미머지/404 → pending 유지(가짜 에러 안 띄움)
       const body: unknown = await res.json();
+      if (mine !== askSeq.current) return;
       const raw = parseVerificationRail(body);
       if (raw) setBeSteps(raw);
       setFirstCallAt(parseFirstCallAt(body));
@@ -369,7 +374,7 @@ export function useVerificationRail({
       if (delay === null) return;
       timer = setTimeout(() => { ask(); schedule(); }, delay);
     };
-    const onVisible = () => { if (document.visibilityState === 'visible') ask(); };
+    const onVisible = () => { if (document.visibilityState === 'visible' && nextPollDelay(Date.now() - startedAt) !== null) ask(); };
     document.addEventListener('visibilitychange', onVisible);
     schedule();
     return () => {

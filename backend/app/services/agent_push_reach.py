@@ -9,29 +9,22 @@ waiting with nothing said (4759 walk: first instruction 23:30:16Z, no reply for 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.models.agent_gateway import AgentGatewaySession
 
 
 async def push_reachable_agent_ids(
     db: AsyncSession, agent_ids: set[uuid.UUID], *, webhook_covered: set[uuid.UUID],
 ) -> set[uuid.UUID]:
-    """The subset of `agent_ids` a message reaches without anyone prompting them. One query, none when nothing is left to ask."""
-    reached = {a for a in agent_ids if a in webhook_covered}
-    to_ask = agent_ids - reached
-    if not to_ask:
-        return reached
-    from app.routers.agent_gateway import _SESSION_FRESH_TTL  # lazy: the router imports this layer's neighbours
+    """The subset of `agent_ids` a message reaches without anyone prompting them.
 
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=_SESSION_FRESH_TTL)
-    rows = (await db.execute(
-        select(AgentGatewaySession.agent_id).where(
-            AgentGatewaySession.agent_id.in_(to_ask),
-            AgentGatewaySession.last_seen_at >= cutoff,
-        ).distinct()
-    )).scalars().all()
-    return reached | set(rows)
+    A live gateway stream is judged the way the connection test judges it (`agent_verify._has_fresh_session`): when presence runs
+    on Redis the session row's `last_seen_at` is not kept fresh, so «online» is read from Redis (and the row's existence when Redis
+    is down) — a quiet row is not a dead stream. One check per agent that is neither webhook-covered nor already known."""
+    from app.services.agent_verify import _has_fresh_session
+
+    reached = {a for a in agent_ids if a in webhook_covered}
+    for agent in sorted(agent_ids - reached):  # a message has a handful of agent recipients — one read each is fine
+        if await _has_fresh_session(db, agent):
+            reached.add(agent)
+    return reached

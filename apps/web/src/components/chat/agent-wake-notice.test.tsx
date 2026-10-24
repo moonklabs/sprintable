@@ -53,6 +53,11 @@ describe('AgentWakeNotice (#4761)', () => {
     expect(container.querySelector('[data-testid="agent-wake-copy"]')?.textContent).toContain('문장 복사됨');
   });
 
+  it('an agent without a name is still named — «이름 없는 에이전트»', async () => {
+    const n = await render([{ member_id: 'a', name: '' }]);
+    expect(n?.textContent).toContain('이 에이전트(이름 없는 에이전트)는 새 메시지가 와도 스스로 알아채지 못해요');
+  });
+
   it('nobody to wake → nothing is drawn', async () => {
     expect(await render([])).toBeNull();
   });

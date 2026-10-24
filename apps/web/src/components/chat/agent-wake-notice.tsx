@@ -21,10 +21,11 @@ export function AgentWakeNotice({ targets }: { targets: AgentWakeTarget[] }) {
   const [copied, setCopied] = useState(false);
   if (targets.length === 0) return null;
   const first = targets[0]!;
+  const firstName = first.name || t('agentWakeUnnamed');
   const prompt = t('agentWakePrompt');
   const lead = targets.length === 1
-    ? t('agentWakeLeadOne', { name: first.name })
-    : t('agentWakeLeadMany', { name: first.name, n: targets.length - 1 });
+    ? t('agentWakeLeadOne', { name: firstName })
+    : t('agentWakeLeadMany', { name: firstName, n: targets.length - 1 });
   return (
     <div
       data-testid="agent-wake-notice"

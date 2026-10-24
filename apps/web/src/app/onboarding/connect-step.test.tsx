@@ -142,6 +142,7 @@ describe('ConnectStep — story #4cdad425 (검증 안내 표시 렌더)', () => 
     // the time is the viewer's own clock (the runtime's zone here): the same text the viewer-date place draws
     const clock = new Intl.DateTimeFormat('ko', { hour: 'numeric', minute: '2-digit' }).format(new Date('2026-10-23T23:24:04.418874+00:00'));
     expect(container.textContent).toContain(`${clock}에 처음 호출했어요`);
+    expect(container.querySelector('time')?.getAttribute('datetime')).toBe('2026-10-23T23:24:04.418874+00:00'); // a real <time> element
     expect(container.textContent).not.toContain(ko.onboarding.verifiedBanner);
   });
 

@@ -146,6 +146,32 @@ describe('useVerificationRail — the panel asks again by itself (D1) and says w
     unmount();
   });
 
+  it('an older answer that arrives after a newer one is not applied (a slow «not yet» must not take the panel back)', async () => {
+    const waiters: Array<(v: unknown) => void> = [];
+    global.fetch = vi.fn(() => new Promise((resolve) => { waiters.push((body) => resolve({ ok: true, json: async () => body } as Response)); })) as unknown as typeof fetch;
+    const { read, unmount } = mount();
+    await flush(0);
+    expect(waiters).toHaveLength(1); // the mount's ask, still in flight
+    await flush(POLL_FAST_MS);
+    expect(waiters).toHaveLength(2); // the first beat's ask
+    await act(async () => { waiters[1]!(VERIFIED('2026-10-23T23:24:04.418874+00:00')); await Promise.resolve(); await Promise.resolve(); });
+    expect(read('verified')).toBe('true');
+    await act(async () => { waiters[0]!(WAITING); await Promise.resolve(); await Promise.resolve(); }); // the older one lands late
+    expect(read('verified')).toBe('true');
+    expect(read('first')).toBe('2026-10-23T23:24:04.418874+00:00');
+    unmount();
+  });
+
+  it('after it gave up, showing the tab again does not ask', async () => {
+    const { unmount } = mount();
+    await flush(POLL_GIVE_UP_MS + POLL_SLOW_MS * 2);
+    const settled = calls();
+    act(() => { document.dispatchEvent(new Event('visibilitychange')); });
+    await flush(0);
+    expect(calls()).toBe(settled);
+    unmount();
+  });
+
   it('not enabled → it never asks', async () => {
     const { unmount } = mount({ ...opts, enabled: false });
     await flush(POLL_FAST_MS * 5);

@@ -5532,6 +5532,7 @@
     "agentWakeCopied": "문장 복사됨",
     "agentWakeApp": "Mac 앱을 쓰면 이 문장 없이도 새 메시지를 에이전트에게 넘겨요.",
     "agentWakeAppLink": "Mac 앱 받기",
+    "agentWakeUnnamed": "이름 없는 에이전트",
     "blockUserConfirmTitle": "이 사용자를 차단할까요?",
     "blockUserConfirmDescription": "{name}의 메시지가 보이지 않게 돼요. 업무 배정과 알림은 그대로예요. 언제든 해제할 수 있어요.",
     "blockUserConfirmCancel": "취소",

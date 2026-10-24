@@ -205,7 +205,7 @@ def build_http_verification_rail(*, heartbeat_fresh: bool) -> list[dict]:
     ]
 
 
-async def first_call_of_current_key(db: AsyncSession, agent_id: uuid.UUID) -> datetime | None:
+async def first_call_of_current_key(db: AsyncSession, agent_id: uuid.UUID, org_id: uuid.UUID | None = None) -> datetime | None:
     """story #4761 (D1b): when the agent's CURRENT key was first used — None until it has been.
 
     «Current» = the newest key that is neither revoked nor expired. The first row of THAT key in the usage ledger
@@ -222,13 +222,16 @@ async def first_call_of_current_key(db: AsyncSession, agent_id: uuid.UUID) -> da
             ApiKey.revoked_at.is_(None),
             or_(ApiKey.expires_at.is_(None), ApiKey.expires_at > now),
         )
-        .order_by(ApiKey.created_at.desc())
+        .order_by(ApiKey.created_at.desc(), ApiKey.id.desc())  # two keys made in the same instant: still one answer
         .limit(1)
         .scalar_subquery()
     )
-    return (await db.execute(
-        select(func.min(AgentApiKeyUsageLog.occurred_at)).where(AgentApiKeyUsageLog.api_key_id == current_key)
-    )).scalar_one_or_none()
+    where = [AgentApiKeyUsageLog.api_key_id == current_key]
+    if org_id is not None:
+        # the caller's org's rows only (the ledger keeps the org each call was made under) — a row another org's call left for this
+        # key id is not this org's connection
+        where.append(AgentApiKeyUsageLog.org_id == org_id)
+    return (await db.execute(select(func.min(AgentApiKeyUsageLog.occurred_at)).where(*where))).scalar_one_or_none()
 
 
 async def get_verification_state(
@@ -242,7 +245,7 @@ async def get_verification_state(
     if transport == "http":
         # story #4761 (D1b): the current key's first call latches «connected» (see first_call_of_current_key); a fresh
         # heartbeat still counts on its own (a ledger write that failed silently must not hide a live agent)
-        first_call = await first_call_of_current_key(db, agent_id)
+        first_call = await first_call_of_current_key(db, agent_id, org_id)
         connected = first_call is not None or await _has_fresh_heartbeat(db, agent_id)
         rail = build_http_verification_rail(heartbeat_fresh=connected)
         return {

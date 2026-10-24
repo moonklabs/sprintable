@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSseMultiplexerContext, useSseConnectedContext } from '@/components/realtime-provider';
 import { shouldSuppressDuplicateSseEvent, createSeenIdTracker } from '@/lib/realtime/sse-event-dedup';
 import { createPollBackoffState, POLL_THRESHOLD_MS } from '@/lib/realtime/sse-polling-fallback';
-import { parseAgentWake, type AgentWake } from '@/lib/chat/agent-wake';
+import { parseAgentWake, rememberAgentWake, type AgentWake } from '@/lib/chat/agent-wake';
 
 // chat-attach: 메시지 전송 시 첨부 메타 (BE MessageAttachment 계약과 동일).
 export interface SendAttachment {
@@ -194,6 +194,7 @@ export function sentMessageFromAnswer(raw: Record<string, unknown>): ChatMessage
   for (const listener of [...sentHereListeners]) listener(payload); // story #4442 — this tab's lists update their row
   const delivery = parseDeliveryWithheld(raw.delivery);
   const wake = parseAgentWake(raw.agent_wake); // story #4761 (D3) — a sibling of `data` too, like `delivery`
+  if (wake && typeof payload.id === 'string') rememberAgentWake(payload.id, wake); // a replaced view (fork · re-read) still draws it
   const msg = normalizeToMessage(delivery ? { ...payload, delivery_withheld: delivery } : payload);
   return wake ? { ...msg, agent_wake: wake } : msg;
 }

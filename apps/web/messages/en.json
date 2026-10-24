@@ -5532,6 +5532,7 @@
     "agentWakeCopied": "Sentence copied",
     "agentWakeApp": "With the Mac app, new messages are handed to the agent without this sentence.",
     "agentWakeAppLink": "Get the Mac app",
+    "agentWakeUnnamed": "Unnamed agent",
     "blockUserConfirmTitle": "Block this user?",
     "blockUserConfirmDescription": "{name}'s messages will be hidden. Task assignments and notifications are unaffected. You can unblock anytime.",
     "blockUserConfirmCancel": "Cancel",

@@ -905,7 +905,13 @@ async def _dispatch_conversation_event(
     _agent_pids = {pid for pid in participant_ids if member_type_map.get(pid, "human") == "agent"}
     from app.services.agent_push_reach import push_reachable_agent_ids
 
-    _reached = await push_reachable_agent_ids(db, _agent_pids, webhook_covered=webhook_covered)
+    try:
+        async with db.begin_nested():
+            _reached = await push_reachable_agent_ids(db, _agent_pids, webhook_covered=webhook_covered)
+    except Exception:
+        # a failed reachability read must never cost a message (P0 message-loss class): behave as before — «typing», no wake claim
+        logger.warning("push reachability read failed conversation_id=%s — fail-open", conversation.id, exc_info=True)
+        _reached = set(_agent_pids)
     if wake_required is not None:
         wake_required |= _agent_pids - _reached
     for pid in sorted(participant_ids):  # deadlock 방지: 일관 락 순서
@@ -3216,6 +3222,23 @@ async def send_message_core(
                 mention_evented = frozenset(uuid.UUID(pid) for pid, _ in mention_pushes)
             except Exception:
                 logger.warning("mention event dispatch failed conversation_id=%s", conversation_id, exc_info=True)
+
+        # story #4761 (D3): an agent mentioned from outside the conversation never went through the participant dispatch above — the
+        # same question for it: does this message reach it by itself? (best-effort: the answer only decides what the sender is told)
+        if mention_targets and sender.type != "agent":
+            try:
+                async with db.begin_nested():
+                    _agent_mentions = set((await db.execute(
+                        select(TeamMember.id).where(TeamMember.id.in_(mention_targets), TeamMember.type == "agent")
+                    )).scalars().all()) - agents_to_wake
+                    if _agent_mentions:
+                        from app.services.agent_push_reach import push_reachable_agent_ids
+
+                        agents_to_wake |= _agent_mentions - await push_reachable_agent_ids(
+                            db, _agent_mentions, webhook_covered=webhook_covered_ids,
+                        )
+            except Exception:
+                logger.warning("mention wake check failed conversation_id=%s", conversation_id, exc_info=True)
 
         # story 1934(선생님 앱 done-gate — 대상은 human만): 멘션 대상 human에게 in-app
         # Notification + Expo push. **agent는 명시 제외** — agent는 이미 _dispatch_mention_events

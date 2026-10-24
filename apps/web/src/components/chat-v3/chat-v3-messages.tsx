@@ -14,7 +14,7 @@ import { dayKeyIn } from '@/lib/viewer-time-zone';
 import { InvisibleSample, useViewerTimeZone } from '@/components/viewer-time-zone';
 import { WithheldDeliveryLine } from '@/components/chat/withheld-delivery-line';
 import { AgentWakeNotice } from '@/components/chat/agent-wake-notice';
-import { agentsStillToWake } from '@/lib/chat/agent-wake';
+import { agentsStillToWake, recalledAgentWake } from '@/lib/chat/agent-wake';
 import { ChatV3EventCard } from './chat-v3-event-card';
 import { seedFromCompose } from './chat-v3-compose';
 import { newClientNonce, normalizeToMessage, sentMessageFromAnswer, type ChatMessage } from '@/hooks/use-chat-sse';
@@ -272,8 +272,8 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
                   {/* story #4430 — right under the sender's own bubble, above the reference and approval cards */}
                   <WithheldDeliveryLine withheld={m.delivery_withheld} isMine={isMine} />
                   {/* story #4761 (D3) — see chat-view: the fact and what to do, not a «typing» that was never true */}
-                  {m.agent_wake && isMine ? (
-                    <AgentWakeNotice targets={agentsStillToWake(m.agent_wake, messages.slice(messages.indexOf(m) + 1))} />
+                  {isMine && (m.agent_wake ?? recalledAgentWake(m.id)) ? (
+                    <AgentWakeNotice targets={agentsStillToWake(m.agent_wake ?? recalledAgentWake(m.id), messages.slice(messages.indexOf(m) + 1))} />
                   ) : null}
                   {(m.references ?? []).map((ref) => (
                     <div key={`${ref.target_type}-${ref.target_id}`} className="mt-1.5">

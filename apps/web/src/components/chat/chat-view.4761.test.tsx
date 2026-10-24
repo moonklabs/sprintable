@@ -118,6 +118,21 @@ describe('ChatView — story #4761 (D3) what to do when the agent cannot hear th
     expect(container.querySelector('[data-testid="agent-wake-app-link"]')?.getAttribute('href')).toContain('/desktop');
   });
 
+  it('a view that is built after the send (fork · re-read) still draws the line the answer carried', async () => {
+    // the send answered earlier in this tab (the memory the line is kept in is exercised by agent-wake.test.ts through the real send)
+    const { rememberAgentWake } = await import('@/lib/chat/agent-wake');
+    rememberAgentWake('m-forked', { required: [{ member_id: 'ag-1', name: 'Walk Agent' }] });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/messages?')) {
+        return { ok: true, json: async () => ({ data: [{ ...SENT, id: 'm-forked' }], meta: { next_cursor: null, has_more: false } }) };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    await mount();
+    for (let i = 0; i < 8; i += 1) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="agent-wake-notice"]')?.textContent).toContain('이 에이전트(Walk Agent)');
+  });
+
   it('no `agent_wake` in the answer → no line (an agent that hears the message needs none)', async () => {
     stubFetch({ data: SENT });
     await send();

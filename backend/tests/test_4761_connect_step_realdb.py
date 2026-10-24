@@ -57,13 +57,15 @@ async def _world(Session):
     return org.id, project.id, agent
 
 
-async def _key(Session, org_id, agent, *, created_ago_s=0, revoked=False, expired=False) -> uuid.UUID:
+async def _key(Session, org_id, agent, *, created_ago_s=0, revoked=False, expired=False, created_at=None, legacy_only=False,
+               key_id=None) -> uuid.UUID:
     from app.models.api_key import ApiKey
 
     now = datetime.now(timezone.utc)
     k = ApiKey(
-        id=uuid.uuid4(), team_member_id=agent, member_id=agent, key_prefix="sk_live_ab", key_hash=uuid.uuid4().hex,
-        created_at=now - timedelta(seconds=created_ago_s),
+        id=key_id or uuid.uuid4(), team_member_id=agent, member_id=None if legacy_only else agent, key_prefix="sk_live_ab",
+        key_hash=uuid.uuid4().hex,
+        created_at=created_at or now - timedelta(seconds=created_ago_s),
         revoked_at=now if revoked else None,
         expires_at=(now - timedelta(seconds=1)) if expired else None,
     )
@@ -73,13 +75,13 @@ async def _key(Session, org_id, agent, *, created_ago_s=0, revoked=False, expire
     return k.id
 
 
-async def _call(Session, org_id, agent, key_id, *, ago_s: int) -> datetime:
+async def _call(Session, org_id, agent, key_id, *, ago_s: int, row_org=None) -> datetime:
     from app.models.agent_api_key_usage_log import AgentApiKeyUsageLog
 
     at = datetime.now(timezone.utc) - timedelta(seconds=ago_s)
     async with Session() as s:
         s.add(AgentApiKeyUsageLog(
-            id=uuid.uuid4(), api_key_id=key_id, org_id=org_id, member_id=agent, endpoint="/api/v2/dashboard", method="GET",
+            id=uuid.uuid4(), api_key_id=key_id, org_id=row_org or org_id, member_id=agent, endpoint="/api/v2/dashboard", method="GET",
             mcp_transport="http", occurred_at=at,
         ))
         await s.commit()
@@ -217,6 +219,55 @@ async def test_06_a_fresh_heartbeat_alone_still_counts_when_the_ledger_write_was
         await engine.dispose()
 
 
+@_realdb
+async def test_06b_a_row_another_org_left_for_this_key_is_not_this_orgs_connection():
+    """The ledger keeps the org each call was made under. A row under another org (a key id that was seen elsewhere) does not
+    verify this org's agent; the same key's row under THIS org does."""
+    engine, Session = await _session_factory()
+    try:
+        org_id, _, agent = await _world(Session)
+        key = await _key(Session, org_id, agent)
+        await _call(Session, org_id, agent, key, ago_s=60, row_org=uuid.uuid4())
+        assert (await _state(Session, org_id, agent))["verified"] is False
+        mine = await _call(Session, org_id, agent, key, ago_s=30)
+        st = await _state(Session, org_id, agent)
+        assert st["verified"] is True and st["first_call_at"] == mine.isoformat()
+    finally:
+        await engine.dispose()
+
+
+@_realdb
+async def test_06c_a_key_that_only_the_legacy_member_column_names_counts():
+    """`agent_api_keys` carries two member columns (member_id the mirror, team_member_id the legacy one). A key written with only the
+    legacy one is still the agent's key."""
+    engine, Session = await _session_factory()
+    try:
+        org_id, _, agent = await _world(Session)
+        key = await _key(Session, org_id, agent, legacy_only=True)
+        first = await _call(Session, org_id, agent, key, ago_s=30)
+        st = await _state(Session, org_id, agent)
+        assert st["verified"] is True and st["first_call_at"] == first.isoformat()
+    finally:
+        await engine.dispose()
+
+
+@_realdb
+async def test_06d_two_keys_made_in_the_same_instant_give_one_answer_the_newer_id_wins():
+    engine, Session = await _session_factory()
+    try:
+        org_id, _, agent = await _world(Session)
+        at = datetime.now(timezone.utc) - timedelta(seconds=120)
+        low, high = sorted([uuid.uuid4(), uuid.uuid4()])
+        k_low = await _key(Session, org_id, agent, created_at=at, key_id=low)
+        k_high = await _key(Session, org_id, agent, created_at=at, key_id=high)
+        await _call(Session, org_id, agent, k_low, ago_s=60)
+        assert (await _state(Session, org_id, agent))["verified"] is False  # the higher id is «current» and has not been used
+        await _call(Session, org_id, agent, k_high, ago_s=30)
+        assert (await _state(Session, org_id, agent))["verified"] is True
+    finally:
+        await engine.dispose()
+
+
 def test_07_nothing_in_app_deletes_from_the_usage_ledger():
     """The latch reads the first row of a key. A retention job that cleared old rows would let it go for a key in use for long —
     this is the guard that says so before anyone adds one."""
@@ -334,9 +385,87 @@ async def test_14_a_webhook_covered_agent_is_reached_without_asking_the_database
     a, b = uuid.uuid4(), uuid.uuid4()
     db = AsyncMock()
     r = MagicMock()
-    r.scalars.return_value.all.return_value = []
+    r.first.return_value = None
     db.execute = AsyncMock(return_value=r)
     assert await push_reachable_agent_ids(db, {a}, webhook_covered={a}) == {a}
     assert db.execute.await_count == 0
     assert await push_reachable_agent_ids(db, {a, b}, webhook_covered={a}) == {a}  # b asked, not found
     assert db.execute.await_count == 1
+
+
+async def test_15_with_presence_on_redis_online_is_what_counts_not_a_quiet_session_row(monkeypatch):
+    """codex round 1: with presence on Redis the session row's last_seen_at is not kept fresh — «online» comes from Redis (the way the
+    connection test judges it). Redis online → reached even when the row says nothing; Redis says offline → not; Redis down (None) → the
+    row's existence."""
+    from app.core.config import settings
+    from app.services import presence_online
+    from app.services.agent_push_reach import push_reachable_agent_ids
+
+    monkeypatch.setattr(settings, "presence_online_redis_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "redis_url", "redis://example:6379", raising=False)
+    a = uuid.uuid4()
+    db = AsyncMock()
+    row = MagicMock()
+    row.first.return_value = ("session-row",)
+    db.execute = AsyncMock(return_value=row)
+
+    monkeypatch.setattr(presence_online, "is_online", AsyncMock(return_value=True))
+    assert await push_reachable_agent_ids(db, {a}, webhook_covered=set()) == {a}
+    assert db.execute.await_count == 0  # Redis answered
+
+    monkeypatch.setattr(presence_online, "is_online", AsyncMock(return_value=False))
+    assert await push_reachable_agent_ids(db, {a}, webhook_covered=set()) == set()
+
+    monkeypatch.setattr(presence_online, "is_online", AsyncMock(return_value=None))  # Redis down
+    assert await push_reachable_agent_ids(db, {a}, webhook_covered=set()) == {a}  # a session row exists
+    row.first.return_value = None
+    assert await push_reachable_agent_ids(db, {a}, webhook_covered=set()) == set()
+
+
+@_realdb
+async def test_16_an_agent_mentioned_from_outside_the_conversation_is_told_about_too():
+    """codex round 1: a mention-only agent never went through the participant dispatch — the sender still has to hear that it will
+    not notice."""
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id)
+            human_id, human_user = await _make_human_member(s, org.id, project.id)
+            partner_id, _ = await _make_human_member(s, org.id, project.id)
+            outsider = await _make_agent_member(s, org.id, project.id)
+            conv = await _make_conversation(s, org.id, project.id, [human_id, partner_id], human_id, conv_type="group")
+        from app.main import app
+
+        await _setup_app_human(app, Session, human_user, org.id)
+        try:
+            async with _client_for(app) as client:
+                r = await client.post(f"/api/v2/conversations/{conv}/messages",
+                                      json={"content": "@agent look", "mentioned_ids": [str(outsider)]})
+        finally:
+            app.dependency_overrides.clear()
+        assert r.status_code == 201, r.text
+        assert [x["member_id"] for x in r.json()["agent_wake"]["required"]] == [str(outsider)]
+    finally:
+        await engine.dispose()
+
+
+@_realdb
+async def test_17_a_failed_reachability_read_never_costs_the_message(monkeypatch):
+    """The read only decides «typing» and what the sender is told. If it fails the message is still sent, the agent shows as before
+    (typing — no worse than until now) and no wake claim is made."""
+    engine, Session = await _session_factory()
+    try:
+        import app.services.agent_push_reach as reach
+
+        async def boom(*_a, **_k):
+            raise RuntimeError("redis and database both gone")
+
+        monkeypatch.setattr(reach, "push_reachable_agent_ids", boom)
+        org_id, human_user, agent, conv = await _dm_with_agent(Session)
+        r = await _send(Session, org_id, human_user, conv)
+        assert r.status_code == 201, r.text
+        assert "agent_wake" not in r.json()
+        assert await _working(conv) == [str(agent)]
+    finally:
+        await engine.dispose()
