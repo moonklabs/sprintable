@@ -25,8 +25,16 @@ describe('the verify hint and the retry button speak with one word (story 4766 A
     expect(ko.onboarding.advanced.timeoutHint).not.toMatch(/허용/);
     expect(en.onboarding.advanced.timeoutHint).not.toMatch(/allow/i);
     // what it does name is the real dead end measured on dev: Claude Code quitting at the folder question
-    expect(ko.onboarding.advanced.timeoutHint).toContain('폴더 확인');
-    expect(en.onboarding.advanced.timeoutHint).toContain('folder question');
+    expect(ko.onboarding.advanced.timeoutHint).toContain('폴더를 믿을지 묻는 곳'); // the SAME words the next-step sentence uses for the one thing (Yuna)
+    expect(ko.onboarding.advanced.timeoutHint).toContain('종료되지'); // a program ends («종료»); «꺼짐» is for switches
+    expect(ko.onboarding.advanced.timeoutHint).not.toMatch(/꺼지/);
+    expect(en.onboarding.advanced.timeoutHint).toContain('the question about trusting the folder');
+    // only what was measured is claimed: the folder question ending a session is measured for Claude Code, not for Codex — the Codex hint says nothing of it
+    for (const h of [ko.onboarding.advanced.timeoutHintCodex, en.onboarding.advanced.timeoutHintCodex]) expect(h).not.toMatch(/폴더|folder|Claude Code/);
+    expect(ko.onboarding.advanced.timeoutHintCodex).toContain(`「${ko.onboarding.verifyRetry}」`);
+    expect(en.onboarding.advanced.timeoutHintCodex).toContain(en.onboarding.verifyRetry);
+    expect(ko.onboarding.advanced.timeoutHintCodex).not.toMatch(/허용/);
+    expect(en.onboarding.advanced.timeoutHintCodex).not.toMatch(/allow/i);
   });
 });
 

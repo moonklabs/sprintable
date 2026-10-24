@@ -402,7 +402,7 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
             {rail.timedOut ? (
               <div role="status" className="rounded-md border border-info-border bg-info-tint px-3 py-2.5 text-xs text-foreground" data-testid="advanced-timeout">
                 <p className="font-medium">{tOnb('verifyTimeoutTitle')}</p>
-                <p className="mt-1">{t('timeoutHint')}</p>
+                <p className="mt-1">{runtime === 'claude' ? t('timeoutHint') : t('timeoutHintCodex')}</p>
                 <Button variant="outline" size="sm" className="mt-2" onClick={() => void rail.handleVerify()} disabled={rail.verifying} data-testid="advanced-retest">
                   {tOnb('verifyRetry')}
                 </Button>
