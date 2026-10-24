@@ -268,6 +268,28 @@ async def test_06d_two_keys_made_in_the_same_instant_give_one_answer_the_newer_i
         await engine.dispose()
 
 
+@_realdb
+async def test_06e_a_row_whose_org_was_never_resolved_is_this_keys_call_all_the_same():
+    """codex round 2: `org_id` of the ledger is nullable (resolution is best-effort at write time). A legitimate call of the agent's
+    current key with no org recorded still connects it — the org filter is there to keep out ANOTHER org's rows, not unresolved ones."""
+    from sqlalchemy import update
+
+    from app.models.agent_api_key_usage_log import AgentApiKeyUsageLog
+
+    engine, Session = await _session_factory()
+    try:
+        org_id, _, agent = await _world(Session)
+        key = await _key(Session, org_id, agent)
+        first = await _call(Session, org_id, agent, key, ago_s=300)
+        async with Session() as s:
+            await s.execute(update(AgentApiKeyUsageLog).where(AgentApiKeyUsageLog.api_key_id == key).values(org_id=None))
+            await s.commit()
+        st = await _state(Session, org_id, agent)
+        assert st["verified"] is True and st["first_call_at"] == first.isoformat()
+    finally:
+        await engine.dispose()
+
+
 def test_07_nothing_in_app_deletes_from_the_usage_ledger():
     """The latch reads the first row of a key. A retention job that cleared old rows would let it go for a key in use for long —
     this is the guard that says so before anyone adds one."""
@@ -379,35 +401,49 @@ async def test_13_in_a_group_only_the_agent_that_is_not_reached_is_listed():
         await engine.dispose()
 
 
+def _rows(*ids):
+    r = MagicMock()
+    r.scalars.return_value.all.return_value = list(ids)
+    return r
+
+
 async def test_14_a_webhook_covered_agent_is_reached_without_asking_the_database():
     from app.services.agent_push_reach import push_reachable_agent_ids
 
     a, b = uuid.uuid4(), uuid.uuid4()
     db = AsyncMock()
-    r = MagicMock()
-    r.first.return_value = None
-    db.execute = AsyncMock(return_value=r)
+    db.execute = AsyncMock(return_value=_rows())
     assert await push_reachable_agent_ids(db, {a}, webhook_covered={a}) == {a}
     assert db.execute.await_count == 0
     assert await push_reachable_agent_ids(db, {a, b}, webhook_covered={a}) == {a}  # b asked, not found
     assert db.execute.await_count == 1
 
 
+async def test_14b_every_agent_is_asked_in_one_read_not_one_per_agent():
+    """codex round 2: a group message must not cost a read per agent recipient."""
+    from app.services.agent_push_reach import push_reachable_agent_ids
+
+    ids = {uuid.uuid4() for _ in range(6)}
+    live = sorted(ids)[:2]
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_rows(*live))
+    assert await push_reachable_agent_ids(db, ids, webhook_covered=set()) == set(live)
+    assert db.execute.await_count == 1
+
+
 async def test_15_with_presence_on_redis_online_is_what_counts_not_a_quiet_session_row(monkeypatch):
     """codex round 1: with presence on Redis the session row's last_seen_at is not kept fresh — «online» comes from Redis (the way the
     connection test judges it). Redis online → reached even when the row says nothing; Redis says offline → not; Redis down (None) → the
-    row's existence."""
+    row's existence. All agents are asked of Redis together; only the ones Redis could not answer for go to the database, in one read."""
     from app.core.config import settings
     from app.services import presence_online
     from app.services.agent_push_reach import push_reachable_agent_ids
 
     monkeypatch.setattr(settings, "presence_online_redis_enabled", True, raising=False)
     monkeypatch.setattr(settings, "redis_url", "redis://example:6379", raising=False)
-    a = uuid.uuid4()
+    a, b, c = sorted(uuid.uuid4() for _ in range(3))
     db = AsyncMock()
-    row = MagicMock()
-    row.first.return_value = ("session-row",)
-    db.execute = AsyncMock(return_value=row)
+    db.execute = AsyncMock(return_value=_rows())
 
     monkeypatch.setattr(presence_online, "is_online", AsyncMock(return_value=True))
     assert await push_reachable_agent_ids(db, {a}, webhook_covered=set()) == {a}
@@ -415,11 +451,15 @@ async def test_15_with_presence_on_redis_online_is_what_counts_not_a_quiet_sessi
 
     monkeypatch.setattr(presence_online, "is_online", AsyncMock(return_value=False))
     assert await push_reachable_agent_ids(db, {a}, webhook_covered=set()) == set()
+    assert db.execute.await_count == 0
 
-    monkeypatch.setattr(presence_online, "is_online", AsyncMock(return_value=None))  # Redis down
-    assert await push_reachable_agent_ids(db, {a}, webhook_covered=set()) == {a}  # a session row exists
-    row.first.return_value = None
-    assert await push_reachable_agent_ids(db, {a}, webhook_covered=set()) == set()
+    answers = {a: True, b: False, c: None}  # a online · b offline · c: Redis cannot say
+    monkeypatch.setattr(presence_online, "is_online", AsyncMock(side_effect=lambda x: answers[x]))
+    db.execute = AsyncMock(return_value=_rows(c))  # c has a session row
+    assert await push_reachable_agent_ids(db, {a, b, c}, webhook_covered=set()) == {a, c}
+    assert db.execute.await_count == 1  # one read, only for c
+    db.execute = AsyncMock(return_value=_rows())  # c has none
+    assert await push_reachable_agent_ids(db, {a, b, c}, webhook_covered=set()) == {a}
 
 
 @_realdb

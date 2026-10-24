@@ -229,8 +229,9 @@ async def first_call_of_current_key(db: AsyncSession, agent_id: uuid.UUID, org_i
     where = [AgentApiKeyUsageLog.api_key_id == current_key]
     if org_id is not None:
         # the caller's org's rows only (the ledger keeps the org each call was made under) — a row another org's call left for this
-        # key id is not this org's connection
-        where.append(AgentApiKeyUsageLog.org_id == org_id)
+        # key id is not this org's connection. A row whose org was never resolved (the column is nullable — org resolution is
+        # best-effort when the row is written) is this key's call all the same: the key IS this agent's, and the agent is this org's
+        where.append(or_(AgentApiKeyUsageLog.org_id == org_id, AgentApiKeyUsageLog.org_id.is_(None)))
     return (await db.execute(select(func.min(AgentApiKeyUsageLog.occurred_at)).where(*where))).scalar_one_or_none()
 
 

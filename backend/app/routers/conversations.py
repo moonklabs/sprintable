@@ -906,8 +906,11 @@ async def _dispatch_conversation_event(
     from app.services.agent_push_reach import push_reachable_agent_ids
 
     try:
-        async with db.begin_nested():
-            _reached = await push_reachable_agent_ids(db, _agent_pids, webhook_covered=webhook_covered)
+        if _agent_pids:  # no agent recipient → nothing to ask (and no savepoint to open)
+            async with db.begin_nested():
+                _reached = await push_reachable_agent_ids(db, _agent_pids, webhook_covered=webhook_covered)
+        else:
+            _reached = set()
     except Exception:
         # a failed reachability read must never cost a message (P0 message-loss class): behave as before — «typing», no wake claim
         logger.warning("push reachability read failed conversation_id=%s — fail-open", conversation.id, exc_info=True)

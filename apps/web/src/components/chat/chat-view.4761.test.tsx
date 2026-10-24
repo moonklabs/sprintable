@@ -139,6 +139,21 @@ describe('ChatView — story #4761 (D3) what to do when the agent cannot hear th
     expect(container.querySelector('[data-testid="agent-wake-notice"]')).toBeNull();
   });
 
+  it('an agent that answers in a thread needs no nudge line either (thread replies never enter the main list)', async () => {
+    stubFetch({ data: SENT, agent_wake: { required: [{ member_id: 'ag-1', name: 'Walk Agent' }] } });
+    await send();
+    expect(container.querySelector('[data-testid="agent-wake-notice"]')).not.toBeNull();
+    const opts = useChatSseMock.mock.calls.at(-1)?.[0] as { onConversationMessage?: (p: Record<string, unknown>) => void };
+    await act(async () => {
+      opts.onConversationMessage?.({
+        id: 'm11', conversation_id: 'thread-1', thread_id: 'm9', parent_id: 'm9', sender: { id: 'ag-1', name: 'Walk Agent', type: 'agent' },
+        content: '스레드로 답해요', attachments: [], created_at: '2026-10-23T23:32:14.410000+00:00',
+      });
+    });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="agent-wake-notice"]')).toBeNull();
+  });
+
   it('the line goes away when that agent says anything after my message', async () => {
     stubFetch({ data: SENT, agent_wake: { required: [{ member_id: 'ag-1', name: 'Walk Agent' }] } });
     await send();

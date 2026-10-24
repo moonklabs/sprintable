@@ -8,23 +8,58 @@ waiting with nothing said (4759 walk: first instruction 23:30:16Z, no reply for 
 """
 from __future__ import annotations
 
+import asyncio
 import uuid
+from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.agent_gateway import AgentGatewaySession
+
+
+async def _agents_with_live_stream(db: AsyncSession, agent_ids: list[uuid.UUID]) -> set[uuid.UUID]:
+    """The agents of `agent_ids` that hold a live gateway stream — judged as `agent_verify._has_fresh_session` judges one agent
+    (that is the connection test's rule), in one pass for all of them:
+
+    - presence on Redis (`presence_online_redis_enabled`): the session row's `last_seen_at` is not kept fresh then, so «online» is
+      read from Redis — all agents at once; the ones Redis cannot answer for (it is down: None) fall back to «has a session row»
+    - otherwise: a session row seen within the session window — one query.
+    """
+    from app.core.config import settings
+
+    if settings.presence_online_redis_enabled and settings.redis_url:
+        from app.services import presence_online
+
+        answers = await asyncio.gather(*(presence_online.is_online(a) for a in agent_ids))
+        live = {a for a, online in zip(agent_ids, answers) if online}
+        unknown = [a for a, online in zip(agent_ids, answers) if online is None]
+        if unknown:
+            rows = (await db.execute(
+                select(AgentGatewaySession.agent_id).where(AgentGatewaySession.agent_id.in_(unknown)).distinct()
+            )).scalars().all()
+            live |= set(rows)
+        return live
+
+    from app.routers.agent_gateway import _SESSION_FRESH_TTL  # lazy: the router imports this layer's neighbours
+
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=_SESSION_FRESH_TTL)
+    rows = (await db.execute(
+        select(AgentGatewaySession.agent_id).where(
+            AgentGatewaySession.agent_id.in_(agent_ids),
+            AgentGatewaySession.last_seen_at >= cutoff,
+        ).distinct()
+    )).scalars().all()
+    return set(rows)
 
 
 async def push_reachable_agent_ids(
     db: AsyncSession, agent_ids: set[uuid.UUID], *, webhook_covered: set[uuid.UUID],
 ) -> set[uuid.UUID]:
-    """The subset of `agent_ids` a message reaches without anyone prompting them.
-
-    A live gateway stream is judged the way the connection test judges it (`agent_verify._has_fresh_session`): when presence runs
-    on Redis the session row's `last_seen_at` is not kept fresh, so «online» is read from Redis (and the row's existence when Redis
-    is down) — a quiet row is not a dead stream. One check per agent that is neither webhook-covered nor already known."""
-    from app.services.agent_verify import _has_fresh_session
-
+    """The subset of `agent_ids` a message reaches without anyone prompting them. No read at all when nothing is left to ask
+    after the webhook-covered ones."""
     reached = {a for a in agent_ids if a in webhook_covered}
-    for agent in sorted(agent_ids - reached):  # a message has a handful of agent recipients — one read each is fine
-        if await _has_fresh_session(db, agent):
-            reached.add(agent)
-    return reached
+    to_ask = sorted(agent_ids - reached)
+    if not to_ask:
+        return reached
+    return reached | await _agents_with_live_stream(db, to_ask)
