@@ -34,7 +34,7 @@ function InstructionInput({ autoFocus }: { autoFocus: boolean }) {
   const [value, setValue] = useState('');
   // story #4762 (AC1) — one press sends when the person has exactly one agent DM; `sending` holds a second press, `failed` keeps the text and says so
   const [sending, setSending] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<null | 'refused' | 'unknown'>(null);
   const sendingRef = useRef(false); // a second press in the same tick sees the state of the render before — the ref holds it at once
   const mountedRef = useRef(true);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
@@ -53,7 +53,7 @@ function InstructionInput({ autoFocus }: { autoFocus: boolean }) {
     e.preventDefault();
     const trimmed = value.trim();
     if (!trimmed || sendingRef.current) return;
-    setFailed(false);
+    setFailed(null);
     // story #3831 PO 確定(c)(2026-09-13 14:04Z) — 수신자 발명 0. 「대화」의 기존 두 경로
     // (최근 대화 프리필 / 0건이면 새 대화 모달, chat-list-view.tsx 참고)로 위임만 한다.
     const handOver = () => router.push(flatHref(`/chats?compose=${encodeURIComponent(trimmed)}`));
@@ -66,12 +66,14 @@ function InstructionInput({ autoFocus }: { autoFocus: boolean }) {
     // the person left the screen, or moved to another project, while the list was being read: nothing is sent (the DM found belongs to the project they left)
     if (!mountedRef.current || projectRef.current !== projectId) { sendingRef.current = false; if (mountedRef.current) setSending(false); return; }
     if (!target) { sendingRef.current = false; setSending(false); handOver(); return; }
-    const sent = await sendInstruction(target, trimmed);
+    const outcome = await sendInstruction(target, trimmed);
     sendingRef.current = false;
     if (!mountedRef.current) return; // sent, and the person has gone elsewhere: no state to set, nowhere to take them
     setSending(false);
-    if (!sent) { setFailed(true); return; }
+    if (outcome !== 'sent') { setFailed(outcome); return; }
     setValue('');
+    // it went to the DM of the project the person WAS on: if they moved to another project during the send, they are not taken back to the one they left
+    if (projectRef.current !== projectId) return;
     // 대상-프로젝트: 현재 p가 곧 대상 프로젝트다 — findSoleAgentDm이 현재 프로젝트(project_id=현재)의 대화 목록만 읽어 고른 대화다.
     router.push(flatHref(`/chats/${encodeURIComponent(target)}`));
   };
@@ -92,7 +94,7 @@ function InstructionInput({ autoFocus }: { autoFocus: boolean }) {
       />
       <Button type="submit" size="sm" disabled={!value.trim() || sending} aria-busy={sending}>{t('instructionSendButton')}</Button>
     </form>
-    {failed ? <p role="alert" data-testid="today-instruction-failed" className="mt-2 pe-14 text-xs text-destructive lg:pe-0">{t('instructionSendFailed')}</p> : null}
+    {failed ? <p role="alert" data-testid="today-instruction-failed" className="mt-2 pe-14 text-xs text-destructive lg:pe-0">{failed === 'unknown' ? t('instructionSendUnknown') : t('instructionSendFailed')}</p> : null}
     </>
   );
 }

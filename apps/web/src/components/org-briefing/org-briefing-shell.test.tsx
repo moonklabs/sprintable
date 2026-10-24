@@ -449,6 +449,22 @@ describe('OrgBriefingShell — story #4762 AC1 한 번 누름 = 서버에 메시
     expect(pushMock).not.toHaveBeenCalled();
   });
 
+  it('no answer at all (network) says «check the chat first» — a different line than a refusal, the text stays, nobody is pushed', async () => {
+    calls = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? 'GET' });
+      if (url === '/api/today') return { ok: true, status: 200, json: async () => ({ data: EMPTY_TODAY }) };
+      if (url.startsWith('/api/conversations?')) return { ok: true, status: 200, json: async () => ({ data: [agentDm('c1', 'a1')], total: 1 }) };
+      if (url.endsWith('/messages')) throw new TypeError('network down');
+      return { ok: true, status: 200, json: async () => ({ data: null }) };
+    }));
+    await mount();
+    const input = await typeAndSend('maybe sent');
+    expect(container.querySelector('[data-testid="today-instruction-failed"]')?.textContent).toBe(koMessages.orgBriefing.instructionSendUnknown);
+    expect(input.value).toBe('maybe sent');
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
   it('while sending, a second press does not send twice', async () => {
     stubWorld({ conversations: [agentDm('c1', 'a1')] });
     await mount();
@@ -506,6 +522,31 @@ describe('OrgBriefingShell — story #4762 AC1 한 번 누름 = 서버에 메시
     root = createRoot(container); // afterEach unmounts it
     await act(async () => { release(null); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it('the person moves to another project while the message is being sent → the line is cleared (it was sent) but they are not taken back to the project they left', async () => {
+    let release!: (v: unknown) => void;
+    calls = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? 'GET' });
+      if (url === '/api/today') return { ok: true, status: 200, json: async () => ({ data: EMPTY_TODAY }) };
+      if (url.startsWith('/api/conversations?')) return { ok: true, status: 200, json: async () => ({ data: [agentDm('c1', 'a1')], total: 1 }) };
+      if (url.endsWith('/messages')) { await new Promise((r) => { release = r; }); return { ok: true, status: 201, json: async () => ({ data: { id: 'm1', content: 'x', created_by: ME, conversation_id: 'c1', sender: { id: ME, name: 'me', type: 'human' } } }) }; }
+      return { ok: true, status: 200, json: async () => ({ data: null }) };
+    }));
+    await mount();
+    const input = container.querySelector('[data-testid="today-instruction-input"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(input, 'sent from p1'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => { input.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+    for (let i = 0; i < 6 && !release; i += 1) await act(async () => { await Promise.resolve(); });
+    useDashboardContextMock.mockReturnValue({ projectId: 'p2', currentTeamMemberId: ME, projectMemberships: [], orgMemberships: [] });
+    const { OrgBriefingShell } = await import('./org-briefing-shell');
+    await act(async () => { root.render(wrap(<OrgBriefingShell />)); });
+    await act(async () => { release(null); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
+    expect(pushMock).not.toHaveBeenCalled();
+    expect((container.querySelector('[data-testid="today-instruction-input"]') as HTMLInputElement).value).toBe('');
   });
 
   it('the person is on another project when the list answers → nothing is sent to the project they left', async () => {

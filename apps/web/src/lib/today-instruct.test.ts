@@ -82,7 +82,7 @@ describe('sendInstruction', () => {
   it('posts the text as the chat composer does (through fetchWithAuth), then hands the answer on (agent_wake is remembered there)', async () => {
     const answer = { data: { id: 'm1' }, agent_wake: { required: [{ member_id: 'a1', name: 'Claude Code' }] } };
     vi.mocked(fetchWithAuth).mockResolvedValue({ ok: true, json: async () => answer } as Response);
-    expect(await sendInstruction('c1', 'hello')).toBe(true);
+    expect(await sendInstruction('c1', 'hello')).toBe('sent');
     const [url, init] = vi.mocked(fetchWithAuth).mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('/api/chats/c1/messages');
     expect(init.method).toBe('POST');
@@ -93,17 +93,17 @@ describe('sendInstruction', () => {
 
   it('the server made the message but its answer cannot be read → still a success (a failure shown now would make a retry post it twice)', async () => {
     vi.mocked(fetchWithAuth).mockResolvedValue({ ok: true, json: async () => { throw new SyntaxError('bad json'); } } as unknown as Response);
-    expect(await sendInstruction('c1', 'hello')).toBe(true);
+    expect(await sendInstruction('c1', 'hello')).toBe('sent');
     vi.mocked(fetchWithAuth).mockResolvedValue({ ok: true, json: async () => ({ data: {} }) } as Response);
     sentMessageFromAnswer.mockImplementationOnce(() => { throw new Error('normalize'); });
-    expect(await sendInstruction('c1', 'hello')).toBe(true);
+    expect(await sendInstruction('c1', 'hello')).toBe('sent');
   });
 
-  it('a refusal or a thrown send is false and hands nothing on', async () => {
+  it('a refusal is `refused` (nothing was made — a retry is safe); no answer at all (network · time limit) is `unknown` (it may exist — no blind retry); neither hands anything on', async () => {
     vi.mocked(fetchWithAuth).mockResolvedValueOnce({ ok: false, json: async () => ({}) } as Response);
-    expect(await sendInstruction('c1', 'hello')).toBe(false);
+    expect(await sendInstruction('c1', 'hello')).toBe('refused');
     vi.mocked(fetchWithAuth).mockRejectedValueOnce(new Error('network'));
-    expect(await sendInstruction('c1', 'hello')).toBe(false);
+    expect(await sendInstruction('c1', 'hello')).toBe('unknown');
     expect(sentMessageFromAnswer).not.toHaveBeenCalled();
   });
 });

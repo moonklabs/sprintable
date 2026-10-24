@@ -452,6 +452,7 @@
     "instructionInputPlaceholder": "Type one line to instruct…",
     "instructionSendButton": "Send",
     "instructionSendFailed": "Couldn't send — your line is still here, try again.",
+    "instructionSendUnknown": "Couldn't confirm it was sent. Open the chat to check before you send it again.",
     "signalHypothesisFalsifiedTitle": "A hypothesis was falsified",
     "clusterFalsifiedTitle": "Hypothesis refuted",
     "clusterFalsifiedSub": "Recently refuted hypotheses · linked to what comes next",

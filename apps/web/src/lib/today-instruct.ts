@@ -47,8 +47,15 @@ export async function findSoleAgentDm(projectId: string, selfMemberId: string): 
   }
 }
 
-/** sends `text` to the conversation as the chat's own composer does (`POST /api/chats/{id}/messages`, through fetchWithAuth); true when the server made the message */
-export async function sendInstruction(conversationId: string, text: string): Promise<boolean> {
+/**
+ * `sent` — the server made the message · `refused` — the server answered no (nothing was made: a retry is safe) · `unknown` — no answer (a network error or the
+ * time limit): the message may or may not exist. The server only echoes `client_nonce` (it does not de-duplicate by it), so a retry after `unknown` could post the
+ * line twice — the screen says «check the chat first» instead of offering a blind retry.
+ */
+export type SendOutcome = 'sent' | 'refused' | 'unknown';
+
+/** sends `text` to the conversation as the chat's own composer does (`POST /api/chats/{id}/messages`, through fetchWithAuth) */
+export async function sendInstruction(conversationId: string, text: string): Promise<SendOutcome> {
   try {
     const res = await fetchWithAuth(`/api/chats/${encodeURIComponent(conversationId)}/messages`, {
       method: 'POST',
@@ -56,13 +63,13 @@ export async function sendInstruction(conversationId: string, text: string): Pro
       body: JSON.stringify({ content: text, client_nonce: newClientNonce() }),
       timeoutMs: SEND_TIMEOUT_MS,
     });
-    if (!res.ok) return false;
+    if (!res.ok) return 'refused';
     // the server made the message: from here on this is a success whatever the answer's body looks like — a failure shown now would keep the text and a
     // retry would post it a second time. The answer only carries `agent_wake` (story #4761): remembered by message id, so the DM the person lands on draws
     // «this agent has to be woken» under the message (no «sent, and nothing happens»); an unreadable answer just loses that line.
     try { sentMessageFromAnswer(await res.json() as Record<string, unknown>); } catch { /* the message exists; only the extra line is lost */ }
-    return true;
+    return 'sent';
   } catch {
-    return false;
+    return 'unknown';
   }
 }
