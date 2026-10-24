@@ -1248,6 +1248,8 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str, device_i
                 select(OrgMember.id).where(OrgMember.org_id == setup.org_id, OrgMember.user_id == locked_confirmer).with_for_update(read=True)
             )
     locked = await _lock_in_order(db, member_ids=attached, setup_ids={setup.id, *other_ids})
+    if setup.id not in locked:
+        raise DesktopSetupError("code_not_found")  # story #4771 (codex r1): the row went with its organization (a delete committed) between the read and the lock — not a KeyError (500)
     setup = locked[setup.id]
     others = [locked[i] for i in sorted(other_ids) if i in locked]
     if not _attached_agents(setup) <= attached:

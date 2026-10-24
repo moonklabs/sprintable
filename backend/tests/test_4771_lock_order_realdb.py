@@ -154,6 +154,42 @@ async def test_04_a_disconnect_whose_setup_row_went_with_its_organization_answer
         await _close(engine, w)
 
 
+async def test_05_an_exchange_whose_setup_row_went_with_its_organization_is_not_a_500():
+    """codex 4771 r1: the exchange indexed the locked rows directly, so a setup that an organization delete removed between its read and its lock was a KeyError (500), like the
+    disconnect. A session holds the setup row, the exchange (a confirmed, not yet exchanged code) waits at its lock, the row is deleted and committed: the answer is 404 code_not_found."""
+    import base64
+    import hashlib
+    import secrets
+
+    from sqlalchemy import text
+
+    engine, w = await _world()
+    try:
+        uid, _, org_id = await w.person(org=True, name="Owner")
+        verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
+        challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+        r = await w.client.post("/api/v2/desktop/setup-codes", json={"challenge": challenge, "device_name": "mac 4771"})
+        assert r.status_code == 201, r.text
+        body = r.json()
+        setup_id = uuid.UUID(body["setup_id"])
+        await w.sql(
+            "UPDATE desktop_setups SET org_id = :o, confirmed_by = :u, confirmed_at = now(), project_id = (SELECT id FROM projects WHERE org_id = :o LIMIT 1) WHERE id = :i",
+            o=org_id, u=uid, i=setup_id,
+        )
+        holder = w.Session()
+        async with holder:
+            await holder.execute(text("SELECT id FROM desktop_setups WHERE id = :i FOR UPDATE"), {"i": setup_id})
+            exchanging = asyncio.create_task(w.client.post("/api/v2/desktop/setup-codes/exchange", json={"code": body["code"], "verifier": verifier}))
+            await asyncio.sleep(1.0)
+            assert not exchanging.done(), "the exchange waits at the setup row"
+            await holder.execute(text("DELETE FROM desktop_setups WHERE id = :i"), {"i": setup_id})
+            await holder.commit()
+        resp = await asyncio.wait_for(exchanging, timeout=20)
+        assert resp.status_code == 404, (resp.status_code, resp.text[:200])
+    finally:
+        await _close(engine, w)
+
+
 async def _round(w, rng: random.Random) -> dict:
     """One round of the lens' matrix on a fresh organization: the owner deletes the organization, the admin M (who confirmed a computer) deletes the account, the owner
     disconnects the computer and the owner revokes the key of its agent — all at once, each started after a random pause."""
