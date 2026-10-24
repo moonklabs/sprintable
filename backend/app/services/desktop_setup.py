@@ -1219,17 +1219,29 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str, device_i
             DesktopSetup.exchanged_at.is_not(None),
         )
     )).scalars().all())
+    # security lens 4767 (Kadir ③): the confirming person's user row FIRST, shared — the account deletion takes that row (FOR UPDATE) before the member rows
+    # and the setup rows, so an exchange that overlaps an open deletion waits for it and then finds the person gone (`confirming_person_is_gone` below),
+    # instead of handing out keys the deletion's closer (which ran before the confirmation) will never see. Taking it after the setup rows would deadlock.
+    locked_confirmer = setup.confirmed_by
+    if locked_confirmer is not None:
+        from app.models.user import User
+
+        await db.execute(select(User.id).where(User.id == locked_confirmer).with_for_update(read=True))
     locked = await _lock_in_order(db, member_ids=attached, setup_ids={setup.id, *other_ids})
     setup = locked[setup.id]
     others = [locked[i] for i in sorted(other_ids) if i in locked]
     if not _attached_agents(setup) <= attached:
         return None  # confirmed between the read and the lock: its agents are not locked yet — the app asks again
+    if setup.confirmed_by != locked_confirmer:
+        return None  # confirmed (or confirmed by someone else) between the read and the lock: that person's row is not held — the app asks again
     if setup.exchanged_at is not None or setup.revoked_at is not None:
         raise DesktopSetupError("code_used")
     if _now() >= setup.expires_at:
         raise DesktopSetupError("code_expired")
     if setup.confirmed_at is None:
         return None
+    if await confirming_person_is_gone(db, setup):
+        raise DesktopSetupError("code_used")  # story #4767: the person closed their account between confirming and this exchange — no keys, no device token
 
     api_url, mcp_url = exchange_urls()
     if not mcp_url or not api_url:
@@ -1339,9 +1351,6 @@ async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
     """«Disconnect this device»: every key this setup handed out, and only those — and the agents this setup made stop
     (story #4434 · PO: «disconnect = that device's agents stop»): they become inactive, so they no longer count toward the
     org's agent limit; their record and work stay (not deleted). Only this setup's own agents, in this org."""
-    from sqlalchemy import func
-
-    from app.models.member import Member
     from app.services.project_auth import is_org_owner_or_admin
 
     found = (await db.execute(
@@ -1351,12 +1360,70 @@ async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
         raise DesktopSetupError("setup_not_found")
     if not await is_org_owner_or_admin(db, user_id, org_id):
         raise DesktopSetupError("not_org_admin")
+    return await _disconnect_setup(db, found, org_id=org_id, revoked_by=user_id)
+
+
+ACCOUNT_DELETED_REASON = "account_deleted"
+
+
+async def confirming_person_is_gone(db: AsyncSession, setup: DesktopSetup) -> bool:
+    """story #4767: the account of the person who confirmed this setup is closed or deleted. No confirmer recorded, or no `users` row for it, is not
+    «gone» (the same reading as the relay's device authentication)."""
+    from app.models.user import User
+
+    if setup.confirmed_by is None:
+        return False
+    row = (await db.execute(select(User.is_active, User.deleted_at).where(User.id == setup.confirmed_by))).first()
+    return row is not None and (row.is_active is False or row.deleted_at is not None)
+
+
+async def close_setups_of_deleted_account(db: AsyncSession, *, user_id: uuid.UUID) -> int:
+    """story #4767 — the computers a person confirmed stay in an organization that outlives their account (another owner stays): the
+    row, its device token and its keys kept working — a device token reaches the relay without looking at who confirmed it. The account
+    deletion closes each open one of them exactly as a disconnect does (`_disconnect_setup`: keys, device token, open commands, open
+    stream, clock view, the agents the setup made), without asking whether the person may still manage the organization — they are
+    leaving. `revoked_reason` says why. The organizations that closed with the account took their setups with them (cascade).
+    Returns how many were closed."""
+    rows = list((await db.execute(
+        select(DesktopSetup.id, DesktopSetup.members).where(DesktopSetup.confirmed_by == user_id, DesktopSetup.revoked_at.is_(None)).order_by(DesktopSetup.id)
+    )).all())
+    if not rows:
+        return 0
+    # codex 4767 r2: ONE lock for all of them, in the service's one order (every agent member row any of them made, by id, then the setup rows, by id) — locking
+    # setup by setup would hold an earlier setup row while waiting for a later setup's agent row, the order an exchange takes the other way round (deadlock)
+    made = {
+        uuid.UUID(str(m["member_id"])) for _, members in rows for m in (members or [])
+        if m.get("kind") == "agent" and m.get("member_id") and not m.get("existing")
+    }
+    locked = await _lock_in_order(db, member_ids=made, setup_ids={sid for sid, _ in rows})
+    closed = 0
+    for setup_id in sorted(locked):
+        found = locked[setup_id]
+        if found.org_id is None:
+            continue
+        done = await _disconnect_setup(db, found, org_id=found.org_id, revoked_by=user_id, reason=ACCOUNT_DELETED_REASON, locked=locked)
+        closed += 0 if done.already else 1
+    return closed
+
+
+async def _disconnect_setup(
+    db: AsyncSession, found: DesktopSetup, *, org_id: uuid.UUID, revoked_by: uuid.UUID, reason: str | None = None,
+    locked: dict[uuid.UUID, DesktopSetup] | None = None,
+) -> Revoked:
+    """The disconnect itself (the authority check is the caller's): `revoke_setup` for a person's «disconnect», `close_setups_of_deleted_account`
+    for an account that is going away."""
+    from sqlalchemy import func
+
+    from app.models.member import Member
+
+    user_id = revoked_by
     # story #4565 (PO 02:51Z): the one lock order — the member rows this disconnect may stop, then the setup row
     made = {
         uuid.UUID(str(m["member_id"])) for m in (found.members or [])
         if m.get("kind") == "agent" and m.get("member_id") and not m.get("existing")
     }
-    setup = (await _lock_in_order(db, member_ids=made, setup_ids={found.id}))[found.id]
+    # `locked`: the caller already took every row it will touch in that one order (the account deletion closes several setups)
+    setup = locked[found.id] if locked is not None else (await _lock_in_order(db, member_ids=made, setup_ids={found.id}))[found.id]
     now = _now()
     revoked = (await db.execute(
         update(ApiKey).where(ApiKey.desktop_setup_id == setup.id, ApiKey.revoked_at.is_(None))
@@ -1387,6 +1454,8 @@ async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
     if not already:
         setup.revoked_at = now
         setup.revoked_by = user_id
+        if reason is not None:
+            setup.revoked_reason = reason
     await db.flush()
     return Revoked(keys=len(revoked), already=already, revoked_at=setup.revoked_at, revoked_by=setup.revoked_by)
 

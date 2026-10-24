@@ -244,6 +244,13 @@ async def delete_account(
                         "orgs": [{"id": org["id"], "name": org["name"], "reason": "other_members" if closed.get("reason") == "members_joined" else "active_subscription"}]},
             )
 
+    # story #4767: the computers this person confirmed in an organization that stays — closed like a disconnect (keys, device token, open commands and
+    # stream), in the same transaction: a deletion that cannot close them fails whole (retry) instead of leaving a deleted person's agent keys alive.
+    # (Authentication refuses such a device anyway — `device_for_token` — but the keys the setup handed out are only closed here.)
+    from app.services.desktop_setup import close_setups_of_deleted_account
+
+    await close_setups_of_deleted_account(session, user_id=uid)
+
     now = datetime.now(timezone.utc)
     await session.execute(
         text("UPDATE org_members SET deleted_at = :now WHERE user_id = CAST(:uid AS uuid) AND deleted_at IS NULL"),

@@ -112,20 +112,28 @@ async def revoke_device_tokens(db: AsyncSession, setup_id: uuid.UUID, *, now: da
 
 
 async def device_for_token(db: AsyncSession, token: str | None) -> DesktopSetup | None:
-    """The device a token belongs to — None for no token, another shape, an unknown or revoked token, or a disconnected device."""
+    """The device a token belongs to — None for no token, another shape, an unknown or revoked token, a disconnected device, or a device whose
+    confirming person's account is closed or deleted (story #4767: a computer is a person's, and a closed account owns no computer; this also covers the
+    rows an account deletion left before the deletion closed its computers). A confirmer with no `users` row at all (or none recorded) is not judged here:
+    `confirmed_by` has no foreign key and the relay contract (4618) has always served such a row."""
+    from app.models.user import User
+
     if not token or not token.startswith(TOKEN_PREFIX):
         return None
     row = (await db.execute(
-        select(DesktopDeviceToken, DesktopSetup)
+        select(DesktopDeviceToken, DesktopSetup, User.is_active, User.deleted_at)
         .join(DesktopSetup, DesktopSetup.id == DesktopDeviceToken.setup_id)
+        .outerjoin(User, User.id == DesktopSetup.confirmed_by)
         .where(DesktopDeviceToken.token_hash == _hash(token))
     )).first()
     if row is None:
         return None
-    tok, setup = row
+    tok, setup, person_active, person_deleted_at = row
     if not hmac.compare_digest(tok.token_hash, _hash(token)):
         return None
     if tok.revoked_at is not None or setup.revoked_at is not None or setup.exchanged_at is None:
+        return None
+    if person_active is False or person_deleted_at is not None:  # a closed account, a deleted one: the same refusal (no user row: person_active is None — not judged)
         return None
     return setup
 
@@ -140,15 +148,18 @@ async def touch_device(db: AsyncSession, setup_id: uuid.UUID) -> None:
 
 
 async def device_still_valid(db: AsyncSession, setup_id: uuid.UUID) -> bool:
-    """An open stream asks again: a disconnect (device revoked · its token revoked) ends it."""
+    """An open stream asks again: a disconnect (device revoked · its token revoked · its confirming person gone — story #4767) ends it."""
+    from app.models.user import User
+
     row = (await db.execute(
-        select(DesktopSetup.revoked_at, func.count(DesktopDeviceToken.id))
+        select(DesktopSetup.revoked_at, func.count(DesktopDeviceToken.id), User.is_active, User.deleted_at)
         .select_from(DesktopSetup)
         .outerjoin(DesktopDeviceToken, (DesktopDeviceToken.setup_id == DesktopSetup.id) & DesktopDeviceToken.revoked_at.is_(None))
+        .outerjoin(User, User.id == DesktopSetup.confirmed_by)
         .where(DesktopSetup.id == setup_id)
-        .group_by(DesktopSetup.revoked_at)
+        .group_by(DesktopSetup.revoked_at, User.is_active, User.deleted_at)
     )).first()
-    return row is not None and row[0] is None and row[1] > 0
+    return row is not None and row[0] is None and row[1] > 0 and row[2] is not False and row[3] is None
 
 
 # ── sessions ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────

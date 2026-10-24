@@ -803,7 +803,7 @@ async def test_25_an_account_reclaim_waits_for_the_report_in_flight_and_then_lea
 _LOCKED_FORGET_SITES = {
     # (file, enclosing function): both are inside desktop_setup's exchange / disconnect, which take the setup rows through `_lock_in_order` before they get here
     ("app/services/desktop_setup.py", "_retire_same_machine"),
-    ("app/services/desktop_setup.py", "revoke_setup"),
+    ("app/services/desktop_setup.py", "_disconnect_setup"),   # story #4767: the disconnect's body (revoke_setup and the account deletion's closer both go through it)
 }
 
 
