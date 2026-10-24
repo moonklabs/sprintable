@@ -59,9 +59,16 @@ export function useEmailVerifyGate(active = true, onOpened?: () => void): Verify
   useEffect(() => { opened.current = onOpened; }, [onOpened]);
 
   // an unreadable answer never holds a person back: the server's own 403 is still there behind the gate
+  // an opened gate never closes again: a slow older «not verified» answer that comes after it opened (a read that was out when the signal came) changes nothing — it must not re-arm `wasClosed`
+  // either, or `onOpened` would run a second time (codex)
+  const isOpen = useRef(false);
   const apply = useCallback((me: Me | null) => {
     if (!me) { setGate((g) => (g.kind === 'reading' ? { kind: 'open' } : g)); return; }
-    if (gateClosed(me)) { wasClosed.current = true; setGate((g) => (g.kind === 'open' ? g : { kind: 'closed', email: me.email })); return; }
+    if (gateClosed(me)) {
+      if (isOpen.current) return;
+      wasClosed.current = true; setGate((g) => (g.kind === 'open' ? g : { kind: 'closed', email: me.email })); return;
+    }
+    isOpen.current = true;
     if (wasClosed.current) { wasClosed.current = false; opened.current?.(); }
     setGate({ kind: 'open' });
   }, []);

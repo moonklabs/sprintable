@@ -122,9 +122,10 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
     // story 4763: the other renewals — before the arrival decides there is no organization (AC11) and on the organization-deleted screen (H6) — go through ONE shared helper (`renewSession`, a single
     // call in flight, its result read); it is the third place that calls `refreshAuthTokens()`
     expect(form.match(/await refreshAuthTokens\(\)\.catch\(\(\) => null\)/g)?.length).toBe(2);
-    expect(form.match(/refreshAuthTokens\(\)/g)?.length).toBe(3);
+    expect(form.match(/refreshAuthTokens\(\)/g)?.length).toBe(2);
+    expect(form.match(/refreshSessionOnce\(\)/g)?.length).toBe(1); // the helper joins the page's ONE flight (the one `fetchWithAuth` joins on a 401)
     expect(form.match(/renewSession\(\)/g)?.length).toBe(2);
-    expect(form).toMatch(/import \{ fetchWithAuth, refreshAuthTokens \} from '@\/lib\/db\/client';/);
+    expect(form).toMatch(/import \{ fetchWithAuth, refreshAuthTokens, refreshSessionOnce \} from '@\/lib\/db\/client';/);
   });
 
   // The old bare `fetch(...).catch(() => null)` swallowed every failure of the rotation and the form went on; refreshAuthTokens can reject (a network error, an answer

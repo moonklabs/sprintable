@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { ACTIVATION_REFRESH_MS, _resetActivationStatusCacheForTests, useActivationStatus } from './use-activation-status';
+import { ACTIVATION_REFRESH_MS, _checklistListenerKeysForTests, _resetActivationStatusCacheForTests, useActivationStatus } from './use-activation-status';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -281,6 +281,19 @@ describe('useActivationStatus — 회신이 오면 스스로 체크(story #4763)
     await flush();
     expect(rt()).toBe('true|false');
     expect(container.querySelector('[data-testid="plain"]')!.textContent).toBe('true');
+  });
+
+  it('a hook that unmounts leaves no empty entry of its organization behind (codex)', async () => {
+    vi.stubGlobal('fetch', sequence([PARTIAL]));
+    function Org({ id }: { id: string }) { useActivationStatus(undefined, { orgId: id }); return null; }
+    await act(async () => { root.render(<Org id="org-1" />); });
+    await flush();
+    expect(_checklistListenerKeysForTests()).toBe(1);
+    await act(async () => { root.render(<Org id="org-2" />); }); // another organization: the first one's set goes
+    await flush();
+    expect(_checklistListenerKeysForTests()).toBe(1);
+    await act(async () => { root.render(<></>); });
+    expect(_checklistListenerKeysForTests()).toBe(0);
   });
 
   it('complete with no organization known (no stored complete flag to stop it) → the condition itself stops the reading', async () => {

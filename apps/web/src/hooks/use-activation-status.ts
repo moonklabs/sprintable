@@ -72,6 +72,10 @@ const sharedFetchPromises = new Map<string, Promise<ActivationState | null>>();
 
 // story #4763 (codex): a re-read made by the banner is told to every other user of this organization's checklist (the support launcher gates on it too), so none keeps an older «open»
 const checklistListeners = new Map<string, Set<(data: ActivationState) => void>>();
+/** test only: how many organization keys still hold a listener set */
+export function _checklistListenerKeysForTests(): number {
+  return checklistListeners.size;
+}
 function publishChecklist(orgKey: string, data: ActivationState): void {
   checklistListeners.get(orgKey)?.forEach((listen) => listen(data));
 }
@@ -81,6 +85,7 @@ function publishChecklist(orgKey: string, data: ActivationState): void {
 // fetch 응답이 캐시로 남아 뒤 테스트에 새지 않도록 test setup에서 명시 호출한다.
 export function _resetActivationStatusCacheForTests(): void {
   sharedFetchPromises.clear();
+  checklistListeners.clear();
 }
 
 async function fetchActivationState(orgKey: string): Promise<ActivationState | null> {
@@ -165,7 +170,10 @@ export function useActivationStatus(
     const set = checklistListeners.get(key) ?? new Set();
     set.add(listen);
     checklistListeners.set(key, set);
-    return () => { set.delete(listen); };
+    return () => {
+      set.delete(listen);
+      if (set.size === 0 && checklistListeners.get(key) === set) checklistListeners.delete(key); // no empty entry per organization left in the module for good (codex)
+    };
   }, [skip, orgId]);
   const stillOpen = options?.refreshWhileIncomplete === true && !skip && result != null && result.data.all_complete !== true;
   useEffect(() => {

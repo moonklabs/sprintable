@@ -7,7 +7,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { OperatorInput, OperatorTextarea, OperatorSelect } from '@/components/ui/operator-control';
 import { useTranslations } from 'next-intl';
-import { fetchWithAuth, refreshAuthTokens } from '@/lib/db/client';
+import { fetchWithAuth, refreshAuthTokens, refreshSessionOnce } from '@/lib/db/client';
 import { defaultOrgName } from '@/lib/default-org-name';
 import { fetchMyInvites, type MyInvite } from '@/lib/my-invites';
 import { InvitedCard } from '@/components/desktop/desktop-setup';
@@ -116,17 +116,15 @@ export function OnboardingForm({
 
   const progress = onboardingProgress(step);
 
-  // story 4763 (codex): the session is renewed by ONE call at a time — the refresh token rotates on use, so the deleted screen's own renewal and the press's (or a double press) must share the
-  // call in flight, not race it. `refreshAuthTokens` answers `{data, error}` instead of throwing: a missing `data` is not a success either. NO_REFRESH_TOKEN = nothing to renew.
-  const renewing = useRef<Promise<'renewed' | 'nothing-to-renew' | 'failed'> | null>(null);
-  const renewSession = () => {
-    if (!renewing.current) {
-      renewing.current = refreshAuthTokens()
-        .then((r): 'renewed' | 'nothing-to-renew' | 'failed' => (!r ? 'failed' : r.error ? (r.error.code === 'NO_REFRESH_TOKEN' ? 'nothing-to-renew' : 'failed') : r.data ? 'renewed' : 'failed'), () => 'failed' as const)
-        .finally(() => { renewing.current = null; });
-    }
-    return renewing.current;
-  };
+  // story 4763 (codex): the session is renewed by ONE call at a time for the whole page (`refreshSessionOnce` — the very flight `fetchWithAuth` joins on a 401): the refresh token rotates on use, so
+  // the deleted screen's own renewal, the press's, a double press and an interceptor's must share the call in flight, not race it. `refreshAuthTokens` answers `{data, error}` instead of
+  // throwing: a missing `data` is not a success either. NO_REFRESH_TOKEN = nothing to renew.
+  const renewSession = () => refreshSessionOnce().then(
+    (r): 'renewed' | 'nothing-to-renew' | 'failed' => (!r ? 'failed' : r.error ? (r.error.code === 'NO_REFRESH_TOKEN' ? 'nothing-to-renew' : 'failed') : r.data ? 'renewed' : 'failed'),
+    () => 'failed' as const,
+  );
+  // the deleted screen is drawn only after its quiet check has answered (a person who still has an organization must not see «no organization» flash by)
+  const [deletedChecked, setDeletedChecked] = useState(false);
 
   // OB-4: wizard 진입 1회 emit. session_id는 telemetry가 sessionStorage로 1회차당 고정.
   useEffect(() => {
@@ -265,8 +263,8 @@ export function OnboardingForm({
       const res = await fetchWithAuth('/api/auth/me');
       if (!res.ok) return;
       const existing = existingOrgIdFromMe(await res.json());
-      if (existing && !off) { setOrgId(existing); setStep('first'); }
-    })().catch(() => undefined);
+      if (existing && !off) { forgetOrgDeletedMarker(); setOrgId(existing); setStep('first'); } // the marker goes too: a reload is the usual onboarding, not this check again
+    })().catch(() => undefined).finally(() => { if (!off) setDeletedChecked(true); });
     return () => { off = true; };
   }, [step]);
 
@@ -420,6 +418,16 @@ export function OnboardingForm({
   };
 
   // story 4763 (H6): the only organization was just deleted — the screen says so; the new organization is made by this press (a second reading of invites included)
+  if (step === 'deleted' && !deletedChecked) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4" data-testid="onboarding-org-deleted-checking">
+        <p role="status" aria-live="polite" className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" aria-hidden />
+          <span>{t('arriving')}</span>
+        </p>
+      </div>
+    );
+  }
   if (step === 'deleted') {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4">

@@ -22,7 +22,8 @@ export function listenVerified(onVerified: () => void): () => void {
     channel = new BroadcastChannel(VERIFIED_SIGNAL);
     channel.onmessage = () => onVerified();
   } catch { channel = null; }
-  const onStorage = (e: StorageEvent) => { if (e.key === VERIFIED_SIGNAL) onVerified(); };
+  // a REMOVAL of the key (a sign-out clearing the account's keys) is not a verification: only a value written says so
+  const onStorage = (e: StorageEvent) => { if (e.key === VERIFIED_SIGNAL && e.newValue !== null) onVerified(); };
   window.addEventListener('storage', onStorage);
   return () => {
     window.removeEventListener('storage', onStorage);

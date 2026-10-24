@@ -52,6 +52,16 @@ describe('[SID:4763 AC7] the e-mail verified signal', () => {
     stop();
   });
 
+  it('a REMOVAL of the key (a sign-out clearing the account\'s keys) is not a verification (codex)', () => {
+    const heard = vi.fn();
+    const stop = listenVerified(heard);
+    window.dispatchEvent(new StorageEvent('storage', { key: VERIFIED_SIGNAL, newValue: null }));
+    expect(heard).not.toHaveBeenCalled();
+    window.dispatchEvent(new StorageEvent('storage', { key: VERIFIED_SIGNAL, newValue: '1' }));
+    expect(heard).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
   it('after stop() nothing is heard and the channel is closed', () => {
     const heard = vi.fn();
     const stop = listenVerified(heard);

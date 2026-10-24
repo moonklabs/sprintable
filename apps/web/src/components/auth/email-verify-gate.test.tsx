@@ -193,6 +193,33 @@ describe('[SID:4453] the «verify your e-mail» gate', () => {
     expect(opened).toHaveBeenCalledTimes(1);
   });
 
+  it('[SID:4763 codex] a slow older «not verified» answer after the gate opened does not re-arm it: switching the screen on again reads «verified» without a second `onOpened`', async () => {
+    let reads = 0;
+    let releaseFirst!: () => void;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url !== '/api/auth/me') return new Response('{}', { status: 404 });
+      reads += 1;
+      if (reads === 1) {
+        await new Promise<void>((resolve) => { releaseFirst = resolve; });
+        return new Response(JSON.stringify({ data: { email_verified: false, email_verification_required: true } }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ data: { email_verified: true, email_verification_required: true } }), { status: 200 });
+    }));
+    const opened = vi.fn();
+    function Probe({ on }: { on: boolean }) { const g = useEmailVerifyGate(on, opened); return <span data-testid="kind">{g.kind}</span>; }
+    await act(async () => { root.render(<Probe on />); });
+    await flush();
+    await act(async () => { window.dispatchEvent(new StorageEvent('storage', { key: 'sprintable-email-verified', newValue: '1' })); });
+    await flush();
+    expect(opened).toHaveBeenCalledTimes(1);
+    await act(async () => { releaseFirst(); });
+    await flush(); // the older «not verified» answer arrives now — the gate is open already
+    await act(async () => { root.render(<Probe on={false} />); });
+    await act(async () => { root.render(<Probe on />); }); // the screen reads again (verified)
+    await flush();
+    expect(opened).toHaveBeenCalledTimes(1);
+  });
+
   it('[SID:4763 AC7] some other storage key says nothing to the gate', async () => {
     await mount();
     const before = meReads;

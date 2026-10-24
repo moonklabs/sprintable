@@ -23,9 +23,10 @@ let urls: string[];
 
 /** `meAnswers`: what each `/api/auth/me` read answers, in order (the last one repeats); `'down'` = the read fails. */
 type Renewal = 'ok' | '503' | '401' | '429' | 'network' | 'not-json' | 'empty' | 'no-refresh-token';
-function stubFetch(meAnswers: Array<Me | 'down'>, renewal: Renewal = 'ok', refreshGate?: Promise<void>) {
+function stubFetch(meAnswers: Array<Me | 'down' | 'expired'>, renewal: Renewal = 'ok', refreshGate?: Promise<void>) {
   urls = [];
   let meReads = 0;
+  let somethingCalls = 0;
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
     urls.push(url);
@@ -34,8 +35,10 @@ function stubFetch(meAnswers: Array<Me | 'down'>, renewal: Renewal = 'ok', refre
       const a = meAnswers[Math.min(meReads, meAnswers.length - 1)]!;
       meReads += 1;
       if (a === 'down') return { ok: false, status: 500, headers: new Headers(), json: async () => ({}) } as Response;
+      if (a === 'expired') return { ok: false, status: 401, headers: new Headers(), json: async () => ({}) } as Response; // an access token that ran out: fetchWithAuth renews and asks again
       return ok(a);
     }
+    if (url === '/api/something') return { ok: somethingCalls++ > 0, status: somethingCalls > 1 ? 200 : 401, headers: new Headers(), json: async () => ({}) } as Response;
     if (url === '/api/onboarding/events') return ok({});
     if (url === '/api/organizations/org-1/remote-control') return ok({ enabled: false, enabled_at: null, can_change: true, owner_names: [] });
     if (url === '/api/invites/mine') return { ok: true, status: 200, headers: new Headers(), json: async () => ({ invites: [] }) } as Response;
@@ -57,7 +60,7 @@ function stubFetch(meAnswers: Array<Me | 'down'>, renewal: Renewal = 'ok', refre
 }
 
 const provider = (node: React.ReactNode) => <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">{node}</NextIntlClientProvider>;
-const settle = () => act(async () => { for (let i = 0; i < 14; i++) await Promise.resolve(); });
+const settle = () => act(async () => { for (let i = 0; i < 80; i++) await Promise.resolve(); }); // the chain is long: shared renewal → account read → the check's end
 const made = () => urls.filter((u) => u === '/api/organizations').length;
 const byId = (id: string) => container.querySelector(`[data-testid="${id}"]`);
 
@@ -143,18 +146,44 @@ describe('[SID:4763 H6] after the organization was deleted', () => {
     expect(byId('onboarding-org-deleted')).toBeNull();
   });
 
-  it('the deleted screen\'s own renewal and a quick press share ONE renewal in flight (a refresh token is single-use: two at once can log the person out) (codex)', async () => {
+  it('another request of the page meets a 401 while the screen\'s own renewal is in flight: it joins that ONE rotation (the refresh token is single-use) (codex)', async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     stubFetch([NO_ORG, NO_ORG], 'ok', gate);
+    const { fetchWithAuth } = await import('@/lib/db/client');
     await act(async () => { root.render(provider(<OnboardingForm todayHref="/today" chatsHref="/chats" afterOrgDelete />)); });
-    await settle(); // the screen has asked for its renewal; it has not come back
-    await act(async () => { (byId('onboarding-org-deleted-new') as HTMLButtonElement).click(); });
+    await settle(); // the screen asked for its renewal; it has not come back
+    expect(urls.filter((u) => u === '/api/auth/refresh')).toHaveLength(1);
+    const other = fetchWithAuth('/api/something'); // its first answer is a 401 → it renews through the same flight
     await settle();
-    expect(urls.filter((u) => u === '/api/auth/refresh')).toHaveLength(1); // the press waited for the one in flight
+    expect(urls).toContain('/api/something');
+    expect(urls.filter((u) => u === '/api/auth/refresh')).toHaveLength(1); // not a second rotation racing the first
+    await act(async () => { release(); });
+    await other;
+    await settle();
+    expect(byId('onboarding-org-deleted')).not.toBeNull(); // and the screen went on: no organization
+  });
+
+  it('the deleted card is not drawn until the quiet check has answered (no flash of «no organization» for someone who has one) (codex)', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    stubFetch([WITH_ORG], 'ok', gate);
+    await act(async () => { root.render(provider(<OnboardingForm todayHref="/today" chatsHref="/chats" afterOrgDelete />)); });
+    await settle();
+    expect(byId('onboarding-org-deleted')).toBeNull();
+    expect(byId('onboarding-org-deleted-checking')).not.toBeNull();
     await act(async () => { release(); });
     await settle();
-    expect(made()).toBe(1);
+    expect(byId('onboarding-org-deleted')).toBeNull(); // someone who has an organization never sees it
+    expect(byId('onboarding-org-deleted-checking')).toBeNull();
+  });
+
+  it('someone who has an organization also loses `?after=org-deleted` from the address (a reload is the usual onboarding, not the check again) (codex)', async () => {
+    window.history.replaceState(null, '', '/onboarding?after=org-deleted');
+    stubFetch([WITH_ORG]);
+    await act(async () => { root.render(provider(<OnboardingForm todayHref="/today" chatsHref="/chats" afterOrgDelete />)); });
+    await settle();
+    expect(window.location.search).toBe('');
   });
 
   it('a reload or an old link AFTER the new organization exists does not say «no organization» — the person goes on as an account with one (codex)', async () => {
