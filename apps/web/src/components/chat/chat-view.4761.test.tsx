@@ -154,6 +154,20 @@ describe('ChatView — story #4761 (D3) what to do when the agent cannot hear th
     expect(container.querySelector('[data-testid="agent-wake-notice"]')).toBeNull();
   });
 
+  it('a reply in ANOTHER message\'s thread does not hide the line', async () => {
+    stubFetch({ data: SENT, agent_wake: { required: [{ member_id: 'ag-1', name: 'Walk Agent' }] } });
+    await send();
+    const opts = useChatSseMock.mock.calls.at(-1)?.[0] as { onConversationMessage?: (p: Record<string, unknown>) => void };
+    await act(async () => {
+      opts.onConversationMessage?.({
+        id: 'm12', conversation_id: 'thread-1', thread_id: 'some-older-message', parent_id: 'some-older-message',
+        sender: { id: 'ag-1', name: 'Walk Agent', type: 'agent' }, content: '다른 스레드', attachments: [], created_at: '2026-10-23T23:32:14.410000+00:00',
+      });
+    });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="agent-wake-notice"]')).not.toBeNull();
+  });
+
   it('the line goes away when that agent says anything after my message', async () => {
     stubFetch({ data: SENT, agent_wake: { required: [{ member_id: 'ag-1', name: 'Walk Agent' }] } });
     await send();
