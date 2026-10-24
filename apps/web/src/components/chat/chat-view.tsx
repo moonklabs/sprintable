@@ -153,9 +153,6 @@ function blockFailureIsRetryable(status: number): boolean {
   return status >= 500 || status === 408 || status === 429;
 }
 
-// story #4761 — how many «who answered in whose thread» entries the nudge line remembers (a view that stays open for long)
-const THREAD_REPLY_CAP = 100;
-
 export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref: backHrefProp, commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants, initialComposeText }: ChatViewProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   // story #4231 3차 — 기본 복귀 목적지(대화 목록 · flat)도 현재 프로젝트를 싣는다(넘겨받은 값은 호출처 책임).
@@ -173,6 +170,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const isMobile = useIsMobile();
   const { addToast } = useToast();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const messagesRef = useRef<ChatMessage[]>([]); // story #4761 — the SSE handler reads the list as it is now (the nudge line of a message)
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
   // story #3638(유나 디자인 CHANGES 2026-09-07) — 초기 로드(:349) 실패가 messages를
   // 빈 배열로 남겨 「대화를 시작하세요」를 그렸다 — 메시지가 있는 대화를 «없다»고
   // 말하는 §1 클래스(모름을 없음으로 오독). ConnectionLostBanner는 handlePoll 경로
@@ -249,10 +248,10 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // CB-S9: 스레드 패널 상태
   const [activeThread, setActiveThread] = useState<ChatMessage | null>(null);
   const [threadIncoming, setThreadIncoming] = useState<ChatMessage | null>(null);
-  // story #4761 — who answered in whose thread (those replies never enter `messages`): an agent that answered IN THE THREAD OF my message
-  // needs no nudge line for it. Kept with the conversation and the parent, so another thread's reply — or one from a conversation this
-  // view showed before — never hides a line.
-  const [threadReplies, setThreadReplies] = useState<Array<{ conv: string; parent: string; by: string }>>([]);
+  // story #4761 — the nudge line ends ONE WAY: once an agent has answered in the thread of my message (those replies never enter
+  // `messages`) it is struck from that message's line for good — nothing later (a cap, a reused view, a flood of other threads) brings it
+  // back. Only an agent that is on an open line is written down, so this holds a few ids, not every reply.
+  const [wakeEnded, setWakeEnded] = useState<Record<string, string[]>>({});
   // activeThread 열림 여부를 ref로 추적 — popstate 핸들러 stale closure 방지
   const activeThreadRef = useRef(false);
 
@@ -463,10 +462,12 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     // CB-S9: thread reply → inject into thread panel; top-level → add to main + update reply_count
     if (msg.parent_id) {
       setThreadIncoming(msg);
-      setThreadReplies((prev) => (prev.some((r) => r.conv === threadId && r.parent === msg.parent_id && r.by === msg.created_by)
-        ? prev
-        // only this conversation's entries are kept (a view reused for another conversation drops the old ones), the newest THREAD_REPLY_CAP of them
-        : [...prev.filter((r) => r.conv === threadId), { conv: threadId, parent: msg.parent_id as string, by: msg.created_by }].slice(-THREAD_REPLY_CAP)));
+      const parent = msg.parent_id;
+      const by = msg.created_by;
+      const openLine = messagesRef.current.find((m) => m.id === parent)?.agent_wake ?? recalledAgentWake(parent);
+      if (openLine?.required.some((a) => a.member_id === by)) {
+        setWakeEnded((prev) => (prev[parent]?.includes(by) ? prev : { ...prev, [parent]: [...(prev[parent] ?? []), by] }));
+      }
       // Update reply_count on parent message in the main list
       setMessages((prev) =>
         prev.map((m) =>
@@ -1110,7 +1111,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                               사실과 할 일. 그 에이전트가 이 뒤로 한 마디라도 하면 줄이 사라진다. */}
                           {msg.created_by === currentTeamMemberId && (msg.agent_wake ?? recalledAgentWake(msg.id)) && (
                             <AgentWakeNotice
-                              targets={agentsStillToWake(msg.agent_wake ?? recalledAgentWake(msg.id), [...messages.slice(messages.findIndex((m) => m.id === msg.id) + 1), ...threadReplies.filter((r) => r.conv === threadId && r.parent === msg.id).map((r) => ({ created_by: r.by }))])}
+                              targets={agentsStillToWake(msg.agent_wake ?? recalledAgentWake(msg.id), [...messages.slice(messages.findIndex((m) => m.id === msg.id) + 1), ...(wakeEnded[msg.id] ?? []).map((created_by) => ({ created_by }))])}
                             />
                           )}
                           {/* S5: 트리거 메시지 직후 차단 hint notice(차단 에이전트별 1건) */}
