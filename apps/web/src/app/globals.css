@@ -589,6 +589,19 @@
   }
 }
 
+/* story #4762 (AC5) — an input's hint text (the placeholder) must be seen in the phone app's web view. 4758 measured it on the sign-up and login screens of the
+   Android emulator: the boxes were empty, though the placeholder existed (`Email` · `Password`) and its computed color read as the text color. Tailwind's preflight
+   sets `::placeholder { color: color-mix(in oklab, currentcolor 50%, transparent) }`; the Android System WebView there is Chrome 113 and paints that placeholder as
+   nothing (measured over the web view's debug socket: injecting a plain color made «Email» · «Password» appear, same page, same engine). A plain token color is
+   read by every engine. `@layer base`, after the preflight, so a utility (`placeholder:text-…`) still wins as before; the value is the app's own hint color. */
+@layer base {
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--muted-foreground);
+    opacity: 1;
+  }
+}
+
 /* story #7d7634ee — `.proof-surface`가 재질 지오메트리 유일 정본(구 `.proof-cut` 계승,
    doc ea94dac4 유나 확定: "컷 소멸이라 재질명으로 리네임"). 그레인은 `::before`로 얹는다 —
    `border-radius: inherit`가 배경을 부모 라운드 안에 자동으로 가둬 별도 overflow-hidden
