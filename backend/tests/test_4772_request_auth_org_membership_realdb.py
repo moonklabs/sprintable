@@ -95,6 +95,13 @@ async def _two_organizations(w):
     _, _, org_y = await w.person(org=True, name="Owner Y")
     m = await w.add_member(org_x, role="admin", name="M")
     await _join(w, org_y, m)
+    # M is placed in a project of each organization, so the `projects` claim of a token carries an entry per organization (the control for "nothing of the one they left")
+    for org in (org_x, org_y):
+        await w.sql(
+            "INSERT INTO project_access (id, project_id, org_member_id, member_id, permission) "
+            "SELECT gen_random_uuid(), (SELECT id FROM projects WHERE org_id = :o LIMIT 1), om.id, om.id, 'granted' FROM org_members om WHERE om.org_id = :o AND om.user_id = :u",
+            o=org, u=m,
+        )
     m_email = f"story4752-m-{m.hex[:10]}@test.com"
     tokens = await w.tokens(m_email)
     tok_x = await _switch_to(w, tokens, org_x)
@@ -226,6 +233,7 @@ async def test_02d_both_request_authentications_drop_the_claims_of_an_organizati
             kept = await fn(credentials=creds_x, x_agent_api_key=None, **({"x_mcp_transport": None} if fn is get_current_user else {}), request=_request())
             meta = kept.claims["app_metadata"]
             assert meta.get("org_id") == str(org_x) and meta.get("org_left") is None, (fn.__name__, meta)
+            assert [p for p in meta.get("projects", []) if p.get("org_id") == str(org_x)], ("the control token must carry the projects of the organization", fn.__name__, meta.get("projects"))
         assert (await _remove(w, owner_email, org_x, m)).status_code == 200
         for fn in (get_current_user, get_current_user_streaming):
             extra = {"x_mcp_transport": None} if fn is get_current_user else {}
@@ -233,6 +241,8 @@ async def test_02d_both_request_authentications_drop_the_claims_of_an_organizati
             meta = gone.claims["app_metadata"]
             assert not any(k in meta for k in ("org_id", "project_id", "project_ids", "role")), (fn.__name__, meta)
             assert meta.get("org_left") == str(org_x) and gone.org_id is None, (fn.__name__, meta, gone.org_id)
+            # the per-project list: nothing of the organization they left, the organization they are still in stays
+            assert not [p for p in meta.get("projects", []) if p.get("org_id") == str(org_x)], (fn.__name__, meta.get("projects"))
             live = await fn(credentials=creds_y, x_agent_api_key=None, **extra, request=_request())
             assert live.claims["app_metadata"].get("org_id") == str(org_y) and live.org_id == str(org_y), (fn.__name__, live.claims)
     finally:

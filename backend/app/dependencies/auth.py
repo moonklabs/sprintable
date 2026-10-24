@@ -595,6 +595,10 @@ async def _drop_org_claims_without_live_seat(payload: dict, user_id: str, db: As
             raise
         for claim in _ORG_SCOPED_CLAIMS:
             meta.pop(claim, None)
+        # the per-project list (`projects`: {id, org_id, role} across every organization of the person) keeps the entries of the organizations they are still in
+        projects = meta.get("projects")
+        if isinstance(projects, list):
+            meta["projects"] = [p for p in projects if not (isinstance(p, dict) and str(p.get("org_id")) == str(org_id))]
         meta["org_left"] = str(org_id)
 
 
