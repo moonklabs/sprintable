@@ -4,7 +4,7 @@ import { ACTIVATION_COLLAPSED_COOKIE, ACTIVATION_HINT_COOKIE, isActivationCollap
 import { getServerSession } from '@/lib/db/server';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { onboardingRedirect, staysForNewOrgSetup } from '@/lib/auth/onboarding-next';
-import { resolveProjectMemberships } from '@/lib/resolve-project-memberships';
+import { resolveProjectMemberships, resolveServerProjectId } from '@/lib/resolve-project-memberships';
 import { DashboardShell } from '../dashboard/dashboard-shell';
 import { StorageCapacityToastProvider } from '@/components/storage/storage-capacity-toast-provider';
 import { CrossProjectToastProvider } from '@/components/chat/cross-project-toast-provider';
@@ -217,7 +217,8 @@ async function AuthenticatedLayoutBody({
         // getServerSession()이 이미 jwtVerify로 이 클레임을 직접 읽어둔 값을 그대로 흘려보낸다
         // (신규 fetch/디코드 0) — DashboardShell의 불일치 판정은 이 값을 우선한다.
         jwtOrgId={session.org_id ?? undefined}
-        projectId={me?.project_id}
+        // story #4762 (AC2) — a new organization's `/me` claim is the organization id (sentinel); the one project it later gets is the only choice.
+        projectId={resolveServerProjectId(projectMemberships, me)}
         projectName={projectNameForDisplay}
         currentProjectSlug={currentProjectSlug}
         userName={me?.name}

@@ -5240,6 +5240,8 @@
     "authFailureTooltipInvalid": "API 키 인식 불가 · 최근 5분 {n}회"
   },
   "chats": {
+    "noProjectYet": "보여 줄 프로젝트가 아직 없어요. 위쪽 전환기에서 만들어 주세요(이미 있다면 새로고침).",
+    "pickProject": "위쪽 전환기에서 프로젝트를 고르면 그 대화가 보여요.",
     "agentsPaused": {
       "title": "이 대화의 에이전트 메시지를 멈췄어요",
       "since": "{time}부터",
