@@ -143,6 +143,30 @@ describe('[SID:4453] the «verify your e-mail» gate', () => {
     expect(gate()).toBeNull();
   });
 
+  it('[SID:4763 codex] a signal that comes while the FIRST read is still on its way is not lost — and the slow pre-verification answer that arrives after it does not close the gate again', async () => {
+    let releaseFirst!: () => void;
+    let reads = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url !== '/api/auth/me') return new Response('{}', { status: 404 });
+      reads += 1;
+      if (reads === 1) {
+        await new Promise<void>((resolve) => { releaseFirst = resolve; });
+        return new Response(JSON.stringify({ data: { email_verified: false, email_verification_required: true, email: 'jiwoo@example.com' } }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ data: { email_verified: true, email_verification_required: true } }), { status: 200 });
+    }));
+    await mount();
+    expect(reads).toBe(1);
+    await act(async () => { window.dispatchEvent(new StorageEvent('storage', { key: 'sprintable-email-verified', newValue: '1' })); });
+    await flush();
+    expect(reads).toBe(2); // the signal made a read although no answer had come yet
+    expect(behind()).not.toBeNull();
+    await act(async () => { releaseFirst(); });
+    await flush();
+    expect(gate()).toBeNull(); // the older «not verified» answer is dropped
+    expect(behind()).not.toBeNull();
+  });
+
   it('[SID:4763 AC7] some other storage key says nothing to the gate', async () => {
     await mount();
     const before = meReads;

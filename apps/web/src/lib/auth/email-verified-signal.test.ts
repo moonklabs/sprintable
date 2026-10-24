@@ -28,6 +28,17 @@ describe('[SID:4763 AC7] the e-mail verified signal', () => {
     stop();
   });
 
+  it('what goes out is a timestamp and nothing else — no e-mail, token or account (Kadir lens)', () => {
+    const heard: unknown[] = [];
+    const spy = new FakeChannel(VERIFIED_SIGNAL);
+    spy.onmessage = (e) => heard.push((e as { data: unknown }).data);
+    announceVerified();
+    expect(heard).toHaveLength(1);
+    expect(Object.keys(heard[0] as object)).toEqual(['at']);
+    expect(typeof (heard[0] as { at: unknown }).at).toBe('number');
+    expect(localStorage.getItem(VERIFIED_SIGNAL)).toMatch(/^\d+$/);
+  });
+
   it('announce also writes the storage key (the second way); a storage event with that key is heard, another key is not', () => {
     const heard = vi.fn();
     const stop = listenVerified(heard);

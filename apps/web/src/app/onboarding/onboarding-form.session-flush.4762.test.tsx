@@ -119,9 +119,9 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
     const form = readFileSync(resolve(__dirname, 'onboarding-form.tsx'), 'utf8');
     expect(form).not.toMatch(/fetch\(\s*'\/api\/auth\/refresh'/); // reverted (a bare fetch) → the shell is never told
     // each one swallows a failure like the bare fetch did (the leaving one has no screen to fall back on: a throw there would keep the person from going home)
-    // story 4763 (AC11) added the third: the renewal before the arrival decides there is no organization
-    expect(form.match(/await refreshAuthTokens\(\)\.catch\(\(\) => null\)/g)?.length).toBe(3);
-    expect(form.match(/refreshAuthTokens\(\)/g)?.length).toBe(3);
+    // story 4763 added two: the renewal before the arrival decides there is no organization (AC11) and the one the organization-deleted screen makes before it asks who the person is (H6) — both read the result
+    expect(form.match(/await refreshAuthTokens\(\)\.catch\(\(\) => null\)/g)?.length).toBe(4);
+    expect(form.match(/refreshAuthTokens\(\)/g)?.length).toBe(4);
     expect(form).toMatch(/import \{ fetchWithAuth, refreshAuthTokens \} from '@\/lib\/db\/client';/);
   });
 
@@ -132,7 +132,10 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
     ['an answer that is not JSON', () => ({ ok: true, json: async () => { throw new SyntaxError('Unexpected token <'); } })],
     ['a refused rotation (401)', () => ({ ok: false, status: 401, json: async () => ({ error: { code: 'UNAUTHORIZED', message: 'no' } }) })],
   ] as Array<[string, () => unknown]>)('the rotation failing (%s) does not stop the form: it still goes on to the next step, with no error line and no `session-changed`', async (_label, answer) => {
-    refreshAnswer = answer;
+    // story 4763: the FIRST rotation (the arrival renewing the token before it decides «no organization») must answer — a failed one stops the arrival, by design. What this test pins is the
+    // rotations that come AFTER the organization is made: those failing change nothing for the person
+    let rotations = 0;
+    refreshAnswer = () => (++rotations === 1 ? rotated() : answer());
     await act(async () => {
       root.render(
         <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
@@ -144,6 +147,7 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
     expect(handler.mock.calls.some((c) => c[0] === '/api/auth/refresh')).toBe(true); // the rotation was tried
     expect([koMessages.onboarding.first.macTitle, koMessages.onboarding.first.notMacTitle]).toContain(container.querySelector('h1')?.textContent); // and the form went on to the one screen
     expect(container.textContent).not.toContain(koMessages.onboarding.networkError); // not into the «network error» state
-    expect(post.mock.calls.filter((c) => (JSON.parse(c[0] as string) as { type: string }).type === 'session-changed')).toHaveLength(0);
+    // the one `session-changed` is the first (answered) rotation's; the failing one tells the shell nothing
+    expect(post.mock.calls.filter((c) => (JSON.parse(c[0] as string) as { type: string }).type === 'session-changed')).toHaveLength(1);
   });
 });

@@ -157,11 +157,16 @@ export function useActivationStatus(
     if (!stillOpen) return;
     let cancelled = false;
     const requestOrg = orgId ?? null;
+    // two reads can overlap (the interval and a focus): an answer older than one already applied is dropped, so an older «not yet» never covers a newer «done» (codex)
+    let sent = 0;
+    let applied = 0;
     const again = () => {
       if (document.visibilityState !== 'visible') return;
       sharedFetchPromises.delete(requestOrg ?? '');
+      const mine = ++sent;
       void fetchActivationState(requestOrg ?? '').then((data) => {
-        if (cancelled || !data) return;
+        if (cancelled || !data || mine < applied) return;
+        applied = mine;
         setResult({ orgId: requestOrg, data });
         if (requestOrg && data.scope_is_requested_org !== false && data.all_complete) writeLocalFlag(`${COMPLETE_KEY}:${requestOrg}`);
       });

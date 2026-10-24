@@ -34,6 +34,11 @@ const AGENT_ROLE_LABEL_KEYS: Record<string, string> = {
 // organization, or their pending invites, or makes the organization with a made name («{name}의 조직» / «내 조직»), then shows ONE
 // screen («first»: on a Mac [Mac 앱 받기] · elsewhere «지금은 Mac 앱만 있어요»). The web way (an agent already running somewhere else)
 // keeps project → agent → connect.
+/** story 4763 (H6 · codex): the press has been made — the `?after=org-deleted` of the address goes, so a reload is the usual onboarding */
+function forgetOrgDeletedMarker() {
+  try { window.history.replaceState(window.history.state, '', window.location.pathname); } catch { /* an address that cannot be changed stays */ }
+}
+
 type Step = 'arrive' | 'invited' | 'first' | 'project' | 'agent' | 'connect' | 'deleted';
 
 /** The progress strip: only the web way's three steps have one (1/3 · 2/3 · 3/3) — arrival, invites and the one screen have none. */
@@ -198,7 +203,10 @@ export function OnboardingForm({
         // the web tab's own arrival made the organization meanwhile) carries no organization although the person has one, and the second «조직 만들기» ended in
         // «무료 플랜은 조직을 1개까지» with no way out. A fresh token is read from the database: renew once, ask again, and only then decide there is none.
         // (the renewal also tells the shell the session changed, so the app's stored token carries the organization from here on — story 4762.)
-        await refreshAuthTokens().catch(() => null);
+        // `refreshAuthTokens` does not throw on a failed rotation, it answers `{data: null, error}` — a renewal that did not happen leaves the same old token, whose «no organization» is
+        // not an answer: nothing is made (Kadir lens on 5221)
+        const renewed = await refreshAuthTokens().catch(() => null);
+        if (!renewed || renewed.error) { setArrival('account-check-failed'); return; }
         try {
           const again = await fetchWithAuth('/api/auth/me');
           if (!again.ok) throw new Error(String(again.status));
@@ -234,6 +242,23 @@ export function OnboardingForm({
       arriving.current = false;
     }
   };
+
+  // story 4763 (H6 · codex): the deleted screen says «this account has no organization» — a reload or an old link after the new organization exists must not say it. It asks quietly who the person
+  // is; one who already has an organization (the others of several, or the new one) goes on as in the arrival (a failed read keeps the screen: its press reads again before it makes anything)
+  useEffect(() => {
+    if (step !== 'deleted') return;
+    let off = false;
+    void (async () => {
+      // the token the person holds was made before the delete (it still names that organization, and an account with others reads as «none» until it is renewed) — renew, then ask
+      const renewed = await refreshAuthTokens().catch(() => null);
+      if (!renewed || renewed.error) return; // not knowing is not «none», but it is not «has one» either: the screen stays and its press asks again before it makes anything
+      const res = await fetchWithAuth('/api/auth/me');
+      if (!res.ok) return;
+      const existing = existingOrgIdFromMe(await res.json());
+      if (existing && !off) { setOrgId(existing); setStep('first'); }
+    })().catch(() => undefined);
+    return () => { off = true; };
+  }, [step]);
 
   useEffect(() => {
     if (step === 'arrive') void arrive();
@@ -391,7 +416,7 @@ export function OnboardingForm({
         <Card className="w-full max-w-md space-y-4 p-6 text-center shadow-lg sm:p-8" data-testid="onboarding-org-deleted">
           <h1 className="text-base font-semibold">{t('orgDeletedTitle')}</h1>
           <p className="break-keep text-sm text-muted-foreground">{t('orgDeletedBody')}</p>
-          <Button onClick={() => { setStep('arrive'); void arrive(); }} data-testid="onboarding-org-deleted-new">{t('orgDeletedNew')}</Button>
+          <Button onClick={() => { forgetOrgDeletedMarker(); setStep('arrive'); void arrive(); }} data-testid="onboarding-org-deleted-new">{t('orgDeletedNew')}</Button>
         </Card>
       </div>
     );
