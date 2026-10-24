@@ -763,8 +763,12 @@ async def _resolve_verified_org_id(
     except ValueError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid org_id format")
 
-    if x_org_id:
-        # 헤더 사용 시 항상 membership 검증 (JWT org_id와 다를 수 있음)
+    # story #4772 — the organization named in a SIGNED token (a JWT, a Firebase session) can be old: the removal of a member ends their refresh tokens and nothing else, so the
+    # access token they already hold kept naming the organization (and the people lists answered 200) until it expired, about an hour. So the judgement is one for every way the
+    # organization is named — the header or the token — and the answer is the live seat now (`org_members.deleted_at IS NULL`; an organization that was deleted has its seats
+    # ended with it). Not asked again: an agent key (`api_key_id`) — its organization is read from its member row in this very request, never from a claim that can be old.
+    # The answer is kept for this request only (`request.state`), so a removal is seen by the very next request.
+    if x_org_id or not auth.claims.get("app_metadata", {}).get("api_key_id"):
         async with async_session_factory() as db:
             await _verify_org_membership(auth.user_id, org_id, db, request)
 
