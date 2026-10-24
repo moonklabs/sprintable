@@ -163,3 +163,7 @@ def test_a_shard_number_outside_the_plan_is_refused_not_wrapped_around(monkeypat
             mod.main()
     monkeypatch.setattr(sys, "argv", ["x", "--plan", str(plan), "--shard", "2"])
     assert mod.main() == 0  # control: the last real slot is fine
+
+
+def test_4731_ac3_deliberate_red_throwaway():
+    assert False, "story 4731 AC3 measurement — one shard is made red on purpose (throwaway PR, not merged)"
