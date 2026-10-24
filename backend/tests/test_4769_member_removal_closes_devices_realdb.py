@@ -105,6 +105,31 @@ async def test_01_the_removal_closes_the_persons_computer_and_only_that_organiza
         await _close(engine, w)
 
 
+async def test_01b_an_attached_agent_stays_and_a_malformed_legacy_line_does_not_fail_the_removal():
+    """codex 4769 r3: the live removal must (a) leave an agent the setup only ATTACHED running and (b) not fail whole over a malformed `member_id` in the setup's members line."""
+    from app.models.member import Member
+
+    engine, w = await _world()
+    try:
+        _, owner_email, org_id = await w.person(org=True, name="Owner")
+        m = await w.add_member(org_id, role="admin", name="M")
+        comp = await _computer(w, org_id, m)
+        attached = uuid.uuid4()
+        async with w.Session() as s:
+            s.add(Member(id=attached, org_id=org_id, type="agent", name="Attached Agent", is_active=True))
+            await s.commit()
+        await w.sql(
+            "UPDATE desktop_setups SET members = members || CAST(:extra AS jsonb) WHERE id = :i",
+            extra=f'[{{"kind": "agent", "member_id": "{attached}", "existing": true}}, {{"kind": "agent", "member_id": "not-a-uuid"}}]', i=comp["setup_id"],
+        )
+        assert (await _remove(w, owner_email, org_id, m)).status_code == 200
+        assert (await _row(w, comp["setup_id"]))["revoked_reason"] == "member_removed"
+        assert await _live(w, "SELECT count(*) FROM members WHERE id = :i AND is_active", i=comp["agent_id"]) == 0
+        assert await _live(w, "SELECT count(*) FROM members WHERE id = :i AND is_active", i=attached) == 1
+    finally:
+        await _close(engine, w)
+
+
 async def test_02_the_owners_view_no_longer_counts_it():
     from app.models.desktop_setup import DesktopSetup
     from app.services import remote_control

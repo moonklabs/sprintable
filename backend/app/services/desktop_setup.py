@@ -1414,6 +1414,20 @@ async def close_setups_of_removed_member(db: AsyncSession, *, user_id: uuid.UUID
     return await _close_open_setups(db, user_id=user_id, org_id=org_id, revoked_by=removed_by, reason=MEMBER_REMOVED_REASON)
 
 
+def _made_agent_ids(members) -> list[uuid.UUID]:
+    """The agents a setup MADE (its `members` line has no `existing` mark). A malformed legacy id is skipped, never raised — a removal or deletion must not
+    fail whole over one bad line (migrations 0463 / 0464 guard the same cast in SQL; codex 4769 r3)."""
+    ids: list[uuid.UUID] = []
+    for m in members or []:
+        if not isinstance(m, dict) or m.get("kind") != "agent" or not m.get("member_id") or m.get("existing"):
+            continue
+        try:
+            ids.append(uuid.UUID(str(m["member_id"])))
+        except ValueError:
+            continue
+    return ids
+
+
 async def _close_open_setups(
     db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID | None, revoked_by: uuid.UUID, reason: str,
 ) -> int:
@@ -1427,10 +1441,7 @@ async def _close_open_setups(
         return 0
     # codex 4767 r2: ONE lock for all of them, in the service's one order (every agent member row any of them made, by id, then the setup rows, by id) — locking
     # setup by setup would hold an earlier setup row while waiting for a later setup's agent row, the order an exchange takes the other way round (deadlock)
-    made = {
-        uuid.UUID(str(m["member_id"])) for _, members in rows for m in (members or [])
-        if m.get("kind") == "agent" and m.get("member_id") and not m.get("existing")
-    }
+    made = {mid for _, members in rows for mid in _made_agent_ids(members)}
     locked = await _lock_in_order(db, member_ids=made, setup_ids={sid for sid, _ in rows})
     closed = 0
     for setup_id in sorted(locked):
@@ -1454,10 +1465,7 @@ async def _disconnect_setup(
 
     user_id = revoked_by
     # story #4565 (PO 02:51Z): the one lock order — the member rows this disconnect may stop, then the setup row
-    made = {
-        uuid.UUID(str(m["member_id"])) for m in (found.members or [])
-        if m.get("kind") == "agent" and m.get("member_id") and not m.get("existing")
-    }
+    made = set(_made_agent_ids(found.members))
     # `locked`: the caller already took every row it will touch in that one order (the account deletion closes several setups)
     setup = locked[found.id] if locked is not None else (await _lock_in_order(db, member_ids=made, setup_ids={found.id}))[found.id]
     now = _now()
@@ -1477,10 +1485,7 @@ async def _disconnect_setup(
     await desktop_clock.forget(db, [setup.id], lock=False)  # story #4733 — a clock view (draft first lines) does not outlive the computer's connection (the row is held: `_lock_in_order` above)
     # story #4565: only the agents this setup made — an existing agent attached here keeps running elsewhere once moved on
     # (its keys from this setup are revoked above; the agent itself is not stopped)
-    agent_ids = {
-        uuid.UUID(str(m["member_id"])) for m in (setup.members or [])
-        if m.get("kind") == "agent" and m.get("member_id") and not m.get("existing")
-    }
+    agent_ids = set(_made_agent_ids(setup.members))
     if agent_ids:
         await db.execute(
             update(Member).where(Member.id.in_(agent_ids), Member.org_id == org_id, Member.type == "agent")
