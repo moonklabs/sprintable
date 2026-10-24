@@ -5,6 +5,8 @@
 // The «받기» path exists only where the download does (`DESKTOP_DOWNLOAD_ENABLED` is read on the SERVER — not in the client bundle — so the server layout of /login hands the answer
 // down through this context; with no provider, as in a test of the page alone or any other tree, the offer is off). It is drawn on a Mac only: the user agent is read after mount
 // (no server/client mismatch) — a phone or another OS sees the login as before.
+// The link is a plain sign-up: a new account has no organization, so the signed-in area sends it to the onboarding (a `next` to the download page would be dropped there), which stands behind the
+// e-mail check, makes the organization and then opens on the app's download — that is why the hint says «메일 인증을 마치면», not «바로».
 import { createContext, useContext, useSyncExternalStore, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
@@ -31,7 +33,7 @@ export function MacAppOffer({ suppressed }: { suppressed: boolean }) {
   return (
     <Card className="space-y-2 p-3 text-center" data-testid="login-mac-app-offer">
       <p className="break-keep text-sm text-foreground/90">{t('macAppPitch')}</p>
-      <Link href={`/register?next=${encodeURIComponent('/desktop')}`} className={`${buttonVariants({ variant: 'outline' })} w-full min-h-[44px]`}>
+      <Link href="/register" className={`${buttonVariants({ variant: 'outline' })} w-full min-h-[44px]`}>
         {t('macAppGet')}
       </Link>
       <p className="break-keep text-xs text-muted-foreground">{t('macAppGetHint')}</p>
