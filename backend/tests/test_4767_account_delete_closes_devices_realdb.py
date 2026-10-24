@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -399,6 +399,7 @@ async def test_13_the_migration_closes_what_older_deletions_left_completely_and_
     whole set. Seeded: a deleted person's open computer (token · key · made agent · open command · clock view), a living person's computer, an already-closed one."""
     from sqlalchemy import text
 
+    from app.models.agent_permission import AgentPermissionRequest
     from app.models.desktop_relay import DesktopClockView, DesktopCommand
 
     engine, w = await _world()
@@ -414,7 +415,24 @@ async def test_13_the_migration_closes_what_older_deletions_left_completely_and_
                 id=uuid.uuid4(), setup_id=legacy["setup_id"], device_seq=1, kind="send_prompt", payload={}, idempotency_key="k", requested_by=gone, state="queued",
             ))
             s.add(DesktopClockView(setup_id=legacy["setup_id"], mode="panel", view={}, expires_at=datetime.now(UTC)))
+            req_id = uuid.uuid4()
+            s.add(AgentPermissionRequest(
+                id=uuid.uuid4(), setup_id=legacy["setup_id"], request_id=req_id, session_key="s1", agent_member_id=legacy["agent_id"], runtime="claude", tool="Bash",
+                summary="ls", input_hash="h", expires_at=datetime.now(UTC) + timedelta(hours=1), state="answered", recipient_reason="paired",
+            ))
+            s.add(DesktopCommand(
+                id=uuid.uuid4(), setup_id=legacy["setup_id"], device_seq=2, kind="answer_approval", payload={"request_id": str(req_id), "stage": "ask"},
+                idempotency_key="k2", requested_by=gone, state="delivered",
+            ))
+            s.add(DesktopCommand(
+                id=uuid.uuid4(), setup_id=legacy["setup_id"], device_seq=3, kind="clock", payload={"action": "out_open", "edit": {"base_rev": 4, "text": "typed words"}},
+                idempotency_key="k3", requested_by=gone, state="queued",
+            ))
             await s.commit()
+        # a legacy `members` line with an id that is no uuid must not abort the whole migration
+        await w.sql(
+            "UPDATE desktop_setups SET members = members || '[{\"kind\": \"agent\", \"member_id\": \"not-a-uuid\"}]'::jsonb WHERE id = :i", i=legacy["setup_id"],
+        )
         await w.sql("UPDATE users SET is_active = false, deleted_at = now() WHERE id = :u", u=gone)   # an older deletion: the closer never ran
 
         async def _run():
@@ -432,6 +450,8 @@ async def test_13_the_migration_closes_what_older_deletions_left_completely_and_
                 "open_commands": await _live(w, "SELECT count(*) FROM desktop_commands WHERE setup_id = :i AND state IN ('queued', 'delivered')", i=legacy["setup_id"]),
                 "rejected": await _live(w, "SELECT count(*) FROM desktop_commands WHERE setup_id = :i AND state = 'rejected' AND result_code = 'device_disconnected'", i=legacy["setup_id"]),
                 "views": await _live(w, "SELECT count(*) FROM desktop_clock_views WHERE setup_id = :i", i=legacy["setup_id"]),
+                "request": await _live(w, "SELECT count(*) FROM agent_permission_requests WHERE setup_id = :i AND state = 'rejected' AND result_code = 'device_disconnected'", i=legacy["setup_id"]),
+                "typed": await _live(w, "SELECT count(*) FROM desktop_commands WHERE setup_id = :i AND payload::text LIKE '%typed words%'", i=legacy["setup_id"]),
                 "mine": await _row(w, mine["setup_id"]),
                 "mine_tokens": await _live(w, "SELECT count(*) FROM desktop_device_tokens WHERE setup_id = :i AND revoked_at IS NULL", i=mine["setup_id"]),
                 "mine_agent": await _live(w, "SELECT count(*) FROM members WHERE id = :i AND is_active", i=mine["agent_id"]),
@@ -442,7 +462,9 @@ async def test_13_the_migration_closes_what_older_deletions_left_completely_and_
         await _run()
         first = await _state()
         assert first["legacy"] == {"revoked": True, "revoked_reason": "account_deleted", "revoked_by": gone}
-        assert (first["tokens"], first["keys"], first["agent"], first["open_commands"], first["rejected"], first["views"]) == (0, 0, 0, 0, 1, 0)
+        assert (first["tokens"], first["keys"], first["agent"], first["open_commands"], first["rejected"], first["views"]) == (0, 0, 0, 0, 3, 0)
+        assert first["request"] == 1, "the answer that never reached the device stops reading «answered»"
+        assert first["typed"] == 0, "the typed words of the clock edit that never reached the computer are gone"
         assert first["mine"]["revoked"] is False and first["mine_tokens"] == 1 and first["mine_agent"] == 1     # a living person's computer is untouched
         assert first["closed"]["revoked_reason"] == "kept" and first["closed_agent"] == 1                       # an already-closed row is not rewritten (nor its agent touched)
         await _run()
