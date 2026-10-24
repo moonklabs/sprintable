@@ -13,6 +13,7 @@ import ChatsLayout from './layout';
 import ChatsPage from './page';
 import { useChatRail } from './chat-rail-context';
 import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
+import { TAB_PROJECT_STORAGE_KEY } from '@/lib/project-context-client';
 
 // story #3945 — 실 <TopBar/>는 NotificationBell·PresenceToggleButton 등 이 테스트와 무관한
 // 무거운 트리(각자 useRouter 등 별도 배선 필요)를 끌고 온다. TopBarSlot이 context에 심은
@@ -64,7 +65,7 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'member-1', projectId: 'proj-1' });
+  useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'member-1', projectId: 'proj-1', projectMemberships: [] });
   mqMatches = false;
   mqListeners.clear();
   window.matchMedia = vi.fn().mockImplementation((query: string) => ({
@@ -315,5 +316,77 @@ describe('ChatsLayout+ChatsPage — 페이지 h1 1개 원칙(story #3945)', () =
     expect(h1s).toHaveLength(1);
     expect(h1s[0]!.id).toBe('chat-rail-heading');
     expect(h1s.some((h) => h.className.includes('text-sm font-medium') && h.id !== 'chat-rail-heading')).toBe(false);
+  });
+});
+
+// story #4762 (AC2) — 4758 measured a new organization's chat list sitting on «Loading…» for 7 minutes: no project was picked, and «no project known» was drawn as «still loading».
+// «Known to have none» is an answer: say what to do next in one line. The loading line stays only for a member id that is not known yet.
+describe('ChatsLayout — story #4762 AC2 (no project is an answer, not «loading»)', () => {
+  async function renderWith(ctx: Record<string, unknown>) {
+    usePathnameMock.mockReturnValue('/chats');
+    useDashboardContextMock.mockReturnValue(ctx);
+    await act(async () => { root.render(wrap(<ChatsLayout><div>children</div></ChatsLayout>)); });
+  }
+
+  it('a person with no project at all sees the «create one» line — no chat list, no loading line', async () => {
+    await renderWith({ currentTeamMemberId: 'member-1', projectId: undefined, projectMemberships: [] });
+    const line = container.querySelector('[data-testid="chats-no-project"]');
+    expect(line?.textContent).toBe(koMessages.chats.noProjectYet);
+    expect(container.querySelector('[data-testid="chat-list-view"]')).toBeNull();
+    expect(container.textContent).not.toContain(koMessages.common.loading);
+  });
+
+  it('a person with projects but none picked sees the «pick one» line', async () => {
+    await renderWith({
+      currentTeamMemberId: 'member-1', projectId: undefined,
+      projectMemberships: [{ projectId: 'p1', projectName: 'A' }, { projectId: 'p2', projectName: 'B' }],
+    });
+    expect(container.querySelector('[data-testid="chats-no-project"]')?.textContent).toBe(koMessages.chats.pickProject);
+    expect(container.querySelector('[data-testid="chat-list-view"]')).toBeNull();
+  });
+
+  it('projects exist and the tab already holds a valid choice (the shell restores it after hydration) → still the loading line, no flash of «pick one»', async () => {
+    window.sessionStorage.setItem(TAB_PROJECT_STORAGE_KEY, 'p2');
+    try {
+      await renderWith({
+        currentTeamMemberId: 'member-1', projectId: undefined,
+        projectMemberships: [{ projectId: 'p1', projectName: 'A' }, { projectId: 'p2', projectName: 'B' }],
+      });
+      expect(container.querySelector('[data-testid="chats-no-project"]')).toBeNull();
+      expect(container.textContent).toContain(koMessages.common.loading);
+    } finally {
+      window.sessionStorage.removeItem(TAB_PROJECT_STORAGE_KEY);
+    }
+  });
+
+  it('a stored choice that is not one of the person\'s projects does not hold the line back', async () => {
+    window.sessionStorage.setItem(TAB_PROJECT_STORAGE_KEY, 'someone-elses-project');
+    try {
+      await renderWith({
+        currentTeamMemberId: 'member-1', projectId: undefined,
+        projectMemberships: [{ projectId: 'p1', projectName: 'A' }, { projectId: 'p2', projectName: 'B' }],
+      });
+      expect(container.querySelector('[data-testid="chats-no-project"]')?.textContent).toBe(koMessages.chats.pickProject);
+    } finally {
+      window.sessionStorage.removeItem(TAB_PROJECT_STORAGE_KEY);
+    }
+  });
+
+  it('a member id that is not known yet still shows the loading line (that one IS «not known yet»)', async () => {
+    await renderWith({ currentTeamMemberId: undefined, projectId: undefined, projectMemberships: [] });
+    expect(container.querySelector('[data-testid="chats-no-project"]')).toBeNull();
+    expect(container.textContent).toContain(koMessages.common.loading);
+  });
+
+  it('a path project that is still being resolved is not called «no project» (no flash of the next-step line)', async () => {
+    await renderWith({ currentTeamMemberId: 'member-1', projectId: undefined, projectMemberships: [{ projectId: 'p1', projectName: 'A' }], projectPathUnresolved: true });
+    expect(container.querySelector('[data-testid="chats-no-project"]')).toBeNull();
+    expect(container.textContent).toContain(koMessages.common.loading);
+  });
+
+  it('with a project picked the list is mounted as before', async () => {
+    await renderWith({ currentTeamMemberId: 'member-1', projectId: 'p1', projectMemberships: [{ projectId: 'p1', projectName: 'A' }] });
+    expect(container.querySelectorAll('[data-testid="chat-list-view"]')).toHaveLength(1);
+    expect(container.querySelector('[data-testid="chats-no-project"]')).toBeNull();
   });
 });

@@ -1,12 +1,13 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useSyncExternalStore } from 'react';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Plus, PanelLeftOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ChatListView } from '@/components/chat/chat-list-view';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
+import { tabProjectCandidates } from '@/lib/project-context-client';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { ChatRailProvider, useChatRail } from './chat-rail-context';
 
@@ -31,11 +32,23 @@ export default function ChatsLayout({ children }: { children: React.ReactNode })
   );
 }
 
+const subscribeToNothing = () => () => {};
+
 function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
   const t = useTranslations('chats');
   const tc = useTranslations('common');
   const pathname = usePathname();
-  const { currentTeamMemberId, projectId } = useDashboardContext();
+  const { currentTeamMemberId, projectId, projectMemberships, projectPathUnresolved } = useDashboardContext();
+  // `null` on the server and while hydrating (the tab's own storage is not readable there), the answer once on the client — no effect, no extra render.
+  const tabHasNoChoice = useSyncExternalStore(
+    subscribeToNothing,
+    () => {
+      const accessible = new Set(projectMemberships.map((m) => m.projectId));
+      const candidates = tabProjectCandidates(new URLSearchParams(window.location.search).get('p'), true);
+      return !candidates.some((id) => accessible.has(id));
+    },
+    () => null,
+  );
   const [showModal, setShowModal] = useState(false);
   const { railMode, toggleManualExpand } = useChatRail();
   // story #2921 S6 후속(유나 design:changes 2026-08-22, CI a11y 가드 지적 처방) — overlay는
@@ -49,6 +62,21 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
   // 전부 대화 쪽이 전체화면이다(이미 열람 중인 대화 화면에 리스트를 노출하지 않는다, 기존
   // 라우트 전환 UX 그대로 계승).
   const isListRoute = pathname === '/chats';
+
+  // story #4762 (AC2) — «known to have no project» is an answer, not «still loading»: a person with no project (or with several and none
+  // picked) used to wait on this «Loading…» for ever (4758: 7 minutes). Say what to do next, in one line. The loading line stays for a person
+  // whose own member id is not known yet.
+  // A person WITH projects but none chosen: the tab's own choice (`?p=` · sessionStorage) is only read after hydration — until the effect above has
+  // looked, that is «not known yet» (loading), never «none picked» (a flash of the wrong line before the shell settles).
+  const showNextStep = Boolean(currentTeamMemberId) && !projectId && !projectPathUnresolved
+    && (projectMemberships.length === 0 || tabHasNoChoice === true);
+  if (showNextStep) {
+    return (
+      <div className="flex h-64 items-center justify-center px-6 text-center" data-testid="chats-no-project">
+        <p className="text-sm text-muted-foreground">{projectMemberships.length === 0 ? t('noProjectYet') : t('pickProject')}</p>
+      </div>
+    );
+  }
 
   if (!currentTeamMemberId || !projectId) {
     // story #3788(B-④, 유나 定) — 「없다」 부품(EmptyState)으로 「아직 모른다」(로딩)를 그리지
