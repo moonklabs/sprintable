@@ -21,6 +21,12 @@ describe('the verify hint and the retry button speak with one word (story 4766 A
     expect(ko.onboarding.advanced.timeoutHint).not.toMatch(/재시작|저장/);
     expect(en.onboarding.advanced.timeoutHint).toContain(en.onboarding.verifyRetry);
     expect(en.onboarding.advanced.timeoutHint).not.toMatch(/restart|saved/i);
+    // the stuck-for-20-minutes hint never pushes the person to allow anything (permission is theirs, and it is not what the screen waits for — the first call is)
+    expect(ko.onboarding.advanced.timeoutHint).not.toMatch(/허용/);
+    expect(en.onboarding.advanced.timeoutHint).not.toMatch(/allow/i);
+    // what it does name is the real dead end measured on dev: Claude Code quitting at the folder question
+    expect(ko.onboarding.advanced.timeoutHint).toContain('폴더 확인');
+    expect(en.onboarding.advanced.timeoutHint).toContain('folder question');
   });
 });
 
@@ -81,15 +87,24 @@ describe('the advanced path speaks the product\'s words (copy review · story 47
       [advEn.nextClaude, `“${en.onboarding.railVerified}”`, 'use a tool', 'trust the folder'],
     ] as const) {
       expect(text.indexOf(trust)).toBeGreaterThan(-1);
+      expect(text.indexOf(verified)).toBeGreaterThan(-1);
+      expect(text.indexOf(tool)).toBeGreaterThan(-1);
       expect(text.indexOf(trust)).toBeLessThan(text.indexOf(verified));
       expect(text.indexOf(verified)).toBeLessThan(text.indexOf(tool));
     }
     for (const [text, verified, tool] of [
       [adv.nextCodex, `«${ko.onboarding.railVerified}»`, '도구를 써도'],
       [advEn.nextCodex, `“${en.onboarding.railVerified}”`, 'use a tool'],
-    ] as const) expect(text.indexOf(verified)).toBeLessThan(text.indexOf(tool));
+    ] as const) { expect(text.indexOf(verified)).toBeGreaterThan(-1); expect(text.indexOf(tool)).toBeGreaterThan(-1); expect(text.indexOf(verified)).toBeLessThan(text.indexOf(tool)); }
+    // placeholders: {sentence} in all four, {yes} only in the Claude lines (the folder question is the one measured)
+    for (const t of [adv.nextClaude, adv.nextCodex, advEn.nextClaude, advEn.nextCodex]) expect(t).toContain('{sentence}');
+    for (const t of [adv.nextClaude, advEn.nextClaude]) expect(t).toContain('{yes}');
+    for (const t of [adv.nextCodex, advEn.nextCodex]) expect(t).not.toContain('{yes}');
     // the old order's tell: «allow … then this screen turns» (and a push to allow)
     for (const t of [adv.nextClaude, adv.nextCodex]) { expect(t).not.toMatch(/허용해 주세요/); expect(t).not.toMatch(/그러면 이 화면/); expect(t).toContain('직접 정해'); }
     for (const t of [advEn.nextClaude, advEn.nextCodex]) { expect(t).not.toMatch(/allow it —/i); expect(t).toContain('your call'); }
+    // the «after that» sentence names its subject (an «it» right after «this screen» reads as the screen — Yuna)
+    expect(adv.nextClaude).toContain('그 뒤 Claude Code가'); expect(adv.nextCodex).toContain('그 뒤 Codex가');
+    expect(advEn.nextClaude).toContain('After that, if Claude Code asks'); expect(advEn.nextCodex).toContain('After that, if Codex asks');
   });
 });

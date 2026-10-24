@@ -1738,9 +1738,9 @@
       "revoking": "Revoking…",
       "revokeFailed": "Could not revoke the key. Try again in a moment. You can also revoke it from the Agents menu: open this agent and use its API key list.",
       "revokedNote": "The key is revoked. The command you copied no longer works. To connect again, make it again with a new key.",
-      "timeoutHint": "Check that the command you pasted ran to the end and that you allowed the tool when the agent asked, then press Run test.",
-      "nextClaude": "Paste and press Enter: the agent connects and Claude Code opens and sends “{sentence}” as its first message. If this terminal is open in a folder of yours and it asks whether you trust the folder, move ❯ to “{yes}” and press Enter. Once Claude Code connects, this screen turns to “Connection verified” by itself. After that, if it asks whether it may use a tool to answer that first message, it is your call whether to allow it.",
-      "nextCodex": "Paste and press Enter: the agent connects and Codex opens and sends “{sentence}” as its first message. Once Codex connects, this screen turns to “Connection verified” by itself. After that, if it asks whether it may use a tool to answer that first message, it is your call whether to allow it.",
+      "timeoutHint": "Check that the command you pasted ran to the end and that Claude Code or Codex did not quit at its folder question, then press Run test.",
+      "nextClaude": "Paste and press Enter: the agent connects and Claude Code opens and sends “{sentence}” as its first message. If this terminal is open in a folder of yours and it asks whether you trust the folder, move ❯ to “{yes}” and press Enter. Once Claude Code connects, this screen turns to “Connection verified” by itself. After that, if Claude Code asks whether it may use a tool to answer that first message, it is your call whether to allow it.",
+      "nextCodex": "Paste and press Enter: the agent connects and Codex opens and sends “{sentence}” as its first message. Once Codex connects, this screen turns to “Connection verified” by itself. After that, if Codex asks whether it may use a tool to answer that first message, it is your call whether to allow it.",
       "failure": {
         "network": "The network dropped. Check your connection and press again.",
         "project": "Could not make the project. Press again.",
