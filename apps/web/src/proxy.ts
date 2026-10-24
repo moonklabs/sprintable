@@ -147,11 +147,16 @@ const CURRENT_PROJECT_COOKIE = 'sprintable_current_project_id';
  * What `/api/v2/me` says about this session's organization — three answers, not two (story 4714 AC6):
  *  · `org`     the server answered and the person works in `orgId`;
  *  · `none`    the server answered 404 NOT_FOUND with `reason: 'no_membership'` (`me.py`): the account exists but has no organization yet — a brand-new person;
- *  · `unknown` anything else (a 5xx, a network error, a 200 without an org, a 404 that is not that answer): the call did not tell us.
+ *  · `unknown` anything else (a 5xx, a network error, a 200 without an org, a 404 that is not that answer): the call did not tell us — `why` names which
+ *    (a fixed word, never a value: it goes to the log), `transient` says whether it is the kind that a second look can mend (a 5xx · a network
+ *    error) as opposed to an answer the server meant (a 4xx — e.g. `membership_elsewhere`: the session names an organization the person does not belong to — or a 200 that names
+ *    no organization: `/` would go on to the authenticated layout, read the same answer as «no organization» and send the person to the onboarding).
  * Only `none` may send a person to the onboarding: an `unknown` is a moment of trouble, and an organization member must never be bounced to
- * «create an organization» because of it (it passes through, as it always did).
+ * «create an organization» because of it. Since story 4762 a TRANSIENT unknown is not left on a Next 404 either: a flat address goes back to `/` (the session
+ * picks the road again) — see `redirectLegacyResourcePath`. A meant answer passes through as before (`/` would send that person to the authenticated layout's
+ * own `/me` 404 → onboarding, where they could create an organization they do not need).
  */
-type OrgLookup = { kind: 'org'; orgId: string } | { kind: 'none' } | { kind: 'unknown' };
+type OrgLookup = { kind: 'org'; orgId: string } | { kind: 'none' } | { kind: 'unknown'; why: string; transient: boolean };
 async function lookupVerifiedOrg(fastapiUrl: string, accessToken: string): Promise<OrgLookup> {
   try {
     const res = await fetch(`${fastapiUrl}/api/v2/me`, { headers: { Authorization: `Bearer ${accessToken}` } });
@@ -160,13 +165,16 @@ async function lookupVerifiedOrg(fastapiUrl: string, accessToken: string): Promi
       // rewording of the message can not quietly bring the 404 trap back. Without it (an older backend during a rollout, a gateway's 404, a 404
       // of another route) the answer is `unknown`: pass through, never a redirect.
       const body = await res.json().catch(() => null) as { error?: { code?: unknown; reason?: unknown } } | null;
-      return body?.error?.code === 'NOT_FOUND' && body?.error?.reason === 'no_membership' ? { kind: 'none' } : { kind: 'unknown' };
+      return body?.error?.code === 'NOT_FOUND' && body?.error?.reason === 'no_membership' ? { kind: 'none' } : { kind: 'unknown', why: 'me_404_other', transient: false };
     }
-    if (!res.ok) return { kind: 'unknown' };
-    const me = await res.json() as { org_id?: string };
-    return typeof me.org_id === 'string' && me.org_id !== '' ? { kind: 'org', orgId: me.org_id } : { kind: 'unknown' }; // an empty id is not an organization: pass through, as `!orgId` always did
+    if (!res.ok) return { kind: 'unknown', why: `me_status_${res.status}`, transient: res.status >= 500 };
+    // a 200 whose body cannot be read (empty · not JSON) is NOT a transport failure: it must not fall into the catch below (that one is «transient» → `/`) — the server answered,
+    // so it is a meant answer like the 4xx ones (pass through). `null` · `{}` · an empty id are the same: no organization named.
+    const me = await res.json().catch(() => undefined) as { org_id?: unknown } | null | undefined;
+    if (me === undefined) return { kind: 'unknown', why: 'me_200_unparseable', transient: false };
+    return typeof me?.org_id === 'string' && me.org_id !== '' ? { kind: 'org', orgId: me.org_id } : { kind: 'unknown', why: 'me_200_without_org', transient: false }; // an empty id is not an organization
   } catch {
-    return { kind: 'unknown' };
+    return { kind: 'unknown', why: 'me_unreachable', transient: true };
   }
 }
 
@@ -276,8 +284,20 @@ async function redirectLegacyResourcePath(
   // (no-store)이고 쿼리는 뗀다(조직이 없는 사람에겐 옮겨 갈 스토리 · 프로젝트가 없다). «모름»(me 5xx · 네트워크 · 모양이 다른 404)은 아래처럼
   // 개입 없이 통과 — 조직이 있는 사람을 순간의 실패로 온보딩에 튕기지 않는다.
   if (orgLookup.kind === 'none') return redirectToOnboarding(request);
-  // orgId조차 모르면(토큰 자체가 org_id를 못 실은 예외적 경우 · me 실패) 개입할 근거가 없어 그대로 통과
-  // (Next 자체 404) — story #2212 스코프 밖(그 경우엔 org조차 모르니 org-briefing으로도 못 보낸다).
+  // story 4762 (AC7) — 일시적인 «모름»은 «통과»가 아니라 «세션으로 길을 다시 고르기»다. 폰 앱은 늘 `/glance`로 열고, 가입 직후의 몇 분 동안 me가 «모름»을 낸 적이 있다
+  // (Android 실측 10-24: 같은 세션이 3분 동안 `/glance` → Next 404 «This page could not be found.» · 다음 걸음 없음 · 다시 로그인하면 정상). 통과시키면
+  // 이 주소엔 페이지가 없어서 그 자체가 막다른 곳이다. `/`는 세션이 오늘 길(org-briefing)로 보내는 실 페이지(이 표의 이름이 아님 · 되돌이 없음).
+  // 범위는 일부러 좁다(codex 검수 두 바퀴): ① 일시적인 것만(5xx · 네트워크) — 서버가 뜻을 담아 한 답(4xx, 예: membership_elsewhere · org 없는 200)은 이전처럼 통과 —
+  // 그 사람을 `/`로 보내면 인증 레이아웃이 같은 me를 «조직 없음»으로 읽고 온보딩 → 이미 있는 조직을 또 만들 수 있다 ② 페이지 로드(문서 읽기)만 — fetch · <img> ·
+  // JSON · POST · HEAD · RSC · prefetch는 통과(메서드와 본문을 `/`로 옮기지 않는다; Next는 RSC 404 뒤 전체 로드로 다시 오므로 그때 이 줄이 받는다).
+  // 그 순간의 me 모양은 문서 읽기마다 로그 한 줄(고정 단어만 — 값 · 경로 · 쿼리 0 · 다른 종류의 요청은 안 남겨 로그가 요청 수만큼 불지 않는다)로 남겨,
+  // 뿌리를 다음 맥 바퀴에서 같이 잡는다.
+  if (orgLookup.kind === 'unknown') {
+    if (!isDocumentRead(request)) return null;
+    console.warn(JSON.stringify({ message: 'proxy_org_lookup_unknown', why: orgLookup.why, resource: resourceName, shell: request.headers.has(SHELL_NAV_HEADER), redirected: orgLookup.transient }));
+    return orgLookup.transient ? redirectToSessionHome(request) : null;
+  }
+  // 위에서 org · none · unknown을 다 다뤘으므로 여기는 org뿐(타입 좁히기).
   if (orgLookup.kind !== 'org') return null;
   const orgId = orgLookup.orgId;
 
@@ -350,6 +370,25 @@ function sessionDependentRedirect(url: URL): NextResponse {
   const response = NextResponse.redirect(url, 307);
   response.headers.set('Cache-Control', 'no-store');
   return response;
+}
+
+/**
+ * a page load: GET, the browser asking for an HTML document (`Accept` names text/html and `Sec-Fetch-Dest` is `document` — or absent, as an older WebView may omit it),
+ * not a Next RSC fetch or prefetch (those come back as a full load when they fail), not a `fetch()` (`*\/*`) · `<img>` · JSON call, and never a POST or HEAD (a method and body must
+ * not be moved to another address). A browser's main-frame navigation — the phone shell's `/glance` load included — always asks `text/html`.
+ */
+function isDocumentRead(request: NextRequest): boolean {
+  if (request.method !== 'GET' || request.headers.has('rsc') || request.headers.has('next-router-prefetch')) return false;
+  const dest = request.headers.get('sec-fetch-dest');
+  return (request.headers.get('accept') ?? '').includes('text/html') && (dest === null || dest === 'document');
+}
+
+/** story 4762 (AC7) — the server could not tell the person's organization just now: `/` lets the session choose the road again (no query, never cached). */
+function redirectToSessionHome(request: NextRequest): NextResponse {
+  const url = request.nextUrl.clone();
+  url.pathname = '/';
+  url.search = '';
+  return sessionDependentRedirect(url);
 }
 
 /** story 4714 AC6 — a person with no organization yet: the onboarding is where they go (no query: nothing of a link they carried applies to them). */

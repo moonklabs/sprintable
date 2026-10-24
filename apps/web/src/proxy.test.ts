@@ -14,6 +14,9 @@ vi.mock('jose', async (importOriginal) => {
 import { proxy as middleware, RENAMED_RESOURCES, RETIRED_RESOURCES } from './proxy';
 import { stubFetch } from '@/test-utils/as-fetch-response';
 import { safeNextPath } from '@/lib/auth/session-redirect';
+import { MIGRATED_RESOURCES } from '@/lib/legacy-resource-tables';
+import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
+import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { parseSetupFragment } from '@/lib/desktop-setup';
 
 const JWT_SECRET = 'test-secret-for-proxy-tests';
@@ -931,6 +934,11 @@ describe('proxy — legacy /docs bare-URL redirect (story a539c649 S2)', () => {
   // 멈춘다(Next 자체 404) — 무한 왕복 대신 "여기서 안 된다"는 신호.
   it('되돌이 방지 — _prRetry=1을 달고 왔는데도 또 실패하면 다시 org-briefing으로 안 튕기고 개입 없이 통과(404)한다', async () => {
     const token = await makeAccessToken({ orgId: 'org-1' });
+    // the server DID answer (the person works in org-1) but no project is known: this is the guard's own door. (Before story 4762 the missing `me` mock made
+    // this test pass through the «unknown» door by accident; an unknown now goes back to `/`, so the guard is tested with a real answer.)
+    mockFetch.mockImplementation((url: string) => (url.includes('/api/v2/me')
+      ? Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) })
+      : Promise.resolve({ ok: false, status: 404 })));
     const response = await middleware(makeRequest('/docs/my-doc?_prRetry=1', { sp_at: token }));
     expect(response.status).toBe(200); // 개입 없이 통과 — Next 라우터가 이 pathname에 404를 렌더
   });
@@ -952,6 +960,10 @@ describe('proxy — a person with no organization yet is sent to the onboarding,
     if (url.includes('/api/v2/me')) return Promise.resolve(answer());
     return Promise.resolve({ ok: false, status: 404 });
   });
+
+  // a browser's page load (the phone shell's `/glance` included) asks for HTML as a document — the only kind of request story 4762's «back to `/`» answers
+  const HTML = { Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 'Sec-Fetch-Dest': 'document' };
+  const page = (path: string, token: string) => makeRequestWithHeaders(path, HTML, { sp_at: token });
 
   it('/glance with no organization → 307 /onboarding (no-store) — the phone app opens /glance, a new person was left on a 404', async () => {
     const token = await makeAccessToken();
@@ -987,12 +999,15 @@ describe('proxy — a person with no organization yet is sent to the onboarding,
     }
   });
 
-  it('a person of ANOTHER organization is never sent to «create an organization»: membership_elsewhere passes through, whatever the words (Kadir 5155 lens)', async () => {
+  it('a person of ANOTHER organization is never sent to «create an organization»: membership_elsewhere passes through, whatever the words (Kadir 5155 lens) — and `/` is NOT where they go either (story 4762: the layout\'s own /me 404 would send them on to the onboarding)', async () => {
     const token = await makeAccessToken({ orgId: 'org-x' });
     for (const message of ['Member not found', 'No membership yet']) {
       withMe(() => new Response(JSON.stringify({ data: null, error: { code: 'NOT_FOUND', message, reason: 'membership_elsewhere' }, meta: null }), { status: 404 }));
-      const res = await middleware(makeRequest('/glance', { sp_at: token }));
-      expect([message, res.status, res.headers.get('location')]).toEqual([message, 200, null]); // no redirect to the onboarding: the person is a member somewhere
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const res = await middleware(page('/glance', token));
+      expect([message, res.status, res.headers.get('location')]).toEqual([message, 200, null]); // no redirect at all: not the onboarding, not `/`
+      expect(JSON.parse(String(warn.mock.calls[0]![0]))).toMatchObject({ message: 'proxy_org_lookup_unknown', why: 'me_404_other', redirected: false }); // but the moment's shape is logged
+      warn.mockRestore();
     }
   });
 
@@ -1004,30 +1019,134 @@ describe('proxy — a person with no organization yet is sent to the onboarding,
       if (url.includes('/api/v2/projects/proj-1')) return Promise.resolve({ ok: true, json: async () => ({ id: 'proj-1', slug: 'sprintable' }) });
       return Promise.resolve({ ok: false, status: 404 });
     });
-    const res = await middleware(makeRequest('/glance', { sp_at: token }));
+    const res = await middleware(page('/glance', token));
     expect(res.status).toBe(307);
     expect(res.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow');
   });
 
-  it('«unknown» is not «no organization»: a 5xx, a network error, a 404 that is not «Member not found», a 200 without an org all pass through as before', async () => {
+  it('«unknown» is not «no organization»: a 5xx or a network error (the transient kinds) go back to `/` — not the onboarding, not a Next 404 — and an answer the server meant (a 404 that is not «Member not found», a 403, a 200 without an org) passes through as before; every kind logs one line on a page load (story 4762)', async () => {
     const token = await makeAccessToken({ orgId: 'org-1' });
-    const unknowns: Array<[string, () => Response | Promise<Response>]> = [
-      ['500', () => new Response('{}', { status: 500 })],
-      ['503', () => new Response('{}', { status: 503 })],
-      ['404 other code even with the reason', () => new Response(JSON.stringify({ error: { code: 'ROUTE_NOT_FOUND', message: 'Not Found', reason: 'no_membership' } }), { status: 404 })],
-      ['404 NOT_FOUND with the old words but no reason (an older backend · another route)', () => new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Member not found' } }), { status: 404 })],
-      ['404 another reason', () => new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Member not found', reason: 'something_else' } }), { status: 404 })],
-      ['404 membership_elsewhere (belongs to another organization, not to the one the token points at)', () => new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Member not found', reason: 'membership_elsewhere' } }), { status: 404 })],
-      ['404 not JSON', () => new Response('<html>gateway</html>', { status: 404 })],
-      ['200 without org_id', () => new Response('{}', { status: 200 })],
-      ['200 with an empty org_id', () => new Response(JSON.stringify({ org_id: '' }), { status: 200 })],
-      ['network error', () => { throw new Error('network'); }],
+    const unknowns: Array<[string, () => Response | Promise<Response>, string]> = [
+      ['500', () => new Response('{}', { status: 500 }), 'me_status_500'],
+      ['503', () => new Response('{}', { status: 503 }), 'me_status_503'],
+      ['404 other code even with the reason', () => new Response(JSON.stringify({ error: { code: 'ROUTE_NOT_FOUND', message: 'Not Found', reason: 'no_membership' } }), { status: 404 }), 'me_404_other'],
+      ['404 NOT_FOUND with the old words but no reason (an older backend · another route)', () => new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Member not found' } }), { status: 404 }), 'me_404_other'],
+      ['404 another reason', () => new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Member not found', reason: 'something_else' } }), { status: 404 }), 'me_404_other'],
+      ['404 membership_elsewhere (belongs to another organization, not to the one the token points at)', () => new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Member not found', reason: 'membership_elsewhere' } }), { status: 404 }), 'me_404_other'],
+      ['404 not JSON', () => new Response('<html>gateway</html>', { status: 404 }), 'me_404_other'],
+      ['200 without org_id', () => new Response('{}', { status: 200 }), 'me_200_without_org'],
+      ['200 with an empty org_id', () => new Response(JSON.stringify({ org_id: '' }), { status: 200 }), 'me_200_without_org'],
+      ['200 with a null body', () => new Response('null', { status: 200 }), 'me_200_without_org'],
+      ['200 with an empty body (the server answered; nothing to read)', () => new Response('', { status: 200 }), 'me_200_unparseable'],
+      ['200 with a body that is not JSON', () => new Response('<html>gateway</html>', { status: 200 }), 'me_200_unparseable'],
+      ['network error', () => { throw new Error('network'); }, 'me_unreachable'],
+      ['403 (the server meant it)', () => new Response('{}', { status: 403 }), 'me_status_403'],
     ];
-    for (const [label, answer] of unknowns) {
-      mockFetch.mockReset();
-      withMe(answer);
-      const res = await middleware(makeRequest('/glance', { sp_at: token }));
-      expect([label, res.status, res.headers.get('location')]).toEqual([label, 200, null]); // no intervention: Next renders what it renders
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      for (const [label, answer, why] of unknowns) {
+        mockFetch.mockReset();
+        warn.mockClear();
+        withMe(answer);
+        const res = await middleware(page('/glance', token));
+        const redirects = why.startsWith('me_status_5') || why === 'me_unreachable'; // the transient kinds (5xx · network error) go back to `/`; a meant answer (any 4xx · a 200 without an org) passes through
+        expect([label, res.status, res.headers.get('location')]).toEqual(redirects ? [label, 307, 'https://app.example.com/'] : [label, 200, null]); // never the onboarding, in either case
+        if (redirects) expect([label, res.headers.get('cache-control')]).toEqual([label, 'no-store']); // the road depends on the session: never cached
+        expect([label, warn.mock.calls.length, warn.mock.calls[0]?.length]).toEqual([label, 1, 1]); // one log line with ONE argument (nothing rides along with it), the same word the lookup gave
+        expect([label, JSON.parse(String(warn.mock.calls[0]![0])).why, JSON.parse(String(warn.mock.calls[0]![0])).redirected]).toEqual([label, why, redirects]);
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('every flat address of the table gets the same answer when the server could not tell — not only /glance (one place) — and `/` is not itself in the table (no loop)', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      withMe(() => new Response('{}', { status: 503 }));
+      const keys = Object.keys(MIGRATED_RESOURCES);
+      expect(keys.length).toBeGreaterThan(5);
+      for (const key of keys) {
+        const res = await middleware(page(`/${key}`, token));
+        expect([key, res.status, res.headers.get('location')]).toEqual([key, 307, 'https://app.example.com/']);
+      }
+      // where `/` lands (the session's own road) must not be a flat address of this table, or the person would go round and round
+      const road = resolveNavV3Destinations(readNavV3FlagsFromEnv()).today.path.split('/').filter(Boolean)[0] ?? '';
+      expect(Object.prototype.hasOwnProperty.call(MIGRATED_RESOURCES, road)).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('the query a link carried is dropped, and the log line carries fixed words only (no path, no id, no query value)', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      withMe(() => new Response('{}', { status: 503 }));
+      const res = await middleware(page('/glance?story=secret-story-id&p=11111111-2222-4333-8444-555555555555', token));
+      expect(res.headers.get('location')).toBe('https://app.example.com/');
+      expect(warn.mock.calls).toHaveLength(1);
+      expect(warn.mock.calls[0]).toHaveLength(1); // one argument: a path riding along as a second argument would not be in the JSON and would still be logged
+      const line = String(warn.mock.calls[0]![0]);
+      expect(Object.keys(JSON.parse(line)).sort()).toEqual(['message', 'redirected', 'resource', 'shell', 'why']);
+      expect(JSON.parse(line)).toMatchObject({ message: 'proxy_org_lookup_unknown', why: 'me_status_503', resource: 'glance', shell: false, redirected: true });
+      expect(line).not.toContain('secret-story-id');
+      expect(line).not.toContain('11111111');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('only a page load is sent back to `/`: a POST, a HEAD, a Next RSC fetch, a prefetch, a fetch(), an image, a JSON call, an iframe and a request with no Accept pass through — and are not logged (the log does not grow with every request)', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const on = (headers: Record<string, string>, init: { method?: string; body?: string } = {}) => { const r = new NextRequest('https://app.example.com/glance', { headers, ...init }); r.cookies.set('sp_at', token); return r; };
+      const cases: Array<[string, () => NextRequest]> = [
+        ['POST', () => on(HTML, { method: 'POST', body: '{}' })],
+        ['HEAD', () => on(HTML, { method: 'HEAD' })],
+        ['RSC fetch', () => on({ ...HTML, rsc: '1' })],
+        ['prefetch', () => on({ ...HTML, 'next-router-prefetch': '1' })],
+        ['fetch() with */*', () => on({ Accept: '*/*', 'Sec-Fetch-Dest': 'empty' })],
+        ['JSON call', () => on({ Accept: 'application/json' })],
+        ['image', () => on({ Accept: 'image/avif,image/webp,*/*;q=0.8', 'Sec-Fetch-Dest': 'image' })],
+        ['iframe', () => on({ ...HTML, 'Sec-Fetch-Dest': 'iframe' })],
+        ['no Accept at all', () => on({})],
+      ];
+      for (const [label, build] of cases) {
+        mockFetch.mockReset();
+        warn.mockClear();
+        withMe(() => new Response('{}', { status: 503 }));
+        const res = await middleware(build());
+        expect([label, res.status, res.headers.get('location')]).toEqual([label, 200, null]);
+        expect([label, warn.mock.calls.length]).toEqual([label, 0]);
+      }
+      // and the page load of the same address is the one that goes back to `/` — also when the browser leaves `Sec-Fetch-Dest` out
+      for (const headers of [HTML, { Accept: HTML.Accept }]) {
+        mockFetch.mockReset();
+        withMe(() => new Response('{}', { status: 503 }));
+        const get = await middleware(makeRequestWithHeaders('/glance', headers, { sp_at: token }));
+        expect([get.status, get.headers.get('location')]).toEqual([307, 'https://app.example.com/']);
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('where `/` leads is never asked about the organization either: `/`, `/org-briefing`, `/today` are not flat addresses of the table, so the redirect cannot loop back into the lookup', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      for (const path of ['/', '/org-briefing', '/today']) {
+        mockFetch.mockReset();
+        withMe(() => new Response('{}', { status: 503 }));
+        const res = await middleware(page(path, token));
+        expect([path, res.status, res.headers.get('location'), mockFetch.mock.calls.length]).toEqual([path, 200, null, 0]);
+      }
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
     }
   });
 
@@ -1738,7 +1857,7 @@ describe('proxy — the phone app opening lands by what the server knows, throug
     expect(res.headers.get('location') ?? '').not.toContain('/phone-landing');
   });
 
-  it('a person with NO organization still goes to the onboarding (5155 first), and an organization the server could not tell about passes through as before', async () => {
+  it('a person with NO organization still goes to the onboarding (5155 first), and an organization the server could not tell about goes back to `/` — never a Next 404 (story 4762)', async () => {
     const token = await makeAccessToken();
     mockFetch.mockImplementation((url: string) => (url.includes('/api/v2/me')
       ? Promise.resolve(new Response(JSON.stringify({ data: null, error: { code: 'NOT_FOUND', message: 'Member not found', reason: 'no_membership' }, meta: null }), { status: 404 }))
@@ -1746,8 +1865,9 @@ describe('proxy — the phone app opening lands by what the server knows, throug
     const none = await middleware(makeRequestWithHeaders('/glance', SHELL, { sp_at: token }));
     expect(none.headers.get('location')).toBe('https://app.example.com/onboarding');
     mockFetch.mockImplementation((url: string) => (url.includes('/api/v2/me') ? Promise.resolve({ ok: false, status: 503 }) : Promise.resolve({ ok: false, status: 404 })));
-    const unknown = await middleware(makeRequestWithHeaders('/glance', SHELL, { sp_at: token }));
-    expect(unknown.status).toBe(200);
+    const unknown = await middleware(makeRequestWithHeaders('/glance', { ...SHELL, Accept: 'text/html,application/xhtml+xml,*/*;q=0.8' }, { sp_at: token })); // the shell's page load asks for HTML like any browser's
+    expect(unknown.status).toBe(307);
+    expect(unknown.headers.get('location')).toBe('https://app.example.com/'); // the session picks the road again; the app is not left on a page that does not exist
   });
 
   it('/phone-landing and /phone-start are behind the session like the onboarding: no session → /login', async () => {
