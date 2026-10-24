@@ -577,13 +577,13 @@ async def _drop_org_claims_without_live_seat(payload: dict, user_id: str, db: As
     with it), the organization-scoped claims are dropped from THIS request's view of the token (`org_id` · `project_id` · `project_ids` · `role`) and `org_left` says why, so a route
     that needs an organization answers 403 (`_resolve_verified_org_id`) or «org_id required», and the person's identity (`/auth/me`, a switch to an organization they are in, a
     fresh login) still works. The answer is the seat lookup `_verify_org_membership` keeps on `request.state` for this request only, so a removal is seen by the very next request.
-    Not applied to the keys: an agent key and a person's own API key read their organization from their member row in the request itself."""
+    Not applied to an agent key (it reads its organization from its member row in the request itself); a person's own API key (`hu_live_`) is judged like a token — its member row says «active», not «still seated», and an older removal can leave the anchor active."""
     meta = payload.get("app_metadata")
     if not isinstance(meta, dict):
         return
     raw = meta.get("org_id")
-    if not raw or meta.get("api_key_id") or meta.get("human_api_key_id"):
-        return
+    if not raw or meta.get("api_key_id"):
+        return  # an agent key reads its organization from its member row in this request — never from a claim that can be old
     try:
         org_id = uuid.UUID(str(raw))
     except ValueError:
@@ -625,7 +625,10 @@ async def _resolve_current_user_auth_context(
     # 거기로 보내면 이 분기가 아예 없어 그대로 미인증(자연 차단 — 별도 판별 코드 불요).
     if token.startswith("hu_live_"):
         async with async_session_factory() as db:
-            return await _resolve_human_api_key(token, db)
+            ctx = await _resolve_human_api_key(token, db)
+            await _drop_org_claims_without_live_seat(ctx.claims, ctx.user_id, db, request)  # story #4772
+            ctx.org_id = (ctx.claims.get("app_metadata") or {}).get("org_id")
+            return ctx
 
     # story 455e528d(E-AUTH-REBUILD Phase1-S2·doc §4.2): Firebase 세션(RS256)은 alg 헤더로
     # 정확 분기 — 순차 fallback 아님. FIREBASE_AUTH_ACCEPT_SESSION=false(기본)면 이 분기는
@@ -1188,7 +1191,10 @@ async def get_current_user_streaming(
     # story #1940 — get_current_user와 동형(x-agent-api-key 헤더 경로엔 의도적으로 안 붙임).
     if token.startswith("hu_live_"):
         async with async_session_factory() as db:
-            return await _resolve_human_api_key(token, db)
+            ctx = await _resolve_human_api_key(token, db)
+            await _drop_org_claims_without_live_seat(ctx.claims, ctx.user_id, db, request)  # story #4772 — as in get_current_user
+            ctx.org_id = (ctx.claims.get("app_metadata") or {}).get("org_id")
+            return ctx
 
     # story 455e528d(doc §4.3 "mirror the dual verifier in get_current_user_streaming"):
     # get_current_user와 동일하게 alg 헤더로 정확 분기(순차 fallback 아님). 단명 세션으로

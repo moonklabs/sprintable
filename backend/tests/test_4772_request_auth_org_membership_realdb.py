@@ -239,6 +239,25 @@ async def test_02d_both_request_authentications_drop_the_claims_of_an_organizati
         await _close(engine, w)
 
 
+async def test_02e_a_persons_own_api_key_is_judged_like_a_token():
+    """A `hu_live_` key reads its member row in the request («active», not «still seated»): an OLDER removal (the seat soft-deleted, the anchor left active) kept it working. The same
+    judgement now applies to it: with the seat gone the organization-scoped claims are dropped and an organization route answers 403; while the seat is live it answers 200."""
+    engine, w = await _world()
+    try:
+        owner_email, org_x, org_y, m, m_email, tok_x, tok_y = await _two_organizations(w)
+        r = await w.client.post("/api/v2/me/api-keys", headers=_bearer(tok_x), json={"name": "k4772", "expires_at": None})
+        assert r.status_code == 201, r.text
+        key = r.json()["api_key"]
+        K = {"Authorization": f"Bearer {key}"}
+        assert (await w.client.get("/api/v2/members", headers=K)).status_code == 200
+        # an older removal: the seat is ended and nothing else is touched (the anchor stays active)
+        await w.sql("UPDATE org_members SET deleted_at = now() WHERE org_id = :o AND user_id = :u", o=org_x, u=m)
+        r = await w.client.get("/api/v2/members", headers=K)
+        assert r.status_code == 403, (r.status_code, r.text[:160])
+    finally:
+        await _close(engine, w)
+
+
 async def test_03_with_the_header_the_judgement_is_the_same():
     engine, w = await _world()
     try:
