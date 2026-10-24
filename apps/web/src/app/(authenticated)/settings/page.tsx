@@ -190,8 +190,8 @@ export default function SettingsPage() {
 
   // story 4762 — the «이 폰» tab only exists inside the phone app: if the bridge goes away while the person is on it, the tab list must not point at a pane that is gone
   useEffect(() => {
-    if (!inPhoneApp && activeTab === 'this-phone') setActiveTab(resolveSettingsTab('this-phone', false));
-  }, [inPhoneApp, activeTab]);
+    if (!inPhoneApp) setActiveTab((current) => (current === 'this-phone' ? resolveSettingsTab('this-phone', false) : current)); // functional: a link change queued in the same pass keeps winning
+  }, [inPhoneApp]);
 
   const [orgId, setOrgId] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);

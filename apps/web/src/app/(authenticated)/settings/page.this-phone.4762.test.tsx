@@ -9,12 +9,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../messages/ko.json';
 
-const { useDashboardContextMock, searchParams } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn(), searchParams: new URLSearchParams('tab=this-phone') }));
+const { useDashboardContextMock, params } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn(), params: { current: new URLSearchParams('tab=this-phone') } }));
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => useDashboardContextMock() }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn(), prefetch: vi.fn() }),
-  useSearchParams: () => searchParams, // ONE object, as in the app: a fresh one per render would re-run the page's tab effect every render and hide a missing dependency
+  useSearchParams: () => params.current, // ONE object per link, as in the app: a fresh one per render would re-run the page's tab effect every render and hide a missing dependency
   usePathname: () => '/settings',
 }));
 vi.mock('@/lib/db/client', () => ({
@@ -26,6 +26,7 @@ vi.mock('@/lib/db/client', () => ({
 let container: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
+  params.current = new URLSearchParams('tab=this-phone');
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -98,6 +99,24 @@ describe('[SID:4762] SettingsPage — «이 폰» tab', () => {
     await act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); });
     expect(tabNames()).not.toContain(koMessages.settings.tabThisPhone);
     expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent?.trim()).toBe(koMessages.settings.tabProfile); // reverted → the selection points at a tab that is gone
+  });
+
+  it('the bridge goes away in the same pass as a link change to another tab: the link wins (the fallback must not overwrite it)', async () => {
+    const phoneCall = vi.fn(async () => ({ id: 'w1', ok: true, key_number: '324 642' }));
+    const { SettingsPage, PhoneBridgeContext } = await load();
+    const draw = (inPhoneApp: boolean) => act(async () => {
+      root.render(
+        <PhoneBridgeContext.Provider value={{ inPhoneApp, phoneCall }}>
+          <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><SettingsPage /></NextIntlClientProvider>
+        </PhoneBridgeContext.Provider>,
+      );
+    });
+    await draw(true);
+    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent?.trim()).toBe(koMessages.settings.tabThisPhone);
+    params.current = new URLSearchParams('tab=appearance'); // the link changes …
+    await draw(false); // … in the same pass in which the bridge goes away
+    await act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); });
+    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent?.trim()).toBe(koMessages.settings.tabDisplay); // reverted (a plain set) → the profile tab
   });
 
   it('a tab the person picked by hand before the claim arrives is kept — the late claim does not pull them back to the link\'s tab', async () => {

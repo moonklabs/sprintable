@@ -129,6 +129,19 @@ describe('[SID:4762] ThisPhoneCard — the phone\'s own check number', () => {
     expect(q('this-phone-number')).toBeNull();
   });
 
+  it('«read again» while the second request has not answered yet shows «loading», not the first answer again', async () => {
+    const call = vi.fn()
+      .mockResolvedValueOnce(answer({ ok: false, code: 'failed' }))
+      .mockImplementationOnce(() => new Promise<Answer>(() => undefined));
+    await draw(call as never);
+    expect(q('this-phone-failed')).not.toBeNull();
+    await act(async () => { (q('this-phone-retry') as HTMLButtonElement).click(); });
+    await act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); });
+    expect(call).toHaveBeenCalledTimes(2);
+    expect(q('this-phone-reading')).not.toBeNull(); // reverted (the answer is not tied to its request number) → the old failure stays on screen
+    expect(q('this-phone-failed')).toBeNull();
+  });
+
   it('«read again» asks the shell again and then shows the number', async () => {
     const call = vi.fn()
       .mockResolvedValueOnce(answer({ ok: false, code: 'failed' }))
