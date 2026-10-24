@@ -1535,6 +1535,7 @@
     "verifyError": "Something went wrong during verification.",
     "startButton": "Get started",
     "backToApp": "Back to the app",
+    "backToAppHint": "Works if the Sprintable app is installed on this phone.",
     "backToLogin": "Back to login"
   },
   "setPassword": {

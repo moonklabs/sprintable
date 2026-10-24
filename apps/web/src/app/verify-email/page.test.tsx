@@ -160,6 +160,8 @@ describe('VerifyEmailPage — 앱으로 돌아가기 (story #4762 AC6)', () => {
     const link = container.querySelector('[data-testid="verify-back-to-app"]') as HTMLAnchorElement | null;
     expect(link?.textContent).toBe(koMessages.verifyEmail.backToApp);
     expect(link?.getAttribute('href')).toBe('ai.sprintable:/'); // no NEXT_PUBLIC_APP_URL in the test build → the production scheme (the dev web's host gives ai.sprintable.dev, see native-return-app.test.ts)
+    // a phone without the app gets the OS's «no app» error from a custom-scheme link: the page says so beforehand (codex 4762)
+    expect(container.querySelector('[data-testid="verify-back-to-app-hint"]')?.textContent).toBe(koMessages.verifyEmail.backToAppHint);
   });
 
   it('an iPhone browser gets it too', async () => {
@@ -174,6 +176,7 @@ describe('VerifyEmailPage — 앱으로 돌아가기 (story #4762 AC6)', () => {
     vi.stubGlobal('fetch', verified);
     await mountAndWait();
     expect(container.querySelector('[data-testid="verify-back-to-app"]')).toBeNull();
+    expect(container.querySelector('[data-testid="verify-back-to-app-hint"]')).toBeNull();
   });
 
   it('a failed verification does not offer it (nothing to go back to the app for)', async () => {

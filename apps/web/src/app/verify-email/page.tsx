@@ -126,6 +126,7 @@ export default function VerifyEmailPage() {
                 {t('backToApp')}
               </a>
             ) : null}
+            {onPhone ? <p className="text-xs text-muted-foreground" data-testid="verify-back-to-app-hint">{t('backToAppHint')}</p> : null}
           </div>
         )}
 
