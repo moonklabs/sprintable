@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
-import { cookieBase } from '@/lib/auth/cookies';
+import { cookieBase, markSessionChanged } from '@/lib/auth/cookies';
 import { handleApiError } from '@/lib/api-error';
 import {
   ACTIVE_ACCOUNT_COOKIE,
@@ -104,7 +104,7 @@ export async function POST(request: Request) {
     removeVaultEntry(res.cookies, next.accountId);
     clearSuperseded(next.accountId); // 승격된 next 는 active — epoch 마킹 해제(정상 refresh 허용)
     discardCookies(res.cookies, staleNames); // RC1: stale vault 폐기
-    return res;
+    return markSessionChanged(res);
   } catch (err: unknown) {
     return handleApiError(err);
   }

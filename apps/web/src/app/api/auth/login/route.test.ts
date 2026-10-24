@@ -24,6 +24,31 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('/api/auth/login — 세션 바뀜 표시(story 4762)', () => {
+  it('정상 로그인 → sp_at/sp_rt를 세우고, 폰 셸이 쿠키를 디스크로 내리도록 표시 헤더를 단다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ data: { access_token: 'login-at', refresh_token: 'login-rt' } }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )));
+    const res = await POST(loginRequest());
+    expect(res.status).toBe(200);
+    const setCookie = res.headers.get('set-cookie') ?? '';
+    expect(setCookie).toContain('sp_at=login-at');
+    expect(setCookie).toContain('sp_rt=login-rt');
+    expect(res.headers.get('x-session-changed')).toBe('1');
+  });
+
+  it('실패한 로그인(401)은 세션을 안 바꿨으니 표시 헤더도 없다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ error: { code: 'INVALID_CREDENTIALS', message: 'bad' } }),
+      { status: 401, headers: { 'content-type': 'application/json' } },
+    )));
+    const res = await POST(loginRequest());
+    expect(res.status).toBe(401);
+    expect(res.headers.get('x-session-changed')).toBeNull();
+  });
+});
+
 describe('/api/auth/login — 상류 비-JSON 본문(story #3644 AC8)', () => {
   it('상류가 502+HTML(CF 오류 페이지)을 내면 500 HTML로 새지 않고 기존 폴백 봉투+원 status를 낸다', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(
