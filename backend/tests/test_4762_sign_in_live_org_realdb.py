@@ -287,6 +287,63 @@ async def test_switch_project_with_a_token_of_an_org_the_person_has_left_is_refu
         await _close(engine, w)
 
 
+async def test_switch_project_with_a_claimless_token_is_refused_even_with_a_leftover_anchor_and_grant():
+    """codex lens: a person whose last seat was closed signs in claim-less (the guard), but a members anchor + project grant are still active. A claim-less token has no org to switch a
+    project in: `switch-project` must not let that leftover row mint a token naming the org (the live-seat check needs an org to check)."""
+    from sqlalchemy import text
+
+    from app.models.member import Member
+
+    engine, w = await _world(org_count=1)
+    try:
+        org = w.orgs[0]
+        async with w.Session() as s:
+            seat = (await s.execute(text("SELECT id FROM org_members WHERE org_id = :o AND user_id = :u"), {"o": org, "u": w.user_id})).scalar_one()
+            s.add(Member(id=seat, org_id=org, type="human", user_id=w.user_id, name="M"))
+            await s.commit()
+            await s.execute(text(
+                "INSERT INTO project_access (id, project_id, org_member_id, member_id, permission, role, color, can_manage_members, access_source) "
+                "VALUES (:i, :p, :om, :m, 'granted', 'member', '#3385f8', false, 'direct')"),
+                {"i": uuid.uuid4(), "p": w.projects[0], "om": seat, "m": seat})
+            await s.commit()
+        await w.leave(org)
+        tokens = await w.login()  # claim-less: no live org
+        assert not _org_claim(tokens)
+        resp = await w.client.post(
+            "/api/v2/auth/switch-project",
+            json={"project_id": str(w.projects[0]), "refresh_token": tokens["refresh_token"]},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+        assert resp.status_code == 403, resp.text
+    finally:
+        await _close(engine, w)
+
+
+async def test_switch_org_does_not_accept_a_seat_in_an_organization_that_no_longer_exists():
+    """codex lens: `org_members.org_id` has no foreign key — a hard-deleted organization can leave a live seat row. switch-org uses the same «live» predicate as `_live_org_ids`
+    (the organization must still exist), so it cannot mint a token naming an organization that is gone."""
+    from sqlalchemy import delete
+
+    from app.models.organization import Organization
+
+    engine, w = await _world()
+    try:
+        a, b = w.orgs
+        tokens = await w.login()
+        async with w.Session() as s:
+            await s.execute(delete(Organization).where(Organization.id == b))
+            await s.commit()
+        resp = await w.client.post(
+            "/api/v2/auth/switch-org",
+            json={"org_id": str(b), "refresh_token": tokens["refresh_token"]},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["error"]["code"] == "NOT_ORG_MEMBER"
+    finally:
+        await _close(engine, w)
+
+
 async def test_switch_project_names_the_callers_session_org_never_the_one_last_used_elsewhere():
     """Kadir lens: the person holds a token for org A, another session left `users.last_org_id` = B, and the person was removed from B. `switch-project` for a project of A used to
     build its claim from `last_org_id` → a new token naming the org they LEFT (the request auth trusts the JWT org when no X-Org-Id is sent). The claim now follows the caller's org."""

@@ -2453,11 +2453,15 @@ async def switch_project(
     # 정식 access+refresh 토큰이 발급되는 증폭 경로였다(SEC-S5~S8 가드를 우회하는 크리덴셜
     # 발급 자체이므로 단순 열람보다 파급이 큼). 현재 세션의 org 컨텍스트로 명시 스코핑.
     caller_org_id_str = auth.claims.get("app_metadata", {}).get("org_id")
-    caller_org_id = uuid.UUID(str(caller_org_id_str)) if caller_org_id_str else None
+    try:
+        caller_org_id = uuid.UUID(str(caller_org_id_str)) if caller_org_id_str else None
+    except ValueError:  # a signed token whose org claim is not an org id: fail closed, not a 500
+        return _err("NOT_MEMBER", "Not an active member of this organization", 403)
 
     # story 4762 (codex · Kadir lens, PR 5217) — the session's own org must still be one the person is a LIVE member of: `has_project_access` also lets an active team-member anchor
-    # through after the seat (org_members) was closed, and the new token would name the org the person left. A claim-less token (no org) goes on as before.
-    if caller_org_id is not None and caller_org_id not in await _live_org_ids(session, user.id):
+    # through after the seat (org_members) was closed, and the new token would name the org the person left. A claim-less token has no org to switch a project in (a person with a
+    # live seat gets a claim from refresh / sign-in): it is refused too, so a leftover legacy team-member row cannot mint an org claim here.
+    if caller_org_id is None or caller_org_id not in await _live_org_ids(session, user.id):
         return _err("NOT_MEMBER", "Not an active member of this organization", 403)
 
     # 인가 체크 — team_member ∪ project_access(granted) ∪ owner/admin (me/memberships 3-branch 정합)
@@ -2525,8 +2529,11 @@ async def switch_organization(
         return _err("SESSION_INVALIDATED", "Password was changed — please log in again", 401)
 
     # org_members 소속 여부 확인
+    from app.models.organization import Organization  # story 4762 — the same «live» predicate as `_live_org_ids`: a seat in an organization that no longer exists is not a membership
+
     membership = await session.execute(
         select(OrgMember)
+        .join(Organization, Organization.id == OrgMember.org_id)
         .where(
             OrgMember.org_id == body.org_id,
             OrgMember.user_id == user.id,

@@ -183,6 +183,25 @@ async def test_switch_project_token_org_the_person_has_left_returns_403_before_a
     assert mock_session.execute.await_count == 1
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize("claims", [
+    {"app_metadata": {}},                                  # a claim-less token: no org to switch a project in
+    {"app_metadata": {"org_id": "not-a-uuid"}},            # a signed token whose org claim is not an org id — fail closed, not a 500
+])
+async def test_switch_project_with_no_usable_session_org_is_refused_before_any_project_check(client, mock_session, auth_ctx, claims):
+    """story 4762 (codex) — no org claim, or one that is not an org id: 403 NOT_MEMBER, no project access query, no revoke."""
+    user = _make_user()
+    auth_ctx.user_id = str(user.id)
+    auth_ctx.claims = claims
+    user_result = MagicMock()
+    user_result.scalar_one_or_none.return_value = user
+    mock_session.execute.side_effect = [user_result]
+    resp = await client.post("/api/v2/auth/switch-project", json={"project_id": str(uuid.uuid4())})
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "NOT_MEMBER"
+    assert mock_session.execute.await_count == 1
+
+
 # ─── AC5-3: 비활성 team_member 거부 ──────────────────────────────────────────
 
 @pytest.mark.anyio
