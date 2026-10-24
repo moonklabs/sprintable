@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { DesktopDevices } from '@/components/desktop/desktop-devices';
 import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
+import { DesktopOpenAppCard } from '@/components/desktop/desktop-open-app-card';
 import { DesktopRemoteControlCard } from '@/components/desktop/desktop-remote-control-card';
 import { DesktopRemoteDevices } from '@/components/desktop/desktop-remote-devices';
 import { PhoneSessionManagement } from '@/components/desktop/phone-session-management';
@@ -34,6 +35,8 @@ export default function DesktopPage() {
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-4 p-6">
+      {/* story #4763 AC5: «앱 열기» first on a Mac, the download right under it */}
+      <DesktopOpenAppCard />
       <DesktopDownloadCard />
       {/* story #4535 — the org's «원격 제어» (an owner switches it; everyone else reads its state) */}
       <DesktopRemoteControlCard />

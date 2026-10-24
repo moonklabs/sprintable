@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { _resetActivationStatusCacheForTests, useActivationStatus } from './use-activation-status';
+import { ACTIVATION_REFRESH_MS, _resetActivationStatusCacheForTests, useActivationStatus } from './use-activation-status';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -179,5 +179,133 @@ describe('useActivationStatus — org 범위(story #4219 F1 PO 리뷰)', () => {
     await flush();
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(container.querySelector('[data-testid="org"]')!.textContent).toBe('false|org-2|2');
+  });
+});
+
+// story #4763 — «첫 지시 보내고 회신 받기» ticks itself when the reply arrives: an open checklist is read again (every ACTIVATION_REFRESH_MS while visible · on focus) until it is complete
+function RefreshProbe({ on = true }: { on?: boolean }) {
+  const { state, allComplete } = useActivationStatus(undefined, { orgId: 'org-1', refreshWhileIncomplete: on });
+  return <span data-testid="rt">{String(state?.steps.first_roundtrip)}|{String(allComplete)}</span>;
+}
+const rt = () => container.querySelector('[data-testid="rt"]')!.textContent;
+const REPLIED = { ...PARTIAL, steps: { ...PARTIAL.steps, first_roundtrip: true }, completed: 3 };
+const COMPLETE = { ...PARTIAL, steps: { signed_up: true, email_verified: true, org_created: true, agent_connected: true, first_roundtrip: true }, completed: 5, total: 5, all_complete: true };
+
+describe('useActivationStatus — 회신이 오면 스스로 체크(story #4763)', () => {
+  let visibility: DocumentVisibilityState;
+  beforeEach(() => {
+    visibility = 'visible';
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility });
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  });
+  afterEach(() => { vi.useRealTimers(); });
+
+  function sequence(answers: object[]) {
+    let i = 0;
+    return vi.fn(async () => ({ ok: true, json: async () => ({ data: answers[Math.min(i++, answers.length - 1)] }) }));
+  }
+
+  it('the reply arrives while the banner is open → the next read ticks «첫 지시 보내고 회신 받기» (no reload)', async () => {
+    const spy = sequence([PARTIAL, REPLIED]);
+    vi.stubGlobal('fetch', spy);
+    await act(async () => { root.render(<RefreshProbe />); });
+    await flush();
+    expect(rt()).toBe('false|false');
+    await act(async () => { vi.advanceTimersByTime(ACTIVATION_REFRESH_MS); });
+    await flush();
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(rt()).toBe('true|false');
+  });
+
+  it('a hidden tab does not read again · coming back (focus) reads at once', async () => {
+    const spy = sequence([PARTIAL, REPLIED]);
+    vi.stubGlobal('fetch', spy);
+    await act(async () => { root.render(<RefreshProbe />); });
+    await flush();
+    visibility = 'hidden';
+    await act(async () => { vi.advanceTimersByTime(ACTIVATION_REFRESH_MS * 4); });
+    await flush();
+    expect(spy).toHaveBeenCalledTimes(1);
+    visibility = 'visible';
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await flush();
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(rt()).toBe('true|false');
+  });
+
+  it('once complete it stops reading (and the complete flag is kept) — no poll left behind', async () => {
+    const spy = sequence([PARTIAL, COMPLETE]);
+    vi.stubGlobal('fetch', spy);
+    await act(async () => { root.render(<RefreshProbe />); });
+    await flush();
+    await act(async () => { vi.advanceTimersByTime(ACTIVATION_REFRESH_MS); });
+    await flush();
+    expect(rt()).toBe('true|true');
+    expect(window.localStorage.getItem(COMPLETE_KEY)).toBe('1');
+    await act(async () => { vi.advanceTimersByTime(ACTIVATION_REFRESH_MS * 4); });
+    await flush();
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('two reads overlap (interval, then focus): the older answer, arriving last, does not cover the newer one (codex)', async () => {
+    const releases: Array<(d: object) => void> = [];
+    let calls = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) return { ok: true, json: async () => ({ data: PARTIAL }) };
+      const data = await new Promise<object>((resolve) => { releases.push(resolve); });
+      return { ok: true, json: async () => ({ data }) };
+    }));
+    await act(async () => { root.render(<RefreshProbe />); });
+    await flush();
+    await act(async () => { vi.advanceTimersByTime(ACTIVATION_REFRESH_MS); }); // read A (interval)
+    await act(async () => { window.dispatchEvent(new Event('focus')); }); // read B (newer)
+    expect(releases).toHaveLength(2);
+    await act(async () => { releases[1]!(REPLIED); }); // B answers: the reply has arrived (still not all done, so the reading goes on)
+    await flush();
+    expect(rt()).toBe('true|false');
+    await act(async () => { releases[0]!(PARTIAL); }); // A answers late: the older «not yet»
+    await flush();
+    expect(rt()).toBe('true|false'); // not taken back
+  });
+
+  it('a re-read made by the banner is told to the other user of the same checklist (the support launcher, which does not ask for re-reads) (codex)', async () => {
+    const spy = sequence([PARTIAL, REPLIED]);
+    vi.stubGlobal('fetch', spy);
+    function Plain() { const { state } = useActivationStatus(undefined, { orgId: 'org-1' }); return <span data-testid="plain">{String(state?.steps.first_roundtrip)}</span>; }
+    await act(async () => { root.render(<><RefreshProbe /><Plain /></>); });
+    await flush();
+    expect(rt()).toBe('false|false');
+    expect(container.querySelector('[data-testid="plain"]')!.textContent).toBe('false');
+    await act(async () => { vi.advanceTimersByTime(ACTIVATION_REFRESH_MS); });
+    await flush();
+    expect(rt()).toBe('true|false');
+    expect(container.querySelector('[data-testid="plain"]')!.textContent).toBe('true');
+  });
+
+  it('complete with no organization known (no stored complete flag to stop it) → the condition itself stops the reading', async () => {
+    const spy = sequence([COMPLETE]);
+    vi.stubGlobal('fetch', spy);
+    function NoOrgProbe() {
+      const { allComplete } = useActivationStatus(undefined, { refreshWhileIncomplete: true });
+      return <span data-testid="rt">{String(allComplete)}</span>;
+    }
+    await act(async () => { root.render(<NoOrgProbe />); });
+    await flush();
+    expect(rt()).toBe('true');
+    await act(async () => { vi.advanceTimersByTime(ACTIVATION_REFRESH_MS * 4); });
+    await flush();
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('without the option (the support launcher\'s call) nothing is read again', async () => {
+    const spy = sequence([PARTIAL, REPLIED]);
+    vi.stubGlobal('fetch', spy);
+    await act(async () => { root.render(<RefreshProbe on={false} />); });
+    await flush();
+    await act(async () => { vi.advanceTimersByTime(ACTIVATION_REFRESH_MS * 3); });
+    await flush();
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(rt()).toBe('false|false');
   });
 });

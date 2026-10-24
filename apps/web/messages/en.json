@@ -1468,6 +1468,9 @@
   "login": {
     "title": "Sprintable",
     "subtitle": "The organization OS that closes open loops",
+    "macAppPitch": "AI agents take your tasks and carry them through. Get the Mac app and start yours.",
+    "macAppGet": "Get the Mac app",
+    "macAppGetHint": "Sign up and verify your email first, then you can get it",
     "sessionExpired": "Your session expired and you were signed out. Please sign in again.",
     "google": "Continue with Google",
     "apple": "Continue with Apple",
@@ -1709,6 +1712,9 @@
     "artifactUnavailable": "No hosted deployment in this environment.",
     "verifyExampleLabel": "Try telling your agent:",
     "verifyExamplePrompt": "Show me my story list",
+    "orgDeletedTitle": "Organization deleted",
+    "orgDeletedBody": "This account has no organization now. Create a new one to keep going.",
+    "orgDeletedNew": "Create a new organization",
     "arriving": "Getting ready…",
     "inviteCheckFailed": "We couldn't check your invitations — your organization is made once they're checked",
     "accountCheckFailed": "We couldn't check your account — your organization is made once it's checked",
@@ -7002,6 +7008,9 @@
     "rowDetailAdsSpendLabel": "Ad spend"
   },
   "desktop": {
+    "openAppTitle": "Already have the app on this Mac?",
+    "openAppCta": "Open the app",
+    "openAppNoAppNote": "No app yet? You can get it just below.",
     "loading": "Loading…",
     "title": "Desktop app",
     "targetLabel": "For macOS (Apple Silicon)",

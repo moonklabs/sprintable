@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { fetchWithAuth, logoutUser } from '@/lib/db/client';
 import { pickEuroJosa } from '@/lib/korean-particle';
+import { listenVerified } from '@/lib/auth/email-verified-signal';
 
 export const VERIFY_POLL_MS = 3000;
 
@@ -72,6 +73,14 @@ export function useEmailVerifyGate(active = true, onOpened?: () => void): Verify
     void readMe().then((me) => { if (!off) apply(me); });
     return () => { off = true; };
   }, [active, apply]);
+
+  // story #4763 AC7: the tab that verifies tells this one — check at once, hidden or not. From the very first read on (not only once the gate is shown closed): a signal that comes while the
+  // first answer is still on its way must not be lost (codex). (An opened gate never closes again — `apply` keeps `open` — so a slow older «not verified» answer cannot undo it.)
+  useEffect(() => {
+    if (!active || gate.kind === 'open') return;
+    // hearing it means the verification has just happened: whatever the screen read before (invites …) is old — `onOpened` runs once when the gate opens, also when it was still reading (codex)
+    return listenVerified(() => { wasClosed.current = true; check(); });
+  }, [active, gate.kind, check]);
 
   useEffect(() => {
     if (!active || gate.kind !== 'closed') return;

@@ -44,6 +44,7 @@ afterEach(async () => {
 function arrivalAnswer(url: string): Response | null {
   if (url === '/api/auth/me') return { ok: true, json: async () => ({ data: { member_id: 'u-1', email_verified: true, org_id: null, org_member_id: null } }) } as Response;
   if (url === '/api/invites/mine') return { ok: true, json: async () => ({ invites: [] }) } as Response; // the backend's one shape (no envelope)
+  if (url === '/api/auth/refresh') return { ok: true, json: async () => ({ data: {} }) } as Response; // story 4763: the arrival renews the token once before it decides «no organization»
   return null;
 }
 

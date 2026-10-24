@@ -11,7 +11,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 
-const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
+const { pushMock, announceMock } = vi.hoisted(() => ({ pushMock: vi.fn(), announceMock: vi.fn() }));
+vi.mock('@/lib/auth/email-verified-signal', () => ({ announceVerified: announceMock, listenVerified: vi.fn(() => () => undefined) }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock }),
   useSearchParams: () => new URLSearchParams('token=tok-1'),
@@ -34,6 +35,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   vi.resetModules();
   pushMock.mockClear();
+  announceMock.mockClear();
 });
 
 async function mountAndWait() {
@@ -65,6 +67,18 @@ describe('VerifyEmailPage — error.code 분기 (story #2484)', () => {
     await mountAndWait();
     expect(container.textContent).not.toContain('Email already verified');
     expect(container.textContent).toContain(koMessages.verifyEmail.verifiedSuccess);
+  });
+
+  it('[SID:4763 AC7] 성공하면 다른 탭에 «인증됐어요»를 알린다(숨은 첫 탭의 게이트가 바로 열리게) — 실패하면 알리지 않는다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ json: async () => ({ data: { message: 'ok' } }) })));
+    await mountAndWait();
+    expect(announceMock).toHaveBeenCalledTimes(1);
+    announceMock.mockClear();
+    root.unmount(); root = createRoot(container);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ json: async () => ({ error: { code: 'INVALID_TOKEN', message: 'x' } }) })));
+    vi.resetModules();
+    await mountAndWait();
+    expect(announceMock).not.toHaveBeenCalled();
   });
 
   it('INVALID_TOKEN — raw 영문 대신 i18n 문구', async () => {
