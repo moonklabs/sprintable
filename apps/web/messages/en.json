@@ -451,6 +451,7 @@
     "adSpendNotMeasured": "Not measured",
     "instructionInputPlaceholder": "Type one line to instruct…",
     "instructionSendButton": "Send",
+    "instructionSendFailed": "Couldn't send — your line is still here, try again.",
     "signalHypothesisFalsifiedTitle": "A hypothesis was falsified",
     "clusterFalsifiedTitle": "Hypothesis refuted",
     "clusterFalsifiedSub": "Recently refuted hypotheses · linked to what comes next",
