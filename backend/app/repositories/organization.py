@@ -374,6 +374,17 @@ class OrganizationRepository:
             .where(OrgMember.org_id == org_id, OrgMember.deleted_at.is_(None))
             .values(deleted_at=func.now())
         )
+        # story #4771 — the one lock order: the agent member rows, then the setup rows, BEFORE any key row. The statements below revoke the organization's agent keys, and the
+        # final delete cascades to `desktop_setups`; with the keys first this was the opposite of a disconnect, the account deletion's closer, a member removal and migrations
+        # 0463 / 0464 (all: agent member rows → setup rows → keys → tokens), a deadlock pair whenever they overlapped (3 + 1 of 20 randomly started rounds on develop,
+        # measured by the security lens). Taking both here, in id order, makes the cascade find rows this transaction already holds. The order, outermost first:
+        # users · organization · refresh tokens · seats (`org_members`) · agent member rows · setup rows · agent keys then device tokens · everything else.
+        await self.session.execute(
+            text("SELECT id FROM members WHERE org_id = :o AND type = 'agent' ORDER BY id FOR UPDATE"), {"o": org_id},
+        )
+        await self.session.execute(
+            text("SELECT id FROM desktop_setups WHERE org_id = :o ORDER BY id FOR UPDATE"), {"o": org_id},
+        )
         # story 4728 (AC0 measured on a real PG): the organization row going away leaves the public links, public keys and agent keys
         # of that organization alive in tables with no foreign key to it (doc_share_tokens · org_metering_keys · site_posts · agent_api_keys
         # all keep org_id as a plain column) — a doc share link kept answering 200 with the deleted organization's text. They are ended

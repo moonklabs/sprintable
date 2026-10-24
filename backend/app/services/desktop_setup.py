@@ -1052,7 +1052,19 @@ async def _lock_in_order(db: AsyncSession, *, member_ids: set[uuid.UUID], setup_
     """story #4565 (PO 02:51Z) — the one lock order every path that touches an agent and setups keeps: the agent member rows
     first, by id, then the setup rows, by id (one statement each). Two exchanges attaching the same agent queue at its member
     row and never reach each other's setup row; «disconnect» takes the same order (no exchange ⟷ disconnect deadlock). The
-    setup rows come back re-read under the lock."""
+    setup rows come back re-read under the lock.
+
+    story #4771 — THE one order, for every path that closes or deletes a computer's rows (outermost first; a path takes only the steps it needs, never one out of order):
+      ① the users row ......... account deletion (FOR UPDATE, routers/account.py) · exchange (FOR SHARE, `exchange_setup`)
+      ② the organization row .. an organization delete / the account deletion closing an organization (FOR UPDATE, repositories/organization.py), `_plan_organizations`
+      ③ refresh tokens ........ member removal · role change · account deletion (`_revoke_user_refresh_tokens`, routers/org_members.py)
+      ④ the seat rows ......... `org_members`: removal (FOR UPDATE) · account deletion (FOR UPDATE, by id) · exchange (FOR SHARE) · an organization delete (UPDATE)
+      ⑤ agent member rows ..... this function, by id — the closers, `_disconnect_setup`, the exchange; an organization delete takes all the organization's agents
+      ⑥ setup rows ............ this function, by id — likewise; an organization delete takes all the organization's setups BEFORE any key (its final DELETE cascades to them)
+      ⑦ agent keys, then device tokens .. `_disconnect_setup`, the closers, migrations 0463 / 0464 (0464 takes the token and key rows it will record, under ⑥)
+      ⑧ everything else ....... commands · clock views · permission requests · human anchors · the cascade of an organization delete
+    An organization delete used to revoke the keys (⑦) before its cascade reached the setups (⑥): the opposite of every other path, a deadlock pair with a disconnect or an
+    account deletion whenever they overlapped (measured on develop: 3 + 1 of 20 randomly started rounds); tests/test_4771_lock_order_realdb.py keeps the pairs."""
     from app.models.member import Member
 
     if member_ids:
@@ -1236,6 +1248,8 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str, device_i
                 select(OrgMember.id).where(OrgMember.org_id == setup.org_id, OrgMember.user_id == locked_confirmer).with_for_update(read=True)
             )
     locked = await _lock_in_order(db, member_ids=attached, setup_ids={setup.id, *other_ids})
+    if setup.id not in locked:
+        raise DesktopSetupError("code_not_found")  # story #4771 (codex r1): the row went with its organization (a delete committed) between the read and the lock — not a KeyError (500)
     setup = locked[setup.id]
     others = [locked[i] for i in sorted(other_ids) if i in locked]
     if not _attached_agents(setup) <= attached:
@@ -1467,7 +1481,10 @@ async def _disconnect_setup(
     # story #4565 (PO 02:51Z): the one lock order — the member rows this disconnect may stop, then the setup row
     made = set(_made_agent_ids(found.members))
     # `locked`: the caller already took every row it will touch in that one order (the account deletion closes several setups)
-    setup = locked[found.id] if locked is not None else (await _lock_in_order(db, member_ids=made, setup_ids={found.id}))[found.id]
+    rows = locked if locked is not None else await _lock_in_order(db, member_ids=made, setup_ids={found.id})
+    setup = rows.get(found.id)
+    if setup is None:
+        raise DesktopSetupError("setup_not_found")  # story #4771: the row went with its organization (a delete committed) between the read and the lock — «not found», not a KeyError (500)
     now = _now()
     revoked = (await db.execute(
         update(ApiKey).where(ApiKey.desktop_setup_id == setup.id, ApiKey.revoked_at.is_(None))
