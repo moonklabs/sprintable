@@ -18,6 +18,7 @@ import { useDashboardContext } from '../../../dashboard/dashboard-shell';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { CHAT_API_PREFIX } from '@/lib/chat-api-prefix';
 import { participantDisplayLabel } from '@/lib/member-display';
 import { useFlatHref } from '@/hooks/use-flat-href';
 
@@ -388,7 +389,7 @@ export default function ConversationPage() {
             threadId={conversation_id}
             currentTeamMemberId={currentTeamMemberId}
             projectId={projectId}
-            apiPrefix="/api/conversations"
+            apiPrefix={CHAT_API_PREFIX}
             commandTargets={commandTargets}
             presenceById={presenceById}
             scrollToMessageId={scrollToMessageId}

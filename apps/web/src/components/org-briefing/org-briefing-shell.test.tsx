@@ -8,6 +8,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
+import { CHAT_API_PREFIX } from '@/lib/chat-api-prefix';
 
 const { useDashboardContextMock, searchParamsValueRef, pushMock, replaceMock } = vi.hoisted(() => ({
   useDashboardContextMock: vi.fn(),
@@ -424,7 +425,7 @@ describe('OrgBriefingShell — story #4762 AC1 한 번 누름 = 서버에 메시
     await typeAndSend('유튜브 챕터 3개로 나눠줘');
     const posts = calls.filter((c) => c.method === 'POST');
     expect(posts).toHaveLength(1);
-    expect(posts[0]!.url).toBe('/api/chats/c1/messages');
+    expect(posts[0]!.url).toBe(`${CHAT_API_PREFIX}/c1/messages`); // the chat screen's own address (story #4762 — it was the old `/api/chats`, a 404 on dev)
     expect(JSON.parse(posts[0]!.body!).content).toBe('유튜브 챕터 3개로 나눠줘');
     expect(pushMock).toHaveBeenCalledTimes(1);
     expect(pushMock).toHaveBeenCalledWith('/chats/c1?p=p1'); // the flat link carries the project, as every flat link does
