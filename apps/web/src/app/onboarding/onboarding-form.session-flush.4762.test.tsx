@@ -15,6 +15,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { OnboardingForm } from './onboarding-form';
 import { installProjectHeaderInterceptor } from '@/lib/project-context-client';
+import { SESSION_CHANGED_HEADER } from '@/lib/auth/session-changed-header';
 import koMessages from '../../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -23,7 +24,7 @@ let container: HTMLDivElement;
 let root: Root;
 const post = vi.fn();
 // what the refresh route answers: the session cookies were rotated, and the route says so (`markSessionChanged`)
-const rotated = () => ({ ok: true, headers: new Headers({ 'x-session-changed': '1' }), json: async () => ({}) });
+const rotated = () => ({ ok: true, headers: new Headers({ [SESSION_CHANGED_HEADER]: '1' }), json: async () => ({}) });
 let refreshAnswer: () => Promise<unknown> | unknown = rotated;
 const handler = vi.fn(async (_url: string): Promise<unknown> => ({ ok: false, status: 404, json: async () => ({}) }));
 

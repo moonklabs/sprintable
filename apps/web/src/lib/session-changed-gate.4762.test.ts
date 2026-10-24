@@ -89,6 +89,23 @@ describe('the fetch gate tells the shell when a response says the session change
     expect(types()).toEqual(['session-changed']);
   });
 
+  it('the mark is believed on ANY same-origin path: a protected page fetch whose session the proxy refreshed announces it too (only the origin decides, not `/api/`)', async () => {
+    answer = () => marked();
+    await install();
+    await window.fetch('/glance', { method: 'GET' });
+    expect(types()).toEqual(['session-changed']);
+  });
+
+  it('a URL-shaped input from another realm (no `instanceof URL`) is read by its href; an input with no readable url tells nobody', async () => {
+    answer = () => marked();
+    await install();
+    await window.fetch({ href: 'https://other.example/api/auth/login' } as unknown as URL, { method: 'POST' });
+    await window.fetch({} as unknown as URL, { method: 'POST' });
+    expect(post).not.toHaveBeenCalled();
+    await window.fetch({ href: `${window.location.origin}/api/auth/login` } as unknown as URL, { method: 'POST' });
+    expect(types()).toEqual(['session-changed']);
+  });
+
   it('a same-origin request that ended on another origin (a redirect) is not believed: the FINAL response url is checked too', async () => {
     answer = () => {
       const res = marked();

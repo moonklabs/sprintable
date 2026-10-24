@@ -158,13 +158,15 @@ export function installProjectHeaderInterceptor(): void {
     return pending.then(tellShellIfSessionChanged(input));
   };
 
-  // story #4762 — a same-origin `/api/` response that set or cleared the session cookies carries `SESSION_CHANGED_HEADER` (lib/auth/cookies.ts `markSessionChanged`):
+  // story #4762 — a same-origin response (any path: an `/api/` call, or a protected page fetch the proxy refreshed the session for) that set or cleared the session cookies carries `SESSION_CHANGED_HEADER` (lib/auth/cookies.ts `markSessionChanged`):
   // tell the phone shell once so it writes the cookies to disk now (a force-quit right after a rotation must not leave the old token there). Every road that
   // goes through `window.fetch` is covered here — raw fetch, fetchWithAuth, a Request input — so a new caller cannot forget. The response is handed on untouched.
   function tellShellIfSessionChanged(input: RequestInfo | URL): (res: Response) => Response {
     return (res) => {
       try {
-        const rawUrl = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        // a `URL` made in another window/iframe fails `instanceof URL` — read its `href` by shape; an input with no readable url tells nobody anything
+        const rawUrl = typeof input === 'string' ? input : 'href' in input ? input.href : input.url;
+        if (typeof rawUrl !== 'string') return res;
         // resolved against the page (a protocol-relative `//host/api/…` is another origin, not a relative path) and checked again on the FINAL response url
         // (a same-origin request redirected to another origin must not be believed)
         const here = window.location.origin;
