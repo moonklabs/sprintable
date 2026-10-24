@@ -1,7 +1,6 @@
 'use client';
 
 import { isSessionExpiredSignaled, signalSessionExpired } from '@/lib/auth/session-expired-signal';
-import { notifySessionChanged } from '@/lib/native-shell-bridge';
 import { collectRefreshDiagnostics } from '@/lib/auth/refresh-diagnostics';
 import { invalidateMeCache } from '@/lib/auth/me-invalidation';
 import { clearAccountScopedStorage } from '@/lib/browser-storage-keys';
@@ -29,10 +28,8 @@ async function callAuthRoute(path: string, body: object): Promise<AuthResult> {
   if (!res.ok) {
     return { data: null, error: json.error ?? { code: 'UNKNOWN', message: 'Unknown error' } };
   }
-  // story #3302(#2459 진단 (c)) — login/register/refresh 공통 choke point. 성공은 항상
-  // sp_at/sp_rt 쿠키가 새로 세워졌다는 뜻(각 route.ts가 Set-Cookie) — 네이티브 셸에 즉시
-  // 알려 디스크로 내리게 한다(강제종료 시 갱신 쿠키 유실 방지, AC1).
-  notifySessionChanged();
+  // story #3302(#2459 진단 (c)) → story #4762 — 셸에 «쿠키를 디스크로 내려라»를 알리는 일은 이제 페이지의 fetch 관문 한 곳이 한다
+  // (세션 쿠키를 쓰는 route가 `x-session-changed`를 달고, lib/project-context-client.ts가 보면 한 번 알림 — 여기서 또 보내면 두 번 간다).
   // story #4184 — 인증 주체가 바뀌었을 수 있다(로그인·가입·갱신) — fetchMe() 결과 재사용을 버린다.
   invalidateMeCache();
   return { data: json.data as AuthTokens, error: null };

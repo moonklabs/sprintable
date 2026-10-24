@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
+import { markSessionChanged } from '@/lib/auth/cookies';
 import { handleApiError } from '@/lib/api-error';
 import { ApiErrors } from '@/lib/api-response';
 import {
@@ -90,7 +91,7 @@ export async function POST(request: Request) {
       discardActiveSession(corrupt.cookies);
       const audit = await auditVault();
       discardCookies(corrupt.cookies, audit.staleNames);
-      return corrupt;
+      return markSessionChanged(corrupt);
     }
 
     // RC1: vault 쿠키 존재 + suffix == decoded RT sub 검증(아니면 폐기·거부).
@@ -124,7 +125,7 @@ export async function POST(request: Request) {
     // RC1 enforcement: 잔여 stale vault 쿠키(suffix/type 위반) 폐기.
     const { staleNames } = await auditVault();
     discardCookies(res.cookies, staleNames.filter((n) => n !== `${VAULT_PREFIX}${targetId}`));
-    return res;
+    return markSessionChanged(res);
   } catch (err: unknown) {
     return handleApiError(err);
   }

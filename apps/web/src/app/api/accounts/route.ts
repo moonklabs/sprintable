@@ -10,6 +10,7 @@ import {
   getVerifiedActiveAccountId,
 } from '@/lib/auth/account-vault';
 import { backendFetch } from '@/lib/backend-fetch';
+import { markSessionChanged } from '@/lib/auth/cookies';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
@@ -43,7 +44,7 @@ export async function GET(request: Request) {
       );
       discardActiveSession(corrupt.cookies);
       discardCookies(corrupt.cookies, staleNames);
-      return corrupt;
+      return markSessionChanged(corrupt);
     }
 
     const tokens = [...(activeRt ? [activeRt] : []), ...vault.map((v) => v.refreshToken)];

@@ -165,7 +165,10 @@ export function installProjectHeaderInterceptor(): void {
     return (res) => {
       try {
         const rawUrl = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-        const sameOrigin = !/^https?:\/\//.test(rawUrl) || new URL(rawUrl).origin === window.location.origin;
+        // resolved against the page (a protocol-relative `//host/api/…` is another origin, not a relative path) and checked again on the FINAL response url
+        // (a same-origin request redirected to another origin must not be believed)
+        const here = window.location.origin;
+        const sameOrigin = new URL(rawUrl, window.location.href).origin === here && (!res.url || new URL(res.url, window.location.href).origin === here);
         if (sameOrigin && res.headers.get(SESSION_CHANGED_HEADER) === '1') notifySessionChanged();
       } catch {
         // telling the shell must never break the response

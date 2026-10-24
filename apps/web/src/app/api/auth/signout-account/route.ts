@@ -75,7 +75,7 @@ export async function POST(request: Request) {
       ]);
       const res = NextResponse.json({ data: { ok: true, next: null } });
       await clearAllAccounts(res.cookies);
-      return res;
+      return markSessionChanged(res);
     }
 
     // scope === 'this' — 현 계정만 revoke, 다음 vault 계정 승격.
@@ -91,7 +91,7 @@ export async function POST(request: Request) {
       // 남은 계정 없음 → 전체 클리어(FE는 /login).
       const res = NextResponse.json({ data: { ok: true, next: null } });
       await clearAllAccounts(res.cookies);
-      return res;
+      return markSessionChanged(res);
     }
 
     // 다음 계정 승격: sp_rt=next RT, sp_at 제거(middleware single-flight refresh가 fresh sp_at 발급),

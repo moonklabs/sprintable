@@ -70,6 +70,54 @@ describe('the fetch gate tells the shell when a response says the session change
     expect(post).not.toHaveBeenCalled();
   });
 
+  it('a protocol-relative URL (`//host/api/…`) is another origin, not a relative path — nothing is believed from it', async () => {
+    answer = () => marked();
+    await install();
+    await window.fetch('//other.example/api/auth/login', { method: 'POST' });
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('an upper-case scheme, `data:` and `blob:` URLs are not this origin either (the origin is parsed, not pattern-matched)', async () => {
+    answer = () => marked();
+    await install();
+    await window.fetch('HTTPS://OTHER.EXAMPLE/api/auth/login', { method: 'POST' });
+    await window.fetch('data:text/plain,hello');
+    await window.fetch('blob:https://other.example/0b1c');
+    expect(post).not.toHaveBeenCalled();
+    // control: the same page's own origin in upper-case scheme + host is believed
+    await window.fetch(window.location.origin.toUpperCase() + '/api/auth/login', { method: 'POST' });
+    expect(types()).toEqual(['session-changed']);
+  });
+
+  it('a same-origin request that ended on another origin (a redirect) is not believed: the FINAL response url is checked too', async () => {
+    answer = () => {
+      const res = marked();
+      Object.defineProperty(res, 'url', { value: 'https://other.example/api/auth/login' });
+      return res;
+    };
+    await install();
+    await window.fetch('/api/auth/login', { method: 'POST' });
+    expect(post).not.toHaveBeenCalled();
+    // control: the same answer ending on this origin is believed
+    answer = () => {
+      const res = marked();
+      Object.defineProperty(res, 'url', { value: `${window.location.origin}/api/auth/login` });
+      return res;
+    };
+    await window.fetch('/api/auth/login', { method: 'POST' });
+    expect(types()).toEqual(['session-changed']);
+  });
+
+  it('the page\'s own sign-in and refresh helpers (lib/db/client) go through this gate: ONE message each (they used to post a second one themselves)', async () => {
+    answer = () => new Response(JSON.stringify({ data: { access_token: 'at', refresh_token: 'rt', token_type: 'bearer' } }), { status: 200, headers: { 'x-session-changed': '1', 'content-type': 'application/json' } });
+    await install();
+    const { loginWithPassword, refreshAuthTokens } = await import('@/lib/db/client');
+    await loginWithPassword('a@b.com', 'pw');
+    expect(types()).toEqual(['session-changed']);
+    await refreshAuthTokens();
+    expect(types()).toEqual(['session-changed', 'session-changed']);
+  });
+
   it('the response is handed on untouched (the body is still readable) and a failed request still fails the same way, with no message', async () => {
     answer = () => new Response(JSON.stringify({ data: { ok: true } }), { status: 200, headers: { 'x-session-changed': '1' } });
     await install();

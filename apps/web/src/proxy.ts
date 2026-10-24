@@ -1,6 +1,6 @@
 import { jwtVerify } from 'jose';
 import { NextRequest, NextResponse } from 'next/server';
-import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
+import { cookieBase, markSessionChanged, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { SESSION_EXPIRED_REASON } from '@/lib/auth/session-redirect';
 import { isRecentlySuperseded } from '@/lib/auth/switch-epoch';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
@@ -609,6 +609,7 @@ function applyTokenCookies(
   const base = cookieBase();
   response.cookies.set(SP_AT_COOKIE, accessToken, { ...base, maxAge: SP_AT_MAX_AGE_SECONDS });
   response.cookies.set(SP_RT_COOKIE, refreshToken, { ...base, maxAge: 30 * 24 * 60 * 60 });
+  markSessionChanged(response); // story 4762 — a protected `/api/*` fetch can pass through this refresh: tell the page's fetch gate (harmless on a document)
 }
 
 // story e5225c0a(P0): refresh 최종 실패(BE 가 401 반환·rotation 실패) 시 sp_at/sp_rt 를 지운다.
@@ -627,6 +628,7 @@ function clearAuthCookies(response: NextResponse): void {
   const base = cookieBase();
   response.cookies.set(SP_AT_COOKIE, '', { ...base, maxAge: 0 });
   response.cookies.set(SP_RT_COOKIE, '', { ...base, maxAge: 0 });
+  markSessionChanged(response); // story 4762 — same as applyTokenCookies
 }
 
 /** Rebuild request headers with updated sp_at/sp_rt so route handlers see fresh tokens */
