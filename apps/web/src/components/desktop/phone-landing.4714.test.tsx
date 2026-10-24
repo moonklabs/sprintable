@@ -35,7 +35,7 @@ const computer = (setup_id: string, device_name: string, running: boolean | null
   agents: [{ agent_member_id: agentId, name: '결제 담당', can_command: true, projects: [{ project_id: PROJECT, name: '결제 개편' }], ...(running === undefined ? {} : { running }) }],
 });
 
-interface World { devices?: unknown[]; startable?: unknown }
+interface World { devices?: unknown[]; startable?: unknown; checklist?: unknown }
 let world: World;
 let calls: string[];
 function server() {
@@ -45,6 +45,8 @@ function server() {
     if (url === '/api/remote-devices') return json({ devices: world.devices ?? [{ id: 'p-1', confirm_number: '482 917' }] });
     if (url.startsWith('/api/desktop/startable')) return json(world.startable ?? { remote_control: true, computers: [computer(SETUP_A, '윤재의 맥북', false)] });
     if (url === '/api/auth/me') return json({ data: { org_id: 'org-1', org_member_id: 'om-1' } });
+    if (url === '/api/activation/checklist' && world.checklist === 'throw') throw new Error('network down');
+    if (url === '/api/activation/checklist') return world.checklist === 'fail' ? json({}, 500) : json(world.checklist ?? { data: { steps: { agent_connected: true } } }); // story #4762: by default the onboarding is over
     if (url.endsWith('/remote-control')) return json({ data: { enabled: true, enabled_at: null, can_change: true } });
     throw new Error(`unexpected ${url}`); // the device's session list is NOT read here (owners and admins only — a plain member who owns an agent has a phone too): the startable read says it
   });
@@ -426,5 +428,70 @@ describe('[4714] /phone-start — the start screen at its own address, with a wa
     expect(byId('onboarding-phone-start')).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(BRIDGE_WAIT_MS + 50); });
     expect(replace).toHaveBeenCalledWith('/today'); // the screen's own home address (what the way out goes to)
+  });
+});
+
+// story #4762 (AC7) — a phone that is paired with nothing, whose person is still in the onboarding (no agent connected yet), lands on the start screen.
+describe('[4762] decideLanding — the onboarding is open', () => {
+  const open = { data: { steps: { agent_connected: false } } };
+
+  it('paired with nothing (the key is not on the server) and no agent connected → the start screen, not Today', async () => {
+    world.devices = [{ id: 'x', confirm_number: '000 000' }];
+    world.checklist = open;
+    expect(await decideLanding(phoneCall as never)).toBe('start');
+  });
+
+  it('a phone with no screen lock (it can pair with nothing) in the onboarding → the start screen (it says why there)', async () => {
+    keyAnswer = { id: 'k', ok: false, code: 'no_screen_lock' };
+    world.checklist = open;
+    expect(await decideLanding(phoneCall as never)).toBe('start');
+  });
+
+  it('a list with no computer in it, or only a silent one, in the onboarding → the start screen', async () => {
+    world.checklist = open;
+    startable();
+    expect(await decideLanding(phoneCall as never)).toBe('start');
+    startable({ ...computer(SETUP_A, '윤재의 맥북', null), reachable: false });
+    expect(await decideLanding(phoneCall as never)).toBe('start');
+  });
+
+  it('paired with nothing and an agent already connected (the onboarding is over) → the usual home, as before', async () => {
+    world.devices = [{ id: 'x', confirm_number: '000 000' }];
+    world.checklist = { data: { steps: { agent_connected: true } } };
+    expect(await decideLanding(phoneCall as never)).toBe('home');
+  });
+
+  it('the checklist cannot be read (error · another shape) → the usual home: a read that went wrong never forces a screen', async () => {
+    world.devices = [{ id: 'x', confirm_number: '000 000' }];
+    world.checklist = 'fail';
+    expect(await decideLanding(phoneCall as never)).toBe('home');
+    world.checklist = 'throw'; // the request itself fails
+    expect(await decideLanding(phoneCall as never)).toBe('home');
+    world.checklist = { data: {} };
+    expect(await decideLanding(phoneCall as never)).toBe('home');
+    world.checklist = { nothing: 1 };
+    expect(await decideLanding(phoneCall as never)).toBe('home');
+  });
+
+  it('a failed read of the phone\'s computers is not «paired with nothing»: the usual home even while the onboarding is open', async () => {
+    world.checklist = open;
+    world.devices = undefined;
+    fetchWithAuth.mockImplementation(async (url: string) => {
+      if (url === '/api/remote-devices') return json({}, 500);
+      return json(open);
+    });
+    expect(await decideLanding(phoneCall as never)).toBe('home');
+  });
+
+  it('a computer that runs an agent still wins: the chat list (the onboarding flag does not matter)', async () => {
+    world.checklist = open;
+    startable(computer(SETUP_A, '윤재의 맥북', true));
+    expect(await decideLanding(phoneCall as never)).toBe('chats');
+  });
+
+  it('the checklist is read only when there is no computer to start on (a paired phone does not pay for it)', async () => {
+    world.checklist = open;
+    await decideLanding(phoneCall as never);
+    expect(calls.includes('/api/activation/checklist')).toBe(false);
   });
 });

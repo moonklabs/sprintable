@@ -675,6 +675,14 @@ describe('[4714] the words (Yuna\'s sheet)', () => {
     expect(ko['noAgent.line']).toContain('{device}');
     expect(ko['start.title']).not.toMatch(/맥/);
   });
+  it('[story 4762] the no-Mac body names the steps in the order they are done: get the app → sign in → START AN AGENT → pair this phone (the Mac only shows the pairing QR once an agent exists)', () => {
+    const koBody = ko['noMac.body']!;
+    const enBody = en['noMac.body']!;
+    expect(koBody.indexOf('에이전트를 시작')).toBeGreaterThan(-1);
+    expect(koBody.indexOf('에이전트를 시작')).toBeLessThan(koBody.indexOf('페어링'));
+    expect(enBody.indexOf('start an agent')).toBeGreaterThan(-1);
+    expect(enBody.indexOf('start an agent')).toBeLessThan(enBody.indexOf('pair this phone'));
+  });
   it('[AC2] the mail lines: exactly the sheet\'s seven keys, the same in ko and en, with {email} as the only placeholder (no particle after an address)', () => {
     const keys = ['noMac.mail', 'noMac.mailAgain', 'noMac.mailFailed', 'noMac.mailLimited', 'noMac.mailNeedVerify', 'noMac.mailSending', 'noMac.mailSent'];
     expect(Object.keys(ko).filter((k) => /mail/i.test(k)).sort()).toEqual(keys);
