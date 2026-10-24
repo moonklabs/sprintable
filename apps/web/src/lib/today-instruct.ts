@@ -11,6 +11,7 @@
  * (none, two or more, a list that cannot be read in full) keeps the old hand-over exactly as it was.
  */
 import { fetchWithAuth } from '@/lib/db/client';
+import { CHAT_API_PREFIX } from '@/lib/chat-api-prefix';
 import { newClientNonce, sentMessageFromAnswer } from '@/hooks/use-chat-sse';
 
 interface ParticipantLike { member_id?: unknown; type?: unknown }
@@ -54,10 +55,10 @@ export async function findSoleAgentDm(projectId: string, selfMemberId: string): 
  */
 export type SendOutcome = 'sent' | 'refused' | 'unknown';
 
-/** sends `text` to the conversation as the chat's own composer does (`POST /api/chats/{id}/messages`, through fetchWithAuth) */
+/** sends `text` to the conversation as the chat's own composer does (`POST {CHAT_API_PREFIX}/{id}/messages`, through fetchWithAuth) */
 export async function sendInstruction(conversationId: string, text: string): Promise<SendOutcome> {
   try {
-    const res = await fetchWithAuth(`/api/chats/${encodeURIComponent(conversationId)}/messages`, {
+    const res = await fetchWithAuth(`${CHAT_API_PREFIX}/${encodeURIComponent(conversationId)}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: text, client_nonce: newClientNonce() }),

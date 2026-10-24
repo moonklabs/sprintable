@@ -7,6 +7,7 @@ vi.mock('@/hooks/use-chat-sse', () => ({ newClientNonce: () => 'nonce-1', sentMe
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { findSoleAgentDm, sendInstruction, soleAgentDm } from './today-instruct';
+import { CHAT_API_PREFIX } from './chat-api-prefix';
 
 const ME = 'me-1';
 const dm = (id: string, others: Array<{ member_id: string; type: 'agent' | 'human' }>) => ({
@@ -84,7 +85,7 @@ describe('sendInstruction', () => {
     vi.mocked(fetchWithAuth).mockResolvedValue({ ok: true, json: async () => answer } as Response);
     expect(await sendInstruction('c1', 'hello')).toBe('sent');
     const [url, init] = vi.mocked(fetchWithAuth).mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe('/api/chats/c1/messages');
+    expect(url).toBe(`${CHAT_API_PREFIX}/c1/messages`); // the one address the chat screen uses — never a spelling of its own (story #4762: `/api/chats` was a 404)
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body as string)).toEqual({ content: 'hello', client_nonce: 'nonce-1' });
     expect((init as { timeoutMs?: number }).timeoutMs).toBe(30000); // never a button stuck for ever
