@@ -62,11 +62,34 @@ describe('the advanced path speaks the product\'s words (copy review · story 47
   it('the Claude line carries the folder-trust clause BEFORE the tool permission; Codex (not measured) does not', () => {
     expect(adv.nextClaude).toContain('{yes}');
     expect(adv.nextClaude.indexOf('폴더를 믿을지')).toBeGreaterThan(-1);
-    expect(adv.nextClaude.indexOf('폴더를 믿을지')).toBeLessThan(adv.nextClaude.indexOf('도구를 써도'));
+    expect(adv.nextClaude.indexOf('폴더를 믿을지')).toBeLessThan(adv.nextClaude.indexOf('도구를 써도')); // (the full order is pinned in the next test)
     expect(adv.nextClaude).toContain('폴더가 내 것이면'); // trust is the person's call: the line never says «always Yes» (Kadir)
     expect(advEn.nextClaude).toContain('a folder of yours');
     expect(adv.nextCodex).not.toContain('폴더');
-    expect(advEn.nextClaude.indexOf('trust the folder')).toBeLessThan(advEn.nextClaude.indexOf('use the tool'));
+    expect(advEn.nextClaude.indexOf('trust the folder')).toBeLessThan(advEn.nextClaude.indexOf('use a tool'));
     expect(advEn.nextCodex).not.toContain('folder');
+  });
+
+  /**
+   * story 4766 AC8 — the sentence is told in the order it happens (measured on dev, Claude Code 2.1.310, default permission mode): the folder question →
+   * the server sees the first call and the screen turns «연결 확인 완료» (before any tool question) → THEN the first message makes the agent ask to use a
+   * tool, one question per tool. Nothing may read as «allowing makes the screen change», and the allow is the person's call (the product never says «allow»).
+   */
+  it('AC8 the order told is the order that happens: folder question → «연결 확인 완료» → tool questions; allowing is the person\'s call', () => {
+    for (const [text, verified, tool, trust] of [
+      [adv.nextClaude, `«${ko.onboarding.railVerified}»`, '도구를 써도', '폴더를 믿을지'],
+      [advEn.nextClaude, `“${en.onboarding.railVerified}”`, 'use a tool', 'trust the folder'],
+    ] as const) {
+      expect(text.indexOf(trust)).toBeGreaterThan(-1);
+      expect(text.indexOf(trust)).toBeLessThan(text.indexOf(verified));
+      expect(text.indexOf(verified)).toBeLessThan(text.indexOf(tool));
+    }
+    for (const [text, verified, tool] of [
+      [adv.nextCodex, `«${ko.onboarding.railVerified}»`, '도구를 써도'],
+      [advEn.nextCodex, `“${en.onboarding.railVerified}”`, 'use a tool'],
+    ] as const) expect(text.indexOf(verified)).toBeLessThan(text.indexOf(tool));
+    // the old order's tell: «allow … then this screen turns» (and a push to allow)
+    for (const t of [adv.nextClaude, adv.nextCodex]) { expect(t).not.toMatch(/허용해 주세요/); expect(t).not.toMatch(/그러면 이 화면/); expect(t).toContain('직접 정해'); }
+    for (const t of [advEn.nextClaude, advEn.nextCodex]) { expect(t).not.toMatch(/allow it —/i); expect(t).toContain('your call'); }
   });
 });
