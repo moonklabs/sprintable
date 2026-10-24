@@ -147,11 +147,13 @@ const CURRENT_PROJECT_COOKIE = 'sprintable_current_project_id';
  * What `/api/v2/me` says about this session's organization — three answers, not two (story 4714 AC6):
  *  · `org`     the server answered and the person works in `orgId`;
  *  · `none`    the server answered 404 NOT_FOUND with `reason: 'no_membership'` (`me.py`): the account exists but has no organization yet — a brand-new person;
- *  · `unknown` anything else (a 5xx, a network error, a 200 without an org, a 404 that is not that answer): the call did not tell us.
+ *  · `unknown` anything else (a 5xx, a network error, a 200 without an org, a 404 that is not that answer): the call did not tell us — `why` names which
+ *    (a fixed word, never a value: it goes to the log).
  * Only `none` may send a person to the onboarding: an `unknown` is a moment of trouble, and an organization member must never be bounced to
- * «create an organization» because of it (it passes through, as it always did).
+ * «create an organization» because of it. Since story 4762 it is not left on a Next 404 either: a flat address goes back to `/` (the session picks the
+ * road again) — see `redirectLegacyResourcePath`.
  */
-type OrgLookup = { kind: 'org'; orgId: string } | { kind: 'none' } | { kind: 'unknown' };
+type OrgLookup = { kind: 'org'; orgId: string } | { kind: 'none' } | { kind: 'unknown'; why: string };
 async function lookupVerifiedOrg(fastapiUrl: string, accessToken: string): Promise<OrgLookup> {
   try {
     const res = await fetch(`${fastapiUrl}/api/v2/me`, { headers: { Authorization: `Bearer ${accessToken}` } });
@@ -160,13 +162,13 @@ async function lookupVerifiedOrg(fastapiUrl: string, accessToken: string): Promi
       // rewording of the message can not quietly bring the 404 trap back. Without it (an older backend during a rollout, a gateway's 404, a 404
       // of another route) the answer is `unknown`: pass through, never a redirect.
       const body = await res.json().catch(() => null) as { error?: { code?: unknown; reason?: unknown } } | null;
-      return body?.error?.code === 'NOT_FOUND' && body?.error?.reason === 'no_membership' ? { kind: 'none' } : { kind: 'unknown' };
+      return body?.error?.code === 'NOT_FOUND' && body?.error?.reason === 'no_membership' ? { kind: 'none' } : { kind: 'unknown', why: 'me_404_other' };
     }
-    if (!res.ok) return { kind: 'unknown' };
+    if (!res.ok) return { kind: 'unknown', why: `me_status_${res.status}` };
     const me = await res.json() as { org_id?: string };
-    return typeof me.org_id === 'string' && me.org_id !== '' ? { kind: 'org', orgId: me.org_id } : { kind: 'unknown' }; // an empty id is not an organization: pass through, as `!orgId` always did
+    return typeof me.org_id === 'string' && me.org_id !== '' ? { kind: 'org', orgId: me.org_id } : { kind: 'unknown', why: 'me_200_without_org' }; // an empty id is not an organization
   } catch {
-    return { kind: 'unknown' };
+    return { kind: 'unknown', why: 'me_unreachable' };
   }
 }
 
@@ -276,8 +278,15 @@ async function redirectLegacyResourcePath(
   // (no-store)이고 쿼리는 뗀다(조직이 없는 사람에겐 옮겨 갈 스토리 · 프로젝트가 없다). «모름»(me 5xx · 네트워크 · 모양이 다른 404)은 아래처럼
   // 개입 없이 통과 — 조직이 있는 사람을 순간의 실패로 온보딩에 튕기지 않는다.
   if (orgLookup.kind === 'none') return redirectToOnboarding(request);
-  // orgId조차 모르면(토큰 자체가 org_id를 못 실은 예외적 경우 · me 실패) 개입할 근거가 없어 그대로 통과
-  // (Next 자체 404) — story #2212 스코프 밖(그 경우엔 org조차 모르니 org-briefing으로도 못 보낸다).
+  // story 4762 (AC7) — «모름»은 «통과»가 아니라 «세션으로 길을 다시 고르기»다. 폰 앱은 늘 `/glance`로 열고, 가입 직후의 몇 분 동안 me가 «모름»을 낸 적이 있다
+  // (Android 실측 10-24: 같은 세션이 3분 동안 `/glance` → Next 404 «This page could not be found.» · 다음 걸음 없음 · 다시 로그인하면 정상). 통과시키면
+  // 이 주소엔 페이지가 없어서 그 자체가 막다른 곳이다. `/`는 세션이 오늘 길(org-briefing)로 보내는 실 페이지(이 표의 이름이 아님 · 되돌이 없음). 그 순간의 me
+  // 모양은 로그 한 줄(고정 단어만 — 값 · 경로 · 쿼리 0)로 남겨, 뿌리(me가 잠깐 org 없는 모양)를 다음 맥 바퀴에서 같이 잡는다.
+  if (orgLookup.kind === 'unknown') {
+    console.warn(JSON.stringify({ message: 'proxy_org_lookup_unknown', why: orgLookup.why, resource: resourceName, shell: request.headers.has(SHELL_NAV_HEADER) }));
+    return redirectToSessionHome(request);
+  }
+  // 위에서 org · none · unknown을 다 다뤘으므로 여기는 org뿐(타입 좁히기).
   if (orgLookup.kind !== 'org') return null;
   const orgId = orgLookup.orgId;
 
@@ -350,6 +359,14 @@ function sessionDependentRedirect(url: URL): NextResponse {
   const response = NextResponse.redirect(url, 307);
   response.headers.set('Cache-Control', 'no-store');
   return response;
+}
+
+/** story 4762 (AC7) — the server could not tell the person's organization just now: `/` lets the session choose the road again (no query, never cached). */
+function redirectToSessionHome(request: NextRequest): NextResponse {
+  const url = request.nextUrl.clone();
+  url.pathname = '/';
+  url.search = '';
+  return sessionDependentRedirect(url);
 }
 
 /** story 4714 AC6 — a person with no organization yet: the onboarding is where they go (no query: nothing of a link they carried applies to them). */
