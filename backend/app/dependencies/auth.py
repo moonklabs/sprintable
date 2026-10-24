@@ -1031,20 +1031,10 @@ def require_admin(auth: AuthContext = Depends(get_current_user)) -> AuthContext:
     return auth
 
 
-def require_project_access(
-    project_id: uuid.UUID,
-    auth: AuthContext = Depends(get_current_user),
-) -> uuid.UUID:
-    """JWT app_metadata.project_ids에 project_id가 포함되어 있는지 검증.
-    project_ids 클레임이 없으면(레거시 토큰) 통과 — Phase C 전환 기간 호환."""
-    project_ids = auth.claims.get("app_metadata", {}).get("project_ids")
-    if project_ids is not None:
-        if str(project_id) not in [str(pid) for pid in project_ids]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Access to project {project_id} denied",
-            )
-    return project_id
+# story #4772 — `require_project_access` (a dependency that read the `project_ids` CLAIM and let a token WITHOUT that claim through as «legacy») was removed: no route used it
+# (the one every route uses is `app.services.project_auth.require_project_access`, which asks the database), and after this story a token that names an organization the person
+# left has its `project_ids` dropped — so the old function would have let such a token through any project. A function nobody uses and that opens the door on an absent claim is
+# a trap for the next person; the DB-asking one is the only one.
 
 
 async def enforce_body_context(
