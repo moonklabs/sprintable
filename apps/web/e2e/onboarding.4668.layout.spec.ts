@@ -97,10 +97,10 @@ const API: Record<string, Answer> = {
   'GET /api/organizations/org-1/remote-control': { data: { enabled: false, enabled_at: null, can_change: true, owner_names: ['송윤재'], connected_setups: 0 } },
 };
 
-async function open(page: Page, o: { width: number; theme: 'L' | 'D'; locale?: 'ko' | 'en'; mac?: boolean; api?: Record<string, Answer> }) {
+async function open(page: Page, o: { width: number; theme: 'L' | 'D'; locale?: 'ko' | 'en'; mac?: boolean; api?: Record<string, Answer>; height?: number }) {
   const { js, css } = await build();
   const api = { ...API, ...(o.api ?? {}) };
-  await page.setViewportSize({ width: o.width, height: o.width < 500 ? 844 : 1000 });
+  await page.setViewportSize({ width: o.width, height: o.height ?? (o.width < 500 ? 844 : 1000) });
   await page.unrouteAll();
   await page.route('http://preview.test/**', async (route) => {
     const url = new URL(route.request().url());
@@ -183,10 +183,11 @@ for (const width of [1440, 390]) {
       await shot(page, card(page), `4715-2-first-not-mac-${tag}`);
     });
 
-    // story 4766 AC3: the fold is found and the one press stands on the FIRST screen — nothing to scroll to (1440 × 1000)
+    // story 4766 AC3: the fold is found and the one press stands on the FIRST screen — nothing to scroll to. The ruler is a real laptop window:
+    // a 900 px screen shows about 800 px under the menu bar · tabs · address bar (the measured walk had the press at 1054 px of 900)
     test(`first screen · a Mac · the web way opened · ${tag}`, async ({ page }) => {
       await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://preview.test' });
-      await open(page, { width, theme });
+      await open(page, { width, theme, height: width >= 1000 ? 800 : undefined });
       await toFirst(page);
       const summary = page.getByTestId('onboarding-first-advanced-summary');
       await summary.click();
@@ -196,10 +197,15 @@ for (const width of [1440, 390]) {
       await expect(page.getByTestId('advanced-make')).toBeVisible();
       if (width >= 1000) {
         const viewportHeight = await page.evaluate(() => window.innerHeight);
+        expect(viewportHeight).toBe(800);
         for (const id of ['onboarding-first-advanced-summary', 'advanced-make']) {
           const box = await page.getByTestId(id).boundingBox();
           expect(box!.y + box!.height, `${id} is inside the first screen (no scroll)`).toBeLessThanOrEqual(viewportHeight);
         }
+        // the notes sit UNDER the press, not between the fold and the press
+        const make = await page.getByTestId('advanced-make').boundingBox();
+        const prereq = await page.getByTestId('advanced-prereq').boundingBox();
+        expect(prereq!.y, 'the «먼저 필요해요» block is below the press').toBeGreaterThan(make!.y + make!.height - 1);
       }
       await fitsViewport(page, width);
       await shot(page, card(page), `4766-1-first-mac-fold-open-${tag}`);
@@ -216,6 +222,16 @@ for (const width of [1440, 390]) {
       await expect(page.getByTestId('advanced-key-line')).toContainText('터미널 명령 기록');
       await expect(page.getByTestId('advanced-revoke')).toBeVisible();
       await expect(page.getByTestId('advanced-verify')).toBeVisible();
+      // the chosen runtime reads as chosen (the first build had it reversed): a filled chip and heavier text; the other has no fill, lighter text
+      await page.mouse.move(2, 2); // not hovering either one (a hovered button is filled on purpose)
+      const chosen = page.getByTestId('advanced-runtime-claude'); const other = page.getByTestId('advanced-runtime-codex');
+      await expect(chosen).toHaveAttribute('aria-pressed', 'true');
+      const style = (loc: typeof chosen) => loc.evaluate((e) => { const c = getComputedStyle(e); return { weight: Number(c.fontWeight), bg: c.backgroundColor }; });
+      // the buttons ease their fill (transition-all): wait for the hover that just ended to finish fading before reading «no fill»
+      await expect.poll(async () => (await style(other)).bg, { message: 'the other one has no fill', timeout: 3000 }).toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+      const [sc, so] = [await style(chosen), await style(other)];
+      expect(sc.weight, 'the chosen one is heavier').toBeGreaterThan(so.weight);
+      expect(sc.bg, 'the chosen one has a fill').not.toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
       await fitsViewport(page, width);
       await shot(page, card(page), `4766-2-the-press-${tag}`);
     });
