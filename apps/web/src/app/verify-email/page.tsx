@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { appScheme } from '@/lib/auth/native-return-app';
+import { announceVerified } from '@/lib/auth/email-verified-signal';
 import { buttonVariants } from '@/components/ui/button';
 
 const subscribeToNothing = () => () => {};
@@ -71,6 +72,7 @@ export default function VerifyEmailPage() {
       .then((json: { data?: { message: string }; error?: { code?: string; message: string } }) => {
         if (json.data) {
           setStatus('success');
+          announceVerified(); // story #4763 AC7: the first tab (the gate) opens now, hidden or not
           // story #2484 — 유나 design:changes(2026-08-06): 성공 분기도 raw 서버 message를
           // 그대로 노출했다("Email verified successfully"/"Email already verified" 둘
           // 다 하드코딩 영문). 성공은 code가 없어 분기 불가하니 우리 자체 한국어 문구

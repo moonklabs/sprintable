@@ -1,5 +1,6 @@
 'use client';
 
+import { ORG_DELETED_LANDING } from '@/lib/auth/org-deleted-landing';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import Link from 'next/link';
@@ -315,7 +316,8 @@ export default function SettingsPage() {
         }),
       });
       if (res.ok) {
-        window.location.href = '/onboarding';
+        // story 4763 (H6): say so on the other side — the onboarding no longer makes a same-named organization behind the person's back
+        window.location.href = ORG_DELETED_LANDING;
       } else {
         // story #2485 — backend delete_organization()은 generic HTTP상태 코드만
         // 낸다(진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.

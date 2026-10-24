@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { UpgradeModal } from '@/components/ui/upgrade-modal';
+import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { OperatorInput, OperatorTextarea, OperatorSelect } from '@/components/ui/operator-control';
 import { useTranslations } from 'next-intl';
@@ -33,7 +34,7 @@ const AGENT_ROLE_LABEL_KEYS: Record<string, string> = {
 // organization, or their pending invites, or makes the organization with a made name («{name}의 조직» / «내 조직»), then shows ONE
 // screen («first»: on a Mac [Mac 앱 받기] · elsewhere «지금은 Mac 앱만 있어요»). The web way (an agent already running somewhere else)
 // keeps project → agent → connect.
-type Step = 'arrive' | 'invited' | 'first' | 'project' | 'agent' | 'connect';
+type Step = 'arrive' | 'invited' | 'first' | 'project' | 'agent' | 'connect' | 'deleted';
 
 /** The progress strip: only the web way's three steps have one (1/3 · 2/3 · 3/3) — arrival, invites and the one screen have none. */
 export function onboardingProgress(step: Step): { fraction: number; label: { current: number; total: number } } | null {
@@ -63,19 +64,21 @@ interface OnboardingFormProps {
   chatsHref: string;
   /** story 4714 AC2: resolved by the server page (`isDesktopDownloadEnabled`) — whether the phone app's first screen offers «메일로 받기» */
   macDownloadEnabled?: boolean;
+  /** story 4763 (H6): the person was sent here by deleting their organization — they are told, and the new one is made on their press (never silently, with the same name) */
+  afterOrgDelete?: boolean;
 }
 
 /** What arrival is doing: working on it · stopped because the invites could not be read (nothing made) · stopped on another failure */
 type Arrival = 'working' | 'account-check-failed' | 'invite-check-failed' | 'failed';
 
 export function OnboardingForm({
-  initialStep, initialOrgId, todayV3Enabled = false, todayHref, chatsHref, macDownloadEnabled = false,
+  initialStep, initialOrgId, todayV3Enabled = false, todayHref, chatsHref, macDownloadEnabled = false, afterOrgDelete = false,
 }: OnboardingFormProps) {
   const t = useTranslations('onboarding');
   const tc = useTranslations('common');
   const tNewOrg = useTranslations('desktopOnboarding');
 
-  const [step, setStep] = useState<Step>(initialStep ?? 'arrive');
+  const [step, setStep] = useState<Step>(initialStep ?? (afterOrgDelete ? 'deleted' : 'arrive'));
   const [arrival, setArrival] = useState<Arrival>('working');
   const [invites, setInvites] = useState<MyInvite[]>([]);
   // the organization's name when this page made it — shown on the one screen; null when not known here (never made up)
@@ -189,8 +192,27 @@ export function OnboardingForm({
         setArrival('account-check-failed');
         return;
       }
+      let existing = existingOrgIdFromMe(me);
+      if (!existing) {
+        // story 4763 (AC11): `/api/auth/me` answers from the session's TOKEN — one made before the organization existed (a sign-up on the web, then the Mac app's login;
+        // the web tab's own arrival made the organization meanwhile) carries no organization although the person has one, and the second «조직 만들기» ended in
+        // «무료 플랜은 조직을 1개까지» with no way out. A fresh token is read from the database: renew once, ask again, and only then decide there is none.
+        // (the renewal also tells the shell the session changed, so the app's stored token carries the organization from here on — story 4762.)
+        await refreshAuthTokens().catch(() => null);
+        try {
+          const again = await fetchWithAuth('/api/auth/me');
+          if (!again.ok) throw new Error(String(again.status));
+          const againJson = await again.json();
+          if (typeof againJson?.data?.member_id !== 'string' || !againJson.data.member_id) throw new Error('no account');
+          me = againJson;
+          existing = existingOrgIdFromMe(againJson);
+        } catch {
+          // rule 4832: the second read cannot be read — that is not «no organization» either; nothing is made
+          setArrival('account-check-failed');
+          return;
+        }
+      }
       // story 4668: already a member (a reload · a re-opened `/onboarding?signup=1`) — no second organization
-      const existing = existingOrgIdFromMe(me);
       if (existing) { setOrgId(existing); setStep('first'); return; }
       // the e-mail gate normally stands before this page; if it is still unverified, say so and make nothing (story #2441)
       if (me?.data?.email_verified === false) { setEmailVerifyBlocked(true); setArrival('failed'); return; }
@@ -361,6 +383,19 @@ export function OnboardingForm({
   const handleFinish = () => {
     void finishToHome();
   };
+
+  // story 4763 (H6): the only organization was just deleted — the screen says so; the new organization is made by this press (a second reading of invites included)
+  if (step === 'deleted') {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <Card className="w-full max-w-md space-y-4 p-6 text-center shadow-lg sm:p-8" data-testid="onboarding-org-deleted">
+          <h1 className="text-base font-semibold">{t('orgDeletedTitle')}</h1>
+          <p className="break-keep text-sm text-muted-foreground">{t('orgDeletedBody')}</p>
+          <Button onClick={() => { setStep('arrive'); void arrive(); }} data-testid="onboarding-org-deleted-new">{t('orgDeletedNew')}</Button>
+        </Card>
+      </div>
+    );
+  }
 
   // story 4715 (AC6): pending invites — the invited card (the app setup's own · its words), and one way to make an organization anyway
   if (step === 'invited') {

@@ -191,3 +191,56 @@ describe('story #4318 — 로그인 화면 링크 글자는 brand-text(밝은 7.
     }
   });
 });
+
+// story #4763 AC6 — the first screen of a person with no account: one sentence on what this is and the way to the Mac app, only where the download exists and on a Mac.
+const MAC = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
+const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+async function mountWithOffer(enabled: boolean, ua = MAC) {
+  vi.spyOn(navigator, 'userAgent', 'get').mockImplementation(() => ua);
+  const { default: LoginPage } = await import('./page');
+  const { MacAppOfferProvider } = await import('./mac-app-offer');
+  await act(async () => { root.render(wrap(<MacAppOfferProvider enabled={enabled}><LoginPage /></MacAppOfferProvider>)); });
+}
+const offer = () => container.querySelector('[data-testid="login-mac-app-offer"]');
+
+describe('LoginPage — 첫 화면의 «Mac 앱 받기» (story #4763 AC6)', () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('받기가 있는 배포 · Mac: 제품 한 문장 + «Mac 앱 받기»(가입으로 이어짐 · 가입 뒤 앱 받는 화면) + 한 줄 안내', async () => {
+    await mountWithOffer(true);
+    expect(offer()).not.toBeNull();
+    expect(offer()?.textContent).toContain(koMessages.login.macAppPitch);
+    expect(offer()?.textContent).toContain(koMessages.login.macAppGetHint);
+    const link = [...(offer()?.querySelectorAll('a') ?? [])].find((a) => a.textContent === koMessages.login.macAppGet);
+    expect(link?.getAttribute('href')).toBe('/register?next=%2Fdesktop');
+  });
+
+  it('받기가 없는 배포(공증 전 prod · 컨텍스트 없음): 아무것도 안 뜬다 — 없는 길을 약속하지 않음', async () => {
+    await mountWithOffer(false);
+    expect(offer()).toBeNull();
+    root.unmount(); root = createRoot(container);
+    await mount(); // no provider at all
+    expect(offer()).toBeNull();
+    expect(container.textContent).not.toContain(koMessages.login.macAppGet);
+  });
+
+  it('Mac이 아닌 기기(폰 · 다른 OS)에는 안 뜬다 — 받을 수 없는 앱을 권하지 않음', async () => {
+    await mountWithOffer(true, IPHONE);
+    expect(offer()).toBeNull();
+  });
+
+  it('볼일이 있어 온 사람(next 있음 · 세션 만료)에겐 안 뜬다 — 로그인이 먼저', async () => {
+    searchParamsRef.current = new URLSearchParams('next=%2Finvite%2Fabc');
+    await mountWithOffer(true);
+    expect(offer()).toBeNull();
+    root.unmount(); root = createRoot(container);
+    searchParamsRef.current = new URLSearchParams('reason=session_expired');
+    await mountWithOffer(true);
+    expect(offer()).toBeNull();
+  });
+
+  it('en.json에도 같은 키 셋이 있다(ko/en 짝)', async () => {
+    const en = (await import('../../../messages/en.json')).default as { login: Record<string, string> };
+    for (const k of ['macAppPitch', 'macAppGet', 'macAppGetHint']) expect(typeof en.login[k]).toBe('string');
+  });
+});
