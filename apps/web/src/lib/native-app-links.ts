@@ -1,5 +1,5 @@
 // iOS Universal Link 검증파일(AASA, apple-app-site-association) 본문 — sprintable-mobile
-// 레포 lib/appLinks.js가 선언한 경로 단일 출처(`/native/oauth-return*`)를 미러링한다.
+// 레포 lib/appLinks.js가 선언한 경로 단일 출처(`/native/oauth-return*` · `/verify-email*`)를 미러링한다.
 // [P1 인시던트] 선생님 실기기 iOS TestFlight Google 로그인 후 404 — 이 파일이 여태 없어서
 // 유니버설 링크 복귀가 앱으로 반사되지 않고 웹이 직접 로드돼 404가 났다.
 //
@@ -8,8 +8,11 @@
 // (native-app-links.test.ts가 그 출력과 대조).
 import { NextResponse } from 'next/server';
 
-const APP_LINK_PATH = '/native/oauth-return*';
-const APP_LINK_COMMENT = 'OAuth 복귀 — 앱이 안 잡으면 로그인이 브라우저에서 끝난다';
+// mobile lib/appLinks.js APP_LINK_PATHS와 같은 순서 · 같은 글(story #4762 AC6 — 가입 메일 인증 링크도 앱이 연다; Android는 같은 목록에서 intent-filter를 만든다).
+const APP_LINKS = [
+  { path: '/native/oauth-return*', comment: 'OAuth 복귀 — 앱이 안 잡으면 로그인이 브라우저에서 끝난다' },
+  { path: '/verify-email*', comment: '가입 메일 인증 — 앱이 안 잡으면 앱에서 가입한 사람이 브라우저로 떨어진다' },
+];
 
 // mobile lib/webOrigin.js와 같은 규율: 기본값은 dev — 환경변수 설정을 까먹었을 때
 // "사용자에게 prod 앱ID가 잘못 박히는" 쪽이 아니라 "개발자가 알아채는" 쪽으로 실패해야 한다.
@@ -41,9 +44,9 @@ export function buildAasaDocument(env: NodeJS.ProcessEnv = process.env) {
       details: [
         {
           appIDs: [appId],
-          components: [{ '/': APP_LINK_PATH, comment: APP_LINK_COMMENT }],
+          components: APP_LINKS.map((l) => ({ '/': l.path, comment: l.comment })),
           appID: appId, // legacy 자리 — 신형(components)과 같은 값 중복
-          paths: [APP_LINK_PATH],
+          paths: APP_LINKS.map((l) => l.path),
         },
       ],
     },
