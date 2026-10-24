@@ -155,11 +155,15 @@ async def test_02b_the_routes_that_read_the_claims_themselves_and_the_role_claim
         H = _bearer(tok_x)
         before = {p: (await w.client.get(p, headers=H)).status_code for p in probes}
         assert before["/api/v2/hitl/policy"] == 200 and before["/api/v2/agent-routing-rules"] == 200, before
+        before_admin = (await w.client.get("/api/v2/mcp/toolset-catalog", headers=H)).status_code
         assert (await _remove(w, owner_email, org_x, m)).status_code == 200
         for p in probes:
             r = await w.client.get(p, headers=H)
             assert r.status_code in (400, 403), (p, r.status_code, r.text[:160])
-        # an admin-only route that reads `role` from the token: the removed admin is no longer an admin of anything
+        # a route that reads ONLY the `role` claim (`require_admin`, no organization lookup): answers 200 to the admin before the removal, 403 after — the removed admin is no longer an admin
+        assert before_admin == 200, before_admin
+        r = await w.client.get("/api/v2/mcp/toolset-catalog", headers=H)
+        assert r.status_code == 403, (r.status_code, r.text[:160])
         r = await w.client.get("/api/v2/org-members", headers=H)
         assert r.status_code in (400, 403), r.status_code
         # …but the person is still themselves
@@ -167,6 +171,70 @@ async def test_02b_the_routes_that_read_the_claims_themselves_and_the_role_claim
         assert (await w.client.get("/api/v2/me/memberships", headers=H)).status_code == 200
         r = await w.client.post("/api/v2/auth/switch-org", headers=H, json={"org_id": str(org_y), "refresh_token": tok_x.get("refresh_token")})
         assert r.status_code == 200, r.text
+    finally:
+        await _close(engine, w)
+
+
+async def test_02c_the_event_stream_does_not_open_for_the_removed_person():
+    """The SSE variant of the request authentication (`get_current_user_streaming`) has its own JWT branch: a removed person's old token must not open `/events/stream` for the
+    organization it names. A stream that opens never answers, so the request is bounded: before the removal the timeout IS the proof that it opened (a person in the organization,
+    `member_id` = their seat, as the endpoint requires for a JWT session); after it, an answer is."""
+    import asyncio
+
+    from tests.test_4769_member_removal_closes_devices_realdb import _seat
+
+    engine, w = await _world()
+    try:
+        owner_email, org_x, org_y, m, m_email, tok_x, tok_y = await _two_organizations(w)
+        seat = await _seat(w, org_x, m)
+        url = f"/api/v2/events/stream?member_id={seat}"
+        try:
+            r = await asyncio.wait_for(w.client.get(url, headers=_bearer(tok_x)), timeout=6)
+            pytest.fail(f"the control stream did not open before the removal: {r.status_code} {r.text[:160]}")
+        except asyncio.TimeoutError:
+            pass   # opened (and is still open): the stream never answers
+        assert (await _remove(w, owner_email, org_x, m)).status_code == 200
+        try:
+            r = await asyncio.wait_for(w.client.get(url, headers=_bearer(tok_x)), timeout=6)
+        except asyncio.TimeoutError:
+            pytest.fail("the event stream opened for a person who was removed from the organization the token names")
+        assert r.status_code in (400, 403, 404), (r.status_code, r.text[:160])
+    finally:
+        await _close(engine, w)
+
+
+async def test_02d_both_request_authentications_drop_the_claims_of_an_organization_the_person_left():
+    """`get_current_user` and its SSE variant `get_current_user_streaming` each have their own JWT branch; each is called here with the removed person's real old token. The
+    organization-scoped claims are gone and `org_left` names the organization; a person who still has the seat keeps every claim. (The event stream is also closed by other checks, so
+    this is the direct pin of the streaming branch.)"""
+    import types
+
+    from fastapi.security import HTTPAuthorizationCredentials
+
+    from app.dependencies.auth import get_current_user, get_current_user_streaming
+
+    engine, w = await _world()
+    try:
+        owner_email, org_x, org_y, m, m_email, tok_x, tok_y = await _two_organizations(w)
+        creds_x = HTTPAuthorizationCredentials(scheme="Bearer", credentials=tok_x["access_token"])
+        creds_y = HTTPAuthorizationCredentials(scheme="Bearer", credentials=tok_y["access_token"])
+
+        def _request():
+            return types.SimpleNamespace(state=types.SimpleNamespace(), headers={})
+
+        for fn in (get_current_user, get_current_user_streaming):
+            kept = await fn(credentials=creds_x, x_agent_api_key=None, **({"x_mcp_transport": None} if fn is get_current_user else {}), request=_request())
+            meta = kept.claims["app_metadata"]
+            assert meta.get("org_id") == str(org_x) and meta.get("org_left") is None, (fn.__name__, meta)
+        assert (await _remove(w, owner_email, org_x, m)).status_code == 200
+        for fn in (get_current_user, get_current_user_streaming):
+            extra = {"x_mcp_transport": None} if fn is get_current_user else {}
+            gone = await fn(credentials=creds_x, x_agent_api_key=None, **extra, request=_request())
+            meta = gone.claims["app_metadata"]
+            assert not any(k in meta for k in ("org_id", "project_id", "project_ids", "role")), (fn.__name__, meta)
+            assert meta.get("org_left") == str(org_x) and gone.org_id is None, (fn.__name__, meta, gone.org_id)
+            live = await fn(credentials=creds_y, x_agent_api_key=None, **extra, request=_request())
+            assert live.claims["app_metadata"].get("org_id") == str(org_y) and live.org_id == str(org_y), (fn.__name__, live.claims)
     finally:
         await _close(engine, w)
 
