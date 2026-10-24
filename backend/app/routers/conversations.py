@@ -2633,6 +2633,7 @@ async def send_message_core(
     auth: AuthContext,
     org_id: uuid.UUID,
     after_commit: list[Callable[[], Any]] | None = None,
+    as_system_publisher: bool = False,
 ) -> dict:
     """`send_message`(HTTP 엔드포인트)의 본체.
 
@@ -2659,7 +2660,13 @@ async def send_message_core(
             ConversationParticipant.member_id == sender.id,
         )
     )).scalar_one_or_none()
-    if participant is None:
+    if participant is None and as_system_publisher:
+        # story #4764 — the server's own event publisher posting into the assigner <-> assignee DM without joining it (the DM stays the
+        # two of them). Only the server path can ask: `after_commit` is never set by an HTTP endpoint, and the sender must be the org's
+        # system publisher member. Anything else asking for it is refused like any other non-participant.
+        if after_commit is None or getattr(sender, "runtime_type", None) != "system-publisher":
+            raise HTTPException(status_code=403, detail="Not a participant")
+    elif participant is None:
         # 발화 403 해소(270c87e6): 프로젝트 접근권 휴먼이 그룹/스레드 대화에 발화하면 auto-join.
         # _resolve_member가 이미 project 접근을 검증했으므로 접근권은 성립. 단 타인 간 1:1 DM은
         # 예외(비공개 보호·여전히 403)이고, 에이전트 인가(allowlist·creator 동석)는 불변(403 유지).

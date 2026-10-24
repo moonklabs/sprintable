@@ -47,7 +47,13 @@ from app.services.agent_onboarding_config import resolve_locale_from_request
 from app.services.stream_access import RECHECK_BEFORE_SEND_SEC, AccessRecheck
 from app.services.org_locale import resolve_org_locale
 from app.services.i18n_catalog import t
-from app.services.member_resolver import assert_caller_is_member, lookup_members_by_ids, resolve_member_identity
+from app.services.member_resolver import (
+    assert_caller_is_member,
+    canonicalize_member_id,
+    lookup_members_by_ids,
+    org_recipient_ids,
+    resolve_member_identity,
+)
 
 
 def _access_revoked_frame(reason: str) -> str:
@@ -1126,6 +1132,53 @@ async def _resolve_event_project_id(
             select(Goal.project_id).where(Goal.id == goal_id, Goal.org_id == org_id)
         )).scalar_one_or_none()
     return None
+
+
+async def _assigner_agent_dm_pair(
+    db: AsyncSession, *, org_id: uuid.UUID, payload: dict,
+    escalation_ids: set[uuid.UUID], broadcast_ids: set[uuid.UUID], system_member_id: uuid.UUID,
+) -> tuple[uuid.UUID, uuid.UUID] | None:
+    """story #4764 — `preset.work.assigned` delivery into the assigner's own DM with the assignee.
+
+    The event's participant set is {system publisher} + escalation (the assignee) + broadcast (the work item's stakeholders:
+    assignee · human owner · assignees). The person who made the assignment (`assigned_by_member_id`) is none of those, so the
+    set was {system publisher, agent} — a 2-member DM nobody but the agent opens — and the agent answers where the event arrived.
+    When a HUMAN assigns to an AGENT and nobody else needs the event, the delivery conversation is the human <-> agent DM instead
+    (the one the app opened; created by the one-pair-one-DM rule when missing) and the system publisher posts into it without
+    becoming a participant (`send_message_core(as_system_publisher=True)`), so the DM stays the two of them.
+
+    Returns (assigner, assignee), or None = the current path unchanged: no/unknown assigner, an assigner that is not a
+    human of this org, an assignee that is not an agent, or any other recipient (a different human owner, a second assignee) —
+    those still get the group they get today (and so does the system publisher itself, which is an `agent` member but never a
+    place for a person's DM)."""
+    raw = payload.get("assigned_by_member_id")
+    if not raw or len(escalation_ids) != 1:
+        return None
+    try:
+        assigned_by = await canonicalize_member_id(uuid.UUID(str(raw)), db)
+    except (ValueError, AttributeError, TypeError):
+        return None
+    (assignee,) = tuple(escalation_ids)
+    if assigned_by == assignee or assignee == system_member_id or (escalation_ids | broadcast_ids) - {assignee, assigned_by}:
+        return None
+    if assigned_by not in await org_recipient_ids({assigned_by}, org_id, db):
+        return None
+    members = await lookup_members_by_ids({assigned_by, assignee}, db)
+    human, agent = members.get(assigned_by), members.get(assignee)
+    if human is None or agent is None or human.type != "human" or agent.type != "agent":
+        return None
+    # The DM is a channel the person can then write into, so the agent owner's message policy (`_enforce_agent_creator_policy`:
+    # creator_only by default · list · org_wide) decides whether they may have it — the same check that refuses them a DM they open
+    # themselves. Refused → today's path (the person is in nobody's DM with the agent, as before this story). Security lens 4764.
+    from types import SimpleNamespace
+
+    from app.routers.conversations import _enforce_agent_creator_policy
+
+    try:
+        await _enforce_agent_creator_policy(SimpleNamespace(id=assigned_by, user_id=human.user_id), [assignee], db)
+    except HTTPException:
+        return None
+    return assigned_by, assignee
 
 
 async def _get_or_create_event_conversation(
@@ -3058,6 +3111,7 @@ async def _publish_registry_event_core(
         if _relay_owner_id is not None:
             participant_ids.add(_relay_owner_id)
 
+    post_as_system_publisher = False
     if conversation_id is not None:
         # story #2935(설계 doc §2 보강) — 지정 conversation에 바로 발행. sender의 참가자
         # 여부는 send_message()의 기존 인가가 그대로 검증(및 human+non-dm이면 auto-join)한다
@@ -3094,9 +3148,23 @@ async def _publish_registry_event_core(
                 },
             )
     else:
+        # story #4764 — a human's assignment of an agent is delivered into their DM (see `_assigner_agent_dm_pair`); every other
+        # event, and every assignment that does not fit, keeps the participant set it always had.
+        _human_dm_pair = (
+            await _assigner_agent_dm_pair(
+                db, org_id=org_id, payload=payload, escalation_ids=escalation_ids, broadcast_ids=broadcast_ids,
+                system_member_id=sender.id,
+            )
+            if _is_system_publisher and definition_key == "preset.work.assigned"
+            else None
+        )
+        post_as_system_publisher = _human_dm_pair is not None
+        # A DM created here belongs to the assigner, not to the system publisher: `created_by` is also a recipient of the chat
+        # websocket fan-out (send_message_core adds it to the agent rooms), and the system publisher is not in this DM.
         conv = await _get_or_create_event_conversation(
             db, org_id=org_id, project_id=project_id,
-            participant_ids=participant_ids, created_by=sender.id,
+            participant_ids=set(_human_dm_pair) if _human_dm_pair else participant_ids,
+            created_by=_human_dm_pair[0] if _human_dm_pair else sender.id,
         )
 
     from app.routers.conversations import SendMessageRequest, send_message_core
@@ -3194,6 +3262,7 @@ async def _publish_registry_event_core(
     )
     msg_response = await send_message_core(
         conv.id, send_body, background_tasks, db=db, auth=auth, org_id=org_id, after_commit=after_commit,
+        as_system_publisher=post_as_system_publisher,
     )
     if sender.type == "agent" and payload.get("work_item_type") == "story" and payload.get("work_item_id"):
         # story #4424 — a desktop setup agent's first write on its first work item = its first result (no-op for others;
