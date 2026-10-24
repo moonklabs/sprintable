@@ -300,3 +300,20 @@ async def test_09_a_code_the_person_confirmed_before_deleting_is_not_exchanged_a
         assert (control.json().get("error") or {}).get("code") != "code_used", control.text
     finally:
         await _close(engine, w)
+
+
+async def test_10_a_person_with_several_computers_gets_all_of_them_closed():
+    """Several open setups of one person (codex 4767 r2: their rows and their agents' rows are taken once, in the one order — no setup-by-setup locking)."""
+    engine, w = await _world()
+    try:
+        uid, email, org_id = await w.person(org=True, name="Admin M")
+        comps = [await _computer(w, org_id, uid, name=f"Mac {i}") for i in range(3)]
+        await _remote_control_on(w, org_id)
+        assert (await w.delete(await w.tokens(email))).status_code == 200
+        for c in comps:
+            assert (await _relay(w, org_id, c["token"]))["setup"] == 401
+            assert (await _row(w, c["setup_id"]))["revoked_reason"] == "account_deleted"
+            assert await _live(w, "SELECT count(*) FROM members WHERE id = :i AND is_active", i=c["agent_id"]) == 0
+            assert await _live(w, "SELECT count(*) FROM agent_api_keys WHERE desktop_setup_id = :i AND revoked_at IS NULL", i=c["setup_id"]) == 0
+    finally:
+        await _close(engine, w)

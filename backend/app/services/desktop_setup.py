@@ -1374,21 +1374,31 @@ async def close_setups_of_deleted_account(db: AsyncSession, *, user_id: uuid.UUI
     stream, clock view, the agents the setup made), without asking whether the person may still manage the organization — they are
     leaving. `revoked_reason` says why. The organizations that closed with the account took their setups with them (cascade).
     Returns how many were closed."""
-    ids = list((await db.execute(
-        select(DesktopSetup.id).where(DesktopSetup.confirmed_by == user_id, DesktopSetup.revoked_at.is_(None)).order_by(DesktopSetup.id)
-    )).scalars().all())
+    rows = list((await db.execute(
+        select(DesktopSetup.id, DesktopSetup.members).where(DesktopSetup.confirmed_by == user_id, DesktopSetup.revoked_at.is_(None)).order_by(DesktopSetup.id)
+    )).all())
+    if not rows:
+        return 0
+    # codex 4767 r2: ONE lock for all of them, in the service's one order (every agent member row any of them made, by id, then the setup rows, by id) — locking
+    # setup by setup would hold an earlier setup row while waiting for a later setup's agent row, the order an exchange takes the other way round (deadlock)
+    made = {
+        uuid.UUID(str(m["member_id"])) for _, members in rows for m in (members or [])
+        if m.get("kind") == "agent" and m.get("member_id") and not m.get("existing")
+    }
+    locked = await _lock_in_order(db, member_ids=made, setup_ids={sid for sid, _ in rows})
     closed = 0
-    for setup_id in ids:
-        found = (await db.execute(select(DesktopSetup).where(DesktopSetup.id == setup_id))).scalar_one_or_none()
-        if found is None or found.org_id is None:
+    for setup_id in sorted(locked):
+        found = locked[setup_id]
+        if found.org_id is None:
             continue
-        done = await _disconnect_setup(db, found, org_id=found.org_id, revoked_by=user_id, reason=ACCOUNT_DELETED_REASON)
+        done = await _disconnect_setup(db, found, org_id=found.org_id, revoked_by=user_id, reason=ACCOUNT_DELETED_REASON, locked=locked)
         closed += 0 if done.already else 1
     return closed
 
 
 async def _disconnect_setup(
     db: AsyncSession, found: DesktopSetup, *, org_id: uuid.UUID, revoked_by: uuid.UUID, reason: str | None = None,
+    locked: dict[uuid.UUID, DesktopSetup] | None = None,
 ) -> Revoked:
     """The disconnect itself (the authority check is the caller's): `revoke_setup` for a person's «disconnect», `close_setups_of_deleted_account`
     for an account that is going away."""
@@ -1402,7 +1412,8 @@ async def _disconnect_setup(
         uuid.UUID(str(m["member_id"])) for m in (found.members or [])
         if m.get("kind") == "agent" and m.get("member_id") and not m.get("existing")
     }
-    setup = (await _lock_in_order(db, member_ids=made, setup_ids={found.id}))[found.id]
+    # `locked`: the caller already took every row it will touch in that one order (the account deletion closes several setups)
+    setup = locked[found.id] if locked is not None else (await _lock_in_order(db, member_ids=made, setup_ids={found.id}))[found.id]
     now = _now()
     revoked = (await db.execute(
         update(ApiKey).where(ApiKey.desktop_setup_id == setup.id, ApiKey.revoked_at.is_(None))
