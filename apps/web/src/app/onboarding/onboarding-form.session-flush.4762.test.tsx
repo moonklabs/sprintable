@@ -75,13 +75,18 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
     await flush();
     const fetchMock = handler;
     const orgAt = fetchMock.mock.calls.findIndex((c) => c[0] === '/api/organizations');
-    const refreshAt = fetchMock.mock.calls.findIndex((c) => c[0] === '/api/auth/refresh');
+    // story 4763 (AC11): the arrival renews once BEFORE it decides «no organization» (a token from before the organization existed) — that is the first rotation; the one that
+    // follows the organization is the LAST of them
+    const refreshCalls = fetchMock.mock.calls.map((c, i) => (c[0] === '/api/auth/refresh' ? i : -1)).filter((i) => i >= 0);
+    const refreshAt = refreshCalls[refreshCalls.length - 1]!;
     expect(orgAt).toBeGreaterThan(-1);
+    expect(refreshCalls).toHaveLength(2);
+    expect(refreshCalls[0]!).toBeLessThan(orgAt); // 4763: the renewal before the decision
     expect(refreshAt).toBeGreaterThan(orgAt); // the rotation follows the organization
     const messages = post.mock.calls.map((c) => JSON.parse(c[0] as string) as { type: string });
-    expect(messages.filter((m) => m.type === 'session-changed')).toHaveLength(1); // reverted (a raw fetch) → 0
-    // and the message came after the refresh request, not before (the shell flushes what the cookie jar holds NOW)
-    expect(handler.mock.invocationCallOrder[refreshAt]!).toBeLessThan(post.mock.invocationCallOrder[0]!);
+    expect(messages.filter((m) => m.type === 'session-changed')).toHaveLength(2); // one per rotation; reverted (a raw fetch) → 0
+    // and the message of the last rotation came after its refresh request, not before (the shell flushes what the cookie jar holds NOW)
+    expect(handler.mock.invocationCallOrder[refreshAt]!).toBeLessThan(post.mock.invocationCallOrder[post.mock.invocationCallOrder.length - 1]!);
   });
 
   it('the shell hears nothing while the rotation is still in flight — only once the server has answered (it must not flush the old cookie)', async () => {
@@ -95,7 +100,7 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
       );
     });
     await flush();
-    expect(handler.mock.calls.some((c) => c[0] === '/api/auth/refresh')).toBe(true); // the rotation was sent …
+    expect(handler.mock.calls.some((c) => c[0] === '/api/auth/refresh')).toBe(true); // the first rotation (4763: before the decision) was sent …
     expect(post).not.toHaveBeenCalled(); // … and is not answered yet: nothing to the shell
     await act(async () => { release(); for (let i = 0; i < 16; i++) await Promise.resolve(); });
     expect(post.mock.calls.map((c) => (JSON.parse(c[0] as string) as { type: string }).type)).toEqual(['session-changed']); // answered → exactly one message
@@ -110,12 +115,13 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
     expect(body.indexOf('await refreshAuthTokens()')).toBeLessThan(body.indexOf('window.location.href'));
   });
 
-  it('both rotations of the form (after the organization is made · before leaving) go through refreshAuthTokens — no bare `/api/auth/refresh` fetch is left in the form', () => {
+  it('every rotation of the form (before the arrival decides · after the organization is made · before leaving) goes through refreshAuthTokens — no bare `/api/auth/refresh` fetch is left in the form', () => {
     const form = readFileSync(resolve(__dirname, 'onboarding-form.tsx'), 'utf8');
     expect(form).not.toMatch(/fetch\(\s*'\/api\/auth\/refresh'/); // reverted (a bare fetch) → the shell is never told
     // each one swallows a failure like the bare fetch did (the leaving one has no screen to fall back on: a throw there would keep the person from going home)
-    expect(form.match(/await refreshAuthTokens\(\)\.catch\(\(\) => null\)/g)?.length).toBe(2);
-    expect(form.match(/refreshAuthTokens\(\)/g)?.length).toBe(2);
+    // story 4763 (AC11) added the third: the renewal before the arrival decides there is no organization
+    expect(form.match(/await refreshAuthTokens\(\)\.catch\(\(\) => null\)/g)?.length).toBe(3);
+    expect(form.match(/refreshAuthTokens\(\)/g)?.length).toBe(3);
     expect(form).toMatch(/import \{ fetchWithAuth, refreshAuthTokens \} from '@\/lib\/db\/client';/);
   });
 

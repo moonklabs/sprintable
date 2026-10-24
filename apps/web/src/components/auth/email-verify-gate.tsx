@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { fetchWithAuth, logoutUser } from '@/lib/db/client';
 import { pickEuroJosa } from '@/lib/korean-particle';
+import { listenVerified } from '@/lib/auth/email-verified-signal';
 
 export const VERIFY_POLL_MS = 3000;
 
@@ -80,7 +81,9 @@ export function useEmailVerifyGate(active = true, onOpened?: () => void): Verify
     const now = () => { if (document.visibilityState === 'visible') check(); };
     window.addEventListener('focus', now);
     document.addEventListener('visibilitychange', now);
-    return () => { clearInterval(tick); window.removeEventListener('focus', now); document.removeEventListener('visibilitychange', now); };
+    // story #4763 AC7: the tab that verifies tells this one — check at once, hidden or not (no waiting for the next poll that a hidden tab never makes)
+    const stopListening = listenVerified(check);
+    return () => { clearInterval(tick); window.removeEventListener('focus', now); document.removeEventListener('visibilitychange', now); stopListening(); };
   }, [active, gate.kind, check]);
 
   // the answer (auth.py resend_verification): 200 `delivered: true` sent · `delivered: false` not sent (mail not configured

@@ -131,6 +131,27 @@ describe('[SID:4453] the «verify your e-mail» gate', () => {
     expect(behind()).not.toBeNull();
   });
 
+  it('[SID:4763 AC7] the tab that verifies tells this one: a HIDDEN tab reads at once and opens in place (no waiting for a poll it never makes)', async () => {
+    await mount();
+    visibility = 'hidden';
+    const before = meReads;
+    me = { email_verified: true, email_verification_required: true };
+    await act(async () => { window.dispatchEvent(new StorageEvent('storage', { key: 'sprintable-email-verified', newValue: '1' })); });
+    await flush();
+    expect(meReads).toBe(before + 1);
+    expect(behind()).not.toBeNull();
+    expect(gate()).toBeNull();
+  });
+
+  it('[SID:4763 AC7] some other storage key says nothing to the gate', async () => {
+    await mount();
+    const before = meReads;
+    await act(async () => { window.dispatchEvent(new StorageEvent('storage', { key: 'something-else', newValue: '1' })); });
+    await flush();
+    expect(meReads).toBe(before);
+    expect(gate()).not.toBeNull();
+  });
+
   it('focus reads at once too (back from the mail app)', async () => {
     await mount();
     const before = meReads;

@@ -30,6 +30,29 @@ describe('filterUnconnectedAgentParticipants', () => {
     expect(result.map((p) => p.member_id)).toEqual(['agent-1']);
   });
 
+  it('[SID:4763 AC8] 시스템 발행(system-publisher)은 verified===false여도 세지 않는다 — 정상 연결된 대화에 «시스템 발행이 아직 연결되지 않았어요»가 뜨던 꼴 0', () => {
+    const result = filterUnconnectedAgentParticipants(
+      [
+        { member_id: 'sys-1', name: '시스템 발행', type: 'agent', verified: false, runtime_type: 'system-publisher' },
+        { member_id: 'agent-1', name: 'Claude Code', type: 'agent', verified: true, runtime_type: 'claude-code' },
+      ],
+      ME,
+    );
+    expect(result).toEqual([]);
+  });
+
+  it('[SID:4763 AC8] 시스템 발행 곁의 진짜 미연결 에이전트는 그대로 센다(띠는 «실제로 미연결일 때만»)', () => {
+    const result = filterUnconnectedAgentParticipants(
+      [
+        { member_id: 'sys-1', name: '시스템 발행', type: 'agent', verified: false, runtime_type: 'system-publisher' },
+        { member_id: 'agent-2', name: '올리베이라', type: 'agent', verified: false, runtime_type: 'claude-code' },
+        { member_id: 'agent-3', name: '이름 모름', type: 'agent', verified: false },
+      ],
+      ME,
+    );
+    expect(result.map((p) => p.member_id)).toEqual(['agent-2', 'agent-3']);
+  });
+
   it('verified===true(연결됨)인 에이전트는 제외된다 — AC2(연결되면 자연 소멸)의 근거', () => {
     const result = filterUnconnectedAgentParticipants(
       [{ member_id: 'agent-1', name: '올리베이라', type: 'agent', verified: true }],

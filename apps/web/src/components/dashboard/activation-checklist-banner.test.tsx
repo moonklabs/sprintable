@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ActivationChecklistBanner } from './activation-checklist-banner';
-import { _resetActivationStatusCacheForTests } from '@/hooks/use-activation-status';
+import { ACTIVATION_REFRESH_MS, _resetActivationStatusCacheForTests } from '@/hooks/use-activation-status';
 
 // story #3201 — useDashboardContext(projectId)·useRouter 신규 의존성. storage-capacity-
 // banner.test.tsx와 동일 패턴(실 dashboard-shell.tsx 전체 모듈 그래프를 끌어들이지 않음).
@@ -539,5 +539,26 @@ describe('ActivationChecklistBanner — not on the desktop setup page (story #44
       await flush();
       expect(container.textContent, path).toContain('가입을 마무리해 볼까요?');
     }
+  });
+});
+
+// story #4763 — «첫 지시 보내고 회신 받기» ticks itself when the reply arrives while the banner is in front (no reload)
+describe('ActivationChecklistBanner — 회신이 오면 스스로 체크 (story #4763)', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('열린 배너는 다시 읽어, 회신이 도착한 뒤 진행률과 체크 표시가 새로고침 없이 바뀐다', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const REPLIED = { ...PARTIAL, steps: { ...PARTIAL.steps, first_roundtrip: true }, completed: 3 };
+    let reads = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: reads++ === 0 ? PARTIAL : REPLIED }) })));
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    expect(container.textContent).toContain('2/5단계 완료');
+    const checks = () => container.querySelectorAll('.lucide-circle-check').length;
+    const before = checks();
+    await act(async () => { vi.advanceTimersByTime(ACTIVATION_REFRESH_MS); });
+    await flush();
+    expect(container.textContent).toContain('3/5단계 완료');
+    expect(checks()).toBe(before + 1);
   });
 });
