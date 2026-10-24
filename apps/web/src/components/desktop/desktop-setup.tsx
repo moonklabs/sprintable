@@ -56,8 +56,10 @@ export function useAppSetupLinks(): { open: string; reopen: string } {
 }
 export const RUNTIME_LABEL: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex' };
 // each provider's recommended install (no Node.js needed; fixed provider addresses with no version in them — PO 13:10Z from
-// code.claude.com/docs/en/setup and github.com/openai/codex)
-export const INSTALL: Record<DesktopRuntime, string> = { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh' };
+// code.claude.com/docs/en/setup and github.com/openai/codex). story 4765: the README's chatgpt.com/codex/install.sh answers 404 (measured on two
+// machines, 10-24) — the same installer is an asset of the official GitHub release, so that is the address (the Mac app's command table has the
+// same string: desktop-electron/src/runtime-install.ts, pinned by test/runtime-install-4658.test.ts)
+export const INSTALL: Record<DesktopRuntime, string> = { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'curl -fsSL https://github.com/openai/codex/releases/latest/download/install.sh | sh' };
 
 export type SetupFailure = 'no-agent' | 'not-admin' | 'agent-limit' | 'expired' | 'offline' | 'managed' | 'no-recipe' | 'recipes-offline' | 'recipe-too-big' | 'recipes-changed' | 'has-org' | 'disconnected'
   // story #4576 — the move's own refusals (Yuna «② 확인이 거절될 때»)
@@ -1336,6 +1338,8 @@ export function Failure({ failure, onRetry, counts = null, plan = null, solo = f
           ))}
         </ul>
       ) : null}
+      {/* story 4765: the Mac app's own card runs the install and the sign-in (one press) — the page only says so; it never starts a download */}
+      {failure === 'no-agent' ? <p className="text-xs text-muted-foreground" data-testid="setup-no-agent-app-hint">{t('failure.no-agent.appHint')}</p> : null}
       <div className="flex gap-2">
         {failure === 'no-agent' ? appButton(t(key('action')))
           : failure === 'expired' ? appButton(t(key('action')))

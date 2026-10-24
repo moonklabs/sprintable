@@ -18,7 +18,7 @@ vi.mock('next/navigation', async (orig) => ({ ...(await orig<typeof import('next
 const { phonePub } = vi.hoisted(() => ({ phonePub: { android: true, ios: false } }));
 vi.mock('@/lib/phone-app-store', async (orig) => ({ ...(await orig<typeof import('@/lib/phone-app-store')>()), PHONE_APP_PUBLISHED: phonePub }));
 
-import { ATTACHABLE_READ_LIMIT_MS, DesktopSetup, DesktopSetupEntry, Failure, OpenInDesktopApp, SETUP_APP_LINK, SETUP_REOPEN_LINK, ToolsNotConnected, failureForCode, inviteUntilDate } from './desktop-setup';
+import { ATTACHABLE_READ_LIMIT_MS, DesktopSetup, DesktopSetupEntry, Failure, INSTALL, OpenInDesktopApp, SETUP_APP_LINK, SETUP_REOPEN_LINK, ToolsNotConnected, failureForCode, inviteUntilDate } from './desktop-setup';
 import { pickEulReulJosa, pickEunNeunJosa } from '@/lib/korean-particle';
 import { DesktopSetupDocWatch } from './desktop-setup-doc-watch';
 import { SetupProgressView } from './desktop-setup-progress';
@@ -141,8 +141,9 @@ describe('[SID:4427] desktop setup page', () => {
     await mount(<DesktopSetup code={CODE} runtimes={[]} />);
     expect(text()).toContain('이 컴퓨터에서 에이전트를 찾지 못했어요');
     expect(text()).toContain('curl -fsSL https://claude.ai/install.sh | bash');
-    expect(text()).toContain('curl -fsSL https://chatgpt.com/codex/install.sh | sh');
+    expect(text()).toContain('curl -fsSL https://github.com/openai/codex/releases/latest/download/install.sh | sh');
     expect(text()).not.toContain('npm install');
+    expect(text()).toContain('Mac 앱 아래쪽 «에이전트 준비가 필요해요» 카드에서 [설치하고 로그인하기]를 한 번 누르면 이어져요.'); // story 4765
     expect((container.querySelector(`a[href="${SETUP_APP_LINK}"]`) as HTMLAnchorElement).textContent).toBe('다시 찾기');
     await act(async () => { root.unmount(); }); root = createRoot(container);
 
@@ -475,6 +476,16 @@ describe('[SID:4427] desktop setup page', () => {
         expect(hrefs(), off).toEqual([SETUP_REOPEN_LINK]);
       }
     } finally { sp.value = null; }
+  });
+});
+
+describe('[SID:4765] the install commands the page offers (other screens import them)', () => {
+  it('INSTALL is exported, one command per runtime — claude\'s official installer and Codex\'s GitHub release installer (the README address answers 404)', () => {
+    expect(INSTALL).toEqual({
+      claude: 'curl -fsSL https://claude.ai/install.sh | bash',
+      codex: 'curl -fsSL https://github.com/openai/codex/releases/latest/download/install.sh | sh',
+    });
+    expect(JSON.stringify(INSTALL)).not.toContain('chatgpt.com');
   });
 });
 
