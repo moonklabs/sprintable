@@ -139,7 +139,7 @@ describe('[SID:4762] SettingsPage — «이 폰» tab', () => {
     expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent?.trim()).toBe(koMessages.settings.tabDisplay); // … and the person stays where they chose to be
   });
 
-  it('inside the phone app: the tab is listed and ?tab=this-phone shows the phone\'s check number', async () => {
+  it('inside the phone app from the first render: the tab is listed and ?tab=this-phone shows the phone\'s check number (the claim that comes later is the «late claim» test)', async () => {
     const call = await drawPage(true);
     expect(tabNames()).toContain(koMessages.settings.tabThisPhone); // reverted (no trigger) → fails
     expect(container.querySelector('[data-testid=settings-this-phone-tab]')).not.toBeNull();

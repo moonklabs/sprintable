@@ -74,7 +74,7 @@ describe('[SID:4762] ThisPhoneCard — the phone\'s own check number', () => {
     expect(q('this-phone-number')?.textContent).toBe('324 642');
   });
 
-  it('the bridge\'s own «timeout» answer (a call that never came back) ends as a failed read with «read again», not as «reading» for ever', async () => {
+  it('any refused answer — also the bridge\'s own «timeout» for a call that never came back — is a failed read with «read again», not «reading» for ever (no special case: one mapping for every refusal)', async () => {
     await draw(async () => answer({ ok: false, code: 'timeout' }));
     expect(q('this-phone-failed')).not.toBeNull();
     expect(q('this-phone-retry')).not.toBeNull();
@@ -110,7 +110,7 @@ describe('[SID:4762] ThisPhoneCard — the phone\'s own check number', () => {
     }
   });
 
-  it('another bridge function (the claim changed) is asked afresh — the answer of the old one is not shown for it', async () => {
+  it('another bridge function (the claim changed) is asked afresh — the new one is called, and its failure replaces the old number (the pending-bridge test below pins that the OLD number is not shown while the new one waits)', async () => {
     const first = vi.fn(async () => answer({ key_number: '324 642' }));
     await draw(first);
     expect(q('this-phone-number')?.textContent).toBe('324 642');
