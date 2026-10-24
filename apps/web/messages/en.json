@@ -7051,7 +7051,8 @@
         "no-agent": {
           "title": "We couldn't find an agent on this computer",
           "body": "Install and sign in to Claude Code or Codex, then look again. You can install them from the terminal.",
-          "action": "Look again"
+          "action": "Look again",
+          "appHint": "In the Mac app, press «Install and sign in» once on the «Get an agent ready» card at the bottom."
         },
         "not-admin": {
           "title": "You need to be an org admin to create agents",
