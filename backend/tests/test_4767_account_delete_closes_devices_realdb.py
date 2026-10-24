@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -47,16 +47,16 @@ def _no_rate_limit(monkeypatch):
 
 async def _computer(w, org_id: uuid.UUID, confirmed_by: uuid.UUID, *, name: str = "Mac of someone") -> dict:
     """A handed-over computer the person confirmed: the setup row, its live device token, one agent made by the setup with one key."""
+    from sqlalchemy import select
+
     from app.models.api_key import ApiKey
     from app.models.desktop_relay import DesktopDeviceToken
     from app.models.desktop_setup import DesktopSetup
-    from sqlalchemy import select
-
     from app.models.member import Member
     from app.models.project import Project
     from app.services.desktop_relay import TOKEN_PREFIX, _hash
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     setup_id, agent_id, token = uuid.uuid4(), uuid.uuid4(), TOKEN_PREFIX + uuid.uuid4().hex
     async with w.Session() as s:
         project_id = (await s.execute(select(Project.id).where(Project.org_id == org_id))).scalars().first()
@@ -145,8 +145,8 @@ async def test_02_the_owners_list_and_the_connected_count_no_longer_carry_it():
         async with w.Session() as s:
             assert await remote_control.connected_setups(s, org_id) == 0, "a deleted person's computer is not a connected one"
         # the list still names it (history) but as disconnected, never as handed over under a person who no longer exists
-        from app.services.desktop_setup import setup_state
         from app.models.desktop_setup import DesktopSetup
+        from app.services.desktop_setup import setup_state
 
         async with w.Session() as s:
             assert setup_state(await s.get(DesktopSetup, comp["setup_id"])) == "disconnected"
@@ -226,9 +226,9 @@ async def test_06_an_organization_that_closes_with_the_account_is_still_clean():
         await _close(engine, w)
 
 
-async def test_07_a_failure_closing_the_computers_never_fails_the_deletion(monkeypatch):
-    """The deletion is a store requirement: if closing a computer breaks, the account still closes — and the device is refused anyway
-    because its person is gone."""
+async def test_07_a_deletion_that_cannot_close_the_computers_fails_whole(monkeypatch):
+    """Not swallowed (codex 4767 r1): a failure closing the computers rolls the deletion back — the account stays, nothing is half done, a retry can finish.
+    Swallowing it would leave the keys the setup handed out alive for a deleted person."""
     from app.services import desktop_setup
 
     async def _boom(*a, **k):
@@ -240,9 +240,63 @@ async def test_07_a_failure_closing_the_computers_never_fails_the_deletion(monke
         uid, email, org_id = await w.person(org=True, name="Admin M")
         comp = await _computer(w, org_id, uid)
         await _remote_control_on(w, org_id)
-        r = await w.delete(await w.tokens(email))
-        assert r.status_code == 200, r.text
-        assert (await w.row(uid))["deleted_at"] is not None
-        assert (await _relay(w, org_id, comp["token"]))["setup"] == 401
+        with pytest.raises(RuntimeError):
+            await w.delete(await w.tokens(email))
+        assert (await w.row(uid))["deleted_at"] is None and (await w.row(uid))["is_active"] is True
+        assert (await _row(w, comp["setup_id"]))["revoked"] is False
+        assert (await _relay(w, org_id, comp["token"]))["setup"] == 200
+    finally:
+        await _close(engine, w)
+
+
+async def test_08_a_confirmer_without_a_user_row_or_none_recorded_keeps_the_relay_contract():
+    """4618's contract: the relay serves a setup whose confirmer is no known user and one with no confirmer recorded. Only a CLOSED or DELETED account refuses."""
+    engine, w = await _world()
+    try:
+        _, _, org_id = await w.person(org=True, name="Admin M")
+        unmapped = await _computer(w, org_id, uuid.uuid4())
+        none_recorded = await _computer(w, org_id, uuid.uuid4())
+        await w.sql("UPDATE desktop_setups SET confirmed_by = NULL WHERE id = :i", i=none_recorded["setup_id"])
+        await _remote_control_on(w, org_id)
+        assert (await _relay(w, org_id, unmapped["token"]))["setup"] == 200
+        assert (await _relay(w, org_id, none_recorded["token"]))["setup"] == 200
+    finally:
+        await _close(engine, w)
+
+
+async def test_09_a_code_the_person_confirmed_before_deleting_is_not_exchanged_after():
+    """The confirm/delete race (codex 4767 r1): a setup confirmed but not yet exchanged when the account is deleted must not turn into keys and a
+    device token. The real exchange endpoint, a code made through the public API."""
+    import base64
+    import hashlib
+    import secrets
+
+    engine, w = await _world()
+    try:
+        uid, _, org_id = await w.person(org=True, name="Admin M")
+        uid2, _, org2 = await w.person(org=True, name="Alive")
+
+        async def _confirmed_unexchanged(who: uuid.UUID, org: uuid.UUID) -> tuple[str, str]:
+            verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
+            challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+            r = await w.client.post("/api/v2/desktop/setup-codes", json={"challenge": challenge, "device_name": "mac 4767"})
+            assert r.status_code == 201, r.text
+            body = r.json()
+            await w.sql(
+                "UPDATE desktop_setups SET org_id = :o, confirmed_by = :u, confirmed_at = now(), project_id = (SELECT id FROM projects WHERE org_id = :o LIMIT 1) WHERE id = :i",
+                o=org, u=who, i=uuid.UUID(body["setup_id"]),
+            )
+            return body["code"], verifier
+
+        gone_code, gone_verifier = await _confirmed_unexchanged(uid, org_id)
+        alive_code, alive_verifier = await _confirmed_unexchanged(uid2, org2)
+        await w.sql("UPDATE users SET is_active = false, deleted_at = now() WHERE id = :u", u=uid)   # deleted between the confirmation and the exchange
+
+        refused = await w.client.post("/api/v2/desktop/setup-codes/exchange", json={"code": gone_code, "verifier": gone_verifier})
+        assert refused.status_code >= 400 and "device_token" not in refused.text, refused.text
+        assert (refused.json().get("error") or {}).get("code") == "code_used", refused.text
+        # the control: a living person's confirmed code is not refused for that reason (it exchanges, or says the deployment has no address configured)
+        control = await w.client.post("/api/v2/desktop/setup-codes/exchange", json={"code": alive_code, "verifier": alive_verifier})
+        assert (control.json().get("error") or {}).get("code") != "code_used", control.text
     finally:
         await _close(engine, w)

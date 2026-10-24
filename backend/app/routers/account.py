@@ -1,4 +1,3 @@
-import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -18,8 +17,6 @@ from app.models.team import TeamMember
 from app.models.user import RefreshToken, User
 from app.schemas.subscription import AccountDeleteResponse
 from app.services.account_purge import ACCOUNT_PURGE_GRACE_DAYS
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v2/account", tags=["account", "Organization"])
 
@@ -248,16 +245,11 @@ async def delete_account(
             )
 
     # story #4767: the computers this person confirmed in an organization that stays — closed like a disconnect (keys, device token, open commands and
-    # stream), so a deleted person's Mac cannot keep reaching the relay. In its own savepoint: the deletion is a store requirement and must not fail because
-    # a computer could not be closed — and a device whose confirming person is gone is refused at authentication anyway (`device_for_token`), so a failure
-    # here leaves nothing open.
-    try:
-        async with session.begin_nested():
-            from app.services.desktop_setup import close_setups_of_deleted_account
+    # stream), in the same transaction: a deletion that cannot close them fails whole (retry) instead of leaving a deleted person's agent keys alive.
+    # (Authentication refuses such a device anyway — `device_for_token` — but the keys the setup handed out are only closed here.)
+    from app.services.desktop_setup import close_setups_of_deleted_account
 
-            await close_setups_of_deleted_account(session, user_id=uid)
-    except Exception:
-        logger.exception("account deletion: closing the person's computers failed user_id=%s (devices are still refused at authentication)", uid)
+    await close_setups_of_deleted_account(session, user_id=uid)
 
     now = datetime.now(timezone.utc)
     await session.execute(

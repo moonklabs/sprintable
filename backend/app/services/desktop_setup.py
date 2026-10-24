@@ -1230,6 +1230,8 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str, device_i
         raise DesktopSetupError("code_expired")
     if setup.confirmed_at is None:
         return None
+    if await confirming_person_is_gone(db, setup):
+        raise DesktopSetupError("code_used")  # story #4767: the person closed their account between confirming and this exchange — no keys, no device token
 
     api_url, mcp_url = exchange_urls()
     if not mcp_url or not api_url:
@@ -1352,6 +1354,17 @@ async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
 
 
 ACCOUNT_DELETED_REASON = "account_deleted"
+
+
+async def confirming_person_is_gone(db: AsyncSession, setup: DesktopSetup) -> bool:
+    """story #4767: the account of the person who confirmed this setup is closed or deleted. No confirmer recorded, or no `users` row for it, is not
+    «gone» (the same reading as the relay's device authentication)."""
+    from app.models.user import User
+
+    if setup.confirmed_by is None:
+        return False
+    row = (await db.execute(select(User.is_active, User.deleted_at).where(User.id == setup.confirmed_by))).first()
+    return row is not None and (row.is_active is False or row.deleted_at is not None)
 
 
 async def close_setups_of_deleted_account(db: AsyncSession, *, user_id: uuid.UUID) -> int:
