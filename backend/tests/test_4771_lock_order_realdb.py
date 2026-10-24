@@ -190,11 +190,122 @@ async def test_05_an_exchange_whose_setup_row_went_with_its_organization_is_not_
         await _close(engine, w)
 
 
+async def test_06_an_organization_delete_takes_the_users_that_point_at_it_before_the_organization_row():
+    """story 4771 follow-up (security lens, measured: organization delete ‖ account deletion deadlocked in 7 + 1 of 60 rounds; PR 5217's CI, 6 of 20): the final `DELETE FROM organizations`
+    sets `users.last_org_id` NULL for every user that points at the organization — a USER row — while the account deletion takes the user row first and then the organization rows.
+    A session that already holds the person's user row (what the account deletion holds first) and then asks for the organization row, against an organization delete that started in
+    between: with the organization row taken first Postgres aborts one of them with a deadlock; with the users that point at it taken first (id order) the delete waits there holding nothing,
+    the holder finishes, and the delete completes — and the pointer is cleared."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+
+    engine, w = await _world()
+    try:
+        _, owner_email, org_id = await w.person(org=True, name="Owner")
+        m = await w.add_member(org_id, role="admin", name="M")
+        await w.sql("UPDATE users SET last_org_id = :o WHERE id = :u", o=org_id, u=m)
+        name = await _org_name(w, org_id)
+        owner = await w.tokens(owner_email)
+
+        holder = w.Session()
+        async with holder:
+            await holder.execute(text("SELECT id FROM users WHERE id = :u FOR UPDATE"), {"u": m})   # the account deletion's first lock
+            deleting = asyncio.create_task(_delete_org(w, owner, org_id, name))
+            await asyncio.sleep(1.5)
+            assert not deleting.done(), "the organization delete waits for the user row held by the other transaction"
+            try:
+                await holder.execute(text("SELECT id FROM organizations WHERE id = :o FOR UPDATE"), {"o": org_id})   # …and its next: the organization rows
+                await holder.commit()
+            except DBAPIError as e:
+                await holder.rollback()
+                pytest.fail(f"deadlock between an organization delete (organization row first) and an account deletion that holds the user row: {type(e.orig).__name__}")
+        r = await asyncio.wait_for(deleting, timeout=30)
+        assert r.status_code == 200, r.text
+        assert await _live(w, "SELECT count(*) FROM users WHERE id = :u AND last_org_id IS NULL", u=m) == 1, "the pointer is cleared by the delete, as before"
+    finally:
+        await _close(engine, w)
+
+
+async def test_07_a_person_who_may_not_delete_the_organization_locks_nothing_of_it():
+    """The users that point at the organization are locked only AFTER the owner check (a plain read): a non-owner is refused without taking a lock a member's account deletion could wait on."""
+    from sqlalchemy import text
+
+    engine, w = await _world()
+    try:
+        _, owner_email, org_id = await w.person(org=True, name="Owner")
+        m = await w.add_member(org_id, role="admin", name="M")
+        await w.sql("UPDATE users SET last_org_id = :o WHERE id = :u", o=org_id, u=m)
+        name = await _org_name(w, org_id)
+        m_tokens = await w.tokens(f"story4752-m-{m.hex[:10]}@test.com")
+        holder = w.Session()
+        async with holder:
+            await holder.execute(text("SELECT id FROM users WHERE id = :u FOR UPDATE"), {"u": m})
+            r = await asyncio.wait_for(_delete_org(w, m_tokens, org_id, name), timeout=10)   # would hang on the held user row if the refusal came after the lock
+            assert r.status_code == 403, r.text
+            await holder.rollback()
+        assert await _live(w, "SELECT count(*) FROM organizations WHERE id = :o", o=org_id) == 1
+    finally:
+        await _close(engine, w)
+
+
+async def test_08_an_exchange_takes_the_agents_its_setup_made_before_it_holds_the_setup_row(monkeypatch):
+    """story 4771 follow-up (security lens): the key insert of the exchange takes a key-share lock on the MEMBER row of each agent (the foreign key of `agent_api_keys.member_id`) — for an agent
+    the setup MADE that row was not locked up front, so the exchange held the setup row and then reached for the member row: the reverse of an organization delete (agent rows, then
+    setup rows). A session that holds the made agent's row and then reaches for the setup row, against an exchange started in between: with the setup row first Postgres aborts one of
+    them with a deadlock; with the made agents locked first the exchange waits there holding nothing, the holder finishes and the exchange completes (200, a device token)."""
+    import base64
+    import hashlib
+    import secrets
+
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+
+    from app.models.member import Member
+    from app.services import desktop_setup
+
+    monkeypatch.setattr(desktop_setup, "exchange_urls", lambda: ("http://api.test", "http://mcp.test"))
+    engine, w = await _world()
+    try:
+        uid, _, org_id = await w.person(org=True, name="Owner")
+        agent = uuid.uuid4()
+        async with w.Session() as s:
+            s.add(Member(id=agent, org_id=org_id, type="agent", name="Made Agent", is_active=True))
+            await s.commit()
+        verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
+        challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+        r = await w.client.post("/api/v2/desktop/setup-codes", json={"challenge": challenge, "device_name": "mac 4771b"})
+        assert r.status_code == 201, r.text
+        body = r.json()
+        setup_id = uuid.UUID(body["setup_id"])
+        await w.sql(
+            "UPDATE desktop_setups SET org_id = :o, confirmed_by = :u, confirmed_at = now(), project_id = (SELECT id FROM projects WHERE org_id = :o LIMIT 1),"
+            " members = CAST(:m AS jsonb) WHERE id = :i",
+            o=org_id, u=uid, i=setup_id, m=f'[{{"stage": "Writer", "member_id": "{agent}", "kind": "agent", "runtime": "claude"}}]',
+        )
+        holder = w.Session()
+        async with holder:
+            await holder.execute(text("SELECT id FROM members WHERE id = :a FOR UPDATE"), {"a": agent})   # what an organization delete holds first
+            exchanging = asyncio.create_task(w.client.post("/api/v2/desktop/setup-codes/exchange", json={"code": body["code"], "verifier": verifier}))
+            await asyncio.sleep(1.5)
+            assert not exchanging.done(), "the exchange waits for the made agent's row"
+            try:
+                await holder.execute(text("SELECT id FROM desktop_setups WHERE id = :i FOR UPDATE"), {"i": setup_id})   # …and its next: the setup row
+                await holder.commit()
+            except DBAPIError as e:
+                await holder.rollback()
+                pytest.fail(f"deadlock between an exchange (setup row first) and a transaction that holds the made agent's row: {type(e.orig).__name__}")
+        resp = await asyncio.wait_for(exchanging, timeout=30)
+        assert resp.status_code == 200 and resp.json().get("device_token"), (resp.status_code, resp.text[:200])
+    finally:
+        await _close(engine, w)
+
+
 async def _round(w, rng: random.Random) -> dict:
     """One round of the lens' matrix on a fresh organization: the owner deletes the organization, the admin M (who confirmed a computer) deletes the account, the owner
     disconnects the computer and the owner revokes the key of its agent — all at once, each started after a random pause."""
     _, owner_email, org_id = await w.person(org=True, name="Owner")
     m = await w.add_member(org_id, role="admin", name="M")
+    await w.sql("UPDATE users SET last_org_id = :o WHERE id = :u", o=org_id, u=m)   # a sign-in leaves this behind: the final DELETE of the organization sets it NULL (a user row)
     comp = await _computer(w, org_id, m)
     name = await _org_name(w, org_id)
     key_id = await _live_value(w, "SELECT id FROM agent_api_keys WHERE desktop_setup_id = :i", i=comp["setup_id"])
