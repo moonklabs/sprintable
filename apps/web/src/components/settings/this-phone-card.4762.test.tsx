@@ -166,6 +166,8 @@ describe('[SID:4762] ThisPhoneCard — the phone\'s own check number', () => {
     for (const k of ['tabThisPhone', 'thisPhoneTitle', 'thisPhoneHint', 'thisPhoneReading', 'thisPhoneNoScreenLock', 'thisPhoneFailed', 'thisPhoneRetry'] as const) {
       expect(enMessages.settings[k], k).toBeTruthy();
       expect(koMessages.settings[k], k).toBeTruthy();
+      expect(enMessages.settings[k], k).not.toBe(k); // a raw key as the value would pass «truthy» and show the key on screen
+      expect(koMessages.settings[k], k).not.toBe(k);
     }
     await draw(async () => answer({ ok: false, code: 'no_screen_lock' }), { messages: enMessages as never, locale: 'en' });
     expect(q('this-phone-no-screen-lock')?.textContent).toBe(enMessages.settings.thisPhoneNoScreenLock);

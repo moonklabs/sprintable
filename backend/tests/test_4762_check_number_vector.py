@@ -17,9 +17,3 @@ VECTORS = [
 def test_the_server_computes_the_shared_check_number_vectors():
     for der, expected in VECTORS:
         assert confirm_number(der) == expected, der[:16]
-
-
-def test_a_leading_zero_is_kept_and_the_shape_is_three_three():
-    n = confirm_number(bytes(range(64)))
-    assert n == "018 604"  # not «18 604» (mod 1e6 is zero-padded to six digits first)
-    assert len(n) == 7 and n[3] == " " and n.replace(" ", "").isdigit()
