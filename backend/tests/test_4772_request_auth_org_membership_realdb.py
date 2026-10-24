@@ -4,6 +4,10 @@ Measured by the security lens (PR 5217, real PG, the real removal endpoint): wit
 (`_resolve_verified_org_id`) it trusted the JWT's `app_metadata.org_id` as it was — so a token naming the organization someone had just been removed from kept reading its people lists
 (team-members · members) until the access token expired, about an hour: the removal ends refresh tokens only.
 
+The judgement now lives in the request authentication itself (`get_current_user`, JWT and Firebase, the SSE variant too): a signed token's organization-scoped claims (`org_id` ·
+`project_id` · `project_ids` · `role`) are dropped from the request's view of the token when the person has no live seat in the organization it names — because ~12 routers read those
+claims themselves (not through `get_verified_org_id`), and `require_admin` read `role` from them.
+
 Real PG, the real endpoints. Pins:
   01 the removed person's OLD access token (taken before the removal, naming that organization): before the removal the reads answer 200; right after it team-members · members ·
      stories · projects answer 403 — no organization name, no people in the body — and the same person's other organization (a live seat) answers 200 for the token that names it;
@@ -133,6 +137,36 @@ async def test_02_the_refusal_comes_on_the_very_next_request_and_a_reseated_pers
         await w.sql("UPDATE members SET is_active = true WHERE org_id = :o AND user_id = :u", o=org_x, u=m)
         assert (await w.client.get("/api/v2/members", headers=H)).status_code == 200
         assert px
+    finally:
+        await _close(engine, w)
+
+
+async def test_02b_the_routes_that_read_the_claims_themselves_and_the_role_claim_are_closed_too():
+    """The probe on the first version of the fix found `GET /hitl/policy`, `GET /hitl/requests` and `GET /agent-routing-rules` answering 200 to the removed person's old token (they read
+    org_id and project_id from the claims themselves). With the judgement in the request authentication they answer 403, `require_admin` no longer sees `role: admin`, and the person's own
+    identity (`/auth/me`, `/me/memberships`) and a switch to an organization they are in still work."""
+    engine, w = await _world()
+    try:
+        owner_email, org_x, org_y, m, m_email, tok_x, tok_y = await _two_organizations(w)
+        probes = (
+            "/api/v2/hitl/policy", "/api/v2/hitl/requests", "/api/v2/agent-routing-rules", "/api/v2/agent-personas?agent_id=" + str(uuid.uuid4()),
+            "/api/v2/agent-deployments", "/api/v2/hitl/policy",
+        )
+        H = _bearer(tok_x)
+        before = {p: (await w.client.get(p, headers=H)).status_code for p in probes}
+        assert before["/api/v2/hitl/policy"] == 200 and before["/api/v2/agent-routing-rules"] == 200, before
+        assert (await _remove(w, owner_email, org_x, m)).status_code == 200
+        for p in probes:
+            r = await w.client.get(p, headers=H)
+            assert r.status_code in (400, 403), (p, r.status_code, r.text[:160])
+        # an admin-only route that reads `role` from the token: the removed admin is no longer an admin of anything
+        r = await w.client.get("/api/v2/org-members", headers=H)
+        assert r.status_code in (400, 403), r.status_code
+        # …but the person is still themselves
+        assert (await w.client.get("/api/v2/auth/me", headers=H)).status_code == 200
+        assert (await w.client.get("/api/v2/me/memberships", headers=H)).status_code == 200
+        r = await w.client.post("/api/v2/auth/switch-org", headers=H, json={"org_id": str(org_y), "refresh_token": tok_x.get("refresh_token")})
+        assert r.status_code == 200, r.text
     finally:
         await _close(engine, w)
 

@@ -1284,28 +1284,6 @@ def auth_ctx(org_id: uuid.UUID) -> MagicMock:
     return ctx
 
 
-@pytest.fixture(autouse=True)
-def _headerless_seat_check_for_made_up_principals(monkeypatch):
-    """story #4772 — the request authentication now asks for the live seat of the organization a SIGNED TOKEN names (`_verify_org_membership`, the judgement an `X-Org-Id` header
-    always got). A test that hands the app a made-up user with `app.dependency_overrides[get_current_user]` has no `org_members` row for it, and it is about a route's behaviour, not
-    about who may enter — so for exactly that case (a fake principal AND no `X-Org-Id` header) the seat check is stood in for. A request that carries the header, a test that does not
-    override the principal, and a test that patches `_verify_org_membership` itself keep the real judgement; the judgement is pinned on a real PG in
-    tests/test_4772_request_auth_org_membership_realdb.py."""
-    from app.dependencies import auth as auth_module
-
-    original = auth_module._verify_org_membership
-
-    async def _check(user_id, org_id, db, request):
-        if request is not None and not request.headers.get("x-org-id"):
-            from app.main import app
-
-            if auth_module.get_current_user in app.dependency_overrides:
-                return None
-        return await original(user_id, org_id, db, request)
-
-    monkeypatch.setattr(auth_module, "_verify_org_membership", _check)
-
-
 @pytest.fixture
 async def test_client(mock_session: AsyncMock, auth_ctx: MagicMock):
     """AsyncClient with mocked DB session + auth. Clears dependency_overrides on teardown."""

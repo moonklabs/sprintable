@@ -566,6 +566,38 @@ async def get_current_user(
     return auth
 
 
+_ORG_SCOPED_CLAIMS = ("org_id", "project_id", "project_ids", "role")
+
+
+async def _drop_org_claims_without_live_seat(payload: dict, user_id: str, db: AsyncSession, request: Request | None) -> None:
+    """story #4772 — the organization a SIGNED token names is only as good as the day it was signed: removing a member ends their refresh tokens and nothing else, so the access
+    token they already hold kept naming the organization — and ~12 routers read that claim themselves (`_get_org_project` and its copies), the `role` claim answered `require_admin`,
+    and `_resolve_verified_org_id` took it without a header — until the token expired, about an hour. The request authentication is the one place every route goes through, so the
+    judgement lives here: if the token names an organization the person has no live seat in (`org_members.deleted_at IS NULL`; an organization that was deleted has its seats ended
+    with it), the organization-scoped claims are dropped from THIS request's view of the token (`org_id` · `project_id` · `project_ids` · `role`) and `org_left` says why, so a route
+    that needs an organization answers 403 (`_resolve_verified_org_id`) or «org_id required», and the person's identity (`/auth/me`, a switch to an organization they are in, a
+    fresh login) still works. The answer is the seat lookup `_verify_org_membership` keeps on `request.state` for this request only, so a removal is seen by the very next request.
+    Not applied to the keys: an agent key and a person's own API key read their organization from their member row in the request itself."""
+    meta = payload.get("app_metadata")
+    if not isinstance(meta, dict):
+        return
+    raw = meta.get("org_id")
+    if not raw or meta.get("api_key_id") or meta.get("human_api_key_id"):
+        return
+    try:
+        org_id = uuid.UUID(str(raw))
+    except ValueError:
+        return
+    try:
+        await _verify_org_membership(str(user_id), org_id, db, request)
+    except HTTPException as e:
+        if e.status_code != status.HTTP_403_FORBIDDEN:
+            raise
+        for claim in _ORG_SCOPED_CLAIMS:
+            meta.pop(claim, None)
+        meta["org_left"] = str(org_id)
+
+
 async def _resolve_current_user_auth_context(
     credentials: HTTPAuthorizationCredentials | None,
     x_agent_api_key: str | None,
@@ -603,11 +635,15 @@ async def _resolve_current_user_auth_context(
 
     if _settings.firebase_auth_accept_session and looks_like_rs256(token):
         async with async_session_factory() as db:
-            return await _resolve_firebase_session(token, db)
+            ctx = await _resolve_firebase_session(token, db)
+            await _drop_org_claims_without_live_seat(ctx.claims, ctx.user_id, db, request)
+            ctx.org_id = (ctx.claims.get("app_metadata") or {}).get("org_id")
+            return ctx
 
     # JWT 경로 (기존) — story 4725: 서명·타입·sub·cut-off는 verify_access_token 한 곳
     async with async_session_factory() as db:
         payload = await verify_access_token(token, db)
+        await _drop_org_claims_without_live_seat(payload, str(payload["sub"]), db, request)
     user_id: str = payload["sub"]
 
     org_id: str | None = payload.get("app_metadata", {}).get("org_id")
@@ -763,6 +799,9 @@ async def _resolve_verified_org_id(
     # X-Org-Id 헤더 우선 — org 전환 프리뷰(unified-switcher) 지원. 항상 membership 검증.
     raw = x_org_id or jwt_org_id
     if not raw:
+        if auth.claims.get("app_metadata", {}).get("org_left"):
+            # story #4772: the token names an organization the person no longer has a live seat in (dropped by the request authentication) — the same 403 a header gets
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="해당 조직의 멤버가 아닌")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="org_id required (X-Org-Id header or JWT app_metadata)",
@@ -772,12 +811,8 @@ async def _resolve_verified_org_id(
     except ValueError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid org_id format")
 
-    # story #4772 — the organization named in a SIGNED token (a JWT, a Firebase session) can be old: the removal of a member ends their refresh tokens and nothing else, so the
-    # access token they already hold kept naming the organization (and the people lists answered 200) until it expired, about an hour. So the judgement is one for every way the
-    # organization is named — the header or the token — and the answer is the live seat now (`org_members.deleted_at IS NULL`; an organization that was deleted has its seats
-    # ended with it). Not asked again: an agent key (`api_key_id`) — its organization is read from its member row in this very request, never from a claim that can be old.
-    # The answer is kept for this request only (`request.state`), so a removal is seen by the very next request.
-    if x_org_id or not auth.claims.get("app_metadata", {}).get("api_key_id"):
+    if x_org_id:
+        # 헤더 사용 시 항상 membership 검증 (JWT org_id와 다를 수 있음)
         async with async_session_factory() as db:
             await _verify_org_membership(auth.user_id, org_id, db, request)
 
@@ -1163,11 +1198,15 @@ async def get_current_user_streaming(
 
     if _settings.firebase_auth_accept_session and looks_like_rs256(token):
         async with async_session_factory() as db:
-            return await _resolve_firebase_session(token, db)
+            ctx = await _resolve_firebase_session(token, db)
+            await _drop_org_claims_without_live_seat(ctx.claims, ctx.user_id, db, request)  # story #4772 — as in get_current_user
+            ctx.org_id = (ctx.claims.get("app_metadata") or {}).get("org_id")
+            return ctx
 
     # 단명 세션(async with)만 열고 즉시 close(스트림 yield 구간 미점유 유지) — story 4725: 서명·타입·sub·cut-off는 verify_access_token 한 곳
     async with async_session_factory() as db:
         payload = await verify_access_token(token, db)
+        await _drop_org_claims_without_live_seat(payload, str(payload["sub"]), db, request)  # story #4772 — as in get_current_user (the seat lookup uses this short session)
     user_id = payload["sub"]
 
     return AuthContext(
