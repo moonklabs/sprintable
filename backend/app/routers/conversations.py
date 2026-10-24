@@ -827,6 +827,7 @@ async def _dispatch_conversation_event(
     exclude_ids: set[uuid.UUID] | None = None,
     webhook_covered_ids: set[uuid.UUID] | None = None,
     references: list[dict[str, str]] | None = None,
+    wake_required: set[uuid.UUID] | None = None,
 ) -> list[tuple[str, dict]]:
     """conversation:message → Event INSERT + flush. push 페이로드 반환 (commit 후 호출).
 
@@ -838,6 +839,8 @@ async def _dispatch_conversation_event(
         send_message가 insert_chat_mentions 직후 같은 트랜잭션에서 fetch_stored_references로
         해소해 넘긴다. None이면 기존 동작(키 자체 없음) 무변경 — 이 함수의 다른 잠재 호출부를
         회귀시키지 않는다.
+    wake_required: story #4761 — 넘기면 «이 메시지가 스스로는 닿지 않는» 에이전트(웹훅 대상도 아니고 살아 있는 게이트웨이
+        스트림도 없음 = 맨 호스팅 MCP)의 member id가 여기에 담긴다. 그런 에이전트에겐 «입력 중»(set_working)을 켜지 않는다.
     반환값: [(pid_str, payload)] — db.commit() 완료 후 _push_to_agent() 호출용.
     """
     if not conversation.project_id:
@@ -897,13 +900,21 @@ async def _dispatch_conversation_event(
 
     events_to_push: list[tuple[str, Event]] = []
     _set_working_any = False
+    # story #4761 (D3): «입력 중» only for an agent the message really reaches (webhook · live gateway stream). The bare hosted
+    # MCP reads Sprintable only while calling a tool — nothing starts it, so «typing» for it was false for the whole TTL.
+    _agent_pids = {pid for pid in participant_ids if member_type_map.get(pid, "human") == "agent"}
+    from app.services.agent_push_reach import push_reachable_agent_ids
+
+    _reached = await push_reachable_agent_ids(db, _agent_pids, webhook_covered=webhook_covered)
+    if wake_required is not None:
+        wake_required |= _agent_pids - _reached
     for pid in sorted(participant_ids):  # deadlock 방지: 일관 락 순서
         m_type = member_type_map.get(pid, "human")
         is_agent = m_type == "agent"
         # 1aeecdde P2: agent recipient 에게 메시지가 dispatch = 답장 생성 시작 → working emit.
         # 그 agent 가 reply 를 보내면 send_message 에서 clear, 안 보내면 TTL 자동 소멸(ephemeral).
         # webhook-covered agent 도 webhook 으로 받아 답장하므로 working 표시는 유지한다.
-        if is_agent:
+        if is_agent and pid in _reached:
             await chat_presence.set_working(str(conversation.id), str(pid))
             _set_working_any = True
         # webhook-covered agent → SSE Event/seq/push 스킵(이중수신 박멸). human Event 는 무변경
@@ -3106,6 +3117,7 @@ async def send_message_core(
     webhook_covered_ids = {t.member_id for t in webhook_targets if t.member_id is not None}
 
     pending_sse_pushes: list[tuple[str, dict]] = []
+    agents_to_wake: set[uuid.UUID] = set()  # story #4761 (D3): agent recipients no push reaches — the sender is told
     try:
         async with db.begin_nested():
             pending_sse_pushes += await _dispatch_conversation_event(
@@ -3113,6 +3125,7 @@ async def send_message_core(
                 exclude_ids=discord_exclude_ids | blocked_agent_ids | user_blocker_ids | preference_excluded_ids,
                 webhook_covered_ids=webhook_covered_ids,
                 references=msg_references,
+                wake_required=agents_to_wake,
             )
     except Exception as _dispatch_err:
         # dispatch 실패를 삼키지 않고 surface — 게이트웨이 이벤트 미생성 무음 방지
@@ -3489,6 +3502,13 @@ async def send_message_core(
     # story #4430 — the participants a block kept this message from (a count · a closed reason); absent when none.
     if withheld_delivery:
         response["delivery"] = withheld_delivery
+    # story #4761 (D3): the agents this message reaches only when someone makes them look (no webhook · no live stream) — machine
+    # fields only (the screen words it); to the sender only, it is the answer to the send and nothing a reader gets.
+    if agents_to_wake and sender.type != "agent":
+        _wake_rows = (await db.execute(
+            select(TeamMember.id, TeamMember.name).where(TeamMember.id.in_(agents_to_wake)).order_by(TeamMember.name, TeamMember.id)
+        )).all()
+        response["agent_wake"] = {"required": [{"member_id": str(r[0]), "name": r[1]} for r in _wake_rows]}
     # E-CHAT-CMD S4: 미지원 런타임으로 차단된 커맨드의 hint 를 발신자에게 반환(AC3 hint response).
     if command_hints:
         response["command_gate"] = {"blocked": command_hints}

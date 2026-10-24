@@ -10,6 +10,8 @@ import { ChatBubble } from './chat-bubble';
 import { ConnectionLostBanner } from './connection-lost-banner';
 import type { PresenceStatus } from './presence-dot';
 import { CommandHintNotice, type BlockedHint } from './command-hint-notice';
+import { AgentWakeNotice } from './agent-wake-notice';
+import { agentsStillToWake } from '@/lib/chat/agent-wake';
 import { ReferenceDropNotice, parseDroppedReferences, type DroppedReference } from './reference-drop-notice';
 import { ChatInput, type CommandTarget } from './chat-input';
 import { ThreadPanel } from './thread-panel';
@@ -1093,6 +1095,13 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                                   : { kind: 'start', onSelect: () => citeSelection.startSelection(msg.id) }
                             }
                           />
+                          {/* story #4761 (D3): 내가 방금 보낸 메시지가 스스로는 못 닿는 에이전트(맨 호스팅 MCP)로 갈 때 — «입력 중» 대신
+                              사실과 할 일. 그 에이전트가 이 뒤로 한 마디라도 하면 줄이 사라진다. */}
+                          {msg.agent_wake && msg.created_by === currentTeamMemberId && (
+                            <AgentWakeNotice
+                              targets={agentsStillToWake(msg.agent_wake, messages.slice(messages.findIndex((m) => m.id === msg.id) + 1))}
+                            />
+                          )}
                           {/* S5: 트리거 메시지 직후 차단 hint notice(차단 에이전트별 1건) */}
                           {commandHints[msg.id]?.map((h) => (
                             <CommandHintNotice key={h.agent_id} hint={h} />

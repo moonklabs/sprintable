@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSseMultiplexerContext, useSseConnectedContext } from '@/components/realtime-provider';
 import { shouldSuppressDuplicateSseEvent, createSeenIdTracker } from '@/lib/realtime/sse-event-dedup';
 import { createPollBackoffState, POLL_THRESHOLD_MS } from '@/lib/realtime/sse-polling-fallback';
+import { parseAgentWake, type AgentWake } from '@/lib/chat/agent-wake';
 
 // chat-attach: 메시지 전송 시 첨부 메타 (BE MessageAttachment 계약과 동일).
 export interface SendAttachment {
@@ -58,6 +59,8 @@ export interface ChatMessage {
   is_blocked_sender?: boolean;
   // story #4430 — participants a block kept this message from (a count, never who) · sent by the server to the sender only
   delivery_withheld?: DeliveryWithheld;
+  // story #4761 (D3) — the agents this message reaches only when someone makes them look · in the send answer to the sender only
+  agent_wake?: AgentWake;
   /** story #2604 P2 — BE(#3007)가 msg_metadata['approval_target']를 payload top-level에
    * additive로 노출(`_approval_payload`, `_activation_payload`와 동형). 있으면 결재 카드를
    * 렌더한다 — 없으면(구 메시지·approval_target 없는 일반 메시지) 항상 `null`(옛 서버는 키
@@ -190,7 +193,9 @@ export function sentMessageFromAnswer(raw: Record<string, unknown>): ChatMessage
   rememberSentHere(typeof payload.id === 'string' ? payload.id : null); // story #4440 — its echo is dropped here
   for (const listener of [...sentHereListeners]) listener(payload); // story #4442 — this tab's lists update their row
   const delivery = parseDeliveryWithheld(raw.delivery);
-  return normalizeToMessage(delivery ? { ...payload, delivery_withheld: delivery } : payload);
+  const wake = parseAgentWake(raw.agent_wake); // story #4761 (D3) — a sibling of `data` too, like `delivery`
+  const msg = normalizeToMessage(delivery ? { ...payload, delivery_withheld: delivery } : payload);
+  return wake ? { ...msg, agent_wake: wake } : msg;
 }
 
 // Normalize backend _to_chat_message format → ChatMessage

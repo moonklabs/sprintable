@@ -244,7 +244,7 @@ vi.mock('@/hooks/use-sse-notifications', () => ({
   useSseNotifications: vi.fn(),
 }));
 
-describe('useVerificationRail — story #2467 respec (SSE push가 재조회를 트리거·polling 아님)', () => {
+describe('useVerificationRail — story #2467 respec (SSE push가 재조회를 «즉시» 트리거 · story #4761 이후엔 짧은 폴링이 보조)', () => {
   const opts = { agentId: 'a1', transport: 'stdio' as const, enabled: true, configCopiedDone: false };
 
   beforeEach(() => {
@@ -256,7 +256,7 @@ describe('useVerificationRail — story #2467 respec (SSE push가 재조회를 �
     vi.restoreAllMocks();
   });
 
-  it('시간만 흘러선 재조회가 안 늘어난다(반복 타이머 없음) — SSE push가 와야 늘어난다', async () => {
+  it('SSE push가 오면 그 즉시 단발 재조회 1회 — 다른 agent_id의 신호는 무시(story #4761: 시간 경과 재조회는 verify-rail.4761.test.tsx)', async () => {
     const { useSseNotifications } = await import('@/hooks/use-sse-notifications');
     let capturedOnExtraEvent: ((eventName: string, data: unknown) => void) | undefined;
     (useSseNotifications as unknown as ReturnType<typeof vi.fn>).mockImplementation(
@@ -277,10 +277,6 @@ describe('useVerificationRail — story #2467 respec (SSE push가 재조회를 �
 
     const callsAfterMount = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.length;
     expect(callsAfterMount).toBeGreaterThan(0); // 마운트 1회 스냅샷
-
-    // 시간만 30초 흘려도(과거 2.5s 폴링이면 12번 더 늘었을 시간) 추가 fetch 없음.
-    act(() => { vi.advanceTimersByTime(30_000); });
-    expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(callsAfterMount);
 
     // SSE push 도착(mock onExtraEvent 직접 호출) → 그 즉시 단발 재조회 1회.
     act(() => { capturedOnExtraEvent?.('onboarding.rail_signal', { agent_id: 'a1', state: 'mcp_reachable' }); });
