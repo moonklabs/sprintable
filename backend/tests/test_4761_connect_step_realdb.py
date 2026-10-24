@@ -290,13 +290,37 @@ async def test_06e_a_row_whose_org_was_never_resolved_is_this_keys_call_all_the_
         await engine.dispose()
 
 
-def test_07_nothing_in_app_deletes_from_the_usage_ledger():
-    """The latch reads the first row of a key. A retention job that cleared old rows would let it go for a key in use for long —
-    this is the guard that says so before anyone adds one."""
-    root = Path(__file__).resolve().parents[1] / "app"
-    pat = re.compile(r"DELETE\s+FROM\s+agent_api_key_usage_logs|TRUNCATE[^;\n]*agent_api_key_usage_logs|delete\(\s*AgentApiKeyUsageLog", re.I)
-    hits = [str(p.relative_to(root)) for p in root.rglob("*.py") if pat.search(p.read_text(encoding="utf-8"))]
-    assert hits == [], f"the key-usage ledger is append-only (4761 latch reads its first row): {hits}"
+def test_07_the_usage_ledger_is_named_only_by_the_files_that_read_and_write_it():
+    """The latch reads the first row of a key. A retention job that cleared old rows would let it go for a key in use for long.
+    A guard that looks for spellings of a delete misses the ones it did not think of (a schema-qualified or quoted name, an alias,
+    `__table__.delete()`, `query(...).delete()`, a split string — and `ee/`, which the first guard never walked). So the property is
+    held by NAME: across `app/` and `ee/`, the ledger may be named only by the four files that read or write it — a new reference
+    to it has to be read by a person here first. (Kadir's lens on 5199.)"""
+    backend = Path(__file__).resolve().parents[1]
+    allowed = {
+        "app/models/agent_api_key_usage_log.py", "app/models/__init__.py",
+        "app/services/agent_api_key_usage.py", "app/services/agent_verify.py",
+    }
+    names = ("agent_api_key_usage_logs", "AgentApiKeyUsageLog")
+    deletes = re.compile(r"DELETE|TRUNCATE|\.delete\(|\bdelete\(|\bDROP\b", re.I)
+    hits: list[str] = []
+    for top in ("app", "ee"):
+        root = backend / top
+        if not root.exists():
+            continue
+        for p in root.rglob("*.py"):
+            text = p.read_text(encoding="utf-8")
+            if not any(n in text for n in names):
+                continue
+            rel = p.relative_to(backend).as_posix()
+            if rel not in allowed:
+                hits.append(rel)
+            elif rel in ("app/services/agent_verify.py", "app/services/agent_api_key_usage.py"):
+                # the two services that may name it must not delete from it either
+                near = [m for m in deletes.finditer(text) if any(n in text[max(0, m.start() - 200): m.end() + 200] for n in names)]
+                if near:
+                    hits.append(f"{rel} (a delete next to the ledger)")
+    assert hits == [], f"the key-usage ledger is append-only (the 4761 latch reads its first row) — new references: {hits}"
 
 
 # ── D3 — «typing» only where a message reaches; the rest is told ─────────────
@@ -507,5 +531,39 @@ async def test_17_a_failed_reachability_read_never_costs_the_message(monkeypatch
         assert r.status_code == 201, r.text
         assert "agent_wake" not in r.json()
         assert await _working(conv) == [str(agent)]
+    finally:
+        await engine.dispose()
+
+
+@_realdb
+async def test_18_a_failed_read_of_the_agent_names_never_turns_the_answer_into_an_error(monkeypatch):
+    """Kadir's lens: the read that names the agents for `agent_wake` runs after the commit. If it fails the message is already stored
+    and delivered — the sender must still get its 201 (no `agent_wake`), or the retry the client offers sends the same message twice."""
+    from sqlalchemy import func, select
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.models.conversation import ConversationMessage
+
+    engine, Session = await _session_factory()
+    try:
+        org_id, human_user, agent, conv = await _dm_with_agent(Session)
+        real = AsyncSession.execute
+        hits = {"n": 0}
+
+        async def flaky(self, stmt, *a, **k):
+            if "ORDER BY team_members.name, team_members.id" in str(stmt):
+                hits["n"] += 1
+                raise RuntimeError("db blip")
+            return await real(self, stmt, *a, **k)
+
+        monkeypatch.setattr(AsyncSession, "execute", flaky)
+        r = await _send(Session, org_id, human_user, conv)
+        monkeypatch.setattr(AsyncSession, "execute", real)
+        assert hits["n"] >= 1  # the read really ran and failed
+        assert r.status_code == 201, r.text
+        assert "agent_wake" not in r.json()
+        async with Session() as s:
+            stored = (await s.execute(select(func.count()).select_from(ConversationMessage).where(ConversationMessage.conversation_id == conv))).scalar_one()
+        assert stored == 1  # once
     finally:
         await engine.dispose()

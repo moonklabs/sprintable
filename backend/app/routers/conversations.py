@@ -3531,10 +3531,15 @@ async def send_message_core(
     # story #4761 (D3): the agents this message reaches only when someone makes them look (no webhook · no live stream) — machine
     # fields only (the screen words it); to the sender only, it is the answer to the send and nothing a reader gets.
     if agents_to_wake and sender.type != "agent":
-        _wake_rows = (await db.execute(
-            select(TeamMember.id, TeamMember.name).where(TeamMember.id.in_(agents_to_wake)).order_by(TeamMember.name, TeamMember.id)
-        )).all()
-        response["agent_wake"] = {"required": [{"member_id": str(r[0]), "name": r[1]} for r in _wake_rows]}
+        # this runs AFTER the commit — the message is stored and delivered. A failed read of the names must not turn the sender's
+        # answer into a 500 (the client would offer a retry and the same message would go out twice): answer without `agent_wake`.
+        try:
+            _wake_rows = (await db.execute(
+                select(TeamMember.id, TeamMember.name).where(TeamMember.id.in_(agents_to_wake)).order_by(TeamMember.name, TeamMember.id)
+            )).all()
+            response["agent_wake"] = {"required": [{"member_id": str(r[0]), "name": r[1]} for r in _wake_rows]}
+        except Exception:
+            logger.warning("agent_wake names read failed conversation_id=%s — answered without it", conversation_id, exc_info=True)
     # E-CHAT-CMD S4: 미지원 런타임으로 차단된 커맨드의 hint 를 발신자에게 반환(AC3 hint response).
     if command_hints:
         response["command_gate"] = {"blocked": command_hints}
