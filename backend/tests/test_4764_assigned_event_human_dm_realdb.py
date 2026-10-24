@@ -79,11 +79,16 @@ async def _seed_human(session, org_id, project_id, *, name):
     return m.id
 
 
-async def _seed_agent(session, org_id, project_id, *, name):
+async def _seed_agent(session, org_id, project_id, *, name, owner_member_id=None, policy=None):
+    """`owner_member_id` = the person who created the agent (the creator_only policy lets exactly them in); `policy` = the
+    agent's `message_policy_mode` (default creator_only)."""
     from app.models.member import Member
     from app.models.project_access import ProjectAccess
 
-    a = Member(id=uuid.uuid4(), org_id=org_id, type="agent", name=name, runtime_type="claude_code", is_active=True)
+    a = Member(
+        id=uuid.uuid4(), org_id=org_id, type="agent", name=name, runtime_type="claude_code", is_active=True,
+        owner_member_id=owner_member_id, **({"message_policy_mode": policy} if policy else {}),
+    )
     session.add(a)
     await session.commit()
     session.add(ProjectAccess(
@@ -192,7 +197,7 @@ async def test_human_assigns_agent_event_lands_in_their_dm_once():
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             human = await _seed_human(s, org_id, project_id, name="human")
-            agent = await _seed_agent(s, org_id, project_id, name="agent")
+            agent = await _seed_agent(s, org_id, project_id, name="agent", owner_member_id=human)
             story_id = await _seed_story(s, org_id, project_id, assignee_id=agent)
 
         await _publish(Session, org_id, "preset.work.assigned", _assigned_payload(story_id, agent, human))
@@ -218,7 +223,7 @@ async def test_existing_dm_of_the_pair_is_reused_not_duplicated():
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             human = await _seed_human(s, org_id, project_id, name="human")
-            agent = await _seed_agent(s, org_id, project_id, name="agent")
+            agent = await _seed_agent(s, org_id, project_id, name="agent", owner_member_id=human)
             story_id = await _seed_story(s, org_id, project_id, assignee_id=agent)
             app_dm = await _seed_dm(s, org_id, project_id, human, agent)  # the «me <-> agent» DM the app opened
 
@@ -238,7 +243,7 @@ async def test_human_owner_who_is_the_assigner_changes_nothing():
         async with Session() as s:
             org_id, project_id = await _seed_org(s)
             human = await _seed_human(s, org_id, project_id, name="human")
-            agent = await _seed_agent(s, org_id, project_id, name="agent")
+            agent = await _seed_agent(s, org_id, project_id, name="agent", owner_member_id=human)
             story_id = await _seed_story(s, org_id, project_id, assignee_id=agent, human_owner_member_id=human)
 
         await _publish(Session, org_id, "preset.work.assigned", _assigned_payload(story_id, agent, human))
@@ -385,5 +390,101 @@ async def test_the_system_publisher_as_assignee_is_not_given_a_persons_dm():
 
         got = await _delivery(Session, org_id, story_id)
         assert len(got) == 1 and human not in got[0]["participants"], got
+    finally:
+        await engine.dispose()
+
+
+async def test_an_assigner_the_agents_message_policy_refuses_gets_no_dm():
+    """Security lens 4764 (Kadir): a person may open a DM with an agent only if the owner's message policy lets them in
+    (`_enforce_agent_creator_policy` — creator_only by default). The system-made DM must not be a way around it: an assigner the policy
+    refuses keeps today's path {system publisher, agent}, and is in nobody's DM with the agent."""
+    from sqlalchemy import select
+
+    from app.models.conversation import ConversationParticipant
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human = await _seed_human(s, org_id, project_id, name="stranger")
+            owner = await _seed_human(s, org_id, project_id, name="owner")
+            agent = await _seed_agent(s, org_id, project_id, name="agent", owner_member_id=owner)  # creator_only, not the assigner
+            story_id = await _seed_story(s, org_id, project_id, assignee_id=agent)
+
+        await _publish(Session, org_id, "preset.work.assigned", _assigned_payload(story_id, agent, human))
+
+        got = await _delivery(Session, org_id, story_id)
+        system_id = await _system_publisher_id(Session, org_id)
+        assert len(got) == 1 and got[0]["participants"] == {system_id, agent}, got
+        async with Session() as s:
+            mine = (await s.execute(
+                select(ConversationParticipant.conversation_id).where(ConversationParticipant.member_id == human)
+            )).scalars().all()
+        assert mine == [], "the refused assigner is in no conversation at all"
+    finally:
+        await engine.dispose()
+
+
+async def test_an_org_wide_agent_lets_any_assigner_have_the_dm():
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human = await _seed_human(s, org_id, project_id, name="human")
+            owner = await _seed_human(s, org_id, project_id, name="owner")
+            agent = await _seed_agent(s, org_id, project_id, name="agent", owner_member_id=owner, policy="org_wide")
+            story_id = await _seed_story(s, org_id, project_id, assignee_id=agent)
+
+        await _publish(Session, org_id, "preset.work.assigned", _assigned_payload(story_id, agent, human))
+
+        got = await _delivery(Session, org_id, story_id)
+        assert len(got) == 1 and got[0]["participants"] == {human, agent}, got
+    finally:
+        await engine.dispose()
+
+
+async def test_the_real_system_publisher_needs_the_servers_after_commit_list_too():
+    """The pin (Kadir ②): `as_system_publisher=True` is honoured only with BOTH conditions — the system publisher's own runtime type AND
+    the server's `after_commit` list. The real system publisher without the list is refused; with it, the post goes in and the DM stays
+    the two of them."""
+    from fastapi import BackgroundTasks, HTTPException
+    from sqlalchemy import select
+
+    from app.dependencies.auth import AuthContext
+    from app.models.conversation import ConversationParticipant
+    from app.routers.conversations import SendMessageRequest, send_message_core
+    from app.routers.events import _get_or_create_system_publisher
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            human = await _seed_human(s, org_id, project_id, name="human")
+            agent = await _seed_agent(s, org_id, project_id, name="agent", owner_member_id=human)
+            system_id = (await _get_or_create_system_publisher(s, org_id)).id
+            await s.commit()
+            dm = await _seed_dm(s, org_id, project_id, human, agent)
+
+        async def _post(*, with_after_commit):
+            async with Session() as s:
+                auth = AuthContext(
+                    user_id=str(system_id), email=None,
+                    claims={"app_metadata": {"api_key_id": "system-publisher"}}, org_id=str(org_id),
+                )
+                return await send_message_core(
+                    dm, SendMessageRequest(content="event"), BackgroundTasks(), db=s, auth=auth, org_id=org_id,
+                    after_commit=[] if with_after_commit else None, as_system_publisher=True,
+                )
+
+        with pytest.raises(HTTPException) as exc:
+            await _post(with_after_commit=False)
+        assert exc.value.status_code == 403
+
+        await _post(with_after_commit=True)
+        async with Session() as s:
+            parts = set((await s.execute(
+                select(ConversationParticipant.member_id).where(ConversationParticipant.conversation_id == dm)
+            )).scalars().all())
+        assert parts == {human, agent}, "posting did not make the system publisher a participant"
     finally:
         await engine.dispose()

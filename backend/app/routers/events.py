@@ -1167,6 +1167,17 @@ async def _assigner_agent_dm_pair(
     human, agent = members.get(assigned_by), members.get(assignee)
     if human is None or agent is None or human.type != "human" or agent.type != "agent":
         return None
+    # The DM is a channel the person can then write into, so the agent owner's message policy (`_enforce_agent_creator_policy`:
+    # creator_only by default · list · org_wide) decides whether they may have it — the same check that refuses them a DM they open
+    # themselves. Refused → today's path (the person is in nobody's DM with the agent, as before this story). Security lens 4764.
+    from types import SimpleNamespace
+
+    from app.routers.conversations import _enforce_agent_creator_policy
+
+    try:
+        await _enforce_agent_creator_policy(SimpleNamespace(id=assigned_by, user_id=human.user_id), [assignee], db)
+    except HTTPException:
+        return None
     return assigned_by, assignee
 
 
