@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FETCH_WITH_AUTH_DEFAULT_TIMEOUT_MS, fetchWithAuth, loginWithPassword, refreshAuthTokens } from './client';
 import { fetchMe } from '@/lib/me-client';
+import { invalidateMeCache } from '@/lib/auth/me-invalidation';
 import { isSessionExpiredSignaled, resetSessionExpired, signalSessionExpired } from '@/lib/auth/session-expired-signal';
 
 beforeEach(() => {
@@ -191,6 +192,20 @@ describe('callAuthRoute → notifySessionChanged 브릿지(story #3302 AC1/AC3)'
     vi.stubGlobal('fetch', vi.fn(async () => okAuthResponse()));
     await refreshAuthTokens();
     expect(postMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('story #4762 — 회전(refresh)이 성공하면 저장해 둔 /me 응답도 버린다: 다음 fetchMe()는 새로 묻는다(새 토큰의 org 클레임으로 읽어야 하므로)', async () => {
+    invalidateMeCache();
+    resetSessionExpired();
+    const fetchMock = vi.fn(async (url: string) => (String(url).includes('/api/auth/refresh') ? okAuthResponse() : new Response(JSON.stringify({ data: { id: 'm-1' } }), { status: 200 })));
+    vi.stubGlobal('fetch', fetchMock);
+    const meCalls = () => fetchMock.mock.calls.filter((c) => String(c[0]).includes('/api/me')).length;
+    await fetchMe();
+    await fetchMe();
+    expect(meCalls()).toBe(1); // the second answer came from the stored one
+    await refreshAuthTokens();
+    await fetchMe();
+    expect(meCalls()).toBe(2); // the rotation dropped it (reverted: still 1)
   });
 
   it('실패(401 등) 응답이면 셸에 아무것도 안 보낸다', async () => {

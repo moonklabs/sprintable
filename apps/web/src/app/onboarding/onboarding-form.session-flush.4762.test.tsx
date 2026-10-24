@@ -70,6 +70,32 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
     expect(vi.mocked(fetch).mock.invocationCallOrder[refreshAt]!).toBeLessThan(post.mock.invocationCallOrder[0]!);
   });
 
+  it('the shell hears nothing while the rotation is still in flight — only once the server has answered (it must not flush the old cookie)', async () => {
+    let release!: () => void;
+    refreshAnswer = () => new Promise((resolve) => { release = () => resolve({ ok: true, json: async () => ({}) }); });
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <OnboardingForm todayHref="/today" chatsHref="/chats" />
+        </NextIntlClientProvider>,
+      );
+    });
+    await flush();
+    expect(vi.mocked(fetch).mock.calls.some((c) => c[0] === '/api/auth/refresh')).toBe(true); // the rotation was sent …
+    expect(post).not.toHaveBeenCalled(); // … and is not answered yet: nothing to the shell
+    await act(async () => { release(); for (let i = 0; i < 16; i++) await Promise.resolve(); });
+    expect(post.mock.calls.map((c) => (JSON.parse(c[0] as string) as { type: string }).type)).toEqual(['session-changed']); // answered → exactly one message
+  });
+
+  it('on the leaving path the rotation comes BEFORE the page change (a navigation first would drop the message together with the page)', () => {
+    const form = readFileSync(resolve(__dirname, 'onboarding-form.tsx'), 'utf8');
+    const at = form.indexOf('const finishToHome = async () => {');
+    expect(at).toBeGreaterThan(-1);
+    const body = form.slice(at, form.indexOf('\n  };', at));
+    expect(body.indexOf('await refreshAuthTokens()')).toBeGreaterThan(-1);
+    expect(body.indexOf('await refreshAuthTokens()')).toBeLessThan(body.indexOf('window.location.href'));
+  });
+
   it('both rotations of the form (after the organization is made · before leaving) go through refreshAuthTokens — no bare `/api/auth/refresh` fetch is left in the form', () => {
     const form = readFileSync(resolve(__dirname, 'onboarding-form.tsx'), 'utf8');
     expect(form).not.toMatch(/fetch\(\s*'\/api\/auth\/refresh'/); // reverted (a bare fetch) → the shell is never told
