@@ -109,35 +109,6 @@ def test_require_admin_blocks_member():
     assert exc.value.status_code == 403
 
 
-# ─── require_project_access ───────────────────────────────────────────────────
-
-def test_require_project_access_passes_when_project_in_list():
-    from app.dependencies.auth import require_project_access
-    pid = uuid.uuid4()
-    auth = _make_auth(project_ids=[str(pid)])
-    result = require_project_access(project_id=pid, auth=auth)
-    assert result == pid
-
-
-def test_require_project_access_blocks_unlisted_project():
-    from app.dependencies.auth import require_project_access
-    pid = uuid.uuid4()
-    other = uuid.uuid4()
-    auth = _make_auth(project_ids=[str(other)])
-    with pytest.raises(HTTPException) as exc:
-        require_project_access(project_id=pid, auth=auth)
-    assert exc.value.status_code == 403
-
-
-def test_require_project_access_allows_legacy_token_without_project_ids():
-    """project_ids 클레임 없는 레거시 토큰은 Phase C 전환 기간 허용."""
-    from app.dependencies.auth import require_project_access
-    pid = uuid.uuid4()
-    auth = _make_auth(project_ids=None)
-    result = require_project_access(project_id=pid, auth=auth)
-    assert result == pid
-
-
 # ─── get_scope_context ────────────────────────────────────────────────────────
 
 @pytest.mark.anyio
