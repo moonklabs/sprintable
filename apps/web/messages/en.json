@@ -1734,7 +1734,7 @@
       },
       "noMac": {
         "title": "Agents run on your Mac",
-        "body": "Get the app on your Mac, sign in with the same account and pair this phone — then you can answer, stop and instruct agents from here.",
+        "body": "Get the app on your Mac, sign in with the same account, start an agent there and pair this phone — then you can answer, stop and instruct agents from here.",
         "pair": "I already have the app on my Mac — pair",
         "mail": "Email me a link to open on my Mac",
         "mailSending": "Sending…",
