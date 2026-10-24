@@ -26,7 +26,9 @@ from app.models.conversation import Conversation, ConversationMessage, Conversat
 from app.models.project import OrgMember
 from app.models.team import TeamMember
 from app.services.member_resolver import resolve_member_display_name
+from app.services.conversation_auth import socket_can_read_conversation
 from app.services.pg_pubsub import fire_and_forget
+from app.services.project_auth import has_project_access
 from app.services.stream_access import AccessRecheck
 
 logger = logging.getLogger(__name__)
@@ -37,6 +39,22 @@ _rooms: dict[str, set[WebSocket]] = defaultdict(set)
 
 
 @dataclass(frozen=True)
+class _SocketIdent:
+    """story #4775 — who a socket's owner is, for the one question a broadcast asks of every receiver: «may this one be sent a line of
+    THAT conversation?» (`conversation_auth.socket_can_read_conversation` — REST's own rule). `member_id` is what the participants table
+    holds, `access_user_id` what the project-access rule takes (a person's user id · an agent key's member id), `via_agent_key` picks the
+    agent flavour of the admin-bypass atom."""
+    member_id: uuid.UUID
+    access_user_id: uuid.UUID
+    org_id: uuid.UUID
+    via_agent_key: bool
+
+
+# socket → its owner. A socket without an entry is never sent a conversation line (nothing is assumed about a socket nobody vouched for).
+_idents: dict[WebSocket, _SocketIdent] = {}
+
+
+@dataclass(frozen=True)
 class _CallerIdentity:
     """#2216: owner-floor 휴먼(team_members뷰에 행 없음)용 최소 caller 신원 — .id/.org_id만 담는다.
     TeamMember와 duck-type 호환(caller.id/caller.org_id로만 소비됨). story #4418 — 방송의 보낸 사람
@@ -44,6 +62,31 @@ class _CallerIdentity:
     `caller.name`이 AttributeError로 방송을 죽이고 보낸 사람 소켓까지 끊었다)."""
     id: uuid.UUID
     org_id: uuid.UUID
+    user_id: uuid.UUID | None = None  # story #4775 — the person's user id (what the project-access rule takes); None only where unknown
+
+
+def _access_identity(caller: "TeamMember | _CallerIdentity", *, via_key: bool) -> tuple[uuid.UUID, bool]:
+    """story #4775 — (the id `has_project_access` takes, whether the socket/route came in by an agent key): a person's user id (a
+    `TeamMember` row of a person carries it, the owner-floor identity carries it); an agent key's member id."""
+    if via_key:
+        return caller.id, True
+    return (getattr(caller, "user_id", None) or caller.id), False
+
+
+async def _reachable_projects(agent_id: uuid.UUID, org_id: uuid.UUID, access_user_id: uuid.UUID) -> list[uuid.UUID]:
+    """story #4775 AC4 — the projects this agent works in that the caller reaches (the one project-access rule REST uses), lowest id first.
+    Empty = the caller has no way to this agent."""
+    async with async_session_factory() as db:
+        project_ids = (await db.execute(
+            select(TeamMember.project_id)
+            .where(TeamMember.id == agent_id, TeamMember.type == "agent", TeamMember.is_active.is_(True))
+            .order_by(TeamMember.project_id)
+        )).scalars().all()
+        reachable: list[uuid.UUID] = []
+        for pid in project_ids:
+            if pid not in reachable and await has_project_access(db, access_user_id, pid, org_id):
+                reachable.append(pid)
+        return reachable
 
 
 async def _authenticate(api_key: str | None, token: str | None) -> TeamMember | _CallerIdentity | None:
@@ -99,7 +142,7 @@ async def _authenticate(api_key: str | None, token: str | None) -> TeamMember | 
                     OrgMember.user_id == uid, OrgMember.deleted_at.is_(None),
                 )
             )).first()
-            return _CallerIdentity(id=om.id, org_id=om.org_id) if om is not None else None
+            return _CallerIdentity(id=om.id, org_id=om.org_id, user_id=uid) if om is not None else None
 
     return None
 
@@ -181,17 +224,79 @@ async def _get_or_create_conversation(
         return conv.id
 
 
-async def _broadcast(room_key: str, payload: str) -> None:
+async def _broadcast(room_key: str, payload: str, *, conversation_id: uuid.UUID) -> None:
+    """Send `payload` — a line of conversation `conversation_id` — to the sockets of room `room_key` whose owner may read that conversation.
+
+    story #4775: the room is per agent, but a line belongs to ONE conversation: before, every socket of the room got every line of every
+    DM the agent is in (REST refused the same people with 404/403 — only the socket leaked). One judgment per distinct owner in the room (REST's
+    own rule — `socket_can_read_conversation`), then the send; a socket nobody vouched for, or an owner who cannot be judged, gets nothing.
+    """
+    sockets = list(_rooms.get(room_key, ()))
+    if not sockets:
+        return
+    idents = {_idents[ws] for ws in sockets if ws in _idents}
+    allowed: set[_SocketIdent] = set()
+    if idents:
+        async with async_session_factory() as db:
+            for ident in idents:
+                if await socket_can_read_conversation(
+                    db, conversation_id, ident.org_id,
+                    member_id=ident.member_id, access_user_id=ident.access_user_id, via_agent_key=ident.via_agent_key,
+                ):
+                    allowed.add(ident)
     dead: set[WebSocket] = set()
-    for ws in list(_rooms[room_key]):
+    for ws in sockets:
+        ident = _idents.get(ws)
+        if ident is None or ident not in allowed:
+            continue
         try:
             await ws.send_text(payload)
         except Exception as exc:  # noqa: BLE001 — one receiver failing must not stop the others (story #4418)
             logger.warning("ws_chat: broadcast send failed room=%s error=%s", room_key, type(exc).__name__)
             dead.add(ws)
-    _rooms[room_key] -= dead
-    if not _rooms[room_key]:
-        _rooms.pop(room_key, None)
+    if dead and room_key in _rooms:
+        _rooms[room_key] -= dead
+        if not _rooms[room_key]:
+            _rooms.pop(room_key, None)
+        for ws in dead:
+            _idents.pop(ws, None)
+
+
+def _parse_incoming(raw: str) -> tuple[str, str | None]:
+    """A socket's line: plain text, or {"content": "...", "conversation_id": "..."} → (content, the conversation it names or None)."""
+    try:
+        data = json.loads(raw)
+        content = data.get("content", "").strip()
+        named = data.get("conversation_id")
+        return content, (str(named) if named is not None else None)
+    except (ValueError, AttributeError):
+        return raw.strip(), None
+
+
+async def _agent_answer_target(agent_id: uuid.UUID, org_id: uuid.UUID, named: str | None) -> tuple[uuid.UUID | None, str | None]:
+    """story #4775 AC3 — where an answer sent through the AGENT'S OWN socket goes: the conversation it names, if the agent is in it; with
+    none named, the agent's one DM when it has exactly one; otherwise nowhere — an error the agent's client sees (`conversation_id_required`
+    · `conversation_not_found`). Never «the agent's oldest DM» (that put an answer into whoever's DM came first)."""
+    async with async_session_factory() as db:
+        in_conv = and_(
+            ConversationParticipant.conversation_id == Conversation.id, ConversationParticipant.member_id == agent_id,
+        )
+        if named is not None:
+            try:
+                wanted = uuid.UUID(named)
+            except ValueError:
+                return None, "conversation_not_found"
+            found = (await db.execute(
+                select(Conversation.id).join(ConversationParticipant, in_conv)
+                .where(Conversation.id == wanted, Conversation.org_id == org_id, Conversation.status != "deleted")
+            )).scalar_one_or_none()
+            return (found, None) if found is not None else (None, "conversation_not_found")
+        dms = (await db.execute(
+            select(Conversation.id).join(ConversationParticipant, in_conv)
+            .where(Conversation.type == "dm", Conversation.org_id == org_id, Conversation.status != "deleted")
+            .order_by(Conversation.created_at, Conversation.id).limit(2)
+        )).scalars().all()
+        return (dms[0], None) if len(dms) == 1 else (None, "conversation_id_required")
 
 
 @router.websocket("/ws/chat/{agent_id}")
@@ -204,28 +309,30 @@ async def ws_chat_hub(
     """WS /ws/chat/{agent_id} — 에이전트별 room 채팅 허브.
 
     인증: ?api_key=sk_live_... 또는 ?token=<jwt>
-    수신 형식: 평문 text 또는 {"content": "..."}
-    송신 형식: {"id": "...", "sender_id": "...", "sender_name": "...", "content": "...", "ts": "..."}
+    수신 형식: 평문 text 또는 {"content": "...", "conversation_id": "..."}
+    송신 형식: {"id": "...", "conversation_id": "...", "sender_id": "...", "sender_name": "...", "content": "...", "ts": "..."}
+
+    story #4775 — the room is per agent but a line belongs to ONE conversation: every line is sent only to the sockets whose owner may read
+    that conversation (REST's rule), the connect gate is the agent's project (not «same organization» alone), and an answer sent through
+    the agent's own socket goes to the conversation it names (`conversation_id`) — with none named, to its only DM; else an error.
     """
     caller = await _authenticate(api_key, token)
     if caller is None:
         await websocket.accept()
         await websocket.close(code=4001, reason="Unauthorized")
         return
+    access_user_id, via_agent_key = _access_identity(caller, via_key=bool(api_key and api_key.startswith("sk_live_")))
 
     await websocket.accept()
     room_key = str(agent_id)
-    _rooms[room_key].add(websocket)
     logger.info("ws_chat: connected agent_id=%s caller=%s", agent_id, caller.id)
 
     # agent의 org_id/project_id 조회 (room 초기화용) — type='agent' 한정
     # team_members 는 projection VIEW — 멀티프로젝트 grant 면 같은 agent_id 가 N 행이라 무필터
-    # scalar_one_or_none 은 MultipleResultsFound 로 깨진다. DM room 은 여기서 _get_or_create_conversation
-    # 으로 생성(project_id 가 입력)되므로 신규 DM 엔 도출할 pre-existing conversation project 가 없다.
-    # → deterministic grant-pick(order_by(project_id) limit 1)으로 크래시를 막고 안정적 default project
-    # 로 room 을 스코프한다. org_id 는 전 projection 행 동형이라 정확.
-    # ⚠️ known-limitation: 멀티프로젝트 agent 의 DM room 은 default(최저 project_id) project 로 스코프.
-    #   진짜 라우팅(기존 (agent,caller) DM 우선조회→그 conversation 의 project)은 follow-up story.
+    # scalar_one_or_none 은 MultipleResultsFound 로 깨진다. 신규 DM 의 project 는 아래에서 «이 사람이 닿는 agent 프로젝트 중
+    # 최저 id» 로 정한다(story #4775 — 전엔 agent 의 최저 project: 그 프로젝트에 권한 없는 사람의 DM 이 REST 로는 403 인 방이 됐다).
+    # ⚠️ known-limitation: 멀티프로젝트 agent 의 «신규» DM 은 여전히 한 프로젝트(이제 «이 사람이 닿는 최저 project_id»)로 스코프 —
+    #   진짜 라우팅(기존 (agent,caller) DM 우선조회 → 그 conversation 의 project)은 follow-up story.
     async with async_session_factory() as db:
         agent_member = (await db.execute(
             select(TeamMember).where(
@@ -238,15 +345,25 @@ async def ws_chat_hub(
     if agent_member is None:
         await websocket.send_text(json.dumps({"error": "agent not found"}))
         await websocket.close(code=4004)
-        _rooms[room_key].discard(websocket)
         return
 
     # org 교차 검증 — caller가 agent와 동일 org 소속인지 확인
     if agent_member.org_id != caller.org_id:
         await websocket.send_text(json.dumps({"error": "forbidden"}))
         await websocket.close(code=4003, reason="Forbidden")
-        _rooms[room_key].discard(websocket)
         return
+
+    # story #4775 AC4 — the connect gate is not «same organization» alone: a person (or another agent) reaches this agent's room only through
+    # a project the agent works in (the one project-access rule REST uses). The agent's OWN socket is its own room.
+    own_socket = caller.id == agent_id
+    default_project_id = agent_member.project_id
+    if not own_socket:
+        reachable = await _reachable_projects(agent_id, agent_member.org_id, access_user_id)
+        if not reachable:
+            await websocket.send_text(json.dumps({"error": "forbidden"}))
+            await websocket.close(code=4003, reason="Forbidden")
+            return
+        default_project_id = reachable[0]
 
     # story #4565 (Qadir ①): an agent key revoked after this socket opened (its agent moved to another computer by a setup ·
     # a device disconnected) ends the socket — checked before each message it sends is kept, and on a timer while it listens
@@ -256,33 +373,48 @@ async def ws_chat_hub(
     watcher = fire_and_forget(_close_when_revoked(websocket, access)) if access else None
     try:
         # story #4418 (Qadir 01a0eb42) — inside the try: if either fails, the `finally` below takes the socket out of the room
-        # (before, a failure here left it registered).
-        conv_id = await _get_or_create_conversation(
-            agent_id, caller.id, agent_member.org_id, agent_member.project_id
-        )
+        conv_id: uuid.UUID | None = None
+        if not own_socket:
+            conv_id = await _get_or_create_conversation(
+                agent_id, caller.id, agent_member.org_id, default_project_id
+            )
         # story #4418 — the sender's name once per connection, the same way for every caller kind: TeamMember.name, or the
         # owner-floor person's users.display_name, or None (#3747 contract — no email, no id string).
         async with async_session_factory() as db:
             sender_name = await resolve_member_display_name(caller.id, caller.org_id, db)
 
+        # the socket enters the room only now — after every gate (before, a refused socket sat in the room until it was closed)
+        _idents[websocket] = _SocketIdent(
+            member_id=caller.id, access_user_id=access_user_id, org_id=caller.org_id, via_agent_key=via_agent_key,
+        )
+        _rooms[room_key].add(websocket)
+
         while True:
             raw = await websocket.receive_text()
-            # 평문 또는 {"content": "..."} 모두 허용
-            try:
-                content = json.loads(raw).get("content", "").strip()
-            except (ValueError, AttributeError):
-                content = raw.strip()
+            # 평문 또는 {"content": "...", "conversation_id": "..."} 모두 허용
+            content, named_conversation = _parse_incoming(raw)
             if not content:
                 continue
             if access is not None and await access.due(0):
                 await websocket.close(code=4001, reason="access_revoked")
                 return  # nothing kept from a key that is no longer allowed
 
+            # story #4775 AC3 — where this line is kept: a person's (or another agent's) line goes to ITS DM with this agent;
+            # the agent's own answer goes to the conversation it names. A conversation a person names is ignored (their socket is
+            # bound to their own DM).
+            target = conv_id
+            if own_socket:
+                target, refusal = await _agent_answer_target(agent_id, agent_member.org_id, named_conversation)
+                if target is None:
+                    await websocket.send_text(json.dumps({"error": {"code": refusal}}))
+                    continue
+            assert target is not None
+
             # conversation_messages 영속화
             async with async_session_factory() as db:
                 try:
                     msg = ConversationMessage(
-                        conversation_id=conv_id,
+                        conversation_id=target,
                         sender_id=caller.id,
                         content=content,
                         mentioned_ids=[],
@@ -297,7 +429,7 @@ async def ws_chat_hub(
 
             payload = json.dumps({
                 "id": str(msg.id),
-                "conversation_id": str(conv_id),
+                "conversation_id": str(target),
                 "sender_id": str(caller.id),
                 "sender_name": sender_name,
                 "content": content,
@@ -307,7 +439,7 @@ async def ws_chat_hub(
             # (before, the exception left the handler and the connection dropped on every message). It is logged, and
             # the sender still gets the saved message back as its confirmation.
             try:
-                await _broadcast(room_key, payload)
+                await _broadcast(room_key, payload, conversation_id=target)
             except WebSocketDisconnect:
                 raise  # a disconnect is not a broadcast failure: the handler's own cleanup below (Qadir 01a0eb42)
             except Exception:  # noqa: BLE001
@@ -321,6 +453,8 @@ async def ws_chat_hub(
     finally:
         if watcher is not None:
             watcher.cancel()
-        _rooms[room_key].discard(websocket)
-        if not _rooms[room_key]:
-            _rooms.pop(room_key, None)
+        _idents.pop(websocket, None)
+        if room_key in _rooms:
+            _rooms[room_key].discard(websocket)
+            if not _rooms[room_key]:
+                _rooms.pop(room_key, None)

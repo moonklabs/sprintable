@@ -157,7 +157,7 @@ def test_a_broadcast_failure_is_logged_and_the_sender_keeps_its_socket(world, cl
     message) and the sender gets the saved message back as its confirmation."""
     import app.routers.ws_chat as ws_chat
 
-    async def broken_broadcast(room_key, payload):
+    async def broken_broadcast(room_key, payload, *, conversation_id):
         raise RuntimeError("injected broadcast failure")
 
     monkeypatch.setattr(ws_chat, "_broadcast", broken_broadcast)
@@ -171,8 +171,9 @@ def test_a_broadcast_failure_is_logged_and_the_sender_keeps_its_socket(world, cl
     assert len(failures) == 2 and all(r.levelno == logging.ERROR for r in failures)
 
 
-def test_one_receiver_failing_does_not_stop_the_others():
-    """`_broadcast` keeps going past a receiver whose send fails, drops it from the room, and logs it."""
+def test_one_receiver_failing_does_not_stop_the_others(monkeypatch):
+    """`_broadcast` keeps going past a receiver whose send fails, drops it from the room, and logs it. (story #4775: both receivers
+    are owners the conversation is readable by — the judgment is stubbed here; the real one is covered in test_4775.)"""
     import app.routers.ws_chat as ws_chat
 
     got: list[str] = []
@@ -185,31 +186,58 @@ def test_one_receiver_failing_does_not_stop_the_others():
         async def send_text(self, payload):
             got.append(payload)
 
+    async def _allow(db, conversation_id, org_id, **kw):
+        return True
+
+    class _Db:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(ws_chat, "socket_can_read_conversation", _allow)
+    monkeypatch.setattr(ws_chat, "async_session_factory", lambda: _Db())
     broken, ok = Broken(), Ok()
+    ident = ws_chat._SocketIdent(member_id=uuid.uuid4(), access_user_id=uuid.uuid4(), org_id=uuid.uuid4(), via_agent_key=False)
     ws_chat._rooms["room-4418"] = {broken, ok}
+    ws_chat._idents[broken] = ident
+    ws_chat._idents[ok] = ident
     try:
-        _run(ws_chat._broadcast("room-4418", "p"))
+        _run(ws_chat._broadcast("room-4418", "p", conversation_id=uuid.uuid4()))
         assert got == ["p"]
         assert ws_chat._rooms.get("room-4418") == {ok}
     finally:
         ws_chat._rooms.pop("room-4418", None)
+        ws_chat._idents.pop(broken, None)
+        ws_chat._idents.pop(ok, None)
 
 
 def test_an_owner_floor_person_delivering_through_the_channel_route_is_saved_and_broadcast(world, client, monkeypatch):
     """Qadir 01a0eb42 — `routers/channel.py` uses the same `_authenticate`, and its `_persist_and_broadcast` read `caller.name`
-    after the commit: saved, then a 500 and nothing broadcast. A listener in the agent's room now gets the message."""
+    after the commit: saved, then a 500 and nothing broadcast. The line now reaches the people of THAT DM — the owner's own socket —
+    (story #4775: it used to reach every socket of the agent's room, here the other person TM's too; TM must not hear an owner's DM line)."""
     monkeypatch.setattr(
         "app.routers.channel.async_session_factory",
         async_sessionmaker(create_async_engine(_ASYNC, poolclass=NullPool), expire_on_commit=False),
     )
-    with client.websocket_connect(f"/ws/chat/{AGENT}?token={_token(TM_USER)}") as listener:
+    with client.websocket_connect(f"/ws/chat/{AGENT}?token={_token(OWNER_USER)}") as owner_ws, \
+            client.websocket_connect(f"/ws/chat/{AGENT}?token={_token(TM_USER)}") as other_ws:
         resp = client.post(
             f"/api/v2/channel/deliver?token={_token(OWNER_USER)}", json={"agent_id": str(AGENT), "content": "via route"},
         )
-        got = json.loads(listener.receive_text())
+        got = json.loads(owner_ws.receive_text())
+        other_ws.send_text(json.dumps({"content": "tm-1"}))
+        heard_by_tm: list[str] = []
+        while True:  # everything TM hears up to its own line (a leaked line would be queued ahead of it)
+            m = json.loads(other_ws.receive_text())
+            heard_by_tm.append(m["content"])
+            if m["content"] == "tm-1":
+                break
     assert resp.status_code == 204, resp.text
     assert (got["content"], got["sender_name"]) == ("via route", "Owner")
-    assert _saved() == ["via route"]
+    assert "via route" not in heard_by_tm
+    assert _saved() == ["via route", "tm-1"]
 
 
 def test_a_failure_before_the_loop_takes_the_socket_out_of_the_room(world, client, monkeypatch):
@@ -236,7 +264,7 @@ def test_a_disconnect_while_broadcasting_is_a_disconnect_not_a_broadcast_failure
 
     import app.routers.ws_chat as ws_chat
 
-    async def disconnecting_broadcast(room_key, payload):
+    async def disconnecting_broadcast(room_key, payload, *, conversation_id):
         raise WebSocketDisconnect(code=1001)
 
     caplog.set_level(logging.INFO, logger="app.routers.ws_chat")
@@ -258,7 +286,7 @@ def test_a_broadcast_failure_on_the_channel_route_is_logged_and_the_delivery_sti
     """The message is saved: the route answers 204 and logs the broadcast failure instead of a 500."""
     import app.routers.channel as channel
 
-    async def broken_broadcast(room_key, payload):
+    async def broken_broadcast(room_key, payload, *, conversation_id):
         raise RuntimeError("injected broadcast failure")
 
     monkeypatch.setattr(

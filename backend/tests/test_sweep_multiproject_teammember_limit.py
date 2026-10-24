@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import inspect
 import uuid
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -90,7 +90,8 @@ async def test_resolve_agent_multiproject_no_crash():
         async def __aexit__(self, *a):
             return False
 
-    with patch.object(channel, "async_session_factory", lambda: _Factory()):
+    with patch.object(channel, "async_session_factory", lambda: _Factory()), \
+         patch.object(channel, "_reachable_projects", AsyncMock(return_value=[uuid.uuid4()])):  # story #4775: the project gate is its own seam
         result = await channel._resolve_agent(uuid.uuid4(), caller)
 
     assert result is agent  # 해소 성공·org 동형 검증 통과

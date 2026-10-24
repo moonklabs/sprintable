@@ -21,7 +21,7 @@ from sqlalchemy import select
 from app.core.database import async_session_factory
 from app.models.conversation import ConversationMessage
 from app.models.team import TeamMember
-from app.routers.ws_chat import _authenticate, _broadcast, _get_or_create_conversation
+from app.routers.ws_chat import _access_identity, _authenticate, _broadcast, _get_or_create_conversation, _reachable_projects
 from app.services.member_resolver import resolve_member_display_name
 
 logger = logging.getLogger(__name__)
@@ -58,7 +58,7 @@ async def _require_caller(api_key: str | None, token: str | None) -> TeamMember:
     return caller
 
 
-async def _resolve_agent(agent_id: uuid.UUID, caller: TeamMember) -> TeamMember:
+async def _resolve_agent(agent_id: uuid.UUID, caller: TeamMember, *, via_key: bool = False) -> TeamMember:
     async with async_session_factory() as db:
         # team_members 는 projection VIEW — org-agent 멀티프로젝트 grant 면 같은 id 가 N 행이라 무필터
         # scalar_one_or_none 은 MultipleResultsFound. 이 결과의 .org_id(동형)뿐 아니라 .project_id 도
@@ -78,6 +78,11 @@ async def _resolve_agent(agent_id: uuid.UUID, caller: TeamMember) -> TeamMember:
         raise HTTPException(status_code=404, detail="Agent not found")
     if agent.org_id != caller.org_id:
         raise HTTPException(status_code=403, detail="Forbidden")
+    # story #4775 AC4 (the same gate as the WebSocket connect): not «same organization» alone — a line is delivered into a DM with this
+    # agent only by someone who reaches a project the agent works in (the one project-access rule REST uses)
+    if caller.id != agent_id:
+        if not await _reachable_projects(agent_id, agent.org_id, _access_identity(caller, via_key=via_key)[0]):
+            raise HTTPException(status_code=403, detail="Forbidden")
     return agent
 
 
@@ -126,7 +131,7 @@ async def _persist_and_broadcast(
 
     # story #4418 — the message is saved: a broadcast failure is logged, not turned into an error for the sender
     try:
-        await _broadcast(str(agent_id), json.dumps(payload_dict))
+        await _broadcast(str(agent_id), json.dumps(payload_dict), conversation_id=conv_id)
     except Exception:  # noqa: BLE001
         logger.error("channel: broadcast failed after save agent_id=%s message_id=%s", agent_id, msg.id, exc_info=True)
 
@@ -144,7 +149,7 @@ async def channel_deliver(
 ) -> None:
     """텍스트 메시지를 특정 에이전트 WS room으로 브로드캐스트."""
     caller = await _require_caller(api_key, token)
-    agent = await _resolve_agent(body.agent_id, caller)
+    agent = await _resolve_agent(body.agent_id, caller, via_key=bool(api_key and api_key.startswith("sk_live_")))
     await _persist_and_broadcast(body.agent_id, agent, caller, body.content)
 
 
@@ -158,7 +163,7 @@ async def channel_upload(
 ) -> None:
     """파일 업로드 + 메시지 전달 → WS room 브로드캐스트."""
     caller = await _require_caller(api_key, token)
-    agent = await _resolve_agent(agent_id, caller)
+    agent = await _resolve_agent(agent_id, caller, via_key=bool(api_key and api_key.startswith("sk_live_")))
 
     file_url: str | None = None
     if file and file.filename:
