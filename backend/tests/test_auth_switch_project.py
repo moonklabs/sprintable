@@ -66,6 +66,14 @@ def auth_ctx(org_id):
     return ctx
 
 
+@pytest.fixture(autouse=True)
+def _session_org_is_live(org_id):
+    """story 4762 — switch-project now asks `_live_org_ids` (one more query) whether the token's org is one the person is still a member of; these mock-session tests are about the
+    project switch itself, so the session org counts as live (the real-PG tests in test_4762_sign_in_live_org_realdb.py cover the refusal)."""
+    with patch("app.routers.auth._live_org_ids", new=AsyncMock(return_value=[org_id])):
+        yield
+
+
 @pytest.fixture
 async def client(mock_session, auth_ctx):
     from app.dependencies.auth import get_current_user
@@ -158,6 +166,40 @@ async def test_switch_project_not_member_returns_403(client, mock_session, auth_
     resp = await client.post("/api/v2/auth/switch-project", json={"project_id": str(uuid.uuid4())})
     assert resp.status_code == 403
     assert resp.json()["error"]["code"] == "NOT_MEMBER"
+
+
+@pytest.mark.anyio
+async def test_switch_project_token_org_the_person_has_left_returns_403_before_any_project_check(client, mock_session, auth_ctx):
+    """story 4762 — the token's own org is not a live membership any more → 403 NOT_MEMBER, and the project access query is never reached."""
+    user = _make_user()
+    auth_ctx.user_id = str(user.id)
+    user_result = MagicMock()
+    user_result.scalar_one_or_none.return_value = user
+    mock_session.execute.side_effect = [user_result]  # only the user lookup: a second query would raise StopAsyncIteration
+    with patch("app.routers.auth._live_org_ids", new=AsyncMock(return_value=[])):
+        resp = await client.post("/api/v2/auth/switch-project", json={"project_id": str(uuid.uuid4())})
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "NOT_MEMBER"
+    assert mock_session.execute.await_count == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("claims", [
+    {"app_metadata": {}},                                  # a claim-less token: no org to switch a project in
+    {"app_metadata": {"org_id": "not-a-uuid"}},            # a signed token whose org claim is not an org id — fail closed, not a 500
+])
+async def test_switch_project_with_no_usable_session_org_is_refused_before_any_project_check(client, mock_session, auth_ctx, claims):
+    """story 4762 (codex) — no org claim, or one that is not an org id: 403 NOT_MEMBER, no project access query, no revoke."""
+    user = _make_user()
+    auth_ctx.user_id = str(user.id)
+    auth_ctx.claims = claims
+    user_result = MagicMock()
+    user_result.scalar_one_or_none.return_value = user
+    mock_session.execute.side_effect = [user_result]
+    resp = await client.post("/api/v2/auth/switch-project", json={"project_id": str(uuid.uuid4())})
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "NOT_MEMBER"
+    assert mock_session.execute.await_count == 1
 
 
 # ─── AC5-3: 비활성 team_member 거부 ──────────────────────────────────────────

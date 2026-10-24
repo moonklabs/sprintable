@@ -59,6 +59,7 @@ async def _run_switch_project(flag: bool, defallback_pid):
           "role": "member", "projects": []}
     with patch("app.routers.auth.settings.build_app_metadata_defallback", flag), \
          patch("app.routers.auth._get_user_by_id", new=AsyncMock(return_value=user)), \
+         patch("app.routers.auth._live_org_ids", new=AsyncMock(return_value=[ORG])), \
          patch("app.routers.auth.has_project_access", new=AsyncMock(return_value=True)), \
          patch("app.routers.auth._build_app_metadata", new=AsyncMock(return_value=md)), \
          patch("app.routers.auth.create_tokens", _ct), \

@@ -910,6 +910,7 @@ async def _refresh_session_context(
         # No org claim without a live membership, whatever the resolution found (a still-active legacy member row). A
         # pending invite it accepted just now is a live membership, so it stays.
         if md.get("org_id") and uuid.UUID(str(md["org_id"])) not in await _live_org_ids(session, user.id):
+            user.last_org_id = None  # `_build_app_metadata` may have written the departed org back (flag off): no live org means no org pointer
             return {}
         return md
     if rt_org_id is not None and rt_org_id in live_orgs:
@@ -922,6 +923,16 @@ async def _refresh_session_context(
     return await _build_app_metadata(
         user, session, org_id=last_org_id if last_org_id in live_orgs else live_orgs[0],
     )
+
+
+async def _sign_in_session_context(user: User, session: AsyncSession) -> dict:
+    """story 4762 — app_metadata for a SIGN-IN of an existing person (password and OAuth): the same live-org rule as a refresh, with no session org yet.
+
+    `_build_app_metadata` without an org scopes to `user.last_org_id` and never asks whether the person is still in it. A person removed from org A (still a
+    member of B) therefore signed in with an A claim: `/api/v2/me` answered 404 `membership_elsewhere`, and signing in again gave the same claim. Here the
+    default is `user.last_org_id` only while it is a live membership, else the oldest live org, else a claim without an org (the state of a new sign-up);
+    one rule for refresh and sign-in (`_refresh_session_context`)."""
+    return await _refresh_session_context(user, session, None, None)
 
 
 # ─── POST /api/v2/auth/register ───────────────────────────────────────────────
@@ -1118,7 +1129,7 @@ async def login(
             update(User).where(User.id == user.id).values(login_fail_count=0, login_locked_until=None)
         )
 
-    _md = await _build_app_metadata(user, session)
+    _md = await _sign_in_session_context(user, session)  # story 4762 — a live org, as a refresh
     if settings.build_app_metadata_defallback:
         _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md, session_started_at=int(datetime.now(timezone.utc).timestamp()))
@@ -1890,7 +1901,7 @@ async def oauth_callback(
     from datetime import timedelta
     from app.core.security import ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS
 
-    _md = await _build_app_metadata(user, session)
+    _md = await _sign_in_session_context(user, session)  # story 4762 — a live org, as a refresh
     if settings.build_app_metadata_defallback:
         _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
     tokens = create_tokens(str(user.id), user.email, _md, session_started_at=int(datetime.now(timezone.utc).timestamp()))
@@ -2442,7 +2453,16 @@ async def switch_project(
     # 정식 access+refresh 토큰이 발급되는 증폭 경로였다(SEC-S5~S8 가드를 우회하는 크리덴셜
     # 발급 자체이므로 단순 열람보다 파급이 큼). 현재 세션의 org 컨텍스트로 명시 스코핑.
     caller_org_id_str = auth.claims.get("app_metadata", {}).get("org_id")
-    caller_org_id = uuid.UUID(str(caller_org_id_str)) if caller_org_id_str else None
+    try:
+        caller_org_id = uuid.UUID(str(caller_org_id_str)) if caller_org_id_str else None
+    except ValueError:  # a signed token whose org claim is not an org id: fail closed, not a 500
+        return _err("NOT_MEMBER", "Not an active member of this organization", 403)
+
+    # story 4762 (codex · Kadir lens, PR 5217) — the session's own org must still be one the person is a LIVE member of: `has_project_access` also lets an active team-member anchor
+    # through after the seat (org_members) was closed, and the new token would name the org the person left. A claim-less token has no org to switch a project in (a person with a
+    # live seat gets a claim from refresh / sign-in): it is refused too, so a leftover legacy team-member row cannot mint an org claim here.
+    if caller_org_id is None or caller_org_id not in await _live_org_ids(session, user.id):
+        return _err("NOT_MEMBER", "Not an active member of this organization", 403)
 
     # 인가 체크 — team_member ∪ project_access(granted) ∪ owner/admin (me/memberships 3-branch 정합)
     if not await has_project_access(session, user.id, body.project_id, caller_org_id):
@@ -2459,7 +2479,9 @@ async def switch_project(
     await _revoke_switching_session(session, user, body.refresh_token, route="switch-project")
 
     # 908075db 단계1: target을 명시 의도로 전달 — flag on이면 _build_app_metadata가 추측 없이 그대로 존중.
-    app_metadata = await _build_app_metadata(user, session, project_id=target_project_id)
+    # story 4762 (Kadir lens, PR 5217) — the claim's ORG is the caller's session org (the one `has_project_access` just checked), never `users.last_org_id`: that column can name
+    # an organization the person was removed from (another session used it last), and the new token would then name the org they left.
+    app_metadata = await _build_app_metadata(user, session, org_id=caller_org_id, project_id=target_project_id)
     # 908075db 단계3: flag-on이면 de-fallback이 명시 target 을 존중(_resolve_explicit→project_id=target)·
     # last_project_id 는 위 1229 kept + 단계2 무mutation 으로 target 유지 → 아래 override 밴드에이드가
     # redundant. flag-off(prod)만 보정(전면 삭제는 prod flag-on 後 단계4·dev 한정).
@@ -2507,8 +2529,11 @@ async def switch_organization(
         return _err("SESSION_INVALIDATED", "Password was changed — please log in again", 401)
 
     # org_members 소속 여부 확인
+    from app.models.organization import Organization  # story 4762 — the same «live» predicate as `_live_org_ids`: a seat in an organization that no longer exists is not a membership
+
     membership = await session.execute(
         select(OrgMember)
+        .join(Organization, Organization.id == OrgMember.org_id)
         .where(
             OrgMember.org_id == body.org_id,
             OrgMember.user_id == user.id,
