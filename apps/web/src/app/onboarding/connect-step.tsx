@@ -610,7 +610,7 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
           <div role="status" aria-live="polite" aria-atomic="true" className="rounded-md border border-success/20 bg-success/10 px-3 py-2.5 text-sm text-foreground">
             {/* story #4761 (D1b) — say what was seen: the first call of this key, in the viewer's own clock */}
             {rail.firstCallAt
-              ? t.rich('verifiedBannerAt', { time: () => <time dateTime={rail.firstCallAt!}><ViewerDate value={rail.firstCallAt!} options={VIEWER_TIME_OPTIONS} /></time> })
+              ? t.rich('verifiedBannerAt', { t: () => <time dateTime={rail.firstCallAt!}><ViewerDate value={rail.firstCallAt!} options={VIEWER_TIME_OPTIONS} /></time> })
               : t('verifiedBanner')}
           </div>
         )}

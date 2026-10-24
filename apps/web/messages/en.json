@@ -1675,7 +1675,7 @@
     "railVerified": "Connection verified",
     "verifyReasonUnknown": "The server didn't say why — try again, or refresh in a moment.",
     "verifiedBanner": "Your agent is actually working. Connection verified.",
-    "verifiedBannerAt": "Connection confirmed — the agent first called in at <time>HH:MM</time>",
+    "verifiedBannerAt": "Connection confirmed — the agent first called in at <t>time</t>",
     "advancedTitle": "Advanced",
     "advancedSubtitle": "Webhook notifications · alternate transports (HTTP, SSE)",
     "advancedNote": "Configure webhook notifications and alternate connection methods later.",

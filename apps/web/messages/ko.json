@@ -1675,7 +1675,7 @@
     "railVerified": "연결 확인 완료",
     "verifyReasonUnknown": "왜인지 서버가 말해주지 않았어요 — 다시 시도하거나 잠시 후 새로고침해 보세요.",
     "verifiedBanner": "에이전트가 실제로 작동해요. 연결이 확인됐어요.",
-    "verifiedBannerAt": "연결이 확인됐어요 — 에이전트가 <time>HH:MM</time>에 처음 호출했어요",
+    "verifiedBannerAt": "연결이 확인됐어요 — 에이전트가 <t>시각</t>에 처음 호출했어요",
     "advancedTitle": "고급 설정",
     "advancedSubtitle": "웹훅 알림 · 대체 연결 방식 (HTTP, SSE)",
     "advancedNote": "웹훅 알림과 대체 연결 방식은 나중에 설정할 수 있어요.",
