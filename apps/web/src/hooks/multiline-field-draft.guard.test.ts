@@ -45,6 +45,7 @@ const EXEMPT: Record<string, string> = {
   'app/(authenticated)/content/[draftId]/page.tsx': '콘텐츠 초안 페이지 — 창 밖(서버 초안)',
   'app/(authenticated)/content/channel-posts/[draftId]/page.tsx': '채널 글 초안 페이지 — 창 밖(서버 초안)',
   'app/internal-dogfood/page.tsx': '내부 점검 페이지 — 창 밖',
+  'app/onboarding/advanced-connect.tsx': '붙일 명령을 보여 주는 읽기 전용 상자(readOnly · 복사가 거절됐을 때만) — 사람이 쓰는 칸이 아님. 초안 훅은 칸 값을 기기 저장소에 남기는데 이 값은 에이전트 키가 든 명령이라 저장하면 안 됨 — 4766',
   'app/onboarding/connect-step.tsx': '온보딩 단계 — 페이지 흐름, 창 밖',
   'app/onboarding/onboarding-form.tsx': '온보딩 폼 — 페이지 흐름, 창 밖',
   'components/agents/agent-api-key-manager.tsx': '읽기 전용 키 표시(readOnly) — 쓰는 칸 아님',

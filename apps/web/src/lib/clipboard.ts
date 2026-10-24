@@ -40,3 +40,24 @@ export async function copyTextSafely(text: string): Promise<CopyResult> {
     return { ok: false };
   }
 }
+
+
+/**
+ * story 4766 — copy text that is not ready yet. The press that makes the agent and its key awaits several answers before the line exists, and
+ * a browser that wants a recent user gesture for the clipboard (Safari · Chrome after a few seconds) would refuse a `writeText` made then. A
+ * `ClipboardItem` takes the text as a PROMISE, so the write starts inside the click and the browser waits for the text. Without that API the
+ * text is awaited and the ordinary path is used. Failure (the promise rejected, the permission refused) is `{ ok: false }`, never swallowed.
+ */
+export async function copyPromisedText(text: Promise<string>): Promise<CopyResult> {
+  try {
+    if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+      const blob = text.then((t) => new Blob([t], { type: 'text/plain' }));
+      blob.catch(() => undefined); // the derived promise is the browser's to settle; if the write call already failed, nobody else reads this rejection
+      await navigator.clipboard.write([new ClipboardItem({ 'text/plain': blob })]);
+      return { ok: true };
+    }
+    return await copyTextSafely(await text);
+  } catch {
+    return { ok: false };
+  }
+}

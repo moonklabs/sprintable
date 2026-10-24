@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { getServerSession } from '@/lib/db/server';
 import { TabOwnerGate } from '@/components/auth/tab-owner-gate';
 import { ReclaimNoticeAlert } from '@/components/auth/reclaim-notice';
+import { OnboardingSessionExpiredNotice } from '@/components/auth/onboarding-session-expired-notice';
 
 /**
  * story #4490 — onboarding writes the person's drafts (organization draft · telemetry session) and sits outside the session
@@ -19,6 +20,12 @@ export default async function OnboardingLayout({ children }: { children: ReactNo
       {session ? (
         <div className="mx-auto w-full max-w-md px-4 pt-4 empty:hidden">
           <ReclaimNoticeAlert />
+        </div>
+      ) : null}
+      {/* story 4766 AC5: the session ending is said here too (the dashboard shell's dialog does not reach this page) */}
+      {session ? (
+        <div className="mx-auto w-full max-w-md px-4 pt-4 empty:hidden">
+          <OnboardingSessionExpiredNotice />
         </div>
       ) : null}
       {children}

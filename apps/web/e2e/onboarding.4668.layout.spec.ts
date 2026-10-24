@@ -1,8 +1,8 @@
 /**
  * story 4668 → 4715 — the onboarding's screens at 1440 and 390, light and dark. Story 4715 replaced the organization-name step, the fork
  * and «데스크톱 앱 받기» with one first screen (plan yuna/4715-plan-1016.md): on a Mac «에이전트는 내 Mac에서 돌아가요» + [Mac 앱 받기];
- * elsewhere «지금은 Mac 앱만 있어요» + the web way as the button; pending invites first (the invited card); the web way keeps project →
- * agent → connect. The real OnboardingForm (bundled here with esbuild — not copied) and the real Tailwind build of globals.css, in
+ * elsewhere «지금은 Mac 앱만 있어요» + the web way; pending invites first (the invited card). Story 4766: the web way is ONE press (the project,
+ * the agent and its key made together, the one line to paste) — folded under «고급» on a Mac, standing on the screen elsewhere. The real OnboardingForm (bundled here with esbuild — not copied) and the real Tailwind build of globals.css, in
  * Chromium. No server of ours: the page and its API answers are made here (the shared stub list `support/layout-stubs.ts` + two modules
  * this form takes more names from, overridden in this file only). Harness = PR 4972's (`allowed-hosts.4580.layout.spec.ts`) via
  * `remote-off.4583.layout.spec.ts`.
@@ -82,8 +82,14 @@ const API: Record<string, Answer> = {
   'GET /api/invites/mine': { invites: [] }, // the backend's one shape (MyInvitesResponse · no envelope)
   'POST /api/organizations': { data: { id: 'org-1' } },
   'POST /api/auth/refresh': {},
+  'GET /api/projects': { data: [] },
   'POST /api/projects': { data: { id: 'proj-1' } },
   'POST /api/current-project': {},
+  // story 4766: the folded web way's one press — the agent and its key, the hosted address, the panel's first answer
+  // (the key's prefix is built, not written: a literal `sk_live_…` reads as a Stripe key to the push-protection scanner)
+  'POST /api/team-members': { data: { id: 'agent-1', api_key: ['sk', 'live', 'abcdefghijklmnopqrstuvwxyz0123456789ABCD'].join('_') } },
+  'GET /api/agents/agent-1/connection-artifact': { data: { files: [{ filename: '.mcp.json', content: JSON.stringify({ mcpServers: { 'sprintable-mcp': { type: 'http', url: 'https://dev-mcp.sprintable.ai/mcp', headers: {} } } }) }] } },
+  'GET /api/agents/agent-1/verification-status': { data: { verified: false, rail: [{ state: 'config_copied', status: 'done' }, { state: 'waiting', status: 'active' }, { state: 'mcp_reachable', status: 'pending' }, { state: 'verified', status: 'pending' }] } },
   'POST /api/onboarding/events': {},
   // story 4697: the manifest route tells the card its bucket in a header — without it the card closes («지금은 받을 수 없어요»)
   'GET /desktop/downloads/macos.json': { __status: 200, body: MANIFEST, headers: { 'x-desktop-download-bucket': 'sprintable-desktop-releases-dev' } },
@@ -146,18 +152,6 @@ async function toFirst(page: Page, mac = true) {
   await expect(page.locator('h1')).toHaveText(mac ? '에이전트는 내 Mac에서 돌아가요' : '지금은 Mac 앱만 있어요');
 }
 
-async function toSkippedConnect(page: Page) {
-  await toFirst(page);
-  await page.getByTestId('onboarding-first-connect').click();
-  await expect(page.locator('h1')).toHaveText('첫 프로젝트 만들기');
-  await page.locator('input').first().fill('첫 프로젝트');
-  await page.getByRole('button', { name: '프로젝트 만들기' }).click();
-  await expect(page.locator('h1')).toHaveText('AI 에이전트 추가');
-  await page.getByRole('button', { name: '건너뛰기' }).click();
-  await expect(page.locator('h1')).toHaveText('에이전트 연결');
-  await expect(page.getByTestId('desktop-download-button')).toBeVisible();
-}
-
 for (const width of [1440, 390]) {
   for (const theme of ['L', 'D'] as const) {
     const tag = `${theme}-${width}`;
@@ -166,13 +160,16 @@ for (const width of [1440, 390]) {
       await open(page, { width, theme });
       await toFirst(page);
       await expect(stepOf(page)).toHaveCount(0); // no progress strip on the first screen
-      // the one primary control is the card's [Mac 앱 받기]; the web way is a text link
+      // the one primary control is the card's [Mac 앱 받기]; the web way is a CLOSED fold (story 4766) and an installed app is opened, not downloaded
       const primaries = page.locator('a[class*="bg-primary"], button[class*="bg-primary"]');
       await expect(primaries).toHaveCount(1);
       await expect(primaries.first()).toHaveAttribute('data-testid', 'desktop-download-button');
       await expect(primaries.first()).toHaveText('Mac 앱 받기');
       await expect(page.getByTestId('onboarding-first-org')).toHaveText('송윤재의 조직에서 시작해요 · 이름은 설정에서 바꿀 수 있어요');
       await expect(page.locator('input[type="radio"]')).toHaveCount(0);
+      await expect(page.getByTestId('onboarding-first-advanced')).toHaveJSProperty('open', false);
+      await expect(page.getByTestId('onboarding-first-advanced-summary')).toHaveText('고급 — 앱 없이, 이미 쓰는 Claude Code · Codex 연결');
+      await expect(page.getByTestId('onboarding-first-open-app')).toHaveText('앱 열기');
       await fitsViewport(page, width);
       await shot(page, card(page), `4715-1-first-mac-${tag}`);
     });
@@ -180,10 +177,47 @@ for (const width of [1440, 390]) {
     test(`first screen · not a Mac · ${tag}`, async ({ page }) => {
       await open(page, { width, theme, mac: false });
       await toFirst(page, false);
-      await expect(page.getByTestId('onboarding-first-connect')).toHaveText('이미 돌고 있는 에이전트 연결하기');
+      await expect(page.getByTestId('advanced-make')).toBeVisible(); // not a Mac: the web way is the only way, so it stands unfolded
       await expect(page.getByTestId('desktop-download-card')).toHaveCount(0);
       await fitsViewport(page, width);
       await shot(page, card(page), `4715-2-first-not-mac-${tag}`);
+    });
+
+    // story 4766 AC3: the fold is found and the one press stands on the FIRST screen — nothing to scroll to (1440 × 1000)
+    test(`first screen · a Mac · the web way opened · ${tag}`, async ({ page }) => {
+      await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://preview.test' });
+      await open(page, { width, theme });
+      await toFirst(page);
+      const summary = page.getByTestId('onboarding-first-advanced-summary');
+      await summary.click();
+      await expect(page.getByTestId('onboarding-first-advanced')).toHaveJSProperty('open', true);
+      await expect(page.getByTestId('advanced-prereq')).toBeVisible();
+      await expect(page.getByTestId('advanced-install-claude')).toBeVisible();
+      await expect(page.getByTestId('advanced-make')).toBeVisible();
+      if (width >= 1000) {
+        const viewportHeight = await page.evaluate(() => window.innerHeight);
+        for (const id of ['onboarding-first-advanced-summary', 'advanced-make']) {
+          const box = await page.getByTestId(id).boundingBox();
+          expect(box!.y + box!.height, `${id} is inside the first screen (no scroll)`).toBeLessThanOrEqual(viewportHeight);
+        }
+      }
+      await fitsViewport(page, width);
+      await shot(page, card(page), `4766-1-first-mac-fold-open-${tag}`);
+    });
+
+    test(`the one press · the line, where the key stays, [키 폐기] · ${tag}`, async ({ page }) => {
+      await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://preview.test' });
+      await open(page, { width, theme });
+      await toFirst(page);
+      await page.getByTestId('onboarding-first-advanced-summary').click();
+      await page.getByTestId('advanced-make').click();
+      await expect(page.getByTestId('advanced-line')).toContainText('claude mcp add --transport http --scope local sprintable-mcp https://dev-mcp.sprintable.ai/mcp');
+      await expect(page.getByTestId('advanced-line')).toContainText('sk_live_••••ABCD');
+      await expect(page.getByTestId('advanced-key-line')).toContainText('터미널 명령 기록');
+      await expect(page.getByTestId('advanced-revoke')).toBeVisible();
+      await expect(page.getByTestId('advanced-verify')).toBeVisible();
+      await fitsViewport(page, width);
+      await shot(page, card(page), `4766-2-the-press-${tag}`);
     });
 
     test(`pending invite · the invited card, no organization made · ${tag}`, async ({ page }) => {
@@ -195,18 +229,6 @@ for (const width of [1440, 390]) {
       expect(made).toHaveLength(0);
       await fitsViewport(page, width);
       await shot(page, page.getByTestId('onboarding-invited'), `4715-3-invited-${tag}`);
-    });
-
-    test(`connect after [건너뛰기] · ${tag}`, async ({ page }) => {
-      await open(page, { width, theme });
-      await toSkippedConnect(page);
-      await expect(stepOf(page)).toHaveText('3 / 3');
-      await expect(page.getByTestId('connect-step-no-agent')).toBeVisible();
-      await expect(page.getByTestId('connect-step-make-agent')).toBeVisible();
-      await expect(page.getByText('API Key 발급에 실패했어요', { exact: false })).toHaveCount(0);
-      await expect(page.getByRole('button', { name: '첫 지시 보내기' })).toHaveCount(0);
-      await fitsViewport(page, width);
-      await shot(page, card(page), `4715-4-connect-skipped-${tag}`);
     });
   }
 }

@@ -461,7 +461,7 @@ export function OnboardingForm({
         )}
 
         {step === 'first' && (
-          <FirstScreen orgId={orgId} chatsHref={chatsHref} macDownloadEnabled={macDownloadEnabled} orgName={orgName} onConnectElsewhere={() => setStep('project')} onFinish={handleFinish} />
+          <FirstScreen orgId={orgId} chatsHref={chatsHref} macDownloadEnabled={macDownloadEnabled} orgName={orgName} todayV3Enabled={todayV3Enabled} onFinish={handleFinish} />
         )}
 
         {step === 'project' && (

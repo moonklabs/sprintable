@@ -6,9 +6,11 @@ const h = vi.hoisted(() => ({ session: vi.fn() }));
 vi.mock('@/lib/db/server', () => ({ getServerSession: h.session }));
 vi.mock('@/components/auth/tab-owner-gate', () => ({ TabOwnerGate: ({ children }: { children: ReactNode }) => children }));
 vi.mock('@/components/auth/reclaim-notice', () => ({ ReclaimNoticeAlert: () => null }));
+vi.mock('@/components/auth/onboarding-session-expired-notice', () => ({ OnboardingSessionExpiredNotice: () => null }));
 
 import OnboardingLayout from './layout';
 import { ReclaimNoticeAlert } from '@/components/auth/reclaim-notice';
+import { OnboardingSessionExpiredNotice } from '@/components/auth/onboarding-session-expired-notice';
 
 function typesIn(node: unknown, out: unknown[] = []): unknown[] {
   if (Array.isArray(node)) { node.forEach((n) => typesIn(n, out)); return out; }
@@ -39,5 +41,18 @@ describe('story 4725 — the onboarding layout', () => {
     const types = typesIn(await OnboardingLayout({ children: <main /> }));
     expect(types).not.toContain(ReclaimNoticeAlert);
     expect(types).toContain('main');
+  });
+});
+
+describe('story 4766 AC5 — the session ending is said on the onboarding too', () => {
+  it('with a session the session-expired notice is mounted above the page (the dashboard shell\'s dialog does not reach this page)', async () => {
+    const types = typesIn(await OnboardingLayout({ children: <main /> }));
+    expect(types).toContain(OnboardingSessionExpiredNotice);
+    expect(types.indexOf(OnboardingSessionExpiredNotice)).toBeLessThan(types.indexOf('main'));
+  });
+
+  it('without a session it is not mounted (an anonymous visit has no session to end — the page decides about login itself)', async () => {
+    h.session.mockResolvedValue(null);
+    expect(typesIn(await OnboardingLayout({ children: <main /> }))).not.toContain(OnboardingSessionExpiredNotice);
   });
 });
