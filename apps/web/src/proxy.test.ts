@@ -1036,6 +1036,9 @@ describe('proxy — a person with no organization yet is sent to the onboarding,
       ['404 not JSON', () => new Response('<html>gateway</html>', { status: 404 }), 'me_404_other'],
       ['200 without org_id', () => new Response('{}', { status: 200 }), 'me_200_without_org'],
       ['200 with an empty org_id', () => new Response(JSON.stringify({ org_id: '' }), { status: 200 }), 'me_200_without_org'],
+      ['200 with a null body', () => new Response('null', { status: 200 }), 'me_200_without_org'],
+      ['200 with an empty body (the server answered; nothing to read)', () => new Response('', { status: 200 }), 'me_200_unparseable'],
+      ['200 with a body that is not JSON', () => new Response('<html>gateway</html>', { status: 200 }), 'me_200_unparseable'],
       ['network error', () => { throw new Error('network'); }, 'me_unreachable'],
       ['403 (the server meant it)', () => new Response('{}', { status: 403 }), 'me_status_403'],
     ];
@@ -1126,6 +1129,22 @@ describe('proxy — a person with no organization yet is sent to the onboarding,
         const get = await middleware(makeRequestWithHeaders('/glance', headers, { sp_at: token }));
         expect([get.status, get.headers.get('location')]).toEqual([307, 'https://app.example.com/']);
       }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('where `/` leads is never asked about the organization either: `/`, `/org-briefing`, `/today` are not flat addresses of the table, so the redirect cannot loop back into the lookup', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1' });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      for (const path of ['/', '/org-briefing', '/today']) {
+        mockFetch.mockReset();
+        withMe(() => new Response('{}', { status: 503 }));
+        const res = await middleware(page(path, token));
+        expect([path, res.status, res.headers.get('location'), mockFetch.mock.calls.length]).toEqual([path, 200, null, 0]);
+      }
+      expect(warn).not.toHaveBeenCalled();
     } finally {
       warn.mockRestore();
     }

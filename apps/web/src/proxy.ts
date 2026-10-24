@@ -168,8 +168,11 @@ async function lookupVerifiedOrg(fastapiUrl: string, accessToken: string): Promi
       return body?.error?.code === 'NOT_FOUND' && body?.error?.reason === 'no_membership' ? { kind: 'none' } : { kind: 'unknown', why: 'me_404_other', transient: false };
     }
     if (!res.ok) return { kind: 'unknown', why: `me_status_${res.status}`, transient: res.status >= 500 };
-    const me = await res.json() as { org_id?: string };
-    return typeof me.org_id === 'string' && me.org_id !== '' ? { kind: 'org', orgId: me.org_id } : { kind: 'unknown', why: 'me_200_without_org', transient: false }; // an empty id is not an organization
+    // a 200 whose body cannot be read (empty · not JSON) is NOT a transport failure: it must not fall into the catch below (that one is «transient» → `/`) — the server answered,
+    // so it is a meant answer like the 4xx ones (pass through). `null` · `{}` · an empty id are the same: no organization named.
+    const me = await res.json().catch(() => undefined) as { org_id?: unknown } | null | undefined;
+    if (me === undefined) return { kind: 'unknown', why: 'me_200_unparseable', transient: false };
+    return typeof me?.org_id === 'string' && me.org_id !== '' ? { kind: 'org', orgId: me.org_id } : { kind: 'unknown', why: 'me_200_without_org', transient: false }; // an empty id is not an organization
   } catch {
     return { kind: 'unknown', why: 'me_unreachable', transient: true };
   }
