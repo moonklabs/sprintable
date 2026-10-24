@@ -910,6 +910,7 @@ async def _refresh_session_context(
         # No org claim without a live membership, whatever the resolution found (a still-active legacy member row). A
         # pending invite it accepted just now is a live membership, so it stays.
         if md.get("org_id") and uuid.UUID(str(md["org_id"])) not in await _live_org_ids(session, user.id):
+            user.last_org_id = None  # `_build_app_metadata` may have written the departed org back (flag off): no live org means no org pointer
             return {}
         return md
     if rt_org_id is not None and rt_org_id in live_orgs:
@@ -2453,6 +2454,11 @@ async def switch_project(
     # 발급 자체이므로 단순 열람보다 파급이 큼). 현재 세션의 org 컨텍스트로 명시 스코핑.
     caller_org_id_str = auth.claims.get("app_metadata", {}).get("org_id")
     caller_org_id = uuid.UUID(str(caller_org_id_str)) if caller_org_id_str else None
+
+    # story 4762 (codex · Kadir lens, PR 5217) — the session's own org must still be one the person is a LIVE member of: `has_project_access` also lets an active team-member anchor
+    # through after the seat (org_members) was closed, and the new token would name the org the person left. A claim-less token (no org) goes on as before.
+    if caller_org_id is not None and caller_org_id not in await _live_org_ids(session, user.id):
+        return _err("NOT_MEMBER", "Not an active member of this organization", 403)
 
     # 인가 체크 — team_member ∪ project_access(granted) ∪ owner/admin (me/memberships 3-branch 정합)
     if not await has_project_access(session, user.id, body.project_id, caller_org_id):
