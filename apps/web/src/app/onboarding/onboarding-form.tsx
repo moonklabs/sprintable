@@ -6,7 +6,7 @@ import { UpgradeModal } from '@/components/ui/upgrade-modal';
 import { Button } from '@/components/ui/button';
 import { OperatorInput, OperatorTextarea, OperatorSelect } from '@/components/ui/operator-control';
 import { useTranslations } from 'next-intl';
-import { fetchWithAuth } from '@/lib/db/client';
+import { fetchWithAuth, refreshAuthTokens } from '@/lib/db/client';
 import { defaultOrgName } from '@/lib/default-org-name';
 import { fetchMyInvites, type MyInvite } from '@/lib/my-invites';
 import { InvitedCard } from '@/components/desktop/desktop-setup';
@@ -150,7 +150,9 @@ export function OnboardingForm({
       // E-ONB S5 FINAL: org 생성 시 org_member가 최초 생성됨 → 즉시 토큰 refresh로
       // 새 JWT에 org_id(BE auth Path4 org_member fallback) 반영. 이래야 다음 단계 project 생성의
       // getAuthContext(/api/v2/me)가 통과한다(미refresh 시 fresh JWT엔 team_member 없어 me null → 401).
-      await fetch('/api/auth/refresh', { method: 'POST' }).catch(() => null);
+      // story 4762 — refreshAuthTokens(lib/db/client.ts)가 새로고침과 함께 셸에 «세션이 바뀌었다»(session-changed)도 알린다: 이 순간 앱이 꺼져도 org 클레임이 든
+      // 새 토큰이 디스크에 남도록. 맨 fetch는 이 신호를 안 보냈다(폰 강제 종료 뒤 클레임 없는 옛 토큰이 남아 /glance가 404 — 실측 10-24).
+      await refreshAuthTokens().catch(() => null);
       setStep('first');
     } catch {
       setError(t('networkError'));
@@ -253,7 +255,7 @@ export function OnboardingForm({
   // register JWT는 app_metadata 비어(org_id 없음) — TeamMember는 project 생성 시 최초 생기므로,
   // 그 후 refresh로 새 JWT(sp_at)에 org_id 반영해야 보드/스토리 등 앱 전반 API가 차단되지 않는다.
   const finishToHome = async () => {
-    await fetch('/api/auth/refresh', { method: 'POST' }).catch(() => null);
+    await refreshAuthTokens().catch(() => null); // story 4762 — same: the shell writes the new token out now
     // story #4231 — 첫 착지(flat)는 방금 만든 프로젝트를 싣는다(착지 뒤 셸 ?p= 정규화 왕복 없음).
     window.location.href = withProjectParam(resolveOnboardingLandingHref(todayV3Enabled, todayHref, chatsHref), projectId);
   };
