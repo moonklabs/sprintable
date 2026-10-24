@@ -63,6 +63,8 @@ describe('the advanced path speaks the product\'s words (copy review · story 47
     expect(adv.nextClaude).toContain('{yes}');
     expect(adv.nextClaude.indexOf('폴더를 믿을지')).toBeGreaterThan(-1);
     expect(adv.nextClaude.indexOf('폴더를 믿을지')).toBeLessThan(adv.nextClaude.indexOf('도구를 써도'));
+    expect(adv.nextClaude).toContain('폴더가 내 것이면'); // trust is the person's call: the line never says «always Yes» (Kadir)
+    expect(advEn.nextClaude).toContain('a folder of yours');
     expect(adv.nextCodex).not.toContain('폴더');
     expect(advEn.nextClaude.indexOf('trust the folder')).toBeLessThan(advEn.nextClaude.indexOf('use the tool'));
     expect(advEn.nextCodex).not.toContain('folder');

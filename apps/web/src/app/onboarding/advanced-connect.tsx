@@ -65,8 +65,10 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
   const [made, setMade] = useState<Made | null>(null);
   const [runtime, setRuntime] = useState<ConnectRuntime>('claude');
   const [copied, setCopied] = useState(false);
-  const [copyFailedLine, setCopyFailedLine] = useState<string | null>(null);
+  const [copyFailedLine, setCopyFailedLineState] = useState<string | null>(null);
   const [rawShownFor, setRawShownFor] = useState<string | null>(null); // the real line is shown only after a press, and only for the line pressed for
+  // every change of the failed line (a new failure, a toggle, a re-copy) withdraws an earlier reveal: «hidden until pressed» holds each time, not once
+  const setCopyFailedLine = (line: string | null) => { setCopyFailedLineState(line); setRawShownFor(null); };
   const [revoked, setRevoked] = useState(false);
   const [revoking, setRevoking] = useState(false);
   const [revokeFailed, setRevokeFailed] = useState(false);

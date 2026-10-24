@@ -227,6 +227,25 @@ describe('AdvancedConnect — story 4766', () => {
     expect(container.innerHTML).not.toContain('sk_live_NEWKEY');
   });
 
+  it('codex 5 / Kadir — «hidden until pressed» holds again after a toggle (Claude → Codex → Claude) and after a new refusal', async () => {
+    copyOk = false;
+    await mount();
+    await press('advanced-make');
+    await press('advanced-show-command');
+    expect(q('advanced-copy-failed-raw')).not.toBeNull();
+    await press('advanced-runtime-codex'); // the toggle withdraws the line and the reveal
+    expect(q('advanced-copy-failed-raw')).toBeNull();
+    await press('advanced-runtime-claude');
+    await press('advanced-copy'); // refused again — the very same line as before
+    expect(q('advanced-copy-failed-raw')).toBeNull(); // NOT shown without a new press
+    expect(q('advanced-show-command')).not.toBeNull();
+    expect(container.innerHTML).not.toContain(KEY);
+    await press('advanced-show-command');
+    expect((q('advanced-copy-failed-raw') as HTMLTextAreaElement).value).toContain(`Bearer ${KEY}`);
+    await press('advanced-copy'); // and a second refusal while it is shown hides it again
+    expect(q('advanced-copy-failed-raw')).toBeNull();
+  });
+
   it('codex/Kadir — every failure branch REJECTS the promise the clipboard was handed (nothing half-written, no hanging write)', async () => {
     const branches: [string, Record<string, Handler>][] = [
       ['project', { 'POST /api/projects': () => ({ ok: false, status: 500, body: {} }) }],
