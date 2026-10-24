@@ -159,10 +159,9 @@ describe('fetchWithAuth — 세션만료 신호는 refresh 최종 실패에서�
   });
 });
 
-// story #3302(#2459 진단 (c) 갈래, AC1/AC3) — login/register/refresh 공통 choke point
-// (callAuthRoute)의 성공 분기가 네이티브 셸에 session-changed를 정확히 1회 알리는지,
-// 실패 분기는 0회인지 pin한다. 뮤테이션 자가검증(AC3) — callAuthRoute의 notifySessionChanged()
-// 호출 한 줄을 지우면 아래 세 성공 케이스가 전부 RED로 떨어져야 한다(직접 지워서 확認).
+// story #3302(#2459 진단 (c) 갈래, AC1/AC3) → story #4762 — login/register/refresh 공통 choke point(callAuthRoute)는 더 이상 스스로 셸에 알리지 않는다:
+// 세션 쿠키를 쓰는 route가 `x-session-changed`를 달고 페이지의 전역 fetch 관문(lib/project-context-client.ts)이 셸에 «정확히 1회» 알린다 —
+// 둘이 다 보내면 두 번 간다(codex 5218). «관문을 지나면 1회»는 lib/session-changed-gate.4762.test.ts가 실제 관문을 깔고 pin한다.
 function okAuthResponse() {
   return new Response(
     JSON.stringify({ data: { access_token: 'at', refresh_token: 'rt', token_type: 'bearer' } }),
@@ -177,21 +176,13 @@ function failAuthResponse() {
 }
 
 describe('callAuthRoute → notifySessionChanged 브릿지(story #3302 AC1/AC3)', () => {
-  it('loginWithPassword 성공 시 셸에 session-changed가 정확히 1회 간다', async () => {
+  it('loginWithPassword · refreshAuthTokens는 스스로 셸에 알리지 않는다(관문이 한 번 알린다 — 둘이 보내면 두 번 간다)', async () => {
     const postMessage = vi.fn();
     window.ReactNativeWebView = { postMessage };
     vi.stubGlobal('fetch', vi.fn(async () => okAuthResponse()));
     await loginWithPassword('a@b.com', 'pw');
-    expect(postMessage).toHaveBeenCalledTimes(1);
-    expect(postMessage).toHaveBeenCalledWith(JSON.stringify({ type: 'session-changed' }));
-  });
-
-  it('refreshAuthTokens 성공 시 셸에 session-changed가 정확히 1회 간다(가장 빈번한 경로 — #2459 진단 (c)의 핵심 창)', async () => {
-    const postMessage = vi.fn();
-    window.ReactNativeWebView = { postMessage };
-    vi.stubGlobal('fetch', vi.fn(async () => okAuthResponse()));
     await refreshAuthTokens();
-    expect(postMessage).toHaveBeenCalledTimes(1);
+    expect(postMessage).not.toHaveBeenCalled();
   });
 
   it('story #4762 — 회전(refresh)이 성공하면 저장해 둔 /me 응답도 버린다: 다음 fetchMe()는 새로 묻는다(새 토큰의 org 클레임으로 읽어야 하므로)', async () => {

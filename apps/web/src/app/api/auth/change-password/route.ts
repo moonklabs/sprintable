@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
-import { cookieBase } from '@/lib/auth/cookies';
+import { cookieBase, markSessionChanged } from '@/lib/auth/cookies';
 import { safeJsonParse } from '@/lib/api-response';
 import { backendFetch } from '@/lib/backend-fetch';
 
@@ -32,5 +32,5 @@ export async function PATCH(request: Request) {
   const gone = { ...cookieBase(), maxAge: 0 };
   res.cookies.set(SP_AT_COOKIE, '', gone);
   res.cookies.set(SP_RT_COOKIE, '', gone);
-  return res;
+  return markSessionChanged(res);
 }

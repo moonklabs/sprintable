@@ -4,14 +4,18 @@
 // the shell must hear «session-changed» then (refreshAuthTokens of lib/db/client.ts sends it), so it writes the cookie to disk at once: the app can be force-quit
 // seconds later, and the disk must hold the token WITH the claim (dev 10-24: it held the sign-up token → every open was a Next 404 until the next sign-in).
 // Reverted (a bare fetch again) → no message.
+// The message is posted by the page's ONE fetch gate (lib/project-context-client.ts, mounted at the app root — FetchGateInstaller in app/layout.tsx, so the onboarding
+// page has it): the refresh route marks its answer `x-session-changed: 1` and the gate tells the shell. This test installs the REAL gate over a scripted `fetch`.
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { OnboardingForm } from './onboarding-form';
+import { installProjectHeaderInterceptor } from '@/lib/project-context-client';
+import { SESSION_CHANGED_HEADER } from '@/lib/auth/session-changed-header';
 import koMessages from '../../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -19,23 +23,33 @@ import koMessages from '../../../messages/ko.json';
 let container: HTMLDivElement;
 let root: Root;
 const post = vi.fn();
-let refreshAnswer: () => Promise<unknown> | unknown = () => ({ ok: true, json: async () => ({}) });
+// what the refresh route answers: the session cookies were rotated, and the route says so (`markSessionChanged`)
+const rotated = () => ({ ok: true, headers: new Headers({ [SESSION_CHANGED_HEADER]: '1' }), json: async () => ({}) });
+let refreshAnswer: () => Promise<unknown> | unknown = rotated;
+const handler = vi.fn(async (_url: string): Promise<unknown> => ({ ok: false, status: 404, json: async () => ({}) }));
+
+beforeAll(() => {
+  // the real gate over a scripted network: every request of the page goes through it, as in the app
+  (window as unknown as { fetch: unknown }).fetch = (input: RequestInfo | URL) => handler(String(input));
+  installProjectHeaderInterceptor();
+});
 
 beforeEach(() => {
-  refreshAnswer = () => ({ ok: true, json: async () => ({}) });
+  refreshAnswer = rotated;
   post.mockReset();
   (window as unknown as { ReactNativeWebView?: { postMessage: (m: string) => void } }).ReactNativeWebView = { postMessage: post };
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+  handler.mockReset();
+  handler.mockImplementation(async (url: string) => {
     if (url === '/api/onboarding/events') return { ok: true, json: async () => ({}) };
     if (url === '/api/auth/me') return { ok: true, json: async () => ({ data: { member_id: 'u-1', email_verified: true, org_id: null, org_member_id: null, display_name: '문클랩스' } }) };
     if (url === '/api/invites/mine') return { ok: true, json: async () => ({ invites: [] }) };
     if (url === '/api/auth/refresh') return refreshAnswer();
     if (url === '/api/organizations') return { ok: true, json: async () => ({ data: { id: 'org-1', slug: 'workspace-3f9a1c2b' } }) };
     return { ok: false, status: 404, json: async () => ({}) };
-  }));
+  });
 });
 
 afterEach(async () => {
@@ -59,7 +73,7 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
       );
     });
     await flush();
-    const fetchMock = vi.mocked(fetch);
+    const fetchMock = handler;
     const orgAt = fetchMock.mock.calls.findIndex((c) => c[0] === '/api/organizations');
     const refreshAt = fetchMock.mock.calls.findIndex((c) => c[0] === '/api/auth/refresh');
     expect(orgAt).toBeGreaterThan(-1);
@@ -67,12 +81,12 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
     const messages = post.mock.calls.map((c) => JSON.parse(c[0] as string) as { type: string });
     expect(messages.filter((m) => m.type === 'session-changed')).toHaveLength(1); // reverted (a raw fetch) → 0
     // and the message came after the refresh request, not before (the shell flushes what the cookie jar holds NOW)
-    expect(vi.mocked(fetch).mock.invocationCallOrder[refreshAt]!).toBeLessThan(post.mock.invocationCallOrder[0]!);
+    expect(handler.mock.invocationCallOrder[refreshAt]!).toBeLessThan(post.mock.invocationCallOrder[0]!);
   });
 
   it('the shell hears nothing while the rotation is still in flight — only once the server has answered (it must not flush the old cookie)', async () => {
     let release!: () => void;
-    refreshAnswer = () => new Promise((resolve) => { release = () => resolve({ ok: true, json: async () => ({}) }); });
+    refreshAnswer = () => new Promise((resolve) => { release = () => resolve(rotated()); });
     await act(async () => {
       root.render(
         <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
@@ -81,7 +95,7 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
       );
     });
     await flush();
-    expect(vi.mocked(fetch).mock.calls.some((c) => c[0] === '/api/auth/refresh')).toBe(true); // the rotation was sent …
+    expect(handler.mock.calls.some((c) => c[0] === '/api/auth/refresh')).toBe(true); // the rotation was sent …
     expect(post).not.toHaveBeenCalled(); // … and is not answered yet: nothing to the shell
     await act(async () => { release(); for (let i = 0; i < 16; i++) await Promise.resolve(); });
     expect(post.mock.calls.map((c) => (JSON.parse(c[0] as string) as { type: string }).type)).toEqual(['session-changed']); // answered → exactly one message
@@ -121,7 +135,7 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
       );
     });
     await flush();
-    expect(vi.mocked(fetch).mock.calls.some((c) => c[0] === '/api/auth/refresh')).toBe(true); // the rotation was tried
+    expect(handler.mock.calls.some((c) => c[0] === '/api/auth/refresh')).toBe(true); // the rotation was tried
     expect([koMessages.onboarding.first.macTitle, koMessages.onboarding.first.notMacTitle]).toContain(container.querySelector('h1')?.textContent); // and the form went on to the one screen
     expect(container.textContent).not.toContain(koMessages.onboarding.networkError); // not into the «network error» state
     expect(post.mock.calls.filter((c) => (JSON.parse(c[0] as string) as { type: string }).type === 'session-changed')).toHaveLength(0);

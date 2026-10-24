@@ -230,6 +230,8 @@ describe('proxy', () => {
     const setCookie = response.headers.get('set-cookie') ?? '';
     expect(setCookie).toContain('sp_rt=;');
     expect(setCookie).toContain('sp_at=;');
+    // story 4762 — this clear rides on a `/api/*` fetch: the page's fetch gate must be told (the phone shell then writes the cleared cookies to disk)
+    expect(response.headers.get('x-session-changed')).toBe('1');
   });
 
   it('clears cookies with matching Domain attribute when NEXT_PUBLIC_COOKIE_DOMAIN is set (prod root cause — story e5225c0a 3차)', async () => {
@@ -267,6 +269,7 @@ describe('proxy', () => {
     const setCookie = response.headers.get('set-cookie') ?? '';
     expect(setCookie).not.toContain('sp_rt=;');
     expect(setCookie).not.toContain('sp_at=;');
+    expect(response.headers.get('x-session-changed')).toBeNull(); // story 4762 — no session cookie changed, nothing to tell
   });
 
   it('네트워크 레벨 throw(fetch reject — 타임아웃/DNS 등)에서도 sp_at/sp_rt를 지우지 않는다 — 토큰 자체는 무관하므로(story #2124 ㉯)', async () => {
@@ -445,6 +448,7 @@ describe('proxy', () => {
     expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow');
     expect(response.headers.get('set-cookie')).toContain('sp_at=');
+    expect(response.headers.get('x-session-changed')).toBe('1'); // story 4762 — a refreshed session is announced (applyTokenCookies)
   });
 
   it('sp_at 쿠키 자체가 없어(만료 후 삭제 등) refresh를 타도, 그 새 토큰으로 legacy 리소스 경로가 여전히 301 해소된다(story #2212)', async () => {
