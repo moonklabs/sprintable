@@ -8,7 +8,7 @@ import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 
 /**
  * story 4766 (AC5): the session ended while a person was on the onboarding. `fetchWithAuth` tells the whole page (session-expired-signal) and
- * from then on answers 401 without asking the network — but the «세션이 끝났어요» dialog is mounted only in the dashboard shell
+ * from then on answers 401 without asking the network — but the session-expired dialog is mounted only in the dashboard shell
  * (dashboard-shell.tsx), so here nothing was said: the connection panel stood on «대기» with no way out but a reload nobody was told to make.
  * One line and one button, drawn only when the signal comes: [다시 로그인] goes to the sign-in with this very address as `next`, so the person
  * lands on the same onboarding page (the arrival finds their organization and opens the same screen — nothing is made twice).

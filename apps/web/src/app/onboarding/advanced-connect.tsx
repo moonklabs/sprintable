@@ -54,6 +54,8 @@ interface Draft { projectId?: string; agentId?: string; key?: string }
 const NEW_KEY_DAYS = 90; // the same default the agent's key manager offers
 /** where Claude Code keeps the key `claude mcp add` is given (measured: ~/.claude.json, mode 0600, plain text) — passed into the sentence, not written in it */
 const CLAUDE_SETTINGS_FILE = '~/.claude.json';
+/** the option Claude Code's first-run folder question is answered with — its own on-screen word, passed in rather than written into the sentence */
+const CLAUDE_TRUST_YES = 'Yes';
 
 export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWorking }: AdvancedConnectProps) {
   const t = useTranslations('onboarding.advanced');
@@ -64,6 +66,7 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
   const [runtime, setRuntime] = useState<ConnectRuntime>('claude');
   const [copied, setCopied] = useState(false);
   const [copyFailedLine, setCopyFailedLine] = useState<string | null>(null);
+  const [rawShownFor, setRawShownFor] = useState<string | null>(null); // the real line is shown only after a press, and only for the line pressed for
   const [revoked, setRevoked] = useState(false);
   const [revoking, setRevoking] = useState(false);
   const [revokeFailed, setRevokeFailed] = useState(false);
@@ -270,7 +273,7 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
   const keyLine = made
     ? (runtime === 'claude' ? t('keyLineClaude', { key: maskKey(made.key), file: CLAUDE_SETTINGS_FILE }) : t('keyLineCodex', { key: maskKey(made.key), env: CODEX_KEY_ENV }))
     : '';
-  const nextLine = runtime === 'claude' ? t('nextClaude', { sentence }) : t('nextCodex', { sentence });
+  const nextLine = runtime === 'claude' ? t('nextClaude', { sentence, yes: CLAUDE_TRUST_YES }) : t('nextCodex', { sentence });
 
   return (
     <div className="space-y-3" data-testid="advanced-connect">
@@ -345,19 +348,6 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
             <pre className="overflow-x-auto whitespace-pre-wrap break-all bg-muted/40 p-3 font-mono text-xs leading-relaxed" data-testid="advanced-line">{shownLine}</pre>
           </div>
 
-          {copyFailedLine ? (
-            <div className="space-y-1.5 rounded-md border border-destructive/30 bg-destructive-tint p-3">
-              <p role="alert" className="break-keep text-xs text-foreground">{t('copyFailed')}</p>
-              <textarea
-                readOnly
-                value={copyFailedLine}
-                onFocus={(e) => e.currentTarget.select()}
-                className="w-full resize-none rounded border border-border bg-background p-2 font-mono text-base text-foreground lg:text-xs"
-                rows={4}
-                data-testid="advanced-copy-failed-raw"
-              />
-            </div>
-          ) : null}
 
           {/* the key's places, by name — the same place as the revoke button (Kadir's lens (1)) */}
           <div className="flex flex-wrap items-start gap-2 rounded-md border border-warning-border bg-warning-tint px-3 py-2.5 text-xs text-foreground" data-testid="advanced-key-line">
@@ -368,6 +358,27 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
             </Button>
             {revokeFailed ? <p role="alert" className="w-full break-keep text-foreground" data-testid="advanced-revoke-failed">{t('revokeFailed')}</p> : null}
           </div>
+
+          {/* the clipboard refused: the real line is not drawn until the person asks for it — here, right under the key's warning */}
+          {copyFailedLine ? (
+            <div className="space-y-1.5 rounded-md border border-destructive/30 bg-destructive-tint p-3">
+              <p role="alert" className="break-keep text-xs text-foreground">{t('copyFailed')}</p>
+              {rawShownFor === copyFailedLine ? (
+                <textarea
+                  readOnly
+                  value={copyFailedLine}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="w-full resize-none rounded border border-border bg-background p-2 font-mono text-base text-foreground lg:text-xs"
+                  rows={4}
+                  data-testid="advanced-copy-failed-raw"
+                />
+              ) : (
+                <Button variant="outline" size="sm" onClick={() => setRawShownFor(copyFailedLine)} data-testid="advanced-show-command">
+                  {t('showCommand')}
+                </Button>
+              )}
+            </div>
+          ) : null}
 
           <p className="break-keep text-xs text-muted-foreground" data-testid="advanced-next">{nextLine}</p>
 
@@ -382,7 +393,7 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
             {rail.timedOut ? (
               <div role="status" className="rounded-md border border-info-border bg-info-tint px-3 py-2.5 text-xs text-foreground" data-testid="advanced-timeout">
                 <p className="font-medium">{tOnb('verifyTimeoutTitle')}</p>
-                <p className="mt-1">{tOnb('verifyTimeoutHint')}</p>
+                <p className="mt-1">{t('timeoutHint')}</p>
                 <Button variant="outline" size="sm" className="mt-2" onClick={() => void rail.handleVerify()} disabled={rail.verifying} data-testid="advanced-retest">
                   {tOnb('verifyRetry')}
                 </Button>

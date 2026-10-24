@@ -32,11 +32,12 @@ vi.mock('@/lib/db/client', () => ({
 }));
 
 const copied: string[] = [];
+const promised: Promise<string>[] = []; // every line the press handed the clipboard a promise of
 let copyOk = true;
 vi.mock('@/lib/clipboard', () => ({
   copyTextSafely: vi.fn(async (text: string) => { copied.push(text); return copyOk ? { ok: true } : { ok: false }; }),
   // the press hands the clipboard a PROMISE of the line (the write starts inside the click) — settled here the way the browser would
-  copyPromisedText: vi.fn(async (p: Promise<string>) => { try { const text = await p; copied.push(text); return copyOk ? { ok: true } : { ok: false }; } catch { return { ok: false }; } }),
+  copyPromisedText: vi.fn(async (p: Promise<string>) => { promised.push(p); try { const text = await p; copied.push(text); return copyOk ? { ok: true } : { ok: false }; } catch { return { ok: false }; } }),
 }));
 vi.mock('@/components/desktop/desktop-setup', () => ({
   INSTALL: { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'curl -fsSL https://example.test/codex/install.sh | sh' },
@@ -86,7 +87,7 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  calls.length = 0; copied.length = 0; copyOk = true;
+  calls.length = 0; copied.length = 0; promised.length = 0; copyOk = true;
   happyRoutes();
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.clearAllMocks(); });
@@ -125,7 +126,7 @@ describe('AdvancedConnect — story 4766', () => {
     await mount();
     await press('advanced-make');
     const line = q('advanced-key-line')!;
-    expect(line.textContent).toContain('셸 기록');
+    expect(line.textContent).toContain('터미널 명령 기록');
     expect(line.textContent).toContain('클립보드');
     expect(line.textContent).toContain('~/.claude.json');
     expect(line.contains(q('advanced-revoke'))).toBe(true);
@@ -141,7 +142,7 @@ describe('AdvancedConnect — story 4766', () => {
     await press('advanced-copy');
     expect(copied.at(-1)).toContain(`export SPRINTABLE_AGENT_KEY='${KEY}' && codex mcp add sprintable-mcp --url ${MCP} --bearer-token-env-var SPRINTABLE_AGENT_KEY`);
     expect(q('advanced-key-line')?.textContent).toContain('SPRINTABLE_AGENT_KEY');
-    expect(q('advanced-key-line')?.textContent).toContain('셸 기록');
+    expect(q('advanced-key-line')?.textContent).toContain('터미널 명령 기록');
     expect(q('advanced-line')?.textContent).not.toContain(KEY);
   });
 
@@ -197,13 +198,56 @@ describe('AdvancedConnect — story 4766', () => {
     expect(q('advanced-make')?.hasAttribute('disabled')).toBe(false);
   });
 
-  it('AC7 pasting fails (the clipboard refuses) → said, and the real line is offered to select by hand', async () => {
+  it('AC7 pasting fails (the clipboard refuses) → said; the real line is NOT drawn until [명령 보기] is pressed, right under the key\'s warning', async () => {
     copyOk = false;
     await mount();
     await press('advanced-make');
     expect(text()).toContain(ko.copyFailed);
-    expect((q('advanced-copy-failed-raw') as HTMLTextAreaElement).value).toContain(`Bearer ${KEY}`);
+    // before the press: no raw line anywhere on the screen (the masked one is the only line drawn)
+    expect(q('advanced-copy-failed-raw')).toBeNull();
+    expect(container.innerHTML).not.toContain(KEY);
     expect(q('advanced-copy')?.textContent).not.toContain(ko.copied); // never «복사됨» for a copy that failed
+    // the button sits after the warning box (same place, the warning first)
+    const warn = q('advanced-key-line')!; const show = q('advanced-show-command')!;
+    expect(show).not.toBeNull();
+    expect(warn.compareDocumentPosition(show) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await press('advanced-show-command');
+    expect((q('advanced-copy-failed-raw') as HTMLTextAreaElement).value).toContain(`Bearer ${KEY}`);
+    expect(q('advanced-show-command')).toBeNull();
+  });
+
+  it('a failed copy that is shown, then a new key is made: the new line is hidden again until pressed for', async () => {
+    copyOk = false;
+    await mount();
+    await press('advanced-make');
+    await press('advanced-show-command');
+    await press('advanced-revoke');
+    await press('advanced-make'); // «다시 만들기» after the revoke → rekey
+    expect(q('advanced-copy-failed-raw')).toBeNull();
+    expect(container.innerHTML).not.toContain('sk_live_NEWKEY');
+  });
+
+  it('codex/Kadir — every failure branch REJECTS the promise the clipboard was handed (nothing half-written, no hanging write)', async () => {
+    const branches: [string, Record<string, Handler>][] = [
+      ['project', { 'POST /api/projects': () => ({ ok: false, status: 500, body: {} }) }],
+      ['agent', { 'POST /api/team-members': () => ({ ok: false, status: 500, body: {} }) }],
+      ['key', { 'POST /api/team-members': () => ({ ok: true, body: { data: { id: 'agent-1' } } }), 'POST /api/agents/agent-1/api-key': () => ({ ok: false, status: 500, body: {} }) }],
+      ['hosted', { 'GET /api/agents/agent-1/connection-artifact': () => ({ ok: false, status: 400, body: {} }) }],
+      ['network', { 'POST /api/team-members': () => { throw new Error('offline'); } }],
+    ];
+    for (const [name, over] of branches) {
+      happyRoutes(over);
+      promised.length = 0;
+      await mount();
+      await press('advanced-make');
+      expect(promised, name).toHaveLength(1);
+      const settled = await Promise.race([
+        promised[0]!.then(() => 'resolved', () => 'rejected'),
+        new Promise<string>((r) => setTimeout(() => r('still pending'), 50)),
+      ]);
+      expect(settled, `${name}: the clipboard's promise`).toBe('rejected');
+      await act(async () => { root.render(<div />); });
+    }
   });
 
   it('an existing first project is used, not a second one made (a reload · a second visit)', async () => {

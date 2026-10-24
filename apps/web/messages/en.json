@@ -1730,24 +1730,26 @@
       "defaultAgent": "My agent",
       "runtimeLabel": "Program to connect",
       "lineLabel": "Paste in a terminal and press Enter",
-      "copyFailed": "Could not copy. Select the command below and copy it yourself.",
+      "copyFailed": "Could not copy. Press “Show command”, then select the command and copy it yourself.",
+      "showCommand": "Show command",
       "keyLineClaude": "This command holds this agent's key ({key}). It stays in your shell history, the clipboard and Claude Code's settings file ({file}), and shows in the process list while the command runs. Do not share it, and revoke the key right away if it leaks.",
       "keyLineCodex": "This command holds this agent's key ({key}). It stays in your shell history and the clipboard, shows in the process list while the command runs, and Codex reads the key from an environment variable ({env}) in this terminal (not from a settings file — set the same variable in any other terminal). Do not share it, and revoke the key right away if it leaks.",
       "revoke": "Revoke key",
       "revoking": "Revoking…",
-      "revokeFailed": "Could not revoke the key. Try again in a moment. You can also revoke it under Settings › Members.",
-      "revokedNote": "The key is revoked. The command above no longer works. To connect again, make it again with a new key.",
-      "nextClaude": "Paste and press Enter: the agent connects and Claude Code opens and asks “{sentence}”. If it asks whether it may use the tool, allow it — this screen then turns to “connected” by itself.",
-      "nextCodex": "Paste and press Enter: the agent connects and Codex opens and asks “{sentence}”. If it asks whether it may use the tool, allow it — this screen then turns to “connected” by itself.",
+      "revokeFailed": "Could not revoke the key. Try again in a moment. You can also revoke it from the Agents menu: open this agent and use its API key list.",
+      "revokedNote": "The key is revoked. The command you copied no longer works. To connect again, make it again with a new key.",
+      "timeoutHint": "Check that the command you pasted ran to the end and that you allowed the tool when the agent asked, then press Run test.",
+      "nextClaude": "Paste and press Enter: the agent connects and Claude Code opens and sends “{sentence}” as its first message. If it asks whether you trust the folder, move ❯ to “{yes}” and press Enter. If it asks whether it may use the tool, allow it — this screen then turns to “Connection verified” by itself.",
+      "nextCodex": "Paste and press Enter: the agent connects and Codex opens and sends “{sentence}” as its first message. If it asks whether it may use the tool, allow it — this screen then turns to “Connection verified” by itself.",
       "failure": {
         "network": "The network dropped. Check your connection and press again.",
         "project": "Could not make the project. Press again.",
         "agent": "Could not make the agent. Press again.",
         "key": "Did not get the agent's key. Press again.",
-        "hosted": "This environment has no connection address for a no-app setup. Use the Mac app, or connect from Settings › Agents."
+        "hosted": "This environment has no connection address for a no-app setup. Use the Mac app, or connect from the Agents menu."
       }
     },
-    "sessionExpired": "Your session ended — sign in again",
+    "sessionExpired": "Your session expired",
     "sessionExpiredCta": "Sign in again",
     "first": {
       "macTitle": "Your agents run on your Mac",
