@@ -5,7 +5,7 @@ organization: the account lives on, so the device token, the keys the setup hand
 handed over. The removal now closes them; this migration closes the ones EARLIER removals left (a token + setup-row close alone would leave a live agent key and an
 active agent on every such row).
 
-The same one set-based pass as 0463, for every open setup whose confirming person has a seat row in the SETUP'S organization that is soft-deleted (`org_members.deleted_at`):
+The same one set-based pass as 0463, for every open setup whose confirming person has a seat row in the SETUP'S organization that is soft-deleted (`org_members.deleted_at`) or no seat row there at all:
   · device tokens revoked · the keys the setup handed out revoked · open commands (`queued` · `delivered`) rejected `device_disconnected` (an `answered` permission request
     of a rejected answer moves to rejected; a rejected clock edit loses its typed words) · clock views dropped · the agents the setup made (not the ones it only
     attached) deactivated · the setup row revoked (`revoked_by` = the confirming person — the remover of old rows is not recorded, `revoked_reason` = `member_removed`)
@@ -23,10 +23,11 @@ down_revision = "0463"
 branch_labels = None
 depends_on = None
 
-# the open computers of a person who was removed from the setup's organization (a soft-deleted seat row)
+# the open computers of a person who was removed from the setup's organization (a soft-deleted seat row) or who has no seat row there at all (PO 4769, fail-closed:
+# the relay refuses such a row, so its keys are closed with it)
 _GONE = (
-    "SELECT s.id FROM desktop_setups s JOIN org_members om ON om.org_id = s.org_id AND om.user_id = s.confirmed_by "
-    "WHERE s.revoked_at IS NULL AND om.deleted_at IS NOT NULL"
+    "SELECT s.id FROM desktop_setups s LEFT JOIN org_members om ON om.org_id = s.org_id AND om.user_id = s.confirmed_by "
+    "WHERE s.revoked_at IS NULL AND s.confirmed_by IS NOT NULL AND s.org_id IS NOT NULL AND (om.id IS NULL OR om.deleted_at IS NOT NULL)"
 )
 
 # the agents a setup MADE (its `members` line has no `existing` mark), as uuids. The cast sits inside a CASE so that a malformed legacy id can never be cast: a regex in a

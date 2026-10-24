@@ -1376,8 +1376,8 @@ ACCOUNT_DELETED_REASON = "account_deleted"
 
 async def confirming_person_is_gone(db: AsyncSession, setup: DesktopSetup) -> bool:
     """story #4767/#4769: the account of the person who confirmed this setup is closed or deleted, OR they were removed from the setup's organization.
-    No confirmer recorded, no `users` row for it, and no `org_members` row for (organization, person) are not «gone» (the same reading as the relay's
-    device authentication)."""
+    No confirmer recorded and no `users` row for it are not «gone»; a recorded confirmer with NO `org_members` row for (organization, person) is (PO 4769,
+    fail-closed — the same reading as the relay's device authentication)."""
     from app.models.project import OrgMember
     from app.models.user import User
 
@@ -1391,7 +1391,7 @@ async def confirming_person_is_gone(db: AsyncSession, setup: DesktopSetup) -> bo
     seat = (await db.execute(
         select(OrgMember.deleted_at).where(OrgMember.org_id == setup.org_id, OrgMember.user_id == setup.confirmed_by)
     )).first()
-    return seat is not None and seat.deleted_at is not None
+    return seat is None or seat.deleted_at is not None
 
 
 MEMBER_REMOVED_REASON = "member_removed"

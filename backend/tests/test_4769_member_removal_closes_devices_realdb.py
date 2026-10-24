@@ -174,7 +174,8 @@ async def test_03_a_removal_that_cannot_close_the_computers_fails_whole(monkeypa
 
 async def test_04_a_row_an_older_removal_left_is_refused_at_authentication():
     """The removals before this story closed no computer: the seat row is soft-deleted, the device row is open. Authentication refuses it (and an open stream ends at
-    its next check); a person with NO seat row at all keeps the 4618 contract."""
+    its next check). PO 4769 (fail-closed): a person with NO seat row at all is refused the same way — no live path makes such a row (every confirmation needs a live
+    owner/admin seat; nothing hard-deletes one) — while a setup with no confirmer recorded is still not judged."""
     from app.models.desktop_setup import DesktopSetup
     from app.services import desktop_setup
     from app.services.desktop_relay import device_for_token, device_still_valid
@@ -183,11 +184,13 @@ async def test_04_a_row_an_older_removal_left_is_refused_at_authentication():
     try:
         _, _, org_id = await w.person(org=True, name="Owner")
         m = await w.add_member(org_id, role="admin", name="M")
-        stranger = uuid.uuid4()   # no users row, no seat: not judged
+        stranger = uuid.uuid4()   # no users row, no seat: refused (fail-closed)
         comp = await _computer(w, org_id, m)
         unmapped = await _computer(w, org_id, stranger)
+        nobody = await _computer(w, org_id, None)   # no confirmer recorded: not judged
         await _remote_control_on(w, org_id)
-        assert (await _relay(w, org_id, comp["token"]))["setup"] == 200 and (await _relay(w, org_id, unmapped["token"]))["setup"] == 200
+        assert (await _relay(w, org_id, comp["token"]))["setup"] == 200 and (await _relay(w, org_id, nobody["token"]))["setup"] == 200
+        assert await _relay(w, org_id, unmapped["token"]) == {"setup": 401, "startable": 401, "sessions": 401}
 
         await w.sql("UPDATE org_members SET deleted_at = now() WHERE org_id = :o AND user_id = :u", o=org_id, u=m)   # an older removal: nothing else was touched
 
@@ -197,7 +200,14 @@ async def test_04_a_row_an_older_removal_left_is_refused_at_authentication():
             assert await device_still_valid(s, comp["setup_id"]) is False
             assert await device_for_token(s, comp["token"]) is None
             assert await desktop_setup.confirming_person_is_gone(s, await s.get(DesktopSetup, comp["setup_id"])) is True
-        assert (await _relay(w, org_id, unmapped["token"]))["setup"] == 200
+            # no seat row at all: refused at all three sites (the relay, the open stream's recheck, the exchange's reading)
+            assert await device_still_valid(s, unmapped["setup_id"]) is False
+            assert await device_for_token(s, unmapped["token"]) is None
+            assert await desktop_setup.confirming_person_is_gone(s, await s.get(DesktopSetup, unmapped["setup_id"])) is True
+            # no confirmer recorded: not judged
+            assert await device_still_valid(s, nobody["setup_id"]) is True
+            assert await device_for_token(s, nobody["token"]) is not None
+            assert await desktop_setup.confirming_person_is_gone(s, await s.get(DesktopSetup, nobody["setup_id"])) is False
     finally:
         await _close(engine, w)
 
@@ -267,7 +277,10 @@ async def test_06_the_migration_closes_what_older_removals_left_completely_and_t
         legacy = await _computer(w, org_id, removed, name="Legacy")
         mine = await _computer(w, org_id, alive, name="Alive Mac")
         _, _, other_org = await w.person(org=True, name="Other Owner")
-        elsewhere = await _computer(w, other_org, removed, name="Removed person's Mac elsewhere")   # the same person, another organization: no removed seat there
+        await _join(w, other_org, removed)   # the same person keeps an ACTIVE seat in another organization
+        elsewhere = await _computer(w, other_org, removed, name="Removed person's Mac elsewhere")   # …so their computer there is not in the set
+        noseat = await _computer(w, org_id, uuid.uuid4(), name="No seat row at all")   # PO 4769 fail-closed: a recorded confirmer with no seat row is in the set
+        nobody = await _computer(w, org_id, None, name="No confirmer recorded")        # no confirmer recorded: not judged, untouched
         attached = uuid.uuid4()
         async with w.Session() as s:
             s.add(Member(id=attached, org_id=org_id, type="agent", name="Attached Agent", is_active=True))
@@ -295,6 +308,9 @@ async def test_06_the_migration_closes_what_older_removals_left_completely_and_t
                 "mine_agent": await _live(w, "SELECT count(*) FROM members WHERE id = :i AND is_active", i=mine["agent_id"]),
                 "elsewhere": await _row(w, elsewhere["setup_id"]),
                 "elsewhere_tokens": await _live(w, "SELECT count(*) FROM desktop_device_tokens WHERE setup_id = :i AND revoked_at IS NULL", i=elsewhere["setup_id"]),
+                "noseat": await _row(w, noseat["setup_id"]),
+                "noseat_live": await _live(w, "SELECT count(*) FROM desktop_device_tokens t JOIN agent_api_keys k ON k.desktop_setup_id = t.setup_id WHERE t.setup_id = :i AND t.revoked_at IS NULL AND k.revoked_at IS NULL", i=noseat["setup_id"]),
+                "nobody": await _row(w, nobody["setup_id"]),
             }
 
         await _run()
@@ -304,6 +320,8 @@ async def test_06_the_migration_closes_what_older_removals_left_completely_and_t
         assert first["attached"] == 1, "an agent the setup only attached keeps running elsewhere"
         assert first["mine"]["revoked"] is False and first["mine_agent"] == 1
         assert first["elsewhere"]["revoked"] is False and first["elsewhere_tokens"] == 1, "the same person's computer in another organization is untouched"
+        assert first["noseat"]["revoked"] is True and first["noseat"]["revoked_reason"] == "member_removed" and first["noseat_live"] == 0, "no seat row at all is closed too"
+        assert first["nobody"]["revoked"] is False, "a setup with no confirmer recorded is not judged"
         await _run()
         assert await _state() == first, "a second run changes nothing"
     finally:
