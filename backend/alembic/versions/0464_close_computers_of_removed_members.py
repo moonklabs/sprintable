@@ -11,10 +11,14 @@ The same one set-based pass as 0463, for every open setup whose confirming perso
     attached) deactivated · the setup row revoked (`revoked_by` = the confirming person — the remover of old rows is not recorded, `revoked_reason` = `member_removed`)
     — written LAST, one transaction. The agent member rows then the setup rows are locked first, in the service's one order, so the migration cannot deadlock with a live
     exchange, disconnect, deletion or removal.
-Idempotent; data only; `downgrade` is a no-op. A person who was removed and later rejoined (seat row active again) is not in the set; a person whose ACCOUNT was
+Before it closes anything it writes ONE ROW PER COMPUTER to `desktop_setup_closures` (created here; ids only, never values): the setup id, the person, whether the seat was soft-deleted or
+absent, and the ids of the device tokens, agent keys and agents it is about to revoke / stop — so a count that later turns out wrong can be undone for exactly those ids by a
+follow-up (PO 4769: the migration cannot be rolled back, but it can be traced). A second run finds nothing open and records nothing.
+Idempotent; the closing statements are data only; `downgrade` drops the record table and re-opens nothing. A person who was removed and later rejoined (seat row active again) is not in the set; a person whose ACCOUNT was
 deleted was closed by 0463. Not done here: the pushes `reject_open_commands` schedules to the person who answered (a migration sends nothing).
 """
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
@@ -40,11 +44,24 @@ _MADE = (
     f"WHERE x.mid IS NOT NULL AND s.id IN ({_GONE})"
 )
 
+# the record of what this run is about to close, by id (see the module docstring): one row per open computer of the set, taken while the rows are still open
+_RECORD = (
+    "INSERT INTO desktop_setup_closures (id, org_id, setup_id, confirmed_by, migration, reason, seatless, token_ids, key_ids, agent_ids) "
+    "SELECT gen_random_uuid(), s.org_id, s.id, s.confirmed_by, '0464', 'member_removed', (om.id IS NULL), "
+    "COALESCE((SELECT jsonb_agg(t.id ORDER BY t.id) FROM desktop_device_tokens t WHERE t.setup_id = s.id AND t.revoked_at IS NULL), '[]'::jsonb), "
+    "COALESCE((SELECT jsonb_agg(k.id ORDER BY k.id) FROM agent_api_keys k WHERE k.desktop_setup_id = s.id AND k.revoked_at IS NULL), '[]'::jsonb), "
+    f"COALESCE((SELECT jsonb_agg(m.id ORDER BY m.id) FROM members m JOIN ({_MADE}) made ON made.id = m.id "
+    "WHERE made.setup_id = s.id AND m.org_id = made.org_id AND m.type = 'agent' AND m.is_active), '[]'::jsonb) "
+    "FROM desktop_setups s LEFT JOIN org_members om ON om.org_id = s.org_id AND om.user_id = s.confirmed_by "
+    f"WHERE s.id IN ({_GONE})"
+)
+
 STATEMENTS = (
     # the service's one lock order first (desktop_setup._lock_in_order: the agent member rows by id, then the setup rows by id) — every live path (an exchange, a disconnect,
     # the account deletion) takes its rows in that order and then updates keys and tokens, so taking them first here keeps this transaction from deadlocking with them
     f"SELECT m.id FROM members m WHERE m.id IN (SELECT id FROM ({_MADE}) made) ORDER BY m.id FOR UPDATE",
     f"SELECT s.id FROM desktop_setups s WHERE s.id IN ({_GONE}) ORDER BY s.id FOR UPDATE",
+    _RECORD,
     # what `reject_open_commands` does besides the commands: an answer a person gave that never reached the device stops reading «answered» (the request moves to rejected)
     (
         "UPDATE agent_permission_requests r SET state = 'rejected', result_code = 'device_disconnected' FROM desktop_commands c "
@@ -77,9 +94,28 @@ STATEMENTS = (
 
 
 def upgrade() -> None:
+    op.create_table(
+        "desktop_setup_closures",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column("org_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("setup_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("confirmed_by", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("migration", sa.Text(), nullable=False),
+        sa.Column("reason", sa.Text(), nullable=False),
+        sa.Column("seatless", sa.Boolean(), nullable=False),
+        sa.Column("token_ids", postgresql.JSONB(), nullable=False),
+        sa.Column("key_ids", postgresql.JSONB(), nullable=False),
+        sa.Column("agent_ids", postgresql.JSONB(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    op.create_index("ix_desktop_setup_closures_org_id", "desktop_setup_closures", ["org_id"])
+    op.create_index("ix_desktop_setup_closures_setup_id", "desktop_setup_closures", ["setup_id"])
     for statement in STATEMENTS:
         op.execute(sa.text(statement))
 
 
 def downgrade() -> None:
-    pass  # data only: a computer closed because its person left the organization is not re-opened
+    # the closing is data only and is not re-opened; the record table is schema and goes with the revision
+    op.drop_index("ix_desktop_setup_closures_setup_id", table_name="desktop_setup_closures")
+    op.drop_index("ix_desktop_setup_closures_org_id", table_name="desktop_setup_closures")
+    op.drop_table("desktop_setup_closures")

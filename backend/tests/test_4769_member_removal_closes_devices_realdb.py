@@ -77,7 +77,7 @@ async def _remove(w, owner_email: str, org_id: uuid.UUID, user_id: uuid.UUID):
 async def test_01_the_removal_closes_the_persons_computer_and_only_that_organizations():
     engine, w = await _world()
     try:
-        _, owner_email, org_id = await w.person(org=True, name="Owner")
+        owner_uid, owner_email, org_id = await w.person(org=True, name="Owner")
         m = await w.add_member(org_id, role="admin", name="M")
         # M's computer in this organization, an agent M's setup only attached, and M's computer in ANOTHER organization
         here = await _computer(w, org_id, m, name="Mac of M")
@@ -94,6 +94,7 @@ async def test_01_the_removal_closes_the_persons_computer_and_only_that_organiza
         assert await _relay(w, org_id, here["token"]) == {"setup": 401, "startable": 401, "sessions": 401}
         row = await _row(w, here["setup_id"])
         assert row["revoked"] is True and row["revoked_reason"] == "member_removed"
+        assert row["revoked_by"] == owner_uid, "the audit line names whoever removed the person, not the person"
         assert await _live(w, "SELECT count(*) FROM desktop_device_tokens WHERE setup_id = :i AND revoked_at IS NULL", i=here["setup_id"]) == 0
         assert await _live(w, "SELECT count(*) FROM agent_api_keys WHERE desktop_setup_id = :i AND revoked_at IS NULL", i=here["setup_id"]) == 0
         assert await _live(w, "SELECT count(*) FROM members WHERE id = :i AND is_active", i=here["agent_id"]) == 0
@@ -126,6 +127,40 @@ async def test_01b_an_attached_agent_stays_and_a_malformed_legacy_line_does_not_
         assert (await _row(w, comp["setup_id"]))["revoked_reason"] == "member_removed"
         assert await _live(w, "SELECT count(*) FROM members WHERE id = :i AND is_active", i=comp["agent_id"]) == 0
         assert await _live(w, "SELECT count(*) FROM members WHERE id = :i AND is_active", i=attached) == 1
+    finally:
+        await _close(engine, w)
+
+
+async def test_01c_the_removal_takes_the_seat_before_it_touches_the_agent_and_setup_rows():
+    """Kadir's lens (a mutant only the stress saw): the removal locks the person's SEAT row first — before the agent member rows and the setup rows — which is the one lock order
+    the exchange (seat FOR SHARE) and the account deletion keep. Deterministic pin: a second session holds the seat FOR SHARE (as an exchange would); the removal must wait on the
+    seat WITHOUT having locked the setup row yet, so a NOWAIT lock on that row from a third session succeeds. Without the early seat lock the closer would already hold the setup
+    row while it waits at the seat's soft delete (the half of the deadlock pair)."""
+    import asyncio
+
+    from sqlalchemy import select, text
+
+    from app.models.project import OrgMember
+
+    engine, w = await _world()
+    try:
+        _, owner_email, org_id = await w.person(org=True, name="Owner")
+        m = await w.add_member(org_id, role="admin", name="M")
+        comp = await _computer(w, org_id, m)
+        holder = w.Session()
+        async with holder:
+            await holder.execute(select(OrgMember.id).where(OrgMember.org_id == org_id, OrgMember.user_id == m).with_for_update(read=True))
+            removal = asyncio.create_task(_remove(w, owner_email, org_id, m))
+            await asyncio.sleep(1.0)
+            assert not removal.done(), "the removal waits for the seat"
+            async with w.Session() as probe:
+                # NOWAIT: raises if the removal already holds the setup row
+                await probe.execute(text("SELECT id FROM desktop_setups WHERE id = :i FOR UPDATE NOWAIT"), {"i": comp["setup_id"]})
+                await probe.rollback()
+            await holder.rollback()
+        r = await asyncio.wait_for(removal, timeout=15)
+        assert r.status_code == 200, r.text
+        assert (await _row(w, comp["setup_id"]))["revoked"] is True
     finally:
         await _close(engine, w)
 
@@ -279,7 +314,8 @@ async def test_06_the_migration_closes_what_older_removals_left_completely_and_t
         _, _, other_org = await w.person(org=True, name="Other Owner")
         await _join(w, other_org, removed)   # the same person keeps an ACTIVE seat in another organization
         elsewhere = await _computer(w, other_org, removed, name="Removed person's Mac elsewhere")   # …so their computer there is not in the set
-        noseat = await _computer(w, org_id, uuid.uuid4(), name="No seat row at all")   # PO 4769 fail-closed: a recorded confirmer with no seat row is in the set
+        noseat_person = uuid.uuid4()
+        noseat = await _computer(w, org_id, noseat_person, name="No seat row at all")   # PO 4769 fail-closed: a recorded confirmer with no seat row is in the set
         nobody = await _computer(w, org_id, None, name="No confirmer recorded")        # no confirmer recorded: not judged, untouched
         attached = uuid.uuid4()
         async with w.Session() as s:
@@ -290,6 +326,46 @@ async def test_06_the_migration_closes_what_older_removals_left_completely_and_t
             line=f'[{{"kind": "agent", "member_id": "{attached}", "existing": true}}]', i=legacy["setup_id"],
         )
         await w.sql("UPDATE org_members SET deleted_at = now() WHERE org_id = :o AND user_id = :u", o=org_id, u=removed)   # an older removal: the closer never ran
+        # the rest of what the closer writes (Kadir's lens: these four pieces were caught only by probes) — an open command, a clock view, an answer that never reached the device,
+        # and the typed words of a clock edit that never reached the computer
+        from datetime import UTC, datetime, timedelta
+
+        from app.models.agent_permission import AgentPermissionRequest
+        from app.models.desktop_relay import DesktopClockView, DesktopCommand
+
+        async with w.Session() as sess:
+            sess.add(DesktopCommand(
+                id=uuid.uuid4(), setup_id=legacy["setup_id"], device_seq=1, kind="send_prompt", payload={}, idempotency_key="k", requested_by=removed, state="queued",
+            ))
+            sess.add(DesktopClockView(setup_id=legacy["setup_id"], mode="panel", view={}, expires_at=datetime.now(UTC)))
+            req_id = uuid.uuid4()
+            sess.add(AgentPermissionRequest(
+                id=uuid.uuid4(), setup_id=legacy["setup_id"], request_id=req_id, session_key="s1", agent_member_id=legacy["agent_id"], runtime="claude", tool="Bash",
+                summary="ls", input_hash="h", expires_at=datetime.now(UTC) + timedelta(hours=1), state="answered", recipient_reason="paired",
+            ))
+            sess.add(DesktopCommand(
+                id=uuid.uuid4(), setup_id=legacy["setup_id"], device_seq=2, kind="answer_approval", payload={"request_id": str(req_id), "stage": "ask"},
+                idempotency_key="k2", requested_by=removed, state="delivered",
+            ))
+            sess.add(DesktopCommand(
+                id=uuid.uuid4(), setup_id=legacy["setup_id"], device_seq=3, kind="clock", payload={"action": "out_open", "edit": {"base_rev": 4, "text": "typed words"}},
+                idempotency_key="k3", requested_by=removed, state="queued",
+            ))
+            await sess.commit()
+
+        async def _ids(sql: str, **kw) -> list[str]:
+            async with w.Session() as sess:
+                return sorted(str(r[0]) for r in (await sess.execute(text(sql), kw)).all())
+
+        # the ids the migration is about to close, taken BEFORE the run — the record must name exactly these
+        before = {
+            sid: {
+                "tokens": await _ids("SELECT id FROM desktop_device_tokens WHERE setup_id = :i AND revoked_at IS NULL", i=sid),
+                "keys": await _ids("SELECT id FROM agent_api_keys WHERE desktop_setup_id = :i AND revoked_at IS NULL", i=sid),
+            }
+            for sid in (legacy["setup_id"], noseat["setup_id"])
+        }
+        agent_of = {legacy["setup_id"]: str(legacy["agent_id"]), noseat["setup_id"]: str(noseat["agent_id"])}
 
         async def _run():
             async with w.Session() as s:
@@ -308,6 +384,11 @@ async def test_06_the_migration_closes_what_older_removals_left_completely_and_t
                 "mine_agent": await _live(w, "SELECT count(*) FROM members WHERE id = :i AND is_active", i=mine["agent_id"]),
                 "elsewhere": await _row(w, elsewhere["setup_id"]),
                 "elsewhere_tokens": await _live(w, "SELECT count(*) FROM desktop_device_tokens WHERE setup_id = :i AND revoked_at IS NULL", i=elsewhere["setup_id"]),
+                "views": await _live(w, "SELECT count(*) FROM desktop_clock_views WHERE setup_id = :i", i=legacy["setup_id"]),
+                "answered": await _live(w, "SELECT count(*) FROM agent_permission_requests WHERE setup_id = :i AND state = 'rejected' AND result_code = 'device_disconnected'", i=legacy["setup_id"]),
+                "open_commands": await _live(w, "SELECT count(*) FROM desktop_commands WHERE setup_id = :i AND state IN ('queued', 'delivered')", i=legacy["setup_id"]),
+                "typed": await _live(w, "SELECT count(*) FROM desktop_commands WHERE setup_id = :i AND payload::text LIKE '%typed words%'", i=legacy["setup_id"]),
+                "records": await _live(w, "SELECT count(*) FROM desktop_setup_closures WHERE migration = '0464' AND setup_id IN (:a, :b)", a=legacy["setup_id"], b=noseat["setup_id"]),
                 "noseat": await _row(w, noseat["setup_id"]),
                 "noseat_live": await _live(w, "SELECT count(*) FROM desktop_device_tokens t JOIN agent_api_keys k ON k.desktop_setup_id = t.setup_id WHERE t.setup_id = :i AND t.revoked_at IS NULL AND k.revoked_at IS NULL", i=noseat["setup_id"]),
                 "nobody": await _row(w, nobody["setup_id"]),
@@ -320,6 +401,20 @@ async def test_06_the_migration_closes_what_older_removals_left_completely_and_t
         assert first["attached"] == 1, "an agent the setup only attached keeps running elsewhere"
         assert first["mine"]["revoked"] is False and first["mine_agent"] == 1
         assert first["elsewhere"]["revoked"] is False and first["elsewhere_tokens"] == 1, "the same person's computer in another organization is untouched"
+        assert (first["views"], first["open_commands"], first["typed"]) == (0, 0, 0), "the clock view is dropped, the open commands rejected, the typed words scrubbed"
+        assert first["answered"] == 1, "the answer that never reached the device stops reading «answered» (the permission request moves to rejected)"
+        # the record: one row per closed computer, naming exactly the ids that were closed — and a second run records nothing more
+        assert first["records"] == 2
+        async with w.Session() as sess:
+            recs = {r.setup_id: r for r in (await sess.execute(text(
+                "SELECT setup_id, confirmed_by, reason, seatless, token_ids, key_ids, agent_ids FROM desktop_setup_closures WHERE migration = '0464' AND setup_id IN (:a, :b)"),
+                {"a": legacy["setup_id"], "b": noseat["setup_id"]})).all()}
+        for sid, who, seatless in ((legacy["setup_id"], removed, False), (noseat["setup_id"], noseat_person, True)):
+            r = recs[sid]
+            assert (r.confirmed_by, r.reason, r.seatless) == (who, "member_removed", seatless)
+            assert sorted(r.token_ids) == before[sid]["tokens"] and len(r.token_ids) == 1
+            assert sorted(r.key_ids) == before[sid]["keys"] and len(r.key_ids) == 1
+            assert sorted(r.agent_ids) == [agent_of[sid]], "the made agent only — never the one the setup attached"
         assert first["noseat"]["revoked"] is True and first["noseat"]["revoked_reason"] == "member_removed" and first["noseat_live"] == 0, "no seat row at all is closed too"
         assert first["nobody"]["revoked"] is False, "a setup with no confirmer recorded is not judged"
         await _run()
