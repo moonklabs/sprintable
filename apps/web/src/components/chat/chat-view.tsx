@@ -10,6 +10,8 @@ import { ChatBubble } from './chat-bubble';
 import { ConnectionLostBanner } from './connection-lost-banner';
 import type { PresenceStatus } from './presence-dot';
 import { CommandHintNotice, type BlockedHint } from './command-hint-notice';
+import { AgentWakeNotice } from './agent-wake-notice';
+import { agentsStillToWake, recalledAgentWake } from '@/lib/chat/agent-wake';
 import { ReferenceDropNotice, parseDroppedReferences, type DroppedReference } from './reference-drop-notice';
 import { ChatInput, type CommandTarget } from './chat-input';
 import { ThreadPanel } from './thread-panel';
@@ -168,6 +170,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const isMobile = useIsMobile();
   const { addToast } = useToast();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const messagesRef = useRef<ChatMessage[]>([]); // story #4761 — the SSE handler reads the list as it is now (the nudge line of a message)
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
   // story #3638(유나 디자인 CHANGES 2026-09-07) — 초기 로드(:349) 실패가 messages를
   // 빈 배열로 남겨 「대화를 시작하세요」를 그렸다 — 메시지가 있는 대화를 «없다»고
   // 말하는 §1 클래스(모름을 없음으로 오독). ConnectionLostBanner는 handlePoll 경로
@@ -244,6 +248,10 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // CB-S9: 스레드 패널 상태
   const [activeThread, setActiveThread] = useState<ChatMessage | null>(null);
   const [threadIncoming, setThreadIncoming] = useState<ChatMessage | null>(null);
+  // story #4761 — the nudge line ends ONE WAY: once an agent has answered in the thread of my message (those replies never enter
+  // `messages`) it is struck from that message's line for good — nothing later (a cap, a reused view, a flood of other threads) brings it
+  // back. Only an agent that is on an open line is written down, so this holds a few ids, not every reply.
+  const [wakeEnded, setWakeEnded] = useState<Record<string, string[]>>({});
   // activeThread 열림 여부를 ref로 추적 — popstate 핸들러 stale closure 방지
   const activeThreadRef = useRef(false);
 
@@ -454,6 +462,12 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     // CB-S9: thread reply → inject into thread panel; top-level → add to main + update reply_count
     if (msg.parent_id) {
       setThreadIncoming(msg);
+      const parent = msg.parent_id;
+      const by = msg.created_by;
+      const openLine = messagesRef.current.find((m) => m.id === parent)?.agent_wake ?? recalledAgentWake(parent);
+      if (openLine?.required.some((a) => a.member_id === by)) {
+        setWakeEnded((prev) => (prev[parent]?.includes(by) ? prev : { ...prev, [parent]: [...(prev[parent] ?? []), by] }));
+      }
       // Update reply_count on parent message in the main list
       setMessages((prev) =>
         prev.map((m) =>
@@ -1093,6 +1107,13 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                                   : { kind: 'start', onSelect: () => citeSelection.startSelection(msg.id) }
                             }
                           />
+                          {/* story #4761 (D3): 내가 방금 보낸 메시지가 스스로는 못 닿는 에이전트(맨 호스팅 MCP)로 갈 때 — «입력 중» 대신
+                              사실과 할 일. 그 에이전트가 이 뒤로 한 마디라도 하면 줄이 사라진다. */}
+                          {msg.created_by === currentTeamMemberId && (msg.agent_wake ?? recalledAgentWake(msg.id)) && (
+                            <AgentWakeNotice
+                              targets={agentsStillToWake(msg.agent_wake ?? recalledAgentWake(msg.id), [...messages.slice(messages.findIndex((m) => m.id === msg.id) + 1), ...(wakeEnded[msg.id] ?? []).map((created_by) => ({ created_by }))])}
+                            />
+                          )}
                           {/* S5: 트리거 메시지 직후 차단 hint notice(차단 에이전트별 1건) */}
                           {commandHints[msg.id]?.map((h) => (
                             <CommandHintNotice key={h.agent_id} hint={h} />

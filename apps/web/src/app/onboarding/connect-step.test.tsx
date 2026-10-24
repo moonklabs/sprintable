@@ -58,7 +58,7 @@ describe('ConnectStep — story #4cdad425 (검증 안내 표시 렌더)', () => 
   const WAITING = '연결을 확인하는 중이에요'; // verifyWaiting
   const TIMEOUT = '아직 연결이 확인되지 않았어요'; // verifyTimeoutTitle
 
-  function makeFetch(verified: boolean) {
+  function makeFetch(verified: boolean, firstCallAt: string | null = null) {
     return vi.fn(async (url: string) => {
       if (url.includes('connection-artifact')) {
         // story #3192 — BE 실 응답 shape(`{data: {files: [{filename, content}]}}`, agents.py::
@@ -82,7 +82,7 @@ describe('ConnectStep — story #4cdad425 (검증 안내 표시 렌더)', () => 
         const rail = verified
           ? [{ state: 'config_copied', status: 'done' }, { state: 'waiting', status: 'done' }, { state: 'mcp_reachable', status: 'done' }, { state: 'verified', status: 'done' }]
           : [{ state: 'config_copied', status: 'done' }, { state: 'waiting', status: 'active' }];
-        return { ok: true, json: async () => ({ data: { verified, rail } }) };
+        return { ok: true, json: async () => ({ data: { verified, rail, first_call_at: firstCallAt } }) };
       }
       return { ok: false, json: async () => ({}) };
     }) as unknown as typeof fetch;
@@ -103,8 +103,8 @@ describe('ConnectStep — story #4cdad425 (검증 안내 표시 렌더)', () => 
     vi.restoreAllMocks();
   });
 
-  async function mount(verified = false) {
-    global.fetch = makeFetch(verified);
+  async function mount(verified = false, firstCallAt: string | null = null) {
+    global.fetch = makeFetch(verified, firstCallAt);
     await act(async () => {
       root.render(
         <NextIntlClientProvider locale="ko" messages={ko} timeZone="Asia/Seoul">
@@ -132,6 +132,24 @@ describe('ConnectStep — story #4cdad425 (검증 안내 표시 렌더)', () => 
     await act(async () => { await vi.advanceTimersByTimeAsync(VERIFY_TIMEOUT_MS + 100); });
     expect(container.textContent).toContain(TIMEOUT);
     expect(container.textContent).not.toContain(WAITING);
+  });
+
+  // story #4761 (D1b) — the banner says what was seen: the first call of this key, in the viewer's own clock (Asia/Seoul here).
+  it('④b 검증 성공 + 서버가 준 첫 호출 시각이면 «연결이 확인됐어요 — 에이전트가 HH:MM에 처음 호출했어요»', async () => {
+    await mount(true, '2026-10-23T23:24:04.418874+00:00');
+    expect(container.textContent).toContain('연결이 확인됐어요 — 에이전트가 ');
+    expect(container.textContent).toContain('에 처음 호출했어요');
+    // the time is the viewer's own clock (the runtime's zone here): the same text the viewer-date place draws
+    const clock = new Intl.DateTimeFormat('ko', { hour: 'numeric', minute: '2-digit' }).format(new Date('2026-10-23T23:24:04.418874+00:00'));
+    expect(container.textContent).toContain(`${clock}에 처음 호출했어요`);
+    expect(container.querySelector('time')?.getAttribute('datetime')).toBe('2026-10-23T23:24:04.418874+00:00'); // a real <time> element
+    expect(container.textContent).not.toContain(ko.onboarding.verifiedBanner);
+  });
+
+  it('④c 검증 성공인데 첫 호출 시각이 없으면(하트비트만) 예전 문구 그대로 — 없는 시각을 지어내지 않는다', async () => {
+    await mount(true, null);
+    expect(container.textContent).toContain(ko.onboarding.verifiedBanner);
+    expect(container.textContent).not.toContain('처음 호출했어요');
   });
 
   it('④ 검증 성공이면 대기·타임아웃 표시가 둘 다 안 뜬다', async () => {

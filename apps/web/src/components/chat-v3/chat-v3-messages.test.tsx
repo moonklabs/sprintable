@@ -491,6 +491,37 @@ describe('ChatV3Messages — 발신자 동명이인([SID:4311 PR 3])', () => {
 });
 
 
+describe('ChatV3Messages — story #4761 (D3) what to do when the agent cannot hear the message', () => {
+  it('a send answer with `agent_wake` puts the fact + the sentence under my new bubble; none without it', async () => {
+    stub();
+    const ref = createRef<ChatV3MessagesHandle>();
+    await mount(ref);
+    fetchMock.mockImplementationOnce(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: { id: 'm9', sender: { id: 'me-1', name: '나', type: 'human' }, content: '회의록 올렸어요.', attachments: [], created_at: '2026-09-16T06:45:00Z', references: [] },
+        agent_wake: { required: [{ member_id: 'ag-1', name: 'Walk Agent' }] },
+      }),
+    }));
+    const input = container.querySelector('[data-testid="chat-v3-compose-input"]') as HTMLInputElement;
+    const sendBtn = container.querySelector('[data-testid="chat-v3-send-action"]') as HTMLElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, '회의록 올렸어요.');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      sendBtn.click();
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    const notices = [...container.querySelectorAll('[data-testid="agent-wake-notice"]')];
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.textContent).toContain('이 에이전트(Walk Agent)는 새 메시지가 와도 스스로 알아채지 못해요');
+    expect(notices[0]!.textContent).toContain('“새 메시지 확인하고 답해 줘”');
+  });
+});
+
 describe('ChatV3Messages — story #4430 «not delivered» line', () => {
   it('a send answer with `delivery` puts the line under my new bubble', async () => {
     stub();

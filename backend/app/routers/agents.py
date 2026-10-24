@@ -495,6 +495,7 @@ async def verify_agent_connection(
             "verification_seq": None,
             "verified": state["verified"],
             "rail": state["rail"],
+            "first_call_at": state.get("first_call_at"),
         }
 
     seq = await start_verification(
@@ -544,6 +545,7 @@ async def agent_verification_status(
         "verification_seq": state["verify_seq"],
         "verified": state["verified"],
         "rail": state["rail"],
+        "first_call_at": state.get("first_call_at"),
     }
 
 

@@ -28,10 +28,12 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_gateway import AgentEventCursor, AgentGatewaySession
+from app.models.agent_api_key_usage_log import AgentApiKeyUsageLog
+from app.models.api_key import ApiKey
 from app.models.event import Event
 from app.models.member import AgentProjectProfile
 from app.services.event_seq import assign_recipient_seq
@@ -203,6 +205,37 @@ def build_http_verification_rail(*, heartbeat_fresh: bool) -> list[dict]:
     ]
 
 
+async def first_call_of_current_key(db: AsyncSession, agent_id: uuid.UUID, org_id: uuid.UUID | None = None) -> datetime | None:
+    """story #4761 (D1b): when the agent's CURRENT key was first used — None until it has been.
+
+    «Current» = the newest key that is neither revoked nor expired. The first row of THAT key in the usage ledger
+    (`agent_api_key_usage_logs`, one row per authenticated call, append-only and never purged — the model docstring) is what
+    «connected» stands on, so the answer does not depend on how long ago the last call was (the 90 s heartbeat window of
+    `_has_fresh_heartbeat` made the person's [다시 테스트] a hit-or-miss), and it lets go by itself when the key is revoked or
+    replaced: the new key has no row yet, so the old key's first call never vouches for it.
+    """
+    now = datetime.now(timezone.utc)
+    current_key = (
+        select(ApiKey.id)
+        .where(
+            or_(ApiKey.member_id == agent_id, ApiKey.team_member_id == agent_id),
+            ApiKey.revoked_at.is_(None),
+            or_(ApiKey.expires_at.is_(None), ApiKey.expires_at > now),
+        )
+        .order_by(ApiKey.created_at.desc(), ApiKey.id.desc())  # two keys made in the same instant: still one answer
+        .limit(1)
+        .scalar_subquery()
+    )
+    where = [AgentApiKeyUsageLog.api_key_id == current_key]
+    if org_id is not None:
+        # the caller's org's rows only (the ledger keeps the org each call was made under) — a row another org's call left for this
+        # key id is not this org's connection. A row whose org was never resolved (the column is nullable — org resolution is
+        # best-effort when the row is written) is this key's call all the same: the rows are keyed by the key's own id, the key is picked
+        # by THIS agent's id, and the agent is this org's (the route checks that) — so such a row cannot be a stranger's call
+        where.append(or_(AgentApiKeyUsageLog.org_id == org_id, AgentApiKeyUsageLog.org_id.is_(None)))
+    return (await db.execute(select(func.min(AgentApiKeyUsageLog.occurred_at)).where(*where))).scalar_one_or_none()
+
+
 async def get_verification_state(
     db: AsyncSession, agent_id: uuid.UUID, *, org_id: uuid.UUID, transport: str = "stdio",
 ) -> dict:
@@ -212,9 +245,15 @@ async def get_verification_state(
     SSE 레일은 http 에서 구조적으로 절대 전진하지 않으므로(모듈 docstring) 재사용하지 않는다.
     """
     if transport == "http":
-        fresh = await _has_fresh_heartbeat(db, agent_id)
-        rail = build_http_verification_rail(heartbeat_fresh=fresh)
-        return {"verify_seq": None, "acked_seq": None, "verified": fresh, "rail": rail}
+        # story #4761 (D1b): the current key's first call latches «connected» (see first_call_of_current_key); a fresh
+        # heartbeat still counts on its own (a ledger write that failed silently must not hide a live agent)
+        first_call = await first_call_of_current_key(db, agent_id, org_id)
+        connected = first_call is not None or await _has_fresh_heartbeat(db, agent_id)
+        rail = build_http_verification_rail(heartbeat_fresh=connected)
+        return {
+            "verify_seq": None, "acked_seq": None, "verified": connected, "rail": rail,
+            "first_call_at": first_call.isoformat() if first_call is not None else None,
+        }
 
     verify_seq = (await db.execute(
         select(Event.recipient_seq).where(

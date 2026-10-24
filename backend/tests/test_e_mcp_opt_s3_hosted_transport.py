@@ -134,14 +134,15 @@ def _first(v):
 
 @pytest.mark.anyio
 async def test_get_verification_state_http_uses_heartbeat_not_sse(monkeypatch):
-    """transport='http' 는 Event/AgentEventCursor(SSE) 를 아예 조회 안 하고 heartbeat freshness 1회만."""
+    """transport='http' 는 Event/AgentEventCursor(SSE) 를 아예 조회 안 하고, 현재 키의 첫 호출(story #4761) → heartbeat freshness 만."""
     from app.routers import agent_gateway as gw
     monkeypatch.setattr(gw, "_SESSION_FRESH_TTL", 60, raising=False)
 
     db = AsyncMock()
-    db.execute = AsyncMock(return_value=_first(("profile-row",)))  # fresh heartbeat 존재
+    # story #4761: the first read is the current key's first call (none here) — then the heartbeat
+    db.execute = AsyncMock(side_effect=[_scalar(None), _first(("profile-row",))])  # fresh heartbeat 존재
     out = await get_verification_state(db, uuid.uuid4(), org_id=uuid.uuid4(), transport="http")
-    assert db.execute.await_count == 1  # SSE 관련 verify_seq/acked_seq 조회 0회
+    assert db.execute.await_count == 2  # SSE 관련 verify_seq/acked_seq 조회 0회 (key's first call + heartbeat)
     assert out["verified"] is True
     assert [r["state"] for r in out["rail"]] == list(HTTP_RAIL_STATES)
     assert out["verify_seq"] is None and out["acked_seq"] is None  # http 는 이 개념 자체가 없음
@@ -150,7 +151,7 @@ async def test_get_verification_state_http_uses_heartbeat_not_sse(monkeypatch):
 @pytest.mark.anyio
 async def test_get_verification_state_http_no_heartbeat_not_verified():
     db = AsyncMock()
-    db.execute = AsyncMock(return_value=_first(None))
+    db.execute = AsyncMock(side_effect=[_scalar(None), _first(None)])  # story #4761: no first call · no heartbeat
     out = await get_verification_state(db, uuid.uuid4(), org_id=uuid.uuid4(), transport="http")
     assert out["verified"] is False
 
