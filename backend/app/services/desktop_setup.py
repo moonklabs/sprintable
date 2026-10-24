@@ -1057,6 +1057,7 @@ async def _lock_in_order(db: AsyncSession, *, member_ids: set[uuid.UUID], setup_
     story #4771 — THE one order, for every path that closes or deletes a computer's rows (outermost first; a path takes only the steps it needs, never one out of order):
       ① the users row ......... account deletion (FOR UPDATE, routers/account.py) · exchange (FOR SHARE, `exchange_setup`)
       ② the organization row .. an organization delete / the account deletion closing an organization (FOR UPDATE, repositories/organization.py), `_plan_organizations`
+         (an organization delete first takes the USERS that point at it — `users.last_org_id` is set NULL by its final DELETE — in id order, so ① comes before ② there too)
       ③ refresh tokens ........ member removal · role change · account deletion (`_revoke_user_refresh_tokens`, routers/org_members.py)
       ④ the seat rows ......... `org_members`: removal (FOR UPDATE) · account deletion (FOR UPDATE, by id) · exchange (FOR SHARE) · an organization delete (UPDATE)
       ⑤ agent member rows ..... this function, by id — the closers, `_disconnect_setup`, the exchange; an organization delete takes all the organization's agents
@@ -1224,6 +1225,9 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str, device_i
     # story #4565 (PO 02:51Z): the locks in the one order — the attached agents' member rows, then this setup and the other
     # live, handed-over setups of the org, by id — and everything below is read again under them
     attached = _attached_agents(setup)
+    # story #4771 (follow-up, security lens): the agents this setup MADE are locked here too, before the setup rows — the key insert below takes a key-share lock on the member row
+    # (the foreign key of `agent_api_keys.member_id`) AFTER the setup row is held, the reverse of an organization delete (which takes the agent rows, then the setup rows)
+    made = set(_made_agent_ids(setup.members))
     # story 4660: always read — the machine key of this exchange may close a line with no attached agent
     other_ids = set((await db.execute(
         select(DesktopSetup.id).where(
@@ -1247,12 +1251,12 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str, device_i
             await db.execute(
                 select(OrgMember.id).where(OrgMember.org_id == setup.org_id, OrgMember.user_id == locked_confirmer).with_for_update(read=True)
             )
-    locked = await _lock_in_order(db, member_ids=attached, setup_ids={setup.id, *other_ids})
+    locked = await _lock_in_order(db, member_ids=attached | made, setup_ids={setup.id, *other_ids})
     if setup.id not in locked:
         raise DesktopSetupError("code_not_found")  # story #4771 (codex r1): the row went with its organization (a delete committed) between the read and the lock — not a KeyError (500)
     setup = locked[setup.id]
     others = [locked[i] for i in sorted(other_ids) if i in locked]
-    if not _attached_agents(setup) <= attached:
+    if not _attached_agents(setup) <= attached or not set(_made_agent_ids(setup.members)) <= made:
         return None  # confirmed between the read and the lock: its agents are not locked yet — the app asks again
     if setup.confirmed_by != locked_confirmer:
         return None  # confirmed (or confirmed by someone else) between the read and the lock: that person's row is not held — the app asks again

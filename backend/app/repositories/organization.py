@@ -286,6 +286,18 @@ class OrganizationRepository:
         삭제가 먼저면 checkout이 커밋된 삭제 後 org 없음으로 실패, checkout이 먼저면
         삭제가 그 lock 해제(=claim 커밋) 後에야 재조회해 "진행 中"을 정확히 본다.
         재조회(get_impact) 반환값도 이제 실제 게이트로 쓴다(버리지 않는다)."""
+        # story #4771 (follow-up, security lens): the final `DELETE FROM organizations` sets `users.last_org_id` NULL (FK ON DELETE SET NULL) for every user that points at the
+        # organization — a USER row, taken AFTER the organization row, while the account deletion takes the user row first and the organization rows next: organization delete ‖
+        # account deletion deadlocked (7 + 1 of 60 rounds measured; 6 of 20 in PR 5217's CI once a sign-in leaves `last_org_id` behind). The one order puts users before the
+        # organization, so the users that point at it are locked HERE, in id order, before the organization row. Only after the owner check (a plain read): somebody who may not
+        # delete the organization is refused without taking a lock a member's account deletion could wait on. The row-by-row work below is unchanged.
+        if (await self.session.execute(select(Organization.id).where(Organization.id == org_id))).scalar_one_or_none() is None:
+            return {"ok": False, "reason": "not_found"}
+        if await self.get_member_role(org_id=org_id, user_id=user_id) != "owner":
+            return {"ok": False, "reason": "forbidden"}
+        await self.session.execute(
+            text("SELECT id FROM users WHERE last_org_id = :o ORDER BY id FOR UPDATE"), {"o": org_id},
+        )
         lock_result = await self.session.execute(
             select(Organization).where(Organization.id == org_id).with_for_update()
         )
