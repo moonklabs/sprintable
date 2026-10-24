@@ -2469,7 +2469,9 @@ async def switch_project(
     await _revoke_switching_session(session, user, body.refresh_token, route="switch-project")
 
     # 908075db 단계1: target을 명시 의도로 전달 — flag on이면 _build_app_metadata가 추측 없이 그대로 존중.
-    app_metadata = await _build_app_metadata(user, session, project_id=target_project_id)
+    # story 4762 (Kadir lens, PR 5217) — the claim's ORG is the caller's session org (the one `has_project_access` just checked), never `users.last_org_id`: that column can name
+    # an organization the person was removed from (another session used it last), and the new token would then name the org they left.
+    app_metadata = await _build_app_metadata(user, session, org_id=caller_org_id, project_id=target_project_id)
     # 908075db 단계3: flag-on이면 de-fallback이 명시 target 을 존중(_resolve_explicit→project_id=target)·
     # last_project_id 는 위 1229 kept + 단계2 무mutation 으로 target 유지 → 아래 override 밴드에이드가
     # redundant. flag-off(prod)만 보정(전면 삭제는 prod flag-on 後 단계4·dev 한정).

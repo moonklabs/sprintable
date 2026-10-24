@@ -53,9 +53,9 @@ def _async_url() -> str:
 
 
 class _World:
-    def __init__(self, app, Session, client, user_id, email, orgs):
+    def __init__(self, app, Session, client, user_id, email, orgs, projects):
         self.app, self.Session, self.client = app, Session, client
-        self.user_id, self.email, self.orgs = user_id, email, orgs
+        self.user_id, self.email, self.orgs, self.projects = user_id, email, orgs, projects
 
     async def login(self) -> dict:
         resp = await self.client.post("/api/v2/auth/token", json={"email": self.email, "password": _PASSWORD})
@@ -100,6 +100,7 @@ async def _world(org_count: int = 2, last_org_index: int = 0):
     user_id = uuid.uuid4()
     email = f"story4762-{user_id.hex[:8]}@test.com"
     orgs = []
+    projects = []
     async with Session() as s:
         s.add(User(id=user_id, email=email, hashed_password=hash_password(_PASSWORD), is_active=True, email_verified=True))
         await s.commit()
@@ -107,7 +108,9 @@ async def _world(org_count: int = 2, last_org_index: int = 0):
             org = Organization(id=uuid.uuid4(), name=f"Org{n}", slug=f"o4762-{uuid.uuid4().hex[:8]}")
             s.add(org)
             await s.commit()
-            s.add(Project(id=uuid.uuid4(), org_id=org.id, name=f"P{n}"))
+            project_id = uuid.uuid4()
+            s.add(Project(id=project_id, org_id=org.id, name=f"P{n}"))
+            projects.append(project_id)
             # owner: project access through the org role (team_members is a read-only view)
             s.add(OrgMember(id=uuid.uuid4(), org_id=org.id, user_id=user_id, role="owner",
                             created_at=datetime.now(timezone.utc) + timedelta(seconds=n)))
@@ -128,7 +131,7 @@ async def _world(org_count: int = 2, last_org_index: int = 0):
 
     override_db_and_read(app, _db)
     client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
-    return engine, _World(app, Session, client, user_id, email, orgs)
+    return engine, _World(app, Session, client, user_id, email, orgs, projects)
 
 
 async def _close(engine, w: _World):
@@ -200,6 +203,86 @@ async def test_a_membership_orphaned_by_a_deleted_org_is_not_a_landing_place_for
         await _close(engine, w)
 
 
+async def test_the_oauth_callback_lands_in_the_org_the_person_is_still_in_executed(monkeypatch):
+    """the OAuth callback road, executed end to end (the provider exchange is faked): removed from A (last_org_id = A), still in B → the sign-in names B."""
+    from unittest.mock import AsyncMock
+
+    import app.routers.auth as auth_router
+    from app.core.security import create_oauth_state_token
+
+    engine, w = await _world()
+    try:
+        a, b = w.orgs
+        await w.leave(a)
+        monkeypatch.setattr(auth_router, "_exchange_oauth_code_for_userinfo", AsyncMock(return_value=(f"g-{w.user_id.hex}", w.email, True)))
+        resp = await w.client.post("/api/v2/auth/oauth/callback", json={
+            "provider": "google", "code": "c", "state": create_oauth_state_token("google"), "tos_accepted": True,
+        })
+        assert resp.status_code == 200, resp.text
+        assert _org_claim(resp.json()["data"]) == str(b)
+    finally:
+        await _close(engine, w)
+
+
+async def test_a_closed_seat_with_the_member_anchor_and_grant_still_active_carries_no_claim():
+    """the `{}` guard of the no-live-org branch (Kadir lens): the seat (org_members) is closed but the members anchor and the project grant are still active — `_build_app_metadata`
+    alone would resolve the old org from them; the guard returns an empty claim instead, so the sign-in never names the org the person has no seat in."""
+    from sqlalchemy import text
+
+    from app.models.member import Member
+
+    engine, w = await _world(org_count=1)
+    try:
+        org = w.orgs[0]
+        async with w.Session() as s:
+            seat = (await s.execute(text("SELECT id FROM org_members WHERE org_id = :o AND user_id = :u"), {"o": org, "u": w.user_id})).scalar_one()
+            s.add(Member(id=seat, org_id=org, type="human", user_id=w.user_id, name="M"))  # the anchor: same id as the seat
+            await s.commit()
+            await s.execute(text(
+                "INSERT INTO project_access (id, project_id, org_member_id, member_id, permission, role, color, can_manage_members, access_source) "
+                "VALUES (:i, :p, :om, :m, 'granted', 'member', '#3385f8', false, 'direct')"),
+                {"i": uuid.uuid4(), "p": w.projects[0], "om": seat, "m": seat})
+            await s.commit()
+        await w.leave(org)  # the seat is closed; the anchor and the grant are not
+        tokens = await w.login()
+        assert not _org_claim(tokens)
+    finally:
+        await _close(engine, w)
+
+
+async def test_switch_project_names_the_callers_session_org_never_the_one_last_used_elsewhere():
+    """Kadir lens: the person holds a token for org A, another session left `users.last_org_id` = B, and the person was removed from B. `switch-project` for a project of A used to
+    build its claim from `last_org_id` → a new token naming the org they LEFT (the request auth trusts the JWT org when no X-Org-Id is sent). The claim now follows the caller's org."""
+    from sqlalchemy import update
+
+    from app.models.user import User
+
+    engine, w = await _world()
+    try:
+        a, b = w.orgs
+        tokens = await w.login()
+        assert _org_claim(tokens) == str(a)  # the session token names A
+        async with w.Session() as s:  # another session used B last, then the person is removed from B
+            await s.execute(update(User).where(User.id == w.user_id).values(last_org_id=b))
+            await s.commit()
+        await w.leave(b)
+        resp = await w.client.post(
+            "/api/v2/auth/switch-project",
+            json={"project_id": str(w.projects[0]), "refresh_token": tokens["refresh_token"]},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+        assert resp.status_code == 200, resp.text
+        new = resp.json()["data"]
+        assert _org_claim(new) == str(a)
+        assert _org_claim(new) != str(b)
+        assert await w.last_org_id() == a  # the stale pointer is repaired as a side effect
+        # the departed org is not readable with a header either (the membership check): 403
+        denied = await w.client.get("/api/v2/org-members", headers={"Authorization": f"Bearer {new['access_token']}", "X-Org-Id": str(b)})
+        assert denied.status_code == 403, denied.text
+    finally:
+        await _close(engine, w)
+
+
 # ── mutations: each re-opens the defect ────────────────────────────────────────
 
 async def test_mutation_sign_in_that_trusts_last_org_id_again_issues_the_departed_org(monkeypatch):
@@ -215,6 +298,37 @@ async def test_mutation_sign_in_that_trusts_last_org_id_again_issues_the_departe
         tokens = await w.login()
         # the pre-4762 defect: the token names the org the person LEFT, not the one they are still in
         assert _org_claim(tokens) == str(w.orgs[0])
+    finally:
+        await _close(engine, w)
+
+
+async def test_mutation_switch_project_building_its_claim_from_last_org_id_issues_the_departed_org(monkeypatch):
+    from sqlalchemy import update
+
+    from app.models.user import User
+    from app.routers import auth as auth_module
+
+    real = auth_module._build_app_metadata
+
+    async def _last_org_id_again(user, session, org_id=None, project_id=None):
+        return await real(user, session, org_id=None, project_id=project_id)
+
+    monkeypatch.setattr(auth_module, "_build_app_metadata", _last_org_id_again)
+    engine, w = await _world()
+    try:
+        a, b = w.orgs
+        tokens = await w.login()
+        async with w.Session() as s:
+            await s.execute(update(User).where(User.id == w.user_id).values(last_org_id=b))
+            await s.commit()
+        await w.leave(b)
+        resp = await w.client.post(
+            "/api/v2/auth/switch-project",
+            json={"project_id": str(w.projects[0]), "refresh_token": tokens["refresh_token"]},
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert _org_claim(resp.json()["data"]) == str(b)  # the pre-fix defect: the new token names the org the person left
     finally:
         await _close(engine, w)
 
