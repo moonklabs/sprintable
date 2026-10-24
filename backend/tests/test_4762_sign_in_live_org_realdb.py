@@ -213,20 +213,25 @@ async def test_mutation_sign_in_that_trusts_last_org_id_again_issues_the_departe
     try:
         await w.leave(w.orgs[0])
         tokens = await w.login()
-        # the pre-4762 defect: the token does not name the org the person is still in
-        assert _org_claim(tokens) != str(w.orgs[1])
+        # the pre-4762 defect: the token names the org the person LEFT, not the one they are still in
+        assert _org_claim(tokens) == str(w.orgs[0])
     finally:
         await _close(engine, w)
 
 
-def test_both_sign_in_roads_use_the_one_helper():
-    """login and the OAuth callback build their claim in ONE place; a new sign-in road that calls `_build_app_metadata(user, session)` again is the defect back.
-    (`register` is a brand-new person with no last_org_id — it stays on `_build_app_metadata`.)"""
+def test_every_sign_in_road_uses_the_one_helper():
+    """login, the OAuth callback and the native OAuth hand-off build their claim in ONE place; a new sign-in road that calls `_build_app_metadata` again is the
+    defect back. (`register` is a brand-new person with no last_org_id — it stays on `_build_app_metadata`.)"""
     import inspect
 
     from app.routers import auth as auth_module
+    from app.routers import auth_firebase_internal as handoff_module
 
-    for fn in (auth_module.login, auth_module.oauth_callback):
+    for fn, call in (
+        (auth_module.login, "_sign_in_session_context(user, session)"),
+        (auth_module.oauth_callback, "_sign_in_session_context(user, session)"),
+        (handoff_module.consume_oauth_handoff, "_sign_in_session_context(user, db)"),
+    ):
         src = inspect.getsource(fn)
-        assert "_sign_in_session_context(user, session)" in src, fn.__name__
-        assert "_build_app_metadata(user, session)" not in src, fn.__name__
+        assert call in src, fn.__name__
+        assert "_build_app_metadata(" not in src, fn.__name__

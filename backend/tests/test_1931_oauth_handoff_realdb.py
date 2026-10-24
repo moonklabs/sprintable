@@ -154,6 +154,50 @@ async def test_issue_and_consume_round_trip_success(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_consume_issues_the_org_the_person_is_still_in_not_the_one_they_left_4762(monkeypatch):
+    """story 4762 — the hand-off is a sign-in road (the phone's OAuth return): a person removed from org A (users.last_org_id = A) who is still in org B must get a
+    B claim, not an A claim (an A claim → `/api/v2/me` 404 `membership_elsewhere` → the web layout sends them to the sign-in again, in a loop)."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.core.security import decode_jwt
+    from app.models.organization import Organization
+    from app.models.project import OrgMember, Project
+    from app.models.user import User
+    from app.routers.auth_firebase_internal import consume_oauth_handoff, issue_oauth_handoff
+
+    _setup_common(monkeypatch)
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            user_id = await _seed_eligible_user(s)
+            orgs = []
+            for n in (1, 2):
+                org = Organization(id=uuid.uuid4(), name=f"HandoffOrg{n}", slug=f"h4762-{uuid.uuid4().hex[:8]}")
+                s.add(org)
+                await s.commit()
+                s.add(Project(id=uuid.uuid4(), org_id=org.id, name=f"P{n}"))
+                s.add(OrgMember(
+                    id=uuid.uuid4(), org_id=org.id, user_id=user_id, role="owner",
+                    created_at=datetime.now(timezone.utc) + timedelta(seconds=n),
+                    deleted_at=datetime.now(timezone.utc) if n == 1 else None,  # org 1: the person was removed
+                ))
+                await s.commit()
+                orgs.append(org.id)
+            user = await s.get(User, user_id)
+            user.last_org_id = orgs[0]
+            await s.commit()
+
+        verifier, challenge = _pkce_pair()
+        async with Session() as s:
+            issued = await issue_oauth_handoff(_FakeRequest(), _issue_req(user_id, challenge), authorization=None, db=s)
+        async with Session() as s:
+            consumed = await consume_oauth_handoff(_FakeRequest(), _consume_req(issued.code, verifier), authorization=None, db=s)
+        assert (decode_jwt(consumed.access_token).get("app_metadata") or {}).get("org_id") == str(orgs[1])
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_consume_wrong_verifier_rejected(monkeypatch):
     from app.routers.auth_firebase_internal import consume_oauth_handoff, issue_oauth_handoff
 
