@@ -40,6 +40,7 @@ import { useChatRail } from '@/app/(authenticated)/chats/chat-rail-context';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { formatViewerDate } from '@/lib/viewer-time-zone';
+import { CHAT_API_PREFIX } from '@/lib/chat-api-prefix';
 
 interface ChatViewProps {
   threadId: string;
@@ -153,7 +154,7 @@ function blockFailureIsRetryable(status: number): boolean {
   return status >= 500 || status === 408 || status === 429;
 }
 
-export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref: backHrefProp, commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants, initialComposeText }: ChatViewProps) {
+export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = CHAT_API_PREFIX, backHref: backHrefProp, commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants, initialComposeText }: ChatViewProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   // story #4231 3차 — 기본 복귀 목적지(대화 목록 · flat)도 현재 프로젝트를 싣는다(넘겨받은 값은 호출처 책임).
   const backHref = backHrefProp ?? flatHref('/chats');

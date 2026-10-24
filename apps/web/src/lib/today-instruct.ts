@@ -55,7 +55,11 @@ export async function findSoleAgentDm(projectId: string, selfMemberId: string): 
  */
 export type SendOutcome = 'sent' | 'refused' | 'unknown';
 
-/** sends `text` to the conversation as the chat's own composer does (`POST {CHAT_API_PREFIX}/{id}/messages`, through fetchWithAuth) */
+/**
+ * sends `text` to the conversation as the chat's own composer does (`POST {CHAT_API_PREFIX}/{id}/messages`, through fetchWithAuth).
+ * The body carries no `mentioned_ids`, so the backend never answers it with a DM fork (`forked` — only a mention makes one; the chat screen handles that
+ * answer, this line has no use for it).
+ */
 export async function sendInstruction(conversationId: string, text: string): Promise<SendOutcome> {
   try {
     const res = await fetchWithAuth(`${CHAT_API_PREFIX}/${encodeURIComponent(conversationId)}/messages`, {

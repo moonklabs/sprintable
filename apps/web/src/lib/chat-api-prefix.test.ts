@@ -13,8 +13,16 @@ describe('CHAT_API_PREFIX', () => {
   it('is a web route whose POST proxies to the backend\'s conversations messages (not `/api/v2/chats`, which the backend does not serve)', () => {
     expect(CHAT_API_PREFIX.startsWith('/api/')).toBe(true);
     const route = read(`app${CHAT_API_PREFIX}/[conversation_id]/messages/route.ts`);
-    expect(route).toMatch(/export async function POST/);
-    expect(route).toMatch(/proxyToFastapi\(request, `\/api\/v2\/conversations\/\$\{conversation_id\}\/messages`\)/);
+    const at = route.indexOf('export async function POST');
+    expect(at).toBeGreaterThan(-1);
+    // the POST handler itself (not the GET above it) — a send that regressed to another backend address must not hide behind a correct read
+    expect(route.slice(at)).toMatch(/proxyToFastapi\(request, `\/api\/v2\/conversations\/\$\{conversation_id\}\/messages`\)/);
+  });
+
+  it('is ChatView\'s own default too (a ChatView mounted without `apiPrefix` must not fall back to a dead address)', () => {
+    const view = read('components/chat/chat-view.tsx');
+    expect(view).toMatch(/apiPrefix = CHAT_API_PREFIX,/);
+    expect(view).not.toMatch(/apiPrefix = '/);
   });
 
   it('is what the chat screen hands ChatView as `apiPrefix` (no spelling of its own there)', () => {
