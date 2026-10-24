@@ -110,7 +110,7 @@ async def test_login_success_writes_audit_log():
         user = _make_user()
 
         with patch("app.routers.auth._get_user_by_email", new_callable=AsyncMock) as mock_get_user, \
-             patch("app.routers.auth._build_app_metadata", new_callable=AsyncMock) as mock_meta, \
+             patch("app.routers.auth._sign_in_session_context", new_callable=AsyncMock) as mock_meta, \
              patch("app.routers.auth._store_refresh_token", new_callable=AsyncMock), \
              patch.dict("os.environ", {"JWT_SECRET": "test-secret"}):
             mock_get_user.return_value = user

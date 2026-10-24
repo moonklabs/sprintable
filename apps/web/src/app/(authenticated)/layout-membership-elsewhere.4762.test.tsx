@@ -36,7 +36,10 @@ async function outcomeFor(pathname: string): Promise<string> {
   try {
     await AuthenticatedLayout({ children: null });
   } catch (e) {
-    return String((e as Error).message);
+    const message = String((e as Error).message);
+    // only the redirect sentinel is an outcome; any other thrown error is a real failure of the layout and must fail the test
+    if (!message.startsWith('redirect:')) throw e;
+    return message;
   }
   return 'no redirect';
 }
@@ -71,6 +74,11 @@ describe('(authenticated) layout — a 404 of /api/v2/me is read by its reason (
     ['a 404 with no reason (an older backend)', { data: null, error: { code: 'NOT_FOUND', message: 'Member not found' }, meta: null }],
     ['a 404 with another reason', envelope('something_else')],
     ['a 404 whose reason is not a word', { error: { reason: { x: 1 } } }],
+    // the reason is compared as the exact word the backend writes: a list holding it is not it (a `String(reason)` would turn it into it) …
+    ['a 404 whose reason is a list holding the word', { error: { reason: ['membership_elsewhere'] } }],
+    // … and a different case or padding is not it either (no trimming · no case folding)
+    ['a 404 whose reason has another case', envelope('Membership_Elsewhere')],
+    ['a 404 whose reason has padding', envelope(' membership_elsewhere ')],
     ['a 404 with an empty body', null],
   ])('%s keeps the old reading: the onboarding', async (_n, body) => {
     meBody = body;

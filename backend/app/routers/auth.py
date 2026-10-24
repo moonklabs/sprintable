@@ -924,6 +924,16 @@ async def _refresh_session_context(
     )
 
 
+async def _sign_in_session_context(user: User, session: AsyncSession) -> dict:
+    """story 4762 — app_metadata for a SIGN-IN of an existing person (password and OAuth): the same live-org rule as a refresh, with no session org yet.
+
+    `_build_app_metadata` without an org scopes to `user.last_org_id` and never asks whether the person is still in it. A person removed from org A (still a
+    member of B) therefore signed in with an A claim: `/api/v2/me` answered 404 `membership_elsewhere`, and signing in again gave the same claim. Here the
+    default is `user.last_org_id` only while it is a live membership, else the oldest live org, else a claim without an org (the state of a new sign-up);
+    one rule for refresh and sign-in (`_refresh_session_context`)."""
+    return await _refresh_session_context(user, session, None, None)
+
+
 # ─── POST /api/v2/auth/register ───────────────────────────────────────────────
 
 @router.post("/register", status_code=201)
@@ -1118,7 +1128,7 @@ async def login(
             update(User).where(User.id == user.id).values(login_fail_count=0, login_locked_until=None)
         )
 
-    _md = await _build_app_metadata(user, session)
+    _md = await _sign_in_session_context(user, session)  # story 4762 — a live org, as a refresh
     if settings.build_app_metadata_defallback:
         _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md, session_started_at=int(datetime.now(timezone.utc).timestamp()))
@@ -1890,7 +1900,7 @@ async def oauth_callback(
     from datetime import timedelta
     from app.core.security import ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS
 
-    _md = await _build_app_metadata(user, session)
+    _md = await _sign_in_session_context(user, session)  # story 4762 — a live org, as a refresh
     if settings.build_app_metadata_defallback:
         _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
     tokens = create_tokens(str(user.id), user.email, _md, session_started_at=int(datetime.now(timezone.utc).timestamp()))
