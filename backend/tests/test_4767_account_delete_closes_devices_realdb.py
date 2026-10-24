@@ -250,16 +250,20 @@ async def test_07_a_deletion_that_cannot_close_the_computers_fails_whole(monkeyp
 
 
 async def test_08_a_confirmer_without_a_user_row_or_none_recorded_keeps_the_relay_contract():
-    """4618's contract: the relay serves a setup whose confirmer is no known user and one with no confirmer recorded. Only a CLOSED or DELETED account refuses."""
+    """4618's contract: the relay serves a setup with no confirmer recorded, and one whose confirmer has a SEAT but no `users` row. Only a CLOSED or DELETED account refuses —
+    and (story 4769, fail-closed) a recorded confirmer with no seat row at all, which no live path makes."""
     engine, w = await _world()
     try:
         _, _, org_id = await w.person(org=True, name="Admin M")
-        unmapped = await _computer(w, org_id, uuid.uuid4())
+        unmapped = await _computer(w, org_id, uuid.uuid4())   # no users row …
+        await w.sql("INSERT INTO org_members (id, org_id, user_id, role) SELECT gen_random_uuid(), org_id, confirmed_by, 'admin' FROM desktop_setups WHERE id = :i", i=unmapped["setup_id"])   # … but a seat
+        seatless = await _computer(w, org_id, uuid.uuid4())   # no users row and no seat: refused since 4769
         none_recorded = await _computer(w, org_id, uuid.uuid4())
         await w.sql("UPDATE desktop_setups SET confirmed_by = NULL WHERE id = :i", i=none_recorded["setup_id"])
         await _remote_control_on(w, org_id)
         assert (await _relay(w, org_id, unmapped["token"]))["setup"] == 200
         assert (await _relay(w, org_id, none_recorded["token"]))["setup"] == 200
+        assert (await _relay(w, org_id, seatless["token"]))["setup"] == 401
     finally:
         await _close(engine, w)
 

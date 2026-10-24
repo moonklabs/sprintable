@@ -174,7 +174,9 @@ async def test_07_nobody_to_tell_is_not_a_failure_and_a_failing_notice_never_fai
         device = await _device(c, "d4685 mac g")
         a = device["agents"][0]["member_id"]
         await _report(c, device, a, "working", 1)
-        await _sql(f"UPDATE desktop_setups SET confirmed_by = '{uuid.uuid4()}' WHERE id = '{device['setup_id']}'")  # nobody active
+        nobody = uuid.uuid4()
+        await _sql(f"UPDATE desktop_setups SET confirmed_by = '{nobody}' WHERE id = '{device['setup_id']}'")  # nobody active (a seat but no account: story 4769 refuses a seatless confirmer at the relay)
+        await _sql(f"INSERT INTO org_members (id, org_id, user_id, role) SELECT gen_random_uuid(), org_id, '{nobody}', 'admin' FROM desktop_setups WHERE id = '{device['setup_id']}' ON CONFLICT DO NOTHING")
         await _report(c, device, a, "waiting_input", 2, limit=LOOKS)  # 200 — nobody told
         assert await _notices(STOOD) == []
         await _sql(f"UPDATE desktop_setups SET confirmed_by = '{OWNER}' WHERE id = '{device['setup_id']}'")

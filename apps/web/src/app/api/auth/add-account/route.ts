@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
-import { cookieBase } from '@/lib/auth/cookies';
+import { cookieBase, markSessionChanged } from '@/lib/auth/cookies';
 import { handleApiError } from '@/lib/api-error';
 import { ACCOUNT_CAP } from '@/lib/auth/account-limits';
 import {
@@ -40,7 +40,7 @@ export async function POST(request: Request) {
       );
       discardActiveSession(corrupt.cookies);
       discardCookies(corrupt.cookies, staleNames);
-      return corrupt;
+      return markSessionChanged(corrupt);
     }
 
     // 5-cap server guard — UI 비활성만으로는 클라 우회 POST 가능. 서버서 한도 enforce.

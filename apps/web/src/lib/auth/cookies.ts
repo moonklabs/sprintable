@@ -1,3 +1,5 @@
+import { SESSION_CHANGED_HEADER } from './session-changed-header';
+
 /**
  * sp_at(access) 쿠키 maxAge(초). AC2b(551bbbee): BE access TTL 60분(#1577)과 일치. ⚠️ refresh **빈도를
  * 결정하는 게 이 쿠키 maxAge** — 쿠키가 15분에 만료되면 JWT 가 60분이어도 15분마다 refresh 강제
@@ -22,6 +24,21 @@ function isSecureScheme(): boolean {
 export const SIGNUP_ATTRIBUTION_COOKIE_NAMES = [
   'sp_attr_src', 'sp_attr_medium', 'sp_attr_campaign', 'sp_attr_ref',
 ] as const;
+
+/**
+ * story #4762 — a response that sets or clears the session cookies (`sp_at` · `sp_rt`) carries this header. The page's global fetch gate
+ * (`installProjectHeaderInterceptor`) sees it on any same-origin `/api/` response and tells the phone shell once (`session-changed`), so the shell writes the
+ * cookies to disk now: an app killed seconds after a token rotation must not wake up with the old token (measured on an Android phone: the sign-up token,
+ * with no organization claim, stayed on disk → `/api/v2/me` 404 `membership_elsewhere` → a Next 404 at `/glance`). The guard test
+ * `session-cookie-routes.guard.test.ts` makes every route that writes `sp_at` call `markSessionChanged`, so a new session road cannot forget it.
+ * Document navigations that set cookies (the OAuth callback and hand-offs, the proxy's own refresh) are not fetches — the shell writes those out when the page finishes loading.
+ */
+export { SESSION_CHANGED_HEADER };
+
+export function markSessionChanged<T extends { headers: Headers }>(res: T): T {
+  res.headers.set(SESSION_CHANGED_HEADER, '1');
+  return res;
+}
 
 export function cookieBase(): {
   httpOnly: boolean;

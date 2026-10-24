@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
 import type { NextResponse } from 'next/server';
 import { apiSuccess, safeJsonParse } from '@/lib/api-response';
-import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
+import { cookieBase, SP_AT_MAX_AGE_SECONDS, markSessionChanged } from '@/lib/auth/cookies';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { backendFetch } from '@/lib/backend-fetch';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
@@ -35,6 +35,7 @@ async function rotateSessionInto(res: NextResponse): Promise<void> {
   if (!at || !rt) return;
   res.cookies.set(SP_AT_COOKIE, at, { ...cookieBase(), maxAge: SP_AT_MAX_AGE_SECONDS });
   res.cookies.set(SP_RT_COOKIE, rt, { ...cookieBase(), maxAge: 30 * 24 * 60 * 60 });
+  markSessionChanged(res); // story 4762 — the page's fetch gate tells the phone shell (the invitation-acceptance road)
 }
 
 export async function POST(request: Request, { params }: RouteParams) {

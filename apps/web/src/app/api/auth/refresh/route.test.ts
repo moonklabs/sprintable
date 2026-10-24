@@ -45,6 +45,7 @@ describe('POST /api/auth/refresh', () => {
     const setCookie = res.headers.get('set-cookie') ?? '';
     expect(setCookie).toContain('sp_at=new-at');
     expect(setCookie).toContain('sp_rt=new-rt');
+    expect(res.headers.get('x-session-changed')).toBe('1'); // story 4762 — the page's fetch gate tells the phone shell: write the new cookies to disk now
   });
 
   it('BE refresh 실패(401) → sp_at/sp_rt 쿠키 삭제(무한 재생산 차단 — 핵심 회귀 가드)', async () => {
@@ -59,6 +60,7 @@ describe('POST /api/auth/refresh', () => {
     const setCookie = res.headers.get('set-cookie') ?? '';
     expect(setCookie).toContain('sp_at=;');
     expect(setCookie).toContain('sp_rt=;');
+    expect(res.headers.get('x-session-changed')).toBe('1'); // story 4762 — a cleared session is written to disk at once too (no resurrected dead token after a kill)
   });
 
   // story #3644(3632 후속, AC8) — 상류가 502+HTML(CF 오류 페이지)을 내면 이전엔
@@ -74,6 +76,7 @@ describe('POST /api/auth/refresh', () => {
     const setCookie = res.headers.get('set-cookie') ?? '';
     expect(setCookie).toContain('sp_at=;');
     expect(setCookie).toContain('sp_rt=;');
+    expect(res.headers.get('x-session-changed')).toBe('1'); // story 4762 — a cleared session is written to disk at once too (no resurrected dead token after a kill)
   });
 
   it('domain-scoped 환경(NEXT_PUBLIC_COOKIE_DOMAIN 설정)에서도 삭제에 Domain이 실림 — prod 근본 회귀 가드(3차)', async () => {

@@ -5,9 +5,11 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { BarChart2, Bell, CreditCard, FolderKanban, GitBranch, LifeBuoy, Menu, Monitor, Palette, Plus, ShieldCheck, Trash2, User, Users, Webhook, X } from 'lucide-react';
+import { BarChart2, Bell, CreditCard, FolderKanban, GitBranch, LifeBuoy, Menu, Monitor, Palette, Plus, ShieldCheck, Smartphone, Trash2, User, Users, Webhook, X } from 'lucide-react';
 import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
 import { PhoneAppCard } from '@/components/desktop/phone-app-card';
+import { ThisPhoneCard } from '@/components/settings/this-phone-card';
+import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
 import { OrgMembersSection } from '@/components/settings/org-members-section';
 import { AddMemberModal } from '@/components/settings/add-member-modal';
@@ -137,7 +139,7 @@ function isWebhookUrlAllowed(url: string): boolean {
 //   판단, 재노출은 새 구현이 필요·set에서 제거만으론 복원 안 됨). 이 문자열은 과거 딥링크
 //   (?tab=ai) 방어 폴백 용도로만 남긴다.
 // the tab from ?tab= (pure · tested in settings-tab.test.ts) with this deployment's gates
-const resolveSettingsTab = (tab: string | null): string => resolveTab(tab, { supportWidget: isSupportWidgetEnabled(), billing: isEEEnabled() });
+const resolveSettingsTab = (tab: string | null, phoneApp: boolean): string => resolveTab(tab, { supportWidget: isSupportWidgetEnabled(), billing: isEEEnabled(), phoneApp });
 
 export default function SettingsPage() {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
@@ -151,7 +153,8 @@ export default function SettingsPage() {
   const router = useRouter();
   const searchParamsHook = useSearchParams();
   const { orgId: ctxOrgId, orgMemberships } = useDashboardContext();
-  const [activeTab, setActiveTab] = useState(() => resolveSettingsTab(searchParamsHook.get('tab')));
+  const { inPhoneApp } = usePhoneBridge(); // story 4762 — the «이 폰» tab exists only inside the phone app
+  const [activeTab, setActiveTab] = useState(() => resolveSettingsTab(searchParamsHook.get('tab'), inPhoneApp));
   // story #3772 — 프로필 탭 섹션 넷(내 프로필·비밀번호·연결된 계정·2FA)이 각자 /api/me를
   // 읽다 실패하면 «이유 없이» 조용히 사라졌다. 섹션은 그대로 두고(각자의 「모름」 렌더
   // 로직 무변) 탭 한 자리에서만 사유+재시도를 말한다(같은 사실 네 번 금지). retryNonce를
@@ -167,15 +170,28 @@ export default function SettingsPage() {
   const [lnbOpen, setLnbOpen] = useState(false);
   const { addToast } = useToast();
 
+  const pickedTabByHand = useRef(false); // story 4762 — set once the person clicks a tab: a phone claim that comes later must not move them back to the link's tab
   const handleTabChange = (tab: string) => {
+    pickedTabByHand.current = true;
     setActiveTab(tab);
     setLnbOpen(false); // 모바일에서 탭 선택 시 LNB 자동 접기
   };
 
+  // story 4762 — the tab follows the link (`?tab=`) when the link changes AND when the phone claim comes after the first render (a `?tab=this-phone` link then lands on its tab once the
+  // tab exists) — but a claim that comes later never moves a person who already picked a tab by hand
+  const lastSearchParams = useRef(searchParamsHook);
   useEffect(() => {
+    const linkChanged = lastSearchParams.current !== searchParamsHook;
+    lastSearchParams.current = searchParamsHook;
+    if (!linkChanged && pickedTabByHand.current) return;
     const tab = searchParamsHook.get('tab');
-    if (tab) setActiveTab(resolveSettingsTab(tab));
-  }, [searchParamsHook]);
+    if (tab) setActiveTab(resolveSettingsTab(tab, inPhoneApp));
+  }, [searchParamsHook, inPhoneApp]);
+
+  // story 4762 — the «이 폰» tab only exists inside the phone app: if the bridge goes away while the person is on it, the tab list must not point at a pane that is gone
+  useEffect(() => {
+    if (!inPhoneApp) setActiveTab((current) => (current === 'this-phone' ? resolveSettingsTab('this-phone', false) : current)); // functional: a link change queued in the same pass keeps winning
+  }, [inPhoneApp]);
 
   const [orgId, setOrgId] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
@@ -750,6 +766,13 @@ export default function SettingsPage() {
               <Monitor className="h-4 w-4" />
               {t('desktopTab')}
             </TabsTrigger>
+            {/* story 4762: the web «원격 기기» list says «if it matches the number in the phone app's settings › This phone» — this is that place (phone app only) */}
+            {inPhoneApp && (
+              <TabsTrigger value="this-phone">
+                <Smartphone className="h-4 w-4" />
+                {t('tabThisPhone')}
+              </TabsTrigger>
+            )}
             {isSupportWidgetEnabled() && (
               <TabsTrigger value="support">
                 <LifeBuoy className="h-4 w-4" />
@@ -921,6 +944,14 @@ export default function SettingsPage() {
                 <PhoneAppCard />
               </div>
             </TabsContent>
+
+            {inPhoneApp && (
+              <TabsContent value="this-phone">
+                <div className="space-y-6" data-testid="settings-this-phone-tab">
+                  <ThisPhoneCard />
+                </div>
+              </TabsContent>
+            )}
 
             {isSupportWidgetEnabled() && (
               <TabsContent value="support">

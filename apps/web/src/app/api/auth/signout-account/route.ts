@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
-import { cookieBase } from '@/lib/auth/cookies';
+import { cookieBase, markSessionChanged } from '@/lib/auth/cookies';
 import { handleApiError } from '@/lib/api-error';
 import {
   ACTIVE_ACCOUNT_COOKIE,
@@ -75,7 +75,7 @@ export async function POST(request: Request) {
       ]);
       const res = NextResponse.json({ data: { ok: true, next: null } });
       await clearAllAccounts(res.cookies);
-      return res;
+      return markSessionChanged(res);
     }
 
     // scope === 'this' — 현 계정만 revoke, 다음 vault 계정 승격.
@@ -91,7 +91,7 @@ export async function POST(request: Request) {
       // 남은 계정 없음 → 전체 클리어(FE는 /login).
       const res = NextResponse.json({ data: { ok: true, next: null } });
       await clearAllAccounts(res.cookies);
-      return res;
+      return markSessionChanged(res);
     }
 
     // 다음 계정 승격: sp_rt=next RT, sp_at 제거(middleware single-flight refresh가 fresh sp_at 발급),
@@ -104,7 +104,7 @@ export async function POST(request: Request) {
     removeVaultEntry(res.cookies, next.accountId);
     clearSuperseded(next.accountId); // 승격된 next 는 active — epoch 마킹 해제(정상 refresh 허용)
     discardCookies(res.cookies, staleNames); // RC1: stale vault 폐기
-    return res;
+    return markSessionChanged(res);
   } catch (err: unknown) {
     return handleApiError(err);
   }
