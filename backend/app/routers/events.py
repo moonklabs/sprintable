@@ -44,7 +44,7 @@ from app.dependencies.database import get_db
 from app.dependencies.ownership import _is_org_admin
 from app.models.event import Event
 from app.services.agent_onboarding_config import resolve_locale_from_request
-from app.services.stream_access import RECHECK_BEFORE_SEND_SEC, AccessRecheck
+from app.services.stream_access import RECHECK_BEFORE_SEND_SEC, AccessRecheck, SeatRecheck
 from app.services.org_locale import resolve_org_locale
 from app.services.i18n_catalog import t
 from app.services.member_resolver import (
@@ -544,10 +544,11 @@ async def agent_event_stream(
     _lifespan_deadline = time.monotonic() + _SSE_LIFESPAN_SEC + random.uniform(0, _SSE_LIFESPAN_JITTER_SEC)
 
     # story #4565 (Qadir ①): an agent key revoked after this stream opened (a setup moved the agent to another computer · a
-    # device disconnected) ends it — rechecked on each heartbeat and before more content goes out. Only an agent key's stream
-    # (a person's JWT session has no key to revoke here).
+    # device disconnected) ends it — rechecked on each heartbeat and before more content goes out. A person's JWT session has no
+    # key to revoke; its seat is asked instead (story #4774, below).
     _key_id = auth.claims.get("app_metadata", {}).get("api_key_id")
-    _access = AccessRecheck(_key_id, resolved_member_id, agent_only=False) if _key_id else None
+    # story #4774: a PERSON's session has no key to revoke, but it has a seat — asked again before every send and on every heartbeat (a removal ends the seat), as a key's is
+    _access = AccessRecheck(_key_id, resolved_member_id, agent_only=False) if _key_id else SeatRecheck(auth.user_id, org_id)
 
     async def generate():
         # story #3026(실사고, PO 확定 2026-08-24) — 이 연결이 실제로 클라에 내보낸(yield
