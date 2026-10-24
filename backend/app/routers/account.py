@@ -249,6 +249,18 @@ async def delete_account(
     # (Authentication refuses such a device anyway — `device_for_token` — but the keys the setup handed out are only closed here.)
     from app.services.desktop_setup import close_setups_of_deleted_account
 
+    # story #4769 (codex r1): the person's seats first, FOR UPDATE, in id order — the order a member removal keeps (seat → agent member rows → setup rows) — so a removal of
+    # this person that overlaps this deletion cannot make a deadlock pair with it (this deletion used to reach the seat rows only AFTER the setup rows)
+    # story #4400 (Qadir 01a0e9fc) — end every session of the deleted account, like the admin removal does
+    # (org_members._revoke_user_refresh_tokens · the same _explicit_revoke_values seam). Before, its refresh tokens stayed
+    # valid and could keep re-issuing a departed org. Taken BEFORE the seats (4769 codex: a removal of this person revokes the tokens first and then takes the seat —
+    # tokens → seat → agent member rows → setup rows is the one order every path keeps, the role change included; this deletion used to take the tokens last).
+    from app.routers.org_members import _revoke_user_refresh_tokens
+
+    await _revoke_user_refresh_tokens(session, uuid.UUID(str(uid)))
+    await session.execute(
+        text("SELECT id FROM org_members WHERE user_id = CAST(:uid AS uuid) AND deleted_at IS NULL ORDER BY id FOR UPDATE"), {"uid": str(uid)},
+    )
     await close_setups_of_deleted_account(session, user_id=uid)
 
     now = datetime.now(timezone.utc)
@@ -274,12 +286,7 @@ async def delete_account(
     )
     user.is_active = False
     user.deleted_at = now
-    # story #4400 (Qadir 01a0e9fc) — end every session of the deleted account, like the admin removal does
-    # (org_members._revoke_user_refresh_tokens · the same _explicit_revoke_values seam). Before, its refresh tokens stayed
-    # valid and could keep re-issuing a departed org.
-    from app.routers.org_members import _revoke_user_refresh_tokens
-
-    await _revoke_user_refresh_tokens(session, uuid.UUID(str(uid)))
+    # (the sessions of the account were ended above — story #4400: its refresh tokens revoked, taken BEFORE the seats are locked; see there)
     # …and every ACCESS token already issued: the per-user cut-off epoch (`auth_migrations.auth_valid_after`, read by `_reject_if_before_cutover` on every request) — the last instant of the
     # CURRENT second, as the reclaim of an unproved account does it (tokens carry whole seconds). Without it a token minted before the deletion kept working until its own expiry.
     epoch = now.replace(microsecond=0) + timedelta(seconds=1) - timedelta(microseconds=1)

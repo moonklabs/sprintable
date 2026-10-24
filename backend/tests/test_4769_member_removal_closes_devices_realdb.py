@@ -283,3 +283,30 @@ async def test_06_the_migration_closes_what_older_removals_left_completely_and_t
         assert await _state() == first, "a second run changes nothing"
     finally:
         await _close(engine, w)
+
+
+async def test_07_a_removal_and_a_deletion_of_the_same_person_do_not_deadlock():
+    """codex 4769 r1: the account deletion used to reach the seat rows only after the setup rows, the removal takes the seat first — a deadlock pair when they overlap. Both now go
+    user → seat → agent member rows → setup rows (the deletion locks the person's seats before its closer). A smoke test: several rounds of both at once; each must end with
+    a normal answer (never a 500 from a deadlock abort) and no live key for the person. (A timing test: it does not claim a deterministic RED.)"""
+    import asyncio
+
+    engine, w = await _world()
+    try:
+        for _ in range(5):
+            _, owner_email, org_id = await w.person(org=True, name="Owner")
+            m = await w.add_member(org_id, role="admin", name="M")
+            comp = await _computer(w, org_id, m)
+            owner = await w.tokens(owner_email)
+            m_tokens = await w.tokens(f"story4752-m-{m.hex[:10]}@test.com")
+            seat = await _seat(w, org_id, m)
+            removal = w.client.delete(f"/api/v2/org-members/{seat}", headers={"Authorization": f"Bearer {owner['access_token']}"})
+            deletion = w.delete(m_tokens)
+            r1, r2 = await asyncio.gather(removal, deletion, return_exceptions=True)
+            for r in (r1, r2):
+                assert not isinstance(r, Exception), r
+                assert r.status_code < 500, r.text      # a deadlock abort would be a 500
+            assert await _live(w, "SELECT count(*) FROM agent_api_keys WHERE desktop_setup_id = :i AND revoked_at IS NULL", i=comp["setup_id"]) == 0
+            assert (await _row(w, comp["setup_id"]))["revoked"] is True
+    finally:
+        await _close(engine, w)

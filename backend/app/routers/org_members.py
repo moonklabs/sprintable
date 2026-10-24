@@ -291,12 +291,14 @@ async def delete_org_member(
     # story #4769: the seat row first (FOR UPDATE), then — in the closer — the agent member rows and the setup rows: the order an exchange keeps (it takes the same seat
     # row FOR SHARE first), so an exchange that overlaps this removal waits for it and finds the person gone. Then the computers the person confirmed IN THIS organization
     # close like a disconnect, in this transaction: a removal that cannot close them fails whole (nothing half done; a retry finishes it).
+    # (the refresh tokens are revoked BEFORE the seat is locked, the order this endpoint and the role change have always kept — locking the seat first would turn
+    # a removal and a role change of the same member into a deadlock pair, codex 4769 r1)
     from app.models.project import OrgMember
     from app.services.desktop_setup import close_setups_of_removed_member
 
+    await _revoke_user_refresh_tokens(repo.session, existing.user_id)
     await session.execute(select(OrgMember.id).where(OrgMember.id == id, OrgMember.org_id == org_id).with_for_update())
     await close_setups_of_removed_member(session, user_id=existing.user_id, org_id=org_id, removed_by=uuid.UUID(str(auth.user_id)))
-    await _revoke_user_refresh_tokens(repo.session, existing.user_id)
     # AC3-4 2-2: team_members 뷰 전환 — anchor-only. members가 is_active 유일 소스(레거시 cascade 제거).
     await session.execute(
         text(
