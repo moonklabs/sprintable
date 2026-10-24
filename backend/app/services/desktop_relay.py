@@ -112,28 +112,33 @@ async def revoke_device_tokens(db: AsyncSession, setup_id: uuid.UUID, *, now: da
 
 
 async def device_for_token(db: AsyncSession, token: str | None) -> DesktopSetup | None:
-    """The device a token belongs to — None for no token, another shape, an unknown or revoked token, a disconnected device, or a device whose
-    confirming person's account is closed or deleted (story #4767: a computer is a person's, and a closed account owns no computer; this also covers the
-    rows an account deletion left before the deletion closed its computers). A confirmer with no `users` row at all (or none recorded) is not judged here:
-    `confirmed_by` has no foreign key and the relay contract (4618) has always served such a row."""
+    """The device a token belongs to — None for no token, another shape, an unknown or revoked token, a disconnected device, a device whose confirming
+    person's account is closed or deleted (story #4767), or whose confirming person was REMOVED from the device's organization (story #4769: the account
+    lives on but the seat is gone — a computer belongs to a person in an organization, and a person who left it owns no computer there; this also covers the
+    rows older removals and deletions left). A confirmer with no `users` row, none recorded, or no `org_members` row for (organization, person) is not judged
+    here: `confirmed_by` has no foreign key and the relay contract (4618) has always served such a row."""
+    from app.models.project import OrgMember
     from app.models.user import User
 
     if not token or not token.startswith(TOKEN_PREFIX):
         return None
     row = (await db.execute(
-        select(DesktopDeviceToken, DesktopSetup, User.is_active, User.deleted_at)
+        select(DesktopDeviceToken, DesktopSetup, User.is_active, User.deleted_at, OrgMember.deleted_at)
         .join(DesktopSetup, DesktopSetup.id == DesktopDeviceToken.setup_id)
         .outerjoin(User, User.id == DesktopSetup.confirmed_by)
+        .outerjoin(OrgMember, (OrgMember.org_id == DesktopSetup.org_id) & (OrgMember.user_id == DesktopSetup.confirmed_by))
         .where(DesktopDeviceToken.token_hash == _hash(token))
     )).first()
     if row is None:
         return None
-    tok, setup, person_active, person_deleted_at = row
+    tok, setup, person_active, person_deleted_at, seat_deleted_at = row
     if not hmac.compare_digest(tok.token_hash, _hash(token)):
         return None
     if tok.revoked_at is not None or setup.revoked_at is not None or setup.exchanged_at is None:
         return None
     if person_active is False or person_deleted_at is not None:  # a closed account, a deleted one: the same refusal (no user row: person_active is None — not judged)
+        return None
+    if seat_deleted_at is not None:  # the person was removed from this organization (no seat row: seat_deleted_at is None — not judged)
         return None
     return setup
 
@@ -148,18 +153,21 @@ async def touch_device(db: AsyncSession, setup_id: uuid.UUID) -> None:
 
 
 async def device_still_valid(db: AsyncSession, setup_id: uuid.UUID) -> bool:
-    """An open stream asks again: a disconnect (device revoked · its token revoked · its confirming person gone — story #4767) ends it."""
+    """An open stream asks again: a disconnect (device revoked · its token revoked · its confirming person's account gone — story #4767 — or removed from the
+    organization — story #4769) ends it."""
+    from app.models.project import OrgMember
     from app.models.user import User
 
     row = (await db.execute(
-        select(DesktopSetup.revoked_at, func.count(DesktopDeviceToken.id), User.is_active, User.deleted_at)
+        select(DesktopSetup.revoked_at, func.count(DesktopDeviceToken.id), User.is_active, User.deleted_at, OrgMember.deleted_at)
         .select_from(DesktopSetup)
         .outerjoin(DesktopDeviceToken, (DesktopDeviceToken.setup_id == DesktopSetup.id) & DesktopDeviceToken.revoked_at.is_(None))
         .outerjoin(User, User.id == DesktopSetup.confirmed_by)
+        .outerjoin(OrgMember, (OrgMember.org_id == DesktopSetup.org_id) & (OrgMember.user_id == DesktopSetup.confirmed_by))
         .where(DesktopSetup.id == setup_id)
-        .group_by(DesktopSetup.revoked_at, User.is_active, User.deleted_at)
+        .group_by(DesktopSetup.revoked_at, User.is_active, User.deleted_at, OrgMember.deleted_at)
     )).first()
-    return row is not None and row[0] is None and row[1] > 0 and row[2] is not False and row[3] is None
+    return row is not None and row[0] is None and row[1] > 0 and row[2] is not False and row[3] is None and row[4] is None
 
 
 # ── sessions ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────

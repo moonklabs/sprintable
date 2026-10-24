@@ -1227,6 +1227,14 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str, device_i
         from app.models.user import User
 
         await db.execute(select(User.id).where(User.id == locked_confirmer).with_for_update(read=True))
+        # story #4769: …then their SEAT in the setup's organization (a member removal holds that row FOR UPDATE first, then the member and setup rows — the same
+        # order), so an exchange that overlaps an open removal waits for it and finds the person gone instead of handing out keys the removal's closer cannot see
+        if setup.org_id is not None:
+            from app.models.project import OrgMember
+
+            await db.execute(
+                select(OrgMember.id).where(OrgMember.org_id == setup.org_id, OrgMember.user_id == locked_confirmer).with_for_update(read=True)
+            )
     locked = await _lock_in_order(db, member_ids=attached, setup_ids={setup.id, *other_ids})
     setup = locked[setup.id]
     others = [locked[i] for i in sorted(other_ids) if i in locked]
@@ -1367,14 +1375,26 @@ ACCOUNT_DELETED_REASON = "account_deleted"
 
 
 async def confirming_person_is_gone(db: AsyncSession, setup: DesktopSetup) -> bool:
-    """story #4767: the account of the person who confirmed this setup is closed or deleted. No confirmer recorded, or no `users` row for it, is not
-    «gone» (the same reading as the relay's device authentication)."""
+    """story #4767/#4769: the account of the person who confirmed this setup is closed or deleted, OR they were removed from the setup's organization.
+    No confirmer recorded, no `users` row for it, and no `org_members` row for (organization, person) are not «gone» (the same reading as the relay's
+    device authentication)."""
+    from app.models.project import OrgMember
     from app.models.user import User
 
     if setup.confirmed_by is None:
         return False
     row = (await db.execute(select(User.is_active, User.deleted_at).where(User.id == setup.confirmed_by))).first()
-    return row is not None and (row.is_active is False or row.deleted_at is not None)
+    if row is not None and (row.is_active is False or row.deleted_at is not None):
+        return True
+    if setup.org_id is None:
+        return False
+    seat = (await db.execute(
+        select(OrgMember.deleted_at).where(OrgMember.org_id == setup.org_id, OrgMember.user_id == setup.confirmed_by)
+    )).first()
+    return seat is not None and seat.deleted_at is not None
+
+
+MEMBER_REMOVED_REASON = "member_removed"
 
 
 async def close_setups_of_deleted_account(db: AsyncSession, *, user_id: uuid.UUID) -> int:
@@ -1384,8 +1404,24 @@ async def close_setups_of_deleted_account(db: AsyncSession, *, user_id: uuid.UUI
     stream, clock view, the agents the setup made), without asking whether the person may still manage the organization — they are
     leaving. `revoked_reason` says why. The organizations that closed with the account took their setups with them (cascade).
     Returns how many were closed."""
+    return await _close_open_setups(db, user_id=user_id, org_id=None, revoked_by=user_id, reason=ACCOUNT_DELETED_REASON)
+
+
+async def close_setups_of_removed_member(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID, removed_by: uuid.UUID) -> int:
+    """story #4769 — the same for a person REMOVED from one organization while their account lives on: the computers they confirmed IN THAT
+    ORGANIZATION close like a disconnect (`revoked_by` = whoever removed them, `revoked_reason` = member_removed). Their computers in other
+    organizations are not touched, nor are agents a setup only attached. Returns how many were closed."""
+    return await _close_open_setups(db, user_id=user_id, org_id=org_id, revoked_by=removed_by, reason=MEMBER_REMOVED_REASON)
+
+
+async def _close_open_setups(
+    db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID | None, revoked_by: uuid.UUID, reason: str,
+) -> int:
+    where = [DesktopSetup.confirmed_by == user_id, DesktopSetup.revoked_at.is_(None)]
+    if org_id is not None:
+        where.append(DesktopSetup.org_id == org_id)
     rows = list((await db.execute(
-        select(DesktopSetup.id, DesktopSetup.members).where(DesktopSetup.confirmed_by == user_id, DesktopSetup.revoked_at.is_(None)).order_by(DesktopSetup.id)
+        select(DesktopSetup.id, DesktopSetup.members).where(*where).order_by(DesktopSetup.id)
     )).all())
     if not rows:
         return 0
@@ -1401,7 +1437,7 @@ async def close_setups_of_deleted_account(db: AsyncSession, *, user_id: uuid.UUI
         found = locked[setup_id]
         if found.org_id is None:
             continue
-        done = await _disconnect_setup(db, found, org_id=found.org_id, revoked_by=user_id, reason=ACCOUNT_DELETED_REASON, locked=locked)
+        done = await _disconnect_setup(db, found, org_id=found.org_id, revoked_by=revoked_by, reason=reason, locked=locked)
         closed += 0 if done.already else 1
     return closed
 

@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
@@ -280,6 +280,7 @@ async def delete_org_member(
     repo: OrgMemberRepository = Depends(_require_admin),
     session: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
+    auth: AuthContext = Depends(get_current_user),
 ) -> dict:
     existing = await repo.get(id)
     if existing is None:
@@ -287,6 +288,14 @@ async def delete_org_member(
     # AC5: owner guard — owner는 삭제 불가
     if existing.role == "owner":
         raise HTTPException(status_code=403, detail="조직 owner는 삭제할 수 없습니다")
+    # story #4769: the seat row first (FOR UPDATE), then — in the closer — the agent member rows and the setup rows: the order an exchange keeps (it takes the same seat
+    # row FOR SHARE first), so an exchange that overlaps this removal waits for it and finds the person gone. Then the computers the person confirmed IN THIS organization
+    # close like a disconnect, in this transaction: a removal that cannot close them fails whole (nothing half done; a retry finishes it).
+    from app.models.project import OrgMember
+    from app.services.desktop_setup import close_setups_of_removed_member
+
+    await session.execute(select(OrgMember.id).where(OrgMember.id == id, OrgMember.org_id == org_id).with_for_update())
+    await close_setups_of_removed_member(session, user_id=existing.user_id, org_id=org_id, removed_by=uuid.UUID(str(auth.user_id)))
     await _revoke_user_refresh_tokens(repo.session, existing.user_id)
     # AC3-4 2-2: team_members 뷰 전환 — anchor-only. members가 is_active 유일 소스(레거시 cascade 제거).
     await session.execute(
