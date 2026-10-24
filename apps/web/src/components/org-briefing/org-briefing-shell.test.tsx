@@ -463,6 +463,10 @@ describe('OrgBriefingShell — story #4762 AC1 한 번 누름 = 서버에 메시
     expect(container.querySelector('[data-testid="today-instruction-failed"]')?.textContent).toBe(koMessages.orgBriefing.instructionSendUnknown);
     expect(input.value).toBe('maybe sent');
     expect(pushMock).not.toHaveBeenCalled();
+    // the line is about the text that was there: the person editing it puts the line away (it never stays on an empty box)
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(input, ''); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    expect(container.querySelector('[data-testid="today-instruction-failed"]')).toBeNull();
   });
 
   it('while sending, a second press does not send twice', async () => {
@@ -547,6 +551,10 @@ describe('OrgBriefingShell — story #4762 AC1 한 번 누름 = 서버에 메시
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
     expect(pushMock).not.toHaveBeenCalled();
     expect((container.querySelector('[data-testid="today-instruction-input"]') as HTMLInputElement).value).toBe('');
+    // not silent: it IS sent, and the line says it went to the chat of the project the person was on
+    const note = container.querySelector('[data-testid="today-instruction-failed"]');
+    expect(note?.textContent).toBe(koMessages.orgBriefing.instructionSentElsewhere);
+    expect(note?.getAttribute('role')).toBe('status');
   });
 
   it('the person is on another project when the list answers → nothing is sent to the project they left', async () => {

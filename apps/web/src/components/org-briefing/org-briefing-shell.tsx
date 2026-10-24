@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ViewerDate } from '@/components/viewer-time-zone';
@@ -34,12 +34,15 @@ function InstructionInput({ autoFocus }: { autoFocus: boolean }) {
   const [value, setValue] = useState('');
   // story #4762 (AC1) — one press sends when the person has exactly one agent DM; `sending` holds a second press, `failed` keeps the text and says so
   const [sending, setSending] = useState(false);
-  const [failed, setFailed] = useState<null | 'refused' | 'unknown'>(null);
+  // what the line under the box says: a refusal · no answer at all · «it was sent, to the project you have just left»
+  const [failed, setFailed] = useState<null | 'refused' | 'unknown' | 'elsewhere'>(null);
   const sendingRef = useRef(false); // a second press in the same tick sees the state of the render before — the ref holds it at once
   const mountedRef = useRef(true);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
   const projectRef = useRef(projectId);
-  useEffect(() => { projectRef.current = projectId; }, [projectId]); // the project the person is on NOW — the answer of a read made on another project must not send anything
+  // the project the person is on NOW — the answer of a read made on another project must not send anything. A LAYOUT effect: it runs inside the commit, so no
+  // continuation of an earlier press can run between «the new project is on screen» and «the ref knows» (a passive effect leaves that gap — codex 4762)
+  useLayoutEffect(() => { projectRef.current = projectId; }, [projectId]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // story #3831 후속(페드루 PO 確定, 2026-09-13 14:22Z) — 컴패니언 단축키가 `?focus=compose`
@@ -73,7 +76,7 @@ function InstructionInput({ autoFocus }: { autoFocus: boolean }) {
     if (outcome !== 'sent') { setFailed(outcome); return; }
     setValue('');
     // it went to the DM of the project the person WAS on: if they moved to another project during the send, they are not taken back to the one they left
-    if (projectRef.current !== projectId) return;
+    if (projectRef.current !== projectId) { setFailed('elsewhere'); return; } // not a failure — it IS sent; the line says where it went
     // 대상-프로젝트: 현재 p가 곧 대상 프로젝트다 — findSoleAgentDm이 현재 프로젝트(project_id=현재)의 대화 목록만 읽어 고른 대화다.
     router.push(flatHref(`/chats/${encodeURIComponent(target)}`));
   };
@@ -86,7 +89,7 @@ function InstructionInput({ autoFocus }: { autoFocus: boolean }) {
       <Input
         ref={inputRef}
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => { setValue(e.target.value); setFailed(null); }} // a line under the box is about the text that was there — a new edit puts it away
         placeholder={t('instructionInputPlaceholder')}
         aria-label={t('instructionInputPlaceholder')}
         data-testid="today-instruction-input"
@@ -94,7 +97,7 @@ function InstructionInput({ autoFocus }: { autoFocus: boolean }) {
       />
       <Button type="submit" size="sm" disabled={!value.trim() || sending} aria-busy={sending}>{t('instructionSendButton')}</Button>
     </form>
-    {failed ? <p role="alert" data-testid="today-instruction-failed" className="mt-2 pe-14 text-xs text-destructive lg:pe-0">{failed === 'unknown' ? t('instructionSendUnknown') : t('instructionSendFailed')}</p> : null}
+    {failed ? <p role={failed === 'elsewhere' ? 'status' : 'alert'} data-testid="today-instruction-failed" className={`mt-2 pe-14 text-xs lg:pe-0 ${failed === 'elsewhere' ? 'text-muted-foreground' : 'text-destructive'}`}>{failed === 'unknown' ? t('instructionSendUnknown') : failed === 'elsewhere' ? t('instructionSentElsewhere') : t('instructionSendFailed')}</p> : null}
     </>
   );
 }
