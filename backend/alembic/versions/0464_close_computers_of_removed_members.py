@@ -14,7 +14,7 @@ The same one set-based pass as 0463, for every open setup whose confirming perso
 Before it closes anything it writes ONE ROW PER COMPUTER to `desktop_setup_closures` (created here; ids only, never values): the setup id, the person, whether the seat was soft-deleted or
 absent, and the ids of the device tokens, agent keys and agents it is about to revoke / stop — so a count that later turns out wrong can be undone for exactly those ids by a
 follow-up (PO 4769: the migration cannot be rolled back, but it can be traced). A second run finds nothing open and records nothing.
-Idempotent; the closing statements are data only; `downgrade` drops the record table and re-opens nothing. A person who was removed and later rejoined (seat row active again) is not in the set; a person whose ACCOUNT was
+Idempotent; the closing statements are data only; `downgrade` re-opens nothing and KEEPS the record table (a rollback must not erase the only trace of what was closed). A person who was removed and later rejoined (seat row active again) is not in the set; a person whose ACCOUNT was
 deleted was closed by 0463. Not done here: the pushes `reject_open_commands` schedules to the person who answered (a migration sends nothing).
 """
 import sqlalchemy as sa
@@ -50,7 +50,7 @@ _RECORD = (
     "SELECT gen_random_uuid(), s.org_id, s.id, s.confirmed_by, '0464', 'member_removed', (om.id IS NULL), "
     "COALESCE((SELECT jsonb_agg(t.id ORDER BY t.id) FROM desktop_device_tokens t WHERE t.setup_id = s.id AND t.revoked_at IS NULL), '[]'::jsonb), "
     "COALESCE((SELECT jsonb_agg(k.id ORDER BY k.id) FROM agent_api_keys k WHERE k.desktop_setup_id = s.id AND k.revoked_at IS NULL), '[]'::jsonb), "
-    f"COALESCE((SELECT jsonb_agg(m.id ORDER BY m.id) FROM members m JOIN ({_MADE}) made ON made.id = m.id "
+    f"COALESCE((SELECT jsonb_agg(DISTINCT m.id ORDER BY m.id) FROM members m JOIN ({_MADE}) made ON made.id = m.id "
     "WHERE made.setup_id = s.id AND m.org_id = made.org_id AND m.type = 'agent' AND m.is_active), '[]'::jsonb) "
     "FROM desktop_setups s LEFT JOIN org_members om ON om.org_id = s.org_id AND om.user_id = s.confirmed_by "
     f"WHERE s.id IN ({_GONE})"
@@ -61,6 +61,10 @@ STATEMENTS = (
     # the account deletion) takes its rows in that order and then updates keys and tokens, so taking them first here keeps this transaction from deadlocking with them
     f"SELECT m.id FROM members m WHERE m.id IN (SELECT id FROM ({_MADE}) made) ORDER BY m.id FOR UPDATE",
     f"SELECT s.id FROM desktop_setups s WHERE s.id IN ({_GONE}) ORDER BY s.id FOR UPDATE",
+    # …then the token and key rows the run is about to revoke, so a revoke that lands from outside (the API-key revoke endpoint) between the record and the closing
+    # statements cannot leave an id recorded as closed that this run did not close (codex 4769 r5): a row revoked meanwhile is skipped here and so not recorded
+    f"SELECT t.id FROM desktop_device_tokens t WHERE t.setup_id IN ({_GONE}) AND t.revoked_at IS NULL ORDER BY t.id FOR UPDATE",
+    f"SELECT k.id FROM agent_api_keys k WHERE k.desktop_setup_id IN ({_GONE}) AND k.revoked_at IS NULL ORDER BY k.id FOR UPDATE",
     _RECORD,
     # what `reject_open_commands` does besides the commands: an answer a person gave that never reached the device stops reading «answered» (the request moves to rejected)
     (
@@ -94,10 +98,13 @@ STATEMENTS = (
 
 
 def upgrade() -> None:
+    # IF NOT EXISTS: the record outlives a downgrade (below), so a second upgrade finds it already there
     op.create_table(
         "desktop_setup_closures",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("org_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
+        # no foreign key on purpose (codex 4769 r5): the insert would take a key-share lock on the organization row while this run already holds the setup rows, the opposite
+        # order of an organization delete (organization first, then its setups by cascade) — a deadlock pair. The record is an audit of ids; it may outlive its organization.
+        sa.Column("org_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("setup_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("confirmed_by", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("migration", sa.Text(), nullable=False),
@@ -107,15 +114,16 @@ def upgrade() -> None:
         sa.Column("key_ids", postgresql.JSONB(), nullable=False),
         sa.Column("agent_ids", postgresql.JSONB(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        if_not_exists=True,
     )
-    op.create_index("ix_desktop_setup_closures_org_id", "desktop_setup_closures", ["org_id"])
-    op.create_index("ix_desktop_setup_closures_setup_id", "desktop_setup_closures", ["setup_id"])
+    op.create_index("ix_desktop_setup_closures_org_id", "desktop_setup_closures", ["org_id"], if_not_exists=True)
+    op.create_index("ix_desktop_setup_closures_setup_id", "desktop_setup_closures", ["setup_id"], if_not_exists=True)
     for statement in STATEMENTS:
         op.execute(sa.text(statement))
 
 
 def downgrade() -> None:
-    # the closing is data only and is not re-opened; the record table is schema and goes with the revision
-    op.drop_index("ix_desktop_setup_closures_setup_id", table_name="desktop_setup_closures")
-    op.drop_index("ix_desktop_setup_closures_org_id", table_name="desktop_setup_closures")
-    op.drop_table("desktop_setup_closures")
+    # Nothing is undone, and the record table STAYS (PO / security lens 4769): the closing is data only and is not re-opened, and a rollback that dropped the record would leave
+    # the closed computers with no trace of which ids this run closed — exactly what a follow-up needs to restore them. A second `upgrade` finds the table in place
+    # (IF NOT EXISTS) and, since nothing it would close is still open, records nothing more.
+    pass

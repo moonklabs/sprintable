@@ -323,8 +323,8 @@ async def test_06_the_migration_closes_what_older_removals_left_completely_and_t
             await s.commit()
         await w.sql(
             "UPDATE desktop_setups SET members = members || CAST(:line AS jsonb) WHERE id = :i",
-            line=f'[{{"kind": "agent", "member_id": "{attached}", "existing": true}}]', i=legacy["setup_id"],
-        )
+            line=f'[{{"kind": "agent", "member_id": "{attached}", "existing": true}}, {{"kind": "agent", "member_id": "{legacy["agent_id"]}", "runtime": "claude"}}]', i=legacy["setup_id"],
+        )   # …and the made agent a second time: a multi-stage recipe stores one line per stage (codex 4769 r5: the record must name it once)
         await w.sql("UPDATE org_members SET deleted_at = now() WHERE org_id = :o AND user_id = :u", o=org_id, u=removed)   # an older removal: the closer never ran
         # the rest of what the closer writes (Kadir's lens: these four pieces were caught only by probes) — an open command, a clock view, an answer that never reached the device,
         # and the typed words of a clock edit that never reached the computer
@@ -352,6 +352,27 @@ async def test_06_the_migration_closes_what_older_removals_left_completely_and_t
                 idempotency_key="k3", requested_by=removed, state="queued",
             ))
             await sess.commit()
+
+        # rows that were ALREADY dead before the run: a revoked token, a revoked key, a made agent that is already stopped — the record must not name them, or an undo would revive what
+        # someone closed on purpose (PO / lens 4769, precision of the record)
+        from app.models.api_key import ApiKey
+        from app.models.desktop_relay import DesktopDeviceToken
+        from app.services.desktop_relay import _hash
+
+        dead_token, dead_key, dead_agent = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        async with w.Session() as sess:
+            sess.add(Member(id=dead_agent, org_id=org_id, type="agent", name="Already stopped", is_active=False))
+            await sess.commit()
+            sess.add(DesktopDeviceToken(id=dead_token, setup_id=legacy["setup_id"], token_hash=_hash("dead-" + uuid.uuid4().hex), revoked_at=datetime.now(UTC)))
+            sess.add(ApiKey(
+                id=dead_key, team_member_id=legacy["agent_id"], member_id=legacy["agent_id"], key_prefix="sk_dead", key_hash=uuid.uuid4().hex,
+                desktop_setup_id=legacy["setup_id"], revoked_at=datetime.now(UTC),
+            ))
+            await sess.commit()
+        await w.sql(
+            "UPDATE desktop_setups SET members = members || CAST(:line AS jsonb) WHERE id = :i",
+            line=f'[{{"kind": "agent", "member_id": "{dead_agent}"}}]', i=legacy["setup_id"],
+        )
 
         async def _ids(sql: str, **kw) -> list[str]:
             async with w.Session() as sess:
@@ -415,10 +436,100 @@ async def test_06_the_migration_closes_what_older_removals_left_completely_and_t
             assert sorted(r.token_ids) == before[sid]["tokens"] and len(r.token_ids) == 1
             assert sorted(r.key_ids) == before[sid]["keys"] and len(r.key_ids) == 1
             assert sorted(r.agent_ids) == [agent_of[sid]], "the made agent only — never the one the setup attached"
+            assert str(dead_token) not in r.token_ids and str(dead_key) not in r.key_ids and str(dead_agent) not in r.agent_ids, "what was already dead is not named by the record"
         assert first["noseat"]["revoked"] is True and first["noseat"]["revoked_reason"] == "member_removed" and first["noseat_live"] == 0, "no seat row at all is closed too"
         assert first["nobody"]["revoked"] is False, "a setup with no confirmer recorded is not judged"
         await _run()
         assert await _state() == first, "a second run changes nothing"
+    finally:
+        await _close(engine, w)
+
+
+async def test_06b_a_key_revoked_from_outside_while_the_migration_runs_is_not_recorded_as_closed_by_it():
+    """codex 4769 r5: the record is taken while the rows are still open; a key revoked meanwhile (the API-key revoke endpoint) must not be recorded as closed BY this run — a later undo
+    of the record would resurrect it. The run locks the token and key rows first: it waits for the outside revoke and, after it commits, neither revokes nor records that key."""
+    import asyncio
+
+    from sqlalchemy import text
+
+    engine, w = await _world()
+    try:
+        _, _, org_id = await w.person(org=True, name="Owner")
+        removed = await w.add_member(org_id, role="admin", name="Removed")
+        comp = await _computer(w, org_id, removed)
+        async with w.Session() as s:
+            key_id = (await s.execute(text("SELECT id FROM agent_api_keys WHERE desktop_setup_id = :i"), {"i": comp["setup_id"]})).scalar_one()
+        await w.sql("UPDATE org_members SET deleted_at = now() WHERE org_id = :o AND user_id = :u", o=org_id, u=removed)
+
+        outside = w.Session()
+        async with outside:
+            await outside.execute(text("UPDATE agent_api_keys SET revoked_at = now() WHERE id = :k"), {"k": key_id})   # an outside revoke, not yet committed
+
+            async def _run():
+                async with w.Session() as s:
+                    for statement in _migration_statements():
+                        await s.execute(text(statement))
+                    await s.commit()
+
+            migration = asyncio.create_task(_run())
+            await asyncio.sleep(1.0)
+            assert not migration.done(), "the run waits for the key row an outside revoke holds"
+            await outside.commit()
+        await asyncio.wait_for(migration, timeout=15)
+        async with w.Session() as s:
+            rec = (await s.execute(text("SELECT key_ids, token_ids FROM desktop_setup_closures WHERE setup_id = :i"), {"i": comp["setup_id"]})).one()
+        assert str(key_id) not in [str(k) for k in rec.key_ids], "a key the outside revoke closed is not recorded as closed by the migration"
+        assert len(rec.token_ids) == 1
+    finally:
+        await _close(engine, w)
+
+
+async def test_06c_a_downgrade_keeps_the_record_and_a_second_upgrade_leaves_the_first_run_as_it_was():
+    """PO / lens 4769: the record is the only trace of which ids the migration closed — a rollback must not erase it. The module's own `downgrade()` and `upgrade()` are run through
+    Alembic's operations on the test database: the table and the first run's rows survive the downgrade, nothing is re-opened, and the second upgrade (table already there) records
+    nothing more because nothing it would close is still open."""
+    import importlib.util
+    from pathlib import Path
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import text
+
+    path = Path(__file__).resolve().parent.parent / "alembic" / "versions" / "0464_close_computers_of_removed_members.py"
+    spec = importlib.util.spec_from_file_location("m0464_rt", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    def _call(sync_conn, which: str) -> None:
+        with Operations.context(MigrationContext.configure(sync_conn)):
+            getattr(module, which)()
+
+    engine, w = await _world()
+    try:
+        _, _, org_id = await w.person(org=True, name="Owner")
+        removed = await w.add_member(org_id, role="admin", name="Removed")
+        comp = await _computer(w, org_id, removed)
+        await w.sql("UPDATE org_members SET deleted_at = now() WHERE org_id = :o AND user_id = :u", o=org_id, u=removed)
+
+        async def _record():
+            async with w.Session() as s:
+                return [tuple(r) for r in (await s.execute(text(
+                    "SELECT id, setup_id, token_ids, key_ids, agent_ids FROM desktop_setup_closures WHERE setup_id = :i"), {"i": comp["setup_id"]})).all()]
+
+        async with engine.begin() as conn:
+            await conn.run_sync(_call, "upgrade")     # the first run: closes the computer and records it
+        first = await _record()
+        assert len(first) == 1 and (await _row(w, comp["setup_id"]))["revoked"] is True
+
+        async with engine.begin() as conn:
+            await conn.run_sync(_call, "downgrade")
+        assert await _live(w, "SELECT count(*) FROM information_schema.tables WHERE table_name = 'desktop_setup_closures'") == 1, "the record table stays"
+        assert await _record() == first, "the first run's rows survive the downgrade"
+        assert (await _row(w, comp["setup_id"]))["revoked"] is True, "nothing is re-opened"
+
+        async with engine.begin() as conn:
+            await conn.run_sync(_call, "upgrade")     # again, the table already there
+        assert await _record() == first, "a second upgrade records nothing more and leaves the first run as it was"
     finally:
         await _close(engine, w)
 
