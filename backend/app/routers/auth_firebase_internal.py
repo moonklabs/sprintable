@@ -753,11 +753,13 @@ async def consume_oauth_handoff(
     from datetime import timedelta
 
     from app.core.security import REFRESH_TOKEN_EXPIRE_DAYS, create_tokens
-    from app.routers.auth import _sign_in_session_context, _store_refresh_token
+    from app.routers.auth import _persist_resolved_context, _sign_in_session_context, _store_refresh_token
 
     # story 4762 — a sign-in road like login() / oauth_callback(): last_org_id only while it is a live membership (a person removed from the org it names
     # must not get a token that names it — the web layout would send them to the sign-in again, in a loop)
     app_metadata = await _sign_in_session_context(user, db)
+    if settings.build_app_metadata_defallback:
+        _persist_resolved_context(user, app_metadata)  # as login() / oauth_callback(): the org and project the token names are the ones the account resolves to next time
     # story #3649(PO 대조 발견, 2026-09-07) — 이 경로가 로그인(새 세션 시작)인데
     # session_started_at을 안 실었다. login()/oauth_callback()(auth.py)과 동형으로
     # 지금 시각을 찍는다 — 안 그러면 password_set_at이 있는 유저가 이 핸드오프로
