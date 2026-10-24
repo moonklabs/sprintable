@@ -131,12 +131,12 @@ describe('OnboardingForm — error.code 분기 (story #2484)', () => {
     // initialStep="project" prop은 컴포넌트 자체 로직상 "새로고침 재개"를 뜻해 프로젝트
     // 생성 성공 時 agent 단계로 안 가고 바로 홈으로 finishToHome()한다(story #3179 S3c) —
     // agent 단계에 실제 projectId를 갖고 도달하려면 org→project 전 과정을 그대로 밟아야 한다.
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       const a = arrivalAnswer(url);
       if (a) return a;
       if (url === '/api/organizations') return { ok: true, json: async () => ({ data: { id: 'org-1' } }) };
       if (url === '/api/auth/refresh') return { ok: true, json: async () => ({}) };
-      if (url === '/api/projects') return { ok: true, json: async () => ({ data: { id: 'proj-1' } }) };
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: init?.method === 'POST' ? { id: 'proj-1' } : [] }) }; // GET = the list (an array)
       if (url === '/api/current-project') return { ok: true, json: async () => ({}) };
       if (url === '/api/team-members') {
         return { ok: false, json: async () => ({ error: { code: 'SOME_CODE', message: 'raw server text' } }) };
@@ -147,25 +147,13 @@ describe('OnboardingForm — error.code 분기 (story #2484)', () => {
     await act(async () => { root.render(wrap(<OnboardingForm todayHref="/today" chatsHref="/chats" />)); });
     await flush();
 
-    // story 4715 — the organization is made on arrival; the web way («이미 돌고 있는 에이전트 연결하기») keeps the project · agent steps
-    const connect = container.querySelector('[data-testid=onboarding-first-connect]');
-    await act(async () => { connect?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    await flush();
-
-    const projectNameInput = container.querySelector('input') as HTMLInputElement;
-    await act(async () => { setNativeValue(projectNameInput, 'My Project'); });
-    const createProjectBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.onboarding.createProjectAction);
-    await act(async () => { createProjectBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    await flush();
-
-    const agentNameInput = container.querySelector('input') as HTMLInputElement;
-    await act(async () => { setNativeValue(agentNameInput, 'My Agent'); });
-    const createAgentBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.onboarding.createAgentAction);
-    await act(async () => { createAgentBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // story 4715 — the organization is made on arrival · story 4766 — the web way is the folded «고급» press: it makes the project, then the agent
+    const make = container.querySelector('[data-testid=advanced-make]');
+    await act(async () => { make?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
 
     expect(container.textContent).not.toContain('raw server text');
     expect(container.textContent).not.toContain('Failed to create agent');
-    expect(container.textContent).toContain(koMessages.onboarding.createAgentFailed);
+    expect(container.textContent).toContain(koMessages.onboarding.advanced.failure.agent); // a made sentence, never the server's words
   });
 });

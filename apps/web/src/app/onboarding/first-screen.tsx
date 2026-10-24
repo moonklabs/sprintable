@@ -6,12 +6,16 @@
 // «지금은 Mac 앱만 있어요» first, the web way as the one button, no download card (it cannot install there). Phone control is not offered
 // here — it is asked when a phone is paired (PO).
 
-import { useSyncExternalStore } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import { cardVariants } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 import { DesktopDownloadCard, notAMac } from '@/components/desktop/desktop-download-card';
 import { PhoneAppCard } from '@/components/desktop/phone-app-card';
 import { PhoneFirstScreen } from '@/components/desktop/phone-first-screen';
+import { appSetupLink } from '@/lib/auth/native-return-app';
+import { AdvancedConnect } from './advanced-connect';
 import { markLeaving } from '@/lib/phone-start';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { emitOnboardingEvent } from './onboarding-telemetry';
@@ -27,18 +31,19 @@ interface FirstScreenProps {
   macDownloadEnabled?: boolean;
   /** the organization's name when this page made it (or read it) — null: not known here, the line is not drawn (never made up) */
   orgName: string | null;
-  /** the web way: project → agent → connect */
-  onConnectElsewhere: () => void;
+  /** story 4766: the landing the web way's fold ends on (the person's «오늘»/«대시보드» word follows this) */
+  todayV3Enabled?: boolean;
   /** «지금 받지 않아도 돼요 …» [오늘로 가기] */
   onFinish: () => void;
 }
 
-export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = false, orgName, onConnectElsewhere, onFinish }: FirstScreenProps) {
+export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = false, orgName, todayV3Enabled = false, onFinish }: FirstScreenProps) {
   const t = useTranslations('onboarding.first');
   const to = useTranslations('onboarding');
   // the device is read after mount (null on the server and before the first read — no hydration mismatch), as the card does
   const { inPhoneApp } = usePhoneBridge();
-  const finish = () => { if (markLeaving()) onFinish(); }; // stops the flows that are out; a second tap is not a second finish // a way out: a start still being waited for in the phone's screen must not move the page after it
+  const [advancedBusy, setAdvancedBusy] = useState(false); // story 4766: while the web way's press is making the agent and its key, the other way out waits
+  const finish = () => { if (advancedBusy) return; if (markLeaving()) onFinish(); }; // stops the flows that are out; a second tap is not a second finish // a way out: a start still being waited for in the phone's screen must not move the page after it
   const elsewhere = useSyncExternalStore(noSubscribe, () => notAMac(navigator.userAgent, inPhoneApp), () => null);
   if (elsewhere === null) return null;
 
@@ -50,7 +55,7 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
         <PhoneFirstScreen orgId={orgId} chatsHref={chatsHref} macDownloadEnabled={macDownloadEnabled} />
         <p className="break-keep border-t border-border pt-4 text-xs text-muted-foreground" data-testid="onboarding-first-later">
           {to('download.laterNote')}{' '}
-          <Button variant="link" size="sm" className="h-auto px-0 py-0 text-xs" onClick={finish} data-testid="onboarding-first-finish">
+          <Button variant="link" size="sm" className="h-auto px-0 py-0 text-xs" onClick={finish} disabled={advancedBusy} data-testid="onboarding-first-finish">
             {to('desktopFinishToToday')}
           </Button>
         </p>
@@ -58,7 +63,6 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
     );
   }
 
-  const connectNote = <p className="break-keep text-xs text-muted-foreground">{t('connectNote')}</p>;
   const orgLine = orgName
     ? <p className="break-keep text-xs text-muted-foreground" data-testid="onboarding-first-org">{t('orgLine', { org: orgName })}</p>
     : null;
@@ -72,12 +76,11 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
 
       {elsewhere ? (
         <>
-          <div className="space-y-1">
-            <Button variant="outline" size="lg" className="w-full" onClick={onConnectElsewhere} data-testid="onboarding-first-connect">
-              {t('connect')}
-            </Button>
-            {connectNote}
-          </div>
+          {/* story 4766: not a Mac → the web way is the only way, so it is not folded: the one press that makes the agent and the line to paste */}
+          <section className="space-y-2" data-testid="onboarding-first-advanced">
+            <p className="break-keep text-sm font-medium text-foreground">{t('advancedTitleNotMac')}</p>
+            <AdvancedConnect orgId={orgId} onFinish={finish} todayV3Enabled={todayV3Enabled} onWorking={setAdvancedBusy} />
+          </section>
           {/* story 4654: a phone gets the phone app's store links (on a Mac nothing is drawn) */}
           <PhoneAppCard />
           {orgLine}
@@ -88,22 +91,28 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
           {/* the 3983 funnel's «went the desktop way» signal — sent where the fork's app choice used to send it, now on the download press */}
           <DesktopDownloadCard hideTitle ctaLabel={t('macCta')} onCta={() => emitOnboardingEvent('desktop_handoff_selected', { agent_id: null, flow: 'onboarding' })} />
           <p className="break-keep text-xs text-muted-foreground" data-testid="onboarding-first-after-note">{to('download.afterNote')}</p>
+          {/* story 4766 (AC1): the app that is already installed is opened, not downloaded again (the link is the host's own scheme — dev or prod) */}
+          <p className="break-keep text-xs text-muted-foreground" data-testid="onboarding-first-open-note">
+            {t('openAppLead')}{' '}
+            <a href={appSetupLink(null)} className="font-medium text-primary underline-offset-2 hover:underline" data-testid="onboarding-first-open-app">{t('openApp')}</a>
+          </p>
           {/* story 4671 (U3): a Mac draws the phone app's QR too — the person at the Mac is who needs it; nothing to get → nothing drawn */}
           <PhoneAppCard />
           {orgLine}
-          <div className="space-y-1">
-            <Button variant="link" size="sm" className="h-auto whitespace-normal px-0 py-0 text-left text-xs" onClick={onConnectElsewhere} data-testid="onboarding-first-connect">
-              {t('connect')}
-            </Button>
-            {connectNote}
-          </div>
+          {/* story 4766 (AC1): the app is the one way offered; the web way is folded under «고급» (a closed disclosure, no longer a link to a three-screen wizard) */}
+          <details className={cn(cardVariants(), 'overflow-hidden')} data-testid="onboarding-first-advanced">
+            <summary className="cursor-pointer break-keep px-3 py-2 text-xs text-muted-foreground" data-testid="onboarding-first-advanced-summary">{t('advancedSummary')}</summary>
+            <div className="px-3 pb-3 pt-1">
+              <AdvancedConnect orgId={orgId} onFinish={finish} todayV3Enabled={todayV3Enabled} onWorking={setAdvancedBusy} />
+            </div>
+          </details>
         </>
       )}
 
       {/* a text line out, not a button in the hierarchy (Yuna A-2 · PO ②) */}
       <p className="break-keep border-t border-border pt-4 text-xs text-muted-foreground" data-testid="onboarding-first-later">
         {to('download.laterNote')}{' '}
-        <Button variant="link" size="sm" className="h-auto px-0 py-0 text-xs" onClick={finish} data-testid="onboarding-first-finish">
+        <Button variant="link" size="sm" className="h-auto px-0 py-0 text-xs" onClick={finish} disabled={advancedBusy} data-testid="onboarding-first-finish">
           {to('desktopFinishToToday')}
         </Button>
       </p>

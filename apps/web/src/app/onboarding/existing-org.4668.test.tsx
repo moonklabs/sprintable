@@ -27,7 +27,7 @@ let hrefSet: string[];
 
 function stubFetch(me: Me, opts: { meGate?: Promise<void>; meFails?: 'reject' | 'status' } = {}) {
   urls = [];
-  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     urls.push(url);
     const ok = (data: unknown) => ({ ok: true, status: 200, headers: new Headers(), json: async () => ({ data, error: null, meta: null }) } as Response);
@@ -44,7 +44,7 @@ function stubFetch(me: Me, opts: { meGate?: Promise<void>; meFails?: 'reject' | 
     if (url === '/api/invites/mine') return { ok: true, status: 200, headers: new Headers(), json: async () => ({ invites: [] }) } as Response;
     if (url === '/api/organizations') return ok({ id: 'org-new' });
     if (url === '/api/auth/refresh') return ok({});
-    if (url === '/api/projects') return ok({ id: 'proj-1' });
+    if (url === '/api/projects') return init?.method === 'POST' ? ok({ id: 'proj-1' }) : ok([]); // the list (GET) is an array — none yet
     if (url === '/api/current-project') return ok({});
     // the one screen's download manifest — not this test's matter
     if (url.startsWith('/desktop/')) return { ok: false, status: 404, headers: new Headers(), json: async () => ({}) } as Response;
@@ -89,26 +89,20 @@ describe('[SID:4668] the usual onboarding (OnboardingForm)', () => {
     stubFetch(WITH_ORG);
     await act(async () => { root.render(provider(<OnboardingForm todayHref="/today" chatsHref="/chats" />)); });
     await settle();
-    expect(container.querySelector('[data-testid="onboarding-first-connect"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="onboarding-first-advanced"]')).not.toBeNull();
     expect(container.querySelector('input[type="text"]')).toBeNull(); // no organization name field
     expect(urls).not.toContain('/api/organizations'); // reverted (the form ignores the membership) → fails
     expect(urls).not.toContain('/api/invites/mine');
   });
 
-  it('the one screen carries that organization on: the web way\'s project is made in THIS organization', async () => {
+  it('the one screen carries that organization on: the web way\'s press makes its project in THIS organization (story 4766)', async () => {
     stubFetch(WITH_ORG);
     await act(async () => { root.render(provider(<OnboardingForm todayHref="/today" chatsHref="/chats" />)); });
     await settle();
-    await act(async () => { (container.querySelector('[data-testid="onboarding-first-connect"]') as HTMLButtonElement).click(); });
-    await settle();
-    const input = container.querySelector('input[type="text"]') as HTMLInputElement;
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
-    await act(async () => { setter.call(input, 'My Project'); input.dispatchEvent(new Event('input', { bubbles: true })); });
-    const create = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === koMessages.onboarding.createProjectAction) as HTMLButtonElement;
     const calls = vi.mocked(fetch).mock.calls;
-    await act(async () => { create.click(); });
+    await act(async () => { (container.querySelector('[data-testid="advanced-make"]') as HTMLButtonElement).click(); });
     await settle();
-    const projectCall = calls.find((c) => c[0] === '/api/projects');
+    const projectCall = calls.find((c) => c[0] === '/api/projects' && (c[1] as RequestInit | undefined)?.method === 'POST');
     // the id came from the membership, not from a form the person filled
     expect(JSON.parse(String((projectCall![1] as RequestInit).body)).org_id).toBe('org-1');
   });
