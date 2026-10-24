@@ -1339,9 +1339,6 @@ async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
     """«Disconnect this device»: every key this setup handed out, and only those — and the agents this setup made stop
     (story #4434 · PO: «disconnect = that device's agents stop»): they become inactive, so they no longer count toward the
     org's agent limit; their record and work stay (not deleted). Only this setup's own agents, in this org."""
-    from sqlalchemy import func
-
-    from app.models.member import Member
     from app.services.project_auth import is_org_owner_or_admin
 
     found = (await db.execute(
@@ -1351,6 +1348,42 @@ async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
         raise DesktopSetupError("setup_not_found")
     if not await is_org_owner_or_admin(db, user_id, org_id):
         raise DesktopSetupError("not_org_admin")
+    return await _disconnect_setup(db, found, org_id=org_id, revoked_by=user_id)
+
+
+ACCOUNT_DELETED_REASON = "account_deleted"
+
+
+async def close_setups_of_deleted_account(db: AsyncSession, *, user_id: uuid.UUID) -> int:
+    """story #4767 — the computers a person confirmed stay in an organization that outlives their account (another owner stays): the
+    row, its device token and its keys kept working — a device token reaches the relay without looking at who confirmed it. The account
+    deletion closes each open one of them exactly as a disconnect does (`_disconnect_setup`: keys, device token, open commands, open
+    stream, clock view, the agents the setup made), without asking whether the person may still manage the organization — they are
+    leaving. `revoked_reason` says why. The organizations that closed with the account took their setups with them (cascade).
+    Returns how many were closed."""
+    ids = list((await db.execute(
+        select(DesktopSetup.id).where(DesktopSetup.confirmed_by == user_id, DesktopSetup.revoked_at.is_(None)).order_by(DesktopSetup.id)
+    )).scalars().all())
+    closed = 0
+    for setup_id in ids:
+        found = (await db.execute(select(DesktopSetup).where(DesktopSetup.id == setup_id))).scalar_one_or_none()
+        if found is None or found.org_id is None:
+            continue
+        done = await _disconnect_setup(db, found, org_id=found.org_id, revoked_by=user_id, reason=ACCOUNT_DELETED_REASON)
+        closed += 0 if done.already else 1
+    return closed
+
+
+async def _disconnect_setup(
+    db: AsyncSession, found: DesktopSetup, *, org_id: uuid.UUID, revoked_by: uuid.UUID, reason: str | None = None,
+) -> Revoked:
+    """The disconnect itself (the authority check is the caller's): `revoke_setup` for a person's «disconnect», `close_setups_of_deleted_account`
+    for an account that is going away."""
+    from sqlalchemy import func
+
+    from app.models.member import Member
+
+    user_id = revoked_by
     # story #4565 (PO 02:51Z): the one lock order — the member rows this disconnect may stop, then the setup row
     made = {
         uuid.UUID(str(m["member_id"])) for m in (found.members or [])
@@ -1387,6 +1420,8 @@ async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
     if not already:
         setup.revoked_at = now
         setup.revoked_by = user_id
+        if reason is not None:
+            setup.revoked_reason = reason
     await db.flush()
     return Revoked(keys=len(revoked), already=already, revoked_at=setup.revoked_at, revoked_by=setup.revoked_by)
 
