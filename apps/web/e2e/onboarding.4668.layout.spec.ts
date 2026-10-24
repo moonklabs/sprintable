@@ -213,7 +213,7 @@ for (const width of [1440, 390]) {
       await page.getByTestId('advanced-make').click();
       await expect(page.getByTestId('advanced-line')).toContainText('claude mcp add --transport http --scope local sprintable-mcp https://dev-mcp.sprintable.ai/mcp');
       await expect(page.getByTestId('advanced-line')).toContainText('sk_live_••••ABCD');
-      await expect(page.getByTestId('advanced-key-line')).toContainText('셸 기록');
+      await expect(page.getByTestId('advanced-key-line')).toContainText('터미널 명령 기록');
       await expect(page.getByTestId('advanced-revoke')).toBeVisible();
       await expect(page.getByTestId('advanced-verify')).toBeVisible();
       await fitsViewport(page, width);
