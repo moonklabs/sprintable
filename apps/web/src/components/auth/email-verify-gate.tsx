@@ -74,6 +74,13 @@ export function useEmailVerifyGate(active = true, onOpened?: () => void): Verify
     return () => { off = true; };
   }, [active, apply]);
 
+  // story #4763 AC7: the tab that verifies tells this one — check at once, hidden or not. From the very first read on (not only once the gate is shown closed): a signal that comes while the
+  // first answer is still on its way must not be lost (codex). (An opened gate never closes again — `apply` keeps `open` — so a slow older «not verified» answer cannot undo it.)
+  useEffect(() => {
+    if (!active || gate.kind === 'open') return;
+    return listenVerified(check);
+  }, [active, gate.kind, check]);
+
   useEffect(() => {
     if (!active || gate.kind !== 'closed') return;
     // every 3 s while the tab is visible (PO 04:37Z: a hidden tab does not poll); right away on focus or on becoming visible
@@ -81,9 +88,7 @@ export function useEmailVerifyGate(active = true, onOpened?: () => void): Verify
     const now = () => { if (document.visibilityState === 'visible') check(); };
     window.addEventListener('focus', now);
     document.addEventListener('visibilitychange', now);
-    // story #4763 AC7: the tab that verifies tells this one — check at once, hidden or not (no waiting for the next poll that a hidden tab never makes)
-    const stopListening = listenVerified(check);
-    return () => { clearInterval(tick); window.removeEventListener('focus', now); document.removeEventListener('visibilitychange', now); stopListening(); };
+    return () => { clearInterval(tick); window.removeEventListener('focus', now); document.removeEventListener('visibilitychange', now); };
   }, [active, gate.kind, check]);
 
   // the answer (auth.py resend_verification): 200 `delivered: true` sent · `delivered: false` not sent (mail not configured

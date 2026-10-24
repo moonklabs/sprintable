@@ -22,7 +22,8 @@ let root: Root;
 let urls: string[];
 
 /** `meAnswers`: what each `/api/auth/me` read answers, in order (the last one repeats); `'down'` = the read fails. */
-function stubFetch(meAnswers: Array<Me | 'down'>) {
+type Renewal = 'ok' | '503' | '401' | '429' | 'network' | 'not-json';
+function stubFetch(meAnswers: Array<Me | 'down'>, renewal: Renewal = 'ok') {
   urls = [];
   let meReads = 0;
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
@@ -39,7 +40,12 @@ function stubFetch(meAnswers: Array<Me | 'down'>) {
     if (url === '/api/organizations/org-1/remote-control') return ok({ enabled: false, enabled_at: null, can_change: true, owner_names: [] });
     if (url === '/api/invites/mine') return { ok: true, status: 200, headers: new Headers(), json: async () => ({ invites: [] }) } as Response;
     if (url === '/api/organizations') return ok({ id: 'org-new' });
-    if (url === '/api/auth/refresh') return ok({});
+    if (url === '/api/auth/refresh') {
+      if (renewal === 'network') throw new Error('network');
+      if (renewal === 'not-json') return { ok: true, status: 200, headers: new Headers(), json: async () => { throw new SyntaxError('not json'); } } as unknown as Response;
+      if (renewal !== 'ok') return { ok: false, status: Number(renewal), headers: new Headers(), json: async () => ({ data: null, error: { code: 'X', message: 'x' } }) } as Response;
+      return ok({});
+    }
     if (url === '/api/projects') return ok([]);
     if (url === '/api/current-project') return ok({});
     if (url.startsWith('/desktop/')) return { ok: false, status: 404, headers: new Headers(), json: async () => ({}) } as Response;
@@ -84,6 +90,15 @@ describe('[SID:4763 AC11] a session token from before the organization existed',
     expect(made()).toBe(1);
   });
 
+  it.each<Renewal>(['503', '401', '429', 'network', 'not-json'])('the renewal FAILS (%s) and the old token still says «no organization» → nothing is made, the account-check line with its retry (Kadir lens)', async (renewal) => {
+    stubFetch([NO_ORG, NO_ORG], renewal);
+    await act(async () => { root.render(provider(<OnboardingForm todayHref="/today" chatsHref="/chats" />)); });
+    await settle();
+    expect(made()).toBe(0);
+    expect(byId('onboarding-account-check-failed')).not.toBeNull();
+    expect(urls).not.toContain('/api/invites/mine');
+  });
+
   it('the second read cannot be read → nothing is made, the account-check line with its retry (a failed read is not «none»)', async () => {
     stubFetch([NO_ORG, 'down']);
     await act(async () => { root.render(provider(<OnboardingForm todayHref="/today" chatsHref="/chats" />)); });
@@ -110,11 +125,53 @@ describe('[SID:4763 H6] after the organization was deleted', () => {
     expect(byId('onboarding-org-deleted')?.textContent).toContain(koMessages.onboarding.orgDeletedTitle);
     expect(byId('onboarding-org-deleted')?.textContent).toContain(koMessages.onboarding.orgDeletedBody);
     expect(made()).toBe(0);
-    expect(urls).not.toContain('/api/auth/me'); // not even a read: the person decides first
+    expect(urls).not.toContain('/api/invites/mine'); // it reads who the person is (below), nothing else, until the press
     await act(async () => { (byId('onboarding-org-deleted-new') as HTMLButtonElement).click(); });
     await settle();
     expect(made()).toBe(1);
     expect(byId('onboarding-org-deleted')).toBeNull();
+  });
+
+  it('a reload or an old link AFTER the new organization exists does not say «no organization» — the person goes on as an account with one (codex)', async () => {
+    stubFetch([WITH_ORG]);
+    await act(async () => { root.render(provider(<OnboardingForm todayHref="/today" chatsHref="/chats" afterOrgDelete />)); });
+    await settle();
+    expect(byId('onboarding-org-deleted')).toBeNull();
+    expect(made()).toBe(0);
+  });
+
+  it('one of several organizations was deleted: the token is renewed first, so the person (who still has another) is not told «no organization» (Kadir lens)', async () => {
+    stubFetch([WITH_ORG]); // what the account says AFTER the renewal (before it, the token still named the deleted organization)
+    await act(async () => { root.render(provider(<OnboardingForm todayHref="/today" chatsHref="/chats" afterOrgDelete />)); });
+    await settle();
+    expect(urls).toContain('/api/auth/refresh');
+    expect(urls.indexOf('/api/auth/refresh')).toBeLessThan(urls.lastIndexOf('/api/auth/me'));
+    expect(byId('onboarding-org-deleted')).toBeNull();
+    expect(made()).toBe(0);
+  });
+
+  it('a stale claim (an organization id in the token, no membership any more) still shows the deleted screen · an unreadable answer keeps it too', async () => {
+    stubFetch([{ member_id: 'u1', org_id: 'org-gone', org_member_id: null, email_verified: true }]);
+    await act(async () => { root.render(provider(<OnboardingForm todayHref="/today" chatsHref="/chats" afterOrgDelete />)); });
+    await settle();
+    expect(byId('onboarding-org-deleted')).not.toBeNull();
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    stubFetch(['down']);
+    await act(async () => { root.render(provider(<OnboardingForm todayHref="/today" chatsHref="/chats" afterOrgDelete />)); });
+    await settle();
+    expect(byId('onboarding-org-deleted')).not.toBeNull();
+  });
+
+  it('the press takes `?after=org-deleted` out of the address (a reload after it is the usual onboarding)', async () => {
+    window.history.replaceState(null, '', '/onboarding?after=org-deleted');
+    stubFetch([NO_ORG]);
+    await act(async () => { root.render(provider(<OnboardingForm todayHref="/today" chatsHref="/chats" afterOrgDelete />)); });
+    await settle();
+    expect(window.location.search).toBe('?after=org-deleted');
+    await act(async () => { (byId('onboarding-org-deleted-new') as HTMLButtonElement).click(); });
+    await settle();
+    expect(window.location.search).toBe('');
   });
 
   it('without the flag the arrival is as before (organization made at once, no deleted screen)', async () => {

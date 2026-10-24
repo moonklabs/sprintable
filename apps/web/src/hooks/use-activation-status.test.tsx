@@ -247,6 +247,28 @@ describe('useActivationStatus — 회신이 오면 스스로 체크(story #4763)
     expect(spy).toHaveBeenCalledTimes(2);
   });
 
+  it('two reads overlap (interval, then focus): the older answer, arriving last, does not cover the newer one (codex)', async () => {
+    const releases: Array<(d: object) => void> = [];
+    let calls = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) return { ok: true, json: async () => ({ data: PARTIAL }) };
+      const data = await new Promise<object>((resolve) => { releases.push(resolve); });
+      return { ok: true, json: async () => ({ data }) };
+    }));
+    await act(async () => { root.render(<RefreshProbe />); });
+    await flush();
+    await act(async () => { vi.advanceTimersByTime(ACTIVATION_REFRESH_MS); }); // read A (interval)
+    await act(async () => { window.dispatchEvent(new Event('focus')); }); // read B (newer)
+    expect(releases).toHaveLength(2);
+    await act(async () => { releases[1]!(REPLIED); }); // B answers: the reply has arrived (still not all done, so the reading goes on)
+    await flush();
+    expect(rt()).toBe('true|false');
+    await act(async () => { releases[0]!(PARTIAL); }); // A answers late: the older «not yet»
+    await flush();
+    expect(rt()).toBe('true|false'); // not taken back
+  });
+
   it('complete with no organization known (no stored complete flag to stop it) → the condition itself stops the reading', async () => {
     const spy = sequence([COMPLETE]);
     vi.stubGlobal('fetch', spy);

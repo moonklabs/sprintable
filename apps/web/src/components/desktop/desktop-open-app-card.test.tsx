@@ -58,6 +58,18 @@ describe('[SID:4763 AC5] DesktopOpenAppCard', () => {
     expect(container.querySelector('[data-testid="desktop-open-app-note"]')?.textContent).toBe(koMessages.desktop.openAppNoAppNote);
   });
 
+  it('the first render on a Mac is the server\'s (nothing) — the card comes after mount, so the page hydrates cleanly (codex)', async () => {
+    const { renderToString } = await import('react-dom/server');
+    const html = renderToString(
+      <PhoneBridgeClaim>
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC"><DesktopOpenAppCard /></NextIntlClientProvider>
+      </PhoneBridgeClaim>,
+    );
+    expect(html).not.toContain('desktop-open-app-card');
+    await mount();
+    expect(button()).not.toBeNull();
+  });
+
   it('English too', async () => {
     await mount('en');
     expect(button()?.textContent).toBe(enMessages.desktop.openAppCta);

@@ -55,6 +55,7 @@ function arrivalAnswer(url: string): { ok: boolean; status?: number; json: () =>
   if (url === '/api/onboarding/events') return { ok: true, json: async () => ({}) };
   if (url === '/api/auth/me') return { ok: true, json: async () => ({ data: { member_id: 'u-1', email_verified: true, org_id: null, org_member_id: null } }) };
   if (url === '/api/invites/mine') return { ok: true, json: async () => ({ invites: [] }) }; // the backend's one shape (no envelope)
+  if (url === '/api/auth/refresh') return { ok: true, json: async () => ({ data: {} }) }; // story 4763: the arrival renews the token once before it decides «no organization»
   return null;
 }
 
