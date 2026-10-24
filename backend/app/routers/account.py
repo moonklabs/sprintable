@@ -231,6 +231,14 @@ async def delete_account(
                 "orgs": blocked,
             },
         )
+    # story #4400 (Qadir 01a0e9fc) — end every session of the deleted account, like the admin removal does
+    # (org_members._revoke_user_refresh_tokens · the same _explicit_revoke_values seam). Before, its refresh tokens stayed
+    # valid and could keep re-issuing a departed org. Taken BEFORE the organizations are closed and the seats locked (4769 codex r1/r2: a removal of this person revokes
+    # the tokens first and then takes the seat — tokens → seat → agent member rows → setup rows is the one order every path keeps, the role change included; this
+    # deletion used to take the tokens last). After the 409 check above on purpose: a blocked deletion has written nothing and ends no session.
+    from app.routers.org_members import _revoke_user_refresh_tokens
+
+    await _revoke_user_refresh_tokens(session, uuid.UUID(str(uid)))
     from app.repositories.organization import OrganizationRepository
 
     repo = OrganizationRepository(session)
@@ -251,13 +259,6 @@ async def delete_account(
 
     # story #4769 (codex r1): the person's seats first, FOR UPDATE, in id order — the order a member removal keeps (seat → agent member rows → setup rows) — so a removal of
     # this person that overlaps this deletion cannot make a deadlock pair with it (this deletion used to reach the seat rows only AFTER the setup rows)
-    # story #4400 (Qadir 01a0e9fc) — end every session of the deleted account, like the admin removal does
-    # (org_members._revoke_user_refresh_tokens · the same _explicit_revoke_values seam). Before, its refresh tokens stayed
-    # valid and could keep re-issuing a departed org. Taken BEFORE the seats (4769 codex: a removal of this person revokes the tokens first and then takes the seat —
-    # tokens → seat → agent member rows → setup rows is the one order every path keeps, the role change included; this deletion used to take the tokens last).
-    from app.routers.org_members import _revoke_user_refresh_tokens
-
-    await _revoke_user_refresh_tokens(session, uuid.UUID(str(uid)))
     await session.execute(
         text("SELECT id FROM org_members WHERE user_id = CAST(:uid AS uuid) AND deleted_at IS NULL ORDER BY id FOR UPDATE"), {"uid": str(uid)},
     )
