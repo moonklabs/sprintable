@@ -153,6 +153,9 @@ function blockFailureIsRetryable(status: number): boolean {
   return status >= 500 || status === 408 || status === 429;
 }
 
+// story #4761 — how many «who answered in whose thread» entries the nudge line remembers (a view that stays open for long)
+const THREAD_REPLY_CAP = 100;
+
 export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref: backHrefProp, commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants, initialComposeText }: ChatViewProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   // story #4231 3차 — 기본 복귀 목적지(대화 목록 · flat)도 현재 프로젝트를 싣는다(넘겨받은 값은 호출처 책임).
@@ -462,7 +465,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       setThreadIncoming(msg);
       setThreadReplies((prev) => (prev.some((r) => r.conv === threadId && r.parent === msg.parent_id && r.by === msg.created_by)
         ? prev
-        : [...prev, { conv: threadId, parent: msg.parent_id as string, by: msg.created_by }]));
+        // only this conversation's entries are kept (a view reused for another conversation drops the old ones), the newest THREAD_REPLY_CAP of them
+        : [...prev.filter((r) => r.conv === threadId), { conv: threadId, parent: msg.parent_id as string, by: msg.created_by }].slice(-THREAD_REPLY_CAP)));
       // Update reply_count on parent message in the main list
       setMessages((prev) =>
         prev.map((m) =>

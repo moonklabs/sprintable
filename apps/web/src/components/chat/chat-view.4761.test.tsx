@@ -154,6 +154,22 @@ describe('ChatView — story #4761 (D3) what to do when the agent cannot hear th
     expect(container.querySelector('[data-testid="agent-wake-notice"]')).toBeNull();
   });
 
+  it('what it remembers about thread answers is bounded (the newest 100) — an old answer\'s entry is let go after that many newer ones', async () => {
+    stubFetch({ data: SENT, agent_wake: { required: [{ member_id: 'ag-1', name: 'Walk Agent' }] } });
+    await send();
+    const opts = useChatSseMock.mock.calls.at(-1)?.[0] as { onConversationMessage?: (p: Record<string, unknown>) => void };
+    const reply = (id: string, parent: string) => opts.onConversationMessage?.({
+      id, conversation_id: 'thread-1', thread_id: parent, parent_id: parent,
+      sender: { id: 'ag-1', name: 'Walk Agent', type: 'agent' }, content: '답', attachments: [], created_at: '2026-10-23T23:32:14.410000+00:00',
+    });
+    await act(async () => { reply('r-first', 'm9'); }); // answered in my message's thread → the line ends
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="agent-wake-notice"]')).toBeNull();
+    await act(async () => { for (let i = 0; i < 100; i += 1) reply(`r-${i}`, `other-${i}`); }); // 100 newer answers elsewhere
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="agent-wake-notice"]')).not.toBeNull(); // the first entry was let go of
+  });
+
   it('a reply in ANOTHER message\'s thread does not hide the line', async () => {
     stubFetch({ data: SENT, agent_wake: { required: [{ member_id: 'ag-1', name: 'Walk Agent' }] } });
     await send();
