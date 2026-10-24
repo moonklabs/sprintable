@@ -121,6 +121,14 @@ describe('[SID:4762] ThisPhoneCard — the phone\'s own check number', () => {
     expect(q('this-phone-number')).toBeNull();
   });
 
+  it('while another bridge function has not answered yet, the old one\'s number is not shown for it (reading, not a stale number)', async () => {
+    await draw(vi.fn(async () => answer({ key_number: '324 642' })));
+    expect(q('this-phone-number')?.textContent).toBe('324 642');
+    await draw(vi.fn(() => new Promise<Answer>(() => undefined))); // the new bridge never answers
+    expect(q('this-phone-reading')).not.toBeNull(); // reverted (the answer is keyed by the request only) → the old number stays
+    expect(q('this-phone-number')).toBeNull();
+  });
+
   it('«read again» asks the shell again and then shows the number', async () => {
     const call = vi.fn()
       .mockResolvedValueOnce(answer({ ok: false, code: 'failed' }))

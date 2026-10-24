@@ -170,15 +170,23 @@ export default function SettingsPage() {
   const [lnbOpen, setLnbOpen] = useState(false);
   const { addToast } = useToast();
 
+  const pickedTabByHand = useRef(false); // story 4762 — set once the person clicks a tab: a phone claim that comes later must not move them back to the link's tab
   const handleTabChange = (tab: string) => {
+    pickedTabByHand.current = true;
     setActiveTab(tab);
     setLnbOpen(false); // 모바일에서 탭 선택 시 LNB 자동 접기
   };
 
+  // story 4762 — the tab follows the link (`?tab=`) when the link changes AND when the phone claim comes after the first render (a `?tab=this-phone` link then lands on its tab once the
+  // tab exists) — but a claim that comes later never moves a person who already picked a tab by hand
+  const lastSearchParams = useRef(searchParamsHook);
   useEffect(() => {
+    const linkChanged = lastSearchParams.current !== searchParamsHook;
+    lastSearchParams.current = searchParamsHook;
+    if (!linkChanged && pickedTabByHand.current) return;
     const tab = searchParamsHook.get('tab');
     if (tab) setActiveTab(resolveSettingsTab(tab, inPhoneApp));
-  }, [searchParamsHook, inPhoneApp]); // story 4762 — the phone claim can come after the first render: a `?tab=this-phone` link then lands on its tab once the tab exists
+  }, [searchParamsHook, inPhoneApp]);
 
   const [orgId, setOrgId] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);

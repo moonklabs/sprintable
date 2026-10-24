@@ -19,7 +19,7 @@ export function ThisPhoneCard() {
   const { inPhoneApp, phoneCall } = usePhoneBridge();
   const [nonce, setNonce] = useState(0);
   // the answer is stored with the request it answers: a new request (nonce) makes the old answer «not read yet» without a state write in the effect
-  const [answer, setAnswer] = useState<{ nonce: number; result: Result } | null>(null);
+  const [answer, setAnswer] = useState<{ nonce: number; call: typeof phoneCall; result: Result } | null>(null);
   // one bridge call per request: React may run the effect twice (StrictMode · a remount) and asking can make the phone's key — the second run shares the first run's call
   const request = useRef<{ nonce: number; call: typeof phoneCall; result: Promise<Result> } | null>(null);
 
@@ -36,12 +36,12 @@ export function ThisPhoneCard() {
         }, (): Result => ({ kind: 'failed' })), // a rejected bridge call is a failed read, not a screen stuck on «reading»
       };
     }
-    request.current.result.then((result) => { if (!stale) setAnswer({ nonce, result }); });
+    request.current.result.then((result) => { if (!stale) setAnswer({ nonce, call: phoneCall, result }); });
     return () => { stale = true; };
   }, [inPhoneApp, phoneCall, nonce]);
 
   if (!inPhoneApp) return null;
-  const result = answer && answer.nonce === nonce ? answer.result : null;
+  const result = answer && answer.nonce === nonce && answer.call === phoneCall ? answer.result : null; // an answer of another request or another bridge is not this one's
   return (
     <Card className="break-keep flex flex-col gap-3 p-6" data-testid="this-phone-card">
       <h2 className="text-base font-semibold">{t('thisPhoneTitle')}</h2>

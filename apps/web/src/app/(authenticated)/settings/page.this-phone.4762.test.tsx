@@ -80,6 +80,26 @@ describe('[SID:4762] SettingsPage — «이 폰» tab', () => {
     expect(container.querySelector('[data-testid=this-phone-number]')?.textContent).toBe('324 642');
   });
 
+  it('a tab the person picked by hand before the claim arrives is kept — the late claim does not pull them back to the link\'s tab', async () => {
+    const phoneCall = vi.fn(async () => ({ id: 'w1', ok: true, key_number: '324 642' }));
+    const { SettingsPage, PhoneBridgeContext } = await load();
+    const draw = (inPhoneApp: boolean) => act(async () => {
+      root.render(
+        <PhoneBridgeContext.Provider value={{ inPhoneApp, phoneCall }}>
+          <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><SettingsPage /></NextIntlClientProvider>
+        </PhoneBridgeContext.Provider>,
+      );
+    });
+    await draw(false);
+    const display = Array.from(container.querySelectorAll('[role="tab"]')).find((el) => el.textContent?.trim() === koMessages.settings.tabDisplay) as HTMLElement;
+    await act(async () => { display.click(); });
+    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent?.trim()).toBe(koMessages.settings.tabDisplay);
+    await draw(true); // the claim arrives
+    await act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); });
+    expect(tabNames()).toContain(koMessages.settings.tabThisPhone); // the tab exists now …
+    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent?.trim()).toBe(koMessages.settings.tabDisplay); // … and the person stays where they chose to be
+  });
+
   it('inside the phone app: the tab is listed and ?tab=this-phone shows the phone\'s check number', async () => {
     const call = await drawPage(true);
     expect(tabNames()).toContain(koMessages.settings.tabThisPhone); // reverted (no trigger) → fails
