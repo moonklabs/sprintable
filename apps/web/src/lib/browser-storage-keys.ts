@@ -54,6 +54,8 @@ export const BROWSER_STORAGE_KEYS: readonly StorageKeyEntry[] = [
   { key: 'sprintable:chat-draft:', prefix: true, area: 'local', scope: 'account', on: ['signout'], where: ['components/chat/chat-input.tsx', 'lib/tab-owner.ts'] },
   { key: 'steer-recipients:', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['app/(authenticated)/[ws]/[proj]/goals/steer-dispatch-modal.tsx'] },
   { key: 'docs:recents:', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['components/docs/use-recent-docs.ts'] },
+  // story 4763 AC7: the time the mailed link's tab last said «verified» (the first tab's gate reads the account again when it changes) — nothing but a time, cleared with the account like the others
+  { key: 'sprintable-email-verified', area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['lib/auth/email-verified-signal.ts'] },
   { key: 'sprintable_activation_checklist_complete', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['hooks/use-activation-status.ts'] },
   { key: 'sprintable:intent-suggestion:dismissed', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['lib/intent-suggestion-dismissal.ts'] },
   // the desktop setup in progress in this tab (30 min) — a document opened after a switch would report the previous account's setup

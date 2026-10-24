@@ -78,7 +78,8 @@ export function useEmailVerifyGate(active = true, onOpened?: () => void): Verify
   // first answer is still on its way must not be lost (codex). (An opened gate never closes again — `apply` keeps `open` — so a slow older «not verified» answer cannot undo it.)
   useEffect(() => {
     if (!active || gate.kind === 'open') return;
-    return listenVerified(check);
+    // hearing it means the verification has just happened: whatever the screen read before (invites …) is old — `onOpened` runs once when the gate opens, also when it was still reading (codex)
+    return listenVerified(() => { wasClosed.current = true; check(); });
   }, [active, gate.kind, check]);
 
   useEffect(() => {

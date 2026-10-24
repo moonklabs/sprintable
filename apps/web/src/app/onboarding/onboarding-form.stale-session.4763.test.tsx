@@ -22,8 +22,8 @@ let root: Root;
 let urls: string[];
 
 /** `meAnswers`: what each `/api/auth/me` read answers, in order (the last one repeats); `'down'` = the read fails. */
-type Renewal = 'ok' | '503' | '401' | '429' | 'network' | 'not-json';
-function stubFetch(meAnswers: Array<Me | 'down'>, renewal: Renewal = 'ok') {
+type Renewal = 'ok' | '503' | '401' | '429' | 'network' | 'not-json' | 'empty' | 'no-refresh-token';
+function stubFetch(meAnswers: Array<Me | 'down'>, renewal: Renewal = 'ok', refreshGate?: Promise<void>) {
   urls = [];
   let meReads = 0;
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
@@ -41,7 +41,10 @@ function stubFetch(meAnswers: Array<Me | 'down'>, renewal: Renewal = 'ok') {
     if (url === '/api/invites/mine') return { ok: true, status: 200, headers: new Headers(), json: async () => ({ invites: [] }) } as Response;
     if (url === '/api/organizations') return ok({ id: 'org-new' });
     if (url === '/api/auth/refresh') {
+      if (refreshGate) await refreshGate;
       if (renewal === 'network') throw new Error('network');
+      if (renewal === 'empty') return { ok: true, status: 200, headers: new Headers(), json: async () => ({}) } as Response; // a 2xx that carries nothing is not a renewal
+      if (renewal === 'no-refresh-token') return { ok: false, status: 401, headers: new Headers(), json: async () => ({ error: { code: 'NO_REFRESH_TOKEN', message: 'No refresh token' } }) } as Response;
       if (renewal === 'not-json') return { ok: true, status: 200, headers: new Headers(), json: async () => { throw new SyntaxError('not json'); } } as unknown as Response;
       if (renewal !== 'ok') return { ok: false, status: Number(renewal), headers: new Headers(), json: async () => ({ data: null, error: { code: 'X', message: 'x' } }) } as Response;
       return ok({});
@@ -90,13 +93,21 @@ describe('[SID:4763 AC11] a session token from before the organization existed',
     expect(made()).toBe(1);
   });
 
-  it.each<Renewal>(['503', '401', '429', 'network', 'not-json'])('the renewal FAILS (%s) and the old token still says «no organization» → nothing is made, the account-check line with its retry (Kadir lens)', async (renewal) => {
+  it.each<Renewal>(['503', '401', '429', 'network', 'not-json', 'empty'])('the renewal FAILS (%s) and the old token still says «no organization» → nothing is made, the account-check line with its retry (Kadir lens)', async (renewal) => {
     stubFetch([NO_ORG, NO_ORG], renewal);
     await act(async () => { root.render(provider(<OnboardingForm todayHref="/today" chatsHref="/chats" />)); });
     await settle();
     expect(made()).toBe(0);
     expect(byId('onboarding-account-check-failed')).not.toBeNull();
     expect(urls).not.toContain('/api/invites/mine');
+  });
+
+  it('a session with NO refresh token (the phone\'s Firebase session) has nothing to renew — that is not a failure: the organization is made once (codex)', async () => {
+    stubFetch([NO_ORG, NO_ORG], 'no-refresh-token');
+    await act(async () => { root.render(provider(<OnboardingForm todayHref="/today" chatsHref="/chats" />)); });
+    await settle();
+    expect(made()).toBe(1);
+    expect(byId('onboarding-account-check-failed')).toBeNull();
   });
 
   it('the second read cannot be read → nothing is made, the account-check line with its retry (a failed read is not «none»)', async () => {
@@ -132,6 +143,20 @@ describe('[SID:4763 H6] after the organization was deleted', () => {
     expect(byId('onboarding-org-deleted')).toBeNull();
   });
 
+  it('the deleted screen\'s own renewal and a quick press share ONE renewal in flight (a refresh token is single-use: two at once can log the person out) (codex)', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    stubFetch([NO_ORG, NO_ORG], 'ok', gate);
+    await act(async () => { root.render(provider(<OnboardingForm todayHref="/today" chatsHref="/chats" afterOrgDelete />)); });
+    await settle(); // the screen has asked for its renewal; it has not come back
+    await act(async () => { (byId('onboarding-org-deleted-new') as HTMLButtonElement).click(); });
+    await settle();
+    expect(urls.filter((u) => u === '/api/auth/refresh')).toHaveLength(1); // the press waited for the one in flight
+    await act(async () => { release(); });
+    await settle();
+    expect(made()).toBe(1);
+  });
+
   it('a reload or an old link AFTER the new organization exists does not say «no organization» — the person goes on as an account with one (codex)', async () => {
     stubFetch([WITH_ORG]);
     await act(async () => { root.render(provider(<OnboardingForm todayHref="/today" chatsHref="/chats" afterOrgDelete />)); });
@@ -148,6 +173,14 @@ describe('[SID:4763 H6] after the organization was deleted', () => {
     expect(urls.indexOf('/api/auth/refresh')).toBeLessThan(urls.lastIndexOf('/api/auth/me'));
     expect(byId('onboarding-org-deleted')).toBeNull();
     expect(made()).toBe(0);
+  });
+
+  it('the deleted screen\'s renewal FAILS and the account would still name an organization (an old token): the screen stays — it does not read and go on on that answer (Kadir lens)', async () => {
+    stubFetch([WITH_ORG], '503');
+    await act(async () => { root.render(provider(<OnboardingForm todayHref="/today" chatsHref="/chats" afterOrgDelete />)); });
+    await settle();
+    expect(byId('onboarding-org-deleted')).not.toBeNull();
+    expect(urls).not.toContain('/api/auth/me');
   });
 
   it('a stale claim (an organization id in the token, no membership any more) still shows the deleted screen · an unreadable answer keeps it too', async () => {

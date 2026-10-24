@@ -70,6 +70,12 @@ function writeLocalFlag(key: string): void {
 // 다른 org의 완주 여부를 보여 주고 힌트 쿠키에도 섞여 기록됐다.
 const sharedFetchPromises = new Map<string, Promise<ActivationState | null>>();
 
+// story #4763 (codex): a re-read made by the banner is told to every other user of this organization's checklist (the support launcher gates on it too), so none keeps an older «open»
+const checklistListeners = new Map<string, Set<(data: ActivationState) => void>>();
+function publishChecklist(orgKey: string, data: ActivationState): void {
+  checklistListeners.get(orgKey)?.forEach((listen) => listen(data));
+}
+
 // firebase-session.ts::_resetKeyCacheForTests()와 동일 컨벤션 — 모듈 스코프 캐시는 테스트
 // 파일 간(그리고 한 파일의 it() 블록 간) 격리가 필요하다, 안 그러면 앞 테스트의 stub된
 // fetch 응답이 캐시로 남아 뒤 테스트에 새지 않도록 test setup에서 명시 호출한다.
@@ -152,6 +158,15 @@ export function useActivationStatus(
   // story #4763: «첫 지시 보내고 회신 받기» ticks itself when the reply arrives — the checklist was read once per session ("activation은 단조 증가라 재조회할 이유가 없다" is true of the
   // direction, not of the moment), so a person who sent the instruction and got the answer in front of this very banner still saw it open until a reload. While it is open (and the
   // caller asks), it is read again every ACTIVATION_REFRESH_MS while the tab is visible, and right away on focus or when the tab becomes visible; the shared promise is dropped first.
+  useEffect(() => {
+    if (skip) return;
+    const key = orgId ?? '';
+    const listen = (data: ActivationState) => setResult({ orgId: orgId ?? null, data });
+    const set = checklistListeners.get(key) ?? new Set();
+    set.add(listen);
+    checklistListeners.set(key, set);
+    return () => { set.delete(listen); };
+  }, [skip, orgId]);
   const stillOpen = options?.refreshWhileIncomplete === true && !skip && result != null && result.data.all_complete !== true;
   useEffect(() => {
     if (!stillOpen) return;
@@ -168,6 +183,7 @@ export function useActivationStatus(
         if (cancelled || !data || mine < applied) return;
         applied = mine;
         setResult({ orgId: requestOrg, data });
+        publishChecklist(requestOrg ?? '', data);
         if (requestOrg && data.scope_is_requested_org !== false && data.all_complete) writeLocalFlag(`${COMPLETE_KEY}:${requestOrg}`);
       });
     };

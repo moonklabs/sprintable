@@ -116,6 +116,18 @@ export function OnboardingForm({
 
   const progress = onboardingProgress(step);
 
+  // story 4763 (codex): the session is renewed by ONE call at a time — the refresh token rotates on use, so the deleted screen's own renewal and the press's (or a double press) must share the
+  // call in flight, not race it. `refreshAuthTokens` answers `{data, error}` instead of throwing: a missing `data` is not a success either. NO_REFRESH_TOKEN = nothing to renew.
+  const renewing = useRef<Promise<'renewed' | 'nothing-to-renew' | 'failed'> | null>(null);
+  const renewSession = () => {
+    if (!renewing.current) {
+      renewing.current = refreshAuthTokens()
+        .then((r): 'renewed' | 'nothing-to-renew' | 'failed' => (!r ? 'failed' : r.error ? (r.error.code === 'NO_REFRESH_TOKEN' ? 'nothing-to-renew' : 'failed') : r.data ? 'renewed' : 'failed'), () => 'failed' as const)
+        .finally(() => { renewing.current = null; });
+    }
+    return renewing.current;
+  };
+
   // OB-4: wizard 진입 1회 emit. session_id는 telemetry가 sessionStorage로 1회차당 고정.
   useEffect(() => {
     emitOnboardingEvent('onboarding_started');
@@ -203,10 +215,9 @@ export function OnboardingForm({
         // the web tab's own arrival made the organization meanwhile) carries no organization although the person has one, and the second «조직 만들기» ended in
         // «무료 플랜은 조직을 1개까지» with no way out. A fresh token is read from the database: renew once, ask again, and only then decide there is none.
         // (the renewal also tells the shell the session changed, so the app's stored token carries the organization from here on — story 4762.)
-        // `refreshAuthTokens` does not throw on a failed rotation, it answers `{data: null, error}` — a renewal that did not happen leaves the same old token, whose «no organization» is
-        // not an answer: nothing is made (Kadir lens on 5221)
-        const renewed = await refreshAuthTokens().catch(() => null);
-        if (!renewed || renewed.error) { setArrival('account-check-failed'); return; }
+        // a renewal that did not happen leaves the same old token, whose «no organization» is not an answer: nothing is made (Kadir lens on 5221). «Nothing to renew» (a session with no refresh
+        // token — the phone's Firebase session reads its claims fresh every time) is not a failure: the second read below decides
+        if ((await renewSession()) === 'failed') { setArrival('account-check-failed'); return; }
         try {
           const again = await fetchWithAuth('/api/auth/me');
           if (!again.ok) throw new Error(String(again.status));
@@ -250,8 +261,7 @@ export function OnboardingForm({
     let off = false;
     void (async () => {
       // the token the person holds was made before the delete (it still names that organization, and an account with others reads as «none» until it is renewed) — renew, then ask
-      const renewed = await refreshAuthTokens().catch(() => null);
-      if (!renewed || renewed.error) return; // not knowing is not «none», but it is not «has one» either: the screen stays and its press asks again before it makes anything
+      if ((await renewSession()) === 'failed') return; // not knowing is not «none», but it is not «has one» either: the screen stays and its press asks again before it makes anything
       const res = await fetchWithAuth('/api/auth/me');
       if (!res.ok) return;
       const existing = existingOrgIdFromMe(await res.json());

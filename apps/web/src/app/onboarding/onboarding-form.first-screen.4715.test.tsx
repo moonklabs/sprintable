@@ -59,7 +59,7 @@ function stubFetch(o: Opts = {}) {
       return ok({ invites: opts.invites ?? [] }); // the backend's one shape (MyInvitesResponse · no envelope)
     }
     if (url.endsWith('/api/organizations')) return ok({ data: { id: 'org-1' } });
-    if (url.endsWith('/api/auth/refresh')) return ok({});
+    if (url.endsWith('/api/auth/refresh')) return ok({ data: { ok: true } }); // the route's real success answer (story 4763: an answer without `data` is not a renewal)
     if (url.endsWith('/api/projects')) return ok({ data: { id: 'proj-1' } });
     if (url.endsWith('/api/current-project')) return ok({});
     if (url.endsWith('/desktop/downloads/macos.json')) return { ok: true, json: async () => MANIFEST, headers: new Headers({ 'x-desktop-download-bucket': 'sprintable-desktop-releases-dev' }) };

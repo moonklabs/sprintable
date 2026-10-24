@@ -269,6 +269,20 @@ describe('useActivationStatus — 회신이 오면 스스로 체크(story #4763)
     expect(rt()).toBe('true|false'); // not taken back
   });
 
+  it('a re-read made by the banner is told to the other user of the same checklist (the support launcher, which does not ask for re-reads) (codex)', async () => {
+    const spy = sequence([PARTIAL, REPLIED]);
+    vi.stubGlobal('fetch', spy);
+    function Plain() { const { state } = useActivationStatus(undefined, { orgId: 'org-1' }); return <span data-testid="plain">{String(state?.steps.first_roundtrip)}</span>; }
+    await act(async () => { root.render(<><RefreshProbe /><Plain /></>); });
+    await flush();
+    expect(rt()).toBe('false|false');
+    expect(container.querySelector('[data-testid="plain"]')!.textContent).toBe('false');
+    await act(async () => { vi.advanceTimersByTime(ACTIVATION_REFRESH_MS); });
+    await flush();
+    expect(rt()).toBe('true|false');
+    expect(container.querySelector('[data-testid="plain"]')!.textContent).toBe('true');
+  });
+
   it('complete with no organization known (no stored complete flag to stop it) → the condition itself stops the reading', async () => {
     const spy = sequence([COMPLETE]);
     vi.stubGlobal('fetch', spy);
