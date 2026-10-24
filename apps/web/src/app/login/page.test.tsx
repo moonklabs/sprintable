@@ -206,13 +206,14 @@ const offer = () => container.querySelector('[data-testid="login-mac-app-offer"]
 describe('LoginPage — 첫 화면의 «Mac 앱 받기» (story #4763 AC6)', () => {
   afterEach(() => { vi.restoreAllMocks(); });
 
-  it('받기가 있는 배포 · Mac: 제품 한 문장 + «Mac 앱 받기»(가입으로 이어짐 · 가입 뒤 앱 받는 화면) + 한 줄 안내', async () => {
+  it('받기가 있는 배포 · Mac: 제품 한 문장 + «Mac 앱 받기»(가입으로 이어짐 · 가입 뒤 온보딩이 받는 화면으로) + 메일 인증을 말하는 한 줄 안내', async () => {
     await mountWithOffer(true);
     expect(offer()).not.toBeNull();
     expect(offer()?.textContent).toContain(koMessages.login.macAppPitch);
     expect(offer()?.textContent).toContain(koMessages.login.macAppGetHint);
     const link = [...(offer()?.querySelectorAll('a') ?? [])].find((a) => a.textContent === koMessages.login.macAppGet);
-    expect(link?.getAttribute('href')).toBe('/register?next=%2Fdesktop');
+    expect(link?.getAttribute('href')).toBe('/register'); // a `next` to the download page would be dropped by the signed-in area (a new account has no organization → onboarding)
+    expect(koMessages.login.macAppGetHint).toContain('메일 인증'); // not «바로»: the onboarding stands behind the e-mail check
   });
 
   it('받기가 없는 배포(공증 전 prod · 컨텍스트 없음): 아무것도 안 뜬다 — 없는 길을 약속하지 않음', async () => {
