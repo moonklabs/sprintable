@@ -277,27 +277,31 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
     : '';
   const nextLine = runtime === 'claude' ? t('nextClaude', { sentence, yes: CLAUDE_TRUST_YES }) : t('nextCodex', { sentence });
 
+  // AC4 (D5): what the program needs — the web cannot see this computer, so no «status»; the install lines are the app setup's own.
+  // Its place (story 4766 · AC3): AFTER the press — the press stands on the first screen of a laptop window (≈800 px visible), the notes under it
+  const pressShown = phase !== 'ready' || revoked;
+  const prereqBlock = (
+    <div className="space-y-1.5 rounded-md border border-border bg-muted/40 p-3" data-testid="advanced-prereq">
+      <p className="break-keep text-xs font-medium text-foreground">{t('prereqTitle')}</p>
+      <p className="break-keep text-xs text-muted-foreground">{t('prereqBody')}</p>
+      <ul className="space-y-1">
+        {(['claude', 'codex'] as const).map((rt, i) => (
+          <li key={rt} className="flex flex-wrap items-center gap-2" data-testid={`advanced-install-${rt}`}>
+            <span className="w-24 shrink-0 text-xs text-foreground">{RUNTIME_LABEL[rt]}</span>
+            <code className="min-w-0 flex-1 break-all rounded bg-background px-2 py-1 font-mono text-xs text-foreground">{INSTALL[rt]}</code>
+            <Button variant="outline" size="sm" onClick={() => void copyInstall(rt)} data-testid={`advanced-install-copy-${rt}`} aria-label={t('installCopyAria', { n: i + 1, label: RUNTIME_LABEL[rt] })}>
+              {installCopied === rt ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copy')}</>}
+            </Button>
+          </li>
+        ))}
+      </ul>
+      <p className="break-keep text-xs text-muted-foreground" data-testid="advanced-prereq-app">{t('prereqApp')}</p>
+    </div>
+  );
+
   return (
     <div className="space-y-3" data-testid="advanced-connect">
       <p className="break-keep text-xs text-muted-foreground">{t('lead')}</p>
-
-      {/* AC4 (D5): what the program needs — the web cannot see this computer, so no «status»; the install lines are the app setup's own */}
-      <div className="space-y-1.5 rounded-md border border-border bg-muted/40 p-3" data-testid="advanced-prereq">
-        <p className="break-keep text-xs font-medium text-foreground">{t('prereqTitle')}</p>
-        <p className="break-keep text-xs text-muted-foreground">{t('prereqBody')}</p>
-        <ul className="space-y-1">
-          {(['claude', 'codex'] as const).map((rt, i) => (
-            <li key={rt} className="flex flex-wrap items-center gap-2" data-testid={`advanced-install-${rt}`}>
-              <span className="w-24 shrink-0 text-xs text-foreground">{RUNTIME_LABEL[rt]}</span>
-              <code className="min-w-0 flex-1 break-all rounded bg-background px-2 py-1 font-mono text-xs text-foreground">{INSTALL[rt]}</code>
-              <Button variant="outline" size="sm" onClick={() => void copyInstall(rt)} data-testid={`advanced-install-copy-${rt}`} aria-label={t('installCopyAria', { n: i + 1, label: RUNTIME_LABEL[rt] })}>
-                {installCopied === rt ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copy')}</>}
-              </Button>
-            </li>
-          ))}
-        </ul>
-        <p className="break-keep text-xs text-muted-foreground" data-testid="advanced-prereq-app">{t('prereqApp')}</p>
-      </div>
 
       {phase !== 'ready' || revoked ? (
         <div className="space-y-1.5">
@@ -320,6 +324,8 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
         </div>
       ) : null}
 
+      {pressShown ? prereqBlock : null}
+
       {made && !revoked ? (
         <div className="space-y-2" data-testid="advanced-ready">
           <div className="flex gap-0 rounded-md border border-border bg-muted p-[3px]" role="group" aria-label={t('runtimeLabel')}>
@@ -327,13 +333,14 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
               <Button
                 key={rt}
                 type="button"
-                variant={runtime === rt ? 'secondary' : 'ghost'}
+                variant={runtime === rt ? 'outline' : 'ghost'}
                 size="sm"
                 data-testid={`advanced-runtime-${rt}`}
                 aria-pressed={runtime === rt}
                 aria-label={t('choiceAria', { n: i + 1, label: RUNTIME_LABEL[rt] })}
                 onClick={() => { setRuntime(rt); setCopied(false); setCopyFailedLine(null); }}
-                className="flex-1"
+                // the chosen one reads as chosen: a filled chip, darker and heavier text; the other is quiet (the first build had it the other way round)
+                className={cn('flex-1', runtime === rt ? 'font-semibold text-foreground' : 'text-muted-foreground')}
               >
                 {RUNTIME_LABEL[rt]}
               </Button>
@@ -419,6 +426,8 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
           </div>
         </div>
       ) : null}
+
+      {pressShown ? null : prereqBlock}
     </div>
   );
 }
