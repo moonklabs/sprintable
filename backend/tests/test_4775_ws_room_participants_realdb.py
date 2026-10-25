@@ -133,6 +133,20 @@ def _url_agent() -> str:
     return f"/ws/chat/{AGENT}?api_key={AGENT_KEY}"
 
 
+def _rt(ws, timeout: float = 8.0) -> str:
+    """`_rt(ws)` with a bound: a socket that was supposed to hear something and does not fails the test in seconds
+    (a bare receive blocks for minutes when a fix is reverted — a mutant that stopped a delivery used to hang the whole run)"""
+    import concurrent.futures
+
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        return ex.submit(ws.receive_text).result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        raise AssertionError(f"nothing arrived on the socket within {timeout} s") from None
+    finally:
+        ex.shutdown(wait=False)
+
+
 def _say(ws, content: str, **extra) -> None:
     ws.send_text(json.dumps({"content": content, **extra}))
 
@@ -141,7 +155,7 @@ def _recv_until(ws, content: str) -> list[dict]:
     """everything this socket hears up to and including its own `content` line (it is sent by this socket, so it comes back)"""
     got: list[dict] = []
     while True:
-        m = json.loads(ws.receive_text())
+        m = json.loads(_rt(ws))
         got.append(m)
         if m.get("content") == content:
             return got
@@ -196,7 +210,7 @@ def test_the_agents_own_socket_hears_the_dm_lines_it_is_a_participant_of(world, 
         # X hears both, in its own order — read until both have shown
         heard: set[str] = set()
         while {"A-to-X", "B-to-X"} - heard:
-            heard.add(json.loads(wx.receive_text())["content"])
+            heard.add(json.loads(_rt(wx))["content"])
     assert {"A-to-X", "B-to-X"} <= heard
 
 
@@ -223,10 +237,10 @@ def test_an_agent_answer_without_a_conversation_is_refused_out_loud_when_the_age
     dm_a, dm_b = _dm_of(MA), _dm_of(MB)
     with client.websocket_connect(_url_agent()) as wx:
         _say(wx, "WHERE-DOES-THIS-GO")
-        err = json.loads(wx.receive_text())
+        err = json.loads(_rt(wx))
         assert err["error"]["code"] == "conversation_id_required"
         _say(wx, "STILL-OPEN", conversation_id=str(dm_a))  # the socket stays open and a named answer works
-        ok = json.loads(wx.receive_text())
+        ok = json.loads(_rt(wx))
         assert ok["content"] == "STILL-OPEN"
     assert _saved_in(dm_a) == ["hello", "STILL-OPEN"] and _saved_in(dm_b) == ["hello"]
 
@@ -236,7 +250,7 @@ def test_an_agent_answer_without_a_conversation_goes_to_its_only_dm(world, clien
     dm_a = _dm_of(MA)
     with client.websocket_connect(_url_agent()) as wx:
         _say(wx, "ONLY-ONE")
-        got = json.loads(wx.receive_text())
+        got = json.loads(_rt(wx))
     assert got["content"] == "ONLY-ONE" and got["conversation_id"] == str(dm_a)
     assert _saved_in(dm_a) == ["hello", "ONLY-ONE"]
 
@@ -250,9 +264,9 @@ def test_an_agent_cannot_answer_into_a_conversation_it_is_not_in(world, client):
     ))
     with client.websocket_connect(_url_agent()) as wx:
         _say(wx, "NOT-MINE", conversation_id=str(other))
-        assert json.loads(wx.receive_text())["error"]["code"] == "conversation_not_found"
+        assert json.loads(_rt(wx))["error"]["code"] == "conversation_not_found"
         _say(wx, "NOT-EITHER", conversation_id=str(uuid.uuid4()))
-        assert json.loads(wx.receive_text())["error"]["code"] == "conversation_not_found"
+        assert json.loads(_rt(wx))["error"]["code"] == "conversation_not_found"
     assert _saved_in(other) == []
 
 
@@ -260,7 +274,7 @@ def test_an_agent_cannot_answer_into_a_conversation_it_is_not_in(world, client):
 
 def test_a_member_with_no_access_to_the_agents_project_is_refused_at_connect(world, client):
     with client.websocket_connect(_url_human(UC)) as wc:
-        err = json.loads(wc.receive_text())
+        err = json.loads(_rt(wc))
         assert err == {"error": "forbidden"}
     rows = _run(_exec(fetch=f"SELECT count(*) FROM conversations WHERE org_id='{ORG}'"))
     assert rows[0][0] == 0  # refused before any DM was made for it
@@ -404,7 +418,7 @@ def test_a_person_whose_project_access_is_removed_after_connecting_is_not_kept(w
         assert _recv_until(wa, "before-revoke")[-1]["content"] == "before-revoke"
         _run(_exec(f"DELETE FROM project_access WHERE member_id='{MA}'"))
         _say(wa, "AFTER-REVOKE")
-        got = json.loads(wa.receive_text())
+        got = json.loads(_rt(wa))
         assert got == {"error": "forbidden"}
     assert "AFTER-REVOKE" not in _saved_in(dm_a)
 
@@ -483,3 +497,108 @@ def test_a_group_conversation_line_over_rest_reaches_its_participants_only(world
     finally:
         app.dependency_overrides.clear()
     assert "group-line" not in [m["content"] for m in owner_heard], "a group line reached a person who is not in the group"
+
+
+# ── Kadir's lens (PR 5225): «cannot tell» is «no» — the property this story stands on ─────────────────────────────────────────
+
+def test_the_judge_fails_closed_never_open(world, client, monkeypatch):
+    """`socket_can_read_conversation` answers False when it cannot tell: no such conversation · the project rule blows up · the database
+    itself fails. (A judge that answers True on an exception sends a person's line to everyone in the room.)"""
+    from app.services import project_auth
+    from app.services.conversation_auth import socket_can_read_conversation
+
+    _make_dm(client, UA)
+    dm_a = _dm_of(MA)
+
+    class _BrokenDb:
+        async def execute(self, *a, **k):
+            raise RuntimeError("database failure")
+
+    async def _ask(db, conversation_id):
+        return await socket_can_read_conversation(db, conversation_id, ORG, member_id=MA, access_user_id=UA, via_agent_key=False)
+
+    async def _run_cases():
+        eng = create_async_engine(_ASYNC, poolclass=NullPool)
+        out = {}
+        try:
+            async with async_sessionmaker(eng, expire_on_commit=False)() as db:
+                out["control: a participant with access"] = await _ask(db, dm_a)
+                out["no such conversation"] = await _ask(db, uuid.uuid4())
+
+                async def _boom(*a, **k):
+                    raise RuntimeError("project rule failure")
+
+                monkeypatch.setattr(project_auth, "has_project_access", _boom)
+                out["the project rule blows up"] = await _ask(db, dm_a)
+                monkeypatch.undo()
+                out["the database fails"] = await _ask(_BrokenDb(), dm_a)
+        finally:
+            await eng.dispose()
+        return out
+
+    assert _run(_run_cases()) == {
+        "control: a participant with access": True, "no such conversation": False,
+        "the project rule blows up": False, "the database fails": False,
+    }
+
+
+def test_a_judgment_that_blows_up_keeps_nothing_and_sends_nothing(world, client, monkeypatch):
+    """A's line meets a project rule that raises: it is not saved, no other socket hears it, A's socket ends (4003)"""
+    from app.services import project_auth
+
+    _make_dm(client, UA)
+    dm_a = _dm_of(MA)
+
+    async def _boom(*a, **k):
+        raise RuntimeError("project rule failure")
+
+    with client.websocket_connect(_url_human(UA)) as wa, client.websocket_connect(_url_human(UO)) as wo, client.websocket_connect(_url_agent()) as wx:
+        monkeypatch.setattr(project_auth, "has_project_access", _boom)
+        _say(wa, "FAIL-CLOSED")
+        assert json.loads(_rt(wa)) == {"error": "forbidden"}
+        monkeypatch.undo()
+        _say(wo, "owner-1")
+        owner_heard = _recv_until(wo, "owner-1")
+        _say(wx, "x-1", conversation_id=str(dm_a))
+        agent_heard = _recv_until(wx, "x-1")
+    assert "FAIL-CLOSED" not in [m["content"] for m in owner_heard + agent_heard], "a line whose judgment failed was sent to a socket"
+    assert "FAIL-CLOSED" not in _saved_in(dm_a), "a line whose judgment failed was saved"
+
+
+def test_a_socket_nobody_vouched_for_is_sent_nothing():
+    """the belt: a socket in a room without a registered owner receives no conversation line (a registered one does)"""
+    import app.routers.ws_chat as ws_chat
+
+    got: dict[str, list[str]] = {"vouched": [], "stranger": []}
+
+    class _Sock:
+        def __init__(self, name):
+            self.name = name
+
+        async def send_text(self, payload):
+            got[self.name].append(payload)
+
+    vouched, stranger = _Sock("vouched"), _Sock("stranger")
+    ident = ws_chat._SocketIdent(member_id=uuid.uuid4(), access_user_id=uuid.uuid4(), org_id=uuid.uuid4(), via_agent_key=False)
+
+    async def _allow(db, conversation_id, org_id, **kw):
+        return True
+
+    class _Db:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, *a):
+            return False
+
+    ws_chat._rooms["room-4775"] = {vouched, stranger}
+    ws_chat._idents[vouched] = ident
+    orig_judge, orig_factory = ws_chat.socket_can_read_conversation, ws_chat.async_session_factory
+    ws_chat.socket_can_read_conversation, ws_chat.async_session_factory = _allow, (lambda: _Db())
+    try:
+        _run(ws_chat._broadcast("room-4775", "line", conversation_id=uuid.uuid4()))
+    finally:
+        ws_chat.socket_can_read_conversation, ws_chat.async_session_factory = orig_judge, orig_factory
+        ws_chat._rooms.pop("room-4775", None)
+        ws_chat._idents.pop(vouched, None)
+    assert got == {"vouched": ["line"], "stranger": []}
