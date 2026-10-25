@@ -73,7 +73,7 @@ async def _seed_user_with_refresh_token(session) -> str:
 
 
 async def _setup_app(app, Session):
-    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read  # story 2451: get_db is overridden only through this helper (it also covers get_read_db)
 
     async def _db():
         async with Session() as s:
@@ -84,7 +84,7 @@ async def _setup_app(app, Session):
                 await s.rollback()
                 raise
 
-    app.dependency_overrides[get_db] = _db
+    override_db_and_read(app, _db)
 
 
 async def _run_overlap(window_seconds: int | None = None):
