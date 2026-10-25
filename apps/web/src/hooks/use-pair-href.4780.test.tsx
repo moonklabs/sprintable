@@ -88,6 +88,7 @@ describe('[SID:4780] usePairHref — the pairing screen\'s address from the page
     try {
       expect(() => window.history.pushState({}, '', '/inbox')).not.toThrow();
       expect(window.location.pathname).toBe('/inbox');
+      expect(seen).toEqual([]); // not inside the call (Next calls pushState inside a useInsertionEffect) — reverted (told at once) → ['/inbox'] already
       await Promise.resolve(); // the listeners are told in a microtask
       expect(seen).toEqual(['/inbox']); // the one after the bad one was still told (reverted: no isolation → the bad one stops it)
     } finally {
@@ -145,6 +146,22 @@ describe('[SID:4780] usePairHref — the pairing screen\'s address from the page
     }
   });
 
+  it('what a router restores may be an OLDER wrapper of ours: that one is not wrapped again', async () => {
+    const { subscribeToLocation } = await import('@/lib/location-store');
+    const off0 = subscribeToLocation(() => undefined);
+    const older = window.history.pushState; // ours (W1)
+    window.history.pushState = function (this: History, ...args: Parameters<History['pushState']>) { return older.apply(this, args); }; // a patch over it (N)
+    const off1 = subscribeToLocation(() => undefined); // wraps N (W2)
+    window.history.pushState = older; // the router unmounts and puts back what it captured (W1)
+    const offs = [off0, off1];
+    try {
+      offs.push(subscribeToLocation(() => undefined));
+      expect(window.history.pushState).toBe(older); // reverted (only the latest wrapper counts as ours) → a third layer around W1
+    } finally {
+      offs.forEach((off) => off());
+    }
+  });
+
   it('something patched over the wrapper (Next patching history after the store) tells a listener once per navigation, not once per layer', async () => {
     const { subscribeToLocation } = await import('@/lib/location-store');
     const off0 = subscribeToLocation(() => undefined); // wrapper in place
@@ -178,6 +195,25 @@ describe('[SID:4780] usePairHref — the pairing screen\'s address from the page
     } finally {
       off1();
       off2();
+    }
+  });
+});
+
+// a store left on `window` by an older copy of the file (Fast Refresh) has another shape
+describe('[SID:4780] the store on window from an older copy of the file', () => {
+  it('is completed, not trusted: a subscription on it neither throws nor loses a navigation', async () => {
+    (window as unknown as Record<string, unknown>)['__sprintableLocationStore'] = { listeners: new Set(), wrapped: true }; // the shape of the first version
+    vi.resetModules();
+    const { subscribeToLocation } = await import('@/lib/location-store');
+    let told = 0;
+    const off = subscribeToLocation(() => { told += 1; }); // reverted (the fields are not completed) → throws: `ours` of undefined
+    try {
+      window.history.pushState({}, '', '/today');
+      await Promise.resolve();
+      expect(told).toBe(1);
+    } finally {
+      off();
+      window.history.pushState({}, '', '/');
     }
   });
 });
