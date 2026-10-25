@@ -104,17 +104,23 @@ export function ActivationChecklistBanner() {
   useEffect(() => {
     if (seenOpenKey && !hidden && state && state.all_complete !== true && state.scope_is_requested_org !== false) writeMark(seenOpenKey);
   }, [seenOpenKey, hidden, state]);
+  // «complete» here is complete FOR THIS ORGANIZATION: an answer that judged another organization (`scope_is_requested_org === false`) is not this one's finish (the banner's own scope guard below says the same)
+  const completeHere = allComplete && state?.scope_is_requested_org !== false;
   useEffect(() => {
-    if (!allComplete || hidden || !seenOpenKey || !readMark(seenOpenKey)) return;
+    if (!completeHere || hidden || !seenOpenKey || !readMark(seenOpenKey)) return;
     clearMark(seenOpenKey);
     setDoneFor(seenOpenKey);
-  }, [allComplete, hidden, seenOpenKey]);
+  }, [completeHere, hidden, seenOpenKey]);
+  // the line is for the page and the organization it was set on: leaving either takes it down for good (coming back within the 10 s does not show it again — the mark is already spent)
+  useEffect(() => {
+    if (doneFor !== null && (hidden || doneFor !== seenOpenKey)) setDoneFor(null);
+  }, [doneFor, hidden, seenOpenKey]);
   useEffect(() => {
     if (!doneFor) return;
     const timer = setTimeout(() => setDoneFor(null), ACTIVATION_DONE_LINE_MS);
     return () => clearTimeout(timer);
   }, [doneFor]);
-  const doneLine = doneFor !== null && doneFor === seenOpenKey;
+  const doneLine = doneFor !== null && doneFor === seenOpenKey && completeHere;
   const [navigatingToInstruction, setNavigatingToInstruction] = useState(false);
   const [instructionStartError, setInstructionStartError] = useState(false);
   // story #4219 F1(PO 리뷰 CLS) — 접힘 상태는 서버도 아는 세션 쿠키(lib/activation-hint)가 정본 — 자리 표시(스켈레톤)를 접힌 칩과

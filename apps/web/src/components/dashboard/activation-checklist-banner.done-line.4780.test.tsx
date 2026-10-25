@@ -211,4 +211,39 @@ describe('[SID:4780] ActivationChecklistBanner — the finish is shown once', ()
     await flush();
     expect(done()).toBeNull(); // reverted (the line ignores where it stands) → still up on the page that hides the banner
   });
+
+  it('an answer that judged ANOTHER organization is not this one\'s finish: it neither shows the line nor spends the mark (codex)', async () => {
+    localStore.set(SEEN('org-1'), '1');
+    answers({ ...COMPLETE, scope_is_requested_org: false });
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    expect(done()).toBeNull(); // reverted (no scope check on the completion path) → the line
+    expect(localStore.get(SEEN('org-1'))).toBe('1'); // the mark is still there for the real finish
+  });
+
+  it('after the line was taken down (an organization switch, or a hidden page) coming back within the 10 s does not show it again', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'] });
+    localStore.set(SEEN('org-1'), '1');
+    answers(COMPLETE);
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    expect(done()).not.toBeNull();
+    mockPath.current = '/desktop/setup';
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    mockPath.current = '/today';
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    expect(done()).toBeNull(); // reverted (the state survives the hidden page) → the line is back
+  });
+
+  it('under StrictMode with the checklist already complete on the first render (no fetch: the browser knows it is complete) the line shows once', async () => {
+    localStore.set('sprintable_activation_checklist_complete:org-1', '1');
+    localStore.set(SEEN('org-1'), '1');
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('no fetch expected'); }));
+    const { StrictMode } = await import('react');
+    await act(async () => { root.render(<StrictMode>{wrap()}</StrictMode>); });
+    await flush();
+    expect(done()).not.toBeNull(); // the first effect run spends the mark; the replay must find the state already set
+  });
 });
