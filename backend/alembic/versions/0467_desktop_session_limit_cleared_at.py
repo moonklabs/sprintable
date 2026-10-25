@@ -7,7 +7,8 @@ sent `agent.limit_lifted`, and the same limit error a second later sent `agent.l
                                    (`desktop_limit_notice.LIFT_HOLD_SEC`), a report that puts the limit back first cancels both the line and the new «stopped» notice.
                                    NULL = no lift is waiting.
 
-Additive only: no backfill (a lift that was waiting when this ran is simply not told — as before a restart), no index (the sweep reads the few rows that carry it).
+Additive only: no backfill (a lift that was waiting when this ran is simply not told — as before a restart). A PARTIAL index on the rows that carry it keeps the 30-second sweep off the whole table
+(empty when created: every value is NULL, so the build is instant).
 """
 import sqlalchemy as sa
 
@@ -21,7 +22,9 @@ depends_on = None
 
 def upgrade() -> None:
     op.add_column("desktop_sessions", sa.Column("limit_cleared_at", sa.DateTime(timezone=True), nullable=True))
+    op.create_index("ix_desktop_sessions_limit_cleared_at", "desktop_sessions", ["limit_cleared_at"], postgresql_where=sa.text("limit_cleared_at IS NOT NULL"))
 
 
 def downgrade() -> None:
+    op.drop_index("ix_desktop_sessions_limit_cleared_at", table_name="desktop_sessions")
     op.drop_column("desktop_sessions", "limit_cleared_at")

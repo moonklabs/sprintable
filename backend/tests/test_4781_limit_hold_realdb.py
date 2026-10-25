@@ -154,6 +154,26 @@ async def test_05_a_session_that_ends_waits_for_nothing(world):
         assert len(await _notices(STOOD)) == 2
 
 
+async def test_05b_a_session_that_ends_while_its_lift_waits_clears_the_notice_outstanding_for_it(world):
+    """codex 01a174dd: limited → working (the lift waits) → stopped. The «stopped» notice's promise must not stay open: a later session of the same person that stands and returns
+    would be told a «working again» that was never this one's. (The same as a limited session that ends: the promise is cleared without a line.)"""
+    async with _client() as c:
+        device = await _device(c, "d4781 mac e2")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _report(c, device, a, "waiting_input", 2, limit=LOOKS)
+        await _report(c, device, a, "working", 3)  # the lift waits
+        await _report(c, device, a, "stopped", 4)  # … and the session ends
+        assert await _notices(LIFTED) == []
+        # a new session under another key stands inside the window (folded into the first notice) and comes back
+        await _report(c, device, a, "working", 5, key="s-2")
+        await _report(c, device, a, "waiting_input", 6, key="s-2", limit=LOOKS)
+        await _report(c, device, a, "working", 7, key="s-2")
+        await _age_the_wait(device, 200)
+        assert await _sweep() in (0, 1)
+        assert await _notices(LIFTED) == [], "no promise was left open by the ended session"
+
+
 async def test_06_a_real_lift_after_a_flap_is_still_told(world):
     async with _client() as c:
         device = await _device(c, "d4781 mac f")
@@ -273,3 +293,9 @@ def test_10_the_sweep_is_started_with_the_app_and_stopped_with_it():
     src = inspect.getsource(main.lifespan)
     assert "lift_sweep_loop()" in src and "lift_sweep_task.cancel()" in src and "await lift_sweep_task" in src
     assert 'PYTEST_CURRENT_TEST' in src.split("lift_sweep_task = None")[1].split("lift_sweep_loop")[0], "like the other workers, not under pytest"
+
+
+async def test_11_the_sweep_reads_through_a_partial_index_that_only_holds_waiting_rows(world):
+    rows = await _sql(fetch="SELECT indexdef FROM pg_indexes WHERE tablename = 'desktop_sessions' AND indexname = 'ix_desktop_sessions_limit_cleared_at'")
+    assert len(rows) == 1, "migration 0467 creates the partial index"
+    assert "limit_cleared_at IS NOT NULL" in rows[0][0], rows[0][0]

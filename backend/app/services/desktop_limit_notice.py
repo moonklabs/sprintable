@@ -485,7 +485,13 @@ async def after_report(db: AsyncSession, setup: DesktopSetup, row: DesktopSessio
     try:
         async with db.begin_nested():  # a failure here rolls back to here — the state report itself stands
             if row.state == "stopped":
+                had_wait = row.limit_cleared_at is not None
                 row.limit_cleared_at = None  # an ended session waits for nothing (and a new session under the same key must not inherit a wait)
+                if had_wait and now_limited == was_limited:
+                    # the limit had been gone and the lift was waiting when the session ended: the notice outstanding for it is cleared without a line, as when a
+                    # limited session ends (otherwise it stays open and a later session of the same person would be told a lift that was never this one's)
+                    await _lifted(db, setup, row)
+                    return
             elif now_limited and row.limit_cleared_at is not None:
                 row.limit_cleared_at = None
                 logger.info("desktop limit notice: lift cancelled (the limit came back before it was told) setup=%s session=%s", setup.id, row.session_key)
