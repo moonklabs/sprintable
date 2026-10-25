@@ -14,9 +14,18 @@ function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\s)\/\/.*$/gm, '$1');
 }
 
-/** files (relative to src) that mention `refreshAuthTokens` in CODE — a call, an import, an alias — other than the owner */
+/**
+ * files (relative to src) that renew the session outside the flight, in CODE: a mention of `refreshAuthTokens` (a call, an import, an alias) or the refresh route's client address
+ * `'/api/auth/refresh'` as a string literal (a direct POST of it — `desktop-setup.tsx`'s `renewToken` did exactly that: codex 4776 round 3) — other than the owner
+ */
 export function directRefreshReferences(files: Array<{ path: string; source: string }>): string[] {
-  return files.filter((f) => f.path !== OWNER && /\brefreshAuthTokens\b/.test(stripComments(f.source))).map((f) => f.path);
+  return files
+    .filter((f) => {
+      if (f.path === OWNER) return false;
+      const code = stripComments(f.source);
+      return /\brefreshAuthTokens\b/.test(code) || /['"`]\/api\/auth\/refresh['"`]/.test(code);
+    })
+    .map((f) => f.path);
 }
 
 function sourceFiles(dir: string, out: Array<{ path: string; source: string }> = []): Array<{ path: string; source: string }> {
@@ -57,5 +66,10 @@ describe('[SID:4776] the session is renewed through one flight — no direct ref
     expect(directRefreshReferences([f('d.ts', "// the old refreshAuthTokens() call\n/* refreshAuthTokens() */ const x = 1;")])).toEqual([]);
     expect(directRefreshReferences([f(OWNER, 'export async function refreshAuthTokens() {}')])).toEqual([]);
     expect(directRefreshReferences([f('e.ts', "const u = 'https://x.test/a'; refreshAuthTokens();")])).toEqual(['e.ts']); // a URL's `//` is not a comment
+    // the refresh route's address as a literal: a direct POST (fetch · fetchWithAuth) is the same hole
+    expect(directRefreshReferences([f('g.tsx', "await fetchWithAuth('/api/auth/refresh', { method: 'POST' });")])).toEqual(['g.tsx']);
+    expect(directRefreshReferences([f('h.ts', 'const r = await fetch(`/api/auth/refresh`);')])).toEqual(['h.ts']);
+    expect(directRefreshReferences([f('i.ts', '// POST /api/auth/refresh (the route)\nconst note = 1;')])).toEqual([]); // a comment is not a call
+    expect(directRefreshReferences([f('j.ts', "const x = '/api/auth/refresh-diagnostics';")])).toEqual([]); // another address
   });
 });

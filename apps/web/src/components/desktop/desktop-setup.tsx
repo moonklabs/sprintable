@@ -7,7 +7,7 @@ import { Loader2, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { fetchWithAuth } from '@/lib/db/client';
+import { fetchWithAuth, refreshSessionAfterChange } from '@/lib/db/client';
 import { presetDescription, presetName } from '@/lib/platform-preset-copy';
 import { pickEulReulJosa, pickEunNeunJosa, pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -166,7 +166,8 @@ export async function joinNewOrg(body: { project_id?: string; data?: { project_i
  */
 export async function renewToken(): Promise<boolean> {
   for (let i = 0; i < 2; i++) {
-    const ok = await fetchWithAuth('/api/auth/refresh', { method: 'POST' }).then((r) => r.ok, () => false);
+    // story 4776 (codex): through the page's ONE flight (a rotation made because the organization has just changed) — a direct POST of the refresh route raced another request's 401 renewal on the same cookie
+    const ok = await refreshSessionAfterChange().then((r) => !r.error, () => false); // `error` is set for any answer that is not ok (401 · 5xx), exactly what `res.ok` said before
     if (ok) return true;
   }
   return false;
