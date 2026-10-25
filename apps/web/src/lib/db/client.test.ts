@@ -446,6 +446,22 @@ describe('refreshSessionAfterChange — one rotation at a time, minted after the
     expect(s.maxActive()).toBe(1);
   });
 
+  it('a second call while the first one is open (the wait or the rotation after it) joins it — a duplicate press makes no extra rotation; a call after it settled is a new change', async () => {
+    const s = scripted();
+    s.hold(); // the FIRST rotation of the script is the one held
+    const a = refreshSessionAfterChange(); // nothing in flight: its own rotation starts at once and is held
+    await vi.waitFor(() => expect(s.log).toHaveLength(1));
+    const b = refreshSessionAfterChange(); // a duplicate press while the rotation is out
+    const c = refreshSessionAfterChange();
+    const d = refreshSessionOnce(); // another path (an interceptor's 401 renewal, the arrival's) while that rotation is out joins it too — the rotation after a change is IN the page's one flight
+    s.gates[0]!();
+    await Promise.all([a, b, c, d]);
+    expect(s.log).toHaveLength(1); // one rotation for the presses and the other path — reverted (each waits then rotates) → 3; the rotation made outside the flight → 2
+    expect(s.maxActive()).toBe(1);
+    await refreshSessionAfterChange(); // the open one has settled: a new change → its own rotation
+    expect(s.log).toHaveLength(2);
+  });
+
   it('an early flight that FAILS does not poison it: the change still gets its own rotation and its own answer', async () => {
     let call = 0;
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
