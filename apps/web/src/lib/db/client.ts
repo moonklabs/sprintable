@@ -67,6 +67,9 @@ export async function refreshAuthTokens(): Promise<AuthResult> {
 
 let _refreshing: Promise<AuthResult> | null = null;
 
+/** the tail of the page's switch queue (settles — never rejects — when the last switch asked for so far has ended); null = no switch open */
+let _switching: Promise<void> | null = null;
+
 /**
  * story #4763 (codex): ONE rotation at a time for the whole page — the refresh token is single-use, so a screen that renews the session itself (the onboarding's arrival)
  * and a 401 that makes `fetchWithAuth` renew it must share the call in flight, not race it (one of two rotations of the same token fails and can log the person out).
@@ -74,9 +77,66 @@ let _refreshing: Promise<AuthResult> | null = null;
  */
 export function refreshSessionOnce(): Promise<AuthResult> {
   if (!_refreshing) {
-    _refreshing = refreshAuthTokens().finally(() => { _refreshing = null; });
+    // story 4778 — a switch that was asked for BEFORE this renewal is waited for: it revokes the refresh token the browser holds and sets the new pair when its answer comes back, so a renewal that
+    // left meanwhile would present a dead token (401 → the refresh route clears both cookies). Only the switches already queued are waited for (never ones asked for later: they wait for this one).
+    const queued = _switching;
+    const run = async (): Promise<AuthResult> => {
+      if (queued) await queued;
+      return refreshAuthTokens();
+    };
+    _refreshing = run().finally(() => { _refreshing = null; });
   }
   return _refreshing;
+}
+
+type SwitchPath = '/api/switch-org' | '/api/switch-project';
+
+function runSwitch<T>(task: () => Promise<T>): Promise<T> {
+  // both are read WHEN THE SWITCH IS ASKED FOR: a rotation asked for later waits for this switch (refreshSessionOnce reads `_switching`), so waiting for it here too would be a cycle
+  const before = _switching;
+  const rotation = _refreshing;
+  const run = (async (): Promise<T> => {
+    if (before) await before; // one switch at a time: each presents the cookie the previous one set
+    if (rotation) await rotation.catch(() => undefined); // a rotation already in flight finishes first (its Set-Cookie must be in the jar before this switch leaves)
+    return task();
+  })();
+  const tail: Promise<void> = run.then(() => undefined, () => undefined).finally(() => { if (_switching === tail) _switching = null; });
+  _switching = tail;
+  return run;
+}
+
+/**
+ * story 4778 — the ONLY way the page switches organization or project (`switchOrg` · `switchProject` below; no other file names the BFF routes — a ratchet test holds that). A switch revokes the session's refresh token on the server and answers with a new pair,
+ * so it must not overlap a rotation of the same token: a refresh that left with the old token while the switch was in flight is refused (401 → the refresh route clears BOTH cookies = logout while
+ * switching; backend/tests/test_4778_switch_vs_refresh_realdb.py). It joins the page's one flight with `refreshSessionOnce`: it waits for a rotation in flight and for earlier switches, runs alone, and a
+ * renewal asked for while it is open waits for its answer. NO client timeout on purpose (story 4320: aborting the request loses the answer that carries the new cookies — worse than waiting).
+ * `withAuth` = what `fetchWithAuth` did for the callers that used it: an answer of 401 renews the session through the flight and asks once more (a renewal that fails signals the session ended).
+ */
+async function switchSession(path: SwitchPath, body: object, opts: { withAuth?: boolean }): Promise<Response> {
+  const post = () => runSwitch(() => fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }));
+  if (opts.withAuth && typeof window !== 'undefined' && isSessionExpiredSignaled()) return new Response(null, { status: 401 });
+  const res = await post();
+  if (!opts.withAuth || res.status !== 401) return res;
+  let renewed: AuthResult;
+  try {
+    renewed = await refreshSessionOnce(); // outside the switch section: a renewal inside it would wait for the switch it is part of
+  } catch {
+    if (typeof window !== 'undefined') signalSessionExpired();
+    return res;
+  }
+  if (renewed.error) {
+    if (typeof window !== 'undefined') signalSessionExpired();
+    return res;
+  }
+  return post();
+}
+
+export function switchOrg(orgId: string, opts: { withAuth?: boolean } = {}): Promise<Response> {
+  return switchSession('/api/switch-org', { org_id: orgId }, opts);
+}
+
+export function switchProject(projectId: string, opts: { withAuth?: boolean } = {}): Promise<Response> {
+  return switchSession('/api/switch-project', { project_id: projectId }, opts);
 }
 
 let _afterChange: Promise<AuthResult> | null = null;

@@ -59,6 +59,8 @@ let root: Root;
 const fetchMock = vi.hoisted(() => ({ fn: null as null | ((url: string, init?: RequestInit) => Promise<Response>) }));
 vi.mock('@/lib/db/client', () => ({
   fetchWithAuth: (url: string, init?: RequestInit) => fetchMock.fn!(url, init),
+  // story 4778 — the banner switches through `switchOrg` (the page's one flight); this stand-in sends what the real one sends
+  switchOrg: (orgId: string) => fetchMock.fn!('/api/switch-org', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ org_id: orgId }) }),
 }));
 
 beforeEach(() => {
