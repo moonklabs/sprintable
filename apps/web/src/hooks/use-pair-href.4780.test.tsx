@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 
 vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (href: string) => `${href}${href.includes('?') ? '&' : '?'}p=proj-1` }));
 const { usePairHref } = await import('./use-pair-href');
+const { _locationListenerCountForTests } = await import('@/lib/location-store');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -47,5 +48,33 @@ describe('[SID:4780] usePairHref — the pairing screen\'s address from the page
     window.history.pushState({}, '', '/inbox');
     await act(async () => { root!.render(<Probe key="again" />); });
     expect(container!.querySelector('a')!.getAttribute('href')).toBe('/desktop/pair?from=%2Finbox&p=proj-1');
+  });
+
+  // Kadir lens on 5232: an entry that stays mounted across client navigation (the chat head's strip sits in a layout) must follow the page it is on
+  it('a link that stays mounted follows a client-side navigation without being drawn again (pushState · replaceState)', async () => {
+    expect(await hrefAt('/today?p=proj-1')).toBe('/desktop/pair?from=%2Ftoday%3Fp%3Dproj-1&p=proj-1');
+    await act(async () => { window.history.pushState({}, '', '/inbox'); });
+    expect(container!.querySelector('a')!.getAttribute('href')).toBe('/desktop/pair?from=%2Finbox&p=proj-1'); // reverted (no subscription) → still /today
+    await act(async () => { window.history.replaceState({}, '', '/chats/conv-7?p=proj-2'); });
+    expect(container!.querySelector('a')!.getAttribute('href')).toBe('/desktop/pair?from=%2Fchats%2Fconv-7%3Fp%3Dproj-2&p=proj-1');
+  });
+
+  it('Back / Forward (popstate) is followed too', async () => {
+    await hrefAt('/today');
+    await act(async () => { window.history.pushState({}, '', '/inbox'); });
+    expect(container!.querySelector('a')!.getAttribute('href')).toBe('/desktop/pair?from=%2Finbox&p=proj-1');
+    await act(async () => { window.history.back(); await new Promise((resolve) => setTimeout(resolve, 30)); });
+    expect(container!.querySelector('a')!.getAttribute('href')).toBe('/desktop/pair?from=%2Ftoday&p=proj-1'); // reverted (popstate not listened) → still /inbox
+  });
+
+  it('a page that is not a target after the navigation drops the way back; the listener goes with the entry', async () => {
+    await hrefAt('/today');
+    await act(async () => { window.history.pushState({}, '', '/board'); });
+    expect(container!.querySelector('a')!.getAttribute('href')).toBe('/desktop/pair?p=proj-1');
+    const during = _locationListenerCountForTests();
+    expect(during).toBeGreaterThan(0);
+    await act(async () => { root!.unmount(); });
+    root = null;
+    expect(_locationListenerCountForTests()).toBe(during - 1); // reverted (never unsubscribed) → the count stays
   });
 });
