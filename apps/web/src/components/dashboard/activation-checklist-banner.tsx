@@ -95,19 +95,26 @@ export function ActivationChecklistBanner() {
       writeActivationHint(activationOrgId, true); // 서버가 이번 요청에 확인한 완주(지금 org일 때만)
     }
   }, [state, stateOrgId, orgId, initialActivationComplete, activationSeedFromHint, activationOrgId]);
-  // story 4780 (AC4): remember an open checklist was shown · show the finish once
+  // story 4780 (AC4): remember an open checklist was shown (the banner or its chip — not on a page that hides it) · show the finish once. `doneFor` = the organization whose finish line is up: the line
+  // is DERIVED from it (the same organization, complete, not hidden), so an organization switch or a page that hides the banner never leaves a stale line; the mark is read and cleared once, and a
+  // StrictMode second run of the effect finds the state already set.
+  const hidden = isHiddenOn(pathname);
   const seenOpenKey = orgId ? `${SEEN_OPEN_KEY}:${orgId}` : null;
-  const [doneLine, setDoneLine] = useState(false);
+  const [doneFor, setDoneFor] = useState<string | null>(null);
   useEffect(() => {
-    if (seenOpenKey && state && state.all_complete !== true && state.scope_is_requested_org !== false) writeMark(seenOpenKey);
-  }, [seenOpenKey, state]);
+    if (seenOpenKey && !hidden && state && state.all_complete !== true && state.scope_is_requested_org !== false) writeMark(seenOpenKey);
+  }, [seenOpenKey, hidden, state]);
   useEffect(() => {
-    if (!allComplete || !seenOpenKey || !readMark(seenOpenKey)) return;
+    if (!allComplete || hidden || !seenOpenKey || !readMark(seenOpenKey)) return;
     clearMark(seenOpenKey);
-    setDoneLine(true);
-    const timer = setTimeout(() => setDoneLine(false), ACTIVATION_DONE_LINE_MS);
+    setDoneFor(seenOpenKey);
+  }, [allComplete, hidden, seenOpenKey]);
+  useEffect(() => {
+    if (!doneFor) return;
+    const timer = setTimeout(() => setDoneFor(null), ACTIVATION_DONE_LINE_MS);
     return () => clearTimeout(timer);
-  }, [allComplete, seenOpenKey]);
+  }, [doneFor]);
+  const doneLine = doneFor !== null && doneFor === seenOpenKey;
   const [navigatingToInstruction, setNavigatingToInstruction] = useState(false);
   const [instructionStartError, setInstructionStartError] = useState(false);
   // story #4219 F1(PO 리뷰 CLS) — 접힘 상태는 서버도 아는 세션 쿠키(lib/activation-hint)가 정본 — 자리 표시(스켈레톤)를 접힌 칩과
@@ -135,14 +142,14 @@ export function ActivationChecklistBanner() {
   ];
 
   if (allComplete) {
-    return doneLine ? (
+    return doneLine && !hidden ? (
       <Alert variant="success" data-testid="activation-done">
         <AlertTitle>{t('doneTitle')}</AlertTitle>
         <AlertDescription>{t('doneBody')}</AlertDescription>
       </Alert>
     ) : null;
   }
-  if (isHiddenOn(pathname)) return null; // story #4432 — after every hook (hooks order unchanged)
+  if (hidden) return null; // story #4432 — after every hook (hooks order unchanged)
   // story #4032 — "완주해서 필요 없다"(위 allComplete)와 "아직 모른다"(여기, fetch
   // 미완료)를 더 이상 같은 null로 뭉치지 않는다. 실 배너와 같은 Alert 박스에 스켈레톤을
   // 채워 자리를 미리 잡아 두면, fetch가 끝나 실 콘텐츠로 바뀔 때 박스 높이가 그대로라

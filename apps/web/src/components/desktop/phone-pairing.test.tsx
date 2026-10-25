@@ -14,7 +14,7 @@ import { PhoneBridgeClaim } from '@/components/providers/phone-bridge-claim';
 const fetchWithAuth = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuth(...args) }));
 vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (href: string) => href }));
-const { PhonePairing } = await import('./phone-pairing');
+const { PhonePairing, PhonePairEntry } = await import('./phone-pairing');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -226,6 +226,19 @@ describe('[4532] phone pairing screen', () => {
     expect(line()).toBe('이미 페어링된 컴퓨터예요');
     expect(buttons()).toEqual(['닫기']);
     expect(sent.some((s) => s.type === 'pair.mac')).toBe(false);
+  });
+
+  // story 4780 — the 원격 기기 entry hands its own page over, so [닫기] of the pairing screen comes back to it
+  it('[4780] the entry on 원격 기기 links the pairing screen with this page as the way back', async () => {
+    window.history.pushState({}, '', '/desktop');
+    try {
+      await act(async () => {
+        root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><PhonePairEntry /></NextIntlClientProvider>);
+      });
+      expect(container.querySelector('a')?.getAttribute('href')).toBe('/desktop/pair?from=%2Fdesktop');
+    } finally {
+      window.history.pushState({}, '', '/');
+    }
   });
 
   // story 4780 — [닫기] goes back to the page the pairing was started from (the page hands it over as `returnTo`); none → the Mac screen as before

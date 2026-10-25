@@ -10,13 +10,15 @@ import { ACTIVATION_DONE_LINE_MS, ActivationChecklistBanner } from './activation
 import { ACTIVATION_REFRESH_MS, _resetActivationStatusCacheForTests } from '@/hooks/use-activation-status';
 
 const mockOrg = { orgId: 'org-1' };
+const mockPath = { current: '/today' as string | null };
+const mockCollapsed = { value: undefined as boolean | undefined }; // the server's word on the collapsed state (a session cookie it reads)
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => ({
     projectId: 'proj-1', orgId: mockOrg.orgId, activationOrgId: mockOrg.orgId, activationSeedFromHint: false,
-    initialActivationComplete: undefined, initialActivationCollapsed: undefined,
+    initialActivationComplete: undefined, initialActivationCollapsed: mockCollapsed.value,
   }),
 }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), usePathname: () => '/today' }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), usePathname: () => mockPath.current }));
 vi.mock('@/lib/onboarding/first-instruction', () => ({ createFirstInstructionConversation: vi.fn() }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -44,6 +46,8 @@ beforeEach(() => {
   stubStorages();
   _resetActivationStatusCacheForTests();
   mockOrg.orgId = 'org-1';
+  mockPath.current = '/today';
+  mockCollapsed.value = undefined;
   document.cookie = 'sp_activation_hint=; Path=/; Max-Age=0';
   document.cookie = 'sp_activation_collapsed=; Path=/; Max-Age=0';
   container = document.createElement('div');
@@ -138,5 +142,73 @@ describe('[SID:4780] ActivationChecklistBanner — the finish is shown once', ()
     await act(async () => { vi.advanceTimersByTime(ACTIVATION_REFRESH_MS); });
     await flush();
     expect(done()).toBeNull();
+  });
+
+  it('on the desktop setup page (the banner is hidden there) nothing is marked and no line is shown or consumed (codex)', async () => {
+    mockPath.current = '/desktop/setup';
+    answers(PARTIAL, COMPLETE);
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'] });
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    expect(localStore.has(SEEN('org-1'))).toBe(false); // an open checklist that is not drawn is not «shown»
+    await act(async () => { vi.advanceTimersByTime(ACTIVATION_REFRESH_MS); });
+    await flush();
+    expect(done()).toBeNull();
+    // a mark made elsewhere is neither shown nor consumed here
+    localStore.set(SEEN('org-1'), '1');
+    await act(async () => { root.unmount(); });
+    _resetActivationStatusCacheForTests();
+    root = createRoot(container);
+    answers(COMPLETE);
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    expect(done()).toBeNull();
+    expect(localStore.get(SEEN('org-1'))).toBe('1'); // still there for the next page that draws the banner
+  });
+
+  it('an organization switch takes the line down (it is derived, not left behind by a cleanup) and does not show it for the other organization', async () => {
+    localStore.set(SEEN('org-1'), '1');
+    answers(COMPLETE);
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    expect(done()).not.toBeNull();
+    mockOrg.orgId = 'org-2';
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    expect(done()).toBeNull(); // reverted (the line kept in a bare flag) → still up for org-2
+  });
+
+  it('under React StrictMode (effects run twice) the line still shows once', async () => {
+    localStore.set(SEEN('org-1'), '1');
+    answers(COMPLETE);
+    const { StrictMode } = await import('react');
+    await act(async () => { root.render(<StrictMode>{wrap()}</StrictMode>); });
+    await flush();
+    expect(done()).not.toBeNull(); // the first effect run clears the mark; the second must not lose the line
+  });
+
+  it('the checklist drawn as its collapsed chip counts as shown: the mark is made, and the line comes when it completes', async () => {
+    mockCollapsed.value = true;
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'] });
+    answers(PARTIAL, COMPLETE);
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    expect(container.querySelector('[data-testid="activation-chip"]')).not.toBeNull();
+    expect(localStore.get(SEEN('org-1'))).toBe('1');
+    await act(async () => { vi.advanceTimersByTime(ACTIVATION_REFRESH_MS); });
+    await flush();
+    expect(done()).not.toBeNull();
+  });
+
+  it('the line is up and the person goes to the desktop setup page (the banner is hidden there): the line goes with it', async () => {
+    localStore.set(SEEN('org-1'), '1');
+    answers(COMPLETE);
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    expect(done()).not.toBeNull();
+    mockPath.current = '/desktop/setup';
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    expect(done()).toBeNull(); // reverted (the line ignores where it stands) → still up on the page that hides the banner
   });
 });

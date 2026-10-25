@@ -41,4 +41,11 @@ describe('[SID:4780] usePairHref — the pairing screen\'s address from the page
   it('a page that is not a return target adds nothing (the address as before)', async () => {
     expect(await hrefAt('/board?p=proj-1')).toBe('/desktop/pair?p=proj-1');
   });
+
+  it('the link follows a navigation once the entry draws again (the address is read at each render)', async () => {
+    expect(await hrefAt('/today?p=proj-1')).toBe('/desktop/pair?from=%2Ftoday%3Fp%3Dproj-1&p=proj-1');
+    window.history.pushState({}, '', '/inbox');
+    await act(async () => { root!.render(<Probe key="again" />); });
+    expect(container!.querySelector('a')!.getAttribute('href')).toBe('/desktop/pair?from=%2Finbox&p=proj-1');
+  });
 });
