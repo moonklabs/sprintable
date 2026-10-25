@@ -149,7 +149,7 @@ class _Deliveries:
         async def _webhook(**kw):
             self.webhooks.append(kw["message_id"])
 
-        async def _broadcast(aid, payload):
+        async def _broadcast(aid, payload, *, conversation_id):
             self.ws.append(aid)
 
         rooms = {str(self.agent_id): object()} if self.agent_id else {}

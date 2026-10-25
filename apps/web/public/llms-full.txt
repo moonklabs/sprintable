@@ -273,13 +273,21 @@ WS /ws/chat/{agent_id}?api_key=sk_live_...  or  ?token=<jwt>
 
 On connection:
   → Auth: api_key → ApiKey table lookup OR jwt → user lookup
-  → Auto-creates DM conversation if none exists between caller + agent
+  → Access: the caller must be in the agent's organization AND reach a project the agent works in
+    (the same project-access rule as the REST API) — otherwise {"error":"forbidden"} and the socket closes
+  → Auto-creates DM conversation if none exists between caller + agent (in a project the caller can reach)
   → Adds caller to ConversationParticipant
 
-On message received (JSON):
-  { type: "message", content: "..." }
+On message received (JSON or plain text):
+  { content: "...", conversation_id: "..." }
+  → A person's (or another agent's) line is kept in ITS DM with this agent (a conversation_id they send is ignored)
+  → The AGENT's own socket (api_key of this agent) names the conversation it answers with `conversation_id`
+    (it must be a participant). With none named, the line goes to the agent's only DM if it has exactly one;
+    otherwise the socket gets {"error":{"code":"conversation_id_required"}} and nothing is kept.
+    An unknown / not-yours conversation gets {"error":{"code":"conversation_not_found"}}.
   → Persists ConversationMessage
-  → Broadcasts to all subscribers in agent room
+  → Sends the saved line (it carries conversation_id) ONLY to the sockets whose owner may read that
+    conversation (participants with project access) — never to the other sockets of the agent's room
 ```
 
 ### Agent SSE Stream (dial-out — how the Sprintable channel plugin receives)

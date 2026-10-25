@@ -251,6 +251,7 @@ async def test_ws_chat_acts_on_the_verdict(kind):
     sock = _Socket()
     with patch.object(ws, "_authenticate", AsyncMock(return_value=caller)), patch.object(ws, "_api_key_id", AsyncMock(return_value=uuid.uuid4())), \
          patch.object(ws, "async_session_factory", factory), patch.object(ws, "_get_or_create_conversation", AsyncMock(return_value=uuid.uuid4())), \
+         patch.object(ws, "_reachable_projects", AsyncMock(return_value=[uuid.uuid4()])), \
          patch.object(ws, "resolve_member_display_name", AsyncMock(return_value="x")), patch.object(ws, "_broadcast", AsyncMock()), \
          patch.object(ws, "_WS_ACCESS_RECHECK_SEC", 60.0), patch.object(sa, "key_access_revoked_db", _verdict(kind)):
         hub = asyncio.create_task(ws.ws_chat_hub(sock, agent_id=agent.id, api_key="sk_live_x", token=None))
