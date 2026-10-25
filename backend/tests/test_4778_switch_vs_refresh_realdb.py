@@ -186,6 +186,23 @@ async def test_a_refresh_that_left_with_the_old_token_after_a_switch_is_supersed
 
 
 @pytest.mark.parametrize("kind", ["org", "project"])
+async def test_a_refresh_with_the_old_token_is_still_superseded_when_the_session_moved_on_through_a_rotation_realdb(kind):
+    """switch, then the browser's refresh rotated the switch's token: the chain O → S → T ends in a live token, so a late O is still «moved on»"""
+    engine, w = await _world()
+    try:
+        a = await w.login()
+        sw = await _switchers(w)[kind](a)
+        assert sw.status_code == 200, sw.text
+        rot = await w.refresh(sw.json()["data"]["refresh_token"])
+        assert rot.status_code == 200, rot.text
+        late = await w.refresh(a["refresh_token"])
+        assert late.status_code == 401 and late.json()["error"]["code"] == "TOKEN_SUPERSEDED", late.text  # reverted (the chain is not followed through a rotated hop) → TOKEN_REVOKED
+        assert (await w.refresh(rot.json()["data"]["refresh_token"])).status_code == 200  # and the session's newest token is untouched
+    finally:
+        await _close(engine, w)
+
+
+@pytest.mark.parametrize("kind", ["org", "project"])
 async def test_the_word_is_revoked_not_superseded_for_every_other_end_realdb(kind):
     """only a switch's end is «moved on»: a logout · a password change (the same explicit end without a successor), a switch followed by a logout (the successor is ended too), a rotation, and a switch past the short window"""
     from app.core.config import settings
@@ -220,6 +237,42 @@ async def test_the_word_is_revoked_not_superseded_for_every_other_end_realdb(kin
         assert rot.status_code == 200, rot.text
         r = await w.refresh(d["refresh_token"])
         assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_REVOKED", r.text  # reverted (the explicit-end test dropped) → TOKEN_SUPERSEDED
+        # 6) the successor was rotated once (a refresh), then every other session ended the way a password change / «sign out everywhere» does: the rotated hop keeps its earlier `revoked_at`
+        #    but its grace window is closed (`expires_at` = now) — it is NOT «not ended»
+        from app.routers.auth import _revoke_other_sessions
+        f = await w.login()
+        sw = await _switchers(w)[kind](f)
+        assert sw.status_code == 200
+        rot = await w.refresh(sw.json()["data"]["refresh_token"])
+        assert rot.status_code == 200, rot.text
+        async with w.Session() as s:
+            await _revoke_other_sessions(s, w.user_id, None)
+            await s.commit()
+        r = await w.refresh(f["refresh_token"])
+        assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_REVOKED", r.text  # reverted (rotated hop judged by revoked_at < expires_at) → TOKEN_SUPERSEDED
+        # 7) the session carried on past the successor (switch, then a refresh) and THEN that newest token is logged out: the end of the chain is dead
+        g = await w.login()
+        sw = await _switchers(w)[kind](g)
+        assert sw.status_code == 200
+        rot = await w.refresh(sw.json()["data"]["refresh_token"])
+        assert rot.status_code == 200, rot.text
+        lo = await w.client.post("/api/v2/auth/logout", json={"refresh_token": rot.json()["data"]["refresh_token"]})
+        assert lo.status_code == 200
+        r = await w.refresh(g["refresh_token"])
+        assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_REVOKED", r.text  # reverted (only the first successor is looked at) → TOKEN_SUPERSEDED
+        # 8) the successor is revoked (inside its grace window) but points at nothing: no live end to the chain → not «moved on»
+        from sqlalchemy import select, update
+
+        from app.core.security import hash_token
+        from app.models.user import RefreshToken
+        h = await w.login()
+        sw = await _switchers(w)[kind](h)
+        assert sw.status_code == 200
+        async with w.Session() as s:
+            await s.execute(update(RefreshToken).where(RefreshToken.token_hash == hash_token(sw.json()["data"]["refresh_token"])).values(revoked_at=datetime.now(timezone.utc), replaced_by=None))
+            await s.commit()
+        r = await w.refresh(h["refresh_token"])
+        assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_REVOKED", r.text  # reverted (a dead end counts as alive) → TOKEN_SUPERSEDED
         # 5) a pointer to another person's token is not «moved on» (never written by the app; a damaged row must not read as a live session)
         from sqlalchemy import select, update
 

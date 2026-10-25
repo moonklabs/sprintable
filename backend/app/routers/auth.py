@@ -1285,7 +1285,7 @@ async def refresh_token(
                     )).scalar_one_or_none()
                     _diag_successor_used = _successor_revoked_at is not None
             # story 4778 (AC2b) — SUPERSEDED, not REVOKED: this token was ended by a switch (explicit revoke: `expires_at` was lowered to `revoked_at` with it · `replaced_by` points at the
-            # token that switch issued) a moment ago, and that successor is not itself ended by a logout or a password change. The session did not die: it moved on, and the browser's refresh
+            # token that switch issued) a moment ago, and the session that successor carries on is not itself ended by a logout or a password change. The session did not die: it moved on, and the browser's refresh
             # that left with the old token before it saved the switch's cookie is just late. The answer is the same 401 — NO new token (a superseded token is never exchanged) — with a
             # different word, so the BFF and the proxy do not clear the cookie the browser is about to replace. Only inside `auth_refresh_superseded_window_seconds`: past it, or for any
             # other end (logout · password change · rotation older than the resolve window · admin revoke), the word is TOKEN_REVOKED as before.
@@ -1295,13 +1295,24 @@ async def refresh_token(
                 and _diag_row.expires_at <= _diag_row.revoked_at
                 and _diag_row.revoked_at > _now - timedelta(seconds=settings.auth_refresh_superseded_window_seconds)
             ):
-                _successor = (await session.execute(
-                    select(RefreshToken.user_id, RefreshToken.revoked_at, RefreshToken.expires_at).where(RefreshToken.id == _diag_row.replaced_by)
-                )).first()
-                if (
-                    _successor is not None and _successor.user_id == _diag_row.user_id
-                    and (_successor.revoked_at is None or _successor.expires_at > _successor.revoked_at)  # not ended by a logout · password change · admin revoke
-                ):
+                # the session must still be alive at the END of the chain: follow `replaced_by` from the switch's token through tokens a refresh has rotated since (revoked but still inside their
+                # grace window: `expires_at` in the future) to the live one. A hop ended by a logout · password change · admin revoke has `expires_at` closed to now — also a rotated one
+                # (`_revoke_other_sessions` closes the grace windows) — so «revoked earlier, expires later than that» is NOT the test; «expires_at is still ahead» is.
+                _session_alive = False
+                _hop_id = _diag_row.replaced_by
+                for _hop_n in range(5):
+                    _hop = (await session.execute(
+                        select(RefreshToken.user_id, RefreshToken.revoked_at, RefreshToken.expires_at, RefreshToken.replaced_by).where(RefreshToken.id == _hop_id)
+                    )).first()
+                    if _hop is None or _hop.user_id != _diag_row.user_id or _hop.expires_at <= _now:
+                        break  # gone · another person's · over
+                    if _hop.revoked_at is None:
+                        _session_alive = True
+                        break
+                    if _hop.replaced_by is None:
+                        break  # revoked without a successor: nothing to move on to
+                    _hop_id = _hop.replaced_by
+                if _session_alive:
                     logger.info(
                         "auth.refresh superseded key=%s user_id=%s delta_since_revoke_s=%s",
                         correlation_key, _diag_user_id, round((_now - _diag_row.revoked_at).total_seconds(), 3),
