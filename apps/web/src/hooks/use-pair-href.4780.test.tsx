@@ -63,7 +63,8 @@ describe('[SID:4780] usePairHref — the pairing screen\'s address from the page
     await hrefAt('/today');
     await act(async () => { window.history.pushState({}, '', '/inbox'); });
     expect(container!.querySelector('a')!.getAttribute('href')).toBe('/desktop/pair?from=%2Finbox&p=proj-1');
-    await act(async () => { window.history.back(); await new Promise((resolve) => setTimeout(resolve, 30)); });
+    const popped = new Promise<void>((resolve) => { window.addEventListener('popstate', () => resolve(), { once: true }); });
+    await act(async () => { window.history.back(); await popped; }); // waits for the event itself, not a guessed delay
     expect(container!.querySelector('a')!.getAttribute('href')).toBe('/desktop/pair?from=%2Ftoday&p=proj-1'); // reverted (popstate not listened) → still /inbox
   });
 
@@ -76,5 +77,39 @@ describe('[SID:4780] usePairHref — the pairing screen\'s address from the page
     await act(async () => { root!.unmount(); });
     root = null;
     expect(_locationListenerCountForTests()).toBe(during - 1); // reverted (never unsubscribed) → the count stays
+  });
+
+  // codex delta: the store is shared and defensive
+  it('a listener that throws neither breaks the navigation nor stops the listeners after it', async () => {
+    const { subscribeToLocation } = await import('@/lib/location-store');
+    const seen: string[] = [];
+    const offBad = subscribeToLocation(() => { throw new Error('bad listener'); });
+    const offGood = subscribeToLocation(() => { seen.push(window.location.pathname); });
+    try {
+      expect(() => window.history.pushState({}, '', '/inbox')).not.toThrow(); // reverted (no isolation) → the pushState call throws after the URL changed
+      expect(window.location.pathname).toBe('/inbox');
+      expect(seen).toEqual(['/inbox']); // the one after the bad one was still told
+    } finally {
+      offBad();
+      offGood();
+    }
+  });
+
+  it('a second instance of the module joins the same store: history is wrapped once, a listener is told once', async () => {
+    const calls: string[] = [];
+    const first = await import('@/lib/location-store');
+    const before = first._locationListenerCountForTests();
+    const off1 = first.subscribeToLocation(() => { calls.push('first'); });
+    vi.resetModules();
+    const second = await import('@/lib/location-store'); // a fresh module instance (HMR · a duplicated chunk)
+    const off2 = second.subscribeToLocation(() => { calls.push('second'); });
+    try {
+      window.history.pushState({}, '', '/today');
+      expect(calls.sort()).toEqual(['first', 'second']); // reverted (state in the module) → the wrapper is wrapped again and each listener is told twice
+      expect(second._locationListenerCountForTests()).toBe(before + 2); // ONE store: the second instance sees the first's listener too (reverted → it sees only its own)
+    } finally {
+      off1();
+      off2();
+    }
   });
 });
