@@ -40,6 +40,7 @@ import { ReclaimNoticeAlert } from '@/components/auth/reclaim-notice';
 import type { OrgSwitcherItem } from '@/components/nav/unified-switcher';
 import { withProjectParam } from '@/lib/with-project-param';
 import { usePendingProjectTarget } from '@/lib/pending-project-switch';
+import { switchOrg } from '@/lib/db/client';
 
 export interface DashboardProjectOption {
   projectId: string;
@@ -470,11 +471,7 @@ export function DashboardShell({
     orgSyncAttemptedRef.current = pathOrgId;
     void (async () => {
       try {
-        const res = await fetch('/api/switch-org', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ org_id: pathOrgId }),
-        });
+        const res = await switchOrg(pathOrgId); // story 4778 — the page's one flight (no overlap with a renewal of the same refresh token)
         const json = await res.json().catch(() => null) as { data?: { ok?: boolean } } | null;
         if (res.ok && json?.data?.ok) {
           // story #2545(카디르 라이브 재QA 2단계) — router.refresh()는 서버 컴포넌트만
