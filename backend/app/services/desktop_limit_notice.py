@@ -439,11 +439,17 @@ async def _lifted_for(db: AsyncSession, setup: DesktopSetup, row: DesktopSession
     promised = await _promised_setups(setup.org_id, person.user_id)
     if await _limited_rows(db, setup.org_id, person.user_id, also_setups=promised, include_waiting=True):
         logger.info("desktop limit notice: lifted not sent (some still stand) setup=%s to=%s", setup.id, member_prefix(person.member_id))
+        if row.state != "stopped":
+            # this session IS back, and nothing will ask again about it: remember it on the outstanding notice (Kadir lens 5235) — if the others then END instead of coming back, the
+            # line is told rather than cleared silently (A works, B ends: A's «working again» would otherwise never be heard)
+            open_record = await _take_open(setup.org_id, person.user_id)
+            if open_record is not None:
+                await _save_open(setup.org_id, person.user_id, {**open_record, "back": True})
         return  # some are still standing — «all working again» would be false
     record = await _take_open(setup.org_id, person.user_id)
-    if record is None or row.state == "stopped":
+    if record is None or (row.state == "stopped" and not record.get("back")):
         logger.info("desktop limit notice: lifted not sent (%s) setup=%s to=%s", "session ended" if record is not None else "nothing was promised", setup.id, member_prefix(person.member_id))
-        return  # nothing was promised (or the session ended — not «working again»)
+        return  # nothing was promised (or the session ended and no other had come back — not «working again»)
     locale = person.locale
     agent_id = uuid.UUID(record["agent"])
     others = int(record.get("others") or 0)

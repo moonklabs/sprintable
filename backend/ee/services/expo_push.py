@@ -19,9 +19,10 @@ import time
 import uuid
 
 import httpx
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.push_device import PushDevice
 
 # 재시도/백오프 = dispatch_router._post_with_retry 와 동일 정책(단일 SSOT 재사용).
@@ -279,8 +280,22 @@ async def _fetch_expo_push_targets(
     devices = await select_active_devices(db, org_id, targets, PushDevice.expo_push_token.is_not(None))
     if not devices:
         _log_push_skipped("no_devices", org_id, event_type, recipients=len(member_ids), muted=len(member_ids) - len(targets))
+    # story #4781 (AC1): WHO the push is for — the recipient, not the member the device last registered under (with `push_devices_by_user` a person's device homed in another org
+    # reaches them here: its own `member_id` is the other org's row). A device whose member is not a recipient is matched to the recipient behind the same person.
+    recipient_of: dict[uuid.UUID, uuid.UUID] = {m: m for m in targets}
+    if settings.push_devices_by_user and any(d.member_id not in recipient_of for d in devices):  # (only that mode reaches a device homed under another member of the same person)
+        from app.models.project import OrgMember
+
+        people = (await db.execute(select(OrgMember.user_id, OrgMember.id).where(OrgMember.org_id == org_id, OrgMember.id.in_(targets), OrgMember.user_id.is_not(None)))).all()
+        member_of_user = {user_id: member_id for user_id, member_id in people}
+    else:
+        member_of_user = {}
     # story #4396 — id · platform: an ok ticket is remembered by device (not token) for the later receipt check.
-    return [{"expo_push_token": d.expo_push_token, "id": d.id, "platform": d.platform, "member_id": d.member_id} for d in devices]
+    return [
+        {"expo_push_token": d.expo_push_token, "id": d.id, "platform": d.platform,
+         "member_id": recipient_of.get(d.member_id) or member_of_user.get(getattr(d, "user_id", None))}
+        for d in devices
+    ]
 
 
 async def _send_expo_push_targets(

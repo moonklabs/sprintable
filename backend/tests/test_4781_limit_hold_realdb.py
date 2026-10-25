@@ -207,6 +207,51 @@ async def test_05d_a_stop_counts_the_agents_standing_now_not_the_ones_whose_lift
         assert second["title"] == f"{second['agent_name']} · 한도로 쉬는 중", "one agent stands now: the single-agent title, not «and N more»"
 
 
+async def test_05e_a_session_that_came_back_is_told_when_the_one_it_waited_for_ends_instead_of_returning(world):
+    """Kadir's lens on 5235: A and B both stood and both wait for their lifts; A's hold ends first (B still waits → A's line is held back) and then B ENDS. A is working — the
+    outstanding notice must be told, not cleared silently."""
+    async with _client() as c:
+        device = await _device(c, "d4781 mac e6")
+        a = device["agents"][0]["member_id"]
+        for seq, key in ((1, "s-1"), (2, "s-2")):
+            await _report(c, device, a, "working", seq, key=key)
+        await _report(c, device, a, "waiting_input", 3, key="s-1", limit=LOOKS)
+        await _report(c, device, a, "waiting_input", 4, key="s-2", limit=LOOKS)
+        await _report(c, device, a, "working", 5, key="s-1")
+        await _report(c, device, a, "working", 6, key="s-2")                         # both lifts wait
+        await _sql("UPDATE desktop_sessions SET limit_cleared_at = now() - interval '200 seconds' WHERE setup_id = :x AND session_key = 's-1'", params={"x": device["setup_id"]})
+        await _report(c, device, a, "idle", 7, key="s-1")                               # A's hold ran out: its own report claims it — B still waits, so nothing is told
+        assert await _notices(LIFTED) == []
+        await _report(c, device, a, "stopped", 8, key="s-2")                            # B ends instead of returning
+        assert len(await _notices(LIFTED)) == 1, "A is working: «working again» is told, not cleared silently"
+
+
+async def test_05f_a_session_that_ends_alone_still_clears_the_notice_without_a_line(world):
+    async with _client() as c:
+        device = await _device(c, "d4781 mac e7")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1, key="s-1")
+        await _report(c, device, a, "waiting_input", 2, key="s-1", limit=LOOKS)
+        await _report(c, device, a, "stopped", 3, key="s-1")
+        assert await _notices(LIFTED) == [], "nobody had come back: an ended session is not «working again»"
+
+
+async def test_05g_a_batch_of_waiting_lifts_is_swept_fifty_at_a_time_and_told_once(world):
+    from sqlalchemy import text  # noqa: F401
+
+    async with _client() as c:
+        device = await _device(c, "d4781 mac e8")
+        a = device["agents"][0]["member_id"]
+        seq = 0
+        for i in range(60):
+            for state, limit in (("working", None), ("waiting_input", LOOKS), ("working", None)):
+                seq += 1
+                await _report(c, device, a, state, seq, key=f"b-{i}", limit=limit)
+        await _age_the_wait(device, 200)
+        assert (await _sweep(), await _sweep(), await _sweep()) == (50, 10, 0), "a batch is at most 50 rows; the rest next tick"
+        assert len(await _notices(LIFTED)) == 1, "sixty sessions of one person: ONE line"
+
+
 async def test_06_a_real_lift_after_a_flap_is_still_told(world):
     async with _client() as c:
         device = await _device(c, "d4781 mac f")
