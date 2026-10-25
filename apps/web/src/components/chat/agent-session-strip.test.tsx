@@ -452,11 +452,11 @@ describe('AgentSessionStrip — another agent\'s view is never shown (story 4684
 
 // story #4763 (AC4): a session that has not begun to run says what it waits on — the question at its computer — not «시작됨» for minutes
 describe('AgentSessionStrip — the first-screen question (story #4763 AC4 · AC12)', () => {
-  it.each(['trust', 'mcp', 'mcp_many', 'update'] as const)('starting + the %s question → «Mac에서 답을 기다려요» (en too) — not «시작됨»', async (ask) => {
+  it.each(['trust', 'mcp', 'mcp_many', 'update'] as const)('starting + the %s question → «Mac 터미널에서 답 대기» (en too) — not «시작됨»', async (ask) => {
     fetchWithAuth.mockResolvedValueOnce(view({ state: 'starting', first_screen: { ask } }));
     await render();
     expect(chip()).toBe(koMessages.chats.agentSession.state.waiting_first_screen);
-    expect(chip()).toBe('Mac에서 답을 기다려요');
+    expect(chip()).toBe('Mac 터미널에서 답 대기');
     root.unmount(); root = createRoot(container);
     fetchWithAuth.mockResolvedValueOnce(view({ state: 'starting', first_screen: { ask } }));
     await render('en');
@@ -468,7 +468,7 @@ describe('AgentSessionStrip — the first-screen question (story #4763 AC4 · AC
       fetchWithAuth.mockResolvedValueOnce(view({ state, first_screen: { ask: 'mcp' } }));
       root.unmount(); root = createRoot(container);
       await render();
-      expect(chip(), state).toBe('Mac에서 답을 기다려요');
+      expect(chip(), state).toBe('Mac 터미널에서 답 대기');
     }
   });
 

@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.desktop_relay import DesktopCommand, DesktopSession
 from app.models.desktop_setup import DesktopSetup
 from app.services.desktop_relay import (
+    FIRST_SCREEN_STATES,
     INSTRUCT_NOW_MAX,
     PROMPT_MAX,
     SESSION_KEY_PATTERN,
@@ -192,7 +193,7 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
         "run": run_view(pick) if state == pick.state and pick.state != "stopped" else None,
         "inbox": inbox_view(pick) if state == pick.state and pick.state != "stopped" else None,  # story #4684
         # story #4763: the first-screen question that stands at that computer — the same gate: the device is heard and the session lives
-        "first_screen": first_screen_view(pick) if state == pick.state and pick.state != "stopped" else None,
+        "first_screen": first_screen_view(pick) if state == pick.state and pick.state in FIRST_SCREEN_STATES else None,
         # story #4599: a held turn's why (the window's folder) — only while the device is heard
         "system": system_view(pick) if state == pick.state else None,
         # story #4641: a widening a person made at the terminal — the three keys, only while the device is heard (the same gate as above)

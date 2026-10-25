@@ -210,3 +210,45 @@ async def test_09_the_reader_is_the_one_who_may_read_the_session(world):
         r = await c.get(f"/api/v2/agents/{a}/desktop-session", headers=_tok(device["device_token"]))  # the device's own token is not a reader
         assert r.status_code in (401, 403, 404), r.text
         assert "first_screen" not in r.text
+
+
+@pytest.mark.parametrize("state", ["waiting_permission", "waiting_input", "error"])
+async def test_10_only_starting_working_idle_carry_it_another_wait_says_its_own_word(world, state):
+    """codex: the web renames only starting / working / idle for the question — a session that waits for a permission, for the agent's own question or has failed says its own word
+    alone: a report that carries the question with such a state is accepted, stores none, and a value left on such a row is not told by either reader."""
+    async with _client() as c:
+        device = await _device(c, f"d4763 mac {state}")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "starting", 1, first_screen={"ask": "trust"})
+        assert await _column(device) == [("trust",)]
+        await _report(c, device, a, state, 2, first_screen={"ask": "trust"})  # the question and another wait in one report
+        assert await _column(device) == [(None,)], "stored for a state the head does not rename"
+        (row,) = [x for x in await _list(c, device) if x["session_key"] == "s-1"]
+        assert row["activity"] == state and "first_screen" not in row  # `activity` is the exact word; `state` is the folded legacy one
+        assert (await _header(c, a))["first_screen"] is None
+        # defense in depth: a value left on a row in such a state is not told as current
+        await _sql(f"UPDATE desktop_sessions SET first_screen_ask = 'trust' WHERE setup_id = '{device['setup_id']}' AND session_key = 's-1'")
+        (row,) = [x for x in await _list(c, device) if x["session_key"] == "s-1"]
+        assert row["activity"] == state and "first_screen" not in row  # `activity` is the exact word; `state` is the folded legacy one
+        assert (await _header(c, a))["first_screen"] is None
+        # …and it comes back with the next report that is in a renamed state again
+        await _report(c, device, a, "working", 3, first_screen={"ask": "mcp"})
+        (row,) = [x for x in await _list(c, device) if x["session_key"] == "s-1"]
+        assert row["first_screen"] == {"ask": "mcp"}
+
+
+@pytest.mark.parametrize("state", ["waiting_permission", "waiting_input", "error"])
+async def test_11_the_snapshot_path_keeps_it_only_for_starting_working_idle_too(world, state):
+    """The same gate on the snapshot path (codex): a snapshot line in another wait stores none and says its own word; the same line in a renamed state keeps the question."""
+    async with _client() as c:
+        device = await _device(c, f"d4763 mac snap {state}")
+        a = device["agents"][0]["member_id"]
+        line = {"session_key": "s-a", "agent_member_id": a, "runtime": "claude", "state": state, "at": _now().isoformat(), "first_screen": {"ask": "mcp"}}
+        assert (await c.put("/api/v2/desktop/relay/sessions", json={"report_seq": 1, "sessions": [line]}, headers=_tok(device["device_token"]))).status_code == 200
+        assert await _column(device, "s-a") == [(None,)], "stored for a state the head does not rename"
+        (row,) = [x for x in await _list(c, device) if x["session_key"] == "s-a"]
+        assert row["activity"] == state and "first_screen" not in row
+        line2 = {**line, "state": "working"}
+        assert (await c.put("/api/v2/desktop/relay/sessions", json={"report_seq": 2, "sessions": [line2]}, headers=_tok(device["device_token"]))).status_code == 200
+        (row,) = [x for x in await _list(c, device) if x["session_key"] == "s-a"]
+        assert row["first_screen"] == {"ask": "mcp"}

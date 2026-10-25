@@ -411,9 +411,14 @@ def _set_inbox(row: DesktopSession, inbox: SessionInbox | None) -> None:
     row.inbox_stream = inbox.stream if inbox else None
 
 
-def _set_first_screen(row: DesktopSession, first_screen: SessionFirstScreen | None) -> None:
-    """story #4763: the row's first-screen question is the report's — a report without it clears it (the question is gone). A stopped session keeps none."""
-    row.first_screen_ask = first_screen.ask if first_screen else None
+# story #4763 (codex): the question rides only with the three states the conversation head may rename for it — a session that waits for something else (a permission, an
+# agent's question, a limit, a macOS window) or has ended says its own word alone, whatever a report carries
+FIRST_SCREEN_STATES = ("starting", "working", "idle")
+
+
+def _set_first_screen(row: DesktopSession, first_screen: SessionFirstScreen | None, state: str) -> None:
+    """story #4763: the row's first-screen question is the report's — a report without it clears it (the question is gone). A state that is not one of FIRST_SCREEN_STATES keeps none."""
+    row.first_screen_ask = first_screen.ask if first_screen and state in FIRST_SCREEN_STATES else None
 
 
 def first_screen_view(row: DesktopSession) -> dict | None:
@@ -583,7 +588,7 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
     _set_run(row, report.run)  # story #4686
     _set_inbox(row, report.inbox if report.state != "stopped" else None)  # story #4684
     _set_system(row, report)  # story #4599
-    _set_first_screen(row, report.first_screen if report.state != "stopped" else None)  # story #4763
+    _set_first_screen(row, report.first_screen, report.state)  # story #4763
     _set_widened(row, report, _now(), was_stopped=was_stopped)  # story #4641
     row.instruct_now = report.instruct_now  # story #4534: each report sets it — a report without it clears it (Kadir 06:31Z (c))
     await touch_device(db, setup.id)
@@ -643,7 +648,7 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
         _set_run(row, s.run)  # story #4686
         _set_inbox(row, s.inbox if s.state != "stopped" else None)  # story #4684
         _set_system(row, s)  # story #4599
-        _set_first_screen(row, s.first_screen if s.state != "stopped" else None)  # story #4763
+        _set_first_screen(row, s.first_screen, s.state)  # story #4763
         _set_widened(row, s, now, was_stopped=was_stopped)  # story #4641
         row.instruct_now = s.instruct_now
     for row in existing.values():
@@ -774,7 +779,7 @@ async def device_sessions_view(
         # story #4599: a held turn's why (the window's folder) — for the new web only, and only while the device is heard
         **({"system": sv} if not silent and (sv := system_view(r)) is not None else {}),
         # story #4763: the first-screen question that stands at that computer — only while the device is heard and the session lives
-        **({"first_screen": fs} if not silent and r.state != "stopped" and (fs := first_screen_view(r)) is not None else {}),
+        **({"first_screen": fs} if not silent and r.state in FIRST_SCREEN_STATES and (fs := first_screen_view(r)) is not None else {}),
         # story #4641: a widening a person made at the terminal — the three keys, only while the device is heard
         **widened_fields(r, silent),
         # story #4534 (PO 06:30Z): whether [지금 지시] can go into its turn — not said for a device not heard (Kadir 06:31Z (c))
