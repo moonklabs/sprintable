@@ -853,11 +853,13 @@ async def _store_refresh_token(
     expires_at: datetime,
     *,
     app_metadata: dict,
+    token_id: uuid.UUID | None = None,
 ) -> uuid.UUID:
     """story #4400 — the refresh token carries its session's org and project (the app_metadata the tokens were issued
     with). A refresh re-issues that session's context (`_refresh_session_context`), so each session keeps its own org:
     switching org on one device no longer moves the others (they used to follow the person-wide last_org_id)."""
     row = RefreshToken(
+        **({"id": token_id} if token_id is not None else {}),  # story 4778: a switch names the new token before it exists (the revoked one points at it in the same transaction)
         user_id=user.id,
         token_hash=hash_token(raw_token),
         org_id=_context_uuid(app_metadata, "org_id"),
@@ -1267,7 +1269,7 @@ async def refresh_token(
             # 셋 다 이미 관측 가능한 시스템 사실(시각차·불리언·UA 문자열)이지 개인식별
             # 정보가 아니다.
             _diag_row = (await session.execute(
-                select(RefreshToken.user_id, RefreshToken.revoked_at, RefreshToken.replaced_by)
+                select(RefreshToken.user_id, RefreshToken.revoked_at, RefreshToken.expires_at, RefreshToken.replaced_by)
                 .where(RefreshToken.token_hash == token_hash)
             )).first()
             _diag_user_id = _diag_row.user_id if _diag_row else None
@@ -1282,6 +1284,32 @@ async def refresh_token(
                         select(RefreshToken.revoked_at).where(RefreshToken.id == _diag_row.replaced_by)
                     )).scalar_one_or_none()
                     _diag_successor_used = _successor_revoked_at is not None
+            # story 4778 (AC2b) — SUPERSEDED, not REVOKED: this token was ended by a switch (explicit revoke: `expires_at` was lowered to `revoked_at` with it · `replaced_by` points at the
+            # token that switch issued) a moment ago, and that successor is not itself ended by a logout or a password change. The session did not die: it moved on, and the browser's refresh
+            # that left with the old token before it saved the switch's cookie is just late. The answer is the same 401 — NO new token (a superseded token is never exchanged) — with a
+            # different word, so the BFF and the proxy do not clear the cookie the browser is about to replace. Only inside `auth_refresh_superseded_window_seconds`: past it, or for any
+            # other end (logout · password change · rotation older than the resolve window · admin revoke), the word is TOKEN_REVOKED as before.
+            _now = datetime.now(timezone.utc)
+            if (
+                _diag_row is not None and _diag_row.revoked_at is not None and _diag_row.replaced_by is not None
+                and _diag_row.expires_at <= _diag_row.revoked_at
+                and _diag_row.revoked_at > _now - timedelta(seconds=settings.auth_refresh_superseded_window_seconds)
+            ):
+                _successor = (await session.execute(
+                    select(RefreshToken.user_id, RefreshToken.revoked_at, RefreshToken.expires_at).where(RefreshToken.id == _diag_row.replaced_by)
+                )).first()
+                if (
+                    _successor is not None and _successor.user_id == _diag_row.user_id
+                    and (_successor.revoked_at is None or _successor.expires_at > _successor.revoked_at)  # not ended by a logout · password change · admin revoke
+                ):
+                    logger.info(
+                        "auth.refresh superseded key=%s user_id=%s delta_since_revoke_s=%s",
+                        correlation_key, _diag_user_id, round((_now - _diag_row.revoked_at).total_seconds(), 3),
+                    )
+                    return _err(
+                        "TOKEN_SUPERSEDED", "Refresh token superseded by a newer session token", 401,
+                        headers={"X-Auth-Correlation": correlation_key},
+                    )
             _diag_ua = request.headers.get("user-agent", "")[:200]
             logger.warning(
                 "auth.refresh 실패 reason=token_not_found_or_revoked_or_expired key=%s user_id=%s "
@@ -2404,7 +2432,7 @@ class SwitchProjectRequest(BaseModel):
 
 
 async def _revoke_switching_session(
-    session: AsyncSession, user: User, refresh_token: str | None, *, route: str,
+    session: AsyncSession, user: User, refresh_token: str | None, *, route: str, successor_id: uuid.UUID,
 ) -> None:
     """story #4400 — switch-org / switch-project revoke **this session's** refresh token only, not every device's.
 
@@ -2418,11 +2446,14 @@ async def _revoke_switching_session(
     previous behaviour stays: every token of the person. Each such use logs one structured line
     (event=switch_revoke_fallback · route · how many tokens; no user id) so the fallback can be removed once it reads 0."""
     conditions = [RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None)]
+    values = _explicit_revoke_values(datetime.now(timezone.utc))
     if refresh_token:
         conditions.append(RefreshToken.token_hash == hash_token(refresh_token))
-    result = await session.execute(
-        update(RefreshToken).where(*conditions).values(**_explicit_revoke_values(datetime.now(timezone.utc)))
-    )
+        # story 4778 (AC2b): the ONE token this session presented points at its successor — the new token this switch issues (named by the caller, inserted in the same transaction). That
+        # pointer, with the explicit revoke, is what lets a late refresh with the old token be told `TOKEN_SUPERSEDED` (see `refresh_token`); the all-device fallback below sets none: those
+        # sessions are over, not moved on.
+        values["replaced_by"] = successor_id
+    result = await session.execute(update(RefreshToken).where(*conditions).values(**values))
     if not refresh_token:
         logger.info(
             "auth switch revoked every token (no refresh_token sent)",
@@ -2476,7 +2507,8 @@ async def switch_project(
     # 이 세션 refresh token 무효화 — story #3649(보안 결함): expires_at도 함께 내려
     # refresh()의 유예창(§3649 주석)이 이 RT를 재사용 대상에서 뺀다(명시 폐기,
     # 회전 경합 straggler 아님). story #4400: 전 기기 → 이 세션만.
-    await _revoke_switching_session(session, user, body.refresh_token, route="switch-project")
+    new_refresh_id = uuid.uuid4()  # story 4778: the token this switch will issue — the revoked one points at it (same transaction)
+    await _revoke_switching_session(session, user, body.refresh_token, route="switch-project", successor_id=new_refresh_id)
 
     # 908075db 단계1: target을 명시 의도로 전달 — flag on이면 _build_app_metadata가 추측 없이 그대로 존중.
     # story 4762 (Kadir lens, PR 5217) — the claim's ORG is the caller's session org (the one `has_project_access` just checked), never `users.last_org_id`: that column can name
@@ -2500,7 +2532,7 @@ async def switch_project(
         str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         session_started_at=_session_started_at,
     )
-    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=app_metadata)
+    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=app_metadata, token_id=new_refresh_id)
 
     await session.commit()
     return _ok(tokens)
@@ -2552,7 +2584,8 @@ async def switch_organization(
 
     # 이 세션 refresh token 무효화 — story #3649(보안 결함): switch_project()와 동형
     # (§3649 주석 참고). story #4400: 전 기기 → 이 세션만.
-    await _revoke_switching_session(session, user, body.refresh_token, route="switch-org")
+    new_refresh_id = uuid.uuid4()  # story 4778: the token this switch will issue — the revoked one points at it (same transaction)
+    await _revoke_switching_session(session, user, body.refresh_token, route="switch-org", successor_id=new_refresh_id)
 
     # _build_app_metadata 호출 전에 target project_id 고정
     # (내부에서 user.last_project_id를 이전 org TM으로 덮어쓰므로 먼저 캡처)
@@ -2585,7 +2618,7 @@ async def switch_organization(
         str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         session_started_at=_session_started_at,
     )
-    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=app_metadata)
+    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=app_metadata, token_id=new_refresh_id)
 
     await session.commit()
 

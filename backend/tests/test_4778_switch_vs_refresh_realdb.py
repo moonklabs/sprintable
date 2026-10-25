@@ -10,6 +10,9 @@ two outcomes, decided only by which of the two commits first:
   switch itself succeeded (its answer carried a live token the cleared cookies no longer hold).
 
 This file pins the server half (real PG, the real endpoints): the two deterministic orders, and a concurrent race whose every outcome is one of the two.
+
+story 4778 AC2b — the server tells the two apart: a token ended by a SWITCH a moment ago is answered `TOKEN_SUPERSEDED` (this session moved on and holds a newer token; no new token is ever issued for it), every other end
+stays `TOKEN_REVOKED` (logout · password change · a rotation older than the resolve window · past the short superseded window). The BFF and the proxy clear the cookies only on the second.
 """
 from __future__ import annotations
 
@@ -58,8 +61,8 @@ def _async_url() -> str:
 
 
 class _World:
-    def __init__(self, app, client, user_id, email, org1, org2, project1):
-        self.app, self.client = app, client
+    def __init__(self, app, client, user_id, email, org1, org2, project1, Session):
+        self.app, self.client, self.Session = app, client, Session
         self.user_id, self.email, self.org1, self.org2, self.project1 = user_id, email, org1, org2, project1
 
     async def login(self) -> dict:
@@ -127,7 +130,7 @@ async def _world() -> tuple:
 
     override_db_and_read(app, _db)
     client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
-    return engine, _World(app, client, user_id, email, orgs[0], orgs[1], project1)
+    return engine, _World(app, client, user_id, email, orgs[0], orgs[1], project1, Session)
 
 
 async def _close(engine, w: _World):
@@ -136,24 +139,106 @@ async def _close(engine, w: _World):
     await engine.dispose()
 
 
+async def _token_rows(w: _World) -> int:
+    from sqlalchemy import func, select
+
+    from app.models.user import RefreshToken
+    async with w.Session() as s:
+        return int((await s.execute(select(func.count()).select_from(RefreshToken).where(RefreshToken.user_id == w.user_id))).scalar_one())
+
+
+async def _end_every_session_like_a_logout(w: _World) -> None:
+    """what a logout / a password change does to every live token of the person (the seam `_explicit_revoke_values`: revoked_at and expires_at set together, no successor)"""
+    from sqlalchemy import update
+
+    from app.models.user import RefreshToken
+    now = datetime.now(timezone.utc)
+    async with w.Session() as s:
+        await s.execute(update(RefreshToken).where(RefreshToken.user_id == w.user_id, RefreshToken.revoked_at.is_(None)).values(revoked_at=now, expires_at=now))
+        await s.commit()
+
+
 def _switchers(w: _World):
     return {"org": lambda tokens: w.switch_org(tokens, w.org2), "project": lambda tokens: w.switch_project(tokens, w.project1)}
 
 
 @pytest.mark.parametrize("kind", ["org", "project"])
-async def test_a_refresh_that_left_with_the_old_token_after_a_switch_is_refused_even_inside_the_window_realdb(kind):
-    """the logout half: switch committed first → the old token is dead at once (not a race loser) → 401 → the BFF refresh route clears both cookies"""
+async def test_a_refresh_that_left_with_the_old_token_after_a_switch_is_superseded_not_revoked_realdb(kind):
+    """the half that used to log the person out: switch committed first → the old token is not a race loser (never renewed) → 401 — but the word is TOKEN_SUPERSEDED, so the BFF does not clear the cookies; and no new token is issued for it"""
     engine, w = await _world()
     try:
         a = await w.login()
         sw = await _switchers(w)[kind](a)
         assert sw.status_code == 200, sw.text
+        rows_before = await _token_rows(w)
         late = await w.refresh(a["refresh_token"])  # left with the cookie the browser still held; seconds after, far inside the 180 s window
-        assert late.status_code == 401, f"the old token of a switched session must be dead: {late.status_code} {late.text}"
-        assert late.json()["error"]["code"] == "TOKEN_REVOKED"
+        assert late.status_code == 401, f"the old token of a switched session must never be exchanged: {late.status_code} {late.text}"
+        assert late.json()["error"]["code"] == "TOKEN_SUPERSEDED"  # reverted (the switch records no successor) → TOKEN_REVOKED → the BFF clears both cookies
+        assert late.headers.get("x-auth-correlation"), "the BFF pairs its log line with the backend's by this header"
+        assert await _token_rows(w) == rows_before, "a superseded token mints nothing"
+        again = await w.refresh(a["refresh_token"])  # and it stays refused: no number of tries turns it into a token
+        assert again.status_code == 401 and again.json()["error"]["code"] == "TOKEN_SUPERSEDED"
         # the switch's own answer holds a live token: only the cleared cookies lose it
         again = await w.refresh(sw.json()["data"]["refresh_token"])
         assert again.status_code == 200, again.text
+    finally:
+        await _close(engine, w)
+
+
+@pytest.mark.parametrize("kind", ["org", "project"])
+async def test_the_word_is_revoked_not_superseded_for_every_other_end_realdb(kind):
+    """only a switch's end is «moved on»: a logout · a password change (the same explicit end without a successor), a switch followed by a logout (the successor is ended too), a rotation, and a switch past the short window"""
+    from app.core.config import settings
+    engine, w = await _world()
+    old_super = settings.auth_refresh_superseded_window_seconds
+    old_resolve = settings.auth_refresh_chain_resolve_window_seconds
+    try:
+        # 1) a plain logout: no successor
+        a = await w.login()
+        await _end_every_session_like_a_logout(w)
+        r = await w.refresh(a["refresh_token"])
+        assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_REVOKED"
+        # 2) a switch, then the person logs out: the successor is ended too → the old token is plain revoked
+        b = await w.login()
+        sw = await _switchers(w)[kind](b)
+        assert sw.status_code == 200
+        await _end_every_session_like_a_logout(w)
+        r = await w.refresh(b["refresh_token"])
+        assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_REVOKED", r.text  # reverted (the successor is not looked at) → TOKEN_SUPERSEDED
+        # 3) a switch, then the superseded window closes
+        c = await w.login()
+        sw = await _switchers(w)[kind](c)
+        assert sw.status_code == 200
+        settings.auth_refresh_superseded_window_seconds = 0
+        r = await w.refresh(c["refresh_token"])
+        assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_REVOKED", r.text  # reverted (no window) → TOKEN_SUPERSEDED for ever
+        settings.auth_refresh_superseded_window_seconds = old_super
+        # 4) an ordinary rotation (no switch): the old token, once outside the resolve window, is revoked — a rotation's end is not an explicit end, whatever the windows are
+        settings.auth_refresh_chain_resolve_window_seconds = 0
+        d = await w.login()
+        rot = await w.refresh(d["refresh_token"])
+        assert rot.status_code == 200, rot.text
+        r = await w.refresh(d["refresh_token"])
+        assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_REVOKED", r.text  # reverted (the explicit-end test dropped) → TOKEN_SUPERSEDED
+    finally:
+        settings.auth_refresh_superseded_window_seconds = old_super
+        settings.auth_refresh_chain_resolve_window_seconds = old_resolve
+        await _close(engine, w)
+
+
+@pytest.mark.parametrize("kind", ["org", "project"])
+async def test_the_all_device_fallback_leaves_no_successor_so_those_tokens_are_revoked_realdb(kind):
+    """a caller that does not send its refresh token (an older web pod during a deploy) still ends every token of the person: those sessions are over, not moved on"""
+    engine, w = await _world()
+    try:
+        a, other = await w.login(), await w.login()
+        body = {"org_id": str(w.org2)} if kind == "org" else {"project_id": str(w.project1)}
+        path = "/api/v2/auth/switch-org" if kind == "org" else "/api/v2/auth/switch-project"
+        sw = await w.client.post(path, json=body, headers={"Authorization": f"Bearer {a['access_token']}"})  # no refresh_token in the body
+        assert sw.status_code == 200, sw.text
+        for token in (a, other):
+            r = await w.refresh(token["refresh_token"])
+            assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_REVOKED", r.text
     finally:
         await _close(engine, w)
 
