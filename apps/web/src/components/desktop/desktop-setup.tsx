@@ -7,7 +7,7 @@ import { Loader2, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { fetchWithAuth, refreshSessionAfterChange } from '@/lib/db/client';
+import { fetchWithAuth, refreshSessionAfterChange, switchOrg } from '@/lib/db/client';
 import { presetDescription, presetName } from '@/lib/platform-preset-copy';
 import { pickEulReulJosa, pickEunNeunJosa, pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -1304,7 +1304,7 @@ export function Failure({ failure, onRetry, counts = null, plan = null, solo = f
     setEntering(true);
     setEnterFailed(false);
     try {
-      const res = await fetchWithAuth('/api/switch-org', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ org_id: newOrgId }) });
+      const res = await switchOrg(newOrgId, { withAuth: true }); // story 4778 — the page's one flight
       const json = await res.json().catch(() => null) as { data?: { ok?: boolean } } | null;
       if (!(res.ok && json?.data?.ok)) { setEnterFailed(true); setEntering(false); return; }
       // the switcher's own order: the tab's project belongs to the organization left, so it goes before the page is read again
@@ -1433,7 +1433,7 @@ export function InvitedCard({ invites, onReload, onCreateOwn, ownBusy = false }:
         acceptedOrg.current[invite.invite_id] = orgId;
       }
       // the member now: the session was made before the membership, so the switch (which gives the session that organization) comes before the page is read again
-      const sw = await fetchWithAuth('/api/switch-org', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ org_id: orgId as string }) });
+      const sw = await switchOrg(orgId as string, { withAuth: true }); // story 4778
       const swJson = (await sw.json().catch(() => null)) as { data?: { ok?: boolean } } | null;
       if (!(sw.ok && swJson?.data?.ok)) { fail('unknown'); return; }
       window.sessionStorage.removeItem(TAB_PROJECT_STORAGE_KEY);
@@ -1501,7 +1501,7 @@ export function InvitedInApp({ invites, onReload }: { invites: MyInvite[]; onRel
     setEntering(true);
     setEnterFailed(false);
     try {
-      const res = await fetchWithAuth('/api/switch-org', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ org_id: orgId }) });
+      const res = await switchOrg(orgId, { withAuth: true }); // story 4778
       const json = (await res.json().catch(() => null)) as { data?: { ok?: boolean } } | null;
       if (!(res.ok && json?.data?.ok)) { setEnterFailed(true); setEntering(false); return; }
       window.sessionStorage.removeItem(TAB_PROJECT_STORAGE_KEY);
