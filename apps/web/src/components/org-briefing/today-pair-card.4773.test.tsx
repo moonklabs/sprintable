@@ -135,6 +135,36 @@ describe('[SID:4773] TodayPairCard — a phone paired with nothing gets one line
     expect(q('today-pair-card')).not.toBeNull();
   });
 
+  it('restored from the back-forward cache after the person paired: the page is read again — the card goes (a normal pageshow reads nothing)', async () => {
+    server({ devices: [] });
+    const call = vi.fn(async () => key());
+    await draw(call);
+    expect(q('today-pair-card')).not.toBeNull();
+    expect(call).toHaveBeenCalledTimes(1);
+    // not restored (a normal show): nothing is read again
+    await act(async () => { window.dispatchEvent(new Event('pageshow')); });
+    await act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); });
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(q('today-pair-card')).not.toBeNull();
+    // the person pairs on /desktop/pair and comes back: the page is restored as it was left
+    server({ devices: [{ id: 'd1', confirm_number: '324 642' }] });
+    await act(async () => { window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true })); });
+    await act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); });
+    expect(call).toHaveBeenCalledTimes(2); // a restored page is read again
+    expect(q('today-pair-card')).toBeNull(); // the stale «unpaired» kept on a restored page → fails
+  });
+
+  it('restored and still unpaired: the card stays (no flash), read again once', async () => {
+    server({ devices: [] });
+    const call = vi.fn(async () => key());
+    await draw(call);
+    await act(async () => { window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true })); });
+    expect(q('today-pair-card')).not.toBeNull(); // while the new read is out, the old answer is still on screen
+    await act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); });
+    expect(call).toHaveBeenCalledTimes(2);
+    expect(q('today-pair-card')).not.toBeNull();
+  });
+
   it('another bridge is another phone read: the answer of the first bridge is not shown for the second until it answers', async () => {
     server({ devices: [] });
     await draw(async () => key());

@@ -19,21 +19,30 @@ export function TodayPairCard() {
   const { inPhoneApp, phoneCall } = usePhoneBridge();
   // the answer is stored with the bridge it came from: another bridge makes an old answer «not read yet» without a state write in the effect
   const [seen, setSeen] = useState<{ call: typeof phoneCall; unpaired: boolean } | null>(null);
-  // one read per bridge: React may run the effect twice (StrictMode · a remount) and the read asks the shell for the phone's key (it makes one if the phone has none) — the second run shares the first run's read
-  const read = useRef<{ call: typeof phoneCall; unpaired: Promise<boolean> } | null>(null);
+  // restored from the back-forward cache (the person paired on /desktop/pair and came back with Back): the page is as it was left, the old answer on it — read again (the start screen does the same).
+  // The old answer stays on screen until the new one lands: a phone that is still unpaired sees no flash, a phone that has just paired loses the card.
+  const [restored, setRestored] = useState(0);
+  useEffect(() => {
+    const onShow = (e: PageTransitionEvent) => { if (e.persisted) setRestored((n) => n + 1); };
+    window.addEventListener('pageshow', onShow);
+    return () => window.removeEventListener('pageshow', onShow);
+  }, []);
+  // one read per bridge and per restore: React may run the effect twice (StrictMode · a remount) and the read asks the shell for the phone's key (it makes one if the phone has none) — the second run shares the first run's read
+  const read = useRef<{ call: typeof phoneCall; restored: number; unpaired: Promise<boolean> } | null>(null);
 
   useEffect(() => {
     if (!inPhoneApp) return;
     let stale = false;
-    if (read.current?.call !== phoneCall) {
+    if (read.current?.call !== phoneCall || read.current.restored !== restored) {
       read.current = {
         call: phoneCall,
+        restored,
         unpaired: readStartableKeyed(phoneCall).then((r) => r.kind === 'no_phone' || r.kind === 'no_screen_lock', () => false), // a read that throws is a failed read: no card
       };
     }
     void read.current.unpaired.then((unpaired) => { if (!stale) setSeen({ call: phoneCall, unpaired }); });
     return () => { stale = true; };
-  }, [inPhoneApp, phoneCall]);
+  }, [inPhoneApp, phoneCall, restored]);
 
   if (!inPhoneApp || !seen || seen.call !== phoneCall || !seen.unpaired) return null;
   return (
