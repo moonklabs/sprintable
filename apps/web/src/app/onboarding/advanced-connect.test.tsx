@@ -28,7 +28,7 @@ vi.mock('@/lib/db/client', () => ({
     const r = h ? await h(init) : { ok: false, status: 404, body: {} };
     return { ok: r.ok, status: r.status ?? (r.ok ? 200 : 500), json: async () => r.body } as Response;
   }),
-  refreshAuthTokens: vi.fn(async () => ({ data: null, error: null })),
+  refreshSessionAfterChange: vi.fn(async () => ({ data: null, error: null })),
 }));
 
 const copied: string[] = [];

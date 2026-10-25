@@ -14,7 +14,7 @@ import {
 } from './verify-rail';
 import { emitOnboardingEvent, beaconOnboardingEvent } from './onboarding-telemetry';
 
-import { fetchWithAuth, refreshAuthTokens } from '@/lib/db/client';
+import { fetchWithAuth, refreshSessionAfterChange } from '@/lib/db/client';
 import { createFirstInstructionConversation } from '@/lib/onboarding/first-instruction';
 import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
 import { PhoneAppCard } from '@/components/desktop/phone-app-card';
@@ -317,8 +317,8 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
       }
       // story #2691 가드(verify-no-new-raw-fetch-api) — onboarding-form.tsx::finishToHome()의
       // auth 토큰 갱신 raw fetch 호출을 그대로 베끼지 않고, 같은 목적의 기존 헬퍼
-      // (lib/db/client.ts의 refreshAuthTokens, callAuthRoute 경유)를 재사용한다.
-      await refreshAuthTokens().catch(() => null);
+      // (lib/db/client.ts의 refreshSessionAfterChange — 페이지의 한 번에 하나 · 바뀐 뒤에 발급, callAuthRoute 경유)를 재사용한다. story 4776.
+      await refreshSessionAfterChange().catch(() => null);
       window.location.href = withProjectParam(`/chats/${convId}`, projectId); // story #4231 3차 — 온보딩 프로젝트를 싣는다
     } catch {
       onFinish();
