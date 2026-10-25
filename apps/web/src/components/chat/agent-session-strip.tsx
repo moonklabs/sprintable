@@ -444,8 +444,10 @@ function InboxLine({ view }: { view: View }) {
 // (desktop-electron/local/src/app.ts: confirmLine :2848 · the failed Claude line · the failed Codex line). A word this page does not know shows no line.
 function WorkHoldLine({ view }: { view: View }) {
   const t = useTranslations('chats.agentSession');
-  const why = view.state === 'stopped' || view.state === 'unknown' ? null : view.work_hold?.why;
+  const why = view.state === 'stopped' || view.state === 'unknown' || view.state === 'unrecognized' ? null : view.work_hold?.why;
   if (why !== 'tools_unconfirmed' && why !== 'tools_failed') return null;
+  // «failed» names the button of the runtime's board — a runtime this page does not know (or none said) has no button name to give: no line rather than the wrong one
+  if (why === 'tools_failed' && view.runtime !== 'claude' && view.runtime !== 'codex') return null;
   const device = view.device_name?.trim() ? view.device_name : null;
   // each wording by its own literal call (the dead-key guard reads the literals)
   const text = why === 'tools_unconfirmed'

@@ -537,6 +537,21 @@ describe('AgentSessionStrip — why work does not reach the agent (story 4779)',
     expect(holdLine()?.textContent).toBe('Work for this agent is held up — Sprintable\'s connection couldn\'t be confirmed. Press [Start again] in the app on the computer this session runs on to check once more');
   });
 
+  it('fail closed: a state word this page does not know → no line; tools_failed with no / an unknown runtime → no line (the button name would be a guess) while tools_unconfirmed, the same button on both boards, still shows', async () => {
+    for (const over of [{ state: 'a_state_from_a_newer_server' }, { runtime: null }, { runtime: 'gemini' }, { runtime: undefined }]) {
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+      fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', runtime: 'claude', work_hold: { why: 'tools_failed' }, ...over }));
+      await render();
+      expect(holdLine(), JSON.stringify(over)).toBeNull();
+    }
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', runtime: null, work_hold: { why: 'tools_unconfirmed' } }));
+    await render();
+    expect(holdLine()?.textContent).toContain('[다시 시작]');
+  });
+
   it('no hold from the server (an older one, a silent computer, none) → no line · a stopped or unknown session → none · a word this page does not know → none', async () => {
     fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', runtime: 'claude' }));
     await render();
