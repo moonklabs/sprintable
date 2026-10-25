@@ -257,6 +257,9 @@ describe('[4532] phone pairing screen', () => {
       await press('QR 찍기');
       await press('페어링');
       await tick();
+      offerState = { state: 'revealed', reveal: 'R' };
+      await tick();
+      expect(line()).toContain('296 843'); // the number first
       pairs = [{ setup_id: HEAD.setup_id }];
       await tick();
       expect(line()).toContain('페어링했어요');

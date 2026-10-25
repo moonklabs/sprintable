@@ -27,8 +27,11 @@ export function safeReturnPath(value: unknown): string | null {
   return project ? `${url.pathname}?p=${encodeURIComponent(project)}` : url.pathname;
 }
 
-/** the pairing screen's address from the page an entry stands on (`here` = that page's path + query); a page that is not a return target adds nothing */
-export function pairAddress(here: string | null | undefined): string {
+/**
+ * the query that hands the page an entry stands on (`here` = that page's path + query) to the pairing screen: `?from=…` — or nothing when that page is not a return target (the entry then links the
+ * address it always did). The address itself is written once, in `usePairHref` (wrapped by `useFlatHref`, so the project goes along).
+ */
+export function pairReturnQuery(here: string | null | undefined): string {
   const from = safeReturnPath(here);
-  return from ? `/desktop/pair?${PAIR_RETURN_PARAM}=${encodeURIComponent(from)}` : '/desktop/pair';
+  return from ? `?${PAIR_RETURN_PARAM}=${encodeURIComponent(from)}` : '';
 }

@@ -1,6 +1,6 @@
 // story 4780 — the way back handed to the phone's pairing screen: an address anybody can write, so only the app's own few phone screens are taken (AC2: no open redirect)
 import { describe, expect, it } from 'vitest';
-import { PAIR_RETURN_PARAM, pairAddress, safeReturnPath } from './pair-return';
+import { PAIR_RETURN_PARAM, pairReturnQuery, safeReturnPath } from './pair-return';
 
 describe('[SID:4780] safeReturnPath', () => {
   it.each([
@@ -28,13 +28,14 @@ describe('[SID:4780] safeReturnPath', () => {
     ['a deeper path of an allowed screen', '/desktop/setup'],
     ['an organization-prefixed path (this or another org)', '/moonklabs/sprintable/board'],
     ['an api path', '/api/auth/logout'],
+    ['an organization-prefixed copy of an allowed screen', '/moonklabs/sprintable/inbox'],
     ['the login screen', '/login?next=/today'],
     ['a screen that redirects on its own parameter', '/onboarding?next=//evil.example'],
     ['an encoded second slash', '/%2Fevil.example'],
     ['a newline', '/today\n/evil'],
     ['a tab in the path', '/today\t'],
     ['empty', ''],
-    ['too long', `/chats/${'a'.repeat(600)}`],
+    ['too long (a long query on an allowed screen)', `/today?p=${'a'.repeat(600)}`],
     ['a path traversal out of the allowed set', '/today/../api/x'],
   ])('drops %s', (_why, given) => {
     expect(safeReturnPath(given)).toBeNull();
@@ -52,16 +53,16 @@ describe('[SID:4780] safeReturnPath', () => {
   });
 });
 
-describe('[SID:4780] pairAddress', () => {
+describe('[SID:4780] pairReturnQuery', () => {
   it('carries the page the link stands on as `from`', () => {
-    expect(pairAddress('/today?p=proj-1')).toBe(`/desktop/pair?${PAIR_RETURN_PARAM}=${encodeURIComponent('/today?p=proj-1')}`);
-    expect(pairAddress('/inbox')).toBe('/desktop/pair?from=%2Finbox');
+    expect(pairReturnQuery('/today?p=proj-1')).toBe(`?${PAIR_RETURN_PARAM}=${encodeURIComponent('/today?p=proj-1')}`);
+    expect(pairReturnQuery('/inbox')).toBe('?from=%2Finbox');
   });
   it('a page that is not a return target (or no page yet) adds nothing — the address as before', () => {
-    expect(pairAddress('')).toBe('/desktop/pair');
-    expect(pairAddress(null)).toBe('/desktop/pair');
-    expect(pairAddress('/board')).toBe('/desktop/pair');
-    expect(pairAddress('https://evil.example/today')).toBe('/desktop/pair');
-    expect(pairAddress('/desktop/pair?from=%2Ftoday')).toBe('/desktop/pair'); // never chains itself
+    expect(pairReturnQuery('')).toBe('');
+    expect(pairReturnQuery(null)).toBe('');
+    expect(pairReturnQuery('/board')).toBe('');
+    expect(pairReturnQuery('https://evil.example/today')).toBe('');
+    expect(pairReturnQuery('/desktop/pair?from=%2Ftoday')).toBe(''); // never chains itself
   });
 });

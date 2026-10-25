@@ -55,6 +55,22 @@ function isHiddenOn(pathname: string | null): boolean {
   return !!pathname && (pathname === '/desktop/setup' || pathname.startsWith('/desktop/setup/'));
 }
 
+// story 4780 (AC4) — the checklist finishes, and the person gets to SEE it finish. The last step («첫 지시 보내고 회신 받기») ends in the chat, where the reply comes: when the person is back on a page with this banner,
+// it was simply gone — completion was never shown. This browser remembers that it showed an OPEN checklist for the organization (`sprintable_activation_seen_open:<org>`); when the checklist is complete and
+// that mark is there, one line says so for DONE_LINE_MS and the mark goes (once). A browser that never showed it open (the server only knows it is complete: a new device, a long-finished account) shows nothing,
+// as before. The storage may be refused (private window · blocked): every read and write is guarded and a refused one simply shows nothing.
+const SEEN_OPEN_KEY = 'sprintable_activation_seen_open';
+export const ACTIVATION_DONE_LINE_MS = 10_000;
+function readMark(key: string): boolean {
+  try { return window.localStorage.getItem(key) === '1'; } catch { return false; }
+}
+function writeMark(key: string): void {
+  try { window.localStorage.setItem(key, '1'); } catch { /* storage refused: the line is simply not shown later */ }
+}
+function clearMark(key: string): void {
+  try { window.localStorage.removeItem(key); } catch { /* nothing to clear */ }
+}
+
 export function ActivationChecklistBanner() {
   const pathname = usePathname();
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
@@ -79,6 +95,19 @@ export function ActivationChecklistBanner() {
       writeActivationHint(activationOrgId, true); // 서버가 이번 요청에 확인한 완주(지금 org일 때만)
     }
   }, [state, stateOrgId, orgId, initialActivationComplete, activationSeedFromHint, activationOrgId]);
+  // story 4780 (AC4): remember an open checklist was shown · show the finish once
+  const seenOpenKey = orgId ? `${SEEN_OPEN_KEY}:${orgId}` : null;
+  const [doneLine, setDoneLine] = useState(false);
+  useEffect(() => {
+    if (seenOpenKey && state && state.all_complete !== true && state.scope_is_requested_org !== false) writeMark(seenOpenKey);
+  }, [seenOpenKey, state]);
+  useEffect(() => {
+    if (!allComplete || !seenOpenKey || !readMark(seenOpenKey)) return;
+    clearMark(seenOpenKey);
+    setDoneLine(true);
+    const timer = setTimeout(() => setDoneLine(false), ACTIVATION_DONE_LINE_MS);
+    return () => clearTimeout(timer);
+  }, [allComplete, seenOpenKey]);
   const [navigatingToInstruction, setNavigatingToInstruction] = useState(false);
   const [instructionStartError, setInstructionStartError] = useState(false);
   // story #4219 F1(PO 리뷰 CLS) — 접힘 상태는 서버도 아는 세션 쿠키(lib/activation-hint)가 정본 — 자리 표시(스켈레톤)를 접힌 칩과
@@ -105,7 +134,14 @@ export function ActivationChecklistBanner() {
     { key: 'first_roundtrip', label: t('stepFirstRoundtrip') },
   ];
 
-  if (allComplete) return null;
+  if (allComplete) {
+    return doneLine ? (
+      <Alert variant="success" data-testid="activation-done">
+        <AlertTitle>{t('doneTitle')}</AlertTitle>
+        <AlertDescription>{t('doneBody')}</AlertDescription>
+      </Alert>
+    ) : null;
+  }
   if (isHiddenOn(pathname)) return null; // story #4432 — after every hook (hooks order unchanged)
   // story #4032 — "완주해서 필요 없다"(위 allComplete)와 "아직 모른다"(여기, fetch
   // 미완료)를 더 이상 같은 null로 뭉치지 않는다. 실 배너와 같은 Alert 박스에 스켈레톤을

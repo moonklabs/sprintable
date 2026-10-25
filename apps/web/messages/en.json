@@ -61,6 +61,8 @@
   "activation": {
     "bannerTitle": "Finish setting up your account",
     "bannerProgress": "{completed}/{total, plural, one {# step} other {# steps}} complete",
+    "doneTitle": "You're all set",
+    "doneBody": "You sent your first instruction and got a reply — all steps are done.",
     "stepSignedUp": "Sign up",
     "stepEmailVerified": "Verify your email",
     "stepOrgCreated": "Create an organization",

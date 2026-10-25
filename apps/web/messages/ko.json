@@ -61,6 +61,8 @@
   "activation": {
     "bannerTitle": "가입을 마무리해 볼까요?",
     "bannerProgress": "{completed}/{total}단계 완료",
+    "doneTitle": "가입을 다 마무리했어요",
+    "doneBody": "첫 지시를 보냈고 회신도 받았어요 — 다섯 단계가 모두 끝났어요.",
     "stepSignedUp": "가입하기",
     "stepEmailVerified": "이메일 인증하기",
     "stepOrgCreated": "조직 만들기",

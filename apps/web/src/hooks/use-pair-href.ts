@@ -7,7 +7,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import { useFlatHref } from '@/hooks/use-flat-href';
-import { pairAddress } from '@/lib/pair-return';
+import { pairReturnQuery } from '@/lib/pair-return';
 
 const noopSubscribe = () => () => {};
 
@@ -18,5 +18,5 @@ export function usePairHref(): string {
     () => `${window.location.pathname}${window.location.search}`,
     () => '',
   );
-  return flat(pairAddress(here));
+  return flat(`/desktop/pair${pairReturnQuery(here)}`);
 }
