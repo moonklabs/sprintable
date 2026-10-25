@@ -81,7 +81,7 @@ export function refreshSessionOnce(): Promise<AuthResult> {
     // left meanwhile would present a dead token (401 → the refresh route clears both cookies). Only the switches already queued are waited for (never ones asked for later: they wait for this one).
     const queued = _switching;
     const run = async (): Promise<AuthResult> => {
-      if (queued) await queued;
+      if (queued) await waitUpTo(queued);
       return refreshAuthTokens();
     };
     _refreshing = run().finally(() => { _refreshing = null; });
@@ -91,13 +91,27 @@ export function refreshSessionOnce(): Promise<AuthResult> {
 
 type SwitchPath = '/api/switch-org' | '/api/switch-project';
 
+/**
+ * story 4778 (codex) — how long a switch or a renewal waits for ANOTHER switch's (or rotation's) answer before it goes on without it. The request itself is never cut (story 4320: aborting it loses the
+ * answer that carries the new cookies); a request that stalls must not hold the page's later switches and renewals for good either. The BFF routes are time-bounded (`BFF_BACKEND_TIMEOUT_MS` = 30 s,
+ * `timeLimitOnly`), so a healthy answer is back well inside this; past it the wait is given up (the overlap this file prevents can then happen again — only for a request that did not answer in time).
+ */
+const SWITCH_WAIT_MAX_MS = 40_000;
+function waitUpTo(flight: Promise<unknown>): Promise<void> {
+  return new Promise((resolve) => {
+    const giveUp = setTimeout(resolve, SWITCH_WAIT_MAX_MS);
+    const done = () => { clearTimeout(giveUp); resolve(); };
+    flight.then(done, done);
+  });
+}
+
 function runSwitch<T>(task: () => Promise<T>): Promise<T> {
   // both are read WHEN THE SWITCH IS ASKED FOR: a rotation asked for later waits for this switch (refreshSessionOnce reads `_switching`), so waiting for it here too would be a cycle
   const before = _switching;
   const rotation = _refreshing;
   const run = (async (): Promise<T> => {
-    if (before) await before; // one switch at a time: each presents the cookie the previous one set
-    if (rotation) await rotation.catch(() => undefined); // a rotation already in flight finishes first (its Set-Cookie must be in the jar before this switch leaves)
+    if (before) await waitUpTo(before); // one switch at a time: each presents the cookie the previous one set
+    if (rotation) await waitUpTo(rotation); // a rotation already in flight finishes first (its Set-Cookie must be in the jar before this switch leaves)
     return task();
   })();
   const tail: Promise<void> = run.then(() => undefined, () => undefined).finally(() => { if (_switching === tail) _switching = null; });

@@ -63,6 +63,8 @@ afterEach(async () => {
   window.sessionStorage.clear();
 });
 
+// a behavior-neutrality guard, not the proof of the move: it passes before and after (fetchWithAuth did the same 401 → renew → ask once more) and fails if the move drops `withAuth`;
+// that the banner goes through the page's one flight is held by the ratchet (switch-single-flight.4778) and the flight tests (switch-one-flight.4778)
 describe('[SID:4778] OrgHintBanner — the switch goes through the page\'s one flight, with the renewal fetchWithAuth used to give it', () => {
   it('a 401 on the switch renews the session and asks once more (then lands as usual); a plain fetch would have shown «failed»', async () => {
     const answers = [401, 200, 200]; // switch (401) · refresh route (200) · switch again (200)

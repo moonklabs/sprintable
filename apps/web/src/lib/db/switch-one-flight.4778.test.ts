@@ -162,3 +162,86 @@ describe('[SID:4778] switch × rotation: one at a time, in the order they were a
     expect(s.calls).toHaveLength(0);
   });
 });
+
+// codex 4778: a request whose answer does not come must not hold the page's later switches and renewals for good — they give up WAITING for it after SWITCH_WAIT_MAX_MS (40 s, past the BFF's own 30 s);
+// the request itself is never cut (story 4320)
+describe('[SID:4778] a stalled switch holds the others only for a bounded time', () => {
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('a renewal asked for while a switch has no answer waits for it up to 40 s, then goes on', async () => {
+    const s = scripted();
+    s.hold('switch#1');
+    const sw = switchOrg('org-1');
+    await vi.waitFor(() => expect(s.isOut('switch#1')).toBe(true));
+    const renewal = refreshSessionOnce();
+    await vi.advanceTimersByTimeAsync(39_000);
+    expect(s.calls.map((c) => c.kind)).toEqual(['switch-org']); // still waiting (reverted to wait for good → also here; the next line tells)
+    await vi.advanceTimersByTimeAsync(1_500);
+    await renewal;
+    expect(s.calls.map((c) => c.kind)).toEqual(['switch-org', 'refresh']); // the wait was given up (reverted: never → the renewal never leaves and `await renewal` hangs)
+    s.release('switch#1');
+    await sw;
+  });
+
+  it('a later switch waits for the stalled one up to 40 s, then goes on (the stalled request is not cut)', async () => {
+    const s = scripted();
+    s.hold('switch#1');
+    const first = switchOrg('org-1');
+    await vi.waitFor(() => expect(s.isOut('switch#1')).toBe(true));
+    const second = switchProject('proj-1');
+    await vi.advanceTimersByTimeAsync(39_000);
+    expect(s.calls).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1_500);
+    await second;
+    expect(s.calls.map((c) => c.kind)).toEqual(['switch-org', 'switch-project']);
+    expect(s.isOut('switch#1')).toBe(true); // the first request is still out: nothing aborted it
+    s.release('switch#1');
+    expect((await first).ok).toBe(true); // and its answer still arrives for its caller
+  });
+
+  it('an answer that comes in time cancels the wait (no timer left to fire a second time)', async () => {
+    const s = scripted();
+    s.hold('switch#1');
+    const sw = switchOrg('org-1');
+    await vi.waitFor(() => expect(s.isOut('switch#1')).toBe(true));
+    const renewal = refreshSessionOnce();
+    s.release('switch#1');
+    await Promise.all([sw, renewal]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+// Kadir 6395454371: a switch that FAILS must not poison the queue for the ones already standing behind it. The test above calls the next ones after the failure is over (the tail is already cleared by then);
+// here a second switch and a renewal are queued BEHIND the first while it is still out, and the first then fails
+describe('[SID:4778] a failed switch does not poison the ones already queued behind it', () => {
+  it('switch A is out; switch B and a renewal are queued behind it; A fails → B goes and succeeds, the renewal goes and succeeds', async () => {
+    const order: string[] = [];
+    let failA!: () => void;
+    const aOut = new Promise<void>((resolve) => { failA = resolve; });
+    let started = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/switch-org')) {
+        order.push('A');
+        started += 1;
+        await aOut; // A's request fails only when released
+        throw new TypeError('network down');
+      }
+      order.push(url.includes('/api/auth/refresh') ? 'R' : 'B');
+      return new Response(JSON.stringify({ data: { ok: true } }), { status: 200 });
+    }));
+    const a = switchOrg('org-1');
+    const aFailed = a.then(() => 'ok', (e: unknown) => (e as Error).message);
+    await vi.waitFor(() => expect(started).toBe(1));
+    const b = switchProject('proj-1'); // already in the queue when A fails
+    const r = refreshSessionOnce(); // so is this renewal (it waits for B)
+    await Promise.resolve(); await Promise.resolve();
+    expect(order).toEqual(['A']);
+    failA();
+    expect(await aFailed).toBe('network down'); // A's own caller still sees its failure
+    expect((await b).ok).toBe(true); // reverted (the tail keeps A's rejection) → B rejects with A's error
+    expect((await r).error).toBeNull(); // …and so does the renewal behind it
+    expect(order).toEqual(['A', 'B', 'R']);
+  });
+});
