@@ -6,7 +6,7 @@
 // «지금은 Mac 앱만 있어요» first, the web way as the one button, no download card (it cannot install there). Phone control is not offered
 // here — it is asked when a phone is paired (PO).
 
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { cardVariants } from '@/components/ui/card';
@@ -52,7 +52,10 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
   // story 4763 AC14 (the «앱 먼저» customer path: login screen «Mac 앱 받기» → the app → sign-up): inside the Mac app the download card is for someone who has no app yet — here the next step
   // is the app's own setup page. In a browser `desktopApp()` is undefined and every screen below stays as it is (read after mount: null on the server and before the first read).
   const inMacApp = useSyncExternalStore(noSubscribe, () => !!desktopApp(), () => null);
-  useEffect(() => { if (inMacApp) window.location.replace(DESKTOP_SETUP_PATH); }, [inMacApp]);
+  // once: React's StrictMode replays effects in development — the page must not navigate twice. The code-less `/desktop/setup` is the app's own entrance: the app notices that page loading
+  // (`did-navigate` → the setup flow's «setup page arrival», sprintable-mobile desktop-electron/src/setup-wiring.ts · setup-flow.ts) and hands it its values, as it does when it opens the page itself.
+  const wentToSetup = useRef(false);
+  useEffect(() => { if (inMacApp && !wentToSetup.current) { wentToSetup.current = true; window.location.replace(DESKTOP_SETUP_PATH); } }, [inMacApp]);
   if (elsewhere === null || inMacApp === null) return null;
   if (inMacApp) return null; // the page is going to the setup page
 

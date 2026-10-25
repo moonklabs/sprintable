@@ -3,6 +3,7 @@
 // the download card («Mac 앱 받기 · 앱 열기 · 이 창은 닫아도 돼요») — for someone who has no app yet. Inside the app the next step is the app's own setup page; in a browser nothing changes.
 // Reverting the `inMacApp` branch in first-screen.tsx (the replace to the setup page or the card's removal) turns this red.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { StrictMode } from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
@@ -46,14 +47,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const render = async () => {
-  await act(async () => {
-    root.render(
-      <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-        <FirstScreen orgId="org-1" chatsHref="/chats" orgName="MinhFour의 조직" onFinish={vi.fn()} />
-      </NextIntlClientProvider>,
-    );
-  });
+const render = async (strict = false) => {
+  const screen = (
+    <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+      <FirstScreen orgId="org-1" chatsHref="/chats" orgName="MinhFour의 조직" onFinish={vi.fn()} />
+    </NextIntlClientProvider>
+  );
+  await act(async () => { root.render(strict ? <StrictMode>{screen}</StrictMode> : screen); });
 };
 const has = (id: string) => !!container.querySelector(`[data-testid="${id}"]`);
 
@@ -67,6 +67,20 @@ describe('FirstScreen inside the Mac app (story 4763 AC14)', () => {
     expect(has('onboarding-first-mac')).toBe(false);
     expect(has('onboarding-first-open-app')).toBe(false);
     expect(container.textContent).not.toContain('에이전트는 내 Mac에서 돌아가요');
+  });
+
+  it('under StrictMode (the effect is replayed in development) it still navigates once', async () => {
+    (window as { sprintableDesktop?: unknown }).sprintableDesktop = bridge();
+    await render(true);
+    expect(replace).toHaveBeenCalledTimes(1);
+  });
+
+  it('the destination is the constant, whatever the address says (no open redirect): `?next=//evil.test` and a fragment change nothing', async () => {
+    (window as { sprintableDesktop?: unknown }).sprintableDesktop = bridge();
+    Object.defineProperty(window, 'location', { configurable: true, value: { ...originalLocation, search: '?next=//evil.test&p=1', hash: '#next=//evil.test', replace } });
+    await render();
+    expect(replace).toHaveBeenCalledTimes(1);
+    expect(replace.mock.calls[0]).toEqual(['/desktop/setup']);
   });
 
   it('in a browser (no bridge) nothing changes: the download card, the open-the-app link, the finish link; no navigation', async () => {
