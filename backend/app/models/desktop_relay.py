@@ -145,6 +145,8 @@ class DesktopSession(Base):
     first_screen_ask: Mapped[str | None] = mapped_column(Text, nullable=True)
     # story #4779 (0466): why work waits for this agent (`tools_unconfirmed` · `tools_failed`) — set by the report that carries `work_hold`
     work_hold_why: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story 4781 (AC2): when the report that took the limit away came — the «working again» notice waits for the hold; NULL = none waiting
+    limit_cleared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class DesktopCommand(Base):

@@ -26,10 +26,10 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.desktop_relay import DesktopSession
@@ -42,6 +42,10 @@ logger = logging.getLogger(__name__)
 # «agent.limit_paused» (stood) · «agent.limit_lifted» (working again) — both registered in schemas/deeplink_manifest.py.
 # one «stood» notice per computer per this long (the others that stand soon after are folded into the first's count / not told)
 WINDOW_SEC = 300
+# story 4781 (AC2): «working again» is told only after the limit has stayed gone this long (10-25: the CLI's own retry every 30 minutes read as «lifted» for a second —
+# ten false lines). 75 s sits inside the 60–90 s the story asked for; the sweep runs every LIFT_SWEEP_SEC, so a true lift is told within ~105 s.
+LIFT_HOLD_SEC = 75
+LIFT_SWEEP_SEC = 30
 # an outstanding «stood» notice waits this long for the «lifted» line (a week of standing is not a thing to keep promising)
 OPEN_TTL_SEC = 7 * 86400
 
@@ -161,6 +165,11 @@ async def _take_open(org_id: uuid.UUID, user_id: uuid.UUID) -> dict | None:
         return json.loads(raw) if raw else None
     except ValueError:
         return None
+
+
+def member_prefix(member_id: uuid.UUID) -> str:
+    """story 4781 (AC1): the first 8 characters of a member id — enough to tell people apart in a log, never a name or a whole id"""
+    return str(member_id)[:8]
 
 
 @dataclass(frozen=True)
@@ -311,6 +320,8 @@ async def _stood(db: AsyncSession, setup: DesktopSetup, row: DesktopSession) -> 
     if not who:
         logger.info("desktop limit notice: nobody to tell setup=%s (no phone paired, and not connected by an active member)", setup.id)
         return
+    # story 4781 (AC1): on 10-25 nothing in the log said WHO a stopped-notice was meant for, so «did it reach the owner» could not be answered
+    logger.info("desktop limit notice: stood setup=%s session=%s to=%s", setup.id, row.session_key, " ".join(member_prefix(p.member_id) for p in who))
     for person in who:  # each person once — and each in a savepoint of their own: one person's failure takes back only their own echo, never another person's
         try:
             async with db.begin_nested():
@@ -328,6 +339,7 @@ async def _stood_for(db: AsyncSession, setup: DesktopSetup, row: DesktopSession,
     locale = person.locale
     if not await _claim_window(setup.org_id, person.user_id):
         await _add_promised_setups(setup.org_id, person.user_id, [setup.id])  # folded into the notice that went: its promise covers this setup too
+        logger.info("desktop limit notice: stood not sent (a notice went to this person within the window) setup=%s to=%s", setup.id, member_prefix(person.member_id))
         return
     try:
         rows = await _limited_rows(db, setup.org_id, person.user_id)
@@ -365,8 +377,9 @@ async def _stood_for(db: AsyncSession, setup: DesktopSetup, row: DesktopSession,
             # the person would never hear «stopped» and later hear only «working again», and for five minutes no report could tell it
             # (Kadir's codex lens ③, 10-14)
             await _release_window(setup.org_id, person.user_id)
-            logger.warning("desktop limit notice: the stood notice reached nobody setup=%s session=%s", setup.id, row.session_key)
+            logger.warning("desktop limit notice: the stood notice reached nobody setup=%s session=%s to=%s", setup.id, row.session_key, member_prefix(person.member_id))
             return
+        logger.info("desktop limit notice: stood sent setup=%s to=%s sent=%d", setup.id, member_prefix(person.member_id), sent)
         await _add_promised_setups(setup.org_id, person.user_id, [setup.id, *(r.setup_id for r in rows)])  # the promise is about THESE setups (merged, never replaced)
         await _save_open(setup.org_id, person.user_id, {"agent": str(agents[0]), "others": others})
     except Exception:
@@ -422,34 +435,121 @@ async def _lifted_for(db: AsyncSession, setup: DesktopSetup, row: DesktopSession
     await db.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"desktop-limit-lifted:{setup.org_id}:{person.user_id}"))))
     promised = await _promised_setups(setup.org_id, person.user_id)
     if await _limited_rows(db, setup.org_id, person.user_id, also_setups=promised):
+        logger.info("desktop limit notice: lifted not sent (some still stand) setup=%s to=%s", setup.id, member_prefix(person.member_id))
         return  # some are still standing — «all working again» would be false
     record = await _take_open(setup.org_id, person.user_id)
     if record is None or row.state == "stopped":
+        logger.info("desktop limit notice: lifted not sent (%s) setup=%s to=%s", "session ended" if record is not None else "nothing was promised", setup.id, member_prefix(person.member_id))
         return  # nothing was promised (or the session ended — not «working again»)
     locale = person.locale
     agent_id = uuid.UUID(record["agent"])
     others = int(record.get("others") or 0)
     name = await _agent_name(db, agent_id)
     kind = "many" if others else "one"
-    await dispatch_notification(
+    sent = await dispatch_notification(
         db, org_id=setup.org_id, event_type="agent.limit_lifted", target_member_ids=[person.member_id],
         title=t(f"desktop_limit_notice.lifted.title_{kind}", locale, agent=name, others=others),
         body=t(f"desktop_limit_notice.lifted.body_{kind}", locale),
         reference_type="agent", reference_id=agent_id, source_project_id=setup.project_id,
         event={"payload": {"agent_name": name}},
     )
+    logger.info("desktop limit notice: lifted sent setup=%s to=%s sent=%d", setup.id, member_prefix(person.member_id), sent)
+
+
+async def _claim_due_lift(db: AsyncSession, row_id: uuid.UUID, cutoff: datetime) -> bool:
+    """story 4781: take a waiting lift once — atomic, so two reports (or a report and the sweep, on two instances) never tell it twice. True = this call owns it."""
+    got = await db.execute(
+        update(DesktopSession).where(
+            DesktopSession.id == row_id, DesktopSession.limit_cleared_at.is_not(None), DesktopSession.limit_cleared_at <= cutoff,
+            DesktopSession.limited.is_not(True), DesktopSession.state != "stopped",
+        ).values(limit_cleared_at=None).returning(DesktopSession.id)
+    )
+    return got.first() is not None
+
+
+async def _tell_if_due(db: AsyncSession, setup: DesktopSetup, row: DesktopSession) -> None:
+    """story 4781: the waiting lift of this row goes now if the limit has stayed gone for the hold (claimed once)"""
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=LIFT_HOLD_SEC)
+    if await _claim_due_lift(db, row.id, cutoff):
+        await db.refresh(row)
+        logger.info("desktop limit notice: lift told (the limit stayed gone) setup=%s session=%s", setup.id, row.session_key)
+        await _lifted(db, setup, row)
 
 
 async def after_report(db: AsyncSession, setup: DesktopSetup, row: DesktopSession, *, was_limited: bool) -> None:
-    """Called after a report is written (flushed). `was_limited`: the row's `limited` BEFORE this report overwrote it."""
+    """Called after a report is written (flushed). `was_limited`: the row's `limited` BEFORE this report overwrote it.
+
+    story 4781: a lift of a LIVE session is not told at once — `limit_cleared_at` marks it and the line goes when the limit has stayed gone for LIFT_HOLD_SEC (this call on a
+    later report, or the sweep). A report that puts the limit back first cancels the waiting line AND the new «stopped» notice: the limit never lifted."""
     now_limited = bool(row.limited)
-    if now_limited == was_limited:
-        return
     try:
         async with db.begin_nested():  # a failure here rolls back to here — the state report itself stands
+            if row.state == "stopped":
+                row.limit_cleared_at = None  # an ended session waits for nothing (and a new session under the same key must not inherit a wait)
+            elif now_limited and row.limit_cleared_at is not None:
+                row.limit_cleared_at = None
+                logger.info("desktop limit notice: lift cancelled (the limit came back before it was told) setup=%s session=%s", setup.id, row.session_key)
+                return  # same episode: no second «stopped» either
+            elif not now_limited and not was_limited and row.limit_cleared_at is not None:
+                await _tell_if_due(db, setup, row)
+                return
+            if now_limited == was_limited:
+                return
             if now_limited:
                 await _stood(db, setup, row)
+            elif row.state == "stopped":
+                await _lifted(db, setup, row)  # the session ended: it clears the outstanding notice without a line (as before)
             else:
-                await _lifted(db, setup, row)
+                row.limit_cleared_at = datetime.now(timezone.utc)
+                await db.flush()
+                logger.info("desktop limit notice: lift waits %ds (not told yet) setup=%s session=%s", LIFT_HOLD_SEC, setup.id, row.session_key)
+                await _tell_if_due(db, setup, row)  # (a hold of 0 tells it now)
     except Exception:  # noqa: BLE001 — the notice is the echo of the record, never its condition
         logger.warning("desktop limit notice failed setup=%s session=%s", setup.id, row.session_key, exc_info=True)
+
+
+async def sweep_due_lifts(db: AsyncSession) -> int:
+    """story 4781: tell the lifts whose hold has run out although no report came (a long working turn reports nothing). Returns how many were told. One lift per call
+    to `_lifted` inside its own savepoint; the caller commits."""
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=LIFT_HOLD_SEC)
+    due = (await db.execute(
+        select(DesktopSession.id).where(
+            DesktopSession.limit_cleared_at.is_not(None), DesktopSession.limit_cleared_at <= cutoff, DesktopSession.limited.is_not(True), DesktopSession.state != "stopped",
+        ).order_by(DesktopSession.limit_cleared_at.asc()).limit(50)
+    )).scalars().all()
+    told = 0
+    for row_id in due:
+        try:
+            async with db.begin_nested():
+                if not await _claim_due_lift(db, row_id, cutoff):
+                    continue  # another instance (or a report) took it
+                row = await db.get(DesktopSession, row_id)
+                setup = await db.get(DesktopSetup, row.setup_id) if row is not None else None
+                if row is None or setup is None:
+                    continue
+                logger.info("desktop limit notice: lift told (the limit stayed gone, sweep) setup=%s session=%s", setup.id, row.session_key)
+                await _lifted(db, setup, row)
+                told += 1
+        except Exception:  # noqa: BLE001
+            logger.warning("desktop limit notice: the sweep failed for one lift session_id=%s", row_id, exc_info=True)
+    return told
+
+
+async def lift_sweep_loop() -> None:
+    """story 4781: the sweep, every LIFT_SWEEP_SEC, on a session of its own (every instance runs it; the claim above keeps a lift to one telling)."""
+    import asyncio
+
+    from app.core.database import async_session_factory
+
+    while True:
+        try:
+            await asyncio.sleep(LIFT_SWEEP_SEC)
+            async with async_session_factory() as db:
+                if await sweep_due_lifts(db):
+                    await db.commit()
+                else:
+                    await db.rollback()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 — a failed sweep tries again at the next tick
+            logger.warning("desktop limit notice: the lift sweep failed", exc_info=True)

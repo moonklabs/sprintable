@@ -40,6 +40,23 @@ _EXPO_CREDENTIAL_ERRORS = frozenset({"InvalidCredentials", "MismatchSenderId"})
 # the structured events (Cloud Logging jsonPayload.event) the monitoring policy and the probe filter on — ids · counts · codes only, never a name, an e-mail or a token
 EXPO_CREDENTIALS_ERROR_EVENT = "expo_push_credentials_error"
 EXPO_PUSH_SKIPPED_EVENT = "expo_push_skipped"
+# story 4781 (AC1): who a push reached — the first 8 characters of the member id, never a name — and how many of THEIR devices took it; one line per send
+EXPO_PUSH_RECIPIENTS_EVENT = "expo_push_recipients"
+_RECIPIENTS_LINE_MAX = 20
+
+
+def _member_prefix(member_id: object) -> str:
+    """the first 8 hex characters of a member id (enough to tell people apart in a log, not a name or a whole id); `unknown` for anything else"""
+    text = str(member_id) if member_id is not None else ""
+    return text[:8] if re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F-]{27}", text) else "unknown"
+
+
+def _recipients_text(by_member: dict[str, dict[str, int]]) -> str:
+    """`a1b2c3d4(devices=2 ok=1 error=1) …` — closed: prefix · counts; at most _RECIPIENTS_LINE_MAX people, then `+N`"""
+    parts = [f"{who}(devices={n['devices']} ok={n['ok']} error={n['error']})" for who, n in list(by_member.items())[:_RECIPIENTS_LINE_MAX]]
+    if len(by_member) > _RECIPIENTS_LINE_MAX:
+        parts.append(f"+{len(by_member) - _RECIPIENTS_LINE_MAX}")
+    return " ".join(parts)
 
 
 async def _expo_send_chunk(messages: list[dict]) -> list[dict]:
@@ -263,7 +280,7 @@ async def _fetch_expo_push_targets(
     if not devices:
         _log_push_skipped("no_devices", org_id, event_type, recipients=len(member_ids), muted=len(member_ids) - len(targets))
     # story #4396 — id · platform: an ok ticket is remembered by device (not token) for the later receipt check.
-    return [{"expo_push_token": d.expo_push_token, "id": d.id, "platform": d.platform} for d in devices]
+    return [{"expo_push_token": d.expo_push_token, "id": d.id, "platform": d.platform, "member_id": d.member_id} for d in devices]
 
 
 async def _send_expo_push_targets(
@@ -317,20 +334,29 @@ async def _send_expo_push_targets(
     ok_count = 0
     error_count = 0
     error_reasons: dict[str, int] = {}
+    error_platforms: dict[str, int] = {}  # story 4781 (AC3): which kind of device the error tickets came from (ios · android · macos · unknown) — the credentials class is per platform
+    by_member: dict[str, dict[str, int]] = {}  # story 4781: per person (id prefix) — devices tried · ok tickets · error tickets
+    for d in devices:
+        by_member.setdefault(_member_prefix(d.get("member_id")), {"devices": 0, "ok": 0, "error": 0})["devices"] += 1
     for i in range(0, len(messages), _EXPO_MAX_BATCH):
         chunk = messages[i:i + _EXPO_MAX_BATCH]
         chunk_devices = devices[i:i + _EXPO_MAX_BATCH]
         tickets = await _expo_send_chunk(chunk)
         # ticket 은 메시지와 동순서. 개수 불일치(부분 응답) 시 zip 이 짧은 쪽 기준(안전).
         for dev, ticket in zip(chunk_devices, tickets):
+            who = by_member[_member_prefix(dev.get("member_id"))]
             if isinstance(ticket, dict) and ticket.get("status") == "error":
                 error_count += 1
+                who["error"] += 1
+                plat = dev.get("platform") if dev.get("platform") in ("ios", "android", "macos") else "unknown"
+                error_platforms[plat] = error_platforms.get(plat, 0) + 1
                 err = _expo_error_code(ticket)
                 error_reasons[err] = error_reasons.get(err, 0) + 1
                 if err == "DeviceNotRegistered":
                     dead_tokens.append(dev["expo_push_token"])
             elif isinstance(ticket, dict) and ticket.get("status") == "ok":
                 ok_count += 1
+                who["ok"] += 1
                 if ticket.get("id") and dev.get("id"):
                     ok_tickets.append((str(ticket["id"]), dev["id"], dev.get("platform")))
 
@@ -341,6 +367,15 @@ async def _send_expo_push_targets(
     logger.info(
         "expo push: sent org=%s event=%s devices=%d ok=%d error=%d reasons=%s",
         org_id, event_type, len(devices), ok_count, error_count, error_reasons or None,
+    )
+    # story 4781 (AC1): and WHO — on 10-25 the log said how many devices took a push but not whose, so «did it reach the owner» could not be answered
+    logger.info(
+        "expo push: recipients org=%s event=%s to=%s error_platforms=%s", org_id, event_type, _recipients_text(by_member),
+        " ".join(f"{k}:{v}" for k, v in sorted(error_platforms.items())) or "none",
+        extra={"structured": {
+            "event": EXPO_PUSH_RECIPIENTS_EVENT, "org_id": str(org_id), "event_type": event_type,
+            "to": {who: dict(n) for who, n in list(by_member.items())[:_RECIPIENTS_LINE_MAX]}, "error_platforms": dict(error_platforms),
+        }},
     )
     # story 4694: the credentials class is an ERROR line of its own (the alert policy keys on `jsonPayload.event`) — the closed codes only, counts only
     credential_errors = {code: n for code, n in error_reasons.items() if code in _EXPO_CREDENTIAL_ERRORS}
