@@ -449,3 +449,53 @@ describe('AgentSessionStrip — another agent\'s view is never shown (story 4684
     expect(container.textContent).toContain('B-맥');
   });
 });
+
+// story #4763 (AC4): a session that has not begun to run says what it waits on — the question at its computer — not «시작됨» for minutes
+describe('AgentSessionStrip — the first-screen question (story #4763 AC4 · AC12)', () => {
+  it.each(['trust', 'mcp', 'mcp_many', 'update'] as const)('starting + the %s question → «Mac에서 답을 기다려요» (en too) — not «시작됨»', async (ask) => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'starting', first_screen: { ask } }));
+    await render();
+    expect(chip()).toBe(koMessages.chats.agentSession.state.waiting_first_screen);
+    expect(chip()).toBe('Mac에서 답을 기다려요');
+    root.unmount(); root = createRoot(container);
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'starting', first_screen: { ask } }));
+    await render('en');
+    expect(chip()).toBe(enMessages.chats.agentSession.state.waiting_first_screen);
+  });
+
+  it('the CLI stands on the question after an instruction went in (the session reads «working»/«idle») → the same line, not «작업 중»', async () => {
+    for (const state of ['working', 'idle'] as const) {
+      fetchWithAuth.mockResolvedValueOnce(view({ state, first_screen: { ask: 'mcp' } }));
+      root.unmount(); root = createRoot(container);
+      await render();
+      expect(chip(), state).toBe('Mac에서 답을 기다려요');
+    }
+  });
+
+  it('starting with no question (or an older server that sends none) keeps «시작됨»; the question is gone → «작업 중» (the report without it clears it)', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'starting' }));
+    await render();
+    expect(chip()).toBe('시작됨');
+    root.unmount(); root = createRoot(container);
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', first_screen: null }));
+    await render();
+    expect(chip()).toBe('작업 중');
+  });
+
+  it('a stopped or lost session keeps its own word: a stale question never covers «끝» / «상태 모름» (and a permission wait keeps «권한 대기»)', async () => {
+    for (const [state, word] of [['stopped', '끝'], ['unknown', '상태 모름'], ['waiting_permission', '권한 대기']] as const) {
+      fetchWithAuth.mockResolvedValueOnce(view({ state, first_screen: { ask: 'trust' } }));
+      root.unmount(); root = createRoot(container);
+      await render();
+      expect(chip(), state).toBe(word);
+    }
+  });
+
+  it('sessionStateLabel is the one place that chooses it (the workforce line shares it)', () => {
+    const t = (k: string) => k;
+    expect(sessionStateLabel({ state: 'starting', first_screen: { ask: 'trust' } }, t)).toBe('state.waiting_first_screen');
+    expect(sessionStateLabel({ state: 'starting', first_screen: { ask: 'mcp_many' } }, t)).toBe('state.waiting_first_screen');
+    expect(sessionStateLabel({ state: 'starting' }, t)).toBe('state.starting');
+    expect(sessionStateLabel({ state: 'starting', first_screen: null }, t)).toBe('state.starting');
+  });
+});

@@ -25,6 +25,7 @@ from app.services.desktop_relay import (
     PROMPT_MAX,
     SESSION_KEY_PATTERN,
     DesktopRelayError,
+    first_screen_view,
     inbox_view,
     legacy_state,
     limit_view,
@@ -158,7 +159,7 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
     # story #4534 (phone contract 48616ee0 v0.3): the names the phone's sheet and system prompt show — never signed
     view = {"agent_name": agent.name,
             "conversation": await _conversation_named(db, conversation_id, member_id=member_id, agent=agent) if conversation_id else None,
-            "setup_id": None, "device_name": None, "session_key": None, "runtime": None, "state": None, "activity": None, "state_at": None, "limit": None, "run": None, "instruct_now": None,
+            "setup_id": None, "device_name": None, "session_key": None, "runtime": None, "state": None, "activity": None, "state_at": None, "limit": None, "run": None, "first_screen": None, "instruct_now": None,
             "remote_control": await remote_control.is_enabled(db, org_id),
             "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent,
                                        setup=setups[0] if setups else None),
@@ -190,6 +191,8 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
         # story #4686: what it runs on — only while the device is heard and the session lives (the same gate)
         "run": run_view(pick) if state == pick.state and pick.state != "stopped" else None,
         "inbox": inbox_view(pick) if state == pick.state and pick.state != "stopped" else None,  # story #4684
+        # story #4763: the first-screen question that stands at that computer — the same gate: the device is heard and the session lives
+        "first_screen": first_screen_view(pick) if state == pick.state and pick.state != "stopped" else None,
         # story #4599: a held turn's why (the window's folder) — only while the device is heard
         "system": system_view(pick) if state == pick.state else None,
         # story #4641: a widening a person made at the terminal — the three keys, only while the device is heard (the same gate as above)

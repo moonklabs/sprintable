@@ -5333,6 +5333,7 @@
       },
       "state": {
         "starting": "Started",
+        "waiting_first_screen": "Waiting for your answer on the Mac",
         "working": "Working",
         "idle": "Waiting for work",
         "waiting_permission": "Waiting for permission",

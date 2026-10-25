@@ -39,6 +39,8 @@ SESSION_WIDENED_MODES = ("plan", "default", "acceptEdits", "auto", "dontAsk", "b
 SESSION_LIMIT_HELD = ("screen", "esc_not_taken")
 # story #4684 (0454): why a computer's subscription for an agent is stopped — the app board's own closed words (the daemon's InboxStreamStatus stops)
 SESSION_INBOX_STREAMS = ("stopped_other_receiver", "stopped_taken_over", "stopped_auth", "stopped_inbox_full")
+# story #4763 (0465): the first-screen question that stands at a computer (one closed word — the daemon's own list, 4528: folder trust · Claude's new-MCP-server(s) question · Codex's update)
+SESSION_FIRST_SCREEN_ASKS = ("trust", "mcp", "mcp_many", "update")
 SESSION_RUNTIMES = ("claude", "codex")
 # story #4733 (0459): the clock view a computer reports. A row exists while a flow is open (panel · out · in) — or, in mode `none`, only while some agents stand
 # clocked out one by one (`outs`: ids and times, so the phone can draw each one's [출근]); a `none` report with nothing in it deletes the row
@@ -94,6 +96,8 @@ class DesktopSession(Base):
         CheckConstraint("run_effort IS NULL OR run_effort IN ('low','medium','high','xhigh','max','ultra')", name="ck_desktop_sessions_run_effort"),
         # story #4684 (0454): the receive stop's closed set in the DB too
         CheckConstraint(f"inbox_stream IS NULL OR {_in('inbox_stream', SESSION_INBOX_STREAMS)}", name="ck_desktop_sessions_inbox_stream"),
+        # story #4763 (0465): the first-screen question's closed set in the DB too
+        CheckConstraint(f"first_screen_ask IS NULL OR {_in('first_screen_ask', SESSION_FIRST_SCREEN_ASKS)}", name="ck_desktop_sessions_first_screen_ask"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -133,6 +137,8 @@ class DesktopSession(Base):
     inbox_stream: Mapped[str | None] = mapped_column(Text, nullable=True)
     # story #4534 (0438): whether the session can take an instruction into the running turn — hides [지금 지시] when not (only)
     instruct_now: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # story #4763 (0465): the first-screen question that stands at that computer (`trust`) — set by the report that carries `first_screen`
+    first_screen_ask: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class DesktopCommand(Base):
