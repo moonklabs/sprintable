@@ -240,10 +240,27 @@ describe('[SID:4780] ActivationChecklistBanner — the finish is shown once', ()
   it('under StrictMode with the checklist already complete on the first render (no fetch: the browser knows it is complete) the line shows once', async () => {
     localStore.set('sprintable_activation_checklist_complete:org-1', '1');
     localStore.set(SEEN('org-1'), '1');
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('no fetch expected'); }));
+    const noFetch = vi.fn(async () => { throw new Error('no fetch expected'); });
+    vi.stubGlobal('fetch', noFetch);
     const { StrictMode } = await import('react');
     await act(async () => { root.render(<StrictMode>{wrap()}</StrictMode>); });
     await flush();
+    expect(noFetch).not.toHaveBeenCalled(); // the browser already knows it is complete: nothing is asked
     expect(done()).not.toBeNull(); // the first effect run spends the mark; the replay must find the state already set
+  });
+
+  it('after an organization switch and back within the 10 s the line is not shown again (the switch took it down, the mark is spent)', async () => {
+    localStore.set(SEEN('org-1'), '1');
+    answers(COMPLETE);
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    expect(done()).not.toBeNull();
+    mockOrg.orgId = 'org-2';
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    mockOrg.orgId = 'org-1';
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    expect(done()).toBeNull(); // reverted (the organization branch of the clearing effect removed) → the line returns for org-1
   });
 });
