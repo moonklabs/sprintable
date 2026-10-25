@@ -86,12 +86,79 @@ describe('[SID:4780] usePairHref — the pairing screen\'s address from the page
     const offBad = subscribeToLocation(() => { throw new Error('bad listener'); });
     const offGood = subscribeToLocation(() => { seen.push(window.location.pathname); });
     try {
-      expect(() => window.history.pushState({}, '', '/inbox')).not.toThrow(); // reverted (no isolation) → the pushState call throws after the URL changed
+      expect(() => window.history.pushState({}, '', '/inbox')).not.toThrow();
       expect(window.location.pathname).toBe('/inbox');
-      expect(seen).toEqual(['/inbox']); // the one after the bad one was still told
+      await Promise.resolve(); // the listeners are told in a microtask
+      expect(seen).toEqual(['/inbox']); // the one after the bad one was still told (reverted: no isolation → the bad one stops it)
     } finally {
       offBad();
       offGood();
+    }
+  });
+
+  // Kadir delta on 5232: Next's app router (HistoryUpdater) calls history.pushState / replaceState INSIDE a `useInsertionEffect`; a listener that makes React schedule an update right there is a React error
+  // («useInsertionEffect must not schedule updates») — so the store tells its listeners after the call, not inside it
+  it('a navigation made inside a useInsertionEffect (what Next\'s HistoryUpdater does) is followed without React complaining', async () => {
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => { errors.push(args.map(String).join(' ')); });
+    const { useInsertionEffect } = await import('react');
+    function FakeHistoryUpdater({ to }: { to: string | null }) {
+      useInsertionEffect(() => { if (to) window.history.pushState({}, '', to); }, [to]);
+      return null;
+    }
+    try {
+      expect(await hrefAt('/today?p=proj-1')).toBe('/desktop/pair?from=%2Ftoday%3Fp%3Dproj-1&p=proj-1');
+      await act(async () => { root!.render(<><FakeHistoryUpdater to={null} /><Probe key="p2" /></>); });
+      await act(async () => { root!.render(<><FakeHistoryUpdater to="/inbox" /><Probe key="p2" /></>); });
+      await act(async () => { await Promise.resolve(); });
+      expect(errors.filter((e) => e.includes('useInsertionEffect'))).toEqual([]); // reverted (listeners told inside the call) → «useInsertionEffect must not schedule updates»
+      expect(container!.querySelector('a')!.getAttribute('href')).toBe('/desktop/pair?from=%2Finbox&p=proj-1'); // and the link did follow
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  // Kadir delta on 5232 ②: Next's app router puts the natives back when it unmounts (and in a dev remount); a wrapper installed before that is gone — the next subscription wraps again
+  it('after the native history is put back (Next unmounting its router) the next subscription wraps again and the link follows', async () => {
+    const native = (method: 'pushState' | 'replaceState') => function (this: History, ...args: Parameters<History['pushState']>) { return History.prototype[method].apply(window.history, args); };
+    window.history.pushState = native('pushState'); // the store's wrappers are gone
+    window.history.replaceState = native('replaceState');
+    expect(await hrefAt('/today?p=proj-1')).toBe('/desktop/pair?from=%2Ftoday%3Fp%3Dproj-1&p=proj-1'); // the entry subscribes on mount
+    await act(async () => { window.history.pushState({}, '', '/inbox'); });
+    expect(container!.querySelector('a')!.getAttribute('href')).toBe('/desktop/pair?from=%2Finbox&p=proj-1'); // reverted (wrapped once for ever) → still /today
+    await act(async () => { window.history.replaceState({}, '', '/chats/conv-7'); });
+    expect(container!.querySelector('a')!.getAttribute('href')).toBe('/desktop/pair?from=%2Fchats%2Fconv-7&p=proj-1');
+  });
+
+  it('subscribing again while the wrapper is in place adds no layer (every entry that mounts subscribes)', async () => {
+    const { subscribeToLocation } = await import('@/lib/location-store');
+    const off0 = subscribeToLocation(() => undefined);
+    const push = window.history.pushState;
+    const replace = window.history.replaceState;
+    const offs = Array.from({ length: 20 }, () => subscribeToLocation(() => undefined));
+    try {
+      expect(window.history.pushState).toBe(push); // reverted (wraps on every subscription) → a new function each time
+      expect(window.history.replaceState).toBe(replace);
+    } finally {
+      offs.forEach((off) => off());
+      off0();
+    }
+  });
+
+  it('something patched over the wrapper (Next patching history after the store) tells a listener once per navigation, not once per layer', async () => {
+    const { subscribeToLocation } = await import('@/lib/location-store');
+    const off0 = subscribeToLocation(() => undefined); // wrapper in place
+    const mine = window.history.pushState;
+    window.history.pushState = function (this: History, ...args: Parameters<History['pushState']>) { return mine.apply(this, args); }; // a patch over it
+    let told = 0;
+    const off = subscribeToLocation(() => { told += 1; }); // wraps again (the wrapper is no longer the one in place)
+    try {
+      window.history.pushState({}, '', '/inbox');
+      await Promise.resolve();
+      expect(told).toBe(1); // reverted (not coalesced) → 2: one per layer
+    } finally {
+      off();
+      off0();
     }
   });
 
@@ -105,6 +172,7 @@ describe('[SID:4780] usePairHref — the pairing screen\'s address from the page
     const off2 = second.subscribeToLocation(() => { calls.push('second'); });
     try {
       window.history.pushState({}, '', '/today');
+      await Promise.resolve();
       expect(calls.sort()).toEqual(['first', 'second']); // reverted (state in the module) → the wrapper is wrapped again and each listener is told twice
       expect(second._locationListenerCountForTests()).toBe(before + 2); // ONE store: the second instance sees the first's listener too (reverted → it sees only its own)
     } finally {
