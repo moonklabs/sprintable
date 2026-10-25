@@ -388,3 +388,30 @@ async def test_07_the_agents_organization_identity_is_taken_only_for_a_real_memb
                 assert [json.loads(f).get("error") for f in frames] == ["forbidden"], frames
     finally:
         await _close(engine, w)
+
+
+async def test_08_an_owner_of_another_organization_is_refused_at_the_agents_room():
+    """The project gate behind the organization cross-check has an admin-bypass road: pinned from the outside — an OWNER of a different organization (not just a plain member) that
+    connects to this organization's agent is refused (4003 'forbidden', nothing kept). Run with the cross-check removed (mutant W11) too, this cell tells whether the check is redundant."""
+    engine, w, owner_email, owner, owner_uid, org_x, org_y, m, tok_x, tok_y, agent_id, project = await _world_with_agent()
+    try:
+        _, other_email, other_org = await w.person(org=True, name="Owner of another organization")
+        assert other_org != org_x
+        other = await w.tokens(other_email)
+        async with _Server(w.app) as srv:
+            async with websockets.connect(await _ws_url(srv.port, agent_id, other)) as wo:
+                try:
+                    await wo.send(json.dumps({"content": "OTHER ORG OWNER line"}))
+                except websockets.exceptions.ConnectionClosed:
+                    pass
+                frames, code = [], None
+                try:
+                    while True:
+                        frames.append(await asyncio.wait_for(wo.recv(), 10))
+                except websockets.exceptions.ConnectionClosed as e:
+                    code = e.rcvd.code if e.rcvd is not None else None
+                assert code == 4003, (code, frames)
+                assert [json.loads(f).get("error") for f in frames] == ["forbidden"], frames
+        assert await _scalar(w, "SELECT count(*) FROM conversation_messages WHERE content = 'OTHER ORG OWNER line'") == 0
+    finally:
+        await _close(engine, w)
