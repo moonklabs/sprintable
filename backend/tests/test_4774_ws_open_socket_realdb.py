@@ -362,3 +362,29 @@ async def test_06_an_agent_key_socket_is_never_asked_the_persons_seat_question()
         await ws_chat.ws_chat_hub(ws, agent_id, api_key="sk_live_" + "a" * 8, token=None)
     asked.assert_not_called()
     assert ws.closed is None and saved == ["answer"], (ws.closed, saved)
+
+
+async def test_07_the_agents_organization_identity_is_taken_only_for_a_real_member_of_that_organization():
+    """The re-resolution in the agent's organization never invents a seat: a person who is in ANOTHER organization only (removed from the agent's) keeps the identity they have there
+    and is refused (4003) — and a person who IS a member still passes the project-access rule of the connect gate (story 4775 AC4): an org member with no way to the agent's project is refused."""
+    engine, w, owner_email, owner, owner_uid, org_x, org_y, m, tok_x, tok_y, agent_id, project = await _world_with_agent()
+    try:
+        # M is placed in a project of org Y (identity there), then removed from org X (the agent's)
+        await w.sql(
+            "INSERT INTO project_access (id, project_id, org_member_id, member_id, permission) "
+            "SELECT gen_random_uuid(), (SELECT id FROM projects WHERE org_id = :o LIMIT 1), om.id, om.id, 'granted' FROM org_members om WHERE om.org_id = :o AND om.user_id = :u",
+            o=org_y, u=m,
+        )
+        assert (await _remove(w, owner_email, org_x, m)).status_code == 200
+        async with _Server(w.app) as srv:
+            async with websockets.connect(await _ws_url(srv.port, agent_id, tok_x)) as wm:
+                frames, code = [], None
+                try:
+                    while True:
+                        frames.append(await asyncio.wait_for(wm.recv(), 10))
+                except websockets.exceptions.ConnectionClosed as e:
+                    code = e.rcvd.code if e.rcvd is not None else None
+                assert code == 4003, (code, frames)
+                assert [json.loads(f).get("error") for f in frames] == ["forbidden"], frames
+    finally:
+        await _close(engine, w)
