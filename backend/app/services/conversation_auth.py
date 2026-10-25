@@ -123,3 +123,53 @@ def conversation_readable_predicate(
         and_(is_participant, pav),
         and_(~has_human_participant, abe),
     )
+
+
+async def socket_can_read_conversation(
+    db,
+    conversation_id: uuid.UUID,
+    org_id: uuid.UUID,
+    *,
+    member_id: uuid.UUID,
+    access_user_id: uuid.UUID,
+    via_agent_key: bool,
+) -> bool:
+    """story #4775 — may THIS socket's person/agent be sent a line of this conversation?  The same question REST answers for
+    `GET /conversations/{id}/messages` (`routers/conversations.py::_can_read_conversation`), asked with what a socket knows about its owner
+    instead of an `AuthContext`: the boolean structure is the one SSOT above (`conversation_readable_predicate`), the project-access atom is
+    the one `has_project_access`, the admin-bypass atom the one correlated pair (`org_admin_valid_correlated` for a person,
+    `project_admin_valid_correlated` for an agent key) — nothing is re-derived here.
+
+    `member_id` is what `conversation_participants.member_id` holds for the socket's owner; `access_user_id` is what `has_project_access`
+    takes (the person's user id; the agent's member id for a key socket). A total predicate: any failure answers False (a line is only ever
+    sent to a socket that was positively found allowed).
+    """
+    from sqlalchemy import literal
+
+    from app.models.conversation import Conversation
+    from app.services.project_auth import has_project_access, org_admin_valid_correlated, project_admin_valid_correlated
+
+    try:
+        conv_project_id = (await db.execute(
+            select(Conversation.project_id).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+        )).scalar_one_or_none()
+        if conv_project_id is None:
+            return False
+        admin_bypass_eligible = (
+            project_admin_valid_correlated(literal(conv_project_id), caller_id=member_id, org_id=org_id)
+            if via_agent_key
+            else org_admin_valid_correlated(caller_id=access_user_id, org_id=org_id)
+        )
+        project_access_valid = await has_project_access(db, access_user_id, conv_project_id, org_id)
+        predicate = conversation_readable_predicate(
+            literal(conversation_id),
+            caller_member_id=member_id,
+            project_access_valid=project_access_valid,
+            admin_bypass_eligible=admin_bypass_eligible,
+        )
+        return bool((await db.execute(select(predicate))).scalar_one())
+    except Exception:  # noqa: BLE001 — total predicate: «cannot tell» is «no»
+        import logging
+
+        logging.getLogger(__name__).warning("socket_can_read_conversation failed conversation=%s", conversation_id, exc_info=True)
+        return False

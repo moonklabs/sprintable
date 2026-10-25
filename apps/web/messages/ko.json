@@ -1468,6 +1468,9 @@
   "login": {
     "title": "Sprintable",
     "subtitle": "열린 루프를 닫는 조직 OS",
+    "macAppPitch": "AI 에이전트가 일감을 받아 끝까지 해내는 곳이에요. Mac 앱을 받아 내 에이전트를 시작해요.",
+    "macAppGet": "Mac 앱 받기",
+    "macAppGetHint": "먼저 회원가입하고 이메일 인증을 마치면 받을 수 있어요",
     "sessionExpired": "세션이 만료되어 로그아웃됐어요. 다시 로그인해 주세요.",
     "google": "Google로 계속",
     "apple": "Apple로 계속하기",
@@ -1709,6 +1712,9 @@
     "artifactUnavailable": "이 환경에는 호스팅 배포가 없어요.",
     "verifyExampleLabel": "에이전트에게 이렇게 말해 보세요:",
     "verifyExamplePrompt": "내 스토리 목록 보여줘",
+    "orgDeletedTitle": "조직을 삭제했어요",
+    "orgDeletedBody": "이 계정에는 이제 조직이 없어요. 계속 쓰려면 새 조직을 만들어 주세요.",
+    "orgDeletedNew": "새 조직 만들기",
     "arriving": "준비하는 중…",
     "inviteCheckFailed": "초대를 확인하지 못했어요 — 확인한 뒤에 조직을 만들어요",
     "accountCheckFailed": "계정을 확인하지 못했어요 — 확인한 뒤에 조직을 만들어요",
@@ -7002,6 +7008,9 @@
     "rowDetailAdsSpendLabel": "광고비"
   },
   "desktop": {
+    "openAppTitle": "이 Mac에 앱이 있나요?",
+    "openAppCta": "앱 열기",
+    "openAppNoAppNote": "앱이 없다면 아래에서 받을 수 있어요.",
     "loading": "불러오는 중…",
     "title": "데스크톱 앱",
     "targetLabel": "대상 macOS (Apple Silicon)",

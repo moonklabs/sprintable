@@ -3453,7 +3453,7 @@ async def send_message_core(
                 async def _ws_send(ids: set[str] = agent_ids, payload: str = ws_payload) -> None:
                     for aid in ids:
                         if aid in _rooms:
-                            await _broadcast(aid, payload)
+                            await _broadcast(aid, payload, conversation_id=conversation_id)
 
                 if after_commit is None:
                     await _ws_send()

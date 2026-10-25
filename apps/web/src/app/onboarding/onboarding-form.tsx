@@ -3,10 +3,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { UpgradeModal } from '@/components/ui/upgrade-modal';
+import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { OperatorInput, OperatorTextarea, OperatorSelect } from '@/components/ui/operator-control';
 import { useTranslations } from 'next-intl';
-import { fetchWithAuth, refreshAuthTokens } from '@/lib/db/client';
+import { fetchWithAuth, refreshAuthTokens, refreshSessionOnce } from '@/lib/db/client';
 import { defaultOrgName } from '@/lib/default-org-name';
 import { fetchMyInvites, type MyInvite } from '@/lib/my-invites';
 import { InvitedCard } from '@/components/desktop/desktop-setup';
@@ -33,7 +34,15 @@ const AGENT_ROLE_LABEL_KEYS: Record<string, string> = {
 // organization, or their pending invites, or makes the organization with a made name («{name}의 조직» / «내 조직»), then shows ONE
 // screen («first»: on a Mac [Mac 앱 받기] · elsewhere «지금은 Mac 앱만 있어요»). The web way (an agent already running somewhere else)
 // keeps project → agent → connect.
-type Step = 'arrive' | 'invited' | 'first' | 'project' | 'agent' | 'connect';
+/** story 4763 (H6 · codex): how long the organization-deleted screen waits for its quiet check before it is drawn anyway (the same screen a failed check shows) */
+export const DELETED_CHECK_MAX_MS = 8000;
+
+/** story 4763 (H6 · codex): the press has been made — the `?after=org-deleted` of the address goes, so a reload is the usual onboarding */
+function forgetOrgDeletedMarker() {
+  try { window.history.replaceState(window.history.state, '', window.location.pathname); } catch { /* an address that cannot be changed stays */ }
+}
+
+type Step = 'arrive' | 'invited' | 'first' | 'project' | 'agent' | 'connect' | 'deleted';
 
 /** The progress strip: only the web way's three steps have one (1/3 · 2/3 · 3/3) — arrival, invites and the one screen have none. */
 export function onboardingProgress(step: Step): { fraction: number; label: { current: number; total: number } } | null {
@@ -63,19 +72,21 @@ interface OnboardingFormProps {
   chatsHref: string;
   /** story 4714 AC2: resolved by the server page (`isDesktopDownloadEnabled`) — whether the phone app's first screen offers «메일로 받기» */
   macDownloadEnabled?: boolean;
+  /** story 4763 (H6): the person was sent here by deleting their organization — they are told, and the new one is made on their press (never silently, with the same name) */
+  afterOrgDelete?: boolean;
 }
 
 /** What arrival is doing: working on it · stopped because the invites could not be read (nothing made) · stopped on another failure */
 type Arrival = 'working' | 'account-check-failed' | 'invite-check-failed' | 'failed';
 
 export function OnboardingForm({
-  initialStep, initialOrgId, todayV3Enabled = false, todayHref, chatsHref, macDownloadEnabled = false,
+  initialStep, initialOrgId, todayV3Enabled = false, todayHref, chatsHref, macDownloadEnabled = false, afterOrgDelete = false,
 }: OnboardingFormProps) {
   const t = useTranslations('onboarding');
   const tc = useTranslations('common');
   const tNewOrg = useTranslations('desktopOnboarding');
 
-  const [step, setStep] = useState<Step>(initialStep ?? 'arrive');
+  const [step, setStep] = useState<Step>(initialStep ?? (afterOrgDelete ? 'deleted' : 'arrive'));
   const [arrival, setArrival] = useState<Arrival>('working');
   const [invites, setInvites] = useState<MyInvite[]>([]);
   // the organization's name when this page made it — shown on the one screen; null when not known here (never made up)
@@ -107,6 +118,16 @@ export function OnboardingForm({
   const ownOrgChosen = useRef(false);
 
   const progress = onboardingProgress(step);
+
+  // story 4763 (codex): the session is renewed by ONE call at a time for the whole page (`refreshSessionOnce` — the very flight `fetchWithAuth` joins on a 401): the refresh token rotates on use, so
+  // the deleted screen's own renewal, the press's, a double press and an interceptor's must share the call in flight, not race it. `refreshAuthTokens` answers `{data, error}` instead of
+  // throwing: a missing `data` is not a success either. NO_REFRESH_TOKEN = nothing to renew.
+  const renewSession = () => refreshSessionOnce().then(
+    (r): 'renewed' | 'nothing-to-renew' | 'failed' => (!r ? 'failed' : r.error ? (r.error.code === 'NO_REFRESH_TOKEN' ? 'nothing-to-renew' : 'failed') : r.data ? 'renewed' : 'failed'),
+    () => 'failed' as const,
+  );
+  // the deleted screen is drawn only after its quiet check has answered (a person who still has an organization must not see «no organization» flash by)
+  const [deletedChecked, setDeletedChecked] = useState(false);
 
   // OB-4: wizard 진입 1회 emit. session_id는 telemetry가 sessionStorage로 1회차당 고정.
   useEffect(() => {
@@ -189,8 +210,29 @@ export function OnboardingForm({
         setArrival('account-check-failed');
         return;
       }
+      let existing = existingOrgIdFromMe(me);
+      if (!existing) {
+        // story 4763 (AC11): `/api/auth/me` answers from the session's TOKEN — one made before the organization existed (a sign-up on the web, then the Mac app's login;
+        // the web tab's own arrival made the organization meanwhile) carries no organization although the person has one, and the second «조직 만들기» ended in
+        // «무료 플랜은 조직을 1개까지» with no way out. A fresh token is read from the database: renew once, ask again, and only then decide there is none.
+        // (the renewal also tells the shell the session changed, so the app's stored token carries the organization from here on — story 4762.)
+        // a renewal that did not happen leaves the same old token, whose «no organization» is not an answer: nothing is made (Kadir lens on 5221). «Nothing to renew» (a session with no refresh
+        // token — the phone's Firebase session reads its claims fresh every time) is not a failure: the second read below decides
+        if ((await renewSession()) === 'failed') { setArrival('account-check-failed'); return; }
+        try {
+          const again = await fetchWithAuth('/api/auth/me');
+          if (!again.ok) throw new Error(String(again.status));
+          const againJson = await again.json();
+          if (typeof againJson?.data?.member_id !== 'string' || !againJson.data.member_id) throw new Error('no account');
+          me = againJson;
+          existing = existingOrgIdFromMe(againJson);
+        } catch {
+          // rule 4832: the second read cannot be read — that is not «no organization» either; nothing is made
+          setArrival('account-check-failed');
+          return;
+        }
+      }
       // story 4668: already a member (a reload · a re-opened `/onboarding?signup=1`) — no second organization
-      const existing = existingOrgIdFromMe(me);
       if (existing) { setOrgId(existing); setStep('first'); return; }
       // the e-mail gate normally stands before this page; if it is still unverified, say so and make nothing (story #2441)
       if (me?.data?.email_verified === false) { setEmailVerifyBlocked(true); setArrival('failed'); return; }
@@ -212,6 +254,24 @@ export function OnboardingForm({
       arriving.current = false;
     }
   };
+
+  // story 4763 (H6 · codex): the deleted screen says «this account has no organization» — a reload or an old link after the new organization exists must not say it. It asks quietly who the person
+  // is; one who already has an organization (the others of several, or the new one) goes on as in the arrival (a failed read keeps the screen: its press reads again before it makes anything)
+  useEffect(() => {
+    if (step !== 'deleted') return;
+    let off = false;
+    // a check that does not answer (a request that hangs) must not leave the person on a spinner for good: after DELETED_CHECK_MAX_MS the screen is drawn as it would be on a failed check (codex)
+    const giveUp = setTimeout(() => { if (!off) setDeletedChecked(true); }, DELETED_CHECK_MAX_MS);
+    void (async () => {
+      // the token the person holds was made before the delete (it still names that organization, and an account with others reads as «none» until it is renewed) — renew, then ask
+      if ((await renewSession()) === 'failed') return; // not knowing is not «none», but it is not «has one» either: the screen stays and its press asks again before it makes anything
+      const res = await fetchWithAuth('/api/auth/me');
+      if (!res.ok) return;
+      const existing = existingOrgIdFromMe(await res.json());
+      if (existing && !off) { forgetOrgDeletedMarker(); setOrgId(existing); setStep('first'); } // the marker goes too: a reload is the usual onboarding, not this check again
+    })().catch(() => undefined).finally(() => { clearTimeout(giveUp); if (!off) setDeletedChecked(true); });
+    return () => { off = true; clearTimeout(giveUp); };
+  }, [step]);
 
   useEffect(() => {
     if (step === 'arrive') void arrive();
@@ -361,6 +421,29 @@ export function OnboardingForm({
   const handleFinish = () => {
     void finishToHome();
   };
+
+  // story 4763 (H6): the only organization was just deleted — the screen says so; the new organization is made by this press (a second reading of invites included)
+  if (step === 'deleted' && !deletedChecked) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4" data-testid="onboarding-org-deleted-checking">
+        <p role="status" aria-live="polite" className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" aria-hidden />
+          <span>{t('arriving')}</span>
+        </p>
+      </div>
+    );
+  }
+  if (step === 'deleted') {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+        <Card className="w-full max-w-md space-y-4 p-6 text-center shadow-lg sm:p-8" data-testid="onboarding-org-deleted">
+          <h1 className="text-base font-semibold">{t('orgDeletedTitle')}</h1>
+          <p className="break-keep text-sm text-muted-foreground">{t('orgDeletedBody')}</p>
+          <Button onClick={() => { forgetOrgDeletedMarker(); setStep('arrive'); void arrive(); }} data-testid="onboarding-org-deleted-new">{t('orgDeletedNew')}</Button>
+        </Card>
+      </div>
+    );
+  }
 
   // story 4715 (AC6): pending invites — the invited card (the app setup's own · its words), and one way to make an organization anyway
   if (step === 'invited') {

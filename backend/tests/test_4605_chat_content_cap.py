@@ -145,6 +145,7 @@ async def test_ws_chat_refuses_that_one_message_with_its_own_frame_and_keeps_the
     with mock.patch.object(ws_chat, "_authenticate", mock.AsyncMock(return_value=caller)), \
             mock.patch.object(ws_chat, "async_session_factory", lambda: _Session()), \
             mock.patch.object(ws_chat, "_get_or_create_conversation", mock.AsyncMock(return_value=uuid.uuid4())), \
+            mock.patch.object(ws_chat, "_reachable_projects", mock.AsyncMock(return_value=[uuid.uuid4()])), \
             mock.patch.object(ws_chat, "resolve_member_display_name", mock.AsyncMock(return_value="P")), \
             mock.patch.object(ws_chat, "_api_key_id", mock.AsyncMock(return_value=None)), \
             mock.patch.object(ws_chat, "_broadcast", mock.AsyncMock()):

@@ -24,7 +24,7 @@ let container: HTMLDivElement;
 let root: Root;
 const post = vi.fn();
 // what the refresh route answers: the session cookies were rotated, and the route says so (`markSessionChanged`)
-const rotated = () => ({ ok: true, headers: new Headers({ [SESSION_CHANGED_HEADER]: '1' }), json: async () => ({}) });
+const rotated = () => ({ ok: true, headers: new Headers({ [SESSION_CHANGED_HEADER]: '1' }), json: async () => ({ data: { ok: true } }) });
 let refreshAnswer: () => Promise<unknown> | unknown = rotated;
 const handler = vi.fn(async (_url: string): Promise<unknown> => ({ ok: false, status: 404, json: async () => ({}) }));
 
@@ -75,13 +75,18 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
     await flush();
     const fetchMock = handler;
     const orgAt = fetchMock.mock.calls.findIndex((c) => c[0] === '/api/organizations');
-    const refreshAt = fetchMock.mock.calls.findIndex((c) => c[0] === '/api/auth/refresh');
+    // story 4763 (AC11): the arrival renews once BEFORE it decides «no organization» (a token from before the organization existed) — that is the first rotation; the one that
+    // follows the organization is the LAST of them
+    const refreshCalls = fetchMock.mock.calls.map((c, i) => (c[0] === '/api/auth/refresh' ? i : -1)).filter((i) => i >= 0);
+    const refreshAt = refreshCalls[refreshCalls.length - 1]!;
     expect(orgAt).toBeGreaterThan(-1);
+    expect(refreshCalls).toHaveLength(2);
+    expect(refreshCalls[0]!).toBeLessThan(orgAt); // 4763: the renewal before the decision
     expect(refreshAt).toBeGreaterThan(orgAt); // the rotation follows the organization
     const messages = post.mock.calls.map((c) => JSON.parse(c[0] as string) as { type: string });
-    expect(messages.filter((m) => m.type === 'session-changed')).toHaveLength(1); // reverted (a raw fetch) → 0
-    // and the message came after the refresh request, not before (the shell flushes what the cookie jar holds NOW)
-    expect(handler.mock.invocationCallOrder[refreshAt]!).toBeLessThan(post.mock.invocationCallOrder[0]!);
+    expect(messages.filter((m) => m.type === 'session-changed')).toHaveLength(2); // one per rotation; reverted (a raw fetch) → 0
+    // and the message of the last rotation came after its refresh request, not before (the shell flushes what the cookie jar holds NOW)
+    expect(handler.mock.invocationCallOrder[refreshAt]!).toBeLessThan(post.mock.invocationCallOrder[post.mock.invocationCallOrder.length - 1]!);
   });
 
   it('the shell hears nothing while the rotation is still in flight — only once the server has answered (it must not flush the old cookie)', async () => {
@@ -95,7 +100,7 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
       );
     });
     await flush();
-    expect(handler.mock.calls.some((c) => c[0] === '/api/auth/refresh')).toBe(true); // the rotation was sent …
+    expect(handler.mock.calls.some((c) => c[0] === '/api/auth/refresh')).toBe(true); // the first rotation (4763: before the decision) was sent …
     expect(post).not.toHaveBeenCalled(); // … and is not answered yet: nothing to the shell
     await act(async () => { release(); for (let i = 0; i < 16; i++) await Promise.resolve(); });
     expect(post.mock.calls.map((c) => (JSON.parse(c[0] as string) as { type: string }).type)).toEqual(['session-changed']); // answered → exactly one message
@@ -110,13 +115,17 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
     expect(body.indexOf('await refreshAuthTokens()')).toBeLessThan(body.indexOf('window.location.href'));
   });
 
-  it('both rotations of the form (after the organization is made · before leaving) go through refreshAuthTokens — no bare `/api/auth/refresh` fetch is left in the form', () => {
+  it('every rotation of the form (before the arrival decides · after the organization is made · before leaving) goes through refreshAuthTokens — no bare `/api/auth/refresh` fetch is left in the form', () => {
     const form = readFileSync(resolve(__dirname, 'onboarding-form.tsx'), 'utf8');
     expect(form).not.toMatch(/fetch\(\s*'\/api\/auth\/refresh'/); // reverted (a bare fetch) → the shell is never told
     // each one swallows a failure like the bare fetch did (the leaving one has no screen to fall back on: a throw there would keep the person from going home)
+    // story 4763: the other renewals — before the arrival decides there is no organization (AC11) and on the organization-deleted screen (H6) — go through ONE shared helper (`renewSession`, a single
+    // call in flight, its result read); it is the third place that calls `refreshAuthTokens()`
     expect(form.match(/await refreshAuthTokens\(\)\.catch\(\(\) => null\)/g)?.length).toBe(2);
     expect(form.match(/refreshAuthTokens\(\)/g)?.length).toBe(2);
-    expect(form).toMatch(/import \{ fetchWithAuth, refreshAuthTokens \} from '@\/lib\/db\/client';/);
+    expect(form.match(/refreshSessionOnce\(\)/g)?.length).toBe(1); // the helper joins the page's ONE flight (the one `fetchWithAuth` joins on a 401)
+    expect(form.match(/renewSession\(\)/g)?.length).toBe(2);
+    expect(form).toMatch(/import \{ fetchWithAuth, refreshAuthTokens, refreshSessionOnce \} from '@\/lib\/db\/client';/);
   });
 
   // The old bare `fetch(...).catch(() => null)` swallowed every failure of the rotation and the form went on; refreshAuthTokens can reject (a network error, an answer
@@ -126,7 +135,10 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
     ['an answer that is not JSON', () => ({ ok: true, json: async () => { throw new SyntaxError('Unexpected token <'); } })],
     ['a refused rotation (401)', () => ({ ok: false, status: 401, json: async () => ({ error: { code: 'UNAUTHORIZED', message: 'no' } }) })],
   ] as Array<[string, () => unknown]>)('the rotation failing (%s) does not stop the form: it still goes on to the next step, with no error line and no `session-changed`', async (_label, answer) => {
-    refreshAnswer = answer;
+    // story 4763: the FIRST rotation (the arrival renewing the token before it decides «no organization») must answer — a failed one stops the arrival, by design. What this test pins is the
+    // rotations that come AFTER the organization is made: those failing change nothing for the person
+    let rotations = 0;
+    refreshAnswer = () => (++rotations === 1 ? rotated() : answer());
     await act(async () => {
       root.render(
         <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
@@ -138,6 +150,7 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
     expect(handler.mock.calls.some((c) => c[0] === '/api/auth/refresh')).toBe(true); // the rotation was tried
     expect([koMessages.onboarding.first.macTitle, koMessages.onboarding.first.notMacTitle]).toContain(container.querySelector('h1')?.textContent); // and the form went on to the one screen
     expect(container.textContent).not.toContain(koMessages.onboarding.networkError); // not into the «network error» state
-    expect(post.mock.calls.filter((c) => (JSON.parse(c[0] as string) as { type: string }).type === 'session-changed')).toHaveLength(0);
+    // the one `session-changed` is the first (answered) rotation's; the failing one tells the shell nothing
+    expect(post.mock.calls.filter((c) => (JSON.parse(c[0] as string) as { type: string }).type === 'session-changed')).toHaveLength(1);
   });
 });

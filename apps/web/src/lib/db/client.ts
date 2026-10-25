@@ -68,6 +68,18 @@ export async function refreshAuthTokens(): Promise<AuthResult> {
 let _refreshing: Promise<AuthResult> | null = null;
 
 /**
+ * story #4763 (codex): ONE rotation at a time for the whole page — the refresh token is single-use, so a screen that renews the session itself (the onboarding's arrival)
+ * and a 401 that makes `fetchWithAuth` renew it must share the call in flight, not race it (one of two rotations of the same token fails and can log the person out).
+ * `fetchWithAuth`'s 401 path uses this very function.
+ */
+export function refreshSessionOnce(): Promise<AuthResult> {
+  if (!_refreshing) {
+    _refreshing = refreshAuthTokens().finally(() => { _refreshing = null; });
+  }
+  return _refreshing;
+}
+
+/**
  * story #4310 — 응답 헤더를 기다리는 기본 상한. 예전엔 제한이 없어 응답 없이 걸린 요청 하나가 화면을 Cloudflare 524(~100초)까지 로딩에 묶었다.
  * 근거(frontend Cloud Run 요청 로그 · BFF): prod 5.3일 SSE 제외 181,845건 p99 0.87s · p99.99 2.6s · 최대 10.4s. storage-api fastapiCall과 같은 30s.
  */
@@ -116,9 +128,7 @@ export async function fetchWithAuth(input: RequestInfo | URL, init?: FetchWithAu
   if (res.status !== 401) return res;
 
   // 중복 refresh 방지: 동시 호출 시 하나만 실행
-  if (!_refreshing) {
-    _refreshing = refreshAuthTokens().finally(() => { _refreshing = null; });
-  }
+  const refreshing = refreshSessionOnce();
   // story #4089(페드루 PO 리뷰 REQUIRED, AC2 두 번째 클래스) — refreshAuthTokens()(=
   // callAuthRoute)는 BE가 401을 줘도 throw하지 않고 {data:null, error:{...}}로
   // *정상 resolve*한다(위 callAuthRoute 정의 참고) — 그래서 이 함수의 진짜 "refresh
@@ -134,7 +144,7 @@ export async function fetchWithAuth(input: RequestInfo | URL, init?: FetchWithAu
   // 구분할 수 없으므로 신호를 안 낸다(호출부가 자기 401을 알아서 처리).
   let refreshResult: AuthResult;
   try {
-    refreshResult = await _refreshing;
+    refreshResult = await refreshing;
   } catch {
     if (typeof window !== 'undefined') signalSessionExpired();
     return res;

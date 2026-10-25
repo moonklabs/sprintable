@@ -5,6 +5,7 @@ import { ChevronLeft, RefreshCw, UserX } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { pickIGaJosa } from '@/lib/korean-particle';
 import { ChatBubble } from './chat-bubble';
 import { ConnectionLostBanner } from './connection-lost-banner';
@@ -68,7 +69,7 @@ interface ChatViewProps {
   // story #3194 — type/verified 추가(둘 다 optional·graceful). verified는 agent_verify.py::
   // get_verified_map()과 같은 정의(#2751 설계②가 워크포스 "연결 안 됨" 배지에 쓰는 그 판별자,
   // 발명 0) — false=stdio verify 미완주. undefined/null/human이면 미연결 배너 미표시.
-  participants?: { member_id: string; name: string | null; type?: string; verified?: boolean | null }[];
+  participants?: { member_id: string; name: string | null; type?: string; verified?: boolean | null; runtime_type?: string | null }[];
   // story #3831(UX-v3·FE 3·오늘) — 「오늘」의 지시 한 줄이 여기까지 오면 이 값으로 컴포저를
   // 채운다. 새 프리필 기전을 짓지 않는다 — #92f00dc4 prefillCommand(모호 명령 후보 클릭)와
   // 동일 경로를 그대로 재사용(마운트 시 1회 시드).
@@ -125,12 +126,15 @@ export function resolveBackfillMarkReadIso(latest: ChatMessage[] | undefined, ne
 // ===false만 대상(undefined/null=판별 불가라 배너 미표시 — agent-management-tab.tsx와 동일
 // 안전 방향, 침묵 실패보다 과소표시가 낫다). 판정 자체는 #2751 get_verified_map 그대로(발명
 // 0) — 이 함수는 그 결과를 소비만 한다.
+//
+// [SID:4763 AC8] 시스템 발행(runtime_type 'system-publisher')은 «연결»이라는 개념이 없는 서버 쪽 발신자라(워크포스 상세도 같은 판정으로
+// 연결 안내를 감춘다) 정상 연결된 에이전트 대화에서도 «시스템 발행이 아직 연결되지 않았어요» 띠가 떴다 — 실제로 미연결인 에이전트만 센다.
 export function filterUnconnectedAgentParticipants(
-  participants: { member_id: string; name: string | null; type?: string; verified?: boolean | null }[] | undefined,
+  participants: { member_id: string; name: string | null; type?: string; verified?: boolean | null; runtime_type?: string | null }[] | undefined,
   currentTeamMemberId: string,
-): { member_id: string; name: string | null; type?: string; verified?: boolean | null }[] {
+): { member_id: string; name: string | null; type?: string; verified?: boolean | null; runtime_type?: string | null }[] {
   return (participants ?? []).filter(
-    (p) => p.member_id !== currentTeamMemberId && p.type === 'agent' && p.verified === false,
+    (p) => p.member_id !== currentTeamMemberId && p.type === 'agent' && p.verified === false && !isSystemPublisher(p.runtime_type),
   );
 }
 

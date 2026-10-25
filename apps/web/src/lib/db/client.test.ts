@@ -4,7 +4,7 @@
 // 이게 없으면 401 폴링/SSE 재연결 루프가 세션이 죽은 뒤에도 매 tick마다 refresh를 재시도해
 // "401에는 재시도하지 않는다"는 처방이 무력화된다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FETCH_WITH_AUTH_DEFAULT_TIMEOUT_MS, fetchWithAuth, loginWithPassword, refreshAuthTokens } from './client';
+import { FETCH_WITH_AUTH_DEFAULT_TIMEOUT_MS, fetchWithAuth, loginWithPassword, refreshAuthTokens, refreshSessionOnce } from './client';
 import { fetchMe } from '@/lib/me-client';
 import { invalidateMeCache } from '@/lib/auth/me-invalidation';
 import { isSessionExpiredSignaled, resetSessionExpired, signalSessionExpired } from '@/lib/auth/session-expired-signal';
@@ -352,5 +352,38 @@ describe('fetchWithAuth — 응답 헤더까지 시간 제한(story #4310)', () 
     await vi.advanceTimersByTimeAsync(30_000);
     expect((await settled as DOMException).name).toBe('TimeoutError');
     expect(n).toBe(2);
+  });
+});
+
+// story #4763 (codex): ONE rotation at a time for the page — a screen that renews the session itself and a 401 that makes fetchWithAuth renew it share the call in flight
+describe('refreshSessionOnce — one rotation at a time (story #4763)', () => {
+  it('two callers and a 401 of fetchWithAuth share ONE /api/auth/refresh; a later call makes a new one', async () => {
+    let refreshes = 0;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let other = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/auth/refresh')) {
+        refreshes += 1;
+        await held;
+        return new Response(JSON.stringify({ data: { ok: true } }), { status: 200 });
+      }
+      other += 1;
+      return new Response('{}', { status: other === 1 ? 401 : 200 });
+    }));
+    const a = refreshSessionOnce();
+    const b = refreshSessionOnce();
+    const c = fetchWithAuth('/api/something'); // its 401 joins the flight in progress
+    await vi.waitFor(() => expect(other).toBe(1));
+    await Promise.resolve();
+    expect(refreshes).toBe(1);
+    release();
+    const [ra, rb, rc] = await Promise.all([a, b, c]);
+    expect(ra).toBe(rb);
+    expect(rc.status).toBe(200); // retried once after the shared renewal
+    expect(refreshes).toBe(1);
+    await refreshSessionOnce(); // nothing in flight now → a new rotation
+    expect(refreshes).toBe(2);
   });
 });
