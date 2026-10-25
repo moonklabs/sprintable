@@ -10,9 +10,12 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 
 vi.mock('./advanced-connect', () => ({ AdvancedConnect: () => <div data-testid="stub-advanced" /> }));
+// the real hook reads the dashboard context (none here): the project the page carries is the test's own switch
+let project = '';
+vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (href: string) => (project ? `${href}?p=${project}` : href) }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-const { FirstScreen, DESKTOP_SETUP_PATH } = await import('./first-screen');
+const { FirstScreen } = await import('./first-screen');
 
 // the bridge the app's preload gives a page on our origin (apps/web/src/lib/desktop-app.ts `desktopAppOf` checks this shape)
 const bridge = () => ({
@@ -33,6 +36,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   replace = vi.fn();
+  project = '';
   Object.defineProperty(window, 'location', { configurable: true, value: { ...originalLocation, replace } });
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404, headers: new Headers(), json: async () => ({}) })));
   // a Mac browser: the page draws the Mac download card (`notAMac` reads the user agent) — so «no card inside the app» is a real difference, not a Linux jsdom that never drew one
@@ -61,12 +65,19 @@ describe('FirstScreen inside the Mac app (story 4763 AC14)', () => {
   it('goes to the app\'s setup page once, and draws no download card', async () => {
     (window as { sprintableDesktop?: unknown }).sprintableDesktop = bridge();
     await render();
-    expect(DESKTOP_SETUP_PATH).toBe('/desktop/setup');
     expect(replace).toHaveBeenCalledTimes(1);
     expect(replace).toHaveBeenCalledWith('/desktop/setup');
     expect(has('onboarding-first-mac')).toBe(false);
     expect(has('onboarding-first-open-app')).toBe(false);
     expect(container.textContent).not.toContain('에이전트는 내 Mac에서 돌아가요');
+  });
+
+  it('the destination carries the project like every other flat entrance (`?p=`) — and only that', async () => {
+    (window as { sprintableDesktop?: unknown }).sprintableDesktop = bridge();
+    project = 'proj-1';
+    await render();
+    expect(replace).toHaveBeenCalledTimes(1);
+    expect(replace.mock.calls[0]).toEqual(['/desktop/setup?p=proj-1']);
   });
 
   it('under StrictMode (the effect is replayed in development) it still navigates once', async () => {

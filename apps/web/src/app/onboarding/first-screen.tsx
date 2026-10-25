@@ -16,15 +16,13 @@ import { PhoneAppCard } from '@/components/desktop/phone-app-card';
 import { PhoneFirstScreen } from '@/components/desktop/phone-first-screen';
 import { appSetupLink } from '@/lib/auth/native-return-app';
 import { desktopApp } from '@/lib/desktop-app';
+import { useFlatHref } from '@/hooks/use-flat-href';
 import { AdvancedConnect } from './advanced-connect';
 import { markLeaving } from '@/lib/phone-start';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { emitOnboardingEvent } from './onboarding-telemetry';
 
 const noSubscribe = () => () => undefined;
-
-/** story 4763 AC14: where a person who is already INSIDE the Mac app goes from here — the app's own setup page (folder · agent · [시작]) */
-export const DESKTOP_SETUP_PATH = '/desktop/setup';
 
 interface FirstScreenProps {
   /** story 4714: the organization's id — the phone app's screen needs it to turn remote control on (null: not known here) */
@@ -55,7 +53,8 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
   // once: React's StrictMode replays effects in development — the page must not navigate twice. The code-less `/desktop/setup` is the app's own entrance: the app notices that page loading
   // (`did-navigate` → the setup flow's «setup page arrival», sprintable-mobile desktop-electron/src/setup-wiring.ts · setup-flow.ts) and hands it its values, as it does when it opens the page itself.
   const wentToSetup = useRef(false);
-  useEffect(() => { if (inMacApp && !wentToSetup.current) { wentToSetup.current = true; window.location.replace(DESKTOP_SETUP_PATH); } }, [inMacApp]);
+  const flatHref = useFlatHref(); // story 4763 AC14: the app's own setup page (folder · agent · [시작]) is a flat destination — it carries the project like every other entrance (the ratchet: no bare flat destination)
+  useEffect(() => { if (inMacApp && !wentToSetup.current) { wentToSetup.current = true; window.location.replace(flatHref('/desktop/setup')); } }, [inMacApp]);
   if (elsewhere === null || inMacApp === null) return null;
   if (inMacApp) return null; // the page is going to the setup page
 
