@@ -57,6 +57,8 @@ export const BROWSER_STORAGE_KEYS: readonly StorageKeyEntry[] = [
   // story 4763 AC7: the time the mailed link's tab last said «verified» (the first tab's gate reads the account again when it changes) — nothing but a time, cleared with the account like the others
   { key: 'sprintable-email-verified', area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['lib/auth/email-verified-signal.ts'] },
   { key: 'sprintable_activation_checklist_complete', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['hooks/use-activation-status.ts'] },
+  // story 4780: «this browser showed the person an OPEN checklist for the organization» — the finish line is shown once after that; account-scoped (the next account must not inherit it)
+  { key: 'sprintable_activation_seen_open', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['components/dashboard/activation-checklist-banner.tsx'] },
   { key: 'sprintable:intent-suggestion:dismissed', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['lib/intent-suggestion-dismissal.ts'] },
   // the desktop setup in progress in this tab (30 min) — a document opened after a switch would report the previous account's setup
   { key: 'sprintable_desktop_setup_active', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['lib/desktop-setup.ts'] },
