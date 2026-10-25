@@ -17,7 +17,7 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { cardVariants } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import { fetchWithAuth, refreshAuthTokens } from '@/lib/db/client';
+import { fetchWithAuth, refreshSessionAfterChange } from '@/lib/db/client';
 import { copyPromisedText, copyTextSafely } from '@/lib/clipboard';
 import { ViewerDate } from '@/components/viewer-time-zone';
 import { VIEWER_TIME_OPTIONS } from '@/lib/viewer-time-zone';
@@ -254,7 +254,7 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
     try {
       const convId = await createFirstInstructionConversation(made.projectId, made.agentId);
       if (!convId) { onFinish(); return; }
-      await refreshAuthTokens().catch(() => null);
+      await refreshSessionAfterChange().catch(() => null); // story 4776 — one rotation at a time for the page, minted after the conversation exists
       window.location.href = withProjectParam(`/chats/${convId}`, made.projectId);
     } catch {
       onFinish();

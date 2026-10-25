@@ -91,7 +91,13 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
 
   it('the shell hears nothing while the rotation is still in flight — only once the server has answered (it must not flush the old cookie)', async () => {
     let release!: () => void;
-    refreshAnswer = () => new Promise((resolve) => { release = () => resolve(rotated()); });
+    // only the FIRST rotation is held; the ones after it (story 4776: they go through the page's one flight too, so a held one that never answers would stay in flight for the next tests of this file) answer at once
+    let held = false;
+    refreshAnswer = () => {
+      if (held) return rotated();
+      held = true;
+      return new Promise((resolve) => { release = () => resolve(rotated()); });
+    };
     await act(async () => {
       root.render(
         <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
@@ -103,7 +109,8 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
     expect(handler.mock.calls.some((c) => c[0] === '/api/auth/refresh')).toBe(true); // the first rotation (4763: before the decision) was sent …
     expect(post).not.toHaveBeenCalled(); // … and is not answered yet: nothing to the shell
     await act(async () => { release(); for (let i = 0; i < 16; i++) await Promise.resolve(); });
-    expect(post.mock.calls.map((c) => (JSON.parse(c[0] as string) as { type: string }).type)).toEqual(['session-changed']); // answered → exactly one message
+    // answered → one message per answered rotation: the held first one (released just now) and then the one after the organization (answered at once; story 4776 — it used to hang here)
+    expect(post.mock.calls.map((c) => (JSON.parse(c[0] as string) as { type: string }).type)).toEqual(['session-changed', 'session-changed']);
   });
 
   it('on the leaving path the rotation comes BEFORE the page change (a navigation first would drop the message together with the page)', () => {
@@ -111,21 +118,21 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
     const at = form.indexOf('const finishToHome = async () => {');
     expect(at).toBeGreaterThan(-1);
     const body = form.slice(at, form.indexOf('\n  };', at));
-    expect(body.indexOf('await refreshAuthTokens()')).toBeGreaterThan(-1);
-    expect(body.indexOf('await refreshAuthTokens()')).toBeLessThan(body.indexOf('window.location.href'));
+    expect(body.indexOf('await refreshSessionAfterChange()')).toBeGreaterThan(-1);
+    expect(body.indexOf('await refreshSessionAfterChange()')).toBeLessThan(body.indexOf('window.location.href'));
   });
 
-  it('every rotation of the form (before the arrival decides · after the organization is made · before leaving) goes through refreshAuthTokens — no bare `/api/auth/refresh` fetch is left in the form', () => {
+  it('every rotation of the form (before the arrival decides · after the organization is made · before leaving) goes through the one page-wide flight (story 4776: `refreshSessionAfterChange` / `refreshSessionOnce`, never `refreshAuthTokens` directly) — no bare `/api/auth/refresh` fetch is left in the form', () => {
     const form = readFileSync(resolve(__dirname, 'onboarding-form.tsx'), 'utf8');
     expect(form).not.toMatch(/fetch\(\s*'\/api\/auth\/refresh'/); // reverted (a bare fetch) → the shell is never told
     // each one swallows a failure like the bare fetch did (the leaving one has no screen to fall back on: a throw there would keep the person from going home)
     // story 4763: the other renewals — before the arrival decides there is no organization (AC11) and on the organization-deleted screen (H6) — go through ONE shared helper (`renewSession`, a single
-    // call in flight, its result read); it is the third place that calls `refreshAuthTokens()`
-    expect(form.match(/await refreshAuthTokens\(\)\.catch\(\(\) => null\)/g)?.length).toBe(2);
-    expect(form.match(/refreshAuthTokens\(\)/g)?.length).toBe(2);
+    // call in flight, its result read). story 4776: the two renewals that follow a CHANGE (the organization · the project and agent) call `refreshSessionAfterChange` — one rotation at a time like the others, minted after the change
+    expect(form.match(/await refreshSessionAfterChange\(\)\.catch\(\(\) => null\)/g)?.length).toBe(2);
+    expect(form.match(/refreshAuthTokens\(\)/g)).toBeNull(); // the direct call is gone from the form (the ratchet in lib/db/refresh-single-flight.4776.test.ts holds the whole tree)
     expect(form.match(/refreshSessionOnce\(\)/g)?.length).toBe(1); // the helper joins the page's ONE flight (the one `fetchWithAuth` joins on a 401)
     expect(form.match(/renewSession\(\)/g)?.length).toBe(2);
-    expect(form).toMatch(/import \{ fetchWithAuth, refreshAuthTokens, refreshSessionOnce \} from '@\/lib\/db\/client';/);
+    expect(form).toMatch(/import \{ fetchWithAuth, refreshSessionAfterChange, refreshSessionOnce \} from '@\/lib\/db\/client';/);
   });
 
   // The old bare `fetch(...).catch(() => null)` swallowed every failure of the rotation and the form went on; refreshAuthTokens can reject (a network error, an answer

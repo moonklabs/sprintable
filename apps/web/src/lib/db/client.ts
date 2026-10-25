@@ -80,6 +80,18 @@ export function refreshSessionOnce(): Promise<AuthResult> {
 }
 
 /**
+ * story 4776 — a renewal made BECAUSE something has just changed (an organization was made · a project and an agent were made): the new token must carry that change (the organization claim
+ * …), so it has to be minted AFTER the change. `refreshSessionOnce` alone would join a rotation that began before the change and hand back ITS token (no organization yet). Never two
+ * rotations at once all the same — one refresh token, one use at a time: a rotation already in flight is waited for (its answer is not this caller's, a failure of it is not either), then
+ * ONE more is made (or joined, when another caller of this function started it in the meantime — it began after the change too). The cookie the first rotation set is in the jar by the time its
+ * promise settles, so the second rotation presents the new token, never the one just used.
+ */
+export async function refreshSessionAfterChange(): Promise<AuthResult> {
+  if (_refreshing) await _refreshing.catch(() => undefined);
+  return refreshSessionOnce();
+}
+
+/**
  * story #4310 — 응답 헤더를 기다리는 기본 상한. 예전엔 제한이 없어 응답 없이 걸린 요청 하나가 화면을 Cloudflare 524(~100초)까지 로딩에 묶었다.
  * 근거(frontend Cloud Run 요청 로그 · BFF): prod 5.3일 SSE 제외 181,845건 p99 0.87s · p99.99 2.6s · 최대 10.4s. storage-api fastapiCall과 같은 30s.
  */
