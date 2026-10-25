@@ -28,7 +28,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   searchParamsValueRef.current = '';
-  useDashboardContextMock.mockReturnValue({ projectId: 'p1', projectMemberships: [], orgMemberships: [], inShell: true });
+  useDashboardContextMock.mockReturnValue({ projectId: 'p1', projectMemberships: [{ id: 'p1', name: 'P1' }], orgMemberships: [], inShell: true });
 });
 afterEach(async () => {
   await act(async () => { root.unmount(); });
@@ -71,7 +71,8 @@ const before = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) 
 describe('[SID:4773] Today — the pairing card is the top band', () => {
   it('phone app + paired with nothing → the card is the first thing on Today: before the title, before the redirect-back banner, before the instruction box', async () => {
     stubServer([]);
-    searchParamsValueRef.current = 'next=%2Fglance'; // the redirect-back banner is on too
+    searchParamsValueRef.current = 'next=%2Fglance'; // the redirect-back banner is on too (no project picked, one to pick)
+    useDashboardContextMock.mockReturnValue({ projectId: undefined, projectMemberships: [{ id: 'p2', name: 'P2' }], orgMemberships: [], inShell: true });
     await mount({ inPhoneApp: true });
     const card = q('today-pair-card');
     expect(card).not.toBeNull(); // reverted (not in the shell) → fails
