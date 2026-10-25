@@ -34,6 +34,9 @@ const AGENT_ROLE_LABEL_KEYS: Record<string, string> = {
 // organization, or their pending invites, or makes the organization with a made name («{name}의 조직» / «내 조직»), then shows ONE
 // screen («first»: on a Mac [Mac 앱 받기] · elsewhere «지금은 Mac 앱만 있어요»). The web way (an agent already running somewhere else)
 // keeps project → agent → connect.
+/** story 4763 (H6 · codex): how long the organization-deleted screen waits for its quiet check before it is drawn anyway (the same screen a failed check shows) */
+export const DELETED_CHECK_MAX_MS = 8000;
+
 /** story 4763 (H6 · codex): the press has been made — the `?after=org-deleted` of the address goes, so a reload is the usual onboarding */
 function forgetOrgDeletedMarker() {
   try { window.history.replaceState(window.history.state, '', window.location.pathname); } catch { /* an address that cannot be changed stays */ }
@@ -257,6 +260,8 @@ export function OnboardingForm({
   useEffect(() => {
     if (step !== 'deleted') return;
     let off = false;
+    // a check that does not answer (a request that hangs) must not leave the person on a spinner for good: after DELETED_CHECK_MAX_MS the screen is drawn as it would be on a failed check (codex)
+    const giveUp = setTimeout(() => { if (!off) setDeletedChecked(true); }, DELETED_CHECK_MAX_MS);
     void (async () => {
       // the token the person holds was made before the delete (it still names that organization, and an account with others reads as «none» until it is renewed) — renew, then ask
       if ((await renewSession()) === 'failed') return; // not knowing is not «none», but it is not «has one» either: the screen stays and its press asks again before it makes anything
@@ -264,8 +269,8 @@ export function OnboardingForm({
       if (!res.ok) return;
       const existing = existingOrgIdFromMe(await res.json());
       if (existing && !off) { forgetOrgDeletedMarker(); setOrgId(existing); setStep('first'); } // the marker goes too: a reload is the usual onboarding, not this check again
-    })().catch(() => undefined).finally(() => { if (!off) setDeletedChecked(true); });
-    return () => { off = true; };
+    })().catch(() => undefined).finally(() => { clearTimeout(giveUp); if (!off) setDeletedChecked(true); });
+    return () => { off = true; clearTimeout(giveUp); };
   }, [step]);
 
   useEffect(() => {

@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
-import { OnboardingForm } from './onboarding-form';
+import { DELETED_CHECK_MAX_MS, OnboardingForm } from './onboarding-form';
 import koMessages from '../../../messages/ko.json';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -176,6 +176,29 @@ describe('[SID:4763 H6] after the organization was deleted', () => {
     await settle();
     expect(byId('onboarding-org-deleted')).toBeNull(); // someone who has an organization never sees it
     expect(byId('onboarding-org-deleted-checking')).toBeNull();
+  });
+
+  it('a quiet check that never answers (a request that hangs) does not leave a spinner for good: after DELETED_CHECK_MAX_MS the card is drawn (codex)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let release!: () => void;
+    const hang = new Promise<void>((resolve) => { release = resolve; });
+    try {
+      stubFetch([NO_ORG], 'ok', hang); // the renewal does not come back (until this test lets it go: the page's ONE refresh flight must not stay stuck for the tests after it)
+      await act(async () => { root.render(provider(<OnboardingForm todayHref="/today" chatsHref="/chats" afterOrgDelete />)); });
+      await settle();
+      expect(byId('onboarding-org-deleted-checking')).not.toBeNull();
+      expect(byId('onboarding-org-deleted')).toBeNull();
+      await act(async () => { vi.advanceTimersByTime(DELETED_CHECK_MAX_MS - 1); });
+      expect(byId('onboarding-org-deleted-checking')).not.toBeNull(); // not before the limit
+      await act(async () => { vi.advanceTimersByTime(2); });
+      await settle();
+      expect(byId('onboarding-org-deleted')).not.toBeNull();
+      expect(byId('onboarding-org-deleted-checking')).toBeNull();
+    } finally {
+      release();
+      await act(async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); });
+      vi.useRealTimers();
+    }
   });
 
   it('someone who has an organization also loses `?after=org-deleted` from the address (a reload is the usual onboarding, not the check again) (codex)', async () => {
