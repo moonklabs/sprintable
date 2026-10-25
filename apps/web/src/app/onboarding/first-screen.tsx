@@ -6,7 +6,7 @@
 // «지금은 Mac 앱만 있어요» first, the web way as the one button, no download card (it cannot install there). Phone control is not offered
 // here — it is asked when a phone is paired (PO).
 
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { cardVariants } from '@/components/ui/card';
@@ -15,12 +15,16 @@ import { DesktopDownloadCard, notAMac } from '@/components/desktop/desktop-downl
 import { PhoneAppCard } from '@/components/desktop/phone-app-card';
 import { PhoneFirstScreen } from '@/components/desktop/phone-first-screen';
 import { appSetupLink } from '@/lib/auth/native-return-app';
+import { desktopApp } from '@/lib/desktop-app';
 import { AdvancedConnect } from './advanced-connect';
 import { markLeaving } from '@/lib/phone-start';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { emitOnboardingEvent } from './onboarding-telemetry';
 
 const noSubscribe = () => () => undefined;
+
+/** story 4763 AC14: where a person who is already INSIDE the Mac app goes from here — the app's own setup page (folder · agent · [시작]) */
+export const DESKTOP_SETUP_PATH = '/desktop/setup';
 
 interface FirstScreenProps {
   /** story 4714: the organization's id — the phone app's screen needs it to turn remote control on (null: not known here) */
@@ -45,7 +49,12 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
   const [advancedBusy, setAdvancedBusy] = useState(false); // story 4766: while the web way's press is making the agent and its key, the other way out waits
   const finish = () => { if (advancedBusy) return; if (markLeaving()) onFinish(); }; // stops the flows that are out; a second tap is not a second finish // a way out: a start still being waited for in the phone's screen must not move the page after it
   const elsewhere = useSyncExternalStore(noSubscribe, () => notAMac(navigator.userAgent, inPhoneApp), () => null);
-  if (elsewhere === null) return null;
+  // story 4763 AC14 (the «앱 먼저» customer path: login screen «Mac 앱 받기» → the app → sign-up): inside the Mac app the download card is for someone who has no app yet — here the next step
+  // is the app's own setup page. In a browser `desktopApp()` is undefined and every screen below stays as it is (read after mount: null on the server and before the first read).
+  const inMacApp = useSyncExternalStore(noSubscribe, () => !!desktopApp(), () => null);
+  useEffect(() => { if (inMacApp) window.location.replace(DESKTOP_SETUP_PATH); }, [inMacApp]);
+  if (elsewhere === null || inMacApp === null) return null;
+  if (inMacApp) return null; // the page is going to the setup page
 
   // story 4714 (AC1 · Yuna 4714-copy-1017): inside the phone app the Mac-or-not fork is not drawn — the phone's own screen takes its place
   // (a phone pairs with a Mac and starts its agents from it; «지금은 Mac 앱만 있어요» would say the opposite). Other non-Mac browsers keep theirs.
