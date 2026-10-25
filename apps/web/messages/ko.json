@@ -5347,6 +5347,14 @@
         "usage_limit": "사용 한도",
         "waiting_system": "macOS 창 대기"
       },
+      "workHold": {
+        "unconfirmed": "이 에이전트에게 가는 글이 멈춰 있어요 — Sprintable 연결을 확인하지 못했어요. {device}의 앱에서 [다시 시작]을 누르면 다시 확인해요",
+        "unconfirmedNoDevice": "이 에이전트에게 가는 글이 멈춰 있어요 — Sprintable 연결을 확인하지 못했어요. 이 세션이 도는 컴퓨터의 앱에서 [다시 시작]을 누르면 다시 확인해요",
+        "failedClaude": "이 에이전트에게 가는 글이 멈춰 있어요 — Sprintable 일감을 받을 연결이 붙지 않았어요. {device}의 앱에서 [다시 시작]을 눌러 주세요",
+        "failedClaudeNoDevice": "이 에이전트에게 가는 글이 멈춰 있어요 — Sprintable 일감을 받을 연결이 붙지 않았어요. 이 세션이 도는 컴퓨터의 앱에서 [다시 시작]을 눌러 주세요",
+        "failedCodex": "이 에이전트에게 가는 글이 멈춰 있어요 — Sprintable 일감을 받을 연결이 계속 붙지 않아요. {device}의 앱에서 [다시 연결]을 눌러 주세요",
+        "failedCodexNoDevice": "이 에이전트에게 가는 글이 멈춰 있어요 — Sprintable 일감을 받을 연결이 계속 붙지 않아요. 이 세션이 도는 컴퓨터의 앱에서 [다시 연결]을 눌러 주세요"
+      },
       "inbox": {
         "otherReceiver": "다른 곳에서 이 에이전트의 일을 받고 있어 {device}에서는 새 일을 받지 않아요",
         "otherReceiverNoDevice": "다른 곳에서 이 에이전트의 일을 받고 있어 이 세션에는 새 일이 오지 않아요",

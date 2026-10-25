@@ -5347,6 +5347,14 @@
         "usage_limit": "Usage limit",
         "waiting_system": "Waiting on a macOS prompt"
       },
+      "workHold": {
+        "unconfirmed": "Work for this agent is held up — Sprintable's connection couldn't be confirmed. Press [Start again] in the app on {device} to check once more",
+        "unconfirmedNoDevice": "Work for this agent is held up — Sprintable's connection couldn't be confirmed. Press [Start again] in the app on the computer this session runs on to check once more",
+        "failedClaude": "Work for this agent is held up — the connection for receiving work didn't come up. Press [Start again] in the app on {device}",
+        "failedClaudeNoDevice": "Work for this agent is held up — the connection for receiving work didn't come up. Press [Start again] in the app on the computer this session runs on",
+        "failedCodex": "Work for this agent is held up — the connection for receiving work still won't come up. Press [Reconnect] in the app on {device}",
+        "failedCodexNoDevice": "Work for this agent is held up — the connection for receiving work still won't come up. Press [Reconnect] in the app on the computer this session runs on"
+      },
       "inbox": {
         "otherReceiver": "Another place is receiving this agent's work, so new work doesn't come to {device}",
         "otherReceiverNoDevice": "Another place is receiving this agent's work, so new work doesn't come to this session",
