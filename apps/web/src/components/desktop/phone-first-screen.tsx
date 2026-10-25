@@ -38,10 +38,10 @@ function useAlive() {
 }
 
 /** `macDownloadEnabled`: the server's own judgement that the Mac app is offered here (`isDesktopDownloadEnabled`, resolved by the page) — false/absent: no mail button, no line */
-export function PhoneFirstScreen({ orgId, chatsHref, macDownloadEnabled = false }: { orgId: string | null; chatsHref?: string; macDownloadEnabled?: boolean }) {
+export function PhoneFirstScreen({ orgId, chatsHref, macDownloadEnabled = false, returnHref }: { orgId: string | null; chatsHref?: string; macDownloadEnabled?: boolean; returnHref?: string }) {
   const t = useTranslations('onboarding.phone');
   const { phoneCall } = usePhoneBridge();
-  const pairHref = usePairHref(); // story 4780: [Close] of the pairing screen comes back to this start screen
+  const pairHref = usePairHref(returnHref); // story 4780: [Close] of the pairing screen comes back to this start screen — or to `returnHref` (the sign-up screen: Today, where the checklist goes on)
   const [read, setRead] = useState<Read>({ kind: 'reading' });
   // the answer lands in a promise callback (never synchronously in the effect); a phone with no screen lock can pair with nothing — the pairing
   // page says why, here it is the «no Mac yet» screen

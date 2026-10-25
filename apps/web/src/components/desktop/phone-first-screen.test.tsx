@@ -111,6 +111,24 @@ const pickFromSheet = async (rowId: string, name: string) => {
   await press(row ?? null);
 };
 
+describe('[4780] the pairing link of the start screen', () => {
+  it('a screen that hands over a way back (the sign-up screen: Today) carries it as `from`, so [Close] of the pairing screen goes there', async () => {
+    world.devices = [{ id: 'x', confirm_number: '000 000' }];
+    await renderIn(<PhoneFirstScreen orgId="org-1" chatsHref="/chats" returnHref="/org-briefing" />);
+    expect(byId('onboarding-phone-pair')?.getAttribute('href')).toContain('/desktop/pair?from=%2Forg-briefing'); // reverted (no returnHref) → no `from`
+  });
+  it('without one the link is the address it always was (the screen is not a way back by itself)', async () => {
+    world.devices = [{ id: 'x', confirm_number: '000 000' }];
+    await screen();
+    expect(byId('onboarding-phone-pair')?.getAttribute('href')).not.toContain('from=');
+  });
+  it('a way back that is not one of the app\'s own screens is dropped', async () => {
+    world.devices = [{ id: 'x', confirm_number: '000 000' }];
+    await renderIn(<PhoneFirstScreen orgId="org-1" chatsHref="/chats" returnHref="//evil.example/today" />);
+    expect(byId('onboarding-phone-pair')?.getAttribute('href')).not.toContain('evil');
+  });
+});
+
 describe('[4714] branch 2 — no paired computer (AC2)', () => {
   it('this phone\'s key is not on the server\'s list → «에이전트는 Mac에서 돌아가요» + the pairing link; no mail button where the Mac app is not offered (the server says so)', async () => {
     world.devices = [{ id: 'x', confirm_number: '000 000' }];

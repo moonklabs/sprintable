@@ -12,7 +12,7 @@ const { _locationListenerCountForTests } = await import('@/lib/location-store');
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
-function Probe() { return <a data-testid="pair" href={usePairHref()}>pair</a>; }
+function Probe({ returnTo }: { returnTo?: string | null }) { return <a data-testid="pair" href={usePairHref(returnTo)}>pair</a>; }
 async function hrefAt(url: string): Promise<string | null> {
   window.history.pushState({}, '', url);
   container = document.createElement('div');
@@ -37,6 +37,17 @@ describe('[SID:4780] usePairHref — the pairing screen\'s address from the page
     ['the phone start screen', '/phone-start', '/desktop/pair?from=%2Fphone-start&p=proj-1'],
   ])('%s', async (_name, here, want) => {
     expect(await hrefAt(here)).toBe(want);
+  });
+
+  it('a way back handed over by the page wins over the page\'s own address (the sign-up screen: Today), also on the first render; an invalid one falls back', async () => {
+    window.history.pushState({}, '', '/onboarding');
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root!.render(<Probe returnTo="/org-briefing" />); });
+    expect(container.querySelector('a')!.getAttribute('href')).toBe('/desktop/pair?from=%2Forg-briefing&p=proj-1'); // reverted (the hook ignores it) → '/desktop/pair?p=proj-1'
+    await act(async () => { root!.render(<Probe key="x" returnTo="//evil.example" />); });
+    expect(container.querySelector('a')!.getAttribute('href')).toBe('/desktop/pair?p=proj-1'); // /onboarding is no way back by itself
   });
 
   it('a page that is not a return target adds nothing (the address as before)', async () => {

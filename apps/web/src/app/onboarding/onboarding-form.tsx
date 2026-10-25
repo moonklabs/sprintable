@@ -546,7 +546,7 @@ export function OnboardingForm({
         )}
 
         {step === 'first' && (
-          <FirstScreen orgId={orgId} chatsHref={chatsHref} macDownloadEnabled={macDownloadEnabled} orgName={orgName} todayV3Enabled={todayV3Enabled} onFinish={handleFinish} />
+          <FirstScreen orgId={orgId} chatsHref={chatsHref} macDownloadEnabled={macDownloadEnabled} orgName={orgName} todayV3Enabled={todayV3Enabled} todayHref={todayHref} onFinish={handleFinish} />
         )}
 
         {step === 'project' && (

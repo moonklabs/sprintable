@@ -11,12 +11,13 @@ import { useFlatHref } from '@/hooks/use-flat-href';
 import { readLocation, subscribeToLocation } from '@/lib/location-store';
 import { pairReturnQuery } from '@/lib/pair-return';
 
-export function usePairHref(): string {
+/** `returnTo`: a way back the page knows better than its own address (the sign-up screen's first screen: the Today address the server resolved) — validated like any other; invalid → the page's own address */
+export function usePairHref(returnTo?: string | null): string {
   const flat = useFlatHref();
   const here = useSyncExternalStore(
     subscribeToLocation,
     readLocation,
     () => '',
   );
-  return flat(`/desktop/pair${pairReturnQuery(here)}`);
+  return flat(`/desktop/pair${pairReturnQuery(here, returnTo)}`);
 }
