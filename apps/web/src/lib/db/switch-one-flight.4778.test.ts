@@ -240,6 +240,46 @@ describe('[SID:4778] a stalled switch holds the others only for a bounded time',
     await first;
   });
 
+  // Kadir 6400554163 · G4 — the wait for a rotation already in flight is bounded from the ASK (the `waitUpTo` timer is what bounds it)
+  it('a switch asked for at 1 s while a rotation is stalled until 90 s leaves at about 41 s, not when the rotation answers', async () => {
+    const s = scripted();
+    s.hold('refresh#1');
+    const rotation = refreshSessionOnce();
+    await vi.waitFor(() => expect(s.isOut('refresh#1')).toBe(true));
+    await vi.advanceTimersByTimeAsync(1_000);
+    const sw = switchOrg('org-1'); // asked at t = 1 s
+    await vi.advanceTimersByTimeAsync(39_000); // t = 40 s: inside 40 s of the ask
+    expect(s.calls.map((c) => c.kind)).toEqual(['refresh']);
+    await vi.advanceTimersByTimeAsync(1_500); // t = 41.5 s
+    await sw; // reverted (the timer of the rotation wait made a no-op) → the switch would wait for the rotation for good and this hangs
+    expect(s.calls.map((c) => c.kind)).toEqual(['refresh', 'switch-org']);
+    s.release('refresh#1');
+    await rotation;
+  });
+
+  // Kadir 6400554163 · G6 — an older tail's release must not clear a NEWER tail: a renewal asked for later waits for the newest switch
+  it('B stalls, C (asked behind B) leaves at 40 s and stalls; a renewal asked for at 50 s waits for C\'s tail and leaves at 80 s', async () => {
+    const s = scripted();
+    s.hold('switch#1');
+    s.hold('switch#2');
+    const b = switchOrg('org-1'); // starts at t = 0 and stalls
+    await vi.waitFor(() => expect(s.isOut('switch#1')).toBe(true));
+    const c = switchProject('proj-1'); // asked behind B
+    await vi.advanceTimersByTimeAsync(40_500); // B is given up on at 40 s: C's request starts and stalls
+    await vi.waitFor(() => expect(s.isOut('switch#2')).toBe(true));
+    await vi.advanceTimersByTimeAsync(9_500); // t = 50 s
+    const renewal = refreshSessionOnce(); // asked for at 50 s: it stands behind C's tail
+    await vi.advanceTimersByTimeAsync(20_000); // t = 70 s: C's own bound (40 + 40 = 80 s) still holds it
+    expect(s.calls.map((x) => x.kind)).toEqual(['switch-org', 'switch-project']); // reverted (B's release clears C's tail) → the renewal left at 50 s
+    await vi.advanceTimersByTimeAsync(10_500); // t = 80.5 s
+    await renewal;
+    expect(s.calls.map((x) => x.kind)).toEqual(['switch-org', 'switch-project', 'refresh']);
+    s.release('switch#1');
+    s.release('switch#2');
+    await b;
+    await c;
+  });
+
   it('an answer that comes in time cancels the wait (no timer left to fire a second time)', async () => {
     const s = scripted();
     s.hold('switch#1');
