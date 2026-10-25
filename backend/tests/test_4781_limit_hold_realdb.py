@@ -174,6 +174,39 @@ async def test_05b_a_session_that_ends_while_its_lift_waits_clears_the_notice_ou
         assert await _notices(LIFTED) == [], "no promise was left open by the ended session"
 
 
+async def test_05c_a_session_that_ends_does_not_take_the_promise_while_another_of_the_person_still_waits_for_its_lift(world):
+    """codex 01a174f2: two sessions come back and both lifts wait; one of them ends first. It must not consume the promise (the other has not been confirmed back yet), or the other's
+    lift finds none and «working again» is never told."""
+    async with _client() as c:
+        device = await _device(c, "d4781 mac e3")
+        a = device["agents"][0]["member_id"]
+        for seq, key in ((1, "s-1"), (2, "s-2")):
+            await _report(c, device, a, "working", seq, key=key)
+        await _report(c, device, a, "waiting_input", 3, key="s-1", limit=LOOKS)
+        await _report(c, device, a, "waiting_input", 4, key="s-2", limit=LOOKS)  # (folded into the first notice)
+        await _report(c, device, a, "working", 5, key="s-1")
+        await _report(c, device, a, "working", 6, key="s-2")  # both lifts wait
+        await _report(c, device, a, "stopped", 7, key="s-1")  # one ends
+        assert await _notices(LIFTED) == []
+        await _age_the_wait(device, 200)
+        assert await _sweep() == 1
+        assert len(await _notices(LIFTED)) == 1, "the other session's lift is told once, with the promise still there"
+
+
+async def test_05d_a_stop_counts_the_agents_standing_now_not_the_ones_whose_lift_waits(world):
+    async with _client() as c:
+        d1, d2 = await _device(c, "d4781 mac e4"), await _device(c, "d4781 mac e5")
+        a1, a2 = d1["agents"][0]["member_id"], d2["agents"][0]["member_id"]
+        await _report(c, d1, a1, "working", 1)
+        await _report(c, d1, a1, "waiting_input", 2, limit=LOOKS)
+        await _report(c, d1, a1, "working", 3)  # its lift waits: it is not at the limit any more
+        await _release_stood_window()
+        await _report(c, d2, a2, "working", 1)
+        await _report(c, d2, a2, "waiting_input", 2, limit=LOOKS)
+        first, second = await _notices(STOOD)
+        assert second["title"] == f"{second['agent_name']} · 한도로 쉬는 중", "one agent stands now: the single-agent title, not «and N more»"
+
+
 async def test_06_a_real_lift_after_a_flap_is_still_told(world):
     async with _client() as c:
         device = await _device(c, "d4781 mac f")

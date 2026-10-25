@@ -276,13 +276,15 @@ def where_text(rows: list[DesktopSession], locale: str) -> str | None:
     return t("desktop_limit_notice.where", locale, where=where)
 
 
-async def _limited_rows(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, *, also_setups: frozenset[uuid.UUID] = frozenset()) -> list[DesktopSession]:
+async def _limited_rows(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, *, also_setups: frozenset[uuid.UUID] = frozenset(), include_waiting: bool = False) -> list[DesktopSession]:
     """The sessions standing at the limit that are THIS person's to hear about (AC8): those of every live setup of the organization whose
     recipients include them — a setup with a phone of theirs paired, or a setup with no usable pairing that they connected (the same two
     cases as `_recipients`). A revoked setup is not theirs any more: its stale row must not hold the «working again» line back.
     `also_setups`: the setups the person's outstanding «stopped» notice was made for (the record carries them). They keep counting for that
     person even if the pairing that made them its recipient is gone since — and ONLY those: a pairing that ended before the episode never held
-    this person's line back."""
+    this person's line back.
+    story 4781 `include_waiting`: a session whose lift is still WAITING (its limit is gone but the hold has not run out) is not yet confirmed back — the «working again» gate counts it as standing,
+    so the first of two sessions to come back does not take the promise (codex 01a174f2: an ended session would otherwise consume it and the other's lift would find none)."""
     from app.models.agent_permission import RemoteDevice, RemoteDevicePairing
     from app.models.member import Member
 
@@ -304,7 +306,8 @@ async def _limited_rows(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID,
         select(DesktopSession).join(DesktopSetup, DesktopSetup.id == DesktopSession.setup_id).where(
             DesktopSetup.org_id == org_id, DesktopSetup.revoked_at.is_(None),
             scope,
-            DesktopSession.limited.is_(True), DesktopSession.state != "stopped",
+            or_(DesktopSession.limited.is_(True), DesktopSession.limit_cleared_at.is_not(None)) if include_waiting else DesktopSession.limited.is_(True),
+            DesktopSession.state != "stopped",
         ).order_by(DesktopSession.state_at.asc(), DesktopSession.id.asc())
     )).scalars().all())
 
@@ -434,7 +437,7 @@ async def _lifted_for(db: AsyncSession, setup: DesktopSetup, row: DesktopSession
     # counts again and sees the whole picture.
     await db.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"desktop-limit-lifted:{setup.org_id}:{person.user_id}"))))
     promised = await _promised_setups(setup.org_id, person.user_id)
-    if await _limited_rows(db, setup.org_id, person.user_id, also_setups=promised):
+    if await _limited_rows(db, setup.org_id, person.user_id, also_setups=promised, include_waiting=True):
         logger.info("desktop limit notice: lifted not sent (some still stand) setup=%s to=%s", setup.id, member_prefix(person.member_id))
         return  # some are still standing — «all working again» would be false
     record = await _take_open(setup.org_id, person.user_id)
