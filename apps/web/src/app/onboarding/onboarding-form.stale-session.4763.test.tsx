@@ -178,6 +178,10 @@ describe('[SID:4763 H6] after the organization was deleted', () => {
     expect(byId('onboarding-org-deleted-checking')).toBeNull();
   });
 
+  it('the give-up limit is eight seconds, written out here (the test below reads the constant, so it moves with the constant: a limit made a hundred times longer would still pass it — Kadir)', () => {
+    expect(DELETED_CHECK_MAX_MS).toBe(8000);
+  });
+
   it('a quiet check that never answers (a request that hangs) does not leave a spinner for good: after DELETED_CHECK_MAX_MS the card is drawn (codex)', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     let release!: () => void;

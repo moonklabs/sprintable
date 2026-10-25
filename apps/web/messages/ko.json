@@ -5333,6 +5333,7 @@
       },
       "state": {
         "starting": "시작됨",
+        "waiting_first_screen": "Mac 터미널에서 답 대기",
         "working": "작업 중",
         "idle": "다음 일 기다림",
         "waiting_permission": "권한 대기",

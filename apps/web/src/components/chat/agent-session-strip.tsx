@@ -29,6 +29,8 @@ import { useViewerTimeZone } from '@/components/viewer-time-zone';
  */
 // story #4534 (relay contract v1.12 · Yuna 03:04Z · 03:06Z): the board's own words — asked in the terminal · an error · paused at a
 // usage limit — never shown as «다음 일 기다림»; a usage limit carries its why (`limit`)
+/** story #4763 (AC4 · AC12): the first-screen question that stands at that computer — the daemon's own closed list (folder trust · Claude's new-MCP-server(s) question · Codex's update) */
+export type FirstScreenAsk = 'trust' | 'mcp' | 'mcp_many' | 'update'
 type SessionState = 'starting' | 'working' | 'idle' | 'waiting_permission' | 'waiting_input' | 'error' | 'paused_limit' | 'stopped' | 'unknown'
   // story #4599 (relay contract v1.13.2 · Yuna 12:4xZ ① · PO 14:25Z): the turn is held by a macOS window on that computer (a
   // folder-access question only the person at the Mac can answer) — «macOS 창 대기», its own line naming the folder when the daemon
@@ -54,6 +56,9 @@ interface View {
   // story 4684 (Yuna ux1-copy §L ②③): why THIS computer receives no new work for the agent — the board's stop word (the server sends it only while
   // the computer is heard and the session lives; an older server sends none → no line)
   inbox?: SessionInbox | null;
+  // story #4763 (AC4): the first-screen question that stands at that computer (one closed word) — the session reads `starting` while it stands, which said «시작됨» for minutes;
+  // the server sends it only while the computer is heard and the session lives (an older server sends none → the line as before)
+  first_screen?: { ask: FirstScreenAsk } | null;
   // story #4599: a held turn's why — the folder the macOS window asks about, when the daemon read it (a closed list; null = not read)
   system?: { folder?: SystemFolder | null } | null;
   // story #4641: a permission widening a person made at the terminal — the three keys, only while one is stored (the server's)
@@ -99,8 +104,11 @@ export function shownState(view: { state: string | null; activity?: string | nul
 
 /** story 4675 (F2 · Yuna §I Q-d): the one place the session's word is chosen — the strip and the workforce detail's «지금 도는
  *  컴퓨터» line say the same word for the same agent. Claude at a usage limit (or a limit the app held) wears «사용 한도». */
-export function sessionStateLabel(view: { state: string | null; activity?: string | null; limit?: SessionLimit | null }, t: (key: string) => string): string {
+export function sessionStateLabel(view: { state: string | null; activity?: string | null; limit?: SessionLimit | null; first_screen?: { ask: FirstScreenAsk } | null }, t: (key: string) => string): string {
   const state = shownState(view);
+  // story #4763 (AC4 · AC12): a session that waits on a question at its computer — before it has begun to run, or after an instruction went in (the CLI stands on the question) — says so, not
+  // «시작됨» / «작업 중»; the server sends the question only while the computer is heard and the session lives
+  if ((state === 'starting' || state === 'working' || state === 'idle') && view.first_screen?.ask) return t('state.waiting_first_screen');
   // story #4685 (Yuna §③): a limit the app looks at again by itself (`limit.looks`) is «한도로 쉬는 중»; only a held one, or one from a
   // daemon that does not look (no `looks`), keeps «사용 한도» — the strip's dot and line follow the same decision (limitLooksAgain)
   const looksAgain = limitLooksAgain(state, view.limit);
@@ -233,7 +241,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
   const count = codePoints(draft);
   const tooLong = count > INSTRUCT_NOW_MAX;
   // story 4675: the word comes from one function (the workforce detail says the same) — `view.state` here is already the shown one
-  const label = sessionStateLabel({ state: view.state, activity: null, limit: view.limit }, t);
+  const label = sessionStateLabel({ state: view.state, activity: null, limit: view.limit, first_screen: view.first_screen }, t);
 
   const deps: CommandDeps = {
     phoneCall,

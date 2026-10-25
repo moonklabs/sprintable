@@ -101,10 +101,9 @@ def client(monkeypatch):
 
     from app.main import app
 
-    monkeypatch.setattr(
-        "app.routers.ws_chat.async_session_factory",
-        async_sessionmaker(create_async_engine(_ASYNC, poolclass=NullPool), expire_on_commit=False),
-    )
+    factory = async_sessionmaker(create_async_engine(_ASYNC, poolclass=NullPool), expire_on_commit=False)
+    monkeypatch.setattr("app.routers.ws_chat.async_session_factory", factory)
+    monkeypatch.setattr("app.services.stream_access.async_session_factory", factory)   # story #4774: the seat check reads through the same test engine
     with TestClient(app) as c:
         yield c
 
@@ -196,7 +195,11 @@ def test_one_receiver_failing_does_not_stop_the_others(monkeypatch):
         async def __aexit__(self, *a):
             return False
 
+    async def _seated(user_id, org_id, **kw):   # story #4774: made-up owners have no seat row; the seat judgement is not what this cell is about
+        return None
+
     monkeypatch.setattr(ws_chat, "socket_can_read_conversation", _allow)
+    monkeypatch.setattr(ws_chat, "person_seat_revoked", _seated)
     monkeypatch.setattr(ws_chat, "async_session_factory", lambda: _Db())
     broken, ok = Broken(), Ok()
     ident = ws_chat._SocketIdent(member_id=uuid.uuid4(), access_user_id=uuid.uuid4(), org_id=uuid.uuid4(), via_agent_key=False)
