@@ -29,7 +29,7 @@ from app.services.member_resolver import resolve_member_display_name
 from app.services.conversation_auth import socket_can_read_conversation
 from app.services.pg_pubsub import fire_and_forget
 from app.services.project_auth import has_project_access
-from app.services.stream_access import AccessRecheck
+from app.services.stream_access import AccessRecheck, SeatRecheck, person_seat_revoked
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["ws-chat", "Organization"])
@@ -88,8 +88,12 @@ async def _reachable_projects(agent_id: uuid.UUID, org_id: uuid.UUID, access_use
         return reachable
 
 
-async def _authenticate(api_key: str | None, token: str | None) -> TeamMember | _CallerIdentity | None:
-    """Query param API Key 또는 JWT로 TeamMember 반환. 실패 시 None."""
+async def _authenticate(api_key: str | None, token: str | None, org_id: uuid.UUID | None = None) -> TeamMember | _CallerIdentity | None:
+    """Query param API Key 또는 JWT로 TeamMember 반환. 실패 시 None.
+
+    story #4774: a person who is in more than one organization has a `TeamMember` row per organization, and `.first()` without an ordering picked any of them — the socket's
+    identity was another organization's one run to run (a 4003 «forbidden» on the wrong pick). With `org_id` (the agent's organization, known only after the agent is read) the
+    person's identity IN THAT organization is returned (None if they have none); without it the pick is ordered (lowest organization id, then project id)."""
     now = datetime.now(timezone.utc)
     async with async_session_factory() as db:
         if api_key and api_key.startswith("sk_live_"):
@@ -122,11 +126,10 @@ async def _authenticate(api_key: str | None, token: str | None) -> TeamMember | 
                 uid = uuid.UUID(user_id)
             except ValueError:
                 return None
-            tm = (await db.execute(
-                select(TeamMember)
-                .where(TeamMember.user_id == uid)
-                .where(TeamMember.is_active.is_(True))
-            )).scalars().first()
+            tm_query = select(TeamMember).where(TeamMember.user_id == uid).where(TeamMember.is_active.is_(True))
+            if org_id is not None:
+                tm_query = tm_query.where(TeamMember.org_id == org_id)
+            tm = (await db.execute(tm_query.order_by(TeamMember.org_id, TeamMember.project_id))).scalars().first()
             if tm is not None:
                 return tm
             # #2216: team_members뷰(members ⋈ project_access INNER JOIN)는 owner-floor
@@ -136,11 +139,10 @@ async def _authenticate(api_key: str | None, token: str | None) -> TeamMember | 
             # SSOT(filter_org_member_ids와 동일 축)로 폴백 — 이 라우터가 caller에서 실제로
             # 쓰는 필드(.id/.org_id)만 있으면 되므로 최소 dataclass로 충분(TeamMember 전체
             # 필드 불필요).
-            om = (await db.execute(
-                select(OrgMember.id, OrgMember.org_id).where(
-                    OrgMember.user_id == uid, OrgMember.deleted_at.is_(None),
-                )
-            )).first()
+            om_query = select(OrgMember.id, OrgMember.org_id).where(OrgMember.user_id == uid, OrgMember.deleted_at.is_(None))
+            if org_id is not None:
+                om_query = om_query.where(OrgMember.org_id == org_id)
+            om = (await db.execute(om_query.order_by(OrgMember.org_id))).first()
             return _CallerIdentity(id=om.id, org_id=om.org_id, user_id=uid) if om is not None else None
 
     return None
@@ -234,6 +236,13 @@ async def _broadcast(room_key: str, payload: str, *, conversation_id: uuid.UUID)
     if not sockets:
         return
     idents = {_idents[ws] for ws in sockets if ws in _idents}
+    # story #4774: a PERSON whose seat in the organization has ended is not sent this line — their socket is closed instead (4001 access_revoked), the same judgement
+    # the request authentication makes (`person_seat_revoked`, one indexed read per distinct person in the room). An agent key's socket keeps its own key recheck.
+    seat_ended: set[_SocketIdent] = set()
+    for ident in idents:
+        if not ident.via_agent_key and await person_seat_revoked(ident.access_user_id, ident.org_id):
+            seat_ended.add(ident)
+    idents -= seat_ended
     allowed: set[_SocketIdent] = set()
     if idents:
         async with async_session_factory() as db:
@@ -246,6 +255,13 @@ async def _broadcast(room_key: str, payload: str, *, conversation_id: uuid.UUID)
     dead: set[WebSocket] = set()
     for ws in sockets:
         ident = _idents.get(ws)
+        if ident is not None and ident in seat_ended:
+            dead.add(ws)
+            try:
+                await ws.close(code=4001, reason="access_revoked")
+            except Exception:  # noqa: BLE001 — already closing
+                logger.debug("ws_chat: close after seat ended failed room=%s", room_key, exc_info=True)
+            continue
         if ident is None or ident not in allowed:
             continue
         try:
@@ -346,6 +362,13 @@ async def ws_chat_hub(
         await websocket.close(code=4004)
         return
 
+    # story #4774: a person in several organizations — their identity is the one IN THE AGENT'S organization (not whichever row came first)
+    if agent_member.org_id != caller.org_id and not (api_key and api_key.startswith("sk_live_")):
+        in_agent_org = await _authenticate(api_key, token, org_id=agent_member.org_id)
+        if in_agent_org is not None:
+            caller = in_agent_org
+            access_user_id, via_agent_key = _access_identity(caller, via_key=False)
+
     # org 교차 검증 — caller가 agent와 동일 org 소속인지 확인
     if agent_member.org_id != caller.org_id:
         await websocket.send_text(json.dumps({"error": "forbidden"}))
@@ -367,7 +390,9 @@ async def ws_chat_hub(
     # story #4565 (Qadir ①): an agent key revoked after this socket opened (its agent moved to another computer by a setup ·
     # a device disconnected) ends the socket — checked before each message it sends is kept, and on a timer while it listens
     key_id = await _api_key_id(api_key)
-    access = AccessRecheck(key_id, caller.id, agent_only=False) if key_id else None
+    # story #4774: a PERSON's socket (a JWT) has no key to revoke but it has a seat — asked on the timer below, before each message it sends is kept, and before each line
+    # that is delivered to it (`_broadcast`): the same judgement the request authentication makes, so a removal / organization delete / account deletion ends the socket.
+    access = AccessRecheck(key_id, caller.id, agent_only=False) if key_id else (None if via_agent_key else SeatRecheck(access_user_id, caller.org_id))
     # held by pg_pubsub's own set (never collected early) and kept here to cancel when the socket ends
     watcher = fire_and_forget(_close_when_revoked(websocket, access)) if access else None
     try:
@@ -396,7 +421,7 @@ async def ws_chat_hub(
                 continue
             if access is not None and await access.due(0):
                 await websocket.close(code=4001, reason="access_revoked")
-                return  # nothing kept from a key that is no longer allowed
+                return  # nothing kept from a key (or a person) that is no longer allowed
 
             # story #4775 AC3 — where this line is kept: a person's (or another agent's) line goes to ITS DM with this agent;
             # the agent's own answer goes to the conversation it names. A conversation a person names is ignored (their socket is

@@ -111,10 +111,9 @@ def client(monkeypatch):
 
     from app.main import app
 
-    monkeypatch.setattr(
-        "app.routers.ws_chat.async_session_factory",
-        async_sessionmaker(create_async_engine(_ASYNC, poolclass=NullPool), expire_on_commit=False),
-    )
+    factory = async_sessionmaker(create_async_engine(_ASYNC, poolclass=NullPool), expire_on_commit=False)
+    monkeypatch.setattr("app.routers.ws_chat.async_session_factory", factory)
+    monkeypatch.setattr("app.services.stream_access.async_session_factory", factory)   # story #4774: the seat check reads through the same test engine
     with TestClient(app) as c:
         yield c
 
@@ -593,12 +592,15 @@ def test_a_socket_nobody_vouched_for_is_sent_nothing():
 
     ws_chat._rooms["room-4775"] = {vouched, stranger}
     ws_chat._idents[vouched] = ident
-    orig_judge, orig_factory = ws_chat.socket_can_read_conversation, ws_chat.async_session_factory
-    ws_chat.socket_can_read_conversation, ws_chat.async_session_factory = _allow, (lambda: _Db())
+    async def _seated(user_id, org_id, **kw):   # story #4774: a made-up owner has no seat row; the seat judgement is not what this cell is about
+        return None
+
+    orig_judge, orig_factory, orig_seat = ws_chat.socket_can_read_conversation, ws_chat.async_session_factory, ws_chat.person_seat_revoked
+    ws_chat.socket_can_read_conversation, ws_chat.async_session_factory, ws_chat.person_seat_revoked = _allow, (lambda: _Db()), _seated
     try:
         _run(ws_chat._broadcast("room-4775", "line", conversation_id=uuid.uuid4()))
     finally:
-        ws_chat.socket_can_read_conversation, ws_chat.async_session_factory = orig_judge, orig_factory
+        ws_chat.socket_can_read_conversation, ws_chat.async_session_factory, ws_chat.person_seat_revoked = orig_judge, orig_factory, orig_seat
         ws_chat._rooms.pop("room-4775", None)
         ws_chat._idents.pop(vouched, None)
     assert got == {"vouched": ["line"], "stranger": []}
