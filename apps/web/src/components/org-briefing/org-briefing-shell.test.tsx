@@ -108,11 +108,38 @@ describe('OrgBriefingShell — 프로젝트 안내 배너(story #2212, story #38
   // story #3831 — today route는 org 스코프뿐(project_id 파라미터 자체가 없다) — project
   // 미보유 자체는 더는 배너 사유가 아니다(옛 "여기에 현황이 표시됩니다"는 이제 거짓이다,
   // LoopFace/WorkforceFace가 걷혀 project 유무와 화면 내용이 무관해졌으므로).
-  it('?next= 있으면 복귀 안내 배너를 보여준다', async () => {
+  it('?next= 있고 프로젝트를 안 골랐고 고를 프로젝트가 있으면 복귀 안내 배너를 보여준다', async () => {
     searchParamsValueRef.current = 'next=%2Fboard';
+    useDashboardContextMock.mockReturnValue({ projectId: undefined, projectMemberships: [{ id: 'p1', name: 'P1' }], orgMemberships: [] });
     stubToday(EMPTY_TODAY);
     await mount();
     expect(container.textContent).toContain('프로젝트를 선택하면 원래 보려던 화면으로 이동해요.');
+  });
+
+  // story 4773 (AC2) — the banner says «pick a project»: true only when none is picked and one can be. The session restore puts `?next=/glance?_prRetry=1` on Today with the project already chosen
+  // (4762 AC8 lap, dev 10-24: `?p=` on the page and on every flat link) — the line then sent the person looking for a choice already made.
+  it('[4773] ?next= 가 있어도 프로젝트가 이미 골라졌으면(자동 선택 포함) 배너가 안 뜬다 — 세션 복원이 붙인 재시도 표식 next', async () => {
+    searchParamsValueRef.current = 'next=%2Fglance%3F_prRetry%3D1&p=p1';
+    useDashboardContextMock.mockReturnValue({ projectId: 'p1', projectMemberships: [{ id: 'p1', name: 'P1' }], orgMemberships: [] });
+    stubToday(EMPTY_TODAY);
+    await mount();
+    expect(container.textContent).not.toContain('프로젝트를 선택하면'); // back to the old `next`-only condition → fails
+  });
+
+  it('[4773] 프로젝트가 둘 이상이고 아직 안 골랐으면 배너가 뜬다(맞는 말)', async () => {
+    searchParamsValueRef.current = 'next=%2Fboard';
+    useDashboardContextMock.mockReturnValue({ projectId: undefined, projectMemberships: [{ id: 'p1', name: 'P1' }, { id: 'p2', name: 'P2' }], orgMemberships: [] });
+    stubToday(EMPTY_TODAY);
+    await mount();
+    expect(container.textContent).toContain('프로젝트를 선택하면 원래 보려던 화면으로 이동해요.');
+  });
+
+  it('[4773] 프로젝트가 하나도 없으면(고를 게 없음) next가 있어도 «고르세요» 배너가 안 뜬다', async () => {
+    searchParamsValueRef.current = 'next=%2Fboard';
+    useDashboardContextMock.mockReturnValue({ projectId: undefined, projectMemberships: [], orgMemberships: [] });
+    stubToday(EMPTY_TODAY);
+    await mount();
+    expect(container.textContent).not.toContain('프로젝트를 선택하면'); // without the candidates condition → fails
   });
 
   it('?next= 없으면 project 유무와 무관하게 배너가 안 뜬다(today는 org 스코프)', async () => {

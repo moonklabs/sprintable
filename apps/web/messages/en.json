@@ -7671,6 +7671,7 @@
   "phonePairing": {
     "start": "Pair with a computer — scan the QR that appears when you press [Pair a phone] in the computer's Sprintable app",
     "entry": "Pair with a computer",
+    "todayNote": "This phone isn't paired with a computer yet.",
     "scan": "Scan QR",
     "rescan": "Scan again",
     "pair": "Pair",

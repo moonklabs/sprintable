@@ -7671,6 +7671,7 @@
   "phonePairing": {
     "start": "컴퓨터와 페어링 — 컴퓨터의 Sprintable 앱에서 [폰 페어링]을 눌러 나온 QR을 찍어 주세요",
     "entry": "컴퓨터와 페어링",
+    "todayNote": "이 폰은 아직 컴퓨터와 페어링되지 않았어요.",
     "scan": "QR 찍기",
     "rescan": "다시 찍기",
     "pair": "페어링",

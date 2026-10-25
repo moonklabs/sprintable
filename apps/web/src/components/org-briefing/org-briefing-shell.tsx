@@ -14,6 +14,7 @@ import { EMPTY_TODAY_SNAPSHOT, useTodaySnapshot } from './use-today-snapshot';
 import { AgentProgressSection, NeedsMeSection, PublishedSection } from './today-sections';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { findSoleAgentDm, sendInstruction } from '@/lib/today-instruct';
+import { TodayPairCard } from './today-pair-card';
 
 // story #3831(UX-v3·FE 3·오늘, 페드루 PO 確定 2026-09-13) — 옛 조직 브리핑(NowFace·
 // LoopFace·WorkforceFace, 각자 다른 BFF 4종 조합)을 시안 v3(오늘 1caf61fe)로 흡수한다.
@@ -105,12 +106,16 @@ function InstructionInput({ autoFocus }: { autoFocus: boolean }) {
 export function OrgBriefingShell() {
   const t = useTranslations('orgBriefing');
   const tc = useTranslations('common');
-  const { projectId: _projectId } = useDashboardContext();
-  void _projectId; // today route는 org 스코프뿐 — 이 화면 자체는 project를 더는 안 쓴다.
+  // today route는 org 스코프뿐 — 내용은 project를 안 쓴다. project는 오직 «복귀 안내 띠»(아래)만 본다.
+  const { projectId, projectMemberships } = useDashboardContext();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const nextTarget = searchParams.get('next');
+  // story 4773 (AC2) — «Pick a project and we'll take you back…» is true only for a person who has NOT picked a project and has one to pick. It was drawn for any `?next=` — also the retry mark the
+  // session restore puts there (`/org-briefing?next=/glance?_prRetry=1`, AC8 lap 10-24) with the project already chosen (`?p=` on the page, every flat link carrying it): a line that sent the person
+  // looking for a choice already made. With no project to pick (none yet) «pick» cannot be done either — Chats says «no project yet» for that.
+  const showPickBanner = Boolean(nextTarget) && !projectId && projectMemberships.length > 0;
   const { data, loadError, retry } = useTodaySnapshot();
   const snapshot = data ?? EMPTY_TODAY_SNAPSHOT;
 
@@ -135,7 +140,9 @@ export function OrgBriefingShell() {
     // 말줄임 · nowrap)의 폭이 그대로 뿌리 폭(최대 max-w-4xl = 896px)이 돼 402폭에서 가로로 밀어야 «승인하고 서명» · «보내기»가 보였다.
     // w-full로 열 폭을 채우고(말줄임이 제 폭 안에서 동작) mx-auto는 넓은 화면 가운데 정렬만 맡는다.
     <div className="mx-auto w-full max-w-4xl space-y-6 p-4 lg:p-6">
-      {nextTarget ? (
+      {/* story 4773 (AC3, PO 10-25) — the top band: the phone app, a phone paired with nothing → one line + [컴퓨터와 페어링]. The instruction box below stays where hands expect it (4762 AC3: Send clear of the support button). */}
+      <TodayPairCard />
+      {showPickBanner ? (
         <Alert role="status">
           <AlertDescription>{t('projectRequiredBannerNext')}</AlertDescription>
         </Alert>
