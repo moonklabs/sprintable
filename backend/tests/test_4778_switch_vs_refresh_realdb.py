@@ -291,6 +291,7 @@ async def test_a_refresh_racing_a_switch_either_survives_or_is_refused_never_any
             if rf.status_code == 200:
                 assert (await w.refresh(rf.json()["data"]["refresh_token"])).status_code == 200, "the refresh's token must be live"
             else:
+                assert rf.json()["error"]["code"] == "TOKEN_SUPERSEDED", rf.text  # the refresh that lost to a committed switch is «moved on», never plain revoked (the BFF would clear both cookies on that)
                 refused += 1
         print(f"\n[4778 race:{kind}] trials={RACE_TRIALS} refresh refused (would clear both cookies)={refused}")
     finally:

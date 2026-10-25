@@ -325,6 +325,16 @@ describe('proxy', () => {
     }
   });
 
+  it('[4778] a 401 whose body cannot be read as JSON (empty body · parse error) is still «dead» and cleared — not mistaken for an unconfirmed answer', async () => {
+    for (const body of ['', 'not json', 'null']) {
+      mockFetch.mockResolvedValue(new Response(body, { status: 401 })); // a real Response: json() rejects (empty body · parse error) or gives null
+      const response = await middleware(makeRequest('/dashboard', { sp_rt: 'dead-rt-unreadable-body' }));
+      const setCookie = response.headers.get('set-cookie') ?? '';
+      expect(setCookie, `body ${JSON.stringify(body)}`).toContain('sp_rt=;'); // reverted (a rejecting json() lands in the outer catch = transient) → nothing cleared
+      expect(setCookie, `body ${JSON.stringify(body)}`).toContain('sp_at=;');
+    }
+  });
+
   it('[4778] a 401 without the word superseded (no JSON body at all) is still «dead» and cleared', async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 401 });
     const response = await middleware(makeRequest('/dashboard', { sp_rt: 'dead-rt-no-body' }));

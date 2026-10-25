@@ -4,7 +4,7 @@
 //   TOKEN_SUPERSEDED  — a switch ended the token this renewal carried and issued a newer pair (another tab, or the server): ask ONCE more, after the switch's answer has had time to land
 //   REFRESH_UNAVAILABLE — the backend answered 5xx · 429 · did not answer: nothing is known — no ended-session signal, the original 401 is handed back
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SUPERSEDED_RETRY_MS, fetchWithAuth, refreshSessionOnce } from './client';
+import { SUPERSEDED_RETRY_MS, fetchWithAuth, refreshSessionOnce, switchOrg } from './client';
 import { isSessionExpiredSignaled, resetSessionExpired } from '@/lib/auth/session-expired-signal';
 
 beforeEach(() => { resetSessionExpired(); });
@@ -83,6 +83,30 @@ describe('[SID:4778] fetchWithAuth: an unconfirmed or superseded renewal does no
   it('a renewal the server says is dead (TOKEN_REVOKED) still ends the session: the signal is sent', async () => {
     network([() => err('TOKEN_REVOKED', 401)]);
     await fetchWithAuth('/api/something');
+    expect(isSessionExpiredSignaled()).toBe(true);
+  });
+});
+
+describe('[SID:4778] a switch with withAuth: the same rule for its renewal', () => {
+  it('the switch answers 401 and its renewal «could not be confirmed» → the 401 is handed back, NO ended-session signal, the next switch still leaves', async () => {
+    let switches = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/auth/refresh')) return err('REFRESH_UNAVAILABLE', 503);
+      switches += 1;
+      return new Response('{}', { status: 401 });
+    }));
+    const first = await switchOrg('org-1', { withAuth: true });
+    expect(first.status).toBe(401);
+    expect(isSessionExpiredSignaled()).toBe(false); // reverted (any renewal error signals) → true and the next switch is refused before it leaves
+    const second = await switchOrg('org-2', { withAuth: true });
+    expect(second.status).toBe(401);
+    expect(switches).toBe(2);
+  });
+
+  it('a renewal the server says is dead still ends the session for a switch (the signal is sent)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (String(input).includes('/api/auth/refresh') ? err('TOKEN_REVOKED', 401) : new Response('{}', { status: 401 }))));
+    await switchOrg('org-1', { withAuth: true });
     expect(isSessionExpiredSignaled()).toBe(true);
   });
 });

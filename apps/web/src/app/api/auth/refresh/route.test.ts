@@ -112,6 +112,25 @@ describe('POST /api/auth/refresh', () => {
       unclear(b);
     });
 
+    it('a 200 that does not carry both tokens (partial · empty · a JSON null) is «not confirmed»: no cookie written, none cleared', async () => {
+      for (const body of ['{"data":{}}', '{"data":{"access_token":"a"}}', '{"data":{"access_token":"","refresh_token":""}}', '{"data":{"access_token":1,"refresh_token":2}}', 'null']) {
+        mockFetch.mockResolvedValue(new Response(body, { status: 200, headers: { 'content-type': 'application/json' } }));
+        const res = await POST(makeRequest());
+        expect(res.status, body).toBe(502); // reverted (a truthy `data` is enough) → a success that writes empty cookies · a null body throws
+        expect((await res.json() as { error: { code: string } }).error.code).toBe('REFRESH_UNAVAILABLE');
+        unclear(res);
+      }
+    });
+
+    it('a 401 whose body is empty · not JSON · JSON null is dead as before (cleared)', async () => {
+      for (const body of ['', 'not json', 'null']) {
+        mockFetch.mockResolvedValue(new Response(body, { status: 401 }));
+        const res = await POST(makeRequest());
+        expect(res.status, body).toBe(401);
+        expect(res.headers.get('set-cookie') ?? '').toContain('sp_rt=;');
+      }
+    });
+
     it('the backend cannot be reached (a connection failure) → 503 REFRESH_UNAVAILABLE, cookies untouched (it used to be an unhandled error)', async () => {
       mockFetch.mockRejectedValue(new TypeError('fetch failed'));
       const res = await POST(makeRequest());

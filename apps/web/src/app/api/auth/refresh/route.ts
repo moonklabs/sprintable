@@ -56,11 +56,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: { code: REFRESH_UNAVAILABLE, message: 'Token refresh could not be confirmed' } }, { status: 503 });
   }
 
-  const json = await safeJsonParse(fastapiRes) as { data?: { access_token: string; refresh_token: string }; error?: { code: string; message: string } };
-  if (!fastapiRes.ok || !json.data) {
+  const json = await safeJsonParse(fastapiRes) as { data?: { access_token?: unknown; refresh_token?: unknown }; error?: { code: string; message: string } } | null;
+  // story 4778 — a 200 only counts when it carries BOTH tokens as non-empty strings (a `{"data":{}}` · a `null` body are «not confirmed», never a success that writes empty cookies)
+  const access_token = typeof json?.data?.access_token === 'string' ? json.data.access_token : '';
+  const refresh_token = typeof json?.data?.refresh_token === 'string' ? json.data.refresh_token : '';
+  if (!fastapiRes.ok || !access_token || !refresh_token) {
     // story 4778 (AC2b) — the session moved on (a switch ended this token a moment ago and issued a newer pair): not dead. The cookies are NOT touched (the browser is about to replace them with the
     // switch's own answer, and the client asks again with whatever it then holds); a clear here would be a logout while switching.
-    if (fastapiRes.status === 401 && json.error?.code === TOKEN_SUPERSEDED) {
+    if (fastapiRes.status === 401 && json?.error?.code === TOKEN_SUPERSEDED) {
       return NextResponse.json({ error: json.error }, { status: 401 });
     }
     // story 4778 (AC2c) — only an answer that says the token is DEAD clears the cookies (a 401). A 5xx · a 429 · any other non-answer (and a 200 without tokens) means «not confirmed»: the cookies
@@ -92,7 +95,7 @@ export async function POST(request: Request) {
     // fix: SET과 완전히 동일한 속성(...cookieBase())으로 값만 빈 문자열+maxAge=0 — 브라우저가
     // 반드시 동일 쿠키로 매칭해 덮어쓰게 한다(bare delete()의 domain drift 클래스 자체를 제거).
     const res = NextResponse.json(
-      { error: json.error ?? { code: 'REFRESH_FAILED', message: 'Token refresh failed' } },
+      { error: json?.error ?? { code: 'REFRESH_FAILED', message: 'Token refresh failed' } },
       { status: fastapiRes.status },
     );
     res.cookies.set(SP_AT_COOKIE, '', { ...cookieBase(), maxAge: 0 });
@@ -100,7 +103,6 @@ export async function POST(request: Request) {
     return markSessionChanged(res);
   }
 
-  const { access_token, refresh_token } = json.data;
   const res = NextResponse.json({ data: { ok: true } });
   res.cookies.set(SP_AT_COOKIE, access_token, { ...cookieBase(), maxAge: SP_AT_MAX_AGE_SECONDS });
   res.cookies.set(SP_RT_COOKIE, refresh_token, { ...cookieBase(), maxAge: 30 * 24 * 60 * 60 });

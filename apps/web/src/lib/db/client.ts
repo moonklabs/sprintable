@@ -165,7 +165,8 @@ async function switchSession(path: SwitchPath, body: object, opts: { withAuth?: 
     return res;
   }
   if (renewed.error) {
-    if (typeof window !== 'undefined') signalSessionExpired();
+    // a renewal that was only «superseded» or «not confirmed» does not end the session (the same rule as fetchWithAuth): the 401 is handed back, later switches stay possible
+    if (typeof window !== 'undefined' && !leavesTheSessionStanding(renewed.error)) signalSessionExpired();
     return res;
   }
   return post();

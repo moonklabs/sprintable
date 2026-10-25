@@ -539,6 +539,16 @@ type RefreshOutcome =
   | { kind: 'superseded' } // story 4778: 401 TOKEN_SUPERSEDED — 전환이 방금 이 토큰을 끝내고 새 토큰을 냈음(세션은 옮겨 갔을 뿐) — 지우면 안 됨(전환의 새 쿠키가 곧 덮음)
   | { kind: 'transient' }; // 5xx·429·네트워크에러·타임아웃·응답 파싱 실패 — 죽었는지 모름, 지우면 안 됨
 
+/** the `error.code` of a JSON error body; none when the body is empty · not JSON · not the usual shape (a 401 without the word is dead as before) */
+async function readErrorCode(res: Response): Promise<string | undefined> {
+  try {
+    const body = await res.json() as { error?: { code?: string } } | null;
+    return body?.error?.code;
+  } catch {
+    return undefined;
+  }
+}
+
 async function refreshWithToken(rt: string): Promise<RefreshOutcome> {
   const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
   try {
@@ -549,8 +559,7 @@ async function refreshWithToken(rt: string): Promise<RefreshOutcome> {
     });
     if (res.status === 401) {
       // story 4778 (AC2b) — the backend's word for «this token was ended by a switch a moment ago» is TOKEN_SUPERSEDED: the session is alive on a newer pair the browser is about to hold. Any other 401 is dead.
-      const code = await res.json().then((j: { error?: { code?: string } } | null) => j?.error?.code, () => undefined);
-      return code === 'TOKEN_SUPERSEDED' ? { kind: 'superseded' } : { kind: 'invalid' };
+      return (await readErrorCode(res)) === 'TOKEN_SUPERSEDED' ? { kind: 'superseded' } : { kind: 'invalid' };
     }
     if (!res.ok) return { kind: 'transient' };
     const json = await res.json() as { data?: { access_token: string; refresh_token: string } };
