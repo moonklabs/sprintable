@@ -310,6 +310,21 @@ describe('proxy', () => {
     expect(setCookie).not.toContain('sp_at=;');
   });
 
+  it('[4778] when the two tries disagree, «superseded» is not turned into «dead»: sp_rt superseded + vault token dead (and the other way round) clear nothing', async () => {
+    const activeId = '5dfbd9fc-94c2-4afc-9814-da4b7ad08c28';
+    for (const [primary, vault] of [['TOKEN_SUPERSEDED', 'TOKEN_REVOKED'], ['TOKEN_REVOKED', 'TOKEN_SUPERSEDED']]) {
+      mockFetch.mockImplementation((_url: string, init: { body: string }) => {
+        const body = JSON.parse(init.body) as { refresh_token: string };
+        const code = body.refresh_token === 'vaulted-rt' ? vault : primary;
+        return Promise.resolve({ ok: false, status: 401, json: async () => ({ error: { code } }) });
+      });
+      const response = await middleware(makeRequest('/dashboard', { sp_rt: 'primary-rt', [`sp_acct_rt_${activeId}`]: 'vaulted-rt', sp_active_account: activeId }));
+      const setCookie = response.headers.get('set-cookie') ?? '';
+      expect(setCookie, `${primary} + ${vault}`).not.toContain('sp_rt=;'); // reverted (superseded does not win) → «invalid» → cleared: a logout while switching
+      expect(setCookie, `${primary} + ${vault}`).not.toContain('sp_at=;');
+    }
+  });
+
   it('[4778] a 401 without the word superseded (no JSON body at all) is still «dead» and cleared', async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 401 });
     const response = await middleware(makeRequest('/dashboard', { sp_rt: 'dead-rt-no-body' }));

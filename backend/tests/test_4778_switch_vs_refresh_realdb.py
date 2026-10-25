@@ -220,6 +220,23 @@ async def test_the_word_is_revoked_not_superseded_for_every_other_end_realdb(kin
         assert rot.status_code == 200, rot.text
         r = await w.refresh(d["refresh_token"])
         assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_REVOKED", r.text  # reverted (the explicit-end test dropped) → TOKEN_SUPERSEDED
+        # 5) a pointer to another person's token is not «moved on» (never written by the app; a damaged row must not read as a live session)
+        from sqlalchemy import select, update
+
+        from app.core.security import hash_password, hash_token
+        from app.models.user import RefreshToken, User
+        e = await w.login()
+        sw = await _switchers(w)[kind](e)
+        assert sw.status_code == 200
+        other = uuid.uuid4()
+        async with w.Session() as s:
+            s.add(User(id=other, email=f"story4778-other-{other.hex[:8]}@test.com", hashed_password=hash_password(_PASSWORD), is_active=True, email_verified=True))
+            await s.commit()
+            successor = (await s.execute(select(RefreshToken.replaced_by).where(RefreshToken.token_hash == hash_token(e["refresh_token"])))).scalar_one()
+            await s.execute(update(RefreshToken).where(RefreshToken.id == successor).values(user_id=other))
+            await s.commit()
+        r = await w.refresh(e["refresh_token"])
+        assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_REVOKED", r.text  # reverted (the successor's owner is not compared) → TOKEN_SUPERSEDED
     finally:
         settings.auth_refresh_superseded_window_seconds = old_super
         settings.auth_refresh_chain_resolve_window_seconds = old_resolve

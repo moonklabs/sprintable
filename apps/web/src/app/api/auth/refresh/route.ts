@@ -65,7 +65,7 @@ export async function POST(request: Request) {
     }
     // story 4778 (AC2c) — only an answer that says the token is DEAD clears the cookies (a 401). A 5xx · a 429 · any other non-answer (and a 200 without tokens) means «not confirmed»: the cookies
     // stay and the answer is a retryable one — a backend that is briefly ill must not sign the person out (proxy.ts #2124 ㉯ draws the same line).
-    if (fastapiRes.status !== 401 || (fastapiRes.ok && !json.data)) {
+    if (fastapiRes.status !== 401) {
       return NextResponse.json({ error: { code: REFRESH_UNAVAILABLE, message: 'Token refresh could not be confirmed' } }, { status: fastapiRes.ok ? 502 : fastapiRes.status });
     }
     if (fastapiRes.status === 401) {
