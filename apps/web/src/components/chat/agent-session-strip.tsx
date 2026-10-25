@@ -39,6 +39,7 @@ type SessionState = 'starting' | 'working' | 'idle' | 'waiting_permission' | 'wa
   | 'waiting_system'
   // story #4534 (Yuna 05:41Z): a word this page does not know — not the server's `unknown` (= the computer lost): its own line
   | 'unrecognized';
+export type WorkHoldWhy = 'tools_unconfirmed' | 'tools_failed';
 interface View {
   // story #4733: the computer this session runs on (the server sends it with the session; an older one sends none)
   setup_id?: string | null;
@@ -59,6 +60,10 @@ interface View {
   // story #4763 (AC4): the first-screen question that stands at that computer (one closed word) — the session reads `starting` while it stands, which said «시작됨» for minutes;
   // the server sends it only while the computer is heard and the session lives (an older server sends none → the line as before)
   first_screen?: { ask: FirstScreenAsk } | null;
+  // story #4779 (AC3): why work does not reach this agent — its Sprintable tools link (one closed word); the server sends it only while the computer is heard and the session lives (an older server sends none → no line)
+  work_hold?: { why: WorkHoldWhy } | null;
+  // the runtime of the session (the server sends it with the session): the failed line names the button of THAT runtime's board
+  runtime?: string | null;
   // story #4599: a held turn's why — the folder the macOS window asks about, when the daemon read it (a closed list; null = not read)
   system?: { folder?: SystemFolder | null } | null;
   // story #4641: a permission widening a person made at the terminal — the three keys, only while one is stored (the server's)
@@ -306,6 +311,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
       ) : null}
       {result ? <ResultLine result={result} /> : <Line view={view} now={readAt} phone={phone} href={flatHref('/inbox?tab=gates')} />}
       <InboxLine view={view} />
+      <WorkHoldLine view={view} />
       <WidenedLine view={view} />
       <RunLine run={view.run ?? null} />
       <Dialog open={endOpen} onOpenChange={setEndOpen}>
@@ -431,6 +437,25 @@ function InboxLine({ view }: { view: View }) {
     ? (device ? t('inbox.takenOver', { device }) : t('inbox.takenOverNoDevice'))
     : (device ? t('inbox.otherReceiver', { device }) : t('inbox.otherReceiverNoDevice'));
   return <p className={`w-full break-keep [overflow-wrap:anywhere] ${stop === 'taken_over' ? 'text-warning' : 'text-muted-foreground'}`} data-testid="agent-session-inbox" data-stop={stop}>{text}</p>;
+}
+
+// story #4779 (AC3 · PO 10-25): work is not reaching this agent because its computer cannot confirm (or has lost) the link to its Sprintable tools. One line, one thing for the
+// person to do — the button that stands on THAT board for that state: [다시 시작] for «not confirmed» (both runtimes) and for a failed Claude, [다시 연결] for a failed Codex
+// (desktop-electron/local/src/app.ts: confirmLine :2848 · the failed Claude line · the failed Codex line). A word this page does not know shows no line.
+function WorkHoldLine({ view }: { view: View }) {
+  const t = useTranslations('chats.agentSession');
+  const why = view.state === 'stopped' || view.state === 'unknown' || view.state === 'unrecognized' ? null : view.work_hold?.why;
+  if (why !== 'tools_unconfirmed' && why !== 'tools_failed') return null;
+  // «failed» names the button of the runtime's board — a runtime this page does not know (or none said) has no button name to give: no line rather than the wrong one
+  if (why === 'tools_failed' && view.runtime !== 'claude' && view.runtime !== 'codex') return null;
+  const device = view.device_name?.trim() ? view.device_name : null;
+  // each wording by its own literal call (the dead-key guard reads the literals)
+  const text = why === 'tools_unconfirmed'
+    ? (device ? t('workHold.unconfirmed', { device }) : t('workHold.unconfirmedNoDevice'))
+    : view.runtime === 'codex'
+      ? (device ? t('workHold.failedCodex', { device }) : t('workHold.failedCodexNoDevice'))
+      : (device ? t('workHold.failedClaude', { device }) : t('workHold.failedClaudeNoDevice'));
+  return <p className="w-full break-keep text-warning [overflow-wrap:anywhere]" data-testid="agent-session-work-hold" data-why={why}>{text}</p>;
 }
 
 // story #4641 (Yuna's copy, 2026-10-08): one plain muted line under the session, only when a person widened the mode at the terminal —
