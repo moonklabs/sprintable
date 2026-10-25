@@ -121,7 +121,7 @@ describe('[SID:4780] usePairHref — the pairing screen\'s address from the page
 
   // Kadir delta on 5232 ②: Next's app router puts the natives back when it unmounts (and in a dev remount); a wrapper installed before that is gone — the next subscription wraps again
   it('after the native history is put back (Next unmounting its router) the next subscription wraps again and the link follows', async () => {
-    const native = (method: 'pushState' | 'replaceState') => function (this: History, ...args: Parameters<History['pushState']>) { return History.prototype[method].apply(window.history, args); };
+    const native = (method: 'pushState' | 'replaceState') => function (this: History, ...args: Parameters<History['pushState']>) { return History.prototype[method].apply(this, args); };
     window.history.pushState = native('pushState'); // the store's wrappers are gone
     window.history.replaceState = native('replaceState');
     expect(await hrefAt('/today?p=proj-1')).toBe('/desktop/pair?from=%2Ftoday%3Fp%3Dproj-1&p=proj-1'); // the entry subscribes on mount
@@ -190,7 +190,7 @@ describe('[SID:4780] usePairHref — the pairing screen\'s address from the page
     try {
       window.history.pushState({}, '', '/today');
       await Promise.resolve();
-      expect(calls.sort()).toEqual(['first', 'second']); // reverted (state in the module) → the wrapper is wrapped again and each listener is told twice
+      expect(calls).toEqual(['first', 'second']); // in the order they subscribed; // reverted (state in the module) → the wrapper is wrapped again and each listener is told twice
       expect(second._locationListenerCountForTests()).toBe(before + 2); // ONE store: the second instance sees the first's listener too (reverted → it sees only its own)
     } finally {
       off1();

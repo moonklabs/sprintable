@@ -11,7 +11,6 @@
  * function in place is one of our wrappers (any we ever installed: what Next restores may be an older one) and wraps again if not.
  * Limit: that look happens on subscribe only; a subscriber that stays mounted while the router puts the native back is not told until another entry subscribes.
  */
-type HistoryMethod = 'pushState' | 'replaceState';
 interface LocationStore {
   listeners: Set<() => void>;
   ours: WeakSet<object>;
