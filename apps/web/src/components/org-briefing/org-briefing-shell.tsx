@@ -14,6 +14,7 @@ import { EMPTY_TODAY_SNAPSHOT, useTodaySnapshot } from './use-today-snapshot';
 import { AgentProgressSection, NeedsMeSection, PublishedSection } from './today-sections';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { findSoleAgentDm, sendInstruction } from '@/lib/today-instruct';
+import { TodayPairCard } from './today-pair-card';
 
 // story #3831(UX-v3·FE 3·오늘, 페드루 PO 確定 2026-09-13) — 옛 조직 브리핑(NowFace·
 // LoopFace·WorkforceFace, 각자 다른 BFF 4종 조합)을 시안 v3(오늘 1caf61fe)로 흡수한다.
@@ -135,6 +136,8 @@ export function OrgBriefingShell() {
     // 말줄임 · nowrap)의 폭이 그대로 뿌리 폭(최대 max-w-4xl = 896px)이 돼 402폭에서 가로로 밀어야 «승인하고 서명» · «보내기»가 보였다.
     // w-full로 열 폭을 채우고(말줄임이 제 폭 안에서 동작) mx-auto는 넓은 화면 가운데 정렬만 맡는다.
     <div className="mx-auto w-full max-w-4xl space-y-6 p-4 lg:p-6">
+      {/* story 4773 (AC3, PO 10-25) — the top band: the phone app, a phone paired with nothing → one line + [컴퓨터와 페어링]. The instruction box below stays where hands expect it (4762 AC3: Send clear of the support button). */}
+      <TodayPairCard />
       {nextTarget ? (
         <Alert role="status">
           <AlertDescription>{t('projectRequiredBannerNext')}</AlertDescription>
