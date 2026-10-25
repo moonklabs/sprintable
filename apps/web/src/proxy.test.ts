@@ -335,6 +335,16 @@ describe('proxy', () => {
     }
   });
 
+  it('[4778] a 200 whose tokens are not both strings is «not confirmed»: nothing written, nothing cleared', async () => {
+    for (const data of [{ access_token: 'a.b.c', refresh_token: 42 }, { access_token: { x: 1 }, refresh_token: 'r' }, { access_token: 'a.b.c' }, {}]) {
+      mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ data }) });
+      const response = await middleware(makeRequest('/dashboard', { sp_rt: 'rt-and-a-bad-answer' }));
+      const setCookie = response.headers.get('set-cookie') ?? '';
+      expect(setCookie, JSON.stringify(data)).not.toContain('sp_rt=;'); // not dead: kept
+      expect(setCookie, JSON.stringify(data)).not.toContain('42'); // reverted (any truthy value is taken) → the number is written as the cookie
+    }
+  });
+
   it('[4778] a 401 without the word superseded (no JSON body at all) is still «dead» and cleared', async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 401 });
     const response = await middleware(makeRequest('/dashboard', { sp_rt: 'dead-rt-no-body' }));

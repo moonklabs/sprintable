@@ -1310,7 +1310,10 @@ async def refresh_token(
                         _session_alive = True
                         break
                     if _hop.replaced_by is None:
-                        break  # revoked without a successor: nothing to move on to
+                        # revoked, no successor linked: a rotation in flight (the atomic revoke commits first, the new token is inserted and linked in later commits) while it is recent — the session is moving
+                        # on, not over; an old dead end is nothing to move on to. Wrongly «alive» costs one more ask of the client (the window ends in seconds); wrongly «dead» logs a live person out.
+                        _session_alive = _hop.revoked_at > _now - timedelta(seconds=settings.auth_refresh_superseded_window_seconds)
+                        break
                     _hop_id = _hop.replaced_by
                 if _session_alive:
                     logger.info(

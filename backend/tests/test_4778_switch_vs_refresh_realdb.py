@@ -260,7 +260,7 @@ async def test_the_word_is_revoked_not_superseded_for_every_other_end_realdb(kin
         assert lo.status_code == 200
         r = await w.refresh(g["refresh_token"])
         assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_REVOKED", r.text  # reverted (only the first successor is looked at) → TOKEN_SUPERSEDED
-        # 8) the successor is revoked (inside its grace window) but points at nothing: no live end to the chain → not «moved on»
+        # 8) the successor is revoked (inside its grace window) but points at nothing, and has been for minutes: a dead end, nothing to move on to → not «moved on»
         from sqlalchemy import select, update
 
         from app.core.security import hash_token
@@ -269,10 +269,19 @@ async def test_the_word_is_revoked_not_superseded_for_every_other_end_realdb(kin
         sw = await _switchers(w)[kind](h)
         assert sw.status_code == 200
         async with w.Session() as s:
-            await s.execute(update(RefreshToken).where(RefreshToken.token_hash == hash_token(sw.json()["data"]["refresh_token"])).values(revoked_at=datetime.now(timezone.utc), replaced_by=None))
+            await s.execute(update(RefreshToken).where(RefreshToken.token_hash == hash_token(sw.json()["data"]["refresh_token"])).values(revoked_at=datetime.now(timezone.utc) - timedelta(minutes=5), replaced_by=None))
             await s.commit()
         r = await w.refresh(h["refresh_token"])
-        assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_REVOKED", r.text  # reverted (a dead end counts as alive) → TOKEN_SUPERSEDED
+        assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_REVOKED", r.text  # reverted (an old dead end counts as alive) → TOKEN_SUPERSEDED
+        # 9) the same shape a moment after the rotation's atomic revoke (the new token is not linked yet: a rotation in flight) is still «moved on» — the late refresh must not log the person out
+        i = await w.login()
+        sw = await _switchers(w)[kind](i)
+        assert sw.status_code == 200
+        async with w.Session() as s:
+            await s.execute(update(RefreshToken).where(RefreshToken.token_hash == hash_token(sw.json()["data"]["refresh_token"])).values(revoked_at=datetime.now(timezone.utc), replaced_by=None))
+            await s.commit()
+        r = await w.refresh(i["refresh_token"])
+        assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_SUPERSEDED", r.text  # reverted (any hop without a link is dead) → TOKEN_REVOKED → the BFF clears both cookies of a live session
         # 5) a pointer to another person's token is not «moved on» (never written by the app; a damaged row must not read as a live session)
         from sqlalchemy import select, update
 

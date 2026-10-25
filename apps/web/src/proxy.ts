@@ -566,7 +566,7 @@ async function refreshWithToken(rt: string): Promise<RefreshOutcome> {
     const tokens = json.data;
     // 200인데 payload가 기대 shape가 아닌 것도 "토큰이 죽었다"는 신호가 아니다(예: 응답 파싱
     // 실패·백엔드 계약 드리프트) — transient로 취급해 재시도 여지를 남긴다.
-    if (!tokens?.access_token || !tokens?.refresh_token) return { kind: 'transient' };
+    if (typeof tokens?.access_token !== 'string' || !tokens.access_token || typeof tokens.refresh_token !== 'string' || !tokens.refresh_token) return { kind: 'transient' };
     return { kind: 'ok', accessToken: tokens.access_token, refreshToken: tokens.refresh_token };
   } catch {
     return { kind: 'transient' };
