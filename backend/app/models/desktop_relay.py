@@ -29,6 +29,8 @@ SESSION_LIMIT_STATES = ("waiting_input", "error", "paused_limit")
 SESSION_SELF_RESUME = ("maybe", "no", "unknown")
 # story #4599 (0442 · contract v1.13 · Kadir lens ③): the folder a macOS window asks about — a closed list, carried with
 # `waiting_system` only (the daemon read it from tccd's service name; a window seen by owner only carries none)
+# story #4779 (0466 · AC3): why work waits for an agent whose computer cannot confirm / has lost the link to its Sprintable tools — a closed list, one word, no path
+SESSION_WORK_HOLD_WHYS = ("tools_unconfirmed", "tools_failed")
 SESSION_SYSTEM_FOLDERS = ("documents", "desktop", "downloads", "network_volume", "icloud")
 # story #4641 (0449 · design 4641 · Kadir lens conditional pass): the permission mode a person widened at the terminal — the closed
 # list (the daemon sends only these; a mode it does not know is not sent). The order (plan < default < acceptEdits < auto <
@@ -98,6 +100,8 @@ class DesktopSession(Base):
         CheckConstraint(f"inbox_stream IS NULL OR {_in('inbox_stream', SESSION_INBOX_STREAMS)}", name="ck_desktop_sessions_inbox_stream"),
         # story #4763 (0465): the first-screen question's closed set in the DB too
         CheckConstraint(f"first_screen_ask IS NULL OR {_in('first_screen_ask', SESSION_FIRST_SCREEN_ASKS)}", name="ck_desktop_sessions_first_screen_ask"),
+        # story #4779 (0466): the work hold's closed set in the DB too
+        CheckConstraint(f"work_hold_why IS NULL OR {_in('work_hold_why', SESSION_WORK_HOLD_WHYS)}", name="ck_desktop_sessions_work_hold_why"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -139,6 +143,8 @@ class DesktopSession(Base):
     instruct_now: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # story #4763 (0465): the first-screen question that stands at that computer (`trust`) — set by the report that carries `first_screen`
     first_screen_ask: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story #4779 (0466): why work waits for this agent (`tools_unconfirmed` · `tools_failed`) — set by the report that carries `work_hold`
+    work_hold_why: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class DesktopCommand(Base):

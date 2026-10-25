@@ -266,6 +266,15 @@ class SessionFirstScreen(BaseModel):
     ask: Literal["trust", "mcp", "mcp_many", "update"]
 
 
+class SessionWorkHold(BaseModel):
+    """story #4779 (AC3 · 0466 · PO 10-25): why work does not reach this agent — the daemon cannot confirm the agent's Sprintable tools for minutes (`tools_unconfirmed`) or the
+    link is down after the app asked again (`tools_failed`). One closed word, no path, no account, no text. Absent = none (or not said); a report without it clears it (the hold is gone)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    why: Literal["tools_unconfirmed", "tools_failed"]
+
+
 class SessionInbox(BaseModel):
     """story #4684 (0454 · Yuna ux1-copy §L ②③): why THIS computer's subscription for the agent is stopped — the app board's own closed words.
     A stopped session keeps none (accepted like `run`, never stored or shown — it receives nothing to explain); absent = receiving, or not said."""
@@ -303,6 +312,8 @@ class SessionReport(BaseModel):
     inbox: SessionInbox | None = None
     # story #4763 (AC4): a question the first screen asks that only a person at that computer can answer — each report sets it (a report without it clears it)
     first_screen: SessionFirstScreen | None = None
+    # story #4779 (AC3): why work does not reach this agent (its tools link) — each report sets it (a report without it clears it)
+    work_hold: SessionWorkHold | None = None
     # story #4641: a widening a person made at the terminal — the three together or none; the daemon decides the order (from ≠ to only)
     permission_widened_at: OffsetDatetime | None = None
     permission_widened_from: WidenedMode | None = None
@@ -419,6 +430,16 @@ FIRST_SCREEN_STATES = ("starting", "working", "idle")
 def _set_first_screen(row: DesktopSession, first_screen: SessionFirstScreen | None, state: str) -> None:
     """story #4763: the row's first-screen question is the report's — a report without it clears it (the question is gone). A state that is not one of FIRST_SCREEN_STATES keeps none."""
     row.first_screen_ask = first_screen.ask if first_screen and state in FIRST_SCREEN_STATES else None
+
+
+def _set_work_hold(row: DesktopSession, work_hold: SessionWorkHold | None, state: str) -> None:
+    """story #4779: the row's work hold is the report's — a report without it clears it (the hold is gone). A session that has ended holds nothing."""
+    row.work_hold_why = work_hold.why if work_hold and state != "stopped" else None
+
+
+def work_hold_view(row: DesktopSession) -> dict | None:
+    """story #4779: why work waits for the agent as a reader sees it — None when the row says none. One closed word."""
+    return {"why": row.work_hold_why} if row.work_hold_why is not None else None
 
 
 def first_screen_view(row: DesktopSession) -> dict | None:
@@ -589,6 +610,7 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
     _set_inbox(row, report.inbox if report.state != "stopped" else None)  # story #4684
     _set_system(row, report)  # story #4599
     _set_first_screen(row, report.first_screen, report.state)  # story #4763
+    _set_work_hold(row, report.work_hold, report.state)  # story #4779
     _set_widened(row, report, _now(), was_stopped=was_stopped)  # story #4641
     row.instruct_now = report.instruct_now  # story #4534: each report sets it — a report without it clears it (Kadir 06:31Z (c))
     await touch_device(db, setup.id)
@@ -649,6 +671,7 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
         _set_inbox(row, s.inbox if s.state != "stopped" else None)  # story #4684
         _set_system(row, s)  # story #4599
         _set_first_screen(row, s.first_screen, s.state)  # story #4763
+        _set_work_hold(row, s.work_hold, s.state)  # story #4779
         _set_widened(row, s, now, was_stopped=was_stopped)  # story #4641
         row.instruct_now = s.instruct_now
     for row in existing.values():
@@ -661,6 +684,7 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
             _set_inbox(row, None)  # story #4684: a dropped session explains no receive stop
             row.system_folder = None  # story #4599: a dropped session holds no window
             row.first_screen_ask = None  # story #4763: a dropped session asks nothing
+            row.work_hold_why = None  # story #4779: a dropped session holds no work
             row.instruct_now = None
     await touch_device(db, setup.id)
     await db.flush()
@@ -780,6 +804,8 @@ async def device_sessions_view(
         **({"system": sv} if not silent and (sv := system_view(r)) is not None else {}),
         # story #4763: the first-screen question that stands at that computer — only while the device is heard and the session lives
         **({"first_screen": fs} if not silent and r.state in FIRST_SCREEN_STATES and (fs := first_screen_view(r)) is not None else {}),
+        # story #4779: why work waits for the agent (its tools link) — only while the device is heard and the session lives
+        **({"work_hold": wh} if not silent and r.state != "stopped" and (wh := work_hold_view(r)) is not None else {}),
         # story #4641: a widening a person made at the terminal — the three keys, only while the device is heard
         **widened_fields(r, silent),
         # story #4534 (PO 06:30Z): whether [지금 지시] can go into its turn — not said for a device not heard (Kadir 06:31Z (c))
