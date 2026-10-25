@@ -8,6 +8,10 @@ import { backendFetch } from '@/lib/backend-fetch';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
 
+// story 4778 — the two answers of the refresh route that are NOT «this session is over» (the client does not signal an ended session on them, and the cookies stay): see lib/db/client.ts
+const TOKEN_SUPERSEDED = 'TOKEN_SUPERSEDED';
+const REFRESH_UNAVAILABLE = 'REFRESH_UNAVAILABLE';
+
 // story #2449 AC1(계측, 페드루 PO 지시 2026-09-16) — 클라이언트(refresh-diagnostics.ts)가
 // 실어 보낸 진단 3종. 요청 body가 비어있거나(onboarding-form.tsx의 무-body 호출 2곳·기존
 // 테스트의 '{}') JSON이 아니면 조용히 없음 취급(그 호출부들의 회귀가 아니라 이 계측 자체가
@@ -37,16 +41,33 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: { code: 'NO_REFRESH_TOKEN', message: 'No refresh token' } }, { status: 401 });
   }
 
-  const fastapiRes = await backendFetch(`${FASTAPI_URL()}/api/v2/auth/refresh`, {
-    // story #4320 — 리프레시 토큰 회전(한 번 쓰는 토큰) — 브라우저가 끊어도 끝까지(끊으면 새 토큰을 잃어 로그아웃된다). 시간 제한만.
-    timeLimitOnly: true,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refresh_token: refreshToken }),
-  });
+  let fastapiRes: Response;
+  try {
+    fastapiRes = await backendFetch(`${FASTAPI_URL()}/api/v2/auth/refresh`, {
+      // story #4320 — 리프레시 토큰 회전(한 번 쓰는 토큰) — 브라우저가 끊어도 끝까지(끊으면 새 토큰을 잃어 로그아웃된다). 시간 제한만.
+      timeLimitOnly: true,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+  } catch {
+    // story 4778 (AC2c) — the backend could not be reached (a connection failure · the BFF's own time limit): the token is not known to be dead, so the cookies stay and the answer is a retryable
+    // one (the same rule as proxy.ts #2124 ㉯). It used to be an unhandled error (a 500 without a body).
+    return NextResponse.json({ error: { code: REFRESH_UNAVAILABLE, message: 'Token refresh could not be confirmed' } }, { status: 503 });
+  }
 
   const json = await safeJsonParse(fastapiRes) as { data?: { access_token: string; refresh_token: string }; error?: { code: string; message: string } };
   if (!fastapiRes.ok || !json.data) {
+    // story 4778 (AC2b) — the session moved on (a switch ended this token a moment ago and issued a newer pair): not dead. The cookies are NOT touched (the browser is about to replace them with the
+    // switch's own answer, and the client asks again with whatever it then holds); a clear here would be a logout while switching.
+    if (fastapiRes.status === 401 && json.error?.code === TOKEN_SUPERSEDED) {
+      return NextResponse.json({ error: json.error }, { status: 401 });
+    }
+    // story 4778 (AC2c) — only an answer that says the token is DEAD clears the cookies (a 401). A 5xx · a 429 · any other non-answer (and a 200 without tokens) means «not confirmed»: the cookies
+    // stay and the answer is a retryable one — a backend that is briefly ill must not sign the person out (proxy.ts #2124 ㉯ draws the same line).
+    if (fastapiRes.status !== 401 || (fastapiRes.ok && !json.data)) {
+      return NextResponse.json({ error: { code: REFRESH_UNAVAILABLE, message: 'Token refresh could not be confirmed' } }, { status: fastapiRes.ok ? 502 : fastapiRes.status });
+    }
     if (fastapiRes.status === 401) {
       // story #2449 AC1 — BFF 로그 1줄로 클라이언트 신호를 남긴다(PII 0). BE(auth.py)의
       // delta_since_revoke_s·successor_used·ua와 짝지어, 다음 하드 401이 「동시경합

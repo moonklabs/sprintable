@@ -536,6 +536,7 @@ async function refreshMatchesActive(request: NextRequest, accessToken: string): 
 type RefreshOutcome =
   | { kind: 'ok'; accessToken: string; refreshToken: string }
   | { kind: 'invalid' } // 백엔드가 401로 명시 거부 — 이 토큰은 진짜 죽음, 지워도 안전
+  | { kind: 'superseded' } // story 4778: 401 TOKEN_SUPERSEDED — 전환이 방금 이 토큰을 끝내고 새 토큰을 냈음(세션은 옮겨 갔을 뿐) — 지우면 안 됨(전환의 새 쿠키가 곧 덮음)
   | { kind: 'transient' }; // 5xx·429·네트워크에러·타임아웃·응답 파싱 실패 — 죽었는지 모름, 지우면 안 됨
 
 async function refreshWithToken(rt: string): Promise<RefreshOutcome> {
@@ -546,7 +547,11 @@ async function refreshWithToken(rt: string): Promise<RefreshOutcome> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: rt }),
     });
-    if (res.status === 401) return { kind: 'invalid' };
+    if (res.status === 401) {
+      // story 4778 (AC2b) — the backend's word for «this token was ended by a switch a moment ago» is TOKEN_SUPERSEDED: the session is alive on a newer pair the browser is about to hold. Any other 401 is dead.
+      const code = await res.json().then((j: { error?: { code?: string } } | null) => j?.error?.code, () => undefined);
+      return code === 'TOKEN_SUPERSEDED' ? { kind: 'superseded' } : { kind: 'invalid' };
+    }
     if (!res.ok) return { kind: 'transient' };
     const json = await res.json() as { data?: { access_token: string; refresh_token: string } };
     const tokens = json.data;
@@ -587,6 +592,8 @@ async function tryRefreshViaFastapi(request: NextRequest): Promise<RefreshOutcom
   // 둘 다 실패 — 어느 한쪽이라도 transient(확인 못 함)면 안전 쪽(transient)으로 합산한다.
   // 예: sp_rt는 진짜 죽었지만(invalid) 금고 시도가 마침 네트워크 에러(transient)면, 그 금고
   // 토큰이 사실 살아있었을 수도 있으므로 지우면 안 된다 — "덜 확信한 쪽"을 최종 판정으로.
+  // story 4778: a superseded answer is also «not dead» — it wins over transient (it is the more specific: the session moved on), and neither is cleared
+  if (primaryOutcome.kind === 'superseded' || vaultOutcome.kind === 'superseded') return { kind: 'superseded' };
   if (primaryOutcome.kind === 'transient' || vaultOutcome.kind === 'transient') return { kind: 'transient' };
   return { kind: 'invalid' };
 }

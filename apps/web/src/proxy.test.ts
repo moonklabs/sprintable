@@ -290,6 +290,34 @@ describe('proxy', () => {
     expect(setCookie).toContain('sp_at=;');
   });
 
+  // story 4778 (AC2b) — the backend's TOKEN_SUPERSEDED (a switch ended this token a moment ago and issued a newer pair: the session moved on) is NOT «dead»: the proxy treats it like the unconfirmed kinds —
+  // this request is not authenticated (the next one carries the browser's new pair), but the cookies are left for the switch's answer to replace
+  it('[4778] TOKEN_SUPERSEDED(전환이 방금 끝낸 토큰)는 sp_at/sp_rt를 지우지 않는다 — 세션이 옮겨 갔을 뿐 죽지 않았다', async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 401, json: async () => ({ error: { code: 'TOKEN_SUPERSEDED' } }) });
+    const response = await middleware(makeRequest('/dashboard', { sp_rt: 'rt-a-switch-just-ended' }));
+    expect(response.status).toBe(307); // this request is unauthenticated (a retry carries the new pair)
+    const setCookie = response.headers.get('set-cookie') ?? '';
+    expect(setCookie).not.toContain('sp_rt=;'); // reverted (every 401 is «invalid») → cleared: a logout while switching
+    expect(setCookie).not.toContain('sp_at=;');
+    expect(response.headers.get('x-session-changed')).toBeNull();
+  });
+
+  it('[4778] TOKEN_SUPERSEDED on an API path passes through unauthenticated without clearing (the page\'s own renewal asks again)', async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 401, json: async () => ({ error: { code: 'TOKEN_SUPERSEDED' } }) });
+    const response = await middleware(makeRequest('/api/v2/some-resource', { sp_rt: 'rt-a-switch-just-ended' }));
+    const setCookie = response.headers.get('set-cookie') ?? '';
+    expect(setCookie).not.toContain('sp_rt=;');
+    expect(setCookie).not.toContain('sp_at=;');
+  });
+
+  it('[4778] a 401 without the word superseded (no JSON body at all) is still «dead» and cleared', async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 401 });
+    const response = await middleware(makeRequest('/dashboard', { sp_rt: 'dead-rt-no-body' }));
+    const setCookie = response.headers.get('set-cookie') ?? '';
+    expect(setCookie).toContain('sp_rt=;');
+    expect(setCookie).toContain('sp_at=;');
+  });
+
   // #2124 사슬 3단계 — ㉮(vault 폴백) 착지 後 기대값 뒤집힘(오르테가군 지시: 새로 짜지 말고 그
   // 셋의 기대값만 뒤집는 것). 원래는 "금고가 있어도 proxy가 안 봐서 복구 불가"를 증명하는
   // 결함-재현 테스트였다 — 이제는 "sp_rt가 죽어도 active 계정의 금고 토큰으로 갱신에 성공한다"는
