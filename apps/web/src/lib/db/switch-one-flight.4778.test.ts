@@ -200,6 +200,46 @@ describe('[SID:4778] a stalled switch holds the others only for a bounded time',
     expect((await first).ok).toBe(true); // and its answer still arrives for its caller
   });
 
+  it('the bound is per request, not for the whole queue: two healthy switches of 25 s each — a renewal behind both still waits for the second (codex round 2)', async () => {
+    const s = scripted();
+    s.hold('switch#1');
+    s.hold('switch#2');
+    const first = switchOrg('org-1');
+    await vi.waitFor(() => expect(s.isOut('switch#1')).toBe(true));
+    const second = switchProject('proj-1'); // waits for the first
+    const renewal = refreshSessionOnce(); // waits for the second
+    await vi.advanceTimersByTimeAsync(25_000);
+    s.release('switch#1');
+    await first;
+    await vi.waitFor(() => expect(s.isOut('switch#2')).toBe(true)); // the second starts only now (t = 25 s)
+    await vi.advanceTimersByTimeAsync(25_000); // t = 50 s: past 40 s from the ASK, inside 40 s from the second's START
+    expect(s.calls.map((c) => c.kind)).toEqual(['switch-org', 'switch-project']); // reverted (an aggregate bound from the ask) → the renewal has already left at 40 s
+    s.release('switch#2');
+    await Promise.all([second, renewal]);
+    expect(s.calls.map((c) => c.kind)).toEqual(['switch-org', 'switch-project', 'refresh']);
+    expect(s.maxActive()).toBe(1);
+  });
+
+  it('a switch behind two others waits for the SECOND one\'s request too, not only for the first\'s give-up (the bound of a switch starts when its own request starts)', async () => {
+    const s = scripted();
+    s.hold('switch#1'); // stalls: the others give up on it 40 s after it started
+    s.hold('switch#2');
+    const first = switchOrg('org-1');
+    await vi.waitFor(() => expect(s.isOut('switch#1')).toBe(true));
+    const second = switchProject('proj-1'); // behind the first
+    const third = switchOrg('org-2'); // behind the second
+    await vi.advanceTimersByTimeAsync(40_500); // the first is given up on: the second's request starts now (t = 40.5 s)
+    await vi.waitFor(() => expect(s.isOut('switch#2')).toBe(true));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(s.calls.map((c) => c.kind)).toEqual(['switch-org', 'switch-project']); // reverted (the third's wait counted from its ask) → the third has left too, beside the second's request
+    s.release('switch#2');
+    await second;
+    await third;
+    expect(s.calls.map((c) => c.kind)).toEqual(['switch-org', 'switch-project', 'switch-org']);
+    s.release('switch#1');
+    await first;
+  });
+
   it('an answer that comes in time cancels the wait (no timer left to fire a second time)', async () => {
     const s = scripted();
     s.hold('switch#1');
