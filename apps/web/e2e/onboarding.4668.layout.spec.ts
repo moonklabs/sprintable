@@ -27,7 +27,7 @@ const APP = path.join(WEB, 'src', 'app');
 function onboardingStubPlugin(): Plugin {
   const bodies: Record<string, string> = {
     '@/hooks/use-flat-href': 'export function useFlatHref() { return (h) => h; } export function withProjectParam(h) { return h; }',
-    '@/lib/db/client': 'export const fetchWithAuth = (u, i) => fetch(u, i); export const refreshAuthTokens = async () => null; export const logoutUser = async () => {};',
+    '@/lib/db/client': 'export const fetchWithAuth = (u, i) => fetch(u, i); export const refreshAuthTokens = async () => ({ data: { ok: true }, error: null }); export const refreshSessionOnce = refreshAuthTokens; export const logoutUser = async () => {};',
   };
   const filter = new RegExp(`^(${Object.keys(bodies).map((k) => k.replace(/[/.-]/g, '\\$&')).join('|')})$`);
   return {

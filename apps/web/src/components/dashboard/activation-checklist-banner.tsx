@@ -66,7 +66,7 @@ export function ActivationChecklistBanner() {
   // 서버 시드·힌트 시드는 레이아웃이 조회한 org(activationOrgId)의 것 — 지금 org와 다르면(flat 경로·org 전환) 훅이 버리고 이 org를
   // 새로 조회한다(inActivationScope · A의 «완주»가 B 배너를 숨기던 자리).
   const { state, stateOrgId, allComplete } = useActivationStatus(initialActivationComplete, {
-    verifyInBackground: activationSeedFromHint, orgId, seedOrgId: activationOrgId,
+    verifyInBackground: activationSeedFromHint, orgId, seedOrgId: activationOrgId, refreshWhileIncomplete: true, // story #4763: «첫 지시 보내고 회신 받기» ticks itself
   });
   // story #4219 F1 — 받은 결과를 다음 문서 요청의 표시용 힌트로(레이아웃이 체크리스트를 임계 경로에서 기다리지 않게).
   // **결과가 판정된 org로만** 기록한다(PO 리뷰: 예전엔 캐시된 옛 org 결과를 현재 org로 기록해 섞였다).
