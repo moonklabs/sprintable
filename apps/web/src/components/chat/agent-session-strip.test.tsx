@@ -499,3 +499,54 @@ describe('AgentSessionStrip — the first-screen question (story #4763 AC4 · AC
     expect(sessionStateLabel({ state: 'starting', first_screen: null }, t)).toBe('state.starting');
   });
 });
+
+// story #4779 (AC3 · PO 10-25): one line when WORK does not reach the agent because its computer cannot confirm (or has lost) the link to its Sprintable tools — with the ONE thing to
+// do: the button that stands on THAT board for that state (the desktop board's [다시 시작] for «not confirmed» and a failed Claude, [다시 연결] for a failed Codex).
+describe('AgentSessionStrip — why work does not reach the agent (story 4779)', () => {
+  const holdLine = () => container.querySelector('[data-testid="agent-session-work-hold"]');
+
+  it('tools_unconfirmed: the line names the computer and the board\'s [다시 시작] — warning tone, under the status line', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', runtime: 'claude', work_hold: { why: 'tools_unconfirmed' } }));
+    await render();
+    expect(holdLine()?.textContent).toBe('이 에이전트에게 가는 글이 멈춰 있어요 — Sprintable 연결을 확인하지 못했어요. SYJ-MacBook-Pro의 앱에서 [다시 시작]을 누르면 다시 확인해요');
+    expect(holdLine()?.getAttribute('data-why')).toBe('tools_unconfirmed');
+    expect(holdLine()?.className).toContain('text-warning');
+  });
+
+  it('tools_failed names the button of THAT runtime\'s board: Claude [다시 시작] · Codex [다시 연결]', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', runtime: 'claude', work_hold: { why: 'tools_failed' } }));
+    await render();
+    expect(holdLine()?.textContent).toContain('[다시 시작]');
+    expect(holdLine()?.textContent).not.toContain('[다시 연결]');
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', runtime: 'codex', work_hold: { why: 'tools_failed' } }));
+    await render();
+    expect(holdLine()?.textContent).toContain('[다시 연결]');
+    expect(holdLine()?.textContent).not.toContain('[다시 시작]');
+  });
+
+  it('English words; without a computer name the line says «the computer this session runs on»', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', runtime: 'codex', work_hold: { why: 'tools_failed' } }));
+    await render('en');
+    expect(holdLine()?.textContent).toBe('Work for this agent is held up — the connection for receiving work still won\'t come up. Press [Reconnect] in the app on SYJ-MacBook-Pro');
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', device_name: null, runtime: 'claude', work_hold: { why: 'tools_unconfirmed' } }));
+    await render('en');
+    expect(holdLine()?.textContent).toBe('Work for this agent is held up — Sprintable\'s connection couldn\'t be confirmed. Press [Start again] in the app on the computer this session runs on to check once more');
+  });
+
+  it('no hold from the server (an older one, a silent computer, none) → no line · a stopped or unknown session → none · a word this page does not know → none', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', runtime: 'claude' }));
+    await render();
+    expect(holdLine()).toBeNull();
+    for (const over of [{ state: 'stopped' }, { state: 'unknown' }, { state: 'idle', work_hold: { why: 'something_new' } }, { state: 'idle', work_hold: null }]) {
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+      fetchWithAuth.mockResolvedValueOnce(view({ runtime: 'claude', work_hold: { why: 'tools_failed' }, ...over }));
+      await render();
+      expect(holdLine(), JSON.stringify(over)).toBeNull();
+    }
+  });
+});
