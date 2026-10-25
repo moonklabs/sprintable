@@ -84,11 +84,11 @@ afterEach(async () => {
 });
 
 const settle = async () => { for (let i = 0; i < 10; i++) await act(async () => { await Promise.resolve(); }); };
-async function render(locale: 'ko' | 'en' = 'ko') {
+async function render(locale: 'ko' | 'en' = 'ko', returnTo?: string | null) {
   await act(async () => {
     root.render(
       <PhoneBridgeClaim><NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
-        <PhonePairing />
+        <PhonePairing returnTo={returnTo} />
       </NextIntlClientProvider></PhoneBridgeClaim>,
     );
   });
@@ -226,6 +226,42 @@ describe('[4532] phone pairing screen', () => {
     expect(line()).toBe('이미 페어링된 컴퓨터예요');
     expect(buttons()).toEqual(['닫기']);
     expect(sent.some((s) => s.type === 'pair.mac')).toBe(false);
+  });
+
+  // story 4780 — [닫기] goes back to the page the pairing was started from (the page hands it over as `returnTo`); none → the Mac screen as before
+  describe('[4780] [닫기] goes back where the pairing started', () => {
+    const closeHref = () => [...container.querySelectorAll('a')].find((x) => x.textContent === '닫기')?.getAttribute('href');
+
+    it('already paired: [닫기] → the page it came from (Today) · none given → /desktop', async () => {
+      pairs = [{ setup_id: HEAD.setup_id }];
+      installShell();
+      await render('ko', '/today?p=proj-1');
+      await press('QR 찍기');
+      await press('페어링');
+      expect(line()).toBe('이미 페어링된 컴퓨터예요');
+      expect(closeHref()).toBe('/today?p=proj-1'); // reverted (the fixed /desktop) → '/desktop'
+    });
+
+    it('already paired, no way back handed over → /desktop (as it always was)', async () => {
+      pairs = [{ setup_id: HEAD.setup_id }];
+      installShell();
+      await render('ko', null);
+      await press('QR 찍기');
+      await press('페어링');
+      expect(closeHref()).toBe('/desktop');
+    });
+
+    it('paired after the number → [닫기] goes back too (a conversation here)', async () => {
+      installShell();
+      await render('ko', '/chats/conv-7');
+      await press('QR 찍기');
+      await press('페어링');
+      await tick();
+      pairs = [{ setup_id: HEAD.setup_id }];
+      await tick();
+      expect(line()).toContain('페어링했어요');
+      expect(closeHref()).toBe('/chats/conv-7');
+    });
   });
 
   it('an empty last-use value reads the relative time, never «아직 안 씀» (story #4624 · Yuna)', async () => {
