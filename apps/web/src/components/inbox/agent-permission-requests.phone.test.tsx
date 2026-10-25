@@ -290,7 +290,8 @@ describe('[4532] approvals card inside the phone app', () => {
     installShell();
     await render([req()]);
     await press('허용');
-    expect(container.querySelector('a')?.getAttribute('href')).toBe('/desktop/pair');
+    // story 4780: this inbox is where the pairing is entered from — the pairing screen's [닫기] comes back here
+    expect(container.querySelector('a')?.getAttribute('href')).toBe('/desktop/pair?from=%2Finbox');
   });
 
   it.each([

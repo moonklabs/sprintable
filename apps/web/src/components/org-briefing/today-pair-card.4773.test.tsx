@@ -67,6 +67,18 @@ describe('[SID:4773] TodayPairCard — a phone paired with nothing gets one line
     expect(link.getAttribute('href')).toBe('/desktop/pair?p=p1'); // the address the start screen's «pair» uses · one press → the pairing screen, [Scan QR] is the second
   });
 
+  it('[4780] the link carries the page it stands on (Today) so the pairing screen\'s [Close] comes back to Today', async () => {
+    window.history.pushState({}, '', '/today?p=p1');
+    try {
+      server({ devices: [] });
+      await draw(async () => key());
+      const link = q('today-pair-link') as HTMLAnchorElement;
+      expect(link.getAttribute('href')).toBe('/desktop/pair?from=%2Ftoday%3Fp%3Dp1&p=p1'); // reverted (no `from`) → '/desktop/pair?p=p1'
+    } finally {
+      window.history.pushState({}, '', '/');
+    }
+  });
+
   it('the list holds another phone but not this one (its check number is not on it) → still the card', async () => {
     server({ devices: [{ id: 'd9', confirm_number: '111 222' }] });
     await draw(async () => key());

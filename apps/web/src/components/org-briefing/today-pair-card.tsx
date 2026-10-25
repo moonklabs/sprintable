@@ -9,13 +9,13 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { useFlatHref } from '@/hooks/use-flat-href';
+import { usePairHref } from '@/hooks/use-pair-href';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { readStartableKeyed } from '@/lib/phone-start';
 
 export function TodayPairCard() {
   const t = useTranslations('phonePairing');
-  const flat = useFlatHref();
+  const pairHref = usePairHref(); // story 4780: carries this page (Today) so the pairing screen's [Close] comes back here
   const { inPhoneApp, phoneCall } = usePhoneBridge();
   // the answer is stored with the bridge it came from: another bridge makes an old answer «not read yet» without a state write in the effect
   const [seen, setSeen] = useState<{ call: typeof phoneCall; unpaired: boolean } | null>(null);
@@ -49,7 +49,7 @@ export function TodayPairCard() {
     <Card className="break-keep flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between" data-testid="today-pair-card">
       <p className="text-sm text-foreground" data-testid="today-pair-note">{t('todayNote')}</p>
       <Button asChild size="sm" className="self-start sm:self-auto">
-        <a href={flat('/desktop/pair')} data-testid="today-pair-link">{t('entry')}</a>
+        <a href={pairHref} data-testid="today-pair-link">{t('entry')}</a>
       </Button>
     </Card>
   );

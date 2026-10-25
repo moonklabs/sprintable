@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { fetchWithAuth } from '@/lib/db/client';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { usePairHref } from '@/hooks/use-pair-href';
 import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off';
 import { useFieldDraft } from '@/hooks/use-field-draft';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
@@ -364,7 +365,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
 function ResultLine({ result }: { result: Result }) {
   const { phoneCall } = usePhoneBridge();
   const t = useTranslations('chats.agentSession');
-  const flatHref = useFlatHref();
+  const pairHref = usePairHref(); // story 4780: the pairing screen's [Close] comes back to this conversation
   const remoteOff = useRemoteOff(); // story #4583: a command refused while off says who turns it on
   const ref = useRef<HTMLParagraphElement>(null);
   useEffect(() => { ref.current?.focus(); }, [result]); // the line takes focus (Yuna 12:47Z C)
@@ -377,7 +378,7 @@ function ResultLine({ result }: { result: Result }) {
   const stop = result.verb !== 'send'; // an end borrows the stop's lines (Yuna ①: no words of its own)
   if (result.busy) return line(stop ? t('command.stopping') : t('command.sending'));
   const signIn = <Button size="sm" variant="outline" asChild><a href={buildLoginRedirect(window.location.pathname + window.location.search)}>{t('command.signInAgain')}</a></Button>;
-  const pairAgain = <Button size="sm" variant="outline" asChild><a href={flatHref('/desktop/pair')}>{t('command.pairAgain')}</a></Button>;
+  const pairAgain = <Button size="sm" variant="outline" asChild><a href={pairHref}>{t('command.pairAgain')}</a></Button>;
   const settings = <Button size="sm" variant="outline" onClick={() => void phoneCall('app.settings')}>{t('command.openSettings')}</Button>;
   switch (result.outcome.kind) {
     case 'stopped': return line(t('command.stopped'));
