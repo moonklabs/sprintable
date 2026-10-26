@@ -354,10 +354,11 @@ async def test_13_the_replay_is_the_agents_own_organization_only(monkeypatch):
         async with Session() as s:
             await s.execute(text("UPDATE events SET org_id = :o WHERE recipient_id = :a AND recipient_seq = :q"), {"o": other_org, "a": ids[2], "q": stray})
             await s.commit()
-        for headers in ({"user-agent": "node"}, PLUGIN):
+        legit = await _event(Session, ids, ACTS)  # a real event of the agent's own organization, after the stray one
+        for headers, expect in (({"user-agent": "node"}, 4), (PLUGIN, 1)):  # (no declaration: the 3 tail events + the legit one; the plugin's list: the legit one)
             frames = await _connect(ag, Session, ids, headers)
             seqs = [json.loads(next(line for line in f.splitlines() if line.startswith("data: "))[6:])["recipient_seq"] for f in frames]
-            assert stray not in seqs, (headers, seqs)
+            assert stray not in seqs and legit in seqs and len(seqs) == expect, (headers, seqs)
     finally:
         await _cleanup(ag, engine, ids[2])
 
