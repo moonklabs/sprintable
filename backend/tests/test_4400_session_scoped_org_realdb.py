@@ -211,34 +211,19 @@ async def test_logout_is_untouched_it_ends_only_its_own_session():
         await _close(engine, w)
 
 
-async def test_a_switch_without_the_token_keeps_the_previous_all_device_revoke_and_logs_it(caplog):
-    """A caller that does not send its refresh token yet (an older web pod during a deploy): previous behaviour, and one
-    structured line per use (PO 21:35Z) so the fallback can be removed once it reads 0."""
-    import logging
-
+async def test_a_switch_without_the_token_is_refused_and_ends_nobody_4782():
+    """story 4782 replaced the all-device fallback (a switch with no token ended every live token of the person and went on): no token sent = no session to switch from = 401, and the person's
+    other sessions are NOT touched (a stolen access token must not be able to sign the owner out of every device)."""
     engine, w = await _world()
     try:
         a, b = await w.login(), await w.login()
-        with caplog.at_level(logging.INFO, logger="app.routers.auth"):
-            await w.switch_org(a, w.org2, send_rt=False)
-        assert (await w.refresh(b["refresh_token"])).status_code == 401
-        lines = [r for r in caplog.records if getattr(r, "structured", {}).get("event") == "switch_revoke_fallback"]
-        assert len(lines) == 1
-        assert lines[0].structured == {"event": "switch_revoke_fallback", "route": "switch-org", "revoked": 2}
-        assert str(w.user_id) not in lines[0].getMessage() + repr(lines[0].structured)
-    finally:
-        await _close(engine, w)
-
-
-async def test_a_switch_with_the_token_logs_no_fallback(caplog):
-    import logging
-
-    engine, w = await _world()
-    try:
-        a = await w.login()
-        with caplog.at_level(logging.INFO, logger="app.routers.auth"):
-            await w.switch_org(a, w.org2)
-        assert not [r for r in caplog.records if getattr(r, "structured", {}).get("event") == "switch_revoke_fallback"]
+        resp = await w.client.post(
+            "/api/v2/auth/switch-org", json={"org_id": str(w.org2)}, headers={"Authorization": f"Bearer {a['access_token']}"},
+        )
+        assert resp.status_code == 401, resp.text
+        assert resp.json()["error"]["code"] == "TOKEN_REVOKED"
+        assert (await w.refresh(a["refresh_token"])).status_code == 200
+        assert (await w.refresh(b["refresh_token"])).status_code == 200
     finally:
         await _close(engine, w)
 
@@ -269,13 +254,20 @@ async def test_a_token_issued_before_4400_follows_last_org_id_once_then_carries_
 # ── mutations: each re-opens the defect ────────────────────────────────────────
 
 async def test_mutation_switch_revoking_every_token_signs_the_other_session_out(monkeypatch):
+    from sqlalchemy import update
+
+    from app.models.user import RefreshToken
     from app.routers import auth as auth_module
 
-    real = auth_module._revoke_switching_session
-    monkeypatch.setattr(
-        auth_module, "_revoke_switching_session",
-        lambda session, user, rt, *, route: real(session, user, None, route=route),
-    )
+    real = auth_module._claim_switching_session
+
+    async def _every_token(session, user, rt, *, route, successor_id):
+        refused = await real(session, user, rt, route=route, successor_id=successor_id)
+        await session.execute(update(RefreshToken).where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
+                              .values(**auth_module._explicit_revoke_values(datetime.now(timezone.utc))))
+        return refused
+
+    monkeypatch.setattr(auth_module, "_claim_switching_session", _every_token)
     engine, w = await _world()
     try:
         a, a2, b = await _two_sessions_after_a_switches(w)

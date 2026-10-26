@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
-import { useFlatHref } from '@/hooks/use-flat-href';
+import { usePairHref } from '@/hooks/use-pair-href';
 import { agentOnDevice, permissionLine, requestAge, shownToolName, stillShown, type PermissionRequest } from '@/lib/agent-permissions';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
@@ -302,7 +302,7 @@ function PhoneAnswerPlace({ tool, auth, answer, onAnswer, net = null, host = '',
 }) {
   const { phoneCall } = usePhoneBridge();
   const t = useTranslations('agentPermissions');
-  const flat = useFlatHref();
+  const pairHref = usePairHref(); // story 4780: [Close] of the pairing screen comes back to the inbox
   const a = answer;
   const pressed = a !== null; // a result after a press takes the focus the buttons had
   const buttons = net === 'confirm' ? (
@@ -347,7 +347,7 @@ function PhoneAnswerPlace({ tool, auth, answer, onAnswer, net = null, host = '',
       return (
         <>
           <Line focus>{a.kind === 'key_invalidated' ? t('phone.keyInvalidated') : t('phone.notRegistered')}</Line>
-          <div><Button size="sm" variant="outline" asChild><a href={flat('/desktop/pair')}>{t('phone.pairAgain')}</a></Button></div>
+          <div><Button size="sm" variant="outline" asChild><a href={pairHref}>{t('phone.pairAgain')}</a></Button></div>
         </>
       );
     // Kadir · PO 09:31Z ②: signed out — one button to sign in again; back here, the request still waits with its buttons

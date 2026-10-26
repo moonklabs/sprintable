@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { SP_AT_COOKIE, SP_RT_COOKIE, getServerSession } from '@/lib/db/server';
 import { CURRENT_PROJECT_COOKIE } from '@/lib/auth-helpers';
-import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
+import { cookieBase, SP_AT_MAX_AGE_SECONDS, markSessionChanged } from '@/lib/auth/cookies';
 import { safeJsonParse } from '@/lib/api-response';
 import { backendFetch } from '@/lib/backend-fetch';
 
@@ -56,5 +56,5 @@ export async function POST(request: Request): Promise<Response> {
   } else {
     res.cookies.set(CURRENT_PROJECT_COOKIE, '', { path: '/', sameSite: 'lax', maxAge: 0 });
   }
-  return res;
+  return markSessionChanged(res);
 }

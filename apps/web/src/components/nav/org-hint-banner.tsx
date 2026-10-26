@@ -11,7 +11,7 @@ import { useTranslations } from 'next-intl';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { fetchWithAuth } from '@/lib/db/client';
+import { switchOrg } from '@/lib/db/client';
 import { TAB_PROJECT_STORAGE_KEY } from '@/lib/project-context-client';
 
 export const ORG_HINT_PARAM = 'org_id';
@@ -68,11 +68,7 @@ export function OrgHintBanner() {
     setPending(true);
     setFailed(false);
     try {
-      const res = await fetchWithAuth('/api/switch-org', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ org_id: target.orgId }),
-      });
+      const res = await switchOrg(target.orgId, { withAuth: true }); // story 4778 — the page's one flight
       const json = (await res.json().catch(() => null)) as { data?: { ok?: boolean } } | null;
       if (res.ok && json?.data?.ok) {
         // same as the org switcher: the previous org's tab project would be sent as X-Project-Id to the new org

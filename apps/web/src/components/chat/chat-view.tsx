@@ -5,11 +5,14 @@ import { ChevronLeft, RefreshCw, UserX } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { pickIGaJosa } from '@/lib/korean-particle';
 import { ChatBubble } from './chat-bubble';
 import { ConnectionLostBanner } from './connection-lost-banner';
 import type { PresenceStatus } from './presence-dot';
 import { CommandHintNotice, type BlockedHint } from './command-hint-notice';
+import { AgentWakeNotice } from './agent-wake-notice';
+import { agentsStillToWake, recalledAgentWake } from '@/lib/chat/agent-wake';
 import { ReferenceDropNotice, parseDroppedReferences, type DroppedReference } from './reference-drop-notice';
 import { ChatInput, type CommandTarget } from './chat-input';
 import { ThreadPanel } from './thread-panel';
@@ -38,6 +41,7 @@ import { useChatRail } from '@/app/(authenticated)/chats/chat-rail-context';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { formatViewerDate } from '@/lib/viewer-time-zone';
+import { CHAT_API_PREFIX } from '@/lib/chat-api-prefix';
 
 interface ChatViewProps {
   threadId: string;
@@ -65,7 +69,7 @@ interface ChatViewProps {
   // story #3194 — type/verified 추가(둘 다 optional·graceful). verified는 agent_verify.py::
   // get_verified_map()과 같은 정의(#2751 설계②가 워크포스 "연결 안 됨" 배지에 쓰는 그 판별자,
   // 발명 0) — false=stdio verify 미완주. undefined/null/human이면 미연결 배너 미표시.
-  participants?: { member_id: string; name: string | null; type?: string; verified?: boolean | null }[];
+  participants?: { member_id: string; name: string | null; type?: string; verified?: boolean | null; runtime_type?: string | null }[];
   // story #3831(UX-v3·FE 3·오늘) — 「오늘」의 지시 한 줄이 여기까지 오면 이 값으로 컴포저를
   // 채운다. 새 프리필 기전을 짓지 않는다 — #92f00dc4 prefillCommand(모호 명령 후보 클릭)와
   // 동일 경로를 그대로 재사용(마운트 시 1회 시드).
@@ -122,12 +126,15 @@ export function resolveBackfillMarkReadIso(latest: ChatMessage[] | undefined, ne
 // ===false만 대상(undefined/null=판별 불가라 배너 미표시 — agent-management-tab.tsx와 동일
 // 안전 방향, 침묵 실패보다 과소표시가 낫다). 판정 자체는 #2751 get_verified_map 그대로(발명
 // 0) — 이 함수는 그 결과를 소비만 한다.
+//
+// [SID:4763 AC8] 시스템 발행(runtime_type 'system-publisher')은 «연결»이라는 개념이 없는 서버 쪽 발신자라(워크포스 상세도 같은 판정으로
+// 연결 안내를 감춘다) 정상 연결된 에이전트 대화에서도 «시스템 발행이 아직 연결되지 않았어요» 띠가 떴다 — 실제로 미연결인 에이전트만 센다.
 export function filterUnconnectedAgentParticipants(
-  participants: { member_id: string; name: string | null; type?: string; verified?: boolean | null }[] | undefined,
+  participants: { member_id: string; name: string | null; type?: string; verified?: boolean | null; runtime_type?: string | null }[] | undefined,
   currentTeamMemberId: string,
-): { member_id: string; name: string | null; type?: string; verified?: boolean | null }[] {
+): { member_id: string; name: string | null; type?: string; verified?: boolean | null; runtime_type?: string | null }[] {
   return (participants ?? []).filter(
-    (p) => p.member_id !== currentTeamMemberId && p.type === 'agent' && p.verified === false,
+    (p) => p.member_id !== currentTeamMemberId && p.type === 'agent' && p.verified === false && !isSystemPublisher(p.runtime_type),
   );
 }
 
@@ -151,7 +158,7 @@ function blockFailureIsRetryable(status: number): boolean {
   return status >= 500 || status === 408 || status === 429;
 }
 
-export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = '/api/chats', backHref: backHrefProp, commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants, initialComposeText }: ChatViewProps) {
+export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = CHAT_API_PREFIX, backHref: backHrefProp, commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants, initialComposeText }: ChatViewProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   // story #4231 3차 — 기본 복귀 목적지(대화 목록 · flat)도 현재 프로젝트를 싣는다(넘겨받은 값은 호출처 책임).
   const backHref = backHrefProp ?? flatHref('/chats');
@@ -168,6 +175,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const isMobile = useIsMobile();
   const { addToast } = useToast();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const messagesRef = useRef<ChatMessage[]>([]); // story #4761 — the SSE handler reads the list as it is now (the nudge line of a message)
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
   // story #3638(유나 디자인 CHANGES 2026-09-07) — 초기 로드(:349) 실패가 messages를
   // 빈 배열로 남겨 「대화를 시작하세요」를 그렸다 — 메시지가 있는 대화를 «없다»고
   // 말하는 §1 클래스(모름을 없음으로 오독). ConnectionLostBanner는 handlePoll 경로
@@ -244,6 +253,10 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // CB-S9: 스레드 패널 상태
   const [activeThread, setActiveThread] = useState<ChatMessage | null>(null);
   const [threadIncoming, setThreadIncoming] = useState<ChatMessage | null>(null);
+  // story #4761 — the nudge line ends ONE WAY: once an agent has answered in the thread of my message (those replies never enter
+  // `messages`) it is struck from that message's line for good — nothing later (a cap, a reused view, a flood of other threads) brings it
+  // back. Only an agent that is on an open line is written down, so this holds a few ids, not every reply.
+  const [wakeEnded, setWakeEnded] = useState<Record<string, string[]>>({});
   // activeThread 열림 여부를 ref로 추적 — popstate 핸들러 stale closure 방지
   const activeThreadRef = useRef(false);
 
@@ -454,6 +467,12 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
     // CB-S9: thread reply → inject into thread panel; top-level → add to main + update reply_count
     if (msg.parent_id) {
       setThreadIncoming(msg);
+      const parent = msg.parent_id;
+      const by = msg.created_by;
+      const openLine = messagesRef.current.find((m) => m.id === parent)?.agent_wake ?? recalledAgentWake(parent);
+      if (openLine?.required.some((a) => a.member_id === by)) {
+        setWakeEnded((prev) => (prev[parent]?.includes(by) ? prev : { ...prev, [parent]: [...(prev[parent] ?? []), by] }));
+      }
       // Update reply_count on parent message in the main list
       setMessages((prev) =>
         prev.map((m) =>
@@ -1093,6 +1112,13 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                                   : { kind: 'start', onSelect: () => citeSelection.startSelection(msg.id) }
                             }
                           />
+                          {/* story #4761 (D3): 내가 방금 보낸 메시지가 스스로는 못 닿는 에이전트(맨 호스팅 MCP)로 갈 때 — «입력 중» 대신
+                              사실과 할 일. 그 에이전트가 이 뒤로 한 마디라도 하면 줄이 사라진다. */}
+                          {msg.created_by === currentTeamMemberId && (msg.agent_wake ?? recalledAgentWake(msg.id)) && (
+                            <AgentWakeNotice
+                              targets={agentsStillToWake(msg.agent_wake ?? recalledAgentWake(msg.id), [...messages.slice(messages.findIndex((m) => m.id === msg.id) + 1), ...(wakeEnded[msg.id] ?? []).map((created_by) => ({ created_by }))])}
+                            />
+                          )}
                           {/* S5: 트리거 메시지 직후 차단 hint notice(차단 에이전트별 1건) */}
                           {commandHints[msg.id]?.map((h) => (
                             <CommandHintNotice key={h.agent_id} hint={h} />

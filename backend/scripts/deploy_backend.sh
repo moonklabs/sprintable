@@ -41,11 +41,13 @@ PROD_SQL_INSTANCE="${PROD_SQL_INSTANCE:-sprintable-prod}"
 
 IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/${AR_REPO}/backend:${COMMIT_SHA}"
 
+CPU_FLAGS=""  # story 4786: dev only (below) — prod keeps its current CPU allocation
 case "${ENV}" in
     dev)
+        CPU_FLAGS="--cpu-throttling"  # story 4786: CPU billed only while a request is served (cloudbuild.yaml `_CPU_FLAGS` for dev)
         SERVICE_NAME="sprintable-backend-dev"
         CLOUD_SQL_INSTANCE="${GCP_PROJECT}:${GCP_REGION}:${DEV_SQL_INSTANCE}"
-        MIN_INSTANCES=0
+        MIN_INSTANCES=2  # story 4786: the SSOT (cloud-build.yml dev branch) keeps 2 — a new revision's start takes ~31 s
         MAX_INSTANCES=3
         MEMORY="512Mi"
         CPU="1"
@@ -75,7 +77,7 @@ case "${ENV}" in
         MIN_INSTANCES=1
         MAX_INSTANCES=10
         MEMORY="1Gi"
-        CPU="2"
+        CPU="1"  # story 4790 (E-INFRA-DIET, 2026-10-26): 2 → 1 — the value the operator set by hand; SSOT: cloud-build.yml prod `backend_resources`
         FRONTEND_URL="${FRONTEND_ORIGIN:-https://app.sprintable.ai}"
         RUNTIME_SA="cloudrun-runtime-prod@${GCP_PROJECT}.iam.gserviceaccount.com"
         APP_URL="${APP_URL:-https://app.sprintable.ai}"
@@ -192,7 +194,7 @@ gcloud run deploy "${SERVICE_NAME}" \
     --subnet=default \
     --vpc-egress=private-ranges-only \
     --update-env-vars="${ENV_VARS_SPEC}" \
-    --update-secrets="${SECRETS_SPEC}"
+    --update-secrets="${SECRETS_SPEC}" ${CPU_FLAGS}
 
 SERVICE_URL=$(gcloud run services describe "${SERVICE_NAME}" \
     --region="${GCP_REGION}" \

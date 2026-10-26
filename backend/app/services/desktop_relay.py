@@ -112,20 +112,35 @@ async def revoke_device_tokens(db: AsyncSession, setup_id: uuid.UUID, *, now: da
 
 
 async def device_for_token(db: AsyncSession, token: str | None) -> DesktopSetup | None:
-    """The device a token belongs to — None for no token, another shape, an unknown or revoked token, or a disconnected device."""
+    """The device a token belongs to — None for no token, another shape, an unknown or revoked token, a disconnected device, a device whose confirming
+    person's account is closed or deleted (story #4767), or whose confirming person was REMOVED from the device's organization (story #4769: the account
+    lives on but the seat is gone — a computer belongs to a person in an organization, and a person who left it owns no computer there; this also covers the
+    rows older removals and deletions left). A confirmer with no `org_members` row for (organization, person) at all is refused too (PO 4769, fail-closed: every
+    confirmation path needs a live owner/admin seat and nothing hard-deletes one, so such a row cannot come from a live path and an open door there would stay quietly
+    open the day someone adds a hard delete). Not judged: a setup with no confirmer recorded, and a confirmer with no `users` row (`confirmed_by` has no foreign key;
+    the 4618 relay contract serves them)."""
+    from app.models.project import OrgMember
+    from app.models.user import User
+
     if not token or not token.startswith(TOKEN_PREFIX):
         return None
     row = (await db.execute(
-        select(DesktopDeviceToken, DesktopSetup)
+        select(DesktopDeviceToken, DesktopSetup, User.is_active, User.deleted_at, OrgMember.id, OrgMember.deleted_at)
         .join(DesktopSetup, DesktopSetup.id == DesktopDeviceToken.setup_id)
+        .outerjoin(User, User.id == DesktopSetup.confirmed_by)
+        .outerjoin(OrgMember, (OrgMember.org_id == DesktopSetup.org_id) & (OrgMember.user_id == DesktopSetup.confirmed_by))
         .where(DesktopDeviceToken.token_hash == _hash(token))
     )).first()
     if row is None:
         return None
-    tok, setup = row
+    tok, setup, person_active, person_deleted_at, seat_id, seat_deleted_at = row
     if not hmac.compare_digest(tok.token_hash, _hash(token)):
         return None
     if tok.revoked_at is not None or setup.revoked_at is not None or setup.exchanged_at is None:
+        return None
+    if person_active is False or person_deleted_at is not None:  # a closed account, a deleted one: the same refusal (no user row: person_active is None — not judged)
+        return None
+    if setup.confirmed_by is not None and (seat_id is None or seat_deleted_at is not None):  # removed from this organization, or no seat row at all (fail-closed)
         return None
     return setup
 
@@ -140,15 +155,25 @@ async def touch_device(db: AsyncSession, setup_id: uuid.UUID) -> None:
 
 
 async def device_still_valid(db: AsyncSession, setup_id: uuid.UUID) -> bool:
-    """An open stream asks again: a disconnect (device revoked · its token revoked) ends it."""
+    """An open stream asks again: a disconnect (device revoked · its token revoked · its confirming person's account gone — story #4767 — or removed from the
+    organization — story #4769) ends it."""
+    from app.models.project import OrgMember
+    from app.models.user import User
+
     row = (await db.execute(
-        select(DesktopSetup.revoked_at, func.count(DesktopDeviceToken.id))
+        select(
+            DesktopSetup.revoked_at, func.count(DesktopDeviceToken.id), User.is_active, User.deleted_at, OrgMember.id, OrgMember.deleted_at, DesktopSetup.confirmed_by,
+        )
         .select_from(DesktopSetup)
         .outerjoin(DesktopDeviceToken, (DesktopDeviceToken.setup_id == DesktopSetup.id) & DesktopDeviceToken.revoked_at.is_(None))
+        .outerjoin(User, User.id == DesktopSetup.confirmed_by)
+        .outerjoin(OrgMember, (OrgMember.org_id == DesktopSetup.org_id) & (OrgMember.user_id == DesktopSetup.confirmed_by))
         .where(DesktopSetup.id == setup_id)
-        .group_by(DesktopSetup.revoked_at)
+        .group_by(DesktopSetup.revoked_at, User.is_active, User.deleted_at, OrgMember.id, OrgMember.deleted_at, DesktopSetup.confirmed_by)
     )).first()
-    return row is not None and row[0] is None and row[1] > 0
+    if row is None or row[0] is not None or row[1] <= 0 or row[2] is False or row[3] is not None:
+        return False
+    return row[6] is None or (row[4] is not None and row[5] is None)  # a recorded confirmer needs a live seat (fail-closed: no row at all is refused too)
 
 
 # ── sessions ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -232,6 +257,24 @@ class SystemHold(BaseModel):
     folder: Literal["documents", "desktop", "downloads", "network_volume", "icloud"] | None = None
 
 
+class SessionFirstScreen(BaseModel):
+    """story #4763 (AC4 · contract v1.15 · design-ac4): the first-screen question that stands at this computer before the session has begun to run — one closed
+    word of the daemon's own list (trust · mcp · mcp_many · update), no folder, no path, no text of the question. Absent = none (or not said); a report without it clears it (the question is gone)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ask: Literal["trust", "mcp", "mcp_many", "update"]
+
+
+class SessionWorkHold(BaseModel):
+    """story #4779 (AC3 · 0466 · PO 10-25): why work does not reach this agent — the daemon cannot confirm the agent's Sprintable tools for minutes (`tools_unconfirmed`) or the
+    link is down after the app asked again (`tools_failed`). One closed word, no path, no account, no text. Absent = none (or not said); a report without it clears it (the hold is gone)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    why: Literal["tools_unconfirmed", "tools_failed"]
+
+
 class SessionInbox(BaseModel):
     """story #4684 (0454 · Yuna ux1-copy §L ②③): why THIS computer's subscription for the agent is stopped — the app board's own closed words.
     A stopped session keeps none (accepted like `run`, never stored or shown — it receives nothing to explain); absent = receiving, or not said."""
@@ -267,6 +310,10 @@ class SessionReport(BaseModel):
     system: SystemHold | None = None
     # story #4684: why this computer's subscription for the agent is stopped — each report sets it (a report without it clears it: it receives again)
     inbox: SessionInbox | None = None
+    # story #4763 (AC4): a question the first screen asks that only a person at that computer can answer — each report sets it (a report without it clears it)
+    first_screen: SessionFirstScreen | None = None
+    # story #4779 (AC3): why work does not reach this agent (its tools link) — each report sets it (a report without it clears it)
+    work_hold: SessionWorkHold | None = None
     # story #4641: a widening a person made at the terminal — the three together or none; the daemon decides the order (from ≠ to only)
     permission_widened_at: OffsetDatetime | None = None
     permission_widened_from: WidenedMode | None = None
@@ -373,6 +420,31 @@ def _set_run(row: DesktopSession, run: SessionRun | None) -> None:
 def _set_inbox(row: DesktopSession, inbox: SessionInbox | None) -> None:
     """story #4684: the row's receive stop is the report's — a report without it clears it (this computer receives again)."""
     row.inbox_stream = inbox.stream if inbox else None
+
+
+# story #4763 (codex): the question rides only with the three states the conversation head may rename for it — a session that waits for something else (a permission, an
+# agent's question, a limit, a macOS window) or has ended says its own word alone, whatever a report carries
+FIRST_SCREEN_STATES = ("starting", "working", "idle")
+
+
+def _set_first_screen(row: DesktopSession, first_screen: SessionFirstScreen | None, state: str) -> None:
+    """story #4763: the row's first-screen question is the report's — a report without it clears it (the question is gone). A state that is not one of FIRST_SCREEN_STATES keeps none."""
+    row.first_screen_ask = first_screen.ask if first_screen and state in FIRST_SCREEN_STATES else None
+
+
+def _set_work_hold(row: DesktopSession, work_hold: SessionWorkHold | None, state: str) -> None:
+    """story #4779: the row's work hold is the report's — a report without it clears it (the hold is gone). A session that has ended holds nothing."""
+    row.work_hold_why = work_hold.why if work_hold and state != "stopped" else None
+
+
+def work_hold_view(row: DesktopSession) -> dict | None:
+    """story #4779: why work waits for the agent as a reader sees it — None when the row says none. One closed word."""
+    return {"why": row.work_hold_why} if row.work_hold_why is not None else None
+
+
+def first_screen_view(row: DesktopSession) -> dict | None:
+    """story #4763: the question as a reader sees it — None when the row says none. One closed word."""
+    return {"ask": row.first_screen_ask} if row.first_screen_ask is not None else None
 
 
 def inbox_view(row: DesktopSession) -> dict | None:
@@ -537,6 +609,8 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
     _set_run(row, report.run)  # story #4686
     _set_inbox(row, report.inbox if report.state != "stopped" else None)  # story #4684
     _set_system(row, report)  # story #4599
+    _set_first_screen(row, report.first_screen, report.state)  # story #4763
+    _set_work_hold(row, report.work_hold, report.state)  # story #4779
     _set_widened(row, report, _now(), was_stopped=was_stopped)  # story #4641
     row.instruct_now = report.instruct_now  # story #4534: each report sets it — a report without it clears it (Kadir 06:31Z (c))
     await touch_device(db, setup.id)
@@ -596,6 +670,8 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
         _set_run(row, s.run)  # story #4686
         _set_inbox(row, s.inbox if s.state != "stopped" else None)  # story #4684
         _set_system(row, s)  # story #4599
+        _set_first_screen(row, s.first_screen, s.state)  # story #4763
+        _set_work_hold(row, s.work_hold, s.state)  # story #4779
         _set_widened(row, s, now, was_stopped=was_stopped)  # story #4641
         row.instruct_now = s.instruct_now
     for row in existing.values():
@@ -607,6 +683,8 @@ async def replace_sessions(db: AsyncSession, setup: DesktopSetup, snapshot: Sess
             _set_run(row, None)  # story #4686: a dropped session says nothing of what it ran on
             _set_inbox(row, None)  # story #4684: a dropped session explains no receive stop
             row.system_folder = None  # story #4599: a dropped session holds no window
+            row.first_screen_ask = None  # story #4763: a dropped session asks nothing
+            row.work_hold_why = None  # story #4779: a dropped session holds no work
             row.instruct_now = None
     await touch_device(db, setup.id)
     await db.flush()
@@ -724,6 +802,10 @@ async def device_sessions_view(
         **({"inbox": ib} if not silent and r.state != "stopped" and (ib := inbox_view(r)) is not None else {}),
         # story #4599: a held turn's why (the window's folder) — for the new web only, and only while the device is heard
         **({"system": sv} if not silent and (sv := system_view(r)) is not None else {}),
+        # story #4763: the first-screen question that stands at that computer — only while the device is heard and the session lives
+        **({"first_screen": fs} if not silent and r.state in FIRST_SCREEN_STATES and (fs := first_screen_view(r)) is not None else {}),
+        # story #4779: why work waits for the agent (its tools link) — only while the device is heard and the session lives
+        **({"work_hold": wh} if not silent and r.state != "stopped" and (wh := work_hold_view(r)) is not None else {}),
         # story #4641: a widening a person made at the terminal — the three keys, only while the device is heard
         **widened_fields(r, silent),
         # story #4534 (PO 06:30Z): whether [지금 지시] can go into its turn — not said for a device not heard (Kadir 06:31Z (c))

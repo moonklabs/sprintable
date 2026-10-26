@@ -36,14 +36,16 @@ describe('DesktopPage — story #4012 서버 게이트', () => {
     vi.resetModules();
     const { default: DesktopPage } = await import('./page');
     const { DesktopDownloadCard } = await import('@/components/desktop/desktop-download-card');
+    const { DesktopOpenAppCard } = await import('@/components/desktop/desktop-open-app-card');
     const { DesktopDevices } = await import('@/components/desktop/desktop-devices');
     const { DesktopRemoteControlCard } = await import('@/components/desktop/desktop-remote-control-card');
     const { DesktopRemoteDevices } = await import('@/components/desktop/desktop-remote-devices');
     const { PhoneSessionManagement } = await import('@/components/desktop/phone-session-management');
     const result = DesktopPage() as { props: { children: Array<{ type: unknown } | null> } };
     expect(redirectMock).not.toHaveBeenCalled();
+    // story #4763 AC5 — «앱 열기» first, the download right under it
     // story #4535 — «원격 제어» between the two (Yuna 09:24Z) · story #4533 — «원격 기기» right under the switch · story #4733 — «세션 관리» (phone app only) before «연결된 기기»
-    expect(result.props.children.filter(Boolean).map((c) => c!.type)).toEqual([DesktopDownloadCard, DesktopRemoteControlCard, DesktopRemoteDevices, PhoneSessionManagement, DesktopDevices]);
+    expect(result.props.children.filter(Boolean).map((c) => c!.type)).toEqual([DesktopOpenAppCard, DesktopDownloadCard, DesktopRemoteControlCard, DesktopRemoteDevices, PhoneSessionManagement, DesktopDevices]);
   });
 
   it('DESKTOP_DOWNLOAD_ENABLED=false → /org-briefing으로 redirect(카드 렌더 없음)', async () => {

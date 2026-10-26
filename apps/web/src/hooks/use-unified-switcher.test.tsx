@@ -371,9 +371,12 @@ describe('useUnifiedSwitcher — switchOrg 네트워크 실패 시 optimistic �
     await act(async () => { await result?.switchOrg('org-dogfood'); });
     expect(result?.switchOrgError).toBeTruthy();
 
-    vi.stubGlobal('fetch', vi.fn(async () => new Promise(() => {}))); // 두 번째 시도는 아직 안 끝남
+    // 두 번째 시도는 아직 안 끝남 — story 4778: a switch is in the page's one flight now, so an answer that never comes would hold every later switch of this file's module: it is answered at the end
+    let answer!: (r: unknown) => void;
+    vi.stubGlobal('fetch', vi.fn(async () => new Promise((resolve) => { answer = resolve; })));
     await act(async () => { void result?.switchOrg('org-dogfood'); });
     expect(result?.switchOrgError).toBeNull();
+    await act(async () => { answer({ ok: true, json: async () => ({ data: { ok: true } }) }); });
   });
 });
 

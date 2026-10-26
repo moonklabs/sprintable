@@ -7,6 +7,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { usePairHref } from '@/hooks/use-pair-href';
 import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off';
 import { LimitPhoneRow, type LimitPhone } from '@/components/desktop/limit-phone-row';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
@@ -76,7 +77,7 @@ export function PhoneAppGet({ body, scanHint = false }: { body?: string; scanHin
   );
 }
 
-export function PhonePairing() {
+export function PhonePairing({ returnTo = null }: { returnTo?: string | null } = {}) {
   const t = useTranslations('phonePairing');
   const { inPhoneApp: phone } = usePhoneBridge();
   if (!phone) {
@@ -87,10 +88,10 @@ export function PhonePairing() {
       </Card>
     );
   }
-  return <Pairing />;
+  return <Pairing returnTo={returnTo} />;
 }
 
-function Pairing() {
+function Pairing({ returnTo }: { returnTo: string | null }) {
   const { phoneCall } = usePhoneBridge();
   const t = useTranslations('phonePairing');
   const tp = useTranslations('agentPermissions.phone');
@@ -188,7 +189,8 @@ function Pairing() {
   };
   const settings = <Button variant="outline" onClick={() => void phoneCall('app.settings')}>{tp('openSettings')}</Button>;
   const rescan = <Button onClick={() => void scan()}>{t('rescan')}</Button>;
-  const close = <Button variant="outline" asChild><a href={flat('/desktop')}>{t('close')}</a></Button>;
+  // story 4780: [Close] goes back where the pairing was started from (`returnTo` is the entry's page, checked by the page); with none it is the Mac screen as it always was
+  const close = <Button variant="outline" asChild><a href={flat(returnTo ?? '/desktop')}>{t('close')}</a></Button>;
 
   switch (view.kind) {
     case 'start':
@@ -283,8 +285,8 @@ type RetryLine = Extract<View, { kind: 'retry' }>['line'];
 /** story #4532 — the entry on «원격 기기», only inside the phone app: this phone pairs from here (the shell has the camera and the key). */
 export function PhonePairEntry() {
   const t = useTranslations('phonePairing');
-  const flat = useFlatHref();
-  return <div><Button size="sm" variant="outline" asChild><a href={flat('/desktop/pair')}>{t('entry')}</a></Button></div>;
+  const pairHref = usePairHref();
+  return <div><Button size="sm" variant="outline" asChild><a href={pairHref}>{t('entry')}</a></Button></div>;
 }
 
 function Shell({ children }: { children: ReactNode }) {

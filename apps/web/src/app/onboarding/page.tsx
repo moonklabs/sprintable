@@ -5,9 +5,10 @@ import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { resolveChatsHref, resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { EmailVerifyGate } from '@/components/auth/email-verify-gate';
 import { isDesktopDownloadEnabled } from '@/lib/desktop-download-gate';
+import { afterOrgDeleted } from '@/lib/auth/org-deleted-landing';
 
 interface OnboardingPageProps {
-  searchParams: Promise<{ step?: string; orgId?: string; next?: string }>;
+  searchParams: Promise<{ step?: string; orgId?: string; next?: string; after?: string }>;
 }
 
 export default async function OnboardingPage({ searchParams }: OnboardingPageProps) {
@@ -37,6 +38,7 @@ export default async function OnboardingPage({ searchParams }: OnboardingPagePro
       todayHref={todayHref}
       chatsHref={chatsHref}
       macDownloadEnabled={isDesktopDownloadEnabled(process.env.DESKTOP_DOWNLOAD_ENABLED)}
+      afterOrgDelete={afterOrgDeleted(params.after) && !initialStep}
     />
   );
   return initialStep === 'project' ? form : <EmailVerifyGate>{form}</EmailVerifyGate>;

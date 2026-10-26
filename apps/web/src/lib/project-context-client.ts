@@ -2,6 +2,8 @@
 
 import { useSyncExternalStore } from 'react';
 import { invalidateMeCache } from '@/lib/auth/me-invalidation';
+import { SESSION_CHANGED_HEADER } from '@/lib/auth/session-changed-header';
+import { notifySessionChanged } from '@/lib/native-shell-bridge';
 
 /**
  * 프로젝트 컨텍스트 SSOT (R2: d802da27 stale context / 85614dd9 멀티탭 독립).
@@ -148,13 +150,34 @@ export function installProjectHeaderInterceptor(): void {
     } catch {
       isApiWrite = false;
     }
-    if (!isApiWrite) return injectHeaders(input, init);
+    if (!isApiWrite) return injectHeaders(input, init).then(tellShellIfSessionChanged(input));
     invalidateMeCache();
     const settle = () => { invalidateMeCache(); };
     const pending = injectHeaders(input, init);
     pending.then(settle, settle);
-    return pending;
+    return pending.then(tellShellIfSessionChanged(input));
   };
+
+  // story #4762 — a same-origin response (any path: an `/api/` call, or a protected page fetch the proxy refreshed the session for) that set or cleared the session cookies carries `SESSION_CHANGED_HEADER` (lib/auth/cookies.ts `markSessionChanged`):
+  // tell the phone shell once so it writes the cookies to disk now (a force-quit right after a rotation must not leave the old token there). Every road that
+  // goes through `window.fetch` is covered here — raw fetch, fetchWithAuth, a Request input — so a new caller cannot forget. The response is handed on untouched.
+  function tellShellIfSessionChanged(input: RequestInfo | URL): (res: Response) => Response {
+    return (res) => {
+      try {
+        // a `URL` made in another window/iframe fails `instanceof URL` — read its `href` by shape; an input with no readable url tells nobody anything
+        const rawUrl = typeof input === 'string' ? input : 'href' in input ? input.href : input.url;
+        if (typeof rawUrl !== 'string') return res;
+        // resolved against the page (a protocol-relative `//host/api/…` is another origin, not a relative path) and checked again on the FINAL response url
+        // (a same-origin request redirected to another origin must not be believed)
+        const here = window.location.origin;
+        const sameOrigin = new URL(rawUrl, window.location.href).origin === here && (!res.url || new URL(res.url, window.location.href).origin === here);
+        if (sameOrigin && res.headers.get(SESSION_CHANGED_HEADER) === '1') notifySessionChanged();
+      } catch {
+        // telling the shell must never break the response
+      }
+      return res;
+    };
+  }
 
   function injectHeaders(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     try {

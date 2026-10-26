@@ -4,8 +4,9 @@
 // 이게 없으면 401 폴링/SSE 재연결 루프가 세션이 죽은 뒤에도 매 tick마다 refresh를 재시도해
 // "401에는 재시도하지 않는다"는 처방이 무력화된다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FETCH_WITH_AUTH_DEFAULT_TIMEOUT_MS, fetchWithAuth, loginWithPassword, refreshAuthTokens } from './client';
+import { FETCH_WITH_AUTH_DEFAULT_TIMEOUT_MS, fetchWithAuth, loginWithPassword, refreshAuthTokens, refreshSessionAfterChange, refreshSessionOnce } from './client';
 import { fetchMe } from '@/lib/me-client';
+import { invalidateMeCache } from '@/lib/auth/me-invalidation';
 import { isSessionExpiredSignaled, resetSessionExpired, signalSessionExpired } from '@/lib/auth/session-expired-signal';
 
 beforeEach(() => {
@@ -158,10 +159,9 @@ describe('fetchWithAuth — 세션만료 신호는 refresh 최종 실패에서�
   });
 });
 
-// story #3302(#2459 진단 (c) 갈래, AC1/AC3) — login/register/refresh 공통 choke point
-// (callAuthRoute)의 성공 분기가 네이티브 셸에 session-changed를 정확히 1회 알리는지,
-// 실패 분기는 0회인지 pin한다. 뮤테이션 자가검증(AC3) — callAuthRoute의 notifySessionChanged()
-// 호출 한 줄을 지우면 아래 세 성공 케이스가 전부 RED로 떨어져야 한다(직접 지워서 확認).
+// story #3302(#2459 진단 (c) 갈래, AC1/AC3) → story #4762 — login/register/refresh 공통 choke point(callAuthRoute)는 더 이상 스스로 셸에 알리지 않는다:
+// 세션 쿠키를 쓰는 route가 `x-session-changed`를 달고 페이지의 전역 fetch 관문(lib/project-context-client.ts)이 셸에 «정확히 1회» 알린다 —
+// 둘이 다 보내면 두 번 간다(codex 5218). «관문을 지나면 1회»는 lib/session-changed-gate.4762.test.ts가 실제 관문을 깔고 pin한다.
 function okAuthResponse() {
   return new Response(
     JSON.stringify({ data: { access_token: 'at', refresh_token: 'rt', token_type: 'bearer' } }),
@@ -176,21 +176,27 @@ function failAuthResponse() {
 }
 
 describe('callAuthRoute → notifySessionChanged 브릿지(story #3302 AC1/AC3)', () => {
-  it('loginWithPassword 성공 시 셸에 session-changed가 정확히 1회 간다', async () => {
+  it('loginWithPassword · refreshAuthTokens는 스스로 셸에 알리지 않는다(관문이 한 번 알린다 — 둘이 보내면 두 번 간다)', async () => {
     const postMessage = vi.fn();
     window.ReactNativeWebView = { postMessage };
     vi.stubGlobal('fetch', vi.fn(async () => okAuthResponse()));
     await loginWithPassword('a@b.com', 'pw');
-    expect(postMessage).toHaveBeenCalledTimes(1);
-    expect(postMessage).toHaveBeenCalledWith(JSON.stringify({ type: 'session-changed' }));
+    await refreshAuthTokens();
+    expect(postMessage).not.toHaveBeenCalled();
   });
 
-  it('refreshAuthTokens 성공 시 셸에 session-changed가 정확히 1회 간다(가장 빈번한 경로 — #2459 진단 (c)의 핵심 창)', async () => {
-    const postMessage = vi.fn();
-    window.ReactNativeWebView = { postMessage };
-    vi.stubGlobal('fetch', vi.fn(async () => okAuthResponse()));
+  it('story #4762 — 회전(refresh)이 성공하면 저장해 둔 /me 응답도 버린다: 다음 fetchMe()는 새로 묻는다(새 토큰의 org 클레임으로 읽어야 하므로)', async () => {
+    invalidateMeCache();
+    resetSessionExpired();
+    const fetchMock = vi.fn(async (url: string) => (String(url).includes('/api/auth/refresh') ? okAuthResponse() : new Response(JSON.stringify({ data: { id: 'm-1' } }), { status: 200 })));
+    vi.stubGlobal('fetch', fetchMock);
+    const meCalls = () => fetchMock.mock.calls.filter((c) => String(c[0]).includes('/api/me')).length;
+    await fetchMe();
+    await fetchMe();
+    expect(meCalls()).toBe(1); // the second answer came from the stored one
     await refreshAuthTokens();
-    expect(postMessage).toHaveBeenCalledTimes(1);
+    await fetchMe();
+    expect(meCalls()).toBe(2); // the rotation dropped it (reverted: still 1)
   });
 
   it('실패(401 등) 응답이면 셸에 아무것도 안 보낸다', async () => {
@@ -346,5 +352,129 @@ describe('fetchWithAuth — 응답 헤더까지 시간 제한(story #4310)', () 
     await vi.advanceTimersByTimeAsync(30_000);
     expect((await settled as DOMException).name).toBe('TimeoutError');
     expect(n).toBe(2);
+  });
+});
+
+// story #4763 (codex): ONE rotation at a time for the page — a screen that renews the session itself and a 401 that makes fetchWithAuth renew it share the call in flight
+describe('refreshSessionOnce — one rotation at a time (story #4763)', () => {
+  it('two callers and a 401 of fetchWithAuth share ONE /api/auth/refresh; a later call makes a new one', async () => {
+    let refreshes = 0;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let other = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/auth/refresh')) {
+        refreshes += 1;
+        await held;
+        return new Response(JSON.stringify({ data: { ok: true } }), { status: 200 });
+      }
+      other += 1;
+      return new Response('{}', { status: other === 1 ? 401 : 200 });
+    }));
+    const a = refreshSessionOnce();
+    const b = refreshSessionOnce();
+    const c = fetchWithAuth('/api/something'); // its 401 joins the flight in progress
+    await vi.waitFor(() => expect(other).toBe(1));
+    await Promise.resolve();
+    expect(refreshes).toBe(1);
+    release();
+    const [ra, rb, rc] = await Promise.all([a, b, c]);
+    expect(ra).toBe(rb);
+    expect(rc.status).toBe(200); // retried once after the shared renewal
+    expect(refreshes).toBe(1);
+    await refreshSessionOnce(); // nothing in flight now → a new rotation
+    expect(refreshes).toBe(2);
+  });
+});
+
+// story 4776 — a renewal made BECAUSE something just changed (the organization · the project and the agent): never two rotations at once, but minted AFTER the change — a rotation already in flight
+// began before it and must not be handed back as this caller's answer
+describe('refreshSessionAfterChange — one rotation at a time, minted after the change (story 4776)', () => {
+  function scripted() {
+    const log: Array<{ n: number; start: number; end?: number }> = [];
+    let clock = 0;
+    let active = 0;
+    let maxActive = 0;
+    const gates: Array<() => void> = [];
+    let holdFirst = false;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (!String(input).includes('/api/auth/refresh')) return new Response('{}', { status: 401 });
+      const entry = { n: log.length + 1, start: ++clock } as { n: number; start: number; end?: number };
+      log.push(entry);
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      if (holdFirst && entry.n === 1) await new Promise<void>((resolve) => { gates.push(resolve); });
+      active -= 1;
+      entry.end = ++clock;
+      return new Response(JSON.stringify({ data: { ok: true } }), { status: 200 });
+    }));
+    return { log, gates, maxActive: () => maxActive, hold: () => { holdFirst = true; } };
+  }
+
+  it('nothing in flight → exactly one rotation', async () => {
+    const s = scripted();
+    await refreshSessionAfterChange();
+    expect(s.log).toHaveLength(1);
+  });
+
+  it('a rotation already in flight (it began before the change) is waited for, then ONE more is made — never two at once', async () => {
+    const s = scripted();
+    s.hold();
+    const early = refreshSessionOnce(); // began before the change
+    await vi.waitFor(() => expect(s.log).toHaveLength(1));
+    const after = refreshSessionAfterChange();
+    await Promise.resolve(); await Promise.resolve();
+    expect(s.log).toHaveLength(1); // joined nothing, started nothing while the early one is out (reverted to `refreshSessionOnce` → it would JOIN the early flight: still 1 here, caught below)
+    s.gates[0]!();
+    await Promise.all([early, after]);
+    expect(s.log).toHaveLength(2); // the change's own rotation was made — reverted (joins the early flight) → 1
+    expect(s.log[1]!.start).toBeGreaterThan(s.log[0]!.end!); // …and it started only after the early one had ended
+    expect(s.maxActive()).toBe(1); // one refresh token, one use at a time
+  });
+
+  it('two callers of it and an interceptor during one early flight → that flight + ONE shared follow-up (never one each)', async () => {
+    const s = scripted();
+    s.hold();
+    const early = refreshSessionOnce();
+    await vi.waitFor(() => expect(s.log).toHaveLength(1));
+    const a = refreshSessionAfterChange();
+    const b = refreshSessionAfterChange();
+    s.gates[0]!();
+    await Promise.all([early, a, b]);
+    expect(s.log).toHaveLength(2); // a rotation each → 3
+    expect(s.maxActive()).toBe(1);
+  });
+
+  it('a second call while the first one is open (the wait or the rotation after it) joins it — a duplicate press makes no extra rotation; a call after it settled is a new change', async () => {
+    const s = scripted();
+    s.hold(); // the FIRST rotation of the script is the one held
+    const a = refreshSessionAfterChange(); // nothing in flight: its own rotation starts at once and is held
+    await vi.waitFor(() => expect(s.log).toHaveLength(1));
+    const b = refreshSessionAfterChange(); // a duplicate press while the rotation is out
+    const c = refreshSessionAfterChange();
+    const d = refreshSessionOnce(); // another path (an interceptor's 401 renewal, the arrival's) while that rotation is out joins it too — the rotation after a change is IN the page's one flight
+    s.gates[0]!();
+    await Promise.all([a, b, c, d]);
+    expect(s.log).toHaveLength(1); // one rotation for the presses and the other path — reverted (each waits then rotates) → 3; the rotation made outside the flight → 2
+    expect(s.maxActive()).toBe(1);
+    await refreshSessionAfterChange(); // the open one has settled: a new change → its own rotation
+    expect(s.log).toHaveLength(2);
+  });
+
+  it('an early flight that FAILS does not poison it: the change still gets its own rotation and its own answer', async () => {
+    let call = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (!String(input).includes('/api/auth/refresh')) return new Response('{}', { status: 401 });
+      call += 1;
+      if (call === 1) { await Promise.resolve(); throw new Error('network'); }
+      return new Response(JSON.stringify({ data: { ok: true } }), { status: 200 });
+    }));
+    const early = refreshSessionOnce().catch(() => 'early failed');
+    const after = refreshSessionAfterChange();
+    expect(await early).toBe('early failed');
+    const result = await after;
+    expect(result.error).toBeNull(); // its own rotation answered, not the early failure
+    expect(call).toBe(2);
   });
 });

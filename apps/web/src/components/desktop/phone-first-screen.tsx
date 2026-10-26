@@ -17,7 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { useOrgRemoteControl, putOrgRemoteControl } from '@/lib/org-remote-control';
-import { useFlatHref } from '@/hooks/use-flat-href';
+import { usePairHref } from '@/hooks/use-pair-href';
 import { sendMacLinkMail, type MacLinkMailOutcome } from '@/lib/phone-mac-link-mail';
 import { Loader2 } from 'lucide-react';
 import { firstInstructionHref } from '@/lib/onboarding/first-instruction';
@@ -38,10 +38,10 @@ function useAlive() {
 }
 
 /** `macDownloadEnabled`: the server's own judgement that the Mac app is offered here (`isDesktopDownloadEnabled`, resolved by the page) — false/absent: no mail button, no line */
-export function PhoneFirstScreen({ orgId, chatsHref, macDownloadEnabled = false }: { orgId: string | null; chatsHref?: string; macDownloadEnabled?: boolean }) {
+export function PhoneFirstScreen({ orgId, chatsHref, macDownloadEnabled = false, returnHref }: { orgId: string | null; chatsHref?: string; macDownloadEnabled?: boolean; returnHref?: string }) {
   const t = useTranslations('onboarding.phone');
   const { phoneCall } = usePhoneBridge();
-  const flat = useFlatHref();
+  const pairHref = usePairHref(returnHref); // story 4780: [Close] of the pairing screen comes back to this start screen — or to `returnHref` (the sign-up screen: Today, where the checklist goes on)
   const [read, setRead] = useState<Read>({ kind: 'reading' });
   // the answer lands in a promise callback (never synchronously in the effect); a phone with no screen lock can pair with nothing — the pairing
   // page says why, here it is the «no Mac yet» screen
@@ -84,7 +84,7 @@ export function PhoneFirstScreen({ orgId, chatsHref, macDownloadEnabled = false 
 
   // remote control off comes first: pairing itself is refused while it is off, so «pair» would be a dead end (branch 1 before branch 2)
   if (read.kind === 'view' && !read.view.remote_control) return <RemoteOff orgId={orgId} onTurnedOn={reload} />;
-  if (read.kind === 'no_phone' || read.view.computers.length === 0) return <NoMac pairHref={flat('/desktop/pair')} mailEnabled={macDownloadEnabled} />;
+  if (read.kind === 'no_phone' || read.view.computers.length === 0) return <NoMac pairHref={pairHref} mailEnabled={macDownloadEnabled} />;
 
   return <Computers computers={groupByComputer(read.view.computers)} chatsHref={chatsHref} onRemoteOff={reload} />; // story 4734: one computer, its setups' agents together
 }

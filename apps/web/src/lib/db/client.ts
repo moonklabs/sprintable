@@ -1,7 +1,6 @@
 'use client';
 
 import { isSessionExpiredSignaled, signalSessionExpired } from '@/lib/auth/session-expired-signal';
-import { notifySessionChanged } from '@/lib/native-shell-bridge';
 import { collectRefreshDiagnostics } from '@/lib/auth/refresh-diagnostics';
 import { invalidateMeCache } from '@/lib/auth/me-invalidation';
 import { clearAccountScopedStorage } from '@/lib/browser-storage-keys';
@@ -19,6 +18,19 @@ export interface AuthResult {
   error: { code: string; message: string } | null;
 }
 
+/**
+ * story 4778 — the two answers of `/api/auth/refresh` that do NOT say «this session is over»: `TOKEN_SUPERSEDED` (a switch ended the token this request carried and issued a newer pair: the session moved
+ * on) and `REFRESH_UNAVAILABLE` (the backend answered 5xx · 429 · did not answer: not confirmed either way). The refresh route leaves the cookies alone on both, and `fetchWithAuth` does not signal an ended
+ * session on them (the person is not signed out; the request is simply not renewed this time).
+ */
+export const TOKEN_SUPERSEDED = 'TOKEN_SUPERSEDED';
+export const REFRESH_UNAVAILABLE = 'REFRESH_UNAVAILABLE';
+function leavesTheSessionStanding(error: AuthResult['error']): boolean {
+  return error?.code === TOKEN_SUPERSEDED || error?.code === REFRESH_UNAVAILABLE;
+}
+/** how long to wait before asking once more after TOKEN_SUPERSEDED: the switch's own answer (its new cookies) has to land in the jar first — a healthy BFF round trip is well inside this */
+export const SUPERSEDED_RETRY_MS = 400;
+
 async function callAuthRoute(path: string, body: object): Promise<AuthResult> {
   const res = await fetch(path, {
     method: 'POST',
@@ -29,10 +41,8 @@ async function callAuthRoute(path: string, body: object): Promise<AuthResult> {
   if (!res.ok) {
     return { data: null, error: json.error ?? { code: 'UNKNOWN', message: 'Unknown error' } };
   }
-  // story #3302(#2459 진단 (c)) — login/register/refresh 공통 choke point. 성공은 항상
-  // sp_at/sp_rt 쿠키가 새로 세워졌다는 뜻(각 route.ts가 Set-Cookie) — 네이티브 셸에 즉시
-  // 알려 디스크로 내리게 한다(강제종료 시 갱신 쿠키 유실 방지, AC1).
-  notifySessionChanged();
+  // story #3302(#2459 진단 (c)) → story #4762 — 셸에 «쿠키를 디스크로 내려라»를 알리는 일은 이제 페이지의 fetch 관문 한 곳이 한다
+  // (세션 쿠키를 쓰는 route가 `x-session-changed`를 달고, lib/project-context-client.ts가 보면 한 번 알림 — 여기서 또 보내면 두 번 간다).
   // story #4184 — 인증 주체가 바뀌었을 수 있다(로그인·가입·갱신) — fetchMe() 결과 재사용을 버린다.
   invalidateMeCache();
   return { data: json.data as AuthTokens, error: null };
@@ -69,6 +79,128 @@ export async function refreshAuthTokens(): Promise<AuthResult> {
 // ─── 401 인터셉터 fetch 래퍼 ─────────────────────────────────────────────────
 
 let _refreshing: Promise<AuthResult> | null = null;
+
+/** the tail of the page's switch queue (settles — never rejects — when the last switch asked for so far has ended); null = no switch open */
+let _switching: Promise<void> | null = null;
+
+/**
+ * story #4763 (codex): ONE rotation at a time for the whole page — the refresh token is single-use, so a screen that renews the session itself (the onboarding's arrival)
+ * and a 401 that makes `fetchWithAuth` renew it must share the call in flight, not race it (one of two rotations of the same token fails and can log the person out).
+ * `fetchWithAuth`'s 401 path uses this very function.
+ */
+export function refreshSessionOnce(): Promise<AuthResult> {
+  if (!_refreshing) {
+    // story 4778 — a switch that was asked for BEFORE this renewal is waited for: it revokes the refresh token the browser holds and sets the new pair when its answer comes back, so a renewal that
+    // left meanwhile would present a dead token (401 → the refresh route clears both cookies). Only the switches already queued are waited for (never ones asked for later: they wait for this one).
+    const queued = _switching;
+    const run = async (): Promise<AuthResult> => {
+      if (queued) await queued; // a switch's tail settles at the latest SWITCH_WAIT_MAX_MS after ITS request started (runSwitch)
+      const first = await refreshAuthTokens();
+      if (first.error?.code !== TOKEN_SUPERSEDED) return first;
+      // story 4778 (AC2b) — the cookie this renewal carried was the one a switch ended (not this page's switch: those are queued above — another tab, or the server). The session moved on; the switch's
+      // answer is on its way into the jar. Ask ONCE more with whatever the jar holds then; a second «superseded» ends here as it is (no third try, no signal that the session ended).
+      await new Promise<void>((resolve) => { setTimeout(resolve, SUPERSEDED_RETRY_MS); });
+      return refreshAuthTokens();
+    };
+    _refreshing = run().finally(() => { _refreshing = null; });
+  }
+  return _refreshing;
+}
+
+type SwitchPath = '/api/switch-org' | '/api/switch-project';
+
+/**
+ * story 4778 (codex) — a request that stalls must not hold the page's later switches and renewals for good, and the request itself is never cut (story 4320: aborting it loses the answer that carries the
+ * new cookies). The BFF routes are time-bounded (`BFF_BACKEND_TIMEOUT_MS` = 30 s, `timeLimitOnly`), so a healthy answer is back well inside SWITCH_WAIT_MAX_MS; past it the others stop waiting for THAT request
+ * (the overlap this file prevents can then happen again — only for a request that did not answer in time). The bound is per request, measured from when that request STARTED (a switch's tail in `runSwitch`);
+ * for a rotation already in flight when a switch is asked for, from that ask (`waitUpTo`).
+ */
+const SWITCH_WAIT_MAX_MS = 40_000;
+function waitUpTo(flight: Promise<unknown>): Promise<void> {
+  return new Promise((resolve) => {
+    const giveUp = setTimeout(resolve, SWITCH_WAIT_MAX_MS);
+    const done = () => { clearTimeout(giveUp); resolve(); };
+    flight.then(done, done);
+  });
+}
+
+function runSwitch<T>(task: () => Promise<T>): Promise<T> {
+  // both are read WHEN THE SWITCH IS ASKED FOR: a rotation asked for later waits for this switch (refreshSessionOnce reads `_switching`), so waiting for it here too would be a cycle
+  const before = _switching;
+  const rotation = _refreshing;
+  let release!: () => void;
+  const tail: Promise<void> = new Promise<void>((resolve) => { release = resolve; }).then(() => { if (_switching === tail) _switching = null; });
+  const run = (async (): Promise<T> => {
+    if (before) await before; // one switch at a time: each presents the cookie the previous one set (a tail that settles at the latest SWITCH_WAIT_MAX_MS after that switch's request started)
+    if (rotation) await waitUpTo(rotation); // a rotation already in flight finishes first (its Set-Cookie must be in the jar before this switch leaves)
+    const giveUp = setTimeout(release, SWITCH_WAIT_MAX_MS); // the others stop waiting for THIS request this long after it started — it is not cut
+    try {
+      return await task();
+    } finally {
+      clearTimeout(giveUp);
+      release(); // answered or failed: the ones standing behind may go (a failure is the caller's, never the queue's)
+    }
+  })();
+  _switching = tail;
+  return run;
+}
+
+/**
+ * story 4778 — the ONLY way the page switches organization or project (`switchOrg` · `switchProject` below; no other file names the BFF routes — a ratchet test holds that). A switch revokes the session's refresh token on the server and answers with a new pair,
+ * so it must not overlap a rotation of the same token: a refresh that left with the old token while the switch was in flight is refused (401 → the refresh route clears BOTH cookies = logout while
+ * switching; backend/tests/test_4778_switch_vs_refresh_realdb.py). It joins the page's one flight with `refreshSessionOnce`: it waits for a rotation in flight and for earlier switches, runs alone, and a
+ * renewal asked for while it is open waits for its answer. NO client timeout on purpose (story 4320: aborting the request loses the answer that carries the new cookies — worse than waiting).
+ * `withAuth` = what `fetchWithAuth` did for the callers that used it: an answer of 401 renews the session through the flight and asks once more (a renewal that fails signals the session ended).
+ */
+async function switchSession(path: SwitchPath, body: object, opts: { withAuth?: boolean }): Promise<Response> {
+  const post = () => runSwitch(() => fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }));
+  if (opts.withAuth && typeof window !== 'undefined' && isSessionExpiredSignaled()) return new Response(null, { status: 401 });
+  const res = await post();
+  if (!opts.withAuth || res.status !== 401) return res;
+  let renewed: AuthResult;
+  try {
+    renewed = await refreshSessionOnce(); // outside the switch section: a renewal inside it would wait for the switch it is part of
+  } catch {
+    if (typeof window !== 'undefined') signalSessionExpired();
+    return res;
+  }
+  if (renewed.error) {
+    // a renewal that was only «superseded» or «not confirmed» does not end the session (the same rule as fetchWithAuth): the 401 is handed back, later switches stay possible
+    if (typeof window !== 'undefined' && !leavesTheSessionStanding(renewed.error)) signalSessionExpired();
+    return res;
+  }
+  return post();
+}
+
+export function switchOrg(orgId: string, opts: { withAuth?: boolean } = {}): Promise<Response> {
+  return switchSession('/api/switch-org', { org_id: orgId }, opts);
+}
+
+export function switchProject(projectId: string, opts: { withAuth?: boolean } = {}): Promise<Response> {
+  return switchSession('/api/switch-project', { project_id: projectId }, opts);
+}
+
+let _afterChange: Promise<AuthResult> | null = null;
+
+/**
+ * story 4776 — a renewal made BECAUSE something has just changed (an organization was made · a project and an agent were made): the new token must carry that change (the organization claim
+ * …), so it has to be minted AFTER the change. `refreshSessionOnce` alone would join a rotation that began before the change and hand back ITS token (no organization yet). Never two
+ * rotations at once all the same — one refresh token, one use at a time: a rotation already in flight is waited for (its answer is not this caller's, a failure of it is not either), then
+ * ONE more is made. The cookie the first rotation set is in the jar by the time its promise settles, so the second rotation presents the new token, never the one just used.
+ * The whole of it — the wait AND the rotation after it — is ONE promise shared by every caller that comes in while it is open (codex 4776 round 2): a duplicate press of the same exit (the onboarding
+ * steps are serial presses: a second call during the open one is the same change, not a new one) must not start yet another rotation whose cookie a page that is already leaving would lose. A call after
+ * it has settled is a new change and gets its own.
+ */
+export function refreshSessionAfterChange(): Promise<AuthResult> {
+  if (!_afterChange) {
+    const run = async (): Promise<AuthResult> => {
+      if (_refreshing) await _refreshing.catch(() => undefined);
+      return refreshSessionOnce();
+    };
+    _afterChange = run().finally(() => { _afterChange = null; });
+  }
+  return _afterChange;
+}
 
 /**
  * story #4310 — 응답 헤더를 기다리는 기본 상한. 예전엔 제한이 없어 응답 없이 걸린 요청 하나가 화면을 Cloudflare 524(~100초)까지 로딩에 묶었다.
@@ -119,9 +251,7 @@ export async function fetchWithAuth(input: RequestInfo | URL, init?: FetchWithAu
   if (res.status !== 401) return res;
 
   // 중복 refresh 방지: 동시 호출 시 하나만 실행
-  if (!_refreshing) {
-    _refreshing = refreshAuthTokens().finally(() => { _refreshing = null; });
-  }
+  const refreshing = refreshSessionOnce();
   // story #4089(페드루 PO 리뷰 REQUIRED, AC2 두 번째 클래스) — refreshAuthTokens()(=
   // callAuthRoute)는 BE가 401을 줘도 throw하지 않고 {data:null, error:{...}}로
   // *정상 resolve*한다(위 callAuthRoute 정의 참고) — 그래서 이 함수의 진짜 "refresh
@@ -137,13 +267,14 @@ export async function fetchWithAuth(input: RequestInfo | URL, init?: FetchWithAu
   // 구분할 수 없으므로 신호를 안 낸다(호출부가 자기 401을 알아서 처리).
   let refreshResult: AuthResult;
   try {
-    refreshResult = await _refreshing;
+    refreshResult = await refreshing;
   } catch {
     if (typeof window !== 'undefined') signalSessionExpired();
     return res;
   }
   if (refreshResult.error) {
-    if (typeof window !== 'undefined') signalSessionExpired();
+    // story 4778 (AC2b · AC2c): «superseded» and «could not be confirmed» are not the end of the session — no signal, the original 401 is handed back (the next request renews)
+    if (typeof window !== 'undefined' && !leavesTheSessionStanding(refreshResult.error)) signalSessionExpired();
     return res;
   }
 

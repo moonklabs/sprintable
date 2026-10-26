@@ -53,10 +53,16 @@ export const BROWSER_STORAGE_KEYS: readonly StorageKeyEntry[] = [
   { key: 'sprintable:chat-draft:', prefix: true, area: 'local', scope: 'account', on: ['signout'], where: ['components/chat/chat-input.tsx', 'lib/tab-owner.ts'] },
   { key: 'steer-recipients:', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['app/(authenticated)/[ws]/[proj]/goals/steer-dispatch-modal.tsx'] },
   { key: 'docs:recents:', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['components/docs/use-recent-docs.ts'] },
+  // story 4763 AC7: the time the mailed link's tab last said «verified» (the first tab's gate reads the account again when it changes) — nothing but a time, cleared with the account like the others
+  { key: 'sprintable-email-verified', area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['lib/auth/email-verified-signal.ts'] },
   { key: 'sprintable_activation_checklist_complete', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['hooks/use-activation-status.ts'] },
+  // story 4780: «this browser showed the person an OPEN checklist for the organization» — the finish line is shown once after that; account-scoped (the next account must not inherit it)
+  { key: 'sprintable_activation_seen_open', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['components/dashboard/activation-checklist-banner.tsx'] },
   { key: 'sprintable:intent-suggestion:dismissed', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['lib/intent-suggestion-dismissal.ts'] },
   // the desktop setup in progress in this tab (30 min) — a document opened after a switch would report the previous account's setup
   { key: 'sprintable_desktop_setup_active', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['lib/desktop-setup.ts'] },
+  // story 4784: the name and role the person typed for the agent the first-setup card makes — kept across the Mac folder window's page reload, per setup; it is the account's words (a next account must not inherit it)
+  { key: 'sprintable.desktopSetupQuick.typed.v1:', prefix: true, area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['lib/desktop-setup-quick.ts'] },
   { key: 'sprintable:reference-candidates:rejected', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['lib/reference-candidates.ts'] },
 
   // ── kept: view settings inside one project · device layout · per-person keys · in-flight payment (its own card, 4488) ──

@@ -449,3 +449,119 @@ describe('AgentSessionStrip — another agent\'s view is never shown (story 4684
     expect(container.textContent).toContain('B-맥');
   });
 });
+
+// story #4763 (AC4): a session that has not begun to run says what it waits on — the question at its computer — not «시작됨» for minutes
+describe('AgentSessionStrip — the first-screen question (story #4763 AC4 · AC12)', () => {
+  it.each(['trust', 'mcp', 'mcp_many', 'update'] as const)('starting + the %s question → «Mac 터미널에서 답 대기» (en too) — not «시작됨»', async (ask) => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'starting', first_screen: { ask } }));
+    await render();
+    expect(chip()).toBe(koMessages.chats.agentSession.state.waiting_first_screen);
+    expect(chip()).toBe('Mac 터미널에서 답 대기');
+    root.unmount(); root = createRoot(container);
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'starting', first_screen: { ask } }));
+    await render('en');
+    expect(chip()).toBe(enMessages.chats.agentSession.state.waiting_first_screen);
+  });
+
+  it('the CLI stands on the question after an instruction went in (the session reads «working»/«idle») → the same line, not «작업 중»', async () => {
+    for (const state of ['working', 'idle'] as const) {
+      fetchWithAuth.mockResolvedValueOnce(view({ state, first_screen: { ask: 'mcp' } }));
+      root.unmount(); root = createRoot(container);
+      await render();
+      expect(chip(), state).toBe('Mac 터미널에서 답 대기');
+    }
+  });
+
+  it('starting with no question (or an older server that sends none) keeps «시작됨»; the question is gone → «작업 중» (the report without it clears it)', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'starting' }));
+    await render();
+    expect(chip()).toBe('시작됨');
+    root.unmount(); root = createRoot(container);
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'working', first_screen: null }));
+    await render();
+    expect(chip()).toBe('작업 중');
+  });
+
+  it('a stopped or lost session keeps its own word: a stale question never covers «끝» / «상태 모름» (and a permission wait keeps «권한 대기»)', async () => {
+    for (const [state, word] of [['stopped', '끝'], ['unknown', '상태 모름'], ['waiting_permission', '권한 대기']] as const) {
+      fetchWithAuth.mockResolvedValueOnce(view({ state, first_screen: { ask: 'trust' } }));
+      root.unmount(); root = createRoot(container);
+      await render();
+      expect(chip(), state).toBe(word);
+    }
+  });
+
+  it('sessionStateLabel is the one place that chooses it (the workforce line shares it)', () => {
+    const t = (k: string) => k;
+    expect(sessionStateLabel({ state: 'starting', first_screen: { ask: 'trust' } }, t)).toBe('state.waiting_first_screen');
+    expect(sessionStateLabel({ state: 'starting', first_screen: { ask: 'mcp_many' } }, t)).toBe('state.waiting_first_screen');
+    expect(sessionStateLabel({ state: 'starting' }, t)).toBe('state.starting');
+    expect(sessionStateLabel({ state: 'starting', first_screen: null }, t)).toBe('state.starting');
+  });
+});
+
+// story #4779 (AC3 · PO 10-25): one line when WORK does not reach the agent because its computer cannot confirm (or has lost) the link to its Sprintable tools — with the ONE thing to
+// do: the button that stands on THAT board for that state (the desktop board's [다시 시작] for «not confirmed» and a failed Claude, [다시 연결] for a failed Codex).
+describe('AgentSessionStrip — why work does not reach the agent (story 4779)', () => {
+  const holdLine = () => container.querySelector('[data-testid="agent-session-work-hold"]');
+
+  it('tools_unconfirmed: the line names the computer and the board\'s [다시 시작] — warning tone, under the status line', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', runtime: 'claude', work_hold: { why: 'tools_unconfirmed' } }));
+    await render();
+    expect(holdLine()?.textContent).toBe('이 에이전트에게 가는 글이 멈춰 있어요 — Sprintable 연결을 확인하지 못했어요. SYJ-MacBook-Pro의 앱에서 [다시 시작]을 누르면 다시 확인해요');
+    expect(holdLine()?.getAttribute('data-why')).toBe('tools_unconfirmed');
+    expect(holdLine()?.className).toContain('text-warning');
+  });
+
+  it('tools_failed names the button of THAT runtime\'s board: Claude [다시 시작] · Codex [다시 연결]', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', runtime: 'claude', work_hold: { why: 'tools_failed' } }));
+    await render();
+    expect(holdLine()?.textContent).toContain('[다시 시작]');
+    expect(holdLine()?.textContent).not.toContain('[다시 연결]');
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', runtime: 'codex', work_hold: { why: 'tools_failed' } }));
+    await render();
+    expect(holdLine()?.textContent).toContain('[다시 연결]');
+    expect(holdLine()?.textContent).not.toContain('[다시 시작]');
+  });
+
+  it('English words; without a computer name the line says «the computer this session runs on»', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', runtime: 'codex', work_hold: { why: 'tools_failed' } }));
+    await render('en');
+    expect(holdLine()?.textContent).toBe('Work for this agent is held up — the connection for receiving work still won\'t come up. Press [Reconnect] in the app on SYJ-MacBook-Pro');
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', device_name: null, runtime: 'claude', work_hold: { why: 'tools_unconfirmed' } }));
+    await render('en');
+    expect(holdLine()?.textContent).toBe('Work for this agent is held up — Sprintable\'s connection couldn\'t be confirmed. Press [Start again] in the app on the computer this session runs on to check once more');
+  });
+
+  it('fail closed: a state word this page does not know → no line; tools_failed with no / an unknown runtime → no line (the button name would be a guess) while tools_unconfirmed, the same button on both boards, still shows', async () => {
+    for (const over of [{ state: 'a_state_from_a_newer_server' }, { runtime: null }, { runtime: 'gemini' }, { runtime: undefined }]) {
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+      fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', runtime: 'claude', work_hold: { why: 'tools_failed' }, ...over }));
+      await render();
+      expect(holdLine(), JSON.stringify(over)).toBeNull();
+    }
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', runtime: null, work_hold: { why: 'tools_unconfirmed' } }));
+    await render();
+    expect(holdLine()?.textContent).toContain('[다시 시작]');
+  });
+
+  it('no hold from the server (an older one, a silent computer, none) → no line · a stopped or unknown session → none · a word this page does not know → none', async () => {
+    fetchWithAuth.mockResolvedValueOnce(view({ state: 'idle', runtime: 'claude' }));
+    await render();
+    expect(holdLine()).toBeNull();
+    for (const over of [{ state: 'stopped' }, { state: 'unknown' }, { state: 'idle', work_hold: { why: 'something_new' } }, { state: 'idle', work_hold: null }]) {
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+      fetchWithAuth.mockResolvedValueOnce(view({ runtime: 'claude', work_hold: { why: 'tools_failed' }, ...over }));
+      await render();
+      expect(holdLine(), JSON.stringify(over)).toBeNull();
+    }
+  });
+});

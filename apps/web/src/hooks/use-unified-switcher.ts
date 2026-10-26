@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { beginPendingProjectTarget, endPendingProjectTarget } from '@/lib/pending-project-switch';
 import { TAB_PROJECT_STORAGE_KEY } from '@/lib/project-context-client';
-import { fetchWithAuth } from '@/lib/db/client';
+import { fetchWithAuth, switchOrg as switchOrgSession, switchProject as switchProjectSession } from '@/lib/db/client';
 import { canGrantProjectAccess } from '@/lib/project-access-role';
 import { desktopApp } from '@/lib/desktop-app';
 import { homeAsTilde } from '@/lib/home-tilde';
@@ -268,11 +268,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
     setSwitchOrgError(null);
     setLocalOrgId(nextOrgId);
     try {
-      const res = await fetch('/api/switch-org', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ org_id: nextOrgId }),
-      });
+      const res = await switchOrgSession(nextOrgId); // story 4778 — the page's one flight
       const json = await res.json().catch(() => null) as { data?: { ok?: boolean } } | null;
       if (res.ok && json?.data?.ok) {
         // story #2468(a) — 이 경로는 대상 org의 특정 프로젝트를 아직 모른다(그건 이후
@@ -303,21 +299,13 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
     setSwitchOrgError(null);
     setLocalOrgId(nextOrgId);
     try {
-      const orgRes = await fetch('/api/switch-org', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ org_id: nextOrgId }),
-      });
+      const orgRes = await switchOrgSession(nextOrgId); // story 4778
       if (!orgRes.ok) {
         setLocalOrgId(prevOrgId);
         setSwitchOrgError(tSwitcher('switcherSwitchOrgError'));
         return;
       }
-      await fetch('/api/switch-project', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId }),
-      }).catch(() => null);
+      await switchProjectSession(projectId).catch(() => null); // story 4778
       if (typeof window !== 'undefined') window.sessionStorage.setItem(TAB_PROJECT_STORAGE_KEY, projectId);
       // story #2212 — proxy.ts가 "프로젝트 미확定" 404 대신 /org-briefing?next=<원 목적지>로
       // 보낸 경우, 여기서 그 next를 읽어 프로젝트 선택 "직후" 원래 가려던 곳으로 돌려보낸다
@@ -358,11 +346,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
       const nextRaw = searchParams.get('next');
       const nextTarget = isSafeInternalNext(nextRaw) ? nextRaw : null;
       if (nextTarget) {
-        await fetch('/api/switch-project', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ project_id: nextProjectId }),
-        }).catch(() => null);
+        await switchProjectSession(nextProjectId).catch(() => null); // story 4778
         router.push(nextTarget);
         return;
       }
@@ -372,11 +356,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
       const newSlug = orgSlug ? await fetchProjectSlug(nextProjectId) : null;
       const switchedPath = orgSlug && newSlug ? withSwitchedSlugs(pathname, orgSlug, orgSlug, newSlug) : null;
       pushWithPendingTarget(`${switchedPath ?? pathname}?${sp.toString()}`, nextProjectId); // story #4226 — 커밋 전 탭 링크가 옛 프로젝트를 박지 않게
-      await fetch('/api/switch-project', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: nextProjectId }),
-      }).catch(() => null);
+      await switchProjectSession(nextProjectId).catch(() => null); // story 4778
       router.refresh();
     } finally {
       setPending(false);

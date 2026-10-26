@@ -100,7 +100,7 @@ async def test_ws_chat_refuses_that_one_message_with_its_own_frame_and_keeps_the
     from app.routers import ws_chat
 
     agent_id = uuid.uuid4()
-    caller = mock.Mock(id=uuid.uuid4(), org_id=uuid.uuid4())
+    caller = mock.Mock(id=uuid.uuid4(), org_id=uuid.uuid4(), user_id=uuid.uuid4())
     agent = mock.Mock(org_id=caller.org_id, project_id=uuid.uuid4())
     saved: list[str] = []
 
@@ -145,9 +145,11 @@ async def test_ws_chat_refuses_that_one_message_with_its_own_frame_and_keeps_the
     with mock.patch.object(ws_chat, "_authenticate", mock.AsyncMock(return_value=caller)), \
             mock.patch.object(ws_chat, "async_session_factory", lambda: _Session()), \
             mock.patch.object(ws_chat, "_get_or_create_conversation", mock.AsyncMock(return_value=uuid.uuid4())), \
+            mock.patch.object(ws_chat, "_reachable_projects", mock.AsyncMock(return_value=[uuid.uuid4()])), \
             mock.patch.object(ws_chat, "resolve_member_display_name", mock.AsyncMock(return_value="P")), \
             mock.patch.object(ws_chat, "_api_key_id", mock.AsyncMock(return_value=None)), \
-            mock.patch.object(ws_chat, "_broadcast", mock.AsyncMock()):
+            mock.patch("app.services.stream_access.person_seat_revoked_db", mock.AsyncMock(return_value=None)), \
+            mock.patch.object(ws_chat, "_broadcast", mock.AsyncMock()):   # story #4774: the made-up caller has no seat row; the seat judgement is not what this cell is about
         await ws_chat.ws_chat_hub(ws, agent_id, api_key="k", token=None)
     assert ws.closed is None, "the socket was not closed for it"
     assert json.loads(ws.sent[0]) == {"error": {"code": "message_too_long", "limit": LIMIT, "got": LIMIT + 1}}

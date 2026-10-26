@@ -14,13 +14,15 @@ import {
 } from './verify-rail';
 import { emitOnboardingEvent, beaconOnboardingEvent } from './onboarding-telemetry';
 
-import { fetchWithAuth, refreshAuthTokens } from '@/lib/db/client';
+import { fetchWithAuth, refreshSessionAfterChange } from '@/lib/db/client';
 import { createFirstInstructionConversation } from '@/lib/onboarding/first-instruction';
 import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
 import { PhoneAppCard } from '@/components/desktop/phone-app-card';
 import { OnboardingRemoteControl } from '@/components/desktop/onboarding-remote-control';
 import { copyTextSafely } from '@/lib/clipboard';
 import { withProjectParam } from '@/hooks/use-flat-href';
+import { ViewerDate } from '@/components/viewer-time-zone';
+import { VIEWER_TIME_OPTIONS } from '@/lib/viewer-time-zone';
 import { VerifyPromptCopyFailedPanel } from './verify-prompt-copy-failed-panel';
 
 // story #2407 — Transport는 이제 verify-rail.tsx가 소유(useVerificationRail이 그 값을 직접
@@ -315,8 +317,8 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
       }
       // story #2691 가드(verify-no-new-raw-fetch-api) — onboarding-form.tsx::finishToHome()의
       // auth 토큰 갱신 raw fetch 호출을 그대로 베끼지 않고, 같은 목적의 기존 헬퍼
-      // (lib/db/client.ts의 refreshAuthTokens, callAuthRoute 경유)를 재사용한다.
-      await refreshAuthTokens().catch(() => null);
+      // (lib/db/client.ts의 refreshSessionAfterChange — 페이지의 한 번에 하나 · 바뀐 뒤에 발급, callAuthRoute 경유)를 재사용한다. story 4776.
+      await refreshSessionAfterChange().catch(() => null);
       window.location.href = withProjectParam(`/chats/${convId}`, projectId); // story #4231 3차 — 온보딩 프로젝트를 싣는다
     } catch {
       onFinish();
@@ -606,7 +608,10 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
           // story #2105 2차 — 검증 성공 결과도 polite로 낭독(#2096/#2105 1차와 동일 원칙).
           // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
           <div role="status" aria-live="polite" aria-atomic="true" className="rounded-md border border-success/20 bg-success/10 px-3 py-2.5 text-sm text-foreground">
-            {t('verifiedBanner')}
+            {/* story #4761 (D1b) — say what was seen: the first call of this key, in the viewer's own clock */}
+            {rail.firstCallAt
+              ? t.rich('verifiedBannerAt', { t: () => <time dateTime={rail.firstCallAt!}><ViewerDate value={rail.firstCallAt!} options={VIEWER_TIME_OPTIONS} /></time> })
+              : t('verifiedBanner')}
           </div>
         )}
       </section>

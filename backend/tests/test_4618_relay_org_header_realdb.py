@@ -48,6 +48,8 @@ async def test_02_a_setup_of_another_org_names_that_org(world):
         # the same Mac's second setup belongs to another organization (with its own remote control on)
         await _sql(f"UPDATE organizations SET remote_control_enabled_at = now() WHERE id = '{ORG2}'")
         await _sql(f"UPDATE desktop_setups SET org_id = '{ORG2}' WHERE id = '{other['setup_id']}'")
+        # story 4769 (fail-closed): a device belongs to a person WITH A SEAT in its organization — the confirmer is seated in the second one too
+        await _sql(f"INSERT INTO org_members (id, org_id, user_id, role) SELECT gen_random_uuid(), '{ORG2}', confirmed_by, 'admin' FROM desktop_setups WHERE id = '{other['setup_id']}' ON CONFLICT DO NOTHING")
         a = await c.get(STREAM, headers=_tok(mine["device_token"]))
         b = await c.get(STREAM, headers=_tok(other["device_token"]))
         assert (a.headers.get("x-desktop-org-id"), b.headers.get("x-desktop-org-id")) == (str(ORG), str(ORG2))
@@ -79,6 +81,7 @@ async def test_05_the_stream_names_who_confirmed_the_setup_never_what_the_caller
         # the same Mac's other setup was confirmed by another person of the same org
         other_person = str(uuid.uuid4())
         await _sql(f"UPDATE desktop_setups SET confirmed_by = '{other_person}' WHERE id = '{theirs['setup_id']}'")
+        await _sql(f"INSERT INTO org_members (id, org_id, user_id, role) VALUES (gen_random_uuid(), '{ORG}', '{other_person}', 'admin') ON CONFLICT DO NOTHING")   # story 4769: a person with a seat
         b = await c.get(STREAM, headers=_tok(theirs["device_token"]))
         assert (b.headers.get("x-desktop-org-id"), b.headers.get("x-desktop-confirmed-by")) == (str(ORG), other_person)
         # a row with no confirmer: no header (the daemon gives that setup nothing)
@@ -96,5 +99,6 @@ async def test_04_remote_control_off_is_409_with_no_org(world):
         # the setup's org with its remote control off (ORG2 is never turned on here)
         await _sql(f"UPDATE organizations SET remote_control_enabled_at = NULL WHERE id = '{ORG2}'")
         await _sql(f"UPDATE desktop_setups SET org_id = '{ORG2}' WHERE id = '{d['setup_id']}'")
+        await _sql(f"INSERT INTO org_members (id, org_id, user_id, role) SELECT gen_random_uuid(), '{ORG2}', confirmed_by, 'admin' FROM desktop_setups WHERE id = '{d['setup_id']}' ON CONFLICT DO NOTHING")   # story 4769: seated there
         off = await c.get(STREAM, headers=_tok(d["device_token"]))
         assert off.status_code == 409 and "x-desktop-org-id" not in off.headers

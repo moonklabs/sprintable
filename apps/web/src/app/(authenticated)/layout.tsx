@@ -4,7 +4,8 @@ import { ACTIVATION_COLLAPSED_COOKIE, ACTIVATION_HINT_COOKIE, isActivationCollap
 import { getServerSession } from '@/lib/db/server';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { onboardingRedirect, staysForNewOrgSetup } from '@/lib/auth/onboarding-next';
-import { resolveProjectMemberships } from '@/lib/resolve-project-memberships';
+import { ME_REASON_MEMBERSHIP_ELSEWHERE, readMe404Reason } from '@/lib/auth/me-reason';
+import { resolveProjectMemberships, resolveServerProjectId } from '@/lib/resolve-project-memberships';
 import { DashboardShell } from '../dashboard/dashboard-shell';
 import { StorageCapacityToastProvider } from '@/components/storage/storage-capacity-toast-provider';
 import { CrossProjectToastProvider } from '@/components/chat/cross-project-toast-provider';
@@ -85,6 +86,11 @@ async function AuthenticatedLayoutBody({
   // story 4427 (나): an organization-less person on the desktop setup page stays there, without the shell (it needs an
   // organization) — the page shows the «새 조직» mode, or sends them to the one screen when an invite exists or the check fails
   if (meRes.status === 404) {
+    // story 4762 — «a person who belongs to an organization the session does not name» is NOT organization-less (me.py `reason: membership_elsewhere`):
+    // the onboarding (and the desktop setup's «새 조직» mode) would let them create a second organization. The session is out of step with the membership —
+    // a new sign-in issues a token with the right claim (the proxy reads the same field the same way: only `no_membership` is «no organization»).
+    // Any other 404 (no reason · an older backend · an unreadable body) keeps the old reading, as before.
+    if ((await readMe404Reason(meRes)) === ME_REASON_MEMBERSHIP_ELSEWHERE) redirect(buildLoginRedirect(currentPath, navV3Flags));
     if (staysForNewOrgSetup(currentPath)) return { userId: session.user_id, node: children };
     redirect(onboardingRedirect(currentPath));
   }
@@ -216,7 +222,8 @@ async function AuthenticatedLayoutBody({
         // getServerSession()이 이미 jwtVerify로 이 클레임을 직접 읽어둔 값을 그대로 흘려보낸다
         // (신규 fetch/디코드 0) — DashboardShell의 불일치 판정은 이 값을 우선한다.
         jwtOrgId={session.org_id ?? undefined}
-        projectId={me?.project_id}
+        // story #4762 (AC2) — a new organization's `/me` claim is the organization id (sentinel); the one project it later gets is the only choice.
+        projectId={resolveServerProjectId(projectMemberships, me)}
         projectName={projectNameForDisplay}
         currentProjectSlug={currentProjectSlug}
         userName={me?.name}

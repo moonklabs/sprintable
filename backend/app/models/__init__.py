@@ -12,6 +12,7 @@ from app.models.oauth_handoff_code import OAuthHandoffCode
 from app.models.desktop_relay import DesktopCommand, DesktopDeviceToken, DesktopDeviceTokenCode, DesktopSession
 from app.models.agent_watch import AgentWatch, DeployServing, GithubPullRequest
 from app.models.desktop_setup import DesktopSetup
+from app.models.desktop_setup_closure import DesktopSetupClosure
 from app.models.remote_control_audit_log import OrgRemoteControlAuditLog
 from app.models.agent_permission import AgentPermissionRequest, RemoteDevice, RemoteDevicePairing, RemoteDevicePairingOffer
 from app.models.agent_allowed_host import AgentAllowedHost
