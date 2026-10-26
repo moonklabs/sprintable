@@ -392,7 +392,7 @@ def _write_policy(path: Path, text: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)  # 약어(`--emit` 등)를 끈다: 사전 스캔이 못 보는 이름으로 낡은 정책 파일 삭제를 건너뛰는 길이 없게
     ap.add_argument("--images", required=True)
     ap.add_argument("--run-services", required=True)
     ap.add_argument("--run-revisions", required=True)

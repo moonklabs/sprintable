@@ -391,3 +391,14 @@ def test_emit_policy_that_is_a_directory_exits_2_without_a_traceback(tmp_path):
     folder.mkdir()
     argv[argv.index("--emit-policy") + 1] = str(folder)
     assert gate.main(argv) == 2 and folder.is_dir()
+
+
+def test_flag_abbreviations_are_off(tmp_path):
+    """an abbreviated flag (`--emit`) would be understood by argparse but not by the pre-scan that drops a stale policy file: abbreviations are refused (argparse exit 2)"""
+    d = Dumps(tmp_path)
+    assert gate.main(d.argv()) == 0 and d.out.exists()
+    argv = d.argv()
+    argv[argv.index("--emit-policy")] = "--emit"
+    with pytest.raises(SystemExit) as err:
+        gate.main(argv)
+    assert err.value.code == 2
