@@ -202,7 +202,7 @@ story #3124 이후에도 매 story마다 인라인 주석이 다시 자라(story
   `get_read_db`가 쓰는 `read_engine`)를 SECRETS_FLAG prod 갈래에서 뺐다. `--update-secrets`는 덧붙이기라 목록에서 빼는 것만으론 살아 있는 서비스의
   바인딩이 남으므로 `RM_SECRETS`에도 `DATABASE_URL_READ`를 올렸다(`--remove-secrets=EDGE_CLIENT_IP_SECRET,DATABASE_URL_READ`). 값이 비면 읽기 엔진이
   primary를 재사용하고(backend/app/core/database.py `read_engine`) 종료 때 dispose도 건너뛴다(main.py) — 서비스가 죽지 않고 읽기 부하가 primary로
-  간다(primary CPU p95 11.3%, 2026-10-26 PO 측정). 만료 조건: `sprintable-prod-replica` 삭제 뒤 `RM_SECRETS`의 이 항을 걷는다.
+  간다(primary CPU p95 11.3%, 2026-10-26 PO 측정). **만료됨(2026-10-26, story 4790 후속):** 2026-10-26 prod 배포로 prod · dev의 모든 서비스 · 작업에서 이 바인딩이 0인 것을 PO가 읽은 뒤 `RM_SECRETS`의 이 항을 걷었다(manifest의 이름도 같이).
   infra/check_secrets_flag_env_symmetry.py의 prod 전용 예외(DATABASE_URL_READ)도 같이 걷었다 — 이 키를 prod에 되살리면 근거 없는 비대칭으로 빨개진다.
 
 ## deploy-realtime 인라인 주석 아카이브 (story #3433, 2026-09-04)
@@ -934,20 +934,20 @@ def test_deploy_edge_client_ip_secret_attached_on_dev_and_removed_on_prod():
     assert "EDGE_CLIENT_IP_SECRET=EDGE_CLIENT_IP_SECRET_DEV:latest" in dev_flag.split(",")
     assert _run_env_vars_assembly("dev", "redis://10.164.120.243:6379", var="RM_SECRETS") == ""
     assert "EDGE_CLIENT_IP_SECRET" not in _run_env_vars_assembly("prod", "", var="SECRETS_FLAG")
-    # story 4790 — prod 백엔드는 EDGE_CLIENT_IP_SECRET에 더해 읽기 복제본 바인딩(DATABASE_URL_READ)도 같이 명시 제거한다.
-    assert _run_env_vars_assembly("prod", "", var="RM_SECRETS") == f"{remove},DATABASE_URL_READ"
+    # story 4790 — 읽기 복제본 바인딩(DATABASE_URL_READ)의 명시 제거는 만료되어 걷었다: prod는 EDGE_CLIENT_IP_SECRET만 명시 제거한다.
+    assert _run_env_vars_assembly("prod", "", var="RM_SECRETS") == remove
     script = _extract_deploy_backend_script()
     call = script[script.index("gcloud run deploy sprintable-backend"):]
     assert "$${RM_SECRETS}" in call[: call.index("--quiet")], call
 
 
-def test_deploy_prod_read_replica_binding_removed_from_update_and_listed_in_remove():
-    """story 4790(INFRA-DIET ⑤ · AC2) — prod 읽기 복제본을 끄는 첫 걸음: prod 백엔드의 `DATABASE_URL_READ` 바인딩을 걷는다.
-    `--update-secrets`는 덧붙이기라 목록에서 빼기만 하면 살아 있는 서비스의 바인딩이 남으므로, 빼는 것과 `--remove-secrets`에 올리는 것이
-    «한 쌍»이다(한쪽만 되돌리면 이 시험이 빨개진다). 읽기 엔진은 값이 비면 primary를 쓴다(database.py `read_engine`) — 서비스가 죽지 않는다."""
+def test_deploy_prod_read_replica_secret_is_in_neither_update_nor_remove():
+    """story 4790(INFRA-DIET ⑤ · AC2) — prod 읽기 복제본의 `DATABASE_URL_READ`: 바인딩을 걷은 PR의 `--remove-secrets` 항은 prod 배포로 서비스에서 걷힌 것이 확인된 뒤 만료되어
+    걷었다. 이제 이름은 `--update-secrets`에도 `--remove-secrets`에도 없다(어느 쪽이든 되살리면 이 시험이 빨개진다). 읽기 엔진은 값이 비면 primary를 쓴다(database.py `read_engine`)."""
     prod_flag = _run_env_vars_assembly("prod", "", var="SECRETS_FLAG")
     assert not [e for e in prod_flag.removeprefix("--update-secrets=").split(",") if e.startswith("DATABASE_URL_READ=")], prod_flag
-    assert "DATABASE_URL_READ" in _run_env_vars_assembly("prod", "", var="RM_SECRETS").removeprefix("--remove-secrets=").split(",")
+    assert "DATABASE_URL_READ" not in _run_env_vars_assembly("prod", "", var="RM_SECRETS").removeprefix("--remove-secrets=").split(",")
+    assert "EDGE_CLIENT_IP_SECRET" in _run_env_vars_assembly("prod", "", var="RM_SECRETS").removeprefix("--remove-secrets=").split(",")  # the other explicit removal stays
     # dev는 처음부터 이 키가 없었고 remove도 없다(dev 복제본 인프라 없음).
     dev_flag = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379", var="SECRETS_FLAG")
     assert "DATABASE_URL_READ" not in dev_flag
