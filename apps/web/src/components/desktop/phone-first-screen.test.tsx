@@ -338,6 +338,108 @@ describe('[4714] branch 1 — remote control is off', () => {
   });
 });
 
+describe('[SID:4714 덧 4] a computer whose agents have no project with a folder', () => {
+  const noProjects = { agent_member_id: AGENT, name: '결제 담당', can_command: true, projects: [] };
+  const withProject = { agent_member_id: AGENT2, name: '문서 담당', can_command: true, projects: [{ project_id: PROJECT2, name: '정산' }] };
+  const reasonText = () => byId('onboarding-phone-reason')?.textContent;
+
+  it('none of its agents has one → one line instead of a start card with an empty project sheet (not «no agent yet»)', async () => {
+    world.startable = { remote_control: true, computers: [computer({ agents: [noProjects] })] };
+    await screen();
+    expect(byId('onboarding-phone-no-folder')?.textContent).toBe('윤재의 맥북에는 폴더를 고른 프로젝트가 아직 없어요 — Mac 앞에서 폴더를 먼저 골라 주세요.');
+    expect(byId('onboarding-phone-start')).toBeNull(); // no card · no empty sheet · no dead [시작]
+    expect(byId('onboarding-phone-no-agent')).toBeNull(); // the «no agent yet» line would be false here
+    expect(container.querySelectorAll('button')).toHaveLength(0);
+  });
+
+  it('one agent has none and another has one: the card stays; the agent without says so, its project row is off, and the other agent reads as before', async () => {
+    world.startable = { remote_control: true, computers: [computer({ agents: [noProjects, withProject] })] };
+    await screen();
+    await pickFromSheet('onboarding-phone-agent', '결제 담당');
+    expect(reasonText()).toBe('이 에이전트에는 폴더를 고른 프로젝트가 아직 없어요 — Mac 앞에서 폴더를 먼저 골라 주세요.');
+    expect((byId('onboarding-phone-project') as HTMLButtonElement).disabled).toBe(true);
+    expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(true);
+    await pickFromSheet('onboarding-phone-agent', '문서 담당');
+    expect(reasonText()).toBe('프로젝트를 고르면 시작할 수 있어요');
+    expect((byId('onboarding-phone-project') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('English words', async () => {
+    world.startable = { remote_control: true, computers: [computer({ agents: [noProjects] })] };
+    await screen({ locale: 'en' });
+    expect(byId('onboarding-phone-no-folder')?.textContent).toBe('윤재의 맥북 has no project with a folder yet — pick a folder at your Mac first.');
+  });
+});
+
+describe('[SID:4714] «the list changed» note — only when the start card comes back after a press that ended list_changed', () => {
+  const agentA = { agent_member_id: AGENT, name: '결제 담당', can_command: true, projects: [{ project_id: PROJECT, name: '결제 개편' }] };
+  const agentB = { agent_member_id: AGENT2, name: '문서 담당', can_command: true, projects: [{ project_id: PROJECT2, name: '정산' }] };
+  const note = () => byId('onboarding-phone-list-changed');
+
+  it('the picked agent left the list but another is still there: the card returns (that agent picked by itself) with a status line; the next pick clears it', async () => {
+    signAnswer = { id: 's', ok: false, code: 'agent_not_found' };
+    world.startable = { remote_control: true, computers: [computer({ agents: [agentA, agentB] })] };
+    await screen();
+    await pickFromSheet('onboarding-phone-agent', '결제 담당');
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    world.startable = { remote_control: true, computers: [computer({ agents: [agentB] })] };
+    await press(byId('onboarding-phone-start-go'));
+    expect(note()?.textContent).toBe('목록이 바뀌었어요 — 에이전트와 프로젝트를 다시 확인해 주세요.');
+    expect(note()?.getAttribute('role')).toBe('status');
+    expect(byId('onboarding-phone-agent-fixed')?.textContent).toContain('문서 담당'); // the one left was picked for the person — the note is why they must look again
+    await pickFromSheet('onboarding-phone-project', '정산');
+    expect(note()).toBeNull();
+  });
+
+  it('nothing is left to start → the policy line says why by itself: no note', async () => {
+    signAnswer = { id: 's', ok: false, code: 'agent_not_found' };
+    world.startable = { remote_control: true, computers: [computer({ agents: [agentA, agentB] })] };
+    await screen();
+    await pickFromSheet('onboarding-phone-agent', '결제 담당');
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    world.startable = { remote_control: true, computers: [{ ...computer({ agents: [] }), agents_hidden: 'message_policy' as const }] };
+    await press(byId('onboarding-phone-start-go'));
+    expect(byId('onboarding-phone-no-agent')).not.toBeNull();
+    expect(note()).toBeNull();
+  });
+
+  it('a failure that is not a changed list (a plain sign failure) shows no note, and a later read does not bring one back', async () => {
+    signAnswer = { id: 's', ok: false, code: 'sign_failed' };
+    world.startable = { remote_control: true, computers: [computer({ agents: [agentA, agentB] })] };
+    await screen();
+    await pickFromSheet('onboarding-phone-agent', '결제 담당');
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await press(byId('onboarding-phone-start-go'));
+    expect(note()).toBeNull();
+    expect(byId('onboarding-phone-result')).not.toBeNull(); // the ordinary failure line
+  });
+
+  it('picking another computer clears the note too (the card is rebuilt for the other computer)', async () => {
+    const OTHER_SETUP = '11111111-2222-4333-8444-999999999999';
+    signAnswer = { id: 's', ok: false, code: 'agent_not_found' };
+    world.startable = { remote_control: true, computers: [computer({ agents: [agentA, agentB] }), computer({ setup_id: OTHER_SETUP, device_name: '사무실 맥', agents: [agentB] })] };
+    await screen();
+    await pickFromSheet('onboarding-phone-agent', '결제 담당');
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    world.startable = { remote_control: true, computers: [computer({ agents: [agentB] }), computer({ setup_id: OTHER_SETUP, device_name: '사무실 맥', agents: [agentB] })] };
+    await press(byId('onboarding-phone-start-go'));
+    expect(note()).not.toBeNull();
+    await pickFromSheet('onboarding-phone-computer', '사무실 맥');
+    expect(note()).toBeNull();
+  });
+
+  it('a read that no list_changed press asked for (remote control found off, the server then says on again) brings the card back with no note', async () => {
+    signAnswer = { id: 's', ok: false, code: 'remote_control_off' };
+    world.startable = { remote_control: true, computers: [computer({ agents: [agentA, agentB] })] };
+    await screen();
+    await pickFromSheet('onboarding-phone-agent', '결제 담당');
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    await press(byId('onboarding-phone-start-go')); // the press found remote control off → the screen reads again; the read says it is on and the card is back
+    expect(byId('onboarding-phone-start')).not.toBeNull();
+    expect(note()).toBeNull();
+  });
+});
+
 describe('[SID:4714] a computer whose agents the person may not talk to says so (the server left them out)', () => {
   it('agents_hidden: message_policy and nothing left → its own line (not «no agent yet»), no button', async () => {
     world.startable = { remote_control: true, computers: [{ ...computer({ agents: [] }), agents_hidden: 'message_policy' as const }] };
@@ -477,11 +579,11 @@ describe('[4714] two paired computers — the person chooses the computer (PO 10
       computer({ setup_id: '11111111-2222-4333-8444-777777777777', device_name: '권한 없는 맥', agents: [{ agent_member_id: AGENT, name: '결제 담당', can_command: false, projects: [] }] }),
     ] };
     await screen();
-    expect(byId('onboarding-phone-computer')).not.toBeNull(); // none has a project: the two the person may command are offered, the card says what it can
-    await press(byId('onboarding-phone-computer'));
-    const names = Array.from(container.querySelectorAll('[data-testid="onboarding-phone-sheet-row"]')).map((r) => r.textContent ?? '');
-    expect(names.length).toBe(2);
-    expect(names.some((n) => n.includes('권한 없는 맥'))).toBe(false); // …and a computer with nothing the person may command is no choice even then
+    // story 4714 (덧 4): none has a project with a folder — no card with an empty sheet; one line per computer the person may command, each naming its own computer
+    expect(byId('onboarding-phone-computer')).toBeNull();
+    const lines = Array.from(container.querySelectorAll('[data-testid="onboarding-phone-no-folder"]')).map((r) => r.textContent ?? '');
+    expect(lines).toEqual(['윤재의 맥북에는 폴더를 고른 프로젝트가 아직 없어요 — Mac 앞에서 폴더를 먼저 골라 주세요.', '사무실 맥에는 폴더를 고른 프로젝트가 아직 없어요 — Mac 앞에서 폴더를 먼저 골라 주세요.']);
+    expect(text()).not.toContain('권한 없는 맥'); // …a computer with nothing the person may command is not offered even then
   });
 
   it('while a start is out the computer row is off — switching would drop the result of a start that is already on its way', async () => {
