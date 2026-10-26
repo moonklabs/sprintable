@@ -35,6 +35,8 @@ MIN_ALIVE_SEC: float = float(os.getenv("AGENT_STREAM_REPLAY_MIN_ALIVE_SEC", "60"
 # above the floor. A transaction that stays open longer than this is the one case that can still be missed — documented, not silent.
 SETTLE_SEC: float = float(os.getenv("AGENT_STREAM_REPLAY_SETTLE_SEC", "120"))
 TTL_SEC: int = 7 * 86400
+IO_TIMEOUT_SEC: float = 2.0  # a store that does not answer (a black-holed Redis) must not hold a connect (the read) or pile up tasks (the write)
+MAX_PENDING_WRITES: int = 2000
 MAX_LOCAL_KEYS: int = 20000  # (agent · key · kind) entries held in this process when there is no Redis; the least recently used go first
 
 # no Redis: key -> (expires_at, newest-first sent_max values). Single-process state — the Redis path is the shared one.
@@ -84,7 +86,11 @@ async def floor(agent_id: uuid.UUID | str, key_id: object, accept_types: "frozen
         raw = await client.lrange(key, 0, ATTEMPTS - 1)
         return _pick([int(v) for v in raw if str(v).lstrip("-").isdigit()])
 
-    return await redis_shared.with_fallback(_op, lambda: _pick(_local_read(key)))
+    try:
+        return await asyncio.wait_for(redis_shared.with_fallback(_op, lambda: _pick(_local_read(key))), IO_TIMEOUT_SEC)
+    except asyncio.TimeoutError:
+        logger.warning("agent_stream replay floor read timed out agent=%s — nothing skipped", agent_id)
+        return 0
 
 
 async def record(agent_id: uuid.UUID | str, key_id: object, accept_types: "frozenset[str] | None", sent_max: int) -> None:
@@ -111,10 +117,14 @@ def record_soon(agent_id: uuid.UUID | str, key_id: object, accept_types: "frozen
     if ATTEMPTS <= 0 or not key_id or sent_max <= 0:
         return
 
+    if len(_pending) >= MAX_PENDING_WRITES:  # a store that stopped answering: counts are dropped rather than piled up
+        logger.warning("agent_stream replay floor: %d writes still pending — this count is dropped agent=%s", len(_pending), agent_id)
+        return
+
     async def _run() -> None:
         try:
-            await record(agent_id, key_id, accept_types, sent_max)
-        except Exception:  # noqa: BLE001 — a count for the next connect, never a condition of this one
+            await asyncio.wait_for(record(agent_id, key_id, accept_types, sent_max), IO_TIMEOUT_SEC * 2.5)
+        except Exception:  # noqa: BLE001 — a count for the next connect, never a condition of this one (a timeout too)
             logger.warning("agent_stream replay floor record failed agent=%s", agent_id, exc_info=True)
 
     try:

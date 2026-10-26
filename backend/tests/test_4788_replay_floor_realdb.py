@@ -423,3 +423,33 @@ async def test_15_both_ends_of_a_stream_record_the_aclose_end_and_the_cancelled_
         assert await _connect_as(ag, Session, ids, H, key) == [], "three of them, two kinds of end, counted together"
     finally:
         await _cleanup(ag, engine, ids[2])
+
+
+def test_16_a_store_that_does_not_answer_holds_neither_a_connect_nor_a_pile_of_writes(monkeypatch, _store_and_limits):
+    """codex 3: the read on connect has a time limit (nothing skipped when it runs out), the write task has one (it ends, and a warning is logged), and at most MAX_PENDING_WRITES wait at once"""
+    from unittest.mock import patch
+
+    from app.services import agent_stream_replay_floor as f
+
+    agent, key = uuid.uuid4(), uuid.uuid4()
+
+    async def hangs(*a, **k):
+        await asyncio.sleep(3600)
+
+    async def run():
+        monkeypatch.setattr(f, "IO_TIMEOUT_SEC", 0.1)
+        with patch("app.services.redis_shared.with_fallback", hangs):
+            assert await f.floor(agent, key, None) == 0, "the read ran out of time: nothing is skipped"
+        monkeypatch.setattr(f, "record", hangs)
+        f.record_soon(agent, key, None, 50)
+        assert len(f._pending) == 1
+        await asyncio.sleep(0.6)
+        assert len(f._pending) == 0, "the write ended at its time limit"
+        monkeypatch.setattr(f, "MAX_PENDING_WRITES", 2)
+        for _ in range(5):
+            f.record_soon(agent, key, None, 50)
+        assert len(f._pending) == 2, "the rest are dropped, not piled up"
+        await asyncio.sleep(0.6)
+        assert len(f._pending) == 0
+
+    asyncio.run(run())
