@@ -107,7 +107,7 @@ async def record(agent_id: uuid.UUID | str, key_id: object, accept_types: "froze
     await redis_shared.with_fallback(_op, lambda: _local_push(key, int(sent_max)))
 
 
-_pending: "set[asyncio.Task]" = set()  # (a task nobody else holds is collected before it ends)
+_pending: "set[asyncio.Task]" = set()  # the writes that are still waiting (counted for MAX_PENDING_WRITES)
 
 
 def record_soon(agent_id: uuid.UUID | str, key_id: object, accept_types: "frozenset[str] | None", sent_max: int) -> None:
@@ -127,9 +127,10 @@ def record_soon(agent_id: uuid.UUID | str, key_id: object, accept_types: "frozen
         except Exception:  # noqa: BLE001 — a count for the next connect, never a condition of this one (a timeout too)
             logger.warning("agent_stream replay floor record failed agent=%s", agent_id, exc_info=True)
 
-    try:
-        task = asyncio.get_running_loop().create_task(_run())
-    except RuntimeError:  # no running loop (cannot happen inside the stream; a call from elsewhere just does not record)
+    from app.services.pg_pubsub import fire_and_forget  # the repo's one way to start a task nobody awaits (strong reference · drained at shutdown · test_no_unreferenced_fire_and_forget)
+
+    task = fire_and_forget(_run())
+    if task is None:  # no running loop (cannot happen inside the stream; a call from elsewhere just does not record)
         return
-    _pending.add(task)
+    _pending.add(task)  # (only to count how many writes wait — the reference that keeps the task alive is fire_and_forget's)
     task.add_done_callback(_pending.discard)
