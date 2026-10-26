@@ -85,6 +85,16 @@ describe('[SID:4711] the card\'s rules', () => {
     expect(LONE.test(typed.name ?? '') || LONE.test(typed.role)).toBe(false);
     expect(Array.from(typed.name ?? '').length).toBeLessThanOrEqual(60);
     expect(Array.from(typed.role).length).toBeLessThanOrEqual(200);
+    // a stored draft of ZWJ families (5 code points each): cutting by LETTERS (60 / 200 graphemes) would keep 100 / 250 code points — the server then refuses the name (Kadir lens)
+    const fam = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}';
+    const famStore = new Map<string, string>([['sprintable.desktopSetupQuick.typed.v1:s-2', JSON.stringify({ name: fam.repeat(20), role: fam.repeat(50) })]]);
+    vi.stubGlobal('window', { sessionStorage: { getItem: (k: string) => famStore.get(k) ?? null, setItem: () => {}, removeItem: () => {} } });
+    const famTyped = readTypedAgent('s-2');
+    vi.unstubAllGlobals();
+    expect(Array.from(famTyped.name ?? '').length).toBeLessThanOrEqual(60);
+    expect(Array.from(famTyped.role).length).toBeLessThanOrEqual(200);
+    expect(famTyped.name).toBe(fam.repeat(12)); // 60 code points, whole families
+    expect(famTyped.role).toBe(fam.repeat(40)); // 200 code points
     // a folder name with an emoji at the end of a 100-name taken: the project name keeps whole letters
     const longName = `${'p'.repeat(97)}\u{1F600}x`; // 99 code points: with the « 2» tail the base is cut at 98 code points — a UTF-16 cut at 98 splits the emoji (units 97 · 98)
     const shown = shownProjectName(longName, [longName]);

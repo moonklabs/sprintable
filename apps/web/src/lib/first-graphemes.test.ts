@@ -78,4 +78,15 @@ describe('[SID:4794] graphemesWithin — a cut for a name the server counts in c
     expect(graphemesWithin(family, 3)).toBe('');
     expect(Array.from(graphemesWithin(family.repeat(20), 60)).length).toBeLessThanOrEqual(60);
   });
+  it('is always a START of the text (a prefix): a grapheme that does not fit ends the cut — the smaller letters after it are not picked up (Kadir lens: break → continue)', () => {
+    const family4 = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}'; // 7 code points, one letter
+    expect(graphemesWithin(`${family4}a`, 5)).toBe(''); // the family does not fit in 5, so nothing is taken — never «a»
+    expect(graphemesWithin(`${family4}ab`, 5)).toBe('');
+    expect(graphemesWithin(`${family4}a`, 7)).toBe(family4); // exactly the family
+    expect(graphemesWithin(`${family4}a`, 8)).toBe(`${family4}a`);
+    expect(graphemesWithin(`ab${family4}cd`, 5)).toBe('ab'); // 2 fit, the family (7) stops the cut, «cd» is not taken
+    for (const text of [`${family4}a`, `ab${family4}cd`, `a${family4}`, `\u{1F600}x${family4}y`, `${'z'.repeat(10)}${family4}`]) {
+      for (let n = 0; n <= 14; n++) expect(text.startsWith(graphemesWithin(text, n)), `${text} · ${n}`).toBe(true);
+    }
+  });
 });
