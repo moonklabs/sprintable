@@ -151,6 +151,7 @@ export type StartOutcome =
   | { kind: 'unreachable' } // 409 device_unreachable — certainly not started
   | { kind: 'remote_off' }
   | { kind: 'not_paired' } // 409 phone_not_paired · the shell found no such computer on this phone's list
+  | { kind: 'list_changed' } // story 4714: the list the person pressed in is not the list now — the shell's own re-read no longer has the agent (`agent_not_found`), or the server refused: `403 agent_message_policy_denied` (the agent's message policy) · `404 agent_not_found`. Nothing was made; the screen reads the list again and says what is true (a policy line · the plain list), not «tap again»
   | { kind: 'cancelled' } // the person said no on the OS prompt — not a failure, no line
   | { kind: 'biometric_required' }
   | { kind: 'no_screen_lock' }
@@ -191,6 +192,7 @@ const SHELL_REFUSALS: Record<string, StartOutcome['kind']> = {
   signed_out: 'signed_out',
   remote_control_off: 'remote_off',
   computer_not_found: 'not_paired',
+  agent_not_found: 'list_changed', // lib/phoneCalls.js startSign re-reads the list itself and signs only a pick that is IN it: an agent the policy now leaves out is not (story 4714)
   device_unreachable: 'unreachable',
   no_folder: 'no_folder',
 };
@@ -249,6 +251,7 @@ async function post(pending: Pending, deps: StartDeps): Promise<StartOutcome> {
     if (code === 'remote_control_off') return { kind: 'remote_off' };
     if (code === 'phone_not_paired') return { kind: 'not_paired' };
     if (code === 'no_folder') return { kind: 'no_folder' };
+    if (code === 'agent_message_policy_denied' || code === 'agent_not_found') return { kind: 'list_changed' }; // refused before anything was made: a retry cannot work, a fresh read can say why
     return { kind: 'failed' }; // another 4xx: refused before anything was made
   }
   let made: { command_id?: string };
