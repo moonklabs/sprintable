@@ -109,6 +109,34 @@ def test_the_off_skip_comes_before_the_empty_url_fail_fast():
     assert on_without_url.returncode != 0 and "FAIL" in on_without_url.stdout, on_without_url
 
 
+def test_dev_keeps_the_redis_rate_limiter_and_prod_has_none_of_it():
+    """the rate limiter's backend is a Redis flag too (codex 4786): the switch leaves it, and its address, on dev; prod does not get it"""
+    dev = _run_env_vars_assembly("dev", "redis://example:6379").split(",")
+    assert "RATE_LIMIT_BACKEND=redis" in dev and "REDIS_URL=redis://example:6379" in dev
+    prod = _run_env_vars_assembly("prod", "").split(",")
+    assert not any(item.startswith(("RATE_LIMIT_BACKEND=", "REDIS_URL=")) for item in prod)
+
+
+def _assembled_skips(stack: str, gce: str, cloudrun: str) -> dict[str, str]:
+    """run the REAL «assemble substitutions» step of the workflow (from the `:-false` defaults to the line that writes the output) and read the two skip substitutions it sends"""
+    start = _WORKFLOW.index('V_REALTIME_GCE_SKIP="${V_REALTIME_GCE_SKIP:-false}"')
+    script = _WORKFLOW[start:_WORKFLOW.index('echo "substitutions=', start)] + 'printf "%s" "$SUBST"\n'
+    env = {**os.environ, "V_DEV_REALTIME_STACK": stack, "V_REALTIME_GCE_SKIP": gce, "V_REALTIME_CLOUDRUN_SKIP": cloudrun}
+    out = subprocess.run(["bash", "-c", script], check=True, capture_output=True, text=True, env=env).stdout
+    return {name: re.search(rf'{name}="([^"]*)"', out).group(1) for name in ("_REALTIME_GCE_SKIP", "_REALTIME_CLOUDRUN_SKIP")}
+
+
+def test_turning_the_stack_on_overrides_the_path_filter_skips():
+    """the path-filter ignores the workflow and cloudbuild.yaml, so the commit that flips the switch on can look unchanged to it: with the switch on both deploys run whatever the filter said"""
+    assert _assembled_skips("on", "true", "true") == {"_REALTIME_GCE_SKIP": "false", "_REALTIME_CLOUDRUN_SKIP": "false"}
+
+
+def test_with_the_stack_off_or_on_prod_the_path_filter_skips_pass_through():
+    for stack in ("off", ""):
+        assert _assembled_skips(stack, "true", "true") == {"_REALTIME_GCE_SKIP": "true", "_REALTIME_CLOUDRUN_SKIP": "true"}, stack
+    assert _assembled_skips("", "", "") == {"_REALTIME_GCE_SKIP": "false", "_REALTIME_CLOUDRUN_SKIP": "false"}  # prod: the gate step did not run
+
+
 def test_the_dev_database_url_is_direct_exactly_when_pgbouncer_is_off():
     assert re.search(r'echo "backend_db_pgbouncer=false"', _DEV)
     dev_secrets = _run_env_vars_assembly("dev", "", var="SECRETS_FLAG")
