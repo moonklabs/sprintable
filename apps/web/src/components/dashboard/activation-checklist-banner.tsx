@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -60,6 +61,14 @@ function isHiddenOn(pathname: string | null): boolean {
 // that mark is there, one line says so for DONE_LINE_MS and the mark goes (once). A browser that never showed it open (the server only knows it is complete: a new device, a long-finished account) shows nothing,
 // as before. The storage may be refused (private window · blocked): every read and write is guarded and a refused one simply shows nothing.
 const SEEN_OPEN_KEY = 'sprintable_activation_seen_open';
+// story 4780 (AC4): «seen» = drawn while the tab is VISIBLE. A phone that went to the background or turned its screen off while the reply was coming must not spend the mark (or the line's 10 s) on a line nobody
+// could look at: while hidden the mark stays and the clock stops; the line comes (once) when the tab is visible again. The effects look at `document.visibilityState` themselves too: a tab can hide between the render
+// that read it and the effect that spends the mark.
+const subscribeVisibility = (listen: () => void) => {
+  document.addEventListener('visibilitychange', listen);
+  return () => document.removeEventListener('visibilitychange', listen);
+};
+const readVisible = () => document.visibilityState === 'visible';
 export const ACTIVATION_DONE_LINE_MS = 10_000;
 function readMark(key: string): boolean {
   try { return window.localStorage.getItem(key) === '1'; } catch { return false; }
@@ -101,25 +110,44 @@ export function ActivationChecklistBanner() {
   const hidden = isHiddenOn(pathname);
   const seenOpenKey = orgId ? `${SEEN_OPEN_KEY}:${orgId}` : null;
   const [doneFor, setDoneFor] = useState<string | null>(null);
+  const pageVisible = useSyncExternalStore(subscribeVisibility, readVisible, () => true);
   useEffect(() => {
-    if (seenOpenKey && !hidden && state && state.all_complete !== true && state.scope_is_requested_org !== false) writeMark(seenOpenKey);
-  }, [seenOpenKey, hidden, state]);
+    if (seenOpenKey && !hidden && pageVisible && readVisible() && state && state.all_complete !== true && state.scope_is_requested_org !== false) writeMark(seenOpenKey);
+  }, [seenOpenKey, hidden, pageVisible, state]);
   // «complete» here is complete FOR THIS ORGANIZATION: an answer that judged another organization (`scope_is_requested_org === false`) is not this one's finish (the banner's own scope guard below says the same)
   const completeHere = allComplete && state?.scope_is_requested_org !== false;
+  // a «complete» the server's HINT gave (read again in the background) is not yet a finish: only an answer that has come in — or a completion this browser saw itself — spends the mark
+  // (the hint counts only for the organization it judged — the status hook applies the same scope to its seed)
+  const hintSeedPending = activationSeedFromHint === true && inActivationScope(activationOrgId, orgId);
+  const completeConfirmed = completeHere && (state !== null || !hintSeedPending);
   useEffect(() => {
-    if (!completeHere || hidden || !seenOpenKey || !readMark(seenOpenKey)) return;
+    if (!completeConfirmed || hidden || !pageVisible || !readVisible() || !seenOpenKey || !readMark(seenOpenKey)) return;
     clearMark(seenOpenKey);
     setDoneFor(seenOpenKey);
-  }, [completeHere, hidden, seenOpenKey]);
+  }, [completeConfirmed, hidden, pageVisible, seenOpenKey]);
   // the line is for the page and the organization it was set on: leaving either takes it down for good (coming back within the 10 s does not show it again — the mark is already spent)
+  // a functional update on purpose: in the same commit the finish effect above may have set the NEW organization's line — a check against the value this render saw would take that one down with the old one's
   useEffect(() => {
-    if (doneFor !== null && (hidden || doneFor !== seenOpenKey)) setDoneFor(null);
-  }, [doneFor, hidden, seenOpenKey]);
+    setDoneFor((current) => (current !== null && (hidden || current !== seenOpenKey) ? null : current));
+  }, [hidden, seenOpenKey]);
+  // the line's own clock runs only while the tab is visible (what was left is kept across a hide)
+  // the clock belongs to ONE line (an organization's): a line that replaces another (an organization switch) starts with its own full 10 s, never with what the old one had left
+  const doneClock = useRef<{ forOrg: string | null; left: number }>({ forOrg: null, left: ACTIVATION_DONE_LINE_MS });
   useEffect(() => {
-    if (!doneFor) return;
-    const timer = setTimeout(() => setDoneFor(null), ACTIVATION_DONE_LINE_MS);
-    return () => clearTimeout(timer);
-  }, [doneFor]);
+    if (!doneFor) { doneClock.current = { forOrg: null, left: ACTIVATION_DONE_LINE_MS }; return; }
+    if (doneClock.current.forOrg !== doneFor) doneClock.current = { forOrg: doneFor, left: ACTIVATION_DONE_LINE_MS };
+    if (!pageVisible || !readVisible()) return;
+    const startedAt = Date.now();
+    // the callback checks itself: a tab that hid in the last milliseconds, or a line that is by now another organization's, is not taken down by this timer
+    const timer = setTimeout(() => {
+      if (!readVisible()) return;
+      setDoneFor((current) => (current === doneFor ? null : current));
+    }, doneClock.current.left);
+    return () => {
+      clearTimeout(timer);
+      doneClock.current.left = Math.max(0, doneClock.current.left - (Date.now() - startedAt));
+    };
+  }, [doneFor, pageVisible]);
   const doneLine = doneFor !== null && doneFor === seenOpenKey && completeHere;
   const [navigatingToInstruction, setNavigatingToInstruction] = useState(false);
   const [instructionStartError, setInstructionStartError] = useState(false);
@@ -148,12 +176,22 @@ export function ActivationChecklistBanner() {
   ];
 
   if (allComplete) {
-    return doneLine && !hidden ? (
-      <Alert variant="success" data-testid="activation-done">
-        <AlertTitle>{t('doneTitle')}</AlertTitle>
-        <AlertDescription>{t('doneBody')}</AlertDescription>
-      </Alert>
-    ) : null;
+    // story 4780 (AC4, phone lap 10-26): the line is drawn on the screen itself — fixed to the viewport, in `document.body`, outside the shell's column. The reply arrives on the conversation screen, where the
+    // shell's column (and this banner's place at the top of it) is scrolled out of sight: the line was up for its 10 s above the visible part, the mark was spent, and the person never saw the checklist finish.
+    return doneLine && !hidden && typeof document !== 'undefined'
+      ? createPortal(
+          <div
+            className="pointer-events-none fixed inset-x-3 top-[max(0.75rem,env(safe-area-inset-top))] z-50 mx-auto max-w-md"
+            data-testid="activation-done-fixed"
+          >
+            <Alert variant="success" data-testid="activation-done" className="shadow-md">
+              <AlertTitle>{t('doneTitle')}</AlertTitle>
+              <AlertDescription>{t('doneBody')}</AlertDescription>
+            </Alert>
+          </div>,
+          document.body,
+        )
+      : null;
   }
   if (hidden) return null; // story #4432 — after every hook (hooks order unchanged)
   // story #4032 — "완주해서 필요 없다"(위 allComplete)와 "아직 모른다"(여기, fetch
