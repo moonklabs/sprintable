@@ -546,6 +546,32 @@ describe('[4714] branch 5 — the result lines', () => {
     expect(byId('onboarding-phone-off')).not.toBeNull();
   });
 
+  it('[SID:4714] a start the shell refuses because the agent is no longer on the list (the policy closed) → the list is read again and the screen says why; never «tap again»', async () => {
+    signAnswer = { id: 's', ok: false, code: 'agent_not_found' };
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    // the person's own start list, read again by the press's outcome: the agent is left out by the agent's message policy and nothing is left
+    world.startable = { remote_control: true, computers: [{ ...computer({ agents: [] }), agents_hidden: 'message_policy' as const }] };
+    const reads = () => fetchWithAuth.mock.calls.filter((c) => String(c[0]).startsWith('/api/desktop/startable')).length;
+    const before = reads();
+    await press(byId('onboarding-phone-start-go'));
+    expect(reads()).toBeGreaterThan(before); // read again
+    expect(byId('onboarding-phone-no-agent')?.textContent).toBe('윤재의 맥북의 에이전트는 대화가 허용된 사람만 시작할 수 있어요 — 에이전트를 만든 사람이나 관리자에게 허용을 부탁해 주세요.');
+    expect(byId('onboarding-phone-result')).toBeNull();
+    expect(text()).not.toContain((koMessages as unknown as { onboarding: { phone: { result: { failed: string } } } }).onboarding.phone.result.failed);
+  });
+
+  it('[SID:4714] the server refusing the same start (403 agent_message_policy_denied) reads the list again too — and nothing was made', async () => {
+    await screen();
+    await pickFromSheet('onboarding-phone-project', '결제 개편');
+    world.post = json({ error: { code: 'agent_message_policy_denied' } }, 403);
+    world.startable = { remote_control: true, computers: [{ ...computer({ agents: [] }), agents_hidden: 'message_policy' as const }] };
+    await press(byId('onboarding-phone-start-go'));
+    expect(byId('onboarding-phone-no-agent')?.textContent).toContain('대화가 허용된 사람만 시작할 수 있어요');
+    expect(byId('onboarding-phone-result')).toBeNull();
+    expect(assigned).toEqual([]); // no conversation was opened
+  });
+
   it('unknown keeps the press and shows [결과 확인]; pressing it follows the same command and signs nothing new', async () => {
     world.post = json({ error: { code: 'INTERNAL_ERROR' } }, 500);
     await start();

@@ -238,6 +238,7 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
     setOutcome(o);
     pending.current = o.kind === 'unknown' ? o.pending : null;
     if (o.kind === 'remote_off') onRemoteOff(); // the screen returns to «원격 제어가 꺼져 있어요»
+    if (o.kind === 'list_changed') onRemoteOff(); // story 4714: the pick is gone from the list (the agent's message policy changed · it left): read the list again — the screen then says what is true (the policy line · the plain list), never «tap again» for a start that cannot work
   };
   // ONE stop signal per press (a `Flow`): the bridge call, the post, the command poll, the wait for the session to stand and the move all look at the same `stopped`.
   // A way out · the end of this screen stop it; what a stopped flow gets back later does nothing (no request · no drawing · no move).

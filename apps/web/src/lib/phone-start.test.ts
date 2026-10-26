@@ -55,7 +55,7 @@ describe('[4714] startOnPhone — what the web asks and posts', () => {
   it.each([
     ['cancelled', 'cancelled'], ['biometric_required', 'biometric_required'], ['no_screen_lock', 'no_screen_lock'], ['key_invalidated', 'key_invalidated'],
     ['not_registered', 'not_registered'], ['signed_out', 'signed_out'], ['remote_control_off', 'remote_off'], ['computer_not_found', 'not_paired'],
-    ['device_unreachable', 'unreachable'], ['no_folder', 'no_folder'], ['agent_not_found', 'failed'], ['not_allowed', 'failed'], ['sign_failed', 'failed'], ['something_new', 'failed'],
+    ['device_unreachable', 'unreachable'], ['no_folder', 'no_folder'], ['agent_not_found', 'list_changed'], ['not_allowed', 'failed'], ['sign_failed', 'failed'], ['something_new', 'failed'],
   ])('the shell says %s → %s, and nothing is posted', async (code, kind) => {
     const calls = server(json(201, {}));
     await expect(startOnPhone(input, deps({ id: 'w', ok: false, code }))).resolves.toEqual({ kind });
@@ -75,6 +75,8 @@ describe('[4714] the server\'s refusals and the command\'s ends', () => {
     [409, { error: { code: 'device_unreachable' } }, 'unreachable'], [409, { error: { code: 'remote_control_off' } }, 'remote_off'],
     [409, { error: { code: 'phone_not_paired' } }, 'not_paired'], [409, { error: { code: 'no_folder' } }, 'no_folder'],
     [404, { error: { code: 'computer_not_found' } }, 'failed'], [403, { error: { code: 'not_allowed_to_command' } }, 'failed'],
+    // story 4714: a start the server refuses because the list the person pressed in is not the list now — a fresh read says why, «tap again» cannot
+    [403, { error: { code: 'agent_message_policy_denied' } }, 'list_changed'], [404, { error: { code: 'agent_not_found' } }, 'list_changed'],
     [422, { code: 'schema' }, 'failed'], [401, {}, 'failed'],
   ])('post %s %j → %s (refused before anything was made)', async (status, body, kind) => {
     server(json(status, body));
@@ -157,6 +159,17 @@ describe('[4714] [결과 확인] never signs again and never starts twice', () =
     const followed = server(json(500), [json(200, { state: 'done' })]);
     await expect(checkStart({ ...pending, commandId: CMD }, d)).resolves.toEqual({ kind: 'started' });
     expect(followed.every((c) => c.init?.method !== 'POST')).toBe(true); // an id → followed, not re-posted
+  });
+
+  it('[SID:4714] [결과 확인] after a lost answer, refused because the list moved on (403 agent_message_policy_denied · 404 agent_not_found): list_changed — the screen reads the list again, which shows whether the agent runs (codex review)', async () => {
+    server(() => { throw new Error('network'); });
+    const first = await startOnPhone(input, deps(signed));
+    const pending = (first as { pending: Pending }).pending;
+    for (const [status, code] of [[403, 'agent_message_policy_denied'], [404, 'agent_not_found']] as const) {
+      const again = server(json(status, { error: { code } }));
+      await expect(checkStart(pending, deps(signed))).resolves.toEqual({ kind: 'list_changed' });
+      expect(again.filter((c) => c.init?.method === 'POST')).toHaveLength(1); // the same post again — nothing else asked, nothing followed (no command id is known)
+    }
   });
 });
 
