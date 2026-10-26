@@ -1,7 +1,7 @@
 """story 4790(INFRA-DIET ⑤ · AC1) — Artifact Registry 정리 정책의 «지움 0» 시험(infra/check_ar_cleanup_keeps_in_use.py).
 
 핵심 표본: **기본 정책만 걸면 사용 중이면서 오래된 이미지(예: 사람이 직접 배포한 prod MIG가 부팅 때 당기는 `backend:<옛 sha>`)가 지워진다.**
-생성 정책(`keep-in-use` 규칙 채움)은 그것을 남긴다. 게이트가 실제로 빨개질 수 있다는 것도 함께 보인다(양성대조)."""
+생성 정책(`keep-in-use` 규칙 채움)은 그것을 남긴다. 게이트가 실제로 빨개질 수 있고(양성대조), 모르면 실패한다는 것(불완전 입력 · 잘린 덤프 · 실패한 실행이 남긴 정책 파일)도 함께 보인다."""
 from __future__ import annotations
 
 import json
@@ -45,23 +45,65 @@ def _versions() -> list[gate.Version]:
     return gate.load_versions(_images("backend", 60) + _images("frontend", 5))
 
 
-def test_refs_in_picks_tag_and_digest_forms_and_ignores_other_registries():
+def _service(name: str, revision: str, image: str) -> dict:
+    return {"metadata": {"name": name}, "status": {"traffic": [{"revisionName": revision, "percent": 100}], "latestReadyRevisionName": revision},
+            "spec": {"template": {"spec": {"containers": [{"image": image}]}}}}
+
+
+def _revision(name: str, image: str, image_digest: str | None = None) -> dict:
+    rev: dict = {"metadata": {"name": name}, "spec": {"containers": [{"image": image}]}}
+    if image_digest:
+        rev["status"] = {"imageDigest": image_digest}
+    return rev
+
+
+class Dumps:
+    """a full, consistent set of the read-only dumps; tests change one thing at a time"""
+
+    def __init__(self, tmp_path: Path):
+        self.dir = tmp_path
+        self.images = _images("backend", 60)
+        self.services = [_service("sprintable-backend-prod", "rev-2", f"{HOST}/backend:backend-tag2")]
+        self.revisions = [_revision("rev-2", f"{HOST}/backend:backend-tag2")]
+        self.jobs = [{"metadata": {"name": "migrate"}, "spec": {"template": {"spec": {"template": {"spec": {"containers": [{"image": f"{HOST}/backend:backend-tag3"}]}}}}}}]
+        self.mig = {"startup": f"docker run {HOST}/backend:backend-tag45"}
+        self.out = tmp_path / "policy.json"
+
+    def argv(self, *extra_args: str, with_mig: bool = True) -> list[str]:
+        files = {"images": self.images, "services": self.services, "revisions": self.revisions, "jobs": self.jobs}
+        paths = {}
+        for key, data in files.items():
+            paths[key] = self.dir / f"{key}.json"
+            paths[key].write_text(json.dumps(data))
+        argv = ["--images", str(paths["images"]), "--run-services", str(paths["services"]), "--run-revisions", str(paths["revisions"]),
+                "--run-jobs", str(paths["jobs"]), "--emit-policy", str(self.out), "--now", NOW.isoformat(), *extra_args]
+        if with_mig:
+            mig = self.dir / "mig.json"
+            mig.write_text(json.dumps(self.mig))
+            argv += ["--extra", str(mig)]
+        return argv
+
+
+def test_refs_in_picks_tag_digest_and_bare_digest_forms_and_ignores_other_registries():
     text = json.dumps({
         "image": f"{HOST}/backend:abc123",
         "pinned": f"{HOST}/backend@{_digest(7)}",
+        "resolved": _digest(8),  # a bare digest (what a revision's status.imageDigest can be)
         "sdk": "gcr.io/google.com/cloudsdktool/cloud-sdk:slim",
     })
     refs = gate.refs_in(text)
-    assert {(r["package"], r["tag"], r["digest"]) for r in refs} == {("backend", "abc123", None), ("backend", None, _digest(7))}
+    assert {(r["package"], r["tag"], r["digest"]) for r in refs} == {
+        ("backend", "abc123", None), ("backend", None, _digest(7)), (None, None, _digest(8)),
+    }
 
 
 def test_base_policy_alone_deletes_an_old_image_that_a_mig_template_still_pulls_at_boot():
     versions = _versions()
     # the prod MIG is deployed by hand: its template can name a commit far older than the newest 30 — here backend-tag45, 45 days old
     mig_template = {"properties": {"metadata": {"items": [{"key": "startup-script", "value": f"docker run -d {HOST}/backend:backend-tag45 \\"}]}}}
-    refs, _ = gate.collect_in_use_refs(extra=[mig_template])
+    refs, _warnings, problems = gate.collect_in_use_refs(extra=[mig_template])
     in_use, missing = gate.resolve_in_use(refs, versions)
-    assert in_use == {("backend", _digest(45))} and not missing
+    assert in_use == {("backend", _digest(45))} and not missing and not problems
 
     _deleted, hit = gate.check(versions, in_use, _base(), NOW)
     assert hit == in_use, "the base policy alone must delete it — that is why keep-in-use exists"
@@ -82,60 +124,102 @@ def test_most_recent_versions_counts_per_package_and_old_images_go():
 
 
 def test_only_serving_revisions_count_as_in_use_not_every_old_revision():
-    versions = _versions()
-    services = [{"metadata": {"name": "sprintable-backend-prod"}, "status": {"traffic": [{"revisionName": "rev-2", "percent": 100}], "latestReadyRevisionName": "rev-2"},
-                 "spec": {"template": {"spec": {"containers": [{"image": f"{HOST}/backend:backend-tag2"}]}}}}]
-    revisions = [
-        {"metadata": {"name": "rev-1"}, "spec": {"containers": [{"image": f"{HOST}/backend:backend-tag50"}]}},
-        {"metadata": {"name": "rev-2"}, "spec": {"containers": [{"image": f"{HOST}/backend:backend-tag2"}]}},
-    ]
-    refs, warnings = gate.collect_in_use_refs(services, revisions)
-    in_use, _ = gate.resolve_in_use(refs, versions)
-    assert in_use == {("backend", _digest(2))} and not warnings  # rev-1 serves nothing: its 50-day-old image is not protected
+    services = [_service("sprintable-backend-prod", "rev-2", f"{HOST}/backend:backend-tag2")]
+    revisions = [_revision("rev-1", f"{HOST}/backend:backend-tag50"), _revision("rev-2", f"{HOST}/backend:backend-tag2")]
+    refs, warnings, problems = gate.collect_in_use_refs(services, revisions)
+    in_use, _ = gate.resolve_in_use(refs, _versions())
+    assert in_use == {("backend", _digest(2))} and not warnings and not problems  # rev-1 serves nothing: its 50-day-old image is not protected
 
 
 def test_without_a_service_list_every_revision_counts_as_in_use():
-    revisions = [{"metadata": {"name": "rev-1"}, "spec": {"containers": [{"image": f"{HOST}/backend:backend-tag50"}]}}]
-    refs, warnings = gate.collect_in_use_refs(None, revisions)
+    revisions = [_revision("rev-1", f"{HOST}/backend:backend-tag50")]
+    refs, warnings, _problems = gate.collect_in_use_refs(None, revisions)
     in_use, _ = gate.resolve_in_use(refs, _versions())
     assert in_use == {("backend", _digest(50))} and warnings  # the safe side, said out loud
 
 
-def test_cli_exit_codes(tmp_path, capsys, monkeypatch):
-    images = tmp_path / "images.json"
-    images.write_text(json.dumps(_images("backend", 60)))
-    mig = tmp_path / "mig.json"
-    mig.write_text(json.dumps({"startup": f"docker run {HOST}/backend:backend-tag45"}))
-    out = tmp_path / "policy.json"
-    argv = ["--images", str(images), "--extra", str(mig), "--emit-policy", str(out), "--now", NOW.isoformat()]
+def test_a_moved_tag_is_still_protected_by_the_revisions_resolved_digest(tmp_path):
+    """Cloud Run deployed `backend:latest`; the tag has since moved to a newer image. The revision still runs the OLD digest (`status.imageDigest`) — that is the image a new instance of
+    that revision pulls, and it is 60 days old. A tag-only lookup would protect the new image and delete the old one."""
+    d = Dumps(tmp_path)
+    old, new = _digest(900), _digest(901)
+    d.images += [
+        {"package": f"{HOST}/backend", "version": old, "tags": [], "createTime": (NOW - timedelta(days=60)).isoformat()},
+        {"package": f"{HOST}/backend", "version": new, "tags": ["latest"], "createTime": (NOW - timedelta(days=1)).isoformat()},
+    ]
+    d.services = [_service("sprintable-backend-prod", "rev-9", f"{HOST}/backend:latest")]
+    d.revisions = [_revision("rev-9", f"{HOST}/backend:latest", image_digest=old)]
+    assert gate.main(d.argv()) == 0
+    kept = json.loads(d.out.read_text())[0]["condition"]["versionNamePrefixes"]
+    assert old in kept and new in kept
 
-    assert gate.main(argv) == 0
-    written = json.loads(out.read_text())
-    assert written[0]["name"] == "keep-in-use" and written[0]["condition"]["versionNamePrefixes"] == [_digest(45)]
+    # without the revision's digest the old image would go: prove the dump is what protects it
+    d.revisions = [_revision("rev-9", f"{HOST}/backend:latest")]
+    assert gate.main(d.argv()) == 0
+    assert old not in json.loads(d.out.read_text())[0]["condition"]["versionNamePrefixes"]
 
-    # the gate can go red: hand it a policy builder that forgets keep-in-use (the thing this gate exists to catch)
+
+def test_cli_ok_writes_the_generated_policy(tmp_path):
+    d = Dumps(tmp_path)
+    assert gate.main(d.argv("--expect-services", "1", "--expect-jobs", "1")) == 0
+    written = json.loads(d.out.read_text())
+    assert written[0]["name"] == "keep-in-use"
+    assert {_digest(2), _digest(3), _digest(45)} <= set(written[0]["condition"]["versionNamePrefixes"])  # service tag · job tag · MIG tag
+
+
+def test_cli_the_gate_can_go_red_and_leaves_no_policy_behind(tmp_path, monkeypatch, capsys):
+    d = Dumps(tmp_path)
+    assert gate.main(d.argv()) == 0 and d.out.exists()
+    # a policy builder that forgets keep-in-use (the thing this gate exists to catch): exit 1, and the earlier policy file is removed
     monkeypatch.setattr(gate, "build_policy", lambda base, in_use: base)
-    assert gate.main(argv) == 1
+    assert gate.main(d.argv()) == 1
     assert "PROBLEM" in capsys.readouterr().out
-    monkeypatch.undo()
+    assert not d.out.exists(), "a failed run must not leave an applicable policy file behind"
+
+
+def test_cli_incomplete_inputs_fail_closed_and_write_nothing(tmp_path, capsys):
+    d = Dumps(tmp_path)
+    assert gate.main(d.argv()) == 0 and d.out.exists()
 
     # an in-use reference the listing does not contain: refuse to promise «지움 0»
-    mig.write_text(json.dumps({"startup": f"docker run {HOST}/backend:not-in-the-listing"}))
-    assert gate.main(argv) == 3
+    d.mig = {"startup": f"docker run {HOST}/backend:not-in-the-listing"}
+    assert gate.main(d.argv()) == 3 and not d.out.exists()
 
-    # empty listing = bad input, never a green
-    images.write_text("[]")
-    assert gate.main(argv) == 2
+    # the service serves rev-2 but the revision dump has been cut and lacks it
+    d = Dumps(tmp_path)
+    d.revisions = [_revision("rev-1", f"{HOST}/backend:backend-tag50")]
+    assert gate.main(d.argv()) == 3 and not d.out.exists()
+    assert "rev-2" in capsys.readouterr().out
+
+    # a service whose block carries no image reference at all
+    d = Dumps(tmp_path)
+    d.services = [{"metadata": {"name": "sprintable-backend-prod"}, "status": {"traffic": [{"revisionName": "rev-2"}], "latestReadyRevisionName": "rev-2"}}]
+    assert gate.main(d.argv()) == 3 and not d.out.exists()
 
 
-def test_no_in_use_reference_at_all_is_bad_input_not_a_green(tmp_path):
-    """«지움 0»을 빈 입력 위에서 약속하지 않는다: 서비스 · 리비전 · job · 템플릿 어디에서도 사용 중 이미지가 안 잡히면 exit 2."""
-    images = tmp_path / "images.json"
-    images.write_text(json.dumps(_images("backend", 60)))
-    empty = tmp_path / "empty.json"
-    empty.write_text("[]")
-    assert gate.main(["--images", str(images), "--run-services", str(empty), "--now", NOW.isoformat()]) == 2
-    assert gate.main(["--images", str(images), "--now", NOW.isoformat()]) == 2  # no in-use dump given at all
+def test_cli_bad_input_is_exit_2_never_a_green(tmp_path):
+    d = Dumps(tmp_path)
+    # a dump with a different count than the operator knows (cut by --limit or a wrong region)
+    assert gate.main(d.argv("--expect-services", "14")) == 2 and not d.out.exists()
+    assert gate.main(d.argv("--expect-jobs", "17")) == 2
+    # no gateway template at all, unless said on purpose
+    assert gate.main(d.argv(with_mig=False)) == 2
+    assert gate.main(d.argv("--no-extra", with_mig=False)) == 0
+    # empty listing; empty everything in use
+    d.images = []
+    assert gate.main(d.argv()) == 2
+    d = Dumps(tmp_path)
+    d.services, d.revisions, d.jobs, d.mig = [], [], [], {}
+    assert gate.main(d.argv()) == 2
+
+
+def test_the_three_run_dumps_are_required_arguments(tmp_path):
+    d = Dumps(tmp_path)
+    argv = d.argv()
+    i = argv.index("--run-jobs")
+    with pytest.raises(SystemExit) as err:
+        gate.main(argv[:i] + argv[i + 2:])
+    assert err.value.code == 2
 
 
 @pytest.mark.parametrize("text,seconds", [("2592000s", 2592000), ("30d", 2592000), ("12h", 43200), ("90", 90)])

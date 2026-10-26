@@ -2,25 +2,29 @@
 """story 4790(INFRA-DIET ⑤ · AC1) — Artifact Registry 정리 정책의 «지움 0» 시험(gcloud 불요 · 읽기 전용 JSON만 읽는다).
 
 정리 정책을 건 뒤에도 **지금 쓰는 이미지는 하나도 안 지워져야** 한다. 이 스크립트는 PO가 모은 JSON으로 «정책이 지울 이미지 집합»을 계산하고
-사용 중 이미지와 겹치는지를 본다. 겹치면 exit 1.
+사용 중 이미지와 겹치는지를 본다. 지운 이미지는 복구되지 않으므로 **모르면 실패한다**(초록은 «다 보고 겹침 0»일 때만).
 
 사용 중인 것(이 저장소에서 «지우면 서비스가 못 뜨는» 것):
   · Cloud Run 서비스가 트래픽을 주는 리비전과 최신 준비 · 최신 생성 리비전의 이미지, 서비스 템플릿 이미지(새 인스턴스는 시작 때 이미지를 당겨 온다)
+    — 리비전의 `status.imageDigest`(태그로 배포했어도 그 리비전이 실제로 쥔 digest)까지 센다
   · Cloud Run job의 이미지
   · GCE MIG 인스턴스 템플릿이 가리키는 `backend:<커밋 sha>`(VM이 부팅 · 자동 복구될 때 그 태그를 `docker pull`한다 —
     prod MIG는 사람이 직접 배포하므로 커밋이 오래됐을 수 있다. backend/scripts/deploy_realtime_gce.sh IMAGE)
 
-입력(전부 `gcloud … --format=json` 출력. 키 이름을 추측하지 않고 이미지 참조 문자열을 정규식으로 줍는다):
-  --images        gcloud artifacts docker images list <repo> --include-tags --format=json
-  --run-services  gcloud run services list --region=… --format=json
-  --run-revisions gcloud run revisions list --region=… --format=json
-  --run-jobs      gcloud run jobs list --region=… --format=json
-  --extra         그 밖의 JSON(MIG 인스턴스 템플릿 등, 여러 번)
+입력(전부 `gcloud … --format=json` 출력. 키 이름을 추측하지 않고 이미지 참조 문자열(태그 · digest · 맨 digest)을 정규식으로 줍는다):
+  --images        gcloud artifacts docker images list <repo> --include-tags --format=json        (--limit 금지: 잘린 목록은 거짓 초록을 만든다)
+  --run-services  gcloud run services list --region=… --format=json                              (필수)
+  --run-revisions gcloud run revisions list --region=… --format=json                             (필수)
+  --run-jobs      gcloud run jobs list --region=… --format=json                                  (필수)
+  --extra         그 밖의 JSON(MIG 인스턴스 템플릿 등, 여러 번). 하나는 필수(MIG가 정말 없으면 --no-extra)
+  --expect-services N · --expect-jobs N   덤프 개수를 알면(서비스 14 · job 17) 맞는지 본다(잘린 덤프를 잡는다)
 
-산출: `--emit-policy PATH`로 기본 정책(infra/artifact-registry/cleanup-policy.base.json)에 `keep-in-use` Keep 규칙을 채운 정책을 쓴다.
-PO는 **이 생성본**을 dry-run → 적용한다(기본 정책만 적용하면 사용 중이면서 오래된 이미지가 지워질 수 있다).
+산출: `--emit-policy PATH`로 기본 정책(infra/artifact-registry/cleanup-policy.base.json)에 `keep-in-use` Keep 규칙을 채운 정책을 쓴다 —
+**통과(exit 0)일 때만** 쓰고, 실패하면 이전 실행이 남긴 같은 이름의 파일을 지운다(실패한 입력으로 만든 정책이 적용되지 않게).
+PO는 이 생성본을 dry-run → 적용한다(기본 정책만 적용하면 사용 중이면서 오래된 이미지가 지워질 수 있다).
 
-exit code: 0=지움 0, 1=사용 중 이미지가 지워진다, 2=입력 오류, 3=사용 중 참조를 AR 목록에서 못 찾음(목록이 잘렸거나 다른 저장소 — 안전하게 실패).
+exit code: 0=지움 0 · 1=사용 중 이미지가 지워진다 · 2=입력 오류(비었다 · 필수 덤프 없음 · 개수가 안 맞음) ·
+          3=불완전(사용 중 참조를 AR 목록에서 못 찾음 · 서빙 리비전 덤프 누락 · 이미지 참조 없는 서비스/job) — 안전하게 실패.
 """
 from __future__ import annotations
 
@@ -39,6 +43,8 @@ _IMAGE_REF = re.compile(
     r"(?P<host>[a-z0-9-]+-docker\.pkg\.dev)/(?P<project>[a-z0-9-]+)/(?P<repo>[a-z0-9._-]+)/(?P<package>[a-z0-9._-]+(?:/[a-z0-9._-]+)*?)"
     r"(?::(?P<tag>[A-Za-z0-9_][A-Za-z0-9_.-]*)|@(?P<digest>sha256:[0-9a-f]{64}))"
 )
+# 맨 digest(`status.imageDigest`가 이 꼴로 올 수 있다): 위 전체 참조의 `@sha256:…` 꼬리는 제외한다
+_BARE_DIGEST = re.compile(r"(?<![@0-9A-Za-z:/_.-])(sha256:[0-9a-f]{64})")
 
 
 class Version:
@@ -52,6 +58,9 @@ class Version:
 
     def key(self) -> tuple[str, str]:
         return (self.package, self.digest)
+
+
+Ref = dict[str, "str | None"]
 
 
 def _parse_time(value: Any) -> datetime:
@@ -91,28 +100,24 @@ def load_versions(data: Any) -> list[Version]:
     return out
 
 
-def refs_in(text: str) -> list[dict[str, str | None]]:
-    """문자열 안의 AR 이미지 참조를 전부 줍는다(태그 또는 digest)."""
-    return [
+def refs_in(text: str) -> list[Ref]:
+    """문자열 안의 이미지 참조를 전부 줍는다: 전체 참조(태그 또는 digest)와 맨 digest(package=None — 어느 패키지든 그 digest)."""
+    refs: list[Ref] = [
         {"package": _short_package(f"{m['host']}/{m['project']}/{m['repo']}/{m['package']}"), "tag": m["tag"], "digest": m["digest"]}
         for m in _IMAGE_REF.finditer(text)
     ]
-
-
-def _walk(obj: Any) -> Iterable[Any]:
-    yield obj
-    if isinstance(obj, dict):
-        for v in obj.values():
-            yield from _walk(v)
-    elif isinstance(obj, list):
-        for v in obj:
-            yield from _walk(v)
+    refs += [{"package": None, "tag": None, "digest": m.group(1)} for m in _BARE_DIGEST.finditer(text)]
+    return refs
 
 
 def _items(data: Any) -> list[dict]:
     if isinstance(data, dict):
         data = data.get("items", [data])
     return [d for d in data if isinstance(d, dict)] if isinstance(data, list) else []
+
+
+def _name_of(obj: dict) -> str:
+    return str((obj.get("metadata") or {}).get("name") or obj.get("name") or "")
 
 
 def _serving_revision_names(services: Any) -> set[str]:
@@ -131,47 +136,71 @@ def _serving_revision_names(services: Any) -> set[str]:
 
 def collect_in_use_refs(
     services: Any = None, revisions: Any = None, jobs: Any = None, extra: Iterable[Any] = ()
-) -> tuple[list[dict[str, str | None]], list[str]]:
-    """(사용 중 이미지 참조 목록, 경고). 서비스 JSON이 있으면 «서빙 중 리비전»만, 없으면 모든 리비전을 사용 중으로 본다(안전한 쪽)."""
-    refs: list[dict[str, str | None]] = []
+) -> tuple[list[Ref], list[str], list[str]]:
+    """(사용 중 이미지 참조 목록, 경고, 불완전한 까닭들). 불완전한 까닭이 하나라도 있으면 «지움 0»을 약속하지 않는다(exit 3).
+    서비스 JSON이 있으면 «서빙 중 리비전»만, 없으면 모든 리비전을 사용 중으로 본다(안전한 쪽)."""
+    refs: list[Ref] = []
     warnings: list[str] = []
-    if services is not None:
-        refs += refs_in(json.dumps(services))  # 서비스 템플릿 이미지
+    problems: list[str] = []
+    for svc in _items(services) if services is not None else []:
+        found = refs_in(json.dumps(svc))
+        if not found:
+            problems.append(f"서비스 {_name_of(svc) or '?'}에서 이미지 참조를 못 찾음")
+        refs += found
     if revisions is not None:
+        revs = _items(revisions)
         serving = _serving_revision_names(services) if services is not None else set()
         if serving:
-            for rev in _items(revisions):
-                if (rev.get("metadata") or {}).get("name") in serving:
-                    refs += refs_in(json.dumps(rev))
+            have = {_name_of(r) for r in revs}
+            for name in sorted(serving - have):
+                problems.append(f"서빙 중 리비전 {name}이 리비전 덤프에 없음(덤프가 잘렸거나 다른 지역)")
+            for rev in revs:
+                if _name_of(rev) in serving:
+                    found = refs_in(json.dumps(rev))
+                    if not found:
+                        problems.append(f"서빙 중 리비전 {_name_of(rev)}에서 이미지 참조를 못 찾음")
+                    refs += found
         else:
             warnings.append("서비스 JSON에서 서빙 중 리비전을 못 읽어 모든 리비전을 사용 중으로 셌다(안전한 쪽).")
             refs += refs_in(json.dumps(revisions))
-    if jobs is not None:
-        refs += refs_in(json.dumps(jobs))
+    for job in _items(jobs) if jobs is not None else []:
+        found = refs_in(json.dumps(job))
+        if not found:
+            problems.append(f"job {_name_of(job) or '?'}에서 이미지 참조를 못 찾음")
+        refs += found
     for blob in extra:
         refs += refs_in(json.dumps(blob))
-    return refs, warnings
+    return refs, warnings, problems
 
 
-def resolve_in_use(refs: list[dict[str, str | None]], versions: list[Version]) -> tuple[set[tuple[str, str]], list[dict[str, str | None]]]:
-    """참조(태그 · digest) → AR의 (package, digest). 못 찾은 참조는 따로 돌려준다."""
+def resolve_in_use(refs: list[Ref], versions: list[Version]) -> tuple[set[tuple[str, str]], list[Ref]]:
+    """참조(태그 · digest · 맨 digest) → AR의 (package, digest). 못 찾은 참조는 따로 돌려준다.
+    태그는 «지금» AR의 태그 대응으로만 풀린다 — 옮겨진 태그의 옛 digest는 리비전의 `status.imageDigest`(맨 digest)가 막아 준다."""
     by_digest = {v.key(): v for v in versions}
+    by_digest_any: dict[str, list[Version]] = {}
     by_tag: dict[tuple[str, str], list[Version]] = {}
     for v in versions:
+        by_digest_any.setdefault(v.digest, []).append(v)
         for tag in v.tags:
             by_tag.setdefault((v.package, tag), []).append(v)
     found: set[tuple[str, str]] = set()
-    missing: list[dict[str, str | None]] = []
+    missing: list[Ref] = []
     for ref in refs:
-        pkg = ref["package"] or ""
-        if ref["digest"]:
-            key = (pkg, ref["digest"])
+        pkg = ref["package"]
+        if ref["digest"] and pkg is None:  # 맨 digest: 패키지를 모른다 — 그 digest를 가진 모든 판
+            hit = by_digest_any.get(ref["digest"])
+            if hit:
+                found.update(v.key() for v in hit)
+            else:
+                missing.append(ref)
+        elif ref["digest"]:
+            key = (pkg or "", ref["digest"])
             if key in by_digest:
                 found.add(key)
             else:
                 missing.append(ref)
         elif ref["tag"]:
-            hit = by_tag.get((pkg, ref["tag"]))
+            hit = by_tag.get((pkg or "", ref["tag"]))
             if hit:
                 found.update(v.key() for v in hit)
             else:
@@ -255,28 +284,49 @@ def _load(path: str | None) -> Any:
     return json.loads(Path(path).read_text())
 
 
+def _drop_stale(path: str | None) -> None:
+    """실패한 실행이 이전 성공의 정책 파일을 «현재 입력의 통과본»인 척 남기지 않게 한다."""
+    if path:
+        try:
+            Path(path).unlink()
+        except FileNotFoundError:
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--images", required=True)
-    ap.add_argument("--run-services")
-    ap.add_argument("--run-revisions")
-    ap.add_argument("--run-jobs")
+    ap.add_argument("--run-services", required=True)
+    ap.add_argument("--run-revisions", required=True)
+    ap.add_argument("--run-jobs", required=True)
     ap.add_argument("--extra", action="append", default=[])
+    ap.add_argument("--no-extra", action="store_true", help="MIG 인스턴스 템플릿이 정말 하나도 없을 때만")
+    ap.add_argument("--expect-services", type=int)
+    ap.add_argument("--expect-jobs", type=int)
     ap.add_argument("--base-policy", default=str(_BASE_POLICY))
     ap.add_argument("--emit-policy")
     ap.add_argument("--now")
     args = ap.parse_args(argv)
+    _drop_stale(args.emit_policy)
+    if not args.extra and not args.no_extra:
+        print("입력 오류: --extra(MIG 인스턴스 템플릿 JSON)가 하나도 없다. VM이 부팅 때 당기는 이미지를 못 본다 — 템플릿이 정말 없으면 --no-extra.")
+        return 2
     try:
         versions = load_versions(_load(args.images))
         base = json.loads(Path(args.base_policy).read_text())
         extra = [json.loads(Path(p).read_text()) for p in args.extra]
-        refs, warnings = collect_in_use_refs(_load(args.run_services), _load(args.run_revisions), _load(args.run_jobs), extra)
+        services, revisions, jobs = _load(args.run_services), _load(args.run_revisions), _load(args.run_jobs)
     except (OSError, ValueError, KeyError) as err:
         print(f"입력 오류: {err}")
         return 2
     if not versions:
         print("입력 오류: AR 이미지 목록이 비었다.")
         return 2
+    for label, data, expect in (("서비스", services, args.expect_services), ("job", jobs, args.expect_jobs)):
+        if expect is not None and len(_items(data)) != expect:
+            print(f"입력 오류: {label} 덤프가 {len(_items(data))}개인데 {expect}개여야 한다(덤프가 잘렸다).")
+            return 2
+    refs, warnings, problems = collect_in_use_refs(services, revisions, jobs, extra)
     if not refs:
         # 사용 중 참조가 하나도 안 잡히면 «지움 0»은 빈 입력 위의 거짓 초록이다(서비스 JSON이 비었거나 형식이 다름) — 절대 통과시키지 않는다.
         print("입력 오류: 사용 중 이미지 참조가 하나도 안 잡혔다(서비스 · 리비전 · job · 템플릿 JSON이 비었거나 형식이 다르다).")
@@ -291,19 +341,21 @@ def main(argv: list[str] | None = None) -> int:
     print(f"AR 이미지 {len(versions)}개 · 사용 중 참조 {len(refs)}건 → 사용 중 digest {len(in_use)}개")
     print(f"기본 정책만: 지움 {len(base_delete)}개 중 사용 중 {len(base_hit)}개  ← 0이 아니면 생성본의 keep-in-use가 필요한 까닭")
     print(f"생성 정책:   지움 {len(would_delete)}개 중 사용 중 {len(hit)}개")
-    if args.emit_policy:
-        Path(args.emit_policy).write_text(json.dumps(policy, indent=2, ensure_ascii=False) + "\n")
-        print(f"생성 정책을 썼다: {args.emit_policy}")
     if hit:
         print("PROBLEM — 지워지는 사용 중 이미지:")
         for pkg, digest in sorted(hit):
             print(f"  - {pkg} {digest}")
         return 1
-    if missing:
-        print(f"사용 중 참조 {len(missing)}건을 AR 목록에서 못 찾음(목록이 잘렸거나 다른 저장소) — 지움 0을 확정할 수 없다:")
+    if missing or problems:
+        print("불완전 — «지움 0»을 약속할 수 없다(정책 파일도 쓰지 않았다):")
         for ref in missing:
-            print(f"  - {ref['package']} {ref['tag'] or ref['digest']}")
+            print(f"  - 사용 중 참조를 AR 목록에서 못 찾음: {ref['package'] or '?'} {ref['tag'] or ref['digest']}")
+        for why in problems:
+            print(f"  - {why}")
         return 3
+    if args.emit_policy:
+        Path(args.emit_policy).write_text(json.dumps(policy, indent=2, ensure_ascii=False) + "\n")
+        print(f"생성 정책을 썼다: {args.emit_policy}")
     print("OK — 생성 정책이 지우는 이미지 중 사용 중인 것은 0.")
     return 0
 
