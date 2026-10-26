@@ -278,6 +278,12 @@ deploy-backend와 같은 이유로 deploy-realtime도 86%(8,640B)까지 자랐�
   `DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1`을 그대로 뒀었다(PO forensic 적발 — 3곳 하드코딩
   중 하나) — SSOT 원칙상 "우연히 같은 값"과 "명시로 같은 값"은 다르다. deploy-backend와
   동일한 substitution으로 교체(dev 기본값 3/1 그대로 — 값 변경 아님, 배선만 정정).
+
+## deploy-backend 인라인 주석 3차 아카이브 (story 4786, 2026-10-26)
+
+deploy-backend가 5,995B(60% 임계 6,000B에 5B 여유 — 합친 뒤 5,911B)까지 차 있어(story 4790의 `,DATABASE_URL_READ` 한 토막만 더해도 넘는다), 맨 위 두 줄 포인터를 한 줄로 합쳤다(값/로직 무변경 — 순수 주석 압축).
+합치기 전 원문: `# ⚠️--update-env-vars(additive) 필수·--set-env-vars 금지 · --allow-unauthenticated 필수. 사유 · 이력(env 키별)은` /
+`# test_deploy_backend_redis_secret_conflict.py 「deploy-backend 인라인 주석 아카이브」.` (사유는 위 #3124 · #3433 절).
 """
 from __future__ import annotations
 
@@ -309,6 +315,10 @@ _DECLARED_SUBSTITUTIONS = {
     "_BACKEND_PRESENCE_REDIS_ENABLED", "_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED",
     "_BACKEND_SSE_LEASE_REDIS_ENABLED", "_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED",
     "_FRONTEND_MIN_INSTANCES", "_FRONTEND_MAX_INSTANCES", "_LICENSE_CONSENT",
+    # story 4786 (E-INFRA-DIET) — extra `gcloud run deploy` flags for the CPU allocation (dev `--cpu-throttling`, prod empty); backend + frontend deploy steps.
+    "_CPU_FLAGS",
+    # story 4786 — the prod fail-closed guard step reads it (first step).
+    "_MINS_EXPLICIT",
     # story aec3ec09([P1 후속] OAuth 핸드오프 활성화) — LICENSE_CONSENT와 동일 배선 클래스.
     "_FIREBASE_OAUTH_HANDOFF_ENABLED",
     "_NEXT_PUBLIC_APP_URL", "_ADMIN_OPERATOR_AUDIENCE", "_ADMIN_OPERATOR_ALLOWLIST",
@@ -366,6 +376,8 @@ _BASH_ENTRYPOINT_STEP_IDS = (
     # 추가할 것). ${_DEPLOY_ENV}/${_GCS_CHANNEL_MEDIA_BUCKET} 둘 다 이미 _DECLARED_
     # SUBSTITUTIONS에 있어 스캔 대상에 넣어도 오탐 없음(사전 확認).
     "apply-gcs-channel-media-cors",
+    # story 4786 — the prod fail-closed guard (first step).
+    "guard-prod-mins",
 )
 
 
@@ -391,19 +403,11 @@ def _apply_cloudbuild_escaping(script: str) -> str:
     return script.replace("$$", "$")
 
 
-def _run_env_vars_assembly(
-    deploy_env: str, redis_url: str, gotenberg_url: str = "", support_gateway_url: str = "", var: str = "ENV_VARS",
-) -> str:
-    """실제 gcloud 호출부만 잘라내고 ENV_VARS 조립 로직까지만 실행 — 실제 배포 없이 결과 문자열만 얻는다."""
-    script = _apply_cloudbuild_escaping(_extract_deploy_backend_script())
-    # 실제 gcloud run deploy 호출 라인 이후는 잘라내고 ENV_VARS를 echo하도록 붙인다.
-    # ⚠️"gcloud run deploy"만으로 찾으면 그 문구를 언급하는 주석(설명 문장)에 먼저 매치된다 —
-    # 실제 호출부에만 있는 서비스명까지 포함해 정확히 그 라인을 찾는다.
-    marker = "gcloud run deploy sprintable-backend"
-    idx = script.index(marker)
-    assembly_only = script[:idx] + f'\necho "RESULT_ENV_VARS=${{{var}}}"\n'
-
-    env = {
+def _backend_step_env(
+    deploy_env: str, redis_url: str = "", gotenberg_url: str = "", support_gateway_url: str = "", **overrides: str,
+) -> dict[str, str]:
+    """the substitutions deploy-backend reads, as environment variables (set -u kills the script on a missing one); `overrides` replace single values"""
+    return {
         **os.environ,
         "_DEPLOY_ENV": deploy_env,
         "_FASTAPI_URL": "https://example.run.app",
@@ -463,7 +467,24 @@ def _run_env_vars_assembly(
         "_BACKEND_TIMEOUT": "1800" if deploy_env == "prod" else "3600",
         # story #4397 — GHA sets prod 'false' · dev 'true' (set -u).
         "_PUSH_DEVICES_BY_USER": "false" if deploy_env == "prod" else "true",
+    
+        **overrides,
     }
+
+
+def _run_env_vars_assembly(
+    deploy_env: str, redis_url: str, gotenberg_url: str = "", support_gateway_url: str = "", var: str = "ENV_VARS",
+) -> str:
+    """실제 gcloud 호출부만 잘라내고 ENV_VARS 조립 로직까지만 실행 — 실제 배포 없이 결과 문자열만 얻는다."""
+    script = _apply_cloudbuild_escaping(_extract_deploy_backend_script())
+    # 실제 gcloud run deploy 호출 라인 이후는 잘라내고 ENV_VARS를 echo하도록 붙인다.
+    # ⚠️"gcloud run deploy"만으로 찾으면 그 문구를 언급하는 주석(설명 문장)에 먼저 매치된다 —
+    # 실제 호출부에만 있는 서비스명까지 포함해 정확히 그 라인을 찾는다.
+    marker = "gcloud run deploy sprintable-backend"
+    idx = script.index(marker)
+    assembly_only = script[:idx] + f'\necho "RESULT_ENV_VARS=${{{var}}}"\n'
+
+    env = _backend_step_env(deploy_env, redis_url, gotenberg_url, support_gateway_url)
     proc = subprocess.run(
         ["bash", "-c", assembly_only],
         capture_output=True, text=True, env=env, check=True,
@@ -472,6 +493,16 @@ def _run_env_vars_assembly(
         if line.startswith("RESULT_ENV_VARS="):
             return line[len("RESULT_ENV_VARS="):]
     raise AssertionError(f"ENV_VARS not found in output: {proc.stdout!r}")
+
+
+def _run_backend_deploy_argv(deploy_env: str, **overrides: str) -> list[str]:
+    """the whole deploy-backend step with only gcloud intercepted — the argument list `gcloud run deploy` would receive (story 4786: the minimum and the CPU flag must arrive)"""
+    script = _apply_cloudbuild_escaping(_extract_deploy_backend_script())
+    env = _backend_step_env(deploy_env, "", **overrides)
+    env.update({"PROJECT_ID": "p", "COMMIT_SHA": "c", "_AR_REGION": "asia-northeast3", "_AR_REPO": "r", "_BACKEND_MIN_INSTANCES": "2", "_BACKEND_MAX_INSTANCES": "8", "_CPU_FLAGS": ""} | overrides)
+    stub = 'gcloud() { printf "ARG=%s\\n" "$@"; }\n'
+    proc = subprocess.run(["bash", "-c", stub + script], capture_output=True, text=True, env=env, check=True)
+    return [line[len("ARG="):] for line in proc.stdout.splitlines() if line.startswith("ARG=")]
 
 
 def test_deploy_backend_no_unescaped_shell_vars_in_cloudbuild_substitution_syntax():
@@ -863,7 +894,7 @@ def test_deploy_removes_xff_probe_flag_everywhere_after_observation():
     assert "XFF_PROBE_ENABLED=true" not in cloudbuild
 
 
-def _run_frontend_deploy_argv(deploy_env: str) -> list[str]:
+def _run_frontend_deploy_argv(deploy_env: str, cpu_flags: str = "") -> list[str]:
     """deploy-frontend 스텝을 gcloud만 가로채 실행 — `gcloud run deploy`가 실제로 받는 인자 목록(따옴표 · 단어 나눔 적용 뒤)."""
     script = _apply_cloudbuild_escaping(_extract_step_script("deploy-frontend"))
     stub = 'gcloud() { printf "ARG=%s\\n" "$@"; }\n'
@@ -872,7 +903,7 @@ def _run_frontend_deploy_argv(deploy_env: str) -> list[str]:
         "_DEPLOY_ENV": deploy_env, "_REALTIME_URL": "https://rt.example", "_APPLE_TEAM_ID": "JN798BC4KC",
         "_MOBILE_APP_LINK_ORIGIN": "https://m.example", "_NEXT_PUBLIC_APP_URL": "https://app.example",
         "_AR_REGION": "asia-northeast3", "PROJECT_ID": "p", "_AR_REPO": "r", "COMMIT_SHA": "c",
-        "_FRONTEND_TIMEOUT": "300", "_FRONTEND_MIN_INSTANCES": "1", "_FRONTEND_MAX_INSTANCES": "2",
+        "_FRONTEND_TIMEOUT": "300", "_FRONTEND_MIN_INSTANCES": "1", "_FRONTEND_MAX_INSTANCES": "2", "_CPU_FLAGS": cpu_flags,
     }
     proc = subprocess.run(["bash", "-c", stub + script], capture_output=True, text=True, env=env, check=True)
     return [line[len("ARG="):] for line in proc.stdout.splitlines() if line.startswith("ARG=")]
