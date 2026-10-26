@@ -117,11 +117,18 @@ def test_base_policy_alone_deletes_an_old_image_that_a_mig_template_still_pulls_
 
 
 def test_most_recent_versions_counts_per_package_and_old_images_go():
-    versions = _versions()
+    """`olderThan 30d` and the newest-30 rule only differ for images that are old but among their own package's newest 30: a package with five images, all 40+ days old, keeps all five; counting
+    globally (newest 30 over every package together) would let backend's young images push them out and delete all five"""
+    frontend_old = [
+        {"package": f"{HOST}/frontend", "version": _digest(10_000 + i), "tags": [f"frontend-tag{i}"],
+         "createTime": (NOW - timedelta(days=40 + i)).isoformat().replace("+00:00", "Z")}
+        for i in range(5)
+    ]
+    versions = gate.load_versions(_images("backend", 60) + frontend_old)
     deleted = gate.simulate(_base(), versions, NOW)
     backend_deleted = {d for p, d in deleted if p == "backend"}
     assert backend_deleted == {_digest(i) for i in range(31, 60)}  # newest 30 stay; of the rest only those older than 30 days go
-    assert not [p for p, _ in deleted if p == "frontend"]  # 5 young images: nothing
+    assert not [d for p, d in deleted if p == "frontend"], "five old images are the whole package: its newest 30 are all of them"
 
 
 def test_only_serving_revisions_count_as_in_use_not_every_old_revision():
@@ -150,6 +157,10 @@ def test_the_all_revisions_fallback_also_needs_the_resolved_digest_and_one_per_c
     two["status"] = {"imageDigest": _digest(2), "containerStatuses": [{"imageDigest": _digest(10_001)}]}
     _refs, _warnings, problems = gate.collect_in_use_refs([_service("s", "rev-2", f"{HOST}/backend:backend-tag2")], [two])
     assert problems, "two tagged containers cannot be paired with their digests, even when two digests are present"
+    mixed = {"metadata": {"name": "rev-2"}, "spec": {"containers": [{"image": f"{HOST}/backend:backend-tag2"}, {"image": f"{HOST}/frontend@{_digest(10_001)}"}]},
+             "status": {"imageDigest": _digest(10_001)}}
+    _refs, _warnings, problems = gate.collect_in_use_refs([_service("s", "rev-2", f"{HOST}/backend:backend-tag2")], [mixed])
+    assert problems, "a tagged container next to a digest-pinned one: the single digest could belong to either"
     one = _revision("rev-2", f"{HOST}/backend:backend-tag2", image_digest=_digest(2))
     _refs, _warnings, problems = gate.collect_in_use_refs([_service("s", "rev-2", f"{HOST}/backend:backend-tag2")], [one])
     assert not problems  # one tagged container with its resolved digest is fine

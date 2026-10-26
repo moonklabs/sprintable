@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""story 4790(INFRA-DIET ⑤ · AC1) — Artifact Registry 정리 정책의 «지움 0» 시험(gcloud 불요 · 읽기 전용 JSON만 읽는다).
+"""story 4790(INFRA-DIET ⑤ · AC1) — Artifact Registry 정리 정책의 «지움 0» 점검 — **보조 도구**다(gcloud 불요 · 읽기 전용 JSON만 읽는다).
+
+성격(PO 결정 2026-10-26): 이 스크립트는 «사용 중 이미지 목록을 뽑아 보이고, 기본 정책이 그것을 지우는지» 계산해 주는 보조 도구이지, 덤프가 완전하다는 것을 증명하는 장치가 아니다.
+사람이 모은 덤프의 완전함(AR 목록이 잘리지 않았나 · prod · dev 템플릿이 모두 들어왔나)은 코드가 증명할 수 없고, 적용 절차가 막는다: 개수 기대값을 적고 · 템플릿을 모두 넣고 ·
+덤프 → 확인 → dry-run → 적용을 한 번에 이어서 한다(그 사이 배포 · 템플릿 변경 · 태그 이동 금지). 출력의 사용 중 목록과 dry-run이 지울 목록을 사람이 대조한다.
 
 정리 정책을 건 뒤에도 **지금 쓰는 이미지는 하나도 안 지워져야** 한다. 이 스크립트는 PO가 모은 JSON으로 «정책이 지울 이미지 집합»을 계산하고
 사용 중 이미지와 겹치는지를 본다. 지운 이미지는 복구되지 않으므로 **모르면 실패한다**(초록은 «다 보고 겹침 0»일 때만).
@@ -152,8 +156,9 @@ def _unresolved_tags(found: list[Ref]) -> bool:
     """태그로 배포된 이미지가 한 개면 해결된 digest가 있어야 한다. 둘 이상이면 짝지을 수 없어 항상 «모름»이다(digest로 고정 배포한 이미지는 태그가 아니라 세지 않는다)."""
     tagged = {(r["package"], r["tag"]) for r in found if r["tag"]}
     digests = {r["digest"] for r in found if r["digest"]}
-    if len(tagged) > 1:
-        return True  # `status.imageDigest`는 하나뿐이라 컨테이너가 여럿이면 어느 digest가 어느 태그의 것인지 짝지을 수 없다 — 모르면 실패
+    packages = {r["package"] for r in found if r["package"]}
+    if len(tagged) > 1 or len(packages) > 1:
+        return True  # `status.imageDigest`는 하나뿐이라 컨테이너가 여럿이면(이미지 패키지가 둘 이상) 어느 digest가 어느 컨테이너의 것인지 짝지을 수 없다 — 모르면 실패
     return bool(tagged) and not digests
 
 
