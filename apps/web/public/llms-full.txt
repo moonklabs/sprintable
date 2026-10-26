@@ -149,9 +149,13 @@ POST /api/v2/auth/refresh  { refresh_token }
 POST /api/v2/auth/logout  { refresh_token }
   → Marks refresh token revoked_at = now()
 
-POST /api/v2/auth/switch-project  { project_id }
-POST /api/v2/auth/switch-org      { org_id }
-  → Revokes all existing refresh tokens → issues new JWT with new context
+POST /api/v2/auth/switch-project  { project_id, refresh_token }
+POST /api/v2/auth/switch-org      { org_id, refresh_token }
+  → refresh_token is this session's own token and is required. A switch starts from a live session:
+    it ends that one token (other devices keep their sessions) and issues a new JWT pair with the new context.
+  → 401 TOKEN_REVOKED when the token is missing, unknown, already ended (logout · password change ·
+    administrator removal · expired). 401 TOKEN_SUPERSEDED when a switch just ended it and the session lives on
+    (renew with the refresh_token you hold). A switch is not a way around a renewal.
 ```
 
 ### TOTP (2FA)

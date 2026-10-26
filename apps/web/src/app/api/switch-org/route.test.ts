@@ -70,12 +70,23 @@ describe('[SID:4400] /api/switch-org sends this session\'s refresh token', () =>
     expect(JSON.parse(String(init.body))).toEqual({ org_id: 'org-2', refresh_token: 'rt-this-session' });
   });
 
-  it('without the cookie the field is left out (the backend then keeps its previous behaviour)', async () => {
+  it('without the cookie the field is left out (the backend then refuses: 401 — story 4782 took the all-device fallback away)', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: { code: 'X' } }), { status: 403 }));
     vi.stubGlobal('fetch', fetchMock);
     cookieJar.rt = undefined;
     await POST(switchRequest('org-2'));
     const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1];
     expect(JSON.parse(String(init.body))).toEqual({ org_id: 'org-2' });
+  });
+});
+
+describe('[SID:4782] /api/switch-org hands the backend\'s refusal of an ended session back as it is', () => {
+  it.each(['TOKEN_REVOKED', 'TOKEN_SUPERSEDED'])('401 %s: same status and word, and no cookie is written or cleared here (the client\'s one flight decides: renew or sign out)', async (code) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: { code, message: 'x' } }), { status: 401 })));
+    cookieJar.rt = 'rt-this-session';
+    const res = await POST(switchRequest('org-2'));
+    expect(res.status).toBe(401);
+    expect((await res.json() as { error: { code: string } }).error.code).toBe(code);
+    expect(res.headers.get('set-cookie')).toBeNull();
   });
 });

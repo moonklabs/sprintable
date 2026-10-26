@@ -133,6 +133,7 @@ async def test_switch_org_success_returns_tokens():
 
         with patch("app.routers.auth.create_tokens") as mock_create_tokens, \
              patch("app.routers.auth.create_refresh_token") as mock_crt, \
+             patch("app.routers.auth._claim_switching_session", new=AsyncMock(return_value=None)), \
              patch("app.routers.auth._store_refresh_token") as mock_store, \
              patch("app.routers.auth.first_accessible_project_id", new_callable=AsyncMock) as mock_fap:
             mock_fap.return_value = PROJECT_A
@@ -261,6 +262,7 @@ async def test_switch_org_no_accessible_project_returns_200_null_project():
 
         with patch("app.routers.auth.create_tokens") as mock_create_tokens, \
              patch("app.routers.auth.create_refresh_token") as mock_crt, \
+             patch("app.routers.auth._claim_switching_session", new=AsyncMock(return_value=None)), \
              patch("app.routers.auth._store_refresh_token") as mock_store, \
              patch("app.routers.auth.first_accessible_project_id", new_callable=AsyncMock) as mock_fap:
             mock_fap.return_value = None  # 접근 가능 project 없음

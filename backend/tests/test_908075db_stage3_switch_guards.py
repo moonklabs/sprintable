@@ -64,6 +64,7 @@ async def _run_switch_project(flag: bool, defallback_pid):
          patch("app.routers.auth._build_app_metadata", new=AsyncMock(return_value=md)), \
          patch("app.routers.auth.create_tokens", _ct), \
          patch("app.routers.auth.create_refresh_token", return_value=("rt", None)), \
+         patch("app.routers.auth._claim_switching_session", new=AsyncMock(return_value=None)), \
          patch("app.routers.auth._store_refresh_token", new=AsyncMock()):
         await switch_project(SwitchProjectRequest(project_id=TARGET), session, _auth())
     return captured["md"], user.last_project_id
@@ -108,6 +109,7 @@ async def _run_switch_org(flag: bool, first_accessible, defallback_pid):
          patch("app.routers.auth._build_app_metadata", new=AsyncMock(return_value=md)), \
          patch("app.routers.auth.create_tokens", _ct), \
          patch("app.routers.auth.create_refresh_token", return_value=("rt", None)), \
+         patch("app.routers.auth._claim_switching_session", new=AsyncMock(return_value=None)), \
          patch("app.routers.auth._store_refresh_token", new=AsyncMock()):
         await switch_organization(SwitchOrganizationRequest(org_id=ORG), session, _auth())
     return captured["md"], user.last_project_id
