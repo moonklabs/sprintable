@@ -2514,16 +2514,10 @@ async def confirm_set_password(
         )
     )
     # story #ab2a503f — 탈취 refresh token으로 이후 /auth/refresh가 즉시 401(우회체인 봉합).
-    # switch_project/switch_org(이 파일)와 동일 인라인 패턴 재사용.
-    # story #3649(보안 결함) — expires_at도 함께 내려 refresh()의 유예창(§3649 주석)이
-    # 이 RT를 재사용 대상에서 뺀다 — set-password confirm이 죽인 RT는 회전 경합
-    # straggler가 아니라 명시 폐기.
-    _now = datetime.now(timezone.utc)
-    await session.execute(
-        update(RefreshToken)
-        .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
-        .values(**_explicit_revoke_values(_now))
-    )
+    # story 4782 (second PR): the one shared revoke of every session (`_revoke_other_sessions`, as the reset / change do) instead of an inline UPDATE of the live rows only — the inline one left the
+    # refresh grace window of a token a rotation had just ended OPEN (a late refresh · switch with it then minted a new pair after the password was set), and it did not queue on the person's
+    # session lock with the issuers in flight. Live rows end (#3649: `expires_at` goes down with `revoked_at`) and the grace windows of the rotated ones close, in one place.
+    await _revoke_other_sessions(session, user.id, None)
     await session.commit()
     return _ok({"message": "Password set successfully — please log in with your new password"})
 

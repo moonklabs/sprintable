@@ -240,3 +240,37 @@ async def test_a_revoke_that_writes_the_persons_row_queues_on_the_lock_before_it
         assert await _live_except(w, None) == 0
     finally:
         await _close(engine, w)
+
+
+@pytest.mark.parametrize("late", ["refresh", "switch_to_org2"])
+async def test_after_the_set_password_confirmation_a_token_a_rotation_just_ended_cannot_mint_a_new_pair(late, monkeypatch):
+    """the confirmation of «set a first password» (the account signed in through a provider and had none) ends every session. Its own inline UPDATE ended only the LIVE rows and left the refresh grace
+    window of a token a rotation had just ended open: R0 -> R1 by refresh, confirmation, then a late refresh / switch with R0 minted a new pair after the password was set. The shared revoke closes that
+    window too. The password-staleness check of #3649 refuses such a session anyway once a whole second has passed since it began; it is switched off HERE (not left to the clock) so that only
+    the closed window can refuse the late token — otherwise a second boundary between the login and the confirmation would let the test pass without testing anything."""
+    from sqlalchemy import update
+
+    import app.routers.auth as auth_router
+
+    from app.core.security import create_set_password_confirm_token, hash_password
+    from app.models.user import User
+
+    monkeypatch.setattr(auth_router, "_is_session_stale_after_password_change", lambda *args, **kwargs: False)
+    engine, w = await _world()
+    try:
+        r0 = await w.login()
+        r1 = (await w.refresh(r0["refresh_token"])).json()["data"]  # R0 was rotated a moment ago: its window is open
+        assert r1["refresh_token"]
+        async with w.Session() as s:  # an account that has no password yet
+            await s.execute(update(User).where(User.id == w.user_id).values(hashed_password=""))
+            await s.commit()
+        token = create_set_password_confirm_token(str(w.user_id), hash_password("new-pw-4782-Xx1"))
+        confirmed = await w.client.get(f"/api/v2/auth/set-password/confirm?token={token}")
+        assert confirmed.status_code == 200, confirmed.text
+        before = await w.token_rows()
+        resp = await w.refresh(r0["refresh_token"]) if late == "refresh" else await w.switch_to_org2(r0["access_token"], r0["refresh_token"])
+        assert resp.status_code == 401, f"{late}: a token a rotation had just ended minted a new pair after the password was set: {resp.status_code} {resp.text}"
+        assert await w.token_rows() == before
+        assert await w.live_tokens() == 0
+    finally:
+        await _close(engine, w)
