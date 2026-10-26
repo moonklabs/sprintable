@@ -45,7 +45,7 @@ beforeAll(async () => {
       return;
     }
     const chunks: Buffer[] = [];
-    req.on('data', (c) => chunks.push(c));
+    req.on('data', (c: Buffer | string) => chunks.push(Buffer.from(c)));
     // `/slow` takes 4 s to answer (a slow upstream call); everything else answers at once
     req.on('end', () => {
       const t = setTimeout(() => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ ok: true, bytes: Buffer.concat(chunks).length })); }, route === '/slow' ? 4000 : 10);
