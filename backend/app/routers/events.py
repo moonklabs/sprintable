@@ -164,6 +164,19 @@ def _pending_or_recently_delivered_filter(now: "datetime"):
     )
 
 
+async def _stamp_first_delivery(db: "AsyncSession", batch, now: "datetime") -> None:
+    """story 4781 (AC8 · PO 10-26): `delivered_at` is the FIRST delivery — a backfill that sends an already-delivered event again leaves it as it was.
+
+    The backfill above re-sends what was delivered inside the last N seconds. It used to stamp `delivered_at = now` on every event it sent, delivered or not — so the re-send
+    opened the window again, the next reconnect re-sent the same event again and stamped again, and one notification was replayed (and its time rewritten) for as long as the
+    person's stream kept reconnecting: five different `delivered_at` over twelve minutes on one bell line (dev, 10-26). Only a still-pending event is stamped, once — in the database
+    (`WHERE status = 'pending'`), not on what this connection read a moment ago: two connections that read the same pending event at once, or an ack beside a backfill, never
+    overwrite each other's first stamp."""
+    ids = [e.id for e in batch]
+    if ids:
+        await db.execute(update(Event).where(Event.id.in_(ids), Event.status == "pending").values(status="delivered", delivered_at=now))
+
+
 def _compute_backfill_mode(
     ref_ts: "datetime | None",
     now: "datetime",
@@ -690,9 +703,7 @@ async def agent_event_stream(
                         # 큐에 같은 event_id가 겹쳐 들어와도(레이스 윈도우) 이 연결에서 또
                         # 안 보낸다(연결-로컬 dedup, DB 공유상태 아님).
                         _sent_event_ids.add(str(evt.id))
-                    for evt in batch:
-                        evt.status = "delivered"
-                        evt.delivered_at = now
+                    await _stamp_first_delivery(db, batch, now)
                     await db.commit()
 
             # #2158: B계열(DB event_id 없는 transient push) 재연결 갭 재생. 위 A계열 DB
@@ -1025,8 +1036,8 @@ async def mark_delivered(
         event.recipient_id, auth, db, org_id, detail="Not the recipient of this event",
     )
 
-    event.status = "delivered"
-    event.delivered_at = datetime.now(timezone.utc)
+    # story 4781 (AC8): the first delivery is kept — a second ack is not a second delivery (one statement: a backfill stamping at the same moment does not lose to it, nor it to the backfill)
+    await db.execute(update(Event).where(Event.id == event.id).values(status="delivered", delivered_at=func.coalesce(Event.delivered_at, datetime.now(timezone.utc))))
     await db.commit()
     await db.refresh(event)
     return EventResponse.model_validate(event)

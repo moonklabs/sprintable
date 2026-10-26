@@ -185,3 +185,134 @@ def test_backfill_filter_used_in_both_exceed_and_within_branches():
     # 예전 하드코딩(Event.status == "pending")이 두 분기 조건절에 더 이상 없어야 —
     # 있으면 그 분기가 _status_filter로 치환 안 된 회귀.
     assert 'Event.status == "pending",' not in source
+
+
+# ─── story 4781 (AC8 · PO 10-26) — `delivered_at` is the FIRST delivery; a backfill re-send does not move it ──────────────────────────
+# 10-26 (dev): one bell line's `delivered_at` changed five times in twelve minutes. The backfill above re-sends what was delivered inside the last 300 seconds and used to stamp
+# `delivered_at = now` on every event it sent, delivered or not — so each reconnect re-opened the window for the same event, which the next reconnect sent again and stamped
+# again: one notification replayed for as long as the stream kept reconnecting (every human notification does this: they are created `delivered`). Only a pending event is stamped, once.
+
+import inspect  # noqa: E402
+
+
+async def _reconnect(Session, org_id, recipient_id, at: datetime, stamp) -> set[uuid.UUID]:
+    """What one reconnect does at time `at`: select what the backfill would send (the stream's own filter), stamp the batch with `stamp`, commit. Returns the ids it sent."""
+    from sqlalchemy import select
+
+    from app.models.event import Event
+    from app.routers.events import _pending_or_recently_delivered_filter
+
+    async with Session() as s:
+        batch = list((await s.execute(
+            select(Event).where(Event.org_id == org_id, Event.recipient_id == recipient_id, _pending_or_recently_delivered_filter(at)).order_by(Event.created_at.asc())
+        )).scalars().all())
+        await stamp(s, batch, at)
+        await s.commit()
+        return {e.id for e in batch}
+
+
+async def _delivered_at(Session, event_id):
+    from app.models.event import Event
+
+    async with Session() as s:
+        return (await s.get(Event, event_id)).delivered_at
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_4781_01_a_pending_event_is_stamped_once_and_resent_only_inside_the_window_after_that():
+    from app.routers.events import _BACKFILL_RECENT_DELIVERED_SECONDS as WINDOW, _stamp_first_delivery
+
+    _, Session = await _session_factory()
+    org_id, project_id, recipient_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    await _seed_project(Session, org_id=org_id, project_id=project_id)
+    await _seed_team_member(Session, org_id=org_id, project_id=project_id, member_id=recipient_id)
+    t0 = datetime.now(timezone.utc)
+    eid = await _seed_event(Session, org_id=org_id, project_id=project_id, recipient_id=recipient_id, status="pending", created_at=t0 - timedelta(seconds=1))
+    sent = []
+    for dt in (0, 5, 60, 120, 250, WINDOW - 1):  # the stream reconnects again and again inside the window
+        sent.append(eid in await _reconnect(Session, org_id, recipient_id, t0 + timedelta(seconds=dt), _stamp_first_delivery))
+    assert sent == [True] * 6, "every reconnect inside the window of the FIRST delivery still gets it (no loss)"
+    assert await _delivered_at(Session, eid) == t0, "and the first delivery time is what the row keeps"
+    assert eid not in await _reconnect(Session, org_id, recipient_id, t0 + timedelta(seconds=WINDOW + 1), _stamp_first_delivery), "past the window: not sent again, however many reconnects came before"
+    assert eid not in await _reconnect(Session, org_id, recipient_id, t0 + timedelta(seconds=WINDOW + 400), _stamp_first_delivery)
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_4781_03_a_human_notification_created_delivered_keeps_its_creation_time_through_reconnects():
+    """Human bell Events are born `delivered` with `delivered_at` = their creation: the case that showed on 10-26."""
+    from app.routers.events import _BACKFILL_RECENT_DELIVERED_SECONDS as WINDOW, _stamp_first_delivery
+
+    _, Session = await _session_factory()
+    org_id, project_id, recipient_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    await _seed_project(Session, org_id=org_id, project_id=project_id)
+    await _seed_team_member(Session, org_id=org_id, project_id=project_id, member_id=recipient_id)
+    t0 = datetime.now(timezone.utc)
+    eid = await _seed_event(Session, org_id=org_id, project_id=project_id, recipient_id=recipient_id, status="delivered", delivered_at=t0, created_at=t0 - timedelta(seconds=1))
+    for dt in (30, 90, 200):
+        assert eid in await _reconnect(Session, org_id, recipient_id, t0 + timedelta(seconds=dt), _stamp_first_delivery)
+    assert await _delivered_at(Session, eid) == t0
+    assert eid not in await _reconnect(Session, org_id, recipient_id, t0 + timedelta(seconds=WINDOW + 1), _stamp_first_delivery)
+
+
+def test_4781_04_the_stream_uses_the_helper_and_no_longer_stamps_the_batch_itself():
+    from app.routers import events as ev_module
+
+    source = inspect.getsource(ev_module.agent_event_stream)
+    assert "_stamp_first_delivery(db, batch, now)" in source
+    assert "evt.delivered_at = now" not in source
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_4781_05_a_second_ack_keeps_the_first_delivery_time():
+    from app.routers import events as ev_module
+
+    _, Session = await _session_factory()
+    org_id, project_id, recipient_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    await _seed_project(Session, org_id=org_id, project_id=project_id)
+    await _seed_team_member(Session, org_id=org_id, project_id=project_id, member_id=recipient_id)
+    eid = await _seed_event(Session, org_id=org_id, project_id=project_id, recipient_id=recipient_id, status="pending")
+
+    async def _is_the_recipient(*_a, **_k):
+        return None
+
+    original = ev_module.assert_caller_is_member
+    ev_module.assert_caller_is_member = _is_the_recipient
+    try:
+        async with Session() as s:
+            await ev_module.mark_delivered(eid, db=s, org_id=org_id, auth=None)
+        first = await _delivered_at(Session, eid)
+        assert first is not None
+        async with Session() as s:
+            await ev_module.mark_delivered(eid, db=s, org_id=org_id, auth=None)
+        assert await _delivered_at(Session, eid) == first, "a second ack is not a second delivery"
+    finally:
+        ev_module.assert_caller_is_member = original
+
+
+@_REAL_DB_SKIP
+@pytest.mark.anyio
+async def test_4781_06_two_connections_that_read_the_same_pending_event_do_not_overwrite_each_other():
+    """The first stamp is decided in the database (codex 10-26): two connections read one event as pending, both stamp — the first stays; neither a later backfill nor a late ack moves it."""
+    from sqlalchemy import select
+
+    from app.models.event import Event
+    from app.routers.events import _stamp_first_delivery
+
+    _, Session = await _session_factory()
+    org_id, project_id, recipient_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    await _seed_project(Session, org_id=org_id, project_id=project_id)
+    await _seed_team_member(Session, org_id=org_id, project_id=project_id, member_id=recipient_id)
+    t0 = datetime.now(timezone.utc)
+    eid = await _seed_event(Session, org_id=org_id, project_id=project_id, recipient_id=recipient_id, status="pending")
+    async with Session() as s1, Session() as s2:
+        read1 = list((await s1.execute(select(Event).where(Event.id == eid))).scalars())
+        read2 = list((await s2.execute(select(Event).where(Event.id == eid))).scalars())
+        assert read1[0].status == "pending" and read2[0].status == "pending"
+        await _stamp_first_delivery(s1, read1, t0)
+        await s1.commit()
+        await _stamp_first_delivery(s2, read2, t0 + timedelta(seconds=7))  # read as pending a moment ago; it is delivered now
+        await s2.commit()
+    assert await _delivered_at(Session, eid) == t0

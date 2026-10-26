@@ -491,7 +491,19 @@ async def test_stream_delivers_pending_on_connect(mock_session, org_id):
     pending_result = MagicMock()
     pending_result.scalars.return_value = scalars_mock
 
-    mock_session.execute.side_effect = [membership_result, pending_result]
+
+    # story 4781 (AC8): the backfill stamps a batch with ONE `UPDATE events … WHERE id IN (…) AND status = 'pending'` (the first delivery is decided in the database) — the mock routes it and
+    # records which events it named; the two reads (membership, pending events) come in order as before
+    stamped: list = []
+    reads = iter([membership_result, pending_result])
+
+    def _execute(stmt, *a, **k):
+        if str(stmt).startswith("UPDATE events"):
+            stamped.extend(next(v for v in stmt.compile().params.values() if isinstance(v, (list, tuple))))
+            return MagicMock()
+        return next(reads)
+
+    mock_session.execute.side_effect = _execute
 
     from app.core import shutdown as shutdown_module
     from app.dependencies.auth import get_current_user, get_verified_org_id, get_current_user_streaming, get_verified_org_id_streaming
@@ -571,8 +583,7 @@ async def test_stream_delivers_pending_on_connect(mock_session, org_id):
     assert member_id_str not in _agent_connections  # cleanup 계약
 
     # pending 이벤트가 delivered로 마킹됐는지 (backfill 처리 확인)
-    assert pending_event.status == "delivered"
-    assert pending_event.delivered_at is not None
+    assert pending_event.id in stamped, "the backfilled event was stamped delivered (in the database)"
 
 
 # ─── AC6: 동시 다수 에이전트 격리 ───────────────────────────────────────────

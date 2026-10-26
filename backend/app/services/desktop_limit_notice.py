@@ -108,6 +108,25 @@ async def _save_open(org_id: uuid.UUID, user_id: uuid.UUID, record: dict) -> Non
     await redis_shared.with_fallback(_op, _fallback)
 
 
+async def _peek_open(org_id: uuid.UUID, user_id: uuid.UUID) -> dict | None:
+    """The outstanding «stood» record, left in place."""
+    key = _key("open", org_id, user_id)
+
+    async def _op(client) -> str | None:
+        raw = await client.get(key)
+        return None if raw is None else (raw.decode() if isinstance(raw, (bytes, bytearray)) else str(raw))
+
+    def _fallback() -> str | None:
+        return _local_get(key)
+
+    raw = await redis_shared.with_fallback(_op, _fallback)
+    try:
+        rec = json.loads(raw) if raw else None
+    except ValueError:
+        return None
+    return rec if isinstance(rec, dict) else None
+
+
 async def _add_promised_setups(org_id: uuid.UUID, user_id: uuid.UUID, setup_ids) -> None:
     """The setups the person's outstanding «stopped» notice is about. A SET with an atomic add (Redis SADD) — never a read-modify-write of the
     record: a stand after the window, and a session folded in at the same instant as another, only ever ADD to it (Kadir-lens/codex 4685)."""
@@ -205,6 +224,143 @@ async def _mark_open_back(org_id: uuid.UUID, user_id: uuid.UUID) -> None:
         _local[key] = (hit[0], json.dumps({**record, "back": True}))
 
     await redis_shared.with_fallback(_op, _fallback)
+
+
+TIME_UNKNOWN_TTL_SEC = 3600
+
+
+def _unknown_key(org_id: uuid.UUID, user_id: uuid.UUID) -> str:
+    return redis_shared.key(_DOMAIN, "time_unknown", str(org_id), str(user_id))
+
+
+def _unknown_setup_key(setup_id: uuid.UUID | str) -> str:
+    return redis_shared.key(_DOMAIN, "time_unknown_setup", str(setup_id))
+
+
+async def _mark_time_unknown(org_id: uuid.UUID, user_id: uuid.UUID, mark: dict) -> None:
+    """story 4781 (AC7): this person's «stopped» notice went with «the time is not known yet». The mark names exactly what was written (the two rows by id and the words by value), the setups the
+    notice is about and the notice's own nonce, so the rewrite touches that notice and nothing else, and only while the words are still what was written. One mark per person (a newer notice
+    replaces it). The per-setup pointers are only a cheap «does anyone wait for a time on this computer» for the hot path (a report of that setup looks up the pointer, not the recipients).
+    One hour is far past the seconds a report with the time takes."""
+    key, value = _unknown_key(org_id, user_id), json.dumps(mark)
+    pointers = [_unknown_setup_key(sid) for sid in mark.get("setups", [])]
+
+    async def _op(client) -> None:
+        await client.set(key, value, ex=TIME_UNKNOWN_TTL_SEC)
+        for pk in pointers:
+            await client.set(pk, "1", ex=TIME_UNKNOWN_TTL_SEC)
+
+    def _fallback() -> None:
+        expires = time.monotonic() + TIME_UNKNOWN_TTL_SEC
+        _local[key] = (expires, value)
+        for pk in pointers:
+            _local[pk] = (expires, "1")
+
+    await redis_shared.with_fallback(_op, _fallback)
+
+
+async def _someone_waits_for_time_on(setup_id: uuid.UUID) -> bool:
+    key = _unknown_setup_key(setup_id)
+
+    async def _op(client) -> bool:
+        return bool(await client.exists(key))
+
+    def _fallback() -> bool:
+        return _local_get(key) is not None
+
+    return await redis_shared.with_fallback(_op, _fallback)
+
+
+async def _drop_setup_pointer(setup_id: uuid.UUID) -> None:
+    key = _unknown_setup_key(setup_id)
+
+    async def _op(client) -> None:
+        await client.delete(key)
+
+    def _fallback() -> None:
+        _local.pop(key, None)
+
+    await redis_shared.with_fallback(_op, _fallback)
+
+
+async def _peek_time_unknown(org_id: uuid.UUID, user_id: uuid.UUID) -> tuple[str, dict] | None:
+    """(the raw value, the mark) of the notice waiting for its time, left in place — the rewrite claims it only when it has the time."""
+    key = _unknown_key(org_id, user_id)
+
+    async def _op(client) -> str | None:
+        raw = await client.get(key)
+        return None if raw is None else (raw.decode() if isinstance(raw, (bytes, bytearray)) else str(raw))
+
+    def _fallback() -> str | None:
+        return _local_get(key)
+
+    raw = await redis_shared.with_fallback(_op, _fallback)
+    try:
+        mark = json.loads(raw) if raw else None
+    except ValueError:
+        return None
+    return (raw, mark) if isinstance(mark, dict) else None
+
+
+async def _extend_time_unknown(org_id: uuid.UUID, user_id: uuid.UUID, setup_id: uuid.UUID) -> None:
+    """A computer whose session stood inside the cooldown is folded into the notice that went — and, when that notice still waits for its time, into its wait: the time of ITS session is one of the
+    things the notice's time is made of, so its reports must reach the fill too (codex 10-26)."""
+    peeked = await _peek_time_unknown(org_id, user_id)
+    if peeked is None:
+        return
+    _, mark = peeked
+    setups = set(mark.get("setups") or [])
+    if str(setup_id) in setups:
+        return
+    mark["setups"] = sorted(setups | {str(setup_id)})
+    await _mark_time_unknown(org_id, user_id, mark)  # (same nonce, same rows, one setup more — its pointer too)
+
+
+async def _time_mark_is_live(org_id: uuid.UUID, user_id: uuid.UUID, setup_id: uuid.UUID) -> bool:
+    """This person's wait for a time is about this computer AND still belongs to their open notice (a lifted or replaced notice's mark does not count)."""
+    peeked = await _peek_time_unknown(org_id, user_id)
+    if peeked is None:
+        return False
+    mark = peeked[1]
+    if str(setup_id) not in (mark.get("setups") or []):
+        return False
+    current = await _peek_open(org_id, user_id)
+    return current is not None and current.get("nonce") == mark.get("nonce")
+
+
+async def _clear_time_unknown(org_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """Drop this person's wait for a time (a new notice is being made: the mark of an earlier one, if it is still there, is not the new one's)."""
+    key = _unknown_key(org_id, user_id)
+
+    async def _op(client) -> None:
+        await client.delete(key)
+
+    def _fallback() -> None:
+        _local.pop(key, None)
+
+    await redis_shared.with_fallback(_op, _fallback)
+
+
+async def _claim_time_unknown(org_id: uuid.UUID, user_id: uuid.UUID, raw: str) -> bool:
+    """Take the mark once (Redis GETDEL · the process map's pop). True only if what was taken is the very mark that was read: a newer notice's mark that landed in between is put back untouched
+    (SET NX — it is never overwritten by the older one) and this call does nothing."""
+    key = _unknown_key(org_id, user_id)
+
+    async def _op(client) -> str | None:
+        got = await client.getdel(key)
+        got = None if got is None else (got.decode() if isinstance(got, (bytes, bytearray)) else str(got))
+        if got is not None and got != raw:
+            await client.set(key, got, ex=TIME_UNKNOWN_TTL_SEC, nx=True)
+        return got
+
+    def _fallback() -> str | None:
+        got = _local_get(key)
+        _local.pop(key, None)
+        if got is not None and got != raw:
+            _local[key] = (time.monotonic() + TIME_UNKNOWN_TTL_SEC, got)
+        return got
+
+    return (await redis_shared.with_fallback(_op, _fallback)) == raw
 
 
 def member_prefix(member_id: uuid.UUID) -> str:
@@ -373,46 +529,60 @@ async def _stood(db: AsyncSession, setup: DesktopSetup, row: DesktopSession) -> 
             logger.warning("desktop limit notice: telling one person failed setup=%s session=%s", setup.id, row.session_key, exc_info=True)
 
 
-async def _stood_for(db: AsyncSession, setup: DesktopSetup, row: DesktopSession, person: Recipient) -> None:
+async def _stood_text(db: AsyncSession, row: DesktopSession, org_id: uuid.UUID, person: Recipient) -> tuple[str, str, bool, uuid.UUID, int, str, list[DesktopSession]]:
+    """(title, body, time known, the agent the notice names, how many other agents stand, that agent's name, the sessions standing) — the words of the «stopped» notice for this person from what stands now (story 4781 AC7: the
+    notice is written from this once when it goes and once more when the reset time arrives, so the two can never differ in anything but the time)."""
     from app.models.organization import Organization
     from app.services.i18n_catalog import t
-    from app.services.notification_dispatch import dispatch_notification
     from app.services.org_time import org_tz
 
     locale = person.locale
+    rows = await _limited_rows(db, org_id, person.user_id)
+    # this report's agent first (the one that just stood), then the others that stand now — one agent counted once
+    agents: list[uuid.UUID] = [row.agent_member_id]
+    for r in rows:
+        if r.agent_member_id not in agents:
+            agents.append(r.agent_member_id)
+    others = len(agents) - 1
+    name = await _agent_name(db, agents[0])
+    now = datetime.now(timezone.utc)
+    ats = [r.limit_at for r in rows]
+    latest = max(ats) if ats and all(a is not None for a in ats) else None
+    known = latest is not None and latest > now
+    if known:
+        org = await db.get(Organization, org_id)
+        time_text = format_time(latest, org_tz(getattr(org, "timezone", None)), locale, now=now)
+        body = t("desktop_limit_notice.stood.body_known", locale, time=time_text)
+    else:  # a time not known for all of them, or one already past: never «풀려요» at a time that has gone
+        body = t("desktop_limit_notice.stood.body_unknown", locale)
+    # story #4686: where it hit (account first, then the model) — this report's session first; no line when nothing is known
+    named = [row] + [r for r in rows if r.id != row.id]
+    where = where_text(named, locale)
+    if where:
+        body = f"{body} {where}"
+    title = (t("desktop_limit_notice.stood.title_many", locale, agent=name, others=others) if others
+             else t("desktop_command.turn_end_title.paused_limit", locale, agent=name))
+    return title, body, known, agents[0], others, name, rows
+
+
+async def _stood_for(db: AsyncSession, setup: DesktopSetup, row: DesktopSession, person: Recipient) -> None:
+    from app.services.notification_dispatch import dispatch_notification
+
     if not await _claim_window(setup.org_id, person.user_id):
         await _add_promised_setups(setup.org_id, person.user_id, [setup.id])  # folded into the notice that went: its promise covers this setup too
+        try:
+            await _extend_time_unknown(setup.org_id, person.user_id, setup.id)  # …and, if that notice still waits for its time, its wait
+        except Exception:  # noqa: BLE001 — a correction of an echo, never a condition of the record
+            logger.warning("desktop limit notice: extending the wait for a time failed setup=%s", setup.id, exc_info=True)
         logger.info("desktop limit notice: stood not sent (a notice went to this person within the window) setup=%s to=%s", setup.id, member_prefix(person.member_id))
         return
     try:
-        rows = await _limited_rows(db, setup.org_id, person.user_id)
-        # this report's agent first (the one that just stood), then the others that stand now — one agent counted once
-        agents: list[uuid.UUID] = [row.agent_member_id]
-        for r in rows:
-            if r.agent_member_id not in agents:
-                agents.append(r.agent_member_id)
-        others = len(agents) - 1
-        name = await _agent_name(db, agents[0])
-        now = datetime.now(timezone.utc)
-        ats = [r.limit_at for r in rows]
-        latest = max(ats) if ats and all(a is not None for a in ats) else None
-        if latest is not None and latest > now:
-            org = await db.get(Organization, setup.org_id)
-            time_text = format_time(latest, org_tz(getattr(org, "timezone", None)), locale, now=now)
-            body = t("desktop_limit_notice.stood.body_known", locale, time=time_text)
-        else:  # a time not known for all of them, or one already past: never «풀려요» at a time that has gone
-            body = t("desktop_limit_notice.stood.body_unknown", locale)
-        # story #4686: where it hit (account first, then the model) — this report's session first; no line when nothing is known
-        named = [row] + [r for r in rows if r.id != row.id]
-        where = where_text(named, locale)
-        if where:
-            body = f"{body} {where}"
-        title = (t("desktop_limit_notice.stood.title_many", locale, agent=name, others=others) if others
-                 else t("desktop_command.turn_end_title.paused_limit", locale, agent=name))
+        title, body, known, agent, others, name, rows = await _stood_text(db, row, setup.org_id, person)
+        made: list = []  # the rows this notice made (story 4781 AC7: named by the dispatcher, not looked for afterwards)
         sent = await dispatch_notification(
             db, org_id=setup.org_id, event_type="agent.limit_paused", target_member_ids=[person.member_id], title=title, body=body,
-            reference_type="agent", reference_id=agents[0], source_project_id=setup.project_id,
-            event={"payload": {"agent_name": name}},
+            reference_type="agent", reference_id=agent, source_project_id=setup.project_id,
+            event={"payload": {"agent_name": name}}, created_rows=made,
         )
         if not sent:
             # the dispatcher answers 0 (it does not raise) when it told nobody — a failure it swallowed, or a person whose settings turn
@@ -424,10 +594,103 @@ async def _stood_for(db: AsyncSession, setup: DesktopSetup, row: DesktopSession,
             return
         logger.info("desktop limit notice: stood sent setup=%s to=%s sent=%d", setup.id, member_prefix(person.member_id), sent)
         await _add_promised_setups(setup.org_id, person.user_id, [setup.id, *(r.setup_id for r in rows)])  # the promise is about THESE setups (merged, never replaced)
-        await _save_open(setup.org_id, person.user_id, {"agent": str(agents[0]), "others": others})
+        nonce = uuid.uuid4().hex  # this notice's own mark: the open record and the wait for its time carry the same one — a lifted or replaced notice's mark can never be taken for the next one's
+        await _save_open(setup.org_id, person.user_id, {"agent": str(agent), "others": others, "nonce": nonce})
+        await _clear_time_unknown(setup.org_id, person.user_id)  # (a mark of an earlier notice, if it was still there)
+        if not known:
+            from app.models.event import Event
+            from app.models.notification import Notification
+
+            note = next((m for m in made if isinstance(m, Notification) and m.body == body), None)
+            bell = next((m for m in made if isinstance(m, Event) and (m.payload or {}).get("body") == body), None)
+            await _mark_time_unknown(setup.org_id, person.user_id, {
+                "nonce": nonce,
+                "setups": sorted({str(setup.id), *(str(r.setup_id) for r in rows)}),
+                "written": body,
+                "note": str(note.id) if note is not None else None,
+                "bell": str(bell.id) if bell is not None else None,
+            })
     except Exception:
         await _release_window(setup.org_id, person.user_id)  # nothing was told: the next report may still tell it
         raise
+
+
+async def _load_stood_rows(db: AsyncSession, mark: dict, person: Recipient, org_id: uuid.UUID):
+    """The two rows the notice made, locked for the rewrite — (card, bell), each None when the mark does not name it. `visible` is False when the mark names a row that is not there (yet): the
+    mark is written inside the report's transaction, so a report that comes in at the same moment may find the mark before the notice is committed. The rows are read by id AND by owner — the card is
+    this person's (`user_id`) in this org, the bell line is addressed to this person's member — so a mark that names somebody else's row (a store written wrongly) finds nothing and writes nothing
+    (Kadir's lens on 5251)."""
+    from app.models.event import Event
+    from app.models.notification import Notification
+
+    note = evt = None
+    visible = True
+    if mark.get("note"):
+        note = (await db.execute(select(Notification).where(
+            Notification.id == uuid.UUID(mark["note"]), Notification.org_id == org_id, Notification.user_id == person.user_id,
+        ).with_for_update())).scalar_one_or_none()
+        visible = visible and note is not None
+    if mark.get("bell"):
+        evt = (await db.execute(select(Event).where(
+            Event.id == uuid.UUID(mark["bell"]), Event.org_id == org_id, Event.recipient_id == person.member_id, Event.recipient_type == "human",
+        ).with_for_update())).scalar_one_or_none()
+        visible = visible and evt is not None
+    return note, evt, visible
+
+
+def _rewrite_stood_time(note, evt, written: str, new_body: str) -> tuple[bool, bool]:
+    """story 4781 (AC7): the «stopped» notice that went out saying «the time is not known yet» now has its time — the SAME notification is rewritten in place (the card in the list and the
+    bell line), no new one. Exactly the two rows the notice made (by id), and each only while its words are still what the notice wrote (a line that was changed since is left alone — whatever
+    language the person reads in now). The push that already went out cannot be taken back; the list says the time from now on. Returns (card rewritten, bell rewritten)."""
+    card = bell = False
+    if note is not None and note.body == written:
+        note.body = new_body
+        card = True
+    if evt is not None and (evt.payload or {}).get("body") == written:
+        evt.payload = {**evt.payload, "body": new_body}
+        bell = True
+    return card, bell
+
+
+async def _fill_time(db: AsyncSession, setup: DesktopSetup, row: DesktopSession) -> None:
+    """story 4781 (AC7 · PO 10-26): a «stopped» notice goes at once — the first report of a limit carries no reset time (10-26: 19 ms after the stop hook, the time came with the next
+    report) — and says «not known yet». When a report of the same limit brings the time, the notice is rewritten with it, not told again and not delayed. Once per notice, only for a
+    report from one of the setups the notice is about, and only while the notice is still the person's open one (a lifted or replaced notice is never rewritten)."""
+    if not await _someone_waits_for_time_on(setup.id):
+        return  # the common case: one cheap lookup, no query
+    people = await _recipients(db, setup)
+    for person in people:
+        try:
+            peeked = await _peek_time_unknown(setup.org_id, person.user_id)
+            if peeked is None:
+                continue
+            raw, mark = peeked
+            if str(setup.id) not in (mark.get("setups") or []):
+                continue  # a notice about other computers: this report is not about it
+            current = await _peek_open(setup.org_id, person.user_id)
+            if current is None or current.get("nonce") != mark.get("nonce"):
+                continue  # that notice is over (lifted · replaced): its mark waits for nothing and runs out by itself
+            async with db.begin_nested():
+                _, body, known, _, _, _, _ = await _stood_text(db, row, setup.org_id, person)
+                if not known:
+                    continue  # (another session of this person still has no time: the words stay as they are for now, and the mark stays)
+                note, evt, visible = await _load_stood_rows(db, mark, person, setup.org_id)
+                if not visible:
+                    continue  # the notice is not committed yet (a report at the same moment): the mark stays for the next one
+                if not await _claim_time_unknown(setup.org_id, person.user_id, raw):
+                    continue  # another report (or instance) took it, or it is a newer notice's
+                again = await _peek_open(setup.org_id, person.user_id)
+                if again is None or again.get("nonce") != mark.get("nonce"):
+                    continue  # the notice was replaced or lifted while this report was at it: its episode is over, nothing is written
+                card, bell = _rewrite_stood_time(note, evt, mark.get("written"), body)
+            logger.info("desktop limit notice: stood time filled in to=%s notification=%s bell=%s", member_prefix(person.member_id), card, bell)
+        except Exception:  # noqa: BLE001 — the rewrite is a correction of an echo, never a condition of the record
+            logger.warning("desktop limit notice: filling the time in failed setup=%s session=%s", setup.id, row.session_key, exc_info=True)
+    try:
+        if not any([await _time_mark_is_live(setup.org_id, p.user_id, setup.id) for p in people]):
+            await _drop_setup_pointer(setup.id)  # nobody waits for a time on this computer any more (a lifted notice's mark does not count): its reports are cheap again
+    except Exception:  # noqa: BLE001
+        logger.warning("desktop limit notice: dropping the pointer failed setup=%s", setup.id, exc_info=True)
 
 
 async def _lifted_candidates(db: AsyncSession, setup: DesktopSetup) -> list[Recipient]:
@@ -547,6 +810,8 @@ async def after_report(db: AsyncSession, setup: DesktopSetup, row: DesktopSessio
                 await _tell_if_due(db, setup, row)
                 return
             if now_limited == was_limited:
+                if now_limited and row.limit_at is not None:
+                    await _fill_time(db, setup, row)  # story 4781 (AC7): the same limit, now with its reset time
                 return
             if now_limited:
                 await _stood(db, setup, row)
