@@ -481,6 +481,27 @@ async def _close_grace_windows_leading_to(session: AsyncSession, user_id: uuid.U
 _FORWARD_WALK_MAX_HOPS = 256  # a lineage seen from a stale cookie is a few rotations; the cap only keeps the cost of a logout bounded however long a chain somebody made
 
 
+def _forward_lineage(user_id: uuid.UUID, token_id: uuid.UUID):
+    """the recursive statement both forward walks share: `token_id` and what a rotation made from it, hop by hop along `replaced_by` (a person's rows only, depth-capped, `UNION` drops a repeated row)."""
+    start = select(RefreshToken.id, RefreshToken.replaced_by, literal(0).label("depth")).where(
+        RefreshToken.user_id == user_id, RefreshToken.id == token_id,
+    ).cte("session_forward", recursive=True)
+    return start.union(select(RefreshToken.id, RefreshToken.replaced_by, (start.c.depth + 1).label("depth")).where(
+        RefreshToken.user_id == user_id, RefreshToken.id == start.c.replaced_by, start.c.depth < _FORWARD_WALK_MAX_HOPS,
+    ))
+
+
+async def _families_of_lineage(session: AsyncSession, user_id: uuid.UUID, token_id: uuid.UUID) -> list[uuid.UUID]:
+    """story 4782 (third PR) — the families that the token and what a rotation made from it belong to. Read AFTER the person's session lock was taken: a rotation that was in flight has committed — its
+    family included (a token from before migration 0468 gets its family at that rotation) — so the value is never the stale one from before the wait. Usually one; more than one when old pods (no family
+    written) and new pods rotated the same session in turn: the rows each family holds are the session's too."""
+    forward = _forward_lineage(user_id, token_id)
+    rows = await session.execute(
+        select(RefreshToken.family_id).where(RefreshToken.id.in_(select(forward.c.id)), RefreshToken.family_id.is_not(None)).distinct()
+    )
+    return list(rows.scalars().all())
+
+
 async def _end_sessions_following(session: AsyncSession, user_id: uuid.UUID, token_id: uuid.UUID, now: datetime) -> int:
     """story 4782 (second PR) — end what a rotation made FROM `token_id` (its successor, the successor's successor…): the same session, further along; and close the grace windows of the rotated ones.
 
@@ -492,12 +513,7 @@ async def _end_sessions_following(session: AsyncSession, user_id: uuid.UUID, tok
 
     Residual (named in the PR): the cap is a SECURITY limit too, not only a cost one — a logout whose cookie is more than `_FORWARD_WALK_MAX_HOPS` rotations behind the session's live end does not end or
     window-close the part of the lineage beyond the cap (a cookie that stale does not come from a browser that is still refreshing it)."""
-    start = select(RefreshToken.id, RefreshToken.replaced_by, literal(0).label("depth")).where(
-        RefreshToken.user_id == user_id, RefreshToken.id == token_id,
-    ).cte("session_forward", recursive=True)
-    forward = start.union(select(RefreshToken.id, RefreshToken.replaced_by, (start.c.depth + 1).label("depth")).where(
-        RefreshToken.user_id == user_id, RefreshToken.id == start.c.replaced_by, start.c.depth < _FORWARD_WALK_MAX_HOPS,
-    ))
+    forward = _forward_lineage(user_id, token_id)
     ended = await session.execute(
         update(RefreshToken)
         .where(RefreshToken.id.in_(select(forward.c.id)), RefreshToken.id != token_id, RefreshToken.revoked_at.is_(None), RefreshToken.expires_at > now)
@@ -508,6 +524,28 @@ async def _end_sessions_following(session: AsyncSession, user_id: uuid.UUID, tok
         .where(RefreshToken.id.in_(select(forward.c.id)), RefreshToken.revoked_at.is_not(None), RefreshToken.revoked_at != now, RefreshToken.expires_at > now)
         .values(expires_at=now)  # only the window closes (as `_revoke_other_sessions` does); the time the rotation ended it stays
     )
+    return ended.rowcount or 0
+
+
+async def _end_session_family(session: AsyncSession, user_id: uuid.UUID, family_id: uuid.UUID, now: datetime) -> int:
+    """story 4782 (third PR) — end the whole FAMILY of a sign-in's tokens: every row of this person that carries `family_id` (a rotation inherits it from the token it continues — winner, race-loser fork,
+    switch). Live rows end through the one revoke seam (`_explicit_revoke_values`); rows a rotation ended earlier lose the rest of their refresh grace window (§2449: `expires_at` goes down, the time
+    the rotation ended them stays; this statement's own stamp `now` is excluded as in `_end_sessions_following`). One statement each over `(user_id, family_id)` — no walk, no hop cap, no clock — so a
+    logout sent with ANY token of the session ends a fork nothing points at, and a stolen fork does not outlive the owner's logout. `user_id` is part of the key: a family never crosses persons
+    (and another sign-in of the same person is another family). Rows from before migration 0468 have no family: the callers still walk for those. Returns how many LIVE rows it ended."""
+    ended = await session.execute(
+        update(RefreshToken)
+        .where(RefreshToken.user_id == user_id, RefreshToken.family_id == family_id, RefreshToken.revoked_at.is_(None), RefreshToken.expires_at > now)
+        .values(**_explicit_revoke_values(now))
+    )
+    await session.execute(
+        update(RefreshToken)
+        .where(RefreshToken.user_id == user_id, RefreshToken.family_id == family_id, RefreshToken.revoked_at.is_not(None), RefreshToken.revoked_at != now, RefreshToken.expires_at > now)
+        .values(expires_at=now)
+    )
+    # the family id is the id of its FIRST token (a sign-in's own token · the legacy token a rotation started the family at): the tokens a rotation spent on the way TO it are not in the family when they were
+    # made by pods that wrote none (a mixed fleet) — their grace windows close here, bounded by the same rotation window as every backward walk (codex 4782 third PR round 2).
+    await _close_grace_windows_leading_to(session, user_id, family_id, now)
     return ended.rowcount or 0
 
 
@@ -1060,6 +1098,32 @@ def _context_uuid(md: dict, key: str) -> uuid.UUID | None:
     return uuid.UUID(str(value)) if value else None
 
 
+async def _adopt_legacy_family(session: AsyncSession, user_id: uuid.UUID, token_id: uuid.UUID) -> uuid.UUID:
+    """story 4782 (third PR) — the family a token from before migration 0468 (family NULL) joins when something is made from it, and the rows that join it with it.
+
+    Reads the forward chain from the token (`replaced_by`, the person's rows only, ONE recursive statement with no hop cap — `UNION` ends a corrupted loop) up to the first row that already has a family. That
+    family is the answer; with none on the way, the id of the END of the chain. Then EVERY family-less row of that stretch is given it, the token itself and the live tip included: a lineage of old rows is
+    one family from the first rotation of any of its rows, however the rotations are ordered — a stale token rotated after the tip's family exists joins it, one rotated before the tip is the end of its own
+    chain and names that END, and the tip (still live, still NULL) is given the same value now so that the family's logout reaches it. (Codex 4782 third PR rounds 3 · 4: «name the token itself» and «stop
+    at a hop cap» both left one session in two families.) The value is a real row's id, so the backward close from it (`_end_session_family`) starts at a token of the session. Two rotations of one legacy
+    token (a winner and a loser), or of two rows of one chain, compute the same value: a rotation in flight changes only the row it spent, and that row is then the end — or points at a row that already has it."""
+    walk = select(RefreshToken.id, RefreshToken.family_id, RefreshToken.replaced_by).where(
+        RefreshToken.user_id == user_id, RefreshToken.id == token_id,
+    ).cte("legacy_family_walk", recursive=True)
+    walk = walk.union(select(RefreshToken.id, RefreshToken.family_id, RefreshToken.replaced_by).where(
+        RefreshToken.user_id == user_id, RefreshToken.id == walk.c.replaced_by, walk.c.family_id.is_(None),
+    ))
+    # three candidates, all read by the database (no row of the chain is carried into the application — a chain somebody made long on purpose costs time, not memory or bind parameters), in this order:
+    # the family a row ahead already carries · the END of the chain (no successor, or one outside the stretch) · the smallest id of the stretch (a corrupted loop has no end: still one canonical value, so
+    # two adopters that meet at different rows of the loop name the same family)
+    ahead = select(walk.c.family_id).where(walk.c.family_id.is_not(None)).limit(1).scalar_subquery()
+    end = select(walk.c.id).where(or_(walk.c.replaced_by.is_(None), walk.c.replaced_by.not_in(select(walk.c.id)))).order_by(walk.c.id).limit(1).scalar_subquery()
+    lowest = select(walk.c.id).order_by(walk.c.id).limit(1).scalar_subquery()
+    family_id = (await session.execute(select(func.coalesce(ahead, end, lowest)))).scalar_one()
+    await session.execute(update(RefreshToken).where(RefreshToken.id.in_(select(walk.c.id)), RefreshToken.family_id.is_(None)).values(family_id=family_id))
+    return family_id
+
+
 async def _store_refresh_token(
     session: AsyncSession,
     user: User,
@@ -1069,12 +1133,29 @@ async def _store_refresh_token(
     app_metadata: dict,
     token_id: uuid.UUID | None = None,
     replaces_token_hash: str | None = None,
+    parent_token_hash: str | None = None,
 ) -> uuid.UUID:
     """story #4400 — the refresh token carries its session's org and project (the app_metadata the tokens were issued
     with). A refresh re-issues that session's context (`_refresh_session_context`), so each session keeps its own org:
-    switching org on one device no longer moves the others (they used to follow the person-wide last_org_id)."""
+    switching org on one device no longer moves the others (they used to follow the person-wide last_org_id).
+
+    story 4782 (third PR): `parent_token_hash` = the token this one continues (a refresh — the winner AND the race loser's fork —, switch-account, switch-org / project): the new row inherits its
+    `family_id`, so the whole session stays one family however it forks. A sign-in (no parent) starts a family of its own: the new token's id. A parent that is not this person's, or not there, starts a new family (a
+    family never crosses persons). A parent from before migration 0468 has no family yet: it takes the family its lineage already has, else the id of the end of its chain, and so does every family-less row of that stretch (`_adopt_legacy_family`) — the same value for every row of one
+    legacy lineage, so two rotations of the same legacy token (a winner and a loser) and a stale token rotated after a later one all land in ONE family."""
+    new_id = token_id if token_id is not None else uuid.uuid4()
+    family_id = new_id
+    if parent_token_hash is not None:
+        parent = (await session.execute(
+            select(RefreshToken.id, RefreshToken.family_id).where(RefreshToken.token_hash == parent_token_hash, RefreshToken.user_id == user.id)
+        )).first()
+        if parent is not None:
+            family_id = parent.family_id
+            if family_id is None:
+                family_id = await _adopt_legacy_family(session, user.id, parent.id)
     row = RefreshToken(
-        **({"id": token_id} if token_id is not None else {}),  # story 4778: a switch names the new token before it exists (the revoked one points at it in the same transaction)
+        id=new_id,  # story 4778: a switch names the new token before it exists (the revoked one points at it in the same transaction)
+        family_id=family_id,
         user_id=user.id,
         token_hash=hash_token(raw_token),
         org_id=_context_uuid(app_metadata, "org_id"),
@@ -1583,6 +1664,7 @@ async def refresh_token(
     await _store_refresh_token(
         session, user, tokens["refresh_token"], refresh_exp, app_metadata=_md,
         replaces_token_hash=token_hash if won_atomic_rotation else None,
+        parent_token_hash=token_hash,  # story 4782 (third PR): the winner AND the race loser's fork belong to the session of the token they were made from
     )
     # #2124(관측성 보강): 성공 회전도 old_key→new_key로 로깅 — 지금까지 성공 경로엔 로그가
     # 아예 없어(까심발견류 '침묵이 결함을 오래 살린다'와 동형) "회전은 성공했는데 클라가 새
@@ -1663,7 +1745,7 @@ async def switch_account(
     )
     # story 4778 — the rotation names its successor, as `refresh_token()` does (audit only for the grace window: no rule of it reads the link; the refresh route's «superseded» answer follows it). A rotated
     # token that points at nothing looks exactly like a rotation still in flight. Story 4782 (second PR): written in the SAME transaction as the revoke and the new row (`replaces_token_hash`).
-    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=_md, replaces_token_hash=token_hash)
+    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=_md, replaces_token_hash=token_hash, parent_token_hash=token_hash)
 
     return _ok({
         **tokens,
@@ -1702,6 +1784,11 @@ async def logout(
     if presented is not None:
         await _end_sessions_following(session, presented.user_id, presented.id, _now)
         await _close_grace_windows_leading_to(session, presented.user_id, presented.id, _now)
+        # story 4782 (third PR): the whole family of the sign-in, whichever token of it this cookie is — a rotation race LOSER's fork (nothing points at it) and a winner's far end alike. The family is read
+        # NOW, after the exclusive lock: a token from before migration 0468 that was rotated while this logout waited has just been given its family (read before the wait it would still be NULL and the
+        # fork of that rotation would survive).
+        for family_id in await _families_of_lineage(session, presented.user_id, presented.id):
+            await _end_session_family(session, presented.user_id, family_id, _now)
     await session.commit()
     return _ok({"ok": True})
 
@@ -2733,7 +2820,8 @@ async def switch_project(
         str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         session_started_at=_session_started_at,
     )
-    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=app_metadata, token_id=new_refresh_id)
+    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=app_metadata, token_id=new_refresh_id,
+                              parent_token_hash=hash_token(body.refresh_token) if body.refresh_token else None)  # story 4782 (third PR): the switch continues the session of the token it was given
 
     await session.commit()
     return _ok(tokens)
@@ -2822,7 +2910,8 @@ async def switch_organization(
         str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         session_started_at=_session_started_at,
     )
-    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=app_metadata, token_id=new_refresh_id)
+    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=app_metadata, token_id=new_refresh_id,
+                              parent_token_hash=hash_token(body.refresh_token) if body.refresh_token else None)  # story 4782 (third PR): the switch continues the session of the token it was given
 
     await session.commit()
 

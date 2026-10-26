@@ -110,6 +110,10 @@ class RefreshToken(Base):
         ForeignKey("refresh_tokens.id", ondelete="SET NULL", deferrable=True, initially="DEFERRED"),
         nullable=True,
     )
+    # story 4782 (third PR): the id of the sign-in's first token — every rotation (winner · loser fork · a switch of org / project / account) inherits its parent's value, so one statement
+    # (`user_id` + `family_id`) reaches the whole session however its lineage forked (`replaced_by` names one successor only; a rotation race LOSER's fork is pointed at by nothing). NULL = a row
+    # from before migration 0468 that has not rotated since — `_end_sessions_following` · `_close_grace_windows_leading_to` still walk for those.
+    family_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
