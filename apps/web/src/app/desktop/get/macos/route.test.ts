@@ -56,6 +56,21 @@ describe('GET /desktop/get/macos (public)', () => {
     }
   });
 
+  // Kadir's lens: a failure is logged by the error's NAME only — an error whose message carries a url or a token must not reach the log arguments (nor the error object itself)
+  it('a failed read logs the error name only — not the error object, not its message (secret-bearing message or body)', async () => {
+    const log = vi.mocked(console.error);
+    const SECRET = 'SECRET-TOKEN-4763';
+    fetchManifest.mockRejectedValue(new Error(`GCS fetch failed for https://storage.googleapis.com/${BUCKET}/x?token=${SECRET}`));
+    await GET();
+    fetchManifest.mockResolvedValue(`not json ${SECRET}`); // a SyntaxError message may quote the text it choked on
+    await GET();
+    expect(log).toHaveBeenCalledTimes(2);
+    const args = log.mock.calls.flat();
+    expect(args.some((a) => typeof a === 'object' && a !== null)).toBe(false); // no error object
+    expect(args.map(String).join('|')).not.toContain(SECRET);
+    expect(log.mock.calls.map((c) => c[1])).toEqual(['Error', 'SyntaxError']);
+  });
+
   it('no bucket configured · the manifest cannot be read · the body is not JSON · the body is not an object: 502, no redirect, no body', async () => {
     for (const bucket of [undefined, '', 'a/b']) { // no bucket named = nothing is ours: 502, empty, and the manifest is not even read
       if (bucket === undefined) delete process.env.DESKTOP_DOWNLOAD_BUCKET; else process.env.DESKTOP_DOWNLOAD_BUCKET = bucket;
