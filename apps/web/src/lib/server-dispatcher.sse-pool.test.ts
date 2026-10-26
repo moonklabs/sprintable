@@ -256,7 +256,7 @@ describe('the h1 agent keeps its 60 s keep-alive and is closed / destroyed with 
     const agent = install();
     await openStream(`${BACKEND_EVENT_STREAM_PATH}?member_id=m1`);
     const slow = fetch(`${srv.url}/slow`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).then(() => 'answered', () => 'cut');
-    await sleep(150); // the slow POST is on the wire
+    await until(() => (srv.versions.get('/slow')?.length ?? 0) > 0, 3000, 'the slow POST reaching the server'); // on the wire for real — a fixed sleep would let `destroy()` win the race on a slow machine and call a connect failure «cut» (codex)
     const t0 = performance.now();
     await withinMs(2500, agent.destroy(), 'destroy()');
     expect(performance.now() - t0).toBeLessThan(1500);
