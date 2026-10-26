@@ -326,4 +326,27 @@ describe('[SID:4780] ActivationChecklistBanner — the finish is shown once', ()
     await flush();
     expect(localStore.get(SEEN('org-1'))).toBe('1');
   });
+  it('the line never takes a tap from what is under it (the whole overlay is not hit-testable)', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'] });
+    answers(PARTIAL, COMPLETE);
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    await act(async () => { vi.advanceTimersByTime(ACTIVATION_REFRESH_MS); });
+    await flush();
+    const line = done();
+    expect(line).not.toBeNull();
+    expect(line!.closest('[data-testid="activation-done-fixed"]')?.className).toContain('pointer-events-none');
+    expect(line!.className).not.toContain('pointer-events-auto'); // reverted (the alert takes taps again) → the mobile header under it is blocked for 10 s
+  });
+
+  it('a tab hidden between the render and the effects spends nothing (the effects look at the tab themselves)', async () => {
+    localStore.set('sprintable_activation_checklist_complete:org-1', '1'); // complete from the first render: the finish effect runs on mount
+    localStore.set(SEEN('org-1'), '1');
+    let reads = 0;
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (reads++ < 2 ? 'visible' : 'hidden') }); // the render reads «visible»; by the time the effects run the tab is hidden
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    expect(localStore.get(SEEN('org-1'))).toBe('1'); // reverted (the effect trusts the value the render read) → spent
+    expect(done()).toBeNull();
+  });
 });

@@ -62,7 +62,8 @@ function isHiddenOn(pathname: string | null): boolean {
 // as before. The storage may be refused (private window · blocked): every read and write is guarded and a refused one simply shows nothing.
 const SEEN_OPEN_KEY = 'sprintable_activation_seen_open';
 // story 4780 (AC4): «seen» = drawn while the tab is VISIBLE. A phone that went to the background or turned its screen off while the reply was coming must not spend the mark (or the line's 10 s) on a line nobody
-// could look at: while hidden the mark stays and the clock stops; the line comes (once) when the tab is visible again.
+// could look at: while hidden the mark stays and the clock stops; the line comes (once) when the tab is visible again. The effects look at `document.visibilityState` themselves too: a tab can hide between the render
+// that read it and the effect that spends the mark.
 const subscribeVisibility = (listen: () => void) => {
   document.addEventListener('visibilitychange', listen);
   return () => document.removeEventListener('visibilitychange', listen);
@@ -111,12 +112,12 @@ export function ActivationChecklistBanner() {
   const [doneFor, setDoneFor] = useState<string | null>(null);
   const pageVisible = useSyncExternalStore(subscribeVisibility, readVisible, () => true);
   useEffect(() => {
-    if (seenOpenKey && !hidden && pageVisible && state && state.all_complete !== true && state.scope_is_requested_org !== false) writeMark(seenOpenKey);
+    if (seenOpenKey && !hidden && pageVisible && readVisible() && state && state.all_complete !== true && state.scope_is_requested_org !== false) writeMark(seenOpenKey);
   }, [seenOpenKey, hidden, pageVisible, state]);
   // «complete» here is complete FOR THIS ORGANIZATION: an answer that judged another organization (`scope_is_requested_org === false`) is not this one's finish (the banner's own scope guard below says the same)
   const completeHere = allComplete && state?.scope_is_requested_org !== false;
   useEffect(() => {
-    if (!completeHere || hidden || !pageVisible || !seenOpenKey || !readMark(seenOpenKey)) return;
+    if (!completeHere || hidden || !pageVisible || !readVisible() || !seenOpenKey || !readMark(seenOpenKey)) return;
     clearMark(seenOpenKey);
     setDoneFor(seenOpenKey);
   }, [completeHere, hidden, pageVisible, seenOpenKey]);
@@ -128,7 +129,7 @@ export function ActivationChecklistBanner() {
   const doneRemaining = useRef(ACTIVATION_DONE_LINE_MS);
   useEffect(() => {
     if (!doneFor) { doneRemaining.current = ACTIVATION_DONE_LINE_MS; return; }
-    if (!pageVisible) return;
+    if (!pageVisible || !readVisible()) return;
     const startedAt = Date.now();
     const timer = setTimeout(() => setDoneFor(null), doneRemaining.current);
     return () => {
@@ -172,7 +173,7 @@ export function ActivationChecklistBanner() {
             className="pointer-events-none fixed inset-x-3 top-[max(0.75rem,env(safe-area-inset-top))] z-50 mx-auto max-w-md"
             data-testid="activation-done-fixed"
           >
-            <Alert variant="success" data-testid="activation-done" className="pointer-events-auto shadow-md">
+            <Alert variant="success" data-testid="activation-done" className="shadow-md">
               <AlertTitle>{t('doneTitle')}</AlertTitle>
               <AlertDescription>{t('doneBody')}</AlertDescription>
             </Alert>
