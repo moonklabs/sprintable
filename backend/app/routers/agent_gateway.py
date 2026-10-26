@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import delete, select, text, update
+from sqlalchemy import bindparam, delete, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -373,6 +373,7 @@ async def _fetch_events(
     after_seq: int,
     limit: int,
     org_id: uuid.UUID,
+    types: "frozenset[str] | None" = None,
 ) -> list:
     """recipient_seq > after_seqì¸ visible ì´ë²¤í¸ ë°í (raw rows).
 
@@ -386,8 +387,9 @@ async def _fetch_events(
     # recipient (a write path that let it through) never reaches it. No event kind legitimately crosses orgs (events.org_id NOT
     # NULL · agent grants same-org · A2A org-scoped · verify in the agent's org). The skipped rows leave gaps in recipient_seq:
     # readers resume from the highest seq they got (no wait for seq+1).
-    rows = await session.execute(
-        text("""
+    # story 4788: a connection that acts on a few event types only (declared, or the legacy plugin) is sent those; the cursor is untouched, so another connection of the agent still gets the rest
+    type_filter = "AND e.event_type IN :types" if types else ""
+    stmt = text("""
             SELECT
                 e.id::text            AS event_id,
                 e.event_type,
@@ -410,11 +412,15 @@ async def _fetch_events(
             WHERE e.recipient_id = CAST(:agent_id AS uuid)
               AND e.org_id = CAST(:org_id AS uuid)
               AND e.recipient_seq > :after_seq
+              """ + type_filter + """
             ORDER BY e.recipient_seq ASC
             LIMIT :limit
-        """),
-        {"agent_id": str(agent_id), "org_id": str(org_id), "after_seq": after_seq, "limit": limit},
-    )
+        """)
+    params: dict = {"agent_id": str(agent_id), "org_id": str(org_id), "after_seq": after_seq, "limit": limit}
+    if types:
+        stmt = stmt.bindparams(bindparam("types", expanding=True))
+        params["types"] = sorted(types)
+    rows = await session.execute(stmt, params)
     return rows.fetchall()
 
 
@@ -649,6 +655,9 @@ async def agent_stream(
 
     start_seq = max(acked_seq, header_seq)
     agent_id_str = str(agent_id)
+    # story 4788 (INFRA-DIET ③): what this connection is sent — the types it declares (or, for the legacy Claude Code plugin, the allow-list it has always acted on); everything else as before
+    from app.services.agent_stream_accept import accepted_event_types
+    _accept_types, _accept_mode = accepted_event_types(request.headers)
 
     # E-INFRA S5: per-key(agent) 동시 스트림 제한 (tier-aware) — 초과 시 429 + Retry-After.
     # per-key 카운트 = _agent_connections[agent_id] (현재 동시 스트림 수). 새 연결은 아직 미등록 상태이므로
@@ -928,6 +937,7 @@ async def agent_stream(
             # the ack catches up would send that tail again (measured: 2,400 rows + 3 quick wakes, no ack → 9,620 frames for 2,405
             # seqs). A seq in here is skipped; one not in here (a late commit) still goes out. Trimmed to > acked on every wake.
             _sent_unacked = _SentUnacked()
+            _backfill_stats: dict = {"rows": 0, "bytes": 0, "types": {}}  # story 4788
 
             async def _send_batches(after_seq: int, is_backfill: bool):
                 """Every row after `after_seq`, batch after batch, until a batch comes back short — the newest row goes out on
@@ -939,7 +949,7 @@ async def agent_stream(
                 floor = after_seq
                 while True:
                     async with async_session_factory() as db:
-                        rows = await _fetch_events(db, agent_id, floor, _BACKFILL_LIMIT, uuid.UUID(org_id_str))
+                        rows = await _fetch_events(db, agent_id, floor, _BACKFILL_LIMIT, uuid.UUID(org_id_str), _accept_types)
                         sender_orgs = await _sender_orgs_for_rows(db, rows) if rows else {}
                     if not rows:
                         return
@@ -962,7 +972,12 @@ async def agent_stream(
                             )
                             _sse = _frame_data({**data, "is_backfill": is_backfill})
                             # AC2: ì¹´ë¼ ì´ë²¤í¸ëª only
-                            yield f"event: {sse_event_name(row.event_type)}\nid: {gseq}\ndata: {_sse}\n\n"
+                            _frame_text = f"event: {sse_event_name(row.event_type)}\nid: {gseq}\ndata: {_sse}\n\n"
+                            if is_backfill:  # story 4788: what the connect replay cost, by event type (counts and sizes only — read from the log after the pass)
+                                _backfill_stats["rows"] += 1
+                                _backfill_stats["bytes"] += len(_frame_text.encode("utf-8"))
+                                _backfill_stats["types"][row.event_type] = _backfill_stats["types"].get(row.event_type, 0) + 1
+                            yield _frame_text
                     await _presence_tick_if_due()  # between batches too (PO 01:28Z) — a long catch-up keeps presence / lease fresh
                     if len(rows) < _BACKFILL_LIMIT:
                         return
@@ -979,6 +994,16 @@ async def agent_stream(
             # PO 14:35Z ② — the backfill is batches too (it runs once the first heartbeat is read, which can be later)
             async for _frame in _send_batches(start_seq, is_backfill=True):
                 yield _frame
+            # story 4788 (INFRA-DIET ③): one line per connect — what the replay cost and what it was made of (the prod stream that sent 25.9 MB per connect had no such number anywhere)
+            _top = sorted(_backfill_stats["types"].items(), key=lambda kv: -kv[1])[:5]
+            # which agent, which key (one key per machine, usually) and which client: the prod stream that sent 25.9 MB per connect came through a proxy and could not be told apart. Ids only — a member id, the
+            # first 8 characters of the key's id (never the key), the client's name and version (letters, digits, `.` `/` `-` only, 40 characters at most)
+            _ua = re.sub(r"[^A-Za-z0-9._/ -]", "_", (request.headers.get("user-agent") or "-"))[:40]
+            logger.info(
+                "agent_stream backfill agent=%s key=%s ua=%s mode=%s from_seq=%d rows=%d bytes=%d types=%s",
+                agent_id_str, str(auth.claims.get("app_metadata", {}).get("api_key_id") or "-")[:8], _ua, _accept_mode, start_seq,
+                _backfill_stats["rows"], _backfill_stats["bytes"], ",".join(f"{t}:{n}" for t, n in _top) or "-",
+            )
             if _batches_ended:
                 return
 
@@ -1059,6 +1084,8 @@ async def agent_stream(
                             yield _access_revoked_frame(_revoked)
                             return
                         event_type = signal.get("event_type", "message")
+                        if _accept_types is not None and event_type not in _accept_types:
+                            continue  # story 4788: a connection that declared the types it acts on is sent those only — a non-durable push too
                         # story 4649: the direct push's frame leads with the same two keys (one lookup for this sender)
                         _sse = _frame_data({**_with_stream_org({**signal, "sender_org_id": await _sender_org_of(signal.get("sender_id"))}, uuid.UUID(org_id_str)), "is_backfill": False})
                         yield f"event: {sse_event_name(event_type)}\ndata: {_sse}\n\n"
