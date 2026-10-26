@@ -35,19 +35,24 @@ def _positional_after(args: list[str], i: int) -> str | None:
     return None
 
 
+# `gcloud [global flags] [alpha|beta] run deploy <svc>` / `… run services update|replace <svc>` ANYWHERE in a line (after `&&`, `;`, `|`, `$(`, …), not only at its start. A comment that merely mentions it matches too:
+# that can only make the closed-set check RED (an unknown name), never let a real command slip past.
+_GCLOUD_RUN = re.compile(r"\bgcloud(?:\s+-\S+(?:\s+[^-\s]\S*)?)*\s+(?:(?:alpha|beta)\s+)?run\s+(?:deploy|services\s+(?:update|replace))\s+(\S+)")
+
+
 def _commands(doc: dict | None = None) -> list[tuple[str, str]]:
-    """every `gcloud run deploy <service>` / `gcloud run services update <service>` in cloudbuild.yaml (service, full command text incl. continuation lines) — inside any argument that is a script (`bash -c`, `sh -c`, …)
-    and as a direct gcloud step (the cloud-sdk image's default entrypoint is gcloud): `run deploy` / `run services update` are looked for ANYWHERE in the args, so a global flag in front
-    (`--project=p`, `--quiet`, `--project p`) does not hide them"""
+    """every Cloud Run deploy / update command in cloudbuild.yaml: (service, full command text incl. continuation lines). Found (1) in every argument string that holds a script (`bash -c`, `sh -c`, …), anywhere on a line,
+    with global flags and `alpha` / `beta` in front; (2) as a direct gcloud step — the entrypoint is absent (the cloud-sdk image's default) or any path ending in `gcloud` — where `run deploy` /
+    `run services update|replace` are looked for ANYWHERE in the args (a global flag in front does not hide them; the service is the next non-flag token)."""
     out: list[tuple[str, str]] = []
-    start = re.compile(r"^\s*gcloud run (?:deploy|services update) (\S+)")
     for step in (doc or yaml.safe_load(_CLOUDBUILD))["steps"]:
         args = [str(a) for a in (step.get("args") or [])]
-        if step.get("entrypoint") in (None, "gcloud"):
+        entry = step.get("entrypoint")
+        if entry is None or os.path.basename(str(entry)) == "gcloud":
             for i in range(len(args) - 1):
                 if args[i : i + 2] == ["run", "deploy"]:
                     name = _positional_after(args, i + 2)
-                elif args[i : i + 3] == ["run", "services", "update"]:
+                elif args[i : i + 3] in (["run", "services", "update"], ["run", "services", "replace"]):
                     name = _positional_after(args, i + 3)
                 else:
                     continue
@@ -55,23 +60,22 @@ def _commands(doc: dict | None = None) -> list[tuple[str, str]]:
                     out.append((name, "gcloud " + " ".join(args)))
         for arg in args:  # every argument that holds a script
             lines = arg.split("\n")  # the file's own text (escaped form): the checks below read it as written
-            i = 0
-            while i < len(lines):
-                m = start.match(lines[i])  # a comment line starts with `#`, never with `gcloud`
-                if not m:
-                    i += 1
+            for i, line in enumerate(lines):
+                if line.lstrip().startswith("#"):
                     continue
-                text = [lines[i]]
-                while text[-1].rstrip().endswith("\\") and i + 1 < len(lines):
-                    i += 1
-                    text.append(lines[i])
-                out.append((m.group(1), "\n".join(text)))
-                i += 1
+                for m in _GCLOUD_RUN.finditer(line):
+                    text = [line[m.start():]]
+                    j = i
+                    while text[-1].rstrip().endswith("\\") and j + 1 < len(lines):
+                        j += 1
+                        text.append(lines[j])
+                    out.append((m.group(1), "\n".join(text)))
     return out
 
 
 def test_the_scan_also_finds_a_direct_gcloud_step():
-    """a new service added as `args: [run, deploy, new-service, …]` (no bash), with or without global flags in front, must not slip past the closed-set check (codex 4786)"""
+    """a new service added as `args: [run, deploy, new-service, …]` (no bash), with global flags in front, behind another command on the same line, through `/usr/bin/gcloud`, or as `gcloud beta run deploy`,
+    must not slip past the closed-set check (codex 4786, three rounds)"""
     sdk = "gcr.io/google.com/cloudsdktool/cloud-sdk"
     doc = {"steps": [
         {"name": sdk, "args": ["run", "deploy", "brand-new-service", "--image=x"]},
@@ -79,12 +83,20 @@ def test_the_scan_also_finds_a_direct_gcloud_step():
         {"name": sdk, "entrypoint": "gcloud", "args": ["--project=p", "run", "deploy", "flag-first", "--image=x"]},
         {"name": sdk, "entrypoint": "gcloud", "args": ["--quiet", "--project", "p", "run", "services", "update", "flag-then-value", "--image=x"]},
         {"name": sdk, "entrypoint": "gcloud", "args": ["run", "deploy", "--image=x", "flag-between"]},
+        {"name": sdk, "entrypoint": "/usr/bin/gcloud", "args": ["run", "deploy", "by-path", "--image=x"]},
+        {"name": sdk, "entrypoint": "gcloud", "args": ["run", "services", "replace", "by-replace"]},
         {"name": "x", "entrypoint": "bash", "args": ["-c", "gcloud run deploy in-bash \\\n  --image=x \\\n  --quiet"]},
+        {"name": "x", "entrypoint": "bash", "args": ["-c", "gcloud run deploy first --image=x && gcloud run deploy chained --image=x"]},
+        {"name": "x", "entrypoint": "bash", "args": ["-c", "echo go; gcloud --project p beta run services update beta-one --image=x"]},
         {"name": "x", "entrypoint": "sh", "args": ["-c", "gcloud run deploy in-sh --image=x"]},
         {"name": "x", "entrypoint": "bash", "args": ["-c", "# gcloud run deploy only-a-comment\necho hi"]},
         {"name": "x", "entrypoint": "bash", "args": ["-c", "echo run deploy not-a-gcloud-step"]},
+        {"name": "x", "entrypoint": "docker", "args": ["run", "deploy", "not-gcloud"]},
     ]}
-    assert [s for s, _ in _commands(doc)] == ["brand-new-service", "another-new", "flag-first", "flag-then-value", "flag-between", "in-bash", "in-sh"]
+    assert [s for s, _ in _commands(doc)] == [
+        "brand-new-service", "another-new", "flag-first", "flag-then-value", "flag-between", "by-path", "by-replace",
+        "in-bash", "first", "chained", "beta-one", "in-sh",
+    ]
 
 
 def test_every_cloud_run_deploy_command_states_its_billing_mode():
