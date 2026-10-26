@@ -534,6 +534,42 @@ async def test_after_logout_a_hop_stamped_a_little_early_by_a_slow_clock_does_no
         await _close(engine, w)
 
 
+async def test_the_logout_walk_stops_at_the_first_row_older_than_the_window():
+    """Kadir's lens (a survivor mutant): the time bound must hold on EVERY hop, not only the first — it is what keeps a logout's cost independent of how long a chain somebody made. a -> b -> c -> d by
+    refresh; a and b were rotated an hour ago (rows aged by hand: `revoked_at` an hour back, their `expires_at` left ahead so that a touch would show), c a moment ago. Logging d out closes c's
+    window and goes no further: a and b are not exploitable any more and are not touched."""
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import select, update
+
+    from app.core.security import hash_token
+    from app.models.user import RefreshToken
+
+    engine, w = await _world()
+    try:
+        a = await w.login()
+        b = (await w.refresh(a["refresh_token"])).json()["data"]
+        c = (await w.refresh(b["refresh_token"])).json()["data"]
+        d = (await w.refresh(c["refresh_token"])).json()["data"]
+        now = datetime.now(timezone.utc)
+        async with w.Session() as s:
+            for old in (a, b):
+                await s.execute(update(RefreshToken).where(RefreshToken.token_hash == hash_token(old["refresh_token"])).values(revoked_at=now - timedelta(hours=1)))
+            await s.commit()
+
+        async def expires(token: dict):
+            async with w.Session() as s:
+                return (await s.execute(select(RefreshToken.expires_at).where(RefreshToken.token_hash == hash_token(token["refresh_token"])))).scalar_one()
+
+        a_before, b_before = await expires(a), await expires(b)
+        assert (await w.client.post("/api/v2/auth/logout", json={"refresh_token": d["refresh_token"]})).status_code == 200
+        assert await expires(c) <= datetime.now(timezone.utc), "the recent predecessor's window was not closed"
+        assert await expires(b) == b_before, "the walk went past the first row older than the window (b)"
+        assert await expires(a) == a_before, "the walk went past the first row older than the window (a)"
+    finally:
+        await _close(engine, w)
+
+
 async def test_a_logout_of_one_session_leaves_the_grace_window_of_another_session_open():
     """control: the chain closed is the logged-out session's own — another device's just-rotated token keeps its straggler window."""
     engine, w = await _world()

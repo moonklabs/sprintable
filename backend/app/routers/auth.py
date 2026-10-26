@@ -415,7 +415,8 @@ async def _revoke_other_sessions(
 
 # `revoked_at` is stamped by the app pod that ended the token, and pods' clocks differ by a little: along a chain it is monotonic only up to that skew. The time bound of
 # `_close_grace_windows_leading_to` carries this much slack on top of the rotation window, so a hop stamped «too early» by a slow clock cannot end the walk while an older, still exploitable
-# predecessor lies inside the window (codex 4782 round 5). The slack only widens the walk by the few rotations of one more minute.
+# predecessor lies inside the window (codex 4782 round 5). The slack only widens the walk by the few rotations of one more minute. The premise of the 60 s: the app pods' clocks stay within
+# that of each other (Cloud Run keeps them on NTP) — a skew beyond it can still leave one open window behind (a named limit in the PR, not a silent one).
 _CHAIN_CLOCK_SLACK_SECONDS = 60
 
 
