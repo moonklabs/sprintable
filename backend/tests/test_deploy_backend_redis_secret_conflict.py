@@ -393,19 +393,11 @@ def _apply_cloudbuild_escaping(script: str) -> str:
     return script.replace("$$", "$")
 
 
-def _run_env_vars_assembly(
-    deploy_env: str, redis_url: str, gotenberg_url: str = "", support_gateway_url: str = "", var: str = "ENV_VARS",
-) -> str:
-    """실제 gcloud 호출부만 잘라내고 ENV_VARS 조립 로직까지만 실행 — 실제 배포 없이 결과 문자열만 얻는다."""
-    script = _apply_cloudbuild_escaping(_extract_deploy_backend_script())
-    # 실제 gcloud run deploy 호출 라인 이후는 잘라내고 ENV_VARS를 echo하도록 붙인다.
-    # ⚠️"gcloud run deploy"만으로 찾으면 그 문구를 언급하는 주석(설명 문장)에 먼저 매치된다 —
-    # 실제 호출부에만 있는 서비스명까지 포함해 정확히 그 라인을 찾는다.
-    marker = "gcloud run deploy sprintable-backend"
-    idx = script.index(marker)
-    assembly_only = script[:idx] + f'\necho "RESULT_ENV_VARS=${{{var}}}"\n'
-
-    env = {
+def _backend_step_env(
+    deploy_env: str, redis_url: str = "", gotenberg_url: str = "", support_gateway_url: str = "", **overrides: str,
+) -> dict[str, str]:
+    """the substitutions deploy-backend reads, as environment variables (set -u kills the script on a missing one); `overrides` replace single values"""
+    return {
         **os.environ,
         "_DEPLOY_ENV": deploy_env,
         "_FASTAPI_URL": "https://example.run.app",
@@ -465,7 +457,24 @@ def _run_env_vars_assembly(
         "_BACKEND_TIMEOUT": "1800" if deploy_env == "prod" else "3600",
         # story #4397 — GHA sets prod 'false' · dev 'true' (set -u).
         "_PUSH_DEVICES_BY_USER": "false" if deploy_env == "prod" else "true",
+    
+        **overrides,
     }
+
+
+def _run_env_vars_assembly(
+    deploy_env: str, redis_url: str, gotenberg_url: str = "", support_gateway_url: str = "", var: str = "ENV_VARS",
+) -> str:
+    """실제 gcloud 호출부만 잘라내고 ENV_VARS 조립 로직까지만 실행 — 실제 배포 없이 결과 문자열만 얻는다."""
+    script = _apply_cloudbuild_escaping(_extract_deploy_backend_script())
+    # 실제 gcloud run deploy 호출 라인 이후는 잘라내고 ENV_VARS를 echo하도록 붙인다.
+    # ⚠️"gcloud run deploy"만으로 찾으면 그 문구를 언급하는 주석(설명 문장)에 먼저 매치된다 —
+    # 실제 호출부에만 있는 서비스명까지 포함해 정확히 그 라인을 찾는다.
+    marker = "gcloud run deploy sprintable-backend"
+    idx = script.index(marker)
+    assembly_only = script[:idx] + f'\necho "RESULT_ENV_VARS=${{{var}}}"\n'
+
+    env = _backend_step_env(deploy_env, redis_url, gotenberg_url, support_gateway_url)
     proc = subprocess.run(
         ["bash", "-c", assembly_only],
         capture_output=True, text=True, env=env, check=True,
@@ -474,6 +483,16 @@ def _run_env_vars_assembly(
         if line.startswith("RESULT_ENV_VARS="):
             return line[len("RESULT_ENV_VARS="):]
     raise AssertionError(f"ENV_VARS not found in output: {proc.stdout!r}")
+
+
+def _run_backend_deploy_argv(deploy_env: str, **overrides: str) -> list[str]:
+    """the whole deploy-backend step with only gcloud intercepted — the argument list `gcloud run deploy` would receive (story 4786: the minimum and the CPU flag must arrive)"""
+    script = _apply_cloudbuild_escaping(_extract_deploy_backend_script())
+    env = _backend_step_env(deploy_env, "", **overrides)
+    env.update({"PROJECT_ID": "p", "COMMIT_SHA": "c", "_AR_REGION": "asia-northeast3", "_AR_REPO": "r", "_BACKEND_MIN_INSTANCES": "2", "_BACKEND_MAX_INSTANCES": "8", "_CPU_FLAGS": ""} | overrides)
+    stub = 'gcloud() { printf "ARG=%s\\n" "$@"; }\n'
+    proc = subprocess.run(["bash", "-c", stub + script], capture_output=True, text=True, env=env, check=True)
+    return [line[len("ARG="):] for line in proc.stdout.splitlines() if line.startswith("ARG=")]
 
 
 def test_deploy_backend_no_unescaped_shell_vars_in_cloudbuild_substitution_syntax():

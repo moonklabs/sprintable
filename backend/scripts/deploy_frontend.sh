@@ -53,8 +53,10 @@ IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/${AR_REPO}/frontend:${COMMIT_
 # 실행 전용 보조 경로라 값이 바뀌면 두 곳을 손으로 맞출 수밖에 없다(자동 동기화 없음). 다음에
 # min/max-instances를 바꿀 땐 반드시 이 파일도 같이 검토할 것 — 안 그러면 오늘과 같은 드리프트가
 # 재발한다.
+CPU_FLAGS=""  # story 4786: dev only (below) — prod keeps its current CPU allocation
 case "${ENV}" in
     dev)
+        CPU_FLAGS="--cpu-throttling"  # story 4786: CPU billed only while a request is served (what the SSOT sends for dev: cloudbuild.yaml `_CPU_FLAGS`)
         SERVICE_NAME="sprintable-frontend-dev"
         MIN_INSTANCES=0  # story 4786 (E-INFRA-DIET): dev 는 «쓸 때만» 돈다 — SSOT(cloud-build.yml dev 분기 · cloudbuild.yaml)와 같은 값
         MAX_INSTANCES=3
@@ -163,7 +165,7 @@ gcloud run deploy "${SERVICE_NAME}" \
     --timeout=60 \
     --update-env-vars="${ENV_VARS_SPEC}" \
     --update-secrets="${SECRETS_SPEC}" \
-    --cpu-boost
+    --cpu-boost ${CPU_FLAGS}
 
 SERVICE_URL=$(gcloud run services describe "${SERVICE_NAME}" \
     --region="${GCP_REGION}" \

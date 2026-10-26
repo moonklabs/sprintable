@@ -1,13 +1,18 @@
-"""story 4786 (E-INFRA-DIET) — dev runs only when it is used: the three Cloud Run services this repo deploys (backend · realtime · frontend) have a minimum of 0 instances on dev, their CPU is
-billed only while a request is being served, and the prod lines are not touched.
+"""story 4786 (E-INFRA-DIET) — dev keeps no idle capacity it does not need: realtime-dev 2 → 0 (it receives no requests) · frontend-dev 1 → 0 (2 s start) · backend-dev 3 → 2 (PO, after the lens on PR 5244: a new backend
+instance takes ≈31 s to start and the long streams, not CPU, bind it, so 0 is not safe at a deploy — story 4789 lifts that); CPU on dev is billed only while a request is served (it already is Cloud Run's default —
+the flag writes it down); the prod lines are not touched and a prod build that does not state its minimums fails first.
 
-Why a static check: the effective dev value is NOT the default in cloudbuild.yaml — the GitHub workflow's dev branch (`.github/workflows/cloud-build.yml`) overrides it on every deploy, so a hand-set
-value (or a default changed alone) comes back. Both files are read here; a change to only one of them, or a prod line dropped to 0 by mistake, turns this red.
+Why a static check: the effective dev value is NOT the default in cloudbuild.yaml — the GitHub workflow's dev branch (`.github/workflows/cloud-build.yml`) overrides it on every deploy, so a hand-set value (or a default
+changed alone) comes back. Both files are read here, and the hops between them (the workflow's env mapping, the substitution list, the deploy step's flag) are checked, not only the two ends.
 """
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from pathlib import Path
+
+import yaml
 
 _ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOW = (_ROOT / ".github/workflows/cloud-build.yml").read_text()
@@ -26,6 +31,9 @@ def _branch(mark: str, end: str) -> str:
 _PROD = _branch(_PROD_MARK, _DEV_MARK)
 _DEV = _branch(_DEV_MARK, _NEXT_STEP)
 
+_DEV_MINS = {"backend_min_instances": 2, "realtime_min_instances": 0, "frontend_min_instances": 0}
+_DEFAULTS = {"_BACKEND_MIN_INSTANCES": "2", "_REALTIME_MIN_INSTANCES": "0", "_FRONTEND_MIN_INSTANCES": "0"}
+
 
 def _outputs(branch: str, name: str) -> list[int]:
     return [int(v) for v in re.findall(rf'echo "{name}=(\d+)"', branch)]
@@ -38,25 +46,53 @@ def test_the_branch_slices_are_the_real_prod_and_dev_branches():
     assert 'echo "target=dev"' not in _PROD and 'echo "target=prod"' not in _DEV
 
 
-def test_dev_minimum_instances_are_zero_in_the_workflow_that_overrides_the_defaults():
-    for name in ("backend_min_instances", "realtime_min_instances", "frontend_min_instances"):
-        assert _outputs(_DEV, name) == [0], (name, _outputs(_DEV, name))
+def test_dev_minimum_instances_in_the_workflow_that_overrides_the_defaults():
+    for name, value in _DEV_MINS.items():
+        assert _outputs(_DEV, name) == [value], (name, _outputs(_DEV, name))
 
 
 def test_prod_minimum_instances_are_still_set():
-    """the prod lines are not part of this story: not dropped, not zeroed by a careless edit"""
+    """the prod lines are not part of this story: not dropped, never zeroed by a careless edit (lowering prod to another non-zero number is a later story's business)"""
     assert all(v >= 1 for v in _outputs(_PROD, "backend_min_instances")) and _outputs(_PROD, "backend_min_instances")
     assert all(v >= 1 for v in _outputs(_PROD, "frontend_min_instances")) and _outputs(_PROD, "frontend_min_instances")
 
 
-def test_cloudbuild_defaults_for_the_dev_safe_fallback_are_zero_too():
-    for name in ("_BACKEND_MIN_INSTANCES", "_REALTIME_MIN_INSTANCES", "_FRONTEND_MIN_INSTANCES"):
-        assert re.findall(rf"^  {name}: '(\d+)'$", _CLOUDBUILD, flags=re.M) == ["0"], name
+def test_cloudbuild_defaults_for_the_dev_safe_fallback():
+    for name, value in _DEFAULTS.items():
+        assert re.findall(rf"^  {name}: '(\d+)'$", _CLOUDBUILD, flags=re.M) == [value], name
+
+
+def test_the_minimums_reach_cloud_build_through_the_env_mapping_and_the_substitution_list():
+    """the two middle hops: `V_*` takes the workflow output, and the substitution list sends it (a hard-coded `_BACKEND_MIN_INSTANCES="3"` there would pass the two ends and still deploy 3)"""
+    for var, output in (("BACKEND", "backend"), ("REALTIME", "realtime"), ("FRONTEND", "frontend")):
+        assert f"V_{var}_MIN_INSTANCES: ${{{{ steps.env.outputs.{output}_min_instances }}}}" in _WORKFLOW, var
+        assert f'_{var}_MIN_INSTANCES=\\"${{V_{var}_MIN_INSTANCES}}\\"' in _WORKFLOW, var
 
 
 def _deploy_block(service: str) -> str:
     start = _CLOUDBUILD.index(f"gcloud run deploy sprintable-{service}-${{_DEPLOY_ENV}}")
     return _CLOUDBUILD[start:_CLOUDBUILD.index("--quiet", start)]
+
+
+def _step_script(step_id: str) -> str:
+    doc = yaml.safe_load(_CLOUDBUILD)
+    return next(s for s in doc["steps"] if s["id"] == step_id)["args"][1].replace("$$", "$")
+
+
+def test_the_deploy_steps_send_their_minimum_and_the_dev_cpu_flag_as_arguments():
+    """the real steps run with gcloud intercepted: the substitution value becomes `--min-instances=<value>`; dev's `--cpu-throttling` is exactly one argument, prod's empty flag is no argument at all"""
+    from tests.test_deploy_backend_redis_secret_conflict import _run_backend_deploy_argv, _run_frontend_deploy_argv
+
+    backend_dev = _run_backend_deploy_argv("dev", _CPU_FLAGS="--cpu-throttling", _BACKEND_MIN_INSTANCES="2")
+    assert "--min-instances=2" in backend_dev and backend_dev.count("--cpu-throttling") == 1, backend_dev
+    backend_prod = _run_backend_deploy_argv("prod", _CPU_FLAGS="", _BACKEND_MIN_INSTANCES="3")
+    assert "--min-instances=3" in backend_prod and "--cpu-throttling" not in backend_prod and "" not in backend_prod, backend_prod
+    frontend_dev = _run_frontend_deploy_argv("dev", "--cpu-throttling")
+    assert frontend_dev.count("--cpu-throttling") == 1 and "--cpu-boost" in frontend_dev, frontend_dev
+    frontend_prod = _run_frontend_deploy_argv("prod", "")
+    assert "--cpu-throttling" not in frontend_prod and "" not in frontend_prod, frontend_prod
+    assert "--min-instances=${_FRONTEND_MIN_INSTANCES}" in _deploy_block("frontend")
+    assert "--min-instances=${_REALTIME_MIN_INSTANCES}" in _deploy_block("realtime")
 
 
 def test_dev_cpu_is_billed_only_while_a_request_is_served():
@@ -75,19 +111,30 @@ def test_dev_cpu_is_billed_only_while_a_request_is_served():
     assert 'if [ "${_DEPLOY_ENV}" != "dev" ]; then' in _CLOUDBUILD[: _CLOUDBUILD.index("gcloud run deploy sprintable-realtime-")]
 
 
-def test_the_manual_frontend_script_agrees_for_dev_and_leaves_prod_alone():
-    script = (_ROOT / "backend/scripts/deploy_frontend.sh").read_text()
-    dev = script[script.index("    dev)"):script.index("    prod)")]
-    prod = script[script.index("    prod)"):]
-    assert re.search(r"^\s+MIN_INSTANCES=0\b", dev, flags=re.M)
-    assert re.search(r"^\s+MIN_INSTANCES=3\b", prod, flags=re.M)
+def _run_guard(deploy_env: str, explicit: str) -> subprocess.CompletedProcess:
+    env = {**os.environ, "_DEPLOY_ENV": deploy_env, "_MINS_EXPLICIT": explicit}
+    return subprocess.run(["bash", "-c", _step_script("guard-prod-mins")], capture_output=True, text=True, env=env)
 
 
-def test_the_frontend_step_passes_the_flag_as_its_own_argument_only_when_it_is_given():
-    """run the real deploy-frontend step with gcloud intercepted: dev (the workflow sends `--cpu-throttling`) gets the flag as one argument; prod (empty) gets nothing — not even an empty argument"""
-    from tests.test_deploy_backend_redis_secret_conflict import _run_frontend_deploy_argv
+def test_a_prod_build_that_does_not_state_its_minimums_fails_first():
+    """fail-closed: the dev-safe defaults must never reach prod by omission (a hand-run `gcloud builds submit`)"""
+    steps = yaml.safe_load(_CLOUDBUILD)["steps"]
+    assert steps[0]["id"] == "guard-prod-mins"  # first: nothing deploys after a failure
+    assert _run_guard("prod", "").returncode != 0 and _run_guard("prod", "false").returncode != 0
+    assert _run_guard("prod", "true").returncode == 0
+    assert _run_guard("dev", "").returncode == 0  # dev is what the defaults are for
+    assert re.findall(r"^  _MINS_EXPLICIT: '(.*)'$", _CLOUDBUILD, flags=re.M) == [""]  # a manual submit never inherits `true`
+    assert 'echo "mins_explicit=true"' in _PROD and "mins_explicit" not in _DEV
+    assert "V_MINS_EXPLICIT: ${{ steps.env.outputs.mins_explicit }}" in _WORKFLOW
+    assert '_MINS_EXPLICIT=\\"${V_MINS_EXPLICIT}\\"' in _WORKFLOW
 
-    with_flag = _run_frontend_deploy_argv("dev", "--cpu-throttling")
-    assert with_flag.count("--cpu-throttling") == 1 and "--cpu-boost" in with_flag
-    without = _run_frontend_deploy_argv("prod", "")
-    assert "--cpu-throttling" not in without and "" not in without
+
+def test_the_manual_scripts_agree_for_dev_and_leave_prod_alone():
+    for name, dev_min, prod_min in (("frontend", 0, 3), ("backend", 2, 1)):
+        script = (_ROOT / f"backend/scripts/deploy_{name}.sh").read_text()
+        dev = script[script.index("    dev)"):script.index("    prod)")]
+        prod = script[script.index("    prod)"):]
+        assert re.search(rf"^\s+MIN_INSTANCES={dev_min}\b", dev, flags=re.M), name
+        assert re.search(rf"^\s+MIN_INSTANCES={prod_min}\b", prod, flags=re.M), name
+        assert 'CPU_FLAGS="--cpu-throttling"' in dev and "CPU_FLAGS=" not in prod, name
+        assert script.count("${CPU_FLAGS}") == 1 and 'CPU_FLAGS=""' in script, name  # the flag reaches the one gcloud call
