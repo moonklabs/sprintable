@@ -403,4 +403,32 @@ describe('[SID:4780] ActivationChecklistBanner — the finish is shown once', ()
     await act(async () => { vi.advanceTimersByTime(4000); });
     expect(done()).toBeNull();
   });
+  it('a «complete» that only the server\'s hint gave spends nothing before it is confirmed: an answer that says open (another organization) leaves the mark, the next real completion shows its line', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'Date'] });
+    mockSeed.complete = true;
+    mockSeed.fromHint = true;
+    localStore.set(SEEN('org-1'), '1');
+    answers({ ...PARTIAL, scope_is_requested_org: false }, COMPLETE);
+    await act(async () => { root.render(wrap()); });
+    expect(localStore.get(SEEN('org-1'))).toBe('1'); // reverted (the seed spends it before the answer) → gone
+    await flush();
+    expect(localStore.get(SEEN('org-1'))).toBe('1');
+    expect(done()).toBeNull();
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await flush();
+    expect(done()).not.toBeNull();
+  });
+
+  it('a timer that fires after the tab has hidden (the hide event not yet delivered) does not take the line down', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'Date'] });
+    localStore.set(SEEN('org-1'), '1');
+    answers(COMPLETE);
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    expect(done()).not.toBeNull();
+    await act(async () => { vi.advanceTimersByTime(ACTIVATION_DONE_LINE_MS - 50); });
+    visibility = 'hidden'; // hidden, but the visibilitychange has not reached the component yet
+    await act(async () => { vi.advanceTimersByTime(100); }); // the line's timer fires now
+    expect(done()).not.toBeNull(); // reverted (the callback clears at once) → the line was spent while nobody could look
+  });
 });

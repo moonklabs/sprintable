@@ -116,11 +116,13 @@ export function ActivationChecklistBanner() {
   }, [seenOpenKey, hidden, pageVisible, state]);
   // «complete» here is complete FOR THIS ORGANIZATION: an answer that judged another organization (`scope_is_requested_org === false`) is not this one's finish (the banner's own scope guard below says the same)
   const completeHere = allComplete && state?.scope_is_requested_org !== false;
+  // a «complete» the server's HINT gave (read again in the background) is not yet a finish: only an answer that has come in — or a completion this browser saw itself — spends the mark
+  const completeConfirmed = completeHere && (state !== null || !activationSeedFromHint);
   useEffect(() => {
-    if (!completeHere || hidden || !pageVisible || !readVisible() || !seenOpenKey || !readMark(seenOpenKey)) return;
+    if (!completeConfirmed || hidden || !pageVisible || !readVisible() || !seenOpenKey || !readMark(seenOpenKey)) return;
     clearMark(seenOpenKey);
     setDoneFor(seenOpenKey);
-  }, [completeHere, hidden, pageVisible, seenOpenKey]);
+  }, [completeConfirmed, hidden, pageVisible, seenOpenKey]);
   // the line is for the page and the organization it was set on: leaving either takes it down for good (coming back within the 10 s does not show it again — the mark is already spent)
   // a functional update on purpose: in the same commit the finish effect above may have set the NEW organization's line — a check against the value this render saw would take that one down with the old one's
   // …and a line whose «complete» is taken back (a stale completion re-read as open) goes too, with its clock — the next completion shows a fresh 10 s
@@ -135,7 +137,11 @@ export function ActivationChecklistBanner() {
     if (doneClock.current.forOrg !== doneFor) doneClock.current = { forOrg: doneFor, left: ACTIVATION_DONE_LINE_MS };
     if (!pageVisible || !readVisible()) return;
     const startedAt = Date.now();
-    const timer = setTimeout(() => setDoneFor(null), doneClock.current.left);
+    // the callback checks itself: a tab that hid in the last milliseconds, or a line that is by now another organization's, is not taken down by this timer
+    const timer = setTimeout(() => {
+      if (!readVisible()) return;
+      setDoneFor((current) => (current === doneFor ? null : current));
+    }, doneClock.current.left);
     return () => {
       clearTimeout(timer);
       doneClock.current.left = Math.max(0, doneClock.current.left - (Date.now() - startedAt));
