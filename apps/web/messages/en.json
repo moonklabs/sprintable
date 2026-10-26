@@ -1796,7 +1796,8 @@
       "noAgent": {
         "line": "{device} has no agents yet — pick a folder at your Mac and start the first agent.",
         "lineNoAccess": "There's no agent on {device} that you can start.",
-        "lineNoTalk": "Only people who are allowed to chat with the agents on {device} can start them — ask whoever made an agent, or an admin, to allow you."
+        "lineNoTalk": "Only people who are allowed to chat with the agents on {device} can start them — ask whoever made an agent, or an admin, to allow you.",
+        "lineNoFolder": "{device} has no project with a folder yet — pick a folder at your Mac first."
       },
       "laterNote": "You don't have to do this now.",
       "start": {
@@ -1810,7 +1811,9 @@
         "action": "Start",
         "starting": "Starting…",
         "needAgent": "Pick an agent to start",
-        "needProject": "Pick a project to start"
+        "needProject": "Pick a project to start",
+        "needFolder": "This agent has no project with a folder yet — pick a folder at your Mac first.",
+        "listChanged": "The list changed — check the agent and project again."
       },
       "result": {
         "noFolder": "This project has no folder on the Mac yet — pick one at your Mac",
