@@ -278,6 +278,12 @@ deploy-backend와 같은 이유로 deploy-realtime도 86%(8,640B)까지 자랐�
   `DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1`을 그대로 뒀었다(PO forensic 적발 — 3곳 하드코딩
   중 하나) — SSOT 원칙상 "우연히 같은 값"과 "명시로 같은 값"은 다르다. deploy-backend와
   동일한 substitution으로 교체(dev 기본값 3/1 그대로 — 값 변경 아님, 배선만 정정).
+
+## deploy-backend 인라인 주석 3차 아카이브 (story 4786, 2026-10-26)
+
+deploy-backend가 5,995B(60% 임계 6,000B에 5B 여유 — 합친 뒤 5,911B)까지 차 있어(story 4790의 `,DATABASE_URL_READ` 한 토막만 더해도 넘는다), 맨 위 두 줄 포인터를 한 줄로 합쳤다(값/로직 무변경 — 순수 주석 압축).
+합치기 전 원문: `# ⚠️--update-env-vars(additive) 필수·--set-env-vars 금지 · --allow-unauthenticated 필수. 사유 · 이력(env 키별)은` /
+`# test_deploy_backend_redis_secret_conflict.py 「deploy-backend 인라인 주석 아카이브」.` (사유는 위 #3124 · #3433 절).
 """
 from __future__ import annotations
 
