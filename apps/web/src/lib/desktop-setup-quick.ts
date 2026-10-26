@@ -80,13 +80,14 @@ export function writeTypedAgent(setupId: string | null, name: string | null, rol
 }
 
 /** The project name the card shows for a NEW project: the folder's name, or «{name} 2» · «{name} 3» … when the organization has it —
- *  the server makes the final name by the same rule (case-insensitive · trimmed); this is only what the line says before. */
+ *  the server makes the final name by the same rule (compatibility-folded · format characters dropped · spaces collapsed · case ignored; the base is cut so the
+ *  name stays within 100 characters); this is only what the line says before. */
 export function shownProjectName(name: string, taken: readonly string[]): string {
-  const norm = (s: string) => s.split(/\s+/).filter(Boolean).join(' ').toLowerCase();
+  const norm = (s: string) => s.normalize('NFKC').replace(/\p{Cf}/gu, '').split(/\s+/).filter(Boolean).join(' ').toLowerCase();
   const used = new Set(taken.map(norm));
   let n = 1;
   let candidate = name;
-  while (used.has(norm(candidate))) { n += 1; candidate = `${name} ${n}`; }
+  while (used.has(norm(candidate))) { n += 1; const tail = ` ${n}`; candidate = `${name.slice(0, Math.max(100 - tail.length, 0))}${tail}`; }
   return candidate;
 }
 

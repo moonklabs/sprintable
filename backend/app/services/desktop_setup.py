@@ -711,7 +711,7 @@ async def _unique_name(db: AsyncSession, model, *conds, base: str, limit: int | 
     while _name_key(name) in taken:
         n += 1
         tail = f" {n}"
-        name = f"{base[:limit - len(tail)] if limit is not None else base}{tail}"
+        name = f"{base[:max(limit - len(tail), 0)] if limit is not None else base}{tail}"
     return name
 
 
@@ -774,7 +774,8 @@ async def confirm_solo_setup(
     # row is the one lock every agent-making setup of it takes — and FIRST, before the setup row: the organization's deletion locks organization →
     # agent members → setup rows, so this order (organization → setup) never meets it the other way round.
     # Only for an owner/admin (the refusal below is theirs to get): a plain member's wrong call must not queue on the organization's row (Kadir 5245 ⓑ).
-    if await is_org_owner_or_admin(db, user_id, org_id):
+    org_locked = await is_org_owner_or_admin(db, user_id, org_id)
+    if org_locked:
         await db.execute(select(Organization.id).where(Organization.id == org_id).with_for_update())
     setup = await _setup_by_code(db, code)
     if _confirmed_again(setup, user_id, org_id):
@@ -792,7 +793,8 @@ async def confirm_solo_setup(
         raise DesktopSetupError("app_cannot_solo")
     if runtime not in RUNTIME_TYPES:
         raise DesktopSetupError("roles_invalid", "unknown runtime")
-    if not await is_org_owner_or_admin(db, user_id, org_id):
+    # `not org_locked`: a member promoted between the first look and this one is refused this time (they press again) — never let a caller past without the lock
+    if not org_locked or not await is_org_owner_or_admin(db, user_id, org_id):
         raise DesktopSetupError("not_org_admin")
     if (project_id is None) == (not project_name):
         raise DesktopSetupError("request_invalid", "exactly one of project_id and project_name")

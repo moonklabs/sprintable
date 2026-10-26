@@ -248,3 +248,25 @@ async def test_the_organization_is_locked_before_the_setup_row_and_only_for_an_a
     assert "organization" in admin_seen and "setup" in admin_seen
     assert admin_seen.index("organization") < admin_seen.index("setup"), admin_seen
     assert "organization" not in plain_seen, plain_seen
+
+
+@pytest.mark.anyio
+async def test_a_caller_who_became_admin_between_the_two_looks_is_refused_not_let_past_the_lock(solo, monkeypatch):
+    """codex r4: the organization lock is taken only for an owner/admin. If the first look says «no» (no lock) and the second says «yes» (promoted meanwhile), the
+    press is refused this time — it must never reach the agent-making code without the lock."""
+    from app.services import project_auth
+
+    real = project_auth.is_org_owner_or_admin
+    looks: list[bool] = []
+
+    async def promoted_meanwhile(db, user_id, org_id):
+        looks.append(True)
+        return False if len(looks) == 1 else await real(db, user_id, org_id)
+
+    monkeypatch.setattr(project_auth, "is_org_owner_or_admin", promoted_meanwhile)
+    async with _client() as c:
+        before = await _state()
+        code, _, _ = await _solo_code(c, "d4784 promoted")
+        r = await _confirm_solo(c, code, {"runtime": "claude", "project_id": str(PROJ), "agent_name": "Late"})
+        assert (r.status_code, r.json()["error"]["code"]) == (403, "not_org_admin"), r.text
+        assert await _state() == before

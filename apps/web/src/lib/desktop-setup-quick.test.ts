@@ -62,6 +62,11 @@ describe('[SID:4711] the card\'s rules', () => {
   it('a taken project name is shown as «{name} 2», «{name} 3» (case and spaces ignored, as the server does)', () => {
     expect(shownProjectName('app', [])).toBe('app');
     expect(shownProjectName('app', ['App'])).toBe('app 2');
+    // story 4784 (Kadir 5245): the server folds full-width letters and drops format characters, and keeps the name within 100 characters
+    expect(shownProjectName('app', ['ａｐｐ'])).toBe('app 2');
+    expect(shownProjectName('ap\u200bp', ['app'])).toBe('ap\u200bp 2');
+    const long = 'p'.repeat(100);
+    expect(shownProjectName(long, [long])).toBe(`${'p'.repeat(98)} 2`);
     expect(shownProjectName('app', ['  APP ', 'app 2'])).toBe('app 3');
   });
   it('[시작] is held with one visible reason: no agent · no folder · the wide folder not yet confirmed', () => {
