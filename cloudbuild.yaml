@@ -389,7 +389,7 @@ substitutions:
   _BACKEND_REDIS_DUAL_PUBLISH_ENABLED: 'false'
 
 steps:
-  # story 4786 (E-INFRA-DIET): fail-closed — a prod build must carry its own minimum instances (`_MINS_EXPLICIT`, sent by the workflow's prod branch; backend and frontend >= 1); the defaults are dev-safe. Runs first and every step that would otherwise start at once waits for it.
+  # story 4786 (E-INFRA-DIET): fail-closed — a prod build must carry its own minimum instances (`_MINS_EXPLICIT`, sent by the workflow's prod branch; backend and frontend >= 1; maximums >= 2, story 4790: the default maximum is dev's 1/3); the defaults are dev-safe. Runs first and every step that would otherwise start at once waits for it.
   - id: guard-prod-mins
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
@@ -397,10 +397,10 @@ steps:
       - -c
       - |
         if [ "${_DEPLOY_ENV}" = "prod" ]; then
-          if [ "${_MINS_EXPLICIT}" = "true" ] && [ "${_BACKEND_MIN_INSTANCES}" -ge 1 ] && [ "${_FRONTEND_MIN_INSTANCES}" -ge 1 ]; then
+          if [ "${_MINS_EXPLICIT}" = "true" ] && [ "${_BACKEND_MIN_INSTANCES}" -ge 1 ] && [ "${_FRONTEND_MIN_INSTANCES}" -ge 1 ] && [ "${_BACKEND_MAX_INSTANCES}" -ge 2 ] && [ "${_FRONTEND_MAX_INSTANCES}" -ge 2 ]; then
             :
           else
-            echo "FAIL: a prod build needs explicit minimum instances (_MINS_EXPLICIT=true, backend and frontend >= 1) - the defaults are dev-safe (story 4786)"
+            echo "FAIL: a prod build needs explicit minimum instances (_MINS_EXPLICIT=true, backend and frontend >= 1) and maximum instances (backend and frontend >= 2) - the defaults are dev-safe (stories 4786, 4790)"
             exit 1
           fi
         fi
