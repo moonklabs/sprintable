@@ -1,6 +1,6 @@
 """story 4786 (E-INFRA-DIET) — dev keeps no idle capacity it does not need: realtime-dev 2 → 0 (it receives no requests) · frontend-dev 1 → 0 (2 s start) · backend-dev 3 → 2 (PO, after the lens on PR 5244: a new backend
-instance takes ≈31 s to start and the long streams, not CPU, bind it, so 0 is not safe at a deploy — story 4789 lifts that); CPU on dev is billed only while a request is served (it already is Cloud Run's default —
-the flag writes it down); the prod lines are not touched and a prod build that does not state its minimums fails first.
+instance takes ≈31 s to start and the long streams, not CPU, bind it, so 0 is not safe at a deploy — story 4789 lifts that); dev backend + frontend bill CPU per instance (they are always working; the billing mode is pinned in
+test_4786d_cpu_billing_mode.py); the prod lines are not touched and a prod build that does not state its minimums fails first.
 
 Why a static check: the effective dev value is NOT the default in cloudbuild.yaml — the GitHub workflow's dev branch (`.github/workflows/cloud-build.yml`) overrides it on every deploy, so a hand-set value (or a default
 changed alone) comes back. Both files are read here, and the hops between them (the workflow's env mapping, the substitution list, the deploy step's flag) are checked, not only the two ends.
@@ -83,26 +83,25 @@ def test_the_deploy_steps_send_their_minimum_and_the_dev_cpu_flag_as_arguments()
     """the real steps run with gcloud intercepted: the substitution value becomes `--min-instances=<value>`; dev's `--cpu-throttling` is exactly one argument, prod's empty flag is no argument at all"""
     from tests.test_deploy_backend_redis_secret_conflict import _run_backend_deploy_argv, _run_frontend_deploy_argv
 
-    backend_dev = _run_backend_deploy_argv("dev", _CPU_FLAGS="--cpu-throttling", _BACKEND_MIN_INSTANCES="2")
-    assert "--min-instances=2" in backend_dev and backend_dev.count("--cpu-throttling") == 1, backend_dev
+    backend_dev = _run_backend_deploy_argv("dev", _CPU_FLAGS="--no-cpu-throttling", _BACKEND_MIN_INSTANCES="2")
+    assert "--min-instances=2" in backend_dev and backend_dev.count("--no-cpu-throttling") == 1 and "--cpu-throttling" not in backend_dev, backend_dev
     backend_prod = _run_backend_deploy_argv("prod", _CPU_FLAGS="", _BACKEND_MIN_INSTANCES="3")
-    assert "--min-instances=3" in backend_prod and "--cpu-throttling" not in backend_prod and "" not in backend_prod, backend_prod
-    frontend_dev = _run_frontend_deploy_argv("dev", "--cpu-throttling")
-    assert frontend_dev.count("--cpu-throttling") == 1 and "--cpu-boost" in frontend_dev, frontend_dev
+    assert "--min-instances=3" in backend_prod and "--cpu-throttling" not in backend_prod and "--no-cpu-throttling" not in backend_prod and "" not in backend_prod, backend_prod
+    frontend_dev = _run_frontend_deploy_argv("dev", "--no-cpu-throttling")
+    assert frontend_dev.count("--no-cpu-throttling") == 1 and "--cpu-boost" in frontend_dev, frontend_dev
     frontend_prod = _run_frontend_deploy_argv("prod", "")
-    assert "--cpu-throttling" not in frontend_prod and "" not in frontend_prod, frontend_prod
+    assert "--cpu-throttling" not in frontend_prod and "--no-cpu-throttling" not in frontend_prod and "" not in frontend_prod, frontend_prod
     assert "--min-instances=${_FRONTEND_MIN_INSTANCES}" in _deploy_block("frontend")
     assert "--min-instances=${_REALTIME_MIN_INSTANCES}" in _deploy_block("realtime")
 
 
-def test_dev_cpu_is_billed_only_while_a_request_is_served():
-    """backend + frontend are deployed for both environments, so the flag travels as a substitution: the workflow's dev branch sends `--cpu-throttling`, the prod branch sends nothing (prod keeps whatever it has);
+def test_dev_backend_and_frontend_cpu_is_billed_per_instance():
+    """backend + frontend are deployed for both environments, so the flag travels as a substitution: the workflow's dev branch sends `--no-cpu-throttling`, the prod branch sends nothing (prod keeps whatever it has);
     realtime is deployed on dev only (its step exits first for any other environment) and names the flag itself"""
-    assert "--no-cpu-throttling" not in _CLOUDBUILD and "--no-cpu-throttling" not in _WORKFLOW
     assert re.findall(r"^  _CPU_FLAGS: '(.*)'$", _CLOUDBUILD, flags=re.M) == [""]  # a manual submit never inherits it
     for service in ("frontend", "backend"):
         assert "${_CPU_FLAGS}" in _deploy_block(service), service
-    assert 'echo "cpu_flags=--cpu-throttling"' in _DEV
+    assert 'echo "cpu_flags=--no-cpu-throttling"' in _DEV and "cpu_flags=--cpu-throttling" not in _WORKFLOW
     assert "cpu_flags" not in _PROD
     assert "V_CPU_FLAGS: ${{ steps.env.outputs.cpu_flags }}" in _WORKFLOW
     assert '_CPU_FLAGS=\\"${V_CPU_FLAGS}\\"' in _WORKFLOW  # the value reaches Cloud Build (prod: empty)
@@ -186,5 +185,5 @@ def test_the_manual_scripts_agree_for_dev_and_leave_prod_alone():
         prod = script[script.index("    prod)"):]
         assert re.search(rf"^\s+MIN_INSTANCES={dev_min}\b", dev, flags=re.M), name
         assert re.search(rf"^\s+MIN_INSTANCES={prod_min}\b", prod, flags=re.M), name
-        assert 'CPU_FLAGS="--cpu-throttling"' in dev and "CPU_FLAGS=" not in prod, name
+        assert 'CPU_FLAGS="--no-cpu-throttling"' in dev and "CPU_FLAGS=" not in prod, name
         assert script.count("${CPU_FLAGS}") == 1 and 'CPU_FLAGS=""' in script, name  # the flag reaches the one gcloud call

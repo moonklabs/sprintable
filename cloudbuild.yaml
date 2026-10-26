@@ -282,8 +282,10 @@ substitutions:
   # story 4786 (E-INFRA-DIET, 2026-10-26): dev-safe 기본값 1 → 0 (위 «라이브 실측 그대로» 는 이 줄 바뀐 날짜까지의 값). GHA cloud-build.yml 이 dev 0 · prod 1 로 덮는다.
   _FRONTEND_MIN_INSTANCES: '0'
   _FRONTEND_MAX_INSTANCES: '3'
-  # story 4786 (E-INFRA-DIET, 2026-10-26): extra `gcloud run deploy` flags for the CPU allocation of backend + frontend. dev: `--cpu-throttling` (CPU billed only while a request is served); prod: empty = the flag is not
-  # sent and gcloud leaves the value as it is. Empty here on purpose (the GHA workflow's dev branch sets it; a manual prod submit must not inherit it). realtime-dev (dev only) names the flag itself.
+  # story 4786 (E-INFRA-DIET, 2026-10-26): the CPU billing mode of the dev Cloud Run services, stated in the file (an unstated one is inherited from whatever the live service has). Always-working dev services (backend-dev ·
+  # frontend-dev) bill per INSTANCE (`--no-cpu-throttling`): long streams sit on every instance, so request-based billing ran around the clock at the higher per-second rate. Services that sit idle most of the time
+  # (realtime-dev · mcp-dev · office-converter-dev · support-gateway-dev) bill per REQUEST (`--cpu-throttling`) and name the flag in their own step. Backend + frontend take it from this substitution: dev sends it from the GHA
+  # workflow's dev branch; prod: empty = the flag is not sent and gcloud leaves the value as it is (prod is a separate change). Empty here on purpose: a manual submit must not inherit it.
   _CPU_FLAGS: ''
   # story 4790 (E-INFRA-DIET, 2026-10-26): the size of each prod service as `gcloud run deploy` flags (`--cpu 1 --memory 1Gi` backend · `--cpu 1 --memory 512Mi` frontend) — the operator lowered them by hand at 09:07Z, and without
   # these a flag left out is only «kept», never written down. Empty = not sent (dev keeps its value; a manual submit must not inherit prod's). The workflow's prod branch sends them. No `=` inside: the substitution list is split on commas.
@@ -820,6 +822,7 @@ steps:
           --cpu=1 \
           --memory=2Gi \
           --timeout=120 \
+          --cpu-throttling \
           --quiet
         deploy_status=$?
         set -e
@@ -1071,9 +1074,13 @@ steps:
         else
           AGENT_KEY_SECRET="MCP_AGENT_API_KEY_DEV"
         fi
+        # story 4786: mcp-dev sits idle most of the time (billed per request); prod states nothing here (its value is left as it is).
+        MCP_CPU_FLAG=""
+        if [ "${_DEPLOY_ENV}" == "dev" ]; then MCP_CPU_FLAG="--cpu-throttling"; fi
         gcloud run services update sprintable-mcp-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
           --region=${_AR_REGION} \
+          $${MCP_CPU_FLAG} \
           --update-env-vars="^;^$${ENV_VARS}" \
           --remove-env-vars=AGENT_API_KEY \
           --update-secrets="AGENT_API_KEY=$${AGENT_KEY_SECRET}:latest" \
@@ -1142,9 +1149,13 @@ steps:
           CORS_ORIGINS_COMMA=$(printf '%s' "${_SUPPORT_GATEWAY_CORS_ORIGINS}" | tr '|' ',')
           ENV_VARS="$${ENV_VARS};SUPPORT_GATEWAY_CORS_ORIGINS=$${CORS_ORIGINS_COMMA}"
         fi
+        # story 4786: support-gateway-dev sits idle most of the time (billed per request); prod states nothing here (its value is left as it is).
+        CPU_FLAG=""
+        if [ "${_DEPLOY_ENV}" == "dev" ]; then CPU_FLAG="--cpu-throttling"; fi
         gcloud run deploy support-gateway-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/support-gateway:${COMMIT_SHA} \
           --region=${_AR_REGION} \
+          $${CPU_FLAG} \
           --service-account=${_SUPPORT_GATEWAY_SERVICE_ACCOUNT} \
           --min-instances=${_SUPPORT_GATEWAY_MIN_INSTANCES} \
           --max-instances=${_SUPPORT_GATEWAY_MAX_INSTANCES} \

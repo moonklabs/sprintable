@@ -44,7 +44,7 @@ IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/${AR_REPO}/backend:${COMMIT_S
 CPU_FLAGS=""  # story 4786: dev only (below) — prod keeps its current CPU allocation
 case "${ENV}" in
     dev)
-        CPU_FLAGS="--cpu-throttling"  # story 4786: CPU billed only while a request is served (cloudbuild.yaml `_CPU_FLAGS` for dev)
+        CPU_FLAGS="--no-cpu-throttling"  # story 4786: dev bills CPU per instance — always working (long streams on every instance) (cloudbuild.yaml `_CPU_FLAGS` for dev)
         SERVICE_NAME="sprintable-backend-dev"
         CLOUD_SQL_INSTANCE="${GCP_PROJECT}:${GCP_REGION}:${DEV_SQL_INSTANCE}"
         MIN_INSTANCES=2  # story 4786: the SSOT (cloud-build.yml dev branch) keeps 2 — a new revision's start takes ~31 s
