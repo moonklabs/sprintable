@@ -64,7 +64,7 @@ class Dumps:
         self.dir = tmp_path
         self.images = _images("backend", 60)
         self.services = [_service("sprintable-backend-prod", "rev-2", f"{HOST}/backend:backend-tag2")]
-        self.revisions = [_revision("rev-2", f"{HOST}/backend:backend-tag2")]
+        self.revisions = [_revision("rev-2", f"{HOST}/backend:backend-tag2", image_digest=_digest(2))]
         self.jobs = [{"metadata": {"name": "migrate"}, "spec": {"template": {"spec": {"template": {"spec": {"containers": [{"image": f"{HOST}/backend:backend-tag3"}]}}}}}}]
         self.mig = {"startup": f"docker run {HOST}/backend:backend-tag45"}
         self.out = tmp_path / "policy.json"
@@ -125,7 +125,7 @@ def test_most_recent_versions_counts_per_package_and_old_images_go():
 
 def test_only_serving_revisions_count_as_in_use_not_every_old_revision():
     services = [_service("sprintable-backend-prod", "rev-2", f"{HOST}/backend:backend-tag2")]
-    revisions = [_revision("rev-1", f"{HOST}/backend:backend-tag50"), _revision("rev-2", f"{HOST}/backend:backend-tag2")]
+    revisions = [_revision("rev-1", f"{HOST}/backend:backend-tag50"), _revision("rev-2", f"{HOST}/backend:backend-tag2", image_digest=_digest(2))]
     refs, warnings, problems = gate.collect_in_use_refs(services, revisions)
     in_use, _ = gate.resolve_in_use(refs, _versions())
     assert in_use == {("backend", _digest(2))} and not warnings and not problems  # rev-1 serves nothing: its 50-day-old image is not protected
@@ -153,10 +153,9 @@ def test_a_moved_tag_is_still_protected_by_the_revisions_resolved_digest(tmp_pat
     kept = json.loads(d.out.read_text())[0]["condition"]["versionNamePrefixes"]
     assert old in kept and new in kept
 
-    # without the revision's digest the old image would go: prove the dump is what protects it
+    # a serving revision deployed by tag whose dump has no resolved digest: the gate does not guess which digest it runs — exit 3, no policy
     d.revisions = [_revision("rev-9", f"{HOST}/backend:latest")]
-    assert gate.main(d.argv()) == 0
-    assert old not in json.loads(d.out.read_text())[0]["condition"]["versionNamePrefixes"]
+    assert gate.main(d.argv()) == 3 and not d.out.exists()
 
 
 def test_cli_ok_writes_the_generated_policy(tmp_path):
@@ -191,6 +190,21 @@ def test_cli_incomplete_inputs_fail_closed_and_write_nothing(tmp_path, capsys):
     assert gate.main(d.argv()) == 3 and not d.out.exists()
     assert "rev-2" in capsys.readouterr().out
 
+    # an extra (gateway template) dump that carries no image reference: it protects nothing, so say so
+    d = Dumps(tmp_path)
+    d.mig = {"startup": "no image here"}
+    assert gate.main(d.argv()) == 3 and not d.out.exists()
+
+    # a serving revision deployed by tag whose dump lacks the resolved digest
+    d = Dumps(tmp_path)
+    d.revisions = [_revision("rev-2", f"{HOST}/backend:backend-tag2")]
+    assert gate.main(d.argv()) == 3 and not d.out.exists()
+
+    # a reference to another repository with the same package and tag must not protect this repository's image
+    d = Dumps(tmp_path)
+    d.mig = {"startup": f"docker run asia-northeast3-docker.pkg.dev/sprintable-494803/other/backend:backend-tag45"}
+    assert gate.main(d.argv()) == 3 and not d.out.exists()
+
     # a service whose block carries no image reference at all
     d = Dumps(tmp_path)
     d.services = [{"metadata": {"name": "sprintable-backend-prod"}, "status": {"traffic": [{"revisionName": "rev-2"}], "latestReadyRevisionName": "rev-2"}}]
@@ -211,6 +225,25 @@ def test_cli_bad_input_is_exit_2_never_a_green(tmp_path):
     d = Dumps(tmp_path)
     d.services, d.revisions, d.jobs, d.mig = [], [], [], {}
     assert gate.main(d.argv()) == 2
+    # empty service and revision dumps are bad input even when a job or a template still carries a valid reference
+    d = Dumps(tmp_path)
+    d.services, d.revisions = [], []
+    assert gate.main(d.argv()) == 2 and not d.out.exists()
+
+
+def test_a_ref_without_tag_or_digest_means_latest():
+    refs = gate.refs_in(json.dumps({"image": f"{HOST}/backend"}))
+    assert [(r["package"], r["tag"], r["digest"]) for r in refs] == [("backend", "latest", None)]
+
+
+def test_an_argument_error_still_removes_the_stale_policy_file(tmp_path):
+    d = Dumps(tmp_path)
+    assert gate.main(d.argv()) == 0 and d.out.exists()
+    argv = d.argv()
+    i = argv.index("--run-jobs")
+    with pytest.raises(SystemExit):
+        gate.main(argv[:i] + argv[i + 2:])
+    assert not d.out.exists(), "an invocation that fails to parse must not leave the earlier policy behind"
 
 
 def test_the_three_run_dumps_are_required_arguments(tmp_path):

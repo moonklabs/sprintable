@@ -23,8 +23,12 @@
 **통과(exit 0)일 때만** 쓰고, 실패하면 이전 실행이 남긴 같은 이름의 파일을 지운다(실패한 입력으로 만든 정책이 적용되지 않게).
 PO는 이 생성본을 dry-run → 적용한다(기본 정책만 적용하면 사용 중이면서 오래된 이미지가 지워질 수 있다).
 
-exit code: 0=지움 0 · 1=사용 중 이미지가 지워진다 · 2=입력 오류(비었다 · 필수 덤프 없음 · 개수가 안 맞음) ·
-          3=불완전(사용 중 참조를 AR 목록에서 못 찾음 · 서빙 리비전 덤프 누락 · 이미지 참조 없는 서비스/job) — 안전하게 실패.
+exit code: 0=지움 0 · 1=사용 중 이미지가 지워진다 · 2=입력 오류(AR 목록 · 서비스 · 리비전이 비었다 · 필수 덤프 없음 · 개수가 안 맞음) ·
+          3=불완전(사용 중 참조를 AR 목록에서 못 찾음 · 서빙 리비전 덤프 누락 · 이미지 참조 없는 서비스/job/--extra ·
+          태그로 배포된 서빙 리비전에 `status.imageDigest`가 없음) — 안전하게 실패.
+참조는 `<host>/<project>/<repo>/<package>`까지 같아야 같은 이미지로 친다(다른 저장소의 같은 이름은 보호하지 않는다). 태그도 digest도 없는 참조는 `:latest`로 본다.
+
+한계(적용 절차로 막는다): 덤프는 «그 시각의» 모습이다. 덤프 → 확인 → dry-run → 적용을 한 번에 이어서 하고(그 사이 배포 금지), GCE가 당기는 `backend:<sha>` 같은 태그가 그 사이에 옮겨지지 않게 한다.
 """
 from __future__ import annotations
 
@@ -40,8 +44,8 @@ _BASE_POLICY = Path(__file__).resolve().parent / "artifact-registry" / "cleanup-
 
 # <host>-docker.pkg.dev/<project>/<repo>/<package>[:<tag> | @sha256:<64 hex>]
 _IMAGE_REF = re.compile(
-    r"(?P<host>[a-z0-9-]+-docker\.pkg\.dev)/(?P<project>[a-z0-9-]+)/(?P<repo>[a-z0-9._-]+)/(?P<package>[a-z0-9._-]+(?:/[a-z0-9._-]+)*?)"
-    r"(?::(?P<tag>[A-Za-z0-9_][A-Za-z0-9_.-]*)|@(?P<digest>sha256:[0-9a-f]{64}))"
+    r"(?P<host>[a-z0-9-]+-docker\.pkg\.dev)/(?P<project>[a-z0-9-]+)/(?P<repo>[a-z0-9._-]+)/(?P<package>[a-z0-9._-]+(?:/[a-z0-9._-]+)*)"
+    r"(?::(?P<tag>[A-Za-z0-9_][A-Za-z0-9_.-]*)|@(?P<digest>sha256:[0-9a-f]{64}))?"
 )
 # 맨 digest(`status.imageDigest`가 이 꼴로 올 수 있다): 위 전체 참조의 `@sha256:…` 꼬리는 제외한다
 _BARE_DIGEST = re.compile(r"(?<![@0-9A-Za-z:/_.-])(sha256:[0-9a-f]{64})")
@@ -50,7 +54,8 @@ _BARE_DIGEST = re.compile(r"(?<![@0-9A-Za-z:/_.-])(sha256:[0-9a-f]{64})")
 class Version:
     """AR의 이미지 한 판(digest 하나)."""
 
-    def __init__(self, package: str, digest: str, tags: list[str], created: datetime):
+    def __init__(self, package: str, digest: str, tags: list[str], created: datetime, repo: str | None = None):
+        self.repo = repo  # `<host>/<project>/<repo>` — 같은 패키지 · 태그 이름이어도 다른 저장소의 이미지를 지키는 일이 없게
         self.package = package  # 짧은 이름(backend · frontend · support-gateway)
         self.digest = digest
         self.tags = tags
@@ -96,17 +101,20 @@ def load_versions(data: Any) -> list[Version]:
             continue
         raw_tags = it.get("tags") or []
         tags = [t for t in (raw_tags.split(",") if isinstance(raw_tags, str) else raw_tags) if t]
-        out.append(Version(_short_package(package), digest, tags, _parse_time(it.get("createTime") or it.get("updateTime"))))
+        parts = package.split("/")
+        repo = "/".join(parts[:3]) if len(parts) > 3 and "docker.pkg.dev" in parts[0] else None
+        out.append(Version(_short_package(package), digest, tags, _parse_time(it.get("createTime") or it.get("updateTime")), repo))
     return out
 
 
 def refs_in(text: str) -> list[Ref]:
     """문자열 안의 이미지 참조를 전부 줍는다: 전체 참조(태그 또는 digest)와 맨 digest(package=None — 어느 패키지든 그 digest)."""
     refs: list[Ref] = [
-        {"package": _short_package(f"{m['host']}/{m['project']}/{m['repo']}/{m['package']}"), "tag": m["tag"], "digest": m["digest"]}
+        {"package": _short_package(f"{m['host']}/{m['project']}/{m['repo']}/{m['package']}"), "tag": m["tag"] or (None if m["digest"] else "latest"),
+         "digest": m["digest"], "repo": f"{m['host']}/{m['project']}/{m['repo']}"}
         for m in _IMAGE_REF.finditer(text)
     ]
-    refs += [{"package": None, "tag": None, "digest": m.group(1)} for m in _BARE_DIGEST.finditer(text)]
+    refs += [{"package": None, "tag": None, "digest": m.group(1), "repo": None} for m in _BARE_DIGEST.finditer(text)]
     return refs
 
 
@@ -159,6 +167,9 @@ def collect_in_use_refs(
                     found = refs_in(json.dumps(rev))
                     if not found:
                         problems.append(f"서빙 중 리비전 {_name_of(rev)}에서 이미지 참조를 못 찾음")
+                    elif any(r["tag"] for r in found) and not any(r["digest"] for r in found):
+                        # 태그로 배포된 리비전이 실제로 쥔 digest(`status.imageDigest`)를 모르면, 태그가 그 뒤 옮겨졌을 때 옛 이미지를 못 지킨다 — 모르면 실패
+                        problems.append(f"서빙 중 리비전 {_name_of(rev)}가 태그로 배포됐는데 status.imageDigest가 없다(어느 digest를 쥐었는지 모른다)")
                     refs += found
         else:
             warnings.append("서비스 JSON에서 서빙 중 리비전을 못 읽어 모든 리비전을 사용 중으로 셌다(안전한 쪽).")
@@ -168,21 +179,24 @@ def collect_in_use_refs(
         if not found:
             problems.append(f"job {_name_of(job) or '?'}에서 이미지 참조를 못 찾음")
         refs += found
-    for blob in extra:
-        refs += refs_in(json.dumps(blob))
+    for n, blob in enumerate(extra, 1):
+        found = refs_in(json.dumps(blob))
+        if not found:
+            problems.append(f"--extra {n}번째 JSON에서 이미지 참조를 못 찾음(비었거나 형식이 다르다)")
+        refs += found
     return refs, warnings, problems
 
 
 def resolve_in_use(refs: list[Ref], versions: list[Version]) -> tuple[set[tuple[str, str]], list[Ref]]:
     """참조(태그 · digest · 맨 digest) → AR의 (package, digest). 못 찾은 참조는 따로 돌려준다.
     태그는 «지금» AR의 태그 대응으로만 풀린다 — 옮겨진 태그의 옛 digest는 리비전의 `status.imageDigest`(맨 digest)가 막아 준다."""
-    by_digest = {v.key(): v for v in versions}
+    by_digest = {(v.repo, *v.key()): v for v in versions}
     by_digest_any: dict[str, list[Version]] = {}
-    by_tag: dict[tuple[str, str], list[Version]] = {}
+    by_tag: dict[tuple[str | None, str, str], list[Version]] = {}
     for v in versions:
         by_digest_any.setdefault(v.digest, []).append(v)
         for tag in v.tags:
-            by_tag.setdefault((v.package, tag), []).append(v)
+            by_tag.setdefault((v.repo, v.package, tag), []).append(v)
     found: set[tuple[str, str]] = set()
     missing: list[Ref] = []
     for ref in refs:
@@ -194,13 +208,13 @@ def resolve_in_use(refs: list[Ref], versions: list[Version]) -> tuple[set[tuple[
             else:
                 missing.append(ref)
         elif ref["digest"]:
-            key = (pkg or "", ref["digest"])
+            key = (ref.get("repo"), pkg or "", ref["digest"])
             if key in by_digest:
-                found.add(key)
+                found.add(key[1:])
             else:
                 missing.append(ref)
         elif ref["tag"]:
-            hit = by_tag.get((pkg or "", ref["tag"]))
+            hit = by_tag.get((ref.get("repo"), pkg or "", ref["tag"]))
             if hit:
                 found.update(v.key() for v in hit)
             else:
@@ -306,8 +320,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--base-policy", default=str(_BASE_POLICY))
     ap.add_argument("--emit-policy")
     ap.add_argument("--now")
+    raw = argv if argv is not None else sys.argv[1:]
+    for i, a in enumerate(raw):  # 인자 오류로 끝나도 이전 실행이 남긴 정책 파일은 지운다
+        if a == "--emit-policy":
+            _drop_stale(raw[i + 1] if i + 1 < len(raw) else None)
+        elif a.startswith("--emit-policy="):
+            _drop_stale(a.split("=", 1)[1])
     args = ap.parse_args(argv)
-    _drop_stale(args.emit_policy)
     if not args.extra and not args.no_extra:
         print("입력 오류: --extra(MIG 인스턴스 템플릿 JSON)가 하나도 없다. VM이 부팅 때 당기는 이미지를 못 본다 — 템플릿이 정말 없으면 --no-extra.")
         return 2
@@ -326,6 +345,9 @@ def main(argv: list[str] | None = None) -> int:
         if expect is not None and len(_items(data)) != expect:
             print(f"입력 오류: {label} 덤프가 {len(_items(data))}개인데 {expect}개여야 한다(덤프가 잘렸다).")
             return 2
+    if not _items(services) or not _items(revisions):
+        print("입력 오류: 서비스 또는 리비전 덤프가 비었다(서빙 중 이미지를 알 수 없다).")
+        return 2
     refs, warnings, problems = collect_in_use_refs(services, revisions, jobs, extra)
     if not refs:
         # 사용 중 참조가 하나도 안 잡히면 «지움 0»은 빈 입력 위의 거짓 초록이다(서비스 JSON이 비었거나 형식이 다름) — 절대 통과시키지 않는다.
