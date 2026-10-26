@@ -27,46 +27,64 @@ _EXPECTED_MODE = {
 }
 
 
+def _positional_after(args: list[str], i: int) -> str | None:
+    """the first token from `i` on that is not a flag (a service name)"""
+    for a in args[i:]:
+        if not a.startswith("-"):
+            return a
+    return None
+
+
 def _commands(doc: dict | None = None) -> list[tuple[str, str]]:
-    """every `gcloud run deploy <service>` / `gcloud run services update <service>` in cloudbuild.yaml (service, full command text incl. continuation lines) — both inside a bash step's script and as a direct gcloud step
-    (`args: [run, deploy, <service>, …]`, the cloud-sdk image's default entrypoint is gcloud)"""
+    """every `gcloud run deploy <service>` / `gcloud run services update <service>` in cloudbuild.yaml (service, full command text incl. continuation lines) — inside any argument that is a script (`bash -c`, `sh -c`, …)
+    and as a direct gcloud step (the cloud-sdk image's default entrypoint is gcloud): `run deploy` / `run services update` are looked for ANYWHERE in the args, so a global flag in front
+    (`--project=p`, `--quiet`, `--project p`) does not hide them"""
     out: list[tuple[str, str]] = []
     start = re.compile(r"^\s*gcloud run (?:deploy|services update) (\S+)")
     for step in (doc or yaml.safe_load(_CLOUDBUILD))["steps"]:
         args = [str(a) for a in (step.get("args") or [])]
-        if step.get("entrypoint") in (None, "gcloud") and args[:2] == ["run", "deploy"] and len(args) > 2:
-            out.append((args[2], "gcloud " + " ".join(args)))
-            continue
-        if step.get("entrypoint") in (None, "gcloud") and args[:3] == ["run", "services", "update"] and len(args) > 3:
-            out.append((args[3], "gcloud " + " ".join(args)))
-            continue
-        if len(args) < 2:
-            continue
-        lines = args[1].split("\n")  # the file's own text (escaped form): the checks below read it as written
-        i = 0
-        while i < len(lines):
-            m = start.match(lines[i])  # a comment line starts with `#`, never with `gcloud`
-            if not m:
+        if step.get("entrypoint") in (None, "gcloud"):
+            for i in range(len(args) - 1):
+                if args[i : i + 2] == ["run", "deploy"]:
+                    name = _positional_after(args, i + 2)
+                elif args[i : i + 3] == ["run", "services", "update"]:
+                    name = _positional_after(args, i + 3)
+                else:
+                    continue
+                if name:
+                    out.append((name, "gcloud " + " ".join(args)))
+        for arg in args:  # every argument that holds a script
+            lines = arg.split("\n")  # the file's own text (escaped form): the checks below read it as written
+            i = 0
+            while i < len(lines):
+                m = start.match(lines[i])  # a comment line starts with `#`, never with `gcloud`
+                if not m:
+                    i += 1
+                    continue
+                text = [lines[i]]
+                while text[-1].rstrip().endswith("\\") and i + 1 < len(lines):
+                    i += 1
+                    text.append(lines[i])
+                out.append((m.group(1), "\n".join(text)))
                 i += 1
-                continue
-            text = [lines[i]]
-            while text[-1].rstrip().endswith("\\") and i + 1 < len(lines):
-                i += 1
-                text.append(lines[i])
-            out.append((m.group(1), "\n".join(text)))
-            i += 1
     return out
 
 
 def test_the_scan_also_finds_a_direct_gcloud_step():
-    """a new service added as `args: [run, deploy, new-service, …]` (no bash) must not slip past the closed-set check (codex 4786)"""
+    """a new service added as `args: [run, deploy, new-service, …]` (no bash), with or without global flags in front, must not slip past the closed-set check (codex 4786)"""
+    sdk = "gcr.io/google.com/cloudsdktool/cloud-sdk"
     doc = {"steps": [
-        {"name": "gcr.io/google.com/cloudsdktool/cloud-sdk", "args": ["run", "deploy", "brand-new-service", "--image=x"]},
-        {"name": "gcr.io/google.com/cloudsdktool/cloud-sdk", "entrypoint": "gcloud", "args": ["run", "services", "update", "another-new", "--image=x"]},
+        {"name": sdk, "args": ["run", "deploy", "brand-new-service", "--image=x"]},
+        {"name": sdk, "entrypoint": "gcloud", "args": ["run", "services", "update", "another-new", "--image=x"]},
+        {"name": sdk, "entrypoint": "gcloud", "args": ["--project=p", "run", "deploy", "flag-first", "--image=x"]},
+        {"name": sdk, "entrypoint": "gcloud", "args": ["--quiet", "--project", "p", "run", "services", "update", "flag-then-value", "--image=x"]},
+        {"name": sdk, "entrypoint": "gcloud", "args": ["run", "deploy", "--image=x", "flag-between"]},
         {"name": "x", "entrypoint": "bash", "args": ["-c", "gcloud run deploy in-bash \\\n  --image=x \\\n  --quiet"]},
+        {"name": "x", "entrypoint": "sh", "args": ["-c", "gcloud run deploy in-sh --image=x"]},
         {"name": "x", "entrypoint": "bash", "args": ["-c", "# gcloud run deploy only-a-comment\necho hi"]},
+        {"name": "x", "entrypoint": "bash", "args": ["-c", "echo run deploy not-a-gcloud-step"]},
     ]}
-    assert [s for s, _ in _commands(doc)] == ["brand-new-service", "another-new", "in-bash"]
+    assert [s for s, _ in _commands(doc)] == ["brand-new-service", "another-new", "flag-first", "flag-then-value", "flag-between", "in-bash", "in-sh"]
 
 
 def test_every_cloud_run_deploy_command_states_its_billing_mode():
@@ -108,6 +126,9 @@ def _step_call(step_id: str, deploy_env: str, call_pattern: str, extra_env: dict
     # them hid a removed `VAR=""` initialisation, which fails a real prod build under `set -u` (codex 4786)
     names = {n for n in re.findall(r"\$\{([A-Z_][A-Z0-9_]*)\}", script) if n.startswith("_") or n in ("PROJECT_ID", "COMMIT_SHA")}
     env = {**os.environ, **{n: "x" for n in names}, "_DEPLOY_ENV": deploy_env, "_MCP_ALLOWED_HOSTS": "", "_SUPPORT_GATEWAY_CORS_ORIGINS": "", **(extra_env or {})}
+    # a variable the script assigns itself must come from the script, never from the caller's environment: a stray MCP_CPU_FLAG / CPU_FLAG there would hide a removed `VAR=""` initialisation (fails a real prod build under `set -u`)
+    for own in set(re.findall(r"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)=", script)):
+        env.pop(own, None)
     # the mcp step checks the served image against what it deployed: with every name set to "x" that is this string
     stub = (
         'gcloud() { if [ "$1 $2 $3" = "run services describe" ]; then echo "x-docker.pkg.dev/x/x/backend:x"; else printf "CALL"; for a in "$@"; do printf " [%s]" "$a"; done; echo; fi; }\n'
@@ -153,3 +174,18 @@ def test_the_manual_scripts_state_dev_per_instance_and_leave_prod_alone():
         prod = script[script.index("    prod)"):]
         assert 'CPU_FLAGS="--no-cpu-throttling"' in dev and "CPU_FLAGS=" not in prod, name
         assert 'CPU_FLAGS=""' in script and script.count("${CPU_FLAGS}") == 1, name  # the flag reaches the one gcloud call; prod keeps the empty default
+
+
+
+def test_a_stray_environment_variable_cannot_stand_in_for_the_scripts_own_initialisation(monkeypatch):
+    """with `MCP_CPU_FLAG` / `CPU_FLAG` set in the caller's environment the real prod runs still send no flag, and the dev runs send exactly the dev flag (the environment is cleaned of the script's own variables)"""
+    monkeypatch.setenv("MCP_CPU_FLAG", "--bogus-from-the-environment")
+    monkeypatch.setenv("CPU_FLAG", "--bogus-from-the-environment")
+    on = {"_SUPPORT_GATEWAY_DEPLOY_ENABLED": "true"}
+    mcp_pattern = r"^CALL \[run\] \[services\] \[update\] "
+    sg_pattern = r"^CALL \[run\] \[deploy\] \[support-gateway-"
+    for env, expect_flag in (("dev", True), ("prod", False)):
+        for step, pattern, extra in (("deploy-mcp", mcp_pattern, None), ("deploy-support-gateway", sg_pattern, on)):
+            call = _step_call(step, env, pattern, extra)
+            assert "bogus" not in call, (step, env, call)
+            assert call.count("[--cpu-throttling]") == (1 if expect_flag else 0), (step, env, call)
