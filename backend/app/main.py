@@ -162,6 +162,12 @@ async def lifespan(app: FastAPI):
         from app.services.delivery_dispatcher import delivery_dispatcher_loop
 
         delivery_dispatcher_task = asyncio.create_task(delivery_dispatcher_loop())
+
+    lift_sweep_task = None
+    if not _os.environ.get("PYTEST_CURRENT_TEST"):
+        from app.services.desktop_limit_notice import lift_sweep_loop  # story 4781: the «working again» line waits for the hold, the sweep tells it when no report comes
+
+        lift_sweep_task = asyncio.create_task(lift_sweep_loop())
     try:
         yield
     finally:
@@ -179,6 +185,8 @@ async def lifespan(app: FastAPI):
             outbox_dispatcher_task.cancel()
         if delivery_dispatcher_task is not None:
             delivery_dispatcher_task.cancel()
+        if lift_sweep_task is not None:
+            lift_sweep_task.cancel()
         try:
             if task is not None:
                 try:
@@ -203,6 +211,11 @@ async def lifespan(app: FastAPI):
             if delivery_dispatcher_task is not None:
                 try:
                     await delivery_dispatcher_task
+                except asyncio.CancelledError:
+                    pass
+            if lift_sweep_task is not None:
+                try:
+                    await lift_sweep_task
                 except asyncio.CancelledError:
                     pass
         finally:
