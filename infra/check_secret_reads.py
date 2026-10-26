@@ -6,14 +6,15 @@ search and was found only when a build was refused. This check finds readers by 
 - a file that reads a secret value and is not on the list  → FAIL (a new reader: add it with its reason, and make sure the account it runs as is allowed to read that secret — one secret at a time)
 - a file on the list that no longer reads one              → FAIL (the list must stay exact)
 
-What counts as a read: `versions access` in any spelling (a command line, or the words as separate list items), the client call `access_secret_version`, the client class `SecretManagerServiceClient`, the REST path
-`secretmanager.googleapis.com/v1…`, and a `…/versions/<v>:access` path. NOT a read: `--set-secrets` / `--update-secrets` (a reference: the service's own account reads the value when it starts),
-`versions add` (a write), IAM bindings.
+What counts as a read — only the calls that return a secret's VALUE: `versions access` in any spelling (a command line, or the words as separate list items), the client method `access_secret_version` (also written
+`accessSecretVersion` / `AccessSecretVersion` in other client libraries), and a `…/versions/<v>:access` REST path. NOT a read: `--set-secrets` / `--update-secrets` (a reference: the service's own account reads the value when it
+starts), `versions add` or any other write, IAM bindings, listing or describing, creating a client object.
 
 Local run:  python3 infra/check_secret_reads.py        (exit 0 = exact, 1 = differs)
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -24,23 +25,23 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = Path(__file__).resolve().parent / "secret-reads.yml"
 
-_SKIP_DIRS = {".git", "node_modules", ".next", "dist", "build", "__pycache__", ".venv", "venv", "tests", "__tests__", "test", ".qa-worktrees"}
-_SKIP_SUFFIXES = (".md", ".lock", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2", ".pdf", ".zip", ".tgz", ".gz", ".map", ".svg")
-_SKIP_NAME_PARTS = (".test.", ".spec.", "pnpm-lock", "package-lock")
+# skipped: vendored / generated folders, the test folders, documents, lock files, binary files. A folder named `build`, `dist` or `test` is NOT skipped (a real script can live there).
+_SKIP_DIRS = {".git", "node_modules", ".next", "__pycache__", ".venv", "venv", "tests", "__tests__", ".qa-worktrees"}
+_SKIP_SUFFIXES = (".md", ".lock", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2", ".pdf", ".zip", ".tgz", ".gz")
+_TEST_FILE = re.compile(r"\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs|py)$")
+_SKIP_NAME_PARTS = ("pnpm-lock", "package-lock")
 # the words «versions» then «access», whatever sits between them: spaces, quotes, commas, a line break, a backslash
 _READ_SHAPES = (
     re.compile(r"""versions[\s"',\\]+access\b"""),
-    re.compile(r"access_secret_version"),
-    re.compile(r"SecretManagerServiceClient"),
-    re.compile(r"secretmanager\.googleapis\.com/v1"),
+    re.compile(r"access_?secret_?version", re.IGNORECASE),
     re.compile(r"/versions/[^\s\"']*:access"),
 )
 
 
 def _tracked_files(root: Path) -> list[Path]:
     try:
-        out = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, check=True, timeout=60).stdout.decode()
-        names = [n for n in out.split("\0") if n]
+        out = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, check=True, timeout=60).stdout
+        names = [os.fsdecode(n) for n in out.split(b"\0") if n]  # any bytes a file name can hold
     except (OSError, subprocess.SubprocessError):
         names = [str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()]
     return [root / n for n in names]
@@ -50,7 +51,7 @@ def _skipped(rel: Path) -> bool:
     if any(part in _SKIP_DIRS for part in rel.parts[:-1]):
         return True
     name = rel.name
-    return name.endswith(_SKIP_SUFFIXES) or any(p in name for p in _SKIP_NAME_PARTS) or name == "check_secret_reads.py" or name == "secret-reads.yml"
+    return name.endswith(_SKIP_SUFFIXES) or any(p in name for p in _SKIP_NAME_PARTS) or bool(_TEST_FILE.search(name)) or name == "check_secret_reads.py" or name == "secret-reads.yml"
 
 
 def find_readers(root: Path = ROOT, files: list[Path] | None = None) -> dict[str, list[int]]:
@@ -61,8 +62,8 @@ def find_readers(root: Path = ROOT, files: list[Path] | None = None) -> dict[str
         if _skipped(rel) or not path.is_file():
             continue
         try:
-            text = path.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
+            text = path.read_bytes().decode("utf-8", errors="replace")  # a file with odd bytes is still read, never skipped
+        except OSError:
             continue
         for shape in _READ_SHAPES:
             for m in shape.finditer(text):
@@ -76,7 +77,7 @@ def load_registry(path: Path = REGISTRY) -> dict[str, dict]:
         raise SystemExit(f"{path}: expected a mapping with a `readers:` list")
     out: dict[str, dict] = {}
     for item in doc["readers"]:
-        if not (isinstance(item, dict) and isinstance(item.get("file"), str) and isinstance(item.get("runs_as"), str) and isinstance(item.get("reason"), str) and item["reason"].strip()):
+        if not (isinstance(item, dict) and isinstance(item.get("file"), str) and isinstance(item.get("runs_as"), str) and item["runs_as"].strip() and isinstance(item.get("reason"), str) and item["reason"].strip()):
             raise SystemExit(f"{path}: every reader needs `file`, `runs_as` and a non-empty `reason`: {item!r}")
         if item["file"] in out:
             raise SystemExit(f"{path}: {item['file']} is listed twice")
