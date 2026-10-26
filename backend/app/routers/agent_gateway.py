@@ -1127,22 +1127,21 @@ async def agent_stream(
             # story 4800: what is left of the connection's end is done by a task of its own and the stream waits for it SHIELDED. A real client that goes away makes Starlette cancel this stream's anyio scope, and that
             # cancellation is level-triggered — every real `await` left in this `finally` raised CancelledError again, so `_mark_agent_disconnected` was cut in the middle of its query and of the session's own
             # `close()`: the pooled connection was never given back (a pool that lent out one more connection per disconnect · «Exception terminating connection» once per disconnect) and the session row stayed.
-            # The sync parts come first (nothing to cut); the awaits run in the task, outside the cancelled scope; a normal end (nothing cancelled) still waits for them.
-            _release_receiver_lease = _owns_receiver_slot()  # a superseded stream leaves the slot to the one that took it over
-            if _release_receiver_lease and _receiver_id:
-                _receiver_streams.pop((agent_id_str, _receiver_id), None)
-            _agent_connections[agent_id_str].discard(queue)
-            if not _agent_connections[agent_id_str]:
-                _agent_connections.pop(agent_id_str, None)
-
+            # The whole end runs in the task, in the SAME ORDER as before (leases first, the wake queue after them), so a reconnect meets the same state it always did — a same-receiver reconnect (story 4509
+            # hand-over) finds the receiver slot looked at right before its lease is released, and the mapping is only removed if it is still this stream's (a reconnect that took the slot keeps it and its lease).
             async def _end_connection() -> None:
                 try:
                     # #2121: lease 명시 해제(최적화만·TTL 이 주 회수 경로). off/다운 no-op.
                     await sse_lease.release("agent_global", _lease_conn_id)
-                    if _release_receiver_lease:
+                    if _owns_receiver_slot():  # a superseded stream leaves the slot to the one that took it over
                         await sse_lease.release(f"perkey:{agent_id_str}", _pk_member)
+                        if _receiver_id and _receiver_streams.get((agent_id_str, _receiver_id)) is queue:
+                            _receiver_streams.pop((agent_id_str, _receiver_id), None)
                     if _took_over:  # story #4676: the taker's mark goes with its stream (only its own)
                         await sse_lease.clear_taken(f"perkey:{agent_id_str}", _pk_member)
+                    _agent_connections[agent_id_str].discard(queue)
+                    if not _agent_connections[agent_id_str]:
+                        _agent_connections.pop(agent_id_str, None)
                     # 49fed0a1 AC2/AC3: 연결 종료 → 세션 행 삭제 + 마지막 세션이면 presence offline 강등.
                     # (presence 배선 성공한 연결만 — 세션 미생성 시 타 세션 presence 오염 방지.)
                     if _presence_wired:
