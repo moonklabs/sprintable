@@ -1,6 +1,6 @@
 // 4763 follow-up — the public download door's process cache: a good answer is kept for a short while, a read in flight is joined, a failure is never kept, the cache is per bucket, the read has a time limit.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearDownloadTargetCache, DOWNLOAD_FETCH_TIMEOUT_MS, DOWNLOAD_TARGET_TTL_MS, publicDownloadTarget } from './desktop-download-target';
+import { clearDownloadTargetCache, DOWNLOAD_FAILURE_MEMORY_MS, DOWNLOAD_FETCH_TIMEOUT_MS, DOWNLOAD_TARGET_TTL_MS, publicDownloadTarget } from './desktop-download-target';
 
 const A = 'sprintable-desktop-releases-dev';
 const B = 'sprintable-desktop-releases';
@@ -40,15 +40,45 @@ describe('publicDownloadTarget (4763 follow-up)', () => {
     expect(f).toHaveBeenCalledTimes(1);
   });
 
-  it('a failure is never kept: an unreadable manifest, a non-JSON body and a url that is not ours each leave the next request to ask again', async () => {
+  it('a failure is never kept as an answer: an unreadable manifest, a non-JSON body and a url that is not ours each leave the next request — after the short rest — to ask again', async () => {
     const f = fakeFetch(async () => { throw new Error('boom'); });
     expect(await publicDownloadTarget(A, f)).toBeNull();
+    vi.advanceTimersByTime(DOWNLOAD_FAILURE_MEMORY_MS);
     f.mockImplementation((async () => ({ ok: true, text: async () => 'not json' }) as unknown as Response) as unknown as typeof fetch);
     expect(await publicDownloadTarget(A, f)).toBeNull();
+    vi.advanceTimersByTime(DOWNLOAD_FAILURE_MEMORY_MS);
     f.mockImplementation((async () => ok('https://evil.example/x.dmg')) as unknown as typeof fetch);
     expect(await publicDownloadTarget(A, f)).toBeNull();
+    vi.advanceTimersByTime(DOWNLOAD_FAILURE_MEMORY_MS);
     f.mockImplementation((async () => ok(dmg(A))) as unknown as typeof fetch);
     expect(await publicDownloadTarget(A, f)).toBe(dmg(A)); // asked again — nothing bad was kept
+    expect(f).toHaveBeenCalledTimes(4);
+  });
+
+  // the PO / Kadir's note (a): a joined read ties concurrency to one, not frequency — a bucket outage must not become one read per request
+  it('a failed bucket rests for DOWNLOAD_FAILURE_MEMORY_MS: N requests during an outage → one read; the rest ends exactly then; recovery keeps the good answer; another bucket is not resting', async () => {
+    const f = fakeFetch(async (url) => {
+      if (url.includes(`/${A}/`)) throw new Error('outage');
+      return ok(dmg(B));
+    });
+    expect(await publicDownloadTarget(A, f)).toBeNull(); // the read that failed
+    for (let i = 0; i < 300; i += 1) expect(await publicDownloadTarget(A, f)).toBeNull(); // the same 502, no read
+    expect(f).toHaveBeenCalledTimes(1);
+    expect(await publicDownloadTarget(B, f)).toBe(dmg(B)); // another bucket is not resting
+    expect(f).toHaveBeenCalledTimes(2);
+    vi.advanceTimersByTime(DOWNLOAD_FAILURE_MEMORY_MS - 1);
+    expect(await publicDownloadTarget(A, f)).toBeNull();
+    expect(f).toHaveBeenCalledTimes(2); // still resting
+    vi.advanceTimersByTime(1); // the rest is over (exclusive end)
+    expect(await publicDownloadTarget(A, f)).toBeNull();
+    expect(f).toHaveBeenCalledTimes(3); // asked again — and it failed again, so it rests again
+    expect(await publicDownloadTarget(A, f)).toBeNull();
+    expect(f).toHaveBeenCalledTimes(3);
+    // recovery: once the rest is over and the read is good, the answer is kept and the memory is gone
+    vi.advanceTimersByTime(DOWNLOAD_FAILURE_MEMORY_MS);
+    f.mockImplementation((async () => ok(dmg(A))) as unknown as typeof fetch);
+    expect(await publicDownloadTarget(A, f)).toBe(dmg(A));
+    expect(await publicDownloadTarget(A, f)).toBe(dmg(A));
     expect(f).toHaveBeenCalledTimes(4);
   });
 

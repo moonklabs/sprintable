@@ -2,19 +2,23 @@
 // time limit, and the proxy has no rate limit on public paths. This holds the ONE answer it needs — the checked download url — in this process for a short while, joins requests that arrive while a read is
 // in flight into that one read, and gives the read a time limit. Only a GOOD answer is kept (a failure is never cached: the next request asks again); the answer and the read in flight are kept PER BUCKET
 // (a changed setting is never served the old bucket's file, and two buckets reading at once cannot overwrite each other); a new dmg is served at most DOWNLOAD_TARGET_TTL_MS late. The TTL is measured on the
-// monotonic `performance.now()`, not the wall clock (a clock set back must not bring an expired answer back). The logged-in card's manifest route is not touched (it stays «past any front cache», no-store).
+// monotonic `performance.now()`, not the wall clock (a clock set back must not bring an expired answer back). A FAILED read is remembered for a short while too (DOWNLOAD_FAILURE_MEMORY_MS, per bucket): the
+// joined read ties concurrency to one, not frequency — without a rest, a bucket outage turns N requests into N reads; during the rest the answer is the same 502 (no read, nothing cached as an answer). The logged-in card's manifest route is not touched (it stays «past any front cache», no-store).
 import { fetchDesktopDownloadManifest, ourDownloadUrl } from '@/lib/desktop-downloads';
 
 export const DOWNLOAD_TARGET_TTL_MS = 45_000;
 export const DOWNLOAD_FETCH_TIMEOUT_MS = 5_000;
+export const DOWNLOAD_FAILURE_MEMORY_MS = 3_000;
 
 const answers = new Map<string, { target: string; at: number }>();
 const reading = new Map<string, Promise<string | null>>();
+const failedAt = new Map<string, number>();
 
 /** for tests: forget every answer and every read in flight */
 export function clearDownloadTargetCache(): void {
   answers.clear();
   reading.clear();
+  failedAt.clear();
 }
 
 const withTimeout = (fetchImpl: typeof fetch): typeof fetch => (input, init) => fetchImpl(input, { ...init, signal: AbortSignal.timeout(DOWNLOAD_FETCH_TIMEOUT_MS) });
@@ -35,10 +39,16 @@ export function publicDownloadTarget(bucket: string, fetchImpl: typeof fetch = f
   if (kept && performance.now() - kept.at < DOWNLOAD_TARGET_TTL_MS) return Promise.resolve(kept.target);
   const running = reading.get(bucket);
   if (running) return running;
+  const failed = failedAt.get(bucket);
+  if (failed !== undefined && performance.now() - failed < DOWNLOAD_FAILURE_MEMORY_MS) return Promise.resolve(null); // the bucket failed a moment ago: the same 502, no new read
   const promise: Promise<string | null> = readTarget(bucket, fetchImpl)
     .then((target) => {
-      if (target) answers.set(bucket, { target, at: performance.now() });
-      else answers.delete(bucket); // nothing bad is kept — and an expired answer is not left behind
+      if (target) {
+        answers.set(bucket, { target, at: performance.now() }); // (an old failure mark is older than its rest by now — nothing to clear)
+      } else {
+        answers.delete(bucket); // nothing bad is kept as an answer — and an expired answer is not left behind
+        failedAt.set(bucket, performance.now()); // only the fact that it failed, for a moment
+      }
       return target;
     })
     .finally(() => {

@@ -39,7 +39,7 @@ describe('GET /desktop/get/macos (public)', () => {
   });
 
   it('a manifest url that is not ours is never redirected to: another host · another bucket · a bucket named like ours · a non-https · user-info · a path climbing out · not a string — all 502', async () => {
-    for (const url of [
+    const urls = [
       'https://evil.example/x.dmg',
       'https://storage.googleapis.com/other-bucket/x.dmg',
       `https://storage.googleapis.com/${BUCKET}-evil/x.dmg`,
@@ -48,13 +48,16 @@ describe('GET /desktop/get/macos (public)', () => {
       `https://storage.googleapis.com/${BUCKET}/../other-bucket/x.dmg`,
       `https://storage.googleapis.com/${BUCKET}/`,
       42, null, undefined,
-    ]) {
+    ];
+    for (const url of urls) {
+      clearDownloadTargetCache(); // every url is judged by its own read (a failed bucket rests for a few seconds)
       fetchManifest.mockResolvedValue(manifest(url));
       const res = await GET();
       expect(res.status, String(url)).toBe(502);
       expect(res.headers.get('Location'), String(url)).toBeNull();
       expect(await res.text(), String(url)).toBe(''); // never the manifest, never an error text
     }
+    expect(fetchManifest).toHaveBeenCalledTimes(urls.length); // each one really read — none skipped by the rest
   });
 
   // Kadir's lens: a failure is logged by the error's NAME only — an error whose message carries a url or a token must not reach the log arguments (nor the error object itself)
@@ -63,6 +66,7 @@ describe('GET /desktop/get/macos (public)', () => {
     const SECRET = 'SECRET-TOKEN-4763';
     fetchManifest.mockRejectedValue(new Error(`GCS fetch failed for https://storage.googleapis.com/${BUCKET}/x?token=${SECRET}`));
     await GET();
+    clearDownloadTargetCache(); // (a failed bucket rests for a few seconds — a new case starts from nothing)
     fetchManifest.mockResolvedValue(`not json ${SECRET}`); // a SyntaxError message may quote the text it choked on
     await GET();
     expect(log).toHaveBeenCalledTimes(2);
@@ -88,6 +92,7 @@ describe('GET /desktop/get/macos (public)', () => {
     expect(failed.status).toBe(502);
     expect(await failed.text()).toBe(''); // the error text stays in the server log
     for (const body of ['not json', 'null', '[]', '"x"']) {
+      clearDownloadTargetCache(); // each body is judged by its own read
       fetchManifest.mockResolvedValue(body);
       const res = await GET();
       expect(res.status, body).toBe(502);
