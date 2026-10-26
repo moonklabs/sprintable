@@ -118,7 +118,7 @@ def test_no_file_binds_the_old_shared_signing_secret_name():
     assert hits == [], hits
 
 
-def test_the_secret_manifest_lists_the_two_new_names_and_the_shared_one_until_it_is_deleted():
+def test_the_secret_manifest_lists_the_per_environment_names_and_keeps_the_existing_one():
     names = {l.strip() for l in (_ROOT / "infra" / "cloudbuild-secret-manifest.txt").read_text().splitlines() if l.strip() and not l.startswith("#")}
     assert {"JWT_SECRET_DEV", "JWT_SECRET_PROD"} <= names
-    assert "JWT_SECRET" in names  # the shared secret stays (nobody binds it) until the operator deletes it and drops the name in the same change
+    assert "JWT_SECRET" in names  # the manifest mirrors Secret Manager: this name exists there, so it is listed; it is dropped in the same change that removes the secret
