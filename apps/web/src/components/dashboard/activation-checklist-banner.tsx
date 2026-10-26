@@ -123,9 +123,10 @@ export function ActivationChecklistBanner() {
   }, [completeHere, hidden, pageVisible, seenOpenKey]);
   // the line is for the page and the organization it was set on: leaving either takes it down for good (coming back within the 10 s does not show it again — the mark is already spent)
   // a functional update on purpose: in the same commit the finish effect above may have set the NEW organization's line — a check against the value this render saw would take that one down with the old one's
+  // …and a line whose «complete» is taken back (a stale completion re-read as open) goes too, with its clock — the next completion shows a fresh 10 s
   useEffect(() => {
-    setDoneFor((current) => (current !== null && (hidden || current !== seenOpenKey) ? null : current));
-  }, [hidden, seenOpenKey]);
+    setDoneFor((current) => (current !== null && (hidden || !completeHere || current !== seenOpenKey) ? null : current));
+  }, [hidden, completeHere, seenOpenKey]);
   // the line's own clock runs only while the tab is visible (what was left is kept across a hide)
   // the clock belongs to ONE line (an organization's): a line that replaces another (an organization switch) starts with its own full 10 s, never with what the old one had left
   const doneClock = useRef<{ forOrg: string | null; left: number }>({ forOrg: null, left: ACTIVATION_DONE_LINE_MS });

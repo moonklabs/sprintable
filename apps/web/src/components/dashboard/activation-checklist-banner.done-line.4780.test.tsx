@@ -11,11 +11,12 @@ import { ACTIVATION_REFRESH_MS, _resetActivationStatusCacheForTests } from '@/ho
 
 const mockOrg = { orgId: 'org-1' };
 const mockPath = { current: '/today' as string | null };
+const mockSeed = { complete: undefined as boolean | undefined, fromHint: false }; // the server's word on «complete» (a seed the banner may re-read in the background)
 const mockCollapsed = { value: undefined as boolean | undefined }; // the server's word on the collapsed state (a session cookie it reads)
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => ({
-    projectId: 'proj-1', orgId: mockOrg.orgId, activationOrgId: mockOrg.orgId, activationSeedFromHint: false,
-    initialActivationComplete: undefined, initialActivationCollapsed: mockCollapsed.value,
+    projectId: 'proj-1', orgId: mockOrg.orgId, activationOrgId: mockOrg.orgId, activationSeedFromHint: mockSeed.fromHint,
+    initialActivationComplete: mockSeed.complete, initialActivationCollapsed: mockCollapsed.value,
   }),
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), usePathname: () => mockPath.current }));
@@ -52,6 +53,8 @@ beforeEach(() => {
   mockOrg.orgId = 'org-1';
   mockPath.current = '/today';
   mockCollapsed.value = undefined;
+  mockSeed.complete = undefined;
+  mockSeed.fromHint = false;
   document.cookie = 'sp_activation_hint=; Path=/; Max-Age=0';
   document.cookie = 'sp_activation_collapsed=; Path=/; Max-Age=0';
   container = document.createElement('div');
@@ -380,6 +383,24 @@ describe('[SID:4780] ActivationChecklistBanner — the finish is shown once', ()
     await act(async () => { vi.advanceTimersByTime(5000); });
     expect(done()).not.toBeNull(); // reverted (the clock is shared) → gone after the old line's last 100 ms
     await act(async () => { vi.advanceTimersByTime(ACTIVATION_DONE_LINE_MS); });
+    expect(done()).toBeNull();
+  });
+  it('a completion that is taken back (the seed said complete, the background read says open) takes the line and its clock down — the next completion shows a fresh 10 s', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'Date'] });
+    mockSeed.complete = true;
+    mockSeed.fromHint = true;
+    localStore.set(SEEN('org-1'), '1');
+    answers(PARTIAL, COMPLETE);
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    expect(done()).toBeNull(); // the background read said «open»: the line is down (reverted: it only hid behind the derived guard, its clock kept running)
+    await act(async () => { vi.advanceTimersByTime(4000); });
+    await act(async () => { window.dispatchEvent(new Event('focus')); }); // read again: complete this time
+    await flush();
+    expect(done()).not.toBeNull();
+    await act(async () => { vi.advanceTimersByTime(7000); });
+    expect(done()).not.toBeNull(); // reverted (the stale clock) → gone 6 s after this completion
+    await act(async () => { vi.advanceTimersByTime(4000); });
     expect(done()).toBeNull();
   });
 });
