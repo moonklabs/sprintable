@@ -1120,6 +1120,10 @@ async def agent_stream(
             # E-INFRA S4: 연결 cap decrement (legacy events.py:380-381 미러) — 항상 실행.
             global _agent_sse_connection_count
             _agent_sse_connection_count -= 1
+            # story 4788: a connection whose replay finished and that was still there `MIN_ALIVE_SEC` later counts as one more replay of its kind that the client had the chance to read. Scheduled as its
+            # own task, first, before any await: when the client goes away Starlette cancels this stream's scope and every await below this point may be cut (see agent_stream_replay_floor.record_soon)
+            if _replay_done_at is not None and time.monotonic() - _replay_done_at >= _replay_floor.MIN_ALIVE_SEC:
+                _replay_floor.record_soon(agent_id, _replay_key_id, _accept_types, _backfill_stats["settled_max"])
             # #2121: lease 명시 해제(최적화만·TTL 이 주 회수 경로). off/다운 no-op.
             await sse_lease.release("agent_global", _lease_conn_id)
             if _owns_receiver_slot():  # a superseded stream leaves the slot to the one that took it over
@@ -1137,13 +1141,6 @@ async def agent_stream(
                 await _mark_agent_disconnected(
                     agent_id, session_id, org_id_str, heartbeat_baseline=_heartbeat_baseline,
                 )
-            # story 4788 (last, after every cleanup above): a connection whose replay finished and that was still there `MIN_ALIVE_SEC` later counts as one more replay of its kind that the client had the chance to read
-            if _replay_done_at is not None and time.monotonic() - _replay_done_at >= _replay_floor.MIN_ALIVE_SEC:
-                try:
-                    await _replay_floor.record(agent_id, _replay_key_id, _accept_types, _backfill_stats["settled_max"])
-                except Exception:  # noqa: BLE001 — a count for the next connect, never a condition of this one
-                    logger.warning("agent_stream replay floor record failed agent=%s", agent_id_str, exc_info=True)
-
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",

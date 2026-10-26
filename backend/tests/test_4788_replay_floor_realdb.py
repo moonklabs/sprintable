@@ -11,6 +11,7 @@ These tests run the real `agent_stream()` over a real database and fakeredis (th
 - the agent's cursor is never written."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -57,22 +58,66 @@ def _store_and_limits(request, monkeypatch):
     f._local.clear()
 
 
-async def _open_as(ag, Session, ids, headers, key_id):
+async def _response_as(ag, ids, headers, key_id):
     from app.dependencies.auth import AuthContext
     from tests.test_4788_agent_stream_replay_realdb import _Request
 
     auth = AuthContext(user_id=str(ids[2]), email=None, claims=agent_stream_claims(key_id, ids[0]))
     resp = await ag.agent_stream(_Request(headers), auth=auth)
     assert resp.status_code == 200
-    return resp.body_iterator
+    return resp
 
 
-async def _connect_as(ag, Session, ids, headers, key_id) -> list[str]:
+async def _open_as(ag, Session, ids, headers, key_id):
+    return (await _response_as(ag, ids, headers, key_id)).body_iterator
+
+
+async def _world_prod(monkeypatch, tail: int = 120):
+    """`_world`, on an engine that checks a pooled connection before it hands it out — as the app's own engine does (`pool_pre_ping` in app/core/database.py). A stream that ends under a cancelled
+    scope (a real client leaving) cuts the query it is in the middle of and leaves that connection closed in the pool; the app's engine replaces it at the next checkout, the test engine would not."""
+    ag, engine, Session, ids = await _world(monkeypatch, tail=tail)
+    engine.sync_engine.pool._pre_ping = True
+    return ag, engine, Session, ids
+
+
+async def _connect_as_close(ag, Session, ids, headers, key_id) -> list[str]:
+    """the stream read until quiet and then ended with `aclose()` — a plain GeneratorExit: every await in its `finally` runs. NOT how a real server ends it (see `_connect_as`)."""
     reader = _Reader(await _open_as(ag, Session, ids, headers, key_id))
     try:
         return await reader.frames()
     finally:
         await reader.close()
+
+
+async def _connect_as(ag, Session, ids, headers, key_id) -> list[str]:
+    """the stream as a real server ends it (Kadir's lens on 5265): the REAL `StreamingResponse.__call__` is run with a `receive` that answers `http.disconnect` when the client "goes away". Starlette then
+    ends the stream inside an anyio cancel scope — a LEVEL-triggered cancellation: every real `await` left in the stream's `finally` raises CancelledError again. Whatever the stream does at its
+    end has to survive that (the first version of the count was awaited there and never ran on a real server, while `aclose()` — a plain GeneratorExit — kept every test green)."""
+    resp = await _response_as(ag, ids, headers, key_id)
+    body = bytearray()
+    gone = asyncio.Event()
+
+    async def receive():
+        await gone.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        if message["type"] == "http.response.body":
+            body.extend(message.get("body", b""))
+
+    scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.3"}, "method": "GET", "path": "/api/v2/agent/stream", "headers": []}
+    task = asyncio.create_task(resp(scope, receive, send))
+    seen = -1
+    for _ in range(60):  # the replay has arrived when the body stops growing
+        await asyncio.sleep(0.2)
+        if len(body) == seen and len(body) > 0:
+            break
+        seen = len(body)
+    await asyncio.sleep(0.4)
+    gone.set()  # the client went away
+    await asyncio.wait_for(task, 20)
+    await asyncio.sleep(0.4)  # (a task the end of the stream started gets to finish)
+    return [f for f in body.decode().split("\n\n") if f and not f.startswith("event: heartbeat")]
 
 
 async def _key(Session, ids) -> uuid.UUID:
@@ -85,7 +130,7 @@ def _seqs(frames):
 
 
 async def test_01_the_root_one_tail_five_reconnects_the_first_three_send_it_and_then_nothing(monkeypatch, caplog):
-    ag, engine, Session, ids = await _world(monkeypatch, tail=120)
+    ag, engine, Session, ids = await _world_prod(monkeypatch, tail=120)
     try:
         key = await _key(Session, ids)
         sizes = []
@@ -103,7 +148,7 @@ async def test_01_the_root_one_tail_five_reconnects_the_first_three_send_it_and_
 
 
 async def test_02_no_loss_a_newer_event_is_sent_and_an_event_sent_fewer_times_than_the_limit_is_sent_again(monkeypatch):
-    ag, engine, Session, ids = await _world(monkeypatch, tail=10)
+    ag, engine, Session, ids = await _world_prod(monkeypatch, tail=10)
     try:
         key = await _key(Session, ids)
         H = {"user-agent": "Bun/1.4.2"}
@@ -125,7 +170,7 @@ async def test_02_no_loss_a_newer_event_is_sent_and_an_event_sent_fewer_times_th
 async def test_03_a_connection_that_was_not_there_afterwards_counts_for_nothing(monkeypatch):
     from app.services import agent_stream_replay_floor as f
 
-    ag, engine, Session, ids = await _world(monkeypatch, tail=20)
+    ag, engine, Session, ids = await _world_prod(monkeypatch, tail=20)
     try:
         monkeypatch.setattr(f, "MIN_ALIVE_SEC", 3600.0)  # none of these connections lives that long
         key = await _key(Session, ids)
@@ -136,7 +181,7 @@ async def test_03_a_connection_that_was_not_there_afterwards_counts_for_nothing(
 
 
 async def test_04_another_key_or_another_declaration_never_skips_what_another_kind_of_connection_was_sent(monkeypatch):
-    ag, engine, Session, ids = await _world(monkeypatch, tail=30)
+    ag, engine, Session, ids = await _world_prod(monkeypatch, tail=30)
     try:
         key, other_key = await _key(Session, ids), await _key(Session, ids)
         H = {"user-agent": "Bun/1.4.2"}
@@ -154,7 +199,7 @@ async def test_04_another_key_or_another_declaration_never_skips_what_another_ki
 async def test_05_the_switch_turns_it_off_and_a_restart_of_a_no_redis_process_forgets_the_counts(monkeypatch, _store_and_limits):
     from app.services import agent_stream_replay_floor as f
 
-    ag, engine, Session, ids = await _world(monkeypatch, tail=12)
+    ag, engine, Session, ids = await _world_prod(monkeypatch, tail=12)
     try:
         key = await _key(Session, ids)
         H = {"user-agent": "Bun/1.4.2"}
@@ -179,7 +224,7 @@ async def test_06_the_agents_cursor_is_never_written_by_it(monkeypatch):
 
     from app.models.agent_gateway import AgentEventCursor
 
-    ag, engine, Session, ids = await _world(monkeypatch, tail=8)
+    ag, engine, Session, ids = await _world_prod(monkeypatch, tail=8)
     try:
         key = await _key(Session, ids)
         async with Session() as s:
@@ -196,7 +241,7 @@ async def test_06_the_agents_cursor_is_never_written_by_it(monkeypatch):
 
 
 async def test_07_the_connect_log_line_says_where_it_started(monkeypatch, caplog):
-    ag, engine, Session, ids = await _world(monkeypatch, tail=6)
+    ag, engine, Session, ids = await _world_prod(monkeypatch, tail=6)
     try:
         key = await _key(Session, ids)
         with caplog.at_level(logging.INFO, logger="app.routers.agent_gateway"):
@@ -270,7 +315,7 @@ async def test_10_an_event_younger_than_the_settle_time_is_never_part_of_the_flo
     """a late commit (a lower seq that commits after a higher one was sent) must still arrive: the floor only ever covers events older than SETTLE_SEC"""
     from app.services import agent_stream_replay_floor as f
 
-    ag, engine, Session, ids = await _world(monkeypatch, tail=15)
+    ag, engine, Session, ids = await _world_prod(monkeypatch, tail=15)
     try:
         monkeypatch.setattr(f, "SETTLE_SEC", 3600.0)  # every event of this test is far younger than that
         key = await _key(Session, ids)
@@ -281,7 +326,7 @@ async def test_10_an_event_younger_than_the_settle_time_is_never_part_of_the_flo
 
 
 async def test_11_a_replay_that_sent_nothing_records_nothing_a_stale_last_event_id_cannot_become_the_floor(monkeypatch):
-    ag, engine, Session, ids = await _world(monkeypatch, tail=15)
+    ag, engine, Session, ids = await _world_prod(monkeypatch, tail=15)
     try:
         key = await _key(Session, ids)
         for _ in range(4):
@@ -292,11 +337,11 @@ async def test_11_a_replay_that_sent_nothing_records_nothing_a_stale_last_event_
         await _cleanup(ag, engine, ids[2])
 
 
-async def test_12_a_cut_off_cleanup_still_runs_when_the_record_fails(monkeypatch):
-    """the count is a hint for the next connect: when writing it raises, the connection's cleanup (cap counter · lease · connection list) has already run and nothing escapes"""
+async def test_12_when_writing_the_count_fails_the_connection_is_still_released(monkeypatch, caplog):
+    """the count is a hint for the next connect: when writing it raises, nothing escapes the end of the connection (cap counter · connection list) and it is a warning"""
     from app.services import agent_stream_replay_floor as f
 
-    ag, engine, Session, ids = await _world(monkeypatch, tail=5)
+    ag, engine, Session, ids = await _world_prod(monkeypatch, tail=5)
     try:
         async def _boom(*a, **k):
             raise RuntimeError("redis down")
@@ -304,9 +349,11 @@ async def test_12_a_cut_off_cleanup_still_runs_when_the_record_fails(monkeypatch
         monkeypatch.setattr(f, "record", _boom)
         before = ag._agent_sse_connection_count
         key = await _key(Session, ids)
-        assert len(await _connect_as(ag, Session, ids, {"user-agent": "Bun/1.4.2"}, key)) == 5
+        with caplog.at_level(logging.WARNING, logger="app.services.agent_stream_replay_floor"):
+            assert len(await _connect_as(ag, Session, ids, {"user-agent": "Bun/1.4.2"}, key)) == 5
         assert ag._agent_sse_connection_count == before, "the connection was released"
         assert str(ids[2]) not in ag._agent_connections
+        assert any("replay floor record failed" in r.getMessage() for r in caplog.records)
     finally:
         await _cleanup(ag, engine, ids[2])
 
@@ -317,7 +364,7 @@ async def test_13_the_settled_run_stops_at_the_first_fresh_event(monkeypatch):
 
     from app.services import agent_stream_replay_floor as f
 
-    ag, engine, Session, ids = await _world(monkeypatch, tail=10)
+    ag, engine, Session, ids = await _world_prod(monkeypatch, tail=10)
     try:
         monkeypatch.setattr(f, "SETTLE_SEC", 60.0)
         async with Session() as s:
@@ -336,23 +383,43 @@ async def test_13_the_settled_run_stops_at_the_first_fresh_event(monkeypatch):
         await _cleanup(ag, engine, ids[2])
 
 
-async def test_14_the_record_is_written_after_the_connection_is_released(monkeypatch):
-    """the count is the last thing the end of a connection does: when it is written, the cap counter, the lease and the connection list are already clean (a cut-off write cannot leave them behind)"""
+async def test_14_a_count_that_never_finishes_does_not_hold_the_connection_and_the_real_end_still_records(monkeypatch):
+    """(a) the count is its own task: a store that hangs cannot keep the connection's end waiting; (b) the end of a stream under a cancelled anyio scope — the real server's way — records: the first
+    test of the file that used `aclose()` for it was green while a real uvicorn never recorded once"""
     from app.services import agent_stream_replay_floor as f
 
-    ag, engine, Session, ids = await _world(monkeypatch, tail=4)
+    ag, engine, Session, ids = await _world_prod(monkeypatch, tail=4)
     try:
-        seen: list[tuple[int, bool]] = []
+        started: list[int] = []
         real = f.record
 
-        async def _spy(*a, **k):
-            seen.append((ag._agent_sse_connection_count, str(ids[2]) in ag._agent_connections))
-            return await real(*a, **k)
+        async def _hangs(*a, **k):
+            started.append(1)
+            await asyncio.sleep(3600)
 
-        monkeypatch.setattr(f, "record", _spy)
+        monkeypatch.setattr(f, "record", _hangs)
         before = ag._agent_sse_connection_count
         key = await _key(Session, ids)
         assert len(await _connect_as(ag, Session, ids, {"user-agent": "Bun/1.4.2"}, key)) == 4
-        assert seen == [(before, False)], seen
+        assert started == [1] and ag._agent_sse_connection_count == before and str(ids[2]) not in ag._agent_connections, "released although the count hangs"
+        for t in list(f._pending):
+            t.cancel()
+        monkeypatch.setattr(f, "record", real)
+        for _ in range(3):
+            assert len(await _connect_as(ag, Session, ids, {"user-agent": "Bun/1.4.2"}, key)) == 4
+        assert await _connect_as(ag, Session, ids, {"user-agent": "Bun/1.4.2"}, key) == [], "recorded by the cancelled-scope end three times: left out the fourth"
+    finally:
+        await _cleanup(ag, engine, ids[2])
+
+
+async def test_15_both_ends_of_a_stream_record_the_aclose_end_and_the_cancelled_scope_end(monkeypatch):
+    ag, engine, Session, ids = await _world_prod(monkeypatch, tail=6)
+    try:
+        key = await _key(Session, ids)
+        H = {"user-agent": "Bun/1.4.2"}
+        assert len(await _connect_as_close(ag, Session, ids, H, key)) == 6
+        assert len(await _connect_as(ag, Session, ids, H, key)) == 6
+        assert len(await _connect_as_close(ag, Session, ids, H, key)) == 6
+        assert await _connect_as(ag, Session, ids, H, key) == [], "three of them, two kinds of end, counted together"
     finally:
         await _cleanup(ag, engine, ids[2])

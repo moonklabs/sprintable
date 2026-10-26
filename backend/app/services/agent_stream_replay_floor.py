@@ -17,6 +17,7 @@ The agent's durable cursor (`acked_seq`) is never written here.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import os
@@ -98,3 +99,27 @@ async def record(agent_id: uuid.UUID | str, key_id: object, accept_types: "froze
         await client.expire(key, TTL_SEC)
 
     await redis_shared.with_fallback(_op, lambda: _local_push(key, int(sent_max)))
+
+
+_pending: "set[asyncio.Task]" = set()  # (a task nobody else holds is collected before it ends)
+
+
+def record_soon(agent_id: uuid.UUID | str, key_id: object, accept_types: "frozenset[str] | None", sent_max: int) -> None:
+    """`record`, started as its own task and not awaited. The end of a stream is run by Starlette inside an anyio cancel scope when the client goes away, and that cancellation is level-triggered: every
+    real `await` left in the stream's `finally` raises CancelledError again — a `record` awaited there never ran (Kadir's lens on 5265, measured on a real uvicorn: not once). A task of its own is not in
+    that scope, so it finishes; it needs no clean-up order either, and a slow store cannot delay the clean-up of the connection. A failure is a warning: the count is a hint for the next connect."""
+    if ATTEMPTS <= 0 or not key_id or sent_max <= 0:
+        return
+
+    async def _run() -> None:
+        try:
+            await record(agent_id, key_id, accept_types, sent_max)
+        except Exception:  # noqa: BLE001 — a count for the next connect, never a condition of this one
+            logger.warning("agent_stream replay floor record failed agent=%s", agent_id, exc_info=True)
+
+    try:
+        task = asyncio.get_running_loop().create_task(_run())
+    except RuntimeError:  # no running loop (cannot happen inside the stream; a call from elsewhere just does not record)
+        return
+    _pending.add(task)
+    task.add_done_callback(_pending.discard)
