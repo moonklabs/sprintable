@@ -4,7 +4,8 @@
 // (`DESKTOP_DOWNLOAD_ENABLED` — the same server switch as /desktop; off → 404, the manifest is not even read). proxy.ts lists exactly this path (PUBLIC_EXACT), not a prefix.
 import { NextResponse } from 'next/server';
 import { isDesktopDownloadEnabled } from '@/lib/desktop-download-gate';
-import { desktopDownloadBucket, fetchDesktopDownloadManifest, ourDownloadUrl } from '@/lib/desktop-downloads';
+import { desktopDownloadBucket } from '@/lib/desktop-downloads';
+import { publicDownloadTarget } from '@/lib/desktop-download-target';
 
 const NO_STORE = { 'Cache-Control': 'no-store' };
 
@@ -12,13 +13,8 @@ export async function GET() {
   if (!isDesktopDownloadEnabled(process.env.DESKTOP_DOWNLOAD_ENABLED)) return new NextResponse(null, { status: 404, headers: NO_STORE });
   const bucket = desktopDownloadBucket();
   if (!bucket) return new NextResponse(null, { status: 502, headers: NO_STORE }); // switch on, no bucket named: nothing is ours — and the manifest is not read
-  let target: string | null = null;
-  try {
-    const manifest: unknown = JSON.parse(await fetchDesktopDownloadManifest(fetch, bucket));
-    target = ourDownloadUrl(typeof manifest === 'object' && manifest !== null ? (manifest as { url?: unknown }).url : undefined, bucket);
-  } catch (err) {
-    console.error('desktop_downloads.public_redirect_unavailable', err instanceof Error ? err.name : 'unknown');
-  }
+  // the manifest read — kept in this process for a short while, joined while in flight, with a time limit (lib/desktop-download-target.ts · 4763 follow-up); it logs a failure by the error name only
+  const target = await publicDownloadTarget(bucket);
   if (!target) return new NextResponse(null, { status: 502, headers: NO_STORE });
   return new NextResponse(null, { status: 302, headers: { ...NO_STORE, Location: target } });
 }
