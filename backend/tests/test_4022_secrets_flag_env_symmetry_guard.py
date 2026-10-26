@@ -21,7 +21,7 @@ _SAMPLE_CLOUDBUILD = '''
         if [ "${_DEPLOY_ENV}" == "dev" ]; then
           SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_DEV_PGBOUNCER_SPRINTABLE:latest,DATABASE_URL_DIRECT=DATABASE_URL_DIRECT_DEV_SPRINTABLE:latest,APPLE_PRIVATE_KEY=APPLE_SIWA_PRIVATE_KEY:latest,SUPPORT_GATEWAY_TOKEN_SECRET=SUPPORT_GATEWAY_TOKEN_SECRET_dev:latest,CHANNEL_CREDENTIAL_ENCRYPTION_KEY=CHANNEL_CREDENTIAL_ENCRYPTION_KEY_DEV:latest,CHANNEL_OAUTH_STATE_SECRET=CHANNEL_OAUTH_STATE_SECRET_DEV:latest"
         elif [ "${_DEPLOY_ENV}" == "prod" ]; then
-          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_PROD_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_PROD:latest,DATABASE_URL_READ=DATABASE_URL_READ:latest,APPLE_PRIVATE_KEY=APPLE_SIWA_PRIVATE_KEY:latest,CHANNEL_CREDENTIAL_ENCRYPTION_KEY=CHANNEL_CREDENTIAL_ENCRYPTION_KEY_PROD:latest,CHANNEL_OAUTH_STATE_SECRET=CHANNEL_OAUTH_STATE_SECRET_PROD:latest"
+          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_PROD_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_PROD:latest,APPLE_PRIVATE_KEY=APPLE_SIWA_PRIVATE_KEY:latest,CHANNEL_CREDENTIAL_ENCRYPTION_KEY=CHANNEL_CREDENTIAL_ENCRYPTION_KEY_PROD:latest,CHANNEL_OAUTH_STATE_SECRET=CHANNEL_OAUTH_STATE_SECRET_PROD:latest"
         fi
 '''
 
@@ -34,7 +34,7 @@ def test_extract_secrets_flag_keys_parses_dev_and_prod_branches():
         "CHANNEL_OAUTH_STATE_SECRET",
     }
     assert prod_keys == {
-        "DATABASE_URL", "DATABASE_URL_DIRECT", "DATABASE_URL_READ", "APPLE_PRIVATE_KEY",
+        "DATABASE_URL", "DATABASE_URL_DIRECT", "APPLE_PRIVATE_KEY",
         "CHANNEL_CREDENTIAL_ENCRYPTION_KEY", "CHANNEL_OAUTH_STATE_SECRET",
     }
 
@@ -74,11 +74,15 @@ def test_check_allows_documented_dev_only_exception():
     assert ok, lines
 
 
-def test_check_allows_documented_prod_only_exception():
+def test_check_flags_prod_read_replica_key_now_that_its_exception_is_gone():
+    """story 4790 — 읽기 복제본 DSN(DATABASE_URL_READ)의 prod 전용 예외를 걷었다. 복제본 바인딩을 prod에 되살리면(복제본 인프라 없이)
+    «근거 없는 prod 전용 키»로 빨개져야 한다 — 이 시험이 그 되돌림을 잡는다."""
     ok, lines = sym_gate.check(
         dev_keys={"DATABASE_URL"}, prod_keys={"DATABASE_URL", "DATABASE_URL_READ"},
     )
-    assert ok, lines
+    assert ok is False
+    assert any("DATABASE_URL_READ" in line for line in lines)
+    assert "DATABASE_URL_READ" not in sym_gate._PROD_ONLY_EXCEPTIONS
 
 
 def test_ac2_positive_control_removing_prod_channel_key_goes_red():

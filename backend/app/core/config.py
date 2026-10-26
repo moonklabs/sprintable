@@ -494,6 +494,12 @@ class Settings(BaseSettings):
     # N=180초(3분)는 선생님 확定값(2026-08-04, PR #2839 머지 게이트 통과).
     auth_refresh_chain_resolve_window_seconds: int = 180
 
+    # story 4778 (AC2b) — how long after a switch (switch-org · switch-project) the refresh token it ended is still answered `TOKEN_SUPERSEDED` (this session moved on and holds a newer token)
+    # instead of `TOKEN_REVOKED` (this session is over). The browser's refresh that left with the old token before it saved the switch's new cookie arrives inside this window; it must not be
+    # told «dead» (the BFF clears both cookies on that). Short on purpose: the word tells whoever holds a stolen old token one thing — «this session switched within the last N seconds and lives on» —
+    # so N is the time a healthy switch answer needs to land (the BFF's own bound is 30 s), not the 180 s of the rotation window.
+    auth_refresh_superseded_window_seconds: int = 30
+
     firebase_project_id: str = ""  # Firebase/Identity Platform GCP 프로젝트 ID(dev/prod 분리)
 
     # story 132e7204(Phase1-S4): Next.js BFF↔FastAPI 세션쿠키 발급 내부 호출 공유시크릿.

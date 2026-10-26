@@ -42,11 +42,8 @@ _DEV_ONLY_EXCEPTIONS: dict[str, str] = {
 
 # prod에만 있고 dev엔 없어도 되는 키 — 근거는 코드에서 직접 확認된 것만 등재.
 _PROD_ONLY_EXCEPTIONS: dict[str, str] = {
-    "DATABASE_URL_READ": (
-        "backend/app/core/config.py:24·database.py:68,139 — 읽기 전용 read replica DSN, "
-        "미설정 時 코드가 자체적으로 primary(database_url)로 안전 폴백함(Phase3 §6). dev는 "
-        "read replica 인프라 자체가 없어 이 키가 필요 없음(누락이 아니라 설계상 미배선)."
-    ),
+    # story 4790(INFRA-DIET ⑤) — DATABASE_URL_READ(읽기 복제본 DSN) 예외를 걷었다: prod 바인딩 자체를 뺐고(cloudbuild.yaml `--remove-secrets`),
+    # 복제본 인프라가 없으니 이 키를 prod에 다시 붙이면 «근거 없는 비대칭»으로 빨개져야 한다. 복제본을 다시 세우는 사람은 코드 근거와 함께 여기 다시 등재한다.
 }
 
 # SECRETS_FLAG 블록 자체를 앵커로 잡는다(cloudbuild.yaml 안의 다른 `_DEPLOY_ENV` 분기와

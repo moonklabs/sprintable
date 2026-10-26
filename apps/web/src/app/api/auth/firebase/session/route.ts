@@ -14,7 +14,7 @@
 import { NextResponse } from 'next/server';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { setFirebaseSessionCookie } from '@/lib/auth/firebase-session';
-import { cookieBase } from '@/lib/auth/cookies';
+import { cookieBase, markSessionChanged } from '@/lib/auth/cookies';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { backendFetch } from '@/lib/backend-fetch';
 
@@ -99,5 +99,5 @@ export async function POST(request: Request) {
   res.cookies.set(SP_RT_COOKIE, '', clearBase);
 
   console.info('auth.firebase.session success');
-  return res;
+  return markSessionChanged(res);
 }

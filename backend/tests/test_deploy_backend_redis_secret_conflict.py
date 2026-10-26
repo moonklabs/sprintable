@@ -198,6 +198,12 @@ story #3124 이후에도 매 story마다 인라인 주석이 다시 자라(story
   `if var_or_path in mapping: del mapping[var_or_path]`) · `--update-secrets`와 `--remove-secrets`는 같이 쓸 수 있다(flags.py
   MapFlagsNoFile: «Only --update-{0} and --remove-{0} can be used together … --remove-{0} will be applied first»). dev엔 remove를 넣지
   않는다(같은 키 update와 겹치지 않게). prod 승격 때 _PROD 시크릿을 SECRETS_FLAG prod 갈래에 넣으면서 이 remove를 걷는다.
+- **story 4790(INFRA-DIET ⑤ · AC2) prod 읽기 복제본 바인딩 걷음**: prod 백엔드의 `DATABASE_URL_READ`(읽기 전용 복제본 DSN, 약 30개 라우트의
+  `get_read_db`가 쓰는 `read_engine`)를 SECRETS_FLAG prod 갈래에서 뺐다. `--update-secrets`는 덧붙이기라 목록에서 빼는 것만으론 살아 있는 서비스의
+  바인딩이 남으므로 `RM_SECRETS`에도 `DATABASE_URL_READ`를 올렸다(`--remove-secrets=EDGE_CLIENT_IP_SECRET,DATABASE_URL_READ`). 값이 비면 읽기 엔진이
+  primary를 재사용하고(backend/app/core/database.py `read_engine`) 종료 때 dispose도 건너뛴다(main.py) — 서비스가 죽지 않고 읽기 부하가 primary로
+  간다(primary CPU p95 11.3%, 2026-10-26 PO 측정). 만료 조건: `sprintable-prod-replica` 삭제 뒤 `RM_SECRETS`의 이 항을 걷는다.
+  infra/check_secrets_flag_env_symmetry.py의 prod 전용 예외(DATABASE_URL_READ)도 같이 걷었다 — 이 키를 prod에 되살리면 근거 없는 비대칭으로 빨개진다.
 
 ## deploy-realtime 인라인 주석 아카이브 (story #3433, 2026-09-04)
 
@@ -278,6 +284,12 @@ deploy-backend와 같은 이유로 deploy-realtime도 86%(8,640B)까지 자랐�
   `DB_POOL_SIZE=3,DB_MAX_OVERFLOW=1`을 그대로 뒀었다(PO forensic 적발 — 3곳 하드코딩
   중 하나) — SSOT 원칙상 "우연히 같은 값"과 "명시로 같은 값"은 다르다. deploy-backend와
   동일한 substitution으로 교체(dev 기본값 3/1 그대로 — 값 변경 아님, 배선만 정정).
+
+## deploy-backend 인라인 주석 3차 아카이브 (story 4786, 2026-10-26)
+
+deploy-backend가 5,995B(60% 임계 6,000B에 5B 여유 — 합친 뒤 5,911B)까지 차 있어(story 4790의 `,DATABASE_URL_READ` 한 토막만 더해도 넘는다), 맨 위 두 줄 포인터를 한 줄로 합쳤다(값/로직 무변경 — 순수 주석 압축).
+합치기 전 원문: `# ⚠️--update-env-vars(additive) 필수·--set-env-vars 금지 · --allow-unauthenticated 필수. 사유 · 이력(env 키별)은` /
+`# test_deploy_backend_redis_secret_conflict.py 「deploy-backend 인라인 주석 아카이브」.` (사유는 위 #3124 · #3433 절).
 """
 from __future__ import annotations
 
@@ -309,6 +321,14 @@ _DECLARED_SUBSTITUTIONS = {
     "_BACKEND_PRESENCE_REDIS_ENABLED", "_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED",
     "_BACKEND_SSE_LEASE_REDIS_ENABLED", "_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED",
     "_FRONTEND_MIN_INSTANCES", "_FRONTEND_MAX_INSTANCES", "_LICENSE_CONSENT",
+    # story 4786 (E-INFRA-DIET) — extra `gcloud run deploy` flags for the CPU allocation (dev `--cpu-throttling`, prod empty); backend + frontend deploy steps.
+    "_CPU_FLAGS",
+    # story 4786 — the prod fail-closed guard step reads it (first step).
+    "_MINS_EXPLICIT",
+    # story 4786 — the dev realtime stack switch (deploy-realtime · deploy-realtime-gce).
+    "_DEV_REALTIME_STACK",
+    # story 4790 — the prod size flags (empty = not sent).
+    "_BACKEND_RESOURCES", "_FRONTEND_RESOURCES",
     # story aec3ec09([P1 후속] OAuth 핸드오프 활성화) — LICENSE_CONSENT와 동일 배선 클래스.
     "_FIREBASE_OAUTH_HANDOFF_ENABLED",
     "_NEXT_PUBLIC_APP_URL", "_ADMIN_OPERATOR_AUDIENCE", "_ADMIN_OPERATOR_ALLOWLIST",
@@ -366,6 +386,8 @@ _BASH_ENTRYPOINT_STEP_IDS = (
     # 추가할 것). ${_DEPLOY_ENV}/${_GCS_CHANNEL_MEDIA_BUCKET} 둘 다 이미 _DECLARED_
     # SUBSTITUTIONS에 있어 스캔 대상에 넣어도 오탐 없음(사전 확認).
     "apply-gcs-channel-media-cors",
+    # story 4786 — the prod fail-closed guard (first step).
+    "guard-prod-mins",
 )
 
 
@@ -391,19 +413,11 @@ def _apply_cloudbuild_escaping(script: str) -> str:
     return script.replace("$$", "$")
 
 
-def _run_env_vars_assembly(
-    deploy_env: str, redis_url: str, gotenberg_url: str = "", support_gateway_url: str = "", var: str = "ENV_VARS",
-) -> str:
-    """실제 gcloud 호출부만 잘라내고 ENV_VARS 조립 로직까지만 실행 — 실제 배포 없이 결과 문자열만 얻는다."""
-    script = _apply_cloudbuild_escaping(_extract_deploy_backend_script())
-    # 실제 gcloud run deploy 호출 라인 이후는 잘라내고 ENV_VARS를 echo하도록 붙인다.
-    # ⚠️"gcloud run deploy"만으로 찾으면 그 문구를 언급하는 주석(설명 문장)에 먼저 매치된다 —
-    # 실제 호출부에만 있는 서비스명까지 포함해 정확히 그 라인을 찾는다.
-    marker = "gcloud run deploy sprintable-backend"
-    idx = script.index(marker)
-    assembly_only = script[:idx] + f'\necho "RESULT_ENV_VARS=${{{var}}}"\n'
-
-    env = {
+def _backend_step_env(
+    deploy_env: str, redis_url: str = "", gotenberg_url: str = "", support_gateway_url: str = "", **overrides: str,
+) -> dict[str, str]:
+    """the substitutions deploy-backend reads, as environment variables (set -u kills the script on a missing one); `overrides` replace single values"""
+    return {
         **os.environ,
         "_DEPLOY_ENV": deploy_env,
         "_FASTAPI_URL": "https://example.run.app",
@@ -463,7 +477,24 @@ def _run_env_vars_assembly(
         "_BACKEND_TIMEOUT": "1800" if deploy_env == "prod" else "3600",
         # story #4397 — GHA sets prod 'false' · dev 'true' (set -u).
         "_PUSH_DEVICES_BY_USER": "false" if deploy_env == "prod" else "true",
+    
+        **overrides,
     }
+
+
+def _run_env_vars_assembly(
+    deploy_env: str, redis_url: str, gotenberg_url: str = "", support_gateway_url: str = "", var: str = "ENV_VARS",
+) -> str:
+    """실제 gcloud 호출부만 잘라내고 ENV_VARS 조립 로직까지만 실행 — 실제 배포 없이 결과 문자열만 얻는다."""
+    script = _apply_cloudbuild_escaping(_extract_deploy_backend_script())
+    # 실제 gcloud run deploy 호출 라인 이후는 잘라내고 ENV_VARS를 echo하도록 붙인다.
+    # ⚠️"gcloud run deploy"만으로 찾으면 그 문구를 언급하는 주석(설명 문장)에 먼저 매치된다 —
+    # 실제 호출부에만 있는 서비스명까지 포함해 정확히 그 라인을 찾는다.
+    marker = "gcloud run deploy sprintable-backend"
+    idx = script.index(marker)
+    assembly_only = script[:idx] + f'\necho "RESULT_ENV_VARS=${{{var}}}"\n'
+
+    env = _backend_step_env(deploy_env, redis_url, gotenberg_url, support_gateway_url)
     proc = subprocess.run(
         ["bash", "-c", assembly_only],
         capture_output=True, text=True, env=env, check=True,
@@ -472,6 +503,16 @@ def _run_env_vars_assembly(
         if line.startswith("RESULT_ENV_VARS="):
             return line[len("RESULT_ENV_VARS="):]
     raise AssertionError(f"ENV_VARS not found in output: {proc.stdout!r}")
+
+
+def _run_backend_deploy_argv(deploy_env: str, **overrides: str) -> list[str]:
+    """the whole deploy-backend step with only gcloud intercepted — the argument list `gcloud run deploy` would receive (story 4786: the minimum and the CPU flag must arrive)"""
+    script = _apply_cloudbuild_escaping(_extract_deploy_backend_script())
+    env = _backend_step_env(deploy_env, "", **overrides)
+    env.update({"PROJECT_ID": "p", "COMMIT_SHA": "c", "_AR_REGION": "asia-northeast3", "_AR_REPO": "r", "_BACKEND_MIN_INSTANCES": "2", "_BACKEND_MAX_INSTANCES": "8", "_CPU_FLAGS": "", "_BACKEND_RESOURCES": ""} | overrides)
+    stub = 'gcloud() { printf "ARG=%s\\n" "$@"; }\n'
+    proc = subprocess.run(["bash", "-c", stub + script], capture_output=True, text=True, env=env, check=True)
+    return [line[len("ARG="):] for line in proc.stdout.splitlines() if line.startswith("ARG=")]
 
 
 def test_deploy_backend_no_unescaped_shell_vars_in_cloudbuild_substitution_syntax():
@@ -863,7 +904,7 @@ def test_deploy_removes_xff_probe_flag_everywhere_after_observation():
     assert "XFF_PROBE_ENABLED=true" not in cloudbuild
 
 
-def _run_frontend_deploy_argv(deploy_env: str) -> list[str]:
+def _run_frontend_deploy_argv(deploy_env: str, cpu_flags: str = "", resources: str = "") -> list[str]:
     """deploy-frontend 스텝을 gcloud만 가로채 실행 — `gcloud run deploy`가 실제로 받는 인자 목록(따옴표 · 단어 나눔 적용 뒤)."""
     script = _apply_cloudbuild_escaping(_extract_step_script("deploy-frontend"))
     stub = 'gcloud() { printf "ARG=%s\\n" "$@"; }\n'
@@ -872,7 +913,7 @@ def _run_frontend_deploy_argv(deploy_env: str) -> list[str]:
         "_DEPLOY_ENV": deploy_env, "_REALTIME_URL": "https://rt.example", "_APPLE_TEAM_ID": "JN798BC4KC",
         "_MOBILE_APP_LINK_ORIGIN": "https://m.example", "_NEXT_PUBLIC_APP_URL": "https://app.example",
         "_AR_REGION": "asia-northeast3", "PROJECT_ID": "p", "_AR_REPO": "r", "COMMIT_SHA": "c",
-        "_FRONTEND_TIMEOUT": "300", "_FRONTEND_MIN_INSTANCES": "1", "_FRONTEND_MAX_INSTANCES": "2",
+        "_FRONTEND_TIMEOUT": "300", "_FRONTEND_MIN_INSTANCES": "1", "_FRONTEND_MAX_INSTANCES": "2", "_CPU_FLAGS": cpu_flags, "_FRONTEND_RESOURCES": resources,
     }
     proc = subprocess.run(["bash", "-c", stub + script], capture_output=True, text=True, env=env, check=True)
     return [line[len("ARG="):] for line in proc.stdout.splitlines() if line.startswith("ARG=")]
@@ -893,10 +934,24 @@ def test_deploy_edge_client_ip_secret_attached_on_dev_and_removed_on_prod():
     assert "EDGE_CLIENT_IP_SECRET=EDGE_CLIENT_IP_SECRET_DEV:latest" in dev_flag.split(",")
     assert _run_env_vars_assembly("dev", "redis://10.164.120.243:6379", var="RM_SECRETS") == ""
     assert "EDGE_CLIENT_IP_SECRET" not in _run_env_vars_assembly("prod", "", var="SECRETS_FLAG")
-    assert _run_env_vars_assembly("prod", "", var="RM_SECRETS") == remove
+    # story 4790 — prod 백엔드는 EDGE_CLIENT_IP_SECRET에 더해 읽기 복제본 바인딩(DATABASE_URL_READ)도 같이 명시 제거한다.
+    assert _run_env_vars_assembly("prod", "", var="RM_SECRETS") == f"{remove},DATABASE_URL_READ"
     script = _extract_deploy_backend_script()
     call = script[script.index("gcloud run deploy sprintable-backend"):]
     assert "$${RM_SECRETS}" in call[: call.index("--quiet")], call
+
+
+def test_deploy_prod_read_replica_binding_removed_from_update_and_listed_in_remove():
+    """story 4790(INFRA-DIET ⑤ · AC2) — prod 읽기 복제본을 끄는 첫 걸음: prod 백엔드의 `DATABASE_URL_READ` 바인딩을 걷는다.
+    `--update-secrets`는 덧붙이기라 목록에서 빼기만 하면 살아 있는 서비스의 바인딩이 남으므로, 빼는 것과 `--remove-secrets`에 올리는 것이
+    «한 쌍»이다(한쪽만 되돌리면 이 시험이 빨개진다). 읽기 엔진은 값이 비면 primary를 쓴다(database.py `read_engine`) — 서비스가 죽지 않는다."""
+    prod_flag = _run_env_vars_assembly("prod", "", var="SECRETS_FLAG")
+    assert not [e for e in prod_flag.removeprefix("--update-secrets=").split(",") if e.startswith("DATABASE_URL_READ=")], prod_flag
+    assert "DATABASE_URL_READ" in _run_env_vars_assembly("prod", "", var="RM_SECRETS").removeprefix("--remove-secrets=").split(",")
+    # dev는 처음부터 이 키가 없었고 remove도 없다(dev 복제본 인프라 없음).
+    dev_flag = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379", var="SECRETS_FLAG")
+    assert "DATABASE_URL_READ" not in dev_flag
+    assert _run_env_vars_assembly("dev", "redis://10.164.120.243:6379", var="RM_SECRETS") == ""
 
 
 def test_deploy_backend_gcloud_uses_assembled_remove_list():

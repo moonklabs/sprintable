@@ -480,11 +480,13 @@ async def test_soft_delete_200():
             # call 1: router get(id) for existing check
             # call 2: revoke refresh tokens (UPDATE · live rows)
             # call 3: story #4630 — close the grace window of tokens a rotation just revoked (UPDATE expires_at)
-            # call 4: AC3-4 2-2 anchor-only UPDATE members is_active=false (레거시 team_members UPDATE 제거)
-            # call 5: S-MBR-10 AC5 DELETE project_access
-            # call 6: soft_delete internal get(id)
-            # call 7: soft_delete UPDATE deleted_at
-            result.scalar_one_or_none.return_value = _mock_member() if call_count in (1, 6) else None
+            # call 4: story #4769 — the seat row, FOR UPDATE (the order an exchange keeps)
+            # call 5: story #4769 — the closer's one lookup of the person's open computers in this organization (nothing to close here)
+            # call 6: AC3-4 2-2 anchor-only UPDATE members is_active=false (레거시 team_members UPDATE 제거)
+            # call 7: S-MBR-10 AC5 DELETE project_access
+            # call 8: soft_delete internal get(id)
+            # call 9: soft_delete UPDATE deleted_at
+            result.scalar_one_or_none.return_value = _mock_member() if call_count in (1, 8) else None
             result.scalars.return_value.all.return_value = []
             return result
 

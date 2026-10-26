@@ -40,9 +40,20 @@ describe('[SID:4400] /api/switch-project', () => {
     expect(sentBody()).toEqual({ project_id: 'proj-2', refresh_token: 'rt-this-session' });
   });
 
-  it('leaves the field out without the cookie', async () => {
+  it('leaves the field out without the cookie (the backend then refuses: 401 — story 4782 took the all-device fallback away)', async () => {
     cookieJar.rt = undefined;
     await POST(switchRequest());
     expect(sentBody()).toEqual({ project_id: 'proj-2' });
+  });
+});
+
+describe('[SID:4782] /api/switch-project hands the backend\'s refusal of an ended session back as it is', () => {
+  it.each(['TOKEN_REVOKED', 'TOKEN_SUPERSEDED'])('401 %s: same status and word, and no cookie is written or cleared here (the client\'s one flight decides: renew or sign out)', async (code) => {
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ error: { code, message: 'x' } }), { status: 401 }));
+    cookieJar.rt = 'rt-this-session';
+    const res = await POST(switchRequest());
+    expect(res.status).toBe(401);
+    expect((await res.json() as { error: { code: string } }).error.code).toBe(code);
+    expect(res.headers.get('set-cookie')).toBeNull();
   });
 });

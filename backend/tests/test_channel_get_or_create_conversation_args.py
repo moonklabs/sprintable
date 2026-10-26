@@ -70,7 +70,7 @@ def test_agent_lookup_filters_is_active(name: str):
 
     fns = {
         "ws_chat.ws_chat_hub": ws_chat.ws_chat_hub,
-        "channel._resolve_agent": channel._resolve_agent,
+        "channel._resolve_agent": channel._resolve_agent_and_project,  # story #4775: the query lives here now (_resolve_agent is its thin wrapper)
         "agent_runs.create_agent_run": agent_runs.create_agent_run,
         "agent_gateway.agent_stream": agent_gateway.agent_stream,
     }

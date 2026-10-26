@@ -6,6 +6,7 @@ agent key is refused there. Answers never carry more than the contract: the plai
 of an exchange."""
 from __future__ import annotations
 
+import unicodedata
 import uuid
 from datetime import datetime
 from typing import Literal
@@ -81,11 +82,13 @@ _STATUS = {
     "app_cannot_move": 409,
     # story 4711: the app that made the code did not say it can take a solo setup (an app from before) — update the app
     "app_cannot_solo": 409,
+    # story 4784: the name the person typed for the new agent is taken by an active agent of the organization — the answer names the free one
+    "agent_name_taken": 409,
 }
 
 
 def _error(e: DesktopSetupError) -> HTTPException:
-    return HTTPException(status_code=_STATUS.get(e.code, 400), detail={"code": e.code, "message": e.detail or e.code})
+    return HTTPException(status_code=_STATUS.get(e.code, 400), detail={"code": e.code, "message": e.detail or e.code, **e.extra})
 
 
 def _human_only(auth: AuthContext) -> uuid.UUID:
@@ -262,6 +265,73 @@ async def post_confirm(
     )
 
 
+AGENT_NAME_MAX = 60
+AGENT_ROLE_MAX = 200  # the role is the label shown beside the agent in the team lists (the agent's profile `agent_role`) — not the daemon's persona (that is `agent_personas`)
+
+
+_BLANK_LOOKING = ("\u3164", "\u2800", "\u115f", "\u1160", "\uffa0")  # letters/symbols that draw as empty: Hangul fillers, the braille blank
+
+
+_JOINERS = ("\u200c", "\u200d")  # zero-width non-joiner / joiner — real text needs them (Persian, Indic scripts, emoji sequences) — but only BETWEEN two characters
+
+
+def _joiner_has_neighbours(v: str, i: int) -> bool:
+    """A joiner at `i` stands between two characters that are not spaces or format/control characters (another joiner is one, so a run of them is refused)."""
+    return 0 < i < len(v) - 1 and all(unicodedata.category(v[j])[0] not in ("Z", "C") for j in (i - 1, i + 1))
+
+
+def _no_control_characters(v: str) -> str:
+    """One honest line wherever it is drawn (the room's first line, the team lists): refused on the same list the persona text is cleaned with
+    (`agent_run_profile.TEXT_DROP_CATEGORIES`: Cc controls · Cf format characters — bidi overrides, zero-width space, BOM, soft hyphen, the invisible tag
+    block — · Zl/Zp line and paragraph separators), except a zero-width joiner / non-joiner between two characters (story 4784, Kadir: «👩‍💻 Dev»,
+    Persian and Indic names are real names)."""
+    from app.services.agent_run_profile import TEXT_DROP_CATEGORIES
+
+    for i, ch in enumerate(v):
+        if unicodedata.category(ch) in TEXT_DROP_CATEGORIES and not (ch in _JOINERS and _joiner_has_neighbours(v, i)):
+            raise ValueError("must not contain control characters")
+    return v
+
+
+def _cleaned_for_display(v: str) -> str:
+    """The persona text's own cleaning: the characters of that list are left out, not refused (for a value the person did not type — the Mac's folder name)."""
+    from app.services.agent_run_profile import TEXT_DROP_CATEGORIES
+
+    return "".join(ch for ch in v if unicodedata.category(ch) not in TEXT_DROP_CATEGORIES)
+
+
+def _has_visible_character(v: str) -> bool:
+    """Something that draws: not only spaces, combining marks or fillers (a name that is blank to the eye is no name)."""
+    return any(unicodedata.category(ch)[0] not in ("Z", "C", "M") and ch not in _BLANK_LOOKING for ch in v)
+
+
+def _agent_name_one_line(v: str | None) -> str | None:
+    """story 4784: the name the person typed — trimmed, inner runs of spaces kept as typed words, never blank, no control characters."""
+    if v is None:
+        return v
+    v = _no_control_characters(v.strip())
+    if not _has_visible_character(v):
+        raise ValueError("must not be blank")
+    return v
+
+
+def _agent_role_one_line(v: str | None) -> str | None:
+    """story 4784: the role is optional — a blank one is no role (the agent is made as before, with none)."""
+    if v is None:
+        return v
+    v = _no_control_characters(v.strip())
+    return v if _has_visible_character(v) else None
+
+
+def _folder_name_one_line(v: str | None) -> str | None:
+    """The folder's NAME comes from the folder the person picked on the Mac, not from their typing, and only goes into the room's first line — so it is cleaned,
+    never refused (a refusal here would end every «만들기» for a folder called «👨‍👩‍👧» or with a stray mark, and no retry could fix it)."""
+    if v is None:
+        return v
+    v = _cleaned_for_display(v).strip()
+    return v if _has_visible_character(v) else None
+
+
 class ConfirmSoloRequest(BaseModel):
     """story 4711 — «시작» of the first setup in three steps: the runtime the person picked and the folder's project. Exactly one of
     `project_id` (the app found a project that already uses the chosen folder) and `project_name` (the folder's name — a new
@@ -274,6 +344,26 @@ class ConfirmSoloRequest(BaseModel):
     project_name: str | None = Field(default=None, min_length=1, max_length=100)
     workdir_hint: str | None = Field(default=None, max_length=200)
     tools: list[str] | None = Field(default=None, max_length=AGENT_TOOLS_CAP)
+    # story 4784 — what the person saw and pressed «만들기» on: the agent's name and role, and the folder's NAME (never a path). All optional
+    # on the wire (a page from before still starts with the program's name); the new card always sends them.
+    agent_name: str | None = Field(default=None, max_length=AGENT_NAME_MAX)
+    agent_role: str | None = Field(default=None, max_length=AGENT_ROLE_MAX)
+    folder_name: str | None = Field(default=None, max_length=100)
+
+    @field_validator("agent_name")
+    @classmethod
+    def _agent_name_one_line(cls, v: str | None) -> str | None:
+        return _agent_name_one_line(v)
+
+    @field_validator("agent_role")
+    @classmethod
+    def _agent_role_one_line(cls, v: str | None) -> str | None:
+        return _agent_role_one_line(v)
+
+    @field_validator("folder_name")
+    @classmethod
+    def _folder_name_one_line(cls, v: str | None) -> str | None:
+        return _folder_name_one_line(v)
 
     @field_validator("project_name")
     @classmethod
@@ -321,6 +411,7 @@ async def post_confirm_solo(
         setup_id, members, project_id, conversation_id = await confirm_solo_setup(
             db, code=body.code, user_id=user_id, org_id=org_id, runtime=body.runtime, project_id=body.project_id,
             project_name=body.project_name, auth=auth, workdir_hint=body.workdir_hint, tools=body.tools,
+            agent_name=body.agent_name, agent_role=body.agent_role, folder_name=body.folder_name,
         )
     except DesktopSetupError as e:
         # get_db rolls the whole session back: no project, agent or room is left by a failed start (the plan's 402 too)
@@ -417,6 +508,24 @@ class ConfirmSoloNewOrgRequest(BaseModel):
     project_name: str = Field(min_length=1, max_length=100)
     workdir_hint: str | None = Field(default=None, max_length=200)
     tools: list[str] | None = Field(default=None, max_length=AGENT_TOOLS_CAP)
+    agent_name: str | None = Field(default=None, max_length=AGENT_NAME_MAX)  # story 4784 — as in ConfirmSoloRequest
+    agent_role: str | None = Field(default=None, max_length=AGENT_ROLE_MAX)
+    folder_name: str | None = Field(default=None, max_length=100)
+
+    @field_validator("agent_name")
+    @classmethod
+    def _agent_name_one_line(cls, v: str | None) -> str | None:
+        return _agent_name_one_line(v)
+
+    @field_validator("agent_role")
+    @classmethod
+    def _agent_role_one_line(cls, v: str | None) -> str | None:
+        return _agent_role_one_line(v)
+
+    @field_validator("folder_name")
+    @classmethod
+    def _folder_name_one_line(cls, v: str | None) -> str | None:
+        return _folder_name_one_line(v)
 
     @field_validator("org_name", "project_name")
     @classmethod
@@ -452,6 +561,7 @@ async def post_confirm_solo_new_org(
         setup_id, members, org_id, project_id, conversation_id = await confirm_solo_setup_new_org(
             db, code=body.code, user_id=user_id, org_name=body.org_name, project_name=body.project_name, runtime=body.runtime,
             auth=auth, workdir_hint=body.workdir_hint, tools=body.tools,
+            agent_name=body.agent_name, agent_role=body.agent_role, folder_name=body.folder_name,
         )
     except DesktopSetupError as e:
         raise _error(e) from None  # get_db rolls the whole session back: no organization, project, agent or room is left

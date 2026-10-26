@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { Loader2, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { isEEEnabled } from '@/lib/ee';
@@ -18,14 +19,17 @@ import { useSearchParams } from 'next/navigation';
 import { agentRoomOf, roomShort, setupFragment, isFolderRefused, moveConfirmBody, movableState, type AgentRoom, type AttachableAgent, type DesktopRuntime, type SetupQuery } from '@/lib/desktop-setup';
 import { agentLimitOf, type AgentLimit } from '@/lib/agent-limit';
 import { pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle'; // 4713: «{file}가 · {runtime}로» — the particle follows the word (the scoped honorific guard forbids a fixed one after a placeholder)
-import { defaultSoloRuntime, folderTracePick, shownProjectName, soloConfirmBody, soloNewOrgConfirmBody, soloOutcome, soloStartBlock, usableRuntimes } from '@/lib/desktop-setup-quick';
+import { AGENT_NAME_MAX, AGENT_ROLE_MAX, defaultSoloRuntime, folderTracePick, readTypedAgent, shownProjectName, soloConfirmBody, soloNewOrgConfirmBody, soloOutcome, soloStartBlock, usableRuntimes, writeTypedAgent } from '@/lib/desktop-setup-quick';
 import { ATTACHABLE_READ_LIMIT_MS, DesktopSetup, Failure, INSTALL, InvitedInApp, MovedAgentNote, PROGRESS_FRAGMENT, RoomShortBox, RUNTIME_LABEL, SetupDoneReload, TooOldCard, fetchMyInvites, joinNewOrg, limitCounts, moveFailureForCode, useAppSetupLinks, type MyInvite } from './desktop-setup';
 import { SetupProgressView } from './desktop-setup-progress';
 
 /**
  * story 4711 — the first setup in three steps (Yuna `yuna/4711-copy-1016.md`): ① the agent found on this computer · ② a folder from the
  * Mac's own folder window (the APP opens it — a page cannot; the answer comes back in the address's `#`) · ③ [시작]. One card, all three
- * steps in view; the recipe setup is one text link away (`onTeam`). The server gets the runtime and the folder's NAME (or the project the
+ * steps in view; the recipe setup is one text link away (`onTeam`).
+ * story 4784 (the teacher's walk 10-26: «에이전트를 만들지 않았는데..?»): the card IS the moment an agent is made — «에이전트 만들기»: ① the tool found ·
+ * ② the name (the tool's name filled in) and an optional role · ③ the folder · [만들기]; the words say nothing is made before the press. The `agent=`
+ * move (an agent the organization already has) keeps «시작» and its ① fixed. The server gets the runtime and the folder's NAME (or the project the
  * app found for the folder) — never a path. No recipe, no first task: the first screen after the start is the conversation (the progress
  * view opens it).
  */
@@ -86,6 +90,13 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
   // story 4713 AC2: the person's own radio choice belongs to the folder it was made for — a folder picked afterwards starts from what ITS marks say again
   const [pickedFor, setPickedFor] = useState<{ folderKey: string; runtime: DesktopRuntime } | null>(null);
   const [wideOk, setWideOk] = useState(false);
+  // story 4784: what the person typed for the new agent. null name = the tool's name stays in the field (it follows the tool picked). The folder window reloads
+  // this page, so both wait in the tab's session storage per setup and are read back once after mount.
+  const [nameTyped, setNameTyped] = useState<string | null>(null);
+  const [roleTyped, setRoleTyped] = useState('');
+  const typedRead = useRef(false);
+  const [focusAsk, setFocusAsk] = useState<{ id: string; n: number } | null>(null); // a refused name/role: the cursor goes to that field once the card is back (the line sits under the button)
+  useEffect(() => { if (focusAsk && view.kind === 'choose') { document.getElementById(focusAsk.id)?.focus(); setFocusAsk(null); } }, [focusAsk, view.kind]); // asked once: a later, unrelated failure does not pull the cursor back
   /** the one project of a free organization that the 402 named; chosen by [넣고 시작] only */
   // codex self-QA: the setup this start made is the SERVER's (`setup_id` in its answer); the address's `setup=` is only the fallback (an older answer without it)
   const [madeSetupId, setMadeSetupId] = useState<string | null>(null);
@@ -151,6 +162,17 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
     : matched ? { kind: 'existing' as const, name: matched.projectName }
     : { kind: 'new' as const, name: newOrg ? folder.name : shownProjectName(folder.name, orgProjects.map((p) => p.projectName)) };
   const block = soloStartBlock(runtime, folder, wideOk);
+  const agentName = (nameTyped ?? (runtime ? RUNTIME_LABEL[runtime] : '')).trim();
+  const nameBlank = !agent && !!runtime && agentName === '';
+  useEffect(() => {
+    if (agent) return;
+    if (!typedRead.current) {
+      typedRead.current = true;
+      const saved = readTypedAgent(query.setupId ?? null);
+      if (saved.name !== null || saved.role) { setNameTyped(saved.name); setRoleTyped(saved.role); return; }
+    }
+    writeTypedAgent(query.setupId ?? null, nameTyped, roleTyped);
+  }, [agent, query.setupId, nameTyped, roleTyped]);
   // story 4717 (follow-up · PO 05:04Z): the one new agent this card makes does not fit the plan — «시작» off, said before the press
   const roomFull = !agent && roomShort(agentRoom, 1); // the `agent=` move confirmation makes no new agent — the room never holds it
   // story 4713 (Yuna's walk 10-17 · PO 10-17): what goes to the Mac folder window — and comes back in the next folder's address — is only what the PERSON chose
@@ -207,15 +229,15 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
     try { await startOnce(useProject); } finally { startInFlight.current = false; }
   }
   async function startOnce(useProject?: string) {
-    if (!runtime || !folder || soloStartBlock(runtime, folder, wideOk) || roomFull) return;
+    if (!runtime || !folder || soloStartBlock(runtime, folder, wideOk) || agentName === '' || roomFull) return;
     setRateLine(null);
     setErrorLine(null);
     setView({ kind: 'starting' });
     const json = { method: 'POST', headers: { 'Content-Type': 'application/json' } } as const;
     try {
       const res = newOrg
-        ? await fetchWithAuth('/api/desktop/setup-codes/confirm-solo-new-org', { ...json, body: JSON.stringify(soloNewOrgConfirmBody(query.code, runtime, folder, orgName)) })
-        : await fetchWithAuth('/api/desktop/setup-codes/confirm-solo', { ...json, body: JSON.stringify(soloConfirmBody(query.code, runtime, matched ? folder : { ...folder, projectId: undefined }, useProject)) });
+        ? await fetchWithAuth('/api/desktop/setup-codes/confirm-solo-new-org', { ...json, body: JSON.stringify(soloNewOrgConfirmBody(query.code, runtime, folder, orgName, { name: agentName, role: roleTyped })) })
+        : await fetchWithAuth('/api/desktop/setup-codes/confirm-solo', { ...json, body: JSON.stringify(soloConfirmBody(query.code, runtime, matched ? folder : { ...folder, projectId: undefined }, { name: agentName, role: roleTyped }, useProject)) });
       if (res.ok) {
         const okBody = await res.json().catch(() => null) as { project_id?: string; org_id?: string; setup_id?: string } | null;
         const made = progressIdOf(okBody?.setup_id, query.setupId);
@@ -230,7 +252,7 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
       }
       const body = await res.json().catch(() => null);
       const error = body?.error as { code?: string; resource?: string; limit?: unknown } | undefined;
-      const out = soloOutcome(res.status, error, res.headers.get('Retry-After'));
+      const out = soloOutcome(res.status, error, res.headers.get('Retry-After'), (body as { detail?: unknown } | null)?.detail);
       switch (out.kind) {
         case 'rate-limited': {
           const secs = out.retryAfter;
@@ -240,6 +262,19 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
           return;
         }
         case 'use-existing-project': setLimitAsk({ ...out.project, folderKey: folder.shown }); setView({ kind: 'choose' }); return;
+        case 'name-taken':
+          // story 4784: never renamed behind their back — the free name goes into the field, the line says so, and «만들기» is theirs to press again
+          if (out.suggested) setNameTyped(out.suggested);
+          setFocusAsk((f) => ({ id: 'quick-agent-name', n: (f?.n ?? 0) + 1 }));
+          setErrorLine(out.suggested ? t('quick.nameTaken', { name: out.suggested }) : t('quick.nameTakenNoSuggestion'));
+          setView({ kind: 'choose' });
+          return;
+        case 'bad-text':
+          // story 4784: say which field and why — a retry of the same text could never go through
+          setErrorLine(out.field === 'agent_role' ? t('quick.roleInvalid') : out.blank ? t('quick.nameBlankLooking') : t('quick.nameInvalid'));
+          setFocusAsk((f) => ({ id: out.field === 'agent_role' ? 'quick-agent-role' : 'quick-agent-name', n: (f?.n ?? 0) + 1 }));
+          setView({ kind: 'choose' });
+          return;
         case 'project-limit': setErrorLine(t('firstProject.limit', { limit: typeof error?.limit === 'number' ? error.limit : 1 })); setView({ kind: 'choose' }); return;
         case 'agent-limit': setView({ kind: 'failed', failure: 'agent-limit', counts: limitCounts(body?.error), plan: agentLimitOf(402, body) }); return;
         case 'not-admin': setView({ kind: 'failed', failure: 'not-admin' }); return;
@@ -247,7 +282,7 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
         case 'has-org': setView({ kind: 'failed', failure: 'has-org' }); return;
         case 'pending-invites': await readInvites(); setView({ kind: 'choose' }); return;
         case 'email-verify': setErrorLine(tOnboarding('emailVerifyRequiredError')); setView({ kind: 'choose' }); return;
-        default: setErrorLine(t('quick.failed')); setView({ kind: 'choose' });
+        default: setErrorLine(t('quick.createFailed')); setView({ kind: 'choose' });
       }
     } catch {
       setView({ kind: 'failed', failure: 'offline' });
@@ -294,7 +329,7 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
 
   const name = runtime ? RUNTIME_LABEL[runtime] : '';
   const starting = view.kind === 'starting';
-  const blockLine = block === 'no-agent' ? t('quick.blockNoAgent') : block === 'no-folder' ? t('quick.blockNoFolder') : block === 'wide-unconfirmed' ? t('quick.blockWide') : null;
+  const blockLine = block === 'no-agent' ? t('quick.blockNoAgent') : block === 'no-folder' ? t('quick.blockNoFolder') : block === 'wide-unconfirmed' ? t('quick.blockWide') : nameBlank ? t('quick.blockName') : null;
   const withVersion = (r: DesktopRuntime) => query.versions?.[r];
   return (
     <div className="flex flex-col gap-3">
@@ -303,7 +338,7 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
         <h1 className="text-lg font-semibold">{agent ? t('quick.titleAgent', { name: agent.name }) : t('quick.title')}</h1>
 
         <section aria-labelledby="quick-step-agent" className="flex flex-col gap-2">
-          <h2 id="quick-step-agent" className="text-sm font-medium">① {t('quick.stepAgent')}</h2>
+          <h2 id="quick-step-agent" className="text-sm font-medium">① {agent ? t('quick.stepAgent') : t('quick.stepTool')}</h2>
           {agent ? (
             // story 4711 (`agent=` branch): the recruiter's agent — one read-only line (no radio, nothing to choose), the move's warning when it works elsewhere
             <div data-testid="quick-agent-fixed">
@@ -331,9 +366,26 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
           ))}
         </section>
 
+        {agent || !runtime ? null : (
+        <section aria-labelledby="quick-step-name" className="flex flex-col gap-3">
+          <h2 id="quick-step-name" className="text-sm font-medium">② {t('quick.stepName')}</h2>
+          <div className="flex flex-col gap-1">
+            <label htmlFor="quick-agent-name" className="text-xs text-muted-foreground">{t('quick.nameLabel')}</label>
+            <Input id="quick-agent-name" data-testid="quick-agent-name" value={nameTyped ?? RUNTIME_LABEL[runtime]} maxLength={AGENT_NAME_MAX} disabled={starting}
+              aria-invalid={nameBlank} onChange={(e) => { setNameTyped(e.target.value); setErrorLine(null); }} />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label htmlFor="quick-agent-role" className="text-xs text-muted-foreground">{t('quick.roleLabel')}</label>
+            <Input id="quick-agent-role" data-testid="quick-agent-role" value={roleTyped} maxLength={AGENT_ROLE_MAX} disabled={starting}
+              placeholder={t('quick.rolePlaceholder')} aria-describedby="quick-role-hint" onChange={(e) => setRoleTyped(e.target.value)} />
+            <p id="quick-role-hint" className="text-xs text-muted-foreground" data-testid="quick-role-hint">{t('quick.roleHint')}</p>
+          </div>
+        </section>
+        )}
+
         {agent ? null : (
         <section aria-labelledby="quick-step-folder" className="flex flex-col gap-2">
-          <h2 id="quick-step-folder" className="text-sm font-medium">② {t('quick.stepFolder')}</h2>
+          <h2 id="quick-step-folder" className="text-sm font-medium">③ {t('quick.stepFolder')}</h2>
           {refused ? (
             <p role="alert" className="text-sm text-destructive" data-testid="quick-refused">
               {refused === 'denied' ? t('quick.refused.denied')
@@ -380,8 +432,9 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
               <RoomShortBox room={agentRoom} line={t('room.soloNone')}
                 hint={<p className="text-xs text-muted-foreground" data-testid="quick-room-use-team">{t('room.soloUseTeam')}</p>} />
             ) : null}
+            {nameBlank ? <p className="text-xs text-muted-foreground" data-testid="quick-limit-name-blank">{t('quick.blockName')}</p> : null}
             <div className="flex flex-wrap items-center gap-3">
-              <Button disabled={starting || roomFull} onClick={() => void start(limitAsk.id)}>{starting ? t('quick.starting') : t('quick.limit.addStart')}</Button>
+              <Button disabled={starting || roomFull || nameBlank} onClick={() => void start(limitAsk.id)}>{starting ? t('quick.creating') : t('quick.limit.addStart')}</Button>
               {isEEEnabled() ? <a className="text-xs underline underline-offset-2" href={flatHref('/settings?tab=billing')}>{tNav('orgLimitUpgradeLink')}</a> : null}
             </div>
           </div>
@@ -407,13 +460,14 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
                 <RoomShortBox room={agentRoom} line={t('room.soloNone')}
                   hint={<p className="text-xs text-muted-foreground" data-testid="quick-room-use-team">{t('room.soloUseTeam')}</p>} />
               ) : null}
-              <div><Button disabled={starting || (agent ? !agentProject : block !== null || roomFull)} aria-describedby="quick-start-line" onClick={() => void (agent ? startAgent() : start())}>{starting ? t('quick.starting') : t('quick.start')}</Button></div>
+              <div><Button disabled={starting || (agent ? !agentProject : block !== null || nameBlank || roomFull)} aria-describedby="quick-start-line" onClick={() => void (agent ? startAgent() : start())}>{agent ? (starting ? t('quick.starting') : t('quick.start')) : (starting ? t('quick.creating') : t('quick.create'))}</Button></div>
               <p id="quick-start-line" className="text-sm text-muted-foreground" data-testid="quick-start-line">
                 {agent ? (agentProject ? t('quick.projectChosen', { name: orgProjects.find((p) => p.projectId === agentProject)?.projectName ?? '' }) : '')
                   : blockLine ?? (runtime && projectLine
-                    ? t('quick.startLine', { runtime: `${name}`, project: projectLine.name })
+                    ? t('quick.createLine', { name: agentName, runtime: `${name}`, project: projectLine.name })
                     : '')}
               </p>
+              {agent ? null : <p className="text-xs text-muted-foreground" data-testid="quick-create-nothing">{t('quick.createNothing')}</p>}
             </div>
           )}
           <p className="text-xs text-muted-foreground">{t('toolNote')}</p>

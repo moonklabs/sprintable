@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, X, Loader2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
@@ -37,6 +37,18 @@ export const HTTP_RAIL_ORDER = ['config_copied', 'waiting', 'mcp_reachable', 've
  * SSE push가 안 오면 «미도달 + 진단 힌트»를 정직히 띄운다(#2404 클래스 재발 방지 — 침묵을
  * "대기 중"으로 영원히 두지 않음). SSE push는 늦게라도 도착하면 이 힌트를 자동으로 감춘다. */
 export const VERIFY_TIMEOUT_MS = 10_000;
+
+/** story #4761 (D1) — how often the not-yet-verified panel asks the server again (see the hook's header). */
+export const POLL_FAST_MS = 3_000;
+export const POLL_SLOW_AFTER_MS = 120_000;
+export const POLL_SLOW_MS = 10_000;
+export const POLL_GIVE_UP_MS = 20 * 60_000;
+
+/** The wait before the next ask, `elapsed` ms after the panel began waiting; null once it gives up. Pure — pinned in the test. */
+export function nextPollDelay(elapsedMs: number): number | null {
+  if (elapsedMs >= POLL_GIVE_UP_MS) return null;
+  return elapsedMs < POLL_SLOW_AFTER_MS ? POLL_FAST_MS : POLL_SLOW_MS;
+}
 
 export interface DisplayStep {
   state: RailState;
@@ -80,6 +92,15 @@ export function parseVerificationRail(json: unknown): RawStep[] | null {
     ? data
     : (data as { rail?: unknown } | undefined)?.rail ?? (json as { rail?: unknown }).rail;
   return Array.isArray(rail) ? (rail as RawStep[]) : null;
+}
+
+/** story #4761 (D1b) — `first_call_at` of the verification answer ({data:{…}} like the rail, or bare): an ISO time or nothing. */
+export function parseFirstCallAt(json: unknown): string | null {
+  if (json === null || typeof json !== 'object') return null;
+  const data = (json as { data?: unknown }).data;
+  const v = (data && typeof data === 'object' && !Array.isArray(data) ? (data as { first_call_at?: unknown }).first_call_at : undefined)
+    ?? (json as { first_call_at?: unknown }).first_call_at;
+  return typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? v : null;
 }
 
 function StepIcon({ status }: { status: RailStatus }) {
@@ -235,6 +256,8 @@ export interface UseVerificationRailResult {
   /** story #4cdad425 — VERIFY_TIMEOUT_MS 지나도 verified 안 됨(진단 힌트 표시용). verified되면 false로
    * 자동 복귀·수동 재시도(handleVerify)나 transport 전환 시 타이머 재무장. */
   timedOut: boolean;
+  /** story #4761 (D1b) — when the agent's current key was first used (ISO), as the server saw it; null when not (yet) known. */
+  firstCallAt: string | null;
 }
 
 /** story #2407 ②-3 — 두 콜러가 각자 계산하되 recruiter만 stdio에서 빈 문자열이었다(무근거
@@ -270,7 +293,14 @@ export function computeShowVerifyExamplePrompt(transport: Transport | null, veri
  * BE가 push하는 named SSE 이벤트(`onboarding.rail_signal` — agent_gateway.py 두 지점:
  * ①/stream 연결 직후 자동 verify 기동→mcp_reachable ②/events/ack에서 verify round-trip
  * 완료→verified)로만 받는다. 재조회(GET verification-status)는 ⓐ마운트 시 1회(재로드/재진입
- * 복원용) ⓑSSE push 도착 시 1회, 둘 다 반복 타이머가 아니라 이벤트 트리거 단발 호출이다.
+ * 복원용) ⓑSSE push 도착 시 1회, 둘 다 반복 타이머가 아니라 이벤트 트리거 단발 호출이었다.
+ *
+ * story #4761 (D1, 4759 웹 길 실측) — ⓑ는 온보딩 연결 단계에선 한 번도 안 왔다: 이 화면은 RealtimeProvider 밖이라 스트림이
+ * 없고(realtime-provider.tsx: «온보딩 연결 단계 … 그 자리는 스트림이 없다»), 호스팅(http)엔 서버가 밀어 줄 신호 자체가 없다
+ * (하트비트는 도구 호출로 찍힐 뿐). 그래서 에이전트가 첫 도구를 부른 직후 서버는 verified:true인데 화면은 «연결을 확인하는
+ * 중이에요 — 자동으로 다시 시도해요» 한 채 100초 넘게 «대기»였다(문구가 거짓). 그 문구를 참으로: 아직 verified가 아니면
+ * 짧은 간격의 재조회(POLL_FAST_MS → 2분 뒤 POLL_SLOW_MS · POLL_GIVE_UP_MS 뒤엔 멈추고 [다시 테스트]만) — 숨은 탭은 건너뛰고
+ * 다시 보이면 곧바로 한 번. 채용 화면(Provider 안)에선 SSE push가 먼저 오면 이 재조회는 verified에서 멈춘다.
  */
 export function useVerificationRail({
   agentId,
@@ -280,6 +310,7 @@ export function useVerificationRail({
 }: UseVerificationRailOptions): UseVerificationRailResult {
   const t = useTranslations('onboarding');
   const [beSteps, setBeSteps] = useState<RawStep[] | null>(null);
+  const [firstCallAt, setFirstCallAt] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [copiedVerifyPrompt, setCopiedVerifyPrompt] = useState(false);
   const [copyVerifyPromptFailed, setCopyVerifyPromptFailed] = useState(false);
@@ -287,12 +318,19 @@ export function useVerificationRail({
   const [timedOut, setTimedOut] = useState(false);
   const [verifyNonce, setVerifyNonce] = useState(0);
 
+  // story #4761 — asks overlap now (a beat every 3 s, [다시 테스트], a push): only the newest answer may be applied, or a slow «not
+  // yet» arriving after a newer «verified» would take the panel back
+  const askSeq = useRef(0);
   const pollStatus = useCallback(async (forAgentId: string, forTransport: Transport) => {
+    const mine = ++askSeq.current;
     try {
       const res = await fetchWithAuth(`/api/agents/${forAgentId}/verification-status?transport=${forTransport}`);
       if (!res.ok) return; // 미머지/404 → pending 유지(가짜 에러 안 띄움)
-      const raw = parseVerificationRail(await res.json());
+      const body: unknown = await res.json();
+      if (mine !== askSeq.current) return;
+      const raw = parseVerificationRail(body);
       if (raw) setBeSteps(raw);
+      setFirstCallAt(parseFirstCallAt(body));
     } catch {
       // swallow — graceful degradation
     }
@@ -319,6 +357,31 @@ export function useVerificationRail({
     extraEventNames: ['onboarding.rail_signal'],
     onExtraEvent: handleRailSignal,
   });
+
+  // story #4761 (D1) — not verified yet → ask again on a short beat (header comment). Stops on verified, on give-up, on unmount;
+  // [다시 테스트] (verifyNonce) starts a fresh wait. A hidden tab is skipped; showing again asks at once.
+  const verifiedNow = beSteps?.find((s) => s.state === 'verified')?.status === 'done';
+  useEffect(() => {
+    if (!enabled || !agentId || !transport || verifiedNow) return;
+    const startedAt = Date.now();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const ask = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      void pollStatus(agentId, transport);
+    };
+    const schedule = () => {
+      const delay = nextPollDelay(Date.now() - startedAt);
+      if (delay === null) return;
+      timer = setTimeout(() => { ask(); schedule(); }, delay);
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible' && nextPollDelay(Date.now() - startedAt) !== null) ask(); };
+    document.addEventListener('visibilitychange', onVisible);
+    schedule();
+    return () => {
+      if (timer) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [enabled, agentId, transport, pollStatus, verifiedNow, verifyNonce]);
 
   // story #4cdad425 — 진단 힌트 타이머. 폴링이 시작되면(또는 transport 전환·수동 재시도로 verifyNonce가
   // 오르면) 재무장하고, VERIFY_TIMEOUT_MS 지나도 verified가 안 되면 timedOut을 켠다. 폴링은 멈추지
@@ -393,5 +456,6 @@ export function useVerificationRail({
     // verified되면 대기·타임아웃 표시는 자동으로 꺼진다(늦게 성공해도 힌트가 안 남는다).
     awaitingVerification: enabled && Boolean(agentId) && Boolean(transport) && !verified,
     timedOut: timedOut && !verified,
+    firstCallAt: verified ? firstCallAt : null,
   };
 }

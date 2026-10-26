@@ -72,3 +72,49 @@ class AccessRecheck:
             return None
         self.last = time.monotonic()
         return await key_access_revoked(self.api_key_id, self.member_id, agent_only=self.agent_only)
+
+
+async def person_seat_revoked_db(user_id: uuid.UUID, org_id: uuid.UUID) -> str | None:
+    """story #4774 — the recheck of a PERSON's open connection: the same judgement the request authentication makes (4772, `_verify_org_membership`: a live `org_members` seat,
+    or the old active-`TeamMember` shape) asked again for a connection that was opened while the person had the seat. None = still seated; `seat_ended` otherwise (a removal, an
+    organization delete and an account deletion all end the seat)."""
+    from fastapi import HTTPException
+
+    from app.dependencies.auth import _verify_org_membership
+
+    async with async_session_factory() as db:
+        try:
+            await _verify_org_membership(str(user_id), org_id, db, None)
+        except HTTPException as e:
+            if e.status_code == 403:
+                return "seat_ended"
+            raise
+    return None
+
+
+async def person_seat_revoked(user_id: object, org_id: object, *, db_check=None) -> str | None:
+    try:
+        user_uuid, org_uuid = uuid.UUID(str(user_id)), uuid.UUID(str(org_id))
+    except (TypeError, ValueError):
+        return "seat_ended"   # fails closed on an id that is not a UUID (as a key id does)
+    try:
+        return await (db_check or person_seat_revoked_db)(user_uuid, org_uuid)
+    except (SQLAlchemyError, TimeoutError):
+        logger.warning("stream seat recheck failed user_id=%s — skipped this time", user_id, exc_info=True)
+        return None
+
+
+class SeatRecheck:
+    """`AccessRecheck`'s counterpart for a connection a PERSON opened (a JWT session, no key to revoke): the same `due(age)` interface, so the three places that hold a long-lived
+    connection ask both kinds the same way. Unlike a key's recheck it does not wait for `age` to pass: a connection that sends content to a person asks before EVERY send (a removal
+    must not be followed by one more event), and on every heartbeat / timer tick; one indexed `org_members` read each — cost is in the story's table. The connect check counts as
+    the first one (the request authentication of the route just made it)."""
+
+    def __init__(self, user_id: object, org_id: object, *, db_check=None) -> None:
+        self.user_id = user_id
+        self.org_id = org_id
+        self._db_check = db_check
+
+    async def due(self, age: float) -> str | None:   # `age` is ignored: a person's seat is asked every time
+        return await person_seat_revoked(self.user_id, self.org_id, db_check=self._db_check)
+

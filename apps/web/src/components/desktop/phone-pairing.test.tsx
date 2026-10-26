@@ -14,7 +14,7 @@ import { PhoneBridgeClaim } from '@/components/providers/phone-bridge-claim';
 const fetchWithAuth = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuth(...args) }));
 vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (href: string) => href }));
-const { PhonePairing } = await import('./phone-pairing');
+const { PhonePairing, PhonePairEntry } = await import('./phone-pairing');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -84,11 +84,11 @@ afterEach(async () => {
 });
 
 const settle = async () => { for (let i = 0; i < 10; i++) await act(async () => { await Promise.resolve(); }); };
-async function render(locale: 'ko' | 'en' = 'ko') {
+async function render(locale: 'ko' | 'en' = 'ko', returnTo?: string | null) {
   await act(async () => {
     root.render(
       <PhoneBridgeClaim><NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
-        <PhonePairing />
+        <PhonePairing returnTo={returnTo} />
       </NextIntlClientProvider></PhoneBridgeClaim>,
     );
   });
@@ -226,6 +226,58 @@ describe('[4532] phone pairing screen', () => {
     expect(line()).toBe('이미 페어링된 컴퓨터예요');
     expect(buttons()).toEqual(['닫기']);
     expect(sent.some((s) => s.type === 'pair.mac')).toBe(false);
+  });
+
+  // story 4780 — the 원격 기기 entry hands its own page over, so [닫기] of the pairing screen comes back to it
+  it('[4780] the entry on 원격 기기 links the pairing screen with this page as the way back', async () => {
+    window.history.pushState({}, '', '/desktop');
+    try {
+      await act(async () => {
+        root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><PhonePairEntry /></NextIntlClientProvider>);
+      });
+      expect(container.querySelector('a')?.getAttribute('href')).toBe('/desktop/pair?from=%2Fdesktop');
+    } finally {
+      window.history.pushState({}, '', '/');
+    }
+  });
+
+  // story 4780 — [닫기] goes back to the page the pairing was started from (the page hands it over as `returnTo`); none → the Mac screen as before
+  describe('[4780] [닫기] goes back where the pairing started', () => {
+    const closeHref = () => [...container.querySelectorAll('a')].find((x) => x.textContent === '닫기')?.getAttribute('href');
+
+    it('already paired: [닫기] → the page it came from (Today) · none given → /desktop', async () => {
+      pairs = [{ setup_id: HEAD.setup_id }];
+      installShell();
+      await render('ko', '/today?p=proj-1');
+      await press('QR 찍기');
+      await press('페어링');
+      expect(line()).toBe('이미 페어링된 컴퓨터예요');
+      expect(closeHref()).toBe('/today?p=proj-1'); // reverted (the fixed /desktop) → '/desktop'
+    });
+
+    it('already paired, no way back handed over → /desktop (as it always was)', async () => {
+      pairs = [{ setup_id: HEAD.setup_id }];
+      installShell();
+      await render('ko', null);
+      await press('QR 찍기');
+      await press('페어링');
+      expect(closeHref()).toBe('/desktop');
+    });
+
+    it('paired after the number → [닫기] goes back too (a conversation here)', async () => {
+      installShell();
+      await render('ko', '/chats/conv-7');
+      await press('QR 찍기');
+      await press('페어링');
+      await tick();
+      offerState = { state: 'revealed', reveal: 'R' };
+      await tick();
+      expect(line()).toContain('296 843'); // the number first
+      pairs = [{ setup_id: HEAD.setup_id }];
+      await tick();
+      expect(line()).toContain('페어링했어요');
+      expect(closeHref()).toBe('/chats/conv-7');
+    });
   });
 
   it('an empty last-use value reads the relative time, never «아직 안 씀» (story #4624 · Yuna)', async () => {

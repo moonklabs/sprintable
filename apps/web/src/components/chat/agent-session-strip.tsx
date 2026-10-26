@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { fetchWithAuth } from '@/lib/db/client';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { usePairHref } from '@/hooks/use-pair-href';
 import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off';
 import { useFieldDraft } from '@/hooks/use-field-draft';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
@@ -29,6 +30,8 @@ import { useViewerTimeZone } from '@/components/viewer-time-zone';
  */
 // story #4534 (relay contract v1.12 · Yuna 03:04Z · 03:06Z): the board's own words — asked in the terminal · an error · paused at a
 // usage limit — never shown as «다음 일 기다림»; a usage limit carries its why (`limit`)
+/** story #4763 (AC4 · AC12): the first-screen question that stands at that computer — the daemon's own closed list (folder trust · Claude's new-MCP-server(s) question · Codex's update) */
+export type FirstScreenAsk = 'trust' | 'mcp' | 'mcp_many' | 'update'
 type SessionState = 'starting' | 'working' | 'idle' | 'waiting_permission' | 'waiting_input' | 'error' | 'paused_limit' | 'stopped' | 'unknown'
   // story #4599 (relay contract v1.13.2 · Yuna 12:4xZ ① · PO 14:25Z): the turn is held by a macOS window on that computer (a
   // folder-access question only the person at the Mac can answer) — «macOS 창 대기», its own line naming the folder when the daemon
@@ -37,6 +40,7 @@ type SessionState = 'starting' | 'working' | 'idle' | 'waiting_permission' | 'wa
   | 'waiting_system'
   // story #4534 (Yuna 05:41Z): a word this page does not know — not the server's `unknown` (= the computer lost): its own line
   | 'unrecognized';
+export type WorkHoldWhy = 'tools_unconfirmed' | 'tools_failed';
 interface View {
   // story #4733: the computer this session runs on (the server sends it with the session; an older one sends none)
   setup_id?: string | null;
@@ -54,6 +58,13 @@ interface View {
   // story 4684 (Yuna ux1-copy §L ②③): why THIS computer receives no new work for the agent — the board's stop word (the server sends it only while
   // the computer is heard and the session lives; an older server sends none → no line)
   inbox?: SessionInbox | null;
+  // story #4763 (AC4): the first-screen question that stands at that computer (one closed word) — the session reads `starting` while it stands, which said «시작됨» for minutes;
+  // the server sends it only while the computer is heard and the session lives (an older server sends none → the line as before)
+  first_screen?: { ask: FirstScreenAsk } | null;
+  // story #4779 (AC3): why work does not reach this agent — its Sprintable tools link (one closed word); the server sends it only while the computer is heard and the session lives (an older server sends none → no line)
+  work_hold?: { why: WorkHoldWhy } | null;
+  // the runtime of the session (the server sends it with the session): the failed line names the button of THAT runtime's board
+  runtime?: string | null;
   // story #4599: a held turn's why — the folder the macOS window asks about, when the daemon read it (a closed list; null = not read)
   system?: { folder?: SystemFolder | null } | null;
   // story #4641: a permission widening a person made at the terminal — the three keys, only while one is stored (the server's)
@@ -99,8 +110,11 @@ export function shownState(view: { state: string | null; activity?: string | nul
 
 /** story 4675 (F2 · Yuna §I Q-d): the one place the session's word is chosen — the strip and the workforce detail's «지금 도는
  *  컴퓨터» line say the same word for the same agent. Claude at a usage limit (or a limit the app held) wears «사용 한도». */
-export function sessionStateLabel(view: { state: string | null; activity?: string | null; limit?: SessionLimit | null }, t: (key: string) => string): string {
+export function sessionStateLabel(view: { state: string | null; activity?: string | null; limit?: SessionLimit | null; first_screen?: { ask: FirstScreenAsk } | null }, t: (key: string) => string): string {
   const state = shownState(view);
+  // story #4763 (AC4 · AC12): a session that waits on a question at its computer — before it has begun to run, or after an instruction went in (the CLI stands on the question) — says so, not
+  // «시작됨» / «작업 중»; the server sends the question only while the computer is heard and the session lives
+  if ((state === 'starting' || state === 'working' || state === 'idle') && view.first_screen?.ask) return t('state.waiting_first_screen');
   // story #4685 (Yuna §③): a limit the app looks at again by itself (`limit.looks`) is «한도로 쉬는 중»; only a held one, or one from a
   // daemon that does not look (no `looks`), keeps «사용 한도» — the strip's dot and line follow the same decision (limitLooksAgain)
   const looksAgain = limitLooksAgain(state, view.limit);
@@ -233,7 +247,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
   const count = codePoints(draft);
   const tooLong = count > INSTRUCT_NOW_MAX;
   // story 4675: the word comes from one function (the workforce detail says the same) — `view.state` here is already the shown one
-  const label = sessionStateLabel({ state: view.state, activity: null, limit: view.limit }, t);
+  const label = sessionStateLabel({ state: view.state, activity: null, limit: view.limit, first_screen: view.first_screen }, t);
 
   const deps: CommandDeps = {
     phoneCall,
@@ -298,6 +312,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
       ) : null}
       {result ? <ResultLine result={result} /> : <Line view={view} now={readAt} phone={phone} href={flatHref('/inbox?tab=gates')} />}
       <InboxLine view={view} />
+      <WorkHoldLine view={view} />
       <WidenedLine view={view} />
       <RunLine run={view.run ?? null} />
       <Dialog open={endOpen} onOpenChange={setEndOpen}>
@@ -350,7 +365,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
 function ResultLine({ result }: { result: Result }) {
   const { phoneCall } = usePhoneBridge();
   const t = useTranslations('chats.agentSession');
-  const flatHref = useFlatHref();
+  const pairHref = usePairHref(); // story 4780: the pairing screen's [Close] comes back to this conversation
   const remoteOff = useRemoteOff(); // story #4583: a command refused while off says who turns it on
   const ref = useRef<HTMLParagraphElement>(null);
   useEffect(() => { ref.current?.focus(); }, [result]); // the line takes focus (Yuna 12:47Z C)
@@ -363,7 +378,7 @@ function ResultLine({ result }: { result: Result }) {
   const stop = result.verb !== 'send'; // an end borrows the stop's lines (Yuna ①: no words of its own)
   if (result.busy) return line(stop ? t('command.stopping') : t('command.sending'));
   const signIn = <Button size="sm" variant="outline" asChild><a href={buildLoginRedirect(window.location.pathname + window.location.search)}>{t('command.signInAgain')}</a></Button>;
-  const pairAgain = <Button size="sm" variant="outline" asChild><a href={flatHref('/desktop/pair')}>{t('command.pairAgain')}</a></Button>;
+  const pairAgain = <Button size="sm" variant="outline" asChild><a href={pairHref}>{t('command.pairAgain')}</a></Button>;
   const settings = <Button size="sm" variant="outline" onClick={() => void phoneCall('app.settings')}>{t('command.openSettings')}</Button>;
   switch (result.outcome.kind) {
     case 'stopped': return line(t('command.stopped'));
@@ -423,6 +438,25 @@ function InboxLine({ view }: { view: View }) {
     ? (device ? t('inbox.takenOver', { device }) : t('inbox.takenOverNoDevice'))
     : (device ? t('inbox.otherReceiver', { device }) : t('inbox.otherReceiverNoDevice'));
   return <p className={`w-full break-keep [overflow-wrap:anywhere] ${stop === 'taken_over' ? 'text-warning' : 'text-muted-foreground'}`} data-testid="agent-session-inbox" data-stop={stop}>{text}</p>;
+}
+
+// story #4779 (AC3 · PO 10-25): work is not reaching this agent because its computer cannot confirm (or has lost) the link to its Sprintable tools. One line, one thing for the
+// person to do — the button that stands on THAT board for that state: [다시 시작] for «not confirmed» (both runtimes) and for a failed Claude, [다시 연결] for a failed Codex
+// (desktop-electron/local/src/app.ts: confirmLine :2848 · the failed Claude line · the failed Codex line). A word this page does not know shows no line.
+function WorkHoldLine({ view }: { view: View }) {
+  const t = useTranslations('chats.agentSession');
+  const why = view.state === 'stopped' || view.state === 'unknown' || view.state === 'unrecognized' ? null : view.work_hold?.why;
+  if (why !== 'tools_unconfirmed' && why !== 'tools_failed') return null;
+  // «failed» names the button of the runtime's board — a runtime this page does not know (or none said) has no button name to give: no line rather than the wrong one
+  if (why === 'tools_failed' && view.runtime !== 'claude' && view.runtime !== 'codex') return null;
+  const device = view.device_name?.trim() ? view.device_name : null;
+  // each wording by its own literal call (the dead-key guard reads the literals)
+  const text = why === 'tools_unconfirmed'
+    ? (device ? t('workHold.unconfirmed', { device }) : t('workHold.unconfirmedNoDevice'))
+    : view.runtime === 'codex'
+      ? (device ? t('workHold.failedCodex', { device }) : t('workHold.failedCodexNoDevice'))
+      : (device ? t('workHold.failedClaude', { device }) : t('workHold.failedClaudeNoDevice'));
+  return <p className="w-full break-keep text-warning [overflow-wrap:anywhere]" data-testid="agent-session-work-hold" data-why={why}>{text}</p>;
 }
 
 // story #4641 (Yuna's copy, 2026-10-08): one plain muted line under the session, only when a person widened the mode at the terminal —

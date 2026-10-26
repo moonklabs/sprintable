@@ -24,4 +24,10 @@ describe('[4680] the settings tab from the address', () => {
     expect(resolveSettingsTab(null, open)).toBe(DEFAULT_SETTINGS_TAB);
     expect(resolveSettingsTab('', open)).toBe(DEFAULT_SETTINGS_TAB);
   });
+
+  it('story 4762 — the «이 폰» tab exists only in the phone app: ?tab=this-phone elsewhere falls back to the default tab', () => {
+    expect(resolveSettingsTab('this-phone', open)).toBe(DEFAULT_SETTINGS_TAB);
+    expect(resolveSettingsTab('this-phone', { ...open, phoneApp: false })).toBe(DEFAULT_SETTINGS_TAB);
+    expect(resolveSettingsTab('this-phone', { ...open, phoneApp: true })).toBe('this-phone');
+  });
 });

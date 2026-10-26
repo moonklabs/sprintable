@@ -8,6 +8,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
+import { CHAT_API_PREFIX } from '@/lib/chat-api-prefix';
 
 const { useDashboardContextMock, searchParamsValueRef, pushMock, replaceMock } = vi.hoisted(() => ({
   useDashboardContextMock: vi.fn(),
@@ -107,11 +108,38 @@ describe('OrgBriefingShell — 프로젝트 안내 배너(story #2212, story #38
   // story #3831 — today route는 org 스코프뿐(project_id 파라미터 자체가 없다) — project
   // 미보유 자체는 더는 배너 사유가 아니다(옛 "여기에 현황이 표시됩니다"는 이제 거짓이다,
   // LoopFace/WorkforceFace가 걷혀 project 유무와 화면 내용이 무관해졌으므로).
-  it('?next= 있으면 복귀 안내 배너를 보여준다', async () => {
+  it('?next= 있고 프로젝트를 안 골랐고 고를 프로젝트가 있으면 복귀 안내 배너를 보여준다', async () => {
     searchParamsValueRef.current = 'next=%2Fboard';
+    useDashboardContextMock.mockReturnValue({ projectId: undefined, projectMemberships: [{ id: 'p1', name: 'P1' }], orgMemberships: [] });
     stubToday(EMPTY_TODAY);
     await mount();
     expect(container.textContent).toContain('프로젝트를 선택하면 원래 보려던 화면으로 이동해요.');
+  });
+
+  // story 4773 (AC2) — the banner says «pick a project»: true only when none is picked and one can be. The session restore puts `?next=/glance?_prRetry=1` on Today with the project already chosen
+  // (4762 AC8 lap, dev 10-24: `?p=` on the page and on every flat link) — the line then sent the person looking for a choice already made.
+  it('[4773] ?next= 가 있어도 프로젝트가 이미 골라졌으면(자동 선택 포함) 배너가 안 뜬다 — 세션 복원이 붙인 재시도 표식 next', async () => {
+    searchParamsValueRef.current = 'next=%2Fglance%3F_prRetry%3D1&p=p1';
+    useDashboardContextMock.mockReturnValue({ projectId: 'p1', projectMemberships: [{ id: 'p1', name: 'P1' }], orgMemberships: [] });
+    stubToday(EMPTY_TODAY);
+    await mount();
+    expect(container.textContent).not.toContain('프로젝트를 선택하면'); // back to the old `next`-only condition → fails
+  });
+
+  it('[4773] 프로젝트가 둘 이상이고 아직 안 골랐으면 배너가 뜬다(맞는 말)', async () => {
+    searchParamsValueRef.current = 'next=%2Fboard';
+    useDashboardContextMock.mockReturnValue({ projectId: undefined, projectMemberships: [{ id: 'p1', name: 'P1' }, { id: 'p2', name: 'P2' }], orgMemberships: [] });
+    stubToday(EMPTY_TODAY);
+    await mount();
+    expect(container.textContent).toContain('프로젝트를 선택하면 원래 보려던 화면으로 이동해요.');
+  });
+
+  it('[4773] 프로젝트가 하나도 없으면(고를 게 없음) next가 있어도 «고르세요» 배너가 안 뜬다', async () => {
+    searchParamsValueRef.current = 'next=%2Fboard';
+    useDashboardContextMock.mockReturnValue({ projectId: undefined, projectMemberships: [], orgMemberships: [] });
+    stubToday(EMPTY_TODAY);
+    await mount();
+    expect(container.textContent).not.toContain('프로젝트를 선택하면'); // without the candidates condition → fails
   });
 
   it('?next= 없으면 project 유무와 무관하게 배너가 안 뜬다(today는 org 스코프)', async () => {
@@ -385,5 +413,218 @@ describe('OrgBriefingShell — 로드 실패(에러를 삼키지 않는다)', ()
     await mount();
     expect(container.textContent).toContain('불러오지 못했어요');
     expect(container.textContent).not.toContain('모두 확인했어요');
+  });
+});
+
+// story #4762 (AC1 · AC3) — one press of the instruction line sends when the person has exactly one agent DM; the send button keeps clear of the support button.
+describe('OrgBriefingShell — story #4762 AC1 한 번 누름 = 서버에 메시지', () => {
+  const ME = 'me-1';
+  const agentDm = (id: string, agent: string) => ({ id, type: 'dm', participants: [{ member_id: ME, type: 'human' }, { member_id: agent, type: 'agent' }] });
+  let calls: Array<{ url: string; method: string; body?: string }>;
+
+  function stubWorld(opts: { conversations: unknown[]; total?: number; sendOk?: boolean }) {
+    calls = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? 'GET', body: typeof init?.body === 'string' ? init.body : undefined });
+      if (url === '/api/today') return { ok: true, status: 200, json: async () => ({ data: EMPTY_TODAY }) };
+      if (url.startsWith('/api/conversations?')) return { ok: true, status: 200, json: async () => ({ data: opts.conversations, total: opts.total ?? opts.conversations.length }) };
+      if (url.endsWith('/messages')) return opts.sendOk === false
+        ? { ok: false, status: 500, json: async () => ({}) }
+        : { ok: true, status: 201, json: async () => ({ data: { id: 'm1', content: 'x', created_by: ME, conversation_id: 'c1', sender: { id: ME, name: 'me', type: 'human' } } }) };
+      return { ok: true, status: 200, json: async () => ({ data: null }) };
+    }));
+  }
+
+  async function typeAndSend(text: string) {
+    const input = container.querySelector('[data-testid="today-instruction-input"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(input, text); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => { input.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+    for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
+    return input;
+  }
+
+  beforeEach(() => { useDashboardContextMock.mockReturnValue({ projectId: 'p1', currentTeamMemberId: ME, projectMemberships: [], orgMemberships: [] }); });
+
+  it('exactly one agent DM → one POST of the text to it, then the person lands on that DM', async () => {
+    stubWorld({ conversations: [agentDm('c1', 'a1')] });
+    await mount();
+    await typeAndSend('유튜브 챕터 3개로 나눠줘');
+    const posts = calls.filter((c) => c.method === 'POST');
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.url).toBe(`${CHAT_API_PREFIX}/c1/messages`); // the chat screen's own address (story #4762 — it was the old `/api/chats`, a 404 on dev)
+    expect(JSON.parse(posts[0]!.body!).content).toBe('유튜브 챕터 3개로 나눠줘');
+    expect(pushMock).toHaveBeenCalledTimes(1);
+    expect(pushMock).toHaveBeenCalledWith('/chats/c1?p=p1'); // the flat link carries the project, as every flat link does
+    // what was sent is not left in the line (a back press must not offer it again as if unsent)
+    expect((container.querySelector('[data-testid="today-instruction-input"]') as HTMLInputElement).value).toBe('');
+  });
+
+  it('two agent DMs → nothing is sent, the old hand-over to the chat keeps working', async () => {
+    stubWorld({ conversations: [agentDm('c1', 'a1'), agentDm('c2', 'a2')] });
+    await mount();
+    await typeAndSend('hi');
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
+    expect(pushMock).toHaveBeenCalledWith('/chats?compose=hi&p=p1');
+  });
+
+  it('a send the server refuses keeps the text, says so, and does not leave the screen', async () => {
+    stubWorld({ conversations: [agentDm('c1', 'a1')], sendOk: false });
+    await mount();
+    const input = await typeAndSend('keep me');
+    expect(container.querySelector('[data-testid="today-instruction-failed"]')?.textContent).toBe(koMessages.orgBriefing.instructionSendFailed);
+    expect(input.value).toBe('keep me');
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it('no answer at all (network) says «check the chat first» — a different line than a refusal, the text stays, nobody is pushed', async () => {
+    calls = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? 'GET' });
+      if (url === '/api/today') return { ok: true, status: 200, json: async () => ({ data: EMPTY_TODAY }) };
+      if (url.startsWith('/api/conversations?')) return { ok: true, status: 200, json: async () => ({ data: [agentDm('c1', 'a1')], total: 1 }) };
+      if (url.endsWith('/messages')) throw new TypeError('network down');
+      return { ok: true, status: 200, json: async () => ({ data: null }) };
+    }));
+    await mount();
+    const input = await typeAndSend('maybe sent');
+    expect(container.querySelector('[data-testid="today-instruction-failed"]')?.textContent).toBe(koMessages.orgBriefing.instructionSendUnknown);
+    expect(input.value).toBe('maybe sent');
+    expect(pushMock).not.toHaveBeenCalled();
+    // the line is about the text that was there: the person editing it puts the line away (it never stays on an empty box)
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(input, ''); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    expect(container.querySelector('[data-testid="today-instruction-failed"]')).toBeNull();
+  });
+
+  it('while sending, a second press does not send twice', async () => {
+    stubWorld({ conversations: [agentDm('c1', 'a1')] });
+    await mount();
+    const input = container.querySelector('[data-testid="today-instruction-input"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(input, 'once'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    const form = input.closest('form')!;
+    await act(async () => {
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
+  });
+
+  it('the person leaves the screen while the list is being read → nothing is sent', async () => {
+    let release!: (v: unknown) => void;
+    calls = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? 'GET' });
+      if (url === '/api/today') return { ok: true, status: 200, json: async () => ({ data: EMPTY_TODAY }) };
+      if (url.startsWith('/api/conversations?')) { await new Promise((r) => { release = r; }); return { ok: true, status: 200, json: async () => ({ data: [agentDm('c1', 'a1')], total: 1 }) }; }
+      return { ok: true, status: 200, json: async () => ({ data: null }) };
+    }));
+    await mount();
+    const input = container.querySelector('[data-testid="today-instruction-input"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(input, 'late'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => { input.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+    await act(async () => { root.unmount(); });
+    root = createRoot(container); // afterEach unmounts it
+    await act(async () => { release(null); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it('the person leaves the screen while the message is being sent → no state set, nowhere pushed (the message itself is sent)', async () => {
+    let release!: (v: unknown) => void;
+    calls = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? 'GET' });
+      if (url === '/api/today') return { ok: true, status: 200, json: async () => ({ data: EMPTY_TODAY }) };
+      if (url.startsWith('/api/conversations?')) return { ok: true, status: 200, json: async () => ({ data: [agentDm('c1', 'a1')], total: 1 }) };
+      if (url.endsWith('/messages')) { await new Promise((r) => { release = r; }); return { ok: true, status: 201, json: async () => ({ data: { id: 'm1', content: 'x', created_by: ME, conversation_id: 'c1', sender: { id: ME, name: 'me', type: 'human' } } }) }; }
+      return { ok: true, status: 200, json: async () => ({ data: null }) };
+    }));
+    await mount();
+    const input = container.querySelector('[data-testid="today-instruction-input"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(input, 'on its way'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => { input.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+    for (let i = 0; i < 6 && !release; i += 1) await act(async () => { await Promise.resolve(); });
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1); // the POST is in flight
+    await act(async () => { root.unmount(); });
+    root = createRoot(container); // afterEach unmounts it
+    await act(async () => { release(null); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it('the person moves to another project while the message is being sent → the line is cleared (it was sent) but they are not taken back to the project they left', async () => {
+    let release!: (v: unknown) => void;
+    calls = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? 'GET' });
+      if (url === '/api/today') return { ok: true, status: 200, json: async () => ({ data: EMPTY_TODAY }) };
+      if (url.startsWith('/api/conversations?')) return { ok: true, status: 200, json: async () => ({ data: [agentDm('c1', 'a1')], total: 1 }) };
+      if (url.endsWith('/messages')) { await new Promise((r) => { release = r; }); return { ok: true, status: 201, json: async () => ({ data: { id: 'm1', content: 'x', created_by: ME, conversation_id: 'c1', sender: { id: ME, name: 'me', type: 'human' } } }) }; }
+      return { ok: true, status: 200, json: async () => ({ data: null }) };
+    }));
+    await mount();
+    const input = container.querySelector('[data-testid="today-instruction-input"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(input, 'sent from p1'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => { input.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+    for (let i = 0; i < 6 && !release; i += 1) await act(async () => { await Promise.resolve(); });
+    useDashboardContextMock.mockReturnValue({ projectId: 'p2', currentTeamMemberId: ME, projectMemberships: [], orgMemberships: [] });
+    const { OrgBriefingShell } = await import('./org-briefing-shell');
+    await act(async () => { root.render(wrap(<OrgBriefingShell />)); });
+    await act(async () => { release(null); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
+    expect(pushMock).not.toHaveBeenCalled();
+    expect((container.querySelector('[data-testid="today-instruction-input"]') as HTMLInputElement).value).toBe('');
+    // not silent: it IS sent, and the line says it went to the chat of the project the person was on
+    const note = container.querySelector('[data-testid="today-instruction-failed"]');
+    expect(note?.textContent).toBe(koMessages.orgBriefing.instructionSentElsewhere);
+    expect(note?.getAttribute('role')).toBe('status');
+  });
+
+  it('the person is on another project when the list answers → nothing is sent to the project they left', async () => {
+    let release!: (v: unknown) => void;
+    calls = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? 'GET' });
+      if (url === '/api/today') return { ok: true, status: 200, json: async () => ({ data: EMPTY_TODAY }) };
+      if (url.startsWith('/api/conversations?')) { await new Promise((r) => { release = r; }); return { ok: true, status: 200, json: async () => ({ data: [agentDm('c1', 'a1')], total: 1 }) }; }
+      return { ok: true, status: 200, json: async () => ({ data: null }) };
+    }));
+    await mount();
+    const input = container.querySelector('[data-testid="today-instruction-input"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(input, 'late'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => { input.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+    useDashboardContextMock.mockReturnValue({ projectId: 'p2', currentTeamMemberId: ME, projectMemberships: [], orgMemberships: [] });
+    const { OrgBriefingShell } = await import('./org-briefing-shell');
+    await act(async () => { root.render(wrap(<OrgBriefingShell />)); }); // the same screen, re-rendered: the dashboard context now says project p2
+    await act(async () => { release(null); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it('without a project or a member id (not known yet) the old hand-over runs at once — no list read', async () => {
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [], orgMemberships: [] });
+    stubWorld({ conversations: [agentDm('c1', 'a1')] });
+    await mount();
+    await typeAndSend('hi');
+    expect(calls.some((c) => c.url.startsWith('/api/conversations'))).toBe(false);
+    expect(pushMock).toHaveBeenCalledWith('/chats?compose=hi');
+  });
+});
+
+describe('OrgBriefingShell — story #4762 AC3 지원 버튼이 [보내기]를 가리지 않는다', () => {
+  it('the instruction row keeps the support button\'s corner free below lg (and gives it back from lg)', async () => {
+    stubToday(EMPTY_TODAY);
+    await mount();
+    const form = container.querySelector('[data-testid="today-instruction-form"]') as HTMLElement;
+    expect(form.className).toMatch(/(^|\s)pe-14(\s|$)/);
+    expect(form.className).toMatch(/(^|\s)lg:pe-0(\s|$)/);
+    // the input is w-full: a wrapping row would push [Send] to a second line (codex 4762) — one row, the failure line sits BELOW the form
+    expect(form.className).not.toMatch(/flex-wrap/);
   });
 });

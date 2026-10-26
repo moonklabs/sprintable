@@ -117,7 +117,7 @@ from app.repositories.team_member import TeamMemberRepository
 from app.routers.agent_gateway import wake_agent
 from app.routers.events import _agent_connections
 from app.services.agent_onboarding_config import resolve_backend_direct_url
-from app.services.stream_access import RECHECK_BEFORE_SEND_SEC, AccessRecheck
+from app.services.stream_access import RECHECK_BEFORE_SEND_SEC, AccessRecheck, SeatRecheck
 from app.services.a2a_task_lifecycle import (
     A2A_TASK_TIMEOUT_MINUTES,
     effective_deadline,
@@ -1013,7 +1013,7 @@ def _sse_error_frame(request_id: str | int | None, code: int, message: str) -> s
 async def _stream_send_message(
     request: Request, request_id: str | int | None,
     session: AsyncSession, member: TeamMember, org_id: uuid.UUID, params: dict,
-    active_extensions: frozenset[str], caller_key_id: object = None,
+    active_extensions: frozenset[str], caller_key_id: object = None, caller_user_id: object = None,
 ) -> StreamingResponse:
     """S-A4 AC1: `SendStreamingMessage` — task 생성(기존 `_handle_send_message` 그대로 재사용)
     확인 프레임 → 상태 변화 폴링(기존 `_advance_task_state`, GetTask와 100% 동일 규칙) →
@@ -1048,8 +1048,9 @@ async def _stream_send_message(
 
         last_state: str | None = send_result["task"]["status"]["state"]
         # story #4565 (Qadir ①): a caller's agent key revoked while this reply streams (its agent moved to another computer by
-        # a setup · a device disconnected) ends the stream — rechecked before more frames go out (a person's JWT: none)
-        access = AccessRecheck(caller_key_id, None) if caller_key_id else None
+        # a setup · a device disconnected) ends the stream — rechecked before more frames go out
+        # story #4774: a person's JWT has no key, but it has a seat — asked again before more frames go out, as a key's is
+        access = AccessRecheck(caller_key_id, None) if caller_key_id else (SeatRecheck(caller_user_id, org_id) if caller_user_id else None)
         while not await request.is_disconnected():
             if access is not None and (why := await access.due(RECHECK_BEFORE_SEND_SEC)):
                 yield _sse_error_frame(request_id, _UNAUTHORIZED, f"access revoked: {why}")
@@ -1140,6 +1141,7 @@ async def a2a_rpc(
                 _stream_send_message(
                     request, body.id, session, member, org_id, body.params or {}, active_extensions,
                     caller_key_id=auth.claims.get("app_metadata", {}).get("api_key_id"),
+                    caller_user_id=auth.user_id,
                 ),
                 timeout=_A2A_RPC_TIMEOUT_SECONDS,
             )

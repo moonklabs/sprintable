@@ -1284,6 +1284,27 @@ def auth_ctx(org_id: uuid.UUID) -> MagicMock:
     return ctx
 
 
+@pytest.fixture(autouse=True)
+def _seat_recheck_for_made_up_principals(monkeypatch):
+    """story #4774 — a PERSON's open connection (the SSE stream, the WebSocket, the A2A streaming reply) now asks for the person's seat again (`stream_access.SeatRecheck`). A test that
+    hands the app a made-up user with `app.dependency_overrides[get_current_user]` (or its streaming variant) has no `org_members` row for it, and it is about the connection's
+    behaviour, not about who may stay — so for exactly that case the seat question is answered «still seated». A test that does not override the principal keeps the real judgement;
+    it is pinned on a real PG in tests/test_4774_open_connections_recheck_realdb.py."""
+    from app.dependencies import auth as auth_module
+    from app.services import stream_access
+
+    original = stream_access.person_seat_revoked_db
+
+    async def _check(user_id, org_id):
+        from app.main import app
+
+        if auth_module.get_current_user in app.dependency_overrides or auth_module.get_current_user_streaming in app.dependency_overrides:
+            return None
+        return await original(user_id, org_id)
+
+    monkeypatch.setattr(stream_access, "person_seat_revoked_db", _check)
+
+
 @pytest.fixture
 async def test_client(mock_session: AsyncMock, auth_ctx: MagicMock):
     """AsyncClient with mocked DB session + auth. Clears dependency_overrides on teardown."""

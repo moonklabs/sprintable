@@ -34,7 +34,7 @@ beforeEach(() => {
     if (url === '/api/onboarding/events') return { ok: true, json: async () => ({}) };
     if (url === '/api/auth/me') return { ok: true, json: async () => ({ data: { member_id: 'u-1', email_verified: true, org_id: null, org_member_id: null, display_name: '문클랩스' } }) };
     if (url === '/api/invites/mine') return { ok: true, json: async () => ({ invites: [] }) }; // the backend's one shape (no envelope)
-    if (url === '/api/auth/refresh') return { ok: true, json: async () => ({}) };
+    if (url === '/api/auth/refresh') return { ok: true, json: async () => ({ data: { ok: true } }) };
     if (url === '/api/organizations') {
       return { ok: true, json: async () => ({ data: { id: 'org-korean-1', slug: 'workspace-3f9a1c2b' } }) };
     }

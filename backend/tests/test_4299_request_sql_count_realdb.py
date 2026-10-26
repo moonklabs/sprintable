@@ -29,8 +29,10 @@ _RAW = os.environ.get("ALEMBIC_DATABASE_URL") or os.environ.get("PARITY_TEST_DAT
 _ASYNC = _RAW.replace("postgresql+psycopg2://", "postgresql+asyncpg://").replace("postgresql://", "postgresql+asyncpg://")
 pytestmark = [pytest.mark.skipif(not _RAW, reason="real-DB URL 미설정 — skip"), pytest.mark.anyio]
 
-STORIES_SQL_MAX = 4
-ATTENTION_SQL_MAX = 8
+# story #4772: +1 each — the request authentication now asks for the live seat of the organization the token names (the lookup an `X-Org-Id` header always paid): one indexed
+# `org_members` read, answered from `request.state` for the rest of the request. Flat in the number of rows (the N+1 guard below is unchanged).
+STORIES_SQL_MAX = 5
+ATTENTION_SQL_MAX = 9
 
 
 @pytest.fixture

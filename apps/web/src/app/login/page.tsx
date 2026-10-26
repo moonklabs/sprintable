@@ -12,6 +12,7 @@ import { FIREBASE_AUTH_ENABLED } from '@/lib/auth/firebase-client';
 import { signInAndExchangeFirebaseSession } from '@/lib/auth/firebase-login-flow';
 import { isAppleLoginEligible } from '@/lib/native-shell-bridge';
 import { LegalFooter } from '@/components/legal/legal-footer';
+import { MacAppOffer } from './mac-app-offer';
 
 export default function LoginPage() {
   const t = useTranslations('login');
@@ -131,6 +132,8 @@ export default function LoginPage() {
           />
           <p className="text-sm text-muted-foreground">{t('subtitle')}</p>
         </div>
+
+        <MacAppOffer suppressed={Boolean(nextParam) || sessionExpired} />
 
         {sessionExpired && (
           <Alert variant="warning">

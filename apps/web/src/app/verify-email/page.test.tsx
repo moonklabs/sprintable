@@ -11,7 +11,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 
-const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
+const { pushMock, announceMock } = vi.hoisted(() => ({ pushMock: vi.fn(), announceMock: vi.fn() }));
+vi.mock('@/lib/auth/email-verified-signal', () => ({ announceVerified: announceMock, listenVerified: vi.fn(() => () => undefined) }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock }),
   useSearchParams: () => new URLSearchParams('token=tok-1'),
@@ -34,6 +35,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   vi.resetModules();
   pushMock.mockClear();
+  announceMock.mockClear();
 });
 
 async function mountAndWait() {
@@ -65,6 +67,18 @@ describe('VerifyEmailPage — error.code 분기 (story #2484)', () => {
     await mountAndWait();
     expect(container.textContent).not.toContain('Email already verified');
     expect(container.textContent).toContain(koMessages.verifyEmail.verifiedSuccess);
+  });
+
+  it('[SID:4763 AC7] 성공하면 다른 탭에 «인증됐어요»를 알린다(숨은 첫 탭의 게이트가 바로 열리게) — 실패하면 알리지 않는다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ json: async () => ({ data: { message: 'ok' } }) })));
+    await mountAndWait();
+    expect(announceMock).toHaveBeenCalledTimes(1);
+    announceMock.mockClear();
+    root.unmount(); root = createRoot(container);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ json: async () => ({ error: { code: 'INVALID_TOKEN', message: 'x' } }) })));
+    vi.resetModules();
+    await mountAndWait();
+    expect(announceMock).not.toHaveBeenCalled();
   });
 
   it('INVALID_TOKEN — raw 영문 대신 i18n 문구', async () => {
@@ -143,5 +157,46 @@ describe('VerifyEmailPage — 「시작하기」 목적지가 org_id 유무로 �
       await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
     });
     expect(pushMock).toHaveBeenCalledWith('/onboarding');
+  });
+});
+
+// story #4762 (AC6) — «Back to the app» on the verified page: only on a phone browser, by the app's own scheme; the dev web's app is `ai.sprintable.dev`.
+describe('VerifyEmailPage — 앱으로 돌아가기 (story #4762 AC6)', () => {
+  const verified = vi.fn(async () => ({ json: async () => ({ data: { message: 'Email verified successfully' } }) }));
+  const realUa = Object.getOwnPropertyDescriptor(window.navigator, 'userAgent');
+  function setUa(ua: string) { Object.defineProperty(window.navigator, 'userAgent', { value: ua, configurable: true }); }
+  afterEach(() => { if (realUa) Object.defineProperty(window.navigator, 'userAgent', realUa); else delete (window.navigator as { userAgent?: string }).userAgent; });
+
+  it('a phone browser gets the link, to the app scheme of this web build', async () => {
+    setUa('Mozilla/5.0 (Linux; Android 14; Pixel) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36');
+    vi.stubGlobal('fetch', verified);
+    await mountAndWait();
+    const link = container.querySelector('[data-testid="verify-back-to-app"]') as HTMLAnchorElement | null;
+    expect(link?.textContent).toBe(koMessages.verifyEmail.backToApp);
+    expect(link?.getAttribute('href')).toBe('ai.sprintable:/'); // no NEXT_PUBLIC_APP_URL in the test build → the production scheme (the dev web's host gives ai.sprintable.dev, see native-return-app.test.ts)
+    // a phone without the app gets the OS's «no app» error from a custom-scheme link: the page says so beforehand (codex 4762)
+    expect(container.querySelector('[data-testid="verify-back-to-app-hint"]')?.textContent).toBe(koMessages.verifyEmail.backToAppHint);
+  });
+
+  it('an iPhone browser gets it too', async () => {
+    setUa('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1');
+    vi.stubGlobal('fetch', verified);
+    await mountAndWait();
+    expect(container.querySelector('[data-testid="verify-back-to-app"]')).not.toBeNull();
+  });
+
+  it('a desktop browser does not (there is no phone app to go back to)', async () => {
+    setUa('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120 Safari/537.36');
+    vi.stubGlobal('fetch', verified);
+    await mountAndWait();
+    expect(container.querySelector('[data-testid="verify-back-to-app"]')).toBeNull();
+    expect(container.querySelector('[data-testid="verify-back-to-app-hint"]')).toBeNull();
+  });
+
+  it('a failed verification does not offer it (nothing to go back to the app for)', async () => {
+    setUa('Mozilla/5.0 (Linux; Android 14; Pixel) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36');
+    vi.stubGlobal('fetch', vi.fn(async () => ({ json: async () => ({ error: { code: 'INVALID_TOKEN', message: 'x' } }) })));
+    await mountAndWait();
+    expect(container.querySelector('[data-testid="verify-back-to-app"]')).toBeNull();
   });
 });

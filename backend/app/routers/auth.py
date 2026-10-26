@@ -358,6 +358,13 @@ def _is_session_stale_after_password_change(user: User, session_started_at: obje
     return int(user.password_set_at.timestamp()) > session_started_at
 
 
+# story 4778 — how many tokens of a chain `refresh_token()` follows (switch's token → rotated hops → the session's live token) before it gives up. Generous on purpose (one hop is a single indexed read, about 0.3 ms);
+# a walk that uses it all without seeing an end answers «superseded» (unknown counts as alive: the cost of being wrong is one more ask of the client, which then gets the real answer — never a forced logout).
+# Limit, on purpose: past this many hops (a switch followed by more than 63 refreshes inside the superseded window) a session whose newest token was logged out is answered «superseded» too; the cookies stay for that one answer
+# and the next request, made with the cookies the browser then holds, gets the real REVOKED and clears them, so nothing is held alive. The cap is pinned to exactly 64 by `test_the_walk_reaches_exactly_sixty_four_hops_realdb`.
+_SUPERSEDED_CHAIN_MAX_HOPS = 64
+
+
 def _explicit_revoke_values(now: datetime) -> dict:
     """story #3649(BE·보안·prod 결함) — logout·set-password confirm·switch-project·
     switch-org·org_members 관리자 강제폐기(5곳) 전부 이 딕셔너리를 그대로 `.values()`
@@ -404,6 +411,150 @@ async def _revoke_other_sessions(
         window.append(or_(RefreshToken.replaced_by.is_(None), RefreshToken.replaced_by != keep_id))
     await session.execute(update(RefreshToken).where(*window).values(expires_at=now))
     return ended.rowcount or 0, keep_id
+
+
+# `revoked_at` is stamped by the app pod that ended the token, and pods' clocks differ by a little: along a chain it is monotonic only up to that skew. The time bound of
+# `_close_grace_windows_leading_to` carries this much slack on top of the rotation window, so a hop stamped «too early» by a slow clock cannot end the walk while an older, still exploitable
+# predecessor lies inside the window (codex 4782 round 5). The slack only widens the walk by the few rotations of one more minute. The premise of the 60 s: the app pods' clocks stay within
+# that of each other (Cloud Run keeps them on NTP) — a skew beyond it can still leave one open window behind (a named limit in the PR, not a silent one).
+_CHAIN_CLOCK_SLACK_SECONDS = 60
+
+
+async def _close_grace_windows_leading_to(session: AsyncSession, user_id: uuid.UUID, token_id: uuid.UUID, now: datetime) -> int:
+    """story 4782 — close the refresh grace window (§2449) of every token a rotation spent on the way TO `token_id`: its predecessor, the predecessor's predecessor…
+
+    A logout ends the token it is given and nothing else. The tokens a refresh spent a moment before (`revoked_at` set · `expires_at` left, `replaced_by` pointing forward) stay
+    exchangeable for `auth_refresh_chain_resolve_window_seconds`, so the logged-out session could fork a new pair from them (`_revoke_other_sessions` closes such windows for its roads;
+    plain logout did not). Walks `replaced_by` backwards through rows in any state, as far back as a window can still be open (see the bound below) — an intermediate already closed must not hide an older one still open — and lowers `expires_at` of the
+    ones still open through the same seam as every explicit end. Returns how many windows it closed.
+
+    Residuals (named in the PR): (1) only the chain that leads TO the presented token is walked — a token a refresh already rotated forward (the logout was sent with a stale cookie) leaves
+    the live end of its chain alone, and the child of a rotation race LOSER (`won_atomic_rotation` false, §2449) has no predecessor pointing at it, so logging it out closes nothing behind it;
+    (2) the winner's `replaced_by` is a separate statement after the new row (§2449), but the new token reaches its client only after that statement, so a logout with it cannot cross it."""
+    # one recursive statement, no hop cap — and bounded by TIME instead: a window can only be open for a token a rotation ended inside `auth_refresh_chain_resolve_window_seconds`
+    # (`revoked_at` newer than that; the refresh straggler test is the same), and a chain's `revoked_at` only grows toward the tip, so the first row older than the window ends the walk —
+    # nothing behind it is exploitable. A row whose own window is already CLOSED (an explicit end by a switch · by a logout-others) is still walked through: an older one behind it can be
+    # open. So the bound is `revoked_at`, never `expires_at > now`. Measured on real PG (one person, 13 000 token rows, a chain of 3 000 of which 100 are inside the window): unbounded 1 902 ms,
+    # bounded 38 ms; a chain made long on purpose (rotations are free) cannot make a logout slow, and so cannot make it fail on a statement timeout. `UNION` (not `UNION ALL`) drops repeated rows,
+    # so a corrupted `replaced_by` loop ends by itself. Every hop is read through the `user_id` index (there is none on `replaced_by`; a chain never crosses persons).
+    cutoff = now - timedelta(seconds=settings.auth_refresh_chain_resolve_window_seconds + _CHAIN_CLOCK_SLACK_SECONDS)
+    leading = select(RefreshToken.id).where(
+        RefreshToken.user_id == user_id, RefreshToken.replaced_by == token_id, RefreshToken.revoked_at > cutoff,
+    ).cte("grace_chain", recursive=True)
+    chain = leading.union(select(RefreshToken.id).where(
+        RefreshToken.user_id == user_id, RefreshToken.replaced_by == leading.c.id, RefreshToken.revoked_at > cutoff,
+    ))
+    result = await session.execute(
+        update(RefreshToken)
+        .where(RefreshToken.id.in_(select(chain.c.id)), RefreshToken.expires_at > now)
+        .values(expires_at=now)  # only the window closes (as `_revoke_other_sessions` does); the time the rotation ended it stays
+    )
+    return result.rowcount or 0
+
+
+async def _was_superseded_by_a_switch(session: AsyncSession, row: object | None, now: datetime) -> bool:
+    """story 4778 (AC2b) · 4782 — was this token ended by a SWITCH a moment ago, with a session that lives on at the end of its chain?
+
+    A switch ends the token it is given explicitly (`expires_at` lowered to `revoked_at` with it) and points `replaced_by` at the token it issued. The session did not die: it moved on, and a
+    request that left with the old token before the new one was saved is only late. `row` carries `user_id · revoked_at · expires_at · replaced_by` of the token as presented (None = unknown token).
+    The ONE walk both roads use: `refresh_token` answers `TOKEN_SUPERSEDED` on True (the BFF keeps the cookies), and the switches (`_claim_switching_session`) refuse with the same word — a
+    late switch must not be told «dead» when the late refresh is told «moved on».
+
+    True only inside `auth_refresh_superseded_window_seconds`, and only while the session is still alive at the END of the chain: follow `replaced_by` from the switch's token through tokens a refresh
+    has rotated since (revoked but still inside their grace window: `expires_at` in the future) to the live one. An end that moved NOWHERE (a logout · password change · admin revoke: `expires_at` closed,
+    no `replaced_by`) stops the walk — the session is over; an end WITH a successor is followed to it: a switch closes `expires_at` of the token it ended too (the explicit end) and links the token it
+    issued (so a second switch inside the window does not hide the session behind the first one's token), and `_revoke_other_sessions` · the logout (`_close_grace_windows_leading_to`) close the grace
+    window of a rotated token while its link stays. «revoked earlier, expires later than that» is not the test either way. The walk is capped (`_SUPERSEDED_CHAIN_MAX_HOPS`); a walk that uses the whole
+    cap without seeing an end answers «alive» (unknown → alive: one more ask of the client, never a forced logout)."""
+    if (
+        row is None or row.revoked_at is None or row.replaced_by is None
+        or row.expires_at > row.revoked_at  # not an explicit end (a rotation leaves `expires_at` alone)
+        or row.revoked_at <= now - timedelta(seconds=settings.auth_refresh_superseded_window_seconds)
+    ):
+        return False
+    session_alive = False
+    hop_id = row.replaced_by
+    for _ in range(_SUPERSEDED_CHAIN_MAX_HOPS):
+        hop = (await session.execute(
+            select(RefreshToken.user_id, RefreshToken.revoked_at, RefreshToken.expires_at, RefreshToken.replaced_by).where(RefreshToken.id == hop_id)
+        )).first()
+        if (
+            hop is None or hop.user_id != row.user_id
+            or (hop.expires_at <= now and hop.replaced_by is None)  # an end that moved nowhere
+            or (hop.revoked_at is None and hop.expires_at <= now)  # a live token that simply expired (the line above already catches it, since a live token links nothing; this one only guards a damaged row)
+        ):
+            break  # gone · another person's · over
+        if hop.revoked_at is None:
+            session_alive = True
+            break
+        if hop.replaced_by is None:
+            # revoked, no successor linked: a rotation in flight (the atomic revoke commits first, the new token is inserted and linked in later commits) while it is recent — the session is moving
+            # on, not over; an old dead end is nothing to move on to. Wrongly «alive» costs one more ask of the client (the window ends in seconds); wrongly «dead» logs a live person out.
+            session_alive = hop.revoked_at > now - timedelta(seconds=settings.auth_refresh_superseded_window_seconds)
+            break
+        hop_id = hop.replaced_by
+    else:
+        session_alive = True  # the cap ran out before an end was seen: unknown → alive
+    return session_alive
+
+
+async def _claim_switching_session(
+    session: AsyncSession, user: User, refresh_token: str | None, *, route: str, successor_id: uuid.UUID,
+) -> JSONResponse | None:
+    """story 4782 (was `_revoke_switching_session`, story #4400) — a switch (switch-org · switch-project) starts from ONE live session: the refresh token it is given. None = go on
+    (that token is now ended and points at `successor_id`, the token this switch issues in the same transaction); a response = refused (401, nothing written).
+
+    Why: the old function ended whatever matched and went on whatever the row count was. A token that was already ended (a logout · «sign out everywhere else» · an administrator's removal)
+    matched 0 rows, and with no token sent it ended every live token (there were none) and went on — so the access token left over after a revoke (up to 60 minutes) bought a new
+    30-day refresh token. A switch is not a way around a renewal: it needs the same standing a renewal needs.
+
+    The token must be this person's and (a) live — not ended, not past `expires_at` — or (b) the one rotation straggler `refresh_token` also honours (a rotation ended it, `expires_at` was
+    left, inside `auth_refresh_chain_resolve_window_seconds`: a tab whose refresh and switch crossed — the switch goes on, ends nothing). `rowcount == 0` alone is not the test: (b) is also 0 rows.
+    Anything else is an END of the session — a logout · logout-others · a password change · an administrator · a switch that already moved on · expiry — and is refused: `TOKEN_SUPERSEDED`
+    when a switch moved it on a moment ago and the successor lives (the client renews; it is not a sign-out), otherwise `TOKEN_REVOKED`. No token sent = nothing to switch from = `TOKEN_REVOKED`
+    (the web BFF always sends its cookie's token; the all-device fallback for web pods older than the backend is gone — 0 callers left, story 4782).
+
+    Call it BEFORE the handler writes anything of the person's (`last_org_id` · `last_project_id`): `get_db` commits when the handler returns, a refusal included."""
+    now = datetime.now(timezone.utc)
+
+    def _refuse(code: str, message: str, reason: str) -> JSONResponse:
+        logger.info(
+            "auth switch refused", extra={"structured": {"event": "switch_refused", "route": route, "reason": reason}},  # no user id · no token
+        )
+        return _err(code, message, 401)
+
+    if not refresh_token:
+        return _refuse("TOKEN_REVOKED", "Refresh token revoked or expired", "no_token")
+    token_hash = hash_token(refresh_token)
+    values = _explicit_revoke_values(now)
+    values["replaced_by"] = successor_id  # story 4778 (AC2b): the pointer that lets a late refresh with the old token be told `TOKEN_SUPERSEDED`
+    claimed = await session.execute(
+        update(RefreshToken)
+        .where(
+            RefreshToken.user_id == user.id, RefreshToken.token_hash == token_hash,
+            RefreshToken.revoked_at.is_(None), RefreshToken.expires_at > now,
+        )
+        .values(**values)
+    )
+    if claimed.rowcount:
+        return None
+    row = (await session.execute(
+        select(RefreshToken.user_id, RefreshToken.revoked_at, RefreshToken.expires_at, RefreshToken.replaced_by)
+        .where(RefreshToken.user_id == user.id, RefreshToken.token_hash == token_hash)
+    )).first()
+    # a fresh clock, not the one above: a request that ended this token while we waited took its `now` at ITS start — which can be later than ours — and an explicit end sets `expires_at` to
+    # that moment. With our older `now` the row looked «still ahead» and the second of two crossing switches went on with a token the first had just ended (codex 4782 round 1).
+    now = datetime.now(timezone.utc)
+    if (
+        row is not None and row.revoked_at is not None
+        and row.expires_at > row.revoked_at  # a rotation leaves `expires_at` alone; every explicit end (a switch · a logout · the others) sets it equal to `revoked_at`
+        and row.expires_at > now
+        and row.revoked_at > now - timedelta(seconds=settings.auth_refresh_chain_resolve_window_seconds)
+    ):
+        return None  # the rotation straggler
+    if await _was_superseded_by_a_switch(session, row, now):
+        return _refuse("TOKEN_SUPERSEDED", "Refresh token superseded by a newer session token", "superseded")
+    return _refuse("TOKEN_REVOKED", "Refresh token revoked or expired", "unknown" if row is None else "ended")
 
 
 _PROVIDER_ID_COLUMNS = ("google_id", "github_id", "apple_id")
@@ -853,11 +1004,13 @@ async def _store_refresh_token(
     expires_at: datetime,
     *,
     app_metadata: dict,
+    token_id: uuid.UUID | None = None,
 ) -> uuid.UUID:
     """story #4400 — the refresh token carries its session's org and project (the app_metadata the tokens were issued
     with). A refresh re-issues that session's context (`_refresh_session_context`), so each session keeps its own org:
     switching org on one device no longer moves the others (they used to follow the person-wide last_org_id)."""
     row = RefreshToken(
+        **({"id": token_id} if token_id is not None else {}),  # story 4778: a switch names the new token before it exists (the revoked one points at it in the same transaction)
         user_id=user.id,
         token_hash=hash_token(raw_token),
         org_id=_context_uuid(app_metadata, "org_id"),
@@ -910,6 +1063,7 @@ async def _refresh_session_context(
         # No org claim without a live membership, whatever the resolution found (a still-active legacy member row). A
         # pending invite it accepted just now is a live membership, so it stays.
         if md.get("org_id") and uuid.UUID(str(md["org_id"])) not in await _live_org_ids(session, user.id):
+            user.last_org_id = None  # `_build_app_metadata` may have written the departed org back (flag off): no live org means no org pointer
             return {}
         return md
     if rt_org_id is not None and rt_org_id in live_orgs:
@@ -922,6 +1076,16 @@ async def _refresh_session_context(
     return await _build_app_metadata(
         user, session, org_id=last_org_id if last_org_id in live_orgs else live_orgs[0],
     )
+
+
+async def _sign_in_session_context(user: User, session: AsyncSession) -> dict:
+    """story 4762 — app_metadata for a SIGN-IN of an existing person (password and OAuth): the same live-org rule as a refresh, with no session org yet.
+
+    `_build_app_metadata` without an org scopes to `user.last_org_id` and never asks whether the person is still in it. A person removed from org A (still a
+    member of B) therefore signed in with an A claim: `/api/v2/me` answered 404 `membership_elsewhere`, and signing in again gave the same claim. Here the
+    default is `user.last_org_id` only while it is a live membership, else the oldest live org, else a claim without an org (the state of a new sign-up);
+    one rule for refresh and sign-in (`_refresh_session_context`)."""
+    return await _refresh_session_context(user, session, None, None)
 
 
 # ─── POST /api/v2/auth/register ───────────────────────────────────────────────
@@ -1118,7 +1282,7 @@ async def login(
             update(User).where(User.id == user.id).values(login_fail_count=0, login_locked_until=None)
         )
 
-    _md = await _build_app_metadata(user, session)
+    _md = await _sign_in_session_context(user, session)  # story 4762 — a live org, as a refresh
     if settings.build_app_metadata_defallback:
         _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md, session_started_at=int(datetime.now(timezone.utc).timestamp()))
@@ -1256,7 +1420,7 @@ async def refresh_token(
             # 셋 다 이미 관측 가능한 시스템 사실(시각차·불리언·UA 문자열)이지 개인식별
             # 정보가 아니다.
             _diag_row = (await session.execute(
-                select(RefreshToken.user_id, RefreshToken.revoked_at, RefreshToken.replaced_by)
+                select(RefreshToken.user_id, RefreshToken.revoked_at, RefreshToken.expires_at, RefreshToken.replaced_by)
                 .where(RefreshToken.token_hash == token_hash)
             )).first()
             _diag_user_id = _diag_row.user_id if _diag_row else None
@@ -1271,6 +1435,21 @@ async def refresh_token(
                         select(RefreshToken.revoked_at).where(RefreshToken.id == _diag_row.replaced_by)
                     )).scalar_one_or_none()
                     _diag_successor_used = _successor_revoked_at is not None
+            # story 4778 (AC2b) — SUPERSEDED, not REVOKED: this token was ended by a switch (explicit revoke: `expires_at` was lowered to `revoked_at` with it · `replaced_by` points at the
+            # token that switch issued) a moment ago, and the session that successor carries on is not itself ended by a logout or a password change. The session did not die: it moved on, and the browser's refresh
+            # that left with the old token before it saved the switch's cookie is just late. The answer is the same 401 — NO new token (a superseded token is never exchanged) — with a
+            # different word, so the BFF and the proxy do not clear the cookie the browser is about to replace. Only inside `auth_refresh_superseded_window_seconds`: past it, or for any
+            # other end (logout · password change · rotation older than the resolve window · admin revoke), the word is TOKEN_REVOKED as before.
+            _now = datetime.now(timezone.utc)
+            if await _was_superseded_by_a_switch(session, _diag_row, _now):  # story 4782: the same test the switches use (`_claim_switching_session`)
+                logger.info(
+                    "auth.refresh superseded key=%s user_id=%s delta_since_revoke_s=%s",
+                    correlation_key, _diag_user_id, round((_now - _diag_row.revoked_at).total_seconds(), 3),
+                )
+                return _err(
+                    "TOKEN_SUPERSEDED", "Refresh token superseded by a newer session token", 401,
+                    headers={"X-Auth-Correlation": correlation_key},
+                )
             _diag_ua = request.headers.get("user-agent", "")[:200]
             logger.warning(
                 "auth.refresh 실패 reason=token_not_found_or_revoked_or_expired key=%s user_id=%s "
@@ -1409,7 +1588,11 @@ async def switch_account(
         str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         session_started_at=_session_started_at,
     )
-    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=_md)
+    new_token_id = await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=_md)
+    # story 4778 — the rotation names its successor, as `refresh_token()` does (audit only: no rule of the refresh grace window reads it). A rotated token that points at nothing looks exactly like
+    # a rotation still in flight to the «superseded» answer of the refresh route, which follows `replaced_by` from a switch's token to the session's live end.
+    await session.execute(update(RefreshToken).where(RefreshToken.token_hash == token_hash).values(replaced_by=new_token_id))
+    await session.commit()
 
     return _ok({
         **tokens,
@@ -1430,11 +1613,16 @@ async def logout(
     # 주석, refresh_token() 참고) — 명시 logout은 회전 경합 straggler 구제 대상이
     # 아니다.
     _now = datetime.now(timezone.utc)
+    presented = (await session.execute(select(RefreshToken.id, RefreshToken.user_id).where(RefreshToken.token_hash == token_hash))).first()
     await session.execute(
         update(RefreshToken)
         .where(RefreshToken.token_hash == token_hash, RefreshToken.revoked_at.is_(None))
         .values(**_explicit_revoke_values(_now))
     )
+    # story 4782 — the tokens a refresh spent on the way to this one keep their grace window (§2449) after this logout, and a refresh with one of them forks a new pair for the session
+    # that just ended. They end with it (the same close `_revoke_other_sessions` makes for its roads).
+    if presented is not None:
+        await _close_grace_windows_leading_to(session, presented.user_id, presented.id, _now)
     await session.commit()
     return _ok({"ok": True})
 
@@ -1890,7 +2078,7 @@ async def oauth_callback(
     from datetime import timedelta
     from app.core.security import ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS
 
-    _md = await _build_app_metadata(user, session)
+    _md = await _sign_in_session_context(user, session)  # story 4762 — a live org, as a refresh
     if settings.build_app_metadata_defallback:
         _persist_resolved_context(user, _md)  # 908075db 단계2: side-effect 호출부 이관
     tokens = create_tokens(str(user.id), user.email, _md, session_started_at=int(datetime.now(timezone.utc).timestamp()))
@@ -2392,33 +2580,6 @@ class SwitchProjectRequest(BaseModel):
     refresh_token: str | None = None
 
 
-async def _revoke_switching_session(
-    session: AsyncSession, user: User, refresh_token: str | None, *, route: str,
-) -> None:
-    """story #4400 — switch-org / switch-project revoke **this session's** refresh token only, not every device's.
-
-    The all-device revoke came with switch-project (#655) and was copied into switch-org (#847), with no threat stated.
-    The refresh token now carries its session's org (`_store_refresh_token`), so other sessions keep their own org and
-    have nothing to be revoked for. #3649's protections are untouched: the stale-session check runs before this, and
-    the revoke goes through the same seam (`_explicit_revoke_values`, which also closes the refresh grace window).
-    logout · password change · admin revoke still revoke every device.
-
-    Without a token (a caller that does not send it yet — web pods older than the backend during a deploy) the
-    previous behaviour stays: every token of the person. Each such use logs one structured line
-    (event=switch_revoke_fallback · route · how many tokens; no user id) so the fallback can be removed once it reads 0."""
-    conditions = [RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None)]
-    if refresh_token:
-        conditions.append(RefreshToken.token_hash == hash_token(refresh_token))
-    result = await session.execute(
-        update(RefreshToken).where(*conditions).values(**_explicit_revoke_values(datetime.now(timezone.utc)))
-    )
-    if not refresh_token:
-        logger.info(
-            "auth switch revoked every token (no refresh_token sent)",
-            extra={"structured": {"event": "switch_revoke_fallback", "route": route, "revoked": result.rowcount or 0}},
-        )
-
-
 @router.post("/switch-project")
 async def switch_project(
     body: SwitchProjectRequest,
@@ -2442,24 +2603,40 @@ async def switch_project(
     # 정식 access+refresh 토큰이 발급되는 증폭 경로였다(SEC-S5~S8 가드를 우회하는 크리덴셜
     # 발급 자체이므로 단순 열람보다 파급이 큼). 현재 세션의 org 컨텍스트로 명시 스코핑.
     caller_org_id_str = auth.claims.get("app_metadata", {}).get("org_id")
-    caller_org_id = uuid.UUID(str(caller_org_id_str)) if caller_org_id_str else None
+    try:
+        caller_org_id = uuid.UUID(str(caller_org_id_str)) if caller_org_id_str else None
+    except ValueError:  # a signed token whose org claim is not an org id: fail closed, not a 500
+        return _err("NOT_MEMBER", "Not an active member of this organization", 403)
+
+    # story 4762 (codex · Kadir lens, PR 5217) — the session's own org must still be one the person is a LIVE member of: `has_project_access` also lets an active team-member anchor
+    # through after the seat (org_members) was closed, and the new token would name the org the person left. A claim-less token has no org to switch a project in (a person with a
+    # live seat gets a claim from refresh / sign-in): it is refused too, so a leftover legacy team-member row cannot mint an org claim here.
+    if caller_org_id is None or caller_org_id not in await _live_org_ids(session, user.id):
+        return _err("NOT_MEMBER", "Not an active member of this organization", 403)
 
     # 인가 체크 — team_member ∪ project_access(granted) ∪ owner/admin (me/memberships 3-branch 정합)
     if not await has_project_access(session, user.id, body.project_id, caller_org_id):
         return _err("NOT_MEMBER", "Not an active member of this project", 403)
+
+    # 이 세션 refresh token 무효화 — story #3649(보안 결함): expires_at도 함께 내려
+    # refresh()의 유예창(§3649 주석)이 이 RT를 재사용 대상에서 뺀다(명시 폐기,
+    # 회전 경합 straggler 아님). story #4400: 전 기기 → 이 세션만.
+    # story 4782: the switch starts from ONE live session or it is refused — and the check comes BEFORE the next lines write anything of the person's (`last_project_id`): `get_db` commits when the
+    # handler returns, a refusal included, so a refused switch must not have moved the person's last project.
+    new_refresh_id = uuid.uuid4()  # story 4778: the token this switch will issue — the revoked one points at it (same transaction)
+    refused = await _claim_switching_session(session, user, body.refresh_token, route="switch-project", successor_id=new_refresh_id)
+    if refused is not None:
+        return refused
 
     # target 캡처 — _build_app_metadata가 내부 fallback으로 last_project_id를 덮어쓰므로 먼저 고정
     # (switch_org auth.py:1158-1165 동일 패턴)
     target_project_id = body.project_id
     user.last_project_id = target_project_id
 
-    # 이 세션 refresh token 무효화 — story #3649(보안 결함): expires_at도 함께 내려
-    # refresh()의 유예창(§3649 주석)이 이 RT를 재사용 대상에서 뺀다(명시 폐기,
-    # 회전 경합 straggler 아님). story #4400: 전 기기 → 이 세션만.
-    await _revoke_switching_session(session, user, body.refresh_token, route="switch-project")
-
     # 908075db 단계1: target을 명시 의도로 전달 — flag on이면 _build_app_metadata가 추측 없이 그대로 존중.
-    app_metadata = await _build_app_metadata(user, session, project_id=target_project_id)
+    # story 4762 (Kadir lens, PR 5217) — the claim's ORG is the caller's session org (the one `has_project_access` just checked), never `users.last_org_id`: that column can name
+    # an organization the person was removed from (another session used it last), and the new token would then name the org they left.
+    app_metadata = await _build_app_metadata(user, session, org_id=caller_org_id, project_id=target_project_id)
     # 908075db 단계3: flag-on이면 de-fallback이 명시 target 을 존중(_resolve_explicit→project_id=target)·
     # last_project_id 는 위 1229 kept + 단계2 무mutation 으로 target 유지 → 아래 override 밴드에이드가
     # redundant. flag-off(prod)만 보정(전면 삭제는 prod flag-on 後 단계4·dev 한정).
@@ -2478,7 +2655,7 @@ async def switch_project(
         str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         session_started_at=_session_started_at,
     )
-    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=app_metadata)
+    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=app_metadata, token_id=new_refresh_id)
 
     await session.commit()
     return _ok(tokens)
@@ -2507,8 +2684,11 @@ async def switch_organization(
         return _err("SESSION_INVALIDATED", "Password was changed — please log in again", 401)
 
     # org_members 소속 여부 확인
+    from app.models.organization import Organization  # story 4762 — the same «live» predicate as `_live_org_ids`: a seat in an organization that no longer exists is not a membership
+
     membership = await session.execute(
         select(OrgMember)
+        .join(Organization, Organization.id == OrgMember.org_id)
         .where(
             OrgMember.org_id == body.org_id,
             OrgMember.user_id == user.id,
@@ -2519,15 +2699,19 @@ async def switch_organization(
     if membership.scalar_one_or_none() is None:
         return _err("NOT_ORG_MEMBER", "Not a member of this organization", 403)
 
+    # 이 세션 refresh token 무효화 — story #3649(보안 결함): switch_project()와 동형
+    # (§3649 주석 참고). story #4400: 전 기기 → 이 세션만.
+    # story 4782: as in switch_project() — one live session or a refusal, BEFORE `last_project_id` · `last_org_id` are written.
+    new_refresh_id = uuid.uuid4()  # story 4778: the token this switch will issue — the revoked one points at it (same transaction)
+    refused = await _claim_switching_session(session, user, body.refresh_token, route="switch-org", successor_id=new_refresh_id)
+    if refused is not None:
+        return refused
+
     # 대상 org의 접근 가능한 첫 project 해소 — team_member > grant > org 첫 project (grant 유저 포함)
     user.last_project_id = await first_accessible_project_id(session, user.id, body.org_id)
     # 0746 후속: 현재 org 영속 → 이후 refresh(org 컨텍스트 없음)가 이 org로 스코프해 0-project org서도
     # cross-org 옛 프로젝트 재주입 0 (last_project_id=None이어도 org는 유지).
     user.last_org_id = body.org_id
-
-    # 이 세션 refresh token 무효화 — story #3649(보안 결함): switch_project()와 동형
-    # (§3649 주석 참고). story #4400: 전 기기 → 이 세션만.
-    await _revoke_switching_session(session, user, body.refresh_token, route="switch-org")
 
     # _build_app_metadata 호출 전에 target project_id 고정
     # (내부에서 user.last_project_id를 이전 org TM으로 덮어쓰므로 먼저 캡처)
@@ -2560,7 +2744,7 @@ async def switch_organization(
         str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         session_started_at=_session_started_at,
     )
-    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=app_metadata)
+    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=app_metadata, token_id=new_refresh_id)
 
     await session.commit()
 

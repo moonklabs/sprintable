@@ -549,6 +549,42 @@ async def get_current_user(
     return auth
 
 
+_ORG_SCOPED_CLAIMS = ("org_id", "project_id", "project_ids", "role")
+
+
+async def _drop_org_claims_without_live_seat(payload: dict, user_id: str, db: AsyncSession, request: Request | None) -> None:
+    """story #4772 — the organization a SIGNED token names is only as good as the day it was signed: removing a member ends their refresh tokens and nothing else, so the access
+    token they already hold kept naming the organization — and ~12 routers read that claim themselves (`_get_org_project` and its copies), the `role` claim answered `require_admin`,
+    and `_resolve_verified_org_id` took it without a header — until the token expired, about an hour. The request authentication is the one place every route goes through, so the
+    judgement lives here: if the token names an organization the person has no live seat in (`org_members.deleted_at IS NULL`; an organization that was deleted has its seats ended
+    with it), the organization-scoped claims are dropped from THIS request's view of the token (`org_id` · `project_id` · `project_ids` · `role`) and `org_left` says why, so a route
+    that needs an organization answers 403 (`_resolve_verified_org_id`) or «org_id required», and the person's identity (`/auth/me`, a switch to an organization they are in, a
+    fresh login) still works. The answer is the seat lookup `_verify_org_membership` keeps on `request.state` for this request only, so a removal is seen by the very next request.
+    Not applied to an agent key (it reads its organization from its member row in the request itself); a person's own API key (`hu_live_`) is judged like a token — its member row says «active», not «still seated», and an older removal can leave the anchor active."""
+    meta = payload.get("app_metadata")
+    if not isinstance(meta, dict):
+        return
+    raw = meta.get("org_id")
+    if not raw or meta.get("api_key_id"):
+        return  # an agent key reads its organization from its member row in this request — never from a claim that can be old
+    try:
+        org_id = uuid.UUID(str(raw))
+    except ValueError:
+        return
+    try:
+        await _verify_org_membership(str(user_id), org_id, db, request)
+    except HTTPException as e:
+        if e.status_code != status.HTTP_403_FORBIDDEN:
+            raise
+        for claim in _ORG_SCOPED_CLAIMS:
+            meta.pop(claim, None)
+        # the per-project list (`projects`: {id, org_id, role} across every organization of the person) keeps the entries of the organizations they are still in
+        projects = meta.get("projects")
+        if isinstance(projects, list):
+            meta["projects"] = [p for p in projects if not (isinstance(p, dict) and str(p.get("org_id")) == str(org_id))]
+        meta["org_left"] = str(org_id)
+
+
 async def _resolve_current_user_auth_context(
     credentials: HTTPAuthorizationCredentials | None,
     x_agent_api_key: str | None,
@@ -576,7 +612,10 @@ async def _resolve_current_user_auth_context(
     # 거기로 보내면 이 분기가 아예 없어 그대로 미인증(자연 차단 — 별도 판별 코드 불요).
     if token.startswith("hu_live_"):
         async with async_session_factory() as db:
-            return await _resolve_human_api_key(token, db)
+            ctx = await _resolve_human_api_key(token, db)
+            await _drop_org_claims_without_live_seat(ctx.claims, ctx.user_id, db, request)  # story #4772
+            ctx.org_id = (ctx.claims.get("app_metadata") or {}).get("org_id")
+            return ctx
 
     # story 455e528d(E-AUTH-REBUILD Phase1-S2·doc §4.2): Firebase 세션(RS256)은 alg 헤더로
     # 정확 분기 — 순차 fallback 아님. FIREBASE_AUTH_ACCEPT_SESSION=false(기본)면 이 분기는
@@ -586,11 +625,15 @@ async def _resolve_current_user_auth_context(
 
     if _settings.firebase_auth_accept_session and looks_like_rs256(token):
         async with async_session_factory() as db:
-            return await _resolve_firebase_session(token, db)
+            ctx = await _resolve_firebase_session(token, db)
+            await _drop_org_claims_without_live_seat(ctx.claims, ctx.user_id, db, request)
+            ctx.org_id = (ctx.claims.get("app_metadata") or {}).get("org_id")
+            return ctx
 
     # JWT 경로 (기존) — story 4725: 서명·타입·sub·cut-off는 verify_access_token 한 곳
     async with async_session_factory() as db:
         payload = await verify_access_token(token, db)
+        await _drop_org_claims_without_live_seat(payload, str(payload["sub"]), db, request)
     user_id: str = payload["sub"]
 
     org_id: str | None = payload.get("app_metadata", {}).get("org_id")
@@ -611,9 +654,13 @@ async def _verify_org_membership(
     db: AsyncSession,
     request: Request,
 ) -> None:
-    """caller가 org 멤버인지 DB 조회 — request.state 캐시로 N+1 방지."""
+    """caller가 org 멤버인지 DB 조회 — request.state 캐시로 N+1 방지.
+
+    story #4772 — the answer is kept for THIS request only (never longer): a removal must be seen by the very next request. `request` may be None for a direct call (no cache then),
+    and a user id that is not a uuid is simply not a member (403), never a 500."""
     cache_key = f"_org_mbr_{user_id}_{org_id}"
-    cached = getattr(request.state, cache_key, None)
+    state = getattr(request, "state", None)
+    cached = getattr(state, cache_key, None) if state is not None else None
     if cached is True:
         return
     if cached is False:
@@ -624,10 +671,14 @@ async def _verify_org_membership(
 
     from app.models.project import OrgMember
 
+    try:
+        user_uuid = uuid.UUID(str(user_id))
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="해당 조직의 멤버가 아닌") from None
     result = await db.execute(
         select(OrgMember.id).where(
             OrgMember.org_id == org_id,
-            OrgMember.user_id == uuid.UUID(user_id),
+            OrgMember.user_id == user_uuid,
             OrgMember.deleted_at.is_(None),
         )
     )
@@ -647,7 +698,7 @@ async def _verify_org_membership(
             select(TeamMember.id)
             .where(
                 TeamMember.org_id == org_id,
-                TeamMember.id == uuid.UUID(user_id),
+                TeamMember.id == user_uuid,
                 TeamMember.is_active.is_(True),
             )
             .limit(1)  # team_members는 0088 이후 projection VIEW — 멀티프로젝트 에이전트는
@@ -655,7 +706,8 @@ async def _verify_org_membership(
             # MultipleResultsFound로 크래시하므로 limit(1)+first()로 존재만 본다.
         )
         is_member = agent_result.first() is not None
-    setattr(request.state, cache_key, is_member)
+    if state is not None:
+        setattr(state, cache_key, is_member)
     if not is_member:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -737,6 +789,9 @@ async def _resolve_verified_org_id(
     # X-Org-Id 헤더 우선 — org 전환 프리뷰(unified-switcher) 지원. 항상 membership 검증.
     raw = x_org_id or jwt_org_id
     if not raw:
+        if auth.claims.get("app_metadata", {}).get("org_left"):
+            # story #4772: the token names an organization the person no longer has a live seat in (dropped by the request authentication) — the same 403 a header gets
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="해당 조직의 멤버가 아닌")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="org_id required (X-Org-Id header or JWT app_metadata)",
@@ -959,20 +1014,10 @@ def require_admin(auth: AuthContext = Depends(get_current_user)) -> AuthContext:
     return auth
 
 
-def require_project_access(
-    project_id: uuid.UUID,
-    auth: AuthContext = Depends(get_current_user),
-) -> uuid.UUID:
-    """JWT app_metadata.project_ids에 project_id가 포함되어 있는지 검증.
-    project_ids 클레임이 없으면(레거시 토큰) 통과 — Phase C 전환 기간 호환."""
-    project_ids = auth.claims.get("app_metadata", {}).get("project_ids")
-    if project_ids is not None:
-        if str(project_id) not in [str(pid) for pid in project_ids]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Access to project {project_id} denied",
-            )
-    return project_id
+# story #4772 — `require_project_access` (a dependency that read the `project_ids` CLAIM and let a token WITHOUT that claim through as «legacy») was removed: no route used it
+# (the one every route uses is `app.services.project_auth.require_project_access`, which asks the database), and after this story a token that names an organization the person
+# left has its `project_ids` dropped — so the old function would have let such a token through any project. A function nobody uses and that opens the door on an absent claim is
+# a trap for the next person; the DB-asking one is the only one.
 
 
 async def enforce_body_context(
@@ -1123,7 +1168,10 @@ async def get_current_user_streaming(
     # story #1940 — get_current_user와 동형(x-agent-api-key 헤더 경로엔 의도적으로 안 붙임).
     if token.startswith("hu_live_"):
         async with async_session_factory() as db:
-            return await _resolve_human_api_key(token, db)
+            ctx = await _resolve_human_api_key(token, db)
+            await _drop_org_claims_without_live_seat(ctx.claims, ctx.user_id, db, request)  # story #4772 — as in get_current_user
+            ctx.org_id = (ctx.claims.get("app_metadata") or {}).get("org_id")
+            return ctx
 
     # story 455e528d(doc §4.3 "mirror the dual verifier in get_current_user_streaming"):
     # get_current_user와 동일하게 alg 헤더로 정확 분기(순차 fallback 아님). 단명 세션으로
@@ -1133,11 +1181,15 @@ async def get_current_user_streaming(
 
     if _settings.firebase_auth_accept_session and looks_like_rs256(token):
         async with async_session_factory() as db:
-            return await _resolve_firebase_session(token, db)
+            ctx = await _resolve_firebase_session(token, db)
+            await _drop_org_claims_without_live_seat(ctx.claims, ctx.user_id, db, request)  # story #4772 — as in get_current_user
+            ctx.org_id = (ctx.claims.get("app_metadata") or {}).get("org_id")
+            return ctx
 
     # 단명 세션(async with)만 열고 즉시 close(스트림 yield 구간 미점유 유지) — story 4725: 서명·타입·sub·cut-off는 verify_access_token 한 곳
     async with async_session_factory() as db:
         payload = await verify_access_token(token, db)
+        await _drop_org_claims_without_live_seat(payload, str(payload["sub"]), db, request)  # story #4772 — as in get_current_user (the seat lookup uses this short session)
     user_id = payload["sub"]
 
     return AuthContext(

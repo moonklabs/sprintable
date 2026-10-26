@@ -24,33 +24,70 @@ export function usableRuntimes(q: Pick<SetupQuery, 'runtimes' | 'blocked'>): Des
   return q.runtimes.filter((r) => !q.blocked.includes(r));
 }
 
+/** story 4784: what the person saw on the «에이전트 만들기» card and pressed «만들기» on — the name (never blank), the role (blank = none, left out) and the
+ *  folder's NAME (never a path; it only goes into the room's first line). */
+export interface AgentMade { name: string; role: string }
 export interface SoloConfirmBody {
   code: string;
   runtime: DesktopRuntime;
   /** exactly one of the two: the project the app found for this folder, or the folder's name (a new project) */
   project_id?: string;
   project_name?: string;
+  agent_name: string;
+  agent_role?: string;
+  folder_name: string;
 }
-export interface SoloNewOrgConfirmBody { code: string; runtime: DesktopRuntime; org_name: string; project_name: string }
+export interface SoloNewOrgConfirmBody { code: string; runtime: DesktopRuntime; org_name: string; project_name: string; agent_name: string; agent_role?: string; folder_name: string }
 
-/** The confirm-solo body. `useProject`: the person's [넣고 시작] (the free plan's one project) — that project, not a new one. */
-export function soloConfirmBody(code: string, runtime: DesktopRuntime, folder: SoloFolder, useProject?: string): SoloConfirmBody {
+/** The agent's name and role as the server takes them: trimmed; a blank role is left out. */
+function madeFields(made: AgentMade): { agent_name: string; agent_role?: string } {
+  const role = made.role.trim();
+  return { agent_name: made.name.trim(), ...(role ? { agent_role: role } : {}) };
+}
+
+/** The confirm-solo body. `useProject`: the person's [넣고 만들기] (the free plan's one project) — that project, not a new one. */
+export function soloConfirmBody(code: string, runtime: DesktopRuntime, folder: SoloFolder, made: AgentMade, useProject?: string): SoloConfirmBody {
   const project = useProject ?? folder.projectId;
-  return project ? { code, runtime, project_id: project } : { code, runtime, project_name: folder.name };
+  const agent = { ...madeFields(made), folder_name: folder.name };
+  return project ? { code, runtime, project_id: project, ...agent } : { code, runtime, project_name: folder.name, ...agent };
 }
 
-export function soloNewOrgConfirmBody(code: string, runtime: DesktopRuntime, folder: SoloFolder, orgName: string): SoloNewOrgConfirmBody {
-  return { code, runtime, org_name: orgName, project_name: folder.name };
+export function soloNewOrgConfirmBody(code: string, runtime: DesktopRuntime, folder: SoloFolder, orgName: string, made: AgentMade): SoloNewOrgConfirmBody {
+  return { code, runtime, org_name: orgName, project_name: folder.name, ...madeFields(made), folder_name: folder.name };
+}
+
+/** The most the server takes (backend AGENT_NAME_MAX · AGENT_ROLE_MAX) — the card's fields stop there instead of answering 422. */
+export const AGENT_NAME_MAX = 60;
+export const AGENT_ROLE_MAX = 200;
+
+/** story 4784: the folder window reloads this page (the answer comes back in a new address), so what the person typed for the new agent waits in the
+ *  tab's session storage, per setup, and is read back once on mount. Only the two fields they typed; unreadable or absent storage = nothing kept. */
+const TYPED_KEY = 'sprintable.desktopSetupQuick.typed.v1:'; // + the setup id: two setups (tabs) never share or overwrite a draft
+export function readTypedAgent(setupId: string | null): { name: string | null; role: string } {
+  try {
+    const raw = setupId ? window.sessionStorage.getItem(TYPED_KEY + setupId) : null;
+    const v = raw ? JSON.parse(raw) as { name?: unknown; role?: unknown } : null;
+    if (!v) return { name: null, role: '' };
+    return { name: typeof v.name === 'string' ? v.name.slice(0, AGENT_NAME_MAX) : null, role: typeof v.role === 'string' ? v.role.slice(0, AGENT_ROLE_MAX) : '' };
+  } catch { return { name: null, role: '' }; }
+}
+export function writeTypedAgent(setupId: string | null, name: string | null, role: string): void {
+  try {
+    if (!setupId) return;
+    if (name === null && !role) window.sessionStorage.removeItem(TYPED_KEY + setupId);
+    else window.sessionStorage.setItem(TYPED_KEY + setupId, JSON.stringify({ name, role }));
+  } catch { /* storage closed: the fields just start over after the folder window */ }
 }
 
 /** The project name the card shows for a NEW project: the folder's name, or «{name} 2» · «{name} 3» … when the organization has it —
- *  the server makes the final name by the same rule (case-insensitive · trimmed); this is only what the line says before. */
+ *  the server makes the final name by the same rule (compatibility-folded · format characters dropped · spaces collapsed · case ignored; the base is cut so the
+ *  name stays within 100 characters); this is only what the line says before. */
 export function shownProjectName(name: string, taken: readonly string[]): string {
-  const norm = (s: string) => s.split(/\s+/).filter(Boolean).join(' ').toLowerCase();
+  const norm = (s: string) => s.normalize('NFKC').replace(/\p{Cf}/gu, '').split(/\s+/).filter(Boolean).join(' ').toLowerCase();
   const used = new Set(taken.map(norm));
   let n = 1;
   let candidate = name;
-  while (used.has(norm(candidate))) { n += 1; candidate = `${name} ${n}`; }
+  while (used.has(norm(candidate))) { n += 1; const tail = ` ${n}`; candidate = `${name.slice(0, Math.max(100 - tail.length, 0))}${tail}`; }
   return candidate;
 }
 
@@ -80,13 +117,34 @@ export type SoloOutcome =
   | { kind: 'has-org' }
   | { kind: 'pending-invites' }
   | { kind: 'email-verify' }
+  | { kind: 'name-taken'; suggested: string | null }
+  | { kind: 'bad-text'; field: 'agent_name' | 'agent_role'; blank: boolean }
   | { kind: 'rate-limited'; retryAfter: number | null }
   | { kind: 'generic' };
 
-interface ErrorBody { code?: string; resource?: string; needed?: unknown; available?: unknown; existing_project?: { id?: unknown; name?: unknown } }
+interface ErrorBody { code?: string; resource?: string; needed?: unknown; available?: unknown; existing_project?: { id?: unknown; name?: unknown }; suggested_name?: unknown }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export function soloOutcome(status: number, error: ErrorBody | undefined, retryAfterHeader: string | null): SoloOutcome {
+/** story 4784 (Kadir 5245): the server refuses a typed name/role it cannot show as one honest line (422, FastAPI's `detail` list: `loc: ['body', field]`, `msg`).
+ *  The card says WHICH field and why instead of a «try again» that could never work. null = a 422 that is not about those two fields. */
+function badTextOf(detail: unknown): { field: 'agent_name' | 'agent_role'; blank: boolean } | null {
+  if (!Array.isArray(detail)) return null;
+  for (const item of detail) {
+    const loc = (item as { loc?: unknown } | null)?.loc;
+    const field = Array.isArray(loc) ? loc[1] : null;
+    if (field === 'agent_name' || field === 'agent_role') {
+      const msg = (item as { msg?: unknown }).msg;
+      return { field, blank: typeof msg === 'string' && msg.includes('must not be blank') };
+    }
+  }
+  return null;
+}
+
+export function soloOutcome(status: number, error: ErrorBody | undefined, retryAfterHeader: string | null, detail?: unknown): SoloOutcome {
+  if (status === 422) {
+    const bad = badTextOf(detail);
+    if (bad) return { kind: 'bad-text', ...bad };
+  }
   if (status === 429 || error?.code === 'RATE_LIMITED') {
     const secs = Number(retryAfterHeader);
     return { kind: 'rate-limited', retryAfter: Number.isFinite(secs) && secs > 0 ? secs : null };
@@ -112,6 +170,7 @@ export function soloOutcome(status: number, error: ErrorBody | undefined, retryA
     case 'has_organization': return { kind: 'has-org' };
     case 'pending_invites': return { kind: 'pending-invites' };
     case 'EMAIL_VERIFICATION_REQUIRED': return { kind: 'email-verify' };
+    case 'agent_name_taken': return { kind: 'name-taken', suggested: typeof error.suggested_name === 'string' && error.suggested_name.trim() ? error.suggested_name.trim().slice(0, AGENT_NAME_MAX) : null };
     default: return { kind: 'generic' };
   }
 }

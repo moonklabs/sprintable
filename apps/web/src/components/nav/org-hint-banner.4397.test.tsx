@@ -63,6 +63,25 @@ afterEach(async () => {
   window.sessionStorage.clear();
 });
 
+// a behavior-neutrality guard, not the proof of the move: it passes before and after (fetchWithAuth did the same 401 → renew → ask once more) and fails if the move drops `withAuth`;
+// that the banner goes through the page's one flight is held by the ratchet (switch-single-flight.4778) and the flight tests (switch-one-flight.4778)
+describe('[SID:4778] OrgHintBanner — the switch goes through the page\'s one flight, with the renewal fetchWithAuth used to give it', () => {
+  it('a 401 on the switch renews the session and asks once more (then lands as usual); a plain fetch would have shown «failed»', async () => {
+    const answers = [401, 200, 200]; // switch (401) · refresh route (200) · switch again (200)
+    const urls: string[] = [];
+    fetchMock = vi.fn(async (url: string) => {
+      urls.push(String(url));
+      return new Response(JSON.stringify({ data: { ok: true } }), { status: answers.shift() ?? 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await mount(`org_id=${ORG_B}`);
+    await act(async () => { button(koMessages.nav.switcherSwitchToOrg).click(); });
+    await act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); });
+    expect(urls).toEqual(['/api/switch-org', '/api/auth/refresh', '/api/switch-org']); // withAuth dropped → only the first (a 401 is shown as a failure)
+    expect(nav.replace).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('[SID:4397] OrgHintBanner', () => {
   it('another org of theirs: the card is offered, and opening the page alone never switches', async () => {
     await mount(`org_id=${ORG_B}`);

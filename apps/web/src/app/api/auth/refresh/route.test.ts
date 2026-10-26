@@ -45,6 +45,7 @@ describe('POST /api/auth/refresh', () => {
     const setCookie = res.headers.get('set-cookie') ?? '';
     expect(setCookie).toContain('sp_at=new-at');
     expect(setCookie).toContain('sp_rt=new-rt');
+    expect(res.headers.get('x-session-changed')).toBe('1'); // story 4762 — the page's fetch gate tells the phone shell: write the new cookies to disk now
   });
 
   it('BE refresh 실패(401) → sp_at/sp_rt 쿠키 삭제(무한 재생산 차단 — 핵심 회귀 가드)', async () => {
@@ -59,21 +60,95 @@ describe('POST /api/auth/refresh', () => {
     const setCookie = res.headers.get('set-cookie') ?? '';
     expect(setCookie).toContain('sp_at=;');
     expect(setCookie).toContain('sp_rt=;');
+    expect(res.headers.get('x-session-changed')).toBe('1'); // story 4762 — a cleared session is written to disk at once too (no resurrected dead token after a kill)
   });
 
-  // story #3644(3632 후속, AC8) — 상류가 502+HTML(CF 오류 페이지)을 내면 이전엔
-  // `fastapiRes.json()`이 던져 이 함수 자체가 uncaught로 죽어 sp_at/sp_rt 삭제
-  // (무한 재시도 차단의 핵심 방어선)까지 통째로 안 돌았다. safeJsonParse가 빈
-  // 객체로 흡수해 `!json.data`가 여전히 true가 되므로 삭제 경로가 살아 있어야 한다.
-  it('상류가 502+HTML을 내도 fastapiRes.json() throw로 안 죽고 sp_at/sp_rt를 그대로 삭제한다', async () => {
+  // story #3644(3632 후속, AC8) — 상류가 502+HTML(CF 오류 페이지)을 내면 이전엔 `fastapiRes.json()`이 던져 이 함수 자체가 uncaught로 죽었다(safeJsonParse가 빈 객체로 흡수).
+  // story 4778 (AC2c) — 그 502는 «토큰이 죽었다»가 아니라 «확인 못 했다»다: 이전엔 쿠키 둘을 지웠고(백엔드가 잠깐 아프면 로그아웃), 이제는 지우지 않고 다시 시도할 수 있는 답(REFRESH_UNAVAILABLE)을 낸다.
+  it('상류가 502+HTML을 내도 죽지 않는다 — 쿠키는 그대로 두고 REFRESH_UNAVAILABLE(502)을 낸다 (4778 AC2c)', async () => {
     mockFetch.mockResolvedValue(new Response('<html><body>502 Bad Gateway</body></html>', {
       status: 502, headers: { 'content-type': 'text/html' },
     }));
     const res = await POST(makeRequest());
     expect(res.status).toBe(502);
-    const setCookie = res.headers.get('set-cookie') ?? '';
-    expect(setCookie).toContain('sp_at=;');
-    expect(setCookie).toContain('sp_rt=;');
+    expect(res.headers.get('set-cookie') ?? '').toBe(''); // reverted (every non-ok clears) → sp_at=; sp_rt=;
+    expect(res.headers.get('x-session-changed')).toBeNull();
+    expect((await res.json() as { error: { code: string } }).error.code).toBe('REFRESH_UNAVAILABLE');
+  });
+
+  // story 4778 (AC2b · AC2c) — what is NOT «this session is over» leaves the cookies alone; only a 401 that says dead clears them
+  describe('story 4778 — superseded and unconfirmed answers do not clear the cookies', () => {
+    const unclear = (res: Response) => {
+      expect(res.headers.get('set-cookie') ?? '').toBe('');
+      expect(res.headers.get('x-session-changed')).toBeNull();
+    };
+
+    it('401 TOKEN_SUPERSEDED (a switch ended this token a moment ago) → 401 with that code, cookies untouched (a clear here is a logout while switching)', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 401, headers: { get: () => null }, json: async () => ({ error: { code: 'TOKEN_SUPERSEDED', message: 'superseded' } }) });
+      const res = await POST(makeRequest());
+      expect(res.status).toBe(401);
+      expect((await res.json() as { error: { code: string } }).error.code).toBe('TOKEN_SUPERSEDED');
+      unclear(res); // reverted (the superseded word falls into the clearing branch) → both cookies cleared
+    });
+
+    it('429 and 5xx from the backend → the same status with REFRESH_UNAVAILABLE, cookies untouched', async () => {
+      for (const status of [429, 500, 503]) {
+        mockFetch.mockResolvedValue({ ok: false, status, headers: { get: () => null }, json: async () => ({ error: { code: 'X', message: 'later' } }) });
+        const res = await POST(makeRequest());
+        expect(res.status).toBe(status);
+        expect((await res.json() as { error: { code: string } }).error.code).toBe('REFRESH_UNAVAILABLE');
+        unclear(res);
+      }
+    });
+
+    it('a non-401 client error and a 200 without tokens are «not confirmed» too (no clear)', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 400, headers: { get: () => null }, json: async () => ({ error: { code: 'BAD', message: 'bad' } }) });
+      const a = await POST(makeRequest());
+      expect(a.status).toBe(400);
+      unclear(a);
+      mockFetch.mockResolvedValue({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({}) });
+      const b = await POST(makeRequest());
+      expect(b.status).toBe(502);
+      unclear(b);
+    });
+
+    it('a 200 that does not carry both tokens (partial · empty · a JSON null) is «not confirmed»: no cookie written, none cleared', async () => {
+      for (const body of ['{"data":{}}', '{"data":{"access_token":"a"}}', '{"data":{"access_token":"","refresh_token":""}}', '{"data":{"access_token":1,"refresh_token":2}}', 'null']) {
+        mockFetch.mockResolvedValue(new Response(body, { status: 200, headers: { 'content-type': 'application/json' } }));
+        const res = await POST(makeRequest());
+        expect(res.status, body).toBe(502); // reverted (a truthy `data` is enough) → a success that writes empty cookies · a null body throws
+        expect((await res.json() as { error: { code: string } }).error.code).toBe('REFRESH_UNAVAILABLE');
+        unclear(res);
+      }
+    });
+
+    it('a 401 whose body is empty · not JSON · JSON null is dead as before (cleared)', async () => {
+      for (const body of ['', 'not json', 'null']) {
+        mockFetch.mockResolvedValue(new Response(body, { status: 401 }));
+        const res = await POST(makeRequest());
+        expect(res.status, body).toBe(401);
+        expect(res.headers.get('set-cookie') ?? '').toContain('sp_rt=;');
+      }
+    });
+
+    it('the backend cannot be reached (a connection failure) → 503 REFRESH_UNAVAILABLE, cookies untouched (it used to be an unhandled error)', async () => {
+      mockFetch.mockRejectedValue(new TypeError('fetch failed'));
+      const res = await POST(makeRequest());
+      expect(res.status).toBe(503);
+      expect((await res.json() as { error: { code: string } }).error.code).toBe('REFRESH_UNAVAILABLE');
+      unclear(res);
+    });
+
+    it('401 for any other reason (TOKEN_REVOKED · INVALID_TOKEN · USER_NOT_FOUND) still clears both cookies — only the word superseded is spared', async () => {
+      for (const code of ['TOKEN_REVOKED', 'INVALID_TOKEN', 'USER_NOT_FOUND', 'SESSION_INVALIDATED']) {
+        mockFetch.mockResolvedValue({ ok: false, status: 401, headers: { get: () => null }, json: async () => ({ error: { code, message: 'dead' } }) });
+        const res = await POST(makeRequest());
+        expect(res.status).toBe(401);
+        const setCookie = res.headers.get('set-cookie') ?? '';
+        expect(setCookie).toContain('sp_at=;');
+        expect(setCookie).toContain('sp_rt=;');
+      }
+    });
   });
 
   it('domain-scoped 환경(NEXT_PUBLIC_COOKIE_DOMAIN 설정)에서도 삭제에 Domain이 실림 — prod 근본 회귀 가드(3차)', async () => {

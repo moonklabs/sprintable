@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { SP_AT_COOKIE, SP_RT_COOKIE, getServerSession } from '@/lib/db/server';
 import { CURRENT_PROJECT_COOKIE } from '@/lib/auth-helpers';
-import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
+import { cookieBase, SP_AT_MAX_AGE_SECONDS, markSessionChanged } from '@/lib/auth/cookies';
 import { safeJsonParse } from '@/lib/api-response';
 import { backendFetch } from '@/lib/backend-fetch';
 
@@ -48,5 +48,5 @@ export async function POST(request: Request): Promise<Response> {
   res.cookies.set(SP_AT_COOKIE, access_token, { ...cookieBase(), maxAge: SP_AT_MAX_AGE_SECONDS });
   res.cookies.set(SP_RT_COOKIE, refresh_token, { ...cookieBase(), maxAge: 30 * 24 * 60 * 60 });
   res.cookies.set(CURRENT_PROJECT_COOKIE, body.project_id, { path: '/', sameSite: 'lax', maxAge: 60 * 60 * 24 * 365 });
-  return res;
+  return markSessionChanged(res);
 }

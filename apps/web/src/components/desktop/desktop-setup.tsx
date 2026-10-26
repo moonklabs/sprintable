@@ -7,7 +7,7 @@ import { Loader2, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { fetchWithAuth } from '@/lib/db/client';
+import { fetchWithAuth, refreshSessionAfterChange, switchOrg } from '@/lib/db/client';
 import { presetDescription, presetName } from '@/lib/platform-preset-copy';
 import { pickEulReulJosa, pickEunNeunJosa, pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -56,8 +56,10 @@ export function useAppSetupLinks(): { open: string; reopen: string } {
 }
 export const RUNTIME_LABEL: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex' };
 // each provider's recommended install (no Node.js needed; fixed provider addresses with no version in them — PO 13:10Z from
-// code.claude.com/docs/en/setup and github.com/openai/codex)
-export const INSTALL: Record<DesktopRuntime, string> = { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh' };
+// code.claude.com/docs/en/setup and github.com/openai/codex). story 4765: the README's chatgpt.com/codex/install.sh answers 404 (measured on two
+// machines, 10-24) — the same installer is an asset of the official GitHub release, so that is the address (the Mac app's command table has the
+// same string: desktop-electron/src/runtime-install.ts, pinned by test/runtime-install-4658.test.ts)
+export const INSTALL: Record<DesktopRuntime, string> = { claude: 'curl -fsSL https://claude.ai/install.sh | bash', codex: 'curl -fsSL https://github.com/openai/codex/releases/latest/download/install.sh | sh' };
 
 export type SetupFailure = 'no-agent' | 'not-admin' | 'agent-limit' | 'expired' | 'offline' | 'managed' | 'no-recipe' | 'recipes-offline' | 'recipe-too-big' | 'recipes-changed' | 'has-org' | 'disconnected'
   // story #4576 — the move's own refusals (Yuna «② 확인이 거절될 때»)
@@ -164,7 +166,8 @@ export async function joinNewOrg(body: { project_id?: string; data?: { project_i
  */
 export async function renewToken(): Promise<boolean> {
   for (let i = 0; i < 2; i++) {
-    const ok = await fetchWithAuth('/api/auth/refresh', { method: 'POST' }).then((r) => r.ok, () => false);
+    // story 4776 (codex): through the page's ONE flight (a rotation made because the organization has just changed) — a direct POST of the refresh route raced another request's 401 renewal on the same cookie
+    const ok = await refreshSessionAfterChange().then((r) => !r.error, () => false); // `error` is set for any answer that is not ok (401 · 5xx), exactly what `res.ok` said before
     if (ok) return true;
   }
   return false;
@@ -1301,7 +1304,7 @@ export function Failure({ failure, onRetry, counts = null, plan = null, solo = f
     setEntering(true);
     setEnterFailed(false);
     try {
-      const res = await fetchWithAuth('/api/switch-org', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ org_id: newOrgId }) });
+      const res = await switchOrg(newOrgId, { withAuth: true }); // story 4778 — the page's one flight
       const json = await res.json().catch(() => null) as { data?: { ok?: boolean } } | null;
       if (!(res.ok && json?.data?.ok)) { setEnterFailed(true); setEntering(false); return; }
       // the switcher's own order: the tab's project belongs to the organization left, so it goes before the page is read again
@@ -1336,6 +1339,8 @@ export function Failure({ failure, onRetry, counts = null, plan = null, solo = f
           ))}
         </ul>
       ) : null}
+      {/* story 4765: the Mac app's own card runs the install and the sign-in (one press) — the page only says so; it never starts a download */}
+      {failure === 'no-agent' ? <p className="text-xs text-muted-foreground" data-testid="setup-no-agent-app-hint">{t('failure.no-agent.appHint')}</p> : null}
       <div className="flex gap-2">
         {failure === 'no-agent' ? appButton(t(key('action')))
           : failure === 'expired' ? appButton(t(key('action')))
@@ -1428,7 +1433,7 @@ export function InvitedCard({ invites, onReload, onCreateOwn, ownBusy = false }:
         acceptedOrg.current[invite.invite_id] = orgId;
       }
       // the member now: the session was made before the membership, so the switch (which gives the session that organization) comes before the page is read again
-      const sw = await fetchWithAuth('/api/switch-org', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ org_id: orgId as string }) });
+      const sw = await switchOrg(orgId as string, { withAuth: true }); // story 4778
       const swJson = (await sw.json().catch(() => null)) as { data?: { ok?: boolean } } | null;
       if (!(sw.ok && swJson?.data?.ok)) { fail('unknown'); return; }
       window.sessionStorage.removeItem(TAB_PROJECT_STORAGE_KEY);
@@ -1496,7 +1501,7 @@ export function InvitedInApp({ invites, onReload }: { invites: MyInvite[]; onRel
     setEntering(true);
     setEnterFailed(false);
     try {
-      const res = await fetchWithAuth('/api/switch-org', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ org_id: orgId }) });
+      const res = await switchOrg(orgId, { withAuth: true }); // story 4778
       const json = (await res.json().catch(() => null)) as { data?: { ok?: boolean } } | null;
       if (!(res.ok && json?.data?.ok)) { setEnterFailed(true); setEntering(false); return; }
       window.sessionStorage.removeItem(TAB_PROJECT_STORAGE_KEY);

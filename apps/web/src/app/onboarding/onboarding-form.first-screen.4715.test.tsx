@@ -59,7 +59,7 @@ function stubFetch(o: Opts = {}) {
       return ok({ invites: opts.invites ?? [] }); // the backend's one shape (MyInvitesResponse · no envelope)
     }
     if (url.endsWith('/api/organizations')) return ok({ data: { id: 'org-1' } });
-    if (url.endsWith('/api/auth/refresh')) return ok({});
+    if (url.endsWith('/api/auth/refresh')) return ok({ data: { ok: true } }); // the route's real success answer (story 4763: an answer without `data` is not a renewal)
     if (url.endsWith('/api/projects')) return ok({ data: { id: 'proj-1' } });
     if (url.endsWith('/api/current-project')) return ok({});
     if (url.endsWith('/desktop/downloads/macos.json')) return { ok: true, json: async () => MANIFEST, headers: new Headers({ 'x-desktop-download-bucket': 'sprintable-desktop-releases-dev' }) };
@@ -231,8 +231,14 @@ describe('[SID:4715] AC2 · AC3 — one screen in place of the fork and the down
     expect(byTestId('desktop-download-button')?.textContent).toBe(first.macCta);
     const primaries = [...container.querySelectorAll('a, button')].filter((el) => el.className.includes('bg-primary'));
     expect(primaries.map((el) => el.getAttribute('data-testid'))).toEqual(['desktop-download-button']);
-    expect(byTestId('onboarding-first-connect')?.textContent).toBe(first.connect);
-    expect(container.textContent).toContain(first.connectNote);
+    // story 4766 (AC1): the web way is a FOLDED «고급» (a closed disclosure), not a link into a three-screen wizard; an app that is already
+    // installed is opened, not downloaded again
+    const fold = byTestId('onboarding-first-advanced') as HTMLDetailsElement | null;
+    expect(fold?.tagName).toBe('DETAILS');
+    expect(fold?.open).toBe(false);
+    expect(byTestId('onboarding-first-advanced-summary')?.textContent).toBe(first.advancedSummary);
+    expect(byTestId('onboarding-first-open-app')?.getAttribute('href')).toMatch(/^ai\.sprintable(\.dev)?:\/desktop\/setup$/);
+    expect(byTestId('onboarding-first-connect')).toBeNull(); // the link into the wizard is gone
     expect(container.querySelector('input[type="radio"]')).toBeNull(); // reverted (the fork back) → radios
     expect(byTestId('onboarding-first-finish')?.textContent).toBe(koMessages.onboarding.desktopFinishToToday);
   });
@@ -242,16 +248,20 @@ describe('[SID:4715] AC2 · AC3 — one screen in place of the fork and the down
     await mount();
     expect(h1()).toBe(first.notMacTitle);
     expect(container.textContent).toContain(first.notMacLead);
-    expect(byTestId('onboarding-first-connect')?.textContent).toBe(first.connect);
+    // story 4766: the web way is the only way here, so it is not folded — the one press stands on the screen
+    expect(byTestId('onboarding-first-advanced')?.tagName).toBe('SECTION');
+    expect(byTestId('advanced-make')).not.toBeNull();
     expect(byTestId('desktop-download-card')).toBeNull();
   });
 
-  it('T5 the web way → «첫 프로젝트 만들기» 1 / 3 (the three steps as before)', async () => {
+  it('T5 the folded web way holds the ONE press and the prerequisites (story 4766) — opening it needs no other screen', async () => {
     await mount();
-    await click(byTestId('onboarding-first-connect'));
-    expect(h1()).toBe(koMessages.onboarding.createProject);
-    expect(byTestId('onboarding-step-of')?.textContent).toBe('1 / 3');
-    expect(container.textContent).toContain('김지우의 조직');
+    expect(h1()).toBe(first.macTitle); // still the one screen (no «1 / 3» wizard)
+    expect(byTestId('onboarding-step-of')).toBeNull();
+    expect(byTestId('advanced-make')?.textContent).toContain(koMessages.onboarding.advanced.make);
+    expect(byTestId('advanced-prereq')).not.toBeNull();
+    expect(byTestId('advanced-install-claude')).not.toBeNull();
+    expect(byTestId('advanced-install-codex')).not.toBeNull();
   });
 
   it('T6 the download press counts the app way once (the 3983 funnel signal the fork used to send)', async () => {
@@ -275,11 +285,11 @@ describe('onboardingProgress — only the web way\'s three steps', () => {
 });
 
 describe('[4714 AC2] the form hands the server\'s download judgement to the phone app\'s first screen', () => {
-  async function mountPhone(macDownloadEnabled: boolean) {
+  async function mountPhone(macDownloadEnabled: boolean, todayHref = '/today') {
     await act(async () => {
       root.render(wrap(
         <PhoneBridgeContext.Provider value={{ inPhoneApp: true, phoneCall: (async () => ({ id: 'k', ok: false, code: 'no_screen_lock' })) as never }}>
-          <OnboardingForm todayHref="/today" chatsHref="/chats" macDownloadEnabled={macDownloadEnabled} />
+          <OnboardingForm todayHref={todayHref} chatsHref="/chats" macDownloadEnabled={macDownloadEnabled} />
         </PhoneBridgeContext.Provider>,
       ));
     });
@@ -294,5 +304,14 @@ describe('[4714 AC2] the form hands the server\'s download judgement to the phon
     root = createRoot(container);
     await mountPhone(true);
     expect(byTestId('onboarding-phone-mail-button')).not.toBeNull();
+  });
+  it('[4780] the start screen\'s pairing link carries the Today address the server gave the form, so [Close] of the pairing screen goes to Today (not the Mac screen)', async () => {
+    setUserAgent(PHONE_UA);
+    await mountPhone(false, '/org-briefing');
+    expect(byTestId('onboarding-phone-pair')?.getAttribute('href')).toContain('/desktop/pair?from=%2Forg-briefing'); // reverted (the form does not hand it over) → '/desktop/pair' with no `from`
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await mountPhone(false, '/today');
+    expect(byTestId('onboarding-phone-pair')?.getAttribute('href')).toContain('/desktop/pair?from=%2Ftoday');
   });
 });

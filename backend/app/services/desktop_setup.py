@@ -24,6 +24,7 @@ import hashlib
 import hmac
 import re
 import secrets
+import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -80,10 +81,11 @@ class DesktopSetupError(Exception):
     no project chosen while the organization has projects) · agent_not_found · agent_not_in_project (story 4565: an existing agent
     to attach)."""
 
-    def __init__(self, code: str, detail: str | None = None):
+    def __init__(self, code: str, detail: str | None = None, extra: dict | None = None):
         super().__init__(detail or code)
         self.code = code
         self.detail = detail
+        self.extra = dict(extra or {})  # story 4784: fields the answer carries beside the code (the free name an `agent_name_taken` offers)
 
 
 def _hash(code: str) -> str:
@@ -694,14 +696,48 @@ async def _with_existing_project(db: AsyncSession, exc: HTTPException, *, org_id
 SOLO_AGENT_NAMES = {"claude": "Claude Code", "codex": "Codex"}  # story 4711 (Yuna): the agent is called what the person picked
 
 
-async def _unique_name(db: AsyncSession, model, *conds, base: str) -> str:
-    """`base`, or `base 2`, `base 3` … — the first not taken among the rows `conds` select (case-insensitive, trimmed)."""
-    taken = {" ".join((n or "").split()).casefold() for (n,) in (await db.execute(select(model.name).where(*conds))).all()}
+_KEY_IGNORED = frozenset("\u034f\u115f\u1160\u17b4\u17b5\u3164\uffa0\u2800")  # draw as nothing but are not format characters: grapheme joiner, Hangul/Khmer fillers, braille blank
+
+
+def _name_key(name: str | None) -> str:
+    """What makes two names the same name: compatibility-normalized (full-width letters), format characters dropped (a zero-width space does not make
+    a second «Zed Bot»), spaces collapsed, case ignored."""
+    # format characters first (a joiner between a letter and a combining mark must not keep them apart), then the folding
+    dropped = "".join(ch for ch in (name or "") if unicodedata.category(ch) != "Cf" and ch not in _KEY_IGNORED and not 0xFE00 <= ord(ch) <= 0xFE0F)
+    return " ".join(unicodedata.normalize("NFKC", dropped).split()).casefold()
+
+
+async def _unique_name(db: AsyncSession, model, *conds, base: str, limit: int | None = None) -> str:
+    """`base`, or `base 2`, `base 3` … — the first not taken among the rows `conds` select (`_name_key`). With `limit` the answer never passes it: the
+    base is cut before the number is added (a 60-character name's free neighbour is still 60 characters)."""
+    taken = {_name_key(n) for (n,) in (await db.execute(select(model.name).where(*conds))).all()}
     name, n = base, 1
-    while " ".join(name.split()).casefold() in taken:
+    while _name_key(name) in taken:
         n += 1
-        name = f"{base} {n}"
+        tail = f" {n}"
+        name = f"{base[:max(limit - len(tail), 0)] if limit is not None else base}{tail}"
     return name
+
+
+async def _write_created_line(db: AsyncSession, *, org_id: uuid.UUID, conversation_id: uuid.UUID, sender_id: uuid.UUID, agent_id: uuid.UUID,
+                              name: str, runtime: str, folder: str | None) -> None:
+    """story 4784 (PO 08:06Z): the first line of the new room says why the person is here — «에이전트를 만들었어요 · 이름 · 도구 · 폴더», from the
+    person who pressed «만들기». Written straight to the room (not dispatched): it asks nothing of the agent, so its activation names nobody
+    and expects no answer (the same shape as the remote prompt line)."""
+    from app.models.conversation import ConversationMessage
+    from app.services.i18n_catalog import t
+    from app.services.org_locale import resolve_org_locale
+
+    locale = await resolve_org_locale(db, org_id)
+    tool = SOLO_AGENT_NAMES[runtime]
+    content = t("desktop_setup.agent_created_line", locale, name=name, tool=tool, folder=folder) if folder \
+        else t("desktop_setup.agent_created_line_no_folder", locale, name=name, tool=tool)
+    db.add(ConversationMessage(
+        id=uuid.uuid4(), conversation_id=conversation_id, sender_id=sender_id, content=content, mentioned_ids=[],
+        msg_metadata={"activation": {"audience": [], "kind": "agent_created", "expects_response": False},
+                      "agent_created": {"agent_member_id": str(agent_id)}},
+    ))
+    await db.flush()
 
 
 async def confirm_solo_setup(
@@ -716,13 +752,18 @@ async def confirm_solo_setup(
     auth,
     workdir_hint: str | None = None,
     tools: list[str] | None = None,
+    agent_name: str | None = None,
+    agent_role: str | None = None,
+    folder_name: str | None = None,
 ) -> tuple[uuid.UUID, list[dict], uuid.UUID, uuid.UUID]:
     """story 4711 (PO 03:36Z) — the first setup in three steps: one agent on the runtime the person picked, for the folder they
     chose. No recipe, no story, nothing published. Returns (setup_id, members, project_id, conversation_id); never commits.
 
     The project is the app's answer to «which project already uses this folder» (`project_id` — the app keeps folder → project,
     the server never sees a path), else a new project named after the folder (`project_name`; a name already taken in the
-    organization becomes «{name} 2»). The agent is called by its program's name (a name taken becomes «Claude Code 2»). The
+    organization becomes «{name} 2»). The agent is called what the person typed (story 4784 — taken by an active agent: `agent_name_taken`
+    with the free name, nothing made); a page from before sends none and the agent is called by its program's name («Claude Code 2» when
+    taken). The
     plan's agent limit (402) and project limit roll everything back. The person ↔ agent DM is made with it: it is the first
     screen after the start. A replay by the same person returns what the code made."""
     from app.models.member import Member
@@ -733,6 +774,13 @@ async def confirm_solo_setup(
     from app.services.org_agent import create_org_level_agent
     from app.services.project_auth import is_org_owner_or_admin, require_project_access
 
+    # story 4784: two presses at once on different codes must not both find the same name free (no unique key on member names). The organization's
+    # row is the one lock every agent-making setup of it takes — and FIRST, before the setup row: the organization's deletion locks organization →
+    # agent members → setup rows, so this order (organization → setup) never meets it the other way round.
+    # Only for an owner/admin (the refusal below is theirs to get): a plain member's wrong call must not queue on the organization's row (Kadir 5245 ⓑ).
+    org_locked = await is_org_owner_or_admin(db, user_id, org_id)
+    if org_locked:
+        await db.execute(select(Organization.id).where(Organization.id == org_id).with_for_update())
     setup = await _setup_by_code(db, code)
     if _confirmed_again(setup, user_id, org_id):
         members = list(setup.members or [])
@@ -749,7 +797,8 @@ async def confirm_solo_setup(
         raise DesktopSetupError("app_cannot_solo")
     if runtime not in RUNTIME_TYPES:
         raise DesktopSetupError("roles_invalid", "unknown runtime")
-    if not await is_org_owner_or_admin(db, user_id, org_id):
+    # `not org_locked`: a member promoted between the first look and this one is refused this time (they press again) — never let a caller past without the lock
+    if not org_locked or not await is_org_owner_or_admin(db, user_id, org_id):
         raise DesktopSetupError("not_org_admin")
     if (project_id is None) == (not project_name):
         raise DesktopSetupError("request_invalid", "exactly one of project_id and project_name")
@@ -764,7 +813,7 @@ async def confirm_solo_setup(
             await check_project_create_allowed(db, org_id)
         except HTTPException as exc:
             raise await _with_existing_project(db, exc, org_id=org_id, user_id=user_id) from None
-        name = await _unique_name(db, Project, Project.org_id == org_id, Project.deleted_at.is_(None), base=project_name)
+        name = await _unique_name(db, Project, Project.org_id == org_id, Project.deleted_at.is_(None), base=project_name, limit=100)
         project_id = (await create_project_with_member(
             db, org_id=org_id, name=name, description=None, slug=None, user_id=str(user_id),
         )).id
@@ -782,18 +831,24 @@ async def confirm_solo_setup(
             await check_agent_add_limit(db, org_id)  # an HTTPException(402) here rolls the whole setup back
         except HTTPException as exc:
             raise _with_setup_numbers(exc, needed=1, agents_before=agents_before) from None
-    agent_name = await _unique_name(
-        db, Member, Member.org_id == org_id, Member.type == "agent", Member.is_active.is_(True), Member.deleted_at.is_(None),
-        base=SOLO_AGENT_NAMES[runtime],
-    )
+    name_conds = (Member.org_id == org_id, Member.type == "agent", Member.is_active.is_(True), Member.deleted_at.is_(None))
+    if agent_name is None:
+        agent_name = await _unique_name(db, Member, *name_conds, base=SOLO_AGENT_NAMES[runtime], limit=60)
+    else:
+        free = await _unique_name(db, Member, *name_conds, base=agent_name, limit=60)
+        if free != agent_name:  # the person named it: never renamed behind their back — they see the free name and press again
+            raise DesktopSetupError("agent_name_taken", "an active agent of this organization already has that name", {"suggested_name": free})
     agent, _no_key = await create_org_level_agent(
-        db, org_id=org_id, created_by=user_id, name=agent_name, role="member", project_ids=[project_id], defer_key_issuance=True,
+        db, org_id=org_id, created_by=user_id, name=agent_name, role="member", agent_role=agent_role, project_ids=[project_id],
+        defer_key_issuance=True,
     )
     await TeamMemberRepository(db, org_id).apply_anchor_update(agent, {"runtime_type": RUNTIME_TYPES[runtime]})
 
     from app.services.approval_delivery import _get_or_create_approval_dm  # the person ↔ agent DM: one get-or-create room
 
     conv = await _get_or_create_approval_dm(db, org_id=org_id, project_id=project_id, requester_id=person_member_id, approver_id=agent.id)
+    await _write_created_line(db, org_id=org_id, conversation_id=conv.id, sender_id=person_member_id, agent_id=agent.id, name=agent_name,
+                              runtime=runtime, folder=folder_name)
     members = [{
         "member_id": str(agent.id), "kind": "agent", "runtime": runtime, "solo": True, "name": agent_name,
         "tools": clean_agent_tools(tools, runtime), "conversation_id": str(conv.id),
@@ -826,6 +881,9 @@ async def confirm_solo_setup_new_org(
     auth,
     workdir_hint: str | None = None,
     tools: list[str] | None = None,
+    agent_name: str | None = None,
+    agent_role: str | None = None,
+    folder_name: str | None = None,
 ) -> tuple[uuid.UUID, list[dict], uuid.UUID, uuid.UUID, uuid.UUID]:
     """story 4711 AC4 (PO 03:42Z) — «시작» of the three steps for a person with no organization: the organization (its name is the
     web's — the screen no longer asks for it), the folder's project and the solo setup in **one transaction**. The folder is the
@@ -869,7 +927,7 @@ async def confirm_solo_setup_new_org(
     org = await create_org_with_owner(db, name=org_name, slug=None, user_id=str(user_id), owner_member_id=None)
     setup_id, members, project_id, conversation_id = await confirm_solo_setup(
         db, code=code, user_id=user_id, org_id=org.id, runtime=runtime, project_id=None, project_name=project_name, auth=auth,
-        workdir_hint=workdir_hint, tools=tools,
+        workdir_hint=workdir_hint, tools=tools, agent_name=agent_name, agent_role=agent_role, folder_name=folder_name,
     )
     return setup_id, members, org.id, project_id, conversation_id
 
@@ -1052,7 +1110,20 @@ async def _lock_in_order(db: AsyncSession, *, member_ids: set[uuid.UUID], setup_
     """story #4565 (PO 02:51Z) — the one lock order every path that touches an agent and setups keeps: the agent member rows
     first, by id, then the setup rows, by id (one statement each). Two exchanges attaching the same agent queue at its member
     row and never reach each other's setup row; «disconnect» takes the same order (no exchange ⟷ disconnect deadlock). The
-    setup rows come back re-read under the lock."""
+    setup rows come back re-read under the lock.
+
+    story #4771 — THE one order, for every path that closes or deletes a computer's rows (outermost first; a path takes only the steps it needs, never one out of order):
+      ① the users row ......... account deletion (FOR UPDATE, routers/account.py) · exchange (FOR SHARE, `exchange_setup`)
+      ② the organization row .. an organization delete / the account deletion closing an organization (FOR UPDATE, repositories/organization.py), `_plan_organizations`
+         (an organization delete first takes the USERS that point at it — `users.last_org_id` is set NULL by its final DELETE — in id order, so ① comes before ② there too)
+      ③ refresh tokens ........ member removal · role change · account deletion (`_revoke_user_refresh_tokens`, routers/org_members.py)
+      ④ the seat rows ......... `org_members`: removal (FOR UPDATE) · account deletion (FOR UPDATE, by id) · exchange (FOR SHARE) · an organization delete (UPDATE)
+      ⑤ agent member rows ..... this function, by id — the closers, `_disconnect_setup`, the exchange; an organization delete takes all the organization's agents
+      ⑥ setup rows ............ this function, by id — likewise; an organization delete takes all the organization's setups BEFORE any key (its final DELETE cascades to them)
+      ⑦ agent keys, then device tokens .. `_disconnect_setup`, the closers, migrations 0463 / 0464 (0464 takes the token and key rows it will record, under ⑥)
+      ⑧ everything else ....... commands · clock views · permission requests · human anchors · the cascade of an organization delete
+    An organization delete used to revoke the keys (⑦) before its cascade reached the setups (⑥): the opposite of every other path, a deadlock pair with a disconnect or an
+    account deletion whenever they overlapped (measured on develop: 3 + 1 of 20 randomly started rounds); tests/test_4771_lock_order_realdb.py keeps the pairs."""
     from app.models.member import Member
 
     if member_ids:
@@ -1212,6 +1283,9 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str, device_i
     # story #4565 (PO 02:51Z): the locks in the one order — the attached agents' member rows, then this setup and the other
     # live, handed-over setups of the org, by id — and everything below is read again under them
     attached = _attached_agents(setup)
+    # story #4771 (follow-up, security lens): the agents this setup MADE are locked here too, before the setup rows — the key insert below takes a key-share lock on the member row
+    # (the foreign key of `agent_api_keys.member_id`) AFTER the setup row is held, the reverse of an organization delete (which takes the agent rows, then the setup rows)
+    made = set(_made_agent_ids(setup.members))
     # story 4660: always read — the machine key of this exchange may close a line with no attached agent
     other_ids = set((await db.execute(
         select(DesktopSetup.id).where(
@@ -1219,17 +1293,39 @@ async def exchange_setup(db: AsyncSession, *, code: str, verifier: str, device_i
             DesktopSetup.exchanged_at.is_not(None),
         )
     )).scalars().all())
-    locked = await _lock_in_order(db, member_ids=attached, setup_ids={setup.id, *other_ids})
+    # security lens 4767 (Kadir ③): the confirming person's user row FIRST, shared — the account deletion takes that row (FOR UPDATE) before the member rows
+    # and the setup rows, so an exchange that overlaps an open deletion waits for it and then finds the person gone (`confirming_person_is_gone` below),
+    # instead of handing out keys the deletion's closer (which ran before the confirmation) will never see. Taking it after the setup rows would deadlock.
+    locked_confirmer = setup.confirmed_by
+    if locked_confirmer is not None:
+        from app.models.user import User
+
+        await db.execute(select(User.id).where(User.id == locked_confirmer).with_for_update(read=True))
+        # story #4769: …then their SEAT in the setup's organization (a member removal holds that row FOR UPDATE first, then the member and setup rows — the same
+        # order), so an exchange that overlaps an open removal waits for it and finds the person gone instead of handing out keys the removal's closer cannot see
+        if setup.org_id is not None:
+            from app.models.project import OrgMember
+
+            await db.execute(
+                select(OrgMember.id).where(OrgMember.org_id == setup.org_id, OrgMember.user_id == locked_confirmer).with_for_update(read=True)
+            )
+    locked = await _lock_in_order(db, member_ids=attached | made, setup_ids={setup.id, *other_ids})
+    if setup.id not in locked:
+        raise DesktopSetupError("code_not_found")  # story #4771 (codex r1): the row went with its organization (a delete committed) between the read and the lock — not a KeyError (500)
     setup = locked[setup.id]
     others = [locked[i] for i in sorted(other_ids) if i in locked]
-    if not _attached_agents(setup) <= attached:
+    if not _attached_agents(setup) <= attached or not set(_made_agent_ids(setup.members)) <= made:
         return None  # confirmed between the read and the lock: its agents are not locked yet — the app asks again
+    if setup.confirmed_by != locked_confirmer:
+        return None  # confirmed (or confirmed by someone else) between the read and the lock: that person's row is not held — the app asks again
     if setup.exchanged_at is not None or setup.revoked_at is not None:
         raise DesktopSetupError("code_used")
     if _now() >= setup.expires_at:
         raise DesktopSetupError("code_expired")
     if setup.confirmed_at is None:
         return None
+    if await confirming_person_is_gone(db, setup):
+        raise DesktopSetupError("code_used")  # story #4767: the person closed their account between confirming and this exchange — no keys, no device token
 
     api_url, mcp_url = exchange_urls()
     if not mcp_url or not api_url:
@@ -1339,9 +1435,6 @@ async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
     """«Disconnect this device»: every key this setup handed out, and only those — and the agents this setup made stop
     (story #4434 · PO: «disconnect = that device's agents stop»): they become inactive, so they no longer count toward the
     org's agent limit; their record and work stay (not deleted). Only this setup's own agents, in this org."""
-    from sqlalchemy import func
-
-    from app.models.member import Member
     from app.services.project_auth import is_org_owner_or_admin
 
     found = (await db.execute(
@@ -1351,12 +1444,109 @@ async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
         raise DesktopSetupError("setup_not_found")
     if not await is_org_owner_or_admin(db, user_id, org_id):
         raise DesktopSetupError("not_org_admin")
+    return await _disconnect_setup(db, found, org_id=org_id, revoked_by=user_id)
+
+
+ACCOUNT_DELETED_REASON = "account_deleted"
+
+
+async def confirming_person_is_gone(db: AsyncSession, setup: DesktopSetup) -> bool:
+    """story #4767/#4769: the account of the person who confirmed this setup is closed or deleted, OR they were removed from the setup's organization.
+    No confirmer recorded and no `users` row for it are not «gone»; a recorded confirmer with NO `org_members` row for (organization, person) is (PO 4769,
+    fail-closed — the same reading as the relay's device authentication)."""
+    from app.models.project import OrgMember
+    from app.models.user import User
+
+    if setup.confirmed_by is None:
+        return False
+    row = (await db.execute(select(User.is_active, User.deleted_at).where(User.id == setup.confirmed_by))).first()
+    if row is not None and (row.is_active is False or row.deleted_at is not None):
+        return True
+    if setup.org_id is None:
+        return False
+    seat = (await db.execute(
+        select(OrgMember.deleted_at).where(OrgMember.org_id == setup.org_id, OrgMember.user_id == setup.confirmed_by)
+    )).first()
+    return seat is None or seat.deleted_at is not None
+
+
+MEMBER_REMOVED_REASON = "member_removed"
+
+
+async def close_setups_of_deleted_account(db: AsyncSession, *, user_id: uuid.UUID) -> int:
+    """story #4767 — the computers a person confirmed stay in an organization that outlives their account (another owner stays): the
+    row, its device token and its keys kept working — a device token reaches the relay without looking at who confirmed it. The account
+    deletion closes each open one of them exactly as a disconnect does (`_disconnect_setup`: keys, device token, open commands, open
+    stream, clock view, the agents the setup made), without asking whether the person may still manage the organization — they are
+    leaving. `revoked_reason` says why. The organizations that closed with the account took their setups with them (cascade).
+    Returns how many were closed."""
+    return await _close_open_setups(db, user_id=user_id, org_id=None, revoked_by=user_id, reason=ACCOUNT_DELETED_REASON)
+
+
+async def close_setups_of_removed_member(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID, removed_by: uuid.UUID) -> int:
+    """story #4769 — the same for a person REMOVED from one organization while their account lives on: the computers they confirmed IN THAT
+    ORGANIZATION close like a disconnect (`revoked_by` = whoever removed them, `revoked_reason` = member_removed). Their computers in other
+    organizations are not touched, nor are agents a setup only attached. Returns how many were closed."""
+    return await _close_open_setups(db, user_id=user_id, org_id=org_id, revoked_by=removed_by, reason=MEMBER_REMOVED_REASON)
+
+
+def _made_agent_ids(members) -> list[uuid.UUID]:
+    """The agents a setup MADE (its `members` line has no `existing` mark). A malformed legacy id is skipped, never raised — a removal or deletion must not
+    fail whole over one bad line (migrations 0463 / 0464 guard the same cast in SQL; codex 4769 r3)."""
+    ids: list[uuid.UUID] = []
+    for m in members or []:
+        if not isinstance(m, dict) or m.get("kind") != "agent" or not m.get("member_id") or m.get("existing"):
+            continue
+        try:
+            ids.append(uuid.UUID(str(m["member_id"])))
+        except ValueError:
+            continue
+    return ids
+
+
+async def _close_open_setups(
+    db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID | None, revoked_by: uuid.UUID, reason: str,
+) -> int:
+    where = [DesktopSetup.confirmed_by == user_id, DesktopSetup.revoked_at.is_(None)]
+    if org_id is not None:
+        where.append(DesktopSetup.org_id == org_id)
+    rows = list((await db.execute(
+        select(DesktopSetup.id, DesktopSetup.members).where(*where).order_by(DesktopSetup.id)
+    )).all())
+    if not rows:
+        return 0
+    # codex 4767 r2: ONE lock for all of them, in the service's one order (every agent member row any of them made, by id, then the setup rows, by id) — locking
+    # setup by setup would hold an earlier setup row while waiting for a later setup's agent row, the order an exchange takes the other way round (deadlock)
+    made = {mid for _, members in rows for mid in _made_agent_ids(members)}
+    locked = await _lock_in_order(db, member_ids=made, setup_ids={sid for sid, _ in rows})
+    closed = 0
+    for setup_id in sorted(locked):
+        found = locked[setup_id]
+        if found.org_id is None:
+            continue
+        done = await _disconnect_setup(db, found, org_id=found.org_id, revoked_by=revoked_by, reason=reason, locked=locked)
+        closed += 0 if done.already else 1
+    return closed
+
+
+async def _disconnect_setup(
+    db: AsyncSession, found: DesktopSetup, *, org_id: uuid.UUID, revoked_by: uuid.UUID, reason: str | None = None,
+    locked: dict[uuid.UUID, DesktopSetup] | None = None,
+) -> Revoked:
+    """The disconnect itself (the authority check is the caller's): `revoke_setup` for a person's «disconnect», `close_setups_of_deleted_account`
+    for an account that is going away."""
+    from sqlalchemy import func
+
+    from app.models.member import Member
+
+    user_id = revoked_by
     # story #4565 (PO 02:51Z): the one lock order — the member rows this disconnect may stop, then the setup row
-    made = {
-        uuid.UUID(str(m["member_id"])) for m in (found.members or [])
-        if m.get("kind") == "agent" and m.get("member_id") and not m.get("existing")
-    }
-    setup = (await _lock_in_order(db, member_ids=made, setup_ids={found.id}))[found.id]
+    made = set(_made_agent_ids(found.members))
+    # `locked`: the caller already took every row it will touch in that one order (the account deletion closes several setups)
+    rows = locked if locked is not None else await _lock_in_order(db, member_ids=made, setup_ids={found.id})
+    setup = rows.get(found.id)
+    if setup is None:
+        raise DesktopSetupError("setup_not_found")  # story #4771: the row went with its organization (a delete committed) between the read and the lock — «not found», not a KeyError (500)
     now = _now()
     revoked = (await db.execute(
         update(ApiKey).where(ApiKey.desktop_setup_id == setup.id, ApiKey.revoked_at.is_(None))
@@ -1374,10 +1564,7 @@ async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
     await desktop_clock.forget(db, [setup.id], lock=False)  # story #4733 — a clock view (draft first lines) does not outlive the computer's connection (the row is held: `_lock_in_order` above)
     # story #4565: only the agents this setup made — an existing agent attached here keeps running elsewhere once moved on
     # (its keys from this setup are revoked above; the agent itself is not stopped)
-    agent_ids = {
-        uuid.UUID(str(m["member_id"])) for m in (setup.members or [])
-        if m.get("kind") == "agent" and m.get("member_id") and not m.get("existing")
-    }
+    agent_ids = set(_made_agent_ids(setup.members))
     if agent_ids:
         await db.execute(
             update(Member).where(Member.id.in_(agent_ids), Member.org_id == org_id, Member.type == "agent")
@@ -1387,6 +1574,8 @@ async def revoke_setup(db: AsyncSession, *, setup_id: uuid.UUID, user_id: uuid.U
     if not already:
         setup.revoked_at = now
         setup.revoked_by = user_id
+        if reason is not None:
+            setup.revoked_reason = reason
     await db.flush()
     return Revoked(keys=len(revoked), already=already, revoked_at=setup.revoked_at, revoked_by=setup.revoked_by)
 

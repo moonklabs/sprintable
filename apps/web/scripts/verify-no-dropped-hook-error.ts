@@ -33,6 +33,7 @@ export const ALLOWLIST: ReadonlyMap<string, string> = new Map([
   ['hooks/use-member-name-fallback.ts::useAsyncResource::loadFailed', '대체 이름 훅 — 이름 조회가 실패하면 대체 이름(id 앞자리 등)으로 그리는 것이 정의된 동작'],
   ['hooks/use-org-domain-labels.ts::useAsyncResource::loadFailed', '대체 라벨 훅 — 조회 실패면 기본 라벨로 그리는 것이 정의된 동작'],
   ['components/docs/doc-status-rail.tsx::useDocGateData::error', '이 훅의 error는 결재 동작(승인 · 반려) 오류 — :257 감사 목록은 동작이 없어 해당 없음(동작하는 레일은 :144에서 읽음)'],
+  ['app/onboarding/advanced-connect.tsx::useVerificationRail::copyVerifyPromptFailed', '이 패널은 예문 복사 단추를 두지 않는다 — 예문은 붙여넣는 한 줄 안에 이미 들어 있어 따로 복사할 일이 없고, 그 한 줄의 복사 실패는 이 파일이 직접 그린다(advanced-copy-failed-raw)'],
   ['components/chat-v3/chat-v3-screen.tsx::useTodaySnapshot::loadError', '도달 0 — /chat v3는 CHAT_V3_ENABLED가 켜진 곳만. dev 실측(PO 2026-09-28 00:42Z · qa-live-probe 로그인 GET): 상태 200 + not-found 화면. 켜는 날 이 줄을 지우고 today-v3처럼 불러오기 실패 표시'],
 ]);
 

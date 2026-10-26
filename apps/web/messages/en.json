@@ -61,6 +61,8 @@
   "activation": {
     "bannerTitle": "Finish setting up your account",
     "bannerProgress": "{completed}/{total, plural, one {# step} other {# steps}} complete",
+    "doneTitle": "You're all set",
+    "doneBody": "You sent your first instruction and got a reply — all steps are done.",
     "stepSignedUp": "Sign up",
     "stepEmailVerified": "Verify your email",
     "stepOrgCreated": "Create an organization",
@@ -451,6 +453,9 @@
     "adSpendNotMeasured": "Not measured",
     "instructionInputPlaceholder": "Type one line to instruct…",
     "instructionSendButton": "Send",
+    "instructionSendFailed": "Couldn't send — your line is still here, try again.",
+    "instructionSendUnknown": "Couldn't confirm it was sent. Open the chat to check before you send it again.",
+    "instructionSentElsewhere": "Sent — it went to the chat of the project you were on a moment ago.",
     "signalHypothesisFalsifiedTitle": "A hypothesis was falsified",
     "clusterFalsifiedTitle": "Hypothesis refuted",
     "clusterFalsifiedSub": "Recently refuted hypotheses · linked to what comes next",
@@ -1465,6 +1470,10 @@
   "login": {
     "title": "Sprintable",
     "subtitle": "The organization OS that closes open loops",
+    "macAppPitch": "AI agents take your tasks and carry them through. Get the Mac app and start yours.",
+    "macAppGet": "Get the Mac app",
+    "macAppGetHint": "Install the app from the downloaded file — sign-up continues in the app",
+    "macAppWebSignup": "Sign up on the web first",
     "sessionExpired": "Your session expired and you were signed out. Please sign in again.",
     "google": "Continue with Google",
     "apple": "Continue with Apple",
@@ -1531,6 +1540,8 @@
     "verifyFailed": "Verification failed.",
     "verifyError": "Something went wrong during verification.",
     "startButton": "Get started",
+    "backToApp": "Back to the app",
+    "backToAppHint": "Works if the Sprintable app is installed on this phone.",
     "backToLogin": "Back to login"
   },
   "setPassword": {
@@ -1661,7 +1672,7 @@
     "restartAfterConfig": "Once you've saved the config, restart Claude Code — the new connection only takes effect after a restart.",
     "verifyWaiting": "Checking the connection… retrying automatically.",
     "verifyTimeoutTitle": "Not connected yet",
-    "verifyTimeoutHint": "Make sure you restarted Claude Code and that the config above was saved correctly, then press Retry.",
+    "verifyTimeoutHint": "Make sure you restarted Claude Code and that the config above was saved correctly, then press Run test.",
     "artifactPending": "Preparing connection config…",
     "artifactError": "Couldn't load the connection config — please retry.",
     "artifactRetry": "Retry",
@@ -1675,6 +1686,7 @@
     "railVerified": "Connection verified",
     "verifyReasonUnknown": "The server didn't say why — try again, or refresh in a moment.",
     "verifiedBanner": "Your agent is actually working. Connection verified.",
+    "verifiedBannerAt": "Connection confirmed — the agent first called in at <t>time</t>",
     "advancedTitle": "Advanced",
     "advancedSubtitle": "Webhook notifications · alternate transports (HTTP, SSE)",
     "advancedNote": "Configure webhook notifications and alternate connection methods later.",
@@ -1703,19 +1715,62 @@
     "artifactUnavailable": "No hosted deployment in this environment.",
     "verifyExampleLabel": "Try telling your agent:",
     "verifyExamplePrompt": "Show me my story list",
+    "orgDeletedTitle": "Organization deleted",
+    "orgDeletedBody": "This account has no organization now. Create a new one to keep going.",
+    "orgDeletedNew": "Create a new organization",
     "arriving": "Getting ready…",
     "inviteCheckFailed": "We couldn't check your invitations — your organization is made once they're checked",
     "accountCheckFailed": "We couldn't check your account — your organization is made once it's checked",
     "inviteCheckAgain": "Check again",
     "projectSubtitleNoOrg": "Create your first project.",
+    "advanced": {
+      "lead": "Connect the Claude Code or Codex already on this computer, no app. One press makes the agent and copies the command to paste in a terminal.",
+      "prereqTitle": "You need this first",
+      "prereqBody": "Claude Code or Codex must be installed on this computer and signed in. If neither is, you can install one with a command below.",
+      "prereqApp": "The web cannot see what is installed or signed in. Open the Mac app and it checks once.",
+      "copy": "Copy",
+      "copied": "Copied",
+      "choiceAria": "Choice {n} · {label}",
+      "installCopyAria": "Copy install command {n} · {label}",
+      "make": "Make the agent and copy the command",
+      "making": "Making…",
+      "remake": "Make again with a new key",
+      "defaultProject": "First project",
+      "defaultAgent": "My agent",
+      "runtimeLabel": "Program to connect",
+      "lineLabel": "Paste in a terminal and press Enter",
+      "copyFailed": "Could not copy. Press “Show command”, then select the command and copy it yourself.",
+      "showCommand": "Show command",
+      "keyLineClaude": "This command holds this agent's key ({key}). It stays in your shell history, the clipboard and Claude Code's settings file ({file}), and shows in the process list while the command runs. Do not share it, and revoke the key right away if it leaks.",
+      "keyLineCodex": "This command holds this agent's key ({key}). It stays in your shell history and the clipboard, shows in the process list while the command runs, and Codex reads the key from an environment variable ({env}) in this terminal (not from a settings file — set the same variable in any other terminal). Do not share it, and revoke the key right away if it leaks.",
+      "revoke": "Revoke key",
+      "revoking": "Revoking…",
+      "revokeFailed": "Could not revoke the key. Try again in a moment. You can also revoke it from the Agents menu: open this agent and use its API key list.",
+      "revokedNote": "The key is revoked. The command you copied no longer works. To connect again, make it again with a new key.",
+      "timeoutHint": "Check that the command you pasted ran to the end and that Claude Code did not quit at the question about trusting the folder, then press Run test.",
+      "timeoutHintCodex": "Check that the command you pasted ran to the end, then press Run test.",
+      "nextClaude": "Paste and press Enter: the agent connects and Claude Code opens and sends “{sentence}” as its first message. If this terminal is open in a folder of yours and it asks whether you trust the folder, move ❯ to “{yes}” and press Enter. Once Claude Code connects, this screen turns to “Connection verified” by itself. After that, if Claude Code asks whether it may use a tool to answer that first message, it is your call whether to allow it.",
+      "nextCodex": "Paste and press Enter: the agent connects and Codex opens and sends “{sentence}” as its first message. Once Codex connects, this screen turns to “Connection verified” by itself. After that, if Codex asks whether it may use a tool to answer that first message, it is your call whether to allow it.",
+      "failure": {
+        "network": "The network dropped. Check your connection and press again.",
+        "project": "Could not make the project. Press again.",
+        "agent": "Could not make the agent. Press again.",
+        "key": "Did not get the agent's key. Press again.",
+        "hosted": "This environment has no connection address for a no-app setup. Use the Mac app, or connect from the Agents menu."
+      }
+    },
+    "sessionExpired": "Your session expired",
+    "sessionExpiredCta": "Sign in again",
     "first": {
       "macTitle": "Your agents run on your Mac",
       "macLead": "Download the Mac app, open it and continue with the same account — then choose a folder and your agent starts right away. Needs Claude Code or Codex on this Mac.",
       "macCta": "Get the Mac app",
       "notMacTitle": "There's only a Mac app for now",
       "notMacLead": "Sign in with this account on a Mac and get the app to start an agent. An agent already running somewhere else can be connected right now.",
-      "connect": "Connect an agent that's already running",
-      "connectNote": "You get a key and a settings file and connect it yourself",
+      "advancedSummary": "Advanced — connect the Claude Code or Codex you already use, no app",
+      "openAppLead": "Already have the app?",
+      "openApp": "Open the app",
+      "advancedTitleNotMac": "Connect an agent you already use",
       "orgLine": "Starting in {org} · You can rename it in settings"
     },
     "phone": {
@@ -1728,7 +1783,7 @@
       },
       "noMac": {
         "title": "Agents run on your Mac",
-        "body": "Get the app on your Mac, sign in with the same account and pair this phone — then you can answer, stop and instruct agents from here.",
+        "body": "Get the app on your Mac, sign in with the same account, start an agent there and pair this phone — then you can answer, stop and instruct agents from here.",
         "pair": "I already have the app on my Mac — pair",
         "mail": "Email me a link to open on my Mac",
         "mailSending": "Sending…",
@@ -2068,6 +2123,13 @@
     "tabApiKeys": "API Keys",
     "tabNotifications": "Notifications",
     "desktopTab": "Get the desktop app",
+    "tabThisPhone": "This phone",
+    "thisPhoneTitle": "Phone check number",
+    "thisPhoneHint": "If it matches the phone check number in the web «Desktop app › Remote devices» list, that entry is this phone. If this phone isn't paired with a computer yet, pair it first, then compare.",
+    "thisPhoneReading": "Loading the number…",
+    "thisPhoneNoScreenLock": "This phone has no screen lock, so it can't make a phone check number — turn on a screen lock in the phone's settings, then open this screen again.",
+    "thisPhoneFailed": "Couldn't load the number.",
+    "thisPhoneRetry": "Load again",
     "tabSupport": "Contact & Support",
     "pushRegisterOff": "Sprintable notifications are turned off on this phone. Turn them on in your phone's settings, then try again.",
     "pushRegisterFailed": "This phone couldn't be registered for notifications, so new ones may not arrive.",
@@ -5195,6 +5257,8 @@
     "authFailureTooltipInvalid": "API key not recognized · {n, plural, one {# failure} other {# failures}} in last 5 min"
   },
   "chats": {
+    "noProjectYet": "No project to show yet — create one from the switcher at the top (already have one? reload this page).",
+    "pickProject": "Pick a project from the switcher at the top to see its chats.",
     "agentsPaused": {
       "title": "Agent messages in this conversation are paused",
       "since": "started {time}",
@@ -5228,6 +5292,7 @@
       },
       "state": {
         "starting": "Started",
+        "waiting_first_screen": "Waiting for your answer in the Mac terminal",
         "working": "Working",
         "idle": "Waiting for work",
         "waiting_permission": "Waiting for permission",
@@ -5238,6 +5303,14 @@
         "paused_limit": "Paused at usage limit",
         "usage_limit": "Usage limit",
         "waiting_system": "Waiting on a macOS prompt"
+      },
+      "workHold": {
+        "unconfirmed": "Work for this agent is held up — Sprintable's connection couldn't be confirmed. Press [Start again] in the app on {device} to check once more",
+        "unconfirmedNoDevice": "Work for this agent is held up — Sprintable's connection couldn't be confirmed. Press [Start again] in the app on the computer this session runs on to check once more",
+        "failedClaude": "Work for this agent is held up — the connection for receiving work didn't come up. Press [Start again] in the app on {device}",
+        "failedClaudeNoDevice": "Work for this agent is held up — the connection for receiving work didn't come up. Press [Start again] in the app on the computer this session runs on",
+        "failedCodex": "Work for this agent is held up — the connection for receiving work still won't come up. Press [Reconnect] in the app on {device}",
+        "failedCodexNoDevice": "Work for this agent is held up — the connection for receiving work still won't come up. Press [Reconnect] in the app on the computer this session runs on"
       },
       "inbox": {
         "otherReceiver": "Another place is receiving this agent's work, so new work doesn't come to {device}",
@@ -5480,6 +5553,14 @@
     "blockedSenderMessageHide": "Hide",
     "withheldDeliveryDm": "Not delivered — the recipient has chosen not to receive your messages",
     "withheldDeliveryGroup": "Not delivered to {n, plural, one {# person} other {# people}} — they've chosen not to receive your messages",
+    "agentWakeLeadOne": "This agent ({name}) can't notice new messages on its own. After you send a message, type the sentence below in the terminal where the agent is running.",
+    "agentWakeLeadMany": "{name} and {n} more agents can't notice new messages on their own. After you send a message, type the sentence below in the terminal where each agent is running.",
+    "agentWakePrompt": "Check for new messages and reply",
+    "agentWakeCopy": "Copy sentence",
+    "agentWakeCopied": "Sentence copied",
+    "agentWakeApp": "With the Mac app, new messages are handed to the agent without this sentence.",
+    "agentWakeAppLink": "Get the Mac app",
+    "agentWakeUnnamed": "Unnamed agent",
     "blockUserConfirmTitle": "Block this user?",
     "blockUserConfirmDescription": "{name}'s messages will be hidden. Task assignments and notifications are unaffected. You can unblock anytime.",
     "blockUserConfirmCancel": "Cancel",
@@ -6895,6 +6976,9 @@
     "rowDetailAdsSpendLabel": "Ad spend"
   },
   "desktop": {
+    "openAppTitle": "Already have the app on this Mac?",
+    "openAppCta": "Open the app",
+    "openAppNoAppNote": "No app yet? You can get it just below.",
     "loading": "Loading…",
     "title": "Desktop app",
     "targetLabel": "For macOS (Apple Silicon)",
@@ -6993,7 +7077,8 @@
         "no-agent": {
           "title": "We couldn't find an agent on this computer",
           "body": "Install and sign in to Claude Code or Codex, then look again. You can install them from the terminal.",
-          "action": "Look again"
+          "action": "Look again",
+          "appHint": "In the Mac app, press «Install and sign in» once on the «Get an agent ready» card at the bottom."
         },
         "not-admin": {
           "title": "You need to be an org admin to create agents",
@@ -7055,10 +7140,27 @@
         }
       },
       "quick": {
-        "title": "Start an agent on this computer",
+        "title": "Create an agent",
         "titleAgent": "Start {name}",
         "stepAgent": "Agent",
         "stepFolder": "Folder",
+        "stepTool": "Tool",
+        "stepName": "Name and role",
+        "nameLabel": "Name",
+        "roleLabel": "Role (optional)",
+        "rolePlaceholder": "e.g. Code reviewer",
+        "roleHint": "A label shown next to the name · it does not change how the agent works",
+        "create": "Create",
+        "creating": "Creating…",
+        "createLine": "Pressing Create adds one agent to this organization · name {name} · tool {runtime} · project {project}",
+        "createNothing": "No agent is created until you press it",
+        "blockName": "Type a name to create the agent",
+        "nameTaken": "That name is taken · an available one is in the field: {name} — press Create again if it suits you",
+        "nameTakenNoSuggestion": "That name is taken — type another one",
+        "createFailed": "Couldn't create the agent — try again",
+        "nameInvalid": "The name has a character that can't be used — remove invisible characters or line breaks and type it again",
+        "nameBlankLooking": "The name looks empty — type it with visible characters",
+        "roleInvalid": "The role has a character that can't be used — remove invisible characters or line breaks and type it again",
         "tooOld": "{name} {version} — too old to use with this app · update it to choose it",
         "noAgentTitle": "We couldn't find Claude Code or Codex on this computer",
         "noAgentBody": "Install and sign in to Claude Code or Codex, then look again. You can install them from the terminal.",
@@ -7077,10 +7179,9 @@
         "folderOther": "Choose another folder",
         "start": "Start",
         "starting": "Starting…",
-        "startLine": "Creates one {runtime} agent, adds it to the {project} project, and opens a conversation in this folder",
-        "blockNoAgent": "You can start once an agent is found",
-        "blockNoFolder": "You can start once you choose a folder",
-        "blockWide": "You can start once you confirm the folder",
+        "blockNoAgent": "You can create once a tool is found",
+        "blockNoFolder": "You can create once you choose a folder",
+        "blockWide": "You can create once you confirm the folder",
         "team": "Set up a team of agents →",
         "refused": {
           "denied": "We can't open this folder — allow Sprintable in System Settings › Privacy & Security › Files and Folders, or choose another folder",
@@ -7091,8 +7192,8 @@
         "failed": "Couldn't start — try again",
         "limit": {
           "title": "The free plan has one project",
-          "body": "You can add this folder's agent to the {project} project and start — the agent works in this folder.",
-          "addStart": "Add and start"
+          "body": "You can add this folder's agent to the {project} project and create it — the agent works in this folder.",
+          "addStart": "Add and create"
         }
       },
       "direct": {
@@ -7554,6 +7655,7 @@
   "phonePairing": {
     "start": "Pair with a computer — scan the QR that appears when you press [Pair a phone] in the computer's Sprintable app",
     "entry": "Pair with a computer",
+    "todayNote": "This phone isn't paired with a computer yet.",
     "scan": "Scan QR",
     "rescan": "Scan again",
     "pair": "Pair",

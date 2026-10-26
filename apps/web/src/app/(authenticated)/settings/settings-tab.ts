@@ -8,6 +8,8 @@ export interface SettingsTabGates {
   supportWidget: boolean;
   /** isEEEnabled() — the billing tab (trigger and content) exists */
   billing: boolean;
+  /** story 4762 — inside the phone app: the «이 폰» tab exists (it shows the phone's own check number — nothing to show anywhere else). Absent = not the phone app. */
+  phoneApp?: boolean;
 }
 
 // ?tab= 딥링크가 숨김 탭을 가리키면 기본 탭으로 폴백 (빈 화면 방지).
@@ -20,5 +22,6 @@ export function resolveSettingsTab(tab: string | null, gates: SettingsTabGates):
   if (!tab || HIDDEN_SETTINGS_TABS.has(tab)) return DEFAULT_SETTINGS_TAB;
   if (tab === 'support' && !gates.supportWidget) return DEFAULT_SETTINGS_TAB;
   if (tab === 'billing' && !gates.billing) return DEFAULT_SETTINGS_TAB;
+  if (tab === 'this-phone' && !gates.phoneApp) return DEFAULT_SETTINGS_TAB; // a link to the phone's tab opened in a browser would be an empty pane
   return tab;
 }

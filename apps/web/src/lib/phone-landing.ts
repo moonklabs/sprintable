@@ -14,19 +14,48 @@
 // there again). The mark lives in sessionStorage — the web view's own storage, gone with the launch. A storage that cannot be read or written cannot keep
 // the promise «once», so it lands nowhere: the usual home, every time.
 import { readStartable } from '@/lib/phone-start';
+import { fetchWithAuth } from '@/lib/db/client';
 
 export type Landing = 'home' | 'chats' | 'start';
 
 type PhoneCall = Parameters<typeof readStartable>[0];
 
-/** where this phone goes now — every failure answers `home` */
+const CHECKLIST_TIMEOUT_MS = 2_500;
+
+/**
+ * story #4762 (AC7) — is this person still in the onboarding? The server's own checklist: no agent connected yet (`steps.agent_connected === false`). Anything else —
+ * connected, a read that failed, an answer of another shape — is «no» (never a screen forced on someone because a read went wrong).
+ */
+async function onboardingOpen(): Promise<boolean> {
+  try {
+    // bounded well inside the landing's own 4 s limit: a checklist that does not answer in time is «no» (the usual home), and the request does not run on after the page left
+    const res = await fetchWithAuth('/api/activation/checklist', { timeoutMs: CHECKLIST_TIMEOUT_MS });
+    if (!res.ok) return false;
+    const json = (await res.json()) as { data?: { scope_is_requested_org?: unknown; steps?: { agent_connected?: unknown } } };
+    // the server may answer for ANOTHER organization than the one asked about (`scope_is_requested_org === false` — the activation banner treats it the same way):
+    // that is not this person's onboarding, so never a reason to send them to the start screen
+    if (json.data?.scope_is_requested_org === false) return false;
+    return json.data?.steps?.agent_connected === false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * where this phone goes now — every failure answers `home`.
+ * story #4762 (AC7): a phone with NO computer to start anything on (paired with nothing · no computer heard from) that belongs to a person still in the onboarding
+ * (no agent connected yet) lands on the start screen too — the one that says «agents run on your Mac» — not on Today. 4758 measured it: the person switched the app
+ * off and on in the middle of the onboarding and fell through to Today, without the next step in sight.
+ */
 export async function decideLanding(phoneCall: PhoneCall): Promise<Landing> {
   const read = await readStartable(phoneCall).catch(() => null);
-  if (!read || read.kind !== 'view') return 'home'; // no key on the server (paired with nothing) · no screen lock · a read that failed
+  if (!read || read.kind === 'failed') return 'home'; // a read that failed: not «paired with nothing»
+  // paired with nothing (no key on the server · no screen lock): the start screen while the onboarding is open, else the usual home
+  if (read.kind !== 'view') return (await onboardingOpen()) ? 'start' : 'home';
   // only a computer that was heard from counts: a silent one (an old Mac the person stopped using) can start nothing and says `running: null` about everything —
   // letting it in would keep a person with a working Mac at the usual home for good
   const heard = read.view.computers.filter((c) => c.reachable);
-  if (heard.length === 0) return 'home';
+  if (heard.length === 0) return (await onboardingOpen()) ? 'start' : 'home';
   const agents = heard.flatMap((c) => c.agents);
   if (agents.some((a) => a.running === true)) return 'chats'; // any agent on any paired computer that runs: that is the running agent
   if (agents.some((a) => a.running === null)) return 'home'; // one we could not tell about: not «nothing is running»

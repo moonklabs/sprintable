@@ -111,6 +111,24 @@ const pickFromSheet = async (rowId: string, name: string) => {
   await press(row ?? null);
 };
 
+describe('[4780] the pairing link of the start screen', () => {
+  it('a screen that hands over a way back (the sign-up screen: Today) carries it as `from`, so [Close] of the pairing screen goes there', async () => {
+    world.devices = [{ id: 'x', confirm_number: '000 000' }];
+    await renderIn(<PhoneFirstScreen orgId="org-1" chatsHref="/chats" returnHref="/org-briefing" />);
+    expect(byId('onboarding-phone-pair')?.getAttribute('href')).toContain('/desktop/pair?from=%2Forg-briefing'); // reverted (no returnHref) → no `from`
+  });
+  it('without one the link is the address it always was (the screen is not a way back by itself)', async () => {
+    world.devices = [{ id: 'x', confirm_number: '000 000' }];
+    await screen();
+    expect(byId('onboarding-phone-pair')?.getAttribute('href')).not.toContain('from=');
+  });
+  it('a way back that is not one of the app\'s own screens is dropped', async () => {
+    world.devices = [{ id: 'x', confirm_number: '000 000' }];
+    await renderIn(<PhoneFirstScreen orgId="org-1" chatsHref="/chats" returnHref="//evil.example/today" />);
+    expect(byId('onboarding-phone-pair')?.getAttribute('href')).not.toContain('evil');
+  });
+});
+
 describe('[4714] branch 2 — no paired computer (AC2)', () => {
   it('this phone\'s key is not on the server\'s list → «에이전트는 Mac에서 돌아가요» + the pairing link; no mail button where the Mac app is not offered (the server says so)', async () => {
     world.devices = [{ id: 'x', confirm_number: '000 000' }];
@@ -153,8 +171,8 @@ describe('[4714 AC2] «Mac에서 열 링크를 메일로 받기» (Yuna 4714-ac2
   });
 
   it('the first screen hands the flag down: FirstScreen in the phone app draws the mail button only with macDownloadEnabled', async () => {
-    const withFlag = <FirstScreen orgId="org-1" chatsHref="/chats" macDownloadEnabled orgName={null} onConnectElsewhere={() => {}} onFinish={() => {}} />;
-    const withoutFlag = <FirstScreen orgId="org-1" chatsHref="/chats" orgName={null} onConnectElsewhere={() => {}} onFinish={() => {}} />;
+    const withFlag = <FirstScreen orgId="org-1" chatsHref="/chats" macDownloadEnabled orgName={null} onFinish={() => {}} />;
+    const withoutFlag = <FirstScreen orgId="org-1" chatsHref="/chats" orgName={null} onFinish={() => {}} />;
     await renderIn(withoutFlag, { phone: true });
     expect(byId('onboarding-phone-no-mac')).not.toBeNull();
     expect(byId('onboarding-phone-mail')).toBeNull();
@@ -639,13 +657,13 @@ describe('[4714] a read that failed, and the screen outside the phone app', () =
 });
 
 describe('[4714] AC1 — the first screen inside the phone app', () => {
-  const first = <FirstScreen orgId="org-1" chatsHref="/chats" orgName="문클랩스" onConnectElsewhere={() => {}} onFinish={() => {}} />;
+  const first = <FirstScreen orgId="org-1" chatsHref="/chats" orgName="문클랩스" onFinish={() => {}} />;
   it('inside the phone app the Mac-or-not fork is not drawn: «지금은 Mac 앱만 있어요» · the web-way button · the download card are gone, the phone screen is there', async () => {
     await renderIn(first, { phone: true });
     expect(byId('onboarding-first-phone-app')).not.toBeNull();
     expect(byId('onboarding-phone-start')).not.toBeNull();
     expect(text()).not.toContain('지금은 Mac 앱만 있어요');
-    expect(byId('onboarding-first-connect')).toBeNull();
+    expect(byId('onboarding-first-advanced')).toBeNull();
     expect(byId('onboarding-first-not-mac')).toBeNull();
     expect(byId('onboarding-first-finish')).not.toBeNull(); // the person can still leave for «오늘»
   });
@@ -674,6 +692,14 @@ describe('[4714] the words (Yuna\'s sheet)', () => {
     expect(ko['start.title']).toContain('{device}');
     expect(ko['noAgent.line']).toContain('{device}');
     expect(ko['start.title']).not.toMatch(/맥/);
+  });
+  it('[story 4762] the no-Mac body names the steps in the order they are done: get the app → sign in → START AN AGENT → pair this phone (the Mac only shows the pairing QR once an agent exists)', () => {
+    const koBody = ko['noMac.body']!;
+    const enBody = en['noMac.body']!;
+    expect(koBody.indexOf('에이전트를 시작')).toBeGreaterThan(-1);
+    expect(koBody.indexOf('에이전트를 시작')).toBeLessThan(koBody.indexOf('페어링'));
+    expect(enBody.indexOf('start an agent')).toBeGreaterThan(-1);
+    expect(enBody.indexOf('start an agent')).toBeLessThan(enBody.indexOf('pair this phone'));
   });
   it('[AC2] the mail lines: exactly the sheet\'s seven keys, the same in ko and en, with {email} as the only placeholder (no particle after an address)', () => {
     const keys = ['noMac.mail', 'noMac.mailAgain', 'noMac.mailFailed', 'noMac.mailLimited', 'noMac.mailNeedVerify', 'noMac.mailSending', 'noMac.mailSent'];
@@ -973,7 +999,7 @@ describe('[4714] AC3 — started ≠ stood: the conversation with the started ag
 
   it('the way out is one navigation however often it is tapped (the onboarding\'s finish runs once)', async () => {
     const onFinish = vi.fn();
-    await renderIn(<FirstScreen orgId="org-1" chatsHref="/chats" orgName={null} onConnectElsewhere={() => undefined} onFinish={onFinish} />);
+    await renderIn(<FirstScreen orgId="org-1" chatsHref="/chats" orgName={null} onFinish={onFinish} />);
     await press(byId('onboarding-first-finish'));
     await press(byId('onboarding-first-finish'));
     expect(onFinish).toHaveBeenCalledTimes(1);
@@ -981,7 +1007,7 @@ describe('[4714] AC3 — started ≠ stood: the conversation with the started ag
 
   it('the onboarding\'s [오늘로 가기] marks the page as being left, then runs its own finish', async () => {
     const onFinish = vi.fn();
-    await renderIn(<FirstScreen orgId="org-1" chatsHref="/chats" orgName={null} onConnectElsewhere={() => undefined} onFinish={onFinish} />);
+    await renderIn(<FirstScreen orgId="org-1" chatsHref="/chats" orgName={null} onFinish={onFinish} />);
     expect(isLeaving()).toBe(false);
     await press(byId('onboarding-first-finish'));
     expect(isLeaving()).toBe(true);
@@ -1070,7 +1096,7 @@ describe('[4714] AC3 — started ≠ stood: the conversation with the started ag
   });
 
   it('inside the onboarding\'s first screen (the phone app) the same start goes the same way — the one behaviour for both places', async () => {
-    await renderIn(<FirstScreen orgId="org-1" chatsHref="/chats" orgName={null} onConnectElsewhere={() => undefined} onFinish={() => undefined} />);
+    await renderIn(<FirstScreen orgId="org-1" chatsHref="/chats" orgName={null} onFinish={() => undefined} />);
     await pickFromSheet('onboarding-phone-project', '결제 개편');
     await press(byId('onboarding-phone-start-go'));
     expect(assigned).toEqual([FIRST]);

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
-import { cookieBase } from '@/lib/auth/cookies';
+import { cookieBase, markSessionChanged } from '@/lib/auth/cookies';
 import { backendFetch } from '@/lib/backend-fetch';
 
 const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
@@ -29,5 +29,5 @@ export async function POST(request: Request) {
   const res = NextResponse.json({ data: { ok: true } });
   res.cookies.set(SP_AT_COOKIE, '', base);
   res.cookies.set(SP_RT_COOKIE, '', base);
-  return res;
+  return markSessionChanged(res);
 }

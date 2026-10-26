@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
-import { cookieBase, SIGNUP_ATTRIBUTION_COOKIE_NAMES, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
+import { cookieBase, SIGNUP_ATTRIBUTION_COOKIE_NAMES, SP_AT_MAX_AGE_SECONDS, markSessionChanged } from '@/lib/auth/cookies';
 import { safeJsonParse } from '@/lib/api-response';
 import { backendFetch } from '@/lib/backend-fetch';
 
@@ -57,5 +57,5 @@ export async function POST(request: Request) {
   for (const name of SIGNUP_ATTRIBUTION_COOKIE_NAMES) {
     res.cookies.set(name, '', { ...cookieBase(), maxAge: 0 });
   }
-  return res;
+  return markSessionChanged(res);
 }

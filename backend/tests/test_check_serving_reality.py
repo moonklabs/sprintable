@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,27 @@ _PINNED_TRAFFIC = [{"revisionName": "sprintable-frontend-prod-00212-7x9", "perce
 _LATEST_TRAFFIC = [
     {"revisionName": "sprintable-frontend-prod-00216-5j6", "percent": 100, "latestRevision": True}
 ]
+
+
+class _RealExternalCall(BaseException):
+    """A `BaseException` on purpose: the guard's own `except Exception` («a service it cannot read is reported, not fatal») must not be able to swallow it."""
+
+
+@pytest.fixture(autouse=True)
+def _no_real_external_command(monkeypatch):
+    """story #4777 — the safety belt for this whole file: these tests fake every `gcloud` read, so a REAL `subprocess.run` here means a fake was
+    forgotten (`test_one_unreadable_service_does_not_stop_the_batch` forgot `_revision_created_at` and, on a runner with no login, the real
+    `gcloud run revisions describe` sometimes ran past the 30 s limit — a red that said nothing about the code under test). Any real command
+    fails the test at once, and the teardown asserts nothing was attempted even if something swallowed the first error."""
+    calls: list = []
+
+    def _forbidden(cmd, *args, **kwargs):
+        calls.append(list(cmd) if isinstance(cmd, (list, tuple)) else str(cmd))
+        raise _RealExternalCall(f"a unit test of the serving guard ran a real command: {calls[-1]}")
+
+    monkeypatch.setattr(subprocess, "run", _forbidden)
+    yield calls
+    assert calls == [], f"a real external command was attempted: {calls}"
 
 
 def _load():
@@ -348,10 +370,11 @@ def test_one_unreadable_service_does_not_stop_the_batch(monkeypatch, capsys):
             raise RuntimeError("gcloud rate limit")
         return statuses[name]
 
-    monkeypatch.setattr(mod, "_list_live_services", lambda: list(statuses))
+    # the file's own stub fakes the service list, the allowlist, the date AND the revision-age read (`_revision_created_at` — the svc-stalled
+    # entry below makes the guard ask for the age of its newest revision; left unfaked it ran a real `gcloud`, story #4777); only the status
+    # read is then replaced, by the one that fails for svc-broken
+    _stub(monkeypatch, mod, statuses)
     monkeypatch.setattr(mod, "_serving_status", _status)
-    monkeypatch.setattr(mod, "_load_allowlist", lambda: ({}, {}))
-    monkeypatch.setenv("SERVING_REALITY_TODAY", "2026-07-25")
 
     assert mod.main() == 1
     out = capsys.readouterr().out
@@ -416,3 +439,26 @@ def test_declared_pins_expiry_and_staleness_are_checked_too(monkeypatch, capsys)
     )
     assert mod.main() == 1
     assert "이미 정상" in capsys.readouterr().out
+
+
+def test_the_belt_refuses_a_real_external_command(_no_real_external_command):
+    """the belt itself: a real `subprocess.run` (what `_run` is) is refused at once, as something no `except Exception` can swallow"""
+    mod = _load()
+    with pytest.raises(_RealExternalCall):
+        mod._run(["gcloud", "--version"])
+    assert _no_real_external_command == [["gcloud", "--version"]]
+    _no_real_external_command.clear()  # this test provoked it on purpose — the teardown check is for the others
+
+
+def test_the_belt_is_not_swallowed_by_the_guards_own_error_handling(monkeypatch, _no_real_external_command):
+    """the reason the belt is a `BaseException`: `main()` wraps each service read in `except Exception` (an unreadable service is reported, the batch
+    goes on). A forgotten fake — here `_serving_status` left real — would then end as «못 읽었다» in the output and the test could still pass; the
+    belt must come out of `main()` as itself."""
+    mod = _load()
+    monkeypatch.setattr(mod, "_list_live_services", lambda: ["svc-forgotten-fake"])
+    monkeypatch.setattr(mod, "_load_allowlist", lambda: ({}, {}))
+    monkeypatch.setenv("SERVING_REALITY_TODAY", "2026-07-25")
+    with pytest.raises(_RealExternalCall):
+        mod.main()
+    assert len(_no_real_external_command) == 1 and _no_real_external_command[0][:4] == ["gcloud", "run", "services", "describe"]
+    _no_real_external_command.clear()  # provoked on purpose

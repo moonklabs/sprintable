@@ -61,7 +61,8 @@ substitutions:
   # 수동 적용 완료 — 위 deploy 스텝의 순서 재구성으로 다음 배포부턴 자동 수렴.
   _GOTENBERG_SERVICE_URL: 'https://office-converter-dev-57iommnikq-du.a.run.app'
   _OFFICE_CONVERTER_MAX_INSTANCES: '3'
-  _BACKEND_MIN_INSTANCES: '1'
+  # story 4786 (E-INFRA-DIET, 2026-10-26): dev-safe 기본값 1 → 2 (PO: backend 새 인스턴스 시작 ≈31초 · 배포 창 동시 접속 몰림 — story 4789 가 서면 0). 실효값은 GHA cloud-build.yml 이 per-env 로 덮는다(dev 2 · prod 1 — prod 는 이 기본값에 기대지 않는다: `_MINS_EXPLICIT` 가드).
+  _BACKEND_MIN_INSTANCES: '2'
   # ⚠️ default '1'(아래) = _DEPLOY_ENV:dev default 와 정합한 **dev-safe fallback**(수동 `gcloud builds submit`
   #    override 없을 때 무리한 maxScale 재현 차단). GHA cloud-build.yml 이 per-env override(prod=5·dev=8, #2074 응급).
   #    rollout-safe 산식(ee7794eb·dev TooManyConnections 인시던트): **2 × maxScale × (pool+overflow + raw) +
@@ -231,7 +232,8 @@ substitutions:
   # (`gcloud run services describe sprintable-realtime-dev` 대조 완료) — "손 값은 다음
   # 배포가 덮는다" 규율대로 이 파일에 명시해 durable화한다. 장수 SSE 연결이 콜드스타트에
   # 끊기지 않도록 minScale 2(backend는 3) · timeout 3600(요청 타임아웃 상한).
-  _REALTIME_MIN_INSTANCES: '2'
+  # story 4786 (E-INFRA-DIET, 2026-10-26): 2 → 0. 위 «minScale 2» 근거(장수 SSE 가 차가운 시작에 끊기지 않게)는 dev 프론트가 GCE 게이트웨이를 보는 지금(#2185) 이 Cloud Run 에 닿지 않는다 — 롤백 때만 쓴다.
+  _REALTIME_MIN_INSTANCES: '0'
   _REALTIME_MAX_INSTANCES: '8'
   _REALTIME_TIMEOUT: '3600'
   # ⛔기본값을 dev URL 에서 빈 문자열로 내린다(오르테가군 PO, 2026-07-23 prod 승격 preflight
@@ -277,8 +279,22 @@ substitutions:
   # 실측 그대로(2026-07-24, `gcloud run services describe sprintable-frontend-dev` 대조:
   # latestReady==latestCreated·traffic 100%인 서빙 리비전 자체를 확認, template spec만 본 것
   # 아님 — 오늘 prod FE 22시간 무실효 사고의 3축 교훈 적용). GHA가 prod에서 override(3/10).
-  _FRONTEND_MIN_INSTANCES: '1'
+  # story 4786 (E-INFRA-DIET, 2026-10-26): dev-safe 기본값 1 → 0 (위 «라이브 실측 그대로» 는 이 줄 바뀐 날짜까지의 값). GHA cloud-build.yml 이 dev 0 · prod 1 로 덮는다.
+  _FRONTEND_MIN_INSTANCES: '0'
   _FRONTEND_MAX_INSTANCES: '3'
+  # story 4786 (E-INFRA-DIET, 2026-10-26): extra `gcloud run deploy` flags for the CPU allocation of backend + frontend. dev: `--cpu-throttling` (CPU billed only while a request is served); prod: empty = the flag is not
+  # sent and gcloud leaves the value as it is. Empty here on purpose (the GHA workflow's dev branch sets it; a manual prod submit must not inherit it). realtime-dev (dev only) names the flag itself.
+  _CPU_FLAGS: ''
+  # story 4790 (E-INFRA-DIET, 2026-10-26): the size of each prod service as `gcloud run deploy` flags (`--cpu 1 --memory 1Gi` backend · `--cpu 1 --memory 512Mi` frontend) — the operator lowered them by hand at 09:07Z, and without
+  # these a flag left out is only «kept», never written down. Empty = not sent (dev keeps its value; a manual submit must not inherit prod's). The workflow's prod branch sends them. No `=` inside: the substitution list is split on commas.
+  _BACKEND_RESOURCES: ''
+  _FRONTEND_RESOURCES: ''
+  # story 4786: prod must say its minimum instances itself (the defaults above are dev-safe: backend 2 · realtime 0 · frontend 0). The workflow's prod branch sends `true`; a hand-run prod build that does
+  # not fails in the first step (fail-closed) instead of deploying prod at the dev numbers.
+  _MINS_EXPLICIT: ''
+  # story 4786 (E-INFRA-DIET): the dev GCE realtime gateways + realtime-dev. `off` (default) = deploy-realtime and deploy-realtime-gce skip on dev, so a deploy never re-creates what was stopped by hand; the dev
+  # workflow branch (cloud-build.yml) sets it together with the frontend's stream address. Prod: both steps already exit first on any environment but dev.
+  _DEV_REALTIME_STACK: 'off'
   # concurrency=80은 Cloud Run 플랫폼 기본값과 라이브 실측(dev describe 확認)이 이미 일치 —
   # SSOT에 값을 안 박아도 드리프트 위험이 없다(플랫폼 기본값 자체가 곧 이 값). 굳이 플래그로
   # 고정하지 않는다(불필요한 명시로 "왜 80이지" 오해를 만들 필요 없음) — 판단 근거만 여기 기록.
@@ -376,6 +392,22 @@ substitutions:
   _BACKEND_REDIS_DUAL_PUBLISH_ENABLED: 'false'
 
 steps:
+  # story 4786 (E-INFRA-DIET): fail-closed — a prod build must carry its own minimum instances (`_MINS_EXPLICIT`, sent by the workflow's prod branch; backend and frontend >= 1; maximums >= 2, story 4790: the default maximum is dev's 1/3); the defaults are dev-safe. Runs first and every step that would otherwise start at once waits for it.
+  - id: guard-prod-mins
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ "${_DEPLOY_ENV}" = "prod" ]; then
+          if [ "${_MINS_EXPLICIT}" = "true" ] && [ "${_BACKEND_MIN_INSTANCES}" -ge 1 ] && [ "${_FRONTEND_MIN_INSTANCES}" -ge 1 ] && [ "${_BACKEND_MAX_INSTANCES}" -ge 2 ] && [ "${_FRONTEND_MAX_INSTANCES}" -ge 2 ]; then
+            :
+          else
+            echo "FAIL: a prod build needs explicit minimum instances (_MINS_EXPLICIT=true, backend and frontend >= 1) and maximum instances (backend and frontend >= 2) - the defaults are dev-safe (stories 4786, 4790)"
+            exit 1
+          fi
+        fi
+
   # story #2806 — GCS 첨부 버킷(sprintable-memo-attachments) CORS를 SSOT로 durable화. 실측
   # (디디군, 2026-08-19): 이 버킷은 dev/prod 공유(GCS_MEMO_ATTACHMENTS_BUCKET override가
   # 배포 SSOT 어디에도 없어 코드 기본값 하나를 양쪽이 씀) — 지금까지 CORS가 배포 SSOT에
@@ -416,7 +448,7 @@ steps:
           *) echo "FAIL: x-goog-if-generation-match header missing from applied CORS — 서명 PUT preflight가 여전히 막힌다" >&2; exit 1 ;;
         esac
         echo "OK: dev Cloud Run regional origin + x-goog-if-generation-match header confirmed in applied CORS"
-    waitFor: ['-']
+    waitFor: ['guard-prod-mins']  # story 4786: nothing starts before the prod guard has passed
 
   # story #2887 — avatar 전용 버킷 CORS. CORS json(infra/gcs-avatars-cors.json)
   # 자체는 dev/prod origin을 이미 다 실은 공용 파일(memo-attachments와 동일 관례) — 버킷명만
@@ -455,7 +487,7 @@ steps:
           esac
           echo "OK: dev Cloud Run regional origin confirmed in applied CORS"
         fi
-    waitFor: ['-']
+    waitFor: ['guard-prod-mins']  # story 4786: nothing starts before the prod guard has passed
 
   # story 620beefc(Threads 이미지 발행, 페드루 리뷰 B5) — 채널 미디어 전용 버킷 CORS.
   # avatar #2887 원래 형태(story #3117 이전, dev 전용)와 동형 — prod 버킷 미프로비저닝
@@ -492,7 +524,7 @@ steps:
           *) echo "FAIL: x-goog-if-generation-match header missing from applied CORS — 서명 PUT preflight가 여전히 막힌다" >&2; exit 1 ;;
         esac
         echo "OK: dev Cloud Run regional origin + x-goog-if-generation-match header confirmed in applied CORS"
-    waitFor: ['-']
+    waitFor: ['guard-prod-mins']  # story 4786: nothing starts before the prod guard has passed
 
   # ─── Frontend (Next.js standalone) ────────────────────────────────────────
   # story #3947(2026-09-16, 페드루 PO 판정) — `_NEXT_PUBLIC_APP_URL`은 cloud-build.yml의
@@ -744,7 +776,7 @@ steps:
           --timeout=${_FRONTEND_TIMEOUT} \
           --min-instances=${_FRONTEND_MIN_INSTANCES} \
           --max-instances=${_FRONTEND_MAX_INSTANCES} \
-          --cpu-boost \
+          --cpu-boost ${_CPU_FLAGS} ${_FRONTEND_RESOURCES} \
           --update-env-vars="$${ENV_VARS}" \
           $${FE_SECRETS} \
           --remove-env-vars=XFF_PROBE_ENABLED \
@@ -817,7 +849,7 @@ steps:
           echo "      아직 모른다(503 fail-closed). 위 URL을 substitutions에 채워 재배포할 것"
           echo "      (부트스트랩 절차, 위 substitutions 섹션 주석 참고)."
         fi
-    waitFor: ['-']
+    waitFor: ['guard-prod-mins']  # story 4786: nothing starts before the prod guard has passed
 
   - id: deploy-backend
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
@@ -826,8 +858,7 @@ steps:
       - -c
       - |
         set -euo pipefail
-        # ⚠️--update-env-vars(additive) 필수·--set-env-vars 금지 · --allow-unauthenticated 필수. 사유 · 이력(env 키별)은
-        # test_deploy_backend_redis_secret_conflict.py 「deploy-backend 인라인 주석 아카이브」.
+        # --update-env-vars(additive)·--allow-unauthenticated 필수, --set-env-vars 금지 — 아카이브(test_deploy_backend_redis_secret_conflict.py)
         ENV_VARS="FASTAPI_URL=${_FASTAPI_URL},BACKEND_URL=${_BACKEND_URL},DB_POOL_SIZE=${_DB_POOL_SIZE},DB_MAX_OVERFLOW=${_DB_MAX_OVERFLOW},DB_PGBOUNCER=${_BACKEND_DB_PGBOUNCER},PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},EVENT_BROKER_REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},EVENT_BROKER_REDIS_DISPATCH_ENABLED=${_BACKEND_REDIS_DISPATCH_ENABLED},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED},FANOUT_WAKE_REDIS_ENABLED=${_BACKEND_FANOUT_WAKE_REDIS_ENABLED},PRESENCE_REDIS_ENABLED=${_BACKEND_PRESENCE_REDIS_ENABLED},PRESENCE_ONLINE_REDIS_ENABLED=${_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED},SSE_LEASE_REDIS_ENABLED=${_BACKEND_SSE_LEASE_REDIS_ENABLED},SSE_TRANSIENT_REPLAY_ENABLED=${_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED},LICENSE_CONSENT=${_LICENSE_CONSENT},NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL},DEPLOY_ENV=${_DEPLOY_ENV},FIREBASE_OAUTH_HANDOFF_ENABLED=${_FIREBASE_OAUTH_HANDOFF_ENABLED},APPLE_SERVICES_ID=${_APPLE_SERVICES_ID},APPLE_KEY_ID=${_APPLE_KEY_ID},APPLE_TEAM_ID=${_APPLE_TEAM_ID},SUPPORT_CONTACT_SURFACE_WIDGET=${_SUPPORT_CONTACT_SURFACE_WIDGET},SUPPORT_ESCALATION_REQUESTER_MEMBER_ID=${_SUPPORT_ESCALATION_REQUESTER_MEMBER_ID},SUPPORT_ESCALATION_APPROVER_MEMBER_ID=${_SUPPORT_ESCALATION_APPROVER_MEMBER_ID},SUPPORT_ESCALATION_TARGET_ORG_SLUG=${_SUPPORT_ESCALATION_TARGET_ORG_SLUG},SUPPORT_ESCALATION_TARGET_PROJECT_SLUG=${_SUPPORT_ESCALATION_TARGET_PROJECT_SLUG},PUBLIC_SITE_BASE_URL=${_PUBLIC_SITE_BASE_URL},OPS_ALERT_CONVERSATION_ID=${_OPS_ALERT_CONVERSATION_ID},BACKEND_REQUEST_TIMEOUT_SECONDS=${_BACKEND_TIMEOUT},PUSH_DEVICES_BY_USER=${_PUSH_DEVICES_BY_USER}"
         # story #2141/#2423/#3418 — REDIS_URL/RATE_LIMIT_BACKEND(dev만, 사유는 docstring 아카이브).
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
@@ -873,21 +904,21 @@ steps:
         if [ "${_DEPLOY_ENV}" != "prod" ] && [ -n "${_NEXT_PUBLIC_SUPPORT_GATEWAY_URL}" ]; then
           ENV_VARS="$${ENV_VARS},SUPPORT_GATEWAY_ESCALATION_RESOLUTION_URL=${_NEXT_PUBLIC_SUPPORT_GATEWAY_URL}/api/v1/internal/escalation-resolution"
         fi
-        # #2445/#3110/#3118/#f2a27d2a/f56bd418 SECRETS_FLAG · #4398 RM_SECRETS — 아카이브.
+        # #2445/#3110/#3118/#f2a27d2a/f56bd418 SECRETS_FLAG · #4398 · 4790 RM_SECRETS — 아카이브.
         SECRETS_FLAG=""
         if [ "${_DEPLOY_ENV}" == "dev" ]; then
           SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_DEV_PGBOUNCER_SPRINTABLE:latest,DATABASE_URL_DIRECT=DATABASE_URL_DIRECT_DEV_SPRINTABLE:latest,APPLE_PRIVATE_KEY=APPLE_SIWA_PRIVATE_KEY:latest,SUPPORT_GATEWAY_TOKEN_SECRET=SUPPORT_GATEWAY_TOKEN_SECRET_dev:latest,CHANNEL_CREDENTIAL_ENCRYPTION_KEY=CHANNEL_CREDENTIAL_ENCRYPTION_KEY_DEV:latest,CHANNEL_OAUTH_STATE_SECRET=CHANNEL_OAUTH_STATE_SECRET_DEV:latest,GENERATION_CONNECTOR_CREDENTIAL_ENCRYPTION_KEY=GENERATION_CONNECTOR_CREDENTIAL_ENCRYPTION_KEY_DEV:latest,EDGE_CLIENT_IP_SECRET=EDGE_CLIENT_IP_SECRET_DEV:latest"
         elif [ "${_DEPLOY_ENV}" == "prod" ]; then
-          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_PROD_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_PROD:latest,DATABASE_URL_READ=DATABASE_URL_READ:latest,APPLE_PRIVATE_KEY=APPLE_SIWA_PRIVATE_KEY:latest,CHANNEL_CREDENTIAL_ENCRYPTION_KEY=CHANNEL_CREDENTIAL_ENCRYPTION_KEY_PROD:latest,CHANNEL_OAUTH_STATE_SECRET=CHANNEL_OAUTH_STATE_SECRET_PROD:latest,GENERATION_CONNECTOR_CREDENTIAL_ENCRYPTION_KEY=GENERATION_CONNECTOR_CREDENTIAL_ENCRYPTION_KEY_PROD:latest"
+          SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_PROD_PGBOUNCER:latest,DATABASE_URL_DIRECT=DATABASE_URL_PROD:latest,APPLE_PRIVATE_KEY=APPLE_SIWA_PRIVATE_KEY:latest,CHANNEL_CREDENTIAL_ENCRYPTION_KEY=CHANNEL_CREDENTIAL_ENCRYPTION_KEY_PROD:latest,CHANNEL_OAUTH_STATE_SECRET=CHANNEL_OAUTH_STATE_SECRET_PROD:latest,GENERATION_CONNECTOR_CREDENTIAL_ENCRYPTION_KEY=GENERATION_CONNECTOR_CREDENTIAL_ENCRYPTION_KEY_PROD:latest"
         fi
         RM_SECRETS=""
-        if [ "${_DEPLOY_ENV}" == "prod" ]; then RM_SECRETS="--remove-secrets=EDGE_CLIENT_IP_SECRET"; fi
+        if [ "${_DEPLOY_ENV}" == "prod" ]; then RM_SECRETS="--remove-secrets=EDGE_CLIENT_IP_SECRET,DATABASE_URL_READ"; fi
         gcloud run deploy sprintable-backend-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
           --region=${_AR_REGION} \
           --min-instances=${_BACKEND_MIN_INSTANCES} \
           --max-instances=${_BACKEND_MAX_INSTANCES} \
-          --timeout=${_BACKEND_TIMEOUT} \
+          --timeout=${_BACKEND_TIMEOUT} ${_CPU_FLAGS} ${_BACKEND_RESOURCES} \
           --allow-unauthenticated \
           --update-env-vars="$${ENV_VARS}" \
           $${SECRETS_FLAG} $${RM_SECRETS} \
@@ -932,6 +963,10 @@ steps:
           echo "skip deploy-realtime: prod gate pending (E-ARCH 1단계 dev 검증 후 오픈)"
           exit 0
         fi
+        if [ "${_DEV_REALTIME_STACK}" != "on" ]; then
+          echo "skip deploy-realtime: dev realtime stack is off (story 4786)"
+          exit 0
+        fi
         # ⛔fail-fast(오르테가군 PO 2026-07-23) — 사유는 docstring 아카이브.
         if [ -z "${_REALTIME_URL}" ]; then
           echo "FAIL: _REALTIME_URL 이 비어 있다. deploy-realtime 은 이 값을 realtime 서비스의"
@@ -950,12 +985,14 @@ steps:
         # 는 진짜 누락이라 배선, PRESENCE_REDIS_ENABLED·PRESENCE_ONLINE_REDIS_ENABLED·
         # FANOUT_WAKE_REDIS_ENABLED는 의도적 off(전제: 이 서비스엔 브라우저만 붙는다 —
         # 라우팅이 바뀌면 이 판정 전체 재검토, 근거는 docstring 아카이브).
+        # story 4786 (E-INFRA-DIET): dev 의 이 서비스는 위 `!= dev` 가드 뒤라 항상 dev 다 — CPU 는 요청(열린 SSE 연결 포함)을 처리하는 동안에만(--cpu-throttling).
         gcloud run deploy sprintable-realtime-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
           --region=${_AR_REGION} \
           --min-instances=${_REALTIME_MIN_INSTANCES} \
           --max-instances=${_REALTIME_MAX_INSTANCES} \
           --timeout=${_REALTIME_TIMEOUT} \
+          --cpu-throttling \
           --allow-unauthenticated \
           --update-env-vars=FASTAPI_URL=${_REALTIME_URL},DB_POOL_SIZE=${_DB_POOL_SIZE},DB_MAX_OVERFLOW=${_DB_MAX_OVERFLOW},PG_LISTEN_ENABLED=false,EVENT_BROKER_REDIS_CONSUME_ENABLED=true,REDIS_URL=${_REDIS_URL},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=true,EVENT_BROKER_REDIS_DISPATCH_ENABLED=true,SSE_TRANSIENT_REPLAY_ENABLED=true,SSE_LEASE_REDIS_ENABLED=true \
           --remove-env-vars=REDIS_CONSUME_ENABLED \
@@ -1136,6 +1173,10 @@ steps:
         set -euo pipefail
         if [ "${_DEPLOY_ENV}" != "dev" ]; then
           echo "skip deploy-realtime-gce: dev 전용 하드게이트(story #2185) — prod GCE는 사람이 직접 배포한다"
+          exit 0
+        fi
+        if [ "${_DEV_REALTIME_STACK}" != "on" ]; then
+          echo "skip deploy-realtime-gce: dev realtime stack is off (story 4786)"
           exit 0
         fi
 

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
-import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
+import { cookieBase, SP_AT_MAX_AGE_SECONDS, markSessionChanged } from '@/lib/auth/cookies';
 import { safeJsonParse } from '@/lib/api-response';
 import { backendFetch } from '@/lib/backend-fetch';
 
@@ -31,5 +31,5 @@ export async function POST(request: Request) {
   const res = NextResponse.json({ data: { ok: true } });
   res.cookies.set(SP_AT_COOKIE, access_token, { ...cookieBase(), maxAge: SP_AT_MAX_AGE_SECONDS });
   res.cookies.set(SP_RT_COOKIE, refresh_token, { ...cookieBase(), maxAge: 30 * 24 * 60 * 60 });
-  return res;
+  return markSessionChanged(res);
 }
