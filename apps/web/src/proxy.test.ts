@@ -336,7 +336,11 @@ describe('proxy', () => {
   });
 
   it('[4778] a 200 whose tokens are not both strings is «not confirmed»: nothing written, nothing cleared', async () => {
-    for (const data of [{ access_token: 'a.b.c', refresh_token: 42 }, { access_token: { x: 1 }, refresh_token: 'r' }, { access_token: 'a.b.c' }, {}]) {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const goodAt = await new SignJWT({ type: 'access', email: 'test@example.com' }) // a real, valid access token: the only way a wrongly accepted answer would be WRITTEN as cookies
+      .setProtectedHeader({ alg: 'HS256' }).setSubject('5dfbd9fc-94c2-4afc-9814-da4b7ad08c28').setIssuedAt(nowSec).setExpirationTime(nowSec + 900)
+      .sign(new TextEncoder().encode(JWT_SECRET));
+    for (const data of [{ access_token: goodAt, refresh_token: 42 }, { access_token: 'a.b.c', refresh_token: 42 }, { access_token: { x: 1 }, refresh_token: 'r' }, { access_token: 'a.b.c' }, {}]) {
       mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ data }) });
       const response = await middleware(makeRequest('/dashboard', { sp_rt: 'rt-and-a-bad-answer' }));
       const setCookie = response.headers.get('set-cookie') ?? '';
