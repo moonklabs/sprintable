@@ -331,9 +331,8 @@ jobs:
             # 시크릿만 바뀌고 이 값이 false거나, 이 값만 true고 시크릿이 안 바뀌면 앱이
             # PgBouncer 위에서 statement_cache 미비활성 상태로 붙어 prepared statement reuse
             # 깨짐(#1314류) 또는 direct DSN 그대로 PgBouncer를 거치지 않는 반쪽 상태가 된다.
-            # story 4786: dev connects to Cloud SQL directly (per instance: request pool 3+1 and worker pool 2+1 = up to 7 — backend/app/core/database.py; × maxScale 8 = 56, 112 while two revisions overlap, inside max_connections 200 with 88 left for the other services; a third overlapping revision (streams live up to 3600 s) would add 56 more); the pgbouncer-dev VM is stopped by hand.
-            # cloudbuild.yaml binds DATABASE_URL to the direct secret in the SAME deploy (the warning above: the secret and this flag move together). Independent of the switch above.
-            echo "backend_db_pgbouncer=false" >> "$GITHUB_OUTPUT"
+            # story 4786 (PO, 10-26): dev STAYS behind PgBouncer. Going direct was weighed and left out: per instance a direct connection set is up to 7 (request pool 3+1 and worker pool 2+1 — backend/app/core/database.py), × maxScale 8 = 56, 112 while two revisions overlap, and a third overlapping revision (streams live up to 3600 s) adds 56 more, against max_connections 200 — to save one VM (≈ $15/month). Revisit with story 4791 and the Redis clean-up. the pgbouncer-dev VM is stopped by hand.
+            echo "backend_db_pgbouncer=true" >> "$GITHUB_OUTPUT"
             # story #2005: PO 라이브 gcloud 실측(2026-07-17) — backend-dev 현재 유효 Cloud Run
             # 요청 타임아웃=3600s(Cloud Run 요청 타임아웃 상한). cloudbuild.yaml의
             # `_BACKEND_TIMEOUT` 기본값(3600)과 동일값이라 이 output이 없어도 기본값으로

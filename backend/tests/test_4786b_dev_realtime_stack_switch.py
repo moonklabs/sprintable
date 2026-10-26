@@ -58,7 +58,7 @@ def test_the_switch_leaves_redis_pg_listen_the_rate_limiter_and_pgbouncer_alone(
     for flag in _REDIS_FLAGS:
         assert out[flag] == "true", flag
     assert out["backend_pg_listen_enabled"] == "false" and out["redis_url"].startswith("redis://")
-    assert out["backend_db_pgbouncer"] == "false"  # dev is direct in both modes (the secret in cloudbuild.yaml moves with it)
+    assert out["backend_db_pgbouncer"] == "true"  # dev stays behind PgBouncer in both modes (PO 10-26: going direct was weighed and left out — the connection budget has no room for a third overlapping revision)
 
 
 def test_prod_has_no_part_in_the_switch():
@@ -137,11 +137,12 @@ def test_with_the_stack_off_or_on_prod_the_path_filter_skips_pass_through():
     assert _assembled_skips("", "", "") == {"_REALTIME_GCE_SKIP": "false", "_REALTIME_CLOUDRUN_SKIP": "false"}  # prod: the gate step did not run
 
 
-def test_the_dev_database_url_is_direct_exactly_when_pgbouncer_is_off():
-    assert re.search(r'echo "backend_db_pgbouncer=false"', _DEV)
+def test_dev_and_prod_both_stay_behind_pgbouncer():
+    """PO 10-26: going direct on dev was weighed and left out (one VM, ≈ $15/month, against a connection budget with no room for a third overlapping revision). The flag and the secret move together, so both are pinned"""
+    assert re.search(r'echo "backend_db_pgbouncer=true"', _DEV) and 'echo "backend_db_pgbouncer=false"' not in _DEV
     dev_secrets = _run_env_vars_assembly("dev", "", var="SECRETS_FLAG")
-    assert "DATABASE_URL=DATABASE_URL_DIRECT_DEV_SPRINTABLE:latest" in dev_secrets.removeprefix("--update-secrets=").split(",")
-    assert "PGBOUNCER" not in dev_secrets
+    assert "DATABASE_URL=DATABASE_URL_DEV_PGBOUNCER_SPRINTABLE:latest" in dev_secrets.removeprefix("--update-secrets=").split(",")
+    assert "DATABASE_URL_DIRECT=DATABASE_URL_DIRECT_DEV_SPRINTABLE:latest" in dev_secrets.removeprefix("--update-secrets=").split(",")  # the LISTEN connection stays direct
     # prod is untouched: PgBouncer in front, the direct secret behind it
     prod_secrets = _run_env_vars_assembly("prod", "", var="SECRETS_FLAG")
     assert "DATABASE_URL=DATABASE_URL_PROD_PGBOUNCER:latest" in prod_secrets.removeprefix("--update-secrets=").split(",")
