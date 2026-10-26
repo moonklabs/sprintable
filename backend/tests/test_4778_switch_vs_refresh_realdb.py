@@ -202,6 +202,83 @@ async def test_a_refresh_with_the_old_token_is_still_superseded_when_the_session
         await _close(engine, w)
 
 
+async def test_a_second_switch_inside_the_window_does_not_hide_the_session_from_the_first_token_realdb():
+    """S1 (lens, real PG): switch-project → switch-org with the first's new token, then the browser's refresh that left with the ORIGINAL token before the first answer landed: a switch ends its token with an explicit end
+    (expires_at closed) AND a successor, so the walk follows the link — the late token is «moved on», not «revoked» (the BFF would clear both cookies on that: a forced logout on the second switch)"""
+    engine, w = await _world()
+    try:
+        a = await w.login()
+        sw1 = await w.switch_project(a, w.project1)
+        assert sw1.status_code == 200, sw1.text
+        sw2 = await w.switch_org(sw1.json()["data"], w.org2)  # with the first switch's new token
+        assert sw2.status_code == 200, sw2.text
+        late = await w.refresh(a["refresh_token"])
+        assert late.status_code == 401 and late.json()["error"]["code"] == "TOKEN_SUPERSEDED", late.text  # reverted (an explicit end stops the walk) → TOKEN_REVOKED
+        second = await w.refresh(sw1.json()["data"]["refresh_token"])
+        assert second.status_code == 401 and second.json()["error"]["code"] == "TOKEN_SUPERSEDED", second.text
+        assert (await w.refresh(sw2.json()["data"]["refresh_token"])).status_code == 200  # the session's newest token lives
+    finally:
+        await _close(engine, w)
+
+
+async def test_switch_then_a_rotation_then_a_switch_does_not_hide_the_session_from_the_first_token_realdb():
+    """S1b (lens, real PG): switch → the browser's refresh rotates the switch's token → a second switch with the rotated token; the original token is still «moved on»"""
+    engine, w = await _world()
+    try:
+        a = await w.login()
+        sw1 = await w.switch_project(a, w.project1)
+        assert sw1.status_code == 200, sw1.text
+        rot = await w.refresh(sw1.json()["data"]["refresh_token"])
+        assert rot.status_code == 200, rot.text
+        sw2 = await w.switch_org(rot.json()["data"], w.org2)  # project1 belongs to the first org, so the order is project → org (as in S1)
+        assert sw2.status_code == 200, sw2.text
+        late = await w.refresh(a["refresh_token"])
+        assert late.status_code == 401 and late.json()["error"]["code"] == "TOKEN_SUPERSEDED", late.text  # reverted → TOKEN_REVOKED
+        assert (await w.refresh(sw2.json()["data"]["refresh_token"])).status_code == 200
+    finally:
+        await _close(engine, w)
+
+
+@pytest.mark.parametrize("rotations", [5, 6, 8])
+async def test_a_late_token_behind_many_rotations_is_still_superseded_realdb(rotations):
+    """S2 (lens + second read, real PG): switch, then the session rotates `rotations` times inside the window; the walk used to stop at 5 hops and answer «revoked» for a live session"""
+    engine, w = await _world()
+    try:
+        a = await w.login()
+        sw = await w.switch_org(a, w.org2)
+        assert sw.status_code == 200, sw.text
+        newest = sw.json()["data"]
+        for _ in range(rotations):
+            rot = await w.refresh(newest["refresh_token"])
+            assert rot.status_code == 200, rot.text
+            newest = rot.json()["data"]
+        late = await w.refresh(a["refresh_token"])
+        assert late.status_code == 401 and late.json()["error"]["code"] == "TOKEN_SUPERSEDED", late.text  # reverted (a short cap that answers «dead») → TOKEN_REVOKED
+        assert (await w.refresh(newest["refresh_token"])).status_code == 200
+    finally:
+        await _close(engine, w)
+
+
+async def test_a_walk_that_runs_out_of_hops_answers_superseded_not_revoked_realdb(monkeypatch):
+    """the cap exhausted without an end seen = unknown = alive (one more ask, never a forced logout)"""
+    from app.routers import auth as auth_router
+    monkeypatch.setattr(auth_router, "_SUPERSEDED_CHAIN_MAX_HOPS", 3)
+    engine, w = await _world()
+    try:
+        a = await w.login()
+        sw = await w.switch_org(a, w.org2)
+        assert sw.status_code == 200, sw.text
+        newest = sw.json()["data"]
+        for _ in range(6):  # more hops than the (patched) cap
+            rot = await w.refresh(newest["refresh_token"])
+            assert rot.status_code == 200, rot.text
+            newest = rot.json()["data"]
+        late = await w.refresh(a["refresh_token"])
+        assert late.status_code == 401 and late.json()["error"]["code"] == "TOKEN_SUPERSEDED", late.text  # reverted (the exhausted walk answers «dead») → TOKEN_REVOKED
+    finally:
+        await _close(engine, w)
+
+
 @pytest.mark.parametrize("kind", ["org", "project"])
 async def test_the_word_is_revoked_not_superseded_for_every_other_end_realdb(kind):
     """only a switch's end is «moved on»: a logout · a password change (the same explicit end without a successor), a switch followed by a logout (the successor is ended too), a rotation, and a switch past the short window"""
@@ -292,6 +369,19 @@ async def test_the_word_is_revoked_not_superseded_for_every_other_end_realdb(kin
         assert lo.status_code == 200
         r = await w.refresh(j["refresh_token"])
         assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_REVOKED", r.text  # reverted (switch-account links nothing) → B looks like a rotation in flight → TOKEN_SUPERSEDED
+        # 11) the switch's token was never ended, but it has simply EXPIRED (an idle session): nothing alive at the end of the chain → not «moved on»
+        from sqlalchemy import update as _update
+
+        from app.core.security import hash_token as _hash_token
+        from app.models.user import RefreshToken as _RefreshToken
+        k = await w.login()
+        sw = await _switchers(w)[kind](k)
+        assert sw.status_code == 200
+        async with w.Session() as s:
+            await s.execute(_update(_RefreshToken).where(_RefreshToken.token_hash == _hash_token(sw.json()["data"]["refresh_token"])).values(expires_at=datetime.now(timezone.utc) - timedelta(hours=1)))
+            await s.commit()
+        r = await w.refresh(k["refresh_token"])
+        assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_REVOKED", r.text  # reverted (both «expired end» breaks of the walk dropped: an expired live token counts as alive) → TOKEN_SUPERSEDED
         # 5) a pointer to another person's token is not «moved on» (never written by the app; a damaged row must not read as a live session)
         from sqlalchemy import select, update
 

@@ -358,6 +358,11 @@ def _is_session_stale_after_password_change(user: User, session_started_at: obje
     return int(user.password_set_at.timestamp()) > session_started_at
 
 
+# story 4778 — how many tokens of a chain `refresh_token()` follows (switch's token → rotated hops → the session's live token) before it gives up. Generous on purpose (one hop is a single indexed read, about 0.3 ms);
+# a walk that uses it all without seeing an end answers «superseded» (unknown counts as alive: the cost of being wrong is one more ask of the client, which then gets the real answer — never a forced logout).
+_SUPERSEDED_CHAIN_MAX_HOPS = 64
+
+
 def _explicit_revoke_values(now: datetime) -> dict:
     """story #3649(BE·보안·prod 결함) — logout·set-password confirm·switch-project·
     switch-org·org_members 관리자 강제폐기(5곳) 전부 이 딕셔너리를 그대로 `.values()`
@@ -1296,15 +1301,21 @@ async def refresh_token(
                 and _diag_row.revoked_at > _now - timedelta(seconds=settings.auth_refresh_superseded_window_seconds)
             ):
                 # the session must still be alive at the END of the chain: follow `replaced_by` from the switch's token through tokens a refresh has rotated since (revoked but still inside their
-                # grace window: `expires_at` in the future) to the live one. A hop ended by a logout · password change · admin revoke has `expires_at` closed to now — also a rotated one
-                # (`_revoke_other_sessions` closes the grace windows) — so «revoked earlier, expires later than that» is NOT the test; «expires_at is still ahead» is.
+                # grace window: `expires_at` in the future) to the live one. An end that moved NOWHERE (a logout · password change · admin revoke: `expires_at` closed, no `replaced_by`) stops the walk — the
+                # session is over; an end WITH a successor is followed to it: a switch closes `expires_at` of the token it ended too (the explicit end) and links the token it issued (so a second switch inside the
+                # window does not hide the session behind the first one's token), and `_revoke_other_sessions` closes the grace window of a rotated token while its link stays. «revoked earlier, expires later
+                # than that» is not the test either way. The walk is capped (`_SUPERSEDED_CHAIN_MAX_HOPS`); a walk that uses the whole cap without seeing an end answers «alive» (see the `else`).
                 _session_alive = False
                 _hop_id = _diag_row.replaced_by
-                for _hop_n in range(5):
+                for _hop_n in range(_SUPERSEDED_CHAIN_MAX_HOPS):
                     _hop = (await session.execute(
                         select(RefreshToken.user_id, RefreshToken.revoked_at, RefreshToken.expires_at, RefreshToken.replaced_by).where(RefreshToken.id == _hop_id)
                     )).first()
-                    if _hop is None or _hop.user_id != _diag_row.user_id or _hop.expires_at <= _now:
+                    if (
+                        _hop is None or _hop.user_id != _diag_row.user_id
+                        or (_hop.expires_at <= _now and _hop.replaced_by is None)  # an end that moved nowhere
+                        or (_hop.revoked_at is None and _hop.expires_at <= _now)  # a live token that simply expired (the line above already catches it, since a live token links nothing; this one only guards a damaged row)
+                    ):
                         break  # gone · another person's · over
                     if _hop.revoked_at is None:
                         _session_alive = True
@@ -1315,6 +1326,8 @@ async def refresh_token(
                         _session_alive = _hop.revoked_at > _now - timedelta(seconds=settings.auth_refresh_superseded_window_seconds)
                         break
                     _hop_id = _hop.replaced_by
+                else:
+                    _session_alive = True  # the cap ran out before an end was seen: unknown → alive (one more ask of the client, never a forced logout)
                 if _session_alive:
                     logger.info(
                         "auth.refresh superseded key=%s user_id=%s delta_since_revoke_s=%s",
