@@ -93,6 +93,31 @@ def test_the_gateway_startup_script_names_the_new_secret_so_its_template_is_a_ne
         assert "'JWT_SECRET'" in env_names  # the variable the gateway's process reads keeps its name
 
 
+# ── the build binds the environment's own secret, so the choice is in the repository (a service the build creates gets it; a legacy binding is replaced at the next deploy) ──
+from tests.test_4798_memo_bucket_per_env import _run as _run_build_step  # the REAL step with only `gcloud` recorded, substitutions filled from the file's own defaults
+
+
+def _secrets_args(step: str, env: str) -> dict[str, list[str]]:
+    """the --update-secrets / --remove-secrets lists the step hands to gcloud"""
+    out: dict[str, list[str]] = {"update": [], "remove": []}
+    for a in _run_build_step(step, env):
+        if a.startswith("--update-secrets="):
+            out["update"] += a.split("=", 1)[1].split(",")
+        elif a.startswith("--remove-secrets="):
+            out["remove"] += a.split("=", 1)[1].split(",")
+    return out
+
+
+@pytest.mark.parametrize("env", ["dev", "prod"])
+@pytest.mark.parametrize("step", ["deploy-backend", "deploy-frontend"])
+def test_the_build_binds_the_signing_secret_of_its_own_environment(step, env):
+    lists = _secrets_args(step, env)
+    mine = f"JWT_SECRET=JWT_SECRET_{env.upper()}:latest"
+    assert mine in lists["update"], lists
+    assert not any(x.startswith("JWT_SECRET=") and x != mine for x in lists["update"]), lists  # not the other environment's, not the old shared name
+    assert "JWT_SECRET" not in lists["remove"]
+
+
 _BARE_BINDING = re.compile(
     r"""(JWT_SECRET=JWT_SECRET(?![A-Za-z0-9_])|\bJWT_SECRET:\s*JWT_SECRET(?![A-Za-z0-9_])|--secret[= ]["']?JWT_SECRET["']?(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])JWT_SECRET:(latest|[0-9]+)\b"""
     r"""|\bcreate_secret\s+["']?JWT_SECRET["']?(?![A-Za-z0-9_])|\bsecrets\s+(create|describe|delete|get-iam-policy|add-iam-policy-binding|remove-iam-policy-binding|versions\s+\w+)\s+["']?JWT_SECRET["']?(?![A-Za-z0-9_]))"""

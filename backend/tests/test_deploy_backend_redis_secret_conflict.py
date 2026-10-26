@@ -930,7 +930,8 @@ def test_deploy_edge_client_ip_secret_attached_on_dev_and_removed_on_prod():
     겹치지 않게). 붙은 적 없는 키 제거는 gcloud `_PruneMapping`(`if var_or_path in mapping: del`)이 건너뛴다."""
     remove = "--remove-secrets=EDGE_CLIENT_IP_SECRET"
     fe_dev, fe_prod = _run_frontend_deploy_argv("dev"), _run_frontend_deploy_argv("prod")
-    assert "--update-secrets=EDGE_CLIENT_IP_SECRET=EDGE_CLIENT_IP_SECRET_DEV:latest" in fe_dev, fe_dev
+    fe_dev_updates = [e for arg in fe_dev if arg.startswith("--update-secrets=") for e in arg.removeprefix("--update-secrets=").split(",")]  # (story 4798: the list also carries the environment's signing secret)
+    assert "EDGE_CLIENT_IP_SECRET=EDGE_CLIENT_IP_SECRET_DEV:latest" in fe_dev_updates, fe_dev
     assert not [a for a in fe_dev if a.startswith("--remove-secrets")], fe_dev
     assert remove in fe_prod, fe_prod
     assert not [a for a in fe_prod if "EDGE_CLIENT_IP_SECRET_DEV" in a], fe_prod
