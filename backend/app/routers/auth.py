@@ -26,7 +26,7 @@ def _normalize_email(v: str) -> str:
         raise ValueError("Invalid email format")
     return v
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import delete, func, literal, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -454,9 +454,9 @@ async def _close_grace_windows_leading_to(session: AsyncSession, user_id: uuid.U
     plain logout did not). Walks `replaced_by` backwards through rows in any state, as far back as a window can still be open (see the bound below) — an intermediate already closed must not hide an older one still open — and lowers `expires_at` of the
     ones still open through the same seam as every explicit end. Returns how many windows it closed.
 
-    Residuals (named in the PR): (1) only the chain that leads TO the presented token is walked — a token a refresh already rotated forward (the logout was sent with a stale cookie) leaves
-    the live end of its chain alone, and the child of a rotation race LOSER (`won_atomic_rotation` false, §2449) has no predecessor pointing at it, so logging it out closes nothing behind it;
-    (2) the winner's `replaced_by` is a separate statement after the new row (§2449), but the new token reaches its client only after that statement, so a logout with it cannot cross it."""
+    Residuals (named in the PR): (1) only the chain that leads TO the presented token is walked here — the lineage AFTER it (a logout sent with a cookie a refresh had already rotated out) is
+    `_end_sessions_following`; the child of a rotation race LOSER (`won_atomic_rotation` false, §2449) has no predecessor pointing at it, so logging it out closes nothing behind it;
+    (2) the winner's `replaced_by` is written in the rotation's own transaction (`_store_refresh_token`), so it is committed with the successor — a logout with the new token cannot cross it."""
     # one recursive statement, no hop cap — and bounded by TIME instead: a window can only be open for a token a rotation ended inside `auth_refresh_chain_resolve_window_seconds`
     # (`revoked_at` newer than that; the refresh straggler test is the same), and a chain's `revoked_at` only grows toward the tip, so the first row older than the window ends the walk —
     # nothing behind it is exploitable. A row whose own window is already CLOSED (an explicit end by a switch · by a logout-others) is still walked through: an older one behind it can be
@@ -476,6 +476,39 @@ async def _close_grace_windows_leading_to(session: AsyncSession, user_id: uuid.U
         .values(expires_at=now)  # only the window closes (as `_revoke_other_sessions` does); the time the rotation ended it stays
     )
     return result.rowcount or 0
+
+
+_FORWARD_WALK_MAX_HOPS = 256  # a lineage seen from a stale cookie is a few rotations; the cap only keeps the cost of a logout bounded however long a chain somebody made
+
+
+async def _end_sessions_following(session: AsyncSession, user_id: uuid.UUID, token_id: uuid.UUID, now: datetime) -> int:
+    """story 4782 (second PR) — end what a rotation made FROM `token_id` (its successor, the successor's successor…): the same session, further along; and close the grace windows of the rotated ones.
+
+    A logout presents the cookie it has; a refresh that won the race a moment earlier has already rotated that token out and stored the next one, so ending only the presented token ends nothing and
+    leaves the session alive. Follows `replaced_by` forward (the link is committed with the successor — see `_store_refresh_token`) and (a) ends the live rows of the chain through the one revoke seam,
+    (b) closes the refresh grace window of every row of it that a rotation had ended BEFORE this logout (`revoked_at` set and not THIS logout's own stamp `now` — a pod with a fast clock may have stamped it later than `now`: the presented token itself and the hops between it and the live end — a rotated
+    row keeps its expiry for the window of §2449, and a refresh with it would fork a new pair of the session that was just logged out). Bounded by hops, not by a clock: a rotation paused for minutes
+    commits a successor whose `created_at` is the start of its transaction. `UNION` + the depth cap end a corrupted loop. Read through the `user_id` index. Returns how many it ended in (a).
+
+    Residual (named in the PR): the cap is a SECURITY limit too, not only a cost one — a logout whose cookie is more than `_FORWARD_WALK_MAX_HOPS` rotations behind the session's live end does not end or
+    window-close the part of the lineage beyond the cap (a cookie that stale does not come from a browser that is still refreshing it)."""
+    start = select(RefreshToken.id, RefreshToken.replaced_by, literal(0).label("depth")).where(
+        RefreshToken.user_id == user_id, RefreshToken.id == token_id,
+    ).cte("session_forward", recursive=True)
+    forward = start.union(select(RefreshToken.id, RefreshToken.replaced_by, (start.c.depth + 1).label("depth")).where(
+        RefreshToken.user_id == user_id, RefreshToken.id == start.c.replaced_by, start.c.depth < _FORWARD_WALK_MAX_HOPS,
+    ))
+    ended = await session.execute(
+        update(RefreshToken)
+        .where(RefreshToken.id.in_(select(forward.c.id)), RefreshToken.id != token_id, RefreshToken.revoked_at.is_(None), RefreshToken.expires_at > now)
+        .values(**_explicit_revoke_values(now))
+    )
+    await session.execute(
+        update(RefreshToken)
+        .where(RefreshToken.id.in_(select(forward.c.id)), RefreshToken.revoked_at.is_not(None), RefreshToken.revoked_at != now, RefreshToken.expires_at > now)
+        .values(expires_at=now)  # only the window closes (as `_revoke_other_sessions` does); the time the rotation ended it stays
+    )
+    return ended.rowcount or 0
 
 
 async def _was_superseded_by_a_switch(session: AsyncSession, row: object | None, now: datetime) -> bool:
@@ -514,8 +547,8 @@ async def _was_superseded_by_a_switch(session: AsyncSession, row: object | None,
             session_alive = True
             break
         if hop.replaced_by is None:
-            # revoked, no successor linked: a rotation in flight (the atomic revoke commits first, the new token is inserted and linked in later commits) while it is recent — the session is moving
-            # on, not over; an old dead end is nothing to move on to. Wrongly «alive» costs one more ask of the client (the window ends in seconds); wrongly «dead» logs a live person out.
+            # revoked, no successor linked: a rotation whose successor is not (yet) named — a rotation race LOSER's fork leaves no link, and a token ended before the link moved into the rotation's own
+            # transaction (story 4782, second PR) has none — while it is recent: the session is moving on, not over; an old dead end is nothing to move on to. Wrongly «alive» costs one more ask of the client (the window ends in seconds); wrongly «dead» logs a live person out.
             session_alive = hop.revoked_at > now - timedelta(seconds=settings.auth_refresh_superseded_window_seconds)
             break
         hop_id = hop.replaced_by
@@ -1035,6 +1068,7 @@ async def _store_refresh_token(
     *,
     app_metadata: dict,
     token_id: uuid.UUID | None = None,
+    replaces_token_hash: str | None = None,
 ) -> uuid.UUID:
     """story #4400 — the refresh token carries its session's org and project (the app_metadata the tokens were issued
     with). A refresh re-issues that session's context (`_refresh_session_context`), so each session keeps its own org:
@@ -1048,6 +1082,12 @@ async def _store_refresh_token(
         expires_at=expires_at,
     )
     session.add(row)
+    if replaces_token_hash is not None:
+        # story 4782 (second PR): a rotation names its successor IN THE SAME TRANSACTION that ends the old token and inserts the new one — not in a statement after the commit. The person's session lock
+        # is released at that commit, and whoever takes it next (a phone removal, a logout) follows `replaced_by` from the old token to the live end: a link that is written a moment later would be
+        # missing exactly when they look. (`replaced_by` is a deferred foreign key; the row is flushed first, so it exists when the link is written.)
+        await session.flush()
+        await session.execute(update(RefreshToken).where(RefreshToken.token_hash == replaces_token_hash).values(replaced_by=row.id))
     await session.commit()
     return row.id
 
@@ -1372,8 +1412,8 @@ async def refresh_token(
     # 즉 진짜 승자의 원자 revoke 자체가 무효화되어 같은 RT가 재사용 가능한 상태로 되돌아가는
     # — e5225c0a P0가 막으려던 바로 그 single-use 불변식 파손을 재도입하는 회귀였다. 감사기록
     # (replaced_by)의 성패가 anti-replay 불변식의 성패에 영향을 줘선 안 된다 — 그래서 이 revoke
-    # UPDATE는 replaced_by 없이 «독립적으로» 커밋되고, replaced_by는 새 row가 실제로 INSERT+
-    # commit된 «후에» 별개 문장으로 기록한다(아래 _store_refresh_token 호출부 이후).
+    # UPDATE는 replaced_by 없이 쓰이고(이 문장에는 링크가 없다), 링크는 새 row가 flush된 «뒤» 같은 트랜잭션 안에서 기록된다 — story 4782(둘째 PR): `_store_refresh_token(replaces_token_hash=…)`가
+    # flush → 링크 UPDATE → commit 한 번. (이 주석의 옛 판은 «commit 後 별개 문장»이었다 — 그 사이 틈을 폰 제거 · 로그아웃이 읽었다.)
     rotated = (await session.execute(
         update(RefreshToken)
         .where(
@@ -1410,8 +1450,8 @@ async def refresh_token(
         # 이었지만, logout·set-password confirm·switch-* «대량 무효화»(명시 폐기)로
         # 죽은 RT도 이 창(기본 180s) 안이면 그냥 통과해 새 토큰을 fork했다(카디르 직접
         # 재현: confirm 직후/60s/170s 옛 RT refresh 200). replaced_by는 이 구분에 못
-        # 쓴다 — 승자가 그 값을 새 row INSERT+commit «後» 별개 문장으로 채우는 타이밍
-        # 이라(위 §2449 주석), 진짜 동시 경합(asyncio.gather)에서 replaced_by IS NOT
+        # 쓴다 — 승자의 링크는 새 row와 «같은 커밋»에서야(story 4782 둘째 PR 이후; 그 전엔 commit 後 별개 문장) 다른 연결에 보이므로,
+        # 진짜 동시 경합(asyncio.gather)에서 replaced_by IS NOT
         # NULL 조건을 걸면 그 커밋 전에 도착한 패자의 select가 오탐 401난다(실측:
         # test_concurrent_refresh_same_token_exactly_one_succeeds_realdb 회귀 — 새
         # 컬럼/조건 시도 뒤 되돌림). 대신 명시 폐기 UPDATE(아래 §3649 표시 3곳)가
@@ -1538,17 +1578,12 @@ async def refresh_token(
         str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         session_started_at=_session_started_at,
     )
-    new_token_id = await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=_md)
-    if won_atomic_rotation:
-        # story #2449(회귀 수정): 이 시점엔 새 row가 이미 INSERT+commit 완료라(_store_refresh_
-        # token 내부), old row의 이 UPDATE가 실패하거나 프로세스가 죽어도 원자 revoke(위)는
-        # 이미 별개로 확定돼 있어 anti-replay 불변식과 무관 — 순수 감사기록일 뿐이다.
-        await session.execute(
-            update(RefreshToken)
-            .where(RefreshToken.token_hash == token_hash)
-            .values(replaced_by=new_token_id)
-        )
-        await session.commit()
+    # story 4782 (second PR): the winner's `replaced_by` link is written by `_store_refresh_token` in the SAME transaction as the revoke above and the new row (it used to be a separate statement
+    # after the commit; the revoke and the new row were already one transaction — the link was the only part that came later, and a phone removal / logout that follows the chain missed it)
+    await _store_refresh_token(
+        session, user, tokens["refresh_token"], refresh_exp, app_metadata=_md,
+        replaces_token_hash=token_hash if won_atomic_rotation else None,
+    )
     # #2124(관측성 보강): 성공 회전도 old_key→new_key로 로깅 — 지금까지 성공 경로엔 로그가
     # 아예 없어(까심발견류 '침묵이 결함을 오래 살린다'와 동형) "회전은 성공했는데 클라가 새
     # 토큰을 저장 못 했는가(㉮)"를 훗날 old_key의 하드 401과 new_key의 미사용 여부로 대조
@@ -1626,11 +1661,9 @@ async def switch_account(
         str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         session_started_at=_session_started_at,
     )
-    new_token_id = await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=_md)
-    # story 4778 — the rotation names its successor, as `refresh_token()` does (audit only: no rule of the refresh grace window reads it). A rotated token that points at nothing looks exactly like
-    # a rotation still in flight to the «superseded» answer of the refresh route, which follows `replaced_by` from a switch's token to the session's live end.
-    await session.execute(update(RefreshToken).where(RefreshToken.token_hash == token_hash).values(replaced_by=new_token_id))
-    await session.commit()
+    # story 4778 — the rotation names its successor, as `refresh_token()` does (audit only for the grace window: no rule of it reads the link; the refresh route's «superseded» answer follows it). A rotated
+    # token that points at nothing looks exactly like a rotation still in flight. Story 4782 (second PR): written in the SAME transaction as the revoke and the new row (`replaces_token_hash`).
+    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=_md, replaces_token_hash=token_hash)
 
     return _ok({
         **tokens,
@@ -1650,16 +1683,24 @@ async def logout(
     # (`expires_at > now()` 조건)가 구조적으로 이 RT를 재사용 대상에서 뺀다(§3649
     # 주석, refresh_token() 참고) — 명시 logout은 회전 경합 straggler 구제 대상이
     # 아니다.
-    _now = datetime.now(timezone.utc)
     presented = (await session.execute(select(RefreshToken.id, RefreshToken.user_id).where(RefreshToken.token_hash == token_hash))).first()
+    if presented is not None:
+        # story 4782 (second PR): the person's session lock FIRST (exclusive). The walk forward below follows `replaced_by` from the presented token; without the lock a rotation of a LATER token of the
+        # same lineage in flight (S -> S2 while this logout waits on S's row) commits after the walk's snapshot was taken and S2 is missed. With it, every rotation in flight has committed — links
+        # included — before the walk reads, and a rotation that comes after finds its token ended.
+        await _lock_person_sessions(session, presented.user_id, exclusive=True)
+    _now = datetime.now(timezone.utc)
     await session.execute(
         update(RefreshToken)
         .where(RefreshToken.token_hash == token_hash, RefreshToken.revoked_at.is_(None))
         .values(**_explicit_revoke_values(_now))
     )
-    # story 4782 — the tokens a refresh spent on the way to this one keep their grace window (§2449) after this logout, and a refresh with one of them forks a new pair for the session
-    # that just ended. They end with it (the same close `_revoke_other_sessions` makes for its roads).
+    # story 4782 — the tokens a refresh spent on the way to this one keep their grace window (§2449) after this logout, and a refresh with one of
+    # them forks a new pair for the session that just ended. They end with it (the same close `_revoke_other_sessions` makes for its roads).
+    # Second PR: the cookie this logout was sent with may itself have been rotated out a moment ago (a refresh won the race): the tokens a rotation made FROM it are the same session — they end — and the
+    # grace windows of the rotated ones (that cookie included) close.
     if presented is not None:
+        await _end_sessions_following(session, presented.user_id, presented.id, _now)
         await _close_grace_windows_leading_to(session, presented.user_id, presented.id, _now)
     await session.commit()
     return _ok({"ok": True})

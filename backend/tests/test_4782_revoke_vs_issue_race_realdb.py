@@ -29,7 +29,7 @@ pytestmark = [
 _ISSUERS = ["switch_to_org2", "switch_to_project2", "refresh", "switch_account"]
 # every way a person's sessions all end: an administrator's removal · «sign out everywhere else» · a password change · the person deleting the account · a mailbox proof that reclaims
 # an account nobody had proved (it drops every sign-in)
-_REVOKERS = ["removal", "logout_others", "change_password", "delete_account", "verify_email"]
+_REVOKERS = ["removal", "logout_others", "change_password", "reset_password", "delete_account", "verify_email"]
 _WAIT = 60  # no test may hang forever on a lock wait that is not a deadlock
 
 
@@ -61,6 +61,15 @@ async def _revoke(w, revoker: str, *, kept: dict, admin: dict, seat):
         return await w.client.patch("/api/v2/auth/change-password", json={"current_password": _PASSWORD, "new_password": "new-pw-4782-Xx1"}, headers=bearer)
     if revoker == "delete_account":
         return await w.client.post("/api/v2/account/delete", headers=bearer)
+    if revoker == "reset_password":  # the mailed link: signed out, the token names the password it replaces
+        from sqlalchemy import select
+
+        from app.core.security import create_password_reset_token
+        from app.models.user import User
+
+        async with w.Session() as s:
+            current = (await s.execute(select(User.hashed_password).where(User.id == w.user_id))).scalar_one()
+        return await w.client.post("/api/v2/auth/reset-password", json={"token": create_password_reset_token(str(w.user_id), current), "new_password": "new-pw-4782-Xx1"})
     if revoker == "verify_email":
         from app.core.security import create_email_verification_token
 
@@ -87,15 +96,17 @@ async def _live_except(w, kept: dict | None) -> int:
         return (await s.execute(select(func.count()).select_from(RefreshToken).where(*conditions))).scalar_one()
 
 
-async def _wait_until_a_lock_is_waited_for(w, timeout: float = 10.0) -> bool:
-    """true as soon as some backend is waiting for a lock (the advisory lock with the fix · the source row's lock without it) — the revoke has reached the point under test, no sleeping and hoping"""
+async def _wait_until_a_lock_is_waited_for(w, timeout: float = 3.0) -> bool:
+    """true as soon as some backend is waiting for a person's session lock (an ADVISORY lock that is not granted) — the revoke has reached the point under test, no sleeping and hoping. Without the
+    lock (the code before the fix, or a mutant that took it out) nothing ever waits on it: the wait then runs out after `timeout` and the test goes on, so the revoke has had that long to reach
+    whatever it waits on instead (the source token's row) — the assertions after it decide."""
     from sqlalchemy import text
 
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     while loop.time() < deadline:
         async with w.Session() as s:
-            if (await s.execute(text("SELECT count(*) FROM pg_locks WHERE NOT granted"))).scalar_one():
+            if (await s.execute(text("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted"))).scalar_one():
                 return True
         await asyncio.sleep(0.05)
     return False
@@ -134,7 +145,7 @@ async def test_a_token_issued_while_every_other_session_is_ended_does_not_surviv
         await asyncio.wait_for(reached.wait(), 15)  # the source token is ended; the new one is not stored yet
 
         revoke = asyncio.create_task(_revoke(w, revoker, kept=kept, admin=admin, seat=seat))
-        await _wait_until_a_lock_is_waited_for(w)  # the revoke queues behind the issue (on the person's session lock; before the fix, on the source row)
+        assert await _wait_until_a_lock_is_waited_for(w), f"{issuer} × {revoker}: the revoke did not queue on the person's session lock behind the issue"
         release.set()
         issued, revoked = await asyncio.wait_for(asyncio.gather(issue, revoke), _WAIT)
 
@@ -169,7 +180,7 @@ async def test_the_revoke_first_makes_the_issue_wait_and_then_refuses_it(issuer,
         revoke = asyncio.create_task(w.client.post("/api/v2/auth/logout-others", json={"refresh_token": kept["refresh_token"]}, headers={"Authorization": f"Bearer {kept['access_token']}"}))
         await asyncio.wait_for(reached.wait(), 15)
         issue = asyncio.create_task(_issue(w, issuer, member))
-        await _wait_until_a_lock_is_waited_for(w, timeout=3.0)
+        assert await _wait_until_a_lock_is_waited_for(w), f"{issuer}: the issue did not queue on the person's session lock behind the revoke"
         await asyncio.sleep(0.5)
         assert not issue.done(), f"{issuer}: the issue ran on while the revoke held the person's session lock"
         release.set()
@@ -204,7 +215,7 @@ async def test_revoke_and_issue_crossing_for_real_end_with_nothing_alive_and_no_
         await _close(engine, w)
 
 
-@pytest.mark.parametrize("revoker", ["change_password", "delete_account", "verify_email"])
+@pytest.mark.parametrize("revoker", ["change_password", "reset_password", "delete_account", "verify_email"])
 @pytest.mark.parametrize("issuer", ["switch_to_org2", "switch_to_project2"])
 async def test_a_revoke_that_writes_the_persons_row_queues_on_the_lock_before_it_does(issuer, revoker, monkeypatch):
     """lock ORDER, held still: a switch has claimed its token (it holds the person's session lock, SHARED) and has NOT yet written the person's row (`last_org_id` · `last_project_id` — a later
@@ -272,5 +283,167 @@ async def test_after_the_set_password_confirmation_a_token_a_rotation_just_ended
         assert resp.status_code == 401, f"{late}: a token a rotation had just ended minted a new pair after the password was set: {resp.status_code} {resp.text}"
         assert await w.token_rows() == before
         assert await w.live_tokens() == 0
+    finally:
+        await _close(engine, w)
+
+
+async def test_one_persons_revoke_does_not_hold_up_another_persons_refresh(monkeypatch):
+    """the lock is per PERSON: while one person's all-device revoke holds it (paused right after it was granted), another person's refresh goes through at once. A lock keyed on «everybody» would
+    stall every sign-in renewal of the product behind one person's account deletion."""
+    import app.routers.auth as auth_router
+
+    engine, w = await _world()
+    try:
+        member = await w.login()
+        kept = await w.login()
+        admin = await w.login(w.admin_email)  # another person
+        real_lock = auth_router._lock_person_sessions
+        reached, release = asyncio.Event(), asyncio.Event()
+
+        async def holding_lock(session, user_id, *, exclusive):
+            await real_lock(session, user_id, exclusive=exclusive)
+            if exclusive and user_id == w.user_id and not reached.is_set():
+                reached.set()
+                await release.wait()
+
+        monkeypatch.setattr(auth_router, "_lock_person_sessions", holding_lock)
+        revoke = asyncio.create_task(w.client.post("/api/v2/auth/logout-others", json={"refresh_token": kept["refresh_token"]}, headers={"Authorization": f"Bearer {kept['access_token']}"}))
+        await asyncio.wait_for(reached.wait(), 15)
+        try:
+            other = await asyncio.wait_for(w.refresh(admin["refresh_token"]), 10)
+            assert other.status_code == 200, other.text
+        finally:
+            release.set()
+        assert (await asyncio.wait_for(revoke, _WAIT)).status_code == 200
+        assert member["refresh_token"]
+    finally:
+        await _close(engine, w)
+
+
+@pytest.mark.parametrize("issuer", ["refresh", "switch_account"])
+async def test_a_rotation_commits_its_link_to_the_new_token_with_the_new_token(issuer, monkeypatch):
+    """the person's session lock is released at the commit that stores the successor; whoever takes it next (a phone removal, a logout) follows `replaced_by` from the old token. The link must be in that
+    commit — not written by a statement that comes after it (a gap in which the chain looks like it ends at the old token)."""
+    from sqlalchemy import select
+
+    import app.routers.auth as auth_router
+    from app.core.security import hash_token
+    from app.models.user import RefreshToken
+
+    engine, w = await _world()
+    try:
+        member = await w.login()
+        original = auth_router._store_refresh_token
+        seen: list = []
+
+        async def checking(session, user, *args, **kwargs):
+            result = await original(session, user, *args, **kwargs)
+            async with w.Session() as s:  # a separate connection: only what the commit made visible
+                seen.append((await s.execute(select(RefreshToken.replaced_by).where(RefreshToken.token_hash == hash_token(member["refresh_token"])))).scalar_one())
+            return result
+
+        monkeypatch.setattr(auth_router, "_store_refresh_token", checking)
+        resp = await _issue(w, issuer, member)
+        assert resp.status_code == 200, resp.text
+        assert len(seen) == 1 and seen[0] is not None, f"{issuer}: the old token did not point at its successor when the successor's commit became visible: {seen}"
+    finally:
+        await _close(engine, w)
+
+
+async def test_a_logout_with_the_cookie_a_refresh_is_rotating_ends_the_session_the_refresh_started(monkeypatch):
+    """the cookie the browser logs out with was rotated out by a refresh that is still in flight (it has ended that token and not yet stored the next one). The logout used to find its token
+    already ended, end nothing and leave the successor alive. Now it queues on the person's lock, sees the successor the refresh commits and ends it too."""
+    import app.routers.auth as auth_router
+
+    engine, w = await _world()
+    try:
+        member = await w.login()
+        original = auth_router._store_refresh_token
+        reached, release = asyncio.Event(), asyncio.Event()
+
+        async def paused(session, user, *args, **kwargs):
+            reached.set()
+            await release.wait()
+            return await original(session, user, *args, **kwargs)
+
+        monkeypatch.setattr(auth_router, "_store_refresh_token", paused)
+        refresh = asyncio.create_task(w.refresh(member["refresh_token"]))
+        await asyncio.wait_for(reached.wait(), 15)
+        logout = asyncio.create_task(w.client.post("/api/v2/auth/logout", json={"refresh_token": member["refresh_token"]}))
+        assert await _wait_until_a_lock_is_waited_for(w), "the logout did not queue on the person's session lock behind the refresh"
+        release.set()
+        refreshed, logged_out = await asyncio.wait_for(asyncio.gather(refresh, logout), _WAIT)
+        assert refreshed.status_code == 200, refreshed.text
+        assert logged_out.status_code == 200, logged_out.text
+        assert await _live_except(w, None) == 0, "the logout left the session alive: the successor the refresh committed is live"
+        assert (await w.refresh(refreshed.json()["data"]["refresh_token"])).status_code == 401
+    finally:
+        await _close(engine, w)
+
+
+async def test_a_logout_with_a_cookie_that_was_just_rotated_out_leaves_that_cookie_unusable():
+    """R0 -> R1 by refresh (R0's grace window is open), then the browser logs out with the OLD cookie R0. R1 ends (it is the same session), and R0 itself must not be exchangeable any more: a logout
+    that only skipped the already-ended R0 would leave R0's window open and a refresh with it would mint a live fork of the session that was just logged out."""
+    engine, w = await _world()
+    try:
+        r0 = await w.login()
+        r1 = (await w.refresh(r0["refresh_token"])).json()["data"]
+        assert (await w.client.post("/api/v2/auth/logout", json={"refresh_token": r0["refresh_token"]})).status_code == 200
+        assert await _live_except(w, None) == 0, "the session's later token is alive after the logout"
+        before = await w.token_rows()
+        resp = await w.refresh(r0["refresh_token"])
+        assert resp.status_code == 401, f"the cookie the logout was sent with minted a new pair afterwards: {resp.status_code} {resp.text}"
+        assert await w.token_rows() == before
+        assert (await w.refresh(r1["refresh_token"])).status_code == 401
+    finally:
+        await _close(engine, w)
+
+
+async def test_a_logout_waits_for_a_later_rotation_of_the_same_session_in_flight(monkeypatch):
+    """R0 -> R1 is done; a refresh of R1 (-> R2) is in flight; the browser logs out with the OLD cookie R0. Following the chain forward from R0 without waiting would stop at R1 (R1's row is locked by
+    the refresh in flight, R2 is not visible yet): R2 would live on. The logout takes the person's lock first, so R2 and its link have been committed when it reads."""
+    import app.routers.auth as auth_router
+
+    engine, w = await _world()
+    try:
+        r0 = await w.login()
+        r1 = (await w.refresh(r0["refresh_token"])).json()["data"]
+        original = auth_router._store_refresh_token
+        reached, release = asyncio.Event(), asyncio.Event()
+
+        async def paused(session, user, *args, **kwargs):
+            reached.set()
+            await release.wait()
+            return await original(session, user, *args, **kwargs)
+
+        monkeypatch.setattr(auth_router, "_store_refresh_token", paused)
+        refresh = asyncio.create_task(w.refresh(r1["refresh_token"]))
+        await asyncio.wait_for(reached.wait(), 15)
+        logout = asyncio.create_task(w.client.post("/api/v2/auth/logout", json={"refresh_token": r0["refresh_token"]}))
+        assert await _wait_until_a_lock_is_waited_for(w), "the logout did not queue on the person's session lock behind the rotation in flight"
+        release.set()
+        refreshed, logged_out = await asyncio.wait_for(asyncio.gather(refresh, logout), _WAIT)
+        assert refreshed.status_code == 200 and logged_out.status_code == 200
+        assert await _live_except(w, None) == 0, "the logout missed the token the refresh in flight handed out"
+        assert (await w.refresh(refreshed.json()["data"]["refresh_token"])).status_code == 401
+    finally:
+        await _close(engine, w)
+
+
+async def test_a_logout_with_the_oldest_cookie_closes_the_windows_of_every_rotated_token_after_it():
+    """R0 -> R1 -> R2 by refresh, the browser logs out with the OLD cookie R0. R2 (live) ends, and R1 — rotated out a moment ago, its grace window open — must not stay exchangeable either: a walk that ended
+    only the live rows would leave R1 able to fork a new pair of the session that was just logged out."""
+    engine, w = await _world()
+    try:
+        r0 = await w.login()
+        r1 = (await w.refresh(r0["refresh_token"])).json()["data"]
+        r2 = (await w.refresh(r1["refresh_token"])).json()["data"]
+        assert (await w.client.post("/api/v2/auth/logout", json={"refresh_token": r0["refresh_token"]})).status_code == 200
+        before = await w.token_rows()
+        for name, old in (("R0", r0), ("R1", r1), ("R2", r2)):
+            resp = await w.refresh(old["refresh_token"])
+            assert resp.status_code == 401, f"{name} still exchanged for a new pair after the logout: {resp.status_code} {resp.text}"
+        assert await w.token_rows() == before
+        assert await _live_except(w, None) == 0
     finally:
         await _close(engine, w)
