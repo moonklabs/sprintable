@@ -86,6 +86,66 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+describe('useSseMultiplexer — story #4797: no stream without a member id', () => {
+  // 예전엔 member_id만 빼고 열었고 BE가 400(«member_id query parameter required»)으로 거절해 EventSource backoff가 시간당 ~54번 재시도했다.
+  it('AC1 — memberId가 없으면(undefined · 빈 문자열) 연결 0, 값이 생기면 바로 1개(member_id 실림) — 되돌리면 RED', async () => {
+    await act(async () => { root.render(<Harness memberId={undefined} />); });
+    expect(instances).toHaveLength(0);
+    await act(async () => { root.render(<Harness memberId="" />); });
+    expect(instances).toHaveLength(0);
+    expect(handle?.connected).toBe(false);
+    await act(async () => { root.render(<Harness memberId="me-1" />); });
+    expect(instances).toHaveLength(1);
+    expect(new URL(instances[0]!.url).searchParams.get('member_id')).toBe('me-1');
+    // member_id 없는 /api/event-stream 요청은 한 번도 만들어지지 않았다
+    expect(instances.every((i) => new URL(i.url).searchParams.get('member_id'))).toBe(true);
+  });
+
+  it('AC2 로딩 중 — 구독이 먼저 걸려 있어도 값이 생긴 뒤 열린 스트림이 그 이벤트를 전달한다(구독 순서 무관은 그대로)', async () => {
+    await act(async () => { root.render(<Harness memberId={undefined} />); });
+    const received: string[] = [];
+    await act(async () => { handle!.subscribe('story.status_changed', (d) => received.push(d)); });
+    await act(async () => { root.render(<Harness memberId="me-1" />); });
+    expect(instances).toHaveLength(1);
+    dispatchNamed(instances[0]!, 'story.status_changed', { story_id: 's1' });
+    expect(received).toEqual([JSON.stringify({ story_id: 's1' })]);
+  });
+
+  it('AC2 로그아웃 직후 · 조직 없음 전환 — 값이 사라지면 열린 스트림을 닫고 다시 열지 않는다(400 재시도 루프 0)', async () => {
+    await act(async () => { root.render(<Harness memberId="me-1" />); });
+    expect(instances).toHaveLength(1);
+    await act(async () => { root.render(<Harness memberId={undefined} />); });
+    expect(instances[0]!.closed).toBe(true);
+    expect(instances).toHaveLength(1); // 새 연결 없음
+    expect(handle?.connected).toBe(false);
+    // 다시 값이 생기면(재로그인 · 다른 조직) 새 스트림이 새 member_id로 열린다
+    await act(async () => { root.render(<Harness memberId="me-2" />); });
+    expect(instances).toHaveLength(2);
+    expect(new URL(instances[1]!.url).searchParams.get('member_id')).toBe('me-2');
+    expect(instances[1]!.closed).toBe(false);
+  });
+
+  it('AC2 값이 없는 동안에는 시간이 흘러도 · 창 포커스 · 가시성 복귀에도 연결이 생기지 않는다(헛요청 0)', async () => {
+    vi.useFakeTimers();
+    try {
+      await act(async () => { root.render(<Harness memberId={undefined} />); });
+      await act(async () => { vi.advanceTimersByTime(10 * 60 * 1000); });
+      window.dispatchEvent(new Event('focus'));
+      Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+      await act(async () => { vi.advanceTimersByTime(10_000); });
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('focus'));
+      await act(async () => { vi.advanceTimersByTime(10 * 60 * 1000); });
+      expect(instances).toHaveLength(0);
+    } finally {
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('useSseMultiplexer — story #2078', () => {
   it('EventSource를 정확히 1개만 연다(story #4698 — 늘 켬 · 플래그 없음)', async () => {
     await act(async () => {
@@ -330,6 +390,26 @@ describe('useSseMultiplexer — story #2078', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
       expect(instances.length).toBeGreaterThan(1); // 백오프 지연 후 재연결됨
       vi.useRealTimers();
+    });
+
+    it('story #4797 — 세션 확認이 끝나기 전에 memberId가 비었다 돌아와도(정리된 effect) 낡은 재시도가 새 스트림의 재시도를 막지 않는다', async () => {
+      vi.useFakeTimers();
+      try {
+        let answer!: (r: Response) => void;
+        vi.mocked(fetchWithAuth).mockReturnValue(new Promise<Response>((r) => { answer = r; }));
+        await act(async () => { root.render(<Harness memberId="me-1" />); });
+        await act(async () => { instances[0]!.readyState = 2; instances[0]!.onerror?.(); }); // fatal: `/api/me`를 묻는 중
+        await act(async () => { root.render(<Harness memberId={undefined} />); }); // 로그아웃 — effect 정리
+        await act(async () => { root.render(<Harness memberId="me-2" />); }); // 다른 사람이 곧 로그인 — 새 스트림
+        expect(instances).toHaveLength(2);
+        await act(async () => { answer({ ok: true } as Response); await Promise.resolve(); }); // 낡은 effect의 세션 확認이 이제서야 «살아 있음»으로 끝남
+        await act(async () => { instances[1]!.readyState = 0; instances[1]!.onerror?.(); }); // 새 스트림의 transient 오류 → 백오프 재시도가 걸려야 한다
+        await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+        expect(instances.length, '낡은 재시도 타이머가 새 스트림의 재시도를 막았다').toBe(3);
+        expect(new URL(instances[2]!.url).searchParams.get('member_id')).toBe('me-2');
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('CONNECTING(transient) onerror는 세션 확認 없이 곧장 백오프 재시도한다', async () => {

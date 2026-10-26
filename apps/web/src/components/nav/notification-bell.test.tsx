@@ -23,7 +23,7 @@ function withIntl(node: React.ReactNode, locale: 'ko' | 'en' = 'ko') {
   const messages = locale === 'ko' ? koMessages : enMessages;
   return (
     <NextIntlClientProvider locale={locale} messages={messages} timeZone="Asia/Seoul">
-      <RealtimeProvider>{node}</RealtimeProvider>
+      <RealtimeProvider currentTeamMemberId="me-1">{node}</RealtimeProvider>
     </NextIntlClientProvider>
   );
 }
