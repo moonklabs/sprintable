@@ -20,7 +20,9 @@ HOST = "asia-northeast3-docker.pkg.dev/sprintable-494803/sprintable"
 
 
 def _digest(n: int) -> str:
-    return "sha256:" + f"{n:064x}"
+    """a distinct digest per `n`. The number sits at the FRONT of the 64 hex characters, like the distinct leading characters of real digests: the policy keeps only the first 64 characters of a digest
+    (Artifact Registry rejects a longer prefix), and fixtures that differ only in the last characters would all collapse to one prefix"""
+    return "sha256:" + f"{n:08x}".ljust(64, "0")  # 8 distinct leading hex characters, then zeros: unique for every n, and distinct within the first 64 characters
 
 
 def _images(package: str, count: int, *, step_days: int = 1) -> list[dict]:
@@ -110,7 +112,7 @@ def test_base_policy_alone_deletes_an_old_image_that_a_mig_template_still_pulls_
     assert hit == in_use, "the base policy alone must delete it — that is why keep-in-use exists"
 
     policy = gate.build_policy(_base(), in_use)
-    assert policy[0]["name"] == "keep-in-use" and policy[0]["condition"]["versionNamePrefixes"] == [_digest(45)]
+    assert policy[0]["name"] == "keep-in-use" and policy[0]["condition"]["versionNamePrefixes"] == [_digest(45)[:64]]  # the registry takes at most 64 characters
     deleted, hit = gate.check(versions, in_use, policy, NOW)
     assert hit == set()
     assert ("backend", _digest(45)) not in deleted and ("backend", _digest(46)) in deleted  # only the used one stays; its neighbours go
@@ -179,7 +181,7 @@ def test_a_moved_tag_is_still_protected_by_the_revisions_resolved_digest(tmp_pat
     d.revisions = [_revision("rev-9", f"{HOST}/backend:latest", image_digest=old)]
     assert gate.main(d.argv()) == 0
     kept = json.loads(d.out.read_text())[0]["condition"]["versionNamePrefixes"]
-    assert old in kept and new in kept
+    assert old[:64] in kept and new[:64] in kept
 
     # a serving revision deployed by tag whose dump has no resolved digest: the gate does not guess which digest it runs — exit 3, no policy
     d.revisions = [_revision("rev-9", f"{HOST}/backend:latest")]
@@ -191,7 +193,7 @@ def test_cli_ok_writes_the_generated_policy(tmp_path):
     assert gate.main(d.argv("--expect-services", "1", "--expect-jobs", "1")) == 0
     written = json.loads(d.out.read_text())
     assert written[0]["name"] == "keep-in-use"
-    assert {_digest(2), _digest(3), _digest(45)} <= set(written[0]["condition"]["versionNamePrefixes"])  # service tag · job tag · MIG tag
+    assert {_digest(2)[:64], _digest(3)[:64], _digest(45)[:64]} <= set(written[0]["condition"]["versionNamePrefixes"])  # service tag · job tag · MIG tag
 
 
 def test_cli_the_gate_can_go_red_and_leaves_no_policy_behind(tmp_path, monkeypatch, capsys):
@@ -496,3 +498,72 @@ def test_a_policy_that_cannot_be_encoded_is_exit_2_not_a_traceback(tmp_path, mon
     monkeypatch.setattr(gate.json, "dumps", lambda *a, **k: "\ud800")  # a lone surrogate cannot be written as UTF-8
     assert gate.main(argv) == 2 and not d.out.exists()
     assert not list(tmp_path.glob(f"{d.out.name}*"))
+
+
+def _in_use_of(d: "Dumps") -> tuple[list[gate.Version], set[tuple[str, str]]]:
+    versions = gate.load_versions(d.images)
+    return versions, {v.key() for v in versions if v.digest in {_digest(2), _digest(3), _digest(45)}}
+
+
+def test_generated_prefixes_are_within_the_registry_limit_of_64_characters(tmp_path):
+    """the live Artifact Registry answered `invalid prefix longer than 64 characters` to the full 71-character digest"""
+    d = Dumps(tmp_path)
+    versions, in_use = _in_use_of(d)
+    policy = gate.build_policy(_base(), in_use)
+    prefixes = policy[0]["condition"]["versionNamePrefixes"]
+    assert len(prefixes) == 3 and all(len(x) == 64 for x in prefixes)
+    assert sorted(prefixes) == sorted(digest[:64] for _pkg, digest in in_use)
+    assert all(len(digest) == 71 for _pkg, digest in in_use)  # the full digest would have been 7 characters too long
+    assert gate.policy_problems(policy) == []
+    assert gate.policy_problems([{"name": "x", "condition": {"versionNamePrefixes": [_digest(2)]}}]) != []  # positive control: the check can fail
+
+
+def test_the_truncated_policy_still_protects_exactly_what_is_in_use(tmp_path):
+    """the simulation matches by prefix like the registry does: with the 64-character prefixes the in-use images are still not deleted, and an unused old image is"""
+    d = Dumps(tmp_path)
+    versions, in_use = _in_use_of(d)
+    policy = gate.build_policy(_base(), in_use)
+    would_delete, hit = gate.check(versions, in_use, policy, NOW)
+    assert hit == set() and would_delete
+    _, base_hit = gate.check(versions, in_use, _base(), NOW)  # positive control: the base policy alone does delete an old in-use image (backend-tag45 is 45 days old)
+    assert base_hit
+
+
+def test_a_truncated_prefix_that_matches_two_versions_stops_with_exit_3(tmp_path, capsys):
+    """two different digests sharing their first 64 characters: the prefix would keep both, so the run stops and names them (safe side), and writes no policy file"""
+    d = Dumps(tmp_path)
+    twin = dict(d.images[2])
+    twin["version"] = _digest(2)[:64] + "abcdef0"  # same first 64 characters, another tail
+    twin["tags"] = ["twin-tag"]
+    d.images = d.images + [twin]
+    assert gate.main(d.argv()) == 3
+    assert "접두" in capsys.readouterr().out
+    assert not d.out.exists()
+
+
+def test_without_the_twin_the_same_call_is_ok(tmp_path):
+    d = Dumps(tmp_path)
+    assert gate.main(d.argv()) == 0 and d.out.exists()
+
+
+def test_the_written_policy_file_carries_only_prefixes_of_64_characters(tmp_path):
+    d = Dumps(tmp_path)
+    assert gate.main(d.argv()) == 0
+    written = json.loads(d.out.read_text())
+    prefixes = written[0]["condition"]["versionNamePrefixes"]
+    assert written[0]["name"] == "keep-in-use" and prefixes and all(len(x) <= 64 for x in prefixes)
+
+
+def test_a_policy_with_an_over_long_prefix_is_never_written_even_if_the_builder_regresses(tmp_path, monkeypatch, capsys):
+    """the second line of defence: if the builder ever hands back the full 71-character digest again, the run stops (exit 2) and writes nothing — the registry would reject that file anyway"""
+    d = Dumps(tmp_path)
+    real = gate.build_policy
+
+    def full_digest(base, in_use):
+        policy = real(base, in_use)
+        policy[0]["condition"]["versionNamePrefixes"] = sorted(dg for _pkg, dg in in_use)
+        return policy
+
+    monkeypatch.setattr(gate, "build_policy", full_digest)
+    assert gate.main(d.argv()) == 2
+    assert "AR" in capsys.readouterr().out and not d.out.exists()
