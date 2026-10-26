@@ -7184,10 +7184,23 @@
         }
       },
       "quick": {
-        "title": "Start an agent on this computer",
+        "title": "Create an agent",
         "titleAgent": "Start {name}",
         "stepAgent": "Agent",
         "stepFolder": "Folder",
+        "stepTool": "Tool",
+        "stepName": "Name and role",
+        "nameLabel": "Name",
+        "roleLabel": "Role (optional)",
+        "rolePlaceholder": "e.g. Code reviewer",
+        "create": "Create",
+        "creating": "Creating…",
+        "createLine": "Pressing Create adds one agent to this organization · name {name} · tool {runtime} · project {project}",
+        "createNothing": "No agent is created until you press it",
+        "blockName": "Type a name to create the agent",
+        "nameTaken": "That name is taken · an available one is in the field: {name} — press Create again if it suits you",
+        "nameTakenNoSuggestion": "That name is taken — type another one",
+        "createFailed": "Couldn't create the agent — try again",
         "tooOld": "{name} {version} — too old to use with this app · update it to choose it",
         "noAgentTitle": "We couldn't find Claude Code or Codex on this computer",
         "noAgentBody": "Install and sign in to Claude Code or Codex, then look again. You can install them from the terminal.",
@@ -7206,10 +7219,9 @@
         "folderOther": "Choose another folder",
         "start": "Start",
         "starting": "Starting…",
-        "startLine": "Creates one {runtime} agent, adds it to the {project} project, and opens a conversation in this folder",
-        "blockNoAgent": "You can start once an agent is found",
-        "blockNoFolder": "You can start once you choose a folder",
-        "blockWide": "You can start once you confirm the folder",
+        "blockNoAgent": "You can create once a tool is found",
+        "blockNoFolder": "You can create once you choose a folder",
+        "blockWide": "You can create once you confirm the folder",
         "team": "Set up a team of agents →",
         "refused": {
           "denied": "We can't open this folder — allow Sprintable in System Settings › Privacy & Security › Files and Folders, or choose another folder",
@@ -7220,8 +7232,8 @@
         "failed": "Couldn't start — try again",
         "limit": {
           "title": "The free plan has one project",
-          "body": "You can add this folder's agent to the {project} project and start — the agent works in this folder.",
-          "addStart": "Add and start"
+          "body": "You can add this folder's agent to the {project} project and create it — the agent works in this folder.",
+          "addStart": "Add and create"
         }
       },
       "direct": {

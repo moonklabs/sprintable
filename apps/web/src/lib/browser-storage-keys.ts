@@ -62,6 +62,8 @@ export const BROWSER_STORAGE_KEYS: readonly StorageKeyEntry[] = [
   { key: 'sprintable:intent-suggestion:dismissed', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['lib/intent-suggestion-dismissal.ts'] },
   // the desktop setup in progress in this tab (30 min) — a document opened after a switch would report the previous account's setup
   { key: 'sprintable_desktop_setup_active', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['lib/desktop-setup.ts'] },
+  // story 4784: the name and role the person typed for the agent the first-setup card makes — kept across the Mac folder window's page reload, per setup; it is the account's words (a next account must not inherit it)
+  { key: 'sprintable.desktopSetupQuick.typed.v1', area: 'session', scope: 'account', on: ['signout', 'switch'], where: ['lib/desktop-setup-quick.ts'] },
   { key: 'sprintable:reference-candidates:rejected', prefix: true, area: 'local', scope: 'account', on: ['signout', 'switch'], where: ['lib/reference-candidates.ts'] },
 
   // ── kept: view settings inside one project · device layout · per-person keys · in-flight payment (its own card, 4488) ──

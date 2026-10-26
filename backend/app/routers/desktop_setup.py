@@ -81,11 +81,13 @@ _STATUS = {
     "app_cannot_move": 409,
     # story 4711: the app that made the code did not say it can take a solo setup (an app from before) — update the app
     "app_cannot_solo": 409,
+    # story 4784: the name the person typed for the new agent is taken by an active agent of the organization — the answer names the free one
+    "agent_name_taken": 409,
 }
 
 
 def _error(e: DesktopSetupError) -> HTTPException:
-    return HTTPException(status_code=_STATUS.get(e.code, 400), detail={"code": e.code, "message": e.detail or e.code})
+    return HTTPException(status_code=_STATUS.get(e.code, 400), detail={"code": e.code, "message": e.detail or e.code, **e.extra})
 
 
 def _human_only(auth: AuthContext) -> uuid.UUID:
@@ -262,6 +264,41 @@ async def post_confirm(
     )
 
 
+AGENT_NAME_MAX = 60
+AGENT_ROLE_MAX = 200  # the daemon reads the role as a one-line persona of at most this many characters (agent_run_profile.PERSONA_ROLE_MAX)
+
+
+def _no_control_characters(v: str) -> str:
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in v):
+        raise ValueError("must not contain control characters")
+    return v
+
+
+def _agent_name_one_line(v: str | None) -> str | None:
+    """story 4784: the name the person typed — trimmed, inner runs of spaces kept as typed words, never blank, no control characters."""
+    if v is None:
+        return v
+    v = v.strip()
+    if not v:
+        raise ValueError("must not be blank")
+    return _no_control_characters(v)
+
+
+def _agent_role_one_line(v: str | None) -> str | None:
+    """story 4784: the role is optional — a blank one is no role (the agent is made as before, with none)."""
+    if v is None:
+        return v
+    v = v.strip()
+    return _no_control_characters(v) if v else None
+
+
+def _folder_name_one_line(v: str | None) -> str | None:
+    if v is None:
+        return v
+    v = v.strip()
+    return _no_control_characters(v) if v else None
+
+
 class ConfirmSoloRequest(BaseModel):
     """story 4711 — «시작» of the first setup in three steps: the runtime the person picked and the folder's project. Exactly one of
     `project_id` (the app found a project that already uses the chosen folder) and `project_name` (the folder's name — a new
@@ -274,6 +311,26 @@ class ConfirmSoloRequest(BaseModel):
     project_name: str | None = Field(default=None, min_length=1, max_length=100)
     workdir_hint: str | None = Field(default=None, max_length=200)
     tools: list[str] | None = Field(default=None, max_length=AGENT_TOOLS_CAP)
+    # story 4784 — what the person saw and pressed «만들기» on: the agent's name and role, and the folder's NAME (never a path). All optional
+    # on the wire (a page from before still starts with the program's name); the new card always sends them.
+    agent_name: str | None = Field(default=None, max_length=AGENT_NAME_MAX)
+    agent_role: str | None = Field(default=None, max_length=AGENT_ROLE_MAX)
+    folder_name: str | None = Field(default=None, max_length=100)
+
+    @field_validator("agent_name")
+    @classmethod
+    def _agent_name_one_line(cls, v: str | None) -> str | None:
+        return _agent_name_one_line(v)
+
+    @field_validator("agent_role")
+    @classmethod
+    def _agent_role_one_line(cls, v: str | None) -> str | None:
+        return _agent_role_one_line(v)
+
+    @field_validator("folder_name")
+    @classmethod
+    def _folder_name_one_line(cls, v: str | None) -> str | None:
+        return _folder_name_one_line(v)
 
     @field_validator("project_name")
     @classmethod
@@ -321,6 +378,7 @@ async def post_confirm_solo(
         setup_id, members, project_id, conversation_id = await confirm_solo_setup(
             db, code=body.code, user_id=user_id, org_id=org_id, runtime=body.runtime, project_id=body.project_id,
             project_name=body.project_name, auth=auth, workdir_hint=body.workdir_hint, tools=body.tools,
+            agent_name=body.agent_name, agent_role=body.agent_role, folder_name=body.folder_name,
         )
     except DesktopSetupError as e:
         # get_db rolls the whole session back: no project, agent or room is left by a failed start (the plan's 402 too)
@@ -417,6 +475,24 @@ class ConfirmSoloNewOrgRequest(BaseModel):
     project_name: str = Field(min_length=1, max_length=100)
     workdir_hint: str | None = Field(default=None, max_length=200)
     tools: list[str] | None = Field(default=None, max_length=AGENT_TOOLS_CAP)
+    agent_name: str | None = Field(default=None, max_length=AGENT_NAME_MAX)  # story 4784 — as in ConfirmSoloRequest
+    agent_role: str | None = Field(default=None, max_length=AGENT_ROLE_MAX)
+    folder_name: str | None = Field(default=None, max_length=100)
+
+    @field_validator("agent_name")
+    @classmethod
+    def _agent_name_one_line(cls, v: str | None) -> str | None:
+        return _agent_name_one_line(v)
+
+    @field_validator("agent_role")
+    @classmethod
+    def _agent_role_one_line(cls, v: str | None) -> str | None:
+        return _agent_role_one_line(v)
+
+    @field_validator("folder_name")
+    @classmethod
+    def _folder_name_one_line(cls, v: str | None) -> str | None:
+        return _folder_name_one_line(v)
 
     @field_validator("org_name", "project_name")
     @classmethod
@@ -452,6 +528,7 @@ async def post_confirm_solo_new_org(
         setup_id, members, org_id, project_id, conversation_id = await confirm_solo_setup_new_org(
             db, code=body.code, user_id=user_id, org_name=body.org_name, project_name=body.project_name, runtime=body.runtime,
             auth=auth, workdir_hint=body.workdir_hint, tools=body.tools,
+            agent_name=body.agent_name, agent_role=body.agent_role, folder_name=body.folder_name,
         )
     except DesktopSetupError as e:
         raise _error(e) from None  # get_db rolls the whole session back: no organization, project, agent or room is left

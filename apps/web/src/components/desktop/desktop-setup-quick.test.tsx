@@ -86,12 +86,12 @@ afterEach(async () => { await act(async () => { root.unmount(); }); container.re
 describe('[SID:4711] the first setup in three steps', () => {
   it('opens with the program picked, the folder button, and [시작] off with its reason in view', async () => {
     await mount(frag(''), { projects: [] });
-    expect(text()).toContain('이 컴퓨터에서 에이전트 시작하기');
+    expect(text()).toContain('에이전트 만들기');
     expect((container.querySelector('input[name=quick-runtime]:checked')!.parentElement)!.textContent).toContain('Claude Code');
     expect(text()).toContain('2.1.289'); // the version after the name
     expect(linkOf('폴더 고르기')!.getAttribute('href')).toBe('ai.sprintable:/desktop/setup?intent=folder&pick=claude');
-    expect(buttonOf('시작')!.disabled).toBe(true);
-    expect(container.querySelector('[data-testid=quick-start-line]')!.textContent).toBe('폴더를 고르면 시작할 수 있어요'); // a line, not a tooltip
+    expect(buttonOf('만들기')!.disabled).toBe(true);
+    expect(container.querySelector('[data-testid=quick-start-line]')!.textContent).toBe('폴더를 고르면 만들 수 있어요'); // a line, not a tooltip
     expect(text()).toContain('여러 에이전트로 팀 꾸리기 →');
   });
 
@@ -105,18 +105,18 @@ describe('[SID:4711] the first setup in three steps', () => {
     await mount(frag('&fshown=~/code/my-app&fname=my-app'), { projectId: PROJ, projects: [{ projectId: PROJ, projectName: 'Existing', orgId: 'o-1' }] });
     expect(container.querySelector('[data-testid=quick-folder]')!.textContent).toBe('~/code/my-app');
     expect(container.querySelector('[data-testid=quick-project]')!.textContent).toBe('프로젝트 이름 · my-app');
-    expect(container.querySelector('[data-testid=quick-start-line]')!.textContent).toBe('Claude Code 에이전트 하나를 만들어 my-app 프로젝트에 넣고, 이 폴더에서 대화를 열어요');
-    expect(buttonOf('시작')!.disabled).toBe(false);
-    await act(async () => { buttonOf('시작')!.click(); });
+    expect(container.querySelector('[data-testid=quick-start-line]')!.textContent).toBe('만들기를 누르면 이 조직에 에이전트가 하나 생겨요 · 이름 Claude Code · 도구 Claude Code · 프로젝트 my-app');
+    expect(buttonOf('만들기')!.disabled).toBe(false);
+    await act(async () => { buttonOf('만들기')!.click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     const post = calls.find((c) => c.url.endsWith('/confirm-solo'))!;
-    expect(post.body).toEqual({ code: CODE, runtime: 'claude', project_name: 'my-app' }); // no path, no workdir
+    expect(post.body).toEqual({ code: CODE, runtime: 'claude', project_name: 'my-app', agent_name: 'Claude Code', folder_name: 'my-app' }); // no path, no workdir
     expect(JSON.stringify(calls)).not.toContain('~/code');
   });
 
   it('codex self-QA: two presses of [시작] before the screen redraws send ONE confirmation', async () => {
     await mount(frag('&fshown=~/code/my-app&fname=my-app'), { projectId: PROJ, projects: [{ projectId: PROJ, projectName: 'Existing', orgId: 'o-1' }] });
-    const go = buttonOf('시작')!;
+    const go = buttonOf('만들기')!;
     await act(async () => { go.click(); go.click(); });
     for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
     expect(calls.filter((c) => c.url.endsWith('/confirm-solo')).length).toBe(1);
@@ -126,7 +126,7 @@ describe('[SID:4711] the first setup in three steps', () => {
     for (const name of ['/Users/me/repo', 'a/b', 'a\\b', '  ']) {
       await mount(frag(`&fshown=~/code/my-app&fname=${encodeURIComponent(name)}`), { projectId: PROJ, projects: [] });
       expect(container.querySelector('[data-testid=quick-folder]')).toBeNull();
-      expect(buttonOf('시작')!.disabled).toBe(true);
+      expect(buttonOf('만들기')!.disabled).toBe(true);
       expect(calls.filter((c) => c.url.includes('confirm-solo'))).toEqual([]);
       await act(async () => { root.render(<div />); });
     }
@@ -135,16 +135,16 @@ describe('[SID:4711] the first setup in three steps', () => {
   it('a project the app found for this folder is used (by id), and the line says so', async () => {
     await mount(frag(`&fshown=~/code/my-app&fname=my-app&fproject=${PROJ}`), { projectId: PROJ, projects: [{ projectId: PROJ, projectName: 'Existing', orgId: 'o-1' }] });
     expect(container.querySelector('[data-testid=quick-project]')!.textContent).toBe('이 폴더의 프로젝트 · Existing');
-    await act(async () => { buttonOf('시작')!.click(); });
+    await act(async () => { buttonOf('만들기')!.click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
-    expect(calls.find((c) => c.url.endsWith('/confirm-solo'))!.body).toEqual({ code: CODE, runtime: 'claude', project_id: PROJ });
+    expect(calls.find((c) => c.url.endsWith('/confirm-solo'))!.body).toEqual({ code: CODE, runtime: 'claude', project_id: PROJ, agent_name: 'Claude Code', folder_name: 'my-app' });
   });
 
   it('a project id this organization does not have is not sent — a new project by the folder\'s name (the server would 404 it)', async () => {
     await mount(frag(`&fshown=~/code/my-app&fname=my-app&fproject=${PROJ}`), { projectId: PROJ, projects: [] });
-    await act(async () => { buttonOf('시작')!.click(); });
+    await act(async () => { buttonOf('만들기')!.click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
-    expect(calls.find((c) => c.url.endsWith('/confirm-solo'))!.body).toEqual({ code: CODE, runtime: 'claude', project_name: 'my-app' });
+    expect(calls.find((c) => c.url.endsWith('/confirm-solo'))!.body).toEqual({ code: CODE, runtime: 'claude', project_name: 'my-app', agent_name: 'Claude Code', folder_name: 'my-app' });
   });
 
   it('a project name this organization has shows as «{name} 2» (the server makes the final one by the same rule)', async () => {
@@ -155,10 +155,10 @@ describe('[SID:4711] the first setup in three steps', () => {
   it('the home folder or the top of the disk asks once and holds [시작] until «맞아요»', async () => {
     await mount(frag('&fshown=~&fname=yoonjae&fwide=1'));
     expect(container.querySelector('[data-testid=quick-wide]')!.textContent).toContain('이 폴더 전체에서 일해요 — 맞나요?');
-    expect(buttonOf('시작')!.disabled).toBe(true);
-    expect(container.querySelector('[data-testid=quick-start-line]')!.textContent).toBe('폴더를 확인하면 시작할 수 있어요');
+    expect(buttonOf('만들기')!.disabled).toBe(true);
+    expect(container.querySelector('[data-testid=quick-start-line]')!.textContent).toBe('폴더를 확인하면 만들 수 있어요');
     await act(async () => { buttonOf('맞아요')!.click(); });
-    expect(buttonOf('시작')!.disabled).toBe(false);
+    expect(buttonOf('만들기')!.disabled).toBe(false);
     expect(container.querySelector('[data-testid=quick-wide]')).toBeNull(); // Yuna 5121 ②: once confirmed the question is gone
     expect(text()).not.toContain('이 폴더 전체에서 일해요');
     expect(linkOf('폴더 바꾸기') ?? linkOf('바꾸기')).toBeTruthy(); // the folder can still be changed
@@ -186,8 +186,8 @@ describe('[SID:4711] the first setup in three steps', () => {
 
   it('English words', async () => {
     await mount(frag('&fshown=~/code/my-app&fname=my-app'), { projectId: PROJ }, 'en');
-    expect(text()).toContain('Start an agent on this computer');
-    expect(container.querySelector('[data-testid=quick-start-line]')!.textContent).toBe('Creates one Claude Code agent, adds it to the my-app project, and opens a conversation in this folder');
+    expect(text()).toContain('Create an agent');
+    expect(container.querySelector('[data-testid=quick-start-line]')!.textContent).toBe('Pressing Create adds one agent to this organization · name Claude Code · tool Claude Code · project my-app');
     expect(text()).toContain('Set up a team of agents →');
   });
 
@@ -205,56 +205,56 @@ describe('[SID:4711] the first setup in three steps', () => {
     const rows = [...container.querySelectorAll('[data-testid=quick-no-agent] li')].map((li) => li.firstElementChild!.textContent);
     expect(rows).toEqual(['Claude Code', 'Codex']); // Yuna 5121 ③: each row starts with the program's name
     expect(linkOf('다시 찾기')!.getAttribute('href')).toBe('ai.sprintable:/desktop/setup');
-    expect(buttonOf('시작')).toBeUndefined();
+    expect(buttonOf('만들기')).toBeUndefined();
   });
 
   it('a person who is not an owner/admin sees the not-admin card, not the form', async () => {
     await mount(frag(''), { role: 'member' });
-    expect(text()).not.toContain('이 컴퓨터에서 에이전트 시작하기');
+    expect(text()).not.toContain('에이전트 만들기');
   });
 
   it('the free plan\'s one project: the 402 names it, the card asks, and «넣고 시작» sends THAT project — nothing was put there before', async () => {
     ee.on = true;
     confirmNow = () => new Response(JSON.stringify({ error: { code: 'PLAN_LIMIT_EXCEEDED', resource: 'project', limit: 1, existing_project: { id: PROJ, name: 'Mine' } } }), { status: 402 });
     await mount(frag('&fshown=~/new/folder&fname=folder'), { projectId: PROJ, projects: [{ projectId: PROJ, projectName: 'Mine', orgId: 'o-1' }] });
-    await act(async () => { buttonOf('시작')!.click(); });
+    await act(async () => { buttonOf('만들기')!.click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     const ask = container.querySelector('[data-testid=quick-limit]')!;
     expect(ask.textContent).toContain('무료 플랜은 프로젝트가 하나예요');
-    expect(ask.textContent).toContain('이 폴더의 에이전트를 Mine 프로젝트에 넣어 시작할 수 있어요 — 에이전트는 이 폴더에서 일해요.');
+    expect(ask.textContent).toContain('이 폴더의 에이전트를 Mine 프로젝트에 넣어 만들 수 있어요 — 에이전트는 이 폴더에서 일해요.');
     expect(ask.textContent).toContain('요금제 업그레이드 →'); // billing open
     expect(container.querySelector('[data-testid=quick-project]')!.textContent).toBe('프로젝트 · Mine');
-    expect(buttonOf('시작')).toBeUndefined(); // Yuna 5121 ①: the one primary on the card is «넣고 시작» — no [시작] beside it
+    expect(buttonOf('만들기')).toBeUndefined(); // Yuna 5121 ①: the one primary on the card is «넣고 시작» — no [시작] beside it
     expect(container.querySelector('[data-testid=quick-start-line]')).toBeNull();
     confirmNow = () => new Response(JSON.stringify({ project_id: PROJ, conversation_id: 'c-1', members: [] }), { status: 200 });
-    await act(async () => { buttonOf('넣고 시작')!.click(); });
+    await act(async () => { buttonOf('넣고 만들기')!.click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     const posts = calls.filter((c) => c.url.endsWith('/confirm-solo'));
-    expect(posts.map((p) => p.body)).toEqual([{ code: CODE, runtime: 'claude', project_name: 'folder' }, { code: CODE, runtime: 'claude', project_id: PROJ }]);
+    expect(posts.map((p) => p.body)).toEqual([{ code: CODE, runtime: 'claude', project_name: 'folder', agent_name: 'Claude Code', folder_name: 'folder' }, { code: CODE, runtime: 'claude', project_id: PROJ, agent_name: 'Claude Code', folder_name: 'folder' }]);
   });
 
   it('codex self-QA: the «넣고 시작» question belongs to the folder it was asked for — another folder picked afterwards asks again, never starts into the first one\'s project', async () => {
     ee.on = true;
     confirmNow = () => new Response(JSON.stringify({ error: { code: 'PLAN_LIMIT_EXCEEDED', resource: 'project', limit: 1, existing_project: { id: PROJ, name: 'Mine' } } }), { status: 402 });
     await mount(frag('&fshown=~/a/folder-a&fname=folder-a'), { projectId: PROJ, projects: [{ projectId: PROJ, projectName: 'Mine', orgId: 'o-1' }] });
-    await act(async () => { buttonOf('시작')!.click(); });
+    await act(async () => { buttonOf('만들기')!.click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     expect(container.querySelector('[data-testid=quick-limit]')).not.toBeNull();
     // the window answers again with folder B (the same page, a new address)
     await mount(frag('&fshown=~/b/folder-b&fname=folder-b'), { projectId: PROJ, projects: [{ projectId: PROJ, projectName: 'Mine', orgId: 'o-1' }] });
     expect(container.querySelector('[data-testid=quick-limit]')).toBeNull();
-    expect(buttonOf('넣고 시작')).toBeUndefined();
-    expect(buttonOf('시작')!.disabled).toBe(false);
+    expect(buttonOf('넣고 만들기')).toBeUndefined();
+    expect(buttonOf('만들기')!.disabled).toBe(false);
     confirmNow = () => new Response(JSON.stringify({ project_id: PROJ, conversation_id: 'c-1', members: [] }), { status: 200 });
-    await act(async () => { buttonOf('시작')!.click(); });
+    await act(async () => { buttonOf('만들기')!.click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     const posts = calls.filter((c) => c.url.endsWith('/confirm-solo')).map((p) => p.body);
-    expect(posts.at(-1)).toEqual({ code: CODE, runtime: 'claude', project_name: 'folder-b' }); // B by its own name — not A's project id
+    expect(posts.at(-1)).toEqual({ code: CODE, runtime: 'claude', project_name: 'folder-b', agent_name: 'Claude Code', folder_name: 'folder-b' }); // B by its own name — not A's project id
   });
 
   it('codex self-QA: a started setup puts #progress=<setup id> on the address, so a reload goes back to the progress (the code is not in it)', async () => {
     await mount(frag('&fshown=~/code/my-app&fname=my-app'), { projectId: PROJ, projects: [] });
-    await act(async () => { buttonOf('시작')!.click(); });
+    await act(async () => { buttonOf('만들기')!.click(); });
     for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
     expect(window.location.hash).toBe('#progress=11111111-1111-4111-8111-aaaaaaaaaaaa');
     expect(window.location.href).not.toContain(CODE);
@@ -264,7 +264,7 @@ describe('[SID:4711] the first setup in three steps', () => {
     const SERVER_ID = '33333333-3333-4333-8333-cccccccccccc';
     confirmNow = () => new Response(JSON.stringify({ setup_id: SERVER_ID, project_id: PROJ, conversation_id: 'c-1', members: [] }), { status: 200 });
     await mount(frag('&fshown=~/code/my-app&fname=my-app'), { projectId: PROJ, projects: [] });
-    await act(async () => { buttonOf('시작')!.click(); });
+    await act(async () => { buttonOf('만들기')!.click(); });
     for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
     expect(window.location.hash).toBe(`#progress=${SERVER_ID}`);
     await act(async () => { await new Promise((r) => setTimeout(r, 30)); }); // the progress view's first reading is on the next task (setTimeout 0)
@@ -274,7 +274,7 @@ describe('[SID:4711] the first setup in three steps', () => {
     calls.length = 0;
     confirmNow = () => new Response(JSON.stringify({ setup_id: 's-1', project_id: PROJ, conversation_id: 'c-1', members: [] }), { status: 200 }); // not a uuid (also 'a/../b' · a code-like string in the move test)
     await mount(frag('&fshown=~/code/my-app&fname=my-app'), { projectId: PROJ, projects: [] });
-    await act(async () => { buttonOf('시작')!.click(); });
+    await act(async () => { buttonOf('만들기')!.click(); });
     for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
     expect(window.location.hash).toBe('#progress=11111111-1111-4111-8111-aaaaaaaaaaaa');
   });
@@ -283,7 +283,7 @@ describe('[SID:4711] the first setup in three steps', () => {
     confirmNow = () => new Promise<Response>(() => { /* never answers */ }) as unknown as Response;
     await mount(frag('&fshown=~/code/my-app&fname=my-app'), { projectId: PROJ, projects: [] });
     expect(buttonOf('여러 에이전트로 팀 꾸리기 →')!.disabled).toBe(false);
-    await act(async () => { buttonOf('시작')!.click(); });
+    await act(async () => { buttonOf('만들기')!.click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     expect(buttonOf('여러 에이전트로 팀 꾸리기 →')!.disabled).toBe(true);
     expect(teamPressed).toBe(false);
@@ -292,7 +292,7 @@ describe('[SID:4711] the first setup in three steps', () => {
   it('codex self-QA: an address whose setup= is not a uuid and an answer without a valid id → the plain «started» card, NO progress route is ever read with the bad id', async () => {
     confirmNow = () => new Response(JSON.stringify({ project_id: PROJ, conversation_id: 'c-1', members: [] }), { status: 200 });
     await mount(frag('&fshown=~/code/my-app&fname=my-app').replace('setup=11111111-1111-4111-8111-aaaaaaaaaaaa', 'setup=s-1'), { projectId: PROJ, projects: [] });
-    await act(async () => { buttonOf('시작')!.click(); });
+    await act(async () => { buttonOf('만들기')!.click(); });
     for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
     await act(async () => { await new Promise((r) => setTimeout(r, 40)); });
     expect(calls.some((c) => c.url.includes('/api/desktop/setups/s-1'))).toBe(false);
@@ -335,7 +335,7 @@ describe('[SID:4711] the first setup in three steps', () => {
     ee.on = false;
     confirmNow = () => new Response(JSON.stringify({ error: { code: 'PLAN_LIMIT_EXCEEDED', resource: 'project', limit: 1, existing_project: { id: PROJ, name: 'Mine' } } }), { status: 402 });
     await mount(frag('&fshown=~/new/folder&fname=folder'), { projectId: PROJ, projects: [{ projectId: PROJ, projectName: 'Mine', orgId: 'o-1' }] });
-    await act(async () => { buttonOf('시작')!.click(); });
+    await act(async () => { buttonOf('만들기')!.click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     expect(container.querySelector('[data-testid=quick-limit]')!.textContent).not.toContain('요금제 업그레이드');
   });
@@ -350,7 +350,7 @@ describe('[SID:4711] the first setup in three steps', () => {
 describe('[SID:4711] the page picks the card by what the app said', () => {
   it('an app that said solo gets the card; one from before gets the recipe setup as always', async () => {
     ctx.mockReturnValue({ projectId: PROJ, currentProjectSlug: 'proj', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'owner' }], projectMemberships: [] });
-    for (const [caps, want] of [['caps=move,solo', '이 컴퓨터에서 에이전트 시작하기'], ['caps=move', '이 컴퓨터에 에이전트를 만들어']] as const) {
+    for (const [caps, want] of [['caps=move,solo', '에이전트 만들기'], ['caps=move', '이 컴퓨터에 에이전트를 만들어']] as const) {
       window.location.hash = `#code=${CODE}&runtimes=claude&${caps}`;
       await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DesktopSetupEntry /></NextIntlClientProvider>); });
       for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); });
@@ -371,7 +371,7 @@ describe('[SID:4670 AC1] «폰으로도 에이전트 다루기» on the three-st
   const tick = () => container.querySelector('#quick-phone-control') as HTMLInputElement | null;
   const puts = () => calls.filter((c) => c.method === 'PUT' && c.url.includes('/remote-control'));
   const FOLDER = '&fshown=~/code/my-app&fname=my-app';
-  const press = async () => { await act(async () => { buttonOf('시작')!.click(); }); for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); }); };
+  const press = async () => { await act(async () => { buttonOf('만들기')!.click(); }); for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); }); };
 
   it('an owner of an organization whose remote control is OFF: one tick above [시작], ticked, with the words — and it sits in the start row (no new step)', async () => {
     remoteGet = remoteOf(OFF_OWNER);
@@ -380,7 +380,7 @@ describe('[SID:4670 AC1] «폰으로도 에이전트 다루기» on the three-st
     expect(container.querySelector('[data-testid=setup-phone-control]')!.textContent).toContain('폰으로도 에이전트 다루기');
     expect(container.querySelectorAll('input[type=checkbox]')).toHaveLength(1);
     const row = container.querySelector('[data-testid=setup-phone-control]')!;
-    expect(row.nextElementSibling?.querySelector('button')?.textContent).toBe('시작'); // just above «시작»
+    expect(row.nextElementSibling?.querySelector('button')?.textContent).toBe('만들기'); // just above «만들기»
   });
 
   it('already on · the person cannot change it → no row', async () => {
@@ -552,8 +552,8 @@ describe('[SID:4717] the solo card says the plan\'s agent room before «시작»
     expect(container.querySelector('[data-testid=quick-room-use-team]')!.textContent).toBe('이미 있는 에이전트로 시작하려면 아래 «여러 에이전트로 팀 꾸리기»에서 골라요.');
     expect(linkOf('에이전트 정리하기')!.getAttribute('href')).toContain('/organization/workforce');
     expect(box.textContent).not.toContain('레시피');
-    expect(buttonOf('시작')!.disabled).toBe(true);
-    await act(async () => { buttonOf('시작')!.click(); });
+    expect(buttonOf('만들기')!.disabled).toBe(true);
+    await act(async () => { buttonOf('만들기')!.click(); });
     expect(calls.some((c) => c.url.includes('/confirm-solo'))).toBe(false);
   });
 
@@ -564,15 +564,15 @@ describe('[SID:4717] the solo card says the plan\'s agent room before «시작»
     recipesNow = (() => gate.then(room({ limit: 3, current: 3, available: 0, tier: 'free' }))) as unknown as () => Response;
     confirmNow = () => new Response(JSON.stringify({ error: { code: 'PLAN_LIMIT_EXCEEDED', resource: 'project', limit: 1, existing_project: { id: PROJ, name: 'Mine' } } }), { status: 402 });
     await mount(frag(ORG_FOLDER), opts);
-    await act(async () => { buttonOf('시작')!.click(); });
+    await act(async () => { buttonOf('만들기')!.click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     expect(container.querySelector('[data-testid=quick-limit]')).not.toBeNull();
-    expect(buttonOf('넣고 시작')!.disabled).toBe(false);
+    expect(buttonOf('넣고 만들기')!.disabled).toBe(false);
     await act(async () => { open(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
-    expect(buttonOf('넣고 시작')!.disabled).toBe(true);
+    expect(buttonOf('넣고 만들기')!.disabled).toBe(true);
     expect(container.querySelector('[data-testid=quick-limit] [data-testid=setup-room-short]')).not.toBeNull();
-    await act(async () => { buttonOf('넣고 시작')!.click(); });
+    await act(async () => { buttonOf('넣고 만들기')!.click(); });
     expect(calls.filter((c) => c.url.endsWith('/confirm-solo')).length).toBe(1); // only the first press went out
   });
 
@@ -580,7 +580,7 @@ describe('[SID:4717] the solo card says the plan\'s agent room before «시작»
     recipesNow = room({ limit: 3, current: 2, available: 1, tier: 'free' });
     await mount(frag(ORG_FOLDER), opts);
     expect(container.querySelector('[data-testid=setup-room-short]')).toBeNull();
-    expect(buttonOf('시작')!.disabled).toBe(false);
+    expect(buttonOf('만들기')!.disabled).toBe(false);
   });
 
   it('no limit (null) · a shape not read · the list failing → nothing said, nothing held', async () => {
@@ -588,7 +588,7 @@ describe('[SID:4717] the solo card says the plan\'s agent room before «시작»
       recipesNow = answer;
       await mount(frag(ORG_FOLDER), opts);
       expect(container.querySelector('[data-testid=setup-room-short]')).toBeNull();
-      expect(buttonOf('시작')!.disabled).toBe(false);
+      expect(buttonOf('만들기')!.disabled).toBe(false);
       await act(async () => { root.unmount(); }); root = createRoot(container);
     }
   });
@@ -603,7 +603,7 @@ describe('[SID:4717] the solo card says the plan\'s agent room before «시작»
     ee.on = true;
     confirmNow = () => new Response(JSON.stringify({ error: { code: 'PLAN_LIMIT_EXCEEDED', resource: 'agent', limit: 3, tier: 'free', current: 3, needed: 1, available: 0 } }), { status: 402 });
     await mount(frag(ORG_FOLDER), opts);
-    await act(async () => { buttonOf('시작')!.click(); });
+    await act(async () => { buttonOf('만들기')!.click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     const body = container.querySelector('[data-testid=setup-agent-limit-body]')!;
     expect(body.textContent).toBe('지금은 에이전트를 더 만들 수 없어요. 무료 플랜은 에이전트를 3개까지 만들 수 있어요. 계속하려면 요금제를 업그레이드해 주세요. 쓰지 않는 에이전트를 정리해 주세요.');
@@ -639,7 +639,7 @@ describe('[SID:4721] the member card on the first-setup page keeps the setup val
     const r = memberReload();
     confirmNow = () => new Response(JSON.stringify({ error: { code: 'not_org_admin' } }), { status: 403 });
     await mount(frag('&fshown=~/new/folder&fname=folder'), { role: 'owner' });
-    await act(async () => { buttonOf('시작')!.click(); });
+    await act(async () => { buttonOf('만들기')!.click(); });
     for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
     expect(text()).toContain('에이전트를 만들려면 조직 관리자여야 해요');
     await act(async () => { buttonOf('다시 확인')!.click(); });
@@ -727,14 +727,14 @@ describe('[SID:4713 AC2] the card picks the program a folder\'s CLAUDE.md / AGEN
   it('a folder with CLAUDE.md → Claude Code picked and the line names the file; with AGENTS.md → Codex picked, the line names AGENTS.md, and [시작] sends codex', async () => {
     await mount(frag(`${F}&pick=codex&ftrace=CLAUDE.md`)); // the earlier pick is only an echo: the folder's mark wins over it
     expect(checked()).toContain('Claude Code');
-    expect(line()).toBe('이 폴더에 CLAUDE.md가 있어요 · 에이전트는 Claude Code로 골라 뒀어요');
+    expect(line()).toBe('이 폴더에 CLAUDE.md가 있어요 · 도구는 Claude Code로 골라 뒀어요');
     await act(async () => { root.unmount(); }); root = createRoot(container);
     await mount(frag(`${F}&ftrace=AGENTS.md`));
     expect(checked()).toContain('Codex');
-    expect(line()).toBe('이 폴더에 AGENTS.md가 있어요 · 에이전트는 Codex로 골라 뒀어요');
-    await act(async () => { buttonOf('시작')!.click(); });
+    expect(line()).toBe('이 폴더에 AGENTS.md가 있어요 · 도구는 Codex로 골라 뒀어요');
+    await act(async () => { buttonOf('만들기')!.click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
-    expect(calls.find((c) => c.url.endsWith('/confirm-solo'))!.body).toEqual({ code: CODE, runtime: 'codex', project_name: 'my-app' });
+    expect(calls.find((c) => c.url.endsWith('/confirm-solo'))!.body).toEqual({ code: CODE, runtime: 'codex', project_name: 'my-app', agent_name: 'Codex', folder_name: 'my-app' });
   });
 
   it('both marks → the first program this computer has in the found order; no mark → no line and the usual default', async () => {
@@ -751,7 +751,7 @@ describe('[SID:4713 AC2] the card picks the program a folder\'s CLAUDE.md / AGEN
     await mount(`#code=${CODE}&setup=11111111-1111-4111-8111-aaaaaaaaaaaa&runtimes=claude&caps=move,solo&rv=claude:2.1.289${F}&ftrace=AGENTS.md`);
     expect(line()).toBeNull();
     expect(text()).toContain('Claude Code');
-    expect(container.querySelector('[data-testid=quick-start-line]')!.textContent).toContain('Claude Code 에이전트 하나를');
+    expect(container.querySelector('[data-testid=quick-start-line]')!.textContent).toContain('이름 Claude Code · 도구 Claude Code');
   });
 
   it('the person picks the other radio → the line is gone (it would be false); picking the marked one again brings it back', async () => {
@@ -828,5 +828,114 @@ describe('[SID:4713 AC2] the card picks the program a folder\'s CLAUDE.md / AGEN
   it('English words', async () => {
     await mount(frag(`${F}&ftrace=AGENTS.md`), {}, 'en');
     expect(line()).toBe('This folder has AGENTS.md · Codex is picked for it');
+  });
+});
+
+describe('[SID:4784] the card is the moment an agent is made — «에이전트 만들기»', () => {
+  const F4784 = '&fshown=~/code/my-app&fname=my-app';
+  const posts = () => calls.filter((c) => c.url.endsWith('/confirm-solo'));
+  const nameField = () => container.querySelector('[data-testid=quick-agent-name]') as HTMLInputElement;
+  const roleField = () => container.querySelector('[data-testid=quick-agent-role]') as HTMLInputElement;
+  const typeInto = async (el: HTMLInputElement, value: string) => {
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(el, value);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  };
+  const settle = async () => { for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); }); };
+
+  it('says what is made, shows tool · name · role · folder, and sends NOTHING until «만들기» is pressed', async () => {
+    await mount(frag(F4784), { projectId: PROJ });
+    expect(container.querySelector('h1')!.textContent).toBe('에이전트 만들기');
+    expect(nameField().value).toBe('Claude Code'); // the tool's name is the default
+    expect(roleField().value).toBe('');
+    expect(text()).toContain('① 도구');
+    expect(text()).toContain('② 이름과 역할');
+    expect(text()).toContain('③ 폴더');
+    expect(container.querySelector('[data-testid=quick-create-nothing]')!.textContent).toBe('누르기 전에는 에이전트가 만들어지지 않아요');
+    expect(buttonOf('시작')).toBeUndefined(); // no «시작» that makes an agent without saying so
+    expect(posts()).toHaveLength(0);
+    await settle();
+    expect(posts()).toHaveLength(0);
+  });
+
+  it('the name follows the tool until the person types one; what they typed and the role go to the server as they stand (trimmed)', async () => {
+    await mount(frag(F4784), { projectId: PROJ });
+    await act(async () => { (container.querySelector('input[name=quick-runtime][type=radio]:not(:checked)') as HTMLInputElement).click(); });
+    expect(nameField().value).toBe('Codex');
+    await typeInto(nameField(), '  Reviewer ');
+    await typeInto(roleField(), ' 코드 리뷰어 ');
+    expect(container.querySelector('[data-testid=quick-start-line]')!.textContent).toContain('이름 Reviewer · 도구 Codex'); // the line follows what is typed
+    await act(async () => { (container.querySelector('input[name=quick-runtime]:not(:checked)') as HTMLInputElement).click(); });
+    expect(nameField().value).toBe('  Reviewer '); // a typed name stays when the tool changes
+    await act(async () => { buttonOf('만들기')!.click(); });
+    await settle();
+    expect(posts().map((p) => p.body)).toEqual([{ code: CODE, runtime: 'claude', project_name: 'my-app', agent_name: 'Reviewer', agent_role: '코드 리뷰어', folder_name: 'my-app' }]);
+  });
+
+  it('a blank name holds «만들기» with its reason in view, and sends nothing', async () => {
+    await mount(frag(F4784), { projectId: PROJ });
+    await typeInto(nameField(), '   ');
+    expect(buttonOf('만들기')!.disabled).toBe(true);
+    expect(container.querySelector('[data-testid=quick-start-line]')!.textContent).toBe('이름을 적으면 만들 수 있어요');
+    expect(nameField().getAttribute('aria-invalid')).toBe('true');
+    expect(posts()).toHaveLength(0);
+  });
+
+  it('a name an agent already has: the free name goes into the field, the line says so, nothing was made — and the next press sends that name', async () => {
+    confirmNow = () => new Response(JSON.stringify({ error: { code: 'agent_name_taken', message: 'x', suggested_name: 'Helper 2' } }), { status: 409 });
+    await mount(frag(F4784), { projectId: PROJ });
+    await typeInto(nameField(), 'Helper');
+    await act(async () => { buttonOf('만들기')!.click(); });
+    await settle();
+    expect(nameField().value).toBe('Helper 2');
+    expect(container.querySelector('[data-testid=quick-error]')!.textContent).toBe('이미 있는 이름이에요 · 쓸 수 있는 이름을 칸에 넣어 뒀어요: Helper 2 — 괜찮으면 «만들기»를 다시 눌러 주세요');
+    expect(buttonOf('만들기')!.disabled).toBe(false); // the card is still the card: nothing started, nothing redirected
+    confirmNow = () => new Response(JSON.stringify({ project_id: PROJ, conversation_id: 'c-1', members: [] }), { status: 200 });
+    await act(async () => { buttonOf('만들기')!.click(); });
+    await settle();
+    expect(posts().map((p) => (p.body as { agent_name: string }).agent_name)).toEqual(['Helper', 'Helper 2']);
+  });
+
+  it('a failed creation says «만들지 못했어요» (not «시작»), keeps the typed fields and the button', async () => {
+    confirmNow = () => new Response(JSON.stringify({ error: { code: 'whatever' } }), { status: 500 });
+    await mount(frag(F4784), { projectId: PROJ });
+    await typeInto(roleField(), '리뷰어');
+    await act(async () => { buttonOf('만들기')!.click(); });
+    await settle();
+    expect(container.querySelector('[data-testid=quick-error]')!.textContent).toBe('만들지 못했어요 — 다시 시도해 주세요');
+    expect(roleField().value).toBe('리뷰어');
+    expect(buttonOf('만들기')!.disabled).toBe(false);
+  });
+
+  it('the folder window reloads the page: what was typed waits in the tab for this setup and comes back; another setup starts clean', async () => {
+    await mount(frag(F4784), { projectId: PROJ });
+    await typeInto(nameField(), 'Reviewer');
+    await typeInto(roleField(), '리뷰어');
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    await mount(frag(F4784), { projectId: PROJ });
+    expect(nameField().value).toBe('Reviewer');
+    expect(roleField().value).toBe('리뷰어');
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    await mount(frag(F4784).replace('11111111-1111-4111-8111-aaaaaaaaaaaa', '11111111-1111-4111-8111-bbbbbbbbbbbb'), { projectId: PROJ });
+    expect(nameField().value).toBe('Claude Code');
+    expect(roleField().value).toBe('');
+  });
+
+  it('a new organization: the new-org confirmation carries the name and role as well', async () => {
+    await mount(frag(F4784), { orgId: null });
+    await typeInto(nameField(), 'Builder');
+    await act(async () => { buttonOf('만들기')!.click(); });
+    await settle();
+    const post = calls.find((c) => c.url.endsWith('/confirm-solo-new-org'))!;
+    expect(post.body).toMatchObject({ runtime: 'claude', project_name: 'my-app', agent_name: 'Builder', folder_name: 'my-app' });
+  });
+
+  it('English words', async () => {
+    await mount(frag(F4784), { projectId: PROJ }, 'en');
+    expect(container.querySelector('h1')!.textContent).toBe('Create an agent');
+    expect(text()).toContain('② Name and role');
+    expect(buttonOf('Create')).toBeDefined();
+    expect(container.querySelector('[data-testid=quick-create-nothing]')!.textContent).toBe('No agent is created until you press it');
   });
 });

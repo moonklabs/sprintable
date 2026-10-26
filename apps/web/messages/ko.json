@@ -7184,10 +7184,23 @@
         }
       },
       "quick": {
-        "title": "이 컴퓨터에서 에이전트 시작하기",
+        "title": "에이전트 만들기",
         "titleAgent": "{name} 에이전트 시작하기",
         "stepAgent": "에이전트",
         "stepFolder": "폴더",
+        "stepTool": "도구",
+        "stepName": "이름과 역할",
+        "nameLabel": "이름",
+        "roleLabel": "역할 (안 적어도 돼요)",
+        "rolePlaceholder": "예: 코드 리뷰어",
+        "create": "만들기",
+        "creating": "만드는 중…",
+        "createLine": "만들기를 누르면 이 조직에 에이전트가 하나 생겨요 · 이름 {name} · 도구 {runtime} · 프로젝트 {project}",
+        "createNothing": "누르기 전에는 에이전트가 만들어지지 않아요",
+        "blockName": "이름을 적으면 만들 수 있어요",
+        "nameTaken": "이미 있는 이름이에요 · 쓸 수 있는 이름을 칸에 넣어 뒀어요: {name} — 괜찮으면 «만들기»를 다시 눌러 주세요",
+        "nameTakenNoSuggestion": "이미 있는 이름이에요 — 다른 이름을 적어 주세요",
+        "createFailed": "만들지 못했어요 — 다시 시도해 주세요",
         "tooOld": "{name} {version} — 이 앱과 쓰기엔 오래된 판이에요 · 업데이트하면 고를 수 있어요",
         "noAgentTitle": "이 컴퓨터에서 Claude Code나 Codex를 찾지 못했어요",
         "noAgentBody": "Claude Code나 Codex를 설치하고 로그인한 뒤 다시 찾아 주세요. 터미널에서 설치할 수 있어요.",
@@ -7195,7 +7208,7 @@
         "copied": "복사했어요",
         "copyAria": "복사 · {name} 설치 명령",
         "refind": "다시 찾기",
-        "traceDefault": "이 폴더에 {file}{iga} 있어요 · 에이전트는 {runtime}{euro} 골라 뒀어요",
+        "traceDefault": "이 폴더에 {file}{iga} 있어요 · 도구는 {runtime}{euro} 골라 뒀어요",
         "folderPick": "폴더 고르기",
         "folderChange": "바꾸기",
         "projectNew": "프로젝트 이름 · {name}",
@@ -7206,10 +7219,9 @@
         "folderOther": "다른 폴더 고르기",
         "start": "시작",
         "starting": "시작하는 중…",
-        "startLine": "{runtime} 에이전트 하나를 만들어 {project} 프로젝트에 넣고, 이 폴더에서 대화를 열어요",
-        "blockNoAgent": "에이전트를 찾으면 시작할 수 있어요",
-        "blockNoFolder": "폴더를 고르면 시작할 수 있어요",
-        "blockWide": "폴더를 확인하면 시작할 수 있어요",
+        "blockNoAgent": "도구를 찾으면 만들 수 있어요",
+        "blockNoFolder": "폴더를 고르면 만들 수 있어요",
+        "blockWide": "폴더를 확인하면 만들 수 있어요",
         "team": "여러 에이전트로 팀 꾸리기 →",
         "refused": {
           "denied": "이 폴더를 열 수 없어요 — 시스템 설정 › 개인정보 보호 및 보안 › 파일 및 폴더에서 Sprintable을 허용하거나, 다른 폴더를 골라 주세요",
@@ -7220,8 +7232,8 @@
         "failed": "시작하지 못했어요 — 다시 시도해 주세요",
         "limit": {
           "title": "무료 플랜은 프로젝트가 하나예요",
-          "body": "이 폴더의 에이전트를 {project} 프로젝트에 넣어 시작할 수 있어요 — 에이전트는 이 폴더에서 일해요.",
-          "addStart": "넣고 시작"
+          "body": "이 폴더의 에이전트를 {project} 프로젝트에 넣어 만들 수 있어요 — 에이전트는 이 폴더에서 일해요.",
+          "addStart": "넣고 만들기"
         }
       },
       "direct": {
