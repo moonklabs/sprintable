@@ -277,6 +277,10 @@ def main(argv: list[str] | None = None) -> int:
     if not versions:
         print("입력 오류: AR 이미지 목록이 비었다.")
         return 2
+    if not refs:
+        # 사용 중 참조가 하나도 안 잡히면 «지움 0»은 빈 입력 위의 거짓 초록이다(서비스 JSON이 비었거나 형식이 다름) — 절대 통과시키지 않는다.
+        print("입력 오류: 사용 중 이미지 참조가 하나도 안 잡혔다(서비스 · 리비전 · job · 템플릿 JSON이 비었거나 형식이 다르다).")
+        return 2
     now = _parse_time(args.now) if args.now else datetime.now(timezone.utc)
     in_use, missing = resolve_in_use(refs, versions)
     policy = build_policy(base, in_use)

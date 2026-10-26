@@ -128,6 +128,16 @@ def test_cli_exit_codes(tmp_path, capsys, monkeypatch):
     assert gate.main(argv) == 2
 
 
+def test_no_in_use_reference_at_all_is_bad_input_not_a_green(tmp_path):
+    """«지움 0»을 빈 입력 위에서 약속하지 않는다: 서비스 · 리비전 · job · 템플릿 어디에서도 사용 중 이미지가 안 잡히면 exit 2."""
+    images = tmp_path / "images.json"
+    images.write_text(json.dumps(_images("backend", 60)))
+    empty = tmp_path / "empty.json"
+    empty.write_text("[]")
+    assert gate.main(["--images", str(images), "--run-services", str(empty), "--now", NOW.isoformat()]) == 2
+    assert gate.main(["--images", str(images), "--now", NOW.isoformat()]) == 2  # no in-use dump given at all
+
+
 @pytest.mark.parametrize("text,seconds", [("2592000s", 2592000), ("30d", 2592000), ("12h", 43200), ("90", 90)])
 def test_duration_forms(text, seconds):
     assert gate._duration(text) == timedelta(seconds=seconds)
