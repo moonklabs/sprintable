@@ -658,6 +658,14 @@ async def agent_stream(
     # story 4788 (INFRA-DIET ③): what this connection is sent — the types it declares (or, for the legacy Claude Code plugin, the allow-list it has always acted on); everything else as before
     from app.services.agent_stream_accept import accepted_event_types
     _accept_types, _accept_mode = accepted_event_types(request.headers)
+    # story 4788 (INFRA-DIET ③ · root): a client that never acks some events (the plugin drops what it does not act on before acking) was sent the whole tail again on every reconnect. An event that the last few
+    # replays of this kind of connection (this agent · this key · the same declaration) all sent — each to a connection that was still there afterwards — is not replayed again; a newer event always is, and the
+    # agent's cursor is never written. No Redis · no key · `AGENT_STREAM_REPLAY_ATTEMPTS=0`: nothing is skipped.
+    from app.services import agent_stream_replay_floor as _replay_floor
+    _replay_key_id = auth.claims.get("app_metadata", {}).get("api_key_id")
+    _replay_skip = await _replay_floor.floor(agent_id, _replay_key_id, _accept_types)
+    _start_before_floor = start_seq
+    start_seq = max(start_seq, _replay_skip)
 
     # E-INFRA S5: per-key(agent) 동시 스트림 제한 (tier-aware) — 초과 시 429 + Retry-After.
     # per-key 카운트 = _agent_connections[agent_id] (현재 동시 스트림 수). 새 연결은 아직 미등록 상태이므로
@@ -782,6 +790,7 @@ async def agent_stream(
         """
         session_id = uuid.uuid4()
         _presence_wired = False
+        _replay_done_at: float | None = None  # story 4788: when this connection's replay finished (None: it did not)
         try:
             # 49fed0a1 AC1: cap 통과 후 세션 등록 + presence online. SSE dial-out 에이전트는 MCP
             # heartbeat를 호출하지 않아 이 배선이 없으면 붙어 일해도 offline(거짓)이었다. 독립 세션 사용
@@ -937,7 +946,8 @@ async def agent_stream(
             # the ack catches up would send that tail again (measured: 2,400 rows + 3 quick wakes, no ack → 9,620 frames for 2,405
             # seqs). A seq in here is skipped; one not in here (a late commit) still goes out. Trimmed to > acked on every wake.
             _sent_unacked = _SentUnacked()
-            _backfill_stats: dict = {"rows": 0, "bytes": 0, "types": {}}  # story 4788
+            _backfill_stats: dict = {"rows": 0, "bytes": 0, "types": {}, "settled_max": 0, "fresh": False}  # story 4788
+            _settle_cutoff = datetime.now(timezone.utc) - timedelta(seconds=_replay_floor.SETTLE_SEC)
 
             async def _send_batches(after_seq: int, is_backfill: bool):
                 """Every row after `after_seq`, batch after batch, until a batch comes back short — the newest row goes out on
@@ -975,6 +985,14 @@ async def agent_stream(
                             _frame_text = f"event: {sse_event_name(row.event_type)}\nid: {gseq}\ndata: {_sse}\n\n"
                             if is_backfill:  # story 4788: what the connect replay cost, by event type (counts and sizes only — read from the log after the pass)
                                 _backfill_stats["rows"] += 1
+                                if not _backfill_stats["fresh"]:  # the highest seq of the unbroken run of events older than SETTLE_SEC (see agent_stream_replay_floor)
+                                    try:
+                                        if row.created_at <= _settle_cutoff:
+                                            _backfill_stats["settled_max"] = gseq
+                                        else:
+                                            _backfill_stats["fresh"] = True
+                                    except (AttributeError, TypeError):
+                                        _backfill_stats["fresh"] = True
                                 _backfill_stats["bytes"] += len(_frame_text.encode("utf-8"))
                                 _kind = sse_event_name(row.event_type)  # (the closed form the frame name uses: an old row with a line break in its type cannot split the log line)
                                 _backfill_stats["types"][_kind] = _backfill_stats["types"].get(_kind, 0) + 1
@@ -1001,12 +1019,14 @@ async def agent_stream(
             # first 8 characters of the key's id (never the key), the client's name and version (letters, digits, `.` `/` `-` only, 40 characters at most)
             _ua = re.sub(r"[^A-Za-z0-9._/ -]", "_", (request.headers.get("user-agent") or "-"))[:40]
             logger.info(
-                "agent_stream backfill agent=%s key=%s ua=%s mode=%s from_seq=%d rows=%d bytes=%d types=%s",
+                "agent_stream backfill agent=%s key=%s ua=%s mode=%s from_seq=%d skipped_to=%d rows=%d bytes=%d types=%s",
                 agent_id_str, str(auth.claims.get("app_metadata", {}).get("api_key_id") or "-")[:8], _ua, _accept_mode, start_seq,
+                _replay_skip if _replay_skip > _start_before_floor else 0,
                 _backfill_stats["rows"], _backfill_stats["bytes"], ",".join(f"{t}:{n}" for t, n in _top) or "-",
             )
             if _batches_ended:
                 return
+            _replay_done_at = time.monotonic()
 
             # ì¤ìê° â wake ì í¸ â acked_seqë¶í° DB ì¬ì¤ìº
             # 49fed0a1 AC1: 연결 유지 중 presence를 주기적으로 online 갱신. wake가 잦으면 timeout
@@ -1100,6 +1120,10 @@ async def agent_stream(
             # E-INFRA S4: 연결 cap decrement (legacy events.py:380-381 미러) — 항상 실행.
             global _agent_sse_connection_count
             _agent_sse_connection_count -= 1
+            # story 4788: a connection whose replay finished and that was still there `MIN_ALIVE_SEC` later counts as one more replay of its kind that the client had the chance to read. Scheduled as its
+            # own task, first, before any await: when the client goes away Starlette cancels this stream's scope and every await below this point may be cut (see agent_stream_replay_floor.record_soon)
+            if _replay_done_at is not None and time.monotonic() - _replay_done_at >= _replay_floor.MIN_ALIVE_SEC:
+                _replay_floor.record_soon(agent_id, _replay_key_id, _accept_types, _backfill_stats["settled_max"])
             # #2121: lease 명시 해제(최적화만·TTL 이 주 회수 경로). off/다운 no-op.
             await sse_lease.release("agent_global", _lease_conn_id)
             if _owns_receiver_slot():  # a superseded stream leaves the slot to the one that took it over
@@ -1117,7 +1141,6 @@ async def agent_stream(
                 await _mark_agent_disconnected(
                     agent_id, session_id, org_id_str, heartbeat_baseline=_heartbeat_baseline,
                 )
-
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",

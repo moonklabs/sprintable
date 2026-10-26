@@ -1,0 +1,1 @@
+{"file": "tests/test_4788_replay_floor_realdb.py", "sec": 10.0, "provisional": true, "source": "story #4788 (신규 파일 · 뿌리) — 로컬 실 PG(disposable) 실측 전 잠정치. 파괴 가드 등록 근거: 이 파일이 _session_factory(create_all)로 스키마를 만든다."}

@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 
 ACCEPT_EVENTS_HEADER = "x-sprintable-accept-events"
-_TOKEN = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
+_TOKEN = re.compile(r"^[a-z0-9_.:-]{1,64}$")  # event types are lowercase: an upper-case token matches no event, and a declaration that matches nothing would hide everything
 MAX_DECLARED_TYPES = 32
 
 
@@ -23,7 +23,7 @@ def parse_accept_header(value: str | None) -> frozenset[str] | None:
     if not value:
         return None
     parts = [p.strip() for p in value.split(",")]
-    parts = [p for p in parts if p]
+    # an empty piece (`,dispatched` · `a,,b` · a trailing comma) or an upper-case / odd token is a declaration we cannot trust whole: ignored as a whole, everything is sent
     if not parts or len(parts) > MAX_DECLARED_TYPES or not all(_TOKEN.match(p) for p in parts):
         return None
     return frozenset(parts)
