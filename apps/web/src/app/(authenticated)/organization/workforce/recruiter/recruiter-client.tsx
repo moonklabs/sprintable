@@ -1,5 +1,6 @@
 'use client';
 
+import { firstGraphemes } from '@/lib/first-graphemes';
 import { VerifyPromptCopyFailedPanel } from '@/app/onboarding/verify-prompt-copy-failed-panel';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
@@ -676,7 +677,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                       'flex h-6 w-6 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground',
                       sel && 'bg-primary/15 text-primary',
                     )}>
-                      {rc.icon ?? runtimeDisplayName(rc).charAt(0).toUpperCase()}
+                      {rc.icon ?? firstGraphemes(runtimeDisplayName(rc), 1).toUpperCase()}
                     </span>
                     <span className="text-xs font-bold text-foreground">{runtimeDisplayName(rc)}</span>
                     {rc.tier === 'experimental' && <Badge variant="info" className="text-[9px]">{t('runtimeExperimental')}</Badge>}
@@ -691,7 +692,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
               {comingSoonRuntimes.map((rc) => (
                 <button key={rc.slug} type="button" disabled className="flex cursor-not-allowed flex-col items-start gap-1 rounded-xl border border-border bg-muted/40 p-2.5 text-left opacity-55">
                   <span className="flex h-6 w-6 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground">
-                    {rc.icon ?? runtimeDisplayName(rc).charAt(0).toUpperCase()}
+                    {rc.icon ?? firstGraphemes(runtimeDisplayName(rc), 1).toUpperCase()}
                   </span>
                   <span className="text-xs font-bold text-foreground">{runtimeDisplayName(rc)}</span>
                   <Badge variant="chip" className="text-[9px]">{t('runtimeComingSoonBadge')}</Badge>
@@ -1912,7 +1913,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
 
               <div className="flex items-center gap-3 rounded-md border border-success/20 bg-success/10 p-3">
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
-                  {activeAgentName.slice(0, 1) || '🪪'}
+                  {firstGraphemes(activeAgentName, 1) || '🪪'}
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="flex items-center gap-1.5 text-sm font-bold text-foreground">

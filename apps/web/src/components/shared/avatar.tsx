@@ -146,6 +146,7 @@ export function Avatar({
             className={cn('flex h-full w-full items-center justify-center font-semibold', avatarColor(isAgent))}
             style={{ fontSize: initSize }}
             aria-label={a11yName}
+            suppressHydrationWarning // story 4794 (Kadir lens): the server's ICU and an old Chrome (145 · 147) split a Khmer / Myanmar cluster differently — the letter is redrawn by the browser, not an error
           >
             {initials(name)}
           </span>

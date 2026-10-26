@@ -3,6 +3,7 @@
  * 파일 크기 포맷은 재구현 금지 → `formatFileSize`(file-node.tsx) 재사용. 여기엔 그 외 표시 유틸만.
  */
 
+import { firstGraphemes } from '@/lib/first-graphemes';
 import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
 import type { AssetSourceLink } from '@/lib/storage/types';
 import { formatScheduledAt, toDateKey } from '@/components/content/schedule-format';
@@ -71,7 +72,7 @@ export function initials(name: string | null | undefined): string {
   const first = parts[0] ?? '';
   const isLatin = /[a-zA-Z]/.test(first);
   if (parts.length === 1) {
-    return isLatin ? first.slice(0, 2).toUpperCase() : first.slice(0, 1);
+    return isLatin ? firstGraphemes(first, 2).toUpperCase() : firstGraphemes(first, 1);
   }
   // story #2986(선생님 실사용 발견) — 어절별 첫 글자를 조합하면(라틴 이니셜 관례) 한글에서
   // 우연히 실제 단어(간혹 비속어)가 조립될 구조적 위험이 있다 — 「시스템 발행」→「시」+「발」
@@ -79,9 +80,9 @@ export function initials(name: string | null | undefined): string {
   // 1자만 쓴다(단일 어절일 때와 동일 규칙). 라틴 다어절(예: John Smith)은 국제 관례대로
   // 각 단어 첫 글자 조합(JS)을 유지 — 위험은 한글류 음절 문자에 한정된다.
   if (isLatin) {
-    return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase();
+    return (firstGraphemes(parts[0] ?? '', 1) + firstGraphemes(parts[1] ?? '', 1)).toUpperCase();
   }
-  return first.slice(0, 1);
+  return firstGraphemes(first, 1);
 }
 
 /** 파일 확장자 라벨 — 파일명 우선, 없으면 content-type subtype. (예: PNG·PDF·DOCX·JSON) */

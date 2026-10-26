@@ -1,5 +1,6 @@
 'use client';
 
+import { firstGraphemes } from '@/lib/first-graphemes';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useSortable } from '@dnd-kit/sortable';
@@ -54,7 +55,7 @@ function getEpicDotClass(epicId: string): string {
 // story #4284 — 구성원 이름은 nullable. 이름 없는 구성원은 머리글자 대신 사람 아이콘(유나 4286 판정 — «?» 머리글자 → 사람 아이콘),
 // 전체 라벨(«이름 없는 구성원»)은 title로. 라벨 앞 두 자(«이름»)를 머리글자로 쓰면 실명처럼 읽힌다.
 function getInitials(name: string): string {
-  return name.slice(0, 2).toUpperCase();
+  return firstGraphemes(name, 2).toUpperCase();
 }
 
 // E-DG S11 ①: workflow-line badge 5상태(LineStatusSummary + 기존 pending gate 두 소스 merge).
