@@ -294,9 +294,6 @@ substitutions:
   # story 4786: prod must say its minimum instances itself (the defaults above are dev-safe: backend 2 · realtime 0 · frontend 0). The workflow's prod branch sends `true`; a hand-run prod build that does
   # not fails in the first step (fail-closed) instead of deploying prod at the dev numbers.
   _MINS_EXPLICIT: ''
-  # story 4786 (E-INFRA-DIET): the dev GCE realtime gateways + realtime-dev. `off` (default) = deploy-realtime and deploy-realtime-gce skip on dev, so a deploy never re-creates what was stopped by hand; the dev
-  # workflow branch (cloud-build.yml) sets it together with the frontend's stream address. Prod: both steps already exit first on any environment but dev.
-  _DEV_REALTIME_STACK: 'off'
   # concurrency=80은 Cloud Run 플랫폼 기본값과 라이브 실측(dev describe 확認)이 이미 일치 —
   # SSOT에 값을 안 박아도 드리프트 위험이 없다(플랫폼 기본값 자체가 곧 이 값). 굳이 플래그로
   # 고정하지 않는다(불필요한 명시로 "왜 80이지" 오해를 만들 필요 없음) — 판단 근거만 여기 기록.
@@ -966,10 +963,10 @@ steps:
           echo "skip deploy-realtime: prod gate pending (E-ARCH 1단계 dev 검증 후 오픈)"
           exit 0
         fi
-        if [ "${_DEV_REALTIME_STACK}" != "on" ]; then
-          echo "skip deploy-realtime: dev realtime stack is off (story 4786)"
-          exit 0
-        fi
+        # story 4786 (E-INFRA-DIET, PO): the dev realtime-dev service is RETIRED — dev streams through backend-dev. There is no switch: this step never deploys. What follows is unreachable and kept only so the older guards on
+        # this step still read the same text; the dev move to VMs (story 4796) rewrites the deploy steps.
+        echo "skip deploy-realtime: retired (story 4786) — dev streams through backend-dev"
+        exit 0
         # ⛔fail-fast(오르테가군 PO 2026-07-23) — 사유는 docstring 아카이브.
         if [ -z "${_REALTIME_URL}" ]; then
           echo "FAIL: _REALTIME_URL 이 비어 있다. deploy-realtime 은 이 값을 realtime 서비스의"
@@ -1186,10 +1183,10 @@ steps:
           echo "skip deploy-realtime-gce: dev 전용 하드게이트(story #2185) — prod GCE는 사람이 직접 배포한다"
           exit 0
         fi
-        if [ "${_DEV_REALTIME_STACK}" != "on" ]; then
-          echo "skip deploy-realtime-gce: dev realtime stack is off (story 4786)"
-          exit 0
-        fi
+        # story 4786 (E-INFRA-DIET, PO): the dev GCE realtime gateways are RETIRED — dev streams through backend-dev, the MIG / load balancer / IP / DNS were removed. There is no switch: this step never deploys. What follows
+        # is unreachable and kept only so the older guards on this step still read the same text; the dev move to VMs (story 4796) rewrites the deploy steps.
+        echo "skip deploy-realtime-gce: retired (story 4786) — dev streams through backend-dev"
+        exit 0
 
         # story #2089(원안, 페드루 PO 판정 2026-08-17) — realtime path-filter.
         # ⛔story #3079(2026-08-25) 근본수정 — 여기 있던 git-diff 기반 판정은 Cloud Build
