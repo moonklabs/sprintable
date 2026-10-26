@@ -72,7 +72,8 @@ def test_one_substitution_assignment_carries_every_item():
     assigns = [line for line in _WORKFLOW.splitlines() if line.lstrip().startswith('SUBST="')]
     assert len(assigns) == 1, len(assigns)
     for name in ("_MINS_EXPLICIT", "_CPU_FLAGS", "_DEV_REALTIME_STACK", "_BACKEND_RESOURCES", "_FRONTEND_RESOURCES", "_BACKEND_MIN_INSTANCES", "_FRONTEND_MIN_INSTANCES", "_REALTIME_MIN_INSTANCES"):
-        assert f'{name}=\\"${{V_' in assigns[0], name
+        # the EXACT mapping, not a `V_` prefix: `_DEV_REALTIME_STACK=\"${V_REALTIME_URL}\"` would pass a prefix check and make both deploys skip while the frontend points at the gateways (codex 4786)
+        assert f'{name}=\\"${{V{name}}}\\"' in assigns[0], name
 
 
 def test_the_switch_reaches_cloud_build():
@@ -140,9 +141,11 @@ def test_with_the_stack_off_or_on_prod_the_path_filter_skips_pass_through():
 def test_dev_and_prod_both_stay_behind_pgbouncer():
     """PO 10-26: going direct on dev was weighed and left out (one VM, ≈ $15/month, against a connection budget with no room for a third overlapping revision). The flag and the secret move together, so both are pinned"""
     assert re.search(r'echo "backend_db_pgbouncer=true"', _DEV) and 'echo "backend_db_pgbouncer=false"' not in _DEV
-    dev_secrets = _run_env_vars_assembly("dev", "", var="SECRETS_FLAG")
-    assert "DATABASE_URL=DATABASE_URL_DEV_PGBOUNCER_SPRINTABLE:latest" in dev_secrets.removeprefix("--update-secrets=").split(",")
-    assert "DATABASE_URL_DIRECT=DATABASE_URL_DIRECT_DEV_SPRINTABLE:latest" in dev_secrets.removeprefix("--update-secrets=").split(",")  # the LISTEN connection stays direct
+    dev_items = _run_env_vars_assembly("dev", "", var="SECRETS_FLAG").removeprefix("--update-secrets=").split(",")
+    # exactly ONE binding of each name: a later duplicate `DATABASE_URL=…DIRECT…` would still contain the right item
+    assert [i for i in dev_items if i.startswith("DATABASE_URL=")] == ["DATABASE_URL=DATABASE_URL_DEV_PGBOUNCER_SPRINTABLE:latest"]
+    assert [i for i in dev_items if i.startswith("DATABASE_URL_DIRECT=")] == ["DATABASE_URL_DIRECT=DATABASE_URL_DIRECT_DEV_SPRINTABLE:latest"]  # the LISTEN connection stays direct
     # prod is untouched: PgBouncer in front, the direct secret behind it
-    prod_secrets = _run_env_vars_assembly("prod", "", var="SECRETS_FLAG")
-    assert "DATABASE_URL=DATABASE_URL_PROD_PGBOUNCER:latest" in prod_secrets.removeprefix("--update-secrets=").split(",")
+    prod_items = _run_env_vars_assembly("prod", "", var="SECRETS_FLAG").removeprefix("--update-secrets=").split(",")
+    assert [i for i in prod_items if i.startswith("DATABASE_URL=")] == ["DATABASE_URL=DATABASE_URL_PROD_PGBOUNCER:latest"]
+    assert [i for i in prod_items if i.startswith("DATABASE_URL_DIRECT=")] == ["DATABASE_URL_DIRECT=DATABASE_URL_PROD:latest"]
