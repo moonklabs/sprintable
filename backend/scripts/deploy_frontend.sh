@@ -56,7 +56,7 @@ IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/${AR_REPO}/frontend:${COMMIT_
 case "${ENV}" in
     dev)
         SERVICE_NAME="sprintable-frontend-dev"
-        MIN_INSTANCES=1
+        MIN_INSTANCES=0  # story 4786 (E-INFRA-DIET): dev 는 «쓸 때만» 돈다 — SSOT(cloud-build.yml dev 분기 · cloudbuild.yaml)와 같은 값
         MAX_INSTANCES=3
         MEMORY="512Mi"
         CPU="1"

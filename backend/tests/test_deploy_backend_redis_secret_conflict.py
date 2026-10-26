@@ -309,6 +309,8 @@ _DECLARED_SUBSTITUTIONS = {
     "_BACKEND_PRESENCE_REDIS_ENABLED", "_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED",
     "_BACKEND_SSE_LEASE_REDIS_ENABLED", "_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED",
     "_FRONTEND_MIN_INSTANCES", "_FRONTEND_MAX_INSTANCES", "_LICENSE_CONSENT",
+    # story 4786 (E-INFRA-DIET) — extra `gcloud run deploy` flags for the CPU allocation (dev `--cpu-throttling`, prod empty); backend + frontend deploy steps.
+    "_CPU_FLAGS",
     # story aec3ec09([P1 후속] OAuth 핸드오프 활성화) — LICENSE_CONSENT와 동일 배선 클래스.
     "_FIREBASE_OAUTH_HANDOFF_ENABLED",
     "_NEXT_PUBLIC_APP_URL", "_ADMIN_OPERATOR_AUDIENCE", "_ADMIN_OPERATOR_ALLOWLIST",
@@ -863,7 +865,7 @@ def test_deploy_removes_xff_probe_flag_everywhere_after_observation():
     assert "XFF_PROBE_ENABLED=true" not in cloudbuild
 
 
-def _run_frontend_deploy_argv(deploy_env: str) -> list[str]:
+def _run_frontend_deploy_argv(deploy_env: str, cpu_flags: str = "") -> list[str]:
     """deploy-frontend 스텝을 gcloud만 가로채 실행 — `gcloud run deploy`가 실제로 받는 인자 목록(따옴표 · 단어 나눔 적용 뒤)."""
     script = _apply_cloudbuild_escaping(_extract_step_script("deploy-frontend"))
     stub = 'gcloud() { printf "ARG=%s\\n" "$@"; }\n'
@@ -872,7 +874,7 @@ def _run_frontend_deploy_argv(deploy_env: str) -> list[str]:
         "_DEPLOY_ENV": deploy_env, "_REALTIME_URL": "https://rt.example", "_APPLE_TEAM_ID": "JN798BC4KC",
         "_MOBILE_APP_LINK_ORIGIN": "https://m.example", "_NEXT_PUBLIC_APP_URL": "https://app.example",
         "_AR_REGION": "asia-northeast3", "PROJECT_ID": "p", "_AR_REPO": "r", "COMMIT_SHA": "c",
-        "_FRONTEND_TIMEOUT": "300", "_FRONTEND_MIN_INSTANCES": "1", "_FRONTEND_MAX_INSTANCES": "2",
+        "_FRONTEND_TIMEOUT": "300", "_FRONTEND_MIN_INSTANCES": "1", "_FRONTEND_MAX_INSTANCES": "2", "_CPU_FLAGS": cpu_flags,
     }
     proc = subprocess.run(["bash", "-c", stub + script], capture_output=True, text=True, env=env, check=True)
     return [line[len("ARG="):] for line in proc.stdout.splitlines() if line.startswith("ARG=")]
