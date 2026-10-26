@@ -51,9 +51,10 @@ def test_dev_minimum_instances_in_the_workflow_that_overrides_the_defaults():
         assert _outputs(_DEV, name) == [value], (name, _outputs(_DEV, name))
 
 
-def test_prod_minimum_instances_are_exactly_what_they_were():
-    """«prod is not touched» pinned literally (codex 4786): backend 3 · frontend 3. A later story that lowers prod changes these two numbers on purpose, here, in the same PR — never by a stray edit"""
-    assert _outputs(_PROD, "backend_min_instances") == [3] and _outputs(_PROD, "frontend_min_instances") == [3]
+def test_prod_minimum_instances_are_exactly_what_the_operator_set():
+    """prod's minimums pinned literally (codex 4786): a story that changes prod changes these two numbers on purpose, here, in the same PR — never by a stray edit. Story 4790 (2026-10-26, the teacher: «prod도 지금 줄이기»):
+    3 · 3 → 1 · 1, the values the operator set by hand at 09:07Z; the repository follows so the next prod deploy cannot put 3 back (the sizes and the maximum are pinned in test_4790_prod_matches_hand_values.py)."""
+    assert _outputs(_PROD, "backend_min_instances") == [1] and _outputs(_PROD, "frontend_min_instances") == [1]
 
 
 def test_cloudbuild_defaults_for_the_dev_safe_fallback():
@@ -152,7 +153,7 @@ def test_no_step_can_start_before_the_guard_has_passed():
 
 
 def test_the_manual_scripts_agree_for_dev_and_leave_prod_alone():
-    for name, dev_min, prod_min in (("frontend", 0, 3), ("backend", 2, 1)):
+    for name, dev_min, prod_min in (("frontend", 0, 1), ("backend", 2, 1)):  # story 4790: frontend prod 3 → 1 (the value the operator set by hand)
         script = (_ROOT / f"backend/scripts/deploy_{name}.sh").read_text()
         dev = script[script.index("    dev)"):script.index("    prod)")]
         prod = script[script.index("    prod)"):]

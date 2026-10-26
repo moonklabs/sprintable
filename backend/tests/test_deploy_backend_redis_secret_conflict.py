@@ -325,6 +325,8 @@ _DECLARED_SUBSTITUTIONS = {
     "_CPU_FLAGS",
     # story 4786 — the prod fail-closed guard step reads it (first step).
     "_MINS_EXPLICIT",
+    # story 4790 — the prod size flags (empty = not sent).
+    "_BACKEND_RESOURCES", "_FRONTEND_RESOURCES",
     # story aec3ec09([P1 후속] OAuth 핸드오프 활성화) — LICENSE_CONSENT와 동일 배선 클래스.
     "_FIREBASE_OAUTH_HANDOFF_ENABLED",
     "_NEXT_PUBLIC_APP_URL", "_ADMIN_OPERATOR_AUDIENCE", "_ADMIN_OPERATOR_ALLOWLIST",
@@ -505,7 +507,7 @@ def _run_backend_deploy_argv(deploy_env: str, **overrides: str) -> list[str]:
     """the whole deploy-backend step with only gcloud intercepted — the argument list `gcloud run deploy` would receive (story 4786: the minimum and the CPU flag must arrive)"""
     script = _apply_cloudbuild_escaping(_extract_deploy_backend_script())
     env = _backend_step_env(deploy_env, "", **overrides)
-    env.update({"PROJECT_ID": "p", "COMMIT_SHA": "c", "_AR_REGION": "asia-northeast3", "_AR_REPO": "r", "_BACKEND_MIN_INSTANCES": "2", "_BACKEND_MAX_INSTANCES": "8", "_CPU_FLAGS": ""} | overrides)
+    env.update({"PROJECT_ID": "p", "COMMIT_SHA": "c", "_AR_REGION": "asia-northeast3", "_AR_REPO": "r", "_BACKEND_MIN_INSTANCES": "2", "_BACKEND_MAX_INSTANCES": "8", "_CPU_FLAGS": "", "_BACKEND_RESOURCES": ""} | overrides)
     stub = 'gcloud() { printf "ARG=%s\\n" "$@"; }\n'
     proc = subprocess.run(["bash", "-c", stub + script], capture_output=True, text=True, env=env, check=True)
     return [line[len("ARG="):] for line in proc.stdout.splitlines() if line.startswith("ARG=")]
@@ -900,7 +902,7 @@ def test_deploy_removes_xff_probe_flag_everywhere_after_observation():
     assert "XFF_PROBE_ENABLED=true" not in cloudbuild
 
 
-def _run_frontend_deploy_argv(deploy_env: str, cpu_flags: str = "") -> list[str]:
+def _run_frontend_deploy_argv(deploy_env: str, cpu_flags: str = "", resources: str = "") -> list[str]:
     """deploy-frontend 스텝을 gcloud만 가로채 실행 — `gcloud run deploy`가 실제로 받는 인자 목록(따옴표 · 단어 나눔 적용 뒤)."""
     script = _apply_cloudbuild_escaping(_extract_step_script("deploy-frontend"))
     stub = 'gcloud() { printf "ARG=%s\\n" "$@"; }\n'
@@ -909,7 +911,7 @@ def _run_frontend_deploy_argv(deploy_env: str, cpu_flags: str = "") -> list[str]
         "_DEPLOY_ENV": deploy_env, "_REALTIME_URL": "https://rt.example", "_APPLE_TEAM_ID": "JN798BC4KC",
         "_MOBILE_APP_LINK_ORIGIN": "https://m.example", "_NEXT_PUBLIC_APP_URL": "https://app.example",
         "_AR_REGION": "asia-northeast3", "PROJECT_ID": "p", "_AR_REPO": "r", "COMMIT_SHA": "c",
-        "_FRONTEND_TIMEOUT": "300", "_FRONTEND_MIN_INSTANCES": "1", "_FRONTEND_MAX_INSTANCES": "2", "_CPU_FLAGS": cpu_flags,
+        "_FRONTEND_TIMEOUT": "300", "_FRONTEND_MIN_INSTANCES": "1", "_FRONTEND_MAX_INSTANCES": "2", "_CPU_FLAGS": cpu_flags, "_FRONTEND_RESOURCES": resources,
     }
     proc = subprocess.run(["bash", "-c", stub + script], capture_output=True, text=True, env=env, check=True)
     return [line[len("ARG="):] for line in proc.stdout.splitlines() if line.startswith("ARG=")]
