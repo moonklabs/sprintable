@@ -374,6 +374,29 @@ def _explicit_revoke_values(now: datetime) -> dict:
     return {"revoked_at": now, "expires_at": now}
 
 
+# story 4782 (second PR) — «ending every session of a person» and «a token being issued from one of that person's sessions» must not run side by side. Both sides queue on ONE advisory
+# transaction lock per person: an issuer (refresh · switch-account · switch-org · switch-project) takes it SHARED before it touches its source token, an all-device revoke
+# (`_revoke_other_sessions` · the set-password confirmation) takes it EXCLUSIVE before it touches anything of the person. Whoever comes second waits for the other's transaction to end, so:
+# the revoke first → the issuer finds its source token ended and is refused; the issuer first → its successor is committed before the revoke's statements run (every statement takes a fresh
+# snapshot), so the revoke sees it and ends it. Before, a revoke that met the issuer's row lock waited, skipped the row and never saw the successor the issuer committed right after.
+# Two-key form `(namespace, hash(user id))`: the other advisory locks of this code base use the one-key form, so they cannot meet this one. The lock is taken FIRST in every transaction that
+# takes it (before the person's row is written · before any token row is touched) — a revoke holding the person's row while waiting for an issuer that waits for that row would be a deadlock.
+_SESSION_LOCK_NAMESPACE = 47820001
+
+
+async def _lock_person_sessions(session: AsyncSession, user_id: uuid.UUID, *, exclusive: bool) -> None:
+    lock = func.pg_advisory_xact_lock if exclusive else func.pg_advisory_xact_lock_shared
+    await session.execute(select(lock(_SESSION_LOCK_NAMESPACE, func.hashtext(str(user_id)))))
+
+
+def _refresh_payload_user_id(payload: dict) -> uuid.UUID | None:
+    """the person a (signature-checked) refresh token names; None when `sub` is not an id (such a token has no row, so there is nothing to queue behind)"""
+    try:
+        return uuid.UUID(str(payload.get("sub")))
+    except (ValueError, TypeError):
+        return None
+
+
 async def _revoke_other_sessions(
     session: AsyncSession, user_id: uuid.UUID, keep_token_hash: str | None,
 ) -> tuple[int, uuid.UUID | None]:
@@ -388,7 +411,10 @@ async def _revoke_other_sessions(
     ② tokens already revoked by a rotation but still inside the refresh grace window (§2449 — `expires_at` untouched by the
        rotation) → their window is closed too. Without it a device's previous token, rotated a moment ago, could fork a new
        session from that window after its live token was revoked. The kept token's own predecessor (`replaced_by` = it) keeps
-       its window: that is this browser's own rotation race."""
+       its window: that is this browser's own rotation race.
+
+    Takes the person's session lock EXCLUSIVELY first (see `_lock_person_sessions`): an issuer in flight finishes before this runs, one that comes after finds its token ended."""
+    await _lock_person_sessions(session, user_id, exclusive=True)
     now = datetime.now(timezone.utc)
     keep_id: uuid.UUID | None = None
     if keep_token_hash:
@@ -514,7 +540,10 @@ async def _claim_switching_session(
     when a switch moved it on a moment ago and the successor lives (the client renews; it is not a sign-out), otherwise `TOKEN_REVOKED`. No token sent = nothing to switch from = `TOKEN_REVOKED`
     (the web BFF always sends its cookie's token; the all-device fallback for web pods older than the backend is gone — 0 callers left, story 4782).
 
-    Call it BEFORE the handler writes anything of the person's (`last_org_id` · `last_project_id`): `get_db` commits when the handler returns, a refusal included."""
+    Call it BEFORE the handler writes anything of the person's (`last_org_id` · `last_project_id`): `get_db` commits when the handler returns, a refusal included.
+
+    The person's session lock is taken SHARED first (`_lock_person_sessions`): an all-device revoke either ran before (this token is then ended and refused) or waits until the successor is committed."""
+    await _lock_person_sessions(session, user.id, exclusive=False)
     now = datetime.now(timezone.utc)
 
     def _refuse(code: str, message: str, reason: str) -> JSONResponse:
@@ -597,6 +626,7 @@ async def _reclaim_unproved_account(
     # what the account held BEFORE this runs (the ORM-enabled UPDATE below would also refresh the loaded object): the notice says only what was really cut
     # (locked FOR UPDATE: the row is read and then overwritten in this one transaction, so a concurrent two-factor / provider / password change cannot slip in between
     # and leave the notice naming a state that was not the one cut)
+    await _lock_person_sessions(session, user.id, exclusive=True)  # story 4782 (second PR): BEFORE the person's row is locked below — the revoke further down takes the same lock, and an issuer holds it while it writes that row
     pre = (await session.execute(
         select(User.hashed_password, User.google_id, User.github_id, User.apple_id, User.totp_enabled, User.totp_secret).where(User.id == user.id).with_for_update()
     )).one()
@@ -1324,6 +1354,11 @@ async def refresh_token(
 
     token_hash = hash_token(body.refresh_token)
     correlation_key = token_hash[:12]  # story e5225c0a: 산티아고 관측성 요구 — 로그 상관키(PII 아님)
+    # story 4782 (second PR): an all-device revoke and this rotation queue on the person's session lock (`_lock_person_sessions`) — the revoke first → the rotation below finds its token ended;
+    # this rotation first → its successor is committed before the revoke's statements run, and they end it
+    _lock_user = _refresh_payload_user_id(payload)
+    if _lock_user is not None:
+        await _lock_person_sessions(session, _lock_user, exclusive=False)
 
     # ⚠️story e5225c0a(P0): switch_account(위)와 동형의 원자 rotation. 기존 SELECT→별도 UPDATE는
     # 비원자라 Cloud Run 멀티 인스턴스 간 동시 refresh가 둘 다 "아직 안 revoke"로 통과하는 race의
@@ -1550,6 +1585,9 @@ async def switch_account(
         return _err("INVALID_TOKEN", "Not a refresh token", 401)
 
     token_hash = hash_token(body.refresh_token)
+    _lock_user = _refresh_payload_user_id(payload)  # story 4782 (second PR): queue with an all-device revoke on the person's session lock (`_lock_person_sessions`)
+    if _lock_user is not None:
+        await _lock_person_sessions(session, _lock_user, exclusive=False)
     # ⚠️ 원자 single-use rotation(까심 TOCTOU): SELECT-then-UPDATE 비원자면 동시 2요청이 둘 다
     # 통과해 double-spend. 검증+revoke 를 단일 UPDATE...WHERE revoked_at IS NULL...RETURNING 으로
     # 원자화 — 동시 요청 중 정확히 1건만 row 매치(나머지 0행→401).
@@ -2299,9 +2337,11 @@ async def reset_password(
         # provider links and its two-factor secret through a reset (only sessions end, below).
         if await _reclaim_unproved_account(session, user, new_password_hash=hash_password(body.new_password), why="password-reset") is not None:
             return _ok({"message": "Password reset successfully", "sessions_ended": None})
+    new_hash = hash_password(body.new_password)  # the (slow) hash before the lock: the lock is held only for the writes
+    await _lock_person_sessions(session, user.id, exclusive=True)  # story 4782 (second PR): before the person's row is written (an issuer holds the lock while it writes that row)
     await session.execute(
         update(User).where(User.id == user.id).values(
-            hashed_password=hash_password(body.new_password),
+            hashed_password=new_hash,
             password_set_at=datetime.now(timezone.utc),
         )
     )
@@ -2328,9 +2368,11 @@ async def change_password(
     if not verify_password(body.current_password, user.hashed_password):
         return _err("WRONG_PASSWORD", "Current password is incorrect", 400)
 
+    new_hash = hash_password(body.new_password)  # the (slow) hash before the lock: the lock is held only for the writes
+    await _lock_person_sessions(session, user.id, exclusive=True)  # story 4782 (second PR): before the person's row is written
     now = datetime.now(timezone.utc)
     await session.execute(
-        update(User).where(User.id == user.id).values(hashed_password=hash_password(body.new_password), password_set_at=now)
+        update(User).where(User.id == user.id).values(hashed_password=new_hash, password_set_at=now)
     )
     # story #4630 (PO 10:18Z · option (b) after Kadir qa:changes · codex 01a11afd) — every session ends now, this one too (as
     # a reset). A new pair for this session would need a session start of now, and #3649 (refresh) and #3247 (disabling TOTP
@@ -2464,6 +2506,7 @@ async def confirm_set_password(
         # TOCTOU fail-closed — 토큰 발급 후 15분 사이 다른 경로로 비밀번호가 이미 생겼으면 거부.
         return _err("ALREADY_HAS_PASSWORD", "User already has a password set", 400)
 
+    await _lock_person_sessions(session, user.id, exclusive=True)  # story 4782 (second PR): before the person's row is written
     await session.execute(
         update(User).where(User.id == user.id).values(
             hashed_password=new_password_hash,

@@ -211,6 +211,11 @@ async def delete_account(
         uid = uuid.UUID(str(auth.user_id))
     except ValueError:
         raise HTTPException(status_code=404, detail="Account not found") from None
+    from app.routers.auth import _lock_person_sessions
+
+    # story 4782 (second PR): the person's session lock FIRST — before the person's row is locked below. A token being issued holds that lock (shared) while it writes the same row; this deletion
+    # ends every session (`_revoke_user_refresh_tokens`, which takes the lock too) — taking the row first and the lock later would be a deadlock between the two.
+    await _lock_person_sessions(session, uid, exclusive=True)
     user = (await session.execute(select(User).where(User.id == uid).with_for_update())).scalar_one_or_none()
     if user is None or not user.is_active or user.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Account not found")  # another person's id, an agent key's member, or an account already deleted: the same answer
