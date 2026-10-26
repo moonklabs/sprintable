@@ -325,6 +325,8 @@ _DECLARED_SUBSTITUTIONS = {
     "_CPU_FLAGS",
     # story 4786 — the prod fail-closed guard step reads it (first step).
     "_MINS_EXPLICIT",
+    # story 4786 — the dev realtime stack switch (deploy-realtime · deploy-realtime-gce).
+    "_DEV_REALTIME_STACK",
     # story 4790 — the prod size flags (empty = not sent).
     "_BACKEND_RESOURCES", "_FRONTEND_RESOURCES",
     # story aec3ec09([P1 후속] OAuth 핸드오프 활성화) — LICENSE_CONSENT와 동일 배선 클래스.
