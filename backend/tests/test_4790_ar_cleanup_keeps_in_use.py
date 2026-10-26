@@ -402,3 +402,77 @@ def test_flag_abbreviations_are_off(tmp_path):
     with pytest.raises(SystemExit) as err:
         gate.main(argv)
     assert err.value.code == 2
+
+
+def test_the_write_is_atomic_an_existing_target_survives_a_failing_write_and_a_failing_replace(tmp_path, monkeypatch):
+    """`_write_policy` on its own: a target that already holds content keeps it when the write fails half way and when `os.replace` fails, and no temporary file is left"""
+    target = tmp_path / "policy.json"
+    target.write_text("OLD")
+    real = Path.write_text
+
+    def half(self, data, *a, **k):
+        real(self, data[: len(data) // 2])
+        raise OSError("File too large")
+
+    monkeypatch.setattr(Path, "write_text", half)
+    with pytest.raises(OSError):
+        gate._write_policy(target, "NEWNEWNEW")
+    monkeypatch.setattr(Path, "write_text", real)
+    assert target.read_text() == "OLD" and [p.name for p in tmp_path.iterdir()] == ["policy.json"]
+
+    def boom(src, dst):
+        raise OSError("cross-device link")
+
+    monkeypatch.setattr(gate.os, "replace", boom)
+    with pytest.raises(OSError):
+        gate._write_policy(target, "NEWNEWNEW")
+    assert target.read_text() == "OLD" and [p.name for p in tmp_path.iterdir()] == ["policy.json"]
+
+
+def test_only_a_policy_this_tool_wrote_is_ever_deleted(tmp_path):
+    """the stale-file drop removes a generated policy and nothing else: not a stranger's file, not an input dump, not a directory, not a symlink (not even one that points to a generated policy or to a directory)"""
+    generated = tmp_path / "generated.json"
+    generated.write_text(json.dumps([{"name": "keep-in-use", "action": {"type": "Keep"}, "condition": {"versionNamePrefixes": []}}]))
+    assert gate._drop_stale(str(generated)) is True and not generated.exists()
+    stranger = tmp_path / "notes.txt"
+    stranger.write_text("not json")
+    dump = tmp_path / "dump.json"
+    dump.write_text(json.dumps([{"package": "x", "version": "sha256:" + "0" * 64}]))
+    folder = tmp_path / "folder"
+    folder.mkdir()
+    for p in (stranger, dump, folder):
+        assert gate._drop_stale(str(p)) is False and p.exists(), p
+    real_policy = tmp_path / "real.json"
+    real_policy.write_text(json.dumps([{"name": "keep-in-use"}]))
+    link = tmp_path / "link.json"
+    link.symlink_to(real_policy)
+    link_dir = tmp_path / "link-dir"
+    link_dir.symlink_to(folder, target_is_directory=True)
+    for p in (link, link_dir):
+        assert gate._drop_stale(str(p)) is False and p.is_symlink(), p
+    assert real_policy.exists()
+
+
+def test_a_malformed_input_option_cannot_make_the_pre_scan_delete_an_input(tmp_path):
+    """the review's case: `--ima X` (an abbreviation the pre-scan does not know) with `--emit-policy X` used to delete X before argparse rejected the call"""
+    d = Dumps(tmp_path)
+    argv = d.argv()
+    images = argv[argv.index("--images") + 1]
+    before = Path(images).read_text()
+    argv[argv.index("--images")] = "--ima"
+    argv[argv.index("--emit-policy") + 1] = images
+    with pytest.raises(SystemExit) as err:
+        gate.main(argv)
+    assert err.value.code == 2
+    assert Path(images).exists() and Path(images).read_text() == before
+
+
+def test_emit_policy_that_is_a_symlink_to_a_directory_is_refused_and_left_alone(tmp_path):
+    d = Dumps(tmp_path)
+    folder = tmp_path / "real-folder"
+    folder.mkdir()
+    link = tmp_path / "link-to-folder"
+    link.symlink_to(folder, target_is_directory=True)
+    argv = d.argv()
+    argv[argv.index("--emit-policy") + 1] = str(link)
+    assert gate.main(argv) == 2 and link.is_symlink() and folder.is_dir()

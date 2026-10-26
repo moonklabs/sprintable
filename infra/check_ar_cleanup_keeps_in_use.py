@@ -44,6 +44,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -345,10 +346,13 @@ _INPUT_FLAGS = ("--images", "--run-services", "--run-revisions", "--run-jobs", "
 
 
 def _same_file(a: str, b: str) -> bool:
+    """같은 파일인가 — 둘 다 있으면 inode로(하드 링크 · 심볼릭 링크까지), 아니면 경로로. **모르면 «같다»**(지우지 않고 거부하는 쪽이 안전하다)."""
     try:
+        if Path(a).exists() and Path(b).exists():
+            return os.path.samefile(a, b)
         return Path(a).resolve() == Path(b).resolve()
     except OSError:
-        return False
+        return True
 
 
 def _raw_values(raw: list[str], flags: tuple[str, ...]) -> list[str]:
@@ -363,23 +367,41 @@ def _raw_values(raw: list[str], flags: tuple[str, ...]) -> list[str]:
     return out
 
 
+def _is_generated_policy(path: Path) -> bool:
+    """이 도구가 만든 정책 파일인가: 심볼릭 링크 · 디렉터리가 아닌 «일반 파일»이고, JSON 목록의 첫 규칙 이름이 `keep-in-use`(`build_policy`가 늘 맨 앞에 넣는 규칙)이다.
+    입력 덤프 · 기본 정책(`keep-in-use`를 가지면 그 자체가 입력 오류) · 다른 사람의 파일은 이 모양이 아니다."""
+    try:
+        if path.is_symlink() or not path.is_file():
+            return False
+        rules = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return False
+    return isinstance(rules, list) and bool(rules) and isinstance(rules[0], dict) and rules[0].get("name") == "keep-in-use"
+
+
 def _drop_stale(path: str | None, protect: Iterable[str] = ()) -> bool:
-    """실패한 실행이 이전 성공의 정책 파일을 «현재 입력의 통과본»인 척 남기지 않게 한다. **입력 파일은 지우지 않는다**(`--emit-policy`가 입력 경로와 같을 때 사람이 손으로 모은 덤프가 사라지지 않게)
-    · 지울 수 없는 경로(디렉터리 · 권한)는 건드리지 않고 False를 돌려준다."""
+    """실패한 실행이 이전 성공의 정책 파일을 «현재 입력의 통과본»인 척 남기지 않게 한다. **이 도구가 만든 정책 파일만** 지운다(`_is_generated_policy`) — 입력 파일 · 디렉터리 · 심볼릭 링크 · 낯선 파일은
+    어떤 경로 철자로 불려도 건드리지 않는다. `protect`(입력 경로 철자들)는 한 겹 더 두는 안전장치다. 지웠거나 원래 없으면 True."""
     if not path or any(_same_file(path, q) for q in protect):
         return False
+    target = Path(path)
+    if not (target.exists() or target.is_symlink()):
+        return True
+    if not _is_generated_policy(target):
+        return False
     try:
-        Path(path).unlink()
-    except FileNotFoundError:
-        pass
+        target.unlink()
     except OSError:
         return False
     return True
 
 
 def _write_policy(path: Path, text: str) -> None:
-    """같은 폴더의 임시 파일에 쓰고 `os.replace`로 바꾼다 — 쓰다 실패해도 잘린 파일(JSON 아님)이 최종 경로에 남지 않는다. 실패하면 임시 파일을 치우고 OSError를 그대로 올린다."""
-    tmp = path.with_name(f"{path.name}.tmp{os.getpid()}")
+    """같은 폴더에 **배타적으로 만든** 임시 파일(`mkstemp`: O_EXCL · 무작위 이름)에 쓰고 `os.replace`로 바꾼다 — 쓰다 실패해도 잘린 파일이 최종 경로에 남지 않고, 이미 있던 목표 파일은 그대로다.
+    실패하면 임시 파일을 치우고 OSError를 그대로 올린다."""
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
+    os.close(fd)
+    tmp = Path(tmp_name)
     try:
         tmp.write_text(text)
         os.replace(tmp, path)
