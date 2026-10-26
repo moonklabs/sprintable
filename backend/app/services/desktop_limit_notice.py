@@ -615,19 +615,25 @@ async def _stood_for(db: AsyncSession, setup: DesktopSetup, row: DesktopSession,
         raise
 
 
-async def _load_stood_rows(db: AsyncSession, mark: dict):
+async def _load_stood_rows(db: AsyncSession, mark: dict, person: Recipient, org_id: uuid.UUID):
     """The two rows the notice made, locked for the rewrite — (card, bell), each None when the mark does not name it. `visible` is False when the mark names a row that is not there (yet): the
-    mark is written inside the report's transaction, so a report that comes in at the same moment may find the mark before the notice is committed."""
+    mark is written inside the report's transaction, so a report that comes in at the same moment may find the mark before the notice is committed. The rows are read by id AND by owner — the card is
+    this person's (`user_id`) in this org, the bell line is addressed to this person's member — so a mark that names somebody else's row (a store written wrongly) finds nothing and writes nothing
+    (Kadir's lens on 5251)."""
     from app.models.event import Event
     from app.models.notification import Notification
 
     note = evt = None
     visible = True
     if mark.get("note"):
-        note = (await db.execute(select(Notification).where(Notification.id == uuid.UUID(mark["note"])).with_for_update())).scalar_one_or_none()
+        note = (await db.execute(select(Notification).where(
+            Notification.id == uuid.UUID(mark["note"]), Notification.org_id == org_id, Notification.user_id == person.user_id,
+        ).with_for_update())).scalar_one_or_none()
         visible = visible and note is not None
     if mark.get("bell"):
-        evt = (await db.execute(select(Event).where(Event.id == uuid.UUID(mark["bell"])).with_for_update())).scalar_one_or_none()
+        evt = (await db.execute(select(Event).where(
+            Event.id == uuid.UUID(mark["bell"]), Event.org_id == org_id, Event.recipient_id == person.member_id, Event.recipient_type == "human",
+        ).with_for_update())).scalar_one_or_none()
         visible = visible and evt is not None
     return note, evt, visible
 
@@ -668,7 +674,7 @@ async def _fill_time(db: AsyncSession, setup: DesktopSetup, row: DesktopSession)
                 _, body, known, _, _, _, _ = await _stood_text(db, row, setup.org_id, person)
                 if not known:
                     continue  # (another session of this person still has no time: the words stay as they are for now, and the mark stays)
-                note, evt, visible = await _load_stood_rows(db, mark)
+                note, evt, visible = await _load_stood_rows(db, mark, person, setup.org_id)
                 if not visible:
                     continue  # the notice is not committed yet (a report at the same moment): the mark stays for the next one
                 if not await _claim_time_unknown(setup.org_id, person.user_id, raw):

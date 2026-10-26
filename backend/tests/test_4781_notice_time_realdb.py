@@ -16,6 +16,8 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
     ORG,
     OWNER,
     OWNER_TM,
+    PROJ,
+    _ASYNC,
     _addresses,
     _client,
     _dispose_global_engine_after_test,
@@ -291,3 +293,115 @@ async def test_12_the_pointer_of_a_lifted_notice_is_dropped_by_the_next_report(w
         for seq in range(6, 10):
             await _report(c, device, a, "waiting_input", seq, limit=_with_time(_later()))
         assert asked == [], "the pointer of a notice that is over is gone: these reports cost nothing"
+
+
+async def _forge_mark(**changes) -> dict:
+    """the stored mark of the person's open notice, replaced by itself with `changes` (a store written wrongly)"""
+    from app.services import desktop_limit_notice
+
+    peeked = await desktop_limit_notice._peek_time_unknown(ORG_UUID, OWNER_UUID)
+    assert peeked is not None, "the notice that said «unknown» left its mark"
+    _, mark = peeked
+    await desktop_limit_notice._clear_time_unknown(ORG_UUID, OWNER_UUID)
+    await desktop_limit_notice._mark_time_unknown(ORG_UUID, OWNER_UUID, {**mark, **changes})
+    return mark
+
+
+async def test_13_a_mark_that_names_somebody_elses_rows_writes_nothing(world):
+    """Kadir's lens on 5251: the rows are read by id AND by owner. A mark (a store written wrongly) that points at another person's card, or at another person's bell line, finds nothing and writes
+    nothing — each of the two is pinned on its own (a mark with one foreign row and one real row must not rewrite the real one either, so a read that checks only one of them is caught)."""
+    other_user, other_member = uuid.uuid4(), uuid.uuid4()
+    other_card, other_bell = uuid.uuid4(), uuid.uuid4()
+    async with _client() as c:
+        device = await _device(c, "d4781t mac m")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _report(c, device, a, "waiting_input", 2, limit=TIMED)
+        assert await _cards() == [UNKNOWN_BODY]
+        await _sql(
+            f"INSERT INTO notifications (id, org_id, user_id, type, title, body, is_read) VALUES ('{other_card}', '{ORG}', '{other_user}', 'agent.limit_paused', 't', '{UNKNOWN_BODY}', false)",
+            f"INSERT INTO events (id, project_id, org_id, event_type, recipient_id, recipient_type, payload, status) VALUES ('{other_bell}', '{PROJ}', '{ORG}', 'dispatched', "
+            f"'{other_member}', 'human', jsonb_build_object('event_type', 'agent.limit_paused', 'body', '{UNKNOWN_BODY}'), 'delivered')",
+        )
+        mine_card = (await _sql(fetch="SELECT id FROM notifications WHERE org_id = :o AND user_id = :u AND type = 'agent.limit_paused'", params={"o": ORG, "u": OWNER}))[0][0]
+        mine_bell = (await _sql(fetch="SELECT id FROM events WHERE recipient_id = :m AND payload->>'event_type' = 'agent.limit_paused'", params={"m": OWNER_TM}))[0][0]
+        at = _later()
+        seq = 3
+        for note, bell in ((other_card, other_bell), (other_card, mine_bell), (mine_card, other_bell)):
+            await _forge_mark(note=str(note), bell=str(bell))  # the same words and nonce — only the rows it names are somebody else's
+            await _report(c, device, a, "waiting_input", seq, limit=_with_time(at))
+            seq += 1
+            theirs = await _sql(fetch=f"SELECT (SELECT body FROM notifications WHERE id = '{other_card}'), (SELECT payload->>'body' FROM events WHERE id = '{other_bell}')")
+            assert theirs[0][0] == UNKNOWN_BODY and theirs[0][1] == UNKNOWN_BODY, "somebody else's card and bell line are untouched"
+            assert await _cards() == [UNKNOWN_BODY], "and the owner's own notice is not rewritten by a mark that did not name both of its rows"
+            assert [n["body"] for n in await _notices(STOOD)] == [UNKNOWN_BODY]
+        await _sql(f"DELETE FROM notifications WHERE id = '{other_card}'", f"DELETE FROM events WHERE id = '{other_bell}'")
+
+
+async def test_14_a_newer_mark_in_the_store_than_the_one_the_report_read_is_left_and_nothing_is_written(world, monkeypatch):
+    """a newer notice's mark lands between the report's read and its claim: the claim takes only the mark that was read — nothing is written and the newer mark stays"""
+    from app.services import desktop_limit_notice
+
+    real = desktop_limit_notice._load_stood_rows
+
+    async def load_then_a_newer_mark_lands(*args, **kwargs):
+        out = await real(*args, **kwargs)
+        await _forge_mark(nonce="newer-notice")  # (what a newer notice's mark looks like to the claim: a different value)
+        return out
+
+    async with _client() as c:
+        device = await _device(c, "d4781t mac n")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _report(c, device, a, "waiting_input", 2, limit=TIMED)
+        monkeypatch.setattr(desktop_limit_notice, "_load_stood_rows", load_then_a_newer_mark_lands)
+        await _report(c, device, a, "waiting_input", 3, limit=_with_time(_later()))
+        assert await _cards() == [UNKNOWN_BODY], "the older mark did not write"
+        peeked = await desktop_limit_notice._peek_time_unknown(ORG_UUID, OWNER_UUID)
+        assert peeked is not None and peeked[1]["nonce"] == "newer-notice", "the newer mark stays"
+
+
+async def test_15_a_hand_edit_that_holds_the_row_is_waited_for_and_not_overwritten(world):
+    """the rewrite locks the card (and the bell line) before it reads them: a person's edit that is still open on the row is waited for, then seen — the rewrite finds words that are no longer what the
+    notice wrote and leaves them alone. Without the lock the report reads the old words, and its write lands after the edit and takes it back."""
+    import asyncio
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    async with _client() as c:
+        device = await _device(c, "d4781t mac o")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _report(c, device, a, "waiting_input", 2, limit=TIMED)
+        eng = create_async_engine(_ASYNC, poolclass=NullPool)
+        try:
+            async with eng.connect() as conn:
+                await conn.execute(text("UPDATE notifications SET body = body || ' (custom)' WHERE org_id = :o AND user_id = :u AND type = 'agent.limit_paused'"), {"o": ORG, "u": OWNER})
+                report = asyncio.create_task(_report(c, device, a, "waiting_input", 3, limit=_with_time(_later())))
+                await asyncio.sleep(1.5)  # the report is at the row
+                assert not report.done(), "it waits for the open edit"
+                await conn.commit()
+            await asyncio.wait_for(report, 30)
+        finally:
+            await eng.dispose()
+        assert await _cards() == [UNKNOWN_BODY + " (custom)"], "the edit is still there"
+
+
+async def test_16_the_next_notice_clears_the_mark_of_the_one_before_it(world):
+    """a notice that stands with its time known leaves no mark of its own; the mark of the earlier notice (which was still waiting for a time) is taken away, not left to run out"""
+    from app.services import desktop_limit_notice
+
+    async with _client() as c:
+        device = await _device(c, "d4781t mac p")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _report(c, device, a, "waiting_input", 2, limit=TIMED)
+        assert await desktop_limit_notice._peek_time_unknown(ORG_UUID, OWNER_UUID) is not None
+        await _report(c, device, a, "working", 3)  # lifted (hold 0): that notice is over, its mark is left
+        await desktop_limit_notice._release_window(ORG_UUID, OWNER_UUID)  # (the cooldown of the first notice is over)
+        at = _later()
+        await _report(c, device, a, "waiting_input", 4, limit={"at": at.isoformat(), "again": False})  # a new notice, with its time at once
+        assert _words(at) in await _cards(), "the new notice stood"
+        assert await desktop_limit_notice._peek_time_unknown(ORG_UUID, OWNER_UUID) is None, "the earlier notice's mark is gone"
