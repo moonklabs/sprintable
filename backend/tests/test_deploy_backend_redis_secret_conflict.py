@@ -340,6 +340,8 @@ _DECLARED_SUBSTITUTIONS = {
     # 분기(ADMIN_OPERATOR_*와 동일 패턴 — prod 버킷 미프로비저닝이라 avatar #3117 이전
     # 형태 그대로 dev 전용).
     "_GCS_CHANNEL_MEDIA_BUCKET",
+    # story 4798 — dev 첨부 버킷(dev만 이름을 붙이고 prod는 코드 기본값 그대로) · deploy-backend / deploy-frontend dev 분기 + CORS 스텝.
+    "_GCS_MEMO_ATTACHMENTS_BUCKET",
     # story #3079 — realtime path-filter 판정을 GHA에서 계산해 넘기는 skip 플래그(GCE·Cloud Run).
     "_REALTIME_GCE_SKIP", "_REALTIME_CLOUDRUN_SKIP",
     # story #3118(Sign in with Apple) — deploy-backend(bash entrypoint)가 이제 이 3개를
@@ -446,6 +448,8 @@ def _backend_step_env(
         "_GCS_AVATARS_BUCKET": "sprintable-avatars-dev",
         # story 620beefc — set -u라 미설정이면 스크립트가 죽는다(GCS_AVATARS_BUCKET과 동일 이유).
         "_GCS_CHANNEL_MEDIA_BUCKET": "sprintable-channel-media-dev",
+        # story 4798 — set -u라 미설정이면 스크립트가 죽는다(같은 이유).
+        "_GCS_MEMO_ATTACHMENTS_BUCKET": "sprintable-memo-attachments-dev",
         # story #2771 — 기본 빈 문자열(substitutions 기본값과 정합, set -u라 미설정이면 스크립트가
         # 죽는다 — 여기 없으면 이 테스트 전체가 붕괴).
         "_GOTENBERG_SERVICE_URL": gotenberg_url,
@@ -868,6 +872,7 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         # story 620beefc — GCS_AVATARS_BUCKET 조건부 append 바로 뒤에 이어붙는다(cloudbuild.yaml
         # 삽입 순서 그대로).
         "GCS_CHANNEL_MEDIA_BUCKET=sprintable-channel-media-dev,"
+        "GCS_MEMO_ATTACHMENTS_BUCKET=sprintable-memo-attachments-dev,"  # story 4798
         # story 5b27b32f — GCS_CHANNEL_MEDIA_BUCKET 조건부 append 바로 뒤(cloudbuild.yaml
         # 삽입 순서 그대로).
         "SANDBOX_CHANNEL_ENABLED=true,"
@@ -914,6 +919,7 @@ def _run_frontend_deploy_argv(deploy_env: str, cpu_flags: str = "", resources: s
         "_MOBILE_APP_LINK_ORIGIN": "https://m.example", "_NEXT_PUBLIC_APP_URL": "https://app.example",
         "_AR_REGION": "asia-northeast3", "PROJECT_ID": "p", "_AR_REPO": "r", "COMMIT_SHA": "c",
         "_FRONTEND_TIMEOUT": "300", "_FRONTEND_MIN_INSTANCES": "1", "_FRONTEND_MAX_INSTANCES": "2", "_CPU_FLAGS": cpu_flags, "_FRONTEND_RESOURCES": resources,
+        "_GCS_MEMO_ATTACHMENTS_BUCKET": "sprintable-memo-attachments-dev",  # story 4798
     }
     proc = subprocess.run(["bash", "-c", stub + script], capture_output=True, text=True, env=env, check=True)
     return [line[len("ARG="):] for line in proc.stdout.splitlines() if line.startswith("ARG=")]
