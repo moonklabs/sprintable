@@ -567,3 +567,30 @@ def test_a_policy_with_an_over_long_prefix_is_never_written_even_if_the_builder_
     monkeypatch.setattr(gate, "build_policy", full_digest)
     assert gate.main(d.argv()) == 2
     assert "AR" in capsys.readouterr().out and not d.out.exists()
+
+
+def test_two_in_use_digests_that_share_their_first_64_characters_need_one_prefix_and_are_not_ambiguous(tmp_path):
+    """both versions are in use, so the single shared prefix keeps exactly what must be kept: no ambiguity, one entry in the rule, both protected"""
+    d = Dumps(tmp_path)
+    d.images[3]["version"] = _digest(2)[:64] + "1234567"  # the job's image shares its first 64 characters with the service's (digest 2)
+    assert gate.main(d.argv()) == 0
+    prefixes = json.loads(d.out.read_text())[0]["condition"]["versionNamePrefixes"]
+    assert prefixes.count(_digest(2)[:64]) == 1 and len(prefixes) == 2  # the shared one + the MIG image (digest 45)
+
+
+def test_a_twin_in_another_package_is_exit_3_too(tmp_path, capsys):
+    """the registry matches the version name across packages unless the rule is scoped: a frontend version with the same first 64 characters as an in-use backend digest would be kept by the prefix"""
+    d = Dumps(tmp_path)
+    d.images = d.images + [{
+        "package": f"{HOST}/frontend", "version": _digest(2)[:64] + "abcdef0", "tags": ["frontend-twin"],
+        "createTime": (NOW - timedelta(days=90)).isoformat().replace("+00:00", "Z"),
+    }]
+    assert gate.main(d.argv()) == 3
+    assert "frontend" in capsys.readouterr().out and not d.out.exists()
+
+
+def test_the_registry_limit_is_exactly_64_characters_at_the_boundary():
+    at = [{"name": "x", "condition": {"versionNamePrefixes": ["a" * 64]}}]
+    over = [{"name": "x", "condition": {"versionNamePrefixes": ["a" * 65]}}]
+    assert gate.policy_problems(at) == []
+    assert gate.policy_problems(over) != []
