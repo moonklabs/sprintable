@@ -152,13 +152,31 @@ def test_no_step_can_start_before_the_guard_has_passed():
         wait = step.get("waitFor")
         assert wait != ["-"], f"{step['id']} starts at once"
         deps[step["id"]] = ids[:i] if wait is None else list(wait)
+    # the graph must be one Cloud Build accepts: every reference names a step that exists, none names itself, no cycle
+    for step_id, wait_ids in deps.items():
+        assert step_id not in wait_ids, f"{step_id} waits for itself"
+        assert all(w in ids for w in wait_ids), f"{step_id} waits for a step that does not exist: {[w for w in wait_ids if w not in ids]}"
+
+    def has_cycle(node: str, path: tuple = ()) -> bool:
+        return node in path or any(has_cycle(d, path + (node,)) for d in deps[node])
+
+    assert not any(has_cycle(i) for i in ids)
 
     def reaches_guard(step_id: str, seen: frozenset = frozenset()) -> bool:
         if step_id == "guard-prod-mins":
             return True
         return any(reaches_guard(d, seen | {step_id}) for d in deps[step_id] if d not in seen)
 
-    assert [i for i in ids if not reaches_guard(i)] == []
+    # a step starts only after ALL the steps it waits for have finished, so one dependency chain that passes through the guard is enough
+    assert [i for i in ids if i != "guard-prod-mins" and not reaches_guard(i)] == []
+
+
+def test_the_guard_is_in_the_undeclared_substitution_scan():
+    """a substitution added to the guard that Cloud Build does not know would make it reject the whole submission; the scan only covers the steps listed in `_BASH_ENTRYPOINT_STEP_IDS`"""
+    from tests.test_deploy_backend_redis_secret_conflict import _BASH_ENTRYPOINT_STEP_IDS, _DECLARED_SUBSTITUTIONS
+
+    assert "guard-prod-mins" in _BASH_ENTRYPOINT_STEP_IDS
+    assert {"_MINS_EXPLICIT", "_BACKEND_MIN_INSTANCES", "_FRONTEND_MIN_INSTANCES", "_DEPLOY_ENV"} <= set(_DECLARED_SUBSTITUTIONS)
 
 
 def test_the_manual_scripts_agree_for_dev_and_leave_prod_alone():
