@@ -7193,6 +7193,7 @@
         "nameLabel": "이름",
         "roleLabel": "역할 (안 적어도 돼요)",
         "rolePlaceholder": "예: 코드 리뷰어",
+        "roleHint": "팀 목록에서 이름 옆에 보이는 이름표예요 · 에이전트가 일하는 방식은 바뀌지 않아요",
         "create": "만들기",
         "creating": "만드는 중…",
         "createLine": "만들기를 누르면 이 조직에 에이전트가 하나 생겨요 · 이름 {name} · 도구 {runtime} · 프로젝트 {project}",

@@ -368,7 +368,8 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
           <div className="flex flex-col gap-1">
             <label htmlFor="quick-agent-role" className="text-xs text-muted-foreground">{t('quick.roleLabel')}</label>
             <Input id="quick-agent-role" data-testid="quick-agent-role" value={roleTyped} maxLength={AGENT_ROLE_MAX} disabled={starting}
-              placeholder={t('quick.rolePlaceholder')} onChange={(e) => setRoleTyped(e.target.value)} />
+              placeholder={t('quick.rolePlaceholder')} aria-describedby="quick-role-hint" onChange={(e) => setRoleTyped(e.target.value)} />
+            <p id="quick-role-hint" className="text-xs text-muted-foreground" data-testid="quick-role-hint">{t('quick.roleHint')}</p>
           </div>
         </section>
         )}

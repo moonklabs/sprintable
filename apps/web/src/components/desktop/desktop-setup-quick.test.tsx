@@ -849,6 +849,7 @@ describe('[SID:4784] the card is the moment an agent is made — «에이전트 
     expect(container.querySelector('h1')!.textContent).toBe('에이전트 만들기');
     expect(nameField().value).toBe('Claude Code'); // the tool's name is the default
     expect(roleField().value).toBe('');
+    expect(container.querySelector('[data-testid=quick-role-hint]')!.textContent).toBe('팀 목록에서 이름 옆에 보이는 이름표예요 · 에이전트가 일하는 방식은 바뀌지 않아요'); // a label, not a persona (PO 08:48Z)
     expect(text()).toContain('① 도구');
     expect(text()).toContain('② 이름과 역할');
     expect(text()).toContain('③ 폴더');
