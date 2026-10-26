@@ -29,7 +29,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
     world,
 )
 from tests.test_4529_desktop_relay_realdb import _device, _tok
-from tests.test_4685_limit_notice_realdb import LIFTED, LOOKS, STOOD, _notices, _report
+from tests.test_4685_limit_notice_realdb import LIFTED, LOOKS, STOOD, _notices, _report, store  # noqa: F401 — `store`: the two promise stores (this process · fakeredis)
 
 pytestmark = pytest.mark.anyio
 
@@ -224,6 +224,80 @@ async def test_05e_a_session_that_came_back_is_told_when_the_one_it_waited_for_e
         assert await _notices(LIFTED) == []
         await _report(c, device, a, "stopped", 8, key="s-2")                            # B ends instead of returning
         assert len(await _notices(LIFTED)) == 1, "A is working: «working again» is told, not cleared silently"
+
+
+async def test_05h_remembering_that_a_session_is_back_keeps_the_promised_setups_and_the_remaining_ttl(world, store):
+    """codex 01a1756c: the “back” mark must not consume anything — `_take_open` also removes the promised-setups set, and a re-save would reset the TTL."""
+    from app.services import desktop_limit_notice as dln
+
+    async with _client() as c:
+        device = await _device(c, "d4781 mac e9")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1, key="s-1")
+        await _report(c, device, a, "waiting_input", 2, key="s-1", limit=LOOKS)
+        before = await dln._promised_setups(ORG, OWNER)
+        assert before, "the stop promised its setup"
+        key = dln._key("open", ORG, OWNER)
+        import time as _time
+
+        if store == "local":                                                    # a record with only ~1000 s left: marking must not hand it a fresh week
+            dln._local[key] = (_time.monotonic() + 1000, dln._local[key][1])
+        else:
+            from app.services import redis_shared
+
+            await redis_shared.get_client().expire(key, 1000)
+        await dln._mark_open_back(ORG, OWNER)
+        await dln._mark_open_back(ORG, OWNER)                                   # twice: idempotent
+        assert await dln._promised_setups(ORG, OWNER) == before, "the promised setups are still there"
+        import json as _json
+
+        if store == "local":
+            assert dln._local[key][0] - _time.monotonic() <= 1000, "the TTL was not reset to a fresh week"
+            assert _json.loads(dln._local[key][1]).get("back") is True
+        else:
+            client = redis_shared.get_client()
+            ttl = await client.ttl(key)
+            assert 0 < ttl <= 1000, ttl
+            raw = await client.get(key)
+            assert _json.loads(raw.decode() if isinstance(raw, bytes) else raw).get("back") is True
+    # nothing to mark = no record: harmless
+    await dln._take_open(ORG, OWNER)
+    await dln._mark_open_back(ORG, OWNER)
+
+
+async def test_05i_a_lift_held_back_by_a_waiting_peer_marks_the_notice_without_losing_the_promise(world, store):
+    """the product path of 05h: A's own report claims A's lift while B still waits — the mark goes on, the promised setups stay (a re-save of the taken record would have dropped them)."""
+    from app.services import desktop_limit_notice as dln
+
+    async with _client() as c:
+        device = await _device(c, "d4781 mac e10")
+        a = device["agents"][0]["member_id"]
+        for seq, key in ((1, "s-1"), (2, "s-2")):
+            await _report(c, device, a, "working", seq, key=key)
+        await _report(c, device, a, "waiting_input", 3, key="s-1", limit=LOOKS)
+        await _report(c, device, a, "waiting_input", 4, key="s-2", limit=LOOKS)
+        await _report(c, device, a, "working", 5, key="s-1")
+        await _report(c, device, a, "working", 6, key="s-2")                    # both lifts wait
+        before = await dln._promised_setups(ORG, OWNER)
+        assert before
+        await _sql("UPDATE desktop_sessions SET limit_cleared_at = now() - interval '200 seconds' WHERE setup_id = :x AND session_key = 's-1'", params={"x": device["setup_id"]})
+        await _report(c, device, a, "idle", 7, key="s-1")                       # A's hold ran out; B still waits → held back, A is remembered as back
+        assert await _notices(LIFTED) == []
+        assert await dln._promised_setups(ORG, OWNER) == before, "the promised setups survived the mark"
+
+
+async def test_05j_two_limited_sessions_that_both_end_never_tell_working_again(world):
+    """Kadir's pin: nobody came back. B ends first (A still stands), then A ends: the notice is cleared without a line - an ended session is never «back»."""
+    async with _client() as c:
+        device = await _device(c, "d4781 mac e11")
+        a = device["agents"][0]["member_id"]
+        for seq, key in ((1, "s-1"), (2, "s-2")):
+            await _report(c, device, a, "working", seq, key=key)
+        await _report(c, device, a, "waiting_input", 3, key="s-1", limit=LOOKS)
+        await _report(c, device, a, "waiting_input", 4, key="s-2", limit=LOOKS)
+        await _report(c, device, a, "stopped", 5, key="s-2")                    # B ends while A still stands
+        await _report(c, device, a, "stopped", 6, key="s-1")                    # then A ends
+        assert await _notices(LIFTED) == [], "nobody came back: no «working again»"
 
 
 async def test_05f_a_session_that_ends_alone_still_clears_the_notice_without_a_line(world):

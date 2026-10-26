@@ -167,6 +167,46 @@ async def _take_open(org_id: uuid.UUID, user_id: uuid.UUID) -> dict | None:
         return None
 
 
+async def _mark_open_back(org_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """story 4781 (Kadir lens 5235 · codex): remember on the outstanding «stopped» notice that a session of this person IS back — WITHOUT consuming anything: the record's TTL and the
+    promised-setups set stay as they are, and a concurrent «stopped» writer is not overwritten (Redis: optimistic WATCH, a few tries; no Redis: this process's copy). No record = nothing to mark."""
+    key = _key("open", org_id, user_id)
+
+    async def _op(client) -> None:
+        for _ in range(5):
+            async with client.pipeline() as pipe:
+                try:
+                    await pipe.watch(key)
+                    raw = await pipe.get(key)
+                    if raw is None:
+                        return
+                    try:
+                        record = json.loads(raw.decode() if isinstance(raw, (bytes, bytearray)) else str(raw))
+                    except ValueError:
+                        return
+                    if record.get("back"):
+                        return
+                    pipe.multi()
+                    pipe.set(key, json.dumps({**record, "back": True}), xx=True, keepttl=True)
+                    await pipe.execute()
+                    return
+                except Exception as exc:  # noqa: BLE001 — a watched key that moved: look again
+                    if type(exc).__name__ != "WatchError":
+                        raise
+
+    def _fallback() -> None:
+        hit = _local.get(key)
+        if hit is None or hit[0] <= time.monotonic():
+            return
+        try:
+            record = json.loads(hit[1])
+        except ValueError:
+            return
+        _local[key] = (hit[0], json.dumps({**record, "back": True}))
+
+    await redis_shared.with_fallback(_op, _fallback)
+
+
 def member_prefix(member_id: uuid.UUID) -> str:
     """story 4781 (AC1): the first 8 characters of a member id — enough to tell people apart in a log, never a name or a whole id"""
     return str(member_id)[:8]
@@ -442,9 +482,7 @@ async def _lifted_for(db: AsyncSession, setup: DesktopSetup, row: DesktopSession
         if row.state != "stopped":
             # this session IS back, and nothing will ask again about it: remember it on the outstanding notice (Kadir lens 5235) — if the others then END instead of coming back, the
             # line is told rather than cleared silently (A works, B ends: A's «working again» would otherwise never be heard)
-            open_record = await _take_open(setup.org_id, person.user_id)
-            if open_record is not None:
-                await _save_open(setup.org_id, person.user_id, {**open_record, "back": True})
+            await _mark_open_back(setup.org_id, person.user_id)
         return  # some are still standing — «all working again» would be false
     record = await _take_open(setup.org_id, person.user_id)
     if record is None or (row.state == "stopped" and not record.get("back")):
