@@ -18,6 +18,19 @@ export interface AuthResult {
   error: { code: string; message: string } | null;
 }
 
+/**
+ * story 4778 — the two answers of `/api/auth/refresh` that do NOT say «this session is over»: `TOKEN_SUPERSEDED` (a switch ended the token this request carried and issued a newer pair: the session moved
+ * on) and `REFRESH_UNAVAILABLE` (the backend answered 5xx · 429 · did not answer: not confirmed either way). The refresh route leaves the cookies alone on both, and `fetchWithAuth` does not signal an ended
+ * session on them (the person is not signed out; the request is simply not renewed this time).
+ */
+export const TOKEN_SUPERSEDED = 'TOKEN_SUPERSEDED';
+export const REFRESH_UNAVAILABLE = 'REFRESH_UNAVAILABLE';
+function leavesTheSessionStanding(error: AuthResult['error']): boolean {
+  return error?.code === TOKEN_SUPERSEDED || error?.code === REFRESH_UNAVAILABLE;
+}
+/** how long to wait before asking once more after TOKEN_SUPERSEDED: the switch's own answer (its new cookies) has to land in the jar first — a healthy BFF round trip is well inside this */
+export const SUPERSEDED_RETRY_MS = 400;
+
 async function callAuthRoute(path: string, body: object): Promise<AuthResult> {
   const res = await fetch(path, {
     method: 'POST',
@@ -82,6 +95,11 @@ export function refreshSessionOnce(): Promise<AuthResult> {
     const queued = _switching;
     const run = async (): Promise<AuthResult> => {
       if (queued) await queued; // a switch's tail settles at the latest SWITCH_WAIT_MAX_MS after ITS request started (runSwitch)
+      const first = await refreshAuthTokens();
+      if (first.error?.code !== TOKEN_SUPERSEDED) return first;
+      // story 4778 (AC2b) — the cookie this renewal carried was the one a switch ended (not this page's switch: those are queued above — another tab, or the server). The session moved on; the switch's
+      // answer is on its way into the jar. Ask ONCE more with whatever the jar holds then; a second «superseded» ends here as it is (no third try, no signal that the session ended).
+      await new Promise<void>((resolve) => { setTimeout(resolve, SUPERSEDED_RETRY_MS); });
       return refreshAuthTokens();
     };
     _refreshing = run().finally(() => { _refreshing = null; });
@@ -147,7 +165,8 @@ async function switchSession(path: SwitchPath, body: object, opts: { withAuth?: 
     return res;
   }
   if (renewed.error) {
-    if (typeof window !== 'undefined') signalSessionExpired();
+    // a renewal that was only «superseded» or «not confirmed» does not end the session (the same rule as fetchWithAuth): the 401 is handed back, later switches stay possible
+    if (typeof window !== 'undefined' && !leavesTheSessionStanding(renewed.error)) signalSessionExpired();
     return res;
   }
   return post();
@@ -254,7 +273,8 @@ export async function fetchWithAuth(input: RequestInfo | URL, init?: FetchWithAu
     return res;
   }
   if (refreshResult.error) {
-    if (typeof window !== 'undefined') signalSessionExpired();
+    // story 4778 (AC2b · AC2c): «superseded» and «could not be confirmed» are not the end of the session — no signal, the original 401 is handed back (the next request renews)
+    if (typeof window !== 'undefined' && !leavesTheSessionStanding(refreshResult.error)) signalSessionExpired();
     return res;
   }
 

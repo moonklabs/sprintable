@@ -274,7 +274,7 @@ async def test_mutation_switch_revoking_every_token_signs_the_other_session_out(
     real = auth_module._revoke_switching_session
     monkeypatch.setattr(
         auth_module, "_revoke_switching_session",
-        lambda session, user, rt, *, route: real(session, user, None, route=route),
+        lambda session, user, rt, *, route, successor_id: real(session, user, None, route=route, successor_id=successor_id),  # story 4778: the revoke names the successor token
     )
     engine, w = await _world()
     try:

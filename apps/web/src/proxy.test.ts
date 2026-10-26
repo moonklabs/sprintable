@@ -299,6 +299,73 @@ describe('proxy', () => {
     expect(setCookie).toContain('sp_at=;');
   });
 
+  // story 4778 (AC2b) — the backend's TOKEN_SUPERSEDED (a switch ended this token a moment ago and issued a newer pair: the session moved on) is NOT «dead»: the proxy treats it like the unconfirmed kinds —
+  // this request is not authenticated (the next one carries the browser's new pair), but the cookies are left for the switch's answer to replace
+  it('[4778] TOKEN_SUPERSEDED(전환이 방금 끝낸 토큰)는 sp_at/sp_rt를 지우지 않는다 — 세션이 옮겨 갔을 뿐 죽지 않았다', async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 401, json: async () => ({ error: { code: 'TOKEN_SUPERSEDED' } }) });
+    const response = await middleware(makeRequest('/dashboard', { sp_rt: 'rt-a-switch-just-ended' }));
+    expect(response.status).toBe(307); // this request is unauthenticated (a retry carries the new pair)
+    const setCookie = response.headers.get('set-cookie') ?? '';
+    expect(setCookie).not.toContain('sp_rt=;'); // reverted (every 401 is «invalid») → cleared: a logout while switching
+    expect(setCookie).not.toContain('sp_at=;');
+    expect(response.headers.get('x-session-changed')).toBeNull();
+  });
+
+  it('[4778] TOKEN_SUPERSEDED on an API path passes through unauthenticated without clearing (the page\'s own renewal asks again)', async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 401, json: async () => ({ error: { code: 'TOKEN_SUPERSEDED' } }) });
+    const response = await middleware(makeRequest('/api/v2/some-resource', { sp_rt: 'rt-a-switch-just-ended' }));
+    const setCookie = response.headers.get('set-cookie') ?? '';
+    expect(setCookie).not.toContain('sp_rt=;');
+    expect(setCookie).not.toContain('sp_at=;');
+  });
+
+  it('[4778] when the two tries disagree, «superseded» is not turned into «dead»: sp_rt superseded + vault token dead (and the other way round) clear nothing', async () => {
+    const activeId = '5dfbd9fc-94c2-4afc-9814-da4b7ad08c28';
+    for (const [primary, vault] of [['TOKEN_SUPERSEDED', 'TOKEN_REVOKED'], ['TOKEN_REVOKED', 'TOKEN_SUPERSEDED']]) {
+      mockFetch.mockImplementation((_url: string, init: { body: string }) => {
+        const body = JSON.parse(init.body) as { refresh_token: string };
+        const code = body.refresh_token === 'vaulted-rt' ? vault : primary;
+        return Promise.resolve({ ok: false, status: 401, json: async () => ({ error: { code } }) });
+      });
+      const response = await middleware(makeRequest('/dashboard', { sp_rt: 'primary-rt', [`sp_acct_rt_${activeId}`]: 'vaulted-rt', sp_active_account: activeId }));
+      const setCookie = response.headers.get('set-cookie') ?? '';
+      expect(setCookie, `${primary} + ${vault}`).not.toContain('sp_rt=;'); // reverted (superseded does not win) → «invalid» → cleared: a logout while switching
+      expect(setCookie, `${primary} + ${vault}`).not.toContain('sp_at=;');
+    }
+  });
+
+  it('[4778] a 401 whose body cannot be read as JSON (empty body · parse error) is still «dead» and cleared — not mistaken for an unconfirmed answer', async () => {
+    for (const body of ['', 'not json', 'null']) {
+      mockFetch.mockResolvedValue(new Response(body, { status: 401 })); // a real Response: json() rejects (empty body · parse error) or gives null
+      const response = await middleware(makeRequest('/dashboard', { sp_rt: 'dead-rt-unreadable-body' }));
+      const setCookie = response.headers.get('set-cookie') ?? '';
+      expect(setCookie, `body ${JSON.stringify(body)}`).toContain('sp_rt=;'); // reverted (a rejecting json() lands in the outer catch = transient) → nothing cleared
+      expect(setCookie, `body ${JSON.stringify(body)}`).toContain('sp_at=;');
+    }
+  });
+
+  it('[4778] a 200 whose tokens are not both strings is «not confirmed»: nothing written, nothing cleared', async () => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const goodAt = await new SignJWT({ type: 'access', email: 'test@example.com' }) // a real, valid access token: the only way a wrongly accepted answer would be WRITTEN as cookies
+      .setProtectedHeader({ alg: 'HS256' }).setSubject('5dfbd9fc-94c2-4afc-9814-da4b7ad08c28').setIssuedAt(nowSec).setExpirationTime(nowSec + 900)
+      .sign(new TextEncoder().encode(JWT_SECRET));
+    for (const data of [{ access_token: goodAt, refresh_token: 42 }, { access_token: 'a.b.c', refresh_token: 42 }, { access_token: { x: 1 }, refresh_token: 'r' }, { access_token: 'a.b.c' }, {}]) {
+      mockFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ data }) });
+      const response = await middleware(makeRequest('/dashboard', { sp_rt: 'rt-and-a-bad-answer' }));
+      const setCookie = response.headers.get('set-cookie') ?? '';
+      expect(setCookie, JSON.stringify(data)).not.toContain('sp_rt=;'); // not dead: kept
+      expect(setCookie, JSON.stringify(data)).not.toContain('42'); // reverted (any truthy value is taken) → the number is written as the cookie
+    }
+  });
+
+  it('[4778] a 401 without the word superseded (no JSON body at all) is still «dead» and cleared', async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 401 });
+    const response = await middleware(makeRequest('/dashboard', { sp_rt: 'dead-rt-no-body' }));
+    const setCookie = response.headers.get('set-cookie') ?? '';
+    expect(setCookie).toContain('sp_rt=;');
+    expect(setCookie).toContain('sp_at=;');
+  });
+
   // #2124 사슬 3단계 — ㉮(vault 폴백) 착지 後 기대값 뒤집힘(오르테가군 지시: 새로 짜지 말고 그
   // 셋의 기대값만 뒤집는 것). 원래는 "금고가 있어도 proxy가 안 봐서 복구 불가"를 증명하는
   // 결함-재현 테스트였다 — 이제는 "sp_rt가 죽어도 active 계정의 금고 토큰으로 갱신에 성공한다"는
