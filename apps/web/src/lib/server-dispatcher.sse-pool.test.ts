@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import http2 from 'node:http2';
+import https from 'node:https';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,7 +20,7 @@ import { BACKEND_EVENT_STREAM_PATH, createBffDispatcher, isEventStreamToBackend,
 let cert: Buffer;
 let key: Buffer;
 let tmp = '';
-let srv: { url: string; versions: Map<string, string[]>; close: () => Promise<void> };
+let srv: { url: string; versions: Map<string, string[]>; open: () => number; close: () => Promise<void> };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 beforeAll(async () => {
@@ -56,6 +57,7 @@ beforeAll(async () => {
   srv = {
     url: `https://127.0.0.1:${(server.address() as AddressInfo).port}`,
     versions,
+    open: () => sockets.size, // server-side sockets still open (the client's sockets, seen from the server)
     close: () => new Promise<void>((r) => { server.close(() => r()); for (const s of sockets) s.destroy(); }),
   };
 });
@@ -94,6 +96,14 @@ async function openStream(pathAndQuery: string): Promise<void> {
 }
 async function withinMs<T>(ms: number, p: Promise<T>, what: string): Promise<T> {
   return Promise.race([p, sleep(ms).then(() => { throw new Error(`${what}: still waiting after ${ms} ms`); })]);
+}
+/** polls until `ok()` holds (the server learns of a client-side close a moment later) */
+async function until(ok: () => boolean, ms: number, what: string): Promise<void> {
+  const end = performance.now() + ms;
+  while (!ok()) {
+    if (performance.now() > end) throw new Error(`${what}: not true after ${ms} ms`);
+    await sleep(25);
+  }
 }
 const post = () => fetch(`${srv.url}/api/v2/auth/token`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'a@b.c', password: 'x' }) }).then(async (r) => ({ status: r.status, body: await r.text() }));
 
@@ -198,4 +208,59 @@ describe('isEventStreamToBackend', () => {
     expect(isEventStreamToBackend(opts({ origin: 'https://realtime.example' }), backend)).toBe(false);
     expect(isEventStreamToBackend(opts(), null)).toBe(false);
   });
+});
+
+// ---- the h1 agent's own behaviour (lens on PR 5257, Kadir): three mutants the cells above let through ----
+describe('the h1 agent keeps its 60 s keep-alive and is closed / destroyed with the dispatcher', () => {
+  it('a POST after 6 s of idle reuses the connection when the server sends no keep-alive hint (the client\'s own keep-alive decides; undici\'s default would drop it)', async () => {
+    // the real backend front end (Google Frontend) advertises no `Keep-Alive: timeout=`; Node\'s default would (5 s), so this server turns it off
+    const sockets = new Set<{ destroy: () => void }>();
+    let conns = 0;
+    const server = https.createServer({ key, cert }, (req, res) => {
+      req.resume();
+      req.on('end', () => { res.setHeader('content-type', 'application/json'); res.end('{"ok":true}'); });
+    });
+    server.keepAliveTimeout = 0; // no hint, and the server never closes an idle socket itself
+    server.on('secureConnection', (s: { destroy: () => void; once: (e: string, f: () => void) => void }) => { conns += 1; sockets.add(s); s.once('close', () => sockets.delete(s)); });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+    const url = `https://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      prev = prev ?? getGlobalDispatcher();
+      const agent = createBffDispatcher(url, { connect: { ca: cert } });
+      made.push(agent);
+      setGlobalDispatcher(agent);
+      const send = () => fetch(`${url}/api/v2/auth/token`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).then((r) => r.text());
+      await send();
+      expect(conns).toBe(1);
+      await sleep(6000);
+      await send();
+      expect(conns).toBe(1); // 0 new connections
+    } finally {
+      await new Promise<void>((r) => { server.close(() => r()); for (const s of sockets) s.destroy(); });
+    }
+  }, 20000);
+
+  it('close() with an open stream stays pending until the stream ends; afterwards no socket is left (the h1 agent is closed too)', async () => {
+    const agent = install();
+    await openStream(`${BACKEND_EVENT_STREAM_PATH}?member_id=m1`);
+    let closed = false;
+    const closing = agent.close().then(() => { closed = true; });
+    await sleep(600);
+    expect(closed).toBe(false); // the stream is still open
+    for (const a of aborts.splice(0)) a.abort();
+    await withinMs(5000, closing, 'close() after the stream ended');
+    await until(() => srv.open() === 0, 3000, 'server-side sockets after close()');
+  }, 15000);
+
+  it('destroy() with an open stream and a POST in flight ends at once and leaves no socket; the in-flight POST is cut, not answered', async () => {
+    const agent = install();
+    await openStream(`${BACKEND_EVENT_STREAM_PATH}?member_id=m1`);
+    const slow = fetch(`${srv.url}/slow`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).then(() => 'answered', () => 'cut');
+    await until(() => (srv.versions.get('/slow')?.length ?? 0) > 0, 3000, 'the slow POST reaching the server'); // on the wire for real — a fixed sleep would let `destroy()` win the race on a slow machine and call a connect failure «cut» (codex)
+    const t0 = performance.now();
+    await withinMs(2500, agent.destroy(), 'destroy()');
+    expect(performance.now() - t0).toBeLessThan(1500);
+    expect(await slow).toBe('cut');
+    await until(() => srv.open() === 0, 2000, 'server-side sockets after destroy()');
+  }, 15000);
 });
