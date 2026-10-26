@@ -39,9 +39,13 @@ function stubStorages() {
   vi.stubGlobal('sessionStorage', { getItem: () => null, setItem: () => undefined, removeItem: () => undefined, clear: () => undefined });
 }
 
+let visibility: 'visible' | 'hidden' = 'visible'; // document.visibilityState of the test page (a phone in the background · a screen turned off)
+const setVisibility = async (v: 'visible' | 'hidden') => { visibility = v; await act(async () => { document.dispatchEvent(new Event('visibilitychange')); }); };
 let container: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
+  visibility = 'visible';
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility });
   refuse = false;
   stubStorages();
   _resetActivationStatusCacheForTests();
@@ -56,6 +60,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   await act(async () => { root.unmount(); });
+  Reflect.deleteProperty(document, 'visibilityState');
   container.remove();
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -65,7 +70,7 @@ const flush = async () => { await act(async () => { await Promise.resolve(); awa
 const wrap = () => (
   <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><ActivationChecklistBanner /></NextIntlClientProvider>
 );
-const done = () => container.querySelector('[data-testid="activation-done"]');
+const done = () => document.querySelector('[data-testid="activation-done"]'); // the line is drawn in document.body (fixed to the screen), not inside the banner's place
 const PARTIAL = {
   steps: { signed_up: true, email_verified: true, org_created: true, agent_connected: true, first_roundtrip: false },
   completed: 4, total: 5, all_complete: false, first_instruction_conversation_id: null,
@@ -262,5 +267,63 @@ describe('[SID:4780] ActivationChecklistBanner — the finish is shown once', ()
     await act(async () => { root.render(wrap()); });
     await flush();
     expect(done()).toBeNull(); // reverted (the organization branch of the clearing effect removed) → the line returns for org-1
+  });
+  // the phone lap (10-26): the reply arrives on the conversation screen, where the shell's column is scrolled away — a line drawn in that column is up for its 10 s out of sight
+  it('the line is fixed to the screen in document.body — not inside the banner\'s own place (where a scrolled column hides it)', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'] });
+    answers(PARTIAL, COMPLETE);
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    await act(async () => { vi.advanceTimersByTime(ACTIVATION_REFRESH_MS); });
+    await flush();
+    const line = done();
+    expect(line).not.toBeNull();
+    expect(container.querySelector('[data-testid="activation-done"]')).toBeNull(); // reverted (drawn in place) → inside the banner's container
+    const holder = line!.closest('[data-testid="activation-done-fixed"]');
+    expect(holder?.parentElement).toBe(document.body);
+    expect(holder?.className).toContain('fixed'); // reverted (no fixed position) → it scrolls with the column
+  });
+  // the reply often comes while the phone is in the background or its screen is off: nobody looks at the line then
+  it('a tab that is hidden when the checklist completes spends nothing: the mark stays, the line comes once the tab is visible again', async () => {
+    localStore.set(SEEN('org-1'), '1');
+    visibility = 'hidden';
+    answers(COMPLETE);
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    expect(done()).toBeNull();
+    expect(localStore.get(SEEN('org-1'))).toBe('1'); // reverted (spent while hidden) → gone and no line was ever seen
+    await setVisibility('visible');
+    await flush();
+    expect(done()?.textContent).toContain(koMessages.activation.doneTitle);
+    expect(localStore.has(SEEN('org-1'))).toBe(false); // spent when it was shown, once
+  });
+
+  it('the line\'s 10 s run only while the tab is visible: hidden for a minute in the middle, it is still there when the tab is back and goes after what was left', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'Date'] });
+    localStore.set(SEEN('org-1'), '1');
+    answers(COMPLETE);
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    expect(done()).not.toBeNull();
+    await act(async () => { vi.advanceTimersByTime(6000); });
+    expect(done()).not.toBeNull();
+    await setVisibility('hidden');
+    await act(async () => { vi.advanceTimersByTime(60_000); });
+    expect(done()).not.toBeNull(); // reverted (the clock keeps running while hidden) → gone
+    await setVisibility('visible');
+    await act(async () => { vi.advanceTimersByTime(3900); });
+    expect(done()).not.toBeNull(); // 6 s + 3.9 s of visible time
+    await act(async () => { vi.advanceTimersByTime(200); });
+    expect(done()).toBeNull(); // reverted (the whole 10 s again after the hide) → still up
+  });
+  it('an open checklist mounted in a hidden tab is not «seen»: no mark until the tab is visible', async () => {
+    visibility = 'hidden';
+    answers(PARTIAL);
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    expect(localStore.has(SEEN('org-1'))).toBe(false); // reverted (written while hidden) → '1'
+    await setVisibility('visible');
+    await flush();
+    expect(localStore.get(SEEN('org-1'))).toBe('1');
   });
 });
