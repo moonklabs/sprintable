@@ -16,6 +16,21 @@ _ROOT = _BACKEND.parent
 _SCRIPTS = _BACKEND / "scripts"
 
 
+@pytest.fixture(scope="module")
+def _no_gcloud(tmp_path_factory):
+    """a `gcloud` that answers nothing and never touches the network (the frontend script's dry run still calls `gcloud run services describe`)"""
+    d = tmp_path_factory.mktemp("bin")
+    g = d / "gcloud"
+    g.write_text("#!/bin/sh\nexit 0\n")
+    g.chmod(0o755)
+    return str(d)
+
+
+@pytest.fixture(autouse=True)
+def _stub(monkeypatch, _no_gcloud):
+    monkeypatch.setenv("PATH", _no_gcloud + os.pathsep + os.environ["PATH"])
+
+
 def _dry_run(script: str, env: str) -> dict[str, str]:
     proc = subprocess.run(["bash", str(_SCRIPTS / script), env], capture_output=True, text=True, check=True, timeout=120, env={**os.environ, "DRY_RUN": "1", "COMMIT_SHA": "dryrun"})
     out: dict[str, str] = {}
@@ -50,15 +65,23 @@ def test_the_gateway_script_fetches_the_signing_secret_of_its_own_environment(en
     assert "JWT_SECRET:JWT_SECRET" not in pairs  # the old shared name
 
 
-def test_the_gateway_template_changes_with_the_secret_name():
-    """the template's name carries a hash of its content: a new secret name is a new template (a rolling update), never a silent reuse of the old one"""
-    dev_name = _dry_run("deploy_realtime_gce.sh", "dev")["TEMPLATE_NAME"]
-    prod_name = _dry_run("deploy_realtime_gce.sh", "prod")["TEMPLATE_NAME"]
-    assert dev_name != prod_name
+def test_the_gateway_startup_script_names_the_new_secret_so_its_template_is_a_new_one():
+    """the template's name carries a hash of the generated startup script: the secret names written into that script are part of what is hashed. The block the script generates to fetch the secrets
+    lists the names; for prod it must hold `JWT_SECRET_PROD` (so the hash — and with it the template — differs from the one built with the old shared name), as the env variable `JWT_SECRET`."""
+    import base64
+
+    for env in ("dev", "prod"):
+        block = base64.b64decode(_dry_run("deploy_realtime_gce.sh", env)["GENERATED_FETCH_SECRETS_BLOCK_B64"]).decode()
+        names = re.search(r"_secret_names=\((.*?)\)", block, re.S).group(1)
+        env_names = re.search(r"_secret_env_names=\((.*?)\)", block, re.S).group(1)
+        assert f"'JWT_SECRET_{env.upper()}'" in names
+        assert "'JWT_SECRET'" not in names
+        assert "'JWT_SECRET'" in env_names  # the variable the gateway's process reads keeps its name
 
 
 _BARE_BINDING = re.compile(
-    r"""(JWT_SECRET=JWT_SECRET(?![A-Za-z0-9_])|\bJWT_SECRET:\s*JWT_SECRET(?![A-Za-z0-9_])|--secret[= ]["']?JWT_SECRET["']?(?![A-Za-z0-9_])|["' ]JWT_SECRET:(latest|[0-9]+)\b)"""
+    r"""(JWT_SECRET=JWT_SECRET(?![A-Za-z0-9_])|\bJWT_SECRET:\s*JWT_SECRET(?![A-Za-z0-9_])|--secret[= ]["']?JWT_SECRET["']?(?![A-Za-z0-9_])|["' ]JWT_SECRET:(latest|[0-9]+)\b"""
+    r"""|\bcreate_secret\s+["']?JWT_SECRET["']?(?![A-Za-z0-9_])|\bsecrets\s+(create|describe|delete|get-iam-policy|add-iam-policy-binding|remove-iam-policy-binding|versions\s+\w+)\s+["']?JWT_SECRET["']?(?![A-Za-z0-9_]))"""
 )
 _SCAN = ["backend/scripts", "infra", "cloudbuild.yaml", ".github/workflows", "deploy"]
 
