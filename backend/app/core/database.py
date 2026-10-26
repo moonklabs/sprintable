@@ -78,8 +78,8 @@ async_session_factory = async_sessionmaker(
     class_=AsyncSession,
 )
 
-# Phase3(§6 read replica): 읽기 전용 엔진/세션. DATABASE_URL_READ 설정 時 read replica(PgBouncer
-# dbname=sprintable_read)로 라우팅, 미설정 時 primary engine 재사용(폴백 — 별도 커넥션 안 늘림·«무해»).
+# Phase3(§6): 읽기 전용 엔진/세션. DATABASE_URL_READ(선택) 설정 時 그 DSN(읽기 복제본)으로, 미설정 時 primary engine 재사용(폴백 — 별도 커넥션 안 늘림·«무해»).
+# 2026-10-26 prod 복제본 삭제 뒤 prod는 미설정이라 읽기 엔진은 primary를 쓴다.
 # ⚠️ get_read_db 는 lag-tolerant 읽기에만 (아래 docstring).
 read_engine = (
     create_async_engine(settings.database_url_read, **_build_engine_kwargs())
@@ -213,7 +213,7 @@ async def get_worker_db(background_tasks: BackgroundTasks = None) -> AsyncGenera
 
 
 async def get_read_db(background_tasks: BackgroundTasks = None) -> AsyncGenerator[AsyncSession, None]:  # type: ignore[assignment]
-    """Phase3(§6): 읽기 전용 세션 — read replica(DATABASE_URL_READ 설정 時) 또는 primary(폴백).
+    """Phase3(§6): 읽기 전용 세션 — DATABASE_URL_READ(읽기 복제본, 설정 時) 또는 primary(폴백 — 지금 prod).
 
     ⚠️ «read-your-writes lag 허용» 읽기(목록·대시보드·타인 데이터·집계)에만 쓴다 — 방금 쓴 걸
     즉시 조회하는 경로(POST 直後 GET 등)는 get_db(primary)를 유지해야 replica lag 로 «내 write 가
