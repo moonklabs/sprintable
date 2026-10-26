@@ -696,11 +696,14 @@ async def _with_existing_project(db: AsyncSession, exc: HTTPException, *, org_id
 SOLO_AGENT_NAMES = {"claude": "Claude Code", "codex": "Codex"}  # story 4711 (Yuna): the agent is called what the person picked
 
 
+_KEY_IGNORED = frozenset("\u034f\u115f\u1160\u17b4\u17b5\u3164\uffa0\u2800")  # draw as nothing but are not format characters: grapheme joiner, Hangul/Khmer fillers, braille blank
+
+
 def _name_key(name: str | None) -> str:
     """What makes two names the same name: compatibility-normalized (full-width letters), format characters dropped (a zero-width space does not make
     a second «Zed Bot»), spaces collapsed, case ignored."""
     # format characters first (a joiner between a letter and a combining mark must not keep them apart), then the folding
-    dropped = "".join(ch for ch in (name or "") if unicodedata.category(ch) != "Cf")
+    dropped = "".join(ch for ch in (name or "") if unicodedata.category(ch) != "Cf" and ch not in _KEY_IGNORED and not 0xFE00 <= ord(ch) <= 0xFE0F)
     return " ".join(unicodedata.normalize("NFKC", dropped).split()).casefold()
 
 
