@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -235,13 +235,23 @@ async def test_k_switch_project_same_org_still_free():
             s.add(grant)
             await s.commit()
 
+        # story 4782 — a switch starts from a live session: this person's own refresh token (the web BFF always sends it)
+        from app.core.security import hash_token
+        from app.models.user import RefreshToken
+
+        raw_rt = "rt-" + uuid.uuid4().hex
+        async with Session() as s:
+            s.add(RefreshToken(id=uuid.uuid4(), user_id=seeded["owner_user_id"], token_hash=hash_token(raw_rt),
+                               expires_at=datetime.now(timezone.utc) + timedelta(days=1)))
+            await s.commit()
+
         await _setup_app(app, Session, seeded["owner_user_id"], seeded["org_a_id"])
         client = _client_for(app)
         try:
             # owner는 org owner라 has_project_access org-wide floor로 통과.
             resp = await client.post(
                 "/api/v2/auth/switch-project",
-                json={"project_id": str(seeded["project_a_id"])},
+                json={"project_id": str(seeded["project_a_id"]), "refresh_token": raw_rt},
             )
             assert resp.status_code == 200, resp.text
             body = resp.json()["data"]

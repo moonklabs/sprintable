@@ -131,6 +131,7 @@ async def test_switch_project_success_returns_new_tokens(client, mock_session, a
     ]
 
     with patch("app.routers.auth.create_tokens") as mock_create, \
+         patch("app.routers.auth._claim_switching_session", new=AsyncMock(return_value=None)), \
          patch("app.routers.auth._store_refresh_token") as mock_store:
         mock_create.return_value = {
             "access_token": "new-access",
@@ -347,6 +348,7 @@ async def test_switch_project_grant_only_user_token_has_target_project_id(client
         }
 
     with patch("app.routers.auth.create_tokens", side_effect=mock_create_tokens), \
+         patch("app.routers.auth._claim_switching_session", new=AsyncMock(return_value=None)), \
          patch("app.routers.auth._store_refresh_token"):
         resp = await client.post("/api/v2/auth/switch-project", json={"project_id": str(target_project)})
 
