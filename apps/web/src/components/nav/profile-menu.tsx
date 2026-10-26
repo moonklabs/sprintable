@@ -1,5 +1,6 @@
 'use client';
 
+import { firstGraphemes } from '@/lib/first-graphemes';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
@@ -34,7 +35,7 @@ interface ProfileMenuProps {
 
 function initialOf(label: string | null | undefined): string {
   const s = (label ?? '').trim();
-  return s ? s[0]!.toUpperCase() : '?';
+  return s ? firstGraphemes(s, 1).toUpperCase() : '?';
 }
 
 function Avatar({ url, label, className }: { url?: string | null; label: string; className?: string }) {

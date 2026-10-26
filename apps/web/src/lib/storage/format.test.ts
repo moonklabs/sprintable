@@ -6,6 +6,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { initials, formatRelativeTime } from './format';
 import { formatScheduledAt } from '@/components/content/schedule-format';
 
+describe('[SID:4794] initials() of a name that starts with an emoji is a whole letter, never «�»', () => {
+  const LONE = /[\ud800-\udbff](?![\udc00-\udfff])/;
+  it('one word, several words, emoji first', () => {
+    expect(initials('\u{1F469}\u200D\u{1F4BB} 두리')).toBe('\u{1F469}\u200D\u{1F4BB}');
+    expect(initials('\u{1F600}')).toBe('\u{1F600}');
+    expect(initials('\u{1F600}Dev')).toBe('\u{1F600}D'.toUpperCase());
+    expect(initials('\u{1F600} Dev Ops')).toBe('\u{1F600}'); // a multi-word name whose first word has no Latin letter: its first letter only (the #2986 rule)
+    for (const n of ['\u{1F469}\u200D\u{1F4BB} 두리', '\u{1F600}Dev', '\u{1F600} Dev Ops']) expect(LONE.test(initials(n)), n).toBe(false);
+  });
+});
+
 describe('initials() — 한글 다어절 이름은 어절 조합 없이 첫 어절 첫 글자만(#2986)', () => {
   it('「시스템 발행」이 「시발」이 아니라 「시」를 반환한다(실사고 재현 고정)', () => {
     expect(initials('시스템 발행')).toBe('시');

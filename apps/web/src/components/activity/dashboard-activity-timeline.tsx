@@ -1,5 +1,6 @@
 'use client';
 
+import { firstGraphemes } from '@/lib/first-graphemes';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations, useLocale } from 'next-intl';
@@ -36,7 +37,7 @@ function getInitials(name: string | null): string {
   return name
     .split(' ')
     .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? '')
+    .map((w) => firstGraphemes(w, 1).toUpperCase())
     .join('');
 }
 
