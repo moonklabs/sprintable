@@ -419,7 +419,8 @@ def test_the_runbook_closes_ssh_and_rdp_for_this_vm_and_uses_the_dev_attachments
     assert re.search(r"\$VM-deny-admin .*--priority 900 --action DENY --rules tcp:22,tcp:3389 --target-tags \$VM", text)
     assert "sprintable-memo-attachments-dev" in text
     assert not re.search(r"sprintable-memo-attachments(?!-dev)", text), "the shared attachments bucket must not be granted to the dev VM"
-    assert "Log scrubbing covers" in text and "JWT_SECRET" in text and "4798" in text
+    assert "Log scrubbing covers" in text and "JWT_SECRET_DEV" in text and "JWT_SECRET_PROD" in text and "4798" in text
+    assert "`JWT_SECRET` is per environment (story 4798 AC6 — done)" in text and "still shared" not in text
     assert "exactly** the one `bootstrap.sh` installed" in text
 
 

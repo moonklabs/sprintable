@@ -138,7 +138,7 @@ for SVC in backend frontend; do
 done   # «ok: N names match» twice; anything else lists added / gone / changed NAMES (never values) — update the declaration first
 ```
 
-**Before the first VM start — `JWT_SECRET` is still shared between dev and prod** (one Secret Manager entry). Story 4798 (AC6) gives dev its own entry; change `secrets.JWT_SECRET` in `env/dev.yaml` (backend and frontend) to that id, and the live-names copy with it, before the VM first serves traffic.
+**`JWT_SECRET` is per environment (story 4798 AC6 — done).** Dev reads `JWT_SECRET_DEV` (backend and frontend, as the live dev services do since 2026-10-26 23:52Z); prod's declaration reads `JWT_SECRET_PROD` from the start. The old shared `JWT_SECRET` entry is deleted at 4798 AC9, so **no declaration may read that name** (a test pins it). The IAM loop in §2 grants exactly the ids the declarations read.
 
 ## 7. Move the data — **disruptive, announced first**
 
