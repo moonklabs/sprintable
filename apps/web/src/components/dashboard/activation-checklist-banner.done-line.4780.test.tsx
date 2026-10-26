@@ -11,11 +11,11 @@ import { ACTIVATION_REFRESH_MS, _resetActivationStatusCacheForTests } from '@/ho
 
 const mockOrg = { orgId: 'org-1' };
 const mockPath = { current: '/today' as string | null };
-const mockSeed = { complete: undefined as boolean | undefined, fromHint: false }; // the server's word on «complete» (a seed the banner may re-read in the background)
+const mockSeed = { complete: undefined as boolean | undefined, fromHint: false, hintOrg: undefined as string | undefined }; // the server's word on «complete» (a seed the banner may re-read in the background)
 const mockCollapsed = { value: undefined as boolean | undefined }; // the server's word on the collapsed state (a session cookie it reads)
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => ({
-    projectId: 'proj-1', orgId: mockOrg.orgId, activationOrgId: mockOrg.orgId, activationSeedFromHint: mockSeed.fromHint,
+    projectId: 'proj-1', orgId: mockOrg.orgId, activationOrgId: mockSeed.hintOrg ?? mockOrg.orgId, activationSeedFromHint: mockSeed.fromHint,
     initialActivationComplete: mockSeed.complete, initialActivationCollapsed: mockCollapsed.value,
   }),
 }));
@@ -55,6 +55,7 @@ beforeEach(() => {
   mockCollapsed.value = undefined;
   mockSeed.complete = undefined;
   mockSeed.fromHint = false;
+  mockSeed.hintOrg = undefined;
   document.cookie = 'sp_activation_hint=; Path=/; Max-Age=0';
   document.cookie = 'sp_activation_collapsed=; Path=/; Max-Age=0';
   container = document.createElement('div');
@@ -385,7 +386,7 @@ describe('[SID:4780] ActivationChecklistBanner — the finish is shown once', ()
     await act(async () => { vi.advanceTimersByTime(ACTIVATION_DONE_LINE_MS); });
     expect(done()).toBeNull();
   });
-  it('a completion that is taken back (the seed said complete, the background read says open) takes the line and its clock down — the next completion shows a fresh 10 s', async () => {
+  it('a hint-seeded «complete» that the background read takes back never starts a line or a clock — the next completion shows a fresh 10 s', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'Date'] });
     mockSeed.complete = true;
     mockSeed.fromHint = true;
@@ -430,5 +431,17 @@ describe('[SID:4780] ActivationChecklistBanner — the finish is shown once', ()
     visibility = 'hidden'; // hidden, but the visibilitychange has not reached the component yet
     await act(async () => { vi.advanceTimersByTime(100); }); // the line's timer fires now
     expect(done()).not.toBeNull(); // reverted (the callback clears at once) → the line was spent while nobody could look
+  });
+  it('a hint that judged ANOTHER organization holds nothing back: this organization\'s own confirmed completion shows its line', async () => {
+    mockOrg.orgId = 'org-2';
+    mockSeed.fromHint = true;
+    mockSeed.hintOrg = 'org-1'; // the server\'s hint is org-1\'s
+    localStore.set('sprintable_activation_checklist_complete:org-2', '1'); // this browser saw org-2 finish
+    localStore.set(SEEN('org-2'), '1');
+    answers(COMPLETE);
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    expect(done()).not.toBeNull(); // reverted (the hint is not scoped) → waits for an answer that never comes
+    expect(localStore.has(SEEN('org-2'))).toBe(false);
   });
 });
