@@ -62,20 +62,20 @@ export const AGENT_ROLE_MAX = 200;
 
 /** story 4784: the folder window reloads this page (the answer comes back in a new address), so what the person typed for the new agent waits in the
  *  tab's session storage, per setup, and is read back once on mount. Only the two fields they typed; unreadable or absent storage = nothing kept. */
-const TYPED_KEY = 'sprintable.desktopSetupQuick.typed.v1';
+const TYPED_KEY = 'sprintable.desktopSetupQuick.typed.v1:'; // + the setup id: two setups (tabs) never share or overwrite a draft
 export function readTypedAgent(setupId: string | null): { name: string | null; role: string } {
   try {
-    const raw = setupId ? window.sessionStorage.getItem(TYPED_KEY) : null;
-    const v = raw ? JSON.parse(raw) as { setup?: unknown; name?: unknown; role?: unknown } : null;
-    if (!v || v.setup !== setupId) return { name: null, role: '' };
+    const raw = setupId ? window.sessionStorage.getItem(TYPED_KEY + setupId) : null;
+    const v = raw ? JSON.parse(raw) as { name?: unknown; role?: unknown } : null;
+    if (!v) return { name: null, role: '' };
     return { name: typeof v.name === 'string' ? v.name.slice(0, AGENT_NAME_MAX) : null, role: typeof v.role === 'string' ? v.role.slice(0, AGENT_ROLE_MAX) : '' };
   } catch { return { name: null, role: '' }; }
 }
 export function writeTypedAgent(setupId: string | null, name: string | null, role: string): void {
   try {
     if (!setupId) return;
-    if (name === null && !role) window.sessionStorage.removeItem(TYPED_KEY);
-    else window.sessionStorage.setItem(TYPED_KEY, JSON.stringify({ setup: setupId, name, role }));
+    if (name === null && !role) window.sessionStorage.removeItem(TYPED_KEY + setupId);
+    else window.sessionStorage.setItem(TYPED_KEY + setupId, JSON.stringify({ name, role }));
   } catch { /* storage closed: the fields just start over after the folder window */ }
 }
 

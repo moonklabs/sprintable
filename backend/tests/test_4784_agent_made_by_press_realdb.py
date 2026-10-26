@@ -117,10 +117,54 @@ async def test_a_blank_role_is_no_role_and_a_blank_or_control_name_is_refused(so
     async with _client() as c:
         before = await _state()
         code, _, _ = await _solo_code(c, "d4784 refusals")
-        for bad in ({"agent_name": "   "}, {"agent_name": "a\nb"}, {"agent_name": "x" * 61}, {"agent_role": "r\tr"}, {"agent_role": "r" * 201}, {"folder_name": "f\nf"}):
+        for bad in ({"agent_name": "   "}, {"agent_name": "a\nb"}, {"agent_name": "x" * 61}, {"agent_role": "r\tr"}, {"agent_role": "r" * 201}, {"folder_name": "f\nf"},
+                    # a line/paragraph separator or a bidi override would split or flip the one line the name/role/folder is drawn in (codex r1)
+                    {"agent_name": "a\u2028b"}, {"agent_name": "\u202eevil"}, {"agent_role": "r\u2029r"}, {"folder_name": "f\u2066f"}):
             r = await _confirm_solo(c, code, {"runtime": "claude", "project_name": "bad-app", **bad})
             assert r.status_code == 422, (bad, r.text)
         assert await _state() == before
         ok = await _confirm_solo(c, code, {"runtime": "claude", "project_name": "blank-role", "agent_name": "Quiet", "agent_role": "   "})
         assert ok.status_code == 200, ok.text
         assert [x[0] for x in await _sql(fetch=f"SELECT agent_role FROM agent_project_profiles WHERE member_id='{ok.json()['members'][0]['member_id']}'")] == [None]
+
+
+async def _lock_waiters() -> int:
+    return (await _sql(fetch=(
+        "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock'"
+    )))[0][0]
+
+
+@pytest.mark.anyio
+async def test_two_presses_at_once_with_the_same_typed_name_make_one_agent(solo, monkeypatch):
+    """codex r1: no unique key on member names — two setups (different codes) pressing «만들기» with the same typed name must not both find it
+    free. The organization's row is locked before the name list is read; the window is held open until the second press is seen waiting on
+    that lock in pg_stat_activity (or both have read — the unlocked case, which then makes two agents and fails here)."""
+    import asyncio
+
+    from app.services import desktop_setup as service
+
+    real = service._unique_name
+    read: list[str] = []
+    both_read = asyncio.Event()
+
+    async def watched(db, model, *conds, base):
+        names = await real(db, model, *conds, base=base)
+        if base == "Racer":
+            read.append(names)
+            if len(read) >= 2:
+                both_read.set()
+            while not both_read.is_set() and await _lock_waiters() == 0:
+                await asyncio.sleep(0.02)
+        return names
+
+    monkeypatch.setattr(service, "_unique_name", watched)
+    async with _client() as c:
+        before = await _state()
+        one, _, _ = await _solo_code(c, "d4784 race one")
+        two, _, _ = await _solo_code(c, "d4784 race two")
+        a, b = await asyncio.gather(
+            _confirm_solo(c, one, {"runtime": "claude", "project_id": str(PROJ), "agent_name": "Racer"}),
+            _confirm_solo(c, two, {"runtime": "claude", "project_id": str(PROJ), "agent_name": "Racer"}),
+        )
+        assert sorted([a.status_code, b.status_code]) == [200, 409], (a.text, b.text)
+        assert (await _state())["agents"] == before["agents"] + 1

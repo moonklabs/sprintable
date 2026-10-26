@@ -897,6 +897,31 @@ describe('[SID:4784] the card is the moment an agent is made — «에이전트 
     expect(posts().map((p) => (p.body as { agent_name: string }).agent_name)).toEqual(['Helper', 'Helper 2']);
   });
 
+  it('the free plan\'s «넣고 만들기» question holds its button while the name is blank, with the reason, and sends nothing', async () => {
+    ee.on = true;
+    confirmNow = () => new Response(JSON.stringify({ error: { code: 'PLAN_LIMIT_EXCEEDED', resource: 'project', limit: 1, existing_project: { id: PROJ, name: 'Mine' } } }), { status: 402 });
+    await mount(frag('&fshown=~/new/folder&fname=folder'), { projectId: PROJ, projects: [{ projectId: PROJ, projectName: 'Mine', orgId: 'o-1' }] });
+    await act(async () => { buttonOf('만들기')!.click(); });
+    await settle();
+    expect(buttonOf('넣고 만들기')!.disabled).toBe(false);
+    await typeInto(nameField(), ' ');
+    expect(buttonOf('넣고 만들기')!.disabled).toBe(true);
+    expect(container.querySelector('[data-testid=quick-limit-name-blank]')!.textContent).toBe('이름을 적으면 만들 수 있어요');
+    expect(posts()).toHaveLength(1); // only the first press went out
+  });
+
+  it('two setups (tabs) keep their own drafts: typing in one never overwrites the other\'s', async () => {
+    const other = frag(F4784).replace('11111111-1111-4111-8111-aaaaaaaaaaaa', '11111111-1111-4111-8111-bbbbbbbbbbbb');
+    await mount(frag(F4784), { projectId: PROJ });
+    await typeInto(nameField(), 'First');
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    await mount(other, { projectId: PROJ });
+    await typeInto(nameField(), 'Second');
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    await mount(frag(F4784), { projectId: PROJ });
+    expect(nameField().value).toBe('First');
+  });
+
   it('a failed creation says «만들지 못했어요» (not «시작»), keeps the typed fields and the button', async () => {
     confirmNow = () => new Response(JSON.stringify({ error: { code: 'whatever' } }), { status: 500 });
     await mount(frag(F4784), { projectId: PROJ });

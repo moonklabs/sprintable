@@ -265,12 +265,16 @@ async def post_confirm(
 
 
 AGENT_NAME_MAX = 60
-AGENT_ROLE_MAX = 200  # the daemon reads the role as a one-line persona of at most this many characters (agent_run_profile.PERSONA_ROLE_MAX)
+AGENT_ROLE_MAX = 200  # the role is the label shown beside the agent in the team lists (the agent's profile `agent_role`) — not the daemon's persona (that is `agent_personas`)
 
 
 def _no_control_characters(v: str) -> str:
-    if any(ord(ch) < 32 or ord(ch) == 127 for ch in v):
-        raise ValueError("must not contain control characters")
+    """No C0/C1 controls, no line/paragraph separators and no bidi overrides/isolates: a name, role or folder name stays one honest line
+    wherever it is drawn (the room's first line, the team lists)."""
+    for ch in v:
+        o = ord(ch)
+        if o < 32 or 0x7F <= o <= 0x9F or o in (0x2028, 0x2029) or 0x202A <= o <= 0x202E or 0x2066 <= o <= 0x2069:
+            raise ValueError("must not contain control characters")
     return v
 
 

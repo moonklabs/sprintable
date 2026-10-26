@@ -809,6 +809,9 @@ async def confirm_solo_setup(
             await check_agent_add_limit(db, org_id)  # an HTTPException(402) here rolls the whole setup back
         except HTTPException as exc:
             raise _with_setup_numbers(exc, needed=1, agents_before=agents_before) from None
+    # two presses at once on different codes must not both find the same name free (no unique key on member names): the organization's row is the
+    # one lock every agent-making setup of it takes before it reads the name list (the new-project branch above took it already)
+    await db.execute(select(Organization.id).where(Organization.id == org_id).with_for_update())
     name_conds = (Member.org_id == org_id, Member.type == "agent", Member.is_active.is_(True), Member.deleted_at.is_(None))
     if agent_name is None:
         agent_name = await _unique_name(db, Member, *name_conds, base=SOLO_AGENT_NAMES[runtime])

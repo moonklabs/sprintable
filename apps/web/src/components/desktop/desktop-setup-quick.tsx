@@ -422,8 +422,9 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
               <RoomShortBox room={agentRoom} line={t('room.soloNone')}
                 hint={<p className="text-xs text-muted-foreground" data-testid="quick-room-use-team">{t('room.soloUseTeam')}</p>} />
             ) : null}
+            {nameBlank ? <p className="text-xs text-muted-foreground" data-testid="quick-limit-name-blank">{t('quick.blockName')}</p> : null}
             <div className="flex flex-wrap items-center gap-3">
-              <Button disabled={starting || roomFull} onClick={() => void start(limitAsk.id)}>{starting ? t('quick.creating') : t('quick.limit.addStart')}</Button>
+              <Button disabled={starting || roomFull || nameBlank} onClick={() => void start(limitAsk.id)}>{starting ? t('quick.creating') : t('quick.limit.addStart')}</Button>
               {isEEEnabled() ? <a className="text-xs underline underline-offset-2" href={flatHref('/settings?tab=billing')}>{tNav('orgLimitUpgradeLink')}</a> : null}
             </div>
           </div>
