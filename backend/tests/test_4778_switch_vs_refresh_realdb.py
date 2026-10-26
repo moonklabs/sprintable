@@ -259,6 +259,28 @@ async def test_a_late_token_behind_many_rotations_is_still_superseded_realdb(rot
         await _close(engine, w)
 
 
+@pytest.mark.parametrize("rotations,code", [(63, "TOKEN_REVOKED"), (64, "TOKEN_SUPERSEDED")])
+async def test_the_walk_reaches_exactly_sixty_four_hops_realdb(rotations, code):
+    """S2b (lens, real PG): the cap is the point where «unknown → alive» starts, so the intended 64 is pinned (not the patched cap of the test below): switch, `rotations` refreshes, then the newest token is logged
+    out. The chain is O → S → R1 … R<rotations>: the walk examines rotations + 1 hops. 63 rotations = 64 hops, the end (the logout) is seen → REVOKED; 64 rotations = 65 hops, the cap runs out first → SUPERSEDED"""
+    engine, w = await _world()
+    try:
+        a = await w.login()
+        sw = await w.switch_org(a, w.org2)
+        assert sw.status_code == 200, sw.text
+        newest = sw.json()["data"]
+        for _ in range(rotations):
+            rot = await w.refresh(newest["refresh_token"])
+            assert rot.status_code == 200, rot.text
+            newest = rot.json()["data"]
+        lo = await w.client.post("/api/v2/auth/logout", json={"refresh_token": newest["refresh_token"]})
+        assert lo.status_code == 200, lo.text
+        late = await w.refresh(a["refresh_token"])
+        assert late.status_code == 401 and late.json()["error"]["code"] == code, late.text  # reverted: cap 5 → SUPERSEDED for 63 · cap 63 → SUPERSEDED for 63 · cap 65 → REVOKED for 64
+    finally:
+        await _close(engine, w)
+
+
 async def test_a_walk_that_runs_out_of_hops_answers_superseded_not_revoked_realdb(monkeypatch):
     """the cap exhausted without an end seen = unknown = alive (one more ask, never a forced logout)"""
     from app.routers import auth as auth_router
@@ -381,7 +403,7 @@ async def test_the_word_is_revoked_not_superseded_for_every_other_end_realdb(kin
             await s.execute(_update(_RefreshToken).where(_RefreshToken.token_hash == _hash_token(sw.json()["data"]["refresh_token"])).values(expires_at=datetime.now(timezone.utc) - timedelta(hours=1)))
             await s.commit()
         r = await w.refresh(k["refresh_token"])
-        assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_REVOKED", r.text  # reverted (both «expired end» breaks of the walk dropped: an expired live token counts as alive) → TOKEN_SUPERSEDED
+        assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_REVOKED", r.text  # catches only a mutant that deletes BOTH «expired end» conditions of the walk (each one alone still stops it at this row; the second is a guard for a damaged row) → then TOKEN_SUPERSEDED
         # 5) a pointer to another person's token is not «moved on» (never written by the app; a damaged row must not read as a live session)
         from sqlalchemy import select, update
 

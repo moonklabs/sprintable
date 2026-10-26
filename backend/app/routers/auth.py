@@ -360,6 +360,8 @@ def _is_session_stale_after_password_change(user: User, session_started_at: obje
 
 # story 4778 — how many tokens of a chain `refresh_token()` follows (switch's token → rotated hops → the session's live token) before it gives up. Generous on purpose (one hop is a single indexed read, about 0.3 ms);
 # a walk that uses it all without seeing an end answers «superseded» (unknown counts as alive: the cost of being wrong is one more ask of the client, which then gets the real answer — never a forced logout).
+# Limit, on purpose: past this many hops (a switch followed by more than 63 refreshes inside the superseded window) a session whose newest token was logged out is answered «superseded» too; the cookies stay for that one answer
+# and the next request, made with the cookies the browser then holds, gets the real REVOKED and clears them, so nothing is held alive. The cap is pinned to exactly 64 by `test_the_walk_reaches_exactly_sixty_four_hops_realdb`.
 _SUPERSEDED_CHAIN_MAX_HOPS = 64
 
 
