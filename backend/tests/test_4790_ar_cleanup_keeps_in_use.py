@@ -324,3 +324,70 @@ def test_repo_base_policy_shape():
     assert base[1]["action"]["type"] == "Delete" and base[1]["condition"]["olderThan"] == "2592000s"
     # keep-in-use is never committed with a digest list: it is generated right before applying (a stale list must not become the source of truth)
     assert all(r["name"] != "keep-in-use" for r in base)
+
+
+def _without(argv: list[str], flag: str) -> list[str]:
+    i = argv.index(flag)
+    return argv[:i] + argv[i + 2:]
+
+
+def test_the_same_call_without_expect_services_exits_2(tmp_path):
+    """the QA lens' surviving mutant: `--expect-services` made optional again. The one call that leaves it out (and only it) must fail, like the jobs one"""
+    d = Dumps(tmp_path)
+    assert gate.main(d.argv()) == 0  # the same call with it passes
+    with pytest.raises(SystemExit) as err:
+        gate.main(_without(d.argv(), "--expect-services"))
+    assert err.value.code == 2
+    with pytest.raises(SystemExit):
+        gate.main(_without(d.argv(), "--expect-jobs"))
+
+
+def test_a_write_that_fails_half_way_leaves_no_file_and_is_not_exit_1(tmp_path, monkeypatch, capsys):
+    """exit 1 means «an in-use image would be deleted»; a failing write is another story (exit 2) and must not leave a truncated, non-JSON file (not even from an earlier run)"""
+    d = Dumps(tmp_path)
+    assert gate.main(d.argv()) == 0 and d.out.exists()  # an earlier good run leaves a file
+    argv = d.argv()
+    real = Path.write_text
+
+    def half(self, data, *a, **k):
+        if self.name.startswith(d.out.name):
+            real(self, data[: len(data) // 2])
+            raise OSError("File too large")
+        return real(self, data, *a, **k)
+
+    monkeypatch.setattr(Path, "write_text", half)
+    assert gate.main(argv) == 2
+    assert "쓰기 오류" in capsys.readouterr().out
+    assert not d.out.exists(), "no policy file (not even a truncated one) is left at the target path"
+    assert not list(tmp_path.glob(f"{d.out.name}*")), "no temporary file is left either"
+
+
+def test_emit_policy_that_points_at_an_input_is_refused_and_the_input_survives(tmp_path):
+    """`--emit-policy` equal to an input path: refuse before anything is deleted — the dump a person collected by hand (or the base policy) is not wiped by the stale-file drop"""
+    d = Dumps(tmp_path)
+    for flag in ("--images", "--run-services"):
+        argv = d.argv()
+        target = Path(argv[argv.index(flag) + 1])
+        before = target.read_text()
+        argv[argv.index("--emit-policy") + 1] = str(target)
+        assert gate.main(argv) == 2
+        assert target.exists() and target.read_text() == before, flag
+    base_copy = tmp_path / "base-copy.json"
+    base_copy.write_text(json.dumps(_base()))
+    argv = d.argv("--base-policy", str(base_copy))
+    argv[argv.index("--emit-policy") + 1] = str(base_copy)
+    assert gate.main(argv) == 2 and base_copy.exists()
+    # the repository's own base policy (the default `--base-policy`) is protected too
+    argv = d.argv()
+    argv[argv.index("--emit-policy") + 1] = str(gate._BASE_POLICY)
+    before = gate._BASE_POLICY.read_text()
+    assert gate.main(argv) == 2 and gate._BASE_POLICY.read_text() == before
+
+
+def test_emit_policy_that_is_a_directory_exits_2_without_a_traceback(tmp_path):
+    d = Dumps(tmp_path)
+    argv = d.argv()
+    folder = tmp_path / "a-folder"
+    folder.mkdir()
+    argv[argv.index("--emit-policy") + 1] = str(folder)
+    assert gate.main(argv) == 2 and folder.is_dir()

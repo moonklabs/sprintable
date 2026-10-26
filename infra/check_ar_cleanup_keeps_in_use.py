@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from datetime import datetime, timedelta, timezone
@@ -340,13 +341,54 @@ def _load(path: str | None) -> Any:
     return json.loads(Path(path).read_text())
 
 
-def _drop_stale(path: str | None) -> None:
-    """실패한 실행이 이전 성공의 정책 파일을 «현재 입력의 통과본»인 척 남기지 않게 한다."""
-    if path:
+_INPUT_FLAGS = ("--images", "--run-services", "--run-revisions", "--run-jobs", "--extra", "--base-policy")
+
+
+def _same_file(a: str, b: str) -> bool:
+    try:
+        return Path(a).resolve() == Path(b).resolve()
+    except OSError:
+        return False
+
+
+def _raw_values(raw: list[str], flags: tuple[str, ...]) -> list[str]:
+    """인자를 파싱하기 前에, 주어진 플래그들의 값을 글자 그대로 줍는다(`--flag V` · `--flag=V`)."""
+    out: list[str] = []
+    for i, a in enumerate(raw):
+        for f in flags:
+            if a == f and i + 1 < len(raw):
+                out.append(raw[i + 1])
+            elif a.startswith(f + "="):
+                out.append(a.split("=", 1)[1])
+    return out
+
+
+def _drop_stale(path: str | None, protect: Iterable[str] = ()) -> bool:
+    """실패한 실행이 이전 성공의 정책 파일을 «현재 입력의 통과본»인 척 남기지 않게 한다. **입력 파일은 지우지 않는다**(`--emit-policy`가 입력 경로와 같을 때 사람이 손으로 모은 덤프가 사라지지 않게)
+    · 지울 수 없는 경로(디렉터리 · 권한)는 건드리지 않고 False를 돌려준다."""
+    if not path or any(_same_file(path, q) for q in protect):
+        return False
+    try:
+        Path(path).unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return False
+    return True
+
+
+def _write_policy(path: Path, text: str) -> None:
+    """같은 폴더의 임시 파일에 쓰고 `os.replace`로 바꾼다 — 쓰다 실패해도 잘린 파일(JSON 아님)이 최종 경로에 남지 않는다. 실패하면 임시 파일을 치우고 OSError를 그대로 올린다."""
+    tmp = path.with_name(f"{path.name}.tmp{os.getpid()}")
+    try:
+        tmp.write_text(text)
+        os.replace(tmp, path)
+    except OSError:
         try:
-            Path(path).unlink()
-        except FileNotFoundError:
+            tmp.unlink()
+        except OSError:
             pass
+        raise
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -362,12 +404,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--emit-policy")
     ap.add_argument("--now")
     raw = argv if argv is not None else sys.argv[1:]
-    for i, a in enumerate(raw):  # 인자 오류로 끝나도 이전 실행이 남긴 정책 파일은 지운다
-        if a == "--emit-policy":
-            _drop_stale(raw[i + 1] if i + 1 < len(raw) else None)
-        elif a.startswith("--emit-policy="):
-            _drop_stale(a.split("=", 1)[1])
+    protect = [*_raw_values(raw, _INPUT_FLAGS), str(_BASE_POLICY)]
+    for emit in _raw_values(raw, ("--emit-policy",)):  # 인자 오류로 끝나도 이전 실행이 남긴 정책 파일은 지운다(입력 파일이면 지우지 않는다)
+        _drop_stale(emit, protect)
     args = ap.parse_args(argv)
+    if args.emit_policy:
+        clash = [q for q in (args.images, args.run_services, args.run_revisions, args.run_jobs, args.base_policy, *args.extra) if _same_file(args.emit_policy, q)]
+        if clash:
+            print(f"입력 오류: --emit-policy가 입력 파일과 같은 경로다({clash[0]}) — 입력을 덮어쓰지도 지우지도 않는다. 다른 경로를 준다.")
+            return 2
+        if Path(args.emit_policy).is_dir():
+            print(f"입력 오류: --emit-policy가 디렉터리다({args.emit_policy}) — 파일 경로를 준다.")
+            return 2
     if not args.extra:
         print("입력 오류: --extra(MIG 인스턴스 템플릿 JSON)가 하나도 없다. VM이 부팅 때 당기는 이미지를 못 본다 — 건너뛸 수 없다.")
         return 2
@@ -420,7 +468,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  - {why}")
         return 3
     if args.emit_policy:
-        Path(args.emit_policy).write_text(json.dumps(policy, indent=2, ensure_ascii=False) + "\n")
+        try:
+            _write_policy(Path(args.emit_policy), json.dumps(policy, indent=2, ensure_ascii=False) + "\n")
+        except OSError as err:
+            # exit 1은 «쓰는 이미지가 지워진다»의 코드다 — 쓰기 실패는 다른 이야기라 입력 오류(2)로 돌려주고, 잘린 파일이 남지 않게 한다
+            _drop_stale(args.emit_policy)
+            print(f"쓰기 오류: 정책 파일을 쓰지 못했다({err.__class__.__name__}: {err}) — 파일을 남기지 않았다.")
+            return 2
         print(f"생성 정책을 썼다: {args.emit_policy}")
     print("OK — 생성 정책이 지우는 이미지 중 사용 중인 것은 0.")
     return 0
