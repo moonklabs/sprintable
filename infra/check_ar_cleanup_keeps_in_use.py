@@ -267,13 +267,43 @@ def resolve_in_use(refs: list[Ref], versions: list[Version]) -> tuple[set[tuple[
     return found, missing
 
 
+# Artifact Registry는 `versionNamePrefixes`의 한 항이 64자를 넘으면 정책을 거절한다("invalid prefix longer than 64 characters"). digest 전체(`sha256:` + 64자 = 71자)는 못 쓴다 —
+# 앞 64자(`sha256:` + 16진 57자 = 228비트)로 자른다. 자른 접두가 «사용 중인 그 하나»에만 맞는지는 `prefix_ambiguities`가 목록에서 확인한다(2026-10-26 PO 실측: 실제 API가 거절).
+_PREFIX_MAX = 64
+
+
+def keep_prefix(digest: str) -> str:
+    return digest[:_PREFIX_MAX]
+
+
 def build_policy(base: list[dict], in_use: set[tuple[str, str]]) -> list[dict]:
-    """기본 정책 앞에 `keep-in-use`(Keep) 규칙을 채워 넣는다. 사용 중 digest 전체를 `versionNamePrefixes`로."""
-    digests = sorted({d for _pkg, d in in_use})
+    """기본 정책 앞에 `keep-in-use`(Keep) 규칙을 채워 넣는다. 사용 중 digest의 앞 `_PREFIX_MAX`자를 `versionNamePrefixes`로(AR의 상한)."""
+    prefixes = sorted({keep_prefix(d) for _pkg, d in in_use})
     policy = [p for p in base if p.get("name") != "keep-in-use"]
-    if digests:
-        policy.insert(0, {"name": "keep-in-use", "action": {"type": "Keep"}, "condition": {"versionNamePrefixes": digests}})
+    if prefixes:
+        policy.insert(0, {"name": "keep-in-use", "action": {"type": "Keep"}, "condition": {"versionNamePrefixes": prefixes}})
     return policy
+
+
+def prefix_ambiguities(in_use: set[tuple[str, str]], versions: list[Version]) -> list[str]:
+    """자른 접두가 «사용 중인 그 버전» 말고 다른 버전에도 맞으면 그 목록. 정책은 더 많이 «남기는» 쪽(안전)이지만 접두가 digest 하나를 가리킨다는 가정이 깨진 것이라 사람이 보도록 멈춘다."""
+    out: list[str] = []
+    for _pkg, digest in sorted(in_use):
+        prefix = keep_prefix(digest)
+        extra = sorted(v.key() for v in versions if v.digest.startswith(prefix) and v.key() not in in_use)
+        if extra:
+            out.append(f"keep-in-use 접두 {prefix}가 사용 중이 아닌 버전 {len(extra)}개에도 맞는다: " + ", ".join(f"{pkg} {d}" for pkg, d in extra[:3]))
+    return out
+
+
+def policy_problems(policy: list[dict]) -> list[str]:
+    """AR이 거절하는 모양(64자를 넘는 `versionNamePrefixes` 항)이 정책에 남아 있으면 그 목록."""
+    return [
+        f"규칙 {rule.get('name', '?')}의 versionNamePrefixes에 {len(pre)}자짜리 항이 있다(AR 상한 {_PREFIX_MAX}자)"
+        for rule in policy
+        for pre in (rule.get("condition") or {}).get("versionNamePrefixes", [])
+        if len(pre) > _PREFIX_MAX
+    ]
 
 
 _DURATION = re.compile(r"^(\d+)(s|m|h|d)?$")
@@ -471,6 +501,11 @@ def main(argv: list[str] | None = None) -> int:
     now = _parse_time(args.now) if args.now else datetime.now(timezone.utc)
     in_use, missing = resolve_in_use(refs, versions)
     policy = build_policy(base, in_use)
+    bad_policy = policy_problems(policy)
+    if bad_policy:
+        print("입력 오류: 생성 정책이 AR이 거절하는 모양이다 — " + "; ".join(bad_policy))
+        return 2
+    problems = [*problems, *prefix_ambiguities(in_use, versions)]
     would_delete, hit = check(versions, in_use, policy, now)
     base_delete, base_hit = check(versions, in_use, base, now)
     for w in warnings:
