@@ -77,7 +77,7 @@ case "${ENV}" in
         MIN_INSTANCES=1
         MAX_INSTANCES=10
         MEMORY="1Gi"
-        CPU="2"
+        CPU="1"  # story 4790 (E-INFRA-DIET, 2026-10-26): 2 → 1 — the value the operator set by hand; SSOT: cloud-build.yml prod `backend_resources`
         FRONTEND_URL="${FRONTEND_ORIGIN:-https://app.sprintable.ai}"
         RUNTIME_SA="cloudrun-runtime-prod@${GCP_PROJECT}.iam.gserviceaccount.com"
         APP_URL="${APP_URL:-https://app.sprintable.ai}"

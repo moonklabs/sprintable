@@ -76,10 +76,10 @@ case "${ENV}" in
         ;;
     prod)
         SERVICE_NAME="sprintable-frontend-prod"
-        MIN_INSTANCES=3
+        MIN_INSTANCES=1  # story 4790 (E-INFRA-DIET, 2026-10-26): 3 → 1 · 2 vCPU/1Gi → 1 vCPU/512Mi — the values the operator set by hand; SSOT: cloud-build.yml prod branch (`frontend_min_instances` · `frontend_resources`)
         MAX_INSTANCES=10
-        MEMORY="1Gi"
-        CPU="2"
+        MEMORY="512Mi"
+        CPU="1"
         FASTAPI_SERVICE="sprintable-backend-prod"
         RUNTIME_SA="cloudrun-runtime-prod@${GCP_PROJECT}.iam.gserviceaccount.com"
         FASTAPI_URL_OVERRIDE=""

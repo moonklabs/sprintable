@@ -51,9 +51,10 @@ def test_dev_minimum_instances_in_the_workflow_that_overrides_the_defaults():
         assert _outputs(_DEV, name) == [value], (name, _outputs(_DEV, name))
 
 
-def test_prod_minimum_instances_are_exactly_what_they_were():
-    """«prod is not touched» pinned literally (codex 4786): backend 3 · frontend 3. A later story that lowers prod changes these two numbers on purpose, here, in the same PR — never by a stray edit"""
-    assert _outputs(_PROD, "backend_min_instances") == [3] and _outputs(_PROD, "frontend_min_instances") == [3]
+def test_prod_minimum_instances_are_exactly_what_the_operator_set():
+    """prod's minimums pinned literally (codex 4786): a story that changes prod changes these two numbers on purpose, here, in the same PR — never by a stray edit. Story 4790 (2026-10-26, the teacher: «prod도 지금 줄이기»):
+    3 · 3 → 1 · 1, the values the operator set by hand at 09:07Z; the repository follows so the next prod deploy cannot put 3 back (the sizes and the maximum are pinned in test_4790_prod_matches_hand_values.py)."""
+    assert _outputs(_PROD, "backend_min_instances") == [1] and _outputs(_PROD, "frontend_min_instances") == [1]
 
 
 def test_cloudbuild_defaults_for_the_dev_safe_fallback():
@@ -110,8 +111,9 @@ def test_dev_cpu_is_billed_only_while_a_request_is_served():
     assert 'if [ "${_DEPLOY_ENV}" != "dev" ]; then' in _CLOUDBUILD[: _CLOUDBUILD.index("gcloud run deploy sprintable-realtime-")]
 
 
-def _run_guard(deploy_env: str, explicit: str, backend_min: str = "3", frontend_min: str = "3") -> subprocess.CompletedProcess:
-    env = {**os.environ, "_DEPLOY_ENV": deploy_env, "_MINS_EXPLICIT": explicit, "_BACKEND_MIN_INSTANCES": backend_min, "_FRONTEND_MIN_INSTANCES": frontend_min}
+def _run_guard(deploy_env: str, explicit: str, backend_min: str = "1", frontend_min: str = "1", backend_max: str = "10", frontend_max: str = "10") -> subprocess.CompletedProcess:
+    env = {**os.environ, "_DEPLOY_ENV": deploy_env, "_MINS_EXPLICIT": explicit, "_BACKEND_MIN_INSTANCES": backend_min, "_FRONTEND_MIN_INSTANCES": frontend_min,
+           "_BACKEND_MAX_INSTANCES": backend_max, "_FRONTEND_MAX_INSTANCES": frontend_max}
     return subprocess.run(["bash", "-c", _step_script("guard-prod-mins")], capture_output=True, text=True, env=env)
 
 
@@ -124,6 +126,14 @@ def test_a_prod_build_that_does_not_state_its_minimums_fails_first():
     assert _run_guard("prod", "true", frontend_min="0").returncode != 0  # the dev-safe default of the frontend
     assert _run_guard("prod", "true", backend_min="0").returncode != 0
     assert _run_guard("prod", "true", backend_min="abc").returncode != 0  # fail closed on garbage too
+    # story 4790 (the QA lens): the maximum defaults are dev's (backend 1 · frontend 3); a hand-submitted prod build that states its minimums and forgets the maximums must not deploy at max 1
+    assert _run_guard("prod", "true", backend_max="1").returncode != 0  # the dev default of the backend
+    assert _run_guard("prod", "true", backend_max="").returncode != 0  # left out
+    assert _run_guard("prod", "true", frontend_max="1").returncode != 0
+    assert _run_guard("prod", "true", frontend_max="").returncode != 0
+    assert _run_guard("prod", "true", backend_max="abc").returncode != 0 and _run_guard("prod", "true", frontend_max="x").returncode != 0
+    assert _run_guard("prod", "true", backend_max="10", frontend_max="10").returncode == 0  # what the workflow's prod branch sends
+    assert _run_guard("dev", "", backend_max="1", frontend_max="3").returncode == 0  # dev keeps its own maximums
     assert _run_guard("dev", "", backend_min="2", frontend_min="0").returncode == 0  # dev is what the defaults are for
     assert re.findall(r"^  _MINS_EXPLICIT: '(.*)'$", _CLOUDBUILD, flags=re.M) == [""]  # a manual submit never inherits `true`
     assert 'echo "mins_explicit=true"' in _PROD and "mins_explicit" not in _DEV
@@ -152,7 +162,7 @@ def test_no_step_can_start_before_the_guard_has_passed():
 
 
 def test_the_manual_scripts_agree_for_dev_and_leave_prod_alone():
-    for name, dev_min, prod_min in (("frontend", 0, 3), ("backend", 2, 1)):
+    for name, dev_min, prod_min in (("frontend", 0, 1), ("backend", 2, 1)):  # story 4790: frontend prod 3 → 1 (the value the operator set by hand)
         script = (_ROOT / f"backend/scripts/deploy_{name}.sh").read_text()
         dev = script[script.index("    dev)"):script.index("    prod)")]
         prod = script[script.index("    prod)"):]

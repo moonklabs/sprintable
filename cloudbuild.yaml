@@ -61,7 +61,7 @@ substitutions:
   # 수동 적용 완료 — 위 deploy 스텝의 순서 재구성으로 다음 배포부턴 자동 수렴.
   _GOTENBERG_SERVICE_URL: 'https://office-converter-dev-57iommnikq-du.a.run.app'
   _OFFICE_CONVERTER_MAX_INSTANCES: '3'
-  # story 4786 (E-INFRA-DIET, 2026-10-26): dev-safe 기본값 1 → 2 (PO: backend 새 인스턴스 시작 ≈31초 · 배포 창 동시 접속 몰림 — story 4789 가 서면 0). 실효값은 GHA cloud-build.yml 이 per-env 로 덮는다(dev 2 · prod 3 — prod 는 이 기본값에 기대지 않는다: `_MINS_EXPLICIT` 가드).
+  # story 4786 (E-INFRA-DIET, 2026-10-26): dev-safe 기본값 1 → 2 (PO: backend 새 인스턴스 시작 ≈31초 · 배포 창 동시 접속 몰림 — story 4789 가 서면 0). 실효값은 GHA cloud-build.yml 이 per-env 로 덮는다(dev 2 · prod 1 — prod 는 이 기본값에 기대지 않는다: `_MINS_EXPLICIT` 가드).
   _BACKEND_MIN_INSTANCES: '2'
   # ⚠️ default '1'(아래) = _DEPLOY_ENV:dev default 와 정합한 **dev-safe fallback**(수동 `gcloud builds submit`
   #    override 없을 때 무리한 maxScale 재현 차단). GHA cloud-build.yml 이 per-env override(prod=5·dev=8, #2074 응급).
@@ -279,12 +279,16 @@ substitutions:
   # 실측 그대로(2026-07-24, `gcloud run services describe sprintable-frontend-dev` 대조:
   # latestReady==latestCreated·traffic 100%인 서빙 리비전 자체를 확認, template spec만 본 것
   # 아님 — 오늘 prod FE 22시간 무실효 사고의 3축 교훈 적용). GHA가 prod에서 override(3/10).
-  # story 4786 (E-INFRA-DIET, 2026-10-26): dev-safe 기본값 1 → 0 (위 «라이브 실측 그대로» 는 이 줄 바뀐 날짜까지의 값). GHA cloud-build.yml 이 dev 0 · prod 3 으로 덮는다.
+  # story 4786 (E-INFRA-DIET, 2026-10-26): dev-safe 기본값 1 → 0 (위 «라이브 실측 그대로» 는 이 줄 바뀐 날짜까지의 값). GHA cloud-build.yml 이 dev 0 · prod 1 로 덮는다.
   _FRONTEND_MIN_INSTANCES: '0'
   _FRONTEND_MAX_INSTANCES: '3'
   # story 4786 (E-INFRA-DIET, 2026-10-26): extra `gcloud run deploy` flags for the CPU allocation of backend + frontend. dev: `--cpu-throttling` (CPU billed only while a request is served); prod: empty = the flag is not
   # sent and gcloud leaves the value as it is. Empty here on purpose (the GHA workflow's dev branch sets it; a manual prod submit must not inherit it). realtime-dev (dev only) names the flag itself.
   _CPU_FLAGS: ''
+  # story 4790 (E-INFRA-DIET, 2026-10-26): the size of each prod service as `gcloud run deploy` flags (`--cpu 1 --memory 1Gi` backend · `--cpu 1 --memory 512Mi` frontend) — the operator lowered them by hand at 09:07Z, and without
+  # these a flag left out is only «kept», never written down. Empty = not sent (dev keeps its value; a manual submit must not inherit prod's). The workflow's prod branch sends them. No `=` inside: the substitution list is split on commas.
+  _BACKEND_RESOURCES: ''
+  _FRONTEND_RESOURCES: ''
   # story 4786: prod must say its minimum instances itself (the defaults above are dev-safe: backend 2 · realtime 0 · frontend 0). The workflow's prod branch sends `true`; a hand-run prod build that does
   # not fails in the first step (fail-closed) instead of deploying prod at the dev numbers.
   _MINS_EXPLICIT: ''
@@ -385,7 +389,7 @@ substitutions:
   _BACKEND_REDIS_DUAL_PUBLISH_ENABLED: 'false'
 
 steps:
-  # story 4786 (E-INFRA-DIET): fail-closed — a prod build must carry its own minimum instances (`_MINS_EXPLICIT`, sent by the workflow's prod branch; backend and frontend >= 1); the defaults are dev-safe. Runs first and every step that would otherwise start at once waits for it.
+  # story 4786 (E-INFRA-DIET): fail-closed — a prod build must carry its own minimum instances (`_MINS_EXPLICIT`, sent by the workflow's prod branch; backend and frontend >= 1; maximums >= 2, story 4790: the default maximum is dev's 1/3); the defaults are dev-safe. Runs first and every step that would otherwise start at once waits for it.
   - id: guard-prod-mins
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
@@ -393,10 +397,10 @@ steps:
       - -c
       - |
         if [ "${_DEPLOY_ENV}" = "prod" ]; then
-          if [ "${_MINS_EXPLICIT}" = "true" ] && [ "${_BACKEND_MIN_INSTANCES}" -ge 1 ] && [ "${_FRONTEND_MIN_INSTANCES}" -ge 1 ]; then
+          if [ "${_MINS_EXPLICIT}" = "true" ] && [ "${_BACKEND_MIN_INSTANCES}" -ge 1 ] && [ "${_FRONTEND_MIN_INSTANCES}" -ge 1 ] && [ "${_BACKEND_MAX_INSTANCES}" -ge 2 ] && [ "${_FRONTEND_MAX_INSTANCES}" -ge 2 ]; then
             :
           else
-            echo "FAIL: a prod build needs explicit minimum instances (_MINS_EXPLICIT=true, backend and frontend >= 1) - the defaults are dev-safe (story 4786)"
+            echo "FAIL: a prod build needs explicit minimum instances (_MINS_EXPLICIT=true, backend and frontend >= 1) and maximum instances (backend and frontend >= 2) - the defaults are dev-safe (stories 4786, 4790)"
             exit 1
           fi
         fi
@@ -769,7 +773,7 @@ steps:
           --timeout=${_FRONTEND_TIMEOUT} \
           --min-instances=${_FRONTEND_MIN_INSTANCES} \
           --max-instances=${_FRONTEND_MAX_INSTANCES} \
-          --cpu-boost ${_CPU_FLAGS} \
+          --cpu-boost ${_CPU_FLAGS} ${_FRONTEND_RESOURCES} \
           --update-env-vars="$${ENV_VARS}" \
           $${FE_SECRETS} \
           --remove-env-vars=XFF_PROBE_ENABLED \
@@ -911,7 +915,7 @@ steps:
           --region=${_AR_REGION} \
           --min-instances=${_BACKEND_MIN_INSTANCES} \
           --max-instances=${_BACKEND_MAX_INSTANCES} \
-          --timeout=${_BACKEND_TIMEOUT} ${_CPU_FLAGS} \
+          --timeout=${_BACKEND_TIMEOUT} ${_CPU_FLAGS} ${_BACKEND_RESOURCES} \
           --allow-unauthenticated \
           --update-env-vars="$${ENV_VARS}" \
           $${SECRETS_FLAG} $${RM_SECRETS} \
