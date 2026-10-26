@@ -119,7 +119,7 @@ def test_backfill_marks_delivered_after_yield():
     src = inspect.getsource(events.agent_event_stream)
     # yield 라인이 'status = "delivered"' 보다 먼저 와야 함 (후마킹)
     yield_idx = src.find('is_backfill\': True')
-    mark_idx = src.find('evt.status = "delivered"')
+    mark_idx = src.find('_stamp_first_delivery(db, batch, now)')  # story 4781: the marking is one helper now (only a still-pending event is stamped)
     assert yield_idx != -1 and mark_idx != -1
     assert yield_idx < mark_idx, "백필 delivered 마킹은 yield 이후여야 함 (1c22da3e)"
 
