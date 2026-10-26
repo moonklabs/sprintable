@@ -282,6 +282,16 @@ async def test_the_word_is_revoked_not_superseded_for_every_other_end_realdb(kin
             await s.commit()
         r = await w.refresh(i["refresh_token"])
         assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_SUPERSEDED", r.text  # reverted (any hop without a link is dead) → TOKEN_REVOKED → the BFF clears both cookies of a live session
+        # 10) an account switch rotates the switch's token (token B → C through /switch-account) and links the rotation: the session's end is C, so ending C ends the chain
+        j = await w.login()
+        sw = await _switchers(w)[kind](j)
+        assert sw.status_code == 200
+        acc = await w.client.post("/api/v2/auth/switch-account", json={"refresh_token": sw.json()["data"]["refresh_token"]})
+        assert acc.status_code == 200, acc.text
+        lo = await w.client.post("/api/v2/auth/logout", json={"refresh_token": acc.json()["data"]["refresh_token"]})
+        assert lo.status_code == 200
+        r = await w.refresh(j["refresh_token"])
+        assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_REVOKED", r.text  # reverted (switch-account links nothing) → B looks like a rotation in flight → TOKEN_SUPERSEDED
         # 5) a pointer to another person's token is not «moved on» (never written by the app; a damaged row must not read as a live session)
         from sqlalchemy import select, update
 

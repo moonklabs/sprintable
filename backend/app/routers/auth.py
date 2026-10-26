@@ -1462,7 +1462,11 @@ async def switch_account(
         str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         session_started_at=_session_started_at,
     )
-    await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=_md)
+    new_token_id = await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=_md)
+    # story 4778 — the rotation names its successor, as `refresh_token()` does (audit only: no rule of the refresh grace window reads it). A rotated token that points at nothing looks exactly like
+    # a rotation still in flight to the «superseded» answer of the refresh route, which follows `replaced_by` from a switch's token to the session's live end.
+    await session.execute(update(RefreshToken).where(RefreshToken.token_hash == token_hash).values(replaced_by=new_token_id))
+    await session.commit()
 
     return _ok({
         **tokens,
