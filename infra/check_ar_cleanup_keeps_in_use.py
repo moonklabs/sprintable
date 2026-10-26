@@ -16,8 +16,8 @@
   --run-services  gcloud run services list --region=… --format=json                              (필수)
   --run-revisions gcloud run revisions list --region=… --format=json                             (필수)
   --run-jobs      gcloud run jobs list --region=… --format=json                                  (필수)
-  --extra         그 밖의 JSON(MIG 인스턴스 템플릿 등, 여러 번). 하나는 필수(MIG가 정말 없으면 --no-extra)
-  --expect-services N · --expect-jobs N   덤프 개수를 알면(서비스 14 · job 17) 맞는지 본다(잘린 덤프를 잡는다)
+  --extra         그 밖의 JSON(MIG 인스턴스 템플릿 등, 여러 번). 하나 이상 필수 — 건너뛰는 길은 없다
+  --expect-services N · --expect-jobs N   덤프 개수(필수: 서비스 14 · job 17) — 잘린 덤프를 잡는다
 
 산출: `--emit-policy PATH`로 기본 정책(infra/artifact-registry/cleanup-policy.base.json)에 `keep-in-use` Keep 규칙을 채운 정책을 쓴다 —
 **통과(exit 0)일 때만** 쓰고, 실패하면 이전 실행이 남긴 같은 이름의 파일을 지운다(실패한 입력으로 만든 정책이 적용되지 않게).
@@ -28,7 +28,9 @@ exit code: 0=지움 0 · 1=사용 중 이미지가 지워진다 · 2=입력 오�
           태그로 배포된 서빙 리비전에 `status.imageDigest`가 없음) — 안전하게 실패.
 참조는 `<host>/<project>/<repo>/<package>`까지 같아야 같은 이미지로 친다(다른 저장소의 같은 이름은 보호하지 않는다). 태그도 digest도 없는 참조는 `:latest`로 본다.
 
+한계: 태그로 배포된 리비전이 컨테이너를 여럿 가지면 짝을 지을 수 없어 항상 exit 3이다(이 저장소의 서비스는 컨테이너 하나).
 한계(적용 절차로 막는다): 생성 정책의 `keep-in-use`는 «덤프 시각의» 사용 중 digest 목록이다. 그 뒤에 사용 중 이미지가 «최근 30개 밖의 옛 이미지»로 바뀌면(예: 손으로 배포하는 prod MIG 템플릿을 옛 sha로 되돌림 · 옛 리비전으로 롤백) 새 목록이 없어 지워질 수 있다 —
+덤프 → 확인 → dry-run → 적용은 «한 번에 이어서, 그 사이 배포 · MIG 변경 · 태그 이동 금지»로 한다(확인기는 이를 강제하지 못한다 — 절차가 막는다).
 그런 일 前에는 이 확인기를 다시 돌려 정책을 다시 만들어 적용한다(정책은 자동으로 따라가지 않는다). 덤프는 «그 시각의» 모습이다. 덤프 → 확인 → dry-run → 적용을 한 번에 이어서 하고(그 사이 배포 금지), GCE가 당기는 `backend:<sha>` 같은 태그가 그 사이에 옮겨지지 않게 한다.
 """
 from __future__ import annotations
@@ -147,10 +149,12 @@ def _serving_revision_names(services: Any) -> set[str]:
 
 
 def _unresolved_tags(found: list[Ref]) -> bool:
-    """태그로 배포된 이미지가 리비전 안에 N개면 그 리비전은 해결된 digest도 N개 이상 가져야 한다(컨테이너 하나의 digest가 다른 컨테이너의 태그를 가리지 못하게)."""
+    """태그로 배포된 이미지가 한 개면 해결된 digest가 있어야 한다. 둘 이상이면 짝지을 수 없어 항상 «모름»이다(digest로 고정 배포한 이미지는 태그가 아니라 세지 않는다)."""
     tagged = {(r["package"], r["tag"]) for r in found if r["tag"]}
     digests = {r["digest"] for r in found if r["digest"]}
-    return bool(tagged) and len(digests) < len(tagged)
+    if len(tagged) > 1:
+        return True  # `status.imageDigest`는 하나뿐이라 컨테이너가 여럿이면 어느 digest가 어느 태그의 것인지 짝지을 수 없다 — 모르면 실패
+    return bool(tagged) and not digests
 
 
 def collect_in_use_refs(
@@ -328,10 +332,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--run-services", required=True)
     ap.add_argument("--run-revisions", required=True)
     ap.add_argument("--run-jobs", required=True)
-    ap.add_argument("--extra", action="append", default=[])
-    ap.add_argument("--no-extra", action="store_true", help="MIG 인스턴스 템플릿이 정말 하나도 없을 때만")
-    ap.add_argument("--expect-services", type=int)
-    ap.add_argument("--expect-jobs", type=int)
+    ap.add_argument("--extra", action="append", default=[], help="MIG 인스턴스 템플릿 등(하나 이상 필수 — 건너뛰는 길은 없다)")
+    ap.add_argument("--expect-services", type=int, required=True, help="서비스 개수(잘린 덤프를 잡는다)")
+    ap.add_argument("--expect-jobs", type=int, required=True, help="job 개수(잘린 덤프를 잡는다)")
     ap.add_argument("--base-policy", default=str(_BASE_POLICY))
     ap.add_argument("--emit-policy")
     ap.add_argument("--now")
@@ -342,8 +345,8 @@ def main(argv: list[str] | None = None) -> int:
         elif a.startswith("--emit-policy="):
             _drop_stale(a.split("=", 1)[1])
     args = ap.parse_args(argv)
-    if not args.extra and not args.no_extra:
-        print("입력 오류: --extra(MIG 인스턴스 템플릿 JSON)가 하나도 없다. VM이 부팅 때 당기는 이미지를 못 본다 — 템플릿이 정말 없으면 --no-extra.")
+    if not args.extra:
+        print("입력 오류: --extra(MIG 인스턴스 템플릿 JSON)가 하나도 없다. VM이 부팅 때 당기는 이미지를 못 본다 — 건너뛸 수 없다.")
         return 2
     try:
         versions = load_versions(_load(args.images))

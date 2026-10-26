@@ -76,7 +76,8 @@ class Dumps:
             paths[key] = self.dir / f"{key}.json"
             paths[key].write_text(json.dumps(data))
         argv = ["--images", str(paths["images"]), "--run-services", str(paths["services"]), "--run-revisions", str(paths["revisions"]),
-                "--run-jobs", str(paths["jobs"]), "--emit-policy", str(self.out), "--now", NOW.isoformat(), *extra_args]
+                "--run-jobs", str(paths["jobs"]), "--emit-policy", str(self.out), "--now", NOW.isoformat(),
+                "--expect-services", str(len(self.services)), "--expect-jobs", str(len(self.jobs)), *extra_args]
         if with_mig:
             mig = self.dir / "mig.json"
             mig.write_text(json.dumps(self.mig))
@@ -148,7 +149,10 @@ def test_the_all_revisions_fallback_also_needs_the_resolved_digest_and_one_per_c
     assert problems, "one resolved digest cannot cover two tagged containers"
     two["status"] = {"imageDigest": _digest(2), "containerStatuses": [{"imageDigest": _digest(10_001)}]}
     _refs, _warnings, problems = gate.collect_in_use_refs([_service("s", "rev-2", f"{HOST}/backend:backend-tag2")], [two])
-    assert not problems
+    assert problems, "two tagged containers cannot be paired with their digests, even when two digests are present"
+    one = _revision("rev-2", f"{HOST}/backend:backend-tag2", image_digest=_digest(2))
+    _refs, _warnings, problems = gate.collect_in_use_refs([_service("s", "rev-2", f"{HOST}/backend:backend-tag2")], [one])
+    assert not problems  # one tagged container with its resolved digest is fine
 
 
 def test_a_moved_tag_is_still_protected_by_the_revisions_resolved_digest(tmp_path):
@@ -231,7 +235,8 @@ def test_cli_bad_input_is_exit_2_never_a_green(tmp_path):
     assert gate.main(d.argv("--expect-jobs", "17")) == 2
     # no gateway template at all, unless said on purpose
     assert gate.main(d.argv(with_mig=False)) == 2
-    assert gate.main(d.argv("--no-extra", with_mig=False)) == 0
+    with pytest.raises(SystemExit):  # the bypass is gone
+        gate.main(d.argv("--no-extra", with_mig=False))
     # empty listing; empty everything in use
     d.images = []
     assert gate.main(d.argv()) == 2
