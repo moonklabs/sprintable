@@ -699,8 +699,9 @@ SOLO_AGENT_NAMES = {"claude": "Claude Code", "codex": "Codex"}  # story 4711 (Yu
 def _name_key(name: str | None) -> str:
     """What makes two names the same name: compatibility-normalized (full-width letters), format characters dropped (a zero-width space does not make
     a second «Zed Bot»), spaces collapsed, case ignored."""
-    text = unicodedata.normalize("NFKC", name or "")
-    return " ".join("".join(ch for ch in text if unicodedata.category(ch) != "Cf").split()).casefold()
+    # format characters first (a joiner between a letter and a combining mark must not keep them apart), then the folding
+    dropped = "".join(ch for ch in (name or "") if unicodedata.category(ch) != "Cf")
+    return " ".join(unicodedata.normalize("NFKC", dropped).split()).casefold()
 
 
 async def _unique_name(db: AsyncSession, model, *conds, base: str, limit: int | None = None) -> str:

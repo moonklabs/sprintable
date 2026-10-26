@@ -190,6 +190,10 @@ async def test_a_name_that_is_nearly_a_taken_one_is_taken_and_invisible_roles_ar
             r = await _confirm_solo(c, code, {"runtime": "claude", "project_id": str(PROJ), "agent_name": typed})
             assert (r.status_code, r.json()["error"]["code"]) == (409, "agent_name_taken"), (typed, r.text)
         assert await _state() == before
+        # codex r6: a joiner between a letter and a combining accent must not keep it apart from the precomposed letter (format characters go before the folding)
+        await _sql(f"INSERT INTO members (id,org_id,type,name,is_active) VALUES (gen_random_uuid(),'{ORG}','agent','\u00e1gent',true)")
+        r = await _confirm_solo(c, code, {"runtime": "claude", "project_id": str(PROJ), "agent_name": "a\u200d\u0301gent"})
+        assert (r.status_code, r.json()["error"]["code"]) == (409, "agent_name_taken"), r.text
         fine = await _confirm_solo(c, code, {"runtime": "claude", "project_id": str(PROJ), "agent_name": "Zed Bot 2", "agent_role": "\u3164 \u2800", "folder_name": "\u3164"})
         assert fine.status_code == 200, fine.text
         assert [x[0] for x in await _sql(fetch=f"SELECT agent_role FROM agent_project_profiles WHERE member_id='{fine.json()['members'][0]['member_id']}'")] == [None]
