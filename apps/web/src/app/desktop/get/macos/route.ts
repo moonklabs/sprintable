@@ -11,6 +11,7 @@ const NO_STORE = { 'Cache-Control': 'no-store' };
 export async function GET() {
   if (!isDesktopDownloadEnabled(process.env.DESKTOP_DOWNLOAD_ENABLED)) return new NextResponse(null, { status: 404, headers: NO_STORE });
   const bucket = desktopDownloadBucket();
+  if (!bucket) return new NextResponse(null, { status: 502, headers: NO_STORE }); // switch on, no bucket named: nothing is ours — and the manifest is not read
   let target: string | null = null;
   try {
     const manifest: unknown = JSON.parse(await fetchDesktopDownloadManifest(fetch, bucket));

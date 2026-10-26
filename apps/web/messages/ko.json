@@ -1472,7 +1472,7 @@
     "subtitle": "열린 루프를 닫는 조직 OS",
     "macAppPitch": "AI 에이전트가 일감을 받아 끝까지 해내는 곳이에요. Mac 앱을 받아 내 에이전트를 시작해요.",
     "macAppGet": "Mac 앱 받기",
-    "macAppGetHint": "받은 앱을 열면 가입도 앱에서 이어져요",
+    "macAppGetHint": "받은 파일로 앱을 설치하면 가입도 앱에서 이어져요",
     "macAppWebSignup": "웹에서 먼저 가입할래요",
     "sessionExpired": "세션이 만료되어 로그아웃됐어요. 다시 로그인해 주세요.",
     "google": "Google로 계속",

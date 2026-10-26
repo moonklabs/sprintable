@@ -217,7 +217,9 @@ describe('LoginPage — 첫 화면의 «Mac 앱 받기» (story #4763 AC6)', () 
     const web = links.find((a) => a.textContent === koMessages.login.macAppWebSignup);
     expect(web?.getAttribute('href')).toBe('/register'); // the web sign-up stays for a person who would rather start there
     expect(links.filter((a) => a.getAttribute('href') === '/register')).toHaveLength(1);
-    expect(koMessages.login.macAppGetHint).toContain('앱'); // the sign-up continues in the app: the hint no longer promises an e-mail check before the file
+    // the file is a .dmg: the hint says it is installed first and that the sign-up then continues in the app (no e-mail check before the file any more)
+    expect(koMessages.login.macAppGetHint).toContain('설치');
+    expect(koMessages.login.macAppGetHint).toContain('가입');
     expect(koMessages.login.macAppGetHint).not.toContain('메일 인증');
   });
 
@@ -248,5 +250,7 @@ describe('LoginPage — 첫 화면의 «Mac 앱 받기» (story #4763 AC6)', () 
   it('en.json에도 같은 키 셋이 있다(ko/en 짝)', async () => {
     const en = (await import('../../../messages/en.json')).default as { login: Record<string, string> };
     for (const k of ['macAppPitch', 'macAppGet', 'macAppGetHint', 'macAppWebSignup']) expect(typeof en.login[k]).toBe('string');
+    expect(en.login.macAppGetHint).toContain('Install'); // the file is a .dmg — installed first
+    expect(en.login.macAppGetHint).toContain('sign-up');
   });
 });

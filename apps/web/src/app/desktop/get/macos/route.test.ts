@@ -52,16 +52,25 @@ describe('GET /desktop/get/macos (public)', () => {
       const res = await GET();
       expect(res.status, String(url)).toBe(502);
       expect(res.headers.get('Location'), String(url)).toBeNull();
+      expect(await res.text(), String(url)).toBe(''); // never the manifest, never an error text
     }
   });
 
   it('no bucket configured · the manifest cannot be read · the body is not JSON · the body is not an object: 502, no redirect, no body', async () => {
-    delete process.env.DESKTOP_DOWNLOAD_BUCKET;
-    fetchManifest.mockResolvedValue(manifest(DMG)); // even with a good-looking manifest: no bucket named = nothing is ours
-    expect((await GET()).status).toBe(502);
+    for (const bucket of [undefined, '', 'a/b']) { // no bucket named = nothing is ours: 502, empty, and the manifest is not even read
+      if (bucket === undefined) delete process.env.DESKTOP_DOWNLOAD_BUCKET; else process.env.DESKTOP_DOWNLOAD_BUCKET = bucket;
+      fetchManifest.mockResolvedValue(manifest(DMG)); // even with a good-looking manifest
+      const res = await GET();
+      expect(res.status, String(bucket)).toBe(502);
+      expect(res.headers.get('Location'), String(bucket)).toBeNull();
+      expect(await res.text(), String(bucket)).toBe('');
+    }
+    expect(fetchManifest).not.toHaveBeenCalled();
     process.env.DESKTOP_DOWNLOAD_BUCKET = BUCKET;
     fetchManifest.mockRejectedValue(new Error('boom'));
-    expect((await GET()).status).toBe(502);
+    const failed = await GET();
+    expect(failed.status).toBe(502);
+    expect(await failed.text()).toBe(''); // the error text stays in the server log
     for (const body of ['not json', 'null', '[]', '"x"']) {
       fetchManifest.mockResolvedValue(body);
       const res = await GET();
