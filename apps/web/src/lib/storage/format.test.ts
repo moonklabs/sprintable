@@ -17,6 +17,16 @@ describe('[SID:4794] initials() of a name that starts with an emoji is a whole l
   });
 });
 
+describe('[SID:4794] initials() — the Latin two-word branch takes whole letters from each word, an emoji included', () => {
+  const LONE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+  it('a Latin first word that starts with an emoji, then another word; and an emoji as the second word', () => {
+    expect(initials('\u{1F469}\u200D\u{1F4BB}Dev Kim')).toBe('\u{1F469}\u200D\u{1F4BB}K'); // «👩‍💻Dev Kim»: the whole emoji, then K
+    expect(initials('Dev \u{1F469}\u200D\u{1F4BB}')).toBe('D\u{1F469}\u200D\u{1F4BB}'); // the second word's whole emoji
+    expect(initials('john smith')).toBe('JS');
+    for (const n of ['\u{1F469}\u200D\u{1F4BB}Dev Kim', 'Dev \u{1F469}\u200D\u{1F4BB}', '\u{1F600}a \u{1F600}b']) expect(LONE.test(initials(n)), n).toBe(false);
+  });
+});
+
 describe('initials() — 한글 다어절 이름은 어절 조합 없이 첫 어절 첫 글자만(#2986)', () => {
   it('「시스템 발행」이 「시발」이 아니라 「시」를 반환한다(실사고 재현 고정)', () => {
     expect(initials('시스템 발행')).toBe('시');

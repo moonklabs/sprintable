@@ -1,6 +1,7 @@
 // story 4711 — 처음 셋업 세 걸음(에이전트 → 폴더 → 시작)의 순수 규칙. 화면 · 글은 유나 `yuna/4711-copy-1016.md`, 서버는 confirm-solo(PR 5120).
 // 폴더 고르기는 앱의 맥 폴더 창이 한다(웹은 못 고른다) — 앱이 고른 결과를 주소의 `#` 조각으로 되돌려 열고, 웹은 «이름»만 서버에 보낸다(경로 0).
 import { DESKTOP_RUNTIMES, SOLO_TRACE_RUNTIME, isFolderRefused, type DesktopRuntime, type FolderRefusal, type SetupQuery, type SoloFolder, type SoloTraceFile } from './desktop-setup';
+import { graphemesWithin } from '@/lib/first-graphemes';
 
 /** The agent the card picks without being asked: the person's earlier pick (echoed by the app after the folder window) if it is still
  *  usable, else the first usable one in the fixed order (Claude Code → Codex). None usable → null (the card shows the no-agent block). */
@@ -68,7 +69,7 @@ export function readTypedAgent(setupId: string | null): { name: string | null; r
     const raw = setupId ? window.sessionStorage.getItem(TYPED_KEY + setupId) : null;
     const v = raw ? JSON.parse(raw) as { name?: unknown; role?: unknown } : null;
     if (!v) return { name: null, role: '' };
-    return { name: typeof v.name === 'string' ? v.name.slice(0, AGENT_NAME_MAX) : null, role: typeof v.role === 'string' ? v.role.slice(0, AGENT_ROLE_MAX) : '' };
+    return { name: typeof v.name === 'string' ? graphemesWithin(v.name, AGENT_NAME_MAX) : null, role: typeof v.role === 'string' ? graphemesWithin(v.role, AGENT_ROLE_MAX) : '' };
   } catch { return { name: null, role: '' }; }
 }
 export function writeTypedAgent(setupId: string | null, name: string | null, role: string): void {
@@ -87,7 +88,7 @@ export function shownProjectName(name: string, taken: readonly string[]): string
   const used = new Set(taken.map(norm));
   let n = 1;
   let candidate = name;
-  while (used.has(norm(candidate))) { n += 1; const tail = ` ${n}`; candidate = `${name.slice(0, Math.max(100 - tail.length, 0))}${tail}`; }
+  while (used.has(norm(candidate))) { n += 1; const tail = ` ${n}`; candidate = `${graphemesWithin(name, Math.max(100 - tail.length, 0))}${tail}`; }
   return candidate;
 }
 
@@ -170,7 +171,7 @@ export function soloOutcome(status: number, error: ErrorBody | undefined, retryA
     case 'has_organization': return { kind: 'has-org' };
     case 'pending_invites': return { kind: 'pending-invites' };
     case 'EMAIL_VERIFICATION_REQUIRED': return { kind: 'email-verify' };
-    case 'agent_name_taken': return { kind: 'name-taken', suggested: typeof error.suggested_name === 'string' && error.suggested_name.trim() ? error.suggested_name.trim().slice(0, AGENT_NAME_MAX) : null };
+    case 'agent_name_taken': return { kind: 'name-taken', suggested: typeof error.suggested_name === 'string' && error.suggested_name.trim() ? graphemesWithin(error.suggested_name.trim(), AGENT_NAME_MAX) : null };
     default: return { kind: 'generic' };
   }
 }
