@@ -127,15 +127,17 @@ export function ActivationChecklistBanner() {
     setDoneFor((current) => (current !== null && (hidden || current !== seenOpenKey) ? null : current));
   }, [hidden, seenOpenKey]);
   // the line's own clock runs only while the tab is visible (what was left is kept across a hide)
-  const doneRemaining = useRef(ACTIVATION_DONE_LINE_MS);
+  // the clock belongs to ONE line (an organization's): a line that replaces another (an organization switch) starts with its own full 10 s, never with what the old one had left
+  const doneClock = useRef<{ forOrg: string | null; left: number }>({ forOrg: null, left: ACTIVATION_DONE_LINE_MS });
   useEffect(() => {
-    if (!doneFor) { doneRemaining.current = ACTIVATION_DONE_LINE_MS; return; }
+    if (!doneFor) { doneClock.current = { forOrg: null, left: ACTIVATION_DONE_LINE_MS }; return; }
+    if (doneClock.current.forOrg !== doneFor) doneClock.current = { forOrg: doneFor, left: ACTIVATION_DONE_LINE_MS };
     if (!pageVisible || !readVisible()) return;
     const startedAt = Date.now();
-    const timer = setTimeout(() => setDoneFor(null), doneRemaining.current);
+    const timer = setTimeout(() => setDoneFor(null), doneClock.current.left);
     return () => {
       clearTimeout(timer);
-      doneRemaining.current = Math.max(0, doneRemaining.current - (Date.now() - startedAt));
+      doneClock.current.left = Math.max(0, doneClock.current.left - (Date.now() - startedAt));
     };
   }, [doneFor, pageVisible]);
   const doneLine = doneFor !== null && doneFor === seenOpenKey && completeHere;

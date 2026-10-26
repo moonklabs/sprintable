@@ -364,4 +364,22 @@ describe('[SID:4780] ActivationChecklistBanner — the finish is shown once', ()
     expect(done()).not.toBeNull(); // reverted (the old line's cleanup takes the new one down in the same commit) → null
     expect(localStore.has(SEEN('org-2'))).toBe(false); // spent by a line that was SHOWN
   });
+  it('the line that replaces another (an organization switch) gets its own full 10 s, not what the old one had left', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'Date'] });
+    localStore.set('sprintable_activation_checklist_complete:org-1', '1');
+    localStore.set('sprintable_activation_checklist_complete:org-2', '1');
+    localStore.set(SEEN('org-1'), '1');
+    localStore.set(SEEN('org-2'), '1');
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    await act(async () => { vi.advanceTimersByTime(ACTIVATION_DONE_LINE_MS - 100); }); // org-1's line has 100 ms left
+    mockOrg.orgId = 'org-2';
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    expect(done()).not.toBeNull();
+    await act(async () => { vi.advanceTimersByTime(5000); });
+    expect(done()).not.toBeNull(); // reverted (the clock is shared) → gone after the old line's last 100 ms
+    await act(async () => { vi.advanceTimersByTime(ACTIVATION_DONE_LINE_MS); });
+    expect(done()).toBeNull();
+  });
 });
