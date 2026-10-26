@@ -1,7 +1,7 @@
 // story #4714 — a start from the phone app: what the web asks the shell, what it posts, how every end maps to one outcome
 // (contract 02d2cf71 §14 v1.17 · v1.18 · Yuna 4714-copy-1017).
 import { describe, expect, it, vi } from 'vitest';
-import { beginFlow, checkStart, clearLeaving, endFlow, groupForPress, isLeaving, markLeaving, parseStartable, readStartable, startOnPhone, waitForSession, type Pending, type StartDeps } from './phone-start';
+import { beginFlow, checkStart, clearLeaving, endFlow, groupByComputer, groupForPress, isLeaving, markLeaving, parseStartable, readStartable, startOnPhone, waitForSession, type Pending, type StartDeps } from './phone-start';
 import type { PhoneAnswer } from './phone-bridge';
 
 let currentFetch: (url: string, init?: RequestInit) => Promise<Response> = async () => { throw new Error('no server'); };
@@ -157,6 +157,26 @@ describe('[4714] [결과 확인] never signs again and never starts twice', () =
     const followed = server(json(500), [json(200, { state: 'done' })]);
     await expect(checkStart({ ...pending, commandId: CMD }, d)).resolves.toEqual({ kind: 'started' });
     expect(followed.every((c) => c.init?.method !== 'POST')).toBe(true); // an id → followed, not re-posted
+  });
+});
+
+describe('[SID:4714] parseStartable keeps the one reason the server may give for an empty list', () => {
+  it('agents_hidden: message_policy is kept (and carried through the computer grouping); any other value is dropped', () => {
+    const base = { setup_id: SETUP, device_name: 'Mac', reachable: true, agents: [] };
+    expect(parseStartable({ remote_control: true, computers: [{ ...base, agents_hidden: 'message_policy' }] })?.computers[0]).toMatchObject({ agents_hidden: 'message_policy' });
+    expect(parseStartable({ remote_control: true, computers: [{ ...base, agents_hidden: 'something else' }] })?.computers[0]).not.toHaveProperty('agents_hidden');
+    expect(parseStartable({ remote_control: true, computers: [base] })?.computers[0]).not.toHaveProperty('agents_hidden');
+  });
+  it('two setups of one computer: the merged computer says «hidden» when any of them does and no agent is left', () => {
+    const e = (id: string, hidden?: boolean) => ({ setup_id: id, device_name: 'Mac', reachable: true, agents: [], computer_id: 'comp-1', ...(hidden ? { agents_hidden: 'message_policy' as const } : {}) });
+    expect(groupByComputer([e('s1'), e('s2', true)])[0]).toMatchObject({ agents_hidden: 'message_policy' });
+    expect(groupByComputer([e('s1'), e('s2')])[0]).not.toHaveProperty('agents_hidden');
+    // «no agent is left» is the whole claim: when another setup of the computer lists an agent, the merged computer does not say it
+    const withAgent = { ...e('s3'), agents: [{ agent_member_id: 'a-1', name: 'Dev', can_command: true, projects: [], running: null }] };
+    expect(groupByComputer([withAgent, e('s2', true)])[0]).not.toHaveProperty('agents_hidden');
+    // … whichever of them is first (the reachable one ranks first and is the base of the merged entry)
+    expect(groupByComputer([e('s2', true), withAgent])[0]).not.toHaveProperty('agents_hidden');
+    expect(groupByComputer([{ ...e('s4', true), reachable: true }, { ...withAgent, reachable: false }])[0]).not.toHaveProperty('agents_hidden');
   });
 });
 

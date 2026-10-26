@@ -105,7 +105,7 @@ function Computers({ computers, chatsHref, onRemoteOff }: { computers: Startable
     return (
       <Card className="break-keep p-6" data-testid="onboarding-phone-no-agent">
         {/* Yuna 4714 §5: the first-agent line is true only when the computer has no agent at all; agents it has but the person may not start get their own line */}
-        <p className="text-sm text-foreground">{computer.agents.length === 0 ? t('noAgent.line', { device: computer.device_name }) : t('noAgent.lineNoAccess', { device: computer.device_name })}</p>
+        <p className="text-sm text-foreground">{computer.agents.length === 0 ? (computer.agents_hidden === 'message_policy' ? t('noAgent.lineNoTalk', { device: computer.device_name }) : t('noAgent.line', { device: computer.device_name })) : t('noAgent.lineNoAccess', { device: computer.device_name })}</p>
       </Card>
     );
   }

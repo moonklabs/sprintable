@@ -118,73 +118,20 @@ async def _enforce_agent_creator_policy(
 
     human_user_ids: set[uuid.UUID] = {u for _, u in humans if u}
 
-    # E-MSG-POLICY S1: 각 에이전트의 message_policy_mode 별 인가
+    # E-MSG-POLICY S1: 각 에이전트의 message_policy_mode 별 인가 — story 4714: the decision is `agent_message_policy.policy_denial`, ONE function
+    # the phone's start list asks too (a person who cannot open this agent's conversation is not offered the agent)
+    from app.services.agent_message_policy import policy_denial
+
     for agent_tm in agent_tms:
-        mode = getattr(agent_tm, "message_policy_mode", None) or "creator_only"
-
-        if mode == "org_wide":
-            continue  # org 내 휴먼 전부 허용 (참가자는 이미 org-scoped) → 통과
-
-        if mode == "list":
-            allowed_ids = set((await db.execute(
-                select(AgentMessageAllowlist.allowed_id).where(
-                    AgentMessageAllowlist.agent_member_id == agent_tm.id
-                )
-            )).scalars().all())
-            for member_id, user_id in humans:
-                # creator는 모드 무관 항상 허용 (자기 에이전트 접근)
-                is_creator = user_id is not None and user_id == agent_tm.created_by
-                if member_id not in allowed_ids and not is_creator:
-                    logger.warning(
-                        "agent creator policy 403: agent_id=%s sender_id=%s reason=allowlist_miss member_id=%s",
-                        agent_tm.id, sender.id, member_id,
-                    )
-                    raise HTTPException(
-                        status_code=403,
-                        detail={
-                            "code": "AGENT_MESSAGE_POLICY_DENIED",
-                            "message": "Member is not in this agent's message allowlist",
-                            "details": {
-                                "agent_id": str(agent_tm.id),
-                                "member_id": str(member_id),
-                                "reason": "allowlist_miss",
-                            },
-                        },
-                    )
-            continue
-
-        # creator_only (default·기존 동작): 에이전트 creator가 참가자여야
-        if agent_tm.created_by is None:
+        denial = await policy_denial(db, agent_tm, humans)
+        if denial is not None:
             logger.warning(
-                "agent creator policy 403: agent_id=%s sender_id=%s reason=created_by_none",
-                agent_tm.id, sender.id,
+                "agent creator policy 403: agent_id=%s sender_id=%s reason=%s created_by=%s member_id=%s",
+                agent_tm.id, sender.id, denial["details"]["reason"], agent_tm.created_by, denial["details"].get("member_id"),
             )
             raise HTTPException(
                 status_code=403,
-                detail={
-                    "code": "AGENT_MESSAGE_POLICY_DENIED",
-                    "message": "Agent has no creator — conversation not allowed",
-                    "details": {
-                        "agent_id": str(agent_tm.id),
-                        "reason": "created_by_none",
-                    },
-                },
-            )
-        if agent_tm.created_by not in human_user_ids:
-            logger.warning(
-                "agent creator policy 403: agent_id=%s sender_id=%s reason=creator_not_participant created_by=%s",
-                agent_tm.id, sender.id, agent_tm.created_by,
-            )
-            raise HTTPException(
-                status_code=403,
-                detail={
-                    "code": "AGENT_MESSAGE_POLICY_DENIED",
-                    "message": "Agent's creator must be a participant in this conversation",
-                    "details": {
-                        "agent_id": str(agent_tm.id),
-                        "reason": "creator_not_participant",
-                    },
-                },
+                detail={"code": "AGENT_MESSAGE_POLICY_DENIED", "message": denial["message"], "details": denial["details"]},
             )
 
 

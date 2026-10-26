@@ -15,7 +15,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.member import Member
-from app.models.team import AgentMessageAllowlist
+from app.models.team import AgentMessageAllowlist, TeamMember
 
 
 async def ensure_creator_allowlisted(session: AsyncSession, agent_member_id: uuid.UUID) -> bool:
@@ -41,3 +41,42 @@ async def ensure_creator_allowlisted(session: AsyncSession, agent_member_id: uui
         .on_conflict_do_nothing(constraint="uq_agent_message_allowlist_pair")
     )
     return True
+
+
+async def policy_denial(db: AsyncSession, agent_tm: TeamMember, humans: list[tuple[uuid.UUID, uuid.UUID | None]]) -> dict | None:
+    """E-MSG-POLICY S1 — whether a conversation of this agent with these people (member id, user id) is refused, and why. `None` = allowed.
+
+    story 4714: moved here from `conversations._enforce_agent_creator_policy` unchanged, so the conversation endpoints and the phone's start list
+    (which must not offer an agent the person could not open a conversation with) decide with ONE function. The answer is the 403's `message` and
+    `details` (`reason`: allowlist_miss · created_by_none · creator_not_participant).
+
+    - org_wide: every person of the organization may.
+    - list: a person on the agent's allowlist, or the agent's creator (always).
+    - creator_only (the default): the agent's creator must be one of the people.
+    """
+    mode = getattr(agent_tm, "message_policy_mode", None) or "creator_only"
+    if mode == "org_wide":
+        return None
+    if mode == "list":
+        allowed_ids = set((await db.execute(
+            select(AgentMessageAllowlist.allowed_id).where(AgentMessageAllowlist.agent_member_id == agent_tm.id)
+        )).scalars().all())
+        for member_id, user_id in humans:
+            is_creator = user_id is not None and user_id == agent_tm.created_by  # the creator may in every mode
+            if member_id not in allowed_ids and not is_creator:
+                return {
+                    "message": "Member is not in this agent's message allowlist",
+                    "details": {"agent_id": str(agent_tm.id), "member_id": str(member_id), "reason": "allowlist_miss"},
+                }
+        return None
+    if agent_tm.created_by is None:
+        return {
+            "message": "Agent has no creator — conversation not allowed",
+            "details": {"agent_id": str(agent_tm.id), "reason": "created_by_none"},
+        }
+    if agent_tm.created_by not in {u for _, u in humans if u}:
+        return {
+            "message": "Agent's creator must be a participant in this conversation",
+            "details": {"agent_id": str(agent_tm.id), "reason": "creator_not_participant"},
+        }
+    return None
