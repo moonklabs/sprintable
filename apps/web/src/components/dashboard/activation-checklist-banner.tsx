@@ -122,9 +122,10 @@ export function ActivationChecklistBanner() {
     setDoneFor(seenOpenKey);
   }, [completeHere, hidden, pageVisible, seenOpenKey]);
   // the line is for the page and the organization it was set on: leaving either takes it down for good (coming back within the 10 s does not show it again — the mark is already spent)
+  // a functional update on purpose: in the same commit the finish effect above may have set the NEW organization's line — a check against the value this render saw would take that one down with the old one's
   useEffect(() => {
-    if (doneFor !== null && (hidden || doneFor !== seenOpenKey)) setDoneFor(null);
-  }, [doneFor, hidden, seenOpenKey]);
+    setDoneFor((current) => (current !== null && (hidden || current !== seenOpenKey) ? null : current));
+  }, [hidden, seenOpenKey]);
   // the line's own clock runs only while the tab is visible (what was left is kept across a hide)
   const doneRemaining = useRef(ACTIVATION_DONE_LINE_MS);
   useEffect(() => {

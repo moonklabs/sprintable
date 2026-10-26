@@ -349,4 +349,19 @@ describe('[SID:4780] ActivationChecklistBanner — the finish is shown once', ()
     expect(localStore.get(SEEN('org-1'))).toBe('1'); // reverted (the effect trusts the value the render read) → spent
     expect(done()).toBeNull();
   });
+  it('switching from an organization whose line is up to a complete one with its own mark shows the new organization\'s line (its mark is not spent for nothing)', async () => {
+    localStore.set('sprintable_activation_checklist_complete:org-1', '1');
+    localStore.set('sprintable_activation_checklist_complete:org-2', '1');
+    localStore.set(SEEN('org-1'), '1');
+    localStore.set(SEEN('org-2'), '1');
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    expect(done()).not.toBeNull(); // org-1's line
+    expect(localStore.has(SEEN('org-1'))).toBe(false);
+    mockOrg.orgId = 'org-2';
+    await act(async () => { root.render(wrap()); });
+    await flush();
+    expect(done()).not.toBeNull(); // reverted (the old line's cleanup takes the new one down in the same commit) → null
+    expect(localStore.has(SEEN('org-2'))).toBe(false); // spent by a line that was SHOWN
+  });
 });
