@@ -51,10 +51,9 @@ def test_dev_minimum_instances_in_the_workflow_that_overrides_the_defaults():
         assert _outputs(_DEV, name) == [value], (name, _outputs(_DEV, name))
 
 
-def test_prod_minimum_instances_are_still_set():
-    """the prod lines are not part of this story: not dropped, never zeroed by a careless edit (lowering prod to another non-zero number is a later story's business)"""
-    assert all(v >= 1 for v in _outputs(_PROD, "backend_min_instances")) and _outputs(_PROD, "backend_min_instances")
-    assert all(v >= 1 for v in _outputs(_PROD, "frontend_min_instances")) and _outputs(_PROD, "frontend_min_instances")
+def test_prod_minimum_instances_are_exactly_what_they_were():
+    """«prod is not touched» pinned literally (codex 4786): backend 3 · frontend 3. A later story that lowers prod changes these two numbers on purpose, here, in the same PR — never by a stray edit"""
+    assert _outputs(_PROD, "backend_min_instances") == [3] and _outputs(_PROD, "frontend_min_instances") == [3]
 
 
 def test_cloudbuild_defaults_for_the_dev_safe_fallback():
@@ -111,22 +110,45 @@ def test_dev_cpu_is_billed_only_while_a_request_is_served():
     assert 'if [ "${_DEPLOY_ENV}" != "dev" ]; then' in _CLOUDBUILD[: _CLOUDBUILD.index("gcloud run deploy sprintable-realtime-")]
 
 
-def _run_guard(deploy_env: str, explicit: str) -> subprocess.CompletedProcess:
-    env = {**os.environ, "_DEPLOY_ENV": deploy_env, "_MINS_EXPLICIT": explicit}
+def _run_guard(deploy_env: str, explicit: str, backend_min: str = "3", frontend_min: str = "3") -> subprocess.CompletedProcess:
+    env = {**os.environ, "_DEPLOY_ENV": deploy_env, "_MINS_EXPLICIT": explicit, "_BACKEND_MIN_INSTANCES": backend_min, "_FRONTEND_MIN_INSTANCES": frontend_min}
     return subprocess.run(["bash", "-c", _step_script("guard-prod-mins")], capture_output=True, text=True, env=env)
 
 
 def test_a_prod_build_that_does_not_state_its_minimums_fails_first():
-    """fail-closed: the dev-safe defaults must never reach prod by omission (a hand-run `gcloud builds submit`)"""
+    """fail-closed: the dev-safe defaults must never reach prod by omission (a hand-run `gcloud builds submit`), nor by saying «explicit» while leaving a minimum at 0 or garbage"""
     steps = yaml.safe_load(_CLOUDBUILD)["steps"]
-    assert steps[0]["id"] == "guard-prod-mins"  # first: nothing deploys after a failure
+    assert steps[0]["id"] == "guard-prod-mins"
     assert _run_guard("prod", "").returncode != 0 and _run_guard("prod", "false").returncode != 0
     assert _run_guard("prod", "true").returncode == 0
-    assert _run_guard("dev", "").returncode == 0  # dev is what the defaults are for
+    assert _run_guard("prod", "true", frontend_min="0").returncode != 0  # the dev-safe default of the frontend
+    assert _run_guard("prod", "true", backend_min="0").returncode != 0
+    assert _run_guard("prod", "true", backend_min="abc").returncode != 0  # fail closed on garbage too
+    assert _run_guard("dev", "", backend_min="2", frontend_min="0").returncode == 0  # dev is what the defaults are for
     assert re.findall(r"^  _MINS_EXPLICIT: '(.*)'$", _CLOUDBUILD, flags=re.M) == [""]  # a manual submit never inherits `true`
     assert 'echo "mins_explicit=true"' in _PROD and "mins_explicit" not in _DEV
     assert "V_MINS_EXPLICIT: ${{ steps.env.outputs.mins_explicit }}" in _WORKFLOW
     assert '_MINS_EXPLICIT=\\"${V_MINS_EXPLICIT}\\"' in _WORKFLOW
+
+
+def test_no_step_can_start_before_the_guard_has_passed():
+    """Cloud Build starts a step with `waitFor: ['-']` at once, in parallel with the guard: such a step could apply its side effect (a prod bucket's CORS) before the guard fails. Every step must reach the guard
+    through its dependencies (a step without waitFor waits for all earlier ones)."""
+    steps = yaml.safe_load(_CLOUDBUILD)["steps"]
+    ids = [s["id"] for s in steps]
+    assert ids[0] == "guard-prod-mins"
+    deps: dict[str, list[str]] = {}
+    for i, step in enumerate(steps):
+        wait = step.get("waitFor")
+        assert wait != ["-"], f"{step['id']} starts at once"
+        deps[step["id"]] = ids[:i] if wait is None else list(wait)
+
+    def reaches_guard(step_id: str, seen: frozenset = frozenset()) -> bool:
+        if step_id == "guard-prod-mins":
+            return True
+        return any(reaches_guard(d, seen | {step_id}) for d in deps[step_id] if d not in seen)
+
+    assert [i for i in ids if not reaches_guard(i)] == []
 
 
 def test_the_manual_scripts_agree_for_dev_and_leave_prod_alone():

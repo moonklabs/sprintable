@@ -385,16 +385,20 @@ substitutions:
   _BACKEND_REDIS_DUAL_PUBLISH_ENABLED: 'false'
 
 steps:
-  # story 4786 (E-INFRA-DIET): fail-closed — a prod build must carry its own minimum instances (`_MINS_EXPLICIT`, sent by the workflow's prod branch); the defaults are dev-safe. Runs first: nothing deploys after a failure.
+  # story 4786 (E-INFRA-DIET): fail-closed — a prod build must carry its own minimum instances (`_MINS_EXPLICIT`, sent by the workflow's prod branch; backend and frontend >= 1); the defaults are dev-safe. Runs first and every step that would otherwise start at once waits for it.
   - id: guard-prod-mins
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: bash
     args:
       - -c
       - |
-        if [ "${_DEPLOY_ENV}" = "prod" ] && [ "${_MINS_EXPLICIT}" != "true" ]; then
-          echo "FAIL: prod build without explicit minimum instances (_MINS_EXPLICIT=true) - the defaults are dev-safe (story 4786)"
-          exit 1
+        if [ "${_DEPLOY_ENV}" = "prod" ]; then
+          if [ "${_MINS_EXPLICIT}" = "true" ] && [ "${_BACKEND_MIN_INSTANCES}" -ge 1 ] && [ "${_FRONTEND_MIN_INSTANCES}" -ge 1 ]; then
+            :
+          else
+            echo "FAIL: a prod build needs explicit minimum instances (_MINS_EXPLICIT=true, backend and frontend >= 1) - the defaults are dev-safe (story 4786)"
+            exit 1
+          fi
         fi
 
   # story #2806 — GCS 첨부 버킷(sprintable-memo-attachments) CORS를 SSOT로 durable화. 실측
@@ -437,7 +441,7 @@ steps:
           *) echo "FAIL: x-goog-if-generation-match header missing from applied CORS — 서명 PUT preflight가 여전히 막힌다" >&2; exit 1 ;;
         esac
         echo "OK: dev Cloud Run regional origin + x-goog-if-generation-match header confirmed in applied CORS"
-    waitFor: ['-']
+    waitFor: ['guard-prod-mins']  # story 4786: nothing starts before the prod guard has passed
 
   # story #2887 — avatar 전용 버킷 CORS. CORS json(infra/gcs-avatars-cors.json)
   # 자체는 dev/prod origin을 이미 다 실은 공용 파일(memo-attachments와 동일 관례) — 버킷명만
@@ -476,7 +480,7 @@ steps:
           esac
           echo "OK: dev Cloud Run regional origin confirmed in applied CORS"
         fi
-    waitFor: ['-']
+    waitFor: ['guard-prod-mins']  # story 4786: nothing starts before the prod guard has passed
 
   # story 620beefc(Threads 이미지 발행, 페드루 리뷰 B5) — 채널 미디어 전용 버킷 CORS.
   # avatar #2887 원래 형태(story #3117 이전, dev 전용)와 동형 — prod 버킷 미프로비저닝
@@ -513,7 +517,7 @@ steps:
           *) echo "FAIL: x-goog-if-generation-match header missing from applied CORS — 서명 PUT preflight가 여전히 막힌다" >&2; exit 1 ;;
         esac
         echo "OK: dev Cloud Run regional origin + x-goog-if-generation-match header confirmed in applied CORS"
-    waitFor: ['-']
+    waitFor: ['guard-prod-mins']  # story 4786: nothing starts before the prod guard has passed
 
   # ─── Frontend (Next.js standalone) ────────────────────────────────────────
   # story #3947(2026-09-16, 페드루 PO 판정) — `_NEXT_PUBLIC_APP_URL`은 cloud-build.yml의
@@ -838,7 +842,7 @@ steps:
           echo "      아직 모른다(503 fail-closed). 위 URL을 substitutions에 채워 재배포할 것"
           echo "      (부트스트랩 절차, 위 substitutions 섹션 주석 참고)."
         fi
-    waitFor: ['-']
+    waitFor: ['guard-prod-mins']  # story 4786: nothing starts before the prod guard has passed
 
   - id: deploy-backend
     name: gcr.io/google.com/cloudsdktool/cloud-sdk

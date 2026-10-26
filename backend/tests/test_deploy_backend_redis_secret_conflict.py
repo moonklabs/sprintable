@@ -311,6 +311,8 @@ _DECLARED_SUBSTITUTIONS = {
     "_FRONTEND_MIN_INSTANCES", "_FRONTEND_MAX_INSTANCES", "_LICENSE_CONSENT",
     # story 4786 (E-INFRA-DIET) — extra `gcloud run deploy` flags for the CPU allocation (dev `--cpu-throttling`, prod empty); backend + frontend deploy steps.
     "_CPU_FLAGS",
+    # story 4786 — the prod fail-closed guard step reads it (first step).
+    "_MINS_EXPLICIT",
     # story aec3ec09([P1 후속] OAuth 핸드오프 활성화) — LICENSE_CONSENT와 동일 배선 클래스.
     "_FIREBASE_OAUTH_HANDOFF_ENABLED",
     "_NEXT_PUBLIC_APP_URL", "_ADMIN_OPERATOR_AUDIENCE", "_ADMIN_OPERATOR_ALLOWLIST",
@@ -368,6 +370,8 @@ _BASH_ENTRYPOINT_STEP_IDS = (
     # 추가할 것). ${_DEPLOY_ENV}/${_GCS_CHANNEL_MEDIA_BUCKET} 둘 다 이미 _DECLARED_
     # SUBSTITUTIONS에 있어 스캔 대상에 넣어도 오탐 없음(사전 확認).
     "apply-gcs-channel-media-cors",
+    # story 4786 — the prod fail-closed guard (first step).
+    "guard-prod-mins",
 )
 
 
