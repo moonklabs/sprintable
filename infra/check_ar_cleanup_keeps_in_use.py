@@ -152,14 +152,32 @@ def _serving_revision_names(services: Any) -> set[str]:
     return names
 
 
-def _unresolved_tags(found: list[Ref]) -> bool:
-    """태그로 배포된 이미지가 한 개면 해결된 digest가 있어야 한다. 둘 이상이면 짝지을 수 없어 항상 «모름»이다(digest로 고정 배포한 이미지는 태그가 아니라 세지 않는다)."""
+_SHA = re.compile(r"sha256:[0-9a-f]{64}")
+
+
+def _status_digest(rev: dict) -> str | None:
+    """리비전이 실제로 쥔 digest — `status.imageDigest` 필드에서만 읽는다(주석 · 환경 변수 속 아무 SHA가 «해결된 digest»인 척하지 못하게)."""
+    status = rev.get("status")
+    value = status.get("imageDigest") if isinstance(status, dict) else None
+    m = _SHA.search(value) if isinstance(value, str) else None
+    return m.group(0) if m else None
+
+
+def _unresolved_tags(rev: dict, found: list[Ref]) -> bool:
+    """태그로 배포된 이미지가 있으면 «모르는» 경우를 모두 true로 돌려준다:
+    · 이미지 패키지가 둘 이상이거나 태그가 둘 이상(컨테이너 여럿 — 하나뿐인 `status.imageDigest`를 짝지을 수 없다)
+    · `status.imageDigest` 필드가 없다
+    · 그 digest와 다른 digest가 같은 리비전에 더 있다(digest로 고정된 컨테이너나 무관한 SHA — 어느 것이 태그의 것인지 가릴 수 없다)"""
     tagged = {(r["package"], r["tag"]) for r in found if r["tag"]}
-    digests = {r["digest"] for r in found if r["digest"]}
+    if not tagged:
+        return False
     packages = {r["package"] for r in found if r["package"]}
     if len(tagged) > 1 or len(packages) > 1:
-        return True  # `status.imageDigest`는 하나뿐이라 컨테이너가 여럿이면(이미지 패키지가 둘 이상) 어느 digest가 어느 컨테이너의 것인지 짝지을 수 없다 — 모르면 실패
-    return bool(tagged) and not digests
+        return True
+    resolved = _status_digest(rev)
+    if resolved is None:
+        return True
+    return any(r["digest"] and r["digest"] != resolved for r in found)
 
 
 def collect_in_use_refs(
@@ -187,7 +205,7 @@ def collect_in_use_refs(
                     found = refs_in(json.dumps(rev))
                     if not found:
                         problems.append(f"서빙 중 리비전 {_name_of(rev)}에서 이미지 참조를 못 찾음")
-                    elif _unresolved_tags(found):
+                    elif _unresolved_tags(rev, found):
                         # 태그로 배포된 이미지마다 실제로 쥔 digest(`status.imageDigest`)를 모르면, 태그가 그 뒤 옮겨졌을 때 옛 이미지를 못 지킨다 — 모르면 실패
                         problems.append(f"서빙 중 리비전 {_name_of(rev)}에 태그로 배포된 이미지가 있는데 그만큼의 status.imageDigest가 없다(어느 digest를 쥐었는지 모른다)")
                     refs += found
@@ -195,7 +213,7 @@ def collect_in_use_refs(
             warnings.append("서비스 JSON에서 서빙 중 리비전을 못 읽어 모든 리비전을 사용 중으로 셌다(안전한 쪽).")
             for rev in revs:
                 found = refs_in(json.dumps(rev))
-                if _unresolved_tags(found):
+                if _unresolved_tags(rev, found):
                     problems.append(f"리비전 {_name_of(rev) or '?'}에 태그로 배포된 이미지가 있는데 그만큼의 status.imageDigest가 없다(서빙 여부를 몰라 모든 리비전을 센다)")
                 refs += found
     for job in _items(jobs) if jobs is not None else []:

@@ -273,6 +273,21 @@ def test_empty_jobs_unreadable_times_and_a_polluted_base_policy_are_bad_input(tm
     assert gate.main(d.argv("--base-policy", str(base))) == 2 and not d.out.exists()
 
 
+def test_a_tagged_container_next_to_another_digest_of_the_same_package_is_ambiguous():
+    """the false green the fifth review found: `backend:latest` plus a pinned `backend@sha256:other` (or an unrelated SHA in an annotation) must not count as «the tag's digest is known»;
+    only the `status.imageDigest` field resolves a tag, and any other digest in the same revision makes it ambiguous"""
+    service = [_service("s", "rev-2", f"{HOST}/backend:backend-tag2")]
+    pinned = {"metadata": {"name": "rev-2"}, "spec": {"containers": [{"image": f"{HOST}/backend:backend-tag2"}, {"image": f"{HOST}/backend@{_digest(7)}"}]}, "status": {"imageDigest": _digest(2)}}
+    _refs, _warnings, problems = gate.collect_in_use_refs(service, [pinned])
+    assert problems, "a same-package pinned container next to a tagged one"
+    annotated = {"metadata": {"name": "rev-2", "annotations": {"note": _digest(9)}}, "spec": {"containers": [{"image": f"{HOST}/backend:backend-tag2"}]}}
+    _refs, _warnings, problems = gate.collect_in_use_refs(service, [annotated])
+    assert problems, "an unrelated SHA in an annotation is not the resolved digest"
+    clean = {"metadata": {"name": "rev-2"}, "spec": {"containers": [{"image": f"{HOST}/backend:backend-tag2"}]}, "status": {"imageDigest": f"{HOST}/backend@{_digest(2)}"}}
+    _refs, _warnings, problems = gate.collect_in_use_refs(service, [clean])
+    assert not problems  # the real shape: the resolved digest comes as a full pinned reference in `status.imageDigest`
+
+
 def test_a_ref_without_tag_or_digest_means_latest():
     refs = gate.refs_in(json.dumps({"image": f"{HOST}/backend"}))
     assert [(r["package"], r["tag"], r["digest"]) for r in refs] == [("backend", "latest", None)]
