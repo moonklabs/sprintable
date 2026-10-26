@@ -222,7 +222,7 @@ def test_deploy_gce_dev_secret_pairs_exact():
     새 계약. 정상 시크릿→env 바인딩은 전부 보존."""
     cfg = _resolve(_DEPLOY_GCE, "dev")
     assert cfg["SECRET_PAIRS"] == (
-        "DATABASE_URL_DEV:DATABASE_URL JWT_SECRET:JWT_SECRET GOOGLE_CLIENT_ID:GOOGLE_CLIENT_ID "
+        "DATABASE_URL_DEV:DATABASE_URL JWT_SECRET_DEV:JWT_SECRET GOOGLE_CLIENT_ID:GOOGLE_CLIENT_ID "  # story 4798: one signing secret per environment
         "GOOGLE_CLIENT_SECRET:GOOGLE_CLIENT_SECRET RESEND_API_KEY:RESEND_API_KEY "
         "EMAIL_FROM:EMAIL_FROM github-webhook-secret:GITHUB_WEBHOOK_SECRET "
         "cron-secret:CRON_SECRET github-app-client-secret-dev:GITHUB_APP_CLIENT_SECRET "
