@@ -79,6 +79,18 @@ describe('[SID:4773] TodayPairCard — a phone paired with nothing gets one line
     }
   });
 
+  it('[4780] on the Today address the app really has with TODAY_V3 off (/org-briefing) the link carries it too — the card lives on that screen', async () => {
+    window.history.pushState({}, '', '/org-briefing?p=p1');
+    try {
+      server({ devices: [] });
+      await draw(async () => key());
+      const link = q('today-pair-link') as HTMLAnchorElement;
+      expect(link.getAttribute('href')).toBe('/desktop/pair?from=%2Forg-briefing%3Fp%3Dp1&p=p1'); // reverted (the allow-list names only /today) → '/desktop/pair?p=p1'
+    } finally {
+      window.history.pushState({}, '', '/');
+    }
+  });
+
   it('the list holds another phone but not this one (its check number is not on it) → still the card', async () => {
     server({ devices: [{ id: 'd9', confirm_number: '111 222' }] });
     await draw(async () => key());
