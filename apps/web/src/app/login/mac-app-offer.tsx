@@ -5,8 +5,9 @@
 // The «받기» path exists only where the download does (`DESKTOP_DOWNLOAD_ENABLED` is read on the SERVER — not in the client bundle — so the server layout of /login hands the answer
 // down through this context; with no provider, as in a test of the page alone or any other tree, the offer is off). It is drawn on a Mac only: the user agent is read after mount
 // (no server/client mismatch) — a phone or another OS sees the login as before.
-// The link is a plain sign-up: a new account has no organization, so the signed-in area sends it to the onboarding (a `next` to the download page would be dropped there), which stands behind the
-// e-mail check, makes the organization and then opens on the app's download — that is why the hint says «메일 인증을 마치면», not «바로».
+// «받기» is the file itself, no sign-up in between (PO 10-26: the download card used to stand behind the account + the e-mail check — the «끊김» the comparison report named): a plain link to the
+// public redirect /desktop/get/macos (a route, so a plain <a>: no client navigation, no prefetch). The sign-up then happens in the app — it opens the browser on its own — which is what the hint
+// says; the web sign-up stays as the second link for a person who would rather start there (it reaches the same download after the e-mail check, on the onboarding).
 import { createContext, useContext, useSyncExternalStore, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
@@ -33,10 +34,14 @@ export function MacAppOffer({ suppressed }: { suppressed: boolean }) {
   return (
     <Card className="space-y-2 p-3 text-center" data-testid="login-mac-app-offer">
       <p className="break-keep text-sm text-foreground">{t('macAppPitch')}</p>
-      <Link href="/register" className={`${buttonVariants({ variant: 'outline' })} w-full min-h-[44px]`}>
+      {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- a file download (a route handler that redirects to the file), not a page: <Link> would try a client navigation to it */}
+      <a href="/desktop/get/macos" className={`${buttonVariants({ variant: 'outline' })} w-full min-h-[44px]`}>
         {t('macAppGet')}
-      </Link>
+      </a>
       <p className="break-keep text-xs text-muted-foreground">{t('macAppGetHint')}</p>
+      <Link href="/register" className="inline-block min-h-[44px] break-keep px-2 text-xs text-muted-foreground underline underline-offset-2">
+        {t('macAppWebSignup')}
+      </Link>
     </Card>
   );
 }

@@ -138,6 +138,15 @@ describe('proxy', () => {
     expect(response.status).toBe(200);
   });
 
+  it('story #4763: /desktop/get/macos is public (the first screen\'s «Mac 앱 받기» for a person with no account) — EXACT: the card\'s manifest and any path under it stay behind the session', async () => {
+    expect((await middleware(makeRequest('/desktop/get/macos'))).status).toBe(200);
+    for (const gated of ['/desktop/downloads/macos.json', '/desktop/get/macos/extra', '/desktop/get/macos.json', '/desktop/get']) {
+      const response = await middleware(makeRequest(gated));
+      expect(response.status, gated).toBe(307);
+      expect(response.headers.get('location') ?? '', gated).toContain('/login');
+    }
+  });
+
   it('treats /native/oauth-return as public (no cookie) — [P1] 실측(next start+curl)으로 발견: 누락 시 307-to-login으로 폴백 페이지가 렌더되지 않았다', async () => {
     // native 핸드오프 콜백은 이 응답에 웹 세션 쿠키를 세팅하지 않으므로(격리 rail) 쿠키 없는
     // 요청이 정상 케이스 — /auth/native와 동일 결함 클래스.

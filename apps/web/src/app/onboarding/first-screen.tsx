@@ -35,11 +35,13 @@ interface FirstScreenProps {
   orgName: string | null;
   /** story 4766: the landing the web way's fold ends on (the person's «오늘»/«대시보드» word follows this) */
   todayV3Enabled?: boolean;
+  /** story 4780: the Today address the server resolved from the nav flags (never a literal here) — the phone's pairing screen [Close] goes there: this screen is not worth coming back to once the phone is paired, Today's checklist goes on */
+  todayHref?: string;
   /** «지금 받지 않아도 돼요 …» [오늘로 가기] */
   onFinish: () => void;
 }
 
-export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = false, orgName, todayV3Enabled = false, onFinish }: FirstScreenProps) {
+export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = false, orgName, todayV3Enabled = false, todayHref, onFinish }: FirstScreenProps) {
   const t = useTranslations('onboarding.first');
   const to = useTranslations('onboarding');
   // the device is read after mount (null on the server and before the first read — no hydration mismatch), as the card does
@@ -63,7 +65,7 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
   if (inPhoneApp) {
     return (
       <div className="space-y-4" data-testid="onboarding-first-phone-app">
-        <PhoneFirstScreen orgId={orgId} chatsHref={chatsHref} macDownloadEnabled={macDownloadEnabled} />
+        <PhoneFirstScreen orgId={orgId} chatsHref={chatsHref} macDownloadEnabled={macDownloadEnabled} returnHref={todayHref} />
         <p className="break-keep border-t border-border pt-4 text-xs text-muted-foreground" data-testid="onboarding-first-later">
           {to('download.laterNote')}{' '}
           <Button variant="link" size="sm" className="h-auto px-0 py-0 text-xs" onClick={finish} disabled={advancedBusy} data-testid="onboarding-first-finish">

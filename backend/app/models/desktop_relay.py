@@ -6,7 +6,7 @@ two together (one changed alone → RED)."""
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -102,6 +102,8 @@ class DesktopSession(Base):
         CheckConstraint(f"first_screen_ask IS NULL OR {_in('first_screen_ask', SESSION_FIRST_SCREEN_ASKS)}", name="ck_desktop_sessions_first_screen_ask"),
         # story #4779 (0466): the work hold's closed set in the DB too
         CheckConstraint(f"work_hold_why IS NULL OR {_in('work_hold_why', SESSION_WORK_HOLD_WHYS)}", name="ck_desktop_sessions_work_hold_why"),
+        # story 4781 (0467): the sweep reads only the few rows that carry a waiting lift — a partial index keeps that read off the whole table
+        Index("ix_desktop_sessions_limit_cleared_at", "limit_cleared_at", postgresql_where=text("limit_cleared_at IS NOT NULL")),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -145,6 +147,8 @@ class DesktopSession(Base):
     first_screen_ask: Mapped[str | None] = mapped_column(Text, nullable=True)
     # story #4779 (0466): why work waits for this agent (`tools_unconfirmed` · `tools_failed`) — set by the report that carries `work_hold`
     work_hold_why: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story 4781 (AC2): when the report that took the limit away came — the «working again» notice waits for the hold; NULL = none waiting
+    limit_cleared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class DesktopCommand(Base):

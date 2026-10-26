@@ -50,6 +50,7 @@ export const EXEMPT: ReadonlyArray<{ file: string; texts?: string[]; props?: str
   { file: 'app/auth/link/route.ts', reason: '서버 리다이렉트(로그인 뒤 돌아올 next) — 서버엔 클라이언트의 목표 프로젝트가 없다(들어온 주소의 p는 이어질 수 있음)' },
   { file: 'app/dashboard/settings/page.tsx', reason: '서버 리다이렉트(옛 주소 → /settings) — 서버엔 클라이언트의 목표 프로젝트가 없다(착지 뒤 셸이 정한다)' },
   { file: 'app/(authenticated)/organization/connectors/page.tsx', reason: '서버 리다이렉트(옛 주소) — 서버엔 클라이언트의 목표 프로젝트가 없다(착지 뒤 셸이 정한다)' },
+  { file: 'app/login/mac-app-offer.tsx', texts: ['/desktop/get/macos'], reason: '로그인 전 첫 화면의 «Mac 앱 받기» — 파일을 내려주는 공개 라우트 핸들러로 가는 링크(프로젝트 페이지가 아님 · 로그인 전이라 실을 프로젝트도 없다)' },
   { file: 'app/register/page.tsx', reason: '가입 직후 첫 착지 — 아직 프로젝트 컨텍스트가 없어 실을 값이 없다' },
   { file: 'app/verify-email/page.tsx', reason: '이메일 확인 직후 첫 착지 — 아직 프로젝트 컨텍스트가 없어 실을 값이 없다' },
   { file: 'components/auth/session-expired-dialog.tsx', reason: '재로그인 뒤 돌아올 경로(현재 주소 폴백) — 로그인 전이라 실을 값이 없다' },

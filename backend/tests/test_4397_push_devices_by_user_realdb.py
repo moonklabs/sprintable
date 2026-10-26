@@ -160,7 +160,7 @@ async def test_targets_carry_device_id_and_platform_for_receipts(monkeypatch):
         monkeypatch.setattr(settings, "push_devices_by_user", True)
         async with Session() as s:
             found = await expo_push._fetch_expo_push_targets(s, ids["org_b"], [ids["om_u_b"]])
-        assert found == [{"expo_push_token": token, "id": device.id, "platform": "android"}]
+        assert found == [{"expo_push_token": token, "id": device.id, "platform": "android", "member_id": ids["om_u_b"]}]  # (4781: «for whom» — the recipient, not the org A member the device is homed under)
 
 
 async def test_a_late_receipt_for_another_orgs_notification_switches_off_the_device(monkeypatch):

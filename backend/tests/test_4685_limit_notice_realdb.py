@@ -36,7 +36,10 @@ LOOKS = {"self_resume": "unknown", "looks": True}  # the 10-13 shape: Claude, re
 
 
 @pytest.fixture(autouse=True)
-async def _remote_control_on_and_korean(world):
+async def _remote_control_on_and_korean(world, monkeypatch):
+    # story 4781: «working again» now waits LIFT_HOLD_SEC for the limit to stay gone; THESE tests are about who is told what and when it lifts — the hold has its own file
+    # (test_4781_limit_hold_realdb.py) — so here the hold is 0: the lift is told by the report that clears the limit, as it was.
+    monkeypatch.setattr("app.services.desktop_limit_notice.LIFT_HOLD_SEC", 0)
     await _sql(f"UPDATE organizations SET remote_control_enabled_at = now() WHERE id = '{ORG}'",
                f"UPDATE users SET locale = 'ko' WHERE id = '{OWNER}'")
     yield
