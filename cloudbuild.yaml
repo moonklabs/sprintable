@@ -50,6 +50,9 @@ substitutions:
   # 미프로비저닝이라 prod엔 이 키 자체가 없어야 안전(GCS_CHANNEL_MEDIA_BUCKET 미설정 시
   # ChannelImageStorageNotConfiguredError→503 fail-closed, avatar_upload.py와 동형).
   _GCS_CHANNEL_MEDIA_BUCKET: sprintable-channel-media-dev
+  # story 4798 — the dev attachments bucket: dev has its own (dev and prod used to share `sprintable-memo-attachments`).
+  # dev names it on the backend AND the frontend (both read GCS_MEMO_ATTACHMENTS_BUCKET) and applies the attachments CORS to it; prod names nothing and keeps the code default `sprintable-memo-attachments`.
+  _GCS_MEMO_ATTACHMENTS_BUCKET: sprintable-memo-attachments-dev
   # story #2771(pptx 서버 변환, doc 84ef0cb7 §7-4) — office-converter는 아래 deploy-office-
   # converter 스텝이 매 배포마다 재생성/갱신한다. **부트스트랩 완료(페드루군, 2026-08-19)**:
   # 최초 배포가 --port 누락(Gotenberg는 3000, Cloud Run 헬스체크 기본 8080)으로 Ready 실패
@@ -408,8 +411,8 @@ steps:
         fi
 
   # story #2806 — GCS 첨부 버킷(sprintable-memo-attachments) CORS를 SSOT로 durable화. 실측
-  # (디디군, 2026-08-19): 이 버킷은 dev/prod 공유(GCS_MEMO_ATTACHMENTS_BUCKET override가
-  # 배포 SSOT 어디에도 없어 코드 기본값 하나를 양쪽이 씀) — 지금까지 CORS가 배포 SSOT에
+  # (디디군, 2026-08-19): 이 버킷은 dev/prod 공유였다(GCS_MEMO_ATTACHMENTS_BUCKET override가
+  # 배포 SSOT 어디에도 없어 코드 기본값 하나를 양쪽이 씀 — story 4798부터 dev는 자기 버킷, 아래 스텝은 환경별 버킷에) — 지금까지 CORS가 배포 SSOT에
   # 선언된 적이 0건(레포 전수 grep)이라 브라우저 signed-URL fetch(docx-preview류, PDF는
   # iframe이라 무영향)가 origin 불문 전부 차단돼 있었다. `gcloud storage buckets update
   # --cors-file=`은 **전체 교체**라 매 배포 재실행에도 멱등(파일 내용이 그대로면 결과도
@@ -429,11 +432,13 @@ steps:
       - -c
       - |
         set -euo pipefail
-        gcloud storage buckets update gs://sprintable-memo-attachments \
+        BUCKET=sprintable-memo-attachments
+        [ "${_DEPLOY_ENV}" == "prod" ] || BUCKET="${_GCS_MEMO_ATTACHMENTS_BUCKET}"
+        gcloud storage buckets update "gs://$${BUCKET}" \
           --cors-file=infra/gcs-attachments-cors.json \
           --quiet
-        applied=$(gcloud storage buckets describe gs://sprintable-memo-attachments --format='value(cors_config)')
-        echo "sprintable-memo-attachments CORS applied = $${applied}"
+        applied=$(gcloud storage buckets describe "gs://$${BUCKET}" --format='value(cors_config)')
+        echo "$${BUCKET} CORS applied = $${applied}"
         case "$${applied}" in
           *https://sprintable-frontend-dev-787818285179.asia-northeast3.run.app*) ;;
           *) echo "FAIL: dev Cloud Run regional origin missing from applied CORS — 배포 검증 실패" >&2; exit 1 ;;
@@ -754,7 +759,7 @@ steps:
         if [ "${_DEPLOY_ENV}" == "dev" ]; then
           # #4398 — 사용자 IP 머리글 서명 비밀(백엔드와 같은 값 · dev만 · prod는 승격 때).
           FE_SECRETS="--update-secrets=EDGE_CLIENT_IP_SECRET=EDGE_CLIENT_IP_SECRET_DEV:latest"
-          ENV_VARS="$${ENV_VARS},DESKTOP_DOWNLOAD_ENABLED=true"
+          ENV_VARS="$${ENV_VARS},DESKTOP_DOWNLOAD_ENABLED=true,GCS_MEMO_ATTACHMENTS_BUCKET=${_GCS_MEMO_ATTACHMENTS_BUCKET}"
           # story 4696 — the download card's bucket is the SERVER's setting (apps/web lib/desktop-downloads.ts has no default: an
           # unset one closes the card, so a prod that does not name its own can never link dev's app). dev: the dev bucket.
           ENV_VARS="$${ENV_VARS},DESKTOP_DOWNLOAD_BUCKET=sprintable-desktop-releases-dev"
@@ -876,7 +881,7 @@ steps:
         fi
         # story 620beefc — GCS_CHANNEL_MEDIA_BUCKET(dev만).
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
-          ENV_VARS="$${ENV_VARS},GCS_CHANNEL_MEDIA_BUCKET=${_GCS_CHANNEL_MEDIA_BUCKET}"
+          ENV_VARS="$${ENV_VARS},GCS_CHANNEL_MEDIA_BUCKET=${_GCS_CHANNEL_MEDIA_BUCKET},GCS_MEMO_ATTACHMENTS_BUCKET=${_GCS_MEMO_ATTACHMENTS_BUCKET}"
         fi
         # story 5b27b32f — SANDBOX_CHANNEL_ENABLED(dev만).
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
