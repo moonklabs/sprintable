@@ -8,12 +8,13 @@ vi.mock('@/lib/desktop-downloads', async (importOriginal) => {
 });
 
 import { GET } from './route';
+import { clearDownloadTargetCache } from '@/lib/desktop-download-target';
 
 const BUCKET = 'sprintable-desktop-releases-dev';
 const DMG = `https://storage.googleapis.com/${BUCKET}/macos-electron/0.2.0/Sprintable-Dev-Setup-f0a17c077-arm64.dmg`;
 const manifest = (url: unknown) => JSON.stringify({ product: 'Sprintable Dev Setup', version: '0.2.0', build: 'f0a17c077', url, sha256: 'ff'.repeat(32), size: 1, pub_date: '2026-10-25T23:29:54.456Z' });
 
-beforeEach(() => { process.env.DESKTOP_DOWNLOAD_ENABLED = 'true'; process.env.DESKTOP_DOWNLOAD_BUCKET = BUCKET; vi.spyOn(console, 'error').mockImplementation(() => {}); });
+beforeEach(() => { clearDownloadTargetCache(); process.env.DESKTOP_DOWNLOAD_ENABLED = 'true'; process.env.DESKTOP_DOWNLOAD_BUCKET = BUCKET; vi.spyOn(console, 'error').mockImplementation(() => {}); });
 afterEach(() => { delete process.env.DESKTOP_DOWNLOAD_ENABLED; delete process.env.DESKTOP_DOWNLOAD_BUCKET; fetchManifest.mockReset(); vi.restoreAllMocks(); });
 
 describe('GET /desktop/get/macos (public)', () => {
