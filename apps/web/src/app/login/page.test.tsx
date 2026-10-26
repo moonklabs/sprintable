@@ -206,14 +206,19 @@ const offer = () => container.querySelector('[data-testid="login-mac-app-offer"]
 describe('LoginPage — 첫 화면의 «Mac 앱 받기» (story #4763 AC6)', () => {
   afterEach(() => { vi.restoreAllMocks(); });
 
-  it('받기가 있는 배포 · Mac: 제품 한 문장 + «Mac 앱 받기»(가입으로 이어짐 · 가입 뒤 온보딩이 받는 화면으로) + 메일 인증을 말하는 한 줄 안내', async () => {
+  it('받기가 있는 배포 · Mac: 제품 한 문장 + «Mac 앱 받기» = 가입 없이 파일로 가는 공개 링크(가입은 앱에서 이어짐) + 웹 가입은 둘째 링크로 남음 (story #4763 · PO 10-26)', async () => {
     await mountWithOffer(true);
     expect(offer()).not.toBeNull();
     expect(offer()?.textContent).toContain(koMessages.login.macAppPitch);
     expect(offer()?.textContent).toContain(koMessages.login.macAppGetHint);
-    const link = [...(offer()?.querySelectorAll('a') ?? [])].find((a) => a.textContent === koMessages.login.macAppGet);
-    expect(link?.getAttribute('href')).toBe('/register'); // a `next` to the download page would be dropped by the signed-in area (a new account has no organization → onboarding)
-    expect(koMessages.login.macAppGetHint).toContain('메일 인증'); // not «바로»: the onboarding stands behind the e-mail check
+    const links = [...(offer()?.querySelectorAll('a') ?? [])];
+    const get = links.find((a) => a.textContent === koMessages.login.macAppGet);
+    expect(get?.getAttribute('href')).toBe('/desktop/get/macos'); // the file itself — not the sign-up (the download used to stand behind the account + the e-mail check)
+    const web = links.find((a) => a.textContent === koMessages.login.macAppWebSignup);
+    expect(web?.getAttribute('href')).toBe('/register'); // the web sign-up stays for a person who would rather start there
+    expect(links.filter((a) => a.getAttribute('href') === '/register')).toHaveLength(1);
+    expect(koMessages.login.macAppGetHint).toContain('앱'); // the sign-up continues in the app: the hint no longer promises an e-mail check before the file
+    expect(koMessages.login.macAppGetHint).not.toContain('메일 인증');
   });
 
   it('받기가 없는 배포(공증 전 prod · 컨텍스트 없음): 아무것도 안 뜬다 — 없는 길을 약속하지 않음', async () => {
@@ -242,6 +247,6 @@ describe('LoginPage — 첫 화면의 «Mac 앱 받기» (story #4763 AC6)', () 
 
   it('en.json에도 같은 키 셋이 있다(ko/en 짝)', async () => {
     const en = (await import('../../../messages/en.json')).default as { login: Record<string, string> };
-    for (const k of ['macAppPitch', 'macAppGet', 'macAppGetHint']) expect(typeof en.login[k]).toBe('string');
+    for (const k of ['macAppPitch', 'macAppGet', 'macAppGetHint', 'macAppWebSignup']) expect(typeof en.login[k]).toBe('string');
   });
 });
