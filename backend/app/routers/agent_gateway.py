@@ -361,9 +361,12 @@ def wake_agent(agent_id: str, seq: int, _from_listener: bool = False) -> None:
                 event_broker.publish("agent", agent_id, "__wake__", {"__wake__": True, "seq": seq})
             )
         else:
-            # 기존 경로(flag off·무회귀) — prod 커넥션 누수 근본fix(2026-07-08)와 동형(fire_and_forget 참조 보관).
+            # 기존 경로(flag off) — prod 커넥션 누수 근본fix(2026-07-08)와 동형(fire_and_forget 참조 보관).
+            # story 4786: the marker goes in `data` here too. The receiving instance's listener (`pg_pubsub._dispatch_received`) hands only `data` to
+            # `_push_to_agent` and ignores the event type, so a bare `{"seq": seq}` reached the other instance's stream as a plain event, not a wake: the
+            # agent's catch-up rescan (`signal.get("__wake__")` in the stream loop) never ran and its desktop stream missed the event until it reconnected.
             from app.services.pg_pubsub import pg_notify
-            fire_and_forget(pg_notify("agent", agent_id, "__wake__", {"seq": seq}))
+            fire_and_forget(pg_notify("agent", agent_id, "__wake__", {"__wake__": True, "seq": seq}))
 
 
 

@@ -41,7 +41,9 @@ def lease_path(request):
     from app.services import sse_lease
 
     if request.param == "in_process":
-        with patch.object(sse_lease.settings, "sse_lease_redis_enabled", False):
+        # story 4791: Redis off alone now means the Postgres lease — this path is the in-process count, so that switch is off too
+        with patch.object(sse_lease.settings, "sse_lease_redis_enabled", False), \
+             patch.object(sse_lease.settings, "sse_lease_pg_enabled", False):
             yield "in_process"
         return
     aioredis = pytest.importorskip("fakeredis.aioredis")

@@ -247,6 +247,10 @@ class Settings(BaseSettings):
     # off/Redis 다운 → 기존 in-process 카운트로 폴백(fail-open·연결 거부 안 함).
     sse_lease_redis_enabled: bool = False
 
+    # story 4791(INFRA-DIET ⑥): 에이전트 스트림의 «수신자 하나·인계» 임대(`perkey:<agent>`)를 Redis가 없을 때 Postgres 행으로.
+    # Redis 임대가 켜져 있으면 쓰지 않음(그쪽이 주경로·상태 갈라짐 방지). 끄면 예전 동작(인스턴스별 메모리) — 롤백 스위치.
+    sse_lease_pg_enabled: bool = True
+
     # #2122(E-ARCH, 2026-07-22): fanout(특히 wake_agent)을 Redis 백플레인에 태워 크로스-인스턴스 배달.
     # 현재 wake_agent 는 pg_notify 직접(event_broker 우회)이라 GCE(PG_LISTEN=false)서 타노드 미도달 +
     # __wake__ 마커가 event_type 에만 있어 브리지(_push_to_agent=data만 큐잉)서 유실 = 크로스노드 wake 이중 파손.
