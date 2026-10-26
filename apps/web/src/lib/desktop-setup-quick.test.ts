@@ -46,16 +46,36 @@ describe('[SID:4711] the card\'s rules', () => {
     expect(defaultSoloRuntime([])).toBeNull();
     expect(usableRuntimes({ runtimes: ['claude', 'codex'], blocked: ['claude'] })).toEqual(['codex']);
   });
-  it('the confirm body carries the runtime and the folder NAME (or the project id) — never a path', () => {
+  it('the confirm body carries the runtime, what the person typed for the agent, and the folder NAME (or the project id) — never a path', () => {
     const folder = { shown: '~/code/my-app', name: 'my-app' };
-    expect(soloConfirmBody(CODE, 'claude', folder)).toEqual({ code: CODE, runtime: 'claude', project_name: 'my-app' });
-    expect(soloConfirmBody(CODE, 'claude', { ...folder, projectId: PROJ })).toEqual({ code: CODE, runtime: 'claude', project_id: PROJ });
-    expect(soloConfirmBody(CODE, 'claude', folder, PROJ)).toEqual({ code: CODE, runtime: 'claude', project_id: PROJ }); // [넣고 시작]
-    expect(soloNewOrgConfirmBody(CODE, 'codex', folder, '내 조직')).toEqual({ code: CODE, runtime: 'codex', org_name: '내 조직', project_name: 'my-app' });
+    const made = { name: ' Reviewer ', role: '' };
+    expect(soloConfirmBody(CODE, 'claude', folder, made)).toEqual({ code: CODE, runtime: 'claude', project_name: 'my-app', agent_name: 'Reviewer', folder_name: 'my-app' }); // a blank role is left out
+    expect(soloConfirmBody(CODE, 'claude', { ...folder, projectId: PROJ }, { name: 'A', role: ' 코드 리뷰어 ' })).toEqual({ code: CODE, runtime: 'claude', project_id: PROJ, agent_name: 'A', agent_role: '코드 리뷰어', folder_name: 'my-app' });
+    expect(soloConfirmBody(CODE, 'claude', folder, made, PROJ)).toEqual({ code: CODE, runtime: 'claude', project_id: PROJ, agent_name: 'Reviewer', folder_name: 'my-app' }); // [넣고 만들기]
+    expect(soloNewOrgConfirmBody(CODE, 'codex', folder, '내 조직', { name: 'Codex', role: 'r' })).toEqual({ code: CODE, runtime: 'codex', org_name: '내 조직', project_name: 'my-app', agent_name: 'Codex', agent_role: 'r', folder_name: 'my-app' });
+  });
+  it('story 4784: a 422 about the typed name or role names the field and whether it looked empty; any other 422 stays generic', () => {
+    const item = (field: string, msg: string) => [{ type: 'value_error', loc: ['body', field], msg }];
+    expect(soloOutcome(422, undefined, null, item('agent_name', 'Value error, must not contain control characters'))).toEqual({ kind: 'bad-text', field: 'agent_name', blank: false });
+    expect(soloOutcome(422, undefined, null, item('agent_name', 'Value error, must not be blank'))).toEqual({ kind: 'bad-text', field: 'agent_name', blank: true });
+    expect(soloOutcome(422, undefined, null, item('agent_role', 'Value error, must not contain control characters'))).toEqual({ kind: 'bad-text', field: 'agent_role', blank: false });
+    expect(soloOutcome(422, undefined, null, item('folder_name', 'x'))).toEqual({ kind: 'generic' });
+    expect(soloOutcome(422, undefined, null, 'nope')).toEqual({ kind: 'generic' });
+    expect(soloOutcome(500, undefined, null, item('agent_name', 'x'))).toEqual({ kind: 'generic' });
+  });
+  it('story 4784: a taken name comes back with the free one (trimmed, capped); none offered → null', () => {
+    expect(soloOutcome(409, { code: 'agent_name_taken', suggested_name: ' Helper 2 ' }, null)).toEqual({ kind: 'name-taken', suggested: 'Helper 2' });
+    expect(soloOutcome(409, { code: 'agent_name_taken', suggested_name: 7 }, null)).toEqual({ kind: 'name-taken', suggested: null });
+    expect(soloOutcome(409, { code: 'agent_name_taken' }, null)).toEqual({ kind: 'name-taken', suggested: null });
   });
   it('a taken project name is shown as «{name} 2», «{name} 3» (case and spaces ignored, as the server does)', () => {
     expect(shownProjectName('app', [])).toBe('app');
     expect(shownProjectName('app', ['App'])).toBe('app 2');
+    // story 4784 (Kadir 5245): the server folds full-width letters and drops format characters, and keeps the name within 100 characters
+    expect(shownProjectName('app', ['ａｐｐ'])).toBe('app 2');
+    expect(shownProjectName('ap\u200bp', ['app'])).toBe('ap\u200bp 2');
+    const long = 'p'.repeat(100);
+    expect(shownProjectName(long, [long])).toBe(`${'p'.repeat(98)} 2`);
     expect(shownProjectName('app', ['  APP ', 'app 2'])).toBe('app 3');
   });
   it('[시작] is held with one visible reason: no agent · no folder · the wide folder not yet confirmed', () => {

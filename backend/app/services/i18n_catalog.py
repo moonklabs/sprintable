@@ -86,6 +86,8 @@ _CATALOG: dict[str, dict[str, str]] = {
     # command or path in the notice; «마쳤어요» is not used — the turn ended, not the work)
     "desktop_command.prompt_line": {"ko": "지시 · 지금 턴에 보냄", "en": "Instruction · sent into the current turn"},
     # story #4534 (Yuna 03:49Z): pasted while a tool was open — it goes in after that step, so «sent into the current turn» would be false
+    "desktop_setup.agent_created_line": {"ko": "에이전트를 만들었어요 · 이름 {name} · 도구 {tool} · 폴더 {folder}", "en": "Agent created · name {name} · tool {tool} · folder {folder}"},
+    "desktop_setup.agent_created_line_no_folder": {"ko": "에이전트를 만들었어요 · 이름 {name} · 도구 {tool}", "en": "Agent created · name {name} · tool {tool}"},
     "desktop_command.prompt_line_after_step": {"ko": "지시 · 하던 단계 뒤에 넣음", "en": "Instruction · queued after the step in progress"},
     "desktop_command.turn_end_title": {"ko": "{agent} · 다음 일 기다림", "en": "{agent} · Waiting for work"},
     "desktop_command.turn_end_title_bare": {"ko": "다음 일 기다림", "en": "Waiting for work"},

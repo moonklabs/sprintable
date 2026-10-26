@@ -24,6 +24,7 @@ import hashlib
 import hmac
 import re
 import secrets
+import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -80,10 +81,11 @@ class DesktopSetupError(Exception):
     no project chosen while the organization has projects) · agent_not_found · agent_not_in_project (story 4565: an existing agent
     to attach)."""
 
-    def __init__(self, code: str, detail: str | None = None):
+    def __init__(self, code: str, detail: str | None = None, extra: dict | None = None):
         super().__init__(detail or code)
         self.code = code
         self.detail = detail
+        self.extra = dict(extra or {})  # story 4784: fields the answer carries beside the code (the free name an `agent_name_taken` offers)
 
 
 def _hash(code: str) -> str:
@@ -694,14 +696,48 @@ async def _with_existing_project(db: AsyncSession, exc: HTTPException, *, org_id
 SOLO_AGENT_NAMES = {"claude": "Claude Code", "codex": "Codex"}  # story 4711 (Yuna): the agent is called what the person picked
 
 
-async def _unique_name(db: AsyncSession, model, *conds, base: str) -> str:
-    """`base`, or `base 2`, `base 3` … — the first not taken among the rows `conds` select (case-insensitive, trimmed)."""
-    taken = {" ".join((n or "").split()).casefold() for (n,) in (await db.execute(select(model.name).where(*conds))).all()}
+_KEY_IGNORED = frozenset("\u034f\u115f\u1160\u17b4\u17b5\u3164\uffa0\u2800")  # draw as nothing but are not format characters: grapheme joiner, Hangul/Khmer fillers, braille blank
+
+
+def _name_key(name: str | None) -> str:
+    """What makes two names the same name: compatibility-normalized (full-width letters), format characters dropped (a zero-width space does not make
+    a second «Zed Bot»), spaces collapsed, case ignored."""
+    # format characters first (a joiner between a letter and a combining mark must not keep them apart), then the folding
+    dropped = "".join(ch for ch in (name or "") if unicodedata.category(ch) != "Cf" and ch not in _KEY_IGNORED and not 0xFE00 <= ord(ch) <= 0xFE0F)
+    return " ".join(unicodedata.normalize("NFKC", dropped).split()).casefold()
+
+
+async def _unique_name(db: AsyncSession, model, *conds, base: str, limit: int | None = None) -> str:
+    """`base`, or `base 2`, `base 3` … — the first not taken among the rows `conds` select (`_name_key`). With `limit` the answer never passes it: the
+    base is cut before the number is added (a 60-character name's free neighbour is still 60 characters)."""
+    taken = {_name_key(n) for (n,) in (await db.execute(select(model.name).where(*conds))).all()}
     name, n = base, 1
-    while " ".join(name.split()).casefold() in taken:
+    while _name_key(name) in taken:
         n += 1
-        name = f"{base} {n}"
+        tail = f" {n}"
+        name = f"{base[:max(limit - len(tail), 0)] if limit is not None else base}{tail}"
     return name
+
+
+async def _write_created_line(db: AsyncSession, *, org_id: uuid.UUID, conversation_id: uuid.UUID, sender_id: uuid.UUID, agent_id: uuid.UUID,
+                              name: str, runtime: str, folder: str | None) -> None:
+    """story 4784 (PO 08:06Z): the first line of the new room says why the person is here — «에이전트를 만들었어요 · 이름 · 도구 · 폴더», from the
+    person who pressed «만들기». Written straight to the room (not dispatched): it asks nothing of the agent, so its activation names nobody
+    and expects no answer (the same shape as the remote prompt line)."""
+    from app.models.conversation import ConversationMessage
+    from app.services.i18n_catalog import t
+    from app.services.org_locale import resolve_org_locale
+
+    locale = await resolve_org_locale(db, org_id)
+    tool = SOLO_AGENT_NAMES[runtime]
+    content = t("desktop_setup.agent_created_line", locale, name=name, tool=tool, folder=folder) if folder \
+        else t("desktop_setup.agent_created_line_no_folder", locale, name=name, tool=tool)
+    db.add(ConversationMessage(
+        id=uuid.uuid4(), conversation_id=conversation_id, sender_id=sender_id, content=content, mentioned_ids=[],
+        msg_metadata={"activation": {"audience": [], "kind": "agent_created", "expects_response": False},
+                      "agent_created": {"agent_member_id": str(agent_id)}},
+    ))
+    await db.flush()
 
 
 async def confirm_solo_setup(
@@ -716,13 +752,18 @@ async def confirm_solo_setup(
     auth,
     workdir_hint: str | None = None,
     tools: list[str] | None = None,
+    agent_name: str | None = None,
+    agent_role: str | None = None,
+    folder_name: str | None = None,
 ) -> tuple[uuid.UUID, list[dict], uuid.UUID, uuid.UUID]:
     """story 4711 (PO 03:36Z) — the first setup in three steps: one agent on the runtime the person picked, for the folder they
     chose. No recipe, no story, nothing published. Returns (setup_id, members, project_id, conversation_id); never commits.
 
     The project is the app's answer to «which project already uses this folder» (`project_id` — the app keeps folder → project,
     the server never sees a path), else a new project named after the folder (`project_name`; a name already taken in the
-    organization becomes «{name} 2»). The agent is called by its program's name (a name taken becomes «Claude Code 2»). The
+    organization becomes «{name} 2»). The agent is called what the person typed (story 4784 — taken by an active agent: `agent_name_taken`
+    with the free name, nothing made); a page from before sends none and the agent is called by its program's name («Claude Code 2» when
+    taken). The
     plan's agent limit (402) and project limit roll everything back. The person ↔ agent DM is made with it: it is the first
     screen after the start. A replay by the same person returns what the code made."""
     from app.models.member import Member
@@ -733,6 +774,13 @@ async def confirm_solo_setup(
     from app.services.org_agent import create_org_level_agent
     from app.services.project_auth import is_org_owner_or_admin, require_project_access
 
+    # story 4784: two presses at once on different codes must not both find the same name free (no unique key on member names). The organization's
+    # row is the one lock every agent-making setup of it takes — and FIRST, before the setup row: the organization's deletion locks organization →
+    # agent members → setup rows, so this order (organization → setup) never meets it the other way round.
+    # Only for an owner/admin (the refusal below is theirs to get): a plain member's wrong call must not queue on the organization's row (Kadir 5245 ⓑ).
+    org_locked = await is_org_owner_or_admin(db, user_id, org_id)
+    if org_locked:
+        await db.execute(select(Organization.id).where(Organization.id == org_id).with_for_update())
     setup = await _setup_by_code(db, code)
     if _confirmed_again(setup, user_id, org_id):
         members = list(setup.members or [])
@@ -749,7 +797,8 @@ async def confirm_solo_setup(
         raise DesktopSetupError("app_cannot_solo")
     if runtime not in RUNTIME_TYPES:
         raise DesktopSetupError("roles_invalid", "unknown runtime")
-    if not await is_org_owner_or_admin(db, user_id, org_id):
+    # `not org_locked`: a member promoted between the first look and this one is refused this time (they press again) — never let a caller past without the lock
+    if not org_locked or not await is_org_owner_or_admin(db, user_id, org_id):
         raise DesktopSetupError("not_org_admin")
     if (project_id is None) == (not project_name):
         raise DesktopSetupError("request_invalid", "exactly one of project_id and project_name")
@@ -764,7 +813,7 @@ async def confirm_solo_setup(
             await check_project_create_allowed(db, org_id)
         except HTTPException as exc:
             raise await _with_existing_project(db, exc, org_id=org_id, user_id=user_id) from None
-        name = await _unique_name(db, Project, Project.org_id == org_id, Project.deleted_at.is_(None), base=project_name)
+        name = await _unique_name(db, Project, Project.org_id == org_id, Project.deleted_at.is_(None), base=project_name, limit=100)
         project_id = (await create_project_with_member(
             db, org_id=org_id, name=name, description=None, slug=None, user_id=str(user_id),
         )).id
@@ -782,18 +831,24 @@ async def confirm_solo_setup(
             await check_agent_add_limit(db, org_id)  # an HTTPException(402) here rolls the whole setup back
         except HTTPException as exc:
             raise _with_setup_numbers(exc, needed=1, agents_before=agents_before) from None
-    agent_name = await _unique_name(
-        db, Member, Member.org_id == org_id, Member.type == "agent", Member.is_active.is_(True), Member.deleted_at.is_(None),
-        base=SOLO_AGENT_NAMES[runtime],
-    )
+    name_conds = (Member.org_id == org_id, Member.type == "agent", Member.is_active.is_(True), Member.deleted_at.is_(None))
+    if agent_name is None:
+        agent_name = await _unique_name(db, Member, *name_conds, base=SOLO_AGENT_NAMES[runtime], limit=60)
+    else:
+        free = await _unique_name(db, Member, *name_conds, base=agent_name, limit=60)
+        if free != agent_name:  # the person named it: never renamed behind their back — they see the free name and press again
+            raise DesktopSetupError("agent_name_taken", "an active agent of this organization already has that name", {"suggested_name": free})
     agent, _no_key = await create_org_level_agent(
-        db, org_id=org_id, created_by=user_id, name=agent_name, role="member", project_ids=[project_id], defer_key_issuance=True,
+        db, org_id=org_id, created_by=user_id, name=agent_name, role="member", agent_role=agent_role, project_ids=[project_id],
+        defer_key_issuance=True,
     )
     await TeamMemberRepository(db, org_id).apply_anchor_update(agent, {"runtime_type": RUNTIME_TYPES[runtime]})
 
     from app.services.approval_delivery import _get_or_create_approval_dm  # the person ↔ agent DM: one get-or-create room
 
     conv = await _get_or_create_approval_dm(db, org_id=org_id, project_id=project_id, requester_id=person_member_id, approver_id=agent.id)
+    await _write_created_line(db, org_id=org_id, conversation_id=conv.id, sender_id=person_member_id, agent_id=agent.id, name=agent_name,
+                              runtime=runtime, folder=folder_name)
     members = [{
         "member_id": str(agent.id), "kind": "agent", "runtime": runtime, "solo": True, "name": agent_name,
         "tools": clean_agent_tools(tools, runtime), "conversation_id": str(conv.id),
@@ -826,6 +881,9 @@ async def confirm_solo_setup_new_org(
     auth,
     workdir_hint: str | None = None,
     tools: list[str] | None = None,
+    agent_name: str | None = None,
+    agent_role: str | None = None,
+    folder_name: str | None = None,
 ) -> tuple[uuid.UUID, list[dict], uuid.UUID, uuid.UUID, uuid.UUID]:
     """story 4711 AC4 (PO 03:42Z) — «시작» of the three steps for a person with no organization: the organization (its name is the
     web's — the screen no longer asks for it), the folder's project and the solo setup in **one transaction**. The folder is the
@@ -869,7 +927,7 @@ async def confirm_solo_setup_new_org(
     org = await create_org_with_owner(db, name=org_name, slug=None, user_id=str(user_id), owner_member_id=None)
     setup_id, members, project_id, conversation_id = await confirm_solo_setup(
         db, code=code, user_id=user_id, org_id=org.id, runtime=runtime, project_id=None, project_name=project_name, auth=auth,
-        workdir_hint=workdir_hint, tools=tools,
+        workdir_hint=workdir_hint, tools=tools, agent_name=agent_name, agent_role=agent_role, folder_name=folder_name,
     )
     return setup_id, members, org.id, project_id, conversation_id
 
