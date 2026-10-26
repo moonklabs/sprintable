@@ -65,6 +65,20 @@ def test_the_gateway_script_fetches_the_signing_secret_of_its_own_environment(en
     assert "JWT_SECRET:JWT_SECRET" not in pairs  # the old shared name
 
 
+def test_the_template_name_follows_the_secret_name_it_is_built_with(tmp_path):
+    """a copy of the scripts folder with the prod secret name put back to the old shared one builds a DIFFERENT template name than the real script: the name carries a hash of the generated startup script"""
+    import shutil
+
+    copy = tmp_path / "scripts"
+    shutil.copytree(_SCRIPTS, copy, ignore=shutil.ignore_patterns("__pycache__", "jobs"))
+    src = (copy / "deploy_realtime_gce.sh").read_text()
+    assert src.count('JWT_SECRET_NAME="JWT_SECRET_PROD"') == 1
+    (copy / "deploy_realtime_gce.sh").write_text(src.replace('JWT_SECRET_NAME="JWT_SECRET_PROD"', 'JWT_SECRET_NAME="JWT_SECRET"'))
+    proc = subprocess.run(["bash", str(copy / "deploy_realtime_gce.sh"), "prod"], capture_output=True, text=True, check=True, timeout=120, env={**os.environ, "DRY_RUN": "1", "COMMIT_SHA": "dryrun"})
+    old = dict(l.partition("=")[::2] for l in proc.stdout.splitlines() if "=" in l)["TEMPLATE_NAME"]
+    assert old != _dry_run("deploy_realtime_gce.sh", "prod")["TEMPLATE_NAME"]
+
+
 def test_the_gateway_startup_script_names_the_new_secret_so_its_template_is_a_new_one():
     """the template's name carries a hash of the generated startup script: the secret names written into that script are part of what is hashed. The block the script generates to fetch the secrets
     lists the names; for prod it must hold `JWT_SECRET_PROD` (so the hash — and with it the template — differs from the one built with the old shared name), as the env variable `JWT_SECRET`."""
@@ -80,7 +94,7 @@ def test_the_gateway_startup_script_names_the_new_secret_so_its_template_is_a_ne
 
 
 _BARE_BINDING = re.compile(
-    r"""(JWT_SECRET=JWT_SECRET(?![A-Za-z0-9_])|\bJWT_SECRET:\s*JWT_SECRET(?![A-Za-z0-9_])|--secret[= ]["']?JWT_SECRET["']?(?![A-Za-z0-9_])|["' ]JWT_SECRET:(latest|[0-9]+)\b"""
+    r"""(JWT_SECRET=JWT_SECRET(?![A-Za-z0-9_])|\bJWT_SECRET:\s*JWT_SECRET(?![A-Za-z0-9_])|--secret[= ]["']?JWT_SECRET["']?(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])JWT_SECRET:(latest|[0-9]+)\b"""
     r"""|\bcreate_secret\s+["']?JWT_SECRET["']?(?![A-Za-z0-9_])|\bsecrets\s+(create|describe|delete|get-iam-policy|add-iam-policy-binding|remove-iam-policy-binding|versions\s+\w+)\s+["']?JWT_SECRET["']?(?![A-Za-z0-9_]))"""
 )
 _SCAN = ["backend/scripts", "infra", "cloudbuild.yaml", ".github/workflows", "deploy"]
@@ -107,3 +121,4 @@ def test_no_file_binds_the_old_shared_signing_secret_name():
 def test_the_secret_manifest_lists_the_two_new_names_and_the_shared_one_until_it_is_deleted():
     names = {l.strip() for l in (_ROOT / "infra" / "cloudbuild-secret-manifest.txt").read_text().splitlines() if l.strip() and not l.startswith("#")}
     assert {"JWT_SECRET_DEV", "JWT_SECRET_PROD"} <= names
+    assert "JWT_SECRET" in names  # the shared secret stays (nobody binds it) until the operator deletes it and drops the name in the same change
