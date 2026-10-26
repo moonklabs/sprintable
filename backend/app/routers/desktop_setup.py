@@ -6,6 +6,7 @@ agent key is refused there. Answers never carry more than the contract: the plai
 of an exchange."""
 from __future__ import annotations
 
+import unicodedata
 import uuid
 from datetime import datetime
 from typing import Literal
@@ -268,39 +269,48 @@ AGENT_NAME_MAX = 60
 AGENT_ROLE_MAX = 200  # the role is the label shown beside the agent in the team lists (the agent's profile `agent_role`) — not the daemon's persona (that is `agent_personas`)
 
 
+_BLANK_LOOKING = ("\u3164", "\u2800", "\u115f", "\u1160", "\uffa0")  # letters/symbols that draw as empty: Hangul fillers, the braille blank
+
+
 def _no_control_characters(v: str) -> str:
-    """No C0/C1 controls, no line/paragraph separators and no bidi overrides/isolates: a name, role or folder name stays one honest line
-    wherever it is drawn (the room's first line, the team lists)."""
-    for ch in v:
-        o = ord(ch)
-        if o < 32 or 0x7F <= o <= 0x9F or o in (0x2028, 0x2029) or 0x202A <= o <= 0x202E or 0x2066 <= o <= 0x2069:
-            raise ValueError("must not contain control characters")
+    """One honest line wherever it is drawn (the room's first line, the team lists): refused on the same list the persona text is cleaned with
+    (`agent_run_profile.TEXT_DROP_CATEGORIES`: Cc controls · Cf format characters — bidi overrides, zero-width space and joiners, BOM, soft hyphen, the
+    invisible tag block — · Zl/Zp line and paragraph separators)."""
+    from app.services.agent_run_profile import TEXT_DROP_CATEGORIES
+
+    if any(unicodedata.category(ch) in TEXT_DROP_CATEGORIES for ch in v):
+        raise ValueError("must not contain control characters")
     return v
+
+
+def _has_visible_character(v: str) -> bool:
+    """Something that draws: not only spaces, combining marks or fillers (a name that is blank to the eye is no name)."""
+    return any(unicodedata.category(ch)[0] not in ("Z", "C", "M") and ch not in _BLANK_LOOKING for ch in v)
 
 
 def _agent_name_one_line(v: str | None) -> str | None:
     """story 4784: the name the person typed — trimmed, inner runs of spaces kept as typed words, never blank, no control characters."""
     if v is None:
         return v
-    v = v.strip()
-    if not v:
+    v = _no_control_characters(v.strip())
+    if not _has_visible_character(v):
         raise ValueError("must not be blank")
-    return _no_control_characters(v)
+    return v
 
 
 def _agent_role_one_line(v: str | None) -> str | None:
     """story 4784: the role is optional — a blank one is no role (the agent is made as before, with none)."""
     if v is None:
         return v
-    v = v.strip()
-    return _no_control_characters(v) if v else None
+    v = _no_control_characters(v.strip())
+    return v if _has_visible_character(v) else None
 
 
 def _folder_name_one_line(v: str | None) -> str | None:
     if v is None:
         return v
-    v = v.strip()
-    return _no_control_characters(v) if v else None
+    v = _no_control_characters(v.strip())
+    return v if _has_visible_character(v) else None
 
 
 class ConfirmSoloRequest(BaseModel):

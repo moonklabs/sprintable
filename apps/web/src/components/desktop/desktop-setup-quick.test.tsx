@@ -849,7 +849,7 @@ describe('[SID:4784] the card is the moment an agent is made — «에이전트 
     expect(container.querySelector('h1')!.textContent).toBe('에이전트 만들기');
     expect(nameField().value).toBe('Claude Code'); // the tool's name is the default
     expect(roleField().value).toBe('');
-    expect(container.querySelector('[data-testid=quick-role-hint]')!.textContent).toBe('팀 목록에서 이름 옆에 보이는 이름표예요 · 에이전트가 일하는 방식은 바뀌지 않아요'); // a label, not a persona (PO 08:48Z)
+    expect(container.querySelector('[data-testid=quick-role-hint]')!.textContent).toBe('이름 옆에 보이는 이름표예요 · 에이전트가 일하는 방식은 바뀌지 않아요'); // a label, not a persona (PO 08:48Z · Yuna: «팀 목록» is not a product word)
     expect(text()).toContain('① 도구');
     expect(text()).toContain('② 이름과 역할');
     expect(text()).toContain('③ 폴더');
@@ -890,6 +890,7 @@ describe('[SID:4784] the card is the moment an agent is made — «에이전트 
     await act(async () => { buttonOf('만들기')!.click(); });
     await settle();
     expect(nameField().value).toBe('Helper 2');
+    expect(document.activeElement).toBe(nameField()); // the line sits under the button; the cursor goes to the field it is about (Yuna)
     expect(container.querySelector('[data-testid=quick-error]')!.textContent).toBe('이미 있는 이름이에요 · 쓸 수 있는 이름을 칸에 넣어 뒀어요: Helper 2 — 괜찮으면 «만들기»를 다시 눌러 주세요');
     expect(buttonOf('만들기')!.disabled).toBe(false); // the card is still the card: nothing started, nothing redirected
     confirmNow = () => new Response(JSON.stringify({ project_id: PROJ, conversation_id: 'c-1', members: [] }), { status: 200 });

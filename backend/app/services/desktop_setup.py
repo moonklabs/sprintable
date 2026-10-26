@@ -24,6 +24,7 @@ import hashlib
 import hmac
 import re
 import secrets
+import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -695,13 +696,22 @@ async def _with_existing_project(db: AsyncSession, exc: HTTPException, *, org_id
 SOLO_AGENT_NAMES = {"claude": "Claude Code", "codex": "Codex"}  # story 4711 (Yuna): the agent is called what the person picked
 
 
-async def _unique_name(db: AsyncSession, model, *conds, base: str) -> str:
-    """`base`, or `base 2`, `base 3` … — the first not taken among the rows `conds` select (case-insensitive, trimmed)."""
-    taken = {" ".join((n or "").split()).casefold() for (n,) in (await db.execute(select(model.name).where(*conds))).all()}
+def _name_key(name: str | None) -> str:
+    """What makes two names the same name: compatibility-normalized (full-width letters), format characters dropped (a zero-width space does not make
+    a second «Zed Bot»), spaces collapsed, case ignored."""
+    text = unicodedata.normalize("NFKC", name or "")
+    return " ".join("".join(ch for ch in text if unicodedata.category(ch) != "Cf").split()).casefold()
+
+
+async def _unique_name(db: AsyncSession, model, *conds, base: str, limit: int | None = None) -> str:
+    """`base`, or `base 2`, `base 3` … — the first not taken among the rows `conds` select (`_name_key`). With `limit` the answer never passes it: the
+    base is cut before the number is added (a 60-character name's free neighbour is still 60 characters)."""
+    taken = {_name_key(n) for (n,) in (await db.execute(select(model.name).where(*conds))).all()}
     name, n = base, 1
-    while " ".join(name.split()).casefold() in taken:
+    while _name_key(name) in taken:
         n += 1
-        name = f"{base} {n}"
+        tail = f" {n}"
+        name = f"{base[:limit - len(tail)] if limit is not None else base}{tail}"
     return name
 
 
@@ -763,7 +773,9 @@ async def confirm_solo_setup(
     # story 4784: two presses at once on different codes must not both find the same name free (no unique key on member names). The organization's
     # row is the one lock every agent-making setup of it takes — and FIRST, before the setup row: the organization's deletion locks organization →
     # agent members → setup rows, so this order (organization → setup) never meets it the other way round.
-    await db.execute(select(Organization.id).where(Organization.id == org_id).with_for_update())
+    # Only for an owner/admin (the refusal below is theirs to get): a plain member's wrong call must not queue on the organization's row (Kadir 5245 ⓑ).
+    if await is_org_owner_or_admin(db, user_id, org_id):
+        await db.execute(select(Organization.id).where(Organization.id == org_id).with_for_update())
     setup = await _setup_by_code(db, code)
     if _confirmed_again(setup, user_id, org_id):
         members = list(setup.members or [])
@@ -795,7 +807,7 @@ async def confirm_solo_setup(
             await check_project_create_allowed(db, org_id)
         except HTTPException as exc:
             raise await _with_existing_project(db, exc, org_id=org_id, user_id=user_id) from None
-        name = await _unique_name(db, Project, Project.org_id == org_id, Project.deleted_at.is_(None), base=project_name)
+        name = await _unique_name(db, Project, Project.org_id == org_id, Project.deleted_at.is_(None), base=project_name, limit=100)
         project_id = (await create_project_with_member(
             db, org_id=org_id, name=name, description=None, slug=None, user_id=str(user_id),
         )).id
@@ -815,9 +827,9 @@ async def confirm_solo_setup(
             raise _with_setup_numbers(exc, needed=1, agents_before=agents_before) from None
     name_conds = (Member.org_id == org_id, Member.type == "agent", Member.is_active.is_(True), Member.deleted_at.is_(None))
     if agent_name is None:
-        agent_name = await _unique_name(db, Member, *name_conds, base=SOLO_AGENT_NAMES[runtime])
+        agent_name = await _unique_name(db, Member, *name_conds, base=SOLO_AGENT_NAMES[runtime], limit=60)
     else:
-        free = await _unique_name(db, Member, *name_conds, base=agent_name)
+        free = await _unique_name(db, Member, *name_conds, base=agent_name, limit=60)
         if free != agent_name:  # the person named it: never renamed behind their back — they see the free name and press again
             raise DesktopSetupError("agent_name_taken", "an active agent of this organization already has that name", {"suggested_name": free})
     agent, _no_key = await create_org_level_agent(

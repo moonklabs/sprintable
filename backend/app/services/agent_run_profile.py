@@ -201,6 +201,7 @@ PERSONA_ROLE_MAX = 200
 # is how a text is written), every format character (Cf: bidi marks · embeddings · isolates · zero-width · soft hyphen · the Arabic letter mark · the deprecated
 # U+206A–206F · BOM · the tag characters), the line and paragraph separators (Zl · Zp). The daemon applies the same rule (\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}).
 _DROP_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
+TEXT_DROP_CATEGORIES = _DROP_CATEGORIES  # story 4784: the one list of «not text a person reads» — the setup card's name · role · folder name are refused on it too
 
 
 def _strip_unsafe(text: str) -> str:

@@ -7193,7 +7193,7 @@
         "nameLabel": "Name",
         "roleLabel": "Role (optional)",
         "rolePlaceholder": "e.g. Code reviewer",
-        "roleHint": "A label shown next to the name in team lists · it does not change how the agent works",
+        "roleHint": "A label shown next to the name · it does not change how the agent works",
         "create": "Create",
         "creating": "Creating…",
         "createLine": "Pressing Create adds one agent to this organization · name {name} · tool {runtime} · project {project}",

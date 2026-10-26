@@ -95,6 +95,8 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
   const [nameTyped, setNameTyped] = useState<string | null>(null);
   const [roleTyped, setRoleTyped] = useState('');
   const typedRead = useRef(false);
+  const [focusNameTick, setFocusNameTick] = useState(0); // a taken name: the cursor goes to the name field once the card is back (the line sits under the button)
+  useEffect(() => { if (focusNameTick > 0 && view.kind === 'choose') document.getElementById('quick-agent-name')?.focus(); }, [focusNameTick, view.kind]);
   /** the one project of a free organization that the 402 named; chosen by [넣고 시작] only */
   // codex self-QA: the setup this start made is the SERVER's (`setup_id` in its answer); the address's `setup=` is only the fallback (an older answer without it)
   const [madeSetupId, setMadeSetupId] = useState<string | null>(null);
@@ -263,6 +265,7 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
         case 'name-taken':
           // story 4784: never renamed behind their back — the free name goes into the field, the line says so, and «만들기» is theirs to press again
           if (out.suggested) setNameTyped(out.suggested);
+          setFocusNameTick((n) => n + 1);
           setErrorLine(out.suggested ? t('quick.nameTaken', { name: out.suggested }) : t('quick.nameTakenNoSuggestion'));
           setView({ kind: 'choose' });
           return;

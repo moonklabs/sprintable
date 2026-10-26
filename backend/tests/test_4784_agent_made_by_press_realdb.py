@@ -65,6 +65,9 @@ async def test_the_person_names_the_agent_gives_it_a_role_and_the_room_opens_wit
         name = (await _sql(fetch=f"SELECT name FROM members WHERE id='{member['member_id']}'"))[0][0]
         roles = await _sql(fetch=f"SELECT agent_role FROM agent_project_profiles WHERE member_id='{member['member_id']}'")
         assert name == "Reviewer" and [r[0] for r in roles] == ["코드 리뷰어"]  # the role rides the agent's profile in the folder's project
+        # the card says the role "does not change how the agent works": a solo agent has no persona row, so the daemon's role (agent_personas) is empty
+        # and `agent_role` never reaches it — if a default persona ever gets made here, that line on the card stops being true (Yuna)
+        assert (await _sql(fetch=f"SELECT count(*) FROM agent_personas WHERE agent_id='{member['member_id']}'"))[0][0] == 0
         # the room's first line: from the person, once, naming the agent · the tool · the folder — and asking nothing of the agent
         (line,) = await _lines(body["conversation_id"])
         content, sender, meta = line
@@ -119,7 +122,10 @@ async def test_a_blank_role_is_no_role_and_a_blank_or_control_name_is_refused(so
         code, _, _ = await _solo_code(c, "d4784 refusals")
         for bad in ({"agent_name": "   "}, {"agent_name": "a\nb"}, {"agent_name": "x" * 61}, {"agent_role": "r\tr"}, {"agent_role": "r" * 201}, {"folder_name": "f\nf"},
                     # a line/paragraph separator or a bidi override would split or flip the one line the name/role/folder is drawn in (codex r1)
-                    {"agent_name": "a\u2028b"}, {"agent_name": "\u202eevil"}, {"agent_role": "r\u2029r"}, {"folder_name": "f\u2066f"}):
+                    {"agent_name": "a\u2028b"}, {"agent_name": "\u202eevil"}, {"agent_role": "r\u2029r"}, {"folder_name": "f\u2066f"},
+                    # the persona list (Cc · Cf · Zl · Zp): zero-width space / joiner / BOM / soft hyphen / the invisible tag block, and names that draw as nothing (Kadir 5245 ⓒ)
+                    {"agent_name": "Zed\u200bBot"}, {"agent_name": "a\u200db"}, {"agent_name": "\ufeffok"}, {"agent_name": "o\u00adk"}, {"agent_name": "\U000e006f\U000e006b"},
+                    {"agent_name": "\u3164"}, {"agent_name": "\u2800\u2800"}, {"agent_name": " \u00a0 "}):
             r = await _confirm_solo(c, code, {"runtime": "claude", "project_name": "bad-app", **bad})
             assert r.status_code == 422, (bad, r.text)
         assert await _state() == before
@@ -147,8 +153,8 @@ async def test_two_presses_at_once_with_the_same_typed_name_make_one_agent(solo,
     read: list[str] = []
     both_read = asyncio.Event()
 
-    async def watched(db, model, *conds, base):
-        names = await real(db, model, *conds, base=base)
+    async def watched(db, model, *conds, base, **kw):
+        names = await real(db, model, *conds, base=base, **kw)
         if base == "Racer":
             read.append(names)
             if len(read) >= 2:
@@ -168,3 +174,77 @@ async def test_two_presses_at_once_with_the_same_typed_name_make_one_agent(solo,
         )
         assert sorted([a.status_code, b.status_code]) == [200, 409], (a.text, b.text)
         assert (await _state())["agents"] == before["agents"] + 1
+
+
+@pytest.mark.anyio
+async def test_a_name_that_is_nearly_a_taken_one_is_taken_and_invisible_roles_are_no_role(solo):
+    """Kadir 5245 ⓒ: the skeleton of a name (full-width letters folded, format characters dropped, spaces collapsed, case ignored) decides «taken»;
+    a role or folder name that draws as nothing is none."""
+    async with _client() as c:
+        first, _, _ = await _solo_code(c, "d4784 skeleton first")
+        ok = await _confirm_solo(c, first, {"runtime": "claude", "project_id": str(PROJ), "agent_name": "Zed Bot"})
+        assert ok.status_code == 200, ok.text
+        before = await _state()
+        code, _, _ = await _solo_code(c, "d4784 skeleton second")
+        for typed in ("ＺＥＤ  ｂｏｔ", "zed   BOT"):  # full-width letters · spacing and case
+            r = await _confirm_solo(c, code, {"runtime": "claude", "project_id": str(PROJ), "agent_name": typed})
+            assert (r.status_code, r.json()["error"]["code"]) == (409, "agent_name_taken"), (typed, r.text)
+        assert await _state() == before
+        fine = await _confirm_solo(c, code, {"runtime": "claude", "project_id": str(PROJ), "agent_name": "Zed Bot 2", "agent_role": "\u3164 \u2800", "folder_name": "\u3164"})
+        assert fine.status_code == 200, fine.text
+        assert [x[0] for x in await _sql(fetch=f"SELECT agent_role FROM agent_project_profiles WHERE member_id='{fine.json()['members'][0]['member_id']}'")] == [None]
+        (line,) = await _lines(fine.json()["conversation_id"])
+        assert line[0] == "에이전트를 만들었어요 · 이름 Zed Bot 2 · 도구 Claude Code"  # a folder name that draws as nothing is no folder name
+
+
+@pytest.mark.anyio
+async def test_the_free_name_of_a_long_name_still_fits_and_goes_through(solo):
+    """Kadir 5245 ⓐ: a 60-character name's neighbour is cut before «2» is added — the card puts it in the field and «만들기» is 200, not 422."""
+    async with _client() as c:
+        for length in (60, 59):
+            long_name = "n" * length
+            a, _, _ = await _solo_code(c, f"d4784 long {length} a")
+            assert (await _confirm_solo(c, a, {"runtime": "claude", "project_id": str(PROJ), "agent_name": long_name})).status_code == 200
+            b, _, _ = await _solo_code(c, f"d4784 long {length} b")
+            r = await _confirm_solo(c, b, {"runtime": "claude", "project_id": str(PROJ), "agent_name": long_name})
+            assert r.status_code == 409, r.text
+            free = r.json()["error"]["suggested_name"]
+            assert len(free) <= 60 and free != long_name and free[-2] == " " and free[-1].isdigit(), free  # the 59-character case meets the 60-character one's «… 2» and takes «… 3»
+            again = await _confirm_solo(c, b, {"runtime": "claude", "project_id": str(PROJ), "agent_name": free})
+            assert again.status_code == 200, again.text
+            assert again.json()["members"][0]["name"] == free
+
+
+@pytest.mark.anyio
+async def test_the_organization_is_locked_before_the_setup_row_and_only_for_an_admin(solo):
+    """Kadir 5245 ⓓ ⓑ: the statements are recorded — an owner/admin's press locks `organizations` FOR UPDATE before `desktop_setups` FOR UPDATE
+    (the organization's deletion takes them in that order); a plain member's wrong call takes no organization lock at all and is refused 403."""
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+
+    seen: list[str] = []
+
+    def record(conn, cursor, statement, parameters, context, executemany):
+        text = " ".join(statement.split()).lower()
+        if "for update" in text and " from organizations" in text:
+            seen.append("organization")
+        elif "for update" in text and " from desktop_setups" in text:
+            seen.append("setup")
+
+    async with _client() as c:
+        code, _, _ = await _solo_code(c, "d4784 lock order")
+        event.listen(Engine, "before_cursor_execute", record)
+        try:
+            ok = await _confirm_solo(c, code, {"runtime": "claude", "project_id": str(PROJ), "agent_name": "Locked"})
+            assert ok.status_code == 200, ok.text
+            admin_seen, seen[:] = list(seen), []
+            other, _, _ = await _solo_code(c, "d4784 lock order plain")
+            seen[:] = []
+            plain = await _confirm_solo(c, other, {"runtime": "claude", "project_id": str(PROJ), "agent_name": "Plain"}, who=PLAIN)
+            assert (plain.status_code, plain.json()["error"]["code"]) == (403, "not_org_admin"), plain.text
+            plain_seen = list(seen)
+        finally:
+            event.remove(Engine, "before_cursor_execute", record)
+    assert "organization" in admin_seen and "setup" in admin_seen
+    assert admin_seen.index("organization") < admin_seen.index("setup"), admin_seen
+    assert "organization" not in plain_seen, plain_seen
