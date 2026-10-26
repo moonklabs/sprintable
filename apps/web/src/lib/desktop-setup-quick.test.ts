@@ -54,6 +54,15 @@ describe('[SID:4711] the card\'s rules', () => {
     expect(soloConfirmBody(CODE, 'claude', folder, made, PROJ)).toEqual({ code: CODE, runtime: 'claude', project_id: PROJ, agent_name: 'Reviewer', folder_name: 'my-app' }); // [넣고 만들기]
     expect(soloNewOrgConfirmBody(CODE, 'codex', folder, '내 조직', { name: 'Codex', role: 'r' })).toEqual({ code: CODE, runtime: 'codex', org_name: '내 조직', project_name: 'my-app', agent_name: 'Codex', agent_role: 'r', folder_name: 'my-app' });
   });
+  it('story 4784: a 422 about the typed name or role names the field and whether it looked empty; any other 422 stays generic', () => {
+    const item = (field: string, msg: string) => [{ type: 'value_error', loc: ['body', field], msg }];
+    expect(soloOutcome(422, undefined, null, item('agent_name', 'Value error, must not contain control characters'))).toEqual({ kind: 'bad-text', field: 'agent_name', blank: false });
+    expect(soloOutcome(422, undefined, null, item('agent_name', 'Value error, must not be blank'))).toEqual({ kind: 'bad-text', field: 'agent_name', blank: true });
+    expect(soloOutcome(422, undefined, null, item('agent_role', 'Value error, must not contain control characters'))).toEqual({ kind: 'bad-text', field: 'agent_role', blank: false });
+    expect(soloOutcome(422, undefined, null, item('folder_name', 'x'))).toEqual({ kind: 'generic' });
+    expect(soloOutcome(422, undefined, null, 'nope')).toEqual({ kind: 'generic' });
+    expect(soloOutcome(500, undefined, null, item('agent_name', 'x'))).toEqual({ kind: 'generic' });
+  });
   it('story 4784: a taken name comes back with the free one (trimmed, capped); none offered → null', () => {
     expect(soloOutcome(409, { code: 'agent_name_taken', suggested_name: ' Helper 2 ' }, null)).toEqual({ kind: 'name-taken', suggested: 'Helper 2' });
     expect(soloOutcome(409, { code: 'agent_name_taken', suggested_name: 7 }, null)).toEqual({ kind: 'name-taken', suggested: null });

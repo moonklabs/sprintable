@@ -118,13 +118,33 @@ export type SoloOutcome =
   | { kind: 'pending-invites' }
   | { kind: 'email-verify' }
   | { kind: 'name-taken'; suggested: string | null }
+  | { kind: 'bad-text'; field: 'agent_name' | 'agent_role'; blank: boolean }
   | { kind: 'rate-limited'; retryAfter: number | null }
   | { kind: 'generic' };
 
 interface ErrorBody { code?: string; resource?: string; needed?: unknown; available?: unknown; existing_project?: { id?: unknown; name?: unknown }; suggested_name?: unknown }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export function soloOutcome(status: number, error: ErrorBody | undefined, retryAfterHeader: string | null): SoloOutcome {
+/** story 4784 (Kadir 5245): the server refuses a typed name/role it cannot show as one honest line (422, FastAPI's `detail` list: `loc: ['body', field]`, `msg`).
+ *  The card says WHICH field and why instead of a «try again» that could never work. null = a 422 that is not about those two fields. */
+function badTextOf(detail: unknown): { field: 'agent_name' | 'agent_role'; blank: boolean } | null {
+  if (!Array.isArray(detail)) return null;
+  for (const item of detail) {
+    const loc = (item as { loc?: unknown } | null)?.loc;
+    const field = Array.isArray(loc) ? loc[1] : null;
+    if (field === 'agent_name' || field === 'agent_role') {
+      const msg = (item as { msg?: unknown }).msg;
+      return { field, blank: typeof msg === 'string' && msg.includes('must not be blank') };
+    }
+  }
+  return null;
+}
+
+export function soloOutcome(status: number, error: ErrorBody | undefined, retryAfterHeader: string | null, detail?: unknown): SoloOutcome {
+  if (status === 422) {
+    const bad = badTextOf(detail);
+    if (bad) return { kind: 'bad-text', ...bad };
+  }
   if (status === 429 || error?.code === 'RATE_LIMITED') {
     const secs = Number(retryAfterHeader);
     return { kind: 'rate-limited', retryAfter: Number.isFinite(secs) && secs > 0 ? secs : null };

@@ -272,15 +272,32 @@ AGENT_ROLE_MAX = 200  # the role is the label shown beside the agent in the team
 _BLANK_LOOKING = ("\u3164", "\u2800", "\u115f", "\u1160", "\uffa0")  # letters/symbols that draw as empty: Hangul fillers, the braille blank
 
 
+_JOINERS = ("\u200c", "\u200d")  # zero-width non-joiner / joiner — real text needs them (Persian, Indic scripts, emoji sequences) — but only BETWEEN two characters
+
+
+def _joiner_has_neighbours(v: str, i: int) -> bool:
+    """A joiner at `i` stands between two characters that are not spaces or format/control characters (another joiner is one, so a run of them is refused)."""
+    return 0 < i < len(v) - 1 and all(unicodedata.category(v[j])[0] not in ("Z", "C") for j in (i - 1, i + 1))
+
+
 def _no_control_characters(v: str) -> str:
     """One honest line wherever it is drawn (the room's first line, the team lists): refused on the same list the persona text is cleaned with
-    (`agent_run_profile.TEXT_DROP_CATEGORIES`: Cc controls · Cf format characters — bidi overrides, zero-width space and joiners, BOM, soft hyphen, the
-    invisible tag block — · Zl/Zp line and paragraph separators)."""
+    (`agent_run_profile.TEXT_DROP_CATEGORIES`: Cc controls · Cf format characters — bidi overrides, zero-width space, BOM, soft hyphen, the invisible tag
+    block — · Zl/Zp line and paragraph separators), except a zero-width joiner / non-joiner between two characters (story 4784, Kadir: «👩‍💻 Dev»,
+    Persian and Indic names are real names)."""
     from app.services.agent_run_profile import TEXT_DROP_CATEGORIES
 
-    if any(unicodedata.category(ch) in TEXT_DROP_CATEGORIES for ch in v):
-        raise ValueError("must not contain control characters")
+    for i, ch in enumerate(v):
+        if unicodedata.category(ch) in TEXT_DROP_CATEGORIES and not (ch in _JOINERS and _joiner_has_neighbours(v, i)):
+            raise ValueError("must not contain control characters")
     return v
+
+
+def _cleaned_for_display(v: str) -> str:
+    """The persona text's own cleaning: the characters of that list are left out, not refused (for a value the person did not type — the Mac's folder name)."""
+    from app.services.agent_run_profile import TEXT_DROP_CATEGORIES
+
+    return "".join(ch for ch in v if unicodedata.category(ch) not in TEXT_DROP_CATEGORIES)
 
 
 def _has_visible_character(v: str) -> bool:
@@ -307,9 +324,11 @@ def _agent_role_one_line(v: str | None) -> str | None:
 
 
 def _folder_name_one_line(v: str | None) -> str | None:
+    """The folder's NAME comes from the folder the person picked on the Mac, not from their typing, and only goes into the room's first line — so it is cleaned,
+    never refused (a refusal here would end every «만들기» for a folder called «👨‍👩‍👧» or with a stray mark, and no retry could fix it)."""
     if v is None:
         return v
-    v = _no_control_characters(v.strip())
+    v = _cleaned_for_display(v).strip()
     return v if _has_visible_character(v) else None
 
 

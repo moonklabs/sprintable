@@ -95,8 +95,8 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
   const [nameTyped, setNameTyped] = useState<string | null>(null);
   const [roleTyped, setRoleTyped] = useState('');
   const typedRead = useRef(false);
-  const [focusNameTick, setFocusNameTick] = useState(0); // a taken name: the cursor goes to the name field once the card is back (the line sits under the button)
-  useEffect(() => { if (focusNameTick > 0 && view.kind === 'choose') document.getElementById('quick-agent-name')?.focus(); }, [focusNameTick, view.kind]);
+  const [focusAsk, setFocusAsk] = useState<{ id: string; n: number } | null>(null); // a refused name/role: the cursor goes to that field once the card is back (the line sits under the button)
+  useEffect(() => { if (focusAsk && view.kind === 'choose') document.getElementById(focusAsk.id)?.focus(); }, [focusAsk, view.kind]);
   /** the one project of a free organization that the 402 named; chosen by [넣고 시작] only */
   // codex self-QA: the setup this start made is the SERVER's (`setup_id` in its answer); the address's `setup=` is only the fallback (an older answer without it)
   const [madeSetupId, setMadeSetupId] = useState<string | null>(null);
@@ -252,7 +252,7 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
       }
       const body = await res.json().catch(() => null);
       const error = body?.error as { code?: string; resource?: string; limit?: unknown } | undefined;
-      const out = soloOutcome(res.status, error, res.headers.get('Retry-After'));
+      const out = soloOutcome(res.status, error, res.headers.get('Retry-After'), (body as { detail?: unknown } | null)?.detail);
       switch (out.kind) {
         case 'rate-limited': {
           const secs = out.retryAfter;
@@ -265,8 +265,14 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
         case 'name-taken':
           // story 4784: never renamed behind their back — the free name goes into the field, the line says so, and «만들기» is theirs to press again
           if (out.suggested) setNameTyped(out.suggested);
-          setFocusNameTick((n) => n + 1);
+          setFocusAsk((f) => ({ id: 'quick-agent-name', n: (f?.n ?? 0) + 1 }));
           setErrorLine(out.suggested ? t('quick.nameTaken', { name: out.suggested }) : t('quick.nameTakenNoSuggestion'));
+          setView({ kind: 'choose' });
+          return;
+        case 'bad-text':
+          // story 4784: say which field and why — a retry of the same text could never go through
+          setErrorLine(out.field === 'agent_role' ? t('quick.roleInvalid') : out.blank ? t('quick.nameBlankLooking') : t('quick.nameInvalid'));
+          setFocusAsk((f) => ({ id: out.field === 'agent_role' ? 'quick-agent-role' : 'quick-agent-name', n: (f?.n ?? 0) + 1 }));
           setView({ kind: 'choose' });
           return;
         case 'project-limit': setErrorLine(t('firstProject.limit', { limit: typeof error?.limit === 'number' ? error.limit : 1 })); setView({ kind: 'choose' }); return;

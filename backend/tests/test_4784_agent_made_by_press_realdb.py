@@ -120,11 +120,11 @@ async def test_a_blank_role_is_no_role_and_a_blank_or_control_name_is_refused(so
     async with _client() as c:
         before = await _state()
         code, _, _ = await _solo_code(c, "d4784 refusals")
-        for bad in ({"agent_name": "   "}, {"agent_name": "a\nb"}, {"agent_name": "x" * 61}, {"agent_role": "r\tr"}, {"agent_role": "r" * 201}, {"folder_name": "f\nf"},
+        for bad in ({"agent_name": "   "}, {"agent_name": "a\nb"}, {"agent_name": "x" * 61}, {"agent_role": "r\tr"}, {"agent_role": "r" * 201},
                     # a line/paragraph separator or a bidi override would split or flip the one line the name/role/folder is drawn in (codex r1)
-                    {"agent_name": "a\u2028b"}, {"agent_name": "\u202eevil"}, {"agent_role": "r\u2029r"}, {"folder_name": "f\u2066f"},
+                    {"agent_name": "a\u2028b"}, {"agent_name": "\u202eevil"}, {"agent_role": "r\u2029r"},
                     # the persona list (Cc · Cf · Zl · Zp): zero-width space / joiner / BOM / soft hyphen / the invisible tag block, and names that draw as nothing (Kadir 5245 ⓒ)
-                    {"agent_name": "Zed\u200bBot"}, {"agent_name": "a\u200db"}, {"agent_name": "\ufeffok"}, {"agent_name": "o\u00adk"}, {"agent_name": "\U000e006f\U000e006b"},
+                    {"agent_name": "Zed\u200bBot"}, {"agent_name": "\u200dab"}, {"agent_name": "ab\u200c"}, {"agent_name": "a \u200d b"}, {"agent_name": "a\u200d\u200cb"}, {"agent_name": "\ufeffok"}, {"agent_name": "o\u00adk"}, {"agent_name": "\U000e006f\U000e006b"},
                     {"agent_name": "\u3164"}, {"agent_name": "\u2800\u2800"}, {"agent_name": " \u00a0 "}):
             r = await _confirm_solo(c, code, {"runtime": "claude", "project_name": "bad-app", **bad})
             assert r.status_code == 422, (bad, r.text)
@@ -270,3 +270,45 @@ async def test_a_caller_who_became_admin_between_the_two_looks_is_refused_not_le
         r = await _confirm_solo(c, code, {"runtime": "claude", "project_id": str(PROJ), "agent_name": "Late"})
         assert (r.status_code, r.json()["error"]["code"]) == (403, "not_org_admin"), r.text
         assert await _state() == before
+
+
+@pytest.mark.anyio
+async def test_real_names_with_joiners_are_made_and_a_folder_name_is_cleaned_never_refused(solo):
+    """Kadir 5245 +1: a joiner BETWEEN two characters is part of real names (an emoji sequence, Persian, Indic) and is accepted; the Mac folder's name goes only
+    into the room's first line, so it is cleaned of the persona text's characters and never refused (a refusal there would end every «만들기» for such a folder)."""
+    async with _client() as c:
+        for i, name in enumerate(("\U0001f469‍\U0001f4bb Dev", "می‌خواهم", "क्‍ष")):
+            code, _, _ = await _solo_code(c, f"d4784 joiner {i}")
+            r = await _confirm_solo(c, code, {"runtime": "claude", "project_id": str(PROJ), "agent_name": name})
+            assert r.status_code == 200, (name, r.text)
+            assert r.json()["members"][0]["name"] == name
+        removed = "‌‍﻿‎⁦\n"
+        for i, folder in enumerate(("\U0001f468‍\U0001f469‍\U0001f467 family", "می‌خواهم", "﻿proj", "proj‎", "क्‍ष", "a⁦b")):
+            code, _, _ = await _solo_code(c, f"d4784 folder {i}")
+            r = await _confirm_solo(c, code, {"runtime": "claude", "project_name": f"folder-{i}", "folder_name": folder, "agent_name": f"Joiner folder {i}"})
+            assert r.status_code == 200, (folder, r.text)
+            (line,) = await _lines(r.json()["conversation_id"])
+            cleaned = "".join(ch for ch in folder if ch not in removed).strip()
+            assert line[0].endswith(f"· 폴더 {cleaned}"), (folder, line[0])
+
+
+@pytest.mark.anyio
+async def test_a_long_project_name_keeps_within_100_and_an_old_name_with_a_hidden_character_is_still_taken(solo):
+    """Kadir 5245 +1 (the two mutants the first nine tests let live): (a) a 100-character folder name twice → two projects, the second cut to 100 with « 2» ·
+    (b) an agent made another way (the plain create has no check) whose name holds a zero-width space is the same name as its visible twin."""
+    async with _client() as c:
+        for i in range(2):
+            code, _, _ = await _solo_code(c, f"d4784 long project {i}")
+            r = await _confirm_solo(c, code, {"runtime": "claude", "project_name": "p" * 100, "agent_name": f"Long project {i}"})
+            assert r.status_code == 200, r.text
+        names = sorted(x[0] for x in await _sql(fetch=f"SELECT name FROM projects WHERE org_id='{ORG}' AND name LIKE 'pppp%'"))
+        assert sorted(len(n) for n in names) == [100, 100] and sum(n.endswith(" 2") for n in names) == 1, names
+        await _sql(f"INSERT INTO members (id,org_id,type,name,is_active) VALUES (gen_random_uuid(),'{ORG}','agent','Old​ Agent',true)")
+        code, _, _ = await _solo_code(c, "d4784 hidden twin")
+        r = await _confirm_solo(c, code, {"runtime": "claude", "project_id": str(PROJ), "agent_name": "Old Agent"})
+        assert (r.status_code, r.json()["error"]["code"]) == (409, "agent_name_taken"), r.text
+        # the refusal's shape the card reads: FastAPI's `detail` list with `loc: ['body', field]` and the message (the card names the field and the reason)
+        bad = await _confirm_solo(c, code, {"runtime": "claude", "project_id": str(PROJ), "agent_name": "\u200bx"})
+        assert bad.status_code == 422 and bad.json()["detail"][0]["loc"] == ["body", "agent_name"] and "control characters" in bad.json()["detail"][0]["msg"], bad.text
+        blank = await _confirm_solo(c, code, {"runtime": "claude", "project_id": str(PROJ), "agent_name": "\u3164"})
+        assert blank.status_code == 422 and "must not be blank" in blank.json()["detail"][0]["msg"], blank.text

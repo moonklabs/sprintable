@@ -924,6 +924,27 @@ describe('[SID:4784] the card is the moment an agent is made — «에이전트 
     expect(nameField().value).toBe('First');
   });
 
+  it('a refused name or role (422) says which one and why, puts the cursor there, and keeps what was typed — not a «try again» that could never work', async () => {
+    const refuse = (field: string, msg: string) => () => new Response(JSON.stringify({ detail: [{ type: 'value_error', loc: ['body', field], msg }] }), { status: 422 });
+    await mount(frag(F4784), { projectId: PROJ });
+    confirmNow = refuse('agent_name', 'Value error, must not contain control characters');
+    await typeInto(nameField(), 'bad\u200bname');
+    await act(async () => { buttonOf('만들기')!.click(); });
+    await settle();
+    expect(container.querySelector('[data-testid=quick-error]')!.textContent).toBe('이름에 쓸 수 없는 글자가 있어요 — 보이지 않는 글자나 줄바꿈을 빼고 다시 적어 주세요');
+    expect(document.activeElement).toBe(nameField());
+    expect(nameField().value).toBe('bad\u200bname');
+    confirmNow = refuse('agent_name', 'Value error, must not be blank');
+    await act(async () => { buttonOf('만들기')!.click(); });
+    await settle();
+    expect(container.querySelector('[data-testid=quick-error]')!.textContent).toBe('이름이 비어 보여요 — 눈에 보이는 글자로 적어 주세요');
+    confirmNow = refuse('agent_role', 'Value error, must not contain control characters');
+    await act(async () => { buttonOf('만들기')!.click(); });
+    await settle();
+    expect(container.querySelector('[data-testid=quick-error]')!.textContent).toBe('역할에 쓸 수 없는 글자가 있어요 — 보이지 않는 글자나 줄바꿈을 빼고 다시 적어 주세요');
+    expect(document.activeElement).toBe(roleField());
+  });
+
   it('a failed creation says «만들지 못했어요» (not «시작»), keeps the typed fields and the button', async () => {
     confirmNow = () => new Response(JSON.stringify({ error: { code: 'whatever' } }), { status: 500 });
     await mount(frag(F4784), { projectId: PROJ });
