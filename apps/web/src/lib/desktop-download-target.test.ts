@@ -1,6 +1,6 @@
 // 4763 follow-up — the public download door's process cache: a good answer is kept for a short while, a read in flight is joined, a failure is never kept, the cache is per bucket, the read has a time limit.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearDownloadTargetCache, DOWNLOAD_FAILURE_MEMORY_MS, DOWNLOAD_FETCH_TIMEOUT_MS, DOWNLOAD_TARGET_TTL_MS, publicDownloadTarget } from './desktop-download-target';
+import { clearDownloadTargetCache, DOWNLOAD_FAILURE_MEMORY_MS, DOWNLOAD_FETCH_TIMEOUT_MS, DOWNLOAD_STALE_MAX_MS, DOWNLOAD_TARGET_TTL_MS, publicDownloadTarget } from './desktop-download-target';
 
 const A = 'sprintable-desktop-releases-dev';
 const B = 'sprintable-desktop-releases';
@@ -141,5 +141,79 @@ describe('publicDownloadTarget (4763 follow-up)', () => {
     const log = vi.mocked(console.error);
     expect(log).toHaveBeenCalledWith('desktop_downloads.public_redirect_unavailable', 'TypeError');
     expect(log.mock.calls.flat().map(String).join('|')).not.toContain('SECRET-4763-FU');
+  });
+
+  // 4763 follow-up (PO): a customer pressing «받기» at the moment of ONE failed refresh must not meet a 502 — the last checked url stands in while the manifest cannot be READ
+  describe('stale-if-error', () => {
+    const unreadable: Array<[string, () => ReturnType<typeof fakeFetch>]> = [
+      ['a thrown error', () => fakeFetch(async () => { throw new Error('boom'); })],
+      ['a body that is not JSON', () => fakeFetch(async () => ({ ok: true, text: async () => 'not json' }) as unknown as Response)],
+      ['a read that times out', () => fakeFetch((_url, init) => new Promise<Response>((_resolve, reject) => {
+        if (init?.signal?.aborted) reject(init.signal.reason);
+        else init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
+      }))],
+    ];
+
+    it.each(unreadable)('a refresh that could not read the manifest (%s) serves the last checked url — never a 502 for a bucket that had a good answer', async (_name, make) => {
+      const good = fakeFetch(async () => ok(dmg(A)));
+      expect(await publicDownloadTarget(A, good)).toBe(dmg(A));
+      vi.advanceTimersByTime(DOWNLOAD_TARGET_TTL_MS + 1); // expired: the next request refreshes
+      if (_name === 'a read that times out') vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => AbortSignal.abort(new DOMException('The operation timed out', 'TimeoutError')));
+      const broken = make();
+      expect(await publicDownloadTarget(A, broken)).toBe(dmg(A)); // the stale url, not null
+      expect(broken).toHaveBeenCalledTimes(1);
+      // during the rest the same stale url, without a new read
+      expect(await publicDownloadTarget(A, broken)).toBe(dmg(A));
+      expect(broken).toHaveBeenCalledTimes(1);
+    });
+
+    it('the stale url is not a new answer: after the rest the next request refreshes again, and a good read replaces it', async () => {
+      const f = fakeFetch(async () => ok(dmg(A)));
+      await publicDownloadTarget(A, f);
+      vi.advanceTimersByTime(DOWNLOAD_TARGET_TTL_MS + 1);
+      f.mockImplementation((async () => { throw new Error('boom'); }) as unknown as typeof fetch);
+      expect(await publicDownloadTarget(A, f)).toBe(dmg(A)); // stale
+      vi.advanceTimersByTime(DOWNLOAD_FAILURE_MEMORY_MS); // the rest is over — still no fresh answer
+      f.mockImplementation((async () => ok(dmg(A, 'newbuild99'))) as unknown as typeof fetch);
+      expect(await publicDownloadTarget(A, f)).toBe(dmg(A, 'newbuild99')); // the refresh asked again and replaced the stale one
+      expect(f).toHaveBeenCalledTimes(3);
+    });
+
+    it('a bucket that never gave a good answer still gets null (the 502) — there is nothing stale to serve', async () => {
+      const f = fakeFetch(async () => { throw new Error('boom'); });
+      expect(await publicDownloadTarget(A, f)).toBeNull();
+      vi.advanceTimersByTime(DOWNLOAD_FAILURE_MEMORY_MS);
+      expect(await publicDownloadTarget(A, f)).toBeNull();
+    });
+
+    it('the stale url is bounded: older than DOWNLOAD_STALE_MAX_MS it is not served any more (null)', async () => {
+      const f = fakeFetch(async () => ok(dmg(A)));
+      await publicDownloadTarget(A, f);
+      f.mockImplementation((async () => { throw new Error('boom'); }) as unknown as typeof fetch);
+      vi.advanceTimersByTime(DOWNLOAD_STALE_MAX_MS - 1_000);
+      expect(await publicDownloadTarget(A, f)).toBe(dmg(A)); // still young enough
+      vi.advanceTimersByTime(DOWNLOAD_FAILURE_MEMORY_MS + 2_000); // past the bound
+      expect(await publicDownloadTarget(A, f)).toBeNull();
+    });
+
+    it('an explicit refusal is not an outage: the manifest was READ and its url is not ours → null, and nothing stale is served afterwards either', async () => {
+      const f = fakeFetch(async () => ok(dmg(A)));
+      await publicDownloadTarget(A, f);
+      vi.advanceTimersByTime(DOWNLOAD_TARGET_TTL_MS + 1);
+      f.mockImplementation((async () => ok('https://evil.example/x.dmg')) as unknown as typeof fetch);
+      expect(await publicDownloadTarget(A, f)).toBeNull(); // not the stale url
+      vi.advanceTimersByTime(DOWNLOAD_FAILURE_MEMORY_MS);
+      f.mockImplementation((async () => { throw new Error('boom'); }) as unknown as typeof fetch);
+      expect(await publicDownloadTarget(A, f)).toBeNull(); // the refused read dropped the stale answer
+    });
+
+    it('is per bucket: A has a stale url, B never had a good answer — both refresh and fail → A serves its own, B gets null', async () => {
+      const f = fakeFetch(async (url) => ok(url.includes(`/${B}/`) ? dmg(B) : dmg(A)));
+      await publicDownloadTarget(A, f);
+      vi.advanceTimersByTime(DOWNLOAD_TARGET_TTL_MS + 1);
+      f.mockImplementation((async () => { throw new Error('boom'); }) as unknown as typeof fetch);
+      expect(await publicDownloadTarget(A, f)).toBe(dmg(A));
+      expect(await publicDownloadTarget(B, f)).toBeNull(); // B has nothing — and A's url is never handed to B
+    });
   });
 });
