@@ -27,13 +27,20 @@ _EXPECTED_MODE = {
 }
 
 
-def _commands() -> list[tuple[str, str]]:
-    """every `gcloud run deploy <service>` / `gcloud run services update <service>` command in cloudbuild.yaml (service, full command text incl. continuation lines)"""
+def _commands(doc: dict | None = None) -> list[tuple[str, str]]:
+    """every `gcloud run deploy <service>` / `gcloud run services update <service>` in cloudbuild.yaml (service, full command text incl. continuation lines) — both inside a bash step's script and as a direct gcloud step
+    (`args: [run, deploy, <service>, …]`, the cloud-sdk image's default entrypoint is gcloud)"""
     out: list[tuple[str, str]] = []
     start = re.compile(r"^\s*gcloud run (?:deploy|services update) (\S+)")
-    for step in yaml.safe_load(_CLOUDBUILD)["steps"]:
-        args = step.get("args") or []
-        if len(args) < 2 or not isinstance(args[1], str):
+    for step in (doc or yaml.safe_load(_CLOUDBUILD))["steps"]:
+        args = [str(a) for a in (step.get("args") or [])]
+        if step.get("entrypoint") in (None, "gcloud") and args[:2] == ["run", "deploy"] and len(args) > 2:
+            out.append((args[2], "gcloud " + " ".join(args)))
+            continue
+        if step.get("entrypoint") in (None, "gcloud") and args[:3] == ["run", "services", "update"] and len(args) > 3:
+            out.append((args[3], "gcloud " + " ".join(args)))
+            continue
+        if len(args) < 2:
             continue
         lines = args[1].split("\n")  # the file's own text (escaped form): the checks below read it as written
         i = 0
@@ -49,6 +56,17 @@ def _commands() -> list[tuple[str, str]]:
             out.append((m.group(1), "\n".join(text)))
             i += 1
     return out
+
+
+def test_the_scan_also_finds_a_direct_gcloud_step():
+    """a new service added as `args: [run, deploy, new-service, …]` (no bash) must not slip past the closed-set check (codex 4786)"""
+    doc = {"steps": [
+        {"name": "gcr.io/google.com/cloudsdktool/cloud-sdk", "args": ["run", "deploy", "brand-new-service", "--image=x"]},
+        {"name": "gcr.io/google.com/cloudsdktool/cloud-sdk", "entrypoint": "gcloud", "args": ["run", "services", "update", "another-new", "--image=x"]},
+        {"name": "x", "entrypoint": "bash", "args": ["-c", "gcloud run deploy in-bash \\\n  --image=x \\\n  --quiet"]},
+        {"name": "x", "entrypoint": "bash", "args": ["-c", "# gcloud run deploy only-a-comment\necho hi"]},
+    ]}
+    assert [s for s, _ in _commands(doc)] == ["brand-new-service", "another-new", "in-bash"]
 
 
 def test_every_cloud_run_deploy_command_states_its_billing_mode():
@@ -86,31 +104,34 @@ def test_the_real_steps_send_exactly_one_billing_flag_on_dev_and_none_on_prod():
 def _step_call(step_id: str, deploy_env: str, call_pattern: str, extra_env: dict[str, str] | None = None) -> str:
     """run a REAL step of cloudbuild.yaml with gcloud stubbed; return the one `gcloud run …` call matching `call_pattern`"""
     script = _apply_cloudbuild_escaping(_extract_step_script(step_id))
-    names = set(re.findall(r"\$\{([A-Z_][A-Z0-9_]*)\}", script))
+    # only what Cloud Build supplies is pre-set (substitutions start with `_`; PROJECT_ID · COMMIT_SHA are built-ins). The script's OWN shell variables (MCP_CPU_FLAG · CPU_FLAG · ENV_VARS …) are left alone: pre-setting
+    # them hid a removed `VAR=""` initialisation, which fails a real prod build under `set -u` (codex 4786)
+    names = {n for n in re.findall(r"\$\{([A-Z_][A-Z0-9_]*)\}", script) if n.startswith("_") or n in ("PROJECT_ID", "COMMIT_SHA")}
     env = {**os.environ, **{n: "x" for n in names}, "_DEPLOY_ENV": deploy_env, "_MCP_ALLOWED_HOSTS": "", "_SUPPORT_GATEWAY_CORS_ORIGINS": "", **(extra_env or {})}
     # the mcp step checks the served image against what it deployed: with every name set to "x" that is this string
     stub = (
-        'gcloud() { if [ "$1 $2 $3" = "run services describe" ]; then echo "x-docker.pkg.dev/x/x/backend:x"; else echo "CALL $*"; fi; }\n'
+        'gcloud() { if [ "$1 $2 $3" = "run services describe" ]; then echo "x-docker.pkg.dev/x/x/backend:x"; else printf "CALL"; for a in "$@"; do printf " [%s]" "$a"; done; echo; fi; }\n'
     )
     proc = subprocess.run(["bash", "-c", stub + script], capture_output=True, text=True, env=env)
     assert proc.returncode == 0, proc
     calls = [line for line in proc.stdout.splitlines() if re.match(call_pattern, line)]
     assert len(calls) == 1, proc.stdout
+    assert "[]" not in calls[0], calls[0]  # no empty argument reaches gcloud (the unquoted empty flag expands to nothing)
     return calls[0]
 
 
 def test_mcp_dev_bills_per_request_and_prod_states_nothing():
-    dev = _step_call("deploy-mcp", "dev", r"^CALL run services update ")
-    assert dev.count("--cpu-throttling") == 1 and "--no-cpu-throttling" not in dev, dev
-    prod = _step_call("deploy-mcp", "prod", r"^CALL run services update ")
+    dev = _step_call("deploy-mcp", "dev", r"^CALL \[run\] \[services\] \[update\] ")
+    assert dev.count("[--cpu-throttling]") == 1 and "--no-cpu-throttling" not in dev, dev
+    prod = _step_call("deploy-mcp", "prod", r"^CALL \[run\] \[services\] \[update\] ")
     assert "--cpu-throttling" not in prod and "--no-cpu-throttling" not in prod, prod
 
 
 def test_support_gateway_dev_bills_per_request_and_prod_states_nothing():
     on = {"_SUPPORT_GATEWAY_DEPLOY_ENABLED": "true"}
-    dev = _step_call("deploy-support-gateway", "dev", r"^CALL run deploy support-gateway-", on)
-    assert dev.count("--cpu-throttling") == 1 and "--no-cpu-throttling" not in dev, dev
-    prod = _step_call("deploy-support-gateway", "prod", r"^CALL run deploy support-gateway-", on)
+    dev = _step_call("deploy-support-gateway", "dev", r"^CALL \[run\] \[deploy\] \[support-gateway-", on)
+    assert dev.count("[--cpu-throttling]") == 1 and "--no-cpu-throttling" not in dev, dev
+    prod = _step_call("deploy-support-gateway", "prod", r"^CALL \[run\] \[deploy\] \[support-gateway-", on)
     assert "--cpu-throttling" not in prod and "--no-cpu-throttling" not in prod, prod
 
 
