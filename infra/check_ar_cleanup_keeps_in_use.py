@@ -28,7 +28,8 @@ exit code: 0=지움 0 · 1=사용 중 이미지가 지워진다 · 2=입력 오�
           태그로 배포된 서빙 리비전에 `status.imageDigest`가 없음) — 안전하게 실패.
 참조는 `<host>/<project>/<repo>/<package>`까지 같아야 같은 이미지로 친다(다른 저장소의 같은 이름은 보호하지 않는다). 태그도 digest도 없는 참조는 `:latest`로 본다.
 
-한계(적용 절차로 막는다): 덤프는 «그 시각의» 모습이다. 덤프 → 확인 → dry-run → 적용을 한 번에 이어서 하고(그 사이 배포 금지), GCE가 당기는 `backend:<sha>` 같은 태그가 그 사이에 옮겨지지 않게 한다.
+한계(적용 절차로 막는다): 생성 정책의 `keep-in-use`는 «덤프 시각의» 사용 중 digest 목록이다. 그 뒤에 사용 중 이미지가 «최근 30개 밖의 옛 이미지»로 바뀌면(예: 손으로 배포하는 prod MIG 템플릿을 옛 sha로 되돌림 · 옛 리비전으로 롤백) 새 목록이 없어 지워질 수 있다 —
+그런 일 前에는 이 확인기를 다시 돌려 정책을 다시 만들어 적용한다(정책은 자동으로 따라가지 않는다). 덤프는 «그 시각의» 모습이다. 덤프 → 확인 → dry-run → 적용을 한 번에 이어서 하고(그 사이 배포 금지), GCE가 당기는 `backend:<sha>` 같은 태그가 그 사이에 옮겨지지 않게 한다.
 """
 from __future__ import annotations
 
@@ -103,7 +104,10 @@ def load_versions(data: Any) -> list[Version]:
         tags = [t for t in (raw_tags.split(",") if isinstance(raw_tags, str) else raw_tags) if t]
         parts = package.split("/")
         repo = "/".join(parts[:3]) if len(parts) > 3 and "docker.pkg.dev" in parts[0] else None
-        out.append(Version(_short_package(package), digest, tags, _parse_time(it.get("createTime") or it.get("updateTime")), repo))
+        when = it.get("createTime") or it.get("updateTime")
+        if _parse_time(when).timestamp() == 0:
+            raise ValueError(f"이미지 {package} {digest}에 읽을 수 있는 createTime/updateTime이 없다")
+        out.append(Version(_short_package(package), digest, tags, _parse_time(when), repo))
     return out
 
 
@@ -142,6 +146,13 @@ def _serving_revision_names(services: Any) -> set[str]:
     return names
 
 
+def _unresolved_tags(found: list[Ref]) -> bool:
+    """태그로 배포된 이미지가 리비전 안에 N개면 그 리비전은 해결된 digest도 N개 이상 가져야 한다(컨테이너 하나의 digest가 다른 컨테이너의 태그를 가리지 못하게)."""
+    tagged = {(r["package"], r["tag"]) for r in found if r["tag"]}
+    digests = {r["digest"] for r in found if r["digest"]}
+    return bool(tagged) and len(digests) < len(tagged)
+
+
 def collect_in_use_refs(
     services: Any = None, revisions: Any = None, jobs: Any = None, extra: Iterable[Any] = ()
 ) -> tuple[list[Ref], list[str], list[str]]:
@@ -167,13 +178,17 @@ def collect_in_use_refs(
                     found = refs_in(json.dumps(rev))
                     if not found:
                         problems.append(f"서빙 중 리비전 {_name_of(rev)}에서 이미지 참조를 못 찾음")
-                    elif any(r["tag"] for r in found) and not any(r["digest"] for r in found):
-                        # 태그로 배포된 리비전이 실제로 쥔 digest(`status.imageDigest`)를 모르면, 태그가 그 뒤 옮겨졌을 때 옛 이미지를 못 지킨다 — 모르면 실패
-                        problems.append(f"서빙 중 리비전 {_name_of(rev)}가 태그로 배포됐는데 status.imageDigest가 없다(어느 digest를 쥐었는지 모른다)")
+                    elif _unresolved_tags(found):
+                        # 태그로 배포된 이미지마다 실제로 쥔 digest(`status.imageDigest`)를 모르면, 태그가 그 뒤 옮겨졌을 때 옛 이미지를 못 지킨다 — 모르면 실패
+                        problems.append(f"서빙 중 리비전 {_name_of(rev)}에 태그로 배포된 이미지가 있는데 그만큼의 status.imageDigest가 없다(어느 digest를 쥐었는지 모른다)")
                     refs += found
         else:
             warnings.append("서비스 JSON에서 서빙 중 리비전을 못 읽어 모든 리비전을 사용 중으로 셌다(안전한 쪽).")
-            refs += refs_in(json.dumps(revisions))
+            for rev in revs:
+                found = refs_in(json.dumps(rev))
+                if _unresolved_tags(found):
+                    problems.append(f"리비전 {_name_of(rev) or '?'}에 태그로 배포된 이미지가 있는데 그만큼의 status.imageDigest가 없다(서빙 여부를 몰라 모든 리비전을 센다)")
+                refs += found
     for job in _items(jobs) if jobs is not None else []:
         found = refs_in(json.dumps(job))
         if not found:
@@ -341,12 +356,15 @@ def main(argv: list[str] | None = None) -> int:
     if not versions:
         print("입력 오류: AR 이미지 목록이 비었다.")
         return 2
+    if any(r.get("name") == "keep-in-use" for r in base):
+        print("입력 오류: 기본 정책에 이미 keep-in-use 규칙이 있다(생성본이 덮어쓰면 보호가 사라질 수 있다) — 기본 정책에는 두지 않는다.")
+        return 2
     for label, data, expect in (("서비스", services, args.expect_services), ("job", jobs, args.expect_jobs)):
         if expect is not None and len(_items(data)) != expect:
             print(f"입력 오류: {label} 덤프가 {len(_items(data))}개인데 {expect}개여야 한다(덤프가 잘렸다).")
             return 2
-    if not _items(services) or not _items(revisions):
-        print("입력 오류: 서비스 또는 리비전 덤프가 비었다(서빙 중 이미지를 알 수 없다).")
+    if not _items(services) or not _items(revisions) or not _items(jobs):
+        print("입력 오류: 서비스 · 리비전 · job 덤프 중 비어 있는 것이 있다(사용 중 이미지를 다 알 수 없다).")
         return 2
     refs, warnings, problems = collect_in_use_refs(services, revisions, jobs, extra)
     if not refs:

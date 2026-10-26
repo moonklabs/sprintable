@@ -132,10 +132,23 @@ def test_only_serving_revisions_count_as_in_use_not_every_old_revision():
 
 
 def test_without_a_service_list_every_revision_counts_as_in_use():
-    revisions = [_revision("rev-1", f"{HOST}/backend:backend-tag50")]
-    refs, warnings, _problems = gate.collect_in_use_refs(None, revisions)
+    revisions = [_revision("rev-1", f"{HOST}/backend:backend-tag50", image_digest=_digest(50))]
+    refs, warnings, problems = gate.collect_in_use_refs(None, revisions)
     in_use, _ = gate.resolve_in_use(refs, _versions())
-    assert in_use == {("backend", _digest(50))} and warnings  # the safe side, said out loud
+    assert in_use == {("backend", _digest(50))} and warnings and not problems  # the safe side, said out loud
+
+
+def test_the_all_revisions_fallback_also_needs_the_resolved_digest_and_one_per_container():
+    """no serving info -> every revision counts, but a revision deployed by tag still must carry what it runs; and a second container's digest must not hide the first container's tag"""
+    refs, _warnings, problems = gate.collect_in_use_refs(None, [_revision("rev-1", f"{HOST}/backend:backend-tag50")])
+    assert problems and "rev-1" in problems[0]
+    two = {"metadata": {"name": "rev-2"}, "spec": {"containers": [{"image": f"{HOST}/backend:backend-tag2"}, {"image": f"{HOST}/frontend:frontend-tag1"}]},
+           "status": {"imageDigest": _digest(2)}}
+    _refs, _warnings, problems = gate.collect_in_use_refs([_service("s", "rev-2", f"{HOST}/backend:backend-tag2")], [two])
+    assert problems, "one resolved digest cannot cover two tagged containers"
+    two["status"] = {"imageDigest": _digest(2), "containerStatuses": [{"imageDigest": _digest(10_001)}]}
+    _refs, _warnings, problems = gate.collect_in_use_refs([_service("s", "rev-2", f"{HOST}/backend:backend-tag2")], [two])
+    assert not problems
 
 
 def test_a_moved_tag_is_still_protected_by_the_revisions_resolved_digest(tmp_path):
@@ -229,6 +242,19 @@ def test_cli_bad_input_is_exit_2_never_a_green(tmp_path):
     d = Dumps(tmp_path)
     d.services, d.revisions = [], []
     assert gate.main(d.argv()) == 2 and not d.out.exists()
+
+
+def test_empty_jobs_unreadable_times_and_a_polluted_base_policy_are_bad_input(tmp_path):
+    d = Dumps(tmp_path)
+    d.jobs = []
+    assert gate.main(d.argv()) == 2 and not d.out.exists()
+    d = Dumps(tmp_path)
+    del d.images[0]["createTime"], d.images[0]["updateTime"]
+    assert gate.main(d.argv()) == 2 and not d.out.exists()
+    d = Dumps(tmp_path)
+    base = tmp_path / "base.json"
+    base.write_text(json.dumps(_base() + [{"name": "keep-in-use", "action": {"type": "Keep"}, "condition": {"versionNamePrefixes": ["sha256:" + "0" * 64]}}]))
+    assert gate.main(d.argv("--base-policy", str(base))) == 2 and not d.out.exists()
 
 
 def test_a_ref_without_tag_or_digest_means_latest():
