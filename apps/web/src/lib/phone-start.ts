@@ -20,7 +20,8 @@ export interface StartableAgent {
 }
 /** `computer_id` (story 4734): the server's id of the computer this entry's setup belongs to — an older server sends none (the entry is then its own computer) */
 /** `computer_press` (story 4734 B): this computer's app takes the press of the WHOLE computer (the `computer` mark) — an older app or server says nothing: false */
-export interface StartableComputer { setup_id: string; device_name: string; reachable: boolean; agents: StartableAgent[]; computer_id?: string; computer_press?: boolean }
+/** `agents_hidden` (story 4714): the server left agents of this computer out because the person cannot open a conversation with them (the agent's message policy) and none is left — the screen says that, not «no agent yet». */
+export interface StartableComputer { setup_id: string; device_name: string; reachable: boolean; agents: StartableAgent[]; computer_id?: string; computer_press?: boolean; agents_hidden?: 'message_policy' }
 export interface StartableView { remote_control: boolean; computers: StartableComputer[] }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -38,7 +39,7 @@ export function parseStartable(raw: unknown): StartableView | null {
       const projects = a.projects.filter((p): p is Record<string, unknown> => isObj(p) && isStr(p.project_id) && isStr(p.name)).map((p) => ({ project_id: p.project_id as string, name: p.name as string }));
       agents.push({ agent_member_id: a.agent_member_id, name: a.name, can_command: a.can_command === true, projects, running: typeof a.running === 'boolean' ? a.running : null });
     }
-    computers.push({ setup_id: c.setup_id, device_name: c.device_name, reachable: c.reachable === true, agents, ...(isStr(c.computer_id) ? { computer_id: c.computer_id } : {}), ...(c.computer_press === true ? { computer_press: true } : {}) });
+    computers.push({ setup_id: c.setup_id, device_name: c.device_name, reachable: c.reachable === true, agents, ...(isStr(c.computer_id) ? { computer_id: c.computer_id } : {}), ...(c.computer_press === true ? { computer_press: true } : {}), ...(c.agents_hidden === 'message_policy' ? { agents_hidden: 'message_policy' as const } : {}) });
   }
   return { remote_control: raw.remote_control, computers };
 }
@@ -61,7 +62,7 @@ export function groupByComputer(entries: readonly StartableComputer[]): Startabl
     const members = groups.get(key)!;
     if (members.length === 1 && !members[0]!.computer_id) return members[0]!;
     const ranked = [...members].sort((a, b) => Number(b.reachable) - Number(a.reachable));
-    const rep = ranked[0]!;
+    const { agents_hidden: _hidden, ...rep } = ranked[0]!; // the merged computer says «hidden» only when no agent is left of ALL its setups (below), not because the first setup said it
     const seen = new Map<string, StartableAgent>();
     for (const m of ranked) {
       for (const a of m.agents) {
@@ -69,7 +70,7 @@ export function groupByComputer(entries: readonly StartableComputer[]): Startabl
         if (!have || (have.running !== true && a.running === true && m.reachable)) seen.set(a.agent_member_id, { ...a, setup_id: m.setup_id });
       }
     }
-    return { ...rep, reachable: members.some((m) => m.reachable), agents: [...seen.values()] };
+    return { ...rep, reachable: members.some((m) => m.reachable), agents: [...seen.values()], ...(seen.size === 0 && members.some((m) => m.agents_hidden === 'message_policy') ? { agents_hidden: 'message_policy' as const } : {}) };
   });
 }
 

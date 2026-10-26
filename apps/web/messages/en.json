@@ -1795,7 +1795,8 @@
       },
       "noAgent": {
         "line": "{device} has no agents yet — pick a folder at your Mac and start the first agent.",
-        "lineNoAccess": "There's no agent on {device} that you can start."
+        "lineNoAccess": "There's no agent on {device} that you can start.",
+        "lineNoTalk": "Only people who are allowed to chat with the agents on {device} can start them — ask whoever made an agent, or an admin, to allow you."
       },
       "laterNote": "You don't have to do this now.",
       "start": {

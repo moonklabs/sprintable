@@ -338,6 +338,25 @@ describe('[4714] branch 1 — remote control is off', () => {
   });
 });
 
+describe('[SID:4714] a computer whose agents the person may not talk to says so (the server left them out)', () => {
+  it('agents_hidden: message_policy and nothing left → its own line (not «no agent yet»), no button', async () => {
+    world.startable = { remote_control: true, computers: [{ ...computer({ agents: [] }), agents_hidden: 'message_policy' as const }] };
+    await screen();
+    expect(byId('onboarding-phone-no-agent')?.textContent).toBe('윤재의 맥북의 에이전트는 대화가 허용된 사람만 시작할 수 있어요 — 에이전트를 만든 사람이나 관리자에게 허용을 부탁해 주세요.');
+    expect(container.querySelectorAll('button')).toHaveLength(0);
+  });
+  it('the flag is ignored when nothing says it (a computer with no agent at all keeps «start the first agent at the Mac»)', async () => {
+    world.startable = { remote_control: true, computers: [computer({ agents: [] })] };
+    await screen();
+    expect(byId('onboarding-phone-no-agent')?.textContent).toBe('윤재의 맥북에는 아직 에이전트가 없어요 — Mac 앞에서 폴더를 고르고 첫 에이전트를 시작해 주세요.');
+  });
+  it('English words', async () => {
+    world.startable = { remote_control: true, computers: [{ ...computer({ agents: [] }), agents_hidden: 'message_policy' as const }] };
+    await screen({ locale: 'en' });
+    expect(byId('onboarding-phone-no-agent')?.textContent).toContain('Only people who are allowed to chat with the agents on');
+  });
+});
+
 describe('[4714] branch 3 — a paired computer with no agent', () => {
   it('one line with the computer\'s own name, no button, no picker', async () => {
     world.startable = { remote_control: true, computers: [computer({ agents: [] })] };
