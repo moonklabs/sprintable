@@ -502,8 +502,8 @@ jobs:
             # story 4786 (E-INFRA-DIET, 2026-10-26) — 최소 1 → 0 (dev만; prod 는 위 최소 3 그대로). 잃는 것 = dev 첫 페이지의 차가운 시작 몇 초.
             echo "frontend_min_instances=0" >> "$GITHUB_OUTPUT"
             echo "frontend_max_instances=3" >> "$GITHUB_OUTPUT"
-            # story 4786 (E-INFRA-DIET, 2026-10-26) — dev: CPU billed only while a request is served (cloudbuild.yaml `_CPU_FLAGS`, backend + frontend deploy). prod sends nothing: its value is left as it is.
-            echo "cpu_flags=--cpu-throttling" >> "$GITHUB_OUTPUT"
+            # story 4786 (E-INFRA-DIET, 2026-10-26, PO measurement): dev backend and frontend are always working (a never-ending stream sits on every instance), so request-based CPU billing was billed around the clock at the higher per-second rate (Seoul: request-based $0.0000336 · instance-based $0.0000216). dev uses instance-based (cloudbuild.yaml `_CPU_FLAGS`, backend + frontend deploy). prod sends nothing here: its value is left as it is (the prod lines are a separate change).
+            echo "cpu_flags=--no-cpu-throttling" >> "$GITHUB_OUTPUT"
             # story #2158 후속(#2077에서 동반 배선) — 재생 버퍼(PR #2468)는 머지됐으나 켤 배선이
             # 없어 까심군이 사용자 경로 재측정을 못 하고 있었다. dev만 켠다(#2158 취지 자체가
             # "손 gcloud로 안 켠다"라 SSOT 경유 필수).

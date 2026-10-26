@@ -1,0 +1,134 @@
+"""story 4786 (E-INFRA-DIET) — the CPU billing mode of the DEV Cloud Run services the pipeline deploys is STATED in the repository, not inherited from whatever the live service has.
+
+Why (PO measurement, last 6 h): backend and frontend are always working — a never-ending stream sits on every instance — so request-based CPU billing ran around the clock at the higher per-second rate (Seoul: request-based
+$0.0000336 · instance-based $0.0000216 per vCPU-second). dev backend + frontend bill per INSTANCE (`--no-cpu-throttling`); the services that sit idle most of the time (realtime-dev · mcp-dev · office-converter-dev ·
+support-gateway-dev) bill per REQUEST (`--cpu-throttling`). A deploy step that does not pass the flag leaves the live value alone, so a hand-set value survives — but only until someone sets the other one by hand.
+The prod lines are NOT part of this change (prod sends nothing and keeps whatever it has; a later change states it). This file runs the real steps and reads the real files; a new Cloud Run deploy command without a stated mode fails here.
+"""
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+
+import yaml
+
+from tests.test_4786_dev_scale_to_zero import _CLOUDBUILD, _DEV, _PROD, _ROOT, _WORKFLOW
+from tests.test_deploy_backend_redis_secret_conflict import _apply_cloudbuild_escaping, _extract_step_script
+
+# service (as written in the `gcloud run deploy|services update` line) -> the token that states its mode inside that command
+_EXPECTED_MODE = {
+    "sprintable-frontend-${_DEPLOY_ENV}": "${_CPU_FLAGS}",  # the substitution carries --no-cpu-throttling on dev, nothing on prod
+    "sprintable-backend-${_DEPLOY_ENV}": "${_CPU_FLAGS}",
+    "sprintable-mcp-${_DEPLOY_ENV}": "$${MCP_CPU_FLAG}",  # --cpu-throttling on dev, nothing on prod (set just above the command)
+    "sprintable-realtime-${_DEPLOY_ENV}": "--cpu-throttling",  # dev only (its step exits first for any other environment)
+    "office-converter-${_DEPLOY_ENV}": "--cpu-throttling",  # dev only (its step exits first for any other environment)
+    "support-gateway-${_DEPLOY_ENV}": "$${CPU_FLAG}",  # --cpu-throttling on dev, nothing on prod
+}
+
+
+def _commands() -> list[tuple[str, str]]:
+    """every `gcloud run deploy <service>` / `gcloud run services update <service>` command in cloudbuild.yaml (service, full command text incl. continuation lines)"""
+    out: list[tuple[str, str]] = []
+    start = re.compile(r"^\s*gcloud run (?:deploy|services update) (\S+)")
+    for step in yaml.safe_load(_CLOUDBUILD)["steps"]:
+        args = step.get("args") or []
+        if len(args) < 2 or not isinstance(args[1], str):
+            continue
+        lines = args[1].split("\n")  # the file's own text (escaped form): the checks below read it as written
+        i = 0
+        while i < len(lines):
+            m = start.match(lines[i])  # a comment line starts with `#`, never with `gcloud`
+            if not m:
+                i += 1
+                continue
+            text = [lines[i]]
+            while text[-1].rstrip().endswith("\\") and i + 1 < len(lines):
+                i += 1
+                text.append(lines[i])
+            out.append((m.group(1), "\n".join(text)))
+            i += 1
+    return out
+
+
+def test_every_cloud_run_deploy_command_states_its_billing_mode():
+    """the set of services is closed: adding a Cloud Run deploy to the pipeline forces a decision here (per instance or per request)"""
+    cmds = _commands()
+    assert sorted(s for s, _ in cmds) == sorted(_EXPECTED_MODE), [s for s, _ in cmds]
+    for service, text in cmds:
+        token = _EXPECTED_MODE[service]
+        assert text.count(token) == 1, (service, token)
+
+
+def test_dev_backend_and_frontend_bill_per_instance_and_prod_states_nothing():
+    """the dev branch of the workflow sends the flag; the prod branch sends nothing (separate change); the substitution reaches Cloud Build exactly; a manual submit that sends nothing leaves the live value alone"""
+    assert _DEV.count('echo "cpu_flags=--no-cpu-throttling"') == 1
+    assert "cpu_flags" not in _PROD
+    assert "cpu_flags=--cpu-throttling" not in _WORKFLOW
+    assert "V_CPU_FLAGS: ${{ steps.env.outputs.cpu_flags }}" in _WORKFLOW
+    assert '_CPU_FLAGS=\\"${V_CPU_FLAGS}\\"' in _WORKFLOW
+    assert re.findall(r"^  _CPU_FLAGS: '(.*)'$", _CLOUDBUILD, flags=re.M) == [""]
+
+
+def test_the_real_steps_send_exactly_one_billing_flag_on_dev_and_none_on_prod():
+    from tests.test_deploy_backend_redis_secret_conflict import _run_backend_deploy_argv, _run_frontend_deploy_argv
+
+    backend = _run_backend_deploy_argv("dev", _CPU_FLAGS="--no-cpu-throttling", _BACKEND_MIN_INSTANCES="2")
+    assert backend.count("--no-cpu-throttling") == 1 and "--cpu-throttling" not in backend, backend
+    frontend = _run_frontend_deploy_argv("dev", "--no-cpu-throttling")
+    assert frontend.count("--no-cpu-throttling") == 1 and "--cpu-throttling" not in frontend, frontend
+    backend_prod = _run_backend_deploy_argv("prod", _CPU_FLAGS="", _BACKEND_MIN_INSTANCES="3")  # what the prod branch sends: nothing
+    assert "--cpu-throttling" not in backend_prod and "--no-cpu-throttling" not in backend_prod and "" not in backend_prod, backend_prod
+    frontend_prod = _run_frontend_deploy_argv("prod", "")
+    assert "--cpu-throttling" not in frontend_prod and "--no-cpu-throttling" not in frontend_prod and "" not in frontend_prod, frontend_prod
+
+
+def _step_call(step_id: str, deploy_env: str, call_pattern: str, extra_env: dict[str, str] | None = None) -> str:
+    """run a REAL step of cloudbuild.yaml with gcloud stubbed; return the one `gcloud run …` call matching `call_pattern`"""
+    script = _apply_cloudbuild_escaping(_extract_step_script(step_id))
+    names = set(re.findall(r"\$\{([A-Z_][A-Z0-9_]*)\}", script))
+    env = {**os.environ, **{n: "x" for n in names}, "_DEPLOY_ENV": deploy_env, "_MCP_ALLOWED_HOSTS": "", "_SUPPORT_GATEWAY_CORS_ORIGINS": "", **(extra_env or {})}
+    # the mcp step checks the served image against what it deployed: with every name set to "x" that is this string
+    stub = (
+        'gcloud() { if [ "$1 $2 $3" = "run services describe" ]; then echo "x-docker.pkg.dev/x/x/backend:x"; else echo "CALL $*"; fi; }\n'
+    )
+    proc = subprocess.run(["bash", "-c", stub + script], capture_output=True, text=True, env=env)
+    assert proc.returncode == 0, proc
+    calls = [line for line in proc.stdout.splitlines() if re.match(call_pattern, line)]
+    assert len(calls) == 1, proc.stdout
+    return calls[0]
+
+
+def test_mcp_dev_bills_per_request_and_prod_states_nothing():
+    dev = _step_call("deploy-mcp", "dev", r"^CALL run services update ")
+    assert dev.count("--cpu-throttling") == 1 and "--no-cpu-throttling" not in dev, dev
+    prod = _step_call("deploy-mcp", "prod", r"^CALL run services update ")
+    assert "--cpu-throttling" not in prod and "--no-cpu-throttling" not in prod, prod
+
+
+def test_support_gateway_dev_bills_per_request_and_prod_states_nothing():
+    on = {"_SUPPORT_GATEWAY_DEPLOY_ENABLED": "true"}
+    dev = _step_call("deploy-support-gateway", "dev", r"^CALL run deploy support-gateway-", on)
+    assert dev.count("--cpu-throttling") == 1 and "--no-cpu-throttling" not in dev, dev
+    prod = _step_call("deploy-support-gateway", "prod", r"^CALL run deploy support-gateway-", on)
+    assert "--cpu-throttling" not in prod and "--no-cpu-throttling" not in prod, prod
+
+
+def test_office_converter_and_realtime_run_on_dev_only_and_name_per_request_billing():
+    """both steps exit first for any other environment, so the literal flag in their own command is dev-only"""
+    by_service = dict(_commands())
+    for service in ("office-converter-${_DEPLOY_ENV}", "sprintable-realtime-${_DEPLOY_ENV}"):
+        assert " --cpu-throttling \\\n" in by_service[service] and "--no-cpu-throttling" not in by_service[service], service
+    office = _extract_step_script("deploy-office-converter")
+    assert 'if [ "${_DEPLOY_ENV}" != "dev" ]; then' in office[: office.index("gcloud run deploy office-converter-")]
+    realtime = _extract_step_script("deploy-realtime")
+    assert 'if [ "${_DEPLOY_ENV}" != "dev" ]; then' in realtime[: realtime.index("gcloud run deploy sprintable-realtime-")]
+
+
+def test_the_manual_scripts_state_dev_per_instance_and_leave_prod_alone():
+    for name in ("backend", "frontend"):
+        script = (_ROOT / f"backend/scripts/deploy_{name}.sh").read_text()
+        dev = script[script.index("    dev)"):script.index("    prod)")]
+        prod = script[script.index("    prod)"):]
+        assert 'CPU_FLAGS="--no-cpu-throttling"' in dev and "CPU_FLAGS=" not in prod, name
+        assert 'CPU_FLAGS=""' in script and script.count("${CPU_FLAGS}") == 1, name  # the flag reaches the one gcloud call; prod keeps the empty default
