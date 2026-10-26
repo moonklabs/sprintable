@@ -71,6 +71,7 @@ describe('[SID:4780] pairReturnQuery', () => {
   it('a way back the page knows better than its own address wins (the sign-up screen: Today, from the server\'s nav flags); another parameter of it never survives', () => {
     expect(pairReturnQuery('/onboarding', '/org-briefing')).toBe('?from=%2Forg-briefing');
     expect(pairReturnQuery('/onboarding', '/today')).toBe('?from=%2Ftoday');
+    expect(pairReturnQuery('/inbox?p=a', '/org-briefing')).toBe('?from=%2Forg-briefing'); // the page IS a return target itself, yet the way back it was handed wins — reverted (the page's address first) → '?from=%2Finbox%3Fp%3Da'
     expect(pairReturnQuery('', '/org-briefing?next=//x&p=a')).toBe('?from=%2Forg-briefing%3Fp%3Da');
   });
   it('a way back that is not valid falls back to the page\'s own address — never to the invalid value', () => {

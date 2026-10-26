@@ -50,6 +50,15 @@ describe('[SID:4780] usePairHref — the pairing screen\'s address from the page
     expect(container.querySelector('a')!.getAttribute('href')).toBe('/desktop/pair?p=proj-1'); // /onboarding is no way back by itself
   });
 
+  it('the way back handed over wins even on a page that is a return target itself (the page\'s own address comes second)', async () => {
+    window.history.pushState({}, '', '/inbox?p=a');
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => { root!.render(<Probe returnTo="/org-briefing" />); });
+    expect(container.querySelector('a')!.getAttribute('href')).toBe('/desktop/pair?from=%2Forg-briefing&p=proj-1'); // reverted (the page's address first) → from=%2Finbox%3Fp%3Da
+  });
+
   it('a page that is not a return target adds nothing (the address as before)', async () => {
     expect(await hrefAt('/board?p=proj-1')).toBe('/desktop/pair?p=proj-1');
   });
