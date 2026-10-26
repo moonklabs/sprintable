@@ -50,7 +50,7 @@ let root: Root;
 function wrap(node: React.ReactNode) {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      <RealtimeProvider>{node}</RealtimeProvider>
+      <RealtimeProvider currentTeamMemberId="me-1">{node}</RealtimeProvider>
     </NextIntlClientProvider>
   );
 }
@@ -115,10 +115,9 @@ describe('ChatV3Screen — 실 EventSource 연결 개수(story #4008 AC7 · #469
     expect(container.querySelector('[data-testid="chat-v3-thread-row"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="chat-v3-messages-column"]')?.textContent).toContain('초안을 마쳤어요');
 
-    // story #4008 — currentTeamMemberId가 처음엔 undefined(me 로딩 前)였다가 로드 후
-    // 값이 생기면, useChatSse 내부가 그 변화로 재연결한다(memberId 없이 연 첫 연결을
-    // 닫고 실 id로 다시 연다 — 의도된 lifecycle, use-chat-sse.ts 자체 주석 참고). 그래서
-    // "생성된 적 있는 횟수"가 아니라 "지금 열려 있는 연결 수"가 AC7의 실제 단언 대상이다.
+    // story #4008 — currentTeamMemberId가 처음엔 undefined(me 로딩 前)였다가 로드 후 값이 생기는 길이 있다. story #4797부터 값이 없는 동안은 스트림을
+    // 아예 열지 않고(400 재시도 루프 0) 값이 생기면 그때 하나를 연다 — 이 시험의 Provider는 처음부터 값을 받는다. 그래도 단언 대상은
+    // "생성된 적 있는 횟수"가 아니라 "지금 열려 있는 연결 수"다(전환 lifecycle이 닫고 여는 것을 허용).
     const openInstances = FakeEventSource.instances.filter((i) => !i.closed);
     expect(openInstances.length).toBe(1);
   });

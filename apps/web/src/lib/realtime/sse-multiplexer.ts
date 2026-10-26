@@ -84,8 +84,6 @@ export function useSseMultiplexer(memberId: string | undefined): SseMultiplexerH
   const lastEventIdRef = useRef<string | null>(null);
   // story #4252 — 이 커넥션이 최근에 무엇이든 받았는지(open · heartbeat · 이벤트). focus 때 살아 있는 커넥션을 끊지 않는 판정용.
   const livenessRef = useRef(createSseLivenessTracker());
-  const memberIdRef = useRef(memberId);
-  useEffect(() => { memberIdRef.current = memberId; }, [memberId]);
   // story #2940 카디르 QA(PR#3388) HIGH — memberId가 진짜로 바뀐 재실행(마운트가
   // 아니라)인지 판별용. 초기값을 memberId로 잡아 마운트 시점엔 항상 "안 바뀜"이 된다.
   const prevMemberIdForResetRef = useRef(memberId);
@@ -140,6 +138,11 @@ export function useSseMultiplexer(memberId: string | undefined): SseMultiplexerH
     if (prevMemberIdForResetRef.current !== memberId) lastEventIdRef.current = null;
     prevMemberIdForResetRef.current = memberId;
 
+    // story #4797 — memberId가 없으면(조직 없는 사용자 · 로딩 중 · 로그아웃 직후) 스트림을 열지 않는다. 예전엔 member_id만 빼고 열었고 BE가 400
+    // («member_id query parameter required»)으로 거절해, EventSource backoff 재시도가 시간당 ~54번 되풀이됐다. 값이 생기면 deps(memberId)로 이
+    // effect가 다시 돌아 바로 연다 · 값이 사라지면(로그아웃 · 조직 전환) 위 cleanup이 열린 스트림을 닫고 여기서 다시 안 연다.
+    if (!memberId) return;
+
     let closed = false;
     const backoff = createReconnectBackoffState();
     // story #2987 — 가시성 복귀로 강제 재연결할 때는 backoff.isReconnect()(과거 onError
@@ -153,7 +156,7 @@ export function useSseMultiplexer(memberId: string | undefined): SseMultiplexerH
       esRef.current?.close();
 
       const url = new URL('/api/event-stream', window.location.origin);
-      if (memberIdRef.current) url.searchParams.set('member_id', memberIdRef.current);
+      url.searchParams.set('member_id', memberId); // story #4797 — 위에서 비어 있으면 이미 돌아갔다: member_id 없는 연결은 없다
       if (lastEventIdRef.current) url.searchParams.set('last_event_id', lastEventIdRef.current);
 
       const es = new EventSource(url.toString(), { withCredentials: true });
@@ -189,7 +192,9 @@ export function useSseMultiplexer(memberId: string | undefined): SseMultiplexerH
         if (esRef.current === es) esRef.current = null;
         if (closed) return;
         const scheduleRetry = () => {
-          if (retryTimerRef.current) return;
+          // story #4797(codex) — 이 effect가 이미 정리됐으면(memberId가 비거나 바뀜) 재시도를 걸지 않는다: 세션 확認(`isSessionAlive`)은 비동기라 cleanup 뒤에 끝날 수 있고,
+          // retryTimerRef는 effect 실행들이 같이 쓰므로 낡은 타이머가 새 스트림의 재시도(`if (retryTimerRef.current) return`)를 막아 SSE가 끊긴 채 남는다.
+          if (closed || retryTimerRef.current) return;
           const delay = backoff.onError();
           retryTimerRef.current = setTimeout(() => {
             retryTimerRef.current = null;
@@ -253,9 +258,9 @@ export function useSseMultiplexer(memberId: string | undefined): SseMultiplexerH
       esRef.current = null;
     };
   // story #2940(실사고 재현·codex 발견) — org 전환으로 memberId가 바뀌어도 이 effect가
-  // 재실행되지 않아(구 deps=[]) 커넥션이 옛 member_id로 남아있었다. memberIdRef는
-  // connect() 재호출 시점의 최신값을 읽으려는 용도였지 effect 재트리거는 못 준다 — ref 쓰기는
-  // effect를 재실행시키지 않는다. memberId를 deps에 편입해 값이 실제로 바뀔 때만(문자열 값
+  // 재실행되지 않아(구 deps=[]) 커넥션이 옛 member_id로 남아있었다(그 땐 ref로 최신값만 읽었는데 ref 쓰기는
+  // effect를 재실행시키지 않는다 — story #4797에서 ref는 걷었다: connect()는 이 effect의 memberId를 직접 읽는다).
+  // memberId를 deps에 편입해 값이 실제로 바뀔 때만(문자열 값
   // 비교라 참조 흔들림에 안 낚임) 재구독을 강제한다 — 그 외 참조 안정적인 항목(attachIfNeeded
   // 등)은 여전히 의도적으로 제외라 disable 유지.
   // eslint-disable-next-line react-hooks/exhaustive-deps

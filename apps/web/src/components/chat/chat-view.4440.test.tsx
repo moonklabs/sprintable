@@ -43,7 +43,7 @@ let root: Root;
 function wrap(node: React.ReactNode) {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      <RealtimeProvider>{node}</RealtimeProvider>
+      <RealtimeProvider currentTeamMemberId="me-1">{node}</RealtimeProvider>
     </NextIntlClientProvider>
   );
 }

@@ -195,7 +195,7 @@ async function mount() {
 
   await act(async () => {
     root.render(wrap(
-      <RealtimeProvider>
+      <RealtimeProvider currentTeamMemberId="me-1">
         <ToastProvider>
           <KanbanBoard projectId="proj-1" wsSlug="ws-1" projSlug="proj-1" />
           <TestToastRenderer />
