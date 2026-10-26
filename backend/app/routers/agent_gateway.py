@@ -976,7 +976,8 @@ async def agent_stream(
                             if is_backfill:  # story 4788: what the connect replay cost, by event type (counts and sizes only — read from the log after the pass)
                                 _backfill_stats["rows"] += 1
                                 _backfill_stats["bytes"] += len(_frame_text.encode("utf-8"))
-                                _backfill_stats["types"][row.event_type] = _backfill_stats["types"].get(row.event_type, 0) + 1
+                                _kind = sse_event_name(row.event_type)  # (the closed form the frame name uses: an old row with a line break in its type cannot split the log line)
+                                _backfill_stats["types"][_kind] = _backfill_stats["types"].get(_kind, 0) + 1
                             yield _frame_text
                     await _presence_tick_if_due()  # between batches too (PO 01:28Z) — a long catch-up keeps presence / lease fresh
                     if len(rows) < _BACKFILL_LIMIT:
@@ -1084,8 +1085,8 @@ async def agent_stream(
                             yield _access_revoked_frame(_revoked)
                             return
                         event_type = signal.get("event_type", "message")
-                        if _accept_types is not None and event_type not in _accept_types:
-                            continue  # story 4788: a connection that declared the types it acts on is sent those only — a non-durable push too
+                        if _accept_types is not None and not (isinstance(event_type, str) and event_type in _accept_types):
+                            continue  # (a type that is not even a string — a sender's JSON can say a list — is not one the client declared, and must not be looked up in the set)  # story 4788: a connection that declared the types it acts on is sent those only — a non-durable push too
                         # story 4649: the direct push's frame leads with the same two keys (one lookup for this sender)
                         _sse = _frame_data({**_with_stream_org({**signal, "sender_org_id": await _sender_org_of(signal.get("sender_id"))}, uuid.UUID(org_id_str)), "is_backfill": False})
                         yield f"event: {sse_event_name(event_type)}\ndata: {_sse}\n\n"

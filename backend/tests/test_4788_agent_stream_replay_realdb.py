@@ -300,3 +300,75 @@ async def test_10_a_non_durable_push_is_filtered_by_the_declaration_too(monkeypa
             await undeclared.close()
     finally:
         await _cleanup(ag, engine, ids[2])
+
+
+async def test_11_a_push_whose_type_is_not_a_string_does_not_close_a_declared_stream(monkeypatch):
+    """A sender's JSON can say `event_type` is a list or an object (the inbox webhook pushes it as it came). The declared set is looked up with a string only — before, the lookup raised TypeError inside the
+    generator and closed the stream (Kadir 10-26). A stream without a declaration sends it as before (the frame name becomes `unknown_event`)."""
+    ag, engine, Session, ids = await _world(monkeypatch, tail=0)
+    try:
+        reader = _Reader(await _open(ag, Session, ids[2], ids[0], PLUGIN))
+        try:
+            assert await reader.frames(quiet=0.5) == []
+            for odd in (["x"], {"a": 1}, None, 7, True):
+                ag._push_to_agent_v2(str(ids[2]), {"event_type": odd, "content": "hi"})
+            assert await reader.frames(quiet=0.8) == [], "none of them is a type the client declared"
+            ag._push_to_agent_v2(str(ids[2]), {"event_type": "conversation.message_created", "content": "still open"})
+            assert _types(await reader.frames(quiet=0.8)) == ["conversation.message_created"], "the stream is still open and still delivers"
+        finally:
+            await reader.close()
+        undeclared = _Reader(await _open(ag, Session, ids[2], ids[0], {"user-agent": "node"}))
+        try:
+            assert await undeclared.frames(quiet=0.5) == []
+            ag._push_to_agent_v2(str(ids[2]), {"event_type": ["x"], "content": "hi"})
+            assert len(await undeclared.frames(quiet=0.8)) == 1, "no declaration: sent as before"
+        finally:
+            await undeclared.close()
+    finally:
+        await _cleanup(ag, engine, ids[2])
+
+
+async def test_12_the_user_agent_is_no_signal_in_the_real_stream(monkeypatch):
+    """The plugin and the SDK adapters are both Bun with the same headers: a `Bun/` client that declares nothing is sent everything (Kadir 10-26 — the parser test alone did not bind the router)."""
+    ag, engine, Session, ids = await _world(monkeypatch, tail=15)
+    try:
+        assert _types(await _connect(ag, Session, ids, {"user-agent": "Bun/1.4.2"})) == [FYI] * 15
+        assert _types(await _connect(ag, Session, ids, {"user-agent": "Bun/1.4.2", "x-agent-api-key": "x"})) == [FYI] * 15
+    finally:
+        await _cleanup(ag, engine, ids[2])
+
+
+async def test_13_the_replay_is_the_agents_own_organization_only(monkeypatch):
+    """An event row for this agent that carries another organization's id is never sent — with or without a declaration. (The line `AND e.org_id = …` of the replay query had no test of its own.)"""
+    from sqlalchemy import text
+
+    from app.models.organization import Organization
+
+    ag, engine, Session, ids = await _world(monkeypatch, tail=3)
+    try:
+        other_org = uuid.uuid4()
+        async with Session() as s:
+            s.add(Organization(id=other_org, name="other", slug=f"o-{other_org}", plan="free"))
+            await s.commit()
+        stray = await _event(Session, ids, ACTS)
+        async with Session() as s:
+            await s.execute(text("UPDATE events SET org_id = :o WHERE recipient_id = :a AND recipient_seq = :q"), {"o": other_org, "a": ids[2], "q": stray})
+            await s.commit()
+        for headers in ({"user-agent": "node"}, PLUGIN):
+            frames = await _connect(ag, Session, ids, headers)
+            seqs = [json.loads(next(line for line in f.splitlines() if line.startswith("data: "))[6:])["recipient_seq"] for f in frames]
+            assert stray not in seqs, (headers, seqs)
+    finally:
+        await _cleanup(ag, engine, ids[2])
+
+
+async def test_14_an_old_row_with_a_line_break_in_its_type_cannot_split_the_log_line(monkeypatch, caplog):
+    ag, engine, Session, ids = await _world(monkeypatch, tail=1)
+    try:
+        await _event(Session, ids, "legacy\nINJECTED line=1 key=EVIL")
+        with caplog.at_level(logging.INFO, logger="app.routers.agent_gateway"):
+            await _connect(ag, Session, ids, {"user-agent": "node"})
+        (line,) = [r.getMessage() for r in caplog.records if r.getMessage().startswith("agent_stream backfill")]
+        assert "\n" not in line and "INJECTED" not in line and "unknown_event:1" in line, line
+    finally:
+        await _cleanup(ag, engine, ids[2])
