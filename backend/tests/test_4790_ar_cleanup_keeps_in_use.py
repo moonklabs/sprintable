@@ -476,3 +476,23 @@ def test_emit_policy_that_is_a_symlink_to_a_directory_is_refused_and_left_alone(
     argv = d.argv()
     argv[argv.index("--emit-policy") + 1] = str(link)
     assert gate.main(argv) == 2 and link.is_symlink() and folder.is_dir()
+
+
+def test_a_second_emit_policy_is_the_one_that_counts(tmp_path):
+    """argparse uses the last `--emit-policy`; the stale drop looks at that one only, so an earlier path in the same call is not touched"""
+    d = Dumps(tmp_path)
+    other = tmp_path / "other-generated.json"
+    other.write_text(json.dumps([{"name": "keep-in-use", "action": {"type": "Keep"}, "condition": {"versionNamePrefixes": []}}]))
+    argv = d.argv() + ["--emit-policy", str(d.out)]
+    argv[argv.index("--emit-policy") + 1] = str(other)  # the FIRST occurrence points at `other`
+    assert gate.main(argv) == 0 and d.out.exists()
+    assert other.exists(), "the earlier --emit-policy value was not the one in use; it is not touched"
+
+
+def test_a_policy_that_cannot_be_encoded_is_exit_2_not_a_traceback(tmp_path, monkeypatch):
+    """the file is written as UTF-8 whatever the locale is; an encoding failure of the text is a write error (exit 2), not an uncaught exception"""
+    d = Dumps(tmp_path)
+    argv = d.argv()
+    monkeypatch.setattr(gate.json, "dumps", lambda *a, **k: "\ud800")  # a lone surrogate cannot be written as UTF-8
+    assert gate.main(argv) == 2 and not d.out.exists()
+    assert not list(tmp_path.glob(f"{d.out.name}*"))

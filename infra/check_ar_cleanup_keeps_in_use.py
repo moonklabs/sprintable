@@ -33,6 +33,7 @@ exit code: 0=지움 0 · 1=사용 중 이미지가 지워진다 · 2=입력 오�
 참조는 `<host>/<project>/<repo>/<package>`까지 같아야 같은 이미지로 친다(다른 저장소의 같은 이름은 보호하지 않는다). 태그도 digest도 없는 참조는 `:latest`로 본다.
 
 한계: 태그로 배포된 리비전이 컨테이너를 여럿 가지면 짝을 지을 수 없어 항상 exit 3이다(이 저장소의 서비스는 컨테이너 하나).
+한계(받아들인 것): 이 도구는 한 사람이 자기 작업 폴더에서 돌리는 보조 도구다 — 경로가 «동시에» 바뀌는 경쟁 상태(검사와 지우기 사이)와, 입력 덤프가 일부러 `keep-in-use`로 시작하는 정책 모양인 경우는 막지 않는다(실수를 막는 장치이지 공격 방어가 아니다).
 한계(적용 절차로 막는다): 생성 정책의 `keep-in-use`는 «덤프 시각의» 사용 중 digest 목록이다. 그 뒤에 사용 중 이미지가 «최근 30개 밖의 옛 이미지»로 바뀌면(예: 손으로 배포하는 prod MIG 템플릿을 옛 sha로 되돌림 · 옛 리비전으로 롤백) 새 목록이 없어 지워질 수 있다 —
 덤프 → 확인 → dry-run → 적용은 «한 번에 이어서, 그 사이 배포 · MIG 변경 · 태그 이동 금지»로 한다(확인기는 이를 강제하지 못한다 — 절차가 막는다).
 그런 일 前에는 이 확인기를 다시 돌려 정책을 다시 만들어 적용한다(정책은 자동으로 따라가지 않는다). 덤프는 «그 시각의» 모습이다. 덤프 → 확인 → dry-run → 적용을 한 번에 이어서 하고(그 사이 배포 금지), GCE가 당기는 `backend:<sha>` 같은 태그가 그 사이에 옮겨지지 않게 한다.
@@ -373,7 +374,7 @@ def _is_generated_policy(path: Path) -> bool:
     try:
         if path.is_symlink() or not path.is_file():
             return False
-        rules = json.loads(path.read_text())
+        rules = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
     return isinstance(rules, list) and bool(rules) and isinstance(rules[0], dict) and rules[0].get("name") == "keep-in-use"
@@ -400,12 +401,12 @@ def _write_policy(path: Path, text: str) -> None:
     """같은 폴더에 **배타적으로 만든** 임시 파일(`mkstemp`: O_EXCL · 무작위 이름)에 쓰고 `os.replace`로 바꾼다 — 쓰다 실패해도 잘린 파일이 최종 경로에 남지 않고, 이미 있던 목표 파일은 그대로다.
     실패하면 임시 파일을 치우고 OSError를 그대로 올린다."""
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
-    os.close(fd)
     tmp = Path(tmp_name)
     try:
-        tmp.write_text(text)
+        os.close(fd)
+        tmp.write_text(text, encoding="utf-8")
         os.replace(tmp, path)
-    except OSError:
+    except (OSError, UnicodeError):
         try:
             tmp.unlink()
         except OSError:
@@ -427,7 +428,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--now")
     raw = argv if argv is not None else sys.argv[1:]
     protect = [*_raw_values(raw, _INPUT_FLAGS), str(_BASE_POLICY)]
-    for emit in _raw_values(raw, ("--emit-policy",)):  # 인자 오류로 끝나도 이전 실행이 남긴 정책 파일은 지운다(입력 파일이면 지우지 않는다)
+    for emit in _raw_values(raw, ("--emit-policy",))[-1:]:  # 인자 오류로 끝나도 이전 실행이 남긴 정책 파일은 지운다(argparse가 쓰는 «마지막» 하나만 · 입력 파일이면 지우지 않는다)
         _drop_stale(emit, protect)
     args = ap.parse_args(argv)
     if args.emit_policy:
@@ -492,9 +493,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.emit_policy:
         try:
             _write_policy(Path(args.emit_policy), json.dumps(policy, indent=2, ensure_ascii=False) + "\n")
-        except OSError as err:
+        except (OSError, UnicodeError) as err:
             # exit 1은 «쓰는 이미지가 지워진다»의 코드다 — 쓰기 실패는 다른 이야기라 입력 오류(2)로 돌려주고, 잘린 파일이 남지 않게 한다
-            _drop_stale(args.emit_policy)
+            _drop_stale(args.emit_policy, protect)
             print(f"쓰기 오류: 정책 파일을 쓰지 못했다({err.__class__.__name__}: {err}) — 파일을 남기지 않았다.")
             return 2
         print(f"생성 정책을 썼다: {args.emit_policy}")
