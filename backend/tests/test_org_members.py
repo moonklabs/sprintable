@@ -478,15 +478,20 @@ async def test_soft_delete_200():
             call_count += 1
             result = MagicMock()
             # call 1: router get(id) for existing check
-            # call 2: revoke refresh tokens (UPDATE · live rows)
-            # call 3: story #4630 — close the grace window of tokens a rotation just revoked (UPDATE expires_at)
-            # call 4: story #4769 — the seat row, FOR UPDATE (the order an exchange keeps)
-            # call 5: story #4769 — the closer's one lookup of the person's open computers in this organization (nothing to close here)
-            # call 6: AC3-4 2-2 anchor-only UPDATE members is_active=false (레거시 team_members UPDATE 제거)
-            # call 7: S-MBR-10 AC5 DELETE project_access
-            # call 8: soft_delete internal get(id)
-            # call 9: soft_delete UPDATE deleted_at
-            result.scalar_one_or_none.return_value = _mock_member() if call_count in (1, 8) else None
+            # call 2: story 4782 — the person's session lock, EXCLUSIVE (`_lock_person_sessions`; first thing the revoke does)
+            # call 3: revoke refresh tokens (UPDATE · live rows)
+            # call 4: story #4630 — close the grace window of tokens a rotation just revoked (UPDATE expires_at)
+            # call 5: story #4769 — the seat row, FOR UPDATE (the order an exchange keeps)
+            # call 6: story #4769 — the closer's one lookup of the person's open computers in this organization (nothing to close here)
+            # call 7: AC3-4 2-2 anchor-only UPDATE members is_active=false (레거시 team_members UPDATE 제거)
+            # call 8: S-MBR-10 AC5 DELETE project_access
+            # call 9: soft_delete internal get(id)
+            # call 10: soft_delete UPDATE deleted_at
+            if call_count == 2:  # the person's session lock comes before any token row is touched (calls 3 and 4)
+                assert "pg_advisory_xact_lock" in str(stmt) and "pg_advisory_xact_lock_shared" not in str(stmt)
+            if call_count in (3, 4):
+                assert "refresh_tokens" in str(stmt)
+            result.scalar_one_or_none.return_value = _mock_member() if call_count in (1, 9) else None
             result.scalars.return_value.all.return_value = []
             return result
 

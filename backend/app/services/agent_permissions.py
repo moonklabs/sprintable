@@ -368,6 +368,18 @@ async def remove_phone(
     each setup until its snapshot drops it) · each of those setups woken. Already removed → False (idempotent). The same key
     registered again by its owner comes back (register_phone · unchanged). story #4629: also that phone's own login session
     (`_end_phone_session` → «ended» · «not_found»; None when nothing was removed)."""
+    # story 4782 (second PR): the person's session lock FIRST — before the key row is locked below. The phone's login session may be rotating right now (a refresh in flight stores the
+    # successor in one transaction); the chain `_end_phone_session` follows must be read after that transaction, or the phone's new token is missed and lives on. Lock order: the person's
+    # lock → rows (a revoke that already holds the lock writes `remote_devices` rows — taking the key row first and the lock later would be a deadlock with it).
+    from app.models.member import Member as _Member
+    from app.routers.auth import _lock_person_sessions
+
+    # the person is the key's OWNER (the member the key belongs to) — not whoever its recorded session token names: a re-registration can move that token between this read and the chain read
+    session_owner = (await db.execute(
+        select(_Member.user_id).join(RemoteDevice, RemoteDevice.member_id == _Member.id).where(RemoteDevice.id == phone_id, RemoteDevice.org_id == org_id)
+    )).scalar_one_or_none()
+    if session_owner is not None:
+        await _lock_person_sessions(db, session_owner, exclusive=True)
     phone = (await db.execute(
         select(RemoteDevice).where(RemoteDevice.id == phone_id, RemoteDevice.org_id == org_id).with_for_update()
     )).scalar_one_or_none()

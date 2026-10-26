@@ -62,14 +62,21 @@ export function createBffDispatcher(
   // story #4723 — 본문이 있는 DELETE는 h1로 보낸다. undici h2는 DELETE(PUT · POST · PATCH만 «본문을 기대»하는 메서드로 본다 ·
   // client-h2.js expectsPayload)에는 content-length를 안 달고, 길이 없는 h2 DATA는 Cloud Run 앞단(GFE)을 지나며 백엔드에 «본문 없음»으로
   // 닿는다(dev 실측: 설정 → 조직 삭제 DELETE /api/organizations/{id} 가 422 body missing). undici h1은 길이를 단다.
-  // 백엔드 origin에 한해 · 본문이 있는 DELETE만 · 나머지 메서드와 스트림 · SSE는 그대로 h2. 전제: 백엔드가 h1도 받는다(Cloud Run · 평문 CI ·
-  // 로컬 모두 그렇다) — h2 전용 백엔드를 두게 되면 본문 있는 DELETE는 이 경로에서 막힌다(그때 이 전제를 다시 본다).
+  // (story 4786부터 DELETE를 포함한 모든 멱등이 아닌 요청이 h1이라 이 경우는 아래 규칙에 들어간다 — `isBodyDeleteToBackend`는 그 분류를
+  // 따로 시험하는 데 남아 있고 여기 분기에서는 더 안 부른다.) 전제: 백엔드가 h1도 받는다(Cloud Run · 평문 CI · 로컬 모두 그렇다) —
+  // h2 전용 백엔드를 두게 되면 멱등이 아닌 요청은 이 경로에서 막힌다(그때 이 전제를 다시 본다).
+  // story 4786 — 백엔드 origin에서 h2는 «멱등한 요청(GET · HEAD)»에만 쓴다. 멱등이 아닌 요청(POST · PUT · PATCH · DELETE · OPTIONS)과 브라우저
+  // 이벤트 스트림(GET /api/v2/events/stream)은 h1으로 보낸다. 이유: undici h2 `busy()`(client-h2.js)는 진행 중인 요청이 하나라도 있으면 멱등이
+  // 아닌 요청을 그 연결에 받지 않는다. 그래서 (a) 끝나지 않는 응답(SSE)이 h2 연결에 앉으면 그 연결로는 POST가 영영 못 나가고, (b) 느린 POST
+  // 하나가 같은 연결의 다른 POST를 막는다 — «로그인 · 갱신 · 메시지 보내기만 30초 뒤 503, 읽기는 정상»(dev 실측 10-26: REALTIME_URL을 비워
+  // 스트림이 백엔드 origin으로 온 직후. (b)는 prod BFF에도 있던 길이다). h2의 이득(콜드 기동 때 새 연결 대기 · SID 4299)은 GET 묶음에서 나온다.
+  // h1은 연결마다 요청 하나라 서로 막지 않는다(느린 요청 · 스트림이 연결을 하나씩 차지하고 다른 요청은 새 연결로 나간다).
   let h1Agent: Agent | null = null;
   const h1 = () => (h1Agent ??= new Agent({ keepAliveTimeout: BFF_KEEPALIVE_MS, keepAliveMaxTimeout: BFF_KEEPALIVE_MAX_MS, ...agentExtra }));
   const agentDispatch = agent.dispatch.bind(agent);
   // 이미 닫혔거나 부서졌으면 h1을 새로 만들지 않고 원 Agent로 보낸다 — 거기서 «닫힘» 오류가 제대로 난다.
   const dispatch = (opts: Dispatcher.DispatchOptions, handler: Dispatcher.DispatchHandler) =>
-    !agent.closed && !agent.destroyed && isBodyDeleteToBackend(opts, backend)
+    !agent.closed && !agent.destroyed && isH1OnlyToBackend(opts, backend)
       ? h1().dispatch(opts, handler)
       : agentDispatch(opts, handler);
   // 닫을 때 h1 쪽도 같이 닫는다. 원 Agent의 close/destroy를 «바로» 부른다(닫힘 표시가 그 자리에서 서므로, 닫는 중에 온 본문 DELETE가 h2로
@@ -131,6 +138,31 @@ export function isBodyDeleteToBackend(opts: Dispatcher.DispatchOptions, backend:
   if ((opts.body as { byteLength?: number }).byteLength === 0) return false; // 빈 Buffer · 빈 typed array
   if (headerOf(opts.headers, 'content-length') === '0') return false;
   return originOf(opts.origin as string | URL) === backend;
+}
+
+/** 백엔드의 브라우저 이벤트 스트림 경로(apps/web/src/app/api/event-stream/route.ts가 부르는 곳). */
+export const BACKEND_EVENT_STREAM_PATH = '/api/v2/events/stream';
+
+/**
+ * 백엔드 origin으로 가는 이벤트 스트림 GET — 끝나지 않는 응답이라 h2 한 연결에 앉으면 그 연결로는 멱등이 아닌 요청이 못 나간다(위 설명).
+ * 경로는 쿼리를 뗀 뒤 정확히 비교한다(`?member_id=…` · `?last_event_id=…`가 붙어 온다).
+ */
+export function isEventStreamToBackend(opts: Dispatcher.DispatchOptions, backend: string | null): boolean {
+  if (backend === null || String(opts.method).toUpperCase() !== 'GET') return false;
+  if (String(opts.path).split('?')[0] !== BACKEND_EVENT_STREAM_PATH) return false;
+  return originOf(opts.origin as string | URL) === backend;
+}
+
+/** undici가 «멱등»으로 보는 메서드(core/request.js: GET · HEAD) 밖 전부 — POST · PUT · PATCH · DELETE · OPTIONS. h2 `busy()`가 진행 중 요청이 있으면 받지 않는 요청. */
+export function isNonIdempotentMethod(method: string | undefined): boolean {
+  const m = String(method).toUpperCase();
+  return m !== 'GET' && m !== 'HEAD';
+}
+
+/** 백엔드 origin으로 가는 요청 중 h2에 태우지 않는 것: 멱등이 아닌 요청 + 이벤트 스트림. 그 밖의 GET · HEAD만 h2(한 연결에 여러 요청). */
+export function isH1OnlyToBackend(opts: Dispatcher.DispatchOptions, backend: string | null): boolean {
+  if (backend === null || originOf(opts.origin as string | URL) !== backend) return false;
+  return isNonIdempotentMethod(opts.method) || isEventStreamToBackend(opts, backend);
 }
 
 /**

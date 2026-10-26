@@ -55,7 +55,6 @@ _KNOWN = {
     "app/routers/agent_gateway.py::agent_stream",
     "app/routers/agent_inbox.py::receive_inbox_webhook",
     "app/routers/assets.py::storage_usage",
-    "app/routers/auth.py::confirm_set_password",
     "app/routers/auth.py::logout",
     "app/routers/auth.py::refresh_token",
     "app/routers/auth.py::switch_account",

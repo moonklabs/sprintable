@@ -249,4 +249,4 @@ def test_every_event_frame_of_the_agent_stream_goes_through_the_bound():
     src = Path(_gw().__file__).read_text(encoding="utf-8")
     frames = re.findall(r"_sse = (\w+)\(", src)
     assert frames == ["_frame_data", "_frame_data"], frames  # mutant: either site back on json.dumps → RED
-    assert re.findall(r'yield f"event: \{[^}]+\}(?:\\nid: \{gseq\})?\\ndata: \{(\w+)\}', src) == ["_sse", "_sse"]
+    assert re.findall(r'(?:yield|_frame_text =) f"event: \{[^}]+\}(?:\\nid: \{gseq\})?\\ndata: \{(\w+)\}', src) == ["_sse", "_sse"]

@@ -100,8 +100,8 @@ describe('본문 있는 DELETE — 길이와 함께 닿는다', () => {
   });
 });
 
-describe('그 밖은 그대로 — 다른 메서드 · 본문 없는 DELETE는 h2', () => {
-  it('본문 없는 DELETE · 빈 문자열 본문 DELETE(프록시가 DELETE에도 text()를 싣는다) · GET · POST · PATCH는 h2 그대로', async () => {
+describe('그 밖은 — GET은 h2 그대로 · 멱등이 아닌 요청은 모두 h1 (story 4786: 진행 중 요청이 있는 h2 연결은 이 요청들을 받지 않는다)', () => {
+  it('GET은 h2 그대로 · 본문 없는 DELETE · 빈 문자열 본문 DELETE(프록시가 DELETE에도 text()를 싣는다) · POST · PATCH는 h1(길이는 그대로 닿는다)', async () => {
     use();
     await fetch(`${url}/a`, { method: 'DELETE' });
     await fetch(`${url}/b`, { method: 'DELETE', headers: JSON_HDR, body: '' });
@@ -109,7 +109,7 @@ describe('그 밖은 그대로 — 다른 메서드 · 본문 없는 DELETE는 h
     await fetch(`${url}/d`, { method: 'POST', headers: JSON_HDR, body: BODY });
     await fetch(`${url}/e`, { method: 'PATCH', headers: JSON_HDR, body: BODY });
     expect(seen.map((s) => [s.method, s.url, s.v])).toEqual([
-      ['DELETE', '/a', '2.0'], ['DELETE', '/b', '2.0'], ['GET', '/c', '2.0'], ['POST', '/d', '2.0'], ['PATCH', '/e', '2.0'],
+      ['DELETE', '/a', '1.1'], ['DELETE', '/b', '1.1'], ['GET', '/c', '2.0'], ['POST', '/d', '1.1'], ['PATCH', '/e', '1.1'],
     ]);
     expect(seen[3]).toMatchObject({ contentLength: String(BODY.length), body: BODY });
     expect(seen[4]).toMatchObject({ contentLength: String(BODY.length), body: BODY });

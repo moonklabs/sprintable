@@ -94,10 +94,17 @@ async def test_confirm_with_valid_token_sets_password_and_revokes_refresh_tokens
     assert values["hashed_password"] == new_hash
     assert values["password_set_at"] is not None
 
+    # story 4782 (second PR): the shared revoke of every session — the live rows end (`revoked_at`, with `expires_at` brought down) and the refresh grace windows of the tokens a rotation had just
+    # ended close too (a second UPDATE, `expires_at` alone) — after the person's session lock and BEFORE the person's row is written
     refresh_updates = _refresh_token_update_calls(mock_session)
-    assert len(refresh_updates) == 1, "confirm 성공 시 refresh token 전량 revoke가 실행되지 않음"
-    refresh_values = refresh_updates[0].compile().params
-    assert refresh_values["revoked_at"] is not None
+    assert len(refresh_updates) == 2, "confirm 성공 시 refresh token 전량 revoke(산 행 + 유예창)가 실행되지 않음"
+    assert refresh_updates[0].compile().params["revoked_at"] is not None
+    window_params = refresh_updates[1].compile().params
+    assert "revoked_at" not in window_params and window_params["expires_at"] is not None
+    statements = [str(c.args[0]) for c in mock_session.execute.call_args_list]
+    lock_at = next(i for i, s in enumerate(statements) if "pg_advisory_xact_lock" in s and "pg_advisory_xact_lock_shared" not in s)
+    user_update_at = next(i for i, c in enumerate(mock_session.execute.call_args_list) if hasattr(c.args[0], "table") and c.args[0].table.name == "users")
+    assert lock_at < user_update_at, "the person's session lock must come before the person's row is written"
 
     mock_session.commit.assert_awaited()
 
