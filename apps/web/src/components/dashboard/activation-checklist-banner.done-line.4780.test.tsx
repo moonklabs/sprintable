@@ -2,7 +2,7 @@
 //
 // story 4780 (AC4) — the checklist finishes and the person gets to see it finish: a browser that showed an OPEN checklist for the organization says «다 됐어요» once when it is complete.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act, useLayoutEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
@@ -286,6 +286,8 @@ describe('[SID:4780] ActivationChecklistBanner — the finish is shown once', ()
     const holder = line!.closest('[data-testid="activation-done-fixed"]');
     expect(holder?.parentElement).toBe(document.body);
     expect(holder?.className).toContain('fixed'); // reverted (no fixed position) → it scrolls with the column
+    expect(holder?.className).toContain('env(safe-area-inset-top)'); // below the notch: reverted (a plain top-3) → under the status bar on a phone
+    expect(holder?.className).toContain('z-50'); // above the shell's own layers (its sticky top bar is z-30): reverted (z-0) → hidden behind them
   });
   // the reply often comes while the phone is in the background or its screen is off: nobody looks at the line then
   it('a tab that is hidden when the checklist completes spends nothing: the mark stays, the line comes once the tab is visible again', async () => {
@@ -443,5 +445,21 @@ describe('[SID:4780] ActivationChecklistBanner — the finish is shown once', ()
     await flush();
     expect(done()).not.toBeNull(); // reverted (the hint is not scoped) → waits for an answer that never comes
     expect(localStore.has(SEEN('org-2'))).toBe(false);
+  });
+  // the render-time guard is the FIRST line of defence: the commit in which the route becomes one that hides the banner must not have the line in the DOM (the effect that clears the state runs after that commit)
+  it('the commit in which the route turns into one that hides the banner already has no line in the DOM', async () => {
+    const samples: boolean[] = [];
+    function Sampler() { useLayoutEffect(() => { samples.push(!!document.querySelector('[data-testid="activation-done"]')); }); return null; }
+    const withSampler = () => (<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><ActivationChecklistBanner /><Sampler /></NextIntlClientProvider>);
+    localStore.set('sprintable_activation_checklist_complete:org-1', '1');
+    localStore.set(SEEN('org-1'), '1');
+    await act(async () => { root.render(withSampler()); });
+    await flush();
+    expect(done()).not.toBeNull(); // the line is up (the sampler only samples the commits the root render itself makes)
+    const before = samples.length;
+    mockPath.current = '/desktop/setup'; // a page that hides the banner
+    await act(async () => { root.render(withSampler()); });
+    expect(samples[before]).toBe(false); // reverted (the render shows the line until the effect clears it) → true
+    expect(done()).toBeNull();
   });
 });
