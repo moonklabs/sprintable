@@ -176,7 +176,12 @@ async def test_02b_the_routes_that_read_the_claims_themselves_and_the_role_claim
         # …but the person is still themselves
         assert (await w.client.get("/api/v2/auth/me", headers=H)).status_code == 200
         assert (await w.client.get("/api/v2/me/memberships", headers=H)).status_code == 200
+        # story 4782 — the removal ended every token of the person, so the OLD session (the token that named X, with its refresh token) is over: it can no longer switch, to Y or anywhere
         r = await w.client.post("/api/v2/auth/switch-org", headers=H, json={"org_id": str(org_y), "refresh_token": tok_x.get("refresh_token")})
+        assert r.status_code == 401, r.text
+        # …a switch to an organization they are in still works from a session they opened after (before 4782 the old, ended session could do it)
+        fresh = await w.tokens(m_email)
+        r = await w.client.post("/api/v2/auth/switch-org", headers=_bearer(fresh), json={"org_id": str(org_y), "refresh_token": fresh["refresh_token"]})
         assert r.status_code == 200, r.text
     finally:
         await _close(engine, w)

@@ -428,18 +428,18 @@ async def test_the_word_is_revoked_not_superseded_for_every_other_end_realdb(kin
 
 
 @pytest.mark.parametrize("kind", ["org", "project"])
-async def test_the_all_device_fallback_leaves_no_successor_so_those_tokens_are_revoked_realdb(kind):
-    """a caller that does not send its refresh token (an older web pod during a deploy) still ends every token of the person: those sessions are over, not moved on"""
+async def test_a_switch_without_the_token_is_refused_and_ends_nobody_realdb(kind):
+    """story 4782 took the all-device fallback away (a caller that did not send its refresh token used to end every token of the person and go on): no token = no session to switch from = 401,
+    and no session of the person ends by it — so there is nothing to answer `TOKEN_SUPERSEDED` or `TOKEN_REVOKED` for here"""
     engine, w = await _world()
     try:
         a, other = await w.login(), await w.login()
         body = {"org_id": str(w.org2)} if kind == "org" else {"project_id": str(w.project1)}
         path = "/api/v2/auth/switch-org" if kind == "org" else "/api/v2/auth/switch-project"
         sw = await w.client.post(path, json=body, headers={"Authorization": f"Bearer {a['access_token']}"})  # no refresh_token in the body
-        assert sw.status_code == 200, sw.text
+        assert sw.status_code == 401 and sw.json()["error"]["code"] == "TOKEN_REVOKED", sw.text
         for token in (a, other):
-            r = await w.refresh(token["refresh_token"])
-            assert r.status_code == 401 and r.json()["error"]["code"] == "TOKEN_REVOKED", r.text
+            assert (await w.refresh(token["refresh_token"])).status_code == 200
     finally:
         await _close(engine, w)
 
