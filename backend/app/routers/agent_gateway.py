@@ -1148,6 +1148,11 @@ async def agent_stream(
                         await _mark_agent_disconnected(
                             agent_id, session_id, org_id_str, heartbeat_baseline=_heartbeat_baseline,
                         )
+                except asyncio.CancelledError:
+                    # the shutdown drain (`pg_pubsub.drain_background_tasks`, 5 s) cancelled an end that was still running: best effort — the engine is disposed right after (no connection is kept), and a session row
+                    # left behind is swept by the next end of that agent's connection (`connected_at` older than the connection lifetime)
+                    logger.warning("agent_stream connection end cancelled by shutdown agent=%s", agent_id_str)
+                    raise
                 except Exception:  # noqa: BLE001 — the end of a connection never raises (a task nobody awaits would only log «never retrieved»)
                     logger.warning("agent_stream connection end failed agent=%s", agent_id_str, exc_info=True)
 
