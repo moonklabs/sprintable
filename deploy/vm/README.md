@@ -11,6 +11,7 @@ Design and reasons: `docs/infra/vm-hosting-design-4796.md` (PR #5259 — it land
 | `bin/render_env.py` | builds the service environments (private plain file < overrides < computed < Secret Manager) and the compose pass-through file (names only). |
 | `bin/deployer.py` | the pull-based deployer a systemd timer runs every minute: bundle → environment → pull → migrate → swap → health → rollback → status. |
 | `bin/check_live_names.py` | Before a cutover: compares the live service's variable names (and which are secrets) with the copy the declaration was made from. |
+| `bin/frontend_build_args.py` `bin/build-frontend-vm.sh` | The VM's frontend image: `apps/web/Dockerfile` (unchanged) built with the VM's API/app hosts baked in, then checked (VM address present, no `run.app` address) and optionally pushed by digest. Needs python3 + PyYAML and Docker. |
 | `bin/bootstrap.sh` | one-time VM preparation (Docker, data disk, swap, Ops Agent, units). |
 | `bin/backup.sh` `restore.sh` `restore-check.sh` `rowcounts.sh` | daily dump to Cloud Storage; restore; scratch-restore check with timing; row counts for the before/after comparison. |
 | `systemd/` | units and timers for the deployer, the backup and the weekly restore check. |

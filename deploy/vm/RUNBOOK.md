@@ -100,7 +100,14 @@ Undo: `gcloud compute instances delete $VM --zone $ZONE` · `gcloud compute disk
 On a machine with the repository at the commit to run:
 ```bash
 SHA=$(git rev-parse HEAD)
-BACKEND_IMAGE=<registry>/backend@sha256:…        FRONTEND_IMAGE=<registry>/frontend-vm@sha256:…   # the frontend image for the VM is built with the VM's API host (§9)
+BACKEND_IMAGE=<registry>/backend@sha256:…        # the Cloud Build backend image of this sha, by digest
+# the VM's frontend image: apps/web/Dockerfile is unchanged, but the API host is baked in at build time, so it is built again with the VM's hosts (needs Docker + python3/PyYAML).
+# It is built for linux/amd64 (the VM's architecture). On an Apple-silicon Mac that runs under emulation and takes long (Next.js build, 6 GB heap) — run it in Cloud Shell or on a Linux amd64 machine instead.
+# Backend image digest: gcloud artifacts docker images describe asia-northeast3-docker.pkg.dev/$PROJECT/sprintable/backend:$SHA --format='value(image_summary.digest)'   (the sha must be a develop commit whose dev build exists)
+# --set values = the public build values of the Cloud Run build of the SAME environment (cloud-build.yml `steps.env`); an empty one is written `NAME=`.
+FRONTEND_IMAGE=$(deploy/vm/bin/build-frontend-vm.sh $ENV $SHA <registry>/frontend-vm:$SHA --push \
+  --set NEXT_PUBLIC_GA4_MEASUREMENT_ID= --set NEXT_PUBLIC_EE_ENABLED=true --set NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED=true \
+  --set NEXT_PUBLIC_SUPPORT_GATEWAY_URL=<the support-gateway URL — a Cloud Run service that stays where it is> --set NEXT_PUBLIC_TOSS_CLIENT_KEY=<dev toss client key> | tail -n1)   # prints <registry>/frontend-vm@sha256:…
 python3 deploy/vm/bin/make_bundle.py --sha $SHA --backend-image $BACKEND_IMAGE --frontend-image $FRONTEND_IMAGE --out /tmp/vm-bundle
 gcloud storage cp /tmp/vm-bundle/bundles/$SHA.tgz gs://$DEPLOY_BUCKET/bundles/$SHA.tgz     # bundle first …
 # … desired.json is uploaded in §7 step 6, after the database is restored

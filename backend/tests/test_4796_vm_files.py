@@ -98,7 +98,7 @@ def test_every_file_a_unit_runs_is_installed_by_bootstrap() -> None:
             assert exe in installed, f"{unit.name} runs {exe}, which bootstrap.sh does not install"
     for f in installed:
         assert (_VM / "bin" / f).exists(), f
-    shipped = {f.name for f in (_VM / "bin").iterdir() if f.is_file()} - {"make_bundle.py", "bootstrap.sh", "check_live_names.py"}
+    shipped = {f.name for f in (_VM / "bin").iterdir() if f.is_file()} - {"make_bundle.py", "bootstrap.sh", "check_live_names.py", "frontend_build_args.py", "build-frontend-vm.sh"}
     assert installed == shipped, f"bootstrap installs {sorted(installed)} but bin/ holds {sorted(shipped)}"
     assert "enable --now sprintable-deploy.timer" not in re.sub(r"(?m)^\s*#.*$|echo .*$", "", boot), "the deploy timer is enabled by hand after the database is restored"
 
@@ -449,3 +449,8 @@ def test_bootstrap_installs_gcloud_when_the_image_lacks_it_and_the_runbook_does_
     assert "gcloud compute scp /tmp/vm-bundle.tgz $VM:/tmp/" in text
     on_vm = text.split("# on the VM:")[1].split("```")[0]
     assert "gcloud" not in on_vm.split("sudo b/bin/bootstrap.sh")[0], "nothing before bootstrap on the VM may need gcloud"
+
+
+def test_the_runbook_tells_where_the_amd64_build_should_run() -> None:
+    text = (_VM / "RUNBOOK.md").read_text()
+    assert "linux/amd64" in text and "Apple-silicon" in text and "Cloud Shell" in text and "image_summary.digest" in text
