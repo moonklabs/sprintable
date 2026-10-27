@@ -891,7 +891,7 @@ def test_deploy_backend_removes_db_timing_flag_outside_dev():
     dev_remove = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379", var="REMOVE_ENV_VARS").split(",")
     prod_remove = _run_env_vars_assembly("prod", "", var="REMOVE_ENV_VARS").split(",")
     assert dev_remove == ["REDIS_CONSUME_ENABLED", "XFF_PROBE_ENABLED"]
-    assert prod_remove == ["REDIS_CONSUME_ENABLED", "XFF_PROBE_ENABLED", "DB_TIMING_LOG_ENABLED"]
+    assert prod_remove == ["REDIS_CONSUME_ENABLED", "XFF_PROBE_ENABLED", "DB_TIMING_LOG_ENABLED", "PUBLIC_API_URL"]  # story 4796: prod states nothing, so a hand-set value is removed
     dev_env = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
     assert "DB_TIMING_LOG_ENABLED=true" in dev_env.split(",")
     assert "DB_TIMING_LOG_ENABLED" not in _run_env_vars_assembly("prod", "")

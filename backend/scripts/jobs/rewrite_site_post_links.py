@@ -74,6 +74,9 @@ async def rewrite_origin(session, old_origin: str, new_origin: str) -> int:
 
 
 async def run(old_origins: list[str], new_origin: str | None, apply: bool) -> int:
+    if _db_url_summary is None:
+        # without DATABASE_URL / ALEMBIC_URL the app's default would be a local database: never write there by accident
+        raise SystemExit("neither DATABASE_URL nor ALEMBIC_URL is set: refusing to run")
     from app.core.database import async_session_factory  # noqa: E402 — the URL fallback above has to run first
 
     print(f"database: {_db_url_summary}")

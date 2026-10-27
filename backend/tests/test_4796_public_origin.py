@@ -59,7 +59,7 @@ BAD = [
     "http://dev-api.sprintable.ai", "https://dev-api.sprintable.ai/api", "https://dev-api.sprintable.ai/?x=1", "https://dev-api.sprintable.ai#f",
     "https://user:pw@dev-api.sprintable.ai", "dev-api.sprintable.ai", "ftp://dev-api.sprintable.ai", "https://",
     "/", "//", "https://dev-api.sprintable.ai:abc", "https://dev-api.sprintable.ai:99999", "https://dev-api.sprintable.ai:0", "https://dev-api.sprintable.ai:",
-    "https://dev-api.sprintable.ai?", "https://dev-api.sprintable.ai#", "https://@dev-api.sprintable.ai", "https://dev-api.sprintable.ai\\@evil.example", "https://dev-api .sprintable.ai", "https://dev-api.sprintable.ai\\path", "https://dev-api.sprintable.ai\\",
+    "https://dev-api.sprintable.ai?", "https://dev-api.sprintable.ai#", "https://@dev-api.sprintable.ai", "https://dev-api.sprintable.ai\\@evil.example", "https://dev-api .sprintable.ai", "https://dev-api.sprintable.ai\\path", "https://dev-api.sprintable.ai\\", "https://dev-api\u00a0.sprintable.ai", "https://dev-api\x0b.sprintable.ai", "https://dev-api\x0c.sprintable.ai", "https://dev-api\u2003.sprintable.ai", "https://dev-api\x00.sprintable.ai", "https://dev-api\u200b.sprintable.ai",
 ]
 
 
@@ -189,3 +189,36 @@ def test_surrounding_whitespace_is_stripped_like_any_env_value_but_whitespace_in
     assert parse_origin("  https://dev-api.sprintable.ai/\n") == "https://dev-api.sprintable.ai"
     with pytest.raises(ValueError):
         parse_origin("https://dev-api .sprintable.ai")
+
+
+def test_the_dev_deploy_does_not_remove_the_public_address_and_the_prod_deploy_removes_a_stale_one(tmp_path: Path) -> None:
+    """codex (public origin PR, round 4): `--update-env-vars` is additive, so a value set by hand on prod would stay: prod states nothing, therefore removes it"""
+    prod = _deploy_backend_calls(tmp_path, "prod", "https://sprintable-backend-prod-787818285179.asia-northeast3.run.app")
+    removed = next(a for a in prod if a.startswith("--remove-env-vars=")).split("=", 1)[1].split(",")
+    assert "PUBLIC_API_URL" in removed
+    dev = _deploy_backend_calls(tmp_path, "dev", DEV_API)
+    assert "PUBLIC_API_URL" not in next(a for a in dev if a.startswith("--remove-env-vars=")).split("=", 1)[1].split(","), "the same key is never switched on and removed in one call"
+
+
+def _hand_deploy_config(env: str) -> dict[str, str]:
+    import os
+
+    proc = subprocess.run(["bash", str(_ROOT / "backend/scripts/deploy_backend.sh"), env], capture_output=True, text=True, env={**os.environ, "DRY_RUN": "1"}, check=True)
+    return dict(line.split("=", 1) for line in proc.stdout.splitlines() if "=" in line and line.split("=", 1)[0].isupper())
+
+
+def test_the_hand_deploy_script_removes_a_stale_public_address_on_prod_only() -> None:
+    assert _hand_deploy_config("prod")["REMOVE_ENV_VARS"] == "PUBLIC_API_URL"
+    assert _hand_deploy_config("dev")["REMOVE_ENV_VARS"] == ""
+    assert '${REMOVE_ENV_VARS:+--remove-env-vars="${REMOVE_ENV_VARS}"}' in (_ROOT / "backend/scripts/deploy_backend.sh").read_text()
+
+
+def test_the_rewrite_job_refuses_to_run_without_a_database_url_instead_of_falling_back_to_a_local_one(monkeypatch) -> None:
+    import asyncio
+
+    from scripts.jobs import rewrite_site_post_links as job
+
+    monkeypatch.setattr(job, "_db_url_summary", None)
+    with pytest.raises(SystemExit) as exc:
+        asyncio.run(job.run([DEV_API], DEV_API, True))
+    assert "neither DATABASE_URL nor ALEMBIC_URL" in str(exc.value)

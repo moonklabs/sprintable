@@ -896,7 +896,7 @@ steps:
         if [ "${_DEPLOY_ENV}" == "dev" ]; then
           ENV_VARS="$${ENV_VARS},DB_TIMING_LOG_ENABLED=true,PUBLIC_API_URL=${_FASTAPI_URL}"
         else
-          REMOVE_ENV_VARS="$${REMOVE_ENV_VARS},DB_TIMING_LOG_ENABLED"
+          REMOVE_ENV_VARS="$${REMOVE_ENV_VARS},DB_TIMING_LOG_ENABLED,PUBLIC_API_URL"
         fi
         # story e4fc29fa — WORDPRESS/WEBHOOK_TEST_STUB_ENABLED(dev만 · 서사는 아카이브).
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
