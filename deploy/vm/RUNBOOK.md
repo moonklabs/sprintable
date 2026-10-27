@@ -62,7 +62,7 @@ gcloud projects add-iam-policy-binding $PROJECT --member serviceAccount:$SAE --r
 Undo: `gcloud iam service-accounts delete $SAE` (removes its bindings with it).
 
 **Accepted limit — one identity on the VM.** The containers can reach the metadata server, because the backend needs it for Vertex AI, Cloud Storage and Firebase exactly as it does on Cloud Run. So an SSRF/RCE in the backend could use the VM service account, which also holds the deploy-time grants (database password secret, read of the backups bucket, create-only write there). Mitigations in place: per-secret grants only, backups bucket create-only (no overwrite/delete), deploy bucket read-only. Splitting the identities would need a second VM and is not part of this story.
-Cloud Build's service account additionally needs `roles/storage.objectAdmin` on `gs://$DEPLOY_BUCKET` (its dev build writes the bundle and `candidates/<sha>.json`, §5 — never `desired.json`, which is written by hand in §7 step 6).
+Cloud Build's service account additionally needs `roles/storage.objectAdmin` on `gs://$DEPLOY_BUCKET` (the dev bundle build writes the bundle and `candidates/<sha>.json`, §5 — never `desired.json`, which is written by hand in §7 step 6).
 
 ## 3. Database password (new, VM only)
 
@@ -97,7 +97,7 @@ Undo: `gcloud compute instances delete $VM --zone $ZONE` · `gcloud compute disk
 
 ## 5. The bundle of a sha (dev: Cloud Build builds it on every dev deploy)
 
-**Dev.** The last two steps of `cloudbuild.yaml` — `build-frontend-vm` and `bundle-vm`, dev only — run after the Cloud Run deploys of the same build: they build and push `frontend-vm:<sha>` (amd64, the Cloud Run build's public values, checked before the push), resolve the `backend:<sha>` digest, and upload `gs://$DEPLOY_BUCKET/bundles/<sha>.tgz` plus `gs://$DEPLOY_BUCKET/candidates/<sha>.json` (the `desired.json` that sha would have; the deployer never reads that path). They write **no** `desired.json`. They are `allowFailure`: if one fails the build is still a success and the Cloud Run deploy is unaffected — look for the failed step in the build's step list (the sha then has no bundle; the next dev build makes one). A bundle that is there: `gcloud storage ls gs://$DEPLOY_BUCKET/bundles/ gs://$DEPLOY_BUCKET/candidates/`.
+**Dev.** After the Cloud Run build of a dev deploy has finished, `cloud-build.yml` starts a **second, separate build** (`cloudbuild-vm.yaml`, `gcloud builds submit --async`, tag `vm-bundle`; the workflow run does not wait for it and does not fail if it fails). Its three steps, dev only: `resolve-backend` (digest of `backend:<sha>` from the registry), `build-frontend-vm` (builds and pushes `frontend-vm:<sha>` for amd64 with the Cloud Run build's public values, the baked values checked before the push), `bundle-vm` (`make_bundle.py`, then uploads `gs://$DEPLOY_BUCKET/bundles/<sha>.tgz` and `candidates/<sha>.json` — the `desired.json` that sha would have; the deployer never reads that path). It writes **no** `desired.json`. It is its own build because a step inside the Cloud Run build once took the worker down (build 844cd9a1) — `allowFailure` and step limits do not help against a dead worker. Where to look: `gcloud builds list --filter="tags=vm-bundle"` and `gcloud storage ls gs://$DEPLOY_BUCKET/bundles/ gs://$DEPLOY_BUCKET/candidates/`. A failed build means this sha has no bundle (the next dev deploy makes one).
 
 **By hand** (only if no dev build has produced the sha you need; not on an Apple-silicon Mac). On a machine with the repository at the commit to run:
 ```bash
