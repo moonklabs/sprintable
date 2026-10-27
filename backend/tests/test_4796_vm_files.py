@@ -148,7 +148,8 @@ def test_section_9_names_the_real_variables_of_the_hosted_mcp_and_the_scheduler_
     """codex round 7: the hosted MCP's address is SPRINTABLE_API_URL (deploy_mcp_dev.sh, cloudbuild deploy-mcp), not `_BACKEND_URL`; the scheduler jobs need --base-url and the pipeline step would undo it"""
     text = (_VM / "RUNBOOK.md").read_text()
     sec = text[text.index("## 9. "):text.index("## 10. ")]
-    assert "--update-env-vars SPRINTABLE_API_URL=https://dev-api.sprintable.ai" in sec and "`_BACKEND_URL`" not in sec
+    assert "--update-env-vars SPRINTABLE_API_URL=https://dev-api.sprintable.ai" in sec
+    assert sec.count("`_BACKEND_URL`") == 1 and "does **not** set `_BACKEND_URL`" in sec, "named only to say the switch leaves it alone (it is the GA4 redirect, not the hosted MCP's address)"
     assert "infra/apply_cloud_scheduler.py --env dev --base-url https://dev-api.sprintable.ai" in sec and "apply-cloud-scheduler" in sec
     deploy_mcp = (_ROOT / "backend/scripts/deploy_mcp_dev.sh").read_text()
     assert "--set-env-vars=\"MCP_TRANSPORT=http,SPRINTABLE_API_URL=${DEV_BACKEND_URL}" in deploy_mcp, "the variable the hosted MCP reads is SPRINTABLE_API_URL"
