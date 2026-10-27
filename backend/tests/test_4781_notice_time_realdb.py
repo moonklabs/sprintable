@@ -405,3 +405,62 @@ async def test_16_the_next_notice_clears_the_mark_of_the_one_before_it(world):
         await _report(c, device, a, "waiting_input", 4, limit={"at": at.isoformat(), "again": False})  # a new notice, with its time at once
         assert _words(at) in await _cards(), "the new notice stood"
         assert await desktop_limit_notice._peek_time_unknown(ORG_UUID, OWNER_UUID) is None, "the earlier notice's mark is gone"
+
+
+async def test_17_a_mark_that_names_the_same_persons_card_in_another_org_writes_nothing(world):
+    """Kadir's lens on 5251 (a survivor): the card is read by id, by owner AND by org — one person in two orgs has a card in each; a mark of the notice in this org that points at the same person's card in the OTHER org
+    must not write there (nor on the owner's own card)"""
+    other_org, other_card = uuid.uuid4(), uuid.uuid4()
+    async with _client() as c:
+        device = await _device(c, "d4781t mac q")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _report(c, device, a, "waiting_input", 2, limit=TIMED)
+        assert await _cards() == [UNKNOWN_BODY]
+        await _sql(f"INSERT INTO notifications (id, org_id, user_id, type, title, body, is_read) VALUES ('{other_card}', '{other_org}', '{OWNER}', 'agent.limit_paused', 't', '{UNKNOWN_BODY}', false)")
+        mine_bell = (await _sql(fetch="SELECT id FROM events WHERE recipient_id = :m AND payload->>'event_type' = 'agent.limit_paused'", params={"m": OWNER_TM}))[0][0]
+        await _forge_mark(note=str(other_card), bell=str(mine_bell))
+        await _report(c, device, a, "waiting_input", 3, limit=_with_time(_later()))
+        there = await _sql(fetch=f"SELECT body FROM notifications WHERE id = '{other_card}'")
+        assert there[0][0] == UNKNOWN_BODY, "the same person's card in another org is untouched"
+        assert await _cards() == [UNKNOWN_BODY] and [n["body"] for n in await _notices(STOOD)] == [UNKNOWN_BODY], "and so are the owner's own card and bell line"
+        await _sql(f"DELETE FROM notifications WHERE id = '{other_card}'")
+
+
+async def test_18_a_limit_that_hit_while_the_daemon_was_off_is_told_once_by_its_first_report_and_not_before(world):
+    """AC5 (4781): with the daemon off nothing is reported, so nothing can be told — there is no stale or guessed notice; the first report that comes after carries the limit and is told once"""
+    async with _client() as c:
+        device = await _device(c, "d4781t mac r")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1, at=datetime.now(timezone.utc) - timedelta(hours=3))
+        assert await _notices(STOOD) == [] and await _cards() == [], "no report, no notice — however long the silence"
+        await _report(c, device, a, "waiting_input", 2, limit=_with_time(_later()))  # the daemon is back and says what it has
+        assert len(await _notices(STOOD)) == 1 and len(await _cards()) == 1
+        await _report(c, device, a, "waiting_input", 3, limit=_with_time(_later()))
+        assert len(await _notices(STOOD)) == 1, "told once"
+
+
+async def test_19_a_phone_push_that_fails_leaves_the_inbox_card_and_the_bell_line(world, monkeypatch):
+    """AC5 (4781): the push is its own job (an outbox row, sent by a worker); when the worker's send fails it swallows the failure and the web inbox — the card and the bell line — is exactly as the notice made it"""
+    from app.core.database import async_session_factory
+    from ee.services import expo_push
+
+    async with _client() as c:
+        device = await _device(c, "d4781t mac s")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _report(c, device, a, "waiting_input", 2, limit=_with_time(_later()))
+        before = (await _cards(), [n["body"] for n in await _notices(STOOD)])
+        assert len(before[0]) == 1 and len(before[1]) == 1
+
+        async def a_target(*_a, **_k):
+            return [object()]
+
+        async def send_fails(*_a, **_k):
+            raise RuntimeError("expo is down")
+
+        monkeypatch.setattr(expo_push, "_fetch_expo_push_targets", a_target)
+        monkeypatch.setattr(expo_push, "_send_expo_push_targets", send_fails)
+        async with async_session_factory() as db:  # (what the worker does for the notice's job)
+            await expo_push._deliver_expo_push_now(db, ORG_UUID, [OWNER_TM], title="t", body="b", event_type="agent.limit_paused")  # must not raise
+        assert (await _cards(), [n["body"] for n in await _notices(STOOD)]) == before, "the inbox is as it was"
