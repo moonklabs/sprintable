@@ -29,8 +29,14 @@ case "$1" in
   ps) echo dbcontainer1 ;;
   inspect) echo "pgvector/pgvector:pg15" ;;
   run)
-    # what the container would receive through its environment (names were given, values come from our environment)
-    env | grep '^PG' | sort | sed 's/^/ENV /' >> "$FAKE_ENV"
+    # what the container would receive: only the variables named with -e (docker takes their values from our environment)
+    prev=""
+    for a in "$@"; do
+      if [ "$prev" = "-e" ]; then
+        case "$a" in *=*) echo "ENV $a" >> "$FAKE_ENV" ;; *) eval "v=\${$a-}"; echo "ENV $a=$v" >> "$FAKE_ENV" ;; esac
+      fi
+      prev="$a"
+    done
     case "$*" in
       *"--entrypoint psql"*) cat > /dev/null; printf '%b' "${FAKE_COUNTS-users\t5\nposts\t7\n}" ;;
       *"--entrypoint pg_dump"*) head -c "${FAKE_DUMP_BYTES-4096}" /dev/zero | tr '\0' 'x' ;;

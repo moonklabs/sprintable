@@ -383,6 +383,9 @@ def test_the_dump_comes_with_its_checksum_because_restore_demands_it_for_a_gs_so
     """the dump is taken on the VM by dump-source.sh (the source database has no public address), which writes the sidecar restore.sh verifies and, with --upload, copies it all to the import folder"""
     text = (_VM / "RUNBOOK.md").read_text()
     assert "dump-source.sh --host $SRC_IP --label rehearsal --upload" in text and "gs://$BACKUPS_BUCKET/import/" in text
+    cmd = next(line for line in text.splitlines() if "gcloud secrets versions access latest --secret=DATABASE_URL_DIRECT_DEV_SPRINTABLE" in line)
+    assert re.search(r"\| gcloud compute ssh \$VM .*--ssh-flag=-T --command \"sudo /opt/sprintable/bin/dump-source\.sh ", cmd), "the URL travels on a pipe, into ssh without a terminal"
+    assert "cloud-sql-proxy" not in text, "the source has no public address: a laptop can not reach it"
     assert "sha256_verify" in (_VM / "bin/restore.sh").read_text()
     script = (_VM / "bin/dump-source.sh").read_text()
     assert '.dump.sha256' in script and 'gcloud storage cp --quiet "$base.dump" "$base.dump.sha256" "$base.counts.tsv" "gs://$bucket/import/"' in script
