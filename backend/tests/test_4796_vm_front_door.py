@@ -146,8 +146,10 @@ def test_starting_again_replaces_the_running_front_door(box) -> None:
 
 
 def test_it_says_so_when_the_front_door_does_not_become_ready(box) -> None:
-    p, _ = box("passthrough", "--host", HOST, "--upstream", UP, FAKE_NOT_READY="1", FRONT_DOOR_WAIT="2")
+    p, calls = box("passthrough", "--host", HOST, "--upstream", UP, FAKE_NOT_READY="1", FRONT_DOOR_WAIT="2")
     assert p.returncode == 1 and "did not become ready" in p.stderr
+    assert "docker rm -f sprintable-front-door" in calls, "a container that never became ready is removed: with restart unless-stopped it would come back and hold the ports"
+    assert box("status")[0].returncode == 1, "and nothing is left running"
 
 
 def _config(box, **over) -> None:
@@ -306,3 +308,15 @@ def test_the_runbook_phase_1_takes_the_stack_down_and_phase_3_lists_the_writers_
     step1 = p3[p3.index("\n1. "):p3.index("\n2. ")]
     assert "gcloud run services update sprintable-frontend-dev --project $PROJECT --region $REGION --ingress internal" in step1, "the Cloud Run frontend is a same-project caller"
     assert "the same for `sprintable-mcp-dev`" in step1, "so is the hosted MCP"
+
+
+def test_phase_3_success_path_reopens_the_hosted_mcp_resumes_the_scheduler_and_names_the_restore_command() -> None:
+    """codex round 3: what was closed for the dump must come back on the success path, not only in the undo"""
+    text = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
+    p3 = text[text.index("**Phase 3"):text.index("## 8. ")]
+    success = p3[p3.index("\n1. "):p3.index("**Undo")]
+    assert "gcloud run services update sprintable-mcp-dev --project $PROJECT --region $REGION --ingress all" in success
+    assert "gcloud scheduler jobs resume <job> --project $PROJECT --location $REGION" in success
+    assert "sudo env RESTORE_WIPE=yes /opt/sprintable/bin/restore.sh" in success, "the command is named here, whatever the order the changes merge in"
+    p1 = text[text.index("**Phase 1"):text.index("**Phase 2")]
+    assert "systemctl stop sprintable-deploy.service" in p1, "a running deploy could bring the stack's Caddy back"

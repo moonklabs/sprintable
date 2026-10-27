@@ -87,7 +87,9 @@ EOF
       fi
       sleep 1
     done
-    echo "the front door did not become ready in $wait_seconds s — see: docker logs $name" >&2
+    docker logs --tail 20 "$name" >&2 || true
+    docker rm -f "$name" > /dev/null || true   # a failed start must not leave a restart-unless-stopped container that comes back later and holds the ports
+    echo "the front door did not become ready in $wait_seconds s — it was removed again (the last log lines are above)" >&2
     exit 1
     ;;
   stop)
