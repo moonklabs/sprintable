@@ -291,8 +291,10 @@ jobs:
             # the Cloud Scheduler jobs. The old Cloud Run address keeps answering. Undo = the previous value of this line: https://sprintable-backend-dev-787818285179.asia-northeast3.run.app
             echo "fastapi_url=https://dev-api.sprintable.ai" >> "$GITHUB_OUTPUT"
             # story #3583-BE 리뷰 조건(페드루 2026-09-06) — GA4 OAuth 콜백 redirect_uri.
-            # dev는 백엔드 자기 자신 URL 그대로 배선(story 4796: fastapi_url과 같은 값이 아니다 — GA4 등록은 Phase 2에서 따로 옮긴다).
-            echo "backend_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
+            # story 4796 (Phase 2, RUNBOOK §9): the backend's own address as Google and the public site-post links see it is the dev API name now. MERGE ONLY AFTER
+            # https://dev-api.sprintable.ai/api/v2/measurement-connections/ga4/callback is added as an authorized redirect URI in the Google console (add it, keep the old one; the old one goes after Phase 3):
+            # until then a GA4 connect would fail with redirect_uri_mismatch. Undo = the previous value of this line: https://sprintable-backend-dev-787818285179.asia-northeast3.run.app
+            echo "backend_url=https://dev-api.sprintable.ai" >> "$GITHUB_OUTPUT"
             # story #2749(2026-08-18, 페드루 PO 실측 — dev 가입 인증메일 verify 링크가 prod
             # 도메인으로 발급됨) — NEXT_PUBLIC_APP_URL이 dev에 한 번도 배선된 적이 없어
             # auth.py의 코드 하드코딩 fallback(prod URL)이 dev에도 새고 있었다. dev 도메인 명시.

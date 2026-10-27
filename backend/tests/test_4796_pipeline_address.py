@@ -82,7 +82,8 @@ def test_the_dev_line_of_fastapi_url_is_single_and_names_the_vm_api_address() ->
     dev_lines = re.findall(r'(?m)^\s*echo "fastapi_url=(https://(?:dev-api\.sprintable\.ai|sprintable-backend-dev-[^"]+))"', _WF_TEXT)
     assert dev_lines == [DEV_API], dev_lines
     assert f"Undo = the previous value of this line: {NEW_FORM}" in _WF_TEXT, "the one-line undo is written next to the line"
-    assert re.findall(r'(?m)^\s*echo "backend_url=(https://sprintable-backend-dev-[^"]+)"', _WF_TEXT) == [NEW_FORM], "GA4's own line did not move"
+    assert re.findall(r'(?m)^\s*echo "backend_url=(https://(?:dev-api\.sprintable\.ai|sprintable-backend-dev-[^"]+))"', _WF_TEXT) == [DEV_API], "GA4's own line: its own pull request flipped it, after the console step"
+    assert f"Undo = the previous value of this line: {NEW_FORM}" in _WF_TEXT[_WF_TEXT.index('echo "backend_url='):] or _WF_TEXT.count(f"Undo = the previous value of this line: {NEW_FORM}") == 2, "its undo is written next to it too"
     prod = re.findall(r'(?m)^\s*echo "fastapi_url=(https://sprintable-backend-prod-[^"]+)"', _WF_TEXT)
     assert prod == ["https://sprintable-backend-prod-787818285179.asia-northeast3.run.app"], "prod is not part of this change"
     assert len(re.findall(r'echo "fastapi_url=', _WF_TEXT)) == 2, "exactly the prod line and the dev line"
@@ -180,10 +181,10 @@ def test_the_stream_lifetimes_the_runbook_states_are_the_ones_in_the_code() -> N
 
 def test_the_runbook_does_not_call_the_switch_the_only_backend_address_line() -> None:
     """codex (pipeline PR, round 4): `backend_url=` is a second, separate dev line (`_BACKEND_URL`, the GA4 redirect); the switch is the one line for `_FASTAPI_URL`"""
-    assert re.findall(r'(?m)^\s*echo "backend_url=(https://sprintable-backend-dev-[^"]+)"', _WF_TEXT) == [NEW_FORM], "the separate dev line the runbook points at"
+    assert re.findall(r'(?m)^\s*echo "backend_url=(https://dev-api\.sprintable\.ai)"', _WF_TEXT) == [DEV_API], "the separate dev line the runbook points at"
     sec = _runbook_section("## 9. ", "## 10. ")
     assert "exactly one line for `_FASTAPI_URL`" in sec and "exactly one line for the backend's address" not in sec
-    assert "`backend_url=…` just below it is a different value, `_BACKEND_URL`" in sec and "moves with the GA4 registration in Phase 2" in sec
+    assert "`backend_url=…` just below it is a different value, `_BACKEND_URL`" in sec and "merged only **after** `https://dev-api.sprintable.ai/api/v2/measurement-connections/ga4/callback` is added as an authorized redirect URI in the Google console" in sec
 
 
 def test_the_documented_measurement_command_really_sends_what_the_exchange_route_reads(tmp_path: Path) -> None:
@@ -245,3 +246,18 @@ def test_the_three_defaults_that_carry_the_switch_value_are_named_in_the_runbook
     for needle in ("the `_FASTAPI_URL` default in `cloudbuild.yaml`", "`backend/scripts/deploy_backend.sh` (`FASTAPI_URL` default)", "`backend/scripts/deploy_mcp_dev.sh` (`DEV_BACKEND_URL`)", "must be put back with it"):
         assert needle in sec, needle
     assert "still hold the Cloud Run address" not in sec
+
+
+def test_the_ga4_line_is_gated_on_the_console_step_in_the_workflow_and_in_the_runbook() -> None:
+    """a flipped redirect URI that Google does not know fails every GA4 connect with redirect_uri_mismatch: the order is written where the line is and where the runbook plans Phase 2"""
+    i = _WF_TEXT.index('echo "backend_url=https://dev-api.sprintable.ai"')
+    note = _WF_TEXT[i - 900:i]
+    assert "MERGE ONLY AFTER" in note and "/api/v2/measurement-connections/ga4/callback" in note and "authorized redirect URI in the Google console" in note
+    assert re.search(r"(?m)^  _BACKEND_URL: https://dev-api\.sprintable\.ai$", _MAIN_TEXT), "the build's own default follows the line"
+    text = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
+    p2 = text[text.index("**Phase 2"):text.index("**Phase 3")]
+    assert "(order in §9: console first, then the `backend_url` line)" in p2
+    sec = _runbook_section("## 9. ", "## 10. ")
+    assert "redirect_uri_mismatch" in sec and "the fallback host of public hosted-site post links" in sec
+    cfg = (_ROOT / "backend/app/routers/measurement_connections.py").read_text()
+    assert "settings.backend_url.rstrip('/')}/api/v2/measurement-connections/ga4/callback" in cfg, "the redirect URI the console must know is built from backend_url"

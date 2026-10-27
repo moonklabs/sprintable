@@ -21,7 +21,8 @@ substitutions:
   # 값은 같지만 별 substitution으로 둔다 — Google Console에 콜백 URI 등록이 아직 안 된
   # prod에서는 GHA(cloud-build.yml)가 빈 값으로 override해 authorize를 사실상 비활성화
   # 해야 하기 때문(_FASTAPI_URL은 다른 여러 용도에 이미 쓰여 그대로 못 비운다).
-  _BACKEND_URL: https://sprintable-backend-dev-787818285179.asia-northeast3.run.app
+  # story 4796: the default is the dev value of `backend_url` in cloud-build.yml (RUNBOOK §9), so a build started by hand deploys the same address.
+  _BACKEND_URL: https://dev-api.sprintable.ai
   # story #2701 — dev-safe 기본값(빈 문자열 = 이 env var 자체를 안 싣는다, 아래 deploy-mcp
   # 참조). GHA cloud-build.yml이 prod에서만 실값으로 override.
   _MCP_ALLOWED_HOSTS: ''
