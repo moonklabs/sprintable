@@ -142,7 +142,7 @@ def test_a_bad_url_stops_before_any_container_and_is_never_echoed(box, bad: str)
     [], ["--host", ""], ["--host", "sql.example.com"], ["--host", "127.0.0.1"], ["--host", "0.0.0.0"], ["--host", "10.1.1"], ["--host", "10.0.0.1;ls"],
     ["--host", "8.8.8.8"], ["--host", "172.15.0.1"], ["--host", "172.32.0.1"], ["--host", "192.169.0.1"], ["--host", "999.1.1.1"], ["--host", "10.0.0.256"],
     ["--host", "010.0.0.1"], ["--host", "10.00.0.1"], ["--host", "169.254.169.254"], ["--host", "100.64.0.1"],
-    ["--host", HOST, "--label", "Bad Label"], ["--host", HOST, "--label", ""], ["--host", HOST, "--label", "a" * 21], ["--host", HOST, "--bogus"],
+    ["--host", HOST, "--label", "Bad Label"], ["--host", HOST, "--label", ""], ["--host"], ["--host", HOST, "--label"], ["--host", HOST, "--label", "a" * 21], ["--host", HOST, "--bogus"],
 ])
 def test_the_arguments_are_checked_before_the_url_is_read(box, args: list[str]) -> None:
     p, calls, _ = box(*args)

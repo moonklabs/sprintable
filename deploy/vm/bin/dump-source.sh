@@ -16,8 +16,8 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 host=""; label="rehearsal"; upload=no
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --host) host="${2:-}"; shift 2 ;;
-    --label) label="${2:-}"; shift 2 ;;
+    --host) [ "$#" -ge 2 ] || { echo "usage: $0 --host <private ip> ...   (--host needs a value)" >&2; exit 2; }; host="$2"; shift 2 ;;
+    --label) [ "$#" -ge 2 ] || { echo "usage: $0 --label <word>   (--label needs a value)" >&2; exit 2; }; label="$2"; shift 2 ;;
     --upload) upload=yes; shift ;;
     *) echo "usage: $0 --host <private ip> [--label <word>] [--upload]   (the connection URL comes on standard input)" >&2; exit 2 ;;
   esac
