@@ -90,6 +90,7 @@ from app.models.unhandled_error_event import UnhandledErrorEvent
 from app.models.standup import StandupEntry, StandupFeedback
 from app.models.team import TeamMember
 from app.models.file_lock import FileLock
+from app.models.sse_lease import SseLease, SseLeaseTaken
 from app.models.org_invite import OrgInvite
 from app.models.project_access import ProjectAccess
 from app.models.member import AgentProjectProfile, Member, MemberIdentityAlias

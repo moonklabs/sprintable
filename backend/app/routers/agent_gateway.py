@@ -361,9 +361,12 @@ def wake_agent(agent_id: str, seq: int, _from_listener: bool = False) -> None:
                 event_broker.publish("agent", agent_id, "__wake__", {"__wake__": True, "seq": seq})
             )
         else:
-            # 기존 경로(flag off·무회귀) — prod 커넥션 누수 근본fix(2026-07-08)와 동형(fire_and_forget 참조 보관).
+            # 기존 경로(flag off) — prod 커넥션 누수 근본fix(2026-07-08)와 동형(fire_and_forget 참조 보관).
+            # story 4786: the marker goes in `data` here too. The receiving instance's listener (`pg_pubsub._dispatch_received`) hands only `data` to
+            # `_push_to_agent` and ignores the event type, so a bare `{"seq": seq}` reached the other instance's stream as a plain event, not a wake: the
+            # agent's catch-up rescan (`signal.get("__wake__")` in the stream loop) never ran and its desktop stream missed the event until it reconnected.
             from app.services.pg_pubsub import pg_notify
-            fire_and_forget(pg_notify("agent", agent_id, "__wake__", {"seq": seq}))
+            fire_and_forget(pg_notify("agent", agent_id, "__wake__", {"__wake__": True, "seq": seq}))
 
 
 
@@ -719,7 +722,11 @@ async def agent_stream(
                     detail={"code": "another_receiver", "message": "another install is receiving this agent's work", "retry_after": _retry_after},
                     headers={"Retry-After": str(_retry_after)},
                 )
-    _pk_lease = await sse_lease.acquire(f"perkey:{agent_id_str}", _per_key_limit, _pk_member)
+    # story 4791 (codex HIGH): the one-receiver check above READS the members and this acquire is a separate step — two instances can both read an empty scope and
+    # both pass a plan-sized limit. A setup key is ONE receiver, so the atomic acquire itself takes limit 1 (its own member passes, any other loses); the loser is the
+    # same 409 as above. A hand-made key keeps the plan's count.
+    _acquire_limit = 1 if _setup_key else _per_key_limit
+    _pk_lease = await sse_lease.acquire(f"perkey:{agent_id_str}", _acquire_limit, _pk_member)
     # story #2602: `_agent_connections`는 defaultdict(set) — `[...]` 서브스크립트는 키가 없으면
     # 빈 set을 **만들면서** 반환한다. 이 줄은 판정(길이 체크)일 뿐인데 거부(429)로 끝나는 요청도
     # 매번 agent_id 하나를 이 dict에 영구 등록해버렸다("거부가 자원을 만드는" 결함 — len에는
@@ -740,6 +747,13 @@ async def agent_stream(
         _earliest = await sse_lease.earliest_expiry(f"perkey:{agent_id_str}")
         if _earliest is not None:
             _retry_after = max(1, round(_earliest - time.time()))
+        if _setup_key and _pk_lease is False:  # lost the race for the one place to another receiver that connected at the same moment
+            logger.info("agent_stream another_receiver (acquire) agent=%s mine=%s", agent_id_str, _pk_member)
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "another_receiver", "message": "another install is receiving this agent's work", "retry_after": _retry_after},
+                headers={"Retry-After": str(_retry_after)},
+            )
         raise HTTPException(
             status_code=429,
             detail={
