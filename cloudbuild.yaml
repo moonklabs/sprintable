@@ -952,7 +952,14 @@ steps:
           echo "apply-cloud-scheduler: ${_DEPLOY_ENV} — dev 전용 스텝이라 스킵"
           exit 0
         fi
-        python3 infra/apply_cloud_scheduler.py --env dev --apply
+        # story 4796: the jobs follow the same address as every other consumer of `_FASTAPI_URL` (cloud-build.yml `fastapi_url`, dev). While that is the Cloud Run
+        # address nothing is passed and the tool reads the backend's status.url as before; once it names the VM's API name the jobs are pointed there too — otherwise
+        # every dev deploy would write the Cloud Run address back into them. Any other value passes nothing (the tool accepts no other address).
+        if [ "${_FASTAPI_URL}" = "https://dev-api.sprintable.ai" ]; then
+          python3 infra/apply_cloud_scheduler.py --env dev --base-url "${_FASTAPI_URL}" --apply
+        else
+          python3 infra/apply_cloud_scheduler.py --env dev --apply
+        fi
     waitFor: [deploy-backend]
 
   # E-ARCH 1단계(story #2078): sprintable-realtime-${_DEPLOY_ENV} — SSE/LISTEN 전용 서비스,

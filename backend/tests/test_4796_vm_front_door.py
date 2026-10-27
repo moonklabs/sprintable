@@ -330,7 +330,7 @@ def test_section_7c_uses_the_hosted_mcps_real_variable_and_moves_the_scheduler_w
     card = text[text.index("## 7c. Dev cutover in three phases"):text.index("## 8. ")]
     assert "_BACKEND_URL" not in card and "`SPRINTABLE_API_URL`" in card
     p2 = card[card.index("**Phase 2"):card.index("**Phase 3")]
-    assert "apply_cloud_scheduler.py --base-url" in p2 and "apply-cloud-scheduler" in p2 and "before that" in p2
+    assert "apply_cloud_scheduler.py --base-url" in p2 and "apply-cloud-scheduler" in p2 and "follows the one switch" in p2, "the pipeline step no longer writes the Cloud Run address back"
     p3 = card[card.index("**Phase 3"):]
     step6 = p3[p3.index("\n6. "):p3.index("**Undo")]
     assert "infra/apply_cloud_scheduler.py --env dev --base-url https://dev-api.sprintable.ai --apply" in step6
