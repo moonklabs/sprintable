@@ -136,9 +136,13 @@ def test_no_route_the_three_flipped_callers_use_is_limited_per_client_ip() -> No
 
 def test_the_runbook_measurement_example_is_the_harmless_endpoint_with_more_requests_than_instances_times_the_limit() -> None:
     sec = _runbook_section("**First-VM measurement", "Caddy needs the real hostnames")
-    assert "POST /api/v2/desktop/setup-codes/exchange" in sec and "1000 requests" in sec and "the limit times the number of instances" in sec
+    assert "POST /api/v2/desktop/setup-codes/exchange" in sec and "the limit times the number of instances that can answer" in sec
     assert "Do not use the verification-resend limiter: it sends real mail" in sec
     assert "480 passed = 2 × 240" in sec, "the Phase 1 measurement that fixed the reading"
+    wf = _WF_TEXT
+    assert 'echo "backend_min_instances=2"' in wf and 'echo "backend_max_instances=8"' in wf, "the dev instance range the runbook quotes"
+    assert "`backend_min_instances=2`, `backend_max_instances=8`" in sec and "240 × 8 = 1,920, round to 2400" in sec and "seq 1 2400" in sec
+    assert "1000 would not have been enough from 5 instances up" in sec
 
 
 def test_the_runbook_states_the_flip_order_the_accepted_cost_and_the_places_the_pipeline_does_not_cover() -> None:
