@@ -61,3 +61,11 @@ def test_the_ga4_and_polar_statements_match_the_vm_env_and_the_code() -> None:
     assert "Unless the organization has a site connector with a `site_base_url`" in sec
     services = (_ROOT / "backend/app/services/site_posts.py").read_text()
     assert 'raw = connector.org_config.get("site_base_url")' in services and "if site_base_url is not None:" in services
+
+
+def test_section_9_does_not_say_every_connector_default_moved() -> None:
+    """codex (status docs PR, round 3): the Pi and OpenCode extensions and the OpenClaw channel name the prod app domain when no address is set, in section 9 as well as in Phase 2"""
+    sec = _sec9()
+    assert "the dev defaults of the Python and host connectors (`DEFAULT_API_URL` in `connectors/`)" in sec
+    assert "and the entry points of the Pi and OpenCode extensions and the OpenClaw channel, which use `https://app.sprintable.ai` when `SPRINTABLE_API_URL` is not set" in sec
+    assert "so do the dev defaults of the connectors (`DEFAULT_API_URL` in `connectors/`);" not in sec
