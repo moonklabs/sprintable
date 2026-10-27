@@ -82,6 +82,27 @@ async def owner_names(db: AsyncSession, org_id: uuid.UUID) -> list[str]:
     return seen
 
 
+async def owner_people(db: AsyncSession, org_id: uuid.UUID) -> dict[uuid.UUID, uuid.UUID]:
+    """story 4781 (AC1 · PO 10-27): the org's owners as people — {users.id: their member id in this org}, oldest first. The same «owner» as `owner_names` and the PUT gate (`members.org_role` on the anchor branch ·
+    `org_members.role` on the legacy one), the same person filter minus the display name: an active, not deleted human member with an account is told whether or not a name is set. Ids only — the
+    limit notice goes to these people; nothing here is shown."""
+    from app.core.config import settings
+    from app.models.member import Member
+    from app.models.project import OrgMember
+
+    person = (Member.org_id == org_id, Member.type == "human", Member.deleted_at.is_(None), Member.is_active.is_(True), Member.user_id.is_not(None))
+    if settings.member_ssot_resolver_shadow:
+        q = select(Member.user_id, Member.id).where(Member.org_role == "owner", *person).order_by(Member.created_at, Member.id)
+    else:
+        q = select(Member.user_id, Member.id).join(
+            OrgMember, (OrgMember.user_id == Member.user_id) & (OrgMember.org_id == Member.org_id),
+        ).where(OrgMember.org_id == org_id, OrgMember.role == "owner", OrgMember.deleted_at.is_(None), *person).order_by(OrgMember.created_at, Member.id)
+    out: dict[uuid.UUID, uuid.UUID] = {}
+    for user_id, member_id in (await db.execute(q)).all():
+        out.setdefault(user_id, member_id)
+    return out
+
+
 def _live_devices(org_id: uuid.UUID) -> tuple:
     """The org's live devices: keys picked up · not disconnected · in a project. Turning it on wakes exactly these, and
     story #4583's `connected_setups` counts exactly these (Didi R4) — «≥ 1» means «turning it on reaches a computer»."""
