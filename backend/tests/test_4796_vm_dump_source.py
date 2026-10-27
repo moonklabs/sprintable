@@ -61,7 +61,7 @@ def box(tmp_path: Path):
         (bin_dir / name).write_text(body)
         (bin_dir / name).chmod(0o755)
     cfg = tmp_path / "deployer.json"
-    cfg.write_text(json.dumps({"environment": "dev", "backups_bucket": "bkt-1"}))
+    cfg.write_text(json.dumps({"environment": "dev", "backups_bucket": "bkt-1", "project": "proj-1"}))
     imp = tmp_path / "import"
     log, envlog = tmp_path / "calls.log", tmp_path / "env.log"
     log.write_text(""), envlog.write_text("")
@@ -181,7 +181,7 @@ def test_upload_copies_the_three_files_to_the_import_folder_and_only_when_asked(
     cp = next(c for c in calls.splitlines() if c.startswith("gcloud storage cp"))
     assert cp.endswith(" gs://bkt-1/import/") and cp.count("gs://") == 1, "one destination: the backups bucket's import folder"
     assert "--no-clobber" in cp, "create only: an existing object is never replaced"
-    assert "--project " in cp, "the project is named, not inherited from whatever the VM's gcloud has set"
+    assert "--project proj-1 " in cp, "the project named in deployer.json is passed, not inherited from whatever the VM's gcloud has set"
     names = re.findall(r"(dev-final-\d{8}T\d{6}Z-\d+\.[\w.]+)", cp)
     assert sorted(re.sub(r"^dev-final-\d{8}T\d{6}Z-\d+", "X", n) for n in names) == ["X.counts.tsv", "X.dump", "X.dump.sha256"]
 

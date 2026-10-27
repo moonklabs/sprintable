@@ -597,3 +597,12 @@ def test_the_support_gateway_is_closed_for_the_dump_and_reopened_and_retargeted_
     undo = phase3[phase3.index("**Undo (before"):]
     assert "support-gateway-dev" in undo
 
+
+def test_every_front_door_command_in_the_runbook_uses_the_installed_path() -> None:
+    """codex round 12: bootstrap installs into /opt/sprintable/bin without adding it to PATH; a bare `front-door.sh stop` is «command not found» and the front door keeps forwarding writes"""
+    text = (_VM / "RUNBOOK.md").read_text()
+    calls = re.findall(r"(\S*)front-door\.sh (stop|status|passthrough)", text)
+    assert len(calls) >= 4, calls
+    for prefix, _ in calls:
+        assert prefix == "/opt/sprintable/bin/", prefix
+
