@@ -1,4 +1,4 @@
-# PO export 2026-10-26 (names only).
+# PO export 2026-10-26 (names only). The JWT_SECRET lines carry the PROD secret id the VM reads (story 4798: the shared JWT_SECRET is deleted at AC9) — re-check with bin/check_live_names.py before the prod cutover.
 ## sprintable-backend-prod
 APPLE_KEY_ID <plain>
 APPLE_PRIVATE_KEY <secret APPLE_SIWA_PRIVATE_KEY>
@@ -42,7 +42,7 @@ GOOGLE_CLIENT_SECRET <secret GOOGLE_CLIENT_SECRET>
 H1_MERGE_GATE_ADVISORY <plain>
 H1_MERGE_GATE_ENABLED <plain>
 H1_MERGE_GATE_ORG_ALLOWLIST <plain>
-JWT_SECRET <secret JWT_SECRET>
+JWT_SECRET <secret JWT_SECRET_PROD>
 LICENSE_CONSENT <plain>
 MCP_PUBLIC_URL <plain>
 MEMBER_SSOT_APIKEY_CUT <plain>
@@ -71,7 +71,7 @@ DESKTOP_DOWNLOAD_BUCKET <plain>
 DESKTOP_DOWNLOAD_ENABLED <plain>
 FIREBASE_BFF_INTERNAL_SECRET <secret FIREBASE_BFF_INTERNAL_SECRET_PROD>
 FIREBASE_OAUTH_HANDOFF_ENABLED <plain>
-JWT_SECRET <secret JWT_SECRET>
+JWT_SECRET <secret JWT_SECRET_PROD>
 MOBILE_APP_LINK_ORIGIN <plain>
 NEXT_PUBLIC_APP_URL <plain>
 NEXT_PUBLIC_COOKIE_DOMAIN <secret NEXT_PUBLIC_COOKIE_DOMAIN>

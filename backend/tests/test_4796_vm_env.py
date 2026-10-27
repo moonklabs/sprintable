@@ -30,6 +30,8 @@ def _load():
 
 R = _load()
 DECL = R.load_declaration(_VM / "env/dev.yaml")
+DECLS = {e: R.load_declaration(_VM / f"env/{e}.yaml") for e in ("dev", "prod")}
+HOSTS = {"dev": ("dev-api", "dev-realtime", "dev-app"), "prod": ("api", "realtime", "app")}
 
 
 def _live(path: Path, section: str) -> dict[str, tuple[str, str | None]]:
@@ -45,10 +47,11 @@ def _live(path: Path, section: str) -> dict[str, tuple[str, str | None]]:
     return out
 
 
+@pytest.mark.parametrize("env", ["dev", "prod"])
 @pytest.mark.parametrize("service", ["backend", "frontend"])
-def test_every_live_variable_is_placed_exactly_once(service: str) -> None:
-    svc = DECL["services"][service]
-    live = _live(_VM / "env/live-names.dev.txt", svc["live_section"])
+def test_every_live_variable_is_placed_exactly_once(env: str, service: str) -> None:
+    svc = DECLS[env]["services"][service]
+    live = _live(_VM / f"env/live-names.{env}.txt", svc["live_section"])
     assert live, "the live-names fixture has no such section"
     groups = {
         "overrides": set(svc.get("overrides") or {}),
@@ -74,33 +77,63 @@ def test_every_live_variable_is_placed_exactly_once(service: str) -> None:
     assert not (set(svc.get("added") or {}) & set(live))
 
 
-def test_the_vm_runs_one_process_without_redis() -> None:
-    o = DECL["services"]["backend"]["overrides"]
+@pytest.mark.parametrize("env", ["dev", "prod"])
+def test_the_vm_runs_one_process_without_redis(env: str) -> None:
+    decl = DECLS[env]
+    o = decl["services"]["backend"]["overrides"]
     for flag in (
         "EVENT_BROKER_REDIS_CONSUME_ENABLED", "EVENT_BROKER_REDIS_DISPATCH_ENABLED", "EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED",
         "FANOUT_WAKE_REDIS_ENABLED", "PRESENCE_ONLINE_REDIS_ENABLED", "PRESENCE_REDIS_ENABLED", "SSE_LEASE_REDIS_ENABLED",
     ):
         assert o[flag] == "false", f"{flag} must be off on the VM"
-    assert o["RATE_LIMIT_BACKEND"] == "memory"
+    # dev's live service sets the rate-limit backend (override); prod's does not and the code default is already «memory» — either way it must not be «redis»
+    assert o.get("RATE_LIMIT_BACKEND", "memory") == "memory" and "RATE_LIMIT_BACKEND" not in decl["services"]["backend"]["secrets"]
     assert o["PG_LISTEN_ENABLED"] == "true" and o["DB_PGBOUNCER"] == "false"
-    assert "REDIS_URL" in DECL["services"]["backend"]["dropped"]
-    assert DECL["services"]["backend"]["added"]["TRUST_FORWARDED_FOR"] == "true", "behind Caddy the client address is the last X-Forwarded-For entry"
+    assert "REDIS_URL" in decl["services"]["backend"]["dropped"]
+    assert decl["services"]["backend"]["added"]["TRUST_FORWARDED_FOR"] == "true", "behind Caddy the client address is the last X-Forwarded-For entry"
 
 
-def test_the_public_addresses_are_the_vm_hosts_not_cloud_run() -> None:
-    hosts = DECL["hosts"]
-    b = DECL["services"]["backend"]["overrides"]
-    f = DECL["services"]["frontend"]["overrides"]
+@pytest.mark.parametrize("env", ["dev", "prod"])
+def test_the_public_addresses_are_the_vm_hosts_not_cloud_run(env: str) -> None:
+    decl = DECLS[env]
+    hosts = decl["hosts"]
+    assert (hosts["api"], hosts["realtime"], hosts["app"]) == tuple(f"{h}.sprintable.ai" for h in HOSTS[env])
     api, app, rt = (f"https://{hosts[k]}" for k in ("api", "app", "realtime"))
-    assert b["BACKEND_URL"] == b["FASTAPI_URL"] == b["ADMIN_OPERATOR_AUDIENCE"] == api
+    sb, sf = decl["services"]["backend"], decl["services"]["frontend"]
+    # a name is an override when the live service has it, otherwise an addition — the value is the VM host either way
+    b = {**(sb["overrides"] or {}), **(sb["added"] or {})}
+    f = {**(sf["overrides"] or {}), **(sf["added"] or {})}
+    assert b["BACKEND_URL"] == b["FASTAPI_URL"] == api
+    if env == "dev":
+        assert b["ADMIN_OPERATOR_AUDIENCE"] == api, "dev's live service sets an admin audience; it follows the API host"
+    else:
+        assert "ADMIN_OPERATOR_AUDIENCE" not in b, "prod's live service has none and the VM must not switch the admin lane on"
     assert b["APP_URL"] == b["NEXT_PUBLIC_APP_URL"] == f["APP_BASE_URL"] == f["NEXT_PUBLIC_APP_URL"] == app
     assert f["NEXT_PUBLIC_FASTAPI_URL"] == api and f["REALTIME_URL"] == rt
-    assert "run.app" not in (_VM / "env/dev.yaml").read_text()
+    assert "run.app" not in (_VM / f"env/{env}.yaml").read_text()
     assert set(hosts) == {"api", "realtime", "app"}
+    assert decl["environment"] == env, "a declaration must say which environment it is for"
+    assert decl["buckets"] == {"deploy": f"sprintable-vm-{env}-deploy", "backups": f"sprintable-vm-{env}-backups"}
+    assert decl["database"]["password_secret"] == f"DB_PASSWORD_VM_{env.upper()}"
 
 
-def test_cloud_only_and_self_hosting_switches_are_never_declared() -> None:
-    for service, svc in DECL["services"].items():
+def test_prod_adds_nothing_the_live_prod_service_does_not_have_except_the_vm_switch() -> None:
+    """prod behaves as prod does today: no new admin lane, no new rate-limit setting; the only new name is TRUST_FORWARDED_FOR (and it is in the live-name-free `added` group)"""
+    assert set(DECLS["prod"]["services"]["backend"]["added"]) == {"TRUST_FORWARDED_FOR"}
+    assert not DECLS["prod"]["services"]["frontend"]["added"]
+
+
+def test_prod_carries_no_payment_secrets_and_no_dev_secret_ids() -> None:
+    prod = DECLS["prod"]["services"]
+    ids = {sid for svc in prod.values() for sid in svc["secrets"].values()}
+    assert not any("TOSS" in n for svc in prod.values() for n in svc["secrets"]), "payments are outside this release"
+    assert not any(i.endswith(("_DEV", "-dev", "_dev")) for i in ids), "a dev secret id leaked into the prod declaration"
+    assert {"CRON_SECRET_PROD", "FIREBASE_BFF_INTERNAL_SECRET_PROD"} <= ids
+
+
+@pytest.mark.parametrize("env", ["dev", "prod"])
+def test_cloud_only_and_self_hosting_switches_are_never_declared(env: str) -> None:
+    for service, svc in DECLS[env]["services"].items():
         declared = set().union(*(set(svc.get(k) or ()) for k in ("live_plain", "overrides", "secrets", "computed", "added")))
         assert not (R.FORBIDDEN_NAMES & declared), f"{service} declares a forbidden variable"
 
@@ -253,3 +286,27 @@ def test_the_metadata_token_is_renewed_before_it_expires() -> None:
     clock["t"] += 600
     read("S3")
     assert fetched == ["tok1", "tok2"], "renewed a minute before the hour ends"
+
+
+@pytest.mark.parametrize("env", ["dev", "prod"])
+def test_each_declaration_builds_a_complete_environment_with_fake_values(env: str) -> None:
+    decl = DECLS[env]
+    for name, svc in decl["services"].items():
+        plain = {n: "plain" for n in svc["live_plain"]}
+        built = R.build_service_env(decl, name, plain, "0123456789abcdef0123", lambda sid: "s-" + sid)
+        live = _live(_VM / f"env/live-names.{env}.txt", svc["live_section"])
+        expected = (set(live) - set(svc["dropped"] or {})) | set(svc["added"] or {})
+        assert set(built) == expected, f"{env}/{name}: {sorted(set(built) ^ expected)}"
+        assert not (R.FORBIDDEN_NAMES & set(built))
+        if name == "backend":
+            assert built["DATABASE_URL"].startswith("postgresql+asyncpg://sprintable:") and built["DATABASE_URL"].endswith("@db:5432/sprintable")
+            assert "REDIS_URL" not in built and built["TRUST_FORWARDED_FOR"] == "true"
+
+
+@pytest.mark.parametrize("env,wanted", [("dev", "JWT_SECRET_DEV"), ("prod", "JWT_SECRET_PROD")])
+def test_the_jwt_secret_is_the_environments_own_and_the_shared_one_is_never_read(env: str, wanted: str) -> None:
+    for service in ("backend", "frontend"):
+        secrets = DECLS[env]["services"][service]["secrets"]
+        assert secrets["JWT_SECRET"] == wanted, f"{env}/{service}"
+    all_ids = {sid for d in DECLS.values() for svc in d["services"].values() for sid in svc["secrets"].values()}
+    assert "JWT_SECRET" not in all_ids, "the shared JWT_SECRET entry is deleted at story 4798 AC9"
