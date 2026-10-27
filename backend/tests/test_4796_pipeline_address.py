@@ -165,3 +165,11 @@ def test_the_stream_lifetimes_the_runbook_states_are_the_ones_in_the_code() -> N
     assert "_AGENT_SSE_LIFESPAN_SEC: float = 300.0" in agent and "_AGENT_SSE_LIFESPAN_JITTER_SEC: float = 30.0" in agent
     assert "the 120 s is the length of the observation" in sec and "300 s plus up to 30 s jitter" in sec, "120 s is what the PO observed, not a server design limit"
     assert "closed by the server at 120 s" not in sec
+
+
+def test_the_runbook_does_not_call_the_switch_the_only_backend_address_line() -> None:
+    """codex (pipeline PR, round 4): `backend_url=` is a second, separate dev line (`_BACKEND_URL`, the GA4 redirect); the switch is the one line for `_FASTAPI_URL`"""
+    assert re.findall(r'(?m)^\s*echo "backend_url=(https://sprintable-backend-dev-[^"]+)"', _WF_TEXT) == [NEW_FORM], "the separate dev line the runbook points at"
+    sec = _runbook_section("## 9. ", "## 10. ")
+    assert "exactly one line for `_FASTAPI_URL`" in sec and "exactly one line for the backend's address" not in sec
+    assert "`backend_url=…` just below it is a different value, `_BACKEND_URL`" in sec and "moves with the GA4 registration in Phase 2" in sec
