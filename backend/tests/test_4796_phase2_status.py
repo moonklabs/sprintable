@@ -44,7 +44,7 @@ def test_the_stored_link_paragraph_is_true_in_the_code() -> None:
     para = sec[sec.index("**Links stored with the request host (fixed by `PUBLIC_API_URL`).**"):sec.index("\nOrder of work:")]
     for needle in ("`request.base_url`", "`header_up Host {upstream_hostport}`", "answer 404 once the Cloud Run backend is deleted (§10)", "the recipe-approved auto-publish (whose fallback is `backend_url`)",
                    "build from `public_api_origin()`", "on dev that is `PUBLIC_API_URL`, set from the one switch", "when it is empty (prod) the routes use the request's host, as before, and the recipe auto-publish — which has no request — uses `backend_url`",
-                   "rewritten by the one-off job of §10 («Stored hosted-site links»), a precondition of Phase 3", "after Phase 3 the host is `dev-api`"):
+                   "rewritten by the one-off job of §10 («Stored hosted-site links»): a precondition of Phase 3 for prod, waived for dev by the PO", "after Phase 3 the host is `dev-api`"):
         assert needle in para, needle
     assert "Before §10 count the stored links" not in para, "the count is now the job's report, not a hand query"
 

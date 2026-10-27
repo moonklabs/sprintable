@@ -171,7 +171,7 @@ def test_the_runbook_names_the_new_setting_and_the_job_steps_that_the_job_really
     for needle in ("**Stored hosted-site links (story 4796).**", "python -m scripts.jobs.rewrite_site_post_links`", "--old-origin https://sprintable-backend-dev-787818285179.asia-northeast3.run.app", "--old-origin https://sprintable-backend-dev-57iommnikq-du.a.run.app",
                    "--new-origin https://dev-api.sprintable.ai`", "with `--apply`", "exits non-zero unless nothing with an old origin is left", "origins and counts, never a full link", "Undo of the rewrite"):
         assert needle in sec10, needle
-    for needle in ("in the Cloud Run job, **before Phase 3's final dump**, so that dump already carries the rewritten links", "sudo docker exec sprintable-backend-1 python -m scripts.jobs.rewrite_site_post_links",
+    for needle in ("in a Cloud Run job, **before Phase 3's final dump**, so that dump already carries the rewritten links (the commands below are dev's; prod needs its own job, §12)", "sudo docker exec sprintable-backend-1 python -m scripts.jobs.rewrite_site_post_links",
                    "gcloud run jobs describe sprintable-verify-oneoff --project $PROJECT --region $REGION --format=export > verify-oneoff-before.yaml",
                    "gcloud run jobs update sprintable-verify-oneoff --project $PROJECT --region $REGION --command=python --image", "--format='value(spec.template.spec.containers[0].image)'", "`jobs execute` takes only `--args`",
                    "gcloud run jobs execute sprintable-verify-oneoff --project $PROJECT --region $REGION --wait --args=-m,scripts.jobs.rewrite_site_post_links",
@@ -230,13 +230,29 @@ def test_section_12_lists_what_dev_taught_and_each_item_is_true_of_the_files() -
 
     text = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
     sec = text[text.index("## 12. Prod"):]
-    for needle in ("**Before the prod move — what dev taught", "still names `https://realtime.sprintable.ai`", "the canonical prod value is empty since #5305", "The prod GCE realtime gateways have been off since 2026-10-26 15:17Z",
+    for needle in ("**Before the prod move — what dev taught", "still names `https://realtime.sprintable.ai`", "the canonical prod value is empty since #5305 (`cloud-build.yml`: `realtime_url=` in the prod branch", "The prod GCE realtime gateways have been off since 2026-10-26 15:17Z (the PO's finding",
                    "the pipeline's prod branch removes it (`--remove-env-vars`)", "set it to `https://api.sprintable.ai`", "the same 20 + 10 as dev, inside the same 57 usable connections",
-                   "The stored-link job against Cloud SQL **before** the final dump", "certificate gap about 6 s"):
+                   "The stored-link job against prod's Cloud SQL **before** the final dump", "a prod job does not exist yet", "create it with the prod image, a service account that reaches the prod database",
+                   "**as the PO measured them on 2026-10-27, quoted here and not derivable from the repository**", "about 6 s after the front door started and about 15 s after the resolvers agreed"):
         assert needle in sec, needle
     prod = yaml.safe_load((_ROOT / "deploy/vm/env/prod.yaml").read_text())
     assert prod["services"]["frontend"]["overrides"]["REALTIME_URL"] == "https://realtime.sprintable.ai", "the item is still open: change this line and the pin together, then this runbook item"
     assert "PUBLIC_API_URL" not in prod["services"]["backend"]["overrides"] and "PUBLIC_API_URL" not in str(prod["services"]["backend"].get("added") or {})
     main = (_ROOT / "cloudbuild.yaml").read_text()
     assert 'REMOVE_ENV_VARS="$${REMOVE_ENV_VARS},DB_TIMING_LOG_ENABLED,PUBLIC_API_URL"' in main
+    # the claims that ARE derivable from the repository: the prod stream address is empty in the pipeline, and no prod one-off job is provisioned
+    workflow = (_ROOT / ".github/workflows/cloud-build.yml").read_text()
+    prod_branch = workflow[workflow.index('echo "fastapi_url=https://sprintable-backend-prod'):workflow.index("story #2701")]
+    assert 'echo "realtime_url=" >> "$GITHUB_OUTPUT"' in prod_branch, "the prod branch states an empty stream address (#5305)"
+    jobs_readme = (_ROOT / "backend/scripts/jobs/README.md").read_text()
+    assert "The only currently-provisioned Cloud Run Job for this is **`sprintable-verify-oneoff`**\n(dev)." in jobs_readme, "no prod one-off job is provisioned"
     assert (prod["services"]["backend"]["overrides"]["DB_POOL_SIZE"], prod["services"]["backend"]["overrides"]["DB_MAX_OVERFLOW"]) == ("20", "10")
+
+
+def test_the_dev_waiver_is_stated_the_same_way_in_every_place_that_speaks_of_the_link_rewrite() -> None:
+    """codex (wording PR): §9 said "a precondition of Phase 3" without the waiver while §7c and §10 said waived for dev"""
+    text = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
+    for marker in ("rewritten by the one-off job of §10", "**Dev: waived by the PO (2026-10-27, the shortcut).**", "**waived for dev** by the PO on 2026-10-27"):
+        assert marker in text, marker
+    assert "(«Stored hosted-site links»), a precondition of Phase 3;" not in text, "the unconditional sentence"
+    assert "a precondition of Phase 3 for prod, waived for dev by the PO (the job runs on the VM afterwards)" in text
