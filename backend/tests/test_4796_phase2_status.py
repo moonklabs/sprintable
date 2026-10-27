@@ -19,7 +19,7 @@ def test_the_status_paragraph_states_what_is_done_deferred_accepted_and_still_di
     sec = _sec9()
     status = sec[sec.index("**Phase 2 status"):sec.index("**Links stored with the request host.**")]
     for needle in (
-        "34 agents and 17 relays moved", "the connectors' defaults, the guides' dev examples and fakechat",
+        "34 agents and 17 relays moved", "the defaults of the Python and host connectors, the guides' dev examples and fakechat", "the Pi, OpenCode and OpenClaw entry points keep the prod app domain, see Phase 2",
         "about 1,800 requests a day", "the dev GitHub App's webhook and the repository webhook of `moonklabs/sprintable`", "a redelivery of each answered 200 through the front door",
         "the GA4 callback had 0 requests in 24 hours", "`score-ga4-outcomes`", "the Polar webhook had 0", "the branch `damrong/4796-ga4-backend-url`, not merged",
         "**Accepted cost:** after Phase 3 a GA4 connect started on dev fails with `redirect_uri_mismatch`", "the Google console knows only the old callback", "its webhook url is not moved", "the route exists on the VM only if `LICENSE_CONSENT` is `agreed`", "a `live_plain` name",

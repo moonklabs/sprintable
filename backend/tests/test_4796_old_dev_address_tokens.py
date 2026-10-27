@@ -4,7 +4,7 @@ Phase 2 of the dev move (RUNBOOK §7c) moves every guest to `https://dev-api.spr
 address dials it) and the dev example lines of the guides under `apps/web/public/` (copied as they are into the VM frontend image). Prod is not part of this move: `hermes-sprintable-prod` and the guides' prod lines keep the
 prod addresses.
 
-Pinned: no file of the connectors (prod plugin excepted) or the guides names the old dev form; every `DEFAULT_API_URL` / `apiUrl` default there is the dev API name; the prod plugin and the prod lines of the guides are unchanged.
+Pinned: no file of the connectors (prod plugin excepted) or the guides names the old dev form; every `DEFAULT_API_URL` of the Python and host connectors and the shared SSE client is the dev API name — the one `DEFAULT_API_URL` that is not (the OpenClaw channel's) and the inline fallbacks of the Pi and OpenCode entry points name the prod app domain on purpose and are pinned as such; the prod plugin and the prod lines of the guides are unchanged.
 """
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ def test_the_runbook_says_the_load_test_tools_stay_on_raw_cloud_run_on_purpose()
         assert name in sec and (_ROOT / "backend/scripts/loadtest" / name).exists(), name
 
 
-def test_every_default_api_url_of_the_dev_connectors_is_the_dev_api_name() -> None:
+def test_every_default_api_url_of_the_python_and_host_connectors_is_the_dev_api_name_and_the_three_entry_points_keep_the_prod_app_domain() -> None:
     found = []
     for p in _files("connectors"):
         rel = str(p.relative_to(_ROOT))
@@ -67,9 +67,12 @@ def test_every_default_api_url_of_the_dev_connectors_is_the_dev_api_name() -> No
         for m in re.finditer(r"(?m)^\s*(?:export\s+)?(?:const\s+)?DEFAULT_API_URL\s*(?::\s*\w+\s*)?=\s*[\"'](https?://[^\"']+)[\"']", p.read_text(errors="ignore")):
             found.append((rel, m.group(1)))
     assert len(found) >= 15, f"the connectors' defaults were found: {len(found)}"
-    # the one default that is not a dev backend address is the OpenClaw channel's PROD app domain (`https://app.sprintable.ai`): prod is not part of this move
+    # the one `DEFAULT_API_URL` that is not a dev backend address is the OpenClaw channel's PROD app domain (`https://app.sprintable.ai`); the Pi and OpenCode entry points have an inline fallback to the same domain
+    # (checked in the Phase 2 test below): prod is not part of this move
     others = [f for f in found if f[1] != DEV_API]
     assert others == [("connectors/openclaw-sprintable/src/channel.ts", "https://app.sprintable.ai")], others
+    for rel, needle in (("connectors/pi-sprintable/index.ts", "process.env.SPRINTABLE_API_URL ?? 'https://app.sprintable.ai'"), ("connectors/opencode-sprintable/index.ts", 'process.env.SPRINTABLE_API_URL ?? "https://app.sprintable.ai"')):
+        assert needle in (_ROOT / rel).read_text(), rel
 
 
 def test_the_prod_plugin_and_the_prod_lines_of_the_guides_did_not_move() -> None:
