@@ -165,13 +165,13 @@ def test_the_runbook_names_the_new_setting_and_the_job_steps_that_the_job_really
         assert needle in sec9, needle
     sec10 = text[text.index("## 10. "):text.index("## 11. ")]
     job = (_ROOT / "backend/scripts/jobs/rewrite_site_post_links.py").read_text()
-    assert "This is a precondition of Phase 3 (§7c)" in sec10 and "**before Phase 3's final dump**" in sec10 and "which comes after the soak" in sec10
+    assert "**Dev: waived by the PO (2026-10-27, the shortcut).**" in sec10 and "**Prod: a precondition of Phase 3 (§7c)**" in sec10 and "**before Phase 3's final dump**" in sec10 and "which comes after the soak" in sec10
     p3 = text[text.index("**Phase 3"):text.index("## 8. ")]
-    assert "the stored hosted-site links rewritten and the report showing no `run.app` origin (§10, «Stored hosted-site links»)" in p3.split("\n1. ")[0]
+    assert "the stored hosted-site links rewritten and the report showing no `run.app` origin (§10, «Stored hosted-site links»; **waived for dev** by the PO on 2026-10-27" in p3.split("\n1. ")[0] and "**required for prod**" in p3.split("\n1. ")[0]
     for needle in ("**Stored hosted-site links (story 4796).**", "python -m scripts.jobs.rewrite_site_post_links`", "--old-origin https://sprintable-backend-dev-787818285179.asia-northeast3.run.app", "--old-origin https://sprintable-backend-dev-57iommnikq-du.a.run.app",
                    "--new-origin https://dev-api.sprintable.ai`", "with `--apply`", "exits non-zero unless nothing with an old origin is left", "origins and counts, never a full link", "Undo of the rewrite"):
         assert needle in sec10, needle
-    for needle in ("**before Phase 3's final dump** against Cloud SQL", "so that dump already carries the rewritten links", "sudo docker exec sprintable-backend-1 python -m scripts.jobs.rewrite_site_post_links",
+    for needle in ("in the Cloud Run job, **before Phase 3's final dump**, so that dump already carries the rewritten links", "sudo docker exec sprintable-backend-1 python -m scripts.jobs.rewrite_site_post_links",
                    "gcloud run jobs describe sprintable-verify-oneoff --project $PROJECT --region $REGION --format=export > verify-oneoff-before.yaml",
                    "gcloud run jobs update sprintable-verify-oneoff --project $PROJECT --region $REGION --command=python --image", "--format='value(spec.template.spec.containers[0].image)'", "`jobs execute` takes only `--args`",
                    "gcloud run jobs execute sprintable-verify-oneoff --project $PROJECT --region $REGION --wait --args=-m,scripts.jobs.rewrite_site_post_links",
@@ -222,3 +222,21 @@ def test_the_rewrite_job_refuses_to_run_without_a_database_url_instead_of_fallin
     with pytest.raises(SystemExit) as exc:
         asyncio.run(job.run([DEV_API], DEV_API, True))
     assert "neither DATABASE_URL nor ALEMBIC_URL" in str(exc.value)
+
+
+def test_section_12_lists_what_dev_taught_and_each_item_is_true_of_the_files() -> None:
+    """the prod checklist names the state of the repository it asks to change"""
+    import yaml
+
+    text = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
+    sec = text[text.index("## 12. Prod"):]
+    for needle in ("**Before the prod move — what dev taught", "still names `https://realtime.sprintable.ai`", "the canonical prod value is empty since #5305", "The prod GCE realtime gateways have been off since 2026-10-26 15:17Z",
+                   "the pipeline's prod branch removes it (`--remove-env-vars`)", "set it to `https://api.sprintable.ai`", "the same 20 + 10 as dev, inside the same 57 usable connections",
+                   "The stored-link job against Cloud SQL **before** the final dump", "certificate gap about 6 s"):
+        assert needle in sec, needle
+    prod = yaml.safe_load((_ROOT / "deploy/vm/env/prod.yaml").read_text())
+    assert prod["services"]["frontend"]["overrides"]["REALTIME_URL"] == "https://realtime.sprintable.ai", "the item is still open: change this line and the pin together, then this runbook item"
+    assert "PUBLIC_API_URL" not in prod["services"]["backend"]["overrides"] and "PUBLIC_API_URL" not in str(prod["services"]["backend"].get("added") or {})
+    main = (_ROOT / "cloudbuild.yaml").read_text()
+    assert 'REMOVE_ENV_VARS="$${REMOVE_ENV_VARS},DB_TIMING_LOG_ENABLED,PUBLIC_API_URL"' in main
+    assert (prod["services"]["backend"]["overrides"]["DB_POOL_SIZE"], prod["services"]["backend"]["overrides"]["DB_MAX_OVERFLOW"]) == ("20", "10")
