@@ -261,7 +261,11 @@ jobs:
             # 단일세션 60분 무절단 + heartbeat 규칙성(dev 대조군 동시 측정).
             # ⚠️승격 병합(promo/backplane-20260723): 위 백플레인 3플래그(develop)와 이 REALTIME_URL
             # 전환(main #2439)은 서로 무관한 prod env 출력이라 둘 다 보존한다.
-            echo "realtime_url=https://realtime.sprintable.ai" >> "$GITHUB_OUTPUT"
+            # story 4790 (E-INFRA-DIET, 2026-10-27, PO) — the prod stream address is EMPTY now: the prod GCE realtime gateways are off. After the Redis move (10-26 15:16Z) the gateway MIG came back
+            # failing its health check (8000 /api/v2/ping), so /api/event-stream answered 502 until the PO emptied REALTIME_URL by hand at 17:30Z (frontend-prod revision 00304). Empty = the frontend streams through
+            # the backend (apps/web/src/app/api/event-stream/route.ts falls back to FASTAPI_URL), the same as dev. Without this line the next prod promotion would write the dead address back. The GCE deploy step
+            # never deploys on prod (cloudbuild.yaml deploy-realtime-gce: dev-only gate), so nothing else here carries the gateway; the MIG, the load balancer rule and the IP are removed by the PO after this merges.
+            echo "realtime_url=" >> "$GITHUB_OUTPUT"
             # story #2701(2026-08-17) — sprintable-mcp-prod의 라이브 실측(gcloud describe)
             # 그대로 durable화. dev엔 이 값이 없다(아래 dev 분기 참조, 조용히 맞추지 않음 —
             # dev는 CORS/host allowlist 자체가 아직 필요하지 않다는 뜻으로 실측된 그대로 둔다).
