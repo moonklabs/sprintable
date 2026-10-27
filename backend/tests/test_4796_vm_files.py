@@ -574,3 +574,26 @@ def test_bootstrap_installs_gcloud_when_the_image_lacks_it_and_the_runbook_does_
 def test_the_runbook_tells_where_the_amd64_build_should_run() -> None:
     text = (_VM / "RUNBOOK.md").read_text()
     assert "linux/amd64" in text and "Apple-silicon" in text and "Cloud Shell" in text and "image_summary.digest" in text
+
+
+def test_phase_1_waits_for_public_dns_before_the_front_door_asks_for_a_certificate() -> None:
+    """codex round 10: Caddy's certificate check would see the old CNAME if it starts before the resolvers agree"""
+    text = (_VM / "RUNBOOK.md").read_text()
+    phase1 = text[text.index("**Phase 1"):text.index("**Phase 2")]
+    assert "dig +short dev-api.sprintable.ai @1.1.1.1" in phase1 and "dig +short dev-api.sprintable.ai @8.8.8.8" in phase1
+    assert phase1.index("@8.8.8.8") < phase1.index("front-door.sh passthrough"), "the wait comes before the front door starts"
+
+
+def test_the_support_gateway_is_closed_for_the_dump_and_reopened_and_retargeted_afterwards() -> None:
+    """codex round 10: support-gateway-dev mounts the Cloud SQL instance and posts to the backend from the same project"""
+    text = (_VM / "RUNBOOK.md").read_text()
+    phase2 = text[text.index("**Phase 2"):text.index("**Phase 3")]
+    phase3 = text[text.index("**Phase 3"):text.index("## 8.")]
+    assert "SUPPORT_GATEWAY_BACKEND_ESCALATION_EVENTS_URL" in phase2, "listed among the guests that carry the backend address"
+    stop = phase3[phase3.index("1. **Stop the writers"):phase3.index("2. `sudo docker stop")]
+    assert "support-gateway-dev" in stop and "--ingress internal" in stop
+    success = phase3[phase3.index("5. Checks from inside"):phase3.index("6. The scheduler jobs")]
+    assert "support-gateway-dev" in success and "--ingress all" in success
+    undo = phase3[phase3.index("**Undo (before"):]
+    assert "support-gateway-dev" in undo
+
