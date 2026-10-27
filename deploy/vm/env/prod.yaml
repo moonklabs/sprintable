@@ -22,8 +22,8 @@ services:
     live_section: sprintable-backend-prod
     overrides:
       DB_PGBOUNCER: 'false'
-      DB_POOL_SIZE: '5'
-      DB_MAX_OVERFLOW: '5'
+      DB_POOL_SIZE: '20'   # story 4796: the same budget as dev (RUNBOOK §11 «Database connection budget»); the VM database allows 60 connections
+      DB_MAX_OVERFLOW: '10'
       PG_LISTEN_ENABLED: 'true'
       EVENT_BROKER_REDIS_CONSUME_ENABLED: 'false'
       EVENT_BROKER_REDIS_DISPATCH_ENABLED: 'false'

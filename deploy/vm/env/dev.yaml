@@ -20,8 +20,8 @@ services:
     live_section: sprintable-backend-dev
     overrides:  # VM-specific values (everything else plain comes from the private file made from the live service)
       DB_PGBOUNCER: "false"
-      DB_POOL_SIZE: "5"
-      DB_MAX_OVERFLOW: "5"
+      DB_POOL_SIZE: "20"   # story 4796: see RUNBOOK §11 «Database connection budget» — one process on direct connections, 10 was exhausted on the first day (QueuePool limit, 30 s timeout)
+      DB_MAX_OVERFLOW: "10"
       PG_LISTEN_ENABLED: "true"
       EVENT_BROKER_REDIS_CONSUME_ENABLED: "false"
       EVENT_BROKER_REDIS_DISPATCH_ENABLED: "false"
