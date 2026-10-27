@@ -37,10 +37,10 @@ Send that output to the agent: it is the parity list (Secret Manager accessor **
 ```bash
 gcloud iam service-accounts create $SA --project $PROJECT --display-name "Sprintable $ENV VM"
 SAE=$SA@$PROJECT.iam.gserviceaccount.com
-# always:
-gcloud projects add-iam-policy-binding $PROJECT --member serviceAccount:$SAE --role roles/logging.logWriter
-gcloud projects add-iam-policy-binding $PROJECT --member serviceAccount:$SAE --role roles/monitoring.metricWriter
-gcloud projects add-iam-policy-binding $PROJECT --member serviceAccount:$SAE --role roles/artifactregistry.reader
+# always (a project-level binding names its condition — the project policy holds a conditional binding, and gcloud then refuses an unconditioned call in a script):
+gcloud projects add-iam-policy-binding $PROJECT --member serviceAccount:$SAE --role roles/logging.logWriter --condition=None
+gcloud projects add-iam-policy-binding $PROJECT --member serviceAccount:$SAE --role roles/monitoring.metricWriter --condition=None
+gcloud projects add-iam-policy-binding $PROJECT --member serviceAccount:$SAE --role roles/artifactregistry.reader --condition=None
 gcloud storage buckets add-iam-policy-binding gs://$DEPLOY_BUCKET  --member serviceAccount:$SAE --role roles/storage.objectViewer   # read only: the VM cannot change what it will run
 gcloud storage buckets add-iam-policy-binding gs://$BACKUPS_BUCKET --member serviceAccount:$SAE --role roles/storage.objectCreator  # backups + status files: it can ADD objects, never replace or delete them
 gcloud storage buckets add-iam-policy-binding gs://$BACKUPS_BUCKET --member serviceAccount:$SAE --role roles/storage.objectViewer   # … and read them back (restore, restore-check)
@@ -57,7 +57,7 @@ done
 for B in sprintable-avatars-dev sprintable-channel-media-dev sprintable-memo-attachments-dev; do
   gcloud storage buckets add-iam-policy-binding gs://$B --member serviceAccount:$SAE --role roles/storage.objectAdmin
 done
-gcloud projects add-iam-policy-binding $PROJECT --member serviceAccount:$SAE --role roles/aiplatform.user
+gcloud projects add-iam-policy-binding $PROJECT --member serviceAccount:$SAE --role roles/aiplatform.user --condition=None
 ```
 Undo: `gcloud iam service-accounts delete $SAE` (removes its bindings with it).
 
