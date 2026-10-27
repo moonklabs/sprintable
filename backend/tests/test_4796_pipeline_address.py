@@ -258,7 +258,7 @@ def test_the_ga4_line_is_gated_on_the_console_step_in_the_workflow_and_in_the_ru
     p2 = text[text.index("**Phase 2"):text.index("**Phase 3")]
     assert "(order in §9: console first, then the `backend_url` line)" in p2
     sec = _runbook_section("## 9. ", "## 10. ")
-    assert "redirect_uri_mismatch" in sec and "the fallback host of public hosted-site post links" in sec
+    assert "redirect_uri_mismatch" in sec and "the fallback host of the links that the recipe-approved auto-publish of a hosted-site post stores" in sec
     cfg = (_ROOT / "backend/app/routers/measurement_connections.py").read_text()
     assert "settings.backend_url.rstrip('/')}/api/v2/measurement-connections/ga4/callback" in cfg, "the redirect URI the console must know is built from backend_url"
 
@@ -273,5 +273,14 @@ def test_the_ga4_flip_consequences_the_runbook_names_are_true_in_the_code() -> N
     sp = (_ROOT / "backend/app/services/site_posts.py").read_text()
     assert 'action="site_post_published"' in sp and '"url": url' in sp and "backend_base_url.rstrip('/')}/api/v2/public/site-posts/" in sp
     sec = _runbook_section("## 9. ", "## 10. ")
-    for needle in ("the signed state lives 10 minutes", "fails once at the token exchange", "does not set `BACKEND_URL` at all", "`activity_logs.context.url` (action `site_post_published`)", "count them", "contains `run.app`", "the flip makes every new link carry the dev API name"):
+    routes = (_ROOT / "backend/app/routers/site_posts.py").read_text()
+    assert "backend_base_url=str(request.base_url)" in routes, "the publish route builds the link from the request's own host"
+    assert "backend_base_url=settings.backend_url" in sp, "the recipe auto-publish builds it from backend_url"
+    assert "header_up Host {upstream_hostport}" in (_ROOT / "deploy/vm/bin/front-door.sh").read_text(), "the front door sets Host to the Cloud Run host"
+    for needle in ("the signed state lives 10 minutes", "fails once at the token exchange", "does not set `BACKEND_URL` at all", "`activity_logs.context.url` (action `site_post_published`)", "Before §10 count the stored links", "contains `run.app`",
+                   "the recipe-approved auto-publish uses `backend_url` (the flip makes its new links carry the dev API name)", "the publish route (`routers/site_posts.py`) uses the request's own host (`request.base_url`)",
+                   "links published through the route during Phase 1/2 still carry `run.app`", "the `web_origin` the native-bootstrap and device routes build from `request.base_url`"):
         assert needle in sec, needle
+    assert "the flip makes every new link carry the dev API name" not in sec, "the old, too broad claim"
+    for rel in ("backend/app/routers/auth_native_bootstrap.py", "backend/app/routers/device_installations.py"):
+        assert 'web_origin=str(request.base_url).rstrip("/")' in (_ROOT / rel).read_text(), rel
