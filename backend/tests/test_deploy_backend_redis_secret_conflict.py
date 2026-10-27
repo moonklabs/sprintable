@@ -877,6 +877,8 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         "SANDBOX_CHANNEL_ENABLED=true,"
         # story #4332 — SANDBOX_CHANNEL_ENABLED 조건부 append 바로 뒤(cloudbuild.yaml 삽입 순서 그대로 · dev만).
         "DB_TIMING_LOG_ENABLED=true,"
+        # story 4796 — same dev-only block, right after DB_TIMING_LOG_ENABLED (the one switch's value; RUNBOOK §9).
+        "PUBLIC_API_URL=https://example.run.app,"
         # story e4fc29fa — SANDBOX_CHANNEL_ENABLED 조건부 append 바로 뒤(cloudbuild.yaml
         # 삽입 순서 그대로).
         "WORDPRESS_TEST_STUB_ENABLED=true,WEBHOOK_TEST_STUB_ENABLED=true"

@@ -55,13 +55,61 @@ def test_the_setting_accepts_an_origin_only(value: str, expected: str) -> None:
     assert Settings(public_api_url=value).public_api_url == expected
 
 
-@pytest.mark.parametrize("value", [
+BAD = [
     "http://dev-api.sprintable.ai", "https://dev-api.sprintable.ai/api", "https://dev-api.sprintable.ai/?x=1", "https://dev-api.sprintable.ai#f",
     "https://user:pw@dev-api.sprintable.ai", "dev-api.sprintable.ai", "ftp://dev-api.sprintable.ai", "https://",
-])
+    "/", "//", "https://dev-api.sprintable.ai:abc", "https://dev-api.sprintable.ai:99999", "https://dev-api.sprintable.ai:0", "https://dev-api.sprintable.ai:",
+]
+
+
+@pytest.mark.parametrize("value", BAD)
 def test_a_value_that_is_not_an_origin_stops_the_app_at_start_up(value: str) -> None:
     with pytest.raises(ValueError):
         Settings(public_api_url=value)
+
+
+@pytest.mark.parametrize("value", BAD + ["", "  "])
+def test_the_shared_origin_check_refuses_the_same_values_and_an_empty_one_unless_allowed(value: str) -> None:
+    from app.core.origin_check import parse_origin
+
+    if value.strip():
+        with pytest.raises(ValueError):
+            parse_origin(value)
+        with pytest.raises(ValueError):
+            parse_origin(value, allow_empty=True)
+    else:
+        with pytest.raises(ValueError):
+            parse_origin(value)
+        assert parse_origin(value, allow_empty=True) == ""
+
+
+def test_the_job_and_the_setting_use_the_one_origin_check() -> None:
+    assert "from app.core.origin_check import parse_origin" in (_ROOT / "backend/scripts/jobs/rewrite_site_post_links.py").read_text()
+    assert "from app.core.origin_check import parse_origin" in (_ROOT / "backend/app/core/config.py").read_text()
+    assert "urlsplit" not in (_ROOT / "backend/scripts/jobs/rewrite_site_post_links.py").read_text(), "no second copy of the check"
+
+
+def test_the_vm_declares_the_new_variable_and_the_live_names_know_it() -> None:
+    """codex (public origin PR): the dev deploy adds PUBLIC_API_URL to the live service; the cutover name check fails on a live name the declaration does not know"""
+    env = (_ROOT / "deploy/vm/env/dev.yaml").read_text()
+    assert 'PUBLIC_API_URL: "https://dev-api.sprintable.ai"' in env.split("secrets:")[0], "an override of the backend: the VM's own value"
+    names = (_ROOT / "deploy/vm/env/live-names.dev.txt").read_text()
+    backend = names[names.index("## sprintable-backend-dev"):]
+    assert "\nPUBLIC_API_URL <plain>\n" in backend.split("\n## ")[0] + "\n"
+    assert "PUBLIC_API_URL" not in (_ROOT / "deploy/vm/env/live-names.prod.txt").read_text() and "PUBLIC_API_URL" not in (_ROOT / "deploy/vm/env/prod.yaml").read_text(), "prod states nothing yet"
+
+
+def _hand_deploy_spec(env: str) -> str:
+    import os
+
+    proc = subprocess.run(["bash", str(_ROOT / "backend/scripts/deploy_backend.sh"), env], capture_output=True, text=True, env={**os.environ, "DRY_RUN": "1"}, check=True)
+    return next(line for line in proc.stdout.splitlines() if line.startswith("ENV_VARS_SPEC=")).split("=", 1)[1]
+
+
+def test_the_hand_deploy_script_sets_the_public_address_for_dev_only() -> None:
+    dev = _hand_deploy_spec("dev").split("@")
+    assert "PUBLIC_API_URL=" + DEV_API in dev and "FASTAPI_URL=" + DEV_API in dev
+    assert not any(item.startswith("PUBLIC_API_URL=") for item in _hand_deploy_spec("prod").split("@")), "prod states nothing"
 
 
 def test_the_four_call_sites_use_the_helper_and_no_origin_is_built_from_the_request_any_more() -> None:
@@ -118,6 +166,12 @@ def test_the_runbook_names_the_new_setting_and_the_job_steps_that_the_job_really
     job = (_ROOT / "backend/scripts/jobs/rewrite_site_post_links.py").read_text()
     for needle in ("**Stored hosted-site links (story 4796).**", "python -m scripts.jobs.rewrite_site_post_links`", "--old-origin https://sprintable-backend-dev-787818285179.asia-northeast3.run.app", "--old-origin https://sprintable-backend-dev-57iommnikq-du.a.run.app",
                    "--new-origin https://dev-api.sprintable.ai`", "with `--apply`", "exits non-zero unless nothing with an old origin is left", "origins and counts, never a full link", "Undo of the rewrite"):
+        assert needle in sec10, needle
+    for needle in ("**before Phase 3** against Cloud SQL", "so the final dump already carries the rewritten links", "sudo docker exec sprintable-backend-1 python -m scripts.jobs.rewrite_site_post_links",
+                   "gcloud run jobs describe sprintable-verify-oneoff --project $PROJECT --region $REGION --format=export > verify-oneoff-before.yaml",
+                   "gcloud run jobs update sprintable-verify-oneoff --project $PROJECT --region $REGION --image", "--format='value(spec.template.spec.containers[0].image)'",
+                   "gcloud run jobs execute sprintable-verify-oneoff --project $PROJECT --region $REGION --wait --command=python --args=-m,scripts.jobs.rewrite_site_post_links",
+                   "gcloud run jobs replace verify-oneoff-before.yaml --project $PROJECT --region $REGION"):
         assert needle in sec10, needle
     for flag in ("--old-origin", "--new-origin", "--apply"):
         assert f'"{flag}"' in job, flag

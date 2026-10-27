@@ -20,7 +20,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
-from urllib.parse import urlsplit
 
 from sqlalchemy import text
 
@@ -39,12 +38,12 @@ def _like_prefix(origin: str) -> str:
 
 
 def check_origin(value: str, *, what: str) -> str:
-    value = value.strip().rstrip("/")
-    parts = urlsplit(value)
-    loopback = parts.scheme == "http" and parts.hostname in ("localhost", "127.0.0.1")
-    if not (parts.scheme == "https" or loopback) or not parts.hostname or parts.path or parts.query or parts.fragment or parts.username or parts.password:
-        raise SystemExit(f"{what} must be an origin: https://host[:port] (http only for localhost), no path, query or credentials")
-    return value
+    from app.core.origin_check import parse_origin
+
+    try:
+        return parse_origin(value)
+    except ValueError as exc:
+        raise SystemExit(f"{what}: {exc}") from exc
 
 
 async def counts_by_origin(session) -> list[tuple[str | None, int]]:

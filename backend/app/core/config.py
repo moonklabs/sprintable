@@ -12,16 +12,12 @@ class Settings(BaseSettings):
     @field_validator("public_api_url")
     @classmethod
     def _public_api_url_is_an_origin(cls, value: str) -> str:
-        value = (value or "").strip().rstrip("/")
-        if not value:
-            return ""
-        from urllib.parse import urlsplit
+        from app.core.origin_check import parse_origin
 
-        parts = urlsplit(value)
-        loopback = parts.scheme == "http" and parts.hostname in ("localhost", "127.0.0.1")
-        if not (parts.scheme == "https" or loopback) or not parts.hostname or parts.path or parts.query or parts.fragment or parts.username or parts.password:
-            raise ValueError("PUBLIC_API_URL must be an origin: https://host[:port] (http only for localhost), no path, query or credentials")
-        return value
+        try:
+            return parse_origin(value, allow_empty=True)
+        except ValueError as exc:
+            raise ValueError(f"PUBLIC_API_URL: {exc}") from exc
 
     model_config = SettingsConfigDict(env_file=(".env", ".env.local"), env_file_encoding="utf-8", extra="ignore")
 

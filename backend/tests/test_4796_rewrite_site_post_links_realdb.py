@@ -18,8 +18,8 @@ from scripts.jobs import rewrite_site_post_links as job
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
+# not `destructive_schema`: the test only creates and drops a schema of its own and never touches `public` (a destructive file must be registered in infra/destructive-schema-shard-weights/)
 pytestmark = [
-    pytest.mark.destructive_schema,
     pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요"),
     pytest.mark.anyio,
 ]
@@ -137,7 +137,7 @@ async def test_like_metacharacters_in_an_origin_are_escaped() -> None:
         assert await job.count_with_origin(session, "https://c%d.example") == 1 and await _url(session, pct) == "https://c%d.example/y"
 
 
-@pytest.mark.parametrize("bad", ["http://x.example", "https://x.example/path", "https://x.example/?q=1", "https://u:p@x.example", "x.example", "https://"])
+@pytest.mark.parametrize("bad", ["http://x.example", "https://x.example/path", "https://x.example/?q=1", "https://u:p@x.example", "x.example", "https://", "/", "https://x.example:abc", "https://x.example:99999"])
 def test_a_bad_origin_is_refused_before_any_database_work(bad: str) -> None:
     with pytest.raises(SystemExit):
         job.check_origin(bad, what="--old-origin")

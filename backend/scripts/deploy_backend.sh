@@ -136,6 +136,8 @@ ENV_VARS_SPEC="${ENV_VARS_SPEC}@APP_URL=${APP_URL}"
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@NEXT_PUBLIC_APP_URL=${APP_URL}"
 # OB-1: agent_onboarding_config generator 가 읽는 backend-direct URL(에이전트 .mcp.json SPRINTABLE_API_URL).
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@FASTAPI_URL=${FASTAPI_URL}"
+# story 4796: dev only, the same value as the pipeline sets (RUNBOOK §9): the origin that stored/bound links are built from. prod states nothing (it keeps the request host until its own move).
+if [ "${ENV}" = "dev" ]; then ENV_VARS_SPEC="${ENV_VARS_SPEC}@PUBLIC_API_URL=${FASTAPI_URL}"; fi
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@EVENTBUS_ENABLED=${EVENTBUS_ENABLED}"
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@MEMBER_SSOT_RESOLVER_SHADOW=${MEMBER_SSOT_RESOLVER_SHADOW}"
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@MEMBER_SSOT_APIKEY_CUT=${MEMBER_SSOT_APIKEY_CUT}"
