@@ -532,28 +532,38 @@ def _chain_id(w, g: int):
     return uuid.UUID(f"{p[:8]}-{p[8:12]}-{p[12:16]}-{p[16:20]}-{g:012d}")
 
 
-@pytest.mark.timeout(120)  # building and walking 33 000 rows takes ~2 s; the headroom is for a busy machine, not for the work
-async def test_a_legacy_chain_of_tens_of_thousands_of_rows_is_adopted_by_the_database_not_through_a_bind_list():
-    """codex 4782 (third PR) round 5: the adoption read the whole stretch into the application and stamped it with `id IN (…)` — a chain somebody made long on purpose (rotations are free) would pass the
-    bind-parameter limit of the driver (32 767) and fail the refresh with a 500. One recursive statement picks the family and one more stamps the stretch; no row is carried into the application."""
-    from sqlalchemy import text
+async def test_a_legacy_chain_is_adopted_by_the_database_with_a_fixed_number_of_bind_parameters():
+    """codex 4782 (third PR) round 5: the adoption read the whole stretch into the application and stamped it with `id IN (…)` — a chain somebody made long on purpose (rotations are free) would pass the driver's
+    bind-parameter limit (32 767) and fail the refresh with a 500. One recursive statement picks the family and one more stamps the stretch; no row is carried into the application. Pinned here by what the
+    statements SEND, not by a chain big enough to hit the limit (a 33 000-row version of this test took minutes in CI: see the commit message): every statement of the adoption of a 300-row chain carries a handful
+    of parameters, and all 300 rows are stamped."""
+    from sqlalchemy import event
 
     from app.routers.auth import _adopt_legacy_family
 
     engine, w = await _world()
     try:
-        n = 33_000  # past the driver's 32 767 bind parameters
+        n = 300
         sql, params = _chain_sql(w, n)
         await _exec(w, sql, **params)
-        async with w.Session() as s:
-            family = await _adopt_legacy_family(s, w.user_id, _chain_id(w, 1))
-            await s.commit()
+        sent: list[int] = []
+
+        def _count(conn, cursor, statement, parameters, context, executemany):
+            sent.append(len(parameters) if parameters else 0)
+
+        event.listen(engine.sync_engine, "before_cursor_execute", _count)
+        try:
+            async with w.Session() as s:
+                family = await _adopt_legacy_family(s, w.user_id, _chain_id(w, 1))
+                await s.commit()
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", _count)
         assert family == _chain_id(w, n), "no family on the way: the id of the END of the chain"
         stamped = (await _fetch(w, "SELECT count(*) FROM refresh_tokens WHERE user_id = :u AND family_id = :f", u=w.user_id, f=family))[0][0]
         assert stamped == n, f"{stamped} of {n} rows of the stretch were given the family"
+        assert sent and max(sent) <= 8, f"a statement of the adoption carried {max(sent) if sent else 0} bind parameters: the stretch must not travel through the application"
     finally:
-        # the rows are NOT deleted: `refresh_tokens.replaced_by` is a self-referencing foreign key (ON DELETE SET NULL) with no index, so deleting n rows scans the table n times — 33 000 rows took minutes
-        # on a table with other tests' rows (CI: the 240 s timeout hit in this very `finally`). They belong to a throw-away person and a database that is dropped after the run.
+        await _exec(w, "DELETE FROM refresh_tokens WHERE user_id = :u AND token_hash LIKE 'bulk-4782-%'", u=w.user_id)  # this test's own rows (300: the foreign key's scan is nothing at this size)
         await _close(engine, w)
 
 
