@@ -7,8 +7,9 @@ from __future__ import annotations
 from urllib.parse import urlsplit
 
 
-def parse_origin(value: str, *, allow_empty: bool = False) -> str:
-    """The normalised origin (no trailing slash). `ValueError` when it is not one. An empty value is `""` only with `allow_empty` (an unset setting); a value made only of slashes is never empty."""
+def parse_origin(value: str, *, allow_empty: bool = False, allow_http: bool = False) -> str:
+    """The normalised origin (no trailing slash). `ValueError` when it is not one. An empty value is `""` only with `allow_empty` (an unset setting); a value made only of slashes is never empty.
+    `allow_http` accepts a plain `http` origin for any host: only for a PREFIX that is matched against values already stored (the rewrite job's `--old-origin`), never for an address that is written."""
     raw = (value or "").strip()
     if not raw:
         if allow_empty:
@@ -25,7 +26,7 @@ def parse_origin(value: str, *, allow_empty: bool = False) -> str:
     except ValueError as exc:
         raise ValueError(f"not an origin (bad port): {raw!r}") from exc
     loopback = parts.scheme == "http" and parts.hostname in ("localhost", "127.0.0.1")
-    if not (parts.scheme == "https" or loopback) or not parts.hostname or parts.path or parts.query or parts.fragment or parts.username or parts.password:
+    if not (parts.scheme == "https" or (allow_http and parts.scheme == "http") or loopback) or not parts.hostname or parts.path or parts.query or parts.fragment or parts.username or parts.password:
         raise ValueError("an origin is https://host[:port] (http only for localhost), with no path, query, fragment or credentials")
     if port == 0 or parts.netloc.endswith(":"):
         raise ValueError("an empty or zero port is not a port")

@@ -26,6 +26,7 @@ pytestmark = [
 
 OLD = "https://sprintable-backend-dev-787818285179.asia-northeast3.run.app"
 OLD2 = "https://sprintable-backend-dev-57iommnikq-du.a.run.app"
+OLD_HTTP = "http://sprintable-backend-dev-787818285179.asia-northeast3.run.app"
 NEW = "https://dev-api.sprintable.ai"
 
 
@@ -239,3 +240,44 @@ async def test_run_needs_the_new_origin_with_an_old_one(monkeypatch) -> None:
     async with _committed_schema(monkeypatch):
         with pytest.raises(SystemExit):
             await job.run([OLD], None, False)
+
+
+async def test_links_stored_with_a_plain_http_origin_are_selected_and_rewritten_to_https(monkeypatch, capsys) -> None:
+    """the first dev report: `http://…run.app` (6 links) — the request scheme behind the front door. The job has to be able to name them (and only them)."""
+    async with _committed_schema(monkeypatch) as factory:
+        async with factory() as s:
+            http_ids = [await _add(s, "site_post_published", f"{OLD_HTTP}/api/v2/public/site-posts/p{i}?public_key=pk_h&lang=ko") for i in range(3)]
+            https_id = await _add(s, "site_post_published", f"{OLD}/api/v2/public/site-posts/secure?public_key=pk_s&lang=ko")
+            await s.commit()
+        assert await job.run([], None, False) == 0
+        out = capsys.readouterr().out
+        assert f"{OLD_HTTP}\t3" in out and f"{OLD}\t1" in out, out
+        assert await job.run([OLD_HTTP], NEW, False) == 0 and "3 link(s)" in capsys.readouterr().out
+        assert await job.run([OLD_HTTP], NEW, True) == 0
+        assert "rewritten: 3; still with an old origin: 0" in capsys.readouterr().out
+        for i, rid in enumerate(http_ids):
+            assert await _read(factory, rid) == f"{NEW}/api/v2/public/site-posts/p{i}?public_key=pk_h&lang=ko"
+        assert await _read(factory, https_id) == f"{OLD}/api/v2/public/site-posts/secure?public_key=pk_s&lang=ko", "the https link was not named, so it is untouched"
+
+
+def test_the_cli_accepts_an_http_old_origin_and_still_refuses_an_http_new_origin(monkeypatch) -> None:
+    calls = []
+
+    async def fake_run(olds, new, apply):
+        calls.append((olds, new, apply))
+        return 0
+
+    monkeypatch.setattr(job, "run", fake_run)
+    assert job.check_origin(OLD_HTTP, what="--old-origin", prefix_match=True) == OLD_HTTP
+    with pytest.raises(SystemExit):
+        job.check_origin(OLD_HTTP, what="--old-origin")
+    with pytest.raises(SystemExit):
+        job.check_origin(OLD_HTTP, what="--new-origin")
+    # through main(): an http old origin reaches run() unchanged, an http new origin never does
+    assert job.main(["--old-origin", OLD_HTTP, "--old-origin", OLD, "--new-origin", NEW]) == 0
+    assert calls == [([OLD_HTTP, OLD], NEW, False)]
+    with pytest.raises(SystemExit):
+        job.main(["--old-origin", OLD_HTTP, "--new-origin", "http://dev-api.sprintable.ai", "--apply"])
+    with pytest.raises(SystemExit):
+        job.main(["--old-origin", "http://x.example/path", "--new-origin", NEW])
+    assert len(calls) == 1, "nothing was run for the refused ones"
