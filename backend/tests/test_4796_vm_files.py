@@ -144,6 +144,17 @@ def test_every_gcloud_command_of_section_7_names_its_project_and_the_writers_sto
     assert "no request other than the health check" in step2 and "cron endpoints are GET requests" in step2, "a GET can write"
 
 
+def test_section_9_names_the_real_variables_of_the_hosted_mcp_and_the_scheduler_tool() -> None:
+    """codex round 7: the hosted MCP's address is SPRINTABLE_API_URL (deploy_mcp_dev.sh, cloudbuild deploy-mcp), not `_BACKEND_URL`; the scheduler jobs need --base-url and the pipeline step would undo it"""
+    text = (_VM / "RUNBOOK.md").read_text()
+    sec = text[text.index("## 9. "):text.index("## 10. ")]
+    assert "--update-env-vars SPRINTABLE_API_URL=https://dev-api.sprintable.ai" in sec and "`_BACKEND_URL`" not in sec
+    assert "infra/apply_cloud_scheduler.py --env dev --base-url https://dev-api.sprintable.ai" in sec and "apply-cloud-scheduler" in sec
+    deploy_mcp = (_ROOT / "backend/scripts/deploy_mcp_dev.sh").read_text()
+    assert "--set-env-vars=\"MCP_TRANSPORT=http,SPRINTABLE_API_URL=${DEV_BACKEND_URL}" in deploy_mcp, "the variable the hosted MCP reads is SPRINTABLE_API_URL"
+    assert "--base-url" in (_ROOT / "infra/apply_cloud_scheduler.py").read_text()
+
+
 def test_no_timer_that_needs_the_database_is_enabled_before_the_restore() -> None:
     """a backup run before the restore finds no database and fails every night (the first dev VM found this); the timers are enabled with the deploy timer, RUNBOOK §7 step 6"""
     code = re.sub(r"(?m)^\s*#.*$|echo .*$", "", (_VM / "bin/bootstrap.sh").read_text())
