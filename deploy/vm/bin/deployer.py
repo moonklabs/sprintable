@@ -510,7 +510,9 @@ class Deployer:
             if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid() or st.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
                 raise renv.EnvError(f"{self.cfg.private_plain} must be a plain file owned by the deploying user and not readable by group or others")
             plain = renv.load_private_plain(self.cfg.private_plain)
+            # the password is hex (RUNBOOK §3): a value piped into `gcloud secrets create` carries the shell's line ending, which is not part of it — ONE trailing line ending is taken off, anything else is still refused below
             db_password = self._read_secret(decl["database"]["password_secret"])
+            db_password = db_password[:-2] if db_password.endswith("\r\n") else db_password[:-1] if db_password.endswith("\n") else db_password
             services = {name: renv.build_service_env(decl, name, plain.get(name, {}), db_password, self._read_secret) for name in decl["services"]}
         except (renv.EnvError, OSError, ValueError, KeyError, yaml.YAMLError, TypeError, AttributeError) as e:
             # our own EnvError messages carry names only; anything else (a failed secret read …) is reported by class, its message could hold a value

@@ -847,6 +847,55 @@ def test_a_secret_shared_by_both_services_is_read_once_per_deploy(world) -> None
     assert reads and max(reads.values()) == 2, reads  # one read per run (a: once, b: once — previous and candidate share it)
 
 
+def _db_secret_id() -> str:
+    import yaml
+    return yaml.safe_load((_VM / "env/dev.yaml").read_text())["database"]["password_secret"]
+
+
+@pytest.mark.parametrize("suffix", ["\n", "\r\n"])
+def test_one_trailing_line_ending_on_the_database_password_secret_is_not_part_of_it(world, suffix: str) -> None:
+    """found on the first dev run: `openssl rand -hex 24 | gcloud secrets create … --data-file=-` stores the line ending too, and the tool refused the 49-byte value"""
+    db_id = _db_secret_id()
+    orig = world.dep.secrets
+    world.dep.secrets = lambda sid: PASSWORD + suffix if sid == db_id else orig(sid)
+    d = world.publish("a" * 40)
+    assert world.dep.run_once() == "deployed"
+    up = next(c for c in world.runner.calls if c["args"][:2] == ["docker", "compose"] and "up" in c["args"] and "--wait-timeout" in c["args"])
+    assert up["env"]["POSTGRES_PASSWORD"] == PASSWORD
+    assert up["env"]["ALEMBIC_DATABASE_URL"] == f"postgresql://sprintable:{PASSWORD}@db:5432/sprintable"
+    assert d["sha"] == _state(world, "current.json")["sha"]
+
+
+@pytest.mark.parametrize("bad", ["\n\n", " \n", "\r\n\r\n", " ", "\t", "\r"])
+def test_anything_else_around_the_database_password_is_still_refused(world, bad: str) -> None:
+    db_id = _db_secret_id()
+    orig = world.dep.secrets
+    world.dep.secrets = lambda sid: PASSWORD + bad if sid == db_id else orig(sid)
+    world.publish()
+    assert world.dep.run_once() == "failed" and world.runner.calls == []
+    assert "database password" in _state(world, "failed.json")["detail"]
+
+
+def test_a_leading_line_ending_is_not_taken_off(world) -> None:
+    db_id = _db_secret_id()
+    orig = world.dep.secrets
+    world.dep.secrets = lambda sid: "\n" + PASSWORD if sid == db_id else orig(sid)
+    world.publish()
+    assert world.dep.run_once() == "failed" and world.runner.calls == []
+
+
+def test_other_secrets_keep_their_trailing_newline_exactly_as_cloud_run_hands_them_over(world) -> None:
+    """only the database password (ours, hex) is tidied; the live services get their secrets verbatim and so does the VM"""
+    import yaml
+    jwt_id = yaml.safe_load((_VM / "env/dev.yaml").read_text())["services"]["backend"]["secrets"]["JWT_SECRET"]
+    orig = world.dep.secrets
+    world.dep.secrets = lambda sid: SECRET + "\n" if sid == jwt_id else orig(sid)
+    world.publish("a" * 40)
+    assert world.dep.run_once() == "deployed"
+    up = next(c for c in world.runner.calls if c["args"][:2] == ["docker", "compose"] and "up" in c["args"] and "--wait-timeout" in c["args"])
+    assert up["env"]["BACKEND__JWT_SECRET"] == SECRET + "\n"
+
+
 def test_even_a_short_secret_value_is_removed_from_recorded_output(world) -> None:
     import yaml
     decl = yaml.safe_load((_VM / "env/dev.yaml").read_text())
