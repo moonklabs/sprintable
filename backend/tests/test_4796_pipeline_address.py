@@ -215,3 +215,15 @@ def test_the_documented_measurement_command_really_sends_what_the_exchange_route
         ipaddress.IPv4Address(h.removeprefix("X-Forwarded-For: "))  # a malformed address would be thrown away by client_ip() and the socket address counted
     addresses = sorted(ipaddress.IPv4Address(h.removeprefix("X-Forwarded-For: ")) for h in forged)
     assert (str(addresses[0]), str(addresses[-1])) == ("9.9.0.1", "9.9.9.150") and "(`9.9.0.1` … `9.9.9.150`;" in sec, "the range the runbook states is the range the command produces"
+
+
+def test_the_runbook_does_not_ask_for_a_stream_that_cannot_stay_open_and_names_the_admin_audience_as_not_moved() -> None:
+    """codex (pipeline PR, round 9): a browser event stream is closed by the server after 90 s + 15 s; `_ADMIN_OPERATOR_AUDIENCE` is its own value, not a consumer of the switch"""
+    text = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
+    p1 = text[text.index("**Phase 1"):text.index("**Phase 2")]
+    assert "an event stream held open for 10 minutes" not in p1 and "in a loop and record each stream's lifetime" in p1
+    sec = _runbook_section("## 9. ", "## 10. ")
+    assert "ten-minute continuous stream" not in sec and "ten minutes of reconnect cycles through the front door are **not measured**" in sec
+    assert re.search(r"(?m)^  _ADMIN_OPERATOR_AUDIENCE: https://sprintable-backend-dev-57iommnikq-du\.a\.run\.app$", _MAIN_TEXT), "its own value, in the old describe form"
+    assert "ADMIN_OPERATOR_AUDIENCE=${_ADMIN_OPERATOR_AUDIENCE}" in _MAIN_TEXT and "ADMIN_OPERATOR_AUDIENCE=${_FASTAPI_URL}" not in _MAIN_TEXT
+    assert "`_ADMIN_OPERATOR_AUDIENCE` (the audience the admin tool's ID token is checked against" in sec and "never `_FASTAPI_URL`" in sec
