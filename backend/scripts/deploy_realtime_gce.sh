@@ -93,6 +93,7 @@ case "${ENV}" in
         SQL_INSTANCE_CONN="${GCP_PROJECT}:${GCP_REGION}:sprintable-dev"
         RUNTIME_SA="cloudrun-runtime-dev@${GCP_PROJECT}.iam.gserviceaccount.com"
         DB_SECRET_NAME="DATABASE_URL_DEV"
+        JWT_SECRET_NAME="JWT_SECRET_DEV"  # story 4798 (AC6): one token-signing secret per environment
         CRON_SECRET_NAME="cron-secret"
         GITHUB_SECRET_SUFFIX="DEV"
         GITHUB_APP_SECRET_ENV="dev"  # story #2142 발견: github-app-*-dev Secret Manager ID의 소문자 접미(위 GITHUB_SECRET_SUFFIX와 별개 컨벤션 — 이 시크릿 3종만 하이픈+소문자)
@@ -146,6 +147,7 @@ case "${ENV}" in
         SQL_INSTANCE_CONN="${GCP_PROJECT}:${GCP_REGION}:sprintable-prod"
         RUNTIME_SA="cloudrun-runtime-prod@${GCP_PROJECT}.iam.gserviceaccount.com"
         DB_SECRET_NAME="DATABASE_URL_PROD"
+        JWT_SECRET_NAME="JWT_SECRET_PROD"  # story 4798 (AC6): one token-signing secret per environment
         # ⛔story #2142(2026-07-23, 오르테가 gcloud 실측+정정) — CRON_SECRET_PROD가 실재하고
         # backend-prod Cloud Run이 실제로 그걸 쓴다(describe 대조 확認). "cron-secret"(dev가
         # 쓰는 이름)을 prod에 그대로 쓰면 존재는 해서 fetch는 성공하지만 backend-prod가 실제
@@ -416,7 +418,7 @@ fi
 # 얹으면 prod GCE가 dev DB 시크릿을 끌어오는 사고가 났을 자리 — #2135와 같은 클래스,
 # "변수가 있는데 안 쓰인다"). ${DB_SECRET_NAME}으로 정정.
 SECRET_PAIRS="${DB_SECRET_NAME}:DATABASE_URL"
-SECRET_PAIRS="${SECRET_PAIRS} JWT_SECRET:JWT_SECRET"
+SECRET_PAIRS="${SECRET_PAIRS} ${JWT_SECRET_NAME}:JWT_SECRET"
 SECRET_PAIRS="${SECRET_PAIRS} GOOGLE_CLIENT_ID:GOOGLE_CLIENT_ID"
 SECRET_PAIRS="${SECRET_PAIRS} GOOGLE_CLIENT_SECRET:GOOGLE_CLIENT_SECRET"
 # story #2145(2026-07-24): GitHub user-login OAuth(GITHUB_CLIENT_ID/SECRET)는 #2155에서 제거됐다

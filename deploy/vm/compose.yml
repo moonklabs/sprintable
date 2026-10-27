@@ -1,0 +1,118 @@
+# story 4796 — one VM per environment: database, migrate (one-shot), backend, frontend, front door.
+#
+# Everything that differs per deploy comes from the process environment of `docker compose` (set by bin/deployer.py):
+#   BACKEND_IMAGE / FRONTEND_IMAGE  full image references (by digest or sha tag)
+#   API_HOST / REALTIME_HOST / APP_HOST / ACME_EMAIL   the public names (from env/<environment>.yaml)
+#   DB_USER / DB_NAME / DATA_DIR    database user, name, and the host folder on the data disk
+#   CADDYDIR                         the folder holding the live Caddyfile (mounted as a folder so the deployer can replace the file atomically)
+# Secrets and the service variables are passed BY NAME through the override file render_env.py writes (-f pass-through.yml);
+# their values exist only in the environment of the compose command. No .env file, no value in this repository.
+#
+# Only caddy publishes ports (80, 443). The database, backend and frontend are reachable on the compose network only.
+
+name: sprintable
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  db:
+    # pgvector is required: the migrations run CREATE EXTENSION vector. pg15 = what Cloud SQL runs today (cloudsql.txt), so the dump restores as it is.
+    image: pgvector/pgvector:pg15
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      POSTGRES_DB: ${DB_NAME:?}
+      POSTGRES_USER: ${DB_USER:?}
+      POSTGRES_PASSWORD:   # by name — the value comes from the deployer's environment
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - max_connections=60
+      - -c
+      - log_min_duration_statement=1000
+    volumes:
+      - ${DATA_DIR:?}/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # one-shot: `docker compose run --rm migrate` — run by the deployer BEFORE the new backend replaces the running one.
+  migrate:
+    image: ${BACKEND_IMAGE:?}
+    profiles: ["migrate"]
+    restart: "no"
+    logging: *logging
+    command: ["/app/scripts/migrate.sh"]
+    environment:
+      - ALEMBIC_DATABASE_URL   # by name
+    depends_on:
+      db:
+        condition: service_healthy
+
+  backend:
+    image: ${BACKEND_IMAGE:?}
+    restart: unless-stopped
+    logging: *logging
+    # the service variables are listed by name in pass-through.yml. SPRINTABLE_LOCAL_DEV and K_SERVICE are never set here (render_env.py refuses them).
+    depends_on:
+      db:
+        condition: service_healthy
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v2/health', timeout=4)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 40s
+
+  frontend:
+    image: ${FRONTEND_IMAGE:?}
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.status < 500 ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 6s
+      retries: 5
+      start_period: 30s
+
+  caddy:
+    image: caddy:2.8.4-alpine
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    environment:
+      API_HOST: ${API_HOST:?}
+      REALTIME_HOST: ${REALTIME_HOST:?}
+      APP_HOST: ${APP_HOST:?}
+      ACME_EMAIL: ${ACME_EMAIL:?}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ${CADDYDIR:?}:/etc/caddy:ro
+      - ${DATA_DIR:?}/caddy:/data
