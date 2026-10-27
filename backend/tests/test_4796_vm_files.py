@@ -137,6 +137,10 @@ def test_every_gcloud_command_of_section_7_names_its_project_and_the_writers_sto
     step2 = section[section.index("\n2. Stop writes"):section.index("\n3. Dump and count")]
     assert "does not stop every writer" in step2 and "front-door.sh stop" in step2
     assert "sprintable-frontend-dev" in step2 and "sprintable-mcp-dev" in step2, "the same-project callers that write through the backend"
+    undo = step2[step2.index("Undo:"):]
+    for service in ("sprintable-backend-dev", "sprintable-frontend-dev", "sprintable-mcp-dev"):
+        assert service in undo, f"closed above, so reopened by the undo: {service}"
+    assert "--ingress all" in undo and "scheduler jobs resume" in undo
     assert "no request other than the health check" in step2 and "cron endpoints are GET requests" in step2, "a GET can write"
 
 
