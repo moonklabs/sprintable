@@ -21,7 +21,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
     anyio_backend,
     world,
 )
-from tests.test_4529_desktop_relay_realdb import _device
+from tests.test_4529_desktop_relay_realdb import _device, _tok
 
 pytestmark = pytest.mark.anyio
 
@@ -79,3 +79,44 @@ async def test_04_a_revoked_setup_is_not_told_either(world):
         await _sql(f"UPDATE desktop_setups SET revoked_at = now() WHERE id = '{device['setup_id']}'")
         gone = await c.get(URL, headers=_key(device))
         assert gone.status_code in (401, 404) and "api.d4424.test" not in gone.text
+
+
+RELAY_URL = "/api/v2/desktop/relay/endpoints"
+
+
+async def test_05_a_relay_record_asks_with_its_own_device_token_and_hears_the_deployments_current_addresses(world, monkeypatch):
+    async with _client() as c:
+        device = await _device(c, name="d4801 mac 5")
+        first = await c.get(RELAY_URL, headers=_tok(device["device_token"]))
+        assert first.status_code == 200, first.text
+        assert first.json() == {"api_url": "https://api.d4424.test", "mcp_url": "https://mcp.d4424.test/mcp"}
+        monkeypatch.setenv("FASTAPI_URL", "https://dev-api.moved.test/")
+        moved = await c.get(RELAY_URL, headers=_tok(device["device_token"]))
+        assert moved.json()["api_url"] == "https://dev-api.moved.test"
+        monkeypatch.delenv("FASTAPI_URL")
+        assert (await c.get(RELAY_URL, headers=_tok(device["device_token"]))).json()["api_url"] is None  # never a local fallback
+
+
+async def test_06_the_relay_answer_is_given_even_while_remote_control_is_off(world):
+    """The record of an organization with the switch off keeps knocking (409 on every relay route) at its stored address; it must still be able to hear a move."""
+    async with _client() as c:
+        device = await _device(c, name="d4801 mac 6")
+        from tests.test_4424_desktop_setup_realdb import ORG
+
+        await _sql(f"UPDATE organizations SET remote_control_enabled_at = NULL WHERE id = '{ORG}'")
+        assert (await c.get("/api/v2/desktop/relay/setup", headers=_tok(device["device_token"]))).status_code == 409  # the gated route is off…
+        r = await c.get(RELAY_URL, headers=_tok(device["device_token"]))
+        assert r.status_code == 200 and r.json()["api_url"] == "https://api.d4424.test", r.text  # …this one is not
+
+
+async def test_07_only_a_live_device_token_is_told(world):
+    async with _client() as c:
+        device = await _device(c, name="d4801 mac 7")
+        assert (await c.get(RELAY_URL)).status_code == 401
+        assert (await c.get(RELAY_URL, headers=_tok("sdt_" + "z" * 43))).status_code == 401
+        assert (await c.get(RELAY_URL, headers=_person(OWNER))).status_code == 401  # a person's login is no device token
+        bad = await c.get(RELAY_URL, headers={"Authorization": f"Bearer {device['agents'][0]['api_key']}"})
+        assert bad.status_code == 401 and "api.d4424.test" not in bad.text  # an agent key is not a device token
+        await _sql(f"UPDATE desktop_setups SET revoked_at = now() WHERE id = '{device['setup_id']}'")
+        gone = await c.get(RELAY_URL, headers=_tok(device["device_token"]))
+        assert gone.status_code == 401 and "api.d4424.test" not in gone.text

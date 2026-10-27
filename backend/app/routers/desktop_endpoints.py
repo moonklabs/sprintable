@@ -7,12 +7,18 @@ Why: the app keeps each agent's two addresses from the day it was set up. When t
 self-hosts and changes its domain) those stored addresses are stale and the agent keeps calling the old one until a new setup. The app reads
 this on each connect (while the old address still answers) and writes the new one beside the same key. A key that is not a device's: 404 — the
 same answer as `/desktop/remote-control` gives, so a person's session or another kind of key learns nothing.
+
+- GET /api/v2/desktop/relay/endpoints — the same two addresses for a setup's RELAY record, asked with its own device token. The relay record is kept by the
+  app per setup (device-tokens/{setupId}.bin) and goes to the daemon on every connect; it must not depend on one of the setup's agents still being alive to
+  hear a move (a setup whose agents are all dead has a relay record that nobody else would move). Deliberately NOT behind the org's «원격 제어» switch
+    (`/relay/setup` is: 409 while off): a record of an organization that has it off keeps knocking at its stored address (409 again and again) and, when
+    the switch is turned on, would reconnect to an address that is gone. The addresses are not secrets; the answer is only given to a live device token.
 """
 from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,5 +51,19 @@ async def get_device_endpoints(db: AsyncSession = Depends(get_db), auth: AuthCon
         )).scalar_one_or_none()
     if setup_id is None:
         raise HTTPException(status_code=404, detail={"code": "setup_not_found", "message": "this key is not a device's"})
+    api_url, mcp_url = exchange_urls()
+    return DeviceEndpoints(api_url=api_url, mcp_url=mcp_url)
+
+
+@router.get("/api/v2/desktop/relay/endpoints", response_model=DeviceEndpoints)
+async def get_relay_endpoints(
+    db: AsyncSession = Depends(get_db),
+    x_desktop_device_token: str | None = Header(default=None, alias="x-desktop-device-token"),
+):
+    from app.services import desktop_relay as relay
+
+    # a valid, live device token only (revoked · disconnected · closed confirmer → None) — and NOT the remote-control switch (see the module note)
+    if await relay.device_for_token(db, x_desktop_device_token) is None:
+        raise HTTPException(status_code=401, detail={"code": "DEVICE_TOKEN_INVALID", "message": "a valid device token is required"})
     api_url, mcp_url = exchange_urls()
     return DeviceEndpoints(api_url=api_url, mcp_url=mcp_url)
