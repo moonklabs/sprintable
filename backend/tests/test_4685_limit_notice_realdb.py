@@ -727,3 +727,60 @@ async def test_33_an_owner_who_left_or_is_inactive_is_not_told_and_another_orgs_
         await _report(c, d, a, "working", 3)
         await _report(c, d, a, "waiting_input", 4, limit=LOOKS)
         assert await _notices(STOOD, OWNER_TM) == []
+
+
+async def test_34_the_owner_counts_every_unpaired_computer_of_the_org_for_the_working_again_line(world):
+    """codex 4781 AC1 (P1): the sessions that are the owner's to hear about are every unpaired computer of the org, not only the ones they connected — the second one is folded into the same notice, and the
+    «working again» line waits for BOTH"""
+    await _second_person()
+    async with _client() as c:
+        d1, d2 = await _device(c, "d4781 mac o5"), await _device(c, "d4781 mac o6")
+        await _sql(f"UPDATE desktop_setups SET confirmed_by = '{PLAIN_USER}' WHERE id IN ('{d1['setup_id']}','{d2['setup_id']}')")  # both connected by someone else
+        a1, a2 = d1["agents"][0]["member_id"], d2["agents"][0]["member_id"]
+        await _report(c, d1, a1, "working", 1)
+        await _report(c, d2, a2, "working", 2)
+        await _report(c, d1, a1, "waiting_input", 3, limit=LOOKS)
+        await _report(c, d2, a2, "waiting_input", 4, limit=LOOKS)
+        assert len(await _notices(STOOD, OWNER_TM)) == 1, "the second computer stood inside the window: folded into the owner's one notice"
+        # only after BOTH are back does the owner hear «working again» — the second unpaired computer is the owner's to hear about too
+        await _report(c, d1, a1, "working", 5)
+        assert await _notices(LIFTED, OWNER_TM) == []
+        await _report(c, d2, a2, "working", 6)
+        assert len(await _notices(LIFTED, OWNER_TM)) == 1
+
+
+async def test_35_an_owner_told_stopped_because_no_phone_was_paired_is_still_told_working_again_when_a_phone_is_paired_meanwhile(world):
+    await _second_person()
+    async with _client() as c:
+        d = await _device(c, "d4781 mac o7")
+        await _sql(f"UPDATE desktop_setups SET confirmed_by = '{PLAIN_USER}' WHERE id = '{d['setup_id']}'")
+        a = d["agents"][0]["member_id"]
+        await _report(c, d, a, "working", 1)
+        await _report(c, d, a, "waiting_input", 2, limit=LOOKS)
+        assert len(await _notices(STOOD, OWNER_TM)) == 1 and len(await _notices(STOOD, PLAIN_TM)) == 1
+        await _pair(d["setup_id"], PLAIN_TM)  # a phone is paired before the limit lifts: from now on the owner is no longer a recipient of this setup
+        await _report(c, d, a, "working", 3)
+        assert len(await _notices(LIFTED, OWNER_TM)) == 1, "…but the promise made to the owner is kept"
+        assert len(await _notices(LIFTED, PLAIN_TM)) == 1
+
+
+async def test_36_the_owner_is_told_the_count_of_a_snapshot_on_a_computer_someone_else_connected(world):
+    """codex 4781 AC1 (P1, owner folding): the sessions standing on an unpaired computer that another member connected are the owner's to hear about too — the owner's notice counts them («{agent} 외 1개»)"""
+    await _second_person()
+    async with _client() as c:
+        device = await _device(c, "d4781 mac o8")
+        await _sql(f"UPDATE desktop_setups SET confirmed_by = '{PLAIN_USER}' WHERE id = '{device['setup_id']}'")
+        a, b = device["agents"][0]["member_id"], device["agents"][1]["member_id"]
+
+        def snap(seq, state):
+            lim = {"limit": LOOKS} if state == "waiting_input" else {}
+            return {"report_seq": seq, "sessions": [
+                {"session_key": "s-a", "agent_member_id": a, "runtime": "claude", "state": state, "at": _now().isoformat(), **lim},
+                {"session_key": "s-b", "agent_member_id": b, "runtime": "claude", "state": state, "at": _now().isoformat(), **lim}]}
+
+        assert (await c.put("/api/v2/desktop/relay/sessions", json=snap(1, "working"), headers=_tok(device["device_token"]))).status_code == 200
+        assert (await c.put("/api/v2/desktop/relay/sessions", json=snap(2, "waiting_input"), headers=_tok(device["device_token"]))).status_code == 200
+        (mine,) = await _notices(STOOD, OWNER_TM)
+        assert mine["title"] == f"{mine['agent_name']} 외 1개 · 한도로 쉬는 중", "the owner's notice counts both sessions of the computer someone else connected"
+        (theirs,) = await _notices(STOOD, PLAIN_TM)
+        assert theirs["title"].endswith("외 1개 · 한도로 쉬는 중")

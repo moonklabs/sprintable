@@ -482,8 +482,8 @@ def where_text(rows: list[DesktopSession], locale: str) -> str | None:
 
 async def _limited_rows(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, *, also_setups: frozenset[uuid.UUID] = frozenset(), include_waiting: bool = False) -> list[DesktopSession]:
     """The sessions standing at the limit that are THIS person's to hear about (AC8): those of every live setup of the organization whose
-    recipients include them — a setup with a phone of theirs paired, or a setup with no usable pairing that they connected (the same two
-    cases as `_recipients`). A revoked setup is not theirs any more: its stale row must not hold the «working again» line back.
+    recipients include them — a setup with a phone of theirs paired, or a setup with no usable pairing that they connected, or (an owner of the org) any setup with
+    no usable pairing (the same three cases as `_recipients`). A revoked setup is not theirs any more: its stale row must not hold the «working again» line back.
     `also_setups`: the setups the person's outstanding «stopped» notice was made for (the record carries them). They keep counting for that
     person even if the pairing that made them its recipient is gone since — and ONLY those: a pairing that ended before the episode never held
     this person's line back.
@@ -504,6 +504,10 @@ async def _limited_rows(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID,
     theirs_paired = _pairing_of_this_setup(Member.user_id == user_id)
     nobody_paired = ~_pairing_of_this_setup()
     scope = or_(theirs_paired, and_(DesktopSetup.confirmed_by == user_id, nobody_paired))
+    from app.services.remote_control import owner_people
+
+    if user_id in await owner_people(db, org_id):  # story 4781 AC1: an owner is also told about every setup with no usable pairing (the same third case as `_recipients`)
+        scope = or_(scope, nobody_paired)
     if also_setups:
         scope = or_(scope, DesktopSetup.id.in_(also_setups))
     return list((await db.execute(
@@ -727,6 +731,10 @@ async def _lifted_candidates(db: AsyncSession, setup: DesktopSetup) -> list[Reci
         )).scalars().first()
         if member_id is not None:
             people[setup.confirmed_by] = member_id
+    from app.services.remote_control import owner_people
+
+    for user_id, member_id in (await owner_people(db, setup.org_id)).items():  # story 4781 AC1: an owner told «stopped» because no phone was paired keeps the promise if a phone is paired before the limit lifts
+        people.setdefault(user_id, member_id)
     return await _with_locales(db, setup.org_id, people)
 
 
