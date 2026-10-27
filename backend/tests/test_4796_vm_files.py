@@ -516,7 +516,7 @@ def test_an_environment_that_trusts_forwarded_for_has_caddy_as_the_only_service_
 
 def test_the_runbook_asks_for_a_real_world_check_of_the_counted_address_before_dns_moves() -> None:
     text = (_VM / "RUNBOOK.md").read_text()
-    assert "First-VM measurement" in text and "X-Forwarded-For: 9.9.9" in text and "do not switch DNS" in text
+    assert "First-VM measurement" in text and "valid forged address in `X-Forwarded-For`" in text and "do not switch DNS" in text
 
 
 def test_bootstrap_installs_the_compose_file_the_deployer_holds_bundles_to() -> None:
