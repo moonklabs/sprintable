@@ -59,6 +59,7 @@ BAD = [
     "http://dev-api.sprintable.ai", "https://dev-api.sprintable.ai/api", "https://dev-api.sprintable.ai/?x=1", "https://dev-api.sprintable.ai#f",
     "https://user:pw@dev-api.sprintable.ai", "dev-api.sprintable.ai", "ftp://dev-api.sprintable.ai", "https://",
     "/", "//", "https://dev-api.sprintable.ai:abc", "https://dev-api.sprintable.ai:99999", "https://dev-api.sprintable.ai:0", "https://dev-api.sprintable.ai:",
+    "https://dev-api.sprintable.ai?", "https://dev-api.sprintable.ai#", "https://@dev-api.sprintable.ai", "https://dev-api.sprintable.ai\\@evil.example", "https://dev-api .sprintable.ai", "https://dev-api.sprintable.ai\\path", "https://dev-api.sprintable.ai\\",
 ]
 
 
@@ -164,10 +165,13 @@ def test_the_runbook_names_the_new_setting_and_the_job_steps_that_the_job_really
         assert needle in sec9, needle
     sec10 = text[text.index("## 10. "):text.index("## 11. ")]
     job = (_ROOT / "backend/scripts/jobs/rewrite_site_post_links.py").read_text()
+    assert "This is a precondition of Phase 3 (§7c)" in sec10 and "**before Phase 3's final dump**" in sec10 and "which comes after the soak" in sec10
+    p3 = text[text.index("**Phase 3"):text.index("## 8. ")]
+    assert "the stored hosted-site links rewritten and the report showing no `run.app` origin (§10, «Stored hosted-site links»)" in p3.split("\n1. ")[0]
     for needle in ("**Stored hosted-site links (story 4796).**", "python -m scripts.jobs.rewrite_site_post_links`", "--old-origin https://sprintable-backend-dev-787818285179.asia-northeast3.run.app", "--old-origin https://sprintable-backend-dev-57iommnikq-du.a.run.app",
                    "--new-origin https://dev-api.sprintable.ai`", "with `--apply`", "exits non-zero unless nothing with an old origin is left", "origins and counts, never a full link", "Undo of the rewrite"):
         assert needle in sec10, needle
-    for needle in ("**before Phase 3** against Cloud SQL", "so the final dump already carries the rewritten links", "sudo docker exec sprintable-backend-1 python -m scripts.jobs.rewrite_site_post_links",
+    for needle in ("**before Phase 3's final dump** against Cloud SQL", "so that dump already carries the rewritten links", "sudo docker exec sprintable-backend-1 python -m scripts.jobs.rewrite_site_post_links",
                    "gcloud run jobs describe sprintable-verify-oneoff --project $PROJECT --region $REGION --format=export > verify-oneoff-before.yaml",
                    "gcloud run jobs update sprintable-verify-oneoff --project $PROJECT --region $REGION --command=python --image", "--format='value(spec.template.spec.containers[0].image)'", "`jobs execute` takes only `--args`",
                    "gcloud run jobs execute sprintable-verify-oneoff --project $PROJECT --region $REGION --wait --args=-m,scripts.jobs.rewrite_site_post_links",
@@ -177,3 +181,11 @@ def test_the_runbook_names_the_new_setting_and_the_job_steps_that_the_job_really
     for flag in ("--old-origin", "--new-origin", "--apply"):
         assert f'"{flag}"' in job, flag
     assert "return 0 if (done == total_before and left == 0) else 1" in job
+
+
+def test_surrounding_whitespace_is_stripped_like_any_env_value_but_whitespace_inside_is_refused() -> None:
+    from app.core.origin_check import parse_origin
+
+    assert parse_origin("  https://dev-api.sprintable.ai/\n") == "https://dev-api.sprintable.ai"
+    with pytest.raises(ValueError):
+        parse_origin("https://dev-api .sprintable.ai")

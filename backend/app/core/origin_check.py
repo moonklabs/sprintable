@@ -17,6 +17,8 @@ def parse_origin(value: str, *, allow_empty: bool = False) -> str:
     cleaned = raw.rstrip("/")
     if not cleaned:
         raise ValueError(f"not an origin: {raw!r}")
+    if any(ch in cleaned for ch in "?#@ \t\r\n\\"):
+        raise ValueError("an origin has no query, fragment, credentials, backslash or whitespace (not even an empty one)")
     parts = urlsplit(cleaned)
     try:
         port = parts.port  # raises ValueError for a non-numeric or out-of-range port
