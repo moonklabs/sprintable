@@ -64,6 +64,10 @@ CLOUD_SQL_INSTANCE="${GCP_PROJECT}:${GCP_REGION}:${SQL_INSTANCE_NAME}"
 # bash 3.2(macOS) 호환을 위해 ${ENV^^} 대신 tr 사용.
 ENV_UPPER="$(printf '%s' "${ENV}" | tr '[:lower:]' '[:upper:]')"
 ALEMBIC_SECRET_NAME="ALEMBIC_DATABASE_URL_${ENV_UPPER}"
+# story 4798 (AC7): the prod job runs as its own least-privilege account, `run-migrate-prod` (the one secret it reads + the database connector role for the prod
+# instance). dev is not changed here (its jobs stay as they are).
+SERVICE_ACCOUNT=""
+[ "${ENV}" = "prod" ] && SERVICE_ACCOUNT="run-migrate-prod@${GCP_PROJECT}.iam.gserviceaccount.com"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$ENV] $*" >&2; }
 
@@ -80,6 +84,7 @@ JOB_NAME=${JOB_NAME}
 IMAGE=${IMAGE}
 CLOUD_SQL_INSTANCE=${CLOUD_SQL_INSTANCE}
 ALEMBIC_SECRET_NAME=${ALEMBIC_SECRET_NAME}
+SERVICE_ACCOUNT=${SERVICE_ACCOUNT}
 COMMAND=/app/scripts/migrate.sh
 EOF
     exit 0
@@ -92,6 +97,7 @@ gcloud run jobs deploy "${JOB_NAME}" \
     --project="${GCP_PROJECT}" \
     --command="/app/scripts/migrate.sh" \
     --set-secrets="ALEMBIC_DATABASE_URL=${ALEMBIC_SECRET_NAME}:latest" \
+    ${SERVICE_ACCOUNT:+"--service-account=${SERVICE_ACCOUNT}"} \
     --set-cloudsql-instances="${CLOUD_SQL_INSTANCE}" \
     --network=default \
     --subnet=default \

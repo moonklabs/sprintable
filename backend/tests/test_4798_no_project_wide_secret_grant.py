@@ -121,7 +121,7 @@ def recording_gcloud(tmp_path):
 
 def _run(script: str, args: list[str], recording_gcloud, extra_env: dict | None = None):
     bin_dir, log = recording_gcloud
-    env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "GCP_PROJECT": "proj-x", **(extra_env or {})}
+    env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "GCP_PROJECT": "proj-x", "PROJECT_NUMBER": "123456", **(extra_env or {})}  # (the recording gcloud answers nothing, so the project number is given)
     proc = subprocess.run(["bash", str(_SCRIPTS / script), *args], capture_output=True, text=True, env=env, timeout=120)
     calls = log.read_text().splitlines() if log.exists() else []
     return proc, calls
@@ -208,7 +208,7 @@ def test_setup_iam_prints_the_real_account_names_in_its_guidance(recording_gclou
     assert proc.returncode == 0, proc.stderr[-300:]
     assert "--service-account=cloudrun-runtime-dev@proj-x.iam.gserviceaccount.com" in proc.stdout, proc.stdout
     assert "--service-account=cloudrun-runtime-prod@proj-x.iam.gserviceaccount.com" in proc.stdout, proc.stdout
-    assert not re.search(r"--service-account=\S*\s", proc.stdout.replace("--service-account=cloudrun-runtime-dev@proj-x.iam.gserviceaccount.com", "").replace("--service-account=cloudrun-runtime-prod@proj-x.iam.gserviceaccount.com", "")), proc.stdout  # no timestamp or log text in a value
+    assert not re.search(r"--service-account=\S*\s", proc.stdout.replace("--service-account=cloudrun-runtime-dev@proj-x.iam.gserviceaccount.com", "").replace("--service-account=cloudrun-runtime-prod@proj-x.iam.gserviceaccount.com", "").replace("--service-account=run-migrate-prod@proj-x.iam.gserviceaccount.com", "")), proc.stdout  # no timestamp or log text in a value
 
 
 def test_the_workflow_comments_no_longer_claim_a_project_level_secret_role():
