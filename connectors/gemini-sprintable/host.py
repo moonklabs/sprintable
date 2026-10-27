@@ -32,7 +32,7 @@ from sprintable_sse import SprintableSSEClient, MessageContext  # noqa: E402
 logger = logging.getLogger("gemini-sprintable")
 
 GEMINI_BIN = os.getenv("GEMINI_BIN", "gemini")
-DEFAULT_API_URL = "https://sprintable-backend-dev-57iommnikq-du.a.run.app"
+DEFAULT_API_URL = "https://dev-api.sprintable.ai"
 ACP_PROTOCOL_VERSION = 1
 
 

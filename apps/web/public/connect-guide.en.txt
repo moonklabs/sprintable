@@ -140,7 +140,7 @@ argument you connect to SaaS** (`https://app.sprintable.ai`) — to connect to a
 self-hosted backend, you must pass that URL too:
 
 ```
-/sprintable:configure <the key issued in step 0> https://sprintable-backend-dev-57iommnikq-du.a.run.app
+/sprintable:configure <the key issued in step 0> https://dev-api.sprintable.ai
 ```
 
 **3) Run with the channel enabled**
