@@ -123,6 +123,9 @@ def test_no_route_the_three_flipped_callers_use_is_limited_per_client_ip() -> No
         if re.search(r"\b(open_setup_limiter|resend_verification_limiter)\.limit\(", p.read_text())
     }
     assert holders == {"routers/auth.py", "routers/onboarding.py", "routers/desktop_setup.py"}, holders
+    auth = (_ROOT / "backend/app/routers/auth.py").read_text()
+    assert auth.count("@resend_verification_limiter.limit(") == 2 and '@router.post("/set-password/request")\n@resend_verification_limiter' in auth, "the two mail-sending routes the runbook names"
+    assert len(re.findall(r"@open_setup_limiter\.limit\(", (_ROOT / "backend/app/routers/desktop_setup.py").read_text())) == 4, "the four public desktop-setup routes"
     for name in ("cron.py", "support_gateway_token.py"):
         files = list((_ROOT / "backend/app/routers").glob(name))
         assert files, name
@@ -143,7 +146,18 @@ def test_the_runbook_states_the_flip_order_the_accepted_cost_and_the_places_the_
     assert "3,613 a day" in sec and "1,404 a day" in sec
     for name in ("backend/scripts/deploy_backend.sh", "backend/scripts/deploy_mcp_dev.sh", "connect-guide.ko.txt", "connect-guide.en.txt", "onboarding-guide.txt"):
         assert name in sec, name
+    assert "`resend-verification` and `set-password/request` — both 3 an hour, both send mail" in sec and "`sk_live_` key is counted per key" in sec
     assert "also name `run.app` addresses and are copied into the VM frontend image as they are" in sec
     assert "change them before `dev-app` is served from the VM" in sec, "the guides are a cutover precondition, not a note"
     p2 = _runbook_section("**Phase 2", "**Phase 3")
     assert "`mcp_url` from `MCP_PUBLIC_URL`" in p2
+
+
+def test_the_stream_lifetimes_the_runbook_states_are_the_ones_in_the_code() -> None:
+    """codex (pipeline PR, round 2): the browser stream is cut at 55 s by the frontend BFF and capped at 90 s + 15 s jitter by the backend; 120 s was the agent stream the PO measured"""
+    assert "const UPSTREAM_HARD_TIMEOUT_MS = 55_000;" in (_ROOT / "apps/web/src/app/api/event-stream/route.ts").read_text()
+    events = (_ROOT / "backend/app/routers/events.py").read_text()
+    assert "_SSE_LIFESPAN_SEC: float = 90.0" in events and "_SSE_LIFESPAN_JITTER_SEC: float = 15.0" in events
+    sec = _runbook_section("## 9. ", "## 10. ")
+    assert "cuts its upstream at 55 s" in sec and "90 s plus up to 15 s jitter" in sec and "the agent stream" in sec
+    assert "the server closes a stream after 120 s by design" not in sec
