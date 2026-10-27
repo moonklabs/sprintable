@@ -213,3 +213,22 @@ def test_two_runs_in_the_same_second_do_not_share_file_names(box) -> None:
     box("--host", HOST)
     dumps = [f for f in box.imp.glob("*.dump")]
     assert len(dumps) == 2 and len({f.name for f in dumps}) == 2
+
+
+@pytest.mark.parametrize("bad", ["", "not a url", "mysql://u:p@10.0.0.1/db", "postgresql://u@10.0.0.1/db", "postgresql://:p@10.0.0.1/db", "postgresql://u:p@10.0.0.1/",
+                                 "postgresql://u:p@10.0.0.1/db?sslmode=Require;rm", "postgresql://u:topsecret-pw%0Aevil@10.0.0.1/db"])
+def test_the_url_checks_are_conditions_not_asserts_so_python_optimisation_does_not_remove_them(box, bad: str) -> None:
+    """codex: `assert` disappears under `python -O` / PYTHONOPTIMIZE — the checks must hold there too"""
+    p, calls, _ = box("--host", HOST, stdin=bad + "\n", PYTHONOPTIMIZE="1")
+    assert p.returncode != 0 and "docker run" not in calls
+
+
+def test_two_runs_in_the_same_second_get_different_names_because_of_the_process_id(box) -> None:
+    """the clock is held still by a fake `date`, so only the process id can tell the two runs apart"""
+    fake = box.tmp / "bin" / "date"
+    fake.write_text("#!/bin/sh\ncase \"$*\" in *%Y%m%d*) echo 20261027T080000Z ;; *) exec /bin/date \"$@\" ;; esac\n")
+    fake.chmod(0o755)
+    assert box("--host", HOST)[0].returncode == 0
+    assert box("--host", HOST)[0].returncode == 0
+    names = sorted(f.name for f in box.imp.glob("*.dump"))
+    assert len(names) == 2 and all("20261027T080000Z" in n for n in names) and len(set(names)) == 2

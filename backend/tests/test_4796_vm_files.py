@@ -115,6 +115,15 @@ def test_the_runbook_puts_desired_json_in_place_and_starts_the_database_before_t
     assert "Once per VM, before the first dump" in section
 
 
+def test_the_real_restore_command_carries_restore_wipe_because_the_rehearsal_left_tables_behind() -> None:
+    """codex: after the rehearsal the database holds tables and restore.sh refuses without RESTORE_WIPE=yes"""
+    text = (_VM / "RUNBOOK.md").read_text()
+    section = text[text.index("## 7. Move the data"):text.index("## 8. ")]
+    step5 = section[section.index("\n5. On the VM, restore"):section.index("\n6. Enable the deployer")]
+    assert "sudo env RESTORE_WIPE=yes /opt/sprintable/bin/restore.sh /srv/sprintable/import/" in step5
+    assert "RESTORE_WIPE" in (_VM / "bin/restore.sh").read_text()
+
+
 def test_no_timer_that_needs_the_database_is_enabled_before_the_restore() -> None:
     """a backup run before the restore finds no database and fails every night (the first dev VM found this); the timers are enabled with the deploy timer, RUNBOOK §7 step 6"""
     code = re.sub(r"(?m)^\s*#.*$|echo .*$", "", (_VM / "bin/bootstrap.sh").read_text())
