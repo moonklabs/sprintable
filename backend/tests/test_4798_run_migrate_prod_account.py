@@ -169,8 +169,8 @@ def test_setup_iam_creates_the_dedicated_account_with_exactly_its_grants(recordi
     # the build's account may deploy a job as it — on this account only
     assert any(c.startswith("iam service-accounts add-iam-policy-binding run-migrate-prod@proj-x") and "--member=serviceAccount:123456-compute@developer.gserviceaccount.com" in c and "--role=roles/iam.serviceAccountUser" in c for c in calls), calls
     # the one secret, granted on the secret (never at project level)
-    grants = [c for c in calls if c.startswith("secrets add-iam-policy-binding")]
-    assert grants == [c for c in grants if "ALEMBIC_DATABASE_URL_PROD" in c and "--member=serviceAccount:run-migrate-prod@proj-x.iam.gserviceaccount.com" in c] and len(grants) == 1, grants
+    grants = [c for c in calls if c.startswith("secrets add-iam-policy-binding") and "--member=serviceAccount:run-migrate-prod@proj-x.iam.gserviceaccount.com" in c]
+    assert len(grants) == 1 and "ALEMBIC_DATABASE_URL_PROD" in grants[0], grants
     assert "--service-account=run-migrate-prod@proj-x.iam.gserviceaccount.com" in proc.stdout
 
 

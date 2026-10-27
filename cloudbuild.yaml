@@ -1082,10 +1082,13 @@ steps:
         # story 4786: mcp-dev sits idle most of the time (billed per request); prod states nothing here (its value is left as it is).
         MCP_CPU_FLAG=""
         if [ "${_DEPLOY_ENV}" == "dev" ]; then MCP_CPU_FLAG="--cpu-throttling"; fi
+        # 4798 AC7: the prod service runs as its own account (the one secret above and nothing else); dev is not changed
+        MCP_SA_FLAG=""
+        if [ "${_DEPLOY_ENV}" == "prod" ]; then MCP_SA_FLAG="--service-account=run-mcp-prod@${PROJECT_ID}.iam.gserviceaccount.com"; fi
         gcloud run services update sprintable-mcp-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
           --region=${_AR_REGION} \
-          $${MCP_CPU_FLAG} \
+          $${MCP_CPU_FLAG} $${MCP_SA_FLAG} \
           --update-env-vars="^;^$${ENV_VARS}" \
           --remove-env-vars=AGENT_API_KEY \
           --update-secrets="AGENT_API_KEY=$${AGENT_KEY_SECRET}:latest" \
