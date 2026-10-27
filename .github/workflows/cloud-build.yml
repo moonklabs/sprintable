@@ -488,7 +488,10 @@ jobs:
             # 짝으로 켜야 실제로 노드 간 공유가 성립한다(scripts/deploy_realtime_gce.sh 동시 배포).
             echo "backend_presence_redis_enabled=true" >> "$GITHUB_OUTPUT"
             echo "backend_presence_online_redis_enabled=true" >> "$GITHUB_OUTPUT"
-            echo "backend_sse_lease_redis_enabled=true" >> "$GITHUB_OUTPUT"
+            # story 4791 (INFRA-DIET ⑥, 2026-10-27, PO): the receiver scopes' SSE lease (one receiver per agent · take-over) lives in Postgres rows when this is false (services/sse_lease_pg.py), so dev
+            # stops using the Redis lease and the Postgres one is measured on two real backend instances. The global caps (events_global · agent_global) and the device stream's count then go back to
+            # each instance's own count (the limit written in the story). Back to the Redis lease = this one value `true`. Prod keeps `true` (the main branch above).
+            echo "backend_sse_lease_redis_enabled=false" >> "$GITHUB_OUTPUT"
             # story #2077(2026-07-24) — frontend min/max-instances가 배포 SSOT 어디에도 없었다.
             # 라이브 실측(2026-07-24, `gcloud run services describe sprintable-frontend-dev` —
             # 서빙 리비전 자체 대조·latestReady==latestCreated·traffic 100% 확認, template spec만
