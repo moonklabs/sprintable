@@ -161,3 +161,7 @@ def test_the_stream_lifetimes_the_runbook_states_are_the_ones_in_the_code() -> N
     sec = _runbook_section("## 9. ", "## 10. ")
     assert "cuts its upstream at 55 s" in sec and "90 s plus up to 15 s jitter" in sec and "the agent stream" in sec
     assert "the server closes a stream after 120 s by design" not in sec
+    agent = (_ROOT / "backend/app/routers/agent_gateway.py").read_text()
+    assert "_AGENT_SSE_LIFESPAN_SEC: float = 300.0" in agent and "_AGENT_SSE_LIFESPAN_JITTER_SEC: float = 30.0" in agent
+    assert "the 120 s is the length of the observation" in sec and "300 s plus up to 30 s jitter" in sec, "120 s is what the PO observed, not a server design limit"
+    assert "closed by the server at 120 s" not in sec
