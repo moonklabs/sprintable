@@ -60,7 +60,7 @@ case "${ENV}" in
         APP_URL="${APP_URL:-https://dev-app.sprintable.ai}"  # OAuth redirect/이메일 링크용 프론트 URL
         # OB-1: 에이전트 onboarding config 의 backend-direct Cloud Run URL(에이전트 SSE 직통).
         # CF-fronted 깔끔 도메인 금지(/agent/stream 버퍼·봇차단). cloudbuild _FASTAPI_URL 과 동일 값.
-        FASTAPI_URL="${FASTAPI_URL:-https://sprintable-backend-dev-787818285179.asia-northeast3.run.app}"
+        FASTAPI_URL="${FASTAPI_URL:-https://dev-api.sprintable.ai}"  # story 4796: the same value as the pipeline's dev `fastapi_url` (RUNBOOK §9)
         # ⚠️story cd10e123 계열(2026-07-21, 오르테가군 SPEC-vs-라이브 1:1 대조 지적): dev는
         # 현재 APP_ENV가 아예 안 박혀있어 config.py 기본값("development")을 그대로 상속 중이다.
         # 예전엔 이 스크립트가 `${ENV}`("dev")를 그대로 썼는데, cron.py/auth_firebase_internal.py의

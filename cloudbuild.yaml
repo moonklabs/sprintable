@@ -14,7 +14,8 @@ substitutions:
   _REALTIME_GCE_SKIP: "false"
   _REALTIME_CLOUDRUN_SKIP: "false"
   _DEPLOY_ENV: dev
-  _FASTAPI_URL: https://sprintable-backend-dev-787818285179.asia-northeast3.run.app
+  # story 4796: the default is the dev value of `fastapi_url` in cloud-build.yml (the one switch, RUNBOOK §9), so a build started by hand without the pipeline's substitutions deploys the same addresses.
+  _FASTAPI_URL: https://dev-api.sprintable.ai
   # story #3583-BE(GA4 «고객 소유» 연결, 페드루 리뷰 조건 2026-09-06) — GA4 OAuth 콜백의
   # redirect_uri 구성용(백엔드 자기 자신, Google이 여기로 직접 리다이렉트). _FASTAPI_URL과
   # 값은 같지만 별 substitution으로 둔다 — Google Console에 콜백 URI 등록이 아직 안 된
