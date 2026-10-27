@@ -15,8 +15,10 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 name="sprintable-front-door"
 image="caddy:2.8.4-alpine"   # the same pinned image as the stack's Caddy (compose.yml; a test keeps them equal)
-install_dir="${INSTALL_DIR:-/opt/sprintable}"
-data_dir="${DATA_DIR:-/srv/sprintable}"
+# the same folders the deployer uses: its configuration keys (defaults as in deployer.py) — no environment override that could point the certificate store somewhere else than the stack's Caddy looks
+cfg_opt() { python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get(sys.argv[2], sys.argv[3]))' "$SPRINTABLE_CONFIG" "$1" "$2"; }
+install_dir="$(cfg_opt install_dir /opt/sprintable)"
+data_dir="$(cfg_opt data_dir /srv/sprintable)"
 dir="$install_dir/runtime/front-door"
 
 usage() { echo "usage: $0 passthrough --host <name>.sprintable.ai --upstream https://sprintable-backend-<env>-<id>.<region>.run.app | stop | status" >&2; exit 2; }
@@ -36,10 +38,13 @@ case "$cmd" in
       esac
     done
     [[ "$host" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.sprintable\.ai$ ]] || { echo "--host must be a name under sprintable.ai" >&2; exit 2; }
-    [[ "$upstream" =~ ^https://sprintable-backend-(dev|prod)-[a-z0-9]+(-[a-z0-9]+)?\.(asia-northeast3\.run\.app|a\.run\.app)$ ]] || { echo "--upstream must be the https address of one of our Cloud Run backends (sprintable-backend-<env>-…run.app), no path" >&2; exit 2; }
+    env_name="$(cfg environment)"
+    [[ "$env_name" =~ ^(dev|prod)$ ]] || { echo "the VM configuration names no known environment" >&2; exit 1; }
+    [[ "$upstream" =~ ^https://sprintable-backend-${env_name}-[a-z0-9]+(-[a-z0-9]+)?\.(asia-northeast3\.run\.app|a\.run\.app)$ ]] || { echo "--upstream must be the https address of this environment's ($env_name) Cloud Run backend (sprintable-backend-$env_name-…run.app), no path: requests carry users' credentials" >&2; exit 2; }
     email="$(cfg acme_email)"
     [[ "$email" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || { echo "acme_email in the VM configuration is not an e-mail address" >&2; exit 1; }
     stack_caddy_running && { echo "the stack's own Caddy is running (same ports 80/443): this temporary front door is for the time BEFORE the stack takes over" >&2; exit 1; }
+    mountpoint -q "$data_dir" || { echo "$data_dir is not a mounted data disk: the certificates would not be where the stack's Caddy looks" >&2; exit 1; }
     install -d -m 0755 "$dir" "$data_dir/caddy"
     tmp="$dir/.Caddyfile.new"
     cat > "$tmp" <<EOF

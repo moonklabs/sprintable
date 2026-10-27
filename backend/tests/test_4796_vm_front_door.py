@@ -44,23 +44,31 @@ exit 0
 """
 
 
+_FAKE_MOUNTPOINT = """#!/bin/sh
+echo "mountpoint $*" >> "$FAKE_LOG"
+[ -z "${FAKE_NOT_MOUNTED:-}" ]
+"""
+
+
 @pytest.fixture()
 def box(tmp_path: Path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    (bin_dir / "docker").write_text(_FAKE_DOCKER)
-    (bin_dir / "docker").chmod(0o755)
+    for name, body in (("docker", _FAKE_DOCKER), ("mountpoint", _FAKE_MOUNTPOINT)):
+        (bin_dir / name).write_text(body)
+        (bin_dir / name).chmod(0o755)
+    install, data = tmp_path / "opt", tmp_path / "srv"
     cfg = tmp_path / "deployer.json"
-    cfg.write_text(json.dumps({"environment": "dev", "acme_email": "ops@sprintable.ai"}))
+    # the folders are the deployer's own configuration keys (install_dir, data_dir), as on the VM
+    cfg.write_text(json.dumps({"environment": "dev", "acme_email": "ops@sprintable.ai", "install_dir": str(install), "data_dir": str(data)}))
     state = tmp_path / "state"
     state.mkdir()
     log = tmp_path / "calls.log"
     log.write_text("")
-    install, data = tmp_path / "opt", tmp_path / "srv"
 
     def run(*args: str, **env: str):
         e = {"PATH": f"{bin_dir}:{Path(sys.executable).parent}:/usr/bin:/bin:/usr/local/bin", "HOME": str(tmp_path), "SPRINTABLE_CONFIG": str(cfg),
-             "INSTALL_DIR": str(install), "DATA_DIR": str(data), "FAKE_LOG": str(log), "FAKE_STATE": str(state), **env}
+             "FAKE_LOG": str(log), "FAKE_STATE": str(state), **env}
         p = subprocess.run(["bash", str(_SCRIPT), *args], env=e, capture_output=True, text=True, timeout=120)
         return p, log.read_text()
 
@@ -100,8 +108,8 @@ def test_the_generated_caddyfile_is_validated_before_anything_starts(box) -> Non
     assert not box.caddyfile.exists(), "a Caddyfile that did not validate is not installed"
 
 
-@pytest.mark.parametrize("up", [UP, OLD_UP, UP.replace("-dev-", "-prod-")])
-def test_our_cloud_run_backend_addresses_are_accepted(box, up: str) -> None:
+@pytest.mark.parametrize("up", [UP, OLD_UP])
+def test_this_environments_cloud_run_backend_addresses_are_accepted(box, up: str) -> None:
     p, _ = box("passthrough", "--host", HOST, "--upstream", up)
     assert p.returncode == 0, p.stderr
 
@@ -141,8 +149,13 @@ def test_it_says_so_when_the_front_door_does_not_become_ready(box) -> None:
     assert p.returncode == 1 and "did not become ready" in p.stderr
 
 
+def _config(box, **over) -> None:
+    base = json.loads(box.cfg.read_text())
+    box.cfg.write_text(json.dumps({**base, **over}))
+
+
 def test_a_bad_email_in_the_vm_configuration_stops_it(box) -> None:
-    box.cfg.write_text(json.dumps({"environment": "dev", "acme_email": "not an email\nrespond 200"}))
+    _config(box, acme_email="not an email\nrespond 200")
     p, calls = box("passthrough", "--host", HOST, "--upstream", UP)
     assert p.returncode == 1 and not box.caddyfile.exists() and "docker" not in calls
 
@@ -195,3 +208,59 @@ def test_the_runbook_has_the_three_phases_with_the_workers_and_the_front_door_co
     p3 = card[card.index("**Phase 3"):]
     assert p3.index("front-door.sh stop") < p3.index("deployer.py --force"), "the front door goes before the stack's Caddy comes up"
     assert p3.index("--ingress internal") < p3.index("RESTORE_WIPE=yes")
+
+
+def test_the_upstream_must_belong_to_this_vms_environment_a_dev_vm_never_forwards_credentials_to_prod(box) -> None:
+    prod_up = UP.replace("-dev-", "-prod-")
+    p, calls = box("passthrough", "--host", HOST, "--upstream", prod_up)
+    assert p.returncode == 2 and "dev" in p.stderr and not box.caddyfile.exists() and "docker" not in calls
+    _config(box, environment="prod")
+    p, calls = box("passthrough", "--host", "api.sprintable.ai", "--upstream", UP)
+    assert p.returncode == 2 and not box.caddyfile.exists(), "and a prod VM does not take the dev backend either"
+    assert box("passthrough", "--host", "api.sprintable.ai", "--upstream", prod_up)[0].returncode == 0
+
+
+@pytest.mark.parametrize("env_name", ["", "staging", "DEV", "dev\nrespond"])
+def test_an_unknown_environment_in_the_configuration_stops_it(box, env_name: str) -> None:
+    _config(box, environment=env_name)
+    p, calls = box("passthrough", "--host", HOST, "--upstream", UP)
+    assert p.returncode != 0 and not box.caddyfile.exists() and "docker" not in calls
+
+
+def test_the_certificate_folder_is_the_deployers_data_disk_and_it_must_be_mounted(box) -> None:
+    p, calls = box("passthrough", "--host", HOST, "--upstream", UP, FAKE_NOT_MOUNTED="1")
+    assert p.returncode == 1 and "not a mounted data disk" in p.stderr
+    assert not (box.data / "caddy").exists() and "docker run" not in calls and not box.caddyfile.exists()
+    assert f"mountpoint -q {box.data}" in calls, "the deployer's data_dir is what is checked"
+
+
+def test_the_folders_come_from_the_deployer_configuration_not_from_the_environment(box, tmp_path: Path) -> None:
+    other = tmp_path / "elsewhere"
+    p, calls = box("passthrough", "--host", HOST, "--upstream", UP, INSTALL_DIR=str(other), DATA_DIR=str(other))
+    assert p.returncode == 0, p.stderr
+    assert not other.exists() and (box.data / "caddy").is_dir() and f"-v {box.data}/caddy:/data" in calls
+
+
+def test_the_defaults_are_the_deployers_defaults_when_the_configuration_names_no_folder(box) -> None:
+    text = _SCRIPT.read_text()
+    assert 'cfg_opt install_dir /opt/sprintable' in text and 'cfg_opt data_dir /srv/sprintable' in text
+    deployer = (_ROOT / "deploy/vm/bin/deployer.py").read_text()
+    assert 'install_dir: Path = Path("/opt/sprintable")' in deployer and 'data_dir: Path = Path("/srv/sprintable")' in deployer
+
+
+def test_the_runbook_says_how_to_undo_phase_3_and_stops_the_front_door_before_the_dump() -> None:
+    text = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
+    p3 = text[text.index("**Phase 3"):text.index("## 8. ")]
+    assert p3.index("front-door.sh stop") < p3.index("--ingress internal") < p3.index("Final dump"), "the front door is the first writer to stop"
+    assert "also admits traffic from the same project" in p3 and "check from outside" in p3
+    undo = p3[p3.index("**Undo"):]
+    assert undo.index("systemctl stop sprintable-deploy.timer") < undo.index("front-door.sh passthrough"), "the stack's Caddy must be down before the front door can start"
+    assert "docker stop sprintable-caddy-1" in undo
+
+
+@pytest.mark.parametrize("env_name", [".*", "dev|prod", "[a-z]+", "d.v"])
+def test_a_regex_looking_environment_name_can_not_widen_the_upstream_check(box, env_name: str) -> None:
+    """the environment name is placed into the pattern the upstream is matched against: it must be exactly dev or prod first"""
+    _config(box, environment=env_name)
+    p, calls = box("passthrough", "--host", HOST, "--upstream", "https://sprintable-backend-evil-1.asia-northeast3.run.app")
+    assert p.returncode != 0 and not box.caddyfile.exists() and "docker" not in calls
