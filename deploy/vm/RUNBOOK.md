@@ -235,15 +235,7 @@ Order of work: (1) VM frontend image built with `NEXT_PUBLIC_FASTAPI_URL=https:/
 
 ## 10. After the soak (one full day, status `deployed`, no rollback) — removals, one line of undo each
 
-Only on the PO's go. Take a final dump first (`sudo systemctl start sprintable-backup.service`).
-
-| Remove | Command | Undo |
-|---|---|---|
-| Cloud Run dev backend/frontend | `gcloud run services delete sprintable-backend-dev sprintable-frontend-dev --region $REGION` | redeploy from the last Cloud Build run of the same sha |
-| Cloud SQL dev | `gcloud sql instances delete <dev-instance>` (take `gcloud sql backups create` + the §7 dump first) | restore the Cloud SQL backup / dump into a new instance |
-| Redis dev | `gcloud redis instances delete <dev-redis> --region $REGION` | recreate with the same size (cache only) |
-| pgbouncer dev VM | `gcloud compute instances delete <pgbouncer-dev>` | recreate from its instance template |
-| realtime-gateway dev VM/LB | as above, then the forwarding rule | recreate from its template |
+Only on the PO's go. The lines, the checks before each one, the saved definitions and the undo of every removal are in **[`REMOVALS-dev.md`](REMOVALS-dev.md)** (Cloud Run dev backend/frontend, Redis dev, the pgbouncer VM, the realtime leftovers check, and Cloud SQL last). Its gates come first: the soak, **the dev pipeline no longer deploying the Cloud Run services** (otherwise the next dev push re-creates them, and a deleted Cloud SQL fails the dev build at its migrate step), a final dump (`sudo systemctl start sprintable-backup.service`), and — for the Cloud SQL row only — the support gateway living on the VM, because the `support_gateway` database sits inside the same Cloud SQL instance.
 
 The load-test tools under `backend/scripts/loadtest/` (`run_loadtest.sh`, `endpoint_mix_test.js`, `dev_db_capacity_test.js`, `generator_selfcheck.js`, its README) default to the raw Cloud Run backend **on purpose**: they load Cloud Run, not the VM's pass-through. They go with the Cloud Run backend in the first row above; a load test of the VM backend needs its own `BASE_URL` and the VM's measured limits.
 
