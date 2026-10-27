@@ -97,6 +97,14 @@ async def test_the_report_lists_origins_and_counts_only() -> None:
         assert not any("/api/" in (o or "") for o, _ in rows), "origins only, never a full link"
 
 
+async def test_the_report_cuts_a_broken_link_without_a_path_at_the_query_so_it_prints_no_part_of_it() -> None:
+    async with _schema_session() as session:
+        await _add(session, "site_post_published", "https://broken.example?public_key=pk_secret&lang=ko")
+        await _add(session, "site_post_published", "https://broken2.example#fragment")
+        rows = dict(await job.counts_by_origin(session))
+        assert rows == {"https://broken.example": 1, "https://broken2.example": 1}, rows
+
+
 async def test_the_count_for_an_old_origin_matches_exactly_the_links_that_start_with_it() -> None:
     async with _schema_session() as session:
         await _seed(session)
@@ -150,3 +158,84 @@ def test_the_origin_checks_normalise_and_accept_the_good_ones() -> None:
         job.main(["--apply", "--new-origin", NEW])
     with pytest.raises(SystemExit):
         job.main(["--old-origin", OLD])  # a plan needs the new origin too
+
+
+
+# ───────── run(): the dry-run / apply split, the commit and the exit code — the part the helper-level tests above do not reach ─────────
+
+@contextlib.asynccontextmanager
+async def _committed_schema(monkeypatch):
+    """Like `_schema_session`, but the job's own sessions (the patched factory) see what is seeded: the rows are committed, the schema is dropped afterwards."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    schema = "t4796r_" + uuid.uuid4().hex[:10]
+    engine = create_async_engine(_async_url(), connect_args={"server_settings": {"search_path": schema}})
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+            await conn.execute(text(f'CREATE TABLE "{schema}".activity_logs (id uuid PRIMARY KEY, action text NOT NULL, context jsonb NOT NULL)'))
+        monkeypatch.setattr("app.core.database.async_session_factory", factory)
+        monkeypatch.setattr(job, "_db_url_summary", "test database")
+        yield factory
+    finally:
+        async with engine.begin() as conn:
+            await conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        await engine.dispose()
+
+
+async def _seed_committed(factory):
+    async with factory() as s:
+        ids = await _seed(s)
+        await s.commit()
+    return ids
+
+
+async def _read(factory, rid):
+    async with factory() as s:
+        return await _url(s, rid)
+
+
+async def test_run_without_origins_is_a_read_only_report(monkeypatch, capsys) -> None:
+    async with _committed_schema(monkeypatch) as factory:
+        ids = await _seed_committed(factory)
+        assert await job.run([], None, False) == 0
+        out = capsys.readouterr().out
+        assert f"{OLD}\t2" in out and f"{OLD2}\t1" in out and "/api/" not in out, out
+        assert await _read(factory, ids["a"]) == f"{OLD}/api/v2/public/site-posts/hello?public_key=pk_1&lang=ko"
+
+
+async def test_run_without_apply_is_a_plan_that_writes_nothing(monkeypatch, capsys) -> None:
+    async with _committed_schema(monkeypatch) as factory:
+        ids = await _seed_committed(factory)
+        before = {k: await _read(factory, v) for k, v in ids.items()}
+        assert await job.run([OLD, OLD2], NEW, False) == 0
+        out = capsys.readouterr().out
+        assert "dry run, nothing written" in out and "2 link(s)" in out and "1 link(s)" in out, out
+        assert {k: await _read(factory, v) for k, v in ids.items()} == before, "a plan changes no row"
+
+
+async def test_run_with_apply_rewrites_commits_and_exits_zero(monkeypatch, capsys) -> None:
+    async with _committed_schema(monkeypatch) as factory:
+        ids = await _seed_committed(factory)
+        assert await job.run([OLD, OLD2], NEW, True) == 0
+        assert "rewritten: 3; still with an old origin: 0" in capsys.readouterr().out
+        # a session of its own (not the job's) sees it: the transaction was committed
+        assert await _read(factory, ids["a"]) == f"{NEW}/api/v2/public/site-posts/hello?public_key=pk_1&lang=ko"
+        assert await _read(factory, ids["old2"]) == f"{NEW}/api/v2/public/site-posts/third?public_key=pk_2&lang=ko"
+        assert await _read(factory, ids["custom"]) == "https://blog.customer.example/ko/blog/x"
+        assert await job.run([OLD, OLD2], NEW, True) == 0, "a second apply finds nothing and is still clean"
+
+
+async def test_run_with_apply_exits_nonzero_when_something_with_an_old_origin_is_left(monkeypatch, capsys) -> None:
+    """new == old: the rewrite 'succeeds' but the old origin is still there — the exit code must say so"""
+    async with _committed_schema(monkeypatch) as factory:
+        await _seed_committed(factory)
+        assert await job.run([OLD], OLD, True) == 1
+        assert "still with an old origin: 2" in capsys.readouterr().out
+
+
+async def test_run_needs_the_new_origin_with_an_old_one(monkeypatch) -> None:
+    async with _committed_schema(monkeypatch):
+        with pytest.raises(SystemExit):
+            await job.run([OLD], None, False)

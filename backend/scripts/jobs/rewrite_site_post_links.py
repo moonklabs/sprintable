@@ -28,7 +28,7 @@ from scripts.jobs._db_env import resolve_database_url
 _db_url_summary = resolve_database_url()
 
 ACTION = "site_post_published"
-_ORIGIN_RE = r"^https?://[^/]+"
+_ORIGIN_RE = r"^https?://[^/?#]+"
 
 
 def _like_prefix(origin: str) -> str:
