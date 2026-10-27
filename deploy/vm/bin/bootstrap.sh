@@ -68,7 +68,7 @@ fi
 
 echo "== tooling → /opt/sprintable"
 install -d -m 0755 /opt/sprintable/bin /opt/sprintable/releases /opt/sprintable/runtime /etc/sprintable
-for f in deployer.py render_env.py lib.sh backup.sh restore.sh restore-check.sh rowcounts.sh rowcounts.sql; do
+for f in deployer.py render_env.py lib.sh backup.sh restore.sh restore-check.sh rowcounts.sh rowcounts.sql dump-source.sh; do
   install -m 0755 "$src/bin/$f" "/opt/sprintable/bin/$f"
 done
 # the compose file the deployer holds bundles to: a bundle whose compose.yml differs from this copy is refused (changing compose = re-run this script)

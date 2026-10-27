@@ -379,10 +379,13 @@ def test_the_runbook_grants_exactly_the_secrets_the_declaration_reads(capsys) ->
     assert not any("PGBOUNCER" in i or "DATABASE_URL" in i for i in ids), "the VM never reads the Cloud SQL connection strings"
 
 
-def test_the_runbook_uploads_the_dump_with_its_checksum_because_restore_demands_it() -> None:
+def test_the_dump_comes_with_its_checksum_because_restore_demands_it_for_a_gs_source() -> None:
+    """the dump is taken on the VM by dump-source.sh (the source database has no public address), which writes the sidecar restore.sh verifies and, with --upload, copies it all to the import folder"""
     text = (_VM / "RUNBOOK.md").read_text()
-    assert "shasum -a 256 dev.dump > dev.dump.sha256" in text and "gcloud storage cp dev.dump dev.dump.sha256" in text
+    assert "dump-source.sh --host $SRC_IP --label rehearsal --upload" in text and "gs://$BACKUPS_BUCKET/import/" in text
     assert "sha256_verify" in (_VM / "bin/restore.sh").read_text()
+    script = (_VM / "bin/dump-source.sh").read_text()
+    assert '.dump.sha256' in script and 'gcloud storage cp --quiet "$base.dump" "$base.dump.sha256" "$base.counts.tsv" "gs://$bucket/import/"' in script
 
 
 def test_the_runbook_closes_the_cloud_run_door_with_a_flag_cloud_run_accepts() -> None:
