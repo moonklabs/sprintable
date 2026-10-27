@@ -261,3 +261,17 @@ def test_the_ga4_line_is_gated_on_the_console_step_in_the_workflow_and_in_the_ru
     assert "redirect_uri_mismatch" in sec and "the fallback host of public hosted-site post links" in sec
     cfg = (_ROOT / "backend/app/routers/measurement_connections.py").read_text()
     assert "settings.backend_url.rstrip('/')}/api/v2/measurement-connections/ga4/callback" in cfg, "the redirect URI the console must know is built from backend_url"
+
+
+def test_the_ga4_flip_consequences_the_runbook_names_are_true_in_the_code() -> None:
+    """codex (GA4 line PR): the state lives 10 minutes and the callback rebuilds the redirect URI from backend_url; the hand deploy script never sets BACKEND_URL; the hosted-site link is stored in the activity log context"""
+    state = (_ROOT / "backend/app/services/channel_oauth_state.py").read_text()
+    assert "_STATE_TTL_SECONDS = 600" in state and '"redirect_uri"' not in state, "the signed state carries no redirect URI"
+    mc = (_ROOT / "backend/app/routers/measurement_connections.py").read_text()
+    assert "redirect_uri=_ga4_redirect_uri()" in mc and "settings.backend_url.rstrip('/')" in mc
+    assert "BACKEND_URL" not in re.sub(r"FASTAPI_URL|DATABASE_BACKEND_URL", "", (_ROOT / "backend/scripts/deploy_backend.sh").read_text()).replace("DEV_BACKEND_URL", "")
+    sp = (_ROOT / "backend/app/services/site_posts.py").read_text()
+    assert 'action="site_post_published"' in sp and '"url": url' in sp and "backend_base_url.rstrip('/')}/api/v2/public/site-posts/" in sp
+    sec = _runbook_section("## 9. ", "## 10. ")
+    for needle in ("the signed state lives 10 minutes", "fails once at the token exchange", "does not set `BACKEND_URL` at all", "`activity_logs.context.url` (action `site_post_published`)", "count them", "contains `run.app`", "the flip makes every new link carry the dev API name"):
+        assert needle in sec, needle
