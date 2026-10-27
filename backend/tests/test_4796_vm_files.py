@@ -103,6 +103,17 @@ def test_every_file_a_unit_runs_is_installed_by_bootstrap() -> None:
     assert "enable --now sprintable-deploy.timer" not in re.sub(r"(?m)^\s*#.*$|echo .*$", "", boot), "the deploy timer is enabled by hand after the database is restored"
 
 
+def test_no_timer_that_needs_the_database_is_enabled_before_the_restore() -> None:
+    """a backup run before the restore finds no database and fails every night (the first dev VM found this); the timers are enabled with the deploy timer, RUNBOOK §7 step 6"""
+    code = re.sub(r"(?m)^\s*#.*$|echo .*$", "", (_VM / "bin/bootstrap.sh").read_text())
+    for timer in ("sprintable-backup.timer", "sprintable-restore-check.timer", "sprintable-deploy.timer"):
+        assert not re.search(rf"systemctl enable[^\n]*{re.escape(timer)}", code), timer
+    runbook = (_VM / "RUNBOOK.md").read_text()
+    step6 = next(line for line in runbook.splitlines() if line.startswith("6. Make a sha's version the desired one"))
+    for timer in ("sprintable-deploy.timer", "sprintable-backup.timer", "sprintable-restore-check.timer"):
+        assert timer in step6, timer
+
+
 def test_the_units_wait_for_the_data_disk() -> None:
     for unit in _VM.joinpath("systemd").glob("*.service"):
         assert "ConditionPathIsMountPoint=/srv/sprintable" in unit.read_text(), unit.name
@@ -427,7 +438,9 @@ def test_the_runbook_closes_ssh_and_rdp_for_this_vm_and_uses_the_dev_attachments
 def test_dev_declares_its_own_attachments_bucket_and_prod_does_not_touch_it() -> None:
     import yaml
     dev = yaml.safe_load((_VM / "env/dev.yaml").read_text())
-    assert dev["services"]["backend"]["added"]["GCS_MEMO_ATTACHMENTS_BUCKET"] == "sprintable-memo-attachments-dev"
+    for svc in ("backend", "frontend"):  # live on Cloud Run dev since story 4798, on both services: an override (it was an addition before it went live)
+        assert dev["services"][svc]["overrides"]["GCS_MEMO_ATTACHMENTS_BUCKET"] == "sprintable-memo-attachments-dev"
+        assert "GCS_MEMO_ATTACHMENTS_BUCKET" not in (dev["services"][svc].get("added") or {})
     prod_path = _VM / "env/prod.yaml"
     if prod_path.exists():
         prod = yaml.safe_load(prod_path.read_text())
