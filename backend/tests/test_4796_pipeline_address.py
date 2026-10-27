@@ -95,3 +95,55 @@ def test_the_runbook_names_the_one_switch_what_follows_it_and_the_order_conditio
     p3 = text[text.index("**Phase 3"):text.index("## 8. ")]
     pre = p3[:p3.index("\n1. ")]
     assert "request log free of lane traffic at the old `run.app` address" in pre, "Phase 3 starts only when no Mac still uses the old address"
+
+
+def _runbook_section(start: str, end: str) -> str:
+    text = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
+    return text[text.index(start):text.index(end)]
+
+
+def test_the_claims_the_runbook_makes_about_the_address_sources_are_true_in_the_code() -> None:
+    """codex (pipeline PR): api_url is FASTAPI_URL but mcp_url is MCP_PUBLIC_URL; the manual deploy scripts and the static guides still hold the Cloud Run address"""
+    ds = (_ROOT / "backend/app/services/desktop_setup.py").read_text()
+    ex = ds[ds.index("def exchange_urls"):]
+    assert 'os.environ.get("FASTAPI_URL"' in ex and "resolve_mcp_public_url()" in ex, "api_url from FASTAPI_URL, mcp_url from MCP_PUBLIC_URL"
+    assert re.search(r'FASTAPI_URL="\$\{FASTAPI_URL:-https://sprintable-backend-dev-[^}]+run\.app\}"', (_ROOT / "backend/scripts/deploy_backend.sh").read_text())
+    assert re.search(r'(?m)^DEV_BACKEND_URL="https://sprintable-backend-dev-[^"]+"', (_ROOT / "backend/scripts/deploy_mcp_dev.sh").read_text()), "no override in the hosted-MCP script"
+    for guide in ("connect-guide.ko.txt", "connect-guide.en.txt", "onboarding-guide.txt"):
+        assert "run.app" in (_ROOT / "apps/web/public" / guide).read_text(), guide
+    usage = (_ROOT / "backend/app/services/agent_api_key_usage.py").read_text()
+    assert "remote_ip = client_ip(request)" in usage, "the ledger records client_ip(): the VM's address behind the pass-through"
+
+
+def test_no_route_the_three_flipped_callers_use_is_limited_per_client_ip() -> None:
+    """the PR text says the scheduler, the hosted MCP and the support gateway reach no `client_ip`-keyed limit; this pins which files hold such limits"""
+    holders = {
+        str(p.relative_to(_ROOT / "backend/app"))
+        for p in (_ROOT / "backend/app").rglob("*.py")
+        if re.search(r"\b(open_setup_limiter|resend_verification_limiter)\.limit\(", p.read_text())
+    }
+    assert holders == {"routers/auth.py", "routers/onboarding.py", "routers/desktop_setup.py"}, holders
+    for name in ("cron.py", "support_gateway_token.py"):
+        files = list((_ROOT / "backend/app/routers").glob(name))
+        assert files, name
+        assert "limiter.limit(" not in files[0].read_text(), f"{name} has a limit now: recheck the PR text"
+
+
+def test_the_runbook_measurement_example_is_the_harmless_endpoint_with_more_requests_than_instances_times_the_limit() -> None:
+    sec = _runbook_section("**First-VM measurement", "Caddy needs the real hostnames")
+    assert "POST /api/v2/desktop/setup-codes/exchange" in sec and "1000 requests" in sec and "the limit times the number of instances" in sec
+    assert "Do not use the verification-resend limiter: it sends real mail" in sec
+    assert "480 passed = 2 × 240" in sec, "the Phase 1 measurement that fixed the reading"
+
+
+def test_the_runbook_states_the_flip_order_the_accepted_cost_and_the_places_the_pipeline_does_not_cover() -> None:
+    sec = _runbook_section("## 9. ", "## 10. ")
+    assert "**before** the 4801 app version is installed" in sec
+    assert "Accepted cost (PO)" in sec and "agent_api_key_usage.remote_ip" in sec and "`client_ip()` is not changed for this" in sec
+    assert "3,613 a day" in sec and "1,404 a day" in sec
+    for name in ("backend/scripts/deploy_backend.sh", "backend/scripts/deploy_mcp_dev.sh", "connect-guide.ko.txt", "connect-guide.en.txt", "onboarding-guide.txt"):
+        assert name in sec, name
+    assert "also name `run.app` addresses and are copied into the VM frontend image as they are" in sec
+    assert "change them before `dev-app` is served from the VM" in sec, "the guides are a cutover precondition, not a note"
+    p2 = _runbook_section("**Phase 2", "**Phase 3")
+    assert "`mcp_url` from `MCP_PUBLIC_URL`" in p2
