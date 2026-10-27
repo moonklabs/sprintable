@@ -37,7 +37,8 @@ jobs:
   cloud-build:
     name: Build & Push to Artifact Registry
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # story 4796: 30 → 60 — the dev build now also builds the VM image after the Cloud Run deploys (cloudbuild.yaml: build-frontend-vm 900 s + bundle-vm 120 s at most); this job waits for the Cloud Build (`gcloud builds submit` is synchronous) and must outlive its 3000 s limit (cloudbuild.yaml `timeout`), or a finished deploy shows up as a failed run
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
