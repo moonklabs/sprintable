@@ -925,6 +925,11 @@
 "kind": "unknown"
 },
 {
+"method": "GET",
+"path": "/api/v2/desktop/relay/endpoints",
+"kind": "object"
+},
+{
 "method": "POST",
 "path": "/api/v2/desktop/relay/pairing-offers/{}/reveal",
 "kind": "unknown"
