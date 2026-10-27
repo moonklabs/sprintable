@@ -103,10 +103,11 @@ def test_every_delete_line_in_a_code_block_is_guarded_and_never_names_what_must_
     fenced = [ln.strip() for b in _fenced(SHEET) for ln in b.splitlines() if re.search(r"gcloud .* delete\b", ln)]
     inline = re.findall(r"`(gcloud [^`]*\bdelete\b[^`]*)`", SHEET)
     deletes = fenced + [c for c in inline if "snapshots delete" not in c and c not in fenced]
-    assert len(deletes) == 5, deletes  # R1, R2, R3, and the two lines of R5 (jobs, instance); the snapshot's delete is part of an undo note
+    assert len(deletes) == 4, deletes  # R1 (a loop: the command takes one service), R2, R3, and R5's one chained line (jobs, then the instance); the snapshot's delete is part of an undo note
     for ln in deletes:
-        assert "${PROJECT:?}" in ln, ln
+        assert ln.count('"${PROJECT:?}"') == ln.count("gcloud "), f"every gcloud call in the line is guarded: {ln}"
         assert ("${REGION:?}" in ln or "${PGB_ZONE:?}" in ln or "gcloud sql instances delete" in ln), ln
+        assert not re.search(r"delete (\S+) (?!--)\S+", re.sub(r'"[^"]*"', '"x"', ln)) or "for s in" in ln, f"one resource per delete command: {ln}"
         for stays in ("sprintable-mcp-dev", "office-converter", "support-gateway", "sprintable-vm-dev", "pgbouncer-nat", "sprintable-vm-dev-ip"):
             assert stays not in ln, (stays, ln)
     named = {"gcloud redis instances delete": '"${REDIS:?}"', "gcloud compute instances delete": '"${PGB:?}"', "gcloud sql instances delete": '"${INSTANCE:?}"'}
@@ -194,3 +195,73 @@ def test_the_redis_still_used_loop_prints_the_user_and_nothing_else(fakebin: Pat
     assert "${REDIS:?}" in line.group(1), "an empty name aborts before anything is asked"
     empty = _run(line.group(1), fakebin)
     assert "STILL USED" not in empty.stdout, "an empty name must not turn into «everything uses it»"
+
+
+def test_the_cloud_sql_line_is_one_chain_jobs_first_so_a_failed_job_delete_never_reaches_the_instance() -> None:
+    chain = [ln for b in _fenced(_rows()["R5"]) for ln in b.splitlines() if "gcloud sql instances delete" in ln]
+    assert len(chain) == 1
+    parts = [p.strip() for p in chain[0].split(" && ")]
+    assert len(parts) == 3 and parts[0].startswith("gcloud run jobs delete sprintable-migrate-dev") and parts[1].startswith("gcloud run jobs delete sprintable-verify-oneoff") and parts[2].startswith("gcloud sql instances delete")
+    r5 = _rows()["R5"]
+    assert "gcloud sql instances create" in r5 and r5.index("gcloud sql instances create") < r5.index("gcloud sql import sql") and 'jq -r .settings.tier sql-dev.json' in r5
+
+
+def test_gate_b_names_the_support_gateway_steps_that_still_reach_cloud_sql() -> None:
+    gate_b = SHEET.split("| **B. Pipeline**")[1].split("\n")[0]
+    for step in ("update-support-gateway-migrate-job", "run-support-gateway-migrate-job", "deploy-support-gateway"):
+        assert step in gate_b
+        assert f"- id: {step}\n" in CLOUDBUILD
+    assert "_SUPPORT_GATEWAY_DEPLOY_ENABLED" in gate_b
+
+
+def test_realtime_check_lists_the_load_balancer_front_not_only_the_back() -> None:
+    r4 = _rows()["R4"]
+    for kind in ("forwarding-rules", "target-https-proxies", "target-http-proxies", "url-maps", "backend-services", "instance-groups managed", "instance-templates", "health-checks", "addresses"):
+        assert f"gcloud compute {kind} list" in r4, kind
+
+
+# ── the pgbouncer capture and undo, run for real against a fake gcloud and a captured definition ───────────────────────────────────────────────
+
+_PGB_DEFINITION = r"""{"name":"pgb-dev","machineType":"https://www.googleapis.com/compute/v1/projects/p/zones/z/machineTypes/e2-small",
+ "disks":[{"boot":false,"source":"https://x/disks/other"},{"boot":true,"source":"https://www.googleapis.com/compute/v1/projects/p/zones/z/disks/pgb-boot-disk"}],
+ "networkInterfaces":[{"subnetwork":"https://x/regions/r/subnetworks/default","networkIP":"10.178.0.63"}],
+ "serviceAccounts":[{"email":"pgb-sa@p.iam.gserviceaccount.com"}],"tags":{"items":["pgbouncer-dev","ssh"]},
+ "metadata":{"items":[{"key":"startup-script","value":"#!/bin/bash\necho boot, with, commas"},{"key":"enable-oslogin","value":"TRUE"}]}}"""
+
+_FAKE_GCLOUD_PGB = r"""#!/bin/sh
+echo "gcloud $*" >> "$FAKE_LOG"
+case "$1 $2 $3" in
+  "compute instances describe") cat "$FAKE_DEFINITION" ;;
+esac
+"""
+
+
+def _fence_with(row: str, marker: str) -> str:
+    blocks = [b for b in _fenced(_rows()[row]) if marker in b]
+    assert len(blocks) == 1, marker
+    return blocks[0]
+
+
+def test_the_pgbouncer_capture_snapshots_the_boot_disk_of_the_definition_and_the_undo_is_built_from_the_captured_values(tmp_path: Path) -> None:
+    b = tmp_path / "bin"
+    b.mkdir()
+    g = b / "gcloud"
+    g.write_text(_FAKE_GCLOUD_PGB)
+    g.chmod(g.stat().st_mode | stat.S_IEXEC)
+    (tmp_path / "def.json").write_text(_PGB_DEFINITION)
+    env = {**os.environ, "PATH": f"{b}:{os.environ['PATH']}", "PROJECT": "p", "REGION": "r", "PGB": "pgb-dev", "PGB_ZONE": "z", "FAKE_LOG": str(tmp_path / "log"), "FAKE_DEFINITION": str(tmp_path / "def.json")}
+    cap = subprocess.run(["bash", "-c", _fence_with("R3", "disks snapshot")], capture_output=True, text=True, env=env, cwd=tmp_path, timeout=30)
+    assert cap.returncode == 0, cap.stderr
+    log = (tmp_path / "log").read_text()
+    assert "gcloud compute disks snapshot pgb-boot-disk --zone z" in log and "--snapshot-names pgb-dev-removal" in log, "the boot disk of the definition, not the instance name"
+    assert (tmp_path / "md-startup-script").read_text() == "#!/bin/bash\necho boot, with, commas\n" and (tmp_path / "md-enable-oslogin").exists()
+    (tmp_path / "log").write_text("")
+    undo = subprocess.run(["bash", "-c", _fence_with("R3", "disks create")], capture_output=True, text=True, env=env, cwd=tmp_path, timeout=30)
+    assert undo.returncode == 0, undo.stderr
+    calls = (tmp_path / "log").read_text().splitlines()
+    assert calls[0].startswith("gcloud compute disks create pgb-dev --source-snapshot pgb-dev-removal")
+    create = calls[1]
+    for want in ("--machine-type e2-small", "--subnet https://x/regions/r/subnetworks/default", "--private-network-ip 10.178.0.63", "--service-account pgb-sa@p.iam.gserviceaccount.com",
+                 "--tags pgbouncer-dev,ssh", "--metadata-from-file ", "startup-script=md-startup-script", "enable-oslogin=md-enable-oslogin", "--no-address"):
+        assert want in create, (want, create)
+    assert "<" not in _fence_with("R3", "disks create"), "no placeholder is left in the undo"
