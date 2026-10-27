@@ -34,7 +34,7 @@ from sprintable_sse import SprintableSSEClient, MessageContext  # noqa: E402
 logger = logging.getLogger("pi-sprintable")
 
 PI_BIN = os.getenv("PI_BIN", "pi")
-DEFAULT_API_URL = "https://sprintable-backend-dev-57iommnikq-du.a.run.app"
+DEFAULT_API_URL = "https://dev-api.sprintable.ai"
 
 
 class PiRpcServer:

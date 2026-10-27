@@ -45,7 +45,7 @@ CURSOR_API_BASE = os.getenv("CURSOR_API_BASE", "https://api.cursor.com").rstrip(
 CURSOR_API_KEY = os.getenv("CURSOR_API_KEY", "")
 # Cursor 클라우드 에이전트는 repo 기반 — 선택 env (미설정 시 launch body에서 생략)
 CURSOR_REPO_URL = os.getenv("CURSOR_REPO_URL", "")
-DEFAULT_API_URL = "https://sprintable-backend-dev-57iommnikq-du.a.run.app"
+DEFAULT_API_URL = "https://dev-api.sprintable.ai"
 _ACTIVE = {"CREATING", "RUNNING"}
 _TERMINAL = {"FINISHED", "ERROR", "CANCELLED", "EXPIRED"}
 

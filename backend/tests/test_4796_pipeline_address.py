@@ -159,8 +159,8 @@ def test_the_runbook_states_the_flip_order_the_accepted_cost_and_the_places_the_
     for name in ("backend/scripts/deploy_backend.sh", "backend/scripts/deploy_mcp_dev.sh", "connect-guide.ko.txt", "connect-guide.en.txt", "onboarding-guide.txt"):
         assert name in sec, name
     assert "`resend-verification` and `set-password/request` — both 3 an hour, both send mail" in sec and "`sk_live_` key is counted per key" in sec
-    assert "also name `run.app` addresses and are copied into the VM frontend image as they are" in sec
-    assert "change them before `dev-app` is served from the VM" in sec, "the guides are a cutover precondition, not a note"
+    assert "are copied into the VM frontend image as they are" in sec
+    assert "Their **dev** example lines name `https://dev-api.sprintable.ai` since story 4796 (Phase 2)" in sec and "the warning keeps counting the guides' prod lines until prod moves" in sec
     p2 = _runbook_section("**Phase 2", "**Phase 3")
     assert "`mcp_url` from `MCP_PUBLIC_URL`" in p2
 

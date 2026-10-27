@@ -9,7 +9,7 @@
  * import { runSprintableSSE } from './sprintable-sse'
  *
  * await runSprintableSSE({
- *   apiUrl: 'https://sprintable-backend-dev-57iommnikq-du.a.run.app',
+ *   apiUrl: 'https://dev-api.sprintable.ai',
  *   apiKey: process.env.AGENT_API_KEY!,
  *   async onMessage(ctx) {
  *     // runtime-specific injection
@@ -57,7 +57,7 @@ export type MessageContext = {
 
 export type OnMessage = (ctx: MessageContext) => Promise<void>
 
-const DEFAULT_API_URL = 'https://sprintable-backend-dev-57iommnikq-du.a.run.app'
+const DEFAULT_API_URL = 'https://dev-api.sprintable.ai'
 const RECONNECT_BACKOFF = [2000, 5000, 10000, 30000, 60000]
 const DEDUP_MAX = 1000
 const DEDUP_TTL_MS = 300_000
