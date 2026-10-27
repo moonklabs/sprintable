@@ -73,6 +73,14 @@ Hex only, no line ending (`tr -d '\n'`): the password is placed inside a connect
 after that, changing the secret does **not** change the database (rotate with `ALTER ROLE` first, then the secret).
 Undo: `gcloud secrets delete DB_PASSWORD_VM_DEV`.
 
+**The support gateway's database password (new, VM only — story 4796, §13).** The gateway has its own role and database inside the same Postgres; the role's password is a second secret made the same way:
+```bash
+openssl rand -hex 24 | tr -d '\n' | gcloud secrets create SUPPORT_GATEWAY_DB_PASSWORD_VM_DEV --project $PROJECT --data-file=-
+gcloud secrets add-iam-policy-binding SUPPORT_GATEWAY_DB_PASSWORD_VM_DEV --project $PROJECT --member serviceAccount:$SAE --role roles/secretmanager.secretAccessor
+gcloud secrets add-iam-policy-binding SUPPORT_GATEWAY_ADMIN_TOKEN_dev --project $PROJECT --member serviceAccount:$SAE --role roles/secretmanager.secretAccessor   # the gateway's admin token: an existing secret the VM did not read until now
+```
+(`SUPPORT_GATEWAY_TOKEN_SECRET_dev` is already granted: the backend reads it.) Undo: `gcloud secrets delete SUPPORT_GATEWAY_DB_PASSWORD_VM_DEV` and `gcloud secrets remove-iam-policy-binding SUPPORT_GATEWAY_ADMIN_TOKEN_dev --project $PROJECT --member serviceAccount:$SAE --role roles/secretmanager.secretAccessor`.
+
 ## 4. Address, firewall, disk, VM
 
 ```bash
@@ -280,3 +288,26 @@ Same steps with `ENV=prod`, `env/prod.yaml`, a new `api.sprintable.ai` record (D
 3. The database pool: `env/prod.yaml` has the same 20 + 10 as dev, inside the same 57 usable connections (§11, «Database connection budget»); prod's real load is not measured — read `pg_stat_activity` and the `QueuePool limit` count after the move.
 4. The stored-link job against prod's Cloud SQL **before** the final dump (§10, «Stored hosted-site links»). The commands there are dev's — the job `sprintable-verify-oneoff`, the service `sprintable-backend-dev`, dev's origins — and `backend/scripts/jobs/README.md` names no prod job (the only provisioned one-off job is the dev one), so a prod job does not exist yet: create it with the prod image, a service account that reaches the prod database, and the prod origins taken from the prod report (the first step of the job), as part of the prod preparation, and write its commands next to dev's.
 5. The Phase 1 and 2 shape applies as it did for dev: front door first, guests one at a time, then the data; the measurements of dev — **as the PO measured them on 2026-10-27, quoted here and not derivable from the repository** (the certificate arrived about 6 s after the front door started and about 15 s after the resolvers agreed; behind the pass-through the rate-limit count is one for everyone; the downtime split) — are starting numbers, not prod's.
+
+## 13. The support gateway on the VM (story 4796, PO decision 2026-10-27: option «나»)
+
+Why: the gateway is a product path (widget → escalation → backend) and its database `support_gateway` lives inside Cloud SQL `sprintable-dev`, which §10 deletes. Keeping a small Cloud SQL for it would cancel the saving, so the gateway moves to the VM (dev first; prod needs the same step, re-read with prod's own output — it has no `aiplatform` role).
+
+**Step 1 (this section): the gateway runs on the VM as a standby, nothing points at it.** What changes: `desired.json` may carry a third image, `support_gateway_image` (digest-pinned like the others; the dev bundle build resolves `support-gateway:<sha>`, which the Cloud Run build pushes); `compose.yml` has the services `support-gateway` and `support-gateway-migrate` (profiles, started only for a release that carries the image); `env/dev.yaml` declares the `support-gateway` service and the `support_gateway` database block. For such a release the deployer, before the swap: reads the gateway password, creates the role `support_gw` and the database `support_gateway` in the VM's Postgres if they are missing (idempotent, through psql's standard input — the password is in no argument list; it also re-applies the password from the secret on each deploy, so a rotated secret takes effect on the next one, and it withdraws `CONNECT` on the backend's database and on the gateway's from everyone else), runs the gateway's migrations (one-shot), and then starts the gateway with the rest. The gateway is reachable on the compose network only; Cloud Run's gateway keeps serving. Its environment is built from the declaration (§ the live names: `support-gateway-dev`); the connection URL is built by the deployer and passed by name.
+
+**Order, and what each step interrupts (PO runs steps 2–4; the agent has no gcloud/ssh):**
+
+| # | Step | Interrupts? |
+|---|---|---|
+| 1 | merge → the dev build writes `candidates/<sha>.json` with `support_gateway_image` | nothing |
+| 2 | create `SUPPORT_GATEWAY_DB_PASSWORD_VM_DEV` and the two grants (§3) | nothing |
+| 3 | re-run `bootstrap.sh` from the new bundle (§6): installs `deployer.py`, `render_env.py`, the trusted `compose.yml` copy and the units, `daemon-reload`, `enable --now docker` | **no container is restarted, no database or Caddy restart, no deploy interruption** (the script only copies files; a deploy already running keeps the copy it loaded). Until it is done, a bundle with the new `compose.yml` is refused by the deployer before the swap («compose.yml differs…», pre-swap — nothing changed) |
+| 4 | copy `candidates/<sha>.json` over `desired.json` (§7 step 1) | the next tick deploys it like any release: backend and frontend are swapped (the same short API/UI gap every release has — `deployer --force` measured 68 s on 2026-10-27); **the database and Caddy are not touched** (their compose configuration is unchanged by this step, so compose does not recreate them); the gateway is created beside them |
+
+Checks after step 4 (on the VM): the newest status object says `deployed`; `sudo docker compose -f /opt/sprintable/releases/<sha>/compose.yml -f /opt/sprintable/runtime/pass-through.yml --profile support-gateway ps` shows `support-gateway` healthy; `sudo docker exec sprintable-db-1 psql -U <db user> -d postgres -Atc "select datname from pg_database where datname='support_gateway'"` prints the name; `sudo docker exec sprintable-db-1 psql -U support_gw -d <backend db> -c 'select 1'` is **refused** (the gateway's role cannot connect to the backend's database).
+
+**Undo:** copy the previous `desired.json` back (a release without the image): the deployer stops the gateway (`compose stop support-gateway`); the role and the empty database stay and cost nothing; to remove them: `docker exec … psql -U <db user> -d postgres -c 'DROP DATABASE support_gateway' -c 'DROP ROLE support_gw'`.
+
+**Security note for the second reviewer.** The gateway's own rule is «zero fleet credentials» (its README). On a VM its container can reach the metadata server like the backend's does (§2, «Accepted limit — one identity on the VM»), so an exploit in the gateway could use the VM service account, which can read the backend's secrets. What this step does about it: separate role and database (the gateway cannot read the backend's data through Postgres), separate image, no secret of the backend in its environment (the token secret and admin token are the gateway's own). What it does not: the shared identity. Closing that needs either a key file for a gateway-only service account with the metadata server blocked for that container (a long-lived key to guard), or a second VM — a decision for the security domain before the cutover, not made here.
+
+**Not in this step (the cutover, with its own sheet):** the Caddy host `dev-support.sprintable.ai` (DNS-only A record — PO), moving the data of `support_gateway` from Cloud SQL, flipping the widget URL and the backend's two gateway URLs, the gateway's connection pool (3+2 of the budget in §11), and the round trip with a real Vertex call.

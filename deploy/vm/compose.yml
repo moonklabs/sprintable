@@ -74,6 +74,40 @@ services:
       retries: 6
       start_period: 40s
 
+  # the support gateway (story 4796): its own role and database inside the db above, its own image. Part of a release only when desired.json carries support_gateway_image (the deployer then adds
+  # `--profile support-gateway`); without that the services below are not started. They are reachable on the compose network only until a Caddy host is added for them.
+  support-gateway-migrate:
+    image: ${SUPPORT_GATEWAY_IMAGE:-not-part-of-this-release}
+    profiles: ["support-gateway-migrate"]
+    restart: "no"
+    logging: *logging
+    command: ["/app/scripts/migrate.sh"]
+    environment:
+      - SUPPORT_GATEWAY_DATABASE_URL   # by name
+    depends_on:
+      db:
+        condition: service_healthy
+
+  support-gateway:
+    image: ${SUPPORT_GATEWAY_IMAGE:-not-part-of-this-release}
+    profiles: ["support-gateway"]
+    restart: unless-stopped
+    logging: *logging
+    # the service variables are listed by name in pass-through.yml; the database URL is passed by name like the migrate's
+    environment:
+      - SUPPORT_GATEWAY_DATABASE_URL
+    depends_on:
+      db:
+        condition: service_healthy
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   frontend:
     image: ${FRONTEND_IMAGE:?}
     restart: unless-stopped
