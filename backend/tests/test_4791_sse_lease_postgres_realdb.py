@@ -133,6 +133,19 @@ async def test_a_member_that_holds_a_place_keeps_it_at_the_limit_and_a_lapsed_pl
         assert await sse_lease.members(scope) == ["rcv:b"]  # the lapsed row was evicted, not counted
 
 
+async def test_a_member_keeps_its_place_when_the_scope_is_over_the_limit_and_a_stranger_does_not_get_one(pg_lease):
+    """a plan that was lowered (or a race) leaves a scope holding more than its limit: those already in keep their place, nobody new gets in"""
+    from app.services import sse_lease
+
+    async with _db() as (Session, new_scope):
+        scope = new_scope()
+        for m in ("conn-1", "conn-2", "conn-3"):
+            assert await sse_lease.acquire(scope, 3, m) is True
+        assert await sse_lease.acquire(scope, 2, "conn-2") is True  # over the limit of 2, and still in
+        assert await sse_lease.acquire(scope, 2, "conn-4") is False
+        assert await sse_lease.count(scope) == 3
+
+
 async def test_members_release_refresh_and_count(pg_lease):
     from app.services import sse_lease
 
@@ -149,6 +162,42 @@ async def test_members_release_refresh_and_count(pg_lease):
         assert sorted(await sse_lease.members(scope)) == ["rcv:a", "rcv:b"]
         await _move_expiry(Session, scope, -1)
         assert await sse_lease.members(scope) == [] and await sse_lease.count(scope) == 0
+
+
+async def test_a_reconnect_is_not_refused_by_its_own_streams_heartbeat_landing_in_the_middle_of_the_acquire(pg_lease):
+    """codex 4791 round 2 (HIGH): the advisory lock serialises acquires, not `refresh`. The member's lease row was lost (a lapse during a database outage); its reconnect
+    runs the acquire — the own-row UPDATE finds nothing — and just then the OLD stream's heartbeat puts the row back. At limit 1 that row must not count as «another»."""
+    from app.services import sse_lease, sse_lease_pg
+
+    real_session = sse_lease_pg._session
+
+    class _Interleaved:
+        def __init__(self, scope):
+            self._cm, self._scope, self._done = real_session(), scope, False
+
+        async def __aenter__(self):
+            self._s = await self._cm.__aenter__()
+            return self
+
+        async def __aexit__(self, *exc):
+            return await self._cm.__aexit__(*exc)
+
+        async def execute(self, stmt, params=None):
+            result = await self._s.execute(stmt, params)
+            if not self._done and str(stmt).lstrip().startswith("UPDATE sse_leases SET expires_at"):
+                self._done = True
+                await sse_lease_pg.refresh(self._scope, "rcv:a", 90)  # the old stream's heartbeat, on its own connection, committed in the middle of the acquire
+            return result
+
+        async def commit(self):
+            return await self._s.commit()
+
+    async with _db() as (Session, new_scope):
+        scope = new_scope()
+        with patch.object(sse_lease_pg, "_session", lambda: _Interleaved(scope)):
+            assert await sse_lease.acquire(scope, 1, "rcv:a") is True  # its own reconnect
+        assert await sse_lease.members(scope) == ["rcv:a"] and await _rows(Session, scope) == 1  # one row, not two
+        assert await sse_lease.acquire(scope, 1, "rcv:b") is False  # and a stranger still loses
 
 
 async def test_a_refresh_pushes_a_live_streams_lapse_time_forward(pg_lease):

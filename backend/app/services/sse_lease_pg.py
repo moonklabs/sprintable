@@ -56,10 +56,17 @@ async def acquire(scope: str, limit: int, member: str, ttl_sec: int) -> "bool | 
             )).first()
             granted = mine is not None
             if not granted:
-                count = (await s.execute(text("SELECT count(*) FROM sse_leases WHERE scope = :scope"), {"scope": scope})).scalar_one()
-                if count < limit:
+                # the others only, and an upsert: the advisory lock serialises acquires, not `refresh` — the stream this member had before (a fail-open one that came back with
+                # the database) may put its row back between the UPDATE above and here; counting that row as «another» would refuse the member's own reconnect (codex round 2)
+                others = (await s.execute(
+                    text("SELECT count(*) FROM sse_leases WHERE scope = :scope AND member <> :member"), {"scope": scope, "member": member}
+                )).scalar_one()
+                if others < limit:
                     await s.execute(
-                        text("INSERT INTO sse_leases (scope, member, expires_at) VALUES (:scope, :member, now() + make_interval(secs => :ttl))"),
+                        text(
+                            "INSERT INTO sse_leases (scope, member, expires_at) VALUES (:scope, :member, now() + make_interval(secs => :ttl)) "
+                            "ON CONFLICT (scope, member) DO UPDATE SET expires_at = EXCLUDED.expires_at"
+                        ),
                         {"scope": scope, "member": member, "ttl": float(ttl_sec)},
                     )
                     granted = True
