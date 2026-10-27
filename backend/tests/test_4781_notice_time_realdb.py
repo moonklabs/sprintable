@@ -450,8 +450,9 @@ async def test_18_a_silent_device_leaves_the_stood_notice_alone_and_tells_nothin
 
 
 async def test_19_a_phone_push_that_fails_in_the_worker_leaves_the_inbox_card_and_the_bell_line(world, monkeypatch):
-    """AC5 (4781): the push is its own job (an outbox row, sent by the delivery worker). When the worker's send fails, the real worker (`_deliver_one`) takes the failure as a job failure — it does not raise — and the
-    web inbox, the card and the bell line the notice made, is exactly as it was"""
+    """AC5 (4781) «the phone push does not arrive»: this pins what the web inbox owes in that case — when the delivery worker (`delivery_dispatcher._deliver_one`) runs an expo push job whose send fails, the worker
+    takes it as a job failure (it does not raise) and the notice's card and bell line are exactly as they were. (That the push is enqueued as a separate outbox job is `notification_dispatch`'s own contract and is
+    not asserted here: the job below is built by hand and has no row, so the worker's job-state update is not checked either.)"""
     from app.services import delivery_dispatcher
     from ee.services import expo_push
 
