@@ -103,7 +103,8 @@ def test_a_dump_is_taken_checked_counted_and_checksummed(box) -> None:
     assert len(runs) == 2 and all("pgvector/pgvector:pg15" in c and "--rm" in c for c in runs)
     assert any("--entrypoint pg_dump" in c and "-Fc --no-owner --no-privileges" in c for c in runs)
     assert re.search(r"seconds|done in \d+ s", p.stdout), "timings are printed"
-    assert "restore.sh" in p.stdout and ".counts.tsv" in p.stdout
+    hint = next(line for line in p.stdout.splitlines() if line.startswith("next:"))
+    assert "sudo env RESTORE_WIPE=yes /opt/sprintable/bin/restore.sh" in hint and "sudo bash -c \"diff " in hint and ".counts.tsv" in hint, "the copy-and-run hint matches the runbook"
 
 
 def test_the_connection_settings_travel_as_environment_names_and_the_password_is_nowhere_else(box) -> None:

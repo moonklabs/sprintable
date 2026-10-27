@@ -118,4 +118,4 @@ if [ "$upload" = yes ]; then
 fi
 echo "dump:   $base.dump"
 echo "counts: $base.counts.tsv"
-printf '%s\n' "next:   sudo /opt/sprintable/bin/restore.sh $base.dump > counts-vm.tsv   then   diff $base.counts.tsv <(grep -P '^\\S+\\t\\d+\$' counts-vm.tsv)"
+printf '%s\n' "next:   sudo env RESTORE_WIPE=yes /opt/sprintable/bin/restore.sh $base.dump > counts-vm.tsv   then   sudo bash -c \"diff $base.counts.tsv <(grep -P '^\\S+\\t\\d+\\\$' counts-vm.tsv)\""

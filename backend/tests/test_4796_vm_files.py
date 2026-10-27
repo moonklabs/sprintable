@@ -121,6 +121,9 @@ def test_the_real_restore_command_carries_restore_wipe_because_the_rehearsal_lef
     section = text[text.index("## 7. Move the data"):text.index("## 8. ")]
     step5 = section[section.index("\n5. On the VM, restore"):section.index("\n6. Enable the deployer")]
     assert "sudo env RESTORE_WIPE=yes /opt/sprintable/bin/restore.sh /srv/sprintable/import/" in step5
+    assert 'sudo bash -c "diff /srv/sprintable/import/' in step5, "the import folder is root-only and sudo closes a bare <(...) descriptor"
+    seven_a = section[section.index("7a. Rehearsal"):section.index("**The dump is taken on the VM.**")]
+    assert "steps 1, 3, 4 and 5 only" in seven_a and "not step 6" in seven_a, "a rehearsal must not start the application or the timers"
     assert "RESTORE_WIPE" in (_VM / "bin/restore.sh").read_text()
 
 
