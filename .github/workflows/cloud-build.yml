@@ -286,9 +286,12 @@ jobs:
             # story 4786 (E-INFRA-DIET, 2026-10-26, PO) — the dev GCE realtime gateways and realtime-dev on Cloud Run are RETIRED (the dev frontend streams through backend-dev: REALTIME_URL is empty, apps/web/src/app/api/event-stream/route.ts
             # falls back to FASTAPI_URL; cloudbuild.yaml deploy-realtime and deploy-realtime-gce skip on dev unconditionally; the resources were removed by hand). There is no switch to turn them back on — the dev move to VMs (story 4796) replaces
             # this path. Redis (event broker, presence, SSE lease, replay, rate limiter) and PG_LISTEN are NOT part of this: they stay as they were.
-            echo "fastapi_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
+            # story 4796 (PO signal 2026-10-27, RUNBOOK §9 «The one switch»): the dev backend's address for clients and for the other services is the VM's API name now (a pass-through to Cloud Run
+            # until the data move, RUNBOOK §7c Phase 1). It feeds `_FASTAPI_URL`: the backend's FASTAPI_URL (the desktop setup's api_url), the baked NEXT_PUBLIC_FASTAPI_URL, the hosted MCP, the support gateway and
+            # the Cloud Scheduler jobs. The old Cloud Run address keeps answering. Undo = the previous value of this line: https://sprintable-backend-dev-787818285179.asia-northeast3.run.app
+            echo "fastapi_url=https://dev-api.sprintable.ai" >> "$GITHUB_OUTPUT"
             # story #3583-BE 리뷰 조건(페드루 2026-09-06) — GA4 OAuth 콜백 redirect_uri.
-            # dev는 백엔드 자기 자신 URL(fastapi_url dev값과 동일) 그대로 배선.
+            # dev는 백엔드 자기 자신 URL 그대로 배선(story 4796: fastapi_url과 같은 값이 아니다 — GA4 등록은 Phase 2에서 따로 옮긴다).
             echo "backend_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
             # story #2749(2026-08-18, 페드루 PO 실측 — dev 가입 인증메일 verify 링크가 prod
             # 도메인으로 발급됨) — NEXT_PUBLIC_APP_URL이 dev에 한 번도 배선된 적이 없어

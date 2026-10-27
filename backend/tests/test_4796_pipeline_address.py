@@ -77,11 +77,15 @@ def test_every_consumer_of_the_backend_address_still_reads_the_one_substitution(
     assert 'if [ "${_FASTAPI_URL}" = "https://dev-api.sprintable.ai" ]' in _script("apply-cloud-scheduler"), "the scheduler jobs"
 
 
-def test_the_dev_line_of_fastapi_url_is_single_and_until_the_move_the_cloud_run_address() -> None:
-    """the switch is this one line; the pull request that flips it (RUNBOOK §9) changes the allowed set here on purpose"""
-    dev_lines = re.findall(r'(?m)^\s*echo "fastapi_url=(https://sprintable-backend-dev-[^"]+)"', _WF_TEXT)
-    assert dev_lines == [NEW_FORM], dev_lines
-    assert not re.search(r'echo "fastapi_url=https://dev-api', _WF_TEXT), "dev has not been switched by this change"
+def test_the_dev_line_of_fastapi_url_is_single_and_names_the_vm_api_address() -> None:
+    """the switch is this one line (RUNBOOK §9); the pull request that flipped it (story 4796, PO signal 2026-10-27) moved it from the Cloud Run address to the dev API name and keeps the old value in the comment above it as the undo"""
+    dev_lines = re.findall(r'(?m)^\s*echo "fastapi_url=(https://(?:dev-api\.sprintable\.ai|sprintable-backend-dev-[^"]+))"', _WF_TEXT)
+    assert dev_lines == [DEV_API], dev_lines
+    assert f"Undo = the previous value of this line: {NEW_FORM}" in _WF_TEXT, "the one-line undo is written next to the line"
+    assert re.findall(r'(?m)^\s*echo "backend_url=(https://sprintable-backend-dev-[^"]+)"', _WF_TEXT) == [NEW_FORM], "GA4's own line did not move"
+    prod = re.findall(r'(?m)^\s*echo "fastapi_url=(https://sprintable-backend-prod-[^"]+)"', _WF_TEXT)
+    assert prod == ["https://sprintable-backend-prod-787818285179.asia-northeast3.run.app"], "prod is not part of this change"
+    assert len(re.findall(r'echo "fastapi_url=', _WF_TEXT)) == 2, "exactly the prod line and the dev line"
 
 
 def test_the_runbook_names_the_one_switch_what_follows_it_and_the_order_condition() -> None:
@@ -227,3 +231,8 @@ def test_the_runbook_does_not_ask_for_a_stream_that_cannot_stay_open_and_names_t
     assert re.search(r"(?m)^  _ADMIN_OPERATOR_AUDIENCE: https://sprintable-backend-dev-57iommnikq-du\.a\.run\.app$", _MAIN_TEXT), "its own value, in the old describe form"
     assert "ADMIN_OPERATOR_AUDIENCE=${_ADMIN_OPERATOR_AUDIENCE}" in _MAIN_TEXT and "ADMIN_OPERATOR_AUDIENCE=${_FASTAPI_URL}" not in _MAIN_TEXT
     assert "`_ADMIN_OPERATOR_AUDIENCE` (the audience the admin tool's ID token is checked against" in sec and "never `_FASTAPI_URL`" in sec
+
+
+def test_the_runbook_says_the_switch_is_flipped_and_where_the_undo_is() -> None:
+    sec = _runbook_section("## 9. ", "## 10. ")
+    assert "**State: flipped** (story 4796, PO signal 2026-10-27)" in sec and "the previous value, kept in the comment above the line" in sec
