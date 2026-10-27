@@ -107,22 +107,23 @@ def test_redis_has_a_user_the_sheet_names_the_cloud_run_backend_that_the_dev_pip
 
 
 def test_every_delete_line_in_a_code_block_is_guarded_and_never_names_what_must_stay() -> None:
-    fenced = [ln.strip() for b in _fenced(SHEET) for ln in b.splitlines() if re.search(r"gcloud .* delete\b", ln)]
-    inline = re.findall(r"`(gcloud [^`]*\bdelete\b[^`]*)`", SHEET)
-    deletes = fenced + [c for c in inline if "snapshots delete" not in c and c not in fenced]
-    assert len(deletes) == 4, deletes  # R1's chained line, R5's chained line, R2 and R3 inline; the snapshot's delete is part of an undo note
+    verb = r"gcloud (?:[a-z-]+ ){1,2}delete\b"  # the command's own verb: «auto-delete=yes» in a create line is not one
+    fenced = [ln.strip() for b in _fenced(SHEET) for ln in b.splitlines() if re.search(verb, ln)]
+    inline = [c for c in re.findall(r"`([^`\n]*" + verb + r"[^`\n]*)`", SHEET)]
+    deletes = fenced + [c for c in inline if c not in fenced]
+    assert len(deletes) == 5, deletes  # R1's chained line, R5's chained line, R2, R3 (gated by the snapshot) and the R3 undo note's snapshot delete
     for ln in deletes:
         assert ln.count('"${PROJECT:?}"') == ln.count("gcloud "), f"every gcloud call in the line is guarded: {ln}"
-        assert ("${REGION:?}" in ln or "${PGB_ZONE:?}" in ln or "gcloud sql instances delete" in ln), ln
+        assert ("${REGION:?}" in ln or "${PGB_ZONE:?}" in ln or "gcloud sql instances delete" in ln or "gcloud compute snapshots delete" in ln), ln
         assert not re.search(r"delete (\S+) (?!--)\S+", re.sub(r'"[^"]*"', '"x"', ln)), f"one resource per delete command: {ln}"
         for stays in ("sprintable-mcp-dev", "office-converter", "support-gateway", "sprintable-vm-dev", "pgbouncer-nat", "sprintable-vm-dev-ip"):
             assert stays not in ln, (stays, ln)
-    named = {"gcloud redis instances delete": '"${REDIS:?}"', "gcloud compute instances delete": '"${PGB:?}"', "gcloud sql instances delete": '"${INSTANCE:?}"'}
+    named = {"gcloud redis instances delete": '"${REDIS:?}"', "gcloud compute instances delete": '"${PGB:?}"', "gcloud sql instances delete": '"${INSTANCE:?}"', "gcloud compute snapshots delete": '"${PGB:?}-removal"'}
     for ln in deletes:
         for cmd, guard in named.items():
             if cmd in ln:
                 assert guard in ln.split(cmd)[1].split("--")[0], f"the resource name itself must be guarded: {ln}"
-    assert sum(any(c in ln for c in named) for ln in deletes) == 3, "Redis, pgbouncer and Cloud SQL deletes are each checked for a guarded name"
+    assert sum(any(c in ln for c in named) for ln in deletes) == 4, "Redis, pgbouncer, snapshot and Cloud SQL deletes are each checked for a guarded name"
 
 
 def test_every_row_that_deletes_has_a_capture_before_the_delete_and_an_undo_after_it() -> None:
@@ -191,6 +192,13 @@ def test_the_cloud_sql_dependents_loop_lists_exactly_the_things_that_hold_the_in
     assert lines == ["USES CLOUD SQL: jobs sprintable-migrate-dev", "USES CLOUD SQL: jobs sprintable-verify-oneoff", "USES CLOUD SQL: services support-gateway-dev"]
 
 
+def test_the_redis_undo_points_the_restored_service_at_the_new_host() -> None:
+    undo = _rows()["R2"].split("5. **Undo")[1]
+    cmd = re.search(r"`(gcloud run services update sprintable-backend-dev[^`]*)`", undo)
+    assert cmd, "an executable update, not a remark"
+    assert '--update-env-vars "REDIS_URL=redis://' in cmd.group(1) and "redis instances describe $REDIS" in cmd.group(1) and "value(host)" in cmd.group(1)
+
+
 def test_the_redis_still_used_loop_prints_the_user_and_nothing_else(fakebin: Path) -> None:
     line = re.search(r"`(H=\$\(gcloud redis instances describe .*?done; done)`", SHEET)
     assert line, "the loop of R2 step 2"
@@ -208,7 +216,7 @@ def test_the_cloud_sql_line_is_one_chain_jobs_first_so_a_failed_job_delete_never
     chain = [ln for b in _fenced(_rows()["R5"]) for ln in b.splitlines() if "gcloud sql instances delete" in ln]
     assert len(chain) == 1
     parts = [p.strip() for p in chain[0].split(" && ")]
-    assert len(parts) == 3 and parts[0].startswith("gcloud run jobs delete sprintable-migrate-dev") and parts[1].startswith("gcloud run jobs delete sprintable-verify-oneoff") and parts[2].startswith("gcloud sql instances delete")
+    assert len(parts) == 4 and parts[0] == '[ "${EXPORTS_OK:-0}" = 1 ]' and parts[1].startswith("gcloud run jobs delete sprintable-migrate-dev") and parts[2].startswith("gcloud run jobs delete sprintable-verify-oneoff") and parts[3].startswith("gcloud sql instances delete")
     r5 = _rows()["R5"]
     assert "gcloud sql instances create" in r5 and r5.index("gcloud sql instances create") < r5.index("gcloud sql import sql") and 'jq -r .settings.tier sql-dev.json' in r5
 
@@ -257,8 +265,8 @@ def test_the_pgbouncer_capture_snapshots_the_boot_disk_of_the_definition_and_the
     g.chmod(g.stat().st_mode | stat.S_IEXEC)
     (tmp_path / "def.json").write_text(_PGB_DEFINITION)
     env = {**os.environ, "PATH": f"{b}:{os.environ['PATH']}", "PROJECT": "p", "REGION": "r", "PGB": "pgb-dev", "PGB_ZONE": "z", "FAKE_LOG": str(tmp_path / "log"), "FAKE_DEFINITION": str(tmp_path / "def.json")}
-    cap = subprocess.run(["bash", "-c", _fence_with("R3", "disks snapshot")], capture_output=True, text=True, env=env, cwd=tmp_path, timeout=30)
-    assert cap.returncode == 0, cap.stderr
+    cap = subprocess.run(["bash", "-c", _fence_with("R3", "disks snapshot") + '\necho "SO=${SNAP_OK:-0}"'], capture_output=True, text=True, env=env, cwd=tmp_path, timeout=30)
+    assert cap.returncode == 0 and "SNAPSHOT-OK" in cap.stdout and "SO=1" in cap.stdout, cap.stderr
     log = (tmp_path / "log").read_text()
     assert "gcloud compute disks snapshot pgb-boot-disk --zone z" in log and "--snapshot-names pgb-dev-removal" in log, "the boot disk of the definition, not the instance name"
     assert (tmp_path / "md-startup-script").read_text() == "#!/bin/bash\necho boot, with, commas\n" and (tmp_path / "md-enable-oslogin").exists()
@@ -301,10 +309,12 @@ _FAKE_GCLOUD_SQL = r"""#!/bin/sh
 echo "gcloud $*" >> "$FAKE_LOG"
 case "$1 $2 $3" in
   "sql instances list") [ "$FAKE_NO_INSTANCE" = 1 ] || echo sprintable-dev ; echo other ;;
+  "sql instances describe") if [ "$FAKE_NO_DESCRIBE" = 1 ]; then echo "no definition" >&2; exit 1; fi; echo '{"settings":{"tier":"db-g1-small"}}' ;;
+  "run jobs describe") echo "kind: Job" ;;
   "sql backups create") if [ "$FAKE_BACKUP_FAILS" = 1 ]; then echo "backup failed" >&2; exit 1; fi ;;
   "sql export sql") case "$*" in *"--database $FAKE_FAIL_DB"*) echo "export failed" >&2; exit 1 ;; esac ;;
-  "storage ls -l") echo "  1234  gs://x/y" ;;
-  "storage ls gs://bk/cloudsql-final/"*) i=0; while [ $i -lt "$FAKE_OBJECTS" ]; do echo "gs://bk/cloudsql-final/x/db$i.sql.gz"; i=$((i+1)); done ;;
+  "storage ls -l") case "$4" in *"$FAKE_EMPTY_DB.sql.gz") echo "     0  $4" ;; *) echo "  1234  $4" ;; esac ;;
+  "run jobs delete"|"sql instances delete") : ;;
 esac
 """
 
@@ -313,27 +323,47 @@ def _r5_export_block() -> str:
     return _fence_with("R5", "EXPORTS-OK")
 
 
-def test_the_cloud_sql_exports_print_their_all_clear_only_when_everything_it_stands_for_happened(tmp_path: Path) -> None:
+def _fake_bin(tmp_path: Path, body: str) -> Path:
     b = tmp_path / "bin"
-    b.mkdir()
+    b.mkdir(exist_ok=True)
     g = b / "gcloud"
-    g.write_text(_FAKE_GCLOUD_SQL)
+    g.write_text(body)
     g.chmod(g.stat().st_mode | stat.S_IEXEC)
-    base = {**os.environ, "PATH": f"{b}:{os.environ['PATH']}", "PROJECT": "p", "BACKUPS_BUCKET": "bk", "FAKE_LOG": str(tmp_path / "log"), "FAKE_FAIL_DB": "none",
-            "FAKE_OBJECTS": "3", "FAKE_NO_INSTANCE": "0", "FAKE_BACKUP_FAILS": "0"}
+    return b
+
+
+def test_the_cloud_sql_exports_print_their_all_clear_only_when_everything_it_stands_for_happened(tmp_path: Path) -> None:
+    b = _fake_bin(tmp_path, _FAKE_GCLOUD_SQL)
+    base = {**os.environ, "PATH": f"{b}:{os.environ['PATH']}", "PROJECT": "p", "REGION": "r", "BACKUPS_BUCKET": "bk", "FAKE_LOG": str(tmp_path / "log"), "FAKE_FAIL_DB": "none", "FAKE_EMPTY_DB": "none",
+            "FAKE_NO_INSTANCE": "0", "FAKE_NO_DESCRIBE": "0", "FAKE_BACKUP_FAILS": "0"}
 
     def run(**over: str) -> subprocess.CompletedProcess:
-        return subprocess.run(["bash", "-c", _r5_export_block()], capture_output=True, text=True, env={**base, **over}, cwd=tmp_path, timeout=30)
+        return subprocess.run(["bash", "-c", _r5_export_block() + '\necho "EO=${EXPORTS_OK:-0}"'], capture_output=True, text=True, env={**base, **over}, cwd=tmp_path, timeout=30)
 
     ok = run()
-    assert ok.returncode == 0 and "EXPORTS-OK" in ok.stdout, ok.stderr
+    assert ok.returncode == 0 and "EXPORTS-OK" in ok.stdout and "EO=1" in ok.stdout, ok.stderr
     log = (tmp_path / "log").read_text()
     assert len(set(re.findall(r"cloudsql-final/(\d{8}T\d{6}Z)/", log))) == 1 and log.count("sql export sql") == 3, "one fresh path per attempt, three databases"
-    for label, over in (("one export failed", {"FAKE_FAIL_DB": "support_gateway"}), ("an object is missing under the path", {"FAKE_OBJECTS": "2"}), ("the backup failed", {"FAKE_BACKUP_FAILS": "1"}),
-                        ("the instance is not in the list", {"FAKE_NO_INSTANCE": "1"})):
+    assert all(f"cloudsql-final/" in log and f"/{db}.sql.gz" in log for db in ("postgres", "sprintable", "support_gateway")), "each database has its own object"
+    assert (tmp_path / "sql-dev.json").exists() and (tmp_path / "sprintable-migrate-dev.yaml").exists() and (tmp_path / "sprintable-verify-oneoff.yaml").exists(), "the definitions the undo needs are saved by the same block"
+    for label, over in (("one export failed", {"FAKE_FAIL_DB": "support_gateway"}), ("an export is empty", {"FAKE_EMPTY_DB": "sprintable"}), ("the backup failed", {"FAKE_BACKUP_FAILS": "1"}),
+                        ("the instance is not in the list", {"FAKE_NO_INSTANCE": "1"}), ("the definition can not be saved", {"FAKE_NO_DESCRIBE": "1"})):
         bad = run(**over)
-        assert "EXPORTS-OK" not in bad.stdout, f"no all clear when {label}"
+        assert "EXPORTS-OK" not in bad.stdout and "EO=0" in bad.stdout, f"no all clear when {label}"
     assert "NO SUCH INSTANCE: sprintable-dev" in run(FAKE_NO_INSTANCE="1").stdout
+
+
+def test_the_cloud_sql_delete_line_does_nothing_without_the_all_clear_and_deletes_in_order_with_it(tmp_path: Path) -> None:
+    b = _fake_bin(tmp_path, _FAKE_GCLOUD_SQL)
+    line = [ln.strip() for blk in _fenced(_rows()["R5"]) for ln in blk.splitlines() if "gcloud sql instances delete" in ln][0]
+    env = {**os.environ, "PATH": f"{b}:{os.environ['PATH']}", "PROJECT": "p", "REGION": "r", "INSTANCE": "sprintable-dev", "FAKE_LOG": str(tmp_path / "log"), "FAKE_NO_INSTANCE": "0", "FAKE_NO_DESCRIBE": "0",
+           "FAKE_BACKUP_FAILS": "0", "FAKE_FAIL_DB": "none", "FAKE_EMPTY_DB": "none"}
+    (tmp_path / "log").write_text("")
+    subprocess.run(["bash", "-c", "unset EXPORTS_OK; " + line], capture_output=True, text=True, env=env, cwd=tmp_path, timeout=30)
+    assert (tmp_path / "log").read_text() == "", "nothing is deleted before the exports were verified"
+    subprocess.run(["bash", "-c", "EXPORTS_OK=1; " + line], capture_output=True, text=True, env=env, cwd=tmp_path, timeout=30)
+    calls = [c.split()[1:4] for c in (tmp_path / "log").read_text().splitlines()]
+    assert calls == [["run", "jobs", "delete"], ["run", "jobs", "delete"], ["sql", "instances", "delete"]]
 
 
 _FAKE_GCLOUD_FIND = r"""#!/bin/sh
@@ -377,17 +407,39 @@ def test_the_pgbouncer_capture_refuses_a_second_disk_instead_of_a_half_undo(tmp_
     extra = _PGB_DEFINITION.replace('"disks":[', '"disks":[{"boot":false,"source":"https://x/disks/other"},')
     (tmp_path / "def.json").write_text(extra)
     env = {**os.environ, "PATH": f"{b}:{os.environ['PATH']}", "PROJECT": "p", "REGION": "r", "PGB": "pgb-dev", "PGB_ZONE": "z", "FAKE_LOG": str(tmp_path / "log"), "FAKE_DEFINITION": str(tmp_path / "def.json")}
-    r = subprocess.run(["bash", "-c", _fence_with("R3", "disks snapshot")], capture_output=True, text=True, env=env, cwd=tmp_path, timeout=30)
-    assert "SNAPSHOT NOT TAKEN" in r.stdout
+    r = subprocess.run(["bash", "-c", _fence_with("R3", "disks snapshot") + '\necho "SO=${SNAP_OK:-0}"'], capture_output=True, text=True, env=env, cwd=tmp_path, timeout=30)
+    assert "SNAPSHOT NOT TAKEN" in r.stdout and "SO=0" in r.stdout and "SNAPSHOT-OK" not in r.stdout
     assert "disks snapshot" not in (tmp_path / "log").read_text(), "no snapshot is taken of a half of the machine"
 
 
-def test_the_undo_steps_that_loop_say_so_when_all_of_them_worked_and_the_users_are_both_restored() -> None:
+def test_the_undo_chains_stop_at_the_first_failure_and_restore_both_database_users() -> None:
     r1 = _rows()["R1"].split("5. **Undo:**")[1].split("\n")[0]
     assert r1.count(" && ") == 3 and "for s in" not in r1, "four commands in one chain"
     r5 = _rows()["R5"].split("5. **Undo**")[1]
-    for token in ("DATABASES-OK", "IMPORTS-OK", "JOBS-OK"):
-        assert f'[ "$OK" = 1 ] && echo {token}' in r5, f"{token} is printed only when no step set OK=0"
-    assert r5.count("|| OK=0") >= 3
-    assert "gcloud sql users create sprintable " in r5 and "gcloud sql users create support_gw " in r5
-    assert '${APP_PASSWORD:?' in r5 and "ALEMBIC_DATABASE_URL_DEV" in r5 and "--set-cloudsql-instances" in r5
+    block = [b for b in _fenced(r5) if "gcloud sql instances create" in b][0]
+    assert block.count(" &&\n") == 7 and block.rstrip().endswith("&& echo RESTORE-OK") and "OK=0" not in block, "eight commands, one chain, one all clear"
+    assert block.count("gcloud sql import sql") == 3 and "gcloud sql databases create sprintable " in block and "gcloud sql databases create support_gateway " in block
+    assert "gcloud sql users create sprintable " in block and "gcloud sql users create support_gw " in block
+    assert '${APP_PASSWORD:?' in block and "ALEMBIC_DATABASE_URL_DEV" in r5 and "--set-cloudsql-instances" in r5
+    jobs = [ln for ln in r5.splitlines() if "gcloud run jobs replace sprintable-migrate-dev.yaml" in ln][0]
+    assert "&& echo JOBS-OK" in jobs, "the all clear closes the chain"
+    assert " && gcloud run jobs replace sprintable-verify-oneoff.yaml" in jobs
+
+
+def test_the_pgbouncer_delete_runs_only_after_a_verified_snapshot(tmp_path: Path) -> None:
+    m = re.search(r'`(\[ "\$\{SNAP_OK:-0\}" = 1 \] && gcloud compute instances delete[^`]*)`', SHEET)
+    assert m
+    b = _fake_bin(tmp_path, '#!/bin/sh\necho "gcloud $*" >> "$FAKE_LOG"\n')
+    env = {**os.environ, "PATH": f"{b}:{os.environ['PATH']}", "PROJECT": "p", "PGB": "pgb-dev", "PGB_ZONE": "z", "FAKE_LOG": str(tmp_path / "log")}
+    (tmp_path / "log").write_text("")
+    subprocess.run(["bash", "-c", "unset SNAP_OK; " + m.group(1)], capture_output=True, text=True, env=env, timeout=30)
+    assert (tmp_path / "log").read_text() == ""
+    subprocess.run(["bash", "-c", "SNAP_OK=1; " + m.group(1)], capture_output=True, text=True, env=env, timeout=30)
+    assert "compute instances delete pgb-dev --zone z --project p" in (tmp_path / "log").read_text()
+
+
+def test_gate_d_makes_the_realtime_check_come_before_the_redis_and_pooler_rows() -> None:
+    gate = SHEET.split("| **D. Realtime leftovers**")[1].split("\n")[0]
+    assert "R4" in gate and "nothing in R2 or R3 runs before this" in gate
+    for key in ("R2", "R3"):
+        assert "**Gate D first**" in _rows()[key], key
