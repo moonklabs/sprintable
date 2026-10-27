@@ -92,6 +92,10 @@ def test_phase_2_of_the_runbook_says_what_the_connector_change_does_and_does_not
     """codex (tokens PR, round 2): new starts use the dev API name; an already installed connector keeps the old default and shows up as a non-VM caller in the request-log table"""
     text = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
     p2 = text[text.index("**Phase 2"):text.index("**Phase 3")]
-    assert "new starts of a connector use `https://dev-api.sprintable.ai`" in p2
+    assert "a new start of the Python and host connectors (`DEFAULT_API_URL`) uses `https://dev-api.sprintable.ai`" in p2
+    assert "the Pi and OpenCode extensions and the OpenClaw channel resolve their address at load time and use `https://app.sprintable.ai`" in p2, "their entry points name the prod app domain when no address is set"
+    for rel, needle in (("connectors/pi-sprintable/index.ts", "process.env.SPRINTABLE_API_URL ?? 'https://app.sprintable.ai'"), ("connectors/opencode-sprintable/index.ts", 'process.env.SPRINTABLE_API_URL ?? "https://app.sprintable.ai"'), ("connectors/openclaw-sprintable/src/channel.ts", "const DEFAULT_API_URL = 'https://app.sprintable.ai'")):
+        assert needle in (_ROOT / rel).read_text(), rel
+    assert "(**deferred by the PO**, see «Phase 2 status» in §9" in p2 and "the Polar webhook (**deferred**, same place)" in p2
     assert "an already installed" not in p2 and "a connector already installed with the old `…-57iommnikq-du.a.run.app` default keeps dialing it" in p2
     assert "those show up in the request-log table as non-VM callers" in p2
