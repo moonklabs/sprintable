@@ -429,6 +429,7 @@ class Deployer:
             p = self._prepare(current)
             self._activate(p)
             self._swap(p)
+            self._drop_gateway_if_left_out(p, bool(pending.get("support_gateway_image")))  # the interrupted swap may have started the gateway of a release that was never recorded
         except Exception as e:  # noqa: BLE001
             self.log(f"reconcile failed: {self._scrub(str(e)) if isinstance(e, DeployError) else type(e).__name__}")
             return "reconcile-failed"
@@ -678,12 +679,14 @@ class Deployer:
             raise DeployError(f"support gateway database could not be prepared: {out[-300:]}", "pre-swap")
 
     def _drop_gateway_if_left_out(self, running: Prepared, previously_had_gateway: bool) -> None:
-        """a release without the gateway after one with it: compose does not remove a container of a service that is merely not part of this release — stop it (best effort, the outcome is only logged)"""
+        """a release without the gateway after one with it: compose does not remove a container of a service that is merely not part of this release — stop it"""
         if running.gateway or not previously_had_gateway:
             return
         rc, out = self._compose(running.release, running.env, "stop", renv.GATEWAY_SERVICE, profile=GATEWAY_PROFILE, timeout=60)
         if rc != 0:
-            self.log(f"could not stop the support gateway that this release leaves out: {out[-200:]}")
+            # not best effort: a gateway that keeps running beside a release that left it out holds database connections nobody budgeted. After the swap this is a post-swap failure — the previous release
+            # (which has the gateway) is put back; on the way back or in a reconcile it is reported as that step failing, and the pending marker stays so the next run tries again
+            raise DeployError(f"could not stop the support gateway that this release leaves out: {out[-200:]}", "post-swap")
 
     def _rollback(self, current: Mapping | None) -> str:
         try:

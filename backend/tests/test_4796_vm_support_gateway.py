@@ -458,3 +458,56 @@ def test_the_gateways_call_into_the_backend_is_the_route_the_pipeline_gave_it_on
 def test_the_gateway_role_is_not_the_backends() -> None:
     d = yaml.safe_load((_VM / "env/dev.yaml").read_text())
     assert d["support_gateway"]["database"]["user"] == "support_gw" and d["support_gateway"]["database"]["user"] != d["database"]["user"]
+
+
+def test_a_swap_that_died_after_starting_a_gateway_release_is_settled_by_stopping_the_gateway(world) -> None:
+    """recorded: a release without the gateway. pending: a release WITH it whose swap began and never got recorded. The settle puts the recorded one back and the gateway the dead swap started must not stay"""
+    world.publish("a" * 40, gateway=False)
+    assert world.dep.run_once() == "deployed"
+    cur = S._state(world, "current.json")
+    gw = f"{S.REG}/support-gateway@{S._digest('gw')}"
+    (world.cfg.state_dir / "pending.json").write_text(json.dumps({**{k: cur[k] for k in D.STATE_KEYS}, "sha": "b" * 40, "support_gateway_image": gw, "at": 1}))
+    world.runner.calls.clear()
+    world.dep.run_once()
+    stops = [c for c in _compose_calls(world) if _verb(c) == "stop"]
+    assert stops and stops[0]["args"][-1] == "support-gateway" and "SUPPORT_GATEWAY_IMAGE" not in stops[0]["env"]
+    assert not (world.cfg.state_dir / "pending.json").exists()
+
+
+def test_a_gateway_that_cannot_be_stopped_is_a_failure_not_a_log_line(world) -> None:
+    world.publish("a" * 40, gateway=True)
+    assert world.dep.run_once() == "deployed"
+    world.publish("b" * 40, gateway=False)
+    world.runner.fail_on[" stop "] = 1
+    world.runner.calls.clear()
+    assert world.dep.run_once() == "rolled-back", "the release that left the gateway out could not stop it: the previous release (which has it) is put back"
+    cur = S._state(world, "current.json")
+    assert cur["sha"] == "a" * 40 and cur["support_gateway_image"]
+
+
+def test_a_stop_that_fails_while_rolling_back_is_a_failed_rollback(world) -> None:
+    a = world.publish("a" * 40, gateway=False)
+    world.dep.run_once()
+    world.publish("b" * 40, gateway=True)
+    orig = world.runner.run
+
+    def run(args, env, **kw):
+        if env.get("BACKEND_IMAGE") == a["backend_image"] and "up" in args:
+            world.runner.gateway_ok = True
+        return orig(args, env, **kw)
+
+    world.runner.gateway_ok = False
+    world.runner.run = run
+    world.runner.fail_on[" stop "] = 1
+    assert world.dep.run_once() == "rollback-failed", "the old release is serving again, but the gateway of the failed one is still up: said out loud, not hidden"
+
+
+def test_a_reconcile_whose_gateway_stop_fails_keeps_the_marker_and_says_so(world) -> None:
+    world.publish("a" * 40, gateway=False)
+    world.dep.run_once()
+    cur = S._state(world, "current.json")
+    gw = f"{S.REG}/support-gateway@{S._digest('gw')}"
+    (world.cfg.state_dir / "pending.json").write_text(json.dumps({**{k: cur[k] for k in D.STATE_KEYS}, "sha": "b" * 40, "support_gateway_image": gw, "at": 1}))
+    world.runner.fail_on[" stop "] = 1
+    assert world.dep.run_once() == "reconcile-failed"
+    assert (world.cfg.state_dir / "pending.json").exists(), "the next run tries again"
