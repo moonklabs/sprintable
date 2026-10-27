@@ -201,8 +201,8 @@ class Settings(BaseSettings):
     eventbus_enabled: bool = False
 
     # story #4397 — send push notifications to a person's devices across their orgs (push_devices.user_id), instead of only
-    # the devices last registered in the notification's org. Env PUSH_DEVICES_BY_USER. Default off; dev on; prod on only after
-    # the app build that re-registers on account switch (and opens a notification of another org in that org) is out.
+    # the devices last registered in the notification's org. Env PUSH_DEVICES_BY_USER. Default off; dev and prod on (cloud-build.yml) — prod was held until
+    # the app build that unregisters on /login and re-registers on an account change was out (store builds with mobile 168, 10-25).
     push_devices_by_user: bool = False
 
     # E-ARCH S1(2026-07-21, 선생님 "가자" 승인 — 채팅 5초 지연/#2074 근본): REST(api)와

@@ -315,7 +315,8 @@ substitutions:
   # sprintable-realtime-prod 배선을 마치는 승격 시점에 GHA prod 분기에도 false를 명시할 것.
   _BACKEND_PG_LISTEN_ENABLED: 'true'
   # story #4397 — push notifications by person across orgs (settings.push_devices_by_user). Default 'false'; GHA injects 'true'
-  # on dev only. prod stays 'false' until the app build that re-registers on account switch is out.
+  # on dev and prod (prod was held until the app build that re-registers on account switch was out). A device still on an older
+  # app build keeps the old behaviour of that build: it does not unregister on /login nor re-register on an account change.
   _PUSH_DEVICES_BY_USER: 'false'
 
   # ⛔E-ARCH S2 정리(story #2078, 2026-07-21) — **전제가 틀렸음이 #2123에서 드러남(아래 정정
