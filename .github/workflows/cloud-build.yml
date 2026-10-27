@@ -473,8 +473,8 @@ jobs:
             # clientKey(publishable 값, secret 아님 — 브라우저 노출 전제)를 Secret Manager
             # TOSS_PAYMENTS_CLIENT_KEY_DEV에서 읽어 dev만 주입(prod는 위 main 분기에서 빈
             # 문자열 명시·무접촉). Secret Manager 접근 권한은 이 워크플로우의 GHA SA(github-
-            # actions@sprintable-494803)가 project-level roles/secretmanager.secretAccessor로
-            # 이미 보유(신규 IAM 변경 0). Setup Cloud SDK 스텝이 이미 프로젝트를 기본값으로
+            # actions@sprintable-494803)에 이 비밀 하나에만 부여한다(backend/scripts/grant_secret_access.sh ci <SECRET>
+            # — 프로젝트 단위 secretAccessor 부여는 하지 않는다). Setup Cloud SDK 스텝이 이미 프로젝트를 기본값으로
             # 잡아 둬 --project 불요.
             TOSS_CLIENT_KEY_DEV_VALUE=$(gcloud secrets versions access latest --secret="TOSS_PAYMENTS_CLIENT_KEY_DEV")
             echo "::add-mask::${TOSS_CLIENT_KEY_DEV_VALUE}"
@@ -555,8 +555,8 @@ jobs:
           # 같은 실 템플릿명에서 8자 SHA가 그대로 뽑힌다 — 이름 패턴 불일치가 원인이 아니었다).
           # 진짜 원인은 IAM: github-actions@${GCP_PROJECT}.iam.gserviceaccount.com에 부여된
           # 역할이 artifactregistry.writer/cloudbuild.builds.editor/iam.serviceAccountUser/
-          # run.admin/secretmanager.secretAccessor/serviceusage.serviceUsageConsumer/
-          # storage.admin뿐 — compute.* 역할이 전무하다(project IAM policy 직접 조회로 확認).
+          # run.admin/serviceusage.serviceUsageConsumer/
+          # storage.admin뿐(비밀 접근은 비밀별 부여 — grant_secret_access.sh) — compute.* 역할이 전무하다(project IAM policy 직접 조회로 확認).
           # `compute.instanceGroupManagers.get` 권한이 없으니 이 describe는 매번 권한거부로
           # 조용히 실패(stderr는 /dev/null)하고 빈 문자열만 돌아온다 — "최초 배포/이름 패턴
           # 변경"이 아니라 "애초에 조회 권한이 없음"이 실제 사유. ⚠️IAM 부여는 인프라 lane

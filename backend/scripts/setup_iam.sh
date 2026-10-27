@@ -35,10 +35,10 @@ create_runtime_sa() {
     local sa_name="cloudrun-runtime-${env}"
     local sa_email="${sa_name}@${GCP_PROJECT}.iam.gserviceaccount.com"
 
-    log "Creating Cloud Run runtime SA for ${env}: ${sa_email}"
+    log "Creating Cloud Run runtime SA for ${env}: ${sa_email}" >&2
     gcloud iam service-accounts create "${sa_name}" \
         --display-name="Cloud Run Runtime (${env})" \
-        --project="${GCP_PROJECT}" 2>/dev/null || log "SA already exists, skipping create."
+        --project="${GCP_PROJECT}" 2>/dev/null || log "SA already exists, skipping create." >&2
 
     # 최소 권한 역할만 부여
     for ROLE in \
@@ -46,10 +46,10 @@ create_runtime_sa() {
         gcloud projects add-iam-policy-binding "${GCP_PROJECT}" \
             --member="serviceAccount:${sa_email}" \
             --role="${ROLE}" \
-            --condition=None
+            --condition=None > /dev/null  # (gcloud prints the whole policy on stdout; this function's stdout is the account name only)
     done
 
-    log "SA ${sa_email} — roles: cloudsql.client (secrets: grant_secret_access.sh ${env} <SECRET_NAME>…)"
+    log "SA ${sa_email} — roles: cloudsql.client (secrets: grant_secret_access.sh ${env} <SECRET_NAME>…)" >&2
     echo "${sa_email}"
 }
 
