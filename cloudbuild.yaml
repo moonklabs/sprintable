@@ -315,7 +315,8 @@ substitutions:
   # sprintable-realtime-prod 배선을 마치는 승격 시점에 GHA prod 분기에도 false를 명시할 것.
   _BACKEND_PG_LISTEN_ENABLED: 'true'
   # story #4397 — push notifications by person across orgs (settings.push_devices_by_user). Default 'false'; GHA injects 'true'
-  # on dev only. prod stays 'false' until the app build that re-registers on account switch is out.
+  # on dev and prod (prod was held until the app build that re-registers on account switch was out). A device still on an older
+  # app build keeps the old behaviour of that build: it does not unregister on /login nor re-register on an account change.
   _PUSH_DEVICES_BY_USER: 'false'
 
   # ⛔E-ARCH S2 정리(story #2078, 2026-07-21) — **전제가 틀렸음이 #2123에서 드러남(아래 정정
@@ -815,6 +816,7 @@ steps:
         set +e
         gcloud run deploy office-converter-${_DEPLOY_ENV} \
           --image=gotenberg/gotenberg:8.36 \
+          --service-account=run-converter-dev@${PROJECT_ID}.iam.gserviceaccount.com \
           --port=3000 \
           --region=${_AR_REGION} \
           --no-allow-unauthenticated \
@@ -1079,10 +1081,12 @@ steps:
         # story 4786: mcp-dev sits idle most of the time (billed per request); prod states nothing here (its value is left as it is).
         MCP_CPU_FLAG=""
         if [ "${_DEPLOY_ENV}" == "dev" ]; then MCP_CPU_FLAG="--cpu-throttling"; fi
+        # 4798 AC7: each environment runs as its own account (run-mcp-dev / run-mcp-prod: the one secret above and nothing else)
+        MCP_SA_FLAG="--service-account=run-mcp-${_DEPLOY_ENV}@${PROJECT_ID}.iam.gserviceaccount.com"
         gcloud run services update sprintable-mcp-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
           --region=${_AR_REGION} \
-          $${MCP_CPU_FLAG} \
+          $${MCP_CPU_FLAG} $${MCP_SA_FLAG} \
           --update-env-vars="^;^$${ENV_VARS}" \
           --remove-env-vars=AGENT_API_KEY \
           --update-secrets="AGENT_API_KEY=$${AGENT_KEY_SECRET}:latest" \

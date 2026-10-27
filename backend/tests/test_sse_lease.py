@@ -14,7 +14,9 @@ from app.services import sse_lease
 
 @pytest.fixture
 def _flag_off():
-    with patch.object(sse_lease.settings, "sse_lease_redis_enabled", False):
+    # story 4791: with Redis off the receiver scopes are answered from Postgres rows — this fixture is the in-process case, so that switch is off too
+    with patch.object(sse_lease.settings, "sse_lease_redis_enabled", False), \
+         patch.object(sse_lease.settings, "sse_lease_pg_enabled", False):
         yield
 
 

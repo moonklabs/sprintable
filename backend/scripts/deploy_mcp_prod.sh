@@ -41,6 +41,7 @@ echo ">>> deploy sprintable-mcp-prod (image=backend:${SHA})"
 ENV_VARS="^##^MCP_TRANSPORT=http##SPRINTABLE_API_URL=${PROD_BACKEND_URL}##MCP_ALLOWED_HOSTS=${PROD_MCP_HOSTS}"
 COMMON_ARGS=(
   --image="${AR}:${SHA}"
+  --service-account="run-mcp-prod@${PROJECT}.iam.gserviceaccount.com"  # story 4798 (AC7): its own account — it reads one secret and nothing else
   --region="${REGION}"
   --command="python"
   --args="-m,sprintable_mcp"

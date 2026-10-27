@@ -179,8 +179,11 @@ jobs:
             # story #2123 S-b/S-c(2026-07-24): consume/dispatch를 위에서 켰으므로 wake_agent 발행측도
             # Redis로 승격(대칭). dev 완전전환·검증됨.
             echo "backend_fanout_wake_redis_enabled=true" >> "$GITHUB_OUTPUT"
-            # story #4397 — prod: push by person stays off until the app build that re-registers on account switch is out.
-            echo "push_devices_by_user=false" >> "$GITHUB_OUTPUT"
+            # story #4397 — prod: push notifications by person across orgs (settings.push_devices_by_user). It was held off until the app build that
+            # unregisters on /login and re-registers on an account change was out: the store builds (iOS TestFlight 46 · Android internal 33, 10-25)
+            # carry mobile 168, and the dev lap on that build (10-27 03:00–03:11Z: logout → unregister 204 · account switch → the same token row moves to
+            # the new person, the old one gets nothing · one person in two orgs → both orgs' notifications on the one device) passed. Evidence on the story.
+            echo "push_devices_by_user=true" >> "$GITHUB_OUTPUT"
             # story #2728 후속(2026-08-17, 페드루 PO 지시) — NEXT_PUBLIC_EE_ENABLED가 이 파이프라인
             # 어디에도 배선된 적이 없어(cloudbuild.yaml·Dockerfile 전부 무배선) dev FE billing 표면이
             # 아예 안 떴다. prod는 이 커밋으로 무접촉(값을 새로 켜는 게 아니라 기존 동작 그대로
@@ -488,7 +491,10 @@ jobs:
             # 짝으로 켜야 실제로 노드 간 공유가 성립한다(scripts/deploy_realtime_gce.sh 동시 배포).
             echo "backend_presence_redis_enabled=true" >> "$GITHUB_OUTPUT"
             echo "backend_presence_online_redis_enabled=true" >> "$GITHUB_OUTPUT"
-            echo "backend_sse_lease_redis_enabled=true" >> "$GITHUB_OUTPUT"
+            # story 4791 (INFRA-DIET ⑥, 2026-10-27, PO): the receiver scopes' SSE lease (one receiver per agent · take-over) lives in Postgres rows when this is false (services/sse_lease_pg.py), so dev
+            # stops using the Redis lease and the Postgres one is measured on two real backend instances. The global caps (events_global · agent_global) and the device stream's count then go back to
+            # each instance's own count (the limit written in the story). Back to the Redis lease = this one value `true`. Prod keeps `true` (the main branch above).
+            echo "backend_sse_lease_redis_enabled=false" >> "$GITHUB_OUTPUT"
             # story #2077(2026-07-24) — frontend min/max-instances가 배포 SSOT 어디에도 없었다.
             # 라이브 실측(2026-07-24, `gcloud run services describe sprintable-frontend-dev` —
             # 서빙 리비전 자체 대조·latestReady==latestCreated·traffic 100% 확認, template spec만
@@ -709,6 +715,30 @@ jobs:
             --project="${{ secrets.GCP_PROJECT_ID }}" \
             --substitutions=COMMIT_SHA="${{ github.sha }}",${{ steps.subst.outputs.substitutions }} \
             --suppress-logs \
+            .
+
+      # story 4796 — the dev VM's bundle (RUNBOOK §5) is a build of its own, started here when the Cloud Run build above has finished and pushed its images.
+      # Why not a step of cloudbuild.yaml: its first version was, and on its first real run the worker stopped answering during the Next.js type check (build 844cd9a1, INTERNAL_ERROR on every
+      # step) — `allowFailure` and step timeouts do nothing for a dead worker. As its own build on its own worker, the worst case is that build failing.
+      # `--async`: this run does not wait for it (no delay, serving-reality starts at once); `continue-on-error`: a failed SUBMISSION does not fail the run either. Where to look: the build
+      # list, tag `vm-bundle` set in cloudbuild-vm.yaml (`gcloud builds list --filter="tags=vm-bundle"`; `gcloud builds submit` itself has no tags flag), and gs://<deploy bucket>/bundles/ + candidates/.
+      # The five values are the ones the Cloud Run frontend was built with (same step outputs as "Assemble Cloud Build substitutions" above); an empty one is passed empty on purpose.
+      - name: Submit the dev VM bundle build (own build, async — never fails or delays this run)
+        if: success() && steps.env.outputs.target == 'dev'
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          VM_GA4_MEASUREMENT_ID: ${{ steps.env.outputs.ga4_measurement_id }}
+          VM_EE_ENABLED: ${{ steps.env.outputs.ee_enabled }}
+          VM_SUPPORT_WIDGET_ENABLED: ${{ steps.env.outputs.support_widget_enabled }}
+          VM_SUPPORT_GATEWAY_URL: ${{ steps.env.outputs.next_public_support_gateway_url }}
+          VM_TOSS_CLIENT_KEY: ${{ steps.env.outputs.toss_client_key }}
+        run: |
+          gcloud builds submit \
+            --async \
+            --config=cloudbuild-vm.yaml \
+            --project="${{ secrets.GCP_PROJECT_ID }}" \
+            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="dev",_GA4_MEASUREMENT_ID="${VM_GA4_MEASUREMENT_ID}",_EE_ENABLED="${VM_EE_ENABLED}",_SUPPORT_WIDGET_ENABLED="${VM_SUPPORT_WIDGET_ENABLED}",_NEXT_PUBLIC_SUPPORT_GATEWAY_URL="${VM_SUPPORT_GATEWAY_URL}",_TOSS_CLIENT_KEY="${VM_TOSS_CLIENT_KEY}" \
             .
 
   # 2026-10-12 (story 4659): 배포 뒤에만 실서버 도달 확인. 예약 cron은 두지 않는다.

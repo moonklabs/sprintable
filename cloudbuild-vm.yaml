@@ -1,0 +1,127 @@
+# story 4796 — the dev VM's bundle, as a build of its own (RUNBOOK §5).
+#
+# Submitted by .github/workflows/cloud-build.yml (dev only) with `gcloud builds submit --async`, AFTER the Cloud Run build of the same sha has finished and its images are in the registry.
+# It is a separate build on purpose: the first version had these steps inside cloudbuild.yaml with `allowFailure`, and on its first real run the worker stopped answering during the
+# Next.js type check (build 844cd9a1, INTERNAL_ERROR on every step) — a dead worker ignores both `allowFailure` and step timeouts. Here the worst case is this build failing, on its own worker.
+#
+# Steps: resolve the backend image digest of this sha → build and push frontend-vm (deploy/vm/bin/build-frontend-vm.sh) → pack the bundle and upload it.
+# Uploads gs://<deploy bucket>/bundles/<sha>.tgz and candidates/<sha>.json. It never writes desired.json (RUNBOOK §7 step 6 does, by hand).
+substitutions:
+  _AR_REGION: asia-northeast3
+  _AR_REPO: sprintable
+  _DEPLOY_ENV: dev
+  _VM_DEPLOY_BUCKET: sprintable-vm-dev-deploy
+  # The public build values of the Cloud Run frontend of the same environment (cloud-build.yml `steps.env`): the caller passes all five, an empty value explicitly (`_X=""`).
+  # The default is a marker, not an empty string, so a forgotten value fails the build instead of silently building the image without it.
+  _GA4_MEASUREMENT_ID: __not-passed__
+  _EE_ENABLED: __not-passed__
+  _SUPPORT_WIDGET_ENABLED: __not-passed__
+  _NEXT_PUBLIC_SUPPORT_GATEWAY_URL: __not-passed__
+  _TOSS_CLIENT_KEY: __not-passed__
+
+# listed with: gcloud builds list --filter="tags=vm-bundle"
+tags: ['vm-bundle']
+
+steps:
+  - id: resolve-backend
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    timeout: 120s
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ "${_DEPLOY_ENV}" != "dev" ]; then
+          echo "skip resolve-backend: dev only (story 4796) — prod gets its own build at the prod cutover"
+          exit 0
+        fi
+        out=/workspace/vm-out
+        rm -rf "$$out"
+        mkdir -p "$$out"
+        repo="${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}"
+        # the backend image the Cloud Run build of this sha pushed, by digest (the tag is read once, here, before the long build)
+        digest="$$(gcloud artifacts docker images describe "$$repo/backend:${COMMIT_SHA}" --format='value(image_summary.digest)')"
+        if ! [[ "$$digest" =~ ^sha256:[0-9a-f]{64}$$ ]]; then
+          echo "resolve-backend: no digest for $$repo/backend:${COMMIT_SHA}: «$$digest»" >&2
+          exit 1
+        fi
+        printf '%s\n' "$$repo/backend@$$digest" > "$$out/backend-image.txt"
+        echo "resolve-backend: $$repo/backend@$$digest"
+
+  - id: build-frontend-vm
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    timeout: 1200s
+    waitFor: [resolve-backend]
+    env:
+      - DOCKER_BUILDKIT=1
+      - VM_GA4_MEASUREMENT_ID=${_GA4_MEASUREMENT_ID}
+      - VM_EE_ENABLED=${_EE_ENABLED}
+      - VM_SUPPORT_WIDGET_ENABLED=${_SUPPORT_WIDGET_ENABLED}
+      - VM_SUPPORT_GATEWAY_URL=${_NEXT_PUBLIC_SUPPORT_GATEWAY_URL}
+      - VM_TOSS_CLIENT_KEY=${_TOSS_CLIENT_KEY}
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ "${_DEPLOY_ENV}" != "dev" ]; then
+          echo "skip build-frontend-vm: dev only (story 4796)"
+          exit 0
+        fi
+        out=/workspace/vm-out
+        [ -s "$$out/backend-image.txt" ] || { echo "build-frontend-vm: resolve-backend left no backend image" >&2; exit 1; }
+        for v in VM_GA4_MEASUREMENT_ID VM_EE_ENABLED VM_SUPPORT_WIDGET_ENABLED VM_SUPPORT_GATEWAY_URL VM_TOSS_CLIENT_KEY; do
+          if [ "$${!v}" = "__not-passed__" ]; then
+            echo "build-frontend-vm: $$v was not passed by the caller (pass an empty value explicitly if it is empty)" >&2
+            exit 1
+          fi
+        done
+        repo="${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}"
+        if ! python3 -c 'import yaml' 2>/dev/null; then
+          DEBIAN_FRONTEND=noninteractive apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 python3-yaml
+        fi
+        # builds (linux/amd64), checks what was baked (the VM API host in, no Cloud Run address in), pushes, and prints the digest reference as its LAST line
+        bash deploy/vm/bin/build-frontend-vm.sh dev "${COMMIT_SHA}" "$$repo/frontend-vm:${COMMIT_SHA}" --push \
+          --set "NEXT_PUBLIC_GA4_MEASUREMENT_ID=$$VM_GA4_MEASUREMENT_ID" \
+          --set "NEXT_PUBLIC_EE_ENABLED=$$VM_EE_ENABLED" \
+          --set "NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED=$$VM_SUPPORT_WIDGET_ENABLED" \
+          --set "NEXT_PUBLIC_SUPPORT_GATEWAY_URL=$$VM_SUPPORT_GATEWAY_URL" \
+          --set "NEXT_PUBLIC_TOSS_CLIENT_KEY=$$VM_TOSS_CLIENT_KEY" | tee "$$out/build.log"
+        ref="$$(tail -n 1 "$$out/build.log")"
+        if [ "$${ref%@*}" != "$$repo/frontend-vm" ] || ! [[ "$${ref#*@}" =~ ^sha256:[0-9a-f]{64}$$ ]]; then
+          echo "build-frontend-vm: the last line of the build is not a digest reference of $$repo/frontend-vm: «$$ref»" >&2
+          exit 1
+        fi
+        printf '%s\n' "$$ref" > "$$out/frontend-image.txt"
+        echo "build-frontend-vm: $$ref"
+
+  - id: bundle-vm
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    timeout: 120s
+    waitFor: [build-frontend-vm]
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ "${_DEPLOY_ENV}" != "dev" ]; then
+          echo "skip bundle-vm: dev only (story 4796)"
+          exit 0
+        fi
+        out=/workspace/vm-out
+        [ -s "$$out/frontend-image.txt" ] || { echo "bundle-vm: build-frontend-vm left no frontend image — no bundle for ${COMMIT_SHA}" >&2; exit 1; }
+        [ -s "$$out/backend-image.txt" ] || { echo "bundle-vm: resolve-backend left no backend image — no bundle for ${COMMIT_SHA}" >&2; exit 1; }
+        frontend="$$(cat "$$out/frontend-image.txt")"
+        backend="$$(cat "$$out/backend-image.txt")"
+        python3 deploy/vm/bin/make_bundle.py --sha "${COMMIT_SHA}" --backend-image "$$backend" --frontend-image "$$frontend" --out "$$out/bundle"
+        # the bundle first; then `candidates/<sha>.json` — the desired.json this sha WOULD have, at a path the VM's deployer never reads (RUNBOOK §7 step 6 copies it to desired.json)
+        gcloud storage cp "$$out/bundle/bundles/${COMMIT_SHA}.tgz" "gs://${_VM_DEPLOY_BUCKET}/bundles/${COMMIT_SHA}.tgz"
+        gcloud storage cp "$$out/bundle/desired.json" "gs://${_VM_DEPLOY_BUCKET}/candidates/${COMMIT_SHA}.json"
+        echo "bundle-vm: gs://${_VM_DEPLOY_BUCKET}/bundles/${COMMIT_SHA}.tgz (+ candidates/${COMMIT_SHA}.json); desired.json untouched"
+
+# stated here, not borrowed from cloudbuild.yaml: the same worker size as the Cloud Run build (the Next.js build is what it is), and a limit that covers the three steps (120 + 1200 + 120 s) with room.
+timeout: 1800s
+options:
+  machineType: E2_HIGHCPU_8
+  logging: CLOUD_LOGGING_ONLY

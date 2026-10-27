@@ -37,10 +37,10 @@ Send that output to the agent: it is the parity list (Secret Manager accessor **
 ```bash
 gcloud iam service-accounts create $SA --project $PROJECT --display-name "Sprintable $ENV VM"
 SAE=$SA@$PROJECT.iam.gserviceaccount.com
-# always:
-gcloud projects add-iam-policy-binding $PROJECT --member serviceAccount:$SAE --role roles/logging.logWriter
-gcloud projects add-iam-policy-binding $PROJECT --member serviceAccount:$SAE --role roles/monitoring.metricWriter
-gcloud projects add-iam-policy-binding $PROJECT --member serviceAccount:$SAE --role roles/artifactregistry.reader
+# always (a project-level binding names its condition — the project policy holds a conditional binding, and gcloud then refuses an unconditioned call in a script):
+gcloud projects add-iam-policy-binding $PROJECT --member serviceAccount:$SAE --role roles/logging.logWriter --condition=None
+gcloud projects add-iam-policy-binding $PROJECT --member serviceAccount:$SAE --role roles/monitoring.metricWriter --condition=None
+gcloud projects add-iam-policy-binding $PROJECT --member serviceAccount:$SAE --role roles/artifactregistry.reader --condition=None
 gcloud storage buckets add-iam-policy-binding gs://$DEPLOY_BUCKET  --member serviceAccount:$SAE --role roles/storage.objectViewer   # read only: the VM cannot change what it will run
 gcloud storage buckets add-iam-policy-binding gs://$BACKUPS_BUCKET --member serviceAccount:$SAE --role roles/storage.objectCreator  # backups + status files: it can ADD objects, never replace or delete them
 gcloud storage buckets add-iam-policy-binding gs://$BACKUPS_BUCKET --member serviceAccount:$SAE --role roles/storage.objectViewer   # … and read them back (restore, restore-check)
@@ -57,12 +57,12 @@ done
 for B in sprintable-avatars-dev sprintable-channel-media-dev sprintable-memo-attachments-dev; do
   gcloud storage buckets add-iam-policy-binding gs://$B --member serviceAccount:$SAE --role roles/storage.objectAdmin
 done
-gcloud projects add-iam-policy-binding $PROJECT --member serviceAccount:$SAE --role roles/aiplatform.user
+gcloud projects add-iam-policy-binding $PROJECT --member serviceAccount:$SAE --role roles/aiplatform.user --condition=None
 ```
 Undo: `gcloud iam service-accounts delete $SAE` (removes its bindings with it).
 
 **Accepted limit — one identity on the VM.** The containers can reach the metadata server, because the backend needs it for Vertex AI, Cloud Storage and Firebase exactly as it does on Cloud Run. So an SSRF/RCE in the backend could use the VM service account, which also holds the deploy-time grants (database password secret, read of the backups bucket, create-only write there). Mitigations in place: per-secret grants only, backups bucket create-only (no overwrite/delete), deploy bucket read-only. Splitting the identities would need a second VM and is not part of this story.
-Cloud Build's service account additionally needs `roles/storage.objectAdmin` on `gs://$DEPLOY_BUCKET` (it writes the bundle and `desired.json`).
+Cloud Build's service account additionally needs `roles/storage.objectAdmin` on `gs://$DEPLOY_BUCKET` (the dev bundle build writes the bundle and `candidates/<sha>.json`, §5 — never `desired.json`, which is written by hand in §7 step 6).
 
 ## 3. Database password (new, VM only)
 
@@ -95,9 +95,11 @@ Images that are not ours (`pgvector/pgvector:pg15`, `caddy:2.8.4-alpine`) are pi
 The extra disk and the snapshot schedule are what survive a lost boot disk (RPO ≤ 24 h by snapshot, ≤ 24 h by dump).
 Undo: `gcloud compute instances delete $VM --zone $ZONE` · `gcloud compute disks delete $DISK --zone $ZONE` · `gcloud compute addresses delete $IP --region $REGION` · `gcloud compute firewall-rules delete $VM-web $VM-iap-ssh $VM-deny-admin`.
 
-## 5. First bundle and desired version (by hand once; Cloud Build does it afterwards)
+## 5. The bundle of a sha (dev: Cloud Build builds it on every dev deploy)
 
-On a machine with the repository at the commit to run:
+**Dev.** After the Cloud Run build of a dev deploy has finished, `cloud-build.yml` starts a **second, separate build** (`cloudbuild-vm.yaml`, `gcloud builds submit --async`, tag `vm-bundle`; the workflow run does not wait for it and does not fail if it fails). Its three steps, dev only: `resolve-backend` (digest of `backend:<sha>` from the registry), `build-frontend-vm` (builds and pushes `frontend-vm:<sha>` for amd64 with the Cloud Run build's public values, the baked values checked before the push), `bundle-vm` (`make_bundle.py`, then uploads `gs://$DEPLOY_BUCKET/bundles/<sha>.tgz` and `candidates/<sha>.json` — the `desired.json` that sha would have; the deployer never reads that path). It writes **no** `desired.json`. It is its own build because a step inside the Cloud Run build once took the worker down (build 844cd9a1) — `allowFailure` and step limits do not help against a dead worker. Where to look: `gcloud builds list --filter="tags=vm-bundle"` and `gcloud storage ls gs://$DEPLOY_BUCKET/bundles/ gs://$DEPLOY_BUCKET/candidates/`. A failed build means this sha has no bundle (the next dev deploy makes one).
+
+**By hand** (only if no dev build has produced the sha you need; not on an Apple-silicon Mac). On a machine with the repository at the commit to run:
 ```bash
 SHA=$(git rev-parse HEAD)
 BACKEND_IMAGE=<registry>/backend@sha256:…        # the Cloud Build backend image of this sha, by digest
@@ -163,7 +165,7 @@ Writers (users, desktop apps, phones) are stopped for the length of the dump-res
 4. Checksum sidecar (restore.sh verifies it before touching anything), then upload both: `shasum -a 256 dev.dump > dev.dump.sha256` · `gcloud storage cp dev.dump dev.dump.sha256 gs://$BACKUPS_BUCKET/import/`
 5. On the VM: `sudo python3 /opt/sprintable/bin/deployer.py --db-only` (needs step 6 first only for `desired.json`; for the rehearsal upload any valid one), then
    `sudo /opt/sprintable/bin/restore.sh gs://$BACKUPS_BUCKET/import/dev.dump > counts-vm.tsv` and `diff counts-source.tsv <(grep -P '^\S+\t\d+$' counts-vm.tsv)` — **empty diff = row counts equal**.
-6. Upload `desired.json` (`gcloud storage cp /tmp/vm-bundle/desired.json gs://$DEPLOY_BUCKET/desired.json`) and enable the deployer: `sudo systemctl enable --now sprintable-deploy.timer`. Watch `journalctl -u sprintable-deploy -f` and the newest object under `gs://$BACKUPS_BUCKET/status/dev/`: states go `deploying → deployed` (migrate runs before the swap).
+6. Make a sha's version the desired one: `gcloud storage cp gs://$DEPLOY_BUCKET/candidates/$SHA.json gs://$DEPLOY_BUCKET/desired.json` (the sha of a dev build whose steps in §5 succeeded; with a hand-built bundle: `/tmp/vm-bundle/desired.json`) and enable the deployer: `sudo systemctl enable --now sprintable-deploy.timer`. Watch `journalctl -u sprintable-deploy -f` and the newest object under `gs://$BACKUPS_BUCKET/status/dev/`: states go `deploying → deployed` (migrate runs before the swap).
 
 Undo of the move as a whole: nothing was deleted from Cloud SQL — scale Cloud Run back up (step 2 undo) and leave DNS where it is (§8 is a separate step).
 

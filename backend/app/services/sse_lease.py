@@ -31,7 +31,7 @@ import os
 import time
 
 from app.core.config import settings
-from app.services import redis_shared
+from app.services import redis_shared, sse_lease_pg
 
 logger = logging.getLogger(__name__)
 
@@ -75,8 +75,11 @@ async def acquire(scope: str, limit: int, conn_id: str) -> "bool | None":
 
     True  = 획득(연결 허용) · False = 한계 초과(429/503 거부) · **None = Redis 불가(off/다운/에러)**.
     None 이면 호출부는 in-process 카운트로 폴백(fail-open·연결 거부 안 함).
+    story 4791: Redis 임대가 꺼져 있고 receiver scope(`perkey:`)면 Postgres 행이 임대다(sse_lease_pg) — 같은 세 가지 답.
     """
     if not _enabled():
+        if sse_lease_pg.handles(scope):
+            return await sse_lease_pg.acquire(scope, limit, conn_id, _TTL_SEC)
         return None
     client = redis_shared.get_client()
     if client is None:
@@ -95,6 +98,8 @@ async def acquire(scope: str, limit: int, conn_id: str) -> "bool | None":
 async def refresh(scope: str, conn_id: str) -> None:
     """연결 살아있음 신호 — lease score 재갱신(SSE 틱에 편승). off/Redis 다운 → no-op."""
     if not _enabled():
+        if sse_lease_pg.handles(scope):
+            await sse_lease_pg.refresh(scope, conn_id, _TTL_SEC)
         return
 
     async def _op(client) -> None:
@@ -109,6 +114,8 @@ async def refresh(scope: str, conn_id: str) -> None:
 async def release(scope: str, conn_id: str) -> None:
     """명시 해제(generate() finally·**최적화만**). off/Redis 다운 → no-op(TTL 이 자가회수)."""
     if not _enabled():
+        if sse_lease_pg.handles(scope):
+            await sse_lease_pg.release(scope, conn_id)
         return
 
     async def _op(client) -> None:
@@ -120,6 +127,8 @@ async def release(scope: str, conn_id: str) -> None:
 async def count(scope: str) -> "int | None":
     """현 lease 카운트(만료 evict 후 ZCARD) — 관측/AC5 판별용. None = Redis 불가."""
     if not _enabled():
+        if sse_lease_pg.handles(scope):
+            return await sse_lease_pg.count(scope)
         return None
     client = redis_shared.get_client()
     if client is None:
@@ -141,6 +150,8 @@ async def members(scope: str) -> "list[str] | None":
     a connection id for anything without the header. A setup key's stream reads who else receives this agent, across instances.
     None = Redis unavailable (the caller reads its in-process view instead)."""
     if not _enabled():
+        if sse_lease_pg.handles(scope):
+            return await sse_lease_pg.members(scope)
         return None
     client = redis_shared.get_client()
     if client is None:
@@ -162,6 +173,8 @@ async def mark_taken(scope: str, member: str) -> None:
     this on their heartbeat and end `superseded` (this instance's are told directly). TTL = the lease TTL: a taker that dies leaves
     the mark for no longer than its lease would have lived."""
     if not _enabled():
+        if sse_lease_pg.handles(scope):
+            await sse_lease_pg.mark_taken(scope, member, _TTL_SEC)
         return
 
     async def _op(client) -> None:
@@ -173,6 +186,8 @@ async def mark_taken(scope: str, member: str) -> None:
 async def taken_by(scope: str) -> "str | None":
     """story #4676: the member a person's take-over gave the scope to, or None (no take-over · Redis unavailable)."""
     if not _enabled():
+        if sse_lease_pg.handles(scope):
+            return await sse_lease_pg.taken_by(scope)
         return None
     client = redis_shared.get_client()
     if client is None:
@@ -197,6 +212,8 @@ return 0
 async def clear_taken(scope: str, member: str) -> None:
     """story #4676: the taker's stream ended — its mark goes with it (only its own: a later taker's stays — one atomic step)."""
     if not _enabled():
+        if sse_lease_pg.handles(scope):
+            await sse_lease_pg.clear_taken(scope, member)
         return
 
     async def _op(client) -> None:
@@ -226,6 +243,8 @@ async def earliest_expiry(scope: str) -> "float | None":
     아직 «막 갱신된 live-full」 구간에 있어 만료 기반 예측이 성립하지 않음. 세 경우 다
     호출부는 flat default(폴링 간격으로서는 정직)로 폴백한다."""
     if not _enabled():
+        if sse_lease_pg.handles(scope):
+            return await sse_lease_pg.earliest_expiry(scope, _TTL_SEC, _HEARTBEAT_SEC)
         return None
     client = redis_shared.get_client()
     if client is None:
