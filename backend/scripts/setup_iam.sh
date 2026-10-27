@@ -91,6 +91,33 @@ create_migrate_prod_sa() {
 }
 SA_MIGRATE_PROD=$(create_migrate_prod_sa) || { echo "creating run-migrate-prod failed — nothing after this point ran" >&2; exit 1; }
 
+# ─── story 4798 (AC7): the prod MCP service's own account ────────────────────
+# `run-mcp-prod` runs `sprintable-mcp-prod` (cloudbuild.yaml `deploy-mcp` · deploy_mcp_prod.sh). The service forwards each request to the backend with the caller's own bearer and uses no Google API, so the account holds NO project role:
+# it reads ONE secret (the fallback key mounted at start) and the build's account may deploy the service as it (on this account only).
+create_mcp_prod_sa() {
+    # (inside a command substitution `set -e` does not stop a function: each step says what a failure does)
+    local sa_name="run-mcp-prod"
+    local sa_email="${sa_name}@${GCP_PROJECT}.iam.gserviceaccount.com"
+    local project_number="${PROJECT_NUMBER:-$(gcloud projects describe "${GCP_PROJECT}" --format='value(projectNumber)')}"
+    [ -n "${project_number}" ] || { log "could not read the project number" >&2; return 1; }
+    local build_sa="${project_number}-compute@developer.gserviceaccount.com"
+
+    log "Creating prod MCP SA: ${sa_email}" >&2
+    gcloud iam service-accounts create "${sa_name}" \
+        --display-name="Prod MCP service — reads one secret" \
+        --project="${GCP_PROJECT}" 2>/dev/null || log "SA already exists, skipping create." >&2
+    gcloud iam service-accounts add-iam-policy-binding "${sa_email}" \
+        --project="${GCP_PROJECT}" \
+        --member="serviceAccount:${build_sa}" \
+        --role="roles/iam.serviceAccountUser" --quiet > /dev/null \
+        || { log "could not allow the build account to deploy as ${sa_email}" >&2; return 1; }
+    bash "${SCRIPT_DIR}/grant_secret_access.sh" mcp-prod MCP_AGENT_API_KEY_PROD >&2 \
+        || { log "could not grant the secret to ${sa_email}" >&2; return 1; }
+    log "SA ${sa_email} — no project role + secret MCP_AGENT_API_KEY_PROD" >&2
+    echo "${sa_email}"
+}
+SA_MCP_PROD=$(create_mcp_prod_sa) || { echo "creating run-mcp-prod failed — nothing after this point ran" >&2; exit 1; }
+
 # ─── GitHub Actions SA 권한 정리 (run.admin 불필요) ──────────────────────────
 # deploy_frontend/backend.sh는 Cloud Build에서 실행되므로
 # GitHub Actions SA에서 run.admin 제거 (최소 권한 강화)
@@ -110,4 +137,5 @@ Cloud Run 배포 시 SA 지정 바라는:
   deploy_backend.sh dev   → --service-account=${SA_DEV}
   deploy_backend.sh prod  → --service-account=${SA_PROD}
   provision_migrate_job.sh prod · provision_readonly_prod_job.sh → --service-account=${SA_MIGRATE_PROD} (set by the scripts)
+  deploy-mcp (prod) · deploy_mcp_prod.sh → --service-account=${SA_MCP_PROD} (set by the build and the script)
 OUTPUT
