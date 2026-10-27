@@ -249,16 +249,23 @@ def main(argv: list[str] | None = None, *, run: Runner = _gcloud) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--env", required=True)
     parser.add_argument("--apply", action="store_true", help="실제로 바꾼다(기본은 dry-run)")
+    parser.add_argument(
+        "--base-url", default="",
+        help="작업 uri의 호스트를 Cloud Run status.url 대신 이 https 주소로(경로 없이) — 백엔드가 VM으로 옮겨 가는 동안(story 4796) 잡이 새 주소를 부르게. "
+             "비우면 지금까지와 같다. 인증 헤더의 원천은 그대로 실물 백엔드 서비스의 CRON_SECRET.",
+    )
     args = parser.parse_args(argv)
+    if args.base_url and not re.fullmatch(r"https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?", args.base_url):
+        raise SystemExit("FAIL: --base-url은 https://<호스트> 꼴이어야 한다(경로·포트·사용자정보 없이)")
 
     manifest = load_manifest()
     target = manifest["environments"][args.env]
     location = target["location"]
     service = target["backend_service"]
     spec = describe_backend(run, service=service, region=location)
-    base_url = backend_url(spec, service=service)
+    base_url = args.base_url or backend_url(spec, service=service)
     bearer, source = resolve_bearer(run, spec, service=service)
-    print(f"백엔드: {service} status.url = {base_url}")
+    print(f"백엔드: {service} " + (f"--base-url = {base_url} (status.url 대신)" if args.base_url else f"status.url = {base_url}"))
     print(f"Authorization 원천: {service} CRON_SECRET ({source})")
 
     desired = desired_jobs(manifest, args.env, bearer, base_url=base_url)

@@ -359,3 +359,30 @@ def test_apply_removes_live_only_headers_and_converges(manifest, capsys):
     residual = mod.make_plan(desired, fake.live, "dev")
     assert (residual.create, residual.update) == ([], [])
     assert _SECRET not in capsys.readouterr().out
+
+
+
+def test_base_url_override_points_every_job_at_the_given_address_and_default_is_unchanged(manifest, capsys):
+    """story 4796: while the backend moves to the VM the jobs must call the new address, not the Cloud Run status.url"""
+    mod = _load_apply_module()
+    new = "https://dev-api.sprintable.ai"
+    desired = mod.desired_jobs(manifest, "dev", _SECRET, base_url=new)
+    fake = _FakeGcloud([_live_from_desired(j) for j in mod.desired_jobs(manifest, "dev", _SECRET, base_url=_URL)])
+    assert mod.main(["--env", "dev", "--base-url", new], run=fake) == 0
+    out = capsys.readouterr().out
+    assert f"--base-url = {new}" in out and all(j.uri.startswith(new + "/") for j in desired)
+    assert "UPDATE" in out, "live jobs still point at the old address, so the plan changes every one of them"
+    assert _SECRET not in out
+    fake2 = _FakeGcloud([_live_from_desired(j) for j in mod.desired_jobs(manifest, "dev", _SECRET, base_url=_URL)])
+    assert mod.main(["--env", "dev"], run=fake2) == 0
+    assert "UPDATE" not in capsys.readouterr().out, "without the flag nothing changed"
+
+
+@pytest.mark.parametrize("bad", ["http://dev-api.sprintable.ai", "https://dev-api.sprintable.ai/", "https://dev-api.sprintable.ai/api", "https://dev-api.sprintable.ai:8443",
+                                 "https://u:p@dev-api.sprintable.ai", "dev-api.sprintable.ai", "https://", "https://-x.example", "https://dev-api.sprintable.ai\nrespond"])
+def test_base_url_override_refuses_anything_but_an_https_host(manifest, bad):
+    mod = _load_apply_module()
+    fake = _FakeGcloud([])
+    with pytest.raises(SystemExit):
+        mod.main(["--env", "dev", "--base-url", bad], run=fake)
+    assert not fake.calls, "refused before any gcloud call"

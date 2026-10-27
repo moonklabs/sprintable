@@ -103,13 +103,65 @@ def test_every_file_a_unit_runs_is_installed_by_bootstrap() -> None:
     assert "enable --now sprintable-deploy.timer" not in re.sub(r"(?m)^\s*#.*$|echo .*$", "", boot), "the deploy timer is enabled by hand after the database is restored"
 
 
+def test_the_runbook_puts_desired_json_in_place_and_starts_the_database_before_the_first_dump() -> None:
+    """found by the codex review: a new VM has no desired.json, and the dump step needs the database container the `--db-only` start provides"""
+    text = (_VM / "RUNBOOK.md").read_text()
+    section = text[text.index("## 7. Move the data"):text.index("## 8. ")]
+    put = section.index("gcloud storage cp gs://$DEPLOY_BUCKET/candidates/$SHA.json gs://$DEPLOY_BUCKET/desired.json")
+    db_only = section.index("deployer.py --db-only")
+    dump = section.index("dump-source.sh --host $SRC_IP --label rehearsal --upload")
+    assert put < db_only < dump, "desired.json, then the database, then the dump"
+    assert section.count("deployer.py --db-only") == 1, "started once, in step 1"
+    assert "Once per VM, before the first dump" in section
+
+
+def test_the_real_restore_command_carries_restore_wipe_because_the_rehearsal_left_tables_behind() -> None:
+    """codex: after the rehearsal the database holds tables and restore.sh refuses without RESTORE_WIPE=yes"""
+    text = (_VM / "RUNBOOK.md").read_text()
+    section = text[text.index("## 7. Move the data"):text.index("## 8. ")]
+    step5 = section[section.index("\n5. On the VM, restore"):section.index("\n6. Enable the deployer")]
+    assert "sudo env RESTORE_WIPE=yes /opt/sprintable/bin/restore.sh /srv/sprintable/import/" in step5
+    assert 'sudo bash -c "diff /srv/sprintable/import/' in step5, "the import folder is root-only and sudo closes a bare <(...) descriptor"
+    seven_a = section[section.index("7a. Rehearsal"):section.index("**The dump is taken on the VM.**")]
+    assert "steps 1, 3, 4 and 5 only" in seven_a and "not step 6" in seven_a, "a rehearsal must not start the application or the timers"
+    assert "RESTORE_WIPE" in (_VM / "bin/restore.sh").read_text()
+
+
+def test_every_gcloud_command_of_section_7_names_its_project_and_the_writers_stop_is_more_than_the_ingress_flag() -> None:
+    """codex: `export PROJECT` does not set gcloud's active project; and `--ingress internal` alone does not stop every writer"""
+    text = (_VM / "RUNBOOK.md").read_text()
+    section = text[text.index("## 7. Move the data"):text.index("## 8. ")]
+    for command in re.findall(r"`(gcloud (?:sql|run|scheduler|compute|secrets|storage)[^`]*)`", section):
+        assert "--project $PROJECT" in command, command
+    assert "gcloud storage cp /tmp/vm-bundle/desired.json gs://$DEPLOY_BUCKET/desired.json" in section, "the hand-built bundle path has its own upload"
+    step2 = section[section.index("\n2. Stop writes"):section.index("\n3. Dump and count")]
+    assert "does not stop every writer" in step2 and "front-door.sh stop" in step2
+    assert "sprintable-frontend-dev" in step2 and "sprintable-mcp-dev" in step2, "the same-project callers that write through the backend"
+    undo = step2[step2.index("Undo:"):]
+    for service in ("sprintable-backend-dev", "sprintable-frontend-dev", "sprintable-mcp-dev"):
+        assert service in undo, f"closed above, so reopened by the undo: {service}"
+    assert "--ingress all" in undo and "scheduler jobs resume" in undo
+    assert "no request other than the health check" in step2 and "cron endpoints are GET requests" in step2, "a GET can write"
+
+
+def test_section_9_names_the_real_variables_of_the_hosted_mcp_and_the_scheduler_tool() -> None:
+    """codex round 7: the hosted MCP's address is SPRINTABLE_API_URL (deploy_mcp_dev.sh, cloudbuild deploy-mcp), not `_BACKEND_URL`; the scheduler jobs need --base-url and the pipeline step would undo it"""
+    text = (_VM / "RUNBOOK.md").read_text()
+    sec = text[text.index("## 9. "):text.index("## 10. ")]
+    assert "--update-env-vars SPRINTABLE_API_URL=https://dev-api.sprintable.ai" in sec and "`_BACKEND_URL`" not in sec
+    assert "infra/apply_cloud_scheduler.py --env dev --base-url https://dev-api.sprintable.ai" in sec and "apply-cloud-scheduler" in sec
+    deploy_mcp = (_ROOT / "backend/scripts/deploy_mcp_dev.sh").read_text()
+    assert "--set-env-vars=\"MCP_TRANSPORT=http,SPRINTABLE_API_URL=${DEV_BACKEND_URL}" in deploy_mcp, "the variable the hosted MCP reads is SPRINTABLE_API_URL"
+    assert "--base-url" in (_ROOT / "infra/apply_cloud_scheduler.py").read_text()
+
+
 def test_no_timer_that_needs_the_database_is_enabled_before_the_restore() -> None:
     """a backup run before the restore finds no database and fails every night (the first dev VM found this); the timers are enabled with the deploy timer, RUNBOOK §7 step 6"""
     code = re.sub(r"(?m)^\s*#.*$|echo .*$", "", (_VM / "bin/bootstrap.sh").read_text())
     for timer in ("sprintable-backup.timer", "sprintable-restore-check.timer", "sprintable-deploy.timer"):
         assert not re.search(rf"systemctl enable[^\n]*{re.escape(timer)}", code), timer
     runbook = (_VM / "RUNBOOK.md").read_text()
-    step6 = next(line for line in runbook.splitlines() if line.startswith("6. Make a sha's version the desired one"))
+    step6 = next(line for line in runbook.splitlines() if line.startswith("6. Enable the deployer"))
     for timer in ("sprintable-deploy.timer", "sprintable-backup.timer", "sprintable-restore-check.timer"):
         assert timer in step6, timer
 
@@ -379,10 +431,16 @@ def test_the_runbook_grants_exactly_the_secrets_the_declaration_reads(capsys) ->
     assert not any("PGBOUNCER" in i or "DATABASE_URL" in i for i in ids), "the VM never reads the Cloud SQL connection strings"
 
 
-def test_the_runbook_uploads_the_dump_with_its_checksum_because_restore_demands_it() -> None:
+def test_the_dump_comes_with_its_checksum_because_restore_demands_it_for_a_gs_source() -> None:
+    """the dump is taken on the VM by dump-source.sh (the source database has no public address), which writes the sidecar restore.sh verifies and, with --upload, copies it all to the import folder"""
     text = (_VM / "RUNBOOK.md").read_text()
-    assert "shasum -a 256 dev.dump > dev.dump.sha256" in text and "gcloud storage cp dev.dump dev.dump.sha256" in text
+    assert "dump-source.sh --host $SRC_IP --label rehearsal --upload" in text and "gs://$BACKUPS_BUCKET/import/" in text
+    cmd = next(line for line in text.splitlines() if "gcloud secrets versions access latest --secret=DATABASE_URL_DIRECT_DEV_SPRINTABLE" in line)
+    assert re.search(r"\| gcloud compute ssh \$VM .*--ssh-flag=-T --command \"sudo /opt/sprintable/bin/dump-source\.sh ", cmd), "the URL travels on a pipe, into ssh without a terminal"
+    assert "cloud-sql-proxy" not in text, "the source has no public address: a laptop can not reach it"
     assert "sha256_verify" in (_VM / "bin/restore.sh").read_text()
+    script = (_VM / "bin/dump-source.sh").read_text()
+    assert '.dump.sha256' in script and 'gcloud storage cp --quiet --no-clobber --project "$(cfg project)" "$base.dump" "$base.dump.sha256" "$base.counts.tsv" "gs://$bucket/import/"' in script
 
 
 def test_the_runbook_closes_the_cloud_run_door_with_a_flag_cloud_run_accepts() -> None:
