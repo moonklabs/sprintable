@@ -168,7 +168,7 @@ def test_the_runbook_names_the_new_setting_and_the_job_steps_that_the_job_really
     assert "This is a precondition of Phase 3 (§7c)" in sec10 and "**before Phase 3's final dump**" in sec10 and "which comes after the soak" in sec10
     p3 = text[text.index("**Phase 3"):text.index("## 8. ")]
     assert "the stored hosted-site links rewritten and the report showing no `run.app` origin (§10, «Stored hosted-site links»)" in p3.split("\n1. ")[0]
-    for needle in ("**Stored hosted-site links (story 4796).**", "python -m scripts.jobs.rewrite_site_post_links`", "--old-origin https://sprintable-backend-dev-787818285179.asia-northeast3.run.app", "--old-origin https://sprintable-backend-dev-57iommnikq-du.a.run.app",
+    for needle in ("**Stored hosted-site links (story 4796).**", "python -m scripts.jobs.rewrite_site_post_links`", "--old-origin http://sprintable-backend-dev-787818285179.asia-northeast3.run.app --old-origin https://sprintable-backend-dev-787818285179.asia-northeast3.run.app", "--old-origin http://sprintable-backend-dev-57iommnikq-du.a.run.app --old-origin https://sprintable-backend-dev-57iommnikq-du.a.run.app", "with the scheme the report shows", "`--old-origin` accepts `http` or `https` because it only selects what is stored, while `--new-origin` must be `https`",
                    "--new-origin https://dev-api.sprintable.ai`", "with `--apply`", "exits non-zero unless nothing with an old origin is left", "origins and counts, never a full link", "Undo of the rewrite"):
         assert needle in sec10, needle
     for needle in ("**before Phase 3's final dump** against Cloud SQL", "so that dump already carries the rewritten links", "sudo docker exec sprintable-backend-1 python -m scripts.jobs.rewrite_site_post_links",
@@ -222,3 +222,18 @@ def test_the_rewrite_job_refuses_to_run_without_a_database_url_instead_of_fallin
     with pytest.raises(SystemExit) as exc:
         asyncio.run(job.run([DEV_API], DEV_API, True))
     assert "neither DATABASE_URL nor ALEMBIC_URL" in str(exc.value)
+
+
+def test_a_prefix_may_be_plain_http_but_an_address_that_is_written_may_not() -> None:
+    """the first dev report listed `http://…run.app` links (the request scheme behind the front door): `--old-origin` must be able to name them; everything else about an origin stays as strict"""
+    from app.core.origin_check import parse_origin
+
+    host = "http://sprintable-backend-dev-787818285179.asia-northeast3.run.app"
+    assert parse_origin(host, allow_http=True) == host and parse_origin(host + "/", allow_http=True) == host
+    with pytest.raises(ValueError):
+        parse_origin(host)                      # not as an address that is written
+    with pytest.raises(ValueError):
+        Settings(public_api_url=host)           # the setting never takes it
+    for still_bad in (host + "/path", host + "?q=1", "http://u:p@h.example", "http://", "http://h.example:abc", "ftp://h.example", "http://h .example", "http://h.example\\x"):
+        with pytest.raises(ValueError):
+            parse_origin(still_bad, allow_http=True)
