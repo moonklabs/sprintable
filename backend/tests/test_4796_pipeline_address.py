@@ -113,8 +113,9 @@ def test_the_claims_the_runbook_makes_about_the_address_sources_are_true_in_the_
     ds = (_ROOT / "backend/app/services/desktop_setup.py").read_text()
     ex = ds[ds.index("def exchange_urls"):]
     assert 'os.environ.get("FASTAPI_URL"' in ex and "resolve_mcp_public_url()" in ex, "api_url from FASTAPI_URL, mcp_url from MCP_PUBLIC_URL"
-    assert re.search(r'FASTAPI_URL="\$\{FASTAPI_URL:-https://sprintable-backend-dev-[^}]+run\.app\}"', (_ROOT / "backend/scripts/deploy_backend.sh").read_text())
-    assert re.search(r'(?m)^DEV_BACKEND_URL="https://sprintable-backend-dev-[^"]+"', (_ROOT / "backend/scripts/deploy_mcp_dev.sh").read_text()), "no override in the hosted-MCP script"
+    assert 'FASTAPI_URL="${FASTAPI_URL:-https://dev-api.sprintable.ai}"' in (_ROOT / "backend/scripts/deploy_backend.sh").read_text()
+    assert re.search(r'(?m)^DEV_BACKEND_URL="https://dev-api\.sprintable\.ai"', (_ROOT / "backend/scripts/deploy_mcp_dev.sh").read_text()), "the hosted-MCP script carries the same value"
+    assert re.search(r"(?m)^  _FASTAPI_URL: https://dev-api\.sprintable\.ai$", _MAIN_TEXT), "the build's own default is the switch's value"
     for guide in ("connect-guide.ko.txt", "connect-guide.en.txt", "onboarding-guide.txt"):
         assert "run.app" in (_ROOT / "apps/web/public" / guide).read_text(), guide
     usage = (_ROOT / "backend/app/services/agent_api_key_usage.py").read_text()
@@ -236,3 +237,11 @@ def test_the_runbook_does_not_ask_for_a_stream_that_cannot_stay_open_and_names_t
 def test_the_runbook_says_the_switch_is_flipped_and_where_the_undo_is() -> None:
     sec = _runbook_section("## 9. ", "## 10. ")
     assert "**State: flipped** (story 4796, PO signal 2026-10-27)" in sec and "the previous value, kept in the comment above the line" in sec
+
+
+def test_the_three_defaults_that_carry_the_switch_value_are_named_in_the_runbook() -> None:
+    sec = _runbook_section("## 9. ", "## 10. ")
+    assert "Three places that are **not** the pipeline's `fastapi_url` line carry the same value" in sec
+    for needle in ("the `_FASTAPI_URL` default in `cloudbuild.yaml`", "`backend/scripts/deploy_backend.sh` (`FASTAPI_URL` default)", "`backend/scripts/deploy_mcp_dev.sh` (`DEV_BACKEND_URL`)", "must be put back with it"):
+        assert needle in sec, needle
+    assert "still hold the Cloud Run address" not in sec
