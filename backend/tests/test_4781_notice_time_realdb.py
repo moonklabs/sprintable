@@ -427,8 +427,13 @@ async def test_17_a_mark_that_names_the_same_persons_card_in_another_org_writes_
         await _sql(f"DELETE FROM notifications WHERE id = '{other_card}'")
 
 
-async def test_18_a_limit_that_hit_while_the_daemon_was_off_is_told_once_by_its_first_report_and_not_before(world):
-    """AC5 (4781): with the daemon off nothing is reported, so nothing can be told — there is no stale or guessed notice; the first report that comes after carries the limit and is told once"""
+async def test_18_a_silent_device_leaves_the_stood_notice_alone_and_tells_nothing_by_itself(world):
+    """AC5 (4781) «the limit hit while the daemon was off / the daemon went away»: with no report there is no notice; the first report that carries the limit is told once; and when the device then goes
+    quiet, the only timer the server has for this (the lift sweep) tells NOTHING by itself — even with the hold at 0 (set for this file) a session that still stands, with no report that it is gone, is never
+    «working again» (before that hold existed, a silent device's lift was the false line of 10-25)"""
+    from app.core.database import async_session_factory
+    from app.services import desktop_limit_notice
+
     async with _client() as c:
         device = await _device(c, "d4781t mac r")
         a = device["agents"][0]["member_id"]
@@ -436,14 +441,21 @@ async def test_18_a_limit_that_hit_while_the_daemon_was_off_is_told_once_by_its_
         assert await _notices(STOOD) == [] and await _cards() == [], "no report, no notice — however long the silence"
         await _report(c, device, a, "waiting_input", 2, limit=_with_time(_later()))  # the daemon is back and says what it has
         assert len(await _notices(STOOD)) == 1 and len(await _cards()) == 1
-        await _report(c, device, a, "waiting_input", 3, limit=_with_time(_later()))
-        assert len(await _notices(STOOD)) == 1, "told once"
+        # …and goes quiet: nothing more is ever reported. The sweep (the server's own timer) finds nothing to lift.
+        async with async_session_factory() as db:
+            assert await desktop_limit_notice.sweep_due_lifts(db) == 0
+            await db.commit()
+        assert await _notices(LIFTED) == [], "no «working again» line for a session that is still standing"
+        assert len(await _notices(STOOD)) == 1, "and the stood notice is still the one"
 
 
-async def test_19_a_phone_push_that_fails_leaves_the_inbox_card_and_the_bell_line(world, monkeypatch):
-    """AC5 (4781): the push is its own job (an outbox row, sent by a worker); when the worker's send fails it swallows the failure and the web inbox — the card and the bell line — is exactly as the notice made it"""
-    from app.core.database import async_session_factory
+async def test_19_a_phone_push_that_fails_in_the_worker_leaves_the_inbox_card_and_the_bell_line(world, monkeypatch):
+    """AC5 (4781): the push is its own job (an outbox row, sent by the delivery worker). When the worker's send fails, the real worker (`_deliver_one`) takes the failure as a job failure — it does not raise — and the
+    web inbox, the card and the bell line the notice made, is exactly as it was"""
+    from app.services import delivery_dispatcher
     from ee.services import expo_push
+
+    sent: list[int] = []
 
     async with _client() as c:
         device = await _device(c, "d4781t mac s")
@@ -457,10 +469,13 @@ async def test_19_a_phone_push_that_fails_leaves_the_inbox_card_and_the_bell_lin
             return [object()]
 
         async def send_fails(*_a, **_k):
+            sent.append(1)
             raise RuntimeError("expo is down")
 
         monkeypatch.setattr(expo_push, "_fetch_expo_push_targets", a_target)
         monkeypatch.setattr(expo_push, "_send_expo_push_targets", send_fails)
-        async with async_session_factory() as db:  # (what the worker does for the notice's job)
-            await expo_push._deliver_expo_push_now(db, ORG_UUID, [OWNER_TM], title="t", body="b", event_type="agent.limit_paused")  # must not raise
+        job = {"id": uuid.uuid4(), "org_id": ORG_UUID, "kind": "expo_push", "attempts": 0, "payload": {
+            "member_ids": [str(OWNER_TM)], "title": "t", "body": "b", "event_type": "agent.limit_paused", "muted_member_ids": None}}
+        await delivery_dispatcher._deliver_one(job)  # must not raise
+        assert sent == [1], "the worker really tried to send (and it failed)"
         assert (await _cards(), [n["body"] for n in await _notices(STOOD)]) == before, "the inbox is as it was"
