@@ -133,6 +133,45 @@ async def test_a_member_that_holds_a_place_keeps_it_at_the_limit_and_a_lapsed_pl
         assert await sse_lease.members(scope) == ["rcv:b"]  # the lapsed row was evicted, not counted
 
 
+async def _acquire_after_a_wait_on_the_lock(Session, scope: str, member: str, wait_sec: float):
+    """hold the scope's advisory lock (another acquire in the middle of its turn), start an acquire with a 2 s lease time that has to wait for it, release the lock
+    after `wait_sec` (longer than the lease time) and hand back the acquire's answer. A fixed wait on purpose: the lock is held, nothing else orders these."""
+    from sqlalchemy import text
+
+    from app.services import sse_lease_pg
+
+    async with Session() as holder:
+        await holder.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:s, 0))"), {"s": scope})
+        waiting = asyncio.ensure_future(sse_lease_pg.acquire(scope, 1, member, 2))
+        await asyncio.sleep(wait_sec)
+        assert not waiting.done(), "the acquire is waiting for the lock"
+        await holder.commit()  # lock released
+    return await waiting
+
+
+async def test_an_acquire_that_waited_on_the_lock_evicts_and_counts_with_the_time_after_its_wait(pg_lease):
+    """codex 4791 round 3 (HIGH): `now()` is the start of the transaction. «rcv:old» lapses while «rcv:new» waits for the lock: «new» must not count «old» as a stranger holding the
+    place, and its own 2 s lease must start when it runs (with the transaction's `now()` its deadline would already be past on arrival)."""
+    from app.services import sse_lease
+
+    async with _db() as (Session, new_scope):
+        scope = new_scope()
+        assert await sse_lease.acquire(scope, 1, "rcv:old") is True
+        await _move_expiry(Session, scope, 2)  # «old» is live when «new» starts waiting, lapsed when it gets the lock
+        assert await _acquire_after_a_wait_on_the_lock(Session, scope, "rcv:new", 2.6) is True
+        assert await sse_lease.members(scope) == ["rcv:new"], "«old» was evicted and «new» is live (its lease time counted from when it ran)"
+
+
+async def test_an_acquire_that_waited_on_the_lock_renews_its_own_place_from_the_time_after_its_wait(pg_lease):
+    from app.services import sse_lease
+
+    async with _db() as (Session, new_scope):
+        scope = new_scope()
+        assert await sse_lease.acquire(scope, 1, "rcv:own") is True  # a place it already holds (its reconnect)
+        assert await _acquire_after_a_wait_on_the_lock(Session, scope, "rcv:own", 2.6) is True
+        assert await sse_lease.members(scope) == ["rcv:own"], "renewed for a full 2 s from when it ran, not from before the wait"
+
+
 async def test_a_member_keeps_its_place_when_the_scope_is_over_the_limit_and_a_stranger_does_not_get_one(pg_lease):
     """a plan that was lowered (or a race) leaves a scope holding more than its limit: those already in keep their place, nobody new gets in"""
     from app.services import sse_lease

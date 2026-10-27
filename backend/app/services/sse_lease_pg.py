@@ -10,7 +10,9 @@ other and both read the same command. This module is the same lease, same answer
 - **Atomic acquire:** one transaction under `pg_advisory_xact_lock(scope)` — evict the lapsed, keep my own place if I hold it, else count and insert. Two
   instances asking for the last place at once are serialised (the Redis path does the same in one Lua script). A transaction-level lock is safe behind
   PgBouncer's transaction pooling.
-- **Time is the database's** (`now()`): instances never compare their own clocks. `earliest_expiry` hands back an epoch computed from the remaining seconds.
+- **Time is the database's** (`clock_timestamp()`, never `now()`): instances never compare their own clocks. `now()` is the START of the transaction; an acquire that waited on
+  the advisory lock would then evict, count and write its lapse time with a moment from before its wait (a lapsed lease counted as live, a heartbeat committed meanwhile
+  overwritten with an already-past deadline) — `clock_timestamp()` is read when the statement runs. `earliest_expiry` hands back an epoch computed from the remaining seconds.
 - **Fail-open like Redis:** a database that cannot answer gives None (acquire / members / taken_by / earliest_expiry / count) or does nothing (refresh / release /
   mark / clear); the caller goes on with its in-process view. Nothing here refuses a connection because the database failed.
 - Each call is its own short session (the stream's heartbeat is 30 s: one refresh and one mark read per stream per beat).
@@ -49,9 +51,9 @@ async def acquire(scope: str, limit: int, member: str, ttl_sec: int) -> "bool | 
     try:
         async with _session() as s:
             await s.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:scope, 0))"), {"scope": scope})
-            await s.execute(text("DELETE FROM sse_leases WHERE scope = :scope AND expires_at <= now()"), {"scope": scope})
+            await s.execute(text("DELETE FROM sse_leases WHERE scope = :scope AND expires_at <= clock_timestamp()"), {"scope": scope})
             mine = (await s.execute(
-                text("UPDATE sse_leases SET expires_at = now() + make_interval(secs => :ttl) WHERE scope = :scope AND member = :member RETURNING 1"),
+                text("UPDATE sse_leases SET expires_at = clock_timestamp() + make_interval(secs => :ttl) WHERE scope = :scope AND member = :member RETURNING 1"),
                 {"scope": scope, "member": member, "ttl": float(ttl_sec)},
             )).first()
             granted = mine is not None
@@ -64,7 +66,7 @@ async def acquire(scope: str, limit: int, member: str, ttl_sec: int) -> "bool | 
                 if others < limit:
                     await s.execute(
                         text(
-                            "INSERT INTO sse_leases (scope, member, expires_at) VALUES (:scope, :member, now() + make_interval(secs => :ttl)) "
+                            "INSERT INTO sse_leases (scope, member, expires_at) VALUES (:scope, :member, clock_timestamp() + make_interval(secs => :ttl)) "
                             "ON CONFLICT (scope, member) DO UPDATE SET expires_at = EXCLUDED.expires_at"
                         ),
                         {"scope": scope, "member": member, "ttl": float(ttl_sec)},
@@ -73,8 +75,8 @@ async def acquire(scope: str, limit: int, member: str, ttl_sec: int) -> "bool | 
             now = time.monotonic()
             if now - _last_sweep >= _SWEEP_EVERY_SEC:  # leases of agents that never came back: an hour past their end is long gone
                 _last_sweep = now
-                await s.execute(text("DELETE FROM sse_leases WHERE expires_at < now() - interval '1 hour'"))
-                await s.execute(text("DELETE FROM sse_lease_taken WHERE expires_at < now() - interval '1 hour'"))
+                await s.execute(text("DELETE FROM sse_leases WHERE expires_at < clock_timestamp() - interval '1 hour'"))
+                await s.execute(text("DELETE FROM sse_lease_taken WHERE expires_at < clock_timestamp() - interval '1 hour'"))
             await s.commit()
             return granted
     except Exception:
@@ -88,7 +90,7 @@ async def refresh(scope: str, member: str, ttl_sec: int) -> None:
         async with _session() as s:
             await s.execute(
                 text(
-                    "INSERT INTO sse_leases (scope, member, expires_at) VALUES (:scope, :member, now() + make_interval(secs => :ttl)) "
+                    "INSERT INTO sse_leases (scope, member, expires_at) VALUES (:scope, :member, clock_timestamp() + make_interval(secs => :ttl)) "
                     "ON CONFLICT (scope, member) DO UPDATE SET expires_at = EXCLUDED.expires_at"
                 ),
                 {"scope": scope, "member": member, "ttl": float(ttl_sec)},
@@ -110,7 +112,7 @@ async def release(scope: str, member: str) -> None:
 async def count(scope: str) -> "int | None":
     try:
         async with _session() as s:
-            return int((await s.execute(text("SELECT count(*) FROM sse_leases WHERE scope = :scope AND expires_at > now()"), {"scope": scope})).scalar_one())
+            return int((await s.execute(text("SELECT count(*) FROM sse_leases WHERE scope = :scope AND expires_at > clock_timestamp()"), {"scope": scope})).scalar_one())
     except Exception:
         logger.warning("sse_lease_pg.count failed", exc_info=True)
         return None
@@ -121,7 +123,7 @@ async def members(scope: str) -> "list[str] | None":
     try:
         async with _session() as s:
             rows = await s.execute(
-                text("SELECT member FROM sse_leases WHERE scope = :scope AND expires_at > now() ORDER BY expires_at, member"), {"scope": scope}
+                text("SELECT member FROM sse_leases WHERE scope = :scope AND expires_at > clock_timestamp() ORDER BY expires_at, member"), {"scope": scope}
             )
             return [r[0] for r in rows.all()]
     except Exception:
@@ -134,7 +136,7 @@ async def mark_taken(scope: str, member: str, ttl_sec: int) -> None:
         async with _session() as s:
             await s.execute(
                 text(
-                    "INSERT INTO sse_lease_taken (scope, member, expires_at) VALUES (:scope, :member, now() + make_interval(secs => :ttl)) "
+                    "INSERT INTO sse_lease_taken (scope, member, expires_at) VALUES (:scope, :member, clock_timestamp() + make_interval(secs => :ttl)) "
                     "ON CONFLICT (scope) DO UPDATE SET member = EXCLUDED.member, expires_at = EXCLUDED.expires_at"
                 ),
                 {"scope": scope, "member": member, "ttl": float(ttl_sec)},
@@ -147,7 +149,7 @@ async def mark_taken(scope: str, member: str, ttl_sec: int) -> None:
 async def taken_by(scope: str) -> "str | None":
     try:
         async with _session() as s:
-            row = (await s.execute(text("SELECT member FROM sse_lease_taken WHERE scope = :scope AND expires_at > now()"), {"scope": scope})).first()
+            row = (await s.execute(text("SELECT member FROM sse_lease_taken WHERE scope = :scope AND expires_at > clock_timestamp()"), {"scope": scope})).first()
             return None if row is None else row[0]
     except Exception:
         return None
@@ -168,7 +170,7 @@ async def earliest_expiry(scope: str, ttl_sec: int, heartbeat_sec: int) -> "floa
     try:
         async with _session() as s:
             remaining = (await s.execute(
-                text("SELECT EXTRACT(EPOCH FROM (min(expires_at) - now())) FROM sse_leases WHERE scope = :scope AND expires_at > now()"), {"scope": scope}
+                text("SELECT EXTRACT(EPOCH FROM (min(expires_at) - clock_timestamp())) FROM sse_leases WHERE scope = :scope AND expires_at > clock_timestamp()"), {"scope": scope}
             )).scalar_one()
         if remaining is None:
             return None
