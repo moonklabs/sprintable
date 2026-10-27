@@ -188,16 +188,16 @@ def test_the_documented_measurement_command_really_sends_what_the_exchange_route
     sec = _runbook_section("**First-VM measurement", "Caddy needs the real hostnames")
     commands = [c for c in re.findall(r"`([^`]+)`", sec) if c.startswith("V=$(printf")]
     assert len(commands) == 1, commands
-    cmd = commands[0].replace("seq 1 2400", "seq 1 3").replace("xargs -P 16", "xargs -P 1")
+    cmd = commands[0].replace("xargs -P 16", "xargs -P 1")
     fake = tmp_path / "bin"
     fake.mkdir()
     log = tmp_path / "curl.log"
     (fake / "curl").write_text('#!/bin/sh\nprintf "%s\\0" "$@" >> "$FAKE_LOG"; printf "\\n--END--\\0" >> "$FAKE_LOG"\necho 404\n')
     (fake / "curl").chmod(0o755)
     p = subprocess.run(["bash", "-c", cmd], env={"PATH": f"{fake}:/usr/bin:/bin", "FAKE_LOG": str(log), "HOME": str(tmp_path)}, capture_output=True, text=True, timeout=30)
-    assert p.returncode == 0 and p.stdout.split() == ["3", "404"], (p.stdout, p.stderr)
+    assert p.returncode == 0 and p.stdout.split() == ["2400", "404"], (p.stdout, p.stderr)
     calls = [c for c in log.read_bytes().decode().split("\n--END--\0") if c]
-    assert len(calls) == 3
+    assert len(calls) == 2400
     forged = set()
     for call in calls:
         args = call.split("\0")
@@ -208,4 +208,10 @@ def test_the_documented_measurement_command_really_sends_what_the_exchange_route
         forged.add(next(h for h in headers if h.startswith("X-Forwarded-For: ")))
         body = json.loads(args[args.index("-d") + 1])
         assert set(body) == {"code", "verifier"} and len(body["code"]) >= 20 and re.fullmatch(r"[A-Za-z0-9._~-]{43,128}", body["verifier"])
-    assert forged == {"X-Forwarded-For: 9.9.9.1", "X-Forwarded-For: 9.9.9.2", "X-Forwarded-For: 9.9.9.3"}, "a different forged address in every request"
+    import ipaddress
+
+    assert len(forged) == 2400, "a different forged address in every request"
+    for h in forged:
+        ipaddress.IPv4Address(h.removeprefix("X-Forwarded-For: "))  # a malformed address would be thrown away by client_ip() and the socket address counted
+    addresses = sorted(ipaddress.IPv4Address(h.removeprefix("X-Forwarded-For: ")) for h in forged)
+    assert (str(addresses[0]), str(addresses[-1])) == ("9.9.0.1", "9.9.9.150") and "(`9.9.0.1` … `9.9.9.150`;" in sec, "the range the runbook states is the range the command produces"
