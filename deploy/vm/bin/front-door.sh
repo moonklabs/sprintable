@@ -24,26 +24,31 @@ dir="$install_dir/runtime/front-door"
 usage() { echo "usage: $0 passthrough --host <name>.sprintable.ai --upstream https://sprintable-backend-<env>-<id>.<region>.run.app | stop | status" >&2; exit 2; }
 cmd="${1:-}"; [ -n "$cmd" ] || usage; shift
 
-stack_caddy_running() { [ -n "$(docker ps -q --filter label=com.docker.compose.project=sprintable --filter label=com.docker.compose.service=caddy)" ]; }
-mine() { docker ps -aq --filter "name=^${name}$"; }
+# docker lookups are plain assignments, never inside `[ … ]` / `if`: a failing docker must stop the script, not read as «nothing there»
+stack_caddy_ids() { docker ps -q --filter label=com.docker.compose.project=sprintable --filter label=com.docker.compose.service=caddy; }
+mine_ids() { docker ps -aq --filter "name=^${name}$"; }
 
 case "$cmd" in
   passthrough)
     host=""; upstream=""
     while [ "$#" -gt 0 ]; do
       case "$1" in
-        --host) host="${2:-}"; shift 2 ;;
-        --upstream) upstream="${2:-}"; shift 2 ;;
+        --host) [ "$#" -ge 2 ] || usage; host="$2"; shift 2 ;;
+        --upstream) [ "$#" -ge 2 ] || usage; upstream="$2"; shift 2 ;;
         *) usage ;;
       esac
     done
     [[ "$host" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.sprintable\.ai$ ]] || { echo "--host must be a name under sprintable.ai" >&2; exit 2; }
     env_name="$(cfg environment)"
     [[ "$env_name" =~ ^(dev|prod)$ ]] || { echo "the VM configuration names no known environment" >&2; exit 1; }
+    # the public API name of this environment (env/<environment>.yaml `hosts.api`; a test keeps the two equal): the front door never answers for the other environment's name
+    case "$env_name" in dev) api_host="dev-api.sprintable.ai" ;; prod) api_host="api.sprintable.ai" ;; esac
+    [ "$host" = "$api_host" ] || { echo "--host must be this environment's ($env_name) API name: $api_host" >&2; exit 2; }
     [[ "$upstream" =~ ^https://sprintable-backend-${env_name}-[a-z0-9]+(-[a-z0-9]+)?\.(asia-northeast3\.run\.app|a\.run\.app)$ ]] || { echo "--upstream must be the https address of this environment's ($env_name) Cloud Run backend (sprintable-backend-$env_name-…run.app), no path: requests carry users' credentials" >&2; exit 2; }
     email="$(cfg acme_email)"
     [[ "$email" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || { echo "acme_email in the VM configuration is not an e-mail address" >&2; exit 1; }
-    stack_caddy_running && { echo "the stack's own Caddy is running (same ports 80/443): this temporary front door is for the time BEFORE the stack takes over" >&2; exit 1; }
+    stack_ids="$(stack_caddy_ids)"
+    [ -z "$stack_ids" ] || { echo "the stack's own Caddy is running (same ports 80/443): stop the deploy timer and the stack first (RUNBOOK §7c)" >&2; exit 1; }
     mountpoint -q "$data_dir" || { echo "$data_dir is not a mounted data disk: the certificates would not be where the stack's Caddy looks" >&2; exit 1; }
     install -d -m 0755 "$dir" "$data_dir/caddy"
     tmp="$dir/.Caddyfile.new"
@@ -68,7 +73,8 @@ EOF
     docker run --rm -v "$tmp:/tmp/Caddyfile.check:ro" "$image" caddy validate --config /tmp/Caddyfile.check --adapter caddyfile > /dev/null \
       || { rm -f "$tmp"; echo "the generated Caddyfile does not validate" >&2; exit 1; }
     mv "$tmp" "$dir/Caddyfile"
-    [ -z "$(mine)" ] || docker rm -f "$name" > /dev/null
+    old_ids="$(mine_ids)"
+    [ -z "$old_ids" ] || docker rm -f "$name" > /dev/null
     docker run -d --name "$name" --restart unless-stopped -p 80:80 -p 443:443 \
       -v "$dir:/etc/caddy:ro" -v "$data_dir/caddy:/data" \
       --log-driver json-file --log-opt max-size=10m --log-opt max-file=5 "$image" > /dev/null
@@ -86,11 +92,13 @@ EOF
     ;;
   stop)
     [ "$#" -eq 0 ] || usage
-    if [ -n "$(mine)" ]; then docker rm -f "$name" > /dev/null; log "front door stopped (certificates stay in $data_dir/caddy)"; else log "no front door was running"; fi
+    old_ids="$(mine_ids)"
+    if [ -n "$old_ids" ]; then docker rm -f "$name" > /dev/null; log "front door stopped (certificates stay in $data_dir/caddy)"; else log "no front door was running"; fi
     ;;
   status)
     [ "$#" -eq 0 ] || usage
-    [ -n "$(docker ps -q --filter "name=^${name}$")" ] || { echo "not running"; exit 1; }
+    running_ids="$(docker ps -q --filter "name=^${name}$")"
+    [ -n "$running_ids" ] || { echo "not running"; exit 1; }
     echo "running"
     grep -E '^[a-z0-9.-]+\.sprintable\.ai \{|reverse_proxy ' "$dir/Caddyfile" || true
     ;;

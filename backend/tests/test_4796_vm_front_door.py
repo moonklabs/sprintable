@@ -28,6 +28,7 @@ _FAKE_DOCKER = r"""#!/bin/sh
 echo "docker $*" >> "$FAKE_LOG"
 case "$1" in
   ps)
+    [ -z "${FAKE_PS_FAIL:-}" ] || { echo "Cannot connect to the Docker daemon" >&2; exit 1; }
     case "$*" in
       *"com.docker.compose.service=caddy"*) [ -n "${FAKE_STACK_CADDY:-}" ] && echo stackcaddy1 ;;
       *"name=^sprintable-front-door$"*) [ -f "$FAKE_STATE/up" ] && echo frontdoor1 ;;
@@ -177,7 +178,8 @@ def test_status_reports_running_with_the_target_or_not_running(box) -> None:
     assert p.returncode == 0 and "running" in p.stdout and UP in p.stdout and HOST in p.stdout
 
 
-@pytest.mark.parametrize("args", [[], ["bogus"], ["passthrough"], ["passthrough", "--host", HOST], ["passthrough", "--upstream", UP], ["passthrough", "--host", HOST, "--upstream", UP, "--x"], ["stop", "now"], ["status", "now"]])
+@pytest.mark.parametrize("args", [[], ["bogus"], ["passthrough"], ["passthrough", "--host", HOST], ["passthrough", "--upstream", UP], ["passthrough", "--host", HOST, "--upstream", UP, "--x"], ["stop", "now"], ["status", "now"],
+                                  ["passthrough", "--host"], ["passthrough", "--host", HOST, "--upstream"], ["passthrough", "--upstream"]])
 def test_wrong_usage_is_refused(box, args: list[str]) -> None:
     p, calls = box(*args)
     assert p.returncode == 2 and "docker" not in calls
@@ -254,8 +256,9 @@ def test_the_runbook_says_how_to_undo_phase_3_and_stops_the_front_door_before_th
     assert p3.index("front-door.sh stop") < p3.index("--ingress internal") < p3.index("Final dump"), "the front door is the first writer to stop"
     assert "also admits traffic from the same project" in p3 and "check from outside" in p3
     undo = p3[p3.index("**Undo"):]
-    assert undo.index("systemctl stop sprintable-deploy.timer") < undo.index("front-door.sh passthrough"), "the stack's Caddy must be down before the front door can start"
-    assert "docker stop sprintable-caddy-1" in undo
+    assert undo.index("systemctl disable --now sprintable-deploy.timer") < undo.index("systemctl stop sprintable-deploy.service") < undo.index("docker stop sprintable-caddy-1") < undo.index("front-door.sh passthrough"), \
+        "the deploy timer and a running deploy first, then the stack, and only then can the front door start"
+    assert "--ingress all` (backend, `sprintable-frontend-dev`, `sprintable-mcp-dev`)" in undo
 
 
 @pytest.mark.parametrize("env_name", [".*", "dev|prod", "[a-z]+", "d.v"])
@@ -264,3 +267,42 @@ def test_a_regex_looking_environment_name_can_not_widen_the_upstream_check(box, 
     _config(box, environment=env_name)
     p, calls = box("passthrough", "--host", HOST, "--upstream", "https://sprintable-backend-evil-1.asia-northeast3.run.app")
     assert p.returncode != 0 and not box.caddyfile.exists() and "docker" not in calls
+
+
+def test_the_host_is_bound_to_this_vms_environment_and_equals_the_declared_api_name(box) -> None:
+    """codex: a dev VM must not answer for the prod API name (nor the other way round)"""
+    assert box("passthrough", "--host", "api.sprintable.ai", "--upstream", UP)[0].returncode == 2, "dev VM, prod name"
+    for env_name, name in (("dev", "dev-api.sprintable.ai"), ("prod", "api.sprintable.ai")):
+        declared = yaml.safe_load((_ROOT / f"deploy/vm/env/{env_name}.yaml").read_text())["hosts"]["api"]
+        assert declared == name and f'{env_name}) api_host="{name}"' in _SCRIPT.read_text(), env_name
+    _config(box, environment="prod")
+    p, calls = box("passthrough", "--host", "dev-api.sprintable.ai", "--upstream", UP.replace("-dev-", "-prod-"))
+    assert p.returncode == 2 and not box.caddyfile.exists() and "docker" not in calls, "prod VM, dev name"
+
+
+def test_a_failing_docker_stops_the_script_instead_of_reading_as_nothing_there(box) -> None:
+    """codex: a lookup inside `[ -n \"$(…)\" ]` swallows the failure — stop would report «no front door was running» and phase 3 would go on with the door open"""
+    assert box("passthrough", "--host", HOST, "--upstream", UP)[0].returncode == 0
+    p, _ = box("stop", FAKE_PS_FAIL="1")
+    assert p.returncode != 0 and "no front door was running" not in p.stdout
+    p, calls = box("status", FAKE_PS_FAIL="1")
+    assert p.returncode != 0 and "not running" not in p.stdout, "an unanswered question is not «not running»"
+    box.caddyfile.unlink()
+    before = (box.tmp / "calls.log").read_text()
+    p, calls = box("passthrough", "--host", HOST, "--upstream", UP, FAKE_PS_FAIL="1")
+    assert p.returncode != 0
+    new_calls = calls[len(before):].splitlines()  # only what THIS call did (the log keeps the earlier ones)
+    assert not box.caddyfile.exists() and not any(c.startswith("docker run") for c in new_calls), "it stops at the lookup: nothing is validated, written or started"
+
+
+def test_the_runbook_phase_1_takes_the_stack_down_and_phase_3_lists_the_writers_and_the_fresh_export() -> None:
+    text = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
+    card = text[text.index("## 7c. Dev cutover in three phases"):text.index("## 8. ")]
+    p1 = card[card.index("**Phase 1"):card.index("**Phase 2")]
+    assert "systemctl disable --now sprintable-deploy.timer" in p1 and "docker stop sprintable-caddy-1" in p1
+    p3 = card[card.index("**Phase 3"):]
+    pre = p3[:p3.index("\n1. ")]
+    assert "systemctl stop sprintable-deploy.service" in pre and "made again from the live dev services after the latest dev deploy" in pre and "ADMIN_OPERATOR_ALLOWLIST" in pre
+    step1 = p3[p3.index("\n1. "):p3.index("\n2. ")]
+    assert "gcloud run services update sprintable-frontend-dev --project $PROJECT --region $REGION --ingress internal" in step1, "the Cloud Run frontend is a same-project caller"
+    assert "the same for `sprintable-mcp-dev`" in step1, "so is the hosted MCP"
