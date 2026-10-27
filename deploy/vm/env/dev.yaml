@@ -36,6 +36,7 @@ services:
       BACKEND_URL: "https://dev-api.sprintable.ai"
       FASTAPI_URL: "https://dev-api.sprintable.ai"
       ADMIN_OPERATOR_AUDIENCE: "https://dev-api.sprintable.ai"
+      GCS_MEMO_ATTACHMENTS_BUCKET: "sprintable-memo-attachments-dev"  # dev-only attachments bucket (story 4798; live on Cloud Run dev as cloudbuild.yaml _GCS_MEMO_ATTACHMENTS_BUCKET) — pinned here so it does not depend on the private file
     secrets:  # env name -> Secret Manager secret id (same ids as the live service; values are read at deploy time)
       APPLE_PRIVATE_KEY: APPLE_SIWA_PRIVATE_KEY
       CHANNEL_CREDENTIAL_ENCRYPTION_KEY: CHANNEL_CREDENTIAL_ENCRYPTION_KEY_DEV
@@ -68,7 +69,6 @@ services:
       OPS_RESTART_TS: "a Cloud Run restart trigger, not a setting"
     added:  # new on the VM
       TRUST_FORWARDED_FOR: "true"
-      GCS_MEMO_ATTACHMENTS_BUCKET: "sprintable-memo-attachments-dev"  # dev-only attachments bucket (story 5269 makes it live on Cloud Run dev; then this moves to overrides)
     live_plain:  # names whose value is taken from the private plain file (PO exports it from the live service)
       - ADMIN_OPERATOR_ALLOWLIST
       - APPLE_KEY_ID
@@ -126,6 +126,7 @@ services:
       REALTIME_URL: "https://dev-realtime.sprintable.ai"
       APP_BASE_URL: "https://dev-app.sprintable.ai"
       NEXT_PUBLIC_APP_URL: "https://dev-app.sprintable.ai"
+      GCS_MEMO_ATTACHMENTS_BUCKET: "sprintable-memo-attachments-dev"  # the frontend reads it too (cloudbuild.yaml: "dev names it on the backend AND the frontend")
     secrets:  # env name -> Secret Manager secret id (same ids as the live service; values are read at deploy time)
       EDGE_CLIENT_IP_SECRET: EDGE_CLIENT_IP_SECRET_DEV
       FIREBASE_BFF_INTERNAL_SECRET: FIREBASE_BFF_INTERNAL_SECRET

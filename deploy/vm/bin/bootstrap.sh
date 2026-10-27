@@ -2,7 +2,7 @@
 # One-time (and re-runnable) preparation of a Sprintable VM — Debian 12 on GCE. Run as root from an unpacked deploy/vm bundle:
 #   sudo ./bootstrap.sh <environment> <project> <deploy-bucket> <backups-bucket> <acme-email>
 # Installs Docker + compose, mounts the data disk, adds swap, installs the deployer / backup tooling and their systemd units, and the Ops Agent.
-# It does NOT start deploying: restore the database first (RUNBOOK), put the private plain file in place, then `systemctl enable --now sprintable-deploy.timer`.
+# It does NOT start deploying: restore the database first (RUNBOOK), put the private plain file in place, then `systemctl enable --now sprintable-deploy.timer sprintable-backup.timer sprintable-restore-check.timer`.
 set -euo pipefail
 
 if [ "$#" -ne 5 ]; then
@@ -87,5 +87,5 @@ fi
 
 systemctl daemon-reload
 systemctl enable --now docker
-systemctl enable --now sprintable-backup.timer sprintable-restore-check.timer
+# the backup and restore-check timers are NOT enabled here: their first run would find no database (the unit fails and says so every night until the restore). RUNBOOK §7 step 6 enables them with the deploy timer.
 echo "bootstrap done for $env_name — deploy timer NOT enabled yet (restore the database first, see RUNBOOK)"

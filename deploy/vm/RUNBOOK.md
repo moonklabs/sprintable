@@ -126,6 +126,8 @@ gcloud compute ssh $VM --zone $ZONE --tunnel-through-iap
 mkdir b && tar -xzf /tmp/vm-bundle.tgz -C b
 sudo b/bin/bootstrap.sh dev sprintable-494803 sprintable-vm-dev-deploy sprintable-vm-dev-backups <ops-email>
 ```
+Bootstrap enables only Docker: the deploy, backup and restore-check timers are enabled in §7 step 6, after the database is restored. (A VM bootstrapped by the first version of this script has the backup and restore-check timers on: `sudo systemctl disable --now sprintable-backup.timer sprintable-restore-check.timer` until §7 step 6.)
+
 Re-run it from a newer bundle whenever `deployer.py`, `render_env.py`, the units, `bootstrap.sh` or **`compose.yml`** change (README; the deployer refuses a bundle whose `compose.yml` differs from the copy bootstrap installed).
 
 **Private plain file** — the non-secret values of the live services, per service, readable by root only. Made from the live Cloud Run services (values stay on this machine / that VM; they are not pasted anywhere):
@@ -165,7 +167,7 @@ Writers (users, desktop apps, phones) are stopped for the length of the dump-res
 4. Checksum sidecar (restore.sh verifies it before touching anything), then upload both: `shasum -a 256 dev.dump > dev.dump.sha256` · `gcloud storage cp dev.dump dev.dump.sha256 gs://$BACKUPS_BUCKET/import/`
 5. On the VM: `sudo python3 /opt/sprintable/bin/deployer.py --db-only` (needs step 6 first only for `desired.json`; for the rehearsal upload any valid one), then
    `sudo /opt/sprintable/bin/restore.sh gs://$BACKUPS_BUCKET/import/dev.dump > counts-vm.tsv` and `diff counts-source.tsv <(grep -P '^\S+\t\d+$' counts-vm.tsv)` — **empty diff = row counts equal**.
-6. Make a sha's version the desired one: `gcloud storage cp gs://$DEPLOY_BUCKET/candidates/$SHA.json gs://$DEPLOY_BUCKET/desired.json` (the sha of a dev build whose steps in §5 succeeded; with a hand-built bundle: `/tmp/vm-bundle/desired.json`) and enable the deployer: `sudo systemctl enable --now sprintable-deploy.timer`. Watch `journalctl -u sprintable-deploy -f` and the newest object under `gs://$BACKUPS_BUCKET/status/dev/`: states go `deploying → deployed` (migrate runs before the swap).
+6. Make a sha's version the desired one: `gcloud storage cp gs://$DEPLOY_BUCKET/candidates/$SHA.json gs://$DEPLOY_BUCKET/desired.json` (the sha of a dev build whose steps in §5 succeeded; with a hand-built bundle: `/tmp/vm-bundle/desired.json`) and enable the deployer **and the two database timers** (they wait for the restored database — bootstrap leaves them off, a backup run before the restore would fail every night): `sudo systemctl enable --now sprintable-deploy.timer sprintable-backup.timer sprintable-restore-check.timer`. Watch `journalctl -u sprintable-deploy -f` and the newest object under `gs://$BACKUPS_BUCKET/status/dev/`: states go `deploying → deployed` (migrate runs before the swap).
 
 Undo of the move as a whole: nothing was deleted from Cloud SQL — scale Cloud Run back up (step 2 undo) and leave DNS where it is (§8 is a separate step).
 
