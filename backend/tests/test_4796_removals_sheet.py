@@ -230,7 +230,7 @@ def test_realtime_check_lists_the_load_balancer_front_not_only_the_back() -> Non
 # ── the pgbouncer capture and undo, run for real against a fake gcloud and a captured definition ───────────────────────────────────────────────
 
 _PGB_DEFINITION = r"""{"name":"pgb-dev","machineType":"https://www.googleapis.com/compute/v1/projects/p/zones/z/machineTypes/e2-small",
- "disks":[{"boot":false,"source":"https://x/disks/other"},{"boot":true,"source":"https://www.googleapis.com/compute/v1/projects/p/zones/z/disks/pgb-boot-disk"}],
+ "disks":[{"boot":true,"source":"https://www.googleapis.com/compute/v1/projects/p/zones/z/disks/pgb-boot-disk"}],
  "networkInterfaces":[{"subnetwork":"https://x/regions/r/subnetworks/default","networkIP":"10.178.0.63"}],
  "serviceAccounts":[{"email":"pgb-sa@p.iam.gserviceaccount.com"}],"tags":{"items":["pgbouncer-dev","ssh"]},
  "metadata":{"items":[{"key":"startup-script","value":"#!/bin/bash\necho boot, with, commas"},{"key":"enable-oslogin","value":"TRUE"}]}}"""
@@ -289,18 +289,22 @@ def test_no_code_block_of_a_removal_row_is_left_with_an_angle_bracket_placeholde
         assert "<" not in c, c
     for key in ("R2", "R3"):
         assert '= 1 ] && ' in _rows()[key].split("Find it (read only)")[1].split("\n")[0], f"{key}: the name is taken only if exactly one resource matched"
-    assert 'INSTANCE=sprintable-dev' in _rows()["R5"] and 'grep -x "${INSTANCE:?}"' in _rows()["R5"]
+    for key in ("R2", "R3"):
+        assert "wc -l" not in _rows()[key], "wc -l pads its count on macOS (` 1`), where the PO runs these lines"
+    assert 'INSTANCE=sprintable-dev' in _rows()["R5"] and 'grep -qx "${INSTANCE:?}"' in _rows()["R5"]
     assert '--password "${GW_PASSWORD:?' in _rows()["R5"], "the gateway role's password is a guarded variable the PO fills, never a literal"
     for secret in ("SUPPORT_GATEWAY_DATABASE_URL_dev", "DATABASE_URL_DIRECT_DEV_SPRINTABLE", "DATABASE_URL_DEV_PGBOUNCER_SPRINTABLE"):
-        assert secret in _rows()["R5"].split("**The services that connected")[1]
+        assert secret in _rows()["R5"].split("The services that connected")[1]
 
 
 _FAKE_GCLOUD_SQL = r"""#!/bin/sh
 echo "gcloud $*" >> "$FAKE_LOG"
 case "$1 $2 $3" in
-  "sql instances list") echo sprintable-dev ; echo other ;;
+  "sql instances list") [ "$FAKE_NO_INSTANCE" = 1 ] || echo sprintable-dev ; echo other ;;
+  "sql backups create") if [ "$FAKE_BACKUP_FAILS" = 1 ]; then echo "backup failed" >&2; exit 1; fi ;;
   "sql export sql") case "$*" in *"--database $FAKE_FAIL_DB"*) echo "export failed" >&2; exit 1 ;; esac ;;
   "storage ls -l") echo "  1234  gs://x/y" ;;
+  "storage ls gs://bk/cloudsql-final/"*) i=0; while [ $i -lt "$FAKE_OBJECTS" ]; do echo "gs://bk/cloudsql-final/x/db$i.sql.gz"; i=$((i+1)); done ;;
 esac
 """
 
@@ -309,19 +313,81 @@ def _r5_export_block() -> str:
     return _fence_with("R5", "EXPORTS-OK")
 
 
-def test_the_cloud_sql_exports_print_their_all_clear_only_when_every_database_was_exported(tmp_path: Path) -> None:
+def test_the_cloud_sql_exports_print_their_all_clear_only_when_everything_it_stands_for_happened(tmp_path: Path) -> None:
     b = tmp_path / "bin"
     b.mkdir()
     g = b / "gcloud"
     g.write_text(_FAKE_GCLOUD_SQL)
     g.chmod(g.stat().st_mode | stat.S_IEXEC)
-    env = {**os.environ, "PATH": f"{b}:{os.environ['PATH']}", "PROJECT": "p", "BACKUPS_BUCKET": "bk", "FAKE_LOG": str(tmp_path / "log"), "FAKE_FAIL_DB": "none"}
-    ok = subprocess.run(["bash", "-c", _r5_export_block()], capture_output=True, text=True, env=env, cwd=tmp_path, timeout=30)
+    base = {**os.environ, "PATH": f"{b}:{os.environ['PATH']}", "PROJECT": "p", "BACKUPS_BUCKET": "bk", "FAKE_LOG": str(tmp_path / "log"), "FAKE_FAIL_DB": "none",
+            "FAKE_OBJECTS": "3", "FAKE_NO_INSTANCE": "0", "FAKE_BACKUP_FAILS": "0"}
+
+    def run(**over: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["bash", "-c", _r5_export_block()], capture_output=True, text=True, env={**base, **over}, cwd=tmp_path, timeout=30)
+
+    ok = run()
     assert ok.returncode == 0 and "EXPORTS-OK" in ok.stdout, ok.stderr
     log = (tmp_path / "log").read_text()
-    stamps = set(re.findall(r"cloudsql-final/(\d{8}T\d{6}Z)/", log))
-    assert len(stamps) == 1 and log.count("sql export sql") == 3, "one fresh path per attempt, three databases"
-    bad = subprocess.run(["bash", "-c", _r5_export_block()], capture_output=True, text=True, env={**env, "FAKE_FAIL_DB": "support_gateway"}, cwd=tmp_path, timeout=30)
-    assert "EXPORTS-OK" not in bad.stdout, "one failed export must not read as all clear"
-    wrong = subprocess.run(["bash", "-c", _r5_export_block()], capture_output=True, text=True, env={**env, "INSTANCE": "x"}, cwd=tmp_path, timeout=30)
-    assert "sprintable-dev" in wrong.stdout.splitlines()[0], "the instance name is checked against the real list first"
+    assert len(set(re.findall(r"cloudsql-final/(\d{8}T\d{6}Z)/", log))) == 1 and log.count("sql export sql") == 3, "one fresh path per attempt, three databases"
+    for label, over in (("one export failed", {"FAKE_FAIL_DB": "support_gateway"}), ("an object is missing under the path", {"FAKE_OBJECTS": "2"}), ("the backup failed", {"FAKE_BACKUP_FAILS": "1"}),
+                        ("the instance is not in the list", {"FAKE_NO_INSTANCE": "1"})):
+        bad = run(**over)
+        assert "EXPORTS-OK" not in bad.stdout, f"no all clear when {label}"
+    assert "NO SUCH INSTANCE: sprintable-dev" in run(FAKE_NO_INSTANCE="1").stdout
+
+
+_FAKE_GCLOUD_FIND = r"""#!/bin/sh
+case "$1 $2 $3" in
+  "redis instances list") printf '%s' "$FAKE_REDIS" ;;
+  "compute instances list") printf '%s' "$FAKE_PGB" ;;
+esac
+"""
+
+
+@pytest.mark.parametrize("marker,var,matches,expected", [
+    ("unset REDIS;", "FAKE_REDIS", "cache-dev\n", "REDIS=cache-dev"),
+    ("unset REDIS;", "FAKE_REDIS", "", None), ("unset REDIS;", "FAKE_REDIS", "cache-dev\nother-dev\n", None),
+    ("unset PGB PGB_ZONE;", "FAKE_PGB", "pgb-dev\tzone-a\n", "PGB=pgb-dev PGB_ZONE=zone-a"),
+    ("unset PGB PGB_ZONE;", "FAKE_PGB", "", None), ("unset PGB PGB_ZONE;", "FAKE_PGB", "a\tz\nb\tz\n", None),
+])
+def test_the_name_finders_take_exactly_one_match_and_forget_what_an_earlier_search_left(tmp_path: Path, marker: str, var: str, matches: str, expected) -> None:
+    line = re.search(rf"`({re.escape(marker)}[^`]*)`", SHEET)
+    assert line, marker
+    b = tmp_path / "bin"
+    b.mkdir()
+    g = b / "gcloud"
+    g.write_text(_FAKE_GCLOUD_FIND)
+    g.chmod(g.stat().st_mode | stat.S_IEXEC)
+    env = {**os.environ, "PATH": f"{b}:{os.environ['PATH']}", "PROJECT": "p", "REGION": "r", var: matches.encode().decode("unicode_escape")}
+    # a stale value from an earlier search sits in the shell; the finder must not let it through when the new search found nothing usable
+    stale = "REDIS=old-redis; PGB=old-vm; PGB_ZONE=old-zone; "
+    r = subprocess.run(["bash", "-c", stale + line.group(1)], capture_output=True, text=True, env=env, timeout=30)
+    if expected:
+        assert r.returncode == 0 and r.stdout.strip() == expected, (r.stdout, r.stderr)
+    else:
+        assert r.returncode != 0 and "old-" not in r.stdout, (r.stdout, r.stderr)
+
+
+def test_the_pgbouncer_capture_refuses_a_second_disk_instead_of_a_half_undo(tmp_path: Path) -> None:
+    b = tmp_path / "bin"
+    b.mkdir()
+    g = b / "gcloud"
+    g.write_text(_FAKE_GCLOUD_PGB)
+    g.chmod(g.stat().st_mode | stat.S_IEXEC)
+    extra = _PGB_DEFINITION.replace('"disks":[', '"disks":[{"boot":false,"source":"https://x/disks/other"},')
+    (tmp_path / "def.json").write_text(extra)
+    env = {**os.environ, "PATH": f"{b}:{os.environ['PATH']}", "PROJECT": "p", "REGION": "r", "PGB": "pgb-dev", "PGB_ZONE": "z", "FAKE_LOG": str(tmp_path / "log"), "FAKE_DEFINITION": str(tmp_path / "def.json")}
+    r = subprocess.run(["bash", "-c", _fence_with("R3", "disks snapshot")], capture_output=True, text=True, env=env, cwd=tmp_path, timeout=30)
+    assert "SNAPSHOT NOT TAKEN" in r.stdout
+    assert "disks snapshot" not in (tmp_path / "log").read_text(), "no snapshot is taken of a half of the machine"
+
+
+def test_the_undo_steps_that_loop_say_so_when_all_of_them_worked_and_the_users_are_both_restored() -> None:
+    r1 = _rows()["R1"].split("5. **Undo:**")[1].split("\n")[0]
+    assert r1.count(" && ") == 3 and "for s in" not in r1, "four commands in one chain"
+    r5 = _rows()["R5"].split("5. **Undo**")[1]
+    for token in ("DATABASES-OK", "IMPORTS-OK", "JOBS-OK"):
+        assert f'[ "$OK" = 1 ] && echo {token}' in r5, f"{token} is printed only when no step set OK=0"
+    assert r5.count("|| OK=0") >= 3
+    assert "gcloud sql users create sprintable " in r5 and "gcloud sql users create support_gw " in r5
+    assert '${APP_PASSWORD:?' in r5 and "ALEMBIC_DATABASE_URL_DEV" in r5 and "--set-cloudsql-instances" in r5
