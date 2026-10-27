@@ -179,8 +179,11 @@ jobs:
             # story #2123 S-b/S-c(2026-07-24): consume/dispatch를 위에서 켰으므로 wake_agent 발행측도
             # Redis로 승격(대칭). dev 완전전환·검증됨.
             echo "backend_fanout_wake_redis_enabled=true" >> "$GITHUB_OUTPUT"
-            # story #4397 — prod: push by person stays off until the app build that re-registers on account switch is out.
-            echo "push_devices_by_user=false" >> "$GITHUB_OUTPUT"
+            # story #4397 — prod: push notifications by person across orgs (settings.push_devices_by_user). It was held off until the app build that
+            # unregisters on /login and re-registers on an account change was out: the store builds (iOS TestFlight 46 · Android internal 33, 10-25)
+            # carry mobile 168, and the dev lap on that build (10-27 03:00–03:11Z: logout → unregister 204 · account switch → the same token row moves to
+            # the new person, the old one gets nothing · one person in two orgs → both orgs' notifications on the one device) passed. Evidence on the story.
+            echo "push_devices_by_user=true" >> "$GITHUB_OUTPUT"
             # story #2728 후속(2026-08-17, 페드루 PO 지시) — NEXT_PUBLIC_EE_ENABLED가 이 파이프라인
             # 어디에도 배선된 적이 없어(cloudbuild.yaml·Dockerfile 전부 무배선) dev FE billing 표면이
             # 아예 안 떴다. prod는 이 커밋으로 무접촉(값을 새로 켜는 게 아니라 기존 동작 그대로

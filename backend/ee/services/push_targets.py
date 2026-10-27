@@ -5,8 +5,9 @@ it), so selecting by org + member reached only the org the person last opened th
 setting on, devices are selected by the **person** behind each target member (org_members.user_id in that org), plus rows
 not backfilled yet (user_id NULL) the old way. Off (default): the old selection, unchanged.
 
-The setting stays off in prod until the app build that re-registers on account switch (and switches org when a notification
-of another org is tapped) is out — otherwise someone who switched accounts would get the previous account's notifications.
+The setting was held off in prod until the app build that unregisters on /login and re-registers on an account change was out
+— otherwise someone who switched accounts would get the previous account's notifications. A device still on an older build
+(no unregister · no re-register) keeps that gap until its app is updated: the row stays with the person who last registered it.
 """
 from __future__ import annotations
 
