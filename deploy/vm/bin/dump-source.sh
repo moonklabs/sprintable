@@ -113,7 +113,7 @@ log "dump done in $((t2 - t1)) s, $size bytes, $(grep -c 'TABLE DATA' <<< "$list
 
 if [ "$upload" = yes ]; then
   bucket="$(cfg backups_bucket)"
-  gcloud storage cp --quiet --no-clobber "$base.dump" "$base.dump.sha256" "$base.counts.tsv" "gs://$bucket/import/"
+  gcloud storage cp --quiet --no-clobber --project "$(cfg project)" "$base.dump" "$base.dump.sha256" "$base.counts.tsv" "gs://$bucket/import/"
   log "uploaded to gs://$bucket/import/$(basename "$base.dump") (+ .sha256, .counts.tsv)"
 fi
 echo "dump:   $base.dump"

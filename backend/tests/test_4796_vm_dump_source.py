@@ -181,6 +181,7 @@ def test_upload_copies_the_three_files_to_the_import_folder_and_only_when_asked(
     cp = next(c for c in calls.splitlines() if c.startswith("gcloud storage cp"))
     assert cp.endswith(" gs://bkt-1/import/") and cp.count("gs://") == 1, "one destination: the backups bucket's import folder"
     assert "--no-clobber" in cp, "create only: an existing object is never replaced"
+    assert "--project " in cp, "the project is named, not inherited from whatever the VM's gcloud has set"
     names = re.findall(r"(dev-final-\d{8}T\d{6}Z-\d+\.[\w.]+)", cp)
     assert sorted(re.sub(r"^dev-final-\d{8}T\d{6}Z-\d+", "X", n) for n in names) == ["X.counts.tsv", "X.dump", "X.dump.sha256"]
 

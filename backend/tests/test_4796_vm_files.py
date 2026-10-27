@@ -131,11 +131,13 @@ def test_every_gcloud_command_of_section_7_names_its_project_and_the_writers_sto
     """codex: `export PROJECT` does not set gcloud's active project; and `--ingress internal` alone does not stop every writer"""
     text = (_VM / "RUNBOOK.md").read_text()
     section = text[text.index("## 7. Move the data"):text.index("## 8. ")]
-    for command in re.findall(r"`(gcloud (?:sql|run|scheduler|compute|secrets)[^`]*)`", section):
+    for command in re.findall(r"`(gcloud (?:sql|run|scheduler|compute|secrets|storage)[^`]*)`", section):
         assert "--project $PROJECT" in command, command
     assert "gcloud storage cp /tmp/vm-bundle/desired.json gs://$DEPLOY_BUCKET/desired.json" in section, "the hand-built bundle path has its own upload"
     step2 = section[section.index("\n2. Stop writes"):section.index("\n3. Dump and count")]
-    assert "does not stop every writer" in step2 and "front-door.sh stop" in step2 and "POST / PUT / PATCH / DELETE" in step2
+    assert "does not stop every writer" in step2 and "front-door.sh stop" in step2
+    assert "sprintable-frontend-dev" in step2 and "sprintable-mcp-dev" in step2, "the same-project callers that write through the backend"
+    assert "no request other than the health check" in step2 and "cron endpoints are GET requests" in step2, "a GET can write"
 
 
 def test_no_timer_that_needs_the_database_is_enabled_before_the_restore() -> None:
@@ -423,7 +425,7 @@ def test_the_dump_comes_with_its_checksum_because_restore_demands_it_for_a_gs_so
     assert "cloud-sql-proxy" not in text, "the source has no public address: a laptop can not reach it"
     assert "sha256_verify" in (_VM / "bin/restore.sh").read_text()
     script = (_VM / "bin/dump-source.sh").read_text()
-    assert '.dump.sha256' in script and 'gcloud storage cp --quiet --no-clobber "$base.dump" "$base.dump.sha256" "$base.counts.tsv" "gs://$bucket/import/"' in script
+    assert '.dump.sha256' in script and 'gcloud storage cp --quiet --no-clobber --project "$(cfg project)" "$base.dump" "$base.dump.sha256" "$base.counts.tsv" "gs://$bucket/import/"' in script
 
 
 def test_the_runbook_closes_the_cloud_run_door_with_a_flag_cloud_run_accepts() -> None:
