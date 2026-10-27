@@ -169,10 +169,11 @@ def test_the_runbook_names_the_new_setting_and_the_job_steps_that_the_job_really
         assert needle in sec10, needle
     for needle in ("**before Phase 3** against Cloud SQL", "so the final dump already carries the rewritten links", "sudo docker exec sprintable-backend-1 python -m scripts.jobs.rewrite_site_post_links",
                    "gcloud run jobs describe sprintable-verify-oneoff --project $PROJECT --region $REGION --format=export > verify-oneoff-before.yaml",
-                   "gcloud run jobs update sprintable-verify-oneoff --project $PROJECT --region $REGION --image", "--format='value(spec.template.spec.containers[0].image)'",
-                   "gcloud run jobs execute sprintable-verify-oneoff --project $PROJECT --region $REGION --wait --command=python --args=-m,scripts.jobs.rewrite_site_post_links",
+                   "gcloud run jobs update sprintable-verify-oneoff --project $PROJECT --region $REGION --command=python --image", "--format='value(spec.template.spec.containers[0].image)'", "`jobs execute` takes only `--args`",
+                   "gcloud run jobs execute sprintable-verify-oneoff --project $PROJECT --region $REGION --wait --args=-m,scripts.jobs.rewrite_site_post_links",
                    "gcloud run jobs replace verify-oneoff-before.yaml --project $PROJECT --region $REGION"):
         assert needle in sec10, needle
+    assert "jobs execute sprintable-verify-oneoff --project $PROJECT --region $REGION --wait --command" not in sec10, "execute has no --command"
     for flag in ("--old-origin", "--new-origin", "--apply"):
         assert f'"{flag}"' in job, flag
     assert "return 0 if (done == total_before and left == 0) else 1" in job
