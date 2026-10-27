@@ -171,6 +171,27 @@ Writers (users, desktop apps, phones) are stopped for the length of the dump-res
 
 Undo of the move as a whole: nothing was deleted from Cloud SQL — scale Cloud Run back up (step 2 undo) and leave DNS where it is (§8 is a separate step).
 
+## 7c. Dev cutover in three phases — the front door first (PO decision 2026-10-27)
+
+Why: the data move takes minutes, but moving every client (lane agents' MCP, the Electron app's stored addresses, GitHub/Polar/GA4 registrations, the scheduler, the connectors) takes people and days. So the clients move first, to the VM's address, while the VM still hands everything on to Cloud Run; the data move comes last and only flips where the VM hands requests to. In front of `dev-app` / `dev-api` / `dev-mcp` there are Cloudflare Worker routes (`sprintable-dev-app-proxy`, `sprintable-dev-api-proxy`, `sprintable-mcp-dev-proxy`) with `run.app` addresses written into them: changing a record's content does nothing while its route exists — a route has to be deleted (or retargeted) in the same step.
+
+**Phase 1 — `dev-api` to the VM, data still on Cloud SQL (users notice nothing; `dev-app` and `dev-mcp` stay as they are).**
+1. Cloudflare, in this order, after writing the old values down (`dns-before-cutover.json`): (a) delete the route `sprintable-dev-api-proxy`; (b) change the record `dev-api` to **A → the VM address, DNS only, TTL 60**.
+2. At once on the VM: `sudo /opt/sprintable/bin/front-door.sh passthrough --host dev-api.sprintable.ai --upstream https://sprintable-backend-dev-787818285179.asia-northeast3.run.app` (checks the address, validates the Caddyfile, starts one Caddy container; it refuses to run while the stack's own Caddy runs; the certificate is requested now and is stored in the stack's Caddy folder). `front-door.sh status` shows what it points at.
+3. Measure: the seconds until the first 200 — `while :; do date +%T; curl -sS -o /dev/null -w '%{http_code}\n' https://dev-api.sprintable.ai/api/v2/health; sleep 1; done`; an event stream held open for 10 minutes (`curl -N … /api/v2/events/stream?member_id=…`) compared with the same call to the `run.app` address (gaps, buffering); the §8 «which address does the backend count» test (429 at the limit, forged X-Forwarded-For ignored) — **through this front door**: Cloud Run now sees the VM as its caller, so a shared bucket for everyone must be ruled out here.
+   Undo: `sudo /opt/sprintable/bin/front-door.sh stop`; recreate the route; put the saved `dev-api` CNAME (proxied) back.
+
+**Phase 2 — move the guests to `dev-api.sprintable.ai`, one at a time, each undoable** (people; Cloud Run's request log shows what still arrives at `run.app` directly — the end is «zero»): the Electron app's stored `api_url` / `mcp_url` (the server's `FASTAPI_URL` is the source; the desktop story refreshes stored addresses on connect) · the GitHub App callback and webhook · the GA4 redirect URI and `BACKEND_URL` · the Polar webhook · the Cloud Scheduler targets (and `apply-cloud-scheduler` in `cloudbuild.yaml` once the Cloud Run backend goes) · the connectors' default address (the old `…-57iommnikq-du.a.run.app` form). The phone app needs nothing (it talks to `dev-app` only). Login callbacks (Google, Apple, channel OAuth) are on the app domain and do not change.
+
+**Phase 3 — the data move (the only part with downtime).** Preconditions: the rehearsal of §7a done, `desired.json` in place, the VM database restored once, the timers off, the private plain file's `L2_TRIGGER_ENABLED` back to its live value after the rehearsal.
+1. Stop writes: Cloud Run `--ingress internal` + pause the scheduler jobs (§7 step 2). From here the front door answers 502.
+2. `sudo docker stop sprintable-backend-1 sprintable-frontend-1` (restore.sh refuses with a running backend).
+3. Final dump with `--label final --upload` (§7 step 3), restore with `RESTORE_WIPE=yes` (step 5): the row-count diff must be **empty** (writers are stopped).
+4. `sudo /opt/sprintable/bin/front-door.sh stop`, then `sudo python3 /opt/sprintable/bin/deployer.py --force` — the stack's own Caddy starts on the same certificate folder, so no new certificate is needed for `dev-api`.
+5. Checks from inside, then from outside (`/api/v2/health`, login, a stream). `dev-app`: delete the route `sprintable-dev-app-proxy` and point the record at the VM (A, proxied; Cloudflare SSL mode for this host must allow the origin certificate) — the VM's own frontend (the `frontend-vm` image) takes over the UI; `dev-mcp` stays on Cloud Run with `_BACKEND_URL` changed (§9).
+6. Enable the timers (§7 step 6). One day of soak, then §10.
+   Undo (before §10): point `dev-app` back at its route/CNAME; `front-door.sh` again with the Cloud Run upstream; Cloud Run `--ingress all` + resume the scheduler jobs. Writes made on the VM after the restore are not in Cloud SQL: a rollback after real use is a move back, not an undo.
+
 ## 8. Lane wheel on the VM, then DNS — **disruptive, announced first**
 
 Before any DNS record moves, the VM is tested by address (hosts file or `curl --resolve`) with the lane wheel: login · conversation · desktop relay · MCP · phone instruction.
