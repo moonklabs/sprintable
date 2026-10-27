@@ -37,7 +37,7 @@ from sprintable_sse import SprintableSSEClient, MessageContext  # noqa: E402
 logger = logging.getLogger("grok-sprintable")
 
 GROK_BIN = os.getenv("GROK_BIN", "grok")
-DEFAULT_API_URL = "https://sprintable-backend-dev-57iommnikq-du.a.run.app"
+DEFAULT_API_URL = "https://dev-api.sprintable.ai"
 ACP_PROTOCOL_VERSION = 1
 
 

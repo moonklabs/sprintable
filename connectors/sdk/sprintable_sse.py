@@ -12,7 +12,7 @@ Usage:
         await ctx.reply(response)
 
     client = SprintableSSEClient(
-        api_url="https://sprintable-backend-dev-57iommnikq-du.a.run.app",
+        api_url="https://dev-api.sprintable.ai",
         api_key="sk_live_...",
     )
     await client.run(inject)   # blocks forever, auto-reconnects
@@ -36,7 +36,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_API_URL = "https://sprintable-backend-dev-57iommnikq-du.a.run.app"
+DEFAULT_API_URL = "https://dev-api.sprintable.ai"
 RECONNECT_BACKOFF = [2, 5, 10, 30, 60]
 STREAM_READ_TIMEOUT = 90
 DEDUP_MAX_SIZE = 1000
