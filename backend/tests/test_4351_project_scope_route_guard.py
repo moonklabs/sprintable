@@ -51,6 +51,9 @@ _KNOWN = {
     # story #4535 — the org's «원격 제어» switch as the device's own agent key sees it: one boolean of the org of that key's
     # setup (an org-level setting, no project entity)
     "app/routers/remote_control.py::get_device_remote_control",
+    # story #4801 — the same device agent key: the two addresses the deployment hands out (`exchange_urls`, the pair a setup confirmation
+    # gives); the key's own row is read only to tell it is a live device's (404 otherwise) — no project-owned entity is read or returned
+    "app/routers/desktop_endpoints.py::get_device_endpoints",
     "app/routers/agent_gateway.py::ack_event",
     "app/routers/agent_gateway.py::agent_stream",
     "app/routers/agent_inbox.py::receive_inbox_webhook",
