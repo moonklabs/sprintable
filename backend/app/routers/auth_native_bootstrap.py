@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.public_origin import public_api_origin
 from app.core.rate_limit import limiter
 from app.dependencies.database import get_db
 from app.models.device_installation import DeviceInstallation
@@ -200,7 +201,7 @@ async def native_bootstrap(
             app_id=installation.app_id,
             http_method="POST",
             route="/auth/native",
-            web_origin=str(request.base_url).rstrip("/"),
+            web_origin=public_api_origin(request),
             ttl_seconds=TTL_BOOTSTRAP_REDEEM_SECONDS,
             installation_id=installation.id,
             key_version=installation.key_version,
@@ -311,7 +312,7 @@ async def native_bootstrap_challenge(
             app_id=installation.app_id,
             http_method="POST",
             route="/api/v2/auth/native-bootstrap",
-            web_origin=str(request.base_url).rstrip("/"),
+            web_origin=public_api_origin(request),
             ttl_seconds=TTL_BOOTSTRAP_ISSUE_SECONDS,
             installation_id=installation.id,
             key_version=installation.key_version,

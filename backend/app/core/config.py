@@ -1,3 +1,4 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # E-LOOP-LEDGER P1: gemini-embedding-001 @ output_dimensionality=768(파운데이션 crux 확정,
@@ -8,6 +9,20 @@ EMBEDDING_DIMENSION = 768
 
 
 class Settings(BaseSettings):
+    @field_validator("public_api_url")
+    @classmethod
+    def _public_api_url_is_an_origin(cls, value: str) -> str:
+        value = (value or "").strip().rstrip("/")
+        if not value:
+            return ""
+        from urllib.parse import urlsplit
+
+        parts = urlsplit(value)
+        loopback = parts.scheme == "http" and parts.hostname in ("localhost", "127.0.0.1")
+        if not (parts.scheme == "https" or loopback) or not parts.hostname or parts.path or parts.query or parts.fragment or parts.username or parts.password:
+            raise ValueError("PUBLIC_API_URL must be an origin: https://host[:port] (http only for localhost), no path, query or credentials")
+        return value
+
     model_config = SettingsConfigDict(env_file=(".env", ".env.local"), env_file_encoding="utf-8", extra="ignore")
 
     # Database
@@ -179,6 +194,11 @@ class Settings(BaseSettings):
     # 이 정확한 콜백 URL을 리다이렉트 URI로 등록하는 것은 이 스토리 밖(analytics.
     # readonly 스코프 동의화면 검수와 같은 PO/사람 항목).
     backend_url: str = ""
+    # story 4796 — the public address of this API (scheme + host [+ port], no path): the origin that links which are STORED or handed to other parties are built from
+    # (the public link of a published hosted-site post, the `web_origin` of device-proof challenges). Empty = the request's own host, as before. The request's host is not
+    # a public address: behind the VM's pass-through front door it is the Cloud Run host (the door sets `Host` to it), and on the VM it is whatever the front door passes.
+    # The dev pipeline sets it from `_FASTAPI_URL` (the one switch, RUNBOOK §9); a bad value stops the app at start-up (the new revision never becomes ready).
+    public_api_url: str = ""
 
     # EE / SaaS gating
     license_consent: str = ""

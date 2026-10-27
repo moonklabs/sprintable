@@ -873,6 +873,11 @@ steps:
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
           ENV_VARS="$${ENV_VARS},REDIS_URL=${_REDIS_URL},RATE_LIMIT_BACKEND=redis"
         fi
+        # story 4796: the public address of the dev API (the one switch, RUNBOOK §9): links that are stored or bound into signed records are built from it, not from the request's host (the front door passes the Cloud Run host).
+        # prod states nothing here: it keeps the request's host until its own move.
+        if [ "${_DEPLOY_ENV}" = "dev" ]; then
+          ENV_VARS="$${ENV_VARS},PUBLIC_API_URL=${_FASTAPI_URL}"
+        fi
         # story #2777 — ADMIN_OPERATOR_*(dev만).
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
           ENV_VARS="$${ENV_VARS},ADMIN_OPERATOR_AUDIENCE=${_ADMIN_OPERATOR_AUDIENCE},ADMIN_OPERATOR_ALLOWLIST=${_ADMIN_OPERATOR_ALLOWLIST}"
