@@ -320,3 +320,16 @@ def test_phase_3_success_path_reopens_the_hosted_mcp_resumes_the_scheduler_and_n
     assert "sudo env RESTORE_WIPE=yes /opt/sprintable/bin/restore.sh" in success, "the command is named here, whatever the order the changes merge in"
     p1 = text[text.index("**Phase 1"):text.index("**Phase 2")]
     assert "systemctl stop sprintable-deploy.service" in p1, "a running deploy could bring the stack's Caddy back"
+
+
+def test_section_7c_uses_the_hosted_mcps_real_variable_and_moves_the_scheduler_with_the_tool_before_resuming() -> None:
+    """codex (A, round 7): the hosted MCP reads SPRINTABLE_API_URL; resuming jobs that still call the closed Cloud Run address would just fail"""
+    text = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
+    card = text[text.index("## 7c. Dev cutover in three phases"):text.index("## 8. ")]
+    assert "_BACKEND_URL" not in card and "`SPRINTABLE_API_URL`" in card
+    p2 = card[card.index("**Phase 2"):card.index("**Phase 3")]
+    assert "apply_cloud_scheduler.py --base-url" in p2 and "apply-cloud-scheduler" in p2 and "before that" in p2
+    p3 = card[card.index("**Phase 3"):]
+    step6 = p3[p3.index("\n6. "):p3.index("**Undo")]
+    assert "infra/apply_cloud_scheduler.py --env dev --base-url https://dev-api.sprintable.ai --apply" in step6
+    assert step6.index("apply_cloud_scheduler.py") < step6.index("scheduler jobs resume"), "retarget first, then resume"
