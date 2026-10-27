@@ -1,0 +1,12 @@
+[Unit]
+Description=Sprintable deploy (pull desired version, migrate, swap, health, rollback)
+After=docker.service network-online.target
+Requires=docker.service
+ConditionPathIsMountPoint=/srv/sprintable
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/sprintable/bin/deployer.py --config /etc/sprintable/deployer.json
+TimeoutStartSec=7200
+UMask=0077
+Nice=5

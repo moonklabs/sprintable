@@ -14,7 +14,7 @@
   DATABASE_URL  있으면 그것을 쓴다(postgresql+asyncpg://... cloud-sql-proxy 경유 가능). 없으면
                 ALEMBIC_URL로 떨어진다(scripts/jobs/_db_env.py — sprintable-verify-oneoff
                 Cloud Run Job이 DATABASE_URL이 아니라 ALEMBIC_URL만 갖고 있다).
-  JWT_SECRET    dev와 동일 secret (Secret Manager JWT_SECRET) — create_access_token 서명용
+  JWT_SECRET    dev와 동일 secret (Secret Manager JWT_SECRET_DEV) — create_access_token 서명용
   ORG_ID        대상 조직 (실 dev org)
   PROJECT_ID    대상 프로젝트 (해당 org 소속)
 

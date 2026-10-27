@@ -96,6 +96,8 @@ esac
 # bash 3.2(macOS) 호환을 위해 ${ENV^^} 대신 tr 사용.
 ENV_UPPER="$(printf '%s' "${ENV}" | tr '[:lower:]' '[:upper:]')"
 DB_SECRET_NAME="DATABASE_URL_${ENV_UPPER}"
+# story 4798 (AC6): the token-signing secret is one per environment (JWT_SECRET_DEV / JWT_SECRET_PROD) — never one shared name.
+JWT_SECRET_NAME="JWT_SECRET_${ENV_UPPER}"
 
 # log는 stderr로 — DRY_RUN의 machine-readable stdout과 섞이지 않도록.
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$ENV] $*" >&2; }
@@ -109,7 +111,7 @@ MEMBER_SSOT_APIKEY_CUT="${MEMBER_SSOT_APIKEY_CUT:-true}"
 
 # ── 결함③ fix: full env. Secret Manager 시크릿 (값에 콤마 없어 콤마 구분 OK). ──
 SECRETS_SPEC="DATABASE_URL=${DB_SECRET_NAME}:latest"
-SECRETS_SPEC="${SECRETS_SPEC},JWT_SECRET=JWT_SECRET:latest"
+SECRETS_SPEC="${SECRETS_SPEC},JWT_SECRET=${JWT_SECRET_NAME}:latest"
 # ⚠️ SUPABASE 시크릿은 dead(backend/app 0 functional refs·JWT_SECRET 우선) → 미주입(S1 결정 유지).
 SECRETS_SPEC="${SECRETS_SPEC},GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest"
 SECRETS_SPEC="${SECRETS_SPEC},GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest"
@@ -151,6 +153,7 @@ ENV=${ENV}
 SERVICE_NAME=${SERVICE_NAME}
 CLOUD_SQL_INSTANCE=${CLOUD_SQL_INSTANCE}
 DB_SECRET_NAME=${DB_SECRET_NAME}
+JWT_SECRET_NAME=${JWT_SECRET_NAME}
 IMAGE=${IMAGE}
 RUNTIME_SA=${RUNTIME_SA}
 MIN_INSTANCES=${MIN_INSTANCES}
