@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.public_origin import public_api_origin
 from app.core.rate_limit import limiter
 from app.core.security import verify_totp
 from app.dependencies.database import get_db
@@ -102,7 +103,7 @@ async def registration_challenge(
             app_id=body.app_id,
             http_method="POST",
             route="/api/v2/auth/device-installations/register",
-            web_origin=str(request.base_url).rstrip("/"),
+            web_origin=public_api_origin(request),
             ttl_seconds=TTL_REGISTER_SECONDS,
         )
     except ChallengeAlreadyActiveError:

@@ -1,7 +1,7 @@
 """story 4796 — what Phase 2 of the dev move reached (PO, 2026-10-27) and what was accepted, written where the cutover plan reads it (RUNBOOK §9).
 
 Pinned: the status paragraph names what is done, the GitHub webhooks the PO moved, the two deferred paths with the 24-hour numbers they were deferred on, the accepted cost after Phase 3, and the callers still arriving at `run.app`;
-the paragraph about links stored with the request host is true in the code (the publish route uses `request.base_url`, the recipe auto-publish uses `backend_url`, the front door sets `Host` to the Cloud Run host, the native-bootstrap and device routes build `web_origin` from `request.base_url`).
+the paragraph about links stored with the request host is true in the code (the publish route and the native-bootstrap and device routes build their origin with `public_api_origin()`, which is `PUBLIC_API_URL` when it is set and otherwise the request's host; the recipe auto-publish, which has no request, uses `PUBLIC_API_URL`, else `backend_url`; the front door sets `Host` to the Cloud Run host).
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ def _sec9() -> str:
 
 def test_the_status_paragraph_states_what_is_done_deferred_accepted_and_still_direct() -> None:
     sec = _sec9()
-    status = sec[sec.index("**Phase 2 status"):sec.index("**Links stored with the request host.**")]
+    status = sec[sec.index("**Phase 2 status"):sec.index("**Links stored with the request host (fixed by `PUBLIC_API_URL`).**")]
     for needle in (
         "34 agents and 17 relays moved", "the defaults of the Python and host connectors, the guides' dev examples and fakechat", "the Pi, OpenCode and OpenClaw entry points keep the prod app domain, see Phase 2",
         "about 1,800 requests a day", "the dev GitHub App's webhook and the repository webhook of `moonklabs/sprintable`", "a redelivery of each answered 200 through the front door",
@@ -31,16 +31,22 @@ def test_the_status_paragraph_states_what_is_done_deferred_accepted_and_still_di
 def test_the_stored_link_paragraph_is_true_in_the_code() -> None:
     routes = (_ROOT / "backend/app/routers/site_posts.py").read_text()
     services = (_ROOT / "backend/app/services/site_posts.py").read_text()
-    assert "backend_base_url=str(request.base_url)" in routes and "backend_base_url=settings.backend_url" in services
+    assert "backend_base_url=public_api_origin(request)," in routes and "backend_base_url=public_api_origin(fallback=settings.backend_url)," in services, "the fix: no origin is built from the request any more"
+    helper = (_ROOT / "backend/app/core/public_origin.py").read_text()
+    assert helper.index("if configured:") < helper.index("if fallback and fallback.strip():") < helper.index("str(request.base_url)"), "configured, then the fallback (backend_url for the recipe path), then the request's host"
+    assert 'if request is not None else ""' in helper, "no request and nothing configured: empty, as `backend_url` itself can be"
     assert 'action="site_post_published"' in services and '"url": url' in services
+    assert 'str(request.base_url).rstrip("/")' in (_ROOT / "backend/app/core/public_origin.py").read_text(), "the old behaviour survives only as the fallback when nothing is configured"
     assert "header_up Host {upstream_hostport}" in (_ROOT / "deploy/vm/bin/front-door.sh").read_text()
     for rel in ("backend/app/routers/auth_native_bootstrap.py", "backend/app/routers/device_installations.py"):
-        assert 'web_origin=str(request.base_url).rstrip("/")' in (_ROOT / rel).read_text(), rel
+        assert "web_origin=public_api_origin(request)," in (_ROOT / rel).read_text(), rel
     sec = _sec9()
-    para = sec[sec.index("**Links stored with the request host.**"):sec.index("\nOrder of work:")]
-    for needle in ("`request.base_url`", "`header_up Host {upstream_hostport}`", "as they did before the flip", "answer 404 once the Cloud Run backend is deleted (§10)", "the recipe-approved auto-publish builds its link from `backend_url`",
-                   "Before §10 count the stored links", "contains `run.app`"):
+    para = sec[sec.index("**Links stored with the request host (fixed by `PUBLIC_API_URL`).**"):sec.index("\nOrder of work:")]
+    for needle in ("`request.base_url`", "`header_up Host {upstream_hostport}`", "answer 404 once the Cloud Run backend is deleted (§10)", "the recipe-approved auto-publish (whose fallback is `backend_url`)",
+                   "build from `public_api_origin()`", "on dev that is `PUBLIC_API_URL`, set from the one switch", "when it is empty (prod) the routes use the request's host, as before, and the recipe auto-publish — which has no request — uses `backend_url`",
+                   "rewritten by the one-off job of §10 («Stored hosted-site links»), a precondition of Phase 3", "after Phase 3 the host is `dev-api`"):
         assert needle in para, needle
+    assert "Before §10 count the stored links" not in para, "the count is now the job's report, not a hand query"
 
 
 def test_the_ga4_and_polar_statements_match_the_vm_env_and_the_code() -> None:

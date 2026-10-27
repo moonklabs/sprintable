@@ -199,6 +199,60 @@ async def _submit_and_approve(client, session, *, org_id, draft_id, status="appr
     return gate_id
 
 
+async def _publish_hosted_post_and_read_back(public_api_url: str) -> tuple[str, str]:
+    """Publishes a hosted-site post (no site connector) through the real route with `settings.public_api_url` set to `public_api_url`; returns (the link in the response, the link stored in the activity log)."""
+    from app.core.config import settings
+    from app.main import app
+    from app.models.activity_log import ActivityLog
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    previous = settings.public_api_url
+    settings.public_api_url = public_api_url
+    try:
+        async with Session() as s:
+            org_id, project_id = await _seed_org(s)
+            await _seed_default_role(s, org_id)
+            agent_id = await _seed_agent(s, org_id, project_id)
+            human_id = await _seed_human(s, org_id)
+            story_id = await _seed_story(s, org_id, project_id)
+        _setup_org_scoped_app(app, Session, org_id, user_id=agent_id)
+        async with _client_for(app) as client:
+            r_draft = await client.post(f"/api/v2/organizations/{org_id}/site-posts/drafts", json=_draft_body(work_item_id=story_id))
+            assert r_draft.status_code == 201, r_draft.text
+            draft_id = r_draft.json()["draft_id"]
+        _setup_org_scoped_app(app, Session, org_id, user_id=human_id)
+        async with _client_for(app) as client, Session() as s:
+            r_submit = await client.post(f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/submit", json={})
+            assert r_submit.status_code == 200, r_submit.text
+            await _approve_gate_directly(s, uuid.UUID(r_submit.json()["gate_id"]))
+            r_pub = await client.post(f"/api/v2/organizations/{org_id}/site-posts/drafts/{draft_id}/publish")
+        assert r_pub.status_code == 200, r_pub.text
+        async with Session() as s:
+            log = (await s.execute(select(ActivityLog).where(ActivityLog.org_id == org_id, ActivityLog.action == "site_post_published"))).scalars().one()
+        return r_pub.json()["url"], log.context["url"]
+    finally:
+        settings.public_api_url = previous
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_story_4796_the_link_is_built_from_the_configured_public_address_not_the_request_host():
+    """Behind the pass-through front door the request's host is the Cloud Run host; the stored link must carry the configured public address."""
+    url, stored = await _publish_hosted_post_and_read_back("https://dev-api.sprintable.ai")
+    assert url.startswith("https://dev-api.sprintable.ai/api/v2/public/site-posts/"), url
+    assert stored == url, "the same link is what is stored in the activity log"
+    assert "http://test" not in url
+
+
+@pytest.mark.anyio
+async def test_story_4796_without_a_configured_address_the_request_host_is_still_used():
+    url, stored = await _publish_hosted_post_and_read_back("")
+    assert url.startswith("http://test/api/v2/public/site-posts/"), url
+    assert stored == url
+
+
 @pytest.mark.anyio
 async def test_publish_success_matching_seal_creates_public_projection_and_platform_audit():
     from app.main import app

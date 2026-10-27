@@ -35,6 +35,7 @@ services:
       NEXT_PUBLIC_APP_URL: "https://dev-app.sprintable.ai"
       BACKEND_URL: "https://dev-api.sprintable.ai"
       FASTAPI_URL: "https://dev-api.sprintable.ai"
+      PUBLIC_API_URL: "https://dev-api.sprintable.ai"  # story 4796: the origin stored/bound links are built from (the pipeline sets the same value on Cloud Run dev from _FASTAPI_URL)
       ADMIN_OPERATOR_AUDIENCE: "https://dev-api.sprintable.ai"
       GCS_MEMO_ATTACHMENTS_BUCKET: "sprintable-memo-attachments-dev"  # dev-only attachments bucket (story 4798; live on Cloud Run dev as cloudbuild.yaml _GCS_MEMO_ATTACHMENTS_BUCKET) — pinned here so it does not depend on the private file
     secrets:  # env name -> Secret Manager secret id (same ids as the live service; values are read at deploy time)
