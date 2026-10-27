@@ -53,12 +53,31 @@ def test_the_request_pool_fits_the_database_budget_and_is_not_the_one_that_ran_d
     assert size + overflow >= FIRST_DAY_FLOOR, f"{environment}: a request pool of {size} + {overflow} is what ran dry on the first day"
 
 
+def test_dev_and_prod_have_the_same_pool_and_it_is_the_one_the_incident_asked_for() -> None:
+    """codex (pool PR): `30/0` or a drift of prod alone would pass the budget; the values are the ones applied to the running dev VM (20 + 10)"""
+    assert _pools("dev") == _pools("prod") == (20, 10)
+
+
 def test_the_numbers_the_test_uses_are_the_real_ones() -> None:
     assert _max_connections() == 60
     defaults = Settings()
     assert (defaults.worker_db_pool_size, defaults.worker_db_max_overflow) == (2, 1), "the worker pool the budget counts"
     database = (_ROOT / "backend/app/core/database.py").read_text()
     assert "pg_pubsub.listen_loop 상시 1" in database, "the raw LISTEN connection the budget counts"
+    # the raw connection is real, exactly one site opens one, and nothing else in the app opens a connection outside the pools
+    raw_sites = [
+        f"{p.relative_to(_ROOT / 'backend')}:{n}"
+        for p in (_ROOT / "backend/app").rglob("*.py")
+        for n, line in enumerate(p.read_text().splitlines(), 1)
+        if re.search(r"\b(asyncpg|psycopg2?|psycopg)\.connect\(", line) and not line.lstrip().startswith("#")
+    ]
+    assert raw_sites == ["app/services/pg_pubsub.py:243"], raw_sites
+    # one process: the image starts uvicorn without --workers, and the compose service does not override the command or scale the service
+    dockerfile = (_ROOT / "backend/Dockerfile").read_text()
+    cmd = next(line for line in dockerfile.splitlines() if line.startswith("CMD "))
+    assert "--workers" not in cmd and "uvicorn" in cmd, cmd
+    backend = yaml.safe_load((_VM / "compose.yml").read_text())["services"]["backend"]
+    assert "command" not in backend and "deploy" not in backend and "scale" not in backend, "the budget counts one backend process"
     for environment in ("dev", "prod"):
         decl = yaml.safe_load((_VM / "env" / f"{environment}.yaml").read_text())
         assert str(decl["services"]["backend"]["overrides"]["DB_PGBOUNCER"]) == "false", "direct connections: every open session is a database connection"
