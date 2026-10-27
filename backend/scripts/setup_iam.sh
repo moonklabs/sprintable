@@ -2,13 +2,14 @@
 # D-S7: IAM 최소 권한 설정 스크립트
 #
 # Cloud Run 런타임 SA (dev + prod) 생성 + 최소 권한:
-#   - secretmanager.secretAccessor
 #   - cloudsql.client
+# (story 4798: secret access is NOT a project-level role — each secret is granted to the account that uses it, one at a time, with
+#  grant_secret_access.sh <dev|prod> <SECRET_NAME>…)
 #
 # GitHub Actions SA (D-S2에서 생성됨)는 다음 역할만 유지:
 #   - cloudbuild.builds.editor
 #   - artifactregistry.writer
-#   (run.admin, secretAccessor는 Cloud Run SA로 이동 — 최소 권한 원칙)
+#   (run.admin은 제거 — 최소 권한 원칙. secret access는 비밀별: grant_secret_access.sh ci <SECRET_NAME>)
 #
 # 사용법:
 #   GCP_PROJECT=sprintable-494803 bash backend/scripts/setup_iam.sh
@@ -34,22 +35,21 @@ create_runtime_sa() {
     local sa_name="cloudrun-runtime-${env}"
     local sa_email="${sa_name}@${GCP_PROJECT}.iam.gserviceaccount.com"
 
-    log "Creating Cloud Run runtime SA for ${env}: ${sa_email}"
+    log "Creating Cloud Run runtime SA for ${env}: ${sa_email}" >&2
     gcloud iam service-accounts create "${sa_name}" \
         --display-name="Cloud Run Runtime (${env})" \
-        --project="${GCP_PROJECT}" 2>/dev/null || log "SA already exists, skipping create."
+        --project="${GCP_PROJECT}" 2>/dev/null || log "SA already exists, skipping create." >&2
 
     # 최소 권한 역할만 부여
     for ROLE in \
-        roles/secretmanager.secretAccessor \
         roles/cloudsql.client; do
         gcloud projects add-iam-policy-binding "${GCP_PROJECT}" \
             --member="serviceAccount:${sa_email}" \
             --role="${ROLE}" \
-            --condition=None
+            --condition=None > /dev/null  # (gcloud prints the whole policy on stdout; this function's stdout is the account name only)
     done
 
-    log "SA ${sa_email} — roles: secretAccessor + cloudsql.client"
+    log "SA ${sa_email} — roles: cloudsql.client (secrets: grant_secret_access.sh ${env} <SECRET_NAME>…)" >&2
     echo "${sa_email}"
 }
 
