@@ -1,5 +1,6 @@
 'use client';
 
+import { firstGraphemes } from '@/lib/first-graphemes';
 import { useEffect } from 'react';
 import { useTranslations } from 'next-intl';
 import { Check, ChevronDown, ChevronRight, Loader2, LogOut, Plus, Search, Settings } from 'lucide-react';
@@ -42,7 +43,7 @@ interface ContextSwitcherChipProps {
 function OrgInitial({ name, className }: { name: string; className?: string }) {
   return (
     <span className={className ?? 'flex h-4 w-4 shrink-0 items-center justify-center rounded-sm bg-brand text-[9px] font-semibold text-brand-foreground'}>
-      {name.charAt(0).toUpperCase()}
+      {firstGraphemes(name, 1).toUpperCase()}
     </span>
   );
 }
@@ -293,7 +294,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                       className={`min-h-11 w-full justify-start gap-2.5 rounded-lg px-3.5 py-2.5 text-left font-normal hover:bg-accent disabled:opacity-60 ${isActive ? 'bg-brand/10' : ''}`}
                     >
                       <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
-                        {label.charAt(0).toUpperCase()}
+                        {firstGraphemes(label, 1).toUpperCase()}
                       </span>
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className="truncate text-[13.5px] text-foreground">{label}</span>

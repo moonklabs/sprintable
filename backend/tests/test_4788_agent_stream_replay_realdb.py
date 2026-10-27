@@ -246,6 +246,9 @@ async def test_06_a_declared_set_is_what_is_sent_and_a_malformed_one_is_ignored_
         assert await _connect(ag, Session, ids, {"x-sprintable-accept-events": ACTS}) == []
         # a declaration with a token that is not a type name: ignored as a whole (everything is sent) — never read partially
         assert _types(await _connect(ag, Session, ids, {"x-sprintable-accept-events": f"{ACTS}, bad token!"})) == [FYI] * 10
+        # PO 10-26: an upper-case token or an empty piece is not a declaration to trust either — it would match no event and the stream would look empty
+        for odd in (ACTS.upper(), f",{ACTS}", f"{ACTS},,{FYI}", f"{ACTS},"):
+            assert _types(await _connect(ag, Session, ids, {"x-sprintable-accept-events": odd})) == [FYI] * 10, odd
     finally:
         await _cleanup(ag, engine, ids[2])
 
@@ -256,6 +259,8 @@ def test_07_the_parsing_and_that_the_user_agent_is_no_signal():
     assert parse_accept_header(None) is None and parse_accept_header("") is None and parse_accept_header(" , ,") is None
     assert parse_accept_header("a, b.c ,d:e") == frozenset({"a", "b.c", "d:e"})
     assert parse_accept_header("a, b c") is None and parse_accept_header("x" * 65) is None
+    assert parse_accept_header("DISPATCHED") is None and parse_accept_header("a, Dispatched") is None  # upper case matches no event
+    assert parse_accept_header(",dispatched") is None and parse_accept_header("a,,b") is None and parse_accept_header("a,b,") is None  # an empty piece
     assert parse_accept_header(",".join(f"t{i}" for i in range(MAX_DECLARED_TYPES))) is not None
     assert parse_accept_header(",".join(f"t{i}" for i in range(MAX_DECLARED_TYPES + 1))) is None
     assert accepted_event_types({"x-sprintable-accept-events": "a,b"}) == (frozenset({"a", "b"}), "declared")

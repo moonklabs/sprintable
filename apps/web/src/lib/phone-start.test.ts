@@ -1,7 +1,7 @@
 // story #4714 — a start from the phone app: what the web asks the shell, what it posts, how every end maps to one outcome
 // (contract 02d2cf71 §14 v1.17 · v1.18 · Yuna 4714-copy-1017).
 import { describe, expect, it, vi } from 'vitest';
-import { beginFlow, checkStart, clearLeaving, endFlow, groupForPress, isLeaving, markLeaving, parseStartable, readStartable, startOnPhone, waitForSession, type Pending, type StartDeps } from './phone-start';
+import { beginFlow, checkStart, clearLeaving, endFlow, groupByComputer, groupForPress, isLeaving, markLeaving, parseStartable, readStartable, startOnPhone, waitForSession, type Pending, type StartDeps } from './phone-start';
 import type { PhoneAnswer } from './phone-bridge';
 
 let currentFetch: (url: string, init?: RequestInit) => Promise<Response> = async () => { throw new Error('no server'); };
@@ -55,7 +55,7 @@ describe('[4714] startOnPhone — what the web asks and posts', () => {
   it.each([
     ['cancelled', 'cancelled'], ['biometric_required', 'biometric_required'], ['no_screen_lock', 'no_screen_lock'], ['key_invalidated', 'key_invalidated'],
     ['not_registered', 'not_registered'], ['signed_out', 'signed_out'], ['remote_control_off', 'remote_off'], ['computer_not_found', 'not_paired'],
-    ['device_unreachable', 'unreachable'], ['no_folder', 'no_folder'], ['agent_not_found', 'failed'], ['not_allowed', 'failed'], ['sign_failed', 'failed'], ['something_new', 'failed'],
+    ['device_unreachable', 'unreachable'], ['no_folder', 'no_folder'], ['agent_not_found', 'list_changed'], ['not_allowed', 'failed'], ['sign_failed', 'failed'], ['something_new', 'failed'],
   ])('the shell says %s → %s, and nothing is posted', async (code, kind) => {
     const calls = server(json(201, {}));
     await expect(startOnPhone(input, deps({ id: 'w', ok: false, code }))).resolves.toEqual({ kind });
@@ -75,6 +75,8 @@ describe('[4714] the server\'s refusals and the command\'s ends', () => {
     [409, { error: { code: 'device_unreachable' } }, 'unreachable'], [409, { error: { code: 'remote_control_off' } }, 'remote_off'],
     [409, { error: { code: 'phone_not_paired' } }, 'not_paired'], [409, { error: { code: 'no_folder' } }, 'no_folder'],
     [404, { error: { code: 'computer_not_found' } }, 'failed'], [403, { error: { code: 'not_allowed_to_command' } }, 'failed'],
+    // story 4714: a start the server refuses because the list the person pressed in is not the list now — a fresh read says why, «tap again» cannot
+    [403, { error: { code: 'agent_message_policy_denied' } }, 'list_changed'], [404, { error: { code: 'agent_not_found' } }, 'list_changed'],
     [422, { code: 'schema' }, 'failed'], [401, {}, 'failed'],
   ])('post %s %j → %s (refused before anything was made)', async (status, body, kind) => {
     server(json(status, body));
@@ -157,6 +159,37 @@ describe('[4714] [결과 확인] never signs again and never starts twice', () =
     const followed = server(json(500), [json(200, { state: 'done' })]);
     await expect(checkStart({ ...pending, commandId: CMD }, d)).resolves.toEqual({ kind: 'started' });
     expect(followed.every((c) => c.init?.method !== 'POST')).toBe(true); // an id → followed, not re-posted
+  });
+
+  it('[SID:4714] [결과 확인] after a lost answer, refused because the list moved on (403 agent_message_policy_denied · 404 agent_not_found): list_changed — the screen reads the list again, which shows whether the agent runs (codex review)', async () => {
+    server(() => { throw new Error('network'); });
+    const first = await startOnPhone(input, deps(signed));
+    const pending = (first as { pending: Pending }).pending;
+    for (const [status, code] of [[403, 'agent_message_policy_denied'], [404, 'agent_not_found']] as const) {
+      const again = server(json(status, { error: { code } }));
+      await expect(checkStart(pending, deps(signed))).resolves.toEqual({ kind: 'list_changed' });
+      expect(again.filter((c) => c.init?.method === 'POST')).toHaveLength(1); // the same post again — nothing else asked, nothing followed (no command id is known)
+    }
+  });
+});
+
+describe('[SID:4714] parseStartable keeps the one reason the server may give for an empty list', () => {
+  it('agents_hidden: message_policy is kept (and carried through the computer grouping); any other value is dropped', () => {
+    const base = { setup_id: SETUP, device_name: 'Mac', reachable: true, agents: [] };
+    expect(parseStartable({ remote_control: true, computers: [{ ...base, agents_hidden: 'message_policy' }] })?.computers[0]).toMatchObject({ agents_hidden: 'message_policy' });
+    expect(parseStartable({ remote_control: true, computers: [{ ...base, agents_hidden: 'something else' }] })?.computers[0]).not.toHaveProperty('agents_hidden');
+    expect(parseStartable({ remote_control: true, computers: [base] })?.computers[0]).not.toHaveProperty('agents_hidden');
+  });
+  it('two setups of one computer: the merged computer says «hidden» when any of them does and no agent is left', () => {
+    const e = (id: string, hidden?: boolean) => ({ setup_id: id, device_name: 'Mac', reachable: true, agents: [], computer_id: 'comp-1', ...(hidden ? { agents_hidden: 'message_policy' as const } : {}) });
+    expect(groupByComputer([e('s1'), e('s2', true)])[0]).toMatchObject({ agents_hidden: 'message_policy' });
+    expect(groupByComputer([e('s1'), e('s2')])[0]).not.toHaveProperty('agents_hidden');
+    // «no agent is left» is the whole claim: when another setup of the computer lists an agent, the merged computer does not say it
+    const withAgent = { ...e('s3'), agents: [{ agent_member_id: 'a-1', name: 'Dev', can_command: true, projects: [], running: null }] };
+    expect(groupByComputer([withAgent, e('s2', true)])[0]).not.toHaveProperty('agents_hidden');
+    // … whichever of them is first (the reachable one ranks first and is the base of the merged entry)
+    expect(groupByComputer([e('s2', true), withAgent])[0]).not.toHaveProperty('agents_hidden');
+    expect(groupByComputer([{ ...e('s4', true), reachable: true }, { ...withAgent, reachable: false }])[0]).not.toHaveProperty('agents_hidden');
   });
 });
 

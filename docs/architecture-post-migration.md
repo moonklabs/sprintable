@@ -61,7 +61,7 @@
 | 백엔드 | Cloud Run: sprintable-backend-prod | FastAPI, asia-northeast3, min=1 |
 | DB | Cloud SQL PostgreSQL 15 | sprintable-db-prod, asia-northeast3 |
 | 이미지 레지스트리 | Artifact Registry | asia-northeast3-docker.pkg.dev/sprintable-494803/sprintable |
-| 시크릿 | Secret Manager | JWT_SECRET, DATABASE_URL_PROD, AGENT_API_KEY_SECRET 등 |
+| 시크릿 | Secret Manager | JWT_SECRET_PROD(dev는 JWT_SECRET_DEV — 서비스 안의 환경 변수 이름은 `JWT_SECRET`), DATABASE_URL_PROD, AGENT_API_KEY_SECRET 등 |
 | 모니터링 | Cloud Monitoring | 대시보드 + 알럿 (setup_monitoring.sh) |
 | DNS | Cloud Run Domain Mapping | app.sprintable.ai → frontend-prod |
 
@@ -127,7 +127,7 @@ gcloud run services update sprintable-backend-prod \
 
 | 증상 | 원인 후보 | 조치 |
 |------|-----------|------|
-| 로그인 실패 (401) | JWT_SECRET 불일치 | Secret Manager 확인, 서비스 재시작 |
+| 로그인 실패 (401) | JWT 서명 비밀 불일치(백엔드 · 프론트 · 게이트웨이가 같은 환경의 `JWT_SECRET_<ENV>`를 써야 함) | Secret Manager 확인, 서비스 재시작 |
 | API key 401 | sk_live_ hash 불일치 | FastAPI auth.py _resolve_api_key 확인 |
 | DB 연결 실패 | Cloud SQL 과부하 | Cloud SQL insights 확인, 연결 풀 조정 |
 | Cold start 지연 | min-instances=0 | min-instances=1 설정 |

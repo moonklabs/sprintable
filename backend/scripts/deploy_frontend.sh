@@ -56,7 +56,7 @@ IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/${AR_REPO}/frontend:${COMMIT_
 CPU_FLAGS=""  # story 4786: dev only (below) — prod keeps its current CPU allocation
 case "${ENV}" in
     dev)
-        CPU_FLAGS="--cpu-throttling"  # story 4786: CPU billed only while a request is served (what the SSOT sends for dev: cloudbuild.yaml `_CPU_FLAGS`)
+        CPU_FLAGS="--no-cpu-throttling"  # story 4786: dev bills CPU per instance — always working (long streams on every instance) (what the SSOT sends for dev: cloudbuild.yaml `_CPU_FLAGS`)
         SERVICE_NAME="sprintable-frontend-dev"
         MIN_INSTANCES=0  # story 4786 (E-INFRA-DIET): dev 는 «쓸 때만» 돈다 — SSOT(cloud-build.yml dev 분기 · cloudbuild.yaml)와 같은 값
         MAX_INSTANCES=3
@@ -95,6 +95,9 @@ case "${ENV}" in
         echo "Usage: $0 [dev|prod]"; exit 1 ;;
 esac
 
+# story 4798 (AC6): the token-signing secret is one per environment (JWT_SECRET_DEV / JWT_SECRET_PROD) — never one shared name.
+JWT_SECRET_NAME="JWT_SECRET_$(printf '%s' "${ENV}" | tr '[:lower:]' '[:upper:]')"
+
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$ENV] $*"; }
 
 log "Deploying ${SERVICE_NAME} ← ${IMAGE}"
@@ -130,7 +133,7 @@ ENV_VARS_SPEC="NODE_ENV=production,NEXT_TELEMETRY_DISABLED=1,NEXT_PUBLIC_FASTAPI
 # FIREBASE_BFF_INTERNAL_SECRET — deploy_backend.sh:125가 이미 같은 Secret Manager 시크릿을
 # 바인딩한다(story #2296 이전에도 존재 — backend는 받고 있었다). frontend가 그동안 이 스크립트로
 # 안 받고 있었던 것이 2026-07-28 사고의 나머지 절반이다. 값은 옮기지 않는다(:latest 참조만).
-SECRETS_SPEC="NEXT_PUBLIC_SUPABASE_URL=NEXT_PUBLIC_SUPABASE_URL:latest,NEXT_PUBLIC_SUPABASE_ANON_KEY=NEXT_PUBLIC_SUPABASE_ANON_KEY:latest,JWT_SECRET=JWT_SECRET:latest,FIREBASE_BFF_INTERNAL_SECRET=FIREBASE_BFF_INTERNAL_SECRET:latest${COOKIE_DOMAIN_SECRET_SPEC}"
+SECRETS_SPEC="NEXT_PUBLIC_SUPABASE_URL=NEXT_PUBLIC_SUPABASE_URL:latest,NEXT_PUBLIC_SUPABASE_ANON_KEY=NEXT_PUBLIC_SUPABASE_ANON_KEY:latest,JWT_SECRET=${JWT_SECRET_NAME}:latest,FIREBASE_BFF_INTERNAL_SECRET=FIREBASE_BFF_INTERNAL_SECRET:latest${COOKIE_DOMAIN_SECRET_SPEC}"
 
 if [ "${DRY_RUN}" = "1" ]; then
     cat <<EOF
@@ -142,6 +145,7 @@ MIN_INSTANCES=${MIN_INSTANCES}
 MAX_INSTANCES=${MAX_INSTANCES}
 ENV_VARS_SPEC=${ENV_VARS_SPEC}
 SECRETS_SPEC=${SECRETS_SPEC}
+JWT_SECRET_NAME=${JWT_SECRET_NAME}
 EOF
     exit 0
 fi

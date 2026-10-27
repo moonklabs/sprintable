@@ -180,8 +180,10 @@ async def test_07_nobody_to_tell_is_not_a_failure_and_a_failing_notice_never_fai
         nobody = uuid.uuid4()
         await _sql(f"UPDATE desktop_setups SET confirmed_by = '{nobody}' WHERE id = '{device['setup_id']}'")  # nobody active (a seat but no account: story 4769 refuses a seatless confirmer at the relay)
         await _sql(f"INSERT INTO org_members (id, org_id, user_id, role) SELECT gen_random_uuid(), org_id, '{nobody}', 'admin' FROM desktop_setups WHERE id = '{device['setup_id']}' ON CONFLICT DO NOTHING")
+        await _sql(f"UPDATE members SET is_active = false WHERE id = '{OWNER_TM}'")  # (story 4781 AC1: the org's owners are told too — so for «nobody» the owner is away as well)
         await _report(c, device, a, "waiting_input", 2, limit=LOOKS)  # 200 — nobody told
         assert await _notices(STOOD) == []
+        await _sql(f"UPDATE members SET is_active = true WHERE id = '{OWNER_TM}'")
         await _sql(f"UPDATE desktop_setups SET confirmed_by = '{OWNER}' WHERE id = '{device['setup_id']}'")
         await _report(c, device, a, "working", 3)
 
@@ -373,11 +375,12 @@ async def test_16_two_people_are_two_notices_each_to_the_person_who_connected_th
         await _report(c, d2, a2, "working", 2)
         await _report(c, d1, a1, "waiting_input", 3, limit=LOOKS)
         await _report(c, d2, a2, "waiting_input", 4, limit=LOOKS)
-        assert len(await _notices(STOOD, OWNER_TM)) == 1 and len(await _notices(STOOD, plain_tm)) == 1, "each person is told once, about their own"
+        assert len(await _notices(STOOD, OWNER_TM)) == 1 and len(await _notices(STOOD, plain_tm)) == 1, "each person is told once"
+        # story 4781 AC1: the owner (OWNER) is told about BOTH unpaired computers — the second one was connected by someone else — so their «working again» waits for both; the connecter (plain) hears about their own only
         await _report(c, d1, a1, "working", 5)
-        assert len(await _notices(LIFTED, OWNER_TM)) == 1 and await _notices(LIFTED, plain_tm) == [], "one person's setup being back says nothing for the other's"
+        assert await _notices(LIFTED, OWNER_TM) == [] and await _notices(LIFTED, plain_tm) == [], "d2 still stands: the owner's line waits, and it says nothing for the other person"
         await _report(c, d2, a2, "working", 6)
-        assert len(await _notices(LIFTED, plain_tm)) == 1
+        assert len(await _notices(LIFTED, plain_tm)) == 1 and len(await _notices(LIFTED, OWNER_TM)) == 1
 
 
 async def test_17_a_revoked_setups_stale_limited_row_does_not_hold_the_working_again_line_back(world):
@@ -665,3 +668,156 @@ async def test_24_two_of_one_persons_setups_coming_back_at_the_same_moment_still
         await s1.close()
         await s2.close()
     assert len(await _notices(LIFTED)) == 1
+
+
+# ── story 4781 AC1 (PO 10-27): the org's owners are told about a computer that has no paired phone ───────────────────────────────────────
+# dev 10-27: six of seven computers had no paired phone and were connected by a login whose only device was a dead iOS registration — the owner heard of none of them.
+
+async def test_30_a_computer_with_no_paired_phone_tells_its_connecter_and_the_orgs_owner_once_each(world):
+    await _second_person()
+    async with _client() as c:
+        d = await _device(c, "d4781 mac o1")
+        await _sql(f"UPDATE desktop_setups SET confirmed_by = '{PLAIN_USER}' WHERE id = '{d['setup_id']}'")  # connected by someone who is not the owner
+        a = d["agents"][0]["member_id"]
+        await _report(c, d, a, "working", 1)
+        await _report(c, d, a, "waiting_input", 2, limit=LOOKS)
+        assert len(await _notices(STOOD, PLAIN_TM)) == 1, "the person who connected it"
+        assert len(await _notices(STOOD, OWNER_TM)) == 1, "and the org's owner (before: nobody but the connecter)"
+        await _report(c, d, a, "waiting_input", 3, limit=LOOKS)
+        assert len(await _notices(STOOD, OWNER_TM)) == 1 and len(await _notices(STOOD, PLAIN_TM)) == 1, "once each"
+        await _report(c, d, a, "working", 4)
+        assert len(await _notices(LIFTED, OWNER_TM)) == 1 and len(await _notices(LIFTED, PLAIN_TM)) == 1, "and the working-again line goes to both"
+
+
+async def test_31_a_computer_with_a_paired_phone_tells_the_phones_owner_only_not_the_orgs_owner(world):
+    """the 4685 rule stays: a paired phone is who holds the computer — the owner is added only where no phone is paired"""
+    await _second_person()
+    async with _client() as c:
+        d = await _device(c, "d4781 mac o2")
+        await _sql(f"UPDATE desktop_setups SET confirmed_by = '{PLAIN_USER}' WHERE id = '{d['setup_id']}'")
+        await _pair(d["setup_id"], PLAIN_TM)
+        a = d["agents"][0]["member_id"]
+        await _report(c, d, a, "working", 1)
+        await _report(c, d, a, "waiting_input", 2, limit=LOOKS)
+        assert len(await _notices(STOOD, PLAIN_TM)) == 1
+        assert await _notices(STOOD, OWNER_TM) == [], "the owner is not added where a phone is paired"
+
+
+async def test_32_an_owner_who_is_also_the_connecter_is_one_entry(world):
+    async with _client() as c:
+        d = await _device(c, "d4781 mac o3")  # connected by OWNER, who is the org's owner
+        a = d["agents"][0]["member_id"]
+        await _report(c, d, a, "working", 1)
+        await _report(c, d, a, "waiting_input", 2, limit=LOOKS)
+        assert len(await _notices(STOOD, OWNER_TM)) == 1, "told once, not twice"
+
+
+async def test_33_an_owner_who_left_or_is_inactive_is_not_told_and_another_orgs_owner_never_is(world):
+    await _second_person()
+    async with _client() as c:
+        d = await _device(c, "d4781 mac o4")
+        await _sql(f"UPDATE desktop_setups SET confirmed_by = '{PLAIN_USER}' WHERE id = '{d['setup_id']}'")
+        await _sql(f"UPDATE members SET is_active = false WHERE id = '{OWNER_TM}'")  # the owner is no longer active
+        a = d["agents"][0]["member_id"]
+        await _report(c, d, a, "working", 1)
+        await _report(c, d, a, "waiting_input", 2, limit=LOOKS)
+        assert await _notices(STOOD, OWNER_TM) == [], "an inactive owner is not told"
+        assert len(await _notices(STOOD, PLAIN_TM)) == 1, "the connecter still is"
+        await _sql(f"UPDATE members SET is_active = true, org_id = '{ORG2}' WHERE id = '{OWNER_TM}'")  # …and an owner whose member row is in another org is not this org's
+        await _report(c, d, a, "working", 3)
+        await _report(c, d, a, "waiting_input", 4, limit=LOOKS)
+        assert await _notices(STOOD, OWNER_TM) == []
+
+
+async def test_34_the_owner_counts_every_unpaired_computer_of_the_org_for_the_working_again_line(world):
+    """codex 4781 AC1 (P1): the sessions that are the owner's to hear about are every unpaired computer of the org, not only the ones they connected — the second one is folded into the same notice, and the
+    «working again» line waits for BOTH"""
+    await _second_person()
+    async with _client() as c:
+        d1, d2 = await _device(c, "d4781 mac o5"), await _device(c, "d4781 mac o6")
+        await _sql(f"UPDATE desktop_setups SET confirmed_by = '{PLAIN_USER}' WHERE id IN ('{d1['setup_id']}','{d2['setup_id']}')")  # both connected by someone else
+        a1, a2 = d1["agents"][0]["member_id"], d2["agents"][0]["member_id"]
+        await _report(c, d1, a1, "working", 1)
+        await _report(c, d2, a2, "working", 2)
+        await _report(c, d1, a1, "waiting_input", 3, limit=LOOKS)
+        await _report(c, d2, a2, "waiting_input", 4, limit=LOOKS)
+        assert len(await _notices(STOOD, OWNER_TM)) == 1, "the second computer stood inside the window: folded into the owner's one notice"
+        # only after BOTH are back does the owner hear «working again» — the second unpaired computer is the owner's to hear about too
+        await _report(c, d1, a1, "working", 5)
+        assert await _notices(LIFTED, OWNER_TM) == []
+        await _report(c, d2, a2, "working", 6)
+        assert len(await _notices(LIFTED, OWNER_TM)) == 1
+
+
+async def test_35_an_owner_told_stopped_because_no_phone_was_paired_is_still_told_working_again_when_a_phone_is_paired_meanwhile(world):
+    await _second_person()
+    async with _client() as c:
+        d = await _device(c, "d4781 mac o7")
+        await _sql(f"UPDATE desktop_setups SET confirmed_by = '{PLAIN_USER}' WHERE id = '{d['setup_id']}'")
+        a = d["agents"][0]["member_id"]
+        await _report(c, d, a, "working", 1)
+        await _report(c, d, a, "waiting_input", 2, limit=LOOKS)
+        assert len(await _notices(STOOD, OWNER_TM)) == 1 and len(await _notices(STOOD, PLAIN_TM)) == 1
+        await _pair(d["setup_id"], PLAIN_TM)  # a phone is paired before the limit lifts: from now on the owner is no longer a recipient of this setup
+        await _report(c, d, a, "working", 3)
+        assert len(await _notices(LIFTED, OWNER_TM)) == 1, "…but the promise made to the owner is kept"
+        assert len(await _notices(LIFTED, PLAIN_TM)) == 1
+
+
+async def test_36_the_owner_is_told_the_count_of_a_snapshot_on_a_computer_someone_else_connected(world):
+    """codex 4781 AC1 (P1, owner folding): the sessions standing on an unpaired computer that another member connected are the owner's to hear about too — the owner's notice counts them («{agent} 외 1개»)"""
+    await _second_person()
+    async with _client() as c:
+        device = await _device(c, "d4781 mac o8")
+        await _sql(f"UPDATE desktop_setups SET confirmed_by = '{PLAIN_USER}' WHERE id = '{device['setup_id']}'")
+        a, b = device["agents"][0]["member_id"], device["agents"][1]["member_id"]
+
+        def snap(seq, state):
+            lim = {"limit": LOOKS} if state == "waiting_input" else {}
+            return {"report_seq": seq, "sessions": [
+                {"session_key": "s-a", "agent_member_id": a, "runtime": "claude", "state": state, "at": _now().isoformat(), **lim},
+                {"session_key": "s-b", "agent_member_id": b, "runtime": "claude", "state": state, "at": _now().isoformat(), **lim}]}
+
+        assert (await c.put("/api/v2/desktop/relay/sessions", json=snap(1, "working"), headers=_tok(device["device_token"]))).status_code == 200
+        assert (await c.put("/api/v2/desktop/relay/sessions", json=snap(2, "waiting_input"), headers=_tok(device["device_token"]))).status_code == 200
+        (mine,) = await _notices(STOOD, OWNER_TM)
+        assert mine["title"] == f"{mine['agent_name']} 외 1개 · 한도로 쉬는 중", "the owner's notice counts both sessions of the computer someone else connected"
+        (theirs,) = await _notices(STOOD, PLAIN_TM)
+        assert theirs["title"].endswith("외 1개 · 한도로 쉬는 중")
+
+
+async def test_37_an_unrelated_paired_setups_lift_does_not_touch_an_owners_promise_for_another_setup(world):
+    """codex 4781 AC1 (P1): the owner was told about the UNPAIRED setup u; a different, PAIRED setup p comes back first — that is not the owner's to act on, and u still standing keeps the owner's «working again» line until u is back"""
+    await _second_person()
+    async with _client() as c:
+        u, p = await _device(c, "d4781 mac o9"), await _device(c, "d4781 mac o10")
+        await _sql(f"UPDATE desktop_setups SET confirmed_by = '{PLAIN_USER}' WHERE id IN ('{u['setup_id']}','{p['setup_id']}')")
+        await _pair(p["setup_id"], PLAIN_TM)
+        au, ap = u["agents"][0]["member_id"], p["agents"][0]["member_id"]
+        await _report(c, u, au, "working", 1)
+        await _report(c, p, ap, "working", 2)
+        await _report(c, u, au, "waiting_input", 3, limit=LOOKS)  # owner + plain are told about u
+        await _report(c, p, ap, "waiting_input", 4, limit=LOOKS)  # only plain (the phone) about p
+        assert len(await _notices(STOOD, OWNER_TM)) == 1
+        await _report(c, p, ap, "working", 5)  # p is back: nothing for the owner
+        assert await _notices(LIFTED, OWNER_TM) == [], "an unrelated paired setup coming back is not the owner's line"
+        await _report(c, u, au, "working", 6)
+        assert len(await _notices(LIFTED, OWNER_TM)) == 1, "the owner's line comes when THEIR setup is back"
+
+
+async def test_38_an_unrelated_setups_lift_must_not_make_a_later_ended_session_of_the_owners_own_setup_say_working_again(world):
+    """codex 4781 AC1 (the P1's second half): if the unrelated paired setup's lift marked the owner's open notice «back», the owner's own session ending afterwards (it was never working again) would be told as «working
+    again» — a false line"""
+    await _second_person()
+    async with _client() as c:
+        u, p = await _device(c, "d4781 mac o11"), await _device(c, "d4781 mac o12")
+        await _sql(f"UPDATE desktop_setups SET confirmed_by = '{PLAIN_USER}' WHERE id IN ('{u['setup_id']}','{p['setup_id']}')")
+        await _pair(p["setup_id"], PLAIN_TM)
+        au, ap = u["agents"][0]["member_id"], p["agents"][0]["member_id"]
+        await _report(c, u, au, "working", 1)
+        await _report(c, p, ap, "working", 2)
+        await _report(c, u, au, "waiting_input", 3, limit=LOOKS)
+        await _report(c, p, ap, "waiting_input", 4, limit=LOOKS)
+        await _report(c, p, ap, "working", 5)  # the paired setup is back
+        await _report(c, u, au, "stopped", 6)  # the owner's own session ends: it never worked again
+        assert await _notices(LIFTED, OWNER_TM) == [], "an ended session is not «working again» — and the paired setup's lift did not make it so"

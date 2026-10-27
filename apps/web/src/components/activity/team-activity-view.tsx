@@ -1,5 +1,6 @@
 'use client';
 
+import { firstGraphemes } from '@/lib/first-graphemes';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
@@ -96,7 +97,7 @@ function relativeTime(iso: string, locale: string): string {
 
 // actor=primary 톤 / 시스템(actor_id=null)=muted — "사람·에이전트 행동 vs 시스템" 시각 구분(권고1).
 function ActorAvatar({ name, isSystem }: { name: string; isSystem: boolean }) {
-  const initial = name.trim().charAt(0).toUpperCase() || '·';
+  const initial = firstGraphemes(name.trim(), 1).toUpperCase() || '·';
   return (
     <span
       aria-hidden

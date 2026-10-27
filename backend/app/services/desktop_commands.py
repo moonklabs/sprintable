@@ -71,6 +71,18 @@ async def can_view(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID, a
     return False
 
 
+async def may_converse(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.UUID, agent_id: uuid.UUID) -> bool:
+    """story 4714: whether this person could OPEN a conversation with the agent — the very decision `POST /api/conversations` makes
+    (`agent_message_policy.policy_denial`: org_wide · allowlist · the agent's creator). The phone offers to start only an agent whose conversation
+    it can then open: a start that ends in a 403 on the room is a start the person was never to be offered."""
+    from app.models.team import TeamMember
+    from app.services.agent_message_policy import policy_denial
+
+    # `team_members` is a view with a row per project the agent is in — the policy columns are the agent's own and the same on each
+    tm = (await db.execute(select(TeamMember).where(TeamMember.id == agent_id).limit(1))).scalars().first()
+    return tm is not None and await policy_denial(db, tm, [(member_id, user_id)]) is None
+
+
 async def org_role(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> str | None:
     """The person's role in the organization itself (org_members) — never a project role. For a person's session resolve_member
     already gives the org role (legacy om.role · anchor members.org_role); this rule reads org_members directly so it does not lean
@@ -389,6 +401,10 @@ async def create_start(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.
             raise DesktopRelayError(403, "not_allowed_to_command", "you cannot command this agent")
         if body.project_id not in await _agent_projects(db, agent_id) or not await has_project_access(db, user_id, body.project_id, org_id):
             raise DesktopRelayError(404, "project_not_found", "no such project of this agent")
+        # story 4714: the list does not offer an agent whose conversation the person cannot open; a stale phone's press is refused here — AFTER the project check, so a
+        # person who may not see the agent's project gets the same masked 404 as before and learns nothing of its policy (codex review)
+        if not await may_converse(db, member_id=member_id, user_id=user_id, agent_id=agent_id):
+            raise DesktopRelayError(403, "agent_message_policy_denied", "you cannot open a conversation with this agent")
         return agent, setup
 
     agent, setup = await authorize()
@@ -449,7 +465,8 @@ async def startable_view(db: AsyncSession, *, member_id: uuid.UUID, member_role:
     from app.services import remote_control
     from app.services.agent_permissions import _reachable, paired_phone
 
-    if not await can_view(db, user_id=user_id, org_id=org_id, agent_id=agent_id):
+    if not await can_view(db, user_id=user_id, org_id=org_id, agent_id=agent_id) \
+            or not await may_converse(db, member_id=member_id, user_id=user_id, agent_id=agent_id):  # story 4714: no conversation to open = no start offered
         raise DesktopRelayError(404, "agent_not_found", "no such agent")
     agent = await _agent(db, org_id, agent_id)
     setups = await _agent_setups(db, org_id, agent_id) if agent.is_active else []  # a deactivated agent has nothing to start
@@ -530,12 +547,16 @@ async def startable_computers_view(db: AsyncSession, *, member_id: uuid.UUID, me
     computers: list[dict] = []
     for setup in setups:
         agents: list[dict] = []
+        hidden_by_policy = 0
         for aid in agent_ids_by_setup[setup.id]:
             agent = (await db.execute(
                 select(Member).where(Member.id == aid, Member.org_id == org_id, Member.type == "agent", Member.deleted_at.is_(None),
                                      Member.is_active.is_(True))
             )).scalar_one_or_none()
             if agent is None or not await can_view(db, user_id=user_id, org_id=org_id, agent_id=aid):
+                continue
+            if not await may_converse(db, member_id=member_id, user_id=user_id, agent_id=aid):
+                hidden_by_policy += 1  # story 4714: seen but not offered — the person could not open its conversation (the computer entry says why when nothing is left)
                 continue
             agents.append({
                 "agent_member_id": str(aid), "name": agent.name,
@@ -549,6 +570,9 @@ async def startable_computers_view(db: AsyncSession, *, member_id: uuid.UUID, me
             "device_name": setup.device_name, "reachable": setup.id in reachable, "agents": agents,
             # story #4734 (B): this computer's app takes the press of the WHOLE computer (it said so with its startable list) — the screen offers the one button only then
             "computer_press": "computer_press" in (setup.capabilities or []),
+            # story 4714: agents of this computer the person can see but not talk to (the agent's message policy) were left out; when that is why the list
+            # is empty the phone says so instead of «no agent yet — start the first at the Mac»
+            **({"agents_hidden": "message_policy"} if hidden_by_policy and not agents else {}),
         })
     return {"remote_control": await remote_control.is_enabled(db, org_id), "computers": computers}
 

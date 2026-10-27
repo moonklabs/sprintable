@@ -258,6 +258,7 @@ async def dispatch_notification(
     sprint_id: uuid.UUID | None = None,
     via_outbox: bool = True,
     human_event_recorded_for: frozenset[uuid.UUID] = frozenset(),
+    created_rows: list | None = None,
 ) -> int:
     """notification_settings 필터 후 enabled member에게 알림 발송.
 
@@ -265,6 +266,9 @@ async def dispatch_notification(
     만든 **멤버 id들**. 이 함수가 그 사람의 Event를 또 만들면 종(`/api/v2/event-notifications` — 수신자 Event를 그대로 셈)에 한
     번 맡김이 둘로 떴다(실 DB 테스트로 재현). 여기 든 멤버만 Notification만 넣고 Event를 건너뛴다 — 불리언이 아니라 집합인
     이유(PO 리뷰): 대상이 여럿인 호출부가 넘기면 기록 안 된 다른 사람의 종 항목까지 조용히 사라진다.
+
+    ``created_rows``: story 4781 (AC7) — optional, additive: when a list is passed, the Notification / Event rows this call added are appended to it (the objects, ids assigned by the flush
+    below) so the caller can name exactly the rows it made instead of looking for them afterwards. Default None — the ~40 callers that do not pass it are unchanged.
 
     ``event``: story #3903(migration 0378, additive·nullable) — human Notification 행에
     그대로 실린다(옵셔널, 기본 None — 이 파라미터를 안 넘기는 기존 ~40개 호출부는 무회귀).
@@ -490,6 +494,8 @@ async def dispatch_notification(
                                 event=event,
                             )
                             db.add(notification)
+                        if created_rows is not None:
+                            created_rows.append(notification)
                         inserted = True
                         created_for.add(member_row.id)
                     except Exception:
@@ -560,6 +566,8 @@ async def dispatch_notification(
                                 )
                                 db.add(dispatch_event)
                             created_events.append(dispatch_event)
+                            if created_rows is not None:
+                                created_rows.append(dispatch_event)
                             inserted = True
                             created_for.add(member_row.id)
                         except Exception:

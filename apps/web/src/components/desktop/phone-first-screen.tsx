@@ -43,10 +43,17 @@ export function PhoneFirstScreen({ orgId, chatsHref, macDownloadEnabled = false,
   const { phoneCall } = usePhoneBridge();
   const pairHref = usePairHref(returnHref); // story 4780: [Close] of the pairing screen comes back to this start screen — or to `returnHref` (the sign-up screen: Today, where the checklist goes on)
   const [read, setRead] = useState<Read>({ kind: 'reading' });
+  // story 4714: «the list changed» note — armed by a press that ended `list_changed`, shown with the start card of exactly THAT read (the card is rebuilt, so what was picked is gone), cleared by the next pick or press
+  const [note, setNote] = useState(false);
+  const noteArmed = useRef(false);
+  const [readSeq, setReadSeq] = useState(0); // one per landed read: the card is rebuilt for each (what was picked is dropped whether or not the «reading» frame was ever drawn)
   // the answer lands in a promise callback (never synchronously in the effect); a phone with no screen lock can pair with nothing — the pairing
   // page says why, here it is the «no Mac yet» screen
   const land = useCallback((r: StartableRead) => {
     setRead(r.kind === 'view' ? { kind: 'view', view: r.view } : r.kind === 'no_phone' || r.kind === 'no_screen_lock' ? { kind: 'no_phone' } : { kind: 'failed' });
+    setReadSeq((n) => n + 1);
+    setNote(noteArmed.current && r.kind === 'view');
+    noteArmed.current = false;
   }, []);
   // one read at a time counts, and a read is a flow: a newer read · the end of the screen · a way out STOP the older one — a stopped read asks for nothing more and draws nothing
   const readFlow = useRef<Flow | null>(null);
@@ -64,7 +71,7 @@ export function PhoneFirstScreen({ orgId, chatsHref, macDownloadEnabled = false,
   }, [readNow, dropReads]);
   // restored from the back-forward cache: a read that was stopped by a way out left this screen «reading» — read again (lib/phone-start.ts has released the way-out window by then)
   useEffect(() => {
-    const onShow = (e: PageTransitionEvent) => { if (e.persisted) { setRead({ kind: 'reading' }); readNow(); } };
+    const onShow = (e: PageTransitionEvent) => { if (e.persisted) { noteArmed.current = false; setRead({ kind: 'reading' }); readNow(); } }; // a note armed by a read that was stopped (the page left) is not for this one
     window.addEventListener('pageshow', onShow);
     return () => window.removeEventListener('pageshow', onShow);
   }, [readNow]);
@@ -86,14 +93,14 @@ export function PhoneFirstScreen({ orgId, chatsHref, macDownloadEnabled = false,
   if (read.kind === 'view' && !read.view.remote_control) return <RemoteOff orgId={orgId} onTurnedOn={reload} />;
   if (read.kind === 'no_phone' || read.view.computers.length === 0) return <NoMac pairHref={pairHref} mailEnabled={macDownloadEnabled} />;
 
-  return <Computers computers={groupByComputer(read.view.computers)} chatsHref={chatsHref} onRemoteOff={reload} />; // story 4734: one computer, its setups' agents together
+  return <Computers key={readSeq} computers={groupByComputer(read.view.computers)} chatsHref={chatsHref} onRemoteOff={reload} onListChanged={() => { noteArmed.current = true; reload(); }} note={note} onNoteSeen={() => setNote(false)} />; // story 4734: one computer, its setups' agents together
 }
 
 // only an agent the person may command can be started from here (`can_command`) — the others are not offered
 const commandable = (c: StartableComputer) => c.agents.filter((a) => a.can_command);
 
 /** the computers this phone is paired with: the first one that can take a start (reachable first) is the one shown; with more than one such computer the person may choose (story 4714 · PO 10-19: never «one Mac» assumed) */
-function Computers({ computers, chatsHref, onRemoteOff }: { computers: StartableComputer[]; chatsHref?: string; onRemoteOff: () => void }) {
+function Computers({ computers, chatsHref, onRemoteOff, onListChanged, note, onNoteSeen }: { computers: StartableComputer[]; chatsHref?: string; onRemoteOff: () => void; onListChanged: () => void; note: boolean; onNoteSeen: () => void }) {
   const t = useTranslations('onboarding.phone');
   const startable = computers.filter((c) => commandable(c).length > 0);
   // a computer none of whose agents has a project to start is no choice (a card with an empty list and a start that cannot be pressed); if none has one the card says so as before
@@ -105,13 +112,26 @@ function Computers({ computers, chatsHref, onRemoteOff }: { computers: Startable
     return (
       <Card className="break-keep p-6" data-testid="onboarding-phone-no-agent">
         {/* Yuna 4714 §5: the first-agent line is true only when the computer has no agent at all; agents it has but the person may not start get their own line */}
-        <p className="text-sm text-foreground">{computer.agents.length === 0 ? t('noAgent.line', { device: computer.device_name }) : t('noAgent.lineNoAccess', { device: computer.device_name })}</p>
+        <p className="text-sm text-foreground">{computer.agents.length === 0 ? (computer.agents_hidden === 'message_policy' ? t('noAgent.lineNoTalk', { device: computer.device_name }) : t('noAgent.line', { device: computer.device_name })) : t('noAgent.lineNoAccess', { device: computer.device_name })}</p>
       </Card>
+    );
+  }
+  // story 4714 (덧 4 · Yuna): the computer has agents the person may start but NONE of them has a project with a folder — a start card would be a dead end (empty project sheet, a start that cannot be pressed);
+  // one line instead, the same card as the other «nothing to start» lines. Not «no agent yet»: that line is only true for a computer with no agent at all.
+  if (offered.length === 0) {
+    return (
+      <div className="space-y-3">
+        {startable.map((c) => (
+          <Card key={c.setup_id} className="break-keep p-6" data-testid="onboarding-phone-no-folder">
+            <p className="text-sm text-foreground">{t('noAgent.lineNoFolder', { device: c.device_name })}</p>
+          </Card>
+        ))}
+      </div>
     );
   }
   // keyed by the computer: another computer is another screen — the agent · project picks and any result line of the first are not carried over
   return (
-    <StartCard key={computer.setup_id} computer={computer} agents={commandable(computer)} chatHref={chatsHref} onRemoteOff={onRemoteOff}
+    <StartCard key={computer.setup_id} computer={computer} agents={commandable(computer)} chatHref={chatsHref} onRemoteOff={onRemoteOff} onListChanged={onListChanged} note={note} onNoteSeen={onNoteSeen}
       computers={choices.length > 1 ? choices : null} onPickComputer={setPicked} />
   );
 }
@@ -212,7 +232,7 @@ function RemoteOff({ orgId, onTurnedOn }: { orgId: string | null; onTurnedOn: ()
   );
 }
 
-function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickComputer }: { computer: StartableComputer; agents: StartableAgent[]; chatHref?: string; onRemoteOff: () => void; computers: StartableComputer[] | null; onPickComputer: (setupId: string) => void }) {
+function StartCard({ computer, agents, chatHref, onRemoteOff, onListChanged, note, onNoteSeen, computers, onPickComputer }: { computer: StartableComputer; agents: StartableAgent[]; chatHref?: string; onRemoteOff: () => void; onListChanged: () => void; note: boolean; onNoteSeen: () => void; computers: StartableComputer[] | null; onPickComputer: (setupId: string) => void }) {
   const t = useTranslations('onboarding.phone');
   const { phoneCall } = usePhoneBridge();
   const [agentId, setAgentId] = useState<string | null>(agents.length === 1 ? agents[0].agent_member_id : null); // one agent → picked already
@@ -238,6 +258,7 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
     setOutcome(o);
     pending.current = o.kind === 'unknown' ? o.pending : null;
     if (o.kind === 'remote_off') onRemoteOff(); // the screen returns to «원격 제어가 꺼져 있어요»
+    if (o.kind === 'list_changed') onListChanged(); // story 4714: the pick is gone from the list (the agent's message policy changed · it left): read the list again — the screen then says what is true (the policy line · the plain list), never «tap again» for a start that cannot work
   };
   // ONE stop signal per press (a `Flow`): the bridge call, the post, the command poll, the wait for the session to stand and the move all look at the same `stopped`.
   // A way out · the end of this screen stop it; what a stopped flow gets back later does nothing (no request · no drawing · no move).
@@ -260,6 +281,7 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
   };
   const run = async (begin: () => Promise<StartOutcome>) => {
     inFlight.current = true;
+    onNoteSeen(); // a press: the note about the list that changed has been read
     const flow = beginFlow();
     flowRef.current = flow;
     try {
@@ -280,7 +302,9 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
     await run(() => checkStart(p, { ...deps, flow: flowRef.current ?? undefined }));
   };
 
-  const reason = !agent ? t('start.needAgent') : !project ? t('start.needProject') : null;
+  // story 4714 (덧 4 · Yuna): the picked agent has no project with a folder — «pick a project» would be false (there is none to pick); say what to do, and keep the empty sheet from opening
+  const noFolder = agent !== undefined && projects.length === 0;
+  const reason = !agent ? t('start.needAgent') : noFolder ? t('start.needFolder') : !project ? t('start.needProject') : null;
   // the line under [시작] for an end that is a refusal (a started or cancelled start has none) — literal keys, one per end
   const resultLine = (kind: StartOutcome['kind']): string | null => {
     switch (kind) {
@@ -303,6 +327,7 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
   return (
     <div className="space-y-4" data-testid="onboarding-phone-start">
       <h1 id="onboarding-step-title" className="break-keep text-center text-2xl font-bold text-foreground">{t('start.title', { device: computer.device_name })}</h1>
+      {note ? <p role="status" className="break-keep text-sm text-muted-foreground" data-testid="onboarding-phone-list-changed">{t('start.listChanged')}</p> : null}
       <Card className="break-keep flex flex-col gap-3 p-4">
         {computers ? (
           <PickRow label={t('start.computerLabel')} value={computer.device_name} onOpen={() => setSheet('computer')} disabled={frozen} testId="onboarding-phone-computer" />
@@ -315,7 +340,7 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
             <span className="text-sm font-medium text-foreground">{agents[0].name}</span>
           </div>
         )}
-        <PickRow label={t('start.projectLabel')} value={project?.name ?? null} onOpen={() => setSheet('project')} disabled={!agent || frozen} testId="onboarding-phone-project" />
+        <PickRow label={t('start.projectLabel')} value={project?.name ?? null} onOpen={() => setSheet('project')} disabled={!agent || noFolder || frozen} testId="onboarding-phone-project" />
         <p className="text-xs text-muted-foreground" data-testid="onboarding-phone-new-folder">{t('start.newFolder')}</p>
       </Card>
       <div className="space-y-1">
@@ -347,9 +372,9 @@ function StartCard({ computer, agents, chatHref, onRemoteOff, computers, onPickC
           selected={sheet === 'computer' ? computer.setup_id : sheet === 'agent' ? agentId : projectId}
           onPick={(id) => {
             if (frozen) { setSheet(null); return; }
-            if (sheet === 'computer') { setSheet(null); if (id !== computer.setup_id) onPickComputer(id); return; } // the screen is rebuilt for the other computer
+            if (sheet === 'computer') { setSheet(null); if (id !== computer.setup_id) { onNoteSeen(); onPickComputer(id); } return; } // the screen is rebuilt for the other computer
             if (sheet === 'agent') setAgentId(id); else setProjectId(id); // a project the other agent does not have reads as «not picked»: it is looked up in THAT agent's list
-            setOutcome(null); pending.current = null; setSheet(null);
+            setOutcome(null); pending.current = null; setSheet(null); onNoteSeen();
           }}
           onClose={() => setSheet(null)}
         />

@@ -21,8 +21,8 @@ class Settings(BaseSettings):
     # Cloud SQL URL 별도**로 우회. 미설정 시 database_url 폴백(non-PgBouncer 환경). on+미설정 = startup
     # fail-closed(pg_pubsub.check_listen_config·main lifespan).
     database_url_direct: str = ""
-    # Phase3(§6 read replica): 읽기 전용 DSN — DATABASE_URL_READ. 미설정이면 database_url(primary)로
-    # 폴백(replica 없거나 준비 前 «무해»). PgBouncer 경유 시 dbname=sprintable_read → replica 라우팅.
+    # Phase3(§6): 읽기 전용 DSN(선택) — DATABASE_URL_READ. 미설정이면 database_url(primary)로 폴백(«무해»).
+    # 2026-10-26 prod 읽기 복제본을 삭제했고 prod는 이 값을 설정하지 않는다(읽기도 primary) — 복제본을 다시 세우면 그 DSN을 여기에 넣는다.
     # ⚠️ get_read_db 는 «read-your-writes lag 허용» 읽기(목록·대시보드·타인 데이터)에만 — 방금 쓴 걸
     #    즉시 읽는 경로는 get_db(primary) 유지(replica lag 로 «내 write 안 보임» 방지).
     database_url_read: str = ""
@@ -509,6 +509,9 @@ class Settings(BaseSettings):
     # story #4398: 프런트(BFF)가 정한 사용자 IP(`X-Sprintable-Client-IP`)를 믿을지 가르는 공유 비밀(`X-Sprintable-Edge-Key`).
     # 미설정이면 그 헤더를 안 믿고 Cloud Run 앞단이 붙인 접속 주소(XFF 오른쪽 끝)로 센다 — 배포 순서에 안 막힌다.
     edge_client_ip_secret: str = ""
+    # story 4796: Cloud Run 밖(VM)에서 앞문(Caddy)이 X-Forwarded-For를 **덮어써** 접속 주소 한 칸만 두는 배포일 때 켠다(TRUST_FORWARDED_FOR=true).
+    # 끄면(기본) K_SERVICE가 있을 때만 XFF를 믿는다 — 앞문 없이 직접 열린 서버에서 꾸민 XFF를 믿지 않으려는 안전 기본값.
+    trust_forwarded_for: bool = False
 
     # story 4dee942b(Phase1-S5): 네이티브 부트스트랩 — custom token→ID token 교환용 Firebase
     # Web API key(공개 클라이언트 키, ADC와 별개). App Check 검증용 project number(project_id와

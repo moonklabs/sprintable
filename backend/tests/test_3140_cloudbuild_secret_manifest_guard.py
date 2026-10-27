@@ -104,7 +104,7 @@ def test_real_repo_extraction_finds_known_secrets_not_a_silent_zero():
     """가드가 "아무것도 못 찾아서" 우연히 그린인 게 아님을 고정 — 알려진 실제 참조 몇 개가
     반드시 잡혀야 한다(추출기 자체가 깨지면 이 테스트가 먼저 빨개진다)."""
     result = extract_all_secret_refs()
-    assert {"DATABASE_URL_DEV", "JWT_SECRET", "ALEMBIC_DATABASE_URL_DEV"} <= result.resolved
+    assert {"DATABASE_URL_DEV", "JWT_SECRET_DEV", "ALEMBIC_DATABASE_URL_DEV"} <= result.resolved  # story 4798: the signing secret is per environment
 
 
 # ── check_cloudbuild_secret_manifest.check() — ① PR 게이트, AC2 양성대조 ────────
