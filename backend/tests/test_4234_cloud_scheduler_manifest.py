@@ -379,10 +379,25 @@ def test_base_url_override_points_every_job_at_the_given_address_and_default_is_
 
 
 @pytest.mark.parametrize("bad", ["http://dev-api.sprintable.ai", "https://dev-api.sprintable.ai/", "https://dev-api.sprintable.ai/api", "https://dev-api.sprintable.ai:8443",
-                                 "https://u:p@dev-api.sprintable.ai", "dev-api.sprintable.ai", "https://", "https://-x.example", "https://dev-api.sprintable.ai\nrespond"])
+                                 "https://u:p@dev-api.sprintable.ai", "dev-api.sprintable.ai", "https://", "https://-x.example", "https://dev-api.sprintable.ai\nrespond",
+                                 "https://api.sprintable.ai", "https://evil.example", "https://dev-api.sprintable.ai.evil.example", "https://sprintable-backend-dev-1.asia-northeast3.run.app"])
 def test_base_url_override_refuses_anything_but_an_https_host(manifest, bad):
     mod = _load_apply_module()
     fake = _FakeGcloud([])
     with pytest.raises(SystemExit):
         mod.main(["--env", "dev", "--base-url", bad], run=fake)
     assert not fake.calls, "refused before any gcloud call"
+
+
+def test_base_url_is_bound_to_the_environment_and_equals_the_declared_api_name(manifest):
+    """the job header carries CRON_SECRET: only the environment's own API name, the one deploy/vm/env/<env>.yaml declares"""
+    import yaml
+    mod = _load_apply_module()
+    root = Path(__file__).resolve().parents[2]
+    for env_name in ("dev", "prod"):
+        declared = yaml.safe_load((root / f"deploy/vm/env/{env_name}.yaml").read_text())["hosts"]["api"]
+        assert mod._API_BASE_URLS[env_name] == f"https://{declared}"
+    fake = _FakeGcloud([])
+    with pytest.raises(SystemExit):
+        mod.main(["--env", "dev", "--base-url", mod._API_BASE_URLS["prod"]], run=fake)
+    assert not fake.calls

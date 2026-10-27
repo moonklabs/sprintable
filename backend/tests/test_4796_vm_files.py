@@ -121,7 +121,7 @@ def test_the_real_restore_command_carries_restore_wipe_because_the_rehearsal_lef
     section = text[text.index("## 7. Move the data"):text.index("## 8. ")]
     step5 = section[section.index("\n5. On the VM, restore"):section.index("\n6. Enable the deployer")]
     assert "sudo env RESTORE_WIPE=yes /opt/sprintable/bin/restore.sh /srv/sprintable/import/" in step5
-    assert 'sudo bash -c "diff /srv/sprintable/import/' in step5, "the import folder is root-only and sudo closes a bare <(...) descriptor"
+    assert "sudo bash -c 'diff /srv/sprintable/import/" in step5, "the import folder is root-only and sudo closes a bare <(...) descriptor"
     seven_a = section[section.index("7a. Rehearsal"):section.index("**The dump is taken on the VM.**")]
     assert "steps 1, 3, 4 and 5 only" in seven_a and "not step 6" in seven_a, "a rehearsal must not start the application or the timers"
     assert "RESTORE_WIPE" in (_VM / "bin/restore.sh").read_text()
@@ -153,6 +153,24 @@ def test_section_9_names_the_real_variables_of_the_hosted_mcp_and_the_scheduler_
     deploy_mcp = (_ROOT / "backend/scripts/deploy_mcp_dev.sh").read_text()
     assert "--set-env-vars=\"MCP_TRANSPORT=http,SPRINTABLE_API_URL=${DEV_BACKEND_URL}" in deploy_mcp, "the variable the hosted MCP reads is SPRINTABLE_API_URL"
     assert "--base-url" in (_ROOT / "infra/apply_cloud_scheduler.py").read_text()
+
+
+def test_the_rehearsal_dump_is_cleaned_up_locally_and_in_the_bucket() -> None:
+    """codex (combined review): the rehearsal dump is a copy of the whole dev database and must not stay in import/"""
+    text = (_VM / "RUNBOOK.md").read_text()
+    section = text[text.index("7a. Rehearsal"):text.index("**The dump is taken on the VM.**")]
+    assert "sudo rm -f /srv/sprintable/import/*-rehearsal-*" in section
+    assert "gcloud storage rm 'gs://$BACKUPS_BUCKET/import/*-rehearsal-*' --project $PROJECT" in section
+    assert "-final-" in section, "the real move's copies go the same way after the soak"
+
+
+def test_every_apply_cloud_scheduler_call_in_the_runbook_names_the_project_through_the_environment() -> None:
+    """codex (combined review): the tool runs gcloud without --project, so `export PROJECT` alone leaves the active project to chance"""
+    text = (_VM / "RUNBOOK.md").read_text()
+    calls = re.findall(r"(\S*\s*python3 infra/apply_cloud_scheduler\.py [^`)]*)", text)
+    assert calls, "the runbook shows the tool"
+    for call in calls:
+        assert "CLOUDSDK_CORE_PROJECT=$PROJECT python3 infra/apply_cloud_scheduler.py" in call, call
 
 
 def test_no_timer_that_needs_the_database_is_enabled_before_the_restore() -> None:

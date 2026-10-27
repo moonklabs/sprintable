@@ -104,7 +104,7 @@ def test_a_dump_is_taken_checked_counted_and_checksummed(box) -> None:
     assert any("--entrypoint pg_dump" in c and "-Fc --no-owner --no-privileges" in c for c in runs)
     assert re.search(r"seconds|done in \d+ s", p.stdout), "timings are printed"
     hint = next(line for line in p.stdout.splitlines() if line.startswith("next:"))
-    assert "sudo env RESTORE_WIPE=yes /opt/sprintable/bin/restore.sh" in hint and "sudo bash -c \"diff " in hint and ".counts.tsv" in hint, "the copy-and-run hint matches the runbook"
+    assert "sudo env RESTORE_WIPE=yes /opt/sprintable/bin/restore.sh" in hint and "sudo bash -c 'diff " in hint and ".counts.tsv" in hint, "the copy-and-run hint matches the runbook"
 
 
 def test_the_connection_settings_travel_as_environment_names_and_the_password_is_nowhere_else(box) -> None:
@@ -193,7 +193,7 @@ def test_the_upload_does_not_happen_when_the_dump_is_refused(box) -> None:
 
 @pytest.mark.parametrize("host", ["10.110.0.5", "10.0.0.0", "172.16.0.1", "172.31.255.254", "192.168.1.1"])
 def test_private_addresses_are_accepted(box, host: str) -> None:
-    p, _, _ = box("--host", host)
+    p, _, _ = box("--host", host, stdin=URL.replace("10.110.0.5", host) + "\n")  # the URL names the same machine
     assert p.returncode == 0, p.stderr
 
 
@@ -234,3 +234,44 @@ def test_two_runs_in_the_same_second_get_different_names_because_of_the_process_
     assert box("--host", HOST)[0].returncode == 0
     names = sorted(f.name for f in box.imp.glob("*.dump"))
     assert len(names) == 2 and all("20261027T080000Z" in n for n in names) and len(set(names)) == 2
+
+
+def _run_diff_command(box, command: str) -> list[str]:
+    """run the printed/documented `sudo bash -c '…'` for real (without sudo, grep replaced by a recorder) and return the grep arguments it passed"""
+    shim = box.tmp / "bin" / "grep"
+    shim.write_text("#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> \"$GREP_ARGS\"; done\n")
+    shim.chmod(0o755)
+    (box.tmp / "src.tsv").write_text("")
+    (box.tmp / "counts-vm.tsv").write_text("")
+    args_file = box.tmp / "grep-args.txt"
+    args_file.unlink(missing_ok=True)
+    inner = command.replace("sudo bash -c", "bash -c", 1)
+    p = subprocess.run(["bash", "-c", inner], cwd=box.tmp, env={"PATH": f"{box.tmp}/bin:/usr/bin:/bin", "GREP_ARGS": str(args_file), "HOME": str(box.tmp)}, capture_output=True, text=True, timeout=30)
+    assert p.returncode in (0, 1), p.stderr
+    return args_file.read_text().splitlines() if args_file.exists() else []
+
+
+def test_the_printed_and_the_documented_diff_command_give_grep_the_line_end_anchor(box) -> None:
+    """codex worried that `\\$` reached grep as a literal dollar: run both commands in a real shell and look at the pattern grep receives"""
+    p, _, _ = box("--host", HOST)
+    hint = next(line for line in p.stdout.splitlines() if line.startswith("next:"))
+    printed = hint[hint.index("sudo bash -c"):].replace(str(box.imp) + "/", "")
+    printed = re.sub(r"diff \S+\.counts\.tsv", "diff src.tsv", printed)
+    text = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
+    documented = re.search(r"`(sudo bash -c 'diff [^`]+)`", text).group(1)
+    documented = re.sub(r"diff \S+\.counts\.tsv", "diff src.tsv", documented)
+    for command in (printed, documented):
+        args = _run_diff_command(box, command)
+        assert args == ["-P", "^\\S+\\t\\d+$", "counts-vm.tsv"], (command, args)
+
+
+def test_the_url_may_not_name_another_address_than_host_but_a_hostname_is_left_alone(box) -> None:
+    other = URL.replace("10.110.0.5", "10.110.0.9")
+    p, calls, _ = box("--host", HOST, stdin=other + "\n")
+    assert p.returncode == 2 and "10.110.0.9" in p.stderr and "another machine" in p.stderr
+    assert PASSWORD_RAW not in p.stderr + p.stdout and PASSWORD_URL not in p.stderr + p.stdout and "docker run" not in calls
+    named = URL.replace("10.110.0.5", "sql.internal.example")
+    p, _, _ = box("--host", HOST, stdin=named + "\n")
+    assert p.returncode == 0, p.stderr
+    p, _, _ = box("--host", HOST)
+    assert p.returncode == 0, p.stderr

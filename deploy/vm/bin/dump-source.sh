@@ -38,8 +38,8 @@ private_ipv4 "$host" || { echo "--host must be the private IPv4 address (10.x, 1
 
 IFS= read -r source_url || true
 [ -n "$source_url" ] || { echo "no connection URL on standard input" >&2; exit 2; }
-# user, password, port, database, sslmode — one per line, decoded; the URL is never printed (not even on an error). Plain shell variables, NOT exported.
-{ IFS= read -r src_user; IFS= read -r src_password; IFS= read -r src_port; IFS= read -r src_db; IFS= read -r src_sslmode; } < <(
+# user, password, port, database, sslmode, host named in the URL — one per line, decoded; the URL is never printed (not even on an error). Plain shell variables, NOT exported.
+{ IFS= read -r src_user; IFS= read -r src_password; IFS= read -r src_port; IFS= read -r src_db; IFS= read -r src_sslmode; IFS= read -r url_host; } < <(
   printf '%s' "$source_url" | python3 -c '
 import re, sys
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -54,7 +54,7 @@ try:
     ssl = parse_qs(u.query).get("sslmode", [""])[0]
 except Exception:
     fail()
-fields = (user, pw, str(port), db, ssl)
+fields = (user, pw, str(port), db, ssl, u.hostname or "")
 if not re.fullmatch(r"postgres(ql)?(\+\w+)?", u.scheme):
     fail()
 if not (user and pw and db) or any(c in f for f in fields for c in "\r\n"):
@@ -66,6 +66,11 @@ print("\n".join(fields))
 )
 unset source_url
 [ -n "${src_user:-}" ] && [ -n "${src_password:-}" ] && [ -n "${src_db:-}" ] || { echo "could not read the connection URL" >&2; exit 2; }
+# the password goes to --host: if the URL itself names an IPv4 address it must be that one (a hostname or a socket path in the URL is the person's call and is not compared)
+if [[ "${url_host:-}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] && [ "$url_host" != "$host" ]; then
+  echo "--host $host is not the address the connection URL names ($url_host): the password would go to another machine" >&2
+  exit 2
+fi
 
 env_name="$(cfg environment)"
 dir="${IMPORT_DIR:-/srv/sprintable/import}"
@@ -118,4 +123,4 @@ if [ "$upload" = yes ]; then
 fi
 echo "dump:   $base.dump"
 echo "counts: $base.counts.tsv"
-printf '%s\n' "next:   sudo env RESTORE_WIPE=yes /opt/sprintable/bin/restore.sh $base.dump > counts-vm.tsv   then   sudo bash -c \"diff $base.counts.tsv <(grep -P '^\\S+\\t\\d+\\\$' counts-vm.tsv)\""
+printf '%s\n' "next:   sudo env RESTORE_WIPE=yes /opt/sprintable/bin/restore.sh $base.dump > counts-vm.tsv   then   sudo bash -c 'diff $base.counts.tsv <(grep -P \"^\\S+\\t\\d+\$\" counts-vm.tsv)'"

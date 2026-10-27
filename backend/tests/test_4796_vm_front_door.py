@@ -119,6 +119,8 @@ def test_this_environments_cloud_run_backend_addresses_are_accepted(box, up: str
     "", "http://sprintable-backend-dev-787818285179.asia-northeast3.run.app", UP + "/", UP + "/api", UP + ":8443", "https://evil.example",
     "https://sprintable-frontend-dev-787818285179.asia-northeast3.run.app", "https://sprintable-backend-dev-1.asia-northeast3.run.app.evil.example",
     "https://sprintable-backend-staging-1.asia-northeast3.run.app", UP + "\nrespond 200", UP + " {", "https://u:p@sprintable-backend-dev-1.asia-northeast3.run.app",
+    "https://sprintable-backend-dev-111111111111.asia-northeast3.run.app",  # same name pattern, somebody else's project
+    "https://sprintable-backend-dev-57iommnikq-xx.a.run.app", "https://sprintable-backend-dev-787818285179.asia-northeast1.run.app",
 ])
 def test_anything_but_one_of_our_backend_addresses_is_refused_before_it_can_reach_a_file(box, up: str) -> None:
     p, calls = box("passthrough", "--host", HOST, "--upstream", up)
@@ -333,3 +335,10 @@ def test_section_7c_uses_the_hosted_mcps_real_variable_and_moves_the_scheduler_w
     step6 = p3[p3.index("\n6. "):p3.index("**Undo")]
     assert "infra/apply_cloud_scheduler.py --env dev --base-url https://dev-api.sprintable.ai --apply" in step6
     assert step6.index("apply_cloud_scheduler.py") < step6.index("scheduler jobs resume"), "retarget first, then resume"
+
+
+def test_a_prod_vm_takes_only_the_prod_backend_in_this_project_and_not_the_dev_hashed_form(box) -> None:
+    _config(box, environment="prod")
+    assert box("passthrough", "--host", "api.sprintable.ai", "--upstream", OLD_UP)[0].returncode == 2
+    assert box("passthrough", "--host", "api.sprintable.ai", "--upstream", "https://sprintable-backend-prod-111111111111.asia-northeast3.run.app")[0].returncode == 2
+    assert box("passthrough", "--host", "api.sprintable.ai", "--upstream", UP.replace("-dev-", "-prod-"))[0].returncode == 0

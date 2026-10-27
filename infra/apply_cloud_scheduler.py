@@ -245,6 +245,10 @@ def _describe(job: DesiredJob) -> str:
     return f"{job.name} [{job.http_method} {job.uri} · {job.schedule} {job.time_zone}]"
 
 
+# story 4796: the address a job may be pointed at instead of the Cloud Run status.url - the environment's own API name on the VM (env/<env>.yaml `hosts.api`)
+_API_BASE_URLS = {"dev": "https://dev-api.sprintable.ai", "prod": "https://api.sprintable.ai"}
+
+
 def main(argv: list[str] | None = None, *, run: Runner = _gcloud) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--env", required=True)
@@ -255,8 +259,10 @@ def main(argv: list[str] | None = None, *, run: Runner = _gcloud) -> int:
              "비우면 지금까지와 같다. 인증 헤더의 원천은 그대로 실물 백엔드 서비스의 CRON_SECRET.",
     )
     args = parser.parse_args(argv)
-    if args.base_url and not re.fullmatch(r"https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?", args.base_url):
-        raise SystemExit("FAIL: --base-url은 https://<호스트> 꼴이어야 한다(경로·포트·사용자정보 없이)")
+    if args.base_url and args.base_url != _API_BASE_URLS.get(args.env):
+        raise SystemExit(
+            f"FAIL: --base-url은 이 환경({args.env})의 API 주소 {_API_BASE_URLS.get(args.env)} 하나만 받는다 — 작업 헤더에 CRON_SECRET이 실린다"
+        )
 
     manifest = load_manifest()
     target = manifest["environments"][args.env]

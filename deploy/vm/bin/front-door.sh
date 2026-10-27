@@ -44,7 +44,11 @@ case "$cmd" in
     # the public API name of this environment (env/<environment>.yaml `hosts.api`; a test keeps the two equal): the front door never answers for the other environment's name
     case "$env_name" in dev) api_host="dev-api.sprintable.ai" ;; prod) api_host="api.sprintable.ai" ;; esac
     [ "$host" = "$api_host" ] || { echo "--host must be this environment's ($env_name) API name: $api_host" >&2; exit 2; }
-    [[ "$upstream" =~ ^https://sprintable-backend-${env_name}-[a-z0-9]+(-[a-z0-9]+)?\.(asia-northeast3\.run\.app|a\.run\.app)$ ]] || { echo "--upstream must be the https address of this environment's ($env_name) Cloud Run backend (sprintable-backend-$env_name-…run.app), no path: requests carry users' credentials" >&2; exit 2; }
+    # exact addresses of OUR Cloud Run backend of this environment (project number 787818285179; dev also answers on its older hashed form): a pattern would accept anybody's `sprintable-backend-dev-<their project>` service, and these requests carry users' credentials
+    case "$env_name:$upstream" in
+      dev:https://sprintable-backend-dev-787818285179.asia-northeast3.run.app|dev:https://sprintable-backend-dev-57iommnikq-du.a.run.app|prod:https://sprintable-backend-prod-787818285179.asia-northeast3.run.app) ;;
+      *) echo "--upstream must be one of this environment's ($env_name) Cloud Run backend addresses: dev → sprintable-backend-dev-787818285179.asia-northeast3.run.app or sprintable-backend-dev-57iommnikq-du.a.run.app, prod → sprintable-backend-prod-787818285179.asia-northeast3.run.app" >&2; exit 2 ;;
+    esac
     email="$(cfg acme_email)"
     [[ "$email" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || { echo "acme_email in the VM configuration is not an e-mail address" >&2; exit 1; }
     stack_ids="$(stack_caddy_ids)"
