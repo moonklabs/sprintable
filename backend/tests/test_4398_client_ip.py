@@ -206,3 +206,80 @@ async def test_forged_headers_on_a_direct_call_cannot_dodge_the_limit(on_cloud_r
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+# ───────────────────────── story 4796 — a VM behind Caddy ─────────────────────────
+
+@pytest.fixture
+def on_vm_behind_caddy(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.delenv("K_SERVICE", raising=False)
+    monkeypatch.setattr(settings, "trust_forwarded_for", True)
+
+
+def test_4796_vm_with_trust_forwarded_for_counts_the_address_caddy_put_last(on_vm_behind_caddy):
+    req = _request({"X-Forwarded-For": "198.51.100.9"}, peer="172.18.0.5")
+    assert client_ip(req) == "198.51.100.9"
+
+
+def test_4796_vm_a_forged_left_entry_is_not_the_connecting_address(on_vm_behind_caddy):
+    req = _request({"X-Forwarded-For": "203.0.113.7, 198.51.100.9"}, peer="172.18.0.5")
+    assert client_ip(req) == "198.51.100.9"
+
+
+def test_4796_vm_without_the_switch_every_user_would_share_the_front_door_address(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.delenv("K_SERVICE", raising=False)
+    monkeypatch.setattr(settings, "trust_forwarded_for", False)
+    assert client_ip(_request({"X-Forwarded-For": "198.51.100.9"}, peer="172.18.0.5")) == "172.18.0.5"
+
+
+def test_4796_vm_the_front_s_secret_still_wins(on_vm_behind_caddy, with_secret):
+    req = _request({CLIENT_IP_HEADER: "203.0.113.7", EDGE_KEY_HEADER: _SECRET, "X-Forwarded-For": "198.51.100.9"}, peer="172.18.0.5")
+    assert client_ip(req) == "203.0.113.7"
+
+
+def test_4796_vm_a_missing_or_malformed_forwarded_for_falls_back_to_the_socket(on_vm_behind_caddy):
+    assert client_ip(_request({}, peer="172.18.0.5")) == "172.18.0.5"
+    assert client_ip(_request({"X-Forwarded-For": "not-an-ip"}, peer="172.18.0.5")) == "172.18.0.5"
+
+
+def test_4796_the_switch_is_off_by_default():
+    from app.core.config import Settings
+
+    assert Settings.model_fields["trust_forwarded_for"].default is False
+
+
+def test_4796_the_environment_variable_turns_the_switch_on(monkeypatch):
+    from app.core.config import Settings
+
+    monkeypatch.setenv("TRUST_FORWARDED_FOR", "true")
+    assert Settings(_env_file=None).trust_forwarded_for is True
+    monkeypatch.delenv("TRUST_FORWARDED_FOR")
+    assert Settings(_env_file=None).trust_forwarded_for is False
+
+
+def _request_with_lines(lines: list[str], peer: str = "172.18.0.5") -> Request:
+    return Request({
+        "type": "http", "method": "GET", "path": "/", "query_string": b"",
+        "headers": [(b"x-forwarded-for", v.encode()) for v in lines], "client": (peer, 5555),
+    })
+
+
+def test_4796_two_header_lines_count_the_last_line_the_front_door_added(on_vm_behind_caddy):
+    assert client_ip(_request_with_lines(["9.9.9.9", "198.51.100.9"])) == "198.51.100.9"
+
+
+def test_4796_the_last_entry_of_the_last_line_wins_when_both_forms_are_mixed(on_vm_behind_caddy):
+    assert client_ip(_request_with_lines(["9.9.9.9, 8.8.8.8", "7.7.7.7, 198.51.100.9"])) == "198.51.100.9"
+
+
+def test_4796_a_forged_second_line_is_the_known_limit_of_trusting_the_front_door(on_vm_behind_caddy):
+    """the rule is «the front door appends last»: if a client could add a line AFTER the front door it would win — which is why the switch is only for a front door that overwrites"""
+    assert client_ip(_request_with_lines(["198.51.100.9", "9.9.9.9"])) == "9.9.9.9"
+
+
+def test_4796_two_lines_on_cloud_run_follow_the_same_rule(on_cloud_run):
+    assert client_ip(_request_with_lines(["9.9.9.9", "198.51.100.9"])) == "198.51.100.9"
