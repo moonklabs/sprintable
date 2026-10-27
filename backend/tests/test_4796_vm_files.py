@@ -127,6 +127,17 @@ def test_the_real_restore_command_carries_restore_wipe_because_the_rehearsal_lef
     assert "RESTORE_WIPE" in (_VM / "bin/restore.sh").read_text()
 
 
+def test_every_gcloud_command_of_section_7_names_its_project_and_the_writers_stop_is_more_than_the_ingress_flag() -> None:
+    """codex: `export PROJECT` does not set gcloud's active project; and `--ingress internal` alone does not stop every writer"""
+    text = (_VM / "RUNBOOK.md").read_text()
+    section = text[text.index("## 7. Move the data"):text.index("## 8. ")]
+    for command in re.findall(r"`(gcloud (?:sql|run|scheduler|compute|secrets)[^`]*)`", section):
+        assert "--project $PROJECT" in command, command
+    assert "gcloud storage cp /tmp/vm-bundle/desired.json gs://$DEPLOY_BUCKET/desired.json" in section, "the hand-built bundle path has its own upload"
+    step2 = section[section.index("\n2. Stop writes"):section.index("\n3. Dump and count")]
+    assert "does not stop every writer" in step2 and "front-door.sh stop" in step2 and "POST / PUT / PATCH / DELETE" in step2
+
+
 def test_no_timer_that_needs_the_database_is_enabled_before_the_restore() -> None:
     """a backup run before the restore finds no database and fails every night (the first dev VM found this); the timers are enabled with the deploy timer, RUNBOOK §7 step 6"""
     code = re.sub(r"(?m)^\s*#.*$|echo .*$", "", (_VM / "bin/bootstrap.sh").read_text())
