@@ -179,3 +179,33 @@ def test_the_runbook_does_not_call_the_switch_the_only_backend_address_line() ->
     sec = _runbook_section("## 9. ", "## 10. ")
     assert "exactly one line for `_FASTAPI_URL`" in sec and "exactly one line for the backend's address" not in sec
     assert "`backend_url=…` just below it is a different value, `_BACKEND_URL`" in sec and "moves with the GA4 registration in Phase 2" in sec
+
+
+def test_the_documented_measurement_command_really_sends_what_the_exchange_route_reads(tmp_path: Path) -> None:
+    """codex (pipeline PR, round 7): without the JSON content type the body is not read and the route answers 422 before the limiter counts; run the documented command for real against a fake curl"""
+    import json
+
+    sec = _runbook_section("**First-VM measurement", "Caddy needs the real hostnames")
+    commands = [c for c in re.findall(r"`([^`]+)`", sec) if c.startswith("V=$(printf")]
+    assert len(commands) == 1, commands
+    cmd = commands[0].replace("seq 1 2400", "seq 1 3").replace("xargs -P 16", "xargs -P 1")
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    log = tmp_path / "curl.log"
+    (fake / "curl").write_text('#!/bin/sh\nprintf "%s\\0" "$@" >> "$FAKE_LOG"; printf "\\n--END--\\0" >> "$FAKE_LOG"\necho 404\n')
+    (fake / "curl").chmod(0o755)
+    p = subprocess.run(["bash", "-c", cmd], env={"PATH": f"{fake}:/usr/bin:/bin", "FAKE_LOG": str(log), "HOME": str(tmp_path)}, capture_output=True, text=True, timeout=30)
+    assert p.returncode == 0 and p.stdout.split() == ["3", "404"], (p.stdout, p.stderr)
+    calls = [c for c in log.read_bytes().decode().split("\n--END--\0") if c]
+    assert len(calls) == 3
+    forged = set()
+    for call in calls:
+        args = call.split("\0")
+        assert args[args.index("-X") + 1] == "POST"
+        assert "https://dev-api.sprintable.ai/api/v2/desktop/setup-codes/exchange" in args
+        headers = [args[i + 1] for i, a in enumerate(args) if a == "-H"]
+        assert "content-type: application/json" in headers
+        forged.add(next(h for h in headers if h.startswith("X-Forwarded-For: ")))
+        body = json.loads(args[args.index("-d") + 1])
+        assert set(body) == {"code", "verifier"} and len(body["code"]) >= 20 and re.fullmatch(r"[A-Za-z0-9._~-]{43,128}", body["verifier"])
+    assert forged == {"X-Forwarded-For: 9.9.9.1", "X-Forwarded-For: 9.9.9.2", "X-Forwarded-For: 9.9.9.3"}, "a different forged address in every request"
