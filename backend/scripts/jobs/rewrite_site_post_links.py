@@ -11,7 +11,7 @@ Three modes, one command line each (run it in the one-off Cloud Run job `sprinta
   python -m scripts.jobs.rewrite_site_post_links --old-origin https://OLD --new-origin https://dev-api.sprintable.ai
       READ-ONLY plan: how many links start with that old origin (nothing is written).
   python -m scripts.jobs.rewrite_site_post_links --old-origin https://OLD --new-origin https://dev-api.sprintable.ai --apply
-      Rewrites ONLY the origin prefix of the links that start with `--old-origin/`, in one transaction, and prints the count before and after. `--old-origin` may be repeated.
+      Rewrites ONLY the origin prefix of the links that start with `--old-origin/` (`http` or `https`: what was stored), in one transaction, and prints the count before and after. `--old-origin` may be repeated.
 
 Nothing else is touched: only rows with action `site_post_published`, only `context.url`, only the leading origin; the path and the query (`public_key`, `lang`) stay. The new origin must be https (or http://localhost).
 """
@@ -37,11 +37,12 @@ def _like_prefix(origin: str) -> str:
     return escaped + "/%"
 
 
-def check_origin(value: str, *, what: str) -> str:
+def check_origin(value: str, *, what: str, prefix_match: bool = False) -> str:
+    """`prefix_match`: the value only selects stored links (`--old-origin`), so plain `http` is accepted — behind the front door the request's scheme was `http`, and that is what was stored. The origin that is WRITTEN stays https."""
     from app.core.origin_check import parse_origin
 
     try:
-        return parse_origin(value)
+        return parse_origin(value, allow_http=prefix_match)
     except ValueError as exc:
         raise SystemExit(f"{what}: {exc}") from exc
 
@@ -113,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("--apply needs --old-origin")
     if args.old_origin and not args.new_origin:
         raise SystemExit("--new-origin is required with --old-origin")
-    olds = [check_origin(o, what="--old-origin") for o in args.old_origin]
+    olds = [check_origin(o, what="--old-origin", prefix_match=True) for o in args.old_origin]
     new = check_origin(args.new_origin, what="--new-origin") if args.new_origin else None
     return asyncio.run(run(olds, new, args.apply))
 

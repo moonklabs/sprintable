@@ -168,8 +168,8 @@ def test_the_runbook_names_the_new_setting_and_the_job_steps_that_the_job_really
     assert "**Dev: waived by the PO (2026-10-27, the shortcut).**" in sec10 and "**Prod: a precondition of Phase 3 (§7c)**" in sec10 and "**before Phase 3's final dump**" in sec10 and "which comes after the soak" in sec10
     p3 = text[text.index("**Phase 3"):text.index("## 8. ")]
     assert "the stored hosted-site links rewritten and the report showing no `run.app` origin (§10, «Stored hosted-site links»; **waived for dev** by the PO on 2026-10-27" in p3.split("\n1. ")[0] and "**required for prod**" in p3.split("\n1. ")[0]
-    for needle in ("**Stored hosted-site links (story 4796).**", "python -m scripts.jobs.rewrite_site_post_links`", "--old-origin https://sprintable-backend-dev-787818285179.asia-northeast3.run.app", "--old-origin https://sprintable-backend-dev-57iommnikq-du.a.run.app",
-                   "--new-origin https://dev-api.sprintable.ai`", "with `--apply`", "exits non-zero unless nothing with an old origin is left", "origins and counts, never a full link", "Undo of the rewrite"):
+    for needle in ("**Stored hosted-site links (story 4796).**", "python -m scripts.jobs.rewrite_site_post_links`", "--old-origin http://sprintable-backend-dev-787818285179.asia-northeast3.run.app --old-origin https://sprintable-backend-dev-787818285179.asia-northeast3.run.app", "--old-origin http://sprintable-backend-dev-57iommnikq-du.a.run.app --old-origin https://sprintable-backend-dev-57iommnikq-du.a.run.app", "with the scheme the report shows", "`--old-origin` accepts `http` or `https` because it only selects what is stored, while `--new-origin` must be `https`",
+                   "--new-origin https://dev-api.sprintable.ai`", "with `--apply`", "exits non-zero unless nothing with an old origin is left", "origins and counts, never a full link", "Undo of the rewrite: **for `https` sources only**", "cannot be put back by the job", "**before the first `--apply`** take a backup (`sudo systemctl start sprintable-backup.service`, §11)"):
         assert needle in sec10, needle
     for needle in ("in a Cloud Run job, **before Phase 3's final dump**, so that dump already carries the rewritten links (the commands below are dev's; prod needs its own job, §12)", "sudo docker exec sprintable-backend-1 python -m scripts.jobs.rewrite_site_post_links",
                    "gcloud run jobs describe sprintable-verify-oneoff --project $PROJECT --region $REGION --format=export > verify-oneoff-before.yaml",
@@ -256,3 +256,30 @@ def test_the_dev_waiver_is_stated_the_same_way_in_every_place_that_speaks_of_the
         assert marker in text, marker
     assert "(«Stored hosted-site links»), a precondition of Phase 3;" not in text, "the unconditional sentence"
     assert "a precondition of Phase 3 for prod, waived for dev by the PO (the job runs on the VM afterwards)" in text
+
+
+def test_a_prefix_may_be_plain_http_but_an_address_that_is_written_may_not() -> None:
+    """the first dev report listed `http://…run.app` links (the request scheme behind the front door): `--old-origin` must be able to name them; everything else about an origin stays as strict"""
+    from app.core.origin_check import parse_origin
+
+    host = "http://sprintable-backend-dev-787818285179.asia-northeast3.run.app"
+    assert parse_origin(host, allow_http=True) == host and parse_origin(host + "/", allow_http=True) == host
+    with pytest.raises(ValueError):
+        parse_origin(host)                      # not as an address that is written
+    with pytest.raises(ValueError):
+        Settings(public_api_url=host)           # the setting never takes it
+    for still_bad in (host + "/path", host + "?q=1", "http://u:p@h.example", "http://", "http://h.example:abc", "ftp://h.example", "http://h .example", "http://h.example\\x"):
+        with pytest.raises(ValueError):
+            parse_origin(still_bad, allow_http=True)
+
+
+def test_the_undo_claim_does_not_promise_what_the_job_cannot_do() -> None:
+    """codex (http prefix PR): an http source cannot be restored by swapping the origins because the written origin is never plain http"""
+    from scripts.jobs import rewrite_site_post_links as job
+
+    with pytest.raises(SystemExit):
+        job.check_origin("http://sprintable-backend-dev-787818285179.asia-northeast3.run.app", what="--new-origin")
+    text = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
+    sec10 = text[text.index("## 10. "):text.index("## 11. ")]
+    assert "Undo of the rewrite: the same job with the two origins swapped" not in sec10, "the old unconditional claim"
+    assert (_ROOT / "deploy/vm/systemd/sprintable-backup.service").exists(), "the backup unit the runbook tells the reader to start"
