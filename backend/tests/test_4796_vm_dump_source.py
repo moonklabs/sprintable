@@ -25,6 +25,7 @@ HOST = "10.110.0.5"
 
 _FAKE_DOCKER = r"""#!/bin/sh
 echo "docker $*" >> "$FAKE_LOG"
+echo "PROCENV docker $1: $(env | grep -F -- "$FAKE_NEEDLE" | grep -v '^FAKE_NEEDLE=' | cut -d= -f1 | sort | tr '\n' ' ')" >> "$FAKE_ENV"
 case "$1" in
   ps) echo dbcontainer1 ;;
   inspect) echo "pgvector/pgvector:pg15" ;;
@@ -47,6 +48,7 @@ exit 0
 """
 _FAKE_GCLOUD = r"""#!/bin/sh
 echo "gcloud $*" >> "$FAKE_LOG"
+echo "PROCENV gcloud $1: $(env | grep -F -- "$FAKE_NEEDLE" | grep -v '^FAKE_NEEDLE=' | cut -d= -f1 | sort | tr '\n' ' ')" >> "$FAKE_ENV"
 exit 0
 """
 
@@ -66,7 +68,7 @@ def box(tmp_path: Path):
 
     def run(*args: str, stdin: str | None = URL + "\n", **env: str):
         e = {"PATH": f"{bin_dir}:{Path(sys.executable).parent}:/usr/bin:/bin:/usr/local/bin", "HOME": str(tmp_path), "SPRINTABLE_CONFIG": str(cfg), "IMPORT_DIR": str(imp),
-             "FAKE_LOG": str(log), "FAKE_ENV": str(envlog), **env}
+             "FAKE_LOG": str(log), "FAKE_ENV": str(envlog), "FAKE_NEEDLE": PASSWORD_RAW, **env}
         p = subprocess.run(["bash", str(_SCRIPT), *args], input=stdin, env=e, capture_output=True, text=True, timeout=60)
         return p, log.read_text(), envlog.read_text()
 
@@ -77,7 +79,7 @@ def box(tmp_path: Path):
 def _files(imp: Path) -> dict[str, Path]:
     out = {}
     for f in imp.glob("*"):
-        out[re.sub(r"^dev-[a-z0-9-]+-\d{8}T\d{6}Z", "X", f.name)] = f
+        out[re.sub(r"^dev-[a-z0-9-]+-\d{8}T\d{6}Z-\d+", "X", f.name)] = f
     return out
 
 
@@ -137,6 +139,8 @@ def test_a_bad_url_stops_before_any_container_and_is_never_echoed(box, bad: str)
 
 @pytest.mark.parametrize("args", [
     [], ["--host", ""], ["--host", "sql.example.com"], ["--host", "127.0.0.1"], ["--host", "0.0.0.0"], ["--host", "10.1.1"], ["--host", "10.0.0.1;ls"],
+    ["--host", "8.8.8.8"], ["--host", "172.15.0.1"], ["--host", "172.32.0.1"], ["--host", "192.169.0.1"], ["--host", "999.1.1.1"], ["--host", "10.0.0.256"],
+    ["--host", "010.0.0.1"], ["--host", "10.00.0.1"], ["--host", "169.254.169.254"], ["--host", "100.64.0.1"],
     ["--host", HOST, "--label", "Bad Label"], ["--host", HOST, "--label", ""], ["--host", HOST, "--label", "a" * 21], ["--host", HOST, "--bogus"],
 ])
 def test_the_arguments_are_checked_before_the_url_is_read(box, args: list[str]) -> None:
@@ -175,10 +179,37 @@ def test_upload_copies_the_three_files_to_the_import_folder_and_only_when_asked(
     assert p.returncode == 0, p.stderr
     cp = next(c for c in calls.splitlines() if c.startswith("gcloud storage cp"))
     assert cp.endswith(" gs://bkt-1/import/") and cp.count("gs://") == 1, "one destination: the backups bucket's import folder"
-    names = re.findall(r"(dev-final-\d{8}T\d{6}Z\.[\w.]+)", cp)
-    assert sorted(re.sub(r"^dev-final-\d{8}T\d{6}Z", "X", n) for n in names) == ["X.counts.tsv", "X.dump", "X.dump.sha256"]
+    assert "--no-clobber" in cp, "create only: an existing object is never replaced"
+    names = re.findall(r"(dev-final-\d{8}T\d{6}Z-\d+\.[\w.]+)", cp)
+    assert sorted(re.sub(r"^dev-final-\d{8}T\d{6}Z-\d+", "X", n) for n in names) == ["X.counts.tsv", "X.dump", "X.dump.sha256"]
 
 
 def test_the_upload_does_not_happen_when_the_dump_is_refused(box) -> None:
     p, calls, _ = box("--host", HOST, "--upload", FAKE_DUMP_BYTES="10")
     assert p.returncode != 0 and "gcloud" not in calls
+
+
+@pytest.mark.parametrize("host", ["10.110.0.5", "10.0.0.0", "172.16.0.1", "172.31.255.254", "192.168.1.1"])
+def test_private_addresses_are_accepted(box, host: str) -> None:
+    p, _, _ = box("--host", host)
+    assert p.returncode == 0, p.stderr
+
+
+def test_the_password_is_in_the_environment_of_the_one_container_command_only(box) -> None:
+    """it is not exported: docker inspect / exec / ps / gcloud and every other child never see it (the codex finding)"""
+    p, calls, env = box("--host", HOST, "--upload")
+    assert p.returncode == 0, p.stderr
+    procs = [line for line in env.splitlines() if line.startswith("PROCENV ")]
+    assert any(line.startswith("PROCENV docker run:") and "PGPASSWORD" in line for line in procs), "the container command has it (docker reads the value from there)"
+    for line in procs:
+        if not line.startswith("PROCENV docker run:"):
+            assert line.split(":", 1)[1].strip() == "", f"the password is in the environment of: {line}"
+    run_lines = [line for line in procs if line.startswith("PROCENV docker run:")]
+    assert all(line.split(":", 1)[1].split() == ["PGPASSWORD"] for line in run_lines), f"only PGPASSWORD may carry it: {run_lines}"
+
+
+def test_two_runs_in_the_same_second_do_not_share_file_names(box) -> None:
+    box("--host", HOST)
+    box("--host", HOST)
+    dumps = [f for f in box.imp.glob("*.dump")]
+    assert len(dumps) == 2 and len({f.name for f in dumps}) == 2

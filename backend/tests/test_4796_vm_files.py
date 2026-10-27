@@ -103,13 +103,25 @@ def test_every_file_a_unit_runs_is_installed_by_bootstrap() -> None:
     assert "enable --now sprintable-deploy.timer" not in re.sub(r"(?m)^\s*#.*$|echo .*$", "", boot), "the deploy timer is enabled by hand after the database is restored"
 
 
+def test_the_runbook_puts_desired_json_in_place_and_starts_the_database_before_the_first_dump() -> None:
+    """found by the codex review: a new VM has no desired.json, and the dump step needs the database container the `--db-only` start provides"""
+    text = (_VM / "RUNBOOK.md").read_text()
+    section = text[text.index("## 7. Move the data"):text.index("## 8. ")]
+    put = section.index("gcloud storage cp gs://$DEPLOY_BUCKET/candidates/$SHA.json gs://$DEPLOY_BUCKET/desired.json")
+    db_only = section.index("deployer.py --db-only")
+    dump = section.index("dump-source.sh --host $SRC_IP --label rehearsal --upload")
+    assert put < db_only < dump, "desired.json, then the database, then the dump"
+    assert section.count("deployer.py --db-only") == 1, "started once, in step 1"
+    assert "Once per VM, before the first dump" in section
+
+
 def test_no_timer_that_needs_the_database_is_enabled_before_the_restore() -> None:
     """a backup run before the restore finds no database and fails every night (the first dev VM found this); the timers are enabled with the deploy timer, RUNBOOK §7 step 6"""
     code = re.sub(r"(?m)^\s*#.*$|echo .*$", "", (_VM / "bin/bootstrap.sh").read_text())
     for timer in ("sprintable-backup.timer", "sprintable-restore-check.timer", "sprintable-deploy.timer"):
         assert not re.search(rf"systemctl enable[^\n]*{re.escape(timer)}", code), timer
     runbook = (_VM / "RUNBOOK.md").read_text()
-    step6 = next(line for line in runbook.splitlines() if line.startswith("6. Make a sha's version the desired one"))
+    step6 = next(line for line in runbook.splitlines() if line.startswith("6. Enable the deployer"))
     for timer in ("sprintable-deploy.timer", "sprintable-backup.timer", "sprintable-restore-check.timer"):
         assert timer in step6, timer
 
@@ -388,7 +400,7 @@ def test_the_dump_comes_with_its_checksum_because_restore_demands_it_for_a_gs_so
     assert "cloud-sql-proxy" not in text, "the source has no public address: a laptop can not reach it"
     assert "sha256_verify" in (_VM / "bin/restore.sh").read_text()
     script = (_VM / "bin/dump-source.sh").read_text()
-    assert '.dump.sha256' in script and 'gcloud storage cp --quiet "$base.dump" "$base.dump.sha256" "$base.counts.tsv" "gs://$bucket/import/"' in script
+    assert '.dump.sha256' in script and 'gcloud storage cp --quiet --no-clobber "$base.dump" "$base.dump.sha256" "$base.counts.tsv" "gs://$bucket/import/"' in script
 
 
 def test_the_runbook_closes_the_cloud_run_door_with_a_flag_cloud_run_accepts() -> None:

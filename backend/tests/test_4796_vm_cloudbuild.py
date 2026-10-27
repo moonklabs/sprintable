@@ -144,7 +144,7 @@ def test_every_step_is_dev_only_and_no_script_writes_desired_json() -> None:
     for sid in VM_STEPS:
         script = _STEPS[sid]["args"][1]
         assert re.search(r'if \[ "\$\{_DEPLOY_ENV\}" != "dev" \]; then\s+echo [^\n]*\n\s+exit 0\s+fi', script), sid
-        assert not re.search(r"gs://\S*desired\.json", script), f"{sid} must not write the VM's desired.json (RUNBOOK §7 step 6 does)"
+        assert not re.search(r"gs://\S*desired\.json", script), f"{sid} must not write the VM's desired.json (RUNBOOK §7 step 1 does)"
 
 
 def test_the_images_live_in_our_registry_and_the_two_hosts_are_not_passed_from_here() -> None:
