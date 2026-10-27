@@ -512,6 +512,9 @@ class Settings(BaseSettings):
     # story #4398: 프런트(BFF)가 정한 사용자 IP(`X-Sprintable-Client-IP`)를 믿을지 가르는 공유 비밀(`X-Sprintable-Edge-Key`).
     # 미설정이면 그 헤더를 안 믿고 Cloud Run 앞단이 붙인 접속 주소(XFF 오른쪽 끝)로 센다 — 배포 순서에 안 막힌다.
     edge_client_ip_secret: str = ""
+    # story 4796: Cloud Run 밖(VM)에서 앞문(Caddy)이 X-Forwarded-For를 **덮어써** 접속 주소 한 칸만 두는 배포일 때 켠다(TRUST_FORWARDED_FOR=true).
+    # 끄면(기본) K_SERVICE가 있을 때만 XFF를 믿는다 — 앞문 없이 직접 열린 서버에서 꾸민 XFF를 믿지 않으려는 안전 기본값.
+    trust_forwarded_for: bool = False
 
     # story 4dee942b(Phase1-S5): 네이티브 부트스트랩 — custom token→ID token 교환용 Firebase
     # Web API key(공개 클라이언트 키, ADC와 별개). App Check 검증용 project number(project_id와

@@ -1,0 +1,147 @@
+# story 4796 — dev on one VM. Names only; no secret values and no private plain values live in this repository.
+# deploy/vm/bin/render_env.py merges: private plain file (live values) < overrides < computed < secrets (Secret Manager).
+format: 1
+environment: dev
+project: sprintable-494803
+region: asia-northeast3
+hosts:
+  api: dev-api.sprintable.ai
+  realtime: dev-realtime.sprintable.ai
+  app: dev-app.sprintable.ai
+buckets:
+  deploy: sprintable-vm-dev-deploy
+  backups: sprintable-vm-dev-backups
+database:
+  user: sprintable
+  name: sprintable
+  password_secret: DB_PASSWORD_VM_DEV
+services:
+  backend:
+    live_section: sprintable-backend-dev
+    overrides:  # VM-specific values (everything else plain comes from the private file made from the live service)
+      DB_PGBOUNCER: "false"
+      DB_POOL_SIZE: "5"
+      DB_MAX_OVERFLOW: "5"
+      PG_LISTEN_ENABLED: "true"
+      EVENT_BROKER_REDIS_CONSUME_ENABLED: "false"
+      EVENT_BROKER_REDIS_DISPATCH_ENABLED: "false"
+      EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED: "false"
+      FANOUT_WAKE_REDIS_ENABLED: "false"
+      PRESENCE_ONLINE_REDIS_ENABLED: "false"
+      PRESENCE_REDIS_ENABLED: "false"
+      SSE_LEASE_REDIS_ENABLED: "false"
+      RATE_LIMIT_BACKEND: "memory"
+      APP_URL: "https://dev-app.sprintable.ai"
+      NEXT_PUBLIC_APP_URL: "https://dev-app.sprintable.ai"
+      BACKEND_URL: "https://dev-api.sprintable.ai"
+      FASTAPI_URL: "https://dev-api.sprintable.ai"
+      ADMIN_OPERATOR_AUDIENCE: "https://dev-api.sprintable.ai"
+    secrets:  # env name -> Secret Manager secret id (same ids as the live service; values are read at deploy time)
+      APPLE_PRIVATE_KEY: APPLE_SIWA_PRIVATE_KEY
+      CHANNEL_CREDENTIAL_ENCRYPTION_KEY: CHANNEL_CREDENTIAL_ENCRYPTION_KEY_DEV
+      CHANNEL_OAUTH_STATE_SECRET: CHANNEL_OAUTH_STATE_SECRET_DEV
+      CRON_SECRET: cron-secret
+      EDGE_CLIENT_IP_SECRET: EDGE_CLIENT_IP_SECRET_DEV
+      EMAIL_FROM: EMAIL_FROM
+      FIREBASE_BFF_INTERNAL_SECRET: FIREBASE_BFF_INTERNAL_SECRET
+      GENERATION_CONNECTOR_CREDENTIAL_ENCRYPTION_KEY: GENERATION_CONNECTOR_CREDENTIAL_ENCRYPTION_KEY_DEV
+      GITHUB_APP_CLIENT_SECRET: github-app-client-secret-dev
+      GITHUB_APP_PRIVATE_KEY: github-app-private-key-dev
+      GITHUB_APP_STATE_SECRET: github-app-state-secret-dev
+      GITHUB_APP_WEBHOOK_SECRET: github-app-webhook-secret-dev
+      GITHUB_WEBHOOK_SECRET: github-webhook-secret
+      GOOGLE_CLIENT_ID: GOOGLE_CLIENT_ID
+      GOOGLE_CLIENT_SECRET: GOOGLE_CLIENT_SECRET
+      JWT_SECRET: JWT_SECRET_DEV
+      ORG_BILLING_KEY_ENCRYPTION_KEY: ORG_BILLING_KEY_ENCRYPTION_KEY_DEV
+      RESEND_API_KEY: RESEND_API_KEY
+      SUPPORT_GATEWAY_TOKEN_SECRET: SUPPORT_GATEWAY_TOKEN_SECRET_dev
+      TOSS_PAYMENTS_CLIENT_KEY: TOSS_PAYMENTS_CLIENT_KEY_DEV
+      TOSS_PAYMENTS_CRYPTO_KEY: TOSS_PAYMENTS_CRYPTO_KEY_DEV
+      TOSS_PAYMENTS_SECRET_KEY: TOSS_PAYMENTS_SECRET_KEY_DEV
+      TOSS_WEBHOOK_SECRET: TOSS_WEBHOOK_SECRET_DEV
+    computed:  # built from the VM database settings
+      DATABASE_URL: "postgresql+asyncpg://{db_user}:{db_password}@db:5432/{db_name}"
+      DATABASE_URL_DIRECT: "postgresql://{db_user}:{db_password}@db:5432/{db_name}"
+    dropped:  # live variables that are deliberately not carried over
+      REDIS_URL: "no Redis on the VM (one process; the in-process fallbacks are the design)"
+      OPS_RESTART_TS: "a Cloud Run restart trigger, not a setting"
+    added:  # new on the VM
+      TRUST_FORWARDED_FOR: "true"
+      GCS_MEMO_ATTACHMENTS_BUCKET: "sprintable-memo-attachments-dev"  # dev-only attachments bucket (story 5269 makes it live on Cloud Run dev; then this moves to overrides)
+    live_plain:  # names whose value is taken from the private plain file (PO exports it from the live service)
+      - ADMIN_OPERATOR_ALLOWLIST
+      - APPLE_KEY_ID
+      - APPLE_SERVICES_ID
+      - APPLE_TEAM_ID
+      - BACKEND_REQUEST_TIMEOUT_SECONDS
+      - BUILD_APP_METADATA_DEFALLBACK
+      - DB_TIMING_LOG_ENABLED
+      - DECISION_GATE_LINE_ENABLED
+      - DECISION_GATE_LINE_MODE
+      - DECISION_GATE_LINE_ORG_ALLOWLIST
+      - DEPLOY_ENV
+      - EVENTBUS_ENABLED
+      - FIREBASE_OAUTH_HANDOFF_ENABLED
+      - GATE_CONFIG_ENFORCE_ENABLED
+      - GATE_CONFIG_ENFORCE_ORG_ALLOWLIST
+      - GCS_AVATARS_BUCKET
+      - GCS_CHANNEL_MEDIA_BUCKET
+      - GITHUB_APP_CLIENT_ID
+      - GITHUB_APP_ID
+      - GITHUB_APP_SLUG
+      - GOTENBERG_SERVICE_URL
+      - H1_MERGE_GATE_ADVISORY
+      - H1_MERGE_GATE_ENABLED
+      - H1_MERGE_GATE_ORG_ALLOWLIST
+      - L2_TRIGGER_ADVISORY_LOCK
+      - L2_TRIGGER_ENABLED
+      - L2_TRIGGER_MAX_WAKES_PER_ORG_PER_HOUR
+      - L2_TRIGGER_ORG_ALLOWLIST
+      - LICENSE_CONSENT
+      - LLM_GEMINI_LOCATION
+      - LLM_GEMINI_MODEL
+      - MCP_PUBLIC_URL
+      - MEMBER_SSOT_APIKEY_CUT
+      - MEMBER_SSOT_RESOLVER_SHADOW
+      - OPS_ALERT_CONVERSATION_ID
+      - PUBLIC_SITE_BASE_URL
+      - PUSH_DEVICES_BY_USER
+      - SANDBOX_CHANNEL_ENABLED
+      - SSE_TRANSIENT_REPLAY_ENABLED
+      - STORAGE_PROVIDER
+      - SUPPORT_CONTACT_SURFACE_WIDGET
+      - SUPPORT_ESCALATION_APPROVER_MEMBER_ID
+      - SUPPORT_ESCALATION_REQUESTER_MEMBER_ID
+      - SUPPORT_ESCALATION_TARGET_ORG_SLUG
+      - SUPPORT_ESCALATION_TARGET_PROJECT_SLUG
+      - SUPPORT_GATEWAY_ESCALATION_RESOLUTION_URL
+      - SUPPORT_GATEWAY_OPERATOR_REPLY_URL
+      - WEBHOOK_TEST_STUB_ENABLED
+      - WORDPRESS_TEST_STUB_ENABLED
+  frontend:
+    live_section: sprintable-frontend-dev
+    overrides:  # VM-specific values (everything else plain comes from the private file made from the live service)
+      NEXT_PUBLIC_FASTAPI_URL: "https://dev-api.sprintable.ai"
+      REALTIME_URL: "https://dev-realtime.sprintable.ai"
+      APP_BASE_URL: "https://dev-app.sprintable.ai"
+      NEXT_PUBLIC_APP_URL: "https://dev-app.sprintable.ai"
+    secrets:  # env name -> Secret Manager secret id (same ids as the live service; values are read at deploy time)
+      EDGE_CLIENT_IP_SECRET: EDGE_CLIENT_IP_SECRET_DEV
+      FIREBASE_BFF_INTERNAL_SECRET: FIREBASE_BFF_INTERNAL_SECRET
+      JWT_SECRET: JWT_SECRET_DEV
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: NEXT_PUBLIC_SUPABASE_ANON_KEY
+      NEXT_PUBLIC_SUPABASE_URL: NEXT_PUBLIC_SUPABASE_URL
+    computed:  # built from the VM database settings
+    dropped:  # live variables that are deliberately not carried over
+    added:  # new on the VM
+    live_plain:  # names whose value is taken from the private plain file (PO exports it from the live service)
+      - APPLE_TEAM_ID
+      - DESKTOP_DOWNLOAD_BUCKET
+      - DESKTOP_DOWNLOAD_ENABLED
+      - FIREBASE_OAUTH_HANDOFF_ENABLED
+      - MOBILE_APP_LINK_ORIGIN
+      - NEXT_TELEMETRY_DISABLED
+      - NODE_ENV
+      - SERVER_TIMING_MARKERS
+      - STORAGE_PROVIDER

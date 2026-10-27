@@ -1,0 +1,1 @@
+{"file": "tests/test_4800_stream_end_connections_realdb.py", "sec": 25.0, "provisional": true, "source": "story #4800 (신규 파일) — 로컬 실 PG(disposable) 실측 전 잠정치. 12번 접속·끊김을 실제 StreamingResponse로 돌림."}

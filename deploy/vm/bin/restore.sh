@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# restore.sh <dump-file | gs://…/db-….dump> — load a pg_dump -Fc into the (EMPTY) application database of this VM. Used once for the move from Cloud SQL,
+# and for a real disaster restore. It refuses a database that already has tables: wipe deliberately with `RESTORE_WIPE=yes`.
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+. "$here/lib.sh"
+
+src="${1:?usage: restore.sh <dump-file | gs://…dump>}"
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+if [[ "$src" == gs://* ]]; then
+  gcloud storage cp --quiet "$src" "$src.sha256" "$work/"
+  sha256_verify "$work" "$(basename "$src").sha256" || { echo "checksum of $src does not match" >&2; exit 1; }
+  src="$work/$(basename "$src")"
+fi
+[ -s "$src" ] || { echo "no such dump: $src" >&2; exit 1; }
+
+user="$(db_user)"; name="$(db_name)"
+# a dump that cannot even be listed must not cost the database it was meant to replace
+listing="$(in_db pg_restore --list < "$src")" || { echo "not a readable pg_dump -Fc archive: $src" >&2; exit 1; }
+grep -q 'TABLE DATA' <<< "$listing" || { echo "the archive holds no table data: $src" >&2; exit 1; }
+if [ -n "$(docker ps -q --filter label=com.docker.compose.project=sprintable --filter label=com.docker.compose.service=backend)" ]; then
+  echo "the backend is running — stop it first (docker compose stop backend frontend) so nothing writes during the restore" >&2
+  exit 1
+fi
+existing="$(in_db psql -U "$user" -d "$name" -X -A -t -c "select count(*) from information_schema.tables where table_schema not in ('pg_catalog','information_schema')")"
+if [ "$existing" != "0" ]; then
+  if [ "${RESTORE_WIPE:-}" != "yes" ]; then
+    echo "database $name already has $existing tables — set RESTORE_WIPE=yes to drop and recreate it" >&2
+    exit 1
+  fi
+  in_db psql -U "$user" -d postgres -X -q -v ON_ERROR_STOP=1 -c "DROP DATABASE \"$name\" WITH (FORCE)" -c "CREATE DATABASE \"$name\""
+fi
+
+log "restore start"
+start="$(date +%s)"
+in_db pg_restore -U "$user" -d "$name" --no-owner --no-privileges --exit-on-error --single-transaction < "$src"
+log "restore done in $(( $(date +%s) - start )) s"
+"$here/rowcounts.sh" "$name"

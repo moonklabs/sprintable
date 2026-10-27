@@ -1124,23 +1124,46 @@ async def agent_stream(
             # own task, first, before any await: when the client goes away Starlette cancels this stream's scope and every await below this point may be cut (see agent_stream_replay_floor.record_soon)
             if _replay_done_at is not None and time.monotonic() - _replay_done_at >= _replay_floor.MIN_ALIVE_SEC:
                 _replay_floor.record_soon(agent_id, _replay_key_id, _accept_types, _backfill_stats["settled_max"])
-            # #2121: lease 명시 해제(최적화만·TTL 이 주 회수 경로). off/다운 no-op.
-            await sse_lease.release("agent_global", _lease_conn_id)
-            if _owns_receiver_slot():  # a superseded stream leaves the slot to the one that took it over
-                await sse_lease.release(f"perkey:{agent_id_str}", _pk_member)
-                if _receiver_id:
-                    _receiver_streams.pop((agent_id_str, _receiver_id), None)
-            if _took_over:  # story #4676: the taker's mark goes with its stream (only its own)
-                await sse_lease.clear_taken(f"perkey:{agent_id_str}", _pk_member)
-            _agent_connections[agent_id_str].discard(queue)
-            if not _agent_connections[agent_id_str]:
-                _agent_connections.pop(agent_id_str, None)
-            # 49fed0a1 AC2/AC3: 연결 종료 → 세션 행 삭제 + 마지막 세션이면 presence offline 강등.
-            # (presence 배선 성공한 연결만 — 세션 미생성 시 타 세션 presence 오염 방지.)
-            if _presence_wired:
-                await _mark_agent_disconnected(
-                    agent_id, session_id, org_id_str, heartbeat_baseline=_heartbeat_baseline,
-                )
+            # story 4800: what is left of the connection's end is done by a task of its own and the stream waits for it SHIELDED. A real client that goes away makes Starlette cancel this stream's anyio scope, and that
+            # cancellation is level-triggered — every real `await` left in this `finally` raised CancelledError again, so `_mark_agent_disconnected` was cut in the middle of its query and of the session's own
+            # `close()`: the pooled connection was never given back (a pool that lent out one more connection per disconnect · «Exception terminating connection» once per disconnect) and the session row stayed.
+            # The whole end runs in the task, in the SAME ORDER as before (leases first, the wake queue after them), so a reconnect meets the same state it always did — a same-receiver reconnect (story 4509
+            # hand-over) finds the receiver slot looked at right before its lease is released, and the mapping is only removed if it is still this stream's (a reconnect that took the slot keeps it and its lease).
+            async def _end_connection() -> None:
+                try:
+                    # #2121: lease 명시 해제(최적화만·TTL 이 주 회수 경로). off/다운 no-op.
+                    await sse_lease.release("agent_global", _lease_conn_id)
+                    if _owns_receiver_slot():  # a superseded stream leaves the slot to the one that took it over
+                        await sse_lease.release(f"perkey:{agent_id_str}", _pk_member)
+                        if _receiver_id and _receiver_streams.get((agent_id_str, _receiver_id)) is queue:
+                            _receiver_streams.pop((agent_id_str, _receiver_id), None)
+                    if _took_over:  # story #4676: the taker's mark goes with its stream (only its own)
+                        await sse_lease.clear_taken(f"perkey:{agent_id_str}", _pk_member)
+                    _agent_connections[agent_id_str].discard(queue)
+                    if not _agent_connections[agent_id_str]:
+                        _agent_connections.pop(agent_id_str, None)
+                    # 49fed0a1 AC2/AC3: 연결 종료 → 세션 행 삭제 + 마지막 세션이면 presence offline 강등.
+                    # (presence 배선 성공한 연결만 — 세션 미생성 시 타 세션 presence 오염 방지.)
+                    if _presence_wired:
+                        await _mark_agent_disconnected(
+                            agent_id, session_id, org_id_str, heartbeat_baseline=_heartbeat_baseline,
+                        )
+                except asyncio.CancelledError:
+                    # the shutdown drain (`pg_pubsub.drain_background_tasks`, 5 s) cancelled an end that was still running: best effort — the engine is disposed right after (no connection is kept), and a session row
+                    # left behind is swept by the next end of that agent's connection (`connected_at` older than the connection lifetime)
+                    logger.warning("agent_stream connection end cancelled by shutdown agent=%s", agent_id_str)
+                    raise
+                except Exception:  # noqa: BLE001 — the end of a connection never raises (a task nobody awaits would only log «never retrieved»)
+                    logger.warning("agent_stream connection end failed agent=%s", agent_id_str, exc_info=True)
+
+            from app.services.pg_pubsub import fire_and_forget
+
+            _ending = fire_and_forget(_end_connection())
+            try:
+                if _ending is not None:
+                    await asyncio.shield(_ending)
+            except asyncio.CancelledError:
+                pass  # the client went away: the task goes on without this stream
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
