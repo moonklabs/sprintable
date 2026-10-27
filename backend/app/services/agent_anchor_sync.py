@@ -340,7 +340,10 @@ async def sync_agent_profile_presence(session: AsyncSession, member_id: uuid.UUI
         upd["first_connected_at"] = func.coalesce(
             AgentProjectProfile.__table__.c.first_connected_at, upd["last_seen_at"]
         )
-    if runtime_touched:
+    tbl = AgentProjectProfile.__table__
+    now = upd.get("last_seen_at") or datetime.now(timezone.utc)  # 한 번만 — 행마다 다른 «지금»이 되지 않게
+
+    def _with_runtime_identity(current, prev_last_seen_at) -> dict:
         # story #4129: client_name/client_version/plugin_version은 이 호출의 "정직한
         # 현재값"(AC2) — 안 실은 필드는 null, 이전 값 조용히 보존 안 함. agent_config는
         # caller-set 임의 dict라 다른 top-level 키는 보존.
@@ -352,17 +355,7 @@ async def sync_agent_profile_presence(session: AsyncSession, member_id: uuid.UUI
         # postgres 서버 자체는 정상임을 raw asyncpg로 별도 확認) 재현 버그를 만났다 — SQL
         # 표현식으로 병합하는 대신 현재 값을 먼저 읽어 파이썬에서 병합한 완성 dict를
         # `.values()`에 직접 싣는다(이 타입의 실드라이버 결함 클래스를 통째로 피함).
-        row = (
-            await session.execute(
-                select(
-                    AgentProjectProfile.__table__.c.agent_config,
-                    AgentProjectProfile.__table__.c.last_seen_at,
-                ).where(AgentProjectProfile.__table__.c.member_id == member_id)
-            )
-        ).one_or_none()
-        current = row.agent_config if row is not None else None
-        prev_last_seen_at = row.last_seen_at if row is not None else None
-
+        #
         # story #4129 CHANGES-1(PO 리뷰, PR#4507) — session_started_at은 MCP 서버 프로세스가
         # "이 세션 객체를 처음 봤다"는 시각이 아니다(호스팅 MCP 재배포마다 모든 에이전트의
         # 세션이 리셋되는 오정보였다). "재기동"의 실제 신호는 ①신원(client_name·client_version·
@@ -374,7 +367,6 @@ async def sync_agent_profile_presence(session: AsyncSession, member_id: uuid.UUI
         identity_unchanged = all(
             prev_identity.get(k) == fields.get(k) for k in _RUNTIME_IDENTITY_INPUT_FIELDS
         )
-        now = upd.get("last_seen_at") or datetime.now(timezone.utc)
         within_idle_gap = False
         if prev_last_seen_at is not None:
             _prev = prev_last_seen_at if prev_last_seen_at.tzinfo else prev_last_seen_at.replace(tzinfo=timezone.utc)
@@ -388,14 +380,31 @@ async def sync_agent_profile_presence(session: AsyncSession, member_id: uuid.UUI
         runtime_identity["session_started_at"] = session_started_at
         merged = dict(current) if isinstance(current, dict) else {}
         merged["runtime_identity"] = runtime_identity
-        upd["agent_config"] = merged
-    result = await session.execute(
-        sa_update(AgentProjectProfile.__table__)
-        .where(AgentProjectProfile.__table__.c.member_id == member_id)
-        .values(**upd)
-    )
-    if result.rowcount != 0:
-        return
+        return merged
+
+    if runtime_touched:
+        # story #4799 — 에이전트 하나가 프로젝트 여럿에 놓이면 agent_project_profiles 행도 프로젝트마다 하나다((project_id, member_id) UNIQUE ·
+        # project_access.py ensure · org_agent.py write_agent_project_placement가 프로젝트마다 재호출 — 정상 다중 프로젝트 배치). 예전엔 여기서 member_id만으로
+        # 한 행을 `one_or_none()`으로 읽어 두 번째 프로젝트가 생긴 에이전트의 heartbeat가 MultipleResultsFound로 500이었고(prod 10-26), 한 행에서
+        # 병합한 agent_config를 모든 행에 덮어써 다른 행의 키가 사라질 수도 있었다. 이제 행마다 «자기» 현재 값(agent_config · last_seen_at)으로 병합해 자기 행만 쓴다.
+        rows = (
+            await session.execute(
+                select(tbl.c.id, tbl.c.agent_config, tbl.c.last_seen_at).where(tbl.c.member_id == member_id).order_by(tbl.c.id)  # 고정된 잠금 순서 — 같은 에이전트의 동시 heartbeat끼리 행을 반대 순서로 잡아 교착하지 않게
+            )
+        ).all()
+        matched = 0
+        for row in rows:
+            res = await session.execute(
+                sa_update(tbl).where(tbl.c.id == row.id).values(**upd, agent_config=_with_runtime_identity(row.agent_config, row.last_seen_at))
+            )
+            matched += res.rowcount
+        if matched:  # 읽은 행이 그 사이 모두 사라졌으면(0) 아래 self-heal로 — 예전의 «rowcount == 0 → self-heal»과 같다
+            return
+        upd["agent_config"] = _with_runtime_identity(None, None)  # 행이 아직 없다 — 아래 self-heal이 새로 만든 행에 쓴다
+    else:
+        result = await session.execute(sa_update(tbl).where(tbl.c.member_id == member_id).values(**upd))
+        if result.rowcount != 0:
+            return
 
     from app.models.team import TeamMember
 
