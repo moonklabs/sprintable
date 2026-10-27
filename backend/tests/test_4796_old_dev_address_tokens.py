@@ -27,10 +27,35 @@ def _files(base: str) -> list[Path]:
 def test_no_connector_or_guide_file_names_the_old_dev_form() -> None:
     offenders = [
         str(p.relative_to(_ROOT))
-        for p in _files("connectors") + _files("apps/web/public")
+        for p in _files("connectors") + _files("apps/web/public") + _files("packages/fakechat")
         if OLD_DEV in p.read_text(errors="ignore") and not str(p.relative_to(_ROOT)).startswith(PROD_PLUGIN)
     ]
     assert offenders == [], offenders
+    for rel in ("backend/scripts/jobs/verify_grant_only_story_assign.py", "backend/sprintable_mcp/README.md"):
+        assert OLD_DEV not in (_ROOT / rel).read_text(), rel
+
+
+def test_fakechat_dials_the_dev_api_name_when_no_address_is_given() -> None:
+    assert "process.env.SPRINTABLE_API_URL ?? 'https://dev-api.sprintable.ai'" in (_ROOT / "packages/fakechat/server.ts").read_text()
+
+
+def test_the_texts_that_explain_why_the_address_is_direct_no_longer_say_only_run_app_is_direct() -> None:
+    """codex (tokens PR): the reason is «no Cloudflare proxy in front» (SSE buffering); for dev that is the DNS-only dev API name now"""
+    guide = (_ROOT / "apps/web/public/onboarding-guide.txt").read_text()
+    assert "dev: `https://dev-api.sprintable.ai`, DNS only — no Cloudflare proxy" in guide and "Dev: `https://dev-api.sprintable.ai`" in guide
+    assert "use the backend-direct run.app host" not in guide
+    readme = (_ROOT / "backend/sprintable_mcp/README.md").read_text()
+    assert "dev=https://dev-api.sprintable.ai" in readme and "prod는 run.app, dev는 DNS 전용 dev-api.sprintable.ai" in readme
+    onboarding = (_ROOT / "backend/app/services/agent_onboarding_config.py").read_text()
+    assert "prod=run.app, dev=DNS 전용 dev-api.sprintable.ai" in onboarding and "직통 run.app 이어야 한다" not in onboarding
+
+
+def test_the_runbook_says_the_load_test_tools_stay_on_raw_cloud_run_on_purpose() -> None:
+    text = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
+    sec = text[text.index("## 10. "):text.index("## 11. ")]
+    assert "default to the raw Cloud Run backend **on purpose**" in sec and "They go with the Cloud Run backend in the first row above" in sec
+    for name in ("run_loadtest.sh", "endpoint_mix_test.js", "dev_db_capacity_test.js", "generator_selfcheck.js"):
+        assert name in sec and (_ROOT / "backend/scripts/loadtest" / name).exists(), name
 
 
 def test_every_default_api_url_of_the_dev_connectors_is_the_dev_api_name() -> None:

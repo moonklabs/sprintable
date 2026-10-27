@@ -19,7 +19,7 @@ import {
 import { isInjectableEventType } from './inject-allowlist'
 
 const API_URL = (
-  process.env.SPRINTABLE_API_URL ?? 'https://sprintable-backend-dev-57iommnikq-du.a.run.app'
+  process.env.SPRINTABLE_API_URL ?? 'https://dev-api.sprintable.ai'
 ).replace(/\/$/, '')
 // AGENT_API_KEY fallback for compatibility with existing .mcp.json configs.
 // 04791bd9: 키 주입은 launch env(config/launch)가 담당 — plugin 프로세스↔workspace .mcp.json

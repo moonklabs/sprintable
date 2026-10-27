@@ -241,6 +241,8 @@ Only on the PO's go. Take a final dump first (`sudo systemctl start sprintable-b
 | pgbouncer dev VM | `gcloud compute instances delete <pgbouncer-dev>` | recreate from its instance template |
 | realtime-gateway dev VM/LB | as above, then the forwarding rule | recreate from its template |
 
+The load-test tools under `backend/scripts/loadtest/` (`run_loadtest.sh`, `endpoint_mix_test.js`, `dev_db_capacity_test.js`, `generator_selfcheck.js`, its README) default to the raw Cloud Run backend **on purpose**: they load Cloud Run, not the VM's pass-through. They go with the Cloud Run backend in the first row above; a load test of the VM backend needs its own `BASE_URL` and the VM's measured limits.
+
 ## 11. Day-to-day on the VM
 
 - Status: the newest object under `gs://$BACKUPS_BUCKET/status/dev/` (`gcloud storage ls gs://$BACKUPS_BUCKET/status/dev/ | tail -n1`; one small object per tick, kept 7 days; `state`: up-to-date · deploying · deployed · failed · rolled-back · rollback-failed · skipping-failed).

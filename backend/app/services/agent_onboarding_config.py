@@ -265,7 +265,7 @@ def resolve_backend_direct_url() -> str:
     """에이전트가 호출할 backend-direct Cloud Run URL.
 
     배포가 주입한 env(``FASTAPI_URL``) → 미설정(로컬)이면 localhost fallback. trailing slash 제거.
-    **CF-fronted 깔끔 도메인 금지** — /agent/stream SSE 도달이 필수라 직통 run.app 이어야 한다.
+    **CF-fronted 깔끔 도메인 금지** — /agent/stream SSE 도달이 필수라 Cloudflare 프록시를 거치지 않는 직통이어야 한다(prod=run.app, dev=DNS 전용 dev-api.sprintable.ai — story 4796).
     """
     val = os.environ.get(_BACKEND_URL_ENV_KEY, "").strip()
     return val.rstrip("/") if val else _LOCAL_FALLBACK_URL
