@@ -286,7 +286,8 @@ def test_the_first_row_is_one_chain_too_so_the_frontend_is_not_deleted_after_a_f
     line = [ln for b in _fenced(_rows()["R1"]) for ln in b.splitlines() if "gcloud run services delete" in ln]
     assert len(line) == 1
     parts = [p.strip() for p in line[0].split(" && ")]
-    assert [p.split()[4] for p in parts] == ["sprintable-backend-dev", "sprintable-frontend-dev"]
+    assert parts[0] == '[ "${R1_OK:-0}" = 1 ]' and len(parts) == 3
+    assert [p.split()[4] for p in parts[1:]] == ["sprintable-backend-dev", "sprintable-frontend-dev"]
 
 
 def test_no_code_block_of_a_removal_row_is_left_with_an_angle_bracket_placeholder() -> None:
@@ -443,3 +444,50 @@ def test_gate_d_makes_the_realtime_check_come_before_the_redis_and_pooler_rows()
     assert "R4" in gate and "nothing in R2 or R3 runs before this" in gate
     for key in ("R2", "R3"):
         assert "**Gate D first**" in _rows()[key], key
+
+
+_FAKE_GCLOUD_CAPTURE = r"""#!/bin/sh
+echo "gcloud $*" >> "$FAKE_LOG"
+case "$1 $2 $3" in
+  "run services describe") if [ "$FAKE_FAIL" = "describe:$4" ]; then echo "kind: Partial"; exit 1; fi; if [ "$FAKE_FAIL" = "empty:$4" ]; then exit 0; fi; case "$*" in *"value("*) echo "region-docker.pkg.dev/p/r/backend@sha256:abc" ;; *) echo "kind: Service $4" ;; esac ;;
+  "run services get-iam-policy") if [ "$FAKE_FAIL" = "iam:$4" ]; then echo "{}"; exit 1; fi; echo "{}" ;;
+  "run services delete") : ;;
+  "redis instances describe") if [ "$FAKE_FAIL" = "redis" ]; then echo '{"tier":"BASIC"}'; exit 1; fi; if [ "$FAKE_FAIL" = "redis-bad" ]; then echo '{"error":"x"}'; exit 0; fi; echo '{"tier":"BASIC","memorySizeGb":1}' ;;
+  "redis instances delete") : ;;
+esac
+"""
+
+
+def test_the_first_and_second_rows_delete_only_after_their_captures_are_proven(tmp_path: Path) -> None:
+    b = _fake_bin(tmp_path, _FAKE_GCLOUD_CAPTURE)
+    base = {**os.environ, "PATH": f"{b}:{os.environ['PATH']}", "PROJECT": "p", "REGION": "r", "REDIS": "cache-dev", "FAKE_LOG": str(tmp_path / "log"), "FAKE_FAIL": ""}
+
+    def run(script: str, **over: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["bash", "-c", script], capture_output=True, text=True, env={**base, **over}, cwd=tmp_path, timeout=30)
+
+    cap1 = _fence_with("R1", "CAPTURE-OK")
+    delete1 = [ln.strip() for blk in _fenced(_rows()["R1"]) for ln in blk.splitlines() if "gcloud run services delete" in ln][0]
+    ok = run(cap1 + '\necho "R=${R1_OK:-0}"')
+    assert "CAPTURE-OK" in ok.stdout and "R=1" in ok.stdout, ok.stderr
+    for fail in ("describe:sprintable-frontend-dev", "iam:sprintable-backend-dev", "empty:sprintable-frontend-dev"):
+        bad = run(cap1 + '\necho "R=${R1_OK:-0}"', FAKE_FAIL=fail)
+        assert "CAPTURE-OK" not in bad.stdout and "R=0" in bad.stdout, fail
+    (tmp_path / "log").write_text("")
+    run("unset R1_OK; " + delete1)
+    assert "services delete" not in (tmp_path / "log").read_text(), "no delete without the proven capture"
+    run("R1_OK=1; " + delete1)
+    assert (tmp_path / "log").read_text().count("run services delete") == 2
+
+    m1 = re.search(r"`(unset REDIS_OK; gcloud redis instances describe[^`]*)`", SHEET)
+    m2 = re.search(r"`(\[ \"\$\{REDIS_OK:-0\}\" = 1 \] && gcloud redis instances delete[^`]*)`", SHEET)
+    assert m1 and m2
+    good = run(m1.group(1) + '; echo "R=${REDIS_OK:-0}"')
+    assert "CAPTURE-OK" in good.stdout and "R=1" in good.stdout, good.stderr
+    for fail in ("redis", "redis-bad"):
+        bad = run(m1.group(1) + '; echo "R=${REDIS_OK:-0}"', FAKE_FAIL=fail)
+        assert "CAPTURE-OK" not in bad.stdout and "R=0" in bad.stdout, fail
+    (tmp_path / "log").write_text("")
+    run("unset REDIS_OK; " + m2.group(1))
+    assert "redis instances delete" not in (tmp_path / "log").read_text()
+    run("REDIS_OK=1; " + m2.group(1))
+    assert "redis instances delete cache-dev" in (tmp_path / "log").read_text()
