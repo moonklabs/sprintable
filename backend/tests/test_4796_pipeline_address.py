@@ -92,6 +92,8 @@ def test_the_runbook_names_the_one_switch_what_follows_it_and_the_order_conditio
     for needle in ("`.github/workflows/cloud-build.yml`", "`_FASTAPI_URL`", "`exchange_urls()`", "`NEXT_PUBLIC_FASTAPI_URL`", "`SPRINTABLE_API_URL`", "escalation URL", "`--base-url`", "`MCP_PUBLIC_URL`", "story 4801"):
         assert needle in switch, needle
     assert "keeps answering until every lane Mac has heard the new one" in switch
+    assert "`httpRequest.remoteIp` is **not** the VM's static address" in _runbook_section("**Phase 3", "## 8. "), "the front door's own requests are in the same log: the check must read it by caller"
+    assert "the front door's own requests carry the VM's address as `httpRequest.remoteIp`" in switch
     p3 = text[text.index("**Phase 3"):text.index("## 8. ")]
     pre = p3[:p3.index("\n1. ")]
     assert "request log free of lane traffic at the old `run.app` address" in pre, "Phase 3 starts only when no Mac still uses the old address"
