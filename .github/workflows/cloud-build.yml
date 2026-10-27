@@ -37,8 +37,7 @@ jobs:
   cloud-build:
     name: Build & Push to Artifact Registry
     runs-on: ubuntu-latest
-    # story 4796: 30 → 60 — the dev build now also builds the VM image after the Cloud Run deploys (cloudbuild.yaml: build-frontend-vm 900 s + bundle-vm 120 s at most); this job waits for the Cloud Build (`gcloud builds submit` is synchronous) and must outlive its 3000 s limit (cloudbuild.yaml `timeout`), or a finished deploy shows up as a failed run
-    timeout-minutes: 60
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -716,6 +715,30 @@ jobs:
             --project="${{ secrets.GCP_PROJECT_ID }}" \
             --substitutions=COMMIT_SHA="${{ github.sha }}",${{ steps.subst.outputs.substitutions }} \
             --suppress-logs \
+            .
+
+      # story 4796 — the dev VM's bundle (RUNBOOK §5) is a build of its own, started here when the Cloud Run build above has finished and pushed its images.
+      # Why not a step of cloudbuild.yaml: its first version was, and on its first real run the worker stopped answering during the Next.js type check (build 844cd9a1, INTERNAL_ERROR on every
+      # step) — `allowFailure` and step timeouts do nothing for a dead worker. As its own build on its own worker, the worst case is that build failing.
+      # `--async`: this run does not wait for it (no delay, serving-reality starts at once); `continue-on-error`: a failed SUBMISSION does not fail the run either. Where to look: the build
+      # list, tag `vm-bundle` set in cloudbuild-vm.yaml (`gcloud builds list --filter="tags=vm-bundle"`; `gcloud builds submit` itself has no tags flag), and gs://<deploy bucket>/bundles/ + candidates/.
+      # The five values are the ones the Cloud Run frontend was built with (same step outputs as "Assemble Cloud Build substitutions" above); an empty one is passed empty on purpose.
+      - name: Submit the dev VM bundle build (own build, async — never fails or delays this run)
+        if: success() && steps.env.outputs.target == 'dev'
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          VM_GA4_MEASUREMENT_ID: ${{ steps.env.outputs.ga4_measurement_id }}
+          VM_EE_ENABLED: ${{ steps.env.outputs.ee_enabled }}
+          VM_SUPPORT_WIDGET_ENABLED: ${{ steps.env.outputs.support_widget_enabled }}
+          VM_SUPPORT_GATEWAY_URL: ${{ steps.env.outputs.next_public_support_gateway_url }}
+          VM_TOSS_CLIENT_KEY: ${{ steps.env.outputs.toss_client_key }}
+        run: |
+          gcloud builds submit \
+            --async \
+            --config=cloudbuild-vm.yaml \
+            --project="${{ secrets.GCP_PROJECT_ID }}" \
+            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="dev",_GA4_MEASUREMENT_ID="${VM_GA4_MEASUREMENT_ID}",_EE_ENABLED="${VM_EE_ENABLED}",_SUPPORT_WIDGET_ENABLED="${VM_SUPPORT_WIDGET_ENABLED}",_NEXT_PUBLIC_SUPPORT_GATEWAY_URL="${VM_SUPPORT_GATEWAY_URL}",_TOSS_CLIENT_KEY="${VM_TOSS_CLIENT_KEY}" \
             .
 
   # 2026-10-12 (story 4659): 배포 뒤에만 실서버 도달 확인. 예약 cron은 두지 않는다.
