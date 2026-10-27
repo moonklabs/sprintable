@@ -278,6 +278,26 @@ async def test_a_receiver_on_another_instance_is_refused_with_409_and_only_one_r
             await first.body_iterator.aclose()
 
 
+async def test_two_receivers_connecting_at_the_same_moment_do_not_both_get_in(pg_lease):
+    """codex 4791 (HIGH): both instances READ the members before either has acquired — both saw an empty scope; the acquire itself must then let one in only.
+    The read is made to answer «empty» for both (what the loser saw), the acquire is the real one."""
+    from unittest.mock import AsyncMock
+
+    from app.services import sse_lease
+
+    async with _world(setup=True, limit=5) as (gw, auth, agent):  # a plan that would allow five
+        one, two = _new_instance(), _new_instance()
+        with patch.object(sse_lease, "members", AsyncMock(return_value=[])):
+            with _instance(gw, one):
+                first = await gw.agent_stream(request=_Req(R1), auth=auth)
+            with _instance(gw, two):
+                refused = await _refused(gw, auth, _Req(R2))
+                assert refused.status_code == 409 and refused.detail["code"] == "another_receiver"  # not the plan's 429, and not let in
+        assert await sse_lease.members(f"perkey:{agent}") == [f"rcv:{R1}"]
+        with _instance(gw, one):
+            await first.body_iterator.aclose()
+
+
 async def test_without_the_database_lease_two_instances_both_receive_the_gap_this_story_closes(pg_lease):
     from app.services import sse_lease
 
