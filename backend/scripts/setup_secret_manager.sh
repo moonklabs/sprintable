@@ -58,15 +58,9 @@ create_secret "DATABASE_URL_PROD"              "${SECRET_DATABASE_URL_PROD:-post
 create_secret "ALEMBIC_DATABASE_URL_DEV"       "${SECRET_ALEMBIC_DATABASE_URL_DEV:-postgresql+psycopg2://placeholder@10.0.0.1:5432/sprintable}"
 create_secret "ALEMBIC_DATABASE_URL_PROD"      "${SECRET_ALEMBIC_DATABASE_URL_PROD:-postgresql+psycopg2://placeholder@10.0.0.2:5432/sprintable}"
 
-# ─── Cloud Run SA에 Secret Accessor 권한 ──────────────────────────────────────
-PROJECT_NUMBER=$(gcloud projects describe "${GCP_PROJECT}" --format="value(projectNumber)")
-CR_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
-
-log "Granting Secret Accessor to Cloud Run SA (${CR_SA})..."
-gcloud projects add-iam-policy-binding "${GCP_PROJECT}" \
-    --member="serviceAccount:${CR_SA}" \
-    --role="roles/secretmanager.secretAccessor" \
-    --condition=None
+# ─── 접근 권한 ────────────────────────────────────────────────────────────────
+# story 4798: no project-level secretAccessor (it would let one account read every secret of both environments). Each secret is granted to the
+# account that uses it, one at a time:  bash backend/scripts/grant_secret_access.sh <dev|prod|ci> <SECRET_NAME>…
 
 log "=== Secret Manager setup complete ==="
 log "Secrets created in project '${GCP_PROJECT}', region '${GCP_REGION}'"
