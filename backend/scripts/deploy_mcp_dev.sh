@@ -28,6 +28,7 @@ readonly MCP_DEV_PLACEHOLDER_AGENT_KEY="_http_per_request_bearer_only_"
 echo ">>> deploy sprintable-mcp-dev (image=backend:${SHA})"
 gcloud run deploy sprintable-mcp-dev \
   --image="${AR}:${SHA}" \
+  --service-account="run-mcp-dev@${PROJECT}.iam.gserviceaccount.com" \
   --region="${REGION}" \
   --command="python" \
   --args="-m,sprintable_mcp" \

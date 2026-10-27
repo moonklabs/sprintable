@@ -818,6 +818,7 @@ steps:
         set +e
         gcloud run deploy office-converter-${_DEPLOY_ENV} \
           --image=gotenberg/gotenberg:8.36 \
+          --service-account=run-converter-dev@${PROJECT_ID}.iam.gserviceaccount.com \
           --port=3000 \
           --region=${_AR_REGION} \
           --no-allow-unauthenticated \
@@ -1082,9 +1083,8 @@ steps:
         # story 4786: mcp-dev sits idle most of the time (billed per request); prod states nothing here (its value is left as it is).
         MCP_CPU_FLAG=""
         if [ "${_DEPLOY_ENV}" == "dev" ]; then MCP_CPU_FLAG="--cpu-throttling"; fi
-        # 4798 AC7: the prod service runs as its own account (the one secret above and nothing else); dev is not changed
-        MCP_SA_FLAG=""
-        if [ "${_DEPLOY_ENV}" == "prod" ]; then MCP_SA_FLAG="--service-account=run-mcp-prod@${PROJECT_ID}.iam.gserviceaccount.com"; fi
+        # 4798 AC7: each environment runs as its own account (run-mcp-dev / run-mcp-prod: the one secret above and nothing else)
+        MCP_SA_FLAG="--service-account=run-mcp-${_DEPLOY_ENV}@${PROJECT_ID}.iam.gserviceaccount.com"
         gcloud run services update sprintable-mcp-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/backend:${COMMIT_SHA} \
           --region=${_AR_REGION} \

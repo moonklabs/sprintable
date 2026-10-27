@@ -46,12 +46,6 @@ def test_the_prod_build_deploys_the_mcp_service_as_the_dedicated_account():
     assert argv[3] == "sprintable-mcp-prod"
 
 
-def test_the_dev_build_does_not_change_the_dev_mcp_service():
-    argv = _update_call("dev")
-    assert not [a for a in argv if a.startswith("--service-account")], argv
-    assert argv[3] == "sprintable-mcp-dev"
-
-
 def test_the_build_still_mounts_the_one_secret_and_removes_the_old_plain_variable():
     argv = _update_call("prod")
     assert "--update-secrets=AGENT_API_KEY=MCP_AGENT_API_KEY_PROD:latest" in argv, argv
@@ -97,10 +91,6 @@ def test_the_manual_prod_deploy_script_names_the_dedicated_account(recorders):
     deploys = [c for c in calls if c[:3] == ["run", "deploy", "sprintable-mcp-prod"]]
     assert len(deploys) == 1, calls
     assert [a for a in deploys[0] if a.startswith("--service-account")] == [f"--service-account={_NEW}"], deploys[0]
-
-
-def test_the_manual_dev_deploy_script_is_not_changed():
-    assert "--service-account" not in (_SCRIPTS / "deploy_mcp_dev.sh").read_text()
 
 
 def test_the_dedicated_account_is_apart_from_every_other_account_the_scripts_name(recorders):

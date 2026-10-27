@@ -208,7 +208,10 @@ def test_setup_iam_prints_the_real_account_names_in_its_guidance(recording_gclou
     assert proc.returncode == 0, proc.stderr[-300:]
     assert "--service-account=cloudrun-runtime-dev@proj-x.iam.gserviceaccount.com" in proc.stdout, proc.stdout
     assert "--service-account=cloudrun-runtime-prod@proj-x.iam.gserviceaccount.com" in proc.stdout, proc.stdout
-    assert not re.search(r"--service-account=\S*\s", proc.stdout.replace("--service-account=cloudrun-runtime-dev@proj-x.iam.gserviceaccount.com", "").replace("--service-account=cloudrun-runtime-prod@proj-x.iam.gserviceaccount.com", "").replace("--service-account=run-migrate-prod@proj-x.iam.gserviceaccount.com", "").replace("--service-account=run-mcp-prod@proj-x.iam.gserviceaccount.com", "")), proc.stdout  # no timestamp or log text in a value
+    values = re.findall(r"--service-account=(\S*)", proc.stdout)
+    assert values, proc.stdout
+    for v in values:  # every value is one real account address — no timestamp, no log text, nothing glued to it
+        assert re.fullmatch(r"[a-z][a-z0-9-]{4,28}[a-z0-9]@proj-x\.iam\.gserviceaccount\.com", v), (v, proc.stdout)
 
 
 def test_the_workflow_comments_no_longer_claim_a_project_level_secret_role():
