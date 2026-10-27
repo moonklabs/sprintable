@@ -201,8 +201,8 @@ class Settings(BaseSettings):
     eventbus_enabled: bool = False
 
     # story #4397 — send push notifications to a person's devices across their orgs (push_devices.user_id), instead of only
-    # the devices last registered in the notification's org. Env PUSH_DEVICES_BY_USER. Default off; dev on; prod on only after
-    # the app build that re-registers on account switch (and opens a notification of another org in that org) is out.
+    # the devices last registered in the notification's org. Env PUSH_DEVICES_BY_USER. Default off; dev and prod on (cloud-build.yml) — prod was held until
+    # the app build that unregisters on /login and re-registers on an account change was out (store builds with mobile 168, 10-25).
     push_devices_by_user: bool = False
 
     # E-ARCH S1(2026-07-21, 선생님 "가자" 승인 — 채팅 5초 지연/#2074 근본): REST(api)와
@@ -246,6 +246,10 @@ class Settings(BaseSettings):
     # 카운터가 멀티인스턴스서 부정확 → 429/503 오발. 독립 flag(#2120 교훈·롤백이 presence/§2 안 끔). 기본 off.
     # off/Redis 다운 → 기존 in-process 카운트로 폴백(fail-open·연결 거부 안 함).
     sse_lease_redis_enabled: bool = False
+
+    # story 4791(INFRA-DIET ⑥): 에이전트 스트림의 «수신자 하나·인계» 임대(`perkey:<agent>`)를 Redis가 없을 때 Postgres 행으로.
+    # Redis 임대가 켜져 있으면 쓰지 않음(그쪽이 주경로·상태 갈라짐 방지). 끄면 예전 동작(인스턴스별 메모리) — 롤백 스위치.
+    sse_lease_pg_enabled: bool = True
 
     # #2122(E-ARCH, 2026-07-22): fanout(특히 wake_agent)을 Redis 백플레인에 태워 크로스-인스턴스 배달.
     # 현재 wake_agent 는 pg_notify 직접(event_broker 우회)이라 GCE(PG_LISTEN=false)서 타노드 미도달 +

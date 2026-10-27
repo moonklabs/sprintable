@@ -9,7 +9,7 @@
 # GitHub Actions SA (D-S2에서 생성됨)는 다음 역할만 유지:
 #   - cloudbuild.builds.editor
 #   - artifactregistry.writer
-#   (run.admin은 제거 — 최소 권한 원칙. secret access는 비밀별: grant_secret_access.sh ci <SECRET_NAME>)
+#   (이 스크립트는 GHA SA에서 run.admin을 걷는다 — setup_workload_identity.sh가 이를 다시 주지 않게 하는 일은 story 4798 AC11의 몫. secret access는 비밀별: grant_secret_access.sh ci <SECRET_NAME>)
 #
 # 사용법:
 #   GCP_PROJECT=sprintable-494803 bash backend/scripts/setup_iam.sh
@@ -18,6 +18,7 @@ set -euo pipefail
 
 GCP_PROJECT="${GCP_PROJECT:-sprintable-494803}"
 GCP_REGION="${GCP_REGION:-asia-northeast3}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"  # ($0, not BASH_SOURCE: BASH_SOURCE is unset under `set -u` in some bash 3.2 contexts)
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
@@ -57,6 +58,94 @@ create_runtime_sa() {
 SA_DEV=$(create_runtime_sa "dev")
 SA_PROD=$(create_runtime_sa "prod")
 
+# ─── story 4798 (AC7): the prod database jobs' own account ───────────────────
+# `run-migrate-prod` runs the prod migrate and read-only check jobs (provision_migrate_job.sh prod · provision_readonly_prod_job.sh). It reads ONE secret and uses the database connector for the PROD instance only
+# (an IAM condition on the instance); the build's account may deploy a job as it (on this account only, not project-wide).
+create_migrate_prod_sa() {
+    # (this function runs inside a command substitution, where `set -e` does NOT stop it: every step below says explicitly what a failure does)
+    local sa_name="run-migrate-prod"
+    local sa_email="${sa_name}@${GCP_PROJECT}.iam.gserviceaccount.com"
+    local project_number="${PROJECT_NUMBER:-$(gcloud projects describe "${GCP_PROJECT}" --format='value(projectNumber)')}"
+    [ -n "${project_number}" ] || { log "could not read the project number" >&2; return 1; }
+    local build_sa="${project_number}-compute@developer.gserviceaccount.com"
+    local sql_instance="${PROD_SQL_INSTANCE:-sprintable-prod}"
+
+    log "Creating prod database-job SA: ${sa_email}" >&2
+    gcloud iam service-accounts create "${sa_name}" \
+        --display-name="Prod database jobs (migrate, read-only check) — reads one secret" \
+        --project="${GCP_PROJECT}" 2>/dev/null || log "SA already exists, skipping create." >&2
+    gcloud projects add-iam-policy-binding "${GCP_PROJECT}" \
+        --member="serviceAccount:${sa_email}" \
+        --role="roles/cloudsql.client" \
+        --condition="expression=resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"projects/${GCP_PROJECT}/instances/${sql_instance}\",title=prod-instance-only" > /dev/null \
+        || { log "could not grant the connector role to ${sa_email}" >&2; return 1; }
+    gcloud iam service-accounts add-iam-policy-binding "${sa_email}" \
+        --project="${GCP_PROJECT}" \
+        --member="serviceAccount:${build_sa}" \
+        --role="roles/iam.serviceAccountUser" --quiet > /dev/null \
+        || { log "could not allow the build account to deploy as ${sa_email}" >&2; return 1; }
+    bash "${SCRIPT_DIR}/grant_secret_access.sh" migrate-prod ALEMBIC_DATABASE_URL_PROD >&2 \
+        || { log "could not grant the secret to ${sa_email}" >&2; return 1; }
+    log "SA ${sa_email} — cloudsql.client (prod instance only) + secret ALEMBIC_DATABASE_URL_PROD" >&2
+    echo "${sa_email}"
+}
+SA_MIGRATE_PROD=$(create_migrate_prod_sa) || { echo "creating run-migrate-prod failed — nothing after this point ran" >&2; exit 1; }
+
+# ─── story 4798 (AC7): the MCP services' own accounts ────────────────────────
+# `run-mcp-<env>` runs `sprintable-mcp-<env>` (cloudbuild.yaml `deploy-mcp` · deploy_mcp_prod.sh · deploy_mcp_dev.sh). The service forwards each request to the backend with the caller's own bearer and uses no Google API, so the account holds NO project role:
+# it reads ONE secret (the fallback key mounted at start) and the build's account may deploy the service as it (on this account only).
+create_mcp_sa() {
+    # (inside a command substitution `set -e` does not stop a function: each step says what a failure does)
+    local env="$1"
+    local env_upper
+    env_upper="$(printf '%s' "${env}" | tr '[:lower:]' '[:upper:]')"
+    local sa_name="run-mcp-${env}"
+    local sa_email="${sa_name}@${GCP_PROJECT}.iam.gserviceaccount.com"
+    local project_number="${PROJECT_NUMBER:-$(gcloud projects describe "${GCP_PROJECT}" --format='value(projectNumber)')}"
+    [ -n "${project_number}" ] || { log "could not read the project number" >&2; return 1; }
+    local build_sa="${project_number}-compute@developer.gserviceaccount.com"
+
+    log "Creating ${env} MCP SA: ${sa_email}" >&2
+    gcloud iam service-accounts create "${sa_name}" \
+        --display-name="${env} MCP service — reads one secret" \
+        --project="${GCP_PROJECT}" 2>/dev/null || log "SA already exists, skipping create." >&2
+    gcloud iam service-accounts add-iam-policy-binding "${sa_email}" \
+        --project="${GCP_PROJECT}" \
+        --member="serviceAccount:${build_sa}" \
+        --role="roles/iam.serviceAccountUser" --quiet > /dev/null \
+        || { log "could not allow the build account to deploy as ${sa_email}" >&2; return 1; }
+    bash "${SCRIPT_DIR}/grant_secret_access.sh" "mcp-${env}" "MCP_AGENT_API_KEY_${env_upper}" >&2 \
+        || { log "could not grant the secret to ${sa_email}" >&2; return 1; }
+    log "SA ${sa_email} — no project role + secret MCP_AGENT_API_KEY_${env_upper}" >&2
+    echo "${sa_email}"
+}
+SA_MCP_PROD=$(create_mcp_sa prod) || { echo "creating run-mcp-prod failed — nothing after this point ran" >&2; exit 1; }
+SA_MCP_DEV=$(create_mcp_sa dev) || { echo "creating run-mcp-dev failed — nothing after this point ran" >&2; exit 1; }
+
+# ─── story 4798 (AC7): the dev document converter's own account ──────────────
+# `run-converter-dev` runs `office-converter-dev` (the public Gotenberg image; cloudbuild.yaml `deploy-office-converter`). It opens documents users uploaded, so it must hold NOTHING: no project role, no secret.
+# The only thing it needs is that the build's account may deploy the service as it (on this account only). Callers reach it through its own invoker binding (the backend's runtime account), which this account does not touch.
+create_converter_dev_sa() {
+    local sa_name="run-converter-dev"
+    local sa_email="${sa_name}@${GCP_PROJECT}.iam.gserviceaccount.com"
+    local project_number="${PROJECT_NUMBER:-$(gcloud projects describe "${GCP_PROJECT}" --format='value(projectNumber)')}"
+    [ -n "${project_number}" ] || { log "could not read the project number" >&2; return 1; }
+    local build_sa="${project_number}-compute@developer.gserviceaccount.com"
+
+    log "Creating dev converter SA: ${sa_email}" >&2
+    gcloud iam service-accounts create "${sa_name}" \
+        --display-name="dev document converter — holds nothing" \
+        --project="${GCP_PROJECT}" 2>/dev/null || log "SA already exists, skipping create." >&2
+    gcloud iam service-accounts add-iam-policy-binding "${sa_email}" \
+        --project="${GCP_PROJECT}" \
+        --member="serviceAccount:${build_sa}" \
+        --role="roles/iam.serviceAccountUser" --quiet > /dev/null \
+        || { log "could not allow the build account to deploy as ${sa_email}" >&2; return 1; }
+    log "SA ${sa_email} — no project role, no secret" >&2
+    echo "${sa_email}"
+}
+SA_CONVERTER_DEV=$(create_converter_dev_sa) || { echo "creating run-converter-dev failed — nothing after this point ran" >&2; exit 1; }
+
 # ─── GitHub Actions SA 권한 정리 (run.admin 불필요) ──────────────────────────
 # deploy_frontend/backend.sh는 Cloud Build에서 실행되므로
 # GitHub Actions SA에서 run.admin 제거 (최소 권한 강화)
@@ -75,4 +164,8 @@ Cloud Run 배포 시 SA 지정 바라는:
   deploy_frontend.sh prod → --service-account=${SA_PROD}
   deploy_backend.sh dev   → --service-account=${SA_DEV}
   deploy_backend.sh prod  → --service-account=${SA_PROD}
+  provision_migrate_job.sh prod · provision_readonly_prod_job.sh → --service-account=${SA_MIGRATE_PROD} (set by the scripts)
+  deploy-mcp (prod) · deploy_mcp_prod.sh → --service-account=${SA_MCP_PROD} (set by the build and the script)
+  deploy-mcp (dev) · deploy_mcp_dev.sh → --service-account=${SA_MCP_DEV} (set by the build and the script)
+  deploy-office-converter (dev) → --service-account=${SA_CONVERTER_DEV} (set by the build)
 OUTPUT

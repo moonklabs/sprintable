@@ -55,6 +55,9 @@ IMAGE_TAG="${COMMIT_SHA:-latest-prod}"
 IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/${AR_REPO}/backend:${IMAGE_TAG}"
 CLOUD_SQL_INSTANCE="${GCP_PROJECT}:${GCP_REGION}:${PROD_SQL_INSTANCE}"
 ALEMBIC_SECRET_NAME="ALEMBIC_DATABASE_URL_PROD"
+# story 4798 (AC7): this prod job runs as its own least-privilege account, `run-migrate-prod` (the one secret it reads + the database connector role for the
+# prod instance). dev is not changed here (its jobs stay as they are).
+SERVICE_ACCOUNT="run-migrate-prod@${GCP_PROJECT}.iam.gserviceaccount.com"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [readonly-prod] $*" >&2; }
 
@@ -69,6 +72,7 @@ JOB_NAME=${JOB_NAME}
 IMAGE=${IMAGE}
 CLOUD_SQL_INSTANCE=${CLOUD_SQL_INSTANCE}
 ALEMBIC_SECRET_NAME=${ALEMBIC_SECRET_NAME}
+SERVICE_ACCOUNT=${SERVICE_ACCOUNT}
 COMMAND=sh -c 'cd /app && alembic current'
 EOF
     exit 0
@@ -84,6 +88,7 @@ gcloud run jobs deploy "${JOB_NAME}" \
     --command=sh \
     --args="-c,cd /app && alembic current" \
     --set-secrets="ALEMBIC_DATABASE_URL=${ALEMBIC_SECRET_NAME}:latest" \
+    --service-account="${SERVICE_ACCOUNT}" \
     --set-cloudsql-instances="${CLOUD_SQL_INSTANCE}" \
     --network=default \
     --subnet=default \

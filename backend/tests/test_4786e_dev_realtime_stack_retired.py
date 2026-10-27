@@ -23,7 +23,7 @@ from tests.test_deploy_backend_redis_secret_conflict import (
 
 _REDIS_FLAGS = (
     "backend_redis_consume_enabled", "backend_redis_dispatch_enabled", "backend_redis_dual_publish_enabled", "backend_fanout_wake_redis_enabled",
-    "backend_presence_redis_enabled", "backend_presence_online_redis_enabled", "backend_sse_lease_redis_enabled", "backend_sse_transient_replay_enabled",
+    "backend_presence_redis_enabled", "backend_presence_online_redis_enabled", "backend_sse_transient_replay_enabled",  # the SSE lease flag left this list: story 4791 turns it off on dev (test_4791_dev_lease_flag.py)
 )
 
 
@@ -51,7 +51,7 @@ def test_the_dev_stream_address_is_always_empty_so_the_frontend_streams_through_
 
 
 def test_the_dev_branch_leaves_redis_pg_listen_the_rate_limiter_and_pgbouncer_alone():
-    """the relay contract (one receiver, takeover) needs the Redis SSE lease; dev backend runs 2+ instances: these values are the ones the file had before the retirement"""
+    """the other Redis-backed flags stay as the file had them before the retirement (the one-receiver lease is now in Postgres on dev: story 4791)"""
     out = _dev_outputs()
     for flag in _REDIS_FLAGS:
         assert out[flag] == "true", flag

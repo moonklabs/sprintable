@@ -38,6 +38,9 @@ def _patch(monkeypatch, agent_id, org_plan="free"):
             return False
 
     monkeypatch.setattr(ag, "async_session_factory", lambda: _Ctx())
+    # story 4791: these tests are about the in-process count (the lease answers None); with Redis off the Postgres lease would answer first
+    from app.services import sse_lease
+    monkeypatch.setattr(sse_lease.settings, "sse_lease_pg_enabled", False)
     monkeypatch.setattr(ag, "_agent_sse_connection_count", 0)  # global cap 여유
     req = MagicMock(); req.headers = {}
     auth = AuthContext(user_id=str(agent_id), email=None,
