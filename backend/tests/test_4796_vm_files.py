@@ -159,8 +159,10 @@ def test_the_rehearsal_dump_is_cleaned_up_locally_and_in_the_bucket() -> None:
     """codex (combined review): the rehearsal dump is a copy of the whole dev database and must not stay in import/"""
     text = (_VM / "RUNBOOK.md").read_text()
     section = text[text.index("7a. Rehearsal"):text.index("**The dump is taken on the VM.**")]
-    assert "sudo rm -f /srv/sprintable/import/*-rehearsal-*" in section
-    assert "gcloud storage rm 'gs://$BACKUPS_BUCKET/import/*-rehearsal-*' --project $PROJECT" in section
+    assert "sudo find /srv/sprintable/import -name '*-rehearsal-*' -delete" in section
+    assert 'gcloud storage rm "gs://$BACKUPS_BUCKET/import/*-rehearsal-*" --project $PROJECT' in section, "double quotes, or the bucket variable is not expanded"
+    commands = re.findall(r"`([^`]+)`", section)
+    assert not [c for c in commands if c.startswith("sudo rm") and "*" in c], "a glob after sudo is expanded by the caller's shell, which cannot read the root-only folder"
     assert "-final-" in section, "the real move's copies go the same way after the soak"
 
 
@@ -171,6 +173,28 @@ def test_every_apply_cloud_scheduler_call_in_the_runbook_names_the_project_throu
     assert calls, "the runbook shows the tool"
     for call in calls:
         assert "CLOUDSDK_CORE_PROJECT=$PROJECT python3 infra/apply_cloud_scheduler.py" in call, call
+
+
+def test_the_documented_cleanup_commands_really_delete_only_the_rehearsal_files(tmp_path: Path) -> None:
+    """codex round 9: the first version had a single-quoted variable and a glob after sudo - neither worked. Run the documented commands for real (sudo dropped, gcloud replaced by a recorder)."""
+    import subprocess
+    text = (_VM / "RUNBOOK.md").read_text()
+    section = text[text.index("7a. Rehearsal"):text.index("**The dump is taken on the VM.**")]
+    find_cmd = re.search(r"`sudo (find /srv/sprintable/import -name '\*-rehearsal-\*' -delete)`", section).group(1)
+    rm_cmd = re.search(r"`(gcloud storage rm \"[^`]+)`", section).group(1)
+    imp = tmp_path / "import"
+    imp.mkdir()
+    for name in ("dev-rehearsal-1-9.dump", "dev-rehearsal-1-9.dump.sha256", "dev-final-1-9.dump"):
+        (imp / name).write_text("x")
+    subprocess.run(["bash", "-c", find_cmd.replace("/srv/sprintable/import", str(imp))], check=True, timeout=30)
+    assert sorted(f.name for f in imp.iterdir()) == ["dev-final-1-9.dump"], "only the rehearsal files go"
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "gcloud").write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$GCLOUD_ARGS"\n')
+    (fake / "gcloud").chmod(0o755)
+    args = tmp_path / "args.txt"
+    subprocess.run(["bash", "-c", rm_cmd], check=True, timeout=30, env={"PATH": f"{fake}:/usr/bin:/bin", "BACKUPS_BUCKET": "bkt-1", "PROJECT": "proj-1", "GCLOUD_ARGS": str(args), "HOME": str(tmp_path)})
+    assert args.read_text().splitlines() == ["storage", "rm", "gs://bkt-1/import/*-rehearsal-*", "--project", "proj-1"], "the bucket variable is expanded, the star reaches gcloud"
 
 
 def test_no_timer_that_needs_the_database_is_enabled_before_the_restore() -> None:
