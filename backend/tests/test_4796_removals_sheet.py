@@ -39,7 +39,7 @@ def test_the_runbook_points_at_the_sheet_and_no_longer_carries_the_old_table() -
     sec = RUNBOOK.split("## 10. After the soak")[1].split("## 11.")[0]
     assert "[`REMOVALS-dev.md`](REMOVALS-dev.md)" in sec
     assert "| Remove | Command | Undo |" not in sec, "one list of removals, not two that drift apart"
-    assert "re-creates them" in sec and "support gateway living on the VM" in sec
+    assert "re-creates the services and the scheduler step fails on a deleted backend" in sec and "support gateway living on the VM" in sec and "the dev build without Cloud Run" in sec
 
 
 def test_the_rows_are_the_five_the_story_names_in_the_run_order() -> None:
@@ -63,16 +63,19 @@ def test_the_migrate_job_name_comes_from_the_provision_script() -> None:
     assert "sprintable-verify-oneoff" in RUNBOOK and "sprintable-verify-oneoff" in SHEET
 
 
-def test_the_dev_pipeline_still_deploys_what_gate_b_says_it_does_so_the_gate_is_still_needed() -> None:
-    """If this fails the pipeline PR landed: drop gate B and its mentions from the sheet and this test together (a gate nobody can read off the repo is a story, not a gate)."""
-    for step, needle in (("deploy-backend", "gcloud run deploy sprintable-backend-${_DEPLOY_ENV}"), ("deploy-frontend", "gcloud run deploy sprintable-frontend-${_DEPLOY_ENV}"),
-                         ("run-migrate-job", "sprintable-migrate-${_DEPLOY_ENV}")):
-        body = _step(step)
-        assert needle in body
-        assert 'skip' not in body.split(needle)[0].split("args:")[-1], f"{step} already has a skip before it deploys"
+def test_gate_b_is_the_switch_and_names_the_steps_it_covers_the_scheduler_source_and_the_steps_it_does_not() -> None:
+    """Gate B is «the dev build without Cloud Run» (cloudbuild.yaml `_CLOUD_RUN_APP_SKIP`, cloud-build.yml dev `cloud_run_app_skip=true`): the sheet's words are read against the repo."""
+    covered = ("build-frontend", "push-frontend", "update-migrate-job", "run-migrate-job", "deploy-frontend", "deploy-backend")
     gate_b = SHEET.split("| **B. Pipeline**")[1].split("\n")[0]
-    for token in ("deploy-backend", "deploy-frontend", "run-migrate-job", "re-creates"):
-        assert token in gate_b
+    workflow = (_ROOT / ".github/workflows/cloud-build.yml").read_text()
+    assert 'echo "cloud_run_app_skip=true" >> "$GITHUB_OUTPUT"' in workflow
+    for step in covered:
+        assert "_CLOUD_RUN_APP_SKIP" in _step(step), step
+        assert f"`{step}`" in gate_b, step
+    for token in ("cloud_run_app_skip=true", "`apply-cloud-scheduler` takes its Authorization secret from the VM's declaration", "one dev build ran green", "answer 200 (not 401", "not covered by the switch", "re-creates the services"):
+        assert token in gate_b, token
+    for step in ("update-support-gateway-migrate-job", "run-support-gateway-migrate-job", "deploy-support-gateway"):
+        assert "_CLOUD_RUN_APP_SKIP" not in _step(step), f"{step} is not covered by the switch, as the gate says"
 
 
 def test_the_support_gateway_database_is_inside_the_cloud_sql_instance_so_gate_zero_guards_row_five() -> None:
