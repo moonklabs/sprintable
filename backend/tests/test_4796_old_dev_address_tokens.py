@@ -86,3 +86,12 @@ def test_the_prod_plugin_and_the_prod_lines_of_the_guides_did_not_move() -> None
 ])
 def test_the_dev_example_line_of_each_guide_names_the_dev_api_name(guide: str, needle: str) -> None:
     assert needle in (_ROOT / "apps/web/public" / guide).read_text()
+
+
+def test_phase_2_of_the_runbook_says_what_the_connector_change_does_and_does_not_reach() -> None:
+    """codex (tokens PR, round 2): new starts use the dev API name; an already installed connector keeps the old default and shows up as a non-VM caller in the request-log table"""
+    text = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
+    p2 = text[text.index("**Phase 2"):text.index("**Phase 3")]
+    assert "new starts of a connector use `https://dev-api.sprintable.ai`" in p2
+    assert "an already installed" not in p2 and "a connector already installed with the old `…-57iommnikq-du.a.run.app` default keeps dialing it" in p2
+    assert "those show up in the request-log table as non-VM callers" in p2
