@@ -169,7 +169,7 @@ def test_the_runbook_names_the_new_setting_and_the_job_steps_that_the_job_really
     p3 = text[text.index("**Phase 3"):text.index("## 8. ")]
     assert "the stored hosted-site links rewritten and the report showing no `run.app` origin (§10, «Stored hosted-site links»)" in p3.split("\n1. ")[0]
     for needle in ("**Stored hosted-site links (story 4796).**", "python -m scripts.jobs.rewrite_site_post_links`", "--old-origin http://sprintable-backend-dev-787818285179.asia-northeast3.run.app --old-origin https://sprintable-backend-dev-787818285179.asia-northeast3.run.app", "--old-origin http://sprintable-backend-dev-57iommnikq-du.a.run.app --old-origin https://sprintable-backend-dev-57iommnikq-du.a.run.app", "with the scheme the report shows", "`--old-origin` accepts `http` or `https` because it only selects what is stored, while `--new-origin` must be `https`",
-                   "--new-origin https://dev-api.sprintable.ai`", "with `--apply`", "exits non-zero unless nothing with an old origin is left", "origins and counts, never a full link", "Undo of the rewrite"):
+                   "--new-origin https://dev-api.sprintable.ai`", "with `--apply`", "exits non-zero unless nothing with an old origin is left", "origins and counts, never a full link", "Undo of the rewrite: **for `https` sources only**", "cannot be put back by the job", "**before the first `--apply`** take a backup (`sudo systemctl start sprintable-backup.service`, §11)"):
         assert needle in sec10, needle
     for needle in ("**before Phase 3's final dump** against Cloud SQL", "so that dump already carries the rewritten links", "sudo docker exec sprintable-backend-1 python -m scripts.jobs.rewrite_site_post_links",
                    "gcloud run jobs describe sprintable-verify-oneoff --project $PROJECT --region $REGION --format=export > verify-oneoff-before.yaml",
@@ -237,3 +237,15 @@ def test_a_prefix_may_be_plain_http_but_an_address_that_is_written_may_not() -> 
     for still_bad in (host + "/path", host + "?q=1", "http://u:p@h.example", "http://", "http://h.example:abc", "ftp://h.example", "http://h .example", "http://h.example\\x"):
         with pytest.raises(ValueError):
             parse_origin(still_bad, allow_http=True)
+
+
+def test_the_undo_claim_does_not_promise_what_the_job_cannot_do() -> None:
+    """codex (http prefix PR): an http source cannot be restored by swapping the origins because the written origin is never plain http"""
+    from scripts.jobs import rewrite_site_post_links as job
+
+    with pytest.raises(SystemExit):
+        job.check_origin("http://sprintable-backend-dev-787818285179.asia-northeast3.run.app", what="--new-origin")
+    text = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
+    sec10 = text[text.index("## 10. "):text.index("## 11. ")]
+    assert "Undo of the rewrite: the same job with the two origins swapped" not in sec10, "the old unconditional claim"
+    assert (_ROOT / "deploy/vm/systemd/sprintable-backup.service").exists(), "the backup unit the runbook tells the reader to start"
