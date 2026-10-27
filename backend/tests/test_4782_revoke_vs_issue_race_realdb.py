@@ -447,3 +447,74 @@ async def test_a_logout_with_the_oldest_cookie_closes_the_windows_of_every_rotat
         assert await _live_except(w, None) == 0
     finally:
         await _close(engine, w)
+
+
+async def test_a_logout_following_a_lineage_never_ends_another_persons_token():
+    """the forward walk is scoped to the person: a rotated token whose `replaced_by` points at ANOTHER person's live token (a damaged row — nothing in the app writes it) must not carry the logout over
+    to that person. The administrator's token stays alive after the member logs out with the damaged cookie."""
+    from sqlalchemy import select, update
+
+    from app.core.security import hash_token
+    from app.models.user import RefreshToken
+
+    engine, w = await _world()
+    try:
+        member = await w.login()
+        admin = await w.login(w.admin_email)
+        rotated = (await w.refresh(member["refresh_token"])).json()["data"]
+        async with w.Session() as s:
+            admin_row = (await s.execute(select(RefreshToken.id).where(RefreshToken.token_hash == hash_token(admin["refresh_token"])))).scalar_one()
+            await s.execute(update(RefreshToken).where(RefreshToken.token_hash == hash_token(member["refresh_token"])).values(replaced_by=admin_row))
+            await s.commit()
+        assert (await w.client.post("/api/v2/auth/logout", json={"refresh_token": member["refresh_token"]})).status_code == 200
+        assert (await w.refresh(admin["refresh_token"])).status_code == 200, "the member's logout ended another person's token"
+        assert rotated["refresh_token"]
+    finally:
+        await _close(engine, w)
+
+
+async def _two_refreshes_with_one_cookie(w):
+    """the rotation race: two refreshes with the SAME cookie inside the grace window (two tabs, two pods). One wins the atomic rotation and is linked from the old token; the other is the LOSER and mints a fork
+    that nothing points at. Returns (old cookie, winner's pair, loser's pair)."""
+    from sqlalchemy import select
+
+    from app.core.security import hash_token
+    from app.models.user import RefreshToken
+
+    r0 = await w.login()
+    one, two = await asyncio.gather(w.refresh(r0["refresh_token"]), w.refresh(r0["refresh_token"]))
+    assert one.status_code == 200 and two.status_code == 200, f"both refreshes should have been answered: {one.status_code} {two.status_code}"
+    pairs = [one.json()["data"], two.json()["data"]]
+    async with w.Session() as s:
+        linked = (await s.execute(select(RefreshToken.replaced_by).where(RefreshToken.token_hash == hash_token(r0["refresh_token"])))).scalar_one()
+        ids = [(await s.execute(select(RefreshToken.id).where(RefreshToken.token_hash == hash_token(p["refresh_token"])))).scalar_one() for p in pairs]
+    winner = pairs[ids.index(linked)]
+    loser = pairs[1 - ids.index(linked)]
+    return r0, winner, loser
+
+
+async def test_a_logout_with_the_first_cookie_also_ends_the_fork_a_rotation_race_loser_made():
+    """the tail of the session's promise: a refresh that lost the rotation race minted a fork nothing points at. Logging the session out with the cookie both refreshes started from must end the winner AND
+    the fork — a walk along `replaced_by` reaches only the winner."""
+    engine, w = await _world()
+    try:
+        r0, winner, loser = await _two_refreshes_with_one_cookie(w)
+        assert (await w.client.post("/api/v2/auth/logout", json={"refresh_token": r0["refresh_token"]})).status_code == 200
+        assert await _live_except(w, None) == 0, "the logout left the loser's fork alive"
+        assert (await w.refresh(loser["refresh_token"])).status_code == 401
+        assert (await w.refresh(winner["refresh_token"])).status_code == 401
+    finally:
+        await _close(engine, w)
+
+
+async def test_a_logout_with_the_cookie_of_the_fork_also_ends_the_winner():
+    """the other direction: the browser that holds the FORK's cookie logs out. The winner's tokens are the same session (a second tab of it keeps the winner's cookie): they must end too — the fork
+    has no predecessor pointing at it, so a walk backwards from it finds nothing."""
+    engine, w = await _world()
+    try:
+        r0, winner, loser = await _two_refreshes_with_one_cookie(w)
+        assert (await w.client.post("/api/v2/auth/logout", json={"refresh_token": loser["refresh_token"]})).status_code == 200
+        assert await _live_except(w, None) == 0, "the logout with the fork's cookie left the winner alive"
+        assert (await w.refresh(winner["refresh_token"])).status_code == 401
+    finally:
+        await _close(engine, w)
