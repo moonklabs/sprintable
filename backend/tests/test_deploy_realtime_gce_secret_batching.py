@@ -193,4 +193,4 @@ def test_batched_secret_fetch_preserves_multiline_pem_and_strips_trailing_newlin
         )
 
         assert "__RESULT_AR_TOKEN__=stub-ar-token" in proc.stdout
-        assert "__RESULT_JWT__=stub-value-for-JWT_SECRET" in proc.stdout
+        assert "__RESULT_JWT__=stub-value-for-JWT_SECRET_DEV\n" in proc.stdout  # story 4798: dev fetches JWT_SECRET_DEV into the variable JWT_SECRET (an exact line: the old shared name would also be a prefix of this)

@@ -187,3 +187,31 @@ async def test_a_full_old_queue_still_hands_over(lease_path):
         old = await _drain(first.body_iterator, 10.0)
         assert old[-1] == "event: superseded\ndata: {}\n\n"
         await second.body_iterator.aclose()
+
+
+async def test_a_same_receiver_reconnect_while_the_old_stream_ends_keeps_its_lease(lease_path):
+    """story 4800: the end of a stream runs in a task of its own; a same-receiver reconnect that arrives while that task is still releasing its leases takes the slot — and the old stream, which looks at the
+    slot only right before it would release the receiver's lease, finds it taken and leaves the lease (the same member `rcv:<id>`) to the new stream. A task that had decided earlier would have removed it."""
+    from app.services import sse_lease
+
+    real_release = sse_lease.release
+
+    async def slow_global_release(scope, conn_id):
+        if scope == "agent_global":
+            await asyncio.sleep(0.4)  # the old stream is in the middle of its end
+        return await real_release(scope, conn_id)
+
+    async with _world() as (gw, auth, agent):
+        first = await gw.agent_stream(request=_Req(R1), auth=auth)
+        agen = first.body_iterator
+        await agen.__anext__()  # (the first heartbeat — the stream is live)
+        with patch.object(sse_lease, "release", slow_global_release):
+            closing = asyncio.create_task(agen.aclose())  # the client leaves
+            await asyncio.sleep(0.1)  # …and its end is waiting in the slow release
+            second = await gw.agent_stream(request=_Req(R1), auth=auth)  # the same receiver comes back
+            await asyncio.wait_for(closing, 5)
+            await asyncio.sleep(0.8)  # (the end task has finished)
+        assert gw._receiver_streams.get((agent, R1)) is not None, "the new stream's slot is still its own"
+        if lease_path == "redis":
+            assert await sse_lease.count(f"perkey:{agent}") == 1, "the old stream's end removed the new stream's lease"
+        await second.body_iterator.aclose()

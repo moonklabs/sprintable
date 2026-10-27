@@ -332,7 +332,7 @@ async def _end_phone_session(db: AsyncSession, phone: RemoteDevice, now: datetim
     registered before 0446 · no token sent) or a chain with nothing live (already logged out · expired) → nothing is revoked:
     «not_found» (PO: no other session is ever touched to make up for it)."""
     from app.models.user import RefreshToken
-    from app.routers.auth import _explicit_revoke_values
+    from app.routers.auth import _end_session_family, _explicit_revoke_values
 
     chain: list[uuid.UUID] = []
     at = phone.session_token_id
@@ -352,6 +352,13 @@ async def _end_phone_session(db: AsyncSession, phone: RemoteDevice, now: datetim
     await db.execute(
         update(RefreshToken).where(RefreshToken.id.in_(chain), RefreshToken.expires_at > now).values(expires_at=now)
     )
+    # story 4782 (third PR): the whole family of that sign-in — a fork a rotation race left (nothing points at it) is the same session; one statement over (person, family) instead of a walk
+    # every row of the chain is looked at, not only the first: old pods (no family written) and new pods may have rotated the same session in turn, and a family can start in the middle of the chain
+    families = (await db.execute(
+        select(RefreshToken.user_id, RefreshToken.family_id).where(RefreshToken.id.in_(chain), RefreshToken.family_id.is_not(None)).distinct()
+    )).all()
+    for family in families:
+        live += await _end_session_family(db, family.user_id, family.family_id, now)
     if not live:
         logger.info("phone removed: its session is no longer live — key and pairs only", extra={"structured": {"event": "phone_removed_session_not_found", "why": "not_live"}})
         return "not_found"
@@ -374,12 +381,13 @@ async def remove_phone(
     from app.models.member import Member as _Member
     from app.routers.auth import _lock_person_sessions
 
-    # the person is the key's OWNER (the member the key belongs to) — not whoever its recorded session token names: a re-registration can move that token between this read and the chain read
-    session_owner = (await db.execute(
-        select(_Member.user_id).join(RemoteDevice, RemoteDevice.member_id == _Member.id).where(RemoteDevice.id == phone_id, RemoteDevice.org_id == org_id)
-    )).scalar_one_or_none()
-    if session_owner is not None:
-        await _lock_person_sessions(db, session_owner, exclusive=True)
+    # the person is the key's OWNER (the member the key belongs to) — not whoever its recorded session token names: a re-registration can move that token between this read and the chain read.
+    # Only for a caller who MAY remove the key (an owner/admin of the organization or the key's own member): anyone else gets the 404 below without ever taking somebody else's lock
+    key_owner = (await db.execute(
+        select(RemoteDevice.member_id, _Member.user_id).join(_Member, RemoteDevice.member_id == _Member.id).where(RemoteDevice.id == phone_id, RemoteDevice.org_id == org_id)
+    )).first()
+    if key_owner is not None and (actor_is_admin or key_owner.member_id == actor_member_id):
+        await _lock_person_sessions(db, key_owner.user_id, exclusive=True)
     phone = (await db.execute(
         select(RemoteDevice).where(RemoteDevice.id == phone_id, RemoteDevice.org_id == org_id).with_for_update()
     )).scalar_one_or_none()

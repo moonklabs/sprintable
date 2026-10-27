@@ -1,0 +1,120 @@
+# story 4796 — prod on one VM (AC4 declaration). Names only; no secret values and no private plain values live in this repository.
+# Same shape and rules as dev.yaml. The source of truth for names / secret ids is the PO's export of the LIVE prod services (live-names.prod.txt), not dev:
+# prod has no payments secrets in this release and no aiplatform grant; secret ids carry the _PROD / -prod suffixes of the prod services.
+# deploy/vm/bin/render_env.py merges: private plain file (live values) < overrides < computed < secrets (Secret Manager).
+format: 1
+environment: prod
+project: sprintable-494803
+region: asia-northeast3
+hosts:
+  api: api.sprintable.ai
+  realtime: realtime.sprintable.ai
+  app: app.sprintable.ai
+buckets:
+  deploy: sprintable-vm-prod-deploy
+  backups: sprintable-vm-prod-backups
+database:
+  user: sprintable
+  name: sprintable
+  password_secret: DB_PASSWORD_VM_PROD
+services:
+  backend:
+    live_section: sprintable-backend-prod
+    overrides:
+      DB_PGBOUNCER: 'false'
+      DB_POOL_SIZE: '5'
+      DB_MAX_OVERFLOW: '5'
+      PG_LISTEN_ENABLED: 'true'
+      EVENT_BROKER_REDIS_CONSUME_ENABLED: 'false'
+      EVENT_BROKER_REDIS_DISPATCH_ENABLED: 'false'
+      EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED: 'false'
+      FANOUT_WAKE_REDIS_ENABLED: 'false'
+      PRESENCE_ONLINE_REDIS_ENABLED: 'false'
+      PRESENCE_REDIS_ENABLED: 'false'
+      SSE_LEASE_REDIS_ENABLED: 'false'
+      APP_URL: https://app.sprintable.ai
+      NEXT_PUBLIC_APP_URL: https://app.sprintable.ai
+      BACKEND_URL: https://api.sprintable.ai
+      FASTAPI_URL: https://api.sprintable.ai
+    secrets:
+      APPLE_PRIVATE_KEY: APPLE_SIWA_PRIVATE_KEY
+      CHANNEL_CREDENTIAL_ENCRYPTION_KEY: CHANNEL_CREDENTIAL_ENCRYPTION_KEY_PROD
+      CHANNEL_OAUTH_STATE_SECRET: CHANNEL_OAUTH_STATE_SECRET_PROD
+      CRON_SECRET: CRON_SECRET_PROD
+      EMAIL_FROM: EMAIL_FROM
+      FIREBASE_BFF_INTERNAL_SECRET: FIREBASE_BFF_INTERNAL_SECRET_PROD
+      GENERATION_CONNECTOR_CREDENTIAL_ENCRYPTION_KEY: GENERATION_CONNECTOR_CREDENTIAL_ENCRYPTION_KEY_PROD
+      GITHUB_APP_CLIENT_SECRET: github-app-client-secret-prod
+      GITHUB_APP_PRIVATE_KEY: github-app-private-key-prod
+      GITHUB_APP_STATE_SECRET: github-app-state-secret-prod
+      GITHUB_APP_WEBHOOK_SECRET: github-app-webhook-secret-prod
+      GITHUB_WEBHOOK_SECRET: github-webhook-secret
+      GOOGLE_CLIENT_ID: GOOGLE_CLIENT_ID
+      GOOGLE_CLIENT_SECRET: GOOGLE_CLIENT_SECRET
+      JWT_SECRET: JWT_SECRET_PROD
+      RESEND_API_KEY: RESEND_API_KEY
+    computed:
+      DATABASE_URL: postgresql+asyncpg://{db_user}:{db_password}@db:5432/{db_name}
+      DATABASE_URL_DIRECT: postgresql://{db_user}:{db_password}@db:5432/{db_name}
+    dropped:
+      REDIS_URL: no Redis on the VM (one process; the in-process fallbacks are the design)
+    added:
+      TRUST_FORWARDED_FOR: 'true'
+    live_plain:
+    - APPLE_KEY_ID
+    - APPLE_SERVICES_ID
+    - APPLE_TEAM_ID
+    - APP_ENV
+    - BACKEND_REQUEST_TIMEOUT_SECONDS
+    - CORS_ORIGINS
+    - DEPLOY_ENV
+    - EVENTBUS_ENABLED
+    - FIREBASE_OAUTH_HANDOFF_ENABLED
+    - GCS_AVATARS_BUCKET
+    - GITHUB_APP_CLIENT_ID
+    - GITHUB_APP_ID
+    - GITHUB_APP_SLUG
+    - H1_MERGE_GATE_ADVISORY
+    - H1_MERGE_GATE_ENABLED
+    - H1_MERGE_GATE_ORG_ALLOWLIST
+    - LICENSE_CONSENT
+    - MCP_PUBLIC_URL
+    - MEMBER_SSOT_APIKEY_CUT
+    - MEMBER_SSOT_RESOLVER_SHADOW
+    - OPS_ALERT_CONVERSATION_ID
+    - PUBLIC_SITE_BASE_URL
+    - PUSH_DEVICES_BY_USER
+    - SSE_TRANSIENT_REPLAY_ENABLED
+    - STORAGE_PROVIDER
+    - SUPPORT_CONTACT_SURFACE_WIDGET
+    - SUPPORT_ESCALATION_APPROVER_MEMBER_ID
+    - SUPPORT_ESCALATION_REQUESTER_MEMBER_ID
+    - SUPPORT_ESCALATION_TARGET_ORG_SLUG
+    - SUPPORT_ESCALATION_TARGET_PROJECT_SLUG
+  frontend:
+    live_section: sprintable-frontend-prod
+    overrides:
+      NEXT_PUBLIC_FASTAPI_URL: https://api.sprintable.ai
+      REALTIME_URL: https://realtime.sprintable.ai
+      APP_BASE_URL: https://app.sprintable.ai
+      NEXT_PUBLIC_APP_URL: https://app.sprintable.ai
+    secrets:
+      FIREBASE_BFF_INTERNAL_SECRET: FIREBASE_BFF_INTERNAL_SECRET_PROD
+      JWT_SECRET: JWT_SECRET_PROD
+      NEXT_PUBLIC_COOKIE_DOMAIN: NEXT_PUBLIC_COOKIE_DOMAIN
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: NEXT_PUBLIC_SUPABASE_ANON_KEY
+      NEXT_PUBLIC_SUPABASE_URL: NEXT_PUBLIC_SUPABASE_URL
+      SUPABASE_SERVICE_ROLE_KEY: SUPABASE_SERVICE_ROLE_KEY
+    computed: {}
+    dropped: {}
+    added: {}
+    live_plain:
+    - APPLE_TEAM_ID
+    - DESKTOP_DOWNLOAD_BUCKET
+    - DESKTOP_DOWNLOAD_ENABLED
+    - FIREBASE_OAUTH_HANDOFF_ENABLED
+    - MOBILE_APP_LINK_ORIGIN
+    - NEXT_TELEMETRY_DISABLED
+    - NODE_ENV
+    - SECRET_REFRESH_1777617854
+    - STORAGE_PROVIDER

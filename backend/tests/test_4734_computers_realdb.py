@@ -202,6 +202,9 @@ async def test_startable_keeps_one_entry_per_setup_in_the_old_shape_and_only_gai
         phone, der = await _register(c)
         await _report(c, a["device_token"], der)
         await _report(c, b["device_token"], der)
+        # story 4714 (policy): the phone lists only an agent whose conversation the person can open — this test is about the shape, so the agents talk to everyone
+        await _sql("UPDATE members SET message_policy_mode = 'org_wide' WHERE type = 'agent' AND org_id IN (SELECT org_id FROM desktop_setups WHERE id IN (:a, :b))",
+                   params={"a": a["setup_id"], "b": b["setup_id"]})
         r = await c.get(f"/api/v2/desktop/startable?phone_key_id={phone}", headers=_person(OWNER))
         assert r.status_code == 200, r.text
         entries = r.json()["computers"]

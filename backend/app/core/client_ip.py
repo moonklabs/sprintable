@@ -8,7 +8,8 @@
   story #4546: 그 접속 주소가 **Cloudflare 공개 대역**이면(백엔드 도메인이 Cloudflare 뒤일 때) 사용자 IP = `CF-Connecting-IP`
   (Cloudflare가 늘 덮어씀) — 웹 `apps/web/src/lib/client-ip.ts`와 같은 규칙 · 같은 대역(시험이 두 목록을 맞물려 고정).
   접속 주소가 Cloudflare가 아니면(run.app 직통) 꾸민 `CF-Connecting-IP`는 무시한다.
-- Cloud Run 밖(로컬 · 테스트)에선 소켓 주소(`request.client.host`).
+- Cloud Run 밖(로컬 · 테스트)에선 소켓 주소(`request.client.host`). 단 VM처럼 앞문(Caddy)이 XFF를 덮어써 한 칸만 남기는 배포는
+  `TRUST_FORWARDED_FOR=true`로 Cloud Run과 같은 규칙을 쓴다(story 4796) — 안 켜면 VM에선 모든 사용자가 앞문 주소 하나로 세어진다.
 
 ⚠️ «XFF 오른쪽 끝 = 접속 주소»는 dev 로그 실측(4398 AC0 ④)이 전제 — 확인 전엔 병합하지 않는다.
 """
@@ -59,6 +60,11 @@ def _on_cloud_run() -> bool:
     return bool(os.environ.get("K_SERVICE"))
 
 
+def _behind_trusted_front() -> bool:
+    """XFF 오른쪽 끝을 접속 주소로 믿어도 되는 배포인가 — Cloud Run 앞단(GFE), 또는 VM에서 Caddy가 XFF를 덮어쓰는 배포(story 4796, TRUST_FORWARDED_FOR)."""
+    return _on_cloud_run() or settings.trust_forwarded_for
+
+
 def client_ip(request: Request) -> str:
     """요청 상한이 셀 사용자 IP. 위 신뢰 경계 순서대로 — 하나도 못 정하면 소켓 주소(없으면 빈 문자열이 아니라 "unknown")."""
     secret = settings.edge_client_ip_secret
@@ -67,8 +73,11 @@ def client_ip(request: Request) -> str:
         forwarded_ip = _valid_ip(request.headers.get(CLIENT_IP_HEADER))
         if given and forwarded_ip and hmac.compare_digest(given.encode(), secret.encode()):
             return forwarded_ip
-    if _on_cloud_run():
-        xff = request.headers.get("x-forwarded-for", "")
+    if _behind_trusted_front():
+        # several header LINES (not only several comma-separated entries) are possible: the front door appends its own line last, so the last line's last entry is the connecting address
+        # (`headers.get()` would return the FIRST line — the one a client can send)
+        lines = request.headers.getlist("x-forwarded-for")
+        xff = lines[-1] if lines else ""
         connecting = _valid_ip(xff.rsplit(",", 1)[-1]) if xff else None
         if connecting:
             if is_cloudflare_address(connecting):

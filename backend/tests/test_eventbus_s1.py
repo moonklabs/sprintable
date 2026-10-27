@@ -240,7 +240,9 @@ async def test_mark_delivered_sets_status_and_timestamp(client, mock_session):
     event = _make_event(status="pending")
 
     async def _refresh(obj):
-        pass  # obj already mutated in-place
+        # story 4781 (AC8): the marking is one UPDATE statement in the database (the first delivery time is kept) — the refresh is what brings its result back
+        obj.status = "delivered"
+        obj.delivered_at = datetime.now(timezone.utc)
 
     mock_session.refresh.side_effect = _refresh
 
@@ -256,6 +258,8 @@ async def test_mark_delivered_sets_status_and_timestamp(client, mock_session):
     assert data["status"] == "delivered"
     assert data["delivered_at"] is not None
     mock_session.commit.assert_called_once()
+    update_sql = str(mock_session.execute.call_args_list[-1].args[0])
+    assert update_sql.startswith("UPDATE events") and "coalesce(events.delivered_at" in update_sql, update_sql  # (the first delivery time is kept, in the database)
 
 
 @pytest.mark.anyio

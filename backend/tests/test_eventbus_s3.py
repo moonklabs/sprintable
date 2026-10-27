@@ -317,7 +317,19 @@ async def test_stream_batch_delivers_over_100_events(mock_session, org_id):
     pending_result = MagicMock()
     pending_result.scalars.return_value = scalars_mock
 
-    mock_session.execute.side_effect = [membership_result, pending_result]
+
+    # story 4781 (AC8): the backfill stamps a batch with ONE `UPDATE events … WHERE id IN (…) AND status = 'pending'` (the first delivery is decided in the database) — the mock routes it and
+    # records which events it named; the two reads (membership, pending events) come in order as before
+    stamped: list = []
+    reads = iter([membership_result, pending_result])
+
+    def _execute(stmt, *a, **k):
+        if str(stmt).startswith("UPDATE events"):
+            stamped.extend(next(v for v in stmt.compile().params.values() if isinstance(v, (list, tuple))))
+            return MagicMock()
+        return next(reads)
+
+    mock_session.execute.side_effect = _execute
 
     from app.core import shutdown as shutdown_module
     from app.dependencies.auth import get_current_user, get_verified_org_id, get_current_user_streaming, get_verified_org_id_streaming
@@ -390,7 +402,7 @@ async def test_stream_batch_delivers_over_100_events(mock_session, org_id):
     # 110건 = 11배치 → commit 11번 (backfill 배치 처리 확인)
     assert mock_session.commit.call_count >= 11
     # 모든 이벤트가 delivered로 마킹됐는지
-    delivered_count = sum(1 for evt in events if evt.status == "delivered")
+    delivered_count = sum(1 for evt in events if evt.id in set(stamped))
     assert delivered_count == 110, f"Expected 110 delivered, got {delivered_count}"
     # 110건 = 11배치 → commit 11번
     assert mock_session.commit.call_count >= 11

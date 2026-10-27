@@ -1,5 +1,6 @@
 'use client';
 
+import { firstGraphemes } from '@/lib/first-graphemes';
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
@@ -1845,7 +1846,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                       >
                         <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-foreground">
                           {/* story #4284 — 이름 없는 구성원은 타입대로 아이콘(에이전트 Bot · 사람 User · UnnamedMemberIcon 정본 · 유나 판정). */}
-                          {m.name ? m.name.slice(0, 2).toUpperCase() : <UnnamedMemberIcon type={m.type} />}
+                          {m.name ? firstGraphemes(m.name, 2).toUpperCase() : <UnnamedMemberIcon type={m.type} />}
                         </span>
                         {/* [SID:4362 · PO 18:11Z 전수] 디자인 Button 기본 nowrap이라 긴 구성원 이름이 줄 밖으로 넘쳤다(390에서 글 483px · 줄 338px) → 줄바꿈 · 긴 낱말 꺾음. */}
                         <span data-assignee-name="" className="min-w-0 flex-1 [overflow-wrap:anywhere]">{m.label}</span>

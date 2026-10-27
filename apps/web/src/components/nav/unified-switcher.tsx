@@ -1,5 +1,6 @@
 'use client';
 
+import { firstGraphemes } from '@/lib/first-graphemes';
 import { useTranslations } from 'next-intl';
 import { Check, ChevronDown, Loader2, Plus, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -48,7 +49,7 @@ interface UnifiedSwitcherProps {
 function OrgInitial({ name }: { name: string }) {
   return (
     <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-sm bg-brand text-[9px] font-semibold text-brand-foreground">
-      {name.charAt(0).toUpperCase()}
+      {firstGraphemes(name, 1).toUpperCase()}
     </span>
   );
 }

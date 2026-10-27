@@ -31,7 +31,8 @@ gcloud iam service-accounts create "${SA_NAME}" \
     --project="${GCP_PROJECT}" 2>/dev/null || log "SA already exists, skipping."
 
 # 필요 권한 부여
-for ROLE in roles/cloudbuild.builds.editor roles/artifactregistry.writer roles/run.admin roles/secretmanager.secretAccessor; do
+# story 4798: no project-level secret role here — the CI account is granted the secrets it reads one at a time (grant_secret_access.sh ci <SECRET_NAME>)
+for ROLE in roles/cloudbuild.builds.editor roles/artifactregistry.writer roles/run.admin; do
     gcloud projects add-iam-policy-binding "${GCP_PROJECT}" \
         --member="serviceAccount:${SA_EMAIL}" \
         --role="${ROLE}" \

@@ -1,7 +1,7 @@
 // story 4711 — the pure rules of the first setup in three steps (and the address the app opens the page with)
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { parseSetupFragment, setupFragment, parseRuntimeVersions, isFolderRefused } from './desktop-setup';
-import { defaultSoloRuntime, folderTracePick, shownProjectName, soloConfirmBody, soloNewOrgConfirmBody, soloOutcome, soloStartBlock, showsQuickCard, usableRuntimes } from './desktop-setup-quick';
+import { defaultSoloRuntime, folderTracePick, readTypedAgent, shownProjectName, soloConfirmBody, soloNewOrgConfirmBody, soloOutcome, soloStartBlock, showsQuickCard, usableRuntimes } from './desktop-setup-quick';
 
 const CODE = `${'A'.repeat(20)}_-${'b'.repeat(21)}`;
 const PROJ = '11111111-1111-4111-8111-111111111111';
@@ -67,6 +67,40 @@ describe('[SID:4711] the card\'s rules', () => {
     expect(soloOutcome(409, { code: 'agent_name_taken', suggested_name: ' Helper 2 ' }, null)).toEqual({ kind: 'name-taken', suggested: 'Helper 2' });
     expect(soloOutcome(409, { code: 'agent_name_taken', suggested_name: 7 }, null)).toEqual({ kind: 'name-taken', suggested: null });
     expect(soloOutcome(409, { code: 'agent_name_taken' }, null)).toEqual({ kind: 'name-taken', suggested: null });
+  });
+  it('story 4794: the card never sends half of a character — a suggestion, a stored draft and a project name are cut by whole letters within the server\'s count', () => {
+    const LONE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+    const near = `${'a'.repeat(59)}\u{1F600}${'b'.repeat(5)}`; // a UTF-16 cut at 60 splits the emoji
+    const taken = soloOutcome(409, { code: 'agent_name_taken', suggested_name: near }, null);
+    expect(taken).toMatchObject({ kind: 'name-taken' });
+    const suggested = (taken as { suggested: string }).suggested;
+    expect(LONE.test(suggested)).toBe(false);
+    expect(Array.from(suggested).length).toBeLessThanOrEqual(60);
+    // a stored draft read back
+    const store = new Map<string, string>([['sprintable.desktopSetupQuick.typed.v1:s-1', JSON.stringify({ name: near, role: `${'r'.repeat(199)}\u{1F600}` })]]);
+    vi.stubGlobal('window', { sessionStorage: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); }, removeItem: (k: string) => { store.delete(k); } } });
+    const typed = readTypedAgent('s-1');
+    vi.unstubAllGlobals();
+    expect(typed.name, 'the stored draft was read (not the empty answer of a closed storage)').not.toBeNull();
+    expect(LONE.test(typed.name ?? '') || LONE.test(typed.role)).toBe(false);
+    expect(Array.from(typed.name ?? '').length).toBeLessThanOrEqual(60);
+    expect(Array.from(typed.role).length).toBeLessThanOrEqual(200);
+    // a stored draft of ZWJ families (5 code points each): cutting by LETTERS (60 / 200 graphemes) would keep 100 / 250 code points — the server then refuses the name (Kadir lens)
+    const fam = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}';
+    const famStore = new Map<string, string>([['sprintable.desktopSetupQuick.typed.v1:s-2', JSON.stringify({ name: fam.repeat(20), role: fam.repeat(50) })]]);
+    vi.stubGlobal('window', { sessionStorage: { getItem: (k: string) => famStore.get(k) ?? null, setItem: () => {}, removeItem: () => {} } });
+    const famTyped = readTypedAgent('s-2');
+    vi.unstubAllGlobals();
+    expect(Array.from(famTyped.name ?? '').length).toBeLessThanOrEqual(60);
+    expect(Array.from(famTyped.role).length).toBeLessThanOrEqual(200);
+    expect(famTyped.name).toBe(fam.repeat(12)); // 60 code points, whole families
+    expect(famTyped.role).toBe(fam.repeat(40)); // 200 code points
+    // a folder name with an emoji at the end of a 100-name taken: the project name keeps whole letters
+    const longName = `${'p'.repeat(97)}\u{1F600}x`; // 99 code points: with the « 2» tail the base is cut at 98 code points — a UTF-16 cut at 98 splits the emoji (units 97 · 98)
+    const shown = shownProjectName(longName, [longName]);
+    expect(LONE.test(shown)).toBe(false);
+    expect(shown).toBe(`${'p'.repeat(97)}\u{1F600} 2`);
+    expect(Array.from(shown).length).toBeLessThanOrEqual(100);
   });
   it('a taken project name is shown as «{name} 2», «{name} 3» (case and spaces ignored, as the server does)', () => {
     expect(shownProjectName('app', [])).toBe('app');

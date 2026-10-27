@@ -184,6 +184,7 @@ async def test_04_who_may_press_the_computer_the_pairing_and_the_project_are_eac
         await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ)), headers=_tok(device["device_token"]))
         plain_phone, plain_der = await _register(c, PLAIN)
         await _pair(c, device["device_token"], der, plain_der)
+        await _sql(f"UPDATE members SET message_policy_mode = 'org_wide' WHERE id = '{agent}'")  
         # a plain member (not owner/admin · not the agent's owner · not who confirmed the device) may not
         r = await _post(c, agent, _start(plain_phone, sid), who=PLAIN)
         assert (r.status_code, r.json()["error"]["code"]) == (403, "not_allowed_to_command")
@@ -264,6 +265,7 @@ async def test_06_a_person_sees_and_starts_only_projects_they_can_open(world):
         plain_phone, plain_der = await _register(c, PLAIN)
         await _pair(c, device["device_token"], owner_der, plain_der)
         await _sql(f"UPDATE members SET owner_member_id = '{plain_tm}' WHERE id = '{agent}'")  # may command, as the agent's owner
+        await _sql(f"UPDATE members SET message_policy_mode = 'org_wide' WHERE id = '{agent}'")  # story 4714: this test is about the key and the projects, so the agent talks to everyone
         # a borrowed key lists nothing even when that key IS paired with this computer (the key must be the asker's own) — both ways
         assert (await _list(c, agent, plain_phone, who=OWNER)).json()["computers"] == []
         assert (await _list(c, agent, owner_phone, who=PLAIN)).json()["computers"] == []
@@ -293,6 +295,8 @@ async def test_07_a_key_is_one_persons_own_and_a_deactivated_agent_starts_nothin
         device, agent, owner_phone, owner_der = await _setup(c, "d4424 mac 4714g")
         sid = device["setup_id"]
         await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ)), headers=_tok(device["device_token"]))
+        # story 4714 (policy): the phone offers and starts only an agent whose conversation the person can open — this test is about the key, not the policy
+        await _sql(f"UPDATE members SET message_policy_mode = 'org_wide' WHERE id = '{agent}'")
         plain_phone, plain_der = await _register(c, PLAIN)
         await _pair(c, device["device_token"], owner_der, plain_der)
         key = str(uuid.uuid4())
@@ -400,6 +404,7 @@ async def test_09b_the_first_screen_read_says_whether_each_agent_runs_so_the_pho
         await _state(c, device, agent, "idle", 3, key="s-2")
         assert (await running())[agent] is True  # one more session that lives is enough
         # the same truth for a plain member (no right to list the device's sessions): their own paired phone lands the same way
+        await _sql(f"UPDATE members SET message_policy_mode = 'org_wide' WHERE id IN ('{agent}', '{other_agent}')")  # story 4714: a plain member is offered only agents they can talk to
         plain_phone, plain_der = await _register(c, PLAIN)
         await _pair(c, device["device_token"], owner_der, plain_der)
         got = await running(who=PLAIN, key=plain_phone)
@@ -510,6 +515,7 @@ async def test_11_what_is_taken_back_while_a_press_waits_for_the_computers_lock_
                 await _sql(f"UPDATE org_members SET role = 'admin' WHERE org_id = '{ORG}' AND user_id = '{PLAIN}'")
             else:
                 await _sql(f"UPDATE members SET owner_member_id = '{plain_tm}' WHERE id = '{agent}'")  # may command, as the agent's owner
+            await _sql(f"UPDATE members SET message_policy_mode = 'org_wide' WHERE id = '{agent}'")  # story 4714: this test is about what is taken back while a press waits, not the conversation policy
             ok = await _post(c, agent, _start(plain_phone, sid), who=PLAIN)
             assert ok.status_code == 201, ok.text  # the same press with nothing changed is accepted
             n = len(await _commands(sid))
@@ -626,6 +632,7 @@ async def test_16_the_whole_phone_read_drops_a_revoked_key_and_an_agent_the_pers
         await c.put("/api/v2/desktop/relay/startable", json=_startable((agent, PROJ), (other, PROJ2)), headers=_tok(device["device_token"]))
         plain_phone, plain_der = await _register(c, PLAIN)
         await _pair(c, device["device_token"], owner_der, plain_der)
+        await _sql(f"UPDATE members SET message_policy_mode = 'org_wide' WHERE id IN ('{agent}', '{other}')")  # story 4714: this test is about projects, so both agents talk to everyone
         # (b) the plain person opens agent `agent` (PROJ) and not agent `other` (PROJ2 only): the whole-phone read names the one, the other's own read is a 404
         comp = (await _all(c, plain_phone, who=PLAIN)).json()["computers"][0]
         assert [a["agent_member_id"] for a in comp["agents"]] == [agent]

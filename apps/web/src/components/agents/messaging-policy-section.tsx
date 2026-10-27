@@ -1,5 +1,6 @@
 'use client';
 
+import { firstGraphemes } from '@/lib/first-graphemes';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Check, Plus, TriangleAlert, X } from 'lucide-react';
 import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
@@ -285,7 +286,7 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
                         >
                           <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
                             {/* [SID:4286 · 유나 결정 2] 이름이 없으면 날것 «?» 대신 사람 아이콘 — 4646 공용 표식(UnnamedMemberIcon · 이 목록은 사람만). */}
-                            {m.name ? m.name.slice(0, 2).toUpperCase() : <UnnamedMemberIcon type="human" className="h-3 w-3" aria-hidden />}
+                            {m.name ? firstGraphemes(m.name, 2).toUpperCase() : <UnnamedMemberIcon type="human" className="h-3 w-3" aria-hidden />}
                           </div>
                           {/* [SID:4286 · PO 12:06Z 같은 부류] 이메일 없이 이름만 그리는 고르기 목록 — 이름 없는 사람이 둘 이상이면 겹친 행에만 «· ID 앞 8자». */}
                           <RowName className="flex-1" label={pickerRowLabels.get(m.id) ?? memberDisplayLabel(m.name, tc)} id={m.id} />

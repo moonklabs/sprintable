@@ -1,0 +1,10 @@
+[Unit]
+Description=Sprintable database backup (pg_dump -Fc to Cloud Storage)
+After=docker.service
+Requires=docker.service
+ConditionPathIsMountPoint=/srv/sprintable
+
+[Service]
+Type=oneshot
+ExecStart=/opt/sprintable/bin/backup.sh
+TimeoutStartSec=3600

@@ -561,6 +561,11 @@ async def test_the_logout_walk_stops_at_the_first_row_older_than_the_window():
             async with w.Session() as s:
                 return (await s.execute(select(RefreshToken.expires_at).where(RefreshToken.token_hash == hash_token(token["refresh_token"])))).scalar_one()
 
+        # story 4782 (third PR): rows made after migration 0468 carry a family and a logout closes them ALL, however old (no walk, no clock — `test_4782_session_family_realdb`). This test pins the
+        # walk's own bound, which still serves the rows from before the migration: they have no family.
+        async with w.Session() as s:
+            await s.execute(update(RefreshToken).where(RefreshToken.user_id == w.user_id).values(family_id=None))
+            await s.commit()
         a_before, b_before = await expires(a), await expires(b)
         assert (await w.client.post("/api/v2/auth/logout", json={"refresh_token": d["refresh_token"]})).status_code == 200
         assert await expires(c) <= datetime.now(timezone.utc), "the recent predecessor's window was not closed"
