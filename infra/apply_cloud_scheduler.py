@@ -245,20 +245,33 @@ def _describe(job: DesiredJob) -> str:
     return f"{job.name} [{job.http_method} {job.uri} · {job.schedule} {job.time_zone}]"
 
 
+# story 4796: the address a job may be pointed at instead of the Cloud Run status.url - the environment's own API name on the VM (env/<env>.yaml `hosts.api`)
+_API_BASE_URLS = {"dev": "https://dev-api.sprintable.ai", "prod": "https://api.sprintable.ai"}
+
+
 def main(argv: list[str] | None = None, *, run: Runner = _gcloud) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--env", required=True)
     parser.add_argument("--apply", action="store_true", help="실제로 바꾼다(기본은 dry-run)")
+    parser.add_argument(
+        "--base-url", default="",
+        help="작업 uri의 호스트를 Cloud Run status.url 대신 이 https 주소로(경로 없이) — 백엔드가 VM으로 옮겨 가는 동안(story 4796) 잡이 새 주소를 부르게. "
+             "비우면 지금까지와 같다. 인증 헤더의 원천은 그대로 실물 백엔드 서비스의 CRON_SECRET.",
+    )
     args = parser.parse_args(argv)
+    if args.base_url and args.base_url != _API_BASE_URLS.get(args.env):
+        raise SystemExit(
+            f"FAIL: --base-url은 이 환경({args.env})의 API 주소 {_API_BASE_URLS.get(args.env)} 하나만 받는다 — 작업 헤더에 CRON_SECRET이 실린다"
+        )
 
     manifest = load_manifest()
     target = manifest["environments"][args.env]
     location = target["location"]
     service = target["backend_service"]
     spec = describe_backend(run, service=service, region=location)
-    base_url = backend_url(spec, service=service)
+    base_url = args.base_url or backend_url(spec, service=service)
     bearer, source = resolve_bearer(run, spec, service=service)
-    print(f"백엔드: {service} status.url = {base_url}")
+    print(f"백엔드: {service} " + (f"--base-url = {base_url} (status.url 대신)" if args.base_url else f"status.url = {base_url}"))
     print(f"Authorization 원천: {service} CRON_SECRET ({source})")
 
     desired = desired_jobs(manifest, args.env, bearer, base_url=base_url)

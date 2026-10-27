@@ -103,6 +103,100 @@ def test_every_file_a_unit_runs_is_installed_by_bootstrap() -> None:
     assert "enable --now sprintable-deploy.timer" not in re.sub(r"(?m)^\s*#.*$|echo .*$", "", boot), "the deploy timer is enabled by hand after the database is restored"
 
 
+def test_the_runbook_puts_desired_json_in_place_and_starts_the_database_before_the_first_dump() -> None:
+    """found by the codex review: a new VM has no desired.json, and the dump step needs the database container the `--db-only` start provides"""
+    text = (_VM / "RUNBOOK.md").read_text()
+    section = text[text.index("## 7. Move the data"):text.index("## 8. ")]
+    put = section.index("gcloud storage cp gs://$DEPLOY_BUCKET/candidates/$SHA.json gs://$DEPLOY_BUCKET/desired.json")
+    db_only = section.index("deployer.py --db-only")
+    dump = section.index("dump-source.sh --host $SRC_IP --label rehearsal --upload")
+    assert put < db_only < dump, "desired.json, then the database, then the dump"
+    assert section.count("deployer.py --db-only") == 1, "started once, in step 1"
+    assert "Once per VM, before the first dump" in section
+
+
+def test_the_real_restore_command_carries_restore_wipe_because_the_rehearsal_left_tables_behind() -> None:
+    """codex: after the rehearsal the database holds tables and restore.sh refuses without RESTORE_WIPE=yes"""
+    text = (_VM / "RUNBOOK.md").read_text()
+    section = text[text.index("## 7. Move the data"):text.index("## 8. ")]
+    step5 = section[section.index("\n5. On the VM, restore"):section.index("\n6. Enable the deployer")]
+    assert "sudo env RESTORE_WIPE=yes /opt/sprintable/bin/restore.sh /srv/sprintable/import/" in step5
+    assert "sudo bash -c 'diff /srv/sprintable/import/" in step5, "the import folder is root-only and sudo closes a bare <(...) descriptor"
+    seven_a = section[section.index("7a. Rehearsal"):section.index("**The dump is taken on the VM.**")]
+    assert "steps 1, 3, 4 and 5 only" in seven_a and "not step 6" in seven_a, "a rehearsal must not start the application or the timers"
+    assert "RESTORE_WIPE" in (_VM / "bin/restore.sh").read_text()
+
+
+def test_every_gcloud_command_of_section_7_names_its_project_and_the_writers_stop_is_more_than_the_ingress_flag() -> None:
+    """codex: `export PROJECT` does not set gcloud's active project; and `--ingress internal` alone does not stop every writer"""
+    text = (_VM / "RUNBOOK.md").read_text()
+    section = text[text.index("## 7. Move the data"):text.index("## 8. ")]
+    for command in re.findall(r"`(gcloud (?:sql|run|scheduler|compute|secrets|storage)[^`]*)`", section):
+        assert "--project $PROJECT" in command, command
+    assert "gcloud storage cp /tmp/vm-bundle/desired.json gs://$DEPLOY_BUCKET/desired.json" in section, "the hand-built bundle path has its own upload"
+    step2 = section[section.index("\n2. Stop writes"):section.index("\n3. Dump and count")]
+    assert "does not stop every writer" in step2 and "front-door.sh stop" in step2
+    assert "sprintable-frontend-dev" in step2 and "sprintable-mcp-dev" in step2, "the same-project callers that write through the backend"
+    undo = step2[step2.index("Undo:"):]
+    for service in ("sprintable-backend-dev", "sprintable-frontend-dev", "sprintable-mcp-dev"):
+        assert service in undo, f"closed above, so reopened by the undo: {service}"
+    assert "--ingress all" in undo and "scheduler jobs resume" in undo
+    assert "no request other than the health check" in step2 and "cron endpoints are GET requests" in step2, "a GET can write"
+
+
+def test_section_9_names_the_real_variables_of_the_hosted_mcp_and_the_scheduler_tool() -> None:
+    """codex round 7: the hosted MCP's address is SPRINTABLE_API_URL (deploy_mcp_dev.sh, cloudbuild deploy-mcp), not `_BACKEND_URL`; the scheduler jobs need --base-url and the pipeline step would undo it"""
+    text = (_VM / "RUNBOOK.md").read_text()
+    sec = text[text.index("## 9. "):text.index("## 10. ")]
+    assert "--update-env-vars SPRINTABLE_API_URL=https://dev-api.sprintable.ai" in sec and "`_BACKEND_URL`" not in sec
+    assert "infra/apply_cloud_scheduler.py --env dev --base-url https://dev-api.sprintable.ai" in sec and "apply-cloud-scheduler" in sec
+    deploy_mcp = (_ROOT / "backend/scripts/deploy_mcp_dev.sh").read_text()
+    assert "--set-env-vars=\"MCP_TRANSPORT=http,SPRINTABLE_API_URL=${DEV_BACKEND_URL}" in deploy_mcp, "the variable the hosted MCP reads is SPRINTABLE_API_URL"
+    assert "--base-url" in (_ROOT / "infra/apply_cloud_scheduler.py").read_text()
+
+
+def test_the_rehearsal_dump_is_cleaned_up_locally_and_in_the_bucket() -> None:
+    """codex (combined review): the rehearsal dump is a copy of the whole dev database and must not stay in import/"""
+    text = (_VM / "RUNBOOK.md").read_text()
+    section = text[text.index("7a. Rehearsal"):text.index("**The dump is taken on the VM.**")]
+    assert "sudo find /srv/sprintable/import -name '*-rehearsal-*' -delete" in section
+    assert 'gcloud storage rm "gs://$BACKUPS_BUCKET/import/*-rehearsal-*" --project $PROJECT' in section, "double quotes, or the bucket variable is not expanded"
+    commands = re.findall(r"`([^`]+)`", section)
+    assert not [c for c in commands if c.startswith("sudo rm") and "*" in c], "a glob after sudo is expanded by the caller's shell, which cannot read the root-only folder"
+    assert "-final-" in section, "the real move's copies go the same way after the soak"
+
+
+def test_every_apply_cloud_scheduler_call_in_the_runbook_names_the_project_through_the_environment() -> None:
+    """codex (combined review): the tool runs gcloud without --project, so `export PROJECT` alone leaves the active project to chance"""
+    text = (_VM / "RUNBOOK.md").read_text()
+    calls = re.findall(r"(\S*\s*python3 infra/apply_cloud_scheduler\.py [^`)]*)", text)
+    assert calls, "the runbook shows the tool"
+    for call in calls:
+        assert "CLOUDSDK_CORE_PROJECT=$PROJECT python3 infra/apply_cloud_scheduler.py" in call, call
+
+
+def test_the_documented_cleanup_commands_really_delete_only_the_rehearsal_files(tmp_path: Path) -> None:
+    """codex round 9: the first version had a single-quoted variable and a glob after sudo - neither worked. Run the documented commands for real (sudo dropped, gcloud replaced by a recorder)."""
+    import subprocess
+    text = (_VM / "RUNBOOK.md").read_text()
+    section = text[text.index("7a. Rehearsal"):text.index("**The dump is taken on the VM.**")]
+    find_cmd = re.search(r"`sudo (find /srv/sprintable/import -name '\*-rehearsal-\*' -delete)`", section).group(1)
+    rm_cmd = re.search(r"`(gcloud storage rm \"[^`]+)`", section).group(1)
+    imp = tmp_path / "import"
+    imp.mkdir()
+    for name in ("dev-rehearsal-1-9.dump", "dev-rehearsal-1-9.dump.sha256", "dev-final-1-9.dump"):
+        (imp / name).write_text("x")
+    subprocess.run(["bash", "-c", find_cmd.replace("/srv/sprintable/import", str(imp))], check=True, timeout=30)
+    assert sorted(f.name for f in imp.iterdir()) == ["dev-final-1-9.dump"], "only the rehearsal files go"
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "gcloud").write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$GCLOUD_ARGS"\n')
+    (fake / "gcloud").chmod(0o755)
+    args = tmp_path / "args.txt"
+    subprocess.run(["bash", "-c", rm_cmd], check=True, timeout=30, env={"PATH": f"{fake}:/usr/bin:/bin", "BACKUPS_BUCKET": "bkt-1", "PROJECT": "proj-1", "GCLOUD_ARGS": str(args), "HOME": str(tmp_path)})
+    assert args.read_text().splitlines() == ["storage", "rm", "gs://bkt-1/import/*-rehearsal-*", "--project", "proj-1"], "the bucket variable is expanded, the star reaches gcloud"
+
+
 def test_the_runbook_creates_the_database_password_without_a_line_ending() -> None:
     """the first dev run stored `openssl rand -hex 24`'s line ending in the secret; the command now strips it"""
     text = (_VM / "RUNBOOK.md").read_text()
@@ -116,7 +210,7 @@ def test_no_timer_that_needs_the_database_is_enabled_before_the_restore() -> Non
     for timer in ("sprintable-backup.timer", "sprintable-restore-check.timer", "sprintable-deploy.timer"):
         assert not re.search(rf"systemctl enable[^\n]*{re.escape(timer)}", code), timer
     runbook = (_VM / "RUNBOOK.md").read_text()
-    step6 = next(line for line in runbook.splitlines() if line.startswith("6. Make a sha's version the desired one"))
+    step6 = next(line for line in runbook.splitlines() if line.startswith("6. Enable the deployer"))
     for timer in ("sprintable-deploy.timer", "sprintable-backup.timer", "sprintable-restore-check.timer"):
         assert timer in step6, timer
 
@@ -386,10 +480,16 @@ def test_the_runbook_grants_exactly_the_secrets_the_declaration_reads(capsys) ->
     assert not any("PGBOUNCER" in i or "DATABASE_URL" in i for i in ids), "the VM never reads the Cloud SQL connection strings"
 
 
-def test_the_runbook_uploads_the_dump_with_its_checksum_because_restore_demands_it() -> None:
+def test_the_dump_comes_with_its_checksum_because_restore_demands_it_for_a_gs_source() -> None:
+    """the dump is taken on the VM by dump-source.sh (the source database has no public address), which writes the sidecar restore.sh verifies and, with --upload, copies it all to the import folder"""
     text = (_VM / "RUNBOOK.md").read_text()
-    assert "shasum -a 256 dev.dump > dev.dump.sha256" in text and "gcloud storage cp dev.dump dev.dump.sha256" in text
+    assert "dump-source.sh --host $SRC_IP --label rehearsal --upload" in text and "gs://$BACKUPS_BUCKET/import/" in text
+    cmd = next(line for line in text.splitlines() if "gcloud secrets versions access latest --secret=DATABASE_URL_DIRECT_DEV_SPRINTABLE" in line)
+    assert re.search(r"\| gcloud compute ssh \$VM .*--ssh-flag=-T --command \"sudo /opt/sprintable/bin/dump-source\.sh ", cmd), "the URL travels on a pipe, into ssh without a terminal"
+    assert "cloud-sql-proxy" not in text, "the source has no public address: a laptop can not reach it"
     assert "sha256_verify" in (_VM / "bin/restore.sh").read_text()
+    script = (_VM / "bin/dump-source.sh").read_text()
+    assert '.dump.sha256' in script and 'gcloud storage cp --quiet --no-clobber --project "$(cfg project)" "$base.dump" "$base.dump.sha256" "$base.counts.tsv" "gs://$bucket/import/"' in script
 
 
 def test_the_runbook_closes_the_cloud_run_door_with_a_flag_cloud_run_accepts() -> None:
@@ -474,3 +574,35 @@ def test_bootstrap_installs_gcloud_when_the_image_lacks_it_and_the_runbook_does_
 def test_the_runbook_tells_where_the_amd64_build_should_run() -> None:
     text = (_VM / "RUNBOOK.md").read_text()
     assert "linux/amd64" in text and "Apple-silicon" in text and "Cloud Shell" in text and "image_summary.digest" in text
+
+
+def test_phase_1_waits_for_public_dns_before_the_front_door_asks_for_a_certificate() -> None:
+    """codex round 10: Caddy's certificate check would see the old CNAME if it starts before the resolvers agree"""
+    text = (_VM / "RUNBOOK.md").read_text()
+    phase1 = text[text.index("**Phase 1"):text.index("**Phase 2")]
+    assert "dig +short dev-api.sprintable.ai @1.1.1.1" in phase1 and "dig +short dev-api.sprintable.ai @8.8.8.8" in phase1
+    assert phase1.index("@8.8.8.8") < phase1.index("front-door.sh passthrough"), "the wait comes before the front door starts"
+
+
+def test_the_support_gateway_is_closed_for_the_dump_and_reopened_and_retargeted_afterwards() -> None:
+    """codex round 10: support-gateway-dev mounts the Cloud SQL instance and posts to the backend from the same project"""
+    text = (_VM / "RUNBOOK.md").read_text()
+    phase2 = text[text.index("**Phase 2"):text.index("**Phase 3")]
+    phase3 = text[text.index("**Phase 3"):text.index("## 8.")]
+    assert "SUPPORT_GATEWAY_BACKEND_ESCALATION_EVENTS_URL" in phase2, "listed among the guests that carry the backend address"
+    stop = phase3[phase3.index("1. **Stop the writers"):phase3.index("2. `sudo docker stop")]
+    assert "support-gateway-dev" in stop and "--ingress internal" in stop
+    success = phase3[phase3.index("5. Checks from inside"):phase3.index("6. The scheduler jobs")]
+    assert "support-gateway-dev" in success and "--ingress all" in success
+    undo = phase3[phase3.index("**Undo (before"):]
+    assert "support-gateway-dev" in undo
+
+
+def test_every_front_door_command_in_the_runbook_uses_the_installed_path() -> None:
+    """codex round 12: bootstrap installs into /opt/sprintable/bin without adding it to PATH; a bare `front-door.sh stop` is «command not found» and the front door keeps forwarding writes"""
+    text = (_VM / "RUNBOOK.md").read_text()
+    calls = re.findall(r"(\S*)front-door\.sh (stop|status|passthrough)", text)
+    assert len(calls) >= 4, calls
+    for prefix, _ in calls:
+        assert prefix == "/opt/sprintable/bin/", prefix
+

@@ -5,7 +5,7 @@
 # Next.js type check (build 844cd9a1, INTERNAL_ERROR on every step) — a dead worker ignores both `allowFailure` and step timeouts. Here the worst case is this build failing, on its own worker.
 #
 # Steps: resolve the backend image digest of this sha → build and push frontend-vm (deploy/vm/bin/build-frontend-vm.sh) → pack the bundle and upload it.
-# Uploads gs://<deploy bucket>/bundles/<sha>.tgz and candidates/<sha>.json. It never writes desired.json (RUNBOOK §7 step 6 does, by hand).
+# Uploads gs://<deploy bucket>/bundles/<sha>.tgz and candidates/<sha>.json. It never writes desired.json (RUNBOOK §7 step 1 does, by hand).
 substitutions:
   _AR_REGION: asia-northeast3
   _AR_REPO: sprintable
@@ -115,7 +115,7 @@ steps:
         frontend="$$(cat "$$out/frontend-image.txt")"
         backend="$$(cat "$$out/backend-image.txt")"
         python3 deploy/vm/bin/make_bundle.py --sha "${COMMIT_SHA}" --backend-image "$$backend" --frontend-image "$$frontend" --out "$$out/bundle"
-        # the bundle first; then `candidates/<sha>.json` — the desired.json this sha WOULD have, at a path the VM's deployer never reads (RUNBOOK §7 step 6 copies it to desired.json)
+        # the bundle first; then `candidates/<sha>.json` — the desired.json this sha WOULD have, at a path the VM's deployer never reads (RUNBOOK §7 step 1 copies it to desired.json)
         gcloud storage cp "$$out/bundle/bundles/${COMMIT_SHA}.tgz" "gs://${_VM_DEPLOY_BUCKET}/bundles/${COMMIT_SHA}.tgz"
         gcloud storage cp "$$out/bundle/desired.json" "gs://${_VM_DEPLOY_BUCKET}/candidates/${COMMIT_SHA}.json"
         echo "bundle-vm: gs://${_VM_DEPLOY_BUCKET}/bundles/${COMMIT_SHA}.tgz (+ candidates/${COMMIT_SHA}.json); desired.json untouched"
