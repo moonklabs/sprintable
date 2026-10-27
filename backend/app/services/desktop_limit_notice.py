@@ -733,8 +733,9 @@ async def _lifted_candidates(db: AsyncSession, setup: DesktopSetup) -> list[Reci
             people[setup.confirmed_by] = member_id
     from app.services.remote_control import owner_people
 
-    for user_id, member_id in (await owner_people(db, setup.org_id)).items():  # story 4781 AC1: an owner told «stopped» because no phone was paired keeps the promise if a phone is paired before the limit lifts
-        people.setdefault(user_id, member_id)
+    for user_id, member_id in (await owner_people(db, setup.org_id)).items():  # story 4781 AC1: an owner told «stopped» because no phone was paired keeps the promise if a phone is paired before the limit lifts —
+        if user_id not in people and setup.id in await _promised_setups(setup.org_id, user_id):  # …but only for the setups the promise was made for: an unrelated setup's lift is not this owner's to act on (codex)
+            people[user_id] = member_id
     return await _with_locales(db, setup.org_id, people)
 
 

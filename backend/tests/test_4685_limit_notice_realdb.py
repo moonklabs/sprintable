@@ -784,3 +784,40 @@ async def test_36_the_owner_is_told_the_count_of_a_snapshot_on_a_computer_someon
         assert mine["title"] == f"{mine['agent_name']} 외 1개 · 한도로 쉬는 중", "the owner's notice counts both sessions of the computer someone else connected"
         (theirs,) = await _notices(STOOD, PLAIN_TM)
         assert theirs["title"].endswith("외 1개 · 한도로 쉬는 중")
+
+
+async def test_37_an_unrelated_paired_setups_lift_does_not_touch_an_owners_promise_for_another_setup(world):
+    """codex 4781 AC1 (P1): the owner was told about the UNPAIRED setup u; a different, PAIRED setup p comes back first — that is not the owner's to act on, and u still standing keeps the owner's «working again» line until u is back"""
+    await _second_person()
+    async with _client() as c:
+        u, p = await _device(c, "d4781 mac o9"), await _device(c, "d4781 mac o10")
+        await _sql(f"UPDATE desktop_setups SET confirmed_by = '{PLAIN_USER}' WHERE id IN ('{u['setup_id']}','{p['setup_id']}')")
+        await _pair(p["setup_id"], PLAIN_TM)
+        au, ap = u["agents"][0]["member_id"], p["agents"][0]["member_id"]
+        await _report(c, u, au, "working", 1)
+        await _report(c, p, ap, "working", 2)
+        await _report(c, u, au, "waiting_input", 3, limit=LOOKS)  # owner + plain are told about u
+        await _report(c, p, ap, "waiting_input", 4, limit=LOOKS)  # only plain (the phone) about p
+        assert len(await _notices(STOOD, OWNER_TM)) == 1
+        await _report(c, p, ap, "working", 5)  # p is back: nothing for the owner
+        assert await _notices(LIFTED, OWNER_TM) == [], "an unrelated paired setup coming back is not the owner's line"
+        await _report(c, u, au, "working", 6)
+        assert len(await _notices(LIFTED, OWNER_TM)) == 1, "the owner's line comes when THEIR setup is back"
+
+
+async def test_38_an_unrelated_setups_lift_must_not_make_a_later_ended_session_of_the_owners_own_setup_say_working_again(world):
+    """codex 4781 AC1 (the P1's second half): if the unrelated paired setup's lift marked the owner's open notice «back», the owner's own session ending afterwards (it was never working again) would be told as «working
+    again» — a false line"""
+    await _second_person()
+    async with _client() as c:
+        u, p = await _device(c, "d4781 mac o11"), await _device(c, "d4781 mac o12")
+        await _sql(f"UPDATE desktop_setups SET confirmed_by = '{PLAIN_USER}' WHERE id IN ('{u['setup_id']}','{p['setup_id']}')")
+        await _pair(p["setup_id"], PLAIN_TM)
+        au, ap = u["agents"][0]["member_id"], p["agents"][0]["member_id"]
+        await _report(c, u, au, "working", 1)
+        await _report(c, p, ap, "working", 2)
+        await _report(c, u, au, "waiting_input", 3, limit=LOOKS)
+        await _report(c, p, ap, "waiting_input", 4, limit=LOOKS)
+        await _report(c, p, ap, "working", 5)  # the paired setup is back
+        await _report(c, u, au, "stopped", 6)  # the owner's own session ends: it never worked again
+        assert await _notices(LIFTED, OWNER_TM) == [], "an ended session is not «working again» — and the paired setup's lift did not make it so"
