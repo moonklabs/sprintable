@@ -262,7 +262,7 @@ def test_the_runbook_says_how_to_undo_phase_3_and_stops_the_front_door_before_th
     undo = p3[p3.index("**Undo"):]
     assert undo.index("systemctl disable --now sprintable-deploy.timer") < undo.index("systemctl stop sprintable-deploy.service") < undo.index("docker stop sprintable-caddy-1") < undo.index("front-door.sh passthrough"), \
         "the deploy timer and a running deploy first, then the stack, and only then can the front door start"
-    assert "--ingress all` (backend, `sprintable-frontend-dev`, `sprintable-mcp-dev`)" in undo
+    assert "--ingress all` (backend, `sprintable-frontend-dev`, `sprintable-mcp-dev`, `support-gateway-dev`)" in undo
 
 
 @pytest.mark.parametrize("env_name", [".*", "dev|prod", "[a-z]+", "d.v"])
