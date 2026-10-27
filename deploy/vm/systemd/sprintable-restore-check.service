@@ -1,0 +1,11 @@
+[Unit]
+Description=Restore the newest Sprintable backup into a scratch database and time it
+After=docker.service
+Requires=docker.service
+ConditionPathIsMountPoint=/srv/sprintable
+
+[Service]
+Type=oneshot
+ExecStart=/opt/sprintable/bin/restore-check.sh
+TimeoutStartSec=7200
+Nice=10

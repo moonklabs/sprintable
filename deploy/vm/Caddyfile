@@ -1,0 +1,23 @@
+# story 4796 — front door. Certificates are issued and renewed by Caddy itself (ports 80/443 must reach it).
+# Caddy overwrites any X-Forwarded-For a client sends (no trusted proxies are configured), so the backend's TRUST_FORWARDED_FOR sees the real peer.
+# The browser-facing API/MCP/realtime hosts are DNS-only (not behind the Cloudflare proxy) because long-lived SSE is buffered there (design doc §front door).
+{
+	email {$ACME_EMAIL}
+	servers {
+		protocols h1 h2
+	}
+}
+
+{$API_HOST}, {$REALTIME_HOST} {
+	# no `encode`: compressing would hold SSE frames back. flush_interval -1 sends every chunk as it arrives.
+	reverse_proxy backend:8000 {
+		flush_interval -1
+	}
+}
+
+{$APP_HOST} {
+	encode zstd gzip
+	reverse_proxy frontend:3000 {
+		flush_interval -1
+	}
+}
