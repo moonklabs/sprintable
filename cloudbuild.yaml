@@ -32,7 +32,8 @@ substitutions:
   # ENV_VARS에 안 실린다(REDIS_URL과 동일 이중가드 — 여기 값이 남아 있어도 안전) + 라우터
   # 자체의 _reject_prod() 가드까지 삼중.
   _ADMIN_OPERATOR_AUDIENCE: https://sprintable-backend-dev-57iommnikq-du.a.run.app
-  _ADMIN_OPERATOR_ALLOWLIST: sprintable-admin-web@sprintable-494803.iam.gserviceaccount.com
+  # 4798 AC15: the dev admin screen runs as its own account; the dev backend accepts that one address (a single value: a comma list does not survive this pipeline).
+  _ADMIN_OPERATOR_ALLOWLIST: run-admin-ui-dev@sprintable-494803.iam.gserviceaccount.com
   # story #2887(BE 아바타 업로드) — dev 버킷(sprintable-avatars-dev, public-read·uniform
   # bucket-level access·cloudrun-runtime-dev=objectAdmin — 페드루 확定 2026-08-21).
   # ⛔story #3117(2026-08-26, prod 실사고 — 선생님 아바타 업로드 503) 후속: 당시 "prod 버킷

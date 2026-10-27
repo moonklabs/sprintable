@@ -197,6 +197,13 @@ def test_the_documented_cleanup_commands_really_delete_only_the_rehearsal_files(
     assert args.read_text().splitlines() == ["storage", "rm", "gs://bkt-1/import/*-rehearsal-*", "--project", "proj-1"], "the bucket variable is expanded, the star reaches gcloud"
 
 
+def test_the_runbook_creates_the_database_password_without_a_line_ending() -> None:
+    """the first dev run stored `openssl rand -hex 24`'s line ending in the secret; the command now strips it"""
+    text = (_VM / "RUNBOOK.md").read_text()
+    assert "openssl rand -hex 24 | tr -d '\\n' | gcloud secrets create DB_PASSWORD_VM_DEV" in text
+    assert "openssl rand -hex 24 | gcloud secrets create" not in text
+
+
 def test_no_timer_that_needs_the_database_is_enabled_before_the_restore() -> None:
     """a backup run before the restore finds no database and fails every night (the first dev VM found this); the timers are enabled with the deploy timer, RUNBOOK §7 step 6"""
     code = re.sub(r"(?m)^\s*#.*$|echo .*$", "", (_VM / "bin/bootstrap.sh").read_text())

@@ -67,9 +67,9 @@ Cloud Build's service account additionally needs `roles/storage.objectAdmin` on 
 ## 3. Database password (new, VM only)
 
 ```bash
-openssl rand -hex 24 | gcloud secrets create DB_PASSWORD_VM_DEV --project $PROJECT --data-file=-
+openssl rand -hex 24 | tr -d '\n' | gcloud secrets create DB_PASSWORD_VM_DEV --project $PROJECT --data-file=-
 ```
-Hex only: the password is placed inside a connection URL and the tooling refuses anything else. The value is used the first time the database folder is created;
+Hex only, no line ending (`tr -d '\n'`): the password is placed inside a connection URL and the tooling refuses anything else. (The deployer takes off ONE trailing line ending, because the first dev run showed the unstripped form is easy to create — `openssl` ends its output with one; a value with more than that, or a space, is still refused.) The value is used the first time the database folder is created;
 after that, changing the secret does **not** change the database (rotate with `ALTER ROLE` first, then the secret).
 Undo: `gcloud secrets delete DB_PASSWORD_VM_DEV`.
 
