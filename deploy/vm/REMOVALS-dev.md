@@ -37,9 +37,9 @@ Names come from the pipeline: `sprintable-backend-dev`, `sprintable-frontend-dev
    gcloud run services describe sprintable-backend-dev --project $PROJECT --region $REGION --format='value(spec.template.spec.containers[0].image)' | tee backend-dev.image
    ```
    The exported definition carries the **image by digest**; the image must still exist in Artifact Registry for the undo (the registry's cleanup policy keeps images in use — after the delete they are no longer «in use», so do the undo within the soak-of-the-removal days, not weeks).
-3. Delete:
+3. Delete — one chained line (each command takes one service, and the second is not run if the first failed):
    ```
-   for s in sprintable-backend-dev sprintable-frontend-dev; do gcloud run services delete "$s" --project "${PROJECT:?}" --region "${REGION:?}" --quiet; done
+   gcloud run services delete sprintable-backend-dev --project "${PROJECT:?}" --region "${REGION:?}" --quiet && gcloud run services delete sprintable-frontend-dev --project "${PROJECT:?}" --region "${REGION:?}" --quiet
    ```
 4. Check: `gcloud run services list --project $PROJECT --region $REGION --format='value(metadata.name)'` no longer lists them; `curl -s -o /dev/null -w '%{http_code}\n' https://dev-api.sprintable.ai/api/v2/health` still `200` and the dev app loads.
 5. **Undo:** `for s in sprintable-backend-dev sprintable-frontend-dev; do gcloud run services replace $s.yaml --project $PROJECT --region $REGION && gcloud run services set-iam-policy $s $s.iam.json --project $PROJECT --region $REGION; done` — the services come back on the old image and settings with the same addresses (a Cloud Run address derives from the service name and the project) and the public door open again. They serve nothing until the pass-through or DNS points at them (RUNBOOK §7c undo), and the database they would use is the one behind them in R5 — so this undo is only meaningful while Cloud SQL still exists.
@@ -48,15 +48,15 @@ Jobs that belong with these two and with Cloud SQL (R5): `sprintable-migrate-dev
 
 ## R2. Redis dev
 
-1. Find it (read only): `gcloud redis instances list --project $PROJECT --region $REGION --format='table(name,tier,memorySizeGb,host,state)' --filter='name~dev'` → one line; `REDIS=<its short name>`.
-2. Nothing uses it: the VM states no Redis (`deploy/vm/env/dev.yaml`: `REDIS_URL` is declared absent, every `*_REDIS_*` switch is `false`), the dev pipeline passes no `REDIS_URL` (`_REDIS_URL: ''`). Check the leftovers: the host printed in step 1 must not appear in any dev Cloud Run service or job — `H=$(gcloud redis instances describe "${REDIS:?}" --project $PROJECT --region $REGION --format='value(host)'); : "${H:?no host}"; for r in services jobs; do for n in $(gcloud run $r list --project $PROJECT --region $REGION --format='value(metadata.name)'); do if gcloud run $r describe $n --project $PROJECT --region $REGION --format=json | grep -q "$H"; then echo "STILL USED: $r $n"; fi; done; done` prints nothing. (Secret values are not read by this check; a secret that holds the address is a leftover, not a user.)
+1. Find it (read only): `gcloud redis instances list --project $PROJECT --region $REGION --format='table(name,tier,memorySizeGb,host,state)' --filter='name~dev'` → exactly one line, then take its name — and stop if it is not exactly one: `REDIS=$(gcloud redis instances list --project $PROJECT --region $REGION --filter='name~dev' --format='value(name.basename())'); [ -n "$REDIS" ] && [ "$(echo "$REDIS" | wc -l)" = 1 ] && echo "$REDIS"`.
+2. What uses it. Not the VM (`deploy/vm/env/dev.yaml`: `REDIS_URL` is declared absent, every `*_REDIS_*` switch is `false`). **The Cloud Run backend did:** the dev workflow writes `redis_url=redis://10.164.120.243:6379` (`.github/workflows/cloud-build.yml`, dev branch) and the `deploy-backend` step passes `REDIS_URL` and `RATE_LIMIT_BACKEND=redis` to it for every non-prod deploy. So this row follows R1 **and** gate B — a dev deploy that still ran `deploy-backend` would bring the service back pointed at a deleted address. Check the leftovers: the host printed in step 1 must not appear in any dev Cloud Run service or job — `H=$(gcloud redis instances describe "${REDIS:?}" --project $PROJECT --region $REGION --format='value(host)'); : "${H:?no host}"; for r in services jobs; do for n in $(gcloud run $r list --project $PROJECT --region $REGION --format='value(metadata.name)'); do if gcloud run $r describe $n --project $PROJECT --region $REGION --format=json | grep -q "$H"; then echo "STILL USED: $r $n"; fi; done; done` prints nothing. (Secret values are not read by this check; a secret that holds the address is a leftover, not a user.)
 3. Capture: `gcloud redis instances describe "$REDIS" --project $PROJECT --region $REGION --format=json > redis-dev.json` (tier, size, version, network, auth flag).
 4. Delete: `gcloud redis instances delete "${REDIS:?}" --project "${PROJECT:?}" --region "${REGION:?}" --quiet`.
-5. **Undo (a cache only — its content is not restored):** `gcloud redis instances create $REDIS --project $PROJECT --region $REGION --tier $(jq -r .tier redis-dev.json) --size $(jq -r .memorySizeGb redis-dev.json) --redis-version $(jq -r .redisVersion redis-dev.json | tr 'A-Z' 'a-z') --network $(jq -r .authorizedNetwork redis-dev.json)` (add `--enable-auth` if `redis-dev.json` has `"authEnabled": true`); the new instance has a new address.
+5. **Undo (a cache only — its content is not restored):** `gcloud redis instances create $REDIS --project $PROJECT --region $REGION --tier $(jq -r .tier redis-dev.json) --size $(jq -r .memorySizeGb redis-dev.json) --redis-version $(jq -r .redisVersion redis-dev.json | tr 'A-Z' 'a-z') --network $(jq -r .authorizedNetwork redis-dev.json)` (add `--enable-auth` if `redis-dev.json` has `"authEnabled": true`). **The new instance gets a new address** unless the old one is free and reserved — the old one is `redis://10.164.120.243:6379` in the workflow line above, so the undo is only whole together with R1's undo **and** that line (and the services' `REDIS_URL`) being set to the new `host`.
 
 ## R3. pgbouncer dev VM
 
-1. Find it (read only): `gcloud compute instances list --project $PROJECT --filter='name~pgbouncer AND name~dev' --format='table(name,zone.basename(),machineType.basename(),networkInterfaces[0].networkIP,status)'` → one line (the dev pooler; the repo's pooler script for prod is a different, idle set named `pgbouncer-prod-*` and is not in this filter). `PGB=<name>`, `PGB_ZONE=<zone>`.
+1. Find it (read only): `gcloud compute instances list --project $PROJECT --filter='name~pgbouncer AND name~dev' --format='table(name,zone.basename(),machineType.basename(),networkInterfaces[0].networkIP,status)'` → one line (the dev pooler; the repo's pooler script for prod is a different, idle set named `pgbouncer-prod-*` and is not in this filter). Take the name and zone the same way and stop unless exactly one: `L=$(gcloud compute instances list --project $PROJECT --filter='name~pgbouncer AND name~dev' --format='value(name,zone.basename())'); [ -n "$L" ] && [ "$(echo "$L" | wc -l)" = 1 ] && PGB=$(echo "$L" | cut -f1) && PGB_ZONE=$(echo "$L" | cut -f2) && echo "$PGB $PGB_ZONE"`.
 2. Nothing uses it: the only consumer was the Cloud Run backend (secret `DATABASE_URL_DEV_PGBOUNCER_SPRINTABLE`), deleted in R1; the VM states `DB_PGBOUNCER: "false"` and talks to its own database. Check: no running dev Cloud Run service or job still has the VM's address (`gcloud compute instances describe "$PGB" --zone "$PGB_ZONE" --project $PROJECT --format='value(networkInterfaces[0].networkIP)'` → `A`; the loop of R2 step 2 with `A` in place of `H` prints nothing).
 3. Capture — the definition, the startup script(s) from the metadata (the pooler reads its secret at boot; no secret value is in them), and a snapshot of the **boot disk found in the definition** (its name is not necessarily the VM's):
    ```
@@ -95,6 +95,7 @@ gcloud compute url-maps list --project $PROJECT --filter='name~realtime' --forma
 gcloud compute backend-services list --project $PROJECT --filter='name~realtime' --format='value(name)'
 gcloud compute health-checks list --project $PROJECT --filter='name~realtime' --format='value(name)'
 gcloud compute addresses list --project $PROJECT --filter='name~realtime' --format='value(name,address)'
+gcloud compute firewall-rules list --project $PROJECT --filter='name~realtime' --format='value(name)'
 ```
 
 All empty = done. **If a line prints something, do not delete it from this sheet:** report the name; it is a leftover of 4786 and is removed in the order forwarding rule → target proxy → URL map → backend service → health check → instance group → template → address, each captured first like the rows above. **Never delete `sprintable-vm-dev-ip`** (the VM's own address, matched by `~realtime` only if someone renamed it) and **do not touch the `dev-realtime` DNS record** the PO pointed at the VM.
@@ -110,13 +111,14 @@ The instance holds three databases: `postgres`, `sprintable` (now on the VM, res
    Expected before the delete: only `jobs sprintable-migrate-dev`, `jobs sprintable-verify-oneoff` (and, if gate 0 has not retired it, `services support-gateway-dev` and `jobs sprintable-support-gateway-migrate-dev` — then gate 0 is not done: stop). The two jobs are deleted below, after the exports.
 2. Capture — what the undo needs: **an on-demand backup and one export per database**, then check each object has a size:
    ```
-   INSTANCE=<the name gcloud sql instances list prints for the dev instance: sprintable-dev>
-   gcloud sql backups create --instance "${INSTANCE:?}" --project $PROJECT
-   for db in postgres sprintable support_gateway; do
-     gcloud sql export sql "$INSTANCE" "gs://${BACKUPS_BUCKET:?}/cloudsql-final/$db.sql.gz" --database "$db" --project $PROJECT
-   done
-   gcloud storage ls -l "gs://$BACKUPS_BUCKET/cloudsql-final/"
+   INSTANCE=sprintable-dev          # the pipeline's name: sprintable-${_DEPLOY_ENV} (cloudbuild.yaml, deploy-support-gateway)
+   gcloud sql instances list --project $PROJECT --format='value(name)' | grep -x "${INSTANCE:?}"   # must print the name; nothing printed = stop
+   STAMP=$(date -u +%Y%m%dT%H%M%SZ); echo "$STAMP"   # a fresh path per attempt: an older object can not pass for this one
+   gcloud sql backups create --instance "$INSTANCE" --project $PROJECT
+   OK=1; for db in postgres sprintable support_gateway; do gcloud sql export sql "$INSTANCE" "gs://${BACKUPS_BUCKET:?}/cloudsql-final/$STAMP/$db.sql.gz" --database "$db" --project $PROJECT || OK=0; done; [ "$OK" = 1 ] && echo EXPORTS-OK
+   gcloud storage ls -l "gs://$BACKUPS_BUCKET/cloudsql-final/$STAMP/"
    ```
+   **Go on only if `EXPORTS-OK` was printed and the listing shows three objects with a size.** (The backup create has no «ok» of its own: `gcloud sql backups list --instance "$INSTANCE" --project $PROJECT --limit 1` shows it `SUCCESSFUL`.)
    (The instance's own service account needs write on the bucket; `gcloud sql instances describe "$INSTANCE" --project $PROJECT --format='value(serviceAccountEmailAddress)'` is the account to grant.) Save the definitions: `gcloud sql instances describe "$INSTANCE" --project $PROJECT --format=json > sql-dev.json`, and the two jobs like R1: `for j in sprintable-migrate-dev sprintable-verify-oneoff; do gcloud run jobs describe "$j" --project $PROJECT --region $REGION --format=export > "$j.yaml"; done`.
 3. Deletion protection, if the instance has it (`jq .settings.deletionProtectionEnabled sql-dev.json` prints `true`): `gcloud sql instances patch "$INSTANCE" --project $PROJECT --no-deletion-protection` (undo: `--deletion-protection`).
 4. Delete the two jobs, then the instance — **one chained line, so a failed job delete stops it before the instance is touched** (these commands take one resource each):
@@ -127,10 +129,10 @@ The instance holds three databases: `postgres`, `sprintable` (now on the VM, res
    ```
    gcloud sql instances create "$INSTANCE" --project $PROJECT --region "$(jq -r .region sql-dev.json)" --database-version "$(jq -r .databaseVersion sql-dev.json)" --tier "$(jq -r .settings.tier sql-dev.json)" --network "$(jq -r .settings.ipConfiguration.privateNetwork sql-dev.json)" --no-assign-ip
    for db in sprintable support_gateway; do gcloud sql databases create "$db" --instance "$INSTANCE" --project $PROJECT; done
-   gcloud sql users create support_gw --instance "$INSTANCE" --project $PROJECT --password "<the password held by the secret behind SUPPORT_GATEWAY_DATABASE_URL_dev — the PO's hand>"
-   for db in postgres sprintable support_gateway; do gcloud sql import sql "$INSTANCE" "gs://$BACKUPS_BUCKET/cloudsql-final/$db.sql.gz" --database "$db" --project $PROJECT; done
+   gcloud sql users create support_gw --instance "$INSTANCE" --project $PROJECT --password "${GW_PASSWORD:?set by the PO from the secret behind SUPPORT_GATEWAY_DATABASE_URL_dev, with the PO's own account — never written into a file or this sheet}"
+   for db in postgres sprintable support_gateway; do gcloud sql import sql "$INSTANCE" "gs://$BACKUPS_BUCKET/cloudsql-final/${STAMP:?the stamp of the export}/$db.sql.gz" --database "$db" --project $PROJECT; done
    ```
-   Add `--database-flags` from `settings.databaseFlags` of `sql-dev.json` if it lists any. The jobs come back with `gcloud run jobs replace <job>.yaml --project $PROJECT --region $REGION`.
+   Add `--database-flags` from `settings.databaseFlags` of `sql-dev.json` if it lists any. The jobs come back with `for j in sprintable-migrate-dev sprintable-verify-oneoff; do gcloud run jobs replace "$j.yaml" --project $PROJECT --region $REGION; done`. **The services that connected to the old private address need the new one:** a new version of each secret that holds a connection URL to this instance — `SUPPORT_GATEWAY_DATABASE_URL_dev`, `DATABASE_URL_DIRECT_DEV_SPRINTABLE`, `DATABASE_URL_DEV_PGBOUNCER_SPRINTABLE` — added by the PO (`… | gcloud secrets versions add <name> --data-file=-`, the URL on standard input), then the dependent services redeployed. Without that the restored instance exists but nothing finds it.
 
 ## After the sheet
 

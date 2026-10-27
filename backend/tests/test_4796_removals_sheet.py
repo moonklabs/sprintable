@@ -92,8 +92,15 @@ def test_realtime_is_only_checked_because_the_pipeline_says_it_was_retired_by_ha
     assert "Never delete `sprintable-vm-dev-ip`" in r4 and "`dev-realtime`" in r4
 
 
-def test_redis_is_unused_on_the_dev_side_as_the_row_says() -> None:
-    assert "_REDIS_URL: ''" in CLOUDBUILD
+def test_redis_has_a_user_the_sheet_names_the_cloud_run_backend_that_the_dev_pipeline_points_at_it() -> None:
+    """The dev workflow hands the backend a Redis address and `deploy-backend` passes it on for every non-prod deploy: so R2 follows R1 and gate B, and the undo names that line."""
+    workflow = (_ROOT / ".github/workflows/cloud-build.yml").read_text()
+    m = re.search(r'echo "redis_url=(redis://[\d.]+:\d+)" >> "\$GITHUB_OUTPUT"', workflow)
+    assert m, "the dev workflow no longer writes a Redis address: R2's text about it is stale"
+    step2 = _rows()["R2"].split("3. Capture")[0]
+    assert m.group(1) in step2 and "gate B" in step2 and m.group(1) in _rows()["R2"].split("5. **Undo")[1]
+    deploy_backend = _step("deploy-backend")
+    assert 'if [ "${_DEPLOY_ENV}" != "prod" ]' in deploy_backend and "REDIS_URL=${_REDIS_URL}" in deploy_backend
     env = (_ROOT / "deploy/vm/env/dev.yaml").read_text()
     assert "REDIS_URL: \"no Redis on the VM" in env
     assert len(re.findall(r'_REDIS_\w*ENABLED: "false"|REDIS_ENABLED: "false"|REDIS_CONSUME_ENABLED: "false"', env)) >= 3
@@ -103,11 +110,11 @@ def test_every_delete_line_in_a_code_block_is_guarded_and_never_names_what_must_
     fenced = [ln.strip() for b in _fenced(SHEET) for ln in b.splitlines() if re.search(r"gcloud .* delete\b", ln)]
     inline = re.findall(r"`(gcloud [^`]*\bdelete\b[^`]*)`", SHEET)
     deletes = fenced + [c for c in inline if "snapshots delete" not in c and c not in fenced]
-    assert len(deletes) == 4, deletes  # R1 (a loop: the command takes one service), R2, R3, and R5's one chained line (jobs, then the instance); the snapshot's delete is part of an undo note
+    assert len(deletes) == 4, deletes  # R1's chained line, R5's chained line, R2 and R3 inline; the snapshot's delete is part of an undo note
     for ln in deletes:
         assert ln.count('"${PROJECT:?}"') == ln.count("gcloud "), f"every gcloud call in the line is guarded: {ln}"
         assert ("${REGION:?}" in ln or "${PGB_ZONE:?}" in ln or "gcloud sql instances delete" in ln), ln
-        assert not re.search(r"delete (\S+) (?!--)\S+", re.sub(r'"[^"]*"', '"x"', ln)) or "for s in" in ln, f"one resource per delete command: {ln}"
+        assert not re.search(r"delete (\S+) (?!--)\S+", re.sub(r'"[^"]*"', '"x"', ln)), f"one resource per delete command: {ln}"
         for stays in ("sprintable-mcp-dev", "office-converter", "support-gateway", "sprintable-vm-dev", "pgbouncer-nat", "sprintable-vm-dev-ip"):
             assert stays not in ln, (stays, ln)
     named = {"gcloud redis instances delete": '"${REDIS:?}"', "gcloud compute instances delete": '"${PGB:?}"', "gcloud sql instances delete": '"${INSTANCE:?}"'}
@@ -138,7 +145,7 @@ def test_the_sheet_reads_no_secret_value_and_invents_no_resource_name() -> None:
 def test_the_cloud_sql_exports_are_kept_beyond_the_backup_lifecycle() -> None:
     lifecycle = RUNBOOK.split("lifecycle.json <<'EOF'")[1].split("EOF")[0]
     assert '"matchesPrefix":["db/"]' in lifecycle and '"matchesPrefix":["status/"]' in lifecycle and "cloudsql-final" not in lifecycle
-    assert "gs://${BACKUPS_BUCKET:?}/cloudsql-final/$db.sql.gz" in SHEET
+    assert "gs://${BACKUPS_BUCKET:?}/cloudsql-final/$STAMP/$db.sql.gz" in SHEET
 
 
 # ── the dependents loops of the sheet, run for real against a fake gcloud ───────────────────────────────────────────────────────────────────────
@@ -216,7 +223,7 @@ def test_gate_b_names_the_support_gateway_steps_that_still_reach_cloud_sql() -> 
 
 def test_realtime_check_lists_the_load_balancer_front_not_only_the_back() -> None:
     r4 = _rows()["R4"]
-    for kind in ("forwarding-rules", "target-https-proxies", "target-http-proxies", "url-maps", "backend-services", "instance-groups managed", "instance-templates", "health-checks", "addresses"):
+    for kind in ("firewall-rules", "forwarding-rules", "target-https-proxies", "target-http-proxies", "url-maps", "backend-services", "instance-groups managed", "instance-templates", "health-checks", "addresses"):
         assert f"gcloud compute {kind} list" in r4, kind
 
 
@@ -265,3 +272,56 @@ def test_the_pgbouncer_capture_snapshots_the_boot_disk_of_the_definition_and_the
                  "--tags pgbouncer-dev,ssh", "--metadata-from-file ", "startup-script=md-startup-script", "enable-oslogin=md-enable-oslogin", "--no-address"):
         assert want in create, (want, create)
     assert "<" not in _fence_with("R3", "disks create"), "no placeholder is left in the undo"
+
+
+def test_the_first_row_is_one_chain_too_so_the_frontend_is_not_deleted_after_a_failed_backend_delete() -> None:
+    line = [ln for b in _fenced(_rows()["R1"]) for ln in b.splitlines() if "gcloud run services delete" in ln]
+    assert len(line) == 1
+    parts = [p.strip() for p in line[0].split(" && ")]
+    assert [p.split()[4] for p in parts] == ["sprintable-backend-dev", "sprintable-frontend-dev"]
+
+
+def test_no_code_block_of_a_removal_row_is_left_with_an_angle_bracket_placeholder() -> None:
+    for key, body in _rows().items():
+        for block in _fenced(body):
+            assert not re.search(r"<[A-Za-z][^>\n]*>", block), (key, block)
+    for c in re.findall(r"`(gcloud [^`]*\bdelete\b[^`]*)`", SHEET):
+        assert "<" not in c, c
+    for key in ("R2", "R3"):
+        assert '= 1 ] && ' in _rows()[key].split("Find it (read only)")[1].split("\n")[0], f"{key}: the name is taken only if exactly one resource matched"
+    assert 'INSTANCE=sprintable-dev' in _rows()["R5"] and 'grep -x "${INSTANCE:?}"' in _rows()["R5"]
+    assert '--password "${GW_PASSWORD:?' in _rows()["R5"], "the gateway role's password is a guarded variable the PO fills, never a literal"
+    for secret in ("SUPPORT_GATEWAY_DATABASE_URL_dev", "DATABASE_URL_DIRECT_DEV_SPRINTABLE", "DATABASE_URL_DEV_PGBOUNCER_SPRINTABLE"):
+        assert secret in _rows()["R5"].split("**The services that connected")[1]
+
+
+_FAKE_GCLOUD_SQL = r"""#!/bin/sh
+echo "gcloud $*" >> "$FAKE_LOG"
+case "$1 $2 $3" in
+  "sql instances list") echo sprintable-dev ; echo other ;;
+  "sql export sql") case "$*" in *"--database $FAKE_FAIL_DB"*) echo "export failed" >&2; exit 1 ;; esac ;;
+  "storage ls -l") echo "  1234  gs://x/y" ;;
+esac
+"""
+
+
+def _r5_export_block() -> str:
+    return _fence_with("R5", "EXPORTS-OK")
+
+
+def test_the_cloud_sql_exports_print_their_all_clear_only_when_every_database_was_exported(tmp_path: Path) -> None:
+    b = tmp_path / "bin"
+    b.mkdir()
+    g = b / "gcloud"
+    g.write_text(_FAKE_GCLOUD_SQL)
+    g.chmod(g.stat().st_mode | stat.S_IEXEC)
+    env = {**os.environ, "PATH": f"{b}:{os.environ['PATH']}", "PROJECT": "p", "BACKUPS_BUCKET": "bk", "FAKE_LOG": str(tmp_path / "log"), "FAKE_FAIL_DB": "none"}
+    ok = subprocess.run(["bash", "-c", _r5_export_block()], capture_output=True, text=True, env=env, cwd=tmp_path, timeout=30)
+    assert ok.returncode == 0 and "EXPORTS-OK" in ok.stdout, ok.stderr
+    log = (tmp_path / "log").read_text()
+    stamps = set(re.findall(r"cloudsql-final/(\d{8}T\d{6}Z)/", log))
+    assert len(stamps) == 1 and log.count("sql export sql") == 3, "one fresh path per attempt, three databases"
+    bad = subprocess.run(["bash", "-c", _r5_export_block()], capture_output=True, text=True, env={**env, "FAKE_FAIL_DB": "support_gateway"}, cwd=tmp_path, timeout=30)
+    assert "EXPORTS-OK" not in bad.stdout, "one failed export must not read as all clear"
+    wrong = subprocess.run(["bash", "-c", _r5_export_block()], capture_output=True, text=True, env={**env, "INSTANCE": "x"}, cwd=tmp_path, timeout=30)
+    assert "sprintable-dev" in wrong.stdout.splitlines()[0], "the instance name is checked against the real list first"
