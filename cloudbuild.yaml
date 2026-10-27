@@ -53,6 +53,8 @@ substitutions:
   # story 4798 — the dev attachments bucket: dev has its own (dev and prod used to share `sprintable-memo-attachments`).
   # dev names it on the backend AND the frontend (both read GCS_MEMO_ATTACHMENTS_BUCKET) and applies the attachments CORS to it; prod names nothing and keeps the code default `sprintable-memo-attachments`.
   _GCS_MEMO_ATTACHMENTS_BUCKET: sprintable-memo-attachments-dev
+  # story 4796 — the deploy bucket of the dev VM: the two build-frontend-vm / bundle-vm steps (end of this file, dev only) put the VM bundle of this sha there.
+  _VM_DEPLOY_BUCKET: sprintable-vm-dev-deploy
   # story #2771(pptx 서버 변환, doc 84ef0cb7 §7-4) — office-converter는 아래 deploy-office-
   # converter 스텝이 매 배포마다 재생성/갱신한다. **부트스트랩 완료(페드루군, 2026-08-19)**:
   # 최초 배포가 --port 누락(Gotenberg는 3000, Cloud Run 헬스체크 기본 8080)으로 Ready 실패
@@ -1210,6 +1212,91 @@ steps:
         GCP_PROJECT="${PROJECT_ID}" GCP_REGION="${_AR_REGION}" COMMIT_SHA="${COMMIT_SHA}" \
           bash backend/scripts/deploy_realtime_gce.sh dev
     waitFor: [run-migrate-job]
+
+  # ─── The dev VM's bundle (story 4796, deploy/vm/RUNBOOK.md §5) ──────────────────────────────────────────────────────────────────────────────
+  # Two steps at the very END of the build, dev only. They wait for every step above (no waitFor), so the Cloud Run deploys are finished before the VM image is built
+  # — the extra build never competes with them for the machine — and `allowFailure: true` means that if they fail the build is still a success (Cloud Run is
+  # already deployed) and the step list shows the failure. The VM is not told about anything: `desired.json` is NOT written here (RUNBOOK §7 step 6 does that,
+  # by hand, after the database is restored); the VM's deployer only ever reads `desired.json`.
+  - id: build-frontend-vm
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    allowFailure: true
+    timeout: 900s
+    env:
+      - DOCKER_BUILDKIT=1
+      # the public build values of THIS build's Cloud Run frontend (build-frontend above) — the VM image takes exactly the same ones
+      - VM_GA4_MEASUREMENT_ID=${_GA4_MEASUREMENT_ID}
+      - VM_EE_ENABLED=${_EE_ENABLED}
+      - VM_SUPPORT_WIDGET_ENABLED=${_SUPPORT_WIDGET_ENABLED}
+      - VM_SUPPORT_GATEWAY_URL=${_NEXT_PUBLIC_SUPPORT_GATEWAY_URL}
+      - VM_TOSS_CLIENT_KEY=${_TOSS_CLIENT_KEY}
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ "${_DEPLOY_ENV}" != "dev" ]; then
+          echo "skip build-frontend-vm: dev only (story 4796) — prod gets its own step at the prod cutover"
+          exit 0
+        fi
+        out=/workspace/vm-out
+        rm -rf "$$out"
+        mkdir -p "$$out"
+        repo="${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}"
+        # the backend image of THIS build, by the digest its push gave it (the docker daemon of this build holds it): a tag read from the registry later could have been moved by another or repeated build of the same sha
+        backend="$$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$$repo/backend:${COMMIT_SHA}" | grep -F "$$repo/backend@" | head -n 1 || true)"
+        if ! [[ "$${backend#*@}" =~ ^sha256:[0-9a-f]{64}$$ ]] || [ "$${backend%@*}" != "$$repo/backend" ]; then
+          echo "build-frontend-vm: no digest reference of $$repo/backend:${COMMIT_SHA} in this build: «$$backend»" >&2
+          exit 1
+        fi
+        printf '%s\n' "$$backend" > "$$out/backend-image.txt"
+        if ! python3 -c 'import yaml' 2>/dev/null; then
+          DEBIAN_FRONTEND=noninteractive apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 python3-yaml
+        fi
+        # builds (linux/amd64), checks what was baked (the VM API host in, no Cloud Run address in), pushes, and prints the digest reference as its LAST line
+        bash deploy/vm/bin/build-frontend-vm.sh dev "${COMMIT_SHA}" "$$repo/frontend-vm:${COMMIT_SHA}" --push \
+          --set "NEXT_PUBLIC_GA4_MEASUREMENT_ID=$$VM_GA4_MEASUREMENT_ID" \
+          --set "NEXT_PUBLIC_EE_ENABLED=$$VM_EE_ENABLED" \
+          --set "NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED=$$VM_SUPPORT_WIDGET_ENABLED" \
+          --set "NEXT_PUBLIC_SUPPORT_GATEWAY_URL=$$VM_SUPPORT_GATEWAY_URL" \
+          --set "NEXT_PUBLIC_TOSS_CLIENT_KEY=$$VM_TOSS_CLIENT_KEY" | tee "$$out/build.log"
+        ref="$$(tail -n 1 "$$out/build.log")"
+        if [ "$${ref%@*}" != "$$repo/frontend-vm" ] || ! [[ "$${ref#*@}" =~ ^sha256:[0-9a-f]{64}$$ ]]; then
+          echo "build-frontend-vm: the last line of the build is not a digest reference of $$repo/frontend-vm: «$$ref»" >&2
+          exit 1
+        fi
+        printf '%s\n' "$$ref" > "$$out/frontend-image.txt"
+        echo "build-frontend-vm: $$ref"
+
+  - id: bundle-vm
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    allowFailure: true
+    timeout: 120s
+    waitFor: [build-frontend-vm]
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ "${_DEPLOY_ENV}" != "dev" ]; then
+          echo "skip bundle-vm: dev only (story 4796)"
+          exit 0
+        fi
+        out=/workspace/vm-out
+        [ -s "$$out/frontend-image.txt" ] || { echo "bundle-vm: build-frontend-vm left no image — no bundle for ${COMMIT_SHA}" >&2; exit 1; }
+        [ -s "$$out/backend-image.txt" ] || { echo "bundle-vm: build-frontend-vm left no backend image — no bundle for ${COMMIT_SHA}" >&2; exit 1; }
+        frontend="$$(cat "$$out/frontend-image.txt")"
+        backend="$$(cat "$$out/backend-image.txt")"
+        python3 deploy/vm/bin/make_bundle.py --sha "${COMMIT_SHA}" --backend-image "$$backend" --frontend-image "$$frontend" --out "$$out/bundle"
+        # the bundle first; then `candidates/<sha>.json` — the desired.json this sha WOULD have, at a path the VM's deployer never reads (RUNBOOK §7 step 6 copies it to desired.json)
+        gcloud storage cp "$$out/bundle/bundles/${COMMIT_SHA}.tgz" "gs://${_VM_DEPLOY_BUCKET}/bundles/${COMMIT_SHA}.tgz"
+        gcloud storage cp "$$out/bundle/desired.json" "gs://${_VM_DEPLOY_BUCKET}/candidates/${COMMIT_SHA}.json"
+        echo "bundle-vm: gs://${_VM_DEPLOY_BUCKET}/bundles/${COMMIT_SHA}.tgz (+ candidates/${COMMIT_SHA}.json); desired.json untouched"
+
+# story 4796: the two VM steps above run after the Cloud Run deploys and may take up to 900 s + 120 s more — the build limit is stated here so they can never turn a finished deploy into a TIMEOUT.
+# (The GitHub job that submits this build waits for it and must outlive it: its `timeout-minutes` in .github/workflows/cloud-build.yml is longer than this.)
+timeout: 3000s
 
 options:
   machineType: E2_HIGHCPU_8
