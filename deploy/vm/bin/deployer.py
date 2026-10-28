@@ -511,8 +511,8 @@ class Deployer:
         env.update(renv.process_environment(services))
         return env
 
-    def _compose(self, release: Path, env: Mapping[str, str], *args: str, profile: str | None = None, timeout: float = 900, stdin: str | None = None) -> tuple[int, str]:
-        cmd = ["docker", "compose", "-f", str(release / "compose.yml"), "-f", str(self.cfg.install_dir / "runtime" / "pass-through.yml")]
+    def _compose(self, release: Path, env: Mapping[str, str], *args: str, profile: str | None = None, timeout: float = 900, stdin: str | None = None, compose_file: Path | None = None) -> tuple[int, str]:
+        cmd = ["docker", "compose", "-f", str(compose_file or release / "compose.yml"), "-f", str(self.cfg.install_dir / "runtime" / "pass-through.yml")]
         profiles = [profile] if profile else []
         if "SUPPORT_GATEWAY_IMAGE" in env and GATEWAY_PROFILE not in profiles:
             profiles.append(GATEWAY_PROFILE)  # the gateway belongs to this release: every compose call of it sees the gateway services
@@ -706,7 +706,8 @@ class Deployer:
         """a release without the gateway after one with it: compose does not remove a container of a service that is merely not part of this release — stop it"""
         if running.gateway or not previously_had_gateway:
             return
-        rc, out = self._compose(running.release, running.env, "stop", renv.GATEWAY_SERVICE, profile=GATEWAY_PROFILE, timeout=60)
+        # with the TRUSTED compose copy, not the release's own: the release that is running may be one from before the gateway existed, and its compose does not define the service ("no such service")
+        rc, out = self._compose(running.release, running.env, "stop", renv.GATEWAY_SERVICE, profile=GATEWAY_PROFILE, timeout=60, compose_file=self.cfg.trusted_compose)
         if rc != 0:
             # not best effort: a gateway that keeps running beside a release that left it out holds database connections nobody budgeted. After the swap this is a post-swap failure — the previous release
             # (which has the gateway) is put back; on the way back or in a reconcile it is reported as that step failing, and the pending marker stays so the next run tries again

@@ -44,6 +44,12 @@ class GwRunner(S.FakeRunner):
 
     def run(self, args, env, cwd=None, timeout=900, stdin=None):
         joined = " ".join(args)
+        if args[:2] == ["docker", "compose"] and "stop" in args and "support-gateway" in args:
+            # what compose does: a service the FIRST compose file does not define cannot be stopped through it
+            defined = yaml.safe_load(Path(args[args.index("-f") + 1]).read_text()).get("services", {})
+            if "support-gateway" not in defined:
+                self.calls.append({"args": list(args), "env": dict(env), "stdin": stdin})
+                return 1, "no such service: support-gateway"
         if "/healthz" in joined:
             self.calls.append({"args": list(args), "env": dict(env), "stdin": stdin})
             return (0, "") if self.gateway_ok else (1, "gateway down")
@@ -621,3 +627,50 @@ def test_a_release_whose_stamp_cannot_be_written_is_not_deployed(world) -> None:
     assert world.dep.run_once() == "failed"
     assert "compose stamp of the release cannot be written" in S._state(world, "failed.json")["detail"]
     assert not any("--wait-timeout" in c["args"] for c in world.runner.calls), "nothing was swapped"
+
+
+def test_a_gateway_is_stopped_through_the_trusted_compose_even_when_the_release_that_is_running_predates_the_gateway(world, tmp_path: Path) -> None:
+    """the release that is serving was deployed from a compose without the gateway services; a rollback to it must still be able to stop the gateway of the failed release"""
+    old = yaml.safe_load((_VM / "compose.yml").read_text())
+    for name in ("support-gateway", "support-gateway-migrate"):
+        old["services"].pop(name)
+    old_bytes = yaml.safe_dump(old).encode()
+    trusted = tmp_path / "trusted-compose.yml"
+    trusted.write_bytes(old_bytes)
+    world.cfg.trusted_compose = trusted
+    a = world.publish("a" * 40, gateway=False, bundle=S._bundle(extra={"compose.yml": old_bytes}))
+    assert world.dep.run_once() == "deployed"
+    trusted.write_bytes((_VM / "compose.yml").read_bytes())       # bootstrap installs the compose that has the gateway (and stamps the running release)
+    world.publish("b" * 40, gateway=True)
+    orig = world.runner.run
+
+    def run(args, env, **kw):
+        if env.get("BACKEND_IMAGE") == a["backend_image"] and "up" in args:
+            world.runner.gateway_ok = True
+        return orig(args, env, **kw)
+
+    world.runner.gateway_ok = False
+    world.runner.run = run
+    world.runner.calls.clear()
+    assert world.dep.run_once() == "rolled-back", "the failed gateway release is rolled back and its gateway is stopped"
+    stop = next(c for c in _compose_calls(world) if _verb(c) == "stop")
+    assert stop["args"][stop["args"].index("-f") + 1] == str(trusted), "through the compose that defines the service"
+    assert S._state(world, "current.json")["sha"] == "a" * 40
+
+
+def test_a_reconcile_into_a_release_that_predates_the_gateway_stops_the_gateway_too(world, tmp_path: Path) -> None:
+    old = yaml.safe_load((_VM / "compose.yml").read_text())
+    for name in ("support-gateway", "support-gateway-migrate"):
+        old["services"].pop(name)
+    old_bytes = yaml.safe_dump(old).encode()
+    trusted = tmp_path / "trusted-compose.yml"
+    trusted.write_bytes(old_bytes)
+    world.cfg.trusted_compose = trusted
+    world.publish("a" * 40, gateway=False, bundle=S._bundle(extra={"compose.yml": old_bytes}))
+    assert world.dep.run_once() == "deployed"
+    trusted.write_bytes((_VM / "compose.yml").read_bytes())
+    cur = S._state(world, "current.json")
+    gw = f"{S.REG}/support-gateway@{S._digest('gw')}"
+    (world.cfg.state_dir / "pending.json").write_text(json.dumps({**{k: cur[k] for k in D.STATE_KEYS}, "sha": "b" * 40, "support_gateway_image": gw, "at": 1}))
+    world.dep.run_once()
+    assert not (world.cfg.state_dir / "pending.json").exists(), "settled, not stuck on «no such service»"
