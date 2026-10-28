@@ -252,22 +252,26 @@ needs_gcloud = pytest.mark.skipif(shutil.which("gcloud") is None, reason="no gcl
 
 
 @needs_gcloud
+@pytest.mark.timeout(900)   # about seventy gcloud starts: each takes a second or more on a busy runner, so they run side by side and the test has a limit of its own
 def test_every_gcloud_command_of_the_sheet_parses_in_the_real_gcloud(tmp_path: Path) -> None:
-    """no credentials, an empty configuration directory: «no active account» = the command line is well formed; anything else is printed"""
-    cfg = tmp_path / "empty-gcloud-config"
-    cfg.mkdir()
-    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(tmp_path), "CLOUDSDK_CONFIG": str(cfg), "CLOUDSDK_CORE_DISABLE_PROMPTS": "1", "CLOUDSDK_CORE_PROJECT": "parse-only-project"}
-    bad, seen = [], set()
+    """no credentials, an empty configuration directory (one per command, so that parallel runs share nothing): «no active account» = the command line is well formed; anything else is printed"""
+    from concurrent.futures import ThreadPoolExecutor
+    unique: dict[tuple, int] = {}
     for cmd in _gcloud_commands():
-        argv = [_expand(t) for t in cmd[1:]]
-        key = tuple(argv)
-        if key in seen:
-            continue
-        seen.add(key)
-        p = subprocess.run(["gcloud", *argv], capture_output=True, text=True, timeout=120, env=env, cwd=tmp_path)
+        unique.setdefault(tuple(_expand(t) for t in cmd[1:]), len(unique))
+
+    def parse(item: tuple[tuple, int]) -> tuple[str, str] | None:
+        argv, n = item
+        cfg = tmp_path / f"cfg-{n}"
+        cfg.mkdir()
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(cfg), "CLOUDSDK_CONFIG": str(cfg), "CLOUDSDK_CORE_DISABLE_PROMPTS": "1", "CLOUDSDK_CORE_PROJECT": "parse-only-project"}
+        p = subprocess.run(["gcloud", *argv], capture_output=True, text=True, timeout=300, env=env, cwd=cfg)
         out = re.sub(r"\x1b\[[0-9;]*m", "", p.stdout + p.stderr)
-        if "do not currently have an active account" not in out:
-            bad.append((" ".join(argv)[:140], out[:220]))
+        return None if "do not currently have an active account" in out else (" ".join(argv)[:140], out[:220])
+
+    assert len(unique) >= 40, len(unique)
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        bad = [r for r in pool.map(parse, unique.items()) if r]
     assert not bad, bad
 
 
