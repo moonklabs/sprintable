@@ -64,6 +64,12 @@ def _start(env: dict[str, str], cwd: Path) -> str:
     return G.text(subprocess.CompletedProcess(proc.args, proc.returncode, out, ""))
 
 
+def _excerpt(out: str) -> str:
+    """what a failure needs to be read without a second run: gcloud's version line is not in the debug log, so the lines about the metadata question, the account and the SDK's own path are printed"""
+    keep = [line[:300] for line in out.splitlines() if re.search(r"metadata|GCE|account|google-cloud-sdk/lib/googlecloudsdk/calliope/cli|Running \[", line, flags=re.I)]
+    return "\n".join(keep[:25])
+
+
 def _gap_between_two_tries(env: dict[str, str], cwd: Path, srv: _HangingMetadataServer) -> float:
     """the seconds gcloud waits on one try of the metadata question: the gap between its first and its second connection (the process is stopped after the second, nobody waits for the rest)"""
     import subprocess
@@ -89,10 +95,10 @@ def test_a_gcloud_start_with_the_helper_sends_the_metadata_question_to_a_port_th
         sk.settimeout(2)
         assert sk.connect_ex((host, int(port))) != 0, "nothing listens where the helper sends the question"
     out = _start(e, tmp_path)
-    assert "do not currently have an active account" in out, out[:300]
+    assert "do not currently have an active account" in out, _excerpt(out)
     checks = [line for line in out.splitlines() if "Failed to check metadata server" in line]
-    assert len(checks) == 1 and "Connection refused" in checks[0] and "timed out" not in checks[0], f"the question must fail by refusal (gcloud logs the check once, after its tries): {checks}"
-    assert "On GCE from server: False" in out, "gcloud took the refusal as the answer «not on Compute Engine» and went on"
+    assert len(checks) == 1 and "Connection refused" in checks[0] and "timed out" not in checks[0], f"the question must fail by refusal (gcloud logs the check once, after its tries): {checks}\n{_excerpt(out)}"
+    assert out.index("Failed to check metadata server") < out.index("do not currently have an active account"), f"gcloud took the refusal as the answer and went on to the credentials (the order of the two lines is the proof; no other wording of gcloud is relied on, it differs between versions):\n{_excerpt(out)}"
 
 
 @needs_gcloud
