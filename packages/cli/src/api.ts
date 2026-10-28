@@ -1,5 +1,5 @@
-// backend-direct — SSE·stdio 브릿지가 CF 깔끔도메인(app.sprintable.ai)에서 실패하므로 run.app 직통.
-export const DEFAULT_API_URL = "https://sprintable-backend-prod-787818285179.asia-northeast3.run.app";
+// backend-direct — SSE·stdio 브릿지가 CF 깔끔도메인(app.sprintable.ai)에서 실패하므로 CF 프록시 없는 DNS 전용 api.sprintable.ai 직통 (story 4796: 옛 run.app 주소 자리).
+export const DEFAULT_API_URL = "https://api.sprintable.ai";
 
 export interface TeamMember {
   id: string;

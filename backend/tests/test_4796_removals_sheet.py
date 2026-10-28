@@ -506,5 +506,9 @@ def test_the_cloud_sql_dependents_step_says_the_list_is_read_and_not_assumed_and
                   "means gate 0 is not done: stop"):
         assert token in step1, token
     assert step1.index("(a)") < step1.index("(b)") < step1.index("(c) only then") < step1.index("run the listing above again"), "state, save, delete, list again"
+    save_step = step1.split("(b)")[1].split("(c) only then")[0]
+    delete_step = step1.split("(c) only then")[1].split("Then **run the listing")[0]
+    assert "definition is saved" in save_step and "delete" not in save_step, "(b) saves and deletes nothing"
+    assert "gcloud run $KIND delete $NAME" in delete_step and "describe" not in delete_step, "(c) is the delete, after the file exists"
     assert "Expected before the delete: only" not in _rows()["R5"], "the old, shorter expectation is gone"
     assert "in the same chain" not in step1, "no promise that the chain below covers the extra lines"

@@ -82,7 +82,7 @@ case "${ENV}" in
         RUNTIME_SA="cloudrun-runtime-prod@${GCP_PROJECT}.iam.gserviceaccount.com"
         APP_URL="${APP_URL:-https://app.sprintable.ai}"
         # OB-1: prod backend-direct Cloud Run URL(에이전트 SSE 직통·CF 금지).
-        FASTAPI_URL="${FASTAPI_URL:-https://sprintable-backend-prod-787818285179.asia-northeast3.run.app}"
+        FASTAPI_URL="${FASTAPI_URL:-https://api.sprintable.ai}"  # story 4796 (P1): the same value as the pipeline's prod `fastapi_url` (RUNBOOK §9)
         # prod는 라이브 실측(APP_ENV=prod)과 이미 일치 — `_LOCAL_ENVS` 체크는 배제 기반이라
         # "prod" 문자열 자체는 기능상 안전(코드가 리터럴 "production"을 요구하는 자리는 없음,
         # grep 확認). 현행 유지.
@@ -136,9 +136,9 @@ ENV_VARS_SPEC="${ENV_VARS_SPEC}@APP_URL=${APP_URL}"
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@NEXT_PUBLIC_APP_URL=${APP_URL}"
 # OB-1: agent_onboarding_config generator 가 읽는 backend-direct URL(에이전트 .mcp.json SPRINTABLE_API_URL).
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@FASTAPI_URL=${FASTAPI_URL}"
-# story 4796: dev only, the same value as the pipeline sets (RUNBOOK §9): the origin that stored/bound links are built from. prod states nothing (it keeps the request host until its own move).
+# story 4796: the same value as the pipeline sets (RUNBOOK §9): the origin that stored/bound links are built from. dev always; prod (P7) only when FASTAPI_URL is the VM's API name, otherwise the name is removed (it keeps the request host).
 REMOVE_ENV_VARS=""
-if [ "${ENV}" = "dev" ]; then ENV_VARS_SPEC="${ENV_VARS_SPEC}@PUBLIC_API_URL=${FASTAPI_URL}"; else REMOVE_ENV_VARS="PUBLIC_API_URL"; fi
+if [ "${ENV}" = "dev" ] || { [ "${ENV}" = "prod" ] && [ "${FASTAPI_URL}" = "https://api.sprintable.ai" ]; }; then ENV_VARS_SPEC="${ENV_VARS_SPEC}@PUBLIC_API_URL=${FASTAPI_URL}"; else REMOVE_ENV_VARS="PUBLIC_API_URL"; fi
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@EVENTBUS_ENABLED=${EVENTBUS_ENABLED}"
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@MEMBER_SSOT_RESOLVER_SHADOW=${MEMBER_SSOT_RESOLVER_SHADOW}"
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@MEMBER_SSOT_APIKEY_CUT=${MEMBER_SSOT_APIKEY_CUT}"

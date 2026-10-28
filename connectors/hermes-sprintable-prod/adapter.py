@@ -127,7 +127,7 @@ from gateway.platforms.base import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_API_URL = "https://sprintable-backend-prod-57iommnikq-du.a.run.app"
+DEFAULT_API_URL = "https://api.sprintable.ai"
 RECONNECT_BACKOFF = [2, 5, 10, 30, 60]
 STREAM_READ_TIMEOUT = 90  # gateway heartbeats keep the stream alive
 DEDUP_MAX_SIZE = 1000
