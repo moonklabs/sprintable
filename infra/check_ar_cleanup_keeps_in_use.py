@@ -38,6 +38,8 @@ exit code: 0=지움 0 · 1=사용 중 이미지가 지워진다 · 2=입력 오�
   · 다른 호스트의 AR 참조(다른 지역) · 알려진 외부 레지스트리(gcr.io · Docker Hub · ghcr.io · quay.io · mcr.microsoft.com · registry.k8s.io · ECR · ACR)
   → 사용 중 목록에 넣지 않고, 출력에 «범위 밖 N건 + 이유 + 어디서 나왔나»로 보인다. 컨테이너 옆에 범위 밖 이미지가 있는 서빙 리비전은 `status.imageDigest`가 누구 것인지 모르므로 불완전(exit 3)이다.
   · **우리 호스트인데 덤프에 없는 저장소 · 이미지는 범위 밖이 아니다** — 여전히 exit 3(그 저장소의 --images를 더한다). 알아보지 못하는 레지스트리 주소도 범위 밖으로 세지 않는다(모르면 실패한다).
+  · JSON의 `image` 값이 우리 AR 주소도 알려진 외부 레지스트리도 아니면 exit 3(다른 곳에 외부 주소 한 줄이 있어도 가려지지 않는다). `status.imageDigest`는 맨 digest 또는 우리 AR 꼴일 때만 «쥔 digest»로 받는다.
+  · --extra 문자열 속의 «알아보지 못하는 레지스트리 주소»(`<도메인>/<경로>:<태그>`)는 ⚠️ 경고로 «보이기만» 한다 — 범위 밖으로도, 읽은 것으로도 세지 않는다.
 이미지 참조가 없는 --extra 하나는 «보이는 경고»(⚠️)이고 통과를 막지 않는다(이미지를 쓰지 않는 템플릿이 있을 수 있다). 다만 --extra가 «전부» 그렇다면 VM이 당기는 이미지를 하나도 못 본 것이라 exit 3이다.
 
 한계: 태그로 배포된 리비전이 컨테이너를 여럿 가지면 짝을 지을 수 없어 항상 exit 3이다(이 저장소의 서비스는 컨테이너 하나).
@@ -188,11 +190,58 @@ _SHA = re.compile(r"sha256:[0-9a-f]{64}")
 
 
 def _status_digest(rev: dict) -> str | None:
-    """리비전이 실제로 쥔 digest — `status.imageDigest` 필드에서만 읽는다(주석 · 환경 변수 속 아무 SHA가 «해결된 digest»인 척하지 못하게)."""
+    """리비전이 실제로 쥔 digest — `status.imageDigest` 필드에서만 읽는다(주석 · 환경 변수 속 아무 SHA가 «해결된 digest»인 척하지 못하게).
+    값은 맨 digest이거나 우리 AR 꼴(`<host>-docker.pkg.dev/…@sha256:…`)일 때만 받는다 — 알아보지 못하는 레지스트리의 digest를 «우리 컨테이너의 digest»로 읽지 않는다(모르면 «없음»)."""
     status = rev.get("status")
     value = status.get("imageDigest") if isinstance(status, dict) else None
-    m = _SHA.search(value) if isinstance(value, str) else None
-    return m.group(0) if m else None
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if _SHA.fullmatch(value):
+        return value
+    m = _IMAGE_REF.fullmatch(value)
+    return m["digest"] if m and m["digest"] else None
+
+
+def _image_values(node: Any) -> Iterable[str]:
+    """JSON 안의 모든 `image` 키의 문자열 값(Cloud Run 컨테이너의 `image`). 이 키 이름을 «읽기»에만 쓴다 — 못 알아보는 값을 실패로 올리는 쪽(더 엄격한 쪽)으로만 작동한다."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "image" and isinstance(value, str):
+                yield value
+            else:
+                yield from _image_values(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _image_values(value)
+
+
+def _unknown_images(blob: Any, where: str) -> list[str]:
+    """`image` 값 중 우리 AR 주소도 알려진 외부 레지스트리도 아닌 것 — 그런 이미지가 «있다»는 사실이 다른 곳의 외부 주소 한 줄에 가려지지 않게 실패로 올린다."""
+    return [
+        f"{where}의 image 값 {value[:80]!r}을 알아보지 못함(우리 AR 주소도 알려진 외부 레지스트리도 아니다) — 모르면 실패한다"
+        for value in dict.fromkeys(_image_values(blob))
+        if not (refs_in(value) or external_refs_in(value))
+    ]
+
+
+# 어느 레지스트리인지 모르는 주소 꼴(`<도메인>/<경로>:<태그>` · `@sha256:`) — 문자열(시작 스크립트 등) 속에서 «있다»를 보이게만 한다. 우리 AR · 알려진 외부 레지스트리는 따로 센다.
+_ANY_REGISTRY_REF = re.compile(
+    r"(?:(?<![A-Za-z0-9._/:@-])|(?<=\\n)|(?<=\\t)|(?<=\\r))(?P<host>(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?)/(?P<path>[a-z0-9._-]+(?:/[a-z0-9._-]+)*)"
+    r"(?::(?P<tag>[A-Za-z0-9_][A-Za-z0-9_.-]*)|@(?P<digest>sha256:[0-9a-f]{64}))"
+)
+_KNOWN_HOST = re.compile(r"(?:" + _EXTERNAL_HOSTS + r")")
+
+
+def _unknown_registry_refs(text: str) -> list[str]:
+    """문자열 속의 «알아보지 못하는 레지스트리» 이미지 주소(우리 AR도 알려진 외부 레지스트리도 아닌 것)."""
+    found: dict[str, None] = {}
+    for m in _ANY_REGISTRY_REF.finditer(text):
+        host = m["host"]
+        if host.endswith("-docker.pkg.dev") or _KNOWN_HOST.fullmatch(host):
+            continue
+        found[f"{host}/{m['path']}" + (f":{m['tag']}" if m["tag"] else f"@{m['digest']}")] = None
+    return list(found)
 
 
 def _unresolved_tags(rev: dict, found: list[Ref], outside: Iterable[Outside] = ()) -> bool:
@@ -253,6 +302,7 @@ def collect(
         found, out = _scan(json.dumps(svc), f"서비스 {_name_of(svc) or '?'}", host_set)
         if not found and not out:
             problems.append(f"서비스 {_name_of(svc) or '?'}에서 이미지 참조를 못 찾음")
+        problems += _unknown_images(svc, f"서비스 {_name_of(svc) or '?'}")
         refs += found
         outside += out
     if revisions is not None:
@@ -270,6 +320,7 @@ def collect(
                     elif _unresolved_tags(rev, found, out):
                         # 태그로 배포된 이미지마다 실제로 쥔 digest(`status.imageDigest`)를 모르면, 태그가 그 뒤 옮겨졌을 때 옛 이미지를 못 지킨다 — 모르면 실패
                         problems.append(f"서빙 중 리비전 {_name_of(rev)}에 태그로 배포된 이미지가 있는데 그만큼의 status.imageDigest가 없다(어느 digest를 쥐었는지 모른다)")
+                    problems += _unknown_images(rev, f"서빙 중 리비전 {_name_of(rev) or '?'}")
                     refs += found
                     outside += out
         else:
@@ -278,18 +329,25 @@ def collect(
                 found, out = _scan(json.dumps(rev), f"리비전 {_name_of(rev) or '?'}", host_set)
                 if _unresolved_tags(rev, found, out):
                     problems.append(f"리비전 {_name_of(rev) or '?'}에 태그로 배포된 이미지가 있는데 그만큼의 status.imageDigest가 없다(서빙 여부를 몰라 모든 리비전을 센다)")
+                problems += _unknown_images(rev, f"리비전 {_name_of(rev) or '?'}")
                 refs += found
                 outside += out
     for job in _items(jobs) if jobs is not None else []:
         found, out = _scan(json.dumps(job), f"job {_name_of(job) or '?'}", host_set)
         if not found and not out:
             problems.append(f"job {_name_of(job) or '?'}에서 이미지 참조를 못 찾음")
+        problems += _unknown_images(job, f"job {_name_of(job) or '?'}")
         refs += found
         outside += out
     extra_blobs = list(extra)
     extra_read = False
     for n, blob in enumerate(extra_blobs, 1):
-        found, out = _scan(json.dumps(blob), f"--extra {n}번째", host_set)
+        text = json.dumps(blob)
+        found, out = _scan(text, f"--extra {n}번째", host_set)
+        problems += _unknown_images(blob, f"--extra {n}번째")
+        for unknown in _unknown_registry_refs(text):
+            # 문자열 속의 모르는 주소는 «보이게만» 한다(범위 밖으로도, 읽은 것으로도 세지 않는다) — 아래 «읽었나» 판정은 우리 주소와 알려진 외부 주소만으로 한다
+            warnings.append(f"--extra {n}번째에 알아보지 못하는 레지스트리 주소 {unknown}가 있다 — 우리 AR도 알려진 외부 레지스트리도 아니라 범위 밖으로 세지 않았다(그 주소가 가리키던 이미지가 있으면 사람이 확인한다).")
         if found or out:
             extra_read = True
         else:

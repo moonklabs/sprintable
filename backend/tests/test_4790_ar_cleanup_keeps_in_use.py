@@ -761,7 +761,9 @@ def test_an_address_the_gate_does_not_recognise_is_not_counted_as_out_of_scope(t
     d = Dumps(tmp_path)
     d.mig = {"startup": f"docker run {HOST}/backend:backend-tag45 registry.example.com/team/app:1"}
     assert gate.main(d.argv()) == 0
-    assert "범위 밖" not in capsys.readouterr().out  # not claimed as out of scope (and nothing depends on it)
+    out = capsys.readouterr().out
+    assert "정리 정책이 닿을 수 없는 참조라" not in out  # no «범위 밖 N건» section: not claimed as out of scope (and nothing depends on it)
+    assert "⚠️ --extra 1번째에 알아보지 못하는 레지스트리 주소 registry.example.com/team/app:1" in out  # but it is shown
     d = Dumps(tmp_path)
     d.mig = {"startup": "docker run registry.example.com/team/app:1"}
     assert gate.main(d.argv()) == 3 and not d.out.exists()  # a lone unrecognised address: the template shows no image at all
@@ -818,6 +820,45 @@ def test_a_service_whose_only_image_is_off_our_registry_is_read_not_missing():
     assert not c.problems and not c.refs and {o["image"] for o in c.outside} == {"gcr.io/cloudrun/hello", "ghcr.io/o/job"}
     empty = {"metadata": {"name": "j2"}, "spec": {}}
     assert gate.collect(None, None, [empty], hosts={AR_HOST}).problems  # positive control: a job with no image at all is still incomplete
+
+
+def test_an_unknown_registry_image_is_not_hidden_by_an_external_string_elsewhere_in_the_object(tmp_path):
+    """the QA finding: a service whose real image is on a registry the gate does not know, next to an unrelated `gcr.io/…` string (an annotation), used to count as «read» and pass"""
+    unknown = {"metadata": {"name": "s", "annotations": {"note": "see gcr.io/foo/bar:1"}}, "status": {"traffic": [{"revisionName": "rev-2"}]},
+               "spec": {"template": {"spec": {"containers": [{"image": "registry.example.com/team/app:1"}]}}}}
+    c = gate.collect([unknown], [_revision("rev-2", f"{HOST}/backend:backend-tag2", image_digest=_digest(2))], hosts={AR_HOST})
+    assert any("registry.example.com/team/app:1" in p for p in c.problems)
+    d = Dumps(tmp_path)
+    d.services = [unknown]
+    assert gate.main(d.argv()) == 3 and not d.out.exists()
+    known = {**unknown, "spec": {"template": {"spec": {"containers": [{"image": f"{HOST}/backend:backend-tag2"}]}}}}  # positive control: the same object with a known image
+    assert not gate.collect([known], [_revision("rev-2", f"{HOST}/backend:backend-tag2", image_digest=_digest(2))], hosts={AR_HOST}).problems
+    job = {"metadata": {"name": "j"}, "spec": {"template": {"spec": {"template": {"spec": {"containers": [{"image": "registry.example.com/team/job:1"}]}}}}}}
+    assert gate.collect(None, None, [job], hosts={AR_HOST}).problems  # jobs and --extra objects are read the same way
+    assert gate.collect(extra=[{"containers": [{"image": "registry.example.com/x:1"}]}], hosts={AR_HOST}).problems
+
+
+def test_a_resolved_digest_from_a_registry_the_gate_does_not_know_does_not_resolve_a_tag():
+    """the QA finding: `status.imageDigest` of an unknown registry carries a valid-looking SHA; it must not stand for our tagged container"""
+    service = [_service("s", "rev-2", f"{HOST}/backend:backend-tag2")]
+    foreign = _revision("rev-2", f"{HOST}/backend:backend-tag2", image_digest="registry.example.com/x/y@" + _digest(2))
+    assert gate.collect(service, [foreign], hosts={AR_HOST}).problems
+    for ok in (_digest(2), f"{HOST}/backend@{_digest(2)}"):  # the two real shapes still resolve
+        assert not gate.collect(service, [_revision("rev-2", f"{HOST}/backend:backend-tag2", image_digest=ok)], hosts={AR_HOST}).problems
+
+
+def test_an_in_use_old_image_in_the_second_repository_is_caught_by_check_and_kept_by_the_generated_policy(tmp_path):
+    """the QA test gap: `check()` must look at every dumped repository, not only the first one"""
+    d = Dumps(tmp_path)
+    d.more_images = [_prod_images(40, age_days=40)]
+    versions = gate.load_versions(d.images + d.more_images[0])
+    in_use = {("backend", _digest(20_035))}  # the second repository's 36th build: past its newest 30 and older than 30 days
+    _deleted, hit = gate.check(versions, in_use, _base(), NOW)
+    assert hit == in_use, "the base policy alone deletes it (positive control: the check sees the second repository)"
+    assert gate.check(versions, in_use, gate.build_policy(_base(), in_use), NOW)[1] == set()
+    d.mig = {"startup": f"docker run {HOST_PROD}/backend:prod-tag35"}
+    assert gate.main(d.argv()) == 0
+    assert _digest(20_035)[:64] in json.loads(d.out.read_text())[0]["condition"]["versionNamePrefixes"]
 
 
 def test_without_dump_hosts_every_registry_reference_stays_inside_the_scope():
