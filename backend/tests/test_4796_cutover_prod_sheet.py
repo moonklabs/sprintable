@@ -604,7 +604,12 @@ def test_the_pipeline_section_names_three_changes_in_an_order_and_the_repository
     prod_branch = wf.split('if [[ "$REF_NAME" == "main" ]]; then')[1].split("\n          else\n", 1)[0]
     assert 'echo "fastapi_url=https://sprintable-backend-prod-787818285179.asia-northeast3.run.app"' in prod_branch, "P1's premise: the prod branch still names the Cloud Run address"
     assert "cloud_run_app_skip" not in prod_branch, "P3's premise: the prod branch does not skip Cloud Run yet"
-    assert "if: success() && steps.env.outputs.target == 'dev'" in wf and "Submit the dev VM bundle build" in wf, "P2's premise: the VM bundle build is submitted for dev only"
+    assert "if: success() && (steps.env.outputs.target == 'dev' || steps.env.outputs.target == 'prod')" in wf and "Submit the VM bundle build (dev and prod" in wf, "P2 is merged: the VM bundle build is submitted for dev and prod"
+    state = section.split("**State when this was written")[1].split("- **P1")[0]
+    for token in ("*Merged:* P2 (#5328", "P4 (#5324)", "P5 (#5326", "P6 (#5329", "*Open:* P1 (#5327", "P3 (ready locally", "P7 (the pipeline's prod branch"):
+        assert token in state, token
+    assert "prod" in __import__("json").loads((_ROOT / "infra/cloud-scheduler/jobs.json").read_text())["environments"], "P4 is merged"
+    assert "\tlog {" in (_ROOT / "deploy/vm/Caddyfile").read_text(), "P5 is merged"
     cb = (_ROOT / "cloudbuild.yaml").read_text()
     assert cb.count('"${_CLOUD_RUN_APP_SKIP}" = "true"') >= 6, "the switch P3 turns on exists and covers the frontend build, the migration job and both deploy steps"
     assert "--allow-unauthenticated" in cb, "the premise of G3: a prod build would deploy the backend publicly"
@@ -782,8 +787,8 @@ def test_the_scheduler_by_the_script_applies_only_after_the_plan_is_exactly_four
 
 
 def test_the_notice_carries_the_freeze_wait_and_the_request_timeout_is_read_before_the_window() -> None:
-    assert "**plus the wait of the freeze**" in SHEET and "1810 s if prod's timeout is 1800 s" in SHEET and "**with the freeze wait added**" in SHEET
-    assert "the notice's window is **1810 s + the rehearsal's measured downtime**" in SHEET
+    assert "**plus the wait of the freeze**" in SHEET and "1810 s if prod's timeout is 1800 s" in SHEET and "**with the freeze wait and step 4b added**" in SHEET
+    assert "the notice's window is **1810 s + the rehearsal's measured downtime + the seconds of step 4b**" in SHEET and "(the window of the notice is 1810 s + the rehearsal's downtime + the seconds of 4b)" in SHEET
     block = _block_with("SRC_IP=$(gcloud sql")
     assert "value(spec.template.spec.timeoutSeconds)" in block and "the freeze waits $((TMO + 10)) s" in block
 
@@ -1064,3 +1069,14 @@ def test_the_migration_block_stops_when_the_history_cannot_be_read_and_never_cal
     assert "history: stop" in p.stdout and "revisions to run" not in p.stdout, "an unreadable history is a stop, not «0 revisions»"
     p, _ = _run(block, _fresh(tmp_path, "badcur"), extra={"REPO": str(_ROOT), "CUR": "no-such-revision"})
     assert "history: stop" in p.stdout and "revisions to run" not in p.stdout
+
+
+def test_the_window_carries_the_seconds_of_the_link_rewrite_and_a_failed_rewrite_does_not_stop_the_move() -> None:
+    one = _section("## 1. Rehearsal", "## 2. The notice")
+    for token in ("**plus step 4b**", "about the seconds of the rehearsal's dump", "the module's seconds as the product owner measured them in the dev run, written in the record of G5"):
+        assert token in one, token
+    six = _section("## 6–7. The data and the takeover", "## 8. Unfreeze")
+    for token in ("**If 4b fails**", "**the move does not stop and the window goes on.**", "an apply that failed inside wrote nothing", "the backup taken just before it goes back", "RESTORE_WIPE=yes /opt/sprintable/bin/restore.sh",
+                  "ls -t /var/backups/sprintable/db-prod-*.dump", "**the next day with the same module**", "answers 403 (Cloud Run is closed since the freeze)", "`links-report.txt`"):
+        assert token in six, token
+    assert "/var/backups/sprintable" in (_ROOT / "deploy/vm/bin/backup.sh").read_text() and 'dump_prefix' in (_ROOT / "deploy/vm/bin/backup.sh").read_text(), "the folder and the name the sheet restores from are the backup unit's"
