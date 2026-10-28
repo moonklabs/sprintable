@@ -1073,7 +1073,7 @@ def test_the_migration_block_stops_when_the_history_cannot_be_read_and_never_cal
 
 def test_the_window_carries_the_seconds_of_the_link_rewrite_and_a_failed_rewrite_does_not_stop_the_move() -> None:
     one = _section("## 1. Rehearsal", "## 2. The notice")
-    for token in ("**plus step 4b**", "about the seconds of the rehearsal's dump", "the module's seconds as the product owner measured them in the dev run, written in the record of G5"):
+    for token in ("**plus step 4b**", "about the seconds of the rehearsal's dump", "the module's seconds as the product owner measured them on dev, written in the record of G5", "took **46 s**", "6.8 s of CPU", "the module's report **1.6 s** and its plan **1.3 s**", "it printed `rewritten 6`", "the rehearsal's dump seconds are the better estimate for prod"):
         assert token in one, token
     six = _section("## 6–7. The data and the takeover", "## 8. Unfreeze")
     for token in ("**If 4b fails**", "**the move does not stop and the window goes on.**", "an apply that failed inside wrote nothing", "the backup taken just before it goes back", "RESTORE_WIPE=yes /opt/sprintable/bin/restore.sh",
