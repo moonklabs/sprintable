@@ -45,7 +45,7 @@ def test_the_texts_that_explain_why_the_address_is_direct_no_longer_say_only_run
     assert "dev: `https://dev-api.sprintable.ai`, DNS only — no Cloudflare proxy" in guide and "Dev: `https://dev-api.sprintable.ai`" in guide
     assert "use the backend-direct run.app host" not in guide
     readme = (_ROOT / "backend/sprintable_mcp/README.md").read_text()
-    assert "dev=https://dev-api.sprintable.ai" in readme and "prod는 run.app, dev는 DNS 전용 dev-api.sprintable.ai" in readme
+    assert "dev=https://dev-api.sprintable.ai" in readme and "prod는 api.sprintable.ai, dev는 DNS 전용 dev-api.sprintable.ai" in readme
     onboarding = (_ROOT / "backend/app/services/agent_onboarding_config.py").read_text()
     assert "prod=run.app, dev=DNS 전용 dev-api.sprintable.ai" in onboarding and "직통 run.app 이어야 한다" not in onboarding
 
