@@ -382,16 +382,6 @@ class Deployer:
         except Exception as e:  # noqa: BLE001 — whatever went wrong, record it and (after the swap) put the previous release back
             err = e if isinstance(e, DeployError) else DeployError(f"unexpected {type(e).__name__}", self._phase)
             _write_json(self.cfg.state_dir / "failed.json", {"signature": signature(desired), "phase": err.phase, "detail": self._scrub(str(err))[:500], "at": int(self.now())})
-            if err.phase == "pre-swap" and self._prev is not None and self._prev.gateway_db:
-                # the candidate's rules file was written for a server that was never told: put the file back to what the running release declares
-                # …and, because compose may have re-created the container with the candidate's file already mounted (a changed secret does that), the running server is told to read it again
-                try:
-                    self._write_gateway_hba(self.cfg.install_dir / "runtime" / "gateway-db-pg_hba.conf", renv.gateway_hba(self._prev.decl))
-                    rc, out = self._compose(self._prev.release, self._prev.env, "exec", "-T", "gateway-db", "sh", "-c", GATEWAY_DB_RELOAD, timeout=30)
-                    if rc != 0:
-                        self.log(f"the gateway database did not reload the previous access rules: {out[-200:]}")
-                except DeployError:
-                    self.log("could not put the gateway database's access rules file back")
             if err.phase == "post-swap":
                 outcome = self._rollback(current)
                 self._status(outcome, sha=desired["sha"], detail=self._scrub(str(err))[:300], serving=(current or {}).get("sha") if outcome == "rolled-back" else None)
@@ -592,7 +582,10 @@ class Deployer:
         (self.cfg.data_dir / "caddy").mkdir(parents=True, exist_ok=True)
         if p.gateway_db:
             (self.cfg.data_dir / "gateway-postgres").mkdir(parents=True, exist_ok=True)
-            self._write_gateway_hba(runtime / "gateway-db-pg_hba.conf", renv.gateway_hba(p.decl))  # the file; the running server is told in `_swap`, so a deploy that fails before it never changes what the server enforces
+            hba = runtime / "gateway-db-pg_hba.conf"
+            if not hba.exists():
+                # the container's mount needs a FILE (docker would make a folder of a missing one) and a first start reads it; an existing file keeps the RUNNING release's rules until `_swap`
+                self._write_gateway_hba(hba, renv.gateway_hba(p.decl))
 
     def _write_gateway_hba(self, path: Path, text: str) -> None:
         """the access rules file of the gateway database. It is bind-mounted as a single file, so it is rewritten IN PLACE (a rename would leave the container looking at the old file) and only when
@@ -646,6 +639,10 @@ class Deployer:
         return rc == 0
 
     def _swap(self, p: Prepared) -> None:
+        if p.gateway_db:
+            # the rules file changes HERE and nowhere earlier: pending.json is already written (a crash from now on is settled by the next run, which puts the recorded release's rules back), and a release that fails
+            # before this point leaves the file as it was — a container started in the meantime (reboot, re-creation) reads the rules of the release that is running
+            self._write_gateway_hba(self.cfg.install_dir / "runtime" / "gateway-db-pg_hba.conf", renv.gateway_hba(p.decl))
         self._phase = "post-swap"
         self._install_caddyfile(p.caddyfile)  # here, not while preparing: a deploy that stops before the swap leaves the running Caddyfile alone
         rc, out = self._compose(p.release, p.env, "up", "-d", "--remove-orphans", "--wait", "--wait-timeout", "120", timeout=T_UP)
@@ -655,7 +652,7 @@ class Deployer:
         if rc != 0:
             raise DeployError(f"caddy reload failed: {out[-300:]}", "post-swap")
         if p.gateway_db:
-            # the file already holds this release's rules (`_activate` wrote it — on the way back too, a rollback activates the previous release first): from here the running server enforces them
+            # the file holds this release's rules (written at the top of this method — on the way back too): from here the running server enforces them
             rc, out = self._compose(p.release, p.env, "exec", "-T", "gateway-db", "sh", "-c", GATEWAY_DB_RELOAD, timeout=30)
             if rc != 0:
                 raise DeployError(f"the gateway database did not reload its access rules: {out[-200:]}", "post-swap")

@@ -549,13 +549,11 @@ def test_a_release_that_fails_before_the_swap_does_not_change_what_the_running_s
     path = world.cfg.install_dir / "runtime/gateway-db-pg_hba.conf"
     before = path.read_text()
     reloads = len(_reloads(world))
-    a_backend = S._state(world, "current.json")["backend_image"]
     world.publish("b" * 40, bundle=_bundle_with_networks(["10.200.0.0/20"]))
     world.runner.fail_on["migrate"] = 1
     assert world.dep.run_once() == "failed"
-    assert path.read_text() == before and "10.200.0.0" not in path.read_text(), "the file is put back, so a restart of the container cannot pick the candidate's networks up"
-    after = _reloads(world)[reloads:]
-    assert len(after) == 1 and after[0]["env"]["BACKEND_IMAGE"] == a_backend, "and the server is told once, with the RUNNING release's environment (compose may have re-created the container with the candidate's file mounted)"
+    assert path.read_text() == before and "10.200.0.0" not in path.read_text(), "the file was never changed, so a container started meanwhile (reboot, re-creation) reads the running release's networks"
+    assert not _reloads(world)[reloads:], "and the server was not told anything"
 
 
 def test_nothing_is_reloaded_when_there_was_no_gateway_database_to_go_back_to(world) -> None:
@@ -894,4 +892,53 @@ def test_nothing_is_started_when_the_rule_could_not_be_put_in_place_or_when_ther
 def test_the_runbook_states_boot_order_the_stuck_container_and_the_shut_door() -> None:
     rb = (_VM / "RUNBOOK.md").read_text()
     for token in ("its restart policy is «no»", "and only THEN starts it", "COULD NOT BE STOPPED", "first **shuts the door**", "leaves the door shut and prints the one command that opens it", "It never drops the gateway's database before the replacement has loaded"):
+        assert token in rb, token
+
+
+def test_the_candidates_rules_reach_the_file_only_after_pending_json_and_a_first_start_finds_its_file(world) -> None:
+    world.publish("a" * 40, bundle=_bundle_with_networks(["10.178.0.0/20"]))
+    path = world.cfg.install_dir / "runtime/gateway-db-pg_hba.conf"
+    seen: dict[str, tuple[str | None, bool]] = {}
+    orig = world.runner.run
+
+    def run(args, env, **kw):
+        joined = " ".join(args)
+        stage = "gwdb-up" if "up -d --wait gateway-db" in joined else "migrate" if " run --rm migrate" in joined or "run --rm" in joined else "swap-up" if "--wait-timeout" in joined else None
+        if stage:
+            seen[stage] = (path.read_text() if path.exists() else None, (world.cfg.state_dir / "pending.json").exists())
+        return orig(args, env, **kw)
+
+    world.runner.run = run
+    world.dep.run_once()
+    a_rules = path.read_text()
+    assert seen["gwdb-up"][0] == a_rules and "10.178.0.0/20" in a_rules, "a first start finds its rules file"
+    seen.clear()
+    world.publish("b" * 40, bundle=_bundle_with_networks(["10.200.0.0/20"]))
+    world.dep.run_once()
+    assert "10.178.0.0/20" in seen["gwdb-up"][0] and "10.200.0.0" not in seen["gwdb-up"][0], "the running release's rules while the database is brought up"
+    assert "10.200.0.0" not in seen["migrate"][0] and seen["migrate"][1] is False, "and still while the migration runs, before pending.json"
+    assert "10.200.0.0" in seen["swap-up"][0] and seen["swap-up"][1] is True, "the candidate's rules are in the file only inside the swap, with pending.json already written"
+
+
+def test_the_backup_and_restore_check_units_come_after_the_unit_that_starts_the_gateway_database() -> None:
+    for name in ("sprintable-backup.service", "sprintable-restore-check.service"):
+        unit = (_VM / "systemd" / name).read_text()
+        assert re.search(r"^After=.*\bsprintable-gateway-db-firewall\.service\b", unit, re.M) and re.search(r"^Wants=.*\bsprintable-gateway-db-firewall\.service\b", unit, re.M), name
+
+
+def test_the_firewall_unit_waits_until_the_database_answers_and_does_not_fail_when_it_does_not(tmp_path: Path) -> None:
+    import subprocess
+    env = _firewall_world(tmp_path, "gwc999")
+    (tmp_path / "bin" / "docker").write_text('#!/bin/sh\necho "docker $*" >> "$LOG"\ncase "$1" in ps) printf "%s" "$CID" ;; exec) exit 1 ;; esac\n')
+    (tmp_path / "bin" / "sleep").write_text("#!/bin/sh\necho sleep >> \"$LOG\"\n")
+    (tmp_path / "bin" / "sleep").chmod(0o755)
+    p = subprocess.run(["bash", str(_VM / "bin/gateway-db-firewall.sh")], env=env, capture_output=True, text=True, timeout=60)
+    calls = (tmp_path / "log").read_text().splitlines()
+    assert p.returncode == 0, "a server that never answers is not this unit's failure"
+    assert calls.count("sleep") == 60 and sum(1 for c in calls if c.startswith("docker exec gwc999 pg_isready")) == 60, "bounded at 60 tries"
+
+
+def test_the_runbook_states_when_the_rules_file_changes_and_the_order_of_the_backup_after_boot() -> None:
+    rb = (_VM / "RUNBOOK.md").read_text()
+    for token in ("**only inside the swap, after `pending.json` exists**", "settled by the next run, which puts the recorded release's rules back", "the backup and restore-check units are ordered after that unit"):
         assert token in rb, token

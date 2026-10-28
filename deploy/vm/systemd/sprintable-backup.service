@@ -1,7 +1,8 @@
 [Unit]
 Description=Sprintable database backup (pg_dump -Fc to Cloud Storage)
-After=docker.service
+After=docker.service sprintable-gateway-db-firewall.service
 Requires=docker.service
+Wants=sprintable-gateway-db-firewall.service
 ConditionPathIsMountPoint=/srv/sprintable
 
 [Service]

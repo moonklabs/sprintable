@@ -1,7 +1,8 @@
 [Unit]
 Description=Restore the newest Sprintable backup into a scratch database and time it
-After=docker.service
+After=docker.service sprintable-gateway-db-firewall.service
 Requires=docker.service
+Wants=sprintable-gateway-db-firewall.service
 ConditionPathIsMountPoint=/srv/sprintable
 
 [Service]
