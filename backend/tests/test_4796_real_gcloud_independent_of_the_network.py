@@ -30,6 +30,7 @@ class _HangingMetadataServer:
         self.port = self.sock.getsockname()[1]
         self.conns: list[socket.socket] = []
         self.accepted = 0
+        self.arrivals: list[float] = []   # monotonic time of each connection: the gap between two is the time limit gcloud puts on one try
         self._stop = False
         threading.Thread(target=self._loop, daemon=True).start()
 
@@ -39,6 +40,7 @@ class _HangingMetadataServer:
                 c, _ = self.sock.accept()
             except OSError:
                 return
+            self.arrivals.append(time.monotonic())
             self.accepted += 1
             self.conns.append(c)
 
@@ -49,38 +51,70 @@ class _HangingMetadataServer:
             c.close()
 
 
-def _start(env: dict[str, str], cwd: Path) -> tuple[float, str]:
+def _start(env: dict[str, str], cwd: Path) -> str:
+    """one start of the real gcloud with its debug log (the log says where the metadata question went and how it ended); its output, no time"""
     import subprocess
-    t0 = time.monotonic()
-    p = subprocess.run(["gcloud", "run", "services", "update", "s", "--region=r", "--clear-cloudsql-instances"], capture_output=True, text=True, timeout=60, env=env, cwd=cwd)
-    return time.monotonic() - t0, G.text(p)
+    proc = subprocess.Popen(["gcloud", "--verbosity=debug", "run", "services", "update", "s", "--region=r", "--clear-cloudsql-instances"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env, cwd=cwd)
+    try:
+        out, _ = proc.communicate(timeout=25)   # a bound for a hang (inside pytest's 30 s), not a budget; the child never outlives the test
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    return G.text(subprocess.CompletedProcess(proc.args, proc.returncode, out, ""))
+
+
+def _gap_between_two_tries(env: dict[str, str], cwd: Path, srv: _HangingMetadataServer) -> float:
+    """the seconds gcloud waits on one try of the metadata question: the gap between its first and its second connection (the process is stopped after the second, nobody waits for the rest)"""
+    import subprocess
+    proc = subprocess.Popen(["gcloud", "run", "services", "update", "s", "--region=r", "--clear-cloudsql-instances"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, cwd=cwd)
+    try:
+        deadline = time.monotonic() + 20   # a bound for a hang (inside pytest's 30 s)
+        while len(srv.arrivals) < 2 and time.monotonic() < deadline and proc.poll() is None:
+            time.sleep(0.02)
+    finally:
+        proc.kill()
+        proc.wait()
+    assert len(srv.arrivals) >= 2, f"gcloud did not ask the metadata server twice (connections: {len(srv.arrivals)})"
+    return srv.arrivals[1] - srv.arrivals[0]
 
 
 @needs_gcloud
-def test_a_gcloud_start_with_the_helper_asks_a_port_that_refuses_and_takes_well_under_a_second_or_two(tmp_path: Path) -> None:
+def test_a_gcloud_start_with_the_helper_sends_the_metadata_question_to_a_port_that_refuses_and_stops_asking(tmp_path: Path) -> None:
+    """no clock: gcloud's own debug log says how the question ended - «Connection refused», not «timed out». A refused connection cannot wait, so a refusal is the proof that nothing waited, however many tries gcloud makes."""
     e = G.env(tmp_path)
     host, port = e["GCE_METADATA_ROOT"].split(":")
     with socket.socket() as sk:
         sk.settimeout(2)
         assert sk.connect_ex((host, int(port))) != 0, "nothing listens where the helper sends the question"
-    took, out = _start(e, tmp_path)
+    out = _start(e, tmp_path)
     assert "do not currently have an active account" in out, out[:300]
-    assert took < 10, f"{took:.1f} s (a start that waits for the metadata question takes 12 s; this test does not time the helper, the lines above prove where the question goes)"
+    checks = [line for line in out.splitlines() if "Failed to check metadata server" in line]
+    assert len(checks) == 1 and "Connection refused" in checks[0] and "timed out" not in checks[0], f"the question must fail by refusal (gcloud logs the check once, after its tries): {checks}"
+    assert "On GCE from server: False" in out, "gcloud took the refusal as the answer «not on Compute Engine» and went on"
 
 
 @needs_gcloud
-def test_even_a_metadata_server_that_never_answers_costs_a_start_at_most_a_few_seconds_with_the_helper_environment(tmp_path: Path) -> None:
-    """the second line of defence, and the proof that the question is the whole story: the question sent to a server that accepts and stays silent costs 4 tries of 1 s (12 s without the time limit of the helper)"""
-    srv = _HangingMetadataServer()
+def test_the_time_limit_of_the_helper_is_shorter_than_the_default_of_gcloud_measured_side_by_side(tmp_path: Path) -> None:
+    """the second line of defence, proved against a metadata server that accepts and never answers (what the link-local address does on a runner), without a threshold in seconds:
+    the same gcloud, on the same machine at the same moment, once with the helper's limit and once with gcloud's own default (3 s per try). A loaded runner slows both, so the comparison holds where a fixed number does not."""
+    helped = default = None
     try:
+        helped = _HangingMetadataServer()
+        default = _HangingMetadataServer()
         e = G.env(tmp_path)
-        e["GCE_METADATA_ROOT"] = f"127.0.0.1:{srv.port}"
-        took, out = _start(e, tmp_path)
+        e["GCE_METADATA_ROOT"] = f"127.0.0.1:{helped.port}"
+        gap_helper = _gap_between_two_tries(e, tmp_path, helped)
+        d = G.env(tmp_path)
+        d["GCE_METADATA_ROOT"] = f"127.0.0.1:{default.port}"
+        d["CLOUDSDK_COMPUTE_GCE_METADATA_CHECK_TIMEOUT_SEC"] = "3"   # what gcloud does when nothing is set
+        gap_default = _gap_between_two_tries(d, tmp_path, default)
     finally:
-        srv.close()
-    assert "do not currently have an active account" in out, out[:300]
-    assert srv.accepted >= 1, "the question really went to the silent server (so the delay below is the question's)"
-    assert took < 10, f"{took:.1f} s: 4 tries x 1 s is about 4.5 s; 12 s would mean the time limit is gone"
+        for srv in (helped, default):
+            if srv is not None:
+                srv.close()
+    assert helped.accepted >= 2 and default.accepted >= 2, "the question really went to the silent servers"
+    assert gap_helper * 1.8 < gap_default, f"one try waits {gap_helper:.2f} s with the helper's limit and {gap_default:.2f} s with gcloud's default (measured 1.0 vs 3.0): the helper's limit is gone"
 
 
 @needs_gcloud
