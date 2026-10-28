@@ -247,26 +247,30 @@ def _unknown_registry_refs(text: str) -> list[str]:
     return list(found)
 
 
-def _unresolved_tags(rev: dict, found: list[Ref], outside: Iterable[Outside] = ()) -> bool:
-    """태그로 배포된 이미지가 있으면 «모르는» 경우를 모두 true로 돌려준다(`found`는 범위 안 참조만):
-    · 이미지 패키지가 둘 이상이거나 태그가 둘 이상(컨테이너 여럿 — 하나뿐인 `status.imageDigest`를 짝지을 수 없다)
+def _unresolved_reason(rev: dict, found: list[Ref], outside: Iterable[Outside] = ()) -> str | None:
+    """태그로 배포된 이미지가 있을 때 «모르는» 경우의 까닭(없으면 None). `found`는 범위 안 참조만:
+    · 이미지 패키지가 둘 이상이거나 태그가 둘 이상(컨테이너 여럿 — 하나뿐인 `status.imageDigest`를 짝지을 수 없다). 같은 패키지 · 태그 이름이어도 **저장소가 다르면** 다른 이미지다
     · 같은 리비전에 범위 밖 이미지가 함께 있다(그 digest가 우리 컨테이너 것인지 옆 컨테이너 것인지 가릴 수 없다)
     · 스펙 쪽에 digest가 있다(digest로 고정된 옆 컨테이너나 주석 속 SHA — 값이 `status.imageDigest`와 같아도 어느 것이 태그의 것인지 가릴 수 없다)
     · `status.imageDigest` 필드가 없다
     · 그 digest와 다른 digest가 같은 리비전에 더 있다(상태 쪽의 다른 digest)"""
-    tagged = {(r["package"], r["tag"]) for r in found if r["tag"]}
+    tagged = {(r["repo"], r["package"], r["tag"]) for r in found if r["tag"]}
     if not tagged:
-        return False
-    packages = {r["package"] for r in found if r["package"]}
-    if len(tagged) > 1 or len(packages) > 1 or any(True for _ in outside):
-        return True
+        return None
+    packages = {(r["repo"], r["package"]) for r in found if r["package"]}
+    if len(tagged) > 1 or len(packages) > 1:
+        return "태그로 배포된 이미지가 있는데 컨테이너가 여럿이다(하나뿐인 status.imageDigest를 짝지을 수 없다)"
+    if any(True for _ in outside):
+        return "태그로 배포된 이미지 옆에 범위 밖 이미지가 있다(status.imageDigest가 누구 것인지 가릴 수 없다)"
     # `status`를 뺀 나머지(스펙 · 주석 …)에 digest가 하나라도 있으면(digest로 고정된 옆 컨테이너 · 무관한 SHA) `status.imageDigest`가 그 digest의 것일 수도 있다 — 값이 같아 보여도 짝을 지을 수 없다
     if any(r["digest"] for r in refs_in(json.dumps({k: v for k, v in rev.items() if k != "status"}))):
-        return True
+        return "태그로 배포된 이미지가 있는데 스펙 쪽(옆 컨테이너 · 주석)에 digest가 있어 status.imageDigest가 누구 것인지 가릴 수 없다"
     resolved = _status_digest(rev)
     if resolved is None:
-        return True
-    return any(r["digest"] and r["digest"] != resolved for r in found)
+        return "태그로 배포된 이미지가 있는데 그만큼의 status.imageDigest가 없다(어느 digest를 쥐었는지 모른다)"
+    if any(r["digest"] and r["digest"] != resolved for r in found):
+        return "태그로 배포된 이미지가 있는데 status 쪽에 다른 digest가 더 있다(어느 것이 태그의 것인지 가릴 수 없다)"
+    return None
 
 
 class Collected(NamedTuple):
@@ -324,9 +328,9 @@ def collect(
                     found, out = _scan(json.dumps(rev), f"서빙 중 리비전 {_name_of(rev) or '?'}", host_set)
                     if not found and not out:
                         problems.append(f"서빙 중 리비전 {_name_of(rev)}에서 이미지 참조를 못 찾음")
-                    elif _unresolved_tags(rev, found, out):
+                    elif reason := _unresolved_reason(rev, found, out):
                         # 태그로 배포된 이미지마다 실제로 쥔 digest(`status.imageDigest`)를 모르면, 태그가 그 뒤 옮겨졌을 때 옛 이미지를 못 지킨다 — 모르면 실패
-                        problems.append(f"서빙 중 리비전 {_name_of(rev)}에 태그로 배포된 이미지가 있는데 그만큼의 status.imageDigest가 없다(어느 digest를 쥐었는지 모른다)")
+                        problems.append(f"서빙 중 리비전 {_name_of(rev)}: {reason}")
                     problems += _unknown_images(rev, f"서빙 중 리비전 {_name_of(rev) or '?'}")
                     refs += found
                     outside += out
@@ -334,8 +338,8 @@ def collect(
             warnings.append("서비스 JSON에서 서빙 중 리비전을 못 읽어 모든 리비전을 사용 중으로 셌다(안전한 쪽).")
             for rev in revs:
                 found, out = _scan(json.dumps(rev), f"리비전 {_name_of(rev) or '?'}", host_set)
-                if _unresolved_tags(rev, found, out):
-                    problems.append(f"리비전 {_name_of(rev) or '?'}에 태그로 배포된 이미지가 있는데 그만큼의 status.imageDigest가 없다(서빙 여부를 몰라 모든 리비전을 센다)")
+                if reason := _unresolved_reason(rev, found, out):
+                    problems.append(f"리비전 {_name_of(rev) or '?'}: {reason}(서빙 여부를 몰라 모든 리비전을 센다)")
                 problems += _unknown_images(rev, f"리비전 {_name_of(rev) or '?'}")
                 refs += found
                 outside += out

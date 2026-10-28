@@ -848,6 +848,27 @@ def test_a_digest_pinned_sibling_whose_digest_equals_the_status_digest_is_still_
     assert not gate.collect(service, [lone], hosts={AR_HOST}).problems  # positive control: the real single-container shape is fine
 
 
+def test_two_containers_with_the_same_package_and_tag_in_different_repositories_are_two_images():
+    """the QA finding: `A/backend:tag` and `B/backend:tag` are not one container — one resolved digest cannot cover both, and the other repository's image would go unprotected"""
+    service = [_service("s", "rev-2", f"{HOST}/backend:backend-tag2")]
+    two = {"metadata": {"name": "rev-2"}, "spec": {"containers": [{"image": f"{HOST}/backend:backend-tag2"}, {"image": f"{HOST_PROD}/backend:backend-tag2"}]},
+           "status": {"imageDigest": f"{HOST}/backend@{_digest(2)}"}}
+    assert gate.collect(service, [two], hosts={AR_HOST}).problems
+    assert not gate.collect(service, [_revision("rev-2", f"{HOST_PROD}/backend:backend-tag2", image_digest=_digest(2))], hosts={AR_HOST}).problems  # positive control: one container
+
+
+def test_the_reason_a_tagged_revision_is_unresolved_is_the_real_one():
+    """the QA finding: a digest on the spec side (an annotation, a pinned sibling) was reported as «status.imageDigest is missing» — the operator must see what is actually wrong"""
+    service = [_service("s", "rev-2", f"{HOST}/backend:backend-tag2")]
+    annotated = {"metadata": {"name": "rev-2", "annotations": {"build-digest": _digest(9)}}, "spec": {"containers": [{"image": f"{HOST}/backend:backend-tag2"}]},
+                 "status": {"imageDigest": f"{HOST}/backend@{_digest(2)}"}}
+    assert any("스펙 쪽" in p and "rev-2" in p for p in gate.collect(service, [annotated], hosts={AR_HOST}).problems)
+    missing = _revision("rev-2", f"{HOST}/backend:backend-tag2")
+    assert any("status.imageDigest가 없다" in p for p in gate.collect(service, [missing], hosts={AR_HOST}).problems)
+    sidecar = {"metadata": {"name": "rev-2"}, "spec": {"containers": [{"image": f"{HOST}/backend:backend-tag2"}, {"image": SQL_PROXY}]}, "status": {"imageDigest": _digest(2)}}
+    assert any("범위 밖" in p for p in gate.collect(service, [sidecar], hosts={AR_HOST}).problems)
+
+
 def test_an_image_value_that_is_not_a_string_is_not_skipped():
     """the QA finding: `{"image": {"name": "registry.example.com/x/y:1"}}` next to a good sibling image used to pass — the walker only recursed into it"""
     odd = {"containers": [{"image": f"{HOST}/backend:backend-tag2"}, {"image": {"name": "registry.example.com/x/y:1"}}]}
