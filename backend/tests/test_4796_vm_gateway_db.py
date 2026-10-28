@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import re
 from pathlib import Path
 
@@ -760,8 +761,8 @@ def test_the_connection_budget_of_the_gateway_server_holds_the_overlap_of_two_re
 
 def test_the_lens_of_the_security_domain_is_in_the_runbook_as_controls_that_can_be_run() -> None:
     sec = (_VM / "RUNBOOK.md").read_text().split("## 13. The support gateway's database on the VM")[1]
-    for token in ("default-allow-internal", "--priority 900 --action DENY --rules tcp:5432", "--priority 800 --action ALLOW --rules tcp:5432 --target-tags $VM --source-tags support-gateway-dev",
-                  "Negative: the same connection from another Cloud Run workload", "a **subnet of its own for the gateway**", "`gw_admin|t` and `support_gw|f`", "permission denied to COPY to or from an external program",
+    for token in ("--priority 900 --action DENY --rules tcp:5432", "--priority 800 --action ALLOW --rules tcp:5432 --target-tags $VM --source-tags support-gateway-dev",
+                  "**Negative — before step 5, as its hard condition:**", "a **subnet of its own for the gateway**", "`gw_admin|t` and `support_gw|f`", "permission denied to COPY to or from an external program",
                   "never 0", "grep -c -F -- \"$PW\"", "no password and no way in over any network address", "ordinary role", "never logs what a statement was run with",
                   "subnets describe default", "an empty value means the variable is not sent at all"):
         assert token in sec, token
@@ -1028,3 +1029,103 @@ def test_the_runbook_states_that_a_failed_release_gives_the_gateway_database_bac
 def test_the_runbook_says_the_internal_address_must_stay_the_same_after_step_3() -> None:
     rb = (_VM / "RUNBOOK.md").read_text()
     assert "**the address must never change afterwards**" in rb and "the secret would have to follow before the next deploy" in rb
+
+
+# ── the review of the security domain (2026-10-28): one transaction, two different secrets, the order of the firewall, what a public repository says ──────────────────────
+
+def test_the_first_start_statements_run_as_one_transaction_after_the_logging_is_off(tmp_path: Path) -> None:
+    p, args, sql, pgdata, rules = _init_run(tmp_path)
+    assert p.returncode == 0, p.stderr
+    lines = [l for l in sql.splitlines() if l.strip()]
+    begin, commit = lines.index("BEGIN;"), lines.index("COMMIT;")
+    assert lines[:3] == ["SET log_min_duration_statement = -1;", "SET log_min_error_statement = 'panic';", "SET log_statement = 'none';"] and begin == 3, "the session settings come first and stay outside the transaction"
+    assert commit == len(lines) - 1
+    inside = lines[begin + 1:commit]
+    assert [l.split()[0] for l in inside] == ["CREATE", "ALTER", "REVOKE", "GRANT", "REVOKE", "REVOKE"] and all(l.endswith(";") for l in inside), inside
+
+
+def _postgres_binaries() -> Path | None:
+    import glob
+    import shutil
+    found = shutil.which("initdb")
+    cands = [Path(found).parent] if found else []
+    cands += [Path(p).parent for p in sorted(glob.glob("/usr/lib/postgresql/*/bin/initdb") + glob.glob("/opt/homebrew/opt/postgresql@*/bin/initdb"), reverse=True)]
+    return cands[0] if cands else None
+
+
+@pytest.mark.skipif(_postgres_binaries() is None or os.geteuid() == 0, reason="needs the Postgres binaries and a user that is not root (initdb refuses root)")
+def test_on_a_real_server_a_first_start_that_fails_leaves_no_role_behind_and_can_be_run_again(tmp_path: Path) -> None:
+    """what the lens of the security domain reproduced: with statements that commit one by one, the second one failing left the role of the first one (and the script could not be run again: «role exists»)"""
+    import shutil
+    import subprocess
+    import tempfile
+    bins = _postgres_binaries()
+    work = Path(tempfile.mkdtemp(prefix="gwinit"))   # short: a unix socket path has a length limit
+    port = str(50000 + (os.getpid() % 10000))
+    try:
+        data, sock = work / "data", work / "sock"
+        sock.mkdir()
+        run = lambda *a, **kw: subprocess.run([str(bins / a[0]), *a[1:]], capture_output=True, text=True, timeout=60, **kw)  # noqa: E731
+        assert run("initdb", "-D", str(data), "-U", "gw_admin", "--auth-local=trust", "--auth-host=trust").returncode == 0
+        assert run("pg_ctl", "-D", str(data), "-l", str(work / "log"), "-o", f"-c listen_addresses='' -k {sock} -p {port} -c log_min_duration_statement=0", "-w", "start").returncode == 0
+        assert run("createdb", "-h", str(sock), "-p", port, "-U", "gw_admin", "support_gateway").returncode == 0
+        rules = work / "pg_hba.conf"
+        rules.write_text("local all all trust\n")
+        script = work / "init.sh"
+        script.write_text((_VM / "gateway-db-init.sh").read_text().replace("/etc/postgresql/pg_hba.conf", str(rules)))
+        env = {"PATH": f"{bins}:/usr/bin:/bin", "PGHOST": str(sock), "PGPORT": port, "PGDATA": str(data), "POSTGRES_USER": "gw_admin", "POSTGRES_DB": "support_gateway",
+               "GATEWAY_APP_USER": "support_gw", "GATEWAY_APP_PASSWORD": GW_PASSWORD, "HOME": str(work)}
+        roles = lambda: run("psql", "-h", str(sock), "-p", port, "-U", "gw_admin", "-d", "postgres", "-X", "-A", "-t", "-c", "select rolname from pg_roles where rolname = 'support_gw'").stdout.strip()  # noqa: E731
+        failing = subprocess.run(["bash", str(script)], env={**env, "POSTGRES_DB": "no_such_database"}, capture_output=True, text=True, timeout=60)
+        assert failing.returncode != 0 and roles() == "", "the role of the first statement is not left behind by the second one failing"
+        again = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True, timeout=60)
+        assert again.returncode == 0 and roles() == "support_gw", again.stderr
+        flags = run("psql", "-h", str(sock), "-p", port, "-U", "gw_admin", "-d", "postgres", "-X", "-A", "-t", "-c",
+                    "select rolsuper::text || rolconnlimit from pg_roles where rolname = 'support_gw'").stdout.strip()
+        assert flags == "false24"
+        assert GW_PASSWORD not in (work / "log").read_text(), "and the password is in no line of the log, with every statement logged"
+    finally:
+        subprocess.run([str(bins / "pg_ctl"), "-D", str(work / "data"), "-m", "immediate", "stop"], capture_output=True, timeout=60)
+        shutil.rmtree(work, ignore_errors=True)
+
+
+@pytest.mark.parametrize("gw_secret_value", [S.PASSWORD, S.PASSWORD + "\n", S.PASSWORD + "\r\n"])
+def test_a_gateway_password_that_is_the_same_value_as_the_main_databases_stops_the_release(tmp_path: Path, gw_secret_value: str) -> None:
+    world = _make_world(tmp_path, secret_overrides={GW_SECRET_ID: gw_secret_value})
+    world.publish()
+    assert world.dep.run_once() == "failed"
+    st = S._state(world, "failed.json")
+    assert st["phase"] == "pre-swap" and "the same value as the main database's" in st["detail"]
+    assert S.PASSWORD not in st["detail"] and not [c for c in world.runner.calls if "up" in c["args"]], "named by words only, nothing was started"
+
+
+def test_two_different_passwords_are_still_accepted(tmp_path: Path) -> None:
+    world = _make_world(tmp_path)
+    world.publish()
+    assert world.dep.run_once() == "deployed"
+
+
+def test_the_runbook_makes_the_firewall_a_hard_condition_of_step_five_and_measures_the_negative_control_before_it() -> None:
+    rb = (_VM / "RUNBOOK.md").read_text().split("## 13. The support gateway's database on the VM")[1]
+    row5 = next(l for l in rb.splitlines() if l.startswith("| 5 |"))
+    assert "only after the firewall pair of step 3 exists and the negative control below has been measured" in row5 and "times out" in row5 and "«refused»" in row5
+    assert "**Negative — before step 5, as its hard condition:**" in rb and "**Positive — after step 5, before any data moves:**" in rb
+
+
+def test_the_public_repository_does_not_describe_what_the_projects_broad_rule_lets_reach_the_vm() -> None:
+    for path in ("RUNBOOK.md", "compose.yml", "bin/gateway-db-firewall.sh", "CUTOVER-gateway-dev.md"):
+        f = _VM / path
+        if not f.exists():
+            continue
+        text = f.read_text()
+        for phrase in ("default-allow-internal", "EVERY machine", "every machine on the default network", "65534", "prod's among them"):
+            assert phrase not in text, (path, phrase)
+    assert "A broader allow rule exists separately in the project, so an allow rule alone would narrow nothing" in (_VM / "RUNBOOK.md").read_text()
+
+
+def test_the_metadata_rule_is_ipv4_only_and_says_so_while_nothing_enables_ipv6() -> None:
+    script = (_VM / "bin/gateway-db-firewall.sh").read_text()
+    assert "IPv4 only, on purpose" in script and "ip6tables" in script
+    compose = yaml.safe_load((_VM / "compose.yml").read_text())
+    assert not compose["networks"]["gateway-db"].get("enable_ipv6"), "the bridge has no IPv6 network"
+    assert "The rule that keeps the metadata server out of reach is IPv4 only" in (_VM / "RUNBOOK.md").read_text()

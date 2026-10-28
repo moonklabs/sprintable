@@ -3,6 +3,7 @@
 # and has no reason to ask Google for anything; if a mistake in it ever ran a program on the server, the VM service account's token must not be one request away. Idempotent; run at boot (and whenever docker restarts) by
 # sprintable-gateway-db-firewall.service, which then starts the container, and checked by the deployer from INSIDE the container before a release is swapped in.
 set -euo pipefail
+# IPv4 only, on purpose: IPv6 is off on this VM and in docker and the bridge has no IPv6 network (compose.yml). Turning IPv6 on needs the same rule with ip6tables FIRST (RUNBOOK section 13).
 rule=(DOCKER-USER -i br-gwdb -d 169.254.169.254 -j DROP)
 if ! iptables -C "${rule[@]}" 2> /dev/null; then
   iptables -I DOCKER-USER 1 "${rule[@]:1}"

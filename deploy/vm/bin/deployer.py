@@ -553,6 +553,9 @@ class Deployer:
                 gw_password = self._read_secret(gw["password_secret"])
                 gw_password = gw_password[:-2] if gw_password.endswith("\r\n") else gw_password[:-1] if gw_password.endswith("\n") else gw_password
                 renv.check_password(gw_password, "the support gateway database's password")
+                if gw_password == db_password:
+                    # the secrets are told apart by NAME (render_env); the same VALUE in both would hand the backend's database password to the gateway's role
+                    raise renv.EnvError("the support gateway database's password is the same value as the main database's: they must be two different secrets")
                 if self.private_ip is None:
                     raise renv.EnvError("this deploy cannot read the VM's private address")
                 gateway = {"user": gw["user"], "name": gw["name"], "password": gw_password, "bind": renv.check_private_address(self.private_ip())}
