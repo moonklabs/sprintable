@@ -60,6 +60,19 @@ case "$cmd" in
 # written by front-door.sh — a temporary pass-through, see RUNBOOK
 {
 	email $email
+	# Caddy's default log (its stream of errors, stderr): the same filter as the access log of the stack's Caddyfile (P5).
+	log {
+		output stderr
+		format filter {
+			wrap json
+			fields {
+				request>headers delete
+				request>tls delete
+				resp_headers delete
+				request>uri delete
+			}
+		}
+	}
 	servers {
 		protocols h1 h2
 	}

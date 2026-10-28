@@ -342,3 +342,19 @@ def test_a_prod_vm_takes_only_the_prod_backend_in_this_project_and_not_the_dev_h
     assert box("passthrough", "--host", "api.sprintable.ai", "--upstream", OLD_UP)[0].returncode == 2
     assert box("passthrough", "--host", "api.sprintable.ai", "--upstream", "https://sprintable-backend-prod-111111111111.asia-northeast3.run.app")[0].returncode == 2
     assert box("passthrough", "--host", "api.sprintable.ai", "--upstream", UP.replace("-dev-", "-prod-"))[0].returncode == 0
+
+
+def test_the_front_door_filters_caddys_error_log_like_the_stacks_access_log(box) -> None:
+    """P5 follow-up: Caddy's default log (the stream of errors, stderr) carries the same filter in the temporary pass-through as in the stack's Caddyfile; the global block sits before `servers`"""
+    p, _ = box("passthrough", "--host", HOST, "--upstream", UP)
+    assert p.returncode == 0, p.stderr
+    text = re.sub(r"(?m)^\s*#.*$", "", box.caddyfile.read_text())
+    head = text.split(f"{HOST} {{")[0]
+    log = head.split("log {", 1)[1].split("\n\t}\n", 1)[0]
+    assert "output stderr" in log and "format filter {" in log and "wrap json" in log
+    for removed in ("request>headers delete", "request>tls delete", "resp_headers delete", "request>uri delete"):
+        assert removed in log, removed
+    assert head.index("log {") < head.index("servers {"), "before `servers`, as in the stack's Caddyfile"
+    stack = re.sub(r"(?m)^\s*#.*$", "", (_ROOT / "deploy/vm/Caddyfile").read_text())
+    for removed in ("request>headers delete", "request>tls delete", "resp_headers delete", "request>uri delete"):
+        assert removed in stack.split("{$API_HOST}")[0], "the stack's global block carries the same four lines"
