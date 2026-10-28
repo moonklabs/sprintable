@@ -321,11 +321,53 @@ def test_duration_forms(text, seconds):
 
 def test_repo_base_policy_shape():
     base = _base()
-    assert [r["name"] for r in base] == ["keep-recent-30", "delete-older-than-30d"]
+    assert [r["name"] for r in base] == ["keep-recent-30", "keep-env-latest-tags", "delete-older-than-30d"]
     assert base[0]["action"]["type"] == "Keep" and base[0]["mostRecentVersions"]["keepCount"] == 30
-    assert base[1]["action"]["type"] == "Delete" and base[1]["condition"]["olderThan"] == "2592000s"
+    assert base[1]["action"]["type"] == "Keep" and base[1]["condition"] == {"tagState": "tagged", "tagPrefixes": ["latest-prod", "latest-dev"]}
+    assert base[2]["action"]["type"] == "Delete" and base[2]["condition"]["olderThan"] == "2592000s"
     # keep-in-use is never committed with a digest list: it is generated right before applying (a stale list must not become the source of truth)
     assert all(r["name"] != "keep-in-use" for r in base)
+
+
+def _tagged_old(package: str, n: int, tags: list[str], *, days: int = 45) -> dict:
+    return {"package": f"{HOST}/{package}", "version": _digest(n), "tags": tags, "createTime": (NOW - timedelta(days=days)).isoformat().replace("+00:00", "Z")}
+
+
+def test_the_image_an_environment_was_last_built_for_stays_however_old_and_however_many_newer_dev_builds_pushed_it_out():
+    """story 4790 (PO, 10-28): the policy is live. A prod image that is not rebuilt for 30 days and has fallen out of its package's newest 30 (dev pushes dozens of builds) would be deleted, and a new
+    instance of the serving revision could not pull it. The pipeline already tags every build `latest-<env>` (cloudbuild.yaml), so the base policy keeps whatever carries that tag"""
+    prod = _tagged_old("backend", 90_001, ["latest-prod", "abc1234"])
+    dev = _tagged_old("backend", 90_002, ["latest-dev", "def5678"])
+    old_by_commit = _tagged_old("backend", 90_003, ["abc9999"])  # positive control: a build that carries only its commit tag is not protected
+    versions = gate.load_versions(_images("backend", 60) + [prod, dev, old_by_commit])
+    deleted = gate.simulate(_base(), versions, NOW)
+    assert ("backend", _digest(90_001)) not in deleted and ("backend", _digest(90_002)) not in deleted
+    assert ("backend", _digest(90_003)) in deleted
+    # the same images under a base policy without the tag rule: the prod image is deleted (the test can go red)
+    without_rule = [r for r in _base() if r["name"] != "keep-env-latest-tags"]
+    assert {("backend", _digest(90_001)), ("backend", _digest(90_002))} <= gate.simulate(without_rule, versions, NOW)
+
+
+def test_the_tag_rule_is_per_environment_prefix_so_another_latest_tag_is_not_kept():
+    """only the two environment tags are kept: a stray `latest` or `latest-staging` tag does not pin an image forever"""
+    versions = gate.load_versions(_images("backend", 60) + [_tagged_old("backend", 90_004, ["latest"]), _tagged_old("backend", 90_005, ["latest-staging"])])
+    deleted = gate.simulate(_base(), versions, NOW)
+    assert {("backend", _digest(90_004)), ("backend", _digest(90_005))} <= deleted
+
+
+def test_the_moved_tag_leaves_the_previous_prod_image_to_the_normal_rules():
+    """the limit, stated: the tag moves at the next prod build, so the previous prod image (a rollback target) is protected only by the newest-30 and 30-day rules — or by keep-in-use at the time the policy is generated"""
+    previous = _tagged_old("backend", 90_006, ["abc0001"])  # was latest-prod until the next build moved the tag
+    versions = gate.load_versions(_images("backend", 60) + [previous])
+    assert ("backend", _digest(90_006)) in gate.simulate(_base(), versions, NOW)
+    in_use = {("backend", _digest(90_006))}
+    assert gate.check(versions, in_use, gate.build_policy(_base(), in_use), NOW)[1] == set()
+
+
+def test_the_generated_policy_keeps_the_tag_rule_next_to_keep_in_use():
+    in_use = {("backend", _digest(45))}
+    policy = gate.build_policy(_base(), in_use)
+    assert [r["name"] for r in policy] == ["keep-in-use", "keep-recent-30", "keep-env-latest-tags", "delete-older-than-30d"]
 
 
 def _without(argv: list[str], flag: str) -> list[str]:
