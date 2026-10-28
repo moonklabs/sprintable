@@ -343,6 +343,8 @@ _DECLARED_SUBSTITUTIONS = {
     "_GCS_MEMO_ATTACHMENTS_BUCKET",
     # story #3079 — realtime path-filter 판정을 GHA에서 계산해 넘기는 skip 플래그(GCE·Cloud Run).
     "_REALTIME_GCE_SKIP", "_REALTIME_CLOUDRUN_SKIP",
+    # story 4796 — dev runs on the VM: exactly "true" makes deploy-backend / deploy-frontend / the migrate steps skip (cloud-build.yml sets it for dev).
+    "_CLOUD_RUN_APP_SKIP",
     # story #3118(Sign in with Apple) — deploy-backend(bash entrypoint)가 이제 이 3개를
     # 직접 참조한다. _APPLE_TEAM_ID는 이전엔 deploy-frontend(순수 gcloud args 리스트 —
     # 이 가드가 스캔하는 4개 bash 스텝 밖)에서만 쓰여 이 목록에 없어도 무해했으나, backend
@@ -421,6 +423,7 @@ def _backend_step_env(
     return {
         **os.environ,
         "_DEPLOY_ENV": deploy_env,
+        "_CLOUD_RUN_APP_SKIP": "false",
         "_FASTAPI_URL": "https://example.run.app",
         # story #3583-BE — set -u라 미설정이면 스크립트가 죽는다(_FASTAPI_URL과 동일 이유).
         "_BACKEND_URL": "https://example.run.app",
@@ -916,7 +919,7 @@ def _run_frontend_deploy_argv(deploy_env: str, cpu_flags: str = "", resources: s
     stub = 'gcloud() { printf "ARG=%s\\n" "$@"; }\n'
     env = {
         **os.environ,
-        "_DEPLOY_ENV": deploy_env, "_REALTIME_URL": "https://rt.example", "_APPLE_TEAM_ID": "JN798BC4KC",
+        "_DEPLOY_ENV": deploy_env, "_CLOUD_RUN_APP_SKIP": "false", "_REALTIME_URL": "https://rt.example", "_APPLE_TEAM_ID": "JN798BC4KC",
         "_MOBILE_APP_LINK_ORIGIN": "https://m.example", "_NEXT_PUBLIC_APP_URL": "https://app.example",
         "_AR_REGION": "asia-northeast3", "PROJECT_ID": "p", "_AR_REPO": "r", "COMMIT_SHA": "c",
         "_FRONTEND_TIMEOUT": "300", "_FRONTEND_MIN_INSTANCES": "1", "_FRONTEND_MAX_INSTANCES": "2", "_CPU_FLAGS": cpu_flags, "_FRONTEND_RESOURCES": resources,

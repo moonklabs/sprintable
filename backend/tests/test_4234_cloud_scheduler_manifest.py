@@ -401,3 +401,56 @@ def test_base_url_is_bound_to_the_environment_and_equals_the_declared_api_name(m
     with pytest.raises(SystemExit):
         mod.main(["--env", "dev", "--base-url", mod._API_BASE_URLS["prod"]], run=fake)
     assert not fake.calls
+
+
+# ── story 4796: the Cloud Run backend is gone, the Authorization value comes from the VM's declaration ────────────────────────────────────────
+
+def test_vm_bearer_mode_reads_no_cloud_run_service_and_uses_the_secret_the_vm_declaration_names(manifest, capsys):
+    mod = _load_apply_module()
+    new = "https://dev-api.sprintable.ai"
+    fake = _FakeGcloud([_live_from_desired(j) for j in mod.desired_jobs(manifest, "dev", _SECRET, base_url=_URL)])
+    mod.main(["--env", "dev", "--base-url", new, "--bearer-from-vm-env", "--apply"], run=fake)  # the fake never changes its live list, so the closing re-read reports a difference: only the calls are asserted
+    out = capsys.readouterr().out
+    assert not [c for c in fake.calls if c[:2] == ["run", "services"]], "no Cloud Run service is described"
+    assert ["secrets", "versions", "access", "latest", "--secret=cron-secret"] in fake.calls
+    assert "Cloud Run 서비스는 읽지 않음" in out and "services.backend.secrets.CRON_SECRET -> cron-secret:latest" in out and _SECRET not in out
+    assert [c for c in fake.calls if c[:3] == ["scheduler", "jobs", "update"]], "live jobs still point at the old address, so they are updated to the VM's name"
+    for call in fake.calls:
+        if call[:3] == ["scheduler", "jobs", "update"]:
+            assert any(a.startswith("--uri=" + new + "/") for a in call)
+
+
+def test_vm_bearer_mode_needs_the_vm_address_and_the_default_mode_still_describes_the_cloud_run_service(manifest):
+    mod = _load_apply_module()
+    fake = _FakeGcloud([])
+    with pytest.raises(SystemExit):
+        mod.main(["--env", "dev", "--bearer-from-vm-env"], run=fake)
+    assert not fake.calls, "refused before any call: without the VM's name the jobs would have no host"
+    default = _FakeGcloud([])
+    mod.main(["--env", "dev"], run=default)
+    assert ["run", "services", "describe", "sprintable-backend-dev", "--region=asia-northeast3", "--format=json"] in default.calls
+
+
+def test_vm_bearer_mode_fails_without_a_declared_secret_or_with_an_empty_one(tmp_path):
+    mod = _load_apply_module()
+    (tmp_path / "dev.yaml").write_text("services:\n  backend:\n    secrets:\n      OTHER: x\n  frontend:\n    secrets:\n      CRON_SECRET: wrong-section\n")
+    with pytest.raises(SystemExit, match="declares no secret for CRON_SECRET"):
+        mod.resolve_bearer_from_vm_env(lambda a: _SECRET, "dev", env_dir=tmp_path)
+    (tmp_path / "dev.yaml").write_text("services:\n  backend:\n    secrets:\n      CRON_SECRET: cron-secret\n")
+    with pytest.raises(SystemExit, match="is empty"):
+        mod.resolve_bearer_from_vm_env(lambda a: "  \n", "dev", env_dir=tmp_path)
+    value, source = mod.resolve_bearer_from_vm_env(lambda a: _SECRET + "\n", "dev", env_dir=tmp_path)
+    assert value == _SECRET and "cron-secret:latest" in source and _SECRET not in source
+
+
+def test_the_dependency_free_reader_agrees_with_a_yaml_parser_on_the_real_declarations_and_on_awkward_text():
+    import yaml
+    mod = _load_apply_module()
+    root = Path(__file__).resolve().parents[2]
+    for env_name in ("dev", "prod"):
+        text = (root / f"deploy/vm/env/{env_name}.yaml").read_text()
+        assert mod._declared_backend_secret(text, "CRON_SECRET") == yaml.safe_load(text)["services"]["backend"]["secrets"]["CRON_SECRET"] != ""
+    awkward = ("# top\nother:\n  backend:\n    secrets:\n      CRON_SECRET: another-section\nservices:\n  # c\n  frontend:\n    secrets:\n      CRON_SECRET: fe\n  backend:\n    live_plain: {}\n    secrets:  # env -> id\n"
+               "      A: a\n\n      CRON_SECRET: \"quoted-id\"  # why\n    computed:\n      CRON_SECRET: not-here\n")
+    assert mod._declared_backend_secret(awkward, "CRON_SECRET") == "quoted-id"
+    assert mod._declared_backend_secret("services:\n  backend:\n    computed:\n      CRON_SECRET: x\n", "CRON_SECRET") == ""

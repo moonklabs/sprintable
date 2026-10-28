@@ -32,14 +32,14 @@ def _script(step_id: str) -> str:
     return args[1]
 
 
-def _run_step(tmp_path: Path, fastapi_url: str, env: str = "dev") -> tuple[int, list[list[str]]]:
+def _run_step(tmp_path: Path, fastapi_url: str, env: str = "dev", skip: str = "false") -> tuple[int, list[list[str]]]:
     fake = tmp_path / "bin"
     fake.mkdir(exist_ok=True)
     log = tmp_path / "calls.log"
     log.write_text("")
     (fake / "python3").write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_LOG"\n')
     (fake / "python3").chmod(0o755)
-    body = _script("apply-cloud-scheduler").replace("${_FASTAPI_URL}", fastapi_url).replace("${_DEPLOY_ENV}", env).replace("$$", "$")
+    body = _script("apply-cloud-scheduler").replace("${_FASTAPI_URL}", fastapi_url).replace("${_DEPLOY_ENV}", env).replace("${_CLOUD_RUN_APP_SKIP}", skip).replace("$$", "$")
     assert not re.search(r"\$\{_[A-Z_]+\}", body), "an unsubstituted Cloud Build variable is left in the step"
     p = subprocess.run(["bash", "-c", body], env={"PATH": f"{fake}:/usr/bin:/bin", "FAKE_LOG": str(log), "HOME": str(tmp_path)}, capture_output=True, text=True, timeout=30)
     return p.returncode, [line.split() for line in log.read_text().splitlines()]

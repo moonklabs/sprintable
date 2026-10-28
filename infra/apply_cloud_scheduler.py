@@ -241,6 +241,43 @@ def resolve_bearer(run: Runner, spec: dict, *, service: str) -> tuple[str, str]:
     raise SystemExit(f"FAIL: {service}에 CRON_SECRET이 없음 — 스케줄러 인증 헤더를 만들 수 없다")
 
 
+VM_ENV_DIR = Path(__file__).resolve().parent.parent / "deploy" / "vm" / "env"
+
+
+def _declared_backend_secret(text: str, name: str) -> str:
+    """The secret id the env declaration gives `name` under `services: backend: secrets:` — read by indentation, without a YAML library: this runs in the Cloud Build cloud-sdk image, which is not
+    promised to carry one. The file's shape is pinned by its own tests (deploy/vm/env/*.yaml, test_4796_vm_env.py)."""
+    state = 0  # 0 outside, 1 inside services:, 2 inside backend:, 3 inside secrets:
+    for line in text.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        key = line.strip().split(":", 1)[0]
+        if indent == 0:
+            state = 1 if key == "services" else 0
+        elif state >= 1 and indent == 2:
+            state = 2 if key == "backend" else 1
+        elif state >= 2 and indent == 4:
+            state = 3 if key == "secrets" else 2
+        elif state == 3 and indent == 6 and key == name:
+            value = line.strip().split(":", 1)[1].split("#", 1)[0].strip().strip('"').strip("'")
+            return value
+    return ""
+
+
+def resolve_bearer_from_vm_env(run: Runner, env: str, *, env_dir: Path = VM_ENV_DIR) -> tuple[str, str]:
+    """story 4796 — the Authorization value from the secret the VM's own env declaration names for `CRON_SECRET` (`services.backend.secrets`), read at its latest version, the same way the VM's
+    deploy reads it. Used once the Cloud Run backend is gone (nothing to describe); same rules as above: a secret in Secret Manager only, never an empty value, never printed."""
+    secret = _declared_backend_secret((env_dir / f"{env}.yaml").read_text(), "CRON_SECRET")
+    if not secret:
+        raise SystemExit(f"FAIL: {env}.yaml declares no secret for CRON_SECRET on the backend — the scheduler's Authorization header has no source")
+    value = run(["secrets", "versions", "access", "latest", f"--secret={secret}"]).strip()
+    if not value:
+        raise SystemExit(f"FAIL: secret {secret}:latest is empty")
+    _SECRETS.add(value)
+    return value, f"{env}.yaml services.backend.secrets.CRON_SECRET -> {secret}:latest"
+
+
 def _describe(job: DesiredJob) -> str:
     return f"{job.name} [{job.http_method} {job.uri} · {job.schedule} {job.time_zone}]"
 
@@ -258,7 +295,14 @@ def main(argv: list[str] | None = None, *, run: Runner = _gcloud) -> int:
         help="작업 uri의 호스트를 Cloud Run status.url 대신 이 https 주소로(경로 없이) — 백엔드가 VM으로 옮겨 가는 동안(story 4796) 잡이 새 주소를 부르게. "
              "비우면 지금까지와 같다. 인증 헤더의 원천은 그대로 실물 백엔드 서비스의 CRON_SECRET.",
     )
+    parser.add_argument(
+        "--bearer-from-vm-env", action="store_true",
+        help="story 4796: take the Authorization value from the secret the VM's env declaration names for CRON_SECRET and do not read any Cloud Run service — for the time after the Cloud Run backend is "
+             "removed. Needs --base-url (the jobs must call the VM's API name).",
+    )
     args = parser.parse_args(argv)
+    if args.bearer_from_vm_env and not args.base_url:
+        raise SystemExit("FAIL: --bearer-from-vm-env needs --base-url — without the VM's API name the jobs would have no host (the Cloud Run status.url is not read in this mode)")
     if args.base_url and args.base_url != _API_BASE_URLS.get(args.env):
         raise SystemExit(
             f"FAIL: --base-url은 이 환경({args.env})의 API 주소 {_API_BASE_URLS.get(args.env)} 하나만 받는다 — 작업 헤더에 CRON_SECRET이 실린다"
@@ -268,11 +312,17 @@ def main(argv: list[str] | None = None, *, run: Runner = _gcloud) -> int:
     target = manifest["environments"][args.env]
     location = target["location"]
     service = target["backend_service"]
-    spec = describe_backend(run, service=service, region=location)
-    base_url = args.base_url or backend_url(spec, service=service)
-    bearer, source = resolve_bearer(run, spec, service=service)
-    print(f"백엔드: {service} " + (f"--base-url = {base_url} (status.url 대신)" if args.base_url else f"status.url = {base_url}"))
-    print(f"Authorization 원천: {service} CRON_SECRET ({source})")
+    if args.bearer_from_vm_env:
+        base_url = args.base_url
+        bearer, source = resolve_bearer_from_vm_env(run, args.env)
+        print(f"백엔드: VM --base-url = {base_url} (Cloud Run 서비스는 읽지 않음)")
+        print(f"Authorization 원천: {source}")
+    else:
+        spec = describe_backend(run, service=service, region=location)
+        base_url = args.base_url or backend_url(spec, service=service)
+        bearer, source = resolve_bearer(run, spec, service=service)
+        print(f"백엔드: {service} " + (f"--base-url = {base_url} (status.url 대신)" if args.base_url else f"status.url = {base_url}"))
+        print(f"Authorization 원천: {service} CRON_SECRET ({source})")
 
     desired = desired_jobs(manifest, args.env, bearer, base_url=base_url)
     live = json.loads(run(["scheduler", "jobs", "list", f"--location={location}", "--format=json"]))
