@@ -335,7 +335,7 @@ def _tagged_old(package: str, n: int, tags: list[str], *, days: int = 45) -> dic
 
 def test_the_image_an_environment_was_last_built_for_stays_however_old_and_however_many_newer_dev_builds_pushed_it_out():
     """story 4790 (PO, 10-28): the policy is live. A prod image that is not rebuilt for 30 days and has fallen out of its package's newest 30 (dev pushes dozens of builds) would be deleted, and a new
-    instance of the serving revision could not pull it. The pipeline already tags every build `latest-<env>` (cloudbuild.yaml), so the base policy keeps whatever carries that tag"""
+    instance of the serving revision could not pull it. The Cloud Build pipeline already tags the frontend, backend and support-gateway builds `latest-<env>` (cloudbuild.yaml), so the base policy keeps whatever carries that tag (the dev VM's `frontend-vm` build does not: see below)"""
     prod = _tagged_old("backend", 90_001, ["latest-prod", "abc1234"])
     dev = _tagged_old("backend", 90_002, ["latest-dev", "def5678"])
     old_by_commit = _tagged_old("backend", 90_003, ["abc9999"])  # positive control: a build that carries only its commit tag is not protected
@@ -362,6 +362,26 @@ def test_the_moved_tag_leaves_the_previous_prod_image_to_the_normal_rules():
     assert ("backend", _digest(90_006)) in gate.simulate(_base(), versions, NOW)
     in_use = {("backend", _digest(90_006))}
     assert gate.check(versions, in_use, gate.build_policy(_base(), in_use), NOW)[1] == set()
+
+
+def _vm_frontend(count: int) -> list[dict]:
+    """the dev VM frontend build (`cloudbuild-vm.yaml`, package `frontend-vm`) is pushed with its commit tag only — no `latest-dev` — so the tag rule does not reach it. Build `i` is `i` days old"""
+    return [
+        {"package": f"{HOST}/frontend-vm", "version": _digest(80_000 + i), "tags": [f"sha{i}"], "createTime": (NOW - timedelta(days=i)).isoformat().replace("+00:00", "Z")}
+        for i in range(count)
+    ]
+
+
+def test_the_vm_frontend_package_is_outside_the_tag_rule_and_rides_on_newest_30_then_on_keep_in_use():
+    """the limit the tag rule leaves, stated (codex, PR 5317): while the package has no more than 30 builds, the newest-30 rule keeps all of them; past 30, an old build that nothing newer replaced is deleted at
+    day 30 unless the generated `keep-in-use` names it. This test does not claim the VM frontend is protected by the tag rule — it is not (story 4796 decides whether to tag it)"""
+    small = gate.load_versions(_vm_frontend(10))
+    assert gate.simulate(_base(), small, NOW) == set()
+    big = gate.load_versions(_vm_frontend(40))
+    deleted = gate.simulate(_base(), big, NOW)
+    assert deleted == {("frontend-vm", _digest(80_000 + i)) for i in range(31, 40)}  # positive control: beyond the newest 30 and older than 30 days they go
+    serving = {("frontend-vm", _digest(80_000 + 35))}
+    assert gate.check(big, serving, gate.build_policy(_base(), serving), NOW)[1] == set()
 
 
 def test_the_generated_policy_keeps_the_tag_rule_next_to_keep_in_use():
