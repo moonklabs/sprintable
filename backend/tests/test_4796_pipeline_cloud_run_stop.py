@@ -73,13 +73,14 @@ def _original_argv(step_id: str, values: dict[str, str]) -> list[str]:
 
 # ── the switch and its wiring ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-def test_the_switch_defaults_to_deploying_and_only_dev_turns_it_on() -> None:
+def test_the_switch_defaults_to_deploying_and_only_dev_and_since_p3_prod_turn_it_on() -> None:
     assert re.search(r'^  _CLOUD_RUN_APP_SKIP: "false"$', _CLOUDBUILD, flags=re.M), "the default deploys: a forgotten value can only mean «as before»"
     block = _WORKFLOW.split('if [[ "$REF_NAME" == "main" ]]; then')[1]
     prod, dev = re.split(r"^          else\n", block, maxsplit=1, flags=re.M)
     assert dev.count('echo "cloud_run_app_skip=true" >> "$GITHUB_OUTPUT"') == 1
-    assert "cloud_run_app_skip" not in prod, "prod states nothing"
-    assert 'V_CLOUD_RUN_APP_SKIP="${V_CLOUD_RUN_APP_SKIP:-false}"' in _WORKFLOW, "an empty output (prod) becomes false"
+    assert prod.count('echo "cloud_run_app_skip=true" >> "$GITHUB_OUTPUT"') == 1 and prod.count("cloud_run_app_skip") == 1, "prod states it too since P3 (story 4796 AC4): exactly one line, the same word as dev's"
+    assert "Merge this ONLY after the cutover's unfreeze (step 8)" in prod and "Undo = delete this line" in prod, "the condition and the undo sit next to it"
+    assert 'V_CLOUD_RUN_APP_SKIP="${V_CLOUD_RUN_APP_SKIP:-false}"' in _WORKFLOW, "an empty output (any build that does not state it) becomes false"
     assert '_CLOUD_RUN_APP_SKIP=\\"${V_CLOUD_RUN_APP_SKIP}\\"' in _WORKFLOW
 
 
@@ -221,3 +222,12 @@ def test_the_runbook_describes_the_switch_the_six_steps_the_scheduler_source_the
     for token in ("cloud_run_app_skip=true", "_CLOUD_RUN_APP_SKIP", "--bearer-from-vm-env", "deploy/vm/env/dev.yaml", "Undo: delete the `cloud_run_app_skip` line", "before** `sprintable-backend-dev`"):
         assert token in para, token
     assert runbook.index(para) < runbook.index("## 11. Day-to-day on the VM")
+
+
+def test_the_runbook_says_prod_states_the_switch_too_and_when_it_may_be_merged() -> None:
+    text = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
+    sec = text[text.index("**The dev build without Cloud Run"):]
+    sec = sec[:sec.index("\n\n")]
+    for needle in ("and, since P3 of the prod cutover", "for prod (under `mins_explicit`; merged right after the cutover's unfreeze, never before", "(or of the prod branch for prod)"):
+        assert needle in sec, needle
+    assert "prod states nothing" not in sec
