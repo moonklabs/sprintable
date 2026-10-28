@@ -3,6 +3,19 @@
 # The browser-facing API/MCP/realtime hosts are DNS-only (not behind the Cloudflare proxy) because long-lived SSE is buffered there (design doc §front door).
 {
 	email {$ACME_EMAIL}
+	# the default log of Caddy (its stream of errors, stderr): the same filter as the access log of the two sites below.
+	log {
+		output stderr
+		format filter {
+			wrap json
+			fields {
+				request>headers delete
+				request>tls delete
+				resp_headers delete
+				request>uri delete
+			}
+		}
+	}
 	servers {
 		protocols h1 h2
 	}

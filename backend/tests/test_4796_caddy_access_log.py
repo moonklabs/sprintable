@@ -79,7 +79,7 @@ def test_the_uri_is_removed_whole_because_credentials_travel_in_the_path_too() -
 
 def test_the_global_options_and_the_proxy_settings_were_not_touched() -> None:
     sites = _sites()
-    assert "protocols h1 h2" in sites["<global>"] and "email {$ACME_EMAIL}" in sites["<global>"] and "log" not in sites["<global>"]
+    assert "protocols h1 h2" in sites["<global>"] and "email {$ACME_EMAIL}" in sites["<global>"]
     assert "reverse_proxy backend:8000 {" in sites["{$API_HOST}, {$REALTIME_HOST}"] and "flush_interval -1" in sites["{$API_HOST}, {$REALTIME_HOST}"]
     assert "encode" not in sites["{$API_HOST}, {$REALTIME_HOST}"].replace("# no `encode`", ""), "still no compression on the stream hosts"
     assert "encode zstd gzip" in sites["{$APP_HOST}"] and "reverse_proxy frontend:3000 {" in sites["{$APP_HOST}"]
@@ -108,3 +108,15 @@ def test_the_caddyfile_comment_does_not_claim_more_than_the_log_does() -> None:
     comment = "\n".join(line for line in CADDY.splitlines() if line.strip().startswith("#"))
     assert "Nothing that identifies a person" not in comment
     assert comment.count("No credential is kept") == 2 and comment.count("remote_ip / client_ip") == 2 and comment.count("an address is personal data") == 2
+
+
+def test_the_default_log_of_caddy_is_filtered_the_same_way_because_errors_carry_the_uri_and_the_headers() -> None:
+    """security lens (4796): Caddy's default log, the stream of errors on stderr, gets the same filter as the access log of the two sites. It sits in the global options, before `servers`"""
+    body = _sites()["<global>"]
+    log = body.split("log {", 1)[1].split("\n\t}\n", 1)[0]
+    assert "output stderr" in log and "format filter {" in log and "wrap json" in log
+    for removed in ("request>headers delete", "request>tls delete", "resp_headers delete", "request>uri delete"):
+        assert removed in log, removed
+    assert body.index("log {") < body.index("servers {"), "before `servers`"
+    text = RUNBOOK.split("## 11. Day-to-day on the VM")[1]
+    assert "The same filter is on Caddy's default log (the stream of errors, stderr)." in text
