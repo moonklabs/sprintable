@@ -30,12 +30,40 @@ class EnvError(Exception):
     """the environment cannot be built — the deploy must stop before it touches anything running"""
 
 
+GATEWAY_SERVICE = "support-gateway"  # the compose service (and the declaration's service key) of the support gateway (story 4796): optional, dev first
+
+
 def load_declaration(path: str | Path) -> dict:
     decl = yaml.safe_load(Path(path).read_text())
     for key in ("environment", "project", "hosts", "buckets", "database", "services"):
         if key not in decl:
             raise EnvError(f"{path}: missing «{key}»")
+    # the gateway has its own database and role inside the same Postgres: the block and the service go together, so a half-declared gateway is refused before anything runs
+    has_block, has_service = "support_gateway" in decl, GATEWAY_SERVICE in decl["services"]
+    if has_block != has_service:
+        raise EnvError(f"{path}: «support_gateway» (database block) and the «{GATEWAY_SERVICE}» service must be declared together")
+    if has_block:
+        gw_db = (decl["support_gateway"] or {}).get("database") or {}
+        missing = [k for k in ("user", "name", "password_secret") if not isinstance(gw_db.get(k), str) or not gw_db[k]]
+        if missing:
+            raise EnvError(f"{path}: support_gateway.database lacks {', '.join(missing)}")
+        if not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", gw_db["user"]) or not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", gw_db["name"]):
+            raise EnvError(f"{path}: support_gateway.database user and name must be plain lower-case identifiers")
+        if gw_db["user"] == decl["database"]["user"] or gw_db["name"] == decl["database"]["name"]:
+            raise EnvError(f"{path}: the gateway must not share the backend's database or role")
     return decl
+
+
+def check_password(password: str, what: str) -> None:
+    if not _SAFE_PASSWORD.fullmatch(password):
+        raise EnvError(f"{what} must be letters, digits, «_» or «-» only (it is placed inside a connection URL and a SQL statement) — make it with `openssl rand -hex 24`")
+
+
+def gateway_database_url(decl: Mapping, password: str) -> str:
+    """the support gateway's connection URL (asyncpg, as its settings expect): its own role and database inside the VM's Postgres, never the backend's"""
+    gw = decl["support_gateway"]["database"]
+    check_password(password, "the support gateway's database password")
+    return f"postgresql+asyncpg://{gw['user']}:{password}@db:5432/{gw['name']}"
 
 
 def load_private_plain(path: str | Path) -> dict[str, dict[str, str]]:
@@ -98,7 +126,7 @@ def build_service_env(
 
 def prefixed(service: str, name: str) -> str:
     """the name a service variable has in the process environment of `docker compose` (backend and frontend both have JWT_SECRET, NEXT_PUBLIC_APP_URL … — one shared namespace would collide)"""
-    return f"{service.upper()}__{name}"
+    return f"{service.upper().replace('-', '_')}__{name}"
 
 
 def process_environment(services: Mapping[str, Mapping[str, str]]) -> dict[str, str]:
@@ -155,6 +183,8 @@ def main(argv: list[str]) -> int:
         # every Secret Manager id the VM will read (the RUNBOOK grants access to exactly these, one by one)
         decl = load_declaration(argv[2])
         ids = {sid for svc in decl["services"].values() for sid in (svc.get("secrets") or {}).values()} | {decl["database"]["password_secret"]}
+        if "support_gateway" in decl:
+            ids.add(decl["support_gateway"]["database"]["password_secret"])
         print("\n".join(sorted(ids)))
         return 0
     if len(argv) != 3:

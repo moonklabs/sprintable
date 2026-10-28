@@ -71,6 +71,15 @@ install -d -m 0755 /opt/sprintable/bin /opt/sprintable/releases /opt/sprintable/
 for f in deployer.py render_env.py lib.sh backup.sh restore.sh restore-check.sh rowcounts.sh rowcounts.sql dump-source.sh front-door.sh; do
   install -m 0755 "$src/bin/$f" "/opt/sprintable/bin/$f"
 done
+# releases already on this VM were checked against the compose copy that is installed NOW (before this run replaces it): remember that per release (deployer.py, COMPOSE_STAMP), so that a compose change
+# does not make the release that is running impossible to prepare as the way back
+if [ -f /opt/sprintable/bin/compose.yml ]; then
+  for d in /opt/sprintable/releases/*/; do
+    if [ -f "${d}compose.yml" ] && cmp -s "${d}compose.yml" /opt/sprintable/bin/compose.yml; then
+      sha256sum "${d}compose.yml" | cut -d' ' -f1 | tr -d '\n' > "${d}.compose-sha256"
+    fi
+  done
+fi
 # the compose file the deployer holds bundles to: a bundle whose compose.yml differs from this copy is refused (changing compose = re-run this script)
 install -m 0644 "$src/compose.yml" /opt/sprintable/bin/compose.yml
 for f in "$src"/systemd/*; do install -m 0644 "$f" "/etc/systemd/system/$(basename "$f")"; done

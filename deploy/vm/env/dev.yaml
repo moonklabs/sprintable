@@ -15,6 +15,11 @@ database:
   user: sprintable
   name: sprintable
   password_secret: DB_PASSWORD_VM_DEV
+support_gateway:  # story 4796: the support gateway's own role and database inside the same Postgres (the deployer creates both, idempotently); its password is a new secret, hex like the database's
+  database:
+    user: support_gw
+    name: support_gateway
+    password_secret: SUPPORT_GATEWAY_DB_PASSWORD_VM_DEV
 services:
   backend:
     live_section: sprintable-backend-dev
@@ -147,3 +152,16 @@ services:
       - NODE_ENV
       - SERVER_TIMING_MARKERS
       - STORAGE_PROVIDER
+  support-gateway:
+    live_section: support-gateway-dev
+    overrides:  # VM-specific values; the gateway is reached by the browser directly (CORS) and calls the backend over the compose network
+      SUPPORT_GATEWAY_VERTEX_PROJECT: sprintable-494803
+      SUPPORT_GATEWAY_BACKEND_ESCALATION_EVENTS_URL: "http://backend:8000/api/v2/support/escalation-events"
+      SUPPORT_GATEWAY_CORS_ORIGINS: "https://dev-app.sprintable.ai,http://localhost:3108"
+    secrets:  # env name -> Secret Manager secret id (the live service's ids)
+      SUPPORT_GATEWAY_ADMIN_TOKEN: SUPPORT_GATEWAY_ADMIN_TOKEN_dev
+      SUPPORT_GATEWAY_TOKEN_SECRET: SUPPORT_GATEWAY_TOKEN_SECRET_dev
+    dropped:  # live variables that are deliberately not carried over
+      SUPPORT_GATEWAY_DATABASE_URL: "the live service holds the Cloud SQL URL; on the VM the deployer builds the URL from support_gateway.database and passes it by name (compose.yml)"
+    added: {}  # new on the VM (the connection pool size joins when the gateway reads it)
+    live_plain: []

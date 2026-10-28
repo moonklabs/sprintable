@@ -47,6 +47,14 @@ steps:
         fi
         printf '%s\n' "$$repo/backend@$$digest" > "$$out/backend-image.txt"
         echo "resolve-backend: $$repo/backend@$$digest"
+        # the support gateway image of this sha, pushed by the same Cloud Run build (it is built and pushed for dev whether or not the gateway runs on Cloud Run)
+        gw_digest="$$(gcloud artifacts docker images describe "$$repo/support-gateway:${COMMIT_SHA}" --format='value(image_summary.digest)')"
+        if ! [[ "$$gw_digest" =~ ^sha256:[0-9a-f]{64}$$ ]]; then
+          echo "resolve-backend: no digest for $$repo/support-gateway:${COMMIT_SHA}: «$$gw_digest»" >&2
+          exit 1
+        fi
+        printf '%s\n' "$$repo/support-gateway@$$gw_digest" > "$$out/support-gateway-image.txt"
+        echo "resolve-backend: $$repo/support-gateway@$$gw_digest"
 
   - id: build-frontend-vm
     name: gcr.io/cloud-builders/docker
@@ -112,9 +120,11 @@ steps:
         out=/workspace/vm-out
         [ -s "$$out/frontend-image.txt" ] || { echo "bundle-vm: build-frontend-vm left no frontend image — no bundle for ${COMMIT_SHA}" >&2; exit 1; }
         [ -s "$$out/backend-image.txt" ] || { echo "bundle-vm: resolve-backend left no backend image — no bundle for ${COMMIT_SHA}" >&2; exit 1; }
+        [ -s "$$out/support-gateway-image.txt" ] || { echo "bundle-vm: resolve-backend left no support gateway image — no bundle for ${COMMIT_SHA}" >&2; exit 1; }
         frontend="$$(cat "$$out/frontend-image.txt")"
         backend="$$(cat "$$out/backend-image.txt")"
-        python3 deploy/vm/bin/make_bundle.py --sha "${COMMIT_SHA}" --backend-image "$$backend" --frontend-image "$$frontend" --out "$$out/bundle"
+        gateway="$$(cat "$$out/support-gateway-image.txt")"
+        python3 deploy/vm/bin/make_bundle.py --sha "${COMMIT_SHA}" --backend-image "$$backend" --frontend-image "$$frontend" --support-gateway-image "$$gateway" --out "$$out/bundle"
         # the bundle first; then `candidates/<sha>.json` — the desired.json this sha WOULD have, at a path the VM's deployer never reads (RUNBOOK §7 step 1 copies it to desired.json)
         gcloud storage cp "$$out/bundle/bundles/${COMMIT_SHA}.tgz" "gs://${_VM_DEPLOY_BUCKET}/bundles/${COMMIT_SHA}.tgz"
         gcloud storage cp "$$out/bundle/desired.json" "gs://${_VM_DEPLOY_BUCKET}/candidates/${COMMIT_SHA}.json"

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Packs deploy/vm into a bundle and writes the desired.json that points at it (story 4796).
 
-  make_bundle.py --sha <git sha> --backend-image <ref> --frontend-image <ref> --out <dir>
+  make_bundle.py --sha <git sha> --backend-image <ref> --frontend-image <ref> [--support-gateway-image <ref>] --out <dir>
       → <dir>/bundles/<sha>.tgz   <dir>/desired.json
 
 The bundle is reproducible (sorted names, no times, no owners), so the same content always has the same sha256 and a rebuild never looks like a new version to the VM.
@@ -69,6 +69,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--sha", required=True)
     ap.add_argument("--backend-image", required=True)
     ap.add_argument("--frontend-image", required=True)
+    ap.add_argument("--support-gateway-image", default="", help="the support gateway's image (story 4796); without it the release does not include the gateway")
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--src", type=Path, default=Path(__file__).resolve().parent.parent)
     a = ap.parse_args(argv[1:])
@@ -81,6 +82,7 @@ def main(argv: list[str]) -> int:
     desired = {
         "sha": a.sha, "backend_image": a.backend_image, "frontend_image": a.frontend_image,
         "bundle": f"bundles/{a.sha}.tgz", "bundle_sha256": hashlib.sha256(blob).hexdigest(),
+        **({"support_gateway_image": a.support_gateway_image} if a.support_gateway_image else {}),
     }
     (a.out / "desired.json").write_text(json.dumps(desired, indent=2, sort_keys=True) + "\n")
     print(json.dumps(desired))
