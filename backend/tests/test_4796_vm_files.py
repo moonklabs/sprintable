@@ -100,7 +100,7 @@ def test_every_file_a_unit_runs_is_installed_by_bootstrap() -> None:
             assert exe in installed, f"{unit.name} runs {exe}, which bootstrap.sh does not install"
     for f in installed:
         assert (_VM / "bin" / f).exists(), f
-    shipped = {f.name for f in (_VM / "bin").iterdir() if f.is_file()} - {"make_bundle.py", "bootstrap.sh", "check_live_names.py", "frontend_build_args.py", "build-frontend-vm.sh"}
+    shipped = {f.name for f in (_VM / "bin").iterdir() if f.is_file()} - {"make_bundle.py", "bootstrap.sh", "check_live_names.py", "frontend_build_args.py", "build-frontend-vm.sh", "subnet-residents.py"}   # the last one is run from the PO's checkout (read only), not installed on the VM
     assert installed == shipped, f"bootstrap installs {sorted(installed)} but bin/ holds {sorted(shipped)}"
     assert "enable --now sprintable-deploy.timer" not in re.sub(r"(?m)^\s*#.*$|echo .*$", "", boot), "the deploy timer is enabled by hand after the database is restored"
 
@@ -817,6 +817,7 @@ def test_a_failed_restore_leaves_the_gateway_database_shut_and_says_how_to_open_
     assert p.returncode != 0
     assert "GRANT CONNECT" not in log, "the door is not opened after a restore that did not finish"
     assert "is CLOSED to the gateway" in p.stderr and 'GRANT CONNECT ON DATABASE "sprintable" TO "support_gw"' in p.stderr
+    assert "sudo docker exec sprintable-gateway-db-1 psql" in p.stderr and "<" not in p.stderr.split("CLOSED to the gateway")[1], "a command that can be pasted: the real container name, with sudo, no placeholder"
 
 
 def test_a_restore_that_is_refused_for_existing_tables_has_not_touched_the_door(fakebin, tmp_path: Path) -> None:

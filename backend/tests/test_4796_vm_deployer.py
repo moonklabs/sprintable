@@ -93,6 +93,8 @@ class FakeRunner:
         self.out_suffix = ""
         self.raise_on: dict[str, Exception] = {}
         self.metadata_rc = 1   # the gateway database container asked for the metadata server: refused (1) is the answer wanted; 0 would mean it can reach it
+        self.chain_lines = ["-N DOCKER-USER", "-A DOCKER-USER -d 169.254.169.254/32 -i br-gwdb -j DROP", "-A DOCKER-USER -j RETURN"]   # what `iptables -S DOCKER-USER` prints: the metadata rule first
+        self.iptables_rc = 0
 
     def run(self, args, env, cwd=None, timeout=900, stdin=None):
         self.calls.append({"args": list(args), "env": dict(env), "stdin": stdin})
@@ -100,6 +102,8 @@ class FakeRunner:
         for marker, exc in self.raise_on.items():
             if marker in joined:
                 raise exc
+        if args[:1] == ["iptables"]:
+            return self.iptables_rc, "\n".join(self.chain_lines) + "\n"
         if "169.254.169.254" in joined:
             return self.metadata_rc, ""
         if "process.exit(r.status<500" in joined:
@@ -126,6 +130,8 @@ class FakeRunner:
                     verb = "exec:" + ("gwdb-metadata" if "169.254.169.254" in " ".join(tail) else "gwdb-reload" if "pg_reload_conf" in " ".join(tail) else "gwdb-ready" if "pg_database" in " ".join(tail) else "health-gwdb" if "gateway-db" in tail
                                       else "reload" if "reload" in a else "health-be" if "python" in a else "health-fe")
                 out.append(verb)
+            elif a[:1] == ["iptables"]:
+                out.append("iptables")
             else:
                 out.append(a[1])
         return out
@@ -187,7 +193,7 @@ def _text_tree(root: Path) -> str:
 def test_a_deploy_migrates_before_it_swaps_and_checks_health_after(world) -> None:
     d = world.publish("a" * 40)
     assert world.dep.run_once() == "deployed"
-    assert world.runner.verbs() == ["login", "pull", "logout", "up:db", "up:gwdb", "exec:gwdb-ready", "exec:gwdb-metadata", "run", "up:all", "exec:reload", "exec:gwdb-reload", "exec:health-be", "exec:health-fe", "exec:gwdb-ready"]
+    assert world.runner.verbs() == ["iptables", "login", "pull", "logout", "up:db", "up:gwdb", "exec:gwdb-ready", "exec:gwdb-metadata", "run", "iptables", "up:all", "exec:reload", "exec:gwdb-reload", "exec:gwdb-metadata", "exec:health-be", "exec:health-fe", "exec:gwdb-ready"]
     cur = _state(world, "current.json")
     assert cur["sha"] == d["sha"] and cur["previous"] is None
     assert (world.cfg.install_dir / "releases" / d["sha"] / "compose.yml").exists()
@@ -201,7 +207,7 @@ def test_a_deploy_migrates_before_it_swaps_and_checks_health_after(world) -> Non
 def test_registry_login_uses_the_vm_token_on_stdin_not_the_command_line(world) -> None:
     world.publish()
     world.dep.run_once()
-    login = world.runner.calls[0]
+    login = next(c for c in world.runner.calls if c["args"][:2] == ["docker", "login"])
     assert login["args"][:2] == ["docker", "login"] and login["stdin"] == "vm-token-abc123" and "vm-token-abc123" not in " ".join(login["args"])
     assert login["args"][-1] == "asia-northeast3-docker.pkg.dev"
     logout = next(c for c in world.runner.calls if c["args"][:2] == ["docker", "logout"])

@@ -40,7 +40,7 @@ if [ -n "$role" ]; then
   # the gateway runs on Cloud Run, not here: no container can be looked at. So the door is shut first (the role may no longer CONNECT: nobody new gets in), and then the open sessions are counted — they are what shows the gateway is still writing.
   # The door stays shut through the wipe and the restore and is opened after it; a restore that fails leaves it shut (the message below says how to open it).
   open_door() { in_db psql -U "$user" -d postgres -X -q -v ON_ERROR_STOP=1 -c "GRANT CONNECT ON DATABASE \"$name\" TO \"$role\""; }
-  say_closed() { echo "the database $name is CLOSED to the gateway (restore did not finish). When it is right to open it: docker exec <gateway-db container> psql -U $user -d postgres -c 'GRANT CONNECT ON DATABASE \"$name\" TO \"$role\"'" >&2; }
+  say_closed() { echo "the database $name is CLOSED to the gateway (restore did not finish). When it is right to open it: sudo docker exec sprintable-gateway-db-1 psql -U $user -d postgres -c 'GRANT CONNECT ON DATABASE \"$name\" TO \"$role\"'" >&2; }
   trap 'rm -rf "$work"; [ -z "$door_closed" ] || say_closed' EXIT
   in_db psql -U "$user" -d postgres -X -q -v ON_ERROR_STOP=1 -c "REVOKE CONNECT ON DATABASE \"$name\" FROM \"$role\""
   door_closed=yes

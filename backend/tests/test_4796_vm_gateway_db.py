@@ -114,7 +114,7 @@ def _without_block(tmp_path: Path) -> bytes:
 def test_the_gateway_database_comes_up_healthy_before_the_swap_and_is_checked_after_it(world) -> None:
     world.publish()
     assert world.dep.run_once() == "deployed"
-    assert world.runner.verbs() == ["login", "pull", "logout", "up:db", "up:gwdb", "exec:gwdb-ready", "exec:gwdb-metadata", "run", "up:all", "exec:reload", "exec:gwdb-reload", "exec:health-be", "exec:health-fe", "exec:gwdb-ready"]
+    assert world.runner.verbs() == ["iptables", "login", "pull", "logout", "up:db", "up:gwdb", "exec:gwdb-ready", "exec:gwdb-metadata", "run", "iptables", "up:all", "exec:reload", "exec:gwdb-reload", "exec:gwdb-metadata", "exec:health-be", "exec:health-fe", "exec:gwdb-ready"]
 
 
 def test_every_compose_call_of_such_a_release_sees_the_gateway_database_service(world) -> None:
@@ -720,25 +720,10 @@ def test_the_first_start_script_stops_at_the_first_error_and_leaves_the_data_fol
     assert p.returncode != 0 and not (pgdata / "pg_hba.conf").exists(), "a failed first start does not go on to install the rules as if it had worked"
 
 
-def test_the_firewall_script_adds_its_rule_once_and_names_the_bridge_compose_gives_the_network(tmp_path: Path) -> None:
-    import stat
-    import subprocess
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    state = tmp_path / "rules"
-    ipt = bin_dir / "iptables"
-    ipt.write_text('#!/bin/sh\necho "iptables $*" >> "$LOG"\ncase "$1" in -C) [ -f "$STATE" ] ;; -I) touch "$STATE" ;; esac\n')
-    ipt.chmod(ipt.stat().st_mode | stat.S_IEXEC)
-    dk = bin_dir / "docker"
-    dk.write_text("#!/bin/sh\nexit 0\n")
-    dk.chmod(dk.stat().st_mode | stat.S_IEXEC)
-    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "LOG": str(tmp_path / "log"), "STATE": str(state), "HOME": str(tmp_path)}
-    for _ in range(2):
-        assert subprocess.run(["bash", str(_VM / "bin/gateway-db-firewall.sh")], env=env, capture_output=True, text=True, timeout=30).returncode == 0
-    calls = (tmp_path / "log").read_text().splitlines()
-    assert calls == ["iptables -C DOCKER-USER -i br-gwdb -d 169.254.169.254 -j DROP", "iptables -I DOCKER-USER 1 -i br-gwdb -d 169.254.169.254 -j DROP", "iptables -C DOCKER-USER -i br-gwdb -d 169.254.169.254 -j DROP"], calls
+def test_the_rule_names_the_bridge_compose_gives_the_network() -> None:
     compose = yaml.safe_load((_VM / "compose.yml").read_text())
     assert compose["networks"]["gateway-db"]["driver_opts"]["com.docker.network.bridge.name"] == "br-gwdb"
+    assert "-i br-gwdb -d 169.254.169.254" in (_VM / "bin/gateway-db-firewall.sh").read_text()
 
 
 def test_bootstrap_installs_and_starts_the_firewall_unit_and_the_bundle_carries_the_two_files() -> None:
@@ -872,7 +857,7 @@ def _firewall_world(tmp_path: Path, container_id: str, iptables_ok: bool = True)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     ipt = bin_dir / "iptables"
-    ipt.write_text('#!/bin/sh\necho "iptables $*" >> "$LOG"\n' + ('case "$1" in -C) [ -f "$STATE" ] ;; -I) touch "$STATE" ;; esac\n' if iptables_ok else 'exit 1\n'))
+    ipt.write_text('#!/bin/sh\necho "iptables $*" >> "$LOG"\n' + ('case "$1" in -S) echo "-N DOCKER-USER"; [ -f "$STATE" ] && echo "-A DOCKER-USER -d 169.254.169.254/32 -i br-gwdb -j DROP" ;; -I) touch "$STATE" ;; esac\n' if iptables_ok else 'exit 1\n'))
     dk = bin_dir / "docker"
     dk.write_text('#!/bin/sh\necho "docker $*" >> "$LOG"\ncase "$1" in ps) printf "%s" "$CID" ;; esac\n')
     for f in (ipt, dk):
@@ -1153,7 +1138,9 @@ def _runbook_probe_program() -> str:
 
 def test_the_negative_control_of_step_five_can_be_run_from_the_runbook_alone() -> None:
     rb = (_VM / "RUNBOOK.md").read_text().split("## 13. The support gateway's database on the VM")[1]
-    sec = rb.split("**Step 3b")[1].split("The tag reaches the gateway's revisions")[0]
+    assert rb.count("**Step 3b") == 1 and rb.count("**Checks after step 5") == 1
+    sec = rb.split("**Step 3b")[1].split("**Checks after step 5")[0]   # bounded: from the start of 3b to the checks after step 5, no further
+    assert 2000 < len(sec) < 12000, len(sec)
     for token in ("STAMP=$(date -u +%m%d%H%M%S)$RANDOM", "PROBESA_ID=gwdb-probe-$STAMP", "PJU=gwdb-probe-untagged-$STAMP", "gcloud iam service-accounts create $PROBESA_ID", "&& SA_MADE=$PROBESA_ID",
                   '[ "$SA_MADE" = "$PROBESA_ID" ] && gcloud run jobs create "$PJU"', "&& JOB_MADE=$PJU", "--network default --subnet default --vpc-egress private-ranges-only",
                   '[ "$JOB_MADE" = "$PJU" ] && gcloud run jobs execute "$PJU"', "--wait || true", '[ "$JOB_MADE" = "$PJU" ] && for n in 1 2 3 4 5 6; do gcloud logging read', "| grep '^result' && break; sleep 10; done",
@@ -1360,7 +1347,19 @@ def test_the_subnet_delete_in_the_undo_carries_its_condition() -> None:
     assert "(only when no Cloud Run revision uses it any more)" in _runbook13()
 
 
-def _run_step_3(tmp_path: Path, cur: str, shell: str = "bash", fw_has: str = "") -> tuple[subprocess.CompletedProcess, list[str]]:
+def _fw_json(name: str, priority: int, kind: str, source: str, **over) -> str:
+    """what `gcloud compute firewall-rules describe` prints for a rule of this step (the keys that matter)"""
+    doc = {"name": name, "priority": priority, "direction": "INGRESS", "disabled": False, "network": "https://www.googleapis.com/compute/v1/projects/p/global/networks/default",
+           "sourceRanges": [source], "targetTags": ["vm"], kind: [{"IPProtocol": "tcp", "ports": ["5432"]}]}
+    doc.update(over)
+    return json.dumps({k: v for k, v in doc.items() if v is not None})
+
+
+def _declared_rules(declared: str) -> dict[str, str]:
+    return {"vm-gateway-db-deny": _fw_json("vm-gateway-db-deny", 900, "denied", "0.0.0.0/0"), "vm-gateway-db-allow": _fw_json("vm-gateway-db-allow", 800, "allowed", declared)}
+
+
+def _run_step_3(tmp_path: Path, cur: str, shell: str = "bash", fw_has: str = "", rules: dict[str, str] | None = None, failcreate: str = "") -> tuple[subprocess.CompletedProcess, list[str]]:
     """the first block of step 3, as written, from the repository root, against a fake gcloud that answers the subnet question with `cur` (empty = there is none)"""
     import stat
     block = _runbook13().split("```bash\n", 1)[1].split("```")[0]
@@ -1369,10 +1368,14 @@ def _run_step_3(tmp_path: Path, cur: str, shell: str = "bash", fw_has: str = "")
     calls = tmp_path / "calls"
     calls.write_text("")
     g = b / "gcloud"
-    g.write_text('#!/bin/sh\necho "gcloud $*" >> "$CALLS"\ncase "$*" in "compute networks subnets describe"*) [ -n "$CUR" ] && printf %s "$CUR" || exit 1 ;; "compute firewall-rules describe"*) case "$*" in *"$FWHAS"*) exit 0 ;; *) exit 1 ;; esac ;; esac\nexit 0\n')
+    g.write_text('#!/bin/sh\necho "gcloud $*" >> "$CALLS"\ncase "$*" in "compute networks subnets describe"*) [ -n "$CUR" ] && printf %s "$CUR" || exit 1 ;; "compute firewall-rules create"*) case "$*" in *"$FAILCREATE"*) [ -n "$FAILCREATE" ] && exit 1 ;; esac ;; "compute firewall-rules describe"*) case "$*" in *"$FWHAS"*) [ -f "$FWDIR/$4.json" ] && cat "$FWDIR/$4.json"; exit 0 ;; *) exit 1 ;; esac ;; esac\nexit 0\n')
+    (b / "python3").symlink_to(sys.executable)   # the block asks the comparison of python3
     g.chmod(g.stat().st_mode | stat.S_IEXEC)
-    env = {"PATH": f"{b}:/usr/bin:/bin", "HOME": str(tmp_path), "ENV": "dev", "REGION": "r", "PROJECT": "p", "VM": "vm", "ZONE": "z", "CALLS": str(calls), "CUR": cur, "FWHAS": fw_has or "no-such-rule"}
-    p = subprocess.run([shell, "-c", block], capture_output=True, text=True, timeout=60, env=env, cwd=_VM.parent.parent)
+    env = {"PATH": f"{b}:/usr/bin:/bin", "HOME": str(tmp_path), "ENV": "dev", "REGION": "r", "PROJECT": "p", "VM": "vm", "ZONE": "z", "CALLS": str(calls), "CUR": cur, "FWHAS": fw_has or "no-such-rule", "FWDIR": str(tmp_path / "fw"), "FAILCREATE": failcreate}
+    (tmp_path / "fw").mkdir(exist_ok=True)
+    for name, text in (rules if rules is not None else _declared_rules(renv.load_declaration(_VM / "env/dev.yaml")["support_gateway"]["allow_from"][0])).items():
+        (tmp_path / "fw" / f"{name}.json").write_text(text)
+    p = subprocess.run([shell, "-c", block + '\necho "GWOK=$GWOK"'], capture_output=True, text=True, timeout=60, env=env, cwd=_VM.parent.parent)
     return p, calls.read_text().splitlines()
 
 
@@ -1428,13 +1431,83 @@ def test_a_rule_that_is_already_there_is_not_created_again(tmp_path: Path) -> No
         made = sorted(c.split("create vm-gateway-db-")[1].split()[0] for c in calls if c.startswith("gcloud compute firewall-rules create"))
         assert made == sorted(created), (has, made, calls)
         if has:
-            assert "exists (compare it with the list above)" in p.stdout
+            assert "exists and matches the declaration" in p.stdout and "STOP" not in p.stdout
+
+
+_DECLARED = renv.load_declaration(_VM / "env/dev.yaml")["support_gateway"]["allow_from"][0]
+
+
+@pytest.mark.parametrize("which,mutate", [
+    ("deny", dict(priority=1000)),                                   # same name, another priority
+    ("deny", dict(disabled=True)),                                   # switched off
+    ("deny", dict(sourceRanges=["10.0.0.0/8"])),                     # denies a narrower set
+    ("deny", dict(targetTags=["other-vm"])),
+    ("deny", dict(denied=[{"IPProtocol": "tcp", "ports": ["22"]}])),  # another port
+    ("deny", dict(denied=None, allowed=[{"IPProtocol": "tcp", "ports": ["5432"]}])),   # the deny is an allow
+    ("deny", dict(direction="EGRESS")),
+    ("deny", dict(network="https://www.googleapis.com/compute/v1/projects/p/global/networks/other")),
+    ("allow", dict(sourceRanges=["0.0.0.0/0"])),                     # the allow is open to the world
+    ("allow", dict(sourceRanges=["10.1.2.0/24"])),                   # another range
+    ("allow", dict(sourceRanges=[_DECLARED, "10.1.2.0/24"])),        # the declared one and more
+    ("allow", dict(sourceRanges=None, sourceTags=["gw"])),           # the old tag-based rule
+    ("allow", dict(priority=950)),                                   # behind the deny
+    ("allow", dict(sourceTags=["gw"])),                              # the declared range AND a tag
+    ("allow", dict(denied=[{"IPProtocol": "tcp", "ports": ["5432"]}])),   # allows and denies the same port
+    ("deny", dict(allowed=[{"IPProtocol": "tcp", "ports": ["5432"]}])),   # denies and allows it
+    ("allow", dict(allowed=[{"IPProtocol": "tcp", "ports": ["5432", "22"]}])),
+    ("allow", dict(allowed=[{"IPProtocol": "tcp"}])),                # every port
+])
+def test_a_rule_with_the_right_name_and_other_values_is_not_accepted(tmp_path: Path, which: str, mutate: dict) -> None:
+    rules = _declared_rules(_DECLARED)
+    name = f"vm-gateway-db-{which}"
+    base = json.loads(rules[name])
+    base.update(mutate)
+    rules[name] = json.dumps({k: v for k, v in base.items() if v is not None})
+    p, calls = _run_step_3(tmp_path, _DECLARED, fw_has=name, rules=rules)
+    assert f"STOP: {name} exists but differs from the declaration" in p.stdout, p.stdout
+    created = [c for c in calls if c.startswith("gcloud compute firewall-rules create")]
+    if which == "deny":
+        assert created == [] and not [c for c in calls if "gateway-db-allow" in c], "a deny that differs stops the allow line too"
+    assert not [c for c in created if name in c], "the rule that differs is neither re-created nor changed"
+
+
+def test_rules_with_exactly_the_declared_values_are_accepted_whatever_order_gcloud_prints_its_keys(tmp_path: Path) -> None:
+    rules = {k: json.dumps(dict(reversed(list(json.loads(v).items())))) for k, v in _declared_rules(_DECLARED).items()}
+    p, calls = _run_step_3(tmp_path, _DECLARED, fw_has="vm-gateway-db", rules=rules)
+    assert p.stdout.count("exists and matches the declaration") == 2 and "STOP" not in p.stdout
+    assert not [c for c in calls if c.startswith("gcloud compute firewall-rules create")]
+
+
+def test_a_rule_whose_description_cannot_be_read_is_not_accepted(tmp_path: Path) -> None:
+    p, calls = _run_step_3(tmp_path, _DECLARED, fw_has="vm-gateway-db", rules={"vm-gateway-db-deny": "", "vm-gateway-db-allow": ""})
+    assert "STOP: vm-gateway-db-deny exists but differs" in p.stdout and not [c for c in calls if c.startswith("gcloud compute firewall-rules create")]
+
+
+@pytest.mark.parametrize("failing,expect_allow_created", [("gateway-db-deny", False), ("gateway-db-allow", False)])
+def test_a_rule_that_could_not_be_created_stops_the_lines_after_it(tmp_path: Path, failing: str, expect_allow_created: bool) -> None:
+    p, calls = _run_step_3(tmp_path, _DECLARED, failcreate=failing)
+    created = [c for c in calls if c.startswith("gcloud compute firewall-rules create")]
+    if failing == "gateway-db-deny":
+        assert len(created) == 1 and "gateway-db-deny" in created[0], "the allow rule is not created behind a deny rule that is not there"
+        assert "STOP: vm-gateway-db-deny could not be created" in p.stdout
+    else:
+        assert "STOP: vm-gateway-db-allow could not be created" in p.stdout
+        assert "GWOK=no" in p.stdout, "the variable that gates the rest says no"
+
+
+def test_a_rule_whose_destination_or_service_account_is_set_is_not_accepted(tmp_path: Path) -> None:
+    for n, extra in enumerate(({"destinationRanges": ["10.0.0.5/32"]}, {"sourceServiceAccounts": ["a@b.iam.gserviceaccount.com"]}, {"targetServiceAccounts": ["a@b.iam.gserviceaccount.com"]})):
+        (tmp_path / str(n)).mkdir()
+        rules = _declared_rules(_DECLARED)
+        rules["vm-gateway-db-deny"] = json.dumps({**json.loads(rules["vm-gateway-db-deny"]), **extra})
+        p, _calls = _run_step_3(tmp_path / str(n), _DECLARED, fw_has="vm-gateway-db-deny", rules=rules)
+        assert "STOP: vm-gateway-db-deny exists but differs" in p.stdout, extra
 
 
 def test_the_runbook_explains_why_the_nightly_backup_of_an_empty_gateway_database_fails_and_why_that_is_not_loosened() -> None:
     rb = _runbook13()
     row5 = next(l for l in rb.splitlines() if l.startswith("| 5 |"))
-    assert "in the same window as the load of the gateway's data" in row5 and "only after the firewall pair of step 3 exists and the negative control below has been measured" in row5
+    assert "in the same window as the cutover sheet's restore" in row5 and "with a candidate built after that sheet's change was merged" in row5 and "only after the firewall pair of step 3 exists and the negative control below has been measured" in row5
     para = rb.split("**Why step 5 belongs to the window of the load.**")[1].split("**Step 3 in commands**")[0]
     for token in ("«lists no table data — refusing»", "the main dump is uploaded first", "expected and loses nothing", "so it is not loosened", "looks for a new `db-gateway-…` dump"):
         assert token in para, token

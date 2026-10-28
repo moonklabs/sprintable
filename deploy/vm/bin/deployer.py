@@ -64,6 +64,13 @@ GATEWAY_DB_READY_TRIES = 15   # the first start of an empty data folder runs the
 GATEWAY_DB_READY_WAIT = 2
 GATEWAY_DB_RELOAD = 'psql -X -q -U "$POSTGRES_USER" -d postgres -c "select pg_reload_conf()"'
 # from INSIDE the gateway database container: may it reach the metadata server? (bash's /dev/tcp; a refused or timed-out connection is the answer wanted)
+def _rule_pairs(line: str) -> tuple[str, ...] | None:
+    """a line of `iptables -S` as the sorted option/value pairs it holds (iptables prints the options in ITS order, not the one a rule was given in); None when an option has no value (a negation, a bare flag)"""
+    toks = line.split()
+    return tuple(sorted(f"{toks[i]} {toks[i + 1]}" for i in range(0, len(toks), 2))) if toks and len(toks) % 2 == 0 else None
+
+
+METADATA_RULE_PAIRS = _rule_pairs("-A DOCKER-USER -i br-gwdb -d 169.254.169.254/32 -j DROP")   # the rule gateway-db-firewall.sh keeps; in `iptables -S DOCKER-USER` the chain's own line comes first, so the first rule is line 2
 METADATA_PROBE = 'timeout 3 bash -c "exec 3<>/dev/tcp/169.254.169.254/80"'
 FRONTEND_SNIPPET = "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
 
@@ -349,6 +356,7 @@ class Deployer:
         self._secret_cache.clear()
         self._prev = self._cand = None
         self._gateway_db_closed = False
+        self._gate_refused = False
         current = read_current(self._current_path)
         # first of all: a previous run may have died between «a swap started» and «the state is recorded» — settle that, whatever desired.json says or fails to say
         unresolved = self._settle_unresolved(current)
@@ -388,14 +396,18 @@ class Deployer:
         except Exception as e:  # noqa: BLE001 — whatever went wrong, record it and (after the swap) put the previous release back
             err = e if isinstance(e, DeployError) else DeployError(f"unexpected {type(e).__name__}", self._phase)
             _write_json(self.cfg.state_dir / "failed.json", {"signature": signature(desired), "phase": err.phase, "detail": self._scrub(str(err))[:500], "at": int(self.now())})
-            if err.phase == "pre-swap" and self._prev is not None and self._prev.gateway_db and not self._gateway_db_closed:
+            if err.phase == "pre-swap" and self._prev is not None and self._prev.gateway_db and not self._gateway_db_closed and not self._gate_refused:
                 # compose may already have re-created the gateway's database with the CANDIDATE's settings (a rotated password secret, a changed private address) before this release failed: nothing else would
                 # bring it back as the running release has it (current.json still names that release, so the next run finds nothing to do). A no-op when nothing was re-created.
                 try:
                     self._activate(self._prev)
+                    # this start is a start like any other: only behind the rule, first in its chain (the candidate may have started the container already: it is stopped when the rule is not in place)
+                    self._require_metadata_rule("post-swap", running=self._prev)
                     rc, out = self._compose(self._prev.release, self._prev.env, "up", "-d", "--wait", "gateway-db", timeout=T_DB)
                     if rc != 0:
                         self.log(f"the gateway database could not be brought back as the running release has it: {out[-200:]}")
+                    # asked from inside again, like after every start - whether or not the start was healthy: a container that came up but did not become healthy may still be running (a container that is not running answers «refused»)
+                    self._probe_metadata(self._prev, "post-swap")
                 except DeployError as e2:
                     self.log(f"the gateway database could not be brought back as the running release has it: {self._scrub(str(e2))}")
             if err.phase == "post-swap":
@@ -445,6 +457,11 @@ class Deployer:
         try:
             p = self._prepare({k: pending[k] for k in STATE_KEYS})
             self._activate(p)
+            if p.gateway_db:
+                try:
+                    self._require_metadata_rule("post-swap", running=p)   # the database stays up behind its rule; without the rule it is stopped
+                except DeployError as e:
+                    self.log(f"unrecorded first release: the gateway database was stopped: {self._scrub(str(e))}")
             rc, out = self._compose(p.release, p.env, "stop", "backend", "frontend", "caddy", timeout=120)
         except Exception as e:  # noqa: BLE001
             self.log(f"could not stop the unrecorded first release: {self._scrub(str(e)) if isinstance(e, DeployError) else type(e).__name__}")
@@ -667,6 +684,8 @@ class Deployer:
 
     def _swap(self, p: Prepared) -> None:
         if p.gateway_db:
+            self._require_metadata_rule("post-swap", running=p)  # the way back and the reconcile bring gateway-db up through here too; a container that is up already is stopped when the rule is gone
+        if p.gateway_db:
             # the rules file changes HERE and nowhere earlier: pending.json is already written (a crash from now on is settled by the next run, which puts the recorded release's rules back), and a release that fails
             # before this point leaves the file as it was — a container started in the meantime (reboot, re-creation) reads the rules of the release that is running
             self._write_gateway_hba(self.cfg.install_dir / "runtime" / "gateway-db-pg_hba.conf", renv.gateway_hba(p.decl))
@@ -683,6 +702,7 @@ class Deployer:
             rc, out = self._compose(p.release, p.env, "exec", "-T", "gateway-db", "sh", "-c", GATEWAY_DB_RELOAD, timeout=30)
             if rc != 0:
                 raise DeployError(f"the gateway database did not reload its access rules: {out[-200:]}", "post-swap")
+            self._probe_metadata(p, "post-swap")  # `compose up` above may have re-created and started the container: ask again, on the way back as well
         deadline = self.now() + self.cfg.health_timeout
         while True:
             if self._healthy(p):
@@ -690,6 +710,32 @@ class Deployer:
             if self.now() >= deadline:
                 raise DeployError(f"health/ready not green within {int(self.cfg.health_timeout)} s", "post-swap")
             self.sleep(self.cfg.health_interval)
+
+    def _require_metadata_rule(self, phase: str, running: Prepared | None = None) -> None:
+        """the gateway database may be started only behind the rule that keeps the metadata server out of its bridge, and only while that rule is the FIRST of DOCKER-USER (an ACCEPT in front of it would let the container through).
+        Asked of iptables itself, here, so a hand-run `deployer.py --force` meets the same door as the timer's run (the unit's Requires does not bind a hand run).
+        `running` = a release whose gateway database may be up already (the swap's head, the recovery): when the rule is not in place that container is stopped — a server whose isolation is unproven does not keep running."""
+        rc, out = self.runner.run(["iptables", "-S", "DOCKER-USER"], {"PATH": os.environ.get("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")}, timeout=30)
+        lines = out.splitlines()
+        if rc == 0 and len(lines) > 1 and _rule_pairs(lines[1]) == METADATA_RULE_PAIRS:
+            return
+        if phase == "pre-swap":
+            self._gate_refused = True   # nothing was touched: the recovery below has nothing to put back
+        state = self._close_gateway_db(running) if running is not None else ""
+        raise DeployError("the rule that keeps the metadata server out of the gateway database's network is not the first rule of DOCKER-USER (or iptables could not be asked)"
+                          + ("; nothing was changed" if phase == "pre-swap" else "")
+                          + (f"; the gateway database container, {state}" if state else "")
+                          + " — start sprintable-gateway-db-firewall.service, which puts it first (RUNBOOK section 13)", phase)
+
+    def _probe_metadata(self, cand: Prepared, phase: str) -> None:
+        """asks from INSIDE the gateway database container whether the metadata server answers; when it does (or the question cannot be asked) the container is stopped — a server that may reach the VM's identity must not keep running"""
+        rc, out = self._compose(cand.release, cand.env, "exec", "-T", "gateway-db", "bash", "-c", METADATA_PROBE, timeout=30)
+        if rc == 0 or rc not in (1, 124):
+            # the one case in which a deploy stops the gateway's database (its data folder stays, a restart after the fix loses nothing)
+            state = self._close_gateway_db(cand)
+            if rc == 0:
+                raise DeployError(f"the metadata server is reachable from the gateway database container, {state} (is sprintable-gateway-db-firewall.service active?)", phase)
+            raise DeployError(f"the metadata server probe of the gateway database container could not run (exit {rc}); the container, {state}", phase)
 
     def _close_gateway_db(self, cand: Prepared) -> str:
         """stops (then kills) the gateway's database whose metadata isolation is unproven; says in words whether it is down"""
@@ -710,6 +756,8 @@ class Deployer:
                 # without a way back, a failed swap would leave the broken release serving: do not start
                 raise DeployError(f"the running release cannot be prepared for a rollback, so nothing was changed: {e}", "pre-swap") from e
         cand = self._cand = self._prepare(desired)
+        if cand.gateway_db:
+            self._require_metadata_rule("pre-swap")  # before anything is activated, pulled or started
         self._activate(cand)
         self._registry_login(cand.env)
         try:
@@ -732,13 +780,7 @@ class Deployer:
                 self.sleep(GATEWAY_DB_READY_WAIT)
             else:
                 raise DeployError("the support gateway database answers but its first start did not finish: the application role does not own the database (RUNBOOK section 13, «A first start that was cut short»)", "pre-swap")
-            rc, out = self._compose(cand.release, cand.env, "exec", "-T", "gateway-db", "bash", "-c", METADATA_PROBE, timeout=30)
-            if rc == 0 or rc not in (1, 124):
-                # the one case in which a deploy stops the gateway's database: a server that may reach the VM's identity must not keep running (its data folder stays, a restart after the fix loses nothing)
-                state = self._close_gateway_db(cand)
-                if rc == 0:
-                    raise DeployError(f"the metadata server is reachable from the gateway database container, {state} (is sprintable-gateway-db-firewall.service active?)", "pre-swap")
-                raise DeployError(f"the metadata server probe of the gateway database container could not run (exit {rc}); the container, {state}", "pre-swap")
+            self._probe_metadata(cand, "pre-swap")
         rc, out = self._compose(cand.release, cand.env, "run", "--rm", "migrate", profile="migrate", timeout=T_MIGRATE)
         if rc != 0:
             raise DeployError(f"migrate failed: {out[-300:]}", "pre-swap")
@@ -759,6 +801,11 @@ class Deployer:
                 # nothing to go back to: do not leave a half-working candidate serving — stop it (the database stays up)
                 if self._cand is not None:
                     self._activate(self._cand)
+                    if self._cand.gateway_db:
+                        try:
+                            self._require_metadata_rule("post-swap", running=self._cand)   # the database stays up — but only behind its rule: when the rule is gone it is stopped, and the rest is stopped as well
+                        except DeployError as e:
+                            self.log(f"first release failed, the gateway database was stopped: {self._scrub(str(e))}")
                     rc, out = self._compose(self._cand.release, self._cand.env, "stop", "backend", "frontend", "caddy", timeout=120)
                     if rc != 0:
                         # the candidate may still be serving: keep the marker (the next run tries to stop it again) and say the state is unknown

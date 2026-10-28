@@ -231,6 +231,15 @@ substitutions:
   # CORS preflight가 돈다. `|`-구분 기본값(빈 문자열=미설정) — deploy-support-gateway
   # 스텝에서 `,`로 변환(cloudbuild.yaml MCP_ALLOWED_HOSTS 선례와 동일 2-layer 콤마 함정 회피).
   _SUPPORT_GATEWAY_CORS_ORIGINS: ''
+  # story 4796 (D2) — the support gateway's DATABASE moves from Cloud SQL to the VM's `gateway-db` (deploy/vm/CUTOVER-gateway-dev.md); the gateway itself stays on Cloud Run. ONE switch, default "false" =
+  # exactly as before. Exactly "true": the gateway service and its migrate job lose their Cloud SQL socket (`--clear-cloudsql-instances` / `--set-cloudsql-instances=`, because gcloud keeps what is not
+  # mentioned) and run on the gateway's OWN subnet `support-gateway-<env>` (instead of `default`), the range the VM's firewall rule allows to reach 5432 (a network tag cannot be the source of an ingress
+  # rule for Direct VPC egress); the service also gets the connection pool below, sent ONLY when both values are
+  # non-empty (an empty value means «not sent»; one without the other stops the step, as the application itself would refuse to start). The database URL secret is flipped by the PO in the same
+  # window (the sheet); until then this stays false.
+  _SUPPORT_GATEWAY_DB_ON_VM: "false"
+  _SUPPORT_GATEWAY_DB_POOL_SIZE: ""
+  _SUPPORT_GATEWAY_DB_MAX_OVERFLOW: ""
 
   # E-ARCH 1단계(story #2078·PR #2358 PG_LISTEN_ENABLED 배선): SSE/LISTEN 전용
   # `sprintable-realtime-${_DEPLOY_ENV}` 서비스 — REST(`sprintable-backend-*`)와 같은 이미지,
@@ -715,6 +724,7 @@ steps:
         fi
         GCP_PROJECT="${PROJECT_ID}" GCP_REGION="${_AR_REGION}" AR_REPO="${_AR_REPO}" COMMIT_SHA="${COMMIT_SHA}" \
           SUPPORT_GATEWAY_SERVICE_ACCOUNT="${_SUPPORT_GATEWAY_SERVICE_ACCOUNT}" \
+          SUPPORT_GATEWAY_DB_ON_VM="${_SUPPORT_GATEWAY_DB_ON_VM}" \
           bash support-gateway/scripts/provision_migrate_job.sh ${_DEPLOY_ENV}
     waitFor: [push-support-gateway]
 
@@ -1187,6 +1197,20 @@ steps:
         # story 4786: support-gateway-dev sits idle most of the time (billed per request); prod states nothing here (its value is left as it is).
         CPU_FLAG=""
         if [ "${_DEPLOY_ENV}" == "dev" ]; then CPU_FLAG="--cpu-throttling"; fi
+        # story 4796 (D2): where the database is. Default = Cloud SQL through its socket, exactly the flag this step always had.
+        DB_FLAGS=("--add-cloudsql-instances=${PROJECT_ID}:${_AR_REGION}:sprintable-${_DEPLOY_ENV}")
+        GW_SUBNET=default
+        if [ "${_SUPPORT_GATEWAY_DB_ON_VM}" = "true" ]; then
+          # `--clear-…`, not «leave it out»: gcloud keeps the Cloud SQL instance the service already has. The subnet is the range the VM's firewall allows to reach 5432 (deploy/vm/RUNBOOK.md section 13).
+          DB_FLAGS=(--clear-cloudsql-instances)
+          GW_SUBNET="support-gateway-${_DEPLOY_ENV}"
+          if [ -n "${_SUPPORT_GATEWAY_DB_POOL_SIZE}" ] && [ -n "${_SUPPORT_GATEWAY_DB_MAX_OVERFLOW}" ]; then
+            ENV_VARS="$${ENV_VARS};SUPPORT_GATEWAY_DB_POOL_SIZE=${_SUPPORT_GATEWAY_DB_POOL_SIZE};SUPPORT_GATEWAY_DB_MAX_OVERFLOW=${_SUPPORT_GATEWAY_DB_MAX_OVERFLOW}"
+          elif [ -n "${_SUPPORT_GATEWAY_DB_POOL_SIZE}${_SUPPORT_GATEWAY_DB_MAX_OVERFLOW}" ]; then
+            echo "deploy-support-gateway: _SUPPORT_GATEWAY_DB_POOL_SIZE and _SUPPORT_GATEWAY_DB_MAX_OVERFLOW must be set together (the application refuses to start with one of them)" >&2
+            exit 1
+          fi
+        fi
         gcloud run deploy support-gateway-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/support-gateway:${COMMIT_SHA} \
           --region=${_AR_REGION} \
@@ -1195,9 +1219,9 @@ steps:
           --min-instances=${_SUPPORT_GATEWAY_MIN_INSTANCES} \
           --max-instances=${_SUPPORT_GATEWAY_MAX_INSTANCES} \
           --allow-unauthenticated \
-          --add-cloudsql-instances=${PROJECT_ID}:${_AR_REGION}:sprintable-${_DEPLOY_ENV} \
+          "$${DB_FLAGS[@]}" \
           --network=default \
-          --subnet=default \
+          --subnet=$${GW_SUBNET} \
           --vpc-egress=private-ranges-only \
           --update-env-vars="^;^$${ENV_VARS}" \
           --update-secrets="SUPPORT_GATEWAY_DATABASE_URL=SUPPORT_GATEWAY_DATABASE_URL_${_DEPLOY_ENV}:latest,SUPPORT_GATEWAY_TOKEN_SECRET=SUPPORT_GATEWAY_TOKEN_SECRET_${_DEPLOY_ENV}:latest,SUPPORT_GATEWAY_ADMIN_TOKEN=SUPPORT_GATEWAY_ADMIN_TOKEN_${_DEPLOY_ENV}:latest" \
