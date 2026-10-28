@@ -251,13 +251,17 @@ def _unresolved_tags(rev: dict, found: list[Ref], outside: Iterable[Outside] = (
     """태그로 배포된 이미지가 있으면 «모르는» 경우를 모두 true로 돌려준다(`found`는 범위 안 참조만):
     · 이미지 패키지가 둘 이상이거나 태그가 둘 이상(컨테이너 여럿 — 하나뿐인 `status.imageDigest`를 짝지을 수 없다)
     · 같은 리비전에 범위 밖 이미지가 함께 있다(그 digest가 우리 컨테이너 것인지 옆 컨테이너 것인지 가릴 수 없다)
+    · 스펙 쪽에 digest가 있다(digest로 고정된 옆 컨테이너나 주석 속 SHA — 값이 `status.imageDigest`와 같아도 어느 것이 태그의 것인지 가릴 수 없다)
     · `status.imageDigest` 필드가 없다
-    · 그 digest와 다른 digest가 같은 리비전에 더 있다(digest로 고정된 컨테이너나 무관한 SHA — 어느 것이 태그의 것인지 가릴 수 없다)"""
+    · 그 digest와 다른 digest가 같은 리비전에 더 있다(상태 쪽의 다른 digest)"""
     tagged = {(r["package"], r["tag"]) for r in found if r["tag"]}
     if not tagged:
         return False
     packages = {r["package"] for r in found if r["package"]}
     if len(tagged) > 1 or len(packages) > 1 or any(True for _ in outside):
+        return True
+    # `status`를 뺀 나머지(스펙 · 주석 …)에 digest가 하나라도 있으면(digest로 고정된 옆 컨테이너 · 무관한 SHA) `status.imageDigest`가 그 digest의 것일 수도 있다 — 값이 같아 보여도 짝을 지을 수 없다
+    if any(r["digest"] for r in refs_in(json.dumps({k: v for k, v in rev.items() if k != "status"}))):
         return True
     resolved = _status_digest(rev)
     if resolved is None:

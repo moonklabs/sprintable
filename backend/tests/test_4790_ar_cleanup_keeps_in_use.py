@@ -838,6 +838,16 @@ def test_an_unknown_registry_image_is_not_hidden_by_an_external_string_elsewhere
     assert gate.collect(extra=[{"containers": [{"image": "registry.example.com/x:1"}]}], hosts={AR_HOST}).problems
 
 
+def test_a_digest_pinned_sibling_whose_digest_equals_the_status_digest_is_still_ambiguous():
+    """the QA finding (also older than this PR): `backend:tag` next to `backend@sha256:D` with `status.imageDigest` = D — the digest may be the sibling's, and the tag's own (older) image would go unprotected"""
+    service = [_service("s", "rev-2", f"{HOST}/backend:backend-tag2")]
+    sibling = {"metadata": {"name": "rev-2"}, "spec": {"containers": [{"image": f"{HOST}/backend:backend-tag2"}, {"image": f"{HOST}/backend@{_digest(7)}"}]},
+               "status": {"imageDigest": f"{HOST}/backend@{_digest(7)}"}}
+    assert gate.collect(service, [sibling], hosts={AR_HOST}).problems
+    lone = {"metadata": {"name": "rev-2"}, "spec": {"containers": [{"image": f"{HOST}/backend:backend-tag2"}]}, "status": {"imageDigest": f"{HOST}/backend@{_digest(2)}"}}
+    assert not gate.collect(service, [lone], hosts={AR_HOST}).problems  # positive control: the real single-container shape is fine
+
+
 def test_an_image_value_that_is_not_a_string_is_not_skipped():
     """the QA finding: `{"image": {"name": "registry.example.com/x/y:1"}}` next to a good sibling image used to pass — the walker only recursed into it"""
     odd = {"containers": [{"image": f"{HOST}/backend:backend-tag2"}, {"image": {"name": "registry.example.com/x/y:1"}}]}
