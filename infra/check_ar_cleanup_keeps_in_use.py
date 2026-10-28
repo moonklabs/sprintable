@@ -221,8 +221,10 @@ def _image_values(node: Any) -> Iterable[Any]:
 
 # 호스트가 없는 Docker 이름(`gotenberg/gotenberg:8.36` · `nginx`): Docker의 이름 규칙은 «첫 경로 조각에 `.`도 `:`도 없고 `localhost`도 아니면 호스트가 아니다 → docker.io(Docker Hub)»다.
 # `registry.example.com/x` · `host:5000/x` · `localhost/x`는 호스트가 있는 이름이라 여기 들지 않는다(모르는 레지스트리로 남아 실패한다).
+# 문법은 distribution/reference(Docker의 이름 문법)를 따른다: 경로 조각 = 소문자·숫자 덩어리를 `.` `_` `__` `-`(연속 가능)로 잇고, 태그는 128자까지. 값 앞뒤 공백은 이름이 아니다(다듬지 않는다).
+_HUB_COMPONENT = r"[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*"
 _HUB_SHORT = re.compile(
-    r"(?P<path>(?:[a-z0-9]+(?:[._-][a-z0-9]+)*/)*[a-z0-9]+(?:[._-][a-z0-9]+)*)(?::(?P<tag>[A-Za-z0-9_][A-Za-z0-9_.-]*))?(?:@(?P<digest>sha256:[0-9a-f]{64}))?"
+    rf"(?P<path>(?:{_HUB_COMPONENT}/)*{_HUB_COMPONENT})(?::(?P<tag>[A-Za-z0-9_][A-Za-z0-9_.-]{{0,127}}))?(?:@(?P<digest>sha256:[0-9a-f]{{64}}))?"
 )
 
 
@@ -230,7 +232,7 @@ def _hub_short(value: Any, where: str) -> Outside | None:
     """`image` 값이 호스트 없는 Docker 이름이면 «알려진 외부(Docker Hub)»로 읽은 범위 밖 참조, 아니면 None. 우리 AR은 늘 호스트(`…-docker.pkg.dev`)가 붙으므로 Docker Hub 이름이 우리 이미지를 가리는 일이 없다."""
     if not isinstance(value, str):
         return None
-    m = _HUB_SHORT.fullmatch(value.strip())
+    m = _HUB_SHORT.fullmatch(value)
     if not m:
         return None
     path = m["path"]

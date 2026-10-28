@@ -823,8 +823,12 @@ def test_hub_short_names_follow_the_docker_name_rule():
     # a first path part with a dot, a port or `localhost` is a HOST: not Docker Hub, left unrecognised (and so a failure)
     for host_named in ("registry.example.com/team/app:1", "host:5000/x", "localhost/x", "localhost:5000/x:1", "my.host/x"):
         assert hub(host_named) is None, host_named
-    for not_a_name in ("", "Foo/Bar", "a b", None, {"name": "x"}, 7):  # uppercase, spaces, non-strings: not a Docker name
+    for not_a_name in ("", "Foo/Bar", "a b", None, {"name": "x"}, 7, " nginx ", "nginx\n", "nginx:"):  # uppercase, spaces (also around the name), non-strings: not a Docker name
         assert hub(not_a_name) is None, not_a_name
+    # Docker's own grammar (distribution/reference): `__` and repeated dashes join name parts, a tag may be 128 characters and no more
+    assert hub("my__org/some---app:1") == ("docker.io/my__org/some---app", ":1")
+    assert hub("a/b:" + "t" * 128) is not None and hub("a/b:" + "t" * 129) is None
+    assert hub("a/-b") is None and hub("a//b") is None and hub("a/b_") is None  # a separator cannot start, double a slash or end a part
 
 
 def test_the_real_office_converter_shape_is_read_not_failed(tmp_path, capsys):
