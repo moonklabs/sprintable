@@ -12,6 +12,7 @@ import importlib.util
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -1141,12 +1142,14 @@ def _runbook_probe_program() -> str:
 def test_the_negative_control_of_step_five_can_be_run_from_the_runbook_alone() -> None:
     rb = (_VM / "RUNBOOK.md").read_text().split("## 13. The support gateway's database on the VM")[1]
     sec = rb.split("**Step 3b")[1].split("The tag reaches the gateway's revisions")[0]
-    for token in ("gcloud iam service-accounts create gwdb-probe", "PJU=gwdb-probe-untagged-$(date -u +%Y%m%d%H%M%S)", 'gcloud run jobs create "$PJU"', "--network default --subnet default --vpc-egress private-ranges-only",
-                  '&& gcloud run jobs execute "$PJU"', "gcloud logging read", "| grep '^result'", 'gcloud run jobs delete "$PJU"', "gcloud iam service-accounts delete $PROBESA", "--service-account $PROBESA",
+    for token in ("STAMP=$(date -u +%m%d%H%M%S)$RANDOM", "PROBESA_ID=gwdb-probe-$STAMP", "PJU=gwdb-probe-untagged-$STAMP", "gcloud iam service-accounts create $PROBESA_ID", "&& SA_MADE=$PROBESA_ID",
+                  '[ "$SA_MADE" = "$PROBESA_ID" ] && gcloud run jobs create "$PJU"', "&& JOB_MADE=$PJU", "--network default --subnet default --vpc-egress private-ranges-only",
+                  '[ "$JOB_MADE" = "$PJU" ] && { gcloud run jobs execute "$PJU"', "; true; }", "for n in 1 2 3 4 5 6; do gcloud logging read", "| grep '^result' && break; sleep 10; done",
+                  '[ "$JOB_MADE" = "$PJU" ] && gcloud run jobs delete "$PJU"', '[ "$SA_MADE" = "$PROBESA_ID" ] && gcloud iam service-accounts delete $PROBESA', "--service-account $PROBESA",
                   "**Pass: the log line is `result <n> TIMEOUT`**", "is not the container's exit code", "**`REFUSED`: the deny rule is missing — stop**", "**`OTHER`: the job could not reach the network at all", "positive control after step 5",
                   "holds **no role at all**"):
         assert token in sec, token
-    command_lines = [l for l in sec.split("**Pass:")[0].splitlines() if l.startswith("gcloud run jobs create")]
+    command_lines = [l for l in sec.split("**Pass:")[0].splitlines() if "gcloud run jobs create" in l and not l.startswith("#")]
     assert len(command_lines) == 1 and "--network-tags" not in command_lines[0], "the job that is meant to carry NO tag carries none"
     assert "support-gateway-dev@" not in sec.split("**Pass:")[0], "the gateway's own account is not used"
     assert 'echo "untagged' not in sec, "gcloud's status after --wait is not printed as if it were the container's exit code"
@@ -1167,3 +1170,68 @@ def _run_probe(code: str, tmp: Path) -> subprocess.CompletedProcess:
 def test_the_probe_of_the_runbook_tells_a_dropped_packet_from_a_refusal_and_from_a_missing_route(tmp_path: Path, name: str, exit_code: int, word: str) -> None:
     p = _run_probe(name, tmp_path)
     assert p.returncode == exit_code and p.stdout.split()[0] == "result" and p.stdout.split()[-1] == word, (p.stdout, p.stderr)
+
+
+def _step_3b_block() -> str:
+    rb = (_VM / "RUNBOOK.md").read_text().split("## 13. The support gateway's database on the VM")[1]
+    return rb.split("**Step 3b")[1].split("```bash\n")[1].split("```")[0]
+
+
+def _run_step_3b(tmp_path: Path, **fail) -> tuple[subprocess.CompletedProcess, list[str]]:
+    """the block of the RUNBOOK as written, against a fake gcloud that records its calls; `fail` names the commands that fail (iam_create, job_create, execute) or answer nothing (no_log)"""
+    import stat
+    b = tmp_path / "bin"
+    b.mkdir(exist_ok=True)
+    calls = tmp_path / "calls.log"
+    calls.write_text("")
+    g = b / "gcloud"
+    g.write_text(
+        "#!/bin/sh\n"
+        'echo "gcloud $*" >> "$CALLS"\n'
+        'case "$*" in\n'
+        '  "compute instances describe"*) printf 10.178.0.9 ;;\n'
+        '  "run services describe"*) printf img ;;\n'
+        '  "iam service-accounts create"*) [ -n "$F_IAM" ] && exit 1 ;;\n'
+        '  "run jobs create"*) [ -n "$F_JOB" ] && exit 1 ;;\n'
+        '  "run jobs execute"*) exit 1 ;;\n'
+        '  "logging read"*) [ -n "$F_NOLOG" ] || echo "result 11 TIMEOUT" ;;\n'
+        "esac\n"
+        "exit 0\n")
+    g.chmod(g.stat().st_mode | stat.S_IEXEC)
+    slp = b / "sleep"
+    slp.write_text('#!/bin/sh\necho sleep >> "$CALLS"\n')
+    slp.chmod(slp.stat().st_mode | stat.S_IEXEC)
+    env = {"PATH": f"{b}:/usr/bin:/bin", "HOME": str(tmp_path), "CALLS": str(calls), "ENV": "dev", "PROJECT": "p", "REGION": "r", "ZONE": "z", "VM": "vm",
+           "F_IAM": "1" if fail.get("iam_create") else "", "F_JOB": "1" if fail.get("job_create") else "", "F_NOLOG": "1" if fail.get("no_log") else ""}
+    p = subprocess.run(["bash", "-c", _step_3b_block()], capture_output=True, text=True, timeout=30, env=env, cwd=tmp_path)
+    return p, calls.read_text().splitlines()
+
+
+def _count(calls: list[str], prefix: str) -> int:
+    return sum(1 for c in calls if c.startswith(prefix))
+
+
+def test_step_3b_runs_the_job_even_though_its_expected_answer_is_a_failure_and_cleans_up_what_it_made(tmp_path: Path) -> None:
+    p, calls = _run_step_3b(tmp_path)
+    assert p.returncode == 0, p.stderr
+    assert _count(calls, "gcloud iam service-accounts create gwdb-probe-") == 1 and _count(calls, "gcloud run jobs create gwdb-probe-untagged-") == 1
+    assert _count(calls, "gcloud run jobs execute gwdb-probe-untagged-") == 1 and _count(calls, "gcloud run jobs delete gwdb-probe-untagged-") == 1, "the execute failed, the job is still deleted"
+    assert "result 11 TIMEOUT" in p.stdout and _count(calls, "sleep") == 0, "the log line is found at once"
+    names = {c.split()[4] for c in calls if c.startswith("gcloud run jobs create") or c.startswith("gcloud run jobs delete")}
+    assert len(names) == 1, "the job that is deleted is the job that was created"
+    sa_id = next(c.split()[4] for c in calls if c.startswith("gcloud iam service-accounts create"))
+    assert any(f"--service-account {sa_id}@p.iam.gserviceaccount.com" in c for c in calls if c.startswith("gcloud run jobs create")), "the job runs as the account made for it"
+
+
+def test_step_3b_does_nothing_after_a_create_that_failed(tmp_path: Path) -> None:
+    p, calls = _run_step_3b(tmp_path, iam_create=True)
+    assert _count(calls, "gcloud run jobs create") == 0 and _count(calls, "gcloud run jobs execute") == 0 and _count(calls, "gcloud run jobs delete") == 0, "an account that could not be made means no job, and no delete"
+    (tmp_path / "j").mkdir()
+    p2, calls2 = _run_step_3b(tmp_path / "j", job_create=True)
+    assert _count(calls2, "gcloud run jobs create") == 1 and _count(calls2, "gcloud run jobs execute") == 0 and _count(calls2, "gcloud run jobs delete") == 0, "a job that could not be made is neither executed nor deleted"
+
+
+def test_step_3b_reads_the_log_again_a_bounded_number_of_times_and_still_cleans_up(tmp_path: Path) -> None:
+    p, calls = _run_step_3b(tmp_path, no_log=True)
+    assert _count(calls, "gcloud logging read") == 6 and _count(calls, "sleep") == 6, "six reads, ten seconds apart, then it stops"
+    assert _count(calls, "gcloud run jobs delete gwdb-probe-untagged-") == 1, "the job is deleted whether or not a line was found"
