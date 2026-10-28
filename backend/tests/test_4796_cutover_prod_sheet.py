@@ -603,7 +603,7 @@ def test_the_pipeline_section_names_three_changes_in_an_order_and_the_repository
     assert "| 8b |" in SHEET and "P3" in _section("## The order", "## G. Gates")
     wf = (_ROOT / ".github/workflows/cloud-build.yml").read_text()
     prod_branch = wf.split('if [[ "$REF_NAME" == "main" ]]; then')[1].split("\n          else\n", 1)[0]
-    assert 'echo "fastapi_url=https://sprintable-backend-prod-787818285179.asia-northeast3.run.app"' in prod_branch, "P1's premise: the prod branch still names the Cloud Run address"
+    assert 'echo "fastapi_url=https://api.sprintable.ai"' in prod_branch and "sprintable-backend-prod-787818285179" not in prod_branch.split('echo "fastapi_url=')[1].split("\n")[0], "P1 is merged: the prod branch gives clients and services the VM's API name"
     assert "cloud_run_app_skip" not in prod_branch, "P3's premise: the prod branch does not skip Cloud Run yet"
     assert "if: success() && (steps.env.outputs.target == 'dev' || steps.env.outputs.target == 'prod')" in wf and "Submit the VM bundle build (dev and prod" in wf, "P2 is merged: the VM bundle build is submitted for dev and prod"
     state = section.split("**State when this was written")[1].split("- **P1")[0]
