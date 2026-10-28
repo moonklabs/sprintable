@@ -338,10 +338,11 @@ PROBESA_ID=gwdb-probe-$STAMP; PROBESA=$PROBESA_ID@$PROJECT.iam.gserviceaccount.c
 VMIP=$(gcloud compute instances describe $VM --zone $ZONE --project $PROJECT --format='value(networkInterfaces[0].networkIP)')
 GWIMG=$(gcloud run services describe $GW --project $PROJECT --region $REGION --format='value(spec.template.spec.containers[0].image)')
 PROBE='^@^-c@import errno, socket, sys; s = socket.socket(); s.settimeout(5); r = s.connect_ex((sys.argv[1], 5432)); kind = "REACHED" if r == 0 else "REFUSED" if r == errno.ECONNREFUSED else "TIMEOUT" if r in (errno.EAGAIN, errno.ETIMEDOUT) else "OTHER"; print("result", r, kind); sys.exit({"REACHED": 0, "REFUSED": 4, "TIMEOUT": 3}.get(kind, 5))@'"$VMIP"
-gcloud iam service-accounts create $PROBESA_ID --project $PROJECT --display-name "gateway db firewall probe (no roles)" && SA_MADE=$PROBESA_ID
+[ -n "$VMIP" ] || echo "STOP: no address to probe (VMIP is empty) - nothing is made below"
+[ -n "$VMIP" ] && gcloud iam service-accounts create $PROBESA_ID --project $PROJECT --display-name "gateway db firewall probe (no roles)" && SA_MADE=$PROBESA_ID
 [ "$SA_MADE" = "$PROBESA_ID" ] && gcloud run jobs create "$PJU" --project $PROJECT --region $REGION --image "$GWIMG" --service-account $PROBESA --network default --subnet default --vpc-egress private-ranges-only --max-retries 0 --task-timeout 60 --command python --args "$PROBE" && JOB_MADE=$PJU
-[ "$JOB_MADE" = "$PJU" ] && { gcloud run jobs execute "$PJU" --project $PROJECT --region $REGION --wait; true; }   # failing IS the expected answer; the next lines still run
-for n in 1 2 3 4 5 6; do gcloud logging read 'resource.type="cloud_run_job" AND resource.labels.job_name="'"$PJU"'"' --project $PROJECT --freshness 15m --limit 20 --format='value(textPayload)' | grep '^result' && break; sleep 10; done
+[ "$JOB_MADE" = "$PJU" ] && gcloud run jobs execute "$PJU" --project $PROJECT --region $REGION --wait || true   # failing IS the expected answer; the next lines still run (also under set -e)
+[ "$JOB_MADE" = "$PJU" ] && for n in 1 2 3 4 5 6; do gcloud logging read 'resource.type="cloud_run_job" AND resource.labels.job_name="'"$PJU"'"' --project $PROJECT --freshness 15m --limit 20 --format='value(textPayload)' | grep '^result' && break; sleep 10; done
 [ "$JOB_MADE" = "$PJU" ] && gcloud run jobs delete "$PJU" --project $PROJECT --region $REGION --quiet
 ```
 **Pass: the log line is `result <n> TIMEOUT`** (the execution failed with `exit(3)`). `gcloud`'s own status after `--wait` only says «failed» — it is not the container's exit code, so the log line is what is read (if it is not there yet, wait a few seconds and read again).

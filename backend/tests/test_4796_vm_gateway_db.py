@@ -1144,7 +1144,8 @@ def test_the_negative_control_of_step_five_can_be_run_from_the_runbook_alone() -
     sec = rb.split("**Step 3b")[1].split("The tag reaches the gateway's revisions")[0]
     for token in ("STAMP=$(date -u +%m%d%H%M%S)$RANDOM", "PROBESA_ID=gwdb-probe-$STAMP", "PJU=gwdb-probe-untagged-$STAMP", "gcloud iam service-accounts create $PROBESA_ID", "&& SA_MADE=$PROBESA_ID",
                   '[ "$SA_MADE" = "$PROBESA_ID" ] && gcloud run jobs create "$PJU"', "&& JOB_MADE=$PJU", "--network default --subnet default --vpc-egress private-ranges-only",
-                  '[ "$JOB_MADE" = "$PJU" ] && { gcloud run jobs execute "$PJU"', "; true; }", "for n in 1 2 3 4 5 6; do gcloud logging read", "| grep '^result' && break; sleep 10; done",
+                  '[ "$JOB_MADE" = "$PJU" ] && gcloud run jobs execute "$PJU"', "--wait || true", '[ "$JOB_MADE" = "$PJU" ] && for n in 1 2 3 4 5 6; do gcloud logging read', "| grep '^result' && break; sleep 10; done",
+                  '[ -n "$VMIP" ] && gcloud iam service-accounts create $PROBESA_ID', "STOP: no address to probe",
                   '[ "$JOB_MADE" = "$PJU" ] && gcloud run jobs delete "$PJU"', '[ "$SA_MADE" = "$PROBESA_ID" ] && gcloud iam service-accounts delete $PROBESA', "--service-account $PROBESA",
                   "**Pass: the log line is `result <n> TIMEOUT`**", "is not the container's exit code", "**`REFUSED`: the deny rule is missing — stop**", "**`OTHER`: the job could not reach the network at all", "positive control after step 5",
                   "holds **no role at all**"):
@@ -1177,7 +1178,7 @@ def _step_3b_block() -> str:
     return rb.split("**Step 3b")[1].split("```bash\n")[1].split("```")[0]
 
 
-def _run_step_3b(tmp_path: Path, **fail) -> tuple[subprocess.CompletedProcess, list[str]]:
+def _run_step_3b(tmp_path: Path, shell_flags: tuple = (), vmip_empty: bool = False, **fail) -> tuple[subprocess.CompletedProcess, list[str]]:
     """the block of the RUNBOOK as written, against a fake gcloud that records its calls; `fail` names the commands that fail (iam_create, job_create, execute) or answer nothing (no_log)"""
     import stat
     b = tmp_path / "bin"
@@ -1189,7 +1190,7 @@ def _run_step_3b(tmp_path: Path, **fail) -> tuple[subprocess.CompletedProcess, l
         "#!/bin/sh\n"
         'echo "gcloud $*" >> "$CALLS"\n'
         'case "$*" in\n'
-        '  "compute instances describe"*) printf 10.178.0.9 ;;\n'
+        '  "compute instances describe"*) [ -n "$F_NOIP" ] || printf 10.178.0.9 ;;\n'
         '  "run services describe"*) printf img ;;\n'
         '  "iam service-accounts create"*) [ -n "$F_IAM" ] && exit 1 ;;\n'
         '  "run jobs create"*) [ -n "$F_JOB" ] && exit 1 ;;\n'
@@ -1202,8 +1203,9 @@ def _run_step_3b(tmp_path: Path, **fail) -> tuple[subprocess.CompletedProcess, l
     slp.write_text('#!/bin/sh\necho sleep >> "$CALLS"\n')
     slp.chmod(slp.stat().st_mode | stat.S_IEXEC)
     env = {"PATH": f"{b}:/usr/bin:/bin", "HOME": str(tmp_path), "CALLS": str(calls), "ENV": "dev", "PROJECT": "p", "REGION": "r", "ZONE": "z", "VM": "vm",
-           "F_IAM": "1" if fail.get("iam_create") else "", "F_JOB": "1" if fail.get("job_create") else "", "F_NOLOG": "1" if fail.get("no_log") else ""}
-    p = subprocess.run(["bash", "-c", _step_3b_block()], capture_output=True, text=True, timeout=30, env=env, cwd=tmp_path)
+           "F_IAM": "1" if fail.get("iam_create") else "", "F_JOB": "1" if fail.get("job_create") else "", "F_NOLOG": "1" if fail.get("no_log") else "",
+           "F_NOIP": "1" if vmip_empty else ""}
+    p = subprocess.run(["bash", *shell_flags, "-c", _step_3b_block()], capture_output=True, text=True, timeout=30, env=env, cwd=tmp_path)
     return p, calls.read_text().splitlines()
 
 
@@ -1235,3 +1237,23 @@ def test_step_3b_reads_the_log_again_a_bounded_number_of_times_and_still_cleans_
     p, calls = _run_step_3b(tmp_path, no_log=True)
     assert _count(calls, "gcloud logging read") == 6 and _count(calls, "sleep") == 6, "six reads, ten seconds apart, then it stops"
     assert _count(calls, "gcloud run jobs delete gwdb-probe-untagged-") == 1, "the job is deleted whether or not a line was found"
+
+
+def test_step_3b_also_cleans_up_when_the_caller_runs_it_with_errexit(tmp_path: Path) -> None:
+    p, calls = _run_step_3b(tmp_path, shell_flags=("-e",))
+    assert p.returncode == 0, p.stderr
+    assert _count(calls, "gcloud run jobs delete gwdb-probe-untagged-") == 1, "the expected failure of the execute does not end a `set -e` shell before the cleanup"
+
+
+def test_step_3b_does_not_read_a_log_when_it_made_no_job(tmp_path: Path) -> None:
+    p, calls = _run_step_3b(tmp_path, job_create=True)
+    assert _count(calls, "gcloud logging read") == 0 and _count(calls, "sleep") == 0 and _count(calls, "gcloud run jobs execute") == 0 and _count(calls, "gcloud run jobs delete") == 0
+    (tmp_path / "i").mkdir()
+    p2, calls2 = _run_step_3b(tmp_path / "i", iam_create=True)
+    assert _count(calls2, "gcloud logging read") == 0, "a log of a job that exists under the same name is never read as ours"
+
+
+def test_step_3b_makes_nothing_when_the_address_to_probe_is_empty(tmp_path: Path) -> None:
+    p, calls = _run_step_3b(tmp_path, vmip_empty=True)
+    assert "STOP: no address to probe" in p.stdout
+    assert _count(calls, "gcloud iam service-accounts create") == 0 and _count(calls, "gcloud run jobs") == 0 and _count(calls, "gcloud logging") == 0
