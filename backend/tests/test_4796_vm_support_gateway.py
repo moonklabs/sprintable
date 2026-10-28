@@ -607,3 +607,17 @@ def test_bootstrap_stamps_the_releases_whose_compose_equals_the_copy_it_is_about
 def test_the_stamp_is_written_before_the_trusted_copy_is_replaced() -> None:
     text = (_VM / "bin/bootstrap.sh").read_text()
     assert text.index("compose-sha256") < text.index('install -m 0644 "$src/compose.yml" /opt/sprintable/bin/compose.yml')
+
+
+def test_a_release_whose_stamp_cannot_be_written_is_not_deployed(world) -> None:
+    """the stamp is what keeps the running release preparable after the next compose change: a release without one is not put into service"""
+    d = world.publish("a" * 40, gateway=False)
+    folder = world.cfg.install_dir / "releases" / d["sha"] / ".compose-sha256"
+    folder.mkdir(parents=True)
+    (folder / "in-the-way").write_text("x")  # a non-empty folder where the stamp file belongs: neither reading nor replacing it works
+    # the release folder itself must look reusable (bundle checksum stamp) so the extraction does not remove the obstacle
+    (world.cfg.install_dir / "releases" / d["sha"] / "compose.yml").write_bytes((_VM / "compose.yml").read_bytes())
+    (world.cfg.install_dir / "releases" / d["sha"] / ".bundle-sha256").write_text(d["bundle_sha256"])
+    assert world.dep.run_once() == "failed"
+    assert "compose stamp of the release cannot be written" in S._state(world, "failed.json")["detail"]
+    assert not any("--wait-timeout" in c["args"] for c in world.runner.calls), "nothing was swapped"

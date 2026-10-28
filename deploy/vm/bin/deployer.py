@@ -586,10 +586,14 @@ class Deployer:
         if _stamp_matches(stamp, digest):
             return
         check_compose(compose, self.cfg.trusted_compose)
+        tmp = stamp.with_name(stamp.name + ".tmp")
         try:
-            stamp.write_text(digest)
-        except OSError:
-            pass  # the release is accepted now; it is simply checked again next time
+            tmp.write_text(digest)
+            os.replace(tmp, stamp)
+        except OSError as e:
+            # not optional: a release that runs without its stamp could not be prepared as the way back after the next compose change
+            tmp.unlink(missing_ok=True)
+            raise DeployError(f"the compose stamp of the release cannot be written: {type(e).__name__}", "pre-swap") from e
 
     def _activate(self, p: Prepared) -> None:
         """make the compose invocations of `p` possible: the pass-through file (names only) and the data folders"""
