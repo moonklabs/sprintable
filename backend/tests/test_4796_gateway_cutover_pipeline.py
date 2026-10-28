@@ -104,7 +104,7 @@ def test_the_switch_defaults_to_cloud_sql_and_only_dev_states_it() -> None:
     block = _WORKFLOW.split('if [[ "$REF_NAME" == "main" ]]; then')[1]
     prod, dev = re.split(r"^          else\n", block, maxsplit=1, flags=re.M)
     assert "support_gateway_db_on_vm" not in prod.replace("# story 4796 (D2): prod's gateway does not exist", ""), "prod states nothing"
-    assert dev.count('echo "support_gateway_db_on_vm=false" >> "$GITHUB_OUTPUT"') == 1, "dev states it, off, until the cutover flips this one word"
+    assert dev.count('echo "support_gateway_db_on_vm=true" >> "$GITHUB_OUTPUT"') == 1 and "support_gateway_db_on_vm=false" not in dev, "dev states it, on: the cutover flipped this one word"
     assert 'echo "support_gateway_db_pool_size=3"' in dev and 'echo "support_gateway_db_max_overflow=2"' in dev
     assert 'V_SUPPORT_GATEWAY_DB_ON_VM="${V_SUPPORT_GATEWAY_DB_ON_VM:-false}"' in _WORKFLOW, "an empty output becomes false"
     for name in ("DB_ON_VM", "DB_POOL_SIZE", "DB_MAX_OVERFLOW"):
@@ -124,8 +124,8 @@ def test_the_order_of_the_gateway_steps_is_unchanged() -> None:
 
 def test_the_flip_is_one_word() -> None:
     dev = _WORKFLOW.split('if [[ "$REF_NAME" == "main" ]]; then')[1].split("          else\n", 1)[1]
-    flipped = dev.replace('echo "support_gateway_db_on_vm=false"', 'echo "support_gateway_db_on_vm=true"')
-    assert flipped != dev and flipped.count("support_gateway_db_on_vm=true") == 1 and len(flipped) == len(dev) - 1
+    flipped_back = dev.replace('echo "support_gateway_db_on_vm=true"', 'echo "support_gateway_db_on_vm=false"')
+    assert flipped_back != dev and flipped_back.count("support_gateway_db_on_vm=false") == 1 and len(flipped_back) == len(dev) + 1, "the way back is the same one word"
 
 
 # ── the service step, run for real ──────────────────────────────────────────────────────────────────────────────────────────────────────────

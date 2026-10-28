@@ -471,7 +471,7 @@ jobs:
             echo "support_gateway_service_account=support-gateway-dev@sprintable-494803.iam.gserviceaccount.com" >> "$GITHUB_OUTPUT"
             # story 4796 (D2): where the gateway's database is. «false» = Cloud SQL, as before; the PO's cutover (deploy/vm/CUTOVER-gateway-dev.md) flips this ONE word to «true» in the same window as the secret.
             # The pool (3 + 2, deploy/vm/RUNBOOK.md section 13) is only sent when it is «true».
-            echo "support_gateway_db_on_vm=false" >> "$GITHUB_OUTPUT"
+            echo "support_gateway_db_on_vm=true" >> "$GITHUB_OUTPUT"
             echo "support_gateway_db_pool_size=3" >> "$GITHUB_OUTPUT"
             echo "support_gateway_db_max_overflow=2" >> "$GITHUB_OUTPUT"
             # story #3263 AC4(2026-09-01, 페드루 PO 지시) — 에스컬레이션 게이트/DM
