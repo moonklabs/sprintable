@@ -1491,8 +1491,9 @@ def test_the_runbook_says_how_to_recover_a_first_start_that_was_cut_short_and_wh
     rb = _runbook13()
     para = rb.split("**A first start that was cut short.**")[1].split("**Rolling back across this step:**")[0]
     for token in ("only while the data folder is empty", "the application role does not own the database", "**no data in any database**", "**First look, read only**", "select count(*) from pg_stat_user_tables",
-                  "`template1` included", "ONE chain that stops where anything fails and asks the same question again as its first link", "&& sudo docker stop sprintable-gateway-db-1 && ", "-mindepth 1 -delete`",
-                  "sudo python3 /opt/sprintable/bin/deployer.py --force", "With data in it, do not empty anything"):
+                  "`template1` included", "ONE chain that stops where anything fails and asks the same question again as its first link", "&& sudo docker stop sprintable-gateway-db-1 && ", "sudo mv /srv/sprintable/gateway-postgres /srv/sprintable/gateway-postgres.cut-short-$(date -u +%Y%m%dT%H%M%SZ)`",
+                  "MOVED ASIDE", "Nothing is deleted by this chain", "the moved folder is looked at, and deleted, by a person once the new server is healthy", "do not move or empty anything",
+                  "sudo python3 /opt/sprintable/bin/deployer.py --force"):
         assert token in para, token
     assert " deployer --force" not in para, "the installed command, not a bare name that is not on the PATH"
     assert para.index("**First look, read only**") < para.index("ONE chain") < para.index("sudo docker stop sprintable-gateway-db-1 &&"), "the look first, then the chain that asks again, stops and only then wipes"
@@ -1630,7 +1631,7 @@ def test_on_a_real_server_the_recovery_question_finds_data_in_any_database(tmp_p
     (0, 0, "FAIL", False),             # the confirmation itself failed: that is not «stopped»
     (0, 0, "", False),                 # and an empty answer is not «false» either
 ])
-def test_the_recovery_chain_wipes_only_an_empty_server_that_is_confirmed_stopped(tmp_path: Path, shell: str, exec_rc: int, stop_rc: int, inspect: str, wiped: bool) -> None:
+def test_the_recovery_chain_moves_the_folder_aside_only_for_an_empty_server_that_is_confirmed_stopped(tmp_path: Path, shell: str, exec_rc: int, stop_rc: int, inspect: str, wiped: bool) -> None:
     import shutil
     import stat
     if shutil.which(shell) is None:
@@ -1648,11 +1649,18 @@ def test_the_recovery_chain_wipes_only_an_empty_server_that_is_confirmed_stopped
     chain = _recovery_chain().replace("/srv/sprintable/gateway-postgres", str(folder))
     env = {"PATH": f"{b}:/usr/bin:/bin", "HOME": str(tmp_path), "FAKE_EXEC_RC": str(exec_rc), "FAKE_STOP_RC": str(stop_rc), "FAKE_INSPECT": inspect}
     subprocess.run([shell, "-c", chain], capture_output=True, text=True, timeout=30, env=env)
-    assert (sorted(p.name for p in folder.iterdir()) == []) is wiped, (exec_rc, stop_rc, inspect)
+    aside = sorted(p for p in tmp_path.iterdir() if p.name.startswith("gateway-postgres.cut-short-"))
+    if wiped:
+        assert not folder.exists() and len(aside) == 1, "the folder is gone from its place and sits beside it under a time-stamped name"
+        assert sorted(p.name for p in aside[0].iterdir()) == ["PG_VERSION", "base", "pg_wal"], "with everything in it: nothing was deleted"
+        assert re.fullmatch(r"gateway-postgres\.cut-short-\d{8}T\d{6}Z", aside[0].name)
+    else:
+        assert folder.exists() and sorted(p.name for p in folder.iterdir()) == ["PG_VERSION", "base", "pg_wal"] and not aside, (exec_rc, stop_rc, inspect)
 
 
 def test_the_first_look_and_the_chain_ask_the_very_same_question_and_the_stop_is_confirmed_by_inspect() -> None:
     para = _recovery_paragraph()
+    assert "-delete" not in _recovery_chain() and "rm " not in _recovery_chain(), "the last link of the chain deletes nothing"
     assert _recovery_script() in _recovery_chain() and "sort -u" not in para and "docker ps" not in para and "not datistemplate" not in para
     assert "[ \"$(sudo docker inspect -f '{{.State.Running}}' sprintable-gateway-db-1)\" = false ]" in para and "a failed `inspect` is not «stopped»" in para
     assert "**It succeeds (exit status 0) only if the list is not empty, every count was obtained and every count is 0**" in para
