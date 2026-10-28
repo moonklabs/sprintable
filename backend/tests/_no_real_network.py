@@ -9,6 +9,8 @@ behaves as it did — and recorded with the test that made it; conftest's autous
 A process is a door too (story 4796): a test never starts the REAL gcloud binary except through tests/_real_gcloud.py. gcloud asks the metadata server whether it runs on Google Compute Engine
 (3 s per try, 3 retries) and on a CI runner the address does not answer: every start waited ~12 s and tests hit pytest's 30 s limit. The helper sends that question to a refusing port and puts a marker in the environment; a spawn of
 the real gcloud - by name or path, or named as a command inside a shell script - WITHOUT the marker is refused at the spawn (a stand-in `gcloud` that a test put on its own PATH is not the real one and passes).
+This is a guard against forgetting, not against intent, and it does not see everything: it reads the program that is started (gcloud by name or path) and the text a shell is given with -c; it does not see a gcloud started from inside a script FILE (the repo's scripts name gcloud in dry-run modes that never start it), or from inside another program
+(a python script of the test's, a make target) or a copy of the binary under another name. Those are for review, and the static scan in tests/test_4796_real_gcloud_independent_of_the_network.py.
 
 Made-up = a host with no dot other than localhost (`test` · `x` · `api` …) · `*.test` · `testserver` · `metadata.google.internal`;
 an IP only when link-local (169.254.0.0/16 · fe80::/10) or AWS's v6 metadata address. Loopback and real addresses pass. An ASGI or
@@ -55,7 +57,7 @@ GCLOUD_MARKER = "SPRINTABLE_TEST_GCLOUD_ENV"
 _STARTUP_PATH = [d for d in os.environ.get("PATH", "").split(os.pathsep) if d]   # where the REAL tools live: the PATH the session began with
 _SHELLS = {"bash", "sh", "zsh", "dash"}
 _GCLOUD_STAND_IN = re.compile(r"(?:^|[;&|(\n])\s*(?:function\s+)?gcloud\s*(?:\(\s*\))?\s*\{|\balias\s+gcloud=")   # the script defines its own gcloud (a shell function or an alias): what runs is the stand-in
-_GCLOUD_AS_COMMAND = re.compile(r"(?:^|[;&|(\n]|\$\()\s*(?:sudo\s+)?(?:\S*/)?gcloud(?:\s|$)")
+_GCLOUD_AS_COMMAND = re.compile(r"(?:^|[;&|(\n{]|\$\(|\b(?:exec|if|elif|while|until|then|do|else|time|command|nohup|xargs)\s|!\s)\s*(?:sudo\s+(?:-\S+\s+)*)?(?:\S*/)?gcloud(?:\s|$)")
 
 
 def real_gcloud_without_marker(args: object, env: object) -> bool:
@@ -73,10 +75,18 @@ def real_gcloud_without_marker(args: object, env: object) -> bool:
     first = os.path.basename(argv[0])
     if first == "gcloud":
         return True
-    if first in _SHELLS and "-c" in argv[1:]:
-        script = argv[argv.index("-c") + 1] if argv.index("-c") + 1 < len(argv) else ""
-        return bool(_GCLOUD_AS_COMMAND.search(script)) and not _GCLOUD_STAND_IN.search(script)
+    if first in _SHELLS:
+        script = _shell_text(argv[1:])
+        return bool(script) and bool(_GCLOUD_AS_COMMAND.search(script)) and not _GCLOUD_STAND_IN.search(script)
     return False
+
+
+def _shell_text(rest: list[str]) -> str:
+    """the text a shell is given to run with -c (also in a bundle such as -euc). A script FILE is not read: the repo's own scripts name gcloud in dry-run and print modes that never start it, so the file's text says too little"""
+    for i, a in enumerate(rest):
+        if a.startswith("-") and not a.startswith("--") and "c" in a[1:]:
+            return rest[i + 1] if i + 1 < len(rest) else ""
+    return ""
 
 
 _installed = False

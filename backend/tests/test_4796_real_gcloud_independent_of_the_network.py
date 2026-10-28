@@ -172,6 +172,14 @@ def _guard():
     (["bash", "-c", "echo x; sudo gcloud run services list"], False, True),
     (["bash", "-c", "set -e\n  gcloud run services list"], False, True),
     (["bash", "-c", "X=$(gcloud config list)"], False, True),
+    (["bash", "-c", 'exec gcloud "$@"'], False, True),                      # the forms the repo's own scripts use
+    (["bash", "-c", "if gcloud run services list; then echo ok; fi"], False, True),
+    (["bash", "-euc", "gcloud run services list"], False, True),            # option bundles
+    (["bash", "-ec", "cd /x && gcloud run services list"], False, True),
+    (["sh", "-c", "while ! gcloud run services list; do sleep 1; done"], False, True),
+    (["bash", "-c", "xargs gcloud run services describe < list"], False, True),
+    (["bash", "-c", "gcloud() { echo stand-in; }\ngcloud run services list"], False, False),   # defines its own
+    (["bash", "-c", "alias gcloud=echo; gcloud run services list"], False, False),
     (["gcloud", "version"], True, False),                                   # through the helper
     (["bash", "-c", "gcloud run services list"], True, False),
     (["grep", "gcloud", "file"], False, False),                             # the word as an argument is not a start
@@ -208,3 +216,18 @@ def test_a_real_spawn_without_the_marker_fails_at_the_spawn_and_names_the_cause(
         subprocess.run(["gcloud", "version"], env={"PATH": os.environ["PATH"], "HOME": str(tmp_path)}, capture_output=True, timeout=30)
     assert len(g.CAUGHT) == len(before) + 1
     del g.CAUGHT[len(before):]   # this test made the refusal on purpose: the autouse fixture must not fail it
+
+
+@needs_gcloud
+def test_a_shell_script_file_is_not_read_because_the_repos_scripts_name_gcloud_in_modes_that_never_start_it(tmp_path: Path) -> None:
+    import os
+    g = _guard()
+    script = tmp_path / "deploy.sh"
+    script.write_text("#!/bin/bash\nif [ -n \"$DRY_RUN\" ]; then echo gcloud run services list; else gcloud run services list; fi\n")
+    assert g.real_gcloud_without_marker(["bash", str(script)], {"PATH": os.environ["PATH"]}) is False, "documented limit: the file's text does not say whether gcloud starts"
+
+
+def test_the_limit_of_the_runtime_guard_is_written_down() -> None:
+    """a guard against forgetting, not against intent: the module says what it sees and what it does not (a script FILE, a program that starts gcloud from inside another program, a binary under another name)"""
+    doc = _guard().__doc__
+    assert "guard against forgetting" in doc and "does not see" in doc
