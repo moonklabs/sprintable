@@ -1,0 +1,29 @@
+# The thin forwarder of the old address (story 4796). It runs as the one revision of the prod backend service on Cloud Run and hands
+# every request to the API name, so a client that still calls the old address reaches the VM without changing anything. It holds no
+# database, no secret and no setting of the application: the revision is deployed with all of them cleared (CUTOVER-prod.md, step 4c).
+{
+	admin off
+	auto_https off
+	# Caddy's default log (its stream of errors, stderr): the same filter as the stack's Caddyfile (P5), so a request's headers,
+	# TLS data, response headers and URI are never written.
+	log {
+		output stderr
+		format filter {
+			wrap json
+			fields {
+				request>headers delete
+				request>tls delete
+				resp_headers delete
+				request>uri delete
+			}
+		}
+	}
+}
+
+:{$PORT:8080} {
+	# no `encode`: compressing would hold stream frames back; flush_interval -1 sends every chunk as it arrives
+	reverse_proxy {$FORWARD_TO:https://api.sprintable.ai} {
+		flush_interval -1
+		header_up Host {upstream_hostport}
+	}
+}
