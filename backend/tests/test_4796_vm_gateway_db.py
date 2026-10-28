@@ -1113,13 +1113,15 @@ def test_the_runbook_makes_the_firewall_a_hard_condition_of_step_five_and_measur
 
 
 def test_the_public_repository_does_not_describe_what_the_projects_broad_rule_lets_reach_the_vm() -> None:
+    """patterns, not the phrases themselves: this file must not carry the sentence it forbids"""
+    banned = [r"default-allow-\w+", r"\bEVERY\s+machine", r"every\s+machine\s+on\s+the\s+default", r"priority\s+6553\d", r"prod's\s+among"]
     for path in ("RUNBOOK.md", "compose.yml", "bin/gateway-db-firewall.sh", "CUTOVER-gateway-dev.md"):
         f = _VM / path
         if not f.exists():
             continue
         text = f.read_text()
-        for phrase in ("default-allow-internal", "EVERY machine", "every machine on the default network", "65534", "prod's among them"):
-            assert phrase not in text, (path, phrase)
+        for pattern in banned:
+            assert not re.search(pattern, text), (path, pattern)
     assert "A broader allow rule exists separately in the project, so an allow rule alone would narrow nothing" in (_VM / "RUNBOOK.md").read_text()
 
 
@@ -1129,3 +1131,13 @@ def test_the_metadata_rule_is_ipv4_only_and_says_so_while_nothing_enables_ipv6()
     compose = yaml.safe_load((_VM / "compose.yml").read_text())
     assert not compose["networks"]["gateway-db"].get("enable_ipv6"), "the bridge has no IPv6 network"
     assert "The rule that keeps the metadata server out of reach is IPv4 only" in (_VM / "RUNBOOK.md").read_text()
+
+
+def test_the_negative_control_of_step_five_can_be_run_from_the_runbook_alone() -> None:
+    rb = (_VM / "RUNBOOK.md").read_text().split("## 13. The support gateway's database on the VM")[1]
+    sec = rb.split("**Step 3b")[1].split("The tag reaches the gateway's revisions")[0]
+    for token in ("gcloud run jobs create gwdb-probe-untagged", "--network default --subnet default --vpc-egress private-ranges-only", "gcloud run jobs execute gwdb-probe-untagged", "gcloud run jobs delete gwdb-probe-untagged",
+                  "sys.exit(0 if r == 0 else 4 if r == errno.ECONNREFUSED else 3)", "5432", "**Pass: the execution FAILS and its message says `exit(3)`.**", "`exit(4)` = refused", "positive control after step 5"):
+        assert token in sec, token
+    assert "--network-tags" not in sec.split("**Pass:")[0], "the job that is meant to carry NO tag carries none"
+    assert "next change" not in rb.split("**Step 3b")[1].split("**Checks after step 5")[0], "nothing the gate needs is deferred to a later change"
