@@ -312,7 +312,7 @@ Same steps with `ENV=prod`, `env/prod.yaml`, a new `api.sprintable.ai` record (D
 |---|---|---|
 | 1 | merge → the dev build writes `candidates/<sha>.json` | nothing |
 | 2 | create the secret and its grant (§3) | nothing |
-| 3 | make the VM's internal address static and set the firewall (below) | nothing — the port has no listener until step 5, and the deny rule keeps everything out in any case |
+| 3 | make the VM's internal address static and set the firewall (below) — **the address must never change afterwards**: the database binds to whatever the metadata server says at each deploy, and the gateway's connection URL (the cutover sheet) names one address; if it ever changed, the secret would have to follow before the next deploy | nothing — the port has no listener until step 5, and the deny rule keeps everything out in any case |
 | 4 | re-run `bootstrap.sh` from the new bundle (§6): stamps the release folders already on the VM (`.compose-sha256`), installs the new tools, the firewall unit (it only adds a rule on a bridge that does not exist yet) and the new trusted `compose.yml`, `daemon-reload` | **no container is restarted — no database or Caddy restart, no deploy interruption.** Until it is done the deployer refuses the new compose before the swap («compose.yml differs…», nothing changed) |
 | 5 | copy `candidates/<sha>.json` over `desired.json` (§7 step 1) | the next tick deploys like any release: backend and frontend are swapped (the same short API/UI gap — `deployer --force` measured 68 s on 2026-10-27); **the main database and Caddy are not touched** (their compose configuration is unchanged); `gateway-db` is created beside them (an image the VM already has — no pull) |
 

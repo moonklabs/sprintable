@@ -1023,3 +1023,8 @@ def test_nothing_is_brought_back_when_the_running_release_had_no_gateway_databas
 
 def test_the_runbook_states_that_a_failed_release_gives_the_gateway_database_back_as_it_was() -> None:
     assert "the deployer brings the database back **as the running release has it**" in (_VM / "RUNBOOK.md").read_text()
+
+
+def test_the_runbook_says_the_internal_address_must_stay_the_same_after_step_3() -> None:
+    rb = (_VM / "RUNBOOK.md").read_text()
+    assert "**the address must never change afterwards**" in rb and "the secret would have to follow before the next deploy" in rb
