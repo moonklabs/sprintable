@@ -6,6 +6,10 @@ Installed once by conftest.py, before any test module is imported. A request to 
 same error a refused connection gives (httpx.ConnectError · ConnectionRefusedError · urllib3 NewConnectionError), so best-effort code
 behaves as it did — and recorded with the test that made it; conftest's autouse fixture fails that test, naming the request.
 
+A process is a door too (story 4796): a test never starts the REAL gcloud binary except through tests/_real_gcloud.py. gcloud asks the metadata server whether it runs on Google Compute Engine
+(3 s per try, 3 retries) and on a CI runner the address does not answer: every start waited ~12 s and tests hit pytest's 30 s limit. The helper sends that question to a refusing port and puts a marker in the environment; a spawn of
+the real gcloud - by name or path, or named as a command inside a shell script - WITHOUT the marker is refused at the spawn (a stand-in `gcloud` that a test put on its own PATH is not the real one and passes).
+
 Made-up = a host with no dot other than localhost (`test` · `x` · `api` …) · `*.test` · `testserver` · `metadata.google.internal`;
 an IP only when link-local (169.254.0.0/16 · fe80::/10) or AWS's v6 metadata address. Loopback and real addresses pass. An ASGI or
 Mock transport never reaches these doors."""
@@ -14,7 +18,10 @@ from __future__ import annotations
 import http.client
 import ipaddress
 import os
+import re
+import shutil
 import socket
+import subprocess
 from urllib.parse import urlsplit
 
 import httpx
@@ -43,6 +50,35 @@ def _stop(how: str, url: object) -> str:
     return f"tests/_no_real_network: a real connection to a made-up host was refused ({how} {url})"
 
 
+#: set by tests/_real_gcloud.py in the environment of every gcloud start it makes
+GCLOUD_MARKER = "SPRINTABLE_TEST_GCLOUD_ENV"
+_STARTUP_PATH = [d for d in os.environ.get("PATH", "").split(os.pathsep) if d]   # where the REAL tools live: the PATH the session began with
+_SHELLS = {"bash", "sh", "zsh", "dash"}
+_GCLOUD_STAND_IN = re.compile(r"(?:^|[;&|(\n])\s*(?:function\s+)?gcloud\s*(?:\(\s*\))?\s*\{|\balias\s+gcloud=")   # the script defines its own gcloud (a shell function or an alias): what runs is the stand-in
+_GCLOUD_AS_COMMAND = re.compile(r"(?:^|[;&|(\n]|\$\()\s*(?:sudo\s+)?(?:\S*/)?gcloud(?:\s|$)")
+
+
+def real_gcloud_without_marker(args: object, env: object) -> bool:
+    """would this spawn start the real gcloud with an environment that did not come from tests/_real_gcloud.py?"""
+    environment = env if isinstance(env, dict) else os.environ
+    if environment.get(GCLOUD_MARKER) == "1":
+        return False
+    found = shutil.which("gcloud", path=environment.get("PATH", os.defpath))
+    if not found or os.path.dirname(found) not in _STARTUP_PATH:
+        return False   # no gcloud at all, or only a stand-in a test put on its own PATH
+    argv = [args] if isinstance(args, (str, bytes, os.PathLike)) else list(args or [])
+    argv = [os.fsdecode(a) if isinstance(a, (bytes, os.PathLike)) else str(a) for a in argv]
+    if not argv:
+        return False
+    first = os.path.basename(argv[0])
+    if first == "gcloud":
+        return True
+    if first in _SHELLS and "-c" in argv[1:]:
+        script = argv[argv.index("-c") + 1] if argv.index("-c") + 1 < len(argv) else ""
+        return bool(_GCLOUD_AS_COMMAND.search(script)) and not _GCLOUD_STAND_IN.search(script)
+    return False
+
+
 _installed = False
 
 
@@ -53,6 +89,16 @@ def install() -> None:
     if _installed or os.environ.get("NO_REAL_NETWORK_GUARD") == "0":
         return
     _installed = True
+
+    orig_popen_init = subprocess.Popen.__init__
+
+    def _popen_init(self, args, *a, **kw):
+        if real_gcloud_without_marker(args, kw.get("env")):
+            what = _stop("subprocess", f"the real gcloud without tests/_real_gcloud.py ({str(args)[:100]})")
+            raise FileNotFoundError(what)
+        return orig_popen_init(self, args, *a, **kw)
+
+    subprocess.Popen.__init__ = _popen_init
 
     orig_sync = httpx.HTTPTransport.handle_request
     orig_async = httpx.AsyncHTTPTransport.handle_async_request

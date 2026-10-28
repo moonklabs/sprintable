@@ -21,6 +21,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests import _real_gcloud as _gcloud
+
 _ROOT = Path(__file__).resolve().parents[2]
 _MAIN = yaml.safe_load((_ROOT / "cloudbuild.yaml").read_text())
 _VM = yaml.safe_load((_ROOT / "cloudbuild-vm.yaml").read_text())
@@ -112,7 +114,7 @@ def test_the_submit_command_lines_are_accepted_by_the_real_gcloud_flag_parser(wh
     words = shlex.split(text)
     assert words[:3] == ["gcloud", "builds", "submit"]
     argv = [re.sub(r"^--config=.*", "--config=/dev/null", w) for w in words]
-    p = subprocess.run(argv, capture_output=True, text=True, cwd=tmp_path, env={"PATH": os.environ["PATH"], "HOME": str(tmp_path), "CLOUDSDK_CONFIG": str(tmp_path / "gc")}, timeout=120)
+    p = subprocess.run(argv, capture_output=True, text=True, cwd=tmp_path, env=_gcloud.env(tmp_path, tmp_path / "gc", project=None), timeout=60)
     assert "unrecognized arguments" not in p.stderr and "usage:" not in p.stderr.lower(), p.stderr[:400]
     assert "parsing /dev/null" in p.stderr, f"the flags were accepted only if gcloud got as far as reading the (empty) config: {p.stderr[:400]}"
 

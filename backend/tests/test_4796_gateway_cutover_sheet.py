@@ -16,6 +16,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests import _real_gcloud as _gcloud
+
 _ROOT = Path(__file__).resolve().parents[2]
 SHEET = (_ROOT / "deploy/vm/CUTOVER-gateway-dev.md").read_text()
 RUNBOOK = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
@@ -252,7 +254,7 @@ needs_gcloud = pytest.mark.skipif(shutil.which("gcloud") is None, reason="no gcl
 
 
 @needs_gcloud
-@pytest.mark.timeout(900)   # about seventy gcloud starts: each takes a second or more on a busy runner, so they run side by side and the test has a limit of its own
+@pytest.mark.timeout(120)   # about seventy gcloud starts of well under a second each (tests/_real_gcloud.py: no network), six at a time - the limit is a bound for a hang, not a budget
 def test_every_gcloud_command_of_the_sheet_parses_in_the_real_gcloud(tmp_path: Path) -> None:
     """no credentials, an empty configuration directory (one per command, so that parallel runs share nothing): «no active account» = the command line is well formed; anything else is printed"""
     from concurrent.futures import ThreadPoolExecutor
@@ -262,11 +264,9 @@ def test_every_gcloud_command_of_the_sheet_parses_in_the_real_gcloud(tmp_path: P
 
     def parse(item: tuple[tuple, int]) -> tuple[str, str] | None:
         argv, n = item
-        cfg = tmp_path / f"cfg-{n}"
-        cfg.mkdir()
-        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(cfg), "CLOUDSDK_CONFIG": str(cfg), "CLOUDSDK_CORE_DISABLE_PROMPTS": "1", "CLOUDSDK_CORE_PROJECT": "parse-only-project"}
-        p = subprocess.run(["gcloud", *argv], capture_output=True, text=True, timeout=300, env=env, cwd=cfg)
-        out = re.sub(r"\x1b\[[0-9;]*m", "", p.stdout + p.stderr)
+        home = tmp_path / f"home-{n}"
+        home.mkdir()
+        out = _gcloud.text(_gcloud.run(list(argv), home))
         return None if "do not currently have an active account" in out else (" ".join(argv)[:140], out[:220])
 
     assert len(unique) >= 40, len(unique)
@@ -494,7 +494,6 @@ def test_no_dev_build_can_start_between_step_four_and_step_eleven() -> None:
 
 
 def test_the_sheet_blocks_survive_errexit_and_read_no_log_of_a_job_they_did_not_make(tmp_path: Path) -> None:
-    import stat
     block = _fence_after("**2a. Negative")
     p, calls = _run_sheet_block(block, tmp_path, {}, {})
     # the same block under `bash -e`: the expected failure of the execute must not end the shell before the cleanup
