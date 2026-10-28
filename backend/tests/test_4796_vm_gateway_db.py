@@ -1489,11 +1489,12 @@ def test_a_role_that_vanishes_after_the_swap_is_not_healthy_and_rolls_the_releas
 def test_the_runbook_says_how_to_recover_a_first_start_that_was_cut_short_and_when_not_to() -> None:
     rb = _runbook13()
     para = rb.split("**A first start that was cut short.**")[1].split("**Rolling back across this step:**")[0]
-    for token in ("only while the data folder is empty", "the application role does not own the database", "holds **no gateway data**", "sudo find /srv/sprintable/gateway-postgres -mindepth 1 -delete",
-                  "deployer --force", "With data in it, do not empty anything", "**First look, read only**", "select count(*) from pg_stat_user_tables", "must print **0**",
-                  "**any other answer, or any other failure, and nothing below is run**", 'sudo docker stop sprintable-gateway-db-1 && [ -z "$(sudo docker ps -q --filter name=sprintable-gateway-db-1)" ] && sudo find /srv/sprintable/gateway-postgres -mindepth 1 -delete', "ONE chain that stops where anything fails"):
+    for token in ("only while the data folder is empty", "the application role does not own the database", "**no data in any database**", "**First look, read only**", "select count(*) from pg_stat_user_tables", "**Every line must be 0**",
+                  "every database that accepts connections, `template1` included: a renamed one", "ONE chain that stops where anything fails and asks the same question again as its first link", "| sort -u)\" = 0 ] && sudo docker stop sprintable-gateway-db-1 && [ -z \"$(sudo docker ps -q --filter name=sprintable-gateway-db-1)\" ] && sudo find /srv/sprintable/gateway-postgres -mindepth 1 -delete",
+                  "sudo python3 /opt/sprintable/bin/deployer.py --force", "With data in it, do not empty anything"):
         assert token in para, token
-    assert para.index("select count(*) from pg_stat_user_tables") < para.index("sudo docker stop sprintable-gateway-db-1") < para.index("-mindepth 1 -delete"), "the look comes first, the wipe last"
+    assert " deployer --force" not in para, "the installed command, not a bare name that is not on the PATH"
+    assert para.index("**First look, read only**") < para.index("ONE chain") < para.index("sudo docker stop sprintable-gateway-db-1 &&"), "the look first, then the chain that asks again, stops and only then wipes"
     assert "docker compose" not in para, "a compose command would need the deployer's environment"
 
 
@@ -1533,3 +1534,78 @@ def test_the_password_in_the_log_check_names_the_project_and_does_not_pass_on_an
     line = rb.split("no password in the server's log:")[1].split("From outside")[0]
     assert "gcloud compute ssh $VM --project $PROJECT --zone $ZONE --tunnel-through-iap" in line
     assert '&& [ -n "$LOG" ] && printf' in line and "grep -c -F -- \"$PW\"" in line and "a failed ssh or an empty log prints nothing: that is not a pass" in line
+
+
+def _recovery_loop() -> str:
+    para = _runbook13().split("**A first start that was cut short.**")[1].split("**Rolling back across this step:**")[0]
+    return para.split("sh -c '")[1].split("'")[0]
+
+
+def _recovery_chain() -> str:
+    para = _runbook13().split("**A first start that was cut short.**")[1].split("**Rolling back across this step:**")[0]
+    return para.split("ONE chain that stops where anything fails and asks the same question again as its first link: `")[1].split("` (the container's own name")[0]
+
+
+@pytest.mark.skipif(_postgres_binaries() is None or os.geteuid() == 0, reason="needs the Postgres binaries and a user that is not root (initdb refuses root)")
+def test_on_a_real_server_the_recovery_question_finds_data_in_any_database(tmp_path: Path) -> None:
+    """a renamed database or a kept restore copy holds data too: the question covers every database that is not a template"""
+    import shutil
+    import tempfile
+    bins = _postgres_binaries()
+    work = Path(tempfile.mkdtemp(prefix="gwrec"))
+    port = str(52000 + (os.getpid() % 8000))
+    try:
+        data, sock = work / "data", work / "sock"
+        sock.mkdir()
+        run = lambda *a: subprocess.run([str(bins / a[0]), *a[1:]], capture_output=True, text=True, timeout=60)  # noqa: E731
+        assert run("initdb", "-D", str(data), "-U", "gw_admin", "--auth-local=trust", "--auth-host=trust").returncode == 0
+        assert run("pg_ctl", "-D", str(data), "-l", str(work / "log"), "-o", f"-c listen_addresses='' -k {sock} -p {port}", "-w", "start").returncode == 0
+        for name in ("support_gateway", "support_gateway_before_restore_x"):
+            assert run("createdb", "-h", str(sock), "-p", port, "-U", "gw_admin", name).returncode == 0
+        env = {"PATH": f"{bins}:/usr/bin:/bin", "PGHOST": str(sock), "PGPORT": port, "POSTGRES_USER": "gw_admin", "HOME": str(work)}
+        ask = lambda: subprocess.run(["sh", "-c", _recovery_loop() + " | sort -u"], capture_output=True, text=True, timeout=60, env=env).stdout.strip()  # noqa: E731
+        assert ask() == "0", "no data anywhere: every line is 0"
+        assert run("psql", "-h", str(sock), "-p", port, "-U", "gw_admin", "-d", "support_gateway_before_restore_x", "-X", "-q", "-c", "create table kept(id int)").returncode == 0
+        assert ask() == "0\n1", "a table in a database that is NOT the gateway's own is found"
+        assert run("psql", "-h", str(sock), "-p", port, "-U", "gw_admin", "-d", "support_gateway_before_restore_x", "-X", "-q", "-c", "drop table kept").returncode == 0 and ask() == "0"
+        assert run("psql", "-h", str(sock), "-p", port, "-U", "gw_admin", "-d", "template1", "-X", "-q", "-c", "create table in_the_template(id int)").returncode == 0
+        assert ask() == "0\n1", "template1 is a database like the others here: a table in it is data too"
+    finally:
+        subprocess.run([str(bins / "pg_ctl"), "-D", str(work / "data"), "-m", "immediate", "stop"], capture_output=True, timeout=60)
+        shutil.rmtree(work, ignore_errors=True)
+
+
+@pytest.mark.parametrize("shell", ["bash", "zsh"])
+@pytest.mark.parametrize("counts,stop_rc,still_running,wiped", [("0\n0\n0", 0, False, True), ("0\n1\n0", 0, False, False), ("", 0, False, False), ("0\n0", 1, False, False), ("0\n0", 0, True, False)])
+def test_the_recovery_chain_wipes_only_an_empty_stopped_server(tmp_path: Path, shell: str, counts: str, stop_rc: int, still_running: bool, wiped: bool) -> None:
+    import shutil
+    import stat
+    if shutil.which(shell) is None:
+        pytest.skip(f"no {shell}")
+    folder = tmp_path / "gateway-postgres"
+    folder.mkdir()
+    for n in ("PG_VERSION", "base", "pg_wal"):
+        (folder / n).write_text("x")
+    b = tmp_path / "bin"
+    b.mkdir()
+    (b / "sudo").write_text('#!/bin/sh\nexec "$@"\n')
+    (b / "docker").write_text('#!/bin/sh\ncase "$1" in exec) printf "%s\\n" "$FAKE_COUNTS" | grep -v "^$" ;; stop) exit "$FAKE_STOP_RC" ;; ps) [ -n "$FAKE_RUNNING" ] && echo abc123; exit 0 ;; esac\n')
+    for f in (b / "sudo", b / "docker"):
+        f.chmod(f.stat().st_mode | stat.S_IEXEC)
+    chain = _recovery_chain().replace("/srv/sprintable/gateway-postgres", str(folder))
+    env = {"PATH": f"{b}:/usr/bin:/bin", "HOME": str(tmp_path), "FAKE_COUNTS": counts, "FAKE_STOP_RC": str(stop_rc), "FAKE_RUNNING": "1" if still_running else ""}
+    subprocess.run([shell, "-c", chain], capture_output=True, text=True, timeout=30, env=env)
+    left = sorted(p.name for p in folder.iterdir())
+    assert (left == []) is wiped, (counts, stop_rc, still_running, left)
+
+
+def test_the_first_look_and_the_chain_ask_the_very_same_question() -> None:
+    assert _recovery_loop() in _recovery_chain() and "pg_stat_user_tables" in _recovery_loop() and "not datistemplate" not in _recovery_loop()
+
+
+def test_the_undo_removes_the_container_before_the_rules_and_the_rules_wait() -> None:
+    rb = _runbook13()
+    undo = rb.split("**Undo of this step:**")[1].split("\n")[0]
+    assert undo.index("sudo docker stop sprintable-gateway-db-1 && sudo docker rm sprintable-gateway-db-1") < undo.index("sudo ss -ltn | grep ':5432'") < undo.index("delete `/srv/sprintable/gateway-postgres`") < undo.index("ONLY THEN the firewall rules of step 3")
+    assert "**The rules stay until the container is gone**" in undo and "docker compose" not in undo
+    assert "Undo (the rules LAST — only after `gateway-db` is gone" in rb
