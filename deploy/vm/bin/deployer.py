@@ -343,6 +343,7 @@ class Deployer:
     def run_once(self, force: bool = False) -> str:
         self._secret_cache.clear()
         self._prev = self._cand = None
+        self._gateway_db_closed = False
         current = read_current(self._current_path)
         # first of all: a previous run may have died between «a swap started» and «the state is recorded» — settle that, whatever desired.json says or fails to say
         unresolved = self._settle_unresolved(current)
@@ -382,6 +383,16 @@ class Deployer:
         except Exception as e:  # noqa: BLE001 — whatever went wrong, record it and (after the swap) put the previous release back
             err = e if isinstance(e, DeployError) else DeployError(f"unexpected {type(e).__name__}", self._phase)
             _write_json(self.cfg.state_dir / "failed.json", {"signature": signature(desired), "phase": err.phase, "detail": self._scrub(str(err))[:500], "at": int(self.now())})
+            if err.phase == "pre-swap" and self._prev is not None and self._prev.gateway_db and not self._gateway_db_closed:
+                # compose may already have re-created the gateway's database with the CANDIDATE's settings (a rotated password secret, a changed private address) before this release failed: nothing else would
+                # bring it back as the running release has it (current.json still names that release, so the next run finds nothing to do). A no-op when nothing was re-created.
+                try:
+                    self._activate(self._prev)
+                    rc, out = self._compose(self._prev.release, self._prev.env, "up", "-d", "--wait", "gateway-db", timeout=T_DB)
+                    if rc != 0:
+                        self.log(f"the gateway database could not be brought back as the running release has it: {out[-200:]}")
+                except DeployError as e2:
+                    self.log(f"the gateway database could not be brought back as the running release has it: {self._scrub(str(e2))}")
             if err.phase == "post-swap":
                 outcome = self._rollback(current)
                 self._status(outcome, sha=desired["sha"], detail=self._scrub(str(err))[:300], serving=(current or {}).get("sha") if outcome == "rolled-back" else None)
@@ -674,6 +685,7 @@ class Deployer:
 
     def _close_gateway_db(self, cand: Prepared) -> str:
         """stops (then kills) the gateway's database whose metadata isolation is unproven; says in words whether it is down"""
+        self._gateway_db_closed = True
         for verb, timeout in (("stop", 120), ("kill", 60)):
             rc, out = self._compose(cand.release, cand.env, verb, "gateway-db", timeout=timeout)
             if rc == 0:

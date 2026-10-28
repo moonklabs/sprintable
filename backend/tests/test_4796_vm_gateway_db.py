@@ -984,3 +984,42 @@ def test_a_release_without_the_first_start_script_stops_before_anything_runs(wor
     st = S._state(world, "failed.json")
     assert st["phase"] == "pre-swap" and "gateway-db-init.sh" in st["detail"]
     assert not [c for c in _compose_calls(world) if "up" in c["args"]], "nothing was started"
+
+
+def _gateway_ups(w) -> list[dict]:
+    return [c for c in _compose_calls(w) if "up" in c["args"] and c["args"][-1] == "gateway-db" and "--wait" in c["args"]]
+
+
+def test_a_release_that_fails_before_the_swap_brings_the_gateway_database_back_as_the_running_release_has_it(world) -> None:
+    a = world.publish("a" * 40)
+    world.dep.run_once()
+    ups_before = len(_gateway_ups(world))
+    world.publish("b" * 40)
+    world.runner.fail_on["migrate"] = 1
+    assert world.dep.run_once() == "failed"
+    ups = _gateway_ups(world)[ups_before:]
+    assert len(ups) == 2, "the candidate's own start, then the way back"
+    assert ups[0]["env"]["BACKEND_IMAGE"] != a["backend_image"] and ups[1]["env"]["BACKEND_IMAGE"] == a["backend_image"], "with the RUNNING release's environment"
+
+
+def test_a_gateway_database_that_was_stopped_for_the_metadata_server_is_not_started_again_by_the_way_back(world) -> None:
+    world.publish("a" * 40)
+    world.dep.run_once()
+    ups_before = len(_gateway_ups(world))
+    world.publish("b" * 40)
+    world.runner.metadata_rc = 0
+    assert world.dep.run_once() == "failed"
+    assert len(_gateway_ups(world)) == ups_before + 1, "only the candidate's own start: the closed container stays closed"
+
+
+def test_nothing_is_brought_back_when_the_running_release_had_no_gateway_database(world) -> None:
+    world.publish("a" * 40, bundle=_without_block(Path(".")))
+    world.dep.run_once()
+    world.publish("b" * 40)
+    world.runner.fail_on["migrate"] = 1
+    assert world.dep.run_once() == "failed"
+    assert len(_gateway_ups(world)) == 1, "the candidate's own start only"
+
+
+def test_the_runbook_states_that_a_failed_release_gives_the_gateway_database_back_as_it_was() -> None:
+    assert "the deployer brings the database back **as the running release has it**" in (_VM / "RUNBOOK.md").read_text()
