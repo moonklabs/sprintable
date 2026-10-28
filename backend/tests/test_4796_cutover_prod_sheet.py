@@ -247,7 +247,7 @@ case "$*" in
   *"secrets get-iam-policy"*) case "$*" in *DATABASE_URL_PROD*) echo '{"bindings":[]}' ;; *) echo '{"bindings":[{"role":"roles/secretmanager.secretAccessor","members":["serviceAccount:vm-sa@sprintable-494803.iam.gserviceaccount.com"]}]}' ;; esac ;;
   *"config get-value account"*) echo "$OPERATOR" ;;
   *"remove-iam-policy-binding"*) svc="$4"; for a in "$@"; do case "$a" in --member=*) case " $STICKY " in *" ${a#--member=} "*) ;; *) echo "${a#--member=}" >> "$STATE/removed-$svc" ;; esac ;; esac; done ;;
-  *"get-iam-policy"*) svc="$4"; case " $* " in *" $NOBIND "*) echo '{"bindings":[{"role":"roles/run.invoker","members":["user:operator@example.com"]}]}' ;; *" $GARBAGE "*) echo 'not json at all' ;; *) out=""; for m in allUsers serviceAccount:caller@p.iam.gserviceaccount.com user:operator@example.com; do grep -qxF "$m" "$STATE/removed-$svc" 2>/dev/null || out="$out\"$m\","; done; echo "{\"bindings\":[{\"role\":\"roles/run.invoker\",\"members\":[${out%,}]}]}" ;; esac ;;
+  *"get-iam-policy"*) svc="$4"; case " $* " in *" $NOBIND "*) echo '{"bindings":[{"role":"roles/run.invoker","members":["user:operator@example.com"]}]}' ;; *" $GARBAGE "*) echo 'not json at all' ;; *) out=""; for m in allUsers serviceAccount:caller@p.iam.gserviceaccount.com user:operator@example.com $EXTRA_MEMBER; do grep -qxF "$m" "$STATE/removed-$svc" 2>/dev/null || out="$out\"$m\","; done; echo "{\"bindings\":[{\"role\":\"roles/run.invoker\",\"members\":[${out%,}]}]}"; [ -n "$LATEFAIL" ] && [ -s "$STATE/removed-$svc" ] && exit 1 ;; esac ;;
   *"executions list"*) case " $* " in *" $BUSY "*) echo "exec-1" ;; esac ;;
   *"compute instances describe"*"serviceAccounts"*) echo vm-sa@sprintable-494803.iam.gserviceaccount.com ;;
   *"compute instances describe"*) echo 34.64.1.2 ;;
@@ -293,6 +293,7 @@ echo "sudo $*" >> "$CALLS"
 [ -n "$FAILSUDO" ] && case "$*" in *"$FAILSUDO"*) exit 1 ;; esac
 case "$*" in
   *restore.sh*) printf 'users\\t3\\n' ;;
+  *rewrite_site_post_links*) [ -n "$SUDO_REPORT" ] && printf '%s\\n' "$SUDO_REPORT" || printf 'https://api.sprintable.ai\\t5\\n' ;;
   "bash -c"*) exec "$@" ;;
   *"docker ps"*) [ -n "$NOSTACK" ] || echo sprintable-backend-1 ;;
 esac
@@ -311,7 +312,7 @@ def _world(tmp_path: Path) -> dict[str, str]:
     calls.write_text("")
     (tmp_path / "state").mkdir(exist_ok=True)
     import sys
-    return {"PATH": f"{b}:{os.environ.get('PATH', '/usr/bin:/bin')}", "HOME": str(tmp_path), "CALLS": str(calls), "STATE": str(tmp_path / "state"), "TMO": "300", "REAL_PYTHON": sys.executable, "OPERATOR": "operator@example.com", "STICKY": "", "PLAN_OUT": "", "PLAN_POST": "UNCHANGED 4\ndry-run — nothing changed", "OPEN_PORT": "none", "DESC_EXTRA": "",
+    return {"PATH": f"{b}:{os.environ.get('PATH', '/usr/bin:/bin')}", "HOME": str(tmp_path), "CALLS": str(calls), "STATE": str(tmp_path / "state"), "TMO": "300", "REAL_PYTHON": sys.executable, "SUDO_REPORT": "", "OPERATOR": "operator@example.com", "STICKY": "", "EXTRA_MEMBER": "", "LATEFAIL": "", "KEEP": "", "PLAN_OUT": "", "PLAN_POST": "UNCHANGED 4\ndry-run — nothing changed", "OPEN_PORT": "none", "DESC_EXTRA": "",
             **{k: v for k, v in SAMPLE.items() if k not in ("TMO",)}}
 
 
@@ -868,10 +869,11 @@ def test_the_promotion_gate_is_before_g2_and_says_what_it_carries() -> None:
     table = _section("## G. Gates", "**The two acceptances of G5")
     assert table.index("| **G1a.") < table.index("| **G2.") and table.index("| **G1.") < table.index("| **G1a.")
     row = next(line for line in table.splitlines() if line.startswith("| **G1a."))
-    for token in ("`develop` is promoted to `main` once, as an ordinary prod deploy, **before** the window", "one day of real use", "the window carries the infrastructure move and no code change", "the migrations are read for the time two revisions run side by side"):
+    for token in ("`develop` is promoted to `main` once, as an ordinary prod deploy, **before** the window", "one day of real use", "the window carries the infrastructure move and no code change", "The promotion carries **no migration** (measured by the product owner, 2026-10-28", "`revisions to run: 0`", "the lines under it are read for the time two revisions run side by side"):
         assert token in row, token
     sec = _section("## G1a, the migrations of the promotion", "## G2, the read-only look")
-    for token in ("runs the migration job **before** it deploys the backend", "previous revision of the code serves against the new schema", "Read every line it prints", "A stop — the promotion waits for a compatible plan", "blocks writes to its table while it scans it", "0467 to 0469", "`sse_leases`"):
+    assert "**Expected: the promotion carries no migration.**" in sec and "Only if the number is **not 0** does the rest of this section apply" in sec
+    for token in ("runs the migration job **before** it deploys the backend", "previous revision of the code serves against the new schema", "Read every line it prints", "A stop — the promotion waits for a compatible plan", "blocks writes to its table while it scans it", "0467 to 0469"):
         assert token in sec, token
 
 
@@ -954,3 +956,111 @@ def test_a_removal_that_gcloud_accepts_but_that_leaves_a_caller_is_a_stop_and_so
     p, calls = _run(block, _fresh(tmp_path, "sa"), extra={"OPERATOR": "ops@p.iam.gserviceaccount.com"}, files={"frozen.txt": "svc-a\n"})
     members = [c.split("--member=")[1].split()[0] for c in _verbs(calls, "remove-iam-policy-binding")]
     assert "serviceAccount:ops@p.iam.gserviceaccount.com" not in members and "user:operator@example.com" in members, "a service-account operator is kept as serviceAccount:, a person as user:"
+
+
+def test_the_record_is_written_before_a_member_is_taken_off_and_a_failed_write_stops_before_the_removal(tmp_path: Path) -> None:
+    block = _block_with(FREEZE)
+    root = _fresh(tmp_path, "intent")
+    p, calls = _run(block, root, extra={"FAIL": "remove-iam-policy-binding svc-b"}, files={"frozen.txt": "svc-a\nsvc-b\n"})
+    assert "freeze: failed" in p.stdout
+    lines = (_w(root) / WP).read_text().splitlines()
+    assert f"svc-b\tallUsers" in lines, "the member whose removal failed is in the record already (the way back puts back a member that is still there: harmless; a missing line would cost a caller)"
+    # the record cannot be written (a directory stands in its place): the removal is not attempted
+    root2 = _fresh(tmp_path, "nowrite")
+    _w(root2).mkdir()
+    (_w(root2) / WP).mkdir()
+    p, calls = _run(block, root2, files={"frozen.txt": "svc-a\n"})
+    assert "freeze: failed" in p.stdout and not _verbs(calls, "remove-iam-policy-binding"), "no record, no removal"
+
+
+def test_a_second_read_that_fails_after_a_parseable_answer_is_a_stop(tmp_path: Path) -> None:
+    """codex: `gcloud ... | jq` without pipefail let a failed gcloud that printed something count as `left=0`"""
+    p, calls = _run(_block_with(FREEZE), _fresh(tmp_path, "late"), extra={"LATEFAIL": "1"}, files={"frozen.txt": "svc-a\n"})
+    assert "freeze: failed" in p.stdout and "freeze: waited" not in p.stdout and not any(c.startswith(("sleep", "curl")) for c in calls)
+
+
+def test_the_operator_may_reach_the_services_through_a_group_and_keep_says_so(tmp_path: Path) -> None:
+    block = _block_with(FREEZE)
+    files = {"frozen.txt": "svc-a\n"}
+    p, calls = _run(block, _fresh(tmp_path, "nokeep"), extra={"EXTRA_MEMBER": "group:ops@example.com"}, files=files)
+    assert "group:ops@example.com" in [c.split("--member=")[1].split()[0] for c in _verbs(calls, "remove-iam-policy-binding")], "without KEEP a group is a caller like any other"
+    p, calls = _run(block, _fresh(tmp_path, "keep"), extra={"EXTRA_MEMBER": "group:ops@example.com", "KEEP": "user:operator@example.com group:ops@example.com"}, files=files)
+    removed = [c.split("--member=")[1].split()[0] for c in _verbs(calls, "remove-iam-policy-binding")]
+    assert removed == ["allUsers", CALLER] and "freeze: waited" in p.stdout, removed
+    assert "`KEEP`" in _section("## 5. Freeze", "## 6–7.")
+
+
+def test_the_invokers_ladder_stops_when_the_operator_account_cannot_be_read(tmp_path: Path) -> None:
+    block = _block_with("USES CLOUD SQL PROD")
+    for name, op in (("empty", ""), ("unset", "(unset)")):
+        p, _ = _run(block, _fresh(tmp_path, name), extra={"OPERATOR": op})
+        assert "invokers: failed" in p.stdout and "invokers: listed" not in p.stdout, name
+
+
+def test_the_freeze_text_names_who_it_does_not_reach_and_what_proves_them() -> None:
+    five = _section("## 5. Freeze", "## 6–7.")
+    for token in ("**Who the freeze does not reach.**", "inherited by the service and is not in its policy", "the proof is the request log, not the policy", "whether any service account with a project-wide role has a reason to call the backend",
+                  "the services may be partly frozen, some callers off and others still on, and that is not a frozen state"):
+        assert token in five, token
+
+
+def test_the_migration_reading_block_also_prints_data_writes_and_bulk_inserts(tmp_path: Path) -> None:
+    block = _block_with("promotion-history.txt")
+    p, _ = _run(block, _fresh(tmp_path, "data"), extra={"REPO": str(_ROOT), "CUR": "0262"})
+    assert p.returncode == 0, p.stderr
+    hits = [line for line in p.stdout.splitlines() if re.match(r"^0\d{3}[a-z]?_\S+\.py:\d+: ", line)]
+    assert any(h.startswith("0264_loop_measure_due.py:") and "bulk_insert" in h for h in hits), "a direct bulk_insert is a data write"
+    assert any(".execute(" in h for h in hits), "so is a statement run on the connection"
+
+
+def test_the_stored_links_of_prod_are_rewritten_on_the_vm_inside_the_freeze_with_a_backup_first(tmp_path: Path) -> None:
+    a = _block_with("LINKS=start")
+    b = _block_with("[ -s links-plan.txt ]")
+    # the report and the plan: read only, in the backend container of the VM, with the four prod origins and the API address
+    p, calls = _run(a, _fresh(tmp_path, "plan"))
+    sudo = [c for c in calls if c.startswith("sudo docker exec sprintable-backend-1 python -m scripts.jobs.rewrite_site_post_links")]
+    assert len(sudo) == 2 and "--apply" not in " ".join(sudo) and "links: planned" in p.stdout, (sudo, p.stdout)
+    for origin in ("http://sprintable-backend-prod-787818285179.asia-northeast3.run.app", "https://sprintable-backend-prod-787818285179.asia-northeast3.run.app",
+                   "http://sprintable-backend-prod-57iommnikq-du.a.run.app", "https://sprintable-backend-prod-57iommnikq-du.a.run.app"):
+        assert f"--old-origin {origin}" in sudo[1], origin
+    assert "--new-origin https://api.sprintable.ai" in sudo[1] and "--old-origin https://sprintable-backend-dev" not in sudo[1]
+    assert (_w(tmp_path / "plan") / "links-plan.txt").exists() and (_w(tmp_path / "plan") / "links-report.txt").exists()
+    # the apply: needs the plan file; the backup comes before the rewrite; the pass is a report with no run.app
+    root = _fresh(tmp_path, "apply")
+    p, calls = _run(b, root, files={"links-plan.txt": "planned\n"})
+    order = [c for c in calls if c.startswith("sudo")]
+    assert order[0] == "sudo systemctl start sprintable-backup.service" and "--apply" in order[1] and "--apply" not in order[2], order
+    assert "links: clean" in p.stdout
+    p, calls = _run(b, _fresh(tmp_path, "noplan"))
+    assert "links: no" in p.stdout and not [c for c in calls if c.startswith("sudo")], "without a plan file nothing runs (not even the backup)"
+    p, calls = _run(b, _fresh(tmp_path, "outside"), where="parent", files={})
+    assert "links: no" in p.stdout and not [c for c in calls if c.startswith("sudo")]
+    p, calls = _run(b, _fresh(tmp_path, "nobackup"), extra={"FAILSUDO": "systemctl start sprintable-backup"}, files={"links-plan.txt": "planned\n"})
+    assert "links: planned" in p.stdout and not [c for c in calls if "--apply" in c], "no backup, no rewrite"
+    p, calls = _run(b, _fresh(tmp_path, "left"), extra={"SUDO_REPORT": "https://sprintable-backend-prod-787818285179.asia-northeast3.run.app\t2"}, files={"links-plan.txt": "planned\n"})
+    assert "links: applied" in p.stdout and "links: clean" not in p.stdout, "a run.app origin still listed after the rewrite is not a pass"
+
+
+def test_step_six_seven_says_where_the_rewrite_runs_and_what_it_replaces() -> None:
+    six = _section("## 6–7. The data and the takeover", "## 8. Unfreeze")
+    for token in ("**4b. The stored links (RUNBOOK §12 item 4) — inside the freeze, on the VM.**", "Prod has no Cloud Run job for this", "none is made for it", "after the final restore and before the unfreeze", "with a backup first",
+                  "**every origin it lists must be one of the four the plan names**", "`links: clean` is the pass"):
+        assert token in six, token
+    assert six.index("4. Checks from inside") < six.index("**4b.") < six.index("5. Enable the deploy, backup and restore-check timers")
+
+
+def test_with_prod_at_the_head_the_block_says_no_revision_is_to_run_and_prints_nothing_else(tmp_path: Path) -> None:
+    import sys
+    head = subprocess.run([sys.executable, "-m", "alembic", "heads"], capture_output=True, text=True, cwd=_ROOT / "backend", env={**os.environ, "DATABASE_URL": "postgresql+asyncpg://offline:offline@localhost/offline"}).stdout.split()[0]
+    assert re.fullmatch(r"\d{4}[a-z]?", head), head
+    p, _ = _run(_block_with("promotion-history.txt"), _fresh(tmp_path, "head"), extra={"REPO": str(_ROOT), "CUR": head})
+    assert p.returncode == 0, p.stderr
+    assert p.stdout.strip() == "revisions to run: 0", p.stdout
+
+
+def test_the_migration_block_stops_when_the_history_cannot_be_read_and_never_calls_it_zero(tmp_path: Path) -> None:
+    block = _block_with("promotion-history.txt")
+    p, _ = _run(block, _fresh(tmp_path, "nohist"), extra={"REPO": str(tmp_path / "no-such-checkout"), "CUR": "0469"})
+    assert "history: stop" in p.stdout and "revisions to run" not in p.stdout, "an unreadable history is a stop, not «0 revisions»"
+    p, _ = _run(block, _fresh(tmp_path, "badcur"), extra={"REPO": str(_ROOT), "CUR": "no-such-revision"})
+    assert "history: stop" in p.stdout and "revisions to run" not in p.stdout
