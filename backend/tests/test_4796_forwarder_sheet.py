@@ -47,7 +47,8 @@ j = " ".join(a)
 if a[:3] == ["run", "services", "describe"]:
     fmt = flag("--format", "")
     if fmt == "json":
-        print(json.dumps({"status": {"url": w["url"], "traffic": w["traffic"]}}))
+        real = w["revisions"][w["template_from"]]
+        print(json.dumps({"status": {"url": w["url"], "traffic": w["traffic"]}, "spec": {"template": {"metadata": {"annotations": real["metadata"]["annotations"]}}}}))
     elif "status.url" in fmt: sys.stdout.write(w["url"])
     elif "containers[0].image" in fmt: sys.stdout.write(w["service_image"])
     sys.exit(0)
@@ -56,12 +57,16 @@ if a[:3] == ["run", "revisions", "describe"]:
     if fmt == "json": print(json.dumps(w["revisions"][name]))
     else: sys.stdout.write(w["revisions"][name]["spec"]["containers"][0]["image"])
     sys.exit(0)
+if a[:3] == ["run", "services", "delete"]:
+    sys.exit(0)
 if a[:3] == ["run", "services", "update-traffic"]:
     spec = flag("--to-revisions")
     rev = spec.split("=")[0]
     tagged = [t for t in w["traffic"] if t.get("tag")]
     w["traffic"] = [{"revisionName": rev, "percent": 100}] + [dict(t, percent=0) for t in tagged]
     save(); sys.exit(0)
+if a[:2] == ["run", "deploy"] and not flag("--revision-suffix"):
+    sys.exit(0)   # the throwaway service of the rehearsal: made, nothing else is modelled
 if a[:2] == ["run", "deploy"]:
     suffix = flag("--revision-suffix"); name = a[2] + "-" + suffix
     base = w["revisions"][w["template_from"]]
@@ -69,11 +74,24 @@ if a[:2] == ["run", "deploy"]:
     rev = json.loads(json.dumps(base))
     rev["spec"]["containers"][0]["image"] = flag("--image")
     rev["spec"]["serviceAccountName"] = flag("--service-account", base["spec"]["serviceAccountName"])
-    if clear("--clear-env-vars"): rev["spec"]["containers"][0]["env"] = []
-    if clear("--clear-secrets"): rev["spec"]["containers"][0]["volumeMounts"] = []; rev["spec"]["volumes"] = []
+    c0 = rev["spec"]["containers"][0]
+    if clear("--clear-env-vars"): c0["env"] = [e for e in c0["env"] if "valueFrom" in e]
+    if clear("--clear-secrets"):
+        c0["env"] = [e for e in c0["env"] if "valueFrom" not in e]
+        gone = {v["name"] for v in rev["spec"]["volumes"] if "secret" in v}
+        rev["spec"]["volumes"] = [v for v in rev["spec"]["volumes"] if v["name"] not in gone]
+        c0["volumeMounts"] = [m for m in c0["volumeMounts"] if m["name"] not in gone]
+    if clear("--clear-volumes"): rev["spec"]["volumes"] = []
+    if clear("--clear-volume-mounts"): c0["volumeMounts"] = []
+    ni = rev["metadata"]["annotations"].get("run.googleapis.com/network-interfaces")
+    if ni:
+        att = json.loads(ni)[0]
+        if clear("--clear-network"): att = {}   # disconnects from the VPC network: the whole attachment goes
+        if att: rev["metadata"]["annotations"]["run.googleapis.com/network-interfaces"] = json.dumps([att])
+        else: rev["metadata"]["annotations"].pop("run.googleapis.com/network-interfaces")
     if clear("--clear-cloudsql-instances"): rev["metadata"]["annotations"].pop("run.googleapis.com/cloudsql-instances", None)
     if clear("--clear-vpc-connector"): rev["metadata"]["annotations"].pop("run.googleapis.com/vpc-access-connector", None)
-    rev["status"] = {"imageDigest": flag("--image").split("@")[-1]}
+    rev["status"] = {"imageDigest": flag("--image")}
     w["revisions"][name] = rev
     tag = flag("--tag")
     if has("--no-traffic"):
@@ -84,6 +102,7 @@ if a[:2] == ["run", "deploy"]:
         w["traffic"] = [t for t in w["traffic"] if t.get("tag") != tag] + [{"revisionName": name, "percent": 0, "tag": tag, "url": "https://" + tag + "---x.run.app"}]
     save(); sys.exit(0)
 if a[:3] == ["run", "services", "get-iam-policy"]:
+    if os.environ.get("EMPTY_POLICY"): sys.exit(0)
     print(json.dumps({"bindings": [{"role": "roles/run.invoker", "members": w["invokers"]}]})); sys.exit(0)
 if a[:3] == ["run", "services", "add-iam-policy-binding"]:
     m = flag("--member")
@@ -115,21 +134,21 @@ w = json.load(open(os.environ["STATE"] + "/world.json"))
 a = sys.argv[1:]
 open(os.environ["CALLS"], "a").write("curl " + " ".join(a) + "\n")
 url = [x for x in a if x.startswith("http")][0]
-authed = any("Authorization" in x for x in a)
+authed = any(x == "X-Serverless-Authorization: Bearer id-token" for x in a)
 code_only = "-w" in a
 host, _, path = url.split("://", 1)[1].partition("/")
 path = "/" + path
 traffic_rev = [t for t in w["traffic"] if t.get("percent") == 100][0]["revisionName"]
-def vm():  return {"status": "ok", "commit_sha": w["vm_sha"], "revision": w.get("vm_revision", "unknown")}
-def cr():  return {"status": "ok", "commit_sha": w["real_sha"], "revision": traffic_rev}
+def vm():  return {"status": w.get("vm_status", "ok"), "db": w.get("vm_db", "ok"), "commit_sha": w["vm_sha"], "revision": w.get("vm_revision", "unknown")}
+def cr():  return {"status": "ok", "db": "ok", "commit_sha": w["real_sha"], "revision": traffic_rev}
 if host == "api.sprintable.ai":
-    out, code = (dict(vm(), commit_sha=w.get("api_sha", w["vm_sha"])), 200)
+    out, code = (dict(vm(), commit_sha=w.get("api_sha", w["vm_sha"]), status=w.get("api_status", w.get("vm_status", "ok"))), 200)
 else:
     public = "allUsers" in w["invokers"] or authed
-    served = vm() if traffic_rev == w["forwarder"] else cr()
+    served = dict(vm(), status=w.get("fwd_authed_status" if authed else "fwd_public_status", w.get("vm_status", "ok"))) if traffic_rev == w["forwarder"] else cr()
     if host.startswith("fwd---"):
         # the tag reaches the forwarder, which hands the request to api.sprintable.ai (the pass-through of step 3), which hands it to the main address
-        served = {"status": "ok", "commit_sha": w["real_sha"], "revision": w.get("tag_revision", w["real"])} if not w.get("loop") else None
+        served = {"status": "ok", "db": "ok", "commit_sha": w["real_sha"], "revision": w.get("tag_revision", w["real"])} if not w.get("loop") else None
         public = True
     if not public: out, code = None, 403
     else: out, code = served, (200 if served is not None else 504)
@@ -139,15 +158,18 @@ sys.exit(0)
 '''
 
 
-def _rev(sa: str, env: list, secrets: bool, cloudsql: bool, vpc: bool) -> dict:
+def _rev(sa: str, env: list, secrets: bool, cloudsql: bool, vpc: bool, kind: str = "direct") -> dict:
+    """a revision like the backend's: plain and secret environment, a secret volume and a plain one, Cloud SQL, a VPC connector, a network"""
     ann: dict = {}
     if cloudsql:
         ann["run.googleapis.com/cloudsql-instances"] = "sprintable-494803:asia-northeast3:sprintable-prod"
-    if vpc:
+    if vpc and kind == "connector":
         ann["run.googleapis.com/vpc-access-connector"] = "conn"
-    return {"metadata": {"annotations": ann}, "spec": {"serviceAccountName": sa, "containers": [{"image": "asia-northeast3-docker.pkg.dev/x/backend@sha256:" + "b" * 64, "env": env,
-                                                                                                        "volumeMounts": ([{"name": "s", "mountPath": "/secrets"}] if secrets else [])}],
-                                                      "volumes": ([{"name": "s", "secret": {"secretName": "x"}}] if secrets else [])}, "status": {"imageDigest": "sha256:" + "b" * 64}}
+    if vpc and kind == "direct":   # prod's backend: a Direct VPC attachment, no connector
+        ann["run.googleapis.com/network-interfaces"] = json.dumps([{"network": "default", "subnetwork": "default", "tags": ["egress-tag"]}])
+    return {"metadata": {"annotations": ann}, "spec": {"serviceAccountName": sa, "containers": [{"image": "asia-northeast3-docker.pkg.dev/x/backend@sha256:" + "b" * 64, "env": env + ([{"name": "JWT_SECRET", "valueFrom": {"secretKeyRef": {"name": "j", "key": "latest"}}}] if secrets else []),
+                                                                                                        "volumeMounts": ([{"name": "s", "mountPath": "/secrets"}, {"name": "tmp", "mountPath": "/tmp"}] if secrets else [])}],
+                                                      "volumes": ([{"name": "s", "secret": {"secretName": "x"}}, {"name": "tmp", "emptyDir": {}}] if secrets else [])}, "status": {"imageDigest": "sha256:" + "b" * 64}}
 
 
 def _world_state(root: Path, **over) -> None:
@@ -210,6 +232,11 @@ def test_4c_a_builds_next_to_the_backends_image_pins_the_digest_and_makes_an_acc
     assert world["sa_exists"] is True
 
 
+def test_4c_a_takes_the_registry_from_the_environment_when_it_is_set_for_the_rehearsal(tmp_path: Path) -> None:
+    p, calls, _, _ = _go(A(), tmp_path, extra={"REPO": str(_ROOT), "AR": "asia-northeast3-docker.pkg.dev/other/registry"})
+    assert "asia-northeast3-docker.pkg.dev/other/registry/sprintable-forwarder:20261102" in _verbs(calls, "builds submit")[0], "the throwaway runs a public image: its registry is not the backend's"
+
+
 def test_4c_a_stops_where_a_line_fails_and_keeps_an_existing_account(tmp_path: Path) -> None:
     for name, fail, last in (("img", "run services describe", "start"), ("build", "builds submit", "named"), ("digest", "images describe", "built")):
         p, calls, _, work = _go(A(), _fresh(tmp_path, name), extra={"REPO": str(_ROOT), "FAIL": fail})
@@ -234,14 +261,14 @@ def test_4c_b_writes_the_record_before_it_deploys_and_the_deploy_clears_everythi
     rec = dict(l.split("\t") for l in (work / "real-revision-20261102.txt").read_text().splitlines())
     assert rec["real"] == REAL and rec["forwarder"] == FWDREV and rec["real-image"].endswith("b" * 64)
     deploy = _verbs(calls, "run deploy")[0].split()
-    for flag in ("--no-traffic", "--clear-env-vars", "--clear-secrets", "--clear-cloudsql-instances", "--clear-vpc-connector", "--tag", "--revision-suffix", "--service-account", "--min-instances", "--max-instances"):
+    for flag in ("--no-traffic", "--clear-env-vars", "--clear-secrets", "--clear-volumes", "--clear-volume-mounts", "--clear-cloudsql-instances", "--clear-vpc-connector", "--clear-network", "--tag", "--revision-suffix", "--service-account", "--min-instances", "--max-instances"):
         assert flag in deploy, flag
     assert deploy[deploy.index("--image") + 1] == IMAGE, "the digest, never a tag"
     assert "--allow-unauthenticated" not in deploy and "--set-env-vars" not in deploy and "--update-env-vars" not in deploy and "--set-secrets" not in deploy, "the public binding is the product owner's line in 8c, and nothing is set"
     assert calls.index(next(c for c in calls if "run deploy" in c)) > calls.index(next(c for c in calls if "revisions describe" in c)), "the real revision is read before anything is made"
     # the revision it made holds nothing of the backend's and the real revision still has the traffic
     rev = world["revisions"][FWDREV]
-    assert rev["spec"]["containers"][0]["env"] == [] and rev["spec"]["volumes"] == [] and "run.googleapis.com/cloudsql-instances" not in rev["metadata"]["annotations"]
+    assert rev["spec"]["containers"][0]["env"] == [] and rev["spec"]["volumes"] == [] and rev["spec"]["containers"][0]["volumeMounts"] == [] and rev["metadata"]["annotations"] == {}, "nothing of the backend's is left"
     assert [(t["revisionName"], t["percent"]) for t in world["traffic"] if t["percent"] > 0] == [(REAL, 100)]
 
 
@@ -285,6 +312,23 @@ def test_4c_c_passes_only_for_a_revision_that_holds_nothing_has_no_traffic_and_r
     assert not [c for c in calls if any(w in c.split() for w in ("deploy", "update-traffic", "add-iam-policy-binding", "remove-iam-policy-binding", "create", "delete"))], "the proof only reads"
 
 
+def test_a_deploy_line_that_forgets_a_clear_flag_makes_a_revision_that_the_proof_stops_on(tmp_path: Path) -> None:
+    """the sheet as it was before the review of the security domain: the connector cleared, the Direct VPC attachment inherited"""
+    for name, drop in (("network", " --clear-network "), ("env", " --clear-env-vars "), ("volumes", " --clear-volumes "), ("mounts", " --clear-volume-mounts "), ("cloudsql", " --clear-cloudsql-instances ")):
+        block = B().replace(drop, " ", 1)
+        assert block != B(), name
+        p, _, world, work = _go(block, _fresh(tmp_path, f"b-{name}"), files={"forwarder-image.txt": IMAGE + "\n"})
+        assert _last(p, "forwarder revision") == "forwarder revision: deployed", name
+        root = tmp_path / f"b-{name}"
+        env = _world_of(root)
+        (root / "state" / "world.json").write_text(json.dumps(world))
+        q = subprocess.run(["bash", "-c", C()], capture_output=True, text=True, timeout=60, env=env, cwd=work)
+        assert _last(q, "forwarder:") == "forwarder: untouched", (name, "the proof does not let a revision that kept it through")
+    # the same with the connector kind of attachment: the connector flag is what clears it
+    p, _, world, work = _go(B(), _fresh(tmp_path, "connector"), files={"forwarder-image.txt": IMAGE + "\n"}, state={"revisions": {REAL: _rev("cloudrun-runtime-prod@sprintable-494803.iam.gserviceaccount.com", [{"name": "A", "value": "x"}], True, True, True, "connector")}})
+    assert world["revisions"][FWDREV]["metadata"]["annotations"] == {}, "the connector kind of attachment is cleared by its own flag"
+
+
 def test_4c_c_every_thing_the_forwarder_must_not_hold_is_a_stop(tmp_path: Path) -> None:
     def rev(w): return w["revisions"][FWDREV]
     cases = {
@@ -294,9 +338,13 @@ def test_4c_c_every_thing_the_forwarder_must_not_hold_is_a_stop(tmp_path: Path) 
         "cloudsql": (lambda w: rev(w)["metadata"]["annotations"].update({"run.googleapis.com/cloudsql-instances": "p:r:i"}), "untouched"),
         "vpc": (lambda w: rev(w)["metadata"]["annotations"].update({"run.googleapis.com/vpc-access-connector": "c"}), "untouched"),
         "network-interfaces": (lambda w: rev(w)["metadata"]["annotations"].update({"run.googleapis.com/network-interfaces": "[{}]"}), "untouched"),
+        "network-tags-only": (lambda w: rev(w)["metadata"]["annotations"].update({"run.googleapis.com/network-interfaces": "[{\"tags\": [\"t\"]}]"}), "untouched"),
         "wrong-account": (lambda w: rev(w)["spec"].update(serviceAccountName="cloudrun-runtime-prod@sprintable-494803.iam.gserviceaccount.com"), "untouched"),
         "wrong-image": (lambda w: (rev(w)["spec"]["containers"][0].update(image="x/backend@sha256:" + "b" * 64), rev(w).update(status={"imageDigest": "sha256:" + "b" * 64})), "untouched"),
         "has-a-role": (lambda w: w.update(sa_roles="roles/editor\n"), "empty"),
+        "digest-resolved-is-another": (lambda w: rev(w).update(status={"imageDigest": "x/forwarder@sha256:" + "c" * 64}), "untouched"),
+        "digest-not-resolved": (lambda w: rev(w).update(status={}), "untouched"),
+        "spec-image-is-another": (lambda w: rev(w)["spec"]["containers"][0].update(image="x/forwarder@sha256:" + "c" * 64), "untouched"),
     }
     for name, (mutate, reached) in cases.items():
         p, _ = _c(_fresh(tmp_path, name), mutate)
@@ -308,6 +356,13 @@ def test_4c_c_traffic_that_moved_or_a_loop_through_the_tag_is_a_stop(tmp_path: P
     assert _last(p, "forwarder:") == "forwarder: read", "the forwarder has the traffic already: that is not what 4c is"
     p, _ = _c(_fresh(tmp_path, "loop"), lambda w: w.update(loop=True))
     assert _last(p, "forwarder:") == "forwarder: noroles", "the tag does not answer (the two addresses hand the request to each other): not ready"
+    def tag_on_real(w):
+        for t in w["traffic"]:
+            if t.get("tag"): t["revisionName"] = REAL
+    p, _ = _c(_fresh(tmp_path, "tag-on-the-real-revision"), tag_on_real)
+    assert _last(p, "forwarder:") == "forwarder: noroles", "a tag that points at the real revision answers well and proves nothing about the forwarder"
+    p, _ = _c(_fresh(tmp_path, "tag-with-traffic"), lambda w: [t.update(percent=5) for t in w["traffic"] if t.get("tag")])
+    assert _last(p, "forwarder:") == "forwarder: read", "a tag that carries traffic is traffic on the forwarder"
     p, _ = _c(_fresh(tmp_path, "own-name"), lambda w: w.update(tag_revision=FWDREV))
     assert _last(p, "forwarder:") == "forwarder: noroles", "an answer with the forwarder's own name through its own tag is a loop or a wrong address, not the real revision"
     p, _ = _c(_fresh(tmp_path, "notag"), lambda w: w.update(traffic=[t for t in w["traffic"] if not t.get("tag")]))
@@ -350,6 +405,11 @@ def test_8c_moves_the_traffic_while_closed_proves_it_as_the_vm_and_only_then_ope
     assert p.stdout.splitlines()[-2].endswith("Z"), "T2 is printed"
 
 
+def test_8c_can_be_run_again_when_it_stopped_after_the_traffic_moved_and_before_the_binding(tmp_path: Path) -> None:
+    p, calls, world = _e8(_fresh(tmp_path, "again"), mutate=lambda w: w.update(traffic=[{"revisionName": FWDREV, "percent": 100}, {"revisionName": FWDREV, "percent": 0, "tag": "fwd", "url": "https://fwd---x.run.app"}]))
+    assert _last(p, "forwarder:") == "forwarder: proven" and world["invokers"][-1] == "allUsers", "the traffic is already on the forwarder and the service is closed: the block goes on"
+
+
 def test_8c_refuses_what_it_was_not_asked_to_do(tmp_path: Path) -> None:
     # the freeze did not record a public binding for the backend: nothing is opened that was not open
     p, calls, _ = _e8(_fresh(tmp_path, "private"), files={WP: "sprintable-backend-prod\tuser:someone@example.com\nsprintable-mcp-prod\tallUsers\n"})
@@ -366,11 +426,17 @@ def test_8c_refuses_what_it_was_not_asked_to_do(tmp_path: Path) -> None:
 
 def test_8c_does_not_open_when_the_service_is_not_closed_or_the_forwarder_does_not_answer_as_the_vm(tmp_path: Path) -> None:
     p, calls, _ = _e8(_fresh(tmp_path, "open"), mutate=lambda w: w["invokers"].append("allUsers"))
-    assert _last(p, "forwarder:") == "forwarder: switched" and not _verbs(calls, "print-identity-token"), "a service that is public before 8c is a stop (the freeze did not hold)"
+    assert _last(p, "forwarder:") == "forwarder: named" and not _verbs(calls, "update-traffic") and not _verbs(calls, "print-identity-token"), "a service that is public before 8c is a stop BEFORE the traffic moves (the freeze did not hold)"
     p, calls, world = _e8(_fresh(tmp_path, "other-build"), mutate=lambda w: w.update(api_sha="2" * 40))
     assert _last(p, "forwarder:") == "forwarder: closed" and "allUsers" not in world["invokers"], "the forwarder and the API name answer with different builds: not the same VM"
     p, calls, world = _e8(_fresh(tmp_path, "unknown2"), mutate=lambda w: w.update(vm_sha="unknown"))
     assert _last(p, "forwarder:") == "forwarder: closed" and "allUsers" not in world["invokers"] and not _verbs(calls, "add-iam-policy-binding"), "a VM that cannot say what it runs proves nothing"
+    for name, mutate in (("vm-error", lambda w: w.update(vm_status="error")), ("vm-db-error", lambda w: w.update(vm_db="error: OperationalError")),
+                         ("only-the-forwarder-answer-is-unhealthy", lambda w: w.update(fwd_authed_status="error")), ("only-the-api-answer-is-unhealthy", lambda w: w.update(api_status="error"))):
+        p, calls, world = _e8(_fresh(tmp_path, name), mutate=mutate)
+        assert _last(p, "forwarder:") == "forwarder: closed" and "allUsers" not in world["invokers"] and not _verbs(calls, "add-iam-policy-binding"), (name, "a VM that cannot work is not opened to the old address")
+    p, calls, world = _e8(_fresh(tmp_path, "public-answer-unhealthy"), mutate=lambda w: w.update(fwd_public_status="error"))
+    assert _last(p, "forwarder:") == "forwarder: opened", "once opened, an answer that is not healthy is not a proof (the undo is block 1 of step 12)"
     p, calls, world = _e8(_fresh(tmp_path, "samerevision"), mutate=lambda w: w.update(vm_revision=REAL))
     assert _last(p, "forwarder:") == "forwarder: closed" and "allUsers" not in world["invokers"], "an answer with the real revision's name is the real backend, not the VM"
     p, calls, world = _e8(_fresh(tmp_path, "fail-add"), extra={"FAIL": "add-iam-policy-binding"})
@@ -417,9 +483,18 @@ def test_the_way_back_stops_when_a_line_fails_and_the_machine_block_will_not_run
     assert _last(p, "forwarder way back") == "forwarder way back: closed"
     p, calls, world = _b12(_fresh(tmp_path, "still-public"), True, extra={"STICKY": "allUsers"})
     assert _last(p, "forwarder way back") == "forwarder way back: real" and "proven" not in p.stdout, "a service that still answers from outside is not a way back that is proven"
+    p, calls, world = _b12(_fresh(tmp_path, "empty-policy"), True, extra={"EMPTY_POLICY": "1"})
+    assert _last(p, "forwarder way back") == "forwarder way back: listed" and not _verbs(calls, "update-traffic") and not _verbs(calls, "remove-iam-policy-binding"), "an unreadable policy is never read as «no allUsers»: the traffic does not move while the door may be open"
+    assert "allUsers" in world["invokers"]
     p, calls, world = _b12(_fresh(tmp_path, "norecord"), True, files={"real-revision-20261102.txt": ""})
     assert _last(p, "forwarder way back") == "forwarder way back: no" and not calls
     # the last block of the way back asks for REALBACK as it asks for VMBACK
+    vm_chain = _block_with("[ \"$REALBACK\" = proven ] && sudo docker ps -a")
+    root = _fresh(tmp_path, "vm")
+    env = _world(root)
+    env["REALBACK"] = ""
+    q = subprocess.run(["bash", "-c", vm_chain], capture_output=True, text=True, timeout=60, env=env, cwd=root)
+    assert "vm way back: no" in q.stdout and not [c for c in Path(env["CALLS"]).read_text().splitlines() if c.startswith("sudo")], "without the proof of block 1 the pass-through to the old address is not started"
     machine = M12()
     assert '[ "$VMBACK" = passing ] && [ "$REALBACK" = proven ]' in machine
     root = _fresh(tmp_path, "m")
@@ -432,15 +507,48 @@ def test_the_way_back_stops_when_a_line_fails_and_the_machine_block_will_not_run
     assert "way back: no" in q.stdout and not _verbs(Path(env["CALLS"]).read_text().splitlines(), "add-iam-policy-binding"), "without the proof of block 1 nothing is reopened"
 
 
+# ── Appendix A: the rehearsal ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+def test_the_rehearsal_reads_prods_network_shape_makes_a_closed_service_and_stops_without_a_tag(tmp_path: Path) -> None:
+    a1 = _block_with("REH=sprintable-rehearsal-forwarder\nNI=")
+    p, calls, _, _ = _go(a1, _fresh(tmp_path, "a1"))
+    deploy = _verbs(calls, "run deploy")[0].split()
+    assert "network: default · subnet: default · tags: egress-tag" in p.stdout and deploy[3] == "sprintable-rehearsal-forwarder", p.stdout + p.stderr
+    for flag, value in (("--network", "default"), ("--subnet", "default"), ("--network-tags", "egress-tag"), ("--image", "us-docker.pkg.dev/cloudrun/container/hello")):
+        assert deploy[deploy.index(flag) + 1] == value, flag
+    assert "--no-allow-unauthenticated" in deploy and "--allow-unauthenticated" not in deploy, "the throwaway is closed to everyone but the operator"
+    assert not [c for c in calls if "sprintable-backend-prod" in c and any(w in c.split() for w in ("deploy", "update", "update-traffic", "delete"))], "prod is only read"
+    # a prod revision with no tags: the line stops, it does not make a service of another shape
+    noting = {"revisions": {REAL: _rev("x@y.iam.gserviceaccount.com", [], True, True, False)}}
+    p, calls, _, _ = _go(a1, _fresh(tmp_path, "a1-none"), state=noting)
+    assert not _verbs(calls, "run deploy"), "no network shape, no throwaway"
+
+
+def test_the_rehearsal_deletes_only_a_service_with_its_name(tmp_path: Path) -> None:
+    a4 = _block_with("case \"$REH\" in sprintable-rehearsal-forwarder)")
+    p, calls, _, _ = _go(a4, _fresh(tmp_path, "ok"), extra={"REH": "sprintable-rehearsal-forwarder"})
+    assert _verbs(calls, "services delete") and "sprintable-rehearsal-forwarder" in _verbs(calls, "services delete")[0]
+    for name in ("sprintable-backend-prod", "", "sprintable-rehearsal-forwarder-x"):
+        p, calls, _, _ = _go(a4, _fresh(tmp_path, "no-" + (name or "empty")), extra={"REH": name})
+        assert not _verbs(calls, "services delete") and "refused" in p.stdout, name
+
+
+def test_the_rehearsal_measures_the_header_and_lists_what_the_revision_keeps() -> None:
+    app = SHEET.split("## Appendix A.")[1]
+    for token in ("**A1.", "**A2.", "**A3.", "**A4.", "`forwarder: noroles`", "X-Serverless-Authorization", "`run.googleapis.com/network-interfaces`", "(`WINDOW=rehearsal`)", "`AR` set by hand"):
+        assert token in app, token
+    assert "does not clear it" in SHEET and "Direct VPC attachment" in SHEET
+
+
 # ── the text, and the pipeline premise ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def test_the_text_says_the_order_the_loop_and_what_the_forwarder_holds() -> None:
     four = _section("## 4c. The forwarder of the old address", "## 5. Freeze")
     for token in ("A client that still names the old address", "holds nothing", "runs as an account with **no role**", "**minimum 0 instances**", "`--no-traffic` pins the traffic", "`forwarder: ready` is the pass, and **step 5 does not start without it**", "tag → forwarder → `api.sprintable.ai`",
-                  "arm image that Cloud Run cannot start", "**Undo of the whole step:**"):
+                  "arm image that Cloud Run cannot start", "**Undo of the whole step:**", "**The mark against a loop.**", "`X-Sprintable-Forwarded`"):
         assert token in four, token
     twelve = _section("## 12. The way back", "## Known limits")
-    for token in ("**The order is the point:**", "the two would hand the request to each other for ever", "close the forwarder, give the traffic back to the real revision", "`REALBACK` to `proven`"):
+    for token in ("**The order is the point:**", "the two would hand the request to each other for ever", "close the forwarder, give the traffic back to the real revision", "`REALBACK` to `proven`", "type `REALBACK=proven` in the ssh shell"):
         assert token in twelve, token
     assert twelve.index("**1. From the product owner's machine") < twelve.index("**2. On the VM**") < twelve.index("**3. From the product owner's machine again**")
     eight = _section("## 8. Unfreeze", "## 9. The lap")
@@ -449,7 +557,7 @@ def test_the_text_says_the_order_the_loop_and_what_the_forwarder_holds() -> None
     g = _section("## G. Gates", "## 0. Read-only")
     assert "**the old address is not a gate**" in g and "no unexplained caller" not in g
     ten = _section("## 10–11. The day after", "## 12. The way back")
-    for token in ("**The old address, counted — the criterion for removing it.**", "**not** a 401", "N is the product owner's, question 5", "**The registry:**", "`real-image`"):
+    for token in ("**The old address, counted — the criterion for removing it.**", "**not** a 401", "**7 days in a row**", "**The registry:**", "`real-image`"):
         assert token in ten, token
     assert "5. **How many days**" in SHEET and "6. Callers of the old address count as one address" in SHEET
     assert "**P3 is also what keeps the forwarder in place:**" in SHEET

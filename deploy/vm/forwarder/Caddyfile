@@ -21,9 +21,15 @@
 }
 
 :{$PORT:8080} {
+	# A request that has already been through a forwarder and comes back (the two addresses pointing at each other, whatever the order of a move
+	# or a way back) is refused, so a loop ends after one turn.
+	@looped header X-Sprintable-Forwarded *
+	respond @looped "forwarding loop" 508
+
 	# no `encode`: compressing would hold stream frames back; flush_interval -1 sends every chunk as it arrives
 	reverse_proxy {$FORWARD_TO:https://api.sprintable.ai} {
 		flush_interval -1
 		header_up Host {upstream_hostport}
+		header_up X-Sprintable-Forwarded 1
 	}
 }
