@@ -296,19 +296,7 @@ echo "freeze: $STEP"
 
 `freeze: waited` is the pass, and the date printed after it is **T0**. Anything else: the services that could be frozen are frozen; fix the cause and run the block again, or go to step 8 (it opens only what `reopen.txt` names; the way back of step 12 opens everything). From the VM the same `curl` (ssh, IAP) must also print **403** — a 200 there means the backend still reaches the service: put the binding back and do not go on.
 
-**The proof that no writer is left, from the log.** `freeze: waited` says the policies hold only the members you chose to keep and that an anonymous call gets 403; it does not say that nothing with an identity can still write. After it, ask the log of the backend for any request that is not a `GET` and was answered 200–399 in the last five minutes (the wait of the freeze is longer than that, so every minute asked about is after the freeze):
-
-```
-QUIET=no
-[ -n "$WINDOW" ] && [ "${PWD##*/}" = "window-${WINDOW}" ] && QUIET=asking
-[ "$QUIET" = asking ] && W=$(gcloud logging read "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${BACKEND}\" AND httpRequest.requestMethod!=\"GET\" AND httpRequest.status>=200 AND httpRequest.status<400" --project $PROJECT --freshness=5m --limit=20 --format='value(timestamp)') && QUIET=read
-[ "$QUIET" = read ] && [ -z "$W" ] && QUIET=none
-echo "writers after the freeze: $QUIET"
-```
-
-`writers after the freeze: none` is the pass and a **gate for step 6**: `read` means a write got through (find who, and do not go on), `no` or no answer means it was not asked.
-
-**Who the freeze does not reach.** It removes the members of each service's own policy. A caller that reaches the service through a role of the **project** (owners, editors, Cloud Run administrators, and the service accounts that hold such a role) is inherited by the service and is not in its policy, so it is neither listed nor removed. For these the proof is the request log, not the policy: the block just above (`writers after the freeze: none`), and the product owner says in the record of G5 whether any service account with a project-wide role has a reason to call the backend.
+**Who the freeze does not reach.** It removes the members of each service's own policy. A caller that reaches the service through a role of the **project** (owners, editors, Cloud Run administrators, and the service accounts that hold such a role) is inherited by the service and is not in its policy, so it is neither listed nor removed. For these the proof is the request log, not the policy: the block at the end of this step (`writers after the freeze: none`), and the product owner says in the record of G5 whether any service account with a project-wide role has a reason to call the backend.
 
 **Cloud Run jobs are writers too.** A job that mounts prod's Cloud SQL (step 0) can run during the dump: pause the scheduler jobs that call the backend, each noted in `paused.txt` (`gcloud scheduler jobs pause $JOB --project $PROJECT --location $REGION && echo "$JOB" >> paused.txt`), and prove that no execution of any job is running (a running one is waited for or cancelled with `gcloud run jobs executions cancel`, by the product owner's decision, written down):
 
@@ -323,6 +311,19 @@ echo "jobs: $RUN"
 `jobs: quiet` is the pass; `busy` or `failed` stops the sheet.
 
 **The daily job inside the window.** `assets-grace-hard-delete-prod` runs at **03:00 Asia/Seoul — the first minute of the window** (the other three: `publication-commands-prod` every minute and `a2a-task-deadline-sweep-prod` every ten minutes, both UTC; `storage-usage-warn-prod` at 09:00 KST, outside). It is paused with the others for that night (the pause and the resume of step 8 are its pair), so its run of that night is **skipped** — Cloud Scheduler does not catch up a run it missed — and it runs again at 03:00 the next night; the product owner decides whether to run it once after the unfreeze (`gcloud scheduler jobs run assets-grace-hard-delete-prod --project $PROJECT --location $REGION`) and writes the decision down. Show in the request log that no request other than the health check arrived in the last minutes (the cron endpoints are GET requests and write: «no POST» proves nothing).
+
+**The proof that no writer is left, from the log — run it last in this step, after the scheduler jobs are paused and the jobs check says `quiet`.** `freeze: waited` says the policies hold only the members you chose to keep and that an anonymous call gets 403; it does not say that nothing with an identity can still reach the backend (the cron endpoints are `GET` requests and write, so no method is excluded). Ask the log of the backend for any request answered 200–399 in the last five minutes that is not a health check (the wait of the freeze is longer than five minutes, so every minute asked about is after the freeze):
+
+```
+QUIET=no
+[ -n "$WINDOW" ] && [ "${PWD##*/}" = "window-${WINDOW}" ] && QUIET=asking
+[ "$QUIET" = asking ] && W=$(gcloud logging read "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${BACKEND}\" AND httpRequest.status>=200 AND httpRequest.status<400 AND NOT httpRequest.requestUrl:\"/health\" AND NOT httpRequest.requestUrl:\"/ping\"" --project $PROJECT --freshness=5m --limit=20 --format='value(timestamp)') && QUIET=read
+[ "$QUIET" = read ] && [ -z "$W" ] && QUIET=none
+echo "writers after the freeze: $QUIET"
+```
+
+`writers after the freeze: none` is the pass and a **gate for step 6**: `read` means a request got through (find who, and do not go on), `no` or `asking` means it was not answered. The scheduler jobs of step 4 now call `api.sprintable.ai`, which is the pass-through to the frozen Cloud Run (a 403 there), and they are paused as well.
+
 
 ## 6–7. The data and the takeover (inside the freeze)
 
@@ -340,7 +341,7 @@ echo "final restore: $FIN"
 3. `sudo python3 /opt/sprintable/bin/deployer.py --force` (the stack's Caddy starts on the same certificate folder as the front door: no new certificate for the API host).
 4. Checks from inside, then from outside (`/api/v2/health`, a login, a stream). `app.sprintable.ai`: delete its route and point the record at the VM (A, proxied; Cloudflare SSL mode **Full (strict)**).
 
-**4b. The stored links (RUNBOOK §12 item 4) — inside the freeze, on the VM.** A hosted-site post published before the move carries a `run.app` link in the database; it answers 404 once Cloud Run is gone. Prod has no Cloud Run job for this (the only one-off job that exists is dev's) and none is made for it: the job's module runs **in the backend container on the VM, after the final restore and before the unfreeze**, with a backup first — nobody reads a link during the freeze, and the database that goes live already carries the rewritten ones. **The public door of the VM is closed for the whole of 4b** (`sudo docker stop sprintable-caddy-1`, the first line of block A: 80 and 443 are the Caddy container's, so the backend is not reachable from outside while it is stopped): nothing can be written between the backup and the rewrite, which is what makes the way back below safe. First the report and the plan (both read-only; origins and counts, never a full link):
+**4b. The stored links (RUNBOOK §12 item 4) — inside the freeze, on the VM.** A hosted-site post published before the move carries a `run.app` link in the database; it answers 404 once Cloud Run is gone. Prod has no Cloud Run job for this (the only one-off job that exists is dev's) and none is made for it: the job's module runs **in the backend container on the VM, after the final restore and before the unfreeze**, with a backup first — nobody reads a link during the freeze, and the database that goes live already carries the rewritten ones. **The public door of the VM is closed for the whole of 4b** (`sudo docker stop sprintable-caddy-1`, the first line of block A: 80 and 443 are the Caddy container's, so the backend is not reachable from outside while it is stopped): nothing new can be written between the backup and the rewrite, which is what makes the way back below safe. A request that was already inside the backend when the door closed finishes in seconds; block B waits 30 s and the plan was read by a person before it, so the backup starts well after the last of them. First the report and the plan (both read-only; origins and counts, never a full link):
 
 ```
 LINKS=no
@@ -356,21 +357,22 @@ Read `links-report.txt`: **every origin it lists must be one of the four the pla
 ```
 LINKS=no
 [ -n "$WINDOW" ] && [ "${PWD##*/}" = "window-${WINDOW}" ] && [ -s links-report.txt ] && [ links-plan.txt -nt links-report.txt ] && [ "$(grep -c 'would be rewritten (dry run, nothing written)' links-plan.txt)" = 4 ] && LINKS=planned
-[ "$LINKS" = planned ] && sudo systemctl start sprintable-backup.service && LINKS=backed
+[ "$LINKS" = planned ] && sleep 30 && sudo systemctl start sprintable-backup.service && LINKS=backed
 [ "$LINKS" = backed ] && sudo docker exec sprintable-backend-1 python -m scripts.jobs.rewrite_site_post_links --old-origin http://sprintable-backend-prod-787818285179.asia-northeast3.run.app --old-origin https://sprintable-backend-prod-787818285179.asia-northeast3.run.app --old-origin http://sprintable-backend-prod-57iommnikq-du.a.run.app --old-origin https://sprintable-backend-prod-57iommnikq-du.a.run.app --new-origin https://api.sprintable.ai --apply && LINKS=applied
-[ "$LINKS" = applied ] && sudo docker exec sprintable-backend-1 python -m scripts.jobs.rewrite_site_post_links > links-after.txt && cat links-after.txt && ! grep -qi 'run\.app' links-after.txt && LINKS=clean
+[ "$LINKS" = applied ] && sudo docker exec sprintable-backend-1 python -m scripts.jobs.rewrite_site_post_links > links-after.txt && [ -s links-after.txt ] && cat links-after.txt && { grep -qi 'run\.app' links-after.txt; [ "$?" = 1 ]; } && LINKS=clean
 echo "links: $LINKS"
 ```
 
-`links: clean` is the pass (the report after the rewrite lists no origin containing `run.app`, in any letter case). Block B applies only to a plan made by block A of this window: the report exists, the plan is newer than it, and the plan has the four lines of a dry run. The undo is the backup taken just before (RUNBOOK §10, «Undo of the rewrite»: the job with the origins swapped puts back only what was stored with `https`; the backup is the way back for the `http` ones).
+`links: clean` is the pass (the report after the rewrite is not empty and lists no origin containing `run.app`, in any letter case; a `grep` that failed is not «nothing found»). Block B applies only to a plan made by block A of this window: the report exists, the plan is newer than it, and the plan has the four lines of a dry run. The undo is the backup taken just before (RUNBOOK §10, «Undo of the rewrite»: the job with the origins swapped puts back only what was stored with `https`; the backup is the way back for the `http` ones).
 
-**Open the door again, whatever 4b ended with** (block C; without it the VM stays closed):
+**If 4b fails** (a line of block B ends anywhere but `links: clean`): **the move does not stop and the window goes on.** The module writes in one transaction and **commits before it checks**, so a non-zero exit does not mean that nothing was written. Run the report again — `sudo docker exec sprintable-backend-1 python -m scripts.jobs.rewrite_site_post_links` (it needs no state from the blocks) — and read what is stored now. If it lists `api.sprintable.ai` with the count the plan gave and no origin that should not have changed, the rewrite stands: leave it and rewrite what is left the next day. If it shows something wrong (a count that does not fit the plan, an origin changed that was not in it), the backup taken just before goes back — nothing was written after it, because the door was closed: with the backend and the frontend stopped (`sudo docker stop sprintable-backend-1 sprintable-frontend-1`; restore refuses a running backend), `sudo env RESTORE_WIPE=yes /opt/sprintable/bin/restore.sh "$(sudo sh -c 'ls -t /var/backups/sprintable/db-prod-*.dump | head -n 1')" > counts-vm-links-undo.tmp && mv counts-vm-links-undo.tmp counts-vm-links-undo.tsv`, then `sudo python3 /opt/sprintable/bin/deployer.py --force` (it brings the whole stack, the door included, back; block C is then not needed), and on with step 8. The links are rewritten **the next day with the same module** (blocks A and B again). Until then a stored link that still names `run.app` answers 403 (Cloud Run is closed since the freeze); **how many** is the number in `links-report.txt`, the first step of the module — written in the record of G5 so that nobody has to guess.
+
+**Open the door again — last, and only after the decision above** (block C; without it the VM stays closed. Do not run it while a restore is still possible: whatever is written after the door opens would be overwritten by that restore):
 
 ```
 sudo docker start sprintable-caddy-1 && sudo docker ps --filter name=sprintable-caddy-1 --format '{{.Names}} {{.Status}}'
 ```
 
-**If 4b fails** (a line of block B ends anywhere but `links: clean`): **the move does not stop and the window goes on.** The module writes in one transaction and **commits before it checks**, so a non-zero exit does not mean that nothing was written. Run the report again (the second line of block A) and read what is stored now. If it lists `api.sprintable.ai` with the count the plan gave and no origin that should not have changed, the rewrite stands: leave it and rewrite what is left the next day. If it shows something wrong (a count that does not fit the plan, an origin changed that was not in it), the backup taken just before goes back — nothing was written after it, because the door was closed: with the backend and the frontend stopped (`sudo docker stop sprintable-backend-1 sprintable-frontend-1`; restore refuses a running backend), `sudo env RESTORE_WIPE=yes /opt/sprintable/bin/restore.sh "$(sudo sh -c 'ls -t /var/backups/sprintable/db-prod-*.dump | head -n 1')" > counts-vm-links-undo.tmp && mv counts-vm-links-undo.tmp counts-vm-links-undo.tsv`, then `sudo python3 /opt/sprintable/bin/deployer.py --force` (it brings the whole stack, the door included, back), and on with step 8. The links are rewritten **the next day with the same module** (blocks A and B again). Until then a stored link that still names `run.app` answers 403 (Cloud Run is closed since the freeze); **how many** is the number in `links-report.txt`, the first step of the module — written in the record of G5 so that nobody has to guess.
 
 5. Enable the deploy, backup and restore-check timers ([RUNBOOK §7 step 6](RUNBOOK.md)); the backup of an empty database would refuse, which is why this is after the restore.
 
@@ -444,6 +446,13 @@ echo "way back: $BACK"
 `VMBACK` is set to `passing` by the product owner only after the VM chain above printed its last line (`BACK=passing`); `way back: done` is the pass. A missing or empty `was-invoker` file for this window, an unset `WINDOW` or an answer of Cloud Run other than 200 is a stop: nothing is resumed on top of it, and the services stay as they are until the cause is found.
 
 The scheduler targets go back with the second block of step 4 (`scheduler-moved.tsv`). Then the records of `app` back to what they were (step 0, written down), and the guests of step 4 that were moved to `api.sprintable.ai` keep working through the pass-through. After a successful way back the next move is a new sheet run from step 1, not a repetition of this one.
+
+## Known limits (not blockers; read before the window)
+
+- The plan check of 4b (block B) proves that block A ran in this window and that the plan has four dry-run lines; it does not compare the four origins with those of the apply command. Block B passes its own `--old-origin` list to the module, so a wrong plan file cannot change what is rewritten.
+- A request already inside the VM's backend when the door closes is covered by the 30 s wait and the reading of the plan, not by a measurement of idle connections.
+- The writers gate reads the log of the Cloud Run backend; a caller that reaches the VM's own stack during the freeze is not in it (the VM's door is the pass-through to the frozen Cloud Run until step 6, and closed during 4b).
+- `KEEP` and the project-level roles are outside the freeze by design (`Who the freeze does not reach`); the request log is their only proof.
 
 ## Questions for the owner (one line each)
 

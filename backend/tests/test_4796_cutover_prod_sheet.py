@@ -245,7 +245,7 @@ case "$*" in
   *"run services list"*|*"run jobs list"*) printf 'sprintable-backend-prod\nsprintable-frontend-prod\n' ;;
   *"run services describe"*|*"run jobs describe"*) echo "{\"x\":1,\"note\":\"$DESC_EXTRA\"}" ;;
   *"secrets get-iam-policy"*) case "$*" in *DATABASE_URL_PROD*) echo '{"bindings":[]}' ;; *) echo '{"bindings":[{"role":"roles/secretmanager.secretAccessor","members":["serviceAccount:vm-sa@sprintable-494803.iam.gserviceaccount.com"]}]}' ;; esac ;;
-  *"logging read"*"requestMethod!="*) printf %s "$WRITE_ROWS" ;;
+  *"logging read"*"NOT httpRequest"*) printf %s "$WRITE_ROWS" ;;
   *"config get-value account"*) echo "$OPERATOR" ;;
   *"remove-iam-policy-binding"*) svc="$4"; for a in "$@"; do case "$a" in --member=*) case " $STICKY " in *" ${a#--member=} "*) ;; *) echo "${a#--member=}" >> "$STATE/removed-$svc" ;; esac ;; esac; done ;;
   *"get-iam-policy"*) svc="$4"; case " $* " in *" $NOBIND "*) echo '{"bindings":[{"role":"roles/run.invoker","members":["user:operator@example.com"]}]}' ;; *" $GARBAGE "*) echo 'not json at all' ;; *) out=""; for m in allUsers serviceAccount:caller@p.iam.gserviceaccount.com user:operator@example.com $EXTRA_MEMBER; do grep -qxF "$m" "$STATE/removed-$svc" 2>/dev/null || out="$out\"$m\","; done; echo "{\"bindings\":[{\"role\":\"roles/run.invoker\",\"members\":[${out%,}]}]}"; [ -n "$LATEFAIL" ] && [ -s "$STATE/removed-$svc" ] && exit 1 ;; esac ;;
@@ -294,7 +294,7 @@ echo "sudo $*" >> "$CALLS"
 [ -n "$FAILSUDO" ] && case "$*" in *"$FAILSUDO"*) exit 1 ;; esac
 case "$*" in
   *restore.sh*) printf 'users\\t3\\n' ;;
-  *rewrite_site_post_links*) [ -n "$SUDO_REPORT" ] && printf '%s\\n' "$SUDO_REPORT" || printf 'https://api.sprintable.ai\\t5\\n' ;;
+  *rewrite_site_post_links*) case "$SUDO_REPORT" in -) ;; "") printf 'https://api.sprintable.ai\\t5\\n' ;; *) printf '%s\\n' "$SUDO_REPORT" ;; esac ;;
   "bash -c"*) exec "$@" ;;
   *"docker ps"*) [ -n "$NOSTACK" ] || echo sprintable-backend-1 ;;
 esac
@@ -1066,9 +1066,15 @@ def test_the_stored_links_of_prod_are_rewritten_on_the_vm_inside_the_freeze_with
     assert "links: no" in p.stdout and not [c for c in calls if c.startswith("sudo")]
     p, calls = _run_b(b, _fresh(tmp_path, "nobackup"), extra={"FAILSUDO": "systemctl start sprintable-backup"})
     assert "links: planned" in p.stdout and not [c for c in calls if "--apply" in c], "no backup, no rewrite"
+    p, calls = _run_b(b, _fresh(tmp_path, "emptyreport"), extra={"SUDO_REPORT": "-"})
+    assert "links: applied" in p.stdout and "links: clean" not in p.stdout, "an empty report after the rewrite is not a pass"
     for name, leftover in (("left", "https://sprintable-backend-prod-787818285179.asia-northeast3.run.app\t2"), ("upper", "https://sprintable-backend-prod-787818285179.asia-northeast3.RUN.APP\t1")):
         p, calls = _run_b(b, _fresh(tmp_path, name), extra={"SUDO_REPORT": leftover})
         assert "links: applied" in p.stdout and "links: clean" not in p.stdout, (name, "a run.app origin still listed after the rewrite, in any letter case, is not a pass")
+    assert '{ grep -qi \'run\\.app\' links-after.txt; [ "$?" = 1 ]; }' in b, "clean means grep found nothing (exit 1), not that grep failed (exit 2)"
+    sleeps = [c for c in calls if c.startswith("sleep")]
+    p, calls = _run_b(b, _fresh(tmp_path, "drain"))
+    assert "sleep 30" in calls and calls.index("sleep 30") < next(i for i, c in enumerate(calls) if c == "sudo systemctl start sprintable-backup.service"), "the drain wait comes before the backup"
 
 
 def test_the_public_door_of_the_vm_is_closed_for_4b_and_opened_by_a_block_of_its_own(tmp_path: Path) -> None:
@@ -1076,10 +1082,10 @@ def test_the_public_door_of_the_vm_is_closed_for_4b_and_opened_by_a_block_of_its
     p, calls = _run(c, _fresh(tmp_path, "open"))
     assert [x for x in calls if x.startswith("sudo")][0] == "sudo docker start sprintable-caddy-1"
     six = _section("## 6–7. The data and the takeover", "## 8. Unfreeze")
-    for token in ("**The public door of the VM is closed for the whole of 4b**", "`sudo docker stop sprintable-caddy-1`", "**Open the door again, whatever 4b ended with**", "nothing was written after it, because the door was closed", "`sudo docker stop sprintable-backend-1 sprintable-frontend-1`",
-                  "**commits before it checks**", "so a non-zero exit does not mean that nothing was written"):
+    for token in ("**The public door of the VM is closed for the whole of 4b**", "`sudo docker stop sprintable-caddy-1`", "**Open the door again — last, and only after the decision above**", "Do not run it while a restore is still possible", "nothing was written after it, because the door was closed", "`sudo docker stop sprintable-backend-1 sprintable-frontend-1`",
+                  "**commits before it checks**", "so a non-zero exit does not mean that nothing was written", "block C is then not needed", "block B waits 30 s"):
         assert token in six, token
-    assert six.index("**4b.") < six.index("sudo docker start sprintable-caddy-1") < six.index("**If 4b fails**")
+    assert six.index("**4b.") < six.index("**If 4b fails**") < six.index("sudo docker start sprintable-caddy-1"), "the door opens after the decision, not before it"
 
 
 def test_step_six_seven_says_where_the_rewrite_runs_and_what_it_replaces() -> None:
@@ -1131,7 +1137,9 @@ def test_the_writers_check_after_the_freeze_is_a_gate_that_reads_the_log_of_the_
     p, calls = _run(block, _fresh(tmp_path, "none"))
     assert "writers after the freeze: none" in p.stdout
     ask = next(c for c in calls if "logging read" in c)
-    assert 'requestMethod!="GET"' in ask and "httpRequest.status>=200" in ask and "httpRequest.status<400" in ask and "--freshness=5m" in ask and "sprintable-backend-prod" in ask
+    assert "requestMethod" not in ask, "no method is excluded: the cron endpoints are GET requests and write"
+    assert "httpRequest.status>=200" in ask and "httpRequest.status<400" in ask and "--freshness=5m" in ask and "sprintable-backend-prod" in ask
+    assert 'NOT httpRequest.requestUrl:"/health"' in ask and 'NOT httpRequest.requestUrl:"/ping"' in ask, "only the health checks are left out"
     p, _ = _run(block, _fresh(tmp_path, "some"), extra={"WRITE_ROWS": "2026-11-02T18:31:12Z\n"})
     assert "writers after the freeze: read" in p.stdout and "writers after the freeze: none" not in p.stdout
     p, calls = _run(block, _fresh(tmp_path, "asked-not"), where="parent")
@@ -1139,11 +1147,24 @@ def test_the_writers_check_after_the_freeze_is_a_gate_that_reads_the_log_of_the_
     p, _ = _run(block, _fresh(tmp_path, "failed"), extra={"FAIL": "logging read"})
     assert "writers after the freeze: asking" in p.stdout and "none" not in p.stdout.split("writers after the freeze:")[1], "a question that failed is not an answer"
     five = _section("## 5. Freeze", "## 6–7.")
-    for token in ("**The proof that no writer is left, from the log.**", "`writers after the freeze: none` is the pass and a **gate for step 6**", "does not say that nothing with an identity can still write"):
+    for token in ("**The proof that no writer is left, from the log — run it last in this step, after the scheduler jobs are paused and the jobs check says `quiet`.**", "`writers after the freeze: none` is the pass and a **gate for step 6**", "does not say that nothing with an identity can still reach the backend"):
         assert token in five, token
+    assert five.index("jobs: quiet") < five.index("writers after the freeze: $QUIET"), "the gate is asked after the schedulers are paused and the jobs are quiet"
 
 
 def test_the_version_of_prod_comes_from_the_database_and_is_checked_against_the_migration_job() -> None:
     block = _block_with("promotion-history.txt")
     for token in ("from the database of prod (select version_num from alembic_version)", "never from `alembic heads` or the repository", "checks that it is the same as the last line of the migration job's log of the promotion's deploy"):
         assert token in block, token
+
+
+def test_the_fresh_report_after_a_failed_4b_is_a_command_that_needs_no_state() -> None:
+    six = _section("## 6–7. The data and the takeover", "## 8. Unfreeze")
+    fail = six[six.index("**If 4b fails**"):]
+    assert "`sudo docker exec sprintable-backend-1 python -m scripts.jobs.rewrite_site_post_links` (it needs no state from the blocks)" in fail
+
+
+def test_the_known_limits_are_written_down() -> None:
+    lim = _section("## Known limits (not blockers; read before the window)", "## Questions for the owner")
+    for token in ("does not compare the four origins with those of the apply command", "covered by the 30 s wait and the reading of the plan, not by a measurement of idle connections", "reads the log of the Cloud Run backend", "outside the freeze by design"):
+        assert token in lim, token
