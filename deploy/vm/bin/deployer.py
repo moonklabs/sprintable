@@ -306,7 +306,6 @@ class Deployer:
     _status_seq: int = 0
     _secret_cache: dict = field(default_factory=dict)
     _current_unknown: bool = False
-    _gateway_hba_changed: bool = False
     _prev: "Prepared | None" = None
     _cand: "Prepared | None" = None
 
@@ -383,6 +382,12 @@ class Deployer:
         except Exception as e:  # noqa: BLE001 — whatever went wrong, record it and (after the swap) put the previous release back
             err = e if isinstance(e, DeployError) else DeployError(f"unexpected {type(e).__name__}", self._phase)
             _write_json(self.cfg.state_dir / "failed.json", {"signature": signature(desired), "phase": err.phase, "detail": self._scrub(str(err))[:500], "at": int(self.now())})
+            if err.phase == "pre-swap" and self._prev is not None and self._prev.gateway_db:
+                # the candidate's rules file was written for a server that was never told: put the file back to what the running release declares
+                try:
+                    self._write_gateway_hba(self.cfg.install_dir / "runtime" / "gateway-db-pg_hba.conf", renv.gateway_hba(self._prev.decl))
+                except DeployError:
+                    self.log("could not put the gateway database's access rules file back")
             if err.phase == "post-swap":
                 outcome = self._rollback(current)
                 self._status(outcome, sha=desired["sha"], detail=self._scrub(str(err))[:300], serving=(current or {}).get("sha") if outcome == "rolled-back" else None)
@@ -578,20 +583,19 @@ class Deployer:
         """make the compose invocations of `p` possible: the pass-through file (names only) and the data folders"""
         runtime = self.cfg.install_dir / "runtime"
         runtime.mkdir(parents=True, exist_ok=True)
-        self._gateway_hba_changed = False
         renv.write_passthrough(runtime / "pass-through.yml", p.services)
         (self.cfg.data_dir / "postgres").mkdir(parents=True, exist_ok=True)
         (self.cfg.data_dir / "caddy").mkdir(parents=True, exist_ok=True)
         if p.gateway_db:
             (self.cfg.data_dir / "gateway-postgres").mkdir(parents=True, exist_ok=True)
-            self._gateway_hba_changed = self._write_gateway_hba(runtime / "gateway-db-pg_hba.conf", renv.gateway_hba(p.decl))
+            self._write_gateway_hba(runtime / "gateway-db-pg_hba.conf", renv.gateway_hba(p.decl))  # the file; the running server is told in `_swap`, so a deploy that fails before it never changes what the server enforces
 
-    def _write_gateway_hba(self, path: Path, text: str) -> bool:
+    def _write_gateway_hba(self, path: Path, text: str) -> None:
         """the access rules file of the gateway database. It is bind-mounted as a single file, so it is rewritten IN PLACE (a rename would leave the container looking at the old file) and only when
-        its content changed; the result says whether it did (then the running server is told to reload it)."""
+        its content differs."""
         try:
             if path.exists() and path.read_text() == text:
-                return False
+                return
             with open(path, "w") as fh:
                 fh.write(text)
                 fh.flush()
@@ -599,7 +603,6 @@ class Deployer:
             os.chmod(path, 0o644)
         except OSError as e:
             raise DeployError(f"the access rules of the gateway database cannot be written: {type(e).__name__}", "pre-swap") from e
-        return True
 
     def _install_caddyfile(self, text: str) -> None:
         """the container mounts the DIRECTORY, so the file can be replaced atomically (write next to it, fsync, rename): a crash leaves the old or the new file, never half of one"""
@@ -647,6 +650,11 @@ class Deployer:
         rc, out = self._compose(p.release, p.env, "exec", "-T", "caddy", "caddy", "reload", "--config", "/etc/caddy/Caddyfile", timeout=30)
         if rc != 0:
             raise DeployError(f"caddy reload failed: {out[-300:]}", "post-swap")
+        if p.gateway_db:
+            # the file already holds this release's rules (`_activate` wrote it — on the way back too, a rollback activates the previous release first): from here the running server enforces them
+            rc, out = self._compose(p.release, p.env, "exec", "-T", "gateway-db", "sh", "-c", GATEWAY_DB_RELOAD, timeout=30)
+            if rc != 0:
+                raise DeployError(f"the gateway database did not reload its access rules: {out[-200:]}", "post-swap")
         deadline = self.now() + self.cfg.health_timeout
         while True:
             if self._healthy(p):
@@ -679,10 +687,6 @@ class Deployer:
             rc, out = self._compose(cand.release, cand.env, "up", "-d", "--wait", "gateway-db", timeout=T_DB)
             if rc != 0:
                 raise DeployError(f"the support gateway database did not become healthy: {out[-300:]}", "pre-swap")
-            if self._gateway_hba_changed:
-                rc, out = self._compose(cand.release, cand.env, "exec", "-T", "gateway-db", "sh", "-c", GATEWAY_DB_RELOAD, timeout=30)
-                if rc != 0:
-                    raise DeployError(f"the gateway database did not reload its access rules: {out[-200:]}", "pre-swap")
             rc, out = self._compose(cand.release, cand.env, "exec", "-T", "gateway-db", "bash", "-c", METADATA_PROBE, timeout=30)
             if rc == 0:
                 raise DeployError("the metadata server is reachable from the gateway database container (is sprintable-gateway-db-firewall.service active?)", "pre-swap")

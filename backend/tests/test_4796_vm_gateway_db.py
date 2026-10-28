@@ -106,7 +106,7 @@ def _without_block(tmp_path: Path) -> bytes:
 def test_the_gateway_database_comes_up_healthy_before_the_swap_and_is_checked_after_it(world) -> None:
     world.publish()
     assert world.dep.run_once() == "deployed"
-    assert world.runner.verbs() == ["login", "pull", "logout", "up:db", "up:gwdb", "exec:gwdb-reload", "exec:gwdb-metadata", "run", "up:all", "exec:reload", "exec:health-be", "exec:health-fe", "exec:health-gwdb"]
+    assert world.runner.verbs() == ["login", "pull", "logout", "up:db", "up:gwdb", "exec:gwdb-metadata", "run", "up:all", "exec:reload", "exec:gwdb-reload", "exec:health-be", "exec:health-fe", "exec:health-gwdb"]
 
 
 def test_every_compose_call_of_such_a_release_sees_the_gateway_database_service(world) -> None:
@@ -516,20 +516,64 @@ def test_the_access_rules_are_rendered_from_the_declaration_and_let_only_the_app
     assert default == [["local", "all", "all", "trust"], ["host", "all", "all", "0.0.0.0/0", "reject"], ["host", "all", "all", "::/0", "reject"]], "the fallback file lets nobody in over the network"
 
 
-def test_the_rules_file_is_rewritten_in_place_and_only_when_it_changed_and_the_server_is_told_then(world) -> None:
+def _bundle_with_networks(networks: list[str]) -> bytes:
+    doc = yaml.safe_load((_VM / "env/dev.yaml").read_text())
+    doc["support_gateway"]["allow_from"] = networks
+    return S._bundle(extra={"env/dev.yaml": yaml.safe_dump(doc).encode()})
+
+
+def _reloads(w) -> list[dict]:
+    return [c for c in _compose_calls(w) if "pg_reload_conf" in " ".join(c["args"])]
+
+
+def test_the_rules_file_is_rewritten_in_place_only_when_it_differs_and_every_swap_tells_the_server(world) -> None:
     world.publish("a" * 40)
     world.dep.run_once()
     path = world.cfg.install_dir / "runtime/gateway-db-pg_hba.conf"
-    inode = path.stat().st_ino
-    reloads = lambda: [c for c in _compose_calls(world) if "pg_reload_conf" in " ".join(c["args"])]
-    assert len(reloads()) == 1, "the first deploy wrote the file: the server reads it"
+    inode, mtime = path.stat().st_ino, path.stat().st_mtime_ns
+    assert len(_reloads(world)) == 1
     world.publish("b" * 40)
     world.dep.run_once()
-    assert len(reloads()) == 1, "the same content: no rewrite, no reload"
+    assert path.stat().st_ino == inode and path.stat().st_mtime_ns == mtime, "the same content: the file is not touched"
+    assert len(_reloads(world)) == 2, "each swap tells the server (cheap, and it makes the file and the running rules one thing)"
     path.write_text("# something else\n")   # a file that differs is put right again — in place, so the single-file mount still sees it
     world.publish("c" * 40)
     world.dep.run_once()
-    assert path.stat().st_ino == inode and path.read_text() == renv.gateway_hba(world.decl) and len(reloads()) == 2
+    assert path.stat().st_ino == inode and path.read_text() == renv.gateway_hba(world.decl) and len(_reloads(world)) == 3
+
+
+def test_a_release_that_fails_before_the_swap_does_not_change_what_the_running_server_enforces(world) -> None:
+    world.publish("a" * 40, bundle=_bundle_with_networks(["10.178.0.0/20"]))
+    world.dep.run_once()
+    path = world.cfg.install_dir / "runtime/gateway-db-pg_hba.conf"
+    before = path.read_text()
+    reloads = len(_reloads(world))
+    world.publish("b" * 40, bundle=_bundle_with_networks(["10.200.0.0/20"]))
+    world.runner.fail_on["migrate"] = 1
+    assert world.dep.run_once() == "failed"
+    assert len(_reloads(world)) == reloads, "the server was never told about the candidate's networks"
+    assert path.read_text() == before and "10.200.0.0" not in path.read_text(), "and the file is put back, so a restart of the container cannot pick them up either"
+
+
+def test_a_rollback_gives_the_running_server_the_previous_releases_rules_again(world) -> None:
+    a = world.publish("a" * 40, bundle=_bundle_with_networks(["10.178.0.0/20"]))
+    world.dep.run_once()
+    path = world.cfg.install_dir / "runtime/gateway-db-pg_hba.conf"
+    world.publish("b" * 40, bundle=_bundle_with_networks(["10.200.0.0/20"]))
+    orig = world.runner.run
+
+    def run(args, env, **kw):
+        if env.get("BACKEND_IMAGE") == a["backend_image"] and "up" in args:
+            world.runner.healthy_after = 0
+            world.runner._probes = 0
+        return orig(args, env, **kw)
+
+    world.runner.healthy_after = 10**6
+    world.runner.run = run
+    reloads_before = len(_reloads(world))
+    assert world.dep.run_once() == "rolled-back"
+    assert "10.178.0.0/20" in path.read_text() and "10.200.0.0" not in path.read_text()
+    assert len(_reloads(world)) == reloads_before + 2, "the candidate's swap and the way back each told the server"
 
 
 def test_a_rules_file_that_cannot_be_written_stops_the_release(world) -> None:
@@ -540,10 +584,11 @@ def test_a_rules_file_that_cannot_be_written_stops_the_release(world) -> None:
     assert not any("--wait-timeout" in c["args"] for c in world.runner.calls)
 
 
-def test_a_reload_that_fails_stops_the_release(world) -> None:
+def test_a_reload_that_fails_after_the_swap_is_a_failed_swap(world) -> None:
     world.publish()
     world.runner.fail_on["pg_reload_conf"] = 1
-    assert world.dep.run_once() == "failed" and "did not reload its access rules" in S._state(world, "failed.json")["detail"]
+    assert world.dep.run_once() == "failed-no-previous", "the server may enforce rules nobody checked: the release is not left serving"
+    assert "did not reload its access rules" in S._state(world, "failed.json")["detail"]
 
 
 def test_a_release_is_refused_when_the_gateway_database_container_can_reach_the_metadata_server(world) -> None:
