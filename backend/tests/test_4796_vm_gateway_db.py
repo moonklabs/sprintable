@@ -13,6 +13,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -1489,8 +1490,8 @@ def test_a_role_that_vanishes_after_the_swap_is_not_healthy_and_rolls_the_releas
 def test_the_runbook_says_how_to_recover_a_first_start_that_was_cut_short_and_when_not_to() -> None:
     rb = _runbook13()
     para = rb.split("**A first start that was cut short.**")[1].split("**Rolling back across this step:**")[0]
-    for token in ("only while the data folder is empty", "the application role does not own the database", "**no data in any database**", "**First look, read only**", "select count(*) from pg_stat_user_tables", "**Every line must be 0**",
-                  "every database that accepts connections, `template1` included: a renamed one", "ONE chain that stops where anything fails and asks the same question again as its first link", "| sort -u)\" = 0 ] && sudo docker stop sprintable-gateway-db-1 && [ -z \"$(sudo docker ps -q --filter name=sprintable-gateway-db-1)\" ] && sudo find /srv/sprintable/gateway-postgres -mindepth 1 -delete",
+    for token in ("only while the data folder is empty", "the application role does not own the database", "**no data in any database**", "**First look, read only**", "select count(*) from pg_stat_user_tables",
+                  "`template1` included", "ONE chain that stops where anything fails and asks the same question again as its first link", "&& sudo docker stop sprintable-gateway-db-1 && ", "-mindepth 1 -delete`",
                   "sudo python3 /opt/sprintable/bin/deployer.py --force", "With data in it, do not empty anything"):
         assert token in para, token
     assert " deployer --force" not in para, "the installed command, not a bare name that is not on the PATH"
@@ -1536,19 +1537,61 @@ def test_the_password_in_the_log_check_names_the_project_and_does_not_pass_on_an
     assert '&& [ -n "$LOG" ] && printf' in line and "grep -c -F -- \"$PW\"" in line and "a failed ssh or an empty log prints nothing: that is not a pass" in line
 
 
-def _recovery_loop() -> str:
-    para = _runbook13().split("**A first start that was cut short.**")[1].split("**Rolling back across this step:**")[0]
-    return para.split("sh -c '")[1].split("'")[0]
+def _recovery_paragraph() -> str:
+    return _runbook13().split("**A first start that was cut short.**")[1].split("**Rolling back across this step:**")[0]
+
+
+def _recovery_script() -> str:
+    return _recovery_paragraph().split("sh -c '")[1].split("'")[0]
 
 
 def _recovery_chain() -> str:
-    para = _runbook13().split("**A first start that was cut short.**")[1].split("**Rolling back across this step:**")[0]
-    return para.split("ONE chain that stops where anything fails and asks the same question again as its first link: `")[1].split("` (the container's own name")[0]
+    return _recovery_paragraph().split("ONE chain that stops where anything fails and asks the same question again as its first link: `")[1].split("` (the container's own name")[0]
+
+
+def _fake_psql(tmp: Path, databases: str, counts: dict, list_fails: bool = False) -> dict:
+    """a psql that answers the list question with `databases` and the count question per database from `counts` (a missing key = the query fails)"""
+    import json
+    import stat
+    b = tmp / "bin"
+    b.mkdir(exist_ok=True)
+    (tmp / "answers.json").write_text(json.dumps({"databases": databases, "counts": counts, "list_fails": list_fails}))
+    p = b / "psql"
+    p.write_text(
+        "#!" + sys.executable + "\nimport json, os, sys\n"
+        "a = json.load(open(os.environ['ANSWERS']))\n"
+        "args = sys.argv[1:]\n"
+        "sql = args[args.index('-c') + 1]\n"
+        "db = args[args.index('-d') + 1]\n"
+        "if 'pg_database' in sql:\n"
+        "    sys.exit(1) if a['list_fails'] else print(a['databases'], end='')\n"
+        "elif db in a['counts']:\n"
+        "    print(a['counts'][db])\n"
+        "else:\n"
+        "    sys.stderr.write('connection failed\\n'); sys.exit(2)\n")
+    p.chmod(p.stat().st_mode | stat.S_IEXEC)
+    return {"PATH": f"{b}:/usr/bin:/bin", "HOME": str(tmp), "ANSWERS": str(tmp / "answers.json"), "POSTGRES_USER": "gw_admin"}
+
+
+@pytest.mark.parametrize("databases,counts,list_fails,ok", [
+    ("postgres\nsupport_gateway", {"postgres": "0", "support_gateway": "0"}, False, True),
+    ("postgres\nsupport_gateway", {"postgres": "0", "support_gateway": "3"}, False, False),
+    ("postgres\nsupport_gateway\nrenamed", {"postgres": "0", "support_gateway": "0"}, False, False),          # the query for the third database FAILS: that must not read as «empty»
+    ("postgres\nsupport_gateway", {"postgres": "0", "support_gateway": ""}, False, False),                    # an empty count is not a zero
+    ("", {}, False, False),                                                                                     # no database at all is not «no data»
+    ("postgres", {"postgres": "0"}, True, False),                                                              # the list question fails
+])
+def test_the_recovery_question_succeeds_only_when_every_count_was_obtained_and_is_zero(tmp_path: Path, databases: str, counts: dict, list_fails: bool, ok: bool) -> None:
+    env = _fake_psql(tmp_path, databases, counts, list_fails)
+    p = subprocess.run(["sh", "-c", _recovery_script()], capture_output=True, text=True, timeout=30, env=env)
+    assert (p.returncode == 0) is ok, (p.returncode, p.stdout, p.stderr)
+    if ok:
+        assert p.stdout.split() == ["postgres", "0", "support_gateway", "0"]
 
 
 @pytest.mark.skipif(_postgres_binaries() is None or os.geteuid() == 0, reason="needs the Postgres binaries and a user that is not root (initdb refuses root)")
 def test_on_a_real_server_the_recovery_question_finds_data_in_any_database(tmp_path: Path) -> None:
-    """a renamed database or a kept restore copy holds data too: the question covers every database that is not a template"""
+    """a renamed database or a kept restore copy holds data too: the question covers every database that accepts connections, template1 included"""
     import shutil
     import tempfile
     bins = _postgres_binaries()
@@ -1563,21 +1606,31 @@ def test_on_a_real_server_the_recovery_question_finds_data_in_any_database(tmp_p
         for name in ("support_gateway", "support_gateway_before_restore_x"):
             assert run("createdb", "-h", str(sock), "-p", port, "-U", "gw_admin", name).returncode == 0
         env = {"PATH": f"{bins}:/usr/bin:/bin", "PGHOST": str(sock), "PGPORT": port, "POSTGRES_USER": "gw_admin", "HOME": str(work)}
-        ask = lambda: subprocess.run(["sh", "-c", _recovery_loop() + " | sort -u"], capture_output=True, text=True, timeout=60, env=env).stdout.strip()  # noqa: E731
-        assert ask() == "0", "no data anywhere: every line is 0"
-        assert run("psql", "-h", str(sock), "-p", port, "-U", "gw_admin", "-d", "support_gateway_before_restore_x", "-X", "-q", "-c", "create table kept(id int)").returncode == 0
-        assert ask() == "0\n1", "a table in a database that is NOT the gateway's own is found"
-        assert run("psql", "-h", str(sock), "-p", port, "-U", "gw_admin", "-d", "support_gateway_before_restore_x", "-X", "-q", "-c", "drop table kept").returncode == 0 and ask() == "0"
-        assert run("psql", "-h", str(sock), "-p", port, "-U", "gw_admin", "-d", "template1", "-X", "-q", "-c", "create table in_the_template(id int)").returncode == 0
-        assert ask() == "0\n1", "template1 is a database like the others here: a table in it is data too"
+        ask = lambda: subprocess.run(["sh", "-c", _recovery_script()], capture_output=True, text=True, timeout=60, env=env)  # noqa: E731
+        psql = lambda db, sql: run("psql", "-h", str(sock), "-p", port, "-U", "gw_admin", "-d", db, "-X", "-q", "-c", sql)  # noqa: E731
+        first = ask()
+        assert first.returncode == 0 and sorted(first.stdout.split()[::2]) == ["postgres", "support_gateway", "support_gateway_before_restore_x", "template1"], first.stdout
+        assert psql("support_gateway_before_restore_x", "create table kept(id int)").returncode == 0
+        found = ask()
+        assert found.returncode != 0 and "support_gateway_before_restore_x 1" in found.stdout, "a table in a database that is NOT the gateway's own is found"
+        assert psql("support_gateway_before_restore_x", "drop table kept").returncode == 0 and ask().returncode == 0
+        assert psql("template1", "create table in_the_template(id int)").returncode == 0
+        assert ask().returncode != 0, "template1 is a database like the others here: a table in it is data too"
     finally:
         subprocess.run([str(bins / "pg_ctl"), "-D", str(work / "data"), "-m", "immediate", "stop"], capture_output=True, timeout=60)
         shutil.rmtree(work, ignore_errors=True)
 
 
 @pytest.mark.parametrize("shell", ["bash", "zsh"])
-@pytest.mark.parametrize("counts,stop_rc,still_running,wiped", [("0\n0\n0", 0, False, True), ("0\n1\n0", 0, False, False), ("", 0, False, False), ("0\n0", 1, False, False), ("0\n0", 0, True, False)])
-def test_the_recovery_chain_wipes_only_an_empty_stopped_server(tmp_path: Path, shell: str, counts: str, stop_rc: int, still_running: bool, wiped: bool) -> None:
+@pytest.mark.parametrize("exec_rc,stop_rc,inspect,wiped", [
+    (0, 0, "false", True),             # empty, stopped, confirmed
+    (1, 0, "false", False),            # the question failed or found data: nothing is stopped, nothing is wiped
+    (0, 1, "false", False),            # the stop failed
+    (0, 0, "true", False),             # «stopped» but still running
+    (0, 0, "FAIL", False),             # the confirmation itself failed: that is not «stopped»
+    (0, 0, "", False),                 # and an empty answer is not «false» either
+])
+def test_the_recovery_chain_wipes_only_an_empty_server_that_is_confirmed_stopped(tmp_path: Path, shell: str, exec_rc: int, stop_rc: int, inspect: str, wiped: bool) -> None:
     import shutil
     import stat
     if shutil.which(shell) is None:
@@ -1589,18 +1642,20 @@ def test_the_recovery_chain_wipes_only_an_empty_stopped_server(tmp_path: Path, s
     b = tmp_path / "bin"
     b.mkdir()
     (b / "sudo").write_text('#!/bin/sh\nexec "$@"\n')
-    (b / "docker").write_text('#!/bin/sh\ncase "$1" in exec) printf "%s\\n" "$FAKE_COUNTS" | grep -v "^$" ;; stop) exit "$FAKE_STOP_RC" ;; ps) [ -n "$FAKE_RUNNING" ] && echo abc123; exit 0 ;; esac\n')
+    (b / "docker").write_text('#!/bin/sh\ncase "$1" in exec) exit "$FAKE_EXEC_RC" ;; stop) exit "$FAKE_STOP_RC" ;; inspect) [ "$FAKE_INSPECT" = FAIL ] && exit 1; printf %s "$FAKE_INSPECT"; exit 0 ;; esac\nexit 0\n')
     for f in (b / "sudo", b / "docker"):
         f.chmod(f.stat().st_mode | stat.S_IEXEC)
     chain = _recovery_chain().replace("/srv/sprintable/gateway-postgres", str(folder))
-    env = {"PATH": f"{b}:/usr/bin:/bin", "HOME": str(tmp_path), "FAKE_COUNTS": counts, "FAKE_STOP_RC": str(stop_rc), "FAKE_RUNNING": "1" if still_running else ""}
+    env = {"PATH": f"{b}:/usr/bin:/bin", "HOME": str(tmp_path), "FAKE_EXEC_RC": str(exec_rc), "FAKE_STOP_RC": str(stop_rc), "FAKE_INSPECT": inspect}
     subprocess.run([shell, "-c", chain], capture_output=True, text=True, timeout=30, env=env)
-    left = sorted(p.name for p in folder.iterdir())
-    assert (left == []) is wiped, (counts, stop_rc, still_running, left)
+    assert (sorted(p.name for p in folder.iterdir()) == []) is wiped, (exec_rc, stop_rc, inspect)
 
 
-def test_the_first_look_and_the_chain_ask_the_very_same_question() -> None:
-    assert _recovery_loop() in _recovery_chain() and "pg_stat_user_tables" in _recovery_loop() and "not datistemplate" not in _recovery_loop()
+def test_the_first_look_and_the_chain_ask_the_very_same_question_and_the_stop_is_confirmed_by_inspect() -> None:
+    para = _recovery_paragraph()
+    assert _recovery_script() in _recovery_chain() and "sort -u" not in para and "docker ps" not in para and "not datistemplate" not in para
+    assert "[ \"$(sudo docker inspect -f '{{.State.Running}}' sprintable-gateway-db-1)\" = false ]" in para and "a failed `inspect` is not «stopped»" in para
+    assert "**It succeeds (exit status 0) only if the list is not empty, every count was obtained and every count is 0**" in para
 
 
 def test_the_undo_removes_the_container_before_the_rules_and_the_rules_wait() -> None:
