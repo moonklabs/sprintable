@@ -497,10 +497,14 @@ def test_the_first_and_second_rows_delete_only_after_their_captures_are_proven(t
 
 
 def test_the_cloud_sql_dependents_step_says_the_list_is_read_and_not_assumed_and_what_the_first_run_found() -> None:
-    """2026-10-28: the first run of R5 stopped at a dependents list longer than the two jobs the sheet expected (the dev admin console's internal API service and seven jobs not run since June-August)"""
+    """2026-10-28: the first run of R5 stopped at a dependents list longer than the two jobs the sheet expected (the dev admin console's internal API service and seven jobs not run since June-August).
+    The blocks of R5 handle the two jobs only, so the paragraph must not promise more than that: the extra lines are retired by hand BEFORE the capture, in an order that cannot delete what is not saved, and the listing is run again."""
     step1 = _rows()["R5"].split("1. Dependents (read only)")[1].split("2. Capture")[0]
     for token in ("**Read the list, do not assume it.**", "on 2026-10-28 the list was longer", "`sprintable-internal-api-dev`", "`sprintable-admin-web-dev`", "seven jobs that had not run since June-August",
-                  "decided by the product owner before anything is deleted", "its definition is saved in step 2", "deleted in step 4 in the same chain", "**A line nobody can account for stops the sheet.**",
+                  "**The blocks below handle only those two jobs.**", "retired by hand BEFORE step 2, one resource at a time and in this order", "the product owner states that it is not used",
+                  "writes the answer down", "**«I do not know» is a stop, not a yes**", "its definition is saved", "checked to be non-empty", "(c) only then", "**run the listing above again: it must print only the two jobs**",
                   "means gate 0 is not done: stop"):
         assert token in step1, token
+    assert step1.index("(a)") < step1.index("(b)") < step1.index("(c) only then") < step1.index("run the listing above again"), "state, save, delete, list again"
     assert "Expected before the delete: only" not in _rows()["R5"], "the old, shorter expectation is gone"
+    assert "in the same chain" not in step1, "no promise that the chain below covers the extra lines"
