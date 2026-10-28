@@ -84,14 +84,32 @@ class DesiredJob:
     retry: dict[str, str | int]
 
 
+_OVERRIDABLE = {"schedule", "time_zone", "attempt_deadline", "method", "headers", "retry"}
+
+
 def desired_jobs(manifest: dict, env: str, bearer: str, *, base_url: str) -> list[DesiredJob]:
     """정의 → 원하는 작업 목록. `bearer`는 필수 — Authorization 없는 작업을 만드는 경로는 없다. `base_url`은 실물 백엔드
     서비스의 `status.url`(정의 파일에 호스트를 박지 않는다 — 서비스 URL이 바뀌어도 어긋나지 않게)."""
     if not bearer:
         raise ValueError("bearer 필수 — 인증 없는 스케줄러 작업은 만들지 않는다")
     defaults = manifest["defaults"]
+    # story 4796 (the prod cutover): an environment may name the jobs it has (`environments.<env>.jobs`; absent = every job of the manifest, as dev) and a job may carry the values prod really runs with
+    # (`env_overrides.<env>`), so that applying prod never creates dev's other jobs and never changes a schedule that prod has
+    env_cfg = manifest.get("environments", {}).get(env, {})
+    only = env_cfg.get("jobs")
+    if only is not None:
+        unknown = sorted(set(only) - {job["name"] for job in manifest["jobs"]})
+        if unknown:
+            raise ValueError(f"environments.{env}.jobs names jobs the manifest does not define: {', '.join(unknown)}")
     out = []
     for job in manifest["jobs"]:
+        if only is not None and job["name"] not in only:
+            continue
+        override = job.get("env_overrides", {}).get(env, {})
+        bad = sorted(set(override) - _OVERRIDABLE)
+        if bad:
+            raise ValueError(f"env_overrides.{env} of {job['name']} may not set: {', '.join(bad)}")
+        job = {**job, **override}
         headers = dict(defaults["headers"])
         headers.update(job.get("headers", {}))
         headers[AUTH_HEADER] = f"Bearer {bearer}"
