@@ -1274,7 +1274,7 @@ def test_the_range_is_written_once_in_the_declaration_and_the_runbook_commands_t
     got = subprocess.run(["bash", "-c", line.split("   #")[0] + '; printf %s "$GWRANGE"'], capture_output=True, text=True, timeout=30, cwd=root)
     assert got.stdout.strip().splitlines()[-1] == declared[0], (got.stdout, got.stderr)
     allow = next(l for l in rb.splitlines() if l.startswith("gcloud compute firewall-rules create $VM-gateway-db-allow"))
-    create = next(l for l in rb.splitlines() if l.startswith("gcloud compute networks subnets create support-gateway-$ENV"))
+    create = next(l for l in rb.splitlines() if "gcloud compute networks subnets create support-gateway-$ENV" in l)
     assert '--source-ranges "$GWRANGE"' in allow and '--range "$GWRANGE"' in create
     assert "--source-tags" not in allow and "--priority 800 --action ALLOW" in allow and "--target-tags $VM" in allow
     assert not re.search(r"\b10\.(?!128\.0\.0/9)\d+\.\d+\.\d+/\d+", rb), "the range is named by `allow_from`, not repeated as a number in the runbook (the automatic block of the network is a general fact)"
@@ -1292,7 +1292,7 @@ def test_the_gateways_subnet_lies_outside_the_automatic_subnets_and_clear_of_the
 
 def test_the_runbook_says_why_the_subnet_and_not_the_tag_and_the_negative_control_stays_on_the_default_subnet() -> None:
     rb = _runbook13()
-    for token in ("cannot be named by a network tag in an ingress firewall rule", "told apart by SUBNET, not by tag", "placed OUTSIDE it", "A /25 holds the service's ceiling of 10 instances",
+    for token in ("cannot be named by a network tag in an ingress firewall rule", "told apart by SUBNET, not by tag", "placed OUTSIDE it", "A /25 (128 addresses) holds the service's ceiling of 10 instances with room to spare (a service takes about twice the addresses of an instance, kept 20 minutes after a scale-in)",
                   "`--subnet support-gateway-$ENV` instead of `--subnet default`", "the default subnet is not allowed, because it also holds other Cloud Run services"):
         assert token in rb, token
     assert "source-tags" not in rb and "--network-tags" not in rb, "no tag is used as the source of the allow rule or on the pipeline's flags"
@@ -1312,3 +1312,37 @@ def test_the_runbook_keeps_the_subnet_to_the_gateway_and_does_not_publish_the_to
 def test_the_runbook_notes_that_the_subnet_has_no_private_google_access_and_when_that_matters() -> None:
     rb = _runbook13()
     assert "Private Google Access **off**" in rb and "`private-ranges-only`" in rb and "changing it to `all-traffic` later needs NAT or Private Google Access first" in rb
+
+
+def test_step_3_creates_the_subnet_only_when_it_is_missing_and_compares_the_range_when_it_is_there(tmp_path: Path) -> None:
+    import stat
+    rb = _runbook13()
+    block = rb.split("```bash\n", 1)[1].split("```")[0]
+    lines = block.splitlines()
+    start = next(i for i, l in enumerate(lines) if l.startswith("GWCUR=$("))
+    snippet = "\n".join(lines[start:start + 2])
+    b = tmp_path / "bin"
+    b.mkdir()
+    g = b / "gcloud"
+    g.write_text('#!/bin/sh\necho "gcloud $*" >> "$CALLS"\ncase "$*" in "compute networks subnets describe"*) [ -n "$CUR" ] && printf %s "$CUR" || exit 1 ;; esac\nexit 0\n')
+    g.chmod(g.stat().st_mode | stat.S_IEXEC)
+    base = {"PATH": f"{b}:/usr/bin:/bin", "HOME": str(tmp_path), "ENV": "dev", "REGION": "r", "PROJECT": "p", "GWRANGE": "10.1.2.0/25", "CALLS": str(tmp_path / "calls")}
+    outcomes = {}
+    for name, cur in (("missing", ""), ("same", "10.1.2.0/25"), ("other", "10.9.9.0/25")):
+        (tmp_path / "calls").write_text("")
+        p = subprocess.run(["bash", "-c", snippet], capture_output=True, text=True, timeout=30, env={**base, "CUR": cur})
+        outcomes[name] = (p.stdout.strip(), (tmp_path / "calls").read_text())
+    assert "subnets create support-gateway-dev" in outcomes["missing"][1] and "--range 10.1.2.0/25" in outcomes["missing"][1]
+    assert "subnets create" not in outcomes["same"][1] and "exists with the declared range" in outcomes["same"][0]
+    assert "subnets create" not in outcomes["other"][1] and outcomes["other"][0].startswith("STOP: the subnet has the range 10.9.9.0/25, the declaration says 10.1.2.0/25")
+
+
+def test_step_3_looks_at_the_firewall_rules_before_creating_the_pair_and_says_what_to_do_with_a_tag_rule() -> None:
+    rb = _runbook13()
+    look = rb.index("gcloud compute firewall-rules list --project $PROJECT --filter=\"name~$VM-gateway-db\"")
+    assert look < rb.index("gcloud compute firewall-rules create $VM-gateway-db-deny") < rb.index("gcloud compute firewall-rules create $VM-gateway-db-allow")
+    assert "whose TAGS column is not empty, delete it" in rb and "gcloud compute firewall-rules delete $VM-gateway-db-allow --project $PROJECT --quiet" in rb.split("# the port.")[0]
+
+
+def test_the_subnet_delete_in_the_undo_carries_its_condition() -> None:
+    assert "(only when no Cloud Run revision uses it any more)" in _runbook13()

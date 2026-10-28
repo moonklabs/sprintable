@@ -323,9 +323,14 @@ IPI=$(gcloud compute instances describe $VM --zone $ZONE --project $PROJECT --fo
 gcloud compute addresses create $VM-internal --project $PROJECT --region $REGION --subnet default --addresses "$IPI"
 # the gateway's OWN subnet. Cloud Run's Direct VPC egress cannot be named by a network tag in an ingress firewall rule (it is on Google's list of limits), so the rule names the SUBNET's address range.
 # The default network is an auto-mode network: its automatic subnets lie in 10.128.0.0/9, so the new range is placed OUTSIDE it (rules written for those subnets then do not apply to it), and clear of
-# every range already in use (`gcloud compute addresses list --global` shows the reserved service-connection range, `gcloud compute networks subnets list --network default` the subnets). A /25 holds the service's ceiling of 10 instances (4 addresses each, kept 20 minutes after a scale-in); Google's minimum is /26.
+# every range already in use (`gcloud compute addresses list --global` shows the reserved service-connection range, `gcloud compute networks subnets list --network default` the subnets). A /25 (128 addresses) holds the service's ceiling of 10 instances with room to spare (a service takes about twice the addresses of an instance, kept 20 minutes after a scale-in); Google's minimum is /26.
 GWRANGE=$(awk '/allow_from:/{f=1;next} f&&/^ *- /{print $2; exit}' deploy/vm/env/dev.yaml); echo "$GWRANGE"   # the range is written ONCE, as `support_gateway.allow_from` (the deployer reads it); the commands take it from there
-gcloud compute networks subnets create support-gateway-$ENV --project $PROJECT --region $REGION --network default --range "$GWRANGE"   # dev: already created (2026-10-28)
+# created if it is not there; if it is (dev: made on 2026-10-28), its range must be the declared one
+GWCUR=$(gcloud compute networks subnets describe support-gateway-$ENV --region $REGION --project $PROJECT --format='value(ipCidrRange)' 2>/dev/null)
+if [ -z "$GWCUR" ]; then gcloud compute networks subnets create support-gateway-$ENV --project $PROJECT --region $REGION --network default --range "$GWRANGE"; elif [ "$GWCUR" = "$GWRANGE" ]; then echo "the subnet exists with the declared range"; else echo "STOP: the subnet has the range $GWCUR, the declaration says $GWRANGE"; fi
+# look first. An earlier version of this step made the allow rule with a network TAG as its source, which never matches Cloud Run traffic: if the list shows an allow rule whose TAGS column is not empty, delete it
+# (`gcloud compute firewall-rules delete $VM-gateway-db-allow --project $PROJECT --quiet`) before creating the pair below; a rule that already has the declared range as its RANGES column needs nothing.
+gcloud compute firewall-rules list --project $PROJECT --filter="name~$VM-gateway-db" --format='table(name,priority,sourceRanges.list():label=RANGES,sourceTags.list():label=TAGS)'
 # the port. A broader allow rule exists separately in the project, so an allow rule alone would narrow nothing:
 # deny 5432 to everyone (priority 900, like the admin-port deny of §4) and allow it earlier (priority 800) from the gateway's subnet only
 gcloud compute firewall-rules create $VM-gateway-db-deny  --project $PROJECT --network default --direction INGRESS --priority 900 --action DENY --rules tcp:5432 --target-tags $VM --source-ranges 0.0.0.0/0
