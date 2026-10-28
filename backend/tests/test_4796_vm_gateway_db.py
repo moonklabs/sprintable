@@ -1133,11 +1133,37 @@ def test_the_metadata_rule_is_ipv4_only_and_says_so_while_nothing_enables_ipv6()
     assert "The rule that keeps the metadata server out of reach is IPv4 only" in (_VM / "RUNBOOK.md").read_text()
 
 
+def _runbook_probe_program() -> str:
+    rb = (_VM / "RUNBOOK.md").read_text().split("## 13. The support gateway's database on the VM")[1]
+    return rb.split("**Step 3b")[1].split("PROBE='^@^-c@")[1].split("@'\"$VMIP\"")[0]
+
+
 def test_the_negative_control_of_step_five_can_be_run_from_the_runbook_alone() -> None:
     rb = (_VM / "RUNBOOK.md").read_text().split("## 13. The support gateway's database on the VM")[1]
     sec = rb.split("**Step 3b")[1].split("The tag reaches the gateway's revisions")[0]
-    for token in ("gcloud run jobs create gwdb-probe-untagged", "--network default --subnet default --vpc-egress private-ranges-only", "gcloud run jobs execute gwdb-probe-untagged", "gcloud run jobs delete gwdb-probe-untagged",
-                  "sys.exit(0 if r == 0 else 4 if r == errno.ECONNREFUSED else 3)", "5432", "**Pass: the execution FAILS and its message says `exit(3)`.**", "`exit(4)` = refused", "positive control after step 5"):
+    for token in ("gcloud iam service-accounts create gwdb-probe", "PJU=gwdb-probe-untagged-$(date -u +%Y%m%d%H%M%S)", 'gcloud run jobs create "$PJU"', "--network default --subnet default --vpc-egress private-ranges-only",
+                  '&& gcloud run jobs execute "$PJU"', "gcloud logging read", "| grep '^result'", 'gcloud run jobs delete "$PJU"', "gcloud iam service-accounts delete $PROBESA", "--service-account $PROBESA",
+                  "**Pass: the log line is `result <n> TIMEOUT`**", "is not the container's exit code", "**`REFUSED`: the deny rule is missing — stop**", "**`OTHER`: the job could not reach the network at all", "positive control after step 5",
+                  "holds **no role at all**"):
         assert token in sec, token
-    assert "--network-tags" not in sec.split("**Pass:")[0], "the job that is meant to carry NO tag carries none"
+    command_lines = [l for l in sec.split("**Pass:")[0].splitlines() if l.startswith("gcloud run jobs create")]
+    assert len(command_lines) == 1 and "--network-tags" not in command_lines[0], "the job that is meant to carry NO tag carries none"
+    assert "support-gateway-dev@" not in sec.split("**Pass:")[0], "the gateway's own account is not used"
+    assert 'echo "untagged' not in sec, "gcloud's status after --wait is not printed as if it were the container's exit code"
     assert "next change" not in rb.split("**Step 3b")[1].split("**Checks after step 5")[0], "nothing the gate needs is deferred to a later change"
+
+
+def _run_probe(code: str, tmp: Path) -> subprocess.CompletedProcess:
+    """the program of the RUNBOOK, as written, with a socket whose connect_ex answers the given errno (by name)"""
+    import subprocess
+    (tmp / "socket.py").write_text(
+        "import errno, os\n\nclass socket:\n    def settimeout(self, t):\n        pass\n    def connect_ex(self, addr):\n        assert addr[1] == 5432\n        n = os.environ['FAKE_ERRNO']\n        return 0 if n == '0' else getattr(errno, n)\n")
+    return subprocess.run(["python3", "-c", _runbook_probe_program(), "10.178.0.9"], capture_output=True, text=True, timeout=30,
+                          env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(tmp), "FAKE_ERRNO": code})
+
+
+@pytest.mark.parametrize("name,exit_code,word", [("0", 0, "REACHED"), ("ECONNREFUSED", 4, "REFUSED"), ("EAGAIN", 3, "TIMEOUT"), ("ETIMEDOUT", 3, "TIMEOUT"),
+                                                  ("EHOSTUNREACH", 5, "OTHER"), ("ENETUNREACH", 5, "OTHER"), ("EPERM", 5, "OTHER")])
+def test_the_probe_of_the_runbook_tells_a_dropped_packet_from_a_refusal_and_from_a_missing_route(tmp_path: Path, name: str, exit_code: int, word: str) -> None:
+    p = _run_probe(name, tmp_path)
+    assert p.returncode == exit_code and p.stdout.split()[0] == "result" and p.stdout.split()[-1] == word, (p.stdout, p.stderr)

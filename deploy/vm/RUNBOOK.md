@@ -328,19 +328,24 @@ gcloud compute networks subnets describe default --region $REGION --project $PRO
 gcloud compute firewall-rules create $VM-gateway-db-deny  --project $PROJECT --network default --direction INGRESS --priority 900 --action DENY --rules tcp:5432 --target-tags $VM --source-ranges 0.0.0.0/0
 gcloud compute firewall-rules create $VM-gateway-db-allow --project $PROJECT --network default --direction INGRESS --priority 800 --action ALLOW --rules tcp:5432 --target-tags $VM --source-tags support-gateway-dev
 ```
-**Step 3b — the negative control, in commands (the hard condition of step 5).** Throw-away Cloud Run jobs on the default network that open ONE connection to the VM's port 5432, with the gateway's own image and service account and no secret.
-The program prints the result and exits **0 = reached**, **4 = refused** (nothing listens, or nothing denies), **3 = neither: the packets were dropped (timed out)**. `$VM`, `$PROJECT`, `$REGION`, `$ENV` as in §2/§4.
+**Step 3b — the negative control, in commands (the hard condition of step 5).** A throw-away Cloud Run job on the default network that opens ONE connection to the VM's port 5432. It runs as a service account that holds **no role at all**
+(the connection needs none; the gateway's own account holds Vertex and database roles it has no business with here), has a name of its own (a leftover or a pre-existing job is never touched), and carries no secret. The program prints
+one line, `result <errno> <word>`, and exits **0 REACHED**, **4 REFUSED** (nothing listens, or nothing denies), **3 TIMEOUT** (the packets were dropped), **5 OTHER** (any other error — for example no route at all: a failure of the job's
+network, not a proof of the firewall). `$VM`, `$PROJECT`, `$REGION`, `$ZONE`, `$ENV` as in §2/§4.
 ```bash
-GW=support-gateway-$ENV; GWSA=support-gateway-dev@$PROJECT.iam.gserviceaccount.com
+GW=support-gateway-$ENV; PROBESA=gwdb-probe@$PROJECT.iam.gserviceaccount.com
 VMIP=$(gcloud compute instances describe $VM --zone $ZONE --project $PROJECT --format='value(networkInterfaces[0].networkIP)')
 GWIMG=$(gcloud run services describe $GW --project $PROJECT --region $REGION --format='value(spec.template.spec.containers[0].image)')
-PROBE='^@^-c@import errno, socket, sys; s = socket.socket(); s.settimeout(5); r = s.connect_ex((sys.argv[1], 5432)); print("result", r); sys.exit(0 if r == 0 else 4 if r == errno.ECONNREFUSED else 3)@'"$VMIP"
-gcloud run jobs create gwdb-probe-untagged --project $PROJECT --region $REGION --image "$GWIMG" --service-account $GWSA --network default --subnet default --vpc-egress private-ranges-only --max-retries 0 --task-timeout 60 --command python --args "$PROBE"
-gcloud run jobs execute gwdb-probe-untagged --project $PROJECT --region $REGION --wait; echo "untagged: exit $?"
-gcloud run jobs delete gwdb-probe-untagged --project $PROJECT --region $REGION --quiet
+PROBE='^@^-c@import errno, socket, sys; s = socket.socket(); s.settimeout(5); r = s.connect_ex((sys.argv[1], 5432)); kind = "REACHED" if r == 0 else "REFUSED" if r == errno.ECONNREFUSED else "TIMEOUT" if r in (errno.EAGAIN, errno.ETIMEDOUT) else "OTHER"; print("result", r, kind); sys.exit({"REACHED": 0, "REFUSED": 4, "TIMEOUT": 3}.get(kind, 5))@'"$VMIP"
+gcloud iam service-accounts create gwdb-probe --project $PROJECT --display-name "gateway db firewall probe (no roles)"
+PJU=gwdb-probe-untagged-$(date -u +%Y%m%d%H%M%S); echo "$PJU"
+gcloud run jobs create "$PJU" --project $PROJECT --region $REGION --image "$GWIMG" --service-account $PROBESA --network default --subnet default --vpc-egress private-ranges-only --max-retries 0 --task-timeout 60 --command python --args "$PROBE" && gcloud run jobs execute "$PJU" --project $PROJECT --region $REGION --wait
+gcloud logging read 'resource.type="cloud_run_job" AND resource.labels.job_name="'"$PJU"'"' --project $PROJECT --freshness 15m --limit 20 --format='value(textPayload)' | grep '^result'
+gcloud run jobs delete "$PJU" --project $PROJECT --region $REGION --quiet
 ```
-**Pass: the execution FAILS and its message says `exit(3)`.** `exit(4)` = refused: the deny rule is missing — stop and check the rules above. `exit(0)` = the port is open to a workload without the tag — stop. The same job created with
-`--network-tags support-gateway-dev` is the positive control after step 5 (it must exit 0).
+**Pass: the log line is `result <n> TIMEOUT`** (the execution failed with `exit(3)`). `gcloud`'s own status after `--wait` only says «failed» — it is not the container's exit code, so the log line is what is read (if it is not there yet, wait a few seconds and read again).
+**`REFUSED`: the deny rule is missing — stop** and check the rules above. **`REACHED`: the port is open to a workload without the tag — stop.** **`OTHER`: the job could not reach the network at all — nothing is proven; find out why before step 5.**
+The same job created with `--network-tags support-gateway-dev` (and its own unique name) is the positive control after step 5 (it must print `REACHED`). When both controls are done: `gcloud iam service-accounts delete $PROBESA --project $PROJECT --quiet`.
 
 The tag reaches the gateway's revisions through the pipeline change that moves the database (`--network-tags support-gateway-dev` on its deploy); until then nothing is allowed — fail closed. Undo: `gcloud compute firewall-rules delete $VM-gateway-db-allow $VM-gateway-db-deny --project $PROJECT` · `gcloud compute addresses delete $VM-internal --region $REGION --project $PROJECT`.
 
