@@ -44,6 +44,13 @@ def flag(name, default=None):
     return default
 def has(name): return name in a
 j = " ".join(a)
+REH_NAME = "sprintable-rehearsal-forwarder"
+if a[:3] == ["run", "services", "describe"] and a[3] == REH_NAME:
+    if not w.get("reh_exists"): sys.stderr.write("not found\n"); sys.exit(1)
+    if "labels.rehearsal" in flag("--format", ""): sys.stdout.write(w.get("reh_label", ""))
+    sys.exit(0)
+if a[:3] == ["run", "services", "describe"] and a[3] != "sprintable-backend-prod":
+    sys.stderr.write("the fake knows one service besides the rehearsal one: " + a[3] + "\n"); sys.exit(1)
 if a[:3] == ["run", "services", "describe"]:
     fmt = flag("--format", "")
     if fmt == "json":
@@ -58,7 +65,7 @@ if a[:3] == ["run", "revisions", "describe"]:
     else: sys.stdout.write(w["revisions"][name]["spec"]["containers"][0]["image"])
     sys.exit(0)
 if a[:3] == ["run", "services", "delete"]:
-    sys.exit(0)
+    w["reh_exists"] = False; save(); sys.exit(0)
 if a[:3] == ["run", "services", "update-traffic"]:
     spec = flag("--to-revisions")
     rev = spec.split("=")[0]
@@ -66,7 +73,8 @@ if a[:3] == ["run", "services", "update-traffic"]:
     w["traffic"] = [{"revisionName": rev, "percent": 100}] + [dict(t, percent=0) for t in tagged]
     save(); sys.exit(0)
 if a[:2] == ["run", "deploy"] and not flag("--revision-suffix"):
-    sys.exit(0)   # the throwaway service of the rehearsal: made, nothing else is modelled
+    w["reh_exists"] = True; w["reh_label"] = (flag("--labels") or "").replace("rehearsal=", ""); save()   # the throwaway service of the rehearsal: made with its label
+    sys.exit(0)
 if a[:2] == ["run", "deploy"]:
     suffix = flag("--revision-suffix"); name = a[2] + "-" + suffix
     base = w["revisions"][w["template_from"]]
@@ -144,11 +152,15 @@ def cr():  return {"status": "ok", "db": "ok", "commit_sha": w["real_sha"], "rev
 if host == "api.sprintable.ai":
     out, code = (dict(vm(), commit_sha=w.get("api_sha", w["vm_sha"]), status=w.get("api_status", w.get("vm_status", "ok"))), 200)
 else:
-    public = "allUsers" in w["invokers"] or authed
+    public = "allUsers" in w["invokers"] or authed or (traffic_rev == w["forwarder"] and w.get("open_on_switch", False))
     served = dict(vm(), status=w.get("fwd_authed_status" if authed else "fwd_public_status", w.get("vm_status", "ok"))) if traffic_rev == w["forwarder"] else cr()
+    if traffic_rev == w["forwarder"] and not authed:
+        served = dict(served, db=w.get("fwd_public_db", served["db"]), commit_sha=w.get("fwd_public_sha", served["commit_sha"]))
     if host.startswith("fwd---"):
         # the tag reaches the forwarder, which hands the request to api.sprintable.ai (the pass-through of step 3), which hands it to the main address
-        served = {"status": "ok", "db": "ok", "commit_sha": w["real_sha"], "revision": w.get("tag_revision", w["real"])} if not w.get("loop") else None
+        tagged = [t for t in w["traffic"] if t.get("tag")][0]["revisionName"]
+        runs_forwarder = w["revisions"][tagged]["spec"]["containers"][0]["image"] == w["built_digest"]
+        served = {"status": "ok", "db": "ok", "commit_sha": w["real_sha"], "revision": w.get("tag_revision", w["real"])} if (runs_forwarder and not w.get("loop")) else None
         public = True
     if not public: out, code = None, 403
     else: out, code = served, (200 if served is not None else 504)
@@ -233,7 +245,7 @@ def test_4c_a_builds_next_to_the_backends_image_pins_the_digest_and_makes_an_acc
 
 
 def test_4c_a_takes_the_registry_from_the_environment_when_it_is_set_for_the_rehearsal(tmp_path: Path) -> None:
-    p, calls, _, _ = _go(A(), tmp_path, extra={"REPO": str(_ROOT), "AR": "asia-northeast3-docker.pkg.dev/other/registry"})
+    p, calls, _, _ = _go(A(), tmp_path, extra={"REPO": str(_ROOT), "FWD_AR": "asia-northeast3-docker.pkg.dev/other/registry"})
     assert "asia-northeast3-docker.pkg.dev/other/registry/sprintable-forwarder:20261102" in _verbs(calls, "builds submit")[0], "the throwaway runs a public image: its registry is not the backend's"
 
 
@@ -435,8 +447,12 @@ def test_8c_does_not_open_when_the_service_is_not_closed_or_the_forwarder_does_n
                          ("only-the-forwarder-answer-is-unhealthy", lambda w: w.update(fwd_authed_status="error")), ("only-the-api-answer-is-unhealthy", lambda w: w.update(api_status="error"))):
         p, calls, world = _e8(_fresh(tmp_path, name), mutate=mutate)
         assert _last(p, "forwarder:") == "forwarder: closed" and "allUsers" not in world["invokers"] and not _verbs(calls, "add-iam-policy-binding"), (name, "a VM that cannot work is not opened to the old address")
-    p, calls, world = _e8(_fresh(tmp_path, "public-answer-unhealthy"), mutate=lambda w: w.update(fwd_public_status="error"))
-    assert _last(p, "forwarder:") == "forwarder: opened", "once opened, an answer that is not healthy is not a proof (the undo is block 1 of step 12)"
+    for name, mutate in (("status", lambda w: w.update(fwd_public_status="error")), ("db", lambda w: w.update(fwd_public_db="error: OperationalError")), ("build", lambda w: w.update(fwd_public_sha="3" * 40))):
+        p, calls, world = _e8(_fresh(tmp_path, "public-" + name), mutate=mutate)
+        assert _last(p, "forwarder:") == "forwarder: opened", (name, "once opened, an answer that is not healthy and of the same build is not a proof (the undo is block 1 of step 12)")
+    # the 403 that is read AFTER the traffic moved: a move that opens the service is a stop before the binding is added
+    p, calls, world = _e8(_fresh(tmp_path, "opens-by-itself"), mutate=lambda w: w.update(open_on_switch=True))
+    assert _last(p, "forwarder:") == "forwarder: switched" and not _verbs(calls, "print-identity-token") and not _verbs(calls, "add-iam-policy-binding"), "the traffic move must not have opened the service"
     p, calls, world = _e8(_fresh(tmp_path, "samerevision"), mutate=lambda w: w.update(vm_revision=REAL))
     assert _last(p, "forwarder:") == "forwarder: closed" and "allUsers" not in world["invokers"], "an answer with the real revision's name is the real backend, not the VM"
     p, calls, world = _e8(_fresh(tmp_path, "fail-add"), extra={"FAIL": "add-iam-policy-binding"})
@@ -522,12 +538,23 @@ def test_the_rehearsal_reads_prods_network_shape_makes_a_closed_service_and_stop
     noting = {"revisions": {REAL: _rev("x@y.iam.gserviceaccount.com", [], True, True, False)}}
     p, calls, _, _ = _go(a1, _fresh(tmp_path, "a1-none"), state=noting)
     assert not _verbs(calls, "run deploy"), "no network shape, no throwaway"
+    # a service of that name exists already (an old rehearsal, or another service): it is left alone
+    p, calls, world, _ = _go(a1, _fresh(tmp_path, "a1-exists"), state={"reh_exists": True, "reh_label": "something-else"})
+    assert not _verbs(calls, "run deploy") and "exists already" in p.stdout and world["reh_label"] == "something-else"
+    # the throwaway carries the label that A4 asks for
+    _, _, world, _ = _go(a1, _fresh(tmp_path, "a1-label"))
+    assert world["reh_exists"] is True and world["reh_label"] == "forwarder-4c"
+    # the read of the network shape is of prod's backend (the fake answers for no other service: a read of $REH would print an empty shape)
+    assert "network: · subnet: · tags:" not in p.stdout
 
 
 def test_the_rehearsal_deletes_only_a_service_with_its_name(tmp_path: Path) -> None:
     a4 = _block_with("case \"$REH\" in sprintable-rehearsal-forwarder)")
-    p, calls, _, _ = _go(a4, _fresh(tmp_path, "ok"), extra={"REH": "sprintable-rehearsal-forwarder"})
-    assert _verbs(calls, "services delete") and "sprintable-rehearsal-forwarder" in _verbs(calls, "services delete")[0]
+    p, calls, world, _ = _go(a4, _fresh(tmp_path, "ok"), extra={"REH": "sprintable-rehearsal-forwarder"}, state={"reh_exists": True, "reh_label": "forwarder-4c"})
+    assert _verbs(calls, "services delete") and "sprintable-rehearsal-forwarder" in _verbs(calls, "services delete")[0] and world["reh_exists"] is False
+    for name, state in (("unlabelled", {"reh_exists": True, "reh_label": ""}), ("other-label", {"reh_exists": True, "reh_label": "keep-me"}), ("missing", {"reh_exists": False})):
+        p, calls, world, _ = _go(a4, _fresh(tmp_path, "no-" + name), extra={"REH": "sprintable-rehearsal-forwarder"}, state=state)
+        assert not _verbs(calls, "services delete") and "refused" in p.stdout, name
     for name in ("sprintable-backend-prod", "", "sprintable-rehearsal-forwarder-x"):
         p, calls, _, _ = _go(a4, _fresh(tmp_path, "no-" + (name or "empty")), extra={"REH": name})
         assert not _verbs(calls, "services delete") and "refused" in p.stdout, name
@@ -535,9 +562,11 @@ def test_the_rehearsal_deletes_only_a_service_with_its_name(tmp_path: Path) -> N
 
 def test_the_rehearsal_measures_the_header_and_lists_what_the_revision_keeps() -> None:
     app = SHEET.split("## Appendix A.")[1]
-    for token in ("**A1.", "**A2.", "**A3.", "**A4.", "`forwarder: noroles`", "X-Serverless-Authorization", "`run.googleapis.com/network-interfaces`", "(`WINDOW=rehearsal`)", "`AR` set by hand"):
+    for token in ("**A1.", "**A2.", "**A3.", "**A4.", "`forwarder: noroles`", "X-Serverless-Authorization", "`run.googleapis.com/network-interfaces`", "(`WINDOW=rehearsal`)", "`FWD_AR` set by hand"):
         assert token in app, token
     assert "does not clear it" in SHEET and "Direct VPC attachment" in SHEET
+    assert "there is no fallback to `Authorization`" in SHEET and "is a **stop**: 8c is not run with the token in `Authorization`" in SHEET, "a token that is not meant for the VM must not be sent to it"
+    assert "the header is `Authorization`" not in SHEET
 
 
 # ── the text, and the pipeline premise ──────────────────────────────────────────────────────────────────────────────────────────────────────
