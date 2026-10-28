@@ -812,6 +812,37 @@ def test_a_tagged_serving_revision_with_a_sidecar_from_elsewhere_is_unresolved()
     assert not gate.collect(service, [ours], hosts={AR_HOST}).problems  # positive control: the same revision without the sidecar is fine
 
 
+def test_hub_short_names_follow_the_docker_name_rule():
+    def hub(value):
+        got = gate._hub_short(value, "w")
+        return (got["image"], got["ref"]) if got else None
+
+    assert hub("gotenberg/gotenberg:8.36") == ("docker.io/gotenberg/gotenberg", ":8.36")
+    assert hub("nginx") == ("docker.io/library/nginx", "") and hub("nginx:1.25") == ("docker.io/library/nginx", ":1.25")
+    assert hub("library/redis@sha256:" + "a" * 64) == ("docker.io/library/redis", "@sha256:" + "a" * 64)
+    # a first path part with a dot, a port or `localhost` is a HOST: not Docker Hub, left unrecognised (and so a failure)
+    for host_named in ("registry.example.com/team/app:1", "host:5000/x", "localhost/x", "localhost:5000/x:1", "my.host/x"):
+        assert hub(host_named) is None, host_named
+    for not_a_name in ("", "Foo/Bar", "a b", None, {"name": "x"}, 7):  # uppercase, spaces, non-strings: not a Docker name
+        assert hub(not_a_name) is None, not_a_name
+
+
+def test_the_real_office_converter_shape_is_read_not_failed(tmp_path, capsys):
+    """PO's real dev dump (10-28): the service spec carries `gotenberg/gotenberg:8.36` (Docker Hub, no host) while its serving revision runs `mirror.gcr.io/gotenberg/gotenberg@sha256:…`. Before this fix: «image 값을 알아보지 못함» + «이미지 참조 못 찾음», exit 3"""
+    digest = "sha256:" + "d" * 64
+    d = Dumps(tmp_path)
+    d.services = d.services + [{"metadata": {"name": "office-converter-dev"}, "status": {"traffic": [{"revisionName": "oc-1"}], "latestReadyRevisionName": "oc-1"},
+                                "spec": {"template": {"spec": {"containers": [{"image": "gotenberg/gotenberg:8.36"}]}}}}]
+    d.revisions = d.revisions + [{"metadata": {"name": "oc-1"}, "spec": {"containers": [{"image": f"mirror.gcr.io/gotenberg/gotenberg@{digest}"}]},
+                                  "status": {"imageDigest": f"mirror.gcr.io/gotenberg/gotenberg@{digest}"}}]
+    assert gate.main(d.argv()) == 0 and d.out.exists()
+    out = capsys.readouterr().out
+    assert "범위 밖 2건" in out and "docker.io/gotenberg/gotenberg:8.36" in out and f"mirror.gcr.io/gotenberg/gotenberg@{digest}" in out
+    # the same dump with a host-named unknown registry is still a failure (positive control: the fix does not open the door)
+    d.services[-1]["spec"]["template"]["spec"]["containers"][0]["image"] = "registry.example.com/gotenberg/gotenberg:8.36"
+    assert gate.main(d.argv()) == 3 and not d.out.exists()
+
+
 def test_a_service_whose_only_image_is_off_our_registry_is_read_not_missing():
     hello = _service("hello", "hello-1", "gcr.io/cloudrun/hello")
     rev = {"metadata": {"name": "hello-1"}, "spec": {"containers": [{"image": "gcr.io/cloudrun/hello"}]}, "status": {"imageDigest": "gcr.io/cloudrun/hello@sha256:" + "b" * 64}}

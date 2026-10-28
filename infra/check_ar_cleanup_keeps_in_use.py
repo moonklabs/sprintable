@@ -38,6 +38,8 @@ exit code: 0=지움 0 · 1=사용 중 이미지가 지워진다 · 2=입력 오�
   · 다른 호스트의 AR 참조(다른 지역) · 알려진 외부 레지스트리(gcr.io · Docker Hub · ghcr.io · quay.io · mcr.microsoft.com · registry.k8s.io · ECR · ACR)
   → 사용 중 목록에 넣지 않고, 출력에 «범위 밖 N건 + 이유 + 어디서 나왔나»로 보인다. 컨테이너 옆에 범위 밖 이미지가 있는 서빙 리비전은 `status.imageDigest`가 누구 것인지 모르므로 불완전(exit 3)이다.
   · **우리 호스트인데 덤프에 없는 저장소 · 이미지는 범위 밖이 아니다** — 여전히 exit 3(그 저장소의 --images를 더한다). 알아보지 못하는 레지스트리 주소도 범위 밖으로 세지 않는다(모르면 실패한다).
+  · JSON의 `image` 값이 호스트 없는 Docker 이름(`gotenberg/gotenberg:8.36` · `nginx`)이면 Docker Hub로 읽어 범위 밖에 센다 — Docker의 이름 규칙: 첫 경로 조각에 `.`도 `:`도 없고 `localhost`도 아니면 호스트가 아니다.
+    우리 AR은 늘 호스트가 붙으므로 이 이름이 우리 이미지를 가리는 일은 없다. `registry.example.com/x` · `host:5000/x` · `localhost/x`는 호스트가 있는 이름이라 여기 들지 않는다(아래 줄).
   · JSON의 `image` 값이 우리 AR 주소도 알려진 외부 레지스트리도 아니면 exit 3(다른 곳에 외부 주소 한 줄이 있어도 가려지지 않는다). `status.imageDigest`는 맨 digest 또는 우리 AR 꼴일 때만 «쥔 digest»로 받는다.
   · --extra 문자열 속의 «알아보지 못하는 레지스트리 주소»(`<도메인>/<경로>:<태그>`)는 ⚠️ 경고로 «보이기만» 한다 — 범위 밖으로도, 읽은 것으로도 세지 않는다.
 이미지 참조가 없는 --extra 하나는 «보이는 경고»(⚠️)이고 통과를 막지 않는다(이미지를 쓰지 않는 템플릿이 있을 수 있다). 다만 --extra가 «전부» 그렇다면 VM이 당기는 이미지를 하나도 못 본 것이라 exit 3이다.
@@ -217,11 +219,44 @@ def _image_values(node: Any) -> Iterable[Any]:
             yield from _image_values(value)
 
 
+# 호스트가 없는 Docker 이름(`gotenberg/gotenberg:8.36` · `nginx`): Docker의 이름 규칙은 «첫 경로 조각에 `.`도 `:`도 없고 `localhost`도 아니면 호스트가 아니다 → docker.io(Docker Hub)»다.
+# `registry.example.com/x` · `host:5000/x` · `localhost/x`는 호스트가 있는 이름이라 여기 들지 않는다(모르는 레지스트리로 남아 실패한다).
+_HUB_SHORT = re.compile(
+    r"(?P<path>(?:[a-z0-9]+(?:[._-][a-z0-9]+)*/)*[a-z0-9]+(?:[._-][a-z0-9]+)*)(?::(?P<tag>[A-Za-z0-9_][A-Za-z0-9_.-]*))?(?:@(?P<digest>sha256:[0-9a-f]{64}))?"
+)
+
+
+def _hub_short(value: Any, where: str) -> Outside | None:
+    """`image` 값이 호스트 없는 Docker 이름이면 «알려진 외부(Docker Hub)»로 읽은 범위 밖 참조, 아니면 None. 우리 AR은 늘 호스트(`…-docker.pkg.dev`)가 붙으므로 Docker Hub 이름이 우리 이미지를 가리는 일이 없다."""
+    if not isinstance(value, str):
+        return None
+    m = _HUB_SHORT.fullmatch(value.strip())
+    if not m:
+        return None
+    path = m["path"]
+    if "/" in path and ("." in path.split("/")[0] or path.split("/")[0] == "localhost"):
+        return None
+    return {"image": "docker.io/" + (path if "/" in path else f"library/{path}"), "ref": f"@{m['digest']}" if m["digest"] else (f":{m['tag']}" if m["tag"] else ""),
+            "reason": "알려진 외부 레지스트리(Docker Hub — 호스트 없는 짧은 이름)", "where": where}
+
+
+def _scan_blob(blob: Any, where: str, hosts: set[str]) -> tuple[list[Ref], list[Outside]]:
+    """`_scan`(문자열 속 참조)에, `image` 키의 «호스트 없는 Docker 이름»을 범위 밖(Docker Hub)으로 더한다."""
+    found, out = _scan(json.dumps(blob), where, hosts)
+    seen = {(o["image"], o["ref"]) for o in out}
+    for value in _image_values(blob):
+        short = _hub_short(value, where)
+        if short and (short["image"], short["ref"]) not in seen:
+            seen.add((short["image"], short["ref"]))
+            out.append(short)
+    return found, out
+
+
 def _unknown_images(blob: Any, where: str) -> list[str]:
     """`image` 값 중 우리 AR 주소도 알려진 외부 레지스트리도 아닌 것(문자열이 아닌 값 포함) — 그런 이미지가 «있다»는 사실이 다른 곳의 외부 주소 한 줄에 가려지지 않게 실패로 올린다."""
     problems: dict[str, None] = {}
     for value in _image_values(blob):
-        if isinstance(value, str) and (refs_in(value) or external_refs_in(value)):
+        if isinstance(value, str) and (refs_in(value) or external_refs_in(value) or _hub_short(value, where)):
             continue
         shown = value[:80] if isinstance(value, str) else json.dumps(value, ensure_ascii=False)[:80]
         problems[f"{where}의 image 값 {shown!r}을 알아보지 못함(우리 AR 주소도 알려진 외부 레지스트리도 아니다) — 모르면 실패한다"] = None
@@ -310,7 +345,7 @@ def collect(
     problems: list[str] = []
     outside: list[Outside] = []
     for svc in _items(services) if services is not None else []:
-        found, out = _scan(json.dumps(svc), f"서비스 {_name_of(svc) or '?'}", host_set)
+        found, out = _scan_blob(svc, f"서비스 {_name_of(svc) or '?'}", host_set)
         if not found and not out:
             problems.append(f"서비스 {_name_of(svc) or '?'}에서 이미지 참조를 못 찾음")
         problems += _unknown_images(svc, f"서비스 {_name_of(svc) or '?'}")
@@ -325,7 +360,7 @@ def collect(
                 problems.append(f"서빙 중 리비전 {name}이 리비전 덤프에 없음(덤프가 잘렸거나 다른 지역)")
             for rev in revs:
                 if _name_of(rev) in serving:
-                    found, out = _scan(json.dumps(rev), f"서빙 중 리비전 {_name_of(rev) or '?'}", host_set)
+                    found, out = _scan_blob(rev, f"서빙 중 리비전 {_name_of(rev) or '?'}", host_set)
                     if not found and not out:
                         problems.append(f"서빙 중 리비전 {_name_of(rev)}에서 이미지 참조를 못 찾음")
                     elif reason := _unresolved_reason(rev, found, out):
@@ -337,14 +372,14 @@ def collect(
         else:
             warnings.append("서비스 JSON에서 서빙 중 리비전을 못 읽어 모든 리비전을 사용 중으로 셌다(안전한 쪽).")
             for rev in revs:
-                found, out = _scan(json.dumps(rev), f"리비전 {_name_of(rev) or '?'}", host_set)
+                found, out = _scan_blob(rev, f"리비전 {_name_of(rev) or '?'}", host_set)
                 if reason := _unresolved_reason(rev, found, out):
                     problems.append(f"리비전 {_name_of(rev) or '?'}: {reason}(서빙 여부를 몰라 모든 리비전을 센다)")
                 problems += _unknown_images(rev, f"리비전 {_name_of(rev) or '?'}")
                 refs += found
                 outside += out
     for job in _items(jobs) if jobs is not None else []:
-        found, out = _scan(json.dumps(job), f"job {_name_of(job) or '?'}", host_set)
+        found, out = _scan_blob(job, f"job {_name_of(job) or '?'}", host_set)
         if not found and not out:
             problems.append(f"job {_name_of(job) or '?'}에서 이미지 참조를 못 찾음")
         problems += _unknown_images(job, f"job {_name_of(job) or '?'}")
@@ -354,7 +389,7 @@ def collect(
     extra_read = False
     for n, blob in enumerate(extra_blobs, 1):
         text = json.dumps(blob)
-        found, out = _scan(text, f"--extra {n}번째", host_set)
+        found, out = _scan_blob(blob, f"--extra {n}번째", host_set)
         problems += _unknown_images(blob, f"--extra {n}번째")
         for unknown in _unknown_registry_refs(text):
             # 문자열 속의 모르는 주소는 «보이게만» 한다(범위 밖으로도, 읽은 것으로도 세지 않는다) — 아래 «읽었나» 판정은 우리 주소와 알려진 외부 주소만으로 한다
