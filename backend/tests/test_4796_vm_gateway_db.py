@@ -436,7 +436,7 @@ def test_the_compose_service_is_a_second_postgres_of_its_own_published_on_the_pr
     compose = doc["services"]
     gw = compose["gateway-db"]
     assert gw["image"] == compose["db"]["image"] == "pgvector/pgvector:pg15", "the image already on the VM, same major as the application's"
-    assert gw["profiles"] == ["gateway-db"] and gw["restart"] == "unless-stopped"
+    assert gw["profiles"] == ["gateway-db"] and gw["restart"] == "no"
     assert gw["ports"] == ["${GATEWAY_DB_BIND:-127.0.0.1}:5432:5432"], "the private address the deployer reads, or the loopback address — never all interfaces"
     assert gw["volumes"][0] == "${DATA_DIR:?}/gateway-postgres:/var/lib/postgresql/data" and compose["db"]["volumes"] == ["${DATA_DIR:?}/postgres:/var/lib/postgresql/data"], "its own data folder"
     assert "max_connections=30" in gw["command"] and "max_connections=60" in compose["db"]["command"], "its own budget"
@@ -717,6 +717,9 @@ def test_the_firewall_script_adds_its_rule_once_and_names_the_bridge_compose_giv
     ipt = bin_dir / "iptables"
     ipt.write_text('#!/bin/sh\necho "iptables $*" >> "$LOG"\ncase "$1" in -C) [ -f "$STATE" ] ;; -I) touch "$STATE" ;; esac\n')
     ipt.chmod(ipt.stat().st_mode | stat.S_IEXEC)
+    dk = bin_dir / "docker"
+    dk.write_text("#!/bin/sh\nexit 0\n")
+    dk.chmod(dk.stat().st_mode | stat.S_IEXEC)
     env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "LOG": str(tmp_path / "log"), "STATE": str(state), "HOME": str(tmp_path)}
     for _ in range(2):
         assert subprocess.run(["bash", str(_VM / "bin/gateway-db-firewall.sh")], env=env, capture_output=True, text=True, timeout=30).returncode == 0
@@ -826,3 +829,69 @@ def test_the_deploy_service_cannot_run_without_the_metadata_firewall_unit() -> N
 def test_the_runbook_states_the_one_case_in_which_a_deploy_stops_the_gateway_database() -> None:
     rb = (_VM / "RUNBOOK.md").read_text()
     assert "except when the metadata server answers from inside it" in rb and "**requires** `sprintable-gateway-db-firewall.service`" in rb
+
+
+def test_a_gateway_database_that_will_not_stop_is_killed_and_if_that_fails_the_failure_says_it_is_still_running(world) -> None:
+    world.publish()
+    world.runner.metadata_rc = 0
+    world.runner.fail_on[" stop gateway-db"] = 1
+    assert world.dep.run_once() == "failed"
+    verbs = [c["args"][-2] for c in _compose_calls(world) if c["args"][-1] == "gateway-db" and c["args"][-2] in ("stop", "kill")]
+    assert verbs == ["stop", "kill"] and "which was stopped" in S._state(world, "failed.json")["detail"]
+    (world.cfg.install_dir.parent / "o").mkdir()
+    other = _make_world(world.cfg.install_dir.parent / "o")
+    other.publish("d" * 40)
+    other.runner.metadata_rc = 0
+    other.runner.fail_on[" stop gateway-db"] = 1
+    other.runner.fail_on[" kill gateway-db"] = 1
+    assert other.dep.run_once() == "failed"
+    assert "COULD NOT BE STOPPED" in S._state(other, "failed.json")["detail"] and "still running" in S._state(other, "failed.json")["detail"]
+
+
+def test_the_gateway_database_container_has_no_restart_policy_so_that_only_the_firewall_unit_starts_it() -> None:
+    gw = yaml.safe_load((_VM / "compose.yml").read_text())["services"]["gateway-db"]
+    assert gw["restart"] == "no"
+    unit = (_VM / "systemd/sprintable-gateway-db-firewall.service").read_text()
+    assert re.search(r"^WantedBy=multi-user\.target$", unit, re.M) and re.search(r"^PartOf=docker\.service$", unit, re.M), "it runs at every boot and again whenever docker restarts"
+
+
+def _firewall_world(tmp_path: Path, container_id: str, iptables_ok: bool = True):
+    import stat
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    ipt = bin_dir / "iptables"
+    ipt.write_text('#!/bin/sh\necho "iptables $*" >> "$LOG"\n' + ('case "$1" in -C) [ -f "$STATE" ] ;; -I) touch "$STATE" ;; esac\n' if iptables_ok else 'exit 1\n'))
+    dk = bin_dir / "docker"
+    dk.write_text('#!/bin/sh\necho "docker $*" >> "$LOG"\ncase "$1" in ps) printf "%s" "$CID" ;; esac\n')
+    for f in (ipt, dk):
+        f.chmod(f.stat().st_mode | stat.S_IEXEC)
+    return {"PATH": f"{bin_dir}:/usr/bin:/bin", "LOG": str(tmp_path / "log"), "STATE": str(tmp_path / "rules"), "HOME": str(tmp_path), "CID": container_id}
+
+
+def test_the_firewall_unit_starts_the_gateway_database_only_after_the_rule_is_in_place(tmp_path: Path) -> None:
+    import subprocess
+    env = _firewall_world(tmp_path, "gwc999")
+    assert subprocess.run(["bash", str(_VM / "bin/gateway-db-firewall.sh")], env=env, capture_output=True, text=True, timeout=30).returncode == 0
+    calls = (tmp_path / "log").read_text().splitlines()
+    rule = next(i for i, c in enumerate(calls) if c.startswith("iptables -I"))
+    start = next(i for i, c in enumerate(calls) if c == "docker start gwc999")
+    assert rule < start
+    ps = next(c for c in calls if c.startswith("docker ps"))
+    assert "-a" in ps and "label=com.docker.compose.service=gateway-db" in ps and "label=com.docker.compose.project=sprintable" in ps
+
+
+def test_nothing_is_started_when_the_rule_could_not_be_put_in_place_or_when_there_is_no_container(tmp_path: Path) -> None:
+    import subprocess
+    env = _firewall_world(tmp_path / "a", "gwc999", iptables_ok=False) if (tmp_path / "a").mkdir() is None else None
+    assert subprocess.run(["bash", str(_VM / "bin/gateway-db-firewall.sh")], env=env, capture_output=True, text=True, timeout=30).returncode != 0
+    assert "docker start" not in (tmp_path / "a" / "log").read_text() if (tmp_path / "a" / "log").exists() else True
+    (tmp_path / "b").mkdir()
+    env2 = _firewall_world(tmp_path / "b", "")
+    assert subprocess.run(["bash", str(_VM / "bin/gateway-db-firewall.sh")], env=env2, capture_output=True, text=True, timeout=30).returncode == 0
+    assert "docker start" not in (tmp_path / "b" / "log").read_text()
+
+
+def test_the_runbook_states_boot_order_the_stuck_container_and_the_shut_door() -> None:
+    rb = (_VM / "RUNBOOK.md").read_text()
+    for token in ("its restart policy is «no»", "and only THEN starts it", "COULD NOT BE STOPPED", "first **shuts the door**", "leaves the door shut and prints the one command that opens it"):
+        assert token in rb, token

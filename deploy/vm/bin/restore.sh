@@ -27,23 +27,34 @@ if [ "$(db_service)" = db ] && [ -n "$(docker ps -q --filter label=com.docker.co
   echo "the backend is running — stop it first (docker compose stop backend frontend) so nothing writes during the restore" >&2
   exit 1
 fi
-if [ "$(db_service)" = gateway-db ]; then
-  # the gateway runs on Cloud Run, not here: no container can be looked at, so the open sessions on its database are what shows it is still writing (a wipe would cut them and lose what they wrote)
-  sessions="$(in_db psql -U "$user" -d postgres -X -A -t -c "select count(*) from pg_stat_activity where datname = '$name' and pid <> pg_backend_pid()")"
-  if [ "$sessions" != "0" ]; then
-    echo "$sessions session(s) are open on $name — the gateway is still connected: stop its Cloud Run traffic and wait until the sessions are gone (RUNBOOK section 13) before restoring" >&2
-    exit 1
-  fi
-fi
 existing="$(in_db psql -U "$user" -d "$name" -X -A -t -c "select count(*) from information_schema.tables where table_schema not in ('pg_catalog','information_schema')")"
 if [ "$existing" != "0" ]; then
   if [ "${RESTORE_WIPE:-}" != "yes" ]; then
     echo "database $name already has $existing tables — set RESTORE_WIPE=yes to drop and recreate it" >&2
     exit 1
   fi
-  if [ -n "$role" ]; then   # the gateway's database: owned by its application role, only that role may connect (what the first start of the server set up)
+fi
+door_closed=""
+if [ -n "$role" ]; then
+  # the gateway runs on Cloud Run, not here: no container can be looked at. So the door is shut first (the role may no longer CONNECT: nobody new gets in), and then the open sessions are counted — they are what shows the gateway is still writing.
+  # The door stays shut through the wipe and the restore and is opened after it; a restore that fails leaves it shut (the message below says how to open it).
+  open_door() { in_db psql -U "$user" -d postgres -X -q -v ON_ERROR_STOP=1 -c "GRANT CONNECT ON DATABASE \"$name\" TO \"$role\""; }
+  say_closed() { echo "the database $name is CLOSED to the gateway (restore did not finish). When it is right to open it: docker exec <gateway-db container> psql -U $user -d postgres -c 'GRANT CONNECT ON DATABASE \"$name\" TO \"$role\"'" >&2; }
+  trap 'rm -rf "$work"; [ -z "$door_closed" ] || say_closed' EXIT
+  in_db psql -U "$user" -d postgres -X -q -v ON_ERROR_STOP=1 -c "REVOKE CONNECT ON DATABASE \"$name\" FROM \"$role\""
+  door_closed=yes
+  sessions="$(in_db psql -U "$user" -d postgres -X -A -t -c "select count(*) from pg_stat_activity where datname = '$name' and pid <> pg_backend_pid()")"
+  if [ "$sessions" != "0" ]; then
+    open_door   # nothing was changed: the door is opened again
+    door_closed=""
+    echo "$sessions session(s) are open on $name — the gateway is still connected: stop its Cloud Run traffic and wait until the sessions are gone (RUNBOOK section 13) before restoring" >&2
+    exit 1
+  fi
+fi
+if [ "$existing" != "0" ]; then
+  if [ -n "$role" ]; then   # the gateway's database: owned by its application role; nobody (the role included) may connect until the restore is done, and nobody else ever (what the first start of the server set up)
     in_db psql -U "$user" -d postgres -X -q -v ON_ERROR_STOP=1 -c "DROP DATABASE \"$name\" WITH (FORCE)" -c "CREATE DATABASE \"$name\" OWNER \"$role\"" \
-      -c "REVOKE ALL ON DATABASE \"$name\" FROM PUBLIC" -c "GRANT CONNECT ON DATABASE \"$name\" TO \"$role\""
+      -c "REVOKE ALL ON DATABASE \"$name\" FROM PUBLIC" -c "REVOKE CONNECT ON DATABASE \"$name\" FROM \"$role\""
   else
     in_db psql -U "$user" -d postgres -X -q -v ON_ERROR_STOP=1 -c "DROP DATABASE \"$name\" WITH (FORCE)" -c "CREATE DATABASE \"$name\""
   fi
@@ -53,4 +64,8 @@ log "restore start"
 start="$(date +%s)"
 in_db pg_restore -U "$user" -d "$name" --no-owner --no-privileges --exit-on-error --single-transaction ${restore_role[@]+"${restore_role[@]}"} < "$src"
 log "restore done in $(( $(date +%s) - start )) s"
+if [ -n "$role" ]; then
+  open_door
+  door_closed=""
+fi
 "$here/rowcounts.sh" "$name"

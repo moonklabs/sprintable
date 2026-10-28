@@ -252,7 +252,7 @@ case "$1" in
       *pg_dump*) head -c "${FAKE_DUMP_BYTES:-5000}" /dev/zero ;;
       *"pg_restore --list"*) cat > /dev/null; [ -n "${FAKE_LIST_NODATA:-}" ] || echo "; 1; 1259 16385 TABLE DATA public t u"; exit "${FAKE_LIST_RC:-0}" ;;
       *"-A -t -F"*) cat > /dev/null; printf 'a\t3\nb\t4\n'; [ -z "${FAKE_COUNTS_JUNK:-}" ] || printf 'NOTICE: something\n\n' ;;
-      *pg_restore*) cat > /dev/null ;;
+      *pg_restore*) cat > /dev/null; exit "${FAKE_RESTORE_RC:-0}" ;;
       *GATEWAY_APP_USER*) printf '%s' "${FAKE_APP_ROLE-support_gw}" ;;
       *POSTGRES_USER*) printf sprintable ;;
       *POSTGRES_DB*) printf '%s' "${FAKE_DB_NAME-sprintable}" ;;
@@ -732,7 +732,10 @@ def test_a_wiped_gateway_database_comes_back_owned_by_the_role_and_closed_to_eve
     p, log = fakebin("restore.sh", str(dump), DB_SERVICE="gateway-db", FAKE_EXISTING="7", RESTORE_WIPE="yes")
     assert p.returncode == 0, p.stderr
     wipe = next(l for l in log.splitlines() if "DROP DATABASE" in l)
-    assert 'CREATE DATABASE "sprintable" OWNER "support_gw"' in wipe and 'REVOKE ALL ON DATABASE "sprintable" FROM PUBLIC' in wipe and 'GRANT CONNECT ON DATABASE "sprintable" TO "support_gw"' in wipe, wipe
+    assert 'CREATE DATABASE "sprintable" OWNER "support_gw"' in wipe and 'REVOKE ALL ON DATABASE "sprintable" FROM PUBLIC' in wipe and 'REVOKE CONNECT ON DATABASE "sprintable" FROM "support_gw"' in wipe, wipe
+    assert "GRANT" not in wipe, "the role is let in only after the restore"
+    lines = log.splitlines()
+    assert 'GRANT CONNECT ON DATABASE "sprintable" TO "support_gw"' in lines[-3] + lines[-2] + lines[-1] or any('GRANT CONNECT ON DATABASE "sprintable" TO "support_gw"' in l for l in lines)
     main, log2 = fakebin("restore.sh", str(dump), FAKE_EXISTING="7", RESTORE_WIPE="yes")
     wipe2 = next(l for l in log2[len(log):].splitlines() if "DROP DATABASE" in l)
     assert "OWNER" not in wipe2 and "REVOKE" not in wipe2, "the application's database is wiped as before"
@@ -759,16 +762,62 @@ def test_the_restore_check_of_the_gateway_database_restores_into_a_scratch_datab
     assert "--role support_gw" in restore
 
 
+def _lines(log: str) -> list[str]:
+    return log.splitlines()
+
+
+def _first(lines: list[str], needle: str, after: int = -1) -> int:
+    return next(i for i, l in enumerate(lines) if i > after and needle in l)
+
+
 def test_the_gateway_database_is_not_restored_while_sessions_are_open_on_it(fakebin, tmp_path: Path) -> None:
     dump = tmp_path / "x.dump"
     dump.write_text("x")
     p, log = fakebin("restore.sh", str(dump), DB_SERVICE="gateway-db", FAKE_EXISTING="7", RESTORE_WIPE="yes", FAKE_SESSIONS="3")
     assert p.returncode != 0 and "3 session(s) are open" in p.stderr
     assert "DROP DATABASE" not in log and not [l for l in log.splitlines() if "pg_restore -U" in l and "--list" not in l], "nothing was dropped or restored"
+    lines = _lines(log)
+    revoke = _first(lines, 'REVOKE CONNECT ON DATABASE "sprintable" FROM "support_gw"')
+    count = _first(lines, "pg_stat_activity")
+    grant = _first(lines, 'GRANT CONNECT ON DATABASE "sprintable" TO "support_gw"')
+    assert revoke < count < grant, "the door is shut, the sessions counted, and — nothing having been changed — the door opened again"
+    assert "CLOSED" not in p.stderr
     ok, log2 = fakebin("restore.sh", str(dump), DB_SERVICE="gateway-db", FAKE_EXISTING="7", RESTORE_WIPE="yes", FAKE_SESSIONS="0")
     assert ok.returncode == 0, ok.stderr
     query = next(l for l in log2.splitlines() if "pg_stat_activity" in l)
     assert "datname = 'sprintable'" in query and "pid <> pg_backend_pid()" in query and "-d postgres" in query, query
+
+
+def test_the_door_of_the_gateway_database_is_shut_before_the_count_and_opened_only_after_the_restore(fakebin, tmp_path: Path) -> None:
+    dump = tmp_path / "x.dump"
+    dump.write_text("x")
+    p, log = fakebin("restore.sh", str(dump), DB_SERVICE="gateway-db", FAKE_EXISTING="7", RESTORE_WIPE="yes")
+    assert p.returncode == 0, p.stderr
+    lines = _lines(log)
+    revoke = _first(lines, 'REVOKE CONNECT ON DATABASE "sprintable" FROM "support_gw"')
+    count = _first(lines, "pg_stat_activity")
+    drop = _first(lines, "DROP DATABASE")
+    restore = next(i for i, l in enumerate(lines) if "pg_restore -U" in l and "--list" not in l)
+    grant = _first(lines, 'GRANT CONNECT ON DATABASE "sprintable" TO "support_gw"')
+    assert revoke < count < drop < restore < grant, (revoke, count, drop, restore, grant)
+    assert "CLOSED" not in p.stderr
+
+
+def test_a_failed_restore_leaves_the_gateway_database_shut_and_says_how_to_open_it(fakebin, tmp_path: Path) -> None:
+    dump = tmp_path / "x.dump"
+    dump.write_text("x")
+    p, log = fakebin("restore.sh", str(dump), DB_SERVICE="gateway-db", FAKE_EXISTING="0", FAKE_RESTORE_RC="1")
+    assert p.returncode != 0
+    assert "GRANT CONNECT" not in log, "the door is not opened after a restore that did not finish"
+    assert "is CLOSED to the gateway" in p.stderr and 'GRANT CONNECT ON DATABASE "sprintable" TO "support_gw"' in p.stderr
+
+
+def test_a_restore_that_is_refused_for_existing_tables_has_not_touched_the_door(fakebin, tmp_path: Path) -> None:
+    dump = tmp_path / "x.dump"
+    dump.write_text("x")
+    p, log = fakebin("restore.sh", str(dump), DB_SERVICE="gateway-db", FAKE_EXISTING="7")
+    assert p.returncode != 0 and "RESTORE_WIPE=yes" in p.stderr
+    assert "CONNECT" not in log and "pg_stat_activity" not in log
 
 
 def test_the_application_database_restore_does_not_look_at_sessions(fakebin, tmp_path: Path) -> None:
@@ -776,4 +825,4 @@ def test_the_application_database_restore_does_not_look_at_sessions(fakebin, tmp
     dump.write_text("x")
     p, log = fakebin("restore.sh", str(dump), FAKE_EXISTING="0", FAKE_SESSIONS="3")
     assert p.returncode == 0, p.stderr
-    assert "pg_stat_activity" not in log
+    assert "pg_stat_activity" not in log and "CONNECT" not in log

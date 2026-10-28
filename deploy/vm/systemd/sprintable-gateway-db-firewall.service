@@ -2,9 +2,13 @@
 Description=Keep the metadata server out of reach of the support gateway's database container
 After=docker.service
 Requires=docker.service
+PartOf=docker.service
 ConditionPathIsMountPoint=/srv/sprintable
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/opt/sprintable/bin/gateway-db-firewall.sh
+
+[Install]
+WantedBy=multi-user.target

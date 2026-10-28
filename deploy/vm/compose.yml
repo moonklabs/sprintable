@@ -58,7 +58,8 @@ services:
   gateway-db:
     image: pgvector/pgvector:pg15
     profiles: ["gateway-db"]
-    restart: unless-stopped
+    # «no», on purpose: after a boot or a restart of docker nothing but sprintable-gateway-db-firewall.service starts this container, and only once the rule that keeps the metadata server out of its reach is in place
+    restart: "no"
     logging: *logging
     networks:
       - gateway-db
