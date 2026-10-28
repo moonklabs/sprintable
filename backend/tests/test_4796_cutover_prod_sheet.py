@@ -606,7 +606,7 @@ def test_the_pipeline_section_names_three_changes_in_an_order_and_the_repository
     wf = (_ROOT / ".github/workflows/cloud-build.yml").read_text()
     prod_branch = wf.split('if [[ "$REF_NAME" == "main" ]]; then')[1].split("\n          else\n", 1)[0]
     assert 'echo "fastapi_url=https://api.sprintable.ai"' in prod_branch and "sprintable-backend-prod-787818285179" not in prod_branch.split('echo "fastapi_url=')[1].split("\n")[0], "P1 is merged: the prod branch gives clients and services the VM's API name"
-    assert "cloud_run_app_skip" not in prod_branch, "P3's premise: the prod branch does not skip Cloud Run yet"
+    assert prod_branch.count('echo "cloud_run_app_skip=true"') == 1, "P3 is merged (this line said «not yet» until step 8 of the move): the prod branch skips Cloud Run now"
     assert "if: success() && (steps.env.outputs.target == 'dev' || steps.env.outputs.target == 'prod')" in wf and "Submit the VM bundle build (dev and prod" in wf, "P2 is merged: the VM bundle build is submitted for dev and prod"
     state = section.split("**State when this was written")[1].split("- **P1")[0]
     for token in ("*Merged:* P2 (#5328", "P4 (#5324)", "P5 (#5326", "P6 (#5329", "*Open:* P1 (#5327", "P3 (ready locally", "P7 (the pipeline's prod branch"):
