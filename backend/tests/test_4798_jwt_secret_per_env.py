@@ -143,7 +143,7 @@ def test_no_file_binds_the_old_shared_signing_secret_name():
     assert hits == [], hits
 
 
-def test_the_secret_manifest_lists_the_per_environment_names_and_keeps_the_existing_one():
+def test_the_secret_manifest_lists_the_per_environment_names_and_not_the_deleted_shared_one():
     names = {l.strip() for l in (_ROOT / "infra" / "cloudbuild-secret-manifest.txt").read_text().splitlines() if l.strip() and not l.startswith("#")}
     assert {"JWT_SECRET_DEV", "JWT_SECRET_PROD"} <= names
-    assert "JWT_SECRET" in names  # the manifest mirrors Secret Manager: this name exists there, so it is listed; it is dropped in the same change that removes the secret
+    assert "JWT_SECRET" not in names  # the manifest mirrors Secret Manager: the shared secret was deleted (story 4798 AC16, 2026-10-28), so its line is gone; the exact name, not the prefix of the two above
