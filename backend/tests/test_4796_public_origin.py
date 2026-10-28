@@ -97,7 +97,10 @@ def test_the_vm_declares_the_new_variable_and_the_live_names_know_it() -> None:
     names = (_ROOT / "deploy/vm/env/live-names.dev.txt").read_text()
     backend = names[names.index("## sprintable-backend-dev"):]
     assert "\nPUBLIC_API_URL <plain>\n" in backend.split("\n## ")[0] + "\n"
-    assert "PUBLIC_API_URL" not in (_ROOT / "deploy/vm/env/live-names.prod.txt").read_text() and "PUBLIC_API_URL" not in (_ROOT / "deploy/vm/env/prod.yaml").read_text(), "prod states nothing yet"
+    assert "PUBLIC_API_URL" not in (_ROOT / "deploy/vm/env/live-names.prod.txt").read_text(), "the live prod service does not have the name (the pipeline's prod branch removes it until P7)"
+    import yaml
+    prod = yaml.safe_load((_ROOT / "deploy/vm/env/prod.yaml").read_text())["services"]["backend"]
+    assert prod["added"]["PUBLIC_API_URL"] == "https://api.sprintable.ai" and "PUBLIC_API_URL" not in prod["overrides"], "since P6 the VM's prod backend states it, as an addition (the live service has no such name to override)"
 
 
 def _hand_deploy_spec(env: str) -> str:
@@ -230,14 +233,14 @@ def test_section_12_lists_what_dev_taught_and_each_item_is_true_of_the_files() -
 
     text = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
     sec = text[text.index("## 12. Prod"):]
-    for needle in ("**Before the prod move — what dev taught", "still names `https://realtime.sprintable.ai`", "the canonical prod value is empty since #5305 (`cloud-build.yml`: `realtime_url=` in the prod branch", "The prod GCE realtime gateways have been off since 2026-10-26 15:17Z (the PO's finding",
-                   "the pipeline's prod branch removes it (`--remove-env-vars`)", "set it to `https://api.sprintable.ai`", "the same 20 + 10 as dev, inside the same 57 usable connections",
+    for needle in ("**Before the prod move — what dev taught", "is **empty** (P6, story 4796)", "the canonical prod value is empty since #5305 (`cloud-build.yml`: `realtime_url=` in the prod branch", "the prod GCE realtime gateways have been off since 2026-10-26 15:17Z (the PO's finding",
+                   "The pipeline's prod branch still removes the name from Cloud Run (`--remove-env-vars`)", "**states `https://api.sprintable.ai`**", "That file is read by the VM only: Cloud Run prod does not read it", "the same 20 + 10 as dev, inside the same 57 usable connections",
                    "The stored-link rewrite against prod", "Prod has no Cloud Run job for it", "none is made", "**in the backend container on the VM inside the freeze**", "with a backup first",
                    "**as the PO measured them on 2026-10-27, quoted here and not derivable from the repository**", "about 6 s after the front door started and about 15 s after the resolvers agreed"):
         assert needle in sec, needle
     prod = yaml.safe_load((_ROOT / "deploy/vm/env/prod.yaml").read_text())
-    assert prod["services"]["frontend"]["overrides"]["REALTIME_URL"] == "https://realtime.sprintable.ai", "the item is still open: change this line and the pin together, then this runbook item"
-    assert "PUBLIC_API_URL" not in prod["services"]["backend"]["overrides"] and "PUBLIC_API_URL" not in str(prod["services"]["backend"].get("added") or {})
+    assert prod["services"]["frontend"]["overrides"]["REALTIME_URL"] == "", "P6: the declaration is empty, as the pipeline's prod branch has been since #5305"
+    assert prod["services"]["backend"]["added"]["PUBLIC_API_URL"] == "https://api.sprintable.ai" and "PUBLIC_API_URL" not in prod["services"]["backend"]["overrides"], "P6: the VM's prod backend states the origin; the live service does not have it, so it is an addition"
     main = (_ROOT / "cloudbuild.yaml").read_text()
     assert 'REMOVE_ENV_VARS="$${REMOVE_ENV_VARS},DB_TIMING_LOG_ENABLED,PUBLIC_API_URL"' in main
     # the claims that ARE derivable from the repository: the prod stream address is empty in the pipeline, and no prod one-off job is provisioned
