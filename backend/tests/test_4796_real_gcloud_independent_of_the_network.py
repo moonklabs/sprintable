@@ -56,7 +56,7 @@ def _start(env: dict[str, str], cwd: Path) -> str:
     import subprocess
     proc = subprocess.Popen(["gcloud", "--verbosity=debug", "run", "services", "update", "s", "--region=r", "--clear-cloudsql-instances"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env, cwd=cwd)
     try:
-        out, _ = proc.communicate(timeout=25)   # a bound for a hang (inside pytest's 30 s), not a budget; the child never outlives the test
+        out, _ = proc.communicate(timeout=150)   # a bound for a hang, not a budget (on a crowded runner one start of gcloud alone took over 30 s); the child never outlives the test
     finally:
         if proc.poll() is None:
             proc.kill()
@@ -69,7 +69,7 @@ def _gap_between_two_tries(env: dict[str, str], cwd: Path, srv: _HangingMetadata
     import subprocess
     proc = subprocess.Popen(["gcloud", "run", "services", "update", "s", "--region=r", "--clear-cloudsql-instances"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, cwd=cwd)
     try:
-        deadline = time.monotonic() + 20   # a bound for a hang (inside pytest's 30 s)
+        deadline = time.monotonic() + 100   # a bound for a hang, not a budget
         while len(srv.arrivals) < 2 and time.monotonic() < deadline and proc.poll() is None:
             time.sleep(0.02)
     finally:
@@ -80,6 +80,7 @@ def _gap_between_two_tries(env: dict[str, str], cwd: Path, srv: _HangingMetadata
 
 
 @needs_gcloud
+@pytest.mark.timeout(240)   # a hang bound above the suite's 30 s: a start of gcloud on a crowded runner took over 30 s by itself (5322, run 40729333649), which says nothing about the metadata question
 def test_a_gcloud_start_with_the_helper_sends_the_metadata_question_to_a_port_that_refuses_and_stops_asking(tmp_path: Path) -> None:
     """no clock: gcloud's own debug log says how the question ended - «Connection refused», not «timed out». A refused connection cannot wait, so a refusal is the proof that nothing waited, however many tries gcloud makes."""
     e = G.env(tmp_path)
@@ -95,6 +96,7 @@ def test_a_gcloud_start_with_the_helper_sends_the_metadata_question_to_a_port_th
 
 
 @needs_gcloud
+@pytest.mark.timeout(240)   # same: a hang bound, not a budget
 def test_the_time_limit_of_the_helper_is_shorter_than_the_default_of_gcloud_measured_side_by_side(tmp_path: Path) -> None:
     """the second line of defence, proved against a metadata server that accepts and never answers (what the link-local address does on a runner), without a threshold in seconds:
     the same gcloud, on the same machine at the same moment, once with the helper's limit and once with gcloud's own default (3 s per try). A loaded runner slows both, so the comparison holds where a fixed number does not."""
