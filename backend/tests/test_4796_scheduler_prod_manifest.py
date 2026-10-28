@@ -112,8 +112,9 @@ def test_a_job_list_naming_a_job_the_manifest_does_not_define_is_refused(manifes
         mod.desired_jobs(manifest, "prod", SECRET, base_url=API)
 
 
-@pytest.mark.parametrize("key", ["route", "name", "basis", "unknown"])
+@pytest.mark.parametrize("key", ["route", "name", "basis", "unknown", "path", "uri"])
 def test_an_override_may_only_set_what_an_environment_really_differs_in(manifest, key: str) -> None:
+    """`path` and `uri` are named on purpose (security lens): a job's target address comes from the environment's base URL and the job's route only; an override that could set the path or the whole address would let one line of the manifest send the bearer elsewhere"""
     mod = _load()
     next(j for j in manifest["jobs"] if j["name"] == "storage-usage-warn")["env_overrides"]["prod"][key] = "x"
     with pytest.raises(ValueError, match="may not set"):
