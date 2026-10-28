@@ -35,12 +35,12 @@ gateway's subnet** — anything else deployed there reaches the database's port;
 | 1 | read-only checks | nothing | — |
 | 2 | the firewall probes (throw-away jobs): 2a on the default subnet, before RUNBOOK step 5 · 2b on the gateway's subnet, after it | nothing (jobs that live a minute and open one connection each) | delete the jobs |
 | 3 | rehearsal: dump of `support_gateway` from Cloud SQL → restore into `gateway-db` → row-count diff → one manual backup | nothing for users (a dump reads; the restore writes only `gateway-db`) | `DROP DATABASE` of the rehearsal copy, step 6 |
-| 4 | **freeze** — the gateway stops accepting requests (`--ingress internal`) and in-flight requests are waited out | **the widget is unavailable from here to step 9** (the freeze window, measured below) | step 9's command |
+| 4 | **freeze** — the gateway stops accepting requests (the public `run.invoker` binding is taken off) and in-flight requests are waited out | **the widget is unavailable from here to step 9** (the freeze window, measured below) | step 9's command |
 | 5 | final dump of `support_gateway` from Cloud SQL | inside the freeze | — |
 | 6 | restore into `gateway-db` (`RESTORE_WIPE=yes`) → row-count diff must print nothing | inside the freeze | the rehearsal copy is kept beside it (see step 6) |
 | 7 | a new version of `SUPPORT_GATEWAY_DATABASE_URL_dev` (the VM's private address, the application role) | inside the freeze | step 12 |
 | 8 | the gateway service on the VM's database (`gcloud run services update`: no Cloud SQL socket, the gateway's own subnet, the pool 3 + 2), then **a database-backed check** from a throw-away job with the new secret | inside the freeze | step 12 |
-| 9 | **unfreeze** (`--ingress all`) | ends the freeze | — |
+| 9 | **unfreeze** (the public `run.invoker` binding is put back) | ends the freeze | — |
 | 10 | the round trip: a widget session, a message, an escalation reaching the backend, a real Vertex call; the server sees the gateway's connections; a manual backup that does not refuse | nothing | step 12 |
 | 11 | the workflow on again, the flip PR (one word in `cloud-build.yml`) → green dev build → the migrate job on the VM's database | the build re-applies the same flags (a new revision of the same config) | revert the PR |
 | 12 | the way back, while Cloud SQL still holds the database | the same freeze again | — |
@@ -126,14 +126,13 @@ sudo systemctl start sprintable-backup.service; sudo journalctl -u sprintable-ba
 ## 4. Freeze
 
 ```
-gcloud run services update $GW --project $PROJECT --region $REGION --ingress internal
-GWURL=$(gcloud run services describe $GW --project $PROJECT --region $REGION --format='value(status.url)'); curl -s -o /dev/null -w '%{http_code}\n' "$GWURL/healthz"
+gcloud run services remove-iam-policy-binding $GW --project $PROJECT --region $REGION --member=allUsers --role=roles/run.invoker
+GWURL=$(gcloud run services describe $GW --project $PROJECT --region $REGION --format='value(status.url)'); curl -s -o /dev/null -w '%{http_code}\n' "$GWURL/openapi.json"
 TMO=$(gcloud run services describe $GW --project $PROJECT --region $REGION --format='value(spec.template.spec.timeoutSeconds)'); echo "request timeout: $TMO s"
 ```
-The `curl` prints **404** (the platform refuses a request from outside); before the freeze it prints 200. `--ingress internal` still lets in requests from the same project's VPC and services; the gateway's callers are the
-browser (the widget) and the backend on the VM, both outside, so nothing is let in — and that is measured from the VM too, not assumed: `ssh`/IAP to the VM and `curl -s -o /dev/null -w '%{http_code}\n' "$GWURL/healthz"` there also prints **404** (a **200** there means the backend still reaches the gateway: stop and do not restore). **Wait `TMO` + 10 seconds** (`sleep $((TMO + 10))`): a message request flushes its rows before the model call and commits after it, so a request that
+The `curl` prints **403** (the platform refuses a request that carries no identity); before the freeze it prints 200 with `application/json`. **The freeze is the IAM binding, not the ingress setting**: `--ingress internal` lets in the requests of the same project's VPC, and the VM is in it, so it would not stop the backend on the VM (the first run of this sheet found that: the gate caught it and the freeze was undone within seconds). Without the public `run.invoker` binding nobody who is not named gets in, from outside or from the VM. It is measured from the VM too, not assumed: `ssh`/IAP to the VM and the same `curl` there also prints **403** (a **200** there means the backend still reaches the gateway: stop, put the binding back and do not restore). The path is `/openapi.json`, not `/healthz`: Cloud Run reserves the paths that end in a `z` and answers them itself with a Google HTML 404, before and after the freeze, so `/healthz` cannot tell the two states apart. **Wait `TMO` + 10 seconds** (`sleep $((TMO + 10))`): a message request flushes its rows before the model call and commits after it, so a request that
 began before the freeze can still commit up to the request timeout later — only after that wait is the database quiet. Write down the time: `date -u +%FT%TZ` — this is T0 (taken after the wait; the wait itself is part of
-the window, so also write down when the freeze command ran). Both `curl`s have printed 404; then, in the same shell (`TMO` is set there), the wait and T0 as commands:
+the window, so also write down when the freeze command ran). Both `curl`s have printed 403; then, in the same shell (`TMO` is set there), the wait and T0 as commands:
 
 ```
 [ -n "$TMO" ] && sleep $((TMO + 10)) && date -u +%FT%TZ   # T0: printed only after the whole wait
@@ -174,13 +173,13 @@ Both `STOP` lines mean: nothing was added, go back to step 4's unfreeze (step 9'
 ```
 gcloud run services update $GW --project $PROJECT --region $REGION --clear-cloudsql-instances --network default --subnet support-gateway-$ENV --update-env-vars SUPPORT_GATEWAY_DB_POOL_SIZE=3,SUPPORT_GATEWAY_DB_MAX_OVERFLOW=2
 gcloud run services describe $GW --project $PROJECT --region $REGION --format='value(status.latestReadyRevisionName)'
-gcloud run services describe $GW --project $PROJECT --region $REGION --format='yaml(spec.template.metadata.annotations)' | grep -c 'cloudsql-instances'
+gcloud run services describe $GW --project $PROJECT --region $REGION --format=json | python3 -c 'import json, sys; a = json.load(sys.stdin)["spec"]["template"]["metadata"].get("annotations", {}); print(len(a.get("run.googleapis.com/cloudsql-instances", "")))'
 python3 -I deploy/vm/bin/subnet-residents.py $PROJECT $REGION support-gateway-$ENV --allow-service $GW --allow-job $GWJOB --allow-job gwdb-probe-
 ```
-The new revision is ready and serves; the first `grep -c` prints **0** (no Cloud SQL socket any more), the residents check ends with `VERDICT: OK` and names the gateway service as the one thing on the subnet (the template and every revision that still serves traffic). `--clear-cloudsql-instances`, not «leave it out»: gcloud keeps an instance that is only
+The new revision is ready and serves; the first command prints **0** (the length of the Cloud SQL instance list the service still carries: gcloud leaves the annotation in place with an empty value, so counting the lines that mention it would print 1), the residents check ends with `VERDICT: OK` and names the gateway service as the one thing on the subnet (the template and every revision that still serves traffic). `--clear-cloudsql-instances`, not «leave it out»: gcloud keeps an instance that is only
 not mentioned. Without a freeze this step would send traffic to a revision whose database is not checked yet — that is why it is inside the freeze.
 
-**The database-backed check — before the unfreeze.** `/healthz` of the gateway answers 200 without touching the database, so it proves nothing here. A throw-away job with the gateway's own image, service account, subnet and the
+**The database-backed check — before the unfreeze.** The gateway's own health path answers 200 without touching the database, so it proves nothing here. A throw-away job with the gateway's own image, service account, subnet and the
 NEW secret opens a real connection to `gateway-db` the way the application does (URL, password, firewall, access rules). It is the one job here that needs the gateway's own account (it reads that secret); its name is new for the same reason as above (`GWIMG` and `STAMP` come from step 2; define them again if this is a new shell):
 ```
 CHECK='^@^-c@import asyncio, asyncpg, os; u = os.environ["SUPPORT_GATEWAY_DATABASE_URL"].replace("+asyncpg", ""); c = asyncio.run(asyncpg.connect(u, timeout=10)); print("connected")'
@@ -195,10 +194,10 @@ gcloud run jobs create "$CHK" --project $PROJECT --region $REGION --image "$GWIM
 ## 9. Unfreeze
 
 ```
-gcloud run services update $GW --project $PROJECT --region $REGION --ingress all
-curl -s -o /dev/null -w '%{http_code}\n' "$GWURL/healthz"
+gcloud run services add-iam-policy-binding $GW --project $PROJECT --region $REGION --member=allUsers --role=roles/run.invoker
+curl -s -o /dev/null -w '%{http_code}\n' "$GWURL/openapi.json"
 ```
-The second command prints **200**. Write down the time: T1. **The freeze window is T1 − T0**, plus the wait of step 4 — report both in the story as numbers.
+The second command prints **200** (and the dev build of step 11 puts the same binding back by itself: it deploys with `--allow-unauthenticated`). Write down the time: T1. **The freeze window is T1 − T0**, plus the wait of step 4 — report both in the story as numbers.
 
 ## 10. The round trip (these are the checks gate 0 of [`REMOVALS-dev.md`](REMOVALS-dev.md) reads)
 
@@ -221,11 +220,11 @@ the workflow is on (nothing else is merged to `develop` before it — gate G4). 
 gateway's migrate job without a Cloud SQL socket and on the gateway's subnet, then runs it against the VM's database. From here on, a run of the workflow from a ref that does **not** contain the flip (an old branch started by hand) would
 put the Cloud SQL socket back: do not start one.
 ```
-gcloud run jobs describe $GWJOB --project $PROJECT --region $REGION --format='yaml(spec.template.metadata.annotations)' | grep -c 'cloudsql-instances'
+gcloud run jobs describe $GWJOB --project $PROJECT --region $REGION --format=json | python3 -c 'import json, sys; a = json.load(sys.stdin)["spec"]["template"]["metadata"].get("annotations", {}); print(len(a.get("run.googleapis.com/cloudsql-instances", "")))'
 python3 -I deploy/vm/bin/subnet-residents.py $PROJECT $REGION support-gateway-$ENV --allow-service $GW --allow-job $GWJOB --allow-job gwdb-probe-
 gcloud run jobs execute $GWJOB --project $PROJECT --region $REGION --wait; echo "migrate job: exit $?"
 ```
-The first prints **0**, the residents check ends with `VERDICT: OK` and names exactly the gateway service and its migrate job, and the migrate job exits **0** (the schema is already at the head: nothing to migrate). Without the PR the next dev deploy would put the Cloud SQL socket back — so the PR is part of the
+The first prints **0** (the length of the instance list, not a count of lines), the residents check ends with `VERDICT: OK` and names exactly the gateway service and its migrate job, and the migrate job exits **0** (the schema is already at the head: nothing to migrate). Without the PR the next dev deploy would put the Cloud SQL socket back — so the PR is part of the
 cutover, not a clean-up after it.
 
 ## 12. The way back (while the database still exists in Cloud SQL)
@@ -236,14 +235,14 @@ that is in the VM's database and in its backups and is **not copied back** to Cl
 prefer fixing forward on the VM, and go back only if the loss is accepted (it is dev; `sudo systemctl start sprintable-backup.service` first keeps those rows in a `db-gateway-…` dump).
 ```
 BACK=no
-gcloud run services update $GW --project $PROJECT --region $REGION --ingress internal && BACK=frozen
+gcloud run services remove-iam-policy-binding $GW --project $PROJECT --region $REGION --member=allUsers --role=roles/run.invoker && BACK=frozen
 [ "$BACK" = frozen ] && { TMO=$(gcloud run services describe $GW --project $PROJECT --region $REGION --format='value(spec.template.spec.timeoutSeconds)'); echo "request timeout: $TMO s"; [ -n "$TMO" ] && sleep $((TMO + 10)) && BACK=waited; }   # a request that began before the freeze can still commit to the database on the VM up to the request timeout later
 [ "$BACK" = waited ] && { OLDURL=$(gcloud secrets versions access "$OLD_VER" --secret=SUPPORT_GATEWAY_DATABASE_URL_dev --project $PROJECT) && [ -n "$OLDURL" ] && printf %s "$OLDURL" | gcloud secrets versions add SUPPORT_GATEWAY_DATABASE_URL_dev --project $PROJECT --data-file=- && BACK=secret || echo "STOP: the old value was not copied"; }
 unset OLDURL
 [ "$BACK" = secret ] && gcloud run services update $GW --project $PROJECT --region $REGION --add-cloudsql-instances ${PROJECT}:${REGION}:sprintable-${ENV} --network default --subnet default --remove-env-vars SUPPORT_GATEWAY_DB_POOL_SIZE,SUPPORT_GATEWAY_DB_MAX_OVERFLOW && BACK=repointed
-[ "$BACK" = repointed ] && gcloud run services update $GW --project $PROJECT --region $REGION --ingress all
+[ "$BACK" = repointed ] && gcloud run services add-iam-policy-binding $GW --project $PROJECT --region $REGION --member=allUsers --role=roles/run.invoker
 ```
-Every line runs only when the one before it succeeded (`BACK` says how far it got): a line that fails leaves the service **frozen** (`--ingress internal`), which is the safe state — fix the cause and run the block again from the top; `--ingress all` is the last line and runs only after the service points at Cloud SQL again. The first line is the same setting that step 4 measured (the VM-side `curl` printed 404 there), so that measurement holds here; if it printed anything else in step 4 the cutover did not start. The wait after the first line is the one of step 4: without it a request still in flight would commit to `gateway-db` after the service already points at Cloud SQL, and the writes would be split between the two. The old value is **added as a new version** (the newest one), so the new revision reads the old URL whatever `latest` means for a disabled version — `latest` is the most recently created version, and a disabled version cannot be read.
+Every line runs only when the one before it succeeded (`BACK` says how far it got): a line that fails leaves the service **frozen** (the public binding is off), which is the safe state — fix the cause and run the block again from the top; putting the binding back is the last line and runs only after the service points at Cloud SQL again. The first line is the same setting that step 4 measured (the VM-side `curl` printed 403 there), so that measurement holds here; if it printed anything else in step 4 the cutover did not start. The wait after the first line is the one of step 4: without it a request still in flight would commit to `gateway-db` after the service already points at Cloud SQL, and the writes would be split between the two. The old value is **added as a new version** (the newest one), so the new revision reads the old URL whatever `latest` means for a disabled version — `latest` is the most recently created version, and a disabled version cannot be read.
 The version the cutover made may then be disabled (`gcloud secrets versions disable $NEW_VER --secret=SUPPORT_GATEWAY_DATABASE_URL_dev --project $PROJECT`). If the flip PR was merged, **revert it first** and keep the workflow
 off until the revert is merged (otherwise the next dev build puts the cutover flags back). Check with the round trip of step 10 against Cloud SQL. **The pipeline does not take the two pool variables off again** (with the switch off it leaves them as they are): they stay at 3 + 2 on Cloud SQL unless the command above — which removes them — was run.
 
