@@ -65,7 +65,10 @@ jobs:
         run: |
           if [[ "$REF_NAME" == "main" ]]; then
             echo "target=prod" >> "$GITHUB_OUTPUT"
-            echo "fastapi_url=https://sprintable-backend-prod-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
+            # story 4796 (AC4, deploy/vm/CUTOVER-prod.md «P1», PO 2026-10-28; RUNBOOK §9 «The one switch»): the prod backend's address for clients and for the other services is the VM's API name. It feeds `_FASTAPI_URL`:
+            # the backend's FASTAPI_URL (the desktop setup's api_url), the baked NEXT_PUBLIC_FASTAPI_URL, the hosted MCP and the support gateway. Merge this ONLY while the API name already answers with the prod backend
+            # (the cutover sheet's step 3: the front door passes it through to Cloud Run until the data move); the old Cloud Run address keeps answering. Undo = the previous value of this line: https://sprintable-backend-prod-787818285179.asia-northeast3.run.app
+            echo "fastapi_url=https://api.sprintable.ai" >> "$GITHUB_OUTPUT"
             # story #3583-BE 리뷰 조건(페드루 2026-09-06) — GA4 OAuth 콜백 redirect_uri.
             # Google Cloud Console에 prod 콜백 URI 등록이 아직 안 됐으므로(사람 항목) 빈 값
             # 유지 — authorize가 이 값 없이는 503으로 fail-closed(config.py 기본값 "").

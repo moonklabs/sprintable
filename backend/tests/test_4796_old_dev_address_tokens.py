@@ -45,7 +45,7 @@ def test_the_texts_that_explain_why_the_address_is_direct_no_longer_say_only_run
     assert "dev: `https://dev-api.sprintable.ai`, DNS only — no Cloudflare proxy" in guide and "Dev: `https://dev-api.sprintable.ai`" in guide
     assert "use the backend-direct run.app host" not in guide
     readme = (_ROOT / "backend/sprintable_mcp/README.md").read_text()
-    assert "dev=https://dev-api.sprintable.ai" in readme and "prod는 run.app, dev는 DNS 전용 dev-api.sprintable.ai" in readme
+    assert "dev=https://dev-api.sprintable.ai" in readme and "prod는 api.sprintable.ai, dev는 DNS 전용 dev-api.sprintable.ai" in readme
     onboarding = (_ROOT / "backend/app/services/agent_onboarding_config.py").read_text()
     assert "prod=run.app, dev=DNS 전용 dev-api.sprintable.ai" in onboarding and "직통 run.app 이어야 한다" not in onboarding
 
@@ -76,7 +76,7 @@ def test_every_default_api_url_of_the_python_and_host_connectors_is_the_dev_api_
 
 
 def test_the_prod_plugin_and_the_prod_lines_of_the_guides_did_not_move() -> None:
-    assert 'DEFAULT_API_URL = "https://sprintable-backend-prod-57iommnikq-du.a.run.app"' in (_ROOT / PROD_PLUGIN / "adapter.py").read_text()
+    assert 'DEFAULT_API_URL = "https://api.sprintable.ai"' in (_ROOT / PROD_PLUGIN / "adapter.py").read_text(), "P8: the prod plugin's default is the API name"
     prod = "https://sprintable-backend-prod-787818285179.asia-northeast3.run.app"
     for guide in ("connect-guide.ko.txt", "connect-guide.en.txt", "onboarding-guide.txt"):
         assert prod in (_ROOT / "apps/web/public" / guide).read_text(), guide

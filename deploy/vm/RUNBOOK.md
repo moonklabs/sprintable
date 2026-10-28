@@ -17,10 +17,11 @@ export DEPLOY_BUCKET=sprintable-vm-$ENV-deploy BACKUPS_BUCKET=sprintable-vm-$ENV
 gcloud storage buckets create gs://$DEPLOY_BUCKET  --project $PROJECT --location $REGION --uniform-bucket-level-access --public-access-prevention
 gcloud storage buckets create gs://$BACKUPS_BUCKET --project $PROJECT --location $REGION --uniform-bucket-level-access --public-access-prevention
 cat > /tmp/lifecycle.json <<'EOF'
-{"rule":[{"action":{"type":"Delete"},"condition":{"age":14,"matchesPrefix":["db/"]}},{"action":{"type":"Delete"},"condition":{"age":7,"matchesPrefix":["status/"]}}]}
+{"rule":[{"action":{"type":"Delete"},"condition":{"age":14,"matchesPrefix":["db/"]}},{"action":{"type":"Delete"},"condition":{"age":7,"matchesPrefix":["status/"]}},{"action":{"type":"Delete"},"condition":{"age":7,"matchesPrefix":["import/"]}}]}
 EOF
 gcloud storage buckets update gs://$BACKUPS_BUCKET --lifecycle-file=/tmp/lifecycle.json
 ```
+The `import/` rule (7 days) is there because the rehearsal and final dumps of the data move (§7) are **whole copies of the database**: they are not kept for ever, and the window plus a day is far inside 7 days. A bucket made before this rule was written gets it with the same `update` line (the file above).
 Undo: `gcloud storage rm -r gs://$DEPLOY_BUCKET gs://$BACKUPS_BUCKET` (only while they hold nothing you need).
 
 ## 2. VM identity and its access (the part most likely to be forgotten)
@@ -141,12 +142,12 @@ Re-run it from a newer bundle whenever `deployer.py`, `render_env.py`, the units
 ```bash
 for SVC in backend frontend; do
   gcloud run services describe sprintable-$SVC-$ENV --region $REGION --format=json \
-   | jq --arg s $SVC '{($s): ([.spec.template.spec.containers[0].env[] | select(.value != null) | {(.name): .value}] | add)}'
+   | jq --arg s $SVC '{($s): ([.spec.template.spec.containers[0].env[] | select(has("valueFrom") | not) | {(.name): (.value // "")}] | add)}'
 done | jq -s 'add' > private-plain.json
 gcloud compute scp private-plain.json $VM:/tmp/ --zone $ZONE --tunnel-through-iap && rm private-plain.json
 # on the VM:  sudo install -m 0600 -o root -g root /tmp/private-plain.json /etc/sprintable/private-plain.json && shred -u /tmp/private-plain.json
 ```
-The deployer reports which names are missing (names only) and refuses a file that group/others can read. Entries the live service holds as secrets are not in the file (they come from Secret Manager).
+The deployer reports which names are missing (names only) and refuses a file that group/others can read. Entries the live service holds as secrets are not in the file (they come from Secret Manager). **A name whose live value is empty is in the file with an empty value:** Cloud Run's JSON leaves out the `value` key of an empty variable (the rehearsal of the prod move found five such names in the backend and the frontend), so a filter on `value != null` dropped them and the deployer stopped on «the private plain file lacks N variables»; the line above keeps every entry that is not a secret reference (`valueFrom`) and gives it `""` when it has no value.
 
 **Before any cutover — do the live services still have the names this declaration was written from?** (the tests only compare the declaration with the copy; this compares the copy with the service as it is now)
 ```bash
@@ -288,7 +289,7 @@ Same steps with `ENV=prod`, `env/prod.yaml`, a new `api.sprintable.ai` record (D
 1. `REALTIME_URL` of the frontend in `env/prod.yaml` is **empty** (P6, story 4796): the prod GCE realtime gateways have been off since 2026-10-26 15:17Z (the PO's finding; the PO emptied the frontend's `REALTIME_URL` on 2026-10-27) and the canonical prod value is empty since #5305 (`cloud-build.yml`: `realtime_url=` in the prod branch; the stream goes through the main server). The declaration says the same, and `test_4796_vm_env.py::test_the_public_addresses_are_the_vm_hosts_not_cloud_run` pins it. The gateway's instance group, rules and address are removed by the PO.
 2. `PUBLIC_API_URL`: the prod declaration **states `https://api.sprintable.ai`** (P6; the live prod service does not have the name, so it is an addition) — the origin that the publish route and the device-proof challenges build their links from, instead of the request's own host. That file is read by the VM only: Cloud Run prod does not read it, so the line changes nothing on prod until the VM runs. The pipeline's prod branch still removes the name from Cloud Run (`--remove-env-vars`); changing that is a separate draft change (P7), merged like P1, only once `api.sprintable.ai` answers with the prod backend (and the tests that pin «prod states nothing» change with it).
 3. The database pool: `env/prod.yaml` has the same 20 + 10 as dev, inside the same 57 usable connections (§11, «Database connection budget»); prod's real load is not measured — read `pg_stat_activity` and the `QueuePool limit` count after the move.
-4. The stored-link job against prod's Cloud SQL **before** the final dump (§10, «Stored hosted-site links»). The commands there are dev's — the job `sprintable-verify-oneoff`, the service `sprintable-backend-dev`, dev's origins — and `backend/scripts/jobs/README.md` names no prod job (the only provisioned one-off job is the dev one), so a prod job does not exist yet: create it with the prod image, a service account that reaches the prod database, and the prod origins taken from the prod report (the first step of the job), as part of the prod preparation, and write its commands next to dev's.
+4. The stored-link rewrite against prod (§10, «Stored hosted-site links»). Prod has no Cloud Run job for it (the only provisioned one-off job is dev's, `backend/scripts/jobs/README.md`) and none is made: the cutover sheet ([CUTOVER-prod.md](CUTOVER-prod.md), step 6–7, item 4b) runs the same module **in the backend container on the VM inside the freeze**, after the final restore and before the unfreeze, with a backup first, so that the database that goes live already carries the rewritten links. The origins to rewrite are the two Cloud Run forms of the prod backend, each with `http` and `https`.
 5. The Phase 1 and 2 shape applies as it did for dev: front door first, guests one at a time, then the data; the measurements of dev — **as the PO measured them on 2026-10-27, quoted here and not derivable from the repository** (the certificate arrived about 6 s after the front door started and about 15 s after the resolvers agreed; behind the pass-through the rate-limit count is one for everyone; the downtime split) — are starting numbers, not prod's.
 6. **TLS for the gateway's database** (§13, “What is exposed”): dev runs the VPC-facing `gateway-db` without application-layer TLS (accepted by the PO); prod must have `ssl=on` and `sslmode=require` before its gateway database moves.
 
