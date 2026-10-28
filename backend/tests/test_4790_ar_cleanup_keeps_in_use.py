@@ -70,6 +70,8 @@ class Dumps:
         self.jobs = [{"metadata": {"name": "migrate"}, "spec": {"template": {"spec": {"template": {"spec": {"containers": [{"image": f"{HOST}/backend:backend-tag3"}]}}}}}}]
         self.mig = {"startup": f"docker run {HOST}/backend:backend-tag45"}
         self.out = tmp_path / "policy.json"
+        self.more_images: list[list[dict]] = []  # one more `--images` dump per further repository
+        self.more_extra: list[object] = []  # further `--extra` dumps after the first template
 
     def argv(self, *extra_args: str, with_mig: bool = True) -> list[str]:
         files = {"images": self.images, "services": self.services, "revisions": self.revisions, "jobs": self.jobs}
@@ -84,6 +86,14 @@ class Dumps:
             mig = self.dir / "mig.json"
             mig.write_text(json.dumps(self.mig))
             argv += ["--extra", str(mig)]
+        for n, images in enumerate(self.more_images):
+            path = self.dir / f"images-{n + 2}.json"
+            path.write_text(json.dumps(images))
+            argv += ["--images", str(path)]
+        for n, blob in enumerate(self.more_extra):
+            path = self.dir / f"extra-{n + 2}.json"
+            path.write_text(json.dumps(blob))
+            argv += ["--extra", str(path)]
         return argv
 
 
@@ -660,3 +670,295 @@ def test_the_registry_limit_is_exactly_64_characters_at_the_boundary():
     over = [{"name": "x", "condition": {"versionNamePrefixes": ["a" * 65]}}]
     assert gate.policy_problems(at) == []
     assert gate.policy_problems(over) != []
+
+
+# ---- story 4796 AC4 precondition: several repositories, out-of-scope references, an extra without images ----
+
+HOST_PROD = "asia-northeast3-docker.pkg.dev/sprintable-494803/sprintable-prod"
+AR_HOST = HOST.split("/")[0]
+SQL_PROXY = "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.8.0"
+
+
+def _iso(moment: datetime) -> str:
+    return moment.isoformat().replace("+00:00", "Z")
+
+
+def _prod_images(count: int, *, age_days: int = 0) -> list[dict]:
+    """the second repository: `backend` builds, `age_days` + i days old (digests 20_000+i, distinct from the first repository's)"""
+    return [
+        {"package": f"{HOST_PROD}/backend", "version": _digest(20_000 + i), "tags": [f"prod-tag{i}"], "createTime": _iso(NOW - timedelta(days=age_days + i))}
+        for i in range(count)
+    ]
+
+
+def test_two_repositories_in_one_call_pass_and_both_digests_are_kept(tmp_path):
+    """the VM template pulls from the first repository while the prod services run from the second: one call with both `--images` dumps passes, no hand-made workaround"""
+    d = Dumps(tmp_path)
+    d.more_images = [_prod_images(5)]
+    d.mig = {"startup": f"docker run {HOST}/backend:backend-tag45 {HOST_PROD}/backend:prod-tag4"}
+    assert gate.main(d.argv()) == 0
+    kept = json.loads(d.out.read_text())[0]["condition"]["versionNamePrefixes"]
+    assert _digest(20_004)[:64] in kept and _digest(45)[:64] in kept
+
+
+def test_a_reference_into_a_repository_that_was_not_dumped_still_fails_and_says_what_to_add(tmp_path, capsys):
+    """«모르면 실패한다»: the same call without the second dump — our own host, a repository the list does not hold — is exit 3 (not an out-of-scope reference) and names the way out"""
+    d = Dumps(tmp_path)
+    d.mig = {"startup": f"docker run {HOST}/backend:backend-tag45 {HOST_PROD}/backend:prod-tag4"}
+    assert gate.main(d.argv()) == 3 and not d.out.exists()
+    out = capsys.readouterr().out
+    assert HOST_PROD in out and "--images" in out
+    assert "범위 밖" not in out, "our own host is never out of scope"
+    d.more_images = [_prod_images(5)]
+    assert gate.main(d.argv()) == 0  # the same call with the dump is green: the test can tell the two apart
+
+
+def test_the_newest_30_rule_counts_inside_each_repository(tmp_path):
+    """the policy is applied per repository: 20 old builds in each of two repositories is 20 per repository (all kept), not 40 together (ten deleted)"""
+    first = [{"package": f"{HOST}/backend", "version": _digest(i), "tags": [f"a{i}"], "createTime": _iso(NOW - timedelta(days=40 + i))} for i in range(20)]
+    second = _prod_images(20, age_days=40)
+    both = gate.load_versions(first + second)
+    assert gate.simulate(_base(), both, NOW) == set()
+    # positive control: the same forty builds in ONE repository do lose ten
+    one_repo = gate.load_versions(first + [{**x, "package": f"{HOST}/backend"} for x in second])
+    assert len(gate.simulate(_base(), one_repo, NOW)) == 10
+
+
+def test_every_dumped_repository_is_simulated_and_an_old_unused_image_in_the_second_goes(tmp_path):
+    d = Dumps(tmp_path)
+    d.more_images = [_prod_images(40, age_days=40)]
+    assert gate.main(d.argv()) == 0
+    versions = gate.load_versions(d.images + d.more_images[0])
+    deleted = gate.simulate(json.loads(d.out.read_text()), versions, NOW)
+    assert {("backend", _digest(20_000 + i)) for i in range(30, 40)} <= deleted  # the second repository's own 31st-40th builds are deleted too
+
+
+def test_the_same_repository_twice_or_an_empty_dump_is_bad_input(tmp_path, capsys):
+    d = Dumps(tmp_path)
+    d.more_images = [d.images]  # the same repository listed twice: counts would double
+    assert gate.main(d.argv()) == 2 and not d.out.exists()
+    assert "두 번" in capsys.readouterr().out
+    d = Dumps(tmp_path)
+    d.more_images = [[]]  # a repository whose list came back empty is most likely the wrong file
+    assert gate.main(d.argv()) == 2 and not d.out.exists()
+
+
+def test_a_reference_off_our_registry_is_counted_apart_with_its_reason_and_does_not_fail(tmp_path, capsys):
+    d = Dumps(tmp_path)
+    d.mig = {"startup": f"docker run {HOST}/backend:backend-tag45 && docker run {SQL_PROXY} && docker run us-docker.pkg.dev/other-project/lib/redis:7"}
+    assert gate.main(d.argv()) == 0
+    out = capsys.readouterr().out
+    assert "범위 밖 2건" in out
+    assert f"{SQL_PROXY}" in out and "외부 레지스트리(gcr.io)" in out
+    assert "us-docker.pkg.dev/other-project/lib/redis:7" in out and f"우리 AR 호스트({AR_HOST})가 아님: us-docker.pkg.dev" in out
+    assert "--extra 1번째" in out  # where it came from
+    kept = json.loads(d.out.read_text())[0]["condition"]["versionNamePrefixes"]
+    assert len(kept) == 3, "an out-of-scope reference protects nothing and adds no prefix: service · job · MIG image only"
+
+
+def test_an_address_the_gate_does_not_recognise_is_not_counted_as_out_of_scope(tmp_path, capsys):
+    """only a registry known to be elsewhere counts: an unknown host could be anything, and «모르면 실패한다»"""
+    d = Dumps(tmp_path)
+    d.mig = {"startup": f"docker run {HOST}/backend:backend-tag45 registry.example.com/team/app:1"}
+    assert gate.main(d.argv()) == 0
+    out = capsys.readouterr().out
+    assert "정리 정책이 닿을 수 없는 참조라" not in out  # no «범위 밖 N건» section: not claimed as out of scope (and nothing depends on it)
+    assert "⚠️ --extra 1번째에 알아보지 못하는 레지스트리 주소 registry.example.com/team/app:1" in out  # but it is shown
+    d = Dumps(tmp_path)
+    d.mig = {"startup": "docker run registry.example.com/team/app:1"}
+    assert gate.main(d.argv()) == 3 and not d.out.exists()  # a lone unrecognised address: the template shows no image at all
+
+
+def test_external_refs_cover_the_known_registries_and_skip_urls_and_unknown_hosts():
+    def found(text: str) -> list[tuple[str, str]]:
+        return [(r["image"], r["ref"]) for r in gate.external_refs_in(json.dumps(text))]
+
+    assert found("gcr.io/google.com/cloudsdktool/cloud-sdk:slim") == [("gcr.io/google.com/cloudsdktool/cloud-sdk", ":slim")]
+    assert found("docker.io/library/redis@sha256:" + "a" * 64) == [("docker.io/library/redis", "@sha256:" + "a" * 64)]
+    assert found("us.gcr.io/p/i") == [("us.gcr.io/p/i", "")]
+    assert found("ghcr.io/o/r:1 quay.io/o/r:2 mcr.microsoft.com/dotnet/aspnet:8.0") == [("ghcr.io/o/r", ":1"), ("quay.io/o/r", ":2"), ("mcr.microsoft.com/dotnet/aspnet", ":8.0")]
+    assert found("echo hi\ngcr.io/x/y:1") == [("gcr.io/x/y", ":1")], "an image at the start of the line after a newline (`\\n` in the JSON text) is found"
+    assert found("see https://ghcr.io/x/y:1 for the page") == [], "a URL is not an image reference"
+    assert found("registry.example.com/team/app:1") == [] and found("redis:7") == []
+    assert found(f"{HOST}/backend:abc") == [], "our own registry is not an external one"
+
+
+def test_an_extra_without_images_is_a_visible_warning_not_a_failure(tmp_path, capsys):
+    d = Dumps(tmp_path)
+    d.more_extra = [{"startup": "no image here"}]
+    assert gate.main(d.argv()) == 0 and d.out.exists()
+    out = capsys.readouterr().out
+    assert "⚠️ --extra 2번째" in out and "경고 1건" in out
+    # positive control: with NO image in any extra there is nothing of the VM side to see — that is still exit 3
+    d = Dumps(tmp_path)
+    d.mig = {"startup": "no image here"}
+    d.more_extra = [{"startup": "none here either"}]
+    assert gate.main(d.argv()) == 3 and not d.out.exists()
+
+
+def test_an_extra_that_holds_only_an_out_of_scope_image_has_been_read():
+    c = gate.collect(extra=[{"startup": f"docker run {SQL_PROXY}"}, {"startup": f"docker run {HOST}/backend:backend-tag45"}], hosts={AR_HOST})
+    assert not c.problems and not c.warnings and len(c.outside) == 1
+
+
+def test_a_tagged_serving_revision_with_a_sidecar_from_elsewhere_is_unresolved():
+    """one `status.imageDigest` cannot say whether it belongs to our container or the sidecar: not guessed"""
+    service = [_service("s", "rev-2", f"{HOST}/backend:backend-tag2")]
+    both = {"metadata": {"name": "rev-2"}, "spec": {"containers": [{"image": f"{HOST}/backend:backend-tag2"}, {"image": SQL_PROXY}]}, "status": {"imageDigest": _digest(2)}}
+    assert gate.collect(service, [both], hosts={AR_HOST}).problems
+    pinned = {"metadata": {"name": "rev-2"}, "spec": {"containers": [{"image": f"{HOST}/backend@{_digest(2)}"}, {"image": SQL_PROXY}]}}
+    assert not gate.collect(service, [pinned], hosts={AR_HOST}).problems  # pinned by digest: nothing to resolve
+    ours = _revision("rev-2", f"{HOST}/backend:backend-tag2", image_digest=_digest(2))
+    assert not gate.collect(service, [ours], hosts={AR_HOST}).problems  # positive control: the same revision without the sidecar is fine
+
+
+def test_hub_short_names_follow_the_docker_name_rule():
+    def hub(value):
+        got = gate._hub_short(value, "w")
+        return (got["image"], got["ref"]) if got else None
+
+    assert hub("gotenberg/gotenberg:8.36") == ("docker.io/gotenberg/gotenberg", ":8.36")
+    assert hub("nginx") == ("docker.io/library/nginx", "") and hub("nginx:1.25") == ("docker.io/library/nginx", ":1.25")
+    assert hub("library/redis@sha256:" + "a" * 64) == ("docker.io/library/redis", "@sha256:" + "a" * 64)
+    # a first path part with a dot, a port or `localhost` is a HOST: not Docker Hub, left unrecognised (and so a failure)
+    for host_named in ("registry.example.com/team/app:1", "host:5000/x", "localhost/x", "localhost:5000/x:1", "my.host/x"):
+        assert hub(host_named) is None, host_named
+    for not_a_name in ("", "Foo/Bar", "a b", None, {"name": "x"}, 7, " nginx ", "nginx\n", "nginx:"):  # uppercase, spaces (also around the name), non-strings: not a Docker name
+        assert hub(not_a_name) is None, not_a_name
+    # Docker's own grammar (distribution/reference): `__` and repeated dashes join name parts, a tag may be 128 characters and no more
+    assert hub("my__org/some---app:1") == ("docker.io/my__org/some---app", ":1")
+    assert hub("a/b:" + "t" * 128) is not None and hub("a/b:" + "t" * 129) is None
+    # the digest is any `algorithm:hex` of 32+ hex digits (sha512 too), and a repository name is at most 255 characters
+    assert hub("a/b@sha512:" + "ab" * 64) == ("docker.io/a/b", "@sha512:" + "ab" * 64)
+    assert hub("a/b@sha256:" + "a" * 31) is None and hub("a/b@:" + "a" * 64) is None and hub("a/b@1sha:" + "a" * 64) is None
+    assert hub("/".join(["a" * 63] * 4)) is not None and hub("/".join(["a" * 64] * 4)) is None  # 255 characters in total, then 259
+    assert hub("a" * 255) is None  # `library/` is added for a single part: 8 + 255
+    assert hub("a/-b") is None and hub("a//b") is None and hub("a/b_") is None  # a separator cannot start, double a slash or end a part
+
+
+def test_the_real_office_converter_shape_is_read_not_failed(tmp_path, capsys):
+    """PO's real dev dump (10-28): the service spec carries `gotenberg/gotenberg:8.36` (Docker Hub, no host) while its serving revision runs `mirror.gcr.io/gotenberg/gotenberg@sha256:…`. Before this fix: «image 값을 알아보지 못함» + «이미지 참조 못 찾음», exit 3"""
+    digest = "sha256:" + "d" * 64
+    d = Dumps(tmp_path)
+    d.services = d.services + [{"metadata": {"name": "office-converter-dev"}, "status": {"traffic": [{"revisionName": "oc-1"}], "latestReadyRevisionName": "oc-1"},
+                                "spec": {"template": {"spec": {"containers": [{"image": "gotenberg/gotenberg:8.36"}]}}}}]
+    d.revisions = d.revisions + [{"metadata": {"name": "oc-1"}, "spec": {"containers": [{"image": f"mirror.gcr.io/gotenberg/gotenberg@{digest}"}]},
+                                  "status": {"imageDigest": f"mirror.gcr.io/gotenberg/gotenberg@{digest}"}}]
+    assert gate.main(d.argv()) == 0 and d.out.exists()
+    out = capsys.readouterr().out
+    assert "범위 밖 2건" in out and "docker.io/gotenberg/gotenberg:8.36" in out and f"mirror.gcr.io/gotenberg/gotenberg@{digest}" in out
+    # the same dump with a host-named unknown registry is still a failure (positive control: the fix does not open the door)
+    d.services[-1]["spec"]["template"]["spec"]["containers"][0]["image"] = "registry.example.com/gotenberg/gotenberg:8.36"
+    assert gate.main(d.argv()) == 3 and not d.out.exists()
+
+
+def test_a_service_whose_only_image_is_off_our_registry_is_read_not_missing():
+    hello = _service("hello", "hello-1", "gcr.io/cloudrun/hello")
+    rev = {"metadata": {"name": "hello-1"}, "spec": {"containers": [{"image": "gcr.io/cloudrun/hello"}]}, "status": {"imageDigest": "gcr.io/cloudrun/hello@sha256:" + "b" * 64}}
+    job = {"metadata": {"name": "j"}, "spec": {"template": {"spec": {"template": {"spec": {"containers": [{"image": "ghcr.io/o/job:1"}]}}}}}}
+    c = gate.collect([hello], [rev], [job], hosts={AR_HOST})
+    assert not c.problems and not c.refs and {o["image"] for o in c.outside} == {"gcr.io/cloudrun/hello", "ghcr.io/o/job"}
+    empty = {"metadata": {"name": "j2"}, "spec": {}}
+    assert gate.collect(None, None, [empty], hosts={AR_HOST}).problems  # positive control: a job with no image at all is still incomplete
+
+
+def test_an_unknown_registry_image_is_not_hidden_by_an_external_string_elsewhere_in_the_object(tmp_path):
+    """the QA finding: a service whose real image is on a registry the gate does not know, next to an unrelated `gcr.io/…` string (an annotation), used to count as «read» and pass"""
+    unknown = {"metadata": {"name": "s", "annotations": {"note": "see gcr.io/foo/bar:1"}}, "status": {"traffic": [{"revisionName": "rev-2"}]},
+               "spec": {"template": {"spec": {"containers": [{"image": "registry.example.com/team/app:1"}]}}}}
+    c = gate.collect([unknown], [_revision("rev-2", f"{HOST}/backend:backend-tag2", image_digest=_digest(2))], hosts={AR_HOST})
+    assert any("registry.example.com/team/app:1" in p for p in c.problems)
+    d = Dumps(tmp_path)
+    d.services = [unknown]
+    assert gate.main(d.argv()) == 3 and not d.out.exists()
+    known = {**unknown, "spec": {"template": {"spec": {"containers": [{"image": f"{HOST}/backend:backend-tag2"}]}}}}  # positive control: the same object with a known image
+    assert not gate.collect([known], [_revision("rev-2", f"{HOST}/backend:backend-tag2", image_digest=_digest(2))], hosts={AR_HOST}).problems
+    job = {"metadata": {"name": "j"}, "spec": {"template": {"spec": {"template": {"spec": {"containers": [{"image": "registry.example.com/team/job:1"}]}}}}}}
+    assert gate.collect(None, None, [job], hosts={AR_HOST}).problems  # jobs and --extra objects are read the same way
+    assert gate.collect(extra=[{"containers": [{"image": "registry.example.com/x:1"}]}], hosts={AR_HOST}).problems
+
+
+def test_a_digest_pinned_sibling_whose_digest_equals_the_status_digest_is_still_ambiguous():
+    """the QA finding (also older than this PR): `backend:tag` next to `backend@sha256:D` with `status.imageDigest` = D — the digest may be the sibling's, and the tag's own (older) image would go unprotected"""
+    service = [_service("s", "rev-2", f"{HOST}/backend:backend-tag2")]
+    sibling = {"metadata": {"name": "rev-2"}, "spec": {"containers": [{"image": f"{HOST}/backend:backend-tag2"}, {"image": f"{HOST}/backend@{_digest(7)}"}]},
+               "status": {"imageDigest": f"{HOST}/backend@{_digest(7)}"}}
+    assert gate.collect(service, [sibling], hosts={AR_HOST}).problems
+    lone = {"metadata": {"name": "rev-2"}, "spec": {"containers": [{"image": f"{HOST}/backend:backend-tag2"}]}, "status": {"imageDigest": f"{HOST}/backend@{_digest(2)}"}}
+    assert not gate.collect(service, [lone], hosts={AR_HOST}).problems  # positive control: the real single-container shape is fine
+
+
+def test_two_containers_with_the_same_package_and_tag_in_different_repositories_are_two_images():
+    """the QA finding: `A/backend:tag` and `B/backend:tag` are not one container — one resolved digest cannot cover both, and the other repository's image would go unprotected"""
+    service = [_service("s", "rev-2", f"{HOST}/backend:backend-tag2")]
+    two = {"metadata": {"name": "rev-2"}, "spec": {"containers": [{"image": f"{HOST}/backend:backend-tag2"}, {"image": f"{HOST_PROD}/backend:backend-tag2"}]},
+           "status": {"imageDigest": f"{HOST}/backend@{_digest(2)}"}}
+    assert gate.collect(service, [two], hosts={AR_HOST}).problems
+    assert not gate.collect(service, [_revision("rev-2", f"{HOST_PROD}/backend:backend-tag2", image_digest=_digest(2))], hosts={AR_HOST}).problems  # positive control: one container
+
+
+def test_the_reason_a_tagged_revision_is_unresolved_is_the_real_one():
+    """the QA finding: a digest on the spec side (an annotation, a pinned sibling) was reported as «status.imageDigest is missing» — the operator must see what is actually wrong"""
+    service = [_service("s", "rev-2", f"{HOST}/backend:backend-tag2")]
+    annotated = {"metadata": {"name": "rev-2", "annotations": {"build-digest": _digest(9)}}, "spec": {"containers": [{"image": f"{HOST}/backend:backend-tag2"}]},
+                 "status": {"imageDigest": f"{HOST}/backend@{_digest(2)}"}}
+    assert any("스펙 쪽" in p and "rev-2" in p for p in gate.collect(service, [annotated], hosts={AR_HOST}).problems)
+    missing = _revision("rev-2", f"{HOST}/backend:backend-tag2")
+    assert any("status.imageDigest가 없다" in p for p in gate.collect(service, [missing], hosts={AR_HOST}).problems)
+    sidecar = {"metadata": {"name": "rev-2"}, "spec": {"containers": [{"image": f"{HOST}/backend:backend-tag2"}, {"image": SQL_PROXY}]}, "status": {"imageDigest": _digest(2)}}
+    assert any("범위 밖" in p for p in gate.collect(service, [sidecar], hosts={AR_HOST}).problems)
+
+
+def test_an_image_value_that_is_not_a_string_is_not_skipped():
+    """the QA finding: `{"image": {"name": "registry.example.com/x/y:1"}}` next to a good sibling image used to pass — the walker only recursed into it"""
+    odd = {"containers": [{"image": f"{HOST}/backend:backend-tag2"}, {"image": {"name": "registry.example.com/x/y:1"}}]}
+    assert gate.collect(extra=[odd], hosts={AR_HOST}).problems
+    assert gate.collect(extra=[{"containers": [{"image": None}]}], hosts={AR_HOST}).problems
+    assert not gate.collect(extra=[{"containers": [{"image": f"{HOST}/backend:backend-tag2"}]}], hosts={AR_HOST}).problems  # positive control
+
+
+def test_a_tag_pinned_with_a_digest_protects_the_digest_even_after_the_tag_moved(tmp_path):
+    """the QA finding (it was in the checker before this PR): `backend:old@sha256:…` is the form Docker accepts; it pulls the DIGEST. When the tag `old` has since moved to a newer image, protecting «what the tag
+    points to now» keeps the wrong image and deletes the pinned one"""
+    refs = gate.refs_in(json.dumps({"image": f"{HOST}/backend:moved@{_digest(900)}"}))
+    assert [(r["package"], r["tag"], r["digest"]) for r in refs] == [("backend", None, _digest(900))]
+    assert [(r["ref"]) for r in gate.external_refs_in("gcr.io/x/y:1@sha256:" + "c" * 64)] == ["@sha256:" + "c" * 64]
+    d = Dumps(tmp_path)
+    d.images += [
+        {"package": f"{HOST}/backend", "version": _digest(900), "tags": [], "createTime": _iso(NOW - timedelta(days=60))},
+        {"package": f"{HOST}/backend", "version": _digest(901), "tags": ["moved"], "createTime": _iso(NOW - timedelta(days=1))},
+    ]
+    d.mig = {"startup": f"docker run {HOST}/backend:moved@{_digest(900)}"}
+    assert gate.main(d.argv()) == 0
+    assert _digest(900)[:64] in json.loads(d.out.read_text())[0]["condition"]["versionNamePrefixes"], "the pinned old image is the one in use"
+
+
+def test_a_resolved_digest_from_a_registry_the_gate_does_not_know_does_not_resolve_a_tag():
+    """the QA finding: `status.imageDigest` of an unknown registry carries a valid-looking SHA; it must not stand for our tagged container"""
+    service = [_service("s", "rev-2", f"{HOST}/backend:backend-tag2")]
+    foreign = _revision("rev-2", f"{HOST}/backend:backend-tag2", image_digest="registry.example.com/x/y@" + _digest(2))
+    assert gate.collect(service, [foreign], hosts={AR_HOST}).problems
+    for ok in (_digest(2), f"{HOST}/backend@{_digest(2)}"):  # the two real shapes still resolve
+        assert not gate.collect(service, [_revision("rev-2", f"{HOST}/backend:backend-tag2", image_digest=ok)], hosts={AR_HOST}).problems
+
+
+def test_an_in_use_old_image_in_the_second_repository_is_caught_by_check_and_kept_by_the_generated_policy(tmp_path):
+    """the QA test gap: `check()` must look at every dumped repository, not only the first one"""
+    d = Dumps(tmp_path)
+    d.more_images = [_prod_images(40, age_days=40)]
+    versions = gate.load_versions(d.images + d.more_images[0])
+    in_use = {("backend", _digest(20_035))}  # the second repository's 36th build: past its newest 30 and older than 30 days
+    _deleted, hit = gate.check(versions, in_use, _base(), NOW)
+    assert hit == in_use, "the base policy alone deletes it (positive control: the check sees the second repository)"
+    assert gate.check(versions, in_use, gate.build_policy(_base(), in_use), NOW)[1] == set()
+    d.mig = {"startup": f"docker run {HOST_PROD}/backend:prod-tag35"}
+    assert gate.main(d.argv()) == 0
+    assert _digest(20_035)[:64] in json.loads(d.out.read_text())[0]["condition"]["versionNamePrefixes"]
+
+
+def test_without_dump_hosts_every_registry_reference_stays_inside_the_scope():
+    """a dump that carries no repository path gives no host to compare: the AR references are all kept as in-use candidates (못 찾으면 실패)"""
+    refs, _warnings, _problems = gate.collect_in_use_refs(extra=[{"s": "docker run us-docker.pkg.dev/p/r/app:1"}])
+    assert [r["package"] for r in refs] == ["app"]
+    c = gate.collect(extra=[{"s": "docker run us-docker.pkg.dev/p/r/app:1"}], hosts={AR_HOST})
+    assert not c.refs and len(c.outside) == 1
