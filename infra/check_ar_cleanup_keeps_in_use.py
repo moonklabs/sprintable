@@ -17,6 +17,7 @@
 
 입력(전부 `gcloud … --format=json` 출력. 키 이름을 추측하지 않고 이미지 참조 문자열(태그 · digest · 맨 digest)을 정규식으로 줍는다):
   --images        gcloud artifacts docker images list <repo> --include-tags --format=json        (--limit 금지: 잘린 목록은 거짓 초록을 만든다)
+                  **정리 정책을 거는 저장소마다 한 번씩**(여러 번). 사용 중 이미지가 다른 저장소에 있으면 그 저장소의 덤프도 넣는다. 한 파일이 비었거나 같은 이미지가 두 파일에 있으면 입력 오류
   --run-services  gcloud run services list --region=… --format=json                              (필수)
   --run-revisions gcloud run revisions list --region=… --format=json                             (필수)
   --run-jobs      gcloud run jobs list --region=… --format=json                                  (필수)
@@ -26,11 +27,18 @@
 산출: `--emit-policy PATH`로 기본 정책(infra/artifact-registry/cleanup-policy.base.json)에 `keep-in-use` Keep 규칙을 채운 정책을 쓴다 —
 **통과(exit 0)일 때만** 쓰고, 실패하면 이전 실행이 남긴 같은 이름의 파일을 지운다(실패한 입력으로 만든 정책이 적용되지 않게).
 PO는 이 생성본을 dry-run → 적용한다(기본 정책만 적용하면 사용 중이면서 오래된 이미지가 지워질 수 있다).
+저장소가 여럿이면 «생성본 하나»를 --images로 넣은 저장소마다 적용한다(`keep-in-use`는 digest 접두 목록이라 다른 저장소에서는 아무것도 안 맞춘다). 최근 30개 규칙은 저장소마다 따로 센다.
 
 exit code: 0=지움 0 · 1=사용 중 이미지가 지워진다 · 2=입력 오류(AR 목록 · 서비스 · 리비전이 비었다 · 필수 덤프 없음 · 개수가 안 맞음) ·
-          3=불완전(사용 중 참조를 AR 목록에서 못 찾음 · 서빙 리비전 덤프 누락 · 이미지 참조 없는 서비스/job/--extra ·
+          3=불완전(사용 중 참조를 AR 목록에서 못 찾음 · 서빙 리비전 덤프 누락 · 이미지 참조 없는 서비스/job · --extra가 «전부» 이미지 참조 없음 ·
           태그로 배포된 서빙 리비전에 `status.imageDigest`가 없음) — 안전하게 실패.
 참조는 `<host>/<project>/<repo>/<package>`까지 같아야 같은 이미지로 친다(다른 저장소의 같은 이름은 보호하지 않는다). 태그도 digest도 없는 참조는 `:latest`로 본다.
+
+범위 밖(실패가 아니라 따로 센다): 정리 정책이 «닿을 수 없는» 참조 — **우리 AR 호스트가 아님이 확실한 것뿐**이다. 우리 호스트 = `--images` 덤프가 속한 `<지역>-docker.pkg.dev`.
+  · 다른 호스트의 AR 참조(다른 지역) · 알려진 외부 레지스트리(gcr.io · Docker Hub · ghcr.io · quay.io · mcr.microsoft.com · registry.k8s.io · ECR · ACR)
+  → 사용 중 목록에 넣지 않고, 출력에 «범위 밖 N건 + 이유 + 어디서 나왔나»로 보인다. 컨테이너 옆에 범위 밖 이미지가 있는 서빙 리비전은 `status.imageDigest`가 누구 것인지 모르므로 불완전(exit 3)이다.
+  · **우리 호스트인데 덤프에 없는 저장소 · 이미지는 범위 밖이 아니다** — 여전히 exit 3(그 저장소의 --images를 더한다). 알아보지 못하는 레지스트리 주소도 범위 밖으로 세지 않는다(모르면 실패한다).
+이미지 참조가 없는 --extra 하나는 «보이는 경고»(⚠️)이고 통과를 막지 않는다(이미지를 쓰지 않는 템플릿이 있을 수 있다). 다만 --extra가 «전부» 그렇다면 VM이 당기는 이미지를 하나도 못 본 것이라 exit 3이다.
 
 한계: 태그로 배포된 리비전이 컨테이너를 여럿 가지면 짝을 지을 수 없어 항상 exit 3이다(이 저장소의 서비스는 컨테이너 하나).
 한계(받아들인 것): 이 도구는 한 사람이 자기 작업 폴더에서 돌리는 보조 도구다 — 경로가 «동시에» 바뀌는 경쟁 상태(검사와 지우기 사이)와, 입력 덤프가 일부러 `keep-in-use`로 시작하는 정책 모양인 경우는 막지 않는다(실수를 막는 장치이지 공격 방어가 아니다).
@@ -48,7 +56,7 @@ import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, NamedTuple
 
 _BASE_POLICY = Path(__file__).resolve().parent / "artifact-registry" / "cleanup-policy.base.json"
 
@@ -59,6 +67,17 @@ _IMAGE_REF = re.compile(
 )
 # 맨 digest(`status.imageDigest`가 이 꼴로 올 수 있다): 위 전체 참조의 `@sha256:…` 꼬리는 제외한다
 _BARE_DIGEST = re.compile(r"(?<![@0-9A-Za-z:/_.-])(sha256:[0-9a-f]{64})")
+
+# «우리 AR이 아님이 확실한» 레지스트리 주소 — 알려진 외부 레지스트리만 센다(목록에 없는 주소는 «모르는 것»이라 범위 밖으로 세지 않는다).
+_EXTERNAL_HOSTS = (
+    r"(?:[a-z0-9-]+\.)?gcr\.io|(?:index\.|registry-1\.)?docker\.io|ghcr\.io|quay\.io|mcr\.microsoft\.com|registry\.k8s\.io|public\.ecr\.aws"
+    r"|[a-z0-9-]+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com|[a-z0-9-]+\.azurecr\.io"
+)
+# 앞에 `/ . : @ - 영숫자`가 오면 URL(`https://ghcr.io/…`) · 다른 호스트 이름의 일부다 — 단 JSON 속 줄바꿈(`\n`) 바로 뒤는 새 줄의 시작이다
+_EXTERNAL_REF = re.compile(
+    r"(?:(?<![A-Za-z0-9._/:@-])|(?<=\\n)|(?<=\\t)|(?<=\\r))(?P<host>" + _EXTERNAL_HOSTS + r")/(?P<path>[a-z0-9._-]+(?:/[a-z0-9._-]+)*)"
+    r"(?::(?P<tag>[A-Za-z0-9_][A-Za-z0-9_.-]*)|@(?P<digest>sha256:[0-9a-f]{64}))?"
+)
 
 
 class Version:
@@ -76,6 +95,7 @@ class Version:
 
 
 Ref = dict[str, "str | None"]
+Outside = dict[str, str]  # 범위 밖 참조: image(<host>/…/<package>) · ref(`:tag` · `@digest` · 빈 문자열) · reason · where
 
 
 def _parse_time(value: Any) -> datetime:
@@ -124,11 +144,20 @@ def refs_in(text: str) -> list[Ref]:
     """문자열 안의 이미지 참조를 전부 줍는다: 전체 참조(태그 또는 digest)와 맨 digest(package=None — 어느 패키지든 그 digest)."""
     refs: list[Ref] = [
         {"package": _short_package(f"{m['host']}/{m['project']}/{m['repo']}/{m['package']}"), "tag": m["tag"] or (None if m["digest"] else "latest"),
-         "digest": m["digest"], "repo": f"{m['host']}/{m['project']}/{m['repo']}"}
+         "digest": m["digest"], "repo": f"{m['host']}/{m['project']}/{m['repo']}", "host": m["host"]}
         for m in _IMAGE_REF.finditer(text)
     ]
-    refs += [{"package": None, "tag": None, "digest": m.group(1), "repo": None} for m in _BARE_DIGEST.finditer(text)]
+    refs += [{"package": None, "tag": None, "digest": m.group(1), "repo": None, "host": None} for m in _BARE_DIGEST.finditer(text)]
     return refs
+
+
+def external_refs_in(text: str) -> list[Outside]:
+    """문자열 안의 «알려진 외부 레지스트리» 이미지 참조(gcr.io · Docker Hub …). 우리 AR이 아님이 확실하니 정리 정책이 닿을 수 없다."""
+    return [
+        {"image": f"{m['host']}/{m['path']}", "ref": f":{m['tag']}" if m["tag"] else (f"@{m['digest']}" if m["digest"] else ""),
+         "reason": f"AR이 아닌 외부 레지스트리({m['host']})"}
+        for m in _EXTERNAL_REF.finditer(text)
+    ]
 
 
 def _items(data: Any) -> list[dict]:
@@ -166,16 +195,17 @@ def _status_digest(rev: dict) -> str | None:
     return m.group(0) if m else None
 
 
-def _unresolved_tags(rev: dict, found: list[Ref]) -> bool:
-    """태그로 배포된 이미지가 있으면 «모르는» 경우를 모두 true로 돌려준다:
+def _unresolved_tags(rev: dict, found: list[Ref], outside: Iterable[Outside] = ()) -> bool:
+    """태그로 배포된 이미지가 있으면 «모르는» 경우를 모두 true로 돌려준다(`found`는 범위 안 참조만):
     · 이미지 패키지가 둘 이상이거나 태그가 둘 이상(컨테이너 여럿 — 하나뿐인 `status.imageDigest`를 짝지을 수 없다)
+    · 같은 리비전에 범위 밖 이미지가 함께 있다(그 digest가 우리 컨테이너 것인지 옆 컨테이너 것인지 가릴 수 없다)
     · `status.imageDigest` 필드가 없다
     · 그 digest와 다른 digest가 같은 리비전에 더 있다(digest로 고정된 컨테이너나 무관한 SHA — 어느 것이 태그의 것인지 가릴 수 없다)"""
     tagged = {(r["package"], r["tag"]) for r in found if r["tag"]}
     if not tagged:
         return False
     packages = {r["package"] for r in found if r["package"]}
-    if len(tagged) > 1 or len(packages) > 1:
+    if len(tagged) > 1 or len(packages) > 1 or any(True for _ in outside):
         return True
     resolved = _status_digest(rev)
     if resolved is None:
@@ -183,19 +213,48 @@ def _unresolved_tags(rev: dict, found: list[Ref]) -> bool:
     return any(r["digest"] and r["digest"] != resolved for r in found)
 
 
-def collect_in_use_refs(
-    services: Any = None, revisions: Any = None, jobs: Any = None, extra: Iterable[Any] = ()
-) -> tuple[list[Ref], list[str], list[str]]:
-    """(사용 중 이미지 참조 목록, 경고, 불완전한 까닭들). 불완전한 까닭이 하나라도 있으면 «지움 0»을 약속하지 않는다(exit 3).
-    서비스 JSON이 있으면 «서빙 중 리비전»만, 없으면 모든 리비전을 사용 중으로 본다(안전한 쪽)."""
+class Collected(NamedTuple):
+    refs: list[Ref]  # 사용 중 이미지 참조(우리 AR 범위 안)
+    warnings: list[str]
+    problems: list[str]
+    outside: list[Outside]  # 범위 밖 참조(정리 정책이 닿을 수 없는 것 — 실패가 아니라 따로 센다)
+
+
+def _scan(text: str, where: str, hosts: set[str]) -> tuple[list[Ref], list[Outside]]:
+    """한 덩어리의 이미지 참조를 «범위 안»(우리 AR 호스트 · 맨 digest)과 «범위 밖»으로 가른다. 범위 밖은 우리 호스트가 아님이 확실한 것뿐 —
+    `hosts`가 비어 있으면(저장소 이름을 못 읽은 덤프) AR 참조는 전부 범위 안으로 둔다(모르면 안쪽: 못 찾으면 실패한다)."""
+    inside: list[Ref] = []
+    outside: dict[tuple[str, str], Outside] = {}
+    for ref in refs_in(text):
+        if hosts and ref["host"] and ref["host"] not in hosts:
+            tail = f":{ref['tag']}" if ref["tag"] and not ref["digest"] else (f"@{ref['digest']}" if ref["digest"] else "")
+            image = f"{ref['repo']}/{ref['package']}"
+            outside.setdefault((image, tail), {"image": image, "ref": tail, "where": where,
+                                               "reason": f"우리 AR 호스트({', '.join(sorted(hosts))})가 아님: {ref['host']}"})
+        else:
+            inside.append(ref)
+    for ext in external_refs_in(text):
+        outside.setdefault((ext["image"], ext["ref"]), {**ext, "where": where})
+    return inside, list(outside.values())
+
+
+def collect(
+    services: Any = None, revisions: Any = None, jobs: Any = None, extra: Iterable[Any] = (), hosts: Iterable[str] = ()
+) -> Collected:
+    """사용 중 이미지 참조 · 경고 · 불완전한 까닭들 · 범위 밖 참조. 불완전한 까닭이 하나라도 있으면 «지움 0»을 약속하지 않는다(exit 3).
+    서비스 JSON이 있으면 «서빙 중 리비전»만, 없으면 모든 리비전을 사용 중으로 본다(안전한 쪽). `hosts` = 우리 AR 호스트들(`--images` 덤프가 속한 호스트).
+    이미지 참조가 «하나도» 없는 서비스 · job은 불완전이다. 범위 밖 참조만 있는 것은 아니다(우리 이미지가 아닐 뿐 읽은 것이다)."""
+    host_set = set(hosts)
     refs: list[Ref] = []
     warnings: list[str] = []
     problems: list[str] = []
+    outside: list[Outside] = []
     for svc in _items(services) if services is not None else []:
-        found = refs_in(json.dumps(svc))
-        if not found:
+        found, out = _scan(json.dumps(svc), f"서비스 {_name_of(svc) or '?'}", host_set)
+        if not found and not out:
             problems.append(f"서비스 {_name_of(svc) or '?'}에서 이미지 참조를 못 찾음")
         refs += found
+        outside += out
     if revisions is not None:
         revs = _items(revisions)
         serving = _serving_revision_names(services) if services is not None else set()
@@ -205,31 +264,50 @@ def collect_in_use_refs(
                 problems.append(f"서빙 중 리비전 {name}이 리비전 덤프에 없음(덤프가 잘렸거나 다른 지역)")
             for rev in revs:
                 if _name_of(rev) in serving:
-                    found = refs_in(json.dumps(rev))
-                    if not found:
+                    found, out = _scan(json.dumps(rev), f"서빙 중 리비전 {_name_of(rev) or '?'}", host_set)
+                    if not found and not out:
                         problems.append(f"서빙 중 리비전 {_name_of(rev)}에서 이미지 참조를 못 찾음")
-                    elif _unresolved_tags(rev, found):
+                    elif _unresolved_tags(rev, found, out):
                         # 태그로 배포된 이미지마다 실제로 쥔 digest(`status.imageDigest`)를 모르면, 태그가 그 뒤 옮겨졌을 때 옛 이미지를 못 지킨다 — 모르면 실패
                         problems.append(f"서빙 중 리비전 {_name_of(rev)}에 태그로 배포된 이미지가 있는데 그만큼의 status.imageDigest가 없다(어느 digest를 쥐었는지 모른다)")
                     refs += found
+                    outside += out
         else:
             warnings.append("서비스 JSON에서 서빙 중 리비전을 못 읽어 모든 리비전을 사용 중으로 셌다(안전한 쪽).")
             for rev in revs:
-                found = refs_in(json.dumps(rev))
-                if _unresolved_tags(rev, found):
+                found, out = _scan(json.dumps(rev), f"리비전 {_name_of(rev) or '?'}", host_set)
+                if _unresolved_tags(rev, found, out):
                     problems.append(f"리비전 {_name_of(rev) or '?'}에 태그로 배포된 이미지가 있는데 그만큼의 status.imageDigest가 없다(서빙 여부를 몰라 모든 리비전을 센다)")
                 refs += found
+                outside += out
     for job in _items(jobs) if jobs is not None else []:
-        found = refs_in(json.dumps(job))
-        if not found:
+        found, out = _scan(json.dumps(job), f"job {_name_of(job) or '?'}", host_set)
+        if not found and not out:
             problems.append(f"job {_name_of(job) or '?'}에서 이미지 참조를 못 찾음")
         refs += found
-    for n, blob in enumerate(extra, 1):
-        found = refs_in(json.dumps(blob))
-        if not found:
-            problems.append(f"--extra {n}번째 JSON에서 이미지 참조를 못 찾음(비었거나 형식이 다르다)")
+        outside += out
+    extra_blobs = list(extra)
+    extra_read = False
+    for n, blob in enumerate(extra_blobs, 1):
+        found, out = _scan(json.dumps(blob), f"--extra {n}번째", host_set)
+        if found or out:
+            extra_read = True
+        else:
+            # 이미지를 쓰지 않는 템플릿일 수 있다 — 통과를 막지 않고 «보이게» 경고한다(아래: 전부 그렇다면 막는다)
+            warnings.append(f"--extra {n}번째 JSON에는 이미지 참조가 없다(이 파일로 지켜지는 이미지는 0) — 이미지를 쓰지 않는 템플릿이 맞는지 사람이 확인한다.")
         refs += found
-    return refs, warnings, problems
+        outside += out
+    if extra_blobs and not extra_read:
+        problems.append("--extra가 전부 이미지 참조 없음 — VM이 부팅 때 당기는 이미지를 하나도 못 읽었다(건너뛴 것과 같다)")
+    return Collected(refs, warnings, problems, outside)
+
+
+def collect_in_use_refs(
+    services: Any = None, revisions: Any = None, jobs: Any = None, extra: Iterable[Any] = (), hosts: Iterable[str] = ()
+) -> tuple[list[Ref], list[str], list[str]]:
+    """`collect`의 앞 셋(사용 중 참조 · 경고 · 불완전한 까닭들)."""
+    c = collect(services, revisions, jobs, extra, hosts)
+    return c.refs, c.warnings, c.problems
 
 
 def resolve_in_use(refs: list[Ref], versions: list[Version]) -> tuple[set[tuple[str, str]], list[Ref]]:
@@ -340,7 +418,18 @@ def _matches(cond: dict, v: Version, now: datetime) -> bool:
 
 
 def simulate(policy: list[dict], versions: list[Version], now: datetime) -> set[tuple[str, str]]:
-    """정책이 지울 (package, digest) 집합. Keep이 Delete를 이긴다(AR 정리 정책의 규칙), 어느 쪽에도 안 걸리면 남는다."""
+    """정책이 지울 (package, digest) 집합 — **저장소마다 따로** 모의한다(AR 정리 정책은 저장소 단위: «최근 30개»도 저장소 안에서 센다)."""
+    by_repo: dict[str | None, list[Version]] = {}
+    for v in versions:
+        by_repo.setdefault(v.repo, []).append(v)
+    deleted: set[tuple[str, str]] = set()
+    for group in by_repo.values():
+        deleted |= _simulate_repo(policy, group, now)
+    return deleted
+
+
+def _simulate_repo(policy: list[dict], versions: list[Version], now: datetime) -> set[tuple[str, str]]:
+    """저장소 하나의 모의. Keep이 Delete를 이긴다(AR 정리 정책의 규칙), 어느 쪽에도 안 걸리면 남는다."""
     keep: set[tuple[str, str]] = set()
     delete: set[tuple[str, str]] = set()
     for rule in policy:
@@ -444,9 +533,47 @@ def _write_policy(path: Path, text: str) -> None:
         raise
 
 
+def _duplicate_images(versions: list[Version]) -> list[str]:
+    """같은 (저장소, 패키지, digest)가 두 번 나오면 그 목록 — 같은 저장소 덤프를 두 번 넣었거나 한 파일이 겹친 것이다(개수가 부풀어 «다 봤다»가 틀려 보인다).
+    저장소 이름을 못 읽은 덤프(`repo` 없음)는 가를 수 없어 보지 않는다."""
+    seen: set[tuple[str, str, str]] = set()
+    dupes: list[str] = []
+    for v in versions:
+        if not v.repo:
+            continue
+        key = (v.repo, v.package, v.digest)
+        if key in seen:
+            dupes.append(f"{v.repo}/{v.package} {v.digest}")
+        seen.add(key)
+    return dupes
+
+
+def _outside_lines(outside: list[Outside]) -> list[str]:
+    """범위 밖 참조를 «이미지 · 이유 · 어디서 나왔나»로 한 번씩만(같은 이미지가 리비전 · 서비스에 겹쳐 나와도 한 줄)."""
+    grouped: dict[tuple[str, str, str], list[str]] = {}
+    for o in outside:
+        wheres = grouped.setdefault((o["image"], o["ref"], o["reason"]), [])
+        if o["where"] not in wheres:
+            wheres.append(o["where"])
+    if not grouped:
+        return []
+    lines = [f"범위 밖 {len(grouped)}건 — 정리 정책이 닿을 수 없는 참조라 사용 중 목록에 넣지 않았다(우리 AR 호스트가 아님이 확실한 것뿐):"]
+    for (image, ref, reason), wheres in sorted(grouped.items()):
+        lines.append(f"  - {image}{ref} — {reason} · {', '.join(wheres)}")
+    return lines
+
+
+def _missing_hint(ref: Ref, repos: list[str]) -> str:
+    """못 찾은 참조의 저장소가 덤프에 아예 없으면 어떻게 하면 되는지 — 범위 밖으로 세지는 않는다(우리 호스트의 저장소다)."""
+    repo = ref.get("repo")
+    if repo and repo not in repos:
+        return f" — 그 저장소({repo})의 덤프가 --images에 없다. 정리 정책을 거는 저장소면 그 저장소의 --images를 더한다"
+    return ""
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0], allow_abbrev=False)  # 약어(`--emit` 등)를 끈다: 사전 스캔이 못 보는 이름으로 낡은 정책 파일 삭제를 건너뛰는 길이 없게
-    ap.add_argument("--images", required=True)
+    ap.add_argument("--images", action="append", required=True, help="AR 이미지 목록(정리 정책을 거는 저장소마다 한 번씩)")
     ap.add_argument("--run-services", required=True)
     ap.add_argument("--run-revisions", required=True)
     ap.add_argument("--run-jobs", required=True)
@@ -462,7 +589,7 @@ def main(argv: list[str] | None = None) -> int:
         _drop_stale(emit, protect)
     args = ap.parse_args(argv)
     if args.emit_policy:
-        clash = [q for q in (args.images, args.run_services, args.run_revisions, args.run_jobs, args.base_policy, *args.extra) if _same_file(args.emit_policy, q)]
+        clash = [q for q in (*args.images, args.run_services, args.run_revisions, args.run_jobs, args.base_policy, *args.extra) if _same_file(args.emit_policy, q)]
         if clash:
             print(f"입력 오류: --emit-policy가 입력 파일과 같은 경로다({clash[0]}) — 입력을 덮어쓰지도 지우지도 않는다. 다른 경로를 준다.")
             return 2
@@ -472,8 +599,14 @@ def main(argv: list[str] | None = None) -> int:
     if not args.extra:
         print("입력 오류: --extra(MIG 인스턴스 템플릿 JSON)가 하나도 없다. VM이 부팅 때 당기는 이미지를 못 본다 — 건너뛸 수 없다.")
         return 2
+    versions: list[Version] = []
     try:
-        versions = load_versions(_load(args.images))
+        for path in args.images:
+            one = load_versions(_load(path))
+            if not one:
+                print(f"입력 오류: AR 이미지 목록이 비었다({path}) — 비어 있는 저장소의 덤프를 넣지 않는다.")
+                return 2
+            versions += one
         base = json.loads(Path(args.base_policy).read_text())
         extra = [json.loads(Path(p).read_text()) for p in args.extra]
         services, revisions, jobs = _load(args.run_services), _load(args.run_revisions), _load(args.run_jobs)
@@ -482,6 +615,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if not versions:
         print("입력 오류: AR 이미지 목록이 비었다.")
+        return 2
+    dupes = _duplicate_images(versions)
+    if dupes:
+        print(f"입력 오류: 같은 이미지가 --images 덤프에 두 번 이상 있다(같은 저장소를 두 번 넣었다) — {dupes[0]} 등 {len(dupes)}개.")
         return 2
     if any(r.get("name") == "keep-in-use" for r in base):
         print("입력 오류: 기본 정책에 이미 keep-in-use 규칙이 있다(생성본이 덮어쓰면 보호가 사라질 수 있다) — 기본 정책에는 두지 않는다.")
@@ -493,10 +630,12 @@ def main(argv: list[str] | None = None) -> int:
     if not _items(services) or not _items(revisions) or not _items(jobs):
         print("입력 오류: 서비스 · 리비전 · job 덤프 중 비어 있는 것이 있다(사용 중 이미지를 다 알 수 없다).")
         return 2
-    refs, warnings, problems = collect_in_use_refs(services, revisions, jobs, extra)
+    repos = sorted({v.repo for v in versions if v.repo})
+    hosts = {r.split("/")[0] for r in repos}
+    refs, warnings, problems, outside = collect(services, revisions, jobs, extra, hosts)
     if not refs:
         # 사용 중 참조가 하나도 안 잡히면 «지움 0»은 빈 입력 위의 거짓 초록이다(서비스 JSON이 비었거나 형식이 다름) — 절대 통과시키지 않는다.
-        print("입력 오류: 사용 중 이미지 참조가 하나도 안 잡혔다(서비스 · 리비전 · job · 템플릿 JSON이 비었거나 형식이 다르다).")
+        print(f"입력 오류: 사용 중 이미지 참조가 하나도 안 잡혔다(서비스 · 리비전 · job · 템플릿 JSON이 비었거나 형식이 다르다 · 범위 밖으로 센 참조 {len(outside)}건).")
         return 2
     now = _parse_time(args.now) if args.now else datetime.now(timezone.utc)
     in_use, missing = resolve_in_use(refs, versions)
@@ -510,9 +649,11 @@ def main(argv: list[str] | None = None) -> int:
     base_delete, base_hit = check(versions, in_use, base, now)
     for w in warnings:
         print(f"⚠️ {w}")
-    print(f"AR 이미지 {len(versions)}개 · 사용 중 참조 {len(refs)}건 → 사용 중 digest {len(in_use)}개")
+    print(f"AR 이미지 {len(versions)}개(저장소 {len(repos)}곳{': ' + ', '.join(r.split('/', 1)[1] for r in repos) if repos else ''}) · 사용 중 참조 {len(refs)}건 → 사용 중 digest {len(in_use)}개")
     print(f"기본 정책만: 지움 {len(base_delete)}개 중 사용 중 {len(base_hit)}개  ← 0이 아니면 생성본의 keep-in-use가 필요한 까닭")
     print(f"생성 정책:   지움 {len(would_delete)}개 중 사용 중 {len(hit)}개")
+    for line in _outside_lines(outside):
+        print(line)
     if hit:
         print("PROBLEM — 지워지는 사용 중 이미지:")
         for pkg, digest in sorted(hit):
@@ -521,7 +662,7 @@ def main(argv: list[str] | None = None) -> int:
     if missing or problems:
         print("불완전 — «지움 0»을 약속할 수 없다(정책 파일도 쓰지 않았다):")
         for ref in missing:
-            print(f"  - 사용 중 참조를 AR 목록에서 못 찾음: {ref['package'] or '?'} {ref['tag'] or ref['digest']}")
+            print(f"  - 사용 중 참조를 AR 목록에서 못 찾음: {ref['package'] or '?'} {ref['tag'] or ref['digest']}{_missing_hint(ref, repos)}")
         for why in problems:
             print(f"  - {why}")
         return 3
@@ -534,7 +675,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"쓰기 오류: 정책 파일을 쓰지 못했다({err.__class__.__name__}: {err}) — 파일을 남기지 않았다.")
             return 2
         print(f"생성 정책을 썼다: {args.emit_policy}")
-    print("OK — 생성 정책이 지우는 이미지 중 사용 중인 것은 0.")
+    note = f" (경고 {len(warnings)}건 — 위 ⚠️ 줄을 읽는다)" if warnings else ""
+    print(f"OK — 생성 정책이 지우는 이미지 중 사용 중인 것은 0.{note}")
     return 0
 
 

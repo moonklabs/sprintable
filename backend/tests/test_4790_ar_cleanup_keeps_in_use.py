@@ -70,6 +70,8 @@ class Dumps:
         self.jobs = [{"metadata": {"name": "migrate"}, "spec": {"template": {"spec": {"template": {"spec": {"containers": [{"image": f"{HOST}/backend:backend-tag3"}]}}}}}}]
         self.mig = {"startup": f"docker run {HOST}/backend:backend-tag45"}
         self.out = tmp_path / "policy.json"
+        self.more_images: list[list[dict]] = []  # one more `--images` dump per further repository
+        self.more_extra: list[object] = []  # further `--extra` dumps after the first template
 
     def argv(self, *extra_args: str, with_mig: bool = True) -> list[str]:
         files = {"images": self.images, "services": self.services, "revisions": self.revisions, "jobs": self.jobs}
@@ -84,6 +86,14 @@ class Dumps:
             mig = self.dir / "mig.json"
             mig.write_text(json.dumps(self.mig))
             argv += ["--extra", str(mig)]
+        for n, images in enumerate(self.more_images):
+            path = self.dir / f"images-{n + 2}.json"
+            path.write_text(json.dumps(images))
+            argv += ["--images", str(path)]
+        for n, blob in enumerate(self.more_extra):
+            path = self.dir / f"extra-{n + 2}.json"
+            path.write_text(json.dumps(blob))
+            argv += ["--extra", str(path)]
         return argv
 
 
@@ -660,3 +670,159 @@ def test_the_registry_limit_is_exactly_64_characters_at_the_boundary():
     over = [{"name": "x", "condition": {"versionNamePrefixes": ["a" * 65]}}]
     assert gate.policy_problems(at) == []
     assert gate.policy_problems(over) != []
+
+
+# ---- story 4796 AC4 precondition: several repositories, out-of-scope references, an extra without images ----
+
+HOST_PROD = "asia-northeast3-docker.pkg.dev/sprintable-494803/sprintable-prod"
+AR_HOST = HOST.split("/")[0]
+SQL_PROXY = "gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.8.0"
+
+
+def _iso(moment: datetime) -> str:
+    return moment.isoformat().replace("+00:00", "Z")
+
+
+def _prod_images(count: int, *, age_days: int = 0) -> list[dict]:
+    """the second repository: `backend` builds, `age_days` + i days old (digests 20_000+i, distinct from the first repository's)"""
+    return [
+        {"package": f"{HOST_PROD}/backend", "version": _digest(20_000 + i), "tags": [f"prod-tag{i}"], "createTime": _iso(NOW - timedelta(days=age_days + i))}
+        for i in range(count)
+    ]
+
+
+def test_two_repositories_in_one_call_pass_and_both_digests_are_kept(tmp_path):
+    """the VM template pulls from the first repository while the prod services run from the second: one call with both `--images` dumps passes, no hand-made workaround"""
+    d = Dumps(tmp_path)
+    d.more_images = [_prod_images(5)]
+    d.mig = {"startup": f"docker run {HOST}/backend:backend-tag45 {HOST_PROD}/backend:prod-tag4"}
+    assert gate.main(d.argv()) == 0
+    kept = json.loads(d.out.read_text())[0]["condition"]["versionNamePrefixes"]
+    assert _digest(20_004)[:64] in kept and _digest(45)[:64] in kept
+
+
+def test_a_reference_into_a_repository_that_was_not_dumped_still_fails_and_says_what_to_add(tmp_path, capsys):
+    """«모르면 실패한다»: the same call without the second dump — our own host, a repository the list does not hold — is exit 3 (not an out-of-scope reference) and names the way out"""
+    d = Dumps(tmp_path)
+    d.mig = {"startup": f"docker run {HOST}/backend:backend-tag45 {HOST_PROD}/backend:prod-tag4"}
+    assert gate.main(d.argv()) == 3 and not d.out.exists()
+    out = capsys.readouterr().out
+    assert HOST_PROD in out and "--images" in out
+    assert "범위 밖" not in out, "our own host is never out of scope"
+    d.more_images = [_prod_images(5)]
+    assert gate.main(d.argv()) == 0  # the same call with the dump is green: the test can tell the two apart
+
+
+def test_the_newest_30_rule_counts_inside_each_repository(tmp_path):
+    """the policy is applied per repository: 20 old builds in each of two repositories is 20 per repository (all kept), not 40 together (ten deleted)"""
+    first = [{"package": f"{HOST}/backend", "version": _digest(i), "tags": [f"a{i}"], "createTime": _iso(NOW - timedelta(days=40 + i))} for i in range(20)]
+    second = _prod_images(20, age_days=40)
+    both = gate.load_versions(first + second)
+    assert gate.simulate(_base(), both, NOW) == set()
+    # positive control: the same forty builds in ONE repository do lose ten
+    one_repo = gate.load_versions(first + [{**x, "package": f"{HOST}/backend"} for x in second])
+    assert len(gate.simulate(_base(), one_repo, NOW)) == 10
+
+
+def test_every_dumped_repository_is_simulated_and_an_old_unused_image_in_the_second_goes(tmp_path):
+    d = Dumps(tmp_path)
+    d.more_images = [_prod_images(40, age_days=40)]
+    assert gate.main(d.argv()) == 0
+    versions = gate.load_versions(d.images + d.more_images[0])
+    deleted = gate.simulate(json.loads(d.out.read_text()), versions, NOW)
+    assert {("backend", _digest(20_000 + i)) for i in range(30, 40)} <= deleted  # the second repository's own 31st-40th builds are deleted too
+
+
+def test_the_same_repository_twice_or_an_empty_dump_is_bad_input(tmp_path, capsys):
+    d = Dumps(tmp_path)
+    d.more_images = [d.images]  # the same repository listed twice: counts would double
+    assert gate.main(d.argv()) == 2 and not d.out.exists()
+    assert "두 번" in capsys.readouterr().out
+    d = Dumps(tmp_path)
+    d.more_images = [[]]  # a repository whose list came back empty is most likely the wrong file
+    assert gate.main(d.argv()) == 2 and not d.out.exists()
+
+
+def test_a_reference_off_our_registry_is_counted_apart_with_its_reason_and_does_not_fail(tmp_path, capsys):
+    d = Dumps(tmp_path)
+    d.mig = {"startup": f"docker run {HOST}/backend:backend-tag45 && docker run {SQL_PROXY} && docker run us-docker.pkg.dev/other-project/lib/redis:7"}
+    assert gate.main(d.argv()) == 0
+    out = capsys.readouterr().out
+    assert "범위 밖 2건" in out
+    assert f"{SQL_PROXY}" in out and "외부 레지스트리(gcr.io)" in out
+    assert "us-docker.pkg.dev/other-project/lib/redis:7" in out and f"우리 AR 호스트({AR_HOST})가 아님: us-docker.pkg.dev" in out
+    assert "--extra 1번째" in out  # where it came from
+    kept = json.loads(d.out.read_text())[0]["condition"]["versionNamePrefixes"]
+    assert len(kept) == 3, "an out-of-scope reference protects nothing and adds no prefix: service · job · MIG image only"
+
+
+def test_an_address_the_gate_does_not_recognise_is_not_counted_as_out_of_scope(tmp_path, capsys):
+    """only a registry known to be elsewhere counts: an unknown host could be anything, and «모르면 실패한다»"""
+    d = Dumps(tmp_path)
+    d.mig = {"startup": f"docker run {HOST}/backend:backend-tag45 registry.example.com/team/app:1"}
+    assert gate.main(d.argv()) == 0
+    assert "범위 밖" not in capsys.readouterr().out  # not claimed as out of scope (and nothing depends on it)
+    d = Dumps(tmp_path)
+    d.mig = {"startup": "docker run registry.example.com/team/app:1"}
+    assert gate.main(d.argv()) == 3 and not d.out.exists()  # a lone unrecognised address: the template shows no image at all
+
+
+def test_external_refs_cover_the_known_registries_and_skip_urls_and_unknown_hosts():
+    def found(text: str) -> list[tuple[str, str]]:
+        return [(r["image"], r["ref"]) for r in gate.external_refs_in(json.dumps(text))]
+
+    assert found("gcr.io/google.com/cloudsdktool/cloud-sdk:slim") == [("gcr.io/google.com/cloudsdktool/cloud-sdk", ":slim")]
+    assert found("docker.io/library/redis@sha256:" + "a" * 64) == [("docker.io/library/redis", "@sha256:" + "a" * 64)]
+    assert found("us.gcr.io/p/i") == [("us.gcr.io/p/i", "")]
+    assert found("ghcr.io/o/r:1 quay.io/o/r:2 mcr.microsoft.com/dotnet/aspnet:8.0") == [("ghcr.io/o/r", ":1"), ("quay.io/o/r", ":2"), ("mcr.microsoft.com/dotnet/aspnet", ":8.0")]
+    assert found("echo hi\ngcr.io/x/y:1") == [("gcr.io/x/y", ":1")], "an image at the start of the line after a newline (`\\n` in the JSON text) is found"
+    assert found("see https://ghcr.io/x/y:1 for the page") == [], "a URL is not an image reference"
+    assert found("registry.example.com/team/app:1") == [] and found("redis:7") == []
+    assert found(f"{HOST}/backend:abc") == [], "our own registry is not an external one"
+
+
+def test_an_extra_without_images_is_a_visible_warning_not_a_failure(tmp_path, capsys):
+    d = Dumps(tmp_path)
+    d.more_extra = [{"startup": "no image here"}]
+    assert gate.main(d.argv()) == 0 and d.out.exists()
+    out = capsys.readouterr().out
+    assert "⚠️ --extra 2번째" in out and "경고 1건" in out
+    # positive control: with NO image in any extra there is nothing of the VM side to see — that is still exit 3
+    d = Dumps(tmp_path)
+    d.mig = {"startup": "no image here"}
+    d.more_extra = [{"startup": "none here either"}]
+    assert gate.main(d.argv()) == 3 and not d.out.exists()
+
+
+def test_an_extra_that_holds_only_an_out_of_scope_image_has_been_read():
+    c = gate.collect(extra=[{"startup": f"docker run {SQL_PROXY}"}, {"startup": f"docker run {HOST}/backend:backend-tag45"}], hosts={AR_HOST})
+    assert not c.problems and not c.warnings and len(c.outside) == 1
+
+
+def test_a_tagged_serving_revision_with_a_sidecar_from_elsewhere_is_unresolved():
+    """one `status.imageDigest` cannot say whether it belongs to our container or the sidecar: not guessed"""
+    service = [_service("s", "rev-2", f"{HOST}/backend:backend-tag2")]
+    both = {"metadata": {"name": "rev-2"}, "spec": {"containers": [{"image": f"{HOST}/backend:backend-tag2"}, {"image": SQL_PROXY}]}, "status": {"imageDigest": _digest(2)}}
+    assert gate.collect(service, [both], hosts={AR_HOST}).problems
+    pinned = {"metadata": {"name": "rev-2"}, "spec": {"containers": [{"image": f"{HOST}/backend@{_digest(2)}"}, {"image": SQL_PROXY}]}}
+    assert not gate.collect(service, [pinned], hosts={AR_HOST}).problems  # pinned by digest: nothing to resolve
+    ours = _revision("rev-2", f"{HOST}/backend:backend-tag2", image_digest=_digest(2))
+    assert not gate.collect(service, [ours], hosts={AR_HOST}).problems  # positive control: the same revision without the sidecar is fine
+
+
+def test_a_service_whose_only_image_is_off_our_registry_is_read_not_missing():
+    hello = _service("hello", "hello-1", "gcr.io/cloudrun/hello")
+    rev = {"metadata": {"name": "hello-1"}, "spec": {"containers": [{"image": "gcr.io/cloudrun/hello"}]}, "status": {"imageDigest": "gcr.io/cloudrun/hello@sha256:" + "b" * 64}}
+    job = {"metadata": {"name": "j"}, "spec": {"template": {"spec": {"template": {"spec": {"containers": [{"image": "ghcr.io/o/job:1"}]}}}}}}
+    c = gate.collect([hello], [rev], [job], hosts={AR_HOST})
+    assert not c.problems and not c.refs and {o["image"] for o in c.outside} == {"gcr.io/cloudrun/hello", "ghcr.io/o/job"}
+    empty = {"metadata": {"name": "j2"}, "spec": {}}
+    assert gate.collect(None, None, [empty], hosts={AR_HOST}).problems  # positive control: a job with no image at all is still incomplete
+
+
+def test_without_dump_hosts_every_registry_reference_stays_inside_the_scope():
+    """a dump that carries no repository path gives no host to compare: the AR references are all kept as in-use candidates (못 찾으면 실패)"""
+    refs, _warnings, _problems = gate.collect_in_use_refs(extra=[{"s": "docker run us-docker.pkg.dev/p/r/app:1"}])
+    assert [r["package"] for r in refs] == ["app"]
+    c = gate.collect(extra=[{"s": "docker run us-docker.pkg.dev/p/r/app:1"}], hosts={AR_HOST})
+    assert not c.refs and len(c.outside) == 1
