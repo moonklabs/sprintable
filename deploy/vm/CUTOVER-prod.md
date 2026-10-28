@@ -60,40 +60,85 @@ API_HOST=api.sprintable.ai; APP_HOST=app.sprintable.ai
 
 | Gate | What has to be true | How to see it |
 |---|---|---|
-| **G1. The repository side of RUNBOOK §12 is done** | its items 1–5: `REALTIME_URL` empty in `env/prod.yaml` and its test, `PUBLIC_API_URL`, the pool, the stored-link job against prod's Cloud SQL (run **before** the final dump), the Phase 1/2 shape; plus the image cleanup checker fix (its three limits) so that the keep-in-use policy can be put back for the VM's digests; plus the **prod pipeline changes P1 and P2 below** (P3 is made ready and merged after step 8) | the merged PRs |
-| **G2. The VM and the candidate** | the prod VM and its address, firewall, disk (§4); bootstrap (§6); `DB_PASSWORD_VM_PROD` and the other secrets of `env/prod.yaml`; the private plain file **made from the live prod services after the latest prod deploy**; a prod candidate built after the last change to `deploy/vm/` | `gcloud storage ls gs://${DEPLOY_BUCKET}/candidates/` |
-| **G3. Nothing can deploy to prod from the start of the window until P3 is merged** | nothing merges to `main` (the prod pipeline runs on a push to `main` and today deploys Cloud Run prod and runs its migration job against **Cloud SQL**: after the move that would reopen Cloud Run with `--allow-unauthenticated` and write to the old database); no build of prod is queued or working | the workflow is switched off for the window (`gh workflow disable cloud-build.yml`) **and** nothing is left in it: `gh run list --limit 200 --json databaseId,status,workflowName,headBranch --jq '.[] | select(.status != "completed" and .workflowName == "Cloud Build (GCP)") | "\(.databaseId) \(.headBranch)"'` prints no line of the branch `main` (a queued run submits its Cloud Build later; the workflow does not cancel it — wait for it or `gh run cancel $RUN_ID`), and `gcloud builds list --project $PROJECT --ongoing --limit 200 --format='value(id,substitutions._DEPLOY_ENV)'` prints no line ending in prod |
+| **G1. The repository side of RUNBOOK §12 is done** | its items 1–5: `REALTIME_URL` empty in `env/prod.yaml` and its test, `PUBLIC_API_URL`, the pool, the stored-link job against prod's Cloud SQL (run **before** the final dump), the Phase 1/2 shape; plus the image cleanup checker fix (its three limits) so that the keep-in-use policy can be put back for the VM's digests; plus the **prod pipeline changes P1, P2, P4 and P5 below** (P3 is made ready and merged after step 8) | the merged PRs |
+| **G2. The VM and the candidate** | the prod VM and its address, firewall, disk (§4); bootstrap (§6); `DB_PASSWORD_VM_PROD` and the other secrets of `env/prod.yaml`; the private plain file **made from the live prod services after the latest prod deploy**; a prod candidate built after the last change to `deploy/vm/`; **and the read-only look at the VM, its buckets and its secrets (the block below) with the expected output** | `gcloud storage ls gs://${DEPLOY_BUCKET}/candidates/`, and the look below |
+| **G3. Nothing can deploy to prod from the start of the window until P3 is merged** | nothing merges to `main` (the prod pipeline runs on a push to `main` and today deploys Cloud Run prod and runs its migration job against **Cloud SQL**: after the move that would reopen Cloud Run with `--allow-unauthenticated` and write to the old database); no build of prod is queued or working | the workflow is switched off for the window (`gh workflow disable cloud-build.yml`) **and** nothing is left in it: `gh run list --limit 200 --json databaseId,status,workflowName,headBranch --jq '.[] | select(.status != "completed" and .workflowName == "Cloud Build (GCP)") | "\(.databaseId) \(.headBranch)"'` prints no line of the branch `main` (a queued run submits its Cloud Build later; the workflow does not cancel it — wait for it or `gh run cancel $RUN_ID`), and `gcloud builds list --project $PROJECT --ongoing --limit 200 --format='value(id,substitutions._DEPLOY_ENV)'` prints no line ending in prod — **with a positive control, so the empty answer cannot be vacuous**: `gcloud builds list --project $PROJECT --limit 40 --format='value(id,substitutions._DEPLOY_ENV)'` (finished builds included) must print at least one line ending in `prod` (measured by the product owner on the real account, 2026-10-28: of the last 40 builds three end in `prod`, the last of 2026-10-27 07:18 UTC, so the empty answer of the first command is not vacuous) |
 | **G4. The window** | 03:00–05:00 KST; the product owner and the security domain reachable; the previous 24 hours of the request log show no unexplained caller of `run.app` (step 4) | step 0 and 4 |
-| **G5. Every decision in this sheet is written down** | the answers of step 0 (not used / used / unknown), the notice sent | the product owner's record |
+| **G5. Every decision in this sheet is written down** | the answers of step 0 (not used / used / unknown), the notice sent, the clean-up of the dump copies on the list of the day after (steps 10–11), and the two acceptances below | the product owner's record |
 
-## The prod pipeline: three changes, each its own PR with its test (the order matters)
+**The two acceptances of G5 (product owner, 2026-10-28).** (1) **One account for the VM, in prod too:** prod takes the account model of [RUNBOOK §2](RUNBOOK.md) as it is. (2) **During step 3 the callers are counted as one address** (the VM's) by the backend's per-address limits. That is accepted only with numbers, not because it is night. The limits that count by the socket address (the shared limiter, `backend/app/core/rate_limit.py`; an API key counts by itself) are: `POST /api/v2/auth/register` 5 a minute; `/auth/token`, `/auth/native-bootstrap`, `/auth/native-bootstrap/challenges`, `/auth/device-installations/registration-challenges` and `/auth/device-installations/register` 10 a minute each; `/auth/refresh` and `/auth/switch-account` 20 a minute each; `GET /api/v2/legal/{doc_type}` 60 a minute (the open desktop-setup routes count by the user's own address, and are not in this list). The dawn total of all requests is about 55 a minute (3,000–3,300 an hour), but these routes are a few of them, so the question is asked per route: the block below (read-only) prints the busiest minutes of each in the last 7 days. **Accepted** only if the busiest minute of every route is below its limit; **not accepted** if any is at or above it — then step 3 does not run until the proxy's address is trusted for that phase (the product owner is told which route and how many).
 
-The dev move needed the pipeline to follow it (`cloud_run_app_skip`, the VM bundle build, the one address switch). Prod's pipeline (`.github/workflows/cloud-build.yml`, the `main` branch of its first `if`) does none of that today, so a prod push after the move would deploy the old thing on top of the new one. These are **not made by this sheet**; they are named here so that none is forgotten, and G1 and G3 hold the order:
+```
+for route in register token refresh switch-account native-bootstrap device-installations/registration-challenges device-installations/register; do
+  echo "== POST /api/v2/auth/$route: busiest minutes of the last 7 days (count minute)"
+  gcloud logging read "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${BACKEND}\" AND httpRequest.requestMethod=\"POST\" AND httpRequest.requestUrl:\"/api/v2/auth/$route\"" --project $PROJECT --freshness=7d --limit=5000 --format='value(timestamp)' | cut -c1-16 | sort | uniq -c | sort -rn | head -3
+done
+```
+
+A count of 5000 lines means «at least» (read a shorter `--freshness`). **MEASURE:** the busiest minute of each route, next to its limit.
+
+## G2, the read-only look (names, numbers, booleans — nothing changes)
+
+For a move of real data the gate carries a look at what is exposed, not only a list of what exists. Run it from the window folder of step 0 (so that `REPO` and `VMIP` are set; `VMIP` is read in step 0) once the VM is bootstrapped; the stack-dependent line is run again at step 3 and in the lap. The expected output is written next to each line; anything else is a stop, written down.
+
+```
+VMSA=$(gcloud compute instances describe ${VM} --project $PROJECT --zone $ZONE --format='value(serviceAccounts[0].email)'); echo "the VM's account: $VMSA"
+for b in ${DEPLOY_BUCKET} ${BACKUPS_BUCKET}; do echo "$b: $(gcloud storage buckets describe gs://$b --format='value(public_access_prevention,uniform_bucket_level_access)')"; done
+gcloud compute firewall-rules list --project $PROJECT --filter='direction=INGRESS' --format='table(name,priority,sourceRanges.list():label=FROM,targetTags.list():label=TARGET,allowed[].map().firewall_rule().list():label=ALLOW,denied[].map().firewall_rule().list():label=DENY)'
+for port in 22 3389 5432; do if nc -z -w 3 "$VMIP" "$port"; then echo "OPEN from outside: $port"; else echo "closed from outside: $port"; fi; done
+gcloud sql instances describe ${SQL} --project $PROJECT --format='value(settings.ipConfiguration.ipv4Enabled,settings.ipConfiguration.privateNetwork,settings.ipConfiguration.authorizedNetworks)'
+python3 "$REPO/deploy/vm/bin/render_env.py" --secret-ids "$REPO/deploy/vm/env/prod.yaml" | while read -r id; do n=$(gcloud secrets versions list "$id" --project $PROJECT --filter='state=ENABLED' --format='value(name)' | grep -c . || true); has=$(gcloud secrets get-iam-policy "$id" --project $PROJECT --format=json | jq -r --arg sa "serviceAccount:${VMSA}" '[.bindings[]? | select(.role=="roles/secretmanager.secretAccessor") | .members[] | select(.==$sa)] | length'); echo "$id enabled=$n vm_accessor=$has"; done
+```
+
+The backups bucket carries the lifecycle rule for `import/` ([RUNBOOK §1](RUNBOOK.md): the dumps of this move are whole copies of the database and go after 7 days). Put it there and read it back (this is the one line of the look that changes something — the product owner runs it once, before the rehearsal writes the first dump):
+
+```
+cat > lifecycle.json <<'EOF'
+{"rule":[{"action":{"type":"Delete"},"condition":{"age":14,"matchesPrefix":["db/"]}},{"action":{"type":"Delete"},"condition":{"age":7,"matchesPrefix":["status/"]}},{"action":{"type":"Delete"},"condition":{"age":7,"matchesPrefix":["import/"]}}]}
+EOF
+gcloud storage buckets update gs://${BACKUPS_BUCKET} --lifecycle-file=lifecycle.json
+gcloud storage buckets describe gs://${BACKUPS_BUCKET} --format=json | jq -r '.lifecycle_config.rule[] | "\(.condition.age) days  \(.condition.matchesPrefix[0])"'
+```
+
+**Expected:** the last line prints `14 days  db/`, `7 days  status/` and `7 days  import/`. For the two buckets and the rest of the look, **expected:** both buckets print `enforced	True` (public access prevention enforced, uniform bucket-level access); the firewall table shows for the VM's tag only the web rule (80 and 443 from anywhere), the IAP rule (22 from `35.235.240.0/20`) and the deny of 22 and 3389 from anywhere — no rule that opens 5432, and no source of `0.0.0.0/0` on any port but 80 and 443; the three ports print `closed from outside` (run from a machine outside Google); the instance prints `False` for the public address, its private network and **no** authorized network; and each of the 21 ids of the declaration prints `enabled=1` or more and `vm_accessor=1` — **none** of them is a Cloud SQL connection string (`DATABASE_URL_PROD`, `DATABASE_URL_PROD_PGBOUNCER` are not in the list and the VM has no access to them). On the VM, with the stack up (step 3 and the lap): `sudo ss -ltn` lists 80 and 443 on the public side and 22, and **no** 5432, 8000 or 3000 published.
+
+## The prod pipeline: five changes, each its own PR with its test (the order matters)
+
+The dev move needed the pipeline to follow it (`cloud_run_app_skip`, the VM bundle build, the one address switch, the scheduler's definitions, a way to count requests). Prod's pipeline (`.github/workflows/cloud-build.yml`, the `main` branch of its first `if`) does none of that today, so a prod push after the move would deploy the old thing on top of the new one. These are **not made by this sheet** (each is its own PR with its test, made by the story's owner); they are named here so that none is forgotten, and G1 and G3 hold the order:
 
 - **P1 — before step 4: the one address switch.** The `fastapi_url` line of the prod branch names the Cloud Run backend's `run.app` address; it becomes `https://api.sprintable.ai` (the addresses the hosted MCP and the clients are given follow it, [RUNBOOK §9](RUNBOOK.md)). It merges to `main` as an ordinary prod deploy while Cloud Run still serves.
 - **P2 — before G2: the prod VM bundle build.** The step «Submit the dev VM bundle build» runs for `target == 'dev'` only; prod needs the same step (or a bundle built by hand, [RUNBOOK §7 step 1](RUNBOOK.md)) so that a prod candidate with its digests exists, built after the last change to `deploy/vm/`.
+- **P4 — before step 4: prod's scheduler jobs are defined in the repository** (`infra/cloud-scheduler/jobs.json`: `environments.prod` with the four jobs prod has, and the two schedules that differ from dev's), so that step 4 moves their target with the repository's own script and not by hand. Until it is merged `apply_cloud_scheduler.py --env prod` stops with a `KeyError`.
+- **P5 — before G2: the access log of the front** (`log` in `deploy/vm/Caddyfile`, standard output, no headers, no query string) — the VM's only source of a requests-per-hour figure (the lap, step 9).
 - **P3 — merged right after step 8, before anything else merges to `main`: Cloud Run prod is no longer deployed.** One line in the prod branch, `cloud_run_app_skip=true` ([RUNBOOK §10](RUNBOOK.md), «The dev build without Cloud Run»): the Cloud Run frontend build, its migration job and both deploy steps end 0 without calling a tool, while the backend image is still built and pushed (the VM bundle reads it by digest). Until P3 is merged G3 holds; the workflow is switched on again (`gh workflow enable cloud-build.yml`) just before P3 is merged, so that P3's own push is the first prod build after the move, and it skips Cloud Run. Undo: revert P3 (the next prod build deploys Cloud Run again, which serves nothing until the pass-through points at it).
 
 ## 0. Read-only: the facts of prod (nothing here changes anything)
 
-**One folder per window.** Every file this sheet writes or reads (`frozen.txt`, `reopen.txt`, `paused.txt`, `jobs.txt`, `scheduler-before.tsv`, `scheduler-moved.tsv`, `counts-vm-final.tsv` on the VM, the `was-public` record) lives in a folder named for the night, and every ladder below refuses to run anywhere else: a later window starts in a folder of its own and cannot pick up the lists of an earlier one. Set `WINDOW` (the date of the night, for example `WINDOW=20261102`) and go into the folder in **every new shell**, on the product owner's machine and on the VM:
+**One folder per window.** Every file this sheet writes or reads (`frozen.txt`, `reopen.txt`, `paused.txt`, `jobs.txt`, `scheduler-before.tsv`, `scheduler-moved.tsv`, `counts-vm-final.tsv` on the VM, the `was-public` record) lives in a folder named for the night, and every ladder below refuses to run anywhere else: a later window starts in a folder of its own and cannot pick up the lists of an earlier one. Set `WINDOW` (the date of the night, for example `WINDOW=20261102`) and go into the folder in **every new shell**. On the product owner's machine the folder is outside the checkout (the lists are not for the repository), so the line is run once **from the repository checkout**: it remembers where the checkout is (`REPO`, which the blocks use for the repository's own scripts) and then goes into the folder:
 
 ```
-[ -n "$WINDOW" ] && mkdir -p "window-${WINDOW}" && cd "window-${WINDOW}" && pwd
+[ -n "$WINDOW" ] && REPO=$(git rev-parse --show-toplevel) && mkdir -p "$HOME/prod-move/window-${WINDOW}" && cd "$HOME/prod-move/window-${WINDOW}" && pwd
+```
+
+On the VM (no checkout there; the same folder name):
+
+```
+[ -n "$WINDOW" ] && mkdir -p "$HOME/window-${WINDOW}" && cd "$HOME/window-${WINDOW}" && pwd
 ```
 
 ```
 gcloud sql instances describe ${SQL} --project $PROJECT --format='value(settings.tier,settings.dataDiskSizeGb,databaseVersion,settings.availabilityType)'
+TMO=$(gcloud run services describe ${BACKEND} --project $PROJECT --region $REGION --format='value(spec.template.spec.timeoutSeconds)'); echo "the backend's request timeout: $TMO s -> the freeze waits $((TMO + 10)) s"
 VMIP=$(gcloud compute instances describe ${VM} --project $PROJECT --zone $ZONE --format='value(networkInterfaces[0].accessConfigs[0].natIP)'); echo "the VM's public address: $VMIP"
 SRC_IP=$(gcloud sql instances describe ${SQL} --project $PROJECT --format=json | jq -r '.ipAddresses[] | select(.type=="PRIVATE") | .ipAddress'); echo "$SRC_IP"
 ```
 
-**MEASURE:** the instance is `db-g1-small`, 20 GB disk, PG15 (the product owner, 2026-10-28); the **real data size and the row counts** come from the rehearsal in step 1 (`.counts.tsv`), not from the disk size.
+**MEASURE:** the request timeout (the product owner read 1800 s: the freeze then waits **1810 s**, step 5; the rehearsal's number does not contain it, so the notice's window is **1810 s + the rehearsal's measured downtime**); the instance is `db-g1-small`, 20 GB disk, PG15 (the product owner, 2026-10-28); the **real data size and the row counts** come from the rehearsal in step 1 (`.counts.tsv`), not from the disk size.
 
-**Everything in the project that depends on prod — read the list, do not assume it.** The first line prints the Cloud Run services and jobs that mount prod's Cloud SQL; the second prints who may call each service (an `allUsers` line means public: that service is frozen in step 5, a service without it needs another freeze, which is the product owner's decision here, written down):
+**Everything in the project that depends on prod — read the list, do not assume it.** The first line prints the Cloud Run services and jobs that **mount** prod's Cloud SQL socket, **name the direct-URL secret** (`DATABASE_URL_PROD`, which also matches the pooler's) or **hold the instance's private address** (a service can reach the database by the secret or the address without mounting the socket; the first version of the loop looked at the socket only); the second prints who may call each service (an `allUsers` line means public: that service is frozen in step 5, a service without it needs another freeze, which is the product owner's decision here, written down):
 
 ```
-for r in services jobs; do for n in $(gcloud run $r list --project $PROJECT --region $REGION --format='value(metadata.name)'); do if gcloud run $r describe $n --project $PROJECT --region $REGION --format=json | grep -q ":${SQL}"; then echo "USES CLOUD SQL PROD: $r $n"; fi; done; done
+for r in services jobs; do for n in $(gcloud run $r list --project $PROJECT --region $REGION --format='value(metadata.name)'); do if gcloud run $r describe $n --project $PROJECT --region $REGION --format=json | grep -q -e ":${SQL}" -e "DATABASE_URL_PROD" -e "${SRC_IP:-no-such-address}"; then echo "USES CLOUD SQL PROD: $r $n"; fi; done; done
 for n in $(gcloud run services list --project $PROJECT --region $REGION --format='value(metadata.name)'); do echo "== $n"; gcloud run services get-iam-policy $n --project $PROJECT --region $REGION --format=json | jq -r '.bindings[]? | select(.role=="roles/run.invoker") | .members[]'; done
 gcloud scheduler jobs list --project $PROJECT --location $REGION --format='table(name,schedule,state,httpTarget.uri)'
 gcloud scheduler jobs list --project $PROJECT --location $REGION --format='value(name.basename(),httpTarget.uri)' > scheduler-before.tsv
@@ -129,11 +174,11 @@ gcloud secrets versions access latest --secret=DATABASE_URL_PROD --project $PROJ
 
 It prints seconds per step, the size, and the paths of the dump, its checksum and its row counts. Restore it (`restore.sh`, [RUNBOOK §7 step 5](RUNBOOK.md)), compare the counts (on a live database the tables written meanwhile differ — expected; the real run must be empty), then clean up the rehearsal files (§7a).
 
-**MEASURE, and read the findings:** the size, the seconds of dump and restore, and from the counts file the rows of `users`, `organizations`, `team_members` and `billing_orders` (`grep -E '^(users|organizations|team_members|billing_orders)\s' counts.tsv`). **The window is computed, not promised:** the product owner measured dev as dump 45 s for 252 tables and 295 MB, and 4 min 44 s from the start of the dump to `dev-api` answering 200 (restore and bring-up included), and a swap of the stack in 68 s. Prod's downtime is that 4 min 44 s scaled by prod's size ratio, plus the DNS and certificate minutes of step 7; the number goes into the notice only after the rehearsal has produced it. If it does not fit in 03:00–05:00 KST with margin, the window is not used.
+**MEASURE, and read the findings:** the size, the seconds of dump and restore, and from the counts file the rows of `users`, `organizations`, `team_members` and `billing_orders` (`grep -E '^(users|organizations|team_members|billing_orders)\s' counts.tsv`). **The window is computed, not promised:** the product owner measured dev as dump 45 s for 252 tables and 295 MB, and 4 min 44 s from the start of the dump to `dev-api` answering 200 (restore and bring-up included), and a swap of the stack in 68 s. Prod's downtime is that 4 min 44 s scaled by prod's size ratio, plus the DNS and certificate minutes of step 7, **plus the wait of the freeze** (the backend's request timeout + 10 s, read in step 5 — 1810 s if prod's timeout is 1800 s; the rehearsal does not contain it and the freeze window of step 8 does); the number goes into the notice only after the rehearsal has produced it. If it does not fit in 03:00–05:00 KST with margin, the window is not used.
 
 ## 2. The notice
 
-The product owner sends the notice to the owner (a notice, not a request): the window, the measured downtime of step 1, what is unavailable (the app, the API, the agents' streams, the phones), when it is back, and — only if step 0 found payments or mail in real use — the span in which they do not work. The undo of a notice is a second notice.
+The product owner sends the notice to the owner (a notice, not a request): the window, the measured downtime of step 1 **with the freeze wait added**, what is unavailable (the app, the API, the agents' streams, the phones), when it is back, and — only if step 0 found payments or mail in real use — the span in which they do not work. The undo of a notice is a second notice.
 
 ## 3. Phase 1 — the front door: `api.sprintable.ai` to the VM, data still in Cloud SQL
 
@@ -148,14 +193,24 @@ sudo /opt/sprintable/bin/front-door.sh status
 
 ## 4. Phase 2 — the guests move to `api.sprintable.ai`, one at a time
 
-Each one is its own line, each undoable, and the end is **zero**: Cloud Run's request log shows what still arrives at `run.app` directly. The set, as step 0 found it: P1 (the pipeline's one address switch) and the Electron app's stored address (the server's `FASTAPI_URL`) and the lanes · the GitHub App's webhook and callback · the Toss webhook · the Google and Apple redirects · the scheduler targets (**by hand, the block below**: the repository's scheduler manifest `infra/cloud-scheduler/jobs.json` defines `dev` only, so `apply_cloud_scheduler.py --env prod` stops with a `KeyError` before it changes anything; putting `prod` into the manifest is a follow-up, not part of this move) · the hosted MCP's `SPRINTABLE_API_URL` (`gcloud run services update ${MCP} --project $PROJECT --region $REGION --update-env-vars SPRINTABLE_API_URL=https://api.sprintable.ai`) · the connectors (the repository's defaults; the Pi, OpenCode and OpenClaw entry points resolve their own, [RUNBOOK §9](RUNBOOK.md)) · whatever else step 0 listed as used.
+Each one is its own line, each undoable, and the end is **zero**: Cloud Run's request log shows what still arrives at `run.app` directly. The set, as step 0 found it: P1 (the pipeline's one address switch) and the Electron app's stored address (the server's `FASTAPI_URL`) and the lanes · the GitHub App's webhook and callback · the Toss webhook · the Google and Apple redirects · the scheduler targets (**the repository's script, after P4** — the block below; the hand move after it is the reserve for a script that stops) · the hosted MCP's `SPRINTABLE_API_URL` (`gcloud run services update ${MCP} --project $PROJECT --region $REGION --update-env-vars SPRINTABLE_API_URL=https://api.sprintable.ai`) · the connectors (the repository's defaults; the Pi, OpenCode and OpenClaw entry points resolve their own, [RUNBOOK §9](RUNBOOK.md)) · whatever else step 0 listed as used.
 
-The scheduler jobs whose target is a `run.app` address are given the same path on `api.sprintable.ai` (their schedules, headers and the secret in them are not touched; **only a target on the prod backend's own address is moved** — a job that points anywhere else, another Cloud Run service included, is printed and left alone for the product owner to decide). The block stops at the first failure and writes every job it moved into `scheduler-moved.tsv`; its undo is the second block:
+**The scheduler, by the script (P4 merged).** The plan is read before anything is applied: it must be **four `UPDATE` lines (each only the `uri`), no `CREATE`, no `UNMANAGED`** — the four jobs prod runs, pointed at `https://api.sprintable.ai` — and only then is it applied. The script reads the Authorization value from the prod backend (still on Cloud Run) and prints no secret.
+
+```
+SCHP=no
+[ -n "$WINDOW" ] && [ -n "$REPO" ] && [ "${PWD##*/}" = "window-${WINDOW}" ] && SCHP=start
+[ "$SCHP" = start ] && PLAN=$(CLOUDSDK_CORE_PROJECT=$PROJECT python3 "$REPO/infra/apply_cloud_scheduler.py" --env prod --base-url https://api.sprintable.ai) && printf '%s\n' "$PLAN" | tail -n 12 && [ "$(printf '%s\n' "$PLAN" | grep -c '^UPDATE ')" = 4 ] && ! printf '%s\n' "$PLAN" | grep -qE '^(CREATE|UNMANAGED)' && SCHP=planned
+[ "$SCHP" = planned ] && CLOUDSDK_CORE_PROJECT=$PROJECT python3 "$REPO/infra/apply_cloud_scheduler.py" --env prod --base-url https://api.sprintable.ai --apply && SCHP=applied
+echo "scheduler (script): $SCHP"
+```
+
+`scheduler (script): applied` is the pass. The undo is the same script without the address (`CLOUDSDK_CORE_PROJECT=$PROJECT python3 "$REPO/infra/apply_cloud_scheduler.py" --env prod --apply`: the jobs go back to the Cloud Run service's own address). **The reserve, by hand** (only when the script stops and the product owner decides to go on): the jobs whose target is on the prod backend's own address — either of its two forms, `sprintable-backend-prod-787818285179.asia-northeast3.run.app` or the older `sprintable-backend-prod-57iommnikq-du.a.run.app` that the live jobs carry — are given the same path on `api.sprintable.ai` (schedules, headers and the secret in them are not touched; a job that points anywhere else, another Cloud Run service included, is printed and left alone). The block stops at the first failure and writes every job it moved into `scheduler-moved.tsv`; its undo is the second block:
 
 ```
 SCH=no
 [ -n "$WINDOW" ] && [ "${PWD##*/}" = "window-${WINDOW}" ] && [ -s scheduler-before.tsv ] && SCH=listed
-[ "$SCH" = listed ] && while read -r job uri; do case "$uri" in https://sprintable-backend-prod-787818285179.asia-northeast3.run.app/*) new="https://api.sprintable.ai/${uri#https://*/}"; gcloud scheduler jobs update http "$job" --project $PROJECT --location $REGION --uri "$new" && echo "$job $uri" >> scheduler-moved.tsv || { SCH=failed; break; } ;; *) echo "left alone: $job $uri" ;; esac; done < scheduler-before.tsv
+[ "$SCH" = listed ] && while read -r job uri; do case "$uri" in https://sprintable-backend-prod-787818285179.asia-northeast3.run.app/*|https://sprintable-backend-prod-57iommnikq-du.a.run.app/*) new="https://api.sprintable.ai/${uri#https://*/}"; gcloud scheduler jobs update http "$job" --project $PROJECT --location $REGION --uri "$new" && echo "$job $uri" >> scheduler-moved.tsv || { SCH=failed; break; } ;; *) echo "left alone: $job $uri" ;; esac; done < scheduler-before.tsv
 [ "$SCH" = listed ] && SCH=moved
 echo "scheduler: $SCH"
 ```
@@ -202,15 +257,17 @@ RUN=no
 echo "jobs: $RUN"
 ```
 
-`jobs: quiet` is the pass; `busy` or `failed` stops the sheet. Show in the request log that no request other than the health check arrived in the last minutes (the cron endpoints are GET requests and write: «no POST» proves nothing).
+`jobs: quiet` is the pass; `busy` or `failed` stops the sheet.
+
+**The daily job inside the window.** `assets-grace-hard-delete-prod` runs at **03:00 Asia/Seoul — the first minute of the window** (the other three: `publication-commands-prod` every minute and `a2a-task-deadline-sweep-prod` every ten minutes, both UTC; `storage-usage-warn-prod` at 09:00 KST, outside). It is paused with the others for that night (the pause and the resume of step 8 are its pair), so its run of that night is **skipped** — Cloud Scheduler does not catch up a run it missed — and it runs again at 03:00 the next night; the product owner decides whether to run it once after the unfreeze (`gcloud scheduler jobs run assets-grace-hard-delete-prod --project $PROJECT --location $REGION`) and writes the decision down. Show in the request log that no request other than the health check arrived in the last minutes (the cron endpoints are GET requests and write: «no POST» proves nothing).
 
 ## 6–7. The data and the takeover (inside the freeze)
 
 1. Stop the front door — the only way `api.sprintable.ai` clients reach Cloud Run: `sudo /opt/sprintable/bin/front-door.sh stop`; then `sudo docker stop sprintable-backend-1 sprintable-frontend-1` (restore refuses with a running backend).
-2. Final dump (the command of step 1 with `--label final`, which prints the paths of the dump `FINAL_DUMP` and of its counts `FINAL_COUNTS`) and restore, [RUNBOOK §7 steps 3 and 5](RUNBOOK.md). The restore's output is **kept** (`counts-vm-final.tsv`: the way back of step 12 compares the live database with it), and the diff of the counts must be **empty** (writers are stopped). **MEASURE:** both seconds.
+2. Final dump (the command of step 1 with `--label final`, which prints the paths of the dump `FINAL_DUMP` and of its counts `FINAL_COUNTS`) and restore, [RUNBOOK §7 steps 3 and 5](RUNBOOK.md). The restore's output is **kept** (`counts-vm-final.tsv`: the way back of step 12 compares the live database with it) and is never emptied by a restore that refuses: it is written to a temporary name and renamed only when the restore succeeded, and a second attempt in the same folder refuses to overwrite it (move the old one aside by hand if a restore really has to be repeated), and the diff of the counts must be **empty** (writers are stopped). **MEASURE:** both seconds.
 
 ```
-sudo env RESTORE_WIPE=yes /opt/sprintable/bin/restore.sh "$FINAL_DUMP" > counts-vm-final.tsv
+[ ! -e counts-vm-final.tsv ] && sudo env RESTORE_WIPE=yes /opt/sprintable/bin/restore.sh "$FINAL_DUMP" > counts-vm-final.tmp && mv counts-vm-final.tmp counts-vm-final.tsv
 sudo bash -c 'diff "$0" <(grep -P "^\S+\t\d+$" counts-vm-final.tsv)' "$FINAL_COUNTS" && echo "row counts equal"
 ```
 
@@ -227,7 +284,7 @@ STEP=no
 [ -n "$WINDOW" ] && [ "${PWD##*/}" = "window-${WINDOW}" ] && [ -s reopen.txt ] && [ -s "was-public-${WINDOW}.txt" ] && STEP=listed
 [ "$STEP" = listed ] && while read -r svc; do grep -qxF "$svc" "was-public-${WINDOW}.txt" || { echo "was not public before the freeze: $svc"; STEP=failed; break; }; gcloud run services add-iam-policy-binding "$svc" --project $PROJECT --region $REGION --member=allUsers --role=roles/run.invoker || { STEP=failed; break; }; done < reopen.txt
 [ "$STEP" = listed ] && STEP=reopened
-[ "$STEP" = reopened ] && VMC=$(curl -s -o /dev/null -w '%{http_code}' https://${API_HOST}/openapi.json) && CRC=$(curl -s -o /dev/null -w '%{http_code}' "$BURL/openapi.json") && echo "the VM: $VMC · Cloud Run backend: $CRC" && [ "$VMC" = 200 ] && [ "$CRC" = 403 ] && STEP=proven
+[ "$STEP" = reopened ] && BURL=$(gcloud run services describe ${BACKEND} --project $PROJECT --region $REGION --format='value(status.url)') && [ -n "$BURL" ] && VMC=$(curl -s -o /dev/null -w '%{http_code}' https://${API_HOST}/openapi.json) && CRC=$(curl -s -o /dev/null -w '%{http_code}' "$BURL/openapi.json") && echo "the VM: $VMC · Cloud Run backend: $CRC" && [ "$VMC" = 200 ] && [ "$CRC" = 403 ] && STEP=proven
 [ "$STEP" = proven ] && [ -s paused.txt ] && while read -r job; do gcloud scheduler jobs resume "$job" --project $PROJECT --location $REGION || { STEP=failed; break; }; done < paused.txt
 [ "$STEP" = proven ] && STEP=resumed
 echo "unfreeze: $STEP"
@@ -238,8 +295,7 @@ The measurement is a gate: the schedulers are resumed only when the line with th
 ## 9. The lap (what has to work, and what is only measured)
 
 1. **Login and a conversation** in the app; **a stream** open for ten minutes.
-2. **Lanes · desktop · MCP reconnect — the machine traffic.** Prod's floor of about 3,000–3,300 requests an hour is machine traffic (agent streams and polling); in the dev move the question was whether it comes back by itself. Check, in this order, and write the minutes each took: (a) every lane Mac's agent shows online in the app (the count before the freeze, written down in step 5, equals the count now); (b) one desktop-app instruction round trip; (c) one tool call through `sprintable-mcp-prod`. **Open item (a number without a source):** the 7-day figure came from Cloud Run's Monitoring, which stops with the move, and `deploy/vm/Caddyfile` writes no access log, so the VM has no requests-per-hour series today. Either one `log` directive is added to the Caddyfile in the prod candidate (a change with its test), or this cell stays «unmeasured»; the product owner chooses before G2.
-3. **Mail:** one real mail from the app (a verification mail to the product owner's own address). **Payments:** only if step 0 found them in use — the webhook of the payment provider reaches the VM (its delivery log shows 200).
+2. **Lanes · desktop · MCP reconnect — the machine traffic.** Prod's floor of about 3,000–3,300 requests an hour is machine traffic (agent streams and polling); in the dev move the question was whether it comes back by itself. Check, in this order, and write the minutes each took: (a) every lane Mac's agent shows online in the app (the count before the freeze, written down in step 5, equals the count now); (b) one desktop-app instruction round trip; (c) one tool call through `sprintable-mcp-prod`. **The figure, from the VM (P5):** the 7-day series came from Cloud Run's Monitoring, which stops with the move; the front now writes an access log ([RUNBOOK §11](RUNBOOK.md)). Count five-minute slices for the API name, every five minutes for half an hour, and write the numbers down: `sudo docker logs --since 5m sprintable-caddy-1 2>&1 | grep -F '"msg":"handled request"' | grep -cF '"host":"api.sprintable.ai"'` — times 12 is an hourly figure, to be compared with the floor of about 3,000–3,300 an hour (that is about 250–275 in five minutes). The machine traffic has come back when the slices stay in that neighbourhood; a floor that does not return in half an hour is a finding for the product owner, not a pass. 3. **Mail:** one real mail from the app (a verification mail to the product owner's own address). **Payments:** only if step 0 found them in use — the webhook of the payment provider reaches the VM (its delivery log shows 200).
 4. **The scheduler:** each job's last run after the resume shows success (`gcloud scheduler jobs describe $JOB --project $PROJECT --location $REGION --format='value(status.code,lastAttemptTime)'`).
 5. **Memory and connections:** `free -m` on the VM and the `QueuePool limit` count in the backend's log (the pool is 20 + 10 inside 57 usable connections, [RUNBOOK §12 item 3](RUNBOOK.md)); read `pg_stat_activity` once.
 6. **The deploy gap, separately from 4789:** a deploy of the stack swaps backend and frontend in about 68 s (dev, measured); the lap writes down prod's number the first time a prod deploy runs.
@@ -249,6 +305,15 @@ Any failure in 1–3: step 12.
 ## 10–11. The day after
 
 The newest status object under `gs://${BACKUPS_BUCKET}/status/prod/` says `deployed`; the backup of the night wrote a dump of a restored (not empty) database, and the weekly restore check finds it. Cloud Run prod (`${BACKEND}`, `${FRONTEND}`) stays **closed** (the binding off) and Cloud SQL prod stays untouched for the day: they are the way back. After the day, the removal is a sheet of its own.
+
+**The copies of the production database are cleaned up.** The rehearsal and final dumps are whole copies of prod. In the backups bucket they go by the **lifecycle rule for `import/`** (7 days, put there in G2). On the VM's data disk they stay until someone deletes them, so deleting them is a line of this day — the rehearsal files as in [RUNBOOK §7a](RUNBOOK.md), and the **final** files once the removal sheet of Cloud SQL prod has made its own exports (until then they are the safety copy):
+
+```
+sudo find /srv/sprintable/import -name '*-final-*' -delete
+sudo find /srv/sprintable/import -name '*-rehearsal-*' -delete
+```
+
+(`find` matches as root: a `sudo rm` with a `*` would be expanded by your own shell, which cannot read the root-only folder.) Write the date this was done in the record of G5.
 
 ## 12. The way back (fix forward first)
 
@@ -272,7 +337,7 @@ BACK=no
 [ "$VMBACK" = passing ] && [ -n "$WINDOW" ] && [ "${PWD##*/}" = "window-${WINDOW}" ] && [ -s "was-public-${WINDOW}.txt" ] && BACK=passing
 [ "$BACK" = passing ] && while read -r svc; do gcloud run services add-iam-policy-binding "$svc" --project $PROJECT --region $REGION --member=allUsers --role=roles/run.invoker || { BACK=failed; break; }; done < "was-public-${WINDOW}.txt"
 [ "$BACK" = passing ] && BACK=reopened
-[ "$BACK" = reopened ] && CRC=$(curl -s -o /dev/null -w '%{http_code}' "$BURL/openapi.json") && echo "Cloud Run backend: $CRC" && [ "$CRC" = 200 ] && BACK=proven
+[ "$BACK" = reopened ] && BURL=$(gcloud run services describe ${BACKEND} --project $PROJECT --region $REGION --format='value(status.url)') && [ -n "$BURL" ] && CRC=$(curl -s -o /dev/null -w '%{http_code}' "$BURL/openapi.json") && echo "Cloud Run backend: $CRC" && [ "$CRC" = 200 ] && BACK=proven
 [ "$BACK" = proven ] && [ -s paused.txt ] && while read -r job; do gcloud scheduler jobs resume "$job" --project $PROJECT --location $REGION || { BACK=failed; break; }; done < paused.txt
 [ "$BACK" = proven ] && BACK=done
 echo "way back: $BACK"

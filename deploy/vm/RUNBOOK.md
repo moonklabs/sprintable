@@ -17,10 +17,11 @@ export DEPLOY_BUCKET=sprintable-vm-$ENV-deploy BACKUPS_BUCKET=sprintable-vm-$ENV
 gcloud storage buckets create gs://$DEPLOY_BUCKET  --project $PROJECT --location $REGION --uniform-bucket-level-access --public-access-prevention
 gcloud storage buckets create gs://$BACKUPS_BUCKET --project $PROJECT --location $REGION --uniform-bucket-level-access --public-access-prevention
 cat > /tmp/lifecycle.json <<'EOF'
-{"rule":[{"action":{"type":"Delete"},"condition":{"age":14,"matchesPrefix":["db/"]}},{"action":{"type":"Delete"},"condition":{"age":7,"matchesPrefix":["status/"]}}]}
+{"rule":[{"action":{"type":"Delete"},"condition":{"age":14,"matchesPrefix":["db/"]}},{"action":{"type":"Delete"},"condition":{"age":7,"matchesPrefix":["status/"]}},{"action":{"type":"Delete"},"condition":{"age":7,"matchesPrefix":["import/"]}}]}
 EOF
 gcloud storage buckets update gs://$BACKUPS_BUCKET --lifecycle-file=/tmp/lifecycle.json
 ```
+The `import/` rule (7 days) is there because the rehearsal and final dumps of the data move (§7) are **whole copies of the database**: they are not kept for ever, and the window plus a day is far inside 7 days. A bucket made before this rule was written gets it with the same `update` line (the file above).
 Undo: `gcloud storage rm -r gs://$DEPLOY_BUCKET gs://$BACKUPS_BUCKET` (only while they hold nothing you need).
 
 ## 2. VM identity and its access (the part most likely to be forgotten)

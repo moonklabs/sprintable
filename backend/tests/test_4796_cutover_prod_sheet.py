@@ -28,7 +28,7 @@ SAMPLE = {"PROJECT": "sprintable-494803", "REGION": "asia-northeast3", "ZONE": "
           "MCP": "sprintable-mcp-prod", "API_HOST": "api.sprintable.ai", "APP_HOST": "app.sprintable.ai", "VMIP": "34.64.1.2", "SRC_IP": "10.110.0.3", "svc": "sprintable-backend-prod",
           "job": "sprintable-sched-prod", "JOB": "sprintable-sched-prod", "NAME": "some-job", "r": "services", "n": "sprintable-backend-prod", "TMO": "300", "BURL": "https://x.run.app", "FROZEN": "yes",
           "uri": "https://sprintable-backend-prod-787818285179.asia-northeast3.run.app/api/v2/internal/cron/x", "new": "https://api.sprintable.ai/api/v2/internal/cron/x", "out": "", "CODE": "403",
-          "WINDOW": "20261102", "VMBACK": "passing", "FINAL_DUMP": "/srv/sprintable/import/prod-final-1.dump", "FINAL_COUNTS": "/srv/sprintable/import/prod-final-1.counts.tsv"}
+          "WINDOW": "20261102", "VMBACK": "passing", "id": "JWT_SECRET_PROD", "b": "sprintable-vm-prod-backups", "route": "refresh", "REPO": "/repo", "FINAL_DUMP": "/srv/sprintable/import/prod-final-1.dump", "FINAL_COUNTS": "/srv/sprintable/import/prod-final-1.counts.tsv"}
 
 
 def _blocks() -> list[str]:
@@ -98,13 +98,13 @@ def test_the_downtime_is_computed_from_the_rehearsal_not_promised() -> None:
     assert "the **real data size and the row counts** come from the rehearsal" in SHEET
 
 
-def test_the_lap_has_the_machine_traffic_cell_and_names_the_open_item_honestly() -> None:
+def test_the_lap_has_the_machine_traffic_cell_and_counts_it_from_the_access_log_of_the_front() -> None:
     lap = _section("## 9. The lap", "## 10–11.")
     for token in ("**Lanes · desktop · MCP reconnect — the machine traffic.**", "(a) every lane Mac's agent shows online", "(b) one desktop-app instruction round trip", "(c) one tool call through `sprintable-mcp-prod`",
-                  "**Open item (a number without a source):**", "`deploy/vm/Caddyfile` writes no access log", "stays «unmeasured»", "**The deploy gap, separately from 4789:**"):
+                  "**The figure, from the VM (P5):**", "sudo docker logs --since 5m sprintable-caddy-1", "grep -F '\"msg\":\"handled request\"'", "times 12", "about 250–275 in five minutes",
+                  "a floor that does not return in half an hour is a finding for the product owner, not a pass", "**The deploy gap, separately from 4789:**"):
         assert token in lap, token
-    caddy = (_ROOT / "deploy/vm/Caddyfile").read_text()
-    assert not re.search(r"^\s*log\b", caddy, flags=re.M), "the premise of the open item: the Caddyfile has no log directive (if one is added, this cell and its test change)"
+    assert "Open item (a number without a source)" not in lap and "stays «unmeasured»" not in lap, "the open item is closed by P5"
 
 
 # ── the names agree with the declaration and the scripts ────────────────────────────────────────────────────────────────────────────────────
@@ -127,8 +127,10 @@ def test_the_scripts_and_flags_the_sheet_names_exist() -> None:
     for named in ("/opt/sprintable/bin/front-door.sh", "/opt/sprintable/bin/dump-source.sh", "/opt/sprintable/bin/restore.sh", "/opt/sprintable/bin/rowcounts.sh", "/opt/sprintable/bin/deployer.py"):
         assert named in SHEET, named
     manifest = __import__("json").loads((_ROOT / "infra/cloud-scheduler/jobs.json").read_text())
-    assert list(manifest["environments"]) == ["dev"], "the premise of step 4: the scheduler manifest defines dev only (apply_cloud_scheduler.py --env prod would stop with a KeyError), so prod's jobs are moved by hand"
-    assert "defines `dev` only" in SHEET and "`KeyError`" in SHEET and "--env prod --base-url" not in SHEET and "gcloud scheduler jobs update http" in SHEET, "the sheet tells nobody to run the repository script for prod"
+    prod = manifest["environments"].get("prod")
+    assert prod is None or sorted(prod["jobs"]) == ["a2a-task-deadline-sweep", "assets-grace-hard-delete", "publication-commands", "storage-usage-warn"], "P4's premise: until it is merged prod is not in the manifest; once it is, it names the four jobs and no more"
+    assert "**P4 — before step 4:" in SHEET and "`apply_cloud_scheduler.py --env prod` stops with a `KeyError`" in SHEET, "the sheet says the script needs P4"
+    assert 'python3 "$REPO/infra/apply_cloud_scheduler.py" --env prod --base-url https://api.sprintable.ai' in "\n".join(_blocks())
     door = (_ROOT / "deploy/vm/bin/front-door.sh").read_text()
     assert "prod:https://sprintable-backend-prod-787818285179.asia-northeast3.run.app" in door
     assert SHEET.count("--upstream https://sprintable-backend-prod-787818285179.asia-northeast3.run.app") == 2, "the front door (step 3) and the way back"
@@ -239,10 +241,16 @@ case "$*" in
   *"services describe"*"value(status.url)"*) printf %s "https://x.run.app" ;;
   *"services describe"*"timeoutSeconds"*) printf %s "$TMO" ;;
   *"run services list"*|*"run jobs list"*) printf 'sprintable-backend-prod\nsprintable-frontend-prod\n' ;;
-  *"run services describe"*|*"run jobs describe"*) echo '{"x":1}' ;;
+  *"run services describe"*|*"run jobs describe"*) echo "{\"x\":1,\"note\":\"$DESC_EXTRA\"}" ;;
+  *"secrets get-iam-policy"*) case "$*" in *DATABASE_URL_PROD*) echo '{"bindings":[]}' ;; *) echo '{"bindings":[{"role":"roles/secretmanager.secretAccessor","members":["serviceAccount:vm-sa@sprintable-494803.iam.gserviceaccount.com"]}]}' ;; esac ;;
   *"get-iam-policy"*) case " $* " in *" $NOBIND "*) echo '{"bindings":[]}' ;; *" $GARBAGE "*) echo 'not json at all' ;; *) echo '{"bindings":[{"role":"roles/run.invoker","members":["allUsers"]}]}' ;; esac ;;
   *"executions list"*) case " $* " in *" $BUSY "*) echo "exec-1" ;; esac ;;
+  *"compute instances describe"*"serviceAccounts"*) echo vm-sa@sprintable-494803.iam.gserviceaccount.com ;;
   *"compute instances describe"*) echo 34.64.1.2 ;;
+  *"buckets describe"*"json"*) echo '{"lifecycle_config":{"rule":[{"condition":{"age":14,"matchesPrefix":["db/"]}},{"condition":{"age":7,"matchesPrefix":["status/"]}},{"condition":{"age":7,"matchesPrefix":["import/"]}}]}}' ;;
+  *"buckets describe"*) printf 'enforced\tTrue\n' ;;
+  *"secrets versions list"*) echo 1 ;;
+  *"firewall-rules list"*) printf 'NAME PRIORITY FROM TARGET ALLOW DENY\n' ;;
   *"sql instances describe"*"json"*) echo '{"ipAddresses":[{"type":"PRIVATE","ipAddress":"10.110.0.3"}]}' ;;
 esac
 exit 0
@@ -254,16 +262,52 @@ case "$*" in *api.sprintable.ai*) printf %s "${VM_CODE:-200}" ;; *) printf %s "$
 """
 
 
+_FAKE_PY = """#!/bin/sh
+echo "python3 $*" >> "$CALLS"
+case "$1" in
+  */apply_cloud_scheduler.py) case " $* " in *" --apply "*) echo "applied" ;; *) printf '%s\\n' "$PLAN_OUT" ;; esac ;;
+  */render_env.py) printf 'JWT_SECRET_PROD\\nDB_PASSWORD_VM_PROD\\n' ;;
+  *) exec "$REAL_PYTHON" "$@" ;;
+esac
+"""
+
+_FAKE_NC = """#!/bin/sh
+echo "nc $*" >> "$CALLS"
+case " $* " in *" $OPEN_PORT "*) exit 0 ;; esac
+exit 1
+"""
+
+_FAKE_GREP = """#!/bin/sh
+case "$1" in
+  -P) shift; pattern="$1"; shift; exec "$REAL_PYTHON" -c 'import re, sys; p = re.compile(sys.argv[1]); rows = [l for l in (open(sys.argv[2]) if len(sys.argv) > 2 else sys.stdin) if p.search(l.rstrip("\\n"))]; sys.stdout.write("".join(rows)); sys.exit(0 if rows else 1)' "$pattern" "$@" ;;
+  *) exec /usr/bin/grep "$@" ;;
+esac
+"""
+
+_FAKE_SUDO = """#!/bin/sh
+echo "sudo $*" >> "$CALLS"
+[ -n "$FAILSUDO" ] && case "$*" in *"$FAILSUDO"*) exit 1 ;; esac
+case "$*" in
+  *restore.sh*) printf 'users\\t3\\n' ;;
+  "bash -c"*) exec "$@" ;;
+  *"docker ps"*) [ -n "$NOSTACK" ] || echo sprintable-backend-1 ;;
+esac
+exit 0
+"""
+
+
 def _world(tmp_path: Path) -> dict[str, str]:
     b = tmp_path / "bin"
     b.mkdir(exist_ok=True)
-    for name, text in (("gcloud", _FAKE), ("curl", _FAKE_CURL), ("sleep", "#!/bin/sh\necho \"sleep $*\" >> \"$CALLS\"\n"), ("dig", "#!/bin/sh\necho 34.64.1.2\n")):
+    for name, text in (("gcloud", _FAKE), ("curl", _FAKE_CURL), ("sleep", "#!/bin/sh\necho \"sleep $*\" >> \"$CALLS\"\n"), ("dig", "#!/bin/sh\necho 34.64.1.2\n"), ("nc", _FAKE_NC), ("python3", _FAKE_PY), ("sudo", _FAKE_SUDO), ("grep", _FAKE_GREP)):
         f = b / name
         f.write_text(text)
         f.chmod(f.stat().st_mode | stat.S_IEXEC)
     calls = tmp_path / "calls"
     calls.write_text("")
-    return {"PATH": f"{b}:{os.environ.get('PATH', '/usr/bin:/bin')}", "HOME": str(tmp_path), "CALLS": str(calls), "TMO": "300", **{k: v for k, v in SAMPLE.items() if k not in ("TMO",)}}
+    import sys
+    return {"PATH": f"{b}:{os.environ.get('PATH', '/usr/bin:/bin')}", "HOME": str(tmp_path), "CALLS": str(calls), "TMO": "300", "REAL_PYTHON": sys.executable, "PLAN_OUT": "", "OPEN_PORT": "none", "DESC_EXTRA": "",
+            **{k: v for k, v in SAMPLE.items() if k not in ("TMO",)}}
 
 
 def _w(root: Path) -> Path:
@@ -303,12 +347,12 @@ WP = "was-public-20261102.txt"
 
 
 def test_the_read_only_blocks_write_nothing(tmp_path: Path) -> None:
-    for i, marker in enumerate(("gcloud sql instances describe ${SQL}", "USES CLOUD SQL PROD", "Google-Cloud-Scheduler")):
+    for i, marker in enumerate(("SRC_IP=$(gcloud sql", "USES CLOUD SQL PROD", "Google-Cloud-Scheduler", "VMSA=$(gcloud compute", "busiest minutes of the last 7 days")):
         p, calls = _run(_block_with(marker), _fresh(tmp_path, f"ro{i}"))
         assert p.returncode == 0, (marker, p.stderr[:300])
         gcloud_calls = [c for c in calls if c.startswith("gcloud ")]
         assert gcloud_calls, marker
-        writes = [c for c in gcloud_calls if any(re.search(rf"\b{re.escape(w)}\b", c) for w in _WRITES)]
+        writes = [c for c in gcloud_calls if any(w in c.split() for w in _WRITES)]   # the words of the command line, not parts of a bucket's name
         assert writes == [], (marker, writes)
 
 
@@ -389,7 +433,8 @@ def test_a_running_execution_of_any_job_stops_the_sheet(tmp_path: Path) -> None:
 def test_the_unfreeze_opens_only_what_reopen_txt_names_proves_the_vm_and_resumes_the_scheduler_last(tmp_path: Path) -> None:
     block = _block_with(UNFREEZE)
     files = {"reopen.txt": "sprintable-mcp-prod\n", "paused.txt": "job-1\njob-2\n", WP: PUBLIC, "frozen.txt": "sprintable-backend-prod\nsprintable-frontend-prod\nsprintable-mcp-prod\n"}
-    p, calls = _run(block, _fresh(tmp_path, "ok"), files=files)
+    p, calls = _run(block, _fresh(tmp_path, "ok"), files=files, extra={"BURL": ""})
+    assert any("services describe" in c and "status.url" in c for c in calls), "the unfreeze derives the Cloud Run address too"
     assert [c.split()[4] for c in _verbs(calls, "add-iam-policy-binding")] == ["sprintable-mcp-prod"], "the Cloud Run backend and frontend stay closed (two databases otherwise)"
     assert [c.split()[4] for c in _verbs(calls, "scheduler jobs resume")] == ["job-1", "job-2"]
     assert "the VM: 200 · Cloud Run backend: 403" in p.stdout and "unfreeze: resumed" in p.stdout
@@ -445,12 +490,22 @@ def test_the_scheduler_targets_move_by_host_and_come_back_from_the_file_the_move
     assert "scheduler: no" in p.stdout and not calls
 
 
-def test_the_final_restore_keeps_its_counts_and_the_way_back_reads_them() -> None:
-    step6 = _block_with("counts-vm-final.tsv")
-    assert 'restore.sh "$FINAL_DUMP" > counts-vm-final.tsv' in step6 and '"$FINAL_COUNTS"' in step6 and 'echo "row counts equal"' in step6
+def test_the_final_restore_keeps_its_counts_and_a_refused_restore_never_empties_them(tmp_path: Path) -> None:
+    block = _block_with("counts-vm-final.tmp")
+    assert '[ ! -e counts-vm-final.tsv ]' in block and 'mv counts-vm-final.tmp counts-vm-final.tsv' in block and 'echo "row counts equal"' in block
+    counts = tmp_path / "final.counts.tsv"
+    counts.write_text("users\t3\n")
+    ok, _ = _run(block, _fresh(tmp_path, "ok"), extra={"FINAL_COUNTS": str(counts)})
+    assert "row counts equal" in ok.stdout and (_w(tmp_path / "ok") / "counts-vm-final.tsv").read_text() == "users\t3\n" and not (_w(tmp_path / "ok") / "counts-vm-final.tmp").exists()
+    # a restore that refuses: the kept file of an earlier success is not touched, and there is none to empty
+    root = _fresh(tmp_path, "refused")
+    p, _ = _run(block, root, extra={"FINAL_COUNTS": str(counts), "FAILSUDO": "restore.sh"})
+    assert not (_w(root) / "counts-vm-final.tsv").exists() and "row counts equal" not in p.stdout, "a refused restore leaves no counts file behind"
+    # a second attempt in the same folder refuses to overwrite what is kept
+    p2, calls = _run(block, _fresh(tmp_path, "again"), extra={"FINAL_COUNTS": str(counts)}, files={"counts-vm-final.tsv": "users\t99\n"})
+    assert (_w(tmp_path / "again") / "counts-vm-final.tsv").read_text() == "users\t99\n" and not any("restore.sh" in c for c in calls), "the kept file is never overwritten and nothing is restored on top of it"
     way = _section("## 12. The way back", "Two chains")
     assert "rowcounts.sh | diff <(grep -P" in way and "counts-vm-final.tsv" in way and "counts-final.tsv" not in SHEET.replace("counts-vm-final.tsv", "")
-    # the same file name and the same line shape as the dev gateway sheet
     dev = (_ROOT / "deploy/vm/CUTOVER-gateway-dev.md").read_text()
     assert 'grep -P "^\\S+\\t\\d+$"' in dev and 'grep -P "^\\S+\\t\\d+$"' in SHEET
 
@@ -482,7 +537,8 @@ def test_the_way_back_on_the_vm_stops_where_it_fails_and_the_one_on_the_machine_
     subprocess.run(["bash", "-c", vm], capture_output=True, text=True, timeout=60, env=env, cwd=nostack_root)
     assert not [c for c in Path(env["CALLS"]).read_text().splitlines() if "systemctl" in c or "passthrough" in c], "no stack on this machine: nothing is stopped and no pass-through is started"
     machine = _block_with('BACK=no\n[ "$VMBACK" = passing ]')
-    p, calls = _run(machine, _fresh(tmp_path, "m"), files={"frozen.txt": "svc-x\nsvc-y\nsvc-a\nsvc-b\n", WP: "svc-a\nsvc-b\n", "paused.txt": "job-1\n"}, extra={"CURL_CODE": "200"})
+    p, calls = _run(machine, _fresh(tmp_path, "m"), files={"frozen.txt": "svc-x\nsvc-y\nsvc-a\nsvc-b\n", WP: "svc-a\nsvc-b\n", "paused.txt": "job-1\n"}, extra={"CURL_CODE": "200", "BURL": ""})
+    assert any("services describe" in c and "status.url" in c for c in calls), "the Cloud Run address is derived inside the block (a fresh shell has no BURL)"
     assert [c.split()[4] for c in _verbs(calls, "add-iam-policy-binding")] == ["svc-a", "svc-b"], "only what the freeze took the binding off (the record of this window), not every service in frozen.txt"
     assert _verbs(calls, "scheduler jobs resume") and "Cloud Run backend: 200" in p.stdout and "way back: done" in p.stdout
     # a failing binding stops the loop; nothing is resumed
@@ -512,7 +568,7 @@ def test_step_eight_says_cloud_run_backend_and_frontend_stay_closed_and_why() ->
 def test_the_gates_and_the_checks_that_need_a_person_say_who_writes_what() -> None:
     g = _section("## G. Gates", "## 0. Read-only")
     for token in ("**G1. The repository side of RUNBOOK §12 is done**", "the image cleanup checker fix (its three limits)", "**G3. Nothing can deploy to prod from the start of the window until P3 is merged**", "nothing merges to `main`",
-                  "`gcloud builds list --project $PROJECT --ongoing --limit 200", "**G5. Every decision in this sheet is written down**", "the **prod pipeline changes P1 and P2 below**"):
+                  "`gcloud builds list --project $PROJECT --ongoing --limit 200", "**G5. Every decision in this sheet is written down**", "the **prod pipeline changes P1, P2, P4 and P5 below**"):
         assert token in g, token
     zero = _section("## 0. Read-only", "## 1. Rehearsal")
     for token in ("**Everything in the project that depends on prod — read the list, do not assume it.**", "**«I do not know» is a stop**", "this sheet deletes nothing of Cloud Run prod", "a **finding to stop on**",
@@ -521,8 +577,8 @@ def test_the_gates_and_the_checks_that_need_a_person_say_who_writes_what() -> No
 
 
 def test_the_pipeline_section_names_three_changes_in_an_order_and_the_repository_premises_hold_today() -> None:
-    section = _section("## The prod pipeline: three changes", "## 0. Read-only")
-    for token in ("**P1 — before step 4: the one address switch.**", "**P2 — before G2: the prod VM bundle build.**", "**P3 — merged right after step 8, before anything else merges to `main`:", "`cloud_run_app_skip=true`",
+    section = _section("## The prod pipeline: five changes", "## 0. Read-only")
+    for token in ("**P1 — before step 4: the one address switch.**", "**P2 — before G2: the prod VM bundle build.**", "**P4 — before step 4: prod's scheduler jobs are defined in the repository**", "**P5 — before G2: the access log of the front**", "**P3 — merged right after step 8, before anything else merges to `main`:", "`cloud_run_app_skip=true`",
                   "Until P3 is merged G3 holds;", "These are **not made by this sheet**"):
         assert token in section, token
     assert "| 8b |" in SHEET and "P3" in _section("## The order", "## G. Gates")
@@ -564,11 +620,19 @@ def test_every_ladder_refuses_to_run_outside_the_folder_of_the_window(tmp_path: 
         assert not any(verb in c for c in Path(env["CALLS"]).read_text().splitlines()) and said in q.stdout, (i, "another window's folder")
 
 
-def test_the_first_block_makes_and_enters_the_folder_and_the_sheet_says_to_do_it_in_every_shell() -> None:
+def test_the_first_blocks_make_and_enter_the_folder_on_the_machine_and_on_the_vm_and_the_sheet_says_to_do_it_in_every_shell() -> None:
     zero = _section("## 0. Read-only", "## 1. Rehearsal")
-    assert "**One folder per window.**" in zero and "in **every new shell**, on the product owner's machine and on the VM" in zero
-    block = _block_with('mkdir -p "window-${WINDOW}"')
-    assert block.strip() == '[ -n "$WINDOW" ] && mkdir -p "window-${WINDOW}" && cd "window-${WINDOW}" && pwd'
+    assert "**One folder per window.**" in zero and "**from the repository checkout**" in zero and "(`REPO`, which the blocks use for the repository's own scripts)" in zero and "On the VM (no checkout there; the same folder name)" in zero
+    machine = _block_with('REPO=$(git rev-parse --show-toplevel)')
+    assert machine.strip() == '[ -n "$WINDOW" ] && REPO=$(git rev-parse --show-toplevel) && mkdir -p "$HOME/prod-move/window-${WINDOW}" && cd "$HOME/prod-move/window-${WINDOW}" && pwd'
+    vm = _block_with('mkdir -p "$HOME/window-${WINDOW}"')
+    assert vm.strip() == '[ -n "$WINDOW" ] && mkdir -p "$HOME/window-${WINDOW}" && cd "$HOME/window-${WINDOW}" && pwd'
+    # run for real: the folder is made outside the checkout and REPO points at the checkout
+    import subprocess as sp
+    home = Path(os.environ.get("TMPDIR", "/tmp")) / "prodsheet-home"
+    home.mkdir(exist_ok=True)
+    out = sp.run(["bash", "-c", machine.strip() + '; echo "REPO=$REPO"'], capture_output=True, text=True, cwd=_ROOT, env={**os.environ, "WINDOW": "20261102", "HOME": str(home)})
+    assert out.returncode == 0 and f"{home}/prod-move/window-20261102" in out.stdout and f"REPO={_ROOT}" in out.stdout, out.stderr
 
 
 def test_g3_switches_the_workflow_off_and_looks_for_queued_runs_of_main_not_only_for_builds() -> None:
@@ -580,3 +644,126 @@ def test_g3_switches_the_workflow_off_and_looks_for_queued_runs_of_main_not_only
     assert f'.workflowName == \\"{name}\\"' in g3 or f'.workflowName == "{name}"' in g3.replace('\\"', '"'), "the name the filter uses is the workflow's name"
     assert "cancel-in-progress: false" in (_ROOT / ".github/workflows/cloud-build.yml").read_text(), "the premise: a queued run is not cancelled by a newer one"
     assert "`gh workflow enable cloud-build.yml`) just before P3 is merged" in SHEET
+
+
+# ── the security lens (Kadir, 2026-10-28): the dependents read, the G2 look, the dump copies, the small four ──
+
+def test_the_dependents_loop_lists_a_service_that_reaches_the_database_by_the_socket_the_secret_or_the_address(tmp_path: Path) -> None:
+    block = _block_with("USES CLOUD SQL PROD")
+    for i, (extra, listed) in enumerate(((":sprintable-prod", True), ("DATABASE_URL_PROD_PGBOUNCER", True), ("10.110.0.3", True), ("nothing of the kind", False))):
+        p, _ = _run(block, _fresh(tmp_path, f"d{i}"), extra={"DESC_EXTRA": extra})
+        assert ("USES CLOUD SQL PROD: services sprintable-backend-prod" in p.stdout) is listed, (extra, p.stdout[:200])
+    p, _ = _run(block, _fresh(tmp_path, "empty"), extra={"DESC_EXTRA": "10.110.0.3", "SRC_IP": ""})
+    assert "USES CLOUD SQL PROD" not in p.stdout, "an unset address matches nothing (the fallback is a string no description has)"
+    assert '-e ":${SQL}" -e "DATABASE_URL_PROD" -e "${SRC_IP:-no-such-address}"' in block
+
+
+def test_the_g2_look_prints_what_the_expected_output_says_and_names_an_open_port(tmp_path: Path) -> None:
+    block = _block_with("VMSA=$(gcloud compute")
+    p, calls = _run(block, _fresh(tmp_path, "ok"))
+    assert p.returncode == 0, p.stderr
+    for token in ("the VM's account: vm-sa@sprintable-494803.iam.gserviceaccount.com", "sprintable-vm-prod-deploy: enforced", "sprintable-vm-prod-backups: enforced", "closed from outside: 22", "closed from outside: 3389", "closed from outside: 5432",
+                  "JWT_SECRET_PROD enabled=1 vm_accessor=1", "DB_PASSWORD_VM_PROD enabled=1 vm_accessor=1"):
+        assert token in p.stdout, (token, p.stdout)
+    assert _verbs(calls, "firewall-rules list") and not [c for c in calls if c.startswith("gcloud") and any(w in c.split() for w in _WRITES)], "read only"
+    p, _ = _run(block, _fresh(tmp_path, "open"), extra={"OPEN_PORT": "5432"})
+    assert "OPEN from outside: 5432" in p.stdout and "closed from outside: 22" in p.stdout
+    # the two Cloud SQL connection strings are not in the declaration the VM reads: no id of the list is one of them
+    from subprocess import run as _r
+    ids = _r([__import__("sys").executable, str(_ROOT / "deploy/vm/bin/render_env.py"), "--secret-ids", str(_ROOT / "deploy/vm/env/prod.yaml")], capture_output=True, text=True).stdout.split()
+    assert len(ids) == 21 and not [i for i in ids if i.startswith("DATABASE_URL")], ids
+    assert "each of the 21 ids of the declaration" in SHEET
+
+
+def test_the_lifecycle_rule_of_the_sheet_is_the_one_of_runbook_section_one(tmp_path: Path) -> None:
+    import json
+    block = _block_with("lifecycle.json <<'EOF'")
+    p, calls = _run(block, _fresh(tmp_path, "lc"))
+    assert p.returncode == 0, p.stderr
+    written = json.loads((_w(tmp_path / "lc") / "lifecycle.json").read_text())
+    runbook = json.loads(RUNBOOK_TEXT.split("lifecycle.json <<'EOF'")[1].split("EOF")[0])
+    assert written == runbook and {r["condition"]["matchesPrefix"][0]: r["condition"]["age"] for r in written["rule"]} == {"db/": 14, "status/": 7, "import/": 7}
+    assert _verbs(calls, "buckets update") and "--lifecycle-file=lifecycle.json" in "\n".join(calls)
+    assert "14 days  db/" in p.stdout and "7 days  status/" in p.stdout and "7 days  import/" in p.stdout, p.stdout
+
+
+RUNBOOK_TEXT = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
+
+
+def test_the_rate_limits_the_sheet_lists_are_the_ones_in_the_code_and_the_acceptance_is_per_route() -> None:
+    import ast
+    limits: dict[str, int] = {}
+    for f in (_ROOT / "backend/app/routers").glob("*.py"):
+        tree = ast.parse(f.read_text())
+        prefix = ""
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call) and getattr(node.value.func, "id", "") == "APIRouter":
+                prefix = next((k.value.value for k in node.value.keywords if k.arg == "prefix"), "")
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+                lim = next((d for d in node.decorator_list if isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute) and d.func.attr == "limit" and getattr(d.func.value, "id", "") == "limiter"), None)
+                route = next((d for d in node.decorator_list if isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute) and d.func.attr in ("get", "post")), None)
+                if lim and route:
+                    limits[prefix + route.args[0].value] = int(lim.args[0].value.split("/")[0])
+    assert limits == {"/api/v2/legal/{doc_type}": 60, "/api/v2/auth/register": 5, "/api/v2/auth/token": 10, "/api/v2/auth/refresh": 20, "/api/v2/auth/switch-account": 20, "/api/v2/auth/native-bootstrap": 10,
+                      "/api/v2/auth/native-bootstrap/challenges": 10, "/api/v2/auth/device-installations/registration-challenges": 10, "/api/v2/auth/device-installations/register": 10}, limits
+    g5 = SHEET.split("**The two acceptances of G5")[1].split("## G2, the read-only look")[0]
+    for token in ("`POST /api/v2/auth/register` 5 a minute", "`/auth/token`, `/auth/native-bootstrap`, `/auth/native-bootstrap/challenges`, `/auth/device-installations/registration-challenges` and `/auth/device-installations/register` 10 a minute each",
+                  "`/auth/refresh` and `/auth/switch-account` 20 a minute each", "`GET /api/v2/legal/{doc_type}` 60 a minute", "about 55 a minute", "**Accepted** only if the busiest minute of every route is below its limit", "**not accepted** if any is at or above it",
+                  "(1) **One account for the VM, in prod too:** prod takes the account model of [RUNBOOK §2](RUNBOOK.md) as it is"):
+        assert token in g5, token
+    block = _block_with("busiest minutes of the last 7 days")
+    for route in ("register", "token", "refresh", "switch-account", "native-bootstrap", "device-installations/registration-challenges", "device-installations/register"):
+        assert route in block.split("for route in ")[1].split("; do")[0].split(), route
+
+
+def test_the_acceptances_use_neutral_words_because_the_repository_is_public() -> None:
+    g5 = SHEET.split("**The two acceptances of G5")[1].split("## G2, the read-only look")[0]
+    for word in ("secret id", "service account", "@", "iam.gserviceaccount", "gs://", "roles/"):
+        assert word not in g5.split("```")[0], word
+
+
+def test_the_scheduler_by_the_script_applies_only_after_the_plan_is_exactly_four_updates(tmp_path: Path) -> None:
+    block = _block_with("SCHP=no")
+    four = "\n".join(f"UPDATE job-{i}-prod [GET x · * * * * *] — uri" for i in range(4)) + "\nUNCHANGED 0\ndry-run — 바꾼 것 없음(--apply로 적용)"
+    p, calls = _run(block, _fresh(tmp_path, "ok"), extra={"PLAN_OUT": four})
+    pys = [c for c in calls if c.startswith("python3 /repo/infra/apply_cloud_scheduler.py")]
+    assert len(pys) == 2 and "--apply" not in pys[0] and "--apply" in pys[1] and "scheduler (script): applied" in p.stdout, (pys, p.stdout)
+    assert all("--env prod --base-url https://api.sprintable.ai" in c for c in pys)
+    for name, plan in (("three", four.replace("UPDATE job-3-prod [GET x · * * * * *] — uri\n", "")), ("create", four + "\nCREATE job-9-prod [GET x]"), ("unmanaged", four + "\nUNMANAGED hand-made-prod (정의에 없음)"),
+                       ("five", four + "\nUPDATE job-4-prod [GET x] — uri")):
+        p, calls = _run(block, _fresh(tmp_path, name), extra={"PLAN_OUT": plan})
+        assert len([c for c in calls if c.startswith("python3 /repo/infra")]) == 1 and "scheduler (script): start" in p.stdout, (name, p.stdout[-200:])
+    for name, extra in (("norepo", {"REPO": ""}), ("nowindow", {"WINDOW": ""})):
+        p, calls = _run(block, _fresh(tmp_path, name), extra={"PLAN_OUT": four, **extra})
+        assert not [c for c in calls if c.startswith("python3")] and "scheduler (script): no" in p.stdout, name
+    p, calls = _run(block, _fresh(tmp_path, "elsewhere"), where="parent", extra={"PLAN_OUT": four})
+    assert not [c for c in calls if c.startswith("python3")] and "scheduler (script): no" in p.stdout, "outside the folder of the window nothing runs"
+
+
+def test_the_notice_carries_the_freeze_wait_and_the_request_timeout_is_read_before_the_window() -> None:
+    assert "**plus the wait of the freeze**" in SHEET and "1810 s if prod's timeout is 1800 s" in SHEET and "**with the freeze wait added**" in SHEET
+    assert "the notice's window is **1810 s + the rehearsal's measured downtime**" in SHEET
+    block = _block_with("SRC_IP=$(gcloud sql")
+    assert "value(spec.template.spec.timeoutSeconds)" in block and "the freeze waits $((TMO + 10)) s" in block
+
+
+def test_the_positive_control_of_the_build_check_and_what_the_product_owner_measured() -> None:
+    g3 = next(line for line in SHEET.splitlines() if line.startswith("| **G3."))
+    for token in ("**with a positive control, so the empty answer cannot be vacuous**", "--limit 40", "must print at least one line ending in `prod`", "of the last 40 builds three end in `prod`, the last of 2026-10-27 07:18 UTC"):
+        assert token in g3, token
+
+
+def test_the_day_after_cleans_the_disk_and_leaves_the_bucket_to_the_rule() -> None:
+    day = _section("## 10–11. The day after", "## 12. The way back")
+    for token in ("**The copies of the production database are cleaned up.**", "**lifecycle rule for `import/`**", "sudo find /srv/sprintable/import -name '*-final-*' -delete", "sudo find /srv/sprintable/import -name '*-rehearsal-*' -delete",
+                  "once the removal sheet of Cloud SQL prod has made its own exports", "Write the date this was done in the record of G5"):
+        assert token in day, token
+    assert "gcloud storage rm" not in day
+
+
+def test_the_job_of_03_kst_is_named_in_the_freeze_with_what_happens_to_that_night() -> None:
+    five = _section("## 5. Freeze", "## 6–7.")
+    for token in ("**The daily job inside the window.**", "`assets-grace-hard-delete-prod` runs at **03:00 Asia/Seoul — the first minute of the window**", "`storage-usage-warn-prod` at 09:00 KST, outside", "its run of that night is **skipped**",
+                  "Cloud Scheduler does not catch up a run it missed", "gcloud scheduler jobs run assets-grace-hard-delete-prod", "writes the decision down"):
+        assert token in five, token
