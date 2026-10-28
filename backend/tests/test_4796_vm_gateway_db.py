@@ -444,7 +444,7 @@ def test_the_compose_service_is_a_second_postgres_of_its_own_published_on_the_pr
     env = gw["environment"]
     assert "POSTGRES_PASSWORD" not in env, "the superuser has no password at all"
     assert env["POSTGRES_USER"] == "${GATEWAY_DB_ADMIN:-gw_admin}" and env["GATEWAY_APP_USER"] == "${GATEWAY_DB_USER:-support_gw}" and env["GATEWAY_APP_PASSWORD"].startswith("${GATEWAY_DB_PASSWORD")
-    assert "${GATEWAY_DB_HBA:-./gateway-db-pg_hba.conf}:/etc/postgresql/pg_hba.conf:ro" in gw["volumes"] and "./gateway-db-init.sh:/docker-entrypoint-initdb.d/10-gateway-db.sh:ro" in gw["volumes"]
+    assert "${GATEWAY_DB_HBA:-./gateway-db-pg_hba.conf}:/etc/postgresql/pg_hba.conf:ro" in gw["volumes"] and "${GATEWAY_DB_INIT:-./gateway-db-init.sh}:/docker-entrypoint-initdb.d/10-gateway-db.sh:ro" in gw["volumes"]
     assert gw["networks"] == ["gateway-db"] and doc["networks"]["gateway-db"]["driver_opts"]["com.docker.network.bridge.name"] == "br-gwdb", "its own bridge, with the name the firewall rule uses"
     assert all("networks" not in compose[n] for n in ("db", "migrate", "backend", "frontend", "caddy")), "the others stay on the default network: they cannot reach the gateway's server"
     assert gw["healthcheck"]["test"][0] == "CMD-SHELL" and "pg_isready" in gw["healthcheck"]["test"][1]
@@ -942,3 +942,45 @@ def test_the_runbook_states_when_the_rules_file_changes_and_the_order_of_the_bac
     rb = (_VM / "RUNBOOK.md").read_text()
     for token in ("**only inside the swap, after `pending.json` exists**", "settled by the next run, which puts the recorded release's rules back", "the backup and restore-check units are ordered after that unit"):
         assert token in rb, token
+
+
+def test_no_mount_of_the_gateway_database_depends_on_the_release_folder() -> None:
+    gw = yaml.safe_load((_VM / "compose.yml").read_text())["services"]["gateway-db"]
+    for v in gw["volumes"]:
+        source = v.split(":")[0]
+        assert source.startswith("${"), f"{v}: a relative source changes with every release folder and makes compose re-create the running container"
+    assert any(v.startswith("${GATEWAY_DB_INIT:-") for v in gw["volumes"]) and any(v.startswith("${GATEWAY_DB_HBA:-") for v in gw["volumes"])
+
+
+def test_the_environment_of_the_gateway_database_is_the_same_for_every_release_and_points_outside_the_release_folders(world) -> None:
+    world.publish("a" * 40)
+    world.dep.run_once()
+    world.publish("b" * 40)
+    world.dep.run_once()
+    ups = [c for c in _compose_calls(world) if "up" in c["args"] and c["args"][-1] == "gateway-db" and "--wait" in c["args"]]
+    assert len(ups) == 2
+    mounts = [(c["env"]["GATEWAY_DB_INIT"], c["env"]["GATEWAY_DB_HBA"]) for c in ups]
+    assert mounts[0] == mounts[1], "the same mount sources for both releases"
+    runtime = str(world.cfg.install_dir / "runtime")
+    assert all(m.startswith(runtime + "/") and "/releases/" not in m for m in mounts[0])
+    assert (world.cfg.install_dir / "runtime/gateway-db-init.sh").read_text() == (_VM / "gateway-db-init.sh").read_text(), "the script the first start runs is the release's own"
+
+
+def _bundle_without(name: str) -> bytes:
+    import io
+    import tarfile
+    src = tarfile.open(fileobj=io.BytesIO(S._bundle()), mode="r:gz")
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as out:
+        for m in src.getmembers():
+            if m.name != name:
+                out.addfile(m, src.extractfile(m))
+    return buf.getvalue()
+
+
+def test_a_release_without_the_first_start_script_stops_before_anything_runs(world) -> None:
+    world.publish("a" * 40, bundle=_bundle_without("gateway-db-init.sh"))
+    assert world.dep.run_once() == "failed"
+    st = S._state(world, "failed.json")
+    assert st["phase"] == "pre-swap" and "gateway-db-init.sh" in st["detail"]
+    assert not [c for c in _compose_calls(world) if "up" in c["args"]], "nothing was started"

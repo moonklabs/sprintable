@@ -485,7 +485,8 @@ class Deployer:
         }
         if gateway:
             env.update({"GATEWAY_DB_USER": gateway["user"], "GATEWAY_DB_NAME": gateway["name"], "GATEWAY_DB_PASSWORD": gateway["password"], "GATEWAY_DB_BIND": gateway["bind"],
-                        "GATEWAY_DB_HBA": str(self.cfg.install_dir / "runtime" / "gateway-db-pg_hba.conf")})
+                        "GATEWAY_DB_HBA": str(self.cfg.install_dir / "runtime" / "gateway-db-pg_hba.conf"),
+                        "GATEWAY_DB_INIT": str(self.cfg.install_dir / "runtime" / "gateway-db-init.sh")})  # every path of this service is the same in every release: compose re-creates a container whose mounts changed
         env.update(renv.process_environment(services))
         return env
 
@@ -582,12 +583,19 @@ class Deployer:
         (self.cfg.data_dir / "caddy").mkdir(parents=True, exist_ok=True)
         if p.gateway_db:
             (self.cfg.data_dir / "gateway-postgres").mkdir(parents=True, exist_ok=True)
+            init_src = p.release / "gateway-db-init.sh"
+            try:
+                init_text = init_src.read_text()
+            except OSError as e:
+                raise DeployError(f"the release has no readable gateway-db-init.sh: {type(e).__name__}", "pre-swap") from e
+            # copied to a path that is the same in every release (see `_compose_env`); used only when the data folder is empty, so a rewrite in place changes nothing for a running server
+            self._write_gateway_hba(runtime / "gateway-db-init.sh", init_text, what="the first-start script")
             hba = runtime / "gateway-db-pg_hba.conf"
             if not hba.exists():
                 # the container's mount needs a FILE (docker would make a folder of a missing one) and a first start reads it; an existing file keeps the RUNNING release's rules until `_swap`
                 self._write_gateway_hba(hba, renv.gateway_hba(p.decl))
 
-    def _write_gateway_hba(self, path: Path, text: str) -> None:
+    def _write_gateway_hba(self, path: Path, text: str, what: str = "the access rules") -> None:
         """the access rules file of the gateway database. It is bind-mounted as a single file, so it is rewritten IN PLACE (a rename would leave the container looking at the old file) and only when
         its content differs."""
         try:
@@ -599,7 +607,7 @@ class Deployer:
                 os.fsync(fh.fileno())
             os.chmod(path, 0o644)
         except OSError as e:
-            raise DeployError(f"the access rules of the gateway database cannot be written: {type(e).__name__}", "pre-swap") from e
+            raise DeployError(f"{what} of the gateway database cannot be written: {type(e).__name__}", "pre-swap") from e
 
     def _install_caddyfile(self, text: str) -> None:
         """the container mounts the DIRECTORY, so the file can be replaced atomically (write next to it, fsync, rename): a crash leaves the old or the new file, never half of one"""

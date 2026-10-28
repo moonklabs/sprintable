@@ -51,7 +51,7 @@ REG = "asia-northeast3-docker.pkg.dev/proj/repo"
 def _bundle(extra: dict[str, bytes] | None = None, links: list[tuple[str, str]] = ()) -> bytes:
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-        for rel in ("compose.yml", "Caddyfile", "env/dev.yaml"):
+        for rel in ("compose.yml", "Caddyfile", "env/dev.yaml", "gateway-db-init.sh"):   # the first-start script of the gateway database travels in every real bundle (make_bundle.TOP_FILES)
             data = (_VM / rel).read_bytes()
             ti = tarfile.TarInfo(rel)
             ti.size = len(data)
