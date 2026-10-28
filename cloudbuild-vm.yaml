@@ -1,6 +1,6 @@
-# story 4796 — the dev VM's bundle, as a build of its own (RUNBOOK §5).
+# story 4796 — the VM's bundle (dev's, and since P2 of the prod cutover prod's), as a build of its own (RUNBOOK §5).
 #
-# Submitted by .github/workflows/cloud-build.yml (dev only) with `gcloud builds submit --async`, AFTER the Cloud Run build of the same sha has finished and its images are in the registry.
+# Submitted by .github/workflows/cloud-build.yml (dev and prod) with `gcloud builds submit --async`, AFTER the Cloud Run build of the same sha has finished and its images are in the registry.
 # It is a separate build on purpose: the first version had these steps inside cloudbuild.yaml with `allowFailure`, and on its first real run the worker stopped answering during the
 # Next.js type check (build 844cd9a1, INTERNAL_ERROR on every step) — a dead worker ignores both `allowFailure` and step timeouts. Here the worst case is this build failing, on its own worker.
 #
@@ -9,6 +9,7 @@
 substitutions:
   _AR_REGION: asia-northeast3
   _AR_REPO: sprintable
+  # dev or prod; anything else makes every step end 0 without calling a tool. The bucket must be the one of that environment (each step checks it): a bundle written to the other environment's deploy bucket would be a release for the wrong VM.
   _DEPLOY_ENV: dev
   _VM_DEPLOY_BUCKET: sprintable-vm-dev-deploy
   # The public build values of the Cloud Run frontend of the same environment (cloud-build.yml `steps.env`): the caller passes all five, an empty value explicitly (`_X=""`).
@@ -31,10 +32,12 @@ steps:
       - -c
       - |
         set -euo pipefail
-        if [ "${_DEPLOY_ENV}" != "dev" ]; then
-          echo "skip resolve-backend: dev only (story 4796) — prod gets its own build at the prod cutover"
-          exit 0
-        fi
+        case "${_DEPLOY_ENV}" in
+          dev) want_bucket=sprintable-vm-dev-deploy ;;
+          prod) want_bucket=sprintable-vm-prod-deploy ;;
+          *) echo "skip resolve-backend: dev and prod only (story 4796)"; exit 0 ;;
+        esac
+        [ "${_VM_DEPLOY_BUCKET}" = "$$want_bucket" ] || { echo "resolve-backend: the deploy bucket ${_VM_DEPLOY_BUCKET} is not the one of ${_DEPLOY_ENV} ($$want_bucket)" >&2; exit 1; }
         out=/workspace/vm-out
         rm -rf "$$out"
         mkdir -p "$$out"
@@ -64,10 +67,12 @@ steps:
       - -c
       - |
         set -euo pipefail
-        if [ "${_DEPLOY_ENV}" != "dev" ]; then
-          echo "skip build-frontend-vm: dev only (story 4796)"
-          exit 0
-        fi
+        case "${_DEPLOY_ENV}" in
+          dev) want_bucket=sprintable-vm-dev-deploy ;;
+          prod) want_bucket=sprintable-vm-prod-deploy ;;
+          *) echo "skip build-frontend-vm: dev and prod only (story 4796)"; exit 0 ;;
+        esac
+        [ "${_VM_DEPLOY_BUCKET}" = "$$want_bucket" ] || { echo "build-frontend-vm: the deploy bucket ${_VM_DEPLOY_BUCKET} is not the one of ${_DEPLOY_ENV} ($$want_bucket)" >&2; exit 1; }
         out=/workspace/vm-out
         [ -s "$$out/backend-image.txt" ] || { echo "build-frontend-vm: resolve-backend left no backend image" >&2; exit 1; }
         for v in VM_GA4_MEASUREMENT_ID VM_EE_ENABLED VM_SUPPORT_WIDGET_ENABLED VM_SUPPORT_GATEWAY_URL VM_TOSS_CLIENT_KEY; do
@@ -82,7 +87,7 @@ steps:
           DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 python3-yaml
         fi
         # builds (linux/amd64), checks what was baked (the VM API host in, no Cloud Run address in), pushes, and prints the digest reference as its LAST line
-        bash deploy/vm/bin/build-frontend-vm.sh dev "${COMMIT_SHA}" "$$repo/frontend-vm:${COMMIT_SHA}" --push \
+        bash deploy/vm/bin/build-frontend-vm.sh "${_DEPLOY_ENV}" "${COMMIT_SHA}" "$$repo/frontend-vm:${COMMIT_SHA}" --push \
           --set "NEXT_PUBLIC_GA4_MEASUREMENT_ID=$$VM_GA4_MEASUREMENT_ID" \
           --set "NEXT_PUBLIC_EE_ENABLED=$$VM_EE_ENABLED" \
           --set "NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED=$$VM_SUPPORT_WIDGET_ENABLED" \
@@ -105,10 +110,12 @@ steps:
       - -c
       - |
         set -euo pipefail
-        if [ "${_DEPLOY_ENV}" != "dev" ]; then
-          echo "skip bundle-vm: dev only (story 4796)"
-          exit 0
-        fi
+        case "${_DEPLOY_ENV}" in
+          dev) want_bucket=sprintable-vm-dev-deploy ;;
+          prod) want_bucket=sprintable-vm-prod-deploy ;;
+          *) echo "skip bundle-vm: dev and prod only (story 4796)"; exit 0 ;;
+        esac
+        [ "${_VM_DEPLOY_BUCKET}" = "$$want_bucket" ] || { echo "bundle-vm: the deploy bucket ${_VM_DEPLOY_BUCKET} is not the one of ${_DEPLOY_ENV} ($$want_bucket)" >&2; exit 1; }
         out=/workspace/vm-out
         [ -s "$$out/frontend-image.txt" ] || { echo "bundle-vm: build-frontend-vm left no frontend image — no bundle for ${COMMIT_SHA}" >&2; exit 1; }
         [ -s "$$out/backend-image.txt" ] || { echo "bundle-vm: resolve-backend left no backend image — no bundle for ${COMMIT_SHA}" >&2; exit 1; }
