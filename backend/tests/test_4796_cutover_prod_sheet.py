@@ -355,7 +355,7 @@ WP = "was-invoker-20261102.tsv"
 
 
 def test_the_read_only_blocks_write_nothing(tmp_path: Path) -> None:
-    for i, marker in enumerate(("SRC_IP=$(gcloud sql", "USES CLOUD SQL PROD", "Google-Cloud-Scheduler", "VMSA=$(gcloud compute", "for route in register token", "for path in desktop/setup-codes")):
+    for i, marker in enumerate(("SRC_IP=$(gcloud sql", "USES CLOUD SQL PROD", "Google-Cloud-Scheduler", "VMSA=$(gcloud compute", "for route in register token", "for route in desktop/setup-codes")):
         p, calls = _run(_block_with(marker), _fresh(tmp_path, f"ro{i}"))
         assert p.returncode == 0, (marker, p.stderr[:300])
         gcloud_calls = [c for c in calls if c.startswith("gcloud ")]
@@ -865,9 +865,9 @@ def test_the_second_family_of_limits_is_the_one_in_the_code() -> None:
                   "`POST /api/v2/onboarding/events` 120 a minute", "the OAuth hand-off `issue` (5) and `consume` (10) a minute", "`POST /api/v2/auth/set-password/request` and `POST /api/v2/auth/resend-verification` 3 an hour each",
                   "so for those callers these limits too are counted as one address"):
         assert token in g5, token
-    block = _block_with("for path in desktop/setup-codes")
+    block = _block_with("for route in desktop/setup-codes")
     for path in ("desktop/setup-codes", "desktop/setup-codes/exchange", "desktop/device-token-codes", "desktop/device-token-codes/exchange", "onboarding/events", "internal/auth/oauth-handoff/issue", "internal/auth/oauth-handoff/consume"):
-        assert path in block.split("for path in ")[1].split("; do")[0].split(), path
+        assert path in block.split("for route in ")[1].split("; do")[0].split(), path
     assert 'echo "== GET /api/v2/legal/: busiest minutes of the last 7 days (count minute)"' in block and "/api/v2/legal/" in block and 'requestMethod=\\"GET\\"' in block and "auth/set-password/request auth/resend-verification" in block and "cut -c1-13" in block, "the legal route (GET) and the two hourly routes are measured too"
 
 
@@ -1171,3 +1171,47 @@ def test_the_known_limits_are_written_down() -> None:
     lim = _section("## Known limits (not blockers; read before the window)", "## Questions for the owner")
     for token in ("does not compare the four origins with those of the apply command", "covered by the 30 s wait and the reading of the plan, not by a measurement of idle connections", "reads the log of the Cloud Run backend", "outside the freeze by design"):
         assert token in lim, token
+
+
+# ── zsh is the default shell of the machine that runs these blocks ──
+
+ZSH_SPECIAL = {"path", "fpath", "cdpath", "manpath", "module_path", "status", "pipestatus", "argv", "prompt", "signals", "options", "commands", "functions", "aliases", "parameters", "history", "histchars", "words", "reply", "match", "mbegin", "mend", "nameref"}
+
+
+def test_no_block_loops_over_an_unquoted_variable_or_on_a_name_zsh_ties_to_something() -> None:
+    """zsh does not split `$var` on whitespace (a loop over `$names` runs once, with the whole list) and ties some names to its own state (`path` is PATH: the loop made gcloud vanish)"""
+    for block in _blocks():
+        for line in block.splitlines():
+            for name, words in re.findall(r"\bfor (\w+) in ([^;]+);", line):
+                assert name not in ZSH_SPECIAL, (name, line[:120])
+                assert not re.fullmatch(r"\$\{?\w+\}?", words.strip()), ("zsh does not split this", line[:120])
+
+
+@pytest.mark.skipif(shutil.which("zsh") is None, reason="no zsh on this machine")
+def test_the_step_zero_ladders_list_every_service_under_zsh_as_under_bash(tmp_path: Path) -> None:
+    block = _block_with("USES CLOUD SQL PROD")
+    for shell in ("bash", "zsh"):
+        p, calls = _run(block, _fresh(tmp_path, shell), shell=shell, extra={"DESC_EXTRA": ":sprintable-prod"})
+        assert "dependents: listed" in p.stdout and "invokers: listed" in p.stdout, (shell, p.stdout, p.stderr[:200])
+        assert "USES CLOUD SQL PROD: services sprintable-backend-prod" in p.stdout and "USES CLOUD SQL PROD: services sprintable-frontend-prod" in p.stdout, (shell, "both services, one name each")
+        assert "== sprintable-backend-prod" in p.stdout and "== sprintable-frontend-prod" in p.stdout, shell
+
+
+@pytest.mark.skipif(shutil.which("zsh") is None, reason="no zsh on this machine")
+def test_the_measure_loops_keep_gcloud_reachable_under_zsh(tmp_path: Path) -> None:
+    for marker in ("for route in register token", "for route in desktop/setup-codes"):
+        p, calls = _run(_block_with(marker), _fresh(tmp_path, marker.split()[-1].replace("/", "_")), shell="zsh")
+        assert p.returncode == 0, (marker, p.stderr[:300])
+        assert len([c for c in calls if c.startswith("gcloud ") and "logging read" in c]) >= 7, (marker, "a loop variable that shadows PATH ends the loop after the first round")
+
+
+def test_the_positive_control_of_the_writers_gate_is_measured_and_repeatable(tmp_path: Path) -> None:
+    five = _section("## 5. Freeze", "## 6–7.")
+    for token in ("**Positive control — measured by the product owner on 2026-10-28 with the live account (`양성 대조 실측됨`).**", "20 lines over `--freshness=1d` and 20 over five minutes", "matched 5 requests of `/api/v2/health`",
+                  "the one place where this gate could pass falsely", "write the number of lines in the record of G5", "A 0 here means the filter matches nothing"):
+        assert token in five, token
+    block = _block_with("--freshness=1d")
+    p, calls = _run(block, _fresh(tmp_path, "pos"), extra={"WRITE_ROWS": "2026-11-02T18:00:00Z\n2026-11-02T18:00:01Z\n"})
+    assert p.stdout.strip() == "2", p.stdout
+    ask = next(c for c in calls if "logging read" in c)
+    assert 'NOT httpRequest.requestUrl=~"^https://[^/?]+/api/v2/(health|ping)$"' in ask and "--freshness=1d" in ask, "the same filter as the gate"
