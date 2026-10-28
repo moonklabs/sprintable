@@ -55,13 +55,14 @@ HEALTH_SNIPPET = (
     "        sys.exit(1)\n"
 )
 GATEWAY_SNIPPET = "import sys,urllib.request\ntry:\n    ok=200<=urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=5).status<300\nexcept Exception:\n    ok=False\nsys.exit(0 if ok else 1)\n"
-# idempotent: the gateway's role and database inside the VM's Postgres (the image only creates the first database, and only on an empty data folder). Run through psql's STANDARD INPUT: the password never
+# idempotent: the gateway's role and database inside the VM's Postgres (the image only creates the first database, and only on an empty data folder). An EXISTING role keeps its password — like the main
+# database's (RUNBOOK §3): the secret is read when the role is first made, and rotating means `ALTER ROLE` first, then the secret (a deploy that changed the role's password before its swap would cut
+# off the gateway that is still running on the old one if the deploy then failed). Run through psql's STANDARD INPUT: the password never
 # appears in an argument list. Every value is a plain identifier or a letters/digits/«_»/«-» password (render_env checks both), so the quoting below cannot be broken out of.
 GATEWAY_DB_SQL = (
     "\\set ON_ERROR_STOP on\n"
     "\\set gw_user '{user}'\n\\set gw_pw '{password}'\n\\set gw_db '{database}'\n\\set main_db '{main}'\n"
     "SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'gw_user', :'gw_pw') WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'gw_user') \\gexec\n"
-    "SELECT format('ALTER ROLE %I PASSWORD %L', :'gw_user', :'gw_pw') \\gexec\n"
     "SELECT format('CREATE DATABASE %I OWNER %I', :'gw_db', :'gw_user') WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'gw_db') \\gexec\n"
     "SELECT format('REVOKE ALL ON DATABASE %I FROM PUBLIC', :'main_db') \\gexec\n"
     "SELECT format('REVOKE ALL ON DATABASE %I FROM PUBLIC', :'gw_db') \\gexec\n"
@@ -140,6 +141,7 @@ class GcsStore:
 
 # ───────────────────────── helpers ─────────────────────────
 
+COMPOSE_STAMP = ".compose-sha256"  # in a release folder: the checksum of the compose.yml that was found equal to the trusted copy of its time
 STATE_KEYS = ("sha", "backend_image", "frontend_image", "bundle", "bundle_sha256")
 OPTIONAL_STATE_KEYS = ("support_gateway_image",)  # part of a release when present; a record written before the gateway existed lacks it and is still a valid record
 GATEWAY_PROFILE, GATEWAY_MIGRATE_PROFILE = "support-gateway", "support-gateway-migrate"
@@ -534,10 +536,11 @@ class Deployer:
             tmp = release.with_name(release.name + ".partial")
             shutil.rmtree(tmp, ignore_errors=True)
             safe_extract(blob, tmp)
+            (tmp / COMPOSE_STAMP).unlink(missing_ok=True)  # only this deployer (or bootstrap) vouches for a compose file; a bundle must not be able to
             (tmp / ".bundle-sha256").write_text(desired["bundle_sha256"])
             shutil.rmtree(release, ignore_errors=True)
             os.replace(tmp, release)
-        check_compose(release / "compose.yml", self.cfg.trusted_compose)
+        self._check_release_compose(release)
         try:
             caddyfile = (release / "Caddyfile").read_text(encoding="utf-8")
             if not caddyfile.strip() or not (release / "Caddyfile").is_file():
@@ -570,6 +573,23 @@ class Deployer:
         secret_values = {services[svc][n] for svc, d in decl["services"].items() if svc in services for n in (d.get("secrets") or {}) if services[svc].get(n)}
         self._scrub_values |= {v for v in (db_password, gateway_password, *secret_values) if v}
         return Prepared(release, decl, self._compose_env(decl, desired, services, db_password, gateway_password), services, caddyfile, gateway_password)
+
+    def _check_release_compose(self, release: Path) -> None:
+        """a release's compose.yml is accepted when it equals the installed (trusted) copy — or when THIS exact file was found equal to the trusted copy of its time (the stamp the deployer writes when it
+        accepts a release, and bootstrap writes for the releases already on the VM before it replaces the copy). Without that, a compose change would refuse to prepare the release that is RUNNING
+        (the way back), so the first deploy after it could never start."""
+        compose, stamp = release / "compose.yml", release / COMPOSE_STAMP
+        try:
+            digest = hashlib.sha256(compose.read_bytes()).hexdigest()
+        except OSError as e:
+            raise DeployError(f"compose.yml cannot be read: {type(e).__name__}", "pre-swap") from e
+        if _stamp_matches(stamp, digest):
+            return
+        check_compose(compose, self.cfg.trusted_compose)
+        try:
+            stamp.write_text(digest)
+        except OSError:
+            pass  # the release is accepted now; it is simply checked again next time
 
     def _activate(self, p: Prepared) -> None:
         """make the compose invocations of `p` possible: the pass-through file (names only) and the data folders"""
@@ -671,7 +691,7 @@ class Deployer:
         self._prune(keep={desired["sha"], *([current["sha"]] if current else [])})
 
     def _prepare_gateway_database(self, p: Prepared) -> None:
-        """the gateway's own role and database in the VM's Postgres (idempotent; also re-applies the role's password from the secret, so a rotated secret takes effect on the next deploy)"""
+        """the gateway's own role and database in the VM's Postgres (idempotent; an existing role's password is left alone)"""
         db, gw = p.decl["database"], p.decl["support_gateway"]["database"]
         sql = GATEWAY_DB_SQL.format(user=gw["user"], password=p.gateway_password, database=gw["name"], main=db["name"])
         rc, out = self._compose(p.release, p.env, "exec", "-T", "db", "psql", "-X", "-q", "-U", db["user"], "-d", "postgres", timeout=120, stdin=sql)

@@ -201,7 +201,7 @@ def test_the_database_script_is_idempotent_in_form_and_isolates_the_two_database
     sql = next(c for c in _compose_calls(world) if "psql" in c["args"])["stdin"]
     assert "\\set ON_ERROR_STOP on" in sql and "\\set gw_user 'support_gw'" in sql and "\\set gw_db 'support_gateway'" in sql and "\\set main_db 'sprintable'" in sql
     assert re.search(r"CREATE ROLE %I LOGIN PASSWORD %L.*WHERE NOT EXISTS \(SELECT 1 FROM pg_roles WHERE rolname = :'gw_user'\) \\gexec", sql)
-    assert "ALTER ROLE %I PASSWORD %L" in sql, "a rotated secret is applied on the next deploy"
+    assert "ALTER ROLE" not in sql.upper(), "an existing role keeps its password: a deploy that changed it before its swap would cut off the gateway that is still running if the deploy then failed"
     assert re.search(r"CREATE DATABASE %I OWNER %I.*WHERE NOT EXISTS \(SELECT 1 FROM pg_database WHERE datname = :'gw_db'\) \\gexec", sql)
     assert "REVOKE ALL ON DATABASE %I FROM PUBLIC', :'main_db'" in sql and "REVOKE ALL ON DATABASE %I FROM PUBLIC', :'gw_db'" in sql and "GRANT CONNECT ON DATABASE %I TO %I', :'gw_db', :'gw_user'" in sql
     assert "SUPERUSER" not in sql.upper() and "CREATEDB" not in sql.upper() and "CREATEROLE" not in sql.upper(), "the role gets nothing beyond login"
@@ -392,7 +392,7 @@ def test_the_bundle_build_resolves_the_gateway_digest_and_hands_it_to_make_bundl
 def test_the_runbook_section_says_what_is_added_in_what_order_and_what_each_step_interrupts() -> None:
     text = (_VM / "RUNBOOK.md").read_text()
     sec = text.split("## 13. The support gateway on the VM")[1]
-    for token in ("support_gateway_image", "role `support_gw`", "psql's standard input", "no container is restarted", "the database and Caddy are not touched", "SUPPORT_GATEWAY_DB_PASSWORD_VM_DEV",
+    for token in ("support_gateway_image", "role `support_gw`", "psql's standard input", "keeps its password", "`.compose-sha256` stamp", "no container is restarted", "the database and Caddy are not touched", "SUPPORT_GATEWAY_DB_PASSWORD_VM_DEV",
                   "**Undo:** copy the previous `desired.json` back (a release without the image)", "`compose stop support-gateway`", "Security note for the second reviewer", "Not in this step", "dev-support.sprintable.ai", "is **refused**"):
         assert token in sec, token
     assert "SUPPORT_GATEWAY_DB_PASSWORD_VM_DEV" in text.split("## 3. Database password")[1].split("## 4.")[0] and "SUPPORT_GATEWAY_ADMIN_TOKEN_dev" in text.split("## 3. Database password")[1].split("## 4.")[0]
@@ -511,3 +511,99 @@ def test_a_reconcile_whose_gateway_stop_fails_keeps_the_marker_and_says_so(world
     world.runner.fail_on[" stop "] = 1
     assert world.dep.run_once() == "reconcile-failed"
     assert (world.cfg.state_dir / "pending.json").exists(), "the next run tries again"
+
+
+# ── the compose pin and the release that is running ─────────────────────────────────────────────────────────────────────────────────────────────
+
+def _with_own_trusted_compose(world, tmp_path: Path) -> Path:
+    trusted = tmp_path / "trusted-compose.yml"
+    trusted.write_text((_VM / "compose.yml").read_text())
+    world.cfg.trusted_compose = trusted
+    return trusted
+
+
+def _changed_compose() -> bytes:
+    doc = yaml.safe_load((_VM / "compose.yml").read_text())
+    doc["x-after-the-change"] = "a compose change that needs a bootstrap run"
+    return yaml.safe_dump(doc).encode()
+
+
+def test_a_compose_change_does_not_strand_the_release_that_is_running(world, tmp_path: Path) -> None:
+    """bootstrap installs the NEW compose as the trusted copy; the running release's folder still holds the old one. It was accepted when it was deployed, and that is remembered — otherwise the way back
+    could not be prepared and the first deploy after a compose change could never start"""
+    trusted = _with_own_trusted_compose(world, tmp_path)
+    a = world.publish("a" * 40, gateway=False)
+    assert world.dep.run_once() == "deployed"
+    stamp = world.cfg.install_dir / "releases" / ("a" * 40) / ".compose-sha256"
+    assert stamp.read_text() == hashlib.sha256((_VM / "compose.yml").read_bytes()).hexdigest()
+    new = _changed_compose()
+    trusted.write_bytes(new)                                    # what `bootstrap.sh` does
+    world.publish("b" * 40, gateway=True, bundle=S._bundle(extra={"compose.yml": new}))
+    assert world.dep.run_once() == "deployed"
+    assert S._state(world, "current.json")["previous"]["sha"] == a["sha"]
+
+
+def test_without_the_stamp_the_old_release_is_refused_and_the_message_says_why(world, tmp_path: Path) -> None:
+    trusted = _with_own_trusted_compose(world, tmp_path)
+    world.publish("a" * 40, gateway=False)
+    assert world.dep.run_once() == "deployed"
+    (world.cfg.install_dir / "releases" / ("a" * 40) / ".compose-sha256").unlink()
+    new = _changed_compose()
+    trusted.write_bytes(new)
+    world.publish("b" * 40, gateway=True, bundle=S._bundle(extra={"compose.yml": new}))
+    world.runner.calls.clear()
+    assert world.dep.run_once() == "failed" and world.runner.calls == []
+    assert "running release cannot be prepared for a rollback" in S._state(world, "failed.json")["detail"]
+
+
+def test_a_stamp_vouches_for_the_file_it_was_made_for_and_nothing_else(world, tmp_path: Path) -> None:
+    trusted = _with_own_trusted_compose(world, tmp_path)
+    world.publish("a" * 40, gateway=False)
+    assert world.dep.run_once() == "deployed"
+    folder = world.cfg.install_dir / "releases" / ("a" * 40)
+    new = _changed_compose()
+    trusted.write_bytes(new)
+    (folder / "compose.yml").write_text((folder / "compose.yml").read_text() + "\n# edited after it was accepted\n")  # still the same document, different bytes
+    world.publish("b" * 40, gateway=True, bundle=S._bundle(extra={"compose.yml": new}))
+    assert world.dep.run_once() == "failed", "the stamp is a checksum of the file: an edited file is checked against the trusted copy again"
+
+
+def test_a_bundle_cannot_bring_its_own_stamp(world, tmp_path: Path) -> None:
+    _with_own_trusted_compose(world, tmp_path)
+    evil = yaml.safe_load((_VM / "compose.yml").read_text())
+    evil["services"]["backend"]["privileged"] = True
+    blob = yaml.safe_dump(evil).encode()
+    world.publish("a" * 40, gateway=False, bundle=S._bundle(extra={"compose.yml": blob, ".compose-sha256": hashlib.sha256(blob).hexdigest().encode()}))
+    assert world.dep.run_once() == "failed" and world.runner.calls == []
+    assert "compose.yml differs from the one installed" in S._state(world, "failed.json")["detail"]
+    assert not (world.cfg.install_dir / "releases" / ("a" * 40) / ".compose-sha256").exists()
+
+
+def _stamp_block() -> str:
+    text = (_VM / "bin/bootstrap.sh").read_text()
+    start = text.index("# releases already on this VM were checked against the compose copy")
+    end = text.index("# the compose file the deployer holds bundles to")
+    return text[start:end]
+
+
+def test_bootstrap_stamps_the_releases_whose_compose_equals_the_copy_it_is_about_to_replace(tmp_path: Path) -> None:
+    root = tmp_path / "opt"
+    (root / "bin").mkdir(parents=True)
+    (root / "bin/compose.yml").write_text("services: {a: {image: x}}\n")
+    for name, body in (("same", "services: {a: {image: x}}\n"), ("other", "services: {a: {image: y}}\n")):
+        (root / "releases" / name).mkdir(parents=True)
+        (root / "releases" / name / "compose.yml").write_text(body)
+    (root / "releases" / "empty").mkdir()
+    script = _stamp_block().replace("/opt/sprintable", str(root))
+    for _ in range(2):  # idempotent
+        subprocess.run(["bash", "-euc", script], check=True, capture_output=True, text=True)
+    assert (root / "releases/same/.compose-sha256").read_text() == hashlib.sha256((root / "releases/same/compose.yml").read_bytes()).hexdigest()
+    assert not (root / "releases/other/.compose-sha256").exists() and not (root / "releases/empty/.compose-sha256").exists()
+    fresh = tmp_path / "fresh"
+    (fresh / "releases").mkdir(parents=True)
+    subprocess.run(["bash", "-euc", _stamp_block().replace("/opt/sprintable", str(fresh))], check=True, capture_output=True, text=True)  # a first bootstrap: nothing to stamp, nothing to fail
+
+
+def test_the_stamp_is_written_before_the_trusted_copy_is_replaced() -> None:
+    text = (_VM / "bin/bootstrap.sh").read_text()
+    assert text.index("compose-sha256") < text.index('install -m 0644 "$src/compose.yml" /opt/sprintable/bin/compose.yml')
