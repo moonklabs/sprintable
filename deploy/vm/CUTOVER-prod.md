@@ -79,15 +79,15 @@ done
 The `client_ip` family and the one `GET` route, the same way (the two mail routes by the hour: `cut -c1-13`):
 
 ```
-for path in desktop/setup-codes desktop/setup-codes/exchange desktop/device-token-codes desktop/device-token-codes/exchange onboarding/events internal/auth/oauth-handoff/issue internal/auth/oauth-handoff/consume; do
-  echo "== POST /api/v2/$path: busiest minutes of the last 7 days (count minute)"
-  gcloud logging read "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${BACKEND}\" AND httpRequest.requestMethod=\"POST\" AND httpRequest.requestUrl:\"/api/v2/$path\"" --project $PROJECT --freshness=7d --limit=5000 --format='value(timestamp)' | cut -c1-16 | sort | uniq -c | sort -rn | head -3
+for route in desktop/setup-codes desktop/setup-codes/exchange desktop/device-token-codes desktop/device-token-codes/exchange onboarding/events internal/auth/oauth-handoff/issue internal/auth/oauth-handoff/consume; do
+  echo "== POST /api/v2/$route: busiest minutes of the last 7 days (count minute)"
+  gcloud logging read "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${BACKEND}\" AND httpRequest.requestMethod=\"POST\" AND httpRequest.requestUrl:\"/api/v2/$route\"" --project $PROJECT --freshness=7d --limit=5000 --format='value(timestamp)' | cut -c1-16 | sort | uniq -c | sort -rn | head -3
 done
 echo "== GET /api/v2/legal/: busiest minutes of the last 7 days (count minute)"
 gcloud logging read "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${BACKEND}\" AND httpRequest.requestMethod=\"GET\" AND httpRequest.requestUrl:\"/api/v2/legal/\"" --project $PROJECT --freshness=7d --limit=5000 --format='value(timestamp)' | cut -c1-16 | sort | uniq -c | sort -rn | head -3
-for path in auth/set-password/request auth/resend-verification; do
-  echo "== POST /api/v2/$path: busiest hours of the last 7 days (count hour)"
-  gcloud logging read "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${BACKEND}\" AND httpRequest.requestMethod=\"POST\" AND httpRequest.requestUrl:\"/api/v2/$path\"" --project $PROJECT --freshness=7d --limit=5000 --format='value(timestamp)' | cut -c1-13 | sort | uniq -c | sort -rn | head -3
+for route in auth/set-password/request auth/resend-verification; do
+  echo "== POST /api/v2/$route: busiest hours of the last 7 days (count hour)"
+  gcloud logging read "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${BACKEND}\" AND httpRequest.requestMethod=\"POST\" AND httpRequest.requestUrl:\"/api/v2/$route\"" --project $PROJECT --freshness=7d --limit=5000 --format='value(timestamp)' | cut -c1-13 | sort | uniq -c | sort -rn | head -3
 done
 ```
 
@@ -175,14 +175,14 @@ SRC_IP=$(gcloud sql instances describe ${SQL} --project $PROJECT --format=json |
 ```
 DEP=no
 [ -n "$SRC_IP" ] && [ -n "$SQL" ] && DEP=listing
-[ "$DEP" = listing ] && for r in services jobs; do names=$(gcloud run $r list --project $PROJECT --region $REGION --format='value(metadata.name)') || { DEP=failed; break; }; for n in $names; do d=$(gcloud run $r describe $n --project $PROJECT --region $REGION --format=json) || { DEP=failed; break 2; }; if printf '%s\n' "$d" | grep -q -e ":${SQL}" -e "DATABASE_URL_PROD" -e "${SRC_IP}"; then echo "USES CLOUD SQL PROD: $r $n"; fi; done; done
+[ "$DEP" = listing ] && for r in services jobs; do names=$(gcloud run $r list --project $PROJECT --region $REGION --format='value(metadata.name)') || { DEP=failed; break; }; for n in $(printf '%s\n' "$names"); do d=$(gcloud run $r describe $n --project $PROJECT --region $REGION --format=json) || { DEP=failed; break 2; }; if printf '%s\n' "$d" | grep -q -e ":${SQL}" -e "DATABASE_URL_PROD" -e "${SRC_IP}"; then echo "USES CLOUD SQL PROD: $r $n"; fi; done; done
 [ "$DEP" = listing ] && DEP=listed
 echo "dependents: $DEP"
 INV=no
 [ -n "$WINDOW" ] && [ "${PWD##*/}" = "window-${WINDOW}" ] && INV=listing
 [ "$INV" = listing ] && { OPR=$(gcloud config get-value account) && [ -n "$OPR" ] && [ "$OPR" != "(unset)" ] && echo "the operator account (it stays an invoker in the freeze): $OPR" || INV=failed; }
 [ "$INV" = listing ] && { svcs=$(gcloud run services list --project $PROJECT --region $REGION --format='value(metadata.name)') || INV=failed; }
-[ "$INV" = listing ] && for n in $svcs; do pol=$(gcloud run services get-iam-policy $n --project $PROJECT --region $REGION --format=json) || { INV=failed; break; }; echo "== $n"; printf '%s\n' "$pol" | jq -r '.bindings[]? | select(.role=="roles/run.invoker") | .members[]' || { INV=failed; break; }; done
+[ "$INV" = listing ] && for n in $(printf '%s\n' "$svcs"); do pol=$(gcloud run services get-iam-policy $n --project $PROJECT --region $REGION --format=json) || { INV=failed; break; }; echo "== $n"; printf '%s\n' "$pol" | jq -r '.bindings[]? | select(.role=="roles/run.invoker") | .members[]' || { INV=failed; break; }; done
 [ "$INV" = listing ] && INV=listed
 echo "invokers: $INV"
 gcloud scheduler jobs list --project $PROJECT --location $REGION --format='table(name,schedule,state,httpTarget.uri)'
@@ -323,6 +323,14 @@ echo "writers after the freeze: $QUIET"
 ```
 
 `writers after the freeze: none` is the pass and a **gate for step 6**: `read` means a request got through (find who, and do not go on), `no` or `asking` means it was not answered. The scheduler jobs of step 4 now call `api.sprintable.ai`, which is the pass-through to the frozen Cloud Run (a 403 there), and they are paused as well.
+
+**Positive control — measured by the product owner on 2026-10-28 with the live account (`양성 대조 실측됨`).** The same filter printed 20 lines over `--freshness=1d` and 20 over five minutes (the limit of the question), and the exact-path pattern for the health checks matched 5 requests of `/api/v2/health` (with the `NOT` taken out). So `none` is the answer of a filter that sees real traffic, not of one that matches nothing — the one place where this gate could pass falsely. Repeat it on the day before the window, with the live account, and write the number of lines in the record of G5:
+
+```
+gcloud logging read "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"${BACKEND}\" AND httpRequest.status>=200 AND httpRequest.status<400 AND NOT httpRequest.requestUrl=~\"^https://[^/?]+/api/v2/(health|ping)$\"" --project $PROJECT --freshness=1d --limit=20 --format='value(timestamp)' | grep -c .
+```
+
+**Expected:** a number above 0 (20 is the limit). A 0 here means the filter matches nothing and `none` proves nothing: stop and look at the filter before the freeze.
 
 
 ## 6–7. The data and the takeover (inside the freeze)
