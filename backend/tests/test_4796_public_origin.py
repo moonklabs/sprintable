@@ -103,17 +103,20 @@ def test_the_vm_declares_the_new_variable_and_the_live_names_know_it() -> None:
     assert prod["added"]["PUBLIC_API_URL"] == "https://api.sprintable.ai" and "PUBLIC_API_URL" not in prod["overrides"], "since P6 the VM's prod backend states it, as an addition (the live service has no such name to override)"
 
 
-def _hand_deploy_spec(env: str) -> str:
+def _hand_deploy_spec(env: str, **extra: str) -> str:
     import os
 
-    proc = subprocess.run(["bash", str(_ROOT / "backend/scripts/deploy_backend.sh"), env], capture_output=True, text=True, env={**os.environ, "DRY_RUN": "1"}, check=True)
+    proc = subprocess.run(["bash", str(_ROOT / "backend/scripts/deploy_backend.sh"), env], capture_output=True, text=True, env={**os.environ, "DRY_RUN": "1", **extra}, check=True)
     return next(line for line in proc.stdout.splitlines() if line.startswith("ENV_VARS_SPEC=")).split("=", 1)[1]
 
 
-def test_the_hand_deploy_script_sets_the_public_address_for_dev_only() -> None:
+def test_the_hand_deploy_script_sets_the_public_address_for_dev_and_for_prod_only_with_the_api_name() -> None:
     dev = _hand_deploy_spec("dev").split("@")
     assert "PUBLIC_API_URL=" + DEV_API in dev and "FASTAPI_URL=" + DEV_API in dev
-    assert not any(item.startswith("PUBLIC_API_URL=") for item in _hand_deploy_spec("prod").split("@")), "prod states nothing"
+    prod = _hand_deploy_spec("prod").split("@")
+    assert "PUBLIC_API_URL=https://api.sprintable.ai" in prod and "FASTAPI_URL=https://api.sprintable.ai" in prod, "P7: the default of prod is the API name (P1), and the origin follows it"
+    old = "https://sprintable-backend-prod-787818285179.asia-northeast3.run.app"
+    assert not any(item.startswith("PUBLIC_API_URL=") for item in _hand_deploy_spec("prod", FASTAPI_URL=old).split("@")), "a prod deploy whose address is still the Cloud Run one states nothing"
 
 
 def test_the_four_call_sites_use_the_helper_and_no_origin_is_built_from_the_request_any_more() -> None:
@@ -203,15 +206,17 @@ def test_the_dev_deploy_does_not_remove_the_public_address_and_the_prod_deploy_r
     assert "PUBLIC_API_URL" not in next(a for a in dev if a.startswith("--remove-env-vars=")).split("=", 1)[1].split(","), "the same key is never switched on and removed in one call"
 
 
-def _hand_deploy_config(env: str) -> dict[str, str]:
+def _hand_deploy_config(env: str, **extra: str) -> dict[str, str]:
     import os
 
-    proc = subprocess.run(["bash", str(_ROOT / "backend/scripts/deploy_backend.sh"), env], capture_output=True, text=True, env={**os.environ, "DRY_RUN": "1"}, check=True)
+    proc = subprocess.run(["bash", str(_ROOT / "backend/scripts/deploy_backend.sh"), env], capture_output=True, text=True, env={**os.environ, "DRY_RUN": "1", **extra}, check=True)
     return dict(line.split("=", 1) for line in proc.stdout.splitlines() if "=" in line and line.split("=", 1)[0].isupper())
 
 
-def test_the_hand_deploy_script_removes_a_stale_public_address_on_prod_only() -> None:
-    assert _hand_deploy_config("prod")["REMOVE_ENV_VARS"] == "PUBLIC_API_URL"
+def test_the_hand_deploy_script_removes_a_stale_public_address_on_prod_unless_it_has_the_api_name() -> None:
+    old = "https://sprintable-backend-prod-787818285179.asia-northeast3.run.app"
+    assert _hand_deploy_config("prod", FASTAPI_URL=old)["REMOVE_ENV_VARS"] == "PUBLIC_API_URL"
+    assert _hand_deploy_config("prod")["REMOVE_ENV_VARS"] == "", "P7: with the API name the origin is set, nothing is removed"
     assert _hand_deploy_config("dev")["REMOVE_ENV_VARS"] == ""
     assert '${REMOVE_ENV_VARS:+--remove-env-vars="${REMOVE_ENV_VARS}"}' in (_ROOT / "backend/scripts/deploy_backend.sh").read_text()
 
@@ -234,7 +239,7 @@ def test_section_12_lists_what_dev_taught_and_each_item_is_true_of_the_files() -
     text = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
     sec = text[text.index("## 12. Prod"):]
     for needle in ("**Before the prod move — what dev taught", "is **empty** (P6, story 4796)", "the canonical prod value is empty since #5305 (`cloud-build.yml`: `realtime_url=` in the prod branch", "the prod GCE realtime gateways have been off since 2026-10-26 15:17Z (the PO's finding",
-                   "The pipeline's prod branch still removes the name from Cloud Run (`--remove-env-vars`)", "**states `https://api.sprintable.ai`**", "That file is read by the VM only: Cloud Run prod does not read it", "the same 20 + 10 as dev, inside the same 57 usable connections",
+                   "**P7** makes the pipeline say the same for Cloud Run prod", "**only when it is exactly `https://api.sprintable.ai`**", "**states `https://api.sprintable.ai`**", "That file is read by the VM only: Cloud Run prod does not read it", "the same 20 + 10 as dev, inside the same 57 usable connections",
                    "The stored-link rewrite against prod", "Prod has no Cloud Run job for it", "none is made", "**in the backend container on the VM inside the freeze**", "with a backup first",
                    "**as the PO measured them on 2026-10-27, quoted here and not derivable from the repository**", "about 6 s after the front door started and about 15 s after the resolvers agreed"):
         assert needle in sec, needle
@@ -242,7 +247,7 @@ def test_section_12_lists_what_dev_taught_and_each_item_is_true_of_the_files() -
     assert prod["services"]["frontend"]["overrides"]["REALTIME_URL"] == "", "P6: the declaration is empty, as the pipeline's prod branch has been since #5305"
     assert prod["services"]["backend"]["added"]["PUBLIC_API_URL"] == "https://api.sprintable.ai" and "PUBLIC_API_URL" not in prod["services"]["backend"]["overrides"], "P6: the VM's prod backend states the origin; the live service does not have it, so it is an addition"
     main = (_ROOT / "cloudbuild.yaml").read_text()
-    assert 'REMOVE_ENV_VARS="$${REMOVE_ENV_VARS},DB_TIMING_LOG_ENABLED,PUBLIC_API_URL"' in main
+    assert 'REMOVE_ENV_VARS="$${REMOVE_ENV_VARS},PUBLIC_API_URL"' in main and 'REMOVE_ENV_VARS="$${REMOVE_ENV_VARS},DB_TIMING_LOG_ENABLED"' in main
     # the claims that ARE derivable from the repository: the prod stream address is empty in the pipeline, and no prod one-off job is provisioned
     workflow = (_ROOT / ".github/workflows/cloud-build.yml").read_text()
     prod_branch = workflow[workflow.index('echo "fastapi_url=https://api.sprintable.ai"'):workflow.index("story #2701")]
