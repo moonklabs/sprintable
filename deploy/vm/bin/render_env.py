@@ -11,6 +11,7 @@ Names are checked against the live service by the tests (the declaration must pl
 from __future__ import annotations
 
 import base64
+import ipaddress
 import json
 import re
 import sys
@@ -30,11 +31,68 @@ class EnvError(Exception):
     """the environment cannot be built — the deploy must stop before it touches anything running"""
 
 
+def check_private_address(value: str) -> str:
+    """the VM's own private IPv4 address (the one the gateway database is published on): an RFC 1918 address, never «all interfaces», loopback, link-local or a public address"""
+    try:
+        ip = ipaddress.ip_address(value.strip())
+    except ValueError as e:
+        raise EnvError("the VM's private address is not an IP address") from e
+    if ip.version != 4 or not ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast:
+        raise EnvError("the VM's private address is not a private IPv4 address")
+    return str(ip)
+
+
+def gateway_networks(value: object, where: object = "the declaration") -> list[str]:
+    """the networks the gateway database's access rules let the application role in from: one to four private IPv4 networks, each at most a /16 wide — never «everywhere»"""
+    if not isinstance(value, list) or not 1 <= len(value) <= 4:
+        raise EnvError(f"{where}: support_gateway.allow_from must be a list of one to four networks")
+    out = []
+    for item in value:
+        try:
+            net = ipaddress.ip_network(str(item), strict=True)
+        except ValueError as e:
+            raise EnvError(f"{where}: support_gateway.allow_from has a value that is not a network address") from e
+        if net.version != 4 or not net.is_private or net.is_loopback or net.is_link_local or net.is_unspecified or net.prefixlen < 16:
+            raise EnvError(f"{where}: support_gateway.allow_from must be private IPv4 networks of /16 or narrower")
+        out.append(str(net))
+    return out
+
+
+def gateway_hba(decl: Mapping) -> str:
+    """the access rules of the gateway database's server, as the deployer renders them: the application role into its own database from the allowed networks over a password (scram), the
+    superuser over the container's unix socket only, everything else refused — no rule names a password or any other value"""
+    gw = decl["support_gateway"]["database"]
+    lines = ["# rendered by the deployer from env/<environment>.yaml (support_gateway.allow_from) — do not edit", "local   all   all   trust"]
+    lines += [f"host    {gw['name']}   {gw['user']}   {net}   scram-sha-256" for net in gateway_networks(decl["support_gateway"].get("allow_from"))]
+    lines += ["host    all   all   0.0.0.0/0   reject", "host    all   all   ::/0   reject"]
+    return "\n".join(lines) + "\n"
+
+
+def check_password(password: str, what: str) -> None:
+    if not _SAFE_PASSWORD.fullmatch(password):
+        raise EnvError(f"{what} must be letters, digits, «_» or «-» only (it is placed inside a connection URL) — make it with `openssl rand -hex 24`")
+
+
 def load_declaration(path: str | Path) -> dict:
     decl = yaml.safe_load(Path(path).read_text())
     for key in ("environment", "project", "hosts", "buckets", "database", "services"):
         if key not in decl:
             raise EnvError(f"{path}: missing «{key}»")
+    # the names of the application's database are used in shell commands of the operations scripts and in the container's environment: plain identifiers only (checked again where they are read, lib.sh)
+    for key in ("user", "name"):
+        if not isinstance(decl["database"].get(key), str) or not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", decl["database"][key]):
+            raise EnvError(f"{path}: database.{key} must be a plain lower-case identifier")
+    # the support gateway's database (story 4796): a block of its own — a second Postgres with its own user, database and password, published on the VM's private address
+    if "support_gateway" in decl:
+        gw_db = (decl["support_gateway"] or {}).get("database") or {}
+        missing = [k for k in ("user", "name", "password_secret") if not isinstance(gw_db.get(k), str) or not gw_db[k]]
+        if missing:
+            raise EnvError(f"{path}: support_gateway.database lacks {', '.join(missing)}")
+        if not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", gw_db["user"]) or not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", gw_db["name"]):
+            raise EnvError(f"{path}: support_gateway.database user and name must be plain lower-case identifiers")
+        if gw_db["user"] == decl["database"]["user"] or gw_db["password_secret"] == decl["database"]["password_secret"]:
+            raise EnvError(f"{path}: the gateway database must not share the backend database's user or password secret")
+        gateway_networks(decl["support_gateway"].get("allow_from"), path)
     return decl
 
 
@@ -141,6 +199,10 @@ class MetadataSecretReader:
             self._token_until = self._now() + max(0, int(body.get("expires_in", 300)) - 60)
         return self._token
 
+    def private_ip(self) -> str:
+        """the VM's own private address, from the metadata server (checked: a private IPv4 address and nothing else)"""
+        return check_private_address(self._get(f"{_METADATA}/instance/network-interfaces/0/ip", {"Metadata-Flavor": "Google"}).decode("ascii", "replace"))
+
     def __call__(self, secret_id: str) -> str:
         if not secret_id or "/" in secret_id or ".." in secret_id:
             raise EnvError(f"not a secret id: {secret_id!r}")
@@ -155,6 +217,8 @@ def main(argv: list[str]) -> int:
         # every Secret Manager id the VM will read (the RUNBOOK grants access to exactly these, one by one)
         decl = load_declaration(argv[2])
         ids = {sid for svc in decl["services"].values() for sid in (svc.get("secrets") or {}).values()} | {decl["database"]["password_secret"]}
+        if "support_gateway" in decl:
+            ids.add(decl["support_gateway"]["database"]["password_secret"])
         print("\n".join(sorted(ids)))
         return 0
     if len(argv) != 3:

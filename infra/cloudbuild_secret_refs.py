@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """story #3140 — cloudbuild.yaml/배포 스크립트가 참조하는 **시크릿명**(Secret Manager 리소스
 이름, 값 아님) 전수 추출. 이 모듈은 «참조하는 이름이 뭔지»만 안다 — 그 이름이 GCP에 실재하는지는
-모른다(그건 소비자 몫: check_cloudbuild_secret_manifest.py=manifest 대조·
-sync_cloudbuild_secret_manifest.py=GCP 실물 대조).
+모른다(그건 소비자 몫: check_cloudbuild_secret_manifest.py=manifest 대조. GCP 실물 대조는 지금 없다 —
+sync_cloudbuild_secret_manifest.py와 그 스케줄 워크플로는 story 4659에서 삭제됐다).
 
 ## 배경(#3140 발견, 카디르 QA #3547)
 기존 가드(test_deploy_env.py 등 132건+AST 5종)는 `--set-secrets=`/`--update-secrets=` 플래그

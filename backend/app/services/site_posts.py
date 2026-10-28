@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.core.config import settings
+from app.core.public_origin import public_api_origin
 from app.models.gate import Gate, set_gate_status
 from app.models.site_post import SitePost
 from app.models.site_post_draft import SitePostDraft
@@ -1264,7 +1265,7 @@ async def publish_recipe_approved_hosted_site_draft_after_commit(
         try:
             await publish_site_post_from_draft(
                 side, org_id=org_id, draft_id=draft_id, published_by_member_id=publisher_member_id,
-                backend_base_url=settings.backend_url,
+                backend_base_url=public_api_origin(fallback=settings.backend_url),
             )
         except Exception as exc:
             logger.warning(

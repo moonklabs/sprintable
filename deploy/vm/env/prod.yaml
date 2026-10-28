@@ -22,8 +22,8 @@ services:
     live_section: sprintable-backend-prod
     overrides:
       DB_PGBOUNCER: 'false'
-      DB_POOL_SIZE: '5'
-      DB_MAX_OVERFLOW: '5'
+      DB_POOL_SIZE: '20'   # story 4796: the same budget as dev (RUNBOOK §11 «Database connection budget»); the VM database allows 60 connections
+      DB_MAX_OVERFLOW: '10'
       PG_LISTEN_ENABLED: 'true'
       EVENT_BROKER_REDIS_CONSUME_ENABLED: 'false'
       EVENT_BROKER_REDIS_DISPATCH_ENABLED: 'false'
@@ -60,6 +60,7 @@ services:
       REDIS_URL: no Redis on the VM (one process; the in-process fallbacks are the design)
     added:
       TRUST_FORWARDED_FOR: 'true'
+      PUBLIC_API_URL: https://api.sprintable.ai   # story 4796 (P6, RUNBOOK §12 item 2): the origin that stored and bound links are built from, the same value dev has; the live prod service does not set it
     live_plain:
     - APPLE_KEY_ID
     - APPLE_SERVICES_ID
@@ -95,7 +96,7 @@ services:
     live_section: sprintable-frontend-prod
     overrides:
       NEXT_PUBLIC_FASTAPI_URL: https://api.sprintable.ai
-      REALTIME_URL: https://realtime.sprintable.ai
+      REALTIME_URL: ''   # story 4796 (P6, RUNBOOK §12 item 1): empty — the prod GCE realtime gateways are off and the stream goes through the main server (the pipeline's prod branch has said `realtime_url=` since #5305)
       APP_BASE_URL: https://app.sprintable.ai
       NEXT_PUBLIC_APP_URL: https://app.sprintable.ai
     secrets:

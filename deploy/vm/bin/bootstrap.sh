@@ -2,7 +2,7 @@
 # One-time (and re-runnable) preparation of a Sprintable VM — Debian 12 on GCE. Run as root from an unpacked deploy/vm bundle:
 #   sudo ./bootstrap.sh <environment> <project> <deploy-bucket> <backups-bucket> <acme-email>
 # Installs Docker + compose, mounts the data disk, adds swap, installs the deployer / backup tooling and their systemd units, and the Ops Agent.
-# It does NOT start deploying: restore the database first (RUNBOOK), put the private plain file in place, then `systemctl enable --now sprintable-deploy.timer`.
+# It does NOT start deploying: restore the database first (RUNBOOK), put the private plain file in place, then `systemctl enable --now sprintable-deploy.timer sprintable-backup.timer sprintable-restore-check.timer`.
 set -euo pipefail
 
 if [ "$#" -ne 5 ]; then
@@ -68,9 +68,18 @@ fi
 
 echo "== tooling → /opt/sprintable"
 install -d -m 0755 /opt/sprintable/bin /opt/sprintable/releases /opt/sprintable/runtime /etc/sprintable
-for f in deployer.py render_env.py lib.sh backup.sh restore.sh restore-check.sh rowcounts.sh rowcounts.sql; do
+for f in deployer.py render_env.py lib.sh backup.sh restore.sh restore-check.sh rowcounts.sh rowcounts.sql dump-source.sh front-door.sh gateway-db-firewall.sh; do
   install -m 0755 "$src/bin/$f" "/opt/sprintable/bin/$f"
 done
+# releases already on this VM were checked against the compose copy that is installed NOW (before this run replaces it): remember that per release (deployer.py, COMPOSE_STAMP), so that a compose change
+# does not make the release that is running impossible to prepare as the way back
+if [ -f /opt/sprintable/bin/compose.yml ]; then
+  for d in /opt/sprintable/releases/*/; do
+    if [ -f "${d}compose.yml" ] && cmp -s "${d}compose.yml" /opt/sprintable/bin/compose.yml; then
+      sha256sum "${d}compose.yml" | cut -d' ' -f1 | tr -d '\n' > "${d}.compose-sha256"
+    fi
+  done
+fi
 # the compose file the deployer holds bundles to: a bundle whose compose.yml differs from this copy is refused (changing compose = re-run this script)
 install -m 0644 "$src/compose.yml" /opt/sprintable/bin/compose.yml
 for f in "$src"/systemd/*; do install -m 0644 "$f" "/etc/systemd/system/$(basename "$f")"; done
@@ -87,5 +96,7 @@ fi
 
 systemctl daemon-reload
 systemctl enable --now docker
-systemctl enable --now sprintable-backup.timer sprintable-restore-check.timer
+# the metadata server stays out of reach of the support gateway's database container (only a rule on its own bridge; harmless where that container does not exist)
+systemctl enable --now sprintable-gateway-db-firewall.service
+# the backup and restore-check timers are NOT enabled here: their first run would find no database (the unit fails and says so every night until the restore). RUNBOOK §7 step 6 enables them with the deploy timer.
 echo "bootstrap done for $env_name — deploy timer NOT enabled yet (restore the database first, see RUNBOOK)"

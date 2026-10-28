@@ -132,7 +132,7 @@ SaaS(`https://app.sprintable.ai`)에 붙습니다** — dev나 self-host 백엔�
 그 URL을 반드시 함께 주십시오:
 
 ```
-/sprintable:configure <0단계에서 발급한 키> https://sprintable-backend-dev-57iommnikq-du.a.run.app
+/sprintable:configure <0단계에서 발급한 키> https://dev-api.sprintable.ai
 ```
 
 **3) 채널과 함께 실행**

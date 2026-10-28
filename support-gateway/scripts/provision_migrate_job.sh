@@ -21,6 +21,10 @@ GCP_REGION="${GCP_REGION:-asia-northeast3}"
 AR_REPO="${AR_REPO:-sprintable}"
 ENV="${1:-${ENV:-dev}}"
 DRY_RUN="${DRY_RUN:-0}"
+# story 4796 (D2): exactly «true» = the database is the VM's gateway-db (no Cloud SQL socket, the gateway's own subnet whose range the VM's firewall allows); anything else = Cloud SQL as before.
+DB_ON_VM="${SUPPORT_GATEWAY_DB_ON_VM:-false}"
+SUBNET=default
+if [ "${DB_ON_VM}" = "true" ]; then SUBNET="support-gateway-${ENV}"; fi
 
 SQL_INSTANCE_NAME="${SQL_INSTANCE_NAME:-sprintable-${ENV}}"
 
@@ -59,7 +63,11 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [${ENV}] $*" >&2; }
 
 log "Migrate job: ${JOB_NAME}"
 log "Image: ${IMAGE}"
-log "Cloud SQL: ${CLOUD_SQL_INSTANCE}"
+if [ "${DB_ON_VM}" = "true" ]; then
+    log "Cloud SQL: none (the database is the VM's gateway-db; subnet ${SUBNET})"
+else
+    log "Cloud SQL: ${CLOUD_SQL_INSTANCE}"
+fi
 log "DB secret: ${DB_SECRET_NAME}"
 
 if [ "${DRY_RUN}" = "1" ]; then
@@ -70,10 +78,20 @@ IMAGE=${IMAGE}
 CLOUD_SQL_INSTANCE=${CLOUD_SQL_INSTANCE}
 DB_SECRET_NAME=${DB_SECRET_NAME}
 SERVICE_ACCOUNT=${SUPPORT_GATEWAY_SERVICE_ACCOUNT:-<unset>}
-VPC=network=default,subnet=default,egress=private-ranges-only
+VPC=network=default,subnet=${SUBNET},egress=private-ranges-only
 COMMAND=/app/scripts/migrate.sh
 EOF
+    if [ "${DB_ON_VM}" = "true" ]; then
+        echo "DB_ON_VM=true CLOUD_SQL=cleared SUBNET=${SUBNET}"
+    fi
     exit 0
+fi
+
+# the Cloud SQL socket of this job: the instance (default) or nothing at all (`--set-cloudsql-instances=` with an empty list REPLACES what the job has — `jobs deploy` has no --clear-cloudsql-instances,
+# and leaving the flag out would keep the old instance) and the gateway's own subnet. The first array is the flag this script always had.
+DB_FLAGS=("--set-cloudsql-instances=${CLOUD_SQL_INSTANCE}")
+if [ "${DB_ON_VM}" = "true" ]; then
+    DB_FLAGS=("--set-cloudsql-instances=")
 fi
 
 gcloud run jobs deploy "${JOB_NAME}" \
@@ -83,9 +101,9 @@ gcloud run jobs deploy "${JOB_NAME}" \
     --command="/app/scripts/migrate.sh" \
     --service-account="${SUPPORT_GATEWAY_SERVICE_ACCOUNT}" \
     --set-secrets="SUPPORT_GATEWAY_DATABASE_URL=${DB_SECRET_NAME}:latest" \
-    --set-cloudsql-instances="${CLOUD_SQL_INSTANCE}" \
+    "${DB_FLAGS[@]}" \
     --network=default \
-    --subnet=default \
+    --subnet="${SUBNET}" \
     --vpc-egress=private-ranges-only \
     --execution-environment=gen2 \
     --max-retries=1 \

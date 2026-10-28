@@ -188,6 +188,44 @@ async def test_ios_bootstrap_issue_success(monkeypatch):
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("configured,expected", [("https://dev-api.sprintable.ai", "https://dev-api.sprintable.ai"), ("", "http://testserver")])
+async def test_story_4796_the_redeem_challenge_binds_the_public_address_not_the_request_host(monkeypatch, configured, expected):
+    """The bootstrap issue step creates the redeem challenge: its web_origin (and the origin in the transcript the device signs next) is the configured public address; empty = the request's host, as before."""
+    from sqlalchemy import select
+
+    from app.core.config import settings
+    from app.models.device_installation import DeviceProofChallenge
+    from app.routers.auth_native_bootstrap import NativeBootstrapRequest, native_bootstrap
+
+    _setup_common(monkeypatch)
+    monkeypatch.setattr(settings, "public_api_url", configured)
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            user_id, firebase_uid, installation_id, key = await _seed_eligible_user_and_installation(s)
+            issued = await _issue_bootstrap_issue_challenge(s, user_id=user_id, firebase_uid=firebase_uid, installation_id=installation_id)
+        await _mock_native_request_preamble(monkeypatch, user_id=user_id, firebase_uid=firebase_uid)
+        transcript_bytes = _b64url_decode(issued.client_data_b64url)
+        assertion = _sign_ios_assertion(key, transcript_bytes, hashlib.sha256(transcript_bytes).digest(), counter=1)
+        async with Session() as s:
+            result = await native_bootstrap(
+                request=_FakeRequest(),
+                body=NativeBootstrapRequest(
+                    installation_id=str(installation_id), challenge_id=issued.challenge_id,
+                    client_data_b64url=issued.client_data_b64url, assertion_b64=base64.b64encode(assertion).decode(),
+                ),
+                response=__import__("fastapi").Response(), authorization="Bearer x", x_firebase_appcheck=None, db=s,
+            )
+        async with Session() as s:
+            stored = (await s.execute(select(DeviceProofChallenge.web_origin).where(DeviceProofChallenge.id == uuid.UUID(result.redeem_challenge_id)))).scalar_one()
+        assert stored == expected
+        import json
+        assert json.loads(_b64url_decode(result.redeem_client_data_b64url))["origin"] == expected
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_bootstrap_issue_key_version_mismatch_rejected(monkeypatch):
     from app.routers.auth_native_bootstrap import NativeBootstrapRequest, native_bootstrap
     from sqlalchemy import update

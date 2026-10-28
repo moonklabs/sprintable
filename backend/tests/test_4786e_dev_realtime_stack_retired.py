@@ -59,8 +59,23 @@ def test_the_dev_branch_leaves_redis_pg_listen_the_rate_limiter_and_pgbouncer_al
     assert out["backend_db_pgbouncer"] == "true"  # dev stays behind PgBouncer (PO 10-26: going direct was weighed and left out)
 
 
-def test_prod_has_no_part_in_it():
-    assert 'echo "realtime_url=https://realtime.sprintable.ai"' in _PROD and 'echo "backend_db_pgbouncer=true"' in _PROD
+def _prod_outputs() -> dict[str, str]:
+    """run the REAL prod branch of the workflow's «Set deploy environment» step (gcloud stubbed) and read what it wrote to $GITHUB_OUTPUT"""
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d) / "out"
+        # the slice is the body of the step's `if prod` branch plus the `else` that opens the dev branch; the `else` is cut so the body can be wrapped in a bare if
+        script = "set -eo pipefail\ngcloud() { echo stub-value; }\nif true; then\n" + _PROD.rsplit("else", 1)[0] + "\nfi\n"
+        subprocess.run(["bash", "-c", script], check=True, env={**os.environ, "GITHUB_OUTPUT": str(out)}, capture_output=True)
+        return dict(line.split("=", 1) for line in out.read_text().splitlines() if "=" in line)
+
+
+def test_the_prod_stream_address_is_empty_so_the_frontend_streams_through_the_backend():
+    """story 4790: the prod GCE gateways are off (after the 10-26 Redis move the gateway group failed its health check and /api/event-stream answered 502 for 26 hours). The address a promotion writes is empty, never the gateway host"""
+    out = _prod_outputs()
+    assert out["realtime_url"] == ""
+    code = "\n".join(line for line in _PROD.splitlines() if not line.lstrip().startswith("#"))  # comments may still tell the history
+    assert 'echo "realtime_url=" >> "$GITHUB_OUTPUT"' in code and "realtime.sprintable.ai" not in code
+    assert out["backend_db_pgbouncer"] == "true"  # the rest of the prod branch is untouched
 
 
 def test_one_substitution_assignment_carries_every_item():

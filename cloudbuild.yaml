@@ -13,8 +13,12 @@ substitutions:
   # "true" 문자열일 때만.
   _REALTIME_GCE_SKIP: "false"
   _REALTIME_CLOUDRUN_SKIP: "false"
+  # story 4796: dev runs on the VM, so the dev build stops building and deploying the Cloud Run frontend and backend and stops running the Cloud SQL migrate job (the VM migrates itself). Exactly
+  # "true" skips them (cloud-build.yml sets it for dev); any other value, an empty one included, deploys as before - prod never states it. Undo: set the dev value back to false.
+  _CLOUD_RUN_APP_SKIP: "false"
   _DEPLOY_ENV: dev
-  _FASTAPI_URL: https://sprintable-backend-dev-787818285179.asia-northeast3.run.app
+  # story 4796: the default is the dev value of `fastapi_url` in cloud-build.yml (the one switch, RUNBOOK §9), so a build started by hand without the pipeline's substitutions deploys the same addresses.
+  _FASTAPI_URL: https://dev-api.sprintable.ai
   # story #3583-BE(GA4 «고객 소유» 연결, 페드루 리뷰 조건 2026-09-06) — GA4 OAuth 콜백의
   # redirect_uri 구성용(백엔드 자기 자신, Google이 여기로 직접 리다이렉트). _FASTAPI_URL과
   # 값은 같지만 별 substitution으로 둔다 — Google Console에 콜백 URI 등록이 아직 안 된
@@ -32,7 +36,8 @@ substitutions:
   # ENV_VARS에 안 실린다(REDIS_URL과 동일 이중가드 — 여기 값이 남아 있어도 안전) + 라우터
   # 자체의 _reject_prod() 가드까지 삼중.
   _ADMIN_OPERATOR_AUDIENCE: https://sprintable-backend-dev-57iommnikq-du.a.run.app
-  _ADMIN_OPERATOR_ALLOWLIST: sprintable-admin-web@sprintable-494803.iam.gserviceaccount.com
+  # 4798 AC15: the dev admin screen runs as its own account; the dev backend accepts that one address (a single value: a comma list does not survive this pipeline).
+  _ADMIN_OPERATOR_ALLOWLIST: run-admin-ui-dev@sprintable-494803.iam.gserviceaccount.com
   # story #2887(BE 아바타 업로드) — dev 버킷(sprintable-avatars-dev, public-read·uniform
   # bucket-level access·cloudrun-runtime-dev=objectAdmin — 페드루 확定 2026-08-21).
   # ⛔story #3117(2026-08-26, prod 실사고 — 선생님 아바타 업로드 503) 후속: 당시 "prod 버킷
@@ -226,6 +231,15 @@ substitutions:
   # CORS preflight가 돈다. `|`-구분 기본값(빈 문자열=미설정) — deploy-support-gateway
   # 스텝에서 `,`로 변환(cloudbuild.yaml MCP_ALLOWED_HOSTS 선례와 동일 2-layer 콤마 함정 회피).
   _SUPPORT_GATEWAY_CORS_ORIGINS: ''
+  # story 4796 (D2) — the support gateway's DATABASE moves from Cloud SQL to the VM's `gateway-db` (deploy/vm/CUTOVER-gateway-dev.md); the gateway itself stays on Cloud Run. ONE switch, default "false" =
+  # exactly as before. Exactly "true": the gateway service and its migrate job lose their Cloud SQL socket (`--clear-cloudsql-instances` / `--set-cloudsql-instances=`, because gcloud keeps what is not
+  # mentioned) and run on the gateway's OWN subnet `support-gateway-<env>` (instead of `default`), the range the VM's firewall rule allows to reach 5432 (a network tag cannot be the source of an ingress
+  # rule for Direct VPC egress); the service also gets the connection pool below, sent ONLY when both values are
+  # non-empty (an empty value means «not sent»; one without the other stops the step, as the application itself would refuse to start). The database URL secret is flipped by the PO in the same
+  # window (the sheet); until then this stays false.
+  _SUPPORT_GATEWAY_DB_ON_VM: "false"
+  _SUPPORT_GATEWAY_DB_POOL_SIZE: ""
+  _SUPPORT_GATEWAY_DB_MAX_OVERFLOW: ""
 
   # E-ARCH 1단계(story #2078·PR #2358 PG_LISTEN_ENABLED 배선): SSE/LISTEN 전용
   # `sprintable-realtime-${_DEPLOY_ENV}` 서비스 — REST(`sprintable-backend-*`)와 같은 이미지,
@@ -542,7 +556,11 @@ steps:
   # fallback을 그대로 보여준 근본 원인.
   - id: build-frontend
     name: gcr.io/cloud-builders/docker
+    entrypoint: bash
     args:
+      - -c
+      - 'if [ "${_CLOUD_RUN_APP_SKIP}" = "true" ]; then echo "skip build-frontend: dev runs on the VM (story 4796)"; exit 0; fi; exec docker "$$@"'
+      - docker
       - build
       - --no-cache
       - -f
@@ -627,7 +645,11 @@ steps:
   # ─── Push images ──────────────────────────────────────────────────────────
   - id: push-frontend
     name: gcr.io/cloud-builders/docker
+    entrypoint: bash
     args:
+      - -c
+      - 'if [ "${_CLOUD_RUN_APP_SKIP}" = "true" ]; then echo "skip push-frontend: dev runs on the VM (story 4796)"; exit 0; fi; exec docker "$$@"'
+      - docker
       - push
       - --all-tags
       - ${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/frontend
@@ -662,6 +684,7 @@ steps:
       - -c
       - |
         set -euo pipefail
+        if [ "${_CLOUD_RUN_APP_SKIP}" = "true" ]; then echo "skip update-migrate-job: dev runs on the VM (story 4796)"; exit 0; fi
         GCP_PROJECT="${PROJECT_ID}" GCP_REGION="${_AR_REGION}" AR_REPO="${_AR_REPO}" COMMIT_SHA="${COMMIT_SHA}" \
           bash backend/scripts/provision_migrate_job.sh ${_DEPLOY_ENV}
     waitFor: [push-backend]
@@ -672,8 +695,11 @@ steps:
   # Cloud Build 로그 + GHA 워크플로우 실패(빨간 X·커밋 상태)로 가시화된다.
   - id: run-migrate-job
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
-    entrypoint: gcloud
+    entrypoint: bash
     args:
+      - -c
+      - 'if [ "${_CLOUD_RUN_APP_SKIP}" = "true" ]; then echo "skip run-migrate-job: dev runs on the VM (story 4796)"; exit 0; fi; exec gcloud "$$@"'
+      - gcloud
       - run
       - jobs
       - execute
@@ -698,6 +724,7 @@ steps:
         fi
         GCP_PROJECT="${PROJECT_ID}" GCP_REGION="${_AR_REGION}" AR_REPO="${_AR_REPO}" COMMIT_SHA="${COMMIT_SHA}" \
           SUPPORT_GATEWAY_SERVICE_ACCOUNT="${_SUPPORT_GATEWAY_SERVICE_ACCOUNT}" \
+          SUPPORT_GATEWAY_DB_ON_VM="${_SUPPORT_GATEWAY_DB_ON_VM}" \
           bash support-gateway/scripts/provision_migrate_job.sh ${_DEPLOY_ENV}
     waitFor: [push-support-gateway]
 
@@ -725,6 +752,7 @@ steps:
       - -c
       - |
         set -euo pipefail
+        [ "${_CLOUD_RUN_APP_SKIP}" = "true" ] && { echo "skip deploy-frontend: dev runs on the VM (story 4796)"; exit 0; }
         # story #2077 — min/max-instances가 이 스텝에 한 번도 배선된 적이 없었다(backend·realtime은
         # 있었는데 frontend만 빠짐). 현행 라이브 값 그대로 IaC에 고정(값 인상 아님) — 근거는 위
         # substitutions 섹션의 _FRONTEND_MIN/MAX_INSTANCES 주석 참조.
@@ -865,7 +893,8 @@ steps:
       - -c
       - |
         set -euo pipefail
-        # --update-env-vars(additive)·--allow-unauthenticated 필수, --set-env-vars 금지 — 아카이브(test_deploy_backend_redis_secret_conflict.py)
+        [ "${_CLOUD_RUN_APP_SKIP}" = "true" ] && { echo "skip deploy-backend: dev runs on the VM (story 4796)"; exit 0; }
+        # additive --update-env-vars + --allow-unauthenticated, never --set-env-vars (archive)
         ENV_VARS="FASTAPI_URL=${_FASTAPI_URL},BACKEND_URL=${_BACKEND_URL},DB_POOL_SIZE=${_DB_POOL_SIZE},DB_MAX_OVERFLOW=${_DB_MAX_OVERFLOW},DB_PGBOUNCER=${_BACKEND_DB_PGBOUNCER},PG_LISTEN_ENABLED=${_BACKEND_PG_LISTEN_ENABLED},EVENT_BROKER_REDIS_CONSUME_ENABLED=${_BACKEND_REDIS_CONSUME_ENABLED},EVENT_BROKER_REDIS_DISPATCH_ENABLED=${_BACKEND_REDIS_DISPATCH_ENABLED},EVENT_BROKER_REDIS_DUAL_PUBLISH_ENABLED=${_BACKEND_REDIS_DUAL_PUBLISH_ENABLED},FANOUT_WAKE_REDIS_ENABLED=${_BACKEND_FANOUT_WAKE_REDIS_ENABLED},PRESENCE_REDIS_ENABLED=${_BACKEND_PRESENCE_REDIS_ENABLED},PRESENCE_ONLINE_REDIS_ENABLED=${_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED},SSE_LEASE_REDIS_ENABLED=${_BACKEND_SSE_LEASE_REDIS_ENABLED},SSE_TRANSIENT_REPLAY_ENABLED=${_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED},LICENSE_CONSENT=${_LICENSE_CONSENT},NEXT_PUBLIC_APP_URL=${_NEXT_PUBLIC_APP_URL},DEPLOY_ENV=${_DEPLOY_ENV},FIREBASE_OAUTH_HANDOFF_ENABLED=${_FIREBASE_OAUTH_HANDOFF_ENABLED},APPLE_SERVICES_ID=${_APPLE_SERVICES_ID},APPLE_KEY_ID=${_APPLE_KEY_ID},APPLE_TEAM_ID=${_APPLE_TEAM_ID},SUPPORT_CONTACT_SURFACE_WIDGET=${_SUPPORT_CONTACT_SURFACE_WIDGET},SUPPORT_ESCALATION_REQUESTER_MEMBER_ID=${_SUPPORT_ESCALATION_REQUESTER_MEMBER_ID},SUPPORT_ESCALATION_APPROVER_MEMBER_ID=${_SUPPORT_ESCALATION_APPROVER_MEMBER_ID},SUPPORT_ESCALATION_TARGET_ORG_SLUG=${_SUPPORT_ESCALATION_TARGET_ORG_SLUG},SUPPORT_ESCALATION_TARGET_PROJECT_SLUG=${_SUPPORT_ESCALATION_TARGET_PROJECT_SLUG},PUBLIC_SITE_BASE_URL=${_PUBLIC_SITE_BASE_URL},OPS_ALERT_CONVERSATION_ID=${_OPS_ALERT_CONVERSATION_ID},BACKEND_REQUEST_TIMEOUT_SECONDS=${_BACKEND_TIMEOUT},PUSH_DEVICES_BY_USER=${_PUSH_DEVICES_BY_USER}"
         # REDIS_URL/RATE_LIMIT_BACKEND(dev만 · 아카이브).
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
@@ -889,12 +918,12 @@ steps:
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
           ENV_VARS="$${ENV_VARS},SANDBOX_CHANNEL_ENABLED=true"
         fi
-        # #4332 DB_TIMING_LOG_ENABLED(dev만) · #4398 XFF_PROBE_ENABLED(전 환경 제거) — 아카이브.
+        # #4332 DB_TIMING_LOG · 4796 PUBLIC_API_URL (dev만, 아카이브).
         REMOVE_ENV_VARS="REDIS_CONSUME_ENABLED,XFF_PROBE_ENABLED"
         if [ "${_DEPLOY_ENV}" == "dev" ]; then
-          ENV_VARS="$${ENV_VARS},DB_TIMING_LOG_ENABLED=true"
+          ENV_VARS="$${ENV_VARS},DB_TIMING_LOG_ENABLED=true,PUBLIC_API_URL=${_FASTAPI_URL}"
         else
-          REMOVE_ENV_VARS="$${REMOVE_ENV_VARS},DB_TIMING_LOG_ENABLED"
+          REMOVE_ENV_VARS="$${REMOVE_ENV_VARS},DB_TIMING_LOG_ENABLED,PUBLIC_API_URL"
         fi
         # story e4fc29fa — WORDPRESS/WEBHOOK_TEST_STUB_ENABLED(dev만 · 서사는 아카이브).
         if [ "${_DEPLOY_ENV}" != "prod" ]; then
@@ -911,7 +940,7 @@ steps:
         if [ "${_DEPLOY_ENV}" != "prod" ] && [ -n "${_NEXT_PUBLIC_SUPPORT_GATEWAY_URL}" ]; then
           ENV_VARS="$${ENV_VARS},SUPPORT_GATEWAY_ESCALATION_RESOLUTION_URL=${_NEXT_PUBLIC_SUPPORT_GATEWAY_URL}/api/v1/internal/escalation-resolution"
         fi
-        # SECRETS_FLAG · RM_SECRETS 서사: 아카이브(#2445 외 · 4798 JWT는 환경별).
+        # SECRETS_FLAG 서사: 아카이브.
         SECRETS_FLAG=""
         if [ "${_DEPLOY_ENV}" == "dev" ]; then
           SECRETS_FLAG="--update-secrets=DATABASE_URL=DATABASE_URL_DEV_PGBOUNCER_SPRINTABLE:latest,DATABASE_URL_DIRECT=DATABASE_URL_DIRECT_DEV_SPRINTABLE:latest,APPLE_PRIVATE_KEY=APPLE_SIWA_PRIVATE_KEY:latest,SUPPORT_GATEWAY_TOKEN_SECRET=SUPPORT_GATEWAY_TOKEN_SECRET_dev:latest,CHANNEL_CREDENTIAL_ENCRYPTION_KEY=CHANNEL_CREDENTIAL_ENCRYPTION_KEY_DEV:latest,CHANNEL_OAUTH_STATE_SECRET=CHANNEL_OAUTH_STATE_SECRET_DEV:latest,GENERATION_CONNECTOR_CREDENTIAL_ENCRYPTION_KEY=GENERATION_CONNECTOR_CREDENTIAL_ENCRYPTION_KEY_DEV:latest,EDGE_CLIENT_IP_SECRET=EDGE_CLIENT_IP_SECRET_DEV:latest,JWT_SECRET=JWT_SECRET_DEV:latest"
@@ -951,7 +980,17 @@ steps:
           echo "apply-cloud-scheduler: ${_DEPLOY_ENV} — dev 전용 스텝이라 스킵"
           exit 0
         fi
-        python3 infra/apply_cloud_scheduler.py --env dev --apply
+        # story 4796: the jobs follow the same address as every other consumer of `_FASTAPI_URL` (cloud-build.yml `fastapi_url`, dev). While that is the Cloud Run
+        # address nothing is passed and the tool reads the backend's status.url as before; once it names the VM's API name the jobs are pointed there too — otherwise
+        # every dev deploy would write the Cloud Run address back into them. Any other value passes nothing (the tool accepts no other address).
+        if [ "${_FASTAPI_URL}" = "https://dev-api.sprintable.ai" ] && [ "${_CLOUD_RUN_APP_SKIP}" = "true" ]; then
+          # no Cloud Run backend any more: the Authorization value comes from the secret the VM's env declaration names for CRON_SECRET (nothing is described)
+          python3 infra/apply_cloud_scheduler.py --env dev --base-url "${_FASTAPI_URL}" --bearer-from-vm-env --apply
+        elif [ "${_FASTAPI_URL}" = "https://dev-api.sprintable.ai" ]; then
+          python3 infra/apply_cloud_scheduler.py --env dev --base-url "${_FASTAPI_URL}" --apply
+        else
+          python3 infra/apply_cloud_scheduler.py --env dev --apply
+        fi
     waitFor: [deploy-backend]
 
   # E-ARCH 1단계(story #2078): sprintable-realtime-${_DEPLOY_ENV} — SSE/LISTEN 전용 서비스,
@@ -1158,6 +1197,20 @@ steps:
         # story 4786: support-gateway-dev sits idle most of the time (billed per request); prod states nothing here (its value is left as it is).
         CPU_FLAG=""
         if [ "${_DEPLOY_ENV}" == "dev" ]; then CPU_FLAG="--cpu-throttling"; fi
+        # story 4796 (D2): where the database is. Default = Cloud SQL through its socket, exactly the flag this step always had.
+        DB_FLAGS=("--add-cloudsql-instances=${PROJECT_ID}:${_AR_REGION}:sprintable-${_DEPLOY_ENV}")
+        GW_SUBNET=default
+        if [ "${_SUPPORT_GATEWAY_DB_ON_VM}" = "true" ]; then
+          # `--clear-…`, not «leave it out»: gcloud keeps the Cloud SQL instance the service already has. The subnet is the range the VM's firewall allows to reach 5432 (deploy/vm/RUNBOOK.md section 13).
+          DB_FLAGS=(--clear-cloudsql-instances)
+          GW_SUBNET="support-gateway-${_DEPLOY_ENV}"
+          if [ -n "${_SUPPORT_GATEWAY_DB_POOL_SIZE}" ] && [ -n "${_SUPPORT_GATEWAY_DB_MAX_OVERFLOW}" ]; then
+            ENV_VARS="$${ENV_VARS};SUPPORT_GATEWAY_DB_POOL_SIZE=${_SUPPORT_GATEWAY_DB_POOL_SIZE};SUPPORT_GATEWAY_DB_MAX_OVERFLOW=${_SUPPORT_GATEWAY_DB_MAX_OVERFLOW}"
+          elif [ -n "${_SUPPORT_GATEWAY_DB_POOL_SIZE}${_SUPPORT_GATEWAY_DB_MAX_OVERFLOW}" ]; then
+            echo "deploy-support-gateway: _SUPPORT_GATEWAY_DB_POOL_SIZE and _SUPPORT_GATEWAY_DB_MAX_OVERFLOW must be set together (the application refuses to start with one of them)" >&2
+            exit 1
+          fi
+        fi
         gcloud run deploy support-gateway-${_DEPLOY_ENV} \
           --image=${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/support-gateway:${COMMIT_SHA} \
           --region=${_AR_REGION} \
@@ -1166,9 +1219,9 @@ steps:
           --min-instances=${_SUPPORT_GATEWAY_MIN_INSTANCES} \
           --max-instances=${_SUPPORT_GATEWAY_MAX_INSTANCES} \
           --allow-unauthenticated \
-          --add-cloudsql-instances=${PROJECT_ID}:${_AR_REGION}:sprintable-${_DEPLOY_ENV} \
+          "$${DB_FLAGS[@]}" \
           --network=default \
-          --subnet=default \
+          --subnet=$${GW_SUBNET} \
           --vpc-egress=private-ranges-only \
           --update-env-vars="^;^$${ENV_VARS}" \
           --update-secrets="SUPPORT_GATEWAY_DATABASE_URL=SUPPORT_GATEWAY_DATABASE_URL_${_DEPLOY_ENV}:latest,SUPPORT_GATEWAY_TOKEN_SECRET=SUPPORT_GATEWAY_TOKEN_SECRET_${_DEPLOY_ENV}:latest,SUPPORT_GATEWAY_ADMIN_TOKEN=SUPPORT_GATEWAY_ADMIN_TOKEN_${_DEPLOY_ENV}:latest" \

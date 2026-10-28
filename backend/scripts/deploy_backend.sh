@@ -60,7 +60,7 @@ case "${ENV}" in
         APP_URL="${APP_URL:-https://dev-app.sprintable.ai}"  # OAuth redirect/이메일 링크용 프론트 URL
         # OB-1: 에이전트 onboarding config 의 backend-direct Cloud Run URL(에이전트 SSE 직통).
         # CF-fronted 깔끔 도메인 금지(/agent/stream 버퍼·봇차단). cloudbuild _FASTAPI_URL 과 동일 값.
-        FASTAPI_URL="${FASTAPI_URL:-https://sprintable-backend-dev-787818285179.asia-northeast3.run.app}"
+        FASTAPI_URL="${FASTAPI_URL:-https://dev-api.sprintable.ai}"  # story 4796: the same value as the pipeline's dev `fastapi_url` (RUNBOOK §9)
         # ⚠️story cd10e123 계열(2026-07-21, 오르테가군 SPEC-vs-라이브 1:1 대조 지적): dev는
         # 현재 APP_ENV가 아예 안 박혀있어 config.py 기본값("development")을 그대로 상속 중이다.
         # 예전엔 이 스크립트가 `${ENV}`("dev")를 그대로 썼는데, cron.py/auth_firebase_internal.py의
@@ -136,6 +136,9 @@ ENV_VARS_SPEC="${ENV_VARS_SPEC}@APP_URL=${APP_URL}"
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@NEXT_PUBLIC_APP_URL=${APP_URL}"
 # OB-1: agent_onboarding_config generator 가 읽는 backend-direct URL(에이전트 .mcp.json SPRINTABLE_API_URL).
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@FASTAPI_URL=${FASTAPI_URL}"
+# story 4796: dev only, the same value as the pipeline sets (RUNBOOK §9): the origin that stored/bound links are built from. prod states nothing (it keeps the request host until its own move).
+REMOVE_ENV_VARS=""
+if [ "${ENV}" = "dev" ]; then ENV_VARS_SPEC="${ENV_VARS_SPEC}@PUBLIC_API_URL=${FASTAPI_URL}"; else REMOVE_ENV_VARS="PUBLIC_API_URL"; fi
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@EVENTBUS_ENABLED=${EVENTBUS_ENABLED}"
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@MEMBER_SSOT_RESOLVER_SHADOW=${MEMBER_SSOT_RESOLVER_SHADOW}"
 ENV_VARS_SPEC="${ENV_VARS_SPEC}@MEMBER_SSOT_APIKEY_CUT=${MEMBER_SSOT_APIKEY_CUT}"
@@ -161,6 +164,7 @@ MAX_INSTANCES=${MAX_INSTANCES}
 APP_URL=${APP_URL}
 SECRETS_SPEC=${SECRETS_SPEC}
 ENV_VARS_SPEC=${ENV_VARS_SPEC}
+REMOVE_ENV_VARS=${REMOVE_ENV_VARS}
 EOF
     exit 0
 fi
@@ -197,7 +201,7 @@ gcloud run deploy "${SERVICE_NAME}" \
     --subnet=default \
     --vpc-egress=private-ranges-only \
     --update-env-vars="${ENV_VARS_SPEC}" \
-    --update-secrets="${SECRETS_SPEC}" ${CPU_FLAGS}
+    --update-secrets="${SECRETS_SPEC}" ${CPU_FLAGS} ${REMOVE_ENV_VARS:+--remove-env-vars="${REMOVE_ENV_VARS}"}
 
 SERVICE_URL=$(gcloud run services describe "${SERVICE_NAME}" \
     --region="${GCP_REGION}" \

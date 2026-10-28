@@ -5,6 +5,16 @@
     "dev": {
       "location": "asia-northeast3",
       "backend_service": "sprintable-backend-dev"
+    },
+    "prod": {
+      "location": "asia-northeast3",
+      "backend_service": "sprintable-backend-prod",
+      "jobs": [
+        "publication-commands",
+        "a2a-task-deadline-sweep",
+        "storage-usage-warn",
+        "assets-grace-hard-delete"
+      ]
     }
   },
   "defaults": {
@@ -187,7 +197,12 @@
       "method": "GET",
       "schedule": "45 3 * * *",
       "time_zone": "Asia/Seoul",
-      "basis": "story #4234 신규(dev 누락) — dev 밖에서는 주기 작업으로 실제로 돎(PO 실측 2026-09-24). S8(PR #1761): 사용량 80%+ 경고 메일 · 7일 쿨다운·재무장(cron.py `storage_usage_warn` docstring) → 하루 1회로 충분. 다른 일일 작업들(03:00~04:00 KST) 사이에 둠."
+      "basis": "story #4234 신규(dev 누락) — dev 밖에서는 주기 작업으로 실제로 돎(PO 실측 2026-09-24). S8(PR #1761): 사용량 80%+ 경고 메일 · 7일 쿨다운·재무장(cron.py `storage_usage_warn` docstring) → 하루 1회로 충분. 다른 일일 작업들(03:00~04:00 KST) 사이에 둠.",
+      "env_overrides": {
+        "prod": {
+          "schedule": "0 9 * * *"
+        }
+      }
     },
     {
       "name": "assets-grace-hard-delete",
@@ -195,7 +210,12 @@
       "method": "GET",
       "schedule": "30 4 * * *",
       "time_zone": "Asia/Seoul",
-      "basis": "story #4234 신규(dev 누락) — dev 밖에서는 주기 작업으로 실제로 돎(PO 실측 2026-09-24). S8(PR #1761): soft-delete 7일 경과 자산 hard-delete · 실패는 다음 tick 재시도 · tick당 500건 상한(cron.py `assets_grace_hard_delete` docstring) → 7일 유예에 하루 1회면 충분."
+      "basis": "story #4234 신규(dev 누락) — dev 밖에서는 주기 작업으로 실제로 돎(PO 실측 2026-09-24). S8(PR #1761): soft-delete 7일 경과 자산 hard-delete · 실패는 다음 tick 재시도 · tick당 500건 상한(cron.py `assets_grace_hard_delete` docstring) → 7일 유예에 하루 1회면 충분.",
+      "env_overrides": {
+        "prod": {
+          "schedule": "0 3 * * *"
+        }
+      }
     },
     {
       "name": "entity-references-orphan-check",

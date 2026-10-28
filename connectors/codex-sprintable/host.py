@@ -40,7 +40,7 @@ from sprintable_sse import SprintableSSEClient, MessageContext  # noqa: E402
 logger = logging.getLogger("codex-sprintable")
 
 CODEX_BIN = os.getenv("CODEX_BIN", "codex")
-DEFAULT_API_URL = "https://sprintable-backend-dev-57iommnikq-du.a.run.app"
+DEFAULT_API_URL = "https://dev-api.sprintable.ai"
 
 
 class CodexAppServer:

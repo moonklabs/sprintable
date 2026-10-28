@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """story #3140 — PR 게이트 축(gcloud 인증 불요). cloudbuild.yaml/배포 스크립트가 참조하는
 시크릿명 전수(cloudbuild_secret_refs.extract_all_secret_refs)가 전부
-`infra/cloudbuild-secret-manifest.txt`(manifest — GCP 실물의 정기 스냅샷) 안에 있는지만
+`infra/cloudbuild-secret-manifest.txt`(manifest — GCP 실물의 손 관리 사본) 안에 있는지만
 목록 diff로 대조한다.
 
 **이 스크립트가 잡는 것**: 참조명 오탈자·존재하지 않는 이름 참조 — manifest에 없으면 즉시 red
 (gcloud 호출 0, PR 게이트 무-GCP-인증 전제 유지).
 **이 스크립트가 못 잡는 것**(선언, AC3): manifest 자체가 GCP 실물과 어긋나 있으면(새 시크릿을
-GCP에서 지웠는데 manifest 갱신을 깜빡함 등) 이 스크립트는 못 본다 — 그건
-`sync_cloudbuild_secret_manifest.py`(스케줄 워크플로우, WIF 인증)의 몫. 또한 "이름이 존재하지만
+GCP에서 지웠는데 manifest 갱신을 깜빡함 등) 이 스크립트는 못 본다 — 그 대조(sync_cloudbuild_secret_manifest.py +
+스케줄 워크플로우)는 story 4659에서 삭제돼 지금은 없다: 운영자가 시크릿을 지울 때 manifest를 같이 고친다. 또한 "이름이 존재하지만
 내용이 낡은 시크릿"(값 로테이션 누락 등)은 이름 대조 축 밖이라 어느 쪽도 못 잡는다.
 
 로컬 수동 실행:

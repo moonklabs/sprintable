@@ -184,7 +184,7 @@ def _render_attachment_notice(attachments: list[dict[str, str]]) -> str:
     return f"[첨부 {len(attachments)}건]\n" + "\n".join(lines) + "\n[/첨부]"
 
 
-DEFAULT_API_URL = "https://sprintable-backend-dev-57iommnikq-du.a.run.app"
+DEFAULT_API_URL = "https://dev-api.sprintable.ai"
 RECONNECT_BACKOFF = [2, 5, 10, 30, 60]
 STREAM_READ_TIMEOUT = 90  # gateway heartbeats keep the stream alive
 DEDUP_MAX_SIZE = 1000
