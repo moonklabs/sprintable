@@ -33,6 +33,7 @@ if [ "$existing" != "0" ]; then
     echo "database $name already has $existing tables — set RESTORE_WIPE=yes to drop and recreate it" >&2
     exit 1
   fi
+  if [ -n "$role" ] && [ "${#name}" -gt 33 ]; then echo "database name too long to keep the old one beside the new one" >&2; exit 1; fi
 fi
 door_closed=""
 if [ -n "$role" ]; then
@@ -51,10 +52,14 @@ if [ -n "$role" ]; then
     exit 1
   fi
 fi
+target="$name"; kept=""
 if [ "$existing" != "0" ]; then
-  if [ -n "$role" ]; then   # the gateway's database: owned by its application role; nobody (the role included) may connect until the restore is done, and nobody else ever (what the first start of the server set up)
-    in_db psql -U "$user" -d postgres -X -q -v ON_ERROR_STOP=1 -c "DROP DATABASE \"$name\" WITH (FORCE)" -c "CREATE DATABASE \"$name\" OWNER \"$role\"" \
-      -c "REVOKE ALL ON DATABASE \"$name\" FROM PUBLIC" -c "REVOKE CONNECT ON DATABASE \"$name\" FROM \"$role\""
+  if [ -n "$role" ]; then
+    # the gateway's database is never dropped before its replacement has loaded (a DROP cannot be undone by --single-transaction): the dump loads into a database beside it, owned by the application role and shut like the rest,
+    # and the two change names only when the load succeeded. The old one stays, under a new name, until somebody drops it.
+    stamp="$(date -u +%Y%m%d%H%M%S)"; target="${name}_restore_${stamp}"; kept="${name}_before_restore_${stamp}"
+    in_db psql -U "$user" -d postgres -X -q -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$target\" OWNER \"$role\"" \
+      -c "REVOKE ALL ON DATABASE \"$target\" FROM PUBLIC" -c "REVOKE CONNECT ON DATABASE \"$target\" FROM \"$role\""
   else
     in_db psql -U "$user" -d postgres -X -q -v ON_ERROR_STOP=1 -c "DROP DATABASE \"$name\" WITH (FORCE)" -c "CREATE DATABASE \"$name\""
   fi
@@ -62,8 +67,19 @@ fi
 
 log "restore start"
 start="$(date +%s)"
-in_db pg_restore -U "$user" -d "$name" --no-owner --no-privileges --exit-on-error --single-transaction ${restore_role[@]+"${restore_role[@]}"} < "$src"
+if ! in_db pg_restore -U "$user" -d "$target" --no-owner --no-privileges --exit-on-error --single-transaction ${restore_role[@]+"${restore_role[@]}"} < "$src"; then
+  if [ -n "$kept" ]; then
+    in_db psql -U "$user" -d postgres -X -q -c "DROP DATABASE IF EXISTS \"$target\" WITH (FORCE)" || true
+    open_door; door_closed=""
+    echo "the restore failed; $name is untouched (the gateway may connect again)" >&2
+  fi
+  exit 1
+fi
 log "restore done in $(( $(date +%s) - start )) s"
+if [ -n "$kept" ]; then
+  in_db psql -U "$user" -d postgres -X -q -v ON_ERROR_STOP=1 -c "ALTER DATABASE \"$name\" RENAME TO \"$kept\"; ALTER DATABASE \"$target\" RENAME TO \"$name\""
+  log "the database that was here before is kept as $kept (closed to the gateway) — drop it when the restored one has proven itself: DROP DATABASE \"$kept\""
+fi
 if [ -n "$role" ]; then
   open_door
   door_closed=""

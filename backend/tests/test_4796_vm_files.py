@@ -731,9 +731,15 @@ def test_a_wiped_gateway_database_comes_back_owned_by_the_role_and_closed_to_eve
     dump.write_text("x")
     p, log = fakebin("restore.sh", str(dump), DB_SERVICE="gateway-db", FAKE_EXISTING="7", RESTORE_WIPE="yes")
     assert p.returncode == 0, p.stderr
-    wipe = next(l for l in log.splitlines() if "DROP DATABASE" in l)
-    assert 'CREATE DATABASE "sprintable" OWNER "support_gw"' in wipe and 'REVOKE ALL ON DATABASE "sprintable" FROM PUBLIC' in wipe and 'REVOKE CONNECT ON DATABASE "sprintable" FROM "support_gw"' in wipe, wipe
+    assert "DROP DATABASE" not in log, "the gateway's database is never dropped: the old one is kept beside the new one"
+    wipe = next(l for l in log.splitlines() if "CREATE DATABASE" in l)
+    assert 'CREATE DATABASE "sprintable_restore_20260101000000" OWNER "support_gw"' in wipe and 'REVOKE ALL ON DATABASE "sprintable_restore_20260101000000" FROM PUBLIC' in wipe and 'REVOKE CONNECT ON DATABASE "sprintable_restore_20260101000000" FROM "support_gw"' in wipe, wipe
     assert "GRANT" not in wipe, "the role is let in only after the restore"
+    restore = next(l for l in log.splitlines() if "pg_restore -U" in l and "--list" not in l)
+    assert "-d sprintable_restore_20260101000000" in restore, "the dump loads beside the old database"
+    swap = next(l for l in log.splitlines() if "RENAME TO" in l)
+    assert 'ALTER DATABASE "sprintable" RENAME TO "sprintable_before_restore_20260101000000"; ALTER DATABASE "sprintable_restore_20260101000000" RENAME TO "sprintable"' in swap, swap
+    assert "kept as sprintable_before_restore_20260101000000" in p.stdout
     lines = log.splitlines()
     assert 'GRANT CONNECT ON DATABASE "sprintable" TO "support_gw"' in lines[-3] + lines[-2] + lines[-1] or any('GRANT CONNECT ON DATABASE "sprintable" TO "support_gw"' in l for l in lines)
     main, log2 = fakebin("restore.sh", str(dump), FAKE_EXISTING="7", RESTORE_WIPE="yes")
@@ -796,10 +802,11 @@ def test_the_door_of_the_gateway_database_is_shut_before_the_count_and_opened_on
     lines = _lines(log)
     revoke = _first(lines, 'REVOKE CONNECT ON DATABASE "sprintable" FROM "support_gw"')
     count = _first(lines, "pg_stat_activity")
-    drop = _first(lines, "DROP DATABASE")
+    create = _first(lines, 'CREATE DATABASE "sprintable_restore_')
     restore = next(i for i, l in enumerate(lines) if "pg_restore -U" in l and "--list" not in l)
+    swap = _first(lines, "RENAME TO")
     grant = _first(lines, 'GRANT CONNECT ON DATABASE "sprintable" TO "support_gw"')
-    assert revoke < count < drop < restore < grant, (revoke, count, drop, restore, grant)
+    assert revoke < count < create < restore < swap < grant, (revoke, count, create, restore, swap, grant)
     assert "CLOSED" not in p.stderr
 
 
@@ -826,3 +833,33 @@ def test_the_application_database_restore_does_not_look_at_sessions(fakebin, tmp
     p, log = fakebin("restore.sh", str(dump), FAKE_EXISTING="0", FAKE_SESSIONS="3")
     assert p.returncode == 0, p.stderr
     assert "pg_stat_activity" not in log and "CONNECT" not in log
+
+
+def test_a_gateway_restore_that_fails_leaves_the_existing_database_untouched_and_opens_the_door_again(fakebin, tmp_path: Path) -> None:
+    dump = tmp_path / "x.dump"
+    dump.write_text("x")
+    p, log = fakebin("restore.sh", str(dump), DB_SERVICE="gateway-db", FAKE_EXISTING="7", RESTORE_WIPE="yes", FAKE_RESTORE_RC="1")
+    assert p.returncode != 0 and "is untouched" in p.stderr and "CLOSED" not in p.stderr
+    drops = [l for l in log.splitlines() if "DROP DATABASE" in l]
+    assert len(drops) == 1 and '"sprintable_restore_20260101000000"' in drops[0] and 'DROP DATABASE IF EXISTS "sprintable" ' not in drops[0] and "RENAME" not in log, drops
+    assert 'GRANT CONNECT ON DATABASE "sprintable" TO "support_gw"' in log, "the gateway may connect to what it had"
+
+
+def test_the_application_database_is_still_wiped_in_place_as_before(fakebin, tmp_path: Path) -> None:
+    dump = tmp_path / "x.dump"
+    dump.write_text("x")
+    p, log = fakebin("restore.sh", str(dump), FAKE_EXISTING="7", RESTORE_WIPE="yes")
+    assert p.returncode == 0 and 'DROP DATABASE "sprintable" WITH (FORCE)' in log and "RENAME" not in log and "_restore_" not in log
+
+
+@pytest.mark.parametrize("length,ok", [(33, True), (34, False)])
+def test_a_gateway_database_name_must_leave_room_for_the_kept_old_name(fakebin, tmp_path: Path, length: int, ok: bool) -> None:
+    dump = tmp_path / "x.dump"
+    dump.write_text("x")
+    name = "d" * length
+    p, log = fakebin("restore.sh", str(dump), DB_SERVICE="gateway-db", FAKE_DB_NAME=name, FAKE_EXISTING="7", RESTORE_WIPE="yes")
+    assert (p.returncode == 0) is ok, p.stderr
+    kept = f"{name}_before_restore_20260101000000"
+    assert len(kept) <= 63 or not ok
+    if not ok:
+        assert "too long" in p.stderr and "CONNECT" not in log, "refused before anything was touched"

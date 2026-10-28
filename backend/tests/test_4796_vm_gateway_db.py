@@ -893,5 +893,5 @@ def test_nothing_is_started_when_the_rule_could_not_be_put_in_place_or_when_ther
 
 def test_the_runbook_states_boot_order_the_stuck_container_and_the_shut_door() -> None:
     rb = (_VM / "RUNBOOK.md").read_text()
-    for token in ("its restart policy is «no»", "and only THEN starts it", "COULD NOT BE STOPPED", "first **shuts the door**", "leaves the door shut and prints the one command that opens it"):
+    for token in ("its restart policy is «no»", "and only THEN starts it", "COULD NOT BE STOPPED", "first **shuts the door**", "leaves the door shut and prints the one command that opens it", "It never drops the gateway's database before the replacement has loaded"):
         assert token in rb, token
