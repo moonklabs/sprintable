@@ -1072,7 +1072,6 @@ def test_the_stored_links_of_prod_are_rewritten_on_the_vm_inside_the_freeze_with
         p, calls = _run_b(b, _fresh(tmp_path, name), extra={"SUDO_REPORT": leftover})
         assert "links: applied" in p.stdout and "links: clean" not in p.stdout, (name, "a run.app origin still listed after the rewrite, in any letter case, is not a pass")
     assert '{ grep -qi \'run\\.app\' links-after.txt; [ "$?" = 1 ]; }' in b, "clean means grep found nothing (exit 1), not that grep failed (exit 2)"
-    sleeps = [c for c in calls if c.startswith("sleep")]
     p, calls = _run_b(b, _fresh(tmp_path, "drain"))
     assert "sleep 30" in calls and calls.index("sleep 30") < next(i for i, c in enumerate(calls) if c == "sudo systemctl start sprintable-backup.service"), "the drain wait comes before the backup"
 
@@ -1139,7 +1138,11 @@ def test_the_writers_check_after_the_freeze_is_a_gate_that_reads_the_log_of_the_
     ask = next(c for c in calls if "logging read" in c)
     assert "requestMethod" not in ask, "no method is excluded: the cron endpoints are GET requests and write"
     assert "httpRequest.status>=200" in ask and "httpRequest.status<400" in ask and "--freshness=5m" in ask and "sprintable-backend-prod" in ask
-    assert 'NOT httpRequest.requestUrl:"/health"' in ask and 'NOT httpRequest.requestUrl:"/ping"' in ask, "only the health checks are left out"
+    assert 'NOT httpRequest.requestUrl=~"^https://[^/?]+/api/v2/(health|ping)$"' in ask, "only the health checks, by their exact path"
+    import re as _re
+    rx = _re.compile(r"^https://[^/?]+/api/v2/(health|ping)$")
+    assert rx.match("https://api.sprintable.ai/api/v2/health") and rx.match("https://x.run.app/api/v2/ping")
+    assert not rx.match("https://api.sprintable.ai/api/v2/auth/token?next=/api/v2/health") and not rx.match("https://api.sprintable.ai/api/v2/health?x=1") and not rx.match("https://api.sprintable.ai/api/v2/healthz/../x"), "a write that mentions the path in its query is not a health check"
     p, _ = _run(block, _fresh(tmp_path, "some"), extra={"WRITE_ROWS": "2026-11-02T18:31:12Z\n"})
     assert "writers after the freeze: read" in p.stdout and "writers after the freeze: none" not in p.stdout
     p, calls = _run(block, _fresh(tmp_path, "asked-not"), where="parent")
