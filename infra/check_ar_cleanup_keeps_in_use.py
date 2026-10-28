@@ -224,8 +224,9 @@ def _image_values(node: Any) -> Iterable[Any]:
 # 문법은 distribution/reference(Docker의 이름 문법)를 따른다: 경로 조각 = 소문자·숫자 덩어리를 `.` `_` `__` `-`(연속 가능)로 잇고, 태그는 128자까지. 값 앞뒤 공백은 이름이 아니다(다듬지 않는다).
 _HUB_COMPONENT = r"[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*"
 _HUB_SHORT = re.compile(
-    rf"(?P<path>(?:{_HUB_COMPONENT}/)*{_HUB_COMPONENT})(?::(?P<tag>[A-Za-z0-9_][A-Za-z0-9_.-]{{0,127}}))?(?:@(?P<digest>sha256:[0-9a-f]{{64}}))?"
+    rf"(?P<path>(?:{_HUB_COMPONENT}/)*{_HUB_COMPONENT})(?::(?P<tag>[A-Za-z0-9_][A-Za-z0-9_.-]{{0,127}}))?(?:@(?P<digest>[A-Za-z][A-Za-z0-9]*(?:[-_+.][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{{32,}}))?"
 )
+_HUB_NAME_MAX = 255  # distribution/reference: 저장소 이름(호스트를 뺀 경로) 전체 길이 상한
 
 
 def _hub_short(value: Any, where: str) -> Outside | None:
@@ -236,6 +237,8 @@ def _hub_short(value: Any, where: str) -> Outside | None:
     if not m:
         return None
     path = m["path"]
+    if len(path if "/" in path else f"library/{path}") > _HUB_NAME_MAX:
+        return None
     if "/" in path and ("." in path.split("/")[0] or path.split("/")[0] == "localhost"):
         return None
     return {"image": "docker.io/" + (path if "/" in path else f"library/{path}"), "ref": f"@{m['digest']}" if m["digest"] else (f":{m['tag']}" if m["tag"] else ""),

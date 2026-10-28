@@ -828,6 +828,11 @@ def test_hub_short_names_follow_the_docker_name_rule():
     # Docker's own grammar (distribution/reference): `__` and repeated dashes join name parts, a tag may be 128 characters and no more
     assert hub("my__org/some---app:1") == ("docker.io/my__org/some---app", ":1")
     assert hub("a/b:" + "t" * 128) is not None and hub("a/b:" + "t" * 129) is None
+    # the digest is any `algorithm:hex` of 32+ hex digits (sha512 too), and a repository name is at most 255 characters
+    assert hub("a/b@sha512:" + "ab" * 64) == ("docker.io/a/b", "@sha512:" + "ab" * 64)
+    assert hub("a/b@sha256:" + "a" * 31) is None and hub("a/b@:" + "a" * 64) is None and hub("a/b@1sha:" + "a" * 64) is None
+    assert hub("/".join(["a" * 63] * 4)) is not None and hub("/".join(["a" * 64] * 4)) is None  # 255 characters in total, then 259
+    assert hub("a" * 255) is None  # `library/` is added for a single part: 8 + 255
     assert hub("a/-b") is None and hub("a//b") is None and hub("a/b_") is None  # a separator cannot start, double a slash or end a part
 
 
