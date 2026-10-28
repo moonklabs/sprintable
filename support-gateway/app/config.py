@@ -15,6 +15,22 @@ class Settings(BaseSettings):
     # 가리키지 않는다(Blueprint v0.3 §0 "우리 org 데이터와 완전 분리된 별도 에이전트").
     database_url: str = ""
 
+    # story 4796 — the connection pool of this service's engine. Unset keeps SQLAlchemy's own defaults (5 + 10), which is what Cloud Run has always run with; the VM sets 3 + 2 so that the gateway fits
+    # the connection budget of the VM's shared Postgres (deploy/vm/RUNBOOK.md §11). Both or neither: a half-set pool would be a guess about the other half.
+    db_pool_size: int | None = None
+    db_max_overflow: int | None = None
+
+    def engine_options(self) -> dict:
+        """`pool_pre_ping` always; the pool size only when it is configured (both values together) — an unset pool is SQLAlchemy's default, and a SQLite test database accepts no pool arguments."""
+        size, overflow = self.db_pool_size, self.db_max_overflow
+        if (size is None) != (overflow is None):
+            raise RuntimeError("SUPPORT_GATEWAY_DB_POOL_SIZE and SUPPORT_GATEWAY_DB_MAX_OVERFLOW must be set together")
+        if size is None:
+            return {"pool_pre_ping": True}
+        if size < 1 or overflow < 0:
+            raise RuntimeError("SUPPORT_GATEWAY_DB_POOL_SIZE must be at least 1 and SUPPORT_GATEWAY_DB_MAX_OVERFLOW at least 0")
+        return {"pool_pre_ping": True, "pool_size": size, "max_overflow": overflow}
+
     # backend가 발급하는 org-스코프 위임 토큰을 검증할 전용 시크릿. backend의 JWT_SECRET과
     # 별개 값 — 이 서비스가 아는 유일한 "신뢰 재료"이며, 이걸로 fleet 인증 토큰을 위조하거나
     # 검증할 수 없다(별도 서명 키 도메인, backend/app/routers/support_gateway_token.py 참고).
