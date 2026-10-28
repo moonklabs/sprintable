@@ -1490,8 +1490,11 @@ def test_the_runbook_says_how_to_recover_a_first_start_that_was_cut_short_and_wh
     rb = _runbook13()
     para = rb.split("**A first start that was cut short.**")[1].split("**Rolling back across this step:**")[0]
     for token in ("only while the data folder is empty", "the application role does not own the database", "holds **no gateway data**", "sudo find /srv/sprintable/gateway-postgres -mindepth 1 -delete",
-                  "deployer --force", "With data in it, do not empty anything"):
+                  "deployer --force", "With data in it, do not empty anything", "**First look, read only**", "select count(*) from pg_stat_user_tables", "must print **0**",
+                  "**any other answer, or any other failure, and nothing below is run**", 'sudo docker stop sprintable-gateway-db-1 && [ -z "$(sudo docker ps -q --filter name=sprintable-gateway-db-1)" ] && sudo find /srv/sprintable/gateway-postgres -mindepth 1 -delete', "ONE chain that stops where anything fails"):
         assert token in para, token
+    assert para.index("select count(*) from pg_stat_user_tables") < para.index("sudo docker stop sprintable-gateway-db-1") < para.index("-mindepth 1 -delete"), "the look comes first, the wipe last"
+    assert "docker compose" not in para, "a compose command would need the deployer's environment"
 
 
 @pytest.mark.skipif(_postgres_binaries() is None or os.geteuid() == 0, reason="needs the Postgres binaries and a user that is not root (initdb refuses root)")
@@ -1523,3 +1526,10 @@ def test_on_a_real_server_the_readiness_question_tells_a_half_made_server_from_a
     finally:
         subprocess.run([str(bins / "pg_ctl"), "-D", str(work / "data"), "-m", "immediate", "stop"], capture_output=True, timeout=60)
         shutil.rmtree(work, ignore_errors=True)
+
+
+def test_the_password_in_the_log_check_names_the_project_and_does_not_pass_on_an_empty_log() -> None:
+    rb = _runbook13()
+    line = rb.split("no password in the server's log:")[1].split("From outside")[0]
+    assert "gcloud compute ssh $VM --project $PROJECT --zone $ZONE --tunnel-through-iap" in line
+    assert '&& [ -n "$LOG" ] && printf' in line and "grep -c -F -- \"$PW\"" in line and "a failed ssh or an empty log prints nothing: that is not a pass" in line
