@@ -1,0 +1,582 @@
+"""story 4796 AC4 - deploy/vm/CUTOVER-prod.md: the prod cutover sheet, pinned.
+
+The sheet is the dev move with prod's names and the lessons of the dev run (the freeze is the IAM binding; the path is /openapi.json; the dependents are read, not assumed; ladders of lines that run only when the one before succeeded; the cloudsql check reads a value).
+Here: the decisions the product owner made (2026-10-28) are in the text; the names agree with the declaration and the scripts they name; no block uses what dev showed to be wrong; every gcloud command goes through the REAL parser
+(tests/_real_gcloud.py); the ladders are run as written (bash and zsh) against a fake gcloud and a failing line leaves the services frozen; the read-only blocks are run and write nothing.
+"""
+from __future__ import annotations
+
+import os
+import re
+import shlex
+import shutil
+import stat
+import subprocess
+from pathlib import Path
+
+import pytest
+import yaml
+
+from tests import _real_gcloud as _gcloud
+
+_ROOT = Path(__file__).resolve().parents[2]
+SHEET = (_ROOT / "deploy/vm/CUTOVER-prod.md").read_text()
+PROD = yaml.safe_load((_ROOT / "deploy/vm/env/prod.yaml").read_text())
+
+SAMPLE = {"PROJECT": "sprintable-494803", "REGION": "asia-northeast3", "ZONE": "asia-northeast3-a", "ENV": "prod", "VM": "sprintable-vm-prod", "SQL": "sprintable-prod",
+          "DEPLOY_BUCKET": "sprintable-vm-prod-deploy", "BACKUPS_BUCKET": "sprintable-vm-prod-backups", "BACKEND": "sprintable-backend-prod", "FRONTEND": "sprintable-frontend-prod",
+          "MCP": "sprintable-mcp-prod", "API_HOST": "api.sprintable.ai", "APP_HOST": "app.sprintable.ai", "VMIP": "34.64.1.2", "SRC_IP": "10.110.0.3", "svc": "sprintable-backend-prod",
+          "job": "sprintable-sched-prod", "JOB": "sprintable-sched-prod", "NAME": "some-job", "r": "services", "n": "sprintable-backend-prod", "TMO": "300", "BURL": "https://x.run.app", "FROZEN": "yes",
+          "uri": "https://sprintable-backend-prod-787818285179.asia-northeast3.run.app/api/v2/internal/cron/x", "new": "https://api.sprintable.ai/api/v2/internal/cron/x", "out": "", "CODE": "403",
+          "WINDOW": "20261102", "VMBACK": "passing", "FINAL_DUMP": "/srv/sprintable/import/prod-final-1.dump", "FINAL_COUNTS": "/srv/sprintable/import/prod-final-1.counts.tsv"}
+
+
+def _blocks() -> list[str]:
+    return re.findall(r"```\n(.*?)```", SHEET, flags=re.S)
+
+
+def _block_with(marker: str) -> str:
+    found = [b for b in _blocks() if marker in b]
+    assert len(found) == 1, (marker, len(found))
+    return found[0]
+
+
+def _section(title: str, until: str) -> str:
+    return SHEET.split(title)[1].split(until)[0]
+
+
+# ── the text: what was decided, in the order of the sheet ───────────────────────────────────────────────────────────────────────────────────
+
+def test_the_sheet_has_every_step_of_the_order_in_order() -> None:
+    heads = ["## What dev taught, applied here", "## Names (prod)", "## Decisions already made", "## The order", "## G. Gates", "## 0. Read-only", "## 1. Rehearsal", "## 2. The notice",
+             "## 3. Phase 1", "## 4. Phase 2", "## 5. Freeze", "## 6–7. The data and the takeover", "## 8. Unfreeze", "## 9. The lap", "## 10–11. The day after", "## 12. The way back", "## Questions for the owner"]
+    pos = [SHEET.index(h) for h in heads]
+    assert pos == sorted(pos), "the headings are in the order of the move"
+    table = _section("## The order", "## G. Gates")
+    for step in ("| G |", "| 0 |", "| 1 |", "| 2 |", "| 3 |", "| 4 |", "| 5 |", "| 6 |", "| 7 |", "| 8 |", "| 9 |", "| 10 |", "| 11 |", "| 12 |"):
+        assert step in table, step
+
+
+def test_the_decisions_of_the_product_owner_are_in_the_text() -> None:
+    d = _section("## Decisions already made", "## The order")
+    for token in ("**03:00–05:00 KST (18:00–20:00 UTC of the day before)**", "about 3,000–3,300 per hour in every Korean hour", "peak about 4,150", "Machine traffic does not go away at night",
+                  "**The announcement is a notice, not a request for approval**", "Rollback loses what the VM wrote after the cutover", "**Fix forward first**", "**No prod support gateway in this move.**",
+                  "**4789**", "**closes with this move**", "a **deploy gap**", "68 s"):
+        assert token in d, token
+
+
+def test_the_window_in_utc_is_the_window_in_kst_minus_nine_hours() -> None:
+    from datetime import datetime, timedelta, timezone
+    kst = timezone(timedelta(hours=9))
+    start = datetime(2026, 11, 2, 3, 0, tzinfo=kst).astimezone(timezone.utc)
+    end = datetime(2026, 11, 2, 5, 0, tzinfo=kst).astimezone(timezone.utc)
+    assert (start.hour, end.hour) == (18, 20) and start.day == 1 and end.day == 1, "03:00-05:00 KST is 18:00-20:00 UTC of the day before"
+    assert "(18:00–20:00 UTC of the day before)" in SHEET
+
+
+def test_the_lessons_of_the_dev_run_are_each_written_down() -> None:
+    lessons = _section("## What dev taught, applied here", "## Names (prod)")
+    for token in ("The freeze is the IAM binding, not the ingress setting", "lets in the requests of the same project's VPC, and the VM is in it", "The measurement path is `/openapi.json`", "Cloud Run reserves the paths that end in a `z`",
+                  "is read, not assumed", "**«I do not know» is a stop, not a yes.**", "A line runs only when the one before it succeeded", "reads the value of `cloudsql-instances`, not the key",
+                  "«lists no table data — refusing»", "A sheet's first real run always finds something"):
+        assert token in lessons, token
+
+
+def test_what_the_sheet_leaves_out_is_said() -> None:
+    assert "**Not in this move:** the support gateway" in SHEET and "Cloud SQL prod is **not deleted** here" in SHEET
+    assert "A number nobody has measured is written «unmeasured», never guessed." in SHEET
+    q = _section("## Questions for the owner", "\x00") if "\x00" in SHEET else SHEET.split("## Questions for the owner")[1]
+    assert q.count("\n1. ") == 1 and "\n4. " in q, "four one-line questions"
+
+
+def test_the_downtime_is_computed_from_the_rehearsal_not_promised() -> None:
+    rehearsal = _section("## 1. Rehearsal", "## 2. The notice")
+    for token in ("**The window is computed, not promised:**", "dump 45 s for 252 tables and 295 MB", "4 min 44 s", "scaled by prod's size ratio", "the number goes into the notice only after the rehearsal has produced it",
+                  "If it does not fit in 03:00–05:00 KST with margin, the window is not used."):
+        assert token in rehearsal, token
+    assert "db-g1-small" in SHEET and "20 GB" in SHEET and "PG15" in SHEET, "what the product owner measured of the instance is quoted as his"
+    assert "the **real data size and the row counts** come from the rehearsal" in SHEET
+
+
+def test_the_lap_has_the_machine_traffic_cell_and_names_the_open_item_honestly() -> None:
+    lap = _section("## 9. The lap", "## 10–11.")
+    for token in ("**Lanes · desktop · MCP reconnect — the machine traffic.**", "(a) every lane Mac's agent shows online", "(b) one desktop-app instruction round trip", "(c) one tool call through `sprintable-mcp-prod`",
+                  "**Open item (a number without a source):**", "`deploy/vm/Caddyfile` writes no access log", "stays «unmeasured»", "**The deploy gap, separately from 4789:**"):
+        assert token in lap, token
+    caddy = (_ROOT / "deploy/vm/Caddyfile").read_text()
+    assert not re.search(r"^\s*log\b", caddy, flags=re.M), "the premise of the open item: the Caddyfile has no log directive (if one is added, this cell and its test change)"
+
+
+# ── the names agree with the declaration and the scripts ────────────────────────────────────────────────────────────────────────────────────
+
+def test_the_names_agree_with_the_prod_declaration() -> None:
+    names = _section("## Names (prod)", "`sprintable-backend-prod`")
+    assert f"DEPLOY_BUCKET={PROD['buckets']['deploy']}" in names and f"BACKUPS_BUCKET={PROD['buckets']['backups']}" in names
+    assert f"API_HOST={PROD['hosts']['api']}" in names and f"APP_HOST={PROD['hosts']['app']}" in names
+    assert f"PROJECT={PROD['project']}" in names and f"REGION={PROD['region']}" in names
+    assert PROD["services"]["backend"]["live_section"] == "sprintable-backend-prod"
+    live = (_ROOT / "deploy/vm/env/live-names.prod.txt").read_text()
+    assert "<secret DATABASE_URL_PROD>" in live and "DATABASE_URL_PROD_PGBOUNCER" in live and "`DATABASE_URL_PROD`" in SHEET, "the direct URL the dump reads"
+    assert "sprintable-frontend-prod" in live
+    assert "sprintable-mcp-prod" in (_ROOT / "cloudbuild.yaml").read_text()
+
+
+def test_the_scripts_and_flags_the_sheet_names_exist() -> None:
+    for script in ("front-door.sh", "dump-source.sh", "restore.sh", "rowcounts.sh", "deployer.py"):
+        assert (_ROOT / "deploy/vm/bin" / script).is_file(), script
+    for named in ("/opt/sprintable/bin/front-door.sh", "/opt/sprintable/bin/dump-source.sh", "/opt/sprintable/bin/restore.sh", "/opt/sprintable/bin/rowcounts.sh", "/opt/sprintable/bin/deployer.py"):
+        assert named in SHEET, named
+    manifest = __import__("json").loads((_ROOT / "infra/cloud-scheduler/jobs.json").read_text())
+    assert list(manifest["environments"]) == ["dev"], "the premise of step 4: the scheduler manifest defines dev only (apply_cloud_scheduler.py --env prod would stop with a KeyError), so prod's jobs are moved by hand"
+    assert "defines `dev` only" in SHEET and "`KeyError`" in SHEET and "--env prod --base-url" not in SHEET and "gcloud scheduler jobs update http" in SHEET, "the sheet tells nobody to run the repository script for prod"
+    door = (_ROOT / "deploy/vm/bin/front-door.sh").read_text()
+    assert "prod:https://sprintable-backend-prod-787818285179.asia-northeast3.run.app" in door
+    assert SHEET.count("--upstream https://sprintable-backend-prod-787818285179.asia-northeast3.run.app") == 2, "the front door (step 3) and the way back"
+    assert "--host api.sprintable.ai" in SHEET and "prod) api_host=\"api.sprintable.ai\"" in door
+    assert re.search(r"--label (rehearsal|final)", SHEET) and "--label final" in SHEET
+
+
+def test_the_routes_the_sheet_reads_in_the_request_log_are_the_applications() -> None:
+    toss = (_ROOT / "backend/app/routers/toss_webhooks.py").read_text()
+    assert 'prefix="/api/v2/webhooks/toss"' in toss and "/api/v2/webhooks/toss" in SHEET
+    assert "/github-webhook" in (_ROOT / "backend/app/routers/verdict_capture.py").read_text() and "github-webhook" in SHEET
+    for table in ("users", "organizations", "team_members", "billing_orders"):
+        assert re.search(rf'__tablename__ = "{table}"', "".join(p.read_text() for p in (_ROOT / "backend/app/models").glob("*.py"))), table
+        assert table in SHEET
+
+
+# ── what dev showed to be wrong must not be in a block ─────────────────────────────────────────────────────────────────────────────────────
+
+def test_no_block_freezes_by_ingress_or_measures_on_a_reserved_path() -> None:
+    code = "\n".join(_blocks())
+    assert "--ingress" not in code, "the freeze is the IAM binding"
+    assert "/healthz" not in code and "/readyz" not in code, "Cloud Run answers the paths that end in z itself"
+    assert code.count("remove-iam-policy-binding") >= 1 and code.count("add-iam-policy-binding") >= 2
+    assert "--member=allUsers --role=roles/run.invoker" in code
+    assert '"$BURL/openapi.json"' in code and "403" in _section("## 5. Freeze", "## 6–7.")
+
+
+def test_no_block_counts_a_key_instead_of_a_value_and_none_has_a_placeholder_in_angle_brackets() -> None:
+    code = "\n".join(_blocks())
+    assert "grep -c 'cloudsql-instances'" not in code
+    assert not re.findall(r"<[a-z][a-z-]*>", code), re.findall(r"<[a-z][a-z-]*>", code)
+
+
+def test_zsh_would_not_read_a_variable_and_a_colon_as_a_modifier() -> None:
+    mod = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*:[$A-Za-z{]")
+    hits = [line.strip()[:120] for b in _blocks() for line in b.splitlines() if mod.search(line) and not line.lstrip().startswith("#")]
+    assert hits == [], hits
+
+
+# ── every gcloud command goes through the real parser ───────────────────────────────────────────────────────────────────────────────────────
+
+def _expand(token: str) -> str:
+    def repl(m: re.Match) -> str:
+        name = m.group(1) or m.group(2)
+        assert name in SAMPLE, f"the sheet uses ${name} and nowhere defines it for the reader"
+        return SAMPLE[name]
+    return re.sub(r"\$\{(\w+)\}|\$(\w+)", repl, token)
+
+
+def _gcloud_commands() -> list[list[str]]:
+    found = []
+    inline = [m for m in re.findall(r"`([^`\n]*)`", SHEET) if "gcloud" in m and re.search(r" -{1,2}\w", m)]
+    for block in [*_blocks(), *inline]:
+        for line in block.splitlines():
+            if "gcloud" not in line:
+                continue
+            lex = shlex.shlex(line, posix=True, punctuation_chars=True)
+            lex.whitespace_split = True
+            lex.commenters = ""
+            toks = list(lex)
+            cur: list[str] = []
+            for t in [*toks, "|"]:
+                if t in {"|", ";", "&&", "||", "(", ")", "$"} or set(t) <= set("|;&()<>$"):
+                    if "gcloud" in cur:
+                        found.append(cur[cur.index("gcloud"):])
+                    cur = []
+                else:
+                    cur.append(t)
+    return found
+
+
+def test_the_sheet_has_the_gcloud_commands_this_test_parses() -> None:
+    verbs = {" ".join(c[1:3]) for c in _gcloud_commands()}
+    for must in ("sql instances", "compute instances", "run services", "run jobs", "scheduler jobs", "logging read", "secrets versions", "secrets list", "compute ssh", "builds list"):
+        assert must in verbs, (must, sorted(verbs))
+    assert 20 <= len(_gcloud_commands()) <= 80, len(_gcloud_commands())
+
+
+@pytest.mark.skipif(shutil.which("gcloud") is None, reason="no gcloud on this machine")
+@pytest.mark.timeout(120)
+def test_every_gcloud_command_of_the_sheet_parses_in_the_real_gcloud(tmp_path: Path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    unique: dict[tuple, int] = {}
+    for cmd in _gcloud_commands():
+        unique.setdefault(tuple(_expand(t) for t in cmd[1:]), len(unique))
+
+    def parse(item: tuple[tuple, int]) -> tuple[str, str] | None:
+        argv, n = item
+        home = tmp_path / f"home-{n}"
+        home.mkdir()
+        out = _gcloud.text(_gcloud.run(list(argv), home))
+        return None if "do not currently have an active account" in out else (" ".join(argv)[:140], out[:220])
+
+    assert len(unique) >= 20, len(unique)
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        bad = [r for r in pool.map(parse, unique.items()) if r]
+    assert not bad, bad
+
+
+# ── the blocks, run as written ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+_WRITES = ("create", "update", "delete", "deploy", "execute", "pause", "resume", "add-iam-policy-binding", "remove-iam-policy-binding", "set-iam-policy", "patch", "replace", "restart", "import", "export", "cancel")
+
+_FAKE = r"""#!/bin/sh
+echo "gcloud $*" >> "$CALLS"
+[ -n "$FAIL" ] && case "$*" in *"$FAIL"*) exit 1 ;; esac
+case "$*" in
+  *"services describe"*"value(status.url)"*) printf %s "https://x.run.app" ;;
+  *"services describe"*"timeoutSeconds"*) printf %s "$TMO" ;;
+  *"run services list"*|*"run jobs list"*) printf 'sprintable-backend-prod\nsprintable-frontend-prod\n' ;;
+  *"run services describe"*|*"run jobs describe"*) echo '{"x":1}' ;;
+  *"get-iam-policy"*) case " $* " in *" $NOBIND "*) echo '{"bindings":[]}' ;; *" $GARBAGE "*) echo 'not json at all' ;; *) echo '{"bindings":[{"role":"roles/run.invoker","members":["allUsers"]}]}' ;; esac ;;
+  *"executions list"*) case " $* " in *" $BUSY "*) echo "exec-1" ;; esac ;;
+  *"compute instances describe"*) echo 34.64.1.2 ;;
+  *"sql instances describe"*"json"*) echo '{"ipAddresses":[{"type":"PRIVATE","ipAddress":"10.110.0.3"}]}' ;;
+esac
+exit 0
+"""
+
+_FAKE_CURL = """#!/bin/sh
+echo "curl $*" >> "$CALLS"
+case "$*" in *api.sprintable.ai*) printf %s "${VM_CODE:-200}" ;; *) printf %s "${CURL_CODE:-403}" ;; esac
+"""
+
+
+def _world(tmp_path: Path) -> dict[str, str]:
+    b = tmp_path / "bin"
+    b.mkdir(exist_ok=True)
+    for name, text in (("gcloud", _FAKE), ("curl", _FAKE_CURL), ("sleep", "#!/bin/sh\necho \"sleep $*\" >> \"$CALLS\"\n"), ("dig", "#!/bin/sh\necho 34.64.1.2\n")):
+        f = b / name
+        f.write_text(text)
+        f.chmod(f.stat().st_mode | stat.S_IEXEC)
+    calls = tmp_path / "calls"
+    calls.write_text("")
+    return {"PATH": f"{b}:{os.environ.get('PATH', '/usr/bin:/bin')}", "HOME": str(tmp_path), "CALLS": str(calls), "TMO": "300", **{k: v for k, v in SAMPLE.items() if k not in ("TMO",)}}
+
+
+def _w(root: Path) -> Path:
+    """the folder of the window, where the sheet's files live and where its ladders refuse to run anywhere else"""
+    return root / "window-20261102"
+
+
+def _run(block: str, tmp_path: Path, shell: str = "bash", extra: dict[str, str] | None = None, files: dict[str, str] | None = None, where: str = "window") -> tuple[subprocess.CompletedProcess, list[str]]:
+    env = _world(tmp_path)
+    env.update(extra or {})
+    work = _w(tmp_path) if where == "window" else tmp_path
+    work.mkdir(exist_ok=True)
+    for name, text in (files or {}).items():
+        (work / name).write_text(text)
+    p = subprocess.run([shell, "-c", block], capture_output=True, text=True, timeout=60, env=env, cwd=work)
+    return p, Path(env["CALLS"]).read_text().splitlines()
+
+
+def _fresh(root: Path, name: str) -> Path:
+    d = root / name
+    d.mkdir()
+    return d
+
+
+def _verbs(calls: list[str], word: str) -> list[str]:
+    return [c for c in calls if word in c]
+
+
+IN_FOLDER = '[ -n "$WINDOW" ] && [ "${PWD##*/}" = "window-${WINDOW}" ]'
+FREEZE = 'STEP=no\n[ -n "$FROZEN" ]'
+UNFREEZE = f"STEP=no\n{IN_FOLDER} && [ -s reopen.txt ]"
+JOBS = f"RUN=no\n{IN_FOLDER} && [ -s jobs.txt ]"
+SCH_MOVE = f"SCH=no\n{IN_FOLDER} && [ -s scheduler-before.tsv ]"
+SCH_BACK = f"SCH=no\n{IN_FOLDER} && [ -s scheduler-moved.tsv ]"
+PUBLIC = "sprintable-mcp-prod\nsvc-a\nsvc-b\nsvc-c\n"
+WP = "was-public-20261102.txt"
+
+
+def test_the_read_only_blocks_write_nothing(tmp_path: Path) -> None:
+    for i, marker in enumerate(("gcloud sql instances describe ${SQL}", "USES CLOUD SQL PROD", "Google-Cloud-Scheduler")):
+        p, calls = _run(_block_with(marker), _fresh(tmp_path, f"ro{i}"))
+        assert p.returncode == 0, (marker, p.stderr[:300])
+        gcloud_calls = [c for c in calls if c.startswith("gcloud ")]
+        assert gcloud_calls, marker
+        writes = [c for c in gcloud_calls if any(re.search(rf"\b{re.escape(w)}\b", c) for w in _WRITES)]
+        assert writes == [], (marker, writes)
+
+
+def test_the_dependents_loop_lists_what_mounts_prods_cloud_sql_and_asks_who_may_call(tmp_path: Path) -> None:
+    p, calls = _run(_block_with("USES CLOUD SQL PROD"), tmp_path)
+    assert p.returncode == 0, p.stderr
+    assert _verbs(calls, "get-iam-policy"), "it asks who may call each service"
+    assert "== sprintable-backend-prod" in p.stdout and "allUsers" in p.stdout
+
+
+def test_step_zero_saves_what_the_undo_and_the_job_check_need(tmp_path: Path) -> None:
+    block = _block_with("> scheduler-before.tsv")
+    assert "> scheduler-before.tsv" in block and "> jobs.txt" in block
+    p, calls = _run(block, tmp_path)
+    assert p.returncode == 0, p.stderr
+    assert (_w(tmp_path) / "scheduler-before.tsv").exists() and (_w(tmp_path) / "jobs.txt").read_text().split() == ["sprintable-backend-prod", "sprintable-frontend-prod"]
+
+
+def test_the_freeze_is_a_ladder_that_proves_before_it_waits_and_leaves_the_services_frozen_when_it_fails(tmp_path: Path) -> None:
+    block = _block_with(FREEZE)
+    ok, calls = _run(block, _fresh(tmp_path, "ok"), files={"frozen.txt": "svc-a\nsvc-b\n"})
+    assert ok.returncode == 0, ok.stderr
+    removed = _verbs(calls, "remove-iam-policy-binding")
+    assert [c.split()[4] for c in removed] == ["svc-a", "svc-b"], removed
+    assert "outside: 403" in ok.stdout and "freeze: waited" in ok.stdout and any(c.startswith("sleep 310") for c in calls), "proved from outside (403), then the wait of the request timeout + 10 s"
+    assert max(i for i, c in enumerate(calls) if "remove-iam-policy-binding" in c) < next(i for i, c in enumerate(calls) if c.startswith("curl")) < next(i for i, c in enumerate(calls) if c.startswith("sleep")), "freeze, prove, wait"
+    assert not _verbs(calls, "add-iam-policy-binding"), "a freeze never opens anything"
+    assert (_w(tmp_path / "ok") / WP).read_text().split() == ["svc-a", "svc-b"], "what the freeze really took the binding off is written down: the way back opens exactly that"
+    # the freeze is not proved (the outside still answers 200): no wait, no T0
+    p, calls2 = _run(block, _fresh(tmp_path, "open"), extra={"CURL_CODE": "200"}, files={"frozen.txt": "svc-a\n"})
+    assert "outside: 200" in p.stdout and "freeze: frozen" in p.stdout and not any(c.startswith("sleep") for c in calls2), "a freeze that is not proved does not wait and does not start the clock"
+    # no WINDOW: the record of this window would have no name - nothing runs
+    p, calls_w = _run(block, _fresh(tmp_path, "nowindow"), extra={"WINDOW": ""}, files={"frozen.txt": "svc-a\n"})
+    assert not _verbs(calls_w, "remove-iam-policy-binding") and "freeze: no" in p.stdout
+    # FROZEN not set / empty list: no line runs
+    p, calls3 = _run(block, _fresh(tmp_path, "none"), extra={"FROZEN": ""}, files={"frozen.txt": "svc-a\n"})
+    assert not _verbs(calls3, "remove-iam-policy-binding") and "freeze: no" in p.stdout
+    p, calls4 = _run(block, _fresh(tmp_path, "empty"), files={"frozen.txt": ""})
+    assert not _verbs(calls4, "remove-iam-policy-binding") and "freeze: no" in p.stdout and not any(c.startswith("sleep") for c in calls4)
+
+
+def test_a_failed_removal_stops_the_loop_at_once_and_no_later_service_is_touched(tmp_path: Path) -> None:
+    block = _block_with(FREEZE)
+    p, calls = _run(block, tmp_path, extra={"FAIL": "remove-iam-policy-binding svc-b"}, files={"frozen.txt": "svc-a\nsvc-b\nsvc-c\n"})
+    touched = [c.split()[4] for c in _verbs(calls, "remove-iam-policy-binding")]
+    assert touched == ["svc-a", "svc-b"], touched
+    assert "freeze: failed" in p.stdout and not any(c.startswith(("sleep", "curl")) for c in calls), "no proof, no wait, no clock after a failure"
+
+
+def test_a_service_that_is_already_frozen_is_skipped_so_the_block_can_be_run_again(tmp_path: Path) -> None:
+    p, calls = _run(_block_with(FREEZE), tmp_path, extra={"NOBIND": "svc-a"}, files={"frozen.txt": "svc-a\nsvc-b\n"})
+    assert [c.split()[4] for c in _verbs(calls, "remove-iam-policy-binding")] == ["svc-b"], "removing a binding that is not there is an error in gcloud: the block asks first"
+    assert "freeze: waited" in p.stdout
+    assert (_w(tmp_path) / WP).read_text().split() == ["svc-b"], "svc-a was private before the move: it is not in the file the way back opens"
+
+
+def test_a_policy_that_cannot_be_read_is_a_stop_and_never_taken_for_already_frozen(tmp_path: Path) -> None:
+    block = _block_with(FREEZE)
+    p, calls = _run(block, _fresh(tmp_path, "readfail"), extra={"FAIL": "get-iam-policy svc-b"}, files={"frozen.txt": "svc-a\nsvc-b\nsvc-c\n"})
+    assert "freeze: failed" in p.stdout and [c.split()[4] for c in _verbs(calls, "remove-iam-policy-binding")] == ["svc-a"] and not any(c.startswith(("sleep", "curl")) for c in calls)
+    p, calls = _run(block, _fresh(tmp_path, "garbage"), extra={"GARBAGE": "svc-b"}, files={"frozen.txt": "svc-a\nsvc-b\nsvc-c\n"})
+    assert "freeze: failed" in p.stdout and [c.split()[4] for c in _verbs(calls, "remove-iam-policy-binding")] == ["svc-a"], "a policy that is not JSON stops the block"
+    assert not [c for c in calls if "svc-c" in c], "nothing after the unreadable one is touched"
+
+
+def test_a_running_execution_of_any_job_stops_the_sheet(tmp_path: Path) -> None:
+    block = _block_with(JOBS)
+    p, calls = _run(block, _fresh(tmp_path, "quiet"), files={"jobs.txt": "job-a\njob-b\n"})
+    assert "jobs: quiet" in p.stdout and len(_verbs(calls, "executions list")) == 2
+    p, _ = _run(block, _fresh(tmp_path, "busy"), extra={"BUSY": "job-b"}, files={"jobs.txt": "job-a\njob-b\n"})
+    assert "job-b running executions: 1" in p.stdout and "jobs: busy" in p.stdout and "jobs: quiet" not in p.stdout
+    p, _ = _run(block, _fresh(tmp_path, "failed"), extra={"FAIL": "executions list --job job-a"}, files={"jobs.txt": "job-a\njob-b\n"})
+    assert "jobs: failed" in p.stdout and "job-b running" not in p.stdout, "a question that could not be asked is not an answer"
+    p, calls = _run(block, _fresh(tmp_path, "nofile"))
+    assert "jobs: no" in p.stdout and not calls
+
+
+def test_the_unfreeze_opens_only_what_reopen_txt_names_proves_the_vm_and_resumes_the_scheduler_last(tmp_path: Path) -> None:
+    block = _block_with(UNFREEZE)
+    files = {"reopen.txt": "sprintable-mcp-prod\n", "paused.txt": "job-1\njob-2\n", WP: PUBLIC, "frozen.txt": "sprintable-backend-prod\nsprintable-frontend-prod\nsprintable-mcp-prod\n"}
+    p, calls = _run(block, _fresh(tmp_path, "ok"), files=files)
+    assert [c.split()[4] for c in _verbs(calls, "add-iam-policy-binding")] == ["sprintable-mcp-prod"], "the Cloud Run backend and frontend stay closed (two databases otherwise)"
+    assert [c.split()[4] for c in _verbs(calls, "scheduler jobs resume")] == ["job-1", "job-2"]
+    assert "the VM: 200 · Cloud Run backend: 403" in p.stdout and "unfreeze: resumed" in p.stdout
+    assert any("api.sprintable.ai/openapi.json" in c for c in calls), "the measurement is the VM's front"
+    assert max(i for i, c in enumerate(calls) if "curl" in c) < min(i for i, c in enumerate(calls) if "scheduler jobs resume" in c), "measured first, resumed after"
+    # the measurement is a gate: the VM does not answer 200 / Cloud Run is not closed
+    for name, extra in (("vm500", {"VM_CODE": "500"}), ("cr200", {"CURL_CODE": "200"})):
+        p, calls = _run(block, _fresh(tmp_path, name), files=files, extra=extra)
+        assert "unfreeze: reopened" in p.stdout and not _verbs(calls, "scheduler jobs resume"), (name, p.stdout)
+    # empty list, a service that was not public before, a failure
+    p, calls = _run(block, _fresh(tmp_path, "empty"), files={**files, "reopen.txt": ""})
+    assert not _verbs(calls, "iam-policy-binding") and not _verbs(calls, "scheduler jobs resume") and "unfreeze: no" in p.stdout and "the VM:" not in p.stdout, "an empty list is a stop, not a pass"
+    nofile = {k: v for k, v in files.items() if k != WP}
+    p, calls = _run(block, _fresh(tmp_path, "nofile"), files=nofile)
+    assert "unfreeze: no" in p.stdout and not _verbs(calls, "iam-policy-binding") and not _verbs(calls, "scheduler jobs resume"), "a window without a record opens nothing"
+    p, calls = _run(block, _fresh(tmp_path, "stale"), files={**files, "was-public-20250101.txt": "sprintable-mcp-prod\n", WP: "svc-a\n"})
+    assert "was not public before the freeze: sprintable-mcp-prod" in p.stdout and not _verbs(calls, "add-iam-policy-binding"), "the record of another window is not this window's"
+    p, calls = _run(block, _fresh(tmp_path, "private"), files={**files, "reopen.txt": "was-private\n"})
+    assert "was not public before the freeze: was-private" in p.stdout and not _verbs(calls, "add-iam-policy-binding") and "unfreeze: failed" in p.stdout
+    p, calls = _run(block, _fresh(tmp_path, "fail"), extra={"FAIL": "add-iam-policy-binding svc-a"}, files={**files, "reopen.txt": "svc-a\nsvc-b\n"})
+    assert [c.split()[4] for c in _verbs(calls, "add-iam-policy-binding")] == ["svc-a"] and not _verbs(calls, "scheduler jobs resume") and "unfreeze: failed" in p.stdout
+
+
+@pytest.mark.skipif(shutil.which("zsh") is None, reason="no zsh on this machine")
+def test_the_ladders_run_the_same_under_zsh_and_bash(tmp_path: Path) -> None:
+    for shell in ("zsh", "bash"):
+        p, calls = _run(_block_with(FREEZE), _fresh(tmp_path, f"f-{shell}"), shell=shell, files={"frozen.txt": "svc-a\nsvc-b\n"})
+        assert p.returncode == 0 and "freeze: waited" in p.stdout and len(_verbs(calls, "remove-iam-policy-binding")) == 2, (shell, p.stderr)
+        p, calls = _run(_block_with(UNFREEZE), _fresh(tmp_path, f"u-{shell}"), shell=shell, files={"reopen.txt": "svc-a\n", "paused.txt": "job-1\n", WP: "svc-a\n"})
+        assert p.returncode == 0 and "unfreeze: resumed" in p.stdout, (shell, p.stderr)
+        p, calls = _run(_block_with(JOBS), _fresh(tmp_path, f"j-{shell}"), shell=shell, files={"jobs.txt": "job-a\n"})
+        assert "jobs: quiet" in p.stdout, (shell, p.stderr)
+
+
+def test_the_scheduler_targets_move_by_host_and_come_back_from_the_file_the_move_wrote(tmp_path: Path) -> None:
+    move = _block_with(SCH_MOVE)
+    back = _block_with(SCH_BACK)
+    old = "https://sprintable-backend-prod-787818285179.asia-northeast3.run.app/api/v2/internal/cron/a2a"
+    before = f"job-1 {old}\njob-2 https://api.sprintable.ai/api/v2/internal/cron/x\njob-3 https://elsewhere.example/hook\njob-5 https://some-other-service-abc123-du.a.run.app/api/hook\njob-6 https://sprintable-backend-dev-787818285179.asia-northeast3.run.app/x\n"
+    root = _fresh(tmp_path, "m")
+    p, calls = _run(move, root, files={"scheduler-before.tsv": before})
+    updates = _verbs(calls, "scheduler jobs update http")
+    assert len(updates) == 1 and "job-1" in updates[0] and '--uri https://api.sprintable.ai/api/v2/internal/cron/a2a' in updates[0], updates
+    assert "left alone: job-2" in p.stdout and "left alone: job-3" in p.stdout and "scheduler: moved" in p.stdout
+    assert "left alone: job-5" in p.stdout and "left alone: job-6" in p.stdout, "another Cloud Run service (or the dev backend) is not rewritten to the prod API: only the prod backend's own address is moved"
+    assert len(updates) == 1
+    assert (_w(root) / "scheduler-moved.tsv").read_text().strip() == f"job-1 {old}", "the undo records the old target"
+    p, calls = _run(back, root, files={})
+    assert [c for c in _verbs(calls, "scheduler jobs update http")][0].endswith(f"--uri {old}") and "scheduler: back" in p.stdout
+    p, calls = _run(move, _fresh(tmp_path, "bad"), extra={"FAIL": "update http job-1"}, files={"scheduler-before.tsv": before + f"job-4 {old}\n"})
+    assert "scheduler: failed" in p.stdout and not _verbs(calls, "job-4"), "the first failure stops the loop"
+    p, calls = _run(move, _fresh(tmp_path, "nofile"))
+    assert "scheduler: no" in p.stdout and not calls
+
+
+def test_the_final_restore_keeps_its_counts_and_the_way_back_reads_them() -> None:
+    step6 = _block_with("counts-vm-final.tsv")
+    assert 'restore.sh "$FINAL_DUMP" > counts-vm-final.tsv' in step6 and '"$FINAL_COUNTS"' in step6 and 'echo "row counts equal"' in step6
+    way = _section("## 12. The way back", "Two chains")
+    assert "rowcounts.sh | diff <(grep -P" in way and "counts-vm-final.tsv" in way and "counts-final.tsv" not in SHEET.replace("counts-vm-final.tsv", "")
+    # the same file name and the same line shape as the dev gateway sheet
+    dev = (_ROOT / "deploy/vm/CUTOVER-gateway-dev.md").read_text()
+    assert 'grep -P "^\\S+\\t\\d+$"' in dev and 'grep -P "^\\S+\\t\\d+$"' in SHEET
+
+
+def test_the_way_back_on_the_vm_stops_where_it_fails_and_the_one_on_the_machine_stops_at_the_first_failure(tmp_path: Path) -> None:
+    vm = _block_with("sudo docker ps -a --format '{{.Names}}' | grep -qx sprintable-backend-1 && BACK=seen")
+    assert "front-door.sh status" not in vm, "after step 6 the temporary front door is stopped and `status` exits 1: the chain must not ask it"
+    fake = tmp_path / "vmbin"
+    fake.mkdir()
+    f = fake / "sudo"
+    f.write_text('#!/bin/sh\necho "sudo $*" >> "$CALLS"\n[ -n "$FAILSUDO" ] && case "$*" in *"$FAILSUDO"*) exit 1 ;; esac\ncase "$*" in *"docker ps"*) [ -n "$NOSTACK" ] || echo sprintable-backend-1 ;; esac\nexit 0\n')
+    f.chmod(f.stat().st_mode | stat.S_IEXEC)
+
+    def run_vm(name: str, fail: str = "") -> list[str]:
+        root = _fresh(tmp_path, name)
+        env = _world(root)
+        env["PATH"] = f"{fake}:{env['PATH']}"
+        env["FAILSUDO"] = fail
+        subprocess.run(["bash", "-c", vm], capture_output=True, text=True, timeout=60, env=env, cwd=root)
+        return Path(env["CALLS"]).read_text().splitlines()
+
+    calls = run_vm("ok")
+    assert "passthrough" in calls[-1] and len([c for c in calls if c.startswith("sudo")]) == 5, "all lines ran, the pass-through last"
+    for fail, must_not in (("systemctl disable", "docker stop"), ("docker stop", "passthrough")):
+        assert not [c for c in run_vm(fail.replace(" ", "_"), fail) if must_not in c], fail
+    nostack_root = _fresh(tmp_path, "nostack")
+    env = _world(nostack_root)
+    env.update({"PATH": f"{fake}:{env['PATH']}", "NOSTACK": "1", "FAILSUDO": ""})
+    subprocess.run(["bash", "-c", vm], capture_output=True, text=True, timeout=60, env=env, cwd=nostack_root)
+    assert not [c for c in Path(env["CALLS"]).read_text().splitlines() if "systemctl" in c or "passthrough" in c], "no stack on this machine: nothing is stopped and no pass-through is started"
+    machine = _block_with('BACK=no\n[ "$VMBACK" = passing ]')
+    p, calls = _run(machine, _fresh(tmp_path, "m"), files={"frozen.txt": "svc-x\nsvc-y\nsvc-a\nsvc-b\n", WP: "svc-a\nsvc-b\n", "paused.txt": "job-1\n"}, extra={"CURL_CODE": "200"})
+    assert [c.split()[4] for c in _verbs(calls, "add-iam-policy-binding")] == ["svc-a", "svc-b"], "only what the freeze took the binding off (the record of this window), not every service in frozen.txt"
+    assert _verbs(calls, "scheduler jobs resume") and "Cloud Run backend: 200" in p.stdout and "way back: done" in p.stdout
+    # a failing binding stops the loop; nothing is resumed
+    p, calls = _run(machine, _fresh(tmp_path, "f"), files={WP: "svc-a\nsvc-b\nsvc-c\n", "paused.txt": "job-1\n"}, extra={"FAIL": "add-iam-policy-binding svc-b"})
+    assert [c.split()[4] for c in _verbs(calls, "add-iam-policy-binding")] == ["svc-a", "svc-b"], "svc-c is not touched after the failure of svc-b"
+    assert not _verbs(calls, "scheduler jobs resume") and "way back: failed" in p.stdout
+    # missing, empty or unnamed record, or the VM chain did not end at passing: nothing is opened, nothing resumed, nothing claimed done
+    for name, files, extra in (("nofile", {"paused.txt": "job-1\n"}, {}), ("empty", {WP: "", "paused.txt": "job-1\n"}, {}), ("nowindow", {WP: "svc-a\n", "paused.txt": "job-1\n"}, {"WINDOW": ""}),
+                               ("vmnot", {WP: "svc-a\n", "paused.txt": "job-1\n"}, {"VMBACK": ""})):
+        p, calls = _run(machine, _fresh(tmp_path, name), files=files, extra=extra)
+        assert "way back: no" in p.stdout and not _verbs(calls, "iam-policy-binding") and not _verbs(calls, "scheduler jobs resume") and "way back: done" not in p.stdout, name
+    # Cloud Run must answer 200 before the schedulers are resumed
+    p, calls = _run(machine, _fresh(tmp_path, "cr403"), files={WP: "svc-a\n", "paused.txt": "job-1\n"}, extra={"CURL_CODE": "403"})
+    assert "way back: reopened" in p.stdout and not _verbs(calls, "scheduler jobs resume"), "an unproven reopening resumes nothing"
+
+
+def test_step_eight_says_cloud_run_backend_and_frontend_stay_closed_and_why() -> None:
+    eight = _section("## 8. Unfreeze", "## 9. The lap")
+    for token in ("**Cloud Run's backend and frontend stay closed**", "they are the way back", "two databases, split writes", "What is put back is `reopen.txt`", "The measurement is a gate", "`unfreeze: resumed` is the pass", "An empty `reopen.txt`, or a window without a `was-public` file, is a stop, not a pass", "is never opened by this block"):
+        assert token in eight, token
+    assert "The hosted MCP" not in eight or "once its `SPRINTABLE_API_URL`" in eight
+    five = _section("## 5. Freeze", "## 6–7.")
+    for token in ("**The ladder.**", "`freeze: waited` is the pass", "**Cloud Run jobs are writers too.**", "`jobs: quiet` is the pass", "removing a binding that is not there is an error in gcloud", "a policy that cannot be **read** is a stop", "`was-public-${WINDOW}.txt`", "`WINDOW` to the date of this night"):
+        assert token in five, token
+
+
+def test_the_gates_and_the_checks_that_need_a_person_say_who_writes_what() -> None:
+    g = _section("## G. Gates", "## 0. Read-only")
+    for token in ("**G1. The repository side of RUNBOOK §12 is done**", "the image cleanup checker fix (its three limits)", "**G3. Nothing can deploy to prod from the start of the window until P3 is merged**", "nothing merges to `main`",
+                  "`gcloud builds list --project $PROJECT --ongoing --limit 200", "**G5. Every decision in this sheet is written down**", "the **prod pipeline changes P1 and P2 below**"):
+        assert token in g, token
+    zero = _section("## 0. Read-only", "## 1. Rehearsal")
+    for token in ("**Everything in the project that depends on prod — read the list, do not assume it.**", "**«I do not know» is a stop**", "this sheet deletes nothing of Cloud Run prod", "a **finding to stop on**",
+                  "RESEND_API_KEY", "`/api/v2/webhooks/toss`", "`000` is no route"):
+        assert token in zero, token
+
+
+def test_the_pipeline_section_names_three_changes_in_an_order_and_the_repository_premises_hold_today() -> None:
+    section = _section("## The prod pipeline: three changes", "## 0. Read-only")
+    for token in ("**P1 — before step 4: the one address switch.**", "**P2 — before G2: the prod VM bundle build.**", "**P3 — merged right after step 8, before anything else merges to `main`:", "`cloud_run_app_skip=true`",
+                  "Until P3 is merged G3 holds;", "These are **not made by this sheet**"):
+        assert token in section, token
+    assert "| 8b |" in SHEET and "P3" in _section("## The order", "## G. Gates")
+    wf = (_ROOT / ".github/workflows/cloud-build.yml").read_text()
+    prod_branch = wf.split('if [[ "$REF_NAME" == "main" ]]; then')[1].split("\n          else\n", 1)[0]
+    assert 'echo "fastapi_url=https://sprintable-backend-prod-787818285179.asia-northeast3.run.app"' in prod_branch, "P1's premise: the prod branch still names the Cloud Run address"
+    assert "cloud_run_app_skip" not in prod_branch, "P3's premise: the prod branch does not skip Cloud Run yet"
+    assert "if: success() && steps.env.outputs.target == 'dev'" in wf and "Submit the dev VM bundle build" in wf, "P2's premise: the VM bundle build is submitted for dev only"
+    cb = (_ROOT / "cloudbuild.yaml").read_text()
+    assert cb.count('"${_CLOUD_RUN_APP_SKIP}" = "true"') >= 6, "the switch P3 turns on exists and covers the frontend build, the migration job and both deploy steps"
+    assert "--allow-unauthenticated" in cb, "the premise of G3: a prod build would deploy the backend publicly"
+
+
+def test_every_ladder_refuses_to_run_outside_the_folder_of_the_window(tmp_path: Path) -> None:
+    """a later window starts in a folder of its own: the lists of an earlier one (frozen, reopen, paused, scheduler targets, jobs) are not there to be picked up"""
+    cases = (
+        (_block_with(FREEZE), {"frozen.txt": "svc-a\n"}, "remove-iam-policy-binding", "freeze: no"),
+        (_block_with(UNFREEZE), {"reopen.txt": "svc-a\n", WP: "svc-a\n", "paused.txt": "job-1\n"}, "iam-policy-binding", "unfreeze: no"),
+        (_block_with(JOBS), {"jobs.txt": "job-a\n"}, "executions list", "jobs: no"),
+        (_block_with(SCH_MOVE), {"scheduler-before.tsv": "job-1 https://sprintable-backend-prod-787818285179.asia-northeast3.run.app/x\n"}, "scheduler jobs update", "scheduler: no"),
+        (_block_with(SCH_BACK), {"scheduler-moved.tsv": "job-1 https://x/y\n"}, "scheduler jobs update", "scheduler: no"),
+        (_block_with('BACK=no\n[ "$VMBACK" = passing ]'), {WP: "svc-a\n", "paused.txt": "job-1\n"}, "iam-policy-binding", "way back: no"),
+    )
+    for i, (block, files, verb, said) in enumerate(cases):
+        # the right folder: it runs (the proof that the files are good); the wrong one (the parent, or another window's folder): nothing
+        ok, calls_ok = _run(block, _fresh(tmp_path, f"in{i}"), files=files)
+        assert any(verb in c for c in calls_ok), (i, ok.stdout[:200])
+        root = _fresh(tmp_path, f"out{i}")
+        for name, text in files.items():
+            (root / name).write_text(text)
+        p, calls = _run(block, root, where="parent")
+        assert not any(verb in c for c in calls) and said in p.stdout, (i, p.stdout[:200])
+        other = _fresh(tmp_path, f"other{i}")
+        (other / "window-20250101").mkdir()
+        for name, text in files.items():
+            (other / "window-20250101" / name).write_text(text)
+        env = _world(other)
+        q = subprocess.run(["bash", "-c", block], capture_output=True, text=True, timeout=60, env=env, cwd=other / "window-20250101")
+        assert not any(verb in c for c in Path(env["CALLS"]).read_text().splitlines()) and said in q.stdout, (i, "another window's folder")
+
+
+def test_the_first_block_makes_and_enters_the_folder_and_the_sheet_says_to_do_it_in_every_shell() -> None:
+    zero = _section("## 0. Read-only", "## 1. Rehearsal")
+    assert "**One folder per window.**" in zero and "in **every new shell**, on the product owner's machine and on the VM" in zero
+    block = _block_with('mkdir -p "window-${WINDOW}"')
+    assert block.strip() == '[ -n "$WINDOW" ] && mkdir -p "window-${WINDOW}" && cd "window-${WINDOW}" && pwd'
+
+
+def test_g3_switches_the_workflow_off_and_looks_for_queued_runs_of_main_not_only_for_builds() -> None:
+    g3 = next(line for line in SHEET.splitlines() if line.startswith("| **G3."))
+    for token in ("`gh workflow disable cloud-build.yml`", "select(.status != \"completed\" and .workflowName == \"Cloud Build (GCP)\")", "prints no line of the branch `main`", "a queued run submits its Cloud Build later; the workflow does not cancel it",
+                  "`gh run cancel $RUN_ID`", "`gcloud builds list --project $PROJECT --ongoing --limit 200"):
+        assert token in g3, token
+    name = next(line for line in (_ROOT / ".github/workflows/cloud-build.yml").read_text().splitlines() if line.startswith("name:"))[len("name:"):].strip()
+    assert f'.workflowName == \\"{name}\\"' in g3 or f'.workflowName == "{name}"' in g3.replace('\\"', '"'), "the name the filter uses is the workflow's name"
+    assert "cancel-in-progress: false" in (_ROOT / ".github/workflows/cloud-build.yml").read_text(), "the premise: a queued run is not cancelled by a newer one"
+    assert "`gh workflow enable cloud-build.yml`) just before P3 is merged" in SHEET
