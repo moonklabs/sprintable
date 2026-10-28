@@ -30,7 +30,6 @@ VM_STEPS = ("resolve-backend", "build-frontend-vm", "bundle-vm")
 SHA = "0123456789abcdef0123456789abcdef01234567"
 BACKEND_DIGEST = "sha256:" + "b" * 64
 FRONTEND_DIGEST = "sha256:" + "f" * 64
-GATEWAY_DIGEST = "sha256:" + "9" * 64
 NOT_PASSED = "__not-passed__"
 # cloudbuild-vm.yaml substitution → (the env name the workflow's main substitutions step uses, the env name of the VM submission step, the Dockerfile build argument)
 BUILD_VALUES = {
@@ -192,7 +191,6 @@ exit 0
 _FAKE_GCLOUD = r"""#!/bin/sh
 echo "gcloud $*" >> "$FAKE_LOG"
 case "$*" in
-  "artifacts docker images describe"*support-gateway*) echo "$FAKE_GATEWAY_DIGEST" ;;
   "artifacts docker images describe"*) echo "$FAKE_BACKEND_DIGEST" ;;
   "storage cp "*) : ;;
   *) echo "unexpected gcloud call: $*" >&2; exit 9 ;;
@@ -224,7 +222,7 @@ def box(tmp_path: Path):
         vals = {**base, **{k: v for k, v in over.items() if k in base}}
         env = {"PATH": f"{bin_dir}:{Path(sys.executable).parent}:/usr/bin:/bin:/usr/local/bin", "HOME": os.environ["HOME"], "FAKE_LOG": str(log),
                "FAKE_FRONTEND_REF": over.get("FAKE_FRONTEND_REF", f"{_REPO}/frontend-vm@{FRONTEND_DIGEST}"),
-               "FAKE_BACKEND_DIGEST": over.get("FAKE_BACKEND_DIGEST", BACKEND_DIGEST), "FAKE_GATEWAY_DIGEST": over.get("FAKE_GATEWAY_DIGEST", GATEWAY_DIGEST)}
+               "FAKE_BACKEND_DIGEST": over.get("FAKE_BACKEND_DIGEST", BACKEND_DIGEST)}
         for e in _STEPS[step].get("env", []):
             k, v = _substitute(e, vals).split("=", 1)
             env[k] = v
@@ -258,16 +256,7 @@ def test_the_backend_digest_is_resolved_from_the_registry_before_anything_long(b
     assert p.returncode == 0, p.stderr
     assert f"gcloud artifacts docker images describe {box.repo}/backend:{SHA}" in calls
     assert (box.work / "vm-out/backend-image.txt").read_text() == f"{box.repo}/backend@{BACKEND_DIGEST}\n"
-    assert f"gcloud artifacts docker images describe {box.repo}/support-gateway:{SHA}" in calls
-    assert (box.work / "vm-out/support-gateway-image.txt").read_text() == f"{box.repo}/support-gateway@{GATEWAY_DIGEST}\n", "the gateway image of the same sha, by digest, from its own repository entry"
     assert _docker_calls(calls) == []
-
-
-@pytest.mark.parametrize("digest", ["", "garbage", "sha256:abc", "sha256:" + "G" * 64, "sha256:" + "9" * 63])
-def test_a_gateway_digest_that_is_not_one_stops_the_resolve_step(box, digest: str) -> None:
-    p, _ = box("resolve-backend", FAKE_GATEWAY_DIGEST=digest)
-    assert p.returncode != 0 and "no digest for" in p.stderr and "support-gateway" in p.stderr
-    assert not (box.work / "vm-out/support-gateway-image.txt").exists()
 
 
 @pytest.mark.parametrize("digest", ["", "latest", "sha256:abc", "sha256:" + "B" * 64])
@@ -359,11 +348,10 @@ def test_the_bundle_step_uploads_the_bundle_then_the_candidate_and_never_desired
     cand = json.loads((out / "desired.json").read_text())
     assert cand["backend_image"] == f"{box.repo}/backend@{BACKEND_DIGEST}" and cand["frontend_image"] == f"{box.repo}/frontend-vm@{FRONTEND_DIGEST}"
     assert cand["sha"] == SHA and cand["bundle"] == f"bundles/{SHA}.tgz"
-    assert cand["support_gateway_image"] == f"{box.repo}/support-gateway@{GATEWAY_DIGEST}", "the candidate names the gateway image of this sha"
 
 
-@pytest.mark.parametrize("missing", ["frontend-image.txt", "backend-image.txt", "support-gateway-image.txt"])
-def test_the_bundle_step_uploads_nothing_unless_all_three_images_were_recorded(box, missing: str) -> None:
+@pytest.mark.parametrize("missing", ["frontend-image.txt", "backend-image.txt"])
+def test_the_bundle_step_uploads_nothing_unless_both_images_were_recorded(box, missing: str) -> None:
     _resolve_and_build(box)
     (box.work / "vm-out" / missing).unlink()
     p, calls = box("bundle-vm")

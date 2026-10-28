@@ -21,7 +21,9 @@ COMPOSE = yaml.safe_load((_VM / "compose.yml").read_text())
 
 def test_only_the_front_door_publishes_ports() -> None:
     published = {name: svc["ports"] for name, svc in COMPOSE["services"].items() if "ports" in svc}
-    assert list(published) == ["caddy"] and published["caddy"] == ["80:80", "443:443"]
+    assert sorted(published) == ["caddy", "gateway-db"] and published["caddy"] == ["80:80", "443:443"]
+    # the one other server that listens is the support gateway's OWN small database, on the VM's private address only — and its bind can fall back to the loopback address, never to «all interfaces»
+    assert published["gateway-db"] == ["${GATEWAY_DB_BIND:-127.0.0.1}:5432:5432"]
     for name in ("db", "backend", "frontend", "migrate"):
         assert "ports" not in COMPOSE["services"][name], f"{name} must not be reachable from outside the compose network"
 
@@ -241,6 +243,7 @@ case "$1" in
   ps)
     case "$*" in
       *service=backend*) [ -z "${FAKE_BACKEND_RUNNING:-}" ] || echo bbb111 ;;
+      *service=gateway-db*) [ -n "${FAKE_NO_GATEWAY:-}" ] || echo gwc999 ;;
       *) echo abc123 ;;
     esac ;;
   exec)
@@ -249,10 +252,12 @@ case "$1" in
       *pg_dump*) head -c "${FAKE_DUMP_BYTES:-5000}" /dev/zero ;;
       *"pg_restore --list"*) cat > /dev/null; [ -n "${FAKE_LIST_NODATA:-}" ] || echo "; 1; 1259 16385 TABLE DATA public t u"; exit "${FAKE_LIST_RC:-0}" ;;
       *"-A -t -F"*) cat > /dev/null; printf 'a\t3\nb\t4\n'; [ -z "${FAKE_COUNTS_JUNK:-}" ] || printf 'NOTICE: something\n\n' ;;
-      *pg_restore*) cat > /dev/null ;;
+      *pg_restore*) cat > /dev/null; exit "${FAKE_RESTORE_RC:-0}" ;;
+      *GATEWAY_APP_USER*) printf '%s' "${FAKE_APP_ROLE-support_gw}" ;;
       *POSTGRES_USER*) printf sprintable ;;
       *POSTGRES_DB*) printf '%s' "${FAKE_DB_NAME-sprintable}" ;;
       *"information_schema.tables where"*) echo "${FAKE_EXISTING:-0}" ;;
+      *pg_stat_activity*) echo "${FAKE_SESSIONS:-0}" ;;
       *) cat > /dev/null ;;
     esac ;;
 esac
@@ -262,7 +267,7 @@ _FAKE_DATE = '#!/bin/sh\ncase "$*" in *+%Y%m%d%H%M%S) echo 20260101000000 ;; *) 
 _FAKE_GCLOUD = (
     '#!/bin/sh\necho "gcloud $*" >> "$FAKE_LOG"\n'
     # `storage cp <src>... <dest>`: copy from FAKE_GCS_DIR when it is set (a gs:// source), otherwise only log
-    'if [ "$2" = ls ]; then echo "${FAKE_LS:-}"; exit 0; fi\n'
+    'if [ "$2" = ls ]; then case "$3" in *db-gateway*) echo "${FAKE_LS_GATEWAY:-${FAKE_LS:-}}" ;; *) echo "${FAKE_LS:-}" ;; esac; exit 0; fi\n'
     'if [ -n "${FAKE_GCS_DIR:-}" ] && [ "$2" = cp ]; then\n'
     '  for a in "$@"; do last="$a"; done\n'
     '  for a in "$@"; do case "$a" in gs://*) cp "$FAKE_GCS_DIR/$(basename "$a")" "$last/" 2>/dev/null || exit 1 ;; esac; done\n'
@@ -510,7 +515,8 @@ def test_an_environment_that_trusts_forwarded_for_has_caddy_as_the_only_service_
     trusts = any(str((svc.get("added") or {}).get("TRUST_FORWARDED_FOR", "")).lower() == "true" for svc in decl["services"].values())
     assert trusts, f"{env} is expected to turn the switch on"
     with_ports = sorted(name for name, svc in COMPOSE["services"].items() if svc.get("ports"))
-    assert with_ports == ["caddy"], f"the switch is on but {with_ports} publish ports"
+    assert with_ports == ["caddy", "gateway-db"], f"the switch is on but {with_ports} publish ports (only the front door and the gateway's own database may; the backend and the frontend never)"
+    assert not {"backend", "frontend", "db", "migrate"} & set(with_ports)
     assert "trusted_proxies" not in (_VM / "Caddyfile").read_text()
 
 
@@ -607,3 +613,253 @@ def test_every_front_door_command_in_the_runbook_uses_the_installed_path() -> No
     for prefix, _ in calls:
         assert prefix == "/opt/sprintable/bin/", prefix
 
+
+
+# ───────────────────────── the support gateway's own database: backup, restore, restore-check (story 4796) ─────────────────────────
+
+def _exec_targets(log: str) -> list[tuple[str, str]]:
+    """(container id, what ran) for every `docker exec`"""
+    out = []
+    for line in log.splitlines():
+        parts = line.split()
+        if parts[:2] == ["docker", "exec"]:
+            out.append((next(p for p in parts[2:] if not p.startswith("-")), line))
+    return out
+
+
+def test_backup_dumps_the_gateway_database_too_where_the_vm_carries_one(fakebin, tmp_path: Path) -> None:
+    (tmp_path / "data" / "gateway-postgres").mkdir(parents=True)
+    p, log = fakebin("backup.sh", DATA_DIR=str(tmp_path / "data"))
+    assert p.returncode == 0, p.stderr
+    ups = [l for l in log.splitlines() if l.startswith("gcloud storage cp")]
+    assert len(ups) == 2 and all(u.endswith("gs://bk-bucket/db/") for u in ups)
+    assert "/db-dev-" in ups[0] and "/db-gateway-dev-" in ups[1], "the application's first, the gateway's second, one bucket folder (one lifecycle rule)"
+    dumps = [c for c, line in _exec_targets(log) if "pg_dump" in line]
+    assert dumps == ["abc123", "gwc999"], "each dump runs in its own server's container"
+    assert list((tmp_path / "backups").glob("db-dev-*.dump")) and list((tmp_path / "backups").glob("db-gateway-dev-*.dump"))
+
+
+def test_backup_without_a_gateway_database_is_what_it_was(fakebin, tmp_path: Path) -> None:
+    p, log = fakebin("backup.sh", DATA_DIR=str(tmp_path / "data"))
+    assert p.returncode == 0
+    assert len([l for l in log.splitlines() if l.startswith("gcloud storage cp")]) == 1 and "gwc999" not in log and "service=gateway-db" not in log and "db-gateway-" not in log
+
+
+def test_a_gateway_database_that_is_not_running_is_a_failed_backup_not_a_skipped_one(fakebin, tmp_path: Path) -> None:
+    (tmp_path / "data" / "gateway-postgres").mkdir(parents=True)
+    p, log = fakebin("backup.sh", DATA_DIR=str(tmp_path / "data"), FAKE_NO_GATEWAY="1")
+    assert p.returncode != 0 and "no running gateway-db container" in p.stderr
+
+
+def test_a_tiny_gateway_dump_is_refused_and_leaves_nothing_half_written(fakebin, tmp_path: Path) -> None:
+    (tmp_path / "data" / "gateway-postgres").mkdir(parents=True)
+    p, log = fakebin("backup.sh", DATA_DIR=str(tmp_path / "data"), FAKE_DUMP_BYTES="10")
+    assert p.returncode != 0 and "storage cp" not in log
+    assert not list((tmp_path / "backups").glob("*.partial"))
+
+
+def test_the_local_copies_are_pruned_per_server(fakebin, tmp_path: Path) -> None:
+    (tmp_path / "data" / "gateway-postgres").mkdir(parents=True)
+    backups = tmp_path / "backups"
+    backups.mkdir()
+    for prefix in ("db-dev", "db-gateway-dev"):
+        for n in range(3):
+            f = backups / f"{prefix}-2025010{n}T000000Z.dump"
+            f.write_text("x")
+            (backups / (f.name + ".sha256")).write_text("x")
+            os.utime(f, (1_000_000 + n, 1_000_000 + n))
+    p, _ = fakebin("backup.sh", DATA_DIR=str(tmp_path / "data"))
+    assert p.returncode == 0, p.stderr
+    for prefix in ("db-dev", "db-gateway-dev"):
+        assert len(list(backups.glob(f"{prefix}-*.dump"))) == 2, f"{prefix}: the newest two stay — the other server's files do not count against it"
+
+
+def test_restore_of_the_gateway_database_does_not_wait_for_the_backend_to_stop(fakebin, tmp_path: Path) -> None:
+    dump = tmp_path / "x.dump"
+    dump.write_text("x")
+    p, log = fakebin("restore.sh", str(dump), DB_SERVICE="gateway-db", FAKE_BACKEND_RUNNING="1", FAKE_EXISTING="0")
+    assert p.returncode == 0, p.stderr
+    assert {c for c, _ in _exec_targets(log)} == {"gwc999"}, "every statement runs in the gateway's own server"
+    main, _ = fakebin("restore.sh", str(dump), FAKE_BACKEND_RUNNING="1", FAKE_EXISTING="0")
+    assert main.returncode != 0 and "backend is running" in main.stderr, "the application's database still demands a stopped backend"
+
+
+def test_the_server_choice_is_one_of_two_names(fakebin, tmp_path: Path) -> None:
+    dump = tmp_path / "x.dump"
+    dump.write_text("x")
+    p, log = fakebin("restore.sh", str(dump), DB_SERVICE="db; rm -rf /", FAKE_EXISTING="0")
+    assert p.returncode != 0 and "DB_SERVICE must be db or gateway-db" in p.stderr and "docker exec" not in log
+
+
+@pytest.mark.skipif(not (shutil.which("sha256sum") or shutil.which("shasum")), reason="no sha256 tool")
+def test_the_weekly_restore_check_proves_the_gateway_database_restores_too(fakebin, tmp_path: Path) -> None:
+    import hashlib
+    (tmp_path / "data" / "gateway-postgres").mkdir(parents=True)
+    gcs = tmp_path / "gcs"
+    gcs.mkdir()
+    for name in ("db-dev-9.dump", "db-gateway-dev-9.dump"):
+        (gcs / name).write_bytes(b"0" * 2000)
+        (gcs / (name + ".sha256")).write_text(f"{hashlib.sha256(b'0' * 2000).hexdigest()}  {name}\n")
+    env = dict(FAKE_GCS_DIR=str(gcs), FAKE_LS="gs://bk-bucket/db/db-dev-9.dump", FAKE_LS_GATEWAY="gs://bk-bucket/db/db-gateway-dev-9.dump")
+    p, log = fakebin("restore-check.sh", DATA_DIR=str(tmp_path / "data"), **env)
+    assert p.returncode == 0, p.stderr
+    lss = [l for l in log.splitlines() if l.startswith("gcloud storage ls")]
+    assert any("/db/db-dev-*.dump" in l for l in lss) and any("/db/db-gateway-dev-*.dump" in l for l in lss), lss
+    assert {c for c, _ in _exec_targets(log)} == {"abc123", "gwc999"}, "the application's server and the gateway's both took part"
+    assert p.stdout.count("restore_seconds=") == 2
+    alone, log2 = fakebin("restore-check.sh", DATA_DIR=str(tmp_path / "nothing"), **env)
+    fresh2 = log2[len(log):]  # the fake's log accumulates over the runs of one test
+    assert alone.returncode == 0 and alone.stdout.count("restore_seconds=") == 1 and "gwc999" not in fresh2 and "db-gateway" not in fresh2, "without a gateway database nothing changes"
+    explicit, log3 = fakebin("restore-check.sh", DATA_DIR=str(tmp_path / "data"), DB_SERVICE="gateway-db", **env)
+    assert explicit.returncode == 0 and explicit.stdout.count("restore_seconds=") == 1 and {c for c, _ in _exec_targets(log3[len(log2):])} == {"gwc999"}, "a chosen server is checked alone, no recursion"
+
+
+def test_what_is_restored_into_the_gateway_database_is_owned_by_its_application_role(fakebin, tmp_path: Path) -> None:
+    dump = tmp_path / "x.dump"
+    dump.write_text("x")
+    p, log = fakebin("restore.sh", str(dump), DB_SERVICE="gateway-db", FAKE_EXISTING="0")
+    assert p.returncode == 0, p.stderr
+    restore = next(l for l in log.splitlines() if "pg_restore -U" in l and "--list" not in l)
+    assert "--role support_gw" in restore and "--no-owner" in restore, restore
+    main, log2 = fakebin("restore.sh", str(dump), FAKE_EXISTING="0")
+    restore2 = next(l for l in log2[len(log):].splitlines() if "pg_restore -U" in l and "--list" not in l)
+    assert main.returncode == 0 and "--role" not in restore2, "the application's database restores as it always did"
+
+
+def test_a_wiped_gateway_database_comes_back_owned_by_the_role_and_closed_to_everyone_else(fakebin, tmp_path: Path) -> None:
+    dump = tmp_path / "x.dump"
+    dump.write_text("x")
+    p, log = fakebin("restore.sh", str(dump), DB_SERVICE="gateway-db", FAKE_EXISTING="7", RESTORE_WIPE="yes")
+    assert p.returncode == 0, p.stderr
+    assert "DROP DATABASE" not in log, "the gateway's database is never dropped: the old one is kept beside the new one"
+    wipe = next(l for l in log.splitlines() if "CREATE DATABASE" in l)
+    assert 'CREATE DATABASE "sprintable_restore_20260101000000" OWNER "support_gw"' in wipe and 'REVOKE ALL ON DATABASE "sprintable_restore_20260101000000" FROM PUBLIC' in wipe and 'REVOKE CONNECT ON DATABASE "sprintable_restore_20260101000000" FROM "support_gw"' in wipe, wipe
+    assert "GRANT" not in wipe, "the role is let in only after the restore"
+    restore = next(l for l in log.splitlines() if "pg_restore -U" in l and "--list" not in l)
+    assert "-d sprintable_restore_20260101000000" in restore, "the dump loads beside the old database"
+    swap = next(l for l in log.splitlines() if "RENAME TO" in l)
+    assert 'ALTER DATABASE "sprintable" RENAME TO "sprintable_before_restore_20260101000000"; ALTER DATABASE "sprintable_restore_20260101000000" RENAME TO "sprintable"' in swap, swap
+    assert "kept as sprintable_before_restore_20260101000000" in p.stdout
+    lines = log.splitlines()
+    assert 'GRANT CONNECT ON DATABASE "sprintable" TO "support_gw"' in lines[-3] + lines[-2] + lines[-1] or any('GRANT CONNECT ON DATABASE "sprintable" TO "support_gw"' in l for l in lines)
+    main, log2 = fakebin("restore.sh", str(dump), FAKE_EXISTING="7", RESTORE_WIPE="yes")
+    wipe2 = next(l for l in log2[len(log):].splitlines() if "DROP DATABASE" in l)
+    assert "OWNER" not in wipe2 and "REVOKE" not in wipe2, "the application's database is wiped as before"
+
+
+@pytest.mark.parametrize("bad", ['x"; drop', "UPPER", "a b"])
+def test_an_application_role_name_that_is_not_a_plain_identifier_is_refused_by_the_restore(fakebin, tmp_path: Path, bad: str) -> None:
+    dump = tmp_path / "x.dump"
+    dump.write_text("x")
+    # the fake answers the role query with the name under test
+    p, log = fakebin("restore.sh", str(dump), DB_SERVICE="gateway-db", FAKE_EXISTING="0", FAKE_APP_ROLE=bad)
+    assert p.returncode != 0 and "unexpected application role name" in p.stderr
+    assert not [l for l in log.splitlines() if "pg_restore -U" in l and "--list" not in l], "nothing was restored"
+
+
+def test_the_restore_check_of_the_gateway_database_restores_into_a_scratch_database_the_role_owns(fakebin, tmp_path: Path) -> None:
+    dump = tmp_path / "x.dump"
+    dump.write_text("x")
+    p, log = fakebin("restore-check.sh", str(dump), DB_SERVICE="gateway-db")
+    assert p.returncode == 0, p.stderr
+    create = next(l for l in log.splitlines() if "CREATE DATABASE restore_check_" in l)
+    assert " OWNER support_gw" in create
+    restore = next(l for l in log.splitlines() if "pg_restore -U" in l and "--list" not in l)
+    assert "--role support_gw" in restore
+
+
+def _lines(log: str) -> list[str]:
+    return log.splitlines()
+
+
+def _first(lines: list[str], needle: str, after: int = -1) -> int:
+    return next(i for i, l in enumerate(lines) if i > after and needle in l)
+
+
+def test_the_gateway_database_is_not_restored_while_sessions_are_open_on_it(fakebin, tmp_path: Path) -> None:
+    dump = tmp_path / "x.dump"
+    dump.write_text("x")
+    p, log = fakebin("restore.sh", str(dump), DB_SERVICE="gateway-db", FAKE_EXISTING="7", RESTORE_WIPE="yes", FAKE_SESSIONS="3")
+    assert p.returncode != 0 and "3 session(s) are open" in p.stderr
+    assert "DROP DATABASE" not in log and not [l for l in log.splitlines() if "pg_restore -U" in l and "--list" not in l], "nothing was dropped or restored"
+    lines = _lines(log)
+    revoke = _first(lines, 'REVOKE CONNECT ON DATABASE "sprintable" FROM "support_gw"')
+    count = _first(lines, "pg_stat_activity")
+    grant = _first(lines, 'GRANT CONNECT ON DATABASE "sprintable" TO "support_gw"')
+    assert revoke < count < grant, "the door is shut, the sessions counted, and — nothing having been changed — the door opened again"
+    assert "CLOSED" not in p.stderr
+    ok, log2 = fakebin("restore.sh", str(dump), DB_SERVICE="gateway-db", FAKE_EXISTING="7", RESTORE_WIPE="yes", FAKE_SESSIONS="0")
+    assert ok.returncode == 0, ok.stderr
+    query = next(l for l in log2.splitlines() if "pg_stat_activity" in l)
+    assert "datname = 'sprintable'" in query and "pid <> pg_backend_pid()" in query and "-d postgres" in query, query
+
+
+def test_the_door_of_the_gateway_database_is_shut_before_the_count_and_opened_only_after_the_restore(fakebin, tmp_path: Path) -> None:
+    dump = tmp_path / "x.dump"
+    dump.write_text("x")
+    p, log = fakebin("restore.sh", str(dump), DB_SERVICE="gateway-db", FAKE_EXISTING="7", RESTORE_WIPE="yes")
+    assert p.returncode == 0, p.stderr
+    lines = _lines(log)
+    revoke = _first(lines, 'REVOKE CONNECT ON DATABASE "sprintable" FROM "support_gw"')
+    count = _first(lines, "pg_stat_activity")
+    create = _first(lines, 'CREATE DATABASE "sprintable_restore_')
+    restore = next(i for i, l in enumerate(lines) if "pg_restore -U" in l and "--list" not in l)
+    swap = _first(lines, "RENAME TO")
+    grant = _first(lines, 'GRANT CONNECT ON DATABASE "sprintable" TO "support_gw"')
+    assert revoke < count < create < restore < swap < grant, (revoke, count, create, restore, swap, grant)
+    assert "CLOSED" not in p.stderr
+
+
+def test_a_failed_restore_leaves_the_gateway_database_shut_and_says_how_to_open_it(fakebin, tmp_path: Path) -> None:
+    dump = tmp_path / "x.dump"
+    dump.write_text("x")
+    p, log = fakebin("restore.sh", str(dump), DB_SERVICE="gateway-db", FAKE_EXISTING="0", FAKE_RESTORE_RC="1")
+    assert p.returncode != 0
+    assert "GRANT CONNECT" not in log, "the door is not opened after a restore that did not finish"
+    assert "is CLOSED to the gateway" in p.stderr and 'GRANT CONNECT ON DATABASE "sprintable" TO "support_gw"' in p.stderr
+
+
+def test_a_restore_that_is_refused_for_existing_tables_has_not_touched_the_door(fakebin, tmp_path: Path) -> None:
+    dump = tmp_path / "x.dump"
+    dump.write_text("x")
+    p, log = fakebin("restore.sh", str(dump), DB_SERVICE="gateway-db", FAKE_EXISTING="7")
+    assert p.returncode != 0 and "RESTORE_WIPE=yes" in p.stderr
+    assert "CONNECT" not in log and "pg_stat_activity" not in log
+
+
+def test_the_application_database_restore_does_not_look_at_sessions(fakebin, tmp_path: Path) -> None:
+    dump = tmp_path / "x.dump"
+    dump.write_text("x")
+    p, log = fakebin("restore.sh", str(dump), FAKE_EXISTING="0", FAKE_SESSIONS="3")
+    assert p.returncode == 0, p.stderr
+    assert "pg_stat_activity" not in log and "CONNECT" not in log
+
+
+def test_a_gateway_restore_that_fails_leaves_the_existing_database_untouched_and_opens_the_door_again(fakebin, tmp_path: Path) -> None:
+    dump = tmp_path / "x.dump"
+    dump.write_text("x")
+    p, log = fakebin("restore.sh", str(dump), DB_SERVICE="gateway-db", FAKE_EXISTING="7", RESTORE_WIPE="yes", FAKE_RESTORE_RC="1")
+    assert p.returncode != 0 and "is untouched" in p.stderr and "CLOSED" not in p.stderr
+    drops = [l for l in log.splitlines() if "DROP DATABASE" in l]
+    assert len(drops) == 1 and '"sprintable_restore_20260101000000"' in drops[0] and 'DROP DATABASE IF EXISTS "sprintable" ' not in drops[0] and "RENAME" not in log, drops
+    assert 'GRANT CONNECT ON DATABASE "sprintable" TO "support_gw"' in log, "the gateway may connect to what it had"
+
+
+def test_the_application_database_is_still_wiped_in_place_as_before(fakebin, tmp_path: Path) -> None:
+    dump = tmp_path / "x.dump"
+    dump.write_text("x")
+    p, log = fakebin("restore.sh", str(dump), FAKE_EXISTING="7", RESTORE_WIPE="yes")
+    assert p.returncode == 0 and 'DROP DATABASE "sprintable" WITH (FORCE)' in log and "RENAME" not in log and "_restore_" not in log
+
+
+@pytest.mark.parametrize("length,ok", [(33, True), (34, False)])
+def test_a_gateway_database_name_must_leave_room_for_the_kept_old_name(fakebin, tmp_path: Path, length: int, ok: bool) -> None:
+    dump = tmp_path / "x.dump"
+    dump.write_text("x")
+    name = "d" * length
+    p, log = fakebin("restore.sh", str(dump), DB_SERVICE="gateway-db", FAKE_DB_NAME=name, FAKE_EXISTING="7", RESTORE_WIPE="yes")
+    assert (p.returncode == 0) is ok, p.stderr
+    kept = f"{name}_before_restore_20260101000000"
+    assert len(kept) <= 63 or not ok
+    if not ok:
+        assert "too long" in p.stderr and "CONNECT" not in log, "refused before anything was touched"

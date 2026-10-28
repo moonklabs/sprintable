@@ -68,7 +68,7 @@ fi
 
 echo "== tooling → /opt/sprintable"
 install -d -m 0755 /opt/sprintable/bin /opt/sprintable/releases /opt/sprintable/runtime /etc/sprintable
-for f in deployer.py render_env.py lib.sh backup.sh restore.sh restore-check.sh rowcounts.sh rowcounts.sql dump-source.sh front-door.sh; do
+for f in deployer.py render_env.py lib.sh backup.sh restore.sh restore-check.sh rowcounts.sh rowcounts.sql dump-source.sh front-door.sh gateway-db-firewall.sh; do
   install -m 0755 "$src/bin/$f" "/opt/sprintable/bin/$f"
 done
 # releases already on this VM were checked against the compose copy that is installed NOW (before this run replaces it): remember that per release (deployer.py, COMPOSE_STAMP), so that a compose change
@@ -96,5 +96,7 @@ fi
 
 systemctl daemon-reload
 systemctl enable --now docker
+# the metadata server stays out of reach of the support gateway's database container (only a rule on its own bridge; harmless where that container does not exist)
+systemctl enable --now sprintable-gateway-db-firewall.service
 # the backup and restore-check timers are NOT enabled here: their first run would find no database (the unit fails and says so every night until the restore). RUNBOOK §7 step 6 enables them with the deploy timer.
 echo "bootstrap done for $env_name — deploy timer NOT enabled yet (restore the database first, see RUNBOOK)"

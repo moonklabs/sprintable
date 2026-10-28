@@ -2,13 +2,15 @@
 """Pull-based deployer of one VM (story 4796). Runs from a systemd timer every minute; one run = at most one deploy.
 
   gs://<deploy bucket>/desired.json   written by Cloud Build as its LAST step (images are pushed and the bundle is uploaded before it):
-      {"sha": "<git sha>", "backend_image": "<ref>", "frontend_image": "<ref>", ["support_gateway_image": "<ref>",] "bundle": "bundles/<sha>.tgz", "bundle_sha256": "<hex>"}
-      (the support gateway image is optional, pinned by digest like the others; without it the gateway is not part of the release)
+      {"sha": "<git sha>", "backend_image": "<ref>", "frontend_image": "<ref>", "bundle": "bundles/<sha>.tgz", "bundle_sha256": "<hex>"}
   state dir (default /var/lib/sprintable-deploy): current.json (what runs, with what it replaced) · failed.json · status.json · docker/ (registry login, root only)
 
 A deploy is: fetch bundle → render environment (Secret Manager through the VM's own identity) → pull images → migrate (new backend image, BEFORE the swap) →
 swap (`compose up -d`) → /api/v2/health AND /api/v2/ready from inside the backend container → on failure put the previous release back and say so.
 Database migrations are not rolled back (the same as the Cloud Run job flow today): a migration must work with the previous image too.
+
+A declaration with a `support_gateway` block also brings up the gateway's own database (compose service `gateway-db`, published on the VM's private address for the gateway on Cloud Run): its password
+secret is read, its address is read from the metadata server, and it must be healthy before the swap. It is never stopped by a deploy: it holds the gateway's data.
 
 The VM can only READ the deploy bucket; it writes its status to the backups bucket, so a taken VM cannot change what the other environments or itself will run.
 Names only in logs and status — never a value.
@@ -54,20 +56,15 @@ HEALTH_SNIPPET = (
     "    if not ok:\n"
     "        sys.exit(1)\n"
 )
-GATEWAY_SNIPPET = "import sys,urllib.request\ntry:\n    ok=200<=urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=5).status<300\nexcept Exception:\n    ok=False\nsys.exit(0 if ok else 1)\n"
-# idempotent: the gateway's role and database inside the VM's Postgres (the image only creates the first database, and only on an empty data folder). An EXISTING role keeps its password — like the main
-# database's (RUNBOOK §3): the secret is read when the role is first made, and rotating means `ALTER ROLE` first, then the secret (a deploy that changed the role's password before its swap would cut
-# off the gateway that is still running on the old one if the deploy then failed). Run through psql's STANDARD INPUT: the password never
-# appears in an argument list. Every value is a plain identifier or a letters/digits/«_»/«-» password (render_env checks both), so the quoting below cannot be broken out of.
-GATEWAY_DB_SQL = (
-    "\\set ON_ERROR_STOP on\n"
-    "\\set gw_user '{user}'\n\\set gw_pw '{password}'\n\\set gw_db '{database}'\n\\set main_db '{main}'\n"
-    "SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'gw_user', :'gw_pw') WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'gw_user') \\gexec\n"
-    "SELECT format('CREATE DATABASE %I OWNER %I', :'gw_db', :'gw_user') WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'gw_db') \\gexec\n"
-    "SELECT format('REVOKE ALL ON DATABASE %I FROM PUBLIC', :'main_db') \\gexec\n"
-    "SELECT format('REVOKE ALL ON DATABASE %I FROM PUBLIC', :'gw_db') \\gexec\n"
-    "SELECT format('GRANT CONNECT ON DATABASE %I TO %I', :'gw_db', :'gw_user') \\gexec\n"
-)
+# the server answers AND its first start finished: the application role exists and owns the gateway's database. The image runs the first-start script only on an EMPTY data folder, so a first start that was cut
+# short is never repeated, and `pg_isready` alone would pass for a server that has no application role at all.
+GATEWAY_DB_READY = ('pg_isready -q -U "$POSTGRES_USER" -d "$POSTGRES_DB" && psql -X -A -t -U "$POSTGRES_USER" -d postgres -c '
+                    '"select count(*) from pg_database d join pg_roles r on r.oid = d.datdba where d.datname = \'$POSTGRES_DB\' and r.rolname = \'$GATEWAY_APP_USER\'" | grep -qx 1')
+GATEWAY_DB_READY_TRIES = 15   # the first start of an empty data folder runs the script while the server already answers on its socket: a few seconds
+GATEWAY_DB_READY_WAIT = 2
+GATEWAY_DB_RELOAD = 'psql -X -q -U "$POSTGRES_USER" -d postgres -c "select pg_reload_conf()"'
+# from INSIDE the gateway database container: may it reach the metadata server? (bash's /dev/tcp; a refused or timed-out connection is the answer wanted)
+METADATA_PROBE = 'timeout 3 bash -c "exec 3<>/dev/tcp/169.254.169.254/80"'
 FRONTEND_SNIPPET = "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
 
 
@@ -142,14 +139,8 @@ class GcsStore:
 # ───────────────────────── helpers ─────────────────────────
 
 COMPOSE_STAMP = ".compose-sha256"  # in a release folder: the checksum of the compose.yml that was found equal to the trusted copy of its time
+GATEWAY_DB_PROFILE = "gateway-db"
 STATE_KEYS = ("sha", "backend_image", "frontend_image", "bundle", "bundle_sha256")
-OPTIONAL_STATE_KEYS = ("support_gateway_image",)  # part of a release when present; a record written before the gateway existed lacks it and is still a valid record
-GATEWAY_PROFILE, GATEWAY_MIGRATE_PROFILE = "support-gateway", "support-gateway-migrate"
-
-
-def release_state(d: Mapping) -> dict:
-    """what a recorded release is made of: the required keys, plus the optional ones that are there"""
-    return {**{k: d[k] for k in STATE_KEYS}, **{k: d[k] for k in OPTIONAL_STATE_KEYS if isinstance(d.get(k), str) and d[k]}}
 
 
 def _read_json(path: Path) -> dict | None:
@@ -236,9 +227,7 @@ def validate_desired(d: object, image_prefix: str | None = None) -> dict:
             raise DeployError(f"desired.json lacks «{key}»", "pre-swap")
     if not all(c in "0123456789abcdef" for c in d["sha"]) or len(d["sha"]) < 7:
         raise DeployError("desired.json: «sha» is not a git sha", "pre-swap")
-    if "support_gateway_image" in d and (not isinstance(d["support_gateway_image"], str) or not d["support_gateway_image"]):
-        raise DeployError("desired.json: «support_gateway_image» must be an image reference when it is present", "pre-swap")
-    for key in ("backend_image", "frontend_image", *(["support_gateway_image"] if "support_gateway_image" in d else [])):
+    for key in ("backend_image", "frontend_image"):
         if " " in d[key] or d[key].startswith("-"):
             raise DeployError(f"desired.json: «{key}» is not an image reference", "pre-swap")
         if not _DIGEST.search(d[key]):
@@ -253,11 +242,7 @@ def validate_desired(d: object, image_prefix: str | None = None) -> dict:
 
 
 def signature(d: Mapping) -> str:
-    """a release's identity; the gateway image joins it only when there is one, so the signature of a release recorded before the gateway existed does not change"""
-    parts = [str(d[k]) for k in ("sha", "backend_image", "frontend_image", "bundle_sha256")]
-    if isinstance(d.get("support_gateway_image"), str) and d["support_gateway_image"]:
-        parts.append(str(d["support_gateway_image"]))
-    return "|".join(parts)
+    return "|".join(str(d[k]) for k in ("sha", "backend_image", "frontend_image", "bundle_sha256"))
 
 
 def _differing(got: object, want: object) -> list[str]:
@@ -303,12 +288,11 @@ class Prepared:
     env: dict
     services: dict
     caddyfile: str
-    gateway_password: str = ""
 
     @property
-    def gateway(self) -> bool:
-        """is the support gateway part of this release? (an image is in the release and the environment was built for it)"""
-        return "SUPPORT_GATEWAY_IMAGE" in self.env
+    def gateway_db(self) -> bool:
+        """does this release carry the support gateway's database? (its declaration has the block and the environment was built for it)"""
+        return "GATEWAY_DB_BIND" in self.env
 
 
 @dataclass
@@ -318,6 +302,7 @@ class Deployer:
     runner: Runner
     secrets: Callable[[str], str]
     token: Callable[[], str]
+    private_ip: Callable[[], str] | None = None   # the VM's own private address (metadata server); needed only by a declaration with the support gateway database
     sleep: Callable[[float], None] = time.sleep
     now: Callable[[], float] = time.time
     log: Callable[[str], None] = field(default=lambda m: print(m, flush=True))
@@ -363,6 +348,7 @@ class Deployer:
     def run_once(self, force: bool = False) -> str:
         self._secret_cache.clear()
         self._prev = self._cand = None
+        self._gateway_db_closed = False
         current = read_current(self._current_path)
         # first of all: a previous run may have died between «a swap started» and «the state is recorded» — settle that, whatever desired.json says or fails to say
         unresolved = self._settle_unresolved(current)
@@ -402,6 +388,16 @@ class Deployer:
         except Exception as e:  # noqa: BLE001 — whatever went wrong, record it and (after the swap) put the previous release back
             err = e if isinstance(e, DeployError) else DeployError(f"unexpected {type(e).__name__}", self._phase)
             _write_json(self.cfg.state_dir / "failed.json", {"signature": signature(desired), "phase": err.phase, "detail": self._scrub(str(err))[:500], "at": int(self.now())})
+            if err.phase == "pre-swap" and self._prev is not None and self._prev.gateway_db and not self._gateway_db_closed:
+                # compose may already have re-created the gateway's database with the CANDIDATE's settings (a rotated password secret, a changed private address) before this release failed: nothing else would
+                # bring it back as the running release has it (current.json still names that release, so the next run finds nothing to do). A no-op when nothing was re-created.
+                try:
+                    self._activate(self._prev)
+                    rc, out = self._compose(self._prev.release, self._prev.env, "up", "-d", "--wait", "gateway-db", timeout=T_DB)
+                    if rc != 0:
+                        self.log(f"the gateway database could not be brought back as the running release has it: {out[-200:]}")
+                except DeployError as e2:
+                    self.log(f"the gateway database could not be brought back as the running release has it: {self._scrub(str(e2))}")
             if err.phase == "post-swap":
                 outcome = self._rollback(current)
                 self._status(outcome, sha=desired["sha"], detail=self._scrub(str(err))[:300], serving=(current or {}).get("sha") if outcome == "rolled-back" else None)
@@ -431,7 +427,6 @@ class Deployer:
             p = self._prepare(current)
             self._activate(p)
             self._swap(p)
-            self._drop_gateway_if_left_out(p, bool(pending.get("support_gateway_image")))  # the interrupted swap may have started the gateway of a release that was never recorded
         except Exception as e:  # noqa: BLE001
             self.log(f"reconcile failed: {self._scrub(str(e)) if isinstance(e, DeployError) else type(e).__name__}")
             return "reconcile-failed"
@@ -448,9 +443,9 @@ class Deployer:
             # the next normal pass (same desired version) deploys it again, which is a no-op for a healthy stack, and records it.
             return None
         try:
-            p = self._prepare(release_state(pending))
+            p = self._prepare({k: pending[k] for k in STATE_KEYS})
             self._activate(p)
-            rc, out = self._compose(p.release, p.env, "stop", "backend", "frontend", "caddy", *([renv.GATEWAY_SERVICE] if p.gateway else []), timeout=120)
+            rc, out = self._compose(p.release, p.env, "stop", "backend", "frontend", "caddy", timeout=120)
         except Exception as e:  # noqa: BLE001
             self.log(f"could not stop the unrecorded first release: {self._scrub(str(e)) if isinstance(e, DeployError) else type(e).__name__}")
             return "reconcile-failed"
@@ -485,7 +480,7 @@ class Deployer:
             self._secret_cache[secret_id] = self.secrets(secret_id)
         return self._secret_cache[secret_id]
 
-    def _compose_env(self, decl: Mapping, images: Mapping[str, str], services: Mapping[str, Mapping[str, str]], db_password: str, gateway_password: str = "") -> dict[str, str]:
+    def _compose_env(self, decl: Mapping, images: Mapping[str, str], services: Mapping[str, Mapping[str, str]], db_password: str, gateway: Mapping[str, str] | None = None) -> dict[str, str]:
         db = decl["database"]
         env = {
             "PATH": os.environ.get("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"),
@@ -493,7 +488,6 @@ class Deployer:
             "DOCKER_CONFIG": str(self.cfg.state_dir / "docker"),
             "BACKEND_IMAGE": images["backend_image"],
             "FRONTEND_IMAGE": images["frontend_image"],
-            **({"SUPPORT_GATEWAY_IMAGE": images["support_gateway_image"]} if images.get("support_gateway_image") else {}),
             "API_HOST": decl["hosts"]["api"],
             "REALTIME_HOST": decl["hosts"]["realtime"],
             "APP_HOST": decl["hosts"]["app"],
@@ -505,20 +499,20 @@ class Deployer:
             "POSTGRES_PASSWORD": db_password,
             "ALEMBIC_DATABASE_URL": f"postgresql://{db['user']}:{db_password}@db:5432/{db['name']}",
         }
-        if images.get("support_gateway_image"):
-            # by name into the gateway and its one-shot migrate (compose.yml); the role and database are the gateway's own, never the backend's
-            env["SUPPORT_GATEWAY_DATABASE_URL"] = renv.gateway_database_url(decl, gateway_password)
+        if gateway:
+            env.update({"GATEWAY_DB_USER": gateway["user"], "GATEWAY_DB_NAME": gateway["name"], "GATEWAY_DB_PASSWORD": gateway["password"], "GATEWAY_DB_BIND": gateway["bind"],
+                        "GATEWAY_DB_HBA": str(self.cfg.install_dir / "runtime" / "gateway-db-pg_hba.conf"),
+                        "GATEWAY_DB_INIT": str(self.cfg.install_dir / "runtime" / "gateway-db-init.sh")})  # every path of this service is the same in every release: compose re-creates a container whose mounts changed
         env.update(renv.process_environment(services))
         return env
 
-    def _compose(self, release: Path, env: Mapping[str, str], *args: str, profile: str | None = None, timeout: float = 900, stdin: str | None = None, compose_file: Path | None = None) -> tuple[int, str]:
-        cmd = ["docker", "compose", "-f", str(compose_file or release / "compose.yml"), "-f", str(self.cfg.install_dir / "runtime" / "pass-through.yml")]
-        profiles = [profile] if profile else []
-        if "SUPPORT_GATEWAY_IMAGE" in env and GATEWAY_PROFILE not in profiles:
-            profiles.append(GATEWAY_PROFILE)  # the gateway belongs to this release: every compose call of it sees the gateway services
-        for name in profiles:
-            cmd += ["--profile", name]
-        rc, out = self.runner.run([*cmd, *args], env, cwd=release, timeout=timeout, stdin=stdin)
+    def _compose(self, release: Path, env: Mapping[str, str], *args: str, profile: str | None = None, timeout: float = 900) -> tuple[int, str]:
+        cmd = ["docker", "compose", "-f", str(release / "compose.yml"), "-f", str(self.cfg.install_dir / "runtime" / "pass-through.yml")]
+        if profile:
+            cmd += ["--profile", profile]
+        if "GATEWAY_DB_BIND" in env:
+            cmd += ["--profile", GATEWAY_DB_PROFILE]  # the gateway's database belongs to this release: every compose call of it sees the service
+        rc, out = self.runner.run([*cmd, *args], env, cwd=release, timeout=timeout)
         return rc, self._scrub(out)
 
     def _prepare(self, desired: Mapping) -> Prepared:
@@ -557,22 +551,26 @@ class Deployer:
             # the password is hex (RUNBOOK §3): a value piped into `gcloud secrets create` carries the shell's line ending, which is not part of it — ONE trailing line ending is taken off, anything else is still refused below
             db_password = self._read_secret(decl["database"]["password_secret"])
             db_password = db_password[:-2] if db_password.endswith("\r\n") else db_password[:-1] if db_password.endswith("\n") else db_password
-            wants_gateway = bool(desired.get("support_gateway_image"))
-            if wants_gateway and renv.GATEWAY_SERVICE not in decl["services"]:
-                raise renv.EnvError(f"the release carries a support gateway image but {self.cfg.environment}.yaml declares no «{renv.GATEWAY_SERVICE}» service")
-            gateway_password = ""
-            if wants_gateway:
-                gateway_password = self._read_secret(decl["support_gateway"]["database"]["password_secret"])
-                gateway_password = gateway_password[:-2] if gateway_password.endswith("\r\n") else gateway_password[:-1] if gateway_password.endswith("\n") else gateway_password
-            # a gateway that is not part of this release reads none of its secrets (and gets no environment)
-            services = {name: renv.build_service_env(decl, name, plain.get(name, {}), db_password, self._read_secret) for name in decl["services"] if name != renv.GATEWAY_SERVICE or wants_gateway}
+            services = {name: renv.build_service_env(decl, name, plain.get(name, {}), db_password, self._read_secret) for name in decl["services"]}
+            gateway = None
+            if "support_gateway" in decl:
+                gw = decl["support_gateway"]["database"]
+                gw_password = self._read_secret(gw["password_secret"])
+                gw_password = gw_password[:-2] if gw_password.endswith("\r\n") else gw_password[:-1] if gw_password.endswith("\n") else gw_password
+                renv.check_password(gw_password, "the support gateway database's password")
+                if gw_password == db_password:
+                    # the secrets are told apart by NAME (render_env); the same VALUE in both would hand the backend's database password to the gateway's role
+                    raise renv.EnvError("the support gateway database's password is the same value as the main database's: they must be two different secrets")
+                if self.private_ip is None:
+                    raise renv.EnvError("this deploy cannot read the VM's private address")
+                gateway = {"user": gw["user"], "name": gw["name"], "password": gw_password, "bind": renv.check_private_address(self.private_ip())}
         except (renv.EnvError, OSError, ValueError, KeyError, yaml.YAMLError, TypeError, AttributeError) as e:
             # our own EnvError messages carry names only; anything else (a failed secret read …) is reported by class, its message could hold a value
             raise DeployError(f"environment: {e}" if isinstance(e, renv.EnvError) else f"environment: {type(e).__name__}", "pre-swap") from e
         # every secret value (whatever its length) is removed from anything recorded; plain values are not secrets
-        secret_values = {services[svc][n] for svc, d in decl["services"].items() if svc in services for n in (d.get("secrets") or {}) if services[svc].get(n)}
-        self._scrub_values |= {v for v in (db_password, gateway_password, *secret_values) if v}
-        return Prepared(release, decl, self._compose_env(decl, desired, services, db_password, gateway_password), services, caddyfile, gateway_password)
+        secret_values = {services[svc][n] for svc, d in decl["services"].items() for n in (d.get("secrets") or {}) if services[svc].get(n)}
+        self._scrub_values |= {v for v in (db_password, (gateway or {}).get("password"), *secret_values) if v}
+        return Prepared(release, decl, self._compose_env(decl, desired, services, db_password, gateway), services, caddyfile)
 
     def _check_release_compose(self, release: Path) -> None:
         """a release's compose.yml is accepted when it equals the installed (trusted) copy — or when THIS exact file was found equal to the trusted copy of its time (the stamp the deployer writes when it
@@ -602,6 +600,33 @@ class Deployer:
         renv.write_passthrough(runtime / "pass-through.yml", p.services)
         (self.cfg.data_dir / "postgres").mkdir(parents=True, exist_ok=True)
         (self.cfg.data_dir / "caddy").mkdir(parents=True, exist_ok=True)
+        if p.gateway_db:
+            (self.cfg.data_dir / "gateway-postgres").mkdir(parents=True, exist_ok=True)
+            init_src = p.release / "gateway-db-init.sh"
+            try:
+                init_text = init_src.read_text()
+            except OSError as e:
+                raise DeployError(f"the release has no readable gateway-db-init.sh: {type(e).__name__}", "pre-swap") from e
+            # copied to a path that is the same in every release (see `_compose_env`); used only when the data folder is empty, so a rewrite in place changes nothing for a running server
+            self._write_gateway_hba(runtime / "gateway-db-init.sh", init_text, what="the first-start script")
+            hba = runtime / "gateway-db-pg_hba.conf"
+            if not hba.exists():
+                # the container's mount needs a FILE (docker would make a folder of a missing one) and a first start reads it; an existing file keeps the RUNNING release's rules until `_swap`
+                self._write_gateway_hba(hba, renv.gateway_hba(p.decl))
+
+    def _write_gateway_hba(self, path: Path, text: str, what: str = "the access rules") -> None:
+        """the access rules file of the gateway database. It is bind-mounted as a single file, so it is rewritten IN PLACE (a rename would leave the container looking at the old file) and only when
+        its content differs."""
+        try:
+            if path.exists() and path.read_text() == text:
+                return
+            with open(path, "w") as fh:
+                fh.write(text)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.chmod(path, 0o644)
+        except OSError as e:
+            raise DeployError(f"{what} of the gateway database cannot be written: {type(e).__name__}", "pre-swap") from e
 
     def _install_caddyfile(self, text: str) -> None:
         """the container mounts the DIRECTORY, so the file can be replaced atomically (write next to it, fsync, rename): a crash leaves the old or the new file, never half of one"""
@@ -636,11 +661,15 @@ class Deployer:
         rc, _ = self._compose(p.release, p.env, "exec", "-T", "frontend", "node", "-e", FRONTEND_SNIPPET, timeout=30)
         if rc != 0:
             return False
-        if p.gateway:
-            rc, _ = self._compose(p.release, p.env, "exec", "-T", renv.GATEWAY_SERVICE, "python", "-c", GATEWAY_SNIPPET, timeout=30)
+        if p.gateway_db:
+            rc, _ = self._compose(p.release, p.env, "exec", "-T", "gateway-db", "sh", "-c", GATEWAY_DB_READY, timeout=30)
         return rc == 0
 
     def _swap(self, p: Prepared) -> None:
+        if p.gateway_db:
+            # the rules file changes HERE and nowhere earlier: pending.json is already written (a crash from now on is settled by the next run, which puts the recorded release's rules back), and a release that fails
+            # before this point leaves the file as it was — a container started in the meantime (reboot, re-creation) reads the rules of the release that is running
+            self._write_gateway_hba(self.cfg.install_dir / "runtime" / "gateway-db-pg_hba.conf", renv.gateway_hba(p.decl))
         self._phase = "post-swap"
         self._install_caddyfile(p.caddyfile)  # here, not while preparing: a deploy that stops before the swap leaves the running Caddyfile alone
         rc, out = self._compose(p.release, p.env, "up", "-d", "--remove-orphans", "--wait", "--wait-timeout", "120", timeout=T_UP)
@@ -649,6 +678,11 @@ class Deployer:
         rc, out = self._compose(p.release, p.env, "exec", "-T", "caddy", "caddy", "reload", "--config", "/etc/caddy/Caddyfile", timeout=30)
         if rc != 0:
             raise DeployError(f"caddy reload failed: {out[-300:]}", "post-swap")
+        if p.gateway_db:
+            # the file holds this release's rules (written at the top of this method — on the way back too): from here the running server enforces them
+            rc, out = self._compose(p.release, p.env, "exec", "-T", "gateway-db", "sh", "-c", GATEWAY_DB_RELOAD, timeout=30)
+            if rc != 0:
+                raise DeployError(f"the gateway database did not reload its access rules: {out[-200:]}", "post-swap")
         deadline = self.now() + self.cfg.health_timeout
         while True:
             if self._healthy(p):
@@ -656,6 +690,16 @@ class Deployer:
             if self.now() >= deadline:
                 raise DeployError(f"health/ready not green within {int(self.cfg.health_timeout)} s", "post-swap")
             self.sleep(self.cfg.health_interval)
+
+    def _close_gateway_db(self, cand: Prepared) -> str:
+        """stops (then kills) the gateway's database whose metadata isolation is unproven; says in words whether it is down"""
+        self._gateway_db_closed = True
+        for verb, timeout in (("stop", 120), ("kill", 60)):
+            rc, out = self._compose(cand.release, cand.env, verb, "gateway-db", timeout=timeout)
+            if rc == 0:
+                return "which was stopped"
+            self.log(f"could not {verb} the gateway database whose metadata isolation is unproven: {out[-200:]}")
+        return "WHICH COULD NOT BE STOPPED — it is still running: stop it by hand (docker stop) now"
 
     def _deploy(self, desired: Mapping, current: Mapping | None) -> None:
         # the way back is prepared BEFORE anything changes: a rollback must not depend on Secret Manager, the token or the private file still being fine afterwards
@@ -669,7 +713,7 @@ class Deployer:
         self._activate(cand)
         self._registry_login(cand.env)
         try:
-            rc, out = self._compose(cand.release, cand.env, "pull", "backend", "frontend", *([renv.GATEWAY_SERVICE] if cand.gateway else []), timeout=T_PULL)
+            rc, out = self._compose(cand.release, cand.env, "pull", "backend", "frontend", timeout=T_PULL)
         finally:
             self._registry_logout(cand.env)
         if rc != 0:
@@ -677,41 +721,34 @@ class Deployer:
         rc, _ = self._compose(cand.release, cand.env, "up", "-d", "--wait", "db", timeout=T_DB)
         if rc != 0:
             raise DeployError("database did not become healthy", "pre-swap")
+        if cand.gateway_db:
+            rc, out = self._compose(cand.release, cand.env, "up", "-d", "--wait", "gateway-db", timeout=T_DB)
+            if rc != 0:
+                raise DeployError(f"the support gateway database did not become healthy: {out[-300:]}", "pre-swap")
+            for _attempt in range(GATEWAY_DB_READY_TRIES):
+                rc, out = self._compose(cand.release, cand.env, "exec", "-T", "gateway-db", "sh", "-c", GATEWAY_DB_READY, timeout=30)
+                if rc == 0:
+                    break
+                self.sleep(GATEWAY_DB_READY_WAIT)
+            else:
+                raise DeployError("the support gateway database answers but its first start did not finish: the application role does not own the database (RUNBOOK section 13, «A first start that was cut short»)", "pre-swap")
+            rc, out = self._compose(cand.release, cand.env, "exec", "-T", "gateway-db", "bash", "-c", METADATA_PROBE, timeout=30)
+            if rc == 0 or rc not in (1, 124):
+                # the one case in which a deploy stops the gateway's database: a server that may reach the VM's identity must not keep running (its data folder stays, a restart after the fix loses nothing)
+                state = self._close_gateway_db(cand)
+                if rc == 0:
+                    raise DeployError(f"the metadata server is reachable from the gateway database container, {state} (is sprintable-gateway-db-firewall.service active?)", "pre-swap")
+                raise DeployError(f"the metadata server probe of the gateway database container could not run (exit {rc}); the container, {state}", "pre-swap")
         rc, out = self._compose(cand.release, cand.env, "run", "--rm", "migrate", profile="migrate", timeout=T_MIGRATE)
         if rc != 0:
             raise DeployError(f"migrate failed: {out[-300:]}", "pre-swap")
-        if cand.gateway:
-            self._prepare_gateway_database(cand)
-            rc, out = self._compose(cand.release, cand.env, "run", "--rm", "support-gateway-migrate", profile=GATEWAY_MIGRATE_PROFILE, timeout=T_MIGRATE)
-            if rc != 0:
-                raise DeployError(f"support gateway migrate failed: {out[-300:]}", "pre-swap")
-        _write_json(self._pending_path, {**release_state(desired), "at": int(self.now())})  # «a swap started»: survives a crash before current.json is written
+        _write_json(self._pending_path, {**{k: desired[k] for k in STATE_KEYS}, "at": int(self.now())})  # «a swap started»: survives a crash before current.json is written
         self._swap(cand)
-        self._drop_gateway_if_left_out(cand, bool(current and current.get("support_gateway_image")))
-        record = release_state(desired)
-        record["previous"] = release_state(current) if current else None
+        record = {k: desired[k] for k in STATE_KEYS}
+        record["previous"] = {k: current[k] for k in STATE_KEYS} if current else None
         _write_json(self._current_path, record)
         self._pending_path.unlink(missing_ok=True)
         self._prune(keep={desired["sha"], *([current["sha"]] if current else [])})
-
-    def _prepare_gateway_database(self, p: Prepared) -> None:
-        """the gateway's own role and database in the VM's Postgres (idempotent; an existing role's password is left alone)"""
-        db, gw = p.decl["database"], p.decl["support_gateway"]["database"]
-        sql = GATEWAY_DB_SQL.format(user=gw["user"], password=p.gateway_password, database=gw["name"], main=db["name"])
-        rc, out = self._compose(p.release, p.env, "exec", "-T", "db", "psql", "-X", "-q", "-U", db["user"], "-d", "postgres", timeout=120, stdin=sql)
-        if rc != 0:
-            raise DeployError(f"support gateway database could not be prepared: {out[-300:]}", "pre-swap")
-
-    def _drop_gateway_if_left_out(self, running: Prepared, previously_had_gateway: bool) -> None:
-        """a release without the gateway after one with it: compose does not remove a container of a service that is merely not part of this release — stop it"""
-        if running.gateway or not previously_had_gateway:
-            return
-        # with the TRUSTED compose copy, not the release's own: the release that is running may be one from before the gateway existed, and its compose does not define the service ("no such service")
-        rc, out = self._compose(running.release, running.env, "stop", renv.GATEWAY_SERVICE, profile=GATEWAY_PROFILE, timeout=60, compose_file=self.cfg.trusted_compose)
-        if rc != 0:
-            # not best effort: a gateway that keeps running beside a release that left it out holds database connections nobody budgeted. After the swap this is a post-swap failure — the previous release
-            # (which has the gateway) is put back; on the way back or in a reconcile it is reported as that step failing, and the pending marker stays so the next run tries again
-            raise DeployError(f"could not stop the support gateway that this release leaves out: {out[-200:]}", "post-swap")
 
     def _rollback(self, current: Mapping | None) -> str:
         try:
@@ -722,7 +759,7 @@ class Deployer:
                 # nothing to go back to: do not leave a half-working candidate serving — stop it (the database stays up)
                 if self._cand is not None:
                     self._activate(self._cand)
-                    rc, out = self._compose(self._cand.release, self._cand.env, "stop", "backend", "frontend", "caddy", *([renv.GATEWAY_SERVICE] if self._cand.gateway else []), timeout=120)
+                    rc, out = self._compose(self._cand.release, self._cand.env, "stop", "backend", "frontend", "caddy", timeout=120)
                     if rc != 0:
                         # the candidate may still be serving: keep the marker (the next run tries to stop it again) and say the state is unknown
                         self.log(f"could not stop the failed first release: {out[-200:]}")
@@ -733,7 +770,6 @@ class Deployer:
                 return "rollback-failed"
             self._activate(self._prev)
             self._swap(self._prev)
-            self._drop_gateway_if_left_out(self._prev, bool(self._cand and self._cand.gateway))
             self._pending_path.unlink(missing_ok=True)
         except Exception as e:  # noqa: BLE001 — the outcome is recorded, never a traceback
             self.log(f"rollback failed: {self._scrub(str(e)) if isinstance(e, DeployError) else type(e).__name__}")
@@ -767,7 +803,7 @@ def main(argv: list[str]) -> int:
         print("another deploy is running", flush=True)
         return 0
     reader = renv.MetadataSecretReader(cfg.project)
-    d = Deployer(cfg, GcsStore(reader), Runner(), reader, reader.token)
+    d = Deployer(cfg, GcsStore(reader), Runner(), reader, reader.token, private_ip=reader.private_ip)
     outcome = d.db_only() if args.db_only else d.run_once(force=args.force)
     print(f"deployer: {outcome}", flush=True)
     return 1 if outcome in ("failed", "rolled-back", "rollback-failed", "failed-no-previous", "failed-state-unknown", "reconcile-failed") else 0

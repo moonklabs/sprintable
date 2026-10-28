@@ -38,6 +38,7 @@ D = _load("deployer")
 SECRET = "SECRET-VALUE-do-not-leak"
 PASSWORD = "0123456789abcdef0123456789abcdef"
 BUCKET, BACKUPS = "sprintable-vm-dev-deploy", "sprintable-vm-dev-backups"
+PRIVATE_IP = "10.178.0.2"
 
 
 def _digest(sha: str) -> str:
@@ -50,7 +51,7 @@ REG = "asia-northeast3-docker.pkg.dev/proj/repo"
 def _bundle(extra: dict[str, bytes] | None = None, links: list[tuple[str, str]] = ()) -> bytes:
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-        for rel in ("compose.yml", "Caddyfile", "env/dev.yaml"):
+        for rel in ("compose.yml", "Caddyfile", "env/dev.yaml", "gateway-db-init.sh"):   # the first-start script of the gateway database travels in every real bundle (make_bundle.TOP_FILES)
             data = (_VM / rel).read_bytes()
             ti = tarfile.TarInfo(rel)
             ti.size = len(data)
@@ -91,6 +92,7 @@ class FakeRunner:
         self.frontend_ok = True
         self.out_suffix = ""
         self.raise_on: dict[str, Exception] = {}
+        self.metadata_rc = 1   # the gateway database container asked for the metadata server: refused (1) is the answer wanted; 0 would mean it can reach it
 
     def run(self, args, env, cwd=None, timeout=900, stdin=None):
         self.calls.append({"args": list(args), "env": dict(env), "stdin": stdin})
@@ -98,6 +100,8 @@ class FakeRunner:
         for marker, exc in self.raise_on.items():
             if marker in joined:
                 raise exc
+        if "169.254.169.254" in joined:
+            return self.metadata_rc, ""
         if "process.exit(r.status<500" in joined:
             return (0, "") if self.frontend_ok else (1, "frontend down")
         if "HEALTH" in joined or "import sys,urllib.request" in joined:
@@ -116,9 +120,11 @@ class FakeRunner:
                 rest = [x for x in a[2:] if x not in ("-f", "--profile") and not x.endswith(".yml") and x != "migrate" or x == "migrate"]
                 verb = next((x for x in a[2:] if x in ("pull", "up", "run", "exec", "stop")), "?")
                 if verb == "up":
-                    verb = "up:db" if "db" in a else "up:all"
+                    verb = "up:gwdb" if a[-1] == "gateway-db" else "up:db" if a[-1] == "db" else "up:all"
                 if verb == "exec":
-                    verb = "exec:" + ("reload" if "reload" in a else "health-be" if "python" in a else "health-fe")
+                    tail = a[a.index("exec"):]
+                    verb = "exec:" + ("gwdb-metadata" if "169.254.169.254" in " ".join(tail) else "gwdb-reload" if "pg_reload_conf" in " ".join(tail) else "gwdb-ready" if "pg_database" in " ".join(tail) else "health-gwdb" if "gateway-db" in tail
+                                      else "reload" if "reload" in a else "health-be" if "python" in a else "health-fe")
                 out.append(verb)
             else:
                 out.append(a[1])
@@ -151,7 +157,7 @@ def world(tmp_path: Path):
     store, runner, clock = FakeStore(), FakeRunner(), Clock()
     logs: list[str] = []
     dep = D.Deployer(cfg, store, runner, lambda sid: SECRET if sid != decl["database"]["password_secret"] else PASSWORD, lambda: "vm-token-abc123",
-                     sleep=clock.sleep, now=clock.now, log=logs.append)
+                     private_ip=lambda: PRIVATE_IP, sleep=clock.sleep, now=clock.now, log=logs.append)
 
     def publish(sha: str = "a" * 40, backend: str | None = None, frontend: str | None = None, bundle: bytes | None = None, sha256: str | None = None) -> dict:
         blob = bundle if bundle is not None else _bundle()
@@ -181,7 +187,7 @@ def _text_tree(root: Path) -> str:
 def test_a_deploy_migrates_before_it_swaps_and_checks_health_after(world) -> None:
     d = world.publish("a" * 40)
     assert world.dep.run_once() == "deployed"
-    assert world.runner.verbs() == ["login", "pull", "logout", "up:db", "run", "up:all", "exec:reload", "exec:health-be", "exec:health-fe"]
+    assert world.runner.verbs() == ["login", "pull", "logout", "up:db", "up:gwdb", "exec:gwdb-ready", "exec:gwdb-metadata", "run", "up:all", "exec:reload", "exec:gwdb-reload", "exec:health-be", "exec:health-fe", "exec:gwdb-ready"]
     cur = _state(world, "current.json")
     assert cur["sha"] == d["sha"] and cur["previous"] is None
     assert (world.cfg.install_dir / "releases" / d["sha"] / "compose.yml").exists()
