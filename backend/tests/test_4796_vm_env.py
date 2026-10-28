@@ -123,7 +123,12 @@ def test_the_public_addresses_are_the_vm_hosts_not_cloud_run(env: str) -> None:
     else:
         assert "ADMIN_OPERATOR_AUDIENCE" not in b, "prod's live service has none and the VM must not switch the admin lane on"
     assert b["APP_URL"] == b["NEXT_PUBLIC_APP_URL"] == f["APP_BASE_URL"] == f["NEXT_PUBLIC_APP_URL"] == app
-    assert f["NEXT_PUBLIC_FASTAPI_URL"] == api and f["REALTIME_URL"] == rt
+    assert f["NEXT_PUBLIC_FASTAPI_URL"] == api
+    if env == "dev":
+        assert f["REALTIME_URL"] == rt, "dev's stream address is its VM realtime host"
+    else:
+        assert f["REALTIME_URL"] == "", "prod's stream address is EMPTY (P6, RUNBOOK §12 item 1): the gateways are off and the frontend streams through the main server"
+    assert b["PUBLIC_API_URL"] == api, "stored and bound links are built from the API host on the VM, in both environments (P6 for prod)"
     assert "run.app" not in (_VM / f"env/{env}.yaml").read_text()
     assert set(hosts) == {"api", "realtime", "app"}
     assert decl["environment"] == env, "a declaration must say which environment it is for"
@@ -133,7 +138,8 @@ def test_the_public_addresses_are_the_vm_hosts_not_cloud_run(env: str) -> None:
 
 def test_prod_adds_nothing_the_live_prod_service_does_not_have_except_the_vm_switch() -> None:
     """prod behaves as prod does today: no new admin lane, no new rate-limit setting; the only new name is TRUST_FORWARDED_FOR (and it is in the live-name-free `added` group)"""
-    assert set(DECLS["prod"]["services"]["backend"]["added"]) == {"TRUST_FORWARDED_FOR"}
+    assert set(DECLS["prod"]["services"]["backend"]["added"]) == {"TRUST_FORWARDED_FOR", "PUBLIC_API_URL"}, "the VM switch, and (P6) the origin of stored links, the same value dev has"
+    assert DECLS["prod"]["services"]["backend"]["added"]["PUBLIC_API_URL"] == "https://api.sprintable.ai"
     assert not DECLS["prod"]["services"]["frontend"]["added"]
 
 
