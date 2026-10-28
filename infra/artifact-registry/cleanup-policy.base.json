@@ -5,6 +5,11 @@
     "mostRecentVersions": {"keepCount": 30}
   },
   {
+    "name": "keep-env-latest-tags",
+    "action": {"type": "Keep"},
+    "condition": {"tagState": "tagged", "tagPrefixes": ["latest-prod", "latest-dev"]}
+  },
+  {
     "name": "delete-older-than-30d",
     "action": {"type": "Delete"},
     "condition": {"olderThan": "2592000s"}
