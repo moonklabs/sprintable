@@ -32,7 +32,7 @@ PO는 이 생성본을 dry-run → 적용한다(기본 정책만 적용하면 �
 exit code: 0=지움 0 · 1=사용 중 이미지가 지워진다 · 2=입력 오류(AR 목록 · 서비스 · 리비전이 비었다 · 필수 덤프 없음 · 개수가 안 맞음) ·
           3=불완전(사용 중 참조를 AR 목록에서 못 찾음 · 서빙 리비전 덤프 누락 · 이미지 참조 없는 서비스/job · --extra가 «전부» 이미지 참조 없음 ·
           태그로 배포된 서빙 리비전에 `status.imageDigest`가 없음) — 안전하게 실패.
-참조는 `<host>/<project>/<repo>/<package>`까지 같아야 같은 이미지로 친다(다른 저장소의 같은 이름은 보호하지 않는다). 태그도 digest도 없는 참조는 `:latest`로 본다.
+참조는 `<host>/<project>/<repo>/<package>`까지 같아야 같은 이미지로 친다(다른 저장소의 같은 이름은 보호하지 않는다). 태그도 digest도 없는 참조는 `:latest`로 본다. `태그@digest` 꼴은 digest로 읽는다(Docker는 digest로 당긴다 — 태그가 그 뒤 옮겨졌어도 그 digest가 사용 중이다).
 
 범위 밖(실패가 아니라 따로 센다): 정리 정책이 «닿을 수 없는» 참조 — **우리 AR 호스트가 아님이 확실한 것뿐**이다. 우리 호스트 = `--images` 덤프가 속한 `<지역>-docker.pkg.dev`.
   · 다른 호스트의 AR 참조(다른 지역) · 알려진 외부 레지스트리(gcr.io · Docker Hub · ghcr.io · quay.io · mcr.microsoft.com · registry.k8s.io · ECR · ACR)
@@ -62,10 +62,10 @@ from typing import Any, Iterable, NamedTuple
 
 _BASE_POLICY = Path(__file__).resolve().parent / "artifact-registry" / "cleanup-policy.base.json"
 
-# <host>-docker.pkg.dev/<project>/<repo>/<package>[:<tag> | @sha256:<64 hex>]
+# <host>-docker.pkg.dev/<project>/<repo>/<package>[:<tag>][@sha256:<64 hex>] — `태그@digest` 꼴(Docker가 받는다)은 digest가 이긴다: 실제로 당기는 것은 digest다(태그가 그 뒤 옮겨졌어도)
 _IMAGE_REF = re.compile(
     r"(?P<host>[a-z0-9-]+-docker\.pkg\.dev)/(?P<project>[a-z0-9-]+)/(?P<repo>[a-z0-9._-]+)/(?P<package>[a-z0-9._-]+(?:/[a-z0-9._-]+)*)"
-    r"(?::(?P<tag>[A-Za-z0-9_][A-Za-z0-9_.-]*)|@(?P<digest>sha256:[0-9a-f]{64}))?"
+    r"(?::(?P<tag>[A-Za-z0-9_][A-Za-z0-9_.-]*))?(?:@(?P<digest>sha256:[0-9a-f]{64}))?"
 )
 # 맨 digest(`status.imageDigest`가 이 꼴로 올 수 있다): 위 전체 참조의 `@sha256:…` 꼬리는 제외한다
 _BARE_DIGEST = re.compile(r"(?<![@0-9A-Za-z:/_.-])(sha256:[0-9a-f]{64})")
@@ -78,7 +78,7 @@ _EXTERNAL_HOSTS = (
 # 앞에 `/ . : @ - 영숫자`가 오면 URL(`https://ghcr.io/…`) · 다른 호스트 이름의 일부다 — 단 JSON 속 줄바꿈(`\n`) 바로 뒤는 새 줄의 시작이다
 _EXTERNAL_REF = re.compile(
     r"(?:(?<![A-Za-z0-9._/:@-])|(?<=\\n)|(?<=\\t)|(?<=\\r))(?P<host>" + _EXTERNAL_HOSTS + r")/(?P<path>[a-z0-9._-]+(?:/[a-z0-9._-]+)*)"
-    r"(?::(?P<tag>[A-Za-z0-9_][A-Za-z0-9_.-]*)|@(?P<digest>sha256:[0-9a-f]{64}))?"
+    r"(?::(?P<tag>[A-Za-z0-9_][A-Za-z0-9_.-]*))?(?:@(?P<digest>sha256:[0-9a-f]{64}))?"
 )
 
 
@@ -145,7 +145,7 @@ def load_versions(data: Any) -> list[Version]:
 def refs_in(text: str) -> list[Ref]:
     """문자열 안의 이미지 참조를 전부 줍는다: 전체 참조(태그 또는 digest)와 맨 digest(package=None — 어느 패키지든 그 digest)."""
     refs: list[Ref] = [
-        {"package": _short_package(f"{m['host']}/{m['project']}/{m['repo']}/{m['package']}"), "tag": m["tag"] or (None if m["digest"] else "latest"),
+        {"package": _short_package(f"{m['host']}/{m['project']}/{m['repo']}/{m['package']}"), "tag": None if m["digest"] else (m["tag"] or "latest"),
          "digest": m["digest"], "repo": f"{m['host']}/{m['project']}/{m['repo']}", "host": m["host"]}
         for m in _IMAGE_REF.finditer(text)
     ]
@@ -156,7 +156,7 @@ def refs_in(text: str) -> list[Ref]:
 def external_refs_in(text: str) -> list[Outside]:
     """문자열 안의 «알려진 외부 레지스트리» 이미지 참조(gcr.io · Docker Hub …). 우리 AR이 아님이 확실하니 정리 정책이 닿을 수 없다."""
     return [
-        {"image": f"{m['host']}/{m['path']}", "ref": f":{m['tag']}" if m["tag"] else (f"@{m['digest']}" if m["digest"] else ""),
+        {"image": f"{m['host']}/{m['path']}", "ref": f"@{m['digest']}" if m["digest"] else (f":{m['tag']}" if m["tag"] else ""),
          "reason": f"AR이 아닌 외부 레지스트리({m['host']})"}
         for m in _EXTERNAL_REF.finditer(text)
     ]
@@ -203,13 +203,14 @@ def _status_digest(rev: dict) -> str | None:
     return m["digest"] if m and m["digest"] else None
 
 
-def _image_values(node: Any) -> Iterable[str]:
-    """JSON 안의 모든 `image` 키의 문자열 값(Cloud Run 컨테이너의 `image`). 이 키 이름을 «읽기»에만 쓴다 — 못 알아보는 값을 실패로 올리는 쪽(더 엄격한 쪽)으로만 작동한다."""
+def _image_values(node: Any) -> Iterable[Any]:
+    """JSON 안의 모든 `image` 키의 값(Cloud Run 컨테이너의 `image`). 이 키 이름을 «읽기»에만 쓴다 — 못 알아보는 값을 실패로 올리는 쪽(더 엄격한 쪽)으로만 작동한다.
+    값이 문자열이 아니어도(객체 · 목록 · 숫자) 그대로 내준다 — 못 읽는 `image`를 건너뛰지 않는다."""
     if isinstance(node, dict):
         for key, value in node.items():
-            if key == "image" and isinstance(value, str):
+            if key == "image":
                 yield value
-            else:
+            if isinstance(value, (dict, list)):
                 yield from _image_values(value)
     elif isinstance(node, list):
         for value in node:
@@ -217,12 +218,14 @@ def _image_values(node: Any) -> Iterable[str]:
 
 
 def _unknown_images(blob: Any, where: str) -> list[str]:
-    """`image` 값 중 우리 AR 주소도 알려진 외부 레지스트리도 아닌 것 — 그런 이미지가 «있다»는 사실이 다른 곳의 외부 주소 한 줄에 가려지지 않게 실패로 올린다."""
-    return [
-        f"{where}의 image 값 {value[:80]!r}을 알아보지 못함(우리 AR 주소도 알려진 외부 레지스트리도 아니다) — 모르면 실패한다"
-        for value in dict.fromkeys(_image_values(blob))
-        if not (refs_in(value) or external_refs_in(value))
-    ]
+    """`image` 값 중 우리 AR 주소도 알려진 외부 레지스트리도 아닌 것(문자열이 아닌 값 포함) — 그런 이미지가 «있다»는 사실이 다른 곳의 외부 주소 한 줄에 가려지지 않게 실패로 올린다."""
+    problems: dict[str, None] = {}
+    for value in _image_values(blob):
+        if isinstance(value, str) and (refs_in(value) or external_refs_in(value)):
+            continue
+        shown = value[:80] if isinstance(value, str) else json.dumps(value, ensure_ascii=False)[:80]
+        problems[f"{where}의 image 값 {shown!r}을 알아보지 못함(우리 AR 주소도 알려진 외부 레지스트리도 아니다) — 모르면 실패한다"] = None
+    return list(problems)
 
 
 # 어느 레지스트리인지 모르는 주소 꼴(`<도메인>/<경로>:<태그>` · `@sha256:`) — 문자열(시작 스크립트 등) 속에서 «있다»를 보이게만 한다. 우리 AR · 알려진 외부 레지스트리는 따로 센다.

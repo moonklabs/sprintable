@@ -838,6 +838,30 @@ def test_an_unknown_registry_image_is_not_hidden_by_an_external_string_elsewhere
     assert gate.collect(extra=[{"containers": [{"image": "registry.example.com/x:1"}]}], hosts={AR_HOST}).problems
 
 
+def test_an_image_value_that_is_not_a_string_is_not_skipped():
+    """the QA finding: `{"image": {"name": "registry.example.com/x/y:1"}}` next to a good sibling image used to pass — the walker only recursed into it"""
+    odd = {"containers": [{"image": f"{HOST}/backend:backend-tag2"}, {"image": {"name": "registry.example.com/x/y:1"}}]}
+    assert gate.collect(extra=[odd], hosts={AR_HOST}).problems
+    assert gate.collect(extra=[{"containers": [{"image": None}]}], hosts={AR_HOST}).problems
+    assert not gate.collect(extra=[{"containers": [{"image": f"{HOST}/backend:backend-tag2"}]}], hosts={AR_HOST}).problems  # positive control
+
+
+def test_a_tag_pinned_with_a_digest_protects_the_digest_even_after_the_tag_moved(tmp_path):
+    """the QA finding (it was in the checker before this PR): `backend:old@sha256:…` is the form Docker accepts; it pulls the DIGEST. When the tag `old` has since moved to a newer image, protecting «what the tag
+    points to now» keeps the wrong image and deletes the pinned one"""
+    refs = gate.refs_in(json.dumps({"image": f"{HOST}/backend:moved@{_digest(900)}"}))
+    assert [(r["package"], r["tag"], r["digest"]) for r in refs] == [("backend", None, _digest(900))]
+    assert [(r["ref"]) for r in gate.external_refs_in("gcr.io/x/y:1@sha256:" + "c" * 64)] == ["@sha256:" + "c" * 64]
+    d = Dumps(tmp_path)
+    d.images += [
+        {"package": f"{HOST}/backend", "version": _digest(900), "tags": [], "createTime": _iso(NOW - timedelta(days=60))},
+        {"package": f"{HOST}/backend", "version": _digest(901), "tags": ["moved"], "createTime": _iso(NOW - timedelta(days=1))},
+    ]
+    d.mig = {"startup": f"docker run {HOST}/backend:moved@{_digest(900)}"}
+    assert gate.main(d.argv()) == 0
+    assert _digest(900)[:64] in json.loads(d.out.read_text())[0]["condition"]["versionNamePrefixes"], "the pinned old image is the one in use"
+
+
 def test_a_resolved_digest_from_a_registry_the_gate_does_not_know_does_not_resolve_a_tag():
     """the QA finding: `status.imageDigest` of an unknown registry carries a valid-looking SHA; it must not stand for our tagged container"""
     service = [_service("s", "rev-2", f"{HOST}/backend:backend-tag2")]
