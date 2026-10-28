@@ -20,8 +20,8 @@ support_gateway:  # story 4796: the support gateway's database — a second Post
     user: support_gw
     name: support_gateway
     password_secret: SUPPORT_GATEWAY_DB_PASSWORD_VM_DEV   # new secret, hex like the main database's (RUNBOOK §3)
-  allow_from:   # the networks the server's access rules let the application role in from: the subnet the gateway's Cloud Run revisions get their addresses from (RUNBOOK §13 compares it with the real one)
-    - 10.178.0.0/20
+  allow_from:   # the networks the server's access rules let the application role in from: the gateway's OWN subnet (RUNBOOK §13 creates it; the firewall's allow rule names the same range). Not the default subnet: that holds other Cloud Run services too
+    - 10.120.0.0/25
 services:
   backend:
     live_section: sprintable-backend-dev

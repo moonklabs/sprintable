@@ -513,7 +513,7 @@ def test_the_access_rules_are_rendered_from_the_declaration_and_let_only_the_app
     text = (world.cfg.install_dir / "runtime/gateway-db-pg_hba.conf").read_text()
     assert text == renv.gateway_hba(world.decl)
     rules = [l.split() for l in text.splitlines() if l and not l.startswith("#")]
-    assert rules == [["local", "all", "all", "trust"], ["host", "support_gateway", "support_gw", "10.178.0.0/20", "scram-sha-256"], ["host", "all", "all", "0.0.0.0/0", "reject"], ["host", "all", "all", "::/0", "reject"]]
+    assert rules == [["local", "all", "all", "trust"], ["host", "support_gateway", "support_gw", "10.120.0.0/25", "scram-sha-256"], ["host", "all", "all", "0.0.0.0/0", "reject"], ["host", "all", "all", "::/0", "reject"]]
     assert oct((world.cfg.install_dir / "runtime/gateway-db-pg_hba.conf").stat().st_mode & 0o777) == "0o644"
     default = [l.split() for l in (_VM / "gateway-db-pg_hba.conf").read_text().splitlines() if l and not l.startswith("#")]
     assert default == [["local", "all", "all", "trust"], ["host", "all", "all", "0.0.0.0/0", "reject"], ["host", "all", "all", "::/0", "reject"]], "the fallback file lets nobody in over the network"
@@ -635,8 +635,8 @@ def test_the_allowed_networks_are_a_short_list_of_narrow_private_networks(tmp_pa
         renv.load_declaration(_decl(tmp_path, lambda d: d["support_gateway"].update(allow_from=value) if value is not None else d["support_gateway"].pop("allow_from")))
 
 
-def test_the_real_declaration_names_the_default_subnet_of_the_region() -> None:
-    assert renv.gateway_networks(renv.load_declaration(_VM / "env/dev.yaml")["support_gateway"]["allow_from"]) == ["10.178.0.0/20"]
+def test_the_real_declaration_names_the_gateways_own_subnet() -> None:
+    assert renv.gateway_networks(renv.load_declaration(_VM / "env/dev.yaml")["support_gateway"]["allow_from"]) == ["10.120.0.0/25"]
 
 
 def _init_run(tmp_path: Path, **env: str):
@@ -762,10 +762,10 @@ def test_the_connection_budget_of_the_gateway_server_holds_the_overlap_of_two_re
 
 def test_the_lens_of_the_security_domain_is_in_the_runbook_as_controls_that_can_be_run() -> None:
     sec = (_VM / "RUNBOOK.md").read_text().split("## 13. The support gateway's database on the VM")[1]
-    for token in ("--priority 900 --action DENY --rules tcp:5432", "--priority 800 --action ALLOW --rules tcp:5432 --target-tags $VM --source-tags support-gateway-dev",
-                  "**Negative — before step 5, as its hard condition:**", "a **subnet of its own for the gateway**", "`gw_admin|t` and `support_gw|f`", "permission denied to COPY to or from an external program",
+    for token in ("--priority 900 --action DENY --rules tcp:5432", "--priority 800 --action ALLOW --rules tcp:5432 --target-tags $VM --source-ranges \"$GWRANGE\"",
+                  "**Negative — before step 5, as its hard condition:**", "told apart by SUBNET, not by tag", "`gw_admin|t` and `support_gw|f`", "permission denied to COPY to or from an external program",
                   "never 0", "grep -c -F -- \"$PW\"", "no password and no way in over any network address", "ordinary role", "never logs what a statement was run with",
-                  "subnets describe default", "an empty value means the variable is not sent at all"):
+                  "gcloud compute networks subnets create support-gateway-$ENV", "an empty value means the variable is not sent at all"):
         assert token in sec, token
 
 
@@ -1257,3 +1257,58 @@ def test_step_3b_makes_nothing_when_the_address_to_probe_is_empty(tmp_path: Path
     p, calls = _run_step_3b(tmp_path, vmip_empty=True)
     assert "STOP: no address to probe" in p.stdout
     assert _count(calls, "gcloud iam service-accounts create") == 0 and _count(calls, "gcloud run jobs") == 0 and _count(calls, "gcloud logging") == 0
+
+
+# ── the gateway's own subnet (PO decision 2026-10-28: option A; Google's list of limits has no network tags in ingress firewall rules for Direct VPC egress) ────────────────
+
+def _runbook13() -> str:
+    return (_VM / "RUNBOOK.md").read_text().split("## 13. The support gateway's database on the VM")[1]
+
+
+def test_the_range_is_written_once_in_the_declaration_and_the_runbook_commands_take_it_from_there() -> None:
+    rb = _runbook13()
+    declared = renv.load_declaration(_VM / "env/dev.yaml")["support_gateway"]["allow_from"]
+    assert len(declared) == 1
+    line = next(l for l in rb.splitlines() if l.startswith("GWRANGE=$(awk"))
+    root = _VM.parent.parent
+    got = subprocess.run(["bash", "-c", line.split("   #")[0] + '; printf %s "$GWRANGE"'], capture_output=True, text=True, timeout=30, cwd=root)
+    assert got.stdout.strip().splitlines()[-1] == declared[0], (got.stdout, got.stderr)
+    allow = next(l for l in rb.splitlines() if l.startswith("gcloud compute firewall-rules create $VM-gateway-db-allow"))
+    create = next(l for l in rb.splitlines() if l.startswith("gcloud compute networks subnets create support-gateway-$ENV"))
+    assert '--source-ranges "$GWRANGE"' in allow and '--range "$GWRANGE"' in create
+    assert "--source-tags" not in allow and "--priority 800 --action ALLOW" in allow and "--target-tags $VM" in allow
+    assert not re.search(r"\b10\.(?!128\.0\.0/9)\d+\.\d+\.\d+/\d+", rb), "the range is named by `allow_from`, not repeated as a number in the runbook (the automatic block of the network is a general fact)"
+
+
+def test_the_gateways_subnet_lies_outside_the_automatic_subnets_and_clear_of_the_ranges_already_in_use() -> None:
+    import ipaddress
+    net = ipaddress.ip_network(renv.load_declaration(_VM / "env/dev.yaml")["support_gateway"]["allow_from"][0])
+    assert not net.overlaps(ipaddress.ip_network("10.128.0.0/9")), "the automatic subnets of an auto-mode network lie in 10.128.0.0/9"
+    assert not net.overlaps(ipaddress.ip_network("10.110.0.0/16")) and not net.overlaps(ipaddress.ip_network("10.178.0.0/20")), "Cloud SQL's peering and the default subnet of the region"
+    assert net.prefixlen <= 26, "Google's minimum for Direct VPC egress"
+    assert net.num_addresses >= 4 * 10 + 4, "the service's ceiling of 10 instances at 4 addresses each, and the network's reserved addresses"
+    assert net.is_private
+
+
+def test_the_runbook_says_why_the_subnet_and_not_the_tag_and_the_negative_control_stays_on_the_default_subnet() -> None:
+    rb = _runbook13()
+    for token in ("cannot be named by a network tag in an ingress firewall rule", "told apart by SUBNET, not by tag", "placed OUTSIDE it", "A /25 holds the service's ceiling of 10 instances",
+                  "`--subnet support-gateway-$ENV` instead of `--subnet default`", "the default subnet is not allowed, because it also holds other Cloud Run services"):
+        assert token in rb, token
+    assert "source-tags" not in rb and "--network-tags" not in rb, "no tag is used as the source of the allow rule or on the pipeline's flags"
+    probe_job = next(l for l in rb.splitlines() if "gcloud run jobs create" in l and "$PJU" in l)
+    assert "--subnet default" in probe_job, "the negative control runs on the default subnet"
+
+
+def test_the_runbook_keeps_the_subnet_to_the_gateway_and_does_not_publish_the_topology_around_it() -> None:
+    rb = _runbook13()
+    assert "**This subnet hosts only the gateway service, its migrate job and the throw-away probe job.**" in rb and "no other Cloud Run service or job goes on this subnet" in rb
+    assert "`gcloud compute addresses list --global`" in rb and "`gcloud compute networks subnets list --network default`" in rb
+    assert "gcloud iam service-accounts list --project $PROJECT --filter='email~gwdb-probe'" in rb
+    for gone in ("10.110.", "peering", "10.178."):
+        assert gone not in rb, f"the runbook does not name {gone}"
+
+
+def test_the_runbook_notes_that_the_subnet_has_no_private_google_access_and_when_that_matters() -> None:
+    rb = _runbook13()
+    assert "Private Google Access **off**" in rb and "`private-ranges-only`" in rb and "changing it to `all-traffic` later needs NAT or Private Google Access first" in rb
