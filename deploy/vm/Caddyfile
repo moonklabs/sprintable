@@ -9,6 +9,23 @@
 }
 
 {$API_HOST}, {$REALTIME_HOST} {
+	# the access log, to stdout (docker logs; the compose logging limit applies: 5 files of 10 MB): it is how the VM's request rate is measured (story 4796: the machine traffic of the prod move, RUNBOOK §12).
+	# No credential is kept: the request headers and the response headers are removed (Caddy hides Authorization and Cookie by default, this keeps the rest of them out too) and so is the whole URI
+	# (one-time codes of OAuth callbacks travel in the query string, invitation and public-document tokens in the path: /api/v2/invites/{token}, /api/v2/public/docs/{token}). What is left: time, host, method, status, size, duration,
+	# and the client address (Caddy's remote_ip / client_ip, the same as Cloud Run's remoteIp in its request log): an address is personal data, so this log is read for its counts and is not shipped anywhere.
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>headers delete
+				request>tls delete
+				resp_headers delete
+				request>uri delete
+			}
+		}
+	}
+
 	# no `encode`: compressing would hold SSE frames back. flush_interval -1 sends every chunk as it arrives.
 	reverse_proxy backend:8000 {
 		flush_interval -1
@@ -16,6 +33,23 @@
 }
 
 {$APP_HOST} {
+	# the access log, to stdout (docker logs; the compose logging limit applies: 5 files of 10 MB): it is how the VM's request rate is measured (story 4796: the machine traffic of the prod move, RUNBOOK §12).
+	# No credential is kept: the request headers and the response headers are removed (Caddy hides Authorization and Cookie by default, this keeps the rest of them out too) and so is the whole URI
+	# (one-time codes of OAuth callbacks travel in the query string, invitation and public-document tokens in the path: /api/v2/invites/{token}, /api/v2/public/docs/{token}). What is left: time, host, method, status, size, duration,
+	# and the client address (Caddy's remote_ip / client_ip, the same as Cloud Run's remoteIp in its request log): an address is personal data, so this log is read for its counts and is not shipped anywhere.
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>headers delete
+				request>tls delete
+				resp_headers delete
+				request>uri delete
+			}
+		}
+	}
+
 	encode zstd gzip
 	reverse_proxy frontend:3000 {
 		flush_interval -1
