@@ -28,7 +28,7 @@ SAMPLE = {"PROJECT": "sprintable-494803", "REGION": "asia-northeast3", "ZONE": "
           "MCP": "sprintable-mcp-prod", "API_HOST": "api.sprintable.ai", "APP_HOST": "app.sprintable.ai", "VMIP": "34.64.1.2", "SRC_IP": "10.110.0.3", "svc": "sprintable-backend-prod",
           "job": "sprintable-sched-prod", "JOB": "sprintable-sched-prod", "NAME": "some-job", "r": "services", "n": "sprintable-backend-prod", "TMO": "300", "BURL": "https://x.run.app", "FROZEN": "yes",
           "uri": "https://sprintable-backend-prod-787818285179.asia-northeast3.run.app/api/v2/internal/cron/x", "new": "https://api.sprintable.ai/api/v2/internal/cron/x", "out": "", "CODE": "403",
-          "WINDOW": "20261102", "VMBACK": "passing", "id": "JWT_SECRET_PROD", "b": "sprintable-vm-prod-backups", "route": "refresh", "REPO": "/repo", "FINAL_DUMP": "/srv/sprintable/import/prod-final-1.dump", "FINAL_COUNTS": "/srv/sprintable/import/prod-final-1.counts.tsv"}
+          "WINDOW": "20261102", "VMBACK": "passing", "id": "JWT_SECRET_PROD", "b": "sprintable-vm-prod-backups", "route": "refresh", "path": "desktop/setup-codes", "m": "allUsers", "names": "a b", "d": "{}", "pol": "{}", "svcs": "a", "left": "0", "REPO": "/repo", "FINAL_DUMP": "/srv/sprintable/import/prod-final-1.dump", "FINAL_COUNTS": "/srv/sprintable/import/prod-final-1.counts.tsv"}
 
 
 def _blocks() -> list[str]:
@@ -154,7 +154,7 @@ def test_no_block_freezes_by_ingress_or_measures_on_a_reserved_path() -> None:
     assert "--ingress" not in code, "the freeze is the IAM binding"
     assert "/healthz" not in code and "/readyz" not in code, "Cloud Run answers the paths that end in z itself"
     assert code.count("remove-iam-policy-binding") >= 1 and code.count("add-iam-policy-binding") >= 2
-    assert "--member=allUsers --role=roles/run.invoker" in code
+    assert '--member="$m" --role=roles/run.invoker' in code and "--member=allUsers" not in code, "members come from the record, never from a literal"
     assert '"$BURL/openapi.json"' in code and "403" in _section("## 5. Freeze", "## 6–7.")
 
 
@@ -222,6 +222,8 @@ def test_every_gcloud_command_of_the_sheet_parses_in_the_real_gcloud(tmp_path: P
         home = tmp_path / f"home-{n}"
         home.mkdir()
         out = _gcloud.text(_gcloud.run(list(argv), home))
+        if "(unset)" in out and argv[0:2] == ("config", "get-value"):
+            return None   # `config get-value account` is answered from the local configuration (empty here): the flags were accepted
         return None if "do not currently have an active account" in out else (" ".join(argv)[:140], out[:220])
 
     assert len(unique) >= 20, len(unique)
@@ -243,7 +245,9 @@ case "$*" in
   *"run services list"*|*"run jobs list"*) printf 'sprintable-backend-prod\nsprintable-frontend-prod\n' ;;
   *"run services describe"*|*"run jobs describe"*) echo "{\"x\":1,\"note\":\"$DESC_EXTRA\"}" ;;
   *"secrets get-iam-policy"*) case "$*" in *DATABASE_URL_PROD*) echo '{"bindings":[]}' ;; *) echo '{"bindings":[{"role":"roles/secretmanager.secretAccessor","members":["serviceAccount:vm-sa@sprintable-494803.iam.gserviceaccount.com"]}]}' ;; esac ;;
-  *"get-iam-policy"*) case " $* " in *" $NOBIND "*) echo '{"bindings":[]}' ;; *" $GARBAGE "*) echo 'not json at all' ;; *) echo '{"bindings":[{"role":"roles/run.invoker","members":["allUsers"]}]}' ;; esac ;;
+  *"config get-value account"*) echo "$OPERATOR" ;;
+  *"remove-iam-policy-binding"*) svc="$4"; for a in "$@"; do case "$a" in --member=*) case " $STICKY " in *" ${a#--member=} "*) ;; *) echo "${a#--member=}" >> "$STATE/removed-$svc" ;; esac ;; esac; done ;;
+  *"get-iam-policy"*) svc="$4"; case " $* " in *" $NOBIND "*) echo '{"bindings":[{"role":"roles/run.invoker","members":["user:operator@example.com"]}]}' ;; *" $GARBAGE "*) echo 'not json at all' ;; *) out=""; for m in allUsers serviceAccount:caller@p.iam.gserviceaccount.com user:operator@example.com; do grep -qxF "$m" "$STATE/removed-$svc" 2>/dev/null || out="$out\"$m\","; done; echo "{\"bindings\":[{\"role\":\"roles/run.invoker\",\"members\":[${out%,}]}]}" ;; esac ;;
   *"executions list"*) case " $* " in *" $BUSY "*) echo "exec-1" ;; esac ;;
   *"compute instances describe"*"serviceAccounts"*) echo vm-sa@sprintable-494803.iam.gserviceaccount.com ;;
   *"compute instances describe"*) echo 34.64.1.2 ;;
@@ -265,7 +269,7 @@ case "$*" in *api.sprintable.ai*) printf %s "${VM_CODE:-200}" ;; *) printf %s "$
 _FAKE_PY = """#!/bin/sh
 echo "python3 $*" >> "$CALLS"
 case "$1" in
-  */apply_cloud_scheduler.py) case " $* " in *" --apply "*) echo "applied" ;; *) printf '%s\\n' "$PLAN_OUT" ;; esac ;;
+  */apply_cloud_scheduler.py) case " $* " in *" --apply "*) echo "applied" ;; *) if grep -q -e '--apply' "$CALLS"; then printf '%s\\n' "$PLAN_POST"; else printf '%s\\n' "$PLAN_OUT"; fi ;; esac ;;
   */render_env.py) printf 'JWT_SECRET_PROD\\nDB_PASSWORD_VM_PROD\\n' ;;
   *) exec "$REAL_PYTHON" "$@" ;;
 esac
@@ -305,8 +309,9 @@ def _world(tmp_path: Path) -> dict[str, str]:
         f.chmod(f.stat().st_mode | stat.S_IEXEC)
     calls = tmp_path / "calls"
     calls.write_text("")
+    (tmp_path / "state").mkdir(exist_ok=True)
     import sys
-    return {"PATH": f"{b}:{os.environ.get('PATH', '/usr/bin:/bin')}", "HOME": str(tmp_path), "CALLS": str(calls), "TMO": "300", "REAL_PYTHON": sys.executable, "PLAN_OUT": "", "OPEN_PORT": "none", "DESC_EXTRA": "",
+    return {"PATH": f"{b}:{os.environ.get('PATH', '/usr/bin:/bin')}", "HOME": str(tmp_path), "CALLS": str(calls), "STATE": str(tmp_path / "state"), "TMO": "300", "REAL_PYTHON": sys.executable, "OPERATOR": "operator@example.com", "STICKY": "", "PLAN_OUT": "", "PLAN_POST": "UNCHANGED 4\ndry-run — nothing changed", "OPEN_PORT": "none", "DESC_EXTRA": "",
             **{k: v for k, v in SAMPLE.items() if k not in ("TMO",)}}
 
 
@@ -337,17 +342,18 @@ def _verbs(calls: list[str], word: str) -> list[str]:
 
 
 IN_FOLDER = '[ -n "$WINDOW" ] && [ "${PWD##*/}" = "window-${WINDOW}" ]'
-FREEZE = 'STEP=no\n[ -n "$FROZEN" ]'
+FREEZE = 'STEP=no\nOP=$(gcloud config get-value account'
 UNFREEZE = f"STEP=no\n{IN_FOLDER} && [ -s reopen.txt ]"
 JOBS = f"RUN=no\n{IN_FOLDER} && [ -s jobs.txt ]"
 SCH_MOVE = f"SCH=no\n{IN_FOLDER} && [ -s scheduler-before.tsv ]"
 SCH_BACK = f"SCH=no\n{IN_FOLDER} && [ -s scheduler-moved.tsv ]"
-PUBLIC = "sprintable-mcp-prod\nsvc-a\nsvc-b\nsvc-c\n"
-WP = "was-public-20261102.txt"
+CALLER = "serviceAccount:caller@p.iam.gserviceaccount.com"
+PUBLIC = "".join(f"{svc}\t{m}\n" for svc in ("sprintable-mcp-prod", "svc-a", "svc-b", "svc-c") for m in ("allUsers", CALLER))
+WP = "was-invoker-20261102.tsv"
 
 
 def test_the_read_only_blocks_write_nothing(tmp_path: Path) -> None:
-    for i, marker in enumerate(("SRC_IP=$(gcloud sql", "USES CLOUD SQL PROD", "Google-Cloud-Scheduler", "VMSA=$(gcloud compute", "busiest minutes of the last 7 days")):
+    for i, marker in enumerate(("SRC_IP=$(gcloud sql", "USES CLOUD SQL PROD", "Google-Cloud-Scheduler", "VMSA=$(gcloud compute", "for route in register token", "for path in desktop/setup-codes")):
         p, calls = _run(_block_with(marker), _fresh(tmp_path, f"ro{i}"))
         assert p.returncode == 0, (marker, p.stderr[:300])
         gcloud_calls = [c for c in calls if c.startswith("gcloud ")]
@@ -376,11 +382,13 @@ def test_the_freeze_is_a_ladder_that_proves_before_it_waits_and_leaves_the_servi
     ok, calls = _run(block, _fresh(tmp_path, "ok"), files={"frozen.txt": "svc-a\nsvc-b\n"})
     assert ok.returncode == 0, ok.stderr
     removed = _verbs(calls, "remove-iam-policy-binding")
-    assert [c.split()[4] for c in removed] == ["svc-a", "svc-b"], removed
+    assert [c.split()[4] for c in removed] == ["svc-a", "svc-a", "svc-b", "svc-b"], removed
+    assert not [c for c in removed if "user:operator@example.com" in c], "the operator account is never taken off"
+    assert [c.split("--member=")[1].split()[0] for c in removed[:2]] == ["allUsers", CALLER], "every other member goes, not only the public one"
     assert "outside: 403" in ok.stdout and "freeze: waited" in ok.stdout and any(c.startswith("sleep 310") for c in calls), "proved from outside (403), then the wait of the request timeout + 10 s"
     assert max(i for i, c in enumerate(calls) if "remove-iam-policy-binding" in c) < next(i for i, c in enumerate(calls) if c.startswith("curl")) < next(i for i, c in enumerate(calls) if c.startswith("sleep")), "freeze, prove, wait"
     assert not _verbs(calls, "add-iam-policy-binding"), "a freeze never opens anything"
-    assert (_w(tmp_path / "ok") / WP).read_text().split() == ["svc-a", "svc-b"], "what the freeze really took the binding off is written down: the way back opens exactly that"
+    assert (_w(tmp_path / "ok") / WP).read_text().splitlines() == [f"svc-a\tallUsers", f"svc-a\t{CALLER}", f"svc-b\tallUsers", f"svc-b\t{CALLER}"], "what the freeze really took off is written down, member by member: the way back puts back exactly that"
     # the freeze is not proved (the outside still answers 200): no wait, no T0
     p, calls2 = _run(block, _fresh(tmp_path, "open"), extra={"CURL_CODE": "200"}, files={"frozen.txt": "svc-a\n"})
     assert "outside: 200" in p.stdout and "freeze: frozen" in p.stdout and not any(c.startswith("sleep") for c in calls2), "a freeze that is not proved does not wait and does not start the clock"
@@ -398,23 +406,23 @@ def test_a_failed_removal_stops_the_loop_at_once_and_no_later_service_is_touched
     block = _block_with(FREEZE)
     p, calls = _run(block, tmp_path, extra={"FAIL": "remove-iam-policy-binding svc-b"}, files={"frozen.txt": "svc-a\nsvc-b\nsvc-c\n"})
     touched = [c.split()[4] for c in _verbs(calls, "remove-iam-policy-binding")]
-    assert touched == ["svc-a", "svc-b"], touched
+    assert touched == ["svc-a", "svc-a", "svc-b"], touched
     assert "freeze: failed" in p.stdout and not any(c.startswith(("sleep", "curl")) for c in calls), "no proof, no wait, no clock after a failure"
 
 
 def test_a_service_that_is_already_frozen_is_skipped_so_the_block_can_be_run_again(tmp_path: Path) -> None:
     p, calls = _run(_block_with(FREEZE), tmp_path, extra={"NOBIND": "svc-a"}, files={"frozen.txt": "svc-a\nsvc-b\n"})
-    assert [c.split()[4] for c in _verbs(calls, "remove-iam-policy-binding")] == ["svc-b"], "removing a binding that is not there is an error in gcloud: the block asks first"
+    assert [c.split()[4] for c in _verbs(calls, "remove-iam-policy-binding")] == ["svc-b", "svc-b"], "removing a binding that is not there is an error in gcloud: the block asks first"
     assert "freeze: waited" in p.stdout
-    assert (_w(tmp_path) / WP).read_text().split() == ["svc-b"], "svc-a was private before the move: it is not in the file the way back opens"
+    assert {line.split("\t")[0] for line in (_w(tmp_path) / WP).read_text().splitlines()} == {"svc-b"}, "svc-a had no caller but the operator: it is not in the file the way back reads"
 
 
 def test_a_policy_that_cannot_be_read_is_a_stop_and_never_taken_for_already_frozen(tmp_path: Path) -> None:
     block = _block_with(FREEZE)
     p, calls = _run(block, _fresh(tmp_path, "readfail"), extra={"FAIL": "get-iam-policy svc-b"}, files={"frozen.txt": "svc-a\nsvc-b\nsvc-c\n"})
-    assert "freeze: failed" in p.stdout and [c.split()[4] for c in _verbs(calls, "remove-iam-policy-binding")] == ["svc-a"] and not any(c.startswith(("sleep", "curl")) for c in calls)
+    assert "freeze: failed" in p.stdout and [c.split()[4] for c in _verbs(calls, "remove-iam-policy-binding")] == ["svc-a", "svc-a"] and not any(c.startswith(("sleep", "curl")) for c in calls)
     p, calls = _run(block, _fresh(tmp_path, "garbage"), extra={"GARBAGE": "svc-b"}, files={"frozen.txt": "svc-a\nsvc-b\nsvc-c\n"})
-    assert "freeze: failed" in p.stdout and [c.split()[4] for c in _verbs(calls, "remove-iam-policy-binding")] == ["svc-a"], "a policy that is not JSON stops the block"
+    assert "freeze: failed" in p.stdout and [c.split()[4] for c in _verbs(calls, "remove-iam-policy-binding")] == ["svc-a", "svc-a"], "a policy that is not JSON stops the block"
     assert not [c for c in calls if "svc-c" in c], "nothing after the unreadable one is touched"
 
 
@@ -435,7 +443,9 @@ def test_the_unfreeze_opens_only_what_reopen_txt_names_proves_the_vm_and_resumes
     files = {"reopen.txt": "sprintable-mcp-prod\n", "paused.txt": "job-1\njob-2\n", WP: PUBLIC, "frozen.txt": "sprintable-backend-prod\nsprintable-frontend-prod\nsprintable-mcp-prod\n"}
     p, calls = _run(block, _fresh(tmp_path, "ok"), files=files, extra={"BURL": ""})
     assert any("services describe" in c and "status.url" in c for c in calls), "the unfreeze derives the Cloud Run address too"
-    assert [c.split()[4] for c in _verbs(calls, "add-iam-policy-binding")] == ["sprintable-mcp-prod"], "the Cloud Run backend and frontend stay closed (two databases otherwise)"
+    adds = _verbs(calls, "add-iam-policy-binding")
+    assert [c.split()[4] for c in adds] == ["sprintable-mcp-prod", "sprintable-mcp-prod"], "the Cloud Run backend and frontend stay closed (two databases otherwise)"
+    assert [c.split("--member=")[1].split()[0] for c in adds] == ["allUsers", CALLER], "the service gets back exactly the members the freeze recorded for it, no other"
     assert [c.split()[4] for c in _verbs(calls, "scheduler jobs resume")] == ["job-1", "job-2"]
     assert "the VM: 200 · Cloud Run backend: 403" in p.stdout and "unfreeze: resumed" in p.stdout
     assert any("api.sprintable.ai/openapi.json" in c for c in calls), "the measurement is the VM's front"
@@ -450,10 +460,10 @@ def test_the_unfreeze_opens_only_what_reopen_txt_names_proves_the_vm_and_resumes
     nofile = {k: v for k, v in files.items() if k != WP}
     p, calls = _run(block, _fresh(tmp_path, "nofile"), files=nofile)
     assert "unfreeze: no" in p.stdout and not _verbs(calls, "iam-policy-binding") and not _verbs(calls, "scheduler jobs resume"), "a window without a record opens nothing"
-    p, calls = _run(block, _fresh(tmp_path, "stale"), files={**files, "was-public-20250101.txt": "sprintable-mcp-prod\n", WP: "svc-a\n"})
-    assert "was not public before the freeze: sprintable-mcp-prod" in p.stdout and not _verbs(calls, "add-iam-policy-binding"), "the record of another window is not this window's"
+    p, calls = _run(block, _fresh(tmp_path, "stale"), files={**files, "was-invoker-20250101.tsv": "sprintable-mcp-prod\tallUsers\n", WP: "svc-a\tallUsers\n"})
+    assert "no caller was taken off before the freeze: sprintable-mcp-prod" in p.stdout and not _verbs(calls, "add-iam-policy-binding"), "the record of another window is not this window's"
     p, calls = _run(block, _fresh(tmp_path, "private"), files={**files, "reopen.txt": "was-private\n"})
-    assert "was not public before the freeze: was-private" in p.stdout and not _verbs(calls, "add-iam-policy-binding") and "unfreeze: failed" in p.stdout
+    assert "no caller was taken off before the freeze: was-private" in p.stdout and not _verbs(calls, "add-iam-policy-binding") and "unfreeze: failed" in p.stdout
     p, calls = _run(block, _fresh(tmp_path, "fail"), extra={"FAIL": "add-iam-policy-binding svc-a"}, files={**files, "reopen.txt": "svc-a\nsvc-b\n"})
     assert [c.split()[4] for c in _verbs(calls, "add-iam-policy-binding")] == ["svc-a"] and not _verbs(calls, "scheduler jobs resume") and "unfreeze: failed" in p.stdout
 
@@ -462,8 +472,8 @@ def test_the_unfreeze_opens_only_what_reopen_txt_names_proves_the_vm_and_resumes
 def test_the_ladders_run_the_same_under_zsh_and_bash(tmp_path: Path) -> None:
     for shell in ("zsh", "bash"):
         p, calls = _run(_block_with(FREEZE), _fresh(tmp_path, f"f-{shell}"), shell=shell, files={"frozen.txt": "svc-a\nsvc-b\n"})
-        assert p.returncode == 0 and "freeze: waited" in p.stdout and len(_verbs(calls, "remove-iam-policy-binding")) == 2, (shell, p.stderr)
-        p, calls = _run(_block_with(UNFREEZE), _fresh(tmp_path, f"u-{shell}"), shell=shell, files={"reopen.txt": "svc-a\n", "paused.txt": "job-1\n", WP: "svc-a\n"})
+        assert p.returncode == 0 and "freeze: waited" in p.stdout and len(_verbs(calls, "remove-iam-policy-binding")) == 4, (shell, p.stderr)
+        p, calls = _run(_block_with(UNFREEZE), _fresh(tmp_path, f"u-{shell}"), shell=shell, files={"reopen.txt": "svc-a\n", "paused.txt": "job-1\n", WP: "svc-a\tallUsers\n"})
         assert p.returncode == 0 and "unfreeze: resumed" in p.stdout, (shell, p.stderr)
         p, calls = _run(_block_with(JOBS), _fresh(tmp_path, f"j-{shell}"), shell=shell, files={"jobs.txt": "job-a\n"})
         assert "jobs: quiet" in p.stdout, (shell, p.stderr)
@@ -504,6 +514,13 @@ def test_the_final_restore_keeps_its_counts_and_a_refused_restore_never_empties_
     # a second attempt in the same folder refuses to overwrite what is kept
     p2, calls = _run(block, _fresh(tmp_path, "again"), extra={"FINAL_COUNTS": str(counts)}, files={"counts-vm-final.tsv": "users\t99\n"})
     assert (_w(tmp_path / "again") / "counts-vm-final.tsv").read_text() == "users\t99\n" and not any("restore.sh" in c for c in calls), "the kept file is never overwritten and nothing is restored on top of it"
+    assert "final restore: no" in p2.stdout and "row counts equal" not in p2.stdout and not any("diff" in c for c in calls), "an earlier file never stands in for this restore: no diff, no pass"
+    # the stale file even MATCHES the counts of this dump: still no pass (the restore did not run)
+    p3, calls3 = _run(block, _fresh(tmp_path, "stale"), extra={"FINAL_COUNTS": str(counts)}, files={"counts-vm-final.tsv": "users\t3\n"})
+    assert "final restore: no" in p3.stdout and "row counts equal" not in p3.stdout and not any("restore.sh" in c for c in calls3), "a stale file that happens to match is refused too"
+    assert "final restore: equal" in ok.stdout
+    p4, _ = _run(block, _fresh(tmp_path, "nodump"), extra={"FINAL_DUMP": "", "FINAL_COUNTS": ""})
+    assert "final restore: no" in p4.stdout, "without the paths of the dump nothing runs"
     way = _section("## 12. The way back", "Two chains")
     assert "rowcounts.sh | diff <(grep -P" in way and "counts-vm-final.tsv" in way and "counts-final.tsv" not in SHEET.replace("counts-vm-final.tsv", "")
     dev = (_ROOT / "deploy/vm/CUTOVER-gateway-dev.md").read_text()
@@ -557,11 +574,11 @@ def test_the_way_back_on_the_vm_stops_where_it_fails_and_the_one_on_the_machine_
 
 def test_step_eight_says_cloud_run_backend_and_frontend_stay_closed_and_why() -> None:
     eight = _section("## 8. Unfreeze", "## 9. The lap")
-    for token in ("**Cloud Run's backend and frontend stay closed**", "they are the way back", "two databases, split writes", "What is put back is `reopen.txt`", "The measurement is a gate", "`unfreeze: resumed` is the pass", "An empty `reopen.txt`, or a window without a `was-public` file, is a stop, not a pass", "is never opened by this block"):
+    for token in ("**Cloud Run's backend and frontend stay closed**", "they are the way back", "two databases, split writes", "What is put back is `reopen.txt`", "The measurement is a gate", "`unfreeze: resumed` is the pass", "An empty `reopen.txt`, or a window without a `was-invoker` file, is a stop, not a pass", "is never opened by this block"):
         assert token in eight, token
     assert "The hosted MCP" not in eight or "once its `SPRINTABLE_API_URL`" in eight
     five = _section("## 5. Freeze", "## 6–7.")
-    for token in ("**The ladder.**", "`freeze: waited` is the pass", "**Cloud Run jobs are writers too.**", "`jobs: quiet` is the pass", "removing a binding that is not there is an error in gcloud", "a policy that cannot be **read** is a stop", "`was-public-${WINDOW}.txt`", "`WINDOW` to the date of this night"):
+    for token in ("**The ladder.**", "`freeze: waited` is the pass", "**Cloud Run jobs are writers too.**", "`jobs: quiet` is the pass", "removing a binding that is not there is an error in gcloud", "a policy that cannot be **read**, or an operator account that cannot be read, is a stop", "`was-invoker-${WINDOW}.tsv`", "`WINDOW` to the date of this night"):
         assert token in five, token
 
 
@@ -653,9 +670,31 @@ def test_the_dependents_loop_lists_a_service_that_reaches_the_database_by_the_so
     for i, (extra, listed) in enumerate(((":sprintable-prod", True), ("DATABASE_URL_PROD_PGBOUNCER", True), ("10.110.0.3", True), ("nothing of the kind", False))):
         p, _ = _run(block, _fresh(tmp_path, f"d{i}"), extra={"DESC_EXTRA": extra})
         assert ("USES CLOUD SQL PROD: services sprintable-backend-prod" in p.stdout) is listed, (extra, p.stdout[:200])
-    p, _ = _run(block, _fresh(tmp_path, "empty"), extra={"DESC_EXTRA": "10.110.0.3", "SRC_IP": ""})
-    assert "USES CLOUD SQL PROD" not in p.stdout, "an unset address matches nothing (the fallback is a string no description has)"
-    assert '-e ":${SQL}" -e "DATABASE_URL_PROD" -e "${SRC_IP:-no-such-address}"' in block
+        assert "dependents: listed" in p.stdout and "invokers: listed" in p.stdout, "the pass lines"
+    assert '-e ":${SQL}" -e "DATABASE_URL_PROD" -e "${SRC_IP}"' in block and "no-such-address" not in block, "no fallback address: an unreadable one is a stop"
+
+
+def test_the_dependents_and_invokers_ladders_fail_closed(tmp_path: Path) -> None:
+    """codex: a failed list or describe, or a source address that could not be read, used to become an empty inventory («nothing depends on prod»)"""
+    block = _block_with("USES CLOUD SQL PROD")
+    p, _ = _run(block, _fresh(tmp_path, "unreadable"), extra={"DESC_EXTRA": "10.110.0.3", "SRC_IP": ""})
+    assert "dependents: no" in p.stdout and "USES CLOUD SQL PROD" not in p.stdout and "dependents: listed" not in p.stdout
+    p, _ = _run(block, _fresh(tmp_path, "listfail"), extra={"FAIL": "run services list"})
+    assert "dependents: failed" in p.stdout and "dependents: listed" not in p.stdout
+    p, _ = _run(block, _fresh(tmp_path, "descfail"), extra={"FAIL": "run services describe sprintable-frontend-prod"})
+    assert "dependents: failed" in p.stdout and "USES CLOUD SQL PROD: services sprintable-frontend-prod" not in p.stdout
+    p, _ = _run(block, _fresh(tmp_path, "jobfail"), extra={"FAIL": "run jobs describe"})
+    assert "dependents: failed" in p.stdout, "the jobs are read the same way"
+    p, _ = _run(block, _fresh(tmp_path, "polfail"), extra={"FAIL": "get-iam-policy sprintable-frontend-prod"})
+    assert "invokers: failed" in p.stdout and "invokers: listed" not in p.stdout
+    p, _ = _run(block, _fresh(tmp_path, "garbage"), extra={"GARBAGE": "sprintable-frontend-prod"})
+    assert "invokers: failed" in p.stdout
+    p, _ = _run(block, _fresh(tmp_path, "nofolder"), where="parent")
+    assert "invokers: no" in p.stdout and "== " not in p.stdout, "outside the folder of the window the invokers are not read"
+    p, _ = _run(block, _fresh(tmp_path, "ok"))
+    assert "the operator account (it stays an invoker in the freeze): operator@example.com" in p.stdout
+    for member in ("allUsers", CALLER, "user:operator@example.com"):
+        assert member in p.stdout, member
 
 
 def test_the_g2_look_prints_what_the_expected_output_says_and_names_an_open_port(tmp_path: Path) -> None:
@@ -672,7 +711,7 @@ def test_the_g2_look_prints_what_the_expected_output_says_and_names_an_open_port
     from subprocess import run as _r
     ids = _r([__import__("sys").executable, str(_ROOT / "deploy/vm/bin/render_env.py"), "--secret-ids", str(_ROOT / "deploy/vm/env/prod.yaml")], capture_output=True, text=True).stdout.split()
     assert len(ids) == 21 and not [i for i in ids if i.startswith("DATABASE_URL")], ids
-    assert "each of the 21 ids of the declaration" in SHEET
+    assert "ids in the declaration: 21" in SHEET and "then each of the 21 ids prints" in SHEET
 
 
 def test_the_lifecycle_rule_of_the_sheet_is_the_one_of_runbook_section_one(tmp_path: Path) -> None:
@@ -712,7 +751,7 @@ def test_the_rate_limits_the_sheet_lists_are_the_ones_in_the_code_and_the_accept
                   "`/auth/refresh` and `/auth/switch-account` 20 a minute each", "`GET /api/v2/legal/{doc_type}` 60 a minute", "about 55 a minute", "**Accepted** only if the busiest minute of every route is below its limit", "**not accepted** if any is at or above it",
                   "(1) **One account for the VM, in prod too:** prod takes the account model of [RUNBOOK §2](RUNBOOK.md) as it is"):
         assert token in g5, token
-    block = _block_with("busiest minutes of the last 7 days")
+    block = _block_with("for route in register token")
     for route in ("register", "token", "refresh", "switch-account", "native-bootstrap", "device-installations/registration-challenges", "device-installations/register"):
         assert route in block.split("for route in ")[1].split("; do")[0].split(), route
 
@@ -728,7 +767,7 @@ def test_the_scheduler_by_the_script_applies_only_after_the_plan_is_exactly_four
     four = "\n".join(f"UPDATE job-{i}-prod [GET x · * * * * *] — uri" for i in range(4)) + "\nUNCHANGED 0\ndry-run — 바꾼 것 없음(--apply로 적용)"
     p, calls = _run(block, _fresh(tmp_path, "ok"), extra={"PLAN_OUT": four})
     pys = [c for c in calls if c.startswith("python3 /repo/infra/apply_cloud_scheduler.py")]
-    assert len(pys) == 2 and "--apply" not in pys[0] and "--apply" in pys[1] and "scheduler (script): applied" in p.stdout, (pys, p.stdout)
+    assert len(pys) == 3 and "--apply" not in pys[0] and "--apply" in pys[1] and "--apply" not in pys[2] and "scheduler (script): verified" in p.stdout, (pys, p.stdout)
     assert all("--env prod --base-url https://api.sprintable.ai" in c for c in pys)
     for name, plan in (("three", four.replace("UPDATE job-3-prod [GET x · * * * * *] — uri\n", "")), ("create", four + "\nCREATE job-9-prod [GET x]"), ("unmanaged", four + "\nUNMANAGED hand-made-prod (정의에 없음)"),
                        ("five", four + "\nUPDATE job-4-prod [GET x] — uri")):
@@ -754,12 +793,14 @@ def test_the_positive_control_of_the_build_check_and_what_the_product_owner_meas
         assert token in g3, token
 
 
-def test_the_day_after_cleans_the_disk_and_leaves_the_bucket_to_the_rule() -> None:
+def test_the_day_after_cleans_this_windows_copies_by_name_and_leaves_the_bucket_to_the_rule() -> None:
     day = _section("## 10–11. The day after", "## 12. The way back")
-    for token in ("**The copies of the production database are cleaned up.**", "**lifecycle rule for `import/`**", "sudo find /srv/sprintable/import -name '*-final-*' -delete", "sudo find /srv/sprintable/import -name '*-rehearsal-*' -delete",
-                  "once the removal sheet of Cloud SQL prod has made its own exports", "Write the date this was done in the record of G5"):
+    for token in ("**The copies of the production database are cleaned up.**", "**lifecycle rule for `import/`**", "sudo ls -l /srv/sprintable/import", "`sudo rm -- /srv/sprintable/import/NAME`",
+                  "once the removal sheet of Cloud SQL prod has made its own exports", "**of this window's files only and by name**", "Never a pattern", "Write the names deleted and the date in the record of G5"):
         assert token in day, token
     assert "gcloud storage rm" not in day
+    code = "\n".join(b for b in re.findall(r"```\n(.*?)```", day, flags=re.S))
+    assert "-delete" not in code and "find " not in code and "rm " not in code, "the only command of the block lists the folder; deleting is typed by name, never a pattern (it would take another window's safety copies)"
 
 
 def test_the_job_of_03_kst_is_named_in_the_freeze_with_what_happens_to_that_night() -> None:
@@ -767,3 +808,149 @@ def test_the_job_of_03_kst_is_named_in_the_freeze_with_what_happens_to_that_nigh
     for token in ("**The daily job inside the window.**", "`assets-grace-hard-delete-prod` runs at **03:00 Asia/Seoul — the first minute of the window**", "`storage-usage-warn-prod` at 09:00 KST, outside", "its run of that night is **skipped**",
                   "Cloud Scheduler does not catch up a run it missed", "gcloud scheduler jobs run assets-grace-hard-delete-prod", "writes the decision down"):
         assert token in five, token
+
+
+# ── the follow-up of the first merge: scheduler gate, G5 families, G1a, wording ──
+
+def test_the_scheduler_ladder_applies_only_when_all_four_updates_change_nothing_but_the_address(tmp_path: Path) -> None:
+    block = _block_with("SCHP=no")
+    four = "\n".join(f"UPDATE job-{i}-prod [GET x · * * * * *] — uri" for i in range(4)) + "\nUNCHANGED 0\ndry-run — nothing changed (--apply applies)"
+    p, calls = _run(block, _fresh(tmp_path, "ok"), extra={"PLAN_OUT": four})
+    assert "scheduler (script): verified" in p.stdout
+    for name, post in (("post-update", "UPDATE job-0-prod [GET x] — uri\nUNCHANGED 3"), ("post-create", "UNCHANGED 4\nCREATE job-9-prod [GET x]"), ("post-unmanaged", "UNCHANGED 4\nUNMANAGED hand-made-prod"), ("post-three", "UNCHANGED 3")):
+        p, calls = _run(block, _fresh(tmp_path, name), extra={"PLAN_OUT": four, "PLAN_POST": post})
+        assert "scheduler (script): applied" in p.stdout and "verified" not in p.stdout, (name, p.stdout[-200:])
+    for name, bad in (("schedule", "— schedule, uri"), ("schedule-first", "— uri, schedule"), ("other", "— headers"), ("retry", "— retry")):
+        plan = four.replace("UPDATE job-3-prod [GET x · * * * * *] — uri", f"UPDATE job-3-prod [GET x · * * * * *] {bad}")
+        p, calls = _run(block, _fresh(tmp_path, name), extra={"PLAN_OUT": plan})
+        assert len([c for c in calls if c.startswith("python3 /repo/infra")]) == 1 and "scheduler (script): start" in p.stdout, (name, p.stdout[-160:])
+    assert "grep -c '^UPDATE .* — uri$'" in block
+
+
+def test_the_p5_line_says_no_uri_and_the_g2_secrets_line_counts_its_ids(tmp_path: Path) -> None:
+    assert "standard output, no headers, no URI)" in SHEET and "no query string" not in SHEET
+    p, _ = _run(_block_with("VMSA=$(gcloud compute"), _fresh(tmp_path, "g2"))
+    assert "ids in the declaration: 2" in p.stdout, "the count line is printed after the loop (the fake declaration has two ids; the real one has 21)"
+    look = _section("## G2, the read-only look", "## The prod pipeline")
+    for token in ("PyYAML", "`0` — that is a stop, not a pass", "and for the rules that name no tag (they apply to every machine of the project)"):
+        assert token in look, token
+
+
+def test_the_second_family_of_limits_is_the_one_in_the_code() -> None:
+    import ast
+    found: dict[str, int] = {}
+    for rel in ("desktop_setup.py", "onboarding.py"):
+        tree = ast.parse((_ROOT / "backend/app/routers" / rel).read_text())
+        prefix = next(k.value.value for n in tree.body if isinstance(n, ast.Assign) and isinstance(n.value, ast.Call) and getattr(n.value.func, "id", "") == "APIRouter" for k in n.value.keywords if k.arg == "prefix")
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+                lim = next((d for d in node.decorator_list if isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute) and d.func.attr == "limit" and getattr(d.func.value, "id", "") == "open_setup_limiter"), None)
+                route = next((d for d in node.decorator_list if isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute) and d.func.attr == "post"), None)
+                if lim and route:
+                    found[prefix + route.args[0].value] = int(lim.args[0].value.split("/")[0])
+    assert found == {"/api/v2/desktop/setup-codes": 10, "/api/v2/desktop/setup-codes/exchange": 240, "/api/v2/desktop/device-token-codes": 10, "/api/v2/desktop/device-token-codes/exchange": 240, "/api/v2/onboarding/events": 120}, found
+    handoff = (_ROOT / "backend/app/routers/auth_firebase_internal.py").read_text()
+    assert "_OAUTH_HANDOFF_CUSTOM_SCHEME_ISSUE_LIMIT = 5" in handoff and "_OAUTH_HANDOFF_CUSTOM_SCHEME_CONSUME_LIMIT = 10" in handoff
+    auth = (_ROOT / "backend/app/routers/auth.py").read_text()
+    assert auth.count('@resend_verification_limiter.limit("3/hour")') == 2 and '@router.post("/set-password/request")' in auth and '@router.post("/resend-verification")' in auth
+    g5 = SHEET.split("**The two acceptances of G5")[1].split("## G1a")[0]
+    for token in ("**A second family counts by `client_ip`**", "`POST /api/v2/desktop/setup-codes` and `POST /api/v2/desktop/device-token-codes` 10 a minute each", "their two `…/exchange` routes 240 a minute each",
+                  "`POST /api/v2/onboarding/events` 120 a minute", "the OAuth hand-off `issue` (5) and `consume` (10) a minute", "`POST /api/v2/auth/set-password/request` and `POST /api/v2/auth/resend-verification` 3 an hour each",
+                  "so for those callers these limits too are counted as one address"):
+        assert token in g5, token
+    block = _block_with("for path in desktop/setup-codes")
+    for path in ("desktop/setup-codes", "desktop/setup-codes/exchange", "desktop/device-token-codes", "desktop/device-token-codes/exchange", "onboarding/events", "internal/auth/oauth-handoff/issue", "internal/auth/oauth-handoff/consume"):
+        assert path in block.split("for path in ")[1].split("; do")[0].split(), path
+    assert 'echo "== GET /api/v2/legal/: busiest minutes of the last 7 days (count minute)"' in block and "/api/v2/legal/" in block and 'requestMethod=\\"GET\\"' in block and "auth/set-password/request auth/resend-verification" in block and "cut -c1-13" in block, "the legal route (GET) and the two hourly routes are measured too"
+
+
+def test_the_promotion_gate_is_before_g2_and_says_what_it_carries() -> None:
+    table = _section("## G. Gates", "**The two acceptances of G5")
+    assert table.index("| **G1a.") < table.index("| **G2.") and table.index("| **G1.") < table.index("| **G1a.")
+    row = next(line for line in table.splitlines() if line.startswith("| **G1a."))
+    for token in ("`develop` is promoted to `main` once, as an ordinary prod deploy, **before** the window", "one day of real use", "the window carries the infrastructure move and no code change", "the migrations are read for the time two revisions run side by side"):
+        assert token in row, token
+    sec = _section("## G1a, the migrations of the promotion", "## G2, the read-only look")
+    for token in ("runs the migration job **before** it deploys the backend", "previous revision of the code serves against the new schema", "Read every line it prints", "A stop — the promotion waits for a compatible plan", "blocks writes to its table while it scans it", "0467 to 0469", "`sse_leases`"):
+        assert token in sec, token
+
+
+def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not_live_with(tmp_path: Path) -> None:
+    block = _block_with("promotion-history.txt")
+    assert "CUR=${CUR:?" in block and "alembic history -r" in block and "--sql" not in block, "files and the history only: no offline SQL (it cannot run the data-reading revisions) and no database"
+    # unset: the block stops at its first line
+    p, _ = _run(block, _fresh(tmp_path, "unset"), extra={"REPO": str(_ROOT)})
+    assert p.returncode != 0 and "CUR is not set" in p.stderr
+    # the three newest revisions of develop at the time of writing: only the two index builds show
+    root = _fresh(tmp_path, "new")
+    p, _ = _run(block, root, extra={"REPO": str(_ROOT), "CUR": "0466"})
+    assert p.returncode == 0, p.stderr
+    assert "revisions to run: 3" in p.stdout
+    hits = [line for line in p.stdout.splitlines() if re.match(r"^0\d{3}[a-z]?_\S+\.py:\d+: ", line)]
+    assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
+    assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
+    assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)
+    assert not any("drop_index" in h for h in hits), "the downgrade() of 0467 and 0468 is not read"
+    assert not any("drop_" in h or "alter_column" in h or "rename_" in h for h in hits), hits
+    # an older start shows the table that was dropped: the stop the block exists for
+    p, _ = _run(block, _fresh(tmp_path, "old"), extra={"REPO": str(_ROOT), "CUR": "0292"})
+    assert p.returncode == 0, p.stderr
+    assert any(line.startswith("0293_drop_inbox_items.py:") and 'op.drop_table("inbox_items")' in line for line in p.stdout.splitlines()), p.stdout[-600:]
+    assert any(line.startswith("0293_drop_inbox_items.py:") and "op.rename_table(" in line for line in p.stdout.splitlines()), "the rename is listed too"
+    assert not (_w(tmp_path / "new") / "x").exists()
+
+
+def test_the_lifecycle_update_keeps_the_previous_configuration_and_runs_only_after_it_was_read(tmp_path: Path) -> None:
+    """codex: `--lifecycle-file` replaces the whole configuration; the previous one is saved first, shown, and the update does not run when it could not be read"""
+    block = _block_with("lifecycle.json <<'EOF'")
+    p, calls = _run(block, _fresh(tmp_path, "ok"))
+    assert p.returncode == 0, p.stderr
+    order = [i for i, c in enumerate(calls) if "buckets describe" in c] + [i for i, c in enumerate(calls) if "buckets update" in c]
+    assert len(order) == 3 and order[0] < order[2], "the previous configuration is read before the update"
+    assert (_w(tmp_path / "ok") / "lifecycle-before.json").read_text().strip().startswith("{") and "before: 14 days  db/" in p.stdout and "before: 7 days  status/" in p.stdout
+    p, calls = _run(block, _fresh(tmp_path, "unread"), extra={"FAIL": "buckets describe"})
+    assert not _verbs(calls, "buckets update"), "nothing is replaced when the previous configuration could not be saved"
+    look = _section("## G2, the read-only look", "## The prod pipeline")
+    for token in ("`--lifecycle-file` replaces the whole configuration", "**Undo:**", "lifecycle-undo.json"):
+        assert token in look, token
+
+
+def test_the_scheduler_targets_saved_in_step_zero_are_never_overwritten_by_a_second_run(tmp_path: Path) -> None:
+    block = _block_with("> scheduler-before.tsv.tmp")
+    root = _fresh(tmp_path, "first")
+    p, calls = _run(block, root)
+    assert "scheduler-before.tsv written" in p.stdout and (_w(root) / "scheduler-before.tsv").is_file() and not (_w(root) / "scheduler-before.tsv.tmp").exists()
+    p, calls = _run(block, _fresh(tmp_path, "second"), files={"scheduler-before.tsv": "the-first-run\thttps://old\n"})
+    assert "scheduler-before.tsv exists: kept as it is" in p.stdout
+    assert (_w(tmp_path / "second") / "scheduler-before.tsv").read_text() == "the-first-run\thttps://old\n", "the way back of the targets is the first run's, not a later look"
+    assert not [c for c in calls if "scheduler jobs list" in c and "value(name.basename()" in c]
+
+
+@pytest.mark.skipif(shutil.which("zsh") is None, reason="no zsh on this machine")
+def test_a_failed_removal_stops_both_loops_at_once_under_zsh_and_bash(tmp_path: Path) -> None:
+    for shell in ("zsh", "bash"):
+        p, calls = _run(_block_with(FREEZE), _fresh(tmp_path, f"x-{shell}"), shell=shell, extra={"FAIL": "remove-iam-policy-binding svc-b"}, files={"frozen.txt": "svc-a\nsvc-b\nsvc-c\n"})
+        touched = [c.split()[4] for c in _verbs(calls, "remove-iam-policy-binding")]
+        assert touched == ["svc-a", "svc-a", "svc-b"] and "freeze: failed" in p.stdout, (shell, touched, p.stdout)
+        assert not [c for c in calls if "svc-c" in c], (shell, "nothing after the failure is touched")
+
+
+def test_the_freeze_text_says_every_caller_goes_but_the_operators_and_the_way_back_restores_the_same_members() -> None:
+    five = _section("## 5. Freeze", "## 6–7.")
+    for token in ("takes **every** invoker member off each service in `frozen.txt`", "**but the operator account**", "it reads each policy again and stops if any other member is left", "`was-invoker-${WINDOW}.tsv` (service, member)",
+                  "a caller that was not there before the move is never added by it"):
+        assert token in five, token
+    back = _section("## 12. The way back", "## Questions for the owner")
+    assert "the `was-invoker` file of this window" in back and '--member="$m"' in back and "allUsers" not in back.split("```")[3]
+
+
+def test_a_removal_that_gcloud_accepts_but_that_leaves_a_caller_is_a_stop_and_so_is_an_unreadable_operator(tmp_path: Path) -> None:
+    block = _block_with(FREEZE)
+    p, calls = _run(block, _fresh(tmp_path, "sticky"), extra={"STICKY": CALLER}, files={"frozen.txt": "svc-a\nsvc-b\n"})
+    assert "still callers on svc-a: 1" in p.stdout and "freeze: failed" in p.stdout and not any(c.startswith(("sleep", "curl")) for c in calls), "the policy is read again: a caller that is still there ends the ladder before the proof and the wait"
+    for name, op in (("empty", ""), ("unset", "(unset)")):
+        p, calls = _run(block, _fresh(tmp_path, name), extra={"OPERATOR": op}, files={"frozen.txt": "svc-a\n"})
+        assert "freeze: no" in p.stdout and not _verbs(calls, "remove-iam-policy-binding"), (name, "without a readable operator account nothing is taken off (it could be the operator's own access)")
+    p, calls = _run(block, _fresh(tmp_path, "sa"), extra={"OPERATOR": "ops@p.iam.gserviceaccount.com"}, files={"frozen.txt": "svc-a\n"})
+    members = [c.split("--member=")[1].split()[0] for c in _verbs(calls, "remove-iam-policy-binding")]
+    assert "serviceAccount:ops@p.iam.gserviceaccount.com" not in members and "user:operator@example.com" in members, "a service-account operator is kept as serviceAccount:, a person as user:"
