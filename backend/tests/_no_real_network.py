@@ -57,7 +57,7 @@ GCLOUD_MARKER = "SPRINTABLE_TEST_GCLOUD_ENV"
 _STARTUP_PATH = [d for d in os.environ.get("PATH", "").split(os.pathsep) if d]   # where the REAL tools live: the PATH the session began with
 _SHELLS = {"bash", "sh", "zsh", "dash"}
 _GCLOUD_STAND_IN = re.compile(r"(?:^|[;&|(\n])\s*(?:function\s+)?gcloud\s*(?:\(\s*\))?\s*\{|\balias\s+gcloud=")   # the script defines its own gcloud (a shell function or an alias): what runs is the stand-in
-_GCLOUD_AS_COMMAND = re.compile(r"(?:^|[;&|(\n{]|\$\(|\b(?:exec|if|elif|while|until|then|do|else|time|command|nohup|xargs)\s|!\s)\s*(?:sudo\s+(?:-\S+\s+)*)?(?:\S*/)?gcloud(?:\s|$)")
+_GCLOUD_AS_COMMAND = re.compile(r"(?:^|[;&|(\n{]|\$\(|\b(?:exec|if|elif|while|until|then|do|else|time|command|nohup|xargs)\s|!\s)\s*(?:(?:sudo|env)\s+(?:-\S+\s+|\w+=\S*\s+)*)?(?:\w+=\S*\s+)*(?:\S*/)?gcloud(?:\s|$)")
 
 
 def real_gcloud_without_marker(args: object, env: object) -> bool:

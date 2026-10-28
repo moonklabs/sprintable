@@ -178,6 +178,12 @@ def _guard():
     (["bash", "-ec", "cd /x && gcloud run services list"], False, True),
     (["sh", "-c", "while ! gcloud run services list; do sleep 1; done"], False, True),
     (["bash", "-c", "xargs gcloud run services describe < list"], False, True),
+    (["bash", "-c", "env gcloud run services list"], False, True),          # assignments and env in front
+    (["bash", "-c", "CLOUDSDK_CORE_PROJECT=x gcloud run services list"], False, True),
+    (["bash", "-c", "A=1 B=2 gcloud run services list"], False, True),
+    (["bash", "-c", "env -i PATH=/usr/bin CLOUDSDK_CORE_PROJECT=x gcloud version"], False, True),
+    (["bash", "-c", "sudo CLOUDSDK_CORE_PROJECT=x gcloud projects list"], False, True),
+    (["bash", "-c", "echo CLOUDSDK_CORE_PROJECT=x gcloud version"], False, False),    # words after echo are not a command
     (["bash", "-c", "gcloud() { echo stand-in; }\ngcloud run services list"], False, False),   # defines its own
     (["bash", "-c", "alias gcloud=echo; gcloud run services list"], False, False),
     (["gcloud", "version"], True, False),                                   # through the helper
