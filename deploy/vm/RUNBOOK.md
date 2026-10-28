@@ -142,12 +142,12 @@ Re-run it from a newer bundle whenever `deployer.py`, `render_env.py`, the units
 ```bash
 for SVC in backend frontend; do
   gcloud run services describe sprintable-$SVC-$ENV --region $REGION --format=json \
-   | jq --arg s $SVC '{($s): ([.spec.template.spec.containers[0].env[] | select(.value != null) | {(.name): .value}] | add)}'
+   | jq --arg s $SVC '{($s): ([.spec.template.spec.containers[0].env[] | select(has("valueFrom") | not) | {(.name): (.value // "")}] | add)}'
 done | jq -s 'add' > private-plain.json
 gcloud compute scp private-plain.json $VM:/tmp/ --zone $ZONE --tunnel-through-iap && rm private-plain.json
 # on the VM:  sudo install -m 0600 -o root -g root /tmp/private-plain.json /etc/sprintable/private-plain.json && shred -u /tmp/private-plain.json
 ```
-The deployer reports which names are missing (names only) and refuses a file that group/others can read. Entries the live service holds as secrets are not in the file (they come from Secret Manager).
+The deployer reports which names are missing (names only) and refuses a file that group/others can read. Entries the live service holds as secrets are not in the file (they come from Secret Manager). **A name whose live value is empty is in the file with an empty value:** Cloud Run's JSON leaves out the `value` key of an empty variable (the rehearsal of the prod move found five such names in the backend and the frontend), so a filter on `value != null` dropped them and the deployer stopped on «the private plain file lacks N variables»; the line above keeps every entry that is not a secret reference (`valueFrom`) and gives it `""` when it has no value.
 
 **Before any cutover — do the live services still have the names this declaration was written from?** (the tests only compare the declaration with the copy; this compares the copy with the service as it is now)
 ```bash
