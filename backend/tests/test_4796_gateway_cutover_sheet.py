@@ -717,3 +717,11 @@ def test_the_cloud_sql_check_reads_the_value_not_the_key() -> None:
     full = sp.run(["python3", "-c", prog], input='{"spec": {"template": {"metadata": {"annotations": {"run.googleapis.com/cloudsql-instances": "p:r:i"}}}}}', capture_output=True, text=True)
     none = sp.run(["python3", "-c", prog], input='{"spec": {"template": {"metadata": {}}}}', capture_output=True, text=True)
     assert (empty.stdout.strip(), full.stdout.strip(), none.stdout.strip()) == ("0", "5", "0"), "an annotation left with an empty value reads 0 (the old check counted the key and printed 1)"
+
+
+def test_the_freeze_section_expects_403_everywhere_and_never_404() -> None:
+    """the first review of the sheet fix: a leftover «404» made the gate contradict the IAM freeze (the platform answers 403 to a caller without an identity)"""
+    freeze = SHEET.split("## 4. Freeze")[1].split("## 5.")[0]
+    assert "Both `curl`s have printed 403" in freeze and freeze.count("**403**") >= 2
+    claims = [l for l in freeze.splitlines() if "404" in l and "Google HTML 404" not in l]
+    assert claims == [], claims
