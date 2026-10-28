@@ -1273,7 +1273,7 @@ def test_the_range_is_written_once_in_the_declaration_and_the_runbook_commands_t
     root = _VM.parent.parent
     got = subprocess.run(["bash", "-c", line.split("   #")[0] + '; printf %s "$GWRANGE"'], capture_output=True, text=True, timeout=30, cwd=root)
     assert got.stdout.strip().splitlines()[-1] == declared[0], (got.stdout, got.stderr)
-    allow = next(l for l in rb.splitlines() if l.startswith("gcloud compute firewall-rules create $VM-gateway-db-allow"))
+    allow = next(l for l in rb.splitlines() if "gcloud compute firewall-rules create $VM-gateway-db-allow" in l)
     create = next(l for l in rb.splitlines() if "gcloud compute networks subnets create support-gateway-$ENV" in l)
     assert '--source-ranges "$GWRANGE"' in allow and '--range "$GWRANGE"' in create
     assert "--source-tags" not in allow and "--priority 800 --action ALLOW" in allow and "--target-tags $VM" in allow
@@ -1320,7 +1320,7 @@ def test_step_3_creates_the_subnet_only_when_it_is_missing_and_compares_the_rang
     block = rb.split("```bash\n", 1)[1].split("```")[0]
     lines = block.splitlines()
     start = next(i for i, l in enumerate(lines) if l.startswith("GWCUR=$("))
-    snippet = "\n".join(lines[start:start + 2])
+    snippet = "\n".join(lines[start:start + 3])
     b = tmp_path / "bin"
     b.mkdir()
     g = b / "gcloud"
@@ -1346,3 +1346,83 @@ def test_step_3_looks_at_the_firewall_rules_before_creating_the_pair_and_says_wh
 
 def test_the_subnet_delete_in_the_undo_carries_its_condition() -> None:
     assert "(only when no Cloud Run revision uses it any more)" in _runbook13()
+
+
+def _run_step_3(tmp_path: Path, cur: str, shell: str = "bash", fw_has: str = "") -> tuple[subprocess.CompletedProcess, list[str]]:
+    """the first block of step 3, as written, from the repository root, against a fake gcloud that answers the subnet question with `cur` (empty = there is none)"""
+    import stat
+    block = _runbook13().split("```bash\n", 1)[1].split("```")[0]
+    b = tmp_path / "bin"
+    b.mkdir(exist_ok=True)
+    calls = tmp_path / "calls"
+    calls.write_text("")
+    g = b / "gcloud"
+    g.write_text('#!/bin/sh\necho "gcloud $*" >> "$CALLS"\ncase "$*" in "compute networks subnets describe"*) [ -n "$CUR" ] && printf %s "$CUR" || exit 1 ;; "compute firewall-rules describe"*) case "$*" in *"$FWHAS"*) exit 0 ;; *) exit 1 ;; esac ;; esac\nexit 0\n')
+    g.chmod(g.stat().st_mode | stat.S_IEXEC)
+    env = {"PATH": f"{b}:/usr/bin:/bin", "HOME": str(tmp_path), "ENV": "dev", "REGION": "r", "PROJECT": "p", "VM": "vm", "ZONE": "z", "CALLS": str(calls), "CUR": cur, "FWHAS": fw_has or "no-such-rule"}
+    p = subprocess.run([shell, "-c", block], capture_output=True, text=True, timeout=60, env=env, cwd=_VM.parent.parent)
+    return p, calls.read_text().splitlines()
+
+
+def test_a_stop_at_the_subnet_really_stops_the_firewall_lines(tmp_path: Path) -> None:
+    declared = renv.load_declaration(_VM / "env/dev.yaml")["support_gateway"]["allow_from"][0]
+    states = {"missing": "", "same": declared, "other": "10.9.9.0/25"}
+    got = {}
+    for name, cur in states.items():
+        (tmp_path / name).mkdir()
+        p, calls = _run_step_3(tmp_path / name, cur)
+        got[name] = (p, calls)
+    for name in ("missing", "same"):
+        calls = got[name][1]
+        assert sum(1 for c in calls if c.startswith("gcloud compute firewall-rules create")) == 2, (name, calls)
+        assert sum(1 for c in calls if c.startswith("gcloud compute firewall-rules list")) == 1
+    p, calls = got["other"]
+    assert "STOP: the subnet has the range 10.9.9.0/25" in p.stdout
+    assert not [c for c in calls if c.startswith("gcloud compute firewall-rules")], "the STOP stops the firewall lines: nothing is listed, nothing is created"
+    assert sum(1 for c in got["missing"][1] if c.startswith("gcloud compute networks subnets create")) == 1
+    assert not [c for c in calls if c.startswith("gcloud compute networks subnets create")]
+
+
+def test_a_subnet_that_could_not_be_created_does_not_open_the_firewall_lines(tmp_path: Path) -> None:
+    import stat
+    block = _runbook13().split("```bash\n", 1)[1].split("```")[0]
+    b = tmp_path / "bin"
+    b.mkdir()
+    g = b / "gcloud"
+    g.write_text('#!/bin/sh\necho "gcloud $*" >> "$CALLS"\ncase "$*" in "compute networks subnets describe"*) exit 1 ;; "compute networks subnets create"*) exit 1 ;; esac\nexit 0\n')
+    g.chmod(g.stat().st_mode | stat.S_IEXEC)
+    (tmp_path / "calls").write_text("")
+    env = {"PATH": f"{b}:/usr/bin:/bin", "HOME": str(tmp_path), "ENV": "dev", "REGION": "r", "PROJECT": "p", "VM": "vm", "ZONE": "z", "CALLS": str(tmp_path / "calls")}
+    subprocess.run(["bash", "-c", block], capture_output=True, text=True, timeout=60, env=env, cwd=_VM.parent.parent)
+    assert not [c for c in (tmp_path / "calls").read_text().splitlines() if c.startswith("gcloud compute firewall-rules")]
+
+
+@pytest.mark.skipif(__import__("shutil").which("zsh") is None, reason="no zsh on this machine")
+def test_the_stop_also_stops_under_zsh(tmp_path: Path) -> None:
+    declared = renv.load_declaration(_VM / "env/dev.yaml")["support_gateway"]["allow_from"][0]
+    (tmp_path / "o").mkdir()
+    (tmp_path / "s").mkdir()
+    p, calls = _run_step_3(tmp_path / "o", "10.9.9.0/25", shell="zsh")
+    assert "STOP:" in p.stdout and not [c for c in calls if c.startswith("gcloud compute firewall-rules")]
+    p2, calls2 = _run_step_3(tmp_path / "s", declared, shell="zsh")
+    assert sum(1 for c in calls2 if c.startswith("gcloud compute firewall-rules create")) == 2
+
+
+def test_a_rule_that_is_already_there_is_not_created_again(tmp_path: Path) -> None:
+    declared = renv.load_declaration(_VM / "env/dev.yaml")["support_gateway"]["allow_from"][0]
+    for n, (has, created) in enumerate([("vm-gateway-db-deny", ["allow"]), ("vm-gateway-db-allow", ["deny"]), ("vm-gateway-db", []), ("", ["deny", "allow"])]):
+        (tmp_path / str(n)).mkdir()
+        p, calls = _run_step_3(tmp_path / str(n), declared, fw_has=has)
+        made = sorted(c.split("create vm-gateway-db-")[1].split()[0] for c in calls if c.startswith("gcloud compute firewall-rules create"))
+        assert made == sorted(created), (has, made, calls)
+        if has:
+            assert "exists (compare it with the list above)" in p.stdout
+
+
+def test_the_runbook_explains_why_the_nightly_backup_of_an_empty_gateway_database_fails_and_why_that_is_not_loosened() -> None:
+    rb = _runbook13()
+    row5 = next(l for l in rb.splitlines() if l.startswith("| 5 |"))
+    assert "in the same window as the load of the gateway's data" in row5 and "only after the firewall pair of step 3 exists and the negative control below has been measured" in row5
+    para = rb.split("**Why step 5 belongs to the window of the load.**")[1].split("**Step 3 in commands**")[0]
+    for token in ("«lists no table data — refusing»", "the main dump is uploaded first", "expected and loses nothing", "so it is not loosened", "looks for a new `db-gateway-…` dump"):
+        assert token in para, token
