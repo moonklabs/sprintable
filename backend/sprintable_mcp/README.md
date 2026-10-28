@@ -6,7 +6,7 @@ BYO 에이전트용 Sprintable MCP 서버. 에이전트 런타임을 Sprintable 
 ## Quick start
 
 ```bash
-export SPRINTABLE_API_URL=https://sprintable-backend-prod-787818285179.asia-northeast3.run.app   # backend-direct(SSE 필수). dev=https://dev-api.sprintable.ai
+export SPRINTABLE_API_URL=https://api.sprintable.ai   # backend-direct(SSE 필수). dev=https://dev-api.sprintable.ai
 export AGENT_API_KEY=sk_live_...                         # 에이전트 API 키
 uvx sprintable
 ```
