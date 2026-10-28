@@ -245,6 +245,7 @@ case "$*" in
   *"run services list"*|*"run jobs list"*) printf 'sprintable-backend-prod\nsprintable-frontend-prod\n' ;;
   *"run services describe"*|*"run jobs describe"*) echo "{\"x\":1,\"note\":\"$DESC_EXTRA\"}" ;;
   *"secrets get-iam-policy"*) case "$*" in *DATABASE_URL_PROD*) echo '{"bindings":[]}' ;; *) echo '{"bindings":[{"role":"roles/secretmanager.secretAccessor","members":["serviceAccount:vm-sa@sprintable-494803.iam.gserviceaccount.com"]}]}' ;; esac ;;
+  *"logging read"*"requestMethod!="*) printf %s "$WRITE_ROWS" ;;
   *"config get-value account"*) echo "$OPERATOR" ;;
   *"remove-iam-policy-binding"*) svc="$4"; for a in "$@"; do case "$a" in --member=*) case " $STICKY " in *" ${a#--member=} "*) ;; *) echo "${a#--member=}" >> "$STATE/removed-$svc" ;; esac ;; esac; done ;;
   *"get-iam-policy"*) svc="$4"; case " $* " in *" $NOBIND "*) echo '{"bindings":[{"role":"roles/run.invoker","members":["user:operator@example.com"]}]}' ;; *" $GARBAGE "*) echo 'not json at all' ;; *) out=""; for m in allUsers serviceAccount:caller@p.iam.gserviceaccount.com user:operator@example.com $EXTRA_MEMBER; do grep -qxF "$m" "$STATE/removed-$svc" 2>/dev/null || out="$out\"$m\","; done; echo "{\"bindings\":[{\"role\":\"roles/run.invoker\",\"members\":[${out%,}]}]}"; [ -n "$LATEFAIL" ] && [ -s "$STATE/removed-$svc" ] && exit 1 ;; esac ;;
@@ -312,7 +313,7 @@ def _world(tmp_path: Path) -> dict[str, str]:
     calls.write_text("")
     (tmp_path / "state").mkdir(exist_ok=True)
     import sys
-    return {"PATH": f"{b}:{os.environ.get('PATH', '/usr/bin:/bin')}", "HOME": str(tmp_path), "CALLS": str(calls), "STATE": str(tmp_path / "state"), "TMO": "300", "REAL_PYTHON": sys.executable, "SUDO_REPORT": "", "OPERATOR": "operator@example.com", "STICKY": "", "EXTRA_MEMBER": "", "LATEFAIL": "", "KEEP": "", "PLAN_OUT": "", "PLAN_POST": "UNCHANGED 4\ndry-run — nothing changed", "OPEN_PORT": "none", "DESC_EXTRA": "",
+    return {"PATH": f"{b}:{os.environ.get('PATH', '/usr/bin:/bin')}", "HOME": str(tmp_path), "CALLS": str(calls), "STATE": str(tmp_path / "state"), "TMO": "300", "REAL_PYTHON": sys.executable, "SUDO_REPORT": "", "WRITE_ROWS": "", "OPERATOR": "operator@example.com", "STICKY": "", "EXTRA_MEMBER": "", "LATEFAIL": "", "KEEP": "", "PLAN_OUT": "", "PLAN_POST": "UNCHANGED 4\ndry-run — nothing changed", "OPEN_PORT": "none", "DESC_EXTRA": "",
             **{k: v for k, v in SAMPLE.items() if k not in ("TMO",)}}
 
 
@@ -1018,32 +1019,67 @@ def test_the_migration_reading_block_also_prints_data_writes_and_bulk_inserts(tm
     assert any(".execute(" in h for h in hits), "so is a statement run on the connection"
 
 
+DRY = "dry run, nothing written"
+PLAN4 = "".join(f"http://old{i} -> https://api.sprintable.ai: 0 link(s) would be rewritten ({DRY})\n" for i in range(4))
+
+
+def _plan_files(root: Path, plan: str = PLAN4) -> dict[str, str]:
+    """the report first, the plan after it: the order block A makes them in (the apply block wants the plan newer than the report)"""
+    return {"links-report.txt": "https://x\t1\n", "links-plan.txt": plan}
+
+
+def _run_b(block: str, root: Path, extra: dict[str, str] | None = None, plan: str = PLAN4, newer: bool = True, report: bool = True):
+    w = _w(root)
+    w.mkdir(exist_ok=True)
+    (w / "links-plan.txt").write_text(plan)
+    if report:
+        (w / "links-report.txt").write_text("https://x\t1\n")
+        os.utime(w / "links-report.txt", (1000, 1000 if newer else 3000))
+        os.utime(w / "links-plan.txt", (2000, 2000))
+    return _run(block, root, extra=extra)
+
+
 def test_the_stored_links_of_prod_are_rewritten_on_the_vm_inside_the_freeze_with_a_backup_first(tmp_path: Path) -> None:
     a = _block_with("LINKS=start")
-    b = _block_with("[ -s links-plan.txt ]")
+    b = _block_with("links-plan.txt -nt links-report.txt")
     # the report and the plan: read only, in the backend container of the VM, with the four prod origins and the API address
     p, calls = _run(a, _fresh(tmp_path, "plan"))
     sudo = [c for c in calls if c.startswith("sudo docker exec sprintable-backend-1 python -m scripts.jobs.rewrite_site_post_links")]
     assert len(sudo) == 2 and "--apply" not in " ".join(sudo) and "links: planned" in p.stdout, (sudo, p.stdout)
+    assert [c for c in calls if c.startswith("sudo")][0] == "sudo docker stop sprintable-caddy-1", "the public door of the VM is closed before anything is read or written"
     for origin in ("http://sprintable-backend-prod-787818285179.asia-northeast3.run.app", "https://sprintable-backend-prod-787818285179.asia-northeast3.run.app",
                    "http://sprintable-backend-prod-57iommnikq-du.a.run.app", "https://sprintable-backend-prod-57iommnikq-du.a.run.app"):
         assert f"--old-origin {origin}" in sudo[1], origin
     assert "--new-origin https://api.sprintable.ai" in sudo[1] and "--old-origin https://sprintable-backend-dev" not in sudo[1]
     assert (_w(tmp_path / "plan") / "links-plan.txt").exists() and (_w(tmp_path / "plan") / "links-report.txt").exists()
-    # the apply: needs the plan file; the backup comes before the rewrite; the pass is a report with no run.app
+    # the apply: needs a plan of this window (report, then a newer plan with the four dry-run lines); the backup comes before the rewrite; the pass is a report with no run.app, in any letter case
     root = _fresh(tmp_path, "apply")
-    p, calls = _run(b, root, files={"links-plan.txt": "planned\n"})
+    p, calls = _run_b(b, root)
     order = [c for c in calls if c.startswith("sudo")]
     assert order[0] == "sudo systemctl start sprintable-backup.service" and "--apply" in order[1] and "--apply" not in order[2], order
     assert "links: clean" in p.stdout
-    p, calls = _run(b, _fresh(tmp_path, "noplan"))
-    assert "links: no" in p.stdout and not [c for c in calls if c.startswith("sudo")], "without a plan file nothing runs (not even the backup)"
-    p, calls = _run(b, _fresh(tmp_path, "outside"), where="parent", files={})
+    for name, kw in (("noplan", {"plan": ""}), ("noreport", {"report": False}), ("stale", {"newer": False}), ("three", {"plan": "".join(PLAN4.splitlines(True)[:3])}), ("arbitrary", {"plan": "something else\n" * 4})):
+        p, calls = _run_b(b, _fresh(tmp_path, name), **kw)
+        assert "links: no" in p.stdout and not [c for c in calls if c.startswith("sudo")], (name, "no valid plan of this window, nothing runs (not even the backup)")
+    p, calls = _run_b(b, _fresh(tmp_path, "outside"), plan=PLAN4)
+    p, calls = _run(b, _fresh(tmp_path, "outside2"), where="parent")
     assert "links: no" in p.stdout and not [c for c in calls if c.startswith("sudo")]
-    p, calls = _run(b, _fresh(tmp_path, "nobackup"), extra={"FAILSUDO": "systemctl start sprintable-backup"}, files={"links-plan.txt": "planned\n"})
+    p, calls = _run_b(b, _fresh(tmp_path, "nobackup"), extra={"FAILSUDO": "systemctl start sprintable-backup"})
     assert "links: planned" in p.stdout and not [c for c in calls if "--apply" in c], "no backup, no rewrite"
-    p, calls = _run(b, _fresh(tmp_path, "left"), extra={"SUDO_REPORT": "https://sprintable-backend-prod-787818285179.asia-northeast3.run.app\t2"}, files={"links-plan.txt": "planned\n"})
-    assert "links: applied" in p.stdout and "links: clean" not in p.stdout, "a run.app origin still listed after the rewrite is not a pass"
+    for name, leftover in (("left", "https://sprintable-backend-prod-787818285179.asia-northeast3.run.app\t2"), ("upper", "https://sprintable-backend-prod-787818285179.asia-northeast3.RUN.APP\t1")):
+        p, calls = _run_b(b, _fresh(tmp_path, name), extra={"SUDO_REPORT": leftover})
+        assert "links: applied" in p.stdout and "links: clean" not in p.stdout, (name, "a run.app origin still listed after the rewrite, in any letter case, is not a pass")
+
+
+def test_the_public_door_of_the_vm_is_closed_for_4b_and_opened_by_a_block_of_its_own(tmp_path: Path) -> None:
+    c = _block_with("sudo docker start sprintable-caddy-1")
+    p, calls = _run(c, _fresh(tmp_path, "open"))
+    assert [x for x in calls if x.startswith("sudo")][0] == "sudo docker start sprintable-caddy-1"
+    six = _section("## 6–7. The data and the takeover", "## 8. Unfreeze")
+    for token in ("**The public door of the VM is closed for the whole of 4b**", "`sudo docker stop sprintable-caddy-1`", "**Open the door again, whatever 4b ended with**", "nothing was written after it, because the door was closed", "`sudo docker stop sprintable-backend-1 sprintable-frontend-1`",
+                  "**commits before it checks**", "so a non-zero exit does not mean that nothing was written"):
+        assert token in six, token
+    assert six.index("**4b.") < six.index("sudo docker start sprintable-caddy-1") < six.index("**If 4b fails**")
 
 
 def test_step_six_seven_says_where_the_rewrite_runs_and_what_it_replaces() -> None:
@@ -1076,7 +1112,38 @@ def test_the_window_carries_the_seconds_of_the_link_rewrite_and_a_failed_rewrite
     for token in ("**plus step 4b**", "about the seconds of the rehearsal's dump", "the module's seconds as the product owner measured them on dev, written in the record of G5", "took **46 s**", "6.8 s of CPU", "the module's report **1.6 s** and its plan **1.3 s**", "it printed `rewritten 6`", "the rehearsal's dump seconds are the better estimate for prod"):
         assert token in one, token
     six = _section("## 6–7. The data and the takeover", "## 8. Unfreeze")
-    for token in ("**If 4b fails**", "**the move does not stop and the window goes on.**", "an apply that failed inside wrote nothing", "the backup taken just before it goes back", "RESTORE_WIPE=yes /opt/sprintable/bin/restore.sh",
+    for token in ("**If 4b fails**", "**the move does not stop and the window goes on.**", "the backup taken just before goes back", "RESTORE_WIPE=yes /opt/sprintable/bin/restore.sh",
                   "ls -t /var/backups/sprintable/db-prod-*.dump", "**the next day with the same module**", "answers 403 (Cloud Run is closed since the freeze)", "`links-report.txt`"):
         assert token in six, token
     assert "/var/backups/sprintable" in (_ROOT / "deploy/vm/bin/backup.sh").read_text() and 'dump_prefix' in (_ROOT / "deploy/vm/bin/backup.sh").read_text(), "the folder and the name the sheet restores from are the backup unit's"
+
+
+def test_a_keep_that_forgets_the_operator_cannot_lock_the_operator_out(tmp_path: Path) -> None:
+    block = _block_with(FREEZE)
+    p, calls = _run(block, _fresh(tmp_path, "forgets"), extra={"KEEP": "group:other@example.com", "EXTRA_MEMBER": "group:other@example.com"}, files={"frozen.txt": "svc-a\n"})
+    removed = [c.split("--member=")[1].split()[0] for c in _verbs(calls, "remove-iam-policy-binding")]
+    assert "user:operator@example.com" not in removed and "group:other@example.com" not in removed and "freeze: waited" in p.stdout, removed
+    assert 'KEEP="$OPM ${KEEP:-}"' in block
+
+
+def test_the_writers_check_after_the_freeze_is_a_gate_that_reads_the_log_of_the_backend(tmp_path: Path) -> None:
+    block = _block_with("writers after the freeze")
+    p, calls = _run(block, _fresh(tmp_path, "none"))
+    assert "writers after the freeze: none" in p.stdout
+    ask = next(c for c in calls if "logging read" in c)
+    assert 'requestMethod!="GET"' in ask and "httpRequest.status>=200" in ask and "httpRequest.status<400" in ask and "--freshness=5m" in ask and "sprintable-backend-prod" in ask
+    p, _ = _run(block, _fresh(tmp_path, "some"), extra={"WRITE_ROWS": "2026-11-02T18:31:12Z\n"})
+    assert "writers after the freeze: read" in p.stdout and "writers after the freeze: none" not in p.stdout
+    p, calls = _run(block, _fresh(tmp_path, "asked-not"), where="parent")
+    assert "writers after the freeze: no" in p.stdout and not [c for c in calls if "logging read" in c]
+    p, _ = _run(block, _fresh(tmp_path, "failed"), extra={"FAIL": "logging read"})
+    assert "writers after the freeze: asking" in p.stdout and "none" not in p.stdout.split("writers after the freeze:")[1], "a question that failed is not an answer"
+    five = _section("## 5. Freeze", "## 6–7.")
+    for token in ("**The proof that no writer is left, from the log.**", "`writers after the freeze: none` is the pass and a **gate for step 6**", "does not say that nothing with an identity can still write"):
+        assert token in five, token
+
+
+def test_the_version_of_prod_comes_from_the_database_and_is_checked_against_the_migration_job() -> None:
+    block = _block_with("promotion-history.txt")
+    for token in ("from the database of prod (select version_num from alembic_version)", "never from `alembic heads` or the repository", "checks that it is the same as the last line of the migration job's log of the promotion's deploy"):
+        assert token in block, token
