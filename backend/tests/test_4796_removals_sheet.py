@@ -494,3 +494,13 @@ def test_the_first_and_second_rows_delete_only_after_their_captures_are_proven(t
     assert "redis instances delete" not in (tmp_path / "log").read_text()
     run("REDIS_OK=1; " + m2.group(1))
     assert "redis instances delete cache-dev" in (tmp_path / "log").read_text()
+
+
+def test_the_cloud_sql_dependents_step_says_the_list_is_read_and_not_assumed_and_what_the_first_run_found() -> None:
+    """2026-10-28: the first run of R5 stopped at a dependents list longer than the two jobs the sheet expected (the dev admin console's internal API service and seven jobs not run since June-August)"""
+    step1 = _rows()["R5"].split("1. Dependents (read only)")[1].split("2. Capture")[0]
+    for token in ("**Read the list, do not assume it.**", "on 2026-10-28 the list was longer", "`sprintable-internal-api-dev`", "`sprintable-admin-web-dev`", "seven jobs that had not run since June-August",
+                  "decided by the product owner before anything is deleted", "its definition is saved in step 2", "deleted in step 4 in the same chain", "**A line nobody can account for stops the sheet.**",
+                  "means gate 0 is not done: stop"):
+        assert token in step1, token
+    assert "Expected before the delete: only" not in _rows()["R5"], "the old, shorter expectation is gone"
