@@ -880,6 +880,11 @@
 "kind": "object"
 },
 {
+"method": "GET",
+"path": "/api/v2/desktop/endpoints",
+"kind": "object"
+},
+{
 "method": "POST",
 "path": "/api/v2/desktop/mac-link-mail",
 "kind": "unknown"
@@ -903,6 +908,11 @@
 "method": "POST",
 "path": "/api/v2/desktop/relay/commands/{}/result",
 "kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/desktop/relay/endpoints",
+"kind": "object"
 },
 {
 "method": "POST",

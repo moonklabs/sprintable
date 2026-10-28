@@ -93,6 +93,20 @@ def test_the_vm_runs_one_process_without_redis(env: str) -> None:
     assert decl["services"]["backend"]["added"]["TRUST_FORWARDED_FOR"] == "true", "behind Caddy the client address is the last X-Forwarded-For entry"
 
 
+def test_the_dev_attachments_bucket_is_the_one_cloud_run_dev_uses_on_both_services_and_prod_names_none() -> None:
+    """found by the first dev bootstrap: the live check reported GCS_MEMO_ATTACHMENTS_BUCKET on both services as «not in the declaration» — it went live (story 4798) after the declaration was written"""
+    cloudbuild = yaml.safe_load((_ROOT / "cloudbuild.yaml").read_text())["substitutions"]["_GCS_MEMO_ATTACHMENTS_BUCKET"]
+    assert cloudbuild == "sprintable-memo-attachments-dev"
+    for svc in ("backend", "frontend"):
+        s = DECLS["dev"]["services"][svc]
+        assert s["overrides"]["GCS_MEMO_ATTACHMENTS_BUCKET"] == cloudbuild, svc
+        assert "GCS_MEMO_ATTACHMENTS_BUCKET" not in (s["added"] or {}), "it is live, so it is an override, not an addition"
+        live = _live(_VM / "env/live-names.dev.txt", f"sprintable-{svc}-dev")
+        assert "GCS_MEMO_ATTACHMENTS_BUCKET" in live, svc
+        p = DECLS["prod"]["services"][svc]
+        assert not any("GCS_MEMO_ATTACHMENTS_BUCKET" in (p.get(k) or {}) for k in ("overrides", "added", "secrets", "computed")) and "GCS_MEMO_ATTACHMENTS_BUCKET" not in (p.get("live_plain") or ())
+
+
 @pytest.mark.parametrize("env", ["dev", "prod"])
 def test_the_public_addresses_are_the_vm_hosts_not_cloud_run(env: str) -> None:
     decl = DECLS[env]

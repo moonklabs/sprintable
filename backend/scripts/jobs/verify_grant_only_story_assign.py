@@ -10,7 +10,7 @@
 보내 **200**을 확인한 뒤, participation 행 생성까지 검증하고 전부 정리(cleanup)한다.
 
 전제(환경변수):
-  BACKEND_URL   예) https://sprintable-backend-dev-57iommnikq-du.a.run.app
+  BACKEND_URL   예) https://dev-api.sprintable.ai
   DATABASE_URL  있으면 그것을 쓴다(postgresql+asyncpg://... cloud-sql-proxy 경유 가능). 없으면
                 ALEMBIC_URL로 떨어진다(scripts/jobs/_db_env.py — sprintable-verify-oneoff
                 Cloud Run Job이 DATABASE_URL이 아니라 ALEMBIC_URL만 갖고 있다).

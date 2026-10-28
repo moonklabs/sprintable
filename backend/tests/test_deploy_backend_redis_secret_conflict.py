@@ -343,6 +343,8 @@ _DECLARED_SUBSTITUTIONS = {
     "_GCS_MEMO_ATTACHMENTS_BUCKET",
     # story #3079 — realtime path-filter 판정을 GHA에서 계산해 넘기는 skip 플래그(GCE·Cloud Run).
     "_REALTIME_GCE_SKIP", "_REALTIME_CLOUDRUN_SKIP",
+    # story 4796 — dev runs on the VM: exactly "true" makes deploy-backend / deploy-frontend / the migrate steps skip (cloud-build.yml sets it for dev).
+    "_CLOUD_RUN_APP_SKIP",
     # story #3118(Sign in with Apple) — deploy-backend(bash entrypoint)가 이제 이 3개를
     # 직접 참조한다. _APPLE_TEAM_ID는 이전엔 deploy-frontend(순수 gcloud args 리스트 —
     # 이 가드가 스캔하는 4개 bash 스텝 밖)에서만 쓰여 이 목록에 없어도 무해했으나, backend
@@ -421,6 +423,7 @@ def _backend_step_env(
     return {
         **os.environ,
         "_DEPLOY_ENV": deploy_env,
+        "_CLOUD_RUN_APP_SKIP": "false",
         "_FASTAPI_URL": "https://example.run.app",
         # story #3583-BE — set -u라 미설정이면 스크립트가 죽는다(_FASTAPI_URL과 동일 이유).
         "_BACKEND_URL": "https://example.run.app",
@@ -877,6 +880,8 @@ def test_deploy_backend_dev_env_vars_unchanged_by_prod_branch():
         "SANDBOX_CHANNEL_ENABLED=true,"
         # story #4332 — SANDBOX_CHANNEL_ENABLED 조건부 append 바로 뒤(cloudbuild.yaml 삽입 순서 그대로 · dev만).
         "DB_TIMING_LOG_ENABLED=true,"
+        # story 4796 — same dev-only block, right after DB_TIMING_LOG_ENABLED (the one switch's value; RUNBOOK §9).
+        "PUBLIC_API_URL=https://example.run.app,"
         # story e4fc29fa — SANDBOX_CHANNEL_ENABLED 조건부 append 바로 뒤(cloudbuild.yaml
         # 삽입 순서 그대로).
         "WORDPRESS_TEST_STUB_ENABLED=true,WEBHOOK_TEST_STUB_ENABLED=true"
@@ -889,7 +894,7 @@ def test_deploy_backend_removes_db_timing_flag_outside_dev():
     dev_remove = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379", var="REMOVE_ENV_VARS").split(",")
     prod_remove = _run_env_vars_assembly("prod", "", var="REMOVE_ENV_VARS").split(",")
     assert dev_remove == ["REDIS_CONSUME_ENABLED", "XFF_PROBE_ENABLED"]
-    assert prod_remove == ["REDIS_CONSUME_ENABLED", "XFF_PROBE_ENABLED", "DB_TIMING_LOG_ENABLED"]
+    assert prod_remove == ["REDIS_CONSUME_ENABLED", "XFF_PROBE_ENABLED", "DB_TIMING_LOG_ENABLED", "PUBLIC_API_URL"]  # story 4796: prod states nothing, so a hand-set value is removed
     dev_env = _run_env_vars_assembly("dev", "redis://10.164.120.243:6379")
     assert "DB_TIMING_LOG_ENABLED=true" in dev_env.split(",")
     assert "DB_TIMING_LOG_ENABLED" not in _run_env_vars_assembly("prod", "")
@@ -914,7 +919,7 @@ def _run_frontend_deploy_argv(deploy_env: str, cpu_flags: str = "", resources: s
     stub = 'gcloud() { printf "ARG=%s\\n" "$@"; }\n'
     env = {
         **os.environ,
-        "_DEPLOY_ENV": deploy_env, "_REALTIME_URL": "https://rt.example", "_APPLE_TEAM_ID": "JN798BC4KC",
+        "_DEPLOY_ENV": deploy_env, "_CLOUD_RUN_APP_SKIP": "false", "_REALTIME_URL": "https://rt.example", "_APPLE_TEAM_ID": "JN798BC4KC",
         "_MOBILE_APP_LINK_ORIGIN": "https://m.example", "_NEXT_PUBLIC_APP_URL": "https://app.example",
         "_AR_REGION": "asia-northeast3", "PROJECT_ID": "p", "_AR_REPO": "r", "COMMIT_SHA": "c",
         "_FRONTEND_TIMEOUT": "300", "_FRONTEND_MIN_INSTANCES": "1", "_FRONTEND_MAX_INSTANCES": "2", "_CPU_FLAGS": cpu_flags, "_FRONTEND_RESOURCES": resources,

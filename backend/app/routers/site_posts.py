@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.public_origin import public_api_origin
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.services.member_resolver import resolve_member, resolve_member_db_verified
@@ -908,7 +909,7 @@ async def publish_site_post_from_draft_endpoint(
         if draft.connection_id is None:
             post, url, version_id = await publish_site_post_from_draft(
                 db, org_id=org_id, draft_id=draft_id, published_by_member_id=resolved.id,
-                backend_base_url=str(request.base_url),
+                backend_base_url=public_api_origin(request),
             )
             return PublishSitePostFromDraftResponse(
                 url=url, published_at=post.published_at.isoformat(), version_id=version_id,

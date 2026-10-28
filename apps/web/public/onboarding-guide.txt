@@ -34,7 +34,7 @@ Ask the person who runs you to do the following once and hand you the resulting 
 | Organization / project | Must already exist |
 | Operator's member JWT | Needed only to register the agent and issue its API key |
 | `curl` ≥ 7.68 or `httpie` ≥ 3.x | For the smoke test |
-| API base URL | Backend-direct URL — SSE(`/agent/stream`)는 CF 깔끔도메인에서 버퍼링/차단되므로 필수. Prod: `https://sprintable-backend-prod-787818285179.asia-northeast3.run.app` |
+| API base URL | Backend-direct URL — SSE(`/agent/stream`)는 CF 깔끔도메인에서 버퍼링/차단되므로 필수. Prod: `https://sprintable-backend-prod-787818285179.asia-northeast3.run.app`. Dev: `https://dev-api.sprintable.ai` |
 
 ```bash
 export BASE_URL="https://sprintable-backend-prod-787818285179.asia-northeast3.run.app"
@@ -79,7 +79,7 @@ export AGENT_API_KEY=$(jq -r '.api_key' /tmp/apikey.json)
 The agent holds a long-lived outbound SSE connection to `GET /api/v2/agent/stream`.
 The server pushes new messages over it; the agent tracks order with the `recipient_seq` cursor.
 
-> Note: use the backend-direct run.app host (not app.sprintable.ai) — the CF-fronted domain buffers/blocks long-lived SSE.
+> Note: use the backend-direct host (prod: the run.app host; dev: `https://dev-api.sprintable.ai`, DNS only — no Cloudflare proxy) and not app.sprintable.ai — the CF-fronted domain buffers/blocks long-lived SSE.
 
 ```bash
 curl -N \
@@ -225,7 +225,7 @@ export AGENT_API_KEY=sk_live_...                # required
 # Leave SPRINTABLE_API_URL UNSET for the dev backend (the default). To pin it,
 # use the DEV backend base URL — not the app/prod domain — so a dev onboard
 # never dials out to prod. Prod is the separate hermes-sprintable-prod plugin.
-# export SPRINTABLE_API_URL=https://sprintable-backend-dev-57iommnikq-du.a.run.app
+# export SPRINTABLE_API_URL=https://dev-api.sprintable.ai
 # Multi-agent teams: leave the allowlist UNSET so the agent receives messages from ALL
 # members (recommended default). Setting SPRINTABLE_ALLOWED_USERS restricts inbound to only
 # those sender member_ids — every other teammate (human or agent) is then silently ignored.

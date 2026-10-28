@@ -303,6 +303,42 @@ async def test_registration_challenge_success(monkeypatch):
         await engine.dispose()
 
 
+async def _stored_web_origin(session, challenge_id: str) -> str:
+    from sqlalchemy import select
+    from app.models.device_installation import DeviceProofChallenge
+
+    return (await session.execute(select(DeviceProofChallenge.web_origin).where(DeviceProofChallenge.id == uuid.UUID(challenge_id)))).scalar_one()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("configured,expected", [("https://dev-api.sprintable.ai", "https://dev-api.sprintable.ai"), ("", "http://testserver")])
+async def test_story_4796_registration_challenge_binds_the_public_address_not_the_request_host(monkeypatch, configured, expected):
+    """Behind the pass-through front door the request's host is the Cloud Run host; the origin signed into the transcript must be the configured public address (empty = the request's host, as before)."""
+    from app.core.config import settings
+    from app.routers.device_installations import RegistrationChallengeRequest, registration_challenge
+
+    _setup_common(monkeypatch)
+    monkeypatch.setattr(settings, "public_api_url", configured)
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            user_id, firebase_uid = await _seed_eligible_user(s)
+        _mock_verifiers(monkeypatch, firebase_uid=firebase_uid)
+        async with Session() as s:
+            result = await registration_challenge(
+                _FakeRequest(),
+                RegistrationChallengeRequest(app_check_token="valid-app-check", platform="ios", app_id="com.sprintable.app", environment="production"),
+                Response(), authorization="Bearer valid-id-token", x_firebase_appcheck=None, db=s,
+            )
+        async with Session() as s:
+            assert await _stored_web_origin(s, result.challenge_id) == expected
+        import base64, json
+        transcript = json.loads(base64.urlsafe_b64decode(result.client_data_b64url + "=" * (-len(result.client_data_b64url) % 4)))
+        assert transcript["origin"] == expected, "the transcript the device signs carries the same origin"
+    finally:
+        await engine.dispose()
+
+
 @pytest.mark.anyio
 async def test_registration_challenge_unsupported_platform_400(monkeypatch):
     from app.routers.device_installations import RegistrationChallengeRequest, registration_challenge
@@ -454,6 +490,32 @@ async def test_native_bootstrap_challenge_success(monkeypatch):
         assert result.challenge_id
         assert result.client_data_b64url
         assert result.expires_in == 60
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("configured,expected", [("https://dev-api.sprintable.ai", "https://dev-api.sprintable.ai"), ("", "http://testserver")])
+async def test_story_4796_native_bootstrap_challenge_binds_the_public_address_not_the_request_host(monkeypatch, configured, expected):
+    from app.core.config import settings
+    from app.routers.auth_native_bootstrap import NativeBootstrapChallengeRequest, native_bootstrap_challenge
+
+    _setup_common(monkeypatch)
+    monkeypatch.setattr(settings, "public_api_url", configured)
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            user_id, firebase_uid = await _seed_eligible_user(s)
+            installation_id = await _seed_installation(s, user_id=user_id, status="active")
+        _mock_verifiers(monkeypatch, firebase_uid=firebase_uid)
+        async with Session() as s:
+            result = await native_bootstrap_challenge(
+                _FakeRequest(),
+                NativeBootstrapChallengeRequest(app_check_token="valid-app-check", installation_id=str(installation_id)),
+                Response(), authorization="Bearer valid-id-token", x_firebase_appcheck=None, db=s,
+            )
+        async with Session() as s:
+            assert await _stored_web_origin(s, result.challenge_id) == expected
     finally:
         await engine.dispose()
 

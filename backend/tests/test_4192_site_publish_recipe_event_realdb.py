@@ -337,6 +337,36 @@ async def test_hosted_blog_in_recipe_is_published_by_server_on_approval():
         await engine.dispose()
 
 
+@pytest.mark.parametrize("public_api_url,backend_url,expected_prefix", [
+    ("https://dev-api.sprintable.ai", "https://backend.example", "https://dev-api.sprintable.ai/api/v2/public/site-posts/"),
+    ("", "https://backend.example", "https://backend.example/api/v2/public/site-posts/"),
+])
+async def test_story_4796_the_recipe_auto_publish_stores_a_link_built_from_the_public_address_else_backend_url(monkeypatch, public_api_url, backend_url, expected_prefix):
+    """The recipe-approved auto-publish has no request: its link comes from PUBLIC_API_URL, else backend_url (the fallback), and is what the activity log stores."""
+    from sqlalchemy import select
+
+    from app.core.config import settings
+    from app.main import app
+    from app.models.activity_log import ActivityLog
+
+    monkeypatch.setattr(settings, "public_api_url", public_api_url)
+    monkeypatch.setattr(settings, "backend_url", backend_url)
+    engine, Session = await _session_factory()
+    try:
+        w = await _world(Session)
+        await _walk_to_verification(Session, w)
+        gate_id, draft_id = await _submit_hosted(app, Session, w, "hosted-link")
+        await _walk_to_pending_approval(Session, w, draft_id=draft_id)
+        await _approve(Session, w, gate_id)
+        assert await _site_posts(Session, w) == 1
+        async with Session() as s:
+            logs = (await s.execute(select(ActivityLog).where(ActivityLog.org_id == w["org_id"], ActivityLog.action == "site_post_published"))).scalars().all()
+        assert len(logs) == 1 and logs[0].context["url"].startswith(expected_prefix), [l.context.get("url") for l in logs]
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
 async def test_hosted_blog_publish_failure_keeps_approval_and_shows_failure():
     """AC2 — 발행 실패(조직 외부 발행 일시 중지)는 승인을 되돌리지 않고 publish_outcome으로 보인다 · 이벤트 0."""
     from app.main import app

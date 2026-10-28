@@ -21,6 +21,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests import _real_gcloud as _gcloud
+
 _ROOT = Path(__file__).resolve().parents[2]
 _MAIN = yaml.safe_load((_ROOT / "cloudbuild.yaml").read_text())
 _VM = yaml.safe_load((_ROOT / "cloudbuild-vm.yaml").read_text())
@@ -52,7 +54,7 @@ def _job_steps() -> list[dict]:
 
 
 def _submit_vm() -> dict:
-    found = [s for s in _job_steps() if s.get("name", "").startswith("Submit the dev VM bundle build")]
+    found = [s for s in _job_steps() if s.get("name", "").startswith("Submit the VM bundle build")]
     assert len(found) == 1
     return found[0]
 
@@ -81,7 +83,7 @@ def test_the_vm_build_is_submitted_after_the_cloud_run_build_async_and_without_b
     assert vm_at == main_at + 1, "right after the Cloud Run build (its images are in the registry then)"
     step = _submit_vm()
     assert step["continue-on-error"] is True
-    assert "success()" in step["if"] and "steps.env.outputs.target == 'dev'" in step["if"]
+    assert "success()" in step["if"] and "steps.env.outputs.target == 'dev'" in step["if"] and "steps.env.outputs.target == 'prod'" in step["if"], "dev and (P2) prod, nothing else"
     run = step["run"]
     assert "--async" in run, "the run must not wait for it (no delay for serving-reality)"
     assert "--config=cloudbuild-vm.yaml" in run
@@ -98,7 +100,8 @@ def test_the_submission_passes_the_same_public_build_values_as_the_cloud_run_bui
         assert step["env"][vm_name] == main_env[v_name], f"{sub}: the VM build must get what the Cloud Run build gets ({main_env[v_name]})"
         assert f'{sub}="${{{vm_name}}}"' in step["run"], sub
         assert f"{build_arg}=${{{sub}}}" in cloud_run_args, f"the Cloud Run frontend build takes {sub} for {build_arg}"
-    assert 'COMMIT_SHA="${{ github.sha }}"' in step["run"] and '_DEPLOY_ENV="dev"' in step["run"]
+    assert 'COMMIT_SHA="${{ github.sha }}"' in step["run"] and '_DEPLOY_ENV="${VM_TARGET}"' in step["run"]
+    assert step["env"]["VM_TARGET"] == "${{ steps.env.outputs.target }}" and '_VM_DEPLOY_BUCKET="sprintable-vm-${VM_TARGET}-deploy"' in step["run"], "the environment and ITS deploy bucket come from the one target of the run"
 
 
 @pytest.mark.skipif(shutil.which("gcloud") is None, reason="gcloud not installed here (GitHub runners have it)")
@@ -112,7 +115,7 @@ def test_the_submit_command_lines_are_accepted_by_the_real_gcloud_flag_parser(wh
     words = shlex.split(text)
     assert words[:3] == ["gcloud", "builds", "submit"]
     argv = [re.sub(r"^--config=.*", "--config=/dev/null", w) for w in words]
-    p = subprocess.run(argv, capture_output=True, text=True, cwd=tmp_path, env={"PATH": os.environ["PATH"], "HOME": str(tmp_path), "CLOUDSDK_CONFIG": str(tmp_path / "gc")}, timeout=120)
+    p = subprocess.run(argv, capture_output=True, text=True, cwd=tmp_path, env=_gcloud.env(tmp_path, tmp_path / "gc", project=None), timeout=60)
     assert "unrecognized arguments" not in p.stderr and "usage:" not in p.stderr.lower(), p.stderr[:400]
     assert "parsing /dev/null" in p.stderr, f"the flags were accepted only if gcloud got as far as reading the (empty) config: {p.stderr[:400]}"
 
@@ -140,11 +143,15 @@ def test_the_five_build_values_default_to_a_marker_so_a_forgotten_one_fails() ->
     assert _VM["substitutions"]["_DEPLOY_ENV"] == "dev"
 
 
-def test_every_step_is_dev_only_and_no_script_writes_desired_json() -> None:
+def test_every_step_names_dev_and_prod_with_their_own_bucket_and_no_script_writes_desired_json() -> None:
+    gate = re.compile(r'case "\$\{_DEPLOY_ENV\}" in\s+dev\) want_bucket=sprintable-vm-dev-deploy ;;\s+prod\) want_bucket=sprintable-vm-prod-deploy ;;\s+\*\) echo "skip [a-z-]+: dev and prod only \(story 4796\)"; exit 0 ;;\s+esac\s+'
+                      r'\[ "\$\{_VM_DEPLOY_BUCKET\}" = "\$\$want_bucket" \] \|\| \{ echo [^\n]*>&2; exit 1; \}')
     for sid in VM_STEPS:
         script = _STEPS[sid]["args"][1]
-        assert re.search(r'if \[ "\$\{_DEPLOY_ENV\}" != "dev" \]; then\s+echo [^\n]*\n\s+exit 0\s+fi', script), sid
-        assert not re.search(r"gs://\S*desired\.json", script), f"{sid} must not write the VM's desired.json (RUNBOOK §7 step 6 does)"
+        assert gate.search(script), sid
+        assert not re.search(r"gs://\S*desired\.json", script), f"{sid} must not write the VM's desired.json (RUNBOOK §7 step 1 does)"
+    assert "build-frontend-vm.sh \"${_DEPLOY_ENV}\" \"${COMMIT_SHA}\"" in _STEPS["build-frontend-vm"]["args"][1], "the frontend is built from the declaration of the environment of the run"
+    assert _VM["substitutions"]["_VM_DEPLOY_BUCKET"] == "sprintable-vm-dev-deploy" and (_ROOT / "deploy/vm/env/prod.yaml").read_text().count("deploy: sprintable-vm-prod-deploy") == 1, "the prod bucket the step expects is the one the prod declaration names"
 
 
 def test_the_images_live_in_our_registry_and_the_two_hosts_are_not_passed_from_here() -> None:
@@ -243,12 +250,34 @@ def _resolve_and_build(box) -> None:
     assert box("build-frontend-vm")[0].returncode == 0
 
 
-def test_prod_runs_no_step(box) -> None:
+def test_another_environment_runs_no_step(box) -> None:
     for step in VM_STEPS:
-        p, calls = box(step, _DEPLOY_ENV="prod")
-        assert p.returncode == 0 and "dev only" in p.stdout
+        p, calls = box(step, _DEPLOY_ENV="staging")
+        assert p.returncode == 0 and "dev and prod only" in p.stdout
         assert calls == ""
     assert not (box.work / "vm-out").exists()
+
+
+@pytest.mark.parametrize("env,bucket", [("prod", "sprintable-vm-dev-deploy"), ("dev", "sprintable-vm-prod-deploy"), ("prod", "")])
+def test_an_environment_with_the_other_ones_bucket_stops_every_step_before_any_tool(box, env: str, bucket: str) -> None:
+    """a bundle in the other environment's deploy bucket is a release for the wrong VM (write access to the bucket = control of the deployment)"""
+    for step in VM_STEPS:
+        p, calls = box(step, _DEPLOY_ENV=env, _VM_DEPLOY_BUCKET=bucket)
+        assert p.returncode == 1 and "is not the one of" in p.stderr and calls == "", (env, bucket, step, p.stderr)
+    assert not (box.work / "vm-out").exists()
+
+
+def test_prod_builds_the_bundle_from_its_own_declaration_and_uploads_to_its_own_bucket(box) -> None:
+    prod = {"_DEPLOY_ENV": "prod", "_VM_DEPLOY_BUCKET": "sprintable-vm-prod-deploy"}
+    assert box("resolve-backend", **prod)[0].returncode == 0
+    p, calls = box("build-frontend-vm", **prod)
+    assert p.returncode == 0, p.stderr
+    assert "NEXT_PUBLIC_FASTAPI_URL=https://api.sprintable.ai" in calls, "the baked API address is prod's (deploy/vm/env/prod.yaml), not dev's"
+    assert "dev-api.sprintable.ai" not in calls
+    p, calls = box("bundle-vm", **prod)
+    assert p.returncode == 0, p.stderr
+    cps = [c.split()[-1] for c in calls.splitlines() if c.startswith("gcloud storage cp")]
+    assert cps == [f"gs://sprintable-vm-prod-deploy/bundles/{SHA}.tgz", f"gs://sprintable-vm-prod-deploy/candidates/{SHA}.json"], "bundle first, the candidate after it, in prod's bucket, never desired.json"
 
 
 def test_the_backend_digest_is_resolved_from_the_registry_before_anything_long(box) -> None:
@@ -369,3 +398,22 @@ def test_a_shell_variable_without_double_dollar_would_be_rejected_by_cloud_build
     with pytest.raises(AssertionError, match="not a substitution"):
         _substitute("echo ${out}", {})
     assert _substitute("echo $${out} $${!v} ${PROJECT_ID}", {"PROJECT_ID": "p"}) == "echo ${out} ${!v} p"
+
+
+def test_the_runbook_says_prod_gets_the_same_build_and_still_no_desired_json() -> None:
+    text = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
+    sec = text[text.index("## 5. "):text.index("**By hand**")]
+    for needle in ("since P2 of the prod cutover prod", "`sprintable-vm-prod-deploy`", "each step stops if the bucket is not the one of its environment", "a prod push cannot change what the prod VM runs"):
+        assert needle in sec, needle
+
+
+def test_no_public_build_value_of_either_branch_contains_a_comma() -> None:
+    """codex (P2): `--substitutions` is a comma-separated list and a comma inside a value splits it (gcloud's own rule; quoting the shell expansion does not help). The five values are passed for prod now as for dev, so the literal values of both branches are pinned comma-free; a value that comes from a variable (dev's public payment key) is not literal here and is a public client key, never a list"""
+    text = (_ROOT / ".github/workflows/cloud-build.yml").read_text()
+    start = text.index('if [[ "$REF_NAME" == "main" ]]; then')
+    prod, dev = text[start:text.index("\n          else\n", start)], text[text.index("\n          else\n", start):]
+    for branch, body in (("prod", prod), ("dev", dev)):
+        for out in ("ga4_measurement_id", "ee_enabled", "support_widget_enabled", "next_public_support_gateway_url", "toss_client_key"):
+            lines = re.findall(rf'(?m)^\s*echo "{out}=([^"]*)" >> "\$GITHUB_OUTPUT"', body)
+            assert len(lines) == 1, (branch, out, lines)
+            assert "," not in lines[0], (branch, out, lines[0])

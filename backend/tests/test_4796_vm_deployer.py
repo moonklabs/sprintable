@@ -38,6 +38,7 @@ D = _load("deployer")
 SECRET = "SECRET-VALUE-do-not-leak"
 PASSWORD = "0123456789abcdef0123456789abcdef"
 BUCKET, BACKUPS = "sprintable-vm-dev-deploy", "sprintable-vm-dev-backups"
+PRIVATE_IP = "10.178.0.2"
 
 
 def _digest(sha: str) -> str:
@@ -50,7 +51,7 @@ REG = "asia-northeast3-docker.pkg.dev/proj/repo"
 def _bundle(extra: dict[str, bytes] | None = None, links: list[tuple[str, str]] = ()) -> bytes:
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-        for rel in ("compose.yml", "Caddyfile", "env/dev.yaml"):
+        for rel in ("compose.yml", "Caddyfile", "env/dev.yaml", "gateway-db-init.sh"):   # the first-start script of the gateway database travels in every real bundle (make_bundle.TOP_FILES)
             data = (_VM / rel).read_bytes()
             ti = tarfile.TarInfo(rel)
             ti.size = len(data)
@@ -91,6 +92,9 @@ class FakeRunner:
         self.frontend_ok = True
         self.out_suffix = ""
         self.raise_on: dict[str, Exception] = {}
+        self.metadata_rc = 1   # the gateway database container asked for the metadata server: refused (1) is the answer wanted; 0 would mean it can reach it
+        self.chain_lines = ["-N DOCKER-USER", "-A DOCKER-USER -d 169.254.169.254/32 -i br-gwdb -j DROP", "-A DOCKER-USER -j RETURN"]   # what `iptables -S DOCKER-USER` prints: the metadata rule first
+        self.iptables_rc = 0
 
     def run(self, args, env, cwd=None, timeout=900, stdin=None):
         self.calls.append({"args": list(args), "env": dict(env), "stdin": stdin})
@@ -98,6 +102,10 @@ class FakeRunner:
         for marker, exc in self.raise_on.items():
             if marker in joined:
                 raise exc
+        if args[:1] == ["iptables"]:
+            return self.iptables_rc, "\n".join(self.chain_lines) + "\n"
+        if "169.254.169.254" in joined:
+            return self.metadata_rc, ""
         if "process.exit(r.status<500" in joined:
             return (0, "") if self.frontend_ok else (1, "frontend down")
         if "HEALTH" in joined or "import sys,urllib.request" in joined:
@@ -116,10 +124,14 @@ class FakeRunner:
                 rest = [x for x in a[2:] if x not in ("-f", "--profile") and not x.endswith(".yml") and x != "migrate" or x == "migrate"]
                 verb = next((x for x in a[2:] if x in ("pull", "up", "run", "exec", "stop")), "?")
                 if verb == "up":
-                    verb = "up:db" if "db" in a else "up:all"
+                    verb = "up:gwdb" if a[-1] == "gateway-db" else "up:db" if a[-1] == "db" else "up:all"
                 if verb == "exec":
-                    verb = "exec:" + ("reload" if "reload" in a else "health-be" if "python" in a else "health-fe")
+                    tail = a[a.index("exec"):]
+                    verb = "exec:" + ("gwdb-metadata" if "169.254.169.254" in " ".join(tail) else "gwdb-reload" if "pg_reload_conf" in " ".join(tail) else "gwdb-ready" if "pg_database" in " ".join(tail) else "health-gwdb" if "gateway-db" in tail
+                                      else "reload" if "reload" in a else "health-be" if "python" in a else "health-fe")
                 out.append(verb)
+            elif a[:1] == ["iptables"]:
+                out.append("iptables")
             else:
                 out.append(a[1])
         return out
@@ -151,7 +163,7 @@ def world(tmp_path: Path):
     store, runner, clock = FakeStore(), FakeRunner(), Clock()
     logs: list[str] = []
     dep = D.Deployer(cfg, store, runner, lambda sid: SECRET if sid != decl["database"]["password_secret"] else PASSWORD, lambda: "vm-token-abc123",
-                     sleep=clock.sleep, now=clock.now, log=logs.append)
+                     private_ip=lambda: PRIVATE_IP, sleep=clock.sleep, now=clock.now, log=logs.append)
 
     def publish(sha: str = "a" * 40, backend: str | None = None, frontend: str | None = None, bundle: bytes | None = None, sha256: str | None = None) -> dict:
         blob = bundle if bundle is not None else _bundle()
@@ -181,7 +193,7 @@ def _text_tree(root: Path) -> str:
 def test_a_deploy_migrates_before_it_swaps_and_checks_health_after(world) -> None:
     d = world.publish("a" * 40)
     assert world.dep.run_once() == "deployed"
-    assert world.runner.verbs() == ["login", "pull", "logout", "up:db", "run", "up:all", "exec:reload", "exec:health-be", "exec:health-fe"]
+    assert world.runner.verbs() == ["iptables", "login", "pull", "logout", "up:db", "up:gwdb", "exec:gwdb-ready", "exec:gwdb-metadata", "run", "iptables", "up:all", "exec:reload", "exec:gwdb-reload", "exec:gwdb-metadata", "exec:health-be", "exec:health-fe", "exec:gwdb-ready"]
     cur = _state(world, "current.json")
     assert cur["sha"] == d["sha"] and cur["previous"] is None
     assert (world.cfg.install_dir / "releases" / d["sha"] / "compose.yml").exists()
@@ -195,7 +207,7 @@ def test_a_deploy_migrates_before_it_swaps_and_checks_health_after(world) -> Non
 def test_registry_login_uses_the_vm_token_on_stdin_not_the_command_line(world) -> None:
     world.publish()
     world.dep.run_once()
-    login = world.runner.calls[0]
+    login = next(c for c in world.runner.calls if c["args"][:2] == ["docker", "login"])
     assert login["args"][:2] == ["docker", "login"] and login["stdin"] == "vm-token-abc123" and "vm-token-abc123" not in " ".join(login["args"])
     assert login["args"][-1] == "asia-northeast3-docker.pkg.dev"
     logout = next(c for c in world.runner.calls if c["args"][:2] == ["docker", "logout"])
@@ -845,6 +857,55 @@ def test_a_secret_shared_by_both_services_is_read_once_per_deploy(world) -> None
     world.publish("b" * 40)
     world.dep.run_once()
     assert reads and max(reads.values()) == 2, reads  # one read per run (a: once, b: once — previous and candidate share it)
+
+
+def _db_secret_id() -> str:
+    import yaml
+    return yaml.safe_load((_VM / "env/dev.yaml").read_text())["database"]["password_secret"]
+
+
+@pytest.mark.parametrize("suffix", ["\n", "\r\n"])
+def test_one_trailing_line_ending_on_the_database_password_secret_is_not_part_of_it(world, suffix: str) -> None:
+    """found on the first dev run: `openssl rand -hex 24 | gcloud secrets create … --data-file=-` stores the line ending too, and the tool refused the 49-byte value"""
+    db_id = _db_secret_id()
+    orig = world.dep.secrets
+    world.dep.secrets = lambda sid: PASSWORD + suffix if sid == db_id else orig(sid)
+    d = world.publish("a" * 40)
+    assert world.dep.run_once() == "deployed"
+    up = next(c for c in world.runner.calls if c["args"][:2] == ["docker", "compose"] and "up" in c["args"] and "--wait-timeout" in c["args"])
+    assert up["env"]["POSTGRES_PASSWORD"] == PASSWORD
+    assert up["env"]["ALEMBIC_DATABASE_URL"] == f"postgresql://sprintable:{PASSWORD}@db:5432/sprintable"
+    assert d["sha"] == _state(world, "current.json")["sha"]
+
+
+@pytest.mark.parametrize("bad", ["\n\n", " \n", "\r\n\r\n", " ", "\t", "\r"])
+def test_anything_else_around_the_database_password_is_still_refused(world, bad: str) -> None:
+    db_id = _db_secret_id()
+    orig = world.dep.secrets
+    world.dep.secrets = lambda sid: PASSWORD + bad if sid == db_id else orig(sid)
+    world.publish()
+    assert world.dep.run_once() == "failed" and world.runner.calls == []
+    assert "database password" in _state(world, "failed.json")["detail"]
+
+
+def test_a_leading_line_ending_is_not_taken_off(world) -> None:
+    db_id = _db_secret_id()
+    orig = world.dep.secrets
+    world.dep.secrets = lambda sid: "\n" + PASSWORD if sid == db_id else orig(sid)
+    world.publish()
+    assert world.dep.run_once() == "failed" and world.runner.calls == []
+
+
+def test_other_secrets_keep_their_trailing_newline_exactly_as_cloud_run_hands_them_over(world) -> None:
+    """only the database password (ours, hex) is tidied; the live services get their secrets verbatim and so does the VM"""
+    import yaml
+    jwt_id = yaml.safe_load((_VM / "env/dev.yaml").read_text())["services"]["backend"]["secrets"]["JWT_SECRET"]
+    orig = world.dep.secrets
+    world.dep.secrets = lambda sid: SECRET + "\n" if sid == jwt_id else orig(sid)
+    world.publish("a" * 40)
+    assert world.dep.run_once() == "deployed"
+    up = next(c for c in world.runner.calls if c["args"][:2] == ["docker", "compose"] and "up" in c["args"] and "--wait-timeout" in c["args"])
+    assert up["env"]["BACKEND__JWT_SECRET"] == SECRET + "\n"
 
 
 def test_even_a_short_secret_value_is_removed_from_recorded_output(world) -> None:

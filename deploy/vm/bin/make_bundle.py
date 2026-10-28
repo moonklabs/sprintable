@@ -21,7 +21,7 @@ from pathlib import Path
 
 SKIP_DIRS = {"__pycache__"}
 # what a bundle may contain: these shapes only (the live-name exports are test fixtures, not deploy input)
-TOP_FILES = {"compose.yml", "Caddyfile", "README.md", "RUNBOOK.md"}
+TOP_FILES = {"compose.yml", "Caddyfile", "README.md", "RUNBOOK.md", "gateway-db-init.sh", "gateway-db-pg_hba.conf"}
 DIR_SUFFIXES = {"env": {".yaml"}, "bin": {".py", ".sh", ".sql"}, "systemd": {".service", ".timer"}}
 SECRET_LIKE = re.compile(r"(^\.env|\.pem$|\.key$|private-plain|secret|credential|\.p12$|id_rsa)", re.I)
 

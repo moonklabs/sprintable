@@ -208,6 +208,7 @@ jobs:
             # sprintable-dev 인스턴스 내 전용 database support_gateway+전용 user support_gw).
             echo "support_gateway_deploy_enabled=false" >> "$GITHUB_OUTPUT"
             echo "support_gateway_service_account=" >> "$GITHUB_OUTPUT"
+            # story 4796 (D2): prod's gateway does not exist (above) — the database switch is left unstated (an empty value becomes false below).
             # story #3263 AC4(2026-09-01, 페드루 PO 지시) — 에스컬레이션 게이트/DM
             # requester/approver team_members.id. prod는 support_gateway_deploy_enabled와
             # 동형 무접촉(빈 문자열 — 이 스토리 스코프가 dev 검증까지).
@@ -261,7 +262,11 @@ jobs:
             # 단일세션 60분 무절단 + heartbeat 규칙성(dev 대조군 동시 측정).
             # ⚠️승격 병합(promo/backplane-20260723): 위 백플레인 3플래그(develop)와 이 REALTIME_URL
             # 전환(main #2439)은 서로 무관한 prod env 출력이라 둘 다 보존한다.
-            echo "realtime_url=https://realtime.sprintable.ai" >> "$GITHUB_OUTPUT"
+            # story 4790 (E-INFRA-DIET, 2026-10-27, PO) — the prod stream address is EMPTY now: the prod GCE realtime gateways are off. After the Redis move (10-26 15:16Z) the gateway MIG came back
+            # failing its health check (8000 /api/v2/ping), so /api/event-stream answered 502 until the PO emptied REALTIME_URL by hand at 17:30Z (frontend-prod revision 00304). Empty = the frontend streams through
+            # the backend (apps/web/src/app/api/event-stream/route.ts falls back to FASTAPI_URL), the same as dev. Without this line the next prod promotion would write the dead address back. The GCE deploy step
+            # never deploys on prod (cloudbuild.yaml deploy-realtime-gce: dev-only gate), so nothing else here carries the gateway; the MIG, the load balancer rule and the IP are removed by the PO after this merges.
+            echo "realtime_url=" >> "$GITHUB_OUTPUT"
             # story #2701(2026-08-17) — sprintable-mcp-prod의 라이브 실측(gcloud describe)
             # 그대로 durable화. dev엔 이 값이 없다(아래 dev 분기 참조, 조용히 맞추지 않음 —
             # dev는 CORS/host allowlist 자체가 아직 필요하지 않다는 뜻으로 실측된 그대로 둔다).
@@ -286,10 +291,17 @@ jobs:
             # story 4786 (E-INFRA-DIET, 2026-10-26, PO) — the dev GCE realtime gateways and realtime-dev on Cloud Run are RETIRED (the dev frontend streams through backend-dev: REALTIME_URL is empty, apps/web/src/app/api/event-stream/route.ts
             # falls back to FASTAPI_URL; cloudbuild.yaml deploy-realtime and deploy-realtime-gce skip on dev unconditionally; the resources were removed by hand). There is no switch to turn them back on — the dev move to VMs (story 4796) replaces
             # this path. Redis (event broker, presence, SSE lease, replay, rate limiter) and PG_LISTEN are NOT part of this: they stay as they were.
-            echo "fastapi_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
+            # story 4796 (PO signal 2026-10-27, RUNBOOK §9 «The one switch»): the dev backend's address for clients and for the other services is the VM's API name now (a pass-through to Cloud Run
+            # until the data move, RUNBOOK §7c Phase 1). It feeds `_FASTAPI_URL`: the backend's FASTAPI_URL (the desktop setup's api_url), the baked NEXT_PUBLIC_FASTAPI_URL, the hosted MCP, the support gateway and
+            # the Cloud Scheduler jobs. The old Cloud Run address keeps answering. Undo = the previous value of this line: https://sprintable-backend-dev-787818285179.asia-northeast3.run.app
+            echo "fastapi_url=https://dev-api.sprintable.ai" >> "$GITHUB_OUTPUT"
             # story #3583-BE 리뷰 조건(페드루 2026-09-06) — GA4 OAuth 콜백 redirect_uri.
-            # dev는 백엔드 자기 자신 URL(fastapi_url dev값과 동일) 그대로 배선.
+            # dev는 백엔드 자기 자신 URL 그대로 배선(story 4796: fastapi_url과 같은 값이 아니다 — GA4 등록은 Phase 2에서 따로 옮긴다).
             echo "backend_url=https://sprintable-backend-dev-787818285179.asia-northeast3.run.app" >> "$GITHUB_OUTPUT"
+            # story 4796 (PO 2026-10-27): dev runs on the VM, so the dev build no longer builds the Cloud Run frontend, deploys the Cloud Run backend and frontend, or runs the Cloud SQL migrate job (the VM
+            # migrates itself); the images the VM bundle needs (backend, by digest) are still built and pushed. Exactly "true" skips (cloudbuild.yaml `_CLOUD_RUN_APP_SKIP`); prod states nothing.
+            # Undo = delete this line (or "false"): the next dev build deploys Cloud Run again, but it serves nothing until the pass-through points at it (RUNBOOK §7c undo).
+            echo "cloud_run_app_skip=true" >> "$GITHUB_OUTPUT"
             # story #2749(2026-08-18, 페드루 PO 실측 — dev 가입 인증메일 verify 링크가 prod
             # 도메인으로 발급됨) — NEXT_PUBLIC_APP_URL이 dev에 한 번도 배선된 적이 없어
             # auth.py의 코드 하드코딩 fallback(prod URL)이 dev에도 새고 있었다. dev 도메인 명시.
@@ -457,6 +469,11 @@ jobs:
             # 자원 프로비저닝 완료(SA·전용 DB·Secret Manager 2종, 사부님 보고 済) — dev만 켠다.
             echo "support_gateway_deploy_enabled=true" >> "$GITHUB_OUTPUT"
             echo "support_gateway_service_account=support-gateway-dev@sprintable-494803.iam.gserviceaccount.com" >> "$GITHUB_OUTPUT"
+            # story 4796 (D2): where the gateway's database is. «false» = Cloud SQL, as before; the PO's cutover (deploy/vm/CUTOVER-gateway-dev.md) flips this ONE word to «true» in the same window as the secret.
+            # The pool (3 + 2, deploy/vm/RUNBOOK.md section 13) is only sent when it is «true».
+            echo "support_gateway_db_on_vm=true" >> "$GITHUB_OUTPUT"
+            echo "support_gateway_db_pool_size=3" >> "$GITHUB_OUTPUT"
+            echo "support_gateway_db_max_overflow=2" >> "$GITHUB_OUTPUT"
             # story #3263 AC4(2026-09-01, 페드루 PO 지시) — 에스컬레이션 게이트/DM
             # requester("Sprintable 지원" 에이전트 멤버)·approver(PO) team_members.id, dev
             # 배선 실 값(PO가 POST /api/v2/team-members로 이미 프로비저닝). 미설정이면
@@ -678,6 +695,10 @@ jobs:
           V_SUPPORT_GATEWAY_CORS_ORIGINS: ${{ steps.env.outputs.support_gateway_cors_origins }}
           V_NEXT_PUBLIC_SUPPORT_GATEWAY_URL: ${{ steps.env.outputs.next_public_support_gateway_url }}
           V_SUPPORT_GATEWAY_DEPLOY_ENABLED: ${{ steps.env.outputs.support_gateway_deploy_enabled }}
+          V_CLOUD_RUN_APP_SKIP: ${{ steps.env.outputs.cloud_run_app_skip }}
+          V_SUPPORT_GATEWAY_DB_ON_VM: ${{ steps.env.outputs.support_gateway_db_on_vm }}
+          V_SUPPORT_GATEWAY_DB_POOL_SIZE: ${{ steps.env.outputs.support_gateway_db_pool_size }}
+          V_SUPPORT_GATEWAY_DB_MAX_OVERFLOW: ${{ steps.env.outputs.support_gateway_db_max_overflow }}
           V_SUPPORT_GATEWAY_SERVICE_ACCOUNT: ${{ steps.env.outputs.support_gateway_service_account }}
           V_LICENSE_CONSENT: ${{ steps.env.outputs.license_consent }}
           V_TOSS_CLIENT_KEY: ${{ steps.env.outputs.toss_client_key }}
@@ -705,7 +726,9 @@ jobs:
           # 쪽은 정확히 "true" 문자열만 스킵으로 취급하므로 다른 값은 전부 안전측(배포)이다.
           V_REALTIME_GCE_SKIP="${V_REALTIME_GCE_SKIP:-false}"
           V_REALTIME_CLOUDRUN_SKIP="${V_REALTIME_CLOUDRUN_SKIP:-false}"
-          SUBST="_DEPLOY_ENV=\"${V_DEPLOY_ENV}\",_FASTAPI_URL=\"${V_FASTAPI_URL}\",_BACKEND_URL=\"${V_BACKEND_URL}\",_BACKEND_MIN_INSTANCES=\"${V_BACKEND_MIN_INSTANCES}\",_BACKEND_MAX_INSTANCES=\"${V_BACKEND_MAX_INSTANCES}\",_DB_POOL_SIZE=\"${V_DB_POOL_SIZE}\",_DB_MAX_OVERFLOW=\"${V_DB_MAX_OVERFLOW}\",_BACKEND_DB_PGBOUNCER=\"${V_BACKEND_DB_PGBOUNCER}\",_BACKEND_TIMEOUT=\"${V_BACKEND_TIMEOUT}\",_GA4_MEASUREMENT_ID=\"${V_GA4_MEASUREMENT_ID}\",_REALTIME_MIN_INSTANCES=\"${V_REALTIME_MIN_INSTANCES}\",_REALTIME_MAX_INSTANCES=\"${V_REALTIME_MAX_INSTANCES}\",_REALTIME_TIMEOUT=\"${V_REALTIME_TIMEOUT}\",_REALTIME_URL=\"${V_REALTIME_URL}\",_BACKEND_PG_LISTEN_ENABLED=\"${V_BACKEND_PG_LISTEN_ENABLED}\",_BACKEND_REDIS_CONSUME_ENABLED=\"${V_BACKEND_REDIS_CONSUME_ENABLED}\",_BACKEND_REDIS_DISPATCH_ENABLED=\"${V_BACKEND_REDIS_DISPATCH_ENABLED}\",_REDIS_URL=\"${V_REDIS_URL}\",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED=\"${V_BACKEND_REDIS_DUAL_PUBLISH_ENABLED}\",_BACKEND_FANOUT_WAKE_REDIS_ENABLED=\"${V_BACKEND_FANOUT_WAKE_REDIS_ENABLED}\",_BACKEND_PRESENCE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_REDIS_ENABLED}\",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED}\",_BACKEND_SSE_LEASE_REDIS_ENABLED=\"${V_BACKEND_SSE_LEASE_REDIS_ENABLED}\",_FRONTEND_MIN_INSTANCES=\"${V_FRONTEND_MIN_INSTANCES}\",_FRONTEND_MAX_INSTANCES=\"${V_FRONTEND_MAX_INSTANCES}\",_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED=\"${V_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED}\",_MCP_ALLOWED_HOSTS=\"${V_MCP_ALLOWED_HOSTS}\",_EE_ENABLED=\"${V_EE_ENABLED}\",_SUPPORT_WIDGET_ENABLED=\"${V_SUPPORT_WIDGET_ENABLED}\",_SUPPORT_CONTACT_SURFACE_WIDGET=\"${V_SUPPORT_CONTACT_SURFACE_WIDGET}\",_SUPPORT_ESCALATION_REQUESTER_MEMBER_ID=\"${V_SUPPORT_ESCALATION_REQUESTER_MEMBER_ID}\",_SUPPORT_ESCALATION_APPROVER_MEMBER_ID=\"${V_SUPPORT_ESCALATION_APPROVER_MEMBER_ID}\",_OPS_ALERT_CONVERSATION_ID=\"${V_OPS_ALERT_CONVERSATION_ID}\",_SUPPORT_GATEWAY_DEPLOY_ENABLED=\"${V_SUPPORT_GATEWAY_DEPLOY_ENABLED}\",_SUPPORT_GATEWAY_SERVICE_ACCOUNT=\"${V_SUPPORT_GATEWAY_SERVICE_ACCOUNT}\",_SUPPORT_GATEWAY_CORS_ORIGINS=\"${V_SUPPORT_GATEWAY_CORS_ORIGINS}\",_NEXT_PUBLIC_SUPPORT_GATEWAY_URL=\"${V_NEXT_PUBLIC_SUPPORT_GATEWAY_URL}\",_LICENSE_CONSENT=\"${V_LICENSE_CONSENT}\",_TOSS_CLIENT_KEY=\"${V_TOSS_CLIENT_KEY}\",_NEXT_PUBLIC_APP_URL=\"${V_NEXT_PUBLIC_APP_URL}\",_REALTIME_GCE_SKIP=\"${V_REALTIME_GCE_SKIP}\",_REALTIME_CLOUDRUN_SKIP=\"${V_REALTIME_CLOUDRUN_SKIP}\",_APPLE_TEAM_ID=\"${V_APPLE_TEAM_ID}\",_MOBILE_APP_LINK_ORIGIN=\"${V_MOBILE_APP_LINK_ORIGIN}\",_FIREBASE_OAUTH_HANDOFF_ENABLED=\"${V_FIREBASE_OAUTH_HANDOFF_ENABLED}\",_PUSH_DEVICES_BY_USER=\"${V_PUSH_DEVICES_BY_USER}\",_CPU_FLAGS=\"${V_CPU_FLAGS}\",_MINS_EXPLICIT=\"${V_MINS_EXPLICIT}\",_BACKEND_RESOURCES=\"${V_BACKEND_RESOURCES}\",_FRONTEND_RESOURCES=\"${V_FRONTEND_RESOURCES}\""
+          V_CLOUD_RUN_APP_SKIP="${V_CLOUD_RUN_APP_SKIP:-false}"
+          V_SUPPORT_GATEWAY_DB_ON_VM="${V_SUPPORT_GATEWAY_DB_ON_VM:-false}"
+          SUBST="_DEPLOY_ENV=\"${V_DEPLOY_ENV}\",_FASTAPI_URL=\"${V_FASTAPI_URL}\",_BACKEND_URL=\"${V_BACKEND_URL}\",_BACKEND_MIN_INSTANCES=\"${V_BACKEND_MIN_INSTANCES}\",_BACKEND_MAX_INSTANCES=\"${V_BACKEND_MAX_INSTANCES}\",_DB_POOL_SIZE=\"${V_DB_POOL_SIZE}\",_DB_MAX_OVERFLOW=\"${V_DB_MAX_OVERFLOW}\",_BACKEND_DB_PGBOUNCER=\"${V_BACKEND_DB_PGBOUNCER}\",_BACKEND_TIMEOUT=\"${V_BACKEND_TIMEOUT}\",_GA4_MEASUREMENT_ID=\"${V_GA4_MEASUREMENT_ID}\",_REALTIME_MIN_INSTANCES=\"${V_REALTIME_MIN_INSTANCES}\",_REALTIME_MAX_INSTANCES=\"${V_REALTIME_MAX_INSTANCES}\",_REALTIME_TIMEOUT=\"${V_REALTIME_TIMEOUT}\",_REALTIME_URL=\"${V_REALTIME_URL}\",_BACKEND_PG_LISTEN_ENABLED=\"${V_BACKEND_PG_LISTEN_ENABLED}\",_BACKEND_REDIS_CONSUME_ENABLED=\"${V_BACKEND_REDIS_CONSUME_ENABLED}\",_BACKEND_REDIS_DISPATCH_ENABLED=\"${V_BACKEND_REDIS_DISPATCH_ENABLED}\",_REDIS_URL=\"${V_REDIS_URL}\",_BACKEND_REDIS_DUAL_PUBLISH_ENABLED=\"${V_BACKEND_REDIS_DUAL_PUBLISH_ENABLED}\",_BACKEND_FANOUT_WAKE_REDIS_ENABLED=\"${V_BACKEND_FANOUT_WAKE_REDIS_ENABLED}\",_BACKEND_PRESENCE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_REDIS_ENABLED}\",_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED=\"${V_BACKEND_PRESENCE_ONLINE_REDIS_ENABLED}\",_BACKEND_SSE_LEASE_REDIS_ENABLED=\"${V_BACKEND_SSE_LEASE_REDIS_ENABLED}\",_FRONTEND_MIN_INSTANCES=\"${V_FRONTEND_MIN_INSTANCES}\",_FRONTEND_MAX_INSTANCES=\"${V_FRONTEND_MAX_INSTANCES}\",_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED=\"${V_BACKEND_SSE_TRANSIENT_REPLAY_ENABLED}\",_MCP_ALLOWED_HOSTS=\"${V_MCP_ALLOWED_HOSTS}\",_EE_ENABLED=\"${V_EE_ENABLED}\",_SUPPORT_WIDGET_ENABLED=\"${V_SUPPORT_WIDGET_ENABLED}\",_SUPPORT_CONTACT_SURFACE_WIDGET=\"${V_SUPPORT_CONTACT_SURFACE_WIDGET}\",_SUPPORT_ESCALATION_REQUESTER_MEMBER_ID=\"${V_SUPPORT_ESCALATION_REQUESTER_MEMBER_ID}\",_SUPPORT_ESCALATION_APPROVER_MEMBER_ID=\"${V_SUPPORT_ESCALATION_APPROVER_MEMBER_ID}\",_OPS_ALERT_CONVERSATION_ID=\"${V_OPS_ALERT_CONVERSATION_ID}\",_SUPPORT_GATEWAY_DEPLOY_ENABLED=\"${V_SUPPORT_GATEWAY_DEPLOY_ENABLED}\",_SUPPORT_GATEWAY_SERVICE_ACCOUNT=\"${V_SUPPORT_GATEWAY_SERVICE_ACCOUNT}\",_SUPPORT_GATEWAY_CORS_ORIGINS=\"${V_SUPPORT_GATEWAY_CORS_ORIGINS}\",_NEXT_PUBLIC_SUPPORT_GATEWAY_URL=\"${V_NEXT_PUBLIC_SUPPORT_GATEWAY_URL}\",_LICENSE_CONSENT=\"${V_LICENSE_CONSENT}\",_TOSS_CLIENT_KEY=\"${V_TOSS_CLIENT_KEY}\",_NEXT_PUBLIC_APP_URL=\"${V_NEXT_PUBLIC_APP_URL}\",_REALTIME_GCE_SKIP=\"${V_REALTIME_GCE_SKIP}\",_REALTIME_CLOUDRUN_SKIP=\"${V_REALTIME_CLOUDRUN_SKIP}\",_APPLE_TEAM_ID=\"${V_APPLE_TEAM_ID}\",_MOBILE_APP_LINK_ORIGIN=\"${V_MOBILE_APP_LINK_ORIGIN}\",_FIREBASE_OAUTH_HANDOFF_ENABLED=\"${V_FIREBASE_OAUTH_HANDOFF_ENABLED}\",_PUSH_DEVICES_BY_USER=\"${V_PUSH_DEVICES_BY_USER}\",_CPU_FLAGS=\"${V_CPU_FLAGS}\",_MINS_EXPLICIT=\"${V_MINS_EXPLICIT}\",_BACKEND_RESOURCES=\"${V_BACKEND_RESOURCES}\",_FRONTEND_RESOURCES=\"${V_FRONTEND_RESOURCES}\",_CLOUD_RUN_APP_SKIP=\"${V_CLOUD_RUN_APP_SKIP}\",_SUPPORT_GATEWAY_DB_ON_VM=\"${V_SUPPORT_GATEWAY_DB_ON_VM}\",_SUPPORT_GATEWAY_DB_POOL_SIZE=\"${V_SUPPORT_GATEWAY_DB_POOL_SIZE}\",_SUPPORT_GATEWAY_DB_MAX_OVERFLOW=\"${V_SUPPORT_GATEWAY_DB_MAX_OVERFLOW}\""
           echo "substitutions=${SUBST}" >> "$GITHUB_OUTPUT"
 
       - name: Submit Cloud Build
@@ -717,17 +740,20 @@ jobs:
             --suppress-logs \
             .
 
-      # story 4796 — the dev VM's bundle (RUNBOOK §5) is a build of its own, started here when the Cloud Run build above has finished and pushed its images.
+      # story 4796 — the VM's bundle (RUNBOOK §5) is a build of its own, started here when the Cloud Run build above has finished and pushed its images.
       # Why not a step of cloudbuild.yaml: its first version was, and on its first real run the worker stopped answering during the Next.js type check (build 844cd9a1, INTERNAL_ERROR on every
       # step) — `allowFailure` and step timeouts do nothing for a dead worker. As its own build on its own worker, the worst case is that build failing.
       # `--async`: this run does not wait for it (no delay, serving-reality starts at once); `continue-on-error`: a failed SUBMISSION does not fail the run either. Where to look: the build
       # list, tag `vm-bundle` set in cloudbuild-vm.yaml (`gcloud builds list --filter="tags=vm-bundle"`; `gcloud builds submit` itself has no tags flag), and gs://<deploy bucket>/bundles/ + candidates/.
       # The five values are the ones the Cloud Run frontend was built with (same step outputs as "Assemble Cloud Build substitutions" above); an empty one is passed empty on purpose.
-      - name: Submit the dev VM bundle build (own build, async — never fails or delays this run)
-        if: success() && steps.env.outputs.target == 'dev'
+      # story 4796 (P2 of the prod cutover, deploy/vm/CUTOVER-prod.md): prod gets the same build, into its own deploy bucket. It only writes bundles/<sha>.tgz and candidates/<sha>.json; it never writes desired.json, so a prod
+      # push cannot change what the prod VM runs (the sheet's step 7 copies a candidate by hand).
+      - name: Submit the VM bundle build (dev and prod; own build, async — never fails or delays this run)
+        if: success() && (steps.env.outputs.target == 'dev' || steps.env.outputs.target == 'prod')
         continue-on-error: true
         timeout-minutes: 10
         env:
+          VM_TARGET: ${{ steps.env.outputs.target }}
           VM_GA4_MEASUREMENT_ID: ${{ steps.env.outputs.ga4_measurement_id }}
           VM_EE_ENABLED: ${{ steps.env.outputs.ee_enabled }}
           VM_SUPPORT_WIDGET_ENABLED: ${{ steps.env.outputs.support_widget_enabled }}
@@ -738,7 +764,7 @@ jobs:
             --async \
             --config=cloudbuild-vm.yaml \
             --project="${{ secrets.GCP_PROJECT_ID }}" \
-            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="dev",_GA4_MEASUREMENT_ID="${VM_GA4_MEASUREMENT_ID}",_EE_ENABLED="${VM_EE_ENABLED}",_SUPPORT_WIDGET_ENABLED="${VM_SUPPORT_WIDGET_ENABLED}",_NEXT_PUBLIC_SUPPORT_GATEWAY_URL="${VM_SUPPORT_GATEWAY_URL}",_TOSS_CLIENT_KEY="${VM_TOSS_CLIENT_KEY}" \
+            --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${VM_TARGET}",_VM_DEPLOY_BUCKET="sprintable-vm-${VM_TARGET}-deploy",_GA4_MEASUREMENT_ID="${VM_GA4_MEASUREMENT_ID}",_EE_ENABLED="${VM_EE_ENABLED}",_SUPPORT_WIDGET_ENABLED="${VM_SUPPORT_WIDGET_ENABLED}",_NEXT_PUBLIC_SUPPORT_GATEWAY_URL="${VM_SUPPORT_GATEWAY_URL}",_TOSS_CLIENT_KEY="${VM_TOSS_CLIENT_KEY}" \
             .
 
   # 2026-10-12 (story 4659): 배포 뒤에만 실서버 도달 확인. 예약 cron은 두지 않는다.

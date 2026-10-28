@@ -15,7 +15,7 @@ REGION="asia-northeast3"
 PROJECT="sprintable-494803"
 AR="${REGION}-docker.pkg.dev/${PROJECT}/sprintable/backend"
 SHA="${COMMIT_SHA:-latest-dev}"
-DEV_BACKEND_URL="https://sprintable-backend-dev-787818285179.${REGION}.run.app"
+DEV_BACKEND_URL="https://dev-api.sprintable.ai"  # story 4796: the same value as the pipeline's dev `fastapi_url` (RUNBOOK §9)
 # ⛔story cd10e123 계열 긴급수정(2026-07-21, 오르테가군 발견+디디 독립재현): AGENT_API_KEY 는
 # http 모드 never-hit fallback(per-request bearer 가 실키)이라 원래도 어떤 실값도 필요 없다 —
 # 그런데 예전엔 이 값을 호출자 쉘의 ambient `AGENT_API_KEY`에서 상속받았다. oscar 런처가 모든

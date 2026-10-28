@@ -15,13 +15,20 @@ database:
   user: sprintable
   name: sprintable
   password_secret: DB_PASSWORD_VM_DEV
+support_gateway:  # story 4796: the support gateway's database — a second Postgres container (compose.yml `gateway-db`) with its own user, database and password; the gateway itself stays on Cloud Run
+  database:
+    user: support_gw
+    name: support_gateway
+    password_secret: SUPPORT_GATEWAY_DB_PASSWORD_VM_DEV   # new secret, hex like the main database's (RUNBOOK §3)
+  allow_from:   # the networks the server's access rules let the application role in from: the gateway's OWN subnet (RUNBOOK §13 creates it; the firewall's allow rule names the same range). Not the default subnet: that holds other Cloud Run services too
+    - 10.120.0.0/25
 services:
   backend:
     live_section: sprintable-backend-dev
     overrides:  # VM-specific values (everything else plain comes from the private file made from the live service)
       DB_PGBOUNCER: "false"
-      DB_POOL_SIZE: "5"
-      DB_MAX_OVERFLOW: "5"
+      DB_POOL_SIZE: "20"   # story 4796: see RUNBOOK §11 «Database connection budget» — one process on direct connections, 10 was exhausted on the first day (QueuePool limit, 30 s timeout)
+      DB_MAX_OVERFLOW: "10"
       PG_LISTEN_ENABLED: "true"
       EVENT_BROKER_REDIS_CONSUME_ENABLED: "false"
       EVENT_BROKER_REDIS_DISPATCH_ENABLED: "false"
@@ -35,7 +42,9 @@ services:
       NEXT_PUBLIC_APP_URL: "https://dev-app.sprintable.ai"
       BACKEND_URL: "https://dev-api.sprintable.ai"
       FASTAPI_URL: "https://dev-api.sprintable.ai"
+      PUBLIC_API_URL: "https://dev-api.sprintable.ai"  # story 4796: the origin stored/bound links are built from (the pipeline sets the same value on Cloud Run dev from _FASTAPI_URL)
       ADMIN_OPERATOR_AUDIENCE: "https://dev-api.sprintable.ai"
+      GCS_MEMO_ATTACHMENTS_BUCKET: "sprintable-memo-attachments-dev"  # dev-only attachments bucket (story 4798; live on Cloud Run dev as cloudbuild.yaml _GCS_MEMO_ATTACHMENTS_BUCKET) — pinned here so it does not depend on the private file
     secrets:  # env name -> Secret Manager secret id (same ids as the live service; values are read at deploy time)
       APPLE_PRIVATE_KEY: APPLE_SIWA_PRIVATE_KEY
       CHANNEL_CREDENTIAL_ENCRYPTION_KEY: CHANNEL_CREDENTIAL_ENCRYPTION_KEY_DEV
@@ -68,7 +77,6 @@ services:
       OPS_RESTART_TS: "a Cloud Run restart trigger, not a setting"
     added:  # new on the VM
       TRUST_FORWARDED_FOR: "true"
-      GCS_MEMO_ATTACHMENTS_BUCKET: "sprintable-memo-attachments-dev"  # dev-only attachments bucket (story 5269 makes it live on Cloud Run dev; then this moves to overrides)
     live_plain:  # names whose value is taken from the private plain file (PO exports it from the live service)
       - ADMIN_OPERATOR_ALLOWLIST
       - APPLE_KEY_ID
@@ -126,6 +134,7 @@ services:
       REALTIME_URL: "https://dev-realtime.sprintable.ai"
       APP_BASE_URL: "https://dev-app.sprintable.ai"
       NEXT_PUBLIC_APP_URL: "https://dev-app.sprintable.ai"
+      GCS_MEMO_ATTACHMENTS_BUCKET: "sprintable-memo-attachments-dev"  # the frontend reads it too (cloudbuild.yaml: "dev names it on the backend AND the frontend")
     secrets:  # env name -> Secret Manager secret id (same ids as the live service; values are read at deploy time)
       EDGE_CLIENT_IP_SECRET: EDGE_CLIENT_IP_SECRET_DEV
       FIREBASE_BFF_INTERNAL_SECRET: FIREBASE_BFF_INTERNAL_SECRET
