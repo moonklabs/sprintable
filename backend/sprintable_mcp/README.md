@@ -6,7 +6,7 @@ BYO 에이전트용 Sprintable MCP 서버. 에이전트 런타임을 Sprintable 
 ## Quick start
 
 ```bash
-export SPRINTABLE_API_URL=https://sprintable-backend-prod-787818285179.asia-northeast3.run.app   # backend-direct(SSE 필수). dev=https://dev-api.sprintable.ai
+export SPRINTABLE_API_URL=https://api.sprintable.ai   # backend-direct(SSE 필수). dev=https://dev-api.sprintable.ai
 export AGENT_API_KEY=sk_live_...                         # 에이전트 API 키
 uvx sprintable
 ```
@@ -34,7 +34,7 @@ backend(app/*) 비의존 — `mcp` / `httpx` / `pydantic` / `pydantic-settings`�
 
 | 변수 | 설명 |
 |------|------|
-| `SPRINTABLE_API_URL` | Sprintable 백엔드 URL (backend-direct — prod는 run.app, dev는 DNS 전용 dev-api.sprintable.ai · CF 깔끔도메인 app.sprintable.ai 금지: /agent/stream SSE 버퍼·봇차단) |
+| `SPRINTABLE_API_URL` | Sprintable 백엔드 URL (backend-direct — prod는 api.sprintable.ai, dev는 DNS 전용 dev-api.sprintable.ai · CF 깔끔도메인 app.sprintable.ai 금지: /agent/stream SSE 버퍼·봇차단) |
 | `AGENT_API_KEY` | 에이전트 API 키(`sk_live_...`). http 모드는 per-request bearer 가 실인증이라 never-hit fallback |
 | `MCP_TRANSPORT` | `stdio`(기본·로컬) \| `http`(Cloud Run 호스팅) |
 | `MCP_ALLOWED_HOSTS` | http 모드 DNS-rebinding 보호 호스트 화이트리스트(comma·exact). 비우면 보호 OFF(bearer+TLS 가 실보안) |
