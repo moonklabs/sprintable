@@ -8,7 +8,8 @@
 # Secrets and the service variables are passed BY NAME through the override file render_env.py writes (-f pass-through.yml);
 # their values exist only in the environment of the compose command. No .env file, no value in this repository.
 #
-# Only caddy publishes ports (80, 443). The database, backend and frontend are reachable on the compose network only.
+# Only caddy publishes ports to the world (80, 443). The database, backend and frontend are reachable on the compose network only. One more server listens, on the VM's PRIVATE address only: the support
+# gateway's own database (`gateway-db` below, RUNBOOK §13) — behind a firewall rule that admits the gateway's Cloud Run revisions and nobody else.
 
 name: sprintable
 

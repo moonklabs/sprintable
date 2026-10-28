@@ -384,8 +384,12 @@ class Deployer:
             _write_json(self.cfg.state_dir / "failed.json", {"signature": signature(desired), "phase": err.phase, "detail": self._scrub(str(err))[:500], "at": int(self.now())})
             if err.phase == "pre-swap" and self._prev is not None and self._prev.gateway_db:
                 # the candidate's rules file was written for a server that was never told: put the file back to what the running release declares
+                # …and, because compose may have re-created the container with the candidate's file already mounted (a changed secret does that), the running server is told to read it again
                 try:
                     self._write_gateway_hba(self.cfg.install_dir / "runtime" / "gateway-db-pg_hba.conf", renv.gateway_hba(self._prev.decl))
+                    rc, out = self._compose(self._prev.release, self._prev.env, "exec", "-T", "gateway-db", "sh", "-c", GATEWAY_DB_RELOAD, timeout=30)
+                    if rc != 0:
+                        self.log(f"the gateway database did not reload the previous access rules: {out[-200:]}")
                 except DeployError:
                     self.log("could not put the gateway database's access rules file back")
             if err.phase == "post-swap":

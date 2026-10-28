@@ -548,11 +548,22 @@ def test_a_release_that_fails_before_the_swap_does_not_change_what_the_running_s
     path = world.cfg.install_dir / "runtime/gateway-db-pg_hba.conf"
     before = path.read_text()
     reloads = len(_reloads(world))
+    a_backend = S._state(world, "current.json")["backend_image"]
     world.publish("b" * 40, bundle=_bundle_with_networks(["10.200.0.0/20"]))
     world.runner.fail_on["migrate"] = 1
     assert world.dep.run_once() == "failed"
-    assert len(_reloads(world)) == reloads, "the server was never told about the candidate's networks"
-    assert path.read_text() == before and "10.200.0.0" not in path.read_text(), "and the file is put back, so a restart of the container cannot pick them up either"
+    assert path.read_text() == before and "10.200.0.0" not in path.read_text(), "the file is put back, so a restart of the container cannot pick the candidate's networks up"
+    after = _reloads(world)[reloads:]
+    assert len(after) == 1 and after[0]["env"]["BACKEND_IMAGE"] == a_backend, "and the server is told once, with the RUNNING release's environment (compose may have re-created the container with the candidate's file mounted)"
+
+
+def test_nothing_is_reloaded_when_there_was_no_gateway_database_to_go_back_to(world) -> None:
+    world.publish("a" * 40, bundle=_without_block(Path(".")))
+    world.dep.run_once()
+    world.publish("b" * 40)
+    world.runner.fail_on["migrate"] = 1
+    assert world.dep.run_once() == "failed"
+    assert not _reloads(world), "the previous release has no gateway database: nothing to tell"
 
 
 def test_a_rollback_gives_the_running_server_the_previous_releases_rules_again(world) -> None:
@@ -776,3 +787,13 @@ def test_a_password_that_a_failing_command_echoes_is_scrubbed_from_what_is_recor
     st = S._state(world, "failed.json")
     assert GW_PASSWORD not in json.dumps(st) and "***" in st["detail"]
     assert GW_PASSWORD not in json.dumps(world.store.puts) and GW_PASSWORD not in "\n".join(world.logs)
+
+
+def test_the_documents_that_describe_the_open_ports_know_about_the_gateway_databases_port() -> None:
+    compose = (_VM / "compose.yml").read_text()
+    assert "One more server listens, on the VM's PRIVATE address only" in compose.split("name: sprintable")[0]
+    runbook = (_VM / "RUNBOOK.md").read_text()
+    section4 = runbook.split("## 4. Address, firewall, disk, VM")[1].split("## 5.")[0]
+    assert "The one other port** is 5432 of the support gateway's own database server" in section4 and "deny rule for everyone and an allow rule" in section4
+    assert "**Rolling back across this step:**" in runbook.split("## 13. The support gateway's database")[1]
+    assert "--remove-orphans" in runbook.split("**Rolling back across this step:**")[1].split("**Undo of this step:**")[0]
