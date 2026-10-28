@@ -11,7 +11,6 @@ configuration directory, so it stops at «no active account» before any request
 """
 from __future__ import annotations
 
-import os
 import re
 import shutil
 import stat
@@ -20,6 +19,8 @@ from pathlib import Path
 
 import pytest
 import yaml
+
+from tests import _real_gcloud as _gcloud
 
 _ROOT = Path(__file__).resolve().parents[2]
 _CLOUDBUILD = (_ROOT / "cloudbuild.yaml").read_text()
@@ -217,11 +218,7 @@ def test_the_job_step_hands_the_switch_to_the_script() -> None:
 def _real_gcloud_parse(argv: list[str], tmp: Path) -> str:
     """what the real gcloud says about an argument list with NO credentials and an empty configuration directory: a usage error means the list is wrong; «no active account» means it parsed and stopped
     before any request. Nothing can reach Google."""
-    cfg = tmp / "gcloud-empty-config"
-    cfg.mkdir(exist_ok=True)
-    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(tmp), "CLOUDSDK_CONFIG": str(cfg), "CLOUDSDK_CORE_DISABLE_PROMPTS": "1", "CLOUDSDK_CORE_PROJECT": "parse-only-project"}
-    p = subprocess.run(["gcloud", *argv], capture_output=True, text=True, timeout=120, env=env, cwd=tmp)
-    return re.sub(r"\x1b\[[0-9;]*m", "", p.stdout + p.stderr)
+    return _gcloud.text(_gcloud.run(argv, tmp))
 
 
 needs_gcloud = pytest.mark.skipif(shutil.which("gcloud") is None, reason="no gcloud on this machine")
