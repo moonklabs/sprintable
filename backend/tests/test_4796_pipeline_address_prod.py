@@ -99,10 +99,12 @@ def _deploy_backend_update(tmp_path: Path, env: str, fastapi_url: str | None) ->
     return next(a for a in log.read_text().splitlines() if a.startswith("--update-env-vars="))
 
 
-def test_the_prod_backend_deploy_gives_the_backend_the_api_name_and_still_no_public_address(tmp_path: Path) -> None:
+def test_the_prod_backend_deploy_gives_the_backend_the_api_name_and_the_origin_follows_it_only_then(tmp_path: Path) -> None:
     update = _deploy_backend_update(tmp_path, "prod", PROD_API)
-    assert f"FASTAPI_URL={PROD_API}" in update.split("=", 1)[1].split(",")
-    assert "PUBLIC_API_URL" not in update, "the origin of stored links is a separate step of the sheet (RUNBOOK §12 item 2), not this one"
+    items = update.split("=", 1)[1].split(",")
+    assert f"FASTAPI_URL={PROD_API}" in items and f"PUBLIC_API_URL={PROD_API}" in items, "P7: the origin of stored links is the one switch, when the switch is the API name"
+    old = _deploy_backend_update(tmp_path, "prod", PROD_RUN)
+    assert "PUBLIC_API_URL" not in old, "a prod build whose switch is still the Cloud Run address states nothing (and removes the name)"
 
 
 def test_the_hand_deploy_script_of_prod_defaults_to_the_same_address() -> None:
