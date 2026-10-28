@@ -83,8 +83,8 @@ def test_the_dev_line_of_fastapi_url_is_single_and_names_the_vm_api_address() ->
     assert dev_lines == [DEV_API], dev_lines
     assert f"Undo = the previous value of this line: {NEW_FORM}" in _WF_TEXT, "the one-line undo is written next to the line"
     assert re.findall(r'(?m)^\s*echo "backend_url=(https://sprintable-backend-dev-[^"]+)"', _WF_TEXT) == [NEW_FORM], "GA4's own line did not move"
-    prod = re.findall(r'(?m)^\s*echo "fastapi_url=(https://sprintable-backend-prod-[^"]+)"', _WF_TEXT)
-    assert prod == ["https://sprintable-backend-prod-787818285179.asia-northeast3.run.app"], "prod is not part of this change"
+    prod = re.findall(r'(?m)^\s*echo "fastapi_url=(https://(?:api\.sprintable\.ai|sprintable-backend-prod-[^"]+))"', _WF_TEXT)
+    assert prod == ["https://api.sprintable.ai"], "prod's own switch is pinned in test_4796_pipeline_address_prod.py (P1)"
     assert len(re.findall(r'echo "fastapi_url=', _WF_TEXT)) == 2, "exactly the prod line and the dev line"
 
 

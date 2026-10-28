@@ -242,7 +242,7 @@ def test_section_12_lists_what_dev_taught_and_each_item_is_true_of_the_files() -
     assert 'REMOVE_ENV_VARS="$${REMOVE_ENV_VARS},DB_TIMING_LOG_ENABLED,PUBLIC_API_URL"' in main
     # the claims that ARE derivable from the repository: the prod stream address is empty in the pipeline, and no prod one-off job is provisioned
     workflow = (_ROOT / ".github/workflows/cloud-build.yml").read_text()
-    prod_branch = workflow[workflow.index('echo "fastapi_url=https://sprintable-backend-prod'):workflow.index("story #2701")]
+    prod_branch = workflow[workflow.index('echo "fastapi_url=https://api.sprintable.ai"'):workflow.index("story #2701")]
     assert 'echo "realtime_url=" >> "$GITHUB_OUTPUT"' in prod_branch, "the prod branch states an empty stream address (#5305)"
     jobs_readme = (_ROOT / "backend/scripts/jobs/README.md").read_text()
     assert "The only currently-provisioned Cloud Run Job for this is **`sprintable-verify-oneoff`**\n(dev)." in jobs_readme, "no prod one-off job is provisioned"

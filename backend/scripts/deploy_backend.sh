@@ -82,7 +82,7 @@ case "${ENV}" in
         RUNTIME_SA="cloudrun-runtime-prod@${GCP_PROJECT}.iam.gserviceaccount.com"
         APP_URL="${APP_URL:-https://app.sprintable.ai}"
         # OB-1: prod backend-direct Cloud Run URL(에이전트 SSE 직통·CF 금지).
-        FASTAPI_URL="${FASTAPI_URL:-https://sprintable-backend-prod-787818285179.asia-northeast3.run.app}"
+        FASTAPI_URL="${FASTAPI_URL:-https://api.sprintable.ai}"  # story 4796 (P1): the same value as the pipeline's prod `fastapi_url` (RUNBOOK §9)
         # prod는 라이브 실측(APP_ENV=prod)과 이미 일치 — `_LOCAL_ENVS` 체크는 배제 기반이라
         # "prod" 문자열 자체는 기능상 안전(코드가 리터럴 "production"을 요구하는 자리는 없음,
         # grep 확認). 현행 유지.
