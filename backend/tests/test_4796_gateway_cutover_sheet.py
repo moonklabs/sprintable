@@ -197,7 +197,7 @@ def test_the_way_back_adds_the_old_value_as_a_new_version_and_says_what_it_costs
     assert "gcloud secrets versions disable $NEW_VER --secret=SUPPORT_GATEWAY_DATABASE_URL_dev --project $PROJECT" in back and "may then be disabled" in back
     assert "**lossless only if nothing was written to `gateway-db` since step 9**" in back and "no replay is provided" in back and "rowcounts.sh" in back and "no difference = nothing was written" in back
     assert "revert it first" in back and "keep the workflow\noff until the revert is merged" in back
-    assert "--add-cloudsql-instances $PROJECT:$REGION:sprintable-$ENV" in back and "--remove-env-vars SUPPORT_GATEWAY_DB_POOL_SIZE,SUPPORT_GATEWAY_DB_MAX_OVERFLOW" in back
+    assert "--add-cloudsql-instances ${PROJECT}:${REGION}:sprintable-${ENV}" in back and "--remove-env-vars SUPPORT_GATEWAY_DB_POOL_SIZE,SUPPORT_GATEWAY_DB_MAX_OVERFLOW" in back
 
 
 def test_the_freeze_is_closed_by_a_command_in_the_sheet_before_any_check_that_needs_traffic() -> None:
@@ -657,3 +657,30 @@ def test_the_gate_does_not_cancel_prod_runs_of_the_same_workflow_and_the_wait_af
     assert '"\\(.databaseId) \\(.headBranch)"' in g4 and "A line of the branch `main` is a PROD run" in g4 and "not cancelled but waited for" in g4
     step11 = SHEET.split("## 11. ")[1].split("## 12.")[0]
     assert "gh run list --workflow cloud-build.yml --branch develop --event workflow_dispatch --limit 1" in step11
+
+
+_ZSH_MODIFIER = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*:[$A-Za-z{]")
+
+
+@pytest.mark.parametrize("doc", ["RUNBOOK.md", "REMOVALS-dev.md", "CUTOVER-gateway-dev.md"])
+def test_no_code_block_of_the_operator_documents_has_a_variable_followed_by_a_colon_and_a_word(doc: str) -> None:
+    """zsh (the PO's shell) reads `$VAR:x` as a history-style modifier and stops with «bad substitution»: write `${VAR}:x` (found by the security domain's scan of the three documents)"""
+    text = (_ROOT / "deploy/vm" / doc).read_text()
+    hits = [l.strip()[:120] for b in re.findall(r"```[a-z]*\n(.*?)```", text, re.S) for l in b.splitlines() if _ZSH_MODIFIER.search(l) and not l.lstrip().startswith("#")]
+    assert hits == [], hits
+
+
+def test_the_new_secret_is_not_added_when_the_address_of_the_vm_is_empty() -> None:
+    import subprocess as sp
+    block = SHEET.split("GWPW=$(gcloud secrets versions access latest")[1].split("unset GWPW NEWURL")[0]
+    program = re.search(r"python3 -c '(.*?)' \"\$VMIP\"\)", block, re.S).group(1)
+    ok = sp.run(["python3", "-c", program, "10.1.2.3"], input="postgresql+asyncpg://support_gw:old@10.9.9.9:5432/support_gateway", capture_output=True, text=True, env={"GWPW": "pw", "PATH": os.environ.get("PATH", "")})
+    empty = sp.run(["python3", "-c", program, ""], input="postgresql+asyncpg://support_gw:old@10.9.9.9:5432/support_gateway", capture_output=True, text=True, env={"GWPW": "pw", "PATH": os.environ.get("PATH", "")})
+    assert ok.returncode == 0 and "@10.1.2.3:5432/support_gateway" in ok.stdout
+    assert empty.returncode != 0 and empty.stdout == "" and "no address" in empty.stderr
+
+
+def test_the_runbook_has_the_read_only_look_at_the_chain_before_the_window_opens() -> None:
+    rb = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
+    row4 = next(l for l in rb.splitlines() if l.startswith("| 4 | re-run `bootstrap.sh`"))
+    assert "sudo iptables -S DOCKER-USER" in row4 and "-A DOCKER-USER -d 169.254.169.254/32 -i br-gwdb -j DROP" in row4 and "BEFORE step 5, not in its window" in row4
