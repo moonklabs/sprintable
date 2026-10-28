@@ -56,7 +56,12 @@ HEALTH_SNIPPET = (
     "    if not ok:\n"
     "        sys.exit(1)\n"
 )
-GATEWAY_DB_PROBE = 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+# the server answers AND its first start finished: the application role exists and owns the gateway's database. The image runs the first-start script only on an EMPTY data folder, so a first start that was cut
+# short is never repeated, and `pg_isready` alone would pass for a server that has no application role at all.
+GATEWAY_DB_READY = ('pg_isready -q -U "$POSTGRES_USER" -d "$POSTGRES_DB" && psql -X -A -t -U "$POSTGRES_USER" -d postgres -c '
+                    '"select count(*) from pg_database d join pg_roles r on r.oid = d.datdba where d.datname = \'$POSTGRES_DB\' and r.rolname = \'$GATEWAY_APP_USER\'" | grep -qx 1')
+GATEWAY_DB_READY_TRIES = 15   # the first start of an empty data folder runs the script while the server already answers on its socket: a few seconds
+GATEWAY_DB_READY_WAIT = 2
 GATEWAY_DB_RELOAD = 'psql -X -q -U "$POSTGRES_USER" -d postgres -c "select pg_reload_conf()"'
 # from INSIDE the gateway database container: may it reach the metadata server? (bash's /dev/tcp; a refused or timed-out connection is the answer wanted)
 METADATA_PROBE = 'timeout 3 bash -c "exec 3<>/dev/tcp/169.254.169.254/80"'
@@ -657,7 +662,7 @@ class Deployer:
         if rc != 0:
             return False
         if p.gateway_db:
-            rc, _ = self._compose(p.release, p.env, "exec", "-T", "gateway-db", "sh", "-c", GATEWAY_DB_PROBE, timeout=30)
+            rc, _ = self._compose(p.release, p.env, "exec", "-T", "gateway-db", "sh", "-c", GATEWAY_DB_READY, timeout=30)
         return rc == 0
 
     def _swap(self, p: Prepared) -> None:
@@ -720,6 +725,13 @@ class Deployer:
             rc, out = self._compose(cand.release, cand.env, "up", "-d", "--wait", "gateway-db", timeout=T_DB)
             if rc != 0:
                 raise DeployError(f"the support gateway database did not become healthy: {out[-300:]}", "pre-swap")
+            for _attempt in range(GATEWAY_DB_READY_TRIES):
+                rc, out = self._compose(cand.release, cand.env, "exec", "-T", "gateway-db", "sh", "-c", GATEWAY_DB_READY, timeout=30)
+                if rc == 0:
+                    break
+                self.sleep(GATEWAY_DB_READY_WAIT)
+            else:
+                raise DeployError("the support gateway database answers but its first start did not finish: the application role does not own the database (RUNBOOK section 13, «A first start that was cut short»)", "pre-swap")
             rc, out = self._compose(cand.release, cand.env, "exec", "-T", "gateway-db", "bash", "-c", METADATA_PROBE, timeout=30)
             if rc == 0 or rc not in (1, 124):
                 # the one case in which a deploy stops the gateway's database: a server that may reach the VM's identity must not keep running (its data folder stays, a restart after the fix loses nothing)

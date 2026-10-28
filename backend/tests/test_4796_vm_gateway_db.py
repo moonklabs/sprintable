@@ -41,6 +41,7 @@ class GwRunner(S.FakeRunner):
         super().__init__()
         self.gateway_db_up_ok = True
         self.gateway_db_probe_ok = True
+        self.gateway_role_fails_for = 0   # how many times the question «does the application role own the database?» is answered «no»
         self.metadata_rc = 1
 
     def run(self, args, env, cwd=None, timeout=900, stdin=None):
@@ -50,6 +51,9 @@ class GwRunner(S.FakeRunner):
             return (0, "") if self.gateway_db_up_ok else (1, "gateway-db unhealthy")
         if "pg_isready" in joined:
             self.calls.append({"args": list(args), "env": dict(env), "stdin": stdin})
+            if "pg_database" in joined and self.gateway_role_fails_for:
+                self.gateway_role_fails_for -= 1
+                return (1, "")
             return (0, "") if self.gateway_db_probe_ok else (1, "no response")
         return super().run(args, env, cwd=cwd, timeout=timeout, stdin=stdin)
 
@@ -109,7 +113,7 @@ def _without_block(tmp_path: Path) -> bytes:
 def test_the_gateway_database_comes_up_healthy_before_the_swap_and_is_checked_after_it(world) -> None:
     world.publish()
     assert world.dep.run_once() == "deployed"
-    assert world.runner.verbs() == ["login", "pull", "logout", "up:db", "up:gwdb", "exec:gwdb-metadata", "run", "up:all", "exec:reload", "exec:gwdb-reload", "exec:health-be", "exec:health-fe", "exec:health-gwdb"]
+    assert world.runner.verbs() == ["login", "pull", "logout", "up:db", "up:gwdb", "exec:gwdb-ready", "exec:gwdb-metadata", "run", "up:all", "exec:reload", "exec:gwdb-reload", "exec:health-be", "exec:health-fe", "exec:gwdb-ready"]
 
 
 def test_every_compose_call_of_such_a_release_sees_the_gateway_database_service(world) -> None:
@@ -232,8 +236,14 @@ def test_a_gateway_database_that_stops_answering_after_the_swap_rolls_the_releas
             world.runner.gateway_db_probe_ok = True
         return orig(args, env, **kw)
 
-    world.runner.gateway_db_probe_ok = False
-    world.runner.run = run
+    swapped = {"up": False}
+
+    def run2(args, env, **kw):
+        if env.get("BACKEND_IMAGE") != a["backend_image"] and "up" in args and "--wait-timeout" in args:
+            world.runner.gateway_db_probe_ok = False   # the swap has happened: from here on the database does not answer
+        return run(args, env, **kw)
+
+    world.runner.run = run2
     assert world.dep.run_once() == "rolled-back"
     assert S._state(world, "current.json")["sha"] == "a" * 40
 
@@ -482,7 +492,8 @@ def test_no_statement_carries_a_password_anywhere_in_the_deployer_or_the_compose
     deployer = (_VM / "bin/deployer.py").read_text()
     assert "PASSWORD %L" not in deployer and "\\gexec" not in deployer and "CREATE ROLE" not in deployer.upper() and "ALTER ROLE" not in deployer.upper()
     mentions = [l.strip() for l in deployer.splitlines() if "psql" in l]
-    assert len(mentions) == 1 and "pg_reload_conf()" in mentions[0], "the one psql command of the deployer reloads the access rules and carries no value"
+    assert len(mentions) == 2 and any("pg_reload_conf()" in m for m in mentions) and any("pg_database d join pg_roles r" in m or "-c '" in m for m in mentions), "the two psql commands of the deployer reload the access rules and ask whether the role owns the database"
+    assert "PASSWORD" not in " ".join(mentions).upper(), "and neither carries a value"
     compose = (_VM / "compose.yml").read_text()
     assert "ALTER ROLE" not in compose.upper() and "CREATE ROLE" not in compose.upper()
 
@@ -1426,3 +1437,89 @@ def test_the_runbook_explains_why_the_nightly_backup_of_an_empty_gateway_databas
     para = rb.split("**Why step 5 belongs to the window of the load.**")[1].split("**Step 3 in commands**")[0]
     for token in ("«lists no table data — refusing»", "the main dump is uploaded first", "expected and loses nothing", "so it is not loosened", "looks for a new `db-gateway-…` dump"):
         assert token in para, token
+
+
+# ── a first start that was cut short: the server answers, the application role is not there ───────────────────────────────────────────────────────────────────────────────
+
+def test_the_readiness_question_asks_for_the_role_and_the_owner_not_only_for_an_answer() -> None:
+    q = D.GATEWAY_DB_READY
+    assert "pg_isready" in q and "from pg_database d join pg_roles r on r.oid = d.datdba" in q and "$POSTGRES_DB" in q and "$GATEWAY_APP_USER" in q and q.rstrip().endswith("grep -qx 1")
+    assert "$GATEWAY_APP_PASSWORD" not in q, "no value of a secret in a command"
+
+
+def test_a_database_that_answers_but_has_no_application_role_stops_the_release_before_anything_else(world) -> None:
+    world.publish()
+    world.runner.gateway_role_fails_for = 10**6
+    assert world.dep.run_once() == "failed"
+    st = S._state(world, "failed.json")
+    assert st["phase"] == "pre-swap" and "first start did not finish" in st["detail"] and "does not own the database" in st["detail"]
+    verbs = world.runner.verbs()
+    assert verbs.count("exec:gwdb-ready") == D.GATEWAY_DB_READY_TRIES and "run" not in verbs and "up:all" not in verbs, "asked a bounded number of times; no migration, no swap"
+    assert not any(w in " ".join(world.logs) for w in (GW_PASSWORD,))
+
+
+def test_a_first_start_still_running_its_script_is_waited_for(world) -> None:
+    world.publish()
+    world.runner.gateway_role_fails_for = 3   # the temporary server of the first start answers before the script has made the role
+    assert world.dep.run_once() == "deployed"
+    assert world.runner.verbs().count("exec:gwdb-ready") == 3 + 1 + 1, "three «no», the «yes», and the probe after the swap"
+
+
+def test_a_role_that_vanishes_after_the_swap_is_not_healthy_and_rolls_the_release_back(world) -> None:
+    a = world.publish("a" * 40)
+    world.dep.run_once()
+    world.publish("b" * 40)
+    orig = world.runner.run
+    state = {"asked": 0}
+
+    def run(args, env, **kw):
+        if "pg_database" in " ".join(args):
+            state["asked"] += 1
+            if state["asked"] == 2 and env.get("BACKEND_IMAGE") != a["backend_image"]:
+                world.runner.gateway_role_fails_for = 10**6   # from the probe after the swap on
+        if env.get("BACKEND_IMAGE") == a["backend_image"] and "up" in args:
+            world.runner.gateway_role_fails_for = 0
+        return orig(args, env, **kw)
+
+    world.runner.run = run
+    assert world.dep.run_once() == "rolled-back"
+    assert S._state(world, "current.json")["sha"] == "a" * 40
+
+
+def test_the_runbook_says_how_to_recover_a_first_start_that_was_cut_short_and_when_not_to() -> None:
+    rb = _runbook13()
+    para = rb.split("**A first start that was cut short.**")[1].split("**Rolling back across this step:**")[0]
+    for token in ("only while the data folder is empty", "the application role does not own the database", "holds **no gateway data**", "sudo find /srv/sprintable/gateway-postgres -mindepth 1 -delete",
+                  "deployer --force", "With data in it, do not empty anything"):
+        assert token in para, token
+
+
+@pytest.mark.skipif(_postgres_binaries() is None or os.geteuid() == 0, reason="needs the Postgres binaries and a user that is not root (initdb refuses root)")
+def test_on_a_real_server_the_readiness_question_tells_a_half_made_server_from_a_whole_one(tmp_path: Path) -> None:
+    """a server that answers but has no application role (a first start that was cut short) is NOT ready; one whose database the role owns is"""
+    import shutil
+    import tempfile
+    bins = _postgres_binaries()
+    work = Path(tempfile.mkdtemp(prefix="gwrdy"))
+    port = str(51000 + (os.getpid() % 9000))
+    try:
+        data, sock = work / "data", work / "sock"
+        sock.mkdir()
+        run = lambda *a: subprocess.run([str(bins / a[0]), *a[1:]], capture_output=True, text=True, timeout=60)  # noqa: E731
+        assert run("initdb", "-D", str(data), "-U", "gw_admin", "--auth-local=trust", "--auth-host=trust").returncode == 0
+        assert run("pg_ctl", "-D", str(data), "-l", str(work / "log"), "-o", f"-c listen_addresses='' -k {sock} -p {port}", "-w", "start").returncode == 0
+        assert run("createdb", "-h", str(sock), "-p", port, "-U", "gw_admin", "support_gateway").returncode == 0
+        env = {"PATH": f"{bins}:/usr/bin:/bin", "PGHOST": str(sock), "PGPORT": port, "POSTGRES_USER": "gw_admin", "POSTGRES_DB": "support_gateway", "GATEWAY_APP_USER": "support_gw", "HOME": str(work)}
+        ready = lambda: subprocess.run(["sh", "-c", D.GATEWAY_DB_READY], capture_output=True, text=True, timeout=60, env=env).returncode  # noqa: E731
+        psql = lambda sql: run("psql", "-h", str(sock), "-p", port, "-U", "gw_admin", "-d", "postgres", "-X", "-q", "-c", sql)  # noqa: E731
+        assert ready() != 0, "the server answers, the database exists, there is no application role: not ready"
+        assert psql("CREATE ROLE support_gw LOGIN").returncode == 0
+        assert ready() != 0, "the role exists but does not own the database: not ready"
+        assert psql('ALTER DATABASE support_gateway OWNER TO support_gw').returncode == 0
+        assert ready() == 0, "the role owns the database: ready"
+        assert subprocess.run(["sh", "-c", D.GATEWAY_DB_READY], capture_output=True, text=True, timeout=60, env={**env, "GATEWAY_APP_USER": "someone_else"}).returncode != 0
+        assert psql('ALTER DATABASE support_gateway OWNER TO gw_admin').returncode == 0 and psql('CREATE DATABASE some_other OWNER support_gw').returncode == 0
+        assert ready() != 0, "the role owns ANOTHER database, not the gateway's: not ready"
+    finally:
+        subprocess.run([str(bins / "pg_ctl"), "-D", str(work / "data"), "-m", "immediate", "stop"], capture_output=True, timeout=60)
+        shutil.rmtree(work, ignore_errors=True)
