@@ -475,8 +475,8 @@ def test_the_runbook_grants_exactly_the_secrets_the_declaration_reads(capsys) ->
     assert R.main(["render_env.py", "--secret-ids", str(_VM / "env/dev.yaml")]) == 0
     ids = set(capsys.readouterr().out.split())
     decl = yaml.safe_load((_VM / "env/dev.yaml").read_text())
-    wanted = {sid for svc in decl["services"].values() for sid in (svc.get("secrets") or {}).values()} | {decl["database"]["password_secret"]}
-    assert ids == wanted and "DB_PASSWORD_VM_DEV" in ids
+    wanted = {sid for svc in decl["services"].values() for sid in (svc.get("secrets") or {}).values()} | {decl["database"]["password_secret"], decl["support_gateway"]["database"]["password_secret"]}
+    assert ids == wanted and "DB_PASSWORD_VM_DEV" in ids and "SUPPORT_GATEWAY_DB_PASSWORD_VM_DEV" in ids
     assert any("-" in i for i in ids) and any(i != i.upper() and "_" in i for i in ids), "the fixture has hyphenated and mixed-case ids"
     assert not any("PGBOUNCER" in i or "DATABASE_URL" in i for i in ids), "the VM never reads the Cloud SQL connection strings"
 
