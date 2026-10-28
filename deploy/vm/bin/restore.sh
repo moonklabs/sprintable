@@ -16,11 +16,14 @@ if [[ "$src" == gs://* ]]; then
 fi
 [ -s "$src" ] || { echo "no such dump: $src" >&2; exit 1; }
 
-user="$(db_user)"; name="$(db_name)"
+user="$(db_user)"; name="$(db_name)"; role="$(app_role)"
+if [ -n "$role" ] && ! [[ "$role" =~ ^[a-z_][a-z0-9_]{0,62}$ ]]; then echo "unexpected application role name" >&2; exit 1; fi
+restore_role=(); [ -z "$role" ] || restore_role=(--role "$role")
 # a dump that cannot even be listed must not cost the database it was meant to replace
 listing="$(in_db pg_restore --list < "$src")" || { echo "not a readable pg_dump -Fc archive: $src" >&2; exit 1; }
 grep -q 'TABLE DATA' <<< "$listing" || { echo "the archive holds no table data: $src" >&2; exit 1; }
-if [ -n "$(docker ps -q --filter label=com.docker.compose.project=sprintable --filter label=com.docker.compose.service=backend)" ]; then
+# the application's database is restored with the backend stopped; the gateway's own database (DB_SERVICE=gateway-db) has nothing of the backend in it
+if [ "$(db_service)" = db ] && [ -n "$(docker ps -q --filter label=com.docker.compose.project=sprintable --filter label=com.docker.compose.service=backend)" ]; then
   echo "the backend is running — stop it first (docker compose stop backend frontend) so nothing writes during the restore" >&2
   exit 1
 fi
@@ -30,11 +33,16 @@ if [ "$existing" != "0" ]; then
     echo "database $name already has $existing tables — set RESTORE_WIPE=yes to drop and recreate it" >&2
     exit 1
   fi
-  in_db psql -U "$user" -d postgres -X -q -v ON_ERROR_STOP=1 -c "DROP DATABASE \"$name\" WITH (FORCE)" -c "CREATE DATABASE \"$name\""
+  if [ -n "$role" ]; then   # the gateway's database: owned by its application role, only that role may connect (what the first start of the server set up)
+    in_db psql -U "$user" -d postgres -X -q -v ON_ERROR_STOP=1 -c "DROP DATABASE \"$name\" WITH (FORCE)" -c "CREATE DATABASE \"$name\" OWNER \"$role\"" \
+      -c "REVOKE ALL ON DATABASE \"$name\" FROM PUBLIC" -c "GRANT CONNECT ON DATABASE \"$name\" TO \"$role\""
+  else
+    in_db psql -U "$user" -d postgres -X -q -v ON_ERROR_STOP=1 -c "DROP DATABASE \"$name\" WITH (FORCE)" -c "CREATE DATABASE \"$name\""
+  fi
 fi
 
 log "restore start"
 start="$(date +%s)"
-in_db pg_restore -U "$user" -d "$name" --no-owner --no-privileges --exit-on-error --single-transaction < "$src"
+in_db pg_restore -U "$user" -d "$name" --no-owner --no-privileges --exit-on-error --single-transaction ${restore_role[@]+"${restore_role[@]}"} < "$src"
 log "restore done in $(( $(date +%s) - start )) s"
 "$here/rowcounts.sh" "$name"

@@ -44,6 +44,55 @@ services:
       timeout: 3s
       retries: 20
 
+  # the support gateway's database (story 4796): a SECOND, small Postgres of its own — own data folder, own users, own docker network — because the gateway runs on Cloud Run and reaches it over the VPC.
+  # This is the only server of the VM that listens on a private address; nothing of the backend (its database, role or password) is in it, and the backend's containers cannot reach it.
+  #  · its superuser (POSTGRES_USER) has no password and no way in over any network address — only the unix socket inside the container (docker exec): the access rules are the mounted hba file
+  #    (rendered by the deployer from support_gateway.allow_from; the default file lets nobody in), and gateway-db-init.sh replaces the data folder's own hba file before the server first listens;
+  #  · the application's role (GATEWAY_APP_USER) is an ordinary role that owns the gateway's database and nothing else; the init script creates it on the first start of an EMPTY data folder only
+  #    (changing the secret later does not change the database, as with the main one);
+  #  · bound on the VM's private address (GATEWAY_DB_BIND, read by the deployer from the metadata server) — the fallback is the loopback address, never «all»;
+  #  · on its own bridge `br-gwdb`, from which the metadata server is unreachable (bin/gateway-db-firewall.sh; the deployer checks it from inside before a release is swapped in);
+  #  · the server never logs the values a statement ran with (customer text) — only the statement.
+  # Started for a release whose declaration has the `support_gateway` block (the deployer adds `--profile gateway-db`).
+  gateway-db:
+    image: pgvector/pgvector:pg15
+    profiles: ["gateway-db"]
+    restart: unless-stopped
+    logging: *logging
+    networks:
+      - gateway-db
+    environment:
+      POSTGRES_DB: ${GATEWAY_DB_NAME:-support_gateway}
+      POSTGRES_USER: ${GATEWAY_DB_ADMIN:-gw_admin}
+      POSTGRES_HOST_AUTH_METHOD: trust   # first start only, so that no superuser password has to exist; the init script swaps the data folder's hba file for the strict one at once
+      GATEWAY_APP_USER: ${GATEWAY_DB_USER:-support_gw}
+      GATEWAY_APP_PASSWORD: ${GATEWAY_DB_PASSWORD:-}   # from the deployer's environment; read by the init script of the first start
+    command:
+      - postgres
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+      - -c
+      - shared_buffers=64MB
+      - -c
+      - max_connections=30   # worst case 16 while a Cloud Run revision is replaced (RUNBOOK §13), 27 usable after the 3 reserved for the superuser
+      - -c
+      - log_min_duration_statement=1000
+      - -c
+      - log_parameter_max_length=0
+      - -c
+      - log_parameter_max_length_on_error=0
+    ports:
+      - "${GATEWAY_DB_BIND:-127.0.0.1}:5432:5432"
+    volumes:
+      - ${DATA_DIR:?}/gateway-postgres:/var/lib/postgresql/data
+      - ${GATEWAY_DB_HBA:-./gateway-db-pg_hba.conf}:/etc/postgresql/pg_hba.conf:ro
+      - ./gateway-db-init.sh:/docker-entrypoint-initdb.d/10-gateway-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   # one-shot: `docker compose run --rm migrate` — run by the deployer BEFORE the new backend replaces the running one.
   migrate:
     image: ${BACKEND_IMAGE:?}
@@ -73,40 +122,6 @@ services:
       timeout: 5s
       retries: 6
       start_period: 40s
-
-  # the support gateway (story 4796): its own role and database inside the db above, its own image. Part of a release only when desired.json carries support_gateway_image (the deployer then adds
-  # `--profile support-gateway`); without that the services below are not started. They are reachable on the compose network only until a Caddy host is added for them.
-  support-gateway-migrate:
-    image: ${SUPPORT_GATEWAY_IMAGE:-not-part-of-this-release}
-    profiles: ["support-gateway-migrate"]
-    restart: "no"
-    logging: *logging
-    command: ["/app/scripts/migrate.sh"]
-    environment:
-      - SUPPORT_GATEWAY_DATABASE_URL   # by name
-    depends_on:
-      db:
-        condition: service_healthy
-
-  support-gateway:
-    image: ${SUPPORT_GATEWAY_IMAGE:-not-part-of-this-release}
-    profiles: ["support-gateway"]
-    restart: unless-stopped
-    logging: *logging
-    # the service variables are listed by name in pass-through.yml; the database URL is passed by name like the migrate's
-    environment:
-      - SUPPORT_GATEWAY_DATABASE_URL
-    depends_on:
-      db:
-        condition: service_healthy
-    expose:
-      - "8080"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=4)"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
 
   frontend:
     image: ${FRONTEND_IMAGE:?}
@@ -150,3 +165,8 @@ services:
     volumes:
       - ${CADDYDIR:?}:/etc/caddy:ro
       - ${DATA_DIR:?}/caddy:/data
+
+networks:
+  gateway-db:
+    driver_opts:
+      com.docker.network.bridge.name: br-gwdb   # a fixed name, so that the firewall rule of bin/gateway-db-firewall.sh can name it
