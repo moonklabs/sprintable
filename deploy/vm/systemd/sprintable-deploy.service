@@ -1,7 +1,7 @@
 [Unit]
 Description=Sprintable deploy (pull desired version, migrate, swap, health, rollback)
-After=docker.service network-online.target
-Requires=docker.service
+After=docker.service network-online.target sprintable-gateway-db-firewall.service
+Requires=docker.service sprintable-gateway-db-firewall.service
 ConditionPathIsMountPoint=/srv/sprintable
 
 [Service]

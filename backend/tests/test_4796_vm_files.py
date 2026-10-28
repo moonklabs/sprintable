@@ -257,6 +257,7 @@ case "$1" in
       *POSTGRES_USER*) printf sprintable ;;
       *POSTGRES_DB*) printf '%s' "${FAKE_DB_NAME-sprintable}" ;;
       *"information_schema.tables where"*) echo "${FAKE_EXISTING:-0}" ;;
+      *pg_stat_activity*) echo "${FAKE_SESSIONS:-0}" ;;
       *) cat > /dev/null ;;
     esac ;;
 esac
@@ -756,3 +757,23 @@ def test_the_restore_check_of_the_gateway_database_restores_into_a_scratch_datab
     assert " OWNER support_gw" in create
     restore = next(l for l in log.splitlines() if "pg_restore -U" in l and "--list" not in l)
     assert "--role support_gw" in restore
+
+
+def test_the_gateway_database_is_not_restored_while_sessions_are_open_on_it(fakebin, tmp_path: Path) -> None:
+    dump = tmp_path / "x.dump"
+    dump.write_text("x")
+    p, log = fakebin("restore.sh", str(dump), DB_SERVICE="gateway-db", FAKE_EXISTING="7", RESTORE_WIPE="yes", FAKE_SESSIONS="3")
+    assert p.returncode != 0 and "3 session(s) are open" in p.stderr
+    assert "DROP DATABASE" not in log and not [l for l in log.splitlines() if "pg_restore -U" in l and "--list" not in l], "nothing was dropped or restored"
+    ok, log2 = fakebin("restore.sh", str(dump), DB_SERVICE="gateway-db", FAKE_EXISTING="7", RESTORE_WIPE="yes", FAKE_SESSIONS="0")
+    assert ok.returncode == 0, ok.stderr
+    query = next(l for l in log2.splitlines() if "pg_stat_activity" in l)
+    assert "datname = 'sprintable'" in query and "pid <> pg_backend_pid()" in query and "-d postgres" in query, query
+
+
+def test_the_application_database_restore_does_not_look_at_sessions(fakebin, tmp_path: Path) -> None:
+    dump = tmp_path / "x.dump"
+    dump.write_text("x")
+    p, log = fakebin("restore.sh", str(dump), FAKE_EXISTING="0", FAKE_SESSIONS="3")
+    assert p.returncode == 0, p.stderr
+    assert "pg_stat_activity" not in log

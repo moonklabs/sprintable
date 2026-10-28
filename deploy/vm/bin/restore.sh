@@ -27,6 +27,14 @@ if [ "$(db_service)" = db ] && [ -n "$(docker ps -q --filter label=com.docker.co
   echo "the backend is running — stop it first (docker compose stop backend frontend) so nothing writes during the restore" >&2
   exit 1
 fi
+if [ "$(db_service)" = gateway-db ]; then
+  # the gateway runs on Cloud Run, not here: no container can be looked at, so the open sessions on its database are what shows it is still writing (a wipe would cut them and lose what they wrote)
+  sessions="$(in_db psql -U "$user" -d postgres -X -A -t -c "select count(*) from pg_stat_activity where datname = '$name' and pid <> pg_backend_pid()")"
+  if [ "$sessions" != "0" ]; then
+    echo "$sessions session(s) are open on $name — the gateway is still connected: stop its Cloud Run traffic and wait until the sessions are gone (RUNBOOK section 13) before restoring" >&2
+    exit 1
+  fi
+fi
 existing="$(in_db psql -U "$user" -d "$name" -X -A -t -c "select count(*) from information_schema.tables where table_schema not in ('pg_catalog','information_schema')")"
 if [ "$existing" != "0" ]; then
   if [ "${RESTORE_WIPE:-}" != "yes" ]; then

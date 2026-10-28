@@ -667,6 +667,11 @@ class Deployer:
                 raise DeployError(f"health/ready not green within {int(self.cfg.health_timeout)} s", "post-swap")
             self.sleep(self.cfg.health_interval)
 
+    def _close_gateway_db(self, cand: Prepared) -> None:
+        rc, out = self._compose(cand.release, cand.env, "stop", "gateway-db", timeout=120)
+        if rc != 0:
+            self.log(f"could not stop the gateway database whose metadata isolation is unproven: {out[-200:]}")
+
     def _deploy(self, desired: Mapping, current: Mapping | None) -> None:
         # the way back is prepared BEFORE anything changes: a rollback must not depend on Secret Manager, the token or the private file still being fine afterwards
         if current:
@@ -692,10 +697,12 @@ class Deployer:
             if rc != 0:
                 raise DeployError(f"the support gateway database did not become healthy: {out[-300:]}", "pre-swap")
             rc, out = self._compose(cand.release, cand.env, "exec", "-T", "gateway-db", "bash", "-c", METADATA_PROBE, timeout=30)
-            if rc == 0:
-                raise DeployError("the metadata server is reachable from the gateway database container (is sprintable-gateway-db-firewall.service active?)", "pre-swap")
-            if rc not in (1, 124):
-                raise DeployError(f"the metadata server probe of the gateway database container could not run (exit {rc})", "pre-swap")
+            if rc == 0 or rc not in (1, 124):
+                # the one case in which a deploy stops the gateway's database: a server that may reach the VM's identity must not keep running (its data folder stays, a restart after the fix loses nothing)
+                self._close_gateway_db(cand)
+                if rc == 0:
+                    raise DeployError("the metadata server is reachable from the gateway database container, which was stopped (is sprintable-gateway-db-firewall.service active?)", "pre-swap")
+                raise DeployError(f"the metadata server probe of the gateway database container could not run (exit {rc}), so the container was stopped", "pre-swap")
         rc, out = self._compose(cand.release, cand.env, "run", "--rm", "migrate", profile="migrate", timeout=T_MIGRATE)
         if rc != 0:
             raise DeployError(f"migrate failed: {out[-300:]}", "pre-swap")

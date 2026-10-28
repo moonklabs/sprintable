@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -797,3 +798,31 @@ def test_the_documents_that_describe_the_open_ports_know_about_the_gateway_datab
     assert "The one other port** is 5432 of the support gateway's own database server" in section4 and "deny rule for everyone and an allow rule" in section4
     assert "**Rolling back across this step:**" in runbook.split("## 13. The support gateway's database")[1]
     assert "--remove-orphans" in runbook.split("**Rolling back across this step:**")[1].split("**Undo of this step:**")[0]
+
+
+@pytest.mark.parametrize("rc", [0, 127])
+def test_a_gateway_database_that_may_reach_the_metadata_server_is_stopped_and_the_release_refused(world, rc: int) -> None:
+    world.publish()
+    world.runner.metadata_rc = rc
+    assert world.dep.run_once() == "failed"
+    stops = [c for c in _compose_calls(world) if "stop" in c["args"]]
+    assert len(stops) == 1 and stops[0]["args"][stops[0]["args"].index("stop"):] == ["stop", "gateway-db"], stops
+    assert "was stopped" in S._state(world, "failed.json")["detail"] or "stopped" in S._state(world, "failed.json")["detail"]
+
+
+@pytest.mark.parametrize("rc", [1, 124])
+def test_a_refused_or_timed_out_probe_leaves_the_gateway_database_running(world, rc: int) -> None:
+    world.publish()
+    world.runner.metadata_rc = rc
+    assert world.dep.run_once() == "deployed"
+    assert not [c for c in _compose_calls(world) if "stop" in c["args"] and "gateway-db" in c["args"]]
+
+
+def test_the_deploy_service_cannot_run_without_the_metadata_firewall_unit() -> None:
+    unit = (_VM / "systemd/sprintable-deploy.service").read_text()
+    assert re.search(r"^Requires=.*\bsprintable-gateway-db-firewall\.service\b", unit, re.M) and re.search(r"^After=.*\bsprintable-gateway-db-firewall\.service\b", unit, re.M)
+
+
+def test_the_runbook_states_the_one_case_in_which_a_deploy_stops_the_gateway_database() -> None:
+    rb = (_VM / "RUNBOOK.md").read_text()
+    assert "except when the metadata server answers from inside it" in rb and "**requires** `sprintable-gateway-db-firewall.service`" in rb
