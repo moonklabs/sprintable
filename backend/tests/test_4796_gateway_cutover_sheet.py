@@ -204,7 +204,7 @@ def test_the_freeze_is_closed_by_a_command_in_the_sheet_before_any_check_that_ne
     order = [SHEET.index(f"## {n}. ") for n in range(1, 13)]
     assert order == sorted(order)
     freeze, unfreeze = SHEET.split("## 4. Freeze")[1].split("## 5.")[0], SHEET.split("## 9. Unfreeze")[1].split("## 10.")[0]
-    assert "--ingress internal" in freeze and "--ingress all" in unfreeze and "T0" in freeze and "T1" in unfreeze
+    assert "remove-iam-policy-binding" in freeze and "--member=allUsers --role=roles/run.invoker" in freeze and "add-iam-policy-binding" in unfreeze and "T0" in freeze and "T1" in unfreeze
     assert "Without a freeze this step would send traffic to a revision whose database is not checked yet" in SHEET
 
 
@@ -473,7 +473,7 @@ def test_the_database_check_program_reads_the_url_from_the_environment_and_fails
 def test_the_database_is_checked_with_the_new_secret_before_the_unfreeze() -> None:
     step8 = SHEET.split("## 8. The gateway service on the VM's database")[1].split("## 9.")[0]
     assert "--set-secrets SUPPORT_GATEWAY_DATABASE_URL=SUPPORT_GATEWAY_DATABASE_URL_dev:latest" in step8 and "--subnet support-gateway-$ENV" in step8 and "--network-tags" not in step8
-    assert "`/healthz` of the gateway answers 200 without touching the database, so it proves nothing here" in step8
+    assert "The gateway's own health path answers 200 without touching the database, so it proves nothing here" in step8
     assert "**Pass: `database check: exit 0` and `check job deleted`.**" in step8 and "step 12 (the way back)" in step8
     assert "database-backed check" in SHEET.split("| 8 |")[1].split("\n")[0]
 
@@ -481,7 +481,7 @@ def test_the_database_is_checked_with_the_new_secret_before_the_unfreeze() -> No
 def test_the_freeze_waits_for_the_request_timeout_because_a_message_commits_after_the_model_call() -> None:
     freeze = SHEET.split("## 4. Freeze")[1].split("## 5.")[0]
     assert "value(spec.template.spec.timeoutSeconds)" in freeze and "sleep $((TMO + 10))" in freeze
-    assert "flushes its rows before the model call and commits after it" in freeze and "still lets in requests from the same project's VPC and services" in freeze
+    assert "flushes its rows before the model call and commits after it" in freeze and "**The freeze is the IAM binding, not the ingress setting**" in freeze and "`--ingress internal` lets in the requests of the same project's VPC" in freeze
 
 
 def test_no_dev_build_can_start_between_step_four_and_step_eleven() -> None:
@@ -549,7 +549,7 @@ def test_the_runbook_says_the_deployer_asks_iptables_itself_and_asks_again_on_th
 def test_the_freeze_is_measured_from_the_vm_too_and_the_build_list_is_part_of_the_gate() -> None:
     sheet = (_ROOT / "deploy/vm/CUTOVER-gateway-dev.md").read_text()
     freeze = sheet.split("## 4. Freeze")[1].split("## 5.")[0]
-    assert "measured from the VM too, not assumed" in freeze and "a **200** there means the backend still reaches the gateway: stop and do not restore" in freeze
+    assert "measured from the VM too, not assumed" in freeze and "a **200** there means the backend still reaches the gateway: stop, put the binding back and do not restore" in freeze
     g4 = next(l for l in sheet.splitlines() if l.startswith("| **G4."))
     assert "gcloud builds list --project $PROJECT --ongoing --limit 200" in g4 and "already SUBMITTED keeps running" in g4 and "gcloud builds cancel $BUILD_ID --project $PROJECT" in g4
 
@@ -559,10 +559,10 @@ def test_the_way_back_waits_for_requests_in_flight_before_it_points_the_service_
     back = sheet.split("## 12. The way back")[1]
     block = back.split("```\n")[1]
     lines = [l for l in block.splitlines() if l.strip()]
-    i_freeze = next(i for i, l in enumerate(lines) if "--ingress internal" in l)
+    i_freeze = next(i for i, l in enumerate(lines) if "remove-iam-policy-binding" in l)
     i_wait = next(i for i, l in enumerate(lines) if "sleep $((TMO + 10))" in l)
     i_repoint = next(i for i, l in enumerate(lines) if "--add-cloudsql-instances" in l)
-    i_open = next(i for i, l in enumerate(lines) if "--ingress all" in l)
+    i_open = next(i for i, l in enumerate(lines) if "add-iam-policy-binding" in l)
     assert i_freeze < i_wait < i_repoint < i_open, (i_freeze, i_wait, i_repoint, i_open)
     assert "The pipeline does not take the two pool variables off again" in back
 
@@ -572,7 +572,7 @@ def test_each_line_of_the_way_back_runs_only_when_the_one_before_it_succeeded_an
     back = sheet.split("## 12. The way back")[1]
     block = back.split("```\n")[1]
     assert "BACK=no" in block
-    for gate, step in (('[ "$BACK" = frozen ]', "sleep $((TMO + 10))"), ('[ "$BACK" = waited ]', "gcloud secrets versions add"), ('[ "$BACK" = secret ]', "--add-cloudsql-instances"), ('[ "$BACK" = repointed ]', "--ingress all")):
+    for gate, step in (('[ "$BACK" = frozen ]', "sleep $((TMO + 10))"), ('[ "$BACK" = waited ]', "gcloud secrets versions add"), ('[ "$BACK" = secret ]', "--add-cloudsql-instances"), ('[ "$BACK" = repointed ]', "add-iam-policy-binding")):
         line = next(l for l in block.splitlines() if step in l)
         assert line.startswith(gate), (gate, line[:80])
     assert "&& BACK=frozen" in block and "&& BACK=waited" in block and "&& BACK=secret" in block and "&& BACK=repointed" in block
@@ -605,26 +605,26 @@ def _did(calls: list[str], text: str) -> bool:
 def test_the_way_back_goes_all_the_way_when_every_line_succeeds(tmp_path: Path) -> None:
     p, calls = _run_way_back(tmp_path)
     assert p.returncode == 0 and "STOP" not in p.stdout, p.stderr
-    order = [next(i for i, c in enumerate(calls) if t in c) for t in ("--ingress internal", "sleep 310", "secrets versions add", "--add-cloudsql-instances", "--ingress all")]
+    order = [next(i for i, c in enumerate(calls) if t in c) for t in ("remove-iam-policy-binding", "sleep 310", "secrets versions add", "--add-cloudsql-instances", "add-iam-policy-binding")]
     assert order == sorted(order), calls
 
 
 @pytest.mark.parametrize("fail,must_not", [
-    ("--ingress internal", ["sleep", "secrets versions", "--add-cloudsql-instances", "--ingress all"]),
-    ("secrets versions access", ["secrets versions add", "--add-cloudsql-instances", "--ingress all"]),
-    ("secrets versions add", ["--add-cloudsql-instances", "--ingress all"]),
-    ("--add-cloudsql-instances", ["--ingress all"]),
+    ("remove-iam-policy-binding", ["sleep", "secrets versions", "--add-cloudsql-instances", "add-iam-policy-binding"]),
+    ("secrets versions access", ["secrets versions add", "--add-cloudsql-instances", "add-iam-policy-binding"]),
+    ("secrets versions add", ["--add-cloudsql-instances", "add-iam-policy-binding"]),
+    ("--add-cloudsql-instances", ["add-iam-policy-binding"]),
 ])
 def test_a_line_of_the_way_back_that_fails_leaves_the_service_frozen(tmp_path: Path, fail: str, must_not: list[str]) -> None:
     p, calls = _run_way_back(tmp_path, fail=fail)
     for t in must_not:
         assert not _did(calls, t), (fail, t, calls)
-    assert not _did([c for c in calls if "--ingress internal" not in c], "--ingress all") or fail == ""
+    assert not _did([c for c in calls if "remove-iam-policy-binding" not in c], "add-iam-policy-binding") or fail == ""
 
 
 def test_a_request_timeout_that_cannot_be_read_stops_the_way_back_before_the_secret(tmp_path: Path) -> None:
     p, calls = _run_way_back(tmp_path, tmo="")
-    assert not _did(calls, "secrets versions") and not _did(calls, "--add-cloudsql-instances") and not _did(calls, "--ingress all")
+    assert not _did(calls, "secrets versions") and not _did(calls, "--add-cloudsql-instances") and not _did(calls, "add-iam-policy-binding")
 
 
 def test_the_workflow_name_the_gate_filters_on_is_the_name_of_the_workflow_file() -> None:
@@ -636,7 +636,7 @@ def test_the_wait_of_the_freeze_is_a_command_in_a_fenced_block_not_only_prose() 
     sheet = (_ROOT / "deploy/vm/CUTOVER-gateway-dev.md").read_text()
     freeze = sheet.split("## 4. Freeze")[1].split("## 5.")[0]
     blocks = [b for i, b in enumerate(freeze.split("```\n")) if i % 2 == 1]
-    assert len(blocks) == 2 and "--ingress internal" in blocks[0] and "sleep" not in blocks[0]
+    assert len(blocks) == 2 and "remove-iam-policy-binding" in blocks[0] and "sleep" not in blocks[0]
     assert '[ -n "$TMO" ] && sleep $((TMO + 10)) && date -u +%FT%TZ' in blocks[1], "a PO who follows the fenced commands waits the request timeout and only then gets T0"
     assert freeze.index("```\n" + blocks[1]) > freeze.index("measured from the VM too"), "the wait comes after both measurements"
 
@@ -647,7 +647,7 @@ def test_the_flip_pr_is_followed_by_a_build_started_by_hand_because_a_merge_to_d
     assert "branches: [main]" in on and "develop" not in "\n".join(l for l in on.splitlines() if not l.strip().startswith("#")), "the premise: no push trigger on develop"
     step11 = SHEET.split("## 11. ")[1].split("## 12.")[0]
     assert "**Merging does not start a build**" in step11 and "gh workflow run cloud-build.yml --ref develop" in step11 and "`completed` and `success`" in step11
-    assert step11.index("gh workflow run cloud-build.yml --ref develop") < step11.index("grep -c 'cloudsql-instances'"), "the checks of the job come after the build has finished"
+    assert step11.index("gh workflow run cloud-build.yml --ref develop") < step11.index("run.googleapis.com/cloudsql-instances"), "the checks of the job come after the build has finished"
 
 
 def test_the_check_job_with_the_gateways_account_is_proved_deleted_before_the_unfreeze() -> None:
@@ -688,3 +688,32 @@ def test_the_runbook_has_the_read_only_look_at_the_chain_before_the_window_opens
     rb = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
     row4 = next(l for l in rb.splitlines() if l.startswith("| 4 | re-run `bootstrap.sh`"))
     assert "sudo iptables -S DOCKER-USER" in row4 and "-A DOCKER-USER -d 169.254.169.254/32 -i br-gwdb -j DROP" in row4 and "BEFORE step 5, not in its window" in row4
+
+
+# ── what the first real run of the sheet found (2026-10-28): three defects, now written down ──
+
+def test_the_freeze_is_the_public_invoker_binding_not_the_ingress_setting_in_every_place_it_is_made_or_undone() -> None:
+    assert "--ingress" not in "\n".join(l for b in _blocks() for l in b.splitlines() if "gcloud run services update $GW" in l and "--clear-cloudsql-instances" not in l), "no block freezes or unfreezes by ingress"
+    for where in ("## 4. Freeze", "## 9. Unfreeze", "## 12. The way back"):
+        sec = SHEET.split(where)[1].split("\n## ")[0]
+        assert "roles/run.invoker" in sec and "--member=allUsers" in sec, where
+    assert "remove-iam-policy-binding" in SHEET.split("## 4. Freeze")[1].split("## 5.")[0] and "add-iam-policy-binding" in SHEET.split("## 9. Unfreeze")[1].split("## 10.")[0]
+
+
+def test_the_sheet_measures_the_freeze_on_a_path_cloud_run_does_not_answer_itself() -> None:
+    assert "/healthz" not in "\n".join(l for b in _blocks() for l in b.splitlines()), "Cloud Run reserves the paths ending in z and answers them with its own 404"
+    freeze = SHEET.split("## 4. Freeze")[1].split("## 5.")[0]
+    assert '"$GWURL/openapi.json"' in freeze and "Cloud Run reserves the paths that end in a `z`" in freeze and "prints **403**" in freeze
+
+
+def test_the_cloud_sql_check_reads_the_value_not_the_key() -> None:
+    for where, cmd in (("## 8. ", "gcloud run services describe $GW"), ("## 11. ", "gcloud run jobs describe $GWJOB")):
+        sec = SHEET.split(where)[1].split("\n## ")[0]
+        line = next(l for l in sec.splitlines() if l.startswith(cmd) and "cloudsql-instances" in l)
+        assert "--format=json" in line and 'len(a.get("run.googleapis.com/cloudsql-instances", ""))' in line and "grep -c" not in line, (where, line)
+    import subprocess as sp
+    prog = re.search(r"python3 -c '(.*?)'", next(l for l in SHEET.splitlines() if l.startswith("gcloud run services describe $GW") and "cloudsql-instances" in l)).group(1)
+    empty = sp.run(["python3", "-c", prog], input='{"spec": {"template": {"metadata": {"annotations": {"run.googleapis.com/cloudsql-instances": ""}}}}}', capture_output=True, text=True)
+    full = sp.run(["python3", "-c", prog], input='{"spec": {"template": {"metadata": {"annotations": {"run.googleapis.com/cloudsql-instances": "p:r:i"}}}}}', capture_output=True, text=True)
+    none = sp.run(["python3", "-c", prog], input='{"spec": {"template": {"metadata": {}}}}', capture_output=True, text=True)
+    assert (empty.stdout.strip(), full.stdout.strip(), none.stdout.strip()) == ("0", "5", "0"), "an annotation left with an empty value reads 0 (the old check counted the key and printed 1)"
