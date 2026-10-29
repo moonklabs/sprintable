@@ -1118,9 +1118,8 @@ steps:
         else
           AGENT_KEY_SECRET="MCP_AGENT_API_KEY_DEV"
         fi
-        # story 4786: mcp-dev sits idle most of the time (billed per request); prod states nothing here (its value is left as it is).
-        MCP_CPU_FLAG=""
-        if [ "${_DEPLOY_ENV}" == "dev" ]; then MCP_CPU_FLAG="--cpu-throttling"; fi
+        # story 4786 (dev) + 4804 (prod): the hosted MCP bills per REQUEST in both environments. Prod's server answers GET /mcp with 405 since the seventh promotion (no held stream), so its CPU is needed only while a request is served; the PO set it by hand on 2026-10-29 13:45Z (revision 00087-v2c) and this line keeps the next deploy from putting it back.
+        MCP_CPU_FLAG="--cpu-throttling"
         # 4798 AC7: each environment runs as its own account (run-mcp-dev / run-mcp-prod: the one secret above and nothing else)
         MCP_SA_FLAG="--service-account=run-mcp-${_DEPLOY_ENV}@${PROJECT_ID}.iam.gserviceaccount.com"
         gcloud run services update sprintable-mcp-${_DEPLOY_ENV} \
