@@ -103,6 +103,10 @@ def test_the_entry_point_reads_the_setting_and_hands_it_to_the_middleware(monkey
 
     captured = {}
     monkeypatch.setattr(uvicorn, "run", lambda app, **kw: captured.update(app=app, **kw))
+    # _run_http configures the API client from the settings and refuses an empty address: give it one (CI has no SPRINTABLE_API_URL; a developer's machine often has), and put the client's own state back afterwards
+    from sprintable_mcp.api_client import client as api_client
+    monkeypatch.setattr(settings, "sprintable_api_url", "http://127.0.0.1:9")
+    monkeypatch.setattr(api_client, "configure", lambda *a, **k: None)
 
     async def drive(app, method, headers):
         out = {"status": None}
