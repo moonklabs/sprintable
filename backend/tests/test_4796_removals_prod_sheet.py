@@ -332,5 +332,8 @@ def test_the_forwarder_is_deployed_with_the_values_that_are_live_and_the_real_gc
     for old in ("--cpu 1 ", "256Mi", "--concurrency 250", "--max-instances 2 "):
         assert old not in line, old
     assert "128 MiB, 0.08 CPU, first generation, concurrency 1" in CUTOVER
+    # no sentence of the cutover sheet still describes the live forwarder with the first size
+    assert "one CPU, 256 MiB" not in CUTOVER and "at most 2, billed" not in CUTOVER and "2 instances × 250 requests, and" not in CUTOVER
+    assert "10 instances × 1 request" in CUTOVER and "0.08 CPU, 128 MiB, concurrency 1" in CUTOVER
     r6 = _rows()["R6"]
     assert "0.08 vCPU, 128 Mi, concurrency 1, maximum 10" in r6 and "CUTOVER-prod.md" in r6.split("**Why it is not removed today")[1].split("\n")[0]
