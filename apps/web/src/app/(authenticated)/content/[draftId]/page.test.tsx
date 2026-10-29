@@ -8,7 +8,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../messages/ko.json';
-import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/lib/schedule-format';
 
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
 const { useParamsMock } = vi.hoisted(() => ({ useParamsMock: vi.fn() }));

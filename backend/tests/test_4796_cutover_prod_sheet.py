@@ -28,7 +28,7 @@ SAMPLE = {"PROJECT": "sprintable-494803", "REGION": "asia-northeast3", "ZONE": "
           "MCP": "sprintable-mcp-prod", "API_HOST": "api.sprintable.ai", "APP_HOST": "app.sprintable.ai", "VMIP": "34.64.1.2", "SRC_IP": "10.110.0.3", "svc": "sprintable-backend-prod",
           "job": "sprintable-sched-prod", "JOB": "sprintable-sched-prod", "NAME": "some-job", "r": "services", "n": "sprintable-backend-prod", "TMO": "300", "BURL": "https://x.run.app", "FROZEN": "yes",
           "uri": "https://sprintable-backend-prod-787818285179.asia-northeast3.run.app/api/v2/internal/cron/x", "new": "https://api.sprintable.ai/api/v2/internal/cron/x", "out": "", "CODE": "403",
-          "WINDOW": "20261102", "VMBACK": "passing", "id": "JWT_SECRET_PROD", "b": "sprintable-vm-prod-backups", "route": "refresh", "path": "desktop/setup-codes", "m": "allUsers", "names": "a b", "d": "{}", "pol": "{}", "svcs": "a", "left": "0", "REPO": "/repo", "FINAL_DUMP": "/srv/sprintable/import/prod-final-1.dump", "FINAL_COUNTS": "/srv/sprintable/import/prod-final-1.counts.tsv"}
+          "WINDOW": "20261102", "VMBACK": "passing", "id": "JWT_SECRET_PROD", "b": "sprintable-vm-prod-backups", "route": "refresh", "path": "desktop/setup-codes", "m": "allUsers", "names": "a b", "d": "{}", "pol": "{}", "svcs": "a", "left": "0", "REPO": "/repo", "FWD_SA": "sprintable-forwarder-prod", "REH": "sprintable-rehearsal-forwarder", "REHID": "r20261029120000", "NET": "default", "SUBNET": "default", "TAGS": "egress-tag", "FWD_IMAGE": "asia-northeast3-docker.pkg.dev/sprintable-494803/sprintable/sprintable-forwarder@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "FWD_TAG": "fwd", "FWD_BUILD": "asia-northeast3-docker.pkg.dev/sprintable-494803/sprintable/sprintable-forwarder:20261102", "FWDREV": "sprintable-backend-prod-fwd-20261102", "REAL": "sprintable-backend-prod-00042-abc", "REALBACK": "proven", "FINAL_DUMP": "/srv/sprintable/import/prod-final-1.dump", "FINAL_COUNTS": "/srv/sprintable/import/prod-final-1.counts.tsv"}
 
 
 def _blocks() -> list[str]:
@@ -151,10 +151,11 @@ def test_the_routes_the_sheet_reads_in_the_request_log_are_the_applications() ->
 
 def test_no_block_freezes_by_ingress_or_measures_on_a_reserved_path() -> None:
     code = "\n".join(_blocks())
-    assert "--ingress" not in code, "the freeze is the IAM binding"
+    assert re.findall(r"--ingress\S*\s+\S+", code) == ["--ingress all"] and "--ingress all" in _block_with("--no-traffic --tag"), "the freeze is the IAM binding; the one `--ingress` is the forwarder revision stating that it is open to all, not a freeze"
     assert "/healthz" not in code and "/readyz" not in code, "Cloud Run answers the paths that end in z itself"
     assert code.count("remove-iam-policy-binding") >= 1 and code.count("add-iam-policy-binding") >= 2
-    assert '--member="$m" --role=roles/run.invoker' in code and "--member=allUsers" not in code, "members come from the record, never from a literal"
+    assert '--member="$m" --role=roles/run.invoker' in code, "members come from the record"
+    assert code.count("--member=allUsers") == 2, "a literal allUsers only in the two lines of the forwarder (opened in 8c, closed in step 12), each behind a look at what is recorded or present"
     assert '"$BURL/openapi.json"' in code and "403" in _section("## 5. Freeze", "## 6–7.")
 
 
@@ -191,9 +192,10 @@ def _gcloud_commands() -> list[list[str]]:
             lex.whitespace_split = True
             lex.commenters = ""
             toks = list(lex)
+            toks = [t for k, t in enumerate(toks) if not (t.isdigit() and k + 1 < len(toks) and toks[k + 1].startswith(">"))]   # the `2` of `2>&1` belongs to the redirection
             cur: list[str] = []
             for t in [*toks, "|"]:
-                if t in {"|", ";", "&&", "||", "(", ")", "$"} or set(t) <= set("|;&()<>$"):
+                if t in {"|", ";", "&&", "||", "(", ")", "$"} or (t != "" and set(t) <= set("|;&()<>$")):   # an empty word (`--command ""`) is a word, not a separator
                     if "gcloud" in cur:
                         found.append(cur[cur.index("gcloud"):])
                     cur = []
@@ -206,7 +208,7 @@ def test_the_sheet_has_the_gcloud_commands_this_test_parses() -> None:
     verbs = {" ".join(c[1:3]) for c in _gcloud_commands()}
     for must in ("sql instances", "compute instances", "run services", "run jobs", "scheduler jobs", "logging read", "secrets versions", "secrets list", "compute ssh", "builds list"):
         assert must in verbs, (must, sorted(verbs))
-    assert 20 <= len(_gcloud_commands()) <= 80, len(_gcloud_commands())
+    assert 20 <= len(_gcloud_commands()) <= 110, len(_gcloud_commands())
 
 
 @pytest.mark.skipif(shutil.which("gcloud") is None, reason="no gcloud on this machine")
@@ -576,7 +578,7 @@ def test_the_way_back_on_the_vm_stops_where_it_fails_and_the_one_on_the_machine_
 
 def test_step_eight_says_cloud_run_backend_and_frontend_stay_closed_and_why() -> None:
     eight = _section("## 8. Unfreeze", "## 9. The lap")
-    for token in ("**Cloud Run's backend and frontend stay closed**", "they are the way back", "two databases, split writes", "What is put back is `reopen.txt`", "The measurement is a gate", "`unfreeze: resumed` is the pass", "An empty `reopen.txt`, or a window without a `was-invoker` file, is a stop, not a pass", "is never opened by this block"):
+    for token in ("**Cloud Run's frontend stays closed, and the real revision of the backend gets no caller and no traffic after 8c: it is the way back.**", "Only the **forwarder** of step 4c is ever opened to the public", "two databases, split writes", "What is put back is `reopen.txt`", "The measurement is a gate", "`unfreeze: resumed` is the pass", "An empty `reopen.txt`, or a window without a `was-invoker` file, is a stop, not a pass", "is never opened by this block"):
         assert token in eight, token
     assert "The hosted MCP" not in eight or "once its `SPRINTABLE_API_URL`" in eight
     five = _section("## 5. Freeze", "## 6–7.")
@@ -1118,7 +1120,7 @@ def test_the_window_carries_the_seconds_of_the_link_rewrite_and_a_failed_rewrite
         assert token in one, token
     six = _section("## 6–7. The data and the takeover", "## 8. Unfreeze")
     for token in ("**If 4b fails**", "**the move does not stop and the window goes on.**", "the backup taken just before goes back", "RESTORE_WIPE=yes /opt/sprintable/bin/restore.sh",
-                  "ls -t /var/backups/sprintable/db-prod-*.dump", "**the next day with the same module**", "answers 403 (Cloud Run is closed since the freeze)", "`links-report.txt`"):
+                  "ls -t /var/backups/sprintable/db-prod-*.dump", "**the next day with the same module**", "answers 403 until the forwarder is opened in step 8c", "`links-report.txt`"):
         assert token in six, token
     assert "/var/backups/sprintable" in (_ROOT / "deploy/vm/bin/backup.sh").read_text() and 'dump_prefix' in (_ROOT / "deploy/vm/bin/backup.sh").read_text(), "the folder and the name the sheet restores from are the backup unit's"
 
@@ -1210,7 +1212,7 @@ def test_the_positive_control_of_the_writers_gate_is_measured_and_repeatable(tmp
     for token in ("**Positive control — measured by the product owner on 2026-10-28 with the live account (`양성 대조 실측됨`).**", "20 lines over `--freshness=1d` and 20 over five minutes", "matched 5 requests of `/api/v2/health`",
                   "the one place where this gate could pass falsely", "write the number of lines in the record of G5", "A 0 here means the filter matches nothing"):
         assert token in five, token
-    block = _block_with("--freshness=1d")
+    block = _block_with("--freshness=1d --limit=20")
     p, calls = _run(block, _fresh(tmp_path, "pos"), extra={"WRITE_ROWS": "2026-11-02T18:00:00Z\n2026-11-02T18:00:01Z\n"})
     assert p.stdout.strip() == "2", p.stdout
     ask = next(c for c in calls if "logging read" in c)

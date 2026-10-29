@@ -31,7 +31,7 @@ import { CommentsSection, deriveCommentsFace, type CommentItem, type CommentsFac
 import type { CommentsRefreshOutcome } from '@/components/content/comments-refresh-button';
 import { CommentConvertToTaskDialog } from '@/components/content/comment-convert-to-task-dialog';
 import { CommentReplyDialog, type CommentReplyOutcome, type ReplyView } from '@/components/content/comment-reply-dialog';
-import { formatViewerScheduledAt, formatScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt, formatScheduledAt } from '@/lib/schedule-format';
 import { GenerationBudgetIndicator, majorToMinor, type GenerationBudgetCurrency, type GenerationBudgetState } from '@/components/content/generation-budget-indicator';
 import { GenerationBudgetExceededBanner } from '@/components/content/generation-budget-exceeded-banner';
 import { ApiUsageBudgetExceededBanner } from '@/components/content/api-usage-budget-exceeded-banner';

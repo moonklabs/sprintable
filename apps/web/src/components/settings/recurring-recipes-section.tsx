@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
-import { formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/lib/schedule-format';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**

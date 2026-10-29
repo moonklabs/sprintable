@@ -11,7 +11,7 @@
 // 조직 타임존이 브라우저와 달라지는 순간(BE 조직 tz 필드 착지 뒤) 이 변환 자체를
 // 제대로 된 tz 변환 라이브러리로 바꿔야 한다 — 지금은 그 필드가 없어(그라운딩 확認,
 // story #3422 ②-a 커밋 참고) 범위 밖으로 명시해 둔다.
-import { zonedWallClockToIso } from './schedule-format';
+import { zonedWallClockToIso } from '@/lib/schedule-format';
 
 export type ScheduledAtValidation =
   | { valid: true; iso: string }

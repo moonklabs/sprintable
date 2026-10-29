@@ -10,7 +10,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { computeReorderPatch } from '@/lib/epic-steer';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { useGoalsRoute } from './goals-context';
-import { formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/lib/schedule-format';
 import { Button } from '@/components/ui/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';

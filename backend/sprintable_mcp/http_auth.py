@@ -37,6 +37,29 @@ async def _send_401(send) -> None:
     await send({"type": "http.response.body", "body": _UNAUTHORIZED_BODY})
 
 
+_NO_STREAM_BODY = (
+    b'{"error":{"code":"method_not_allowed",'
+    b'"message":"This server does not open a server-to-client stream: POST to /mcp"}}'
+)
+
+
+async def _send_405_no_stream(send) -> None:
+    # story 4804: the MCP spec lets a server that does not offer an SSE stream at the endpoint answer a GET with 405 (Streamable HTTP,
+    # «Listening for Messages from the Server»). This server is stateless — every POST gets a fresh transport that is gone with the
+    # response — and sends the client nothing of its own (no notification, no list-changed, no request), so the standalone stream
+    # that the SDK opens for a GET could only ever carry its 15-second pings, while it keeps the connection (and a Cloud Run
+    # instance) busy for as long as the client stays.
+    await send({
+        "type": "http.response.start",
+        "status": 405,
+        "headers": [
+            (b"content-type", b"application/json"),
+            (b"allow", b"POST"),
+        ],
+    })
+    await send({"type": "http.response.body", "body": _NO_STREAM_BODY})
+
+
 async def _send_health(send) -> None:
     # E-MCP-HTTP S2: Cloud Run HTTP liveness/readiness — streamable_http_app 엔 /health 라우트가 없어
     # 404 나므로 미들웨어가 직접 200(인증 불요). 의존성(백엔드) 미체크 = liveness 용(서버 살아있음).
@@ -48,8 +71,12 @@ async def _send_health(send) -> None:
     await send({"type": "http.response.body", "body": b'{"status":"ok"}'})
 
 
-def bearer_auth_asgi(app):
-    """app(streamable_http_app) 을 per-request bearer auth 로 감싸는 순수 ASGI 미들웨어."""
+def bearer_auth_asgi(app, get_stream: bool = False):
+    """app(streamable_http_app) 을 per-request bearer auth 로 감싸는 순수 ASGI 미들웨어.
+
+    ``get_stream=False``(기본, story 4804): ``GET /mcp`` 는 인증 이전에 405(``Allow: POST``) — SDK 의 무상태 모드가 GET 에 여는
+    standalone SSE 스트림은 보낼 것이 없는 채 연결만 붙들어 둔다. ``True`` 는 SDK 동작(스트림 개방)으로의 되돌림 스위치
+    (env ``MCP_HTTP_GET_STREAM``)."""
 
     async def middleware(scope, receive, send):
         if scope.get("type") != "http":
@@ -63,6 +90,10 @@ def bearer_auth_asgi(app):
         # 비-MCP 경로는 인증 없이 app 으로 통과(향후 다른 라우트 호환).
         if not path.startswith("/mcp"):
             await app(scope, receive, send)
+            return
+        # story 4804: no server-to-client stream (nothing to protect, so before the key and before the backend lookup below)
+        if not get_stream and scope.get("method") == "GET":
+            await _send_405_no_stream(send)
             return
 
         headers = {k.decode("latin-1").lower(): v.decode("latin-1")

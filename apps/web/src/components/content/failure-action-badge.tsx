@@ -5,7 +5,7 @@ import {
   CHANNEL_POST_BLOCKED_REASON_MESSAGE_KEYS, CHANNEL_POST_DEAD_LETTER_REASON_MESSAGE_KEYS, CHANNEL_POST_VOID_REASON_MESSAGE_KEYS,
   type FailureAction,
 } from '@/components/content/failure-action';
-import { formatScheduledAt } from '@/components/content/schedule-format';
+import { formatScheduledAt } from '@/lib/schedule-format';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { useResetPassed } from '@/components/content/use-reset-passed';
 

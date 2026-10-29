@@ -1,7 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/lib/schedule-format';
 import { CommentBodyText } from '@/components/content/comment-body-text';
 import { CommentsRefreshButton, type CommentsRefreshOutcome } from '@/components/content/comments-refresh-button';
 import { Button } from '@/components/ui/button';

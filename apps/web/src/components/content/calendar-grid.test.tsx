@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { CalendarGrid } from './calendar-grid';
-import { defaultCalendarRange } from './schedule-format';
+import { defaultCalendarRange } from '@/lib/schedule-format';
 import type { ChannelPostCalendarItem } from './use-channel-post-calendar-data';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

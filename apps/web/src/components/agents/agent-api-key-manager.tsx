@@ -21,7 +21,7 @@ import { copyTextSafely } from '@/lib/clipboard';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
-import { formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/lib/schedule-format';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface ApiKey {

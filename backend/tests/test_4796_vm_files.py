@@ -100,7 +100,7 @@ def test_every_file_a_unit_runs_is_installed_by_bootstrap() -> None:
             assert exe in installed, f"{unit.name} runs {exe}, which bootstrap.sh does not install"
     for f in installed:
         assert (_VM / "bin" / f).exists(), f
-    shipped = {f.name for f in (_VM / "bin").iterdir() if f.is_file()} - {"make_bundle.py", "bootstrap.sh", "check_live_names.py", "frontend_build_args.py", "build-frontend-vm.sh", "subnet-residents.py"}   # the last one is run from the PO's checkout (read only), not installed on the VM
+    shipped = {f.name for f in (_VM / "bin").iterdir() if f.is_file()} - {"make_bundle.py", "bootstrap.sh", "check_live_names.py", "frontend_build_args.py", "build-frontend-vm.sh", "frontend-vm-image.sh", "frontend_input_id.py", "subnet-residents.py"}   # the last one is run from the PO's checkout (read only), not installed on the VM
     assert installed == shipped, f"bootstrap installs {sorted(installed)} but bin/ holds {sorted(shipped)}"
     assert "enable --now sprintable-deploy.timer" not in re.sub(r"(?m)^\s*#.*$|echo .*$", "", boot), "the deploy timer is enabled by hand after the database is restored"
 

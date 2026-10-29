@@ -128,12 +128,17 @@ def test_the_vm_build_has_three_steps_in_a_chain() -> None:
     assert _STEPS["build-frontend-vm"]["waitFor"] == ["resolve-backend"] and _STEPS["bundle-vm"]["waitFor"] == ["build-frontend-vm"]
 
 
-def test_the_vm_build_states_its_own_machine_and_time_limits() -> None:
-    assert _VM["options"]["machineType"] == "E2_HIGHCPU_8", "stated here, not borrowed from the Cloud Run build"
+def test_the_vm_build_runs_on_the_default_worker_and_states_its_own_time_limits() -> None:
+    """story 4805: no machineType = Cloud Build's default worker (free minutes each month). Measured: the frontend build is x2.03 slower there than on E2_HIGHCPU_8 (5.2 -> 10.6 min; the slowest 8-core one seen was 8.5 min),
+    so the frontend step may take 30 minutes and the build 40"""
+    assert "machineType" not in _VM["options"] and "pool" not in _VM["options"], "the default worker; the Cloud Run build (cloudbuild.yaml) keeps its own"
+    assert not re.search(r"--machine-type|--worker-pool|--timeout", _submit_vm()["run"]), "the submission must not pick another worker or limit either"
     assert _VM["options"]["logging"] == "CLOUD_LOGGING_ONLY"
     steps_total = sum(_seconds(_STEPS[s]["timeout"]) for s in VM_STEPS)
     assert _seconds(_VM["timeout"]) >= steps_total + 300, "the build limit covers every step limit with room"
-    assert _seconds(_STEPS["build-frontend-vm"]["timeout"]) >= 900, "the frontend build took 6 minutes on a fresh worker"
+    assert _seconds(_STEPS["build-frontend-vm"]["timeout"]) >= 1800, "twice the slowest frontend build seen on the 8-core worker (8.5 min) is 17 min"
+    assert _seconds(_VM["timeout"]) >= 2400
+    assert _MAIN["options"]["machineType"] == "E2_HIGHCPU_8", "the Cloud Run build is not changed by story 4805 (main waits for the window)"
 
 
 def test_the_five_build_values_default_to_a_marker_so_a_forgotten_one_fails() -> None:
@@ -150,13 +155,13 @@ def test_every_step_names_dev_and_prod_with_their_own_bucket_and_no_script_write
         script = _STEPS[sid]["args"][1]
         assert gate.search(script), sid
         assert not re.search(r"gs://\S*desired\.json", script), f"{sid} must not write the VM's desired.json (RUNBOOK §7 step 1 does)"
-    assert "build-frontend-vm.sh \"${_DEPLOY_ENV}\" \"${COMMIT_SHA}\"" in _STEPS["build-frontend-vm"]["args"][1], "the frontend is built from the declaration of the environment of the run"
+    assert "frontend-vm-image.sh \"${_DEPLOY_ENV}\" \"${COMMIT_SHA}\"" in _STEPS["build-frontend-vm"]["args"][1], "the frontend is built (or, story 4805, reused) from the declaration of the environment of the run"
     assert _VM["substitutions"]["_VM_DEPLOY_BUCKET"] == "sprintable-vm-dev-deploy" and (_ROOT / "deploy/vm/env/prod.yaml").read_text().count("deploy: sprintable-vm-prod-deploy") == 1, "the prod bucket the step expects is the one the prod declaration names"
 
 
 def test_the_images_live_in_our_registry_and_the_two_hosts_are_not_passed_from_here() -> None:
     script = _STEPS["build-frontend-vm"]["args"][1]
-    assert '"${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}"' in script and "frontend-vm:${COMMIT_SHA}" in script
+    assert '"${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}"' in script and '"$$repo/frontend-vm"' in script
     assert "NEXT_PUBLIC_FASTAPI_URL" not in script and "NEXT_PUBLIC_APP_URL" not in script
 
 
@@ -184,6 +189,7 @@ def _substitute(text: str, values: dict[str, str]) -> str:
 _FAKE_DOCKER = r"""#!/bin/sh
 echo "docker $*" >> "$FAKE_LOG"
 case "$1" in
+  pull) exit 1 ;;  # story 4805: no earlier frontend image with the same inputs (the reuse has its own tests, test_4805_frontend_vm_reuse.py) - these tests are the full build
   run)
     case "$*" in
       *"-rlF"*) echo 1 ;;
