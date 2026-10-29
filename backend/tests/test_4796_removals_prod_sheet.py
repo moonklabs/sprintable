@@ -299,3 +299,26 @@ def test_the_sheet_keeps_what_the_first_run_taught() -> None:
     assert grant.index("add-iam-policy-binding") < grant.index("remove-iam-policy-binding")
     assert "roles/storage.objectAdmin" in grant and grant.count("serviceAccount:$SQL_SA") == 2, "granted before, taken away after, to the instance's own account only"
     assert "R6 has not run" in SHEET.split("## Run record")[1].split("##")[0]
+
+
+def test_the_pooler_template_is_read_from_the_group_not_assumed_and_the_revoke_is_guarded(tmp_path: Path) -> None:
+    """2026-10-29: the live group used `tmpl-r3`, not the script's `pgbouncer-prod-tmpl`; and the temporary bucket role must come off even through a typo (an empty bucket name aborts, it does not skip)"""
+    r3 = _rows()["R3"]
+    capture = _block("R3", "CAPTURE-OK")
+    assert "$(jq -r '.versions[0].instanceTemplate" in capture and "NO TEMPLATE IN THE GROUP'S DEFINITION" in capture
+    chain = [ln for ln in _fenced(r3)[2].splitlines() if "instance-templates delete" in ln][0]
+    assert 'instance-templates delete "${TMPL:?}"' in chain and "pgbouncer-prod-tmpl" not in chain
+    revoke = [ln for ln in SHEET.splitlines() if "remove-iam-policy-binding" in ln][0]
+    assert 'gs://${BACKUPS_BUCKET:?}' in revoke
+    # run for real: a definition without a template stops the capture; with one, the template's own name is described
+    b = tmp_path / "bin"
+    b.mkdir()
+    (b / "gcloud").write_text('#!/bin/sh\necho "gcloud $*" >> "$FAKE_LOG"\ncase "$1 $2 $3" in\n  "compute instance-groups managed") echo "$FAKE_MIG" ;;\n  *) echo \'{"name":"x"}\' ;;\nesac\n')
+    (b / "gcloud").chmod(0o755)
+    (tmp_path / "log").write_text("")
+    for mig, ok in (('{"name":"m","versions":[{"instanceTemplate":"https://x/global/instanceTemplates/tmpl-r3"}]}', True), ('{"name":"m","versions":[]}', False)):
+        script = capture.replace("--format=json > pgbouncer-prod-mig.json || OK=0", "--format=json > pgbouncer-prod-mig.json || OK=0; echo \"$FAKE_MIG\" > pgbouncer-prod-mig.json")
+        out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, cwd=tmp_path, timeout=30,
+                             env={**os.environ, "PATH": f"{b}:{os.environ['PATH']}", "PROJECT": "p", "REGION": "r", "FAKE_LOG": str(tmp_path / "log"), "FAKE_MIG": mig})
+        assert ("CAPTURE-OK" in out.stdout) == ok, (mig, out.stdout, out.stderr)
+        assert ("the group's template: tmpl-r3" in out.stdout) == ok
