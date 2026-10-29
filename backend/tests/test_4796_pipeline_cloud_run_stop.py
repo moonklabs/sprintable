@@ -231,3 +231,16 @@ def test_the_runbook_says_prod_states_the_switch_too_and_when_it_may_be_merged()
     for needle in ("and, since P3 of the prod cutover", "for prod (under `mins_explicit`; merged right after the cutover's unfreeze, never before", "(or of the prod branch for prod)"):
         assert needle in sec, needle
     assert "prod states nothing" not in sec
+
+
+def test_the_skip_lines_do_not_say_dev_because_prod_prints_them_too() -> None:
+    """since P3 the prod build writes `cloud_run_app_skip=true` as well: a line that says «dev runs on the VM» in a prod log is wrong, so the six steps say «this environment»"""
+    import re
+    from pathlib import Path
+    text = (Path(__file__).resolve().parents[2] / "cloudbuild.yaml").read_text()
+    skips = re.findall(r'echo "skip ([a-z-]+): ([^"]*)"', text)
+    steps = {name for name, _ in skips}
+    assert steps >= {"build-frontend", "push-frontend", "update-migrate-job", "run-migrate-job", "deploy-frontend", "deploy-backend"}, steps
+    for name, msg in skips:
+        if name in {"build-frontend", "push-frontend", "update-migrate-job", "run-migrate-job", "deploy-frontend", "deploy-backend"}:
+            assert msg == "this environment runs on the VM (story 4796)", (name, msg)

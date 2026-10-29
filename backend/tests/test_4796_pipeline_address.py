@@ -159,7 +159,7 @@ def test_the_runbook_states_the_flip_order_the_accepted_cost_and_the_places_the_
         assert name in sec, name
     assert "`resend-verification` and `set-password/request` — both 3 an hour, both send mail" in sec and "`sk_live_` key is counted per key" in sec
     assert "are copied into the VM frontend image as they are" in sec
-    assert "Their **dev** example lines name `https://dev-api.sprintable.ai` since story 4796 (Phase 2)" in sec and "**The prod lines of the three guides name `https://api.sprintable.ai` since the prod move**" in sec
+    assert "Their **dev** example lines name `https://dev-api.sprintable.ai` since story 4796 (Phase 2)" in sec and "**The prod lines of the three guides name `https://api.sprintable.ai` since the prod move**" in sec and "the prod plugin `connectors/hermes-sprintable-prod` names `https://api.sprintable.ai` too (P8)" in sec and "until prod moves" not in sec
     p2 = _runbook_section("**Phase 2", "**Phase 3")
     assert "`mcp_url` from `MCP_PUBLIC_URL`" in p2
 

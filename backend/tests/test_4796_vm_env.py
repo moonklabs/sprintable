@@ -138,8 +138,8 @@ def test_the_public_addresses_are_the_vm_hosts_not_cloud_run(env: str) -> None:
 
 def test_prod_adds_nothing_the_live_prod_service_does_not_have_except_the_vm_switch() -> None:
     """prod behaves as prod does today: no new admin lane, no new rate-limit setting; the only new name is TRUST_FORWARDED_FOR (and it is in the live-name-free `added` group)"""
-    assert set(DECLS["prod"]["services"]["backend"]["added"]) == {"TRUST_FORWARDED_FOR", "PUBLIC_API_URL"}, "the VM switch, and (P6) the origin of stored links, the same value dev has"
-    assert DECLS["prod"]["services"]["backend"]["added"]["PUBLIC_API_URL"] == "https://api.sprintable.ai"
+    assert set(DECLS["prod"]["services"]["backend"]["added"]) == {"TRUST_FORWARDED_FOR"}, "the VM switch is the only new name; PUBLIC_API_URL (P6) is an override since the old prod service's last real revision held it"
+    assert DECLS["prod"]["services"]["backend"]["overrides"]["PUBLIC_API_URL"] == "https://api.sprintable.ai"
     assert not DECLS["prod"]["services"]["frontend"]["added"]
 
 
