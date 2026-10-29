@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { RENAMED_RESOURCES, RETIRED_RESOURCES } from '../src/proxy';
 import {
@@ -7,9 +8,11 @@ import {
   extractNavConfigResourceTargets,
   findAliasedLiveRoutes,
   findEntryWithoutRoute,
+  findStaleBaseline,
   findRouteWithoutEntry,
   GRANDFATHER_BASELINE,
   KNOWN_NON_PROJECT_ROUTES,
+  listRouteDirs,
   RENAMED_RESOURCE_ALIASES,
   type EntryHit,
 } from './verify-no-orphan-resource-routes';
@@ -165,6 +168,23 @@ describe('AC7 — 실제 저장소 첫 스캔의 검거(GRANDFATHER_BASELINE)이
     expect([...GRANDFATHER_BASELINE].sort()).toEqual(['routeWithoutEntry:hypotheses', 'routeWithoutEntry:loops', 'routeWithoutEntry:retro']);
     expect(GRANDFATHER_BASELINE.has('routeWithoutEntry:mockups')).toBe(false);
     expect(GRANDFATHER_BASELINE.has('entryWithoutRoute:memos')).toBe(false);
+  });
+});
+
+// story #4810 — the warning became a failure: a grandfathered key that this scan no longer hits (its route was deleted) must leave the baseline.
+describe('findStaleBaseline — 라우트가 걷힌 뒤 남은 키는 실패(story #4810)', () => {
+  const baseline = new Set(['routeWithoutEntry:retro', 'routeWithoutEntry:loops']);
+
+  it('이번 스캔에서 안 걸린 키만 골라낸다', () => {
+    expect(findStaleBaseline(baseline, new Set(['routeWithoutEntry:loops']))).toEqual(['routeWithoutEntry:retro']);
+    expect(findStaleBaseline(baseline, new Set(['routeWithoutEntry:retro', 'routeWithoutEntry:loops']))).toEqual([]);
+    expect(findStaleBaseline(baseline, new Set())).toEqual(['routeWithoutEntry:loops', 'routeWithoutEntry:retro']);
+  });
+
+  it('실 저장소 — 지금 baseline의 키는 전부 아직 걸린다(라우트 폴더가 실제로 있다)', () => {
+    const routeDirs = new Set(listRouteDirs(path.resolve(__dirname, '../src/app/(authenticated)/[ws]/[proj]')));
+    const hit = new Set([...GRANDFATHER_BASELINE].filter((k) => routeDirs.has(k.replace('routeWithoutEntry:', ''))));
+    expect(findStaleBaseline(GRANDFATHER_BASELINE, hit)).toEqual([]);
   });
 });
 
