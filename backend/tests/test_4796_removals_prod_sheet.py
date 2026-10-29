@@ -54,7 +54,7 @@ def test_the_rows_are_six_in_the_run_order_and_the_old_address_has_its_own_gate(
     assert "empty for **7 days in a row**" in CUTOVER and "removed as a whole" in CUTOVER
     assert "R1–R5 do **not** touch `sprintable-backend-prod`" in gate_f
     why = _rows()["R6"].split("**Why it is not removed today")[1].split("\n")[0]
-    for token in ("minimum instances 0", "CPU throttling on", "1 CPU, 256 Mi", "maximum 2 instances", "unmeasured here"):
+    for token in ("0.08 vCPU", "128 Mi", "concurrency 1", "maximum 10", "first generation", "CPU boost off", "minimum instances 0", "fwd-20261030=100", "unmeasured here"):
         assert token in why, token
 
 
@@ -293,7 +293,7 @@ def test_the_service_rows_delete_only_after_their_capture_is_proven(tmp_path: Pa
 def test_the_sheet_keeps_what_the_first_run_taught() -> None:
     """2026-10-29: the dependents list printed four more than the two jobs, and the export failed with 412 until the instance's service account had a role on the bucket"""
     r5 = _rows()["R5"]
-    for token in ("`internal-api`", "`seed-loadtest`", "`audit-apikey`", "`backfill`", "DEPENDENTS-CLEAR", "failed with 412"):
+    for token in ("`sprintable-internal-api`", "`seed-loadtest-prod`", "`sprintable-audit-apikey-prod`", "`sprintable-backfill-prod`", "DEPENDENTS-CLEAR", "failed with 412"):
         assert token in r5, token
     grant = [b for b in _fenced(r5) if "add-iam-policy-binding" in b][0]
     assert grant.index("add-iam-policy-binding") < grant.index("remove-iam-policy-binding")
@@ -322,3 +322,15 @@ def test_the_pooler_template_is_read_from_the_group_not_assumed_and_the_revoke_i
                              env={**os.environ, "PATH": f"{b}:{os.environ['PATH']}", "PROJECT": "p", "REGION": "r", "FAKE_LOG": str(tmp_path / "log"), "FAKE_MIG": mig})
         assert ("CAPTURE-OK" in out.stdout) == ok, (mig, out.stdout, out.stderr)
         assert ("the group's template: tmpl-r3" in out.stdout) == ok
+
+
+def test_the_forwarder_is_deployed_with_the_values_that_are_live_and_the_real_gcloud_accepts_them(tmp_path: Path) -> None:
+    """2026-10-29 14:04Z: the PO moved the old address to 0.08 vCPU / 128 Mi / concurrency 1 / maximum 10 by hand; the written line (cutover 4c-B) says the same, and the real gcloud parses it"""
+    line = [ln for ln in CUTOVER.splitlines() if ln.startswith('[ "$FWD" = recorded ]') and "gcloud run deploy" in ln][0]
+    for flag in ("--cpu 0.08", "--memory 128Mi", "--concurrency 1", "--max-instances 10", "--execution-environment gen1", "--cpu-throttling", "--no-cpu-boost", "--min-instances 0"):
+        assert flag in line, flag
+    for old in ("--cpu 1 ", "256Mi", "--concurrency 250", "--max-instances 2 "):
+        assert old not in line, old
+    assert "128 MiB, 0.08 CPU, first generation, concurrency 1" in CUTOVER
+    r6 = _rows()["R6"]
+    assert "0.08 vCPU, 128 Mi, concurrency 1, maximum 10" in r6 and "CUTOVER-prod.md" in r6.split("**Why it is not removed today")[1].split("\n")[0]
