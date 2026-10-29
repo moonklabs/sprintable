@@ -31,5 +31,7 @@
 		flush_interval -1
 		header_up Host {upstream_hostport}
 		header_up X-Sprintable-Forwarded 1
+		# the operator's identity token of step 8c travels in this header; Cloud Run reads it, and whatever Cloud Run does with it, it does not go on to the VM
+		header_up -X-Serverless-Authorization
 	}
 }

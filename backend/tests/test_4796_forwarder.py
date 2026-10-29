@@ -56,6 +56,7 @@ def test_it_hands_everything_to_the_api_name_with_that_name_as_host_and_flushes_
     assert len(re.findall(r"(?m)^\s*reverse_proxy\b", SETTINGS)) == 1 and "redir" not in SETTINGS and "rewrite" not in SETTINGS, "it forwards and does nothing else"
     assert re.findall(r"(?m)^\s*respond .*$", SETTINGS) == ['\trespond @looped "forwarding loop" 508'], "the one answer of its own is the refusal of a loop"
     assert "@looped header X-Sprintable-Forwarded *" in SETTINGS and "header_up X-Sprintable-Forwarded 1" in SETTINGS, "a request that comes back with the mark is a loop"
+    assert "header_up -X-Serverless-Authorization" in SETTINGS and not re.search(r"header_up -?Authorization\b", SETTINGS), "the identity token header is removed; the application's own Authorization is not touched"
 
 
 def test_its_error_log_has_the_filter_of_the_stacks_caddy_and_no_access_log() -> None:
@@ -85,7 +86,7 @@ class _Upstream(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self) -> None:
-        _Upstream.seen.append({"path": self.path, "host": self.headers.get("Host"), "xff": self.headers.get("X-Forwarded-For"), "mark": self.headers.get("X-Sprintable-Forwarded")})
+        _Upstream.seen.append({"path": self.path, "host": self.headers.get("Host"), "xff": self.headers.get("X-Forwarded-For"), "mark": self.headers.get("X-Sprintable-Forwarded"), "xsa": self.headers.get("X-Serverless-Authorization"), "auth": self.headers.get("Authorization")})
         if self.path.startswith("/stream"):
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
@@ -174,6 +175,17 @@ def test_the_real_caddy_marks_what_it_forwards_and_refuses_what_comes_back_with_
     r = c.getresponse()
     assert r.status == 508 and b"forwarding loop" in r.read(), "a request that already went through a forwarder is refused"
     assert len(_Upstream.seen) == before, "and is not handed on"
+
+
+def test_the_real_caddy_does_not_hand_on_the_identity_token_header_but_hands_on_the_callers_own_authorization(running) -> None:
+    port, up_port, _ = running
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    c.request("GET", "/api/v2/health", headers={"X-Serverless-Authorization": "Bearer id-token-of-the-operator", "Authorization": "Bearer sk_live_agent_key"})
+    r = c.getresponse()
+    assert r.status == 200 and r.read()
+    seen = _Upstream.seen[-1]
+    assert seen["xsa"] is None, "the operator's identity token (header of Cloud Run's own check) does not reach the VM"
+    assert seen["auth"] == "Bearer sk_live_agent_key", "the agent's own key, in the header the application reads, reaches it unchanged"
 
 
 def test_the_real_caddy_sends_the_first_frame_of_a_stream_before_the_stream_ends(running) -> None:
