@@ -54,16 +54,12 @@ function WorkTabTitleFallback({ tab }: { tab: WorkspaceFrameTabKey }) {
   const tWorkList = useTranslations('workList');
   const tSprints = useTranslations('sprints');
   const tBoard = useTranslations('board');
-  const tRetro = useTranslations('retro');
-  const tNav = useTranslations('nav');
   const { holdFallback } = useTopBar();
   const title =
     tab === 'board' ? <h1 className="text-sm font-display font-extrabold">{tFlow('title')}</h1>
       : tab === 'workList' ? <h1 className="text-sm font-medium">{tWorkList('title')}</h1>
         : tab === 'sprints' ? <h1 className="text-sm font-medium">{tSprints('title')}</h1>
-          : tab === 'epic' ? <h1 className="text-sm font-medium">{tBoard('epicSwimlaneTitle')}</h1>
-            : tab === 'retro' ? <h1 className="text-sm font-medium">{tRetro('title')}</h1>
-              : <h1 className="text-sm font-medium">{tNav('hypothesis')}</h1>;
+          : <h1 className="text-sm font-medium">{tBoard('epicSwimlaneTitle')}</h1>;
   useEffect(() => {
     return holdFallback({ title, showContextChip: true });
     // title은 tab과 로케일에서만 파생 — 매 렌더 새 엘리먼트라 deps에 넣지 않는다.

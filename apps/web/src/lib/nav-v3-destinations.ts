@@ -44,8 +44,6 @@ export interface NavV3Destinations {
    * 착지 즉시 전 사용자 노출이라 반려됨).
    */
   work: NavV3Destination;
-  /** 「결과」 — 플래그 무관 고정 경로(v3/레거시 둘 다 이미 /organization/insights-board 공용). */
-  results: NavV3Destination;
   /**
    * 「연결·규칙」 — ON: /connect-rules(story #3982, 통합 화면) · OFF: null(항목 자체를
    * 안 낸다 — 레거시는 지금처럼 「채널 연결」·「콘텐츠 규칙」 2항목을 그대로 유지,
@@ -54,7 +52,7 @@ export interface NavV3Destinations {
   connectRules: NavV3Destination | null;
   /**
    * 「결재」 — story #4016(페드루 PO 確定 2026-09-17) 추가. 모바일 탭 바 전용이던 고정
-   * 경로(v3 3플래그 어디에도 안 걸림, results와 동형) — 이 모듈에 없으면 소비처(탭 바)가
+   * 경로(v3 3플래그 어디에도 안 걸림) — 이 모듈에 없으면 소비처(탭 바)가
    * 손으로 다시 박게 된다(AC1 「파일 안 경로 리터럴 0」).
    */
   approvals: NavV3Destination;
@@ -76,7 +74,6 @@ export function resolveNavV3Destinations(flags: NavV3Flags): NavV3Destinations {
     today: { kind: 'static', path: flags.todayV3Enabled ? '/today' : '/org-briefing' },
     chats: { kind: 'static', path: flags.chatV3Enabled ? '/chat' : '/chats' },
     work: { kind: 'resource', path: anyV3Enabled ? 'work-list' : 'flow' },
-    results: { kind: 'static', path: '/organization/insights-board' },
     connectRules: flags.connectRulesV3Enabled ? { kind: 'static', path: '/connect-rules' } : null,
     approvals: { kind: 'static', path: '/inbox?tab=gates' },
     more: { kind: 'static', path: '/more' },

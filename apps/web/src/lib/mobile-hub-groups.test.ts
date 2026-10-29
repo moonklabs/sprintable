@@ -46,7 +46,7 @@ describe('buildMobileHubGroups(story #4278)', () => {
   it.each([['OFF', DEFAULT_NAV_V3_FLAGS], ['ON', ON]] as const)('⭐«연결·규칙» 한 구역(%s) — 끝에 에이전트 · 신뢰 센터 · 레시피 · 그 밖의 화면엔 연결 소묶음 없음', (_label, flags) => {
     const g = hub(flags);
     const connect = ids(g.find((x) => x.id === 'connect-rules'));
-    expect(connect.slice(-3)).toEqual(['org-workforce', 'org-trust', 'org-events']);
+    expect(connect.slice(-2)).toEqual(['org-workforce', 'org-trust']);
     const legacy = g.find((x) => x.id === MOBILE_LEGACY_CARD_ID);
     expect(legacy?.subgroups?.map((sg) => sg.target)).not.toContain('connect');
     const headings = g.map((x) => x.labelKey).concat(legacy?.subgroups?.map((sg) => sg.labelKey) ?? []);
@@ -90,12 +90,6 @@ describe.each(LOCALES)('sectionHeader(story #4292) — %s', (_locale, t) => {
     const now = byId(DEFAULT_NAV_V3_FLAGS, 'now');
     expect(ids(now)).toEqual(['org-briefing']);
     expect(sectionHeader(now, t)).toEqual({ headerKey: null, name: t('zoneNow') });
-  });
-
-  it('⭐ON «결과»(머리 없는 한 항목 구역) — 예전엔 항목 이름을 머리로 끌어와 «결과 › 결과», 이제 머리 없음', () => {
-    const results = byId(ON, 'results');
-    expect(results.labelKey).toBeUndefined();
-    expect(sectionHeader(results, t)).toEqual({ headerKey: null, name: t('navResults') });
   });
 
   it('검색으로 한 항목만 남아 그 이름이 머리와 같아도 — 머리 없음(거른 뒤에도 같은 함수)', () => {

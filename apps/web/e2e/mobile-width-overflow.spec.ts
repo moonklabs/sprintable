@@ -33,7 +33,7 @@ const PROJECT_NAME = '넘침 가드 프로젝트 · 이름이 긴 편';
 // 시드한 긴 데이터를 안 보고도 초록이 될 수 있었다(까디르 검수 P1).
 let ownerIsUnnamed = false;
 let seededProjectId = '';
-// 이미 `p=`가 있으면 그대로(메뉴 링크 대부분은 `/more`가 싣는다) · 없으면 붙인다 — `/more`의 자원 항목(`/docs` · `/loops` · `/storage`)은
+// 이미 `p=`가 있으면 그대로(메뉴 링크 대부분은 `/more`가 싣는다) · 없으면 붙인다 — `/more`의 자원 항목(`/docs` · `/storage`)은
 // `p` 없이 나와 프록시가 쿠키 프로젝트로 고르므로 순회가 다른 프로젝트를 잴 수 있었다(까디르 검수 · 그 링크 자체의 결함은 별 카드).
 const withProject = (path: string) => (/[?&]p=/.test(path) ? path : `${path}${path.includes('?') ? '&' : '?'}p=${seededProjectId}`);
 const LONG_DOC_TITLE = '[FE·prod 승격 준비] 명령 팔레트 «작업 목록»이 /work-list(직접 경로)로 보내는데 옛 주소 변환 표에 work-list가 없어 404가 난다';
@@ -180,7 +180,8 @@ test('402폭 — 스토리지 한 단 · 상단바 벨 화면 안 · 일감 바�
   const pick = (part: string) => hrefs.find((h) => h.split('?')[0]!.endsWith(part));
 
   // 결재(/inbox) — 유나 4636 측정 때 본 «알림 120» 제목이 오른쪽 칩 · 버튼에 눌려 잘리던 자리(같은 상단바 부류 · PO 20:26Z).
-  for (const part of ['/docs', '/loops', '/inbox']) {
+  // story #4810 — `/loops`(실행)는 메뉴에서 걷혔다(루프 화면 걷기 4809): 메뉴 링크로 찾던 순회에서 뺀다.
+  for (const part of ['/docs', '/inbox']) {
     const href = part === '/inbox' ? withProject('/inbox?tab=notifications') : pick(part);
     expect(href, `${part} 메뉴 링크`).toBeTruthy();
     await page.goto(withProject(href!), { waitUntil: 'domcontentloaded' });

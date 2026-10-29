@@ -47,7 +47,7 @@ describe('내비 설정 경로 소비처가 flat 목적지를 감싼다(story #4
     const { NavV3ItemList } = await import('./nav-v3-item-list');
     await render(<NavV3ItemList flags={DEFAULT_NAV_V3_FLAGS} activeKey="today" />);
     const hrefs = [...container.querySelectorAll('a')].map((a) => a.getAttribute('href'));
-    expect(hrefs).toEqual(['/org-briefing?p=proj-A', '/chats?p=proj-A', '/flow?p=proj-A', '/organization/insights-board?p=proj-A']);
+    expect(hrefs).toEqual(['/org-briefing?p=proj-A', '/chats?p=proj-A', '/flow?p=proj-A']);
   });
 
   it('커맨드 팔레트 — flat(static) 탐색 항목은 `?p=proj-A`를 싣고 이동', async () => {

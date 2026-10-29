@@ -41,6 +41,11 @@ function nestedLoadingDirs(dir: string, out: string[] = []): string[] {
   return out;
 }
 const NESTED = nestedLoadingDirs(HERE);
+/**
+ * story #4810 (OPEN-ZERO ⑦, PO order: nav PR before the screen PRs) — 회고 · 가설 left the 「일감」 tab row ahead of their folders, so the parent
+ * boundary no longer draws their tab skeleton and the parity check is moot while those two screens await deletion (4807 retro, 4811 hypotheses).
+ */
+const WITHDRAWING = ['retro', 'hypotheses'];
 /** 폴더 경로 → 주소(동적 조각 `[x]`는 표본 값). */
 const toPath = (rel: string) => `/ws-1/proj-1/${rel.split(sep).map((seg) => (/^\[.+\]$/.test(seg) ? 'sample-id' : seg)).join('/')}`;
 
@@ -52,13 +57,17 @@ function render(node: React.ReactNode): string {
 }
 
 describe('[ws]/[proj] 부모 경계 = 도착 자원의 자기 loading 모양(story #4274)', () => {
-  it('대상을 실제로 모았다 — 프레임 탭 여섯 전부 + 동적 layout 자원이 들어 있다', () => {
+  it('story #4810 — 걷는 중 목록(WITHDRAWING)의 폴더는 전부 아직 있다(그 화면을 걷는 PR이 폴더와 이 줄을 같이 지운다)', () => {
+    expect(WITHDRAWING.filter((d) => !OWN.includes(d))).toEqual([]);
+  });
+
+  it('대상을 실제로 모았다 — 프레임 탭 전부 + 동적 layout 자원이 들어 있다', () => {
     for (const tab of WORKSPACE_FRAME_TABS) expect(OWN, `프레임 탭 ${tab.path}`).toContain(tab.path);
     const withLayout = OWN.filter((d) => existsSync(join(HERE, d, 'layout.tsx')));
     expect(withLayout.length).toBeGreaterThanOrEqual(1);
   });
 
-  for (const dir of OWN) {
+  for (const dir of OWN.filter((d) => !WITHDRAWING.includes(d))) {
     it(`⭐/${'{ws}'}/${'{proj}'}/${dir} — 부모 경계가 ${dir}/loading.tsx와 같은 마크업`, async () => {
       const { default: Parent } = await import('./loading');
       const Own = await loadOwn(dir);

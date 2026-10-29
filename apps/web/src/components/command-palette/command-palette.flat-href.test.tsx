@@ -36,7 +36,7 @@ afterEach(async () => {
 describe('CommandPalette — 앵커 목적지는 현재 프로젝트(?p=)를 싣는다(#4231 4차 B)', () => {
   it.each([
     ['스프린트로 이동', '/sprints?p=proj-1'],
-    ['회고로 이동', '/retro?p=proj-1'],
+    ['에픽으로 이동', '/epics?p=proj-1'],
   ])('⭐%s → %s', async (label, href) => {
     const { CommandPalette } = await import('./command-palette');
     await act(async () => {

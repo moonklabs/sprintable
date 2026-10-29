@@ -74,10 +74,18 @@ function realRoutes(dir = APP, out: string[] = []): string[] {
   return out.sort();
 }
 
-type Kind = 'table' | 'detail' | 'workTab' | 'noTopBarTitle';
+type Kind = 'table' | 'detail' | 'workTab' | 'noTopBarTitle' | 'withdrawing';
+
+/**
+ * story #4810 (OPEN-ZERO ⑦, PO order: the nav PR goes before the screen-withdrawal PRs) — the 회고 · 가설 tabs left 「일감」 ahead of their
+ * routes, so these two pages are no longer a 일감 tab and still fill the top bar. They are listed here only until the PR that deletes the
+ * route (4807 retro, 4811 hypotheses) — the stale check below fails if an entry outlives its page, so that PR must delete the line.
+ */
+const WITHDRAWING_ROUTES = new Set<string>(['[ws]/[proj]/retro', '[ws]/[proj]/hypotheses']);
 
 function classify(route: string): { kind: Kind } | { kind: 'unclassified'; slotIn: string } {
   if (route in FLAT_ROUTE_TOP_BAR) return { kind: 'table' };
+  if (WITHDRAWING_ROUTES.has(route)) return { kind: 'withdrawing' };
   const segments = route.split('/');
   const rest = route.startsWith('[ws]/[proj]/') ? segments.slice(2) : segments;
   if (rest.some((s) => s.startsWith('['))) return { kind: 'detail' };
@@ -87,6 +95,11 @@ function classify(route: string): { kind: Kind } | { kind: 'unclassified'; slotI
 }
 
 describe('상단바 폴백 표 — 실제 라우트 전수(story #4326 · 까디르 4688)', () => {
+  it('story #4810 — 걷는 중 목록(WITHDRAWING_ROUTES)의 항목은 전부 아직 실제 라우트다(화면이 걷힌 PR이 그 줄을 지운다)', () => {
+    const routes = new Set(realRoutes());
+    expect([...WITHDRAWING_ROUTES].filter((r) => !routes.has(r))).toEqual([]);
+  });
+
   it('따라가기 기준점 — 실행 목록은 TopBarSlot에 닿고(양성) · 멤버 화면은 안 닿는다(음성) · 문서는 자기 layout으로 닿는다', () => {
     expect(routeReachesTopBarSlot('organization/workforce/runs'), '양성 대조').not.toBeNull();
     expect(routeReachesTopBarSlot('organization/members'), '음성 대조').toBeNull();

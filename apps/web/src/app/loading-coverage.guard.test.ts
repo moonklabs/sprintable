@@ -13,7 +13,7 @@
  * 1. 모든 목적지 경로가 app/ 아래 실제 page.tsx로 풀린다(라우트 그룹 `(…)` 통과) — 못 풀리면 RED(조용히 버리지 않는다).
  * 2. 그 page.tsx를 덮는 loading.tsx가 있고, 그 loading은 화면 읽기 프로그램에 상태를 알린다 — loading 파일 자체나 그것이 import한
  *    `@/components/…` 스켈레톤 소스에 `role="status"` · `aria-busy="true"` · `sr-only` 라벨 셋 다(이름이 아니라 실제 소스를 본다).
- * 3. 일감 프레임 여섯 경로(WorkspaceFrameTabs의 탭)의 탭 줄은 `[ws]/[proj]/layout.tsx`(WorkTabsFrame)가 **한 곳에서** 쥔다(story #4291) —
+ * 3. 일감 프레임 넷 경로(WorkspaceFrameTabs의 탭 — story #4810으로 회고 · 가설 걷힘)의 탭 줄은 `[ws]/[proj]/layout.tsx`(WorkTabsFrame)가 **한 곳에서** 쥔다(story #4291) —
  *    레이아웃은 형제 탭 이동에서 다시 그려지지 않아 로딩 경계가 떠도 탭 줄이 남는다. 그래서 자기 loading.tsx는 몸(`<WorkspaceFrameLoading />`)만
  *    그리고, `<WorkspaceFrameTabs`를 그리는 소스는 그 띠 하나뿐이다(화면 · 로더가 다시 품으면 탭 줄이 두 줄 · 자리가 다시 갈린다).
  * 4. 스켈레톤이 도착 페이지와 같은 폭 · 여백(유나 판정) — 목적지 전수를 EXPECTED_CONTAINERS(컨테이너 + 그 선언 파일) · NO_CONTAINER(이유)
@@ -145,17 +145,16 @@ function announcesStatus(loadingFile: string): boolean {
 }
 
 // 판마다 따로 대조한다(까디르 검수 P2 — 합집합 하나로 대조하면 OFF/ON이 뒤바뀌어도 통과했다). 늘거나 빠지면 여기 고치고 loading.tsx를 같이 확인.
+// story #4810 (OPEN-ZERO ⑦) — 채널 · 사이트 글 축(콘텐츠 · 채널 글 · 채널 연결 · 연산 커넥터 · 콘텐츠 규칙 · 결과)과 이벤트 · 루프 목적지가 내비에서 걷혔다.
 const EXPECTED_OFF = [
-  '/activity', '/chats', '/content', '/content/channel-posts', '/inbox', '/more', '/org-briefing',
-  '/organization/channels', '/organization/content-rules', '/organization/events', '/organization/generation-connectors',
-  '/organization/insights-board', '/organization/members', '/organization/roles', '/organization/trust', '/organization/workforce',
-  '/settings', 'resource:artifacts', 'resource:docs', 'resource:flow', 'resource:goals', 'resource:loops', 'resource:storage',
+  '/activity', '/chats', '/inbox', '/more', '/org-briefing',
+  '/organization/members', '/organization/roles', '/organization/trust', '/organization/workforce',
+  '/settings', 'resource:artifacts', 'resource:docs', 'resource:flow', 'resource:goals', 'resource:storage',
 ].sort();
 const EXPECTED_ON = [
-  '/activity', '/chat', '/connect-rules', '/content', '/content/channel-posts', '/inbox', '/more',
-  '/organization/channels', '/organization/content-rules', '/organization/events', '/organization/generation-connectors',
-  '/organization/insights-board', '/organization/members', '/organization/roles', '/organization/trust', '/organization/workforce',
-  '/settings', '/today', 'resource:artifacts', 'resource:docs', 'resource:goals', 'resource:loops', 'resource:storage', 'resource:work-list',
+  '/activity', '/chat', '/connect-rules', '/inbox', '/more',
+  '/organization/members', '/organization/roles', '/organization/trust', '/organization/workforce',
+  '/settings', '/today', 'resource:artifacts', 'resource:docs', 'resource:goals', 'resource:storage', 'resource:work-list',
 ].sort();
 
 // 목적지 전수의 «페이지 컨테이너» 표(유나 «스켈레톤 = 페이지 컨테이너» · 까디르 검수 P2 — 첫 className만 · 조상 loader 건너뜀 · 하한 8 대신 목록 대조).
@@ -164,13 +163,6 @@ const EXPECTED_CONTAINERS: Record<string, { source: string; container: string }>
   '/organization/members': { source: '(authenticated)/organization/members/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-3 p-6' },
   '/organization/roles': { source: '(authenticated)/organization/roles/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-3 p-6' },
   '/organization/trust': { source: '(authenticated)/organization/trust/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-3 p-6' },
-  '/organization/events': { source: '(authenticated)/organization/events/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-6 p-6' },
-  '/organization/channels': { source: '(authenticated)/organization/channels/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-6 p-6' },
-  '/organization/content-rules': { source: '(authenticated)/organization/content-rules/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-6 p-6' },
-  '/organization/generation-connectors': { source: '(authenticated)/organization/generation-connectors/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-6 p-6' },
-  '/organization/insights-board': { source: '(authenticated)/organization/insights-board/page.tsx', container: 'mx-auto w-full max-w-6xl space-y-6 p-6' },
-  '/content': { source: '(authenticated)/content/page.tsx', container: 'mx-auto w-full max-w-5xl space-y-6 p-6' },
-  '/content/channel-posts': { source: '(authenticated)/content/channel-posts/page.tsx', container: 'mx-auto w-full max-w-5xl space-y-6 p-6' },
   '/settings': { source: '(authenticated)/settings/page.tsx', container: 'w-full max-w-3xl mx-auto p-6' },
   '/org-briefing': { source: '../components/org-briefing/org-briefing-shell.tsx', container: 'mx-auto w-full max-w-4xl space-y-6 p-4 lg:p-6' },
   '/more': { source: '(authenticated)/more/page.tsx', container: 'flex flex-col p-4' },
@@ -189,7 +181,6 @@ const NO_CONTAINER: Record<string, string> = {
   'resource:flow': '일감 프레임 — 몸 스켈레톤 WorkspaceFrameLoading · 탭 줄은 레이아웃 띠(별 단언)',
   'resource:work-list': '일감 프레임 — 몸 스켈레톤 WorkspaceFrameLoading · 탭 줄은 레이아웃 띠(별 단언)',
   'resource:goals': '목표 전용 스켈레톤(EpicsSkeleton)',
-  'resource:loops': '실행 목록 전폭',
   'resource:storage': '스토리지 2단(폰 1단) 전폭',
 };
 
@@ -218,8 +209,8 @@ describe('story #4274 — 탭 · 메뉴 목적지 loading.tsx 전수(v3 플래�
     expect(problems).toEqual([]);
   });
 
-  it('⭐일감 프레임 여섯 경로: 자기 loading.tsx는 몸 스켈레톤(<WorkspaceFrameLoading />)만 · 탭 줄은 품지 않음', () => {
-    expect(WORKSPACE_FRAME_TABS.length).toBeGreaterThanOrEqual(6);
+  it('⭐일감 프레임 넷 경로: 자기 loading.tsx는 몸 스켈레톤(<WorkspaceFrameLoading />)만 · 탭 줄은 품지 않음', () => {
+    expect(WORKSPACE_FRAME_TABS.length).toBeGreaterThanOrEqual(4);
     const problems: string[] = [];
     for (const tab of WORKSPACE_FRAME_TABS) {
       const own = join(APP_ROOT, '(authenticated)', '[ws]', '[proj]', tab.path, 'loading.tsx');

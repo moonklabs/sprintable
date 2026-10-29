@@ -46,13 +46,13 @@ describe('MorePage — flat 링크 `?p=`(story #4226)', () => {
   });
 
   // story #4274(유나 실측 · PO) — resource 항목이 bare `/goals`면 proxy 307 동안 로딩 경계가 설 자리가 없어 «전체» 화면이 1.5초 그대로였다.
-  it('⭐resource 항목(목표 · 문서 · 루프 …)은 프로젝트가 정해지면 `/{ws}/{proj}/{자원}` 직접 주소 — flat 리다이렉트 없음', async () => {
+  it('⭐resource 항목(목표 · 문서 …)은 프로젝트가 정해지면 `/{ws}/{proj}/{자원}` 직접 주소 — flat 리다이렉트 없음', async () => {
     const { NAV_GROUPS, LEGACY_NAV_ITEMS } = await import('@/lib/nav-config');
     const resourcePaths = [...NAV_GROUPS.flatMap((g) => g.items), ...LEGACY_NAV_ITEMS].filter((i) => i.kind === 'resource').map((i) => i.path);
     const hrefs = await hrefsOfMenu();
     const shown = resourcePaths.filter((p) => hrefs.includes(`/ws-1/proj-1/${p}`));
     expect(shown.length, '메뉴에 보이는 resource 항목이 직접 주소로').toBeGreaterThanOrEqual(3);
-    expect(shown).toEqual(expect.arrayContaining(['goals', 'docs', 'loops']));
+    expect(shown).toEqual(expect.arrayContaining(['goals', 'docs']));
     for (const p of resourcePaths) expect(hrefs, `bare /${p}`).not.toContain(`/${p}`);
   });
 

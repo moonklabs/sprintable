@@ -15,8 +15,8 @@ import { LEGACY_NAV_ITEMS, VISIBLE_LEGACY_NAV_ITEMS, groupVisibleLegacyByTarget,
 // story #3989(「일감」 흡수 3/N) — docs·artifacts는 work→knowledge로 재배정(PO 확定,
 // worklist-6item-absorption doc §검증1 — 연결분만 일감, 전수 라이브러리는 지식 축).
 const EXPECTED_TARGET_BY_ID: Record<string, AbsorbTarget> = {
-  goals: 'work', loops: 'work', content: 'work', 'channel-posts': 'work',
-  'org-trust': 'connect', 'org-members': 'settings', 'org-workforce': 'connect', 'org-roles': 'settings', 'org-events': 'connect',
+  goals: 'work',
+  'org-trust': 'connect', 'org-members': 'settings', 'org-workforce': 'connect', 'org-roles': 'settings',
   docs: 'knowledge', artifacts: 'knowledge', storage: 'knowledge',
   activity: 'history',
   settings: 'settings',
