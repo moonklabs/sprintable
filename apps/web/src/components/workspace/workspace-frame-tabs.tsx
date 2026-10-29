@@ -18,16 +18,7 @@ const TABS = [
   { key: 'board', labelKey: 'board', path: 'flow' },
   { key: 'sprints', labelKey: 'sprints', path: 'sprints' },
   { key: 'epic', labelKey: 'epic', path: 'epics' },
-  // story #3845(UX-v3·FE 5·일감 2, 페드루 PO 確定 §③ⓑ 2026-09-14) — 「일감」 흡수 지도
-  // (doc a699be00 §②)의 「회고」 탭. board/sprints/epic과 동형(실 라우트 /retro 보존,
-  // 이 프레임은 그 위에 얹힌 얕은 nav일 뿐 — WorkspaceFrameTabs 파일 상단 주석 참고).
-  // labelKey 'retro'는 nav-config.ts::LEGACY_NAV_ITEMS가 이미 쓰던 값 재사용(사본 0).
-  { key: 'retro', labelKey: 'retro', path: 'retro' },
-  // story #3989(「일감」 흡수 3/N, PO 확定 — worklist-6item-absorption doc §②-1) — 전수
-  // 가설 집. 다른 탭과 동형(실 라우트 /hypotheses 보존, 이 프레임은 얕은 nav일 뿐).
-  // labelKey 'hypothesis'는 flow.ladderName_earth와 같은 낱말(「가설」)이라 값만 맞추고
-  // 키는 새로 둔다(namespace가 다름 — 사본이 아니라 같은 사실·다른 화면).
-  { key: 'hypothesis', labelKey: 'hypothesis', path: 'hypotheses' },
+  // story #4810 — 「회고」 · 「가설」 탭은 걷혔다(화면은 4807 · 4811이 걷는다) — 지워지는 화면으로 가는 링크를 먼저 뺀다.
 ] as const;
 
 export type WorkspaceFrameTabKey = (typeof TABS)[number]['key'];

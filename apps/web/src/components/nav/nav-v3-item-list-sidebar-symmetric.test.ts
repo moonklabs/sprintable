@@ -44,11 +44,6 @@ describe('NavV3ItemList ↔ app-sidebar 대칭(story #4004 AC2) — 플래그 8�
     expect(dest.work.path).toBe(sidebarItemPath(flags, 'dev', 'board'));
   });
 
-  it.each(COMBOS)('결과(results) — org-insights-board 항목과 같은 경로($todayV3Enabled/$chatV3Enabled/$connectRulesV3Enabled)', (flags) => {
-    const dest = resolveNavV3Destinations(flags);
-    expect(dest.results.path).toBe(sidebarItemPath(flags, 'results', 'org-insights-board'));
-  });
-
   it.each(COMBOS)('연결·규칙(connectRules) — connectRulesV3Enabled일 때만 connect-rules-v3 항목과 같은 경로($todayV3Enabled/$chatV3Enabled/$connectRulesV3Enabled)', (flags) => {
     const dest = resolveNavV3Destinations(flags);
     if (!flags.connectRulesV3Enabled) {

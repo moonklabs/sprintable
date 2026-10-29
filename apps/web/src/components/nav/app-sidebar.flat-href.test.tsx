@@ -32,7 +32,7 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); });
 
 describe('AppSidebar — flat 링크 `?p=`(story #4226)', () => {
-  it('⭐대화 카드(/chats)와 static 항목(/org-briefing · /organization/insights-board)은 `?p=`를 싣는다', async () => {
+  it('⭐대화 카드(/chats)와 static 항목(/org-briefing)은 `?p=`를 싣는다', async () => {
     await act(async () => {
       root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><SidebarProvider>
         <AppSidebar projectMemberships={[]} chatUnreadTotal={0} />
@@ -41,7 +41,6 @@ describe('AppSidebar — flat 링크 `?p=`(story #4226)', () => {
     const hrefs = [...container.querySelectorAll('a')].map((a) => a.getAttribute('href') ?? '');
     expect(hrefs).toContain('/chats?p=P');
     expect(hrefs).toContain('/org-briefing?p=P');
-    expect(hrefs).toContain('/organization/insights-board?p=P');
     expect(hrefs).not.toContain('/chats');
     expect(hrefs).not.toContain('/org-briefing');
   });

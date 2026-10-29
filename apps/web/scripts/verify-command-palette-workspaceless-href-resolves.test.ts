@@ -19,7 +19,7 @@
  *   ① 변환 표(MIGRATED_RESOURCES/RENAMED_RESOURCES) — **첫 세그먼트**만(레거시 표 자체가
  *      1세그먼트 리소스명 키라 그렇다, `/work-list`류).
  *   ② 표에 없으면 **전체 경로**가 실 `page.tsx`(라우트 그룹 `(authenticated)` 포함)와
- *      대응하는지(`/organization/channels`류 — 여러 세그먼트라 첫 세그먼트만 보면 오판).
+ *      대응하는지(`/organization/trust`류 — 여러 세그먼트라 첫 세그먼트만 보면 오판).
  *
  * `PARITY_TEST_DATABASE_URL`/`ALEMBIC_DATABASE_URL` 불요(순수 정적 스캔).
  */
@@ -102,14 +102,14 @@ describe('command-palette — 워크스페이스 없는 href 전부가 실제로
     expect(resolves('/this-path-does-not-exist-story-4013', MIGRATED_RESOURCES, RENAMED_RESOURCES)).toBe(false);
   });
 
-  it('여러 세그먼트 static nav 경로(예: /organization/channels)는 첫 세그먼트가 아니라 전체 경로로 판정된다', () => {
+  it('여러 세그먼트 static nav 경로(예: /organization/trust)는 첫 세그먼트가 아니라 전체 경로로 판정된다', () => {
     // 'organization'은 MIGRATED_RESOURCES/RENAMED_RESOURCES 어디에도 없다(네임스페이스일
     // 뿐 리소스명이 아님) — 첫 세그먼트만 봤다면 이 경로는 항상 RED였을 것.
     expect('organization' in MIGRATED_RESOURCES).toBe(false);
     expect('organization' in RENAMED_RESOURCES).toBe(false);
-    const orgChannelsItem = workspacelessCandidates().find((item) => item.href === '/organization/channels');
-    expect(orgChannelsItem, 'org-channels가 nav-config.ts에서 이름이 바뀌었으면 이 테스트도 갱신').toBeDefined();
-    expect(resolves(orgChannelsItem!.href, MIGRATED_RESOURCES, RENAMED_RESOURCES)).toBe(true);
+    const orgTrustItem = workspacelessCandidates().find((item) => item.href === '/organization/trust');
+    expect(orgTrustItem, 'org-trust가 nav-config.ts에서 이름이 바뀌었으면 이 테스트도 갱신').toBeDefined();
+    expect(resolves(orgTrustItem!.href, MIGRATED_RESOURCES, RENAMED_RESOURCES)).toBe(true);
   });
 
   it('CHANGES② 고정 — 컴포넌트 ITEMS useMemo 본문 안에는 NAV_GROUPS.flatMap 목록 조립이 없다(deriveNavigateItems 안에만 있어야 함)', () => {

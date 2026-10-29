@@ -201,7 +201,14 @@ export const EXEMPT_TARGETS = new Set<string>([...KNOWN_NON_PROJECT_ROUTES, ...R
 // 남은" 항목을 잡는다. `entryWithoutRoute:memos`는 story #2379가, `routeWithoutEntry:
 // mockups`는 story #2378이 실제로 고치고 여기서 뺐다 — 둘 다 staleness 체크가 그 자리에서
 // 값을 했다(빈 Set이 된 것 자체가 "지금 아는 채무 0건"이라는 사실이다).
-export const GRANDFATHER_BASELINE = new Set<string>([]);
+// story #4810 (OPEN-ZERO ⑦, PO order 2026-10-29: the nav PR goes BEFORE the screen-withdrawal PRs so no link is left pointing at a deleted
+// screen) — the 회고 (retro), 루프 (loops) and 가설 (hypotheses) entries leave the nav ahead of their routes. These two keys are meant to be deleted by the
+// PRs that delete the routes (4807 retro, 4809 loops, 4811 hypotheses); the staleness check below fails if a key stays after its route is gone.
+export const GRANDFATHER_BASELINE = new Set<string>([
+  'routeWithoutEntry:retro',
+  'routeWithoutEntry:loops',
+  'routeWithoutEntry:hypotheses',
+]);
 
 // ── 라우트 실존 — [ws]/[proj]/<resource>/page.tsx 직접 존재 ────────────────────
 

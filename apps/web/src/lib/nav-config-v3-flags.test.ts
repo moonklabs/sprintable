@@ -24,7 +24,6 @@ describe('resolveNavGroups — story #4003 AC2', () => {
   it('todayV3Enabled — org-briefing 항목의 path만 /today로 바뀌고 나머지는 무변', () => {
     const resolved = resolveNavGroups({ ...DEFAULT_NAV_V3_FLAGS, todayV3Enabled: true });
     expect(findItem(resolved, 'org-briefing')?.path).toBe('/today');
-    expect(findItem(resolved, 'org-channels')?.path).toBe('/organization/channels');
   });
 
   it('⭐임의 플래그 하나라도 ON — 「일감」(board) path가 work-list로(단일 플래그 의존 0)', () => {
@@ -37,28 +36,16 @@ describe('resolveNavGroups — story #4003 AC2', () => {
     }
   });
 
-  it('결과(org-insights-board) — 플래그 무관 고정 경로(분기 없음, 단일 소스가 명시적으로 씀)', () => {
-    const resolved = resolveNavGroups({ todayV3Enabled: true, chatV3Enabled: true, connectRulesV3Enabled: true });
-    expect(findItem(resolved, 'org-insights-board')?.path).toBe('/organization/insights-board');
-  });
-
-  it('connectRulesV3Enabled — connect-rules 그룹 맨 앞에 신규 항목이 추가되고 옛 3항목은 그대로 남는다(옛 진입점 유지)', () => {
-    // story #4003 rebase(develop 대비, 2026-09-22) — org-generation-connectors가
-    // 이 브랜치가 갈라진 뒤 nav-config.ts connect-rules 그룹에 새로 추가됐다(무관
-    // 변경, 이 PR 스코프 밖) — 원본 NAV_GROUPS 상수와의 통짜 대조 원칙 그대로
-    // 유지하며 기대값만 현재 develop 실제 순서로 갱신.
+  it('connectRulesV3Enabled — connect-rules 그룹엔 신규 «모아 보기» 항목만 남는다(story #4810: 채널 연결 · 연산 커넥터 · 콘텐츠 규칙 걷힘)', () => {
     const resolved = resolveNavGroups({ ...DEFAULT_NAV_V3_FLAGS, connectRulesV3Enabled: true });
     const group = resolved.find((g) => g.id === 'connect-rules');
-    expect(group?.items.map((i) => i.id)).toEqual([
-      'connect-rules-v3', 'org-channels', 'org-generation-connectors', 'org-content-rules',
-    ]);
+    expect(group?.items.map((i) => i.id)).toEqual(['connect-rules-v3']);
     expect(findItem(resolved, 'connect-rules-v3')?.path).toBe('/connect-rules');
   });
 
-  it('connectRulesV3Enabled=false — connect-rules 그룹엔 옛 3항목만(신규 항목 노출 0)', () => {
+  it('connectRulesV3Enabled=false — connect-rules 그룹엔 정적 항목이 없다(story #4810: 채널 연결 · 연산 커넥터 · 콘텐츠 규칙 걷힘)', () => {
     const resolved = resolveNavGroups(DEFAULT_NAV_V3_FLAGS);
-    const group = resolved.find((g) => g.id === 'connect-rules');
-    expect(group?.items.map((i) => i.id)).toEqual(['org-channels', 'org-generation-connectors', 'org-content-rules']);
+    expect(resolved.find((g) => g.id === 'connect-rules')?.items).toEqual([]);
   });
 
   it('⭐전부 ON — 항목 전체 신 경로 동시 적용(교차 오염 0)', () => {

@@ -63,11 +63,11 @@ async function mount(flags?: { todayV3Enabled?: boolean; chatV3Enabled?: boolean
 }
 
 describe('ConnectRulesV3Screen', () => {
-  it('제목·nav 5개·검색창이 렌더된다', async () => {
+  it('제목·nav 4개·검색창이 렌더된다(story #4810: 「결과」 항목 걷힘)', async () => {
     fetchMock.mockImplementation(async () => ({ ok: true, status: 200, json: async () => ({ data: [] }) }));
     await mount();
     expect(container.querySelector('h1')?.textContent).toBe('연결·규칙');
-    expect(container.querySelectorAll('a[data-testid^="nav-v3-item-"]').length).toBe(5);
+    expect(container.querySelectorAll('a[data-testid^="nav-v3-item-"]').length).toBe(4);
     expect(container.querySelector('[data-testid="nav-v3-item-connectRules"]')?.className).toContain('bg-sidebar-active-fill');
   });
 

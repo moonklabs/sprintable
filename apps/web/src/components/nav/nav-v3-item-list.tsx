@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { Link2, MessageSquare, Newspaper, TrendingUp, Workflow } from 'lucide-react';
+import { Link2, MessageSquare, Newspaper, Workflow } from 'lucide-react';
 import { resolveNavV3Destinations, type NavV3Flags } from '@/lib/nav-v3-destinations';
 import { destHref } from '@/components/nav/mobile-tab-bar';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -30,7 +30,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
  * 링은 현행 v3에 없던 신규(`focus-visible:ring-2 focus-visible:ring-ring
  * focus-visible:ring-offset-2`).
  */
-export type NavV3ItemKey = 'today' | 'chats' | 'work' | 'results' | 'connectRules';
+export type NavV3ItemKey = 'today' | 'chats' | 'work' | 'connectRules';
 
 interface NavV3ItemDef {
   key: NavV3ItemKey;
@@ -45,7 +45,6 @@ const NAV_V3_ITEMS: readonly NavV3ItemDef[] = [
   { key: 'today', labelKey: 'zoneNow', icon: Newspaper },
   { key: 'chats', labelKey: 'chats', icon: MessageSquare },
   { key: 'work', labelKey: 'zoneDev', icon: Workflow },
-  { key: 'results', labelKey: 'navResults', icon: TrendingUp },
   { key: 'connectRules', labelKey: 'zoneConnectRules', icon: Link2 },
 ];
 

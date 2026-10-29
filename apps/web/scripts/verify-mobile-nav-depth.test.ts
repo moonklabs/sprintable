@@ -69,16 +69,18 @@ describe('실 NAV_GROUPS ∪ LEGACY_NAV_ITEMS — story #2684 AC3 판별자, sto
   // ITEMS 18→16, 총량 23→21(nav-config-descriptions.test.ts와 동일 축, 동일 사유).
   // story #4116(2026-09-21) — org-generation-connectors 신설로 21→22(동일 축 동일 사유).
   // story #4183(2026-09-23) — org-memory 걷힘으로 22→21(동일 축 동일 사유).
-  it('전 21항목(챗 center 제외)이 depth ≤2다(회귀 0 — 도달불가 0건 포함)', () => {
+  // story #4810 (OPEN-ZERO ⑦) — 채널 · 사이트 글 축 6항목 + loops + org-events 걷힘으로 21→13(동일 축 동일 사유).
+  it('전 13항목(챗 center 제외)이 depth ≤2다(회귀 0 — 도달불가 0건 포함)', () => {
     const entries = computeMobileDepths(groups, MOBILE_HUB_EXCLUDE_IDS, hubGroupIds);
-    expect(entries).toHaveLength(21);
+    expect(entries).toHaveLength(13);
     expect(findDepthViolations(entries, MAX_MOBILE_DEPTH)).toEqual([]);
   });
 
-  it('이벤트(판별자 자체, 이제 LEGACY_NAV_ITEMS 소속)는 depth 2다 — /more 「그 밖의 화면」 경유', () => {
+  // story #4810 — 판별자였던 이벤트(org-events)가 걷혀, 같은 «그 밖의 화면» 경유 항목인 신뢰 센터(org-trust)로 갈아 쥔다.
+  it('신뢰 센터(LEGACY_NAV_ITEMS 소속)는 depth 2다 — /more 「그 밖의 화면」 경유', () => {
     const entries = computeMobileDepths(groups, MOBILE_HUB_EXCLUDE_IDS, hubGroupIds);
-    const events = entries.find((e) => e.id === 'org-events');
-    expect(events?.depth).toBe(2);
+    const trust = entries.find((e) => e.id === 'org-trust');
+    expect(trust?.depth).toBe(2);
   });
 
   // story #3824 — inbox는 이제 LEGACY_NAV_ITEMS 소속이지만 MOBILE_HUB_EXCLUDE_IDS엔 여전히

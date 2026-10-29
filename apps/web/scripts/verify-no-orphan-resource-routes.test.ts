@@ -159,8 +159,10 @@ describe('AC7 — 실제 저장소 첫 스캔의 검거(GRANDFATHER_BASELINE)이
   // story #2378(2026-08-01) — routeWithoutEntry:mockups는 실제로 고쳐져(라우트 자체를
   // 제거 + proxy.ts RENAMED_RESOURCES로 도착지 이관) baseline에서 빠졌다. story #2379가
   // entryWithoutRoute:memos를 먼저 뺐던 것과 같은 자리 — 이제 둘 다 빠져 Set이 빈다.
-  it('GRANDFATHER_BASELINE 크기는 정확히 0이다(둘 다 고쳐졌다 — 새 항목은 PO 승인 없이 조용히 못 들어온다)', () => {
-    expect(GRANDFATHER_BASELINE.size).toBe(0);
+  // story #4810 — PO 순서 지시(내비 PR이 화면 걷기 PR보다 먼저)로 retro · loops 두 키가 «라우트 삭제 PR이 지울 때까지만» 들어와 있다.
+  // 그 PR들(4807 · 4809 · 4811)이 키를 지우면 이 기대값은 0으로 돌아간다.
+  it('GRANDFATHER_BASELINE 크기는 정확히 3이다(retro · loops · hypotheses — 라우트가 걷히는 PR이 지운다. 새 항목은 PO 승인 없이 조용히 못 들어온다)', () => {
+    expect([...GRANDFATHER_BASELINE].sort()).toEqual(['routeWithoutEntry:hypotheses', 'routeWithoutEntry:loops', 'routeWithoutEntry:retro']);
     expect(GRANDFATHER_BASELINE.has('routeWithoutEntry:mockups')).toBe(false);
     expect(GRANDFATHER_BASELINE.has('entryWithoutRoute:memos')).toBe(false);
   });

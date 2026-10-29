@@ -30,8 +30,8 @@ export interface NavTitlePairing {
 
 // story #5f709b45 — 손 확認 5자리(못 잰 3 중 inbox·board는 이미 일치라 대상 제외, standup은
 // 신규 편입). org-members는 제목 자체가 없어(섹션 h2만) 이 표 밖(별건).
+// story #4810 — 회고(retro) 항목이 nav에서 걷혀(nav.retro 키 삭제) 자리가 5→4.
 export const NAV_TITLE_PAIRINGS: readonly NavTitlePairing[] = [
-  { navItemId: 'retro', navKey: 'retro', titleNamespace: 'retro', titleKey: 'title' },
   { navItemId: 'standup', navKey: 'standup', titleNamespace: 'standup', titleKey: 'title' },
   { navItemId: 'org-trust', navKey: 'orgTrust', titleNamespace: 'organization', titleKey: 'trustSlotTitle' },
   { navItemId: 'docs', navKey: 'docs', titleNamespace: 'docs', titleKey: 'title' },
