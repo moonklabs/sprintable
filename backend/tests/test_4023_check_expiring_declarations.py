@@ -297,8 +297,15 @@ def test_real_repo_all_three_files_and_five_sections_are_actually_present():
     assert result.errors == [], f"이 축이 대상을 못 보고 있음: {result.errors}"
 
 
-def test_real_repo_currently_has_no_expiring_declarations():
-    """story #4023 AC1 반영 후 실 레포 3파일 전부 활성 until 항목 0건이므로 지금은 조용하다
-    — 메커니즘 자체는 위 양성 대조가 증명한다."""
+def test_real_repo_has_no_expiring_declarations_but_the_known_ones():
+    """story #4023 AC1 반영 후 실 레포 3파일 전부 활성 until 항목 0건이라 조용했다 — 메커니즘 자체는 위 양성 대조가 증명한다.
+
+    story 4796 (2026-10-29): `sprintable-backend-prod` is declared a pin on purpose (CUTOVER-prod step 4c, until 2026-11-06). The warning for it is the notice
+    this axis exists to give (an annotation, exit 0), and it appears or not depending on the date (inside the last 14 days of its `until`): a test that expected
+    `warnings == []` would be red on one calendar day and green on another for a reason that is not a defect. So: nothing is expiring **except the known
+    declarations** — a new expiring declaration of anything else is still caught here (the point of the test), and the list below is the place to name the next
+    known one (with the story that made it)."""
+    known = ("sprintable-backend-prod",)   # story 4796: the forwarder of CUTOVER-prod step 4c
     result = mod.collect_expiry_findings()
-    assert result.warnings == []
+    unexpected = [(path, msg) for path, msg in result.warnings if not any(name in msg for name in known)]
+    assert unexpected == [], unexpected

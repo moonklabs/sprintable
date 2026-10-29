@@ -308,9 +308,9 @@ def test_the_backend_prod_pin_of_step_4c_is_declared_and_says_what_not_to_do():
     mod = _load()
     pins, _ = mod._load_allowlist()
     entry = pins["sprintable-backend-prod"]
-    assert str(entry["until"]) == "2026-11-06" and entry["declared_by"], entry
+    assert str(entry["until"]) == "2026-11-27" and entry["declared_by"], entry   # a day to judge again, not a day to delete: the guard takes 30 days at most
     reason = " ".join(str(entry["reason"]).split())
-    for token in ("CUTOVER-prod 4c", "--to-latest", "사고", "508", "8c 뒤에 지우지 않는다", "12단계 1번 블록"):
+    for token in ("CUTOVER-prod 4c", "--to-latest", "사고", "508", "8c 뒤에 지우지 않는다", "REMOVALS-prod", "다시 판단할 날", "12단계 1번 블록"):
         assert token in reason, token
     # and the guard accepts exactly the live shape of the evening (the real revision 100% by name, the forwarder revision only as a tag at 0%)
     from datetime import date
