@@ -88,6 +88,11 @@ jobs:
             echo "backend_min_instances=1" >> "$GITHUB_OUTPUT"
             # story 4786: the prod branch states its minimums itself (cloudbuild.yaml guard-prod-mins fails a prod build without this).
             echo "mins_explicit=true" >> "$GITHUB_OUTPUT"
+            # story 4796 (AC4, deploy/vm/CUTOVER-prod.md «P3», PO 2026-10-28): prod runs on its VM after the move, so the prod build no longer builds the Cloud Run frontend, deploys the Cloud Run backend and frontend, or runs the
+            # Cloud SQL migrate job (the VM migrates itself); the images the VM bundle needs (backend, by digest) are still built and pushed. Exactly "true" skips (cloudbuild.yaml `_CLOUD_RUN_APP_SKIP`, the same six steps as dev).
+            # Merge this ONLY after the cutover's unfreeze (step 8): a prod push before it would stop deploying Cloud Run while Cloud Run still serves. Undo = delete this line (or "false"): the next prod build deploys Cloud Run again,
+            # which serves nothing until the pass-through points at it (RUNBOOK §7c undo).
+            echo "cloud_run_app_skip=true" >> "$GITHUB_OUTPUT"
             # ⚠️ maxScale 18 (#2448 앱티어 right-size, 2026-08-04) — §6 규모 검증 부하테스트(warm18)와
             # 라이브(rev 00274 수동복원)에서 실증된 값. 과거 maxScale 5 는 앱→primary «직결» 커넥션 예산
             # (5×(pool+overflow)+raw ≤ max_conn 200)에서 나온 값이었으나, 그 전제는 #2445 Phase1 prod
