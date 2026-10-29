@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -46,7 +47,8 @@ def has(name): return name in a
 j = " ".join(a)
 REH_NAME = "sprintable-rehearsal-forwarder"
 if a[:3] == ["run", "services", "describe"] and a[3] == REH_NAME:
-    if not w.get("reh_exists"): sys.stderr.write("not found\n"); sys.exit(1)
+    if os.environ.get("REH_ERR"): sys.stderr.write("ERROR: (gcloud.run.services.describe) HTTPError 503: backend unavailable\n"); sys.exit(1)
+    if not w.get("reh_exists"): sys.stderr.write("ERROR: (gcloud.run.services.describe) Cannot find service [sprintable-rehearsal-forwarder]\n"); sys.exit(1)
     if "labels.rehearsal" in flag("--format", ""): sys.stdout.write(w.get("reh_label", ""))
     sys.exit(0)
 if a[:3] == ["run", "services", "describe"] and a[3] != "sprintable-backend-prod":
@@ -541,19 +543,28 @@ def test_the_rehearsal_reads_prods_network_shape_makes_a_closed_service_and_stop
     # a service of that name exists already (an old rehearsal, or another service): it is left alone
     p, calls, world, _ = _go(a1, _fresh(tmp_path, "a1-exists"), state={"reh_exists": True, "reh_label": "something-else"})
     assert not _verbs(calls, "run deploy") and "exists already" in p.stdout and world["reh_label"] == "something-else"
-    # the throwaway carries the label that A4 asks for
-    _, _, world, _ = _go(a1, _fresh(tmp_path, "a1-label"))
-    assert world["reh_exists"] is True and world["reh_label"] == "forwarder-4c"
+    # any answer but «Cannot find service» (a transient error, a permission) is «could not tell»: nothing is made
+    p, calls, world, _ = _go(a1, _fresh(tmp_path, "a1-error"), extra={"REH_ERR": "1"})
+    assert not _verbs(calls, "run deploy") and "could not tell" in p.stdout and not world.get("reh_exists")
+    # the throwaway carries a new id that is also written in the folder, and A4 asks for that id
+    root = _fresh(tmp_path, "a1-label")
+    _, _, world, work = _go(a1, root)
+    rid = (work / "rehearsal-id.txt").read_text().strip()
+    assert world["reh_exists"] is True and world["reh_label"] == rid and re.fullmatch(r"r\d{14}", rid), rid
     # the read of the network shape is of prod's backend (the fake answers for no other service: a read of $REH would print an empty shape)
     assert "network: · subnet: · tags:" not in p.stdout
 
 
 def test_the_rehearsal_deletes_only_a_service_with_its_name(tmp_path: Path) -> None:
     a4 = _block_with("case \"$REH\" in sprintable-rehearsal-forwarder)")
-    p, calls, world, _ = _go(a4, _fresh(tmp_path, "ok"), extra={"REH": "sprintable-rehearsal-forwarder"}, state={"reh_exists": True, "reh_label": "forwarder-4c"})
+    mine = {"rehearsal-id.txt": "r20261029120000\n"}
+    p, calls, world, _ = _go(a4, _fresh(tmp_path, "ok"), extra={"REH": "sprintable-rehearsal-forwarder"}, state={"reh_exists": True, "reh_label": "r20261029120000"}, files=mine)
     assert _verbs(calls, "services delete") and "sprintable-rehearsal-forwarder" in _verbs(calls, "services delete")[0] and world["reh_exists"] is False
-    for name, state in (("unlabelled", {"reh_exists": True, "reh_label": ""}), ("other-label", {"reh_exists": True, "reh_label": "keep-me"}), ("missing", {"reh_exists": False})):
-        p, calls, world, _ = _go(a4, _fresh(tmp_path, "no-" + name), extra={"REH": "sprintable-rehearsal-forwarder"}, state=state)
+    cases = (("unlabelled", {"reh_exists": True, "reh_label": ""}, mine), ("other-label", {"reh_exists": True, "reh_label": "keep-me"}, mine), ("missing", {"reh_exists": False}, mine),
+             ("same-static-label-another-service", {"reh_exists": True, "reh_label": "forwarder-4c"}, mine),
+             ("no-id-file", {"reh_exists": True, "reh_label": "r20261029120000"}, {}), ("empty-id-file", {"reh_exists": True, "reh_label": ""}, {"rehearsal-id.txt": "\n"}))
+    for name, state, files in cases:
+        p, calls, world, _ = _go(a4, _fresh(tmp_path, "no-" + name), extra={"REH": "sprintable-rehearsal-forwarder"}, state=state, files=files)
         assert not _verbs(calls, "services delete") and "refused" in p.stdout, name
     for name in ("sprintable-backend-prod", "", "sprintable-rehearsal-forwarder-x"):
         p, calls, _, _ = _go(a4, _fresh(tmp_path, "no-" + (name or "empty")), extra={"REH": name})
