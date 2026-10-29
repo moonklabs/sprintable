@@ -38,7 +38,7 @@ def _block_with(marker: str) -> str:
 
 def test_the_file_records_what_the_long_requests_are_and_what_is_still_to_be_shown() -> None:
     five = DOC.split("## 5. What the long requests are")[1].split("## Questions")[0]
-    for token in ("888 requests over 30 s add up to 267,288 s (0.442 concurrent)", "all of them `GET /mcp` of one client", "no byte for 6 seconds", "no `send_*` of a notification", "answer the GET with **405**", "`MCP_HTTP_GET_STREAM=true`",
+    for token in ("888 requests over 30 s add up to 267,288 s (0.442 concurrent)", "all of them `GET /mcp` of one client", "no byte for 6 seconds", "the transport handler still serves a client's GET", "no `send_*` of a notification", "answer the GET with **405**", "`MCP_HTTP_GET_STREAM=true`",
                   "**Still to be shown (dev round, the product owner's hands):**", "per client per hour"):
         assert token in five, token
     # and the change it describes is in the source
