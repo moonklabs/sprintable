@@ -349,10 +349,13 @@ def test_the_takeover_step_has_the_realtime_host_line_and_the_declaration_names_
     assert "realtime: realtime.sprintable.ai" in env
     step = CUTOVER.split("## 6–7. The data and the takeover")[1].split("## 8.")[0]
     line = step.split("**The realtime host")[1].split("**Undo:**")[0]
-    for token in ("`realtime.sprintable.ai`", "dns-realtime-before.json", "DNS only", "`dev-realtime`", "dig +short realtime.sprintable.ai", "dig +short api.sprintable.ai", "prints `0`"):
+    for token in ("`realtime.sprintable.ai`", "dns-before-realtime.json", "`dns-before-cutover.json` of step 3", "DNS only", "`dev-realtime`", "dig +short realtime.sprintable.ai", "dig +short api.sprintable.ai",
+                  "by waiting, not by pushing", "an empty error log proves nothing", "first new attempt", "grep -E 'obtained|error'", "prints `200`", "do not reload or restart Caddy", "Waiting is the default"):
         assert token in line, token
-    assert "dns-realtime-before.json" in step.split("**Undo:**")[1].split("\n")[0] and "the old A" in step
+    assert "dns-before-realtime.json" in step.split("**Undo:**")[1].split("\n")[0] and "dns-realtime-before" not in step
     assert "| `dev-realtime` | A, DNS only | same A |" in RUNBOOK, "the shape it copies is the one RUNBOOK §4 states"
+    assert "{$API_HOST}, {$REALTIME_HOST} {" in (_ROOT / "deploy/vm/Caddyfile").read_text(), "the realtime host is served by the same site block as the API host, so its health route answers"
+    assert CUTOVER.count("dns-before-cutover.json") >= 2, "the record file it names the shape of is written by step 3 of the sheet"
 
 
 def test_the_buckets_lose_the_legacy_project_viewer_roles_in_the_runbook_and_the_real_gcloud_takes_the_lines(tmp_path: Path) -> None:
