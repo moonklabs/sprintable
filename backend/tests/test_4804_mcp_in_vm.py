@@ -38,7 +38,7 @@ def _block_with(marker: str) -> str:
 
 def test_the_file_states_the_premises_it_checks() -> None:
     table = DOC.split("## 1.")[1].split("## 2.")[0]
-    for token in ("**stateless Streamable HTTP** (`stateless_http=True`)", "**the event bridge is not started**", "**the backend's own image**", "`MCP_ALLOWED_HOSTS`", "**CPU throttling off**", "`mcp.sprintable.ai`", "16 MiB"):
+    for token in ("A fallback key can be configured (`AGENT_API_KEY`; the prod script of Cloud Run injects one from Secret Manager)", "**stateless Streamable HTTP** (`stateless_http=True`)", "**the event bridge is not started**", "**the backend's own image**", "`MCP_ALLOWED_HOSTS`", "**CPU throttling off**", "`mcp.sprintable.ai`", "16 MiB"):
         assert token in table, token
 
 
@@ -148,7 +148,9 @@ def _fake_world(tmp_path: Path, series: dict[str, list[float]]) -> dict[str, str
     (tmp_path / "series.json").write_text(json.dumps(series))
     for name, text in (
         ("gcloud", '#!/bin/sh\necho "gcloud $*" >> "$CALLS"\ncase "$*" in *print-access-token*) echo tok ;; esac\n'),
-        ("curl", '#!/bin/sh\necho "curl $*" >> "$CALLS"\nmetric=$(printf "%s\\n" "$*" | sed -n \'s/.*metric.type="\\([^"]*\\)".*/\\1/p\')\n'
+        ("curl", '#!/bin/sh\necho "curl $*" >> "$CALLS"\n# the list call of the Monitoring API needs a filter, an interval, an aggregation and view=FULL: without any of them it answers an error, as the real one does\n'
+                 'for need in "filter=" "interval.startTime=" "interval.endTime=" "aggregation.alignmentPeriod=" "aggregation.perSeriesAligner=" "view=FULL"; do case "$*" in *"$need"*) ;; *) echo \'{"error":{"code":400,"message":"missing parameter"}}\'; exit 0 ;; esac; done\n'
+                 'metric=$(printf "%s\\n" "$*" | sed -n \'s/.*metric.type="\\([^"]*\\)".*/\\1/p\')\n'
                  'python3 -c \'import json,sys; s=json.load(open(sys.argv[1])); v=s.get(sys.argv[2], []); print(json.dumps({"timeSeries":[{"points":[{"value":{"doubleValue":x}} for x in v]}]}))\' "$SERIES" "$metric"\n'),
     ):
         f = b / name
@@ -173,7 +175,7 @@ def test_the_monitoring_lines_read_the_fields_the_api_returns_and_summarise_them
             buf = ""
     assert len(docs) == 4, p.stdout
     assert docs[0]["hours"] == 3 and abs(docs[0]["mean"] - 0.99) < 1e-9 and docs[0]["max"] == 1.0
-    assert docs[1]["p99_max"] == 0.44 and docs[2]["max_concurrent"] == 5.0 and docs[3]["max_per_s"] == 3.5
+    assert docs[1]["hourly_p99_max"] == 0.44 and docs[2]["hourly_p99_max_concurrent"] == 5.0 and docs[3]["max_per_s"] == 3.5
     calls = Path(env["CALLS"]).read_text().splitlines()
     metrics = [re.search(r'metric.type="([^"]+)"', c).group(1) for c in calls if c.startswith("curl")]
     assert metrics == list(series), "the four metrics, in this order, for this service"
@@ -193,16 +195,16 @@ def test_the_request_log_lines_only_read_and_never_print_a_key() -> None:
     for line in block.splitlines():
         if "logging read" in line:
             assert "--format='value(" in line and "authorization" not in line.lower() and "requestUrl" not in line, line
-    assert 'httpRequest.latency>\\"30s\\"' in block, "a stateless server should have no request over 30 seconds"
+    assert 'httpRequest.requestMethod=\\"GET\\" AND httpRequest.latency>\\"30s\\"' in block and 'httpRequest.requestMethod=\\"POST\\" AND httpRequest.latency>\\"30s\\"' in block, "a held connection is a GET that lasts; a slow POST is counted apart so that it is not taken for one"
 
 
 # ── the decision ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def test_the_text_says_how_the_numbers_decide_and_what_the_design_is() -> None:
-    for token in ("**A. Billing, not a connection**", "--cpu-throttling", "--no-cpu-throttling", "**B. A held connection**", "a forwarder that holds the same streams is billed like the service it replaces",
-                  "**Fit**", "lowest** `available` memory", "256 MiB of margin", "48 MiB", "idle percentage", "above 30", "Nothing goes to `main` until the prod move and one day after it are over"):
+    for token in ("**A. Billing, not a connection**", "--cpu-throttling", "--no-cpu-throttling", "**B. A held connection**", "a forwarder that holds the same streams is active all day", "which are not lower per second than the instance-based ones", "**unmeasured**",
+                  "**Fit**", "lowest** `available` memory", "1.5 × the server's `hourly_p99_max`", "not a maximum", "256 MiB of margin", "48 MiB", "idle percentage", "above 30", "Nothing goes to `main` until the prod move and one day after it are over"):
         assert token in DOC, token
     design = DOC.split("## 4. Design")[1].split("## Questions")[0]
-    for token in ("`${BACKEND_IMAGE}`", "python -m sprintable_mcp", "http://backend:8000", "`MCP_ALLOWED_HOSTS`", "no secret (it holds none: every request brings its own bearer key", "mem_limit", "`{$MCP_HOST}`", "flush_interval -1", "`hosts.mcp`", "DNS-only A record", "deploy/vm/forwarder/", "`FORWARD_TO`", "the security domain reads the key and path exposure"):
+    for token in ("`${BACKEND_IMAGE}`", "python -m sprintable_mcp", "http://backend:8000", "`MCP_ALLOWED_HOSTS`", "no secret (every request brings its own bearer key; the service sets **no** `AGENT_API_KEY`", "mem_limit", "`{$MCP_HOST}`", "flush_interval -1", "`hosts.mcp`", "DNS-only A record", "deploy/vm/forwarder/", "`FORWARD_TO`", "the security domain reads the key and path exposure"):
         assert token in design, token
     assert "58 USD" in DOC and "59 USD" in DOC, "the product owner's figure and the forwarder's"
