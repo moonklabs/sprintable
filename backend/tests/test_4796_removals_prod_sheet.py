@@ -370,3 +370,10 @@ def test_the_buckets_lose_the_legacy_project_viewer_roles_in_the_runbook_and_the
         home.mkdir()
         out = _gcloud.text(_gcloud.run(["storage", "buckets", "remove-iam-policy-binding", "gs://parse-only-bucket", "--member=projectViewer:parse-only-project", f"--role={role}"], home))
         assert "do not currently have an active account" in out, out[:300]
+
+
+def test_no_sheet_of_deploy_vm_still_says_the_cloud_sql_exports_have_no_expiry() -> None:
+    for f in sorted((_ROOT / "deploy/vm").glob("*.md")):
+        text = f.read_text()
+        assert "no expiry" not in text and "has no expiry rule" not in text, f.name
+    assert "which the bucket rule of RUNBOOK §1 keeps 30 days" in (_ROOT / "deploy/vm/REMOVALS-dev.md").read_text()
