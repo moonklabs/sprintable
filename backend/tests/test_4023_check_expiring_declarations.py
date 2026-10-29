@@ -297,8 +297,48 @@ def test_real_repo_all_three_files_and_five_sections_are_actually_present():
     assert result.errors == [], f"이 축이 대상을 못 보고 있음: {result.errors}"
 
 
-def test_real_repo_currently_has_no_expiring_declarations():
-    """story #4023 AC1 반영 후 실 레포 3파일 전부 활성 until 항목 0건이므로 지금은 조용하다
-    — 메커니즘 자체는 위 양성 대조가 증명한다."""
+def test_real_repo_has_no_expiring_declarations_but_the_known_ones():
+    """story #4023 AC1 반영 후 실 레포 3파일 전부 활성 until 항목 0건이라 조용했다 — 메커니즘 자체는 위 양성 대조가 증명한다.
+
+    story 4796 (2026-10-29): `sprintable-backend-prod` is declared a pin on purpose (CUTOVER-prod step 4c, until 2026-11-27). The warning for it is the notice
+    this axis exists to give (an annotation, exit 0), and it appears or not depending on the date (inside the last 14 days of its `until`): a test that expected
+    `warnings == []` would be red on one calendar day and green on another for a reason that is not a defect. So: nothing is expiring **except the known
+    declarations** — a new expiring declaration of anything else is still caught here (the point of the test), and the list below is the place to name the next
+    known one (with the story that made it)."""
     result = mod.collect_expiry_findings()
-    assert result.warnings == []
+    unexpected = _unexpected_warnings(result.warnings)
+    assert unexpected == [], unexpected
+
+
+# the declarations that are expected to be near their `until` (name them with the story that made them): by the label the warning carries, compared whole
+_KNOWN_EXPIRING = ("sprintable-backend-prod",)   # story 4796: the forwarder of CUTOVER-prod step 4c
+
+
+def _warning_label(message: str) -> str | None:
+    """the warning reads «<section> `<label>` — N일 뒤 만료(…)»: the label is what is compared, whole (a substring would let `…-prod-forwarder` pass as `…-prod`)"""
+    import re
+    found = re.match(r"^\w+ `([^`]+)` — ", message)
+    return found.group(1) if found else None
+
+
+def _unexpected_warnings(warnings):
+    return [(path, msg) for path, msg in warnings if _warning_label(msg) not in _KNOWN_EXPIRING]
+
+
+def test_the_known_declaration_is_taken_out_by_its_whole_name_and_a_longer_name_is_not(tmp_path):
+    """the negative control of the test above: the label of a warning is compared whole, so a service whose name merely contains the known one is still unexpected"""
+    from datetime import date
+    for service, expected in (("sprintable-backend-prod", []), ("sprintable-backend-prod-forwarder", ["sprintable-backend-prod-forwarder"]), ("x-sprintable-backend-prod", ["x-sprintable-backend-prod"])):
+        _write_allowlist(tmp_path, "manual-env-allowlist.yml", "code_read_high_baseline: []\n")
+        _write_allowlist(tmp_path, "serving-reality-allowlist.yml", f"""
+declared_pins:
+  - service: {service}
+    reason: r
+    declared_by: PO
+    until: "2026-11-02"
+declared_stalls: []
+""")
+        _write_allowlist(tmp_path, "mcp-path-contract-allowlist.yml", _EMPTY_MCP_PATH_CONTRACT)
+        result = mod.collect_expiry_findings(repo_root=tmp_path, today=date(2026, 10, 29))
+        assert len(result.warnings) == 1, result.warnings
+        assert [_warning_label(m) for _, m in _unexpected_warnings(result.warnings)] == expected, service
