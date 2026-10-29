@@ -117,7 +117,7 @@ def test_the_claims_the_runbook_makes_about_the_address_sources_are_true_in_the_
     assert re.search(r'(?m)^DEV_BACKEND_URL="https://dev-api\.sprintable\.ai"', (_ROOT / "backend/scripts/deploy_mcp_dev.sh").read_text()), "the hosted-MCP script carries the same value"
     assert re.search(r"(?m)^  _FASTAPI_URL: https://dev-api\.sprintable\.ai$", _MAIN_TEXT), "the build's own default is the switch's value"
     for guide in ("connect-guide.ko.txt", "connect-guide.en.txt", "onboarding-guide.txt"):
-        assert "run.app" in (_ROOT / "apps/web/public" / guide).read_text(), guide
+        assert "run.app" not in (_ROOT / "apps/web/public" / guide).read_text(), (guide, "the guides' prod lines name the API name since the prod move")
     usage = (_ROOT / "backend/app/services/agent_api_key_usage.py").read_text()
     assert "remote_ip = client_ip(request)" in usage, "the ledger records client_ip(): the VM's address behind the pass-through"
 
@@ -159,7 +159,7 @@ def test_the_runbook_states_the_flip_order_the_accepted_cost_and_the_places_the_
         assert name in sec, name
     assert "`resend-verification` and `set-password/request` — both 3 an hour, both send mail" in sec and "`sk_live_` key is counted per key" in sec
     assert "are copied into the VM frontend image as they are" in sec
-    assert "Their **dev** example lines name `https://dev-api.sprintable.ai` since story 4796 (Phase 2)" in sec and "the warning keeps counting the guides' prod lines until prod moves" in sec
+    assert "Their **dev** example lines name `https://dev-api.sprintable.ai` since story 4796 (Phase 2)" in sec and "**The prod lines of the three guides name `https://api.sprintable.ai` since the prod move**" in sec
     p2 = _runbook_section("**Phase 2", "**Phase 3")
     assert "`mcp_url` from `MCP_PUBLIC_URL`" in p2
 

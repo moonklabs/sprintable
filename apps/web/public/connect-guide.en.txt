@@ -55,7 +55,7 @@ command `uvx sprintable`, plus two environment variables.
       "command": "uvx",
       "args": ["sprintable"],
       "env": {
-        "SPRINTABLE_API_URL": "https://sprintable-backend-prod-787818285179.asia-northeast3.run.app",
+        "SPRINTABLE_API_URL": "https://api.sprintable.ai",
         "AGENT_GATEWAY_V2": "1",
         "AGENT_API_KEY": "<the key issued in step 0>"
       }
