@@ -288,3 +288,14 @@ def test_the_service_rows_delete_only_after_their_capture_is_proven(tmp_path: Pa
             out = subprocess.run(["bash", "-c", cap + "\n" + line], capture_output=True, text=True, env=env, cwd=d, timeout=30)
             deleted = "services delete" in (d / "log").read_text()
             assert (marker in out.stdout) == (fail == "0") and deleted == (fail == "0"), (row, fail, out.stdout, out.stderr)
+
+
+def test_the_sheet_keeps_what_the_first_run_taught() -> None:
+    """2026-10-29: the dependents list printed four more than the two jobs, and the export failed with 412 until the instance's service account had a role on the bucket"""
+    r5 = _rows()["R5"]
+    for token in ("`internal-api`", "`seed-loadtest`", "`audit-apikey`", "`backfill`", "DEPENDENTS-CLEAR", "failed with 412"):
+        assert token in r5, token
+    grant = [b for b in _fenced(r5) if "add-iam-policy-binding" in b][0]
+    assert grant.index("add-iam-policy-binding") < grant.index("remove-iam-policy-binding")
+    assert "roles/storage.objectAdmin" in grant and grant.count("serviceAccount:$SQL_SA") == 2, "granted before, taken away after, to the instance's own account only"
+    assert "R6 has not run" in SHEET.split("## Run record")[1].split("##")[0]
