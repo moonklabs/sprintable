@@ -69,7 +69,7 @@ Name from the pipeline: `sprintable-redis-prod` (AUTH on). The Cloud Run backend
 
 ## R3. pgbouncer prod (the high-availability set behind the old backend)
 
-The prod pooler is not one VM: `infra/pgbouncer/deploy_prod.sh` builds a regional managed instance group `pgbouncer-prod-mig` from the template `pgbouncer-prod-tmpl`, a health check `pgbouncer-prod-hc`, a backend service `pgbouncer-prod-bes` and an internal forwarding rule `pgbouncer-prod-fr`. **It was in use on Cloud Run:** the prod workflow sets `backend_db_pgbouncer=true` (the comment there names the internal address `10.178.0.111:6432`) and `deploy-backend` binds `DATABASE_URL` ← `DATABASE_URL_PROD_PGBOUNCER` for prod. The VM does not use it (`DB_PGBOUNCER: 'false'` in `deploy/vm/env/prod.yaml`). The closed real revision still points at it, which is why gate G comes first. This row **first finds out what exists** and removes it only if nothing in a current template uses it.
+The prod pooler is not one VM: `infra/pgbouncer/deploy_prod.sh` builds a regional managed instance group `pgbouncer-prod-mig` from an instance template (the script names it `pgbouncer-prod-tmpl`; **on 2026-10-29 the live group used `tmpl-r3`**, so the sheet reads the template name from the group's definition), a health check `pgbouncer-prod-hc`, a backend service `pgbouncer-prod-bes` and an internal forwarding rule `pgbouncer-prod-fr`. **It was in use on Cloud Run:** the prod workflow sets `backend_db_pgbouncer=true` (the comment there names the internal address `10.178.0.111:6432`) and `deploy-backend` binds `DATABASE_URL` ← `DATABASE_URL_PROD_PGBOUNCER` for prod. The VM does not use it (`DB_PGBOUNCER: 'false'` in `deploy/vm/env/prod.yaml`). The closed real revision still points at it, which is why gate G comes first. This row **first finds out what exists** and removes it only if nothing in a current template uses it.
 
 1. Find it (read only; every name is the script's, none is guessed):
    ```
@@ -77,7 +77,7 @@ The prod pooler is not one VM: `infra/pgbouncer/deploy_prod.sh` builds a regiona
    gcloud compute backend-services list --project $PROJECT --regions $REGION --filter='name=pgbouncer-prod-bes' --format='value(name)'
    gcloud compute instance-groups managed list --project $PROJECT --filter='name=pgbouncer-prod-mig' --format='value(name,region.basename(),targetSize)'
    gcloud compute health-checks list --project $PROJECT --regions $REGION --filter='name=pgbouncer-prod-hc' --format='value(name)'
-   gcloud compute instance-templates list --project $PROJECT --filter='name=pgbouncer-prod-tmpl' --format='value(name)'
+   gcloud compute instance-templates list --project $PROJECT --filter='name~pgbouncer OR name~tmpl' --format='value(name)'
    ```
    **All empty = done** (write «none found» with the date; nothing below runs). Anything printed: continue, and stop if a name that is not in the script shows up in a similar filter (`--filter='name~pgbouncer'`): report it.
 2. **Gates E and G first.** Nothing current uses it: the forwarding rule's address (step 1) and the secret name `DATABASE_URL_PROD_PGBOUNCER` appear in no prod Cloud Run service or job — the loop of R2 with `grep -q -e "$ADDR" -e DATABASE_URL_PROD_PGBOUNCER` over the current template of each service and job prints nothing (the closed real revision is not in it, and gate G is its acceptance) — and `DB_PGBOUNCER: 'false'` in `deploy/vm/env/prod.yaml`.
@@ -88,18 +88,19 @@ The prod pooler is not one VM: `infra/pgbouncer/deploy_prod.sh` builds a regiona
    gcloud compute backend-services describe pgbouncer-prod-bes --region $REGION --project $PROJECT --format=json > pgbouncer-prod-bes.json || OK=0
    gcloud compute instance-groups managed describe pgbouncer-prod-mig --region $REGION --project $PROJECT --format=json > pgbouncer-prod-mig.json || OK=0
    gcloud compute health-checks describe pgbouncer-prod-hc --region $REGION --project $PROJECT --format=json > pgbouncer-prod-hc.json || OK=0
-   gcloud compute instance-templates describe pgbouncer-prod-tmpl --project $PROJECT --format=json > pgbouncer-prod-tmpl.json || OK=0
+   TMPL=$(jq -r '.versions[0].instanceTemplate // empty | split("/") | last' pgbouncer-prod-mig.json 2>/dev/null); [ -n "$TMPL" ] || { echo "NO TEMPLATE IN THE GROUP'S DEFINITION"; OK=0; }; echo "the group's template: $TMPL"
+   gcloud compute instance-templates describe "${TMPL:-none}" --project $PROJECT --format=json > pgbouncer-prod-tmpl.json || OK=0
    for f in pgbouncer-prod-fr pgbouncer-prod-bes pgbouncer-prod-mig pgbouncer-prod-hc pgbouncer-prod-tmpl; do jq -e .name $f.json > /dev/null || OK=0; done
    [ "$OK" = 1 ] && PGB_OK=1 && echo CAPTURE-OK
    ```
    (The pooler VMs are made from the template by the group at boot and hold nothing: the startup script is in the template's metadata, saved above, and reads the secret `DATABASE_URL_PROD` at boot — no secret value is in it.)
 4. Delete — in the order the pieces depend on each other (rule → backend service → group → health check → template), one chain that starts only after `CAPTURE-OK`:
    ```
-   [ "${PGB_OK:-0}" = 1 ] && gcloud compute forwarding-rules delete pgbouncer-prod-fr --region "${REGION:?}" --project "${PROJECT:?}" --quiet && gcloud compute backend-services delete pgbouncer-prod-bes --region "${REGION:?}" --project "${PROJECT:?}" --quiet && gcloud compute instance-groups managed delete pgbouncer-prod-mig --region "${REGION:?}" --project "${PROJECT:?}" --quiet && gcloud compute health-checks delete pgbouncer-prod-hc --region "${REGION:?}" --project "${PROJECT:?}" --quiet && gcloud compute instance-templates delete pgbouncer-prod-tmpl --project "${PROJECT:?}" --quiet
+   [ "${PGB_OK:-0}" = 1 ] && gcloud compute forwarding-rules delete pgbouncer-prod-fr --region "${REGION:?}" --project "${PROJECT:?}" --quiet && gcloud compute backend-services delete pgbouncer-prod-bes --region "${REGION:?}" --project "${PROJECT:?}" --quiet && gcloud compute instance-groups managed delete pgbouncer-prod-mig --region "${REGION:?}" --project "${PROJECT:?}" --quiet && gcloud compute health-checks delete pgbouncer-prod-hc --region "${REGION:?}" --project "${PROJECT:?}" --quiet && gcloud compute instance-templates delete "${TMPL:?}" --project "${PROJECT:?}" --quiet
    ```
 5. **Undo:** run `infra/pgbouncer/deploy_prod.sh` again — it is the recipe that made the set, describes before it creates, and makes idle infrastructure (no prod traffic is pointed at it). The new forwarding rule may get another address; nothing points at the old one (step 2).
 
-**Left in place on purpose:** the service account `pgbouncer-prod-sa` and its accessor binding on `DATABASE_URL_PROD` (an IAM line, harmless; the PO may remove it with the secret's clean-up), the firewall rules `allow-hc-pgbouncer-prod` and `allow-pgbouncer-prod` (no cost), and the NAT router `pgbouncer-nat-router` with its NAT `pgbouncer-nat` («region shared» with dev). The NAT's remaining cost is the PO's to read off the bill (unmeasured here).
+**Left in place on purpose:** every instance template the group does not use (they cost nothing; `tmpl-r2` was left on 2026-10-29), the service account `pgbouncer-prod-sa` and its accessor binding on `DATABASE_URL_PROD` (an IAM line, harmless; the PO may remove it with the secret's clean-up), the firewall rules `allow-hc-pgbouncer-prod` and `allow-pgbouncer-prod` (no cost), and the NAT router `pgbouncer-nat-router` with its NAT `pgbouncer-nat` («region shared» with dev). The NAT's remaining cost is the PO's to read off the bill (unmeasured here).
 
 ## R4. realtime prod — read only, nothing is deleted here
 
@@ -132,7 +133,7 @@ All empty = done. **If a line prints something, do not delete it from this sheet
    gcloud run revisions list --service $BACKEND --project $PROJECT --region $REGION --format='table(metadata.name,status.conditions[0].status,metadata.annotations."run.googleapis.com/cloudsql-instances")'
    [ "$OK" = 1 ] && DEP_OK=1 && echo DEPENDENTS-CLEAR
    ```
-   **Read the list, do not assume it.** The dev run expected two jobs and found a service and seven more. Every line that prints is stopped on first: the PO decides each (retire it with its own captured definition, or do not delete the instance). The service `$BACKEND` itself does not print (its current template is the forwarder, which mounts nothing); **the revisions list shows the closed real revision still mounting the instance — gate G is its acceptance.** The two jobs are the ones named in step 2 and step 4.
+   **Read the list, do not assume it.** The dev run expected two jobs and found a service and seven more. Every line that prints is stopped on first: the PO decides each (retire it with its own captured definition, or do not delete the instance). The service `$BACKEND` itself does not print (its current template is the forwarder, which mounts nothing); **the revisions list shows the closed real revision still mounting the instance — gate G is its acceptance.** The two jobs are the ones named in step 2 and step 4. **What the first run printed (2026-10-29, PO):** four more — the service `sprintable-internal-api` (behind the admin console) and the jobs `seed-loadtest-prod`, `sprintable-audit-apikey-prod` and `sprintable-backfill-prod`; each had no use in the last 30 days and nothing running. The PO saved each definition (`gcloud run services describe … --format=export`, `gcloud run jobs describe … --format=export`, into the window folder `removals-prod/`) and deleted them, then ran the block again: `DEPENDENTS-CLEAR`. Do the same for any line that prints.
 2. Capture — what the undo needs: **an on-demand backup and one export per database**, then check each object has a size:
    ```
    unset EXPORTS_OK; STAMP=$(date -u +%Y%m%dT%H%M%SZ); echo "$STAMP"   # a fresh path per attempt: an older object can not pass for this one
@@ -145,7 +146,14 @@ All empty = done. **If a line prints something, do not delete it from this sheet
    while read -r db; do gcloud sql export sql "$SQL" "gs://${BACKUPS_BUCKET:?}/cloudsql-final/$STAMP/$db.sql.gz" --database "$db" --project $PROJECT || OK=0; [ "$(gcloud storage ls -l "gs://$BACKUPS_BUCKET/cloudsql-final/$STAMP/$db.sql.gz" | awk 'NR==1{print $1}')" -gt 0 ] || OK=0; done < dbs.txt
    [ "$OK" = 1 ] && EXPORTS_OK=1 && echo EXPORTS-OK
    ```
-   **Go on only if `EXPORTS-OK` was printed** — it means: the instance is in the list, its definition and the two jobs' definitions are saved, the backup succeeded, and every database the instance holds was exported to its own object under the fresh path with a size above zero. Look at the printed list of databases: it must be what the cutover sheet's step 0 read (`postgres` and `sprintable`); another name is a stop. (The instance's own service account needs write on the bucket: `gcloud sql instances describe "$SQL" --project $PROJECT --format='value(serviceAccountEmailAddress)'` is the account to grant. The `cloudsql-final/` prefix has no expiry rule.)
+   **Go on only if `EXPORTS-OK` was printed** — it means: the instance is in the list, its definition and the two jobs' definitions are saved, the backup succeeded, and every database the instance holds was exported to its own object under the fresh path with a size above zero. Look at the printed list of databases: it must be what the cutover sheet's step 0 read (`postgres` and `sprintable`); another name is a stop. (The instance's own service account has no role on the bucket, and the first export on 2026-10-29 failed with 412 until it was given one. Give it a role **before** the capture block and take it away right after — the grant is the PO's, with the PO's own account:
+   ```
+   SQL_SA=$(gcloud sql instances describe "${SQL:?}" --project $PROJECT --format='value(serviceAccountEmailAddress)'); : "${SQL_SA:?}"
+   gcloud storage buckets add-iam-policy-binding "gs://${BACKUPS_BUCKET:?}" --member "serviceAccount:$SQL_SA" --role roles/storage.objectAdmin
+   # ... the capture block above ...
+   gcloud storage buckets remove-iam-policy-binding "gs://${BACKUPS_BUCKET:?}" --member "serviceAccount:$SQL_SA" --role roles/storage.objectAdmin
+   ```
+   Take the role away even if an export failed. The `cloudsql-final/` prefix has no expiry rule.)
 3. Deletion protection, if the instance has it (`jq .settings.deletionProtectionEnabled sql-prod.json` prints `true`): `gcloud sql instances patch "$SQL" --project $PROJECT --no-deletion-protection` (undo: `--deletion-protection`).
 4. Delete the two jobs, then the instance — **one chained line that starts only after `EXPORTS-OK`, `DEPENDENTS-CLEAR` and `COPY-OK` (gate C) were all printed in this shell, so a missing proof, a failed export or a failed job delete stops it before the instance is touched**:
    ```
@@ -165,7 +173,7 @@ All empty = done. **If a line prints something, do not delete it from this sheet
 
 ## R6. `sprintable-backend-prod` — the forwarder and the closed real revision (gate F)
 
-**Why it is not removed today (PO, 2026-10-29).** The forwarder revision's settings, measured by the PO: minimum instances 0, CPU throttling on (billed per request), 1 CPU, 256 Mi, maximum 2 instances. With no caller it costs close to nothing, so it does not touch the server-cost goal, and there is no reason to cut off a client that still names the old address. The cost of waiting is therefore the requests of those clients only (**MEASURE** on the bill after a full billing day; unmeasured here). Revisit when the 7-day list is empty.
+**Why it is not removed today (PO, 2026-10-29).** Four agents of an outside team keep a stream open to the old address, so it is not idle. The PO therefore moved the traffic at 14:04Z to a smaller revision, `sprintable-backend-prod-fwd-lite`: 0.08 vCPU, 128 Mi, concurrency 1, maximum 10, first generation, CPU boost off, minimum instances 0, billed per request (a fractional CPU needs concurrency 1, request billing and the first generation). At the first size (1 CPU, 256 Mi, maximum 2, concurrency 250) the instances holding those streams would have cost about 75 USD a month (the PO's figure; **MEASURE** on the bill after a full billing day, unmeasured here). The way back to the first size is `gcloud run services update-traffic sprintable-backend-prod --project $PROJECT --region $REGION --to-revisions=sprintable-backend-prod-fwd-20261030=100` (the tag `fwd` stays). [`CUTOVER-prod.md`](CUTOVER-prod.md) step 4c now deploys these values, so the live setting is also the written one. The old address is cut when the 7-day list is empty, not before.
 
 Runs only through gate F. It removes the service as a whole: the **forwarder revision** (the old address) and the **real revision** (the old backend). After it, a client still naming the old `run.app` address gets nothing.
 
@@ -183,6 +191,10 @@ Runs only through gate F. It removes the service as a whole: the **forwarder rev
 3. Delete — only after `CAPTURE-OK`: `[ "${R6_OK:-0}" = 1 ] && gcloud run services delete "${BACKEND:?}" --project "${PROJECT:?}" --region "${REGION:?}" --quiet`. **Then, in the same change that removes the declaration,** the line `sprintable-backend-prod` in `infra/serving-reality-allowlist.yml` (`declared_pins`) is removed, so the serving-reality guard has nothing declared for a service that is gone (it expires on 2026-11-27 in any case) — a one-line PR, not part of this sheet's lines.
 4. Check: the service is not listed; the old address answers 404 (`curl -s -o /dev/null -w '%{http_code}\n' https://sprintable-backend-prod-57iommnikq-du.a.run.app/api/v2/health`); `https://api.sprintable.ai/api/v2/health` is still `200`.
 5. **Undo:** `gcloud run services replace $BACKEND.yaml --project $PROJECT --region $REGION && gcloud run services set-iam-policy $BACKEND $BACKEND.iam.json --project $PROJECT --region $REGION` brings back the service **as it was at capture — the forwarder revision**, with the same address; set its traffic by name (`--to-revisions`) as step 8c does and open it for callers only after the forwarder's own proof (403 closed → healthy as the VM → `allUsers`). The real revision comes back only if its image is still in the registry and Cloud SQL exists again (R5's undo) — until then it is not a way back.
+
+## Run record (2026-10-29, the PO's hands)
+
+R1 `sprintable-frontend-prod`, R2 the Redis instance (the find returned `redis-prod-basic`: the live name, not the pipeline comment's `sprintable-redis-prod` — R2's find is by filter, so it gave the right one), R3 the five pooler pieces (the group used the template `tmpl-r3`, not the script's `pgbouncer-prod-tmpl` — hence the template is now read from the group's definition; `tmpl-r2` and `tmpl-r3` cost nothing and `tmpl-r2` was left), R5 Cloud SQL `sprintable-prod` — done between 13:29Z and 13:44Z; the instance was deleted at 13:44:04Z. Exports: `sprintable` 220 MB, `postgres` 453 B. Gate C `COPY-OK` (dump 219,075,936 bytes, `.sha256` and counts the same size in both places). R4 (eleven reads) printed nothing. At 14:04Z the PO moved the forwarder's traffic to the smaller revision described in R6. **R6 has not run:** it waits for the seven empty days of gate F.
 
 ## After the sheet
 
