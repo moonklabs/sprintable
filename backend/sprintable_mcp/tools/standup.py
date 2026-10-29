@@ -53,6 +53,11 @@ class UpdateRetroActionStatusInput(SprintableInput):
     status: str  # open | done
 
 
+class CheckinSprintInput(SprintableInput):
+    sprint_id: str
+    date: str
+
+
 async def standup_missing(args: StandupDateInput) -> list[TextContent]:
     """스탠드업 미제출 멤버 조회 — 응답은 `[{"id": "<member id>", "name": "<이름 또는 null>"}]`(story #4298). 이름은
     members.name → 사람의 표시 이름이고 모르면 null이다(이메일로 지어내지 않는다). 예전엔 id 배열만 왔다."""
@@ -132,5 +137,13 @@ async def update_retro_action_status(args: UpdateRetroActionStatusInput) -> list
         return ok(await client.patch(
             f"/api/v2/retros/{args.session_id}/actions/{args.action_id}", json={"status": args.status}
         ))
+    except Exception as exc:
+        return err(exc)
+
+
+async def checkin_sprint(args: CheckinSprintInput) -> list[TextContent]:
+    """스프린트 체크인 — 진행률 + 스탠드업 미제출 현황."""
+    try:
+        return ok(await client.get(f"/api/v2/sprints/{args.sprint_id}/checkin", params={"date": args.date}))
     except Exception as exc:
         return err(exc)

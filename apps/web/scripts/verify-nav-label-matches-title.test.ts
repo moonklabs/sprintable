@@ -8,11 +8,11 @@ const koMessages = JSON.parse(readFileSync(path.join(MESSAGES_DIR, 'ko.json'), '
 const enMessages = JSON.parse(readFileSync(path.join(MESSAGES_DIR, 'en.json'), 'utf-8'));
 
 describe('findNavTitleMismatches — story #5f709b45(AC1·AC5)', () => {
-  it('실 ko.json 손 확認 4자리가 전부 일치한다(정렬본 초록 · story #4810으로 5→4)', () => {
+  it('실 ko.json 손 확認 5자리가 전부 일치한다(정렬본 초록)', () => {
     expect(findNavTitleMismatches(koMessages)).toEqual([]);
   });
 
-  it('실 en.json 손 확認 4자리가 전부 일치한다(정렬본 초록 · story #4810으로 5→4)', () => {
+  it('실 en.json 손 확認 5자리가 전부 일치한다(정렬본 초록)', () => {
     expect(findNavTitleMismatches(enMessages)).toEqual([]);
   });
 
@@ -45,11 +45,11 @@ describe('findNavTitleMismatches — story #5f709b45(AC1·AC5)', () => {
     ];
     const fixture = { nav: {}, nsY: {} };
     expect(findNavTitleMismatches(fixture, pairings)).toEqual([]);
-    // ⚠️ 위는 "둘 다 undefined라 값이 같다"로 우연히 통과하는 자리 — 실 4쌍은 아래에서
+    // ⚠️ 위는 "둘 다 undefined라 값이 같다"로 우연히 통과하는 자리 — 실 5쌍은 아래에서
     // 키 존재 자체를 확認해 이 사각을 막는다.
   });
 
-  it('실 4쌍 모두 nav·title 두 값이 실제로 존재한다(undefined 우연 통과 배제)', () => {
+  it('실 5쌍 모두 nav·title 두 값이 실제로 존재한다(undefined 우연 통과 배제)', () => {
     for (const pairing of NAV_TITLE_PAIRINGS) {
       expect(koMessages.nav?.[pairing.navKey], `ko nav.${pairing.navKey}`).toBeDefined();
       expect(koMessages[pairing.titleNamespace]?.[pairing.titleKey], `ko ${pairing.titleNamespace}.${pairing.titleKey}`).toBeDefined();

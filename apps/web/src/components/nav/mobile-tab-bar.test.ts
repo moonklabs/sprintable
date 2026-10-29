@@ -160,7 +160,7 @@ describe('경로 → 탭 — 「일감」 위 줄 전부(story #4278)', () => {
     }
   });
 
-  it('표 자체: 넷(목록 · 보드 · 스프린트 · 에픽) — story #4810으로 회고 · 가설 걷힘', () => {
-    expect([...WORKSPACE_FRAME_TAB_PATHS].sort()).toEqual(['epics', 'flow', 'sprints', 'work-list']);
+  it('표 자체: 여섯(목록 · 보드 · 스프린트 · 에픽 · 회고 · 가설) — 카드의 다섯 + 보드', () => {
+    expect([...WORKSPACE_FRAME_TAB_PATHS].sort()).toEqual(['epics', 'flow', 'hypotheses', 'retro', 'sprints', 'work-list']);
   });
 });

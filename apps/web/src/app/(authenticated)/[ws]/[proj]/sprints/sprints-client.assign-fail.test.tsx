@@ -54,6 +54,9 @@ function stubFetch(patchOk: boolean) {
     if (typeof url === 'string' && url.includes('/api/sprints?project_id=')) {
       return { ok: true, json: async () => ({ data: [SPRINT] }) };
     }
+    if (typeof url === 'string' && url.includes('/burndown')) {
+      return { ok: false, json: async () => null };
+    }
     if (typeof url === 'string' && url.includes('/api/stories/backlog')) {
       return { ok: true, json: async () => ({ data: [BACKLOG_STORY] }) };
     }

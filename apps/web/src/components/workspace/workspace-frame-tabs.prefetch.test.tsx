@@ -58,7 +58,7 @@ afterEach(async () => {
   container.remove();
 });
 
-async function render(active: 'workList' | 'board' | 'sprints' | 'epic') {
+async function render(active: 'workList' | 'board' | 'sprints' | 'epic' | 'retro' | 'hypothesis') {
   const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
   await act(async () => {
     root.render(
@@ -72,11 +72,11 @@ async function render(active: 'workList' | 'board' | 'sprints' | 'epic') {
 const href = (path: string) => `/my-ws/my-proj/${path}`;
 
 describe('[SID:4299] 탭 프리패치 — 첫 화면 뒤 · 이웃 둘 · 누르려는 기색', () => {
-  it('⭐탭 Link 넷 모두 자동 프리패치를 끈다(prefetch={false})', async () => {
+  it('⭐탭 Link 여섯 모두 자동 프리패치를 끈다(prefetch={false})', async () => {
     await render('board');
-    const last4 = h.linkProps.slice(-4);
-    expect(last4.map((p) => p.href)).toEqual(['work-list', 'flow', 'sprints', 'epics'].map(href));
-    expect(last4.every((p) => p.prefetch === false)).toBe(true);
+    const last6 = h.linkProps.slice(-6);
+    expect(last6.map((p) => p.href)).toEqual(['work-list', 'flow', 'sprints', 'epics', 'retro', 'hypotheses'].map(href));
+    expect(last6.every((p) => p.prefetch === false)).toBe(true);
   });
 
   it('⭐그릴 때는 router.prefetch 0 — 첫 화면이 조용해진 뒤 지금 탭 이웃 둘만(보드 → 목록 · 스프린트)', async () => {
@@ -87,33 +87,33 @@ describe('[SID:4299] 탭 프리패치 — 첫 화면 뒤 · 이웃 둘 · 누르
     expect(h.prefetch.mock.calls.map(([u]) => u)).toEqual([href('work-list'), href('sprints')]);
   });
 
-  it('끝 탭은 이웃 하나(목록 → 보드 · 에픽 → 스프린트)', async () => {
+  it('끝 탭은 이웃 하나(목록 → 보드 · 가설 → 회고)', async () => {
     await render('workList');
     h.quiet.at(-1)!.run();
     expect(h.prefetch.mock.calls.map(([u]) => u)).toEqual([href('flow')]);
     h.prefetch.mockReset();
-    await render('epic');
+    await render('hypothesis');
     h.quiet.at(-1)!.run();
-    expect(h.prefetch.mock.calls.map(([u]) => u)).toEqual([href('sprints')]);
+    expect(h.prefetch.mock.calls.map(([u]) => u)).toEqual([href('retro')]);
   });
 
   it.each([
     ['pointerenter', (el: Element) => el.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))],
     ['focus', (el: Element) => (el as HTMLElement).focus()],
     ['touchstart', (el: Element) => el.dispatchEvent(new Event('touchstart', { bubbles: true }))],
-  ])('누르려는 기색(%s) 때 그 탭을 router.prefetch — 이웃 아닌 «에픽»도', async (_label, fire) => {
+  ])('누르려는 기색(%s) 때 그 탭을 router.prefetch — 이웃 아닌 «가설»도', async (_label, fire) => {
     await render('board');
-    const tab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '에픽')!;
+    const tab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '가설')!;
     await act(async () => { fire(tab); });
-    expect(h.prefetch).toHaveBeenCalledWith(href('epics'));
+    expect(h.prefetch).toHaveBeenCalledWith(href('hypotheses'));
   });
 
   it('탭이 바뀌면 옛 예약을 풀고 새 이웃으로 다시 건다', async () => {
     await render('board');
     const first = h.quiet[0]!;
-    await render('sprints' as never);
+    await render('epic');
     expect(first.cancel).toHaveBeenCalled();
     h.quiet.at(-1)!.run();
-    expect(h.prefetch.mock.calls.map(([u]) => u)).toEqual([href('flow'), href('epics')]);
+    expect(h.prefetch.mock.calls.map(([u]) => u)).toEqual([href('sprints'), href('retro')]);
   });
 });

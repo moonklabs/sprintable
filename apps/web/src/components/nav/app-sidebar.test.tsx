@@ -59,10 +59,6 @@ function stubLocalStorage() {
 // 펼침)이라 이 helper는 엄밀히는 더 이상 필수가 아니다(기본값 자체가 이미 전부 펼침).
 // 그래도 "이 테스트는 접힘 前 구조를 재는 게 목적"이라는 의도를 명시적으로 남겨 두는 게
 // 읽기에 낫다고 판단해 그대로 둔다(오버라이드가 기본값과 같은 값을 다시 심을 뿐 — 무해).
-// story #4810 — with the flags off 「연결·규칙」 has no item (채널 연결 · 연산 커넥터 · 콘텐츠 규칙 went with the publishing axis), so the group
-// is only drawn with the connect-rules flag on: its one «모아 보기» item.
-const CR_ON: NavV3Flags = { todayV3Enabled: false, chatV3Enabled: false, connectRulesV3Enabled: true };
-
 function expandAllGroups() {
   localStorage.setItem('sidebar_group_collapsed', JSON.stringify({
     'connect-rules': false,
@@ -120,6 +116,8 @@ async function mount(userName?: string, navV3Flags?: NavV3Flags) {
 const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
   { labelKey: null, labels: ['오늘'] },
   { labelKey: null, labels: ['일감'] },
+  { labelKey: null, labels: ['결과'] },
+  { labelKey: 'zoneConnectRules', labels: ['채널 연결', '연산 커넥터', '콘텐츠 규칙'] },
   // story #3836(UX-v3·셸 후속) — 「더보기」(LEGACY_GROUP_ID)는 기본 접힘(AC1)이라 이
   // 테스트(expandAllGroups가 'connect-rules'만 편다)에선 항목이 DOM에 없다 — 그룹
   // 자체(라벨+토글)는 렌더된다는 사실만 여기서 잠그고, 내용물은 전용 스위트에서.
@@ -135,16 +133,20 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
 const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '오늘': '/org-briefing',
   '일감': '/flow',
+  '결과': '/organization/insights-board',
+  '채널 연결': '/organization/channels',
+  '연산 커넥터': '/organization/generation-connectors',
+  '콘텐츠 규칙': '/organization/content-rules',
 };
 
 describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·FE 1)', () => {
   it('그룹 순서·라벨·항목 순서·라벨이 확定대로다(오늘→일감→결과→연결·규칙)', async () => {
     expandAllGroups();
     await mount();
-    // 헤더리스 그룹(오늘·일감)은 sidebar-group-label 자체가 없다. story #4810 — 「연결·규칙」은 플래그 OFF에선 항목이 없어
-    // 그려지지 않는다(아래 CR_ON 스위트가 ON 쪽을 잰다) → 라벨 그룹은 「더보기」 하나뿐.
+    // 헤더리스 그룹(오늘·일감·결과)은 sidebar-group-label 자체가 없다 — 라벨 그룹은
+    // 「연결·규칙」 하나뿐.
     const groupLabels = [...container.querySelectorAll('[data-slot="sidebar-group-label"]')].map((el) => el.textContent);
-    expect(groupLabels).toEqual(['더보기']);
+    expect(groupLabels).toEqual(['연결·규칙', '더보기']);
 
     const groups = [...container.querySelectorAll('[data-slot="sidebar-group"]')];
     expect(groups.length).toBe(EXPECTED_GROUPS.length);
@@ -171,6 +173,15 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
     expect(workIndex).toBeGreaterThanOrEqual(0);
     expect(todayIndex).toBeLessThan(chatsIndex);
     expect(chatsIndex).toBeLessThan(workIndex);
+  });
+
+  it('정적 항목(연결·규칙 그룹)의 href가 무변화다(path 전부 불변)', async () => {
+    expandAllGroups();
+    await mount();
+    const channelsLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('채널 연결'));
+    expect(channelsLink?.getAttribute('href')).toBe('/organization/channels');
+    const rulesLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('콘텐츠 규칙'));
+    expect(rulesLink?.getAttribute('href')).toBe('/organization/content-rules');
   });
 
   it('story #4524 — «데스크톱 앱» links to /desktop only when the server says DESKTOP_DOWNLOAD_ENABLED (no role input: everyone sees it)', async () => {
@@ -206,11 +217,11 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
     expect(workBtn?.textContent).toContain('프로젝트');
   });
 
-  it('org 항목(모아 보기)엔 「프로젝트」 표식이 안 붙는다', async () => {
+  it('org 항목(채널 연결)엔 「프로젝트」 표식이 안 붙는다', async () => {
     expandAllGroups();
-    await mount(undefined, CR_ON);
-    const overviewBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('모아 보기'));
-    expect(overviewBtn?.textContent).not.toContain('프로젝트');
+    await mount();
+    const channelsBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('채널 연결'));
+    expect(channelsBtn?.textContent).not.toContain('프로젝트');
   });
 
   it('애매 항목(오늘)엔 「프로젝트」 표식이 안 붙는다', async () => {
@@ -243,13 +254,13 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
   });
 
   it('현재 경로와 일치하는 정적 항목이 active로 표시된다(isActive 판정 보존)', async () => {
-    pathnameRef.current = '/connect-rules';
+    pathnameRef.current = '/organization/channels';
     expandAllGroups();
-    await mount(undefined, CR_ON);
-    const overviewBtn = [...container.querySelectorAll('[data-slot="sidebar-menu-button"]')].find((b) => b.textContent?.includes('모아 보기'));
-    expect(overviewBtn?.hasAttribute('data-active')).toBe(true);
-    const todayBtn = [...container.querySelectorAll('[data-slot="sidebar-menu-button"]')].find((b) => b.textContent === '오늘');
-    expect(todayBtn?.hasAttribute('data-active')).toBe(false);
+    await mount();
+    const channelsBtn = [...container.querySelectorAll('[data-slot="sidebar-menu-button"]')].find((b) => b.textContent?.includes('채널 연결'));
+    expect(channelsBtn?.hasAttribute('data-active')).toBe(true);
+    const rulesBtn = [...container.querySelectorAll('[data-slot="sidebar-menu-button"]')].find((b) => b.textContent?.includes('콘텐츠 규칙'));
+    expect(rulesBtn?.hasAttribute('data-active')).toBe(false);
   });
 
   // story #1981/#3084 배지 축 — 사이드바에서 'inbox' 항목 자체가 빠졌으므로(LEGACY_NAV_
@@ -266,13 +277,14 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
     expect(badges).toHaveLength(0);
   });
 
-  it('헤더리스 그룹(오늘·일감)엔 접기 토글이 없다(옛 설정 그룹과 동형 관례)', async () => {
+  it('헤더리스 그룹(오늘·일감·결과)엔 접기 토글이 없다(옛 설정 그룹과 동형 관례)', async () => {
     await mount();
     const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
     expect(todayLink).toBeDefined();
     const toggles = [...container.querySelectorAll('button[aria-expanded]')];
     expect(toggles.some((b) => b.textContent?.includes('오늘'))).toBe(false);
     expect(toggles.some((b) => b.textContent?.includes('일감'))).toBe(false);
+    expect(toggles.some((b) => b.textContent?.includes('결과'))).toBe(false);
   });
 
   // 카디르 QA(PR#3100) 지적 — 라벨은 그대로인 채 href만 다른 항목과 뒤바뀌는 뮤테이션은 앞
@@ -318,7 +330,7 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
   // (mutation-kill: 옛 규칙이 되살아나면 이 셋 다 RED로 돌아간다).
   it('기억 없는 새 브라우저 — 활성 구역이 없어도(경로=/dashboard) 전 구역이 펼쳐진다(옛 규칙이면 전부 접혔어야 함)', async () => {
     stubViewportHeight(700);
-    await mount(undefined, CR_ON); // story #4810 — a labeled (collapsible) group only exists with the connect-rules flag on
+    await mount();
     const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
     expect(todayLink).toBeDefined();
     const workLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
@@ -358,18 +370,18 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
   });
 
   it('구역 헤더를 클릭하면 접히고(항목 DOM에서 사라짐) 다시 클릭하면 펴진다', async () => {
-    await mount(undefined, CR_ON);
+    await mount();
     const crHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('연결·규칙'));
     expect(crHeader).toBeDefined();
     expect(crHeader?.getAttribute('aria-expanded')).toBe('true');
 
     await act(async () => { crHeader!.click(); });
-    expect([...container.querySelectorAll('a')].find((a) => a.textContent?.includes('모아 보기'))).toBeUndefined();
+    expect([...container.querySelectorAll('a')].find((a) => a.textContent?.includes('채널 연결'))).toBeUndefined();
     const crHeaderAfter = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('연결·규칙'));
     expect(crHeaderAfter?.getAttribute('aria-expanded')).toBe('false');
 
     await act(async () => { crHeaderAfter!.click(); });
-    expect([...container.querySelectorAll('a')].find((a) => a.textContent?.includes('모아 보기'))).toBeDefined();
+    expect([...container.querySelectorAll('a')].find((a) => a.textContent?.includes('채널 연결'))).toBeDefined();
   });
 
   // 카디르 QA(a11y, §22-18 가드) — render prop 버튼이 SidebarGroupLabel의 children(그룹명
@@ -378,7 +390,7 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
   // 이름이 안 실리는 경우가 있다) — aria-label에 그룹명+접힘상태를 담는다.
   it('구역 토글 버튼의 aria-label이 그룹명+접힘상태를 담는다(카디르 QA a11y 처방)', async () => {
     expandAllGroups();
-    await mount(undefined, CR_ON);
+    await mount();
     const crHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('연결·규칙'));
     expect(crHeader?.getAttribute('aria-label')).toBe('연결·규칙 접기');
 
@@ -389,7 +401,7 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
 
   it('접힘 상태가 localStorage에 사람별로 기억된다(AC3)', async () => {
     expandAllGroups();
-    await mount(undefined, CR_ON);
+    await mount();
     const crHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('연결·규칙'));
     await act(async () => { crHeader!.click(); });
 
@@ -399,9 +411,9 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
 
   it('기억된 접힘 상태가 마운트 시 그대로 재현된다(기억 있으면 그 값, AC3)', async () => {
     localStorage.setItem('sidebar_group_collapsed', JSON.stringify({ 'connect-rules': true }));
-    await mount(undefined, CR_ON);
-    const overviewLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('모아 보기'));
-    expect(overviewLink).toBeUndefined();
+    await mount();
+    const channelsLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('채널 연결'));
+    expect(channelsLink).toBeUndefined();
     const crHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('연결·규칙'));
     expect(crHeader?.getAttribute('aria-expanded')).toBe('false');
   });
@@ -424,7 +436,7 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
   it('활성 항목이 있으면 scrollIntoView({block:"nearest"})가 불린다(딥링크 진입 시 활성 항목 자동 노출)', async () => {
     const scrollIntoViewMock = vi.fn();
     Element.prototype.scrollIntoView = scrollIntoViewMock;
-    pathnameRef.current = '/org-briefing';
+    pathnameRef.current = '/organization/channels';
     expandAllGroups();
     await mount();
     expect(scrollIntoViewMock).toHaveBeenCalledWith({ block: 'nearest' });
@@ -437,13 +449,13 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
 // resourceLink에 WORKSPACE_FRAME_TAB_PATHS(workspace-frame-tabs.tsx SSOT)를
 // extraActivePaths로 넘긴다 — 탭을 하나 늘리면 이 판정도 하드코딩 없이 자동으로 늘어난다.
 // story #3989(「일감」 흡수 3/N) — 「가설」 탭(경로 hypotheses) 합류로 5→6개.
-const EXPECTED_WORKSPACE_FRAME_TAB_PATHS = ['work-list', 'flow', 'sprints', 'epics'];
+const EXPECTED_WORKSPACE_FRAME_TAB_PATHS = ['work-list', 'flow', 'sprints', 'epics', 'retro', 'hypotheses'];
 
 describe('AppSidebar — 「일감」 활성 판정은 WorkspaceFrameTabs 경로 SSOT에서 파생(story #3844)', () => {
   // ⭐되돌리면 RED — WorkspaceFrameTabs에 탭이 추가/삭제됐는데 이 표를 안 갱신하면(또는
   // app-sidebar.tsx가 그 SSOT를 다시 안 읽으면) 여기서 먼저 잡힌다. 아래 it.each는 이 표를
   // 하드코딩 소스로 쓰므로, 이 대조 자체가 "표류 감지"의 유일한 자리다.
-  it('WORKSPACE_FRAME_TAB_PATHS가 정확히 4개다(work-list·flow·sprints·epics — story #4810으로 retro · hypotheses 걷힘)', async () => {
+  it('WORKSPACE_FRAME_TAB_PATHS가 정확히 6개다(work-list·flow·sprints·epics·retro·hypotheses)', async () => {
     const { WORKSPACE_FRAME_TAB_PATHS } = await import('@/components/workspace/workspace-frame-tabs');
     expect(WORKSPACE_FRAME_TAB_PATHS).toEqual(EXPECTED_WORKSPACE_FRAME_TAB_PATHS);
   });
@@ -532,14 +544,14 @@ describe('AppSidebar — v3 nav 단일 소스(story #4003) 플래그 배선', ()
     expect(todayLink?.getAttribute('href')).toBe('/today');
   });
 
-  it('connectRulesV3Enabled — 연결·규칙 그룹에 통합 항목(모아 보기)이 보인다(story #4810: 옛 채널 연결 · 콘텐츠 규칙 항목은 걷힘)', async () => {
+  it('connectRulesV3Enabled — 연결·규칙 그룹에 통합 항목이 앞에 추가되고 옛 2항목도 그대로 보인다(옛 진입점 유지)', async () => {
     expandAllGroups();
-    await mount(undefined, CR_ON);
+    await mount(undefined, { todayV3Enabled: false, chatV3Enabled: false, connectRulesV3Enabled: true });
     const links = [...container.querySelectorAll('a')];
     const v3Link = links.find((a) => a.getAttribute('href') === '/connect-rules');
     expect(v3Link).toBeDefined();
-    expect(links.some((a) => a.getAttribute('href') === '/organization/channels')).toBe(false);
-    expect(links.some((a) => a.getAttribute('href') === '/organization/content-rules')).toBe(false);
+    expect(links.some((a) => a.getAttribute('href') === '/organization/channels')).toBe(true);
+    expect(links.some((a) => a.getAttribute('href') === '/organization/content-rules')).toBe(true);
   });
 
   // CHANGES(페드루 PO, PR#4386 1차 리뷰) — 「일감」은 어느 단일 플래그에도 안 걸려있어

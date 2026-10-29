@@ -10,7 +10,9 @@ import {
   BookOpen,
   CalendarRange,
   FolderKanban,
+  Gauge,
   GitPullRequest,
+  Lightbulb,
   List,
   Search,
   UserPlus,
@@ -64,17 +66,24 @@ const NAV_ITEM_SHORTCUTS: Record<string, string[]> = {
 // routes(story #2376) 정적 스캔(㉠resourceLink류·㉡리터럴 href) 시야 밖이다. 이 두 리터럴이
 // 그 가드의 유일하게 «보이는» 앵커다 — story #3698 그라운딩(PO 確定)으로 NAV_GROUPS 파생
 // 대상이 «아니다»로 확定됐다. 지우지 말 것(지우면 그 가드가 조용히 눈먼다).
-// story #4810 — the 「회고」 entry (tab + go-retro anchor) is gone ahead of its screen: the retro route is being withdrawn
-// (4807) and verify-no-orphan-resource-routes lists `routeWithoutEntry:retro` in its GRANDFATHER_BASELINE until that PR deletes it.
+// story #3845(UX-v3·FE 5·일감 2, 페드루 PO 確定 §③ⓑ 2026-09-14) — 「회고」가 LEGACY_
+// NAV_ITEMS(nav-config.ts)에서 빠지고 WorkspaceFrameTabs 전용 진입점(router.push 템플릿
+// 리터럴)으로만 남으면 verify-no-orphan-resource-routes.ts의 ㉠조합 시야 밖이라(같은
+// 파일 상단 주석 "지우지 말 것" 경고 그대로 — go-sprints 선례와 동형) go-retro 앵커가
+// 없으면 조용한 orphan이 된다. 지우면 그 가드가 못 잡는다.
 // story #4013 — export해 팔레트 정의를 직접 순회하는 가드(scripts/verify-command-
 // palette-workspaceless-href-resolves.test.ts)가 이름 목록을 손으로 다시 안 베끼게 한다.
 export const GUARD_ANCHOR_ITEMS: Array<{ id: string; icon: LucideIcon; labelKey: string; href: string }> = [
   { id: 'go-sprints', icon: CalendarRange, labelKey: 'goSprints', href: '/sprints' },
   { id: 'go-epics', icon: FolderKanban, labelKey: 'goEpics', href: '/epics' },
+  { id: 'go-retro', icon: Gauge, labelKey: 'goRetro', href: '/retro' },
   // story #3844(PO 지적 2026-09-14 08:09Z, CI 「Verify no orphan resource routes(#2376)」
   // RED) — WorkspaceFrameTabs가 얹은 탭 경로는 이 가드가 진입점으로 안 센다(4264가 retro를
   // 여기 앵커한 선례 그대로) — work-list도 동형으로 앵커.
   { id: 'go-work-list', icon: List, labelKey: 'goWorkList', href: '/work-list' },
+  // story #3989(「일감」 흡수 3/N) — 「가설」 탭도 WorkspaceFrameTabs 전용 진입점(router.push
+  // 템플릿 리터럴)뿐이라 같은 이유로 앵커가 필요하다(go-work-list·go-retro 선례 그대로).
+  { id: 'go-hypotheses', icon: Lightbulb, labelKey: 'goHypotheses', href: '/hypotheses' },
 ];
 
 export interface DerivedNavItem {

@@ -37,11 +37,11 @@ export const TEMP_TOOLSET_CATALOG: ToolsetCatalog = {
     { key: 'core', is_core: true, is_destructive: false, tools: ['ping', 'sprintable_my_dashboard', 'sprintable_check_notifications'] },
     { key: 'stories', is_core: false, is_destructive: false, tools: ['sprintable_add_story', 'sprintable_list_stories', 'sprintable_update_story_status', 'sprintable_claim_story', 'sprintable_search_stories'] },
     { key: 'tasks', is_core: false, is_destructive: false, tools: ['sprintable_add_task', 'sprintable_list_tasks', 'sprintable_update_task_status', 'sprintable_get_task'] },
-    { key: 'sprints', is_core: false, is_destructive: false, tools: ['sprintable_list_sprints', 'sprintable_assign_story_to_sprint'] },
+    { key: 'sprints', is_core: false, is_destructive: false, tools: ['sprintable_list_sprints', 'sprintable_assign_story_to_sprint', 'sprintable_checkin_sprint', 'sprintable_sprint_summary'] },
     { key: 'epics', is_core: false, is_destructive: false, tools: ['sprintable_add_epic', 'sprintable_list_epics', 'sprintable_update_epic', 'sprintable_get_epic_progress'] },
     { key: 'chat', is_core: false, is_destructive: false, tools: ['sprintable_send_chat_message', 'sprintable_list_chat_messages', 'sprintable_create_conversation'] },
     { key: 'docs', is_core: false, is_destructive: false, tools: ['sprintable_create_doc', 'sprintable_get_doc', 'sprintable_list_docs', 'sprintable_search_docs', 'sprintable_update_doc'] },
-    { key: 'analytics', is_core: false, is_destructive: false, tools: ['sprintable_get_project_health', 'sprintable_get_project_overview', 'sprintable_get_leaderboard_v2'] },
+    { key: 'analytics', is_core: false, is_destructive: false, tools: ['sprintable_get_velocity', 'sprintable_get_project_health', 'sprintable_get_project_overview', 'sprintable_get_leaderboard_v2'] },
     { key: 'retro', is_core: false, is_destructive: false, tools: ['sprintable_create_retro_session', 'sprintable_add_retro_item', 'sprintable_vote_retro_item'] },
     { key: 'standup', is_core: false, is_destructive: false, tools: ['sprintable_get_standup', 'sprintable_save_standup', 'sprintable_standup_history'] },
     { key: 'meetings', is_core: false, is_destructive: false, tools: ['sprintable_create_meeting', 'sprintable_list_meetings', 'sprintable_get_meeting'] },
@@ -60,7 +60,7 @@ export const TEMP_TOOLSET_CATALOG: ToolsetCatalog = {
     // story #3631 — mcp_toolset.py에 "content" 그룹 신설(콘텐츠/채널 도구, #3614
     // sprintable_withdraw_channel_post_draft가 첫 멤버). 위 #2661과 동일 이유로 여기도 반영.
     { key: 'content', is_core: false, is_destructive: false, tools: ['sprintable_withdraw_channel_post_draft', 'sprintable_create_channel_post_draft', 'sprintable_submit_channel_post_draft', 'sprintable_get_channel_post_publication', 'sprintable_list_channel_connections', 'sprintable_get_my_channel_connection_status', 'sprintable_attach_channel_post_image', 'sprintable_get_channel_post_video_upload_url', 'sprintable_confirm_channel_post_video', 'sprintable_create_site_post_draft', 'sprintable_submit_site_post_draft', 'sprintable_get_site_post_publication'] },
-    { key: 'admin', is_core: false, is_destructive: true, tools: ['sprintable_delete_sprint', 'sprintable_give_reward', 'sprintable_upsert_webhook_config'] },
+    { key: 'admin', is_core: false, is_destructive: true, tools: ['sprintable_delete_sprint', 'sprintable_close_sprint', 'sprintable_give_reward', 'sprintable_upsert_webhook_config', 'sprintable_activate_sprint'] },
   ],
 };
 

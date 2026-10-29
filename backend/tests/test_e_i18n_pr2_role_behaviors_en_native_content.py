@@ -81,9 +81,8 @@ def test_en_role_behaviors_reference_verified_tool_names_only():
     """0163 교훈과 동형 — EN 신규 저작도 환각 도구명 0건이어야."""
     mod = _load(_MIGRATION, "rev_0166")
     from sprintable_mcp.server import _TOOL_DEFS
-    from tests.withdrawn_tool_names import WITHDRAWN_BUT_STILL_IN_SEED_TEXT
 
-    real_names = {name for name, *_ in _TOOL_DEFS} | {"ping"} | WITHDRAWN_BUT_STILL_IN_SEED_TEXT
+    real_names = {name for name, *_ in _TOOL_DEFS} | {"ping"}
     for slug, behaviors in mod._ROLE_BEHAVIORS_EN.items():
         mentioned = set(re.findall(r"`(sprintable_[a-z_]+)`", behaviors))
         assert mentioned, f"{slug} EN role_behaviors mentions no sprintable_* tools"
@@ -156,8 +155,6 @@ def test_all_en_roles_compose_via_compose_kit_without_error(slug_source):
         kit = compose_kit(role, "claude-code", locale="en")
         assert behaviors_en in kit["role_context"]
         mentioned = set(_re.findall(r"`(sprintable_[a-z_]+)`", kit["role_context"]))
-        from tests.withdrawn_tool_names import WITHDRAWN_BUT_STILL_IN_SEED_TEXT
-
-        assert mentioned <= set(ALL_TOOL_NAMES) | WITHDRAWN_BUT_STILL_IN_SEED_TEXT, (
-            f"{slug}: invented tool names {mentioned - set(ALL_TOOL_NAMES) - WITHDRAWN_BUT_STILL_IN_SEED_TEXT}"
+        assert mentioned <= set(ALL_TOOL_NAMES), (
+            f"{slug}: invented tool names {mentioned - set(ALL_TOOL_NAMES)}"
         )

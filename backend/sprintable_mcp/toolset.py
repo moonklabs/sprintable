@@ -15,7 +15,7 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     # mcp_toolset.py)와 동기화(standup_missing이 이제 core 편입돼 그룹 분류 자체는 무관해졌지만,
     # tool_group() 피커 라벨 정합을 위해 analytics 오분류를 남겨두지 않는다).
     ("analytics", ("velocity", "health", "dashboard", "overview", "stats",
-                   "recent_activity", "agent_stats", "blocked_stories",
+                   "sprint_summary", "recent_activity", "agent_stats", "blocked_stories",
                    "unassigned_stories", "member_workload", "overdue", "epic_progress",
                    "goal_progress")),
     ("agent_runs", ("agent_run", "run_status", "update_run")),
@@ -37,7 +37,7 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     # 동기화(sprintable_add_goal 등 신 이름도 이 그룹).
     ("epics", ("epic", "goal")),
     ("tasks", ("task",)),
-    ("stories", ("story", "stories", "backlog", "claim")),
+    ("stories", ("story", "stories", "backlog", "claim", "checkin")),
     # story b4027b2e(SEC): 백엔드 SSOT와 동기화 — E-CANVAS visual_artifacts가 전용 그룹으로 승격
     # (app/services/mcp_toolset.py 참고. "canonical_version"은 propose_canonical_version에
     # "artifact" substring이 없어 별도 키워드 필요, "spec_pin"은 핀 4종).
@@ -45,7 +45,8 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     # story #2311(2026-07-29): "delete_sprint" 제거 — E-SECURITY SEC-S8 확장으로 그 이름의
     # 도구 자체가 이미 없다(원본 app/services/mcp_toolset.py에는 "제거했다"는 주석만 남아
     # 있었는데 vendored 사본에만 실제 키워드로 잔존해 있었다 — 원본과 동기화).
-    ("admin", ("give_reward", "emit_event", "trigger_ai", "upsert_webhook", "delete_webhook",
+    ("admin", ("give_reward", "emit_event", "trigger_ai", "activate_sprint",
+               "close_sprint", "create_sprint", "upsert_webhook", "delete_webhook",
                # story #2636: 백엔드 SSOT와 동기화 — 이벤트 등록(admin 그룹, 등록=org 관리).
                "register_event_definition", "update_event_definition")),
     # story #2634: 백엔드 SSOT(app/services/mcp_toolset.py)와 동기화 — publish_event/

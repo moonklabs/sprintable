@@ -14,7 +14,7 @@ import { LEGACY_NAV_ITEMS, NAV_GROUPS } from './nav-config';
 // story #3845(UX-v3·FE 5·일감 2, 페드루 PO 確定 §④ 2026-09-14) — retro·standup이
 // LEGACY_NAV_ITEMS에서 빠지며(각각 「일감」 회고 탭·스프린트 탭 하루 체크인 절로 흡수,
 // nav-config.ts 주석 참고) 9→7.
-const PROJECT_SCOPED_IDS = ['board', 'goals', 'docs', 'artifacts', 'storage', 'activity'];
+const PROJECT_SCOPED_IDS = ['board', 'goals', 'loops', 'docs', 'artifacts', 'storage', 'activity'];
 // 애매(표식 없음) — scope 필드를 아예 안 쓴다.
 // - inbox: 순수 개인 알림(project/org 필터 0)
 // - settings: 계정 설정인데 팀원 탭 하나만 project라 섞인 화면
@@ -41,13 +41,11 @@ describe('NAV_GROUPS scope — story #9c5e82dc(IA·S3 AC1)', () => {
   // story #4116(2026-09-21) — org-generation-connectors 신설(연결·규칙, 채널 연결의
   // 형제 화면)로 21→22.
   // story #4183(2026-09-23, 유나 확認) — «준비 중» 화면뿐이던 org-memory를 nav에서 걷어 22→21.
-  // story #4810 (OPEN-ZERO ⑦) — the channel/site-post axis (결과 · 채널 연결 · 연산 커넥터 · 콘텐츠 규칙 · 콘텐츠 · 채널 글) and
-  // loops · org-events left the nav: 21→13.
-  it('항목 13개 전부가 scope 분류 대상이다(회귀 시 이 수부터 어긋난다)', () => {
-    expect(allItems()).toHaveLength(13);
+  it('항목 21개 전부가 scope 분류 대상이다(회귀 시 이 수부터 어긋난다)', () => {
+    expect(allItems()).toHaveLength(21);
   });
 
-  it('project 스코프 6항목이 정확히 이 집합이다(story #3845로 9→7, retro·standup 제외 · story #4810으로 loops 제외 7→6)', () => {
+  it('project 스코프 7항목이 정확히 이 집합이다(story #3845로 9→7, retro·standup 제외)', () => {
     const projectIds = allItems().filter((i) => i.scope === 'project').map((i) => i.id).sort();
     expect(projectIds).toEqual([...PROJECT_SCOPED_IDS].sort());
   });
@@ -55,14 +53,14 @@ describe('NAV_GROUPS scope — story #9c5e82dc(IA·S3 AC1)', () => {
   // story #3743 — org-connectors 걷힘으로 13→11→10(이 스토리에서 -1).
   // story #4116 — org-generation-connectors 신설로 10→11.
   // story #4183 — org-memory 걷힘으로 11→10.
-  it('org 스코프 3항목 — project·애매를 뺀 나머지 전부(카디르 QA 재감사로 13→11·#3743으로 11→10·#4116으로 10→11·#4183으로 11→10·#4810으로 10→3)', () => {
+  it('org 스코프 10항목 — project·애매를 뺀 나머지 전부(카디르 QA 재감사로 13→11·#3743으로 11→10·#4116으로 10→11·#4183으로 11→10)', () => {
     const orgIds = allItems().filter((i) => i.scope === 'org').map((i) => i.id).sort();
     const expected = allItems()
       .map((i) => i.id)
       .filter((id) => !PROJECT_SCOPED_IDS.includes(id) && !AMBIGUOUS_IDS.includes(id))
       .sort();
     expect(orgIds).toEqual(expected);
-    expect(orgIds).toHaveLength(3);
+    expect(orgIds).toHaveLength(10);
   });
 
   it('애매 4항목(inbox·settings·org-briefing·org-workforce)은 scope 필드 자체가 없다(undefined — org로 기본값 안 깖)', () => {
@@ -74,7 +72,7 @@ describe('NAV_GROUPS scope — story #9c5e82dc(IA·S3 AC1)', () => {
 
   it('kind:"resource" 항목(6개, story #3845로 8→6)은 전부 project 스코프다(라우트 자체가 /{ws}/{proj}/... 파생)', () => {
     const resourceItems = allItems().filter((i) => i.kind === 'resource');
-    expect(resourceItems).toHaveLength(5);
+    expect(resourceItems).toHaveLength(6);
     for (const item of resourceItems) {
       expect(item.scope, `${item.id}.scope`).toBe('project');
     }

@@ -62,13 +62,13 @@ describe('전체 메뉴 — 플래그 ON에서 실제 탭과 한 세계(story #4
     expect(container.textContent).not.toContain(koMessages.nav.descOrgBriefing);
   });
 
-  it('⭐«연결·규칙» 머리 한 번 · 첫 항목 «모아 보기» · 에이전트 · 신뢰 센터가 같은 구역', async () => {
+  it('⭐«연결·규칙» 머리 한 번 · 첫 항목 «모아 보기» · 에이전트 · 신뢰 센터 · 레시피가 같은 구역', async () => {
     await mount('ko');
     const headings = [...container.querySelectorAll('h2, [data-legacy-group] p span:first-child')].map((el) => el.textContent?.trim());
     expect(headings.filter((h) => h === koMessages.nav.zoneConnectRules)).toHaveLength(1);
     const connectCard = [...container.querySelectorAll('h2')].find((h) => h.textContent?.startsWith(koMessages.nav.zoneConnectRules))!.closest('[class*="overflow-hidden"]')!;
     const names = [...connectCard.querySelectorAll('a span.block.truncate')].map((el) => el.textContent);
     expect(names[0]).toBe(koMessages.nav.connectRulesOverview);
-    expect(names.slice(-2)).toEqual([koMessages.nav.workforce, koMessages.nav.orgTrust]);
+    expect(names.slice(-3)).toEqual([koMessages.nav.workforce, koMessages.nav.orgTrust, koMessages.nav.orgEvents]);
   });
 });

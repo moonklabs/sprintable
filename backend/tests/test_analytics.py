@@ -250,3 +250,67 @@ async def test_get_project_health_200():
         assert resp.json()["sprint_progress"] == 25
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_get_burndown_200():
+    client, session, app = await _client()
+    try:
+        mock_data = {
+            "sprint": {
+                "id": SPRINT_ID, "title": "Sprint 5", "status": "active",
+                "start_date": date(2026, 4, 28), "end_date": date(2026, 5, 11),
+                "duration": 14, "velocity": None,
+            },
+            "total_points": 40,
+            "done_points": 10,
+            "remaining_points": 30,
+            "completion_pct": 25,
+            "stories_count": 8,
+            "done_count": 2,
+            "ideal_line": [{"date": "2026-04-28", "points": 40}],
+            "actual_line": [{"date": "2026-04-28", "points": 40}, {"date": "2026-04-30", "points": 30}],
+        }
+        with patch("app.repositories.analytics.AnalyticsRepository.get_burndown", new_callable=AsyncMock) as mock_fn:
+            mock_fn.return_value = mock_data
+
+            async with client as c:
+                resp = await c.get(f"/api/v2/sprints/{SPRINT_ID}/burndown")
+
+        assert resp.status_code == 200
+        assert resp.json()["remaining_points"] == 30
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_get_burndown_404():
+    client, session, app = await _client()
+    try:
+        with patch("app.repositories.analytics.AnalyticsRepository.get_burndown", new_callable=AsyncMock) as mock_fn:
+            mock_fn.return_value = None
+
+            async with client as c:
+                resp = await c.get(f"/api/v2/sprints/{uuid.uuid4()}/burndown")
+
+        assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.anyio
+async def test_get_sprint_velocity_200():
+    client, session, app = await _client()
+    try:
+        with patch("app.repositories.analytics.AnalyticsRepository.get_sprint_velocity", new_callable=AsyncMock) as mock_fn:
+            mock_fn.return_value = {"velocity": 35, "title": "Sprint 5", "status": "active"}
+
+            async with client as c:
+                resp = await c.get(f"/api/v2/sprints/{SPRINT_ID}/velocity")
+
+        assert resp.status_code == 200
+        assert resp.json()["velocity"] == 35
+    finally:
+        app.dependency_overrides.clear()
+
+

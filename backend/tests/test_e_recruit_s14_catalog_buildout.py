@@ -71,12 +71,11 @@ def test_seed_each_role_has_at_least_one_non_core_group():
 
 
 def test_role_behaviors_reference_verified_tool_names_only():
-    """견고 기준: role_behaviors 안의 sprintable_* 언급이 실제 등록 도구명과 100% 일치(환각 0) — 걷은 도구의 이름이 옛 시드 글에 남은 것(위 상수)만 예외."""
+    """견고 기준: role_behaviors 안의 sprintable_* 언급이 실제 등록 도구명과 100% 일치(환각 0)."""
     mod = _load_migration()
     from sprintable_mcp.server import _TOOL_DEFS
-    from tests.withdrawn_tool_names import WITHDRAWN_BUT_STILL_IN_SEED_TEXT
 
-    real_names = {name for name, *_ in _TOOL_DEFS} | {"ping"} | WITHDRAWN_BUT_STILL_IN_SEED_TEXT  # 걷은 도구 이름이 옛 시드 글에 남은 것만 예외(tests/withdrawn_tool_names.py)
+    real_names = {name for name, *_ in _TOOL_DEFS} | {"ping"}
     for slug, behaviors in mod._ROLE_BEHAVIORS.items():
         mentioned = set(re.findall(r"`(sprintable_[a-z_]+)`", behaviors))
         assert mentioned, f"{slug} role_behaviors mentions no sprintable_* tools"
@@ -108,7 +107,6 @@ def test_all_18_roles_compose_without_error_and_validate_against_default_tool_gr
     from types import SimpleNamespace
     from app.services.agent_recruiter import compose_kit, validate_tool_groups
     from app.services.mcp_toolset import ALL_TOOL_NAMES
-    from tests.withdrawn_tool_names import WITHDRAWN_BUT_STILL_IN_SEED_TEXT
 
     mod = _load_migration()
     for slug, name, _category, _description, tool_groups, _recipe_slug in mod._SEED:
@@ -119,8 +117,8 @@ def test_all_18_roles_compose_without_error_and_validate_against_default_tool_gr
         )
         out = compose_kit(role, "claude-code")["onboarding"]
         mentioned = set(re.findall(r"`(sprintable_[a-z_]+)`", out))
-        assert mentioned <= set(ALL_TOOL_NAMES) | WITHDRAWN_BUT_STILL_IN_SEED_TEXT, (
-            f"{slug}: invented tool names {mentioned - set(ALL_TOOL_NAMES) - WITHDRAWN_BUT_STILL_IN_SEED_TEXT}"
+        assert mentioned <= set(ALL_TOOL_NAMES), (
+            f"{slug}: invented tool names {mentioned - set(ALL_TOOL_NAMES)}"
         )
 
 

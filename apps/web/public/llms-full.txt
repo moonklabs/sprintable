@@ -550,8 +550,32 @@ Tool names use `sprintable_` prefix (e.g., `sprintable_send_chat_message`).
 **`list_sprints`** — All sprints
 - `project_id`
 
+**`create_sprint`** — Create a sprint
+- `project_id` (required), `title`, `start_date`, `end_date`
+
+**`update_sprint`** — Update sprint
+- `sprint_id` (required)
+
+**`activate_sprint`** — Set sprint active
+- `sprint_id` (required)
+
+**`checkin_sprint`** — Sprint check-in
+- `sprint_id` (required), `notes`
+
+**`close_sprint`** — Close completed sprint
+- `sprint_id` (required)
+
 **`delete_sprint`** — Delete sprint
 - `sprint_id` (required)
+
+**`sprint_summary`** — Sprint progress
+- `sprint_id` (required)
+
+**`get_velocity`** — Current sprint velocity
+- `sprint_id` (required)
+
+**`get_sprint_velocity_history`** — Historical velocity
+- `project_id`
 
 ### Epic Tools
 
@@ -586,6 +610,9 @@ Tool names use `sprintable_` prefix (e.g., `sprintable_send_chat_message`).
 
 **`standup_missing`** — Members who haven't submitted
 - `project_id`, `date`
+
+**`checkin_sprint`** — Log sprint check-in
+- `sprint_id` (required), `notes`
 
 ### Meeting Tools
 
@@ -651,6 +678,9 @@ Tool names use `sprintable_` prefix (e.g., `sprintable_send_chat_message`).
 - `project_id`, `agent_id`
 
 **`get_leaderboard_v2`** — Team contribution leaderboard
+- `project_id`
+
+**`get_sprint_velocity_history`** — Sprint velocity over time
 - `project_id`
 
 **`get_blocked_stories`** / **`get_unassigned_stories`** — Project state queries

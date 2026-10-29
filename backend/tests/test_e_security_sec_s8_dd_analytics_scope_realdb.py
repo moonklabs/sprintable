@@ -3,8 +3,6 @@ analytics 엔드포인트 project-scope 봉쇄 실증(까심 라이브확定, CR
 
 - get_burndown/get_sprint_velocity: 다른 org_repo 메소드는 전부 org_id를 필터하는데 이 둘만
   누락돼 완전 무관 org가 sprint UUID만 알면 velocity/status를 그대로 열람할 수 있었다.
-  (story 4811: 그 두 경로 자체를 걷었다 — 이 파일은 남은 overview의 project-scope 봉쇄만 시험한다.
-  경로가 없다는 것은 test_4811_sprint_analysis_withdrawn.py.)
 - 이왕 여는 김에(PO 결) analytics.py 9개 엔드포인트 전부에 has_project_access를 추가해
   same-org cross-project 노출까지 봉인(오늘 R~CC와 동형 근본)."""
 from __future__ import annotations
@@ -120,6 +118,107 @@ async def _setup_app(app, Session, user_id, org_id):
 
 
 # ── DD: cross-org (원 취약점) ─────────────────────────────────────────────────
+
+@pytest.mark.anyio
+async def test_burndown_cross_org_blocked_secret_not_leaked():
+    """org_a human이 org_b의 sprint UUID로 burndown 조회 → 404, SECRET 미노출."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_two_orgs(s)
+
+        await _setup_app(app, Session, seeded["human_user_id"], seeded["org_a_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/sprints/{seeded['sprint_b_id']}/burndown")
+            assert resp.status_code == 404, resp.text
+            assert "SECRET" not in resp.text
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_velocity_cross_org_blocked_secret_not_leaked():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_two_orgs(s)
+
+        await _setup_app(app, Session, seeded["human_user_id"], seeded["org_a_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/sprints/{seeded['sprint_b_id']}/velocity")
+            assert resp.status_code == 404, resp.text
+            assert "SECRET" not in resp.text
+            assert "99" not in resp.text
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_burndown_same_org_same_project_still_works():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_two_orgs(s)
+
+        await _setup_app(app, Session, seeded["human_user_id"], seeded["org_a_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/sprints/{seeded['sprint_a_id']}/burndown")
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["sprint"]["title"] == "Sprint A"
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+# ── DD 후속: same-org cross-project (project-scope 하드닝) ──────────────────────
+
+@pytest.mark.anyio
+async def test_burndown_same_org_cross_project_blocked():
+    """org_a human이 project_a에만 grant 있는데, 같은 org 내 project_b sprint를 만들어 조회 시도."""
+    from app.main import app
+    from app.models.pm import Sprint
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_two_orgs(s)
+            from app.models.project import Project
+            project_c = Project(id=uuid.uuid4(), org_id=seeded["org_a_id"], name="Project C")
+            s.add(project_c)
+            await s.commit()
+            sprint_c = Sprint(id=uuid.uuid4(), org_id=seeded["org_a_id"], project_id=project_c.id, title="Sprint C", status="active", duration=14, velocity=5)
+            s.add(sprint_c)
+            await s.commit()
+            sprint_c_id = sprint_c.id
+
+        await _setup_app(app, Session, seeded["human_user_id"], seeded["org_a_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/sprints/{sprint_c_id}/burndown")
+            assert resp.status_code == 404, resp.text
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
 
 @pytest.mark.anyio
 async def test_overview_same_org_cross_project_blocked_same_project_ok():

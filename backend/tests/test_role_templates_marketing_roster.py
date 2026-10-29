@@ -60,9 +60,8 @@ def test_role_behaviors_reference_verified_tool_names_only():
     """견고 기준: role_behaviors 안의 sprintable_* 언급이 실제 등록 도구명과 100% 일치(환각 0)."""
     mod = _load_migration()
     from sprintable_mcp.server import _TOOL_DEFS
-    from tests.withdrawn_tool_names import WITHDRAWN_BUT_STILL_IN_SEED_TEXT
 
-    real_names = {name for name, *_ in _TOOL_DEFS} | {"ping"} | WITHDRAWN_BUT_STILL_IN_SEED_TEXT
+    real_names = {name for name, *_ in _TOOL_DEFS} | {"ping"}
     for slug, behaviors in mod._ROLE_BEHAVIORS.items():
         mentioned = set(re.findall(r"`(sprintable_[a-z_]+)`", behaviors))
         assert mentioned, f"{slug} role_behaviors mentions no sprintable_* tools"

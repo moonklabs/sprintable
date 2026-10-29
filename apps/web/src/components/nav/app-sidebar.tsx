@@ -148,8 +148,7 @@ export function AppSidebar({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   // story #4003 — nav-v3-destinations.ts 결정 함수를 그대로 재사용(복붙 규칙 0, AC2).
-  // story #4810 — 연결·규칙 holds no static item any more: with the flags off it is empty, and an empty group draws no header.
-  const navGroups = useMemo(() => resolveNavGroups(navV3Flags).filter((group) => group.items.length > 0), [navV3Flags]);
+  const navGroups = useMemo(() => resolveNavGroups(navV3Flags), [navV3Flags]);
   // story #4226 — static(flat) 항목 링크는 `?p=`를 싣는다(use-flat-href · 셸의 착지 정규화 router.replace 0).
   const flatHref = useFlatHref();
   const chatCenterItem = useMemo(() => resolveChatCenterItem(navV3Flags), [navV3Flags]);

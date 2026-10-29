@@ -25,7 +25,7 @@ afterEach(async () => {
   container.remove();
 });
 
-async function mount(flags: NavV3Flags, activeKey: 'today' | 'chats' | 'work' | 'connectRules', todayBadgeCount = 0) {
+async function mount(flags: NavV3Flags, activeKey: 'today' | 'chats' | 'work' | 'results' | 'connectRules', todayBadgeCount = 0) {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -35,26 +35,26 @@ async function mount(flags: NavV3Flags, activeKey: 'today' | 'chats' | 'work' | 
 }
 
 describe('NavV3ItemList — story #4004 AC1(목적지 5항목·라벨)', () => {
-  it('플래그 전부 OFF — connectRules 제외 3항목만 렌더, 라벨은 레거시 사이드바와 동일한 낱말(story #4810: 「결과」 걷힘)', async () => {
+  it('플래그 전부 OFF — connectRules 제외 4항목만 렌더, 라벨은 레거시 사이드바와 동일한 낱말', async () => {
     await mount(DEFAULT_NAV_V3_FLAGS, 'today');
     const links = [...container.querySelectorAll('a')];
-    expect(links.map((a) => a.textContent?.replace(/\d+$/, '').trim())).toEqual(['오늘', '대화', '일감']);
-    expect(links.map((a) => a.getAttribute('href'))).toEqual(['/org-briefing', '/chats', '/flow']);
+    expect(links.map((a) => a.textContent?.replace(/\d+$/, '').trim())).toEqual(['오늘', '대화', '일감', '결과']);
+    expect(links.map((a) => a.getAttribute('href'))).toEqual(['/org-briefing', '/chats', '/flow', '/organization/insights-board']);
   });
 
-  it('connectRulesV3Enabled=true — 4번째 「연결·규칙」 항목이 맨 끝에 추가', async () => {
+  it('connectRulesV3Enabled=true — 5번째 「연결·규칙」 항목이 맨 끝에 추가', async () => {
     await mount({ ...DEFAULT_NAV_V3_FLAGS, connectRulesV3Enabled: true }, 'today');
     const links = [...container.querySelectorAll('a')];
-    expect(links).toHaveLength(4);
-    expect(links[3]?.textContent).toBe('연결·규칙');
-    expect(links[3]?.getAttribute('href')).toBe('/connect-rules');
+    expect(links).toHaveLength(5);
+    expect(links[4]?.textContent).toBe('연결·규칙');
+    expect(links[4]?.getAttribute('href')).toBe('/connect-rules');
   });
 
   it('플래그 전부 ON — 오늘·대화·일감 목적지가 v3 경로로', async () => {
     const flags: NavV3Flags = { todayV3Enabled: true, chatV3Enabled: true, connectRulesV3Enabled: true };
     await mount(flags, 'today');
     const links = [...container.querySelectorAll('a')];
-    expect(links.map((a) => a.getAttribute('href'))).toEqual(['/today', '/chat', '/work-list', '/connect-rules']);
+    expect(links.map((a) => a.getAttribute('href'))).toEqual(['/today', '/chat', '/work-list', '/organization/insights-board', '/connect-rules']);
   });
 });
 
@@ -91,7 +91,7 @@ describe('NavV3ItemList — story #4006 §6 역전 활성 표시(레거시 sideb
   });
 
   it('activeKey마다 정확히 그 항목 하나만 활성(교차 오염 0)', async () => {
-    for (const key of ['today', 'chats', 'work'] as const) {
+    for (const key of ['today', 'chats', 'work', 'results'] as const) {
       await mount(DEFAULT_NAV_V3_FLAGS, key);
       const activeLinks = [...container.querySelectorAll('a[aria-current="page"]')];
       expect(activeLinks).toHaveLength(1);

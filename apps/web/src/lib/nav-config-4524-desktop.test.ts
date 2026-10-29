@@ -35,10 +35,10 @@ describe('story #4524 — the «데스크톱 앱» sidebar entry', () => {
     }
   });
 
-  it('beside the v3 overview: overview first, then «데스크톱 앱» (story #4810 removed the existing three)', () => {
+  it('beside the v3 overview: overview first, the existing three, then «데스크톱 앱»', () => {
     const groups = resolveNavGroups({ ...DEFAULT_NAV_V3_FLAGS, connectRulesV3Enabled: true, desktopDownloadEnabled: true });
     expect(ids(groups, 'connect-rules')).toEqual([
-      'connect-rules-v3', 'desktop-app',
+      'connect-rules-v3', 'org-channels', 'org-generation-connectors', 'org-content-rules', 'desktop-app',
     ]);
   });
 
