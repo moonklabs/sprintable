@@ -172,7 +172,7 @@ sys.exit(0)
 '''
 
 
-def _rev(sa: str, env: list, secrets: bool, cloudsql: bool, vpc: bool, kind: str = "direct") -> dict:
+def _rev(sa: str, env: list, secrets: bool, cloudsql: bool, vpc: bool, kind: str = "direct", tags: bool = True) -> dict:
     """a revision like the backend's: plain and secret environment, a secret volume and a plain one, Cloud SQL, a VPC connector, a network"""
     ann: dict = {}
     if cloudsql:
@@ -180,7 +180,7 @@ def _rev(sa: str, env: list, secrets: bool, cloudsql: bool, vpc: bool, kind: str
     if vpc and kind == "connector":
         ann["run.googleapis.com/vpc-access-connector"] = "conn"
     if vpc and kind == "direct":   # prod's backend: a Direct VPC attachment, no connector
-        ann["run.googleapis.com/network-interfaces"] = json.dumps([{"network": "default", "subnetwork": "default", "tags": ["egress-tag"]}])
+        ann["run.googleapis.com/network-interfaces"] = json.dumps([{"network": "default", "subnetwork": "default", **({"tags": ["egress-tag"]} if tags else {})}])
     return {"metadata": {"annotations": ann}, "spec": {"serviceAccountName": sa, "containers": [{"image": "asia-northeast3-docker.pkg.dev/x/backend@sha256:" + "b" * 64, "env": env + ([{"name": "JWT_SECRET", "valueFrom": {"secretKeyRef": {"name": "j", "key": "latest"}}}] if secrets else []),
                                                                                                         "volumeMounts": ([{"name": "s", "mountPath": "/secrets"}, {"name": "tmp", "mountPath": "/tmp"}] if secrets else [])}],
                                                       "volumes": ([{"name": "s", "secret": {"secretName": "x"}}, {"name": "tmp", "emptyDir": {}}] if secrets else [])}, "status": {"imageDigest": "sha256:" + "b" * 64}}
@@ -536,10 +536,15 @@ def test_the_rehearsal_reads_prods_network_shape_makes_a_closed_service_and_stop
         assert deploy[deploy.index(flag) + 1] == value, flag
     assert "--no-allow-unauthenticated" in deploy and "--allow-unauthenticated" not in deploy, "the throwaway is closed to everyone but the operator"
     assert not [c for c in calls if "sprintable-backend-prod" in c and any(w in c.split() for w in ("deploy", "update", "update-traffic", "delete"))], "prod is only read"
-    # a prod revision with no tags: the line stops, it does not make a service of another shape
+    # prod's attachment has no tags (what prod really has): the service is made without the tag flag
+    notags = {"revisions": {REAL: _rev("x@y.iam.gserviceaccount.com", [], True, True, True, "direct", False)}}
+    p, calls, world, _ = _go(a1, _fresh(tmp_path, "a1-notags"), state=notags)
+    deploy = _verbs(calls, "run deploy")[0].split()
+    assert "--network-tags" not in deploy and deploy[deploy.index("--network") + 1] == "default" and "--no-allow-unauthenticated" in deploy and world["reh_exists"] is True, p.stdout
+    # no network shape at all: nothing is made, and it says why
     noting = {"revisions": {REAL: _rev("x@y.iam.gserviceaccount.com", [], True, True, False)}}
-    p, calls, _, _ = _go(a1, _fresh(tmp_path, "a1-none"), state=noting)
-    assert not _verbs(calls, "run deploy"), "no network shape, no throwaway"
+    p, calls, _, work = _go(a1, _fresh(tmp_path, "a1-none"), state=noting)
+    assert not _verbs(calls, "run deploy") and "no network shape" in p.stdout and not (work / "rehearsal-id.txt").exists(), "no network shape, no throwaway, no id"
     # a service of that name exists already (an old rehearsal, or another service): it is left alone
     p, calls, world, _ = _go(a1, _fresh(tmp_path, "a1-exists"), state={"reh_exists": True, "reh_label": "something-else"})
     assert not _verbs(calls, "run deploy") and "exists already" in p.stdout and world["reh_label"] == "something-else"
@@ -576,6 +581,8 @@ def test_the_rehearsal_measures_the_header_and_lists_what_the_revision_keeps() -
     for token in ("**A1.", "**A2.", "**A3.", "**A4.", "`forwarder: noroles`", "X-Serverless-Authorization", "`run.googleapis.com/network-interfaces`", "(`WINDOW=rehearsal`)", "`FWD_AR` set by hand"):
         assert token in app, token
     assert "does not clear it" in SHEET and "Direct VPC attachment" in SHEET
+    assert "run.googleapis.com/cloudsql-instances` is absent **or has an empty value**" in SHEET and "(without tags the deploy has no `--network-tags`" in SHEET
+    assert "**From 4c to step 8 nothing may be pushed to `main`.**" in SHEET
     assert "gcloud has no «create only if absent»" in SHEET, "the check-then-act of the rehearsal is a written limit"
     assert "there is no fallback to `Authorization`" in SHEET and "is a **stop**: 8c is not run with the token in `Authorization`" in SHEET, "a token that is not meant for the VM must not be sent to it"
     assert "the header is `Authorization`" not in SHEET
