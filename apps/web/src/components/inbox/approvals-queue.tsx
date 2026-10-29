@@ -17,7 +17,7 @@ import { gateTypeLabel } from '@/lib/gate-type-label';
 import { gateApproveLabelKey, sigApproveAndSignLabelKey } from '@/lib/newsletter-gate-approve-label';
 import { adsBoostObjectiveLabel } from '@/lib/ads-boost-objective-label';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
-import { formatScheduledAt } from '@/components/content/schedule-format';
+import { formatScheduledAt } from '@/lib/schedule-format';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';

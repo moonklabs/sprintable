@@ -11,7 +11,7 @@ import { useChannelPostCalendarData } from '@/components/content/use-channel-pos
 import { CalendarGrid, type CalendarChannel } from '@/components/content/calendar-grid';
 import { UnscheduledLane } from '@/components/content/unscheduled-lane';
 import { CalendarRangeControls } from '@/components/content/calendar-range-controls';
-import { defaultCalendarRange, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { defaultCalendarRange, resolveDisplayTimezone } from '@/lib/schedule-format';
 import { channelConnectionIdentityLabel, useChannelLabel } from '@/lib/channel-label';
 import { useFlatHref } from '@/hooks/use-flat-href';
 

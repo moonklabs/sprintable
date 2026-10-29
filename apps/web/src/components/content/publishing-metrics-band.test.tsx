@@ -13,7 +13,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { PublishingMetricsBand } from './publishing-metrics-band';
-import { formatScheduledAt, resolveDisplayTimezone } from './schedule-format';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/lib/schedule-format';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

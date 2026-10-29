@@ -14,7 +14,7 @@ import {
   formatMinorCurrency, majorToMinor, minorToMajor,
   type GenerationBudgetState, type GenerationBudgetCurrency,
 } from '@/components/content/generation-budget-indicator';
-import { formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/lib/schedule-format';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 

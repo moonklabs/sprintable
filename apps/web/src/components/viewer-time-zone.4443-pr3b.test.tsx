@@ -9,7 +9,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../messages/ko.json';
 import { ViewerTimeZoneProvider } from './viewer-time-zone';
-import { teamOffsetCaption } from './content/schedule-format';
+import { teamOffsetCaption } from '@/lib/schedule-format';
 
 const { runtimeTz, orgTz } = vi.hoisted(() => ({ runtimeTz: { value: 'America/Los_Angeles' as string | null }, orgTz: { value: 'Asia/Seoul' as string | null } }));
 vi.mock('@/lib/viewer-time-zone', async (orig) => ({ ...(await orig<typeof import('@/lib/viewer-time-zone')>()), runtimeTimeZone: () => runtimeTz.value }));

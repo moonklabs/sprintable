@@ -17,7 +17,7 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useChannelLabel } from '@/lib/channel-label';
-import { formatViewerScheduledAt, formatScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt, formatScheduledAt } from '@/lib/schedule-format';
 import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
 import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';

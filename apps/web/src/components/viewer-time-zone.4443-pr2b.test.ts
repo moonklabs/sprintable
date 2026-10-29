@@ -3,7 +3,7 @@
 // not drawn while the zone is unknown (never the server's UTC); a relative time needs no zone and is drawn as before.
 // The process zone is pinned to UTC for this file (no machine-dependent result — PO 22:55Z).
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { formatScheduledAt, formatViewerScheduledAt } from './content/schedule-format';
+import { formatScheduledAt, formatViewerScheduledAt } from '@/lib/schedule-format';
 import { formatDate, formatRelativeTime, formatViewerRelativeTime } from '@/lib/storage/format';
 
 let processTz: string | undefined;

@@ -1,4 +1,4 @@
-import { toDateKey } from '@/components/content/schedule-format';
+import { toDateKey } from '@/lib/schedule-format';
 import { ChannelPostCard } from '@/components/content/channel-post-card';
 import type { ChannelPostCalendarItem } from '@/components/content/use-channel-post-calendar-data';
 

@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { validateScheduledAt } from '@/components/content/validate-scheduled-at';
-import { teamOffsetCaption } from '@/components/content/schedule-format';
+import { teamOffsetCaption } from '@/lib/schedule-format';
 import { useTeamTimeZone } from '@/components/team-time-zone';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 

@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
-import { formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/lib/schedule-format';
 import { declaredMetricsForChannel } from '@/components/insights-board/channel-declared-metrics';
 import { CHANNEL_LABEL_KEYS } from '@/lib/channel-label';
 // story #3746(유나 design gate CHANGES, 2026-09-09) — 이 유니온을 여기서 다시

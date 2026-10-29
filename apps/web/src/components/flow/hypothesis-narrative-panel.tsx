@@ -14,7 +14,7 @@ import type { HypothesisStatus } from '@sprintable/core-storage';
 import { cn } from '@/lib/utils';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
-import { formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/lib/schedule-format';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
