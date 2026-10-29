@@ -17,12 +17,19 @@ export DEPLOY_BUCKET=sprintable-vm-$ENV-deploy BACKUPS_BUCKET=sprintable-vm-$ENV
 gcloud storage buckets create gs://$DEPLOY_BUCKET  --project $PROJECT --location $REGION --uniform-bucket-level-access --public-access-prevention
 gcloud storage buckets create gs://$BACKUPS_BUCKET --project $PROJECT --location $REGION --uniform-bucket-level-access --public-access-prevention
 cat > /tmp/lifecycle.json <<'EOF'
-{"rule":[{"action":{"type":"Delete"},"condition":{"age":14,"matchesPrefix":["db/"]}},{"action":{"type":"Delete"},"condition":{"age":7,"matchesPrefix":["status/"]}},{"action":{"type":"Delete"},"condition":{"age":7,"matchesPrefix":["import/"]}}]}
+{"rule":[{"action":{"type":"Delete"},"condition":{"age":14,"matchesPrefix":["db/"]}},{"action":{"type":"Delete"},"condition":{"age":7,"matchesPrefix":["status/"]}},{"action":{"type":"Delete"},"condition":{"age":7,"matchesPrefix":["import/"]}},{"action":{"type":"Delete"},"condition":{"age":30,"matchesPrefix":["cloudsql-final/"]}}]}
 EOF
 gcloud storage buckets update gs://$BACKUPS_BUCKET --lifecycle-file=/tmp/lifecycle.json
 ```
 The `import/` rule (7 days) is there because the rehearsal and final dumps of the data move (§7) are **whole copies of the database**: they are not kept for ever, and the window plus a day is far inside 7 days. A bucket made before this rule was written gets it with the same `update` line (the file above).
-Undo: `gcloud storage rm -r gs://$DEPLOY_BUCKET gs://$BACKUPS_BUCKET` (only while they hold nothing you need).
+The `cloudsql-final/` rule (30 days) keeps the Cloud SQL exports and the copy of the final dump that the removals sheets make (`REMOVALS-dev.md`, `REMOVALS-prod.md`): whole copies of a database, kept for a month and no longer. It was added to the prod bucket by the PO on 2026-10-29; a bucket made before that has three rules, and `--lifecycle-file` replaces the whole configuration, so read the old one first (CUTOVER-prod.md shows how) before applying this file to it.
+
+**No legacy project-viewer reading on the buckets.** A new bucket carries `roles/storage.legacyBucketReader` and `roles/storage.legacyObjectReader` for `projectViewer:$PROJECT` by default: everyone with the project viewer role could list and read the dumps. Take both away from both buckets, right after they are made (the roles of the VM's account are given in section 2, not through these):
+```bash
+for b in $DEPLOY_BUCKET $BACKUPS_BUCKET; do for r in roles/storage.legacyBucketReader roles/storage.legacyObjectReader; do gcloud storage buckets remove-iam-policy-binding gs://$b --member=projectViewer:$PROJECT --role=$r; done; done
+gcloud storage buckets get-iam-policy gs://$BACKUPS_BUCKET --format=json | jq -r '.bindings[] | select(any(.members[]; startswith("projectViewer:"))) | .role'   # prints nothing
+```
+(A binding that is already gone makes the remove line fail with «not found»: that is the state wanted, go on.) Undo: `gcloud storage rm -r gs://$DEPLOY_BUCKET gs://$BACKUPS_BUCKET` (only while they hold nothing you need).
 
 ## 2. VM identity and its access (the part most likely to be forgotten)
 

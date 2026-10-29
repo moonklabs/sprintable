@@ -118,7 +118,8 @@ def test_the_final_dump_is_copied_out_of_the_seven_day_prefix_before_anything_is
     copy = [b for b in _fenced(SHEET) if "COPY-OK" in b][0]
     assert "gcloud storage cp" in copy and "cloudsql-final/$P/" in copy and "P=prod-final-20261029T111058Z" in copy
     lifecycle = RUNBOOK.split("lifecycle.json <<'EOF'")[1].split("EOF")[0]
-    assert "cloudsql-final" not in lifecycle, "the prefix the exports and the copy go to has no expiry rule"
+    assert '"age":30,"matchesPrefix":["cloudsql-final/"]' in lifecycle, "the prefix the exports and the copy go to is kept 30 days by the bucket's rule"
+    assert "kept 30 days by the bucket's lifecycle rule" in SHEET and "no expiry" not in SHEET
     assert "gs://${BACKUPS_BUCKET:?}/cloudsql-final/$STAMP/$db.sql.gz" in _block("R5", "EXPORTS-OK")
 
 
@@ -339,3 +340,40 @@ def test_the_forwarder_is_deployed_with_the_values_that_are_live_and_the_real_gc
     assert "10 instances × 1 request" in CUTOVER and "0.08 CPU, 128 MiB, concurrency 1" in CUTOVER
     r6 = _rows()["R6"]
     assert "0.08 vCPU, 128 Mi, concurrency 1, maximum 10" in r6 and "CUTOVER-prod.md" in r6.split("**Why it is not removed today")[1].split("\n")[0]
+
+
+# ── what the PO changed by hand on 2026-10-29, now written in the source ──────────────────────────────────────────────────────────────────
+
+def test_the_takeover_step_has_the_realtime_host_line_and_the_declaration_names_that_host() -> None:
+    env = (_ROOT / "deploy/vm/env/prod.yaml").read_text()
+    assert "realtime: realtime.sprintable.ai" in env
+    step = CUTOVER.split("## 6–7. The data and the takeover")[1].split("## 8.")[0]
+    line = step.split("**The realtime host")[1].split("**Undo:**")[0]
+    for token in ("`realtime.sprintable.ai`", "dns-before-realtime.json", "`dns-before-cutover.json` of step 3", "DNS only", "`dev-realtime`", "dig +short realtime.sprintable.ai", "dig +short api.sprintable.ai",
+                  "by waiting, not by pushing", "an empty error log proves nothing", "first new attempt", "grep -E 'obtained|error'", "prints `200`", "do not reload or restart Caddy", "Waiting is the default"):
+        assert token in line, token
+    assert "dns-before-realtime.json" in step.split("**Undo:**")[1].split("\n")[0] and "dns-realtime-before" not in step
+    assert "| `dev-realtime` | A, DNS only | same A |" in RUNBOOK, "the shape it copies is the one RUNBOOK §4 states"
+    assert "{$API_HOST}, {$REALTIME_HOST} {" in (_ROOT / "deploy/vm/Caddyfile").read_text(), "the realtime host is served by the same site block as the API host, so its health route answers"
+    assert CUTOVER.count("dns-before-cutover.json") >= 2, "the record file it names the shape of is written by step 3 of the sheet"
+
+
+def test_the_buckets_lose_the_legacy_project_viewer_roles_in_the_runbook_and_the_real_gcloud_takes_the_lines(tmp_path: Path) -> None:
+    sec = RUNBOOK.split("## 1. Buckets")[1].split("## 2.")[0]
+    block = [b for b in re.findall(r"```(?:bash)?\n(.*?)```", sec, flags=re.S) if "remove-iam-policy-binding" in b][0]
+    assert "for b in $DEPLOY_BUCKET $BACKUPS_BUCKET; do for r in roles/storage.legacyBucketReader roles/storage.legacyObjectReader; do" in block
+    assert "--member=projectViewer:$PROJECT" in block and sec.index("buckets create") < sec.index("remove-iam-policy-binding"), "after the buckets exist"
+    assert "prints nothing" in block and "already gone" in sec
+    from tests import _real_gcloud as _gcloud
+    for role in ("roles/storage.legacyBucketReader", "roles/storage.legacyObjectReader"):
+        home = tmp_path / role.rsplit(".", 1)[1]
+        home.mkdir()
+        out = _gcloud.text(_gcloud.run(["storage", "buckets", "remove-iam-policy-binding", "gs://parse-only-bucket", "--member=projectViewer:parse-only-project", f"--role={role}"], home))
+        assert "do not currently have an active account" in out, out[:300]
+
+
+def test_no_sheet_of_deploy_vm_still_says_the_cloud_sql_exports_have_no_expiry() -> None:
+    for f in sorted((_ROOT / "deploy/vm").glob("*.md")):
+        text = f.read_text()
+        assert "no expiry" not in text and "has no expiry rule" not in text, f.name
+    assert "which the bucket rule of RUNBOOK §1 keeps 30 days" in (_ROOT / "deploy/vm/REMOVALS-dev.md").read_text()

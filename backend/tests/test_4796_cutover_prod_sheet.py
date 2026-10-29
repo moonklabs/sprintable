@@ -254,7 +254,7 @@ case "$*" in
   *"executions list"*) case " $* " in *" $BUSY "*) echo "exec-1" ;; esac ;;
   *"compute instances describe"*"serviceAccounts"*) echo vm-sa@sprintable-494803.iam.gserviceaccount.com ;;
   *"compute instances describe"*) echo 34.64.1.2 ;;
-  *"buckets describe"*"json"*) echo '{"lifecycle_config":{"rule":[{"condition":{"age":14,"matchesPrefix":["db/"]}},{"condition":{"age":7,"matchesPrefix":["status/"]}},{"condition":{"age":7,"matchesPrefix":["import/"]}}]}}' ;;
+  *"buckets describe"*"json"*) echo '{"lifecycle_config":{"rule":[{"condition":{"age":14,"matchesPrefix":["db/"]}},{"condition":{"age":7,"matchesPrefix":["status/"]}},{"condition":{"age":30,"matchesPrefix":["cloudsql-final/"]}},{"condition":{"age":7,"matchesPrefix":["import/"]}}]}}' ;;
   *"buckets describe"*) printf 'enforced\tTrue\n' ;;
   *"secrets versions list"*) echo 1 ;;
   *"firewall-rules list"*) printf 'NAME PRIORITY FROM TARGET ALLOW DENY\n' ;;
@@ -730,9 +730,9 @@ def test_the_lifecycle_rule_of_the_sheet_is_the_one_of_runbook_section_one(tmp_p
     assert p.returncode == 0, p.stderr
     written = json.loads((_w(tmp_path / "lc") / "lifecycle.json").read_text())
     runbook = json.loads(RUNBOOK_TEXT.split("lifecycle.json <<'EOF'")[1].split("EOF")[0])
-    assert written == runbook and {r["condition"]["matchesPrefix"][0]: r["condition"]["age"] for r in written["rule"]} == {"db/": 14, "status/": 7, "import/": 7}
+    assert written == runbook and {r["condition"]["matchesPrefix"][0]: r["condition"]["age"] for r in written["rule"]} == {"db/": 14, "status/": 7, "import/": 7, "cloudsql-final/": 30}
     assert _verbs(calls, "buckets update") and "--lifecycle-file=lifecycle.json" in "\n".join(calls)
-    assert "14 days  db/" in p.stdout and "7 days  status/" in p.stdout and "7 days  import/" in p.stdout, p.stdout
+    assert "14 days  db/" in p.stdout and "7 days  status/" in p.stdout and "7 days  import/" in p.stdout and "30 days  cloudsql-final/" in p.stdout, p.stdout
 
 
 RUNBOOK_TEXT = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
