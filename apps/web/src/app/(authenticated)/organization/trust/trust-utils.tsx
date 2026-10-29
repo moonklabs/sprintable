@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/lib/schedule-format';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 export interface OrgSummaryRow {

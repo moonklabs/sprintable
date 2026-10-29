@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useChannelLabel } from '@/lib/channel-label';
-import { formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/lib/schedule-format';
 import { InsightsBoardMetricCell } from '@/components/insights-board/insights-board-metric-cell';
 import { AdsSpendCell } from '@/components/insights-board/ads-spend-cell';
 import { FollowUpDialog } from '@/components/insights-board/follow-up-dialog';

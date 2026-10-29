@@ -6,7 +6,7 @@
 import { firstGraphemes } from '@/lib/first-graphemes';
 import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
 import type { AssetSourceLink } from '@/lib/storage/types';
-import { formatScheduledAt, toDateKey } from '@/components/content/schedule-format';
+import { formatScheduledAt, toDateKey } from '@/lib/schedule-format';
 
 /** 파일 아이콘 틴트 분류 — 목업 `.fic.*` 5종에 1:1 대응. */
 export type FileTint = 'img' | 'pdf' | 'doc' | 'zip' | 'code';

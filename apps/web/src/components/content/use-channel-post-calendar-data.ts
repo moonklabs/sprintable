@@ -3,7 +3,7 @@
 import { useMemo } from 'react';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useAsyncResource } from '@/hooks/use-async-resource';
-import { resolveDisplayTimezone, toDateKey } from './schedule-format';
+import { resolveDisplayTimezone, toDateKey } from '@/lib/schedule-format';
 
 // story #3422(Phase1·마케팅운영, doc §11 T8) — 캘린더가 필요로 하는 두 축(그리드용 기간
 // 조회·「날짜 미정」 레인용 미예약 조회)은 서로 배타적 필터라(BE #3423/PR#3775 —

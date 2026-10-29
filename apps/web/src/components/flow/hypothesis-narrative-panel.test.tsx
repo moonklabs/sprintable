@@ -11,7 +11,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { HypothesisNarrativePanel } from './hypothesis-narrative-panel';
 import { bumpOrgSyncVersion } from '@/lib/project-context-client';
-import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/lib/schedule-format';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

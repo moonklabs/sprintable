@@ -6,7 +6,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
-import { formatScheduledAt } from '@/components/content/schedule-format';
+import { formatScheduledAt } from '@/lib/schedule-format';
 import type { GateItem } from '@/components/kanban/types';
 import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity-ref';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';

@@ -6,7 +6,7 @@ import { FlaskConical } from 'lucide-react';
 import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
-import { formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/lib/schedule-format';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 /**

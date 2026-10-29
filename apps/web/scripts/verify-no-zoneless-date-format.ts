@@ -38,7 +38,7 @@ const BASELINE_PATH = path.resolve(HERE, 'zoneless-date-format-baseline.json');
 const EXT_RE = /\.(tsx?|jsx?)$/;
 const TEST_RE = /\.test\.(tsx?|jsx?)$/;
 // the definition itself (its fallback is what ③ counts at the call sites)
-const DEFINITION_FILES = new Set(['components/content/schedule-format.ts']);
+const DEFINITION_FILES = new Set(['lib/schedule-format.ts']);
 
 export type ZonelessKind = 'zoneless-intl' | 'fixed-locale' | 'no-arg-display-tz' | 'fixed-zone' | 'runtime-calendar';
 

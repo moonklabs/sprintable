@@ -13,7 +13,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { actorRowLabels, memberDisplayLabel, memberOptionLabels } from '@/lib/member-display';
-import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/lib/schedule-format';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { ActivityTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 

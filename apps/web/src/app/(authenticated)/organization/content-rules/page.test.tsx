@@ -16,7 +16,7 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
 }));
 
 import ContentRulesPage from './page';
-import { formatScheduledAt, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { formatScheduledAt, resolveDisplayTimezone } from '@/lib/schedule-format';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

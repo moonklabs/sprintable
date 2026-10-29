@@ -6,7 +6,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { FailureActionBadge } from './failure-action-badge';
 import { blockedByConnection, blockedReason, deriveFailureAction, type FailureAction } from './failure-action';
-import { formatScheduledAt } from './schedule-format';
+import { formatScheduledAt } from '@/lib/schedule-format';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 vi.mock('next/navigation', () => ({ useParams: () => ({}) }));

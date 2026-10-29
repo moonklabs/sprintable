@@ -20,7 +20,7 @@ import { canEditOrgMemberRole, orgRoleLabel } from '@/lib/org-member-role';
 import { memberDisplayLabel } from '@/lib/member-display';
 import { copyTextSafely } from '@/lib/clipboard';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
-import { formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/lib/schedule-format';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface OrgMember {

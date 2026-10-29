@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { GateEvidence, GateActivityHistory, GateLinkedEvidenceSection, gateNeedsAction, gateDecision } from '@/components/cage/gate-evidence';
 import { NewsletterSendStatus } from '@/components/cage/newsletter-send-status';
-import { resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { resolveDisplayTimezone } from '@/lib/schedule-format';
 import { ProductionWorkbenchEvidencePanel } from '@/components/cage/production-workbench-evidence';
 import { LineagePerformancePanel } from '@/components/cage/lineage-performance';
 import { BoostExecutionControl } from '@/components/cage/boost-execution-control';

@@ -17,7 +17,7 @@ import { actorRowLabels, memberLookup, memberOptionLabels } from '@/lib/member-d
 import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
 import { fetchWithAuth } from '@/lib/db/client';
 import { withProjectParam } from '@/lib/with-project-param';
-import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/components/content/schedule-format';
+import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/lib/schedule-format';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { RowName } from '@/components/shared/row-name';
 
