@@ -14,7 +14,7 @@ import { ViewerDate, ViewerTimeZoneProvider } from './viewer-time-zone';
 import { createRoot } from 'react-dom/client';
 import { VIEWER_TIME_OPTIONS, shiftDayKey, teamDayKey } from '@/lib/viewer-time-zone';
 import { LEGAL_TIME_ZONE, formatLegalDate } from '@/lib/legal-date';
-import { formatScheduledAt } from './content/schedule-format';
+import { formatScheduledAt } from '@/lib/schedule-format';
 import { formatRelativeTime } from '@/lib/storage/format';
 
 const { runtimeTz } = vi.hoisted(() => ({ runtimeTz: { value: 'Asia/Seoul' as string | null } }));

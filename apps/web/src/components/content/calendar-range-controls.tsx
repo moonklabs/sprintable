@@ -1,6 +1,6 @@
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
-import { shiftCalendarRange, toDateKey } from '@/components/content/schedule-format';
+import { shiftCalendarRange, toDateKey } from '@/lib/schedule-format';
 
 // story #3422(doc §11 T8) — 주 단위 이동(월 단위는 후속, 화면 자체는 range를 그대로
 // 받아 그리므로 이 컴포넌트가 range 계산 방식을 늘려도 CalendarGrid는 안 바뀐다).

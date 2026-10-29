@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { fetchWithAuth } from '@/lib/db/client';
 import { majorToMinor, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 import { validateScheduledAt } from '@/components/content/validate-scheduled-at';
-import { teamOffsetCaption } from '@/components/content/schedule-format';
+import { teamOffsetCaption } from '@/lib/schedule-format';
 import { useTeamTimeZone } from '@/components/team-time-zone';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 

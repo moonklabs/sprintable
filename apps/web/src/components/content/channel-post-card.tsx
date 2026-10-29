@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
 import { StatusChip } from '@/components/content/status-chip';
-import { formatScheduledAt } from '@/components/content/schedule-format';
+import { formatScheduledAt } from '@/lib/schedule-format';
 import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';

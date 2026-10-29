@@ -4,7 +4,7 @@
 // 1자만 쓰도록 고정 — 라틴 다어절(John Smith→JS)은 국제 관례대로 유지.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { initials, formatRelativeTime } from './format';
-import { formatScheduledAt } from '@/components/content/schedule-format';
+import { formatScheduledAt } from '@/lib/schedule-format';
 
 describe('[SID:4794] initials() of a name that starts with an emoji is a whole letter, never «�»', () => {
   const LONE = /[\ud800-\udbff](?![\udc00-\udfff])/;

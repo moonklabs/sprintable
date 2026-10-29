@@ -1,6 +1,6 @@
 import type { AgentRunFailureDisposition, RetryableFailureInput } from './agent-retry';
 import { getFailureDisposition } from './agent-retry';
-import { dateKeysToInstants } from '@/components/content/schedule-format';
+import { dateKeysToInstants } from '@/lib/schedule-format';
 import { dayKeyIn, shiftDayKey } from '@/lib/viewer-time-zone';
 
 export const DEFAULT_RUN_STATUS_FILTER = 'completed';

@@ -291,12 +291,34 @@ def test_repo_allowlist_entries_are_wellformed():
     reason·declared_by·until 누락이 나기 쉽다."""
     mod = _load()
     pins, stalls = mod._load_allowlist()
-    from datetime import date
+    from datetime import date, timedelta
     for kind, entries in (("declared_pins", pins), ("declared_stalls", stalls)):
         for service, entry in entries.items():
-            problem = mod._expired(entry, date(2026, 7, 25))
+            # the form is judged on the eve of the entry's own `until`: a fixed day would make every entry «too far» or «expired» as the calendar moves,
+            # and the guard itself (it runs after each deploy) is what judges the calendar — this test must not turn red on a date
+            until = date.fromisoformat(str(entry.get("until")))
+            problem = mod._expired(entry, until - timedelta(days=1))
             assert problem is None, f"{kind}/{service}: {problem}"
             assert entry.get("declared_by"), f"{kind}/{service}: declared_by 누락"
+
+
+def test_the_backend_prod_pin_of_step_4c_is_declared_and_says_what_not_to_do():
+    """story 4796: the forwarder of CUTOVER-prod step 4c leaves `sprintable-backend-prod` pinned on purpose (the real revision at 100%, the forwarder at 0%),
+    and the guard's own advice for a pin — `update-traffic --to-latest` — is an accident in that state. The declaration says so."""
+    mod = _load()
+    pins, _ = mod._load_allowlist()
+    entry = pins["sprintable-backend-prod"]
+    assert str(entry["until"]) == "2026-11-27" and entry["declared_by"], entry   # a day to judge again, not a day to delete: the guard takes 30 days at most
+    reason = " ".join(str(entry["reason"]).split())
+    for token in ("CUTOVER-prod 4c", "--to-latest", "사고", "508", "8c 뒤에 지우지 않는다", "REMOVALS-prod", "다시 판단할 날", "12단계 1번 블록"):
+        assert token in reason, token
+    # and the guard accepts exactly the live shape of the evening (the real revision 100% by name, the forwarder revision only as a tag at 0%)
+    from datetime import date
+    assert mod._expired(entry, date(2026, 10, 29)) is None
+    live = [{"revisionName": "sprintable-backend-prod-00342-mn9", "percent": 100}, {"revisionName": "sprintable-backend-prod-fwd-20261030", "percent": 0, "tag": "fwd"}]
+    assert mod._is_pinned(live) is True, "it is a pin: that is why it is declared"
+    after_8c = [{"revisionName": "sprintable-backend-prod-fwd-20261030", "percent": 100}, {"revisionName": "sprintable-backend-prod-fwd-20261030", "percent": 0, "tag": "fwd"}]
+    assert mod._is_pinned(after_8c) is True, "8c moves the traffic by revision name: the service is still pinned, the declaration is still the truth"
 
 
 @pytest.mark.parametrize("traffic,expected", [

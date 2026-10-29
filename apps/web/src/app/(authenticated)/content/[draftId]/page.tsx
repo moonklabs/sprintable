@@ -22,7 +22,7 @@ import { StatusChip } from '@/components/content/status-chip';
 import { AuthorKindBadge } from '@/components/content/author-kind-badge';
 import { parseSitePostApiError } from '@/components/content/api-error';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { formatViewerScheduledAt } from '@/components/content/schedule-format';
+import { formatViewerScheduledAt } from '@/lib/schedule-format';
 import { RawDetailsToggle } from '@/components/content/raw-details-toggle';
 import { postPublicationRetry, PublicationRetryResultLine, withReload, type PublicationRetryResult, type ReloadOutcome } from '@/components/content/publication-retry';
 // story #3483(BE 3482 계약, 3472 2부/§16-7과 동형) — 원문(site_post) 초안의 규칙

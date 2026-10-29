@@ -54,7 +54,7 @@ steps:
   - id: build-frontend-vm
     name: gcr.io/cloud-builders/docker
     entrypoint: bash
-    timeout: 1200s
+    timeout: 1800s
     waitFor: [resolve-backend]
     env:
       - DOCKER_BUILDKIT=1
@@ -86,8 +86,10 @@ steps:
           DEBIAN_FRONTEND=noninteractive apt-get update -qq
           DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 python3-yaml
         fi
-        # builds (linux/amd64), checks what was baked (the VM API host in, no Cloud Run address in), pushes, and prints the digest reference as its LAST line
-        bash deploy/vm/bin/build-frontend-vm.sh "${_DEPLOY_ENV}" "${COMMIT_SHA}" "$$repo/frontend-vm:${COMMIT_SHA}" --push \
+        # story 4805: the frontend inputs (sources, base image digests, the five values, the build scripts) have an id; an image an earlier FULL build made from the same id gets the commit put on top
+        # (a minute) instead of a new Next.js build (six); in every other case it is the full build — builds (linux/amd64), checks what was baked (the VM API host in, no Cloud Run address in),
+        # pushes — and prints the digest reference as its LAST line
+        bash deploy/vm/bin/frontend-vm-image.sh "${_DEPLOY_ENV}" "${COMMIT_SHA}" "$$repo/frontend-vm" \
           --set "NEXT_PUBLIC_GA4_MEASUREMENT_ID=$$VM_GA4_MEASUREMENT_ID" \
           --set "NEXT_PUBLIC_EE_ENABLED=$$VM_EE_ENABLED" \
           --set "NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED=$$VM_SUPPORT_WIDGET_ENABLED" \
@@ -127,8 +129,10 @@ steps:
         gcloud storage cp "$$out/bundle/desired.json" "gs://${_VM_DEPLOY_BUCKET}/candidates/${COMMIT_SHA}.json"
         echo "bundle-vm: gs://${_VM_DEPLOY_BUCKET}/bundles/${COMMIT_SHA}.tgz (+ candidates/${COMMIT_SHA}.json); desired.json untouched"
 
-# stated here, not borrowed from cloudbuild.yaml: the same worker size as the Cloud Run build (the Next.js build is what it is), and a limit that covers the three steps (120 + 1200 + 120 s) with room.
-timeout: 1800s
+# stated here, not borrowed from cloudbuild.yaml: a limit that covers the three steps (120 + 1800 + 120 s) with room.
+# Story 4805: no `machineType` — Cloud Build's default worker (documented as e2-standard-2: 2 vCPU, 8 GB, the one with free minutes each month; the build record shows the field empty). Measured on the same commit, same two images:
+# the frontend build took 5.2 minutes on E2_HIGHCPU_8 and 10.6 on the default worker (x2.03), so the step limit is 1800 s (the slowest frontend build seen on the 8-core worker was 8.5 minutes; x2 = 17).
+# To go back to the 8-core worker: put `machineType: E2_HIGHCPU_8` under `options` (and the limits may go back to 1200 / 1800 s).
+timeout: 2400s
 options:
-  machineType: E2_HIGHCPU_8
   logging: CLOUD_LOGGING_ONLY

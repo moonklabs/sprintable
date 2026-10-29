@@ -2,7 +2,7 @@
  * story #4280(민 기기 · 배포 27) — `toISOString()`을 10자로 잘라 «날짜»를 만드는 자리(UTC 날짜 자르기) 전수 가드.
  *
  * 왜: 그 값은 UTC의 날짜라 KST(+9)에서는 00~09시에 «어제»가 된다. 활동 로그 · 팀 활동 기본 기간(끝 날짜가 어제)과 스토리지 «생성» 날짜가
- * 이것으로 틀렸다. 사람에게 보이는 날짜 · «오늘»은 표시 시간대 기준(`components/content/schedule-format.ts`의 toDateKey · todayDateKey ·
+ * 이것으로 틀렸다. 사람에게 보이는 날짜 · «오늘»은 표시 시간대 기준(`lib/schedule-format.ts`의 toDateKey · todayDateKey ·
  * defaultPastDaysDateRange · dateKeysToInstants)으로 만든다.
  *
  * 규칙: 앱 코드(테스트 제외)에 새 UTC 날짜 자르기 0. UTC가 **의도**인 자리만 아래 허용 목록에 이유와 함께 둔다.
