@@ -119,7 +119,8 @@ def _run_http() -> None:
             stateless_http=True,
             transport_security=transport_security,
             max_request_body_size=MAX_MCP_REQUEST_BODY_SIZE,
-        )
+        ),
+        get_stream=settings.mcp_http_get_stream,
     )
     print(
         f"Sprintable MCP — Streamable HTTP on {settings.mcp_http_host}:{port}/mcp "
