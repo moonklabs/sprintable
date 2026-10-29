@@ -109,15 +109,6 @@ export class SprintService {
     return this.repo.update(id, { status: 'active' });
   }
 
-  async getBurndown(id: string) {
-    const token = await this.getToken();
-    if (token) return fastapiCall<Record<string, unknown>>('GET', `/api/v2/sprints/${id}/burndown`, token);
-    // story #4293 — 예전 이 아래 직접 DB 갈래(스토리 합산 · 이상선 · UTC 날짜 자르기)는 유일한 호출자(api/sprints/[id]/burndown)가
-    // db를 넘기지 않아(dbClient = undefined) 운영 도달 0이었다 — 걷고, 토큰이 없을 때의 빈 결과만 남긴다.
-    const sprint = await this.getById(id);
-    return { sprint, total_points: 0, done_points: 0, remaining_points: 0, completion_pct: 0, stories_count: 0, done_count: 0, ideal_line: [], actual_line: [] };
-  }
-
   async kickoff(id: string, message?: string) {
     const token = await this.getToken();
     if (token) return fastapiCall<{ notified: number }>('POST', `/api/v2/sprints/${id}/kickoff`, token, { body: { message } });
@@ -131,21 +122,6 @@ export class SprintService {
     return { notified: notifications.length };
   }
 
-  async checkin(id: string, date: string) {
-    const token = await this.getToken();
-    if (token) return fastapiCall<Record<string, unknown>>('POST', `/api/v2/sprints/${id}/checkin`, token, { body: { date } });
-    const sprint = await this.getById(id);
-    if (!this.db) return { total_stories: 0, total_points: 0, done_points: 0, completion_pct: 0, missing_standups: [] };
-    const { data: stories, error: storiesError } = await this.db.from('stories').select('status, story_points, assignee_id').eq('sprint_id', id);
-    if (storiesError) throw storiesError;
-    const { data: members } = await this.db.from('team_members').select('id, name').eq('project_id', sprint.project_id as string).eq('is_active', true);
-    const { data: standups } = await this.db.from('standup_entries').select('author_id').eq('project_id', sprint.project_id as string).eq('date', date);
-    const standupAuthors = new Set((standups ?? []).map((s) => s.author_id as string));
-    const missing = (members ?? []).filter((m) => !standupAuthors.has(m.id as string));
-    const totalPts = (stories ?? []).reduce((sum, s) => sum + ((s.story_points as number) ?? 0), 0);
-    const donePts = (stories ?? []).filter((s) => s.status === 'done').reduce((sum, s) => sum + ((s.story_points as number) ?? 0), 0);
-    return { total_stories: stories?.length ?? 0, total_points: totalPts, done_points: donePts, completion_pct: totalPts > 0 ? Math.round((donePts / totalPts) * 100) : 0, missing_standups: missing.map((m) => ({ id: m.id, name: m.name })) };
-  }
 
   async close(id: string) {
     const sprint = await this.getById(id);

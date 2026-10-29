@@ -39,13 +39,10 @@ SNAPSHOT: dict[str, dict[str, str]] = {
     "sprintable_update_goal": {"target_date": DATE_ONLY, "measure_after": OFFSET_REQUIRED},
     "sprintable_add_epic": {"target_date": DATE_ONLY},
     "sprintable_update_epic": {"target_date": DATE_ONLY, "measure_after": OFFSET_REQUIRED},
-    "sprintable_create_sprint": {"start_date": DATE_ONLY, "end_date": DATE_ONLY},
-    "sprintable_update_sprint": {"start_date": DATE_ONLY, "end_date": DATE_ONLY},
     "sprintable_standup_missing": {"date": DATE_ONLY},
     "sprintable_get_standup": {"date": DATE_ONLY},
     "sprintable_save_standup": {"date": DATE_ONLY},
     "sprintable_list_standup_entries": {"date": DATE_ONLY},
-    "sprintable_checkin_sprint": {"date": DATE_ONLY},
     "sprintable_list_chat_messages": {"before": CURSOR},
     "sprintable_check_notifications": {"before": CURSOR},
     # story #4330 AC4 — 요청 본문의 일시도 `OffsetDatetime`이라 오프셋 없으면 422(쿼리와 같은 봉투). 기록하는 값 · 서버가 준

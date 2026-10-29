@@ -97,17 +97,6 @@ function excludeHidden(stories: Story[]): Story[] {
   return stories.filter((s) => !s.is_excluded);
 }
 
-interface BurndownData {
-  total_points: number;
-  done_points: number;
-  remaining_points: number;
-  completion_pct: number;
-  stories_count: number;
-  done_count: number;
-  ideal_line: Array<{ date: string; points: number }>;
-  actual_line: Array<{ date: string; points: number }>;
-}
-
 interface SprintsClientProps {
   projectId: string;
   orgId: string;
@@ -434,8 +423,6 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
   const [sprints, setSprints] = useState<Sprint[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Sprint | null>(null);
-  const [burndown, setBurndown] = useState<BurndownData | null>(null);
-  const [loadingBurndown, setLoadingBurndown] = useState(false);
   const [sprintStories, setSprintStories] = useState<Story[]>([]);
   const [sprintStoriesHasMore, setSprintStoriesHasMore] = useState(false);
   const [sprintStoriesNextCursor, setSprintStoriesNextCursor] = useState<string | null>(null);
@@ -503,9 +490,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
   useEffect(() => { void loadSprints(); }, [loadSprints]);
 
   const loadSprintDetail = useCallback(async (sprint: Sprint) => {
-    setLoadingBurndown(true);
     setLoadingStories(true);
-    setBurndown(null);
     setSprintStories([]);
     setSprintStoriesHasMore(false);
     setSprintStoriesNextCursor(null);
@@ -515,20 +500,16 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
     setActionError(null);
 
     try {
-      // story #3519(§16-7 2부, PO 確定 2026-09-05) — 셋 다 부수(res.ok?채움:그대로 두는
-      // degrade, loadError 없음)인데 catch가 어디에도 없었다 — 셋 중 하나가 네트워크단
+      // story #3519(§16-7 2부, PO 確定 2026-09-05) — 둘 다 부수(res.ok?채움:그대로 두는
+      // degrade, loadError 없음)인데 catch가 어디에도 없었다 — 하나가 네트워크단
       // reject(HTTP status가 아니라 fetch 자체 실패)면 Promise.all 전체가 던져 나머지도
       // 조용히 못 채워졌다(setLoading은 finally라 꺼지긴 하나, 원인 표시가 0). leg별로
-      // 격리해 하나가 죽어도 나머지 둘은 그대로 채워진다(doc-status-rail.tsx 정본 패턴).
-      const [burndownRes, storiesRes, backlogRes] = await Promise.all([
-        fetchWithAuth(`/api/sprints/${sprint.id}/burndown`).catch(() => null),
+      // 격리해 하나가 죽어도 나머지는 그대로 채워진다(doc-status-rail.tsx 정본 패턴).
+      // story 4811 — 번다운 leg는 걷었다(분석 경로 삭제): 이 화면의 상세는 스토리 · 백로그 둘만 읽는다.
+      const [storiesRes, backlogRes] = await Promise.all([
         fetchWithAuth(`/api/stories?project_id=${projectId}&sprint_id=${sprint.id}&limit=20`).catch(() => null),
         fetchWithAuth(`/api/stories/backlog?project_id=${projectId}&limit=20`).catch(() => null),
       ]);
-      if (burndownRes?.ok) {
-        const json = await burndownRes.json();
-        setBurndown(json.data);
-      }
       if (storiesRes?.ok) {
         const json = await storiesRes.json() as { data?: Story[]; meta?: { hasMore?: boolean; nextCursor?: string | null } };
         setSprintStories(excludeHidden(json.data ?? []));
@@ -542,7 +523,6 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         setBacklogNextCursor(json.meta?.nextCursor ?? null);
       }
     } finally {
-      setLoadingBurndown(false);
       setLoadingStories(false);
     }
   }, [projectId]);
@@ -1000,47 +980,15 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         </div>
       ) : null}
 
-      {/* Burndown */}
-      {loadingBurndown ? (
-        <p className="text-sm text-muted-foreground">{t('loading')}</p>
-      ) : burndown ? (
-        <div className="mb-6 space-y-3">
-          <p className="text-xs font-medium text-muted-foreground">{t('burndown')}</p>
-          {/* 진행 바 — 기존 completion_pct 시각화(새 데이터 0·번다운 주인공) */}
-          <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-            <div className="h-full rounded-full bg-success transition-all" style={{ width: `${burndown.completion_pct}%` }} />
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            <div className="rounded-md border border-border bg-muted/30 p-2 text-center">
-              <p className="text-xl font-bold text-foreground">{burndown.completion_pct}%</p>
-              <p className="text-[10px] text-muted-foreground">{t('completionRate')}</p>
-            </div>
-            <div className="rounded-md border border-border bg-muted/30 p-2 text-center">
-              <p className="text-xl font-bold text-foreground">{burndown.done_points}<span className="text-xs text-muted-foreground">/{burndown.total_points}</span></p>
-              <p className="text-[10px] text-muted-foreground">SP</p>
-            </div>
-            <div className="rounded-md border border-border bg-muted/30 p-2 text-center">
-              <p className="text-xl font-bold text-foreground">{burndown.done_count}<span className="text-xs text-muted-foreground">/{burndown.stories_count}</span></p>
-              <p className="text-[10px] text-muted-foreground">{t('stories')}</p>
-            </div>
-          </div>
-          {burndown.ideal_line.length > 0 ? (
-            <div className="rounded-md border border-border p-3">
-              <p className="mb-1 text-xs font-medium text-muted-foreground">{t('burndown')}</p>
-              <div className="flex gap-4 text-xs text-muted-foreground">
-                <span>{t('idealLine')}: {burndown.ideal_line[0]?.points ?? 0} → 0</span>
-                <span>{t('actualLine')}: {burndown.actual_line[0]?.points ?? 0} → {burndown.actual_line[burndown.actual_line.length - 1]?.points ?? 0}</span>
-              </div>
-            </div>
-          ) : null}
-          {selected.report_doc_id ? (
-            <a
-              href={flatHref(`/docs?id=${selected.report_doc_id}`)}
-              className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 p-3 text-sm font-medium text-primary transition hover:bg-primary/10"
-            >
-              📄 {t('viewReport')}
-            </a>
-          ) : null}
+      {/* story 4811 — 번다운 카드는 걷었다. 보고서 링크(사람이 보는 길)만 남긴다 */}
+      {selected.report_doc_id ? (
+        <div className="mb-6">
+          <a
+            href={flatHref(`/docs?id=${selected.report_doc_id}`)}
+            className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 p-3 text-sm font-medium text-primary transition hover:bg-primary/10"
+          >
+            📄 {t('viewReport')}
+          </a>
         </div>
       ) : null}
 

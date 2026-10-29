@@ -1,5 +1,5 @@
 import uuid
-from datetime import date as date_type, datetime
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.datetime_query import OffsetDatetime
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db, get_read_db
-from app.models.pm import Story
 from app.models.project import OrgMember
 from app.models.project_access import ProjectAccess
 from app.models.team import TeamMember
@@ -549,114 +548,6 @@ async def kickoff_sprint(
         not_found_detail="Sprint not found")
     # Notification dispatch is Phase D — return stub for Phase B
     return {"notified": 0, "sprint_id": str(id), "message": body.message}
-
-
-@router.get("/{id}/summary")
-async def sprint_summary(
-    id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    repo: SprintRepository = Depends(_get_repo),
-    auth: AuthContext = Depends(get_current_user),
-) -> dict:
-    """GET /api/v2/sprints/{id}/summary — 스프린트 스토리 상태별 집계 (AC3 S-STANDUP-FIX)."""
-    # E-SECURITY SEC-S8(story 83ea3d6a) CC: project 접근권 검증 없이 남의 project sprint의
-    # 스토리 상태별 집계가 노출됐다.
-    from app.services.project_auth import require_project_access
-    sprint = await repo.get(id)
-    if sprint is None:
-        raise HTTPException(status_code=404, detail="Sprint not found")
-    await require_project_access(db, uuid.UUID(auth.user_id), sprint.project_id, repo.org_id,
-        not_found_detail="Sprint not found")
-
-    stories_result = await db.execute(
-        select(Story.status, Story.story_points).where(Story.sprint_id == id)
-    )
-    stories = stories_result.all()
-
-    status_counts: dict[str, int] = {}
-    status_points: dict[str, int] = {}
-    for s in stories:
-        status_counts[s.status] = status_counts.get(s.status, 0) + 1
-        status_points[s.status] = status_points.get(s.status, 0) + (s.story_points or 0)
-
-    total_stories = len(stories)
-    total_points = sum(s.story_points or 0 for s in stories)
-    done_points = status_points.get("done", 0)
-    completion_pct = round((done_points / total_points) * 100) if total_points > 0 else 0
-
-    return {
-        "sprint_id": str(id),
-        "total_stories": total_stories,
-        "total_points": total_points,
-        "done_points": done_points,
-        "completion_pct": completion_pct,
-        # 실제 DB에 존재하는 상태값 기준 동적 생성 — 하드코딩 시 enum 불일치 위험 방지
-        "by_status": {
-            status: {"count": count, "points": status_points.get(status, 0)}
-            for status, count in status_counts.items()
-        },
-    }
-
-
-@router.get("/{id}/checkin")
-async def checkin_sprint(
-    id: uuid.UUID,
-    date: str = Query(..., description="YYYY-MM-DD"),
-    db: AsyncSession = Depends(get_db),
-    repo: SprintRepository = Depends(_get_repo),
-    auth: AuthContext = Depends(get_current_user),
-) -> dict:
-    # E-SECURITY SEC-S8(story 83ea3d6a) CC: project 접근권 검증 없이 남의 project sprint의
-    # standup 미제출자 명단(이름 포함)이 노출됐다.
-    from app.services.project_auth import require_project_access
-    sprint = await repo.get(id)
-    if sprint is None:
-        raise HTTPException(status_code=404, detail="Sprint not found")
-    await require_project_access(db, uuid.UUID(auth.user_id), sprint.project_id, repo.org_id,
-        not_found_detail="Sprint not found")
-
-    try:
-        checkin_date = date_type.fromisoformat(date)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid date format, expected YYYY-MM-DD") from exc
-
-    stories_result = await db.execute(
-        select(Story.status, Story.story_points).where(Story.sprint_id == id)
-    )
-    stories = stories_result.all()
-
-    # AC3-3(T3, #1167 회귀 방지): standup 미제출자를 canonical members.id로 집계 — team_members vs raw
-    # author_id 직접 비교는 canonical 저장분을 못 보고 레거시 휴먼을 "제출했는데 missing"으로 오판한다.
-    # repository.get_missing(effective 휴먼 access ∪ alias 정규화)와 동일 SSOT. 이름은 members(canonical).
-    from app.models.member import Member
-    from app.repositories.standup import StandupEntryRepository
-
-    missing_ids = await StandupEntryRepository(db, repo.org_id).get_missing(
-        sprint.project_id, checkin_date
-    )
-    name_map: dict[uuid.UUID, str] = {}
-    if missing_ids:
-        name_rows = await db.execute(
-            select(Member.id, Member.name).where(Member.id.in_(missing_ids))
-        )
-        name_map = {mid: nm for mid, nm in name_rows.all()}
-
-    total_stories = len(stories)
-    total_points = sum(s.story_points or 0 for s in stories)
-    done_points = sum(s.story_points or 0 for s in stories if s.status == "done")
-    completion_pct = round((done_points / total_points) * 100) if total_points > 0 else 0
-    missing_standups = [
-        {"id": str(mid), "name": name_map.get(mid, str(mid))}
-        for mid in missing_ids
-    ]
-
-    return {
-        "total_stories": total_stories,
-        "total_points": total_points,
-        "done_points": done_points,
-        "completion_pct": completion_pct,
-        "missing_standups": missing_standups,
-    }
 
 
 class SprintTransitionRequest(BaseModel):

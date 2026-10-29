@@ -41,15 +41,3 @@ def test_standups_read_query_param_canonicalized():
 
     src = inspect.getsource(standups.list_standups)
     assert "canonicalize_member_id" in src, "list_standups author_id query param canonicalize 누락"
-
-
-def test_sprint_checkin_missing_is_canonical():
-    """T3(#1167 회귀): sprint checkin missing_standups가 team_members vs raw author_id 직접비교가
-    아닌 canonical(get_missing) 기반인지(소스 가드)."""
-    import inspect
-
-    from app.routers import sprints
-
-    src = inspect.getsource(sprints)
-    assert "standup_author_ids" not in src, "checkin이 여전히 raw author_id 직접 비교(레거시 휴먼 오판)"
-    assert "get_missing" in src, "checkin이 canonical get_missing 미사용"

@@ -71,14 +71,6 @@ async def get_member_workload(args: WorkloadInput) -> list[TextContent]:
         return err(exc)
 
 
-async def get_sprint_velocity_history(args: SprintableInput) -> list[TextContent]:
-    """스프린트 벨로시티 히스토리 조회."""
-    try:
-        return ok(await client.get("/api/v2/analytics/velocity-history", params={"project_id": client.require_project_id()}))
-    except Exception as exc:
-        return err(exc)
-
-
 async def search_stories(args: SearchStoriesInput) -> list[TextContent]:
     """스토리 제목 검색."""
     try:

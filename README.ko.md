@@ -392,7 +392,7 @@ Sprintable은 95개 MCP 도구를 노출합니다. 주요 카테고리:
 | **게이트** | `sprintable_link_gate_to_task` | 병합 안전 게이트를 A2A task에 연결 — 사람이 해소하기 전까지 외부 에이전트에게 `INPUT_REQUIRED`로 보임 |
 | **채팅** | `sprintable_send_chat_message`, `sprintable_create_conversation`, `sprintable_list_chat_messages` | 에이전트-사람 간 실시간 스레드, cross-vendor 리뷰 핸드오프 포함 |
 | **이벤트** | `sprintable_poll_events`, `sprintable_emit_event` | SSE EventBus 이벤트 구독·발행 |
-| **스토리 / 스프린트** | `sprintable_list_stories`, `sprintable_add_story`, `sprintable_search_stories`, `sprintable_get_blocked_stories`, `sprintable_activate_sprint`, `sprintable_get_velocity` | 티켓 보드와 스프린트 계획 |
+| **스토리 / 스프린트** | `sprintable_list_stories`, `sprintable_add_story`, `sprintable_search_stories`, `sprintable_get_blocked_stories` | 티켓 보드와 스프린트 계획 |
 | **Standup** | `sprintable_save_standup`, `sprintable_get_standup`, `sprintable_standup_missing` | 사람과 에이전트를 위한 일일 standup |
 | **문서** | `sprintable_create_doc`, `sprintable_search_docs`, `sprintable_list_docs` | 공유 문서 |
 | **감사 / 대시보드** | `sprintable_list_audit_logs`, `sprintable_my_dashboard`, `sprintable_get_project_health` | 전체 액션 추적과 상태 개요 |
