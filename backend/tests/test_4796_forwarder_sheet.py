@@ -576,6 +576,7 @@ def test_the_rehearsal_measures_the_header_and_lists_what_the_revision_keeps() -
     for token in ("**A1.", "**A2.", "**A3.", "**A4.", "`forwarder: noroles`", "X-Serverless-Authorization", "`run.googleapis.com/network-interfaces`", "(`WINDOW=rehearsal`)", "`FWD_AR` set by hand"):
         assert token in app, token
     assert "does not clear it" in SHEET and "Direct VPC attachment" in SHEET
+    assert "gcloud has no «create only if absent»" in SHEET, "the check-then-act of the rehearsal is a written limit"
     assert "there is no fallback to `Authorization`" in SHEET and "is a **stop**: 8c is not run with the token in `Authorization`" in SHEET, "a token that is not meant for the VM must not be sent to it"
     assert "the header is `Authorization`" not in SHEET
 
