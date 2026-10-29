@@ -36,6 +36,16 @@ def _block_with(marker: str) -> str:
 
 # ── the premises, read from the files ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+def test_the_file_records_what_the_long_requests_are_and_what_is_still_to_be_shown() -> None:
+    five = DOC.split("## 5. What the long requests are")[1].split("## Questions")[0]
+    for token in ("888 requests over 30 s add up to 267,288 s (0.442 concurrent)", "all of them `GET /mcp` of one client", "no byte for 6 seconds", "the transport handler still serves a client's GET", "no `send_*` of a notification", "answer the GET with **405**", "`MCP_HTTP_GET_STREAM=true`", "**Leave the variable unset rather than empty:**", "answered 500 by the SDK",
+                  "**Still to be shown (dev round, the product owner's hands):**", "per client per hour"):
+        assert token in five, token
+    # and the change it describes is in the source
+    auth = (_ROOT / "backend/sprintable_mcp/http_auth.py").read_text()
+    assert "_send_405_no_stream" in auth and 'b"allow", b"POST"' in auth and (_ROOT / "backend/tests/test_4804_mcp_get_405.py").exists()
+
+
 def test_the_file_states_the_premises_it_checks() -> None:
     table = DOC.split("## 1.")[1].split("## 2.")[0]
     for token in ("A fallback key can be configured (`AGENT_API_KEY`; the prod script of Cloud Run injects one from Secret Manager)", "**stateless Streamable HTTP** (`stateless_http=True`)", "**the event bridge is not started**", "**the backend's own image**", "`MCP_ALLOWED_HOSTS`", "**CPU throttling off**", "`mcp.sprintable.ai`", "16 MiB"):

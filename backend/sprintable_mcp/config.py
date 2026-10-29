@@ -29,6 +29,9 @@ class McpSettings(BaseSettings):
     # 비우면(기본) **보호 OFF**(공개 호스팅 MCP=per-request bearer + Cloud Run TLS 가 실보안·브라우저
     # 로컬공격 모델 비해당). prod 승격 시 커스텀 도메인 정밀 화이트리스트(exact·서브도메인 와일드카드 X).
     mcp_allowed_hosts: str = ""
+    # story 4804: the stateless HTTP server answers ``GET /mcp`` with 405 (it has nothing to send on a standalone stream, and an open
+    # one keeps the connection busy all day). ``true`` (env MCP_HTTP_GET_STREAM) gives back the SDK's behaviour: the stream is opened.
+    mcp_http_get_stream: bool = False
 
 
 settings = McpSettings()
