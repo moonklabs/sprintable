@@ -295,7 +295,7 @@ def test_repo_allowlist_entries_are_wellformed():
     for kind, entries in (("declared_pins", pins), ("declared_stalls", stalls)):
         for service, entry in entries.items():
             # the form is judged on the eve of the entry's own `until`: a fixed day would make every entry «too far» or «expired» as the calendar moves,
-            # and the guard itself (every 6 hours) is what judges the calendar — this test must not turn red on a date
+            # and the guard itself (it runs after each deploy) is what judges the calendar — this test must not turn red on a date
             until = date.fromisoformat(str(entry.get("until")))
             problem = mod._expired(entry, until - timedelta(days=1))
             assert problem is None, f"{kind}/{service}: {problem}"
