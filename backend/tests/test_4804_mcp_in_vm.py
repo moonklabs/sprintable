@@ -205,7 +205,8 @@ def test_the_held_time_line_adds_up_the_latencies_the_log_prints(tmp_path: Path)
     env = {"PATH": f"{b}:{os.environ.get('PATH', '/usr/bin:/bin')}", "HOME": str(tmp_path), "CALLS": str(calls), "PROJECT": "p", "REGION": "r"}
     p = subprocess.run(["bash", "-c", block], capture_output=True, text=True, timeout=60, env=env)
     assert p.returncode == 0, p.stderr
-    assert "3 requests over 30 s, 302542 s held, 0.500 instances on average" in p.stdout, p.stdout
+    assert "3 requests over 30 s, 302542 s, 0.500 concurrent on average (7 days)" in p.stdout, p.stdout
+    assert "3 requests, 302542 s, 3.502 concurrent on average (24 hours)" in p.stdout, "the same latencies over one day: the busiest figure, an upper bound"
     assert "2 2026-10-28" in p.stdout and "1 2026-10-29" in p.stdout, "requests per day"
 
 
@@ -214,14 +215,17 @@ def test_the_request_log_lines_only_read_and_never_print_a_key() -> None:
     for line in block.splitlines():
         if "logging read" in line:
             assert "--format='value(" in line and "authorization" not in line.lower() and "requestUrl" not in line, line
-    assert "604800" in block and "value(httpRequest.latency)" in block, "the held time is added up from the log's own latency"
+    last = [l for l in block.splitlines() if "value(httpRequest.latency)" in l]
+    assert "--freshness=1d --limit=1000000" in last[1] and "httpRequest.latency>" not in last[1], "the second line is ALL requests of the last day (up to a million), not the long ones"
+    assert "--freshness=7d" in last[0] and 'httpRequest.latency>\\"30s\\"' in last[0]
+    assert "604800" in block and "86400" in block and block.count("value(httpRequest.latency)") == 2, "the time is added up from the log's own latency, over 7 days for the long ones and over 24 hours for all"
     assert 'httpRequest.requestMethod=\\"GET\\" AND httpRequest.latency>\\"30s\\"' in block and 'httpRequest.requestMethod=\\"POST\\" AND httpRequest.latency>\\"30s\\"' in block, "a held connection is a GET that lasts; a slow POST is counted apart so that it is not taken for one"
 
 
 # ── the decision ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def test_the_text_says_how_the_numbers_decide_and_what_the_design_is() -> None:
-    for token in ("the average number of instances the long requests alone keep busy", "**both count as held time**", "**A. Billing, not a connection**", "keep less than 0.1 of an instance busy on average", "keep 0.1 of an instance busy or more on average", "1.5 × the measured `hourly_p99_max` + 256 MiB", "--cpu-throttling", "--no-cpu-throttling", "**B. A held connection**", "a forwarder that holds the same streams is active all day", "which are not lower per second than the instance-based ones", "**unmeasured**",
+    for token in ("the average number of requests being served at the same moment", "an upper bound of the share of one instance that is busy", "**both count as held time**", "**A. Billing, not a connection**", "**A′. In between**", "| **All** requests together keep less than 0.1 of an instance busy", "below 0.1 concurrent on average over 24 hours", "keep less than 0.1 of an instance busy", "keep 0.1 or more concurrent on average over 7 days", "1.5 × the measured `hourly_p99_max` + 256 MiB", "--cpu-throttling", "--no-cpu-throttling", "**B. A held connection**", "a forwarder that holds the same streams is active all day", "which are not lower per second than the instance-based ones", "**unmeasured**",
                   "**Fit**", "lowest** `available` memory", "1.5 × the server's `hourly_p99_max`", "not a maximum", "256 MiB of margin", "48 MiB", "idle percentage", "above 30", "Nothing goes to `main` until the prod move and one day after it are over"):
         assert token in DOC, token
     design = DOC.split("## 4. Design")[1].split("## Questions")[0]
