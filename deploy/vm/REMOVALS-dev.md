@@ -1,6 +1,6 @@
 # Dev removals — what runs right after the soak, one line of undo each (story 4796, AC3)
 
-Scope: the dev resources that the VM replaced. Run by the PO's hands (`gcloud` is the PO's; this sheet gives the exact lines, the checks before, and the way back). Prod has its own sheet when its move is decided (RUNBOOK §12).
+Scope: the dev resources that the VM replaced. Run by the PO's hands (`gcloud` is the PO's; this sheet gives the exact lines, the checks before, and the way back). Prod has its own sheet: [`REMOVALS-prod.md`](REMOVALS-prod.md).
 
 Nothing here is a guess at a name. A resource is **found with a read-only list command first**, its definition is **saved to a file**, and only then is the delete line run, guarded so an empty variable aborts (`: "${VAR:?}"`). Every delete line is followed by its undo line. Save the capture files in one folder (`mkdir -p removals-dev && cd removals-dev`) and keep it until the sheet is finished.
 
