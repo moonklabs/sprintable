@@ -3,7 +3,7 @@
 Why (PO measurement, last 6 h): backend and frontend are always working — a never-ending stream sits on every instance — so request-based CPU billing ran around the clock at the higher per-second rate (Seoul: request-based
 $0.0000336 · instance-based $0.0000216 per vCPU-second). dev backend + frontend bill per INSTANCE (`--no-cpu-throttling`); the services that sit idle most of the time (realtime-dev · mcp-dev · office-converter-dev ·
 support-gateway-dev) bill per REQUEST (`--cpu-throttling`). A deploy step that does not pass the flag leaves the live value alone, so a hand-set value survives — but only until someone sets the other one by hand.
-The prod lines are NOT part of this change (prod sends nothing and keeps whatever it has; a later change states it). This file runs the real steps and reads the real files; a new Cloud Run deploy command without a stated mode fails here.
+The prod lines are NOT part of this change except the hosted MCP's (story 4804 states `--cpu-throttling` for mcp-prod too; every other prod line sends nothing and keeps whatever it has). This file runs the real steps and reads the real files; a new Cloud Run deploy command without a stated mode fails here.
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from tests.test_deploy_backend_redis_secret_conflict import _apply_cloudbuild_es
 _EXPECTED_MODE = {
     "sprintable-frontend-${_DEPLOY_ENV}": "${_CPU_FLAGS}",  # the substitution carries --no-cpu-throttling on dev, nothing on prod
     "sprintable-backend-${_DEPLOY_ENV}": "${_CPU_FLAGS}",
-    "sprintable-mcp-${_DEPLOY_ENV}": "$${MCP_CPU_FLAG}",  # --cpu-throttling on dev, nothing on prod (set just above the command)
+    "sprintable-mcp-${_DEPLOY_ENV}": "$${MCP_CPU_FLAG}",  # --cpu-throttling on dev and prod (story 4804; set just above the command)
     "sprintable-realtime-${_DEPLOY_ENV}": "--cpu-throttling",  # dev only (its step exits first for any other environment)
     "office-converter-${_DEPLOY_ENV}": "--cpu-throttling",  # dev only (its step exits first for any other environment)
     "support-gateway-${_DEPLOY_ENV}": "$${CPU_FLAG}",  # --cpu-throttling on dev, nothing on prod
@@ -153,11 +153,11 @@ def _step_call(step_id: str, deploy_env: str, call_pattern: str, extra_env: dict
     return calls[0]
 
 
-def test_mcp_dev_bills_per_request_and_prod_states_nothing():
-    dev = _step_call("deploy-mcp", "dev", r"^CALL \[run\] \[services\] \[update\] ")
-    assert dev.count("[--cpu-throttling]") == 1 and "--no-cpu-throttling" not in dev, dev
-    prod = _step_call("deploy-mcp", "prod", r"^CALL \[run\] \[services\] \[update\] ")
-    assert "--cpu-throttling" not in prod and "--no-cpu-throttling" not in prod, prod
+def test_mcp_bills_per_request_on_dev_and_on_prod_since_4804():
+    """prod's GET /mcp answers 405 (no held stream), so the hand-set `--cpu-throttling` of 2026-10-29 is stated in the pipeline: the next prod deploy must not put the instance-based mode back"""
+    for env in ("dev", "prod"):
+        call = _step_call("deploy-mcp", env, r"^CALL \[run\] \[services\] \[update\] ")
+        assert call.count("[--cpu-throttling]") == 1 and "--no-cpu-throttling" not in call, (env, call)
 
 
 def test_support_gateway_dev_bills_per_request_and_prod_states_nothing():
@@ -196,8 +196,8 @@ def test_a_stray_environment_variable_cannot_stand_in_for_the_scripts_own_initia
     on = {"_SUPPORT_GATEWAY_DEPLOY_ENABLED": "true"}
     mcp_pattern = r"^CALL \[run\] \[services\] \[update\] "
     sg_pattern = r"^CALL \[run\] \[deploy\] \[support-gateway-"
-    for env, expect_flag in (("dev", True), ("prod", False)):
-        for step, pattern, extra in (("deploy-mcp", mcp_pattern, None), ("deploy-support-gateway", sg_pattern, on)):
+    for env in ("dev", "prod"):
+        for step, pattern, extra, prod_states_flag in (("deploy-mcp", mcp_pattern, None, True), ("deploy-support-gateway", sg_pattern, on, False)):
             call = _step_call(step, env, pattern, extra)
             assert "bogus" not in call, (step, env, call)
-            assert call.count("[--cpu-throttling]") == (1 if expect_flag else 0), (step, env, call)
+            assert call.count("[--cpu-throttling]") == (1 if (env == "dev" or prod_states_flag) else 0), (step, env, call)
