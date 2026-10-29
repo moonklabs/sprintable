@@ -651,6 +651,9 @@ def test_with_the_skip_on_the_deploy_backend_step_never_calls_gcloud_so_a_prod_b
     assert p.returncode == 0 and "skip deploy-backend" in p.stdout and calls.read_text() == "", (p.stdout, p.stderr)
 
 
-def test_the_workflow_premise_prod_states_no_skip_today_so_p3_is_what_turns_it_on() -> None:
+def test_the_workflow_writes_the_skip_for_dev_and_prod_since_p3() -> None:
+    """P3 (merged right after step 8 of CUTOVER-prod): before it only the dev branch of the workflow wrote `cloud_run_app_skip=true` (this test said «one» and G3 held until P3);
+    since it the prod branch writes it too, so a prod build no longer builds or deploys Cloud Run — and the `deploy-backend` step (first test of this file's
+    last test above) ends 0 on its first line, so no build puts the real backend over the forwarder."""
     wf = (_ROOT / ".github/workflows/cloud-build.yml").read_text()
-    assert wf.count('echo "cloud_run_app_skip=true"') == 1, "only the dev branch writes it today; the prod line is P3, merged right after step 8"
+    assert wf.count('echo "cloud_run_app_skip=true"') == 2, "the dev branch and the prod branch"
