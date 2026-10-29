@@ -46,10 +46,10 @@ baked="$(inspect 'grep -rlF "$VM_API" /app/apps/web/.next | wc -l')"
 stale="$(inspect "grep -rlE 'sprintable-(backend|frontend)-(dev|prod)[-0-9a-z]*(\\.asia-northeast3)?\\.(a\\.)?run\\.app' /app/apps/web/.next | wc -l")"
 [[ "$stale" =~ ^[0-9]+$ ]] || { echo "unexpected answer from the image check: «$stale»" >&2; exit 1; }
 [ "$stale" -eq 0 ] || { echo "the build output still contains a Cloud Run service address" >&2; exit 1; }
-# public/ (the static guides) is copied into the image as it is and still names the Cloud Run backend until the guides are changed at cutover (design appendix A, row 1): a warning, not a failure
+# public/ (the static guides) is copied into the image as it is; since #5335 they name the API host, so any run.app left in them is a regression: a warning, not a failure
 public="$(inspect "grep -rlE 'run\\.app' /app/apps/web/public | wc -l")"
 [[ "$public" =~ ^[0-9]+$ ]] || { echo "unexpected answer from the image check: «$public»" >&2; exit 1; }
-[ "$public" -eq 0 ] || echo "WARNING: $public file(s) under public/ still mention run.app (the static guides) — change them before the cutover, see design appendix A row 1" >&2
+[ "$public" -eq 0 ] || echo "WARNING: $public file(s) under public/ mention run.app (the static guides name the API host since #5335) — change them, see design appendix A row 1" >&2
 echo "baked: $api"
 
 if [ "$push" = yes ]; then

@@ -75,11 +75,12 @@ def test_every_default_api_url_of_the_python_and_host_connectors_is_the_dev_api_
         assert needle in (_ROOT / rel).read_text(), rel
 
 
-def test_the_prod_plugin_and_the_prod_lines_of_the_guides_did_not_move() -> None:
+def test_the_prod_plugin_and_the_prod_lines_of_the_guides_name_the_api_name() -> None:
     assert 'DEFAULT_API_URL = "https://api.sprintable.ai"' in (_ROOT / PROD_PLUGIN / "adapter.py").read_text(), "P8: the prod plugin's default is the API name"
-    prod = "https://sprintable-backend-prod-787818285179.asia-northeast3.run.app"
     for guide in ("connect-guide.ko.txt", "connect-guide.en.txt", "onboarding-guide.txt"):
-        assert prod in (_ROOT / "apps/web/public" / guide).read_text(), guide
+        text = (_ROOT / "apps/web/public" / guide).read_text()
+        assert "https://api.sprintable.ai" in text and "run.app" not in text, guide
+    assert "Prod: `https://api.sprintable.ai`" in (_ROOT / "apps/web/public/onboarding-guide.txt").read_text() and "(prod: `https://api.sprintable.ai`; dev:" in (_ROOT / "apps/web/public/onboarding-guide.txt").read_text()
 
 
 @pytest.mark.parametrize("guide,needle", [

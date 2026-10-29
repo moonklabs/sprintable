@@ -1,4 +1,4 @@
-# PO export 2026-10-26 (names only). The JWT_SECRET lines carry the PROD secret id the VM reads (story 4798: the shared JWT_SECRET is deleted at AC9) — re-check with bin/check_live_names.py before the prod cutover.
+# Names of the LAST REAL revision of the old Cloud Run prod backend, 00342-mn9 (2026-10-28 23:17Z, the last prod deploy before the move; the PO's count: 65 variables — the 64 of the PO export of 2026-10-26 plus PUBLIC_API_URL, which the prod deploy sets since P7). Names only, no values. Original header: PO export 2026-10-26 (names only). The JWT_SECRET lines carry the PROD secret id the VM reads (story 4798: the shared JWT_SECRET is deleted at AC9) — re-check with bin/check_live_names.py before the prod cutover.
 ## sprintable-backend-prod
 APPLE_KEY_ID <plain>
 APPLE_PRIVATE_KEY <secret APPLE_SIWA_PRIVATE_KEY>
@@ -52,6 +52,7 @@ OPS_ALERT_CONVERSATION_ID <plain>
 PG_LISTEN_ENABLED <plain>
 PRESENCE_ONLINE_REDIS_ENABLED <plain>
 PRESENCE_REDIS_ENABLED <plain>
+PUBLIC_API_URL <plain>
 PUBLIC_SITE_BASE_URL <plain>
 PUSH_DEVICES_BY_USER <plain>
 REDIS_URL <secret REDIS_URL_PROD>

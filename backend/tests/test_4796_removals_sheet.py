@@ -147,8 +147,11 @@ def test_the_sheet_reads_no_secret_value_and_invents_no_resource_name() -> None:
 
 
 def test_the_cloud_sql_exports_are_kept_beyond_the_backup_lifecycle() -> None:
+    """the exports go to `cloudsql-final/`, which the bucket keeps 30 days (a longer life than `db/` 14, `status/` and `import/` 7): the rule the PO added on 2026-10-29"""
+    import json
     lifecycle = RUNBOOK.split("lifecycle.json <<'EOF'")[1].split("EOF")[0]
-    assert '"matchesPrefix":["db/"]' in lifecycle and '"matchesPrefix":["status/"]' in lifecycle and "cloudsql-final" not in lifecycle
+    ages = {r["condition"]["matchesPrefix"][0]: r["condition"]["age"] for r in json.loads(lifecycle)["rule"]}
+    assert ages == {"db/": 14, "status/": 7, "import/": 7, "cloudsql-final/": 30}
     assert "gs://${BACKUPS_BUCKET:?}/cloudsql-final/$STAMP/$db.sql.gz" in SHEET
 
 
