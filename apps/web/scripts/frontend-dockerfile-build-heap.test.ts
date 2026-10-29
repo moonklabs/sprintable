@@ -48,7 +48,9 @@ describe('frontend Dockerfile 빌드 힙 상한(story #4225)', () => {
     expect(dockerfile).toMatch(/^FROM\s+mirror\.gcr\.io\/library\/node:\S+\s+AS runner$/m);
   });
 
-  it('값의 근거인 Cloud Build 머신(E2_HIGHCPU_8 = 8GB)이 그대로다 — 바뀌면 이 상한도 다시 정한다', () => {
-    expect(cloudbuild).toMatch(/^\s+machineType:\s+E2_HIGHCPU_8\s*$/m);
+  // story 4818 — the main build no longer names a machine, so it runs on Cloud Build's default worker (e2-standard-2 = 8GB, the same RAM the cap was set for; the VM bundle
+  // build already builds this Dockerfile there). A named machine would be a new basis for the cap, so naming one turns this red until the cap is chosen again.
+  it('값의 근거인 Cloud Build 머신 메모리(8GB)가 그대로다 — 기본 일꾼(e2-standard-2 = 8GB). 머신을 새로 지정하면 이 상한도 다시 정한다', () => {
+    expect(cloudbuild).not.toMatch(/^\s+machineType:/m);
   });
 });
