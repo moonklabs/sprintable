@@ -54,7 +54,7 @@ steps:
   - id: build-frontend-vm
     name: gcr.io/cloud-builders/docker
     entrypoint: bash
-    timeout: 1200s
+    timeout: 1800s
     waitFor: [resolve-backend]
     env:
       - DOCKER_BUILDKIT=1
@@ -129,8 +129,10 @@ steps:
         gcloud storage cp "$$out/bundle/desired.json" "gs://${_VM_DEPLOY_BUCKET}/candidates/${COMMIT_SHA}.json"
         echo "bundle-vm: gs://${_VM_DEPLOY_BUCKET}/bundles/${COMMIT_SHA}.tgz (+ candidates/${COMMIT_SHA}.json); desired.json untouched"
 
-# stated here, not borrowed from cloudbuild.yaml: the same worker size as the Cloud Run build (the Next.js build is what it is), and a limit that covers the three steps (120 + 1200 + 120 s) with room.
-timeout: 1800s
+# stated here, not borrowed from cloudbuild.yaml: a limit that covers the three steps (120 + 1800 + 120 s) with room.
+# Story 4805: no `machineType` — Cloud Build's default worker (documented as e2-standard-2: 2 vCPU, 8 GB, the one with free minutes each month; the build record shows the field empty). Measured on the same commit, same two images:
+# the frontend build took 5.2 minutes on E2_HIGHCPU_8 and 10.6 on the default worker (x2.03), so the step limit is 1800 s (the slowest frontend build seen on the 8-core worker was 8.5 minutes; x2 = 17).
+# To go back to the 8-core worker: put `machineType: E2_HIGHCPU_8` under `options` (and the limits may go back to 1200 / 1800 s).
+timeout: 2400s
 options:
-  machineType: E2_HIGHCPU_8
   logging: CLOUD_LOGGING_ONLY

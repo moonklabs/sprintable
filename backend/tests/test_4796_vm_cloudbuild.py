@@ -128,12 +128,17 @@ def test_the_vm_build_has_three_steps_in_a_chain() -> None:
     assert _STEPS["build-frontend-vm"]["waitFor"] == ["resolve-backend"] and _STEPS["bundle-vm"]["waitFor"] == ["build-frontend-vm"]
 
 
-def test_the_vm_build_states_its_own_machine_and_time_limits() -> None:
-    assert _VM["options"]["machineType"] == "E2_HIGHCPU_8", "stated here, not borrowed from the Cloud Run build"
+def test_the_vm_build_runs_on_the_default_worker_and_states_its_own_time_limits() -> None:
+    """story 4805: no machineType = Cloud Build's default worker (free minutes each month). Measured: the frontend build is x2.03 slower there than on E2_HIGHCPU_8 (5.2 -> 10.6 min; the slowest 8-core one seen was 8.5 min),
+    so the frontend step may take 30 minutes and the build 40"""
+    assert "machineType" not in _VM["options"] and "pool" not in _VM["options"], "the default worker; the Cloud Run build (cloudbuild.yaml) keeps its own"
+    assert not re.search(r"--machine-type|--worker-pool|--timeout", _submit_vm()["run"]), "the submission must not pick another worker or limit either"
     assert _VM["options"]["logging"] == "CLOUD_LOGGING_ONLY"
     steps_total = sum(_seconds(_STEPS[s]["timeout"]) for s in VM_STEPS)
     assert _seconds(_VM["timeout"]) >= steps_total + 300, "the build limit covers every step limit with room"
-    assert _seconds(_STEPS["build-frontend-vm"]["timeout"]) >= 900, "the frontend build took 6 minutes on a fresh worker"
+    assert _seconds(_STEPS["build-frontend-vm"]["timeout"]) >= 1800, "twice the slowest frontend build seen on the 8-core worker (8.5 min) is 17 min"
+    assert _seconds(_VM["timeout"]) >= 2400
+    assert _MAIN["options"]["machineType"] == "E2_HIGHCPU_8", "the Cloud Run build is not changed by story 4805 (main waits for the window)"
 
 
 def test_the_five_build_values_default_to_a_marker_so_a_forgotten_one_fails() -> None:
