@@ -10,7 +10,7 @@ import type { LegacyNavGroup, LegacyNavItemConfig, NavGroupConfig, NavItemConfig
 // 입력을 전부 인자로 받는 순수 함수라(nav-config를 import하지 않는다 — 타입만) 호출부 · 테스트가 같은 원천을 넘긴다.
 // 데스크톱 «더보기»(groupVisibleLegacyByTarget)는 그대로다.
 export const MOBILE_LEGACY_CARD_ID = 'legacy-other-screens';
-const CONNECT_TAIL_ORDER = ['org-workforce', 'org-trust'];
+const CONNECT_TAIL_ORDER = ['org-workforce', 'org-trust', 'org-events'];
 
 export interface MobileHubGroup {
   id: string;

@@ -91,6 +91,7 @@ describe('SprintsClient — 백로그/스프린트 스토리 「더 보기」(st
   it('cursor에 "+00:00"이 있어도 실제 요청 URL에 인코딩되지 않은 "+"가 남지 않는다(backlog)', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes('/api/sprints?project_id=')) return { ok: true, json: async () => ({ data: [SPRINT] }) };
+      if (url.includes('/burndown')) return { ok: true, json: async () => ({ data: null }) };
       if (url.includes('/api/stories?project_id=')) return { ok: true, json: async () => ({ data: [], meta: { hasMore: false, nextCursor: null } }) };
       if (url.includes('/api/stories/backlog') && !url.includes('cursor=')) {
         return { ok: true, json: async () => ({ data: [{ id: 'b1', title: 'Backlog 1' }], meta: { hasMore: true, nextCursor: CURSOR_WITH_PLUS } }) };
@@ -119,6 +120,7 @@ describe('SprintsClient — 백로그/스프린트 스토리 「더 보기」(st
   it('loadMore가 실패(500 등)하면 조용히 삼키지 않고 에러 문구를 보여준다(backlog)', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes('/api/sprints?project_id=')) return { ok: true, json: async () => ({ data: [SPRINT] }) };
+      if (url.includes('/burndown')) return { ok: true, json: async () => ({ data: null }) };
       if (url.includes('/api/stories?project_id=')) return { ok: true, json: async () => ({ data: [], meta: { hasMore: false, nextCursor: null } }) };
       if (url.includes('/api/stories/backlog') && !url.includes('cursor=')) {
         return { ok: true, json: async () => ({ data: [{ id: 'b1', title: 'Backlog 1' }], meta: { hasMore: true, nextCursor: CURSOR_WITH_PLUS } }) };
@@ -140,6 +142,7 @@ describe('SprintsClient — 백로그/스프린트 스토리 「더 보기」(st
   it('cursor에 "+00:00"이 있어도 실제 요청 URL에 인코딩되지 않은 "+"가 남지 않는다(sprint stories)', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes('/api/sprints?project_id=')) return { ok: true, json: async () => ({ data: [SPRINT] }) };
+      if (url.includes('/burndown')) return { ok: true, json: async () => ({ data: null }) };
       if (url.includes('/api/stories/backlog')) return { ok: true, json: async () => ({ data: [], meta: { hasMore: false, nextCursor: null } }) };
       if (url.includes('/api/stories?project_id=') && !url.includes('cursor=')) {
         return { ok: true, json: async () => ({ data: [{ id: 's-story-1', title: 'Sprint Story 1' }], meta: { hasMore: true, nextCursor: CURSOR_WITH_PLUS } }) };
@@ -167,6 +170,7 @@ describe('SprintsClient — is_excluded 스토리 무조건 숨김(story #2187 �
   it('백로그 초기 로드에서 is_excluded=true 카드는 목록에도 "배정" 대상에도 안 뜬다', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes('/api/sprints?project_id=')) return { ok: true, json: async () => ({ data: [SPRINT] }) };
+      if (url.includes('/burndown')) return { ok: true, json: async () => ({ data: null }) };
       if (url.includes('/api/stories?project_id=')) return { ok: true, json: async () => ({ data: [], meta: { hasMore: false, nextCursor: null } }) };
       if (url.includes('/api/stories/backlog')) {
         return {
@@ -193,6 +197,7 @@ describe('SprintsClient — is_excluded 스토리 무조건 숨김(story #2187 �
   it('스프린트 편입 스토리 초기 로드에서도 is_excluded=true 카드는 숨는다', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes('/api/sprints?project_id=')) return { ok: true, json: async () => ({ data: [SPRINT] }) };
+      if (url.includes('/burndown')) return { ok: true, json: async () => ({ data: null }) };
       if (url.includes('/api/stories/backlog')) return { ok: true, json: async () => ({ data: [], meta: { hasMore: false, nextCursor: null } }) };
       if (url.includes('/api/stories?project_id=')) {
         return {
@@ -219,6 +224,7 @@ describe('SprintsClient — is_excluded 스토리 무조건 숨김(story #2187 �
   it('loadMore로 추가 페이지를 append할 때도 is_excluded=true 카드는 걸러진다(backlog)', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes('/api/sprints?project_id=')) return { ok: true, json: async () => ({ data: [SPRINT] }) };
+      if (url.includes('/burndown')) return { ok: true, json: async () => ({ data: null }) };
       if (url.includes('/api/stories?project_id=')) return { ok: true, json: async () => ({ data: [], meta: { hasMore: false, nextCursor: null } }) };
       if (url.includes('/api/stories/backlog') && !url.includes('cursor=')) {
         return { ok: true, json: async () => ({ data: [{ id: 'b1', title: 'Backlog 1페이지', is_excluded: false }], meta: { hasMore: true, nextCursor: CURSOR_WITH_PLUS } }) };

@@ -3,18 +3,25 @@ import {
   BookOpen,
   Bot,
   ClipboardList,
+  Cpu,
+  FileText,
+  FlaskConical,
   GalleryVerticalEnd,
   HardDrive,
   Inbox,
   Layers,
   Link2,
+  ListChecks,
   MessageSquare,
   Monitor,
   Newspaper,
   Settings,
+  Share2,
   Shield,
+  TrendingUp,
   Users2,
   Workflow,
+  Zap,
   type LucideIcon,
 } from 'lucide-react';
 import { resolveNavV3Destinations, type NavV3Flags } from './nav-v3-destinations';
@@ -136,12 +143,21 @@ export const NAV_GROUPS: NavGroupConfig[] = [
     ],
   },
   {
+    id: 'results',
+    items: [
+      { id: 'org-insights-board', labelKey: 'navResults', descriptionKey: 'descOrgInsightsBoard', icon: TrendingUp, kind: 'static', path: '/organization/insights-board', scope: 'org' },
+    ],
+  },
+  {
     id: 'connect-rules',
     labelKey: 'zoneConnectRules',
-    // story #4810 (OPEN-ZERO ⑦) — the 채널 연결 · 연산 커넥터 · 콘텐츠 규칙 items went with the channel/site-post publishing
-    // axis; this group now holds only what resolveNavGroups adds per flag («모아 보기» · «데스크톱 앱»). The desktop sidebar
-    // skips it while empty (app-sidebar.tsx); the mobile hub still hangs 에이전트 · 신뢰 센터 on it (mobile-hub-groups.ts).
-    items: [],
+    items: [
+      { id: 'org-channels', labelKey: 'orgChannels', descriptionKey: 'descOrgChannels', icon: Share2, kind: 'static', path: '/organization/channels', scope: 'org' },
+      // story #4116(#4112 유나 시안 55a04e8d) — 채널 연결의 형제 화면. «연결»(계정 링크)과
+      // «커넥터»(자격 등록)는 용어 구분이 곧 메커니즘 구분(유나 canon, §8) — 통일 대신 병치.
+      { id: 'org-generation-connectors', labelKey: 'orgGenerationConnectors', descriptionKey: 'descOrgGenerationConnectors', icon: Cpu, kind: 'static', path: '/organization/generation-connectors', scope: 'org' },
+      { id: 'org-content-rules', labelKey: 'orgContentRules', descriptionKey: 'descOrgContentRules', icon: ListChecks, kind: 'static', path: '/organization/content-rules', scope: 'org' },
+    ],
   },
 ];
 
@@ -164,6 +180,9 @@ export function resolveNavGroups(flags: NavV3Flags): NavGroupConfig[] {
     }
     if (group.id === 'dev') {
       return { ...group, items: group.items.map((item) => (item.id === 'board' ? { ...item, path: dest.work.path } : item)) };
+    }
+    if (group.id === 'results') {
+      return { ...group, items: group.items.map((item) => (item.id === 'org-insights-board' ? { ...item, path: dest.results.path } : item)) };
     }
     if (group.id === 'connect-rules') {
       const v3Item: NavItemConfig | null = dest.connectRules ? {
@@ -208,6 +227,7 @@ export function resolveNavGroups(flags: NavV3Flags): NavGroupConfig[] {
 // 아예 빠지므로(listRouteDirs가 page.tsx 실존으로 파생) retro와 달리 팔레트 앵커도 불요.
 export const LEGACY_NAV_ITEMS: LegacyNavItemConfig[] = [
   { id: 'goals', labelKey: 'goals', descriptionKey: 'descGoals', icon: Layers, kind: 'resource', path: 'goals', scope: 'project', absorbTarget: 'work' },
+  { id: 'loops', labelKey: 'loops', descriptionKey: 'descLoops', icon: FlaskConical, kind: 'resource', path: 'loops', scope: 'project', absorbTarget: 'work' },
   // story #3989(「일감」 흡수 3/N) — 연결분(문서/산출물 탭)만 일감이고, 전수
   // 라이브러리/갤러리(트리·검색)는 «조직 자산 전수 탐색» 축이라 일감과 다르다
   // (PO 확定 — worklist-6item-absorption doc §검증1). work → knowledge로 이사.
@@ -216,12 +236,15 @@ export const LEGACY_NAV_ITEMS: LegacyNavItemConfig[] = [
   { id: 'storage', labelKey: 'storage', descriptionKey: 'descStorage', icon: HardDrive, kind: 'resource', path: 'storage', scope: 'project', absorbTarget: 'knowledge' },
   { id: 'activity', labelKey: 'activity', descriptionKey: 'descActivity', icon: ClipboardList, kind: 'static', path: '/activity', scope: 'project', absorbTarget: 'history' },
   { id: 'org-trust', labelKey: 'orgTrust', descriptionKey: 'descOrgTrust', icon: Award, kind: 'static', path: '/organization/trust', scope: 'org', absorbTarget: 'connect' },
+  { id: 'content', labelKey: 'content', descriptionKey: 'descContent', icon: FileText, kind: 'static', path: '/content', scope: 'org', absorbTarget: 'work' },
+  { id: 'channel-posts', labelKey: 'channelPosts', descriptionKey: 'descChannelPosts', icon: Share2, kind: 'static', path: '/content/channel-posts', scope: 'org', absorbTarget: 'work' },
   // story #3985(E-UX-OVERHAUL·「연결·규칙」 흡수 2편, 페드루 PO 確定 2026-09-17) — 구성원·
   // 권한은 「연결」이 아니라 「설정」 흡수 대상으로 재분류(사람 팀 관리 ≠ 에이전트·채널·규칙
   // 배선, 온보딩 connect-step도 이미 `/settings?tab=members`로 보낸다). 경로 자체는 불변.
   { id: 'org-members', labelKey: 'orgMembers', descriptionKey: 'descOrgMembers', icon: Users2, kind: 'static', path: '/organization/members', scope: 'org', absorbTarget: 'settings' },
   { id: 'org-workforce', labelKey: 'workforce', descriptionKey: 'descWorkforce', icon: Bot, kind: 'static', path: '/organization/workforce', absorbTarget: 'connect' },
   { id: 'org-roles', labelKey: 'orgRoles', descriptionKey: 'descOrgRoles', icon: Shield, kind: 'static', path: '/organization/roles', scope: 'org', absorbTarget: 'settings' },
+  { id: 'org-events', labelKey: 'orgEvents', descriptionKey: 'descOrgEvents', icon: Zap, kind: 'static', path: '/organization/events', scope: 'org', absorbTarget: 'connect' },
   // story #1981 배지 축(inboxPendingCount)은 app-sidebar.tsx에 그대로 남는다(다음
   // 카드 #3823 「오늘」 배지가 재사용) — 이 항목 자체가 사이드바에서 빠져도 그
   // 폴링·SSE 재조회 로직은 안 건든다(다음 카드가 그 값을 소비할 자리를 다시 연결).
@@ -248,7 +271,7 @@ export const LEGACY_NAV_ITEMS: LegacyNavItemConfig[] = [
 // 남겨 두면 다음 사람이 "이 그룹이 아직 있나" 헷갈린다). 5항목 밖으로 빠진 17개
 // (LEGACY_NAV_ITEMS)는 이 순서 상수가 아니라 more/page.tsx가 그 배열을 직접 얹는
 // «그 밖의 화면» 카드 하나로 뒤에 따라붙는다(모바일 회귀 0, PO 조건②).
-export const MOBILE_HUB_GROUP_ORDER = ['now', 'dev', 'connect-rules'];
+export const MOBILE_HUB_GROUP_ORDER = ['now', 'dev', 'results', 'connect-rules'];
 
 // flow·inbox·chats는 바텀 탭(지금/결재/채팅)이 이미 depth 1로 커버한다(doc §2.2 "자주" 축) —
 // 허브에 또 실으면 같은 목적지로 가는 진입점이 두 개가 되고 "몇 탭"의 의미가 흐려진다.

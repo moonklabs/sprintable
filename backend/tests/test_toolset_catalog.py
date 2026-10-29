@@ -96,7 +96,7 @@ def test_tool_group_mapping_examples():
     assert by_tool["sprintable_unlock_files"] == "core"
     # 정상 그룹 매핑 sanity
     assert by_tool["sprintable_add_story"] == "stories"
-    assert by_tool["sprintable_get_project_health"] == "analytics"
+    assert by_tool["sprintable_get_velocity"] == "analytics"
     # story #2010: sprintable_transition_goal — ALL_TOOL_NAMES 누락 시 KeyError로 실패(당초
     # 이 도구가 SSOT 목록에서 빠져 role-template picker/치트시트에 노출되지 않던 회귀 가드).
     # "goal" substring 매칭으로 add_goal/update_goal/list_goals와 동일 "epics" 그룹.

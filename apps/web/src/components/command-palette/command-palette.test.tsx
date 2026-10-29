@@ -84,9 +84,9 @@ describe('CommandPalette — existing navigate/search behavior (regression guard
 // == 모바일 legacy 집합")의 절반(팔레트 쪽)을 잠근다. 나머지 절반(모바일 쪽과의 등치)은
 // 바로 아래 별도 테스트로.
 describe('CommandPalette — navigate 목적지 = NAV_GROUPS 파생(story #3698 AC1·AC3)', () => {
-  // story #4810 — go-retro 걷힘(회고 화면 걷기 4807에 앞서 진입점부터 뺌).
-  // story #4810 — go-hypotheses도 걷힘(가설 화면 걷기 4811에 앞서 진입점부터 뺌).
-  const GUARD_ANCHOR_IDS = new Set(['go-sprints', 'go-epics', 'go-work-list']);
+  // story #3845 §④ — go-retro 신규(retro가 LEGACY_NAV_ITEMS에서 빠지며 이 앵커로 이관).
+  // story #3989 — go-hypotheses 신규(가설 탭도 WorkspaceFrameTabs 전용 진입점).
+  const GUARD_ANCHOR_IDS = new Set(['go-sprints', 'go-epics', 'go-retro', 'go-work-list', 'go-hypotheses']);
 
   it('팔레트 navigate id 집합이 정확히 NAV_GROUPS+LEGACY_NAV_ITEMS 전 항목 + CHAT_CENTER_ITEM과 같다(앵커 2개는 문서화된 예외로 제외)', async () => {
     await mount();
@@ -161,6 +161,7 @@ describe('CommandPalette — navigate 목적지 = NAV_GROUPS 파생(story #3698 
     // S1 이전엔 팔레트가 24 중 5(inbox·board·chats·org-workforce·docs)만 도달했다 — 이번
     // 파생으로 그 밖의 항목(신뢰·지식·마케팅·조직 구역)도 전부 도달하는지 표본 확認.
     expect(document.body.textContent).toContain('신뢰 센터'); // org-trust(신뢰 구역, 예전엔 누락)
+    expect(document.body.textContent).toContain('블로그 포스트'); // content(마케팅 구역, 예전엔 누락)
     expect(document.body.textContent).toContain('스토리지'); // storage(지식 구역, 예전엔 누락)
     expect(document.body.textContent).toContain('설정'); // settings(예전엔 누락)
   });
@@ -176,12 +177,12 @@ describe('CommandPalette — navigate 목적지 = NAV_GROUPS 파생(story #3698 
     expect(shortcutTexts).toContain('S');
   });
 
-  it('go-sprints·go-epics 가드 앵커는 그대로 남아 있다(#2376 orphan-route 가드용, 지우면 안 됨)', async () => {
+  it('go-sprints·go-epics·go-retro 가드 앵커는 그대로 남아 있다(#2376 orphan-route 가드용, 지우면 안 됨)', async () => {
     await mount();
     expect(document.body.textContent).toContain('스프린트로 이동');
     expect(document.body.textContent).toContain('에픽으로 이동');
-    // story #4810 — 회고 진입점은 걷혔다(앵커 포함).
-    expect(document.body.textContent).not.toContain('회고로 이동');
+    // story #3845 §④ — retro가 LEGACY_NAV_ITEMS에서 빠지며 신규.
+    expect(document.body.textContent).toContain('회고로 이동');
   });
 
   it('board 목적지는 /flow?view=list로 라우팅한다(리다이렉트 경유 금지, story #2224)', async () => {

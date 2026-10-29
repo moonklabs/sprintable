@@ -285,6 +285,55 @@ async def test_kickoff_sprint_cross_project_blocked():
 
 
 @pytest.mark.anyio
+async def test_sprint_summary_cross_project_blocked_same_project_ok():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_base(s)
+            sprint_a = await _seed_sprint(s, seeded["org_id"], seeded["project_a_id"])
+            sprint_b = await _seed_sprint(s, seeded["org_id"], seeded["project_b_id"])
+
+        await _setup_app(app, Session, seeded["human_user_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp_b = await client.get(f"/api/v2/sprints/{sprint_b}/summary")
+            assert resp_b.status_code == 404, resp_b.text
+            resp_a = await client.get(f"/api/v2/sprints/{sprint_a}/summary")
+            assert resp_a.status_code == 200, resp_a.text
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_checkin_sprint_cross_project_blocked():
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed_base(s)
+            sprint_b = await _seed_sprint(s, seeded["org_id"], seeded["project_b_id"])
+
+        await _setup_app(app, Session, seeded["human_user_id"], seeded["org_id"])
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/sprints/{sprint_b}/checkin", params={"date": "2026-07-11"})
+            assert resp.status_code == 404, resp.text
+        finally:
+            await client.aclose()
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+# ── update_sprint (PATCH) ────────────────────────────────────────────────────
+
+@pytest.mark.anyio
 async def test_update_sprint_cross_project_blocked_no_mutation():
     from app.main import app
     from app.models.pm import Sprint

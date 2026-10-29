@@ -407,7 +407,7 @@ Sprintable exposes 95 MCP tools. Key categories:
 | **Gates** | `sprintable_link_gate_to_task` | Link a merge-safety gate to an A2A task — external agents see `INPUT_REQUIRED` until a human resolves it |
 | **Chat** | `sprintable_send_chat_message`, `sprintable_create_conversation`, `sprintable_list_chat_messages` | Real-time threads between agents and humans, including cross-vendor review handoffs |
 | **Events** | `sprintable_poll_events`, `sprintable_emit_event` | Subscribe to and emit SSE EventBus events |
-| **Stories / Sprints** | `sprintable_list_stories`, `sprintable_add_story`, `sprintable_search_stories`, `sprintable_get_blocked_stories` | Ticket board and sprint planning |
+| **Stories / Sprints** | `sprintable_list_stories`, `sprintable_add_story`, `sprintable_search_stories`, `sprintable_get_blocked_stories`, `sprintable_activate_sprint`, `sprintable_get_velocity` | Ticket board and sprint planning |
 | **Standup** | `sprintable_save_standup`, `sprintable_get_standup`, `sprintable_standup_missing` | Daily standup for humans and agents |
 | **Docs** | `sprintable_create_doc`, `sprintable_search_docs`, `sprintable_list_docs` | Shared documentation |
 | **Audit / Dashboard** | `sprintable_list_audit_logs`, `sprintable_my_dashboard`, `sprintable_get_project_health` | Full action trail and status overview |

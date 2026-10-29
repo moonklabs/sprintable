@@ -242,6 +242,39 @@ class ProjectHealthResponse(BaseModel):
     health: str
 
 
+class BurndownPoint(BaseModel):
+    date: str
+    points: int
+
+
+class SprintInfo(BaseModel):
+    id: uuid.UUID
+    title: str
+    status: str
+    start_date: date | None
+    end_date: date | None
+    duration: int
+    velocity: int | None
+
+
+class BurndownResponse(BaseModel):
+    sprint: SprintInfo
+    total_points: int
+    done_points: int
+    remaining_points: int
+    completion_pct: int
+    stories_count: int
+    done_count: int
+    ideal_line: list[BurndownPoint]
+    actual_line: list[BurndownPoint]
+
+
+class SprintVelocityResponse(BaseModel):
+    velocity: int | None
+    title: str
+    status: str
+
+
 class LeaderboardEntry(BaseModel):
     member_id: uuid.UUID
     balance: float
