@@ -39,7 +39,10 @@ def _block_with(marker: str) -> str:
 def test_the_file_records_what_the_long_requests_are_and_what_is_still_to_be_shown() -> None:
     five = DOC.split("## 5. What the long requests are")[1].split("## Questions")[0]
     for token in ("888 requests over 30 s add up to 267,288 s (0.442 concurrent)", "all of them `GET /mcp` of one client", "no byte for 6 seconds", "the transport handler still serves a client's GET", "no `send_*` of a notification", "answer the GET with **405**", "`MCP_HTTP_GET_STREAM=true`", "**Leave the variable unset rather than empty:**", "answered 500 by the SDK",
-                  "**Still to be shown (dev round, the product owner's hands):**", "per client per hour"):
+                  "**Shown (2026-10-29, on the author's machine; nothing was connected to the dev service", "`if (status === 405) return`", "`ServerDoesNotSupportSse`", "`Terminate`",
+                  "(140 tools)", "**one `GET /mcp` at connect (405, 0.0 s) and none in the next 10 minutes.**", "lasting **120.1 s**",
+                  "**Still to be shown — on prod, where the client that holds the stream is (`claude-code/2.1.280`", "the same ruler as the 7 days before it (888 requests over 30 s, 267,288 s)", "per client per hour",
+                  "**The way back of both is one line:** `MCP_HTTP_GET_STREAM=true`", "`--no-cpu-throttling`"):
         assert token in five, token
     # and the change it describes is in the source
     auth = (_ROOT / "backend/sprintable_mcp/http_auth.py").read_text()
