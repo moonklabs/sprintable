@@ -86,8 +86,10 @@ steps:
           DEBIAN_FRONTEND=noninteractive apt-get update -qq
           DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 python3-yaml
         fi
-        # builds (linux/amd64), checks what was baked (the VM API host in, no Cloud Run address in), pushes, and prints the digest reference as its LAST line
-        bash deploy/vm/bin/build-frontend-vm.sh "${_DEPLOY_ENV}" "${COMMIT_SHA}" "$$repo/frontend-vm:${COMMIT_SHA}" --push \
+        # story 4805: the frontend inputs (sources, base image digests, the five values, the build scripts) have an id; an image an earlier FULL build made from the same id gets the commit put on top
+        # (a minute) instead of a new Next.js build (six); in every other case it is the full build — builds (linux/amd64), checks what was baked (the VM API host in, no Cloud Run address in),
+        # pushes — and prints the digest reference as its LAST line
+        bash deploy/vm/bin/frontend-vm-image.sh "${_DEPLOY_ENV}" "${COMMIT_SHA}" "$$repo/frontend-vm" \
           --set "NEXT_PUBLIC_GA4_MEASUREMENT_ID=$$VM_GA4_MEASUREMENT_ID" \
           --set "NEXT_PUBLIC_EE_ENABLED=$$VM_EE_ENABLED" \
           --set "NEXT_PUBLIC_SUPPORT_WIDGET_ENABLED=$$VM_SUPPORT_WIDGET_ENABLED" \

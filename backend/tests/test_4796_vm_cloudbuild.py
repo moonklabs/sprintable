@@ -150,13 +150,13 @@ def test_every_step_names_dev_and_prod_with_their_own_bucket_and_no_script_write
         script = _STEPS[sid]["args"][1]
         assert gate.search(script), sid
         assert not re.search(r"gs://\S*desired\.json", script), f"{sid} must not write the VM's desired.json (RUNBOOK §7 step 1 does)"
-    assert "build-frontend-vm.sh \"${_DEPLOY_ENV}\" \"${COMMIT_SHA}\"" in _STEPS["build-frontend-vm"]["args"][1], "the frontend is built from the declaration of the environment of the run"
+    assert "frontend-vm-image.sh \"${_DEPLOY_ENV}\" \"${COMMIT_SHA}\"" in _STEPS["build-frontend-vm"]["args"][1], "the frontend is built (or, story 4805, reused) from the declaration of the environment of the run"
     assert _VM["substitutions"]["_VM_DEPLOY_BUCKET"] == "sprintable-vm-dev-deploy" and (_ROOT / "deploy/vm/env/prod.yaml").read_text().count("deploy: sprintable-vm-prod-deploy") == 1, "the prod bucket the step expects is the one the prod declaration names"
 
 
 def test_the_images_live_in_our_registry_and_the_two_hosts_are_not_passed_from_here() -> None:
     script = _STEPS["build-frontend-vm"]["args"][1]
-    assert '"${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}"' in script and "frontend-vm:${COMMIT_SHA}" in script
+    assert '"${_AR_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}"' in script and '"$$repo/frontend-vm"' in script
     assert "NEXT_PUBLIC_FASTAPI_URL" not in script and "NEXT_PUBLIC_APP_URL" not in script
 
 
@@ -184,6 +184,7 @@ def _substitute(text: str, values: dict[str, str]) -> str:
 _FAKE_DOCKER = r"""#!/bin/sh
 echo "docker $*" >> "$FAKE_LOG"
 case "$1" in
+  pull) exit 1 ;;  # story 4805: no earlier frontend image with the same inputs (the reuse has its own tests, test_4805_frontend_vm_reuse.py) - these tests are the full build
   run)
     case "$*" in
       *"-rlF"*) echo 1 ;;
