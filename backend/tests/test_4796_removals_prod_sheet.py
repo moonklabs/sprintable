@@ -193,6 +193,9 @@ def test_the_cloud_sql_delete_line_does_nothing_without_all_three_proofs_and_del
         sets = "; ".join(f"{p}=1" for p in proofs if p != missing)
         subprocess.run(["bash", "-c", f"unset {' '.join(proofs)}; {sets}; " + line], capture_output=True, text=True, env=_env(tmp_path), cwd=tmp_path, timeout=30)
         assert (tmp_path / "log").read_text() == "", f"nothing is deleted without {missing}"
+    (tmp_path / "log").write_text("")
+    subprocess.run(["bash", "-c", "set -u; EXPORTS_OK=1; DEP_OK=1; COPY_OK=1; SQL=''; " + line], capture_output=True, text=True, env={**_env(tmp_path), "SQL": ""}, cwd=tmp_path, timeout=30)
+    assert (tmp_path / "log").read_text() == "", "an empty instance name stops the line before the first job is deleted"
     subprocess.run(["bash", "-c", "EXPORTS_OK=1; DEP_OK=1; COPY_OK=1; " + line], capture_output=True, text=True, env=_env(tmp_path), cwd=tmp_path, timeout=30)
     calls = [c.split()[1:4] for c in (tmp_path / "log").read_text().splitlines()]
     assert calls == [["run", "jobs", "delete"], ["run", "jobs", "delete"], ["sql", "instances", "delete"]]
@@ -200,7 +203,7 @@ def test_the_cloud_sql_delete_line_does_nothing_without_all_three_proofs_and_del
 
 _FAKE_GCLOUD_DEP = r"""#!/bin/sh
 case "$1 $2 $3" in
-  "sql instances describe") echo "10.110.0.5" ;;
+  "sql instances describe") echo '{"ipAddresses":[{"type":"PRIMARY","ipAddress":"34.64.0.9"},{"type":"PRIVATE","ipAddress":"10.110.0.5"}]}' ;;
   "run services list") printf 'sprintable-backend-prod\nsprintable-mcp-prod\n' ;;
   "run jobs list") printf 'sprintable-migrate-prod\nsprintable-readonly-prod\n%s' "$FAKE_EXTRA_JOB" ;;
   "run services describe") if [ "$4" = "$FAKE_UNREADABLE" ]; then exit 1; fi; echo "{\"name\":\"$4\"}"; [ "$4" = "$FAKE_SVC_USES" ] && echo "$FAKE_USES"; exit 0 ;;

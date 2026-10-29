@@ -127,7 +127,7 @@ All empty = done. **If a line prints something, do not delete it from this sheet
 
 1. Dependents — **a gate, not a report**: the block prints `DEPENDENTS-CLEAR` only if every service and job whose definition carries the instance (`:$SQL`), the direct-URL secret (`DATABASE_URL_PROD`, which also matches the pooler secret) or the instance's private address is one of the two jobs this sheet deletes itself (a read of each current template; a failed read is not clear):
    ```
-   unset DEP_OK; OK=1; SRC_IP=$(gcloud sql instances describe "${SQL:?}" --project $PROJECT --format='value(ipAddresses[0].ipAddress)') && [ -n "$SRC_IP" ] || { echo "NO PRIVATE ADDRESS READ"; OK=0; }
+   unset DEP_OK; OK=1; SRC_IP=$(gcloud sql instances describe "${SQL:?}" --project $PROJECT --format=json | jq -r '.ipAddresses[]? | select(.type=="PRIVATE") | .ipAddress' | head -n1) && [ -n "$SRC_IP" ] || { echo "NO PRIVATE ADDRESS READ"; OK=0; }
    for r in services jobs; do names=$(gcloud run $r list --project $PROJECT --region $REGION --format='value(metadata.name)') || { OK=0; continue; }; for n in $names; do d=$(gcloud run $r describe $n --project $PROJECT --region $REGION --format=json) || { echo "UNREADABLE: $r $n"; OK=0; continue; }; if printf '%s\n' "$d" | grep -q -e ":$SQL" -e "DATABASE_URL_PROD" -e "$SRC_IP"; then case "$r/$n" in jobs/sprintable-migrate-prod|jobs/sprintable-readonly-prod) ;; *) echo "USES CLOUD SQL PROD: $r $n"; OK=0 ;; esac; fi; done; done
    gcloud run revisions list --service $BACKEND --project $PROJECT --region $REGION --format='table(metadata.name,status.conditions[0].status,metadata.annotations."run.googleapis.com/cloudsql-instances")'
    [ "$OK" = 1 ] && DEP_OK=1 && echo DEPENDENTS-CLEAR
@@ -149,7 +149,7 @@ All empty = done. **If a line prints something, do not delete it from this sheet
 3. Deletion protection, if the instance has it (`jq .settings.deletionProtectionEnabled sql-prod.json` prints `true`): `gcloud sql instances patch "$SQL" --project $PROJECT --no-deletion-protection` (undo: `--deletion-protection`).
 4. Delete the two jobs, then the instance — **one chained line that starts only after `EXPORTS-OK`, `DEPENDENTS-CLEAR` and `COPY-OK` (gate C) were all printed in this shell, so a missing proof, a failed export or a failed job delete stops it before the instance is touched**:
    ```
-   [ "${EXPORTS_OK:-0}" = 1 ] && [ "${DEP_OK:-0}" = 1 ] && [ "${COPY_OK:-0}" = 1 ] && gcloud run jobs delete sprintable-migrate-prod --project "${PROJECT:?}" --region "${REGION:?}" --quiet && gcloud run jobs delete sprintable-readonly-prod --project "${PROJECT:?}" --region "${REGION:?}" --quiet && gcloud sql instances delete "${SQL:?}" --project "${PROJECT:?}" --quiet
+   : "${SQL:?}" && [ "${EXPORTS_OK:-0}" = 1 ] && [ "${DEP_OK:-0}" = 1 ] && [ "${COPY_OK:-0}" = 1 ] && gcloud run jobs delete sprintable-migrate-prod --project "${PROJECT:?}" --region "${REGION:?}" --quiet && gcloud run jobs delete sprintable-readonly-prod --project "${PROJECT:?}" --region "${REGION:?}" --quiet && gcloud sql instances delete "${SQL:?}" --project "${PROJECT:?}" --quiet
    ```
 5. **Undo** — a new instance from `sql-prod.json`, the databases and the user, then the exports (the same chain as the dev sheet's R5: one chain, a failing step stops the rest, `RESTORE-OK` only if all ran):
    ```
