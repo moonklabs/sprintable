@@ -70,6 +70,11 @@ async def test_nothing_else_changes_post_health_other_paths_and_the_key_rules():
     assert st["status"] == 401 and not st["app_called"], "a POST without a key is still a 401"
     st = await _call(bearer_auth_asgi, "DELETE", "/mcp", {"authorization": "Bearer sk_abc"})
     assert st["app_called"], "a DELETE is the SDK's (it answers 405 itself in this mode)"
+    for method in ("HEAD", "OPTIONS"):
+        st = await _call(bearer_auth_asgi, method, "/mcp", {})
+        assert st["status"] == 401 and not st["app_called"], f"{method} without a key keeps the key rule (the 405 is for GET only)"
+        st = await _call(bearer_auth_asgi, method, "/mcp", {"authorization": "Bearer sk_abc"})
+        assert st["app_called"], f"{method} with a key still reaches the SDK"
     for path in ("/health", "/healthz"):
         st = await _call(bearer_auth_asgi, "GET", path, {})
         assert st["status"] == 200 and b"ok" in st["body"], "the health check is a GET and must keep answering 200"
