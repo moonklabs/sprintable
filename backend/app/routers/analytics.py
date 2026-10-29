@@ -1,16 +1,13 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_read_db
-from app.models.pm import Sprint
 from app.repositories.analytics import AnalyticsRepository
 from app.schemas.analytics import (
     AgentStatsResponse,
-    BurndownResponse,
     EpicFlowNodesBatchResponse,
     EpicFlowNodesResponse,
     EpicProgressLane,
@@ -24,7 +21,6 @@ from app.schemas.analytics import (
     ProjectOverviewResponse,
     RecentActivityResponse,
     SprintVelocityItem,
-    SprintVelocityResponse,
 )
 from app.services.project_auth import has_project_access
 
@@ -246,39 +242,3 @@ async def get_project_health(
     await _assert_project_access(repo, auth, project_id)
     data = await repo.get_project_health(project_id)
     return ProjectHealthResponse.model_validate(data)
-
-
-@router.get("/sprints/{sprint_id}/burndown", response_model=BurndownResponse)
-async def get_burndown(
-    sprint_id: uuid.UUID,
-    repo: AnalyticsRepository = Depends(_get_repo),
-    auth: AuthContext = Depends(get_current_user),
-) -> BurndownResponse:
-    sprint_project_id = (await repo.session.execute(
-        select(Sprint.project_id).where(Sprint.id == sprint_id, Sprint.org_id == repo.org_id)
-    )).scalar_one_or_none()
-    if sprint_project_id is None:
-        raise HTTPException(status_code=404, detail="Sprint not found")
-    await _assert_project_access(repo, auth, sprint_project_id)
-    data = await repo.get_burndown(sprint_id)
-    if data is None:
-        raise HTTPException(status_code=404, detail="Sprint not found")
-    return BurndownResponse.model_validate(data)
-
-
-@router.get("/sprints/{sprint_id}/velocity", response_model=SprintVelocityResponse)
-async def get_sprint_velocity(
-    sprint_id: uuid.UUID,
-    repo: AnalyticsRepository = Depends(_get_repo),
-    auth: AuthContext = Depends(get_current_user),
-) -> SprintVelocityResponse:
-    sprint_project_id = (await repo.session.execute(
-        select(Sprint.project_id).where(Sprint.id == sprint_id, Sprint.org_id == repo.org_id)
-    )).scalar_one_or_none()
-    if sprint_project_id is None:
-        raise HTTPException(status_code=404, detail="Sprint not found")
-    await _assert_project_access(repo, auth, sprint_project_id)
-    data = await repo.get_sprint_velocity(sprint_id)
-    if data is None:
-        raise HTTPException(status_code=404, detail="Sprint not found")
-    return SprintVelocityResponse.model_validate(data)

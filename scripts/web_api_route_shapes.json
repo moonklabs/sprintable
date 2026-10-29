@@ -3320,16 +3320,6 @@
 "kind": "object"
 },
 {
-"method": "GET",
-"path": "/api/v2/sprints/{}/burndown",
-"kind": "object"
-},
-{
-"method": "GET",
-"path": "/api/v2/sprints/{}/checkin",
-"kind": "unknown"
-},
-{
 "method": "POST",
 "path": "/api/v2/sprints/{}/close",
 "kind": "object"
@@ -3350,18 +3340,8 @@
 "kind": "unknown"
 },
 {
-"method": "GET",
-"path": "/api/v2/sprints/{}/summary",
-"kind": "unknown"
-},
-{
 "method": "POST",
 "path": "/api/v2/sprints/{}/transition",
-"kind": "object"
-},
-{
-"method": "GET",
-"path": "/api/v2/sprints/{}/velocity",
 "kind": "object"
 },
 {

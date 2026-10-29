@@ -86,7 +86,7 @@ from .tools.analytics import (
     SearchStoriesInput, SprintFilterInput, WorkloadInput,
     get_agent_stats, get_blocked_stories, get_goal_progress,
     get_member_workload, get_overdue_tasks, get_project_health,
-    get_project_overview, get_recent_activity, get_sprint_velocity_history,
+    get_project_overview, get_recent_activity,
     get_unassigned_stories, search_stories,
 )
 from .tools.audit import ListAuditLogsInput, list_audit_logs
@@ -139,16 +139,12 @@ from .tools.rewards import (
     GetLeaderboardInput, GetWalletInput, GiveRewardInput,
     get_leaderboard_v2, get_wallet, give_reward,
 )
-from .tools.sprints import (
-    CreateSprintInput, ListSprintsInput, SprintIdInput, UpdateSprintInput,
-    activate_sprint, close_sprint, create_sprint,
-    get_velocity, list_sprints, sprint_summary, update_sprint,
-)
+from .tools.sprints import ListSprintsInput, list_sprints
 from .tools.standup import (
-    CheckinSprintInput, GetRetroSessionInput, GetStandupInput,
+    GetRetroSessionInput, GetStandupInput,
     ListStandupEntriesInput, SaveStandupInput, StandupDateInput, StandupHistoryInput,
     UpdateRetroActionStatusInput,
-    checkin_sprint, get_retro_session, get_standup, list_standup_entries,
+    get_retro_session, get_standup, list_standup_entries,
     save_standup, standup_history, standup_missing, update_retro_action_status,
 )
 from .tools.stories import (
@@ -666,28 +662,10 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_confirm_hypothesis",
      "[일감] 가설 확정(active) 또는 폐기(killed). active 확정은 휴먼 경로만.",
      ConfirmHypothesisInput, confirm_hypothesis),
-    # Sprints (7) — E-SECURITY SEC-S8 확장: delete_sprint 제거(에이전트 hard-delete 차단)
+    # Sprints (1) — 4811: only the read tool stays (the web screen is the human path to create / edit / activate / close)
     ("sprintable_list_sprints",
      "[일감] 스프린트 목록 조회.",
      ListSprintsInput, list_sprints),
-    ("sprintable_sprint_summary",
-     "[일감] 스프린트 스토리 상태별 요약.",
-     SprintIdInput, sprint_summary),
-    ("sprintable_activate_sprint",
-     "[일감] 스프린트 활성화 (planning → active).",
-     SprintIdInput, activate_sprint),
-    ("sprintable_close_sprint",
-     "[일감] 스프린트 종료 (active → closed).",
-     SprintIdInput, close_sprint),
-    ("sprintable_get_velocity",
-     "[일감] 스프린트 벨로시티 조회.",
-     SprintIdInput, get_velocity),
-    ("sprintable_create_sprint",
-     "[일감] 스프린트 생성.",
-     CreateSprintInput, create_sprint),
-    ("sprintable_update_sprint",
-     "[일감] 스프린트 수정.",
-     UpdateSprintInput, update_sprint),
     # Docs (5) — E-SECURITY SEC-S1 확장: delete_doc 제거(에이전트 삭제 차단)
     ("sprintable_list_docs",
      "[지식] 문서 목록 조회 (tree 또는 tag 필터). 각 항목의 reference_token 필드가 그 문서를"
@@ -728,9 +706,6 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_get_member_workload",
      "[일감] 팀원 워크로드 조회.",
      WorkloadInput, get_member_workload),
-    ("sprintable_get_sprint_velocity_history",
-     "[일감] 스프린트 벨로시티 히스토리 조회.",
-     SprintableInput, get_sprint_velocity_history),
     ("sprintable_search_stories",
      "[일감] 스토리 제목 검색.",
      SearchStoriesInput, search_stories),
@@ -1044,9 +1019,6 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_update_retro_action_status",
      "[일감] 레트로 액션 아이템 상태 변경.",
      UpdateRetroActionStatusInput, update_retro_action_status),
-    ("sprintable_checkin_sprint",
-     "[일감] 스프린트 체크인 — 진행률 + 스탠드업 미제출 현황.",
-     CheckinSprintInput, checkin_sprint),
     # Retro (7)
     ("sprintable_list_retro_sessions",
      "[일감] 레트로 세션 목록 조회.",

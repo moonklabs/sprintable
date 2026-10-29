@@ -57,7 +57,7 @@ function wrap(node: React.ReactNode) {
 }
 
 function stubFetch(sprints: unknown[], opts: {
-  burndownReject?: boolean;
+  sprintStoriesReject?: boolean;
   sprintStories?: unknown[];
   backlogStories?: unknown[];
 } = {}) {
@@ -65,14 +65,11 @@ function stubFetch(sprints: unknown[], opts: {
     if (typeof url === 'string' && url.includes('/api/sprints?project_id=')) {
       return { ok: true, json: async () => ({ data: sprints }) };
     }
-    if (typeof url === 'string' && url.includes('/burndown')) {
-      if (opts.burndownReject) throw new Error('network down');
-      return { ok: false, json: async () => null };
-    }
     if (typeof url === 'string' && url.includes('/api/stories/backlog')) {
       return { ok: true, json: async () => ({ data: opts.backlogStories ?? [] }) };
     }
     if (typeof url === 'string' && url.includes('/api/stories?')) {
+      if (opts.sprintStoriesReject) throw new Error('network down');
       return { ok: true, json: async () => ({ data: opts.sprintStories ?? [] }) };
     }
     return { ok: false, json: async () => null };
@@ -155,15 +152,31 @@ describe('SprintsClient — 스프린트 first-touch 정체성', () => {
   });
 });
 
-// story #3519(§16-7 2부, PO 確定 2026-09-05) — loadSprintDetail의 burndown/sprintStories/
-// backlogStories 3legs 전부 부수인데 catch가 어디에도 없어, 하나가 네트워크단 reject하면
-// Promise.all 전체가 던져 나머지 둘도 조용히 못 채워졌다(에러 표시 0).
+// story #3519(§16-7 2부, PO 確定 2026-09-05) — loadSprintDetail의 두 leg(sprintStories·backlogStories)는 둘 다 부수인데 catch가 어디에도 없어,
+// 하나가 네트워크단 reject하면 Promise.all 전체가 던져 나머지도 조용히 못 채워졌다(에러 표시 0). story 4811: 번다운 leg는 걷었다.
 describe('SprintsClient — 스프린트 상세 Promise.all 격리(story #3519)', () => {
-  it('burndown이 네트워크 reject해도 sprintStories·backlogStories는 그대로 채워진다', async () => {
+  it('sprintStories가 네트워크 reject해도 backlogStories는 그대로 채워진다', async () => {
     stubFetch(
       [{ id: 's1', title: 'Sprint 1', status: 'planning', start_date: '2026-07-01', end_date: '2026-07-14' }],
       {
-        burndownReject: true,
+        sprintStoriesReject: true,
+        backlogStories: [{ id: 'st2', title: '백로그 스토리' }],
+      },
+    );
+    await mount();
+    const row = [...container.querySelectorAll('li')].find((li) => li.textContent?.includes('Sprint 1'));
+    await act(async () => { row!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('백로그 스토리');
+  });
+});
+
+// story 4811 — 번다운 분석 길을 걷었다: 스프린트 상세는 그 주소를 더는 부르지 않고, 보고서 링크(사람이 보는 길)는 남는다.
+describe('SprintsClient — 번다운 걷음(story 4811)', () => {
+  it('스프린트를 열어도 /burndown을 부르지 않고 스토리 · 백로그는 그대로 채워진다', async () => {
+    stubFetch(
+      [{ id: 's1', title: 'Sprint 1', status: 'active', start_date: '2026-07-01', end_date: '2026-07-14' }],
+      {
         sprintStories: [{ id: 'st1', title: '스프린트 스토리', story_points: 3 }],
         backlogStories: [{ id: 'st2', title: '백로그 스토리' }],
       },
@@ -172,8 +185,21 @@ describe('SprintsClient — 스프린트 상세 Promise.all 격리(story #3519)'
     const row = [...container.querySelectorAll('li')].find((li) => li.textContent?.includes('Sprint 1'));
     await act(async () => { row!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const urls = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes('/burndown'))).toBe(false);
+    expect(urls.some((u) => u.includes('/api/stories?'))).toBe(true);
     expect(container.textContent).toContain('스프린트 스토리');
     expect(container.textContent).toContain('백로그 스토리');
+  });
+
+  it('보고서가 있는 스프린트는 «보고서 보기» 링크가 그대로 남는다', async () => {
+    stubFetch([{ id: 's1', title: 'Sprint 1', status: 'closed', start_date: '2026-07-01', end_date: '2026-07-14', report_doc_id: 'doc-9' }]);
+    await mount();
+    const row = [...container.querySelectorAll('li')].find((li) => li.textContent?.includes('Sprint 1'));
+    await act(async () => { row!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const link = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href')?.includes('doc-9'));
+    expect(link).not.toBeUndefined();
   });
 });
 

@@ -51,8 +51,9 @@ def test_role_behaviors_reference_verified_tool_names_only():
 
     mod = _load_migration()
     from sprintable_mcp.server import _TOOL_DEFS
+    from tests.withdrawn_tool_names import WITHDRAWN_BUT_STILL_IN_SEED_TEXT
 
-    real_names = {name for name, *_ in _TOOL_DEFS} | {"ping"}
+    real_names = {name for name, *_ in _TOOL_DEFS} | {"ping"} | WITHDRAWN_BUT_STILL_IN_SEED_TEXT
     for slug, behaviors in mod._ROLE_BEHAVIORS.items():
         mentioned = set(re.findall(r"`(sprintable_[a-z_]+)`", behaviors))
         assert mentioned, f"{slug} role_behaviors mentions no sprintable_* tools"

@@ -56,7 +56,6 @@ READ_ONLY_TOOLS = [
     ("sprintable_list_docs", {}),
     ("sprintable_get_project_overview", {}),
     ("sprintable_get_project_health", {}),
-    ("sprintable_get_sprint_velocity_history", {}),
     ("sprintable_list_team_members", {}),
     ("sprintable_list_meetings", {}),
     ("sprintable_list_retro_sessions", {}),

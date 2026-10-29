@@ -15,7 +15,7 @@ from __future__ import annotations
 _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("rewards", ("reward", "wallet", "leaderboard")),
     ("analytics", ("velocity", "health", "dashboard", "overview", "stats",
-                   "sprint_summary", "recent_activity", "agent_stats", "blocked_stories",
+                   "recent_activity", "agent_stats", "blocked_stories",
                    "unassigned_stories", "member_workload", "overdue", "epic_progress",
                    # 계층 리네이밍 B1(story 1925): sprintable_get_goal_progress(신)도 이 그룹.
                    "goal_progress")),
@@ -40,13 +40,12 @@ _GROUP_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     # literal은 유지 — 데이터 마이그 불요, 스탠드업 core-promotion 때와 동일 관례).
     ("epics", ("epic", "goal")),
     ("tasks", ("task",)),
-    ("stories", ("story", "stories", "backlog", "claim", "checkin")),
+    ("stories", ("story", "stories", "backlog", "claim")),
     # story b4027b2e: E-CANVAS visual_artifacts가 임계(11개 도구·전용 REST 도메인)에 도달해
     # cross-cutting always-allow에서 전용 그룹으로 승격(C1-S3 당시 예고된 신설). "canonical_version"
     # (propose_canonical_version은 "artifact" substring이 없음)·"spec_pin"(핀 4종)까지 포괄.
     ("canvas", ("artifact", "canonical_version", "spec_pin")),
-    ("admin", ("give_reward", "emit_event", "trigger_ai", "activate_sprint",
-               "close_sprint", "create_sprint", "upsert_webhook", "delete_webhook",
+    ("admin", ("give_reward", "emit_event", "trigger_ai", "upsert_webhook", "delete_webhook",
                # story #2636: 이벤트 레지스트리 "등록"(admin 그룹 — 등록=org 관리 행위, PO
                # 확定 §범위5). "events" 그룹 키워드("event")보다 이 admin 항목이 먼저 매치돼야
                # 하므로 반드시 이 admin 튜플 안에 둔다(순서 의존 — 아래 events 항목 주석 참고).
@@ -476,15 +475,14 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     # 이름으로 부른다. 바꾸려면 클라이언트 쪽이 먼저 따라와야 한다(server.py:311 데코레이터
     # 개명 + 모든 호출자 마이그 선행, story #2304).
     "ping",
-    "sprintable_activate_sprint", "sprintable_add_epic", "sprintable_add_goal",
+    "sprintable_add_epic", "sprintable_add_goal",
     "sprintable_add_retro_action",
     "sprintable_add_retro_item", "sprintable_add_story", "sprintable_add_task",
     "sprintable_assign_story_to_sprint", "sprintable_change_retro_phase",
-    "sprintable_check_notifications", "sprintable_checkin_sprint", "sprintable_claim_story",
+    "sprintable_check_notifications", "sprintable_claim_story",
     "sprintable_watch", "sprintable_unwatch", "sprintable_list_watches",  # story #4536
-    "sprintable_close_sprint", "sprintable_create_conversation", "sprintable_create_doc",
-    "sprintable_create_meeting", "sprintable_create_retro_session", "sprintable_create_sprint",
-    "sprintable_delete_meeting",
+    "sprintable_create_conversation", "sprintable_create_doc",
+    "sprintable_create_meeting", "sprintable_create_retro_session", "sprintable_delete_meeting",
     # E-SECURITY SEC-S1(확장): sprintable_delete_story/task/epic/doc 의도적 제거(에이전트
     # hard-delete 차단 — 까심 적대적 QA가 delete_story만으로는 반쪽임을 발견, story와 동형 확대).
     # E-SECURITY SEC-S8 확장: sprintable_delete_sprint도 동일 사유로 제거.
@@ -494,10 +492,9 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_get_leaderboard_v2", "sprintable_get_meeting",
     "sprintable_get_member_workload", "sprintable_get_overdue_tasks", "sprintable_get_project_health",
     "sprintable_get_project_overview", "sprintable_get_recent_activity",
-    "sprintable_get_retro_session_by_sprint", "sprintable_get_sprint_velocity_history",
-    "sprintable_get_standup", "sprintable_get_task", "sprintable_get_unassigned_stories",
+    "sprintable_get_retro_session_by_sprint", "sprintable_get_standup", "sprintable_get_task", "sprintable_get_unassigned_stories",
     "sprintable_get_story",  # story 4615 — a story by its id, in full
-    "sprintable_get_velocity", "sprintable_get_wallet", "sprintable_get_workflow_guide",
+    "sprintable_get_wallet", "sprintable_get_workflow_guide",
     "sprintable_give_reward", "sprintable_list_audit_logs", "sprintable_list_backlog",
     "sprintable_get_chat_message",
     "sprintable_get_chat_attachment",  # story 4646 — 채팅 첨부 읽기
@@ -511,7 +508,7 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_lock_files", "sprintable_mark_all_notifications_read",
     "sprintable_mark_notification_read", "sprintable_my_dashboard", "sprintable_poll_events",
     "sprintable_save_standup", "sprintable_search_docs", "sprintable_search_stories",
-    "sprintable_send_chat_message", "sprintable_sprint_summary", "sprintable_standup_history",
+    "sprintable_send_chat_message", "sprintable_standup_history",
     "sprintable_standup_missing",
     "sprintable_submit_for_approval",
     # story #2010: sprintable_transition_goal — 목표 lifecycle 전이 전용 신설(구 _epic 별칭
@@ -524,7 +521,7 @@ ALL_TOOL_NAMES: tuple[str, ...] = (
     "sprintable_update_doc", "sprintable_update_epic", "sprintable_update_goal",
     "sprintable_update_meeting",
     "sprintable_update_retro_action_status", "sprintable_update_run_status",
-    "sprintable_update_sprint", "sprintable_update_story", "sprintable_update_story_status",
+    "sprintable_update_story", "sprintable_update_story_status",
     "sprintable_update_task", "sprintable_update_task_status", "sprintable_upsert_webhook_config",
     "sprintable_vote_retro_item",
     # hypotheses (E1-S5)
