@@ -97,10 +97,12 @@ def test_the_vm_declares_the_new_variable_and_the_live_names_know_it() -> None:
     names = (_ROOT / "deploy/vm/env/live-names.dev.txt").read_text()
     backend = names[names.index("## sprintable-backend-dev"):]
     assert "\nPUBLIC_API_URL <plain>\n" in backend.split("\n## ")[0] + "\n"
-    assert "PUBLIC_API_URL" not in (_ROOT / "deploy/vm/env/live-names.prod.txt").read_text(), "the live prod service does not have the name (the pipeline's prod branch removes it until P7)"
+    live_prod = (_ROOT / "deploy/vm/env/live-names.prod.txt").read_text()
+    assert "\nPUBLIC_API_URL <plain>\n" in live_prod.split("\n## sprintable-frontend-prod")[0], "the last real revision of the old prod backend (00342-mn9, 2026-10-28 23:17Z) held the name since P7"
+    assert "00342-mn9" in live_prod.split("\n")[0] and "65 variables" in live_prod.split("\n")[0], "the fixture says whose names these are and when"
     import yaml
     prod = yaml.safe_load((_ROOT / "deploy/vm/env/prod.yaml").read_text())["services"]["backend"]
-    assert prod["added"]["PUBLIC_API_URL"] == "https://api.sprintable.ai" and "PUBLIC_API_URL" not in prod["overrides"], "since P6 the VM's prod backend states it, as an addition (the live service has no such name to override)"
+    assert prod["overrides"]["PUBLIC_API_URL"] == "https://api.sprintable.ai" and "PUBLIC_API_URL" not in prod["added"], "the VM's prod backend states it as an override: the last real revision of the old service held the name"
 
 
 def _hand_deploy_spec(env: str, **extra: str) -> str:
@@ -167,7 +169,7 @@ def test_the_prod_deploy_states_no_public_address(tmp_path: Path) -> None:
 def test_the_runbook_names_the_new_setting_and_the_job_steps_that_the_job_really_has() -> None:
     text = (_ROOT / "deploy/vm/RUNBOOK.md").read_text()
     sec9 = text[text.index("## 9. "):text.index("## 10. ")]
-    for needle in ("`PUBLIC_API_URL` (`deploy-backend` sets it from `_FASTAPI_URL`)", "instead of the request's own host", "prod states nothing until its own move", "stops the app at start-up"):
+    for needle in ("`PUBLIC_API_URL` (`deploy-backend` sets it from `_FASTAPI_URL`)", "instead of the request's own host", "prod states `https://api.sprintable.ai` since its move", "stops the app at start-up"):
         assert needle in sec9, needle
     sec10 = text[text.index("## 10. "):text.index("## 11. ")]
     job = (_ROOT / "backend/scripts/jobs/rewrite_site_post_links.py").read_text()
@@ -245,7 +247,7 @@ def test_section_12_lists_what_dev_taught_and_each_item_is_true_of_the_files() -
         assert needle in sec, needle
     prod = yaml.safe_load((_ROOT / "deploy/vm/env/prod.yaml").read_text())
     assert prod["services"]["frontend"]["overrides"]["REALTIME_URL"] == "", "P6: the declaration is empty, as the pipeline's prod branch has been since #5305"
-    assert prod["services"]["backend"]["added"]["PUBLIC_API_URL"] == "https://api.sprintable.ai" and "PUBLIC_API_URL" not in prod["services"]["backend"]["overrides"], "P6: the VM's prod backend states the origin; the live service does not have it, so it is an addition"
+    assert prod["services"]["backend"]["overrides"]["PUBLIC_API_URL"] == "https://api.sprintable.ai" and "PUBLIC_API_URL" not in prod["services"]["backend"]["added"], "P6: the VM's prod backend states the origin; the last real revision of the old service (00342-mn9) held it, so it is an override"
     main = (_ROOT / "cloudbuild.yaml").read_text()
     assert 'REMOVE_ENV_VARS="$${REMOVE_ENV_VARS},PUBLIC_API_URL"' in main and 'REMOVE_ENV_VARS="$${REMOVE_ENV_VARS},DB_TIMING_LOG_ENABLED"' in main
     # the claims that ARE derivable from the repository: the prod stream address is empty in the pipeline, and no prod one-off job is provisioned

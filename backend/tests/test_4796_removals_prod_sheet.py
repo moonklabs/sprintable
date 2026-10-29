@@ -54,7 +54,7 @@ def test_the_rows_are_six_in_the_run_order_and_the_old_address_has_its_own_gate(
     assert "empty for **7 days in a row**" in CUTOVER and "removed as a whole" in CUTOVER
     assert "R1–R5 do **not** touch `sprintable-backend-prod`" in gate_f
     why = _rows()["R6"].split("**Why it is not removed today")[1].split("\n")[0]
-    for token in ("0.08 vCPU", "128 Mi", "concurrency 1", "maximum 10", "first generation", "CPU boost off", "minimum instances 0", "fwd-20261030=100", "unmeasured here"):
+    for token in ("0.08 vCPU", "128 Mi", "concurrency 1", "maximum 10", "first generation", "CPU boost off", "minimum instances 0", "fwd-20261030=100", "unmeasured here", "stays resident as `sprintable-backend-prod-fwd-lite`", "the four outside agents' calls to the old address are zero"):
         assert token in why, token
 
 
