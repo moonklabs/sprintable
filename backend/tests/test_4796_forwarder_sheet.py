@@ -600,7 +600,7 @@ def test_the_text_says_the_order_the_loop_and_what_the_forwarder_holds() -> None
         assert token in twelve, token
     assert twelve.index("**1. From the product owner's machine") < twelve.index("**2. On the VM**") < twelve.index("**3. From the product owner's machine again**")
     eight = _section("## 8. Unfreeze", "## 9. The lap")
-    for token in ("**The serving-reality guard knows about this (declared, not forgotten).**", "**the line is not removed after 8c**", "`update-traffic --to-latest`, is an accident here", "answer 508", "traffic to the real revision **by name**",
+    for token in ("**The serving-reality guard knows about this (declared, not forgotten).**", "there is no schedule since story 4659", "**the line is not removed after 8c**", "`update-traffic --to-latest`, is an accident here", "answer 508", "traffic to the real revision **by name**",
                   "**8c. The forwarder takes the old address", "T0 to **T2**", "the public binding the freeze recorded for the backend, and no other member", "The Cloud Run **frontend** is not touched"):
         assert token in eight, token
     g = _section("## G. Gates", "## 0. Read-only")
