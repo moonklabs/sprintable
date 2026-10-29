@@ -180,6 +180,9 @@ def test_the_monitoring_lines_read_the_fields_the_api_returns_and_summarise_them
     metrics = [re.search(r'metric.type="([^"]+)"', c).group(1) for c in calls if c.startswith("curl")]
     assert metrics == list(series), "the four metrics, in this order, for this service"
     assert all("sprintable-mcp-prod" in c for c in calls if c.startswith("curl"))
+    reducers = {re.search(r'metric.type="([^"]+)"', c).group(1): re.search(r"aggregation.crossSeriesReducer=(\w+)", c).group(1) for c in calls if c.startswith("curl")}
+    assert reducers == {"run.googleapis.com/container/billable_instance_time": "REDUCE_SUM", "run.googleapis.com/container/memory/utilizations": "REDUCE_MAX",
+                        "run.googleapis.com/container/max_request_concurrencies": "REDUCE_MAX", "run.googleapis.com/request_count": "REDUCE_SUM"}, "totals are summed over instances, the memory and the concurrency are the worst instance"
     assert not [c for c in calls if any(w in c.split() for w in ("update", "deploy", "delete", "create"))], "read-only"
 
 
@@ -190,18 +193,35 @@ def test_the_monitoring_filter_names_real_cloud_run_metrics() -> None:
     assert "mon run.googleapis.com/container/memory/utilizations ALIGN_PERCENTILE_99 REDUCE_MAX" in DOC and "mon run.googleapis.com/container/max_request_concurrencies ALIGN_PERCENTILE_99 REDUCE_MAX" in DOC, "the 99th percentile, not the mean, is what the memory is judged by"
 
 
+def test_the_held_time_line_adds_up_the_latencies_the_log_prints(tmp_path: Path) -> None:
+    block = _block_with("SVC=sprintable-mcp-prod")
+    b = tmp_path / "bin"
+    b.mkdir()
+    calls = tmp_path / "calls"
+    calls.write_text("")
+    f = b / "gcloud"
+    f.write_text('#!/bin/sh\necho "gcloud $*" >> "$CALLS"\ncase "$*" in\n  *"value(httpRequest.latency)"*) printf "42s\\n100s\\n302400s\\n" ;;\n  *"value(timestamp)"*) printf "2026-10-28T01:00:00Z\\n2026-10-28T02:00:00Z\\n2026-10-29T01:00:00Z\\n" ;;\n  *"value(httpRequest.requestMethod"*) printf "POST 200\\nPOST 200\\nGET 405\\n" ;;\n  *"value(httpRequest.userAgent)"*) printf "ua-a\\nua-a\\nua-b\\n" ;;\nesac\n')
+    f.chmod(f.stat().st_mode | stat.S_IEXEC)
+    env = {"PATH": f"{b}:{os.environ.get('PATH', '/usr/bin:/bin')}", "HOME": str(tmp_path), "CALLS": str(calls), "PROJECT": "p", "REGION": "r"}
+    p = subprocess.run(["bash", "-c", block], capture_output=True, text=True, timeout=60, env=env)
+    assert p.returncode == 0, p.stderr
+    assert "3 requests over 30 s, 302542 s held, 0.500 instances on average" in p.stdout, p.stdout
+    assert "2 2026-10-28" in p.stdout and "1 2026-10-29" in p.stdout, "requests per day"
+
+
 def test_the_request_log_lines_only_read_and_never_print_a_key() -> None:
     block = _block_with('SVC=sprintable-mcp-prod')
     for line in block.splitlines():
         if "logging read" in line:
             assert "--format='value(" in line and "authorization" not in line.lower() and "requestUrl" not in line, line
+    assert "604800" in block and "value(httpRequest.latency)" in block, "the held time is added up from the log's own latency"
     assert 'httpRequest.requestMethod=\\"GET\\" AND httpRequest.latency>\\"30s\\"' in block and 'httpRequest.requestMethod=\\"POST\\" AND httpRequest.latency>\\"30s\\"' in block, "a held connection is a GET that lasts; a slow POST is counted apart so that it is not taken for one"
 
 
 # ── the decision ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 def test_the_text_says_how_the_numbers_decide_and_what_the_design_is() -> None:
-    for token in ("**A. Billing, not a connection**", "--cpu-throttling", "--no-cpu-throttling", "**B. A held connection**", "a forwarder that holds the same streams is active all day", "which are not lower per second than the instance-based ones", "**unmeasured**",
+    for token in ("the average number of instances the long requests alone keep busy", "**both count as held time**", "**A. Billing, not a connection**", "keep less than 0.1 of an instance busy on average", "keep 0.1 of an instance busy or more on average", "1.5 × the measured `hourly_p99_max` + 256 MiB", "--cpu-throttling", "--no-cpu-throttling", "**B. A held connection**", "a forwarder that holds the same streams is active all day", "which are not lower per second than the instance-based ones", "**unmeasured**",
                   "**Fit**", "lowest** `available` memory", "1.5 × the server's `hourly_p99_max`", "not a maximum", "256 MiB of margin", "48 MiB", "idle percentage", "above 30", "Nothing goes to `main` until the prod move and one day after it are over"):
         assert token in DOC, token
     design = DOC.split("## 4. Design")[1].split("## Questions")[0]
