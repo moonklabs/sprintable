@@ -69,10 +69,9 @@ export const FROZEN_BE_HEADER_ROUTERS = [
 export const PROXY_MAP: Record<string, string[] | null> = {
   agent_runs: ['agent-runs/route.ts', 'v1/agent-runs/[id]/tool-calls/route.ts'],
   channel_posts: ['organizations/[id]/channel-posts/drafts/route.ts'],
-  // story #4833 — `GET /api/v2/agents/desktop-sessions` (the Today screen's agent list) says X-Total-Count; its one FE proxy
-  // (`agents/desktop-sessions/route.ts`) is a plain pass-through with no paging and the list shows what it received (at most 100 rows), so no
-  // FE proxy READS the header — written as `null` on purpose, not as a dropped signal. If the list ever pages, map the proxy here instead.
-  desktop_commands: null,
+  // story #4833 — `GET /api/v2/agents/desktop-sessions` (the Today screen's agent list): its web proxy carries X-Total-Count into meta.totalCount.
+  // (the other GET of that router, `[id]/desktop-session`, says no total — the file-level check below is the guard's own, see its ㉢)
+  desktop_commands: ['agents/desktop-sessions/route.ts'],
   events: null,
   goals: ['goals/route.ts'],
   retros: ['retro-sessions/route.ts'],
