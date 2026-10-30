@@ -53,6 +53,8 @@ function makeRequestWithHeaders(path: string, headers: Record<string, string>, c
   return req;
 }
 
+const LOOPBACK = { host: '127.0.0.1:3000' };
+
 describe('story 4824 — proxy inside the desktop app\'s own server (SPRINTABLE_EMBEDDED=1)', () => {
   const KEYS = ['SPRINTABLE_EMBEDDED', 'NEXT_PUBLIC_FASTAPI_URL'] as const;
   const before = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
@@ -63,11 +65,11 @@ describe('story 4824 — proxy inside the desktop app\'s own server (SPRINTABLE_
     process.env['SPRINTABLE_EMBEDDED'] = '1';
     process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://127.0.0.1:41234';
     const token = await makeAccessToken();
-    const response = await middleware(makeRequest('/api/v2/stories?limit=5', { sp_at: token }));
+    const response = await middleware(makeRequestWithHeaders('/api/v2/stories?limit=5', LOOPBACK, { sp_at: token }));
     expect(response.headers.get('x-middleware-rewrite')).toBe('http://127.0.0.1:41234/api/v2/stories?limit=5');
     expect(response.headers.get('x-middleware-next')).toBeNull();
     process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://127.0.0.1:52999';
-    const again = await middleware(makeRequest('/api/v2/stories', { sp_at: token }));
+    const again = await middleware(makeRequestWithHeaders('/api/v2/stories', LOOPBACK, { sp_at: token }));
     expect(again.headers.get('x-middleware-rewrite')).toBe('http://127.0.0.1:52999/api/v2/stories');
   });
 
@@ -75,7 +77,7 @@ describe('story 4824 — proxy inside the desktop app\'s own server (SPRINTABLE_
     process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://127.0.0.1:41234';
     const token = await makeAccessToken();
     process.env['SPRINTABLE_EMBEDDED'] = '1';
-    const own = await middleware(makeRequest('/api/switch-org', { sp_at: token }));
+    const own = await middleware(makeRequestWithHeaders('/api/switch-org', LOOPBACK, { sp_at: token }));
     expect(own.headers.get('x-middleware-rewrite')).toBeNull();
     delete process.env['SPRINTABLE_EMBEDDED'];
     const plain = await middleware(makeRequest('/api/v2/stories', { sp_at: token }));
@@ -86,9 +88,101 @@ describe('story 4824 — proxy inside the desktop app\'s own server (SPRINTABLE_
   it('a login redirect from the proxy stays a redirect (only «carry on» is re-addressed)', async () => {
     process.env['SPRINTABLE_EMBEDDED'] = '1';
     process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://127.0.0.1:41234';
-    const response = await middleware(makeRequest('/stories'));
+    const response = await middleware(makeRequestWithHeaders('/stories', LOOPBACK));
     expect(response.status).toBe(307);
     expect(response.headers.get('x-middleware-rewrite')).toBeNull();
+  });
+
+  // story 4825 (lens AC5) — a DNS-rebinding page arrives with its own Host name; the browser sets Host, the page cannot, but it CAN send X-Forwarded-Host
+  it('a foreign Host is refused with 400 on every kind of request — and an X-Forwarded-Host the page sends itself does not let it through', async () => {
+    process.env['SPRINTABLE_EMBEDDED'] = '1';
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://127.0.0.1:41234';
+    const token = await makeAccessToken();
+    for (const host of ['evil.example', 'evil.example:3000', 'localhost:3000', '127.0.0.1.evil.example', '127.0.0.1:3000.evil.example', '[::1]:3000', '127.0.0.1:99999x', '']) {
+      for (const path of ['/api/v2/auth/register', '/api/v2/stories', '/stories', '/login', '/api/switch-org']) {
+        const plain = await middleware(makeRequestWithHeaders(path, { host }, { sp_at: token }));
+        expect(plain.status, `${host} ${path}`).toBe(400);
+        expect(plain.headers.get('x-middleware-rewrite')).toBeNull();
+        const spoof = await middleware(makeRequestWithHeaders(path, { host, 'x-forwarded-host': '127.0.0.1:3000' }, { sp_at: token }));
+        expect(spoof.status, `${host} ${path} (+X-Forwarded-Host)`).toBe(400);
+      }
+    }
+    const missing = await middleware(makeRequest('/login'));
+    expect(missing.status).toBe(400);
+  });
+
+  it('the loopback Host (with or without a port) is served; a foreign X-Forwarded-Host beside it is not what decides', async () => {
+    process.env['SPRINTABLE_EMBEDDED'] = '1';
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://127.0.0.1:41234';
+    const token = await makeAccessToken();
+    for (const host of ['127.0.0.1', '127.0.0.1:3000', '127.0.0.1:41999']) {
+      const response = await middleware(makeRequestWithHeaders('/api/v2/stories', { host }, { sp_at: token }));
+      expect(response.status).not.toBe(400);
+      expect(response.headers.get('x-middleware-rewrite')).toBe('http://127.0.0.1:41234/api/v2/stories');
+    }
+    const odd = await middleware(makeRequestWithHeaders('/api/v2/stories', { host: '127.0.0.1:3000', 'x-forwarded-host': 'evil.example' }, { sp_at: token }));
+    expect(odd.status).not.toBe(400);
+  });
+
+  // codex round 7: the matcher leaves out paths ending in a static-asset extension, so `/api/v2/channel/files/x.png` never reached the Host check
+  it('a backend file path ending in an asset extension is Host-checked and forwarded to the live backend like any other /api/v2 path', async () => {
+    process.env['SPRINTABLE_EMBEDDED'] = '1';
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://127.0.0.1:41234';
+    for (const file of ['x.png', 'report.pdf', 'a.b.webp', 'doc.map']) {
+      const foreign = await middleware(makeRequestWithHeaders(`/api/v2/channel/files/${file}`, { host: 'evil.example:3000', 'x-forwarded-host': '127.0.0.1:3000' }));
+      expect(foreign.status, file).toBe(400);
+      expect(foreign.headers.get('x-middleware-rewrite')).toBeNull();
+      const mine = await middleware(makeRequestWithHeaders(`/api/v2/channel/files/${file}`, LOOPBACK));
+      expect(mine.status, file).not.toBe(400);
+      expect(mine.headers.get('x-middleware-rewrite')).toBe(`http://127.0.0.1:41234/api/v2/channel/files/${file}`);
+    }
+  });
+
+  // the matcher decides with Next's own compilation: `new RegExp(tryToParsePath(source).regexStr)` — NO case-insensitive flag, on the decoded path
+  it('the matcher leaves the asset exclusion off under /api/v2 in any letter case, and only there; the extension list is the one proxy.ts uses', async () => {
+    const { config } = await import('./proxy');
+    const { tryToParsePath } = await import('next/dist/lib/try-to-parse-path');
+    expect(config.matcher).toHaveLength(1);
+    const re = new RegExp(tryToParsePath(config.matcher[0] as string).regexStr as string);
+    for (const path of ['/api/v2/channel/files/x.png', '/API/v2/channel/files/x.png', '/api/V2/x.pdf', '/Api/v2/a.b.webp', '/api/v2/x.png/', '/stories', '/login', '/api/v2/stories']) {
+      expect(re.test(path), `${path} reaches the proxy`).toBe(true);
+    }
+    for (const path of ['/logo.png', '/images/a.webp', '/_next/static/chunks/a.js', '/favicon.ico', '/manifest.webmanifest', '/api/auth/x.png', '/fonts/a.woff2', '/docs/guide.pdf']) {
+      expect(re.test(path), `${path} stays excluded as before`).toBe(false);
+    }
+    const listed = ((config.matcher[0] as string).match(/\.\*\\\.\(\?:([^)]*)\)\$/) ?? [])[1];
+    const source = (await import('node:fs')).readFileSync(new URL('./proxy.ts', import.meta.url), 'utf-8');
+    const inCode = (source.match(/STATIC_ASSET_EXTENSION = \/\\\.\(\?:([^)]*)\)\$\//) ?? [])[1];
+    expect(listed).toBeTruthy();
+    expect(inCode).toBe(listed);
+  });
+
+  it('a foreign Host is refused on every spelling of such a path — other letter case and an encoded separator included', async () => {
+    process.env['SPRINTABLE_EMBEDDED'] = '1';
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://127.0.0.1:41234';
+    for (const path of ['/API/v2/channel/files/x.png', '/api/V2/channel/files/x.png', '/api%2Fv2/channel/files/x.png', '/api/v2%2Fchannel/files/x.png']) {
+      const foreign = await middleware(makeRequestWithHeaders(path, { host: 'evil.example:3000', 'x-forwarded-host': '127.0.0.1:3000' }));
+      expect(foreign.status, path).toBe(400);
+    }
+  });
+
+  it('every other deployment, any spelling: such a path is a bare «carry on» — no session work, no backend round trip', async () => {
+    delete process.env['SPRINTABLE_EMBEDDED'];
+    for (const path of ['/api/v2/channel/files/x.png', '/API/v2/channel/files/x.png', '/api/V2/x.pdf', '/api%2Fv2/x.png', '/api/v2%2Fchannel/x.webp']) {
+      mockFetch.mockClear();
+      // a refresh cookie and no access token: the full proxy would go to the backend to refresh the session — the bare «carry on» must not
+      const response = await middleware(makeRequestWithHeaders(path, { host: 'app.example.com' }, { sp_rt: 'a-refresh-token' }));
+      expect(response.status, path).toBe(200);
+      expect(response.headers.get('x-middleware-next'), path).toBe('1');
+      expect(response.headers.get('location'), path).toBeNull();
+      expect(mockFetch, path).not.toHaveBeenCalled();
+    }
+  });
+
+  it('without the switch (any other deployment) the Host is not looked at', async () => {
+    delete process.env['SPRINTABLE_EMBEDDED'];
+    const response = await middleware(makeRequestWithHeaders('/login', { host: 'app.example.com' }));
+    expect(response.status).not.toBe(400);
   });
 });
 

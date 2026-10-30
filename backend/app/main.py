@@ -102,6 +102,8 @@ async def lifespan(app: FastAPI):
     assert_webhook_stub_not_registered_in_prod()  # story e4fc29fa 조각④: prod에 webhook 스텁 등재=기동 실패(fail-closed).
     from app.routers.dev_ghost_stub import assert_ghost_stub_not_registered_in_prod
     assert_ghost_stub_not_registered_in_prod()  # story #3816 PR1: prod에 Ghost 스텁 등재=기동 실패(fail-closed).
+    from app.routers.local_auth import assert_local_bootstrap_config
+    assert_local_bootstrap_config()  # story #4825: 로컬 부트스트랩 스위치·비밀은 짝으로만, Cloud Run엔 절대 없음(fail-closed).
     # story bea25062: cutover 존재-캐시는 의도적으로 startup에서 warm 안 함(자체 발견 —
     # TestClient(app)로 lifespan을 태우는 기존 SSE 테스트들이 라우트 전용으로 짜둔 유한한
     # mock db.execute() 순서-큐를 startup 시점의 이 캐시 조회가 몰래 하나 소비해 실패시켰다).
@@ -633,6 +635,11 @@ from app.routers import dev_ghost_stub as _dev_ghost_stub  # noqa: E402
 
 if _dev_ghost_stub.ghost_stub_enabled():
     app.include_router(_dev_ghost_stub.router)
+# story #4825 — the desktop app's embedded server only (SPRINTABLE_EMBEDDED + a 32+ char secret, never Cloud Run): not registered anywhere else.
+from app.routers import local_auth as _local_auth  # noqa: E402
+
+_local_auth.register_local_auth_routes(app)
+_local_auth.apply_embedded_host_guard(app)
 app.include_router(resolve.router)
 app.include_router(org_invites.router)
 app.include_router(invite_accept.router)

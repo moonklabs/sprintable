@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
 /**
@@ -12,6 +12,21 @@ export const EMBEDDED_API_PREFIX = '/api/v2/';
 
 export function isEmbeddedServer(env: NodeJS.ProcessEnv = process.env): boolean {
   return env['SPRINTABLE_EMBEDDED'] === '1';
+}
+
+const LOOPBACK_HOST = /^127\.0\.0\.1(?::\d{1,5})?$/;
+
+/**
+ * story 4825 (lens AC5, DNS rebinding) — inside the app's own server ONLY the loopback host name is served, on every request this server answers: a page that
+ * rebinds its own DNS name to 127.0.0.1 reaches the web port with `Host: its-name`, and the `/api/v2/*` forward below would then hand the request to the
+ * backend with the backend's own Host (the forward re-addresses the request), so the backend's own host check would never see the foreign name. The browser sets
+ * `Host` and a page cannot change it — unlike `X-Forwarded-Host`, which a page CAN send, so no forwarded header is looked at. A missing Host is refused too.
+ * `null` = serve; otherwise the 400 to answer with. Any other deployment (no switch) is untouched.
+ */
+export function embeddedHostRefusal(request: NextRequest, env: NodeJS.ProcessEnv = process.env): NextResponse | null {
+  if (!isEmbeddedServer(env)) return null;
+  if (LOOPBACK_HOST.test(request.headers.get('host') ?? '')) return null;
+  return new NextResponse('Invalid host header', { status: 400 });
 }
 
 /** where `/api/v2/...` goes at request time inside the app's own server — or null when this server is not that (or the path is not an API path) */

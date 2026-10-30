@@ -1254,6 +1254,9 @@ async def register(
     existing = await _get_user_by_email(session, body.email)
     if existing:
         return _err("EMAIL_TAKEN", "Email already registered", 409)
+    from app.routers.local_auth import is_reserved_owner_address
+    if is_reserved_owner_address(body.email):  # story 4825: embedded installs only (False on a hosted deployment) — the owner's address is made by local-bootstrap alone
+        return _err("EMAIL_TAKEN", "Email already registered", 409)
 
     from app.services.agent_onboarding_config import resolve_locale_from_request
     user = User(

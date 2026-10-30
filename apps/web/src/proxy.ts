@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookieBase, markSessionChanged, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { SESSION_EXPIRED_REASON } from '@/lib/auth/session-redirect';
 import { isRecentlySuperseded } from '@/lib/auth/switch-epoch';
-import { carryOnToTarget, embeddedApiTarget } from '@/lib/embedded-api-origin';
+import { carryOnToTarget, embeddedApiTarget, embeddedHostRefusal } from '@/lib/embedded-api-origin';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { MIGRATED_RESOURCES, RENAMED_RESOURCES, RETIRED_RESOURCES } from '@/lib/legacy-resource-tables';
@@ -849,9 +849,30 @@ function captureSignupAttribution(request: NextRequest, response: NextResponse):
  */
 // story 4824 — inside the desktop app's own server `/api/v2/*` is forwarded here, at request time, to the backend port the app chose at launch (see lib/embedded-api-origin.ts);
 // every other server keeps the build-time rewrite in next.config.ts. The proxy below runs in full first — only the destination of «carry on» changes.
+// the extensions the matcher below has always left out (kept in step with it by proxy.test.ts) — an `/api/v2/**` path ending in one is answered with a bare
+// «carry on», as when the proxy did not run for it, instead of the session / auth work (the backend serves those files itself).
+// The test is made on the same form of the path the matcher is: Next decides on the DECODED path (`/api%2Fv2/x.png` is `/api/v2/x.png` to it) and its
+// rewrite matches `/api/v2` in ANY letter case (`/API/v2/…`), while the matcher's regexp has no case-insensitive flag — so both are handled here and in the
+// matcher's own lookahead.
+const STATIC_ASSET_EXTENSION = /\.(?:svg|png|jpg|jpeg|gif|webp|ico|webmanifest|woff2?|ttf|otf|eot|mp3|mp4|webm|ogg|wav|map|pdf)$/;
+
+function isApiV2AssetPath(pathname: string): boolean {
+  let decoded = pathname;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    // a malformed escape stays as it is
+  }
+  return /^\/api\/v2\//i.test(decoded) && STATIC_ASSET_EXTENSION.test(decoded);
+}
+
 export async function proxy(request: NextRequest) {
-  const response = await proxyWithTiming(request);
-  const target = embeddedApiTarget(request.nextUrl.pathname, request.nextUrl.search);
+  // story 4825 — first of all: inside the app's own server a foreign Host name (a DNS-rebinding page) is refused before anything else runs
+  const foreignHost = embeddedHostRefusal(request);
+  if (foreignHost) return foreignHost;
+  const { pathname, search } = request.nextUrl;
+  const response = isApiV2AssetPath(pathname) ? NextResponse.next() : await proxyWithTiming(request);
+  const target = embeddedApiTarget(pathname, search);
   return target ? carryOnToTarget(response, target) : response;
 }
 
@@ -1067,6 +1088,10 @@ export const config = {
   // 이 확장자로 응답할 수 있어(PUBLIC_EXACT가 이미 알려진 공개 .txt를 개별 처리 중) 넣으면
   // 그런 라우트의 인증을 통째로 우회시키는 자리다.
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|webmanifest|woff2?|ttf|otf|eot|mp3|mp4|webm|ogg|wav|map|pdf)$).*)',
+    // story 4825 — the extension exclusion does NOT apply under `/api/v2/` (in any letter case: the build-time rewrite to the backend matches `/api/v2`
+    // case-insensitively, the matcher's regexp does not): for a backend file route like `/api/v2/channel/files/x.png` the proxy never ran, so the app's own
+    // server could not Host-check or re-address it. Such a path now reaches proxy(), which answers it with the same bare «carry on» as before
+    // (isApiV2AssetPath) — every other deployment sees no difference.
+    '/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|(?![aA][pP][iI]/[vV]2/).*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|webmanifest|woff2?|ttf|otf|eot|mp3|mp4|webm|ogg|wav|map|pdf)$).*)',
   ],
 };
