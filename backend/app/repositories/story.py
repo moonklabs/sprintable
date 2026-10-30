@@ -307,8 +307,12 @@ class StoryRepository(BaseRepository[Story]):
         exclude_statuses: list[str] | None = None,
         priority: str | None = None,
         no_assignee: bool = False,
+        cursor: tuple[datetime, uuid.UUID | None] | None = None,
     ) -> tuple[list[Story], int]:
         """sprint 미배정 + 삭제되지 않은 스토리만 서버사이드 필터.
+
+        story #4833 — `cursor`(신규, opt-in): `(created_at, id)` 뒤의 것만(정렬이 created_at 오름차순 + id라 그 순서의 «다음 쪽»).
+        id가 None이면 created_at만 본다. total은 커서를 적용하기 «전»의 개수라 쪽마다 같다. 미지정이면 예전 그대로.
 
         story #2428: `(stories, total)` 튜플을 반환한다(list()/list_board()와 동형 — 필터
         適用 後·limit 適用 前 실 COUNT). 예전엔 total 자체를 안 내(X-Total-Count 헤더 부재)
@@ -366,6 +370,13 @@ class StoryRepository(BaseRepository[Story]):
 
         count_q = select(func.count()).select_from(query.subquery())
         total = (await self.session.execute(count_q)).scalar_one()
+
+        if cursor is not None:
+            c_at, c_id = cursor
+            if c_id is None:
+                query = query.where(Story.created_at > c_at)
+            else:
+                query = query.where(or_(Story.created_at > c_at, and_(Story.created_at == c_at, Story.id > c_id)))
 
         # story #4382 — 순서 없는 LIMIT이면 limit을 넘는 백로그에서 어느 스토리가 빠질지 요청마다 달라질 수 있었다. 예전에 보이던 순서
         # (대개 넣은 순)에 가장 가깝게 생성 시각 오름차순 + id.
