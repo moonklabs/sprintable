@@ -848,7 +848,7 @@ async def test_a_stuck_cleanup_cannot_hold_the_shutdown_drain_hostage():
             t0 = time.monotonic()
             await pg_pubsub.drain_background_tasks(timeout=0.5)
             elapsed = time.monotonic() - t0
-            assert elapsed < 5.0, f"a stuck cleanup held the drain for {elapsed:.1f}s"
+            assert elapsed < 3.0, f"a stuck cleanup held the drain for {elapsed:.1f}s (its budget was 0.5 s)"
     finally:
         from app.core.database import Base
         async with engine.begin() as conn:
@@ -900,6 +900,60 @@ async def test_a_cancel_that_comes_early_still_cleans_up_the_connection():
                     return not (await s.execute(select(AgentGatewaySession).where(AgentGatewaySession.agent_id == agent_id))).scalars().all()
 
             assert await _wait_for(_row_gone, timeout=5.0), "the connection's row must not leak when the stream is cancelled while it starts"
+            _spy.assert_awaited_once()
+    finally:
+        from app.core.database import Base
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+        from app.core import shutdown as _shutdown_module
+        _shutdown_module.reset_shutdown_event()
+
+
+@pytest.mark.anyio
+@pytest.mark.destructive_schema
+@pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요")
+async def test_a_cancel_while_the_verification_signal_is_sent_still_cleans_up_the_connection():
+    """story #4834 (codex round 6) — `_heartbeat_baseline` is set up before the first await too: a cancel during `push_verification_signal` (the first await after the
+    session row is committed) must not leave it unbound, which made `_end_connection` raise an UnboundLocalError and skip the cleanup."""
+    import app.routers.agent_gateway as gw_module
+    from app.models.agent_gateway import AgentGatewaySession
+    from sqlalchemy import select
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, agent_id = await _seed_org_project_agent(s)
+            key_id = await seed_agent_stream_key(s, agent_id)
+        auth_ctx = MagicMock()
+        auth_ctx.user_id = str(agent_id)
+        auth_ctx.claims = agent_stream_claims(key_id)
+
+        @asynccontextmanager
+        async def _factory():
+            async with Session() as s:
+                yield s
+
+        _orig = gw_module._mark_agent_disconnected
+        _spy = AsyncMock(side_effect=_orig)
+        _signal = AsyncMock(side_effect=asyncio.CancelledError)
+        with patch("app.core.database.async_session_factory", _factory), \
+             patch.object(gw_module, "_SSE_HEARTBEAT", 0.02), \
+             patch.object(gw_module, "_AGENT_SSE_LIFESPAN_SEC", 60.0), \
+             patch.object(gw_module, "_LIFESPAN_END_GRACE_SEC", 0.0), \
+             patch.object(gw_module, "_mark_agent_disconnected", _spy), \
+             patch("app.services.agent_verify.push_verification_signal", _signal), \
+             patch("app.services.onboarding_funnel.emit_onboarding_event", AsyncMock()):
+            response = await gw_module.agent_stream(request=_FakeRequest(), auth=auth_ctx)
+            async for _ in response.body_iterator:
+                pass
+
+            async def _row_gone() -> bool:
+                async with Session() as s:
+                    return not (await s.execute(select(AgentGatewaySession).where(AgentGatewaySession.agent_id == agent_id))).scalars().all()
+
+            assert _signal.await_count == 1, "the cancel point of this test was not reached (the stream did not send the verification signal)"
+            assert await _wait_for(_row_gone, timeout=5.0), "the row must not leak when the stream is cancelled while it sends the verification signal"
             _spy.assert_awaited_once()
     finally:
         from app.core.database import Base

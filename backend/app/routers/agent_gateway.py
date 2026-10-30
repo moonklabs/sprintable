@@ -826,6 +826,7 @@ async def agent_stream(
         """
         session_id = uuid.uuid4()
         _presence_wired = False
+        _heartbeat_baseline: "datetime | None" = None  # story #4834: set up before any await — `_end_connection` reads it even when a cancel comes while the stream starts (None = the cleanup without the wipe-race suppression, as for a caller that gives none)
         _lifespan_ended = False  # story #4834: the stream ends because its lifespan ran out (see _LIFESPAN_END_GRACE_SEC) — set up here, before any await: `_end_connection` reads it even when a cancel comes early
         _replay_done_at: float | None = None  # story 4788: when this connection's replay finished (None: it did not)
         try:

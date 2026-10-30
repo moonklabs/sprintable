@@ -41,7 +41,7 @@ _background_tasks: set[asyncio.Task] = set()
 # story #4834 — tasks that WAIT on purpose (the gateway's lifespan-end grace, 20 s) and clean up when cut. The shutdown drain must not wait for them out of its 5 s
 # budget (it would use all of it every deploy, then cancel anyway): they are cancelled FIRST (`cancel_first_tasks`) so their «clean up now» path runs inside the budget.
 _cancel_first_tasks: set[asyncio.Task] = set()
-_DRAIN_CANCEL_WAIT_SEC = 2.0  # how long the drain waits for tasks it has just cancelled (a task that is cancel-resistant is left to the engine's disposal)
+_DRAIN_CANCEL_FLOOR_SEC = 0.2  # the least the drain waits for tasks it has just cancelled when its budget is already gone (a cancel needs a few loop turns); never more than the budget otherwise
 
 
 def fire_and_forget(coro: "Coroutine[Any, Any, Any]", *, cancel_first: bool = False) -> "asyncio.Task | None":
@@ -127,8 +127,13 @@ async def drain_background_tasks(timeout: float = 5.0) -> None:
     )
     for t in still_pending:
         t.cancel()
-    # bounded: a cancel-resistant task (the gateway's cleanup runs shielded to its end) must not hold the shutdown — and the engine's disposal — hostage
-    await asyncio.wait(still_pending, timeout=_DRAIN_CANCEL_WAIT_SEC)
+    # bounded BY THE BUDGET (with a small floor so a cancel can be processed): a cancel-resistant task (the gateway's cleanup runs shielded to its end) must not hold
+    # the shutdown — and the engine's disposal — hostage past the graceful-shutdown time the process is given
+    await asyncio.wait(still_pending, timeout=max(_left(), _DRAIN_CANCEL_FLOOR_SEC))
+    # a cleanup that has just run may have started ordinary work of its own (a presence event): look once more, within what is left
+    late_ordinary = [t for t in _background_tasks if t.get_loop() is loop and not t.done()]
+    if late_ordinary:
+        await asyncio.wait(late_ordinary, timeout=_left())
 
 # ── NOTIFY 발행 ────────────────────────────────────────────────────────────────
 

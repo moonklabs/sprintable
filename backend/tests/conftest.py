@@ -583,6 +583,9 @@ async def _dispose_global_engine_for_non_destructive_tests():
     끼워 넣는 것으로 근본 해결."""
     yield
     from app.core.database import engine as _global_engine
+    from app.services import pg_pubsub
+
+    await pg_pubsub.cancel_first_tasks(10.0)  # story #4834: the same reap as the other end-of-test hooks (bounded)
     await _global_engine.dispose()
 
 
@@ -601,7 +604,7 @@ async def drain_global_background_work(timeout: float = DESTRUCTIVE_DRAIN_TIMEOU
     from app.core.database import engine as _global_engine
     from app.services import pg_pubsub
 
-    await pg_pubsub.cancel_first_tasks()  # story #4834: a task that waits on purpose (the gateway's lifespan-end grace) is cut first and cleans up in THIS loop
+    await pg_pubsub.cancel_first_tasks(10.0)  # story #4834: a task that waits on purpose (the gateway's lifespan-end grace) is cut first and cleans up in THIS loop
     loop = asyncio.get_running_loop()
     leftover: list[str] = []
     for _ in range(_DRAIN_ROUNDS):
@@ -628,7 +631,7 @@ async def _dispose_global_engine() -> None:
     from app.core.database import engine as _global_engine
     from app.services import pg_pubsub
 
-    await pg_pubsub.cancel_first_tasks()  # story #4834: no task that waits on purpose outlives the test's loop (its «clean up now» path runs here, before the dispose)
+    await pg_pubsub.cancel_first_tasks(10.0)  # story #4834: no task that waits on purpose outlives the test's loop (its «clean up now» path runs here, before the dispose)
     await _global_engine.dispose()
 
 
