@@ -23,6 +23,10 @@ describe('story 4824 — /api/channel/token tells the page where the backend is'
     vi.stubEnv('NEXT_PUBLIC_FASTAPI_URL', 'https://dev-api.sprintable.ai');
     expect((await (await GET()).json()).backend_origin).toBe('https://dev-api.sprintable.ai');
     vi.stubEnv('NEXT_PUBLIC_FASTAPI_URL', '');
+    expect((await (await GET()).json()).backend_origin).toBe(''); // an empty build value stays empty, exactly as the page's own baked read behaved
+    vi.unstubAllEnvs();
+    vi.stubEnv('SPRINTABLE_API_ORIGIN', '');
+    delete process.env['NEXT_PUBLIC_FASTAPI_URL'];
     expect((await (await GET()).json()).backend_origin).toBe('http://localhost:8000');
   });
 

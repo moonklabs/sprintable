@@ -9,5 +9,7 @@
  * the process runs. Without it (every cloud / dev setup) nothing changes: the build-time value, then the local default.
  */
 export function fastapiBaseUrl(): string {
-  return process.env['SPRINTABLE_API_ORIGIN'] || process.env['NEXT_PUBLIC_FASTAPI_URL'] || 'http://localhost:8000';
+  const runtime = process.env['SPRINTABLE_API_ORIGIN'];
+  if (runtime) return runtime;
+  return process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000'; // `??` as before: an empty build value stays empty (backend/scripts/deploy_frontend.sh allows it)
 }

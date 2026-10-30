@@ -16,7 +16,13 @@ describe('story 4824 — the backend address, read at run time', () => {
     process.env['SPRINTABLE_API_ORIGIN'] = 'http://127.0.0.1:41234';
     expect(fastapiBaseUrl()).toBe('http://127.0.0.1:41234');
     process.env['SPRINTABLE_API_ORIGIN'] = '';
-    expect(fastapiBaseUrl()).toBe('https://api.example.com'); // an empty value is no value
+    expect(fastapiBaseUrl()).toBe('https://api.example.com'); // an empty run-time value is no value
+  });
+
+  it('an EMPTY build value stays empty, as before this change (the frontend deploy script allows it) — it is not turned into the local default', () => {
+    delete process.env['SPRINTABLE_API_ORIGIN'];
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = '';
+    expect(fastapiBaseUrl()).toBe('');
   });
 
   it('hosted setups (dev · prod set no SPRINTABLE_API_ORIGIN): the address is exactly what it was before this change — the build value, or the local default', () => {
@@ -34,5 +40,13 @@ describe('story 4824 — the backend address, read at run time', () => {
     // the allowed reads: the helper itself; the channel page (client — its fallback for an older token answer); the channels page's snippet text (client, display only)
     const stray = code.filter((l) => !/src\/lib\/fastapi-url\.ts:/.test(l) && !/src\/app\/\(authenticated\)\/channel\/page\.tsx:/.test(l) && !/src\/app\/\(authenticated\)\/organization\/channels\/page\.tsx:/.test(l));
     expect(stray).toEqual([]);
+  });
+
+  it('the shared packages that call the backend read the run-time name too (packages/storage-api cannot import the app\'s helper)', () => {
+    const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+    const out = execFileSync('git', ['grep', '-n', 'NEXT_PUBLIC_FASTAPI_URL', '--', 'packages', ':!*.test.ts', ':!*.md'], { cwd: repoRoot, encoding: 'utf8' });
+    const files = [...new Set(out.split('\n').filter(Boolean).map((l) => l.split(':')[0] as string))];
+    expect(files.length).toBeGreaterThan(0);
+    for (const f of files) expect(execFileSync('git', ['grep', '-c', 'SPRINTABLE_API_ORIGIN', '--', f], { cwd: repoRoot, encoding: 'utf8' }).trim()).not.toBe('');
   });
 });

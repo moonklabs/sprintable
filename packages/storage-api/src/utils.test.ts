@@ -1,7 +1,7 @@
 // story #2488 — mapApiError가 404/403 외 status·error.code를 discard하던 병 회귀가드.
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { NotFoundError, ForbiddenError } from '@sprintable/core-storage';
-import { mapApiError } from './utils';
+import { getBaseUrl, mapApiError } from './utils';
 
 describe('mapApiError (story #2488)', () => {
   it('404 — NotFoundError instanceof 유지 + code/status 보존', () => {
@@ -42,5 +42,22 @@ describe('mapApiError (story #2488)', () => {
     const err = mapApiError(500, {});
     expect(err.message).toBe('HTTP 500');
     expect(err.code).toBe('HTTP_500');
+  });
+});
+
+describe('getBaseUrl (story 4824)', () => {
+  const KEYS = ['SPRINTABLE_API_ORIGIN', 'NEXT_PUBLIC_FASTAPI_URL'] as const;
+  const saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
+  afterEach(() => { for (const k of KEYS) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
+
+  it('the run-time name wins (the desktop app\'s own server); hosted setups do not set it and get what they always got', () => {
+    delete process.env['SPRINTABLE_API_ORIGIN']; delete process.env['NEXT_PUBLIC_FASTAPI_URL'];
+    expect(getBaseUrl()).toBe('http://localhost:8000');
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'https://dev-api.sprintable.ai';
+    expect(getBaseUrl()).toBe('https://dev-api.sprintable.ai');
+    process.env['SPRINTABLE_API_ORIGIN'] = 'http://127.0.0.1:41234';
+    expect(getBaseUrl()).toBe('http://127.0.0.1:41234');
+    process.env['SPRINTABLE_API_ORIGIN'] = '';
+    expect(getBaseUrl()).toBe('https://dev-api.sprintable.ai');
   });
 });
