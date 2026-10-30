@@ -43,7 +43,7 @@ const hintNode = () => container.querySelector('[data-testid="gate-sig-hint"]');
 const hint = () => hintNode()?.textContent || null; // '' (nothing to say) reads as null
 const btn = (label: string) => Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent?.trim() === label)!;
 
-async function mount(props: { mode?: 'decide' | 'reject'; resolving?: boolean; locale?: 'ko' | 'en'; onDiscuss?: () => void } = {}) {
+async function mount(props: { mode?: 'decide' | 'reject'; resolving?: boolean; locale?: 'ko' | 'en'; onDiscuss?: () => void; onCancel?: () => void } = {}) {
   const { locale = 'ko', resolving = false, ...rest } = props;
   await act(async () => {
     root.render(
@@ -134,9 +134,17 @@ describe('GateSignatureApproval — why the button is locked (story #4833)', () 
     expect(hint()).toBe(ko.sigHintReason);
   });
 
-  it('while resolving: no hint line', async () => {
-    await mount({ resolving: true });
+  it('while resolving: no hint line, and every visible button is locked (cancel too)', async () => {
+    await mount({ resolving: true, onDiscuss: () => undefined, onCancel: () => undefined });
     expect(hint()).toBeNull();
+    const labels = Array.from(container.querySelectorAll<HTMLButtonElement>('button'));
+    expect(labels.length).toBeGreaterThanOrEqual(4); // reject · approve · discuss · cancel
+    expect(labels.every((b) => b.disabled)).toBe(true);
+  });
+
+  it('not resolving: cancel is open even when the form is incomplete (a person can always back out)', async () => {
+    await mount({ onDiscuss: () => undefined, onCancel: () => undefined });
+    expect(btn(ko.cancel).disabled).toBe(false);
   });
 
   it('reject-only panel: the reason is all it asks for (the tick does not gate a rejection)', async () => {
