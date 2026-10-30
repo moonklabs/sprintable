@@ -128,6 +128,20 @@ describe('looks only', () => {
   });
 });
 
+describe('a narrow column', () => {
+  it('a spaceless, very long computer name is cut inside a column that may shrink — it cannot push the row sideways', async () => {
+    const long = 'x'.repeat(120);
+    await mount([row({ agent_name: 'wide', device_name: long, bound_device_name: long })]);
+    const right = container.querySelector('[data-testid="agent-state-right"]')!;
+    expect(right.className).toContain('min-w-0');
+    expect(right.className).toContain('max-w-40');
+    expect(right.className).not.toContain('shrink-0');
+    expect(container.querySelector('[data-testid="agent-state-device"]')!.className).toContain('truncate');
+    // the name column keeps its own room too
+    expect(rowOf('wide').querySelector('a,span')!.className).toContain('truncate');
+  });
+});
+
 describe('empty and «더 보기»', () => {
   it('no agent on a computer: one line, no rows', async () => {
     await mount([]);

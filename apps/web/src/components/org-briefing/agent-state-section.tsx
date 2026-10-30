@@ -53,9 +53,10 @@ function Row({ item, now }: { item: Shown; now: number }) {
         )}
         {restText ? <p className="mt-0.5 break-keep text-xs text-muted-foreground">{restText}</p> : null}
       </div>
-      <div className="flex shrink-0 flex-col items-end">
-        <span className="text-sm text-foreground">{state}</span>
-        {word !== null && device ? <span className="text-xs text-muted-foreground">{device}</span> : null}
+      {/* the right column may shrink and wraps/cuts its words: a long state sentence or a spaceless computer name must not push a narrow column (the v3 Today's 392px) sideways */}
+      <div className="flex min-w-0 max-w-40 flex-col items-end text-right" data-testid="agent-state-right">
+        <span className="max-w-full break-keep text-sm text-foreground">{state}</span>
+        {word !== null && device ? <span className="max-w-full truncate text-xs text-muted-foreground" data-testid="agent-state-device">{device}</span> : null}
       </div>
     </div>
   );
