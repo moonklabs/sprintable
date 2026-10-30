@@ -249,15 +249,13 @@ async def test_07b_a_miswired_mount_with_the_switch_off_still_refuses(monkeypatc
     assert await _counts() == (0, 0, 0, 0)
 
 
-async def test_10_an_account_that_is_not_the_one_this_route_made_is_never_given_a_session(embedded):
-    """the reserved address under a password, a second factor, a deactivated or a purged account: refused, nothing written, no session"""
+async def test_10_a_deactivated_or_deleted_owner_gets_a_controlled_refusal_not_a_session_or_a_500(embedded):
+    """the owner row deactivated or purged: the same bare 403, nothing written, no session (never a unique-key 500 from a second insert)"""
     async with _client(embedded) as c:
         assert (await c.post(URL, headers=_h())).status_code == 200
         base = await _counts()
         n_tokens = (await _sql(f"SELECT count(*) FROM refresh_tokens WHERE user_id = (SELECT id FROM users WHERE email = '{OWNER_EMAIL}')", fetch="one"))[0]
         for bad in (
-            "hashed_password = '$2b$12$notours'",
-            "totp_enabled = true",
             "is_active = false",
             "is_active = false, deleted_at = now()",
         ):
@@ -269,6 +267,63 @@ async def test_10_an_account_that_is_not_the_one_this_route_made_is_never_given_
             assert (await _sql(f"SELECT count(*) FROM refresh_tokens WHERE user_id = (SELECT id FROM users WHERE email = '{OWNER_EMAIL}')", fetch="one"))[0] == n_tokens
             await _sql(f"UPDATE users SET hashed_password = '', totp_enabled = false, is_active = true, deleted_at = NULL WHERE email = '{OWNER_EMAIL}'")
         assert (await c.post(URL, headers=_h())).status_code == 200  # restored, and it is the owner again
+
+
+async def test_10b_setting_a_password_or_a_second_factor_later_never_locks_the_owner_out(embedded):
+    async with _client(embedded) as c:
+        assert (await c.post(URL, headers=_h())).status_code == 200
+        for change in ("hashed_password = '$2b$12$setlaterbytheowner'", "totp_enabled = true"):
+            await _sql(f"UPDATE users SET {change} WHERE email = '{OWNER_EMAIL}'")
+            r = await c.post(URL, headers=_h())
+            assert r.status_code == 200 and r.json()["data"]["access_token"], (change, r.text)
+    assert await _counts() == (1, 1, 1, 1)
+
+
+async def test_10c_register_refuses_the_reserved_owner_address_only_on_an_embedded_install(embedded, monkeypatch):
+    """the owner's account can be made by local-bootstrap alone on an embedded install; on a hosted one sign-up is exactly as before"""
+    from httpx import ASGITransport, AsyncClient
+
+    body = {"email": OWNER_EMAIL, "password": "Aa1!aaaaaaaaaa", "display_name": "Squatter", "tos_accepted": True}
+    async with AsyncClient(transport=ASGITransport(app=real_app, raise_app_exceptions=False), base_url="http://test") as rc:
+        refused = await rc.post("/api/v2/auth/register", json=body)  # `embedded` fixture: the switch is on
+        assert refused.status_code == 409, refused.text
+        assert (await _counts())[0] == 0
+        monkeypatch.delenv("SPRINTABLE_EMBEDDED", raising=False)  # hosted: no switch
+        try:
+            made = await rc.post("/api/v2/auth/register", json=body)
+            assert made.status_code == 201, made.text
+        finally:
+            await _wipe_owner()
+
+
+async def test_15_losing_the_first_project_to_a_concurrent_creator_is_not_a_500(embedded, monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+
+    from app.services import org_project_create
+
+    async def _collides(*a, **k):
+        raise IntegrityError("INSERT INTO projects", {}, Exception("duplicate key (org_id, slug)"))
+
+    monkeypatch.setattr(org_project_create, "create_project_with_member", _collides)
+    async with _client(embedded) as c:
+        r = await c.post(URL, headers=_h())
+    assert r.status_code == 200 and r.json()["data"]["access_token"], r.text
+    assert await _counts() == (1, 1, 0, 1)  # the owner and the organization stand; the project is for the next call to find or make
+    monkeypatch.undo()
+
+
+async def test_16_a_membership_whose_organization_is_gone_is_not_my_organization(embedded):
+    async with _client(embedded) as c:
+        assert (await c.post(URL, headers=_h())).status_code == 200
+        await _sql(f"UPDATE org_members SET org_id = gen_random_uuid() WHERE user_id = (SELECT id FROM users WHERE email = '{OWNER_EMAIL}')")
+        r = await c.post(URL, headers=_h())
+    assert r.status_code == 200, r.text
+    live = await _sql(
+        f"""SELECT count(*) FROM org_members om JOIN organizations o ON o.id = om.org_id
+              WHERE om.role = 'owner' AND om.user_id = (SELECT id FROM users WHERE email = '{OWNER_EMAIL}')""",
+        fetch="one",
+    )
+    assert live[0] == 1
 
 
 async def test_11_a_call_that_came_through_a_proxy_is_refused(embedded):

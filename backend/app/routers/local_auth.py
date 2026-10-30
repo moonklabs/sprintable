@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, FastAPI, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -58,6 +59,12 @@ def _refuse() -> JSONResponse:
     return JSONResponse({"data": None, "error": {"code": "FORBIDDEN", "message": "Forbidden"}, "meta": None}, status_code=403)
 
 
+def is_reserved_owner_address(email: str | None) -> bool:
+    """True on an EMBEDDED install for any address in the reserved owner domain — `register` refuses it there so that nothing but this route
+    can make the owner's account. Always False on a hosted deployment (`is_embedded` is False there), so hosted sign-up is unchanged."""
+    return settings.is_embedded and (email or "").strip().lower().endswith("@local.sprintable")
+
+
 def _clean(value: str | None, fallback: str) -> str:
     value = (value or "").strip()
     return value or fallback
@@ -88,6 +95,7 @@ async def local_bootstrap(
         return _refuse()
 
     # lazy imports: the auth router is a large module; keep this one importable on its own and avoid an import cycle at app start
+    from app.models.organization import Organization
     from app.models.project import OrgMember, Project
     from app.routers.auth import (
         _ok,
@@ -104,12 +112,13 @@ async def local_bootstrap(
     await session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"), {"k": _LOCK_KEY})
 
     now = datetime.now(timezone.utc)
-    # any state of the row: a deactivated or purged one must not make the insert below fail with a unique-key error (a 500) — it is refused instead
+    # any state of the row: a deactivated or purged one must not make the insert below fail with a unique-key error (a 500) — it is refused instead.
+    # Whose account this is does not rest on a password or a second factor (the owner may set either later and must not be locked out of their own
+    # install): on an embedded install nothing but this route can make an account at the reserved address — `register` refuses it there
+    # (`is_reserved_owner_address`) and no OAuth / e-mail flow is configured.
     user = (await session.execute(select(User).where(User.email == LOCAL_OWNER_EMAIL))).scalar_one_or_none()
-    if user is not None and (not user.is_active or user.deleted_at is not None or user.hashed_password or user.totp_enabled):
-        # only the account THIS route made is adopted: it has no password and no second factor. Anything else under this address (a sign-up that
-        # got there first, a deactivated account) is not the install's owner, and this route must never hand out a session for it.
-        logger.warning("local-bootstrap refused: the reserved owner address is not this install's owner account")
+    if user is not None and (not user.is_active or user.deleted_at is not None):
+        logger.warning("local-bootstrap refused: the owner account is deactivated or deleted")
         return _refuse()
     if user is None:
         user = User(
@@ -128,7 +137,9 @@ async def local_bootstrap(
     # organization while we wait is seen by the look below instead of being doubled
     await lock_first_org_path(session, user.id)
     org_id = (await session.execute(
-        select(OrgMember.org_id).where(OrgMember.user_id == user.id, OrgMember.role == "owner", OrgMember.deleted_at.is_(None))
+        # joined to the organization: a membership whose organization is gone (org_members.org_id has no foreign key) is not "my organization"
+        select(OrgMember.org_id).join(Organization, Organization.id == OrgMember.org_id)
+        .where(OrgMember.user_id == user.id, OrgMember.role == "owner", OrgMember.deleted_at.is_(None))
         .order_by(OrgMember.created_at.asc()).limit(1)
     )).scalar_one_or_none()
     if org_id is None:
@@ -141,10 +152,14 @@ async def local_bootstrap(
         select(Project.id).where(Project.org_id == org_id, Project.deleted_at.is_(None)).limit(1)
     )).scalar_one_or_none()
     if has_project is None:
-        await create_project_with_member(
-            session, org_id=org_id, name=_clean(body.project_name, "First project"),
-            description=None, slug=None, user_id=str(user.id),
-        )
+        try:
+            async with session.begin_nested():  # a savepoint: a slug taken by someone creating a project in this organization at this moment is not a 500
+                await create_project_with_member(
+                    session, org_id=org_id, name=_clean(body.project_name, "First project"),
+                    description=None, slug=None, user_id=str(user.id),
+                )
+        except IntegrityError:
+            logger.info("local-bootstrap: the first project lost a race to another creator; the next call finds it")
     await session.flush()
 
     # the session is issued exactly as a password sign-in does it (routers/auth.py login): same claims, same stored refresh token
