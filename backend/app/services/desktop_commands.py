@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.desktop_relay import DesktopCommand, DesktopSession
@@ -318,12 +318,20 @@ async def sessions_overview(db: AsyncSession, *, member_id: uuid.UUID, user_id: 
 
     from app.models.conversation import Conversation, ConversationParticipant
 
-    mine, theirs = aliased(ConversationParticipant), aliased(ConversationParticipant)
+    mine, theirs, anyone = aliased(ConversationParticipant), aliased(ConversationParticipant), aliased(ConversationParticipant)
+    # a room typed `dm` with more than the two of them is not «the conversation with that agent» (some rooms are mislabelled): exactly two participants
+    exactly_two = (
+        select(anyone.conversation_id)
+        .where(anyone.conversation_id.in_(select(mine.conversation_id).where(mine.member_id == member_id)))
+        .group_by(anyone.conversation_id)
+        .having(func.count() == 2)
+    )
     dm_rows = (await db.execute(
         select(theirs.member_id, Conversation.id, Conversation.project_id)
         .join(Conversation, Conversation.id == theirs.conversation_id)
         .join(mine, mine.conversation_id == Conversation.id)
-        .where(Conversation.org_id == org_id, Conversation.type == "dm", mine.member_id == member_id, theirs.member_id.in_(agent_ids))
+        .where(Conversation.org_id == org_id, Conversation.type == "dm", mine.member_id == member_id, theirs.member_id.in_(agent_ids),
+               Conversation.id.in_(exactly_two))
         .order_by(Conversation.created_at, Conversation.id)
     )).all()
     dm_of = {agent: (conv, proj) for agent, conv, proj in dm_rows}  # ascending → the newest overwrites
