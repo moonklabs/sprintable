@@ -44,7 +44,7 @@ export function NextActionsStrip({
 
   return (
     <div className="space-y-1.5">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+      <p className="text-editorial-meta font-semibold uppercase tracking-[0.06em] text-muted-foreground">
         {t('nextMakerNeedsNextHeading', { n: needsNextStems.length })}
       </p>
       {memberNamesLoadFailed ? (
@@ -59,7 +59,7 @@ export function NextActionsStrip({
         return (
           <div key={stem.epicId}>
             {showQuietHint && (
-              <p className="mb-1 mt-2 text-[10px] text-muted-foreground">
+              <p className="mb-1 mt-2 text-micro text-muted-foreground">
                 {t('nextMakerQuietHint', { n: quietCount })}
               </p>
             )}

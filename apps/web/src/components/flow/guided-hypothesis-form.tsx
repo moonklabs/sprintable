@@ -172,7 +172,7 @@ export function GuidedHypothesisForm({
             ))}
           </div>
         </div>
-        <p className="text-[11px] text-info">{t('guidedMetricHint')}</p>
+        <p className="text-editorial-meta text-info">{t('guidedMetricHint')}</p>
       </div>
 
       <div className="mt-auto flex justify-end gap-2 pt-1">

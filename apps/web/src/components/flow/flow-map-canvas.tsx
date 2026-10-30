@@ -220,9 +220,9 @@ function FlowMapNodeCard({
         // 오인되므로, 이제 호출부(FlowMapCanvas)가 잇기 진행 중(linkDraft.phase !== 'idle')엔
         // selected 자체를 false로 넘겨 이 컴포넌트에 도달하기 전에 막는다.
         title={stalled ? t('flowNodeStalledHint') : undefined}
-        className={`focus-inset flex h-6 w-full items-center gap-1 rounded border border-l-[3px] border-border bg-card px-1.5 text-left text-[11px] shadow-sm hover:border-info/60 ${toneClass} ${stalled ? 'origin-left scale-[0.92] text-muted-foreground' : ''} ${dimmed ? 'opacity-50' : ''} ${selected || isDropHover ? 'ring-2 ring-brand ring-offset-1 ring-offset-background' : ''} ${isJustLinked ? 'ring-2 ring-success ring-offset-1 ring-offset-background' : ''}`}
+        className={`focus-inset flex h-6 w-full items-center gap-1 rounded border border-l-[3px] border-border bg-card px-1.5 text-left text-editorial-meta shadow-sm hover:border-info/60 ${toneClass} ${stalled ? 'origin-left scale-[0.92] text-muted-foreground' : ''} ${dimmed ? 'opacity-50' : ''} ${selected || isDropHover ? 'ring-2 ring-brand ring-offset-1 ring-offset-background' : ''} ${isJustLinked ? 'ring-2 ring-success ring-offset-1 ring-offset-background' : ''}`}
       >
-        <span className="shrink-0 font-mono text-[9px] text-muted-foreground">#{node.storyNumber}</span>
+        <span className="shrink-0 font-mono text-micro text-muted-foreground">#{node.storyNumber}</span>
         <GateGlyph node={node} t={t} />
         {/* 대체(확認됨)만 — "옛 노드"에 취소선(유나양 규격). 제안 상태는 절대 취소선을 넣지
             않는다(computeSupersededNodeIds가 확認 간선만 모으므로 이 자리는 값만 받는다 —
@@ -249,13 +249,13 @@ function FlowMapNodeCard({
               aria-label={t('portLinkStart', { n: node.storyNumber })}
               onPointerDown={(e) => onPortPointerDown(e, node.id)}
               onKeyDown={(e) => onPortKeyDown(e, node.id)}
-              className="focus-inset group absolute -right-[22px] top-1/2 flex h-[24px] w-11 -translate-y-1/2 cursor-crosshair items-center justify-center rounded-full"
+              className="focus-inset group absolute -right-5.5 top-1/2 flex h-[24px] w-11 -translate-y-1/2 cursor-crosshair items-center justify-center rounded-full"
             />
           }
         >
           <span
             aria-hidden="true"
-            className={`flex items-center justify-center rounded-full border-[1.6px] text-[9px] font-bold leading-none transition-all ${isLinkSource ? 'h-[14px] w-[14px] border-brand bg-brand text-brand-foreground' : 'h-[10px] w-[10px] border-muted-foreground bg-background text-transparent group-hover:h-[14px] group-hover:w-[14px] group-hover:border-brand group-hover:bg-brand group-hover:text-brand-foreground group-focus-visible:h-[14px] group-focus-visible:w-[14px] group-focus-visible:border-brand group-focus-visible:bg-brand group-focus-visible:text-brand-foreground'}`}
+            className={`flex items-center justify-center rounded-full border-[1.6px] text-micro font-bold leading-none transition-all ${isLinkSource ? 'h-[14px] w-[14px] border-brand bg-brand text-brand-foreground' : 'h-[10px] w-[10px] border-muted-foreground bg-background text-transparent group-hover:h-[14px] group-hover:w-[14px] group-hover:border-brand group-hover:bg-brand group-hover:text-brand-foreground group-focus-visible:h-[14px] group-focus-visible:w-[14px] group-focus-visible:border-brand group-focus-visible:bg-brand group-focus-visible:text-brand-foreground'}`}
           >
             +
           </span>
@@ -339,7 +339,7 @@ export function FlowCanvasOffscreenHint({ count }: { count: number }) {
   return (
     <div
       data-testid="flow-canvas-offscreen-hint"
-      className="pointer-events-none absolute bottom-1 right-1 z-10 flex items-center gap-1.5 rounded border border-border bg-muted/90 px-2 py-1 text-[11px] text-muted-foreground shadow-sm"
+      className="pointer-events-none absolute bottom-1 right-1 z-10 flex items-center gap-1.5 rounded border border-border bg-muted/90 px-2 py-1 text-editorial-meta text-muted-foreground shadow-sm"
     >
       <span aria-hidden="true">▸</span>
       <b className="text-foreground">{t('flowCanvasOffscreenCount', { n: count })}</b>
@@ -693,17 +693,17 @@ export function FlowMapCanvas({
             나오게 한다. */}
         <div className="shrink-0 border-b border-r border-border" style={{ width: LANE_LABEL_WIDTH }} />
         <div className="relative min-w-0 flex-1 overflow-hidden border-b border-border">
-          <span className="absolute top-[5px] text-[9.5px] uppercase tracking-[0.06em] text-muted-foreground" style={{ left: 10 }}>
+          <span className="absolute top-1 text-micro uppercase tracking-[0.06em] text-muted-foreground" style={{ left: 10 }}>
             {t('canvasPast')}
           </span>
           <span
-            className="absolute top-[5px] text-[9.5px] font-semibold uppercase tracking-[0.06em] text-info"
+            className="absolute top-1 text-micro font-semibold uppercase tracking-[0.06em] text-info"
             style={{ left: FLOW_MAP_NOW_LINE_X - 26 }}
           >
             {t('canvasNow')}
           </span>
           <span
-            className="absolute top-[5px] text-[9.5px] uppercase tracking-[0.06em] text-muted-foreground"
+            className="absolute top-1 text-micro uppercase tracking-[0.06em] text-muted-foreground"
             style={{ left: FLOW_MAP_DEPTH0_X - 60 }}
           >
             {t('canvasUpcoming')}
@@ -729,7 +729,7 @@ export function FlowMapCanvas({
               >
                 {/* 위 헤더 칸과 같은 사정 — LANE_LABEL_WIDTH 하나에서 나온다(사본 없음). */}
                 <div className="shrink-0 border-r border-border px-2 py-1.5" style={{ width: LANE_LABEL_WIDTH }}>
-                  <p className="truncate text-[11px] font-semibold text-foreground">{lane.title}</p>
+                  <p className="truncate text-editorial-meta font-semibold text-foreground">{lane.title}</p>
                   {/* story #2224 후속(수→형, §A4, doc galrae-visual-transition-final-spec) —
                       줄기 채움 바. 완료 N·전체 M «숫자»는 hover(title)로 강등하고 화면엔
                       채움만 보인다 — NextMakerGoal.doneStories/totalStories(호출부가 이미
@@ -849,7 +849,7 @@ export function FlowMapCanvas({
                                 <text
                                   x={midX} y={midY - 4}
                                   textAnchor="middle"
-                                  className="fill-muted-foreground font-mono text-[9px] font-semibold"
+                                  className="fill-muted-foreground font-mono text-micro font-semibold"
                                   style={{ paintOrder: 'stroke', stroke: 'var(--card)', strokeWidth: 3 }}
                                 >
                                   {group.count}
@@ -863,7 +863,7 @@ export function FlowMapCanvas({
                                   data-testid="flow-edge-kind-hover-label"
                                   x={midX} y={midY - 14}
                                   textAnchor="middle"
-                                  className="fill-foreground font-sans text-[9px] font-semibold"
+                                  className="fill-foreground font-sans text-micro font-semibold"
                                   style={{ paintOrder: 'stroke', stroke: 'var(--card)', strokeWidth: 3 }}
                                 >
                                   {t(`portLinkKind_${edgeKindPortLinkKey(group.uniformKind)}`)}
@@ -907,7 +907,7 @@ export function FlowMapCanvas({
                   })() : null}
 
                   {lane.pastTotal === 0 && lane.nowNodes.length === 0 && lane.queueNodesByDepth.size === 0 ? (
-                    <p className="absolute left-3 top-2 text-[11px] text-muted-foreground">{t('flowMapLaneEmpty')}</p>
+                    <p className="absolute left-3 top-2 text-editorial-meta text-muted-foreground">{t('flowMapLaneEmpty')}</p>
                   ) : null}
 
                   {/* ④과거 묶음 카드 — 유나양 규격(아티팩트 a125909a, "묶음이 선을 통과시킨다").
@@ -930,7 +930,7 @@ export function FlowMapCanvas({
                       className="focus-inset absolute z-10 cursor-pointer rounded border border-border bg-muted px-1.5 py-1 text-left hover:border-brand/60"
                       style={{ left: PAST_BUNDLE_LEFT, top: PAST_BUNDLE_TOP, width: PAST_BUNDLE_CARD_WIDTH }}
                     >
-                      <div className="font-mono text-[9px] font-semibold text-foreground">
+                      <div className="font-mono text-micro font-semibold text-foreground">
                         {t('flowMapPastCount', { n: lane.pastTotal })} · {t('flowMapPastBundle')}
                       </div>
                       {/* story #2368 AC3 — 배경이 이제 고정(bg-muted, 완전 불투명)이라 대비가
@@ -945,7 +945,7 @@ export function FlowMapCanvas({
                           토큰 무관·한 줄짜리 스코프다. 구분은 이미 "여기서 나온 다음"이라는
                           말이 하고 있어 색은 보조 신호였다(유나) — text-foreground로 통일해도
                           뜻이 안 죽는다. --brand 토큰 자체는 전역이라 안 건드린다. */}
-                      <div className="text-[9px] text-foreground">
+                      <div className="text-micro text-foreground">
                         {t('flowMapPastInternalCount', { n: lane.pastBundle.internalCount })}
                       </div>
                       {/* story #2224 후속(수→형, §A4, doc galrae-visual-transition-final-spec)
@@ -965,11 +965,11 @@ export function FlowMapCanvas({
                           </svg>
                         </div>
                       ) : (
-                        <div className="text-[9px] font-semibold text-foreground">
+                        <div className="text-micro font-semibold text-foreground">
                           {t('flowMapPastOutgoingCount', { n: lane.pastBundle.outgoingCount })}
                         </div>
                       )}
-                      <div className="text-[9px] text-foreground">
+                      <div className="text-micro text-foreground">
                         {loadingPastBundleEpicIds.has(lane.epicId) ? t('flowMapPastLoading') : t('flowMapPastExpandHint')}
                       </div>
                     </button>
@@ -987,13 +987,13 @@ export function FlowMapCanvas({
                         height: PAST_EXPANDED_TOP_START - PAST_BUNDLE_TOP + lane.pastNodes.length * PAST_EXPANDED_ROW_HEIGHT,
                       }}
                     >
-                      <span className="absolute -top-[9px] left-2 bg-card px-1 font-mono text-[9.5px] text-brand-text">
+                      <span className="absolute -top-2 left-2 bg-card px-1 font-mono text-micro text-brand-text">
                         {t('flowMapPastCount', { n: lane.pastTotal })} · {t('flowMapPastExpandedCaption')}
                       </span>
                       <button
                         type="button"
                         onClick={() => onTogglePastBundle(lane.epicId)} aria-expanded={lane.pastNodes.length > 0}
-                        className="focus-inset absolute right-1 top-1 text-[9px] text-muted-foreground underline"
+                        className="focus-inset absolute right-1 top-1 text-micro text-muted-foreground underline"
                       >
                         {t('flowMapPastCollapseHint')}
                       </button>
@@ -1070,7 +1070,7 @@ export function FlowMapCanvas({
                             아니라 "있다는 걸 보여주며 접는 것"(오늘 「67 중 15」와 같은 규율). */}
                         {overflow ? (
                           <div
-                            className="absolute flex w-[110px] items-center gap-1 rounded border border-dashed border-border px-1.5 py-1 text-[10px] text-muted-foreground"
+                            className="absolute flex w-[110px] items-center gap-1 rounded border border-dashed border-border px-1.5 py-1 text-micro text-muted-foreground"
                             style={{ left: x, top: 4 + nodes.length * NODE_ROW_HEIGHT }}
                           >
                             <b className="font-mono font-semibold text-foreground">
@@ -1098,7 +1098,7 @@ export function FlowMapCanvas({
                     // 자체는 상시 있는 빈 상자가 아니라 «끌 때만» 나타나는 것이라 이 조건부
                     // 문구(shouldShowNoDeeperReason)에 얹는다(새 상시 UI를 만들지 않는다).
                     <p
-                      className="absolute whitespace-nowrap font-mono text-[9px] text-brand-text"
+                      className="absolute whitespace-nowrap font-mono text-micro text-brand-text"
                       style={{ left: FLOW_MAP_DEPTH0_X + FLOW_MAP_GRID_STEP + 12, top: height / 2 - 6 }}
                     >
                       {linkDraft.phase === 'linking' ? t('flowMapSlotDragHint') : t('flowMapNoDeeperReason')}
@@ -1134,7 +1134,7 @@ export function FlowMapCanvas({
           hasAnyConfirmedRenderedEdge가 참이면 그 뒤 절을 뗀다 — 앞 절만으로도 "일부"라는
           말이 여전히 성립한다(전량 확認이 아니라는 뜻이므로). */}
       {renderedEdgeLineCount > 0 ? (
-        <div className="border-t border-border px-2 py-1.5 text-[10px] text-muted-foreground">
+        <div className="border-t border-border px-2 py-1.5 text-micro text-muted-foreground">
           {t('edgeLegendMachineFound')}
           {hasAnyConfirmedRenderedEdge ? null : ` — ${t('edgeLegendNoneConfirmedYet')}`}
         </div>
@@ -1177,7 +1177,7 @@ export function FlowMapCanvas({
       {/* story #2353(AC15) — 실패는 토스트로 흘려보내지 않는다(㉦-2, "그 자리에 남는다") —
           여기 고정 배너가 그 "자리"다. message는 서버 원문 그대로(진단을 새로 안 짓는다). */}
       {linkDraft.phase === 'error' ? (
-        <div role="alert" className="flex items-center justify-between gap-2 border-t border-destructive/30 bg-destructive-tint px-3 py-2 text-[11px] text-foreground">
+        <div role="alert" className="flex items-center justify-between gap-2 border-t border-destructive/30 bg-destructive-tint px-3 py-2 text-editorial-meta text-foreground">
           <span>{linkDraft.message}</span>
           <button type="button" onClick={resetLinkDraft} className="shrink-0 underline">{t('portLinkErrorDismiss')}</button>
         </div>
@@ -1195,7 +1195,7 @@ export function FlowMapCanvas({
               <DialogTitle>{t('portRejectTitle')}</DialogTitle>
               <DialogDescription>{t('portRejectDescription')}</DialogDescription>
             </DialogHeader>
-            {rejectError ? <p role="alert" className="text-[11px] text-destructive">{rejectError}</p> : null}
+            {rejectError ? <p role="alert" className="text-editorial-meta text-destructive">{rejectError}</p> : null}
             <DialogFooter>
               <Button type="button" variant="ghost" disabled={rejecting} onClick={() => setUndoTarget(null)}>
                 {t('portUndoKeep')}
@@ -1223,7 +1223,7 @@ export function FlowMapCanvas({
                 {undoTarget.declaredAt ? t('portUndoSignature', { at: formatViewerRelativeTime(undoTarget.declaredAt, locale, displayTimezone) }) : t('portUndoSignatureUnknown')}
               </DialogDescription>
             </DialogHeader>
-            {undoDeleteError ? <p role="alert" className="text-[11px] text-destructive">{undoDeleteError}</p> : null}
+            {undoDeleteError ? <p role="alert" className="text-editorial-meta text-destructive">{undoDeleteError}</p> : null}
             <DialogFooter>
               <Button type="button" variant="ghost" disabled={undoDeleting} onClick={() => setUndoTarget(null)}>
                 {t('portUndoKeep')}

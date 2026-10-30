@@ -221,8 +221,8 @@ const descriptionViewerComponents = {
   ol: ({ children }: { children?: React.ReactNode }) => <ol className="mb-2 ml-4 list-decimal space-y-0.5 text-muted-foreground">{children}</ol>,
   li: ({ children }: { children?: React.ReactNode }) => <li className="text-sm leading-6">{children}</li>,
   // story #2165: 코드블럭은 전역 스크롤바 숨김 예외.
-  pre: ({ children }: { children?: React.ReactNode }) => <pre className="mb-2 overflow-x-auto scrollbar-visible rounded-lg bg-muted p-3 text-[13px] text-foreground">{children}</pre>,
-  code: ({ children }: { children?: React.ReactNode }) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-[13px] text-foreground">{children}</code>,
+  pre: ({ children }: { children?: React.ReactNode }) => <pre className="mb-2 overflow-x-auto scrollbar-visible rounded-lg bg-muted p-3 text-editorial-ui text-foreground">{children}</pre>,
+  code: ({ children }: { children?: React.ReactNode }) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-editorial-ui text-foreground">{children}</code>,
   blockquote: ({ children }: { children?: React.ReactNode }) => <blockquote className="mb-2 border-l-2 border-border pl-3 text-muted-foreground">{children}</blockquote>,
   // 긴급 정정(2026-07-28, PO 검수): description/AC 뷰어는 부모 div에 클릭=편집모드 진입
   // onClick이 걸려 있다(1093·1140줄) — 링크가 stopPropagation 없이 렌더돼 클릭이 그대로
@@ -1703,14 +1703,14 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   색 신호 그대로 KEEP(merge_ready=green·기타=amber) — 계열색 텍스트만 헤어라인 위에서
                   라이트 AA 미달이라 text-foreground로 이전(대비표 정본). */}
               {trustChip && trustChipLabel ? (
-                <span data-testid="story-detail-trust-chip" className="inline-flex items-center gap-1.5 rounded-[7px] border border-proof-line px-2 py-0.5 text-[11px] font-semibold text-foreground">
+                <span data-testid="story-detail-trust-chip" className="inline-flex items-center gap-1.5 rounded-xl border border-proof-line px-2 py-0.5 text-editorial-meta font-semibold text-foreground">
                   <span className={`size-1.5 rounded-full ${trustChip === 'merge_ready' ? 'bg-proof-green' : 'bg-proof-amber'}`} aria-hidden="true" />
                   {trustChipLabel}
                 </span>
               ) : null}
               {/* story #2258 AC2 — 검증요청: pending "qa" gate가 없을 때만 요청 버튼, 있으면 대기 배지. */}
               {chipGates.some((g) => g.gate_type === 'qa' && g.status === 'pending') ? (
-                <span className="inline-flex items-center gap-1.5 rounded-[7px] border border-proof-line px-2 py-0.5 text-[11px] font-semibold text-foreground">
+                <span className="inline-flex items-center gap-1.5 rounded-xl border border-proof-line px-2 py-0.5 text-editorial-meta font-semibold text-foreground">
                   <span className="size-1.5 rounded-full bg-proof-amber" aria-hidden="true" />
                   {t('verificationPending')}
                 </span>
@@ -1720,7 +1720,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   variant="ghost"
                   onClick={() => void handleRequestVerification()}
                   disabled={requestingVerification}
-                  className="h-auto min-h-0 min-w-0 inline-flex items-center gap-1 rounded-[7px] border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
+                  className="h-auto min-h-0 min-w-0 inline-flex items-center gap-1 rounded-xl border border-border bg-transparent px-2 py-0.5 text-editorial-meta font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
                 >
                   {requestingVerification ? t('loading') : t('requestVerification')}
                 </Button>
@@ -1802,7 +1802,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
             />
             <div>
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('assignee')}</span>
+                <span className="text-micro font-mono uppercase tracking-wider text-muted-foreground">{t('assignee')}</span>
                 {!editingAssignee && (
                   <Button
                     type="button"
@@ -1844,7 +1844,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         aria-pressed={selected}
                         className={`h-auto min-h-0 w-full min-w-0 items-center justify-start gap-2 whitespace-normal rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${selected ? 'font-medium text-foreground' : 'font-normal text-muted-foreground'}`}
                       >
-                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-foreground">
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-micro font-medium text-foreground">
                           {/* story #4284 — 이름 없는 구성원은 타입대로 아이콘(에이전트 Bot · 사람 User · UnnamedMemberIcon 정본 · 유나 판정). */}
                           {m.name ? firstGraphemes(m.name, 2).toUpperCase() : <UnnamedMemberIcon type={m.type} />}
                         </span>
@@ -1927,7 +1927,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
 
             {story.story_points != null ? (
               <div>
-                <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('storyPoints')}</span>
+                <span className="text-micro font-mono uppercase tracking-wider text-muted-foreground">{t('storyPoints')}</span>
                 <p className="mt-1 text-sm text-foreground">{t('storyPointsBadge', { count: story.story_points })}</p>
               </div>
             ) : null}
@@ -1935,7 +1935,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
             {/* Description */}
             <div ref={descriptionSectionRef}>
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('description')}</span>
+                <span className="text-micro font-mono uppercase tracking-wider text-muted-foreground">{t('description')}</span>
                 {!editingDescription && (
                   <Button
                     type="button"
@@ -1999,7 +1999,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
             {/* Acceptance Criteria — Description 블록 미러 (E-BOARD-UX S3) */}
             <div ref={acSectionRef}>
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('acceptanceCriteria')}</span>
+                <span className="text-micro font-mono uppercase tracking-wider text-muted-foreground">{t('acceptanceCriteria')}</span>
                 {!editingAC && (
                   <Button
                     type="button"
@@ -2061,7 +2061,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
             {/* Attachments — chat-attach 자산 미러 (E-FILE S4) */}
             <div>
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{t('attachments')}</span>
+                <span className="text-micro font-mono uppercase tracking-wider text-muted-foreground">{t('attachments')}</span>
                 <Button
                   type="button"
                   variant="ghost"
@@ -2135,7 +2135,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
             {/* Labels */}
             <div>
               <div className="mb-2 flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                <div className="flex items-center gap-1.5 text-micro font-mono uppercase tracking-wider text-muted-foreground">
                   <Tag className="size-3" />
                   <span>{t('labelsSectionTitle')}</span>
                 </div>
@@ -2143,7 +2143,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   type="button"
                   variant="ghost"
                   onClick={() => setShowLabelPicker((v) => !v)}
-                  className="h-auto min-h-0 min-w-0 rounded px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground hover:bg-muted"
+                  className="h-auto min-h-0 min-w-0 rounded px-1.5 py-0.5 text-micro font-normal text-muted-foreground hover:bg-muted"
                 >
                   {showLabelPicker ? tc('close') : t('addGeneric')}
                 </Button>
@@ -2169,7 +2169,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           >
                             {/* story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는 이 테마에 매핑이 없는 no-op.
                                 trust-seal.tsx 선례로 hover 상태도 테마별 반전(dark:). 이제 원이 안쪽 span이라 버튼 hover를 group으로 받는다. */}
-                            <span aria-hidden="true" className="flex size-3.5 items-center justify-center rounded-full bg-muted-foreground/20 text-foreground group-hover/button:bg-destructive/80 group-hover/button:text-white dark:group-hover/button:text-proof-bg">
+                            <span aria-hidden="true" className="flex size-3.5 items-center justify-center rounded-full bg-muted-foreground/20 text-foreground group-hover/button:bg-destructive/80 group-hover/button:text-on-scrim dark:group-hover/button:text-proof-bg">
                               <X className="size-2" />
                             </span>
                           </Button>
@@ -2195,7 +2195,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                                 onClick={() => void handleAttachLabel(label.id)}
                                 className="h-auto min-h-0 min-w-0 items-center gap-1.5 rounded-full border border-border bg-background px-2 py-0.5 text-xs font-normal text-foreground hover:bg-muted"
                               >
-                                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: label.color ?? '#8A8F98' }} />
+                                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: label.color ?? 'var(--muted-foreground)' }} />
                                 {label.name}
                               </Button>
                             ))}
@@ -2244,7 +2244,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
             {/* Dependencies — v2 (그래프 + 추가 + 경고) */}
             <div>
               <div className="mb-2 flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                <div className="flex items-center gap-1.5 text-micro font-mono uppercase tracking-wider text-muted-foreground">
                   <GitFork className="size-3" />
                   <span>{t('dependenciesSectionTitle')}</span>
                 </div>
@@ -2252,7 +2252,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   type="button"
                   variant="ghost"
                   onClick={() => setShowAddDep((v) => !v)} aria-expanded={showAddDep}
-                  className="h-auto min-h-0 min-w-0 flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground hover:bg-muted"
+                  className="h-auto min-h-0 min-w-0 flex items-center gap-0.5 rounded px-1.5 py-0.5 text-micro font-normal text-muted-foreground hover:bg-muted"
                 >
                   <Plus className="size-3" />{t('dep.add')}
                 </Button>
@@ -2301,7 +2301,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           <AlertTriangle className="size-3 shrink-0" />
                           <span className="font-medium shrink-0">{t('dep.blockedByLabel')}</span>
                           <span className="min-w-0 truncate">{blocker?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
-                          {blocker?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(blocker.status)}</span> : null}
+                          {blocker?.status ? <span className="ml-auto shrink-0 font-mono text-micro opacity-60">{resolveStatusLabel(blocker.status)}</span> : null}
                         </Button>
                         <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-warning/20', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
@@ -2322,7 +2322,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           <GitFork className="size-3 shrink-0" />
                           <span className="font-medium shrink-0">{t('dep.blockingLabel')}</span>
                           <span className="min-w-0 truncate">{blocked?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
-                          {blocked?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(blocked.status)}</span> : null}
+                          {blocked?.status ? <span className="ml-auto shrink-0 font-mono text-micro opacity-60">{resolveStatusLabel(blocked.status)}</span> : null}
                         </Button>
                         <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
@@ -2343,7 +2343,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           <GitFork className="size-3 shrink-0 rotate-90" />
                           <span className="font-medium shrink-0">{t('dep.dependsOnLabel')}</span>
                           <span className="min-w-0 truncate">{target?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
-                          {target?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(target.status)}</span> : null}
+                          {target?.status ? <span className="ml-auto shrink-0 font-mono text-micro opacity-60">{resolveStatusLabel(target.status)}</span> : null}
                         </Button>
                         <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
@@ -2364,7 +2364,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           <GitFork className="size-3 shrink-0 -rotate-90" />
                           <span className="font-medium shrink-0">{t('dep.dependedByLabel')}</span>
                           <span className="min-w-0 truncate">{source?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
-                          {source?.status ? <span className="ml-auto shrink-0 font-mono text-[10px] opacity-60">{resolveStatusLabel(source.status)}</span> : null}
+                          {source?.status ? <span className="ml-auto shrink-0 font-mono text-micro opacity-60">{resolveStatusLabel(source.status)}</span> : null}
                         </Button>
                         <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
@@ -2389,7 +2389,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         variant="ghost"
                         aria-pressed={depType === type}
                         onClick={() => setDepType(type)}
-                        className={`h-auto min-h-0 min-w-0 rounded px-2 py-0.5 text-[10px] font-medium ${depType === type ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
+                        className={`h-auto min-h-0 min-w-0 rounded px-2 py-0.5 text-micro font-medium ${depType === type ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
                       >
                         {type === 'blocks' ? t('dep.typeBlocks') : t('dep.typeDepends')}
                       </Button>
@@ -2415,7 +2415,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           // 확定, PR#2668 되돌림). 스크린리더가 "대시 대시 대시"로 읽고, 폰트별
                           // 길이가 달라지고, 번역 시 좌우 정렬이 무너진다 — 선이 필요하면 CSS로
                           // 긋고 문자는 머리글 텍스트만 남긴다.
-                          <li aria-hidden className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          <li aria-hidden className="px-2 py-1 text-editorial-meta font-semibold uppercase tracking-wide text-muted-foreground">
                             {t('dep.candidatesHeader')}
                           </li>
                         )}
@@ -2430,7 +2430,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                             >
                               <span className="block truncate">{s.title}</span>
                               {showingCandidates ? (
-                                <span className="block truncate text-[11px] text-muted-foreground">
+                                <span className="block truncate text-editorial-meta text-muted-foreground">
                                   {t('dep.candidateMentionHint')}
                                   {'matched_snippet' in s && s.matched_snippet ? ` · ${s.matched_snippet}` : ''}
                                 </span>
@@ -2578,7 +2578,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                       {comments.map((comment) => (
                         <li key={comment.id} className="rounded-md border border-border bg-muted/30 p-3">
                           <p className="whitespace-pre-wrap text-sm text-foreground">{comment.content}</p>
-                          <div className="mt-2 flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
+                          <div className="mt-2 flex items-center gap-2 text-micro font-mono text-muted-foreground">
                             <span>{commentAuthorLabels.get(comment.created_by) ?? authorLabel(comment.created_by)}</span>
                             <span>·</span>
                             <span>{formatViewerRelativeTime(comment.created_at, locale, displayTimezone)}</span>
@@ -2612,7 +2612,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         return (
                           <li key={activity.id} className="rounded-md border border-border bg-muted/30 p-3">
                             <div className="text-sm">{formatActivityMessage(activity, expanded)}</div>
-                            <div className="mt-1 flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
+                            <div className="mt-1 flex items-center gap-2 text-micro font-mono text-muted-foreground">
                               <span>{actorName}</span>
                               <span>·</span>
                               <span>{formatViewerRelativeTime(activity.created_at, locale, displayTimezone)}</span>

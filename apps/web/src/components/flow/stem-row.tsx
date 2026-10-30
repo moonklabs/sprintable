@@ -19,8 +19,8 @@ interface StemRowProps {
 export function StemRow({ stem, isExpanded, onToggle }: StemRowProps) {
   const t = useTranslations('flow');
   const accentClass = stem.priority === 'about-to-stall'
-    ? 'border-l-amber-500'
-    : stem.hasNext ? 'border-l-emerald-500' : 'border-l-border';
+    ? 'border-l-warning'
+    : stem.hasNext ? 'border-l-success' : 'border-l-border';
 
   return (
     <button
@@ -31,7 +31,7 @@ export function StemRow({ stem, isExpanded, onToggle }: StemRowProps) {
         isExpanded ? 'bg-muted' : 'hover:bg-muted/50'
       }`}
     >
-      <div className="truncate text-[12.5px] font-semibold text-foreground">{stem.title}</div>
+      <div className="truncate text-xs font-semibold text-foreground">{stem.title}</div>
       <div className="mt-1 flex flex-wrap gap-1">
         {stem.inProgressCount > 0 && (
           <Flag tone="info" label={t('nextMakerFlagInProgress', { n: stem.inProgressCount })} />
@@ -57,5 +57,5 @@ function Flag({ tone, label }: { tone: 'info' | 'neutral' | 'brand' | 'warn'; la
     brand: 'border-primary/50 text-primary font-semibold',
     warn: 'border-warning/50 text-warning-strong font-semibold',
   }[tone];
-  return <span className={`rounded border px-1 py-0.5 font-mono text-[9.5px] ${cls}`}>{label}</span>;
+  return <span className={`rounded border px-1 py-0.5 font-mono text-micro ${cls}`}>{label}</span>;
 }

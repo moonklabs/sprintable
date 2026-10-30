@@ -120,7 +120,7 @@ export function ScaleLadder({ activeLevel = 'earth', compact = false }: { active
           const active = level === activeLevel;
           const behavior = RUNG_BEHAVIOR[level];
           const chipClassName = cn(
-            'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium transition',
+            'shrink-0 rounded-full px-2 py-0.5 text-editorial-meta font-medium transition',
             active ? 'bg-brand/10 text-brand-text' : 'text-muted-foreground',
             behavior.kind === 'dead' && 'cursor-not-allowed opacity-60',
             behavior.kind === 'reserved' && 'cursor-help',
@@ -202,7 +202,7 @@ export function ScaleLadder({ activeLevel = 'earth', compact = false }: { active
             <div className={cn('text-sm font-semibold text-foreground', active && 'text-brand-text', behavior.kind === 'dead' && 'text-muted-foreground')}>
               {t(`ladderName_${level}`)}
             </div>
-            <div className="mt-1 text-[11px] leading-snug text-muted-foreground">{t(`ladderQuestion_${level}`)}</div>
+            <div className="mt-1 text-editorial-meta leading-snug text-muted-foreground">{t(`ladderQuestion_${level}`)}</div>
             <span
               aria-hidden="true"
               className={cn('absolute top-2.5 right-2.5 size-2 rounded-full bg-border', active && 'bg-brand')}
@@ -212,7 +212,7 @@ export function ScaleLadder({ activeLevel = 'earth', compact = false }: { active
             ) : null}
             <span
               className={cn(
-                'absolute bottom-2 left-3 text-[9.5px] font-semibold tracking-wide uppercase',
+                'absolute bottom-2 left-3 text-micro font-semibold tracking-wide uppercase',
                 behavior.kind === 'move' ? 'text-brand-text' : 'text-muted-foreground',
               )}
             >
@@ -252,13 +252,13 @@ export function ScaleLadder({ activeLevel = 'earth', compact = false }: { active
                 className="flex h-full w-full flex-col text-left"
               >
                 <div className="text-sm font-semibold text-muted-foreground">{t(`ladderName_${level}`)}</div>
-                <div className="mt-1 text-[11px] leading-snug text-muted-foreground">{t(`ladderQuestion_${level}`)}</div>
+                <div className="mt-1 text-editorial-meta leading-snug text-muted-foreground">{t(`ladderQuestion_${level}`)}</div>
                 <span aria-hidden="true" className="absolute top-2.5 right-2.5 flex items-center gap-1">
                   <Info className="size-3 text-muted-foreground" />
                   <span className="size-2 rounded-full border border-dashed border-border" />
                 </span>
                 <span data-ladder-reserved-chip="" className="mt-auto pt-2">
-                  <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-[10.5px] font-semibold text-muted-foreground">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-micro font-semibold text-muted-foreground">
                     {t('ladderReservedChip')}
                   </span>
                 </span>

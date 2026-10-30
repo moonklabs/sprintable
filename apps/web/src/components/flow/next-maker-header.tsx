@@ -71,7 +71,7 @@ export function NextMakerHeader({ headline, zeroStage }: NextMakerHeaderProps) {
         <ZeroStageCell tone="warn" value={zeroStage.blocked} label={t('nextMakerPendingApproval')} href={flatHref('/inbox?tab=gates')} />
       </div>
 
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-editorial-meta text-muted-foreground">
         {t('nextMakerBacklogLine', { n: zeroStage.backlogTotal, owned: zeroStage.backlogOwned })}
       </p>
     </div>
@@ -84,7 +84,7 @@ function ZeroStageCell({
   const borderClass = {
     brand: 'border-l-primary',
     info: 'border-l-info',
-    warn: 'border-l-amber-500',
+    warn: 'border-l-warning',
     neutral: 'border-l-border',
   }[tone];
   const valueClass = {
@@ -97,7 +97,7 @@ function ZeroStageCell({
   const content = (
     <>
       <div className={`font-mono text-lg font-semibold tabular-nums ${valueClass}`}>{value}</div>
-      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className="text-editorial-meta text-muted-foreground">{label}</div>
     </>
   );
   const className = `min-w-[130px] rounded-md border border-l-[3px] px-3 py-2 ${borderClass} ${href ? 'transition hover:bg-muted' : ''}`;

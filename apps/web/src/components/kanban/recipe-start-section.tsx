@@ -189,7 +189,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
     const notice = stageActionNotice[c.key];
     let body: React.ReactNode = null;
     if (advancedFrom[c.key] && advancedFrom[c.key] === c.current_stage) {
-      body = <p className="break-keep text-[11px] text-muted-foreground" data-testid="recipe-stage-advanced">{t('recipeCompletedStage')}</p>;
+      body = <p className="break-keep text-editorial-meta text-muted-foreground" data-testid="recipe-stage-advanced">{t('recipeCompletedStage')}</p>;
     } else if (mine && c.current_completion === 'complete' && c.next_stage) {
       const nextLabel = recipeStageLabel(c.next_stage, tOrg);
       const question = nextLabel === c.next_stage
@@ -211,9 +211,9 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
         </Button>
       );
     } else if (mine && c.current_completion === 'last_stage') {
-      body = <p className="break-keep text-[11px] text-muted-foreground" data-testid="recipe-last-stage-hint">{t('recipeLastStageHint')}</p>;
+      body = <p className="break-keep text-editorial-meta text-muted-foreground" data-testid="recipe-last-stage-hint">{t('recipeLastStageHint')}</p>;
     } else if (mine && c.current_completion === 'needs_fields') {
-      body = <p className="break-keep text-[11px] text-muted-foreground" data-testid="recipe-needs-fields-hint">{t('recipeNeedsFieldsHint')}</p>;
+      body = <p className="break-keep text-editorial-meta text-muted-foreground" data-testid="recipe-needs-fields-hint">{t('recipeNeedsFieldsHint')}</p>;
     } else if (nextMine && c.current_completion === 'gate_approval') {
       body = c.current_gate_status === 'approved' ? (
         <Button type="button" size="sm" className="self-start" disabled={busy}
@@ -221,7 +221,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
           {busy ? t('recipeStarting') : t('recipeStartMyStage')}
         </Button>
       ) : (
-        <p className="break-keep text-[11px] text-muted-foreground" data-testid="recipe-start-my-stage-waiting">{t('recipeStartMyStageWaiting')}</p>
+        <p className="break-keep text-editorial-meta text-muted-foreground" data-testid="recipe-start-my-stage-waiting">{t('recipeStartMyStageWaiting')}</p>
       );
     }
     if (!body && !notice) return null;
@@ -231,7 +231,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
         {notice ? (
           <p
             role={notice.tone === 'error' ? 'alert' : 'status'}
-            className={notice.tone === 'error' ? 'break-keep text-xs text-destructive' : 'break-keep text-[11px] text-muted-foreground'}
+            className={notice.tone === 'error' ? 'break-keep text-xs text-destructive' : 'break-keep text-editorial-meta text-muted-foreground'}
             data-testid="recipe-stage-action-notice"
           >
             {notice.text}
@@ -263,7 +263,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
           : t('recipeNoNextStage')}
       </p>
       {c.last_published_at && (
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-editorial-meta text-muted-foreground">
           {t('recipeLastPublishedLabel')}: {formatViewerRelativeTime(c.last_published_at, locale, displayTimezone)}
         </p>
       )}
@@ -318,7 +318,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
         notStarted.length > 1 && <p className="text-xs text-muted-foreground">{t('recipeStartChooseRecipe')}</p>
       )}
       {publishError && (
-        <p role="alert" aria-live="assertive" className="mt-1 break-keep text-[11px] text-destructive">
+        <p role="alert" aria-live="assertive" className="mt-1 break-keep text-editorial-meta text-destructive">
           {publishError}
         </p>
       )}
