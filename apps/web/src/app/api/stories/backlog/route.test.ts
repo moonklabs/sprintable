@@ -78,4 +78,33 @@ describe('/api/stories/backlog — meta 구성(story #2190)', () => {
 
     expect(json.meta.totalCount).toBeNull();
   });
+  // story #4833 — status를 안 주면 «스프린트에 안 든 것 중 끝나지 않은 장». 예전엔 status=backlog를 박아 진행 중으로 바꾼 장이 목록에서 사라졌다.
+  const forwardedUrl = async (query: string): Promise<URL> => {
+    const calls: unknown[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
+      calls.push(input);
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    await GET(new Request(`http://localhost/api/stories/backlog?${query}`, { headers: { Authorization: 'Bearer tok' } }));
+    const first = calls[0];
+    return new URL(typeof first === 'string' ? first : first instanceof URL ? first.toString() : (first as Request).url);
+  };
+
+  it('status를 안 주면 status=backlog를 박지 않고 no_sprint=true + exclude_status=done으로 보낸다(진행 중인 장도 목록에 남는다)', async () => {
+    const url = await forwardedUrl('project_id=p1&limit=20');
+    expect(url.searchParams.get('status')).toBeNull();
+    expect(url.searchParams.get('no_sprint')).toBe('true');
+    expect(url.searchParams.get('exclude_status')).toBe('done');
+  });
+
+  it('음성대조 — status를 주면 예전 그대로 그 상태만 보고 no_sprint는 붙이지 않는다', async () => {
+    const url = await forwardedUrl('project_id=p1&limit=20&status=in-review');
+    expect(url.searchParams.get('status')).toBe('in-review');
+    expect(url.searchParams.get('no_sprint')).toBeNull();
+  });
+
+  it('호출자가 exclude_status를 주면 그 값을 덮어쓰지 않는다', async () => {
+    const url = await forwardedUrl('project_id=p1&exclude_status=done,in-review');
+    expect(url.searchParams.get('exclude_status')).toBe('done,in-review');
+  });
 });
