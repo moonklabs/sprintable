@@ -113,14 +113,14 @@ function VerificationSheetRow({
         <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
           {verificationSheetSummary(items, t, naLabel)}
         </span>
-        <span className="shrink-0 text-[10px] font-semibold text-muted-foreground">
+        <span className="shrink-0 text-micro font-semibold text-muted-foreground">
           {t('verificationSheetTypeLabel')}
         </span>
         {expanded ? <ChevronUp className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden /> : <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />}
       </button>
       {expanded ? (
         // 대비: 표 글자는 text-xs 아래로 내려가지 않는다(§17-24) — 이 파일 다른
-        // evidence 행이 쓰는 text-[10px]/text-[11px]류를 여기선 안 쓴다.
+        // evidence 행이 쓰는 text-micro/text-editorial-meta류를 여기선 안 쓴다.
         <table className="mt-1.5 w-full text-xs" data-testid="evidence-verification-sheet-table">
           <thead>
             <tr className="text-left text-muted-foreground">
@@ -316,9 +316,9 @@ export function EvidenceSection({
             두면 그 옆의 proof가 안 세어진 것처럼 보여 총량을 거짓으로 만든다 — "첨부 근거"로
             좁혀 이 수가 «첨부형»만 센다는 것을 명시한다(두 섹션 통합은 별건으로 등재). */}
           {items ? (
-            <span className="text-[11px] text-muted-foreground">· {t('evidenceCount', { count: items.length })}</span>
+            <span className="text-editorial-meta text-muted-foreground">· {t('evidenceCount', { count: items.length })}</span>
           ) : null}
-          <span className="ml-auto flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+          <span className="ml-auto flex shrink-0 items-center gap-1 text-editorial-meta text-muted-foreground">
             {expanded ? t('evidenceHide') : t('evidenceShow')}
             {expanded ? <ChevronUp className="h-3 w-3" aria-hidden /> : <ChevronDown className="h-3 w-3" aria-hidden />}
           </span>
@@ -327,15 +327,15 @@ export function EvidenceSection({
         {expanded ? (
           <div className="mt-2 border-t border-border pt-2">
             {loading ? (
-              <p className="text-[11px] text-muted-foreground">{tCommon('loading')}</p>
+              <p className="text-editorial-meta text-muted-foreground">{tCommon('loading')}</p>
             ) : error ? (
               // 유나 디자인 가디언 리뷰: fetch 실패는 시스템 에러(에이전트 판단 아님) — "안심" 표면
               // 일관성을 위해 destructive(빨강) 대신 중립 톤.
-              <p className="text-[11px] text-muted-foreground">{t('evidenceLoadError')}</p>
+              <p className="text-editorial-meta text-muted-foreground">{t('evidenceLoadError')}</p>
             ) : items && items.length > 0 ? (
               <>
                 {signerName ? (
-                  <p className="mb-1.5 text-[11px] text-muted-foreground">{t('evidenceSignedBy', { name: signerName, josa: pickIGaJosa(signerName) })}</p>
+                  <p className="mb-1.5 text-editorial-meta text-muted-foreground">{t('evidenceSignedBy', { name: signerName, josa: pickIGaJosa(signerName) })}</p>
                 ) : null}
                 <ul className="space-y-1">
                   {(visibleItems ?? []).map((item) => {
@@ -380,9 +380,9 @@ export function EvidenceSection({
                           ) : (
                             <span className="block truncate text-xs font-medium text-foreground">{primaryText}</span>
                           )}
-                          {item.source ? <p className="truncate text-[11px] text-muted-foreground">{item.source}</p> : null}
+                          {item.source ? <p className="truncate text-editorial-meta text-muted-foreground">{item.source}</p> : null}
                         </div>
-                        <span className="mt-0.5 shrink-0 text-[10px] font-semibold text-muted-foreground">
+                        <span className="mt-0.5 shrink-0 text-micro font-semibold text-muted-foreground">
                           {t(TYPE_LABEL_KEY[item.type] ?? 'evidenceTypeUrl')}
                         </span>
                       </li>
@@ -393,7 +393,7 @@ export function EvidenceSection({
                   <button
                     type="button"
                     onClick={() => setShowAll(true)}
-                    className="mt-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+                    className="mt-1.5 text-editorial-meta text-muted-foreground hover:text-foreground"
                   >
                     {t('evidenceMore', { count: hiddenCount })}
                   </button>
@@ -411,7 +411,7 @@ export function EvidenceSection({
                       aria-pressed={addType === ty}
                       onClick={() => setAddType(ty)}
                       className={cn(
-                        'rounded px-2 py-0.5 text-[10px] font-medium transition',
+                        'rounded px-2 py-0.5 text-micro font-medium transition',
                         addType === ty ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground',
                       )}
                     >
@@ -433,16 +433,16 @@ export function EvidenceSection({
                   placeholder={t('evidenceNotePlaceholder')}
                   className="w-full rounded border border-border bg-background px-2 py-1 text-base lg:text-xs"
                 />
-                {addError ? <p className="text-[11px] text-destructive">{t('evidenceAddFailed')}</p> : null}
+                {addError ? <p className="text-editorial-meta text-destructive">{t('evidenceAddFailed')}</p> : null}
                 <div className="flex justify-end gap-1.5">
-                  <button type="button" onClick={() => setShowAddForm(false)} className="rounded px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground">
+                  <button type="button" onClick={() => setShowAddForm(false)} className="rounded px-2 py-1 text-editorial-meta text-muted-foreground hover:text-foreground">
                     {tCommon('cancel')}
                   </button>
                   <button
                     type="button"
                     onClick={() => void handleAddEvidence()}
                     disabled={!addRef.trim() || adding}
-                    className="rounded bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground disabled:opacity-50"
+                    className="rounded bg-primary px-2 py-1 text-editorial-meta font-medium text-primary-foreground disabled:opacity-50"
                   >
                     {adding ? tCommon('loading') : t('evidenceAdd')}
                   </button>
@@ -452,7 +452,7 @@ export function EvidenceSection({
               <button
                 type="button"
                 onClick={() => setShowAddForm(true)}
-                className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+                className="mt-2 flex items-center gap-1 text-editorial-meta text-muted-foreground hover:text-foreground"
               >
                 <Plus className="h-3 w-3" aria-hidden />
                 {t('evidenceAdd')}

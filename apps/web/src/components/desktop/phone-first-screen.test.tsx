@@ -107,7 +107,7 @@ const settle = async () => { for (let i = 0; i < 3; i++) await act(async () => {
 const press = async (el: Element | null) => { await act(async () => { (el as HTMLElement).click(); }); await flush(); await settle(); };
 const pickFromSheet = async (rowId: string, name: string) => {
   await press(byId(rowId));
-  const row = Array.from(container.querySelectorAll('[data-testid="onboarding-phone-sheet-row"]')).find((r) => r.textContent?.includes(name));
+  const row = Array.from(document.querySelectorAll('[data-testid="onboarding-phone-sheet-row"]')).find((r) => r.textContent?.includes(name));
   await press(row ?? null);
 };
 
@@ -510,7 +510,7 @@ describe('[4714] branch 4 — start (AC3)', () => {
     expect((byId('onboarding-phone-start-go') as HTMLButtonElement).disabled).toBe(true);
     expect(byId('onboarding-phone-reason')?.textContent).toBe('프로젝트를 고르면 시작할 수 있어요');
     await press(byId('onboarding-phone-project'));
-    const names = Array.from(container.querySelectorAll('[data-testid="onboarding-phone-sheet-row"]')).map((r) => r.textContent);
+    const names = Array.from(document.querySelectorAll('[data-testid="onboarding-phone-sheet-row"]')).map((r) => r.textContent);
     expect(names).toEqual(['정산']);
   });
 
@@ -560,7 +560,7 @@ describe('[4714] two paired computers — the person chooses the computer (PO 10
     await screen();
     expect(text()).toContain('윤재의 맥북에서 에이전트를 시작할까요?'); // the reachable one first
     await press(byId('onboarding-phone-computer'));
-    const names = Array.from(container.querySelectorAll('[data-testid="onboarding-phone-sheet-row"]')).map((r) => r.textContent);
+    const names = Array.from(document.querySelectorAll('[data-testid="onboarding-phone-sheet-row"]')).map((r) => r.textContent);
     expect(names.some((n) => n?.includes('꺼진 맥'))).toBe(true);
     expect(names.some((n) => n?.includes('윤재의 맥북'))).toBe(true);
     expect(names.some((n) => n?.includes('권한 없는 맥'))).toBe(false);
@@ -722,7 +722,7 @@ describe('[4714] codex round 1 — a start of unknown end is locked; only agents
     await act(async () => { release(); });
     await settle();
     expect(byId('onboarding-phone-check')).not.toBeNull(); // unknown
-    const row = Array.from(container.querySelectorAll('[data-testid="onboarding-phone-sheet-row"]')).find((r) => r.textContent?.includes('정산'));
+    const row = Array.from(document.querySelectorAll('[data-testid="onboarding-phone-sheet-row"]')).find((r) => r.textContent?.includes('정산'));
     await press(row ?? null); // a choice on the open sheet: ignored
     expect(byId('onboarding-phone-check')).not.toBeNull(); // the lock and the pending are still there
     expect(byId('onboarding-phone-project')?.textContent).toContain('결제 개편'); // the pick did not move
@@ -1265,7 +1265,7 @@ describe('[4734] one computer, its setups\' agents together — a start names th
     await screen();
     expect(byId('onboarding-phone-computer')).toBeNull(); // reverted (one card per setup) → a computer picker with two «윤재의 맥북»
     await press(byId('onboarding-phone-agent'));
-    const names = Array.from(container.querySelectorAll('[data-testid="onboarding-phone-sheet-row"]')).map((r) => r.textContent);
+    const names = Array.from(document.querySelectorAll('[data-testid="onboarding-phone-sheet-row"]')).map((r) => r.textContent);
     expect(names).toEqual(expect.arrayContaining(['결제 담당', '문서 담당']));
     expect(names).toHaveLength(2);
   });

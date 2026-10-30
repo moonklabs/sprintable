@@ -48,14 +48,14 @@ export function ChatProofEmbed({
   if (status === 'no_access') {
     return (
       <div className={cn('border-l-2 border-border py-1.5 pl-3', className)}>
-        <p className="text-[11.5px] text-muted-foreground">{t('chatProofNoAccess')}</p>
+        <p className="text-editorial-meta text-muted-foreground">{t('chatProofNoAccess')}</p>
       </div>
     );
   }
 
   return (
     <div className={cn('border-l-2 border-border py-1.5 pl-3', className)}>
-      <div className="mb-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground">
+      <div className="mb-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-editorial-meta text-muted-foreground">
         <span>{sourceLabel}</span>
         {conversationHref ? (
           <Link href={conversationHref} className="text-primary hover:underline">
@@ -82,22 +82,22 @@ export function ChatProofEmbed({
       </div>
 
       {status === 'deleted' ? (
-        <p className="text-[11.5px] text-muted-foreground">
-          <span className="mr-1 rounded bg-muted px-1 py-0.5 text-[10px]">{t('chatProofDeletedTag')}</span>
+        <p className="text-editorial-meta text-muted-foreground">
+          <span className="mr-1 rounded bg-muted px-1 py-0.5 text-micro">{t('chatProofDeletedTag')}</span>
         </p>
       ) : (
         <div className="flex flex-col gap-1">
           {truncatedBefore ? (
-            <p className="text-[10.5px] text-muted-foreground">{t('chatProofTruncatedBefore', { count: truncatedBefore })}</p>
+            <p className="text-micro text-muted-foreground">{t('chatProofTruncatedBefore', { count: truncatedBefore })}</p>
           ) : null}
           {messages.map((m) => (
-            <p key={m.id} className="text-[13px] leading-snug text-foreground">
+            <p key={m.id} className="text-editorial-ui leading-snug text-foreground">
               <span className="font-medium">{m.senderName}</span>{' '}
               <span className="[overflow-wrap:anywhere]">{m.content}</span>
             </p>
           ))}
           {truncatedAfter ? (
-            <p className="text-[10.5px] text-muted-foreground">{t('chatProofTruncatedAfter', { count: truncatedAfter })}</p>
+            <p className="text-micro text-muted-foreground">{t('chatProofTruncatedAfter', { count: truncatedAfter })}</p>
           ) : null}
         </div>
       )}

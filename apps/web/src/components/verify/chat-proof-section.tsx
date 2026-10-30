@@ -158,7 +158,7 @@ export function ChatProofSection({ storyId }: ChatProofSectionProps) {
 
   if (loadError) {
     return (
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-editorial-meta text-muted-foreground">
         {t('chatProofLoadFailed')}{' '}
         <button type="button" onClick={() => setRetryNonce((n) => n + 1)} className="text-primary hover:underline">
           {t('chatProofRetry')}
@@ -169,7 +169,7 @@ export function ChatProofSection({ storyId }: ChatProofSectionProps) {
 
   return (
     <div className="space-y-2">
-      <p className="text-[11px] font-medium text-muted-foreground">
+      <p className="text-editorial-meta font-medium text-muted-foreground">
         {t('chatProofCount', { count: refs.length })}
         {/* story #2265(C-7), PO 지적(2026-07-29): 생략 건수는 반드시 세어서 말한다("모름"이
             "괜찮음"으로 집계되면 안 됨) — 정확한 문구는 유나군 lane(자리만 확保). */}
