@@ -68,7 +68,7 @@ export function AssetEmbedCard({ entityId, label, onOpenReadingPanel }: AssetEmb
   }, [entityId]);
 
   // story 4831: 내 메시지 버블은 밝은 틴트(bg-proof-blue-soft)+어두운 ink(story #2921)인데 옛 코드는 «진한 brand 버블 위 화이트 카드»라 흰 글자 · 흰 반투명을 썼다(라이트에서 안 보임).
-  // 내 메시지 위에서도 다른 카드와 같은 표면(card)을 쓴다 — 이미 대비가 검증된 조합이고, 특수 가지가 없으니 한 곳에서 정한다. 그래서 `ownMessage` 인자는 걷었다(story 4831).
+  // 내 메시지 위에서도 다른 카드와 같은 표면(card)을 쓴다 — 이미 대비가 검증된 조합이고, 특수 가지가 없으니 한 곳에서 정한다. 그래서 «내 메시지 여부» 인자는 걷었다(story 4831).
   const cardSurface = 'border-border bg-card hover:bg-muted';
   const nameTone = 'text-foreground';
   const metaTone = 'text-muted-foreground';

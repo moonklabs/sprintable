@@ -13,9 +13,9 @@ interface DependencyGraphProps {
 const MAX_SIDE = 4;
 
 function nodeColor(status: string | undefined, isCurrent: boolean) {
-  if (isCurrent) return { fill: 'var(--color-brand)', text: 'var(--color-brand-foreground)', stroke: 'var(--color-brand)' };
-  if (status === 'done') return { fill: 'var(--color-success-tint)', text: 'var(--color-success)', stroke: 'var(--color-success-border)' };
-  return { fill: 'var(--color-info-tint)', text: 'var(--color-info)', stroke: 'var(--color-info-border)' };
+  if (isCurrent) return { fill: 'var(--brand)', text: 'var(--brand-foreground)', stroke: 'var(--brand)' };
+  if (status === 'done') return { fill: 'var(--success-tint)', text: 'var(--success)', stroke: 'var(--success-border)' };
+  return { fill: 'var(--info-tint)', text: 'var(--info)', stroke: 'var(--info-border)' };
 }
 
 export function DependencyGraph({ storyId, deps, storyMap, onNavigate }: DependencyGraphProps) {
@@ -76,7 +76,7 @@ export function DependencyGraph({ storyId, deps, storyMap, onNavigate }: Depende
         const ny = y + nodeH / 2;
         return (
           <g key={d.id}>
-            <line x1={mx} y1={ny} x2={centerX - nodeW / 2 - 2} y2={currentY + nodeH / 2} stroke="var(--color-border)" strokeWidth={1.5} markerEnd={d.dep_type === 'blocks' ? 'url(#arrow)' : undefined} strokeDasharray={d.dep_type === 'depends_on' ? '4 2' : undefined} />
+            <line x1={mx} y1={ny} x2={centerX - nodeW / 2 - 2} y2={currentY + nodeH / 2} stroke="var(--border)" strokeWidth={1.5} markerEnd={d.dep_type === 'blocks' ? 'url(#arrow)' : undefined} strokeDasharray={d.dep_type === 'depends_on' ? '4 2' : undefined} />
             <rect x={0} y={y} width={nodeW} height={nodeH} rx={6} fill={fill} stroke={stroke} strokeWidth={1.5} style={{ cursor: onNavigate ? 'pointer' : 'default' }} onClick={() => onNavigate?.(otherId)} />
             <text x={nodeW / 2} y={y + nodeH / 2 + 4} textAnchor="middle" fontSize={10} fill={text} style={{ pointerEvents: 'none' }}>{shortTitle(otherId)}</text>
           </g>
@@ -84,8 +84,8 @@ export function DependencyGraph({ storyId, deps, storyMap, onNavigate }: Depende
       })}
       {leftExtra > 0 && (
         <g>
-          <rect x={0} y={sideY(leftVisible.length, leftCount)} width={nodeW} height={nodeH} rx={6} fill="var(--color-muted)" stroke="var(--color-border)" strokeWidth={1.5} />
-          <text x={nodeW / 2} y={sideY(leftVisible.length, leftCount) + nodeH / 2 + 4} textAnchor="middle" fontSize={10} fill="var(--color-muted-foreground)">+{tDocs('groupMore', { count: leftExtra })}</text>
+          <rect x={0} y={sideY(leftVisible.length, leftCount)} width={nodeW} height={nodeH} rx={6} fill="var(--muted)" stroke="var(--border)" strokeWidth={1.5} />
+          <text x={nodeW / 2} y={sideY(leftVisible.length, leftCount) + nodeH / 2 + 4} textAnchor="middle" fontSize={10} fill="var(--muted-foreground)">+{tDocs('groupMore', { count: leftExtra })}</text>
         </g>
       )}
 
@@ -111,7 +111,7 @@ export function DependencyGraph({ storyId, deps, storyMap, onNavigate }: Depende
         const ny = y + nodeH / 2;
         return (
           <g key={d.id}>
-            <line x1={centerX + nodeW / 2 + 2} y1={currentY + nodeH / 2} x2={rx - 2} y2={ny} stroke="var(--color-border)" strokeWidth={1.5} markerEnd={d.dep_type === 'blocks' ? 'url(#arrow)' : undefined} strokeDasharray={d.dep_type === 'depends_on' ? '4 2' : undefined} />
+            <line x1={centerX + nodeW / 2 + 2} y1={currentY + nodeH / 2} x2={rx - 2} y2={ny} stroke="var(--border)" strokeWidth={1.5} markerEnd={d.dep_type === 'blocks' ? 'url(#arrow)' : undefined} strokeDasharray={d.dep_type === 'depends_on' ? '4 2' : undefined} />
             <rect x={rx} y={y} width={nodeW} height={nodeH} rx={6} fill={fill} stroke={stroke} strokeWidth={1.5} style={{ cursor: onNavigate ? 'pointer' : 'default' }} onClick={() => onNavigate?.(otherId)} />
             <text x={rx + nodeW / 2} y={y + nodeH / 2 + 4} textAnchor="middle" fontSize={10} fill={text} style={{ pointerEvents: 'none' }}>{shortTitle(otherId)}</text>
           </g>
@@ -119,14 +119,14 @@ export function DependencyGraph({ storyId, deps, storyMap, onNavigate }: Depende
       })}
       {rightExtra > 0 && (
         <g>
-          <rect x={svgW - nodeW} y={sideY(rightVisible.length, rightCount)} width={nodeW} height={nodeH} rx={6} fill="var(--color-muted)" stroke="var(--color-border)" strokeWidth={1.5} />
-          <text x={svgW - nodeW / 2} y={sideY(rightVisible.length, rightCount) + nodeH / 2 + 4} textAnchor="middle" fontSize={10} fill="var(--color-muted-foreground)">+{tDocs('groupMore', { count: rightExtra })}</text>
+          <rect x={svgW - nodeW} y={sideY(rightVisible.length, rightCount)} width={nodeW} height={nodeH} rx={6} fill="var(--muted)" stroke="var(--border)" strokeWidth={1.5} />
+          <text x={svgW - nodeW / 2} y={sideY(rightVisible.length, rightCount) + nodeH / 2 + 4} textAnchor="middle" fontSize={10} fill="var(--muted-foreground)">+{tDocs('groupMore', { count: rightExtra })}</text>
         </g>
       )}
 
       <defs>
         <marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-          <path d="M0,0 L0,6 L6,3 z" fill="var(--color-border)" />
+          <path d="M0,0 L0,6 L6,3 z" fill="var(--border)" />
         </marker>
       </defs>
     </svg>

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 //
-// story 4831 — (이 카드는 `ownMessage` 인자가 있던 시절 내 메시지 위에서만 흰 글자를 썼다. 인자는 걷었고 모양은 하나다.) 내 메시지 말풍선은 밝은 틴트(bg-proof-blue-soft) + 어두운 ink(story #2921)다. 그 위의 자산 카드가 옛 «진한 brand 버블 위 화이트 카드»의 흰 글자 · 흰 반투명을
+// story 4831 — (이 카드는 «내 메시지 여부» 인자가 있던 시절 내 메시지 위에서만 흰 글자를 썼다. 인자는 걷었고 모양은 하나다.) 내 메시지 말풍선은 밝은 틴트(bg-proof-blue-soft) + 어두운 ink(story #2921)다. 그 위의 자산 카드가 옛 «진한 brand 버블 위 화이트 카드»의 흰 글자 · 흰 반투명을
 // 그대로 쓰면 라이트에서 이름 · 크기 글자가 안 보인다(develop에 있던 결함). 내 메시지 위에서도 일반 카드 표면(card)과 일반 글자색을 쓴다 — 흰색을 되살리면 빨강이다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';

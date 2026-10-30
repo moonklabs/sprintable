@@ -202,7 +202,7 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
 
 // story #ec57c80c(v2 3호) — report-message-summary.tsx가 「전문 보기」 펼침 상태에서 이
 // 컴포넌트를 그대로 재사용한다(사본 분화 금지 — 접힘 해제 시 원래 렌더 경로와 완전히 동일).
-export function ChatMarkdown({ content: rawContent, isMine, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey }: {
+export function ChatMarkdown({ content: rawContent, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey }: {
   content: string; isMine: boolean; references: ChatMessage['references'];
   entityStatusByKey?: Record<string, EntityStatusFetchState>;
   onOpenReadingPanel?: (target: ReadingPanelTarget) => void;
