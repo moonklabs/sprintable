@@ -17,7 +17,7 @@ let root: Root;
 let last: ReturnType<typeof useAgentStates>;
 function Probe() { last = useAgentStates(); return null; }
 
-const ok = (rows: unknown) => ({ ok: true, json: async () => rows });
+const ok = (rows: unknown) => ({ ok: true, json: async () => ({ data: rows, meta: { totalCount: null } }) });
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-10-30T03:00:00Z'));
@@ -60,7 +60,7 @@ describe('useAgentStates', () => {
     h.fetchWithAuth.mockResolvedValueOnce({ ok: false, json: async () => ({}) });
     await mount();
     expect(last.loaded).toBe(false);
-    h.fetchWithAuth.mockResolvedValueOnce(ok({ unexpected: true }));
+    h.fetchWithAuth.mockResolvedValueOnce({ ok: true, json: async () => ({ data: { unexpected: true } }) });
     await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
     expect(last.loaded).toBe(true);
     expect(last.rows).toEqual([]);
