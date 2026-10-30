@@ -64,6 +64,16 @@ class _FakeRequest:
         return False
 
 
+async def _wait_for(cond, timeout: float = 5.0, step: float = 0.05) -> bool:
+    """story #4834: poll an async condition instead of sleeping a fixed time (a real-PG cleanup takes as long as it takes)."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if await cond():
+            return True
+        await asyncio.sleep(step)
+    return await cond()
+
+
 class _DisconnectingRequest:
     """story #4834: a client that goes away — `is_disconnected()` turns True after `after` checks (a real disconnect, not a lifespan end)."""
     headers: dict = {}
@@ -352,11 +362,12 @@ async def test_lifespan_end_keeps_the_agent_reachable_through_the_reconnect_gap(
                 assert len(rows) == 1, "a lifespan end must not delete the session row at once (the reconnect gap)"
                 assert await push_reachable_agent_ids(s, {agent_id}, webhook_covered=set()) == {agent_id}, "the agent reads as unreachable in the gap"
 
-            await asyncio.sleep(1.0)  # past the grace: nobody came back — cleaned as before (the same function, once)
-            _spy.assert_awaited_once()
-            async with Session() as s:
-                rows = (await s.execute(select(AgentGatewaySession).where(AgentGatewaySession.agent_id == agent_id))).scalars().all()
-                assert rows == [], "after the grace the row is cleaned as before"
+            async def _row_gone() -> bool:
+                async with Session() as s:
+                    return not (await s.execute(select(AgentGatewaySession).where(AgentGatewaySession.agent_id == agent_id))).scalars().all()
+
+            assert await _wait_for(_row_gone), "after the grace the row is cleaned as before"  # nobody came back
+            _spy.assert_awaited_once()  # the same function, once
     finally:
         from app.core.database import Base
         async with engine.begin() as conn:
@@ -405,11 +416,12 @@ async def test_a_real_disconnect_is_cleaned_at_once_without_the_grace():
                 if "lifespan_reconnect" in chunk:
                     saw_lifespan = True
             assert not saw_lifespan, "this stream must end by the client going away, not by its lifespan"
-            await asyncio.sleep(0.3)  # the end task of the connection (no grace) — far below the 30 s grace
+            async def _row_gone() -> bool:
+                async with Session() as s:
+                    return not (await s.execute(select(AgentGatewaySession).where(AgentGatewaySession.agent_id == agent_id))).scalars().all()
+
+            assert await _wait_for(_row_gone, timeout=3.0), "a real disconnect is cleaned at once"  # far below the 30 s grace
             _spy.assert_awaited_once()
-            async with Session() as s:
-                rows = (await s.execute(select(AgentGatewaySession).where(AgentGatewaySession.agent_id == agent_id))).scalars().all()
-                assert rows == [], "a real disconnect is cleaned at once"
     finally:
         from app.core.database import Base
         async with engine.begin() as conn:
@@ -447,11 +459,12 @@ async def test_a_reconnect_inside_the_grace_keeps_its_own_session_and_only_the_o
              patch.object(gw_module, "_SSE_HEARTBEAT", 0.02), \
              patch.object(gw_module, "_AGENT_SSE_LIFESPAN_SEC", 0.05), \
              patch.object(gw_module, "_AGENT_SSE_LIFESPAN_JITTER_SEC", 0.0), \
-             patch.object(gw_module, "_LIFESPAN_END_GRACE_SEC", 0.6), \
+             patch.object(gw_module, "_LIFESPAN_END_GRACE_SEC", 1.5), \
              patch("app.services.onboarding_funnel.emit_onboarding_event", AsyncMock()):
             first = await gw_module.agent_stream(request=_FakeRequest(), auth=auth_ctx)
             async for _ in first.body_iterator:
                 pass  # the first stream ends by its lifespan
+            t_first_end = time.monotonic()
             async with Session() as s:
                 old_ids = {r.id for r in (await s.execute(select(AgentGatewaySession).where(AgentGatewaySession.agent_id == agent_id))).scalars().all()}
             assert len(old_ids) == 1
@@ -460,11 +473,67 @@ async def test_a_reconnect_inside_the_grace_keeps_its_own_session_and_only_the_o
                 second = await gw_module.agent_stream(request=_FakeRequest(), auth=auth_ctx)  # the reconnect, inside the grace
                 it = second.body_iterator.__aiter__()
                 await it.__anext__()  # it is up (a first frame went out)
-                await asyncio.sleep(1.0)  # the old end's cleanup has run by now (grace 0.6 s)
-                async with Session() as s:
-                    now_ids = {r.id for r in (await s.execute(select(AgentGatewaySession).where(AgentGatewaySession.agent_id == agent_id))).scalars().all()}
-                assert len(now_ids) == 1 and not (now_ids & old_ids), "the old row is gone and the reconnect's own row stays"
+                assert time.monotonic() - t_first_end < 1.0, "the reconnect must be up INSIDE the grace for this test to mean anything"
+
+                async def _only_new_row() -> bool:
+                    async with Session() as s:
+                        ids = {r.id for r in (await s.execute(select(AgentGatewaySession).where(AgentGatewaySession.agent_id == agent_id))).scalars().all()}
+                    return len(ids) == 1 and not (ids & old_ids)
+
+                assert await _wait_for(_only_new_row, timeout=6.0), "the old row goes (after the grace) and the reconnect's own row stays"
                 await it.aclose()
+    finally:
+        from app.core.database import Base
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+        from app.core import shutdown as _shutdown_module
+        _shutdown_module.reset_shutdown_event()
+
+
+@pytest.mark.anyio
+@pytest.mark.destructive_schema
+@pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요")
+async def test_the_shutdown_drain_cleans_up_a_waiting_lifespan_end_at_once():
+    """story #4834 (codex) — a graceful shutdown cuts background tasks after 5 s (`pg_pubsub.drain_background_tasks`); a lifespan end still waiting out its grace
+    must clean up NOW, not leave a session row or a stale online key behind (no zombies, #2128)."""
+    import app.routers.agent_gateway as gw_module
+    from app.models.agent_gateway import AgentGatewaySession
+    from app.services import pg_pubsub
+    from sqlalchemy import select
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, agent_id = await _seed_org_project_agent(s)
+            key_id = await seed_agent_stream_key(s, agent_id)
+        auth_ctx = MagicMock()
+        auth_ctx.user_id = str(agent_id)
+        auth_ctx.claims = agent_stream_claims(key_id)
+
+        @asynccontextmanager
+        async def _factory():
+            async with Session() as s:
+                yield s
+
+        _orig = gw_module._mark_agent_disconnected
+        _spy = AsyncMock(side_effect=_orig)
+        with patch("app.core.database.async_session_factory", _factory), \
+             patch.object(gw_module, "_SSE_HEARTBEAT", 0.02), \
+             patch.object(gw_module, "_AGENT_SSE_LIFESPAN_SEC", 0.05), \
+             patch.object(gw_module, "_AGENT_SSE_LIFESPAN_JITTER_SEC", 0.0), \
+             patch.object(gw_module, "_LIFESPAN_END_GRACE_SEC", 30.0), \
+             patch.object(gw_module, "_mark_agent_disconnected", _spy), \
+             patch("app.services.onboarding_funnel.emit_onboarding_event", AsyncMock()):
+            response = await gw_module.agent_stream(request=_FakeRequest(), auth=auth_ctx)
+            async for _ in response.body_iterator:
+                pass  # ended by its lifespan; the cleanup waits (30 s grace)
+            _spy.assert_not_called()
+            await pg_pubsub.drain_background_tasks(timeout=0.2)  # the shutdown: the waiting task is cut — and cleans up first
+            _spy.assert_awaited_once()
+            async with Session() as s:
+                rows = (await s.execute(select(AgentGatewaySession).where(AgentGatewaySession.agent_id == agent_id))).scalars().all()
+                assert rows == [], "a shutdown must not leave the session row of a waiting lifespan end"
     finally:
         from app.core.database import Base
         async with engine.begin() as conn:

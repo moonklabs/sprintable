@@ -1172,7 +1172,15 @@ async def agent_stream(
                         # stream's end, and a longer wait there would lengthen the very gap this avoids)
                         async def _cleanup_after_grace() -> None:
                             try:
-                                await asyncio.sleep(_LIFESPAN_END_GRACE_SEC)
+                                try:
+                                    await asyncio.sleep(_LIFESPAN_END_GRACE_SEC)
+                                except asyncio.CancelledError:
+                                    # the shutdown drain (`pg_pubsub.drain_background_tasks`) cut the wait: no reconnect can reach this instance any more — clean up NOW
+                                    # (no zombie row · no stale online key), then let the cancel go on. The drain awaits the task, so this finishes before the engine is disposed.
+                                    await _mark_agent_disconnected(
+                                        agent_id, session_id, org_id_str, heartbeat_baseline=_heartbeat_baseline,
+                                    )
+                                    raise
                                 await _mark_agent_disconnected(
                                     agent_id, session_id, org_id_str, heartbeat_baseline=_heartbeat_baseline,
                                 )
