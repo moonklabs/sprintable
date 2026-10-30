@@ -266,7 +266,7 @@ export function TossSheet({
           <div className="px-4">
             <div
               data-testid="toss-partial-notice"
-              className="mb-1.5 flex items-center justify-between gap-2 rounded-lg bg-muted px-2.5 py-1.5 text-[11px] text-muted-foreground"
+              className="mb-1.5 flex items-center justify-between gap-2 rounded-lg bg-muted px-2.5 py-1.5 text-editorial-meta text-muted-foreground"
             >
               <span>{t('approvalRequestTossPartialBanner')}</span>
               <button type="button" onClick={loadConversations} className="shrink-0 font-medium text-foreground underline underline-offset-2">
@@ -276,7 +276,7 @@ export function TossSheet({
           </div>
         ) : null}
         <div className="max-h-72 overflow-y-auto px-2 pb-2">
-          {error ? <p role="alert" aria-live="assertive" className="px-2 pb-2 text-[11px] text-foreground">{error}</p> : null}
+          {error ? <p role="alert" aria-live="assertive" className="px-2 pb-2 text-editorial-meta text-foreground">{error}</p> : null}
           {loading ? (
             <div className="h-16 animate-pulse rounded-lg bg-muted" />
           ) : candidates.length === 0 ? (
@@ -322,7 +322,7 @@ export function TossSheet({
                     // 유나 규격 정정(design gate 반려, 2026-08-26) — text-primary는 bg-primary/10
                     // 위에서 opacity-70(부모 row)과 겹치면 라이트 2.83/다크 3.04로 AA 미달
                     // (hover 시 더 낮음). text-foreground는 같은 조건에서 5.4~6.9 PASS.
-                    <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10.5px] font-semibold text-foreground">
+                    <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-micro font-semibold text-foreground">
                       {t('approvalRequestTossAlreadyThereChip')}
                     </span>
                   ) : (

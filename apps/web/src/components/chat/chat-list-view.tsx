@@ -204,7 +204,7 @@ function ConversationRow({
 
   const participantLayer = conv.participants && conv.participants.length > 0 ? (
     conv.type === 'dm' ? (
-      <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+      <div className="mt-0.5 flex items-center gap-1 text-editorial-meta text-muted-foreground">
         <span className="rounded bg-muted px-1 py-0.5 font-medium text-muted-foreground">{t('you')}</span>
         <span>↔</span>
         <span className="max-w-[80px] truncate rounded bg-muted px-1 py-0.5 font-medium text-muted-foreground">
@@ -215,20 +215,20 @@ function ConversationRow({
         {/* story #2023 ⓑ: L5(시스템 상태), 브랜드 아님 */}
         {isAgentInConv && (
           // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
-          <span className="flex-shrink-0 rounded border border-info/30 bg-info/12 px-1.5 py-0.5 text-[10px] font-medium text-foreground">
+          <span className="flex-shrink-0 rounded border border-info/30 bg-info/12 px-1.5 py-0.5 text-micro font-medium text-foreground">
             {t('agent')}
           </span>
         )}
         {/* story 4675 (F2): a DM with an agent names its computer after the «에이전트» chip; a group row says nothing (several · Q-b) */}
-        {isAgentInConv ? <DeviceChip name={others[0]?.device_name} className="text-[10px]" /> : null}
+        {isAgentInConv ? <DeviceChip name={others[0]?.device_name} className="text-micro" /> : null}
       </div>
     ) : (
-      <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+      <div className="mt-0.5 flex items-center gap-1.5 text-editorial-meta text-muted-foreground">
         <div className="flex -space-x-1.5">
           {others.slice(0, 3).map((p) => (
             <div
               key={p.member_id}
-              className="relative flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-medium text-muted-foreground ring-1 ring-background"
+              className="relative flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-full bg-muted text-micro font-medium text-muted-foreground ring-1 ring-background"
             >
               {/* [SID:4286 · 유나 결정 2] 이름이 없으면 날것 «?» 대신 아이콘 — 4646 공용 표식(UnnamedMemberIcon · 에이전트 Bot · 사람 User). */}
               {p.name ? firstGraphemes(p.name, 1) : <UnnamedMemberIcon type={p.type} className="h-3 w-3" aria-hidden />}
@@ -239,7 +239,7 @@ function ConversationRow({
             </div>
           ))}
           {others.length > 3 && (
-            <div className="flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-medium text-muted-foreground ring-1 ring-background">
+            <div className="flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-full bg-muted text-micro font-medium text-muted-foreground ring-1 ring-background">
               +{others.length - 3}
             </div>
           )}
@@ -291,13 +291,13 @@ function ConversationRow({
               재분류(구조·크기 불변). preview는 이미 text-xs+muted+기본무게(400)라 Body-small
               규칙에 이미 부합 — 무편집. */}
           <span className="truncate text-sm font-semibold text-foreground">{displayName}</span>
-          <span className="flex-shrink-0 text-[10px] text-muted-foreground">{formatTime(time, locale, displayTimezone)}</span>
+          <span className="flex-shrink-0 text-micro text-muted-foreground">{formatTime(time, locale, displayTimezone)}</span>
         </div>
         {participantLayer}
         <div className="flex items-center justify-between gap-1">
           <p className="truncate text-xs text-muted-foreground">{preview}</p>
           {unread > 0 && (
-            <span className="flex-shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground">
+            <span className="flex-shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-micro font-semibold text-primary-foreground">
               {unread > 99 ? '99+' : unread}
             </span>
           )}
@@ -790,7 +790,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     <div className="space-y-4">
       {dmConvs.length > 0 && (
         <div>
-          <p className="mb-1 px-3 text-[11px] font-medium text-muted-foreground">
+          <p className="mb-1 px-3 text-editorial-meta font-medium text-muted-foreground">
             {t('dmSection')}
           </p>
           {dmConvs.map((conv) => (
@@ -800,7 +800,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       )}
       {groupConvs.length > 0 && (
         <div>
-          <p className="mb-1 px-3 text-[11px] font-medium text-muted-foreground">
+          <p className="mb-1 px-3 text-editorial-meta font-medium text-muted-foreground">
             {t('groupSection')}
           </p>
           {groupConvs.map((conv) => (
@@ -833,7 +833,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // 조용히 안 보인다 — "몰랐다"(완전 분리)도 "경계 흐림"(섞음)도 아닌 세 번째 선택.
   const outsideProjectSection = outsideProjectConvs.length > 0 && (
     <div className="mt-4 border-t border-border pt-4">
-      <p className="mb-1 px-3 text-[11px] font-medium text-muted-foreground">
+      <p className="mb-1 px-3 text-editorial-meta font-medium text-muted-foreground">
         {t('otherProjectsSection')}
       </p>
       {outsideProjectConvs.map((conv) => (
@@ -874,7 +874,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     </div>
   ) : (
     <div>
-      <p className="mb-1 px-3 text-[11px] font-medium text-muted-foreground">
+      <p className="mb-1 px-3 text-editorial-meta font-medium text-muted-foreground">
         {t('agentSection')}
       </p>
       {agentOnlyConvs.map((conv) => (

@@ -95,7 +95,7 @@ describe('ChatView — 발신자 동명이인([SID:4311 PR 3])', () => {
     }));
     await mount();
     for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); });
-    const names = [...container.querySelectorAll('span.text-\\[11px\\].font-medium')].map((el) => el.textContent).filter((n) => n !== koMessages.chats.you);
+    const names = [...container.querySelectorAll('span.text-editorial-meta.font-medium')].map((el) => el.textContent).filter((n) => n !== koMessages.chats.you);
     expect([...names].sort()).toEqual(['송윤재 · 2fd14616', '송윤재 · e75ca548', '송윤재 · e75ca548', '안나'].sort());
   });
 });

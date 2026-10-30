@@ -237,7 +237,7 @@ export function ThreadPanel({
           메시지 pin + 좌측 라인" — 답글이 원 메시지에서 뻗어나온 것처럼). 기존 border-border
           토큰 재사용(신규 색 0). */}
       <div className="flex-shrink-0 border-b border-l-2 border-border bg-muted/30 py-3 pl-3 pr-4">
-        <p className="mb-1 text-[10px] font-medium text-muted-foreground">{t('originalMessage')}</p>
+        <p className="mb-1 text-micro font-medium text-muted-foreground">{t('originalMessage')}</p>
         <ChatBubble
           message={parentMessage}
           isMine={parentMessage.created_by === currentTeamMemberId}

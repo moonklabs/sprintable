@@ -21,7 +21,7 @@ export function WithheldDeliveryLine({ withheld, isMine }: { withheld: DeliveryW
       data-testid="withheld-delivery-line"
       className="mt-1 flex items-start justify-end gap-1 text-right text-xs text-muted-foreground break-keep"
     >
-      <Ban aria-hidden="true" className="mt-[3px] size-3 shrink-0" />
+      <Ban aria-hidden="true" className="mt-1 size-3 shrink-0" />
       <span>{text}</span>
     </p>
   );

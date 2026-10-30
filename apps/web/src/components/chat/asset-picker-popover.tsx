@@ -135,19 +135,19 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
       ref={containerRef}
       role="dialog"
       aria-label={t('assetPickerTitle')}
-      className="absolute bottom-[54px] left-3 z-40 flex max-h-[380px] w-[372px] flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-[0_16px_46px_rgba(0,0,0,0.20)]"
+      className="absolute bottom-14 left-3 z-40 flex max-h-[380px] w-[372px] flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-[var(--elev-overlay)]"
     >
       {/* 헤더 */}
-      <div className="flex items-center gap-2 px-[13px] pb-[9px] pt-[11px] text-xs font-semibold">
+      <div className="flex items-center gap-2 px-3 pb-2 pt-3 text-xs font-semibold">
         <FolderOpen className="size-4 shrink-0 text-info" aria-hidden />
         <span className="text-foreground">{t('assetPickerTitle')}</span>
-        <span className="ml-auto rounded-[5px] border border-border px-[5px] py-px text-[10px] font-normal text-muted-foreground">
+        <span className="ml-auto rounded-md border border-border bg-muted px-1 py-px text-micro font-normal text-muted-foreground">
           esc
         </span>
       </div>
 
       {/* 검색 */}
-      <div className="mx-[13px] mb-2 flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-[7px]">
+      <div className="mx-3 mb-2 flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-2">
         <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
         <input
           ref={searchRef}
@@ -165,7 +165,7 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
       </div>
 
       {/* 스코프 칩 */}
-      <div className="flex flex-wrap items-center gap-1.5 px-[13px] pb-2">
+      <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2">
         {scopes.map((s) => {
           const on = s.id === scope;
           // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
@@ -175,7 +175,7 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
               type="button"
               onClick={() => setScope(s.id)}
               aria-pressed={on}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-[3px] text-[11px] transition-colors ${
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-editorial-meta transition-colors ${
                 on ? 'border-transparent bg-info/10 font-semibold text-foreground' : 'border-border text-muted-foreground hover:bg-muted'
               }`}
             >
@@ -202,7 +202,7 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
         {loading ? (
           <ul className="space-y-0.5">
             {[0, 1, 2, 3].map((i) => (
-              <li key={i} className="flex items-center gap-2.5 px-2 py-[7px]">
+              <li key={i} className="flex items-center gap-2.5 px-2 py-2">
                 <Skeleton variant="rect" className="size-[30px] shrink-0 rounded-sm" />
                 <div className="min-w-0 flex-1 space-y-1.5">
                   <Skeleton variant="text" className="h-3 w-2/3" />
@@ -259,7 +259,7 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
                       e.preventDefault();
                       onSelect(asset);
                     }}
-                    className={`flex w-full items-center gap-2.5 rounded-sm px-2 py-[7px] text-left transition-colors ${
+                    className={`flex w-full items-center gap-2.5 rounded-sm px-2 py-2 text-left transition-colors ${
                       sel ? 'bg-accent' : 'hover:bg-muted'
                     }`}
                   >
@@ -268,15 +268,15 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
                       <Icon className="size-4" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className={`block truncate text-[12.5px] text-foreground ${sel ? 'font-semibold' : ''}`}>
+                      <span className={`block truncate text-xs text-foreground ${sel ? 'font-semibold' : ''}`}>
                         {asset.name}
                       </span>
-                      <span className="mt-px block text-[10.5px] text-muted-foreground">
+                      <span className="mt-px block text-micro text-muted-foreground">
                         {ext} · {formatFileSize(asset.size_bytes)}
                       </span>
                     </span>
                     <span
-                      className={`flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground ${sel ? 'opacity-100' : 'opacity-0'}`}
+                      className={`flex shrink-0 items-center gap-1 text-micro text-muted-foreground ${sel ? 'opacity-100' : 'opacity-0'}`}
                     >
                       <CornerDownLeft className="size-3" aria-hidden />
                       {t('assetPickerHintAttach')}
@@ -290,18 +290,18 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
       </div>
 
       {/* 푸터 */}
-      <div className="flex gap-3 border-t border-border px-[13px] py-[7px] text-[10.5px] text-muted-foreground">
+      <div className="flex gap-3 border-t border-border px-3 py-2 text-micro text-muted-foreground">
         <span className="inline-flex items-center gap-1">
-          <kbd className="rounded border border-border px-1 text-[10px]">↑</kbd>
-          <kbd className="rounded border border-border px-1 text-[10px]">↓</kbd>
+          <kbd className="rounded border border-border px-1 text-micro">↑</kbd>
+          <kbd className="rounded border border-border px-1 text-micro">↓</kbd>
           {t('assetPickerHintMove')}
         </span>
         <span className="inline-flex items-center gap-1">
-          <kbd className="rounded border border-border px-1 text-[10px]">↵</kbd>
+          <kbd className="rounded border border-border px-1 text-micro">↵</kbd>
           {t('assetPickerHintAttach')}
         </span>
         <span className="inline-flex items-center gap-1">
-          <kbd className="rounded border border-border px-1 text-[10px]">esc</kbd>
+          <kbd className="rounded border border-border px-1 text-micro">esc</kbd>
           {t('assetPickerHintClose')}
         </span>
       </div>

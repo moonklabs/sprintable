@@ -162,7 +162,7 @@ export function FileViewer({ target, onClose }: { target: AttachmentTarget; onCl
       <div className="flex flex-shrink-0 items-center gap-2 border-b border-border px-4 py-2.5">
         <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
         <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{target.label}</span>
-        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{FORMAT_LABEL_LITERAL[format] ?? tChats(FORMAT_LABEL_KEYS[format as Exclude<Format, 'html' | 'pdf'>])}</span>
+        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">{FORMAT_LABEL_LITERAL[format] ?? tChats(FORMAT_LABEL_KEYS[format as Exclude<Format, 'html' | 'pdf'>])}</span>
         <button
           type="button"
           onClick={handleOpenFull}
@@ -211,7 +211,7 @@ export function FileViewer({ target, onClose }: { target: AttachmentTarget; onCl
         {state.kind === 'error' && (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
             <p className="text-sm text-foreground">{tChats('fileLoadFailed')}</p>
-            <p className="w-fit rounded-md bg-destructive-tint px-2 py-1.5 font-mono text-[10.5px] text-foreground">
+            <p className="w-fit rounded-md bg-destructive-tint px-2 py-1.5 font-mono text-micro text-foreground">
               {state.status} {state.message ?? tChats(state.fallbackKey)}
             </p>
             <button
@@ -727,7 +727,7 @@ function PptxBody({ assetId, label }: { assetId: string; label: string }) {
         <p className="text-sm text-foreground">{t('conversionFailed')}</p>
         <p className="text-xs text-muted-foreground">{t('pdfConversionFailedDesc')} {t('downloadToCheck')}</p>
         {failMessage && (
-          <p className="w-fit rounded-md bg-destructive-tint px-2 py-1.5 font-mono text-[10.5px] text-foreground">{failMessage}</p>
+          <p className="w-fit rounded-md bg-destructive-tint px-2 py-1.5 font-mono text-micro text-foreground">{failMessage}</p>
         )}
       </div>
     );

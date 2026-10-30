@@ -163,7 +163,7 @@ function renderInlineMarkdown(text: string): React.ReactNode {
       return <strong key={i} className="font-semibold text-foreground">{part.slice(2, -2)}</strong>;
     }
     if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
-      return <code key={i} className="rounded bg-muted px-1 py-0.5 font-mono text-[13px] text-foreground">{part.slice(1, -1)}</code>;
+      return <code key={i} className="rounded bg-muted px-1 py-0.5 font-mono text-editorial-ui text-foreground">{part.slice(1, -1)}</code>;
     }
     return <span key={i}>{part}</span>;
   });
@@ -556,13 +556,13 @@ function EventPublishActionButton({
           <Send className="h-3.5 w-3.5" aria-hidden />
           {label}
         </Button>
-        <p className="text-[11px] text-muted-foreground">{t('eventActionUnauthorized')}</p>
+        <p className="text-editorial-meta text-muted-foreground">{t('eventActionUnauthorized')}</p>
       </div>
     );
   }
   if (published) {
     return (
-      <p className="flex items-center gap-1 text-[11px] font-medium text-foreground">
+      <p className="flex items-center gap-1 text-editorial-meta font-medium text-foreground">
         <Send className="h-3 w-3" aria-hidden />
         {t('eventActionPublished')}
       </p>
@@ -602,7 +602,7 @@ function EventPublishActionButton({
         {label}
       </Button>
       {error && (
-        <p role="alert" aria-live="assertive" className="text-[11px] text-destructive">
+        <p role="alert" aria-live="assertive" className="text-editorial-meta text-destructive">
           {error}
         </p>
       )}

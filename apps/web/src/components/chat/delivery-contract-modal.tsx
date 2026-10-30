@@ -175,8 +175,8 @@ export function DeliveryContractModal({
                 {/* 유나 design 소견(#3012) — 헤더 Bell/BellOff(conversation.muted_at, 화면 표시만
                     억제)와 이 레벨(notification_preferences, 전달 자체를 결정)은 서로 다른 축이다
                     (channel_router.py가 muted_at을 참조하지 않음, 코드로 확認) — 혼동 방지 문구. */}
-                <p className="mb-1 text-[11px] text-muted-foreground">{t('deliveryContractLevelHint')}</p>
-                <p className="mb-2 text-[11px] text-muted-foreground">
+                <p className="mb-1 text-editorial-meta text-muted-foreground">{t('deliveryContractLevelHint')}</p>
+                <p className="mb-2 text-editorial-meta text-muted-foreground">
                   {hasOverride ? t('deliveryContractLevelHasOverride') : t('deliveryContractLevelDefault')}
                 </p>
                 <div className="flex gap-1.5">
@@ -203,7 +203,7 @@ export function DeliveryContractModal({
                 <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
                   <div className="min-w-0">
                     <p className="text-xs font-medium text-foreground">{t('deliveryContractFreeResponseLabel')}</p>
-                    <p className="mt-0.5 text-[11px] text-muted-foreground">{t('deliveryContractFreeResponseDesc')}</p>
+                    <p className="mt-0.5 text-editorial-meta text-muted-foreground">{t('deliveryContractFreeResponseDesc')}</p>
                   </div>
                   <Switch
                     checked={localFreeResponse}
@@ -216,7 +216,7 @@ export function DeliveryContractModal({
               {/* story #2621 AC③ 부분충족 — 판정 사유(chain-expired 등)는 현재 Cloud Logging에만
                   있어(BE #2603/#2608 실측) 이 UI가 실시간으로 보여줄 수 없다. 조용히 숨기는 대신
                   그 한계 자체를 선언 — #2617 후속(BE가 사유를 조회 가능한 형태로 노출)의 몫. */}
-              <p className="text-[11px] text-muted-foreground">{t('deliveryContractReasonGapNote')}</p>
+              <p className="text-editorial-meta text-muted-foreground">{t('deliveryContractReasonGapNote')}</p>
 
               {error && <p role="alert" aria-live="assertive" className="text-xs text-destructive">{error}</p>}
             </div>

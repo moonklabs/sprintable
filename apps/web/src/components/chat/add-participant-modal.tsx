@@ -136,7 +136,7 @@ export function AddParticipantModal({
                         : 'text-foreground hover:bg-muted'
                     }`}
                   >
-                    <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
+                    <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-muted text-micro font-medium text-muted-foreground">
                       {/* [SID:4286 · 유나 결정 2] 이름이 없으면 날것 «?» 대신 아이콘(에이전트 Bot · 사람 User — 4646 공용 표식). */}
                       {m.name ? firstGraphemes(m.name, 2).toUpperCase() : <UnnamedMemberIcon type={m.type} className="h-3 w-3" aria-hidden />}
                     </div>

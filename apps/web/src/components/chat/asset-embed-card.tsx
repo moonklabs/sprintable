@@ -22,7 +22,7 @@ interface AssetEmbedCardProps {
   entityId: string;
   /** 토큰 라벨(`[name](entity:asset:id)`의 name) — fetch 전/실패 시 폴백 표시명. */
   label: string;
-  /** 내 메시지(brand 버블) 위면 카드 배경을 반투명 화이트로(목업 ②). */
+  /** 내 메시지 위인지 — 부르는 쪽 계약으로 남아 있으나 카드 모양은 가르지 않는다(story 4831: 내 말풍선은 밝은 틴트라 다른 카드와 같은 표면을 쓴다). */
   ownMessage: boolean;
   /**
    * story #2781 — 채팅 컨텍스트(제공됨)에서는 클릭이 `/storage` 이탈 대신 우측 ReadingPanel의
@@ -38,7 +38,7 @@ interface AssetEmbedCardProps {
  * 썸네일(타입 틴트 글리프) + 이름 + 메타 + 외부링크 화살표. 링크 `/storage?asset={id}`.
  * 로딩=스켈레톤·미존재(fetch 실패/404)=graceful(평문 라벨, 링크/화살표 제거).
  */
-export function AssetEmbedCard({ entityId, label, ownMessage, onOpenReadingPanel }: AssetEmbedCardProps) {
+export function AssetEmbedCard({ entityId, label, onOpenReadingPanel }: AssetEmbedCardProps) {
   const t = useTranslations('chats');
   const [asset, setAsset] = useState<Asset | null>(null);
   const [loading, setLoading] = useState(true);
@@ -69,11 +69,12 @@ export function AssetEmbedCard({ entityId, label, ownMessage, onOpenReadingPanel
     };
   }, [entityId]);
 
-  // 내 메시지(brand 버블) 위: 반투명 화이트 카드(목업 .me .embed). 그 외: card 표면.
-  const cardSurface = ownMessage ? 'border-white/20 bg-white/12 hover:bg-white/20' : 'border-border bg-card hover:bg-muted';
-  const nameTone = ownMessage ? 'text-white' : 'text-foreground';
-  const metaTone = ownMessage ? 'text-white/70' : 'text-muted-foreground';
-  const arrowTone = ownMessage ? 'text-white/80' : 'text-muted-foreground';
+  // story 4831: 내 메시지 버블은 밝은 틴트(bg-proof-blue-soft)+어두운 ink(story #2921)인데 옛 코드는 «진한 brand 버블 위 화이트 카드»라 흰 글자 · 흰 반투명을 썼다(라이트에서 안 보임).
+  // 내 메시지 위에서도 다른 카드와 같은 표면(card)을 쓴다 — 이미 대비가 검증된 조합이고, 특수 가지가 없으니 한 곳에서 정한다. `ownMessage`는 부르는 쪽 계약이라 props에 남기되 모양은 가르지 않는다.
+  const cardSurface = 'border-border bg-card hover:bg-muted';
+  const nameTone = 'text-foreground';
+  const metaTone = 'text-muted-foreground';
+  const arrowTone = 'text-muted-foreground';
 
   // ── 로딩: 스켈레톤 카드 ──
   if (loading) {
@@ -91,13 +92,13 @@ export function AssetEmbedCard({ entityId, label, ownMessage, onOpenReadingPanel
   // ── 미존재(graceful): 평문 라벨 + 파일 글리프, 링크/화살표 없음 ──
   if (missing || !asset) {
     return (
-      <div className={`mt-2 flex max-w-[300px] items-center gap-2.5 rounded-md border px-2.5 py-2 ${ownMessage ? 'border-white/20 bg-white/12' : 'border-border bg-muted/40'}`}>
-        <span className={`grid size-[38px] shrink-0 place-items-center rounded-sm ${ownMessage ? 'bg-white/15 text-white' : 'bg-muted text-muted-foreground'}`}>
+      <div className={`mt-2 flex max-w-[300px] items-center gap-2.5 rounded-md border px-2.5 py-2 ${'border-border bg-muted/40'}`}>
+        <span className={`grid size-[38px] shrink-0 place-items-center rounded-sm ${'bg-muted text-muted-foreground'}`}>
           {fileGlyph(null, 'size-[17px]')}
         </span>
         <div className="min-w-0 flex-1">
-          <p className={`truncate text-[12.5px] font-semibold ${nameTone}`}>{label}</p>
-          <p className={`mt-px text-[11px] ${metaTone}`}>{t('assetEmbedMissing')}</p>
+          <p className={`truncate text-xs font-semibold ${nameTone}`}>{label}</p>
+          <p className={`mt-px text-editorial-meta ${metaTone}`}>{t('assetEmbedMissing')}</p>
         </div>
       </div>
     );
@@ -111,12 +112,12 @@ export function AssetEmbedCard({ entityId, label, ownMessage, onOpenReadingPanel
   const inner = (
     <>
       {/* 썸네일 38×38 — 타입 틴트 글리프(서명 썸네일 필드 부재 → 글리프, 추후 affordance). */}
-      <span className={`grid size-[38px] shrink-0 place-items-center overflow-hidden rounded-sm ${ownMessage ? 'bg-white/15 text-white' : tint}`}>
+      <span className={`grid size-[38px] shrink-0 place-items-center overflow-hidden rounded-sm ${tint}`}>
         {fileGlyph(asset.content_type, 'size-[17px]')}
       </span>
       <div className="min-w-0 flex-1">
-        <p className={`truncate text-[12.5px] font-semibold ${nameTone}`}>{asset.name}</p>
-        <p className={`mt-px text-[11px] ${metaTone}`}>{meta}</p>
+        <p className={`truncate text-xs font-semibold ${nameTone}`}>{asset.name}</p>
+        <p className={`mt-px text-editorial-meta ${metaTone}`}>{meta}</p>
       </div>
       <ExternalLink className={`size-[15px] shrink-0 ${arrowTone}`} aria-hidden />
     </>

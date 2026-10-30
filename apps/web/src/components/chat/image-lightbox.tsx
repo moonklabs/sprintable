@@ -149,7 +149,7 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogPortal>
-        <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/90 duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
+        <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-scrim-3 duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
         <DialogPrimitive.Popup data-modal-popup=""
           aria-label={current.alt}
           className="fixed inset-0 z-50 flex flex-col outline-none duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
@@ -158,7 +158,7 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
         >
           {/* Header — 카운터 + 원본 열기 + 닫기 */}
           <div className="flex flex-shrink-0 items-center justify-between px-4 py-3">
-            <span className="text-xs font-medium text-white/70">
+            <span className="text-xs font-medium text-on-scrim/70">
               {hasMultiple ? t('lightboxCounter', { current: index + 1, total: items.length }) : ''}
             </span>
             <div className="flex items-center gap-1">
@@ -169,14 +169,14 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
                   rel="noopener noreferrer"
                   aria-label={t('lightboxOpenOriginal')}
                   title={t('lightboxOpenOriginal')}
-                  className="flex size-9 items-center justify-center rounded-full text-white/80 transition hover:bg-white/10 hover:text-white"
+                  className="flex size-9 items-center justify-center rounded-full text-on-scrim/80 transition hover:bg-on-scrim-fill-1 hover:text-on-scrim"
                 >
                   <ExternalLink className="h-4.5 w-4.5" aria-hidden />
                 </a>
               )}
               <DialogPrimitive.Close
                 aria-label={t('lightboxClose')}
-                className="flex size-9 items-center justify-center rounded-full text-white/80 transition hover:bg-white/10 hover:text-white"
+                className="flex size-9 items-center justify-center rounded-full text-on-scrim/80 transition hover:bg-on-scrim-fill-1 hover:text-on-scrim"
               >
                 <X className="h-5 w-5" aria-hidden />
               </DialogPrimitive.Close>
@@ -190,7 +190,7 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
                 type="button"
                 onClick={goPrev}
                 aria-label={t('lightboxPrev')}
-                className="absolute left-2 top-1/2 z-10 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white transition hover:bg-black/60 lg:left-4"
+                className="absolute left-2 top-1/2 z-10 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-scrim-2 text-on-scrim transition hover:bg-scrim-3 lg:left-4"
               >
                 <ChevronLeft className="h-6 w-6" aria-hidden />
               </button>
@@ -200,23 +200,23 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
                 type="button"
                 onClick={goNext}
                 aria-label={t('lightboxNext')}
-                className="absolute right-2 top-1/2 z-10 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white transition hover:bg-black/60 lg:right-4"
+                className="absolute right-2 top-1/2 z-10 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-scrim-2 text-on-scrim transition hover:bg-scrim-3 lg:right-4"
               >
                 <ChevronRight className="h-6 w-6" aria-hidden />
               </button>
             )}
 
             {signState === 'fetching' && (
-              <Loader2 className="h-8 w-8 animate-spin text-white/60" aria-label={current.alt} />
+              <Loader2 className="h-8 w-8 animate-spin text-on-scrim/60" aria-label={current.alt} />
             )}
             {signState === 'denied' && (
-              <p className="text-sm text-white/70">{t('attachmentDenied')}</p>
+              <p className="text-sm text-on-scrim/70">{t('attachmentDenied')}</p>
             )}
             {signState === 'expired' && (
               <button
                 type="button"
                 onClick={() => void fetchSignedUrl(current.storedUrl)}
-                className="rounded px-3 py-1.5 text-sm text-white/70 hover:text-white"
+                className="rounded px-3 py-1.5 text-sm text-on-scrim/70 hover:text-on-scrim"
               >
                 {t('attachmentReload')}
               </button>
@@ -244,9 +244,9 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
                 {/* 유나 design:changes(2026-08-11) — lightboxZoomHint가 고아 키였다(더블탭이
                     핵심 제스처인데 아무 데도 안 뜸). 확대 상태에 따라 힌트를 바꿔 스와이프가
                     확대 중 비활성화된다는 것도 같이 알린다. 이미지 클릭(더블탭 토글)을 막지
-                    않도록 pointer-events-none. 대비: 텍스트라 AA 4.5 필요 — bg-black/70(밝은
+                    않도록 pointer-events-none. 대비: 텍스트라 AA 4.5 필요 — bg-scrim-3(밝은
                     스크린샷이 주 시나리오라는 유나 지적과 같은 이유로 nav보다 더 진하게). */}
-                <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/70 px-3 py-1 text-[11px] text-white">
+                <div className="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-scrim-3 px-3 py-1 text-editorial-meta text-on-scrim">
                   {zoomed ? t('lightboxZoomedHint') : t('lightboxZoomHint')}
                 </div>
               </div>

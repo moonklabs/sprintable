@@ -823,11 +823,11 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                   <Terminal className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
                   {/* story #92f00dc4(doc exec-command-final-spec-92f00dc4 §①) — 커맨드명
                       mono+primary·인자 힌트 mono+muted(있을 때만)·설명은 우측 정렬. */}
-                  <span className="font-mono text-[12.5px] font-semibold text-primary">/{cmd.name}</span>
+                  <span className="font-mono text-xs font-semibold text-primary">/{cmd.name}</span>
                   {cmd.argHintKey ? (
-                    <span className="shrink-0 whitespace-nowrap font-mono text-[11.5px] text-muted-foreground">{t(cmd.argHintKey)}</span>
+                    <span className="shrink-0 whitespace-nowrap font-mono text-editorial-meta text-muted-foreground">{t(cmd.argHintKey)}</span>
                   ) : null}
-                  <span className="ml-auto truncate pl-2 text-[11.5px] text-foreground">{t(cmd.descKey)}</span>
+                  <span className="ml-auto truncate pl-2 text-editorial-meta text-foreground">{t(cmd.descKey)}</span>
                 </button>
               </li>
             ))}
@@ -879,7 +879,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
               return (
               <li key={`${entity.entity_type}:${entity.entity_id}`}>
                 {isNewGroup && (
-                  <div className="sticky top-0 bg-popover px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <div className="sticky top-0 bg-popover px-3 pb-1 pt-2 text-editorial-meta font-semibold uppercase tracking-wide text-muted-foreground">
                     {domainLabels.entityTypeLabel(entity.entity_type) ?? entityTypeLabel(entity.entity_type)}
                   </div>
                 )}

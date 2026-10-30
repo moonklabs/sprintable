@@ -127,7 +127,7 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
           aria-hidden="true"
           tabIndex={-1}
           onClick={toggleManualExpand}
-          className="fixed inset-0 z-30 hidden bg-black/20 lg:block xl:hidden"
+          className="fixed inset-0 z-30 hidden bg-scrim-1 lg:block xl:hidden"
         />
       )}
 
