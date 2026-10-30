@@ -27,6 +27,11 @@ ALLOWED = {
     "backend/tests/test_4825_local_bootstrap_not_hosted.py",
     "backend/tests/test_4825_local_bootstrap_realdb.py",
     "deploy/vm/bin/render_env.py",
+    # story 4824's web side: SOURCE code (and its test) that reads the switch the app sets for its own server — not a deployment file; a hosted
+    # web deployment never sets it and keeps the build-time rewrite
+    "apps/web/src/lib/embedded-api-origin.ts",
+    "apps/web/src/lib/embedded-api-origin.test.ts",
+    "apps/web/src/proxy.test.ts",
 }
 _SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".next", "dist", "build", ".pytest_cache", ".mypy_cache"}
 
