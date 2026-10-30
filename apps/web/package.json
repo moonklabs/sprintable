@@ -86,6 +86,7 @@
     "e2e": "playwright test",
     "e2e:layout": "playwright test --config playwright.layout.config.ts",
     "e2e:ga": "playwright test --config playwright.ga.config.ts",
+    "e2e:ga-off": "GA_MODE=off playwright test --config playwright.ga-off.config.ts && GA_MODE=on playwright test --config playwright.ga-off.config.ts",
     "e2e:contrast": "playwright test contrast-guard.spec.ts",
     "e2e:card-surface": "playwright test card-surface-guard.spec.ts",
     "e2e:v3-narrow-width": "playwright test v3-narrow-width-overflow.spec.ts",
