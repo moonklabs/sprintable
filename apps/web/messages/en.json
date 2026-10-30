@@ -4038,6 +4038,8 @@
     "filter_gate_pending_approval": "Approval request",
     "filter_agent_permission_request": "Waiting for permission",
     "filter_agent_turn_ended": "Waiting for work",
+    "filter_agent_limit_paused": "Paused at its usage limit",
+    "filter_agent_limit_lifted": "Working again",
     "filter_generic": "Notification",
     "revoke_agent": "Revoke Access",
     "revoke_agent_confirm": "Deactivate this agent?",

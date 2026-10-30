@@ -46,6 +46,8 @@ const INBOX_LABEL_KEYS: Record<string, string> = {
   'gate.pending_approval': 'filter_gate_pending_approval',
   'agent.permission_request': 'filter_agent_permission_request', // story #4533 — «권한 대기»
   'agent.turn_ended': 'filter_agent_turn_ended', // story #4534 — «다음 일 기다림»
+  'agent.limit_paused': 'filter_agent_limit_paused', // story #4833 — «한도로 쉬는 중»
+  'agent.limit_lifted': 'filter_agent_limit_lifted', // story #4833 — «다시 일하는 중»
 };
 
 export function getInboxNotificationLabel(
@@ -141,6 +143,13 @@ export function getDispatchedHeadline(
     // story #4534 (명세 B-3 푸시) — «{에이전트} · 다음 일 기다림» (the agent first, as the push title); never «마쳤어요»
     const agent = typeof payload?.['agent_name'] === 'string' ? payload['agent_name'].trim() : '';
     const label = t('filter_agent_turn_ended');
+    return agent ? `${agent} · ${label}` : label;
+  }
+  if (inner === 'agent.limit_paused' || inner === 'agent.limit_lifted') {
+    // story #4833 (4814 실측) — the bell read these as the generic «새 알림» (no line in the table, nothing to open). «{에이전트} · 한도로 쉬는 중» /
+    // «{에이전트} · 다시 일하는 중»: the name only from `payload.agent_name`, the server's title is not read (as above)
+    const agent = typeof payload?.['agent_name'] === 'string' ? payload['agent_name'].trim() : '';
+    const label = t(inner === 'agent.limit_paused' ? 'filter_agent_limit_paused' : 'filter_agent_limit_lifted');
     return agent ? `${agent} · ${label}` : label;
   }
   if (inner === 'agent.permission_request') {
