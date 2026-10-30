@@ -33,6 +33,8 @@ export async function answerOnPhone(id: string, decision: 'allow' | 'deny', deps
       case 'biometric_required': return { kind: 'biometric_required' };
       case 'no_screen_lock': return { kind: 'no_screen_lock' };
       case 'key_invalidated': return { kind: 'key_invalidated' };
+      // [SID:4834] the shell holds no key at all (never paired · or the OS dropped it): «not paired», not «your lock settings changed · pair again»
+      case 'no_key': return { kind: 'not_paired' };
       // PO 07:47Z ①: a key the server does not know (its registration was removed · or made again before the shell stopped making
       // keys on the signing path) — pair again, never «press again»; its own line, since the lock may not have changed (Yuna 07:58Z)
       case 'not_registered': return { kind: 'not_registered' };

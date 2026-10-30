@@ -190,6 +190,7 @@ const SHELL_REFUSALS: Record<string, PressOutcome['kind']> = {
   biometric_required: 'biometric_required',
   no_screen_lock: 'no_screen_lock',
   key_invalidated: 'key_invalidated',
+  no_key: 'not_paired', // [SID:4834] the shell holds no key at all (never paired · or the OS dropped it): «not paired», not «your lock settings changed · pair again»
   not_registered: 'not_registered',
   signed_out: 'signed_out',
   remote_control_off: 'remote_off',
