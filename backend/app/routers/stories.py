@@ -137,7 +137,8 @@ def _parse_backlog_cursor(cursor: str | None) -> tuple[datetime, uuid.UUID | Non
     if not at_part:
         raise HTTPException(status_code=400, detail="invalid cursor: expected '<ISO 8601 datetime>|<story id>'")
     at = _parse_stories_cursor(at_part)
-    assert at is not None  # at_part is not empty → parsed or 400
+    if at is None:  # unreachable for a non-empty at_part (parsed or 400) — kept as an explicit refusal, never an `assert`
+        raise HTTPException(status_code=400, detail="invalid cursor: expected '<ISO 8601 datetime>|<story id>'")
     if not id_part:
         return at, None
     try:
