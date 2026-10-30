@@ -39,6 +39,9 @@ router = APIRouter(prefix="/api/v2/auth", tags=["auth", "local"])
 #: the one owner account of an embedded install (a reserved, non-routable address: nothing can be mailed to it and nobody can register it by accident)
 LOCAL_OWNER_EMAIL = "owner@local.sprintable"
 _LOOPBACK = {"127.0.0.1", "::1"}
+#: a caller that came through a proxy carries one of these; the app's own main process, talking straight to the loopback port, never does. If
+#: the server were ever fronted by a reverse proxy on this machine every client would look like loopback, so these headers close that route.
+_FORWARDED_HEADERS = ("forwarded", "x-forwarded-for", "x-real-ip")
 _LOCK_KEY = "sprintable:local-bootstrap"
 
 
@@ -75,6 +78,9 @@ async def local_bootstrap(
     if host not in _LOOPBACK:
         logger.warning("local-bootstrap refused: caller is not loopback")
         return _refuse()
+    if any(h in request.headers for h in _FORWARDED_HEADERS):
+        logger.warning("local-bootstrap refused: the call came through a proxy")
+        return _refuse()
     expected = settings.local_bootstrap_secret.encode()
     provided = (x_local_bootstrap_secret or "").encode()
     if not hmac.compare_digest(provided, expected):
@@ -84,7 +90,6 @@ async def local_bootstrap(
     # lazy imports: the auth router is a large module; keep this one importable on its own and avoid an import cycle at app start
     from app.models.project import OrgMember, Project
     from app.routers.auth import (
-        _get_user_by_email,
         _ok,
         _persist_resolved_context,
         _sign_in_session_context,
@@ -99,7 +104,13 @@ async def local_bootstrap(
     await session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"), {"k": _LOCK_KEY})
 
     now = datetime.now(timezone.utc)
-    user = await _get_user_by_email(session, LOCAL_OWNER_EMAIL)
+    # any state of the row: a deactivated or purged one must not make the insert below fail with a unique-key error (a 500) — it is refused instead
+    user = (await session.execute(select(User).where(User.email == LOCAL_OWNER_EMAIL))).scalar_one_or_none()
+    if user is not None and (not user.is_active or user.deleted_at is not None or user.hashed_password or user.totp_enabled):
+        # only the account THIS route made is adopted: it has no password and no second factor. Anything else under this address (a sign-up that
+        # got there first, a deactivated account) is not the install's owner, and this route must never hand out a session for it.
+        logger.warning("local-bootstrap refused: the reserved owner address is not this install's owner account")
+        return _refuse()
     if user is None:
         user = User(
             email=LOCAL_OWNER_EMAIL,
@@ -113,11 +124,14 @@ async def local_bootstrap(
         session.add(user)
         await session.flush()
 
+    # the same per-person lock every first-organization path takes, held BEFORE the look: a setup or invite flow that creates this person's first
+    # organization while we wait is seen by the look below instead of being doubled
+    await lock_first_org_path(session, user.id)
     org_id = (await session.execute(
-        select(OrgMember.org_id).where(OrgMember.user_id == user.id, OrgMember.deleted_at.is_(None)).order_by(OrgMember.created_at.asc()).limit(1)
+        select(OrgMember.org_id).where(OrgMember.user_id == user.id, OrgMember.role == "owner", OrgMember.deleted_at.is_(None))
+        .order_by(OrgMember.created_at.asc()).limit(1)
     )).scalar_one_or_none()
     if org_id is None:
-        await lock_first_org_path(session, user.id)  # the same per-person lock every first-organization path takes
         # the app sends a localized name; the server keeps no Korean user strings (story #3779), so its own default is English
         org = await create_org_with_owner(
             session, name=_clean(body.org_name, "My workspace"), slug=None, user_id=str(user.id), owner_member_id=None,

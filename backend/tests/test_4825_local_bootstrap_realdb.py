@@ -249,6 +249,79 @@ async def test_07b_a_miswired_mount_with_the_switch_off_still_refuses(monkeypatc
     assert await _counts() == (0, 0, 0, 0)
 
 
+async def test_10_an_account_that_is_not_the_one_this_route_made_is_never_given_a_session(embedded):
+    """the reserved address under a password, a second factor, a deactivated or a purged account: refused, nothing written, no session"""
+    async with _client(embedded) as c:
+        assert (await c.post(URL, headers=_h())).status_code == 200
+        base = await _counts()
+        n_tokens = (await _sql(f"SELECT count(*) FROM refresh_tokens WHERE user_id = (SELECT id FROM users WHERE email = '{OWNER_EMAIL}')", fetch="one"))[0]
+        for bad in (
+            "hashed_password = '$2b$12$notours'",
+            "totp_enabled = true",
+            "is_active = false",
+            "is_active = false, deleted_at = now()",
+        ):
+            await _sql(f"UPDATE users SET {bad} WHERE email = '{OWNER_EMAIL}'")
+            r = await c.post(URL, headers=_h())
+            assert r.status_code == 403, (bad, r.status_code, r.text)
+            assert not (r.json().get("data") or {}).get("access_token")
+            assert await _counts() == base
+            assert (await _sql(f"SELECT count(*) FROM refresh_tokens WHERE user_id = (SELECT id FROM users WHERE email = '{OWNER_EMAIL}')", fetch="one"))[0] == n_tokens
+            await _sql(f"UPDATE users SET hashed_password = '', totp_enabled = false, is_active = true, deleted_at = NULL WHERE email = '{OWNER_EMAIL}'")
+        assert (await c.post(URL, headers=_h())).status_code == 200  # restored, and it is the owner again
+
+
+async def test_11_a_call_that_came_through_a_proxy_is_refused(embedded):
+    async with _client(embedded) as c:
+        for hdr in ({"X-Forwarded-For": "203.0.113.9"}, {"Forwarded": "for=203.0.113.9"}, {"X-Real-IP": "203.0.113.9"}):
+            r = await c.post(URL, headers={**_h(), **hdr})
+            assert r.status_code == 403, (hdr, r.text)
+        assert await _counts() == (0, 0, 0, 0)
+        assert (await c.post(URL, headers=_h())).status_code == 200
+
+
+async def test_12_the_session_carries_the_claims_a_password_sign_in_would(embedded):
+    from app.core.security import decode_jwt
+
+    async with _client(embedded) as c:
+        tokens = (await c.post(URL, headers=_h())).json()["data"]
+    uid = (await _sql(f"SELECT id FROM users WHERE email = '{OWNER_EMAIL}'", fetch="one"))[0]
+    org_id = (await _sql(f"SELECT org_id FROM org_members WHERE user_id = '{uid}'", fetch="one"))[0]
+    acc, ref = decode_jwt(tokens["access_token"]), decode_jwt(tokens["refresh_token"])
+    assert acc["sub"] == str(uid) and ref["sub"] == str(uid) and acc["email"] == OWNER_EMAIL
+    assert isinstance(acc["session_started_at"], int) and acc["session_started_at"] == ref["session_started_at"]
+    assert str((acc.get("app_metadata") or {}).get("org_id")) == str(org_id), acc
+    row = await _sql(f"SELECT token_hash, org_id, family_id FROM refresh_tokens WHERE user_id = '{uid}'", fetch="one")
+    assert row.token_hash and row.token_hash != tokens["refresh_token"]  # stored hashed, never raw
+    assert str(row.org_id) == str(org_id) and row.family_id is not None
+    audit = (await _sql(f"SELECT detail FROM login_audit_logs WHERE email = '{OWNER_EMAIL}'", fetch="all"))
+    assert [a.detail for a in audit] == ["local_bootstrap"]
+
+
+async def test_13_the_first_project_is_reachable_through_the_projects_api(embedded):
+    async with _client(embedded) as c:
+        tokens = (await c.post(URL, headers=_h(), json={"project_name": "Reach me"})).json()["data"]
+    from httpx import ASGITransport, AsyncClient
+
+    hdr = {"Authorization": f"Bearer {tokens['access_token']}"}
+    async with AsyncClient(transport=ASGITransport(app=real_app, raise_app_exceptions=False), base_url="http://test") as rc:
+        r = await rc.get("/api/v2/projects", headers=hdr)
+    assert r.status_code == 200, r.text
+    assert "Reach me" in r.text
+
+
+async def test_14_only_an_organization_the_account_owns_counts_as_its_own(embedded):
+    """the account is a plain member of some organization and owns none: it gets an organization of its own instead of borrowing that one"""
+    async with _client(embedded) as c:
+        assert (await c.post(URL, headers=_h())).status_code == 200
+        await _sql(f"UPDATE org_members SET role = 'member' WHERE user_id = (SELECT id FROM users WHERE email = '{OWNER_EMAIL}')")
+        assert (await c.post(URL, headers=_h())).status_code == 200
+    owned = await _sql(
+        f"SELECT count(*) FROM org_members WHERE role = 'owner' AND user_id = (SELECT id FROM users WHERE email = '{OWNER_EMAIL}')", fetch="one",
+    )
+    assert owned[0] == 1
+
+
 async def test_08_the_real_app_has_no_such_route_unless_embedded():
     """the app main.py builds in this process (no SPRINTABLE_EMBEDDED in the test environment) must not serve the path"""
     if os.environ.get("SPRINTABLE_EMBEDDED"):
