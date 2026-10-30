@@ -129,6 +129,8 @@ async def test_06b_the_row_names_the_person_s_own_dm_with_the_agent_and_never_so
         someone_elses = await _dm(plain_tm, agent)  # another person's DM with the same agent
         after = _row((await _list(c)).json(), agent)
         assert after["conversation_id"] == before != someone_elses, "another person's conversation must not be offered"
+        three = await _dm(OWNER_TM, agent, plain_tm)  # a room typed `dm` with a third person in it is not «the conversation with that agent»
+        assert _row((await _list(c)).json(), agent)["conversation_id"] == before != three
         own = await _dm(OWNER_TM, agent)  # the person's own, newer than any before
         row = _row((await _list(c)).json(), agent)
         assert row["conversation_id"] == own
