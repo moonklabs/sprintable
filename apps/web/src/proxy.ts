@@ -849,12 +849,17 @@ function captureSignupAttribution(request: NextRequest, response: NextResponse):
  */
 // story 4824 — inside the desktop app's own server `/api/v2/*` is forwarded here, at request time, to the backend port the app chose at launch (see lib/embedded-api-origin.ts);
 // every other server keeps the build-time rewrite in next.config.ts. The proxy below runs in full first — only the destination of «carry on» changes.
+// the extensions the matcher below has always left out (kept in step with it by proxy.test.ts) — an `/api/v2/**` path ending in one is answered with a bare
+// «carry on», as when the proxy did not run for it, instead of the session / auth work (the backend serves those files itself)
+const STATIC_ASSET_EXTENSION = /\.(?:svg|png|jpg|jpeg|gif|webp|ico|webmanifest|woff2?|ttf|otf|eot|mp3|mp4|webm|ogg|wav|map|pdf)$/;
+
 export async function proxy(request: NextRequest) {
   // story 4825 — first of all: inside the app's own server a foreign Host name (a DNS-rebinding page) is refused before anything else runs
   const foreignHost = embeddedHostRefusal(request);
   if (foreignHost) return foreignHost;
-  const response = await proxyWithTiming(request);
-  const target = embeddedApiTarget(request.nextUrl.pathname, request.nextUrl.search);
+  const { pathname, search } = request.nextUrl;
+  const response = pathname.startsWith('/api/v2/') && STATIC_ASSET_EXTENSION.test(pathname) ? NextResponse.next() : await proxyWithTiming(request);
+  const target = embeddedApiTarget(pathname, search);
   return target ? carryOnToTarget(response, target) : response;
 }
 
@@ -1071,5 +1076,9 @@ export const config = {
   // 그런 라우트의 인증을 통째로 우회시키는 자리다.
   matcher: [
     '/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|webmanifest|woff2?|ttf|otf|eot|mp3|mp4|webm|ogg|wav|map|pdf)$).*)',
+    // story 4825 — the entry above leaves out any path ENDING in a static-asset extension, which for `/api/v2/**/name.png` (backend file routes) means the
+    // proxy never ran and the app's own server could not check the Host of, or re-address, such a request. This entry brings those paths in; proxy()
+    // answers them with the same «carry on» as before (STATIC_ASSET_EXTENSION) so every other deployment sees no difference.
+    '/api/v2/:path*',
   ],
 };

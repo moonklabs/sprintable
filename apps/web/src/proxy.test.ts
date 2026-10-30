@@ -124,6 +124,43 @@ describe('story 4824 — proxy inside the desktop app\'s own server (SPRINTABLE_
     expect(odd.status).not.toBe(400);
   });
 
+  // codex round 7: the matcher leaves out paths ending in a static-asset extension, so `/api/v2/channel/files/x.png` never reached the Host check
+  it('a backend file path ending in an asset extension is Host-checked and forwarded to the live backend like any other /api/v2 path', async () => {
+    process.env['SPRINTABLE_EMBEDDED'] = '1';
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://127.0.0.1:41234';
+    for (const file of ['x.png', 'report.pdf', 'a.b.webp', 'doc.map']) {
+      const foreign = await middleware(makeRequestWithHeaders(`/api/v2/channel/files/${file}`, { host: 'evil.example:3000', 'x-forwarded-host': '127.0.0.1:3000' }));
+      expect(foreign.status, file).toBe(400);
+      expect(foreign.headers.get('x-middleware-rewrite')).toBeNull();
+      const mine = await middleware(makeRequestWithHeaders(`/api/v2/channel/files/${file}`, LOOPBACK));
+      expect(mine.status, file).not.toBe(400);
+      expect(mine.headers.get('x-middleware-rewrite')).toBe(`http://127.0.0.1:41234/api/v2/channel/files/${file}`);
+    }
+  });
+
+  it('every other deployment: such a path is a bare «carry on» exactly as when the proxy did not run for it (no login redirect, no session work)', async () => {
+    delete process.env['SPRINTABLE_EMBEDDED'];
+    mockFetch.mockClear();
+    // a refresh cookie and no access token: the full proxy would go to the backend to refresh the session — the bare «carry on» must not
+    const response = await middleware(makeRequestWithHeaders('/api/v2/channel/files/x.png', { host: 'app.example.com' }, { sp_rt: 'a-refresh-token' }));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-middleware-next')).toBe('1');
+    expect(response.headers.get('x-middleware-rewrite')).toBeNull();
+    expect(response.headers.get('location')).toBeNull();
+    expect(mockFetch).not.toHaveBeenCalled(); // no refresh round trip to the backend
+  });
+
+  it('the matcher brings /api/v2 in, and the extension list in proxy.ts is the one the first matcher entry leaves out', async () => {
+    const { config } = await import('./proxy');
+    expect(config.matcher).toContain('/api/v2/:path*');
+    const first = config.matcher.find((m: string) => m.includes('_next/static')) as string;
+    const listed = (first.match(/\.\*\\\.\(\?:([^)]*)\)\$/) ?? [])[1];
+    const source = (await import('node:fs')).readFileSync(new URL('./proxy.ts', import.meta.url), 'utf-8');
+    const inCode = (source.match(/STATIC_ASSET_EXTENSION = \/\\\.\(\?:([^)]*)\)\$\//) ?? [])[1];
+    expect(listed).toBeTruthy();
+    expect(inCode).toBe(listed);
+  });
+
   it('without the switch (any other deployment) the Host is not looked at', async () => {
     delete process.env['SPRINTABLE_EMBEDDED'];
     const response = await middleware(makeRequestWithHeaders('/login', { host: 'app.example.com' }));
