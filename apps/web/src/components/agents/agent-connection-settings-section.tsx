@@ -118,7 +118,7 @@ export function AgentConnectionSettingsSection({ agentId, freshApiKey }: AgentCo
       </SectionCardHeader>
       <SectionCardBody className="space-y-3">
         {transport && (
-          <div className="flex gap-0 rounded-md border border-border bg-muted p-[3px] max-w-xs">
+          <div className="flex gap-0 rounded-md border border-border bg-muted p-1 max-w-xs">
             <button
               type="button"
               onClick={() => handleSwitchTransport('http')}

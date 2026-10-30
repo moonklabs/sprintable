@@ -302,7 +302,7 @@ export function AgentRunsList() {
                         {run.memo_id && (
                           <Link
                             href={getTriggerMemoHref(run.memo_id)}
-                            className="inline-flex items-center rounded-full border border-border bg-muted/30 px-2.5 py-1 text-[11px] font-medium text-foreground transition hover:border-primary/25 hover:text-primary"
+                            className="inline-flex items-center rounded-full border border-border bg-muted/30 px-2.5 py-1 text-editorial-meta font-medium text-foreground transition hover:border-primary/25 hover:text-primary"
                           >
                             {t('openMemo')}
                           </Link>

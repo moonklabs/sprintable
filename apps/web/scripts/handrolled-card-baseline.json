@@ -67,7 +67,7 @@
     "app/(authenticated)/organization/workforce/api-keys/page.tsx::h-32 animate-pulse rounded-lg border border-border bg-muted/30",
     "app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx::flex cursor-not-allowed flex-col items-start gap-1 rounded-xl border border-border bg-muted/40 p-2.5 text-left opacity-55",
     "app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx::flex items-start gap-2 rounded-lg border border-border bg-card p-2.5",
-    "app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx::flex w-fit rounded-lg border border-border bg-muted p-[3px]",
+    "app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx::flex w-fit rounded-lg border border-border bg-muted p-1",
     "app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx::space-y-2 rounded-xl border border-border bg-muted/20 p-3",
     "app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx::space-y-2 rounded-xl border border-border bg-muted/30 p-3",
     "app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx::space-y-3 rounded-xl border border-border bg-muted/20 p-3",

@@ -214,11 +214,11 @@ function ToolCallRowItem({
         </div>
       </div>
       {expanded && hasDetail && (
-        <div className="mt-2 space-y-2 rounded-md border border-white/8 bg-white/4 p-3">
+        <div className="mt-2 space-y-2 rounded-md border border-overlay-line-1 bg-overlay-fill-1 p-3">
           {row.input_summary != null && (
             <div>
               <p className="text-xs font-medium text-foreground">{t('toolCallsInputSummaryLabel')}</p>
-              <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] text-muted-foreground">
+              <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-editorial-meta text-muted-foreground">
                 {JSON.stringify(row.input_summary, null, 2)}
               </pre>
             </div>
@@ -232,7 +232,7 @@ function ToolCallRowItem({
               <p className="text-xs font-medium text-destructive">{t('toolCallsErrorSummary')}</p>
               <details className="mt-1 text-xs text-muted-foreground">
                 <summary className="cursor-pointer">{t('toolCallsErrorToggle')}</summary>
-                <p className="mt-1 whitespace-pre-wrap break-all font-mono text-[11px]">{row.error}</p>
+                <p className="mt-1 whitespace-pre-wrap break-all font-mono text-editorial-meta">{row.error}</p>
               </details>
             </div>
           )}

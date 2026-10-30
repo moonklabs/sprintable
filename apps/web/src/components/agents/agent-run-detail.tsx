@@ -209,7 +209,7 @@ export function AgentRunDetail({
             </div>
 
             {Array.isArray(run.billing_notes) && run.billing_notes.length > 0 && (
-              <div className="mb-4 rounded-xl border border-white/8 bg-white/4 px-4 py-3">
+              <div className="mb-4 rounded-xl border border-overlay-line-1 bg-overlay-fill-1 px-4 py-3">
                 <p className="text-sm font-medium text-foreground">{t('billingNotesLabel')}</p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {run.billing_notes.map((note) => (
@@ -243,7 +243,7 @@ export function AgentRunDetail({
 
             {/* Result summary */}
             {run.result_summary && (
-              <div className="mb-4 rounded-xl border border-white/8 bg-white/4 px-4 py-3">
+              <div className="mb-4 rounded-xl border border-overlay-line-1 bg-overlay-fill-1 px-4 py-3">
                 <p className="text-sm font-medium text-foreground">{t('resultSummary')}</p>
                 <p className="mt-1 text-sm text-muted-foreground">{run.result_summary}</p>
               </div>
@@ -265,7 +265,7 @@ export function AgentRunDetail({
 
 function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-white/8 bg-white/4 px-4 py-3">
+    <div className="rounded-xl border border-overlay-line-1 bg-overlay-fill-1 px-4 py-3">
       <div className="flex items-center gap-2 text-muted-foreground">
         {icon}
         <span className="text-xs">{label}</span>
@@ -277,7 +277,7 @@ function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string
 
 function MetaCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-white/8 bg-white/3 px-4 py-3">
+    <div className="rounded-xl border border-overlay-line-1 bg-overlay-fill-1 px-4 py-3">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="mt-1 break-all text-sm font-medium text-foreground">{value}</p>
     </div>
