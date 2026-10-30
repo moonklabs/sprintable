@@ -296,20 +296,24 @@ async def test_10c_register_refuses_the_reserved_owner_address_only_on_an_embedd
             await _wipe_owner()
 
 
-async def test_15_losing_the_first_project_to_a_concurrent_creator_is_not_a_500(embedded, monkeypatch):
-    from sqlalchemy.exc import IntegrityError
-
-    from app.services import org_project_create
-
-    async def _collides(*a, **k):
-        raise IntegrityError("INSERT INTO projects", {}, Exception("duplicate key (org_id, slug)"))
-
-    monkeypatch.setattr(org_project_create, "create_project_with_member", _collides)
+async def test_15_a_deleted_first_project_is_not_made_again_on_the_next_launch(embedded):
+    """the project belongs to the organization the first call made; a person who deletes their projects does not get one back (nor a slug collision
+    with the deleted row — an error) on every launch"""
     async with _client(embedded) as c:
-        r = await c.post(URL, headers=_h())
-    assert r.status_code == 200 and r.json()["data"]["access_token"], r.text
-    assert await _counts() == (1, 1, 0, 1)  # the owner and the organization stand; the project is for the next call to find or make
-    monkeypatch.undo()
+        assert (await c.post(URL, headers=_h(), json={"project_name": "Mine"})).status_code == 200
+        await _sql(
+            f"""UPDATE projects SET deleted_at = now() WHERE org_id IN (SELECT om.org_id FROM org_members om JOIN users u ON u.id = om.user_id
+                  WHERE u.email = '{OWNER_EMAIL}')"""
+        )
+        for _ in range(2):
+            r = await c.post(URL, headers=_h(), json={"project_name": "Mine"})
+            assert r.status_code == 200 and r.json()["data"]["access_token"], r.text
+    total = await _sql(
+        f"""SELECT count(*) FROM projects p WHERE p.org_id IN (SELECT om.org_id FROM org_members om JOIN users u ON u.id = om.user_id
+              WHERE u.email = '{OWNER_EMAIL}')""",
+        fetch="one",
+    )
+    assert total[0] == 1  # the deleted one, and nothing new
 
 
 async def test_16_a_membership_whose_organization_is_gone_is_not_my_organization(embedded):
