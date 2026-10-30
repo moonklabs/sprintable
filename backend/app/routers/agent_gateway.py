@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import random
 import re
@@ -107,7 +108,19 @@ _AGENT_SSE_LIFESPAN_JITTER_SEC: float = 30.0  # herd 방지(#2095 지터와 동�
 # sender saw «type this sentence in the terminal» for an agent that was receiving). The cleanup of a lifespan end runs this many seconds later, by a task of
 # its own: a connection that came back meets «another live session exists» and nothing is demoted; one that did not is cleaned as before. Keep it well under
 # `_SESSION_FRESH_TTL` minus one tick (the old row must still look fresh while it waits).
-_LIFESPAN_END_GRACE_SEC: float = float(os.getenv("AGENT_SSE_LIFESPAN_END_GRACE_SEC", "20"))
+def _lifespan_end_grace_from_env(raw: "str | None") -> float:
+    """The grace in seconds from `AGENT_SSE_LIFESPAN_END_GRACE_SEC`: unset/empty → 20; `0` = no grace; a value that is not a finite number ≥ 0 (a typo · `nan` · `inf` ·
+    a negative) falls back to 20 instead of failing the import of the whole router or waiting for ever."""
+    if raw is None or not raw.strip():
+        return 20.0
+    try:
+        v = float(raw)
+    except ValueError:
+        return 20.0
+    return v if math.isfinite(v) and v >= 0 else 20.0
+
+
+_LIFESPAN_END_GRACE_SEC: float = _lifespan_end_grace_from_env(os.getenv("AGENT_SSE_LIFESPAN_END_GRACE_SEC"))
 # `0` (or less) = no grace: a lifespan end is cleaned inside the stream's own end exactly as before (no task of its own). The test suite sets 0 for every test
 # (tests/conftest.py) — a task still waiting when a test's event loop closes would use the shared pool's connection on a closing loop and hand the next test
 # («Event loop is closed» · «attached to a different loop»); only the tests of the grace itself set a positive value and see their task to its end.
@@ -1174,23 +1187,33 @@ async def agent_stream(
                         # story #4834: the same cleanup, a moment later — a task of its own (the stream's end must not wait for it: the client reconnects on the
                         # stream's end, and a longer wait there would lengthen the very gap this avoids)
                         async def _cleanup_after_grace() -> None:
+                            # the wait may be cut at any time (the shutdown drain cancels this task FIRST) — whichever way it ends, the cleanup runs, and once it has begun
+                            # a further cancel cannot cut it half-way: it is its own task, shielded (a cut query would leave the row and the online key behind)
+                            was_cut = False
                             try:
+                                await asyncio.sleep(_LIFESPAN_END_GRACE_SEC)
+                            except asyncio.CancelledError:
+                                was_cut = True  # no reconnect can reach this instance any more — clean up NOW, then let the cancel go on
+
+                            async def _cleanup() -> None:
                                 try:
-                                    await asyncio.sleep(_LIFESPAN_END_GRACE_SEC)
-                                except asyncio.CancelledError:
-                                    # the shutdown drain (`pg_pubsub.drain_background_tasks`) cut the wait: no reconnect can reach this instance any more — clean up NOW
-                                    # (no zombie row · no stale online key), then let the cancel go on. The drain awaits the task, so this finishes before the engine is disposed.
                                     await _mark_agent_disconnected(
                                         agent_id, session_id, org_id_str, heartbeat_baseline=_heartbeat_baseline,
                                     )
-                                    raise
-                                await _mark_agent_disconnected(
-                                    agent_id, session_id, org_id_str, heartbeat_baseline=_heartbeat_baseline,
-                                )
-                            except asyncio.CancelledError:
-                                raise
-                            except Exception:  # noqa: BLE001 — a cleanup nobody awaits only logs
-                                logger.warning("agent_stream lifespan-end cleanup failed agent=%s", agent_id_str, exc_info=True)
+                                except Exception:  # noqa: BLE001 — a cleanup nobody awaits only logs
+                                    logger.warning("agent_stream lifespan-end cleanup failed agent=%s", agent_id_str, exc_info=True)
+
+                            inner = asyncio.ensure_future(_cleanup())
+                            while True:
+                                try:
+                                    await asyncio.shield(inner)
+                                    break
+                                except asyncio.CancelledError:
+                                    was_cut = True
+                                    if inner.done():
+                                        break  # (cancelled again while we waited: the cleanup itself is not cut)
+                            if was_cut:
+                                raise asyncio.CancelledError()
 
                         from app.services.pg_pubsub import fire_and_forget as _ff
                         if _ff(_cleanup_after_grace(), cancel_first=True) is None:  # no task could be made: do it now, as before

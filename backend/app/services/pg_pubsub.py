@@ -66,17 +66,18 @@ def fire_and_forget(coro: "Coroutine[Any, Any, Any]", *, cancel_first: bool = Fa
     return task
 
 
-async def cancel_first_tasks() -> None:
-    """story #4834 — cancel (and wait for) this loop's `cancel_first` tasks: the ones that wait on purpose and clean up when cut (the gateway's lifespan-end grace).
-    One device for production and tests: `drain_background_tasks` (shutdown) calls it before it waits for anything else, so the 5 s budget is spent on work that
-    can finish, not on a 20 s sleep; the test suite's end-of-test hooks (tests/conftest.py) call it inside the test's own loop, so no such task outlives its loop."""
+async def cancel_first_tasks(timeout: "float | None" = None) -> None:
+    """story #4834 — cancel (and wait for, at most `timeout` seconds when given) this loop's `cancel_first` tasks: the ones that wait on purpose and clean up when cut
+    (the gateway's lifespan-end grace). One device for production and tests: `drain_background_tasks` (shutdown) calls it before it waits for anything else, so
+    the 5 s budget is spent on work that can finish, not on a 20 s sleep; the test suite's end-of-test hooks (tests/conftest.py) call it inside the test's own loop
+    (no `timeout`: they wait for the cleanup), so no such task outlives its loop."""
     loop = asyncio.get_running_loop()
     mine = [t for t in _cancel_first_tasks if not t.done() and t.get_loop() is loop]
     if not mine:
         return
     for t in mine:
         t.cancel()
-    await asyncio.gather(*mine, return_exceptions=True)
+    await asyncio.wait(mine, timeout=timeout)
 
 
 async def drain_background_tasks(timeout: float = 5.0) -> None:
@@ -104,11 +105,14 @@ async def drain_background_tasks(timeout: float = 5.0) -> None:
     # 끝날 수도(그 루프는 닫혔다) cancel될 수도 없어, 섞이면 timeout까지 기다린 뒤 닫힌 루프에 cancel을 걸다 RuntimeError가 난다.
     # 운영은 루프 하나라 동작 변화 없음.
     loop = asyncio.get_running_loop()
-    await cancel_first_tasks()  # story #4834: first, so a grace-waiting cleanup runs now instead of eating the whole budget
+    started = loop.time()
+    await cancel_first_tasks(timeout)  # story #4834: first, so a grace-waiting cleanup runs now instead of eating the whole budget
     pending = [t for t in _background_tasks if t.get_loop() is loop]
     if not pending:
         return
-    _, still_pending = await asyncio.wait(pending, timeout=timeout)
+    _, still_pending = await asyncio.wait(pending, timeout=max(0.0, timeout - (loop.time() - started)))
+    # an ordinary task that was still finishing may have started a waiting one meanwhile (a stream's end registers its grace task): one more pass
+    await cancel_first_tasks(max(0.0, timeout - (loop.time() - started)))
     if not still_pending:
         return
     logger.warning(

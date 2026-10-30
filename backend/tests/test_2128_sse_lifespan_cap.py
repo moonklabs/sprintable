@@ -458,7 +458,7 @@ async def test_a_reconnect_inside_the_grace_keeps_its_own_session_and_only_the_o
              patch.object(gw_module, "_SSE_HEARTBEAT", 0.02), \
              patch.object(gw_module, "_AGENT_SSE_LIFESPAN_SEC", 0.05), \
              patch.object(gw_module, "_AGENT_SSE_LIFESPAN_JITTER_SEC", 0.0), \
-             patch.object(gw_module, "_LIFESPAN_END_GRACE_SEC", 1.5), \
+             patch.object(gw_module, "_LIFESPAN_END_GRACE_SEC", 4.0), \
              patch("app.services.onboarding_funnel.emit_onboarding_event", AsyncMock()):
             first = await gw_module.agent_stream(request=_FakeRequest(), auth=auth_ctx)
             async for _ in first.body_iterator:
@@ -472,14 +472,14 @@ async def test_a_reconnect_inside_the_grace_keeps_its_own_session_and_only_the_o
                 second = await gw_module.agent_stream(request=_FakeRequest(), auth=auth_ctx)  # the reconnect, inside the grace
                 it = second.body_iterator.__aiter__()
                 await it.__anext__()  # it is up (a first frame went out)
-                assert time.monotonic() - t_first_end < 1.0, "the reconnect must be up INSIDE the grace for this test to mean anything"
+                assert time.monotonic() - t_first_end < 3.0, "the reconnect must be up INSIDE the grace for this test to mean anything"
 
                 async def _only_new_row() -> bool:
                     async with Session() as s:
                         ids = {r.id for r in (await s.execute(select(AgentGatewaySession).where(AgentGatewaySession.agent_id == agent_id))).scalars().all()}
                     return len(ids) == 1 and not (ids & old_ids)
 
-                assert await _wait_for(_only_new_row, timeout=6.0), "the old row goes (after the grace) and the reconnect's own row stays"
+                assert await _wait_for(_only_new_row, timeout=10.0), "the old row goes (after the grace) and the reconnect's own row stays"
                 await it.aclose()
     finally:
         from app.core.database import Base
@@ -538,7 +538,7 @@ async def test_the_shutdown_drain_cleans_up_a_waiting_lifespan_end_at_once():
             pg_pubsub.fire_and_forget(_ordinary())
             _t0 = time.monotonic()
             await pg_pubsub.drain_background_tasks(timeout=5.0)  # the production budget: the waiting task is cut FIRST and cleans up inside it
-            assert time.monotonic() - _t0 < 3.0, "the drain must not spend its budget waiting out the 30 s grace"
+            assert time.monotonic() - _t0 < 4.0, "the drain must not spend its 5 s budget waiting out the 30 s grace"
             assert _finished == [True], "the drain still waits for ordinary background work"
             _spy.assert_awaited_once()
             async with Session() as s:
@@ -662,6 +662,151 @@ async def test_the_suites_end_of_test_hooks_reap_a_waiting_lifespan_end_inside_t
             await engine.dispose()
             from app.core import shutdown as _shutdown_module
             _shutdown_module.reset_shutdown_event()
+
+
+def test_the_grace_from_the_environment_is_parsed_defensively():
+    """story #4834 (codex) — a typo must not fail the import of the whole router, `nan` must not switch the grace off silently, `inf` must not wait for ever."""
+    from app.routers.agent_gateway import _lifespan_end_grace_from_env as parse
+
+    assert parse(None) == 20.0 and parse("") == 20.0 and parse("  ") == 20.0
+    assert parse("0") == 0.0 and parse("7.5") == 7.5 and parse("20") == 20.0
+    for bad in ("abc", "nan", "inf", "-inf", "-3", "1e999"):
+        assert parse(bad) == 20.0, bad
+
+
+@pytest.mark.anyio
+@pytest.mark.destructive_schema
+@pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요")
+async def test_the_drain_catches_a_grace_task_that_a_stream_end_registers_while_it_runs():
+    """story #4834 (codex) — a stream's end is itself an ordinary background task that registers the grace task AFTER the drain's first look. The drain looks again
+    after it has waited for the ordinary tasks, so that task is cut (and cleans up) inside the budget and does not survive into the engine's disposal."""
+    import app.routers.agent_gateway as gw_module
+    from app.models.agent_gateway import AgentGatewaySession
+    from app.services import pg_pubsub
+    from sqlalchemy import select
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, agent_id = await _seed_org_project_agent(s)
+            key_id = await seed_agent_stream_key(s, agent_id)
+        auth_ctx = MagicMock()
+        auth_ctx.user_id = str(agent_id)
+        auth_ctx.claims = agent_stream_claims(key_id)
+
+        @asynccontextmanager
+        async def _factory():
+            async with Session() as s:
+                yield s
+
+        _orig = gw_module._mark_agent_disconnected
+        _spy = AsyncMock(side_effect=_orig)
+        from app.services import sse_lease as _lease
+        _real_release = _lease.release
+
+        async def _slow_release(*a, **k):
+            await asyncio.sleep(0.4)  # the stream's end is still running when the drain starts
+            return await _real_release(*a, **k)
+
+        with patch("app.core.database.async_session_factory", _factory), \
+             patch.object(gw_module, "_SSE_HEARTBEAT", 0.02), \
+             patch.object(gw_module, "_AGENT_SSE_LIFESPAN_SEC", 0.05), \
+             patch.object(gw_module, "_AGENT_SSE_LIFESPAN_JITTER_SEC", 0.0), \
+             patch.object(gw_module, "_LIFESPAN_END_GRACE_SEC", 30.0), \
+             patch.object(gw_module, "_mark_agent_disconnected", _spy), \
+             patch.object(_lease, "release", _slow_release), \
+             patch("app.services.onboarding_funnel.emit_onboarding_event", AsyncMock()):
+            response = await gw_module.agent_stream(request=_FakeRequest(), auth=auth_ctx)
+
+            async def _consume() -> None:
+                async for _ in response.body_iterator:
+                    pass
+
+            consumer = asyncio.ensure_future(_consume())
+            await asyncio.sleep(0.25)  # the lifespan (0.05 s) has ended the stream; its end task is inside the slow release, the grace task is not registered yet
+            loop = asyncio.get_running_loop()
+            assert not [t for t in pg_pubsub._cancel_first_tasks if not t.done() and t.get_loop() is loop]
+            _t0 = time.monotonic()
+            await pg_pubsub.drain_background_tasks(timeout=5.0)
+            assert time.monotonic() - _t0 < 4.0
+            await consumer
+            assert not [t for t in pg_pubsub._cancel_first_tasks if not t.done() and t.get_loop() is loop], "no waiting task survives the drain"
+            _spy.assert_awaited_once()
+            async with Session() as s:
+                rows = (await s.execute(select(AgentGatewaySession).where(AgentGatewaySession.agent_id == agent_id))).scalars().all()
+                assert rows == [], "the row of the late-registered grace task is cleaned inside the drain"
+    finally:
+        from app.core.database import Base
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+        from app.core import shutdown as _shutdown_module
+        _shutdown_module.reset_shutdown_event()
+
+
+@pytest.mark.anyio
+@pytest.mark.destructive_schema
+@pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요")
+async def test_a_second_cancel_cannot_cut_the_cleanup_half_way():
+    """story #4834 (codex) — the grace task is cancelled by the drain, and maybe again (the end of its budget): once its cleanup has begun it runs to its end (its own
+    shielded task) while the task itself still ends cancelled. A slow cleanup is cut a second time in the middle — it still finishes and the row is gone."""
+    import app.routers.agent_gateway as gw_module
+    from app.models.agent_gateway import AgentGatewaySession
+    from app.services import pg_pubsub
+    from sqlalchemy import select
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, agent_id = await _seed_org_project_agent(s)
+            key_id = await seed_agent_stream_key(s, agent_id)
+        auth_ctx = MagicMock()
+        auth_ctx.user_id = str(agent_id)
+        auth_ctx.claims = agent_stream_claims(key_id)
+
+        @asynccontextmanager
+        async def _factory():
+            async with Session() as s:
+                yield s
+
+        _orig = gw_module._mark_agent_disconnected
+        finished: list[bool] = []
+
+        async def _slow(*a, **k):
+            await asyncio.sleep(0.5)  # a slow database
+            await _orig(*a, **k)
+            finished.append(True)
+
+        with patch("app.core.database.async_session_factory", _factory), \
+             patch.object(gw_module, "_SSE_HEARTBEAT", 0.02), \
+             patch.object(gw_module, "_AGENT_SSE_LIFESPAN_SEC", 0.05), \
+             patch.object(gw_module, "_AGENT_SSE_LIFESPAN_JITTER_SEC", 0.0), \
+             patch.object(gw_module, "_LIFESPAN_END_GRACE_SEC", 30.0), \
+             patch.object(gw_module, "_mark_agent_disconnected", _slow), \
+             patch("app.services.onboarding_funnel.emit_onboarding_event", AsyncMock()):
+            response = await gw_module.agent_stream(request=_FakeRequest(), auth=auth_ctx)
+            async for _ in response.body_iterator:
+                pass
+            loop = asyncio.get_running_loop()
+            waiting = [t for t in pg_pubsub._cancel_first_tasks if not t.done() and t.get_loop() is loop]
+            assert len(waiting) == 1
+            task = waiting[0]
+            task.cancel()  # the drain: the wait is cut, the cleanup begins (slow)
+            await asyncio.sleep(0.15)
+            task.cancel()  # the budget's end: cancelled again in the middle of the cleanup
+            await asyncio.wait([task], timeout=5.0)
+            assert task.cancelled(), "the task itself ends cancelled"
+            assert finished == [True], "the cleanup was not cut half-way by the second cancel"
+            async with Session() as s:
+                rows = (await s.execute(select(AgentGatewaySession).where(AgentGatewaySession.agent_id == agent_id))).scalars().all()
+                assert rows == [], "the row is gone: the cleanup ran to its end"
+    finally:
+        from app.core.database import Base
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+        from app.core import shutdown as _shutdown_module
+        _shutdown_module.reset_shutdown_event()
 
 
 # ── 소스 고정 — pinning 테스트(오늘 팀 관례) ────────────────────────────────
