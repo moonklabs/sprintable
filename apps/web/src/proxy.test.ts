@@ -138,27 +138,45 @@ describe('story 4824 — proxy inside the desktop app\'s own server (SPRINTABLE_
     }
   });
 
-  it('every other deployment: such a path is a bare «carry on» exactly as when the proxy did not run for it (no login redirect, no session work)', async () => {
-    delete process.env['SPRINTABLE_EMBEDDED'];
-    mockFetch.mockClear();
-    // a refresh cookie and no access token: the full proxy would go to the backend to refresh the session — the bare «carry on» must not
-    const response = await middleware(makeRequestWithHeaders('/api/v2/channel/files/x.png', { host: 'app.example.com' }, { sp_rt: 'a-refresh-token' }));
-    expect(response.status).toBe(200);
-    expect(response.headers.get('x-middleware-next')).toBe('1');
-    expect(response.headers.get('x-middleware-rewrite')).toBeNull();
-    expect(response.headers.get('location')).toBeNull();
-    expect(mockFetch).not.toHaveBeenCalled(); // no refresh round trip to the backend
-  });
-
-  it('the matcher brings /api/v2 in, and the extension list in proxy.ts is the one the first matcher entry leaves out', async () => {
+  // the matcher decides with Next's own compilation: `new RegExp(tryToParsePath(source).regexStr)` — NO case-insensitive flag, on the decoded path
+  it('the matcher leaves the asset exclusion off under /api/v2 in any letter case, and only there; the extension list is the one proxy.ts uses', async () => {
     const { config } = await import('./proxy');
-    expect(config.matcher).toContain('/api/v2/:path*');
-    const first = config.matcher.find((m: string) => m.includes('_next/static')) as string;
-    const listed = (first.match(/\.\*\\\.\(\?:([^)]*)\)\$/) ?? [])[1];
+    const { tryToParsePath } = await import('next/dist/lib/try-to-parse-path');
+    expect(config.matcher).toHaveLength(1);
+    const re = new RegExp(tryToParsePath(config.matcher[0] as string).regexStr as string);
+    for (const path of ['/api/v2/channel/files/x.png', '/API/v2/channel/files/x.png', '/api/V2/x.pdf', '/Api/v2/a.b.webp', '/api/v2/x.png/', '/stories', '/login', '/api/v2/stories']) {
+      expect(re.test(path), `${path} reaches the proxy`).toBe(true);
+    }
+    for (const path of ['/logo.png', '/images/a.webp', '/_next/static/chunks/a.js', '/favicon.ico', '/manifest.webmanifest', '/api/auth/x.png', '/fonts/a.woff2', '/docs/guide.pdf']) {
+      expect(re.test(path), `${path} stays excluded as before`).toBe(false);
+    }
+    const listed = ((config.matcher[0] as string).match(/\.\*\\\.\(\?:([^)]*)\)\$/) ?? [])[1];
     const source = (await import('node:fs')).readFileSync(new URL('./proxy.ts', import.meta.url), 'utf-8');
     const inCode = (source.match(/STATIC_ASSET_EXTENSION = \/\\\.\(\?:([^)]*)\)\$\//) ?? [])[1];
     expect(listed).toBeTruthy();
     expect(inCode).toBe(listed);
+  });
+
+  it('a foreign Host is refused on every spelling of such a path — other letter case and an encoded separator included', async () => {
+    process.env['SPRINTABLE_EMBEDDED'] = '1';
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://127.0.0.1:41234';
+    for (const path of ['/API/v2/channel/files/x.png', '/api/V2/channel/files/x.png', '/api%2Fv2/channel/files/x.png', '/api/v2%2Fchannel/files/x.png']) {
+      const foreign = await middleware(makeRequestWithHeaders(path, { host: 'evil.example:3000', 'x-forwarded-host': '127.0.0.1:3000' }));
+      expect(foreign.status, path).toBe(400);
+    }
+  });
+
+  it('every other deployment, any spelling: such a path is a bare «carry on» — no session work, no backend round trip', async () => {
+    delete process.env['SPRINTABLE_EMBEDDED'];
+    for (const path of ['/api/v2/channel/files/x.png', '/API/v2/channel/files/x.png', '/api/V2/x.pdf', '/api%2Fv2/x.png', '/api/v2%2Fchannel/x.webp']) {
+      mockFetch.mockClear();
+      // a refresh cookie and no access token: the full proxy would go to the backend to refresh the session — the bare «carry on» must not
+      const response = await middleware(makeRequestWithHeaders(path, { host: 'app.example.com' }, { sp_rt: 'a-refresh-token' }));
+      expect(response.status, path).toBe(200);
+      expect(response.headers.get('x-middleware-next'), path).toBe('1');
+      expect(response.headers.get('location'), path).toBeNull();
+      expect(mockFetch, path).not.toHaveBeenCalled();
+    }
   });
 
   it('without the switch (any other deployment) the Host is not looked at', async () => {
