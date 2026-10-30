@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // story #4833 — the Today list's read: rows after the first answer, again every 30 s, a failed read keeps the rows and moves the clock on, a bad answer is no crash
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 const h = vi.hoisted(() => ({ fetchWithAuth: vi.fn() }));
@@ -14,8 +14,9 @@ import { useAgentStates } from './use-agent-states';
 
 let container: HTMLDivElement;
 let root: Root;
-let last: ReturnType<typeof useAgentStates>;
-function Probe() { last = useAgentStates(); return null; }
+// the latest answer of the hook, taken in an effect (not assigned while rendering — the react-hooks rule)
+const seen: { last: ReturnType<typeof useAgentStates> | null } = { last: null };
+function Probe() { const v = useAgentStates(); useEffect(() => { seen.last = v; }); return null; }
 
 const ok = (rows: unknown) => ({ ok: true, json: async () => ({ data: rows, meta: { totalCount: null } }) });
 beforeEach(() => {
@@ -35,8 +36,8 @@ describe('useAgentStates', () => {
     h.fetchWithAuth.mockResolvedValueOnce(ok([{ agent_id: 'a', agent_name: 'A' }]));
     await mount();
     expect(h.fetchWithAuth).toHaveBeenCalledWith('/api/agents/desktop-sessions');
-    expect(last.loaded).toBe(true);
-    expect(last.rows.map((r) => r.agent_id)).toEqual(['a']);
+    expect(seen.last!.loaded).toBe(true);
+    expect(seen.last!.rows.map((r) => r.agent_id)).toEqual(['a']);
   });
 
   it('reads again every 30 s', async () => {
@@ -50,19 +51,19 @@ describe('useAgentStates', () => {
   it('a failed read keeps the rows and moves the clock on (a limit\'s «passed» is judged on this page\'s time)', async () => {
     h.fetchWithAuth.mockResolvedValueOnce(ok([{ agent_id: 'a', agent_name: 'A' }])).mockRejectedValue(new Error('offline'));
     await mount();
-    const first = last.readAt;
+    const first = seen.last!.readAt;
     await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
-    expect(last.rows.map((r) => r.agent_id)).toEqual(['a']);
-    expect(last.readAt).toBeGreaterThan(first);
+    expect(seen.last!.rows.map((r) => r.agent_id)).toEqual(['a']);
+    expect(seen.last!.readAt).toBeGreaterThan(first);
   });
 
   it('a first read that fails stays «not loaded» (no «0명» claim from a failure); a non-list answer is an empty list, not a crash', async () => {
     h.fetchWithAuth.mockResolvedValueOnce({ ok: false, json: async () => ({}) });
     await mount();
-    expect(last.loaded).toBe(false);
+    expect(seen.last!.loaded).toBe(false);
     h.fetchWithAuth.mockResolvedValueOnce({ ok: true, json: async () => ({ data: { unexpected: true } }) });
     await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
-    expect(last.loaded).toBe(true);
-    expect(last.rows).toEqual([]);
+    expect(seen.last!.loaded).toBe(true);
+    expect(seen.last!.rows).toEqual([]);
   });
 });
