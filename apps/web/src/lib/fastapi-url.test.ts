@@ -19,6 +19,14 @@ describe('story 4824 — the backend address, read at run time', () => {
     expect(fastapiBaseUrl()).toBe('https://api.example.com'); // an empty value is no value
   });
 
+  it('hosted setups (dev · prod set no SPRINTABLE_API_ORIGIN): the address is exactly what it was before this change — the build value, or the local default', () => {
+    delete process.env['SPRINTABLE_API_ORIGIN'];
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'https://dev-api.sprintable.ai';
+    expect(fastapiBaseUrl()).toBe('https://dev-api.sprintable.ai');
+    delete process.env['NEXT_PUBLIC_FASTAPI_URL'];
+    expect(fastapiBaseUrl()).toBe('http://localhost:8000');
+  });
+
   it('the server side reads the address only through fastapiBaseUrl() — a NEXT_PUBLIC read anywhere else is baked into the build and ignores the run-time name', () => {
     const root = path.resolve(__dirname, '..', '..');
     const out = execFileSync('git', ['grep', '-n', '-E', "NEXT_PUBLIC_FASTAPI_URL", '--', 'src', ':!*.test.*', ':!*.test.tsx'], { cwd: root, encoding: 'utf8' });
