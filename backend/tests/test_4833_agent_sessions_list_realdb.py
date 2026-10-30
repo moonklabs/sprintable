@@ -149,6 +149,7 @@ async def test_07_the_number_of_queries_does_not_grow_with_the_number_of_agents(
         device = await _device(c, name="d4833 mac g")
         agent = device["agents"][0]["member_id"]
         await _state(c, device, agent, "working", 1)
+        await _list(c)  # warm up: a first request does set-up reads of its own (who the caller is, which org) that later ones may not
         event.listen(engine.sync_engine, "before_cursor_execute", count)
         try:
             await _list(c)
@@ -164,4 +165,4 @@ async def test_07_the_number_of_queries_does_not_grow_with_the_number_of_agents(
         finally:
             event.remove(engine.sync_engine, "before_cursor_execute", count)
         assert len(listed.json()) >= 7
-        assert many == few, f"{few} queries for the first list, {many} with six more agents — a query per agent is back"
+        assert many <= few, f"{few} queries for the list, {many} with six more agents — a query per agent is back"
