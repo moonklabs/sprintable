@@ -809,6 +809,107 @@ async def test_a_second_cancel_cannot_cut_the_cleanup_half_way():
         _shutdown_module.reset_shutdown_event()
 
 
+@pytest.mark.anyio
+@pytest.mark.destructive_schema
+@pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요")
+async def test_a_stuck_cleanup_cannot_hold_the_shutdown_drain_hostage():
+    """story #4834 (codex) — the grace cleanup runs shielded, so it cannot be cut; the drain must not wait for it without a limit (a stuck database would keep the
+    engine from being disposed). With a cleanup that takes 8 s, a drain with a 0.5 s budget returns within a few seconds (the budget + its bounded wait for the cancelled)."""
+    import app.routers.agent_gateway as gw_module
+    from app.services import pg_pubsub
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, agent_id = await _seed_org_project_agent(s)
+            key_id = await seed_agent_stream_key(s, agent_id)
+        auth_ctx = MagicMock()
+        auth_ctx.user_id = str(agent_id)
+        auth_ctx.claims = agent_stream_claims(key_id)
+
+        @asynccontextmanager
+        async def _factory():
+            async with Session() as s:
+                yield s
+
+        async def _stuck(*a, **k):
+            await asyncio.sleep(8.0)
+
+        with patch("app.core.database.async_session_factory", _factory), \
+             patch.object(gw_module, "_SSE_HEARTBEAT", 0.02), \
+             patch.object(gw_module, "_AGENT_SSE_LIFESPAN_SEC", 0.05), \
+             patch.object(gw_module, "_AGENT_SSE_LIFESPAN_JITTER_SEC", 0.0), \
+             patch.object(gw_module, "_LIFESPAN_END_GRACE_SEC", 30.0), \
+             patch.object(gw_module, "_mark_agent_disconnected", _stuck), \
+             patch("app.services.onboarding_funnel.emit_onboarding_event", AsyncMock()):
+            response = await gw_module.agent_stream(request=_FakeRequest(), auth=auth_ctx)
+            async for _ in response.body_iterator:
+                pass
+            t0 = time.monotonic()
+            await pg_pubsub.drain_background_tasks(timeout=0.5)
+            elapsed = time.monotonic() - t0
+            assert elapsed < 5.0, f"a stuck cleanup held the drain for {elapsed:.1f}s"
+    finally:
+        from app.core.database import Base
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+        from app.core import shutdown as _shutdown_module
+        _shutdown_module.reset_shutdown_event()
+
+
+@pytest.mark.anyio
+@pytest.mark.destructive_schema
+@pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요")
+async def test_a_cancel_that_comes_early_still_cleans_up_the_connection():
+    """story #4834 (codex) — `_lifespan_ended` is set up before the first await, so a cancel that arrives while the stream is still starting (after its session row is
+    committed) does not make `_end_connection` fail with a NameError and skip the cleanup (a leaked row)."""
+    import app.routers.agent_gateway as gw_module
+    from app.models.agent_gateway import AgentGatewaySession
+    from sqlalchemy import select
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, agent_id = await _seed_org_project_agent(s)
+            key_id = await seed_agent_stream_key(s, agent_id)
+        auth_ctx = MagicMock()
+        auth_ctx.user_id = str(agent_id)
+        auth_ctx.claims = agent_stream_claims(key_id)
+
+        @asynccontextmanager
+        async def _factory():
+            async with Session() as s:
+                yield s
+
+        _orig = gw_module._mark_agent_disconnected
+        _spy = AsyncMock(side_effect=_orig)
+        with patch("app.core.database.async_session_factory", _factory), \
+             patch.object(gw_module, "_SSE_HEARTBEAT", 0.02), \
+             patch.object(gw_module, "_AGENT_SSE_LIFESPAN_SEC", 60.0), \
+             patch.object(gw_module, "_LIFESPAN_END_GRACE_SEC", 0.0), \
+             patch.object(gw_module, "_mark_agent_disconnected", _spy), \
+             patch("app.services.presence_online.mark_online", AsyncMock(side_effect=asyncio.CancelledError)), \
+             patch("app.services.onboarding_funnel.emit_onboarding_event", AsyncMock()):
+            response = await gw_module.agent_stream(request=_FakeRequest(), auth=auth_ctx)
+            async for _ in response.body_iterator:
+                pass  # the cancel at the start ends the stream at once
+
+            async def _row_gone() -> bool:
+                async with Session() as s:
+                    return not (await s.execute(select(AgentGatewaySession).where(AgentGatewaySession.agent_id == agent_id))).scalars().all()
+
+            assert await _wait_for(_row_gone, timeout=5.0), "the connection's row must not leak when the stream is cancelled while it starts"
+            _spy.assert_awaited_once()
+    finally:
+        from app.core.database import Base
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+        from app.core import shutdown as _shutdown_module
+        _shutdown_module.reset_shutdown_event()
+
+
 # ── 소스 고정 — pinning 테스트(오늘 팀 관례) ────────────────────────────────
 def test_browser_breaking_condition_declared():
     import inspect

@@ -71,7 +71,7 @@ def test_the_numbers_the_test_uses_are_the_real_ones() -> None:
         for n, line in enumerate(p.read_text().splitlines(), 1)
         if re.search(r"\b(asyncpg|psycopg2?|psycopg)\.connect\(", line) and not line.lstrip().startswith("#")
     ]
-    assert raw_sites == ["app/services/pg_pubsub.py:267"], raw_sites  # story #4834: +24 lines above it (the cancel-first set · task helper · a second drain pass) — the one raw LISTEN connection, unchanged
+    assert raw_sites == ["app/services/pg_pubsub.py:275"], raw_sites  # story #4834: +32 lines above it (the cancel-first set · task helper · a late-task catch in the drain · a bounded final wait) — the one raw LISTEN connection, unchanged
     # one process: the image starts uvicorn without --workers, and the compose service does not override the command or scale the service
     dockerfile = (_ROOT / "backend/Dockerfile").read_text()
     cmd = next(line for line in dockerfile.splitlines() if line.startswith("CMD "))

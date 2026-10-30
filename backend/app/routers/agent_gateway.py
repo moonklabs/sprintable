@@ -826,6 +826,7 @@ async def agent_stream(
         """
         session_id = uuid.uuid4()
         _presence_wired = False
+        _lifespan_ended = False  # story #4834: the stream ends because its lifespan ran out (see _LIFESPAN_END_GRACE_SEC) — set up here, before any await: `_end_connection` reads it even when a cancel comes early
         _replay_done_at: float | None = None  # story 4788: when this connection's replay finished (None: it did not)
         try:
             # 49fed0a1 AC1: cap 통과 후 세션 등록 + presence online. SSE dial-out 에이전트는 MCP
@@ -915,7 +916,6 @@ async def agent_stream(
             # story #4569 — set when a pass ended the stream (access gone, or its lifespan ran out mid-pass): its closing line
             # already went out, the stream ends
             _batches_ended = False
-            _lifespan_ended = False  # story #4834: the stream ends because its lifespan ran out (see _LIFESPAN_END_GRACE_SEC)
             # the presence tick's clock (49fed0a1 AC1) — starts before the connect backfill, which can be long now (#4569)
             last_presence_tick = datetime.now(timezone.utc)
 

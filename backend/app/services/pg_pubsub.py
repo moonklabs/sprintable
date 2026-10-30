@@ -41,6 +41,7 @@ _background_tasks: set[asyncio.Task] = set()
 # story #4834 — tasks that WAIT on purpose (the gateway's lifespan-end grace, 20 s) and clean up when cut. The shutdown drain must not wait for them out of its 5 s
 # budget (it would use all of it every deploy, then cancel anyway): they are cancelled FIRST (`cancel_first_tasks`) so their «clean up now» path runs inside the budget.
 _cancel_first_tasks: set[asyncio.Task] = set()
+_DRAIN_CANCEL_WAIT_SEC = 2.0  # how long the drain waits for tasks it has just cancelled (a task that is cancel-resistant is left to the engine's disposal)
 
 
 def fire_and_forget(coro: "Coroutine[Any, Any, Any]", *, cancel_first: bool = False) -> "asyncio.Task | None":
@@ -106,13 +107,19 @@ async def drain_background_tasks(timeout: float = 5.0) -> None:
     # 운영은 루프 하나라 동작 변화 없음.
     loop = asyncio.get_running_loop()
     started = loop.time()
+
+    def _left() -> float:
+        return max(0.0, timeout - (loop.time() - started))
+
     await cancel_first_tasks(timeout)  # story #4834: first, so a grace-waiting cleanup runs now instead of eating the whole budget
     pending = [t for t in _background_tasks if t.get_loop() is loop]
     if not pending:
         return
-    _, still_pending = await asyncio.wait(pending, timeout=max(0.0, timeout - (loop.time() - started)))
-    # an ordinary task that was still finishing may have started a waiting one meanwhile (a stream's end registers its grace task): one more pass
-    await cancel_first_tasks(max(0.0, timeout - (loop.time() - started)))
+    _, still = await asyncio.wait(pending, timeout=_left())
+    still_pending = set(still)
+    # an ordinary task that was still finishing may have started a waiting one meanwhile (a stream's end registers its grace task after the first look):
+    # those are counted with the rest, cut below and waited for (bounded) like them — their cleanup runs on the cut
+    still_pending |= {t for t in _cancel_first_tasks if not t.done() and t.get_loop() is loop}
     if not still_pending:
         return
     logger.warning(
@@ -120,7 +127,8 @@ async def drain_background_tasks(timeout: float = 5.0) -> None:
     )
     for t in still_pending:
         t.cancel()
-    await asyncio.gather(*still_pending, return_exceptions=True)
+    # bounded: a cancel-resistant task (the gateway's cleanup runs shielded to its end) must not hold the shutdown — and the engine's disposal — hostage
+    await asyncio.wait(still_pending, timeout=_DRAIN_CANCEL_WAIT_SEC)
 
 # ── NOTIFY 발행 ────────────────────────────────────────────────────────────────
 
