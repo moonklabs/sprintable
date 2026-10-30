@@ -38,9 +38,13 @@ _MAX_PAYLOAD_BYTES = 7500  # 8KB PG 제한 대비 여유
 
 # prod 커넥션 누수 근본fix — fire-and-forget 태스크의 강한 참조 보관(GC 조기수거 방지).
 _background_tasks: set[asyncio.Task] = set()
+# story #4834 — tasks that WAIT on purpose (the gateway's lifespan-end grace, 20 s) and clean up when cut. The shutdown drain must not wait for them out of its 5 s
+# budget (it would use all of it every deploy, then cancel anyway): they are cancelled FIRST (`cancel_first_tasks`) so their «clean up now» path runs inside the budget.
+_cancel_first_tasks: set[asyncio.Task] = set()
+_DRAIN_CANCEL_FLOOR_SEC = 0.2  # the least the drain waits for tasks it has just cancelled when its budget is already gone (a cancel needs a few loop turns); never more than the budget otherwise
 
 
-def fire_and_forget(coro: "Coroutine[Any, Any, Any]") -> "asyncio.Task | None":
+def fire_and_forget(coro: "Coroutine[Any, Any, Any]", *, cancel_first: bool = False) -> "asyncio.Task | None":
     """asyncio task를 발사하되 완료까지 강한 참조를 유지한다(GC 조기 수거 방지).
 
     이벤트 루프가 없으면(테스트 등) 조용히 no-op — 기존 호출부들의 `except RuntimeError: pass`
@@ -57,7 +61,24 @@ def fire_and_forget(coro: "Coroutine[Any, Any, Any]") -> "asyncio.Task | None":
     task = loop.create_task(coro)
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
+    if cancel_first:  # story #4834: a task that waits on purpose and cleans up when cut — see `cancel_first_tasks`
+        _cancel_first_tasks.add(task)
+        task.add_done_callback(_cancel_first_tasks.discard)
     return task
+
+
+async def cancel_first_tasks(timeout: "float | None" = None) -> None:
+    """story #4834 — cancel (and wait for, at most `timeout` seconds when given) this loop's `cancel_first` tasks: the ones that wait on purpose and clean up when cut
+    (the gateway's lifespan-end grace). One device for production and tests: `drain_background_tasks` (shutdown) calls it before it waits for anything else, so
+    the 5 s budget is spent on work that can finish, not on a 20 s sleep; the test suite's end-of-test hooks (tests/conftest.py) call it inside the test's own loop
+    (no `timeout`: they wait for the cleanup), so no such task outlives its loop."""
+    loop = asyncio.get_running_loop()
+    mine = [t for t in _cancel_first_tasks if not t.done() and t.get_loop() is loop]
+    if not mine:
+        return
+    for t in mine:
+        t.cancel()
+    await asyncio.wait(mine, timeout=timeout)
 
 
 async def drain_background_tasks(timeout: float = 5.0) -> None:
@@ -85,10 +106,20 @@ async def drain_background_tasks(timeout: float = 5.0) -> None:
     # 끝날 수도(그 루프는 닫혔다) cancel될 수도 없어, 섞이면 timeout까지 기다린 뒤 닫힌 루프에 cancel을 걸다 RuntimeError가 난다.
     # 운영은 루프 하나라 동작 변화 없음.
     loop = asyncio.get_running_loop()
+    started = loop.time()
+
+    def _left() -> float:
+        return max(0.0, timeout - (loop.time() - started))
+
+    await cancel_first_tasks(timeout)  # story #4834: first, so a grace-waiting cleanup runs now instead of eating the whole budget
     pending = [t for t in _background_tasks if t.get_loop() is loop]
     if not pending:
         return
-    _, still_pending = await asyncio.wait(pending, timeout=timeout)
+    _, still = await asyncio.wait(pending, timeout=_left())
+    still_pending = set(still)
+    # an ordinary task that was still finishing may have started a waiting one meanwhile (a stream's end registers its grace task after the first look):
+    # those are counted with the rest, cut below and waited for (bounded) like them — their cleanup runs on the cut
+    still_pending |= {t for t in _cancel_first_tasks if not t.done() and t.get_loop() is loop}
     if not still_pending:
         return
     logger.warning(
@@ -96,7 +127,13 @@ async def drain_background_tasks(timeout: float = 5.0) -> None:
     )
     for t in still_pending:
         t.cancel()
-    await asyncio.gather(*still_pending, return_exceptions=True)
+    # bounded BY THE BUDGET (with a small floor so a cancel can be processed): a cancel-resistant task (the gateway's cleanup runs shielded to its end) must not hold
+    # the shutdown — and the engine's disposal — hostage past the graceful-shutdown time the process is given
+    await asyncio.wait(still_pending, timeout=max(_left(), _DRAIN_CANCEL_FLOOR_SEC))
+    # a cleanup that has just run may have started ordinary work of its own (a presence event): look once more, within what is left
+    late_ordinary = [t for t in _background_tasks if t.get_loop() is loop and not t.done()]
+    if late_ordinary:
+        await asyncio.wait(late_ordinary, timeout=_left())
 
 # ── NOTIFY 발행 ────────────────────────────────────────────────────────────────
 
