@@ -102,6 +102,12 @@ _MAX_SSE_LIFETIME_SEC: float = 3900.0  # 3600s(GLCB) + 여유
 _AGENT_SSE_LIFESPAN_SEC: float = 300.0
 _AGENT_SSE_LIFESPAN_JITTER_SEC: float = 30.0  # herd 방지(#2095 지터와 동일 목적) — base 축소에
 # 비례해 60s → 30s(그대로 두면 300s 기준 최대 +20% 변동, browser #2128 정정과 동일 원칙).
+# story #4834 (AC4): a stream that ends because its LIFESPAN ran out is not a disconnect — the client reconnects at once (observed on dev: offline for 1–9 s,
+# every ~5 min). Cleaning up right then (row deleted · presence offline) made every send in that gap read «this agent cannot be reached» (`agent_wake`: the
+# sender saw «type this sentence in the terminal» for an agent that was receiving). The cleanup of a lifespan end runs this many seconds later, by a task of
+# its own: a connection that came back meets «another live session exists» and nothing is demoted; one that did not is cleaned as before. Keep it well under
+# `_SESSION_FRESH_TTL` minus one tick (the old row must still look fresh while it waits).
+_LIFESPAN_END_GRACE_SEC: float = 20.0
 
 
 async def _mark_agent_online(agent_id: uuid.UUID, session_id: uuid.UUID) -> None:
@@ -893,6 +899,7 @@ async def agent_stream(
             # story #4569 — set when a pass ended the stream (access gone, or its lifespan ran out mid-pass): its closing line
             # already went out, the stream ends
             _batches_ended = False
+            _lifespan_ended = False  # story #4834: the stream ends because its lifespan ran out (see _LIFESPAN_END_GRACE_SEC)
             # the presence tick's clock (49fed0a1 AC1) — starts before the connect backfill, which can be long now (#4569)
             last_presence_tick = datetime.now(timezone.utc)
 
@@ -969,7 +976,7 @@ async def agent_stream(
                 long backlog (4543 r2: 2,399 rows) heard a new DM hours late. A batch is still at most `_BACKFILL_LIMIT` rows in
                 seq order; each batch rechecks access first (PO 14:35Z ②); `floor` keeps a seq from going out twice in this
                 pass. The cursor is still the client's ack only."""
-                nonlocal _batches_ended
+                nonlocal _batches_ended, _lifespan_ended
                 floor = after_seq
                 while True:
                     async with async_session_factory() as db:
@@ -1018,6 +1025,7 @@ async def agent_stream(
                     # the stream past it; the client connects again and goes on from its ack
                     if time.monotonic() >= _lifespan_deadline:
                         _batches_ended = True
+                        _lifespan_ended = True
                         yield "event: lifespan_reconnect\ndata: {}\n\n"
                         return
 
@@ -1061,6 +1069,7 @@ async def agent_stream(
                 # finally: 하나로 그대로 흘러간다(정상종료·이상종료·수명초과 전부 같은 정리
                 # 경로 — presence offline 강등·세션row 삭제 포함, #2161 CAS 원칙의 적용).
                 if time.monotonic() >= _lifespan_deadline:
+                    _lifespan_ended = True
                     yield "event: lifespan_reconnect\ndata: {}\n\n"
                     return
                 await _presence_tick_if_due()
@@ -1158,7 +1167,26 @@ async def agent_stream(
                         _agent_connections.pop(agent_id_str, None)
                     # 49fed0a1 AC2/AC3: 연결 종료 → 세션 행 삭제 + 마지막 세션이면 presence offline 강등.
                     # (presence 배선 성공한 연결만 — 세션 미생성 시 타 세션 presence 오염 방지.)
-                    if _presence_wired:
+                    if _presence_wired and _lifespan_ended:
+                        # story #4834: the same cleanup, a moment later — a task of its own (the stream's end must not wait for it: the client reconnects on the
+                        # stream's end, and a longer wait there would lengthen the very gap this avoids)
+                        async def _cleanup_after_grace() -> None:
+                            try:
+                                await asyncio.sleep(_LIFESPAN_END_GRACE_SEC)
+                                await _mark_agent_disconnected(
+                                    agent_id, session_id, org_id_str, heartbeat_baseline=_heartbeat_baseline,
+                                )
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception:  # noqa: BLE001 — a cleanup nobody awaits only logs
+                                logger.warning("agent_stream lifespan-end cleanup failed agent=%s", agent_id_str, exc_info=True)
+
+                        from app.services.pg_pubsub import fire_and_forget as _ff
+                        if _ff(_cleanup_after_grace()) is None:  # no task could be made: do it now, as before
+                            await _mark_agent_disconnected(
+                                agent_id, session_id, org_id_str, heartbeat_baseline=_heartbeat_baseline,
+                            )
+                    elif _presence_wired:
                         await _mark_agent_disconnected(
                             agent_id, session_id, org_id_str, heartbeat_baseline=_heartbeat_baseline,
                         )
