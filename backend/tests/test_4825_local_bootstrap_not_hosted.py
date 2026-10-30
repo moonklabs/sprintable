@@ -1,11 +1,12 @@
 """story #4825 — the embedded-only switch must never reach a hosted deployment, pinned three ways (no DB needed):
-① the hosted deployment sources of truth — the Cloud Run build (cloudbuild.yaml), the VM build (cloudbuild-vm.yaml) and everything under deploy/vm
-  that declares an environment — name neither `SPRINTABLE_EMBEDDED` nor `LOCAL_BOOTSTRAP_SECRET` (only the VM renderer's FORBIDDEN list may);
-② `settings.is_embedded` is True only for switch on + a 32+ char secret + not Cloud Run; ③ the startup guard refuses a half-configured or
-Cloud Run process, and passes a clean hosted one.
+① NO file in the repository outside a short allow-list (the code that reads the two variables, the VM renderer that forbids them, these tests) names
+  `SPRINTABLE_EMBEDDED` or `LOCAL_BOOTSTRAP_SECRET` — every deployment file is covered without a list of them to maintain (Cloud Run build, VM build,
+  `backend/scripts/deploy_*.sh`, Dockerfiles, workflows, compose, env yaml …); ② `settings.is_embedded` is True only for switch on + a 32+ char secret
+  + not Cloud Run; ③ the startup guard refuses a half-configured or Cloud Run process, and passes a clean hosted one.
 """
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -15,22 +16,67 @@ ROOT = Path(__file__).resolve().parents[2]
 NAMES = ("SPRINTABLE_EMBEDDED", "LOCAL_BOOTSTRAP_SECRET")
 
 
-def _hosted_sources() -> list[Path]:
-    files = [ROOT / "cloudbuild.yaml", ROOT / "cloudbuild-vm.yaml"]
-    vm = ROOT / "deploy" / "vm"
-    files += sorted(p for p in vm.rglob("*") if p.is_file() and p.suffix in {".yaml", ".yml", ".txt", ".env", ""} and "bin" not in p.relative_to(vm).parts)
-    return files
+#: the ONLY files that may name either variable: the code that reads them, the VM renderer that forbids them, and these tests. A deployment
+#: file anywhere in the repository (Cloud Run build, VM build, `backend/scripts/deploy_*.sh`, Dockerfiles, workflows, compose, env yaml …) that
+#: names one fails here — no list of "hosted deploy files" to keep up to date, so a new deploy path cannot slip past the scan.
+ALLOWED = {
+    "backend/app/core/config.py",
+    "backend/app/main.py",
+    "backend/app/routers/local_auth.py",
+    "backend/tests/test_4796_vm_env.py",
+    "backend/tests/test_4825_local_bootstrap_not_hosted.py",
+    "backend/tests/test_4825_local_bootstrap_realdb.py",
+    "deploy/vm/bin/render_env.py",
+}
+_SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".next", "dist", "build", ".pytest_cache", ".mypy_cache"}
+
+
+def _repo_files() -> list[Path]:
+    import subprocess
+
+    try:
+        out = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True, check=True).stdout
+        names = [n for n in out.decode("utf-8", errors="replace").split("\0") if n]
+        files = [ROOT / n for n in names]
+    except Exception:  # no git (a source export): walk the tree
+        files = []
+        for dirpath, dirnames, filenames in os.walk(ROOT):
+            dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+            files += [Path(dirpath) / f for f in filenames]
+    return [f for f in files if f.is_file()]
 
 
 def _code(text: str) -> str:
     return re.sub(r"(?m)#.*$", "", text)
 
 
-def test_the_hosted_deployment_sources_carry_neither_name() -> None:
-    sources = _hosted_sources()
-    assert len(sources) >= 6, sources  # the walk really found the files (cloudbuild × 2, compose, env yaml × 2, live-names × 2)
-    offenders = [f"{p.relative_to(ROOT)}: {n}" for p in sources for n in NAMES if n in _code(p.read_text(encoding="utf-8", errors="replace"))]
-    assert offenders == []
+def _namers(files: list[Path]) -> set[str]:
+    found: set[str] = set()
+    for p in files:
+        try:
+            if p.stat().st_size > 2_000_000:
+                continue
+            raw = p.read_bytes()
+        except OSError:
+            continue
+        if b"\0" in raw[:4096]:  # binary
+            continue
+        if any(n.encode() in raw for n in NAMES):
+            found.add(str(p.relative_to(ROOT)))
+    return found
+
+
+def test_no_file_outside_the_allowed_ones_names_either_variable() -> None:
+    files = _repo_files()
+    assert len(files) > 500, len(files)  # the scan really covers the repository
+    for must in ("cloudbuild.yaml", "cloudbuild-vm.yaml", "backend/scripts/deploy_realtime_gce.sh"):  # the deploy truths are in the scan
+        assert (ROOT / must) in set(files), must
+    assert _namers(files) - ALLOWED == set()
+
+
+def test_the_allowed_files_are_the_ones_that_really_name_them() -> None:
+    """keeps the allow-list honest: a name in it that nothing uses any more is dropped from it"""
+    assert _namers(_repo_files()) == ALLOWED
 
 
 def test_the_walk_would_catch_a_planted_name(tmp_path: Path) -> None:
