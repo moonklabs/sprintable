@@ -328,7 +328,7 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
 
       {made && !revoked ? (
         <div className="space-y-2" data-testid="advanced-ready">
-          <div className="flex gap-0 rounded-md border border-border bg-muted p-[3px]" role="group" aria-label={t('runtimeLabel')}>
+          <div className="flex gap-0 rounded-md border border-border bg-muted p-1" role="group" aria-label={t('runtimeLabel')}>
             {(['claude', 'codex'] as const).map((rt, i) => (
               <Button
                 key={rt}

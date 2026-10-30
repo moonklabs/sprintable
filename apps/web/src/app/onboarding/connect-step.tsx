@@ -408,7 +408,7 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
       </p>
 
       {/* [0] transport 세그먼트 토글 */}
-      <div className="flex gap-0 rounded-md border border-border bg-muted p-[3px]">
+      <div className="flex gap-0 rounded-md border border-border bg-muted p-1">
         <button
           type="button"
           onClick={() => setTransport('http')}
@@ -420,7 +420,7 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
         >
           <Cloud className="h-3.5 w-3.5" aria-hidden />
           {t('transportHosted')}
-          <Badge variant="info" className="px-1.5 py-0 text-[9px]">{t('transportRecommended')}</Badge>
+          <Badge variant="info" className="px-1.5 py-0 text-micro">{t('transportRecommended')}</Badge>
         </button>
         <button
           type="button"

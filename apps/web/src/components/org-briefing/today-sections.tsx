@@ -53,7 +53,7 @@ function NeedsMeRow({ item }: { item: TodayNeedsMeItem }) {
       <Icon className="mt-0.5 size-[18px] shrink-0 text-muted-foreground" aria-hidden="true" />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="min-w-0 truncate text-[13.5px] font-medium text-foreground">{item.workItemTitle}</span>
+          <span className="min-w-0 truncate text-editorial-ui font-medium text-foreground">{item.workItemTitle}</span>
           {/* story #3853(customer-zero·오늘·토큰, 페드루 PO 確定 2026-09-14) — §③ 토큰 표
               「사람 손 필요=경고 amber」. variant="info"(파랑)로 렌더되던 결함을 badge.tsx의
               기존 warning 변형(border-warning-border·bg-warning-tint·text-foreground,
@@ -67,7 +67,7 @@ function NeedsMeRow({ item }: { item: TodayNeedsMeItem }) {
         ) : null}
         {/* story #3831 AC1 무엇⑤ — 위험 문구는 서명 대기 상태에서만(돈·외부 발송 공통). */}
         {item.state === 'signature' ? (
-          <p className="mt-0.5 text-[11px] text-muted-foreground">{t('signatureRiskNotice')}</p>
+          <p className="mt-0.5 text-editorial-meta text-muted-foreground">{t('signatureRiskNotice')}</p>
         ) : null}
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1">
@@ -81,7 +81,7 @@ function NeedsMeRow({ item }: { item: TodayNeedsMeItem }) {
         {/* story #3831 AC4 — conversation_id 있는 행만 「대화 열기」(3828 develop 착지,
             라이브 dev-app은 배포 86 뒤 반영). 있으면 짓지 않고 실 id로만 연다. */}
         {item.conversationId ? (
-          <Link href={conversationHref(item.conversationId, item.conversationProjectId)} className="text-[11px] text-primary hover:underline">
+          <Link href={conversationHref(item.conversationId, item.conversationProjectId)} className="text-editorial-meta text-primary hover:underline">
             {t('conversationOpenLink')}
           </Link>
         ) : null}
@@ -101,7 +101,7 @@ export function NeedsMeSection({ items, count }: { items: TodayNeedsMeItem[]; co
     <section aria-label={t('needsMeSectionTitle', { count })}>
       <div className="mb-2.5 flex items-baseline gap-2.5">
         <h2 className="text-sm font-semibold text-foreground">{t('needsMeSectionTitle', { count })}</h2>
-        {items.length > 0 ? <span className="text-[11px] text-muted-foreground">{t('needsMeHint')}</span> : null}
+        {items.length > 0 ? <span className="text-editorial-meta text-muted-foreground">{t('needsMeHint')}</span> : null}
       </div>
       {items.length === 0 && hiddenCount <= 0 ? (
         <Card className="flex flex-col items-center gap-1.5 px-5 py-10 text-center">
@@ -115,7 +115,7 @@ export function NeedsMeSection({ items, count }: { items: TodayNeedsMeItem[]; co
         <>
           <Card>{items.map((item) => <NeedsMeRow key={item.id} item={item} />)}</Card>
           {hiddenCount > 0 ? (
-            <p className="mt-1.5 text-[11px] text-muted-foreground">{t('needsMeHiddenCountNotice', { count: hiddenCount })}</p>
+            <p className="mt-1.5 text-editorial-meta text-muted-foreground">{t('needsMeHiddenCountNotice', { count: hiddenCount })}</p>
           ) : null}
         </>
       )}
@@ -132,7 +132,7 @@ function AgentProgressRow({ item }: { item: TodayAgentProgressItem }) {
     <div className="flex items-center gap-3 border-t border-border px-3 py-3 first:border-t-0">
       <span className="size-2 shrink-0 rounded-full bg-info" aria-hidden="true" />
       <div className="min-w-0 flex-1">
-        <span className="block truncate text-[13.5px] font-medium text-foreground">
+        <span className="block truncate text-editorial-ui font-medium text-foreground">
           {item.workItemTitle ?? item.agentName}
         </span>
         <span className="block truncate text-xs text-muted-foreground">
@@ -150,7 +150,7 @@ export function AgentProgressSection({ items }: { items: TodayAgentProgressItem[
       <div className="mb-2.5 flex items-baseline gap-2.5">
         <h2 className="text-sm font-semibold text-foreground">{t('agentProgressSectionTitle')}</h2>
         {items.length > 0 ? (
-          <span className="text-[11px] text-muted-foreground">{t('agentProgressInProgressBadge', { count: items.length })}</span>
+          <span className="text-editorial-meta text-muted-foreground">{t('agentProgressInProgressBadge', { count: items.length })}</span>
         ) : null}
       </div>
       {items.length === 0 ? (
@@ -179,7 +179,7 @@ export function PublishedSection({ published, usage }: { published: TodayPublish
     <section aria-label={t('sectionPublishedTitle')}>
       <div className="mb-2.5 flex items-baseline gap-2.5">
         <h2 className="text-sm font-semibold text-foreground">{t('sectionPublishedTitle')}</h2>
-        <span className="text-[11px] text-muted-foreground">{t('publishedHint')}</span>
+        <span className="text-editorial-meta text-muted-foreground">{t('publishedHint')}</span>
       </div>
       {isEmpty ? (
         <Card className="flex flex-col items-center gap-1.5 px-5 py-10 text-center">
@@ -189,10 +189,10 @@ export function PublishedSection({ published, usage }: { published: TodayPublish
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {published.count > 0 ? (
             <Card className="p-3.5">
-              <p className="text-[11px] text-muted-foreground">{t('publishedCountLabel')}</p>
+              <p className="text-editorial-meta text-muted-foreground">{t('publishedCountLabel')}</p>
               <p className="mt-1 text-lg font-semibold text-foreground">{formatCount(published.count, locale)}</p>
               {published.byChannel.length > 0 ? (
-                <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                <p className="mt-0.5 truncate text-editorial-meta text-muted-foreground">
                   {published.byChannel
                     .map((c) => `${channelLabel(c.channelKind)} ${formatCount(c.count, locale)}`)
                     .join(' · ')}
@@ -202,7 +202,7 @@ export function PublishedSection({ published, usage }: { published: TodayPublish
           ) : null}
           {usage.platform.map((p) => (
             <Card key={p.connectionId} className="p-3.5">
-              <p className="text-[11px] text-muted-foreground">{channelLabel(p.channelKind)}</p>
+              <p className="text-editorial-meta text-muted-foreground">{channelLabel(p.channelKind)}</p>
               <p className="mt-1 text-lg font-semibold text-foreground">
                 {formatCount(p.used, locale)}/{formatCount(p.limit, locale)}
               </p>
@@ -210,7 +210,7 @@ export function PublishedSection({ published, usage }: { published: TodayPublish
           ))}
           {!usage.adSpendMeasured ? (
             <Card className="p-3.5">
-              <p className="text-[11px] text-muted-foreground">{t('adSpendLabel')}</p>
+              <p className="text-editorial-meta text-muted-foreground">{t('adSpendLabel')}</p>
               <p className="mt-1 text-lg font-semibold text-foreground">{t('adSpendNotMeasured')}</p>
             </Card>
           ) : null}

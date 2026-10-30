@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { useOrgRemoteControl, putOrgRemoteControl } from '@/lib/org-remote-control';
 import { usePairHref } from '@/hooks/use-pair-href';
@@ -398,10 +399,13 @@ function PickRow({ label, value, onOpen, disabled = false, testId }: { label: st
 
 /** a bottom sheet of names only (no path · no folder name): the whole row is the target (≥ 44 px) and the chosen row is marked by a check, not by colour alone */
 function PickSheet({ title, rows, selected, onPick, onClose }: { title: string; rows: Array<{ id: string; name: string }>; selected: string | null; onPick: (id: string) => void; onClose: () => void }) {
+  // story 4831: the hand-made overlay (fixed inset-0 · role="dialog") is the Sheet part now — focus trap, Esc and the backdrop click come with it.
   return (
-    <div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-50 flex items-end bg-black/40" data-testid="onboarding-phone-sheet" onClick={onClose}>
-      <Card className="max-h-[70vh] w-full overflow-y-auto rounded-b-none p-4" onClick={(e) => e.stopPropagation()}>
-        <h2 className="mb-2 text-base font-semibold text-foreground">{title}</h2>
+    <Sheet open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <SheetContent side="bottom" showCloseButton={false} className="max-h-[70vh] overflow-y-auto p-4" data-testid="onboarding-phone-sheet">
+        <SheetHeader className="p-0">
+          <SheetTitle className="mb-2 text-base font-semibold text-foreground">{title}</SheetTitle>
+        </SheetHeader>
         <ul role="listbox" aria-label={title} className="space-y-1">
           {rows.map((r) => (
             <li key={r.id}>
@@ -413,7 +417,7 @@ function PickSheet({ title, rows, selected, onPick, onClose }: { title: string; 
             </li>
           ))}
         </ul>
-      </Card>
-    </div>
+      </SheetContent>
+    </Sheet>
   );
 }

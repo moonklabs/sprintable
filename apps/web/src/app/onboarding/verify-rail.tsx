@@ -106,14 +106,14 @@ export function parseFirstCallAt(json: unknown): string | null {
 function StepIcon({ status }: { status: RailStatus }) {
   if (status === 'done') {
     return (
-      <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-success text-white">
+      <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-success text-on-scrim">
         <Check className="h-3.5 w-3.5" aria-hidden />
       </span>
     );
   }
   if (status === 'failed') {
     return (
-      <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-destructive text-white">
+      <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-destructive text-on-scrim">
         <X className="h-3.5 w-3.5" aria-hidden />
       </span>
     );
@@ -166,7 +166,7 @@ export function VerifyRail({ steps }: { steps: DisplayStep[] }) {
                 <span
                   aria-hidden
                   className={cn(
-                    'absolute left-[10px] top-6 bottom-0 w-0.5',
+                    'absolute left-2.5 top-6 bottom-0 w-0.5',
                     step.status === 'done' ? 'bg-success' : 'bg-border',
                   )}
                 />

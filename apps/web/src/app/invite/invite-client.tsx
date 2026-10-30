@@ -171,7 +171,7 @@ export function InviteClient({ chatsHref }: InviteClientProps) {
         {/* story #2105 2차 — 'preview-loading'에서 비동기로 전이되는 결과다(reset-password의
             정적 초기렌더 invalidLink와 달리 마운트 후 상태변화라 aria-live 대상). */}
         <div role="alert" aria-live="assertive" aria-atomic="true" className="space-y-3 py-8 text-center">
-          <div className="text-3xl">✕</div>
+          <div className="text-display">✕</div>
           <p className="text-sm text-destructive">{errorMsg}</p>
           {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- story a539c649 S2 오탐, invite-accept-client.tsx 주석 참고 */}
           <a href="/login" className="text-sm font-medium text-brand-text hover:text-brand-text/85">
@@ -212,7 +212,7 @@ export function InviteClient({ chatsHref }: InviteClientProps) {
       {preview && (
         <div className="space-y-6">
           <div className="space-y-3 text-center animate-in fade-in slide-in-from-bottom-2 duration-500 delay-100 fill-mode-backwards">
-            <h1 className="text-2xl font-normal tracking-tight text-foreground sm:text-3xl">
+            <h1 className="text-2xl font-normal tracking-tight text-foreground sm:text-display">
               {t.rich('joinHeading', {
                 org: preview.org_name,
                 b: (chunks) => <span className="font-semibold text-foreground">{chunks}</span>,
