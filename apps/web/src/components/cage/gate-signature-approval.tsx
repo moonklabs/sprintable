@@ -141,9 +141,16 @@ export function GateSignatureApproval({
       <div className="flex flex-col gap-2">
         {/* story #4558 — «승인은 내 서명으로 기록돼요»는 승인이 있는 패널에만(반려 전용 패널엔 승인이 없다). */}
         {rejectOnly ? null : <p className="text-center text-[11px] text-muted-foreground">{t('sigConsequenceNote')}</p>}
-        {hint ? (
-          <p className="text-center text-xs text-foreground" role="status" aria-live="polite" data-testid="gate-sig-hint">{hint}</p>
-        ) : null}
+        {/* the live region stays mounted (text in and out) so a screen reader announces the change; with no text it is sr-only (no gap in the column) */}
+        <p
+          className={hint ? 'text-center text-xs text-foreground' : 'sr-only'}
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          data-testid="gate-sig-hint"
+        >
+          {hint}
+        </p>
         <div className={compact || rejectOnly ? 'flex flex-col gap-2' : 'flex gap-2'}>
           {/* story #4558(유나 정본 §0) — 이 일의 이름은 «반려» 하나: 진입 [반려] → 이 단추 «반려» → 결과 «반려됨». 예전 «변경 요청»은
               결정 패널 한 곳에만 있던 낱말이라 판단 요청(바꿀 결과물이 없는 게이트)에 맞지 않았고, 연필 아이콘은 «고쳐 달라»의 뜻이라

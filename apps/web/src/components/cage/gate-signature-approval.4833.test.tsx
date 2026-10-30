@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * story #4833 (4814 실측) — 사유를 안 쓰면 «승인하고 서명»이 눌려도 아무 일도 없고 왜인지 안 보였다. 막힌 까닭을 단추 바로 위 한 줄로 말한다:
- * - 사유 · 근거 둘 다 비었다 → «근거를 확인하고 결정 사유를 적어 주세요» (승인 단추가 있을 때)
+ * - 사유 · 근거 둘 다 비었다 → «결정 사유를 적어 주세요 — 승인하려면 근거 확인도 필요해요» (반려 · 보류는 사유만 있으면 되므로 근거를 «필수»로 말하지 않는다)
  * - 근거는 확인했고 사유만 비었다 → «결정 사유를 적어 주세요»
  * - 사유는 썼는데 근거를 안 봤다 → «승인하려면 위 근거를 확인했는지 체크해 주세요»
  * - 반려 전용 패널(근거 확인이 반려를 막지 않는다) → 사유만 («결정 사유를 적어 주세요»)
@@ -39,9 +39,11 @@ function gate(): GateItem {
 
 const ko = koMessages.cage as Record<string, string>;
 const en = enMessages.cage as Record<string, string>;
-const hint = () => container.querySelector('[data-testid="gate-sig-hint"]')?.textContent ?? null;
+const hintNode = () => container.querySelector('[data-testid="gate-sig-hint"]');
+const hint = () => hintNode()?.textContent || null; // '' (nothing to say) reads as null
+const btn = (label: string) => Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent?.trim() === label)!;
 
-async function mount(props: { mode?: 'decide' | 'reject'; resolving?: boolean; locale?: 'ko' | 'en' } = {}) {
+async function mount(props: { mode?: 'decide' | 'reject'; resolving?: boolean; locale?: 'ko' | 'en'; onDiscuss?: () => void } = {}) {
   const { locale = 'ko', resolving = false, ...rest } = props;
   await act(async () => {
     root.render(
@@ -76,10 +78,46 @@ describe('GateSignatureApproval — why the button is locked (story #4833)', () 
     expect(hint()).toBe(ko.sigHintReason);
   });
 
-  it('reason written, evidence not ticked: asks for the tick (approve is the only locked button)', async () => {
-    await mount();
+  it('reason written, evidence not ticked: asks for the tick — approve is the ONLY locked button (reject and discuss are open)', async () => {
+    await mount({ onDiscuss: () => undefined });
     await typeReason('사유를 적었어요');
     expect(hint()).toBe(ko.sigHintEvidence);
+    expect(btn(ko.sigApproveAndSign).disabled).toBe(true);
+    expect(btn(ko.sigReject).disabled).toBe(false);
+    expect(btn(ko.gateDiscussSubmit).disabled).toBe(false);
+  });
+
+  it('nothing done: all three buttons are locked, and the words do not make the tick a condition of rejecting or discussing', async () => {
+    await mount({ onDiscuss: () => undefined });
+    expect(btn(ko.sigApproveAndSign).disabled).toBe(true);
+    expect(btn(ko.sigReject).disabled).toBe(true);
+    expect(btn(ko.gateDiscussSubmit).disabled).toBe(true);
+    expect(ko.sigHintEvidenceAndReason).toContain('승인하려면');
+    expect(ko.sigHintEvidenceAndReason.indexOf('결정 사유')).toBeLessThan(ko.sigHintEvidenceAndReason.indexOf('근거')); // the reason comes first, the tick is scoped to approving
+  });
+
+  it('the discuss caller: with a reason typed (no tick) discuss is open and the line asks only for the tick', async () => {
+    let discussed = '';
+    await mount({ onDiscuss: () => { discussed = 'yes'; } });
+    await typeReason('논의가 필요해요');
+    await act(async () => { btn(ko.gateDiscussSubmit).click(); });
+    expect(discussed).toBe('yes');
+  });
+
+  it('the line is one live region that stays mounted: polite, atomic, and empty (sr-only) when there is nothing to say', async () => {
+    await mount();
+    const node = hintNode()!;
+    expect(node.getAttribute('role')).toBe('status');
+    expect(node.getAttribute('aria-live')).toBe('polite');
+    expect(node.getAttribute('aria-atomic')).toBe('true');
+    await tickEvidence();
+    await typeReason('사유를 적었어요');
+    expect(hintNode()).toBe(node); // the same node, not a new one
+    expect(node.textContent).toBe('');
+    expect(node.className).toContain('sr-only');
+    await typeReason('');
+    expect(hintNode()).toBe(node);
+    expect(node.textContent).toBe(ko.sigHintReason);
   });
 
   it('everything in place: no hint line', async () => {
