@@ -316,6 +316,32 @@ async def test_15_a_deleted_first_project_is_not_made_again_on_the_next_launch(e
     assert total[0] == 1  # the deleted one, and nothing new
 
 
+async def test_17_the_session_is_for_the_owned_organization_not_another_one_the_owner_belongs_to(embedded):
+    """the account is also a plain member of an older organization that is its `last_org_id`: the session must still be for the install's own"""
+    async with _client(embedded) as c:
+        assert (await c.post(URL, headers=_h())).status_code == 200  # makes the owner and its organization
+        uid = (await _sql(f"SELECT id FROM users WHERE email = '{OWNER_EMAIL}'", fetch="one"))[0]
+        own = (await _sql(f"SELECT org_id FROM org_members WHERE user_id = '{uid}' AND role = 'owner'", fetch="one"))[0]
+        other = uuid.uuid4()
+        try:
+            await _sql(
+                f"INSERT INTO organizations (id, name, slug) VALUES ('{other}', 'Elsewhere', 't4825-{other.hex[:10]}')",
+                f"INSERT INTO org_members (id, org_id, user_id, role, created_at) VALUES (gen_random_uuid(), '{other}', '{uid}', 'member', now() - interval '3 days')",
+                f"UPDATE users SET last_org_id = '{other}' WHERE id = '{uid}'",
+            )
+            from app.core.security import decode_jwt
+
+            tokens = (await c.post(URL, headers=_h())).json()["data"]
+            claims = decode_jwt(tokens["access_token"])
+            assert str((claims.get("app_metadata") or {}).get("org_id")) == str(own), claims
+        finally:
+            await _sql(
+                f"UPDATE users SET last_org_id = NULL WHERE id = '{uid}'",
+                f"DELETE FROM org_members WHERE org_id = '{other}'",
+                f"DELETE FROM organizations WHERE id = '{other}'",
+            )
+
+
 async def test_16_a_membership_whose_organization_is_gone_is_not_my_organization(embedded):
     async with _client(embedded) as c:
         assert (await c.post(URL, headers=_h())).status_code == 200
