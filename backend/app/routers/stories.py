@@ -134,9 +134,10 @@ def _parse_backlog_cursor(cursor: str | None) -> tuple[datetime, uuid.UUID | Non
     if not cursor:
         return None
     at_part, _, id_part = cursor.partition("|")
+    if not at_part:
+        raise HTTPException(status_code=400, detail="invalid cursor: expected '<ISO 8601 datetime>|<story id>'")
     at = _parse_stories_cursor(at_part)
-    if at is None:
-        return None
+    assert at is not None  # at_part is not empty → parsed or 400
     if not id_part:
         return at, None
     try:
@@ -293,16 +294,20 @@ async def list_stories(
         parsed_exclude_statuses = (
             [x.strip() for x in exclude_status.split(",") if x.strip()] if exclude_status else None
         )
+        # story #4833 — one more than asked, to know whether another page exists: a last page that is exactly `limit` long must not
+        # offer «더 보기» (the web proxy trusts X-Next-Cursor). The caller still gets at most `limit` rows.
         stories, total = await repo.list_backlog(
-            project_id, limit=limit, epic_id=epic_id, assignee_id=assignee_id,
+            project_id, limit=limit + 1, epic_id=epic_id, assignee_id=assignee_id,
             status=status_filter, story_number=story_number, q=q, unattached=unattached,
             exclude_statuses=parsed_exclude_statuses, priority=priority, no_assignee=no_assignee,
             cursor=_parse_backlog_cursor(cursor),
         )
+        has_more = len(stories) > limit
+        stories = stories[:limit]
         if response is not None:
             response.headers["X-Total-Count"] = str(total)
             response.headers["X-Result-Count"] = str(len(stories))
-            if stories:
+            if has_more:
                 response.headers["X-Next-Cursor"] = f"{stories[-1].created_at.isoformat()}|{stories[-1].id}"
         await _attach_list_fields(repo.session, repo.org_id, stories)
         return [StoryResponse.model_validate(s) for s in stories]

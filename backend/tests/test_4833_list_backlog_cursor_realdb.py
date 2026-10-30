@@ -54,7 +54,7 @@ def _auth(agent_id: uuid.UUID):
 async def _seed(session):
     from app.models.member import Member
     from app.models.organization import Organization
-    from app.models.pm import Story
+    from app.models.pm import Sprint, Story
     from app.models.project import Project
     from app.models.project_access import ProjectAccess
 
@@ -76,10 +76,19 @@ async def _seed(session):
         for i, st in enumerate(["backlog", "in-progress", "in-review", "ready-for-dev", "in-progress", "done"])
     ]
     session.add_all(stories)
+    # a story that is NOT done but already sits in a sprint — the «not in a sprint» list must leave it out
+    sprint = Sprint(id=uuid.uuid4(), org_id=org.id, project_id=project.id, title="Sprint")
+    session.add(sprint)
+    await session.commit()
+    in_sprint = Story(
+        id=uuid.uuid4(), org_id=org.id, project_id=project.id, title="InSprint", status="in-progress", story_number=99,
+        sprint_id=sprint.id,
+    )
+    session.add(in_sprint)
     await session.commit()
     return {
         "org_id": org.id, "project_id": project.id, "agent_id": agent.id,
-        "ids": [s.id for s in stories], "done_id": stories[-1].id, "in_progress_id": stories[1].id,
+        "ids": [s.id for s in stories], "done_id": stories[-1].id, "in_progress_id": stories[1].id, "in_sprint_id": in_sprint.id,
     }
 
 
@@ -112,7 +121,10 @@ async def test_in_progress_stories_stay_in_the_no_sprint_list():
         got = {r.id for r in rows}
         assert seeded["in_progress_id"] in got
         assert seeded["done_id"] not in got
+        assert seeded["in_sprint_id"] not in got, "a story already in a sprint is not «not in a sprint»"
         assert got == set(seeded["ids"]) - {seeded["done_id"]}
+        # same created_at → ordered by id (the order the cursor walks)
+        assert [r.id for r in rows] == sorted(got)
     finally:
         await engine.dispose()
 
@@ -125,16 +137,41 @@ async def test_paging_by_cursor_neither_drops_nor_repeats_stories_created_at_the
             seeded = await _seed(s)
         seen: list[uuid.UUID] = []
         cursor = None
+        pages = 0
         for _ in range(10):  # 무한 루프 방지 상한
             async with Session() as s:
                 rows, headers = await _list(s, seeded, limit=2, cursor=cursor)
-            if not rows:
-                break
+            assert rows, "a page after the last one was asked for — the previous page offered a cursor it should not have"
+            pages += 1
             seen.extend(r.id for r in rows)
             assert headers["X-Total-Count"] == "5"  # 쪽마다 같은 전체 수(커서 적용 전 개수)
-            cursor = headers["X-Next-Cursor"]
+            assert len(rows) <= 2
+            cursor = headers.get("X-Next-Cursor")
+            if cursor is None:
+                break
+            assert "|" in cursor and "+" in cursor  # `<iso with +00:00>|<id>` — what the web has to URL-encode
+        assert pages == 3, "5 stories at 2 per page = 2 + 2 + 1"
         assert len(seen) == len(set(seen)), "같은 장이 두 쪽에 나왔다"
+        assert seen == sorted(seen), "pages follow the order"
         assert set(seen) == set(seeded["ids"]) - {seeded["done_id"]}, "빠진 장이 있다"
+    finally:
+        await engine.dispose()
+
+
+async def test_a_last_page_that_is_exactly_the_limit_long_offers_no_cursor():
+    """5 stories, limit 5 → one full page and nothing after it: no X-Next-Cursor (the web would otherwise show «더 보기» for an empty page)."""
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            seeded = await _seed(s)
+        async with Session() as s:
+            rows, headers = await _list(s, seeded, limit=5)
+        assert len(rows) == 5
+        assert "X-Next-Cursor" not in headers
+        async with Session() as s:
+            rows4, headers4 = await _list(s, seeded, limit=4)
+        assert len(rows4) == 4
+        assert headers4["X-Next-Cursor"].endswith(str(rows4[-1].id))  # one more exists → the cursor is the 4th story's
     finally:
         await engine.dispose()
 
@@ -147,10 +184,15 @@ async def test_a_bare_iso_cursor_is_accepted_and_a_garbled_one_is_a_400():
         async with Session() as s:
             seeded = await _seed(s)
         async with Session() as s:
-            await _list(s, seeded, cursor="2999-01-01T00:00:00+00:00")  # 시각만 — 받는다(그 뒤엔 아무것도 없다)
+            rows_after, _ = await _list(s, seeded, cursor="2999-01-01T00:00:00+00:00")  # time only — taken: nothing is after it
+        assert rows_after == []
         async with Session() as s:
-            with pytest.raises(HTTPException) as caught:
-                await _list(s, seeded, cursor="2026-01-01T00:00:00+00:00|not-a-uuid")
-        assert caught.value.status_code == 400
+            rows_before, _ = await _list(s, seeded, cursor="1970-01-01T00:00:00+00:00")  # time only, long ago — everything is after it
+        assert len(rows_before) == 5
+        for bad in ("2026-01-01T00:00:00+00:00|not-a-uuid", "|" + str(uuid.uuid4()), "not-a-time|" + str(uuid.uuid4())):
+            async with Session() as s:
+                with pytest.raises(HTTPException) as caught:
+                    await _list(s, seeded, cursor=bad)
+            assert caught.value.status_code == 400, bad
     finally:
         await engine.dispose()
