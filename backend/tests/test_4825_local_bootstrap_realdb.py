@@ -93,6 +93,7 @@ async def embedded(monkeypatch):
     monkeypatch.setattr(settings, "local_bootstrap_secret", SECRET)
     monkeypatch.delenv("K_SERVICE", raising=False)
     limiter.reset()
+    local_auth._failures.clear()
     await _wipe_owner()
     app = FastAPI()
     app.state.limiter = limiter
@@ -340,6 +341,47 @@ async def test_17_the_session_is_for_the_owned_organization_not_another_one_the_
                 f"DELETE FROM org_members WHERE org_id = '{other}'",
                 f"DELETE FROM organizations WHERE id = '{other}'",
             )
+
+
+async def test_18_wrong_secrets_are_throttled_but_the_right_one_always_passes(embedded):
+    """a program on this machine that keeps failing must not lock the app out of its own server: only WRONG secrets count toward the limit"""
+    async with _client(embedded) as c:
+        codes = [(await c.post(URL, headers=_h(f"wrong-{i}"))).status_code for i in range(40)]
+        assert codes[:30] == [403] * 30 and set(codes[30:]) == {429}, codes
+        throttled = await c.post(URL, headers=_h("wrong-again"))
+        assert throttled.status_code == 429 and throttled.headers.get("retry-after")
+        ok = await c.post(URL, headers=_h())
+        assert ok.status_code == 200 and ok.json()["data"]["access_token"], ok.text
+        assert (await c.post(URL, headers=_h())).status_code == 200
+    assert await _counts() == (1, 1, 1, 1)
+
+
+async def test_19_an_embedded_install_serves_only_the_loopback_host_name(monkeypatch):
+    """a page that rebinds its own DNS name to 127.0.0.1 arrives with `Host: its-name`: refused on every route; hosted gets no such guard"""
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+
+    from app.core.config import settings
+    from app.routers import local_auth
+
+    async def _status(app, base_url: str) -> int:
+        async with AsyncClient(transport=ASGITransport(app=app, raise_app_exceptions=False, client=("127.0.0.1", 50000)), base_url=base_url) as c:
+            return (await c.get("/anything")).status_code
+
+    monkeypatch.setenv("SPRINTABLE_EMBEDDED", "1")
+    monkeypatch.setattr(settings, "local_bootstrap_secret", SECRET)
+    monkeypatch.delenv("K_SERVICE", raising=False)
+    embedded_app = FastAPI()
+    assert local_auth.apply_embedded_host_guard(embedded_app) is True
+    assert await _status(embedded_app, "http://evil.example") == 400
+    assert await _status(embedded_app, "http://evil.example:8000") == 400
+    assert await _status(embedded_app, "http://127.0.0.1:8123") == 404  # served (no such route) — the guard let it through
+    assert await _status(embedded_app, "http://127.0.0.1") == 404
+
+    monkeypatch.delenv("SPRINTABLE_EMBEDDED", raising=False)  # hosted
+    hosted_app = FastAPI()
+    assert local_auth.apply_embedded_host_guard(hosted_app) is False
+    assert await _status(hosted_app, "http://api.example.com") == 404
 
 
 async def test_16_a_membership_whose_organization_is_gone_is_not_my_organization(embedded):

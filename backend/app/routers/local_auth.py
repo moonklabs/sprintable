@@ -5,7 +5,7 @@ Who may call it: only the app's own main process. The route exists ONLY when `se
 32+ characters + not Cloud Run) — otherwise it is not registered at all (`register_local_auth_routes`), and a hosted deployment, which never carries
 either variable, has no such path. When it exists the caller must (a) come from the loopback interface and (b) present the per-install secret in
 `X-Local-Bootstrap-Secret` (constant-time compare). Every refusal is the same bare 403 — it does not say which check failed — and nothing of the
-secret is ever logged or echoed.
+secret is ever logged or echoed. Only WRONG secrets are counted against a per-minute limit (then 429); the right one always passes.
 
 What it does: the owner of this install is ONE account (`LOCAL_OWNER_EMAIL`, verified, no password — it cannot sign in with one). The first call
 creates that account, an organization it owns and a first project; every later call (the app calls it on every launch) finds the same account and only
@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import hmac
 import logging
+import time
 import uuid
+from collections import deque
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, FastAPI, Header, Request
@@ -27,7 +29,6 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.rate_limit import limiter
 from app.core.security import REFRESH_TOKEN_EXPIRE_DAYS, create_refresh_token, create_tokens
 from app.dependencies.database import get_db
 from app.models.user import User
@@ -42,6 +43,17 @@ _LOOPBACK = {"127.0.0.1", "::1"}
 #: a caller that came through a proxy carries one of these; the app's own main process, talking straight to the loopback port, never does. If
 #: the server were ever fronted by a reverse proxy on this machine every client would look like loopback, so these headers close that route.
 _FORWARDED_HEADERS = ("forwarded", "x-forwarded-for", "x-real-ip")
+#: wrong secrets are throttled, the right one never is: a program on the same machine that keeps guessing (or just keeps failing) must not be able to
+#: lock the app out of its own server. This is the failures of the last minute in this process (the embedded server is one process).
+_FAIL_LIMIT = 30
+_FAIL_WINDOW_S = 60.0
+_failures: deque[float] = deque(maxlen=_FAIL_LIMIT * 4)
+
+
+def _too_many_failures(now: float) -> bool:
+    while _failures and _failures[0] < now - _FAIL_WINDOW_S:
+        _failures.popleft()
+    return len(_failures) >= _FAIL_LIMIT
 _LOCK_KEY = "sprintable:local-bootstrap"
 
 
@@ -70,7 +82,6 @@ def _clean(value: str | None, fallback: str) -> str:
 
 
 @router.post("/local-bootstrap")
-@limiter.limit("30/minute")
 async def local_bootstrap(
     request: Request,
     body: LocalBootstrapRequest | None = None,
@@ -90,6 +101,14 @@ async def local_bootstrap(
     expected = settings.local_bootstrap_secret.encode()
     provided = (x_local_bootstrap_secret or "").encode()
     if not hmac.compare_digest(provided, expected):
+        now = time.monotonic()
+        if _too_many_failures(now):
+            logger.warning("local-bootstrap throttled: too many wrong secrets")
+            return JSONResponse(
+                {"data": None, "error": {"code": "RATE_LIMITED", "message": "Too many attempts"}, "meta": None},
+                status_code=429, headers={"Retry-After": str(int(_FAIL_WINDOW_S))},
+            )
+        _failures.append(now)
         logger.warning("local-bootstrap refused: secret mismatch")
         return _refuse()
 
@@ -178,6 +197,18 @@ def register_local_auth_routes(app: FastAPI) -> bool:
         app.include_router(router)
         return True
     return False
+
+
+def apply_embedded_host_guard(app: FastAPI) -> bool:
+    """On an embedded install ONLY the loopback host name is served, on every route of the app: a page that rebinds its own DNS name to 127.0.0.1
+    reaches this server with `Host: its-name`, and would otherwise be able to touch any door on the port (sign-up, …). The port is not matched (the
+    server does not know its own); a hostname other than `127.0.0.1` gets 400. Returns whether it was applied (never on a hosted deployment)."""
+    if not settings.is_embedded:
+        return False
+    from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1"])
+    return True
 
 
 def assert_local_bootstrap_config() -> None:

@@ -148,3 +148,10 @@ def test_startup_guard(monkeypatch, env, secret, refuses) -> None:
         assert secret not in str(e.value) or secret == ""  # the message never carries the value
     else:
         assert_local_bootstrap_config()
+
+
+def test_main_wires_both_the_route_registration_and_the_host_guard() -> None:
+    """the real app calls both (each is a no-op unless the install is embedded); a removed call would silently drop the guard"""
+    src = (ROOT / "backend" / "app" / "main.py").read_text(encoding="utf-8")
+    assert "_local_auth.register_local_auth_routes(app)" in src
+    assert "_local_auth.apply_embedded_host_guard(app)" in src
