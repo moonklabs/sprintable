@@ -60,7 +60,7 @@ const HEADER_EMIT_RE = /response\.headers\["X-(Total-Count|Next-Cursor)"\]\s*=/;
 // 미르코 그라운딩(story #3857, 2026-09-14 08:05Z) 확定값. 바뀌면(늘거나 줄면) ①이 RED —
 // PROXY_MAP도 함께 갱신할 것(늘어난 자원은 FE 소비처를 새로 매핑, 줄어든 자원은 걷어낸다).
 export const FROZEN_BE_HEADER_ROUTERS = [
-  'agent_runs', 'channel_posts', 'events', 'goals', 'retros',
+  'agent_runs', 'channel_posts', 'desktop_commands', 'events', 'goals', 'retros',
   'site_posts', 'sprints', 'standups', 'stories', 'tasks',
 ].sort();
 
@@ -69,6 +69,10 @@ export const FROZEN_BE_HEADER_ROUTERS = [
 export const PROXY_MAP: Record<string, string[] | null> = {
   agent_runs: ['agent-runs/route.ts', 'v1/agent-runs/[id]/tool-calls/route.ts'],
   channel_posts: ['organizations/[id]/channel-posts/drafts/route.ts'],
+  // story #4833 — `GET /api/v2/agents/desktop-sessions` (the Today screen's agent list) says X-Total-Count; its one FE proxy
+  // (`agents/desktop-sessions/route.ts`) is a plain pass-through with no paging and the list shows what it received (at most 100 rows), so no
+  // FE proxy READS the header — written as `null` on purpose, not as a dropped signal. If the list ever pages, map the proxy here instead.
+  desktop_commands: null,
   events: null,
   goals: ['goals/route.ts'],
   retros: ['retro-sessions/route.ts'],
