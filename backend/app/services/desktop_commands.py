@@ -260,12 +260,13 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
 OVERVIEW_MAX = 100
 
 
-async def sessions_overview(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID, limit: int = OVERVIEW_MAX) -> tuple[list[dict], int]:
+async def sessions_overview(db: AsyncSession, *, member_id: uuid.UUID, user_id: uuid.UUID, org_id: uuid.UUID, limit: int = OVERVIEW_MAX) -> tuple[list[dict], int]:
     """story #4833 — the state of every agent the person can open the DM of, in a fixed number of queries (not one per agent).
 
     The same rule as `session_view` for each agent (`can_view` = access to one of the agent's projects, the picked session, the heard
     computer, the fields told only while it is heard — `_picked_view`), only batched. Order: by name (the web sorts by state). Only words and
-    facts are told, no sentences (the web writes them). Returns `(rows, total)` — `total` before the `limit` cut.
+    facts are told, no sentences (the web writes them). Each row also names the person's OWN direct conversation with the agent (newest), so the
+    web can link to it — never someone else's. Returns `(rows, total)` — `total` before the `limit` cut.
     """
     from app.models.member import AgentProjectProfile, Member
     from app.services.agent_permissions import _reachable
@@ -312,12 +313,28 @@ async def sessions_overview(db: AsyncSession, *, user_id: uuid.UUID, org_id: uui
     now = _now()
     reachable = await _reachable(db, {p.setup_id for p in picks.values()}, now)
     bound = await bound_devices(db, org_id=org_id, member_ids=agent_ids)
+    # the person's own direct conversation with each agent (one read): both are participants of a `dm` of this org — newest wins
+    from sqlalchemy.orm import aliased
+
+    from app.models.conversation import Conversation, ConversationParticipant
+
+    mine, theirs = aliased(ConversationParticipant), aliased(ConversationParticipant)
+    dm_rows = (await db.execute(
+        select(theirs.member_id, Conversation.id, Conversation.project_id)
+        .join(Conversation, Conversation.id == theirs.conversation_id)
+        .join(mine, mine.conversation_id == Conversation.id)
+        .where(Conversation.org_id == org_id, Conversation.type == "dm", mine.member_id == member_id, theirs.member_id.in_(agent_ids))
+        .order_by(Conversation.created_at, Conversation.id)
+    )).all()
+    dm_of = {agent: (conv, proj) for agent, conv, proj in dm_rows}  # ascending → the newest overwrites
     out: list[dict] = []
     for a in agents:
         row = {
             "agent_id": str(a.id), "agent_name": a.name,
             "bound_setup_id": str(bound[a.id]["setup_id"]) if a.id in bound else None,
             "bound_device_name": bound[a.id]["device_name"] if a.id in bound else None,
+            "conversation_id": str(dm_of[a.id][0]) if a.id in dm_of else None,
+            "conversation_project_id": str(dm_of[a.id][1]) if a.id in dm_of else None,
             "setup_id": None, "device_name": None, "state": None, "activity": None, "state_at": None, "limit": None, "first_screen": None,
         }
         pick = picks.get(a.id)

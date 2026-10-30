@@ -15,6 +15,7 @@ from sqlalchemy import event
 from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (autouse ones apply here too)
     ORG,
     OWNER,
+    OWNER_TM,
     PLAIN,
     PROJ,
     _addresses,
@@ -26,7 +27,8 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
     world,
 )
 from tests.test_4529_desktop_relay_realdb import _device
-from tests.test_4534_desktop_commands_realdb import _remote_control_on, _state  # noqa: F401 — autouse fixture too
+from tests.test_4533_agent_permissions_realdb import _plain_member
+from tests.test_4534_desktop_commands_realdb import _dm, _remote_control_on, _state  # noqa: F401 — autouse fixture too
 
 pytestmark = pytest.mark.anyio
 
@@ -116,6 +118,21 @@ async def test_06_an_agent_with_no_session_yet_is_listed_with_no_state(world):
         row = _row((await _list(c)).json(), agent)
         assert row["state"] is None and row["activity"] is None
         assert row["bound_device_name"] == "d4833 mac f"  # said even before any session was reported (4675)
+
+
+async def test_06b_the_row_names_the_person_s_own_dm_with_the_agent_and_never_someone_else_s(world):
+    plain_tm = await _plain_member()
+    async with _client() as c:
+        device = await _device(c, name="d4833 mac h")
+        agent = device["agents"][0]["member_id"]
+        before = _row((await _list(c)).json(), agent)["conversation_id"]  # connecting an agent may already have made one
+        someone_elses = await _dm(plain_tm, agent)  # another person's DM with the same agent
+        after = _row((await _list(c)).json(), agent)
+        assert after["conversation_id"] == before != someone_elses, "another person's conversation must not be offered"
+        own = await _dm(OWNER_TM, agent)  # the person's own, newer than any before
+        row = _row((await _list(c)).json(), agent)
+        assert row["conversation_id"] == own
+        assert row["conversation_project_id"] == str(PROJ)
 
 
 async def test_07_the_number_of_queries_does_not_grow_with_the_number_of_agents(world):

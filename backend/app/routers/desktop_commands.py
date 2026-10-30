@@ -56,9 +56,9 @@ async def get_desktop_sessions(
 ):
     """story #4833 — every agent's state in one read (words and facts only; the web writes the sentences). A person's session, like the
     one-agent read; an agent key is 403."""
-    await _person(db, auth, org_id, interactive=False)
+    member = await _person(db, auth, org_id, interactive=False)
     user_id = uuid.UUID(str(auth.user_id))
-    rows, total = await desktop_commands.sessions_overview(db, user_id=user_id, org_id=org_id)
+    rows, total = await desktop_commands.sessions_overview(db, member_id=uuid.UUID(str(member.id)), user_id=user_id, org_id=org_id)
     response.headers["X-Total-Count"] = str(total)
     return rows
 
