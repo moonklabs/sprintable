@@ -107,7 +107,10 @@ _AGENT_SSE_LIFESPAN_JITTER_SEC: float = 30.0  # herd 방지(#2095 지터와 동�
 # sender saw «type this sentence in the terminal» for an agent that was receiving). The cleanup of a lifespan end runs this many seconds later, by a task of
 # its own: a connection that came back meets «another live session exists» and nothing is demoted; one that did not is cleaned as before. Keep it well under
 # `_SESSION_FRESH_TTL` minus one tick (the old row must still look fresh while it waits).
-_LIFESPAN_END_GRACE_SEC: float = 20.0
+_LIFESPAN_END_GRACE_SEC: float = float(os.getenv("AGENT_SSE_LIFESPAN_END_GRACE_SEC", "20"))
+# `0` (or less) = no grace: a lifespan end is cleaned inside the stream's own end exactly as before (no task of its own). The test suite sets 0 for every test
+# (tests/conftest.py) — a task still waiting when a test's event loop closes would use the shared pool's connection on a closing loop and hand the next test
+# («Event loop is closed» · «attached to a different loop»); only the tests of the grace itself set a positive value and see their task to its end.
 
 
 async def _mark_agent_online(agent_id: uuid.UUID, session_id: uuid.UUID) -> None:
@@ -1167,7 +1170,7 @@ async def agent_stream(
                         _agent_connections.pop(agent_id_str, None)
                     # 49fed0a1 AC2/AC3: 연결 종료 → 세션 행 삭제 + 마지막 세션이면 presence offline 강등.
                     # (presence 배선 성공한 연결만 — 세션 미생성 시 타 세션 presence 오염 방지.)
-                    if _presence_wired and _lifespan_ended:
+                    if _presence_wired and _lifespan_ended and _LIFESPAN_END_GRACE_SEC > 0:
                         # story #4834: the same cleanup, a moment later — a task of its own (the stream's end must not wait for it: the client reconnects on the
                         # stream's end, and a longer wait there would lengthen the very gap this avoids)
                         async def _cleanup_after_grace() -> None:
@@ -1190,7 +1193,7 @@ async def agent_stream(
                                 logger.warning("agent_stream lifespan-end cleanup failed agent=%s", agent_id_str, exc_info=True)
 
                         from app.services.pg_pubsub import fire_and_forget as _ff
-                        if _ff(_cleanup_after_grace()) is None:  # no task could be made: do it now, as before
+                        if _ff(_cleanup_after_grace(), cancel_first=True) is None:  # no task could be made: do it now, as before
                             await _mark_agent_disconnected(
                                 agent_id, session_id, org_id_str, heartbeat_baseline=_heartbeat_baseline,
                             )

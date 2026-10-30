@@ -43,6 +43,12 @@ import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
+# story #4834 (AC4) — the gateway stream's lifespan end waits `_LIFESPAN_END_GRACE_SEC` (20 s in production) before its cleanup, in a task of its own. In the suite
+# a task still waiting when a test's event loop closes would run its cleanup on the shared pool's connection on that closing loop and leave it for the next test
+# («Event loop is closed» · «Future attached to a different loop», seen in CI shard 3/6 on test_4580 right after a test that ends by `lifespan_reconnect`). `0` =
+# the old inline cleanup, no task. Set before any test module imports the gateway; the tests of the grace itself patch a positive value and finish their task.
+os.environ.setdefault("AGENT_SSE_LIFESPAN_END_GRACE_SEC", "0")
+
 # story #4009(critical, 페드루 PO 確定 2026-09-17) — channel_adapters.py의 8개
 # 테스트용 채널(sandbox·instagram_sandbox·facebook_sandbox·ads_sandbox·x_sandbox·
 # youtube_sandbox·stibee_sandbox·ghost_sandbox)이 전부 `SANDBOX_CHANNEL_ENABLED`
@@ -595,6 +601,7 @@ async def drain_global_background_work(timeout: float = DESTRUCTIVE_DRAIN_TIMEOU
     from app.core.database import engine as _global_engine
     from app.services import pg_pubsub
 
+    await pg_pubsub.cancel_first_tasks()  # story #4834: a task that waits on purpose (the gateway's lifespan-end grace) is cut first and cleans up in THIS loop
     loop = asyncio.get_running_loop()
     leftover: list[str] = []
     for _ in range(_DRAIN_ROUNDS):
@@ -619,7 +626,9 @@ async def drain_global_background_work(timeout: float = DESTRUCTIVE_DRAIN_TIMEOU
 
 async def _dispose_global_engine() -> None:
     from app.core.database import engine as _global_engine
+    from app.services import pg_pubsub
 
+    await pg_pubsub.cancel_first_tasks()  # story #4834: no task that waits on purpose outlives the test's loop (its «clean up now» path runs here, before the dispose)
     await _global_engine.dispose()
 
 

@@ -528,7 +528,18 @@ async def test_the_shutdown_drain_cleans_up_a_waiting_lifespan_end_at_once():
             async for _ in response.body_iterator:
                 pass  # ended by its lifespan; the cleanup waits (30 s grace)
             _spy.assert_not_called()
-            await pg_pubsub.drain_background_tasks(timeout=0.2)  # the shutdown: the waiting task is cut — and cleans up first
+            # an ordinary background task (finishes by itself in 0.3 s) next to the 30 s grace: the drain must WAIT for the ordinary one and must NOT wait for the grace
+            _finished: list[bool] = []
+
+            async def _ordinary() -> None:
+                await asyncio.sleep(0.3)
+                _finished.append(True)
+
+            pg_pubsub.fire_and_forget(_ordinary())
+            _t0 = time.monotonic()
+            await pg_pubsub.drain_background_tasks(timeout=5.0)  # the production budget: the waiting task is cut FIRST and cleans up inside it
+            assert time.monotonic() - _t0 < 3.0, "the drain must not spend its budget waiting out the 30 s grace"
+            assert _finished == [True], "the drain still waits for ordinary background work"
             _spy.assert_awaited_once()
             async with Session() as s:
                 rows = (await s.execute(select(AgentGatewaySession).where(AgentGatewaySession.agent_id == agent_id))).scalars().all()
@@ -540,6 +551,117 @@ async def test_the_shutdown_drain_cleans_up_a_waiting_lifespan_end_at_once():
         await engine.dispose()
         from app.core import shutdown as _shutdown_module
         _shutdown_module.reset_shutdown_event()
+
+
+@pytest.mark.anyio
+@pytest.mark.destructive_schema
+@pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요")
+async def test_grace_zero_is_the_old_inline_cleanup_with_no_task_of_its_own():
+    """story #4834 — `_LIFESPAN_END_GRACE_SEC <= 0` (the whole test suite's default, tests/conftest.py) = the cleanup of a lifespan end runs inside the stream's own end,
+    exactly as before: the moment the stream's iteration has finished the cleanup has been awaited and the row is gone, and no background task is left that a closing
+    test loop could cut (CI shard 3/6: «Event loop is closed» on the next test)."""
+    import app.routers.agent_gateway as gw_module
+    from app.models.agent_gateway import AgentGatewaySession
+    from app.services import pg_pubsub
+    from sqlalchemy import select
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as s:
+            org_id, project_id, agent_id = await _seed_org_project_agent(s)
+            key_id = await seed_agent_stream_key(s, agent_id)
+        auth_ctx = MagicMock()
+        auth_ctx.user_id = str(agent_id)
+        auth_ctx.claims = agent_stream_claims(key_id)
+
+        @asynccontextmanager
+        async def _factory():
+            async with Session() as s:
+                yield s
+
+        _orig = gw_module._mark_agent_disconnected
+        _spy = AsyncMock(side_effect=_orig)
+        tasks_before = len([t for t in pg_pubsub._background_tasks if t.get_loop() is asyncio.get_running_loop()])
+        with patch("app.core.database.async_session_factory", _factory), \
+             patch.object(gw_module, "_SSE_HEARTBEAT", 0.02), \
+             patch.object(gw_module, "_AGENT_SSE_LIFESPAN_SEC", 0.05), \
+             patch.object(gw_module, "_AGENT_SSE_LIFESPAN_JITTER_SEC", 0.0), \
+             patch.object(gw_module, "_LIFESPAN_END_GRACE_SEC", 0.0), \
+             patch.object(gw_module, "_mark_agent_disconnected", _spy), \
+             patch("app.services.onboarding_funnel.emit_onboarding_event", AsyncMock()):
+            response = await gw_module.agent_stream(request=_FakeRequest(), auth=auth_ctx)
+            async for _ in response.body_iterator:
+                pass
+            _spy.assert_awaited_once()  # at once — inside the stream's own end, not in a task started later
+            tasks_after = len([t for t in pg_pubsub._background_tasks if t.get_loop() is asyncio.get_running_loop() and not t.done()])
+            assert tasks_after <= tasks_before, "grace 0 must not leave a background task behind"
+            async with Session() as s:
+                rows = (await s.execute(select(AgentGatewaySession).where(AgentGatewaySession.agent_id == agent_id))).scalars().all()
+                assert rows == [], "grace 0: the row is gone when the stream's iteration has finished"
+    finally:
+        from app.core.database import Base
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+        from app.core import shutdown as _shutdown_module
+        _shutdown_module.reset_shutdown_event()
+
+
+@pytest.mark.anyio
+@pytest.mark.destructive_schema
+@pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요")
+async def test_the_suites_end_of_test_hooks_reap_a_waiting_lifespan_end_inside_the_test_loop():
+    """story #4834 (PO: CI shard 3/6 «Event loop is closed» on the next test) — a task that waits on purpose must not outlive its test's event loop: the conftest's
+    end-of-test hooks (`_dispose_global_engine` for the non-destructive async tests, `drain_global_background_work` for the destructive ones) cut it first, in the
+    test's own loop, so its «clean up now» path runs there. Reverting the call in either hook turns this red."""
+    import app.routers.agent_gateway as gw_module
+    from app.models.agent_gateway import AgentGatewaySession
+    from app.services import pg_pubsub
+    from sqlalchemy import select
+    from tests import conftest as suite
+
+    for hook_name in ("_dispose_global_engine", "drain_global_background_work"):
+        engine, Session = await _realdb_session()
+        try:
+            async with Session() as s:
+                org_id, project_id, agent_id = await _seed_org_project_agent(s)
+                key_id = await seed_agent_stream_key(s, agent_id)
+            auth_ctx = MagicMock()
+            auth_ctx.user_id = str(agent_id)
+            auth_ctx.claims = agent_stream_claims(key_id)
+
+            @asynccontextmanager
+            async def _factory():
+                async with Session() as s:
+                    yield s
+
+            _orig = gw_module._mark_agent_disconnected
+            _spy = AsyncMock(side_effect=_orig)
+            with patch("app.core.database.async_session_factory", _factory), \
+                 patch.object(gw_module, "_SSE_HEARTBEAT", 0.02), \
+                 patch.object(gw_module, "_AGENT_SSE_LIFESPAN_SEC", 0.05), \
+                 patch.object(gw_module, "_AGENT_SSE_LIFESPAN_JITTER_SEC", 0.0), \
+                 patch.object(gw_module, "_LIFESPAN_END_GRACE_SEC", 30.0), \
+                 patch.object(gw_module, "_mark_agent_disconnected", _spy), \
+                 patch("app.services.onboarding_funnel.emit_onboarding_event", AsyncMock()):
+                response = await gw_module.agent_stream(request=_FakeRequest(), auth=auth_ctx)
+                async for _ in response.body_iterator:
+                    pass  # ended by its lifespan; the cleanup waits (30 s grace)
+                loop = asyncio.get_running_loop()
+                assert [t for t in pg_pubsub._cancel_first_tasks if not t.done() and t.get_loop() is loop], "the grace task is waiting"
+                await getattr(suite, hook_name)()  # the end of the test
+                assert not [t for t in pg_pubsub._cancel_first_tasks if not t.done() and t.get_loop() is loop], f"{hook_name}: no waiting task may be left"
+                _spy.assert_awaited_once()
+                async with Session() as s:
+                    rows = (await s.execute(select(AgentGatewaySession).where(AgentGatewaySession.agent_id == agent_id))).scalars().all()
+                    assert rows == [], f"{hook_name}: its cleanup ran (the row is gone)"
+        finally:
+            from app.core.database import Base
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.drop_all)
+            await engine.dispose()
+            from app.core import shutdown as _shutdown_module
+            _shutdown_module.reset_shutdown_event()
 
 
 # ── 소스 고정 — pinning 테스트(오늘 팀 관례) ────────────────────────────────
