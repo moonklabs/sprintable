@@ -2,7 +2,7 @@
 //
 // story #4533 (명세 모음 B-2 · 웹은 읽기 전용) — the approvals inbox's «에이전트 권한 요청» group: the card (agent · computer ·
 // role line · tool · masked summary with its notes · working folder) and one line where the buttons would be — the phone, the
-// window passed, the computer gone quiet («상태 모름» chip, no waiting time), no paired phone. No button at all on the web.
+// window passed, the computer gone quiet («연결 끊김 · 상태 모름» chip, no waiting time), no paired phone. No button at all on the web.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -78,10 +78,10 @@ describe('AgentPermissionRequests (story #4533)', () => {
     expect(container.querySelectorAll('button')).toHaveLength(0);
   });
 
-  it('a quiet computer: «상태 모름» and no waiting time; a passed window and no paired phone say why it cannot be answered here', async () => {
+  it('a quiet computer: «연결 끊김 · 상태 모름» and no waiting time; a passed window and no paired phone say why it cannot be answered here', async () => {
     fetchWithAuth.mockResolvedValueOnce(answer([req({ device_reachable: false })]));
     await render();
-    expect(text()).toContain('상태 모름');
+    expect(text()).toContain('연결 끊김 · 상태 모름');
     expect(text()).not.toContain('분째 기다림');
     expect(line()).toBe('그 컴퓨터와 연결이 끊겨 지금 상태를 몰라요 — 다시 연결되면 여기서 바로 바뀌어요');
 
