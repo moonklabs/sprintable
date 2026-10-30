@@ -60,7 +60,7 @@ const HEADER_EMIT_RE = /response\.headers\["X-(Total-Count|Next-Cursor)"\]\s*=/;
 // 미르코 그라운딩(story #3857, 2026-09-14 08:05Z) 확定값. 바뀌면(늘거나 줄면) ①이 RED —
 // PROXY_MAP도 함께 갱신할 것(늘어난 자원은 FE 소비처를 새로 매핑, 줄어든 자원은 걷어낸다).
 export const FROZEN_BE_HEADER_ROUTERS = [
-  'agent_runs', 'channel_posts', 'events', 'goals', 'retros',
+  'agent_runs', 'channel_posts', 'desktop_commands', 'events', 'goals', 'retros',
   'site_posts', 'sprints', 'standups', 'stories', 'tasks',
 ].sort();
 
@@ -69,6 +69,9 @@ export const FROZEN_BE_HEADER_ROUTERS = [
 export const PROXY_MAP: Record<string, string[] | null> = {
   agent_runs: ['agent-runs/route.ts', 'v1/agent-runs/[id]/tool-calls/route.ts'],
   channel_posts: ['organizations/[id]/channel-posts/drafts/route.ts'],
+  // story #4833 — `GET /api/v2/agents/desktop-sessions` (the Today screen's agent list): its web proxy carries X-Total-Count into meta.totalCount.
+  // (the other GET of that router, `[id]/desktop-session`, says no total — the file-level check below is the guard's own, see its ㉢)
+  desktop_commands: ['agents/desktop-sessions/route.ts'],
   events: null,
   goals: ['goals/route.ts'],
   retros: ['retro-sessions/route.ts'],

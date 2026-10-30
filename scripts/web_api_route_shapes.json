@@ -280,6 +280,11 @@
 "kind": "array"
 },
 {
+"method": "GET",
+"path": "/api/v2/agents/desktop-sessions",
+"kind": "unknown"
+},
+{
 "method": "PUT",
 "path": "/api/v2/agents/run-profile",
 "kind": "unknown"
