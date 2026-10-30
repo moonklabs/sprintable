@@ -153,7 +153,7 @@ export function canPreviewEntity(entityType: string): boolean {
 }
 
 const MdBadge = ({ label }: { label: string }) => (
-  <span className="rounded border px-1.5 py-0.5 text-[11px] font-medium border-border bg-muted text-muted-foreground">
+  <span className="rounded border px-1.5 py-0.5 text-editorial-meta font-medium border-border bg-muted text-muted-foreground">
     {label}
   </span>
 );
@@ -184,9 +184,9 @@ const makeMdBodyComponents = (withProject: (href: string) => string) => ({
   ol: ({ children }: { children?: React.ReactNode }) => <ol className="mb-2 ml-4 list-decimal space-y-0.5">{children}</ol>,
   li: ({ children }: { children?: React.ReactNode }) => <li className="text-sm leading-6">{children}</li>,
   // story #2165: 코드블럭은 전역 스크롤바 숨김 예외.
-  pre: ({ children }: { children?: React.ReactNode }) => <pre className="mb-2 overflow-x-auto scrollbar-visible rounded-lg p-3 text-[13px] bg-muted">{children}</pre>,
+  pre: ({ children }: { children?: React.ReactNode }) => <pre className="mb-2 overflow-x-auto scrollbar-visible rounded-lg p-3 text-editorial-ui bg-muted">{children}</pre>,
   // story 4707: 긴 경로 · `GET /api/…/{id}` 토큰이 표 칸의 최소 폭을 키워 본문을 옆으로 미는 것을 막는다 — 어디서든 줄을 바꾼다.
-  code: ({ children }: { children?: React.ReactNode }) => <code className="rounded px-1 py-0.5 font-mono text-[13px] bg-muted [overflow-wrap:anywhere]">{children}</code>,
+  code: ({ children }: { children?: React.ReactNode }) => <code className="rounded px-1 py-0.5 font-mono text-editorial-ui bg-muted [overflow-wrap:anywhere]">{children}</code>,
   // story 4707 (Yuna AC0 · 선생님 폰 지적): 이 둘째 렌더러에는 표 · 구분선 처리기가 0이라 표 칸이 서로 붙고 넓은 표가 문서 전체를 옆으로 밀었다.
   // 표는 전체 보기와 «정의 하나»(docs/doc-table.tsx) — 폰(<640)에서 4열 이상은 행마다 카드, 그 밖은 표만 가로 스크롤.
   table: ({ children }: { children?: React.ReactNode }) => <DocTable phoneCards>{children}</DocTable>,
@@ -272,7 +272,7 @@ function renderEntityDetail(entityType: string, entityId: string, detail: Record
       // (markdown 경로)의 pre/code 사이징을 그대로 옮긴다. story 4707: 표는 «정의 하나»(docs/doc-table.tsx — 규칙 상수 + 가로 스크롤 상자).
       return (
         <div
-          className={`min-w-0 text-sm leading-6 [&_h1]:mb-2 [&_h1]:text-lg [&_h1]:font-bold [&_h2]:mb-2 [&_h2]:text-base [&_h2]:font-bold [&_h3]:mb-1.5 [&_h3]:text-sm [&_h3]:font-bold [&_p]:mb-2 [&_ul]:mb-2 [&_ul]:ml-4 [&_ul]:list-disc [&_ol]:mb-2 [&_ol]:ml-4 [&_ol]:list-decimal [&_pre]:mb-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:text-[13px] [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[13px] [&_pre_code]:bg-transparent [&_pre_code]:p-0 ${DOC_TABLE_RULES} [&_th]:text-sm [&_td]:text-sm`}
+          className={`min-w-0 text-sm leading-6 [&_h1]:mb-2 [&_h1]:text-lg [&_h1]:font-bold [&_h2]:mb-2 [&_h2]:text-base [&_h2]:font-bold [&_h3]:mb-1.5 [&_h3]:text-sm [&_h3]:font-bold [&_p]:mb-2 [&_ul]:mb-2 [&_ul]:ml-4 [&_ul]:list-disc [&_ol]:mb-2 [&_ol]:ml-4 [&_ol]:list-decimal [&_pre]:mb-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:text-editorial-ui [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-editorial-ui [&_pre_code]:bg-transparent [&_pre_code]:p-0 ${DOC_TABLE_RULES} [&_th]:text-sm [&_td]:text-sm`}
           dangerouslySetInnerHTML={{ __html: wrapTablesInScrollShell(sanitizeDocHtml(d.content)) }}
         />
       );
@@ -730,7 +730,7 @@ export function EntityPreviewModal({
           <span className="truncate text-sm font-semibold">{label}</span>
         )}
         {resolvedStatusLabel ? (
-          <span className="ml-auto shrink-0 rounded bg-black/10 px-1.5 py-0.5 text-xs dark:bg-white/10">{resolvedStatusLabel}</span>
+          <span className="ml-auto shrink-0 rounded bg-overlay-fill-3 px-1.5 py-0.5 text-xs">{resolvedStatusLabel}</span>
         ) : null}
       </div>
       <button
@@ -912,7 +912,7 @@ export function EmbedCard({
       <EntityGlyph Icon={resolveEntityIcon(entity_type)} label={label} />
       <span className="font-medium">{label}</span>
       {statusLabel ? (
-        <span className="ml-auto rounded px-1.5 py-0.5 text-xs bg-black/10 dark:bg-white/10">{statusLabel}</span>
+        <span className="ml-auto rounded px-1.5 py-0.5 text-xs bg-overlay-fill-3">{statusLabel}</span>
       ) : null}
       {navigating && <span className="ml-auto h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />}
     </div>
@@ -956,7 +956,7 @@ export function EmbedCard({
             <EntityGlyph Icon={resolveEntityIcon(entity_type)} label={label} />
             <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
             {statusLabel ? (
-              <span className="shrink-0 rounded px-1.5 py-0.5 text-xs bg-black/10 dark:bg-white/10">{statusLabel}</span>
+              <span className="shrink-0 rounded px-1.5 py-0.5 text-xs bg-overlay-fill-3">{statusLabel}</span>
             ) : null}
             {navigating && <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent" />}
           </button>
@@ -966,7 +966,7 @@ export function EmbedCard({
               e.stopPropagation();
               setShowModal(true);
             }}
-            className="shrink-0 rounded p-1 opacity-70 transition-opacity hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10"
+            className="shrink-0 rounded p-1 opacity-70 transition-opacity hover:bg-overlay-fill-3 hover:opacity-100"
             aria-label={t('preview')}
             title={t('preview')}
           >
@@ -1177,7 +1177,7 @@ export function EntityChip({
   // pane 정형화) 스코프라 이번엔 제외한다(별도 CTA 배선 없음, 이 스토리 AC 밖).
   const tooltipRow = (rowLabel: string, value: string) => (
     <div className="flex items-baseline justify-between gap-4">
-      <span className="text-[10px] text-background/60">{rowLabel}</span>
+      <span className="text-micro text-background/60">{rowLabel}</span>
       <span className="font-medium">{value}</span>
     </div>
   );

@@ -192,7 +192,7 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
         onClick={handleCopy}
         aria-label={copyFailed ? tc('copyFailedSelectManually') : copied ? t('copied') : t('copyCode')}
         title={copyFailed ? tc('copyFailedSelectManually') : copied ? t('copied') : t('copyCode')}
-        className="absolute right-1 top-1 rounded p-1 opacity-60 transition hover:bg-black/10 group-hover/code:opacity-100 dark:hover:bg-white/10"
+        className="absolute right-1 top-1 rounded p-1 opacity-60 transition hover:bg-overlay-fill-3 group-hover/code:opacity-100"
       >
         {copied ? <Check className="size-3.5" /> : <Copy className={copyFailed ? 'size-3.5 text-destructive' : 'size-3.5'} />}
       </button>
@@ -596,7 +596,7 @@ export function ChatBubble({
                 tabIndex={isMine ? undefined : 0}
                 onClick={isMine ? undefined : handleOpenProfilePopover}
                 onKeyDown={isMine ? undefined : (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOpenProfilePopover(e); } }}
-                className={`text-[11px] font-medium text-muted-foreground ${isMine ? '' : 'cursor-pointer hover:underline'}`}
+                className={`text-editorial-meta font-medium text-muted-foreground ${isMine ? '' : 'cursor-pointer hover:underline'}`}
               >
                 {displayName}
               </span>
@@ -666,7 +666,7 @@ export function ChatBubble({
             />
           ) : isCmd ? (
             <div className={`min-w-0 max-w-full rounded-xl border border-info/30 bg-info/8 px-3.5 py-2 ${isMine ? 'rounded-tr-sm' : 'rounded-tl-sm'}`}>
-              <div className="mb-1 flex items-center gap-1 text-[10px] font-medium text-foreground">
+              <div className="mb-1 flex items-center gap-1 text-micro font-medium text-foreground">
                 <Terminal className="h-3 w-3" aria-hidden />
                 {t('commandTag')}
               </div>
@@ -815,7 +815,7 @@ export function ChatBubble({
           )}
 
           {/* story #4443 PR2 — the viewer's zone and locale (was ko-KR in the runtime's zone: «오전 07:32» in en too) */}
-          <time className="text-[10px] text-muted-foreground" dateTime={message.created_at}><ViewerDate value={message.created_at} options={VIEWER_TIME_OPTIONS} /></time>
+          <time className="text-micro text-muted-foreground" dateTime={message.created_at}><ViewerDate value={message.created_at} options={VIEWER_TIME_OPTIONS} /></time>
 
           {/* AC5: 답글 수 표시 — reply_count > 0 */}
           {replyCount > 0 && (

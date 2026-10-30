@@ -264,17 +264,17 @@ export function ChatV3ContextPanel({
   return (
     <section className="flex w-full shrink-0 flex-col bg-card lg:w-[340px]" data-testid="chat-v3-context-panel">
       <div className="flex h-[52px] shrink-0 items-center border-b border-border px-4">
-        <h2 className="text-[13px] font-bold text-muted-foreground">{t('contextPanelTitle')}</h2>
+        <h2 className="text-editorial-ui font-bold text-muted-foreground">{t('contextPanelTitle')}</h2>
       </div>
       <div className="flex-1 space-y-4 overflow-auto p-4">
         <div>
-          <p className="mb-1.5 text-[11px] text-muted-foreground">{t('contextOpenArtifactLabel')}</p>
+          <p className="mb-1.5 text-editorial-meta text-muted-foreground">{t('contextOpenArtifactLabel')}</p>
           {openArtifactId ? (
             artifact ? (
               <Card className="p-3" data-testid="chat-v3-open-artifact-card">
-                <p className="truncate text-[13px] font-medium text-foreground">{artifact.title ?? t('untitledArtifact')}</p>
+                <p className="truncate text-editorial-ui font-medium text-foreground">{artifact.title ?? t('untitledArtifact')}</p>
                 {artifact.latestVersionNumber !== null ? (
-                  <p className="mt-0.5 text-[11.5px] text-muted-foreground">{t('artifactVersion', { version: artifact.latestVersionNumber })}</p>
+                  <p className="mt-0.5 text-editorial-meta text-muted-foreground">{t('artifactVersion', { version: artifact.latestVersionNumber })}</p>
                 ) : null}
               </Card>
             ) : (
@@ -287,18 +287,18 @@ export function ChatV3ContextPanel({
 
         {scopeLabel ? (
           scopeHref ? (
-            <Link href={scopeHref} className="-mb-2 block text-[11px] text-muted-foreground hover:underline" data-testid="chat-v3-context-scope">
+            <Link href={scopeHref} className="-mb-2 block text-editorial-meta text-muted-foreground hover:underline" data-testid="chat-v3-context-scope">
               {scopeLabel}
             </Link>
           ) : (
-            <p className="-mb-2 text-[11px] text-muted-foreground" data-testid="chat-v3-context-scope">
+            <p className="-mb-2 text-editorial-meta text-muted-foreground" data-testid="chat-v3-context-scope">
               {scopeLabel}
             </p>
           )
         ) : null}
 
         <div>
-          <p className="mb-1.5 text-[11px] text-muted-foreground">{t('contextEvidenceLabel')}</p>
+          <p className="mb-1.5 text-editorial-meta text-muted-foreground">{t('contextEvidenceLabel')}</p>
           {!workItemRef ? (
             <p className="text-xs text-muted-foreground" data-testid="chat-v3-evidence-no-work-item">{t('contextNoLinkedWorkItem')}</p>
           ) : evidence.kind === 'idle' || evidence.kind === 'loading' ? (
@@ -341,7 +341,7 @@ export function ChatV3ContextPanel({
         </div>
 
         <div>
-          <p className="mb-1.5 text-[11px] text-muted-foreground">{t('contextHistoryLabel')}</p>
+          <p className="mb-1.5 text-editorial-meta text-muted-foreground">{t('contextHistoryLabel')}</p>
           {!workItemRef ? (
             <p className="text-xs text-muted-foreground" data-testid="chat-v3-history-no-work-item">{t('contextNoLinkedWorkItem')}</p>
           ) : history.kind === 'idle' || history.kind === 'loading' ? (
@@ -372,9 +372,9 @@ export function ChatV3ContextPanel({
         </div>
 
         <div>
-          <p className="mb-1.5 text-[11px] text-muted-foreground">{t('contextRelatedLabel')}</p>
+          <p className="mb-1.5 text-editorial-meta text-muted-foreground">{t('contextRelatedLabel')}</p>
           {relatedNeedsMe ? (
-            <Link href={todayHref} className="block rounded-md bg-primary/10 px-3 py-2.5 text-[12.5px] text-primary" data-testid="chat-v3-related-today-link">
+            <Link href={todayHref} className="block rounded-md bg-primary/10 px-3 py-2.5 text-xs text-primary" data-testid="chat-v3-related-today-link">
               {t('contextRelatedTodayLink')}
             </Link>
           ) : (

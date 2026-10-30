@@ -49,7 +49,7 @@ export function resolveEntityIcon(entityType: string): LucideIcon | null {
  * `react-hooks/static-components`에 걸린다). */
 export function EntityGlyph({ Icon, label, className }: { Icon: LucideIcon | null; label: string; className?: string }) {
   if (Icon) return <Icon className={className ?? 'size-4 shrink-0'} />;
-  return <span className={`flex items-center justify-center text-[10px] font-bold ${className ?? 'size-4 shrink-0'}`}>{initials(label)}</span>;
+  return <span className={`flex items-center justify-center text-micro font-bold ${className ?? 'size-4 shrink-0'}`}>{initials(label)}</span>;
 }
 
 // 엔티티 신호 토큰(하드코딩 blue/purple/emerald/slate 제거·다크 자동 정합). 타입별 절제 틴트.

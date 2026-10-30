@@ -49,7 +49,7 @@ export function ServerCommandResultCard({ content, serverCommand, onFillComposer
       {/* ⚡ 서버 집행 배지 — 기존 「런타임 커맨드」 버블(chat-bubble.tsx isCmd 분기, 사람이
           입력한 /명령을 에이전트가 처리)과 구분: 이 카드는 발화자가 «서버»다. */}
       <div className="mb-1.5 flex items-center gap-1.5">
-        <span className="inline-flex items-center gap-1 rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-bold text-proof-ink-2">
+        <span className="inline-flex items-center gap-1 rounded border border-border bg-muted px-1.5 py-0.5 text-micro font-bold text-proof-ink-2">
           <Zap className="size-2.5 text-warning-strong" aria-hidden />
           {t('serverCommandBadge')}
         </span>
@@ -60,7 +60,7 @@ export function ServerCommandResultCard({ content, serverCommand, onFillComposer
 
       {candidates && candidates.length > 0 ? (
         <>
-          <p className="mb-1 mt-2 text-[9.5px] font-bold uppercase tracking-wide text-muted-foreground">
+          <p className="mb-1 mt-2 text-micro font-bold uppercase tracking-wide text-muted-foreground">
             {t('serverCommandCandidatesLabel')}
           </p>
           <ul className="flex flex-col gap-0.5">
@@ -85,7 +85,7 @@ export function ServerCommandResultCard({ content, serverCommand, onFillComposer
           <span className="font-bold text-brand" aria-hidden>→</span>
           <p className="[overflow-wrap:anywhere]">
             <span className="font-semibold text-primary">{t('reportNextActionLabel')}</span>
-            <span className="text-[12.5px] text-foreground"> {nextAction}</span>
+            <span className="text-xs text-foreground"> {nextAction}</span>
           </p>
         </div>
       ) : null}

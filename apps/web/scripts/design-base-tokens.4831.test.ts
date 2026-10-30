@@ -23,7 +23,7 @@ const theme = block(/@theme inline\s*\{/);
 const light = block(/(^|\n):root\s*\{/);
 const dark = block(/(^|\n)\.dark\s*\{/);
 
-const OVERLAY = ['overlay-fill-1', 'overlay-fill-2', 'overlay-fill-3', 'overlay-line-1', 'overlay-line-2', 'scrim-1', 'scrim-2', 'scrim-3', 'on-scrim'];
+const OVERLAY = ['overlay-fill-1', 'overlay-fill-2', 'overlay-fill-3', 'overlay-line-1', 'overlay-line-2', 'scrim-1', 'scrim-2', 'scrim-3', 'on-scrim', 'on-scrim-fill-1', 'on-scrim-fill-2', 'on-scrim-line'];
 
 describe('글자 눈금의 빈 두 단(규격 v1 §1)', () => {
   it('text-micro 10px · text-display 32px가 줄간격과 짝으로 있다', () => {
@@ -59,7 +59,7 @@ describe('겹침색 토큰(규격 v1 §4)', () => {
   });
 
   it('장막 · 장막 위 글자는 두 테마 같은 값이다', () => {
-    for (const name of ['scrim-1', 'scrim-2', 'scrim-3', 'on-scrim']) {
+    for (const name of ['scrim-1', 'scrim-2', 'scrim-3', 'on-scrim', 'on-scrim-fill-1', 'on-scrim-fill-2', 'on-scrim-line']) {
       const l = new RegExp(`--${name}:\\s*([^;]+);`).exec(light)![1];
       const d = new RegExp(`--${name}:\\s*([^;]+);`).exec(dark)![1];
       expect(l).toBe(d);

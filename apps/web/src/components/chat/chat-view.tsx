@@ -1055,7 +1055,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                   <div key={group.date} className="flex flex-col gap-3">
                     <div className="flex items-center gap-3">
                       <div className="h-px flex-1 bg-border/60" />
-                      <span className="text-[11px] text-muted-foreground">{group.date}</span>
+                      <span className="text-editorial-meta text-muted-foreground">{group.date}</span>
                       <div className="h-px flex-1 bg-border/60" />
                     </div>
 
@@ -1069,7 +1069,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
                             <div className="my-1 flex items-center gap-2.5" role="separator" aria-label={t('unreadMarker')}>
                               <div className="h-px flex-1 bg-info/50" />
                               {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
-                              <span className="rounded-full bg-info-tint px-3 py-0.5 text-[11px] font-bold text-foreground">
+                              <span className="rounded-full bg-info-tint px-3 py-0.5 text-editorial-meta font-bold text-foreground">
                                 {t('unreadMarker')}
                               </span>
                               <div className="h-px flex-1 bg-info/50" />
