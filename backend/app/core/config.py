@@ -105,6 +105,11 @@ class Settings(BaseSettings):
     # JWT
     jwt_secret: str = ""
 
+    # story #4825 (공개 2-②, 로컬 모드 로그인) — the desktop app's embedded server mints the owner's first session with this per-install secret
+    # (`POST /api/v2/auth/local-bootstrap`, loopback only). Hosted deployments must never carry it: `is_embedded` is the single switch, and the
+    # route exists only when it is on. The value is never logged or printed.
+    local_bootstrap_secret: str = ""
+
     # story #3259(지원v1·1경계) — Support Gateway 위임 토큰 서명 시크릿. jwt_secret과 **의도적으로
     # 분리**(별도 값) — 이 시크릿이 유출돼도 fleet JWT_SECRET과는 무관(반대도 동일). Support
     # Gateway는 이 시크릿의 검증만 하고 jwt_secret은 아예 모른다(support-gateway/app/config.py).
@@ -629,6 +634,19 @@ class Settings(BaseSettings):
         if os.environ.get("PYTEST_CURRENT_TEST"):
             return True
         return os.environ.get("SPRINTABLE_LOCAL_DEV", "").strip().lower() in {"1", "true", "yes"}
+
+    @property
+    def is_embedded(self) -> bool:
+        """story #4825 — True only in the desktop app's embedded server: `SPRINTABLE_EMBEDDED` is set AND a bootstrap secret of at least 32
+        characters exists AND this is not Cloud Run (`K_SERVICE` is a positive «hosted» signal; it wins). The local-bootstrap route is registered only
+        when this is True, so hosted deployments — which never set either variable (pinned by tests/test_4825_local_bootstrap_not_hosted.py) —
+        have no such route at all."""
+        import os
+        if os.environ.get("K_SERVICE"):
+            return False
+        if os.environ.get("SPRINTABLE_EMBEDDED", "").strip().lower() not in {"1", "true", "yes"}:
+            return False
+        return len(self.local_bootstrap_secret) >= 32
 
     @property
     def is_internal_secret_gate_exempt(self) -> bool:
