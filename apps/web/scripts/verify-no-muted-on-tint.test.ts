@@ -362,7 +362,7 @@ describe('scanContent — 실 파일 뮤테이션(story #3850 AC3, 신설 분석
     };
     // 반려 사유 상자(bg-destructive-tint) 안 muted 글 줄 — 기존 #3839 GRANDFATHER 위반 자리. 조각은 위반 클래스
     // (text-muted-foreground)를 빼고 잡는다 — 클래스를 지우면 줄은 그대로 찾히고 «위반 없음»으로 RED가 나야 하므로.
-    const DESTRUCTIVE_MUTED_SNIPPET = 'flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]';
+    const DESTRUCTIVE_MUTED_SNIPPET = 'flex flex-wrap items-center gap-x-2 gap-y-1 text-editorial-meta'; // story 4831: text-[11px] → 바탕 눈금 이름
     // AUDIT_META 조회(`${am.dot}`) span — #3865 정밀화로 더 이상 위반 아닌 자리.
     const AUDIT_DOT_SNIPPET = 'place-items-center rounded-full ${am.dot}';
 
@@ -406,7 +406,7 @@ describe('scanContent — 실 파일 뮤테이션(story #3850 AC3, 신설 분석
     const original = readFileSync(ABS_FILE, 'utf8');
 
     it('상태 라벨 옆에 muted 텍스트를 끼워 넣으면(템플릿 치환 안 삼항 tint가 조상으로 인식돼) RED', () => {
-      const target = '<div className="text-[15px] font-bold text-foreground">{t(STATE_LABEL_KEY[state])}</div>';
+      const target = '<div className="text-base font-bold text-foreground">{t(STATE_LABEL_KEY[state])}</div>'; // story 4831: text-[15px] → text-base
       expect(original.includes(target)).toBe(true);
       const mutated = original.replace(target, `${target}<div className="text-muted-foreground">x</div>`);
       expect(mutated).not.toBe(original);
