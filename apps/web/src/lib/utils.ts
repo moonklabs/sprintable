@@ -16,7 +16,8 @@ const twMerge = extendTailwindMerge({
   extend: {
     theme: {
       'font-weight': ['editorial-heading', 'editorial-claim'],
-      'text': ['editorial-body', 'editorial-ui', 'editorial-meta', 'editorial-claim'],
+      // story 4831: 글자 눈금의 빈 두 단 micro(10px) · display(32px)도 크기 축으로 알려준다 — 안 그러면 `cn('text-muted-foreground', 'text-micro')`가 글자색을 지운다.
+      'text': ['editorial-body', 'editorial-ui', 'editorial-meta', 'editorial-claim', 'micro', 'display'],
     },
   },
 })
