@@ -335,7 +335,7 @@ export function ChatMarkdown({ content: rawContent, isMine, references, entitySt
         // 주석 참조) mention_parser가 애초에 entity_references에 안 쓴다 — stored 참조와
         // 대조하면 asset 임베드가 전부 유령으로 오판된다. 유령 판정 자체를 안 태운다.
         if (decision.kind === 'asset') {
-          return <AssetEmbedCard entityId={ref.entityId} label={String(children)} ownMessage={isMine} onOpenReadingPanel={onOpenReadingPanel} />;
+          return <AssetEmbedCard entityId={ref.entityId} label={String(children)} onOpenReadingPanel={onOpenReadingPanel} />;
         }
         // allowCard:false라 decision.kind는 여기서 항상 'chip'('card'는 불가능 — resolveEmbedDecision
         // 계약: opts.allowCard가 false면 'card'를 반환하지 않는다).
@@ -356,7 +356,7 @@ export function ChatMarkdown({ content: rawContent, isMine, references, entitySt
       }
       return <a href={href} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{children}</a>;
     },
-  }), [text, muted, codeBg, border, isMine, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey, flatHref]);
+  }), [text, muted, codeBg, border, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey, flatHref]);
 
   if (!hasMarkdown && !hasMention) {
     return (
