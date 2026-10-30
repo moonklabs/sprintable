@@ -292,15 +292,14 @@ async def test_agent_lifespan_cap_reclaims_slot_and_presence():
         assert saw_lifespan_event, "lifespan_reconnect 이벤트가 스트림에 안 실림"
         assert elapsed is not None and elapsed < 5.0
 
-        await asyncio.sleep(0.3)  # story #4834: the cleanup of a lifespan end runs in a task of its own (grace 0 here)
+        # story #4834: the cleanup of a lifespan end runs in a task of its own (grace 0 here) — wait for the condition, not a fixed time
+        async def _row_gone() -> bool:
+            async with Session() as s:
+                return not (await s.execute(select(AgentGatewaySession).where(AgentGatewaySession.agent_id == agent_id))).scalars().all()
+
+        assert await _wait_for(_row_gone), "AgentGatewaySession row가 정리 안 됨(AC2/AC3)"
         assert gw_module._agent_sse_connection_count == count_before, "수명초과 후 카운터 정리 안 됨"
         assert not gw_module._agent_connections.get(str(agent_id)), "queue 정리 안 됨"
-
-        async with Session() as s:
-            remaining = (await s.execute(
-                select(AgentGatewaySession).where(AgentGatewaySession.agent_id == agent_id)
-            )).scalars().all()
-            assert remaining == [], "AgentGatewaySession row가 정리 안 됨(AC2/AC3)"
     finally:
         from app.core.database import Base
         async with engine.begin() as conn:
