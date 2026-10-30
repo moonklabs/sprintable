@@ -639,6 +639,7 @@ if _dev_ghost_stub.ghost_stub_enabled():
 from app.routers import local_auth as _local_auth  # noqa: E402
 
 _local_auth.register_local_auth_routes(app)
+_local_auth.apply_embedded_host_guard(app)
 app.include_router(resolve.router)
 app.include_router(org_invites.router)
 app.include_router(invite_accept.router)
