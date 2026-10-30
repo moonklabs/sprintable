@@ -27,7 +27,9 @@ export function useAgentStates(): { rows: AgentStateRow[]; loaded: boolean; read
         .then(async (res) => (res.ok ? parseAgentStates(await res.json()) : null))
         .catch(() => null)
         .then((rows) => {
-          if (off || !rows) return;
+          if (off) return;
+          // a failed read keeps the rows but moves the clock on: a limit's «풀리는 때가 지났어요» is judged on this page's time, not on the last good read's
+          if (!rows) { setState((prev) => (prev.loaded ? { ...prev, readAt: Date.now() } : prev)); return; }
           setState({ rows, loaded: true, readAt: Date.now() });
         });
     };
