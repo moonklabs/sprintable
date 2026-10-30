@@ -70,7 +70,7 @@ export function DocAssigneeControl({
         aria-label={label}
         className={
           assigned
-            ? 'flex size-7 items-center justify-center rounded-full border border-border bg-muted text-[10px] font-medium text-foreground'
+            ? 'flex size-7 items-center justify-center rounded-full border border-border bg-muted text-micro font-medium text-foreground'
             : 'flex size-7 items-center justify-center rounded-full border border-dashed border-muted-foreground/50 text-muted-foreground transition-colors hover:text-foreground'
         }
       >

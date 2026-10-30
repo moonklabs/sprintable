@@ -176,7 +176,7 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
         <Icon className={`size-4 ${state === 'confirmed' ? 'text-success' : state === 'denied' ? 'text-destructive' : 'text-warning'}`} />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="text-[15px] font-bold text-foreground">{t(STATE_LABEL_KEY[state])}</div>
+        <div className="text-base font-bold text-foreground">{t(STATE_LABEL_KEY[state])}</div>
         {/* story #2967 — resolveName은 한글 사람 이름이라 mono 걷음(동일 결함 클래스). */}
         {/* story #3865(AC1) — 이 div의 조상(부모 wrapper)이 state==='confirmed'일 때
             bg-success-tint를 입는다(위 return 블록 상단 삼항) — text-muted-foreground는
@@ -307,7 +307,7 @@ export function DocEvidenceRail({ docId, status }: { docId: string; status: stri
 
   return (
     <div>
-      <div className="text-[12px] font-semibold text-muted-foreground">
+      <div className="text-xs font-semibold text-muted-foreground">
         {t('docGateAuditTitle')}
       </div>
       {/* 수직 타임라인 — 기존 접힌 리스트(doc-gate-section.tsx)를 상시 레일로 공간화(§3/§6).
@@ -316,7 +316,7 @@ export function DocEvidenceRail({ docId, status }: { docId: string; status: stri
       <ol className="relative mt-3 space-y-2 border-l border-border pl-4">
         {auditEvents.map((ev) => (
           <li key={ev.key} className="relative">
-            <span className="absolute -left-[19px] top-2 size-2 rounded-full border-2 border-background bg-border" aria-hidden="true" />
+            <span className="absolute -left-5 top-2 size-2 rounded-full border-2 border-background bg-border" aria-hidden="true" />
             <ProofCapsule
               density="audit"
               proofState={ev.proofState}
@@ -328,7 +328,7 @@ export function DocEvidenceRail({ docId, status }: { docId: string; status: stri
               human={{ name: ev.name, label: ev.actorId ? auditLabels.get(ev.actorId) : undefined, role: '' }}
             />
             {ev.note?.trim() ? (
-              <p className="mt-1 whitespace-pre-wrap break-keep [overflow-wrap:anywhere] border-l-2 border-destructive bg-muted px-2 py-1 text-[11px] leading-[14px] text-muted-foreground">{ev.note}</p>
+              <p className="mt-1 whitespace-pre-wrap break-keep [overflow-wrap:anywhere] border-l-2 border-destructive bg-muted px-2 py-1 text-editorial-meta leading-[14px] text-muted-foreground">{ev.note}</p>
             ) : null}
           </li>
         ))}

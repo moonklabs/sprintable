@@ -63,7 +63,7 @@ export function DocSearchResults({
 
   return (
     <div className="px-2 py-1">
-      <p className="px-1 py-1 text-[11px] text-muted-foreground">{resultCountLabel(results.length)}</p>
+      <p className="px-1 py-1 text-editorial-meta text-muted-foreground">{resultCountLabel(results.length)}</p>
       <ul className="space-y-0.5">
         {results.map((doc) => (
           <li key={doc.id}>
@@ -87,9 +87,9 @@ export function DocSearchResults({
                 <span className="truncate">{doc.title}</span>
               </span>
               {/* story #2167 AC2 — slug로 찾은 결과가 어떤 slug인지 화면에 보여야 한다. */}
-              <span className="truncate pl-5 font-mono text-[10px] text-muted-foreground">{doc.slug}</span>
+              <span className="truncate pl-5 font-mono text-micro text-muted-foreground">{doc.slug}</span>
               {doc.snippet ? (
-                <span className="truncate pl-5 text-[11px] text-muted-foreground">
+                <span className="truncate pl-5 text-editorial-meta text-muted-foreground">
                   {highlightSnippet(doc.snippet)}
                 </span>
               ) : null}
@@ -98,7 +98,7 @@ export function DocSearchResults({
         ))}
       </ul>
       {results.length >= cap && cappedLabel ? (
-        <p className="px-2 py-1.5 text-[10px] text-muted-foreground">{cappedLabel}</p>
+        <p className="px-2 py-1.5 text-micro text-muted-foreground">{cappedLabel}</p>
       ) : null}
     </div>
   );

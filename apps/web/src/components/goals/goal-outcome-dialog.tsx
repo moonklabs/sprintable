@@ -144,7 +144,7 @@ export function GoalOutcomeDialog({
                 onChange={(e) => setReason(e.target.value)}
                 className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               />
-              <p className="text-[11px] text-muted-foreground">{t('outcomeReasonHint')}</p>
+              <p className="text-editorial-meta text-muted-foreground">{t('outcomeReasonHint')}</p>
             </div>
             <DialogFooter className="mt-auto shrink-0">
               <Button type="button" variant="ghost" disabled={submitting} onClick={() => setStep('choice')}>{t('cancel')}</Button>

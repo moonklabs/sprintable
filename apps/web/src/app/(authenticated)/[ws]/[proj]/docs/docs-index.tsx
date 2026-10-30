@@ -46,7 +46,7 @@ function StatusChip({ status }: { status: string | undefined }) {
   const s = toDocStatusFilter(status);
   const tone = DOC_STATUS_TONE[s];
   return (
-    <span className={`proof-surface proof-surface-press inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-[11.5px] font-bold ${tone.bg} ${tone.text}`}>
+    <span className={`proof-surface proof-surface-press inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-editorial-meta font-bold ${tone.bg} ${tone.text}`}>
       <span className={`size-1.5 rounded-full ${tone.dot}`} aria-hidden="true" />
       {t(docStatusLabelKey(s))}
     </span>
@@ -163,14 +163,14 @@ export function DocsIndex() {
     <div className="h-full overflow-y-auto px-6 py-8 lg:px-10">
       {/* 마스트헤드(§2) — editorial 타이포 스케일 첫 소비처(story #2917 토큰). */}
       <div className="mb-6">
-        <div className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+        <div className="font-mono text-editorial-meta font-semibold uppercase tracking-[0.16em] text-muted-foreground">
           {t('indexKicker')}
         </div>
         {/* story #2974(PR-D0) delta — `font-editorial-heading`은 무게 유틸(--font-weight-editorial-heading:
             820, Tailwind가 자동생성)이지 페이스 토큰이 아니다. font-display 단독 치환이 무게 820을
             조용히 지웠던 걸 유나군이 배포 CSS로 실증(2026-08-23) — 페이스(font-display)+무게
             (font-editorial-heading) 병기로 복원. 정적 className이라 twMerge 충돌군 문제 없음. */}
-        <h1 className="mt-2 font-display font-editorial-heading text-[46px] leading-none tracking-[-0.035em] text-foreground">
+        <h1 className="mt-2 font-display font-editorial-heading text-display leading-none tracking-[-0.035em] text-foreground">
           {t('title')}
         </h1>
         {/* story #2983(유나 확定) — 정적 장식 citron 퇴출(citron=live pulse 신호 전용).
@@ -188,9 +188,9 @@ export function DocsIndex() {
           type="button"
           onClick={() => setCategoryFilter(null)}
           aria-pressed={categoryFilter === null}
-          className={`px-2.5 py-1 text-[13px] font-semibold transition ${categoryFilter === null ? 'border-b-2 border-proof-citron text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+          className={`px-2.5 py-1 text-editorial-ui font-semibold transition ${categoryFilter === null ? 'border-b-2 border-proof-citron text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
         >
-          {t('indexCategoryAll')} <span className="font-mono text-[11px] text-muted-foreground">{items.length}</span>
+          {t('indexCategoryAll')} <span className="font-mono text-editorial-meta text-muted-foreground">{items.length}</span>
         </button>
         {folders.map((f) => (
           <button
@@ -198,9 +198,9 @@ export function DocsIndex() {
             type="button"
             onClick={() => setCategoryFilter(f.id)}
             aria-pressed={categoryFilter === f.id}
-            className={`px-2.5 py-1 text-[13px] font-medium transition ${categoryFilter === f.id ? 'border-b-2 border-proof-citron text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+            className={`px-2.5 py-1 text-editorial-ui font-medium transition ${categoryFilter === f.id ? 'border-b-2 border-proof-citron text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
           >
-            {f.title} <span className="font-mono text-[11px] text-muted-foreground">{categoryCounts[f.id] ?? 0}</span>
+            {f.title} <span className="font-mono text-editorial-meta text-muted-foreground">{categoryCounts[f.id] ?? 0}</span>
           </button>
         ))}
         {categoryCounts[UNCATEGORIZED] > 0 && (
@@ -208,9 +208,9 @@ export function DocsIndex() {
             type="button"
             onClick={() => setCategoryFilter(UNCATEGORIZED)}
             aria-pressed={categoryFilter === UNCATEGORIZED}
-            className={`px-2.5 py-1 text-[13px] font-medium transition ${categoryFilter === UNCATEGORIZED ? 'border-b-2 border-proof-citron text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+            className={`px-2.5 py-1 text-editorial-ui font-medium transition ${categoryFilter === UNCATEGORIZED ? 'border-b-2 border-proof-citron text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
           >
-            {t('indexCategoryUncategorized')} <span className="font-mono text-[11px] text-muted-foreground">{categoryCounts[UNCATEGORIZED]}</span>
+            {t('indexCategoryUncategorized')} <span className="font-mono text-editorial-meta text-muted-foreground">{categoryCounts[UNCATEGORIZED]}</span>
           </button>
         )}
 
@@ -225,7 +225,7 @@ export function DocsIndex() {
             className={`transition ${statusFilter === s ? 'ring-2 ring-proof-citron' : 'opacity-80 hover:opacity-100'}`}
           >
             <StatusChip status={s} />
-            <span className="ml-1 font-mono text-[10px] text-muted-foreground">{statusCounts[s]}</span>
+            <span className="ml-1 font-mono text-micro text-muted-foreground">{statusCounts[s]}</span>
           </button>
         ))}
 
@@ -269,8 +269,8 @@ export function DocsIndex() {
               className="flex flex-col items-start gap-2 rounded-lg border border-border bg-card p-4 text-left transition hover:border-foreground/30"
             >
               <StatusChip status={doc.status} />
-              <span className="text-editorial-claim font-editorial-claim text-foreground line-clamp-2">{doc.title}</span>
-              <span className="mt-auto font-mono text-[10.5px] text-muted-foreground">{formatDate(doc.updated_at)}</span>
+              <span className="text-lg font-editorial-claim text-foreground line-clamp-2">{doc.title}</span>
+              <span className="mt-auto font-mono text-micro text-muted-foreground">{formatDate(doc.updated_at)}</span>
             </button>
           ))}
         </div>
@@ -288,10 +288,10 @@ export function DocsIndex() {
               <span className="absolute inset-y-0 left-0 w-1 bg-proof-line-strong" aria-hidden="true" />
               <div className="flex items-center gap-2.5">
                 <StatusChip status={lead.status} />
-                <span className="font-mono text-[11px] uppercase tracking-[0.05em] text-muted-foreground">{t('indexLeadBadge')}</span>
+                <span className="font-mono text-editorial-meta uppercase tracking-[0.05em] text-muted-foreground">{t('indexLeadBadge')}</span>
               </div>
-              <h2 className="font-display font-editorial-heading text-[27px] leading-[1.15] tracking-[-0.02em] text-foreground">{lead.title}</h2>
-              <div className="font-mono text-[12px] text-muted-foreground">{formatDate(lead.updated_at)}</div>
+              <h2 className="font-display font-editorial-heading text-2xl leading-[1.15] tracking-[-0.02em] text-foreground">{lead.title}</h2>
+              <div className="font-mono text-xs text-muted-foreground">{formatDate(lead.updated_at)}</div>
             </button>
           ) : null}
           <ul className="divide-y divide-border/60">
@@ -303,8 +303,8 @@ export function DocsIndex() {
                   className="grid w-full grid-cols-[auto_1fr_auto] items-center gap-4 py-4 text-left transition hover:bg-muted/40"
                 >
                   <StatusChip status={doc.status} />
-                  <span className="min-w-0 truncate text-editorial-claim font-editorial-claim text-foreground">{doc.title}</span>
-                  <span className="shrink-0 font-mono text-[11.5px] text-muted-foreground">{formatDate(doc.updated_at)}</span>
+                  <span className="min-w-0 truncate text-lg font-editorial-claim text-foreground">{doc.title}</span>
+                  <span className="shrink-0 font-mono text-editorial-meta text-muted-foreground">{formatDate(doc.updated_at)}</span>
                 </button>
               </li>
             ))}

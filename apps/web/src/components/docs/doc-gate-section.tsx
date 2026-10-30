@@ -315,11 +315,11 @@ export function DocGateSection({
       {isDraft && approverPickerOpen ? (
         <div className="space-y-1.5">
           {approverError ? (
-            <p role="alert" aria-live="assertive" className="break-keep text-[11px] text-foreground">{approverError}</p>
+            <p role="alert" aria-live="assertive" className="break-keep text-editorial-meta text-foreground">{approverError}</p>
           ) : null}
           {/* story #3040 v3 AC2 — 동명 표시이름이 실재할 때만(음성 대조: 비동명 org는 렌더 0). */}
           {approverHasDuplicateNames ? (
-            <p role="alert" className="break-keep text-[11px] text-warning-strong">{t('docGateApproverPickerDuplicateWarning')}</p>
+            <p role="alert" className="break-keep text-editorial-meta text-warning-strong">{t('docGateApproverPickerDuplicateWarning')}</p>
           ) : null}
           <OperatorDropdownSelect
             value={selectedApprover}
@@ -411,7 +411,7 @@ export function DocGateSection({
         <div className="space-y-1.5 rounded-lg border border-destructive/30 bg-destructive-tint p-2.5">
           <p className="text-xs font-medium text-foreground">{t('docGateDeniedReason')}</p>
           <p className="whitespace-pre-wrap break-keep [overflow-wrap:anywhere] text-xs text-foreground">{gate?.resolution_note?.trim() || t('docGateNoReason')}</p>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-editorial-meta text-muted-foreground">
             <span className="inline-flex items-center gap-1"><User className="size-3" />{resolveName(gate?.resolver_id)}</span>
             {gate?.resolved_at ? <span>· {fmtDate(gate.resolved_at)}</span> : null}
           </div>
@@ -425,7 +425,7 @@ export function DocGateSection({
             type="button"
             onClick={() => setAuditOpen((o) => !o)}
             aria-expanded={auditOpen}
-            className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+            className="inline-flex items-center gap-1 text-editorial-meta font-medium text-muted-foreground transition-colors hover:text-foreground"
           >
             <History className="size-3 shrink-0" />
             {t('docGateAuditTitle')}
@@ -440,7 +440,7 @@ export function DocGateSection({
                 const isLast = i === auditEvents.length - 1;
                 return (
                   <li key={ev.key} className="relative grid grid-cols-[18px_1fr] gap-2 pb-2.5">
-                    {!isLast ? <span className="absolute left-[8px] top-4 bottom-0 w-px bg-border" aria-hidden /> : null}
+                    {!isLast ? <span className="absolute left-2 top-4 bottom-0 w-px bg-border" aria-hidden /> : null}
                     <span className={`z-[1] grid size-[18px] place-items-center rounded-full ${am.dot}`}>
                       <AIcon className="size-2.5" />
                     </span>
@@ -449,9 +449,9 @@ export function DocGateSection({
                         {t(ev.nameFallback ? 'docGateAuditByFallback' : 'docGateAuditBy', { name: ev.name, josa: pickIGaJosa(ev.name), action: t(am.labelKey) })}
                         {ev.version ? <span className="text-muted-foreground"> (v{ev.version})</span> : null}
                       </p>
-                      <p className="mt-px text-[10.5px] text-muted-foreground">{fmtDate(ev.at)}</p>
+                      <p className="mt-px text-micro text-muted-foreground">{fmtDate(ev.at)}</p>
                       {ev.note?.trim() ? (
-                        <p className="mt-1 whitespace-pre-wrap break-keep [overflow-wrap:anywhere] rounded border-l-2 border-destructive bg-muted px-2 py-1 text-[11px] leading-[14px] text-muted-foreground">{ev.note}</p>
+                        <p className="mt-1 whitespace-pre-wrap break-keep [overflow-wrap:anywhere] rounded border-l-2 border-destructive bg-muted px-2 py-1 text-editorial-meta leading-[14px] text-muted-foreground">{ev.note}</p>
                       ) : null}
                     </div>
                   </li>
@@ -470,7 +470,7 @@ export function DocGateSection({
               <ShieldX className="size-4 shrink-0 text-destructive" />
               <DialogTitle className="text-sm font-semibold">{t('docGateRejectModalTitle')}</DialogTitle>
             </div>
-            <label className="mb-1.5 block break-keep text-[11.5px] text-muted-foreground">{t('docGateRejectReasonLabel')}</label>
+            <label className="mb-1.5 block break-keep text-editorial-meta text-muted-foreground">{t('docGateRejectReasonLabel')}</label>
             <textarea
               rows={3}
               value={note}

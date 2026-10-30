@@ -451,10 +451,10 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           이유로 그때 이미 한 번 고쳐졌던 것을 이 자리는 놓쳤음). sans로 통일 — 계열 대문자
           표기("INDEX")는 카피 자체가 이미 담당. */}
       <div className="px-3 pb-1.5 pt-3">
-        <div className="text-[9px] font-semibold text-muted-foreground">
+        <div className="text-micro font-semibold text-muted-foreground">
           {t('railKicker')}
         </div>
-        <div className="mt-0.5 font-editorial-heading text-[20px] leading-none tracking-[-0.03em] text-foreground">
+        <div className="mt-0.5 font-editorial-heading text-xl leading-none tracking-[-0.03em] text-foreground">
           {t('title')}
         </div>
         {/* story #2983(유나 확定) — 정적 장식 citron 퇴출(citron=live pulse 신호 전용).
@@ -477,7 +477,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
       {folderCreation ? (
         <div className="mx-2 mt-1.5 space-y-1.5 rounded-lg border border-border bg-card p-2">
           {folderCreationParentTitle ? (
-            <p className="truncate text-[11px] text-muted-foreground">{t('newFolderTarget', { title: folderCreationParentTitle })}</p>
+            <p className="truncate text-editorial-meta text-muted-foreground">{t('newFolderTarget', { title: folderCreationParentTitle })}</p>
           ) : null}
           <input
             autoFocus
@@ -492,7 +492,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             className="w-full min-w-0 rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
           />
           {folderCreateError ? (
-            <p className="text-[11px] text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{folderCreateError}</p>
+            <p className="text-editorial-meta text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{folderCreateError}</p>
           ) : null}
           <div className="flex items-center justify-end gap-1.5">
             <Button size="sm" variant="ghost" onClick={cancelCreateFolder} disabled={folderSubmitting}>
@@ -518,7 +518,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
               className={cn(
                 // story #2963 §2 — 언더라인 탭(I3 정본, docs-index.tsx 카테고리 탭과 동일 클래스
                 // 조합: border-b-2 border-proof-citron). setViewMode 호출·localStorage 저장은 무변경.
-                'flex-1 border-b-2 px-2 pb-1.5 text-[11px] font-semibold transition-colors',
+                'flex-1 border-b-2 px-2 pb-1.5 text-editorial-meta font-semibold transition-colors',
                 viewMode === mode
                   ? 'border-proof-citron text-foreground'
                   : 'border-transparent text-muted-foreground hover:text-foreground',
@@ -541,7 +541,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           영문 라벨("Manual order" 등)이 한 줄 flex로 넘칠 구조였다 — flex-wrap 추가.
           #2967 교훈(mono+한글=흐림)도 반영해 font-mono 제거(이 라벨도 한글). */}
       {!isSearching && viewMode === 'folders' && (
-        <div role="group" aria-label={t('sortModeLabel')} className="flex flex-wrap items-center gap-x-2.5 gap-y-1 border-b border-border/60 px-3 py-1.5 text-[11px]">
+        <div role="group" aria-label={t('sortModeLabel')} className="flex flex-wrap items-center gap-x-2.5 gap-y-1 border-b border-border/60 px-3 py-1.5 text-editorial-meta">
           <span className="text-muted-foreground">{t('sortModeLabel')}</span>
           {(['manual', 'title', 'updated_at'] as const).map((mode) => (
             <button
@@ -564,7 +564,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         if (allTags.length === 0) return null;
         return (
           <div className="border-b border-border">
-            <button type="button" onClick={() => setTagsCollapsed((v) => !v)} aria-expanded={!tagsCollapsed} className="flex w-full items-center justify-between px-4 py-1 text-[11px] text-muted-foreground hover:text-foreground">
+            <button type="button" onClick={() => setTagsCollapsed((v) => !v)} aria-expanded={!tagsCollapsed} className="flex w-full items-center justify-between px-4 py-1 text-editorial-meta text-muted-foreground hover:text-foreground">
               <span className="flex items-center gap-1.5">
                 {tagsCollapsed ? <ChevronRight className="size-3" /> : <ChevronDown className="size-3" />}
                 {t('tagFilter')}
@@ -584,11 +584,11 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
                   // story #3053(2984-S5) — 선택 상태는 subtle 헤어라인 채택, bg-proof-blue-soft
                   // 채움 폐지(비선택 bg-proof-sunk는 무채 중립 배경이라 SHIFT 대상 밖 — S1
                   // 선례와 동형).
-                  <button key={tag} type="button" onClick={() => setSelectedTags((prev) => prev.includes(tag) ? prev.filter((tg) => tg !== tag) : [...prev, tag])} className={`proof-surface proof-surface-press px-2 py-0.5 text-[11px] font-semibold transition ${selectedTags.includes(tag) ? 'border border-proof-line bg-transparent text-foreground' : 'bg-proof-sunk text-proof-ink-3 hover:bg-muted'}`}>
+                  <button key={tag} type="button" onClick={() => setSelectedTags((prev) => prev.includes(tag) ? prev.filter((tg) => tg !== tag) : [...prev, tag])} className={`proof-surface proof-surface-press px-2 py-0.5 text-editorial-meta font-semibold transition ${selectedTags.includes(tag) ? 'border border-proof-line bg-transparent text-foreground' : 'bg-proof-sunk text-proof-ink-3 hover:bg-muted'}`}>
                     #{tag}
                   </button>
                 ))}
-                {selectedTags.length > 0 && <button type="button" onClick={() => setSelectedTags([])} className="text-[11px] text-muted-foreground underline hover:text-foreground">{t('clearFilter')}</button>}
+                {selectedTags.length > 0 && <button type="button" onClick={() => setSelectedTags([])} className="text-editorial-meta text-muted-foreground underline hover:text-foreground">{t('clearFilter')}</button>}
               </div>
             )}
           </div>
@@ -668,7 +668,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             {docsHasMore && (
               <div className="px-2 py-1">
                 {docsTotal !== null && (
-                  <p className="px-2 pb-1 text-center text-[11px] text-muted-foreground">{t('treeLoadedOfTotal', { loaded: tree.length, total: docsTotal })}</p>
+                  <p className="px-2 pb-1 text-center text-editorial-meta text-muted-foreground">{t('treeLoadedOfTotal', { loaded: tree.length, total: docsTotal })}</p>
                 )}
                 <Button variant="ghost" size="sm" className="w-full text-xs text-muted-foreground" disabled={docsLoadingMore} onClick={() => { if (!docsNextCursor || docsLoadingMore) return; setDocsLoadingMore(true); void fetchTree(selectedTags.length ? selectedTags : undefined, docsNextCursor); }}>
                   {docsLoadingMore ? tc('loading') : tc('loadMore')}

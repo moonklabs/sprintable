@@ -53,7 +53,7 @@ export function TrustSeal(props: TrustSealProps) {
       // story #3054(2984-S6) — VerificationStamp(S1) 재질 언어(헤어라인+엠보스 inset) 채택,
       // bg-proof-amber-soft 채움 폐지. Green 무결성 SOUL-LOCK 무변경(green 토큰 미참조) —
       // amber 라벨("검증 대기")은 실제 상태 신호라 그대로 KEEP.
-      <div className={cn('flex items-center gap-2 rounded-lg border border-proof-line bg-proof-panel px-2.5 py-2 text-editorial-meta shadow-[var(--elev-inset)]', props.className)}>
+      <div className={cn('flex items-center gap-2 rounded-xl border border-proof-line bg-proof-panel px-2.5 py-2 text-editorial-meta shadow-[var(--elev-inset)]', props.className)}>
         {/* story #3049(2984-S1) — AGENT_MARK_FILL_CLASS(헤어라인 border 유지·soft-fill
             폐지) 채택. border는 이미 있었으니 배경만 투명으로 교체. */}
         <span className={cn('flex size-[22px] shrink-0 items-center justify-center rounded-full border border-proof-blue text-micro font-bold', AGENT_MARK_FILL_CLASS)}>
@@ -71,7 +71,7 @@ export function TrustSeal(props: TrustSealProps) {
 
   if (props.variant === 'verified') {
     return (
-      <div className={cn('flex items-center gap-2 rounded-lg bg-proof-green-soft px-2.5 py-2 text-editorial-meta', props.className)}>
+      <div className={cn('flex items-center gap-2 rounded-xl bg-proof-green-soft px-2.5 py-2 text-editorial-meta', props.className)}>
         <span className="flex size-[22px] shrink-0 items-center justify-center rounded-full bg-proof-green text-micro font-bold text-on-scrim dark:text-proof-bg">
           {props.humanName ? initials(props.humanName) : <UnnamedMemberIcon type="human" />}
         </span>

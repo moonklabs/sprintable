@@ -56,7 +56,7 @@ function GroupMemberList({ members, moreLabel, selectedSlug, onSelect }: {
             onClick={() => onSelect(doc.slug)}
             aria-current={selectedSlug === doc.slug ? 'page' : undefined}
             className={cn(
-              'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] font-semibold transition-colors',
+              'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold transition-colors',
               selectedSlug === doc.slug
                 ? 'bg-primary/10 text-primary'
                 : 'text-foreground/80 hover:bg-muted hover:text-foreground',
@@ -73,7 +73,7 @@ function GroupMemberList({ members, moreLabel, selectedSlug, onSelect }: {
           <button
             type="button"
             onClick={() => setExpanded(true)}
-            className="w-full rounded-lg px-2.5 py-1 text-left text-[11px] text-primary hover:underline"
+            className="w-full rounded-lg px-2.5 py-1 text-left text-editorial-meta text-primary hover:underline"
           >
             {moreLabel(hiddenCount)}
           </button>
@@ -108,7 +108,7 @@ function GroupHeader({ group, inFolderLabel, looseAtRootLabel, moreLabel, select
         {expanded ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />}
         {/* rebase 발견(2026-08-23, #2973/#3391 rebase 중) — group.label이 한글(예: "제품")이라
             mono uppercase가 2967과 동일 결함(흐림)을 낸다 — sans로(숫자 total은 이미 별도라 영향 없음). */}
-        <span className="flex-1 truncate text-[9.5px] font-semibold text-muted-foreground">
+        <span className="flex-1 truncate text-micro font-semibold text-muted-foreground">
           {group.label} <span className="text-border">·</span> {total}
         </span>
       </button>
@@ -117,11 +117,11 @@ function GroupHeader({ group, inFolderLabel, looseAtRootLabel, moreLabel, select
           {showSplit ? (
             <>
               <div>
-                <p className="px-2.5 pb-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">{inFolderLabel} · {group.inFolder.length}</p>
+                <p className="px-2.5 pb-0.5 text-micro uppercase tracking-wide text-muted-foreground">{inFolderLabel} · {group.inFolder.length}</p>
                 <GroupMemberList members={group.inFolder} moreLabel={moreLabel} selectedSlug={selectedSlug} onSelect={onSelect} />
               </div>
               <div>
-                <p className="px-2.5 pb-0.5 text-[10px] uppercase tracking-wide text-muted-foreground opacity-75">{looseAtRootLabel} · {group.looseAtRoot.length}</p>
+                <p className="px-2.5 pb-0.5 text-micro uppercase tracking-wide text-muted-foreground opacity-75">{looseAtRootLabel} · {group.looseAtRoot.length}</p>
                 <GroupMemberList members={group.looseAtRoot} moreLabel={moreLabel} selectedSlug={selectedSlug} onSelect={onSelect} />
               </div>
             </>

@@ -117,11 +117,11 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
   const policyPanelToggleLabel = policyPanelInlineOpen || policyPanelDrawerOpen ? t('hidePolicySprints') : t('openPolicySprints');
 
   const renderSprintSidebar = ({ mode, closePanel }: { mode: 'inline' | 'drawer'; closePanel: () => void }) => (
-    <GlassPanel className="flex h-full min-h-0 flex-col overflow-hidden border-white/8 bg-muted/75">
+    <GlassPanel className="flex h-full min-h-0 flex-col overflow-hidden border-overlay-line-1 bg-muted/75">
       <div className="space-y-4 overflow-y-auto p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">{t('policySprints')}</div>
+            <div className="text-editorial-meta font-semibold uppercase tracking-[0.22em] text-muted-foreground">{t('policySprints')}</div>
             <p className="mt-2 text-sm text-muted-foreground">{t('policySprintsDescription')}</p>
           </div>
           {mode === 'drawer' ? (
@@ -151,11 +151,11 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
                     'w-full rounded-2xl border px-3 py-3 text-left text-sm transition-all',
                     isSelected
                       ? 'border-brand/20 bg-brand/14 text-brand-text'
-                      : 'border-white/8 bg-white/5 text-foreground/88 hover:bg-white/8',
+                      : 'border-overlay-line-1 bg-overlay-fill-1 text-foreground/88 hover:bg-overlay-fill-2',
                   )}
                 >
                   <div className="font-medium">{sprint.title}</div>
-                  {isActive ? <div className="mt-1 text-[11px] text-info">{t('activeSprint')}</div> : null}
+                  {isActive ? <div className="mt-1 text-editorial-meta text-info">{t('activeSprint')}</div> : null}
                 </button>
               );
             })}
@@ -173,7 +173,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
           {policyPanelToggleLabel}
         </Button>
         {selectedSprintId ? (
-          <div className="rounded-full border border-white/8 bg-white/5 px-3 py-1.5 text-xs text-muted-foreground">
+          <div className="rounded-full border border-overlay-line-1 bg-overlay-fill-1 px-3 py-1.5 text-xs text-muted-foreground">
             {sprints.find((sprint) => sprint.id === selectedSprintId)?.title ?? t('policySprints')}
           </div>
         ) : null}
@@ -190,7 +190,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
       >
         <div className="grid gap-4 p-4 xl:grid-cols-[320px_minmax(0,1fr)]">
           <div className="flex flex-col min-h-0">
-            <div className="border-b border-white/8 px-4 py-4">
+            <div className="border-b border-overlay-line-1 px-4 py-4">
               <div className="space-y-3">
                 <div>
                   <div className="text-sm font-semibold text-foreground">{t('policyEpics')}</div>
@@ -201,7 +201,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder={t('policySearchPlaceholder')}
-                  className="w-full rounded-2xl border border-white/8 bg-muted/90 px-4 py-2.5 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:border-brand/20 focus:outline-none"
+                  className="w-full rounded-2xl border border-overlay-line-1 bg-muted/90 px-4 py-2.5 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:border-brand/20 focus:outline-none"
                 />
               </div>
             </div>
@@ -226,7 +226,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
                           'w-full rounded-2xl border px-3 py-3 text-left text-sm transition-all',
                           isSelected
                             ? 'border-brand/20 bg-brand/14 text-brand-text'
-                            : 'border-white/8 bg-white/5 text-foreground/88 hover:bg-white/8',
+                            : 'border-overlay-line-1 bg-overlay-fill-1 text-foreground/88 hover:bg-overlay-fill-2',
                         )}
                       >
                         <div className="font-medium">{doc.title || doc.epic?.title || t('untitledPolicyDoc')}</div>
@@ -239,7 +239,7 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
           </div>
 
           <div className="flex flex-col min-h-0">
-            <div className="border-b border-white/8 px-4 py-4">
+            <div className="border-b border-overlay-line-1 px-4 py-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-sm font-semibold text-foreground">{selectedDoc?.title || selectedDoc?.epic?.title || t('selectPolicyEpic')}</div>
