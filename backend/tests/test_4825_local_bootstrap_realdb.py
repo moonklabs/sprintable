@@ -94,6 +94,7 @@ async def embedded(monkeypatch):
     monkeypatch.delenv("K_SERVICE", raising=False)
     limiter.reset()
     local_auth._failures.clear()
+    local_auth._suppressed = 0
     await _wipe_owner()
     app = FastAPI()
     app.state.limiter = limiter
@@ -354,6 +355,28 @@ async def test_18_wrong_secrets_are_throttled_but_the_right_one_always_passes(em
         assert ok.status_code == 200 and ok.json()["data"]["access_token"], ok.text
         assert (await c.post(URL, headers=_h())).status_code == 200
     assert await _counts() == (1, 1, 1, 1)
+
+
+async def test_18b_after_the_limit_the_throttled_attempts_are_counted_not_logged_one_by_one(embedded, caplog, monkeypatch):
+    """a loop of wrong secrets must not push the other lines out of the server's rotating log: ≤ 30 refusal lines + 1 limit line, then ONE count line"""
+    import logging
+
+    from app.routers import local_auth
+
+    caplog.set_level(logging.DEBUG, logger="app.routers.local_auth")
+    async with _client(embedded) as c:
+        for i in range(200):
+            await c.post(URL, headers=_h(f"wrong-{i}"))
+        lines = [r.getMessage() for r in caplog.records if r.name == "app.routers.local_auth"]
+        assert len(lines) == 31, (len(lines), lines[-3:])  # 30 refusals + the one «limit reached» line
+        assert sum("limit is reached" in m for m in lines) == 1
+        # the window clears: the next call (here a right one) reports the count once
+        real = local_auth.time.monotonic
+        monkeypatch.setattr(local_auth.time, "monotonic", lambda: real() + 3600)
+        assert (await c.post(URL, headers=_h())).status_code == 200
+    counted = [r.getMessage() for r in caplog.records if r.name == "app.routers.local_auth" and "were throttled" in r.getMessage()]
+    assert len(counted) == 1 and "170" in counted[0], counted
+    assert SECRET not in caplog.text
 
 
 async def test_19_an_embedded_install_serves_only_the_loopback_host_name(monkeypatch):

@@ -50,10 +50,28 @@ _FAIL_WINDOW_S = 60.0
 _failures: deque[float] = deque(maxlen=_FAIL_LIMIT * 4)
 
 
+#: once the limit is hit, the throttled attempts are COUNTED, not logged one by one (a loop of wrong secrets must not push the other lines out of the
+#: server's rotating log): one line when the limit is reached, one line with the count when the window clears.
+_suppressed = 0
+
+
+def _note_throttled() -> None:
+    global _suppressed
+    if _suppressed == 0:
+        logger.warning("local-bootstrap throttled: the wrong-secret limit is reached; further attempts are counted, not logged")
+    _suppressed += 1
+
+
 def _too_many_failures(now: float) -> bool:
+    """True while the limit is hit. Called on every call, so the "N attempts were throttled" line comes out as soon as the window has cleared."""
+    global _suppressed
     while _failures and _failures[0] < now - _FAIL_WINDOW_S:
         _failures.popleft()
-    return len(_failures) >= _FAIL_LIMIT
+    over = len(_failures) >= _FAIL_LIMIT
+    if not over and _suppressed:
+        logger.warning("local-bootstrap: %d wrong-secret attempts were throttled in the last window (not logged one by one)", _suppressed)
+        _suppressed = 0
+    return over
 _LOCK_KEY = "sprintable:local-bootstrap"
 
 
@@ -100,10 +118,11 @@ async def local_bootstrap(
         return _refuse()
     expected = settings.local_bootstrap_secret.encode()
     provided = (x_local_bootstrap_secret or "").encode()
+    _too_many_failures(time.monotonic())  # also lets a window that has cleared report its throttled count before anything else is logged
     if not hmac.compare_digest(provided, expected):
         now = time.monotonic()
         if _too_many_failures(now):
-            logger.warning("local-bootstrap throttled: too many wrong secrets")
+            _note_throttled()
             return JSONResponse(
                 {"data": None, "error": {"code": "RATE_LIMITED", "message": "Too many attempts"}, "meta": None},
                 status_code=429, headers={"Retry-After": str(int(_FAIL_WINDOW_S))},
@@ -202,7 +221,9 @@ def register_local_auth_routes(app: FastAPI) -> bool:
 def apply_embedded_host_guard(app: FastAPI) -> bool:
     """On an embedded install ONLY the loopback host name is served, on every route of the app: a page that rebinds its own DNS name to 127.0.0.1
     reaches this server with `Host: its-name`, and would otherwise be able to touch any door on the port (sign-up, …). The port is not matched (the
-    server does not know its own); a hostname other than `127.0.0.1` gets 400. Returns whether it was applied (never on a hosted deployment)."""
+    server does not know its own); a hostname other than `127.0.0.1` gets 400 — `localhost` too, so a client configured for this server (an MCP client's
+    URL, a health check) must say `127.0.0.1`, not `localhost`. The web server in front applies the same rule to ITS Host (`embeddedHostRefusal` in the web
+    app), because its forward re-addresses the request. Returns whether it was applied (never on a hosted deployment)."""
     if not settings.is_embedded:
         return False
     from starlette.middleware.trustedhost import TrustedHostMiddleware

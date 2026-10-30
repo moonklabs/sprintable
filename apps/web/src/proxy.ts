@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookieBase, markSessionChanged, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { SESSION_EXPIRED_REASON } from '@/lib/auth/session-redirect';
 import { isRecentlySuperseded } from '@/lib/auth/switch-epoch';
-import { carryOnToTarget, embeddedApiTarget } from '@/lib/embedded-api-origin';
+import { carryOnToTarget, embeddedApiTarget, embeddedHostRefusal } from '@/lib/embedded-api-origin';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { MIGRATED_RESOURCES, RENAMED_RESOURCES, RETIRED_RESOURCES } from '@/lib/legacy-resource-tables';
@@ -850,6 +850,9 @@ function captureSignupAttribution(request: NextRequest, response: NextResponse):
 // story 4824 — inside the desktop app's own server `/api/v2/*` is forwarded here, at request time, to the backend port the app chose at launch (see lib/embedded-api-origin.ts);
 // every other server keeps the build-time rewrite in next.config.ts. The proxy below runs in full first — only the destination of «carry on» changes.
 export async function proxy(request: NextRequest) {
+  // story 4825 — first of all: inside the app's own server a foreign Host name (a DNS-rebinding page) is refused before anything else runs
+  const foreignHost = embeddedHostRefusal(request);
+  if (foreignHost) return foreignHost;
   const response = await proxyWithTiming(request);
   const target = embeddedApiTarget(request.nextUrl.pathname, request.nextUrl.search);
   return target ? carryOnToTarget(response, target) : response;
