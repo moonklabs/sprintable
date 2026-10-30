@@ -24,7 +24,6 @@ from fastapi import APIRouter, Depends, FastAPI, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -96,7 +95,7 @@ async def local_bootstrap(
 
     # lazy imports: the auth router is a large module; keep this one importable on its own and avoid an import cycle at app start
     from app.models.organization import Organization
-    from app.models.project import OrgMember, Project
+    from app.models.project import OrgMember
     from app.routers.auth import (
         _ok,
         _persist_resolved_context,
@@ -142,24 +141,19 @@ async def local_bootstrap(
         .where(OrgMember.user_id == user.id, OrgMember.role == "owner", OrgMember.deleted_at.is_(None))
         .order_by(OrgMember.created_at.asc()).limit(1)
     )).scalar_one_or_none()
-    if org_id is None:
+    created_org = org_id is None
+    if created_org:
         # the app sends a localized name; the server keeps no Korean user strings (story #3779), so its own default is English
         org = await create_org_with_owner(
             session, name=_clean(body.org_name, "My workspace"), slug=None, user_id=str(user.id), owner_member_id=None,
         )
         org_id = org.id
-    has_project = (await session.execute(
-        select(Project.id).where(Project.org_id == org_id, Project.deleted_at.is_(None)).limit(1)
-    )).scalar_one_or_none()
-    if has_project is None:
-        try:
-            async with session.begin_nested():  # a savepoint: a slug taken by someone creating a project in this organization at this moment is not a 500
-                await create_project_with_member(
-                    session, org_id=org_id, name=_clean(body.project_name, "First project"),
-                    description=None, slug=None, user_id=str(user.id),
-                )
-        except IntegrityError:
-            logger.info("local-bootstrap: the first project lost a race to another creator; the next call finds it")
+        # the first project belongs to the organization THIS call made: nobody else can be creating one in an organization that did not exist a
+        # moment ago (no slug race), and a person who later deletes their projects does not get a new one on every launch
+        await create_project_with_member(
+            session, org_id=org_id, name=_clean(body.project_name, "First project"),
+            description=None, slug=None, user_id=str(user.id),
+        )
     await session.flush()
 
     # the session is issued exactly as a password sign-in does it (routers/auth.py login): same claims, same stored refresh token
