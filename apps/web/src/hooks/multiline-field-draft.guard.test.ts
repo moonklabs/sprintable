@@ -63,6 +63,7 @@ const EXEMPT: Record<string, string> = {
   'components/settings/workflow-line-editor-section.tsx': '설정 탭 섹션 — 창 밖',
   'components/shared/entity-aware-textarea.tsx': '부품 정의(여러 줄 칸 자체)',
   'components/ui/operator-control.tsx': '부품 정의(OperatorTextarea 자체)',
+  'components/ui/textarea.tsx': '부품 정의(Textarea 자체) — 값을 소유하지 않는 부품이라 초안은 이 부품을 쓰는 폼이 단다(4831)',
 };
 
 type Verdict = 'drafted' | 'via' | 'exempt' | 'undrafted' | 'none';
