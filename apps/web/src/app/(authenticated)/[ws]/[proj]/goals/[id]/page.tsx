@@ -444,15 +444,15 @@ export default function EpicDetailPage() {
             font-display는 안 붙이고 font-editorial-heading(무게 유틸, 820)만 유지한다. */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="proof-surface proof-surface-lift border border-border bg-card px-4 py-3.5">
-            <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">{t('taskCapsuleTitle')}</div>
+            <div className="font-mono text-micro uppercase tracking-[0.1em] text-muted-foreground">{t('taskCapsuleTitle')}</div>
             <div className="mt-1.5 flex items-baseline gap-2">
-              <span className="font-editorial-heading text-[26px] tracking-[-0.02em] text-foreground">{done}/{stories.length}</span>
+              <span className="font-editorial-heading text-2xl tracking-[-0.02em] text-foreground">{done}/{stories.length}</span>
               <span className="font-mono text-xs text-muted-foreground">{t('stories')}</span>
             </div>
             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
               <div className="h-full rounded-full bg-proof-ink-3 transition-all duration-300" style={{ width: `${stories.length > 0 ? Math.round((done / stories.length) * 100) : 0}%` }} />
             </div>
-            <div className="mt-2 text-[11px] text-muted-foreground">{t('taskCapsuleHint')}</div>
+            <div className="mt-2 text-editorial-meta text-muted-foreground">{t('taskCapsuleHint')}</div>
           </div>
           {/* story #3053(2984-S5) — 헤어라인+elev(S1 재질 언어) 채택, bg-proof-blue-soft 채움
               폐지. 강조 색은 이 카드의 항상-고정 blue(상태별 분기 없음, 기존 동작 그대로)를
@@ -461,15 +461,15 @@ export default function EpicDetailPage() {
               story #7d7634ee(P0) — elev-card는 proof-surface-lift로 흡수(두 elevation
               시스템 이중 적용 방지, box-shadow 충돌 제거). */}
           <div className="proof-surface proof-surface-lift border border-proof-line bg-proof-panel px-4 py-3.5">
-            <div className="font-mono text-[10px] uppercase tracking-[0.1em] text-proof-blue">{t('outcomeCapsuleTitle')}</div>
-            <div className="mt-1.5 font-editorial-heading text-[22px] tracking-[-0.02em] text-proof-blue">
+            <div className="font-mono text-micro uppercase tracking-[0.1em] text-proof-blue">{t('outcomeCapsuleTitle')}</div>
+            <div className="mt-1.5 font-editorial-heading text-xl tracking-[-0.02em] text-proof-blue">
               {epic.outcome_status === 'hit' ? t('outcomeCapsuleHit')
                 : epic.outcome_status === 'miss' ? t('outcomeCapsuleMiss')
                 : epic.outcome_status === 'unmeasured' ? t('outcomeCapsuleUnmeasured')
                 : epic.outcome_status === 'unmeasurable' ? t('outcomeCapsuleUnmeasurable')
                 : t('outcomeCapsuleUnmeasuredYet')}
             </div>
-            <div className="mt-2 text-[13px] leading-snug text-foreground/80">
+            <div className="mt-2 text-editorial-ui leading-snug text-foreground/80">
               {epic.success_criteria?.trim() ? epic.success_criteria.split('\n')[0] : t('outcomeCapsuleNoCriteria')}
               {epic.measure_after ? ` · ${t('targetDate')} ${formatDate(epic.measure_after, displayTimezone)}` : ''}
             </div>
@@ -564,7 +564,7 @@ export default function EpicDetailPage() {
               {storyGroups.map(({ status: groupStatus, items }) => (
                 <div key={groupStatus}>
                   <div className="mb-1.5 flex items-center gap-2">
-                    <Badge variant={storyStatusVariant(groupStatus)} className="text-[10px]">
+                    <Badge variant={storyStatusVariant(groupStatus)} className="text-micro">
                       {storyStatusLabel(groupStatus)}
                     </Badge>
                     <span className="text-xs text-muted-foreground">{t('itemCount', { count: items.length })}</span>

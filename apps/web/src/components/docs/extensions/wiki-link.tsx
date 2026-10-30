@@ -169,14 +169,14 @@ function WikiLinkMenu({
   // story #3007(로드맵 P2·PR-E, L1) — 프리뷰/메뉴 둘 다 floating이라 --elev-overlay(아래 2곳).
   if (items.length === 0) {
     return (
-      <div className="w-56 rounded-xl border border-white/10 bg-card p-3 text-xs text-muted-foreground shadow-[var(--elev-overlay)]">
+      <div className="w-56 rounded-xl border border-overlay-line-1 bg-card p-3 text-xs text-muted-foreground shadow-[var(--elev-overlay)]">
         {notFoundLabel}
       </div>
     );
   }
 
   return (
-    <div ref={menuRef} className="max-h-64 w-56 overflow-y-auto rounded-xl border border-white/10 bg-card p-1 shadow-[var(--elev-overlay)]">
+    <div ref={menuRef} className="max-h-64 w-56 overflow-y-auto rounded-xl border border-overlay-line-1 bg-card p-1 shadow-[var(--elev-overlay)]">
       {items.map((item, i) => (
         <button
           key={item.id}

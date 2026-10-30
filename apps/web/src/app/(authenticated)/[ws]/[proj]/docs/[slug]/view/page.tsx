@@ -127,7 +127,7 @@ export default function DocViewPage() {
           story #2967(선생님 실사용 판정) — font-mono가 한글에서 가늘고 흐리다(에디토리얼
           mono 문법은 라틴 고정폭 전제라 한글엔 안 맞음). meta-caps는 라틴 전용으로 한정하고
           한글 경로는 sans 본문체로 — 위계는 크기/weight/citron rule로만 낸다. */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/20 px-4 py-2.5 text-[12px] text-muted-foreground lg:px-8">
+      <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/20 px-4 py-2.5 text-xs text-muted-foreground lg:px-8">
         {/* [SID:4356] 좁은 폭(390/360)에서 이 줄이 nowrap flex라 «지식»이 한 글자 폭(10~12px)까지 줄어 «지 / 식»으로 꺾였다(한글 최소 폭 = 한 글자).
             뿌리 «지식» · 구분 «/»는 줄지 않고 안 꺾임 · 분류 · 제목은 한 줄로 줄되 말줄임(낱말 중간에서 안 꺾임). 넓으면 예전과 같다.
             유나 CR(PR 4747) — 분류 · 제목이 같은 규칙(바탕 = 글자 폭)이면 글자 폭 비례로 줄어 짧은 분류(«기획»)가 5.8~10.6px로 눌려
@@ -154,13 +154,13 @@ export default function DocViewPage() {
             {/* story #2967 — kicker/byline은 한글 콘텐츠(카테고리명·작성자명)라 mono+uppercase+
                 wide tracking을 걷는다(«처방도 언어 축을 탄다» — 라틴 전용 문법을 한글에
                 강제하지 않는다). 위계는 색(citron 라인 계열 blue)+굵기로만 유지. */}
-            <div className="text-[13px] font-semibold text-proof-blue">
+            <div className="text-editorial-ui font-semibold text-proof-blue">
               {categoryLabel ?? t('indexCategoryUncategorized')}
             </div>
             {/* story #2974(PR-D0) delta — font-display(페이스)+font-editorial-heading(무게 유틸,
                 --font-weight-editorial-heading:820) 병기. docs-index.tsx 마스트헤드 주석 참고. */}
-            <h1 className="mt-2 font-display font-editorial-heading text-[38px] leading-[1.1] tracking-[-0.03em] text-foreground">{doc.title}</h1>
-            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground">
+            <h1 className="mt-2 font-display font-editorial-heading text-display leading-[1.1] tracking-[-0.03em] text-foreground">{doc.title}</h1>
+            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-editorial-ui text-muted-foreground">
               {doc.assignee ? (<><span>{doc.assignee.name}</span><span className="text-border">|</span></>) : null}
               <span>{doc.updated_at ? formatViewerRelativeTime(doc.updated_at, locale, displayTimezone) : ''}</span>
               <span className="text-border">|</span>

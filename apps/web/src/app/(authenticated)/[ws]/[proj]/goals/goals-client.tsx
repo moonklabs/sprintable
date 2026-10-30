@@ -669,13 +669,13 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
             {/* story #3053(2984-S5) — MaterialChip(S1, 헤어라인+fill 0) 채택, 상태별
                 bg-proof-blue-soft/bg-proof-sunk 채움 폐지. dot 신호(active=blue·비active=
                 faint)는 이미 있던 신호라 그대로 KEEP. */}
-            <MaterialChip className="gap-1 text-[10.5px]">
+            <MaterialChip className="gap-1 text-micro">
               <span className={`size-1.5 rounded-full ${epic.status === 'active' ? 'bg-proof-blue' : 'bg-proof-faint'}`} />
               {statusLabel[epic.status]}
             </MaterialChip>
             {epic.outcome_status && epic.outcome_status !== 'n_a' ? <OutcomeStatusBadge status={epic.outcome_status} /> : null}
           </div>
-          <p className="min-w-0 flex-1 text-editorial-claim font-editorial-claim leading-snug text-foreground">{epic.title}</p>
+          <p className="min-w-0 flex-1 text-lg font-editorial-claim leading-snug text-foreground">{epic.title}</p>
           <div className="flex shrink-0 items-center gap-1.5">
             {/* story #2e583f9e(2984-S7, 유나 확定 2026-08-25) — soft-fill(bg-proof-amber-soft)
                 SHIFT→헤어라인(MaterialChip). 색 신호(unconfirmed/제안 의미)는 dot로 KEEP —
@@ -683,17 +683,17 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
                 이전(대비표 정본 — 옅은 배경+같은 계열 글자 조합 자체가 문제). */}
             {sortable ? (
               curated ? (
-                <MaterialChip className="gap-1 text-[10px] text-foreground">
+                <MaterialChip className="gap-1 text-micro text-foreground">
                   <span className="size-1.5 rounded-full bg-proof-amber" aria-hidden="true" />
                   {t('steerCurated')} {epic.position}
                 </MaterialChip>
               ) : (
-                <span className="text-[10px] font-medium text-muted-foreground">{t('steerAuto')}</span>
+                <span className="text-micro font-medium text-muted-foreground">{t('steerAuto')}</span>
               )
             ) : null}
             {/* Loop 제안 hook — source_loop_id 배선(P3/v2) 전엔 미표시(no-fiction·sparkle 0). */}
             {epic.source_loop_id ? (
-              <MaterialChip className="gap-1 text-[10px] text-foreground">
+              <MaterialChip className="gap-1 text-micro text-foreground">
                 <span className="size-1 rounded-full bg-proof-amber" aria-hidden="true" />
                 {t('steerLoopSuggest')}
               </MaterialChip>
@@ -725,15 +725,15 @@ function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalR
             작업 바는 반드시 중립색(proof-ink-3) — green은 outcome=hit에만(§8 설계 확定, soul-lock). */}
         {total > 0 ? (
           <div className="flex items-center gap-2">
-            <span className="w-8 shrink-0 font-mono text-[10px] text-muted-foreground">{t('taskLabel')}</span>
+            <span className="w-8 shrink-0 font-mono text-micro text-muted-foreground">{t('taskLabel')}</span>
             <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-border">
               <div className="h-full rounded-full bg-proof-ink-3 transition-all duration-300" style={{ width: `${pct}%` }} />
             </div>
-            <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{done}/{total}</span>
+            <span className="shrink-0 font-mono text-micro text-muted-foreground">{done}/{total}</span>
           </div>
         ) : null}
         <div className="flex items-center gap-2">
-          <span className="w-8 shrink-0 font-mono text-[10px] text-muted-foreground">{t('outcomeLabel')}</span>
+          <span className="w-8 shrink-0 font-mono text-micro text-muted-foreground">{t('outcomeLabel')}</span>
           {/* story #3099(DS·AA 후속, #3090과 동형) — green/blue 소형텍스트(12px) AA 미달(라이트
               green 3.49), 별도 dot 없는 자리라 text-proof-ink로 중립화(일관성 위해 blue도 동형
               처리 — #3090 선례). 의미는 텍스트 자체(outcomeLine.text)가 이미 병기. */}
@@ -931,7 +931,7 @@ function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
                         {story.story_points !== undefined ? (
                           <span className="text-xs text-muted-foreground">{story.story_points} SP</span>
                         ) : null}
-                        <Badge variant={story.status === 'done' ? 'success' : 'secondary'} className="text-[10px]">
+                        <Badge variant={story.status === 'done' ? 'success' : 'secondary'} className="text-micro">
                           {storyStatusLabel(story.status)}
                         </Badge>
                       </div>
@@ -1195,10 +1195,10 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
           스케일 goals 첫 소비처). TopBarSlot(아래)은 얇은 전역 브레드크럼 칩이라 존속 — 이
           마스트헤드가 실질 콘텐츠 헤더. */}
       <div className="shrink-0 border-b border-border px-4 pb-4 pt-5 sm:px-6">
-        <div className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-proof-blue">{t('indexKicker')}</div>
+        <div className="font-mono text-editorial-meta font-semibold uppercase tracking-[0.16em] text-proof-blue">{t('indexKicker')}</div>
         {/* story #2974(PR-D0) delta — font-display(페이스)+font-editorial-heading(무게 유틸,
             --font-weight-editorial-heading:820) 병기. docs-index.tsx 마스트헤드 주석 참고. */}
-        <h1 className="mt-1.5 font-display font-editorial-heading text-[28px] leading-none tracking-[-0.03em] text-foreground sm:text-[34px]">{t('title')}</h1>
+        <h1 className="mt-1.5 font-display font-editorial-heading text-2xl leading-none tracking-[-0.03em] text-foreground sm:text-display">{t('title')}</h1>
         {/* story #2983(유나 확定) — 정적 장식 citron 퇴출(citron=live pulse 신호 전용).
             시그니처는 무채 두께(3px)·길이로 유지. */}
         <hr className="my-3 h-[3px] w-16 border-0 bg-proof-line-strong" />
@@ -1232,7 +1232,7 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
           전체 뷰일 때만. 누르면 수신자 선택 모달 → POST /epics/steer-dispatch. */}
       {sortable && hasCurated ? (
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-proof-line-soft px-4 py-2">
-          <span className="min-w-0 truncate text-[11px] text-muted-foreground">{t('steerCommitHint')}</span>
+          <span className="min-w-0 truncate text-editorial-meta text-muted-foreground">{t('steerCommitHint')}</span>
           <Button size="sm" variant="outline" className="shrink-0" onClick={() => setShowDispatch(true)}>
             <Send className="mr-1.5 h-3.5 w-3.5" />
             {t('steerCommit')}
@@ -1246,11 +1246,11 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
       {justDispatched ? (
         // story #3053(2984-S5) — 헤어라인+elev(S1 재질 언어) 채택, bg-proof-blue-soft 채움
         // 폐지. pulse dot(라이브 신호)은 그대로 KEEP — proof-blue.
-        <div className="flex shrink-0 items-center gap-2 border-y border-proof-line bg-proof-panel px-4 py-2 text-[11.5px] font-semibold text-foreground shadow-[var(--elev-card)]">
+        <div className="flex shrink-0 items-center gap-2 border-y border-proof-line bg-proof-panel px-4 py-2 text-editorial-meta font-semibold text-foreground shadow-[var(--elev-card)]">
           <span className="size-1.5 shrink-0 rounded-full bg-proof-blue motion-safe:animate-pulse" aria-hidden="true" />
           <span>{t('steerHandoffReceived')} · <b className="font-bold">{t('steerHandoffOrchestrating')}</b></span>
           {dispatchedTo.length > 0 ? (
-            <span className="ml-auto max-w-[45%] truncate text-[9.5px] font-bold text-muted-foreground">{dispatchedTo.join(', ')}</span>
+            <span className="ml-auto max-w-[45%] truncate text-micro font-bold text-muted-foreground">{dispatchedTo.join(', ')}</span>
           ) : null}
         </div>
       ) : null}
@@ -1303,7 +1303,7 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
                   />
                 ))}
                 {capped ? (
-                  <p className="pt-1 text-center text-[11px] text-muted-foreground">{t('steerCappedNote', { count: STEER_LIMIT })}</p>
+                  <p className="pt-1 text-center text-editorial-meta text-muted-foreground">{t('steerCappedNote', { count: STEER_LIMIT })}</p>
                 ) : null}
               </div>
             </SortableContext>

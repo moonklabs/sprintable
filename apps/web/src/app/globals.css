@@ -494,8 +494,9 @@
   --tiptap-placeholder: oklch(0.60 0 0);
   --tiptap-selection: oklch(0.66 0.18 258);
   --tiptap-link: oklch(0.55 0.18 258);
-  --tiptap-callout-border: oklch(0.55 0.16 145);
-  --tiptap-callout-bg: oklch(0.55 0.16 145 / 8%);
+  /* story 4831: 노드가 인라인 style로 호박색(#f59e0b)을 주고 있어 이 초록 토큰은 에디터에서 가려져 있었다 — 호박색을 바탕 토큰으로 옮기며 이 두 토큰도 같은 값으로 맞춰 한 곳에서 정한다. */
+  --tiptap-callout-border: var(--proof-amber);
+  --tiptap-callout-bg: var(--proof-amber-soft);
 
   /* E-UI-DAEGBYEON P0: Proof Capsule (Light · Bone) — proof-capsule-mockup-render 정확값.
      story #3826(UX-v3·FE 2, 유나 「[UX-v3] 토큰 표」 doc 3dc24888 정본) — 아래 라이트 값은
@@ -794,8 +795,8 @@
   --tiptap-placeholder: oklch(0.50 0 0);
   --tiptap-selection: oklch(0.70 0.18 258);
   --tiptap-link: oklch(0.75 0.14 258);
-  --tiptap-callout-border: oklch(0.65 0.15 145);
-  --tiptap-callout-bg: oklch(0.65 0.15 145 / 10%);
+  --tiptap-callout-border: var(--proof-amber);
+  --tiptap-callout-bg: var(--proof-amber-soft);
 
   /* E-UI-DAEGBYEON P0: Proof Capsule (Dark · Carbon/Fog) — proof-capsule-mockup-render 정확값.
      단순 반전 아님(§ 의미대비) — blue/green/amber/red 전부 dark 전용 값. */

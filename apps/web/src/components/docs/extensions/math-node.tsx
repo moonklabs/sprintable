@@ -54,9 +54,9 @@ function MathBlockView({ node, selected }: ReactNodeViewProps) {
       <div className="rounded-xl border border-border bg-muted/10">
         {/* Header */}
         <div className="flex items-center justify-between px-3 py-2" contentEditable={false}>
-          <span className="text-[11px] font-medium text-muted-foreground">math</span>
+          <span className="text-editorial-meta font-medium text-muted-foreground">math</span>
           {selected && (
-            <span className="text-[11px] text-muted-foreground">{t('mathEditingLatex')}</span>
+            <span className="text-editorial-meta text-muted-foreground">{t('mathEditingLatex')}</span>
           )}
         </div>
 

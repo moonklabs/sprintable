@@ -57,12 +57,12 @@ function ColumnsBlockView({ node, editor, getPos, updateAttributes }: ReactNodeV
         contentEditable={false}
         className={cn('mb-1.5 flex items-center gap-1 transition-opacity', HOVER_REVEAL)}
       >
-        <span className="text-[10px] uppercase tracking-widest text-muted-foreground mr-1">{t('columnsLabel')}</span>
+        <span className="text-micro uppercase tracking-widest text-muted-foreground mr-1">{t('columnsLabel')}</span>
         <button
           type="button"
           aria-pressed={cols === 2}
           onClick={() => switchTo(2)}
-          className={`${HOVER_REVEAL_HIT} gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors ${HOVER_REVEAL_FOCUS_RING} ${
+          className={`${HOVER_REVEAL_HIT} gap-1 rounded-md border px-2 py-0.5 text-editorial-meta transition-colors ${HOVER_REVEAL_FOCUS_RING} ${
             cols === 2
               ? 'border-brand/40 bg-brand/10 text-brand-text'
               : 'border-border text-muted-foreground hover:border-brand/30 hover:text-foreground'
@@ -74,7 +74,7 @@ function ColumnsBlockView({ node, editor, getPos, updateAttributes }: ReactNodeV
           type="button"
           aria-pressed={cols === 3}
           onClick={() => switchTo(3)}
-          className={`${HOVER_REVEAL_HIT} gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors ${HOVER_REVEAL_FOCUS_RING} ${
+          className={`${HOVER_REVEAL_HIT} gap-1 rounded-md border px-2 py-0.5 text-editorial-meta transition-colors ${HOVER_REVEAL_FOCUS_RING} ${
             cols === 3
               ? 'border-brand/40 bg-brand/10 text-brand-text'
               : 'border-border text-muted-foreground hover:border-brand/30 hover:text-foreground'

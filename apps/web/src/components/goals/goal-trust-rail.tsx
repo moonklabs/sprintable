@@ -67,13 +67,13 @@ export function GoalTrustRail({ outcomeStatus, measureAfter, createdAt, epicId, 
 
   return (
     <div>
-      <div className="font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+      <div className="font-mono text-editorial-meta font-semibold uppercase tracking-[0.16em] text-muted-foreground">
         {t('trustRailTitle')}
       </div>
       <ol className="relative mt-3 space-y-3 border-l border-border pl-4">
         {/* 결과 검증 — 판정 완료(초록/파랑, §8 색규율: hit만 green·나머지 중립/blue) vs 예정(dashed). */}
         <li className="relative">
-          <span className={`absolute -left-[19px] top-2 size-2 rounded-full border-2 border-background ${judged ? (outcomeStatus === 'hit' ? 'bg-proof-green' : 'bg-proof-blue') : 'bg-transparent border-dashed border-proof-blue'}`} />
+          <span className={`absolute -left-5 top-2 size-2 rounded-full border-2 border-background ${judged ? (outcomeStatus === 'hit' ? 'bg-proof-green' : 'bg-proof-blue') : 'bg-transparent border-dashed border-proof-blue'}`} />
           {judged ? (
             <ProofCapsule
               density="audit"
@@ -85,8 +85,8 @@ export function GoalTrustRail({ outcomeStatus, measureAfter, createdAt, epicId, 
             />
           ) : (
             <div className="border border-dashed border-proof-blue/40 px-3 py-2">
-              <div className="text-[13px] font-bold text-proof-blue">{t('trustRailOutcomePending')}</div>
-              {measureAfter ? <div className="mt-0.5 font-mono text-[11px] text-muted-foreground">{t('outcomeAwaitingMeasure')} · {fmtScheduled(measureAfter)}</div> : null}
+              <div className="text-editorial-ui font-bold text-proof-blue">{t('trustRailOutcomePending')}</div>
+              {measureAfter ? <div className="mt-0.5 font-mono text-editorial-meta text-muted-foreground">{t('outcomeAwaitingMeasure')} · {fmtScheduled(measureAfter)}</div> : null}
             </div>
           )}
         </li>
@@ -94,8 +94,8 @@ export function GoalTrustRail({ outcomeStatus, measureAfter, createdAt, epicId, 
         {/* 가설 증거 — HypothesesSection과 동일 엔드포인트 재사용, 개수만(밀집도상 배지 생략). */}
         {hypCount > 0 ? (
           <li className="relative">
-            <span className="absolute -left-[19px] top-2 size-2 rounded-full border-2 border-background bg-proof-amber" />
-            <div className="flex items-center gap-1.5 text-[13px] font-medium text-foreground">
+            <span className="absolute -left-5 top-2 size-2 rounded-full border-2 border-background bg-proof-amber" />
+            <div className="flex items-center gap-1.5 text-editorial-ui font-medium text-foreground">
               <FlaskConical className="size-3.5 text-muted-foreground" aria-hidden="true" />
               {t('trustRailHypotheses', { count: hypCount })}
             </div>
@@ -107,14 +107,14 @@ export function GoalTrustRail({ outcomeStatus, measureAfter, createdAt, epicId, 
           {/* story #3053(2984-S5) — KEEP 재검(doc §2): 형제 노드(위 hypotheses)는 solid
               bg-proof-amber인데 이 dot만 -soft(옅은 틴트)라 재질 불일치였다 — dot은 신호라
               유지하되, 솔리드 채도로 정합(제거 아니라 정제). */}
-          <span className="absolute -left-[19px] top-2 size-2 rounded-full border-2 border-background bg-proof-blue" />
-          <div className="text-[13px] font-medium text-foreground">{t('trustRailCreated')}</div>
-          <div className="font-mono text-[11px] text-muted-foreground">{fmtRecord(createdAt)}</div>
+          <span className="absolute -left-5 top-2 size-2 rounded-full border-2 border-background bg-proof-blue" />
+          <div className="text-editorial-ui font-medium text-foreground">{t('trustRailCreated')}</div>
+          <div className="font-mono text-editorial-meta text-muted-foreground">{fmtRecord(createdAt)}</div>
         </li>
       </ol>
 
       <div className="mt-6 border border-border bg-muted/30 p-3">
-        <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{t('trustRailColorRuleTitle')}</div>
+        <div className="font-mono text-micro uppercase tracking-[0.12em] text-muted-foreground">{t('trustRailColorRuleTitle')}</div>
         <div className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
           {/* story #3099(DS·AA 후속) — green 소형텍스트(12px) AA 미달, text-proof-ink로
               중립화(별도 dot 없는 범례 문구 — 텍스트 자체가 이미 규칙을 서술). */}

@@ -54,7 +54,7 @@ export function TreeSearchInput({
         )}
       </div>
       {isSearching && (
-        <p className="mt-1 px-1 text-[11px] text-muted-foreground">
+        <p className="mt-1 px-1 text-editorial-meta text-muted-foreground">
           {matchCount === 0 ? noResultsLabel : resultCountLabel(matchCount)}
         </p>
       )}
