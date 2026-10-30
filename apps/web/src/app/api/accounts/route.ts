@@ -11,8 +11,9 @@ import {
 } from '@/lib/auth/account-vault';
 import { backendFetch } from '@/lib/backend-fetch';
 import { markSessionChanged } from '@/lib/auth/cookies';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_URL = () => fastapiBaseUrl();
 
 interface AccountMeta {
   account_id: string;

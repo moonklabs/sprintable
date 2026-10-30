@@ -4,8 +4,9 @@ import { resolveAppUrl } from '@/services/app-url';
 import { SP_AT_COOKIE } from '@/lib/db/server';
 import { backendSignal, BFF_BACKEND_EXTERNAL_CHAIN_TIMEOUT_MS } from '@/lib/backend-signal';
 import { backendFetch } from '@/lib/backend-fetch';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
-const FASTAPI_BASE = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_BASE = fastapiBaseUrl();
 
 // story #3376 — PR#3736의 redirect_uri가 정확히 이 경로를 가리킨다(그라운딩 §10 실 diff
 // 확認: `f"{settings.app_url}/api/oauth-channel/callback/{channel}"`). Meta가 여기로

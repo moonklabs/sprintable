@@ -2,8 +2,9 @@ import { NextResponse } from 'next/server';
 import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { safeJsonParse } from '@/lib/api-response';
 import { backendFetch } from '@/lib/backend-fetch';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_URL = () => fastapiBaseUrl();
 
 /** POST /api/auth/set-password/request — OAuth 전용 사용자 최초 비밀번호 설정 1단계
  * (확인 이메일 발송, 아직 DB write 없음 — story #ab2a503f 재인증 게이트). */

@@ -4,8 +4,9 @@ import { getServerSession } from '@/lib/db/server';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { NextResponse } from 'next/server';
 import { backendFetch } from '@/lib/backend-fetch';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_URL = () => fastapiBaseUrl();
 
 /** POST /api/auth/2fa/setup — TOTP secret 생성 (FastAPI) */
 export async function POST(request: Request) {

@@ -5,12 +5,13 @@ import { createStorageService } from '@/lib/storage/factory';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
 import { backendFetch } from '@/lib/backend-fetch';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
 // a54ddc16: 첨부 auth-gated 서빙. public 버킷 직링크 → 이 라우트가 BE authorize(접근권+path
 // 소속 2겹 방어) 통과 시에만 단기 만료 V4 서명 URL을 반환한다.
 //
 // GET /api/attachments/sign?path=<stored url|bare path>&conversation_id=<uuid>   (또는 story_id)
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_URL = () => fastapiBaseUrl();
 
 // story #2720(2026-08-17) — 이 라우트 자체 재구현을 없애고 lib/storage/canonical.ts(FE
 // canonicalization SSOT)를 이 버킷으로 호출하는 얇은 wrapper로 대체했다. BE와의 규칙 정합은

@@ -14,6 +14,7 @@ import { DesktopSetupDocWatch } from '@/components/desktop/desktop-setup-doc-wat
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { logServerTiming, withServerTiming } from '@/lib/server-timing';
 import { TabOwnerGate } from '@/components/auth/tab-owner-gate';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
 interface MemberContext {
   id: string;
@@ -69,7 +70,7 @@ async function AuthenticatedLayoutBody({
   const session = await getServerSession();
   if (!session) redirect(buildLoginRedirect(currentPath, navV3Flags));
 
-  const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+  const fastapiUrl = fastapiBaseUrl();
   const authHeader = { Authorization: `Bearer ${session.access_token}` };
 
   const [meRes, membershipsRes, orgsRes] = await Promise.all([

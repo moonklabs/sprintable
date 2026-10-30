@@ -5,10 +5,11 @@ import { ApiErrors } from '@/lib/api-response';
 import { GCS_MEMO_ATTACHMENTS_BUCKET } from '@/lib/storage/config';
 import { createStorageService } from '@/lib/storage/factory';
 import { backendFetch } from '@/lib/backend-fetch';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
 // BE _MAX_ATTACHMENT_SIZE 정합 (schemas/story.py)
 const MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024; // 100MB
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_URL = () => fastapiBaseUrl();
 
 // E-FILE S4: 스토리 첨부 파일을 서버사이드에서 GCS로 업로드하고 메타({url,name,content_type,size})를 반환.
 // chat-attach 의 conversations/attachments 와 동형. 반환 메타를 호출부에서 모아

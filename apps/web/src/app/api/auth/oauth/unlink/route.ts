@@ -4,8 +4,9 @@ import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { SP_AT_COOKIE } from '@/lib/db/server';
 import { safeJsonParse } from '@/lib/api-response';
 import { backendFetch } from '@/lib/backend-fetch';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_URL = () => fastapiBaseUrl();
 
 /** POST /api/auth/oauth/unlink — story #3122 AC3, {provider} 연결 해제(최소 1개 로그인
  * 수단 보장은 BE가 매번 재계산해 강제한다 — 이 라우트는 순수 프록시). */

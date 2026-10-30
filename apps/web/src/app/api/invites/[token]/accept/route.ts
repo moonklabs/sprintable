@@ -6,10 +6,11 @@ import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { backendFetch } from '@/lib/backend-fetch';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { proxyToFastapi } from '@/lib/fastapi-proxy';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
 type RouteParams = { params: Promise<{ token: string }> };
 
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_URL = () => fastapiBaseUrl();
 
 /**
  * story 4722 — a token-proven accept makes the membership, but the session the person already holds was issued before it (a sign-up whose address is

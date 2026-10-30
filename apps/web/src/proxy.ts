@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookieBase, markSessionChanged, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { SESSION_EXPIRED_REASON } from '@/lib/auth/session-redirect';
 import { isRecentlySuperseded } from '@/lib/auth/switch-epoch';
+import { carryOnToTarget, embeddedApiTarget } from '@/lib/embedded-api-origin';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { MIGRATED_RESOURCES, RENAMED_RESOURCES, RETIRED_RESOURCES } from '@/lib/legacy-resource-tables';
@@ -18,6 +19,7 @@ import {
 } from '@/lib/route-resolve';
 import { formatServerTiming, isServerTimingEnabled, logServerTiming, MW_T0_HEADER, withServerTiming } from '@/lib/server-timing';
 import { resolveLocale } from '@/i18n/locale-negotiation';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
 // story #2595 — connect-guide.txt는 static public asset이라 서버 컴포넌트가 아니고, i18n/request.ts의 getLocale()
 // (next-intl RSC config · 비동기 cookies()/headers())을 못 부른다 — 이 파일(proxy)은 NextRequest 동기 API로 도는 별개
@@ -280,7 +282,7 @@ async function redirectLegacyResourcePath(
   const excluded = MIGRATED_RESOURCES[resourceName] ?? [];
   if (excluded.some((sub) => pathname.startsWith(`/${resourceName}/${sub}`))) return null;
 
-  const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+  const fastapiUrl = fastapiBaseUrl();
   const orgLookup = await lookupVerifiedOrg(fastapiUrl, accessToken);
   // story 4714 AC6 — 서버가 «이 계정은 조직이 없다»고 답한 새 사람(me 404 Member not found)은 org-briefing도 project picker도 못 가는 자리다.
   // 앱은 늘 `/glance`로 열어서(셸 HOME_PATH) 폰으로 처음 온 사람이 여기서 Next 404에 갇혔다 — 온보딩(`/onboarding`)으로 보낸다. 세션 의존 307
@@ -553,7 +555,7 @@ async function readErrorCode(res: Response): Promise<string | undefined> {
 }
 
 async function refreshWithToken(rt: string): Promise<RefreshOutcome> {
-  const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+  const fastapiUrl = fastapiBaseUrl();
   try {
     const res = await fetch(`${fastapiUrl}/api/v2/auth/refresh`, {
       method: 'POST',
@@ -845,7 +847,15 @@ function captureSignupAttribution(request: NextRequest, response: NextResponse):
  * story #4219 C1 — dev 전용 서버 구간 마커(SERVER_TIMING_MARKERS=true일 때만). 요청 처리 중 나간 백엔드 호출별 시작·시간·연결
  * 재사용 여부를 `Server-Timing` 헤더와 로그 한 줄로 — 이름·시간만(경로·id 0). 꺼져 있으면 그대로 통과(동작 변화 0).
  */
+// story 4824 — inside the desktop app's own server `/api/v2/*` is forwarded here, at request time, to the backend port the app chose at launch (see lib/embedded-api-origin.ts);
+// every other server keeps the build-time rewrite in next.config.ts. The proxy below runs in full first — only the destination of «carry on» changes.
 export async function proxy(request: NextRequest) {
+  const response = await proxyWithTiming(request);
+  const target = embeddedApiTarget(request.nextUrl.pathname, request.nextUrl.search);
+  return target ? carryOnToTarget(response, target) : response;
+}
+
+async function proxyWithTiming(request: NextRequest) {
   if (!isServerTimingEnabled()) return proxyImpl(request);
   // story #4299 — 미들웨어 시작 시각을 요청 헤더로(route handler가 «미들웨어 + 라우터 대기»를 잰다). 클라이언트가 보낸 같은 이름은 덮어씀.
   const stamped = withMiddlewareStart(request);
@@ -981,7 +991,7 @@ async function resolveWorkspaceProject(
     }
   }
 
-  const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+  const fastapiUrl = fastapiBaseUrl();
   const outcome = await fetchResolve(fastapiUrl, wsSlug, projSlug, accessToken);
 
   if (outcome.kind === 'not_found') return { kind: 'skip' }; // resolve 실패 — 개입 없이 통과(Next 자체 404)

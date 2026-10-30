@@ -5,8 +5,9 @@ import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { cookieBase, SP_AT_MAX_AGE_SECONDS, markSessionChanged } from '@/lib/auth/cookies';
 import { safeJsonParse } from '@/lib/api-response';
 import { backendFetch } from '@/lib/backend-fetch';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_URL = () => fastapiBaseUrl();
 
 // story 4778 — the two answers of the refresh route that are NOT «this session is over» (the client does not signal an ended session on them, and the cookies stay): see lib/db/client.ts
 const TOKEN_SUPERSEDED = 'TOKEN_SUPERSEDED';
