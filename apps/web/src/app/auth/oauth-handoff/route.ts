@@ -28,8 +28,9 @@ import { cookieBase, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { resolveAppUrl } from '@/services/app-url';
 import { isOAuthCallbackMode, expectedReturnUri } from '@/lib/auth/oauth-callback-mode';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_URL = () => fastapiBaseUrl();
 // story #3121 AC1 — issue 시점(callback/[provider]/route.ts)과 동일 출처. 이 라우트는 웹뷰
 // top-level POST라 쿠키/세션 연속성이 없다(§ 상단 주석) — 모바일이 code/code_verifier와
 // **같은 요청에** callback_mode를 실어 보내야만(App.js) issue 시점 값과 대조가 가능하다.

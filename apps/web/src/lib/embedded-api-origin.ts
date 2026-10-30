@@ -4,8 +4,8 @@ import { fastapiBaseUrl } from '@/lib/fastapi-url';
 /**
  * story 4824 — the desktop app carries the server and picks its ports at launch. `next.config.ts` `rewrites()` forwards `/api/v2/*` to the backend, but it
  * runs at BUILD time: the destination (and so the backend's port) would be baked into the web build. In the app's own server (`SPRINTABLE_EMBEDDED=1`, set by
- * the app) the forward is done here at request time instead, to the address the app put in `NEXT_PUBLIC_FASTAPI_URL` — read through bracket access, which is
- * not inlined at build. Everything else in the proxy (session refresh, cookies, headers) has already run by then; this only changes WHERE the request goes.
+ * the app) the forward is done here at request time instead, to the address the app put in `SPRINTABLE_API_ORIGIN` (see lib/fastapi-url.ts — a `NEXT_PUBLIC_*`
+ * name would be replaced by its build-time value). Everything else in the proxy (session refresh, cookies, headers) has already run by then; this only changes WHERE the request goes.
  * Any other deployment (cloud, the plain dev server) has no such switch and keeps the config rewrite as before.
  */
 export const EMBEDDED_API_PREFIX = '/api/v2/';

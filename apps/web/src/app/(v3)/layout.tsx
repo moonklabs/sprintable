@@ -4,6 +4,7 @@ import { getServerSession } from '@/lib/db/server';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { RealtimeProvider } from '@/components/realtime-provider';
 import { TabOwnerGate } from '@/components/auth/tab-owner-gate';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
 /**
  * story #4008(E-UX-OVERHAUL·v3 셸 실시간) — v3 라우트(`/chat`, 추후 `/today`)는
@@ -37,7 +38,7 @@ export default async function V3Layout({ children }: { children: React.ReactNode
   const session = await getServerSession();
   if (!session) redirect(buildLoginRedirect(currentPath));
 
-  const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+  const fastapiUrl = fastapiBaseUrl();
   const meRes = await fetch(`${fastapiUrl}/api/v2/me`, {
     headers: { Authorization: `Bearer ${session.access_token}` },
     cache: 'no-store',

@@ -3,8 +3,9 @@ import { getServerSession } from '@/lib/db/server';
 import { ApiErrors } from '@/lib/api-response';
 import { backendFetch } from '@/lib/backend-fetch';
 import { channelFileHeaders } from '@/lib/channel-file-headers';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_URL = () => fastapiBaseUrl();
 
 export async function GET(
   request: NextRequest,

@@ -19,6 +19,7 @@ import {
 } from '@/lib/route-resolve';
 import { formatServerTiming, isServerTimingEnabled, logServerTiming, MW_T0_HEADER, withServerTiming } from '@/lib/server-timing';
 import { resolveLocale } from '@/i18n/locale-negotiation';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
 // story #2595 — connect-guide.txt는 static public asset이라 서버 컴포넌트가 아니고, i18n/request.ts의 getLocale()
 // (next-intl RSC config · 비동기 cookies()/headers())을 못 부른다 — 이 파일(proxy)은 NextRequest 동기 API로 도는 별개
@@ -281,7 +282,7 @@ async function redirectLegacyResourcePath(
   const excluded = MIGRATED_RESOURCES[resourceName] ?? [];
   if (excluded.some((sub) => pathname.startsWith(`/${resourceName}/${sub}`))) return null;
 
-  const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+  const fastapiUrl = fastapiBaseUrl();
   const orgLookup = await lookupVerifiedOrg(fastapiUrl, accessToken);
   // story 4714 AC6 — 서버가 «이 계정은 조직이 없다»고 답한 새 사람(me 404 Member not found)은 org-briefing도 project picker도 못 가는 자리다.
   // 앱은 늘 `/glance`로 열어서(셸 HOME_PATH) 폰으로 처음 온 사람이 여기서 Next 404에 갇혔다 — 온보딩(`/onboarding`)으로 보낸다. 세션 의존 307
@@ -554,7 +555,7 @@ async function readErrorCode(res: Response): Promise<string | undefined> {
 }
 
 async function refreshWithToken(rt: string): Promise<RefreshOutcome> {
-  const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+  const fastapiUrl = fastapiBaseUrl();
   try {
     const res = await fetch(`${fastapiUrl}/api/v2/auth/refresh`, {
       method: 'POST',
@@ -990,7 +991,7 @@ async function resolveWorkspaceProject(
     }
   }
 
-  const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+  const fastapiUrl = fastapiBaseUrl();
   const outcome = await fetchResolve(fastapiUrl, wsSlug, projSlug, accessToken);
 
   if (outcome.kind === 'not_found') return { kind: 'skip' }; // resolve 실패 — 개입 없이 통과(Next 자체 404)

@@ -5,10 +5,11 @@ import { ApiErrors } from '@/lib/api-response';
 import { GCS_MEMO_ATTACHMENTS_BUCKET } from '@/lib/storage/config';
 import { createStorageService } from '@/lib/storage/factory';
 import { backendFetch } from '@/lib/backend-fetch';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
 // BE _MAX_ATTACHMENT_SIZE 정합 (conversations.py)
 const MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024; // 100MB
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_URL = () => fastapiBaseUrl();
 
 // chat-attach: 파일을 서버사이드에서 GCS로 업로드하고 메시지 첨부 메타({url,name,content_type,size})를 돌려준다.
 // 업로드된 GCS object URL은 리로드/다른 인스턴스에서도 유효(multi-instance safe) — BE 계약대로
