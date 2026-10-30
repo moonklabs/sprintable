@@ -70,7 +70,7 @@ export function HypothesisDeclarationSection({
           🎯 {t('declareSectionTitle')} <span className="text-destructive">*</span>
           <Badge variant="info" className="font-semibold">{t('declareRequiredBadge')}</Badge>
         </span>
-        <span className="text-[10px] font-semibold text-primary">{t('declareCount', { count: declaredCount })}</span>
+        <span className="text-micro font-semibold text-primary">{t('declareCount', { count: declaredCount })}</span>
       </div>
 
       {declarations.length === 0 ? (
@@ -79,7 +79,7 @@ export function HypothesisDeclarationSection({
             <Sparkles className="size-3.5 text-info" aria-hidden />
             {t('declareGateQuestion')}
           </p>
-          <p className="text-[11px] leading-snug text-muted-foreground">{t('declareGateHint')}</p>
+          <p className="text-editorial-meta leading-snug text-muted-foreground">{t('declareGateHint')}</p>
         </div>
       ) : (
         <div className="space-y-2.5">

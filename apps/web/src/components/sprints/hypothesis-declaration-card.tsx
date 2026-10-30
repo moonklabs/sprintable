@@ -128,7 +128,7 @@ export function HypothesisDeclarationCard({
   return (
     <div className="flex flex-col gap-2.5 rounded-xl border border-border bg-card p-3">
       <div className="flex items-center justify-between gap-2">
-        <div className="inline-flex overflow-hidden rounded-lg border border-border text-[10px] font-semibold">
+        <div className="inline-flex overflow-hidden rounded-lg border border-border text-micro font-semibold">
           <button
             type="button"
             aria-pressed={value.mode === 'new'}
@@ -147,7 +147,7 @@ export function HypothesisDeclarationCard({
           </button>
         </div>
         {onRemove ? (
-          <button type="button" onClick={onRemove} className="text-[10px] text-muted-foreground hover:text-foreground">
+          <button type="button" onClick={onRemove} className="text-micro text-muted-foreground hover:text-foreground">
             {t('declareRemove')}
           </button>
         ) : null}
@@ -169,7 +169,7 @@ export function HypothesisDeclarationCard({
               type="button"
               onClick={() => void handleDraft()}
               disabled={drafting}
-              className="inline-flex items-center gap-1 rounded-lg border border-dashed border-border px-2 py-0.5 text-[10.5px] font-medium text-muted-foreground transition hover:border-primary hover:text-primary disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-lg border border-dashed border-border px-2 py-0.5 text-micro font-medium text-muted-foreground transition hover:border-primary hover:text-primary disabled:opacity-50"
             >
               <Sparkles className="size-3" />
               {t('declareDraftCta')}
@@ -187,7 +187,7 @@ export function HypothesisDeclarationCard({
             )}
           />
           {value.drafted ? (
-            <p className="flex items-start gap-1.5 rounded-lg border border-dashed border-border bg-info-tint/20 px-2 py-1.5 text-[10px] text-muted-foreground">
+            <p className="flex items-start gap-1.5 rounded-lg border border-dashed border-border bg-info-tint/20 px-2 py-1.5 text-micro text-muted-foreground">
               <Sparkles className="mt-0.5 size-3 shrink-0 text-info" aria-hidden />
               <span><b className="text-foreground">{t('declareDraftNoteTitle')}</b> {t('declareDraftNoteBody')}</span>
             </p>
@@ -278,23 +278,23 @@ export function HypothesisDeclarationCard({
           ) : null}
 
           {precedentsLoading ? (
-            <p className="text-[10px] text-muted-foreground">{t('declareL1Loading')}</p>
+            <p className="text-micro text-muted-foreground">{t('declareL1Loading')}</p>
           ) : precedentsFailed ? (
-            <p className="text-[10px] text-muted-foreground">{t('declareL1LoadError')}</p>
+            <p className="text-micro text-muted-foreground">{t('declareL1LoadError')}</p>
           ) : precedents && precedents.length > 0 ? (
             <div className="space-y-1.5 rounded-lg border border-border bg-muted/20 p-2">
-              <p className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground">
+              <p className="flex items-center gap-1.5 text-micro font-medium text-muted-foreground">
                 <Sparkles className="size-3 text-info" aria-hidden />
                 {t('declareL1Title')}
               </p>
               {precedents.map((p) => (
-                <div key={p.entity_id} className="flex items-start gap-2 text-[10.5px]">
+                <div key={p.entity_id} className="flex items-start gap-2 text-micro">
                   <span className="mt-0.5 shrink-0 tabular-nums text-muted-foreground">{p.similarity.toFixed(2)}</span>
                   <div className="min-w-0 flex-1 space-y-0.5">
                     <p className="truncate text-foreground">{p.embedding_text}</p>
                     {p.hypothesis_status ? (
                       <p className="flex items-center gap-1.5 text-muted-foreground">
-                        <Badge variant={p.hypothesis_status === 'verified' ? 'success' : 'info'} className="text-[9px]">
+                        <Badge variant={p.hypothesis_status === 'verified' ? 'success' : 'info'} className="text-micro">
                           {p.hypothesis_status === 'verified' ? t('declareL1Verified') : t('declareL1FalsifiedLearn')}
                         </Badge>
                         {p.outcome_summary ?? null}
@@ -341,7 +341,7 @@ export function HypothesisDeclarationCard({
             </div>
           )}
           {value.linkedPreview ? (
-            <div className="flex items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2 text-[11px]">
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2 text-editorial-meta">
               <span className="min-w-0 flex-1 truncate text-foreground">{value.linkedPreview.statement}</span>
               <Badge variant="chip">{hypothesisStatusLabel(value.linkedPreview.status)}</Badge>
             </div>

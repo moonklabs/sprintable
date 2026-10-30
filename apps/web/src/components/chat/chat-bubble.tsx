@@ -202,7 +202,7 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
 
 // story #ec57c80c(v2 3호) — report-message-summary.tsx가 「전문 보기」 펼침 상태에서 이
 // 컴포넌트를 그대로 재사용한다(사본 분화 금지 — 접힘 해제 시 원래 렌더 경로와 완전히 동일).
-export function ChatMarkdown({ content: rawContent, isMine, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey }: {
+export function ChatMarkdown({ content: rawContent, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey }: {
   content: string; isMine: boolean; references: ChatMessage['references'];
   entityStatusByKey?: Record<string, EntityStatusFetchState>;
   onOpenReadingPanel?: (target: ReadingPanelTarget) => void;
@@ -335,7 +335,7 @@ export function ChatMarkdown({ content: rawContent, isMine, references, entitySt
         // 주석 참조) mention_parser가 애초에 entity_references에 안 쓴다 — stored 참조와
         // 대조하면 asset 임베드가 전부 유령으로 오판된다. 유령 판정 자체를 안 태운다.
         if (decision.kind === 'asset') {
-          return <AssetEmbedCard entityId={ref.entityId} label={String(children)} ownMessage={isMine} onOpenReadingPanel={onOpenReadingPanel} />;
+          return <AssetEmbedCard entityId={ref.entityId} label={String(children)} onOpenReadingPanel={onOpenReadingPanel} />;
         }
         // allowCard:false라 decision.kind는 여기서 항상 'chip'('card'는 불가능 — resolveEmbedDecision
         // 계약: opts.allowCard가 false면 'card'를 반환하지 않는다).
@@ -356,7 +356,7 @@ export function ChatMarkdown({ content: rawContent, isMine, references, entitySt
       }
       return <a href={href} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{children}</a>;
     },
-  }), [text, muted, codeBg, border, isMine, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey, flatHref]);
+  }), [text, muted, codeBg, border, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey, flatHref]);
 
   if (!hasMarkdown && !hasMention) {
     return (

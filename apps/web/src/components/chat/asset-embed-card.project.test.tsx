@@ -27,7 +27,7 @@ async function render(projectId: string | null) {
   });
   await act(async () => {
     root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      <AssetEmbedCard entityId="a1" label="plan.pdf" ownMessage={false} />
+      <AssetEmbedCard entityId="a1" label="plan.pdf" />
     </NextIntlClientProvider>);
   });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });

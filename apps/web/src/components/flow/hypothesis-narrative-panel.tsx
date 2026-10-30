@@ -91,9 +91,9 @@ function NarrativeStep({
 }) {
   return (
     <div className="relative border-l-2 border-border pb-6 pl-5 last:pb-0">
-      <span aria-hidden="true" className="absolute -left-[7px] top-0.5 size-3 rounded-full border-2 border-background bg-brand" />
+      <span aria-hidden="true" className="absolute -left-1.75 top-0.5 size-3 rounded-full border-2 border-background bg-brand" />
       <div className="mb-1 flex items-baseline gap-2">
-        <span className="text-[10px] font-bold tracking-wide text-brand-text">{label}</span>
+        <span className="text-micro font-bold tracking-wide text-brand-text">{label}</span>
         <h3 className="text-sm font-semibold text-foreground">{title}</h3>
       </div>
       <div className="text-xs text-muted-foreground">{children}</div>

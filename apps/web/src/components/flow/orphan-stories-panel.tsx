@@ -32,10 +32,10 @@ export function OrphanStoriesPanel({ orphanStories, activeGoals, onSelectStory, 
         onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}
         className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
       >
-        <span className="text-[13px] text-foreground">
+        <span className="text-editorial-ui text-foreground">
           {t('orphanSummary', { n: orphanStories.length })}
         </span>
-        <span className="text-[11px] text-muted-foreground">{t('orphanHint')}</span>
+        <span className="text-editorial-meta text-muted-foreground">{t('orphanHint')}</span>
       </button>
       {expanded && (
         <div className="space-y-1.5 border-t border-border bg-muted/30 px-3 py-3">
@@ -86,13 +86,13 @@ function OrphanRow({
       <button type="button" onClick={() => onSelectStory(story.id)} className="min-w-0 flex-1 truncate text-left text-xs text-foreground">
         #{story.storyNumber} {story.title}
       </button>
-      {story.assigneeId && <span className="shrink-0 text-[10.5px] text-primary">{t('nextPickReasonOwned')}</span>}
+      {story.assigneeId && <span className="shrink-0 text-micro text-primary">{t('nextPickReasonOwned')}</span>}
       {picking ? (
         <div className="flex shrink-0 items-center gap-1.5">
           <select
             value={selectedEpicId}
             onChange={(e) => setSelectedEpicId(e.target.value)}
-            className="rounded border border-border bg-card px-1.5 py-1 text-base lg:text-[11px]"
+            className="rounded border border-border bg-card px-1.5 py-1 text-base lg:text-editorial-meta"
           >
             <option value="">{t('orphanPickPlaceholder')}</option>
             {activeGoals.map((g) => (
@@ -103,7 +103,7 @@ function OrphanRow({
             type="button"
             disabled={!selectedEpicId || assigning}
             onClick={handleConfirm}
-            className="focus-outset rounded-md border border-primary bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground disabled:opacity-50"
+            className="focus-outset rounded-md border border-primary bg-primary px-2 py-1 text-editorial-meta font-medium text-primary-foreground disabled:opacity-50"
           >
             {assigning ? <Loader2 className="size-3 animate-spin" aria-hidden="true" /> : t('orphanAssignConfirm')}
           </button>
@@ -112,7 +112,7 @@ function OrphanRow({
         <button
           type="button"
           onClick={() => setPicking(true)}
-          className="shrink-0 rounded-md border border-border px-2.5 py-1 text-[11px] font-medium"
+          className="shrink-0 rounded-md border border-border px-2.5 py-1 text-editorial-meta font-medium"
         >
           {t('orphanPickAction')}
         </button>

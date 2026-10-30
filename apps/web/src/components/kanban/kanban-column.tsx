@@ -140,7 +140,7 @@ export function KanbanColumn({
     >
       {isDragging && isValidTarget && (
         // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
-        <div className="mb-3 rounded-md border border-success-border/30 bg-success-tint px-2 py-1 text-center text-[10px] font-medium text-foreground">
+        <div className="mb-3 rounded-md border border-success-border/30 bg-success-tint px-2 py-1 text-center text-micro font-medium text-foreground">
           {t('validDrop')}
         </div>
       )}
@@ -162,7 +162,7 @@ export function KanbanColumn({
                   wipExceeded일 때만 bg-destructive-tint를 입는다(colClass) — 평시(미초과)엔
                   tint 자체가 없어 muted-foreground가 원래 대비 그대로 안전하다. wipExceeded일
                   때만 ink로 올리는 조건부 교체(평시 시안 변경 0, PO CHANGES 처방①). */}
-              <span className={`text-[11px] tabular-nums ${wipExceeded ? 'text-destructive' : 'text-muted-foreground'}`}>
+              <span className={`text-editorial-meta tabular-nums ${wipExceeded ? 'text-destructive' : 'text-muted-foreground'}`}>
                 {totalCount !== undefined ? (hasMore ? `${totalCount}+` : totalCount) : stories.length}
               </span>
             </>
@@ -181,13 +181,13 @@ export function KanbanColumn({
               <div className="flex shrink-0 items-center gap-1.5">
                 {/* AC1: WIP 초과 배지 */}
                 {wipExceeded && (
-                  <Badge variant="destructive" className="text-[10px]">
+                  <Badge variant="destructive" className="text-micro">
                     {t('wipLimitExceeded')}
                   </Badge>
                 )}
                 {/* AC1: WIP limit 배지 (설정된 경우) */}
                 {wipLimit !== null && wipLimit !== undefined && !wipExceeded && (
-                  <Badge variant="outline" className={`text-[10px] ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}>
+                  <Badge variant="outline" className={`text-micro ${wipExceeded ? 'text-foreground' : 'text-muted-foreground'}`}>
                     {t('wipLimitLabel')}: {wipLimit}
                   </Badge>
                 )}

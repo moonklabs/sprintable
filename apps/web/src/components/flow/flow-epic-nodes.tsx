@@ -251,10 +251,10 @@ export function FlowEpicNodes({ projectId, epicId, epicTitle, onSelectStory, sel
   }, [state, pastItems, epicId, epicTitle]);
 
   if (state.kind === 'loading') {
-    return <p className="px-2 py-2 text-[11px] text-muted-foreground">{t('nodesLoading')}</p>;
+    return <p className="px-2 py-2 text-editorial-meta text-muted-foreground">{t('nodesLoading')}</p>;
   }
   if (state.kind === 'error' || !lane) {
-    return <p className="px-2 py-2 text-[11px] text-muted-foreground">{t('nodesError')}</p>;
+    return <p className="px-2 py-2 text-editorial-meta text-muted-foreground">{t('nodesError')}</p>;
   }
 
   return (

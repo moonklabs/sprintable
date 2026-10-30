@@ -480,13 +480,13 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
         claim={titleLead}
         headerAside={
           story.story_number ? (
-            <span className="shrink-0 font-mono text-[10px] text-muted-foreground">#{story.story_number}</span>
+            <span className="shrink-0 font-mono text-micro text-muted-foreground">#{story.story_number}</span>
           ) : undefined
         }
         cardHeader={
           <>
             {nextAction ? (
-              <div className="mb-1.5 flex items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-2 py-1 text-[11px] font-semibold text-warning-strong">
+              <div className="mb-1.5 flex items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-2 py-1 text-editorial-meta font-semibold text-warning-strong">
                 <nextAction.Icon className="size-3 shrink-0" aria-hidden="true" />
                 <span className="min-w-0 truncate">{t('nextActionPrefix')} {nextAction.label}</span>
               </div>
@@ -503,7 +503,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
           <div className="mt-2">
             {/* E-MODERN A: 에픽 = 작은 색 dot + muted 라벨(일관 식별·랜덤 채움배지 퇴출) */}
             {epicName && story.epic_id ? (
-              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] text-proof-ink-3">
+              <div className="mb-1.5 flex items-center gap-1.5 text-editorial-meta text-proof-ink-3">
                 <span className={`size-1.5 shrink-0 rounded-sm ${getEpicDotClass(story.epic_id)}`} aria-hidden="true" />
                 <span className="min-w-0 truncate">{epicName}</span>
               </div>
@@ -545,7 +545,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                         // story #3049(2984-S1) — AGENT_MARK_FILL_CLASS(헤어라인 border 유지·
                         // soft-fill 폐지) 채택. border는 이미 있었으니 배경/텍스트색만 교체.
                         className={cn(
-                          'relative flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-medium ring-1 ring-background',
+                          'relative flex h-6 w-6 items-center justify-center rounded-full border text-micro font-medium ring-1 ring-background',
                           m.type === 'agent'
                             ? cn('border-proof-blue/30', AGENT_MARK_FILL_CLASS)
                             : 'border-border bg-muted text-muted-foreground',
@@ -560,7 +560,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                       </div>
                     ))}
                     {assigneeList.length > 3 && (
-                      <div className="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-muted text-[10px] font-medium text-muted-foreground ring-1 ring-background">
+                      <div className="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-muted text-micro font-medium text-muted-foreground ring-1 ring-background">
                         +{assigneeList.length - 3}
                       </div>
                     )}
@@ -569,7 +569,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                   <div />
                 )}
                 {hasAgent && (
-                  <span className="inline-flex items-center gap-1 text-[10px] text-foreground">
+                  <span className="inline-flex items-center gap-1 text-micro text-foreground">
                     <span className="size-1.5 shrink-0 rounded-full bg-accent-claim" aria-hidden="true" />
                     {t('filterAgents')}
                   </span>
@@ -592,7 +592,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                   <TrustSeal variant="claimed" agentInitial={trustAgent?.name ? getInitials(trustAgent.name) : undefined} />
                 ) : null}
                 {story.story_points != null ? (
-                  <span className="text-[11px] tabular-nums text-muted-foreground">{t('storyPointsBadge', { count: story.story_points })}</span>
+                  <span className="text-editorial-meta tabular-nums text-muted-foreground">{t('storyPointsBadge', { count: story.story_points })}</span>
                 ) : null}
                 {/* E-MODERN A: 액션 점진 공개 — 데스크탑 hover 노출·모바일(hover 없음)은 상시(kickoff 도달성=기능 동결 보존).
                     story #4345 — 기준을 폭(sm:)에서 «호버가 되는가»(pointer-fine)로: 640 이상 태블릿(터치)에서 늘 투명하던 것을 닫는다. */}
