@@ -2,6 +2,8 @@
 Contract: doc «E-DESKTOP-2 B-1 — 기기 줄 계약 v1» §11 (02d2cf71 v1.9 · v1.9.1).
 
 - GET  /api/v2/agents/{agent_member_id}/desktop-session                  — whoever can open the agent's DM (else 404)
+- GET  /api/v2/agents/desktop-sessions                                   — story #4833: the state of every agent the person can open the DM of, in one read
+  (the Today screen); the same rule per agent as the one-agent read above
 - POST /api/v2/agents/{agent_member_id}/desktop-commands                 — the phone: stop_session | send_prompt | end_session (a
   person's own session — an API key or an agent key 403; who may press and the phone's pairing are checked in
   services.desktop_commands; story #4599: end_session = the whole session ended, the handle on a turn a macOS window holds)
@@ -15,7 +17,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,6 +45,22 @@ async def _person(db: AsyncSession, auth: AuthContext, org_id: uuid.UUID, *, int
     if member.type != "human":
         raise HTTPException(status_code=403, detail={"code": "person_session_required", "message": "a person's session is required"})
     return member
+
+
+@router.get("/desktop-sessions")
+async def get_desktop_sessions(
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
+):
+    """story #4833 — every agent's state in one read (words and facts only; the web writes the sentences). A person's session, like the
+    one-agent read; an agent key is 403."""
+    await _person(db, auth, org_id, interactive=False)
+    user_id = uuid.UUID(str(auth.user_id))
+    rows, total = await desktop_commands.sessions_overview(db, user_id=user_id, org_id=org_id)
+    response.headers["X-Total-Count"] = str(total)
+    return rows
 
 
 @router.get("/{agent_member_id}/desktop-session")

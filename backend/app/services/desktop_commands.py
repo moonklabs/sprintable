@@ -160,6 +160,43 @@ async def _conversation_named(db: AsyncSession, conversation_id: uuid.UUID, *, m
     return {"id": str(conv.id), "name": name}
 
 
+def _pick_session(sessions) -> DesktopSession:
+    """not stopped first, then the latest — the one session an agent is shown by"""
+    return sorted(sessions, key=lambda r: (r.state != "stopped", r.state_at), reverse=True)[0]
+
+
+def _shown_state(pick: DesktopSession, reachable: bool) -> str:
+    """a stopped session keeps its word; a live one whose computer is no longer heard reads `unknown` (the computer was lost)"""
+    return pick.state if pick.state == "stopped" or reachable else "unknown"
+
+
+def _picked_view(pick: DesktopSession, setup: DesktopSetup, state: str) -> dict:
+    """story #4833 — what an agent's session shows, from the picked row: ONE function for the DM header read (`session_view`) and the
+    list of every agent (`sessions_overview`), so the two never say different things about the same agent."""
+    heard = state == pick.state  # the computer is heard — the fields below are told only then
+    return {
+        "setup_id": str(setup.id), "device_name": setup.device_name, "session_key": pick.session_key, "runtime": pick.runtime,
+        # story #4534 (Kadir 4960 · PO 05:36Z): `state` stays one of the five (an older web never meets a word it does not know) ·
+        # `activity` = the board's own word (eight) for the new web
+        "state": legacy_state(state), "activity": state, "state_at": pick.state_at.isoformat(),
+        # story #4534 (contract v1.12): a usage limit's why — only while the row is a limit word and the device is heard
+        "limit": limit_view(pick) if heard else None,
+        # story #4686: what it runs on — only while the device is heard and the session lives (the same gate)
+        "run": run_view(pick) if heard and pick.state != "stopped" else None,
+        "inbox": inbox_view(pick) if heard and pick.state != "stopped" else None,  # story #4684
+        # story #4763: the first-screen question that stands at that computer — the same gate: the device is heard and the session lives
+        "first_screen": first_screen_view(pick) if heard and pick.state in FIRST_SCREEN_STATES else None,
+        # story #4779: why work waits for the agent (its tools link) — the same gate: the device is heard and the session lives
+        "work_hold": work_hold_view(pick) if heard and pick.state != "stopped" else None,
+        # story #4599: a held turn's why (the window's folder) — only while the device is heard
+        "system": system_view(pick) if heard else None,
+        # story #4641: a widening a person made at the terminal — the three keys, only while the device is heard (the same gate as above)
+        **widened_fields(pick, silent=not heard),
+        # story #4534 (PO 06:30Z · Kadir 06:31Z): whether [지금 지시] can go into its turn — only while the device is heard
+        "instruct_now": pick.instruct_now if heard else None,
+    }
+
+
 async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: str | None, user_id: uuid.UUID, org_id: uuid.UUID,
                        agent_id: uuid.UUID, conversation_id: uuid.UUID | None = None) -> dict:
     from app.models.agent_permission import AgentPermissionRequest
@@ -189,34 +226,12 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
     )).scalars().all()
     if not sessions:
         return view
-    # not stopped first, then the latest
-    pick = sorted(sessions, key=lambda r: (r.state != "stopped", r.state_at), reverse=True)[0]
+    pick = _pick_session(sessions)
     setup = next(s for s in setups if s.id == pick.setup_id)
     now = _now()
     reachable = pick.setup_id in await _reachable(db, {pick.setup_id}, now)
-    state = pick.state if pick.state == "stopped" or reachable else "unknown"
-    view.update({
-        "setup_id": str(setup.id), "device_name": setup.device_name, "session_key": pick.session_key, "runtime": pick.runtime,
-        # story #4534 (Kadir 4960 · PO 05:36Z): `state` stays one of the five (an older web never meets a word it does not know) ·
-        # `activity` = the board's own word (eight) for the new web
-        "state": legacy_state(state), "activity": state, "state_at": pick.state_at.isoformat(),
-        # story #4534 (contract v1.12): a usage limit's why — only while the row is a limit word and the device is heard
-        "limit": limit_view(pick) if state == pick.state else None,
-        # story #4686: what it runs on — only while the device is heard and the session lives (the same gate)
-        "run": run_view(pick) if state == pick.state and pick.state != "stopped" else None,
-        "inbox": inbox_view(pick) if state == pick.state and pick.state != "stopped" else None,  # story #4684
-        # story #4763: the first-screen question that stands at that computer — the same gate: the device is heard and the session lives
-        "first_screen": first_screen_view(pick) if state == pick.state and pick.state in FIRST_SCREEN_STATES else None,
-        # story #4779: why work waits for the agent (its tools link) — the same gate: the device is heard and the session lives
-        "work_hold": work_hold_view(pick) if state == pick.state and pick.state != "stopped" else None,
-        # story #4599: a held turn's why (the window's folder) — only while the device is heard
-        "system": system_view(pick) if state == pick.state else None,
-        # story #4641: a widening a person made at the terminal — the three keys, only while the device is heard (the same gate as above)
-        **widened_fields(pick, silent=state != pick.state),
-        # story #4534 (PO 06:30Z · Kadir 06:31Z): whether [지금 지시] can go into its turn — only while the device is heard
-        "instruct_now": pick.instruct_now if state == pick.state else None,
-        "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup),
-    })
+    state = _shown_state(pick, reachable)
+    view.update({**_picked_view(pick, setup, state), "can_command": can_command(member_id=member_id, member_role=member_role, user_id=user_id, agent=agent, setup=setup)})
     if state == "waiting_permission":  # the inbox link — only a request sent to this person
         view["pending_permission_request_id"] = (await db.execute(
             select(AgentPermissionRequest.id).where(
@@ -238,6 +253,79 @@ async def session_view(db: AsyncSession, *, member_id: uuid.UUID, member_role: s
             ).limit(1)
         )).scalar_one_or_none() is not None
     return view
+
+
+# ── ①-b the list of every agent (the Today screen) ─────────────────────────────────────────────────────────────────────────
+
+OVERVIEW_MAX = 100
+
+
+async def sessions_overview(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID, limit: int = OVERVIEW_MAX) -> tuple[list[dict], int]:
+    """story #4833 — the state of every agent the person can open the DM of, in a fixed number of queries (not one per agent).
+
+    The same rule as `session_view` for each agent (`can_view` = access to one of the agent's projects, the picked session, the heard
+    computer, the fields told only while it is heard — `_picked_view`), only batched. Order: by name (the web sorts by state). Only words and
+    facts are told, no sentences (the web writes them). Returns `(rows, total)` — `total` before the `limit` cut.
+    """
+    from app.models.member import AgentProjectProfile, Member
+    from app.services.agent_permissions import _reachable
+    from app.services.project_auth import accessible_project_ids_in_org
+
+    project_ids = await accessible_project_ids_in_org(db, user_id, org_id)
+    if not project_ids:
+        return [], 0
+    agents = (await db.execute(
+        select(Member).where(
+            Member.org_id == org_id, Member.type == "agent", Member.deleted_at.is_(None),
+            Member.id.in_(select(AgentProjectProfile.member_id).where(AgentProjectProfile.project_id.in_(project_ids))),
+        ).order_by(Member.name, Member.id)
+    )).scalars().all()
+    total = len(agents)
+    agents = agents[:limit]
+    if not agents:
+        return [], total
+    agent_ids = [a.id for a in agents]
+    setups = (await db.execute(
+        select(DesktopSetup).where(DesktopSetup.org_id == org_id, DesktopSetup.revoked_at.is_(None), DesktopSetup.exchanged_at.is_not(None))
+    )).scalars().all()
+    setup_by_id = {s.id: s for s in setups}
+    setup_ids_of: dict[uuid.UUID, set[uuid.UUID]] = {i: set() for i in agent_ids}
+    for s in setups:  # the same reading of `desktop_setups.members` as `_agent_setups`
+        for m in (s.members or []):
+            if m.get("kind") == "agent":
+                try:
+                    mid = uuid.UUID(str(m.get("member_id")))
+                except ValueError:
+                    continue
+                if mid in setup_ids_of:
+                    setup_ids_of[mid].add(s.id)
+    all_setup_ids = {sid for ids in setup_ids_of.values() for sid in ids}
+    sessions_of: dict[uuid.UUID, list[DesktopSession]] = {i: [] for i in agent_ids}
+    if all_setup_ids:
+        rows = (await db.execute(
+            select(DesktopSession).where(DesktopSession.setup_id.in_(all_setup_ids), DesktopSession.agent_member_id.in_(agent_ids))
+        )).scalars().all()
+        for r in rows:
+            if r.setup_id in setup_ids_of.get(r.agent_member_id, ()):
+                sessions_of[r.agent_member_id].append(r)
+    picks = {i: _pick_session(rs) for i, rs in sessions_of.items() if rs}
+    now = _now()
+    reachable = await _reachable(db, {p.setup_id for p in picks.values()}, now)
+    bound = await bound_devices(db, org_id=org_id, member_ids=agent_ids)
+    out: list[dict] = []
+    for a in agents:
+        row = {
+            "agent_id": str(a.id), "agent_name": a.name,
+            "bound_setup_id": str(bound[a.id]["setup_id"]) if a.id in bound else None,
+            "bound_device_name": bound[a.id]["device_name"] if a.id in bound else None,
+            "setup_id": None, "device_name": None, "state": None, "activity": None, "state_at": None, "limit": None, "first_screen": None,
+        }
+        pick = picks.get(a.id)
+        if pick is not None:
+            full = _picked_view(pick, setup_by_id[pick.setup_id], _shown_state(pick, pick.setup_id in reachable))
+            row.update({k: full[k] for k in ("setup_id", "device_name", "state", "activity", "state_at", "limit", "first_screen")})
+        out.append(row)
+    return out, total
 
 
 # ── ② a command ──────────────────────────────────────────────────────────────────────────────────────────────────────────
