@@ -99,7 +99,7 @@ async def local_bootstrap(
     from app.routers.auth import (
         _ok,
         _persist_resolved_context,
-        _sign_in_session_context,
+        _refresh_session_context,
         _store_refresh_token,
         _write_audit,
     )
@@ -157,7 +157,9 @@ async def local_bootstrap(
     await session.flush()
 
     # the session is issued exactly as a password sign-in does it (routers/auth.py login): same claims, same stored refresh token
-    _md = await _sign_in_session_context(user, session)
+    # the session is for THIS install's organization, not whatever the person-wide default would pick (a sign-in picks `last_org_id` / the oldest
+    # membership — another organization the owner belongs to would win and could even have no project)
+    _md = await _refresh_session_context(user, session, org_id, None)
     if settings.build_app_metadata_defallback:
         _persist_resolved_context(user, _md)
     tokens = create_tokens(str(user.id), email=user.email, app_metadata=_md, session_started_at=int(now.timestamp()))
