@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookieBase, markSessionChanged, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { SESSION_EXPIRED_REASON } from '@/lib/auth/session-redirect';
 import { isRecentlySuperseded } from '@/lib/auth/switch-epoch';
+import { carryOnToTarget, embeddedApiTarget } from '@/lib/embedded-api-origin';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { MIGRATED_RESOURCES, RENAMED_RESOURCES, RETIRED_RESOURCES } from '@/lib/legacy-resource-tables';
@@ -845,7 +846,15 @@ function captureSignupAttribution(request: NextRequest, response: NextResponse):
  * story #4219 C1 — dev 전용 서버 구간 마커(SERVER_TIMING_MARKERS=true일 때만). 요청 처리 중 나간 백엔드 호출별 시작·시간·연결
  * 재사용 여부를 `Server-Timing` 헤더와 로그 한 줄로 — 이름·시간만(경로·id 0). 꺼져 있으면 그대로 통과(동작 변화 0).
  */
+// story 4824 — inside the desktop app's own server `/api/v2/*` is forwarded here, at request time, to the backend port the app chose at launch (see lib/embedded-api-origin.ts);
+// every other server keeps the build-time rewrite in next.config.ts. The proxy below runs in full first — only the destination of «carry on» changes.
 export async function proxy(request: NextRequest) {
+  const response = await proxyWithTiming(request);
+  const target = embeddedApiTarget(request.nextUrl.pathname, request.nextUrl.search);
+  return target ? carryOnToTarget(response, target) : response;
+}
+
+async function proxyWithTiming(request: NextRequest) {
   if (!isServerTimingEnabled()) return proxyImpl(request);
   // story #4299 — 미들웨어 시작 시각을 요청 헤더로(route handler가 «미들웨어 + 라우터 대기»를 잰다). 클라이언트가 보낸 같은 이름은 덮어씀.
   const stamped = withMiddlewareStart(request);

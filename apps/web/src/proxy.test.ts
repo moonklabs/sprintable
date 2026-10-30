@@ -53,6 +53,45 @@ function makeRequestWithHeaders(path: string, headers: Record<string, string>, c
   return req;
 }
 
+describe('story 4824 — proxy inside the desktop app\'s own server (SPRINTABLE_EMBEDDED=1)', () => {
+  const KEYS = ['SPRINTABLE_EMBEDDED', 'NEXT_PUBLIC_FASTAPI_URL'] as const;
+  const before = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
+  afterEach(() => { for (const k of KEYS) { if (before[k] === undefined) delete process.env[k]; else process.env[k] = before[k]; } });
+  beforeEach(() => { process.env['JWT_SECRET'] = JWT_SECRET; mockFetch.mockReset(); });
+
+  it('an /api/v2/* request goes on to the backend address read at request time — the proxy\'s own work (token check) still runs first', async () => {
+    process.env['SPRINTABLE_EMBEDDED'] = '1';
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://127.0.0.1:41234';
+    const token = await makeAccessToken();
+    const response = await middleware(makeRequest('/api/v2/stories?limit=5', { sp_at: token }));
+    expect(response.headers.get('x-middleware-rewrite')).toBe('http://127.0.0.1:41234/api/v2/stories?limit=5');
+    expect(response.headers.get('x-middleware-next')).toBeNull();
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://127.0.0.1:52999';
+    const again = await middleware(makeRequest('/api/v2/stories', { sp_at: token }));
+    expect(again.headers.get('x-middleware-rewrite')).toBe('http://127.0.0.1:52999/api/v2/stories');
+  });
+
+  it('a page and the web\'s own /api route are not forwarded; without the switch nothing changes', async () => {
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://127.0.0.1:41234';
+    const token = await makeAccessToken();
+    process.env['SPRINTABLE_EMBEDDED'] = '1';
+    const own = await middleware(makeRequest('/api/switch-org', { sp_at: token }));
+    expect(own.headers.get('x-middleware-rewrite')).toBeNull();
+    delete process.env['SPRINTABLE_EMBEDDED'];
+    const plain = await middleware(makeRequest('/api/v2/stories', { sp_at: token }));
+    expect(plain.headers.get('x-middleware-rewrite')).toBeNull();
+    expect(plain.headers.get('x-middleware-next')).toBe('1');
+  });
+
+  it('a login redirect from the proxy stays a redirect (only «carry on» is re-addressed)', async () => {
+    process.env['SPRINTABLE_EMBEDDED'] = '1';
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://127.0.0.1:41234';
+    const response = await middleware(makeRequest('/stories'));
+    expect(response.status).toBe(307);
+    expect(response.headers.get('x-middleware-rewrite')).toBeNull();
+  });
+});
+
 describe('proxy', () => {
   beforeEach(() => {
     process.env['JWT_SECRET'] = JWT_SECRET;
