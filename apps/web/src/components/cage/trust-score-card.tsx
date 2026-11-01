@@ -48,7 +48,7 @@ function TrustScoreEmpty({ compact }: { compact?: boolean }) {
   const t = useTranslations('cage');
   if (compact) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-[10px] text-muted-foreground">
+      <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-micro text-muted-foreground">
         {t('trustScorePending')}
       </span>
     );
@@ -98,7 +98,7 @@ export function TrustScoreCard({ memberId, compact = false }: TrustScoreCardProp
     // 1급=outcome 적중률. 미측정(null)이면 pending 톤(0%/빨강 환원 X).
     return (
       <span
-        className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium tabular-nums ${
+        className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-micro font-medium tabular-nums ${
           hitRate === null
             ? 'border-dashed border-border text-muted-foreground'
             : 'border-border bg-muted/40 text-foreground'
@@ -115,11 +115,11 @@ export function TrustScoreCard({ memberId, compact = false }: TrustScoreCardProp
     <div className="space-y-4 rounded-xl border border-border bg-card p-4">
       {/* 1급 주지표 — outcome trust(가설 적중). "통과했다 ≠ 옳았다" */}
       <div>
-        <p className="text-[10px] font-mono uppercase tracking-wider text-info">{t('outcomeTrustLabel')}</p>
+        <p className="text-micro font-mono uppercase tracking-wider text-info">{t('outcomeTrustLabel')}</p>
         {hitRate === null ? (
           <p className="mt-1 text-2xl font-bold italic text-muted-foreground">{t('trustScoreNoData')}</p>
         ) : (
-          <p className="mt-1 text-3xl font-bold tabular-nums text-foreground">{pct(hitRate)}</p>
+          <p className="mt-1 text-display font-bold tabular-nums text-foreground">{pct(hitRate)}</p>
         )}
         <p className="mt-0.5 text-xs text-muted-foreground">
           {t('outcomeSummary', { hit, resolved, days: data!.window_days })}
@@ -130,7 +130,7 @@ export function TrustScoreCard({ memberId, compact = false }: TrustScoreCardProp
       {/* 2급 delivery signal — clean_pass 격하(납품 신호). 큰 위계 X·muted. */}
       <div className="rounded-lg border border-border bg-muted/30 p-2.5">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          <span className="text-micro font-medium uppercase tracking-wide text-muted-foreground">
             {t('deliverySignalLabel')}
           </span>
           <span className="text-sm font-semibold tabular-nums text-muted-foreground">{pct(deliveryRate)}</span>
@@ -139,7 +139,7 @@ export function TrustScoreCard({ memberId, compact = false }: TrustScoreCardProp
           <div className="mt-2 space-y-1.5">
             {roleScores.map((role) => (
               <div key={role.role_key} className="space-y-0.5">
-                <div className="flex items-center justify-between text-[11px]">
+                <div className="flex items-center justify-between text-editorial-meta">
                   <span className="text-muted-foreground">{role.role_label}</span>
                   <span className="tabular-nums text-muted-foreground">{pct(role.clean_pass_rate)}</span>
                 </div>

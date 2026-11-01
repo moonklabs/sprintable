@@ -24,14 +24,14 @@ export function StuckHandoffDetail({ step }: StuckHandoffDetailProps) {
   return (
     <div className="space-y-2">
       {/* 막힌 agent (갭1: name 있으면 표기·없으면 "에이전트" 폴백) */}
-      <p className="text-[11px] text-foreground/90">
+      <p className="text-editorial-meta text-foreground/90">
         <span className="text-muted-foreground">{t('stuckAgent')}: </span>
         {step.recipient_agent?.name ?? t('agentFallback')}
       </p>
 
       {/* last_event 미니박스 */}
       {ev ? (
-        <div className="space-y-0.5 rounded-md bg-muted/30 px-2 py-1.5 text-[10px] text-muted-foreground">
+        <div className="space-y-0.5 rounded-md bg-muted/30 px-2 py-1.5 text-micro text-muted-foreground">
           <p className="font-medium text-foreground/80">{t('lastEventInfo')}</p>
           <p>{ev.event_type}</p>
           <p className="font-mono">#{ev.id.slice(0, 8)}{ev.recipient_seq != null ? ` · seq ${ev.recipient_seq}` : ''}</p>
@@ -42,7 +42,7 @@ export function StuckHandoffDetail({ step }: StuckHandoffDetailProps) {
 
       {/* delivery_error 박스(있을 때만) */}
       {step.delivery_error ? (
-        <div className="flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive-tint px-2 py-1.5 text-[11px] text-foreground/85">
+        <div className="flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive-tint px-2 py-1.5 text-editorial-meta text-foreground/85">
           <AlertCircle className="mt-0.5 size-3 shrink-0" />
           <span>
             <span className="text-foreground">{t('deliveryError')}: </span>

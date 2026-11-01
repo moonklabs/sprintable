@@ -71,7 +71,7 @@ export function GateUndoButton({
         {undoing ? '...' : t('gateUndo')}
       </Button>
       {error ? (
-        <p role="alert" aria-live="assertive" className="text-[11px] text-foreground">
+        <p role="alert" aria-live="assertive" className="text-editorial-meta text-foreground">
           {t('gateTransitionError', { reason: error })}
         </p>
       ) : null}

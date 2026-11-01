@@ -106,7 +106,7 @@ function AgentJoinedDetailPanel({
   return (
     <div className="flex flex-1 flex-col gap-4 px-6 py-6">
       <div className="flex items-start gap-3">
-        <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-white/6 text-muted-foreground">
+        <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-overlay-fill-1 text-muted-foreground">
           <Bot className="size-6" />
         </div>
         <div className="min-w-0 flex-1 space-y-2">
@@ -121,7 +121,7 @@ function AgentJoinedDetailPanel({
       </div>
 
       {notification.body ? (
-        <div className="rounded-xl border border-white/8 bg-muted/55 p-4 text-sm leading-6 text-foreground whitespace-pre-wrap">
+        <div className="rounded-xl border border-overlay-line-1 bg-muted/55 p-4 text-sm leading-6 text-foreground whitespace-pre-wrap">
           {notification.body}
         </div>
       ) : null}
@@ -583,7 +583,7 @@ export default function InboxPage() {
             보여준다(별 패널 제거, GATE/STEER/BLOCK/Q 병합). */}
         {workflowExecs.length > 0 && (
           <div className="shrink-0 border-b border-border/80 px-4 py-3">
-            <p className="mb-2 text-[11px] font-medium text-muted-foreground">{t('workflowExecutionLabel')}</p>
+            <p className="mb-2 text-editorial-meta font-medium text-muted-foreground">{t('workflowExecutionLabel')}</p>
             <div className="flex flex-col gap-1.5">
               {workflowExecs.slice(0, 5).map((exec) => (
                 <div key={exec.id} className="flex items-center gap-2 rounded-lg bg-muted/55 px-3 py-2 text-xs">
@@ -597,7 +597,7 @@ export default function InboxPage() {
                   <span className="min-w-0 flex-1 truncate text-foreground">
                     {exec.rule_name ?? exec.event_type}
                   </span>
-                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                  <span className="shrink-0 text-micro text-muted-foreground">
                     {formatViewerRelativeTime(exec.completed_at ?? exec.created_at, locale, displayTimezone)}
                   </span>
                 </div>
@@ -636,7 +636,7 @@ export default function InboxPage() {
               inboxSections.map((section) => (
                 <div key={section.label}>
                   {/* 목업 ③: 날짜 section 라벨(calm·NOT uppercase) */}
-                  <p className="px-3 pt-3 pb-1 text-[11.5px] font-medium text-muted-foreground">{section.label}</p>
+                  <p className="px-3 pt-3 pb-1 text-editorial-meta font-medium text-muted-foreground">{section.label}</p>
                   {/* 목업 ④: dense rows — per-item 카드 테두리 제거·divide-y로 구분·content-dominant */}
                   <div className="divide-y divide-border/60">
                     {section.items.map((item) => {
@@ -662,7 +662,7 @@ export default function InboxPage() {
                                 onClick={() => void openGroup(item)}
                                 className="flex min-w-0 flex-1 items-start gap-3 py-2.5 pr-3 text-left"
                               >
-                                <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/6 text-muted-foreground">
+                                <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-overlay-fill-1 text-muted-foreground">
                                   <NotifIcon type={item.latest.type} fallback={Bell} className="size-4" />
                                 </div>
                                 <div className="min-w-0 flex-1 space-y-0.5">
@@ -677,7 +677,7 @@ export default function InboxPage() {
                                       {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
                                       {/* story #0d1c69f3(v2 4호) — generic 그룹은 status_change와 다른 문구(반복
                                           알림 건수일 뿐 "상태 변경" 의미가 아니다)를 쓴다. */}
-                                      <span className="shrink-0 rounded-full border border-info/30 bg-info/10 px-1.5 py-0.5 text-[10px] font-medium text-foreground">
+                                      <span className="shrink-0 rounded-full border border-info/30 bg-info/10 px-1.5 py-0.5 text-micro font-medium text-foreground">
                                         {/* story #4302(유나 판정) — 묶음 수는 불러온 쪽 안의 수다(전체 아님). 더 불러올 쪽이 남았으면 «48+건».
                                             en 복수형 키는 `+`를 숫자에 못 붙여 형제 키(statusChangeCountAtLeast). */}
                                         {item.groupKind === 'status_change'
@@ -685,7 +685,7 @@ export default function InboxPage() {
                                           : t('notificationGroupCount', { count: formatAtLeast(item.count, hasMore) })}
                                       </span>
                                     </div>
-                                    <span className="shrink-0 text-[11px] text-muted-foreground">{formatTime(item.latest.created_at)}</span>
+                                    <span className="shrink-0 text-editorial-meta text-muted-foreground">{formatTime(item.latest.created_at)}</span>
                                   </div>
                                 </div>
                               </button>
@@ -696,7 +696,7 @@ export default function InboxPage() {
                                   <div key={n.id} className="flex items-center gap-2 text-xs">
                                     <span className={`size-1.5 shrink-0 rounded-full ${idx === 0 ? 'bg-success' : 'bg-muted-foreground/40'}`} />
                                     <span className="min-w-0 flex-1 truncate text-foreground">{composeNotificationDisplay(n, t, eventPreviewHelpers).title}</span>
-                                    <span className="shrink-0 text-[10px] text-muted-foreground">{formatTime(n.created_at)}</span>
+                                    <span className="shrink-0 text-micro text-muted-foreground">{formatTime(n.created_at)}</span>
                                   </div>
                                 ))}
                               </div>
@@ -712,18 +712,18 @@ export default function InboxPage() {
                                   return (
                                     <div key={n.id} className="flex items-center gap-2 text-xs">
                                       {refLabel ? (
-                                        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                                        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
                                           {refLabel}
                                         </span>
                                       ) : null}
                                       {n.reference_id ? (
-                                        <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-muted-foreground">
+                                        <span className="min-w-0 flex-1 truncate font-mono text-micro text-muted-foreground">
                                           {n.reference_id.slice(0, 8)}
                                         </span>
                                       ) : (
                                         <span className="min-w-0 flex-1 truncate text-foreground">{composeNotificationDisplay(n, t, eventPreviewHelpers).title}</span>
                                       )}
-                                      <span className="shrink-0 text-[10px] text-muted-foreground">{formatTime(n.created_at)}</span>
+                                      <span className="shrink-0 text-micro text-muted-foreground">{formatTime(n.created_at)}</span>
                                       {n.href ? (
                                         <a
                                           href={n.href}
@@ -764,7 +764,7 @@ export default function InboxPage() {
                         >
                           {/* 목업 ④: unread=좌측 accent strip(박시 카드 bg 대체). story #2023 ⓑ: L5(시스템 상태), 브랜드 아님 */}
                           {!notification.is_read ? <span className="absolute left-0 top-0 h-full w-0.5 bg-info" aria-hidden /> : null}
-                          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/6 text-muted-foreground">
+                          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-overlay-fill-1 text-muted-foreground">
                             <NotifIcon type={notification.type} fallback={Info} className="size-4" />
                           </div>
                           <div className="min-w-0 flex-1 space-y-1">
@@ -772,7 +772,7 @@ export default function InboxPage() {
                               <p className={`truncate text-sm ${notification.is_read ? 'text-muted-foreground' : 'font-semibold text-foreground'}`}>
                                 {display.title}
                               </p>
-                              <span className="shrink-0 text-[11px] text-muted-foreground">{formatTime(notification.created_at)}</span>
+                              <span className="shrink-0 text-editorial-meta text-muted-foreground">{formatTime(notification.created_at)}</span>
                             </div>
                             {display.body ? (
                               <p className="line-clamp-1 text-xs text-muted-foreground">{display.body}</p>
@@ -783,7 +783,7 @@ export default function InboxPage() {
                             {(notification.type === 'agent_joined' || reasonKey) ? (
                               <div className="flex flex-wrap items-center gap-1.5">
                                 {notification.type === 'agent_joined' ? <AgentIdentity /> : null}
-                                {reasonKey ? <Badge variant="info" className="text-[10px]">{t(reasonKey)}</Badge> : null}
+                                {reasonKey ? <Badge variant="info" className="text-micro">{t(reasonKey)}</Badge> : null}
                               </div>
                             ) : null}
                           </div>
@@ -835,7 +835,7 @@ export default function InboxPage() {
             ) : (
             <div className="flex flex-1 flex-col gap-4 px-6 py-6">
               <div className="flex items-start gap-3">
-                <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-white/6 text-muted-foreground">
+                <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-overlay-fill-1 text-muted-foreground">
                   <NotifIcon type={selectedNotification.type} fallback={Info} className="size-5" />
                 </div>
                 <div className="min-w-0 flex-1 space-y-2">
@@ -853,7 +853,7 @@ export default function InboxPage() {
               </div>
 
               {selectedDisplay?.body ? (
-                <div className="rounded-xl border border-white/8 bg-muted/55 p-4 text-sm leading-6 text-foreground whitespace-pre-wrap">
+                <div className="rounded-xl border border-overlay-line-1 bg-muted/55 p-4 text-sm leading-6 text-foreground whitespace-pre-wrap">
                   {selectedDisplay.body}
                 </div>
               ) : null}
