@@ -599,14 +599,23 @@ _DRAIN_ROUNDS = 5  # 배달이 또 배달을 띄울 수 있어(after_commit 사�
 
 async def _reap_waiting_tasks() -> None:
     """story #4834 — the end-of-test step every hook shares: cut the tasks that wait on purpose (the gateway's lifespan-end grace) and let their «clean up now» path run in THIS
-    loop, for at most 10 s. One still running after that is a failure with its name, not a silent leftover (a shielded cleanup that outlives the test's loop would use the shared
-    pool on a closing loop)."""
+    loop, for at most 10 s. A stream's end that is still running (`_end_connection`, an ordinary background task) may register its waiting task only after the first look, so
+    after each cut those ends are waited for and the look is repeated. One still running after that is a failure with its name, not a silent leftover (a shielded cleanup that
+    outlives the test's loop would use the shared pool on a closing loop)."""
     import asyncio
 
     from app.services import pg_pubsub
 
-    await pg_pubsub.cancel_first_tasks(10.0)
     loop = asyncio.get_running_loop()
+    deadline = loop.time() + 10.0
+    for _ in range(_DRAIN_ROUNDS):
+        await pg_pubsub.cancel_first_tasks(max(0.0, deadline - loop.time()))
+        ends = [t for t in pg_pubsub._background_tasks if not t.done() and t.get_loop() is loop and "_end_connection" in t.get_coro().__qualname__]
+        if not ends:
+            break
+        await asyncio.wait(ends, timeout=max(0.0, deadline - loop.time()))
+    else:
+        await pg_pubsub.cancel_first_tasks(max(0.0, deadline - loop.time()))
     left = [t for t in pg_pubsub._cancel_first_tasks if not t.done() and t.get_loop() is loop]
     if left:
         pytest.fail(

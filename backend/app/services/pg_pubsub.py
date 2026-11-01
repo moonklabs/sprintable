@@ -41,7 +41,11 @@ _background_tasks: set[asyncio.Task] = set()
 # story #4834 — tasks that WAIT on purpose (the gateway's lifespan-end grace, 20 s) and clean up when cut. The shutdown drain must not wait for them out of its 5 s
 # budget (it would use all of it every deploy, then cancel anyway): they are cancelled FIRST (`cancel_first_tasks`) so their «clean up now» path runs inside the budget.
 _cancel_first_tasks: set[asyncio.Task] = set()
-_DRAIN_CANCEL_FLOOR_SEC = 0.2  # the least the drain waits for tasks it has just cancelled when its budget is already gone (a cancel needs a few loop turns); never more than the budget otherwise
+# a task is cut (cancelled) only after its coroutine has STARTED: a task cancelled before its first step never runs its body, so the «clean up now» handler inside it is never
+# installed and the cleanup would be skipped. `_cancel_first_started` is set by the wrapper at its first line; `_cancel_first_cut` makes the cut happen once.
+_cancel_first_started: set[asyncio.Task] = set()
+_cancel_first_cut: set[asyncio.Task] = set()
+_DRAIN_CANCEL_FLOOR_SEC = 0.2  # after `timeout` the drain cuts what is left and waits at most this long for the cuts to be processed: a cancel needs a few loop turns, so the drain can end up to this much after `timeout` (the story-2041 contract — a task over the timeout is cancelled — needs at least a turn past it anyway)
 
 
 def fire_and_forget(coro: "Coroutine[Any, Any, Any]", *, cancel_first: bool = False) -> "asyncio.Task | None":
@@ -58,27 +62,67 @@ def fire_and_forget(coro: "Coroutine[Any, Any, Any]", *, cancel_first: bool = Fa
     except RuntimeError:
         coro.close()  # 이벤트 루프 없음 — "coroutine was never awaited" 경고 방지
         return None
+    if cancel_first:  # story #4834: a task that waits on purpose and cleans up when cut — see `cancel_first_tasks`
+        inner = coro
+
+        async def _started_first() -> None:
+            _cancel_first_started.add(asyncio.current_task())  # from here a cut reaches the body (and its «clean up now» handler)
+            await inner
+
+        coro = _started_first()
+        coro.__qualname__ = getattr(inner, "__qualname__", coro.__qualname__)  # a failure message names the real work, not the wrapper
     task = loop.create_task(coro)
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
-    if cancel_first:  # story #4834: a task that waits on purpose and cleans up when cut — see `cancel_first_tasks`
+    if cancel_first:
         _cancel_first_tasks.add(task)
-        task.add_done_callback(_cancel_first_tasks.discard)
+
+        def _forget(t: asyncio.Task, _inner=inner) -> None:
+            _cancel_first_tasks.discard(t)
+            if t not in _cancel_first_started:
+                _inner.close()  # cancelled before its first step: the body never ran — no «never awaited» warning
+            _cancel_first_started.discard(t)
+            _cancel_first_cut.discard(t)
+
+        task.add_done_callback(_forget)
     return task
 
 
+def _cut_waiting_tasks(loop: "asyncio.AbstractEventLoop", cut: "set[asyncio.Task]") -> bool:
+    """story #4834 — cut (once) this loop's waiting tasks whose body has started, adding them to `cut`; returns True when some have not started yet (the caller yields a
+    loop turn and looks again — cancelling them now would skip their cleanup)."""
+    unstarted = False
+    for t in [t for t in _cancel_first_tasks if not t.done() and t.get_loop() is loop]:
+        cut.add(t)  # tracked either way: waited for, and cancelled at the budget's end if it is still there
+        if t not in _cancel_first_started:
+            unstarted = True
+            continue
+        if t not in _cancel_first_cut:
+            _cancel_first_cut.add(t)
+            t.cancel()
+    return unstarted
+
+
 async def cancel_first_tasks(timeout: "float | None" = None) -> None:
-    """story #4834 — cancel (and wait for, at most `timeout` seconds when given) this loop's `cancel_first` tasks: the ones that wait on purpose and clean up when cut
-    (the gateway's lifespan-end grace). One device for production and tests: `drain_background_tasks` (shutdown) calls it before it waits for anything else, so
-    the 5 s budget is spent on work that can finish, not on a 20 s sleep; the test suite's end-of-test hooks (tests/conftest.py) call it inside the test's own loop
-    (no `timeout`: they wait for the cleanup), so no such task outlives its loop."""
+    """story #4834 — cut this loop's `cancel_first` tasks (the ones that wait on purpose and clean up when cut: the gateway's lifespan-end grace) and wait for them, at most
+    `timeout` seconds when given. One device for production and tests: `drain_background_tasks` (shutdown) cuts them before it waits for anything else, so the 5 s budget
+    is spent on work that can finish, not on a 20 s sleep; the test suite's end-of-test hooks (tests/conftest.py) call it inside the test's own loop (no `timeout`: they wait
+    for the cleanup), so no such task outlives its loop. It looks again after each wait: a task registered meanwhile (a stream's end that was still running) is cut too."""
     loop = asyncio.get_running_loop()
-    mine = [t for t in _cancel_first_tasks if not t.done() and t.get_loop() is loop]
-    if not mine:
-        return
-    for t in mine:
-        t.cancel()
-    await asyncio.wait(mine, timeout=timeout)
+    deadline = None if timeout is None else loop.time() + timeout
+    cut: set[asyncio.Task] = set()
+    while True:
+        unstarted = _cut_waiting_tasks(loop, cut)
+        pending = [t for t in cut if not t.done()]
+        if not pending and not unstarted:
+            return
+        left = None if deadline is None else deadline - loop.time()
+        if left is not None and left <= 0:
+            return
+        if unstarted:
+            await asyncio.sleep(0)  # let the not-yet-started ones take their first step, then cut them
+            continue
+        await asyncio.wait(pending, timeout=left)
 
 
 async def drain_background_tasks(timeout: float = 5.0) -> None:
@@ -111,24 +155,22 @@ async def drain_background_tasks(timeout: float = 5.0) -> None:
     # work started by a task we are already waiting for). The one exception is the tasks that wait on purpose (`cancel_first`, the gateway's lifespan-end grace): a stream's
     # end registers one while the drain runs, and it must be cut and waited for like the rest, so each round looks at that set again.
     tracked: set[asyncio.Task] = {t for t in _background_tasks if t.get_loop() is loop}
-    # the budget is `timeout`, all of it: the last step (cut what is still running and wait a moment for the cancels) is RESERVED inside it, so the drain never returns
-    # later than `timeout` after it started (a budget under twice the floor splits in half: wait, then cut and let the cancels run)
-    reserve = min(_DRAIN_CANCEL_FLOOR_SEC, timeout / 2)
-    main_end = started + timeout - reserve
+    main_end = started + timeout
     while True:
         # story #4834: every round first cuts the tasks that wait on purpose — their «clean up now» path runs inside the budget instead of a 20 s sleep eating it.
-        for t in [t for t in _cancel_first_tasks if not t.done() and t.get_loop() is loop]:
-            t.cancel()
-            tracked.add(t)
+        unstarted = _cut_waiting_tasks(loop, tracked)
         pending = [t for t in tracked if not t.done()]
-        if not pending:
+        if not pending and not unstarted:
             return
         left = main_end - loop.time()
         if left <= 0:
             break
+        if unstarted:
+            await asyncio.sleep(0)  # a registered task takes its first step before it is cut (a cut before that would skip its cleanup)
+            continue
         await asyncio.wait(pending, timeout=left)
-    # the budget's main phase is over: cut whatever is left of ours and give the cancels the reserved moment. A cancel-resistant task (the gateway's cleanup runs
-    # shielded to its end) must not hold the shutdown — and the engine's disposal — hostage past the budget.
+    # the budget is spent: cut whatever is left (a waiting task that has not started yet is tracked too, so it is cancelled here and does not run after the shutdown) and give the cancels the floor — a cancel-resistant task (the
+    # gateway's cleanup runs shielded to its end) must not hold the shutdown, and the engine's disposal, hostage.
     still_pending = [t for t in tracked if not t.done()]
     logger.warning(
         "pg_pubsub drain timeout(%ss) — 미완료 태스크 %d건 cancel", timeout, len(still_pending),
@@ -136,7 +178,7 @@ async def drain_background_tasks(timeout: float = 5.0) -> None:
     for t in still_pending:
         t.cancel()
     if still_pending:
-        await asyncio.wait(still_pending, timeout=max(0.0, started + timeout - loop.time()))
+        await asyncio.wait(still_pending, timeout=_DRAIN_CANCEL_FLOOR_SEC)
 
 # ── NOTIFY 발행 ────────────────────────────────────────────────────────────────
 

@@ -700,7 +700,12 @@ async def test_the_drain_catches_a_grace_task_that_a_stream_end_registers_while_
                 yield s
 
         _orig = gw_module._mark_agent_disconnected
-        _spy = AsyncMock(side_effect=_orig)
+
+        async def _slow_orig(*a, **k):
+            await asyncio.sleep(0.5)  # the late task's cleanup takes longer than the drain's cancel floor: the drain must go on waiting for it (not stop after one look)
+            return await _orig(*a, **k)
+
+        _spy = AsyncMock(side_effect=_slow_orig)
         from app.services import sse_lease as _lease
         _real_release = _lease.release
 
@@ -965,6 +970,112 @@ async def test_a_cancel_while_the_verification_signal_is_sent_still_cleans_up_th
 
 
 # ── 소스 고정 — pinning 테스트(오늘 팀 관례) ────────────────────────────────
+@pytest.mark.anyio
+@pytest.mark.destructive_schema
+@pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요")
+async def test_a_waiting_task_that_has_not_started_yet_is_still_cleaned_up_when_it_is_cut():
+    """story #4834 (codex round 8) — a task cancelled before its first step never runs its body, so its «clean up now» handler is never installed and the cleanup would be
+    skipped. The drain (and the test hooks' `cancel_first_tasks`) let such a task take its first step, then cut it: the cleanup runs."""
+    from app.services import pg_pubsub
+
+    for how in ("drain", "cancel_first_tasks"):
+        cleaned: list[bool] = []
+
+        async def _waiter() -> None:
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                cleaned.append(True)
+                raise
+
+        pg_pubsub.fire_and_forget(_waiter(), cancel_first=True)  # nothing awaited since: its first step has not run
+        if how == "drain":
+            await pg_pubsub.drain_background_tasks(timeout=2.0)
+        else:
+            await pg_pubsub.cancel_first_tasks(2.0)
+        assert cleaned == [True], f"{how}: the cleanup of a not-yet-started waiting task ran"
+
+
+@pytest.mark.anyio
+@pytest.mark.destructive_schema
+@pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요")
+async def test_the_drain_gives_an_ordinary_task_its_whole_timeout():
+    """story #4834 (codex round 8) — the story-2041 contract is «wait `timeout`, then cancel»: no part of the budget is held back from ordinary work. A task that takes
+    0.85 s finishes inside a 1.0 s drain; it is not cut early to leave room for the cancels."""
+    from app.services import pg_pubsub
+
+    outcome: list[str] = []
+
+    async def _work() -> None:
+        try:
+            await asyncio.sleep(0.85)
+            outcome.append("finished")
+        except asyncio.CancelledError:
+            outcome.append("cancelled")
+            raise
+
+    pg_pubsub.fire_and_forget(_work())
+    await pg_pubsub.drain_background_tasks(timeout=1.0)
+    assert outcome == ["finished"]
+
+
+@pytest.mark.anyio
+@pytest.mark.destructive_schema
+@pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요")
+async def test_the_drain_cuts_a_waiting_task_registered_shortly_before_its_budget_ends():
+    """story #4834 (codex round 8) — a waiting task that a still-busy stream end registers just before the budget (0.5 s) ends is found by the round that follows the wait,
+    cut, and cleans up; it does not outlive the shutdown."""
+    from app.services import pg_pubsub
+
+    cleaned: list[bool] = []
+
+    async def _waiter() -> None:
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            cleaned.append(True)
+            raise
+
+    async def _busy_stream_end() -> None:
+        await asyncio.sleep(0.45)
+        pg_pubsub.fire_and_forget(_waiter(), cancel_first=True)
+        await asyncio.sleep(30)
+
+    pg_pubsub.fire_and_forget(_busy_stream_end())
+    try:
+        await pg_pubsub.drain_background_tasks(timeout=0.5)
+        assert cleaned == [True], "the late waiting task was cut and cleaned up"
+    finally:
+        await pg_pubsub.cancel_first_tasks(2.0)
+
+
+@pytest.mark.anyio
+@pytest.mark.destructive_schema
+@pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요")
+async def test_the_suite_reaper_waits_for_a_stream_end_that_registers_its_waiting_task_late():
+    """story #4834 (codex round 8) — the test hooks' reaper looks again after the in-flight stream ends (`_end_connection`, an ordinary background task) have finished: the
+    waiting task such an end registers after the first look is cut too, in the test's own loop, before the engine is disposed."""
+    from app.services import pg_pubsub
+    from tests import conftest as suite
+
+    cleaned: list[bool] = []
+
+    async def _waiter() -> None:
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            cleaned.append(True)
+            raise
+
+    async def _end_connection() -> None:
+        await asyncio.sleep(0.2)
+        pg_pubsub.fire_and_forget(_waiter(), cancel_first=True)
+
+    pg_pubsub.fire_and_forget(_end_connection())
+    await suite._reap_waiting_tasks()
+    assert cleaned == [True]
+
+
 def test_browser_breaking_condition_declared():
     import inspect
     import app.routers.events as ev_module
