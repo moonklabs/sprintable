@@ -222,8 +222,8 @@ def apply_embedded_host_guard(app: FastAPI) -> bool:
     """On an embedded install ONLY the loopback host name is served, on every route of the app: a page that rebinds its own DNS name to 127.0.0.1
     reaches this server with `Host: its-name`, and would otherwise be able to touch any door on the port (sign-up, …). The port is not matched (the
     server does not know its own); a hostname other than `127.0.0.1` gets 400 — `localhost` too, so a client configured for this server (an MCP client's
-    URL, a health check) must say `127.0.0.1`, not `localhost`. The web server in front applies the same rule to ITS Host (`embeddedHostRefusal` in the web
-    app), because its forward re-addresses the request. Returns whether it was applied (never on a hosted deployment)."""
+    URL, a health check) must say `127.0.0.1`, not `localhost`. The web server in front applies the same rule to the requests that go through ITS proxy
+    (`embeddedHostRefusal` in the web app), because its forward re-addresses the request; the check at the web server's entrance is story 4824 AC7. Returns whether it was applied (never on a hosted deployment)."""
     if not settings.is_embedded:
         return False
     from starlette.middleware.trustedhost import TrustedHostMiddleware

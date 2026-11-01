@@ -17,10 +17,12 @@ export function isEmbeddedServer(env: NodeJS.ProcessEnv = process.env): boolean 
 const LOOPBACK_HOST = /^127\.0\.0\.1(?::\d{1,5})?$/;
 
 /**
- * story 4825 (lens AC5, DNS rebinding) — inside the app's own server ONLY the loopback host name is served, on every request this server answers: a page that
+ * story 4825 (lens AC5, DNS rebinding) — inside the app's own server a request that goes THROUGH THIS PROXY is served ONLY under the loopback host name: a page that
  * rebinds its own DNS name to 127.0.0.1 reaches the web port with `Host: its-name`, and the `/api/v2/*` forward below would then hand the request to the
  * backend with the backend's own Host (the forward re-addresses the request), so the backend's own host check would never see the foreign name. The browser sets
  * `Host` and a page cannot change it — unlike `X-Forwarded-Host`, which a page CAN send, so no forwarded header is looked at. A missing Host is refused too.
+ * What this does NOT cover: Next answers some requests before the proxy ever runs (the middleware matcher leaves out static files and any path ending in a static-asset
+ * extension, in whatever spelling; redirects and routing normalisation come first). The check at the web server's ENTRANCE, before any routing, is story 4824 AC7.
  * `null` = serve; otherwise the 400 to answer with. Any other deployment (no switch) is untouched.
  */
 export function embeddedHostRefusal(request: NextRequest, env: NodeJS.ProcessEnv = process.env): NextResponse | null {

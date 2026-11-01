@@ -850,7 +850,8 @@ function captureSignupAttribution(request: NextRequest, response: NextResponse):
 // story 4824 — inside the desktop app's own server `/api/v2/*` is forwarded here, at request time, to the backend port the app chose at launch (see lib/embedded-api-origin.ts);
 // every other server keeps the build-time rewrite in next.config.ts. The proxy below runs in full first — only the destination of «carry on» changes.
 export async function proxy(request: NextRequest) {
-  // story 4825 — first of all: inside the app's own server a foreign Host name (a DNS-rebinding page) is refused before anything else runs
+  // story 4825 — first of all in this proxy: inside the app's own server a foreign Host name (a DNS-rebinding page) is refused before anything else here runs
+  // (requests Next answers before the proxy is reached are covered at the server's entrance — story 4824 AC7)
   const foreignHost = embeddedHostRefusal(request);
   if (foreignHost) return foreignHost;
   const response = await proxyWithTiming(request);
