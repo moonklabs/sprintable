@@ -208,6 +208,11 @@ def test_forbidden_names_and_nul_bytes_are_refused() -> None:
     d["services"]["backend"]["added"]["SPRINTABLE_LOCAL_DEV"] = "1"
     with pytest.raises(R.EnvError, match="SPRINTABLE_LOCAL_DEV"):
         R.build_service_env(d, "backend", {"PLAIN_A": "a", "SHARED": "s"}, "pw0123456789abcdef", lambda s: "v")
+    for forbidden in ("SPRINTABLE_EMBEDDED", "LOCAL_BOOTSTRAP_SECRET"):  # story 4825: the embedded-only switch and its secret
+        d3 = _decl()
+        d3["services"]["backend"]["added"][forbidden] = "1"
+        with pytest.raises(R.EnvError, match=forbidden):
+            R.build_service_env(d3, "backend", {"PLAIN_A": "a", "SHARED": "s"}, "pw0123456789abcdef", lambda s: "v")
     d2 = _decl()
     with pytest.raises(R.EnvError, match="NUL"):
         R.build_service_env(d2, "backend", {"PLAIN_A": "a\x00", "SHARED": "s"}, "pw0123456789abcdef", lambda s: "v")

@@ -23,7 +23,8 @@ from typing import Callable, Mapping
 import yaml
 
 # a VM that sets either of these would run with the cloud-only / self-hosting behaviour switched on (config.py:577-608, docker-compose.yml:56-60)
-FORBIDDEN_NAMES = frozenset({"SPRINTABLE_LOCAL_DEV", "K_SERVICE"})
+# + the desktop app's embedded-server switch and its bootstrap secret (story 4825): a hosted process that carried them would serve a no-password sign-in
+FORBIDDEN_NAMES = frozenset({"SPRINTABLE_LOCAL_DEV", "K_SERVICE", "SPRINTABLE_EMBEDDED", "LOCAL_BOOTSTRAP_SECRET"})
 _SAFE_PASSWORD = re.compile(r"[A-Za-z0-9_-]{16,}")
 
 

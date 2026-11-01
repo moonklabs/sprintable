@@ -753,6 +753,12 @@ def test_the_rate_limits_the_sheet_lists_are_the_ones_in_the_code_and_the_accept
                 route = next((d for d in node.decorator_list if isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute) and d.func.attr in ("get", "post")), None)
                 if lim and route:
                     limits[prefix + route.args[0].value] = int(lim.args[0].value.split("/")[0])
+    # the sheet is the HOSTED deployment's: a limit counts only if its route is registered on the app a hosted process builds. A router that is
+    # registered conditionally (story 4825's embedded-only `local_auth`: no embedded switch in a hosted environment, so no route — pinned by
+    # test_4825_local_bootstrap_realdb.py::test_08) is not on the sheet, and no file name has to be excepted here.
+    from app.main import app as _hosted_app
+    registered = {getattr(r, "path", None) for r in _hosted_app.routes}
+    limits = {path: n for path, n in limits.items() if path in registered}
     assert limits == {"/api/v2/legal/{doc_type}": 60, "/api/v2/auth/register": 5, "/api/v2/auth/token": 10, "/api/v2/auth/refresh": 20, "/api/v2/auth/switch-account": 20, "/api/v2/auth/native-bootstrap": 10,
                       "/api/v2/auth/native-bootstrap/challenges": 10, "/api/v2/auth/device-installations/registration-challenges": 10, "/api/v2/auth/device-installations/register": 10}, limits
     g5 = SHEET.split("**The two acceptances of G5")[1].split("## G2, the read-only look")[0]
