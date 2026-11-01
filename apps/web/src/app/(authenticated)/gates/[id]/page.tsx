@@ -561,7 +561,7 @@ export default function GateDetailPage() {
             //   Auto로 단정하던 게 자기모순의 절반이었다).
             const resolvedStatusExtra = (
               <>
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-editorial-meta text-muted-foreground">
                   {gate.status !== 'pending'
                     ? (gate.resolver_id && memberNames[gate.resolver_id]
                         // story #3806 PR 9(페드루 PO 리뷰 2026-09-11 실측) — 이름을 아직
@@ -599,7 +599,7 @@ export default function GateDetailPage() {
             // 폴백한다(resolvedStatusExtra의 gateDetailResolvedByStatus/gateDetailResolvedStatus
             // 폴백과 동형 패턴).
             const unauthorizedExtra = (
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-editorial-meta text-muted-foreground">
                 {gate.designated_approver_id && gate.designated_approver_id !== currentTeamMemberId
                   ? (memberNames[gate.designated_approver_id]
                       ? t('gateReadonlyDesignatedElsewhereNamed', { name: memberNames[gate.designated_approver_id] })
@@ -613,7 +613,7 @@ export default function GateDetailPage() {
             // 누른다"가 아니라 "이 게이트는 다른 게이트가 대신 결정한다"는 별개 사실이라
             // 문구도 별개(unauthorizedExtra와 절대 안 섞는다).
             const deferredExtra = gate.deferred_to_gate_id ? (
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-editorial-meta text-muted-foreground">
                 {t('gateDeferredToRecipeGate')}
                 {' · '}
                 <Link href={deferredGateHref(gate.deferred_to_gate_id)} className="font-medium text-primary hover:underline">

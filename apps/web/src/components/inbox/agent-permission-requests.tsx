@@ -247,11 +247,11 @@ function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
           <Badge variant="chip">{t('chip')}</Badge>
         )}
         {line !== 'unknown' && asking ? (
-          <span className="text-[11px] text-muted-foreground" data-testid="agent-permission-waited">{t('waited', requestAge(r, now))}</span>
+          <span className="text-editorial-meta text-muted-foreground" data-testid="agent-permission-waited">{t('waited', requestAge(r, now))}</span>
         ) : (
           // story #4610 (run13b 20:45Z): every other card says when it was asked, in the chip's place — answered · expired · withdrawn
           // cards stay a while (#4596) and several of one agent looked alike: which question a result belongs to is this time
-          <span className="text-[11px] text-muted-foreground" data-testid="agent-permission-asked">{t('asked', requestAge(r, now))}</span>
+          <span className="text-editorial-meta text-muted-foreground" data-testid="agent-permission-asked">{t('asked', requestAge(r, now))}</span>
         )}
       </div>
       <p className="text-sm text-foreground">{agentOnDevice(r.agent_name, r.device_name)}</p>
@@ -270,10 +270,10 @@ function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
       ) : r.summary === null ? null : ( // story #4590: no detail read → no summary box
         <div className="rounded-md bg-muted/50 px-2 py-1.5">
           <p className="break-all font-mono text-xs text-foreground">{r.summary}</p>
-          {notes.length > 0 ? <p className="mt-0.5 text-[11px] text-muted-foreground">{notes.join(' · ')}</p> : null}
+          {notes.length > 0 ? <p className="mt-0.5 text-editorial-meta text-muted-foreground">{notes.join(' · ')}</p> : null}
         </div>
       )}
-      {r.workdir ? <p className="text-[11px] text-muted-foreground">{t('workdir', { path: r.workdir })}</p> : null}
+      {r.workdir ? <p className="text-editorial-meta text-muted-foreground">{t('workdir', { path: r.workdir })}</p> : null}
       {net === 'ask' && r.host_unread && answer === null ? (
         <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-line">{t('net.hostUnread')}</p>
       ) : answersHere ? (

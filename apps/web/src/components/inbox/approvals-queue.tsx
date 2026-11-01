@@ -468,10 +468,10 @@ export function ApprovalsQueue() {
             <div key={item.id} className="flex flex-col gap-1.5 rounded-xl border border-info/30 bg-info/5 px-4 py-3">
               <div className="flex w-full flex-wrap items-center gap-1.5">
                 <Badge variant="chip">{t('hitlRequestBadge')}</Badge>
-                <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{formatAge(item.created_at, t)}</span>
+                <span className="ml-auto shrink-0 text-micro text-muted-foreground">{formatAge(item.created_at, t)}</span>
               </div>
               <p className="text-sm text-foreground">{item.title}</p>
-              <p className="line-clamp-2 text-[11px] text-muted-foreground">{item.prompt}</p>
+              <p className="line-clamp-2 text-editorial-meta text-muted-foreground">{item.prompt}</p>
               {canResolveHitl ? (
                 // story #3592(§17-20 ⑧·§22-18 동형)·story #3606(잔여, 페드루 PO 確定
                 // 2026-09-07) — gateApprove도 gateReject와 같은 자리(같은 map·같은
@@ -505,7 +505,7 @@ export function ApprovalsQueue() {
                   </Button>
                 </div>
               ) : (
-                <p className="mt-1 text-right text-[11px] text-muted-foreground">{t('gateReadonlyNotAuthorized')}</p>
+                <p className="mt-1 text-right text-editorial-meta text-muted-foreground">{t('gateReadonlyNotAuthorized')}</p>
               )}
             </div>
           );
@@ -532,7 +532,7 @@ export function ApprovalsQueue() {
               {held ? (
                 <Badge variant="secondary">{t('heldBadge')}</Badge>
               ) : null}
-              <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{formatAge(gate.created_at, t)}</span>
+              <span className="ml-auto shrink-0 text-micro text-muted-foreground">{formatAge(gate.created_at, t)}</span>
             </div>
             {/* PO 실측(390px, 2026-08-16) — items-start 부모(flex-col)에서 truncate는 자기
                 content 폭까지 shrink-to-fit돼 ellipsis가 걸릴 폭 기준 자체가 없다(카드
@@ -546,7 +546,7 @@ export function ApprovalsQueue() {
               {decisionFacts?.question ?? gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`}
             </p>
             {decisionFacts ? (
-              <p className="text-[11px] text-muted-foreground">#{gate.work_item_id.slice(0, 8)}</p>
+              <p className="text-editorial-meta text-muted-foreground">#{gate.work_item_id.slice(0, 8)}</p>
             ) : null}
             {/* story #3806(Phase3·3-2 PR5, 유나 §절 §1 「결재 카드 봉인 5필드」 — 정정2,
                 페드루 PO 리뷰 2026-09-11 13:00Z 실측) — 이 큐 카드 자체가 「결재 카드」다.
@@ -554,7 +554,7 @@ export function ApprovalsQueue() {
                 재사용, 새 표시 로직 0). ads_boost가 아닌 gate_type은 sealed_ads_budget_
                 minor가 항상 null이라 이 블록이 안 그려진다. */}
             {gate.gate_type === 'ads_boost' && gate.sealed_ads_budget_minor != null ? (
-              <p className="text-[11px] text-muted-foreground" data-testid="inbox-ads-boost-sealed">
+              <p className="text-editorial-meta text-muted-foreground" data-testid="inbox-ads-boost-sealed">
                 {gate.sealed_ads_currency
                   ? formatMinorCurrency(gate.sealed_ads_budget_minor, gate.sealed_ads_currency as GenerationBudgetCurrency, locale, tContent)
                   : gate.sealed_ads_budget_minor}
@@ -574,7 +574,7 @@ export function ApprovalsQueue() {
                 pr_number·head SHA는 이미 GateResponse에 있었지만(from_attributes 자동 채움)
                 카드가 안 그려 판별자가 못 됐다 — 이 게이트 자신의 고유 식별을 1행에 표기. */}
             {gate.pr_number ? (
-              <p className="text-[11px] font-medium text-muted-foreground">
+              <p className="text-editorial-meta font-medium text-muted-foreground">
                 PR #{gate.pr_number}
                 {gate.github_check_run_sha ? ` · ${gate.github_check_run_sha.slice(0, 7)}` : ''}
               </p>
@@ -586,14 +586,14 @@ export function ApprovalsQueue() {
                 raw slug 대신 recipe-stage-label.ts/stage-role.ts SSOT(recipe-detail-view.tsx
                 와 동일 낱말표). */}
             {typeof gate.neutral_facts?.stage === 'string' ? (
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-editorial-meta text-muted-foreground">
                 {t('gateStageLabel')}: {recipeStageLabel(gate.neutral_facts.stage, tOrg)}
                 {typeof gate.neutral_facts.stage_role === 'string' ? ` (${stageRoleLabel(gate.neutral_facts.stage_role, tOrg)})` : ''}
               </p>
             ) : null}
-            {orgName ? <p className="text-[11px] text-muted-foreground">{orgName}</p> : null}
+            {orgName ? <p className="text-editorial-meta text-muted-foreground">{orgName}</p> : null}
             {diffFacts ? (
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-editorial-meta text-muted-foreground">
                 {t('diffFactsFileCount', { count: diffFacts.fileCount })}
                 {diffFacts.touchesMigration ? ` · ${t('diffFactsMigrationTouch')}` : ''}
               </p>
@@ -613,7 +613,7 @@ export function ApprovalsQueue() {
             <button
               type="button"
               onClick={() => toggleDecisionExpanded(gate.id)} aria-expanded={decisionExpanded}
-              className="mt-1 flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+              className="mt-1 flex items-center gap-1 text-editorial-meta font-medium text-primary hover:underline"
             >
               {decisionExpanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
               {t(decisionExpanded ? 'decisionCollapse' : 'decisionExpand')}
@@ -622,17 +622,17 @@ export function ApprovalsQueue() {
               <div className="mt-1.5 space-y-2 rounded-lg border border-border bg-muted/20 p-2.5">
                 <p className="text-xs whitespace-pre-wrap text-foreground">{decisionFacts.question}</p>
                 {decisionFacts.assumption ? (
-                  <p className="text-[11px] whitespace-pre-wrap text-muted-foreground">
+                  <p className="text-editorial-meta whitespace-pre-wrap text-muted-foreground">
                     <span className="font-medium text-foreground">{t('decisionAssumptionLabel')}</span> {decisionFacts.assumption}
                   </p>
                 ) : null}
                 {decisionFacts.options.length > 0 ? (
                   <div className="space-y-1">
-                    <p className="text-[11px] font-medium text-foreground">{t('decisionOptionsLabel')}</p>
+                    <p className="text-editorial-meta font-medium text-foreground">{t('decisionOptionsLabel')}</p>
                     {decisionFacts.options.map((option) => (
                       <label
                         key={option}
-                        className="flex cursor-pointer items-start gap-1.5 rounded-md p-1 text-[11px] text-foreground hover:bg-muted/40"
+                        className="flex cursor-pointer items-start gap-1.5 rounded-md p-1 text-editorial-meta text-foreground hover:bg-muted/40"
                       >
                         <input
                           type="radio"
@@ -690,7 +690,7 @@ export function ApprovalsQueue() {
                     곁들인다(안전망 인지 자체가 오발 방지의 일부). */}
                 {resolvedAtMs[gate.id] && Date.now() - resolvedAtMs[gate.id]! < UNDO_WINDOW_MS ? (
                   <div className="mt-2 flex items-center justify-end gap-2">
-                    <span className="text-[11px] text-muted-foreground">{formatUndoRemaining(resolvedAtMs[gate.id]!, t)}</span>
+                    <span className="text-editorial-meta text-muted-foreground">{formatUndoRemaining(resolvedAtMs[gate.id]!, t)}</span>
                     <GateUndoButton gateId={gate.id} onUndone={() => undoGate(gate.id)} />
                   </div>
                 ) : null}
@@ -786,13 +786,13 @@ export function ApprovalsQueue() {
               // story #3806(정정3, 페드루 PO 리뷰 2026-09-11 13:00Z) — 「작성자가 본문을
               // 수정해...」는 글 게이트(doc/content) 전용 문장이다. ads_boost는 본문이
               // 아니라 예산·기간이 바뀌는 축이라 §1 원문 그대로 별도 문장을 쓴다.
-              <p className="mt-2 rounded-lg bg-muted/40 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+              <p className="mt-2 rounded-lg bg-muted/40 px-2.5 py-1.5 text-editorial-meta text-muted-foreground">
                 {gate.gate_type === 'ads_boost' ? t('adsBoostReapprovalWaiting') : t('gateReapprovalResubmitWaiting')}
               </p>
             ) : null}
             {gateErrors[gate.id] ? (
               <p
-                className="mt-2 rounded-lg border border-destructive/30 bg-destructive-tint px-2.5 py-1.5 text-[11px] text-foreground"
+                className="mt-2 rounded-lg border border-destructive/30 bg-destructive-tint px-2.5 py-1.5 text-editorial-meta text-foreground"
                 role="alert"
                 aria-live="assertive"
               >
@@ -849,7 +849,7 @@ export function ApprovalsQueue() {
               </Button>
             </div>
             {requiresOptionChoice && !selectedOption ? (
-              <p className="mt-1.5 text-right text-[11px] text-muted-foreground">{t('decisionSelectHint')}</p>
+              <p className="mt-1.5 text-right text-editorial-meta text-muted-foreground">{t('decisionSelectHint')}</p>
             ) : null}
           </div>
         );
@@ -879,7 +879,7 @@ export function ApprovalsQueue() {
             {/* story #3038 AC4 — 서명 모달도 방어적으로 동형 표기(카드 단계에서 이미 구분
                 가능해졌지만, 모달 단독으로도 "이게 그 PR 맞나" 재확認 가능하게). */}
             {signatureGate?.pr_number ? (
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-editorial-meta text-muted-foreground">
                 PR #{signatureGate.pr_number}
                 {signatureGate.github_check_run_sha ? ` · ${signatureGate.github_check_run_sha.slice(0, 7)}` : ''}
               </p>

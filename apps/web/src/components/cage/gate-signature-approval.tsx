@@ -100,7 +100,7 @@ export function GateSignatureApproval({
   return (
     <div className="space-y-4">
       <div>
-        <p className="mb-2 text-[11px] font-semibold text-muted-foreground">{t('sigEvidenceLabel')}</p>
+        <p className="mb-2 text-editorial-meta font-semibold text-muted-foreground">{t('sigEvidenceLabel')}</p>
         <GateEvidence gate={gate} />
         <label className="mt-3 flex min-h-12 items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm">
           <input
@@ -114,7 +114,7 @@ export function GateSignatureApproval({
       </div>
 
       <div>
-        <label className="mb-1 block text-[11px] font-semibold text-muted-foreground" htmlFor="gate-sig-reason">
+        <label className="mb-1 block text-editorial-meta font-semibold text-muted-foreground" htmlFor="gate-sig-reason">
           {t('sigReasonLabel')}
         </label>
         <textarea
@@ -140,7 +140,7 @@ export function GateSignatureApproval({
 
       <div className="flex flex-col gap-2">
         {/* story #4558 — «승인은 내 서명으로 기록돼요»는 승인이 있는 패널에만(반려 전용 패널엔 승인이 없다). */}
-        {rejectOnly ? null : <p className="text-center text-[11px] text-muted-foreground">{t('sigConsequenceNote')}</p>}
+        {rejectOnly ? null : <p className="text-center text-editorial-meta text-muted-foreground">{t('sigConsequenceNote')}</p>}
         {/* the live region stays mounted (text in and out) so a screen reader announces the change; with no text it is sr-only (no gap in the column) */}
         <p
           className={hint ? 'text-center text-xs text-foreground' : 'sr-only'}
