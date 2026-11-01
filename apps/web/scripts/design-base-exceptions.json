@@ -1,0 +1,66 @@
+{
+  "_doc": [
+    "story 4831 AC4 — 바탕 밖 값으로 세지 않는 예외 명단(verify-design-base.ts가 읽는다).",
+    "여기에는 «바탕이 정할 수 없는 값»(제3자 브랜드색 · 사용자 데이터 색 · 라이브러리 입력 · 독립 문서 문자열)만 올린다.",
+    "항목마다 why(까닭)가 필수이고, 적은 kinds가 그 파일에서 0건이 되면 가드가 낡은 항목으로 실패시킨다.",
+    "측정 도구가 값을 오인하는 경우(예: 토큰만 섞는 color-mix)는 여기가 아니라 verify-design-base.ts의 스캐너를 고친다.",
+    "file은 src 기준 경로(정확히 일치), kinds는 verify-design-base.ts의 OFF_KINDS 이름."
+  ],
+  "exceptions": [
+    {
+      "file": "app/login/page.tsx",
+      "kinds": ["color_literal", "color_bw"],
+      "why": "color_literal: Google 로고 SVG 브랜드 색. color_bw: Apple 로그인 단추 — Apple 가이드의 검정/흰 단추(로고 선 한 줄)."
+    },
+    {
+      "file": "app/invite/invite-client.tsx",
+      "kinds": ["color_literal"],
+      "why": "Google 로고 SVG 브랜드 색"
+    },
+    {
+      "file": "app/register/page.tsx",
+      "kinds": ["color_literal"],
+      "why": "Google 로고 SVG 브랜드 색"
+    },
+    {
+      "file": "components/ui/label-chip.tsx",
+      "kinds": ["color_literal"],
+      "why": "사용자 데이터 색(라벨 색 3종) — 사용자가 고르는 값이라 바탕이 정할 수 없다"
+    },
+    {
+      "file": "components/docs/lib/mermaid-renderer.ts",
+      "kinds": ["color_literal"],
+      "why": "mermaid 테마 변수는 리터럴 색만 받는다(라이브러리 입력) — 다크 고정 테마"
+    },
+    {
+      "file": "components/chat/file-viewer.tsx",
+      "kinds": ["color_bw"],
+      "why": "문서 iframe 바탕 — 문서가 기대하는 흰색이라 테마와 무관"
+    },
+    {
+      "file": "lib/channel-label.ts",
+      "kinds": ["color_literal"],
+      "why": "채널 표식(ListRowMark)의 배경색 맵 — 제3자 채널의 공식 브랜드색(instagram · facebook · wordpress · stibee · threads · x · ghost)과 hosted_site 표식 파랑은 바탕이 정할 수 없는 값이고, 중립 회색 #5B6470은 흰 이니셜을 올리는 두 테마 공통의 고정 면이다(테마를 따르면 다크에서 흰 글자 대비가 깨짐). 새 채널 색은 이 파일에서 브랜드 값일 때만 더한다."
+    },
+    {
+      "file": "lib/runtime-capabilities.ts",
+      "kinds": ["color_literal", "color_bw"],
+      "why": "7건 모두 sourceNote(출처 설명 문장)와 주석 속의 글자 — 브랜드 아이콘 색을 실측했다고 적은 산문(#DA7757 · bg-white 등)이지 스타일 값이 아니다. 코드 위치로 분류해 확인함."
+    },
+    {
+      "file": "services/canvas.ts",
+      "kinds": ["color_literal", "font_inline", "space_inline"],
+      "why": "목(mock) 산출물 MOCK_HTML_V4 — 독립 HTML 문서 문자열이라 바탕 토큰이 닿지 않는다(산출물 미리보기 샘플)."
+    },
+    {
+      "file": "components/brand/sprintable-logo.tsx",
+      "kinds": ["color_literal"],
+      "why": "브랜드 마크의 mono 판 고정 색(#FFFFFF · #ADADAD) — 항상 어두운 면(랜딩) 전용이라 테마를 따르지 않는다. 테마를 따르는 판은 var(--brand-mark-*)를 이미 쓴다."
+    },
+    {
+      "file": "components/shared/avatar.tsx",
+      "kinds": ["color_bw", "space_inline"],
+      "why": "color_bw: mono 연동 아이콘은 검정 단색 원본이라 두 테마 모두 흰 원판 위에 놓아야 보인다(고정 흰색). space_inline: 글자 크기에 비례해 계산되는 작은 글자 배지(fontSize가 7px까지 내려감)의 padding."
+    }
+  ]
+}

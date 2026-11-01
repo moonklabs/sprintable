@@ -67,7 +67,7 @@ describe('MobileTabBar — 결재/채팅 카운트 배지(story #3431 CornerCoun
     expect(badge?.textContent).toBe('5');
     expect(badge?.className).toContain('bg-primary');
     expect(badge?.className).toContain('text-primary-foreground');
-    expect(badge?.className).toContain('text-[10px]');
+    expect(badge?.className).toContain('text-micro');
     expect(badge?.className).toContain('absolute');
     expect(badge?.className).toContain('left-full');
   });

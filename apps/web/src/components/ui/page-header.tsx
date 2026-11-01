@@ -65,7 +65,7 @@ import { cn } from '@/lib/utils';
 const pageHeaderVariants = cva('font-display font-editorial-heading tracking-[-0.02em] text-foreground', {
   variants: {
     size: {
-      page: 'text-2xl md:text-3xl',
+      page: 'text-2xl md:text-display',
       section: 'text-xl',
       compact: 'text-lg',
     },
@@ -85,7 +85,7 @@ export function PageHeader({ eyebrow, title, description, actions, className, si
   return (
     <section className={cn('flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between', className)}>
       <div className="space-y-1.5">
-        {eyebrow ? <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">{eyebrow}</div> : null}
+        {eyebrow ? <div className="text-editorial-meta font-semibold uppercase tracking-[0.2em] text-muted-foreground">{eyebrow}</div> : null}
         <h1 className={cn(pageHeaderVariants({ size }))}>
           {title}
         </h1>

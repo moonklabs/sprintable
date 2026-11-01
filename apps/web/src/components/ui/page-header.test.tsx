@@ -27,7 +27,7 @@ async function mount(node: React.ReactNode): Promise<{ el: HTMLElement; root: Ro
 // 안전하게 병기된다(lib/utils.ts 참고) — 더 이상 인라인 style 우회가 필요 없다.
 // story #2974 D1 revert(PO 판정 2026-08-24, PR#3416) — D1이 반려돼 페이스는 다시 D0 값
 // (font-display=var(--font-sans), 시각 무변화)이다.
-const ORIGINAL_TITLE_CLASSES = 'font-display font-editorial-heading text-2xl tracking-[-0.02em] text-foreground md:text-3xl';
+const ORIGINAL_TITLE_CLASSES = 'font-display font-editorial-heading text-2xl tracking-[-0.02em] text-foreground md:text-display';
 
 function classSet(s: string): Set<string> {
   return new Set(s.split(/\s+/).filter(Boolean));
@@ -61,7 +61,7 @@ describe('PageHeader size variant (story #2879)', () => {
     const h1 = el.querySelector('h1')!;
     expect(h1.className).toContain('text-xl');
     expect(h1.className).not.toContain('text-2xl');
-    expect(h1.className).not.toContain('md:text-3xl');
+    expect(h1.className).not.toContain('md:text-display');
   });
 
   it('size=compact가 text-lg를 렌더한다', async () => {

@@ -22,7 +22,7 @@ describe('CornerCountBadge', () => {
     const el = container.querySelector('span');
     expect(el?.textContent).toBe('99+');
     expect(el?.className).toContain('bg-destructive');
-    expect(el?.className).toContain('text-white');
+    expect(el?.className).toContain('text-on-scrim');
     expect(el?.className).toContain('dark:text-proof-bg');
   });
 
@@ -52,7 +52,7 @@ describe('CornerCountBadge', () => {
     const { container, root } = mount();
     await act(async () => { root.render(<CornerCountBadge variant="destructive" value={1} className="absolute -right-0.5 -top-0.5" />); });
     const el = container.querySelector('span');
-    expect(el?.className).toContain('text-[10px]');
+    expect(el?.className).toContain('text-micro');
     expect(el?.className).toContain('rounded-full');
     expect(el?.className).toContain('h-4');
     expect(el?.className).toContain('min-w-4');

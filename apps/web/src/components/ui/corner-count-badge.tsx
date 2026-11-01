@@ -42,11 +42,11 @@ import { cn } from '@/lib/utils';
  * 문서화 안 돼 있던 것이 원인).
  */
 const cornerCountBadgeVariants = cva(
-  'flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold tabular-nums leading-none',
+  'flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-micro font-bold tabular-nums leading-none',
   {
     variants: {
       variant: {
-        destructive: 'bg-destructive text-white dark:text-proof-bg',
+        destructive: 'bg-destructive text-on-scrim dark:text-proof-bg',
         info: 'bg-info text-info-foreground',
         primary: 'bg-primary text-primary-foreground',
       },
