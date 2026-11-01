@@ -157,7 +157,7 @@ describe('RecruiterClient — recruit 키 무고지 rotate 방지 (story #2667)'
     // agentMode를 existing으로 전환 + 기존 에이전트 선택.
     const existingTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'recruiter.agentModeExisting');
     await act(async () => { existingTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const select = container.querySelector('select') as HTMLSelectElement;
+    const select = container.querySelector('select[data-slot="select"]') as HTMLSelectElement;
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!;
       setter.call(select, 'existing-agent-1');
@@ -200,7 +200,7 @@ describe('RecruiterClient — recruit 키 무고지 rotate 방지 (story #2667)'
 
     const existingTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'recruiter.agentModeExisting');
     await act(async () => { existingTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const select = container.querySelector('select') as HTMLSelectElement;
+    const select = container.querySelector('select[data-slot="select"]') as HTMLSelectElement;
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!;
       setter.call(select, 'existing-agent-2');
@@ -234,7 +234,7 @@ describe('RecruiterClient — recruit 키 무고지 rotate 방지 (story #2667)'
 
     const existingTab = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'recruiter.agentModeExisting');
     await act(async () => { existingTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const select = container.querySelector('select') as HTMLSelectElement;
+    const select = container.querySelector('select[data-slot="select"]') as HTMLSelectElement;
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!;
       setter.call(select, 'existing-agent-3');

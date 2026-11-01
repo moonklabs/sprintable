@@ -164,7 +164,7 @@ describe('AgentRunsList — 빈 상태 문구가 기본 창과 넓힌 창을 가
     await act(async () => { root.render(wrap(<AgentRunsList />)); });
     await flush();
 
-    const fromInput = container.querySelector('input[type="date"]') as HTMLInputElement;
+    const fromInput = container.querySelector('input[type="date"][data-slot="input"]') as HTMLInputElement;
     expect(fromInput).toBeTruthy();
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
     await act(async () => {
