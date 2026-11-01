@@ -1331,11 +1331,14 @@ async def register(
         if not delivered:
             # SPR-13: provider 미설정 설치에서 운영자가 로그로 인증을 완료할 수 있게 링크를 남긴다
             # (자기 인스턴스 로그 = 운영자 신뢰 경계 안. 실발송 성공 시에는 안 찍힘).
-            logger.warning(
-                "register: 인증 이메일 미발송(콘솔 폴백) user_id=%s email=%s — "
-                "RESEND_API_KEY/EMAIL_FROM 미설정 또는 발송 실패 추정. 인증 링크: %s",
-                user.id, user.email, verify_link,
-            )
+            if settings.is_embedded:  # story 4825 (AC6): the link is a token — the desktop app's server log never carries one
+                logger.warning("register: verification e-mail not sent (no provider in this install) user_id=%s", user.id)
+            else:
+                logger.warning(
+                    "register: 인증 이메일 미발송(콘솔 폴백) user_id=%s email=%s — "
+                    "RESEND_API_KEY/EMAIL_FROM 미설정 또는 발송 실패 추정. 인증 링크: %s",
+                    user.id, user.email, verify_link,
+                )
     except Exception:
         logger.exception(
             "register: 인증 이메일 발송 예외 user_id=%s email=%s (가입 자체는 완료)",
@@ -2575,6 +2578,10 @@ async def request_set_password(
     즉시 해시해 토큰에만 싣는다(평문 어디에도 안 남김) — 실제 DB write는 confirm이 한다."""
     if _requires_interactive_session(auth):
         return _err("REQUIRES_INTERACTIVE_SESSION", "이 작업은 브라우저 세션에서만 가능합니다", 403)
+    if settings.is_embedded:
+        # story 4825 (AC6) — the desktop app's own server has no e-mail: nothing is made or sent here (no token, no link); a signed-in owner sets the first
+        # password through POST /auth/local-set-password instead
+        return _err("EMAIL_NOT_CONFIGURED", "E-mail is not available in this install", 409)
 
     user = await _get_user_by_id(session, uuid.UUID(auth.user_id))
     if user is None:
@@ -2611,7 +2618,7 @@ async def request_set_password(
         logger.warning(
             "set-password/request: 확인 이메일 미발송(콘솔 폴백) user_id=%s email=%s 확인 링크: %s",
             user.id, user.email, confirm_link,
-        )
+        )  # (an embedded install never gets here: it is closed above with EMAIL_NOT_CONFIGURED before any token exists)
         return _ok({"message": "Confirmation email could not be delivered — check email configuration", "delivered": False})
     return _ok({"message": "Confirmation email sent", "delivered": True})
 
@@ -2732,10 +2739,13 @@ async def resend_verification(
     if not delivered:
         # 콘솔 폴백(미발송)을 "sent"로 거짓 보고하지 않는다(데모 디버깅 가시화).
         # SPR-13: 운영자가 로그로 인증을 완료할 수 있게 링크 포함(register 폴백과 동일).
-        logger.warning(
-            "resend-verification: 인증 이메일 미발송(콘솔 폴백) user_id=%s email=%s 인증 링크: %s",
-            user.id, user.email, verify_link,
-        )
+        if settings.is_embedded:  # story 4825 (AC6): the link is a token — the desktop app's server log never carries one
+            logger.warning("resend-verification: verification e-mail not sent (no provider in this install) user_id=%s", user.id)
+        else:
+            logger.warning(
+                "resend-verification: 인증 이메일 미발송(콘솔 폴백) user_id=%s email=%s 인증 링크: %s",
+                user.id, user.email, verify_link,
+            )
         return _ok({"message": "Verification email could not be delivered — check email configuration", "delivered": False})
     return _ok({"message": "Verification email sent", "delivered": True})
 

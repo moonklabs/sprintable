@@ -25,13 +25,16 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, FastAPI, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.security import REFRESH_TOKEN_EXPIRE_DAYS, create_refresh_token, create_tokens
+from app.core.rate_limit import limiter
+from app.core.security import REFRESH_TOKEN_EXPIRE_DAYS, create_refresh_token, create_tokens, hash_password
+from app.dependencies.auth import AuthContext, get_current_user
 from app.dependencies.database import get_db
 from app.models.user import User
+from app.routers.auth import SetPasswordRequest
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +138,7 @@ async def local_bootstrap(
     from app.models.organization import Organization
     from app.models.project import OrgMember
     from app.routers.auth import (
+        _lock_person_sessions,
         _ok,
         _persist_resolved_context,
         _refresh_session_context,
@@ -170,6 +174,17 @@ async def local_bootstrap(
         session.add(user)
         await session.flush()
 
+    # the person's session lock, SHARED, before anything of the person is written or any session is stored (as the password sign-in does): a
+    # local-set-password / password change that ends every session either ran before (this session is then issued after it and stands) or waits until
+    # this one is committed (and ends it) — it can never end the sessions and then have a session slip in behind it
+    await _lock_person_sessions(session, user.id, exclusive=False)
+    # the look above may be stale by now (this call waited for the lock): a deactivation / removal / first password that committed meanwhile is seen here, not
+    # after a session has been issued across it
+    user = (await session.execute(select(User).where(User.id == user.id).execution_options(populate_existing=True))).scalar_one_or_none()
+    if user is None or not user.is_active or user.deleted_at is not None:
+        logger.warning("local-bootstrap refused: the owner account is deactivated or deleted")
+        return _refuse()
+    now = datetime.now(timezone.utc)  # the session starts HERE, after any password set that this call waited behind (else that set would make this very session stale)
     # the same per-person lock every first-organization path takes, held BEFORE the look: a setup or invite flow that creates this person's first
     # organization while we wait is seen by the look below instead of being doubled
     await lock_first_org_path(session, user.id)
@@ -208,6 +223,60 @@ async def local_bootstrap(
     )
     await session.commit()
     return _ok(tokens)
+
+
+@router.post("/local-set-password")
+@limiter.limit("10/hour")
+async def local_set_password(
+    request: Request,
+    body: SetPasswordRequest,
+    session: AsyncSession = Depends(get_db),
+    auth: AuthContext = Depends(get_current_user),
+) -> JSONResponse:
+    """story 4825 (AC6) — the signed-in owner of an embedded install chooses the first password, with NO e-mail step. The hosted flow
+    (`set-password/request` → mailed link → `confirm`) proves «this person, this moment» by e-mail; this install has no e-mail, so the proof here is the
+    owner's own session on their own machine (loopback · Host 127.0.0.1 · the session cookie), and the rest is as strict as the mailed flow:
+    a person's own session only (never an API key), the owner account only, only while it has no password, no second factor on the account
+    (a second factor that a session alone could step around is refused, not skipped), the password rules of the mailed flow, and EVERY session of the
+    person ends — they sign in again, with the password or through the app's bootstrap. No token and no link exists, so none can reach a log."""
+    from app.routers.auth import _err, _get_user_by_id, _lock_person_sessions, _ok, _requires_interactive_session, _revoke_other_sessions, _write_audit
+
+    if not settings.is_embedded:
+        return _refuse()
+    if _requires_interactive_session(auth):
+        return _err("REQUIRES_INTERACTIVE_SESSION", "This action needs a signed-in person's own session", 403)
+    user = await _get_user_by_id(session, uuid.UUID(auth.user_id))
+    if user is None:
+        return _err("USER_NOT_FOUND", "User not found", 404)
+    if user.email != LOCAL_OWNER_EMAIL:
+        return _err("NOT_LOCAL_OWNER", "Only the owner of this install can use this", 403)
+    if user.hashed_password:
+        return _err("ALREADY_HAS_PASSWORD", "User already has a password set", 400)
+    if user.totp_enabled:
+        return _err("TOTP_ENABLED", "Turn off the second factor before setting a first password", 409)
+
+    new_hash = hash_password(body.new_password)
+    await _lock_person_sessions(session, user.id, exclusive=True)  # before the person's row is written, as the mailed flow does
+    # the write holds every condition the look above checked, so a change that landed between the look and here (a rival password, a second factor
+    # turned on, the account deactivated or removed) is not overwritten
+    done = await session.execute(
+        update(User)
+        .where(User.id == user.id, User.hashed_password == "", User.totp_enabled.is_(False), User.is_active.is_(True), User.deleted_at.is_(None))
+        .values(hashed_password=new_hash, password_set_at=datetime.now(timezone.utc))
+    )
+    if done.rowcount != 1:
+        now_state = (await session.execute(
+            select(User.hashed_password, User.totp_enabled).where(User.id == user.id, User.is_active.is_(True), User.deleted_at.is_(None))
+        )).first()
+        if now_state is None:
+            return _refuse()
+        if now_state.hashed_password:
+            return _err("ALREADY_HAS_PASSWORD", "User already has a password set", 400)
+        return _err("TOTP_ENABLED", "Turn off the second factor before setting a first password", 409)
+    await _revoke_other_sessions(session, user.id, None)
+    await _write_audit(session, "password_set", user_id=user.id, email=user.email, ip_address=request.client.host if request.client else None, detail="local_set_password")
+    await session.commit()
+    return _ok({"message": "Password set — sign in again"})
 
 
 def register_local_auth_routes(app: FastAPI) -> bool:
