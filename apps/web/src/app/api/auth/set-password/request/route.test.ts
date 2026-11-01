@@ -10,11 +10,17 @@ vi.mock('@/lib/db/server', () => ({ SP_AT_COOKIE: 'sp_at', SP_RT_COOKIE: 'sp_rt'
 
 import { POST } from './route';
 
-const req = () => new Request('http://127.0.0.1:3000/api/auth/set-password/request', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json', cookie: 'sp_at=at-1; sp_rt=rt-this-browser' },
-  body: JSON.stringify({ new_password: 'Aa1!local-owner-pw' }),
-});
+// the app window: same origin as the server it talks to, JSON body
+const WINDOW = { host: '127.0.0.1:3000', origin: 'http://127.0.0.1:3000', 'sec-fetch-site': 'same-origin' };
+// a header given as `undefined` is not sent at all
+const req = (headers: Record<string, string | undefined> = {}) => {
+  const all: Record<string, string | undefined> = { 'Content-Type': 'application/json', cookie: 'sp_at=at-1; sp_rt=rt-this-browser', ...WINDOW, ...headers };
+  return new Request('http://127.0.0.1:3000/api/auth/set-password/request', {
+    method: 'POST',
+    headers: Object.fromEntries(Object.entries(all).filter((e): e is [string, string] => e[1] !== undefined)),
+    body: JSON.stringify({ new_password: 'Aa1!local-owner-pw' }),
+  });
+};
 
 const urls = (fetchMock: ReturnType<typeof vi.fn>) => fetchMock.mock.calls.map((c) => String((c as unknown as [string])[0]));
 
@@ -55,7 +61,77 @@ describe('[SID:4825] /api/auth/set-password/request', () => {
     });
   });
 
+  describe('who may ask, inside the app\'s own server (the window\'s cookies are shared by every port on 127.0.0.1)', () => {
+    beforeEach(() => { embedded.on = true; });
+    const okFetch = () => {
+      const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: { message: 'ok' } }), { status: 200 }));
+      vi.stubGlobal('fetch', fetchMock);
+      return fetchMock;
+    };
+
+    it('a page served from another port on this machine is refused — the backend is never asked', async () => {
+      const fetchMock = okFetch();
+      const res = await POST(req({ origin: 'http://127.0.0.1:4000', 'sec-fetch-site': 'same-site', 'Content-Type': 'text/plain' }));
+      expect(res.status).toBe(403);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('another site is refused', async () => {
+      const fetchMock = okFetch();
+      const res = await POST(req({ origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' }));
+      expect(res.status).toBe(403);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('the Origin alone refuses (no Sec-Fetch-Site sent, JSON body): another port, another site, or the right port on another host name', async () => {
+      const fetchMock = okFetch();
+      for (const origin of ['http://127.0.0.1:4000', 'https://evil.example', 'http://localhost:3000']) {
+        const res = await POST(req({ origin, 'sec-fetch-site': '' }));
+        expect(res.status, origin).toBe(403);
+      }
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('no Origin sent: the Referer decides — a page from another port is refused', async () => {
+      const fetchMock = okFetch();
+      const res = await POST(req({ origin: undefined, 'sec-fetch-site': undefined, referer: 'http://127.0.0.1:4000/page' }));
+      expect(res.status).toBe(403);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('a request that says it is not same-origin is refused even when its Origin looks right', async () => {
+      const fetchMock = okFetch();
+      const res = await POST(req({ 'sec-fetch-site': 'same-site' }));
+      expect(res.status).toBe(403);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('a body that is not JSON (what a cross-origin form can send) is refused with 415', async () => {
+      const fetchMock = okFetch();
+      for (const type of ['text/plain', 'application/x-www-form-urlencoded', 'multipart/form-data; boundary=x', '']) {
+        const res = await POST(req({ 'Content-Type': type }));
+        expect(res.status, type).toBe(415);
+      }
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('the app window (same origin, JSON — with or without a charset) is served', async () => {
+      const fetchMock = okFetch();
+      expect((await POST(req())).status).toBe(200);
+      expect((await POST(req({ 'Content-Type': 'application/json; charset=utf-8' }))).status).toBe(200);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+  });
+
   describe('any other deployment', () => {
+    it('is not judged by the embedded rules: a request the embedded branch would refuse goes on to the mailed flow as before', async () => {
+      const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: { delivered: true } }), { status: 200 }));
+      vi.stubGlobal('fetch', fetchMock);
+      const res = await POST(req({ 'sec-fetch-site': 'same-site', 'Content-Type': 'text/plain' }));
+      expect(res.status).toBe(200);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it('keeps the mailed flow: the request goes to set-password/request, the answer is the backend\'s, no cookie is touched', async () => {
       const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: { delivered: true } }), { status: 200 }));
       vi.stubGlobal('fetch', fetchMock);
