@@ -30,7 +30,8 @@ function embeddedRequestRefusal(request: Request): NextResponse | null {
   const csrfError = verifyCsrfOrigin(request);
   if (csrfError) return csrfError;
   // `verifyCsrfOrigin` also trusts a few fixed dev origins (localhost:3000 / :3108 …); this server answers one origin, its own: an Origin, when sent, must be this very host:port
-  const origin = request.headers.get('origin');
+  // (no Origin: the Referer, when sent, is held to the same rule — `verifyCsrfOrigin` lets any `http://localhost:` Referer through)
+  const origin = request.headers.get('origin') ?? request.headers.get('referer');
   if (origin !== null && !sameHost(origin, request.headers.get('host'))) {
     return NextResponse.json({ error: { code: 'CSRF_FORBIDDEN', message: 'Invalid request origin' } }, { status: 403 });
   }

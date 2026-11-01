@@ -7,7 +7,13 @@ const embedded = vi.hoisted(() => ({ on: false }));
 vi.mock('@/lib/embedded-api-origin', () => ({ isEmbeddedServer: () => embedded.on }));
 vi.mock('@/lib/auth-helpers', () => ({ getOrgProjectAuthContext: vi.fn(async () => ({ id: 'me' })) }));
 vi.mock('@/lib/db/server', () => ({ SP_AT_COOKIE: 'sp_at', SP_RT_COOKIE: 'sp_rt' }));
+// the repo's own origin check runs for real; the spy only records that the app-server branch asks it (the strict host comparison after it is stricter, so a missing call would not otherwise show)
+vi.mock('@/lib/auth/csrf', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@/lib/auth/csrf')>();
+  return { ...real, verifyCsrfOrigin: vi.fn(real.verifyCsrfOrigin) };
+});
 
+import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { POST } from './route';
 
 // the app window: same origin as the server it talks to, JSON body
@@ -24,7 +30,7 @@ const req = (headers: Record<string, string | undefined> = {}) => {
 
 const urls = (fetchMock: ReturnType<typeof vi.fn>) => fetchMock.mock.calls.map((c) => String((c as unknown as [string])[0]));
 
-beforeEach(() => { vi.unstubAllGlobals(); embedded.on = false; });
+beforeEach(() => { vi.unstubAllGlobals(); embedded.on = false; vi.mocked(verifyCsrfOrigin).mockClear(); });
 
 describe('[SID:4825] /api/auth/set-password/request', () => {
   describe('inside the app\'s own server', () => {
@@ -73,6 +79,7 @@ describe('[SID:4825] /api/auth/set-password/request', () => {
       const fetchMock = okFetch();
       const res = await POST(req({ origin: 'http://127.0.0.1:4000', 'sec-fetch-site': 'same-site', 'Content-Type': 'text/plain' }));
       expect(res.status).toBe(403);
+      expect((await res.json() as { error: { code: string } }).error.code).toBe('CSRF_FORBIDDEN');
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
@@ -92,11 +99,20 @@ describe('[SID:4825] /api/auth/set-password/request', () => {
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    it('no Origin sent: the Referer decides — a page from another port is refused', async () => {
+    it('no Origin sent: the Referer decides — a page from another port, or from a fixed dev origin, is refused', async () => {
       const fetchMock = okFetch();
-      const res = await POST(req({ origin: undefined, 'sec-fetch-site': undefined, referer: 'http://127.0.0.1:4000/page' }));
-      expect(res.status).toBe(403);
+      for (const referer of ['http://127.0.0.1:4000/page', 'http://localhost:3000/page', 'http://localhost:9/x']) {
+        const res = await POST(req({ origin: undefined, 'sec-fetch-site': undefined, referer }));
+        expect(res.status, referer).toBe(403);
+      }
       expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('no Origin sent: no Referer, or this server\'s own page as the Referer, is served (a browser may leave the Origin out)', async () => {
+      const fetchMock = okFetch();
+      expect((await POST(req({ origin: undefined, referer: undefined }))).status).toBe(200);
+      expect((await POST(req({ origin: undefined, referer: 'http://127.0.0.1:3000/settings' }))).status).toBe(200);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
     it('a request that says it is not same-origin is refused even when its Origin looks right', async () => {
@@ -111,8 +127,15 @@ describe('[SID:4825] /api/auth/set-password/request', () => {
       for (const type of ['text/plain', 'application/x-www-form-urlencoded', 'multipart/form-data; boundary=x', '']) {
         const res = await POST(req({ 'Content-Type': type }));
         expect(res.status, type).toBe(415);
+        expect((await res.json() as { error: { code: string } }).error.code, type).toBe('UNSUPPORTED_MEDIA_TYPE');
       }
       expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('asks the repo\'s origin check (verifyCsrfOrigin) once per request', async () => {
+      okFetch();
+      await POST(req());
+      expect(verifyCsrfOrigin).toHaveBeenCalledTimes(1);
     });
 
     it('the app window (same origin, JSON — with or without a charset) is served', async () => {
@@ -130,6 +153,7 @@ describe('[SID:4825] /api/auth/set-password/request', () => {
       const res = await POST(req({ 'sec-fetch-site': 'same-site', 'Content-Type': 'text/plain' }));
       expect(res.status).toBe(200);
       expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(verifyCsrfOrigin).not.toHaveBeenCalled();
     });
 
     it('keeps the mailed flow: the request goes to set-password/request, the answer is the backend\'s, no cookie is touched', async () => {
