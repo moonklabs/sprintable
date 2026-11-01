@@ -499,7 +499,7 @@ export default function GateDetailPage() {
                         {canAct && !isSigFlowGate ? (
                           <RadioGroup
                             name="decision-option"
-                            value={selectedOption ?? ''}
+                            value={selectedOption}
                             onValueChange={(value) => setSelectedOption(String(value))}
                             className="gap-1"
                           >

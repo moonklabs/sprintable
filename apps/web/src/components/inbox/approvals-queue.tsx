@@ -632,7 +632,7 @@ export function ApprovalsQueue() {
                     <p className="text-editorial-meta font-medium text-foreground">{t('decisionOptionsLabel')}</p>
                     <RadioGroup
                       name={`decision-option-${gate.id}`}
-                      value={selectedOptionByGateId[gate.id] ?? ''}
+                      value={selectedOptionByGateId[gate.id] ?? null}
                       onValueChange={(value) => setSelectedOptionByGateId((prev) => ({ ...prev, [gate.id]: String(value) }))}
                       className="gap-1"
                     >

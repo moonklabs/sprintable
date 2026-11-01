@@ -85,10 +85,16 @@ describe('Select — 네이티브 <select> 그대로', () => {
 });
 
 describe('Textarea — 네이티브 <textarea> 그대로', () => {
-  it('입력하면 네이티브 change(input) 이벤트로 e.target.value가 읽힌다', async () => {
+  it('입력하면 부르는 쪽의 onChange가 네이티브 이벤트로 불리고(e.target.value), 제어 상태가 그 값으로 바뀐다', async () => {
+    const seen: string[] = [];
     function Controlled() {
       const [v, setV] = useState('');
-      return <Textarea aria-label="t" value={v} onChange={(e) => setV(e.target.value)} data-testid="t" />;
+      return (
+        <>
+          <Textarea aria-label="t" value={v} onChange={(e) => { seen.push(e.target.value); setV(e.target.value); }} />
+          <output data-testid="mirror">{v}</output>
+        </>
+      );
     }
     await render(<Controlled />);
     const el = container.querySelector('textarea')!;
@@ -97,6 +103,8 @@ describe('Textarea — 네이티브 <textarea> 그대로', () => {
       setter.call(el, '안녕');
       el.dispatchEvent(new Event('input', { bubbles: true }));
     });
+    expect(seen).toEqual(['안녕']);
+    expect(container.querySelector('[data-testid="mirror"]')!.textContent).toBe('안녕');
     expect(el.value).toBe('안녕');
   });
 
@@ -183,6 +191,33 @@ describe('RadioGroup — 사람이 보는 동작', () => {
     const radios = [...container.querySelectorAll('[role="radio"]')];
     expect(radios).toHaveLength(2);
     expect(radios.map((r) => r.getAttribute('aria-checked'))).toEqual(['false', 'false']);
+  });
+
+  it('값이 null이면 «선택 없음» — 값이 빈 문자열인 선택지가 있어도 처음부터 켜져 있지 않다(날것 radio와 같음)', async () => {
+    await render(
+      <RadioGroup name="opt" value={null} onValueChange={() => {}}>
+        <label><RadioGroupItem value="" /><span>빈 선택지</span></label>
+        <label><RadioGroupItem value="b" /><span>나</span></label>
+      </RadioGroup>,
+    );
+    expect([...container.querySelectorAll('[role="radio"]')].map((r) => r.getAttribute('aria-checked'))).toEqual(['false', 'false']);
+  });
+
+  it('빈 문자열 선택지도 눌러서 고를 수 있고, 고르면 그것만 켜진다', async () => {
+    const seen: string[] = [];
+    function Group() {
+      const [v, setV] = useState<string | null>(null);
+      return (
+        <RadioGroup name="opt" value={v} onValueChange={(next) => { setV(String(next)); seen.push(String(next)); }}>
+          <label><RadioGroupItem value="" /><span data-testid="empty">빈 선택지</span></label>
+          <label><RadioGroupItem value="b" /><span>나</span></label>
+        </RadioGroup>
+      );
+    }
+    await render(<Group />);
+    await act(async () => { (container.querySelector('[data-testid="empty"]') as HTMLElement).click(); });
+    expect(seen).toEqual(['']);
+    expect([...container.querySelectorAll('[role="radio"]')].map((r) => r.getAttribute('aria-checked'))).toEqual(['true', 'false']);
   });
 
   it('라벨 글자를 누르면 그 항목만 켜지고 다른 항목은 꺼진다(한 묶음에서 하나)', async () => {
