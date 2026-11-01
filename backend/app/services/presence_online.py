@@ -55,13 +55,26 @@ async def clear_online(member_id: str) -> None:
     await redis_shared.with_fallback(_op, lambda: None)
 
 
-async def expire_online(member_id: str, seconds: float) -> None:
+async def expire_online(member_id: str, seconds: float, *, unless_renewed_after: "datetime.datetime | None" = None) -> None:
     """story #4834 — a stream that ended by its lifespan: shorten the online key to `seconds` instead of deleting it (the client reconnects at once and its first tick
-    renews the key; one that does not reads as gone when the key runs out). Nothing to shorten (no key · off · Redis down) → no-op."""
+    renews the key; one that does not reads as gone when the key runs out). Nothing to shorten (no key · off · Redis down) → no-op.
+
+    `unless_renewed_after`: the key holds the time of the last tick; one later than this was written by a connection that came back while the caller's cleanup was
+    still running — that key is live and is left alone. A failure here (Redis down at that moment) leaves the key to its own ≤ 90 s life — the same as a server that
+    died (no cleanup at all) or a failed `clear_online`: the key always ends 90 s after the last tick."""
     if not _enabled():
         return
 
     async def _op(client) -> None:
+        if unless_renewed_after is not None:
+            raw = await client.get(_key(member_id))
+            if raw:
+                try:
+                    ts = datetime.datetime.fromisoformat(raw if isinstance(raw, str) else raw.decode())
+                except (ValueError, AttributeError):
+                    ts = None
+                if ts is not None and ts > unless_renewed_after:
+                    return
         await client.pexpire(_key(member_id), max(int(seconds * 1000), 1))
 
     await redis_shared.with_fallback(_op, lambda: None)

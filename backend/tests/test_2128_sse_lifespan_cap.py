@@ -300,11 +300,13 @@ class _FakeOnline:
 
     def __init__(self) -> None:
         self.expires: dict[str, float] = {}
+        self.expire_calls: list = []
 
     async def mark_online(self, member_id) -> None:
         self.expires[str(member_id)] = time.monotonic() + 90.0
 
-    async def expire_online(self, member_id, seconds: float) -> None:
+    async def expire_online(self, member_id, seconds: float, *, unless_renewed_after=None) -> None:
+        self.expire_calls.append(unless_renewed_after)
         if self.expires.get(str(member_id), 0.0) > time.monotonic():
             self.expires[str(member_id)] = time.monotonic() + seconds
 
@@ -526,11 +528,58 @@ async def test_expire_online_shortens_the_key_in_milliseconds_and_never_deletes_
     client.set.assert_not_awaited()
 
 
+@pytest.mark.anyio
+@pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요")
+@pytest.mark.parametrize("mode", _MODES)
+async def test_a_stamped_row_is_not_a_live_sibling_when_the_next_connection_really_ends(mode):
+    """story #4834 (codex round 10) — the client reconnected inside the expiry and that connection went away at once (before the first stamp ran out): its cleanup must not
+    count the earlier session's stamped row as «another live session», or the agent is never demoted (the connect wrote it online) and reads online after the expiry."""
+    async with _agent_env(mode=mode) as (Session, agent_id, auth_ctx, fake):
+        with patch("app.services.agent_anchor_sync.sync_agent_profile_presence", new=AsyncMock()) as sync:
+            await _stream_to_its_end(auth_ctx, grace=30.0)  # the stamp (30 s) is still running below
+            await _stream_to_its_end(auth_ctx, grace=30.0, lifespan=30.0, request=_DisconnectingRequest())  # the next connection goes away for real
+        last = sync.await_args_list[-1]
+        assert last.kwargs.get("last_seen_at") is None and last.kwargs.get("agent_status") == "offline", f"{mode}: not demoted — {last}"
+
+
+@pytest.mark.anyio
+@pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요")
+async def test_the_redis_key_is_shortened_only_if_nobody_renewed_it_after_the_cleanup_began():
+    """story #4834 (codex round 10) — the cleanup passes the moment it began as `unless_renewed_after`, so a reconnect that was quicker than the cleanup keeps its key."""
+    async with _agent_env(mode="redis_on") as (Session, agent_id, auth_ctx, fake):
+        from datetime import datetime, timezone
+
+        t0 = datetime.now(timezone.utc)
+        await _stream_to_its_end(auth_ctx, grace=3.0)
+        assert fake.expire_calls, "expire_online was called"
+        bound = fake.expire_calls[-1]
+        assert bound is not None and t0 <= bound <= datetime.now(timezone.utc), bound
+
+
+@pytest.mark.anyio
+async def test_expire_online_leaves_a_key_that_a_reconnect_renewed_after_the_bound():
+    from datetime import datetime, timedelta, timezone
+
+    from app.services import presence_online
+
+    bound = datetime.now(timezone.utc)
+    for ts, shortened in ((bound + timedelta(seconds=1), False), (bound - timedelta(seconds=1), True)):
+        client = MagicMock()
+        client.get = AsyncMock(return_value=ts.isoformat())
+        client.pexpire = AsyncMock()
+        with patch.object(presence_online.settings, "presence_online_redis_enabled", True), \
+             patch.object(presence_online.settings, "redis_url", "redis://x"), \
+             patch("app.services.redis_shared.get_client", return_value=client):
+            await presence_online.expire_online("m1", 20, unless_renewed_after=bound)
+        assert client.pexpire.await_count == (1 if shortened else 0), (ts, shortened)
+
+
 def test_the_expiry_from_the_environment_is_parsed_defensively():
     from app.routers.agent_gateway import _lifespan_end_grace_from_env as parse
 
     assert parse(None) == 20.0 and parse("") == 20.0 and parse("  ") == 20.0
     assert parse("0") == 0.0 and parse("7.5") == 7.5
+    assert parse("500") == 60.0, "a longer expiry is cut to the most a stamp may have (its connected_at must stay older than any live connection)"
     for bad in ("abc", "nan", "inf", "-inf", "-1"):
         assert parse(bad) == 20.0, bad
 

@@ -109,16 +109,20 @@ _AGENT_SSE_LIFESPAN_JITTER_SEC: float = 30.0  # herd 방지(#2095 지터와 동�
 # `connected_at` are set so that every reader's existing window (`_SESSION_FRESH_TTL` for the freshness readers, `_MAX_SSE_LIFETIME_SEC` for the lifetime ones) runs
 # out that many seconds from now. A connection that comes back inside it has a new row of its own; one that does not reads as gone to every reader after it, and
 # the next cleanup of that agent sweeps the stamped row (no task, no timer). Keep it well under `_SESSION_FRESH_TTL` minus one tick.
+_STAMP_MAX_SEC: float = 60.0  # the longest expiry a stamp may have: a stamped row's `connected_at` is then always older than `_SIBLING_LIFETIME_SEC`, which no real connection reaches (its cap is 3600 s)
+_SIBLING_LIFETIME_SEC: float = _MAX_SSE_LIFETIME_SEC - _STAMP_MAX_SEC  # a row older than this is a stamped (expiring) row, not a live connection: it never counts as «another live session»
+
+
 def _lifespan_end_grace_from_env(raw: "str | None") -> float:
     """The expiry in seconds from `AGENT_SSE_LIFESPAN_END_GRACE_SEC`: unset/empty → 20; `0` = none (a lifespan end is cleaned at once, as before); a value that is not a
-    finite number ≥ 0 (a typo · `nan` · `inf` · a negative) falls back to 20 instead of failing the import of the whole router."""
+    finite number ≥ 0 (a typo · `nan` · `inf` · a negative) falls back to 20 instead of failing the import of the whole router; a larger value is cut to `_STAMP_MAX_SEC`."""
     if raw is None or not raw.strip():
         return 20.0
     try:
         v = float(raw)
     except ValueError:
         return 20.0
-    return v if math.isfinite(v) and v >= 0 else 20.0
+    return min(v, _STAMP_MAX_SEC) if math.isfinite(v) and v >= 0 else 20.0
 
 
 _LIFESPAN_END_GRACE_SEC: float = _lifespan_end_grace_from_env(os.getenv("AGENT_SSE_LIFESPAN_END_GRACE_SEC"))
@@ -193,7 +197,7 @@ async def _mark_agent_disconnected(
                     select(AgentGatewaySession.id).where(
                         AgentGatewaySession.agent_id == agent_id,
                         AgentGatewaySession.id != session_id,
-                        AgentGatewaySession.connected_at >= life_cutoff,
+                        AgentGatewaySession.connected_at >= now - timedelta(seconds=_SIBLING_LIFETIME_SEC),  # (story #4834: a stamped row is not a live sibling)
                     ).limit(1)
                 )).scalar_one_or_none()
                 # 보강(가속 신호·**강등 방향으로만**): Redis 정상인데 online 키가 없음 = 틱 도는 연결이 0 =
@@ -227,6 +231,7 @@ async def _mark_agent_disconnected(
                     select(AgentGatewaySession.id).where(
                         AgentGatewaySession.agent_id == agent_id,
                         AgentGatewaySession.id != session_id,  # (story #4834: a stamped row of this very session is not «another» one)
+                        AgentGatewaySession.connected_at >= now - timedelta(seconds=_SIBLING_LIFETIME_SEC),  # (…nor is the stamped row of an earlier session: it only waits to expire)
                         AgentGatewaySession.last_seen_at >= fresh_cutoff,
                     ).limit(1)
                 )).scalar_one_or_none()
@@ -249,8 +254,9 @@ async def _mark_agent_disconnected(
                 if _ac2:
                     from app.services import presence_online
                     if expire_in is not None:
-                        # story #4834: the online key stays for the expiry (the reconnect's first tick renews it) instead of being deleted at once
-                        await presence_online.expire_online(agent_id, expire_in)
+                        # story #4834: the online key stays for the expiry (the reconnect's first tick renews it) instead of being deleted at once — unless a connection
+                        # renewed it after this cleanup began (a reconnect that was quicker than this transaction: its key is not shortened)
+                        await presence_online.expire_online(agent_id, expire_in, unless_renewed_after=now)
                     else:
                         # AC2: online 키 DEL(90s 잔존 방지·즉시 offline 규약 유지). flag off면 no-op.
                         await presence_online.clear_online(agent_id)
