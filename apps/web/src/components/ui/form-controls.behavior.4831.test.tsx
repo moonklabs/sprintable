@@ -108,6 +108,14 @@ describe('Textarea — 네이티브 <textarea> 그대로', () => {
     expect(el.value).toBe('안녕');
   });
 
+  it('value를 부르는 쪽이 주면 그 값이 보이고, 바꿔 주면 따라 바뀐다(제어 컴포넌트로 value가 전달된다)', async () => {
+    await render(<Textarea aria-label="t" value="처음 값" onChange={() => {}} />);
+    const el = container.querySelector('textarea')!;
+    expect(el.value).toBe('처음 값');
+    await render(<Textarea aria-label="t" value="바뀐 값" onChange={() => {}} />);
+    expect(container.querySelector('textarea')!.value).toBe('바뀐 값');
+  });
+
   it('폼 제출 값 · required 검증 · maxLength · rows · placeholder가 그대로다', async () => {
     await render(
       <form>
