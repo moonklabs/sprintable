@@ -7,6 +7,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { CheckCircle, ChevronDown, ChevronUp, XCircle } from 'lucide-react';
 import { deriveRiskLevel, usesSignatureFlow, deriveDiffFacts, isDecisionGate, deriveDecisionFacts, isRecipePublishGate, reviewedDraftOf } from '@/components/cage/gate-risk';
 import { gateNeedsAction } from '@/components/cage/gate-evidence';
@@ -629,21 +630,22 @@ export function ApprovalsQueue() {
                 {decisionFacts.options.length > 0 ? (
                   <div className="space-y-1">
                     <p className="text-editorial-meta font-medium text-foreground">{t('decisionOptionsLabel')}</p>
-                    {decisionFacts.options.map((option) => (
-                      <label
-                        key={option}
-                        className="flex cursor-pointer items-start gap-1.5 rounded-md p-1 text-editorial-meta text-foreground hover:bg-muted/40"
-                      >
-                        <input
-                          type="radio"
-                          name={`decision-option-${gate.id}`}
-                          className="mt-0.5"
-                          checked={selectedOptionByGateId[gate.id] === option}
-                          onChange={() => setSelectedOptionByGateId((prev) => ({ ...prev, [gate.id]: option }))}
-                        />
-                        <span>{option}</span>
-                      </label>
-                    ))}
+                    <RadioGroup
+                      name={`decision-option-${gate.id}`}
+                      value={selectedOptionByGateId[gate.id] ?? ''}
+                      onValueChange={(value) => setSelectedOptionByGateId((prev) => ({ ...prev, [gate.id]: String(value) }))}
+                      className="gap-1"
+                    >
+                      {decisionFacts.options.map((option) => (
+                        <label
+                          key={option}
+                          className="flex cursor-pointer items-start gap-1.5 rounded-md p-1 text-editorial-meta text-foreground hover:bg-muted/40"
+                        >
+                          <RadioGroupItem value={option} className="mt-0.5" />
+                          <span>{option}</span>
+                        </label>
+                      ))}
+                    </RadioGroup>
                   </div>
                 ) : null}
               </div>

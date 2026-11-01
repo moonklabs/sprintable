@@ -61,7 +61,7 @@ async function typeReason(text: string) {
   });
 }
 async function tickEvidence() {
-  const box = container.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+  const box = container.querySelector<HTMLElement>('[role="checkbox"]')!;
   await act(async () => { box.click(); });
 }
 
