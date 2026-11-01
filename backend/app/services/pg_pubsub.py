@@ -107,33 +107,36 @@ async def drain_background_tasks(timeout: float = 5.0) -> None:
     # 운영은 루프 하나라 동작 변화 없음.
     loop = asyncio.get_running_loop()
     started = loop.time()
-
-    def _left() -> float:
-        return max(0.0, timeout - (loop.time() - started))
-
-    await cancel_first_tasks(timeout)  # story #4834: first, so a grace-waiting cleanup runs now instead of eating the whole budget
-    pending = [t for t in _background_tasks if t.get_loop() is loop]
-    if not pending:
-        return
-    _, still = await asyncio.wait(pending, timeout=_left())
-    still_pending = set(still)
-    # an ordinary task that was still finishing may have started a waiting one meanwhile (a stream's end registers its grace task after the first look):
-    # those are counted with the rest, cut below and waited for (bounded) like them — their cleanup runs on the cut
-    still_pending |= {t for t in _cancel_first_tasks if not t.done() and t.get_loop() is loop}
-    if not still_pending:
-        return
+    # story #2041 ①: the SNAPSHOT of ordinary tasks is taken once, here — an ordinary task added after this point is not this call's business (it can only be new
+    # work started by a task we are already waiting for). The one exception is the tasks that wait on purpose (`cancel_first`, the gateway's lifespan-end grace): a stream's
+    # end registers one while the drain runs, and it must be cut and waited for like the rest, so each round looks at that set again.
+    tracked: set[asyncio.Task] = {t for t in _background_tasks if t.get_loop() is loop}
+    # the budget is `timeout`, all of it: the last step (cut what is still running and wait a moment for the cancels) is RESERVED inside it, so the drain never returns
+    # later than `timeout` after it started (a budget under twice the floor splits in half: wait, then cut and let the cancels run)
+    reserve = min(_DRAIN_CANCEL_FLOOR_SEC, timeout / 2)
+    main_end = started + timeout - reserve
+    while True:
+        # story #4834: every round first cuts the tasks that wait on purpose — their «clean up now» path runs inside the budget instead of a 20 s sleep eating it.
+        for t in [t for t in _cancel_first_tasks if not t.done() and t.get_loop() is loop]:
+            t.cancel()
+            tracked.add(t)
+        pending = [t for t in tracked if not t.done()]
+        if not pending:
+            return
+        left = main_end - loop.time()
+        if left <= 0:
+            break
+        await asyncio.wait(pending, timeout=left)
+    # the budget's main phase is over: cut whatever is left of ours and give the cancels the reserved moment. A cancel-resistant task (the gateway's cleanup runs
+    # shielded to its end) must not hold the shutdown — and the engine's disposal — hostage past the budget.
+    still_pending = [t for t in tracked if not t.done()]
     logger.warning(
         "pg_pubsub drain timeout(%ss) — 미완료 태스크 %d건 cancel", timeout, len(still_pending),
     )
     for t in still_pending:
         t.cancel()
-    # bounded BY THE BUDGET (with a small floor so a cancel can be processed): a cancel-resistant task (the gateway's cleanup runs shielded to its end) must not hold
-    # the shutdown — and the engine's disposal — hostage past the graceful-shutdown time the process is given
-    await asyncio.wait(still_pending, timeout=max(_left(), _DRAIN_CANCEL_FLOOR_SEC))
-    # a cleanup that has just run may have started ordinary work of its own (a presence event): look once more, within what is left
-    late_ordinary = [t for t in _background_tasks if t.get_loop() is loop and not t.done()]
-    if late_ordinary:
-        await asyncio.wait(late_ordinary, timeout=_left())
+    if still_pending:
+        await asyncio.wait(still_pending, timeout=max(0.0, started + timeout - loop.time()))
 
 # ── NOTIFY 발행 ────────────────────────────────────────────────────────────────
 

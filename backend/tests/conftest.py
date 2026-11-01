@@ -585,7 +585,7 @@ async def _dispose_global_engine_for_non_destructive_tests():
     from app.core.database import engine as _global_engine
     from app.services import pg_pubsub
 
-    await pg_pubsub.cancel_first_tasks(10.0)  # story #4834: the same reap as the other end-of-test hooks (bounded)
+    await _reap_waiting_tasks()  # story #4834: the same reap as the other end-of-test hooks (bounded)
     await _global_engine.dispose()
 
 
@@ -597,6 +597,25 @@ DESTRUCTIVE_DRAIN_TIMEOUT_S = 10.0
 _DRAIN_ROUNDS = 5  # 배달이 또 배달을 띄울 수 있어(after_commit 사슬) 빌 때까지 몇 번
 
 
+async def _reap_waiting_tasks() -> None:
+    """story #4834 — the end-of-test step every hook shares: cut the tasks that wait on purpose (the gateway's lifespan-end grace) and let their «clean up now» path run in THIS
+    loop, for at most 10 s. One still running after that is a failure with its name, not a silent leftover (a shielded cleanup that outlives the test's loop would use the shared
+    pool on a closing loop)."""
+    import asyncio
+
+    from app.services import pg_pubsub
+
+    await pg_pubsub.cancel_first_tasks(10.0)
+    loop = asyncio.get_running_loop()
+    left = [t for t in pg_pubsub._cancel_first_tasks if not t.done() and t.get_loop() is loop]
+    if left:
+        pytest.fail(
+            "story #4834 — a task that waits on purpose is still running 10 s after it was cut: "
+            + ", ".join(sorted(t.get_coro().__qualname__ for t in left)),
+            pytrace=False,
+        )
+
+
 async def drain_global_background_work(timeout: float = DESTRUCTIVE_DRAIN_TIMEOUT_S) -> None:
     """이 루프에 뜬 `fire_and_forget` 작업을 끝까지 기다린 뒤 전역 엔진 풀을 닫는다. 상한을 넘기면 남은 작업을 취소하고 이름과 함께 실패."""
     import asyncio
@@ -604,7 +623,7 @@ async def drain_global_background_work(timeout: float = DESTRUCTIVE_DRAIN_TIMEOU
     from app.core.database import engine as _global_engine
     from app.services import pg_pubsub
 
-    await pg_pubsub.cancel_first_tasks(10.0)  # story #4834: a task that waits on purpose (the gateway's lifespan-end grace) is cut first and cleans up in THIS loop
+    await _reap_waiting_tasks()  # story #4834: a task that waits on purpose (the gateway's lifespan-end grace) is cut first and cleans up in THIS loop
     loop = asyncio.get_running_loop()
     leftover: list[str] = []
     for _ in range(_DRAIN_ROUNDS):
@@ -616,7 +635,7 @@ async def drain_global_background_work(timeout: float = DESTRUCTIVE_DRAIN_TIMEOU
             leftover = sorted(t.get_coro().__qualname__ for t in still)
             for t in still:
                 t.cancel()
-            await asyncio.gather(*still, return_exceptions=True)
+            await asyncio.wait(still, timeout=timeout)  # story #4834: bounded (a cancel-resistant task must not hang the teardown)
             break
     await _global_engine.dispose()
     if leftover:
@@ -631,7 +650,7 @@ async def _dispose_global_engine() -> None:
     from app.core.database import engine as _global_engine
     from app.services import pg_pubsub
 
-    await pg_pubsub.cancel_first_tasks(10.0)  # story #4834: no task that waits on purpose outlives the test's loop (its «clean up now» path runs here, before the dispose)
+    await _reap_waiting_tasks()  # story #4834: no task that waits on purpose outlives the test's loop (its «clean up now» path runs here, before the dispose)
     await _global_engine.dispose()
 
 
