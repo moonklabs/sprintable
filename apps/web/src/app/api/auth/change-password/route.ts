@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { cookieBase, markSessionChanged } from '@/lib/auth/cookies';
@@ -10,6 +11,9 @@ const FASTAPI_URL = () => fastapiBaseUrl();
 
 /** PATCH /api/auth/change-password */
 export async function PATCH(request: Request) {
+  const csrfError = verifyCsrfOrigin(request);
+  if (csrfError) return csrfError;
+
   const me = await getOrgProjectAuthContext(request);
   if (!me) return NextResponse.json({ error: { code: 'UNAUTHORIZED', message: 'Unauthorized' } }, { status: 401 });
 

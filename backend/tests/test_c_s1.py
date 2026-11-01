@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -60,6 +61,21 @@ def _make_user(
     # 단락이 안 걸려 이 파일의 세션 무효화 무관 테스트들이 401로 오탐됐다.
     u.password_set_at = None
     return u
+
+
+def _hash_reread(session, user) -> None:
+    """story 4838 — the sign-in reads the person's hash (and whether the account is open) again under the session lock: a statement that asks for exactly those two columns. This mocked session
+    answers it with the user's own hash, account open (nothing changed in between); every other statement is answered as the test set it up."""
+    inner = session.execute
+
+    async def execute(stmt, *args, **kwargs):
+        if [c.name for c in getattr(stmt, "selected_columns", [])] == ["hashed_password", "is_active"]:
+            result = MagicMock()
+            result.one_or_none.return_value = SimpleNamespace(hashed_password=user.hashed_password, is_active=True)
+            return result
+        return await inner(stmt, *args, **kwargs)
+
+    session.execute = execute
 
 
 # ─── security.py unit tests ───────────────────────────────────────────────────
@@ -154,6 +170,7 @@ async def test_totp_replay_rejected():
             mock_meta.return_value = {}
             session.execute = AsyncMock(return_value=MagicMock())
 
+            _hash_reread(session, user)
             async with client as c:
                 resp = await c.post("/api/v2/auth/token", json={
                     "email": "test@example.com",
@@ -183,6 +200,7 @@ async def test_totp_lockout_after_5_failures():
             mock_get_user.return_value = user
             session.execute = AsyncMock(return_value=MagicMock())
 
+            _hash_reread(session, user)
             async with client as c:
                 resp = await c.post("/api/v2/auth/token", json={
                     "email": "test@example.com",
@@ -211,6 +229,7 @@ async def test_totp_locked_user_returns_429():
         with patch("app.routers.auth._get_user_by_email", new_callable=AsyncMock) as mock_get_user:
             mock_get_user.return_value = user
 
+            _hash_reread(session, user)
             async with client as c:
                 code = pyotp.TOTP(secret).now()
                 resp = await c.post("/api/v2/auth/token", json={
@@ -273,6 +292,7 @@ async def test_login_success_200():
         result.scalar_one_or_none.return_value = user
         session.execute = AsyncMock(return_value=result)
         with patch.dict("os.environ", {"JWT_SECRET": "test-secret"}):
+            _hash_reread(session, user)
             async with client as c:
                 resp = await c.post("/api/v2/auth/token", json={"email": "test@example.com", "password": "correct-password"})
         assert resp.status_code == 200
@@ -307,6 +327,7 @@ async def test_login_totp_required_403():
         result = MagicMock()
         result.scalar_one_or_none.return_value = user
         session.execute = AsyncMock(return_value=result)
+        _hash_reread(session, user)
         async with client as c:
             resp = await c.post("/api/v2/auth/token", json={"email": "test@example.com", "password": "correct-password"})
         assert resp.status_code == 403

@@ -167,6 +167,21 @@ async def _oauth_client(session: AsyncMock):
     from app.main import app
     from tests.conftest import override_db_and_read
 
+    # story 4838 — the provider sign-in reads (account open, provider id) again under the person's session lock: a statement asking for exactly those two columns. This mocked session answers
+    # it «open, and the id the provider gave» (nothing changed in between); every other statement is answered as the test set it up.
+    import app.routers.auth as auth_router
+
+    inner = session.execute
+
+    async def execute(stmt, *args, **kwargs):
+        if [c.name for c in getattr(stmt, "selected_columns", [])] == ["is_active", "google_id"]:
+            result = MagicMock()
+            result.one_or_none.return_value = (True, auth_router._exchange_oauth_code_for_userinfo.return_value[0])
+            return result
+        return await inner(stmt, *args, **kwargs)
+
+    session.execute = execute
+
     async def override_db():
         yield session
 

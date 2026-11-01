@@ -1365,6 +1365,7 @@ async def login(
             remaining = int((user.login_locked_until - datetime.now(timezone.utc)).total_seconds())
             return _err("ACCOUNT_LOCKED", f"Account locked. Try again in {remaining} seconds", 429)
         # 잠금 해제 시간 경과 — 카운터 초기화
+        await _lock_person_sessions(session, user.id, exclusive=False)  # story 4838: BEFORE the person's row is written — a password change holds this lock (exclusive) and writes that row next
         await session.execute(
             update(User).where(User.id == user.id).values(login_fail_count=0, login_locked_until=None)
         )
@@ -1390,6 +1391,21 @@ async def login(
             email=body.email,
             ip_address=_ip,
             user_agent=_ua,
+            detail="INVALID_CREDENTIALS",
+        )
+        await session.commit()
+        return _err("INVALID_CREDENTIALS", "Invalid email or password", 401)
+
+    # story 4838: the session stored below queues on the person's session lock like every other issuer (refresh · switch) — an all-device revoke (a password change · a reset…) either ran before
+    # (then the hash read again here is no longer the one just checked, or the account is closed: refused, nothing stored) or waits until this sign-in's session is committed and ends it. The (slow) hash check stays outside the lock.
+    await _lock_person_sessions(session, user.id, exclusive=False)
+    _now = (await session.execute(select(User.hashed_password, User.is_active).where(User.id == user.id))).one_or_none()
+    if _now is None or not _now.is_active or _now.hashed_password != user.hashed_password:
+        await _write_audit(
+            session, "login_failure",
+            user_id=user.id, email=body.email,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
             detail="INVALID_CREDENTIALS",
         )
         await session.commit()
@@ -2249,6 +2265,14 @@ async def oauth_callback(
     # 4. JWT 발급
     from datetime import timedelta
     from app.core.security import ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS
+
+    # story 4838: as the password sign-in — the session below queues on the person's session lock, and what the provider's proof was matched to is read again under it (the account still open, the
+    # provider id still the one that matched): an all-device revoke (the account's deletion · a reclaim…) either ran before → refused, nothing stored, or waits until this session is committed and ends it.
+    await _lock_person_sessions(session, user.id, exclusive=False)
+    _live = (await session.execute(select(User.is_active, id_col).where(User.id == user.id))).one_or_none()
+    if _live is None or not _live[0] or _live[1] != oauth_id:
+        await session.commit()
+        return _err("INVALID_CREDENTIALS", "Sign-in is no longer valid for this account", 401)
 
     _md = await _sign_in_session_context(user, session)  # story 4762 — a live org, as a refresh
     if settings.build_app_metadata_defallback:
