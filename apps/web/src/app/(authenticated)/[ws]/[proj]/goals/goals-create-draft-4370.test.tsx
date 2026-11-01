@@ -48,8 +48,8 @@ afterEach(async () => {
 
 const settle = async () => { await act(async () => { await new Promise((r) => setTimeout(r, 50)); }); };
 const esc = (t: EventTarget) => t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
-const titleInput = () => document.body.querySelector<HTMLInputElement>(`input[placeholder="${g.fieldTitlePlaceholder}"]`);
-const descField = () => document.body.querySelector<HTMLTextAreaElement>(`textarea[placeholder="${g.fieldDescriptionPlaceholder}"]`);
+const titleInput = () => document.body.querySelector<HTMLInputElement>(`input[data-slot="input"][placeholder="${g.fieldTitlePlaceholder}"]`);
+const descField = () => document.body.querySelector<HTMLTextAreaElement>(`textarea[data-slot="textarea"][placeholder="${g.fieldDescriptionPlaceholder}"]`);
 const button = (label: string) => Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent?.trim() === label);
 
 async function mount() {

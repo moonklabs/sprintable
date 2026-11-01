@@ -9,6 +9,9 @@ import remarkGfm from 'remark-gfm';
 import { ArrowLeft, Pencil, Trash2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { formatViewerScheduledAt } from '@/lib/schedule-format';
@@ -199,24 +202,22 @@ function EpicEditInline({ epic, onSaved, onCancel }: { epic: Epic; onSaved: (e: 
     }
   }, [title, description, objective, successCriteria, priority, targetDate, targetSp, epic, onSaved]);
 
-  const inputCls = 'w-full rounded-lg border border-border bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-primary';
-
   return (
     <div className="space-y-4">
-      <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className={inputCls} placeholder={t('fieldTitlePlaceholder')} />
-      <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} className={`${inputCls} resize-none`} placeholder={t('fieldDescriptionPlaceholder')} />
-      <textarea value={objective} onChange={(e) => setObjective(e.target.value)} rows={3} className={`${inputCls} resize-none`} placeholder={t('fieldObjectivePlaceholder')} />
-      <textarea value={successCriteria} onChange={(e) => setSuccessCriteria(e.target.value)} rows={3} className={`${inputCls} resize-none`} placeholder={t('fieldSuccessCriteriaPlaceholder')} />
+      <Input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('fieldTitlePlaceholder')} />
+      <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} className="resize-none" placeholder={t('fieldDescriptionPlaceholder')} />
+      <Textarea value={objective} onChange={(e) => setObjective(e.target.value)} rows={3} className="resize-none" placeholder={t('fieldObjectivePlaceholder')} />
+      <Textarea value={successCriteria} onChange={(e) => setSuccessCriteria(e.target.value)} rows={3} className="resize-none" placeholder={t('fieldSuccessCriteriaPlaceholder')} />
       {/* RC#2: status select 제거 — 전용 transition(상세 헤더 컨트롤·⓶)·일반 PATCH 봉인(BE #1651). 편집=title/desc/objective/criteria/priority/target만. */}
       <div className="grid grid-cols-2 gap-3">
-        <select value={priority} onChange={(e) => setPriority(e.target.value as EpicPriority)} className={inputCls}>
+        <Select value={priority} onChange={(e) => setPriority(e.target.value as EpicPriority)}>
           <option value="critical">{t('priorityCritical')}</option>
           <option value="high">{t('priorityHigh')}</option>
           <option value="medium">{t('priorityMedium')}</option>
           <option value="low">{t('priorityLow')}</option>
-        </select>
-        <input type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} className={inputCls} />
-        <input type="number" min="0" value={targetSp} onChange={(e) => setTargetSp(e.target.value)} className={inputCls} placeholder={t('fieldTargetSp')} />
+        </Select>
+        <Input type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} />
+        <Input type="number" min="0" value={targetSp} onChange={(e) => setTargetSp(e.target.value)} placeholder={t('fieldTargetSp')} />
       </div>
       <div className="flex justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={onCancel}>{t('cancel')}</Button>
