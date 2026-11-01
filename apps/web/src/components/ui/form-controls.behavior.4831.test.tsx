@@ -235,6 +235,15 @@ describe('Checkbox — 키보드 (날것 checkbox와 같은 키)', () => {
     expect(seen).toEqual([]);
   });
 
+  it('<form> 안에서 name이 없으면 켜져 있어도 폼 제출 값에 실리지 않는다(날것 checkbox와 같음)', async () => {
+    await render(
+      <form>
+        <Checkbox aria-label="c" defaultChecked />
+      </form>,
+    );
+    expect([...new FormData(container.querySelector('form')!).keys()]).toEqual([]);
+  });
+
   it('<form> 안에서 name을 주면 켜졌을 때만 폼 제출 값에 실린다(날것 checkbox와 같음)', async () => {
     await render(
       <form>
@@ -267,6 +276,30 @@ describe('RadioGroup — 키보드 · 폼 제출 (날것 radio와 같은 키)', 
     expect(radios().map((r) => r.tabIndex)).toEqual([-1, 0, -1]);
     await render(<Three initial={null} onValue={() => {}} />);
     expect(radios().filter((r) => r.tabIndex === 0)).toHaveLength(1);
+  });
+
+  it('아무것도 안 골라진 묶음에서 초점 있는 항목에 스페이스를 누르면 그 항목이 골라진다(날것 radio와 같음 — Tab으로 들어와 스페이스로 고르는 길)', async () => {
+    const seen: string[] = [];
+    await render(<Three initial={null} onValue={(v) => seen.push(v)} />);
+    const first = radios().find((r) => r.tabIndex === 0)!;
+    first.focus();
+    expect(document.activeElement).toBe(first);
+    await press(first, ' ');
+    expect(seen).toHaveLength(1);
+    expect(checked().filter((c) => c === 'true')).toHaveLength(1);
+    expect(first.getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('이미 고른 항목에서 스페이스는 아무 일도 없고, 다른 항목에 초점을 옮겨 스페이스를 누르면 그 항목이 골라진다', async () => {
+    const seen: string[] = [];
+    await render(<Three initial="a" onValue={(v) => seen.push(v)} />);
+    radios()[0]!.focus();
+    await press(document.activeElement!, ' ');
+    expect(checked()).toEqual(['true', 'false', 'false']);
+    radios()[2]!.focus();
+    await press(document.activeElement!, ' ');
+    expect(checked()).toEqual(['false', 'false', 'true']);
+    expect(seen).toEqual(['c']);
   });
 
   it('아래 · 오른쪽 화살표는 다음 항목을 고르고, 위 · 왼쪽은 이전 항목을 고른다', async () => {
