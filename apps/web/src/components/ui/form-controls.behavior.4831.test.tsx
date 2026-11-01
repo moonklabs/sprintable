@@ -182,6 +182,136 @@ describe('Checkbox — 사람이 보는 동작', () => {
   });
 });
 
+/** 키보드 한 번 누름 = keydown → keyup (jsdom은 키보드로 버튼을 누르는 기본 동작을 안 만들어 주므로 부품이 스스로 처리하는지를 본다). */
+async function press(el: Element, key: string): Promise<void> {
+  await act(async () => {
+    el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+    el.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true, cancelable: true }));
+  });
+}
+
+describe('Checkbox — 키보드 (날것 checkbox와 같은 키)', () => {
+  function Controlled({ onChange }: { onChange: (v: boolean) => void }) {
+    const [on, setOn] = useState(false);
+    return <Checkbox aria-label="c" checked={on} onCheckedChange={(v) => { setOn(v); onChange(v); }} />;
+  }
+
+  it('Tab으로 들어올 수 있는 한 칸(tabIndex 0)이다', async () => {
+    await render(<Controlled onChange={() => {}} />);
+    const el = container.querySelector('[role="checkbox"]') as HTMLElement;
+    expect(el.tabIndex).toBe(0);
+    el.focus();
+    expect(document.activeElement).toBe(el);
+  });
+
+  it('초점 뒤 스페이스로 켜고 끈다', async () => {
+    const seen: boolean[] = [];
+    await render(<Controlled onChange={(v) => seen.push(v)} />);
+    const el = container.querySelector('[role="checkbox"]') as HTMLElement;
+    el.focus();
+    await press(el, ' ');
+    expect(seen).toEqual([true]);
+    expect(el.getAttribute('aria-checked')).toBe('true');
+    await press(el, ' ');
+    expect(seen).toEqual([true, false]);
+    expect(el.getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('엔터로는 켜지지 않는다(날것 checkbox와 같음 — 엔터는 폼 제출 몫)', async () => {
+    const seen: boolean[] = [];
+    await render(<Controlled onChange={(v) => seen.push(v)} />);
+    const el = container.querySelector('[role="checkbox"]') as HTMLElement;
+    el.focus();
+    await press(el, 'Enter');
+    expect(seen).toEqual([]);
+    expect(el.getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('disabled이면 스페이스에도 안 바뀐다', async () => {
+    const seen: boolean[] = [];
+    await render(<Checkbox aria-label="c" disabled checked={false} onCheckedChange={(v) => seen.push(v)} />);
+    const el = container.querySelector('[role="checkbox"]') as HTMLElement;
+    await press(el, ' ');
+    expect(seen).toEqual([]);
+  });
+
+  it('<form> 안에서 name을 주면 켜졌을 때만 폼 제출 값에 실린다(날것 checkbox와 같음)', async () => {
+    await render(
+      <form>
+        <Checkbox aria-label="c" name="agree" defaultChecked />
+        <Checkbox aria-label="d" name="skipped" />
+      </form>,
+    );
+    const data = new FormData(container.querySelector('form')!);
+    expect(data.has('agree')).toBe(true);
+    expect(data.has('skipped')).toBe(false);
+  });
+});
+
+describe('RadioGroup — 키보드 · 폼 제출 (날것 radio와 같은 키)', () => {
+  function Three({ initial, onValue }: { initial: string | null; onValue: (v: string) => void }) {
+    const [v, setV] = useState<string | null>(initial);
+    return (
+      <RadioGroup name="opt" value={v} onValueChange={(next) => { setV(String(next)); onValue(String(next)); }}>
+        <RadioGroupItem value="a" aria-label="a" />
+        <RadioGroupItem value="b" aria-label="b" />
+        <RadioGroupItem value="c" aria-label="c" />
+      </RadioGroup>
+    );
+  }
+  const radios = (): HTMLElement[] => [...container.querySelectorAll<HTMLElement>('[role="radio"]')];
+  const checked = (): string[] => radios().map((r) => r.getAttribute('aria-checked') ?? '');
+
+  it('Tab 정거장은 한 곳이다 — 켜진 항목(없으면 하나)만 tabIndex 0, 나머지는 -1', async () => {
+    await render(<Three initial="b" onValue={() => {}} />);
+    expect(radios().map((r) => r.tabIndex)).toEqual([-1, 0, -1]);
+    await render(<Three initial={null} onValue={() => {}} />);
+    expect(radios().filter((r) => r.tabIndex === 0)).toHaveLength(1);
+  });
+
+  it('아래 · 오른쪽 화살표는 다음 항목을 고르고, 위 · 왼쪽은 이전 항목을 고른다', async () => {
+    const seen: string[] = [];
+    await render(<Three initial="a" onValue={(v) => seen.push(v)} />);
+    radios()[0]!.focus();
+    await press(document.activeElement!, 'ArrowDown');
+    expect(checked()).toEqual(['false', 'true', 'false']);
+    await press(document.activeElement!, 'ArrowRight');
+    expect(checked()).toEqual(['false', 'false', 'true']);
+    await press(document.activeElement!, 'ArrowUp');
+    expect(checked()).toEqual(['false', 'true', 'false']);
+    await press(document.activeElement!, 'ArrowLeft');
+    expect(checked()).toEqual(['true', 'false', 'false']);
+    expect(seen).toEqual(['b', 'c', 'b', 'a']);
+  });
+
+  it('끝에서 한 칸 더 가면 반대편 끝으로 돈다(날것 radio와 같음)', async () => {
+    await render(<Three initial="c" onValue={() => {}} />);
+    radios()[2]!.focus();
+    await press(document.activeElement!, 'ArrowDown');
+    expect(checked()).toEqual(['true', 'false', 'false']);
+    await press(document.activeElement!, 'ArrowUp');
+    expect(checked()).toEqual(['false', 'false', 'true']);
+  });
+
+  it('<form> 안에서 name을 주면 고른 값이 폼 제출 값에 실린다', async () => {
+    await render(
+      <form>
+        <Three initial="b" onValue={() => {}} />
+      </form>,
+    );
+    expect(new FormData(container.querySelector('form')!).get('opt')).toBe('b');
+  });
+
+  it('아무것도 안 고르면 폼 제출 값에 실리지 않는다', async () => {
+    await render(
+      <form>
+        <Three initial={null} onValue={() => {}} />
+      </form>,
+    );
+    expect(new FormData(container.querySelector('form')!).has('opt')).toBe(false);
+  });
+});
+
 describe('RadioGroup — 사람이 보는 동작', () => {
   function Group({ onValue }: { onValue: (v: string) => void }) {
     const [v, setV] = useState('');

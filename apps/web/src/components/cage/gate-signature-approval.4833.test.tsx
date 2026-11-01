@@ -160,3 +160,31 @@ describe('GateSignatureApproval — why the button is locked (story #4833)', () 
     expect(en.sigHintEvidenceAndReason).not.toBe(ko.sigHintEvidenceAndReason);
   });
 });
+
+// story 4831 부품 교체 — 키보드만으로 승인하는 길(PO 조건 «동작 바뀜 0»): 근거 확인은 스페이스로 켜고, 엔터로는 켜지지 않는다(날것 checkbox와 같음).
+describe('GateSignatureApproval — keyboard-only approve path (story 4831 parts)', () => {
+  const press = async (el: Element, key: string) => {
+    await act(async () => {
+      el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+      el.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true, cancelable: true }));
+    });
+  };
+
+  it('reason typed, evidence not ticked: Space on the focused checkbox opens «승인하고 서명»; Enter does not', async () => {
+    await mount();
+    await typeReason('키보드로만 승인');
+    expect(btn(ko.sigApproveAndSign).disabled).toBe(true);
+    const box = container.querySelector<HTMLElement>('[role="checkbox"]')!;
+    box.focus();
+    expect(document.activeElement).toBe(box);
+    await press(box, 'Enter');
+    expect(btn(ko.sigApproveAndSign).disabled).toBe(true);
+    expect(box.getAttribute('aria-checked')).toBe('false');
+    await press(box, ' ');
+    expect(box.getAttribute('aria-checked')).toBe('true');
+    expect(btn(ko.sigApproveAndSign).disabled).toBe(false);
+    expect(hint()).toBeNull();
+    await press(box, ' ');
+    expect(btn(ko.sigApproveAndSign).disabled).toBe(true);
+  });
+});
