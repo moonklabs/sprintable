@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { SectionCard } from '@/components/ui/section-card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   fetchToolsetCatalog,
   type ToolsetCatalog,
@@ -30,7 +31,7 @@ interface ToolPermissionPickerProps {
   disabled?: boolean;
 }
 
-/** 네이티브 체크박스 + indeterminate ref + a11y(aria-checked mixed). 신규 dep 없음. */
+/** 바탕 Checkbox + indeterminate(aria-checked mixed는 부품이 낸다). 신규 dep 없음. */
 function GroupCheckbox({
   checked,
   indeterminate = false,
@@ -44,20 +45,13 @@ function GroupCheckbox({
   onChange?: (checked: boolean) => void;
   ariaLabel: string;
 }) {
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (ref.current) ref.current.indeterminate = indeterminate;
-  }, [indeterminate]);
   return (
-    <input
-      ref={ref}
-      type="checkbox"
+    <Checkbox
       checked={checked}
+      indeterminate={indeterminate}
       disabled={disabled}
-      aria-checked={indeterminate ? 'mixed' : checked}
       aria-label={ariaLabel}
-      onChange={(e) => onChange?.(e.target.checked)}
-      className="h-4 w-4 shrink-0 cursor-pointer accent-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+      onCheckedChange={(next) => onChange?.(next)}
     />
   );
 }

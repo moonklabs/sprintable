@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Check, Copy, Cloud, Terminal, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -172,11 +173,11 @@ export function AgentConnectionSettingsSection({ agentId, freshApiKey }: AgentCo
               <div className="space-y-1.5 border-t border-border p-3">
                 <p role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
                 {freshApiKey ? (
-                  <textarea
+                  <Textarea
                     readOnly
                     value={renderArtifact(mcpFile?.content ?? null, freshApiKey, false) ?? ''}
                     onFocus={(e) => e.currentTarget.select()}
-                    className="w-full resize-none rounded border border-border bg-background p-2 font-mono text-base lg:text-xs text-foreground"
+                    className="resize-none p-2 font-mono lg:text-xs"
                     rows={4}
                     data-testid="agent-connection-settings-copy-failed-raw-config"
                   />

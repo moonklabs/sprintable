@@ -12,6 +12,8 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -1201,12 +1203,12 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                   {/* 선생님 피드백(2026-07-07, ~110직군): 플랫 리스트 탐색 불가 — 검색 + division 그루핑. */}
                   <div className="relative">
                     <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
-                    <input
+                    <Input
                       type="text"
                       value={roleQuery}
                       onChange={(e) => setRoleQuery(e.target.value)}
                       placeholder={t('roleSearchPlaceholder')}
-                      className="w-full rounded-lg border border-border bg-card py-2 pl-8 pr-3 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                      className="bg-card pl-8 dark:bg-card"
                     />
                   </div>
                   {/* 다음 버튼이 긴 리스트 하단에 묻히지 않도록 리스트 자체를 bounded-height 스크롤로 격리 —
@@ -1344,24 +1346,24 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-3">
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium text-muted-foreground">{tSettings('agentNameLabel')}</label>
-                    <input
+                    <Input
                       type="text"
                       value={equipName}
                       onChange={(e) => setEquipName(e.target.value)}
                       placeholder={tSettings('agentNamePlaceholder')}
-                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                      className="bg-card dark:bg-card"
                     />
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium text-muted-foreground">{tSettings('agentRoleLabel')}</label>
-                    <select
+                    <Select
                       value={equipRole}
                       onChange={(e) => setEquipRole(e.target.value as 'member' | 'admin')}
-                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                      className="bg-card dark:bg-card"
                     >
                       <option value="member">{tSettings('agentRoleMember')}</option>
                       <option value="admin">{tSettings('agentRoleAdmin')}</option>
-                    </select>
+                    </Select>
                   </div>
                   {/* story #2433(B) — "역할 없이(키만)"도 STEP3(실행환경)이 스킵돼 런타임을 고를
                       길이 없었다(equip-skip은 STEP2 이후 바로 생성). 키만 받는 사람도 런타임은
@@ -1420,15 +1422,18 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                     </button>
                   </div>
                   {agentMode === 'new' ? (
-                    <input
+                    <Input
                       type="text"
                       value={newAgentName}
                       onChange={(e) => setNewAgentName(e.target.value)}
                       placeholder={suggestedAgentName || t('agentNamePlaceholder')}
-                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                      // 이 칸은 info-tint 조상 안이라 불투명 면(bg-card)이 흐린 안내 글자를 받친다(dark:도 불투명 — 부품의 dark:bg-input/30이 덮지 않게).
+                      // placeholder:text-muted-foreground는 부품이 이미 내지만, 정적 가드(verify-no-muted-on-tint)는 부품 안의 클래스를 못 봐서 불투명 경계를 읽도록 여기에도 적는다.
+                      className="bg-card placeholder:text-muted-foreground dark:bg-card"
                     />
                   ) : (
-                    <select
+                    <Select
+                      className="bg-card dark:bg-card"
                       value={selectedExistingAgentId}
                       onChange={(e) => {
                         setSelectedExistingAgentId(e.target.value);
@@ -1437,11 +1442,10 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                         // 충분 — 다음 recruit 클릭이 새 agentId로 다시 실측한다).
                         setExistingKeyRotateWarning(null);
                       }}
-                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                     >
                       <option value="">{t('agentSelectPlaceholder')}</option>
                       {((agents) => { const labels = memberOptionLabels(agents.map((a) => ({ ...a, type: 'agent' })), tc); return agents.map((a) => <option key={a.id} value={a.id}>{labels.get(a.id)}</option>); })(existingAgents ?? [])}
-                    </select>
+                    </Select>
                   )}
                   <p className="flex items-start gap-1.5 text-xs text-info">
                     <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
