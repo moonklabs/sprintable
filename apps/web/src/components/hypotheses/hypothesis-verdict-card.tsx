@@ -59,7 +59,7 @@ export function HypothesisVerdictCard({
           {isVerified ? t('statusVerified') : t('statusFalsified')}
         </span>
         {result?.scored_at ? (
-          <span className="text-[11px] text-muted-foreground">{t('scoredOn', { date: result.scored_at.slice(0, 10) })}</span>
+          <span className="text-editorial-meta text-muted-foreground">{t('scoredOn', { date: result.scored_at.slice(0, 10) })}</span>
         ) : null}
       </div>
 
@@ -85,7 +85,7 @@ export function HypothesisVerdictCard({
         <p className="mt-3 text-xs leading-5 text-muted-foreground">&ldquo;{result.reason}&rdquo;</p>
       ) : null}
       {closedByLabel ? (
-        <p className="mt-1.5 text-[11px] text-muted-foreground">{closedByLabel}</p>
+        <p className="mt-1.5 text-editorial-meta text-muted-foreground">{closedByLabel}</p>
       ) : null}
     </div>
   );

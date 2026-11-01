@@ -134,7 +134,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+      <div className="flex items-center gap-2 text-editorial-meta text-muted-foreground">
         <Loader2 className="size-3 animate-spin" />
         {t('loading')}
       </div>
@@ -152,7 +152,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
         {/* 중립 tint(가디언 ④): GitHub=옵셔널 통합·미연결은 "문제" 아님 → amber 금지(비-GitHub org 노이즈 차단). */}
         <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
           <p className="text-xs font-medium text-foreground">{t('connectPromptTitle')}</p>
-          <p className="text-[11px] text-muted-foreground">{t('connectPromptBody')}</p>
+          <p className="text-editorial-meta text-muted-foreground">{t('connectPromptBody')}</p>
           <Button
             size="sm"
             variant="outline"
@@ -185,7 +185,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
               공유했다("aria-label 있는가"만 보면 놓치는 자리). 아이콘 전용이라 보이는
               글자 라벨은 없으므로 순번만으로 가른다. */}
           {canonical.map((l, index) => (
-            <li key={l.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/20 p-2 text-[11px]">
+            <li key={l.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/20 p-2 text-editorial-meta">
               <a
                 href={prUrl(l.repo_full_name, l.pr_number)}
                 target="_blank"
@@ -222,12 +222,12 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
       {/* 추천 후보(suggestion·med/low) — 강하게 분리·기본 비활성·명시 confirm해야 승격 */}
       {suggestions.length > 0 ? (
         <div className="space-y-1.5">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('suggestionLabel')}</p>
+          <p className="text-micro font-medium uppercase tracking-wide text-muted-foreground">{t('suggestionLabel')}</p>
           <ul className="space-y-1.5">
             {/* story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「명시 연결」 접근 이름이라
                 보조기술 버튼 목록에서 어느 PR 링크 행인지 못 가른다. */}
             {suggestions.map((l, index) => (
-              <li key={l.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-border bg-muted/10 p-2 text-[11px]">
+              <li key={l.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-border bg-muted/10 p-2 text-editorial-meta">
                 <a
                   href={prUrl(l.repo_full_name, l.pr_number)}
                   target="_blank"
@@ -245,7 +245,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
                 <Button
                   size="sm"
                   variant="outline"
-                  className="ml-auto h-6 shrink-0 gap-1 text-[11px]"
+                  className="ml-auto h-6 shrink-0 gap-1 text-editorial-meta"
                   disabled={busyId === l.id}
                   onClick={() => void promote(l)}
                   aria-label={t('promoteAriaLabel', { n: index + 1, label: t('promoteCta') })}
@@ -256,27 +256,27 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
               </li>
             ))}
           </ul>
-          <p className="text-[10px] text-muted-foreground">{t('promoteHint')}</p>
+          <p className="text-micro text-muted-foreground">{t('promoteHint')}</p>
         </div>
       ) : null}
 
       {canonical.length === 0 && suggestions.length === 0 ? (
-        <p className="text-[11px] text-muted-foreground">{t('empty')}</p>
+        <p className="text-editorial-meta text-muted-foreground">{t('empty')}</p>
       ) : null}
 
       {/* 추가 — owner는 installation account(account_login)로 고정(타owner 불가·anti-IDOR), repo명+PR# 입력 */}
       <div className="flex flex-wrap items-end gap-2 pt-1">
-        <div className="flex min-w-0 flex-1 items-center gap-1 rounded-lg border border-border bg-background px-2 py-1 text-[11px]">
+        <div className="flex min-w-0 flex-1 items-center gap-1 rounded-lg border border-border bg-background px-2 py-1 text-editorial-meta">
           <span className="shrink-0 font-mono text-muted-foreground">{status.account_login}/</span>
           <input
             value={repoName}
             onChange={(e) => setRepoName(e.target.value)}
             placeholder={t('repoPlaceholder')}
             aria-label={t('repoAria')}
-            className="min-w-0 flex-1 bg-transparent font-mono text-base lg:text-[11px] text-foreground outline-none placeholder:text-muted-foreground"
+            className="min-w-0 flex-1 bg-transparent font-mono text-base lg:text-editorial-meta text-foreground outline-none placeholder:text-muted-foreground"
           />
         </div>
-        <div className="flex shrink-0 items-center gap-1 rounded-lg border border-border bg-background px-2 py-1 text-[11px]">
+        <div className="flex shrink-0 items-center gap-1 rounded-lg border border-border bg-background px-2 py-1 text-editorial-meta">
           <span className="shrink-0 text-muted-foreground">#</span>
           <input
             value={prNum}
@@ -284,7 +284,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
             inputMode="numeric"
             placeholder={t('prPlaceholder')}
             aria-label={t('prAria')}
-            className="w-16 bg-transparent text-foreground outline-none placeholder:text-muted-foreground text-base lg:text-[11px]"
+            className="w-16 bg-transparent text-foreground outline-none placeholder:text-muted-foreground text-base lg:text-editorial-meta"
           />
         </div>
         <Button
@@ -299,10 +299,10 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
         </Button>
       </div>
 
-      <p className="text-[10px] text-muted-foreground">{t('riskHint')}</p>
+      <p className="text-micro text-muted-foreground">{t('riskHint')}</p>
       {error ? (
         <p
-          className="inline-flex items-center gap-1 text-[11px] text-destructive"
+          className="inline-flex items-center gap-1 text-editorial-meta text-destructive"
           role="alert"
           aria-live="assertive"
           aria-atomic="true"

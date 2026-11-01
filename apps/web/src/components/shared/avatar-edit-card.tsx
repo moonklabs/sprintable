@@ -138,7 +138,7 @@ export function AvatarEditCard({
         </div>
       )}
 
-      <p className="text-[10.5px] leading-relaxed text-muted-foreground">{t('avatarConstraint')}</p>
+      <p className="text-micro leading-relaxed text-muted-foreground">{t('avatarConstraint')}</p>
       {error && <p role="alert" aria-live="assertive" className="text-xs text-destructive">{error}</p>}
     </div>
   );

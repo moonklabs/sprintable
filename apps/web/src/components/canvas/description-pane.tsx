@@ -14,15 +14,15 @@ export function DescriptionPane({ description, elementLabel, className }: Descri
   const t = useTranslations('canvas');
   return (
     <div className={className}>
-      <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{t('descriptionPaneHeading')}</p>
+      <p className="mb-1 text-micro font-bold uppercase tracking-wide text-muted-foreground">{t('descriptionPaneHeading')}</p>
       {description ? (
-        <p className="text-[11px] leading-relaxed text-muted-foreground">
+        <p className="text-editorial-meta leading-relaxed text-muted-foreground">
           {elementLabel ? <strong className="text-foreground">{elementLabel}</strong> : null}
           {elementLabel ? ' · ' : ''}
           {description}
         </p>
       ) : (
-        <p className="text-[11px] text-muted-foreground">{t('descriptionEmptyState')}</p>
+        <p className="text-editorial-meta text-muted-foreground">{t('descriptionEmptyState')}</p>
       )}
     </div>
   );

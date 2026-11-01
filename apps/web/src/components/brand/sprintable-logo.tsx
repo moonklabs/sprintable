@@ -67,7 +67,7 @@ export function SprintableLogo({
         />
         <SprintableTypeWordmark
           aria-hidden="true"
-          className={cn('shrink-0 text-[0.98rem]', wordmarkClassName)}
+          className={cn('shrink-0 text-base', wordmarkClassName)}
           title={title}
         />
       </span>

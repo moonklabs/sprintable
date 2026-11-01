@@ -95,13 +95,13 @@ export function HypothesisGateBadge({ hypothesis, gate, resolveName = () => '', 
         </Badge>
         {/* owner/drafted_by/confirmed_by 구분 미니 evidence */}
         {draftedBy ? (
-          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1 text-editorial-meta text-muted-foreground">
             <Sparkles className="size-3 shrink-0" />
             {t('gateDraftedBy', { name: resolveName(draftedBy) })}
           </span>
         ) : null}
         {actorId && (state === 'confirmed' || state === 'rejected') ? (
-          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1 text-editorial-meta text-muted-foreground">
             <User className="size-3 shrink-0" />
             {t(state === 'rejected' ? 'gateRejectedBy' : 'gateConfirmedBy', { name: resolveName(actorId) })}
           </span>

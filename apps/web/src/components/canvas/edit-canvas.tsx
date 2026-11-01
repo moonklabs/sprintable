@@ -38,7 +38,7 @@ function NodeBox({ node, selectedId, onSelect }: { node: ResolvedNode; selectedI
         selected ? 'border-primary ring-1 ring-primary/40' : 'border-border hover:border-primary/30',
       )}
     >
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{node.type}</span>
+      <span className="text-micro font-semibold uppercase tracking-wide text-muted-foreground">{node.type}</span>
       <p className="mt-0.5 truncate text-foreground">{text}</p>
       {node.children.length > 0 ? (
         <div className="mt-1.5 space-y-1.5 border-l border-border pl-2">
@@ -141,14 +141,14 @@ export function EditCanvas({ tree, selectedId, onSelect, artifactId, canvasBound
           disabled={!artifactId}
           title={artifactId ? undefined : t('specPinToolUnavailableForNewArtifact')}
           className={cn(
-            'flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+            'flex items-center gap-1 rounded-md border px-2 py-1 text-editorial-meta font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40',
             pinToolActive ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-muted',
           )}
         >
           <FileText className="size-3" aria-hidden />
           {t('specPinToolAction')}
         </button>
-        {showPlacementHint ? <p className="text-[11px] text-muted-foreground">{t('specPinPlacementHint')}</p> : null}
+        {showPlacementHint ? <p className="text-editorial-meta text-muted-foreground">{t('specPinPlacementHint')}</p> : null}
       </div>
 
       <div className="h-[420px] w-full">

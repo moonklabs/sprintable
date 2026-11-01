@@ -42,7 +42,7 @@ export function AiGenerationLoading({
           <Sparkles className="size-3.5 text-info" aria-hidden />
           Sprintable AI
         </span>
-        <span className="text-[10.5px] font-medium text-muted-foreground">{headline}</span>
+        <span className="text-micro font-medium text-muted-foreground">{headline}</span>
       </div>
 
       <div className="flex flex-col">
@@ -55,7 +55,7 @@ export function AiGenerationLoading({
               {i < steps.length - 1 ? (
                 <span
                   className={cn(
-                    'absolute left-[9px] top-[26px] bottom-[-6px] w-px',
+                    'absolute left-2.25 top-6.5 -bottom-1.5 w-px',
                     isDone ? 'bg-info-border' : 'bg-border',
                   )}
                   aria-hidden
@@ -63,7 +63,7 @@ export function AiGenerationLoading({
               ) : null}
               <span
                 className={cn(
-                  'relative z-[1] mt-0.5 flex size-[18px] shrink-0 items-center justify-center rounded-full text-[10px]',
+                  'relative z-[1] mt-0.5 flex size-[18px] shrink-0 items-center justify-center rounded-full text-micro',
                   // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
                   isDone && 'border border-info-border bg-info-tint text-foreground',
                   isActive && 'bg-info text-background',
@@ -79,7 +79,7 @@ export function AiGenerationLoading({
                 <p className={cn('text-xs leading-tight', isPending ? 'text-muted-foreground' : 'font-semibold text-foreground')}>
                   {step.label}
                 </p>
-                {step.desc ? <p className="text-[10px] leading-snug text-muted-foreground">{step.desc}</p> : null}
+                {step.desc ? <p className="text-micro leading-snug text-muted-foreground">{step.desc}</p> : null}
                 {isActive ? (
                   <div className="relative h-[3px] w-full max-w-[220px] overflow-hidden rounded-full bg-muted">
                     <span className="absolute inset-y-0 left-0 w-[36%] animate-ai-loading-indeterminate rounded-full bg-gradient-to-r from-transparent via-info to-transparent" aria-hidden />
@@ -93,7 +93,7 @@ export function AiGenerationLoading({
 
       <GenerationSkeleton variant={skeleton} />
 
-      <p className="flex items-center gap-1.5 rounded-lg border border-dashed border-border px-2.5 py-1.5 text-[10px] leading-snug text-muted-foreground">
+      <p className="flex items-center gap-1.5 rounded-lg border border-dashed border-border px-2.5 py-1.5 text-micro leading-snug text-muted-foreground">
         <Sparkles className="size-3 shrink-0 text-info" aria-hidden />
         {transline}
       </p>
@@ -106,7 +106,7 @@ function GenerationSkeleton({ variant }: { variant: 'synthesis' | 'draft' }) {
   if (variant === 'draft') {
     return (
       <div className="flex flex-col gap-2 border-t border-dashed border-border pt-3">
-        <p className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-muted-foreground">{tc('aiUpcomingDraft')}</p>
+        <p className="text-micro font-bold uppercase tracking-[0.14em] text-muted-foreground">{tc('aiUpcomingDraft')}</p>
         <div className="space-y-2 rounded-lg border border-border bg-card p-2.5">
           <Skeleton variant="text" className="w-[85%]" />
           <Skeleton variant="text" className="w-[55%]" />
@@ -121,7 +121,7 @@ function GenerationSkeleton({ variant }: { variant: 'synthesis' | 'draft' }) {
   }
   return (
     <div className="flex flex-col gap-2 border-t border-dashed border-border pt-3">
-      <p className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-muted-foreground">{tc('aiUpcomingSynthesis')}</p>
+      <p className="text-micro font-bold uppercase tracking-[0.14em] text-muted-foreground">{tc('aiUpcomingSynthesis')}</p>
       <div className="space-y-2.5 rounded-lg border border-border bg-card p-2.5">
         {[0, 1].map((i) => (
           <div key={i} className="flex items-start gap-2">

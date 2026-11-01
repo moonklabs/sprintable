@@ -261,11 +261,11 @@ export function EntityBacklinksSection({ entityType, entityId }: EntityBacklinks
                 <div className="min-w-0 flex-1">
                   <span className="[overflow-wrap:anywhere]">{label ?? item.source_id}</span>
                   {!item.still_exists && (
-                    <span className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
+                    <span className="ml-1.5 rounded bg-muted px-1 py-0.5 text-micro text-muted-foreground">
                       {t('backlinksTargetGone')}
                     </span>
                   )}
-                  <div className="text-[10px] text-muted-foreground">
+                  <div className="text-micro text-muted-foreground">
                     {creatorName ? `${creatorName} · ` : ''}
                     {formatViewerRelativeTime(item.created_at, locale, displayTimezone)}
                   </div>

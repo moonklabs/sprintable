@@ -74,7 +74,7 @@ export function EpicHypothesisDeclarationSection({
           {t('declareSectionTitle')}
         </span>
         {declaredCount > 0 ? (
-          <span className="text-[10px] font-semibold text-primary">{t('declareCount', { count: declaredCount })}</span>
+          <span className="text-micro font-semibold text-primary">{t('declareCount', { count: declaredCount })}</span>
         ) : null}
       </div>
 
@@ -84,7 +84,7 @@ export function EpicHypothesisDeclarationSection({
             <Sparkles className="size-3.5 text-info" aria-hidden />
             {t('declareGateQuestion')}
           </p>
-          <p className="text-[11px] leading-snug text-muted-foreground">{t('declareGateHint')}</p>
+          <p className="text-editorial-meta leading-snug text-muted-foreground">{t('declareGateHint')}</p>
         </div>
       ) : (
         <div className="space-y-2.5">

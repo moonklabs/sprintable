@@ -102,7 +102,7 @@ export function EntityAwareTextarea({ value, onChange, projectId, placeholder, c
             return (
               <li key={`${entity.entity_type}:${entity.entity_id}`}>
                 {isNewGroup && (
-                  <div className="sticky top-0 bg-popover px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <div className="sticky top-0 bg-popover px-3 pb-1 pt-2 text-editorial-meta font-semibold uppercase tracking-wide text-muted-foreground">
                     {getEntityTypeLabel?.(entity.entity_type) ?? entityTypeLabel(entity.entity_type)}
                   </div>
                 )}

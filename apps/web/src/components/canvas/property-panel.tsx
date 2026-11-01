@@ -19,7 +19,7 @@ export function PropertyPanel({ node, onChangeText, onDelete, className }: Prope
   if (!node) {
     return (
       <div className={className}>
-        <p className="text-[11px] text-muted-foreground">{t('propertyPanelEmpty')}</p>
+        <p className="text-editorial-meta text-muted-foreground">{t('propertyPanelEmpty')}</p>
       </div>
     );
   }
@@ -28,18 +28,18 @@ export function PropertyPanel({ node, onChangeText, onDelete, className }: Prope
 
   return (
     <div className={className}>
-      <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{node.type}</p>
-      <label className="mb-1 block text-[10px] text-muted-foreground">{t('propertyTextLabel')}</label>
+      <p className="mb-2 text-micro font-bold uppercase tracking-wide text-muted-foreground">{node.type}</p>
+      <label className="mb-1 block text-micro text-muted-foreground">{t('propertyTextLabel')}</label>
       <input
         type="text"
         value={text}
         onChange={(e) => onChangeText(node.id, e.target.value)}
-        className="mb-3 w-full rounded-md border border-border bg-background px-2 py-1 text-base lg:text-[11px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        className="mb-3 w-full rounded-md border border-border bg-background px-2 py-1 text-base lg:text-editorial-meta text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
       />
       <button
         type="button"
         onClick={() => onDelete(node.id)}
-        className="w-full rounded-md border border-border px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-muted"
+        className="w-full rounded-md border border-border px-2 py-1 text-editorial-meta font-semibold text-muted-foreground hover:bg-muted"
       >
         {t('propertyDeleteAction')}
       </button>

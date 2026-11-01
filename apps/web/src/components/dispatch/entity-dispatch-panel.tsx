@@ -220,7 +220,7 @@ export function EntityDispatchPanel({
                 </button>
                 {needsAssignee && (
                   // 까디르(4761 비차단 ②) — role=menu 안의 자식은 menuitem · group · separator뿐 → 까닭 줄은 role="none"(읽기는 describedby로).
-                  <p id={menuReasonId} role="none" className="mt-1 break-keep border-t border-border px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground">{t('dispatchNeedsAssignee')}</p>
+                  <p id={menuReasonId} role="none" className="mt-1 break-keep border-t border-border px-3 pb-1 pt-1.5 text-editorial-meta text-muted-foreground">{t('dispatchNeedsAssignee')}</p>
                 )}
               </AnchoredPopover>
             )}

@@ -142,7 +142,7 @@ export function ArtifactThumbnail({ artifactId, latestVersionNumber, anchorVersi
           return (
             <div className="flex size-full flex-col items-center justify-center gap-0.5 text-muted-foreground">
               <Icon className="size-4" aria-hidden />
-              <span className="text-[8px] font-semibold uppercase tracking-wide">
+              <span className="text-micro font-semibold uppercase tracking-wide">
                 {t(`galleryFormat${state.format[0]!.toUpperCase()}${state.format.slice(1)}`)}
               </span>
             </div>

@@ -158,7 +158,7 @@ export function StoryHypothesesSection({
               </span>
               {isCrossEpic(h) ? (
                 <span
-                  className="inline-flex shrink-0 items-center gap-1 text-[11px] text-warning-strong"
+                  className="inline-flex shrink-0 items-center gap-1 text-editorial-meta text-warning-strong"
                   title={t('crossEpicHint')}
                 >
                   <AlertTriangle className="size-3" aria-hidden />
@@ -208,7 +208,7 @@ export function StoryHypothesesSection({
             />
           </div>
           {/* story에선 가설을 생성하지 않는다 — 생성은 에픽 상세/MCP 경로(AC①). */}
-          <p className="text-[11px] text-muted-foreground">{t('createElsewhereHint')}</p>
+          <p className="text-editorial-meta text-muted-foreground">{t('createElsewhereHint')}</p>
           {candidates === null ? (
             <p className="px-1 py-2 text-xs text-muted-foreground">…</p>
           ) : filteredCandidates.length === 0 ? (
@@ -228,7 +228,7 @@ export function StoryHypothesesSection({
                     </span>
                     {isCrossEpic(h) ? (
                       <span
-                        className="inline-flex shrink-0 items-center gap-1 text-[11px] text-warning-strong"
+                        className="inline-flex shrink-0 items-center gap-1 text-editorial-meta text-warning-strong"
                         title={t('crossEpicHint')}
                       >
                         <AlertTriangle className="size-3" aria-hidden />

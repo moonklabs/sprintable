@@ -41,8 +41,8 @@ export function OutcomeIntentFields({ value, onChange, defaultOpen = false, open
   return (
     <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-3">
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('intentLabel')}</span>
-        <span className="text-[10px] text-muted-foreground">{t('optional')}</span>
+        <span className="text-micro font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('intentLabel')}</span>
+        <span className="text-micro text-muted-foreground">{t('optional')}</span>
       </div>
       <div className="space-y-1">
         <label className="text-xs font-medium text-muted-foreground">{t('hypothesisField')}</label>
@@ -70,13 +70,13 @@ export function OutcomeIntentFields({ value, onChange, defaultOpen = false, open
             onChange={(e) => setMd({ target: e.target.value === '' ? 0 : Number(e.target.value) })} placeholder={t('targetPlaceholder')}
             className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground tabular-nums placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary sm:w-24" />
         </div>
-        {!isInternal ? <p className="text-[11px] text-muted-foreground">{t('externalSourceNote')}</p> : null}
+        {!isInternal ? <p className="text-editorial-meta text-muted-foreground">{t('externalSourceNote')}</p> : null}
       </div>
       <div className="space-y-1">
         <label className="text-xs font-medium text-muted-foreground">{t('measureAfterField')}</label>
         <input type="date" value={value.measure_after} onChange={(e) => onChange({ ...value, measure_after: e.target.value })}
           className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary" />
-        <p className="text-[11px] text-muted-foreground">{t('measureAfterHint')}</p>
+        <p className="text-editorial-meta text-muted-foreground">{t('measureAfterHint')}</p>
       </div>
     </div>
   );

@@ -334,7 +334,7 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
     <DialogPrimitive.Root open={open} onOpenChange={handleOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Backdrop
-          className="fixed inset-0 z-50 bg-black/20 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
+          className="fixed inset-0 z-50 bg-scrim-1 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
         />
         <DialogPrimitive.Popup data-modal-popup=""
           className={cn(
@@ -372,7 +372,7 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
                 aria-expanded={hasResults}
               />
               <DialogPrimitive.Close
-                className="rounded border border-border/60 bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                className="rounded border border-border/60 bg-muted/50 px-1.5 py-0.5 font-mono text-micro font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
                 aria-label={t('close')}
               >
                 ESC
@@ -380,7 +380,7 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
             </div>
 
             {contextStory ? (
-              <div className="flex items-center gap-1.5 border-b border-border/60 bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground">
+              <div className="flex items-center gap-1.5 border-b border-border/60 bg-muted/30 px-3 py-1.5 text-editorial-meta text-muted-foreground">
                 <span className="text-info" aria-hidden="true">◆</span>
                 {t('contextChip', { title: contextStory.story_number ? `#${contextStory.story_number} ${contextStory.title}` : contextStory.title })}
               </div>
@@ -434,7 +434,7 @@ interface PaletteGroupViewProps {
 function PaletteGroupView({ group, highlightedId, onSelect, dangerPillLabel }: PaletteGroupViewProps) {
   return (
     <Autocomplete.Group items={group.items} className="flex flex-col" data-command-group={group.key === 'navigate' ? 'navigate' : undefined}>
-      <Autocomplete.GroupLabel className="px-2 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+      <Autocomplete.GroupLabel className="px-2 pt-1.5 pb-1 text-micro font-medium uppercase tracking-wider text-muted-foreground">
         {group.label}
       </Autocomplete.GroupLabel>
       <Autocomplete.Collection>
@@ -471,7 +471,7 @@ function NavigateRow({ item }: { item: CommandItem }) {
           {item.shortcut.map((key) => (
             <kbd
               key={key}
-              className="rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground"
+              className="rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-micro font-medium text-muted-foreground"
             >
               {key}
             </kbd>
@@ -497,13 +497,13 @@ function ActionRow({ item, highlighted, dangerPillLabel }: { item: ActionCommand
         <span className="flex-1 truncate">{item.label}</span>
         {item.danger ? (
           // story #2590(TIER1) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
-          <span className="ml-auto shrink-0 rounded border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-[9px] font-semibold text-foreground">
+          <span className="ml-auto shrink-0 rounded border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-micro font-semibold text-foreground">
             {dangerPillLabel}
           </span>
         ) : null}
       </span>
       {highlighted ? (
-        <span className="ml-8 mr-2 block border-l-2 border-info/40 py-1 pl-2 text-[11px] leading-snug text-muted-foreground">
+        <span className="ml-8 mr-2 block border-l-2 border-info/40 py-1 pl-2 text-editorial-meta leading-snug text-muted-foreground">
           {item.impact}
         </span>
       ) : null}
@@ -518,7 +518,7 @@ function DocRow({ doc }: { doc: DocResult }) {
       <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
         <span className="truncate">{doc.icon ? `${doc.icon} ` : ''}{doc.title}</span>
         {/* story #2167 AC2 — slug로 찾은 결과가 어떤 slug인지 화면에 보여야 한다. */}
-        <span className="shrink-0 truncate font-mono text-[10px] text-muted-foreground">{doc.slug}</span>
+        <span className="shrink-0 truncate font-mono text-micro text-muted-foreground">{doc.slug}</span>
       </span>
     </>
   );

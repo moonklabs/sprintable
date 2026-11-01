@@ -150,8 +150,8 @@ export function AvatarCropper({
         />
         {/* 원형 크롭 가이드 오버레이 — 뷰포트 밖(사각 여백)만 어둡게, 실제 크롭 영역은 뷰포트 전체(정사각)와 동일하므로 원은 시각 가이드일 뿐. */}
         <div
-          className="pointer-events-none absolute inset-[10px] rounded-full border-2 border-white/90"
-          style={{ boxShadow: '0 0 0 999px rgba(0,0,0,0.35)' }}
+          className="pointer-events-none absolute inset-2.5 rounded-full border-2 border-on-scrim/90"
+          style={{ boxShadow: '0 0 0 999px var(--scrim-1)' }}
         />
       </div>
       <div className="flex-1 space-y-3">

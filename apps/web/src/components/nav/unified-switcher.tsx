@@ -48,7 +48,7 @@ interface UnifiedSwitcherProps {
 
 function OrgInitial({ name }: { name: string }) {
   return (
-    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-sm bg-brand text-[9px] font-semibold text-brand-foreground">
+    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-sm bg-brand text-micro font-semibold text-brand-foreground">
       {firstGraphemes(name, 1).toUpperCase()}
     </span>
   );
@@ -85,7 +85,7 @@ export function UnifiedSwitcher({
                 </span>
                 {/* 0746: 전환 중에는 옛 org의 프로젝트명을 숨겨 "새 org + 옛 프로젝트" 깜빡임(leak처럼 보임)을 차단 */}
                 {!s.pending && s.displayProject && (
-                  <span className="truncate text-[10px] font-medium text-muted-foreground leading-tight">
+                  <span className="truncate text-micro font-medium text-muted-foreground leading-tight">
                     {s.displayProject}
                   </span>
                 )}
@@ -98,7 +98,7 @@ export function UnifiedSwitcher({
           {/* 현재 조직 */}
           <DropdownMenuGroup>
             <div className="flex items-center justify-between px-2 py-1.5">
-              <DropdownMenuLabel className="p-0 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+              <DropdownMenuLabel className="p-0 text-editorial-meta font-semibold text-muted-foreground uppercase tracking-wide">
                 <span className="flex items-center gap-1.5">
                   <OrgInitial name={s.displayOrg} />
                   {s.displayOrg}
@@ -151,12 +151,12 @@ export function UnifiedSwitcher({
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
                   <div className="px-2 py-1.5">
-                    <DropdownMenuLabel className="p-0 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                    <DropdownMenuLabel className="p-0 text-editorial-meta font-semibold text-muted-foreground uppercase tracking-wide">
                       <span className="flex items-center gap-1.5">
                         <OrgInitial name={org.orgName} />
                         {org.orgName}
                         {org.role && (
-                          <span className="text-[9px] font-normal opacity-60">{orgRoleLabel(org.role, tSettings)}</span>
+                          <span className="text-micro font-normal opacity-60">{orgRoleLabel(org.role, tSettings)}</span>
                         )}
                       </span>
                     </DropdownMenuLabel>

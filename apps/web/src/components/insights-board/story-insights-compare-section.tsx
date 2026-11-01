@@ -100,7 +100,7 @@ function PublicationCard({
                 <td className="py-1 pr-2 text-foreground">
                   {tContent(METRIC_LABEL_KEYS[metric])}
                   {metric === 'views' ? (
-                    <span className="ml-1 text-[11px] text-muted-foreground">({tBoard(sourceLabelKey)})</span>
+                    <span className="ml-1 text-editorial-meta text-muted-foreground">({tBoard(sourceLabelKey)})</span>
                   ) : null}
                 </td>
                 <td className="py-1">

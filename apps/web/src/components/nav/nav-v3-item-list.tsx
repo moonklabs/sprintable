@@ -89,7 +89,7 @@ export function NavV3ItemList({ flags, activeKey, todayBadgeCount = 0 }: NavV3It
             <Icon className="size-4 shrink-0" aria-hidden="true" />
             <span className="min-w-0 flex-1 truncate">{t(item.labelKey)}</span>
             {item.key === 'today' && todayBadgeCount > 0 ? (
-              <span className="flex h-[19px] min-w-[19px] items-center justify-center rounded-full bg-primary px-1 text-[11.5px] font-bold text-primary-foreground">
+              <span className="flex h-[19px] min-w-[19px] items-center justify-center rounded-full bg-primary px-1 text-editorial-meta font-bold text-primary-foreground">
                 {todayBadgeCount}
               </span>
             ) : null}

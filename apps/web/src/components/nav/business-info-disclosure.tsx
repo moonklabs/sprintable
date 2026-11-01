@@ -37,7 +37,7 @@ export function BusinessInfoDisclosure() {
         <div id={panelId} className="max-h-[45vh] overflow-y-auto px-2 py-2">
           <BusinessInfoList />
           <div className="mt-2 border-t border-sidebar-border/60 pt-2">
-            <p className="mb-1 text-[10px] font-medium text-muted-foreground">{t('policiesHeading')}</p>
+            <p className="mb-1 text-micro font-medium text-muted-foreground">{t('policiesHeading')}</p>
             <LegalLinks className="text-xs text-muted-foreground" />
           </div>
         </div>

@@ -134,7 +134,7 @@ export function PaidSpendDailySeriesCard({ orgId }: { orgId: string }) {
                     aria-label={label}
                   />
                 )}
-                <span className="text-[10px] text-muted-foreground">{point.date.slice(5)}</span>
+                <span className="text-micro text-muted-foreground">{point.date.slice(5)}</span>
               </li>
             );
           })}

@@ -102,7 +102,7 @@ export function StoryPickerDialog({ open, onOpenChange, projectId, onSelect, all
                 key={s.id}
                 type="button"
                 onClick={() => onSelect(s.id)}
-                className="block w-full truncate rounded-md px-2.5 py-1.5 text-left text-[13px] text-foreground transition-colors hover:bg-muted/60"
+                className="block w-full truncate rounded-md px-2.5 py-1.5 text-left text-editorial-ui text-foreground transition-colors hover:bg-muted/60"
               >
                 {s.title}
               </button>
@@ -120,7 +120,7 @@ export function StoryPickerDialog({ open, onOpenChange, projectId, onSelect, all
           <button
             type="button"
             onClick={() => onSelect(null)}
-            className="mt-1 w-full rounded-md border border-border px-2.5 py-2 text-center text-[13px] font-medium text-foreground transition-colors hover:bg-muted/60"
+            className="mt-1 w-full rounded-md border border-border px-2.5 py-2 text-center text-editorial-ui font-medium text-foreground transition-colors hover:bg-muted/60"
           >
             {t('storyPickerSkip')}
           </button>
