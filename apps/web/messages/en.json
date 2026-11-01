@@ -7034,6 +7034,10 @@
     "rowDetailAdsSpendLabel": "Ad spend"
   },
   "desktop": {
+    "phoneRelayLocal": {
+      "title": "Controlling from your phone works in hosted mode",
+      "body": "A phone connects to this computer through the Sprintable server on the internet. Local mode has no such server, so phone pairing and phone control are turned off."
+    },
     "openAppTitle": "Already have the app on this Mac?",
     "openAppCta": "Open the app",
     "openAppNoAppNote": "No app yet? You can get it just below.",

@@ -7034,6 +7034,10 @@
     "rowDetailAdsSpendLabel": "광고비"
   },
   "desktop": {
+    "phoneRelayLocal": {
+      "title": "폰으로 다루기는 호스팅 모드에서 쓸 수 있어요",
+      "body": "폰은 인터넷에 있는 Sprintable 서버를 거쳐 이 컴퓨터와 이어져요. 로컬 모드에는 그 서버가 없어서 폰 페어링과 폰으로 다루기가 꺼져 있어요."
+    },
     "openAppTitle": "이 Mac에 앱이 있나요?",
     "openAppCta": "앱 열기",
     "openAppNoAppNote": "앱이 없다면 아래에서 받을 수 있어요.",

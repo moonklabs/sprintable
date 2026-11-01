@@ -53,6 +53,8 @@ interface ConnectStepProps {
   // 낱말이 실제 착지와 같아야 한다(온보딩 원칙). 기본값 false = 기존 테스트
   // (이 prop 없이 마운트)가 현행 낱말(dashboardCta)을 계속 기대.
   todayV3Enabled?: boolean;
+  /** story 4829: the app's own server (local mode) — the phone relay's «원격 제어» switch is not offered (nothing to relay through). Default false = hosted. */
+  localMode?: boolean;
   /** story 4668 (AC2 · Yuna A-3): the person skipped the agent step (`agentId` null) — [에이전트 만들기] takes them back to it. */
   onMakeAgent?: () => void;
 }
@@ -112,7 +114,7 @@ export function HighlightedJson({ text }: { text: string }) {
   );
 }
 
-export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish, todayV3Enabled = false, onMakeAgent }: ConnectStepProps) {
+export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish, todayV3Enabled = false, localMode = false, onMakeAgent }: ConnectStepProps) {
   const t = useTranslations('onboarding');
   const tc = useTranslations('common');
 
@@ -337,7 +339,7 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
     <section className={cn(cardVariants(), 'space-y-3 p-4')} data-testid="connect-step-desktop-primary">
       <p className="text-xs text-muted-foreground">{t('desktopHandoffSubtitle')}</p>
       {/* story #4656: the org's remote control, once, for its owner — before the desktop steps that need it (no flash: it draws only when read) */}
-      <OnboardingRemoteControl orgId={orgId} />
+      {localMode ? null : <OnboardingRemoteControl orgId={orgId} />}
       <DesktopDownloadCard />
       {/* story 4654: a device that is not a Mac gets the phone app's store links under the download card (Yuna §1) */}
       <PhoneAppCard />

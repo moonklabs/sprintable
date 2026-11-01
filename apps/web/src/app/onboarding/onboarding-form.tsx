@@ -61,6 +61,8 @@ interface OnboardingFormProps {
   // 서버(page.tsx)가 내려준다(이 컴포넌트는 'use client'라 직접 못 읽음). 기본값
   // false = 기존 테스트(이 prop 없이 마운트)가 계속 현행 착지를 기대.
   todayV3Enabled?: boolean;
+  /** story 4829 (공개 2-⑥ (나)): this is the app's own server (local mode) — decided by the server page (`isEmbeddedServer()`); the connect step then does not offer the phone relay's «원격 제어» switch. Default false = hosted. */
+  localMode?: boolean;
   // story #4017 착지 뒤 재정정(2026-09-22) — resolveNavV3Destinations(flags).today.path를
   // 부모가 구해 내려준다(하드코딩 '/today' 0, chatsHref와 동형 필수 prop).
   todayHref: string;
@@ -80,7 +82,7 @@ interface OnboardingFormProps {
 type Arrival = 'working' | 'account-check-failed' | 'invite-check-failed' | 'failed';
 
 export function OnboardingForm({
-  initialStep, initialOrgId, todayV3Enabled = false, todayHref, chatsHref, macDownloadEnabled = false, afterOrgDelete = false,
+  initialStep, initialOrgId, todayV3Enabled = false, todayHref, chatsHref, macDownloadEnabled = false, afterOrgDelete = false, localMode = false,
 }: OnboardingFormProps) {
   const t = useTranslations('onboarding');
   const tc = useTranslations('common');
@@ -632,6 +634,7 @@ export function OnboardingForm({
             orgId={orgId}
             onFinish={handleFinish}
             todayV3Enabled={todayV3Enabled}
+            localMode={localMode}
             onMakeAgent={() => setStep('agent')}
           />
         )}
