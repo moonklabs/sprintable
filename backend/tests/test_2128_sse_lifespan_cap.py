@@ -548,6 +548,30 @@ async def test_a_long_lived_real_connection_still_counts_as_a_live_sibling():
         assert not demotions, "the agent was demoted while a live connection (3650 s old) was still there"
 
 
+@pytest.mark.anyio
+@pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요")
+async def test_a_stale_row_of_the_ending_session_is_deleted_not_brought_back_to_life():
+    """story #4834 (codex round 13) — the ending stream's own row whose ticks stopped long ago (more than the freshness window) was already read as gone by every reader. The
+    cleanup deletes it with the other dead rows; stamping it would give it `last_seen_at = now - (window - expire_in)` and make the readers read a dead session as live for
+    the expiry (a false online that was not there before)."""
+    import app.routers.agent_gateway as gw_module
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.agent_gateway import AgentGatewaySession
+
+    async with _agent_env() as (Session, agent_id, auth_ctx, _):
+        sid = uuid.uuid4()
+        async with Session() as s:
+            now = datetime.now(timezone.utc)
+            s.add(AgentGatewaySession(id=sid, agent_id=agent_id, connected_at=now - timedelta(seconds=500), last_seen_at=now - timedelta(seconds=200)))
+            await s.commit()
+        assert not any((await _readers(Session, agent_id)).values()), "(a stale row reads as gone to begin with)"
+        with patch("app.services.agent_anchor_sync.sync_agent_profile_presence", new=AsyncMock()):
+            await gw_module._mark_agent_disconnected(agent_id, sid, None, expire_in=30.0)
+        assert await _session_rows(Session, agent_id) == [], "the stale row was deleted"
+        assert not any((await _readers(Session, agent_id)).values()), "no reader reads the dead session as live"
+
+
 def test_the_sibling_window_is_derived_from_the_lifetime_cap_and_sits_above_a_real_connection():
     """story #4834 (PO) — the line between «a live connection» and «a stamped (expiring) row» is not a number of its own: it is the lifetime cap minus the longest stamp, so it
     moves with the cap; and it must stay above what a real connection can reach (Cloud Run / GCLB hard cap 3600 s), or a live long connection would stop counting as a

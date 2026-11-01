@@ -231,6 +231,8 @@ async def _mark_agent_disconnected(
             else:
                 # 기존 freshness 경로(30s틱 유지·flag off·무회귀).
                 fresh_cutoff = now - timedelta(seconds=_SESSION_FRESH_TTL)
+                # (a row of this very session whose ticks stopped more than the window ago is `_dead` too: it is deleted, not stamped — readers had already stopped reading it
+                # as live, and a stamp would bring it back to life for the expiry)
                 _dead = (AgentGatewaySession.agent_id == agent_id) & (AgentGatewaySession.last_seen_at < fresh_cutoff)
                 await db.execute(
                     delete(AgentGatewaySession).where(_dead if expire_in is not None else ((AgentGatewaySession.id == session_id) | _dead))
