@@ -178,6 +178,13 @@ async def local_bootstrap(
     # local-set-password / password change that ends every session either ran before (this session is then issued after it and stands) or waits until
     # this one is committed (and ends it) — it can never end the sessions and then have a session slip in behind it
     await _lock_person_sessions(session, user.id, exclusive=False)
+    # the look above may be stale by now (this call waited for the lock): a deactivation / removal / first password that committed meanwhile is seen here, not
+    # after a session has been issued across it
+    user = (await session.execute(select(User).where(User.id == user.id).execution_options(populate_existing=True))).scalar_one_or_none()
+    if user is None or not user.is_active or user.deleted_at is not None:
+        logger.warning("local-bootstrap refused: the owner account is deactivated or deleted")
+        return _refuse()
+    now = datetime.now(timezone.utc)  # the session starts HERE, after any password set that this call waited behind (else that set would make this very session stale)
     # the same per-person lock every first-organization path takes, held BEFORE the look: a setup or invite flow that creates this person's first
     # organization while we wait is seen by the look below instead of being doubled
     await lock_first_org_path(session, user.id)

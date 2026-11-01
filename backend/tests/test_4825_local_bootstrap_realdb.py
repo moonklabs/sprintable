@@ -718,6 +718,56 @@ async def test_21g_on_an_embedded_install_no_auth_refusal_sends_back_what_was_ty
     assert all('"input"' in text_ for text_ in hosted), hosted
 
 
+async def test_21h_an_owner_removed_while_bootstrap_waits_for_the_lock_gets_no_session_and_nothing_is_created(embedded, monkeypatch):
+    """bootstrap looked at the owner, then waited for the person's session lock; the account was deactivated / removed in that gap: it is refused after the wait —
+    no session is stored, no organization or project is made behind the change"""
+    import app.routers.auth as auth_router
+
+    original = auth_router._lock_person_sessions
+    async with _client(embedded) as c:
+        assert (await c.post(URL, headers=_h())).status_code == 200
+        base = await _counts()
+        n_tokens = lambda: _sql(f"SELECT count(*) FROM refresh_tokens WHERE user_id = (SELECT id FROM users WHERE email = '{OWNER_EMAIL}')", fetch="one")  # noqa: E731
+        before = (await n_tokens())[0]
+        for change in ("is_active = false", "is_active = false, deleted_at = now()"):
+            async def _lock_after_a_removal(session, user_id, _change=change, **kw):
+                await _sql(f"UPDATE users SET {_change} WHERE email = '{OWNER_EMAIL}'")
+                return await original(session, user_id, **kw)
+
+            with monkeypatch.context() as m:
+                m.setattr(auth_router, "_lock_person_sessions", _lock_after_a_removal)
+                r = await c.post(URL, headers=_h())
+            assert r.status_code == 403, (change, r.text)
+            assert (await n_tokens())[0] == before and await _counts() == base, change
+            await _sql(f"UPDATE users SET is_active = true, deleted_at = NULL WHERE email = '{OWNER_EMAIL}'")
+
+
+async def test_21i_a_session_issued_after_waiting_behind_a_password_set_is_not_stale(embedded, monkeypatch):
+    """bootstrap waits behind the first password set: its session starts after that set, so it can be renewed (a start time taken before the wait would make the very
+    session it returns stale)"""
+    import app.routers.auth as auth_router
+
+    original = auth_router._lock_person_sessions
+    async with _client(embedded) as c:
+        assert (await c.post(URL, headers=_h())).status_code == 200
+
+        async def _lock_after_a_password_set(session, user_id, **kw):
+            await asyncio.sleep(1.1)  # a whole second between the start of this call and the set (the start time is kept in whole seconds)
+            await _sql(f"UPDATE users SET hashed_password = '$2b$12$setwhilewaiting', password_set_at = now() WHERE email = '{OWNER_EMAIL}'")
+            return await original(session, user_id, **kw)
+
+        with monkeypatch.context() as m:
+            m.setattr(auth_router, "_lock_person_sessions", _lock_after_a_password_set)
+            r = await c.post(URL, headers=_h())
+        assert r.status_code == 200, r.text
+        tokens = r.json()["data"]
+    from httpx import ASGITransport, AsyncClient
+
+    async with AsyncClient(transport=ASGITransport(app=real_app, raise_app_exceptions=False), base_url="http://test") as rc:
+        renew = await rc.post("/api/v2/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+    assert renew.status_code == 200, renew.text
+
+
 async def test_22_the_route_exists_only_on_an_embedded_install(monkeypatch):
     from fastapi import FastAPI
 
