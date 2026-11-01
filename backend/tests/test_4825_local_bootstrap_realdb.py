@@ -10,6 +10,7 @@ The secret value is never in a response body or a log line.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import secrets
@@ -98,6 +99,11 @@ async def embedded(monkeypatch):
     await _wipe_owner()
     app = FastAPI()
     app.state.limiter = limiter
+    from fastapi.exceptions import RequestValidationError
+
+    from app.main import validation_exception_handler
+
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)  # the real app's 422 answer (what a refusal may carry)
     assert local_auth.register_local_auth_routes(app) is True
     yield app
     await _wipe_owner()
@@ -537,11 +543,14 @@ async def test_21_every_other_state_is_refused_and_the_password_stays_unset(embe
         # the password rules of the mailed flow
         for weak in ("sh1A!", "alllowercaseletters", "NOLOWERCASE12345"):
             assert (await c.post(SET_URL, headers=_bearer(tokens), json={"new_password": weak})).status_code == 422, weak
-        # an API-key session (the same predicate the mailed flow uses)
-        with monkeypatch.context() as m:  # (not monkeypatch.undo(): that would also undo the `embedded` fixture's switch)
-            m.setattr(auth_router, "_requires_interactive_session", lambda auth: True)
-            r = await c.post(SET_URL, headers=_bearer(tokens), json={"new_password": GOOD_PW})
-        assert r.status_code == 403 and r.json()["error"]["code"] == "REQUIRES_INTERACTIVE_SESSION", r.text
+        # an API-key session: a token whose claims carry an agent key / a person's personal key id (what the mailed flow's predicate reads)
+        from app.core.security import create_tokens, decode_jwt
+
+        claims = decode_jwt(tokens["access_token"])
+        for key_claim in ("api_key_id", "human_api_key_id"):
+            keyed = create_tokens(str(uid), email=OWNER_EMAIL, app_metadata={**claims.get("app_metadata", {}), key_claim: str(uuid.uuid4())})
+            r = await c.post(SET_URL, headers=_bearer(keyed), json={"new_password": GOOD_PW})
+            assert r.status_code == 403 and r.json()["error"]["code"] == "REQUIRES_INTERACTIVE_SESSION", (key_claim, r.text)
         # a second factor on the account
         await _sql(f"UPDATE users SET totp_enabled = true WHERE id = '{uid}'")
         r = await c.post(SET_URL, headers=_bearer(tokens), json={"new_password": GOOD_PW})
@@ -589,6 +598,67 @@ async def test_21b_a_password_that_lands_between_the_look_and_the_write_is_not_o
         r = await c.post(SET_URL, headers=_bearer(tokens), json={"new_password": GOOD_PW})
     assert r.status_code == 400 and r.json()["error"]["code"] == "ALREADY_HAS_PASSWORD", r.text
     assert (await _owner_row()).hashed_password == other_hash  # the rival's password stands, nothing of this call was written
+
+
+async def test_21c_a_refusal_never_sends_the_chosen_password_back(embedded):
+    """FastAPI's default 422 carries each error's `input` (for a body-level error, the WHOLE body): the password a person typed must not come back in the answer"""
+    typed = "sh1A!"
+    async with _client(embedded) as c:
+        tokens = await _owner_session(c)
+        weak = await c.post(SET_URL, headers=_bearer(tokens), json={"new_password": typed})
+        body_level = await c.post(SET_URL, headers={**_bearer(tokens), "Content-Type": "application/json"}, content=json.dumps([typed]))
+        wrong_type = await c.post(SET_URL, headers=_bearer(tokens), json={"new_password": 123456789})
+    for r in (weak, body_level, wrong_type):
+        assert r.status_code == 422, r.text
+        assert typed not in r.text and "123456789" not in r.text and '"input"' not in r.text, r.text
+
+
+async def test_21d_a_password_rule_that_stops_holding_between_the_look_and_the_write_is_not_overwritten(embedded, monkeypatch):
+    """a second factor turned on, or the account deactivated, while this call waits for the person's session lock: the write holds those conditions too"""
+    import app.routers.auth as auth_router
+
+    original = auth_router._lock_person_sessions
+    async with _client(embedded) as c:
+        tokens = await _owner_session(c)
+        for change, status, code in (
+            ("totp_enabled = true", 409, "TOTP_ENABLED"),
+            ("is_active = false", 403, "FORBIDDEN"),
+        ):
+            async def _lock_after_a_change(session, user_id, _change=change, **kw):
+                await _sql(f"UPDATE users SET {_change} WHERE email = '{OWNER_EMAIL}'")
+                return await original(session, user_id, **kw)
+
+            with monkeypatch.context() as m:
+                m.setattr(auth_router, "_lock_person_sessions", _lock_after_a_change)
+                r = await c.post(SET_URL, headers=_bearer(tokens), json={"new_password": GOOD_PW})
+            assert r.status_code == status and r.json()["error"]["code"] == code, (change, r.text)
+            assert (await _owner_row()).hashed_password == "", change
+            await _sql(f"UPDATE users SET totp_enabled = false, is_active = true WHERE email = '{OWNER_EMAIL}'")
+
+
+async def test_21e_bootstrap_takes_the_persons_session_lock_before_it_stores_a_session(embedded, monkeypatch):
+    """a bootstrap in flight while local-set-password ends every session must not store a live refresh token behind that revoke: like a password sign-in it
+    takes the person's session lock (shared) before the session is stored, so the revoke (exclusive) either ran before it or waits for it"""
+    import app.routers.auth as auth_router
+
+    events: list[str] = []
+    real_lock, real_store = auth_router._lock_person_sessions, auth_router._store_refresh_token
+
+    async def _lock(session, user_id, *, exclusive):
+        events.append(f"lock exclusive={exclusive}")
+        return await real_lock(session, user_id, exclusive=exclusive)
+
+    async def _store(*a, **k):
+        events.append("store")
+        return await real_store(*a, **k)
+
+    monkeypatch.setattr(auth_router, "_lock_person_sessions", _lock)
+    monkeypatch.setattr(auth_router, "_store_refresh_token", _store)
+    async with _client(embedded) as c:
+        assert (await c.post(URL, headers=_h())).status_code == 200  # creates the owner
+        events.clear()
+        assert (await c.post(URL, headers=_h())).status_code == 200  # the next launch
+    assert events == ["lock exclusive=False", "store"], events
 
 
 async def test_22_the_route_exists_only_on_an_embedded_install(monkeypatch):

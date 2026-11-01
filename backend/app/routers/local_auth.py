@@ -138,6 +138,7 @@ async def local_bootstrap(
     from app.models.organization import Organization
     from app.models.project import OrgMember
     from app.routers.auth import (
+        _lock_person_sessions,
         _ok,
         _persist_resolved_context,
         _refresh_session_context,
@@ -173,6 +174,10 @@ async def local_bootstrap(
         session.add(user)
         await session.flush()
 
+    # the person's session lock, SHARED, before anything of the person is written or any session is stored (as the password sign-in does): a
+    # local-set-password / password change that ends every session either ran before (this session is then issued after it and stands) or waits until
+    # this one is committed (and ends it) — it can never end the sessions and then have a session slip in behind it
+    await _lock_person_sessions(session, user.id, exclusive=False)
     # the same per-person lock every first-organization path takes, held BEFORE the look: a setup or invite flow that creates this person's first
     # organization while we wait is seen by the look below instead of being doubled
     await lock_first_org_path(session, user.id)
@@ -245,11 +250,22 @@ async def local_set_password(
 
     new_hash = hash_password(body.new_password)
     await _lock_person_sessions(session, user.id, exclusive=True)  # before the person's row is written, as the mailed flow does
+    # the write holds every condition the look above checked, so a change that landed between the look and here (a rival password, a second factor
+    # turned on, the account deactivated or removed) is not overwritten
     done = await session.execute(
-        update(User).where(User.id == user.id, User.hashed_password == "").values(hashed_password=new_hash, password_set_at=datetime.now(timezone.utc))
+        update(User)
+        .where(User.id == user.id, User.hashed_password == "", User.totp_enabled.is_(False), User.is_active.is_(True), User.deleted_at.is_(None))
+        .values(hashed_password=new_hash, password_set_at=datetime.now(timezone.utc))
     )
-    if done.rowcount != 1:  # a concurrent call set one first
-        return _err("ALREADY_HAS_PASSWORD", "User already has a password set", 400)
+    if done.rowcount != 1:
+        now_state = (await session.execute(
+            select(User.hashed_password, User.totp_enabled).where(User.id == user.id, User.is_active.is_(True), User.deleted_at.is_(None))
+        )).first()
+        if now_state is None:
+            return _refuse()
+        if now_state.hashed_password:
+            return _err("ALREADY_HAS_PASSWORD", "User already has a password set", 400)
+        return _err("TOTP_ENABLED", "Turn off the second factor before setting a first password", 409)
     await _revoke_other_sessions(session, user.id, None)
     await _write_audit(session, "password_set", user_id=user.id, email=user.email, ip_address=request.client.host if request.client else None, detail="local_set_password")
     await session.commit()
