@@ -125,6 +125,10 @@ describe('the guard on a real server', () => {
     expect(good).toContain('ok 5');
     const other = await raw(r.port, `POST /x HTTP/1.1\r\nHost: 127.0.0.1:${r.port}\r\nExpect: something-else\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`);
     expect(status(other)).toBe('417');
+    const otherBad = await raw(r.port, `POST /x HTTP/1.1\r\nHost: evil.example\r\nExpect: something-else\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`);
+    expect(status(otherBad)).toBe('400'); // the door judges it before Node's own 417
+    const otherCross = await raw(r.port, `POST /x HTTP/1.1\r\nHost: 127.0.0.1:${r.port}\r\nSec-Fetch-Site: cross-site\r\nExpect: something-else\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`);
+    expect(status(otherCross)).toBe('403');
     expect(r.hits).toEqual(['POST /api/v2/x']);
   });
 
@@ -260,6 +264,28 @@ describe('the memory that request bodies in flight can take', () => {
     await hold.answer;
     const after = await raw(r.port, head(r, 'Transfer-Encoding: chunked\r\n') + chunk(150) + chunk(150) + '0\r\n\r\n');
     expect(after).toContain('ok 300');
+  });
+
+  it('chunked bodies that finish give their bytes back: many in a row, together far more than the budget, all pass', async () => {
+    const r = await rig({ SPRINTABLE_EMBEDDED: '1' }, true, { bodyBudget: BUDGET });
+    const chunk = (n: number) => `${n.toString(16)}\r\n${'c'.repeat(n)}\r\n`;
+    for (let i = 0; i < 4; i++) expect(await raw(r.port, head(r, 'Transfer-Encoding: chunked\r\n') + chunk(400) + '0\r\n\r\n'), `round ${i}`).toContain('ok 400');
+  });
+
+  it('a request with Expect: 100-continue is judged ONCE: its declared body is reserved once, not at checkContinue and again at request', async () => {
+    const r = await rig({ SPRINTABLE_EMBEDDED: '1' }, true, { bodyBudget: BUDGET });
+    const out = await raw(r.port, head(r, 'Expect: 100-continue\r\nContent-Length: 600\r\n') + 'k'.repeat(600)); // 600 once fits in 1000; 600 twice would not
+    expect(out).toContain('100 Continue');
+    expect(out).toContain('ok 600');
+  });
+
+  it('once a chunked body went over the budget, nothing more of it reaches the app (the app does not see an «end» of a cut body)', async () => {
+    const r = await rig({ SPRINTABLE_EMBEDDED: '1' }, true, { bodyBudget: BUDGET });
+    const chunk = (n: number) => `${n.toString(16)}\r\n${'c'.repeat(n)}\r\n`;
+    const out = await raw(r.port, head(r, 'Transfer-Encoding: chunked\r\n') + chunk(600) + chunk(600) + chunk(100) + '0\r\n\r\n');
+    expect(status(out)).toBe('503');
+    await new Promise((res) => setTimeout(res, 150));
+    expect(r.bodies).toEqual([]); // the app's body never ended
   });
 
   it('a body of any kind is the same bytes at the app as were sent (the counting does not touch the data) — binary, both ways of sending it', async () => {
