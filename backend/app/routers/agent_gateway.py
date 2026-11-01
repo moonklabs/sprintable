@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import random
 import re
@@ -102,6 +103,29 @@ _MAX_SSE_LIFETIME_SEC: float = 3900.0  # 3600s(GLCB) + 여유
 _AGENT_SSE_LIFESPAN_SEC: float = 300.0
 _AGENT_SSE_LIFESPAN_JITTER_SEC: float = 30.0  # herd 방지(#2095 지터와 동일 목적) — base 축소에
 # 비례해 60s → 30s(그대로 두면 300s 기준 최대 +20% 변동, browser #2128 정정과 동일 원칙).
+# story #4834 (AC4): a stream that ends because its LIFESPAN ran out is not a disconnect — the client reconnects at once (observed on dev: «offline» for 1–9 s every
+# ~5 min). Deleting the session row right then made every send in that gap read «this agent cannot be reached» (`agent_wake`: the sender saw «type this sentence in
+# the terminal» for an agent that was receiving). So a lifespan end does not delete the row: it STAMPS it to expire in this many seconds — `last_seen_at` is set so that
+# the freshness window the readers use (`_SESSION_FRESH_TTL`: agent_push_reach, agent_verify) runs out that many seconds from now. A connection that comes back inside
+# it has a new row of its own; one that does not reads as gone to every reader after it, and the next cleanup of that agent sweeps the stamped row (no task, no timer).
+# Redis presence OFF only (what dev and prod run); with it on a lifespan end is cleaned at once as before. Kept at most half of `_SESSION_FRESH_TTL`.
+_STAMP_MAX_SEC: float = 60.0  # the longest expiry a stamp may have: a stamped row's `connected_at` is then always older than `_SIBLING_LIFETIME_SEC`, which no real connection reaches (its cap is 3600 s)
+_SIBLING_LIFETIME_SEC: float = _MAX_SSE_LIFETIME_SEC - _STAMP_MAX_SEC  # a row older than this is a stamped (expiring) row, not a live connection: it never counts as «another live session»
+
+
+def _lifespan_end_grace_from_env(raw: "str | None") -> float:
+    """The expiry in seconds from `AGENT_SSE_LIFESPAN_END_GRACE_SEC`: unset/empty → 20; `0` = none (a lifespan end is cleaned at once, as before); a value that is not a
+    finite number ≥ 0 (a typo · `nan` · `inf` · a negative) falls back to 20 instead of failing the import of the whole router; a larger value is cut to `_STAMP_MAX_SEC`."""
+    if raw is None or not raw.strip():
+        return 20.0
+    try:
+        v = float(raw)
+    except ValueError:
+        return 20.0
+    return min(v, _STAMP_MAX_SEC) if math.isfinite(v) and v >= 0 else 20.0
+
+
+_LIFESPAN_END_GRACE_SEC: float = _lifespan_end_grace_from_env(os.getenv("AGENT_SSE_LIFESPAN_END_GRACE_SEC"))
 
 
 async def _mark_agent_online(agent_id: uuid.UUID, session_id: uuid.UUID) -> None:
@@ -131,7 +155,7 @@ async def _mark_agent_online(agent_id: uuid.UUID, session_id: uuid.UUID) -> None
 
 async def _mark_agent_disconnected(
     agent_id: uuid.UUID, session_id: uuid.UUID, org_id: str | None = None,
-    *, heartbeat_baseline: "datetime | None" = None,
+    *, heartbeat_baseline: "datetime | None" = None, expire_in: "float | None" = None,
 ) -> None:
     """49fed0a1 AC2/AC3: SSE 연결 종료 cleanup — 연결-도출 offline 강등.
 
@@ -146,10 +170,17 @@ async def _mark_agent_disconnected(
     다른 연결의 connect-time write(둘 다 agent_project_profiles.last_seen_at을 건드림, AC2
     무관하게 connect 시점엔 항상 씀 — 아래 참조)가 있었다는 뜻이라, 내 cleanup이 그보다 늦게
     도착한 stale order다(row-존재 체크만으론 못 잡는 TOCTOU — B의 세션 row insert가 아직 이
-    쿼리 시야에 안 들어온 좁은 창)."""
+    쿼리 시야에 안 들어온 좁은 창).
+
+    story #4834: `expire_in` (seconds) = a lifespan end. The session row is NOT deleted: it is stamped to expire in that many seconds (see
+    `_LIFESPAN_END_GRACE_SEC`) and left out of «another live session exists». Everything else — the sweep of dead rows, the presence demotion when no other session is
+    live — is as for a disconnect. Only with Redis presence OFF (the configuration dev and prod run): with it on, a lifespan end is cleaned at once exactly as before
+    (no deployment runs that way today; its readers judge by the online key, which this does not touch)."""
     now = datetime.now(timezone.utc)
     from app.core.config import settings as _settings
     _ac2 = bool(_settings.presence_online_redis_enabled) and bool(_settings.redis_url)
+    if expire_in is not None:
+        expire_in = min(expire_in, _SESSION_FRESH_TTL / 2)  # the freshness window is made shorter by the stamp: an expiry longer than half of it would be cut short (SSE_HEARTBEAT_TIMEOUT can lower it)
     try:
         async with async_session_factory() as db:
             if _ac2:
@@ -200,21 +231,31 @@ async def _mark_agent_disconnected(
             else:
                 # 기존 freshness 경로(30s틱 유지·flag off·무회귀).
                 fresh_cutoff = now - timedelta(seconds=_SESSION_FRESH_TTL)
+                # (a row of this very session whose ticks stopped more than the window ago is `_dead` too: it is deleted, not stamped — readers had already stopped reading it
+                # as live, and a stamp would bring it back to life for the expiry)
+                _dead = (AgentGatewaySession.agent_id == agent_id) & (AgentGatewaySession.last_seen_at < fresh_cutoff)
                 await db.execute(
-                    delete(AgentGatewaySession).where(
-                        (AgentGatewaySession.id == session_id)
-                        | (
-                            (AgentGatewaySession.agent_id == agent_id)
-                            & (AgentGatewaySession.last_seen_at < fresh_cutoff)
-                        )
-                    )
+                    delete(AgentGatewaySession).where(_dead if expire_in is not None else ((AgentGatewaySession.id == session_id) | _dead))
                 )
                 remaining = (await db.execute(
                     select(AgentGatewaySession.id).where(
                         AgentGatewaySession.agent_id == agent_id,
+                        AgentGatewaySession.id != session_id,  # (story #4834: a stamped row of this very session is not «another» one)
+                        AgentGatewaySession.connected_at >= now - timedelta(seconds=_SIBLING_LIFETIME_SEC),  # (…nor is the stamped row of an earlier session: it only waits to expire)
                         AgentGatewaySession.last_seen_at >= fresh_cutoff,
                     ).limit(1)
                 )).scalar_one_or_none()
+                if expire_in is not None:
+                    # story #4834: stamp this session's row so that the freshness readers (`last_seen_at` within `_SESSION_FRESH_TTL`: agent_push_reach, agent_verify) stop reading it
+                    # `expire_in` seconds from now; `connected_at` is set so far back that the row is never counted as «another live session» (`_SIBLING_LIFETIME_SEC`)
+                    await db.execute(
+                        update(AgentGatewaySession)
+                        .where(AgentGatewaySession.id == session_id)
+                        .values(
+                            last_seen_at=now - timedelta(seconds=max(_SESSION_FRESH_TTL - expire_in, 0.0)),
+                            connected_at=now - timedelta(seconds=max(_MAX_SSE_LIFETIME_SEC - expire_in, 0.0)),
+                        )
+                    )
             if remaining is None:
                 from app.services.agent_anchor_sync import sync_agent_profile_presence
                 await sync_agent_profile_presence(
@@ -804,6 +845,7 @@ async def agent_stream(
         """
         session_id = uuid.uuid4()
         _presence_wired = False
+        _lifespan_ended = False  # story #4834: the stream ends because its lifespan ran out (see _LIFESPAN_END_GRACE_SEC)
         _replay_done_at: float | None = None  # story 4788: when this connection's replay finished (None: it did not)
         try:
             # 49fed0a1 AC1: cap 통과 후 세션 등록 + presence online. SSE dial-out 에이전트는 MCP
@@ -969,7 +1011,7 @@ async def agent_stream(
                 long backlog (4543 r2: 2,399 rows) heard a new DM hours late. A batch is still at most `_BACKFILL_LIMIT` rows in
                 seq order; each batch rechecks access first (PO 14:35Z ②); `floor` keeps a seq from going out twice in this
                 pass. The cursor is still the client's ack only."""
-                nonlocal _batches_ended
+                nonlocal _batches_ended, _lifespan_ended
                 floor = after_seq
                 while True:
                     async with async_session_factory() as db:
@@ -1018,6 +1060,7 @@ async def agent_stream(
                     # the stream past it; the client connects again and goes on from its ack
                     if time.monotonic() >= _lifespan_deadline:
                         _batches_ended = True
+                        _lifespan_ended = True
                         yield "event: lifespan_reconnect\ndata: {}\n\n"
                         return
 
@@ -1061,6 +1104,7 @@ async def agent_stream(
                 # finally: 하나로 그대로 흘러간다(정상종료·이상종료·수명초과 전부 같은 정리
                 # 경로 — presence offline 강등·세션row 삭제 포함, #2161 CAS 원칙의 적용).
                 if time.monotonic() >= _lifespan_deadline:
+                    _lifespan_ended = True
                     yield "event: lifespan_reconnect\ndata: {}\n\n"
                     return
                 await _presence_tick_if_due()
@@ -1159,8 +1203,10 @@ async def agent_stream(
                     # 49fed0a1 AC2/AC3: 연결 종료 → 세션 행 삭제 + 마지막 세션이면 presence offline 강등.
                     # (presence 배선 성공한 연결만 — 세션 미생성 시 타 세션 presence 오염 방지.)
                     if _presence_wired:
+                        # story #4834: a lifespan end stamps its row to expire (no delete, no task); a real disconnect is cleaned at once, as before
                         await _mark_agent_disconnected(
                             agent_id, session_id, org_id_str, heartbeat_baseline=_heartbeat_baseline,
+                            expire_in=_LIFESPAN_END_GRACE_SEC if (_lifespan_ended and _LIFESPAN_END_GRACE_SEC > 0) else None,
                         )
                 except asyncio.CancelledError:
                     # the shutdown drain (`pg_pubsub.drain_background_tasks`, 5 s) cancelled an end that was still running: best effort — the engine is disposed right after (no connection is kept), and a session row
