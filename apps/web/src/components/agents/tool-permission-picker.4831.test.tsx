@@ -82,6 +82,20 @@ describe('ToolPermissionPicker — 바탕 Checkbox (story 4831 부품 교체)', 
     expect(box(agents.toolPermissions.selectAll).getAttribute('aria-checked')).toBe('false');
   });
 
+  it('«전체 선택» 행도 키보드로: 일부 선택(mixed)에서 스페이스는 전체 선택, 엔터는 아무 일 없음, 전부 선택에서 스페이스는 전체 해제', async () => {
+    await mount([NORMAL[0]!]);
+    const all = () => box(agents.toolPermissions.selectAll);
+    all().focus();
+    await press(all(), 'Enter');
+    expect(all().getAttribute('aria-checked')).toBe('mixed');
+    await press(all(), ' ');
+    expect(latest.filter((k) => NORMAL.includes(k)).sort()).toEqual([...NORMAL].sort());
+    expect(all().getAttribute('aria-checked')).toBe('true');
+    await press(all(), ' ');
+    expect(latest.filter((k) => NORMAL.includes(k))).toEqual([]);
+    expect(all().getAttribute('aria-checked')).toBe('false');
+  });
+
   it('그룹 행은 스페이스로 켜고 끈다(엔터로는 안 바뀐다)', async () => {
     await mount([NORMAL[0]!]);
     const key = NORMAL[1]!;
