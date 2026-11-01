@@ -86,7 +86,8 @@ function install(env = process.env, target = http.Server.prototype, options = {}
   function takeBody(req, res) {
     const headers = req.headers;
     let held = 0;
-    const release = () => { inflight -= held; held = 0; };
+    let done = false; // the response is over (or the connection closed): the bytes still arriving are nobody's to reserve any more
+    const release = () => { done = true; inflight -= held; held = 0; };
     const chunked = headers['transfer-encoding'] !== undefined;
     const declared = headers['content-length'] !== undefined ? Number(headers['content-length']) : 0;
     if (!chunked) {
@@ -102,7 +103,7 @@ function install(env = process.env, target = http.Server.prototype, options = {}
     const push = req.push;
     req.push = function countedPush(chunk, encoding) {
       if (cut) return true;
-      if (chunk && chunk.length) {
+      if (!done && chunk && chunk.length) {
         if (inflight + chunk.length > budget) {
           cut = true;
           if (!res.headersSent) { res.statusCode = 503; res.setHeader('Connection', 'close'); res.setHeader('Retry-After', '1'); res.end('Busy'); }

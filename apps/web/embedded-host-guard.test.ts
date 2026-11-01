@@ -23,6 +23,7 @@ async function rig(env: Record<string, string | undefined> = { SPRINTABLE_EMBEDD
   const bodies: number[] = []; // how many body bytes the app READ for each request (an app that reads the body, like the proxy that forwards it)
   const server = new GuardedServer((req, res) => {
     hits.push(`${req.method} ${req.url}`);
+    if (req.url === '/early') { res.statusCode = 404; res.end('early'); return; } // answers before the body is read (like Next does for a missing static file)
     let n = 0;
     req.on('data', (c: Buffer) => { n += c.length; });
     req.on('end', () => { bodies.push(n); res.statusCode = 200; res.end(`ok ${n}`); });
@@ -286,6 +287,20 @@ describe('the memory that request bodies in flight can take', () => {
     expect(status(out)).toBe('503');
     await new Promise((res) => setTimeout(res, 150));
     expect(r.bodies).toEqual([]); // the app's body never ended
+  });
+
+  it('a chunked body that goes on arriving AFTER the response is over reserves nothing more (the reservation was returned; the bytes still arriving are not counted into the budget for ever)', async () => {
+    const r = await rig({ SPRINTABLE_EMBEDDED: '1' }, true, { bodyBudget: BUDGET });
+    const chunk = (n: number) => `${n.toString(16)}\r\n${'c'.repeat(n)}\r\n`;
+    const s = net.connect(r.port, '127.0.0.1');
+    let out = '';
+    s.on('data', (d) => { out += d.toString(); });
+    s.write(`POST /early HTTP/1.1\r\nHost: 127.0.0.1:${r.port}\r\nTransfer-Encoding: chunked\r\n\r\n`);
+    await vi.waitFor(() => expect(out).toContain('404'));
+    for (let i = 0; i < 3; i++) { s.write(chunk(400)); await new Promise((res) => setTimeout(res, 30)); } // 1200 bytes in all, more than the whole budget
+    const after = await raw(r.port, head(r, 'Content-Length: 900\r\n') + 'a'.repeat(900));
+    s.destroy();
+    expect(after).toContain('ok 900'); // not refused: the late bytes did not stay in the counter
   });
 
   it('a body of any kind is the same bytes at the app as were sent (the counting does not touch the data) — binary, both ways of sending it', async () => {
