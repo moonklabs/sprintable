@@ -1208,7 +1208,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                       value={roleQuery}
                       onChange={(e) => setRoleQuery(e.target.value)}
                       placeholder={t('roleSearchPlaceholder')}
-                      className="pl-8"
+                      className="bg-card pl-8 dark:bg-card"
                     />
                   </div>
                   {/* 다음 버튼이 긴 리스트 하단에 묻히지 않도록 리스트 자체를 bounded-height 스크롤로 격리 —
@@ -1351,6 +1351,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                       value={equipName}
                       onChange={(e) => setEquipName(e.target.value)}
                       placeholder={tSettings('agentNamePlaceholder')}
+                      className="bg-card dark:bg-card"
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -1358,6 +1359,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                     <Select
                       value={equipRole}
                       onChange={(e) => setEquipRole(e.target.value as 'member' | 'admin')}
+                      className="bg-card dark:bg-card"
                     >
                       <option value="member">{tSettings('agentRoleMember')}</option>
                       <option value="admin">{tSettings('agentRoleAdmin')}</option>
@@ -1425,9 +1427,13 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                       value={newAgentName}
                       onChange={(e) => setNewAgentName(e.target.value)}
                       placeholder={suggestedAgentName || t('agentNamePlaceholder')}
+                      // 이 칸은 info-tint 조상 안이라 불투명 면(bg-card)이 흐린 안내 글자를 받친다(dark:도 불투명 — 부품의 dark:bg-input/30이 덮지 않게).
+                      // placeholder:text-muted-foreground는 부품이 이미 내지만, 정적 가드(verify-no-muted-on-tint)는 부품 안의 클래스를 못 봐서 불투명 경계를 읽도록 여기에도 적는다.
+                      className="bg-card placeholder:text-muted-foreground dark:bg-card"
                     />
                   ) : (
                     <Select
+                      className="bg-card dark:bg-card"
                       value={selectedExistingAgentId}
                       onChange={(e) => {
                         setSelectedExistingAgentId(e.target.value);

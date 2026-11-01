@@ -571,11 +571,11 @@ describe('scanContent — 실 파일 양성대조(recruiter-client.tsx, 불투�
   });
 
   it('bg-card를 걷으면(불투명 경계 소실) 조상 info-tint가 다시 비쳐 RED', () => {
-    // value={newAgentName}로 시작하는 입력은 파일에 하나뿐(1112행) — 그 className까지
-    // 통째로 타깃 삼아 결정적으로 그 입력 하나만 고른다(다른 bg-card 입력과 안 섞임).
-    const target = "value={newAgentName}\n                      onChange={(e) => setNewAgentName(e.target.value)}\n                      placeholder={suggestedAgentName || t('agentNamePlaceholder')}\n                      className=\"w-full rounded-lg border border-border bg-card px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary\"";
-    expect(original.includes(target)).toBe(true);
-    const mutated = original.replace(target, target.replace('bg-card ', ''));
+    // 이 className 문자열은 파일에 하나뿐(신규 에이전트 이름 입력) — 결정적으로 그 입력 하나만 고른다.
+    // story 4831: 이 입력은 바탕 Input 부품이 됐다 — 불투명 면은 className(bg-card dark:bg-card)으로 유지하고, 정적 가드가 읽도록 placeholder 클래스도 적혀 있다.
+    const target = "className=\"bg-card placeholder:text-muted-foreground dark:bg-card\"";
+    expect(original.split(target).length - 1).toBe(1);
+    const mutated = original.replace(target, 'className="placeholder:text-muted-foreground"');
     expect(mutated).not.toBe(original);
 
     const before = scanContent(original, REL_FILE);
