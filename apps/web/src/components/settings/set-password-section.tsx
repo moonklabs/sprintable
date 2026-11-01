@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Check, Circle } from 'lucide-react';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
@@ -32,6 +33,7 @@ export interface SetPasswordSectionProps {
 
 export function SetPasswordSection({ onLoadError }: SetPasswordSectionProps = {}) {
   const t = useTranslations('settings');
+  const tCommon = useTranslations('common');
   const [hasPassword, setHasPassword] = useState<boolean | null>(null);
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -46,6 +48,9 @@ export function SetPasswordSection({ onLoadError }: SetPasswordSectionProps = {}
   // 그 안내로 치환한다 — has_password는 그 클릭이 있기 전까진 여전히 false라 페이지를
   // 새로고침하면 폼이 다시 보인다(forgot-password 페이지와 동일 관례, 별도 영속 불필요).
   const [requested, setRequested] = useState(false);
+  // story 4825 AC6 — 맥 앱의 자체 서버엔 보낼 메일이 없다: BFF가 비밀번호를 그 자리에서 정하고(`data.set`) 모든 세션이 끝났다 → 메일 안내 대신
+  // 「설정됐어요」와 로그인으로 가는 길을 보인다(로그인 문구는 기존 키 재사용).
+  const [done, setDone] = useState(false);
   // 유나 design:changes ② — 「메일 안 왔나요? 재발송」. resending은 초기 submit(busy)과 별개
   // 로 관리(요청 화면 자체는 이미 안 보이니 버튼 자체 disable만 필요).
   const [resending, setResending] = useState(false);
@@ -88,7 +93,7 @@ export function SetPasswordSection({ onLoadError }: SetPasswordSectionProps = {}
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ new_password: password }),
       });
-      const json = await res.json() as { data?: { delivered?: boolean }; error?: { code?: string; message: string } };
+      const json = await res.json() as { data?: { delivered?: boolean; set?: boolean }; error?: { code?: string; message: string } };
       if (!res.ok) {
         // story #2485 — code로 분기(backend auth.py request_set_password()가 _err()로
         // 직접 발급하는 안정 값). 알려지지 않은 code만 안전 폴백.
@@ -99,6 +104,10 @@ export function SetPasswordSection({ onLoadError }: SetPasswordSectionProps = {}
         } else {
           setMessage({ type: 'error', text: t('setPasswordErrorGeneric') });
         }
+        return;
+      }
+      if (json.data?.set === true) {
+        setDone(true);
         return;
       }
       // story #ab2a503f — delivered:false를 "완료"로 거짓 보고하지 않는다(BE의 정직 응답
@@ -144,7 +153,16 @@ export function SetPasswordSection({ onLoadError }: SetPasswordSectionProps = {}
         </div>
       </SectionCardHeader>
       <SectionCardBody className="space-y-4">
-        {requested ? (
+        {done ? (
+          <div className="space-y-2">
+            <p role="status" aria-live="polite" aria-atomic="true" className="text-sm text-success">
+              {t('setPasswordSuccess')}
+            </p>
+            <Link href="/login" className="text-sm font-medium text-brand-text hover:text-brand-text/85">
+              {tCommon('goToLogin')}
+            </Link>
+          </div>
+        ) : requested ? (
           <div className="space-y-2">
             <p role="status" aria-live="polite" aria-atomic="true" className="text-sm text-success">
               {t('setPasswordRequestSuccessDelivered')}

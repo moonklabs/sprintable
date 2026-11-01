@@ -235,6 +235,37 @@ describe('SetPasswordSection — 재인증 게이트: request 성공은 "메일�
   });
 });
 
+// story 4825 AC6 — 맥 앱의 자체 서버: BFF가 비밀번호를 그 자리에서 정하고 `{ data: { set: true } }`를 준다. 메일 안내가 아니라 「설정됐어요」 +
+// 로그인으로 가는 길이 뜬다(재발송 버튼 없음 — 보낸 메일이 없다).
+describe('SetPasswordSection — 로컬 모드: data.set=true는 메일함 확인이 아니라 「설정됐어요」(story 4825 AC6)', () => {
+  it('set:true — 성공 문구 + 로그인 링크, 메일 안내·재발송·폼은 없다', async () => {
+    let requestCallCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { has_password: false } }) };
+      if (url === '/api/auth/set-password/request') {
+        requestCallCount += 1;
+        return { ok: true, json: async () => ({ data: { set: true } }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => { root.render(wrap(<SetPasswordSection />)); });
+    await flush();
+    const [pw, confirm] = Array.from(container.querySelectorAll('input[type="password"]')) as HTMLInputElement[];
+    await act(async () => { setNativeValue(pw, 'Str0ng!Pass'); });
+    await act(async () => { setNativeValue(confirm, 'Str0ng!Pass'); });
+    await act(async () => { container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+
+    expect(requestCallCount).toBe(1);
+    expect(container.textContent).toContain(koMessages.settings.setPasswordSuccess);
+    expect(container.textContent).not.toContain('확인 이메일을 보냈어요');
+    expect(container.textContent).not.toContain('재발송');
+    expect(container.querySelector('input[type="password"]')).toBeNull();
+    const link = container.querySelector('a[href="/login"]');
+    expect(link?.textContent).toBe(koMessages.common.goToLogin);
+  });
+});
+
 // story #3772 CHANGES(페드루 PO 픽셀 지적 2026-09-10 — my-profile-section.tsx에서 실측된
 // "실패 배너 아래 로딩 문구 잔존" 클래스, 네 섹션 전부 같은 검사) — 이 섹션은 이미
 // `hasPassword !== false`(null=로딩·실패 공통) → return null이라 회귀가 아니지만, 네

@@ -472,6 +472,225 @@ async def test_14_only_an_organization_the_account_owns_counts_as_its_own(embedd
     assert owned[0] == 1
 
 
+SET_URL = "/api/v2/auth/local-set-password"
+GOOD_PW = "Aa1!local-owner-pw"
+
+
+async def _owner_session(c) -> dict:
+    return (await c.post(URL, headers=_h())).json()["data"]
+
+
+def _bearer(tokens: dict) -> dict:
+    return {"Authorization": f"Bearer {tokens['access_token']}"}
+
+
+async def _owner_row():
+    return await _sql(f"SELECT id, hashed_password, password_set_at FROM users WHERE email = '{OWNER_EMAIL}'", fetch="one")
+
+
+async def test_20_the_owner_sets_the_first_password_with_no_mail_and_every_session_ends(embedded, caplog, monkeypatch):
+    """story 4825 AC6 — a signed-in owner chooses a password on the spot: no token, no link, no e-mail; all sessions end; the password then works"""
+    import logging
+
+    from httpx import ASGITransport, AsyncClient
+
+    import app.services.email as email_service
+
+    def _no_mail(*a, **k):
+        raise AssertionError("no e-mail may be sent on this path")
+
+    monkeypatch.setattr(email_service, "send_email", _no_mail)
+    caplog.set_level(logging.DEBUG)
+    async with _client(embedded) as c:
+        tokens = await _owner_session(c)
+        r = await c.post(SET_URL, headers=_bearer(tokens), json={"new_password": GOOD_PW})
+    assert r.status_code == 200, r.text
+    row = await _owner_row()
+    assert row.hashed_password and row.hashed_password != GOOD_PW and row.password_set_at is not None
+    live = (await _sql(f"SELECT count(*) FROM refresh_tokens WHERE user_id = '{row.id}' AND revoked_at IS NULL", fetch="one"))[0]
+    assert live == 0  # every session of the person ended
+    audit = await _sql(f"SELECT detail FROM login_audit_logs WHERE email = '{OWNER_EMAIL}' AND event_type = 'password_set'", fetch="all")
+    assert [a.detail for a in audit] == ["local_set_password"]
+    async with AsyncClient(transport=ASGITransport(app=real_app, raise_app_exceptions=False), base_url="http://test") as rc:
+        login = await rc.post("/api/v2/auth/token", json={"email": OWNER_EMAIL, "password": GOOD_PW})
+        assert login.status_code == 200 and login.json()["data"]["access_token"], login.text
+        # the session cannot be renewed: its refresh token is dead (the access token itself is stateless and runs out on its own, as after a change-password)
+        renew = await rc.post("/api/v2/auth/refresh", json={"refresh_token": tokens["refresh_token"]})
+        assert renew.status_code == 401, renew.text
+    assert GOOD_PW not in caplog.text and row.hashed_password not in caplog.text and SECRET not in caplog.text
+    assert "token=" not in caplog.text
+
+
+async def test_21_every_other_state_is_refused_and_the_password_stays_unset(embedded, monkeypatch):
+    from httpx import ASGITransport, AsyncClient
+
+    import app.routers.auth as auth_router
+    from app.core.rate_limit import limiter
+
+    other = f"t4825-other-{uuid.uuid4().hex[:8]}@example.com"
+    async with _client(embedded) as c:
+        tokens = await _owner_session(c)
+        uid = (await _owner_row()).id
+        # no session / a bad token
+        assert (await c.post(SET_URL, json={"new_password": GOOD_PW})).status_code == 401
+        assert (await c.post(SET_URL, headers={"Authorization": "Bearer nope"}, json={"new_password": GOOD_PW})).status_code == 401
+        # the password rules of the mailed flow
+        for weak in ("sh1A!", "alllowercaseletters", "NOLOWERCASE12345"):
+            assert (await c.post(SET_URL, headers=_bearer(tokens), json={"new_password": weak})).status_code == 422, weak
+        # an API-key session (the same predicate the mailed flow uses)
+        with monkeypatch.context() as m:  # (not monkeypatch.undo(): that would also undo the `embedded` fixture's switch)
+            m.setattr(auth_router, "_requires_interactive_session", lambda auth: True)
+            r = await c.post(SET_URL, headers=_bearer(tokens), json={"new_password": GOOD_PW})
+        assert r.status_code == 403 and r.json()["error"]["code"] == "REQUIRES_INTERACTIVE_SESSION", r.text
+        # a second factor on the account
+        await _sql(f"UPDATE users SET totp_enabled = true WHERE id = '{uid}'")
+        r = await c.post(SET_URL, headers=_bearer(tokens), json={"new_password": GOOD_PW})
+        assert r.status_code == 409 and r.json()["error"]["code"] == "TOTP_ENABLED", r.text
+        await _sql(f"UPDATE users SET totp_enabled = false WHERE id = '{uid}'")
+        # the account already has a password
+        await _sql(f"UPDATE users SET hashed_password = '$2b$12$alreadyset' WHERE id = '{uid}'")
+        r = await c.post(SET_URL, headers=_bearer(tokens), json={"new_password": GOOD_PW})
+        assert r.status_code == 400 and r.json()["error"]["code"] == "ALREADY_HAS_PASSWORD", r.text
+        await _sql(f"UPDATE users SET hashed_password = '' WHERE id = '{uid}'")
+        # someone who is not the owner (a plain sign-up on this install)
+        try:
+            async with AsyncClient(transport=ASGITransport(app=real_app, raise_app_exceptions=False), base_url="http://test") as rc:
+                limiter.reset()
+                reg = await rc.post("/api/v2/auth/register", json={"email": other, "password": "Aa1!aaaaaaaaaa", "display_name": "Other", "tos_accepted": True})
+                assert reg.status_code == 201, reg.text
+                login = await rc.post("/api/v2/auth/token", json={"email": other, "password": "Aa1!aaaaaaaaaa"})
+                theirs = login.json()["data"]
+            r = await c.post(SET_URL, headers=_bearer(theirs), json={"new_password": GOOD_PW})
+            assert r.status_code == 403 and r.json()["error"]["code"] == "NOT_LOCAL_OWNER", r.text
+        finally:
+            await _sql(
+                f"DELETE FROM refresh_tokens WHERE user_id IN (SELECT id FROM users WHERE email = '{other}')",
+                f"DELETE FROM login_audit_logs WHERE email = '{other}'",
+                f"DELETE FROM users WHERE email = '{other}'",
+            )
+    assert (await _owner_row()).hashed_password == ""  # nothing above wrote a password
+
+
+async def test_21b_a_password_that_lands_between_the_look_and_the_write_is_not_overwritten(embedded, monkeypatch):
+    """the early look found no password; another call writes one before this one does (made deterministic: it lands as this call takes the person's session lock).
+    The write itself is conditional on there still being none, so this call is refused and the other password stays"""
+    import app.routers.auth as auth_router
+
+    other_hash = "$2b$12$writtenbyanothercall"
+    original = auth_router._lock_person_sessions
+
+    async def _lock_after_a_rival_write(session, user_id, **kw):
+        await _sql(f"UPDATE users SET hashed_password = '{other_hash}' WHERE email = '{OWNER_EMAIL}'")
+        return await original(session, user_id, **kw)
+
+    async with _client(embedded) as c:
+        tokens = await _owner_session(c)
+        monkeypatch.setattr(auth_router, "_lock_person_sessions", _lock_after_a_rival_write)
+        r = await c.post(SET_URL, headers=_bearer(tokens), json={"new_password": GOOD_PW})
+    assert r.status_code == 400 and r.json()["error"]["code"] == "ALREADY_HAS_PASSWORD", r.text
+    assert (await _owner_row()).hashed_password == other_hash  # the rival's password stands, nothing of this call was written
+
+
+async def test_22_the_route_exists_only_on_an_embedded_install(monkeypatch):
+    from fastapi import FastAPI
+
+    from app.core.config import settings
+    from app.routers import local_auth
+
+    assert SET_URL not in {getattr(r, "path", None) for r in real_app.routes}  # not on the hosted app this process builds
+    monkeypatch.delenv("SPRINTABLE_EMBEDDED", raising=False)
+    monkeypatch.setattr(settings, "local_bootstrap_secret", SECRET)
+    app = FastAPI()
+    assert local_auth.register_local_auth_routes(app) is False
+    async with _client(app) as c:
+        assert (await c.post(SET_URL, json={"new_password": GOOD_PW})).status_code == 404
+
+
+async def test_22b_a_miswired_mount_with_the_switch_off_still_refuses_to_set_a_password(embedded, monkeypatch):
+    """the route sits on an app only by a wrong wiring (included directly): the handler's own check refuses even a valid owner session, and no password is written"""
+    from fastapi import FastAPI
+
+    from app.core.rate_limit import limiter
+    from app.routers import local_auth
+
+    async with _client(embedded) as c:
+        tokens = await _owner_session(c)
+    monkeypatch.delenv("SPRINTABLE_EMBEDDED", raising=False)
+    bare = FastAPI()
+    bare.state.limiter = limiter
+    bare.include_router(local_auth.router)
+    async with _client(bare) as c:
+        r = await c.post(SET_URL, headers=_bearer(tokens), json={"new_password": GOOD_PW})
+    assert r.status_code == 403, r.text
+    assert (await _owner_row()).hashed_password == ""
+
+
+async def test_23_on_an_embedded_install_the_mailed_request_is_closed_before_any_token_exists(embedded, caplog, monkeypatch):
+    import logging
+
+    from httpx import ASGITransport, AsyncClient
+
+    import app.routers.auth as auth_router
+    import app.services.email as email_service
+
+    def _no_mail(*a, **k):
+        raise AssertionError("no e-mail may be sent")
+
+    monkeypatch.setattr(email_service, "send_email", _no_mail)
+    monkeypatch.setattr(auth_router, "create_set_password_confirm_token", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no token may be made")))
+    monkeypatch.setattr(auth_router.resend_verification_limiter, "enabled", False)
+    caplog.set_level(logging.DEBUG)
+    async with _client(embedded) as c:
+        tokens = await _owner_session(c)
+    async with AsyncClient(transport=ASGITransport(app=real_app, raise_app_exceptions=False), base_url="http://test") as rc:
+        r = await rc.post("/api/v2/auth/set-password/request", headers=_bearer(tokens), json={"new_password": GOOD_PW})
+    assert r.status_code == 409 and r.json()["error"]["code"] == "EMAIL_NOT_CONFIGURED", r.text
+    assert "token=" not in caplog.text and "set-password/confirm" not in caplog.text
+
+
+async def test_24_the_server_log_of_an_embedded_install_carries_no_verification_link_hosted_logging_is_unchanged(embedded, caplog, monkeypatch):
+    """register + resend-verification: the link is a token. Embedded: a line with the user id only. Not embedded: the existing console-fallback line (the operator's use)"""
+    import logging
+
+    from httpx import ASGITransport, AsyncClient
+
+    import app.routers.auth as auth_router
+    from app.core.rate_limit import limiter
+
+    monkeypatch.delenv("RESEND_API_KEY", raising=False)
+    monkeypatch.delenv("EMAIL_SMTP_HOST", raising=False)
+    monkeypatch.setattr(auth_router.resend_verification_limiter, "enabled", False)
+    emails = [f"t4825-log-{uuid.uuid4().hex[:8]}@example.com" for _ in range(2)]
+
+    async def _round(email: str) -> str:
+        caplog.clear()
+        caplog.set_level(logging.DEBUG)
+        limiter.reset()
+        async with AsyncClient(transport=ASGITransport(app=real_app, raise_app_exceptions=False), base_url="http://test") as rc:
+            reg = await rc.post("/api/v2/auth/register", json={"email": email, "password": "Aa1!aaaaaaaaaa", "display_name": "Log", "tos_accepted": True})
+            assert reg.status_code == 201, reg.text
+            login = await rc.post("/api/v2/auth/token", json={"email": email, "password": "Aa1!aaaaaaaaaa"})
+            hdr = _bearer(login.json()["data"])
+            await rc.post("/api/v2/auth/resend-verification", headers=hdr)
+        return caplog.text
+
+    try:
+        embedded_log = await _round(emails[0])  # the `embedded` fixture: the switch is on
+        assert "미발송" not in embedded_log or "verify-email" not in embedded_log
+        assert "verify-email" not in embedded_log and "token=" not in embedded_log, embedded_log
+        assert embedded_log.count("verification e-mail not sent") == 2  # register + resend-verification, user id only
+        monkeypatch.delenv("SPRINTABLE_EMBEDDED", raising=False)  # hosted
+        hosted_log = await _round(emails[1])
+        assert hosted_log.count("verify-email?token=") == 2, hosted_log  # unchanged: the operator's console fallback
+    finally:
+        for email in emails:
+            await _sql(
+                f"DELETE FROM refresh_tokens WHERE user_id IN (SELECT id FROM users WHERE email = '{email}')",
+                f"DELETE FROM login_audit_logs WHERE email = '{email}'",
+                f"DELETE FROM users WHERE email = '{email}'",
+            )
+
+
 async def test_08_the_real_app_has_no_such_route_unless_embedded():
     """the app main.py builds in this process (no SPRINTABLE_EMBEDDED in the test environment) must not serve the path"""
     if os.environ.get("SPRINTABLE_EMBEDDED"):
