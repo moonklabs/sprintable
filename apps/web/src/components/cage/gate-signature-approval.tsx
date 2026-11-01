@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { CheckCircle, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Textarea } from '@/components/ui/textarea';
 import { GateEvidence } from '@/components/cage/gate-evidence';
 import type { GateItem } from '@/components/kanban/types';
 import { sigApproveAndSignLabelKey } from '@/lib/newsletter-gate-approve-label';
@@ -103,12 +105,7 @@ export function GateSignatureApproval({
         <p className="mb-2 text-editorial-meta font-semibold text-muted-foreground">{t('sigEvidenceLabel')}</p>
         <GateEvidence gate={gate} />
         <label className="mt-3 flex min-h-12 items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm">
-          <input
-            type="checkbox"
-            checked={evidenceViewed}
-            onChange={(e) => setEvidenceViewed(e.target.checked)}
-            className="size-4 shrink-0"
-          />
+          <Checkbox checked={evidenceViewed} onCheckedChange={(checked) => setEvidenceViewed(checked)} />
           {t('sigEvidenceViewedLabel')}
         </label>
       </div>
@@ -117,13 +114,13 @@ export function GateSignatureApproval({
         <label className="mb-1 block text-editorial-meta font-semibold text-muted-foreground" htmlFor="gate-sig-reason">
           {t('sigReasonLabel')}
         </label>
-        <textarea
+        <Textarea
           id="gate-sig-reason"
           rows={3}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           placeholder={t('sigReasonPlaceholder')}
-          className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          className="resize-none"
         />
       </div>
 

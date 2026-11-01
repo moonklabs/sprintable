@@ -78,7 +78,7 @@ describe('GateSignatureApproval — 낱말 하나 «반려»(story #4558)', () =
     expect(container.textContent).not.toContain(ko.sigConsequenceNote);
     expect(btn(ko.sigReject)!.className).toContain('bg-destructive');
     // 경계: 근거 확인 체크 · 사유 칸은 두 모드 같다
-    expect(container.querySelector('input[type="checkbox"]')).toBeTruthy();
+    expect(container.querySelector('[role="checkbox"]')).toBeTruthy();
     expect(container.querySelector('#gate-sig-reason')).toBeTruthy();
   });
 

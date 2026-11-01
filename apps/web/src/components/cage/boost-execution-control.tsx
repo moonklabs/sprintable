@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
@@ -807,9 +808,9 @@ export function BoostExecutionControl({
             ) : null}
             {/* the same two steps as the post screen's needs_check retry: the confirm button stays locked until checked */}
             <label className="flex items-center gap-2 text-sm text-foreground">
-              <input
-                type="checkbox" checked={needsCheckConfirmed}
-                onChange={(e) => setNeedsCheckConfirmed(e.target.checked)}
+              <Checkbox
+                checked={needsCheckConfirmed}
+                onCheckedChange={(checked) => setNeedsCheckConfirmed(checked)}
                 data-testid="boost-needs-check-confirm-checklist"
               />
               {outcomeUnknown ? t('boostNeedsCheckConfirmNoCampaign') : t('boostNeedsCheckConfirmChecked')}

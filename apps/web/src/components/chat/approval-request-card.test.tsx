@@ -1053,7 +1053,7 @@ describe('ApprovalRequestCard — 레시피 발행 게이트 본 초안 버전 (
     expect(container.querySelector('[data-testid="linked-site-draft"]')?.textContent).toContain('제목 v1');
     expect(bodies).toHaveLength(0);
 
-    await act(async () => { (container.querySelector('input[type="checkbox"]') as HTMLInputElement).click(); });
+    await act(async () => { (container.querySelector('[role="checkbox"]') as HTMLElement).click(); });
     const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;

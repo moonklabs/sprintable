@@ -434,7 +434,7 @@ describe('GateDetailPage — transition 실패 사유 노출 (story #2500)', () 
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
     // SHA A 열람: 체크+사유 입력 → 서명 버튼이 활성화됨을 먼저 확인(사전조건).
-    const checkbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    const checkbox = container.querySelector('[role="checkbox"]') as HTMLElement;
     await act(async () => { checkbox.click(); });
     const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
     await act(async () => {
@@ -450,8 +450,8 @@ describe('GateDetailPage — transition 실패 사유 노출 (story #2500)', () 
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
     expect(gateFetchCount).toBe(2);
-    const checkboxAfter = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
-    expect(checkboxAfter.checked).toBe(false); // remount로 evidenceViewed 리셋 확認.
+    const checkboxAfter = container.querySelector('[role="checkbox"]') as HTMLElement;
+    expect(checkboxAfter.getAttribute('aria-checked')).toBe('false'); // remount로 evidenceViewed 리셋 확認.
     signBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.sigApproveAndSign));
     expect(signBtn?.disabled).toBe(true); // canSign=false — 새 SHA B를 실제로 다시 봐야만 재활성화.
   });
@@ -495,7 +495,7 @@ describe('GateDetailPage — 본 초안 버전 대조 (story #4190)', () => {
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
     expect(container.querySelector('[data-testid="linked-site-draft"]')?.textContent).toContain('블로그 제목 v1');
-    const checkbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    const checkbox = container.querySelector('[role="checkbox"]') as HTMLElement;
     await act(async () => { checkbox.click(); });
     const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
     await act(async () => {
@@ -512,7 +512,7 @@ describe('GateDetailPage — 본 초안 버전 대조 (story #4190)', () => {
     expect(gateFetchCount).toBe(2);
     expect(container.querySelector('[data-testid="linked-site-draft"]')?.textContent).toContain('블로그 제목 v2');
     expect(container.querySelector('[data-testid="linked-draft-version"]')?.textContent).toContain('v2');
-    expect((container.querySelector('input[type="checkbox"]') as HTMLInputElement).checked).toBe(false);
+    expect((container.querySelector('[role="checkbox"]') as HTMLElement).getAttribute('aria-checked')).toBe('false');
   });
 });
 
@@ -620,7 +620,7 @@ describe('GateDetailPage — evidence_viewed 서버 계약 (story #2027 AC2)', (
   it('고위험(서명 플로우) 승인 — 근거 열람 체크 + 사유 입력 후 클릭하면 evidence_viewed:true가 실린다', async () => {
     const calls = await mountCapturingTransition(gate({ can_approve: true, risk_grade: 'high' }));
 
-    const checkbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    const checkbox = container.querySelector('[role="checkbox"]') as HTMLElement;
     const textarea = container.querySelector('#gate-sig-reason') as HTMLTextAreaElement;
     expect(checkbox).toBeTruthy();
     expect(textarea).toBeTruthy();
@@ -884,9 +884,9 @@ describe('GateDetailPage — 실시간 재조회는 로딩을 안 켠다(story #
     await act(async () => { root.render(wrap(<GateDetailPage />, TopBarProvider)); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
-    const radios = container.querySelectorAll('input[type="radio"]');
-    await act(async () => { (radios[1] as HTMLInputElement).click(); });
-    expect((container.querySelectorAll('input[type="radio"]')[1] as HTMLInputElement).checked).toBe(true);
+    const radios = container.querySelectorAll('[role="radio"]');
+    await act(async () => { (radios[1] as HTMLElement).click(); });
+    expect((container.querySelectorAll('[role="radio"]')[1] as HTMLElement).getAttribute('aria-checked')).toBe('true');
 
     const muxCall = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_delegated');
     const handler = muxCall![1] as (raw: string, eventId?: string) => void;
@@ -894,7 +894,7 @@ describe('GateDetailPage — 실시간 재조회는 로딩을 안 켠다(story #
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
     expect(call).toBe(2); // 재조회는 실제로 일어났다(회귀 아님).
-    expect((container.querySelectorAll('input[type="radio"]')[1] as HTMLInputElement).checked).toBe(true); // 선택은 그대로.
+    expect((container.querySelectorAll('[role="radio"]')[1] as HTMLElement).getAttribute('aria-checked')).toBe('true'); // 선택은 그대로.
   });
 
   it('AC1 — 첫 로드(id 변경 포함)는 여전히 «불러오는 중»을 보여준다(첫 로드 회귀 방지)', async () => {
@@ -976,16 +976,16 @@ describe('GateDetailPage — story #3113 결정 게이트(agent_decision_request
     expect(approveBtn.disabled).toBe(true);
     expect(container.textContent).toContain(koMessages.cage.decisionSelectHint);
 
-    const radios = container.querySelectorAll('input[type="radio"]');
+    const radios = container.querySelectorAll('[role="radio"]');
     expect(radios).toHaveLength(3);
-    await act(async () => { (radios[0] as HTMLInputElement).click(); });
+    await act(async () => { (radios[0] as HTMLElement).click(); });
     expect(approveBtn.disabled).toBe(false);
   });
 
   it('AC3 — 승인 시 선택안이 note로 전송·영구 기록된다(resolution_note)', async () => {
     const calls = await mountCapturingDecisionTransition(decisionGate());
-    const radios = container.querySelectorAll('input[type="radio"]');
-    await act(async () => { (radios[2] as HTMLInputElement).click(); });
+    const radios = container.querySelectorAll('[role="radio"]');
+    await act(async () => { (radios[2] as HTMLElement).click(); });
 
     const approveBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
     await act(async () => { approveBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
@@ -1277,7 +1277,7 @@ describe('GateDetailPage — 2열+sticky 레이아웃(story #4121)', () => {
     const actionCol = container.querySelector('[data-testid="gate-detail-action-column"]');
     expect(actionCol?.className).toContain('lg:sticky');
     // 서명 플로우는 evidenceViewed 체크박스가 우 열 안에 있어야 한다(액션 콘텐츠가 실제로 거기).
-    expect(actionCol?.querySelector('input[type="checkbox"]')).toBeTruthy();
+    expect(actionCol?.querySelector('[role="checkbox"]')).toBeTruthy();
   });
 
   it('우 열이 빌 자리(무권한, can_approve=false)는 2열 클래스 없이 단일열 그대로다(회귀 0)', async () => {

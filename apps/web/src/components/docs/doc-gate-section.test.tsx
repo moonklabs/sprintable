@@ -243,7 +243,7 @@ describe('DocGateSection — high-risk(risk_grade=high) 승인은 서명 플로�
     // 플로우로 정확히 분기됐다는 증거 — 단순히 "클릭해도 안 터진다"만으론 부족).
     // Dialog(base-ui)는 container 밖 document.body로 portal된다(approvals-queue.tsx의
     // 서명 Dialog와 동일 구조 — gates/[id]/page.test.tsx의 discuss dialog 케이스 참조).
-    const checkbox = document.body.querySelector('[data-slot="dialog-content"] input[type="checkbox"]');
+    const checkbox = document.body.querySelector('[data-slot="dialog-content"] [role="checkbox"]');
     const textarea = document.body.querySelector('[data-slot="dialog-content"] #gate-sig-reason');
     expect(checkbox).toBeTruthy();
     expect(textarea).toBeTruthy();
@@ -258,7 +258,7 @@ describe('DocGateSection — high-risk(risk_grade=high) 승인은 서명 플로�
       approveBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    const checkbox = document.body.querySelector('[data-slot="dialog-content"] input[type="checkbox"]') as HTMLInputElement;
+    const checkbox = document.body.querySelector('[data-slot="dialog-content"] [role="checkbox"]') as HTMLElement;
     const textarea = document.body.querySelector('[data-slot="dialog-content"] #gate-sig-reason') as HTMLTextAreaElement;
 
     await act(async () => {
