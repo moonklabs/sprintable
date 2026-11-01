@@ -644,7 +644,9 @@ class Settings(BaseSettings):
         import os
         if os.environ.get("K_SERVICE"):
             return False
-        if os.environ.get("SPRINTABLE_EMBEDDED", "").strip().lower() not in {"1", "true", "yes"}:
+        # exactly "1" — the value the desktop app's supervisor sets and the web server's own check reads (a looser value here would switch on the backend's
+        # route and guard while the web server's Host refusal stayed off)
+        if os.environ.get("SPRINTABLE_EMBEDDED", "").strip() != "1":
             return False
         return len(self.local_bootstrap_secret) >= 32
 

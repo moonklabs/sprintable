@@ -237,7 +237,7 @@ def assert_local_bootstrap_config() -> None:
     never on Cloud Run. A hosted process that carries either variable — alone or half-configured — refuses to start."""
     import os
 
-    flag = os.environ.get("SPRINTABLE_EMBEDDED", "").strip().lower() in {"1", "true", "yes"}
+    flag = os.environ.get("SPRINTABLE_EMBEDDED", "").strip() == "1"  # exactly "1", as `settings.is_embedded` and the web server read it
     secret = settings.local_bootstrap_secret
     if not flag:
         if secret:

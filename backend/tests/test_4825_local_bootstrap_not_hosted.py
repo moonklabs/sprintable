@@ -112,7 +112,9 @@ def test_the_vm_renderer_refuses_both_names() -> None:
         ({"SPRINTABLE_EMBEDDED": "1"}, "s" * 31, False),  # too short
         ({"SPRINTABLE_EMBEDDED": "0"}, "s" * 40, False),
         ({"SPRINTABLE_EMBEDDED": "1"}, "s" * 32, True),
-        ({"SPRINTABLE_EMBEDDED": "true"}, "s" * 40, True),
+        ({"SPRINTABLE_EMBEDDED": "true"}, "s" * 40, False),  # only "1": the web server reads exactly that, so no looser spelling may switch the backend on
+        ({"SPRINTABLE_EMBEDDED": "yes"}, "s" * 40, False),
+        ({"SPRINTABLE_EMBEDDED": " 1 "}, "s" * 40, True),  # surrounding blanks are trimmed on both sides
         ({"SPRINTABLE_EMBEDDED": "1", "K_SERVICE": "backend-prod"}, "s" * 40, False),  # Cloud Run always wins
     ],
 )
@@ -135,6 +137,7 @@ def test_is_embedded_truth_table(monkeypatch, env, secret, expected) -> None:
         ({"SPRINTABLE_EMBEDDED": "1"}, "", True),
         ({"SPRINTABLE_EMBEDDED": "1"}, "s" * 31, True),
         ({"SPRINTABLE_EMBEDDED": "1", "K_SERVICE": "backend-prod"}, "s" * 40, True),
+        ({"SPRINTABLE_EMBEDDED": "true"}, "s" * 40, True),  # a looser spelling with a secret set is a half-configured install: refuse to start
         ({"SPRINTABLE_EMBEDDED": "1"}, "s" * 32, False),  # a proper embedded install starts
     ],
 )
