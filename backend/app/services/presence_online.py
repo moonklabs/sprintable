@@ -55,37 +55,6 @@ async def clear_online(member_id: str) -> None:
     await redis_shared.with_fallback(_op, lambda: None)
 
 
-# story #4834: «shorten the key unless a connection renewed it after `bound`» in ONE step on the server — a GET and a PEXPIRE sent one after the other leave a gap in which
-# a reconnect's tick can renew the key and the PEXPIRE then still shortens it. The key's value is the time of the last tick as an ISO string with a UTC offset, which sorts
-# like the time itself (byte order; a whole second without microseconds sorts before the same second with them, which is the right way round).
-_EXPIRE_UNLESS_RENEWED = """
-local v = redis.call('GET', KEYS[1])
-if not v then return 0 end
-if v > ARGV[1] then return 0 end
-return redis.call('PEXPIRE', KEYS[1], ARGV[2])
-"""
-
-
-async def expire_online(member_id: str, seconds: float, *, unless_renewed_after: "datetime.datetime | None" = None) -> None:
-    """story #4834 — a stream that ended by its lifespan: shorten the online key to `seconds` instead of deleting it (the client reconnects at once and its first tick
-    renews the key; one that does not reads as gone when the key runs out). Nothing to shorten (no key · off · Redis down) → no-op.
-
-    `unless_renewed_after`: the key holds the time of the last tick; one later than this was written by a connection that came back while the caller's cleanup was
-    still running — that key is live and is left alone (checked and shortened atomically). A failure here (Redis down at that moment) leaves the key to its own ≤ 90 s
-    life — the same as a server that died (no cleanup at all) or a failed `clear_online`: the key always ends 90 s after the last tick."""
-    if not _enabled():
-        return
-    ms = max(int(seconds * 1000), 1)
-
-    async def _op(client) -> None:
-        if unless_renewed_after is None:
-            await client.pexpire(_key(member_id), ms)
-        else:
-            await client.eval(_EXPIRE_UNLESS_RENEWED, 1, _key(member_id), unless_renewed_after.isoformat(), ms)
-
-    await redis_shared.with_fallback(_op, lambda: None)
-
-
 async def get_online_map(member_ids) -> dict[str, str]:
     """member_ids 중 online 키가 살아있는 것 → {member_id: ts}. 라우터 last_seen_at 주입용.
 

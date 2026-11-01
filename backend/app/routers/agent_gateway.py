@@ -105,10 +105,10 @@ _AGENT_SSE_LIFESPAN_JITTER_SEC: float = 30.0  # herd 방지(#2095 지터와 동�
 # 비례해 60s → 30s(그대로 두면 300s 기준 최대 +20% 변동, browser #2128 정정과 동일 원칙).
 # story #4834 (AC4): a stream that ends because its LIFESPAN ran out is not a disconnect — the client reconnects at once (observed on dev: «offline» for 1–9 s every
 # ~5 min). Deleting the session row right then made every send in that gap read «this agent cannot be reached» (`agent_wake`: the sender saw «type this sentence in
-# the terminal» for an agent that was receiving). So a lifespan end does not delete the row: it STAMPS it to expire in this many seconds — `last_seen_at` and
-# `connected_at` are set so that every reader's existing window (`_SESSION_FRESH_TTL` for the freshness readers, `_MAX_SSE_LIFETIME_SEC` for the lifetime ones) runs
-# out that many seconds from now. A connection that comes back inside it has a new row of its own; one that does not reads as gone to every reader after it, and
-# the next cleanup of that agent sweeps the stamped row (no task, no timer). Keep it well under `_SESSION_FRESH_TTL` minus one tick.
+# the terminal» for an agent that was receiving). So a lifespan end does not delete the row: it STAMPS it to expire in this many seconds — `last_seen_at` is set so that
+# the freshness window the readers use (`_SESSION_FRESH_TTL`: agent_push_reach, agent_verify) runs out that many seconds from now. A connection that comes back inside
+# it has a new row of its own; one that does not reads as gone to every reader after it, and the next cleanup of that agent sweeps the stamped row (no task, no timer).
+# Redis presence OFF only (what dev and prod run); with it on a lifespan end is cleaned at once as before. Kept at most half of `_SESSION_FRESH_TTL`.
 _STAMP_MAX_SEC: float = 60.0  # the longest expiry a stamp may have: a stamped row's `connected_at` is then always older than `_SIBLING_LIFETIME_SEC`, which no real connection reaches (its cap is 3600 s)
 _SIBLING_LIFETIME_SEC: float = _MAX_SSE_LIFETIME_SEC - _STAMP_MAX_SEC  # a row older than this is a stamped (expiring) row, not a live connection: it never counts as «another live session»
 
@@ -173,12 +173,14 @@ async def _mark_agent_disconnected(
     쿼리 시야에 안 들어온 좁은 창).
 
     story #4834: `expire_in` (seconds) = a lifespan end. The session row is NOT deleted: it is stamped to expire in that many seconds (see
-    `_LIFESPAN_END_GRACE_SEC`), the Redis online key (if any) is shortened to the same, and the row is left out of «another live session exists». Everything else —
-    the sweep of dead rows, the presence demotion when no other session is live — is as for a disconnect."""
+    `_LIFESPAN_END_GRACE_SEC`) and left out of «another live session exists». Everything else — the sweep of dead rows, the presence demotion when no other session is
+    live — is as for a disconnect. Only with Redis presence OFF (the configuration dev and prod run): with it on, a lifespan end is cleaned at once exactly as before
+    (no deployment runs that way today; its readers judge by the online key, which this does not touch)."""
     now = datetime.now(timezone.utc)
     from app.core.config import settings as _settings
     _ac2 = bool(_settings.presence_online_redis_enabled) and bool(_settings.redis_url)
-    _stream_gone = True  # story #4834: no other SSE stream of this agent is live (judged before the heartbeat rule below, which is about the agent as a whole, not about streams)
+    if expire_in is not None:
+        expire_in = min(expire_in, _SESSION_FRESH_TTL / 2)  # the freshness window is made shorter by the stamp: an expiry longer than half of it would be cut short (SSE_HEARTBEAT_TIMEOUT can lower it)
     try:
         async with async_session_factory() as db:
             if _ac2:
@@ -189,16 +191,21 @@ async def _mark_agent_disconnected(
                 # 먼저 DELETE → 그 다음 다른 row 존재 확認. remaining=0(마지막)일 때만 강등+DEL키(아래 공통 블록).
                 life_cutoff = now - timedelta(seconds=_MAX_SSE_LIFETIME_SEC)
                 # 이 세션 + 확실히 죽은 좀비(연결수명 GLCB 3600s 초과 = 살아있을 수 없음) 정리.
-                _dead = (AgentGatewaySession.agent_id == agent_id) & (AgentGatewaySession.connected_at < life_cutoff)
                 await db.execute(
-                    delete(AgentGatewaySession).where(_dead if expire_in is not None else ((AgentGatewaySession.id == session_id) | _dead))
+                    delete(AgentGatewaySession).where(
+                        (AgentGatewaySession.id == session_id)
+                        | (
+                            (AgentGatewaySession.agent_id == agent_id)
+                            & (AgentGatewaySession.connected_at < life_cutoff)
+                        )
+                    )
                 )
                 # 잔여 = 이 세션 外 **수명 내 connect된 세션 row 존재**(freshness 아님·Redis 무의존). 없으면 마지막.
                 remaining = (await db.execute(
                     select(AgentGatewaySession.id).where(
                         AgentGatewaySession.agent_id == agent_id,
                         AgentGatewaySession.id != session_id,
-                        AgentGatewaySession.connected_at >= now - timedelta(seconds=_SIBLING_LIFETIME_SEC),  # (story #4834: a stamped row is not a live sibling)
+                        AgentGatewaySession.connected_at >= life_cutoff,
                     ).limit(1)
                 )).scalar_one_or_none()
                 # 보강(가속 신호·**강등 방향으로만**): Redis 정상인데 online 키가 없음 = 틱 도는 연결이 0 =
@@ -208,7 +215,6 @@ async def _mark_agent_disconnected(
                 from app.services import presence_online
                 if await presence_online.is_online(agent_id) is False:
                     remaining = None
-                _stream_gone = remaining is None
 
                 # story #2602 Fix②: heartbeat_baseline보다 새 last_seen_at이 있으면(내가 시작한
                 # 뒤 heartbeat 또는 다른 세션의 connect write가 있었다는 뜻) 강등을 skip한다 —
@@ -237,31 +243,23 @@ async def _mark_agent_disconnected(
                         AgentGatewaySession.last_seen_at >= fresh_cutoff,
                     ).limit(1)
                 )).scalar_one_or_none()
-            if expire_in is not None:
-                # story #4834: stamp this session's row so that every reader's window ends `expire_in` seconds from now — the freshness readers (`last_seen_at` within
-                # `_SESSION_FRESH_TTL`) and the lifetime ones (`connected_at` within `_MAX_SSE_LIFETIME_SEC`, also the Redis-down «a row exists» fallback)
-                await db.execute(
-                    update(AgentGatewaySession)
-                    .where(AgentGatewaySession.id == session_id)
-                    .values(
-                        last_seen_at=now - timedelta(seconds=max(_SESSION_FRESH_TTL - expire_in, 0.0)),
-                        connected_at=now - timedelta(seconds=max(_MAX_SSE_LIFETIME_SEC - expire_in, 0.0)),
+                if expire_in is not None:
+                    # story #4834: stamp this session's row so that the freshness readers (`last_seen_at` within `_SESSION_FRESH_TTL`: agent_push_reach, agent_verify) stop reading it
+                    # `expire_in` seconds from now; `connected_at` is set so far back that the row is never counted as «another live session» (`_SIBLING_LIFETIME_SEC`)
+                    await db.execute(
+                        update(AgentGatewaySession)
+                        .where(AgentGatewaySession.id == session_id)
+                        .values(
+                            last_seen_at=now - timedelta(seconds=max(_SESSION_FRESH_TTL - expire_in, 0.0)),
+                            connected_at=now - timedelta(seconds=max(_MAX_SSE_LIFETIME_SEC - expire_in, 0.0)),
+                        )
                     )
-                )
-                if _ac2 and _stream_gone:
-                    # the online key stays for the expiry (the reconnect's first tick renews it) instead of being deleted at once — for the time that is LEFT of it (this
-                    # cleanup has already used some), so the rows and the key run out together; and unless a connection renewed it after this cleanup began (a reconnect
-                    # quicker than this transaction keeps its key). Judged by the streams, not by the heartbeat rule below: a newer MCP heartbeat keeps the agent from
-                    # being demoted, but the key still belongs to the stream that has just ended.
-                    from app.services import presence_online
-                    _left = max(expire_in - (datetime.now(timezone.utc) - now).total_seconds(), 0.05)
-                    await presence_online.expire_online(agent_id, _left, unless_renewed_after=now)
             if remaining is None:
                 from app.services.agent_anchor_sync import sync_agent_profile_presence
                 await sync_agent_profile_presence(
                     db, agent_id, last_seen_at=None, agent_status="offline"
                 )
-                if _ac2 and expire_in is None:
+                if _ac2:
                     # AC2: online 키 DEL(90s 잔존 방지·즉시 offline 규약 유지). flag off면 no-op.
                     from app.services import presence_online
                     await presence_online.clear_online(agent_id)
