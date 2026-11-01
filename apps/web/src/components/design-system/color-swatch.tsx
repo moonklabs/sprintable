@@ -17,11 +17,11 @@ export function ColorSwatch({ token }: { token: ColorToken }) {
       />
       <div className="min-w-0 flex-1">
         <p className="truncate text-xs font-medium text-foreground">{token.name}</p>
-        <p suppressHydrationWarning className="truncate font-mono text-[10px] text-muted-foreground">
+        <p suppressHydrationWarning className="truncate font-mono text-micro text-muted-foreground">
           {value || token.cssVar}
         </p>
       </div>
-      <code className="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+      <code className="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
         {token.tailwind}
       </code>
     </div>

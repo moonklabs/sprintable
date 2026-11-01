@@ -10,12 +10,12 @@ export function CountBadge({ count, suffix, className }: { count: number; suffix
   return (
     <span
       className={cn(
-        'inline-flex items-baseline gap-0.5 rounded-full border border-proof-line px-2.5 py-[3px] font-mono text-xs font-bold text-foreground shadow-[var(--elev-inset)]',
+        'inline-flex items-baseline gap-0.5 rounded-full border border-proof-line px-2.5 py-1 font-mono text-xs font-bold text-foreground shadow-[var(--elev-inset)]',
         className,
       )}
     >
       {count}
-      {suffix ? <span className="text-[9px] font-medium text-muted-foreground">{suffix}</span> : null}
+      {suffix ? <span className="text-micro font-medium text-muted-foreground">{suffix}</span> : null}
     </span>
   );
 }

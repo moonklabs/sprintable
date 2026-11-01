@@ -190,7 +190,7 @@ export function ContextualPanelLayout({
           <button
             type="button"
             aria-label={drawerAriaLabel}
-            className="absolute inset-0 bg-black/55 backdrop-blur-[2px]"
+            className="absolute inset-0 bg-scrim-2 backdrop-blur-[2px]"
             onClick={() => onDrawerOpenChange(false)}
           />
           <div

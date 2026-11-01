@@ -15,7 +15,7 @@ export function UpgradeModal({ message, onClose }: UpgradeModalProps) {
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="max-w-sm" showCloseButton={false}>
         <div className="text-center">
-          <div className="mb-3 text-4xl">🚀</div>
+          <div className="mb-3 text-display">🚀</div>
           <DialogTitle className="text-lg font-semibold text-foreground">{t('upgradeRequired')}</DialogTitle>
           <p className="mt-2 text-sm text-muted-foreground">{message}</p>
         </div>

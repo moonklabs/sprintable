@@ -466,7 +466,7 @@ describe('NotificationBell — story #3074 데스크톱 브리지 notify_show', 
 // story 3466(위생, 유나 5~8회차 4연속 관측) — 「99+」 배지 대비 미달(라이트 3.55·다크
 // 3.00, AA 4.5 미달) 정정. text-destructive-foreground가 이 테마에 매핑 자체가 없는
 // 무효 Tailwind 유틸이라 조용히 no-op였던 것이 근본원인(실제 렌더 색은 상속된
-// --foreground). ⭐두 pin: (a) 실 렌더 className이 새 값(text-white dark:text-proof-bg)
+// --foreground). ⭐두 pin: (a) 실 렌더 className이 새 값(text-on-scrim dark:text-proof-bg)
 // 을 갖고 구 무효 유틸이 안 남았는지 (b) 그 값들의 WCAG 대비비가 실제로 두 테마 모두
 // ≥4.5인지(색 계산 자체의 양성대조 — globals.css의 --proof-red/--proof-bg 실값을
 // 읽어 codebase 공용 계산기(color-contrast.ts)로 잰다, 값이 나중에 바뀌어도 그 값
@@ -486,14 +486,14 @@ describe('NotificationBell — 배지 「99+」 대비(story 3466)', () => {
     }));
   }
 
-  it('⭐배지가 text-white dark:text-proof-bg를 쓰고, 무효 유틸(text-destructive-foreground)이 안 남았다', async () => {
+  it('⭐배지가 text-on-scrim dark:text-proof-bg를 쓰고, 무효 유틸(text-destructive-foreground)이 안 남았다', async () => {
     stubUnreadCount(150);
     await act(async () => { root.render(withIntl(<NotificationBell />)); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
     const badge = Array.from(container.querySelectorAll('span')).find((s) => s.textContent === '99+');
     expect(badge).toBeDefined();
-    expect(badge?.className).toContain('text-white');
+    expect(badge?.className).toContain('text-on-scrim');
     expect(badge?.className).toContain('dark:text-proof-bg');
     expect(badge?.className).not.toContain('text-destructive-foreground');
   });
@@ -506,7 +506,7 @@ describe('NotificationBell — 배지 「99+」 대비(story 3466)', () => {
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
     const badge = Array.from(container.querySelectorAll('span')).find((s) => s.textContent === '5');
-    expect(badge?.className).toContain('text-[10px]');
+    expect(badge?.className).toContain('text-micro');
     expect(badge?.className).not.toContain('text-[9px]');
     expect(badge?.className).not.toContain('font-mono');
   });

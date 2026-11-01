@@ -2622,6 +2622,13 @@ jobs:
       - name: "Verify no card-surfaceless box (story #3785 regression guard)"
         run: pnpm --filter web verify:no-card-surfaceless-box
 
+      # story #4831(AC4) — 「바탕 한 벌」 0 유지 가드. 화면 묶음 여덟 + 바탕 부품 폴더(components/ui ·
+      # design-system)에 바탕을 거치지 않은 값(색 리터럴 · 팔레트 · white/black · 임의 글자 · 눈금 밖 글자 ·
+      # 임의 간격 · 임의 모서리)이 새로 들어오면 FAIL. 예외는 scripts/design-base-exceptions.json에
+      # 까닭과 함께만(까닭 없음 · 낡은 항목 · 묶음 경로 소실도 FAIL).
+      - name: "Verify design base zero (story #4831 AC4 guard)"
+        run: pnpm --filter web verify:design-base
+
       # story #4014(AC1) — 좁은 폭 마케팅 목록 표 3곳(블로그 포스트·채널 포스트·성과 보드)이
       # 공용 ResponsiveDataTable을 우회해 다시 손으로 <table>을 조립하지 않게 고정.
       - name: "Verify no hand-rolled marketing table (story #4014 regression guard)"

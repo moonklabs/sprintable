@@ -11,7 +11,7 @@ export function MaterialChip({ children, className }: { children: React.ReactNod
     <span
       data-slot="material-chip"
       className={cn(
-        'inline-flex items-center rounded-md border border-proof-line bg-transparent px-2 py-[3.5px] text-[10.5px] font-semibold tracking-[0.04em] text-muted-foreground',
+        'inline-flex items-center rounded-md border border-proof-line bg-transparent px-2 py-1 text-micro font-semibold tracking-[0.04em] text-muted-foreground',
         className,
       )}
     >

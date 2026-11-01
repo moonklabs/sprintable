@@ -17,7 +17,7 @@ export function RadiusSwatch({ token }: { token: RadiusToken }) {
       />
       <div className="text-center">
         <p className="text-xs font-medium text-foreground">{token.name}</p>
-        <p suppressHydrationWarning className="font-mono text-[10px] text-muted-foreground">
+        <p suppressHydrationWarning className="font-mono text-micro text-muted-foreground">
           {value || '—'}
         </p>
       </div>
