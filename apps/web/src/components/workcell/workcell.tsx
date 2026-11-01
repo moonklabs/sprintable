@@ -253,7 +253,7 @@ export function Workcell({ title, pipelineStage, brief, run, evidence, conversat
   const railState = pipelineStage ? PIPELINE_STAGE_TRUST_COLOR[pipelineStage] : undefined;
   return (
     // story #7d7634ee(P0·선생님 직접 지시) — 컷코너(clip-path) 폐지, proof-surface(13px 균일
-    // 라운드)+proof-surface-lift(뜬 표면 재질) 채택. 옛 rounded-xl는 proof-surface의
+    // 라운드)+proof-surface-lift(뜬 표면 재질) 채택. 옛 rounded-[6px]는 proof-surface의
     // --proof-radius-soft로 흡수.
     <div className={cn('proof-surface proof-surface-lift flex overflow-hidden border border-proof-line bg-proof-panel', className)}>
       {/* story #2922 W6(선행 조각) — Proofline 좌측 레일(ProofCapsule CutCornerShell과 동형

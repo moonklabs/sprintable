@@ -173,7 +173,7 @@ describe('AttentionQueueView — 로드맵 P3 L5(faint 텍스트 대비 정정)'
 });
 
 // story #3010(로드맵 P3, L6, 유나 판정 2026-08-24) — 섹션 주 제목 h2는 font-editorial-heading
-// (820 weight)로, 19px 크기는 유지.
+// (820 weight)로, 크기는 글자 눈금의 lg(18px) (story 4831: 눈금에 없는 19px에서).
 describe('AttentionQueueView — 로드맵 P3 L6(섹션 제목 editorial weight)', () => {
   it('h2가 font-editorial-heading을 쓰고 글자 눈금의 lg(18px)를 쓴다', async () => {
     await mount(mockGatePendingOnly());

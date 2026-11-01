@@ -201,7 +201,7 @@ export function AttentionQueueView({ projectId }: { projectId: string }) {
           <div className="text-editorial-meta font-bold uppercase tracking-[0.12em] text-proof-ink-3">{t('kicker')}</div>
           {/* story #3010(로드맵 P3, L6, 유나 판정 2026-08-24) — 이 h2는 반복 그룹 라벨이 아니라
               섹션 주 제목(단일 마운트)이라 L6 대상. weight만 font-editorial-heading(820)로
-              교체, 19px 크기는 유지. */}
+              교체. 크기는 글자 눈금의 lg(18px) (story 4831: 눈금에 없는 19px에서). */}
           <h2 className="text-lg font-editorial-heading leading-tight tracking-[-0.014em] text-proof-ink">{t('title')}</h2>
         </div>
         {!loading ? (

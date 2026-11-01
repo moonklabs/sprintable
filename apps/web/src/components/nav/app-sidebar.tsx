@@ -360,7 +360,7 @@ export function AppSidebar({
       >
         <MessageSquare className="size-[18px] shrink-0" />
         <span className="flex-1 truncate text-editorial-ui font-bold">{t(chatCenterItem.labelKey)}</span>
-        {/* text-on-scrim 대신 sidebar-primary-foreground(다크에서 근흑색 — 수동 대비 확認,
+        {/* text-white 대신 sidebar-primary-foreground(다크에서 근흑색 — 수동 대비 확認,
             4.61 라이트·4.81 다크는 카드 톤이고 이 자리는 solid pill이라 별도 확認 필요했다:
             bg-proof-blue+text-white는 다크에서 3.21로 AA 미달. sidebar-primary-foreground는
             sidebar-primary(=proof-blue)와 짝으로 설계된 토큰이라 이 자리에 맞다). */}
@@ -569,7 +569,7 @@ export function AppSidebar({
                     <div key={group.target} className="space-y-0.5" data-legacy-group={group.target}>
                       {/* 픽셀 커밋(페드루 PO 판정 2026-09-14 07:34Z, 유나 시안 77731332
                           getComputedStyle 대조) — 묶음 사이 구분선(border 토큰) 1px·margin
-                          5px 8px 4px, 첫 그룹 앞엔 없음. */}
+                          4px 8px 4px(story 4831: 위 5px를 눈금의 4px로), 첫 그룹 앞엔 없음. */}
                       {groupIndex > 0 ? <div className="mx-2 mt-1 mb-1 h-px bg-border" /> : null}
                       {/* AC2 — 머리말은 링크·버튼이 아니다(순수 텍스트, 클릭 불가). 시안이
                           지정한 안내 문구(머리말 옆 회색 note, 예: 「만드는 곳(일)…」)는 PO가
