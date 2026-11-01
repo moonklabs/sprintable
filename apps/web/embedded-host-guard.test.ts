@@ -25,7 +25,7 @@ async function rig(env: Record<string, string | undefined> = { SPRINTABLE_EMBEDD
   server.on('connect', (_req, socket) => { socket.end('HTTP/1.1 200 Connection established\r\n\r\n'); });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
   const port = (server.address() as net.AddressInfo).port;
-  guard.install(pinPort ? { ...env, PORT: String(port) } : env, GuardedServer.prototype);
+  guard.install(pinPort ? { ...env, PORT: String(port) } : env, GuardedServer.prototype); // (the guard asks the server for its real port; PORT is only a fallback)
   const r: Rig = { port, hits, get upgrades() { return upgrades; }, close: () => new Promise((res) => server.close(() => res())) } as Rig;
   rigs.push(r);
   return r;
@@ -48,8 +48,10 @@ const get = (path: string, host: string | null, extra = '') => `GET ${path} HTTP
 const status = (r: string): string => /^HTTP\/1\.\d (\d{3})/.exec(r)?.[1] ?? 'none';
 
 describe('isAllowedHost', () => {
-  it('only 127.0.0.1:<port>; with a known port only that port', () => {
-    expect(guard.isAllowedHost('127.0.0.1:3108')).toBe(true);
+  it('only 127.0.0.1:<port>, only that port; with no known port nothing is allowed', () => {
+    expect(guard.isAllowedHost('127.0.0.1:3108')).toBe(false); // no port to compare with: closed
+    expect(guard.isAllowedHost('127.0.0.1:3108', 0)).toBe(false);
+    expect(guard.isAllowedHost('127.0.0.1:0', 0)).toBe(false);
     expect(guard.isAllowedHost('127.0.0.1:3108', 3108)).toBe(true);
     expect(guard.isAllowedHost('127.0.0.1:3109', 3108)).toBe(false);
     for (const bad of ['127.0.0.1', 'localhost:3108', '[::1]:3108', '127.1:3108', '0x7f.0.0.1:3108', '127.0.0.1.:3108', '127.0.0.1.evil.com:3108', '127.0.0.1:3108@evil.com', 'evil.com@127.0.0.1:3108', '127.0.0.1:3108.evil.com', ' 127.0.0.1:3108', '127.0.0.1:3108 ', '127.0.0.1:', '127.0.0.1:123456', '', 'LOCALHOST:3108', '2130706433:3108', '127.0.0.1:3108,evil.com']) {
@@ -121,9 +123,11 @@ describe('the guard on a real server', () => {
     expect(Twice.prototype.emit).toBe(once);
   });
 
-  it('without a known port any port of 127.0.0.1 is accepted (the app always sets PORT; this is the fallback)', async () => {
-    const r = await rig({ SPRINTABLE_EMBEDDED: '1' }, false);
-    expect(status(await raw(r.port, get('/', `127.0.0.1:${r.port}`)))).toBe('200');
-    expect(status(await raw(r.port, get('/', 'localhost:1234')))).toBe('400');
+  it('the guard compares with the port the server is REALLY bound to, not with the PORT it was told: PORT=0, a wrong PORT or none at all make no difference', async () => {
+    for (const envPort of ['0', '1', '99999', 'abc', undefined]) {
+      const r = await rig({ SPRINTABLE_EMBEDDED: '1', ...(envPort === undefined ? {} : { PORT: envPort }) }, false);
+      expect(status(await raw(r.port, get('/', `127.0.0.1:${r.port}`))), `PORT=${envPort}`).toBe('200'); // the real port: the app's own window works
+      expect(status(await raw(r.port, get('/', envPort === '0' ? '127.0.0.1:0' : `127.0.0.1:${envPort ?? 1234}`))), `PORT=${envPort} · the told port`).toBe('400'); // a port nobody listens on is not a way in
+    }
   });
 });

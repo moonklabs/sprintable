@@ -15,12 +15,12 @@ const GUARDED_EVENTS = new Set(['request', 'checkContinue', 'checkExpectation', 
 const INSTALLED = Symbol.for('sprintable.embeddedHostGuard');
 const BODY = 'Invalid host header';
 
-/** `127.0.0.1:<port>` — exactly this server's port when it is known, else any 1–5 digit port; no other spelling of the loopback (localhost · [::1] · 127.1 · 0x7f… · a trailing dot · userinfo) */
+/** `127.0.0.1:<port>` — exactly this server's port, and no other spelling of the loopback (localhost · [::1] · 127.1 · 0x7f… · a trailing dot · userinfo). With no port to compare with (nothing known) nothing is allowed. */
 function isAllowedHost(host, port) {
   if (typeof host !== 'string') return false;
   const m = /^127\.0\.0\.1:(\d{1,5})$/.exec(host);
   if (!m) return false;
-  return port === undefined || Number(m[1]) === Number(port);
+  return typeof port === 'number' && Number.isInteger(port) && port > 0 && Number(m[1]) === port; // closed when the port is not known
 }
 
 /** an absolute-form request target (`GET http://evil/ HTTP/1.1`) names its own authority, which takes precedence over `Host` — it must be the loopback too */
@@ -50,12 +50,16 @@ function refuse(event, args) {
 function install(env = process.env, target = http.Server.prototype) {
   if (env['SPRINTABLE_EMBEDDED'] !== '1') return false;
   if (target[INSTALLED]) return true;
-  const port = env['PORT'] ? Number(env['PORT']) : undefined;
+  const envPort = env['PORT'] ? Number(env['PORT']) : undefined;
   const original = target.emit;
   target.emit = function guardedEmit(event, ...args) {
     if (typeof event === 'string' && GUARDED_EVENTS.has(event)) {
       const req = args[0];
       const host = req && req.headers ? req.headers.host : undefined;
+      // the port this server is REALLY bound to, asked at request time (PORT=0 or a port that was taken makes Next bind another one; the env value would then name a port nobody listens on);
+      // the env value is only the fallback for a server that cannot say (none in practice)
+      const bound = typeof this.address === 'function' ? this.address() : null;
+      const port = bound && typeof bound === 'object' && typeof bound.port === 'number' ? bound.port : envPort;
       if (!isAllowedHost(host, port) || !targetAuthorityAllowed(req && req.url, port)) {
         refuse(event, args);
         return true;
