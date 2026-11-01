@@ -58,7 +58,7 @@ export function ArtifactEditor({ title, initialNodes, onCommit, onDone, artifact
       <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-[var(--elev-card)]">
         <div className="flex items-center gap-2.5 border-b border-border px-4 py-3">
           <span className="truncate text-sm font-semibold text-foreground">{title}</span>
-          <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+          <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-micro font-bold uppercase tracking-wide text-muted-foreground">
             {t('editModeLabel')}
           </span>
         </div>

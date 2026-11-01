@@ -371,7 +371,7 @@ export function MobileTabBar({
             prefetch={isCurrentPage ? false : undefined}
             aria-current={active ? 'page' : undefined}
             className={cn(
-              'relative flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 text-[11px]',
+              'relative flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 text-editorial-meta',
               active ? 'font-semibold text-primary' : 'text-muted-foreground',
             )}
           >

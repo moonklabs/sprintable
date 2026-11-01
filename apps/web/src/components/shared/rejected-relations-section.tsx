@@ -122,24 +122,24 @@ export function RejectedRelationsSection({ storyId }: { storyId: string }) {
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex-1">
                 <span className="text-foreground [overflow-wrap:anywhere]">{title ?? t('rejectedRelationsTargetGone')}</span>
-                <div className="text-[10px] text-muted-foreground">{formatViewerRelativeTime(item.rejected_at, locale, displayTimezone)}</div>
+                <div className="text-micro text-muted-foreground">{formatViewerRelativeTime(item.rejected_at, locale, displayTimezone)}</div>
               </div>
               {restored ? (
                 // AC6 — 「다시 후보로 올라올 수 있습니다」까지만 말한다(시점 약속 없음).
                 // 토스트가 아니라 이 행 자리에 그대로 남는다(㉣).
-                <span className="shrink-0 text-[11px] text-muted-foreground">{t('rejectedRelationsRestored')}</span>
+                <span className="shrink-0 text-editorial-meta text-muted-foreground">{t('rejectedRelationsRestored')}</span>
               ) : (
                 <button
                   type="button"
                   disabled={restoring}
                   onClick={() => handleRestore(item.target_id)}
-                  className="focus-outset shrink-0 rounded-md border border-border px-2 py-1 text-[11px] font-medium disabled:opacity-50"
+                  className="focus-outset shrink-0 rounded-md border border-border px-2 py-1 text-editorial-meta font-medium disabled:opacity-50"
                 >
                   {t('rejectedRelationsRestore')}
                 </button>
               )}
             </div>
-            {error ? <p role="alert" className="text-[10px] text-destructive">{error}</p> : null}
+            {error ? <p role="alert" className="text-micro text-destructive">{error}</p> : null}
           </li>
         ))}
       </ul>

@@ -58,7 +58,7 @@ function HypothesisDraftPreview({
 
       <div className="space-y-2">
         <div className="space-y-0.5">
-          <p className="text-[11px] font-medium text-muted-foreground">{t('statementField')}</p>
+          <p className="text-editorial-meta font-medium text-muted-foreground">{t('statementField')}</p>
           <p className="text-sm text-foreground">{draft.statement}</p>
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
@@ -67,7 +67,7 @@ function HypothesisDraftPreview({
         </div>
       </div>
 
-      <p className="text-[11px] text-muted-foreground">{t('draftNote')}</p>
+      <p className="text-editorial-meta text-muted-foreground">{t('draftNote')}</p>
 
       <div className="flex justify-end gap-2">
         <button

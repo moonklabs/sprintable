@@ -27,25 +27,25 @@ export function CommitBar({ changeCount, onCommit, onDone, className }: CommitBa
   return (
     <div className={className}>
       <div className="flex items-center gap-2 border-t border-border pt-3">
-        <span className="text-[11px] text-muted-foreground">{t('changeCount', { count: changeCount })}</span>
+        <span className="text-editorial-meta text-muted-foreground">{t('changeCount', { count: changeCount })}</span>
         <input
           type="text"
           value={summary}
           onChange={(e) => setSummary(e.target.value)}
           placeholder={t('commitSummaryPlaceholder')}
           disabled={changeCount === 0}
-          className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-base lg:text-[11px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+          className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-base lg:text-editorial-meta text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
         />
         <button
           type="button"
           onClick={handleCommit}
           disabled={changeCount === 0}
-          className="shrink-0 rounded-md bg-primary px-2.5 py-1 text-[11px] font-semibold text-primary-foreground disabled:opacity-40"
+          className="shrink-0 rounded-md bg-primary px-2.5 py-1 text-editorial-meta font-semibold text-primary-foreground disabled:opacity-40"
         >
           {t('commitAction')}
         </button>
         {onDone ? (
-          <button type="button" onClick={onDone} className="shrink-0 text-[11px] text-muted-foreground hover:text-foreground">
+          <button type="button" onClick={onDone} className="shrink-0 text-editorial-meta text-muted-foreground hover:text-foreground">
             {t('doneToViewerAction')}
           </button>
         ) : null}

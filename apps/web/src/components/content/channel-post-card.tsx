@@ -89,7 +89,7 @@ export function ChannelPostCard({ item, displayTimezone }: ChannelPostCardProps)
           「미확인」(channelPostsCharLimitUnknown과 동형 낱말) 그대로 — 지어내지 않는다. */}
       {item.newsletter ? (
         <p className="truncate text-muted-foreground" data-testid="channel-post-calendar-card-newsletter">
-          <span className="mr-1 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-foreground">
+          <span className="mr-1 rounded bg-muted px-1 py-0.5 text-micro font-medium text-foreground">
             {t('channelPostsNewsletterBadge')}
           </span>
           {item.newsletter.subject ?? t('channelPostsNewsletterSubjectUnknown')}
@@ -103,7 +103,7 @@ export function ChannelPostCard({ item, displayTimezone }: ChannelPostCardProps)
           바뀌어(BE COALESCE) 캠페인 만들기 예정 시각이 안 보이게 된다 — PO 明示
           "두 시각 라벨 다 보이게"를 위해 둘 다 있을 때만 명시 라벨로 갈라 보인다. */}
       {item.newsletter?.campaign_scheduled_at && item.newsletter.send_scheduled_at ? (
-        <p className="text-[11px] text-muted-foreground" data-testid="channel-post-calendar-card-newsletter-schedules">
+        <p className="text-editorial-meta text-muted-foreground" data-testid="channel-post-calendar-card-newsletter-schedules">
           <span>
             {t('channelPostsNewsletterCampaignScheduleLabel')}
             {' '}

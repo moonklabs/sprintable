@@ -321,7 +321,7 @@ function NotificationPanel({
             className={cn(
               // story #2062: showUnreadOnly=true면 bg-primary(링색과 동일) — focus-inset 컨테이너
               // 안에서는 inset 링이 안 보이므로 focus-outset으로 바깥 링을 되돌린다(유나 규격).
-              'focus-outset rounded-full px-2.5 py-0.5 text-[11px] font-medium transition',
+              'focus-outset rounded-full px-2.5 py-0.5 text-editorial-meta font-medium transition',
               showUnreadOnly
                 ? 'bg-primary text-primary-foreground'
                 : 'bg-muted text-muted-foreground hover:text-foreground',

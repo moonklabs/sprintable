@@ -138,7 +138,7 @@ export function EpicStatusTransition({
               >
                 {t(LABEL_KEY[to] ?? to)}
                 {GATED.has(`${status}>${to}`) ? (
-                  <span className="ml-2 inline-flex items-center gap-0.5 text-[10px] text-warning-strong" title={t('transitionGateHint')}>
+                  <span className="ml-2 inline-flex items-center gap-0.5 text-micro text-warning-strong" title={t('transitionGateHint')}>
                     <ShieldCheck className="size-3 shrink-0" />
                   </span>
                 ) : null}

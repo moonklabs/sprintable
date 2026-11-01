@@ -19,12 +19,12 @@ export function OutcomeResultCard({ status, hypothesis, result, pendingMetricLab
       isMiss && 'border-border bg-muted/40',
       isPending && 'border-dashed border-border bg-muted/20')}>
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('resultLabel')}</span>
+        <span className="text-micro font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t('resultLabel')}</span>
         <OutcomeStatusBadge status={status} />
       </div>
       {hypothesis ? (
         <div className="mt-3">
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('hypothesisLabel')}</span>
+          <span className="text-micro uppercase tracking-wider text-muted-foreground">{t('hypothesisLabel')}</span>
           <p className="mt-0.5 text-sm leading-6 text-foreground">{hypothesis}</p>
         </div>) : null}
       {isPending ? (
@@ -39,7 +39,7 @@ export function OutcomeResultCard({ status, hypothesis, result, pendingMetricLab
           </span>
         </div>
         <DeltaTrack target={result.target} actual={result.actual} isHit={isHit} targetLabel={t('target')} />
-        <p className="mt-3 text-[11px] text-muted-foreground">
+        <p className="mt-3 text-editorial-meta text-muted-foreground">
           {result.scored_at.slice(0, 10)} {t('scoredSuffix')}<span className="mx-1.5 text-border">·</span>{t('forwardNote')}
         </p>
       </>) : null}
@@ -57,7 +57,7 @@ export function DeltaTrack({ target, actual, isHit, targetLabel }: { target: num
         <span className={cn('absolute top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-background animate-in fade-in slide-in-from-left-1 duration-700', isHit ? 'bg-success' : 'bg-foreground')}
           style={{ left: `${50 + offset}%` }} />
       </div>
-      <div className="mt-1 text-center text-[10px] text-muted-foreground">{targetLabel}</div>
+      <div className="mt-1 text-center text-micro text-muted-foreground">{targetLabel}</div>
     </div>
   );
 }

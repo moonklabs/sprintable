@@ -118,7 +118,7 @@ export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, ca
                   readOnly
                   value={result.download_url}
                   onFocus={(e) => e.currentTarget.select()}
-                  className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-base lg:text-[11px] text-foreground"
+                  className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-base lg:text-editorial-meta text-foreground"
                   data-testid="export-dialog-copy-failed-raw-link"
                 />
               </div>
@@ -133,33 +133,33 @@ export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, ca
           >
             <p>{t('exportFailedNote')}</p>
             {errorDetail ? (
-              <p className="break-words font-mono text-[10px] leading-[13px] text-muted-foreground">{errorDetail}</p>
+              <p className="break-words font-mono text-micro leading-[13px] text-muted-foreground">{errorDetail}</p>
             ) : null}
           </div>
         ) : (
           <div className="space-y-3">
             <div>
-              <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{t('exportFormatLabel')}</p>
+              <p className="mb-1 text-micro font-bold uppercase tracking-wide text-muted-foreground">{t('exportFormatLabel')}</p>
               <div className="flex gap-1.5">
                 {(['png', 'html'] as const).map((f) => (
                   <button
                     key={f} type="button" disabled={f === 'png' && !pngAllowed} aria-pressed={format === f} onClick={() => setFormat(f)}
                     title={f === 'png' && !pngAllowed ? t('exportPngUnavailableForHtml') : undefined}
-                    className={`rounded-md border px-2.5 py-1 text-[11px] font-semibold uppercase disabled:cursor-not-allowed disabled:opacity-40 ${format === f ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`}
+                    className={`rounded-md border px-2.5 py-1 text-editorial-meta font-semibold uppercase disabled:cursor-not-allowed disabled:opacity-40 ${format === f ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`}
                   >
                     {f}
                   </button>
                 ))}
               </div>
-              {!pngAllowed ? <p className="mt-1 text-[10px] text-muted-foreground">{t('exportPngUnavailableForHtml')}</p> : null}
+              {!pngAllowed ? <p className="mt-1 text-micro text-muted-foreground">{t('exportPngUnavailableForHtml')}</p> : null}
             </div>
             {format === 'png' ? (
               <div>
-                <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{t('exportThemeLabel')}</p>
+                <p className="mb-1 text-micro font-bold uppercase tracking-wide text-muted-foreground">{t('exportThemeLabel')}</p>
                 <div className="flex gap-1.5">
                   {(['light', 'dark'] as const).map((th) => (
                     <button key={th} type="button" aria-pressed={theme === th} onClick={() => setTheme(th)}
-                      className={`rounded-md border px-2.5 py-1 text-[11px] ${theme === th ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`}>
+                      className={`rounded-md border px-2.5 py-1 text-editorial-meta ${theme === th ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`}>
                       {th === 'light' ? t('themeLight') : t('themeDark')}
                     </button>
                   ))}
