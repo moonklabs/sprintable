@@ -23,7 +23,7 @@ async function rig(env: Record<string, string | undefined> = { SPRINTABLE_EMBEDD
   const bodies: number[] = []; // how many body bytes the app READ for each request (an app that reads the body, like the proxy that forwards it)
   const server = new GuardedServer((req, res) => {
     hits.push(`${req.method} ${req.url}`);
-    if (req.url === '/early') { res.statusCode = 404; res.end('early'); return; } // answers before the body is read (like Next does for a missing static file)
+    if (req.url === '/early') { req.on('data', () => undefined); res.statusCode = 404; res.end('early'); return; } // answers before the body is over while still reading it (Node only drops the late bytes of a request nobody reads)
     let n = 0;
     req.on('data', (c: Buffer) => { n += c.length; });
     req.on('end', () => { bodies.push(n); res.statusCode = 200; res.end(`ok ${n}`); });
