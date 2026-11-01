@@ -300,13 +300,15 @@ class _FakeOnline:
 
     def __init__(self) -> None:
         self.expires: dict[str, float] = {}
-        self.expire_calls: list = []
+        self.expire_calls: list = []  # the `unless_renewed_after` bound of each call
+        self.expire_seconds: list = []  # the seconds each call asked for
 
     async def mark_online(self, member_id) -> None:
         self.expires[str(member_id)] = time.monotonic() + 90.0
 
     async def expire_online(self, member_id, seconds: float, *, unless_renewed_after=None) -> None:
         self.expire_calls.append(unless_renewed_after)
+        self.expire_seconds.append(seconds)
         if self.expires.get(str(member_id), 0.0) > time.monotonic():
             self.expires[str(member_id)] = time.monotonic() + seconds
 
@@ -558,20 +560,142 @@ async def test_the_redis_key_is_shortened_only_if_nobody_renewed_it_after_the_cl
 
 @pytest.mark.anyio
 async def test_expire_online_leaves_a_key_that_a_reconnect_renewed_after_the_bound():
+    """story #4834 — against a real (fake) Redis server with Lua: a key written after the bound keeps its life, an older one is shortened, no key is created for an agent
+    that has none."""
+    aioredis = pytest.importorskip("fakeredis.aioredis")
+    pytest.importorskip("lupa")  # fakeredis runs the script through Lua
     from datetime import datetime, timedelta, timezone
 
     from app.services import presence_online
 
+    client = aioredis.FakeRedis(decode_responses=True)
+    key = presence_online._key("m1")
     bound = datetime.now(timezone.utc)
-    for ts, shortened in ((bound + timedelta(seconds=1), False), (bound - timedelta(seconds=1), True)):
-        client = MagicMock()
-        client.get = AsyncMock(return_value=ts.isoformat())
-        client.pexpire = AsyncMock()
-        with patch.object(presence_online.settings, "presence_online_redis_enabled", True), \
-             patch.object(presence_online.settings, "redis_url", "redis://x"), \
-             patch("app.services.redis_shared.get_client", return_value=client):
-            await presence_online.expire_online("m1", 20, unless_renewed_after=bound)
-        assert client.pexpire.await_count == (1 if shortened else 0), (ts, shortened)
+    with patch.object(presence_online.settings, "presence_online_redis_enabled", True), \
+         patch.object(presence_online.settings, "redis_url", "redis://x"), \
+         patch("app.services.redis_shared.get_client", return_value=client):
+        await client.set(key, (bound + timedelta(seconds=1)).isoformat(), ex=90)
+        await presence_online.expire_online("m1", 20, unless_renewed_after=bound)
+        assert await client.pttl(key) > 60_000, "a key renewed after the bound keeps its life"
+        await client.set(key, (bound - timedelta(seconds=1)).isoformat(), ex=90)
+        await presence_online.expire_online("m1", 20, unless_renewed_after=bound)
+        assert 0 < await client.pttl(key) <= 20_000, "an older key is shortened to the expiry"
+        await client.delete(key)
+        await presence_online.expire_online("m1", 20, unless_renewed_after=bound)
+        assert await client.exists(key) == 0, "no key is made for an agent that has none"
+
+
+@pytest.mark.anyio
+async def test_expire_online_checks_and_shortens_in_one_step_on_the_server():
+    """story #4834 (codex round 11) — a GET and a PEXPIRE sent one after the other leave a gap in which a reconnect's tick can renew the key and the PEXPIRE still shortens it.
+    With a bound the whole thing is one script call; the client's own get / pexpire are not used."""
+    from datetime import datetime, timezone
+
+    from app.services import presence_online
+
+    client = MagicMock()
+    client.eval = AsyncMock()
+    client.get = AsyncMock()
+    client.pexpire = AsyncMock()
+    bound = datetime.now(timezone.utc)
+    with patch.object(presence_online.settings, "presence_online_redis_enabled", True), \
+         patch.object(presence_online.settings, "redis_url", "redis://x"), \
+         patch("app.services.redis_shared.get_client", return_value=client):
+        await presence_online.expire_online("m1", 20, unless_renewed_after=bound)
+    client.eval.assert_awaited_once_with(presence_online._EXPIRE_UNLESS_RENEWED, 1, presence_online._key("m1"), bound.isoformat(), 20000)
+    client.get.assert_not_awaited()
+    client.pexpire.assert_not_awaited()
+
+
+@pytest.mark.anyio
+@pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요")
+async def test_the_redis_key_gets_only_the_time_that_is_left_of_the_expiry():
+    """story #4834 (codex round 11) — the rows expire `expire_in` seconds after the cleanup began; the key's life starts when its call is made, so it is given what is LEFT
+    (the time the cleanup has already used is taken off), and the rows and the key run out together."""
+    from datetime import datetime, timezone
+
+    async def _slow_heartbeat(*a, **k):
+        await asyncio.sleep(0.6)  # the cleanup spends 0.6 s before it gets to the key
+        return None
+
+    async with _agent_env(mode="redis_on") as (Session, agent_id, auth_ctx, fake):
+        with patch("app.services.heartbeat_freshness.get_agent_last_heartbeat", new=_slow_heartbeat):
+            await _stream_to_its_end(auth_ctx, grace=3.0)
+        assert fake.expire_seconds, "expire_online was called"
+        assert fake.expire_seconds[-1] <= 3.0 - 0.5, f"the key was given {fake.expire_seconds[-1]:.2f} s (the cleanup had used 0.6 s of the 3 s)"
+
+
+@pytest.mark.anyio
+@pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요")
+async def test_a_newer_mcp_heartbeat_does_not_keep_the_key_of_an_ended_stream_alive():
+    """story #4834 (codex round 11) — a heartbeat newer than the connection keeps the agent from being demoted (the existing wipe-race rule), but the online key belongs to the
+    stream that has just ended: with no other stream it is still shortened to the expiry, or the agent would read live to stream-based readers for up to 90 s."""
+    from datetime import datetime, timedelta, timezone
+
+    async def _newer_heartbeat(*a, **k):
+        return datetime.now(timezone.utc) + timedelta(hours=1)
+
+    async with _agent_env(mode="redis_on") as (Session, agent_id, auth_ctx, fake):
+        with patch("app.services.heartbeat_freshness.get_agent_last_heartbeat", new=_newer_heartbeat), \
+             patch("app.services.heartbeat_freshness.incr_wipe_suppressed_counter", new=AsyncMock()), \
+             patch("app.services.agent_anchor_sync.sync_agent_profile_presence", new=AsyncMock()) as sync:
+            await _stream_to_its_end(auth_ctx, grace=3.0)
+        demotions = [c for c in sync.await_args_list if c.kwargs.get("last_seen_at") is None and c.kwargs.get("agent_status") == "offline"]
+        assert not demotions, "the heartbeat rule still holds the demotion back"
+        assert fake.expire_calls, "the key of the ended stream is shortened all the same"
+
+
+@pytest.mark.anyio
+@pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요")
+async def test_the_redis_key_is_left_alone_while_another_stream_of_the_agent_is_live():
+    """story #4834 — the key is shared by all streams of the agent: while another stream (a live row) is there, the end of this one must not shorten it."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.agent_gateway import AgentGatewaySession
+
+    async with _agent_env(mode="redis_on") as (Session, agent_id, auth_ctx, fake):
+        async with Session() as s:
+            now = datetime.now(timezone.utc)
+            s.add(AgentGatewaySession(id=uuid.uuid4(), agent_id=agent_id, connected_at=now - timedelta(seconds=100), last_seen_at=now))
+            await s.commit()
+        await _stream_to_its_end(auth_ctx, grace=3.0)
+        assert not fake.expire_calls, "another stream is live: its key was shortened"
+
+
+def test_the_sibling_window_is_derived_from_the_lifetime_cap_and_sits_above_a_real_connection():
+    """story #4834 (PO) — the line between «a live connection» and «a stamped (expiring) row» is not a number of its own: it is the lifetime cap minus the longest stamp, so it
+    moves with the cap; and it must stay above what a real connection can reach (Cloud Run / GCLB hard cap 3600 s), or a live long connection would stop counting as a
+    sibling. A stamp of the longest expiry starts exactly at the line (so it is on the stamped side)."""
+    import app.routers.agent_gateway as gw_module
+
+    import inspect
+
+    assert gw_module._SIBLING_LIFETIME_SEC == gw_module._MAX_SSE_LIFETIME_SEC - gw_module._STAMP_MAX_SEC
+    # (the value alone cannot tell a derived line from a number that happens to be the same today — the formula is pinned in the source, as this file does for its other contracts)
+    assert "_SIBLING_LIFETIME_SEC: float = _MAX_SSE_LIFETIME_SEC - _STAMP_MAX_SEC" in inspect.getsource(gw_module)
+    assert gw_module._SIBLING_LIFETIME_SEC > 3600.0, "a connection at its hard cap must still be a live sibling"
+    assert gw_module._STAMP_MAX_SEC < gw_module._SESSION_FRESH_TTL, "a stamp must be shorter than the freshness window (it is made by shortening it)"
+
+
+@pytest.mark.anyio
+@pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요")
+@pytest.mark.parametrize("mode", _MODES)
+async def test_a_long_lived_real_connection_still_counts_as_a_live_sibling(mode):
+    """story #4834 (PO) — the other side of the sibling line: a real connection that is 3650 s old (near the 3600 s cap, still ticking) is a live sibling, so the cleanup of
+    another connection of the same agent does not demote it. A line drawn too low would stop counting it and the agent would read offline while it is connected."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.agent_gateway import AgentGatewaySession
+
+    async with _agent_env(mode=mode) as (Session, agent_id, auth_ctx, fake):
+        async with Session() as s:
+            now = datetime.now(timezone.utc)
+            s.add(AgentGatewaySession(id=uuid.uuid4(), agent_id=agent_id, connected_at=now - timedelta(seconds=3650), last_seen_at=now))
+            await s.commit()
+        with patch("app.services.agent_anchor_sync.sync_agent_profile_presence", new=AsyncMock()) as sync:
+            await _stream_to_its_end(auth_ctx, grace=30.0, lifespan=30.0, request=_DisconnectingRequest())  # another connection of the agent goes away for real
+        demotions = [c for c in sync.await_args_list if c.kwargs.get("last_seen_at") is None and c.kwargs.get("agent_status") == "offline"]
+        assert not demotions, f"{mode}: the agent was demoted while a live connection (3650 s old) was still there"
 
 
 def test_the_expiry_from_the_environment_is_parsed_defensively():

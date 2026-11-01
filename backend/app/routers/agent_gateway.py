@@ -178,6 +178,7 @@ async def _mark_agent_disconnected(
     now = datetime.now(timezone.utc)
     from app.core.config import settings as _settings
     _ac2 = bool(_settings.presence_online_redis_enabled) and bool(_settings.redis_url)
+    _stream_gone = True  # story #4834: no other SSE stream of this agent is live (judged before the heartbeat rule below, which is about the agent as a whole, not about streams)
     try:
         async with async_session_factory() as db:
             if _ac2:
@@ -207,6 +208,7 @@ async def _mark_agent_disconnected(
                 from app.services import presence_online
                 if await presence_online.is_online(agent_id) is False:
                     remaining = None
+                _stream_gone = remaining is None
 
                 # story #2602 Fix②: heartbeat_baseline보다 새 last_seen_at이 있으면(내가 시작한
                 # 뒤 heartbeat 또는 다른 세션의 connect write가 있었다는 뜻) 강등을 skip한다 —
@@ -246,20 +248,23 @@ async def _mark_agent_disconnected(
                         connected_at=now - timedelta(seconds=max(_MAX_SSE_LIFETIME_SEC - expire_in, 0.0)),
                     )
                 )
+                if _ac2 and _stream_gone:
+                    # the online key stays for the expiry (the reconnect's first tick renews it) instead of being deleted at once — for the time that is LEFT of it (this
+                    # cleanup has already used some), so the rows and the key run out together; and unless a connection renewed it after this cleanup began (a reconnect
+                    # quicker than this transaction keeps its key). Judged by the streams, not by the heartbeat rule below: a newer MCP heartbeat keeps the agent from
+                    # being demoted, but the key still belongs to the stream that has just ended.
+                    from app.services import presence_online
+                    _left = max(expire_in - (datetime.now(timezone.utc) - now).total_seconds(), 0.05)
+                    await presence_online.expire_online(agent_id, _left, unless_renewed_after=now)
             if remaining is None:
                 from app.services.agent_anchor_sync import sync_agent_profile_presence
                 await sync_agent_profile_presence(
                     db, agent_id, last_seen_at=None, agent_status="offline"
                 )
-                if _ac2:
+                if _ac2 and expire_in is None:
+                    # AC2: online 키 DEL(90s 잔존 방지·즉시 offline 규약 유지). flag off면 no-op.
                     from app.services import presence_online
-                    if expire_in is not None:
-                        # story #4834: the online key stays for the expiry (the reconnect's first tick renews it) instead of being deleted at once — unless a connection
-                        # renewed it after this cleanup began (a reconnect that was quicker than this transaction: its key is not shortened)
-                        await presence_online.expire_online(agent_id, expire_in, unless_renewed_after=now)
-                    else:
-                        # AC2: online 키 DEL(90s 잔존 방지·즉시 offline 규약 유지). flag off면 no-op.
-                        await presence_online.clear_online(agent_id)
+                    await presence_online.clear_online(agent_id)
                 # d5de8e08 안전망: 연결 완전 종료 → 이 에이전트의 chat working 신호도 즉시 정리
                 # (offline 인데 "...typing" 잔존 방지·TTL backstop 기다리지 않음).
                 from app.services import chat_presence
