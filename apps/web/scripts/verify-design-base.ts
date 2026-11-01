@@ -95,7 +95,7 @@ const RE_HEX = new RegExp(`(?<![\\w&\\/#"'=-])#${HEX_DIGITS}\\b(?![\\w-])`, 'g')
 const RE_HEX_Q = new RegExp(`["'\`(\\[ :,]#${HEX_DIGITS}(?![\\w-])`, 'g');
 const RE_HEX_ANCHOR_CONTEXT = /(?:href|to|id|htmlFor|aria-[a-z]+|data-[a-z-]+|name)=\{?\s*["'`]?$/;
 // «_rgba(» 처럼 밑줄 뒤에 붙은 Tailwind 임의 값(shadow-[0_16px_46px_rgba(…)])도 잡도록 «앞이 영문자가 아님»으로 본다.
-const RE_COLORFN = /(?<![A-Za-z])(?:rgba?|hsla?|oklch|oklab|lab|lch|hwb|color-mix)\(\s*(?!var\()/gi;
+const RE_COLORFN = /(?<![A-Za-z])(?:rgba?|hsla?|oklch|oklab|lab|lch|hwb|color-mix)\(/gi;
 const PALETTE = '(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)';
 const UTIL_C = '(?:bg|text|border|ring|ring-offset|fill|stroke|from|via|to|divide|outline|decoration|accent|caret|shadow|placeholder|border-[xytblrse])';
 const RE_PALETTE = new RegExp(`(?<![\\w-])(?:[a-z0-9-]+:)*${UTIL_C}-${PALETTE}-(?:50|100|200|300|400|500|600|700|800|900|950)(?:/\\d+)?(?![\\w-])`, 'g');
@@ -105,7 +105,8 @@ const SIZES = '(?:micro|display|xs|sm|base|lg|xl|2xl|3xl|4xl|5xl|6xl|7xl|8xl|9xl
 // 규격 v1 §1 — 정한 글자 눈금 10단. 이 밖의 눈금 이름(3xl 이상 · editorial-body · editorial-claim)은 «눈금 밖».
 export const ALLOWED_STEPS: ReadonlySet<string> = new Set(['micro', 'editorial-meta', 'xs', 'editorial-ui', 'sm', 'base', 'lg', 'xl', '2xl', 'display']);
 const RE_TEXT_SCALE = new RegExp(`(?<![\\w-])(?:[a-z0-9-]+:)*text-(${SIZES})(?![\\w-])`, 'g');
-const RE_TEXT_ARB = /(?<![\w-])(?:[a-z0-9-]+:)*text-\[\s*(-?\d+(?:\.\d+)?)(px|rem|em)\s*\]/g;
+const RE_TEXT_ARB = /(?<![\w-])(?:[a-z0-9-]+:)*text-\[\s*(?:length:\s*)?(-?\d+(?:\.\d+)?)(px|rem|em)\s*\]/g;
+const RE_TEXT_ARB_FN = /(?<![\w-])(?:[a-z0-9-]+:)*text-\[\s*(?:length:\s*)?(?:calc|clamp|min|max)\(/g;
 const RE_FONTSIZE_INLINE = /\bfont-?[sS]ize\s*:\s*['"]?(-?\d+(?:\.\d+)?)(px|rem|em)?/g;
 
 const SP = '(?:p|px|py|pt|pb|pl|pr|ps|pe|m|mx|my|mt|mb|ml|mr|ms|me|gap|gap-x|gap-y|space-x|space-y|inset|inset-x|inset-y|top|left|right|bottom|start|end)';
@@ -116,29 +117,47 @@ const RE_RADIUS_ARB = /(?<![\w-])(?:[a-z0-9-]+:)*rounded(?:-[a-z]{1,2})?-\[\s*[\
 const RE_RADIUS_INLINE = /\bborder(?:[A-Z][a-z]+)?Radius\s*:\s*['"]?\d+(?:\.\d+)?/g;
 
 // ---- 주석 지우기 ----
+/** 줄 앞부분(prefix)이 끝난 자리가 따옴표 문자열(' " `) 안이면 true — 거기 나온 `//`는 주석이 아니라 문자열의 글자다. */
+function endsInsideString(prefix: string): boolean {
+  let quote = '';
+  for (let k = 0; k < prefix.length; k += 1) {
+    const ch = prefix[k];
+    if (quote) {
+      if (ch === '\\') k += 1;
+      else if (ch === quote) quote = '';
+    } else if (ch === "'" || ch === '"' || ch === '`') {
+      quote = ch;
+    }
+  }
+  return quote !== '';
+}
+
 /**
- * 주석을 지운다(줄 수는 지키려고 줄바꿈은 남긴다). 따옴표 상태는 따라가지 않는다 — JSX 글 속 아포스트로피(don't)나 정규식 리터럴이
- * 상태를 어긋나게 해 뒤 주석이 안 지워지던 적이 있다. 대신 시작 표지 앞 글자로 거른다:
+ * 주석을 지운다(줄 수는 지키려고 줄바꿈은 남긴다). 시작 표지 앞 글자로 거른다:
  * `//`는 앞이 공백 · ; { } , ( ) [ ] = > 일 때만(URL의 `://`는 앞이 `:`라 빠진다),
  * `/*`는 앞이 공백 · ; { } , ( = > 일 때만(경로 글 `src/** /*.ts`는 앞이 글자 · `*`라 빠진다).
+ * 거기에 더해 그 줄의 앞부분이 따옴표 문자열 안에서 끝나면 주석이 아니다(`"a // text-[13px]"`의 뒤 클래스를 지우지 않는다).
+ * 반대 방향의 오판 — JSX 글 속 아포스트로피(don't)나 정규식 리터럴의 따옴표 뒤에 같은 줄 주석이 오는 경우 — 은 그 주석을
+ * 지우지 못해 값을 «더 세는» 쪽(실패 쪽)으로만 틀린다. 여러 줄 템플릿 리터럴 안의 «줄 전체가 // 로 시작하는 줄»은 못 가린다(한계).
  */
 export function stripComments(src: string): string {
   const out: string[] = [];
   const n = src.length;
   const ws = ' \t\n';
+  const insideString = (at: number): boolean => endsInsideString(src.slice(src.lastIndexOf('\n', at - 1) + 1, at));
   let i = 0;
   while (i < n) {
     const c = src[i];
     const nxt = i + 1 < n ? src[i + 1] : '';
     const prev = i ? src[i - 1] : '\n';
-    if (c === '/' && nxt === '*' && (ws + ';{},(=>').includes(prev)) {
+    if (c === '/' && nxt === '*' && (ws + ';{},(=>').includes(prev) && !insideString(i)) {
       const k = src.indexOf('*/', i + 2);
       const j = k < 0 ? n : k + 2;
       out.push(src.slice(i, j).replace(/[^\n]/g, ' '));
       i = j;
       continue;
     }
-    if (c === '/' && nxt === '/' && (i === 0 || (ws + ';{},()[]=>').includes(prev))) {
+    if (c === '/' && nxt === '/' && (i === 0 || (ws + ';{},()[]=>').includes(prev)) && !insideString(i)) {
       const k = src.indexOf('\n', i);
       const j = k < 0 ? n : k;
       out.push(' '.repeat(j - i));
@@ -159,7 +178,7 @@ function lineOf(text: string, pos: number): number {
 
 // ---- color-mix 인자가 전부 토큰이면 이미 바탕을 거친 값 ----
 const RE_MIX_SPACE = /^in\s+[a-z0-9-]+(?:\s+(?:shorter|longer|increasing|decreasing)\s+hue)?$/i;
-const RE_MIX_PART = /^(?:\d+(?:\.\d+)?%\s*)?var\([\s\S]*\)(?:\s*\d+(?:\.\d+)?%)?$/;
+const RE_MIX_PART = /^(?:\d+(?:\.\d+)?%\s*)?var\(\s*--[\w-]+\s*\)(?:\s*\d+(?:\.\d+)?%)?$/;
 
 /**
  * `color-mix( … )`의 색 인자가 전부 `var(…)` 토큰이면 true. 괄호 짝을 따라 인자 목록을 얻고 괄호 밖 쉼표로 쪼갠다.
@@ -232,6 +251,7 @@ export function scanText(text: string): Hits {
   addAll('color_palette', RE_PALETTE);
   addAll('color_bw', RE_BW);
   addAll('font_arb', RE_TEXT_ARB);
+  addAll('font_arb', RE_TEXT_ARB_FN);
   addAll('font_inline', RE_FONTSIZE_INLINE);
   addAll('space_arb', RE_SPACE_ARB);
   addAll('space_inline', RE_SPACE_INLINE);
@@ -296,7 +316,8 @@ export function loadExceptions(filePath: string): ExceptionEntry[] {
   return parsed.exceptions ?? [];
 }
 
-const sameFile = (rel: string, file: string): boolean => rel === file || rel.endsWith(`/${file}`);
+// 명단의 file은 src 기준 경로 «정확히 일치»만 가린다 — 이름만 같은 다른 폴더의 파일까지 가리지 않는다.
+const sameFile = (rel: string, file: string): boolean => rel === file;
 
 // ---- 판정 ----
 export interface GroupStat {

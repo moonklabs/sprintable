@@ -119,7 +119,7 @@ story #3876에서 삭제됐다. 현재 라이브 문서 레이아웃은 `docs-cl
 
 **파일**: `src/components/ui/contextual-panel-layout.tsx`
 
-우측 컨텍스트 패널 드로어. `bg-black/55` 오버레이만 사용 — **준수 중**.
+우측 컨텍스트 패널 드로어. `bg-scrim-2` 오버레이만 사용 — **준수 중**.
 
 ### Page Shell 공통 규칙
 

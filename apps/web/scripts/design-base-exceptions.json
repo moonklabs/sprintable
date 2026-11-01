@@ -4,7 +4,7 @@
     "여기에는 «바탕이 정할 수 없는 값»(제3자 브랜드색 · 사용자 데이터 색 · 라이브러리 입력 · 독립 문서 문자열)만 올린다.",
     "항목마다 why(까닭)가 필수이고, 적은 kinds가 그 파일에서 0건이 되면 가드가 낡은 항목으로 실패시킨다.",
     "측정 도구가 값을 오인하는 경우(예: 토큰만 섞는 color-mix)는 여기가 아니라 verify-design-base.ts의 스캐너를 고친다.",
-    "file은 src 기준 경로(접미 일치), kinds는 verify-design-base.ts의 OFF_KINDS 이름."
+    "file은 src 기준 경로(정확히 일치), kinds는 verify-design-base.ts의 OFF_KINDS 이름."
   ],
   "exceptions": [
     {

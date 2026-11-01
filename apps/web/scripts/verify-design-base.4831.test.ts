@@ -55,7 +55,27 @@ describe('스캐너 — 안 잡아야 하는 것', () => {
   it('href 앵커 #abc 는 색이 아니다', () => expect(n(sc('<a href="#abc">x</a>'), 'color_literal')).toBe(0));
   it('엔티티 &#39; 는 색이 아니다', () => expect(n(sc("const s = 'it&#39;s';"), 'color_literal')).toBe(0));
   it('영문자 뒤 xrgba( 는 색 함수가 아니다', () => expect(n(sc('const mergebgrgba = 1; foo_rgbaX(1)'), 'color_fn')).toBe(0));
-  it('var() 안 hsl 은 바탕 경유', () => expect(n(sc('color: hsl(var(--x))'), 'color_fn')).toBe(0));
+  it('색 함수가 var()를 감싸도 센다 — 토큰은 var(--x) 그대로 쓴다(hsl · rgba 래퍼 금지)', () => {
+    expect(n(sc('color: hsl(var(--x))'), 'color_fn')).toBe(1);
+    expect(n(sc('background: rgba(var(--x), .5)'), 'color_fn')).toBe(1);
+    expect(n(sc('color: var(--x)'), 'color_fn')).toBe(0);
+  });
+  it('타입 지정 임의 글자 크기도 센다(text-[length:13px] · calc · clamp), 값이 없는 inherit 는 아니다', () => {
+    expect(n(sc('className="text-[length:13px]"'), 'font_arb')).toBe(1);
+    expect(n(sc('className="md:text-[length:1.25rem]"'), 'font_arb')).toBe(1);
+    expect(n(sc('className="text-[clamp(1rem,2vw,2rem)]"'), 'font_arb')).toBe(1);
+    expect(n(sc('className="text-[length:inherit]"'), 'font_arb')).toBe(0);
+  });
+  it('문자열 속 // 는 주석이 아니다 — 뒤의 진짜 클래스를 지우지 않는다', () => {
+    expect(n(sc('const a = "prefix // text-[13px]";'), 'font_arb')).toBe(1);
+    expect(n(sc("const a = 'x /* y */ p-[7px]';"), 'space_arb')).toBe(1);
+    expect(n(sc('const a = `list // rounded-[5px]`;'), 'radius_arb')).toBe(1);
+  });
+  it('같은 줄 끝 주석은 지운다(문자열 밖일 때), 따옴표가 닫힌 뒤의 주석도', () => {
+    expect(n(sc('const a = 1; // text-[13px]'), 'font_arb')).toBe(0);
+    expect(n(sc('const a = "it\'s"; // text-[13px]'), 'font_arb')).toBe(0);
+    expect(n(sc('const a = 1; /* p-[7px] */ const b = 2;'), 'space_arb')).toBe(0);
+  });
   it('토큰 클래스는 안 센다', () => expect(n(sc('className="bg-background text-foreground p-4 text-sm rounded-md"'), 'color_palette')).toBe(0));
   it('눈금 간격은 안 센다', () => expect(n(sc('className="p-4 gap-2 mt-6 py-0.5"'), 'space_arb')).toBe(0));
   it('text-sm 은 임의 크기가 아니다', () => expect(n(sc('className="text-sm"'), 'font_arb')).toBe(0));
@@ -76,6 +96,10 @@ describe('스캐너 — color-mix (토큰만 섞으면 바탕을 이미 거친 �
   it('둘 다 리터럴이면 센다', () => expect(n(sc('color-mix(in srgb, red 40%, blue)'), 'color_fn')).toBe(1));
   it('토큰 하나뿐(짝 없음)이면 센다', () => expect(n(sc('color-mix(in oklch, var(--a) 30%)'), 'color_fn')).toBe(1));
   it('괄호가 닫히지 않으면 센다', () => expect(n(sc('color-mix(in oklch, var(--a) 30%, var(--b)'), 'color_fn')).toBe(1));
+  it('var()의 폴백에 리터럴 색이 숨어 있으면 센다', () => {
+    expect(n(sc('color-mix(in oklch, var(--a, red) 30%, var(--b) 70%)'), 'color_fn')).toBe(1);
+    expect(n(sc('color-mix(in oklch, var(--a) 30%, var(--b, #fff) 70%)'), 'color_fn')).toBe(1);
+  });
 });
 
 // ---- 판정 ----
@@ -160,10 +184,16 @@ describe('판정', () => {
     expect(gone.problems.some((p) => p.includes('그 파일이 없다'))).toBe(true);
   });
 
-  it('명단 파일은 경로 끝 일치만 한다(이름 일부가 겹치는 다른 파일은 안 가려진다)', () => {
-    const files = cleanTree({ 'components/one/xbrand.tsx': 'export const E = { fill: "#4285F4" };\n' });
-    const r = run(files, [{ file: 'brand.tsx', kinds: ['color_literal'], why: BASE_REASON }]);
-    expect(r.offFiles.map((o) => o.file)).toEqual(['components/one/xbrand.tsx']);
+  it('명단 파일은 경로 정확히 일치만 한다(이름만 같은 다른 폴더의 파일은 안 가려진다)', () => {
+    const brand = 'export const E = { fill: "#4285F4" };\n';
+    const files = cleanTree({ 'components/one/brand.tsx': brand, 'components/one/deep/brand.tsx': brand, 'components/one/xbrand.tsx': brand });
+    // 파일 이름만 적으면 아무것도 가리지 않고, 낡은 항목(그 파일이 없음)으로 실패한다
+    const nameOnly = run(files, [{ file: 'brand.tsx', kinds: ['color_literal'], why: BASE_REASON }]);
+    expect(nameOnly.offFiles.map((o) => o.file).sort()).toEqual(['components/one/brand.tsx', 'components/one/deep/brand.tsx', 'components/one/xbrand.tsx']);
+    expect(nameOnly.problems.some((p) => p.includes('그 파일이 없다'))).toBe(true);
+    // 전체 경로를 적으면 그 한 파일만 가린다
+    const exact = run(files, [{ file: 'components/one/brand.tsx', kinds: ['color_literal'], why: BASE_REASON }]);
+    expect(exact.offFiles.map((o) => o.file).sort()).toEqual(['components/one/deep/brand.tsx', 'components/one/xbrand.tsx']);
   });
 
   it('묶음 경로가 사라지거나 비면 실패한다(폴더 이동으로 가드가 헛도는 것을 막는다)', () => {
