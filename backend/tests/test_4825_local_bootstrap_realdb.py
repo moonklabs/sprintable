@@ -661,6 +661,63 @@ async def test_21e_bootstrap_takes_the_persons_session_lock_before_it_stores_a_s
     assert events == ["lock exclusive=False", "store"], events
 
 
+async def test_21f_bootstrap_waits_for_a_revoke_in_flight_but_not_for_a_sign_in(embedded):
+    """the session lock is real, not just called: while another transaction holds the person's lock EXCLUSIVELY (a password set / change in the middle of ending every
+    session) a bootstrap does not store a session; while it is held SHARED (another issuer) a bootstrap goes through"""
+    from app.routers.auth import _SESSION_LOCK_NAMESPACE
+
+    async def _waiting_for_an_advisory_lock() -> int:
+        return (await _sql("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted", fetch="one"))[0]
+
+    async with _client(embedded) as c:
+        assert (await c.post(URL, headers=_h())).status_code == 200  # creates the owner
+        uid = str((await _owner_row()).id)
+        eng = create_async_engine(_ASYNC, poolclass=NullPool)
+        try:
+            for mode, must_wait in (("pg_advisory_xact_lock", True), ("pg_advisory_xact_lock_shared", False)):
+                async with async_sessionmaker(eng)() as holder:
+                    await holder.execute(text(f"SELECT {mode}(:ns, hashtext(:u))"), {"ns": _SESSION_LOCK_NAMESPACE, "u": uid})
+                    task = asyncio.create_task(c.post(URL, headers=_h()))
+                    for _ in range(3000):  # a bounded number of looks, not a time budget
+                        if task.done() or await _waiting_for_an_advisory_lock():
+                            break
+                        await asyncio.sleep(0.01)
+                    assert (not task.done()) is must_wait, mode
+                    await holder.commit()
+                assert (await task).status_code == 200, mode
+        finally:
+            await eng.dispose()
+
+
+async def test_21g_on_an_embedded_install_no_auth_refusal_sends_back_what_was_typed_a_hosted_one_is_as_before(embedded, monkeypatch):
+    """a password in the body of any /api/v2/auth/ call that is refused as malformed is not echoed on an embedded install (the mailed-request route and the
+    sign-in are reachable directly); with the switch off the answer is exactly the framework default, `input` included"""
+    from httpx import ASGITransport, AsyncClient
+
+    typed = "sh1A!"
+    async with _client(embedded) as c:
+        tokens = await _owner_session(c)
+    calls = (
+        ("/api/v2/auth/set-password/request", {"new_password": typed}, _bearer(tokens)),
+        ("/api/v2/auth/token", {"email": OWNER_EMAIL, "password": 123456789}, {}),
+    )
+
+    async def _answers() -> list[str]:
+        out = []
+        async with AsyncClient(transport=ASGITransport(app=real_app, raise_app_exceptions=False), base_url="http://test") as rc:
+            for path, payload, hdr in calls:
+                r = await rc.post(path, headers=hdr, json=payload)
+                assert r.status_code == 422, (path, r.text)
+                out.append(r.text)
+        return out
+
+    for text_ in await _answers():
+        assert typed not in text_ and "123456789" not in text_ and '"input"' not in text_, text_
+    monkeypatch.delenv("SPRINTABLE_EMBEDDED", raising=False)  # a hosted process: the default answer, unchanged
+    hosted = await _answers()
+    assert all('"input"' in text_ for text_ in hosted), hosted
+
+
 async def test_22_the_route_exists_only_on_an_embedded_install(monkeypatch):
     from fastapi import FastAPI
 

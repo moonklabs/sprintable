@@ -315,8 +315,9 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 
 
 _CLOCK_PRESS_PATH = re.compile(r"/api/v2/desktop/setups/[^/]+/clock")
-# story 4825 (AC6): the chosen password is never sent back in a refusal either (the route exists only on an embedded install; on a hosted app this path is a 404 before any validation)
-_LOCAL_SET_PASSWORD_PATH = re.compile(r"/api/v2/auth/local-set-password")
+# story 4825 (AC6): on the desktop app's own server (embedded install) nothing under /api/v2/auth/ sends back what was typed — a password in any auth body (the owner's new password, a sign-in) is not echoed
+# by a refusal. Keyed on the embedded switch, so a hosted deployment's answers are exactly as before.
+_AUTH_PATH_PREFIX = "/api/v2/auth/"
 
 
 @app.exception_handler(RequestValidationError)
@@ -333,7 +334,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             )
     # story #4733 (S5 · P2): what a person typed into a clock edit is never sent back in a refusal — FastAPI's default 422 carries each error's `input` (for a body-level error, the WHOLE body). On the phone's
     # clock route no error carries it; the rest of the answer is the default's, and every other route's answer is untouched.
-    if _CLOCK_PRESS_PATH.fullmatch(request.url.path) or _LOCAL_SET_PASSWORD_PATH.fullmatch(request.url.path):
+    if _CLOCK_PRESS_PATH.fullmatch(request.url.path) or (settings.is_embedded and request.url.path.startswith(_AUTH_PATH_PREFIX)):
         exc = RequestValidationError([{k: v for k, v in err.items() if k != "input"} for err in exc.errors()])
     return await request_validation_exception_handler(request, exc)
 
