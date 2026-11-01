@@ -43,12 +43,6 @@ import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-# story #4834 (AC4) — the gateway stream's lifespan end waits `_LIFESPAN_END_GRACE_SEC` (20 s in production) before its cleanup, in a task of its own. In the suite
-# a task still waiting when a test's event loop closes would run its cleanup on the shared pool's connection on that closing loop and leave it for the next test
-# («Event loop is closed» · «Future attached to a different loop», seen in CI shard 3/6 on test_4580 right after a test that ends by `lifespan_reconnect`). `0` =
-# the old inline cleanup, no task. Set before any test module imports the gateway; the tests of the grace itself patch a positive value and finish their task.
-os.environ.setdefault("AGENT_SSE_LIFESPAN_END_GRACE_SEC", "0")
-
 # story #4009(critical, 페드루 PO 確定 2026-09-17) — channel_adapters.py의 8개
 # 테스트용 채널(sandbox·instagram_sandbox·facebook_sandbox·ads_sandbox·x_sandbox·
 # youtube_sandbox·stibee_sandbox·ghost_sandbox)이 전부 `SANDBOX_CHANNEL_ENABLED`
@@ -583,9 +577,6 @@ async def _dispose_global_engine_for_non_destructive_tests():
     끼워 넣는 것으로 근본 해결."""
     yield
     from app.core.database import engine as _global_engine
-    from app.services import pg_pubsub
-
-    await _reap_waiting_tasks()  # story #4834: the same reap as the other end-of-test hooks (bounded)
     await _global_engine.dispose()
 
 
@@ -597,34 +588,6 @@ DESTRUCTIVE_DRAIN_TIMEOUT_S = 10.0
 _DRAIN_ROUNDS = 5  # 배달이 또 배달을 띄울 수 있어(after_commit 사슬) 빌 때까지 몇 번
 
 
-async def _reap_waiting_tasks() -> None:
-    """story #4834 — the end-of-test step every hook shares: cut the tasks that wait on purpose (the gateway's lifespan-end grace) and let their «clean up now» path run in THIS
-    loop, for at most 10 s. A stream's end that is still running (`_end_connection`, an ordinary background task) may register its waiting task only after the first look, so
-    after each cut those ends are waited for and the look is repeated. One still running after that is a failure with its name, not a silent leftover (a shielded cleanup that
-    outlives the test's loop would use the shared pool on a closing loop)."""
-    import asyncio
-
-    from app.services import pg_pubsub
-
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + 10.0
-    for _ in range(_DRAIN_ROUNDS):
-        await pg_pubsub.cancel_first_tasks(max(0.0, deadline - loop.time()))
-        ends = [t for t in pg_pubsub._background_tasks if not t.done() and t.get_loop() is loop and "_end_connection" in t.get_coro().__qualname__]
-        if not ends:
-            break
-        await asyncio.wait(ends, timeout=max(0.0, deadline - loop.time()))
-    else:
-        await pg_pubsub.cancel_first_tasks(max(0.0, deadline - loop.time()))
-    left = [t for t in pg_pubsub._cancel_first_tasks if not t.done() and t.get_loop() is loop]
-    if left:
-        pytest.fail(
-            "story #4834 — a task that waits on purpose is still running 10 s after it was cut: "
-            + ", ".join(sorted(t.get_coro().__qualname__ for t in left)),
-            pytrace=False,
-        )
-
-
 async def drain_global_background_work(timeout: float = DESTRUCTIVE_DRAIN_TIMEOUT_S) -> None:
     """이 루프에 뜬 `fire_and_forget` 작업을 끝까지 기다린 뒤 전역 엔진 풀을 닫는다. 상한을 넘기면 남은 작업을 취소하고 이름과 함께 실패."""
     import asyncio
@@ -632,7 +595,6 @@ async def drain_global_background_work(timeout: float = DESTRUCTIVE_DRAIN_TIMEOU
     from app.core.database import engine as _global_engine
     from app.services import pg_pubsub
 
-    await _reap_waiting_tasks()  # story #4834: a task that waits on purpose (the gateway's lifespan-end grace) is cut first and cleans up in THIS loop
     loop = asyncio.get_running_loop()
     leftover: list[str] = []
     for _ in range(_DRAIN_ROUNDS):
@@ -644,7 +606,7 @@ async def drain_global_background_work(timeout: float = DESTRUCTIVE_DRAIN_TIMEOU
             leftover = sorted(t.get_coro().__qualname__ for t in still)
             for t in still:
                 t.cancel()
-            await asyncio.wait(still, timeout=timeout)  # story #4834: bounded (a cancel-resistant task must not hang the teardown)
+            await asyncio.gather(*still, return_exceptions=True)
             break
     await _global_engine.dispose()
     if leftover:
@@ -657,9 +619,7 @@ async def drain_global_background_work(timeout: float = DESTRUCTIVE_DRAIN_TIMEOU
 
 async def _dispose_global_engine() -> None:
     from app.core.database import engine as _global_engine
-    from app.services import pg_pubsub
 
-    await _reap_waiting_tasks()  # story #4834: no task that waits on purpose outlives the test's loop (its «clean up now» path runs here, before the dispose)
     await _global_engine.dispose()
 
 

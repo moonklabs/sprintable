@@ -55,6 +55,18 @@ async def clear_online(member_id: str) -> None:
     await redis_shared.with_fallback(_op, lambda: None)
 
 
+async def expire_online(member_id: str, seconds: float) -> None:
+    """story #4834 — a stream that ended by its lifespan: shorten the online key to `seconds` instead of deleting it (the client reconnects at once and its first tick
+    renews the key; one that does not reads as gone when the key runs out). Nothing to shorten (no key · off · Redis down) → no-op."""
+    if not _enabled():
+        return
+
+    async def _op(client) -> None:
+        await client.pexpire(_key(member_id), max(int(seconds * 1000), 1))
+
+    await redis_shared.with_fallback(_op, lambda: None)
+
+
 async def get_online_map(member_ids) -> dict[str, str]:
     """member_ids 중 online 키가 살아있는 것 → {member_id: ts}. 라우터 last_seen_at 주입용.
 

@@ -35,8 +35,14 @@ async def _agents_with_live_stream(db: AsyncSession, agent_ids: list[uuid.UUID])
         live = {a for a, online in zip(agent_ids, answers) if online}
         unknown = [a for a, online in zip(agent_ids, answers) if online is None]
         if unknown:
+            # story #4834: a row stamped by a lifespan end has its `connected_at` set so that the lifetime window runs out when its expiry does
+            from app.routers.agent_gateway import _MAX_SSE_LIFETIME_SEC
+
+            life_cutoff = datetime.now(timezone.utc) - timedelta(seconds=_MAX_SSE_LIFETIME_SEC)
             rows = (await db.execute(
-                select(AgentGatewaySession.agent_id).where(AgentGatewaySession.agent_id.in_(unknown)).distinct()
+                select(AgentGatewaySession.agent_id).where(
+                    AgentGatewaySession.agent_id.in_(unknown), AgentGatewaySession.connected_at >= life_cutoff,
+                ).distinct()
             )).scalars().all()
             live |= set(rows)
         return live

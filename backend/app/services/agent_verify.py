@@ -154,9 +154,14 @@ async def _has_fresh_session(db: AsyncSession, agent_id: uuid.UUID) -> bool:
         if online is not None:
             return online
         # Redis 다운 → 세션-row 존재(freshness 아님) 폴백
+        # story #4834: …within the connection lifetime — a row stamped by a lifespan end has its `connected_at` set so that this window runs out when its expiry does
+        from app.routers.agent_gateway import _MAX_SSE_LIFETIME_SEC
+
+        life_cutoff = datetime.now(timezone.utc) - timedelta(seconds=_MAX_SSE_LIFETIME_SEC)
         row = (await db.execute(
             select(AgentGatewaySession.id).where(
                 AgentGatewaySession.agent_id == agent_id,
+                AgentGatewaySession.connected_at >= life_cutoff,
             ).limit(1)
         )).first()
         return row is not None
