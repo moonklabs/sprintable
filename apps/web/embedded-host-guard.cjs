@@ -1,4 +1,5 @@
 'use strict';
+/* eslint-disable @typescript-eslint/no-require-imports -- plain CommonJS on purpose: copied next to Next's standalone server.js and run by the app without a build step */
 // story 4824 (security lens AC7) — the desktop app's own web server answers ONLY requests whose `Host` is the loopback address WITH ITS OWN PORT, decided at the HTTP
 // SERVER'S DOOR, before Next routes anything. A page that rebinds its own DNS name to 127.0.0.1 reaches this port with `Host: its-name`; whatever it asks for — a page, a
 // route handler that calls the backend, a path a build-time rewrite would hand to the backend, in any spelling (other letter case, encoded separators, dot segments,
