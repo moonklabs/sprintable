@@ -7,6 +7,7 @@ import { entityTypeLabel, getEntityQuery, type EntityResult } from '@/components
 import { translateEntityStatus } from '@/components/chat/entity-status-labels';
 import { useEntityPicker } from '@/hooks/use-entity-picker';
 import { AnchoredPopover } from '@/components/shared/anchored-popover';
+import { Textarea } from '@/components/ui/textarea';
 
 interface EntityAwareTextareaProps {
   value: string;
@@ -75,7 +76,7 @@ export function EntityAwareTextarea({ value, onChange, projectId, placeholder, c
 
   return (
     <div className="relative">
-      <textarea
+      <Textarea
         ref={textareaRef}
         data-testid={dataTestId}
         value={value}

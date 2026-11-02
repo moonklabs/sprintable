@@ -413,3 +413,17 @@ describe('ContextSwitcherChip — 지금 프로젝트 aria-current([SID:4380])',
     expect(current.some((t) => t.includes('Landing'))).toBe(false);
   });
 });
+
+// story 4831 부품 교체(공용 부품 ④) — 프로젝트 검색 칸이 바탕 Input이 되어도 높이(h-10) · 돋보기 자리(pl-9) · 면(bg-muted) · 본문색이 그대로다.
+describe('ContextSwitcherChip — 바탕 부품(story 4831)', () => {
+  it('프로젝트 검색 칸은 바탕 Input(type=search)이고 h-10 · pl-9 · pr-3 · bg-muted · text-foreground를 낱말 그대로 가진다', async () => {
+    await act(async () => {
+      root.render(wrap(<ContextSwitcherChip orgs={ORGS} currentOrgId="org-1" projects={PROJECTS} currentProjectId="proj-1" />));
+    });
+    await act(async () => { container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const search = document.querySelector('input[type="search"]') as HTMLInputElement;
+    expect(search.dataset.slot).toBe('input');
+    const tokens = search.className.split(/\s+/);
+    for (const t of ['h-10', 'pl-9', 'pr-3', 'bg-muted', 'text-foreground']) expect(tokens, t).toContain(t);
+  });
+});

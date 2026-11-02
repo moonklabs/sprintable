@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import type { SupportWidgetSession } from '@/hooks/use-support-widget-session';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { Input } from '@/components/ui/input';
 
 /**
  * story #3260 — 헤더가 반전 톤(bg-foreground/text-background, tooltip.tsx·avatar.tsx와 동일
@@ -265,13 +266,13 @@ export function SupportWidgetPanelBody({ session }: { session: SupportWidgetSess
           setDraft('');
         }}
       >
-        <input
+        <Input
           type="text"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={t('inputPlaceholder')}
           disabled={session.status !== 'ready' || session.sending || session.isEnded}
-          className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
+          className="h-auto min-w-0 flex-1 text-foreground bg-background dark:bg-background"
         />
         {!session.isEnded && session.conversationId !== null ? (
           <Button

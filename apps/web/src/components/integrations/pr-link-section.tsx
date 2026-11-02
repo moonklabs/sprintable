@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { GitPullRequest, ExternalLink, X, Plus, AlertTriangle, Check, Loader2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 
 import { fetchWithAuth } from '@/lib/db/client';
@@ -266,25 +267,25 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
 
       {/* 추가 — owner는 installation account(account_login)로 고정(타owner 불가·anti-IDOR), repo명+PR# 입력 */}
       <div className="flex flex-wrap items-end gap-2 pt-1">
-        <div className="flex min-w-0 flex-1 items-center gap-1 rounded-lg border border-border bg-background px-2 py-1 text-editorial-meta">
+        <div className="flex min-w-0 flex-1 items-center gap-1 text-editorial-meta">
           <span className="shrink-0 font-mono text-muted-foreground">{status.account_login}/</span>
-          <input
+          <Input
             value={repoName}
             onChange={(e) => setRepoName(e.target.value)}
             placeholder={t('repoPlaceholder')}
             aria-label={t('repoAria')}
-            className="min-w-0 flex-1 bg-transparent font-mono text-base lg:text-editorial-meta text-foreground outline-none placeholder:text-muted-foreground"
+            className="h-auto min-w-0 flex-1 px-2 py-1 font-mono lg:text-editorial-meta text-foreground bg-background dark:bg-background"
           />
         </div>
-        <div className="flex shrink-0 items-center gap-1 rounded-lg border border-border bg-background px-2 py-1 text-editorial-meta">
+        <div className="flex shrink-0 items-center gap-1 text-editorial-meta">
           <span className="shrink-0 text-muted-foreground">#</span>
-          <input
+          <Input
             value={prNum}
             onChange={(e) => setPrNum(e.target.value.replace(/[^0-9]/g, ''))}
             inputMode="numeric"
             placeholder={t('prPlaceholder')}
             aria-label={t('prAria')}
-            className="w-16 bg-transparent text-foreground outline-none placeholder:text-muted-foreground text-base lg:text-editorial-meta"
+            className="h-auto w-20 px-2 py-1 lg:text-editorial-meta text-foreground bg-background dark:bg-background"
           />
         </div>
         <Button

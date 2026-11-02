@@ -28,6 +28,8 @@ import { orgRoleLabel } from '@/lib/org-member-role';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { ProjectLimitBanner } from '@/components/nav/project-limit-banner';
 import { NewProjectMacBlock } from '@/components/nav/new-project-mac-block';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 
 interface ContextSwitcherChipProps {
   orgs: OrgSwitcherItem[];
@@ -144,12 +146,12 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
             <div className="sticky top-0 z-10 bg-background px-1 pb-2 pt-2">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-                <input
+                <Input
                   type="search"
                   value={s.searchQuery}
                   onChange={(e) => s.setSearchQuery(e.target.value)}
                   placeholder={t('switcherProjectSearchPlaceholder')}
-                  className="h-10 w-full rounded-md border border-border bg-muted pl-9 pr-3 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  className="h-10 bg-muted pl-9 pr-3 text-foreground dark:bg-muted"
                 />
               </div>
             </div>
@@ -369,9 +371,9 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
               <label className="text-sm font-medium" htmlFor="chip-proj-name">
                 {t('switcherProjectNameLabel')} <span className="text-destructive">*</span>
               </label>
-              <input
+              <Input
                 id="chip-proj-name"
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                className="h-auto bg-background dark:bg-background"
                 placeholder={t('switcherProjectNamePlaceholder')}
                 value={s.newProjectName}
                 onChange={(e) => s.setNewProjectName(e.target.value)}
@@ -383,9 +385,9 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
               <label className="text-sm font-medium" htmlFor="chip-proj-desc">
                 {t('switcherDescriptionLabel')} <span className="text-muted-foreground text-xs">{t('switcherOptionalLabel')}</span>
               </label>
-              <textarea
+              <Textarea
                 id="chip-proj-desc"
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                className="min-h-0 bg-background dark:bg-background"
                 placeholder={t('switcherProjectDescPlaceholder')}
                 rows={3}
                 value={s.newProjectDesc}

@@ -45,9 +45,9 @@ describe('[SID:4681] ProjectAccessPicker', () => {
     fetchWithAuth.mockResolvedValue({ ok: true, json: async () => ({ data: AGENTS }) });
     await draw([]);
     expect(fetchWithAuth).toHaveBeenCalledWith('/api/team-members?type=agent');
-    const boxes = [...host.querySelectorAll<HTMLInputElement>('[data-testid="project-access-checkbox"]')];
+    const boxes = [...host.querySelectorAll<HTMLElement>('[data-testid="project-access-checkbox"]')];
     expect(boxes.map((b) => b.getAttribute('data-agent-id'))).toEqual(['a-1', 'a-2']);
-    expect(boxes.every((b) => !b.checked)).toBe(true);
+    expect(boxes.every((b) => b.getAttribute('aria-checked') !== 'true')).toBe(true);
     // Yuna §G-3 (ux1-copy-1013 · story 4680/4677 — «프로젝트 팀에 넣기» words, replacing §F's «접근» ones in one go) letter for letter
     expect(host.querySelector('legend')?.textContent).toBe('프로젝트 팀에 넣을 에이전트 (선택)');
     expect(host.textContent).toContain('고른 에이전트가 이 프로젝트 팀에 들어가 일해요. 지금 안 골라도 돼요.');
@@ -58,8 +58,8 @@ describe('[SID:4681] ProjectAccessPicker', () => {
   it('a check adds the id, an uncheck removes it (the dialog owns the list)', async () => {
     fetchWithAuth.mockResolvedValue({ ok: true, json: async () => ({ data: AGENTS }) });
     const onChange = await draw(['a-2']);
-    const [b1, b2] = [...host.querySelectorAll<HTMLInputElement>('[data-testid="project-access-checkbox"]')];
-    expect(b2!.checked).toBe(true);
+    const [b1, b2] = [...host.querySelectorAll<HTMLElement>('[data-testid="project-access-checkbox"]')];
+    expect(b2!.getAttribute('aria-checked')).toBe('true');
     await act(async () => { b1!.click(); });
     expect(onChange).toHaveBeenLastCalledWith(['a-2', 'a-1']);
     await act(async () => { b2!.click(); });
@@ -88,5 +88,49 @@ describe('[SID:4681] ProjectAccessPicker', () => {
     expect(fetchWithAuth).toHaveBeenCalledTimes(2);
     expect(host.querySelector('[data-testid="project-access-load-error"]')).toBeNull();
     expect(host.querySelectorAll('[data-testid="project-access-checkbox"]').length).toBe(2);
+  });
+});
+
+// story 4831 부품 교체(공용 부품 ④) — 접근 체크 칸이 바탕 Checkbox가 되어도 라벨과 이어지고(숨은 입력의 id) 스페이스로 켜고 끄며 엔터로는 켜지지 않는다.
+describe('[SID:4831] ProjectAccessPicker — 바탕 Checkbox', () => {
+  it('라벨 글자를 누르는 것(숨은 입력 누름)과 스페이스가 켜고 끄며, 엔터는 켜지 않는다', async () => {
+    fetchWithAuth.mockResolvedValue({ ok: true, json: async () => ({ data: AGENTS }) });
+    const onChange = await draw([]);
+    const label = host.querySelector('label') as HTMLLabelElement;
+    const hidden = host.querySelector(`input[type="checkbox"]#${label.htmlFor}`) as HTMLInputElement;
+    expect(hidden).toBeTruthy(); // 라벨의 htmlFor가 가리키는 숨은 입력
+    expect(hidden.labels?.[0]).toBe(label); // 라벨과 입력이 실제로 이어져 있다(htmlFor가 깨지면 여기서 빨개진다)
+    await act(async () => { label.click(); }); // 사람이 라벨 글자를 누르는 길 그대로
+    expect(onChange).toHaveBeenLastCalledWith(['a-1']);
+    const box = host.querySelectorAll<HTMLElement>('[data-testid="project-access-checkbox"]')[1]!;
+    await act(async () => {
+      box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      box.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+    expect(onChange).toHaveBeenCalledTimes(1); // 엔터는 켜지 않는다
+    await act(async () => {
+      box.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
+      box.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true, cancelable: true }));
+    });
+    expect(onChange).toHaveBeenLastCalledWith(['a-2']);
+  });
+
+  it('목록이 잠기면(프로젝트를 만드는 중) 보이는 체크 칸도 잠겨 마우스 · 라벨 · 스페이스 어느 길로도 켜지지 않는다', async () => {
+    fetchWithAuth.mockResolvedValue({ ok: true, json: async () => ({ data: AGENTS }) });
+    const onChange = vi.fn();
+    await act(async () => {
+      root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC"><ProjectAccessPicker selected={[]} onChange={onChange} idPrefix="t" disabled /></NextIntlClientProvider>);
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const box = host.querySelector<HTMLElement>('[data-testid="project-access-checkbox"]')!;
+    expect(box.getAttribute('aria-disabled')).toBe('true'); // 보이는 칸이 잠김(fieldset은 span을 못 잠근다)
+    const label = host.querySelector('label') as HTMLLabelElement;
+    await act(async () => { box.click(); });
+    await act(async () => { label.click(); });
+    await act(async () => {
+      box.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
+      box.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true, cancelable: true }));
+    });
+    expect(onChange).not.toHaveBeenCalled();
   });
 });
