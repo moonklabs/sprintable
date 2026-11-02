@@ -130,3 +130,33 @@ describe('가입 화면 약관 체크박스', () => {
     expect(box().getAttribute('aria-checked')).toBe('true');
   });
 });
+
+describe('가입 제출 — 엔터 · 요청 내용 (인증은 되돌리기 어려운 길이라 결과로 잠근다)', () => {
+  it('이름 · 이메일 · 비밀번호 칸 어디서든 엔터로 가입이 제출되고, 요청 본문은 입력 그대로다 · 약관을 안 켜면 제출되지 않는다', async () => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { body?: string }) => {
+      calls.push({ url, body: JSON.parse(init?.body ?? '{}') });
+      return { ok: false, status: 400, json: async () => ({ error: { code: 'X', message: 'x' } }) };
+    }));
+    const { default: RegisterPage } = await import('./register/page');
+    await act(async () => { root.render(wrap(<RegisterPage />)); });
+    const name = container.querySelector<HTMLInputElement>('input[data-slot="input"][type="text"]')!;
+    const email = container.querySelector<HTMLInputElement>('input[data-slot="input"][type="email"]')!;
+    const pw = container.querySelector<HTMLInputElement>('input[data-slot="input"][type="password"]')!;
+    await act(async () => { setNative(name, '홍길동'); setNative(email, ' a@b.co '); setNative(pw, 'Str0ng!Passw0rd#2026'); });
+    // 약관을 켜기 전에는 어느 칸의 엔터도 제출하지 않는다
+    await act(async () => { press(name, 'Enter'); });
+    expect(calls).toHaveLength(0);
+    const labelText = [...container.querySelectorAll('label span')].find((s) => s.textContent?.includes(koMessages.register.tosPrefix))!;
+    await act(async () => { (labelText as HTMLElement).click(); });
+    for (const field of [name, email, pw]) {
+      await act(async () => { press(field, 'Enter'); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    }
+    expect(calls).toHaveLength(3);
+    for (const c of calls) {
+      expect(c.url).toBe('/api/auth/register');
+      expect(c.body).toEqual({ email: 'a@b.co', password: 'Str0ng!Passw0rd#2026', display_name: '홍길동', tos_accepted: true });
+    }
+  });
+});
