@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from collections import Counter
 
 import pytest
@@ -404,6 +405,54 @@ async def test_a_second_step_switched_on_while_the_sign_in_was_running_is_asked_
         release.set()
         answer = await asyncio.wait_for(right, _WAIT)
         assert answer.status_code == 403 and answer.json()["error"]["code"] == "TOTP_REQUIRED", f"{answer.status_code} {answer.text}"
+        assert await w.token_rows() == rows_before
+    finally:
+        release.set()
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await _close(engine, w)
+
+
+async def test_a_code_of_the_secret_replaced_while_the_sign_in_was_running_is_refused(monkeypatch):
+    """the person's second step is set up again (a new secret) after this request read the person and before the code is checked: the code is judged against the secret the row holds now, so a code of the old one gets no session"""
+    import pyotp
+    from sqlalchemy import text
+
+    import app.routers.auth as auth_router
+
+    engine, w = await _world()
+    tasks: list[asyncio.Task] = []
+    reached, release = asyncio.Event(), asyncio.Event()
+    try:
+        old_secret, _ = await _enable_totp(w)
+        old_code = pyotp.TOTP(old_secret).now()
+        now = time.time()
+        while True:  # a new secret whose accepted steps (the check takes the step before and after, and a step may turn while the test runs) cannot hold the old code
+            new_secret = pyotp.random_base32()
+            if all(pyotp.TOTP(new_secret).at(now + 30 * k) != old_code for k in range(-3, 4)):
+                break
+        real_lock = auth_router._lock_person_sessions
+
+        async def paused_lock(session, user_id, *, exclusive):
+            if not exclusive and user_id == w.user_id and not reached.is_set():
+                reached.set()  # password checked, the person read; the code is checked after this
+                await release.wait()
+            return await real_lock(session, user_id, exclusive=exclusive)
+
+        monkeypatch.setattr(auth_router, "_lock_person_sessions", paused_lock)
+        stale = asyncio.create_task(_sign_in(w, code=old_code))
+        tasks.append(stale)
+        await asyncio.wait_for(reached.wait(), 15)
+        async with w.Session() as s:
+            await s.execute(text("UPDATE users SET totp_secret = :s, totp_last_timestep = NULL WHERE id = :i"), {"s": new_secret, "i": w.user_id})
+            await s.commit()
+        rows_before = await w.token_rows()
+        release.set()
+        answer = await asyncio.wait_for(stale, _WAIT)
+        assert answer.status_code == 403 and answer.json()["error"]["code"] == "INVALID_TOTP", f"{answer.status_code} {answer.text}"
+        assert (await _row(w, "totp_last_timestep"))[0] is None, "a refused code is not recorded as used"
         assert await w.token_rows() == rows_before
     finally:
         release.set()
