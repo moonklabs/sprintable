@@ -52,7 +52,7 @@ describe('HypothesisDeclarationCard(sprints) — L1 선례 조회 실패(story #
         <HypothesisDeclarationCard projectId="proj-1" contextTitle="에픽 제목" value={FILLED_VALUE} onChange={() => {}} linkableHypotheses={null} />,
       ));
     });
-    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    const textarea = container.querySelector('textarea[data-slot="textarea"]') as HTMLTextAreaElement;
     await act(async () => { textarea.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
@@ -67,7 +67,7 @@ describe('HypothesisDeclarationCard(sprints) — L1 선례 조회 실패(story #
         <HypothesisDeclarationCard projectId="proj-1" contextTitle="에픽 제목" value={FILLED_VALUE} onChange={() => {}} linkableHypotheses={null} />,
       ));
     });
-    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    const textarea = container.querySelector('textarea[data-slot="textarea"]') as HTMLTextAreaElement;
     await act(async () => { textarea.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 

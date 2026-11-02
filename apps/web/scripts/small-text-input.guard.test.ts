@@ -38,6 +38,16 @@ describe('scanSource — 셀프테스트', () => {
     expect(r.inherits).toBe(1);
   });
 
+  it('⭐프로젝트 글자 눈금(globals.css)의 이름 크기를 px로 읽는다 — editorial-meta 11 · editorial-ui 13 · micro 10 (4831: 이게 없어 lg:text-editorial-meta가 «크기 없음»으로 읽혔다)', () => {
+    expect([baseFontPx('text-editorial-meta'), baseFontPx('text-editorial-ui'), baseFontPx('text-micro')]).toEqual([11, 13, 10]);
+    expect(desktopFontPx('text-base lg:text-editorial-meta')).toBe(11);
+    expect(belowLgFontPx('text-base lg:text-editorial-meta')).toBe(16);
+    // 공용 부품(text-base lg:text-sm)에 호출부가 lg:text-editorial-meta를 얹어도 데스크톱 11px 그대로 — 가짜 «14 → 16» 바뀜이 없다
+    const r = scanSource('export const S = () => <Select className="h-auto w-auto lg:text-editorial-meta" />;', 's.tsx',
+      new Map([['Select', { inner: '', classes: 'h-9 w-full text-base lg:text-sm', px: 16 }]]));
+    expect([r.sites, r.drift]).toEqual([[], []]);
+  });
+
   it('상태에 따라 붙는 클래스(삼항)는 크기 판정에 안 섞는다', () => {
     const src = `export const C = ({ bad }) => <input className={\`w-full text-base lg:text-sm \${bad ? 'border-destructive text-xs' : 'border-border'}\`} />;`;
     expect(scanSource(src, 'c.tsx').sites).toEqual([]);

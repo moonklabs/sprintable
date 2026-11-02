@@ -14,13 +14,25 @@
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { cn } from '../src/lib/utils';
 
 const NON_TEXT_TYPES = new Set(['checkbox', 'radio', 'hidden', 'file', 'range', 'color', 'submit', 'button', 'image', 'reset']);
 const RAW_TAGS = new Set(['input', 'textarea', 'select']);
 const SHARED_TAGS = new Set(['Input', 'Textarea']);
-const NAMED_SIZES: Record<string, number> = { 'text-xs': 12, 'text-sm': 14, 'text-base': 16, 'text-lg': 18, 'text-xl': 20, 'text-2xl': 24, 'text-3xl': 30 };
+/**
+ * 프로젝트 자신의 글자 눈금 — globals.css `@theme`의 `--text-<이름>: <n>px`(editorial-meta 11 · editorial-ui 13 · micro 10 …)을 그대로 읽는다(숫자를 여기 또 박지 않음).
+ * 이게 없으면 `lg:text-editorial-meta` 같은 클래스가 «크기 없음»으로 읽혀, 공용 부품(text-base lg:text-sm)과 합쳐질 때 데스크톱 크기가 틀리게 계산된다
+ * (4831: 날 `<select>`를 `Select` 부품으로 바꾼 자리가 «데스크톱 14 → 16»이라는 가짜 바뀜으로 잡힘 — 실제 cn() 결과는 11px 그대로).
+ */
+function themeSizes(): Record<string, number> {
+  const css = readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/app/globals.css'), 'utf8');
+  const out: Record<string, number> = {};
+  for (const m of css.matchAll(/^\s*--text-([a-z][a-z-]*): (\d+(?:\.\d+)?)px;/gm)) out[`text-${m[1]}`] = parseFloat(m[2]!);
+  return out;
+}
+const NAMED_SIZES: Record<string, number> = { 'text-xs': 12, 'text-sm': 14, 'text-base': 16, 'text-lg': 18, 'text-xl': 20, 'text-2xl': 24, 'text-3xl': 30, ...themeSizes() };
 
 /** 입력칸을 감싼 공용 래퍼 → 정의 파일(src 기준). 새 래퍼를 만들면 여기에 적는다(가드의 셀프테스트가 정의가 실제로 있는지 본다). */
 export const WRAPPERS: Readonly<Record<string, string>> = {
