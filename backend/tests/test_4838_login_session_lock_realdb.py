@@ -156,12 +156,12 @@ async def test_sign_ins_and_a_password_change_crossing_for_real_leave_nothing_al
     from app.models.user import User
 
     engine, w = await _world()
+    tasks: list[asyncio.Task] = []
     try:
         for round_n in range(6):
             existing = await w.login()
-            results = await asyncio.wait_for(asyncio.gather(
-                _change(w, existing, _PASSWORD, _NEW_PASSWORD), *[_sign_in(w) for _ in range(4)],
-            ), _WAIT)
+            tasks = [asyncio.create_task(c) for c in (_change(w, existing, _PASSWORD, _NEW_PASSWORD), *[_sign_in(w) for _ in range(4)])]
+            results = await asyncio.wait_for(asyncio.gather(*tasks), _WAIT)
             changed, sign_ins = results[0], results[1:]
             assert changed.status_code == 200, f"round {round_n}: {changed.status_code} {changed.text}"
             assert all(r.status_code in (200, 401, 429) for r in sign_ins), f"round {round_n}: {[r.status_code for r in sign_ins]}"
@@ -171,6 +171,10 @@ async def test_sign_ins_and_a_password_change_crossing_for_real_leave_nothing_al
                 await s.execute(update(User).where(User.id == w.user_id).values(hashed_password=hash_password(_PASSWORD), login_fail_count=0, login_locked_until=None))
                 await s.commit()
     finally:
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         await _close(engine, w)
 
 
