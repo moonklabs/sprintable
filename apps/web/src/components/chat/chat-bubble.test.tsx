@@ -561,13 +561,19 @@ describe('ChatBubble — story 4831 프로필 팝업이 열린 채 우클릭하�
   const nameOf = () => Array.from(container.querySelectorAll('span')).find((s) => s.textContent === baseMessage.sender_name)!;
   const profileOpen = () => document.body.querySelector('[data-slot="popover-content"]') !== null;
   const menuOpen = () => document.body.querySelector('[role="menu"]') !== null;
+  // 마우스 우클릭은 브라우저에서 pointerdown(button 2) → contextmenu 순서로 온다. 메뉴 키(키보드)는 contextmenu만 온다.
+  const rightClick = async (el: Element, withPointerdown = true) => {
+    await act(async () => {
+      if (withPointerdown) el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 2 }));
+      el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+    });
+  };
 
   it('같은 말풍선: 프로필을 연 뒤 우클릭하면 프로필은 닫히고 우클릭 메뉴만 남는다', async () => {
     await act(async () => { root.render(wrap(<ChatBubble message={baseMessage} isMine={false} />)); });
     await act(async () => { nameOf().dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(profileOpen()).toBe(true);
-    const wrapperDiv = container.querySelector(`#msg-${baseMessage.id}`)!;
-    await act(async () => { wrapperDiv.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 })); });
+    await rightClick(container.querySelector(`#msg-${baseMessage.id}`)!);
     expect(menuOpen()).toBe(true);
     expect(profileOpen()).toBe(false);
   });
@@ -579,8 +585,16 @@ describe('ChatBubble — story 4831 프로필 팝업이 열린 채 우클릭하�
     });
     await act(async () => { nameOf().dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(profileOpen()).toBe(true);
-    const otherDiv = container.querySelector('#msg-msg-other')!;
-    await act(async () => { otherDiv.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 })); });
+    await rightClick(container.querySelector('#msg-msg-other')!);
+    expect(menuOpen()).toBe(true);
+    expect(profileOpen()).toBe(false);
+  });
+
+  it('메뉴 키(contextmenu만 오고 pointerdown이 없는 경우)도 프로필을 닫는다', async () => {
+    await act(async () => { root.render(wrap(<ChatBubble message={baseMessage} isMine={false} />)); });
+    await act(async () => { nameOf().dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(profileOpen()).toBe(true);
+    await rightClick(container.querySelector(`#msg-${baseMessage.id}`)!, false);
     expect(menuOpen()).toBe(true);
     expect(profileOpen()).toBe(false);
   });

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { SenderProfilePopover, pointAnchor } from './sender-profile-popover';
@@ -34,6 +34,13 @@ afterEach(async () => {
 });
 
 const NOOP = () => {};
+
+// 실제 호출부(chat-bubble)처럼 닫으라는 요청이 오면 팝업을 내린다 — 같은 누름에 닫기가 두 번 불리는지까지 본다.
+function Host({ onClose, ...rest }: Omit<React.ComponentProps<typeof SenderProfilePopover>, 'onClose'> & { onClose: () => void }) {
+  const [open, setOpen] = useState(true);
+  return open ? <SenderProfilePopover {...rest} onClose={() => { onClose(); setOpen(false); }} /> : null;
+}
+const popupOpen = () => document.body.querySelector('[data-slot="popover-content"]') !== null;
 
 describe('SenderProfilePopover — story #2349 "상대 프로필" 진입점', () => {
   it('이름을 그린다', async () => {
@@ -74,74 +81,77 @@ describe('SenderProfilePopover — story #2349 "상대 프로필" 진입점', ()
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('바깥을 클릭하면 onClose가 불린다(눌렀다 뗀 한 번의 클릭)', async () => {
+  // story 4831 — 손으로 지은 팝업의 닫기 길을 그대로 복원했다: 바깥에서 «어느 버튼이든 누르는 순간(pointerdown)» 닫힌다(Base UI 기본은 마우스 주 버튼의 click, 뗀 뒤).
+  it('바깥을 클릭하면(누르는 순간) 한 번 닫힌다 — 뒤따르는 click이 닫기를 또 부르지 않는다', async () => {
     const onClose = vi.fn();
     await act(async () => {
-      root.render(wrap(<SenderProfilePopover x={0} y={0} name="민" isAgent={false} onClose={onClose} />));
+      root.render(wrap(<Host x={0} y={0} name="민" isAgent={false} onClose={onClose} />));
     });
     await act(async () => {
       document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-      document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(onClose).toHaveBeenCalledTimes(1);
-  });
-
-  // story 4831 — 손으로 지은 팝업은 마우스를 «누르는 순간(pointerdown)» 닫았다. 바탕 Popover(Base UI)는 마우스는 «뗄 때(click)» 닫고 터치는 누르는 순간 닫는다.
-  // 실제 Chromium에서도 같다(누르고만 있으면 열려 있고 뗀 뒤 닫힘). «눈에 보이는 변화»로 PR 본문에 적었고, 여기서 잠근다.
-  it('마우스는 누르고만 있으면 닫히지 않고 뗀 뒤(click)에 닫힌다', async () => {
-    const onClose = vi.fn();
-    await act(async () => {
-      root.render(wrap(<SenderProfilePopover x={0} y={0} name="민" isAgent={false} onClose={onClose} />));
-    });
-    await act(async () => {
-      document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-    });
-    expect(onClose).not.toHaveBeenCalled();
+    expect(popupOpen()).toBe(false);
     await act(async () => {
       document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  // Base UI는 마우스 오른쪽 · 가운데 버튼을 바깥 누름으로 안 본다 — 손으로 지은 팝업은 pointerdown(어느 버튼이든)에 닫았다. 복원한 것을 잠근다.
-  it('바깥에서 오른쪽 버튼(contextmenu)이나 가운데 버튼(auxclick)을 누르면 닫힌다', async () => {
-    for (const type of ['contextmenu', 'auxclick'] as const) {
+  it('바깥에서 오른쪽 · 가운데 버튼을 눌러도, 누르고 끄는 드래그를 시작해도 누르는 순간 닫힌다(click이 안 오는 길)', async () => {
+    for (const button of [0, 1, 2]) {
       const onClose = vi.fn();
       await act(async () => {
-        root.render(wrap(<SenderProfilePopover x={0} y={0} name="민" isAgent={false} onClose={onClose} />));
+        root.render(wrap(<Host x={0} y={0} name="민" isAgent={false} onClose={onClose} />));
       });
       await act(async () => {
-        document.body.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true }));
-      });
-      expect(onClose, type).toHaveBeenCalledTimes(1);
+        document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button }));
+      }); // click은 보내지 않는다 — 드래그 · 우클릭 · 가운데 버튼은 click 없이 끝난다
+      expect(onClose, `button ${button}`).toHaveBeenCalledTimes(1);
+      expect(popupOpen()).toBe(false);
       await act(async () => { root.render(wrap(<div />)); });
     }
   });
 
-  it('팝업 안에서의 오른쪽 · 가운데 버튼은 닫지 않는다', async () => {
+  it('키보드로 여는 메뉴처럼 pointerdown 없이 오는 contextmenu도 바깥이면 닫는다', async () => {
     const onClose = vi.fn();
     await act(async () => {
-      root.render(wrap(<SenderProfilePopover x={0} y={0} name="민" isAgent={false} onClose={onClose} onBlock={NOOP} />));
+      root.render(wrap(<Host x={0} y={0} name="민" isAgent={false} onClose={onClose} />));
+    });
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('바깥 요소가 pointerdown의 전파를 막아도 닫힌다(포착 단계에서 받는다)', async () => {
+    const onClose = vi.fn();
+    const blocker = document.createElement('div');
+    blocker.addEventListener('pointerdown', (e) => e.stopPropagation());
+    document.body.appendChild(blocker);
+    await act(async () => {
+      root.render(wrap(<Host x={0} y={0} name="민" isAgent={false} onClose={onClose} />));
+    });
+    await act(async () => {
+      blocker.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    });
+    blocker.remove();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('팝업 안에서의 누름 · contextmenu · click은 닫지 않는다', async () => {
+    const onClose = vi.fn();
+    await act(async () => {
+      root.render(wrap(<Host x={0} y={0} name="민" isAgent={false} onClose={onClose} onBlock={NOOP} />));
     });
     const inside = document.body.querySelector('[data-slot="popover-content"] span')!;
     await act(async () => {
+      inside.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 2 }));
       inside.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-      inside.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true }));
+      inside.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(onClose).not.toHaveBeenCalled();
-  });
-
-  it('팝업 안을 누르면 닫히지 않는다', async () => {
-    const onClose = vi.fn();
-    await act(async () => {
-      root.render(wrap(<SenderProfilePopover x={0} y={0} name="민" isAgent={false} onClose={onClose} />));
-    });
-    const popup = document.body.querySelector('[role="dialog"]')!;
-    await act(async () => {
-      popup.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-      popup.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    expect(onClose).not.toHaveBeenCalled();
+    expect(popupOpen()).toBe(true);
   });
 
   // story #2968(카디르 QA #3397 MEDIUM) — chat-bubble.tsx가 이미 들고 있던 sender_avatar_url을

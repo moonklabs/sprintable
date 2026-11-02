@@ -44,18 +44,19 @@ export function SenderProfilePopover({ x, y, name, rawName, isAgent, avatarUrl, 
   const tChats = useTranslations('chats');
   const anchor = useMemo(() => pointAnchor(x, y), [x, y]);
 
-  // Base UI는 마우스 «주 버튼의 click»만 바깥 누름으로 본다. 손으로 지은 팝업은 어느 버튼의 pointerdown에도 닫았으므로, 오른쪽 · 가운데 버튼(contextmenu · auxclick)을
-  // 같은 식으로 복원한다 — 안 그러면 말풍선의 우클릭 메뉴가 뜬 뒤에도(같은 말풍선이든 다른 말풍선이든) 이 프로필이 열려 남아 두 층이 겹친다. 팝업 안은 제외.
+  // 손으로 지은 팝업은 «바깥에서 어느 버튼이든 누르는 순간(pointerdown)» 닫았다. Base UI는 마우스 주 버튼의 «click»(뗀 뒤)만 바깥 누름으로 보므로 드래그 시작 · 오른쪽 · 가운데 ·
+  // Ctrl-클릭이 닫지 못한다(우클릭 메뉴가 뜬 뒤에도 이 프로필이 열려 두 층이 겹침 — 같은 말풍선이든 다른 말풍선이든). 옛 길을 그대로 복원한다(팝업 안은 제외).
+  // contextmenu는 키보드로 여는 메뉴(pointerdown 없이 옴)까지 덮는 보강이다. 터치는 Base UI도 누르는 순간 닫는다.
   useEffect(() => {
-    const closeOnOtherButton = (e: MouseEvent) => {
+    const closeIfOutside = (e: Event) => {
       if ((e.target as Element | null)?.closest?.('[data-sender-profile-popup]')) return;
       onClose();
     };
-    document.addEventListener('contextmenu', closeOnOtherButton, true);
-    document.addEventListener('auxclick', closeOnOtherButton, true);
+    document.addEventListener('pointerdown', closeIfOutside, true);
+    document.addEventListener('contextmenu', closeIfOutside, true);
     return () => {
-      document.removeEventListener('contextmenu', closeOnOtherButton, true);
-      document.removeEventListener('auxclick', closeOnOtherButton, true);
+      document.removeEventListener('pointerdown', closeIfOutside, true);
+      document.removeEventListener('contextmenu', closeIfOutside, true);
     };
   }, [onClose]);
 
