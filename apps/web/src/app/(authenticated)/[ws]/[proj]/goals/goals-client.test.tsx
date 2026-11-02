@@ -320,7 +320,7 @@ describe('GoalsClient — 로드맵 P2·PR-C L2(스토리진행/SP진행 Progres
     const createBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.goals.newGoal));
     await act(async () => { createBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
-    const titleInput = document.body.querySelector('input[type="text"]') as HTMLInputElement;
+    const titleInput = document.body.querySelector('input[type="text"][data-slot="input"]') as HTMLInputElement;
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
     await act(async () => {
       setter.call(titleInput, '진행 목표');

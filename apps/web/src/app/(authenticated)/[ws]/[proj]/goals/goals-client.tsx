@@ -12,6 +12,9 @@ import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { useGoalsRoute } from './goals-context';
 import { formatViewerScheduledAt } from '@/lib/schedule-format';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
 import { MaterialChip } from '@/components/ui/material-chip';
@@ -328,62 +331,58 @@ function GoalCreateForm({ projectId, orgId, onCreated, onCancel }: GoalCreateFor
     <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
       <div className="space-y-1.5">
         <label className="text-xs font-medium text-muted-foreground">{t('fieldTitle')}</label>
-        <input
+        <Input
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder={t('fieldTitlePlaceholder')}
           required
-          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
         />
       </div>
 
       <div className="space-y-1.5">
         <label className="text-xs font-medium text-muted-foreground">{t('fieldDescription')}</label>
-        <textarea
+        <Textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           placeholder={t('fieldDescriptionPlaceholder')}
           rows={3}
-          className="w-full resize-none rounded-xl border border-border bg-card px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
+          className="resize-none"
         />
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">{t('fieldPriority')}</label>
-          <select
+          <Select
             value={priority}
             onChange={(e) => setPriority(e.target.value as GoalPriority)}
-            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-base lg:text-sm text-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
           >
             <option value="critical">{t('priorityCritical')}</option>
             <option value="high">{t('priorityHigh')}</option>
             <option value="medium">{t('priorityMedium')}</option>
             <option value="low">{t('priorityLow')}</option>
-          </select>
+          </Select>
         </div>
 
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">{t('fieldTargetSp')}</label>
-          <input
+          <Input
             type="number"
             min="0"
             value={targetSp}
             onChange={(e) => setTargetSp(e.target.value)}
             placeholder="0"
-            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
           />
         </div>
       </div>
 
       <div className="space-y-1.5">
         <label className="text-xs font-medium text-muted-foreground">{t('fieldTargetDate')}</label>
-        <input
+        <Input
           type="date"
           value={targetDate}
           onChange={(e) => setTargetDate(e.target.value)}
-          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-base lg:text-sm text-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
         />
       </div>
 
@@ -479,60 +478,56 @@ function GoalEditForm({ epic, onSaved, onCancel }: GoalEditFormProps) {
     <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
       <div className="space-y-1.5">
         <label className="text-xs font-medium text-muted-foreground">{t('fieldTitle')}</label>
-        <input
+        <Input
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           required
-          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
         />
       </div>
 
       <div className="space-y-1.5">
         <label className="text-xs font-medium text-muted-foreground">{t('fieldDescription')}</label>
-        <textarea
+        <Textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={3}
-          className="w-full resize-none rounded-xl border border-border bg-card px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
+          className="resize-none"
         />
       </div>
 
       {/* RC#2: status는 편집 폼서 제거 — 전용 POST /epics/{id}/transition(상세 헤더 transition 컨트롤·⓶)·일반 PATCH서 봉인(BE #1651·hypothesis/story 선례 동형). 편집=title/desc/priority/target만. */}
       <div className="space-y-1.5">
         <label className="text-xs font-medium text-muted-foreground">{t('fieldPriority')}</label>
-        <select
+        <Select
           value={priority}
           onChange={(e) => setPriority(e.target.value as GoalPriority)}
-          className="w-full rounded-xl border border-border bg-card px-3 py-2 text-base lg:text-sm text-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
         >
           <option value="critical">{t('priorityCritical')}</option>
           <option value="high">{t('priorityHigh')}</option>
           <option value="medium">{t('priorityMedium')}</option>
           <option value="low">{t('priorityLow')}</option>
-        </select>
+        </Select>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">{t('fieldTargetDate')}</label>
-          <input
+          <Input
             type="date"
             value={targetDate}
             onChange={(e) => setTargetDate(e.target.value)}
-            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-base lg:text-sm text-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
           />
         </div>
 
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">{t('fieldTargetSp')}</label>
-          <input
+          <Input
             type="number"
             min="0"
             value={targetSp}
             onChange={(e) => setTargetSp(e.target.value)}
             placeholder="0"
-            className="w-full rounded-xl border border-border bg-card px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground outline-none focus-visible:border-proof-citron focus-visible:ring-3 focus-visible:ring-proof-citron"
           />
         </div>
       </div>

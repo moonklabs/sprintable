@@ -42,7 +42,7 @@ function clickByText(text: string) {
 }
 
 function setInputValue(id: string, value: string) {
-  const input = document.body.querySelector<HTMLInputElement>(`#${id}`);
+  const input = document.body.querySelector<HTMLInputElement>(`#${id}[data-slot="input"]`);
   if (!input) throw new Error(`input not found: ${id}`);
   const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
   setter.call(input, value);
