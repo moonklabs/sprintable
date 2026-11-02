@@ -7,6 +7,7 @@ import { Loader2, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { fetchWithAuth, refreshSessionAfterChange, switchOrg } from '@/lib/db/client';
 import { presetDescription, presetName } from '@/lib/platform-preset-copy';
 import { pickEulReulJosa, pickEunNeunJosa, pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle';
@@ -818,12 +819,12 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       {/* story 4496 ⓑ: projects exist but the tab has none and there are several — the person picks one (none is made) */}
       {orgMode.kind === 'has-org' && !projectId && orgProjects.length > 1 ? (
         <label className="flex flex-col gap-1 text-sm font-medium" data-testid="setup-project-pick">{t('projectPick.label')}
-          <select className="rounded-md border bg-background px-2 py-1 text-base font-normal lg:text-sm" value={pickedProject}
+          <Select className="h-auto bg-background px-2 py-1 font-normal dark:bg-background" value={pickedProject}
             // Kadir 4969 (2선): the old project's ticks never ride to the new one — cleared before its list comes
             onChange={(e) => { setMoving([]); setPickedProject(e.target.value); }}>
             <option value="" disabled>{t('projectPick.placeholder')}</option>
             {orgProjects.map((p) => <option key={p.projectId} value={p.projectId}>{p.projectName}</option>)}
-          </select>
+          </Select>
         </label>
       ) : null}
 
@@ -977,7 +978,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
                 {r.choices.length === 1
                   ? <span className="text-sm">{r.owner.kind === 'me' ? t('me', { name: myName }) : r.owner.kind === 'existing' ? r.owner.name : t('onThisComputer', { runtime: RUNTIME_LABEL[r.owner.runtime] })}</span>
                   : (
-                    <select aria-label={t('ownerFor', { role: roleName(r.role) })} className="max-w-[55%] shrink-0 rounded-md border bg-background px-2 py-1 text-base lg:text-sm"
+                    <Select aria-label={t('ownerFor', { role: roleName(r.role) })} className="h-auto w-auto max-w-[55%] shrink-0 bg-background px-2 py-1 dark:bg-background"
                       value={ownerKey(r.owner)} onChange={(e) => setOwner(r.role, e.target.value)}>
                       {attachable.length === 0 ? (
                         <>
@@ -1011,7 +1012,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
                           ) : null}
                         </>
                       )}
-                    </select>
+                    </Select>
                   )}
                 </div>
                 {/* story #4565 (Yuna 02:32Z ② · 02:39Z): an existing agent with a live key — what moving it does, then when it was last seen */}
@@ -1689,10 +1690,10 @@ function AgentToolsLine({ runtime, tools, onChange }: { runtime: DesktopRuntime;
           <Button type="button" variant="ghost" size="sm" className="h-auto p-0 text-muted-foreground" aria-label={t('tools.remove', { tool: name })} onClick={() => onChange(tools.filter((x) => x !== name))}>×</Button>
         </span>
       ))}
-      <input
+      <Input
         aria-label={t('tools.label')}
         list="agent-tool-suggestions"
-        className="h-7 w-40 rounded-md border bg-background px-2 text-base lg:text-sm"
+        className="h-7 w-40 bg-background px-2 py-0 dark:bg-background"
         placeholder={t('tools.placeholder')}
         value={draft}
         onChange={(e) => { setDraft(e.target.value); setError(null); }}

@@ -98,7 +98,7 @@ describe('[SID:4427] desktop setup page', () => {
     await openRecipes();
     expect((container.querySelector('input[name=recipe]:checked') as HTMLInputElement).value).toBe('rec-1');
     expect(text()).toContain('나 · 김지우');
-    const selects = [...container.querySelectorAll('select')] as HTMLSelectElement[];
+    const selects = [...container.querySelectorAll('select[data-slot="select"]')] as HTMLSelectElement[];
     expect(selects.map((s) => s.value)).toEqual(['claude', 'claude']); // 조사 · 작성(either)
     expect(text()).toContain('~/Sprintable/마케팅 루프');
     expect(text()).toContain('에이전트 2개를 이 컴퓨터에 만들고 첫 일감을 맡겨요 · 연출은 내가 맡아요');
@@ -225,7 +225,7 @@ describe('[SID:4427] desktop setup page', () => {
     stub(() => new Response(JSON.stringify({ data: {} }), { status: 200 }));
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} blocked={['claude']} />);
     expect(text()).toContain('Codex · 이 컴퓨터에 있음'); // 조사: only Codex left → text, no picker
-    const select = container.querySelector('select') as HTMLSelectElement; // 작성(either): Codex · 나 · (꺼진) Claude Code
+    const select = container.querySelector('select[data-slot="select"]') as HTMLSelectElement; // 작성(either): Codex · 나 · (꺼진) Claude Code
     expect(select.value).toBe('codex');
     const off = [...select.options].find((o) => o.value === 'claude-blocked')!;
     expect(off.disabled).toBe(true);
@@ -784,7 +784,7 @@ describe('[SID:4565] existing agents moved to this computer', () => {
     const late = new Promise<Response>((r) => { release = r; });
     recipesNow = (() => late) as unknown as () => Response;
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
-    expect(container.querySelector('select')).toBeNull(); // no recipe yet, no rows
+    expect(container.querySelector('select[data-slot="select"]')).toBeNull(); // no recipe yet, no rows
     await act(async () => { release(new Response(JSON.stringify({ recipes: RECIPES }), { status: 200 })); });
     for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
     expect(optionText(selectOf('조사'), `agent:${DAN}`)).toBeTruthy(); // the existing group, from the list that arrived first
@@ -801,7 +801,7 @@ describe('[SID:4565] existing agents moved to this computer', () => {
     const late = new Promise<Response>((r) => { release = r; });
     agentsNow = (() => late) as unknown as () => Response;
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} preselect={DAN} />);
-    expect(container.querySelector('select')).not.toBeNull(); // the recipe's rows are here — only the list is not
+    expect(container.querySelector('select[data-slot="select"]')).not.toBeNull(); // the recipe's rows are here — only the list is not
     expect(startButton().disabled).toBe(true);
     expect(container.querySelector('[data-testid=setup-attachable-reading]')?.textContent).toBe('이미 있는 에이전트 목록을 불러오고 있어요');
     expect(container.querySelector('[data-testid=setup-attachable-reading]')?.getAttribute('role')).toBe('status'); // Yuna 4701-copy §1
@@ -3145,5 +3145,38 @@ describe('[SID:4717] the plan\'s agent room before «시작» (AC1) and one way 
       expect(startButton().disabled).toBe(false);
       await act(async () => { root.unmount(); }); root = createRoot(container);
     }
+  });
+});
+
+describe('[SID:4831] 담당 선택 · 도구 입력칸 (바탕 부품)', () => {
+  it('담당 선택(역할마다)은 바탕 Select이되 한 줄 안에서 글자 폭을 쓴다(부품의 w-full을 물려받지 않는다) · 폭 상한 유지', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
+    const owner = container.querySelector('select[data-slot="select"][aria-label]') as HTMLSelectElement;
+    expect(owner).not.toBeNull();
+    const cls = owner.className.split(/\s+/);
+    expect(cls).toContain('w-auto');
+    expect(cls).not.toContain('w-full');
+    expect(cls).toContain('max-w-[55%]');
+    expect(cls).toContain('shrink-0');
+  });
+
+  it('도구 입력칸은 바탕 Input이고 제안 목록(datalist)에 이어지며, 이름을 쓰고 엔터하면 칩이 더해지고 칸이 비워진다', async () => {
+    stub(() => new Response('{}', { status: 200 }));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
+    const box = container.querySelector('[data-testid="agent-tools"]') as HTMLElement;
+    expect(box).not.toBeNull();
+    const input = box.querySelector('input[data-slot="input"]') as HTMLInputElement;
+    expect(input).not.toBeNull();
+    expect(input.getAttribute('list')).toBe('agent-tool-suggestions');
+    expect(document.getElementById('agent-tool-suggestions')).not.toBeNull();
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'aws');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(input.value).toBe('aws');
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
+    expect(box.textContent).toContain('aws');
+    expect(input.value).toBe('');
   });
 });

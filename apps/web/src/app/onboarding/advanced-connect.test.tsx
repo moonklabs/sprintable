@@ -212,6 +212,7 @@ describe('AdvancedConnect — story 4766', () => {
     expect(show).not.toBeNull();
     expect(warn.compareDocumentPosition(show) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await press('advanced-show-command');
+    expect(q('advanced-copy-failed-raw')?.getAttribute('data-slot')).toBe('textarea');
     expect((q('advanced-copy-failed-raw') as HTMLTextAreaElement).value).toContain(`Bearer ${KEY}`);
     expect(q('advanced-show-command')).toBeNull();
   });
@@ -241,6 +242,7 @@ describe('AdvancedConnect — story 4766', () => {
     expect(q('advanced-show-command')).not.toBeNull();
     expect(container.innerHTML).not.toContain(KEY);
     await press('advanced-show-command');
+    expect(q('advanced-copy-failed-raw')?.getAttribute('data-slot')).toBe('textarea');
     expect((q('advanced-copy-failed-raw') as HTMLTextAreaElement).value).toContain(`Bearer ${KEY}`);
     await press('advanced-copy'); // and a second refusal while it is shown hides it again
     expect(q('advanced-copy-failed-raw')).toBeNull();
