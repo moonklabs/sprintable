@@ -71,6 +71,8 @@ async function mount(node: React.ReactNode, role = 'owner') {
   for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
 }
 const text = () => container.textContent ?? '';
+/** the visible radio/checkbox part (a span role=radio|checkbox) — checked state is aria-checked */
+const isOn = (el: Element | null | undefined) => el?.getAttribute('aria-checked') === 'true';
 /** Change the address `#` and wait for the page's own `hashchange` handling (listeners run in the order they were added,
  * so the page's handler has run when this one does) — no sleeping. */
 const setHash = async (h: string) => {
@@ -96,7 +98,7 @@ describe('[SID:4427] desktop setup page', () => {
     stub(() => new Response('{}', { status: 200 }));
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
     await openRecipes();
-    expect((container.querySelector('input[name=recipe]:checked') as HTMLInputElement).value).toBe('rec-1');
+    expect((container.querySelector('[role=radio][data-recipe-id][data-checked]') as HTMLElement).dataset.recipeId).toBe('rec-1');
     expect(text()).toContain('나 · 김지우');
     const selects = [...container.querySelectorAll('select[data-slot="select"]')] as HTMLSelectElement[];
     expect(selects.map((s) => s.value)).toEqual(['claude', 'claude']); // 조사 · 작성(either)
@@ -360,10 +362,10 @@ describe('[SID:4427] desktop setup page', () => {
       stub(() => new Response(JSON.stringify({ setup_id: 's', members: [], work_item_id: 'w' }), { status: 200 }));
       await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
       await openRecipes();
-      const ids = [...container.querySelectorAll('input[name=recipe]')].map((i) => (i as HTMLInputElement).value);
+      const ids = [...container.querySelectorAll('[role=radio][data-recipe-id]')].map((i) => (i as HTMLElement).dataset.recipeId);
       expect(ids).toEqual(['rec-1', 'rec-2', 'rec-loop']);
       expect(text()).not.toContain('org.moonklabs.work.gate_cycle');
-      await act(async () => { (container.querySelector('input[value=rec-loop]') as HTMLInputElement).click(); });
+      await act(async () => { (container.querySelector('[role=radio][data-recipe-id=rec-loop]') as HTMLElement).click(); });
       await act(async () => { startButton().click(); });
       for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
       expect((calls.find((c) => c.url.includes('/confirm'))!.body as { roles: unknown }).roles).toEqual([{ role: '기획', runtime: 'claude' }, { role: '검수', runtime: 'claude' }]);
@@ -751,10 +753,10 @@ describe('[SID:4565] existing agents moved to this computer', () => {
     await choose('조사', 'claude');
     expect(selectOf('조사').value).toBe('claude');
     await openRecipes();
-    const other = [...container.querySelectorAll('input[name=recipe]')].find((i) => (i as HTMLInputElement).value === 'rec-2') as HTMLInputElement;
+    const other = [...container.querySelectorAll('[role=radio][data-recipe-id]')].find((i) => (i as HTMLElement).dataset.recipeId === 'rec-2') as HTMLElement;
     await act(async () => { other.click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
-    expect((container.querySelector('input[name=recipe]:checked') as HTMLInputElement).value).toBe('rec-2');
+    expect((container.querySelector('[role=radio][data-recipe-id][data-checked]') as HTMLElement).dataset.recipeId).toBe('rec-2');
     expect(selectOf('조사').value).toBe('claude'); // the spent preselect does not come back
   });
 
@@ -1138,7 +1140,7 @@ describe('[SID:4427] the default recipe', () => {
   const recipe = (id: string, key: string, name: string, org_id: string | null) => ({
     id, key, name, org_id, roles: [{ role: '작성', kind: 'agent' as const, stages: ['draft'] }],
   });
-  const radios = () => [...container.querySelectorAll('input[type=radio][name=recipe]')] as HTMLInputElement[];
+  const radios = () => [...container.querySelectorAll('[role=radio][data-recipe-id]')] as HTMLElement[];
 
   it('«블로그 글» in the list: first, and chosen — not the server\'s first', async () => {
     recipesNow = () => new Response(JSON.stringify({ recipes: [
@@ -1149,8 +1151,8 @@ describe('[SID:4427] the default recipe', () => {
     stub(() => new Response('{}', { status: 200 }));
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
     await openRecipes();
-    expect(radios().map((r) => r.value)).toEqual(['r-blog', 'r-kanban', 'r-video']);
-    expect(radios().find((r) => r.checked)?.value).toBe('r-blog');
+    expect(radios().map((r) => r.dataset.recipeId)).toEqual(['r-blog', 'r-kanban', 'r-video']);
+    expect(radios().find(isOn)?.dataset.recipeId).toBe('r-blog');
     expect(container.textContent).not.toMatch(/추천/);
   });
 
@@ -1162,8 +1164,8 @@ describe('[SID:4427] the default recipe', () => {
     stub(() => new Response('{}', { status: 200 }));
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
     await openRecipes();
-    expect(radios().map((r) => r.value)).toEqual(['r-kanban', 'r-video']);
-    expect(radios().find((r) => r.checked)?.value).toBe('r-kanban');
+    expect(radios().map((r) => r.dataset.recipeId)).toEqual(['r-kanban', 'r-video']);
+    expect(radios().find(isOn)?.dataset.recipeId).toBe('r-kanban');
   });
 
   it("an org's own recipe with the same key is not the default (only the platform preset is)", async () => {
@@ -1174,7 +1176,7 @@ describe('[SID:4427] the default recipe', () => {
     stub(() => new Response('{}', { status: 200 }));
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
     await openRecipes();
-    expect(radios().find((r) => r.checked)?.value).toBe('r-kanban');
+    expect(radios().find(isOn)?.dataset.recipeId).toBe('r-kanban');
   });
 });
 
@@ -1227,7 +1229,7 @@ describe('[SID:4427] either rows can be «나» · no agent row · the recipe ov
     expect([...container.querySelectorAll('button')].map((b) => b.textContent)).toEqual([chooseLabel]);
     await act(async () => { [...container.querySelectorAll('button')].find((b) => b.textContent === chooseLabel)!.click(); });
     await openRecipes();
-    expect(container.querySelector('input[name=recipe]')).not.toBeNull();
+    expect(container.querySelector('[role=radio][data-recipe-id]')).not.toBeNull();
     // a body fault (roles_invalid · FastAPI's own 422 with detail) is not taken for this card
     for (const body of [{ data: null, error: { code: 'roles_invalid' } }, { detail: [{ type: 'too_long', loc: ['body', 'roles'], msg: 'x' }] }]) {
       await act(async () => { root.unmount(); });
@@ -1252,7 +1254,7 @@ describe('[SID:4427] either rows can be «나» · no agent row · the recipe ov
     for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
     expect(calls.map((c) => c.url)).toEqual(['/api/desktop/recipes']);
     await openRecipes();
-    expect(container.querySelector('input[name=recipe]')).not.toBeNull();
+    expect(container.querySelector('[role=radio][data-recipe-id]')).not.toBeNull();
   });
 
   it('a platform preset (org_id null) is named in the viewer\'s language; an organization\'s recipe keeps its own name', async () => {
@@ -2089,14 +2091,14 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
     await mountNoOrg(<DesktopSetup code={CODE} runtimes={['claude']} setupId="s-1" />);
     const row = container.querySelector('[data-testid=setup-phone-control]')!;
     expect(row).not.toBeNull();
-    const box = row.querySelector('input[type=checkbox]') as HTMLInputElement;
-    expect(box.checked).toBe(true);
+    const box = row.querySelector('[role=checkbox]') as HTMLElement;
+    expect(isOn(box)).toBe(true);
     expect(row.textContent).toContain('폰으로도 에이전트 다루기');
     expect(row.textContent).toContain('원격 제어를 켜면 페어링된 폰에서 에이전트를 멈추고, 지시하고, 권한 요청에 답할 수 있어요. 이 조직 전체에 적용되고, 나중에 끌 수 있어요.');
     // the row sits in the start row, above «시작»
     expect(container.querySelector('[data-testid=setup-start-row]')!.contains(row)).toBe(true);
     await act(async () => { box.click(); });
-    expect(box.checked).toBe(false);
+    expect(isOn(box)).toBe(false);
     calls = [];
     await act(async () => { startButton().click(); });
     await flush();
@@ -2369,7 +2371,9 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
 });
 
 describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the last row (Yuna b2d15f85 · PO 00:31Z)', () => {
-  const recipeInputs = () => [...container.querySelectorAll('input[name=recipe]')] as HTMLInputElement[];
+  const recipeInputs = () => [...container.querySelectorAll('[role=radio][data-recipe-id]')] as HTMLElement[];
+  /** what a label's default action clicks when the card's TEXT is pressed: the hidden native input beside the visible radio */
+  const hiddenOf = (el: HTMLElement) => el.closest('label')!.querySelector('input[type=radio]') as HTMLInputElement;
   // a person's mouse click (detail 1) — `.click()` and the click an arrow key sends both have detail 0 (choose only, no fold)
   // a person's mouse click: a press (pointerdown) on it first, then the click (detail 1) — 4504 AC4: the fold follows a press
   const realClick = async (el: HTMLElement) => { await act(async () => {
@@ -2377,11 +2381,11 @@ describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the 
     el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
     el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
   }); };
-  const keyChoose = async (el: HTMLInputElement) => { await act(async () => { el.focus(); el.click(); }); }; // as ↑/↓ does
+  const keyChoose = async (el: HTMLElement) => { await act(async () => { el.focus(); el.click(); }); }; // as ↑/↓ does
   const chosen = () => container.querySelector('[data-testid=setup-recipe-chosen]') as HTMLElement | null;
   /** a person's press on a card in the browser's order (not in act — see the AC4 real-browser test) */
   const label_press = async (label: HTMLElement) => {
-    const input = label.querySelector('input') as HTMLInputElement;
+    const input = label.querySelector('input[type=radio]') as HTMLInputElement;
     label.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
     label.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1 }));
     label.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true })); // released on the card
@@ -2405,7 +2409,7 @@ describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the 
     stub(() => new Response('{}'));
     await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
     await openRecipes();
-    expect(recipeInputs().map((i) => i.value)).toEqual(['rec-1', 'rec-2']);
+    expect(recipeInputs().map((i) => i.dataset.recipeId)).toEqual(['rec-1', 'rec-2']);
     expect(chosen()?.textContent).toContain('마케팅 루프'); // the card and its [바꾸기] stay while the list is open (Qadir 4869)
     // …as one line: the name only, no description or roles (Yuna 03:53Z); the list below holds the full cards
     const card = chosen()!;
@@ -2417,8 +2421,8 @@ describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the 
     expect(chosen()?.textContent).toContain('조사 한 명');
     // opened again: the newly chosen one is now first
     await openRecipes();
-    expect(recipeInputs().map((i) => i.value)).toEqual(['rec-2', 'rec-1']);
-    expect(recipeInputs()[0].checked).toBe(true);
+    expect(recipeInputs().map((i) => i.dataset.recipeId)).toEqual(['rec-2', 'rec-1']);
+    expect(isOn(recipeInputs()[0])).toBe(true);
   });
 
   it('keyboard focus follows the fold (Yuna 00:54Z): opening → the chosen radio · picking → back on [바꾸기] · aria-expanded', async () => {
@@ -2428,7 +2432,7 @@ describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the 
     expect(change.getAttribute('aria-expanded')).toBe('false');
     expect(change.getAttribute('aria-controls')).toBe('setup-recipe-list');
     await openRecipes();
-    expect(document.activeElement).toBe(recipeInputs().find((i) => i.checked));
+    expect(document.activeElement).toBe(recipeInputs().find(isOn));
     // the same button, now «expanded», and what it controls is there (Qadir 4869: it was false forever, pointing at nothing)
     expect(chosen()!.querySelector('button')).toBe(change);
     expect(change.getAttribute('aria-expanded')).toBe('true');
@@ -2458,9 +2462,9 @@ describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the 
       stub(() => new Response('{}'));
       await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
       await openRecipes();
-      const other = recipeInputs().find((i) => !i.checked)!;
+      const other = recipeInputs().find((i) => !isOn(i))!;
       await act(async () => { other.focus(); }); // focus only — not checked
-      expect(other.checked).toBe(false);
+      expect(isOn(other)).toBe(false);
       await act(async () => { other.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })); });
       expect(recipeInputs()).toHaveLength(0);
       expect(chosen()?.textContent, `key «${key}»`).toContain('조사 한 명');
@@ -2474,11 +2478,11 @@ describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the 
     stub(() => new Response('{}'));
     await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
     await openRecipes();
-    const order = recipeInputs().map((i) => i.value);
+    const order = recipeInputs().map((i) => i.dataset.recipeId);
     await keyChoose(recipeInputs()[1]);
     await keyChoose(recipeInputs()[2]);
-    expect(recipeInputs().map((i) => i.value)).toEqual(order); // open still, and not re-sorted under the keyboard
-    expect(recipeInputs().find((i) => i.checked)?.value).toBe('rec-3');
+    expect(recipeInputs().map((i) => i.dataset.recipeId)).toEqual(order); // open still, and not re-sorted under the keyboard
+    expect(recipeInputs().find(isOn)?.dataset.recipeId).toBe('rec-3');
     await act(async () => { container.querySelector('[data-testid=setup-recipe-list]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
     expect(recipeInputs()).toHaveLength(0);
     expect(chosen()?.textContent).toContain('셋째 일');
@@ -2513,7 +2517,7 @@ describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the 
     await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
     const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
     await openRecipes();
-    expect(document.activeElement).toBe(recipeInputs().find((i) => i.checked)); // opening put focus on the chosen radio
+    expect(document.activeElement).toBe(recipeInputs().find(isOn)); // opening put focus on the chosen radio
     const label = recipeInputs()[1].closest('label') as HTMLLabelElement; // the card's text, not its small radio
     // a browser's order for one press on the card: pointerdown · mousedown → focus leaves the radio for nothing (a label's text
     // is not focusable) → pointerup · mouseup → click (detail 1) on the label, which the label passes to its radio
@@ -2544,7 +2548,7 @@ describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the 
     // jsdom runs that default action inside dispatchEvent, before the test's microtasks — the order that kept 4918's test green
     // while the card did not choose in the app. So the default action is held back here and done after the checkpoint, as a
     // browser does: preventDefault on the label's click, await a microtask, then the radio's click.
-    const input = recipeInputs()[1];
+    const input = hiddenOf(recipeInputs()[1]);
     label.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
     label.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1 }));
     (document.activeElement as HTMLElement).blur();
@@ -2620,7 +2624,7 @@ describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the 
         expect(recipeInputs()).toHaveLength(0);
       } else {
         expect(recipeInputs()).toHaveLength(2);
-        expect(document.activeElement).toBe(recipeInputs().find((i) => i.checked)); // back in the list
+        expect(document.activeElement).toBe(recipeInputs().find(isOn)); // back in the list
         await act(async () => { (document.activeElement as HTMLElement).blur(); }); // then a click outside · Tab
         expect(recipeInputs()).toHaveLength(0);
       }
@@ -2641,7 +2645,7 @@ describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the 
       (document.activeElement as HTMLElement).blur();
     });
     expect(recipeInputs()).toHaveLength(2); // still open: the click on the radio is coming
-    await act(async () => { recipeInputs()[1].click(); });
+    await act(async () => { hiddenOf(recipeInputs()[1]).click(); });
     expect(recipeInputs()).toHaveLength(0);
     expect(chosen()?.textContent).toContain('조사 한 명');
     hasFocus.mockRestore();
@@ -2988,7 +2992,7 @@ describe('[SID:4670] «폰으로도 에이전트 다루기» — the tick above 
     remoteGet = remoteGetOf(REMOTE_OFF_OWNER);
     stub(confirmOk);
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} setupId={SETUP_ID} />);
-    expect((row()!.querySelector('input[type=checkbox]') as HTMLInputElement).checked).toBe(true);
+    expect(isOn(row()!.querySelector('[role=checkbox]'))).toBe(true);
     calls = [];
     await act(async () => { startButton().click(); });
     await flushAll();
@@ -3002,7 +3006,7 @@ describe('[SID:4670] «폰으로도 에이전트 다루기» — the tick above 
     remoteGet = remoteGetOf(REMOTE_OFF_OWNER);
     stub(confirmOk);
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} setupId={SETUP_ID} />);
-    await act(async () => { (row()!.querySelector('input[type=checkbox]') as HTMLInputElement).click(); });
+    await act(async () => { (row()!.querySelector('[role=checkbox]') as HTMLElement).click(); });
     calls = [];
     await act(async () => { startButton().click(); });
     await flushAll();
@@ -3043,7 +3047,7 @@ describe('[SID:4670] «폰으로도 에이전트 다루기» — the tick above 
     remoteGet = () => new Response('{}', { status: 404 });
     stub(confirmOk);
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} setupId={SETUP_ID} />);
-    expect((row()!.querySelector('input[type=checkbox]') as HTMLInputElement).checked).toBe(false);
+    expect(isOn(row()!.querySelector('[role=checkbox]'))).toBe(false);
     calls = [];
     await act(async () => { startButton().click(); });
     await flushAll();
@@ -3051,7 +3055,7 @@ describe('[SID:4670] «폰으로도 에이전트 다루기» — the tick above 
     act(() => root.unmount()); root = createRoot(container);
     stub(confirmOk);
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} setupId={SETUP_ID} />);
-    await act(async () => { (row()!.querySelector('input[type=checkbox]') as HTMLInputElement).click(); });
+    await act(async () => { (row()!.querySelector('[role=checkbox]') as HTMLElement).click(); });
     calls = [];
     await act(async () => { startButton().click(); });
     await flushAll();
@@ -3067,7 +3071,7 @@ describe('[SID:4670] «폰으로도 에이전트 다루기» — the tick above 
     expect(box.className).toContain('rounded-md border p-3');
     expect(box.querySelector('svg[aria-hidden=true]')).not.toBeNull();
     expect(box.querySelector('label span')!.className).toContain('font-semibold');
-    expect(box.querySelector('input')!.className).toContain('size-5');
+    expect(box.querySelector('[data-slot="checkbox"]')!.className).toContain('size-5');
     const kids = [...footer.children];
     expect(kids.indexOf(box)).toBe(kids.indexOf(kids.find((k) => k.tagName === 'BUTTON')!) - 1); // right above [시작]
   });

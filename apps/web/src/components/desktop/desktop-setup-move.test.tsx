@@ -56,12 +56,16 @@ async function mount(node: React.ReactNode, locale: 'ko' | 'en' = 'ko', several 
 }
 const settle = async () => { for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); }); };
 const text = () => container.textContent ?? '';
+/** the visible radio/checkbox part (a span role=radio|checkbox): checked = aria-checked, off = data-disabled */
+const isOn = (el: Element | null | undefined) => el?.getAttribute('aria-checked') === 'true';
+const isOff = (el: Element | null | undefined) => el?.hasAttribute('data-disabled') === true;
+const kindRadio = (v: 'recipe' | 'move') => container.querySelectorAll('[data-testid=setup-kind] [role=radio]')[v === 'recipe' ? 0 : 1] as HTMLElement;
 const button = (label: string) => [...container.querySelectorAll('button')].find((b) => b.textContent === label) as HTMLButtonElement | undefined;
-const chooseMove = async () => { await act(async () => { (container.querySelector('input[name=setup-kind][value=move]') as HTMLInputElement).click(); }); };
+const chooseMove = async () => { await act(async () => { kindRadio('move').click(); }); };
 const rows = () => [...container.querySelectorAll('[data-testid=setup-move-row]')] as HTMLElement[];
 const tick = async (name: string) => {
   const row = rows().find((r) => r.textContent?.includes(name))!;
-  await act(async () => { (row.querySelector('input[type=checkbox]') as HTMLInputElement).click(); });
+  await act(async () => { (row.querySelector('[role=checkbox]') as HTMLElement).click(); });
 };
 const startRowLine = () => (container.querySelector('[data-testid=setup-start-row] p') as HTMLElement).textContent;
 
@@ -100,7 +104,7 @@ describe('[SID:4678] the move list · a row not on the team', () => {
     const row = rowOf('담롱');
     expect(row.dataset.state).toBe('not-in-project');
     expect(row.textContent).toContain('이 프로젝트 팀에 아직 없어요');
-    expect((row.querySelector('input') as HTMLInputElement).disabled).toBe(true);
+    expect(isOff(row.querySelector('[role=checkbox]'))).toBe(true);
     const put = row.querySelector('[data-testid=setup-put-on-team]') as HTMLButtonElement;
     expect([put.textContent, put.getAttribute('aria-label')]).toEqual(['프로젝트 팀에 넣기', '프로젝트 팀에 넣기 · 담롱']);
     // Codex is not on this computer: the blocker is the runtime — said once, with no button next to it
@@ -114,9 +118,9 @@ describe('[SID:4678] the move list · a row not on the team', () => {
     expect(posts).toHaveLength(1);
     expect(posts[0]).toMatchObject({ method: 'POST', body: { member_id: 'a-dam', org_member_id: null, permission: 'granted' } });
     expect(rowOf('담롱').dataset.state).toBe('ok');
-    const box = rowOf('담롱').querySelector('input') as HTMLInputElement;
-    expect(box.disabled).toBe(false);
-    expect(box.checked).toBe(false); // not ticked for them
+    const box = rowOf('담롱').querySelector('[role=checkbox]') as HTMLElement;
+    expect(isOff(box)).toBe(false);
+    expect(isOn(box)).toBe(false); // not ticked for them
     expect(document.activeElement).toBe(box); // the pressed button is gone — focus goes to the row's checkbox, not the page
     expect(container.querySelector('[data-testid=setup-put-on-team-done]')).toBeNull(); // the recipe page's role fields are not here — no «위 역할 칸» line
   });
@@ -139,7 +143,7 @@ describe('[SID:4576] the two ways · the move list', () => {
     expect(kinds.textContent).toContain('시작 방법');
     expect(kinds.textContent).toContain('레시피로 시작레시피의 역할을 에이전트에게 맡기고 첫 일감으로 바로 시작해요');
     expect(kinds.textContent).toContain('이미 있는 에이전트 옮기기이 조직에서 일하던 에이전트를 이 컴퓨터로 옮겨요');
-    expect((container.querySelector('input[name=setup-kind][value=recipe]') as HTMLInputElement).checked).toBe(true);
+    expect(isOn(kindRadio('recipe'))).toBe(true);
     // the recipe way's head line stays as it was
     expect(text()).toContain('레시피를 고르면 이 컴퓨터의 에이전트가 역할을 맡아 바로 첫 일감을 시작해요.');
     await chooseMove();
@@ -152,8 +156,8 @@ describe('[SID:4576] the two ways · the move list', () => {
     expect(rows()[0].textContent).toContain('Claude Code · 이 컴퓨터에 있음');
     expect(rows()[2].textContent).toContain('이 프로젝트 팀에 아직 없어요'); // 4678: the line, then [프로젝트 팀에 넣기] (the button's own test: desktop-setup.4678.test)
     expect(rows()[2].querySelector('[data-testid=setup-put-on-team]')?.textContent).toBe('프로젝트 팀에 넣기');
-    expect((rows()[2].querySelector('input') as HTMLInputElement).disabled).toBe(true);
-    expect(rows().every((r) => !(r.querySelector('input') as HTMLInputElement).checked)).toBe(true);
+    expect(isOff(rows()[2].querySelector('[role=checkbox]'))).toBe(true);
+    expect(rows().every((r) => !isOn(r.querySelector('[role=checkbox]')))).toBe(true);
     expect(text()).toContain('작업 폴더는 옮긴 뒤 앱에서 에이전트마다 골라요 — 이 컴퓨터에서 일한 적이 있는 에이전트는 그 폴더를 그대로 써요');
     expect(button('옮기기')!.disabled).toBe(true);
     expect(startRowLine()).toBe('옮길 에이전트를 하나 이상 골라 주세요');
@@ -178,7 +182,7 @@ describe('[SID:4576] the two ways · the move list', () => {
     const kadir = rows().find((r) => r.textContent?.includes('까디르 QA'))!;
     expect(kadir.dataset.state).toBe('runtime-missing');
     expect(kadir.textContent).toContain('Codex가 이 컴퓨터에 없어요');
-    expect((kadir.querySelector('input') as HTMLInputElement).disabled).toBe(true);
+    expect(isOff(kadir.querySelector('[role=checkbox]'))).toBe(true);
   });
 
   it('a tick shows the 4565 note under it (live key only) · [옮기기] = one confirm with no recipe, no folder, only the ticked agents', async () => {
@@ -204,11 +208,11 @@ describe('[SID:4576] the two ways · the move list', () => {
     stub(() => new Response('{}'));
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
     const move = container.querySelector('[data-testid=setup-kind-move]') as HTMLElement;
-    expect((move.querySelector('input') as HTMLInputElement).disabled).toBe(true);
+    expect(isOff(move.querySelector('[role=radio]'))).toBe(true);
     expect(container.querySelector('[data-testid=setup-kind-move-why]')?.textContent).toBe('이 앱 판에서는 옮길 수 없어요 — 앱을 업데이트해 주세요');
     expect(move.textContent).not.toContain('이 조직에서 일하던 에이전트를 이 컴퓨터로 옮겨요');
     // a click on it changes nothing: still the recipe way, no move list, «시작»
-    await act(async () => { (move.querySelector('input') as HTMLInputElement).click(); (move as HTMLElement).click(); });
+    await act(async () => { (move.querySelector('[role=radio]') as HTMLElement).click(); (move as HTMLElement).click(); });
     expect(container.querySelector('[data-testid=setup-move-list]')).toBeNull();
     expect(button('시작')).toBeDefined();
     expect(button('옮기기')).toBeUndefined();
@@ -231,8 +235,8 @@ describe('[SID:4576] Kadir 4969 (2선) — no switching mid-start · no old tick
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />);
     await act(async () => { button('시작')!.click(); });
     await settle();
-    const radios = [...container.querySelectorAll('input[name=setup-kind]')] as HTMLInputElement[];
-    expect(radios.map((r) => r.disabled)).toEqual([true, true]);
+    const radios = [...container.querySelectorAll('[data-testid=setup-kind] [role=radio]')] as HTMLElement[];
+    expect(radios.map((r) => isOff(r))).toEqual([true, true]);
   });
 
   it('changing the project unticks at once — the old project\'s ticks never go with the new project id', async () => {
@@ -246,7 +250,7 @@ describe('[SID:4576] Kadir 4969 (2선) — no switching mid-start · no old tick
     expect(startRowLine()).toBe('에이전트 1개를 이 컴퓨터로 옮겨요');
     await choose('p-2'); // the same agents come back for B
     const dan = rows().find((r) => r.textContent?.includes('댄 어윈'))!;
-    expect((dan.querySelector('input') as HTMLInputElement).checked).toBe(false);
+    expect(isOn(dan.querySelector('[role=checkbox]'))).toBe(false);
     expect(startRowLine()).toBe('옮길 에이전트를 하나 이상 골라 주세요');
   });
 });
@@ -299,7 +303,7 @@ describe('[SID:4576] the move refused', () => {
     await act(async () => { button('목록 다시 불러오기')!.click(); });
     await settle();
     expect(container.querySelector('[data-testid=setup-move-empty]')?.textContent).toBe(koMessages.desktop.setup.move.listEmpty);
-    expect((container.querySelector('input[name=setup-kind][value=move]') as HTMLInputElement).checked).toBe(true);
+    expect(isOn(kindRadio('move'))).toBe(true);
     expect(container.querySelector('[data-testid=setup-recipe-chosen]')).toBeNull();
     expect(button('시작')).toBeUndefined();
     expect(button('옮기기')!.disabled).toBe(true);
@@ -321,7 +325,7 @@ describe('[SID:4576] the move refused', () => {
     await act(async () => { button('목록 다시 불러오기')!.click(); });
     await settle();
     const dan = rows().find((r) => r.textContent?.includes('댄 어윈'))!;
-    expect((dan.querySelector('input') as HTMLInputElement).checked).toBe(false);
+    expect(isOn(dan.querySelector('[role=checkbox]'))).toBe(false);
   });
 
   it('offline → the offline card with the move\'s body («고른 에이전트는 그대로») · «다시 시도» sends the same move again', async () => {
@@ -507,7 +511,7 @@ describe('[SID:4670] «폰으로도 에이전트 다루기» on the move road (t
     stub(confirmOk);
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove preselect="a-dan" />);
     await chooseMove();
-    expect((row()!.querySelector('input[type=checkbox]') as HTMLInputElement).checked).toBe(true);
+    expect(isOn(row()!.querySelector('[role=checkbox]'))).toBe(true);
     await pressMoveStart();
     expect(calls.map((c) => `${c.method ?? 'GET'} ${c.url}`).filter((u) => !u.includes('/api/desktop/setups/'))).toEqual([
       'POST /api/desktop/setup-codes/confirm', 'PUT /api/organizations/o-1/remote-control',
@@ -529,7 +533,7 @@ describe('[SID:4670] «폰으로도 에이전트 다루기» on the move road (t
     stub(confirmOk);
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />);
     await chooseMove();
-    await act(async () => { (row()!.querySelector('input[type=checkbox]') as HTMLInputElement).click(); });
+    await act(async () => { (row()!.querySelector('[role=checkbox]') as HTMLElement).click(); });
     await pressMoveStart();
     expect(calls.some((c) => c.url === '/api/desktop/setup-codes/confirm')).toBe(true);
     expect(puts()).toHaveLength(0);
@@ -565,7 +569,7 @@ describe('[SID:4670] «폰으로도 에이전트 다루기» on the move road (t
     stub(confirmOk);
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />);
     await chooseMove();
-    expect((row()!.querySelector('input[type=checkbox]') as HTMLInputElement).checked).toBe(false);
+    expect(isOn(row()!.querySelector('[role=checkbox]'))).toBe(false);
     await pressMoveStart();
     expect(puts()).toHaveLength(0);
   });
@@ -578,5 +582,32 @@ describe('[SID:4670] «폰으로도 에이전트 다루기» on the move road (t
     await pressMoveStart();
     expect(puts()).toHaveLength(1);
     expect(container.querySelector('[data-testid=setup-phone-control-failed]')?.textContent).toBe('폰 다루기는 켜지 못했어요 — 끝나면 아래 카드에서 다시 켤 수 있어요.'); // (no status read yet: the card before it carries the line too)
+  });
+});
+
+describe('[SID:4831] the move list tick is the base Checkbox (a label press, Space, Enter)', () => {
+  it('pressing the row\'s name (the label) ticks it and again unticks it · Enter does not tick · Space does · a row that is not ok stays off', async () => {
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />);
+    await chooseMove();
+    const row = rows().find((r) => r.textContent?.includes('댄 어윈'))!;
+    const box = () => row.querySelector('[role=checkbox]') as HTMLElement;
+    expect(box().getAttribute('data-slot')).toBe('checkbox');
+    expect(isOn(box())).toBe(false);
+    const name = row.querySelector('label') as HTMLElement;
+    await act(async () => { name.click(); });
+    expect(isOn(box())).toBe(true);
+    await act(async () => { name.click(); });
+    expect(isOn(box())).toBe(false);
+    await act(async () => { box().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
+    expect(isOn(box())).toBe(false);
+    await act(async () => {
+      box().dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
+      box().dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true, cancelable: true }));
+    });
+    expect(isOn(box())).toBe(true);
+    const off = rows().find((r) => r.dataset.state !== 'ok')!;
+    await act(async () => { (off.querySelector('label') as HTMLElement).click(); });
+    expect(isOn(off.querySelector('[role=checkbox]'))).toBe(false);
   });
 });

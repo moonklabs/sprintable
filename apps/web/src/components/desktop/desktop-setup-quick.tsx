@@ -6,6 +6,8 @@ import { Loader2, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { isEEEnabled } from '@/lib/ee';
@@ -346,15 +348,23 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
               <MovedAgentNote agent={agent} />
             </div>
           ) : usable.length > 1 ? (
-            <div role="radiogroup" aria-labelledby="quick-step-agent" className="flex flex-col gap-1">
+            <RadioGroup name="quick-runtime" aria-labelledby="quick-step-agent" className="gap-1" value={runtime ?? null} onValueChange={(v) => { const picked = usable.find((u) => u === v); if (picked) setPickedFor({ folderKey, runtime: picked }); }}
+              // onClick too: pressing the radio a folder's mark already picked fires no change event, yet it is the person's own choice (4713 · codex 01a151a1).
+              // The click reaches the visible control (a span) or, from a press on the label's text, its hidden input — both bubble here.
+              onClick={(e) => {
+                const t = e.target as Element;
+                const v = t instanceof HTMLInputElement && t.type === 'radio' ? t.value : t.closest('[role=radio]')?.getAttribute('data-runtime');
+                const picked = usable.find((u) => u === v);
+                if (picked) setPickedFor({ folderKey, runtime: picked });
+              }}>
               {usable.map((r) => (
                 <label key={r} className="flex items-center gap-2 text-sm">
-                  <input type="radio" name="quick-runtime" checked={runtime === r} onChange={() => setPickedFor({ folderKey, runtime: r })} onClick={() => setPickedFor({ folderKey, runtime: r })} /> {/* onClick too: pressing the radio a folder's mark already picked fires no change event, yet it is the person's own choice (4713 · codex 01a151a1) */}
+                  <RadioGroupItem value={r} data-runtime={r} />
                   <span>{RUNTIME_LABEL[r]}</span>
                   {withVersion(r) ? <span className="text-xs text-muted-foreground">{withVersion(r)}</span> : null}
                 </label>
               ))}
-            </div>
+            </RadioGroup>
           ) : (
             <p className="flex items-center gap-2 text-sm"><span>{runtime ? RUNTIME_LABEL[runtime] : ''}</span>{runtime && withVersion(runtime) ? <span className="text-xs text-muted-foreground">{withVersion(runtime)}</span> : null}</p>
           )}
@@ -449,7 +459,7 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
               {showPhoneControl ? (
                 // story 4670 AC1 (Yuna §M): a bordered box, the phone icon, a semibold label, a bigger tick — one line inside the third step, just above «시작»
                 <div className="flex gap-3 rounded-md border p-3" data-testid="setup-phone-control">
-                  <input type="checkbox" id="quick-phone-control" checked={phoneControl} onChange={(e) => setPhoneControl(e.target.checked)} disabled={starting} className="mt-0.5 size-5 shrink-0 self-start accent-primary" />
+                  <Checkbox id="quick-phone-control" checked={phoneControl} onCheckedChange={(checked) => setPhoneControl(checked === true)} disabled={starting} className="mt-0.5 size-5 self-start" />
                   <label htmlFor="quick-phone-control" className="block min-w-0 flex-1 cursor-pointer break-keep">
                     <span className="flex items-center gap-1.5 text-sm font-semibold"><Smartphone className="size-4 shrink-0 text-primary" aria-hidden />{t('phoneControl.label')}</span>
                     <span className="mt-0.5 block text-xs text-muted-foreground">{t('phoneControl.help')}</span>
