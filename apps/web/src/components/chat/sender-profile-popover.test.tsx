@@ -103,6 +103,34 @@ describe('SenderProfilePopover — story #2349 "상대 프로필" 진입점', ()
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  // Base UI는 마우스 오른쪽 · 가운데 버튼을 바깥 누름으로 안 본다 — 손으로 지은 팝업은 pointerdown(어느 버튼이든)에 닫았다. 복원한 것을 잠근다.
+  it('바깥에서 오른쪽 버튼(contextmenu)이나 가운데 버튼(auxclick)을 누르면 닫힌다', async () => {
+    for (const type of ['contextmenu', 'auxclick'] as const) {
+      const onClose = vi.fn();
+      await act(async () => {
+        root.render(wrap(<SenderProfilePopover x={0} y={0} name="민" isAgent={false} onClose={onClose} />));
+      });
+      await act(async () => {
+        document.body.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true }));
+      });
+      expect(onClose, type).toHaveBeenCalledTimes(1);
+      await act(async () => { root.render(wrap(<div />)); });
+    }
+  });
+
+  it('팝업 안에서의 오른쪽 · 가운데 버튼은 닫지 않는다', async () => {
+    const onClose = vi.fn();
+    await act(async () => {
+      root.render(wrap(<SenderProfilePopover x={0} y={0} name="민" isAgent={false} onClose={onClose} onBlock={NOOP} />));
+    });
+    const inside = document.body.querySelector('[data-slot="popover-content"] span')!;
+    await act(async () => {
+      inside.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      inside.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true }));
+    });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it('팝업 안을 누르면 닫히지 않는다', async () => {
     const onClose = vi.fn();
     await act(async () => {

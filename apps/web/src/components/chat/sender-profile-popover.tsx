@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useTranslations } from 'next-intl';
 import { ShieldOff } from 'lucide-react';
 import { Avatar } from '@/components/shared/avatar';
@@ -44,6 +44,21 @@ export function SenderProfilePopover({ x, y, name, rawName, isAgent, avatarUrl, 
   const tChats = useTranslations('chats');
   const anchor = useMemo(() => pointAnchor(x, y), [x, y]);
 
+  // Base UI는 마우스 «주 버튼의 click»만 바깥 누름으로 본다. 손으로 지은 팝업은 어느 버튼의 pointerdown에도 닫았으므로, 오른쪽 · 가운데 버튼(contextmenu · auxclick)을
+  // 같은 식으로 복원한다 — 안 그러면 말풍선의 우클릭 메뉴가 뜬 뒤에도(같은 말풍선이든 다른 말풍선이든) 이 프로필이 열려 남아 두 층이 겹친다. 팝업 안은 제외.
+  useEffect(() => {
+    const closeOnOtherButton = (e: MouseEvent) => {
+      if ((e.target as Element | null)?.closest?.('[data-sender-profile-popup]')) return;
+      onClose();
+    };
+    document.addEventListener('contextmenu', closeOnOtherButton, true);
+    document.addEventListener('auxclick', closeOnOtherButton, true);
+    return () => {
+      document.removeEventListener('contextmenu', closeOnOtherButton, true);
+      document.removeEventListener('auxclick', closeOnOtherButton, true);
+    };
+  }, [onClose]);
+
   return (
     <Popover open onOpenChange={(open) => { if (!open) onClose(); }}>
       <PopoverContent
@@ -52,6 +67,7 @@ export function SenderProfilePopover({ x, y, name, rawName, isAgent, avatarUrl, 
         align="start"
         sideOffset={0}
         aria-label={name}
+        data-sender-profile-popup=""
         className="w-auto min-w-[200px] overflow-hidden p-0 py-2"
       >
         <div className="flex items-center gap-2.5 px-3 py-1.5">
