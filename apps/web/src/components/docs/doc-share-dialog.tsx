@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Info, Copy, Check } from 'lucide-react';
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -130,11 +131,11 @@ function DocShareForm({ docId, labels }: { docId: string; labels: ShareLabels })
       {isOn && token && (
         <div className="space-y-2 border-t border-border pt-3">
           <div className="flex items-center gap-2">
-            <input
+            <Input
               readOnly
               value={shareUrl}
               onFocus={(e) => e.currentTarget.select()}
-              className="min-w-0 flex-1 rounded-md border border-border bg-muted/30 px-2.5 py-1.5 font-mono text-base lg:text-xs text-foreground outline-none"
+              className="h-auto min-w-0 flex-1 bg-muted/30 px-2.5 py-1.5 font-mono lg:text-xs dark:bg-muted/30"
             />
             <Button size="sm" variant="outline" onClick={() => void copy()} className="flex-shrink-0">
               {copied ? <Check className="mr-1 size-3.5 text-success" /> : <Copy className="mr-1 size-3.5" />}

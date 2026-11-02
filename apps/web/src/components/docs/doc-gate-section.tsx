@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/operator-dropdown-select';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -471,12 +472,12 @@ export function DocGateSection({
               <DialogTitle className="text-sm font-semibold">{t('docGateRejectModalTitle')}</DialogTitle>
             </div>
             <label className="mb-1.5 block break-keep text-editorial-meta text-muted-foreground">{t('docGateRejectReasonLabel')}</label>
-            <textarea
+            <Textarea
               rows={3}
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder={t('docGateRejectReasonPlaceholder')}
-              className="w-full resize-none break-keep rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              className="resize-none break-keep"
             />
             <div className="mt-3 flex justify-end gap-2">
               <Button variant="ghost" size="sm" disabled={busy} onClick={() => { clearNoteDraft(); setRejectOpen(false); }}>{t('cancel')}</Button>

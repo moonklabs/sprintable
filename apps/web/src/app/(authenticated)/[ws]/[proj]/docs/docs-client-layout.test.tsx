@@ -111,7 +111,7 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     const calls: string[] = [];
     const fetchMock = stubFetch({ onCall: (url) => calls.push(url) });
     await mount();
-    const input = container.querySelector('input[type="text"]') as HTMLInputElement;
+    const input = container.querySelector('input[type="text"][data-slot="input"]') as HTMLInputElement;
     expect(input).toBeTruthy();
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
@@ -284,7 +284,7 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     await mount();
     const newFolderBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('새 폴더'));
     await act(async () => { newFolderBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const input = container.querySelector('input[placeholder="폴더 이름"]') as HTMLInputElement;
+    const input = container.querySelector('input[data-slot="input"][placeholder="폴더 이름"]') as HTMLInputElement;
     expect(input).toBeTruthy();
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;

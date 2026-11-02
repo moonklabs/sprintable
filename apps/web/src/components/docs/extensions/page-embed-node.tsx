@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { FileText, AlertCircle, RefreshCw } from 'lucide-react';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
 
@@ -171,7 +172,7 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
           className="flex items-center gap-2 rounded-xl border border-overlay-line-1 bg-overlay-fill-1 px-4 py-3"
         >
           <FileText className="size-4 shrink-0 text-muted-foreground" />
-          <input
+          <Input
             ref={inputRef}
             type="text"
             value={inputSlug}
@@ -179,7 +180,8 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
             placeholder={tDocs('pageEmbedPlaceholder')}
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? errorId : undefined}
-            className="flex-1 bg-transparent text-base lg:text-sm outline-none placeholder:text-muted-foreground"
+            // 겹침색 면(bg-overlay-fill-1) 안이라 흐린 안내 글자를 받치는 불투명 면을 남긴다(부품은 투명 · dark:bg-input/30).
+            className="min-w-0 flex-1 bg-card dark:bg-card"
             autoFocus
           />
           <button

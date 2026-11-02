@@ -16,6 +16,7 @@ import { TreeSearchInput } from '@/components/docs/tree-search-input';
 import { DocSearchResults, type DocSearchResult } from '@/components/docs/doc-search-results';
 import { useTreeExpanded } from '@/components/docs/use-tree-expanded';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { CountBadge } from '@/components/ui/count-badge';
 import { useToast } from '@/components/ui/toast';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
@@ -479,7 +480,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           {folderCreationParentTitle ? (
             <p className="truncate text-editorial-meta text-muted-foreground">{t('newFolderTarget', { title: folderCreationParentTitle })}</p>
           ) : null}
-          <input
+          <Input
             autoFocus
             value={newFolderName}
             onChange={(e) => { setNewFolderName(e.target.value); if (folderCreateError) setFolderCreateError(null); }}
@@ -489,7 +490,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             }}
             placeholder={t('newFolderPlaceholder')}
             disabled={folderSubmitting}
-            className="w-full min-w-0 rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
+            className="h-auto min-w-0 px-2 py-1.5 lg:text-xs"
           />
           {folderCreateError ? (
             <p className="text-editorial-meta text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{folderCreateError}</p>
