@@ -79,15 +79,15 @@ async def _audit_details(w) -> list[str]:
         return list((await s.execute(select(LoginAuditLog.detail).where(LoginAuditLog.user_id == w.user_id, LoginAuditLog.event_type == "login_failure"))).scalars())
 
 
-async def _wait_until_a_row_wait_exists(w, timeout: float = 10.0) -> bool:
-    """true as soon as some backend waits for a row lock (a tuple or a transaction id) — the request under test has reached the row"""
+async def _wait_until_a_row_wait_exists(w, timeout: float = 10.0, at_least: int = 1) -> bool:
+    """true as soon as `at_least` backends wait for a row lock (a tuple or a transaction id) — the requests under test have reached the row"""
     from sqlalchemy import text
 
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     while loop.time() < deadline:
         async with w.Session() as s:
-            if (await s.execute(text("SELECT count(*) FROM pg_locks WHERE NOT granted AND locktype IN ('transactionid', 'tuple')"))).scalar_one():
+            if (await s.execute(text("SELECT count(*) FROM pg_locks WHERE NOT granted AND locktype IN ('transactionid', 'tuple')"))).scalar_one() >= at_least:
                 return True
         await asyncio.sleep(0.05)
     return False
@@ -218,18 +218,32 @@ async def test_the_same_second_step_code_from_eight_requests_in_flight_together_
         await _close(engine, w)
 
 
-async def test_wrong_second_step_codes_in_flight_together_lock_on_the_fifth_and_answer_429_after(monkeypatch):
+async def test_wrong_second_step_codes_in_flight_together_lock_on_the_fifth_and_answer_429_after():
+    """the person's row is held by another transaction while twelve wrong codes arrive: every one of them reaches the row and queues there (their start-of-statement view is the same old one) — then the row is let go.
+    One statement per failure that reads the lock-out under the row lock answers the first five 403 (the fifth sets the lock-out) and the other seven 429."""
+    from sqlalchemy import text
+
     engine, w = await _world()
+    tasks: list[asyncio.Task] = []
+    holder = w.Session()
     try:
         await _enable_totp(w)
-        _overlap(monkeypatch, w, 12)
-        counts, results = await _answers([_sign_in(w, code="000000") for _ in range(12)])
+        async with holder.begin():
+            await holder.execute(text("SELECT 1 FROM users WHERE id = :i FOR UPDATE"), {"i": w.user_id})
+            tasks = [asyncio.create_task(_sign_in(w, code="000000")) for _ in range(12)]
+            assert await _wait_until_a_row_wait_exists(w, at_least=12), "the twelve requests did not all reach the person's row"
+        counts, results = await _answers(tasks)
         assert counts == Counter({403: 5, 429: 7}), counts
         assert {r.json()["error"]["code"] for r in results if r.status_code == 403} == {"INVALID_TOTP"}
         assert {r.json()["error"]["code"] for r in results if r.status_code == 429} == {"TOTP_LOCKED"}
         fail_count, locked_until = await _row(w, "totp_fail_count", "totp_locked_until")
         assert fail_count == 0 and locked_until is not None, "the fifth failure sets the lock and starts the count over; the later ones change nothing"
     finally:
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await holder.close()
         await _close(engine, w)
 
 

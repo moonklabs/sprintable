@@ -1442,7 +1442,8 @@ async def login(
 
         if timestep is None:
             # 실패: 카운터 증가, 5회 도달 시 5분 lockout — story 4839: one statement reads the row's lock-out state under the row lock, counts and answers from what it returns
-            # (a failure counted after the lock-out is already in force changes nothing and is answered 429, like the password lock-out)
+            # (a failure counted after the lock-out is already in force changes nothing and is answered 429, like the password lock-out). The read under the person's session lock above already holds this row until the end of the request;
+            # the statement takes it again (FOR UPDATE) so that it is correct on its own, whatever is above it.
             _failed = (await session.execute(text(
                 "WITH old AS (SELECT id, totp_locked_until AS was_locked_until FROM users WHERE id = :uid FOR UPDATE) "
                 "UPDATE users u SET "
