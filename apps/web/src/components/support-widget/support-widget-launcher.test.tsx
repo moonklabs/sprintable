@@ -136,6 +136,24 @@ describe('SupportWidgetLauncher — story #3260 셸', () => {
     expect(container.querySelector('[role="dialog"]')).toBeNull();
   });
 
+  // story 4831 덮개 명단 잠금 — 이 패널은 팝오버가 아니라 우하단 도크에 떠 있는 «비모달» 상담 패널이다. 바깥을 눌러도 닫히지 않는 것이 맞는 동작이라
+  // (Base UI Popover는 바깥 누름으로 닫는다) 바탕 Popover로 옮기지 않고 명단에 남긴다. 옮기려면 이 시험이 먼저 빨개져야 한다.
+  it('열린 패널은 바깥을 눌러도(pointerdown · mousedown · click) 닫히지 않고, 모달이 아니다(aria-modal 없음)', async () => {
+    await mount();
+    const btn = container.querySelector('button') as HTMLButtonElement;
+    await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const panel = container.querySelector('[role="dialog"]')!;
+    expect(panel).toBeTruthy();
+    expect(panel.getAttribute('aria-modal') ?? 'false').toBe('false'); // 모달이 아니다(속성 없음 · "false" 모두 같은 뜻)
+    await act(async () => {
+      document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(container.querySelector('[role="dialog"]')).toBeTruthy();
+    expect(btn.getAttribute('aria-expanded')).toBe('true');
+  });
+
   it('본체 대화가 아니라 Sprintable에 직접 연결된다는 문구가 패널에 드러난다(외부 위젯 패키징 요건)', async () => {
     await mount();
     const btn = container.querySelector('button') as HTMLButtonElement;
