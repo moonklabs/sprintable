@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { validateScheduledAt } from '@/components/content/validate-scheduled-at';
 import { teamOffsetCaption } from '@/lib/schedule-format';
@@ -52,11 +53,11 @@ export function ScheduleAtDialog({ open, onOpenChange, onSubmit, submitting, ser
           <DialogDescription className="break-keep">{t('channelPostsScheduleAtDialogDescription')}</DialogDescription>
         </DialogHeader>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <input
+          <Input
             type="datetime-local"
             value={value}
             onChange={(e) => { setValue(e.target.value); setTouched(true); }}
-            className="rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm"
+            className="h-auto w-auto bg-background dark:bg-background"
             aria-describedby={orgOffset ? 'channel-post-schedule-at-org-time' : undefined}
             data-testid="channel-post-schedule-at-input"
           />

@@ -225,3 +225,40 @@ describe('EntityDispatchPanel — 로드맵 P2·PR-E L1(더보기 드롭다운 e
     expect(document.querySelector('.shadow-md')).toBeNull();
   });
 });
+
+// story 4831 부품 교체(공용 부품 ②) — 담당자 칸이 바탕 Select가 되어도 한 줄에서 남는 폭을 채우고(flex-1) 줄어들 수 있으며(min-w-0), 고른 담당자로 전달 요청이 나간다.
+describe('EntityDispatchPanel — 바탕 부품(story 4831)', () => {
+  it('담당자 칸은 바탕 Select(flex-1 · min-w-0)이고, 고른 담당자가 담당자 저장 요청(PATCH)에 실린 뒤 전달 요청이 나간다', async () => {
+    const calls: Array<{ url: string; method: string; body: Record<string, unknown> }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/api/members')) return { ok: true, json: async () => ({ data: MEMBERS }) };
+      if (url === '/api/stories/s1') {
+        calls.push({ url, method: String(init?.method), body: JSON.parse(String(init?.body)) });
+        return { ok: true, json: async () => ({ data: {} }) };
+      }
+      if (url === '/api/dispatch') {
+        calls.push({ url, method: String(init?.method), body: JSON.parse(String(init?.body)) });
+        return { ok: true, json: async () => ({ data: { dispatched: true, assignee_id: 'm1', reason: 'ok' } }) };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await act(async () => {
+      root.render(wrap(<EntityDispatchPanel entityType="story" entityId="s1" projectId="p1" currentAssigneeId={null} />));
+    });
+    await act(async () => { await Promise.resolve(); });
+    const select = container.querySelector('select') as HTMLSelectElement;
+    expect(select.dataset.slot).toBe('select');
+    expect(select.className).toContain('flex-1');
+    expect(select.className).toContain('min-w-0');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select, 'm1');
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const dispatchBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('전달'));
+    await act(async () => { dispatchBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    // 담당자 선택이 먼저 저장되고(story = assignee_ids 배열), 이어서 전달 요청이 나간다
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual(['PATCH /api/stories/s1', 'POST /api/dispatch']);
+    expect(calls[0].body).toEqual({ assignee_ids: ['m1'] });
+    expect(calls[1].body).toEqual({ entity_type: 'story', entity_id: 's1', project_id: 'p1' });
+  });
+});

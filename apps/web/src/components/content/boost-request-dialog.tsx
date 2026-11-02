@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { majorToMinor, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
@@ -144,18 +146,18 @@ export function BoostRequestDialog({ open, onOpenChange, orgId, publicationId, o
                 {t('boostRequestNoAdConnection')}
               </p>
             ) : (
-              <select
+              <Select
                 id="boost-ad-connection"
                 value={adConnectionId}
                 onChange={(e) => setAdConnectionId(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm"
+                className="h-auto bg-background dark:bg-background"
                 data-testid="boost-ad-connection-select"
               >
                 <option value="">{t('boostRequestAdConnectionPlaceholder')}</option>
                 {connections.map((c) => (
                   <option key={c.id} value={c.id}>{c.account_label ?? c.account_id}</option>
                 ))}
-              </select>
+              </Select>
             )}
           </div>
 
@@ -164,23 +166,23 @@ export function BoostRequestDialog({ open, onOpenChange, orgId, publicationId, o
               <label className="text-xs font-medium text-muted-foreground" htmlFor="boost-budget">
                 {t('boostRequestBudgetLabel')}
               </label>
-              <input
+              <Input
                 id="boost-budget" type="number" min={0} step={1}
                 value={budgetMajor}
                 onChange={(e) => setBudgetMajor(e.target.value)}
-                className="w-32 rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm"
+                className="h-auto w-32 bg-background dark:bg-background"
                 data-testid="boost-budget-input"
               />
             </div>
-            <select
+            <Select
               value={currency}
               onChange={(e) => setCurrency(e.target.value as GenerationBudgetCurrency)}
-              className="rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm"
+              className="h-auto w-auto bg-background dark:bg-background"
               data-testid="boost-currency-select"
             >
               <option value="KRW">KRW</option>
               <option value="USD">USD</option>
-            </select>
+            </Select>
           </div>
           {touched && !budgetValid ? (
             <p className="text-xs text-destructive" data-testid="boost-budget-error">{t('boostRequestBudgetError')}</p>
@@ -191,11 +193,11 @@ export function BoostRequestDialog({ open, onOpenChange, orgId, publicationId, o
               {t('boostRequestStartsAtLabel')}
             </label>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <input
+              <Input
                 id="boost-starts-at" type="datetime-local"
                 value={startsAtLocal}
                 onChange={(e) => setStartsAtLocal(e.target.value)}
-                className="rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm"
+                className="h-auto w-auto bg-background dark:bg-background"
                 aria-describedby={orgOffset ? 'boost-starts-at-org-time' : undefined}
                 data-testid="boost-starts-at-input"
               />
@@ -211,11 +213,11 @@ export function BoostRequestDialog({ open, onOpenChange, orgId, publicationId, o
               {t('boostRequestEndsAtLabel')}
             </label>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <input
+              <Input
                 id="boost-ends-at" type="datetime-local"
                 value={endsAtLocal}
                 onChange={(e) => setEndsAtLocal(e.target.value)}
-                className="rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm"
+                className="h-auto w-auto bg-background dark:bg-background"
                 aria-describedby={orgOffset ? 'boost-ends-at-org-time' : undefined}
                 data-testid="boost-ends-at-input"
               />
@@ -236,17 +238,17 @@ export function BoostRequestDialog({ open, onOpenChange, orgId, publicationId, o
             <label className="text-xs font-medium text-muted-foreground" htmlFor="boost-objective">
               {t('boostRequestObjectiveLabel')}
             </label>
-            <select
+            <Select
               id="boost-objective"
               value={objective}
               onChange={(e) => setObjective(e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm"
+              className="h-auto bg-background dark:bg-background"
               data-testid="boost-objective-select"
             >
               {OBJECTIVE_OPTIONS.map((o) => (
                 <option key={o} value={o}>{t(`boostObjective_${o}`)}</option>
               ))}
-            </select>
+            </Select>
           </div>
         </div>
 
