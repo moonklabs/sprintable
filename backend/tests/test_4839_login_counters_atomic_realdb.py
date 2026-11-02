@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from collections import Counter
 
 import pytest
@@ -427,8 +428,11 @@ async def test_a_code_of_the_secret_replaced_while_the_sign_in_was_running_is_re
     try:
         old_secret, _ = await _enable_totp(w)
         old_code = pyotp.TOTP(old_secret).now()
-        new_secret = pyotp.random_base32()
-        assert pyotp.TOTP(new_secret).now() != old_code
+        now = time.time()
+        while True:  # a new secret whose accepted steps (the check takes the step before and after, and a step may turn while the test runs) cannot hold the old code
+            new_secret = pyotp.random_base32()
+            if all(pyotp.TOTP(new_secret).at(now + 30 * k) != old_code for k in range(-3, 4)):
+                break
         real_lock = auth_router._lock_person_sessions
 
         async def paused_lock(session, user_id, *, exclusive):
