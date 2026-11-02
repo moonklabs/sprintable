@@ -1,6 +1,8 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 
 const operatorControlClassName = 'flex w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm text-foreground ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 transition-colors';
 
@@ -8,9 +10,10 @@ export function OperatorInput({ className, ...props }: React.ComponentProps<type
   return <Input className={cn(operatorControlClassName, 'h-10', className)} {...props} />;
 }
 
+// story 4831 — 운영자 모양의 글 칸 · 선택 칸도 OperatorInput처럼 바탕 부품 위에 얹는다(날 태그 0). 네이티브 칸이라 동작은 그대로다.
 export function OperatorTextarea({ className, ...props }: React.ComponentProps<'textarea'>) {
   return (
-    <textarea
+    <Textarea
       className={cn(operatorControlClassName, 'min-h-[96px] w-full resize-y', className)}
       {...props}
     />
@@ -19,7 +22,7 @@ export function OperatorTextarea({ className, ...props }: React.ComponentProps<'
 
 export function OperatorSelect({ className, ...props }: React.ComponentProps<'select'>) {
   return (
-    <select
+    <Select
       className={cn(
         operatorControlClassName,
         // story #2969 §2 PR-3(doc proofline-system-layer-2969) — shadow-sm 제거(§1.2, 이미

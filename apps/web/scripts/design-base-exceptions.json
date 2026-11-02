@@ -66,6 +66,11 @@
     { "file": "components/desktop/desktop-continue-card.tsx", "kinds": ["raw_control"], "count": 4, "why": "앱으로 넘기는 폼(POST /native/continue/open)에 실리는 숨은 값 4개(PKCE 챌린지 · 방식 · 콜백 모드 · 돌아갈 앱) — 사람이 쓰는 입력칸이 아니라 값 운반이라 보이는 입력 부품으로 바꾸지 않는다." },
     { "file": "components/chat/chat-input.tsx", "kinds": ["raw_control"], "count": 1, "why": "첨부 파일 선택(type=file, 숨김) — 브라우저 파일 대화상자를 여는 입력이라 보이는 입력 부품으로 바꾸지 않는다. 보이는 단추는 Button이다." },
     { "file": "components/kanban/story-detail-panel.tsx", "kinds": ["raw_control"], "count": 1, "why": "첨부 파일 선택(type=file, 숨김) — 브라우저 파일 대화상자를 여는 입력이라 보이는 입력 부품으로 바꾸지 않는다. 보이는 단추는 Button이다." },
-    { "file": "components/docs/doc-editor.tsx", "kinds": ["raw_control"], "count": 2, "why": "편집기 표면 둘 — 제목 줄 글 칸 · 원문 마크다운 칸. 값은 바탕 토큰만 쓰고 키보드 · 초점은 편집기 규칙을 따른다(PO 판정 2026-11-02, «맨 입력칸» 변형을 만들지 않는다)." }
+    { "file": "components/docs/doc-editor.tsx", "kinds": ["raw_control"], "count": 2, "why": "편집기 표면 둘 — 제목 줄 글 칸 · 원문 마크다운 칸. 값은 바탕 토큰만 쓰고 키보드 · 초점은 편집기 규칙을 따른다(PO 판정 2026-11-02, «맨 입력칸» 변형을 만들지 않는다)." },
+    { "file": "components/canvas/import-artifact-dialog.tsx", "kinds": ["raw_control"], "count": 1, "why": "이미지 임포트의 파일 선택(type=file) — 브라우저 파일 대화상자를 여는 입력이라 보이는 입력 부품으로 바꾸지 않는다." },
+    { "file": "components/shared/avatar-edit-card.tsx", "kinds": ["raw_control"], "count": 1, "why": "아바타 사진 고르기의 파일 선택(type=file, 숨김) — 브라우저 파일 대화상자를 여는 입력이라 보이는 입력 부품으로 바꾸지 않는다. 보이는 단추는 Button이다." },
+    { "file": "components/shared/avatar-cropper.tsx", "kinds": ["raw_control"], "count": 1, "why": "아바타 자르기의 확대 범위 슬라이더(type=range) — 바탕에 슬라이더 부품이 없는 입력 종류다(브라우저 기본 슬라이더 그대로)." },
+    { "file": "components/ui/select.tsx", "kinds": ["raw_control"], "count": 1, "why": "Select 부품의 정의 자신 — 이 파일이 날 <select>를 감싸는 껍데기라, 이 태그를 부품으로 바꾸면 자기 자신을 부르게 된다." },
+    { "file": "components/ui/textarea.tsx", "kinds": ["raw_control"], "count": 1, "why": "Textarea 부품의 정의 자신 — 이 파일이 날 <textarea>를 감싸는 껍데기라, 이 태그를 부품으로 바꾸면 자기 자신을 부르게 된다." }
   ]
 }

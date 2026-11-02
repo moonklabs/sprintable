@@ -11,8 +11,8 @@
  *
  * 또 하나의 종류 — 날것 입력칸(`raw_control`): 부품(Input · Textarea · Select · Checkbox · RadioGroup) 대신 쓴 날 `<input>` · `<textarea>` · `<select>`.
  * 이 종류는 «닫힌 묶음»(`Group.closed`)에서만 센다 — 묶음의 부품 교체가 끝난 뒤 0으로 못 박는 것이다(아직 교체 중인 묶음은 닫지 않는다).
- * 지금 닫힌 것은 첫 실행 길 · 대화 · 보드 · 승인 · 에이전트 · 문서·목표 · 브리핑이고, 공용 부품 · 바탕 부품은 교체 PR이 끝날 때까지 열어 둔다
- * (바탕 부품은 닫을 때 `ui/input` · `ui/textarea` · `ui/select`가 부품 «정의 자신»이라 쓰는 날 태그도 명단에 올린다).
+ * 아홉 묶음 모두 닫혔다(첫 실행 길 · 대화 · 보드 · 승인 · 에이전트 · 문서·목표 · 브리핑 · 공용 부품 · 바탕 부품).
+ * 바탕 부품의 `ui/select` · `ui/textarea`는 부품 «정의 자신»이라 쓰는 날 태그를 명단에 올린다.
  * 정규식이 아니라 TypeScript 구문 트리로 본다: 문자열 · 주석 속 `<input>`(예: HTML 문자열을 만드는 변환기)은 세지 않는다.
  * 한계: 세는 것은 JSX 소스의 소문자 태그뿐이다 — `document.createElement('input')` · `React.createElement('input')`처럼 실행 중에 만드는 입력칸은 못 본다
  * (지금은 문서 슬래시 명령의 이미지 URL 입력 하나뿐이며, 편집기 표면이라 이 가드의 범위 밖으로 둔다).
@@ -82,6 +82,7 @@ export const GROUPS: Group[] = [
   { name: '브리핑 (org-briefing)', closed: true, prefixes: ['app/(authenticated)/org-briefing', 'components/org-briefing'] },
   {
     name: '공용 부품 (화면이 부르는 공용 폴더)',
+    closed: true,
     prefixes: [
       'components/canvas', 'components/nav', 'components/workcell', 'components/proof-capsule', 'components/shared', 'components/integrations',
       'components/epics', 'components/hypotheses', 'components/ai', 'components/attention-queue', 'components/command-palette', 'components/outcome',
@@ -91,7 +92,7 @@ export const GROUPS: Group[] = [
       'lib/channel-label.ts', 'lib/runtime-capabilities.ts', 'services/canvas.ts',
     ],
   },
-  { name: '바탕 부품 (components/ui + design-system)', prefixes: ['components/ui', 'components/design-system'] },
+  { name: '바탕 부품 (components/ui + design-system)', closed: true, prefixes: ['components/ui', 'components/design-system'] },
 ];
 
 // 묶음 합이 이보다 적으면 가드가 헛도는 것(폴더 이동 · 경로 오타)이다. 지금 약 545파일.

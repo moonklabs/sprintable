@@ -133,20 +133,32 @@ describe('판정 — 닫힌 묶음의 날것 입력칸', () => {
 // ---- 실제 소스 트리 ----
 describe('실제 소스 트리 — 닫힌 묶음의 날것 입력칸', () => {
   const closedNames = GROUPS.filter((g) => g.closed).map((g) => g.name);
-  it('닫힌 묶음은 일곱이고, 공용 부품 · 바탕 부품은 아직 열려 있다(교체가 끝난 뒤 마지막 PR에서 닫는다)', () => {
-    expect(closedNames).toHaveLength(7);
-    for (const g of GROUPS) {
-      if (g.name.startsWith('공용 부품') || g.name.startsWith('바탕 부품')) expect(g.closed, g.name).toBeFalsy();
-    }
+  it('묶음 아홉이 모두 닫혀 있다(공용 부품 · 바탕 부품까지 — 교체가 끝났다)', () => {
+    expect(GROUPS).toHaveLength(9);
+    expect(closedNames).toHaveLength(9);
+    for (const g of GROUPS) expect(g.closed, g.name).toBe(true);
   });
-  it('날것은 명단 8건뿐이고 문제 0이다(첫 실행 길 4 · 대화 1 · 보드 1 · 문서 2)', () => {
+  it('날것은 명단 13건뿐이고 문제 0이다(첫 실행 길 4 · 대화 1 · 보드 1 · 문서 2 · 공용 3 · 바탕 정의 2)', () => {
     const r = evaluate(fsReader(SRC_ROOT), GROUPS, loadExceptions(EXCEPTIONS_PATH));
     expect(r.problems).toEqual([]);
-    expect(r.rawControls.found).toBe(8);
-    expect(r.rawControls.allowed).toBe(8);
+    expect(r.rawControls.found).toBe(13);
+    expect(r.rawControls.allowed).toBe(13);
     const listed = loadExceptions(EXCEPTIONS_PATH).filter((e) => e.kinds.includes(RAW_KIND));
-    expect(listed.reduce((n, e) => n + (e.count ?? 0), 0)).toBe(8);
+    expect(listed.reduce((n, e) => n + (e.count ?? 0), 0)).toBe(13);
     for (const e of listed) expect(e.why.trim().length, e.file).toBeGreaterThanOrEqual(10);
+  });
+  it('양성 대조: 새로 닫힌 두 묶음에 날 입력칸을 넣어도 빨개진다(공용 부품 · 바탕 부품)', () => {
+    const reader = fsReader(SRC_ROOT);
+    for (const target of ['components/nav/unified-switcher.tsx', 'components/ui/badge.tsx']) {
+      const patched = { list: reader.list, read: (rel: string) => (rel === target ? `${reader.read(rel)}\nexport const Injected = () => <textarea />;\n` : reader.read(rel)) };
+      const r = evaluate(patched, GROUPS, loadExceptions(EXCEPTIONS_PATH));
+      expect(r.problems.join(' | '), target).toContain(`날것 입력칸 1건 더(명단 0건): ${target}`);
+    }
+  });
+  it('양성 대조: 명단에서 부품 정의 자신(ui/select) 항목을 빼면 새 날것으로 잡힌다', () => {
+    const without = loadExceptions(EXCEPTIONS_PATH).filter((e) => e.file !== 'components/ui/select.tsx');
+    const r = evaluate(fsReader(SRC_ROOT), GROUPS, without);
+    expect(r.problems.join(' | ')).toContain('날것 입력칸 1건 더(명단 0건): components/ui/select.tsx');
   });
   it('양성 대조: 실제 닫힌 파일에 날 입력칸을 넣으면 같은 판정이 빨개진다', () => {
     const reader = fsReader(SRC_ROOT);
