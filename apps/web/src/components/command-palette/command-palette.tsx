@@ -6,6 +6,7 @@ import { scopedResourceHref } from '@/lib/nav-v3-destinations';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
+import { Dialog, DialogOverlay, DialogPortal } from '@/components/ui/dialog';
 import {
   BookOpen,
   CalendarRange,
@@ -331,11 +332,9 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
   const hasResults = groups.length > 0;
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={handleOpenChange}>
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Backdrop
-          className="fixed inset-0 z-50 bg-scrim-1 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
-        />
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogPortal>
+        <DialogOverlay className="bg-scrim-1 supports-backdrop-filter:backdrop-blur-xs" />
         <DialogPrimitive.Popup data-modal-popup=""
           className={cn(
             'fixed top-[20%] left-1/2 z-50 w-full max-w-[calc(100%-2rem)] -translate-x-1/2',
@@ -404,8 +403,8 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
             ) : null}
           </Autocomplete.Root>
         </DialogPrimitive.Popup>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+      </DialogPortal>
+    </Dialog>
   );
 }
 

@@ -5,7 +5,7 @@ import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
 import Image from 'next/image';
 import { ChevronLeft, ChevronRight, ExternalLink, Loader2, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { Dialog, DialogPortal } from '@/components/ui/dialog';
+import { Dialog, DialogOverlay, DialogPortal } from '@/components/ui/dialog';
 
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -149,7 +149,7 @@ export function ImageLightbox({ items, startIndex, conversationId, storyId, onCl
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogPortal>
-        <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-scrim-3 duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
+        <DialogOverlay className="bg-scrim-3" />
         <DialogPrimitive.Popup data-modal-popup=""
           aria-label={current.alt}
           className="fixed inset-0 z-50 flex flex-col outline-none duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
