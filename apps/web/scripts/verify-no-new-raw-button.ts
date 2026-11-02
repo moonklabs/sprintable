@@ -39,7 +39,6 @@ export const EXEMPT_FILES = new Set<string>([
   'components/ui/sidebar.tsx', // base-ui 프리미티브 트리거 wrapper — 구조적으로 raw button 필요.
   'components/ui/toast.tsx', // 토스트 dismiss 트리거 — 최소 마크업 프리미티브.
   'components/ui/route-error-state.tsx', // 에러 화면 재시도 트리거 — 최소 마크업.
-  'components/ui/contextual-panel-layout.tsx', // 패널 닫기/토글 트리거 — 구조적 오버레이 마크업.
   'components/ui/operator-dropdown-select.tsx', // 커스텀 드롭다운 트리거 프리미티브.
   'components/ui/upgrade-modal.tsx', // 모달 닫기 트리거 — 최소 마크업.
 ]);

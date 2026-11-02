@@ -53,8 +53,9 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
   const { railMode, toggleManualExpand } = useChatRail();
   // story #2921 S6 후속(유나 design:changes 2026-08-22, CI a11y 가드 지적 처방) — overlay는
   // 모바일 드로어와 동형인데 접근 가능한 dialog 시맨틱이 없었다(「손수 구현된 모달」로 CI가
-  // 정당하게 잡음). contextual-panel-layout.tsx의 기존 반응형 드로어와 같은 useFocusTrap
-  // 배선을 재사용한다(사본 분화 금지) — Tab 순환+Esc 닫힘+포커스 반환.
+  // 정당하게 잡음). 당시 contextual-panel-layout.tsx의 반응형 드로어와 같은 useFocusTrap
+  // 배선을 재사용했다(사본 분화 금지) — Tab 순환+Esc 닫힘+포커스 반환. (그 드로어는 story 4831에서 바탕 Sheet로 옮겼다 — 이 레일은 같은
+  // 요소가 docked ↔ overlay로 모양만 바뀌어 포털(Sheet)로 옮기면 목록 상태가 사라지므로 useFocusTrap에 남는다.)
   const closeOverlay = useCallback(() => toggleManualExpand(), [toggleManualExpand]);
   const trapRef = useFocusTrap(railMode === 'overlay', closeOverlay);
 

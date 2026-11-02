@@ -35,7 +35,6 @@ export const EXEMPT_FILES = new Set<string>([
   'components/ui/card.tsx',
   'components/ui/section-card.tsx',
   'components/ui/glass-panel.tsx',
-  'components/ui/contextual-panel-layout.tsx',
   'components/ui/route-error-state.tsx',
   'components/ui/toast.tsx',
   'components/ui/upgrade-modal.tsx',
