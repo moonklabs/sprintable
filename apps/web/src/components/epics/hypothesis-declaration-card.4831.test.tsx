@@ -50,6 +50,7 @@ describe('에픽 가설 선언 카드 — 새로 정의 모드의 칸들(story 4
 
     await act(async () => { setInput(q<HTMLInputElement>(`input[data-slot="input"][placeholder="${th.metricPlaceholder}"]`), '전환율'); });
     expect(latest.metricDefinition?.metric).toBe('전환율');
+    expect(q<HTMLInputElement>('input[data-slot="input"][type=number][inputmode=decimal]').className).toContain('sm:w-20'); // 자동 칸에서 목표 칸 폭을 부품의 w-full이 되돌리지 못한다
     await act(async () => { setInput(q<HTMLInputElement>('input[data-slot="input"][type=number][inputmode=decimal]'), '12.5'); });
     expect(latest.metricDefinition?.target).toBe(12.5);
     await act(async () => { setInput(q<HTMLInputElement>('input[data-slot="input"][type=date]'), '2026-12-01'); });

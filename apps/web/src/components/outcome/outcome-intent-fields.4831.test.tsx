@@ -43,6 +43,7 @@ describe('성과 의도 칸 — 값이 onChange 값에 실린다(story 4831)', (
     });
     expect(latest.metric_definition).toMatchObject({ metric: 'progress', source: 'internal_ops', direction: 'up' });
 
+    expect(q<HTMLInputElement>('input[data-slot="input"][type=number]').className).toContain('sm:w-24'); // 자동 칸에서 목표 칸 폭을 부품의 w-full이 되돌리지 못한다
     await act(async () => { setInput(q<HTMLInputElement>('input[data-slot="input"][type=number]'), '40'); });
     expect(latest.metric_definition?.target).toBe(40);
     await act(async () => { setInput(q<HTMLInputElement>('input[data-slot="input"][type=number]'), ''); });

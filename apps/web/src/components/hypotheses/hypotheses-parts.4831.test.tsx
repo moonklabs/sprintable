@@ -51,6 +51,7 @@ describe('가설 폼 — 문장 · 지표 · 출처 · 방향 · 목표 · 측�
     await act(async () => { setInput(q(container, 'textarea[data-slot="textarea"]'), '체크아웃을 줄이면 전환이 오른다'); });
     await act(async () => { setInput(q(container, `input[data-slot="input"][placeholder="${th.metricPlaceholder}"]`), '전환율'); });
     await act(async () => { setSelect(q(container, 'select[data-slot="select"]'), 'manual'); });
+    expect(q<HTMLInputElement>(container, 'input[data-slot="input"][type=number]').className).toContain('sm:w-20'); // 자동 칸에서 목표 칸 폭을 부품의 w-full이 되돌리지 못한다
     await act(async () => { setInput(q(container, 'input[data-slot="input"][type=number]'), '12.5'); });
     await act(async () => { setInput(q(container, 'input[data-slot="input"][type=date]'), '2026-12-01'); });
     await submit(form);

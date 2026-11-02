@@ -111,7 +111,7 @@ export function HypothesisForm({
             value={Number.isNaN(md.target) ? '' : md.target}
             onChange={(e) => setMd({ target: e.target.value === '' ? 0 : Number(e.target.value) })}
             placeholder={t('targetPlaceholder')}
-            className="h-auto tabular-nums bg-background dark:bg-background"
+            className="h-auto tabular-nums bg-background dark:bg-background sm:w-20"
           />
         </div>
       </div>
