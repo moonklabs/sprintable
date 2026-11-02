@@ -40,6 +40,9 @@ ALLOWED = {
     "apps/web/next.config.ts",
     "apps/web/next.config.embedded.test.ts",
     "turbo.json",
+    # story 4829: tests that must SET the switch to show a page in local mode and in hosted mode (the pages themselves ask `isEmbeddedServer()` and name nothing)
+    "apps/web/src/app/(authenticated)/desktop/page.4829.test.tsx",
+    "apps/web/src/app/(authenticated)/desktop/pair/page.4829.test.tsx",
 }
 _SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".next", "dist", "build", ".pytest_cache", ".mypy_cache"}
 
