@@ -30,7 +30,7 @@ import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
  * 같이 resolveNavV3Destinations(readNavV3FlagsFromEnv()).today.path로 — 하드코딩
  * '/org-briefing'은 TODAY_V3_ENABLED가 나중에 ON이 되면 목적지가 갈리는 조용한 드리프트였다.
  *
- * story 4829 (공개 2-⑥ (나)) — the phone relay needs a middle server that the app's own server (local mode, `SPRINTABLE_EMBEDDED=1`) does not have: there the three phone
+ * story 4829 (공개 2-⑥ (나)) — the phone relay needs the Sprintable server on the internet, which the app's own server (local mode, `isEmbeddedServer()`) does not have: there the three phone
  * cards («원격 제어» · «원격 기기» · «세션 관리») are one line of guidance. Hosted mode draws them as before — each card has its own condition, so the hosted children are
  * exactly what they were.
  */

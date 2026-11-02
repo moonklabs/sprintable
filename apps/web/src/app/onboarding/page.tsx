@@ -6,7 +6,6 @@ import { resolveChatsHref, resolveNavV3Destinations } from '@/lib/nav-v3-destina
 import { EmailVerifyGate } from '@/components/auth/email-verify-gate';
 import { isDesktopDownloadEnabled } from '@/lib/desktop-download-gate';
 import { afterOrgDeleted } from '@/lib/auth/org-deleted-landing';
-import { isEmbeddedServer } from '@/lib/embedded-api-origin';
 
 interface OnboardingPageProps {
   searchParams: Promise<{ step?: string; orgId?: string; next?: string; after?: string }>;
@@ -40,7 +39,6 @@ export default async function OnboardingPage({ searchParams }: OnboardingPagePro
       chatsHref={chatsHref}
       macDownloadEnabled={isDesktopDownloadEnabled(process.env.DESKTOP_DOWNLOAD_ENABLED)}
       afterOrgDelete={afterOrgDeleted(params.after) && !initialStep}
-      localMode={isEmbeddedServer()} // story 4829: the app's own server (local mode) — the connect step does not offer the phone relay's switch there
     />
   );
   return initialStep === 'project' ? form : <EmailVerifyGate>{form}</EmailVerifyGate>;
