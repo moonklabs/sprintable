@@ -267,6 +267,22 @@ describe('ImageLightbox — story #2037 상태(denied/expired) — AttachmentIma
 });
 
 // [SID:4375] AC5 — 확대 보기 창에 제목 · 이름이 없어 화면 읽기가 «대화 상자»로만 읽었다 → 창 이름 = 지금 이미지 이름(넘기면 따라감).
+// story 4831 덮개 명단 잠금 — 이미지 확대의 팝업 본체는 가림막이 아니라 «내용 배치»(전체 화면 이미지 뷰)라서 바탕 DialogContent(안쪽 여백 · 가운데 상자 · 닫기 단추)로 옮기지 않고
+// 원시 Popup 그대로 명단에 남긴다. 옮기려면 이 시험이 먼저 빨개져야 한다. Esc · 닫기 단추 · 접근 이름 · 좌우 넘김은 이 파일과 overlay-dialogs.4831.test.tsx가 잠근다.
+describe('ImageLightbox — 팝업 본체는 전체 화면이다(덮개 명단 잠금)', () => {
+  it('팝업이 화면 전체(fixed inset-0)를 세로 flex로 채우고, 안쪽 여백 · 가운데 상자(DialogContent 모양)가 아니다', async () => {
+    mockFetchFor({ 'att-1.png': SIGNED1 });
+    await act(async () => {
+      root.render(wrap(<ImageLightbox items={[IMG1]} startIndex={0} conversationId="conv-1" onClose={() => {}} />));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const popup = document.querySelector('[role="dialog"]') as HTMLElement;
+    const has = (t: string) => popup.className.split(/\s+/).includes(t);
+    for (const t of ['fixed', 'inset-0', 'flex', 'flex-col']) expect(has(t), t).toBe(true);
+    for (const t of ['top-1/2', 'left-1/2', 'p-4', 'rounded-lg', 'grid']) expect(has(t), t).toBe(false); // DialogContent 기본 모양이 아님
+  });
+});
+
 describe('ImageLightbox — 창 접근 이름([SID:4375])', () => {
   it('창 aria-label = 지금 이미지 alt · 다음으로 넘기면 바뀐다', async () => {
     mockFetchFor({ 'att-1.png': SIGNED1, 'att-2.png': SIGNED2 });
