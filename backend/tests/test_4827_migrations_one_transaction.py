@@ -55,11 +55,53 @@ def _fold(node: ast.AST) -> str | None:
 
 
 def _sql_statements(text: str) -> list[str]:
-    """statements of a piece of SQL: comments and dollar-quoted bodies taken out, split at `;`"""
-    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
-    text = re.sub(r"--[^\n]*", " ", text)
-    text = re.sub(r"\$(\w*)\$.*?\$\1\$", " $$ ", text, flags=re.DOTALL)
-    return [p.strip() for p in text.split(";") if p.strip()]
+    """the statements of a piece of SQL, read the way postgres reads it: string literals ('' escapes), quoted identifiers, `-- …` and `/* … */` comments and dollar-quoted bodies
+    are each replaced by a placeholder, and the text is split at the `;` that remain — so `'legacy -- x'` is not a comment and `'x; END'` is not a statement"""
+    out: list[str] = []
+    cur: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c in ("'", '"'):
+            j = i + 1
+            while j < n:
+                if text[j] == c:
+                    if j + 1 < n and text[j + 1] == c:
+                        j += 2
+                        continue
+                    break
+                j += 1
+            cur.append(" ? ")
+            i = j + 1
+        elif text.startswith("--", i):
+            j = text.find("\n", i)
+            i = n if j == -1 else j + 1
+            cur.append(" ")
+        elif text.startswith("/*", i):
+            depth, j = 1, i + 2
+            while j < n and depth:
+                if text.startswith("/*", j):
+                    depth, j = depth + 1, j + 2
+                elif text.startswith("*/", j):
+                    depth, j = depth - 1, j + 2
+                else:
+                    j += 1
+            i = j
+            cur.append(" ")
+        elif c == "$" and (m := re.match(r"\$\w*\$", text[i:])):
+            tag = m.group(0)
+            j = text.find(tag, i + len(tag))
+            i = n if j == -1 else j + len(tag)
+            cur.append(" $ ")
+        elif c == ";":
+            out.append("".join(cur).strip())
+            cur = []
+            i += 1
+        else:
+            cur.append(c)
+            i += 1
+    out.append("".join(cur).strip())
+    return [x for x in out if x]
 
 
 def sql_violations(text: str) -> list[str]:
@@ -67,7 +109,7 @@ def sql_violations(text: str) -> list[str]:
     for stmt in _sql_statements(text):
         if _TX_STATEMENT.match(stmt):
             out.append(f"a transaction statement ({stmt[:20]!r})")
-    flat = " ".join(_sql_statements(text))
+    flat = " ".join(_sql_statements(text))  # (code only: strings and comments are placeholders)
     if re.search(r"\bCONCURRENTLY\b", flat, re.IGNORECASE) and re.search(
         r"\bCREATE\s+(UNIQUE\s+)?INDEX\b|\bREINDEX\b|\bDROP\s+INDEX\b|\bDETACH\s+PARTITION\b|\bREFRESH\s+MATERIALIZED\s+VIEW\b", flat, re.IGNORECASE
     ):
@@ -373,6 +415,29 @@ def test_control_migration_violations_are_seen(source: str, expect: str) -> None
 )
 def test_control_prose_and_ordinary_statements_are_not_flagged(source: str) -> None:
     assert version_violations(source) == [], version_violations(source)
+
+
+def test_control_sql_is_read_like_sql() -> None:
+    # a `--` inside a string is not a comment: the COMMIT after it is a statement
+    assert version_violations("def upgrade():\n    op.execute(sa.text(\"UPDATE audit_log SET note = 'legacy -- marker'; COMMIT\"))\n")
+    # a `;` or a word inside a string is not a statement
+    assert version_violations("def upgrade():\n    op.execute(sa.text(\"UPDATE records SET note = 'legacy; COMMIT'\"))\n") == []
+    assert version_violations("def upgrade():\n    op.execute(sa.text(\"UPDATE records SET label = CASE WHEN kind = 'legacy' THEN 'x; END' ELSE label END\"))\n") == []
+    # a doubled quote stays inside the string
+    assert version_violations("def upgrade():\n    op.execute(\"UPDATE t SET a = 'it''s; COMMIT'\")\n") == []
+    # CONCURRENTLY as data is not the keyword
+    assert version_violations("def upgrade():\n    op.execute(\"UPDATE t SET a = 'CREATE INDEX CONCURRENTLY'\")\n") == []
+    # a quoted identifier is not a statement either
+    assert version_violations("def upgrade():\n    op.execute('ALTER TABLE \"commit\" ADD COLUMN a int; SELECT 1')\n") == []
+    # a nested block comment hides nothing that follows it
+    assert version_violations("def upgrade():\n    op.execute('/* a /* b */ c */ SELECT 1; COMMIT')\n")
+
+
+def test_control_built_strings_are_read_as_a_whole() -> None:
+    assert version_violations("def upgrade():\n    op.execute('COMMIT {}'.format(x))\n")
+    assert version_violations("def upgrade():\n    op.execute('COMMIT %s' % x)\n")
+    assert version_violations("def upgrade():\n    op.execute(f'COMMIT {x}')\n")
+    assert version_violations("def upgrade():\n    op.execute('SELECT 1; ' + 'COMMIT')\n")
 
 
 def test_control_a_savepoint_may_be_rolled_back_but_the_connection_may_not() -> None:
