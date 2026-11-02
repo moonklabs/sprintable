@@ -34,6 +34,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { participantDisplayLabel } from '@/lib/member-display';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { isImeComposing } from '@/lib/ime-composition';
 import { memberDisplayLabel, memberRowLabels, type MemberRow } from '@/lib/member-display';
 import { draftOwnerSegment } from '@/lib/tab-owner';
 
@@ -529,6 +530,9 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // 한글 등 입력기 조합 중의 키(엔터=글자 확정, 에스케이프=조합 취소, 방향키=후보 고르기)는 발송 · 선택 · 닫기로 읽지 않는다.
+    // 안 거르면 조합 중 엔터가 메시지를 보낸 뒤 확정된 마지막 음절이 빈 입력창에 다시 남는다(4831 측정 중 발견).
+    if (isImeComposing(e)) return;
     // command(/) picker — mention/entity와 정확 동일 패턴(§5.2 가드·§5.4 a11y는 렌더). 배타라 최상단.
     if (commandCandidates.length > 0) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setCommandIndex((i) => (i + 1) % commandCandidates.length); return; }

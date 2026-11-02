@@ -21,6 +21,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { CHAT_API_PREFIX } from '@/lib/chat-api-prefix';
 import { participantDisplayLabel } from '@/lib/member-display';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { isImeComposing } from '@/lib/ime-composition';
 
 interface Participant {
   member_id: string;
@@ -303,6 +304,8 @@ export default function ConversationPage() {
                 value={titleDraft}
                 onChange={(e) => setTitleDraft(e.target.value)}
                 onKeyDown={(e) => {
+                  // 한글 등 입력기 조합 중의 엔터(글자 확정) · 에스케이프(조합 취소)는 저장 · 닫기로 읽지 않는다 — 반쯤 쓴 방 이름이 저장되던 것(4831 측정 중 발견).
+                  if (isImeComposing(e)) return;
                   if (e.key === 'Enter') void handleSaveTitle();
                   else if (e.key === 'Escape') setEditingTitle(false);
                 }}
