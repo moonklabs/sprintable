@@ -269,7 +269,7 @@ describe('[4534] the strip inside the phone app', () => {
     await press(ko.button.instruct);
     expect(document.body.textContent).toContain(ko.sheet.title);
     expect(document.body.textContent).toContain(ko.sheet.note);
-    const box = document.querySelector('[data-testid="agent-instruct-text"]') as HTMLTextAreaElement;
+    const box = document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement;
     expect(box.maxLength).toBe(8000);
     await act(async () => {
       const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
@@ -282,7 +282,7 @@ describe('[4534] the strip inside the phone app', () => {
     expect(commandLine()?.textContent).toBe(ko.command.sentAfterStep);
     expect(JSON.parse(calls.find((c) => c.init?.method === 'POST')!.init!.body as string)).toMatchObject({ kind: 'send_prompt', text: 'run the tests', conversation_id: CONV, session_key: 's-9' });
     await press(ko.button.instruct);
-    expect((document.querySelector('[data-testid="agent-instruct-text"]') as HTMLTextAreaElement).value).toBe('');
+    expect((document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement).value).toBe('');
   });
 
   it('the turn had ended (409): the instruction goes in as a message into this conversation — never lost', async () => {
@@ -290,7 +290,7 @@ describe('[4534] the strip inside the phone app', () => {
     phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9', text: 'run the tests' });
     await render();
     await press(ko.button.instruct);
-    const box = document.querySelector('[data-testid="agent-instruct-text"]') as HTMLTextAreaElement;
+    const box = document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement;
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, 'run the tests'); box.dispatchEvent(new Event('input', { bubbles: true })); });
     await press(ko.sheet.send);
     await settle();
@@ -301,7 +301,7 @@ describe('[4534] the strip inside the phone app', () => {
 
   const typeAndSend = async (text: string) => {
     await press(ko.button.instruct);
-    const box = document.querySelector('[data-testid="agent-instruct-text"]') as HTMLTextAreaElement;
+    const box = document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement;
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, text); box.dispatchEvent(new Event('input', { bubbles: true })); });
     await press(ko.sheet.send);
   };
@@ -361,7 +361,7 @@ describe('[4534] the strip inside the phone app', () => {
     expect(commandLine()?.textContent).toBe(ko.command.sendUnreachable);
     expect(buttons()).toEqual([ko.button.stop, ko.button.instruct]);
     await press(ko.button.instruct);
-    expect((document.querySelector('[data-testid="agent-instruct-text"]') as HTMLTextAreaElement).value).toBe('x');
+    expect((document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement).value).toBe('x');
   });
 
   it('refusals keep the button\'s verb and their way out: signed out → [다시 로그인] · key lost → [다시 페어링] · no screen lock → [설정 열기]', async () => {
@@ -382,13 +382,13 @@ describe('[4534] the strip inside the phone app', () => {
       if (code !== 'conversation_not_found') expect(commandLine()?.textContent).toBe(stopLine);
       expect(commandLine()?.parentElement?.querySelector('a,button')?.textContent ?? null).toBe(code === 'conversation_not_found' ? null : action);
       await press(ko.button.instruct);
-      const box = document.querySelector('[data-testid="agent-instruct-text"]') as HTMLTextAreaElement;
+      const box = document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement;
       await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, 'x'); box.dispatchEvent(new Event('input', { bubbles: true })); });
       await press(ko.sheet.send);
       expect(commandLine()?.textContent).toBe(sendLine);
       expect(commandLine()?.className).toContain('break-keep');
       await press(ko.button.instruct);
-      expect((document.querySelector('[data-testid="agent-instruct-text"]') as HTMLTextAreaElement).value, `${code}: what was written stays`).toBe('x');
+      expect((document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement).value, `${code}: what was written stays`).toBe('x');
     }
     expect(fetchWithAuth.mock.calls.some(([u, i]) => String(u).endsWith('/desktop-commands') && (i as RequestInit | undefined)?.method === 'POST')).toBe(false);
   });
@@ -406,7 +406,7 @@ describe('[4534] the strip inside the phone app', () => {
 // on the sheet before it is signed; the daemon's «not now» → a message, said as such
 describe('[4534] [지금 지시] only when the daemon can put it into the turn', () => {
   const type = async (text: string) => {
-    const box = document.querySelector('[data-testid="agent-instruct-text"]') as HTMLTextAreaElement;
+    const box = document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement;
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, text); box.dispatchEvent(new Event('input', { bubbles: true })); });
   };
   const line = () => container.querySelector('[data-testid="agent-session-line"]')?.textContent ?? null;
@@ -452,7 +452,7 @@ describe('[4534] [지금 지시] only when the daemon can put it into the turn',
     expect(count()?.className).toContain('text-destructive');
     expect(document.querySelector('[data-testid="agent-instruct-too-long"]')?.textContent).toBe(ko.sheet.tooLong);
     expect(send().disabled).toBe(true);
-    expect((document.querySelector('[data-testid="agent-instruct-text"]') as HTMLTextAreaElement).value).toHaveLength(401);
+    expect((document.querySelector('[data-testid="agent-instruct-text"][data-slot="textarea"]') as HTMLTextAreaElement).value).toHaveLength(401);
     expect(phoneCall).not.toHaveBeenCalled();
   });
 

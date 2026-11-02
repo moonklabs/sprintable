@@ -51,7 +51,7 @@ const flush = async () => { for (let i = 0; i < 6; i++) await act(async () => { 
 const q = (id: string) => container.querySelector(`[data-testid="${id}"]`) as HTMLElement | null;
 const button = (label: string) => Array.from(container.querySelectorAll('button')).find((b) => b.textContent === label) as HTMLButtonElement | undefined;
 const type = async (value: string) => {
-  const input = container.querySelector('input') as HTMLInputElement;
+  const input = container.querySelector('input[data-slot="input"]') as HTMLInputElement;
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
   await act(async () => { setter.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
 };
@@ -153,7 +153,7 @@ describe('AgentsPausedBand (story #4631)', () => {
     await confirmWith('확인', json({ detail: 'x' }, 403));
     expect(q('agents-paused-result')!.textContent).toBe('관리자만 풀 수 있어요');
     expect(q('agents-paused-band')).toBeTruthy();
-    expect((container.querySelector('input') as HTMLInputElement).value).toBe('확인');
+    expect((container.querySelector('input[data-slot="input"]') as HTMLInputElement).value).toBe('확인');
     expect(onResumed).not.toHaveBeenCalled();
     fetchWithAuth.mockResolvedValueOnce(json({}, 500));
     const go = Array.from(container.querySelectorAll('[role="group"] button')).find((b) => b.textContent === '멈춤 풀기') as HTMLButtonElement;

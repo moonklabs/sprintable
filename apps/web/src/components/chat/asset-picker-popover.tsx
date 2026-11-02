@@ -9,6 +9,7 @@ import { FILE_TINT_CLASS, fileExtLabel, fileTypeTint } from '@/lib/storage/forma
 import type { Asset } from '@/lib/storage/types';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Input } from '@/components/ui/input';
 import { fetchWithAuth } from '@/lib/db/client';
 
 interface AssetPickerPopoverProps {
@@ -147,9 +148,9 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
       </div>
 
       {/* 검색 */}
-      <div className="mx-3 mb-2 flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-2">
-        <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-        <input
+      <div className="relative mx-3 mb-2">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+        <Input
           ref={searchRef}
           type="text"
           role="combobox"
@@ -160,7 +161,7 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={t('assetPickerSearchPlaceholder')}
-          className="w-full border-0 bg-transparent text-base lg:text-xs text-foreground outline-none placeholder:text-muted-foreground"
+          className="h-auto bg-card py-2 pl-8 pr-2.5 lg:text-xs dark:bg-card"
         />
       </div>
 

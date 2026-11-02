@@ -7,6 +7,9 @@ import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -751,11 +754,12 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
             {t('steerPanelTitle')}
           </div>
           <div className="flex flex-wrap gap-1.5">
-            <select
+            {/* 조종 패널은 info 색 면(bg-info/8) 안이라 두 칸 모두 불투명 면을 남긴다(부품은 투명 · dark:bg-input/30). */}
+            <Select
               aria-label={t('steerPanelTargetLabel')}
               value={steerTargetId}
               onChange={(e) => setSteerTargetId(e.target.value)}
-              className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-base lg:text-xs text-foreground"
+              className="h-auto min-w-0 flex-1 bg-background px-2 py-1 lg:text-xs dark:bg-background"
             >
               <option value="">{t('steerPanelTargetPlaceholder')}</option>
               {steerTargets.map((p) => (
@@ -765,9 +769,9 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                 // #3758(9번째) — resolved 비트로 갈라 그린다(participantDisplayLabel).
                 <option key={p.member_id} value={p.member_id}>{participantDisplayLabel(p, tc)}</option>
               ))}
-            </select>
+            </Select>
             <div className="relative min-w-0 flex-1">
-              <input
+              <Input
                 type="text"
                 value={steerWorkItem ? steerWorkItem.title : steerWorkItemQuery}
                 onChange={(e) => {
@@ -778,7 +782,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                 onFocus={() => { if (!steerWorkItem) workItemPicker.setEntityQuery(steerWorkItemQuery); }}
                 placeholder={t('steerPanelWorkItemPlaceholder')}
                 aria-label={t('steerPanelWorkItemLabel')}
-                className="w-full rounded-md border border-border bg-background px-2 py-1 text-base lg:text-xs text-foreground placeholder:text-muted-foreground"
+                className="h-auto bg-background px-2 py-1 lg:text-xs dark:bg-background"
               />
               {/* story #3000 로드맵 PR-B(L1) — 이 파일의 floating 드롭다운 4곳(작업항목·커맨드·
                   멘션·엔티티 후보) 전부 --elev-overlay(오버레이 전용) 토큰으로 통일. */}
@@ -984,7 +988,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         />
 
         {/* Textarea */}
-        <textarea
+        <Textarea
           ref={textareaRef}
           rows={1}
           value={text}
@@ -1011,7 +1015,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           }}
           disabled={disabled || sending || steerSending}
           placeholder={steerMode ? t('steerPanelInstructionPlaceholder') : (placeholder ?? t('inputPlaceholderMobile'))}
-          className="flex-1 resize-none rounded-xl border border-border bg-muted/30 px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-40"
+          className="min-h-0 flex-1 resize-none bg-muted/30 disabled:opacity-40 dark:bg-muted/30"
           style={{ minHeight: '36px', maxHeight: '160px' }}
         />
 

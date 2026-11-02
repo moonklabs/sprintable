@@ -73,7 +73,7 @@ async function mountGroupRoom() {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 const editBtn = () => [...container.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === koMessages.chats.editRoomName) as HTMLButtonElement;
-const titleInput = () => container.querySelector(`input[aria-label="${koMessages.chats.editRoomName}"]`) as HTMLInputElement | null;
+const titleInput = () => container.querySelector(`input[data-slot="input"][aria-label="${koMessages.chats.editRoomName}"]`) as HTMLInputElement | null;
 function keydown(el: Element, k: string, init: KeyboardEventInit = {}): KeyboardEvent {
   const ev = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...init });
   el.dispatchEvent(ev);
@@ -109,6 +109,14 @@ describe('그룹 대화방 이름 바꾸기 — 한글 조합 중 키 (story 483
     expect(titleInput()).not.toBeNull();
     await act(async () => { keydown(input, 'Escape'); });
     expect(titleInput()).toBeNull();
+  });
+
+  it('이름 칸은 부품의 w-full을 물려받지 않고 전처럼 자기 폭(w-auto · 축소 가능)을 쓴다 — 상단바 제목 행의 truncate가 초점 링을 자르지 않게', async () => {
+    const input = await openEditor('기획');
+    const cls = input.className.split(/\s+/);
+    expect(cls).toContain('w-auto');
+    expect(cls).not.toContain('w-full');
+    expect(cls).toContain('min-w-0');
   });
 
   it('조합이 끝난 뒤의 엔터는 저장한다', async () => {

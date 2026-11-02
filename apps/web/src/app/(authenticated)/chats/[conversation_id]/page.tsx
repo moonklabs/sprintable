@@ -12,6 +12,7 @@ import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { AddParticipantModal } from '@/components/chat/add-participant-modal';
 import { DeliveryContractModal } from '@/components/chat/delivery-contract-modal';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/toast';
 import { Avatar } from '@/components/shared/avatar';
 import { useDashboardContext } from '../../../dashboard/dashboard-shell';
@@ -299,7 +300,7 @@ export default function ConversationPage() {
               />
             )}
             {editingTitle && meta?.type === 'group' ? (
-              <input
+              <Input
                 autoFocus
                 value={titleDraft}
                 onChange={(e) => setTitleDraft(e.target.value)}
@@ -311,7 +312,7 @@ export default function ConversationPage() {
                 }}
                 onBlur={() => void handleSaveTitle()}
                 aria-label={t('editRoomName')}
-                className="min-w-0 rounded border border-border bg-background px-1.5 py-0.5 text-base lg:text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="h-auto w-auto min-w-0 px-1.5 py-0.5 font-medium"
               />
             ) : meta?.type === 'group' ? (
               <button

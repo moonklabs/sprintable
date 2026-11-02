@@ -8,6 +8,7 @@ import { useTranslations } from 'next-intl';
 import { AgentIdentity } from '@/components/ui/agent-identity';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { buildPolicyDeniedMessage, parseAgentMessagePolicyDenied } from '@/lib/agent-message-policy-error';
 import { memberDisplayLabel, memberRowLabels } from '@/lib/member-display';
@@ -191,12 +192,12 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
           {selected.length >= 2 && (
             <div className="mt-3">
               <label className="mb-1 block text-xs text-muted-foreground">{t('groupTitle')}</label>
-              <input
+              <Input
                 type="text"
                 value={groupTitle}
                 onChange={(e) => setGroupTitle(e.target.value)}
                 placeholder={t('groupTitlePlaceholder')}
-                className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-base lg:text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                className="h-auto py-1.5"
               />
             </div>
           )}
