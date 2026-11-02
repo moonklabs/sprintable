@@ -234,6 +234,7 @@ async def test_oauth_callback_invite_accept_success_overrides_cookie_derived_utm
                     "signup_utm_source": "google", "signup_utm_medium": "cpc", "signup_utm_campaign": "launch",
                 })
         assert resp.status_code == 200
+        assert session.provider_rereads == 1  # story 4838: the account is read again under the person's session lock before the session is stored
         assert resp.json()["data"]["is_new_user"] is True
         user = next(c.args[0] for c in session.add.call_args_list if isinstance(c.args[0], User))
         assert user.signup_utm_source == "referral"
@@ -272,6 +273,7 @@ async def test_oauth_callback_invite_accept_failure_is_hands_off(monkeypatch):
                     "signup_utm_source": "google", "signup_utm_medium": "cpc", "signup_utm_campaign": "launch",
                 })
         assert resp.status_code == 200
+        assert session.provider_rereads == 1  # story 4838: the account is read again under the person's session lock before the session is stored
         user = next(c.args[0] for c in session.add.call_args_list if isinstance(c.args[0], User))
         assert user.signup_utm_source == "google"
         assert user.signup_utm_medium == "cpc"

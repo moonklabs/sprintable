@@ -114,6 +114,44 @@ async def test_a_sign_in_that_read_the_person_before_a_password_change_is_refuse
         await _close(engine, w)
 
 
+async def test_a_sign_in_that_checked_the_password_before_a_password_change_is_refused_by_the_read_under_the_lock(monkeypatch):
+    """the pause is right BEFORE the sign-in takes the lock (the password is checked, nothing else): a change that completes there is seen only by a read made UNDER the lock — a read made before
+    it (the same read moved up) would still see the old hash and let the session be stored."""
+    import app.routers.auth as auth_router
+
+    engine, w = await _world()
+    tasks: list[asyncio.Task] = []
+    pause = _Pause()
+    try:
+        existing = await w.login()
+        real_lock = auth_router._lock_person_sessions
+
+        async def paused_before_lock(session, user_id, *, exclusive):
+            if not exclusive and user_id == w.user_id and not pause.reached.is_set():
+                await pause.hold()
+            return await real_lock(session, user_id, exclusive=exclusive)
+
+        monkeypatch.setattr(auth_router, "_lock_person_sessions", paused_before_lock)
+        sign_in = asyncio.create_task(_sign_in(w))
+        tasks.append(sign_in)
+        try:
+            await asyncio.wait_for(pause.reached.wait(), 15)
+        except asyncio.TimeoutError:
+            pytest.fail("the sign-in did not take the person's session lock before issuing its session")
+        changed = await asyncio.wait_for(_change(w, existing), _WAIT)
+        assert changed.status_code == 200, changed.text
+        rows_before = await w.token_rows()
+        pause.release.set()
+        answer = await asyncio.wait_for(sign_in, _WAIT)
+
+        assert answer.status_code == 401, f"{answer.status_code}: {answer.text}"
+        assert await w.token_rows() == rows_before
+        assert await _live_except(w, None) == 0
+    finally:
+        await _settle(pause, *tasks)
+        await _close(engine, w)
+
+
 async def test_a_password_change_queues_behind_a_sign_in_that_holds_the_lock_and_ends_its_session(monkeypatch):
     import app.routers.auth as auth_router
 
