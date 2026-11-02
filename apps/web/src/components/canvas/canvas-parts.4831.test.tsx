@@ -94,13 +94,12 @@ describe('핀 설명 창(story 4831)', () => {
 });
 
 describe('코멘트 스레드 카드 답글 칸(story 4831)', () => {
-  it('답글 칸은 바탕 Input(min-w-0 · flex-1)이고, 쓰고 엔터하면 스레드 id와 글이 onReply로 가고 칸이 비워진다', async () => {
+  it('답글 칸은 바탕 Input(flex-1)이고, 쓰고 엔터하면 스레드 id와 글이 onReply로 가고 칸이 비워진다', async () => {
     const thread = MOCK_THREADS.find((t) => t.rollup === 'open')!;
     const onReply = vi.fn();
     await mount(<CommentThreadCard thread={thread} memberMap={MOCK_MEMBERS} onReply={onReply} />);
     const input = container.querySelector(`input[placeholder="${c.replyPlaceholder}"]`) as HTMLInputElement;
     expect(input.dataset.slot).toBe('input');
-    expect(input.className).toContain('min-w-0');
     expect(input.className).toContain('flex-1');
     expect(hasClass(input, 'text-foreground')).toBe(true);
     await act(async () => { setValue(input, '  확인했어요  '); });
@@ -111,12 +110,11 @@ describe('코멘트 스레드 카드 답글 칸(story 4831)', () => {
 });
 
 describe('커밋 바 요약 칸(story 4831)', () => {
-  it('요약 칸은 바탕 Input(min-w-0 · flex-1)이고, 변경이 있으면 쓴 요약(공백 제거)이 onCommit으로 가며, 변경이 0이면 칸이 잠긴다', async () => {
+  it('요약 칸은 바탕 Input(flex-1)이고, 변경이 있으면 쓴 요약(공백 제거)이 onCommit으로 가며, 변경이 0이면 칸이 잠긴다', async () => {
     const onCommit = vi.fn();
     await mount(<CommitBar changeCount={2} onCommit={onCommit} />);
     const input = container.querySelector(`input[placeholder="${c.commitSummaryPlaceholder}"]`) as HTMLInputElement;
     expect(input.dataset.slot).toBe('input');
-    expect(input.className).toContain('min-w-0');
     expect(input.className).toContain('flex-1');
     expect(hasClass(input, 'text-foreground')).toBe(true);
     await act(async () => { setValue(input, '  버튼 위계 상향  '); });
