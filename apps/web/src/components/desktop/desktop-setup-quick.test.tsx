@@ -87,7 +87,7 @@ describe('[SID:4711] the first setup in three steps', () => {
   it('opens with the program picked, the folder button, and [시작] off with its reason in view', async () => {
     await mount(frag(''), { projects: [] });
     expect(text()).toContain('에이전트 만들기');
-    expect((container.querySelector('input[name=quick-runtime]:checked')!.parentElement)!.textContent).toContain('Claude Code');
+    expect((container.querySelector('[role=radio][data-checked]')!.parentElement)!.textContent).toContain('Claude Code');
     expect(text()).toContain('2.1.289'); // the version after the name
     expect(linkOf('폴더 고르기')!.getAttribute('href')).toBe('ai.sprintable:/desktop/setup?intent=folder&pick=claude');
     expect(buttonOf('만들기')!.disabled).toBe(true);
@@ -97,7 +97,7 @@ describe('[SID:4711] the first setup in three steps', () => {
 
   it('the person\'s program pick goes to the folder window and comes back (the address is new)', async () => {
     await mount(frag('&pick=codex'));
-    expect((container.querySelector('input[name=quick-runtime]:checked')!.parentElement)!.textContent).toContain('Codex');
+    expect((container.querySelector('[role=radio][data-checked]')!.parentElement)!.textContent).toContain('Codex');
     expect(linkOf('폴더 고르기')!.getAttribute('href')).toBe('ai.sprintable:/desktop/setup?intent=folder&pick=codex');
   });
 
@@ -193,7 +193,7 @@ describe('[SID:4711] the first setup in three steps', () => {
 
   it('only one program found: no radio, the name and its version', async () => {
     await mount(`#code=${CODE}&runtimes=codex&caps=solo&rv=codex:0.159.3`);
-    expect(container.querySelector('input[name=quick-runtime]')).toBeNull();
+    expect(container.querySelector('[role=radio]')).toBeNull();
     expect(text()).toContain('Codex');
     expect(text()).toContain('0.159.3');
   });
@@ -378,7 +378,7 @@ describe('[SID:4670 AC1] «폰으로도 에이전트 다루기» on the three-st
     await mount(frag(FOLDER), { projectId: PROJ, projects: [{ projectId: PROJ, projectName: 'P', orgId: 'o-1' }] });
     expect(tick()?.checked).toBe(true);
     expect(container.querySelector('[data-testid=setup-phone-control]')!.textContent).toContain('폰으로도 에이전트 다루기');
-    expect(container.querySelectorAll('input[type=checkbox]')).toHaveLength(1);
+    expect(container.querySelectorAll('[role=checkbox]')).toHaveLength(1);
     const row = container.querySelector('[data-testid=setup-phone-control]')!;
     expect(row.nextElementSibling?.querySelector('button')?.textContent).toBe('만들기'); // just above «만들기»
   });
@@ -720,7 +720,7 @@ describe('[SID:4721] the member card on the first-setup page keeps the setup val
 });
 
 describe('[SID:4713 AC2] the card picks the program a folder\'s CLAUDE.md / AGENTS.md means, and says so once', () => {
-  const checked = () => container.querySelector('input[name=quick-runtime]:checked')!.parentElement!.textContent ?? '';
+  const checked = () => container.querySelector('[role=radio][data-checked]')!.parentElement!.textContent ?? '';
   const line = () => container.querySelector('[data-testid=quick-trace]')?.textContent ?? null;
   const F = '&fshown=~/code/my-app&fname=my-app';
 
@@ -756,7 +756,7 @@ describe('[SID:4713 AC2] the card picks the program a folder\'s CLAUDE.md / AGEN
 
   it('the person picks the other radio → the line is gone (it would be false); picking the marked one again brings it back', async () => {
     await mount(frag(`${F}&ftrace=AGENTS.md`));
-    const radios = () => [...container.querySelectorAll<HTMLInputElement>('input[name=quick-runtime]')];
+    const radios = () => [...container.querySelectorAll<HTMLElement>('[role=radio]')];
     await act(async () => { radios().find((r) => r.parentElement!.textContent!.includes('Claude Code'))!.click(); });
     expect(checked()).toContain('Claude Code');
     expect(line()).toBeNull();
@@ -769,7 +769,7 @@ describe('[SID:4713 AC2] the card picks the program a folder\'s CLAUDE.md / AGEN
     ctx.mockReturnValue({ projectId: undefined, currentProjectSlug: 'proj', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'owner' }], projectMemberships: [] });
     const render = async (extra: string) => { await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DesktopSetupQuick query={query(extra)} onTeam={() => undefined} /></NextIntlClientProvider>); }); for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); }); };
     await render(`${F}&ftrace=AGENTS.md`);
-    await act(async () => { [...container.querySelectorAll<HTMLInputElement>('input[name=quick-runtime]')].find((r) => r.parentElement!.textContent!.includes('Claude Code'))!.click(); });
+    await act(async () => { [...container.querySelectorAll<HTMLElement>('[role=radio]')].find((r) => r.parentElement!.textContent!.includes('Claude Code'))!.click(); });
     expect(checked()).toContain('Claude Code');
     await render('&fshown=~/code/other&fname=other&ftrace=AGENTS.md'); // another folder, same page
     expect(checked()).toContain('Codex');
@@ -797,7 +797,7 @@ describe('[SID:4713 AC2] the card picks the program a folder\'s CLAUDE.md / AGEN
     ctx.mockReturnValue({ projectId: undefined, currentProjectSlug: 'proj', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'owner' }], projectMemberships: [] });
     const render = async (extra: string) => { await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DesktopSetupQuick query={query(extra)} onTeam={() => undefined} /></NextIntlClientProvider>); }); for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); }); };
     await render(F); // a folder with no mark: Claude Code by default
-    await act(async () => { [...container.querySelectorAll<HTMLInputElement>('input[name=quick-runtime]')].find((r) => r.parentElement!.textContent!.includes('Codex'))!.click(); });
+    await act(async () => { [...container.querySelectorAll<HTMLElement>('[role=radio]')].find((r) => r.parentElement!.textContent!.includes('Codex'))!.click(); });
     expect(checked()).toContain('Codex');
     expect(pickOf('바꾸기')).toBe('codex'); // the person's choice goes to the folder window
     await render(`&fshown=~/code/other&fname=other&pick=${pickOf('바꾸기')}`);
@@ -812,7 +812,7 @@ describe('[SID:4713 AC2] the card picks the program a folder\'s CLAUDE.md / AGEN
     await render(`${F}&ftrace=AGENTS.md`);
     expect(checked()).toContain('Codex'); // the mark picked it
     expect(pickOf('바꾸기')).toBe('claude'); // not the person's choice yet
-    await act(async () => { [...container.querySelectorAll<HTMLInputElement>('input[name=quick-runtime]')].find((r) => r.parentElement!.textContent!.includes('Codex'))!.click(); }); // already checked: no change event, still a choice
+    await act(async () => { [...container.querySelectorAll<HTMLElement>('[role=radio]')].find((r) => r.parentElement!.textContent!.includes('Codex'))!.click(); }); // already checked: no change event, still a choice
     expect(pickOf('바꾸기')).toBe('codex');
     await render(`&fshown=~/code/other&fname=other&pick=${pickOf('바꾸기')}`);
     expect(checked()).toContain('Codex');
@@ -862,12 +862,12 @@ describe('[SID:4784] the card is the moment an agent is made — «에이전트 
 
   it('the name follows the tool until the person types one; what they typed and the role go to the server as they stand (trimmed)', async () => {
     await mount(frag(F4784), { projectId: PROJ });
-    await act(async () => { (container.querySelector('input[name=quick-runtime][type=radio]:not(:checked)') as HTMLInputElement).click(); });
+    await act(async () => { (container.querySelector('[role=radio]:not([data-checked])') as HTMLElement).click(); });
     expect(nameField().value).toBe('Codex');
     await typeInto(nameField(), '  Reviewer ');
     await typeInto(roleField(), ' 코드 리뷰어 ');
     expect(container.querySelector('[data-testid=quick-start-line]')!.textContent).toContain('이름 Reviewer · 도구 Codex'); // the line follows what is typed
-    await act(async () => { (container.querySelector('input[name=quick-runtime]:not(:checked)') as HTMLInputElement).click(); });
+    await act(async () => { (container.querySelector('[role=radio]:not([data-checked])') as HTMLElement).click(); });
     expect(nameField().value).toBe('  Reviewer '); // a typed name stays when the tool changes
     await act(async () => { buttonOf('만들기')!.click(); });
     await settle();

@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { fetchWithAuth, refreshSessionAfterChange, switchOrg } from '@/lib/db/client';
 import { presetDescription, presetName } from '@/lib/platform-preset-copy';
 import { pickEulReulJosa, pickEunNeunJosa, pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle';
@@ -334,7 +336,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   useEffect(() => {
     const where = focusAfterFold.current;
     focusAfterFold.current = null;
-    if (where === 'list') recipeListRef.current?.querySelector<HTMLInputElement>('input[name=recipe]:checked')?.focus();
+    if (where === 'list') recipeListRef.current?.querySelector<HTMLElement>('[role=radio][data-checked]')?.focus();
     if (where === 'change') recipeChangeRef.current?.focus();
   }, [pickingRecipe]);
   const [view, setView] = useState<View>({ kind: 'loading' });
@@ -552,7 +554,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     if (target === 'start') { focusStartOrRoles(); return; }
     const el = target === 'hold-put' ? document.querySelector<HTMLElement>('[data-preselect-put]')
       : target.startsWith('put:') ? document.querySelector<HTMLElement>(`[data-put-on-team="${target.slice(4)}"]`)
-      : target.startsWith('move:') ? document.getElementById(`setup-move-${target.slice(5)}`)
+      : target.startsWith('move:') ? document.querySelector<HTMLElement>(`[role=checkbox][data-move-id="${target.slice(5)}"]`)
         : rolesRef.current?.querySelector<HTMLElement>('select');
     el?.focus();
   }, [attachable, teamState]);
@@ -755,19 +757,19 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       {showKinds ? (
         <section aria-labelledby="setup-kind" data-testid="setup-kind">
           <h2 id="setup-kind" className="text-sm font-medium">{t('move.kindLabel')}</h2>
-          <div role="radiogroup" aria-labelledby="setup-kind" className="mt-2 flex flex-col gap-2">
-            <label className="flex cursor-pointer gap-3 rounded-md border p-3 has-[:checked]:border-primary">
+          <RadioGroup name="setup-kind" aria-labelledby="setup-kind" className="mt-2" value={moveMode ? 'move' : 'recipe'} onValueChange={(v) => setSetupKind(v === 'move' ? 'move' : 'recipe')}>
+            <label className="flex cursor-pointer gap-3 rounded-md border p-3 has-[[data-checked]]:border-primary">
               {/* Kadir 4969 (2선): no switching while a start is on its way — an offline [다시 시도] must repeat what was sent */}
-              <input type="radio" name="setup-kind" value="recipe" checked={!moveMode} disabled={view.kind === 'starting'} onChange={() => setSetupKind('recipe')} className="mt-1 shrink-0 self-start" />
+              <RadioGroupItem value="recipe" disabled={view.kind === 'starting'} className="mt-1 self-start" />
               <span><span className="block text-sm font-medium">{t('move.kindRecipe')}</span>
                 <span className="block text-xs text-muted-foreground">{t('move.kindRecipeDesc')}</span></span>
             </label>
-            <label className={`flex gap-3 rounded-md border p-3 has-[:checked]:border-primary ${canMove ? 'cursor-pointer' : 'cursor-not-allowed'}`} data-testid="setup-kind-move" data-disabled={canMove ? undefined : 'true'}>
-              <input type="radio" name="setup-kind" value="move" checked={moveMode} disabled={!canMove || view.kind === 'starting'} onChange={() => setSetupKind('move')} className="mt-1 shrink-0 self-start" />
+            <label className={`flex gap-3 rounded-md border p-3 has-[[data-checked]]:border-primary ${canMove ? 'cursor-pointer' : 'cursor-not-allowed'}`} data-testid="setup-kind-move" data-disabled={canMove ? undefined : 'true'}>
+              <RadioGroupItem value="move" disabled={!canMove || view.kind === 'starting'} className="mt-1 self-start" />
               <span><span className={`block text-sm font-medium ${canMove ? '' : 'text-muted-foreground'}`}>{t('move.kindMove')}</span>
                 <span className="block text-xs text-muted-foreground" data-testid={canMove ? undefined : 'setup-kind-move-why'}>{canMove ? t('move.kindMoveDesc') : t('move.kindMoveOldApp')}</span></span>
             </label>
-          </div>
+          </RadioGroup>
         </section>
       ) : null}
 
@@ -853,7 +855,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
               return (
                 <li key={a.id} className="p-3" data-testid="setup-move-row" data-state={state}>
                   <div className="flex gap-3">
-                    <input type="checkbox" id={`setup-move-${a.id}`} checked={on} disabled={state !== 'ok'} onChange={(e) => toggleMove(a.id, e.target.checked)} className="mt-1 shrink-0 self-start" />
+                    <Checkbox id={`setup-move-${a.id}`} data-move-id={a.id} checked={on} disabled={state !== 'ok'} onCheckedChange={(checked) => toggleMove(a.id, checked === true)} className="mt-1 self-start" />
                     <div className="min-w-0 break-keep">
                       <label htmlFor={`setup-move-${a.id}`} className={`block ${state === 'ok' ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
                         <span className={`block text-sm font-medium ${state === 'ok' ? '' : 'text-muted-foreground'}`}>{a.name}</span>
@@ -893,14 +895,26 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
             </div>
           ) : null}
           {pickingRecipe ? (
-            <div role="radiogroup" aria-labelledby="setup-recipe" className="mt-2 flex flex-col gap-2" data-testid="setup-recipe-list" id="setup-recipe-list" ref={recipeListRef}
+            <div className="mt-2" data-testid="setup-recipe-list" id="setup-recipe-list" ref={recipeListRef}
+              // a key is not a press: cleared in the capture phase so it runs before the part's own arrow handling (an arrow's click only chooses)
+              onKeyDownCapture={() => { pressInList.current = false; }}
+              // story 4504 AC4 + 4831: the fold is on a click that reaches the radio itself — the visible control (a span) or its hidden input (what a
+              // label's default action clicks when the card's TEXT is pressed) — never on the label's own click (a browser does the label's
+              // default action only after the listeners and the update they flushed, so folding there removed the radio before it was chosen).
+              // Both the choice (the radio's change) and this fold are state updates of the same click: React batches them into one render, so the
+              // list goes away in the render that also holds the choice (real Chromium: the pressed card is the chosen one). An arrow key's click has no press: it only chooses.
+              onClick={(e) => {
+                const t = e.target as Element;
+                if (!(t.closest('[role=radio]') || (t instanceof HTMLInputElement && t.type === 'radio'))) return;
+                if (pressInList.current) { pressInList.current = false; foldRecipes(true); }
+              }}
               onKeyDown={(e) => {
                 pressInList.current = false; // a key, not a press: an arrow's click only chooses
                 if (e.key !== 'Enter' && e.key !== ' ') return;
                 e.preventDefault();
                 // a screen reader can put focus on a radio without choosing it: Enter/Space there chooses that one (PO 03:41Z)
-                const el = e.target as HTMLInputElement;
-                if (el.name === 'recipe' && !el.checked) { const r = recipes.find((x) => x.id === el.value); if (r) pick(r); }
+                const el = (e.target as HTMLElement).closest<HTMLElement>('[role=radio][data-recipe-id]');
+                if (el && el.getAttribute('aria-checked') !== 'true') { const r = recipes.find((x) => x.id === el.getAttribute('data-recipe-id')); if (r) pick(r); }
                 foldRecipes(true);
               }}
               onPointerDown={(down) => {
@@ -927,7 +941,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
                   if (!list || list.contains(document.activeElement)) return; // focus still in the list: its next blur folds as usual
                   if (up.type === 'pointercancel' || (up.target instanceof Node && list.contains(up.target))) {
                     // without scrolling: after a cancelled touch the person was scrolling the list — never pull it back (PO 06:26Z)
-                    list.querySelector<HTMLInputElement>('input[name=recipe]:checked')?.focus({ preventScroll: true });
+                    list.querySelector<HTMLElement>('[role=radio][data-checked]')?.focus({ preventScroll: true });
                   } else foldRecipes(document.hasFocus());
                 };
                 window.addEventListener('pointerup', release);
@@ -939,6 +953,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
                 if (e.currentTarget.contains(to) || to === recipeChangeRef.current) return; // [바꾸기]'s own click folds it
                 foldRecipes(to === null && document.hasFocus());
               }}>
+            <RadioGroup name="recipe" aria-labelledby="setup-recipe" value={recipeId} onValueChange={(v) => { const r = recipes.find((x) => x.id === v); if (r) pick(r); }}>
               {recipeOrder.map((id) => recipes.find((x) => x.id === id)).filter((r): r is NonNullable<typeof r> => !!r).map((r) => (
                 // story 4504 AC4 (live 2026-10-03 02:18Z): a person's click chooses, THEN folds — the fold is on the radio's own click
                 // (after its change), never on the label's: a browser does the label's default action (that radio click) only after
@@ -946,14 +961,14 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
                 // press inside the list (pointer) folds; an arrow key's click (no press) only chooses.
                 // story 4553: the radio keeps its own size in the flex label (no stretch to the card's height) — its focus ring is a ring,
                 // not a card-tall capsule
-                <label key={r.id} className="flex cursor-pointer gap-3 rounded-md border p-3 has-[:checked]:border-primary">
-                  <input type="radio" name="recipe" value={r.id} checked={r.id === recipeId} onChange={() => pick(r)} className="mt-1 shrink-0 self-start"
-                    onClick={() => { if (pressInList.current) { pressInList.current = false; foldRecipes(true); } }} />
+                <label key={r.id} className="flex cursor-pointer gap-3 rounded-md border p-3 has-[[data-checked]]:border-primary">
+                  <RadioGroupItem value={r.id} data-recipe-id={r.id} className="mt-1 self-start" />
                   <span><span className="block text-sm font-medium">{presetName(r, tPreset)}</span>
                     {presetDescription(r, tPreset) ? <span className="block text-xs text-muted-foreground">{presetDescription(r, tPreset)}</span> : null}
                     <RecipeRolesLine recipe={r} runtimes={runtimes} /></span>
                 </label>
               ))}
+            </RadioGroup>
             </div>
           ) : null}
         </section>
@@ -1075,7 +1090,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         {showPhoneControl ? (
           // story 4670 AC1 (Yuna §M): a bordered box, the phone icon, a semibold label, a bigger tick — inside the sticky footer, just above «시작»
           <div className="flex gap-3 rounded-md border p-3" data-testid="setup-phone-control">
-            <input type="checkbox" id="setup-phone-control" checked={phoneControl} onChange={(e) => setPhoneControl(e.target.checked)} disabled={view.kind === 'starting'} className="mt-0.5 size-5 shrink-0 self-start accent-primary" />
+            <Checkbox id="setup-phone-control" checked={phoneControl} onCheckedChange={(checked) => setPhoneControl(checked === true)} disabled={view.kind === 'starting'} className="mt-0.5 size-5 self-start" />
             <label htmlFor="setup-phone-control" className="block min-w-0 flex-1 cursor-pointer break-keep">
               <span className="flex items-center gap-1.5 text-sm font-semibold"><Smartphone className="size-4 shrink-0 text-primary" aria-hidden />{t('phoneControl.label')}</span>
               <span className="mt-0.5 block text-xs text-muted-foreground">{t('phoneControl.help')}</span>
