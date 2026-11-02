@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
 import { LegalFooter } from '@/components/legal/legal-footer';
 import { safeNextPath } from '@/lib/auth/session-redirect';
 
@@ -119,11 +121,10 @@ export default function RegisterPage() {
 
         {/* story 4669: the terms line first (both ways need it), then Google as the main button, then the folded e-mail form */}
         <label className="flex items-start gap-2 cursor-pointer select-none">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={tosAccepted}
-            onChange={(e) => setTosAccepted(e.target.checked)}
-            className="mt-0.5 h-4 w-4 shrink-0 rounded border-border accent-brand"
+            onCheckedChange={(checked) => setTosAccepted(checked === true)}
+            className="mt-0.5"
             disabled={loading}
           />
           <span className="text-xs text-muted-foreground">
@@ -187,34 +188,32 @@ export default function RegisterPage() {
 
         {emailFormOpen && (
         <div className="space-y-3" data-testid="register-email-form">
-          <input
+          <Input
             ref={nameInputRef}
             type="text"
             placeholder={t('namePlaceholder')}
             autoComplete="name"
-            className="w-full rounded-lg border border-border px-4 py-3 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+            className="h-auto px-4 py-3"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleRegister()}
             disabled={loading}
           />
-          <input
+          <Input
             type="email"
             placeholder={t('emailPlaceholder')}
             autoComplete="email"
-            className="w-full rounded-lg border border-border px-4 py-3 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+            className="h-auto px-4 py-3"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleRegister()}
             disabled={loading}
           />
-          <input
+          <Input
             type="password"
             placeholder={t('passwordPlaceholder')}
             autoComplete="new-password"
-            className={`w-full rounded-lg border px-4 py-3 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand ${
-              showRules && !isPasswordValid ? 'border-destructive' : 'border-border'
-            }`}
+            className={showRules && !isPasswordValid ? 'h-auto border-destructive px-4 py-3' : 'h-auto px-4 py-3'}
             value={password}
             onChange={(e) => { setPassword(e.target.value); setPasswordTouched(true); }}
             onKeyDown={(e) => e.key === 'Enter' && handleRegister()}

@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { loginWithPassword } from '@/lib/db/client';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Input } from '@/components/ui/input';
 import { safeNextPath, SESSION_EXPIRED_REASON } from '@/lib/auth/session-redirect';
 import { FIREBASE_AUTH_ENABLED } from '@/lib/auth/firebase-client';
 import { signInAndExchangeFirebaseSession } from '@/lib/auth/firebase-login-flow';
@@ -142,33 +143,33 @@ export default function LoginPage() {
         )}
 
         <div className="space-y-3">
-          <input
+          <Input
             type="email"
             placeholder={t('email')}
             autoComplete="email"
-            className="w-full rounded-lg border border-border px-4 py-3 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+            className="h-auto px-4 py-3"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
             disabled={loading}
           />
-          <input
+          <Input
             type="password"
             placeholder={t('password')}
             autoComplete="current-password"
-            className="w-full rounded-lg border border-border px-4 py-3 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+            className="h-auto px-4 py-3"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
             disabled={loading}
           />
           {showTotp && (
-            <input
+            <Input
               type="text"
               inputMode="numeric"
               maxLength={6}
               placeholder={t('totpPlaceholder')}
-              className="w-full rounded-lg border border-border px-4 py-3 text-center text-lg text-foreground font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-brand"
+              className="h-auto px-4 py-3 text-center text-lg font-mono tracking-widest lg:text-lg"
               value={totpCode}
               onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
               onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
