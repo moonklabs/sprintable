@@ -40,8 +40,8 @@ afterEach(async () => {
 });
 
 const settle = async () => { await act(async () => { await new Promise((r) => setTimeout(r, 50)); }); };
-const titleInput = () => document.body.querySelector<HTMLInputElement>(`input[placeholder="${sp.sprintTitlePlaceholder}"]`);
-const goalInput = () => document.body.querySelector<HTMLInputElement>(`input[placeholder="${sp.goalPlaceholder}"]`);
+const titleInput = () => document.body.querySelector<HTMLInputElement>(`input[data-slot="input"][placeholder="${sp.sprintTitlePlaceholder}"]`);
+const goalInput = () => document.body.querySelector<HTMLInputElement>(`input[data-slot="input"][placeholder="${sp.goalPlaceholder}"]`);
 const button = (label: string) => Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent?.trim() === label);
 
 const ctl: { setShow?: (v: boolean) => void } = {};

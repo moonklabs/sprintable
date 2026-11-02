@@ -3,6 +3,7 @@
 import { useCallback, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
+import { Select } from '@/components/ui/select';
 import type { NextMakerGoal, NextMakerStory } from './derive-next-maker';
 
 interface OrphanStoriesPanelProps {
@@ -89,16 +90,16 @@ function OrphanRow({
       {story.assigneeId && <span className="shrink-0 text-micro text-primary">{t('nextPickReasonOwned')}</span>}
       {picking ? (
         <div className="flex shrink-0 items-center gap-1.5">
-          <select
+          <Select
             value={selectedEpicId}
             onChange={(e) => setSelectedEpicId(e.target.value)}
-            className="rounded border border-border bg-card px-1.5 py-1 text-base lg:text-editorial-meta"
+            className="h-auto w-auto bg-card px-1.5 py-1 lg:text-editorial-meta dark:bg-card"
           >
             <option value="">{t('orphanPickPlaceholder')}</option>
             {activeGoals.map((g) => (
               <option key={g.id} value={g.id}>{g.title}</option>
             ))}
-          </select>
+          </Select>
           <button
             type="button"
             disabled={!selectedEpicId || assigning}
