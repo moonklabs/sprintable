@@ -32,6 +32,14 @@ ALLOWED = {
     "apps/web/src/lib/embedded-api-origin.ts",
     "apps/web/src/lib/embedded-api-origin.test.ts",
     "apps/web/src/proxy.test.ts",
+    # story 4824's web entrance (the app's own web server): the plain-CommonJS guard that is installed only when the switch is set (it is not a deployment file — the
+    # switch is set by the desktop app for its own server), the two build-time readers of `SPRINTABLE_EMBEDDED_BUILD` (the embedded flavour of the web build; a hosted
+    # build never sets it) and `turbo.json`, which only DECLARES that build variable to turbo's strict env mode (declaring is not setting) — and their tests
+    "apps/web/embedded-host-guard.cjs",
+    "apps/web/embedded-host-guard.test.ts",
+    "apps/web/next.config.ts",
+    "apps/web/next.config.embedded.test.ts",
+    "turbo.json",
 }
 _SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".next", "dist", "build", ".pytest_cache", ".mypy_cache"}
 

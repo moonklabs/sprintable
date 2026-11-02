@@ -30,6 +30,14 @@ describe('story 4824 — the app\'s own server forwards /api/v2 at request time'
     expect(embeddedApiTarget('/api/v2/stories', '')?.toString()).toBe('http://127.0.0.1:52999/api/v2/stories');
   });
 
+  it('any letter case of the prefix is the same route for Next — and the backend gets the canonical lower-case path', () => {
+    process.env['SPRINTABLE_EMBEDDED'] = '1';
+    process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://127.0.0.1:41234';
+    for (const p of ['/API/V2/stories', '/Api/v2/stories', '/api/V2/stories', '/API/v2/stories']) {
+      expect(embeddedApiTarget(p, '?a=1')?.toString(), p).toBe('http://127.0.0.1:41234/api/v2/stories?a=1');
+    }
+  });
+
   it('only /api/v2/* — the web\'s own /api/* routes and pages stay where they are', () => {
     process.env['SPRINTABLE_EMBEDDED'] = '1';
     process.env['NEXT_PUBLIC_FASTAPI_URL'] = 'http://127.0.0.1:41234';

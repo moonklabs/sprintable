@@ -33,9 +33,9 @@ export function embeddedHostRefusal(request: NextRequest, env: NodeJS.ProcessEnv
 
 /** where `/api/v2/...` goes at request time inside the app's own server — or null when this server is not that (or the path is not an API path) */
 export function embeddedApiTarget(pathname: string, search: string, env: NodeJS.ProcessEnv = process.env): URL | null {
-  if (!isEmbeddedServer(env) || !pathname.startsWith(EMBEDDED_API_PREFIX)) return null;
+  if (!isEmbeddedServer(env) || !pathname.toLowerCase().startsWith(EMBEDDED_API_PREFIX)) return null; // any letter case: `/API/V2/…` is the same route for Next
   try {
-    return new URL(`${pathname}${search}`, fastapiBaseUrl());
+    return new URL(`${EMBEDDED_API_PREFIX}${pathname.slice(EMBEDDED_API_PREFIX.length)}${search}`, fastapiBaseUrl()); // the backend sees the canonical lower-case prefix
   } catch {
     return null; // an unusable address is left to the config rewrite's own failure rather than a crash here
   }
