@@ -139,6 +139,29 @@ describe('scanSource — 셀프테스트', () => {
     expect(() => wrapperSizes(() => 'export const Nothing = 1;')).toThrow(/정의가/);
   });
 
+  it('⭐래퍼가 공용 Select 위에 얹혀도 밑단 클래스까지 읽는다 — OperatorSelect가 Select를 그림(4831) · 글자를 작게 주면 잡는다(양성 대조)', () => {
+    const selectDef = `function Select({ className }) { return <select data-slot="select" className={cn('h-9 text-base lg:text-sm', className)} />; }`;
+    const inputDef = `function Input({ className }) { return <InputPrimitive className={cn('h-9 text-base md:text-sm', className)} />; }`;
+    const entity = `export function EntityAwareTextarea({ className }) { return <div className="relative"><textarea className={className} /></div>; }`;
+    const operator = (selectClasses: string) => `const cls = 'px-3 text-base'; export function OperatorInput(p) { return <Input className={cn(cls, p.className)} />; }
+        export function OperatorTextarea(p) { return <Textarea className={cn(cls, 'min-h-24')} />; }
+        export function OperatorSelect(p) { return <Select className={cn(cls, '${selectClasses}', p.className)} />; }`;
+    const read = (op: string) => (rel: string) => ({
+      'components/ui/operator-control.tsx': op,
+      'components/ui/select.tsx': selectDef,
+      'components/ui/input.tsx': inputDef,
+      'components/ui/textarea.tsx': `function Textarea({ className }) { return <textarea data-slot="textarea" className={cn('min-h-16 text-base lg:text-sm', className)} />; }`,
+      'components/shared/entity-aware-textarea.tsx': entity,
+    } as Record<string, string>)[rel]!;
+    const ok = wrapperSizes(read(operator('h-10')));
+    expect(ok.get('OperatorSelect')).toMatchObject({ inner: 'h-9 text-base lg:text-sm', px: 16 });
+    // 양성 대조: 래퍼가 글자를 작게 주면(접두사 없는 text-xs) 모바일 12px로 잡힌다 — 호출부 검사도 그 값으로 이어진다
+    const small = wrapperSizes(read(operator('text-xs')));
+    expect(small.get('OperatorSelect')?.px).toBe(12);
+    expect(scanSource('export const A = () => <OperatorSelect className="text-xs" />;', 'a.tsx', ok).sites.map((x) => x.px)).toEqual([12]);
+    expect(scanSource('export const A = () => <OperatorSelect />;', 'a.tsx', ok).sites).toEqual([]);
+  });
+
   it('belowLgFontPx — lg 미만 세 구간(폰 · sm · md) 중 가장 작은 실제 크기: sm: · md: 접두 14px도 잡는다(까디르 4821 · 아이패드 세로)', () => {
     expect(belowLgFontPx('text-base sm:text-sm')).toBe(14);
     expect(belowLgFontPx('text-base md:text-xs')).toBe(12);
