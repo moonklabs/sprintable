@@ -167,6 +167,23 @@ async def _oauth_client(session: AsyncMock):
     from app.main import app
     from tests.conftest import override_db_and_read
 
+    # story 4838 — the provider sign-in reads (account open, provider id) again under the person's session lock: a statement asking for exactly those two columns. This mocked session answers
+    # it «open, and the id the provider gave» (nothing changed in between); every other statement is answered as the test set it up.
+    import app.routers.auth as auth_router
+
+    inner = session.execute
+    session.provider_rereads = 0  # how many times the sign-in asked: the tests below assert the re-read really happens
+
+    async def execute(stmt, *args, **kwargs):
+        if [c.name for c in getattr(stmt, "selected_columns", [])] == ["is_active", "google_id"]:
+            session.provider_rereads += 1
+            result = MagicMock()
+            result.one_or_none.return_value = (True, auth_router._exchange_oauth_code_for_userinfo.return_value[0])
+            return result
+        return await inner(stmt, *args, **kwargs)
+
+    session.execute = execute
+
     async def override_db():
         yield session
 
@@ -217,6 +234,7 @@ async def test_oauth_callback_invite_accept_success_overrides_cookie_derived_utm
                     "signup_utm_source": "google", "signup_utm_medium": "cpc", "signup_utm_campaign": "launch",
                 })
         assert resp.status_code == 200
+        assert session.provider_rereads == 1  # story 4838: the account is read again under the person's session lock before the session is stored
         assert resp.json()["data"]["is_new_user"] is True
         user = next(c.args[0] for c in session.add.call_args_list if isinstance(c.args[0], User))
         assert user.signup_utm_source == "referral"
@@ -255,6 +273,7 @@ async def test_oauth_callback_invite_accept_failure_is_hands_off(monkeypatch):
                     "signup_utm_source": "google", "signup_utm_medium": "cpc", "signup_utm_campaign": "launch",
                 })
         assert resp.status_code == 200
+        assert session.provider_rereads == 1  # story 4838: the account is read again under the person's session lock before the session is stored
         user = next(c.args[0] for c in session.add.call_args_list if isinstance(c.args[0], User))
         assert user.signup_utm_source == "google"
         assert user.signup_utm_medium == "cpc"
