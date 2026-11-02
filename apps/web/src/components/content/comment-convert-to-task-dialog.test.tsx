@@ -91,3 +91,25 @@ describe('CommentConvertToTaskDialog', () => {
     expect(document.querySelector('#comments-convert-title')).not.toBeNull();
   });
 });
+
+// story 4831 부품 교체(공용 부품 ②) — 제목 · 메모 칸이 바탕 Input · Textarea가 되어도 쓴 값이 제출 값에 실린다.
+describe('CommentConvertToTaskDialog — 바탕 부품(story 4831)', () => {
+  it('제목은 바탕 Input, 메모는 바탕 Textarea이고, 고쳐 쓴 제목 · 메모(앞뒤 공백 제거)가 제출 값에 실린다', async () => {
+    const onSubmit = vi.fn().mockResolvedValue({ ok: true, storyId: 's-1' });
+    await act(async () => {
+      root.render(wrap(<CommentConvertToTaskDialog postTitle="9월 소식지" comment={COMMENT} onClose={vi.fn()} onSubmit={onSubmit} />));
+    });
+    const title = document.querySelector('#comments-convert-title') as HTMLInputElement;
+    const note = document.querySelector('#comments-convert-note') as HTMLTextAreaElement;
+    expect(title.dataset.slot).toBe('input');
+    expect(note.dataset.slot).toBe('textarea');
+    expect(note.rows).toBe(3);
+    const setIn = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+    const setTa = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => { setIn.call(title, '재입고 일정 확인'); title.dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => { setTa.call(note, '  다음 주 월요일 확인  '); note.dispatchEvent(new Event('input', { bubbles: true })); });
+    const submitBtn = [...document.querySelectorAll('button')].find((b) => b.type === 'submit') as HTMLButtonElement;
+    await act(async () => { submitBtn.click(); });
+    expect(onSubmit).toHaveBeenCalledWith({ title: '재입고 일정 확인', note: '다음 주 월요일 확인' });
+  });
+});

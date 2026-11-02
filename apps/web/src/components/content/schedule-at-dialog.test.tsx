@@ -122,3 +122,17 @@ describe('ScheduleAtDialog — story #3422 ②-d 2/N', () => {
       .toBe(koMessages.content.channelPostsScheduleAtErrorInvalid);
   });
 });
+
+// story 4831 부품 교체(공용 부품 ②) — 예약 시각 칸이 바탕 Input이 되어도 한 줄 안에서 내용 폭을 유지한다(부품의 w-full이 되돌리지 못한다).
+describe('ScheduleAtDialog — 바탕 부품(story 4831)', () => {
+  it('예약 시각 칸은 바탕 Input(datetime-local)이고 w-auto로 한 줄 안에서 늘어나지 않는다', async () => {
+    await act(async () => {
+      root.render(wrap(<ScheduleAtDialog open onOpenChange={() => {}} onSubmit={() => {}} />));
+    });
+    await flush();
+    const input = document.body.querySelector('[data-testid="channel-post-schedule-at-input"]') as HTMLInputElement;
+    expect(input.dataset.slot).toBe('input');
+    expect(input.type).toBe('datetime-local');
+    expect(input.className).toContain('w-auto');
+  });
+});

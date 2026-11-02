@@ -195,3 +195,59 @@ describe('BoostRequestDialog — story #3806(Phase3·3-2 PR5, 유나 §절 §1)'
       .toBe(koMessages.content.boostRequestScheduleOrderInvalid);
   });
 });
+
+// story 4831 부품 교체(공용 부품 ②) — 광고 계정 · 예산 · 통화 · 시작/종료 · 목적 여섯 칸이 바탕 Input · Select가 되어도 폭과 배치가 같고,
+// 통화 · 목적처럼 기존 시험이 건드리지 않던 칸의 값도 요청 본문에 실린다.
+describe('BoostRequestDialog — 바탕 부품(story 4831)', () => {
+  async function openWithConnections() {
+    mockedFetch.mockResolvedValueOnce(jsonResponse({ data: AD_CONNECTIONS_ROWS }));
+    await act(async () => {
+      root.render(wrap(<BoostRequestDialog open onOpenChange={() => {}} orgId="org-1" publicationId="pub-1" onRequested={() => {}} />));
+    });
+    await flush();
+  }
+  const el = <T extends Element>(testid: string) => document.body.querySelector(`[data-testid="${testid}"]`) as T;
+
+  it('여섯 칸이 바탕 부품이고, 폭은 전과 같다: 예산 w-32 · 통화/시작/종료 w-auto(한 줄 안에서 늘어나지 않음) · 계정/목적 칸 가득', async () => {
+    await openWithConnections();
+    const select = el<HTMLSelectElement>('boost-ad-connection-select');
+    const budget = el<HTMLInputElement>('boost-budget-input');
+    const currency = el<HTMLSelectElement>('boost-currency-select');
+    const startsAt = el<HTMLInputElement>('boost-starts-at-input');
+    const endsAt = el<HTMLInputElement>('boost-ends-at-input');
+    const objective = el<HTMLSelectElement>('boost-objective-select');
+    expect(select.dataset.slot).toBe('select');
+    expect(currency.dataset.slot).toBe('select');
+    expect(objective.dataset.slot).toBe('select');
+    expect(budget.dataset.slot).toBe('input');
+    expect(startsAt.dataset.slot).toBe('input');
+    expect(endsAt.dataset.slot).toBe('input');
+    expect(budget.className).toContain('w-32');
+    for (const x of [currency, startsAt, endsAt]) expect(x.className).toContain('w-auto');
+    for (const x of [select, objective]) expect(x.className).not.toContain('w-auto');
+    expect(budget.type).toBe('number');
+    expect(startsAt.type).toBe('datetime-local');
+    expect(budget.min).toBe('0');
+  });
+
+  it('통화를 USD로, 목적을 다른 항목으로 바꾸면 요청 본문의 currency · objective · budget_minor에 실린다', async () => {
+    await openWithConnections();
+    await act(async () => { setNativeSelectValue(el<HTMLSelectElement>('boost-ad-connection-select'), 'conn-meta'); });
+    await act(async () => { setNativeInputValue(el<HTMLInputElement>('boost-budget-input'), '50'); });
+    await act(async () => { setNativeSelectValue(el<HTMLSelectElement>('boost-currency-select'), 'USD'); });
+    const objective = el<HTMLSelectElement>('boost-objective-select');
+    const other = [...objective.options].map((o) => o.value).find((v) => v !== objective.value)!;
+    await act(async () => { setNativeSelectValue(objective, other); });
+    const start = new Date(Date.now() + 86400000).toISOString().slice(0, 16);
+    const end = new Date(Date.now() + 8 * 86400000).toISOString().slice(0, 16);
+    await act(async () => { setNativeInputValue(el<HTMLInputElement>('boost-starts-at-input'), start); });
+    await act(async () => { setNativeInputValue(el<HTMLInputElement>('boost-ends-at-input'), end); });
+    mockedFetch.mockResolvedValueOnce(jsonResponse({ data: { gate_id: 'gate-1', status: 'pending', reapproval_required: false } }, 201));
+    await act(async () => { el<HTMLButtonElement>('boost-submit').dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    const body = JSON.parse((mockedFetch.mock.calls[1][1] as RequestInit).body as string);
+    expect(body.currency).toBe('USD');
+    expect(body.objective).toBe(other);
+    expect(body.budget_minor).toBe(5000); // USD는 소수 둘째 자리까지(50.00 → 5000)
+  });
+});
