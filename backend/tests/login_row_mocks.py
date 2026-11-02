@@ -43,6 +43,10 @@ def answer_login_rows(session, user) -> None:
             result = MagicMock()
             result.first.return_value = None if (last is not None and step is not None and step <= last) else SimpleNamespace(id=user.id)
             return result
+        if cols == ["totp_locked_until"]:
+            result = MagicMock()
+            result.scalar_one_or_none.return_value = getattr(user, "totp_locked_until", None)
+            return result
         return await inner(stmt, *args, **kwargs)
 
     session.execute = execute

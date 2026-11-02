@@ -70,6 +70,29 @@ async def _row(w, *columns: str) -> tuple:
         return tuple((await s.execute(text(f"SELECT {', '.join(columns)} FROM users WHERE id = :i"), {"i": w.user_id})).one())
 
 
+async def _audit_details(w) -> list[str]:
+    from sqlalchemy import select
+
+    from app.models.login_audit_log import LoginAuditLog
+
+    async with w.Session() as s:
+        return list((await s.execute(select(LoginAuditLog.detail).where(LoginAuditLog.user_id == w.user_id, LoginAuditLog.event_type == "login_failure"))).scalars())
+
+
+async def _wait_until_a_row_wait_exists(w, timeout: float = 10.0) -> bool:
+    """true as soon as some backend waits for a row lock (a tuple or a transaction id) — the request under test has reached the row"""
+    from sqlalchemy import text
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        async with w.Session() as s:
+            if (await s.execute(text("SELECT count(*) FROM pg_locks WHERE NOT granted AND locktype IN ('transactionid', 'tuple')"))).scalar_one():
+                return True
+        await asyncio.sleep(0.05)
+    return False
+
+
 async def _answers(tasks: list) -> Counter:
     results = await asyncio.wait_for(asyncio.gather(*tasks), _WAIT)
     return Counter(r.status_code for r in results), results
@@ -95,6 +118,7 @@ async def test_twelve_wrong_passwords_in_flight_together_answer_five_401_then_se
         fail_count, locked_until = await _row(w, "login_fail_count", "login_locked_until")
         assert fail_count == 12, f"the stored count is the number of attempts, not what the last writer read: {fail_count}"
         assert locked_until is not None
+        assert Counter(await _audit_details(w)) == Counter({"INVALID_CREDENTIALS": 5, "ACCOUNT_LOCKED": 7}), "each refused attempt leaves one audit row saying which answer it got"
     finally:
         await _close(engine, w)
 
@@ -227,4 +251,110 @@ async def test_serial_second_step_behaviour_is_unchanged_a_used_code_is_refused_
         assert (await _sign_in(w, code=later)).status_code == 200
         assert (await _row(w, "totp_last_timestep"))[0] > step_used
     finally:
+        await _close(engine, w)
+
+
+async def test_requests_that_read_the_same_expired_lock_out_do_not_clear_each_others_counts(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import text
+
+    engine, w = await _world()
+    try:
+        async with w.Session() as s:
+            await s.execute(text("UPDATE users SET login_fail_count = 5, login_locked_until = :t WHERE id = :i"), {"t": datetime.now(timezone.utc) - timedelta(minutes=1), "i": w.user_id})
+            await s.commit()
+        _overlap(monkeypatch, w, 4)
+        counts, _ = await _answers([_sign_in(w, _WRONG) for _ in range(4)])
+        assert counts == Counter({401: 4}), counts
+        fail_count, locked_until = await _row(w, "login_fail_count", "login_locked_until")
+        assert (fail_count, locked_until) == (4, None), f"four failures after the lock-out ran out are four, not what the last reset left: {fail_count}"
+    finally:
+        await _close(engine, w)
+
+
+async def test_a_right_password_that_meets_the_fifth_failure_being_counted_waits_for_it_and_is_refused(monkeypatch):
+    """the fifth failure has counted (holds the row, not yet committed) when the right password has finished checking: the read under the person's lock waits for that row and sees the lock-out — 429, no session"""
+    import app.routers.auth as auth_router
+    from sqlalchemy import text
+
+    engine, w = await _world()
+    tasks: list[asyncio.Task] = []
+    reached, release = asyncio.Event(), asyncio.Event()
+    try:
+        async with w.Session() as s:
+            await s.execute(text("UPDATE users SET login_fail_count = 4 WHERE id = :i"), {"i": w.user_id})
+            await s.commit()
+        original = auth_router._write_audit
+
+        async def held_audit(session, event_type, **kwargs):
+            if event_type == "login_failure" and not reached.is_set():
+                reached.set()  # the fifth failure is counted (the row is held), not committed
+                await release.wait()
+            return await original(session, event_type, **kwargs)
+
+        monkeypatch.setattr(auth_router, "_write_audit", held_audit)
+        fifth = asyncio.create_task(_sign_in(w, _WRONG))
+        tasks.append(fifth)
+        await asyncio.wait_for(reached.wait(), 15)
+        rows_before = await w.token_rows()
+        right = asyncio.create_task(_sign_in(w))
+        tasks.append(right)
+        assert await _wait_until_a_row_wait_exists(w), "the right password did not wait for the row the fifth failure holds"
+        release.set()
+        fifth_answer, right_answer = await asyncio.wait_for(asyncio.gather(fifth, right), _WAIT)
+        assert fifth_answer.status_code == 401, fifth_answer.text
+        assert right_answer.status_code == 429, f"{right_answer.status_code} {right_answer.text}"
+        assert await w.token_rows() == rows_before
+        fail_count, locked_until = await _row(w, "login_fail_count", "login_locked_until")
+        assert fail_count == 5 and locked_until is not None, "the lock-out the fifth failure set is still there"
+    finally:
+        release.set()
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await _close(engine, w)
+
+
+async def test_a_valid_second_step_code_is_not_recorded_when_a_lock_out_went_on_meanwhile(monkeypatch):
+    """the code was checked while no lock-out was in force; before the step is recorded the fifth wrong code commits and sets one: the record statement refuses (nothing recorded, 429, no session)"""
+    import pyotp
+    from sqlalchemy import text
+
+    import app.routers.auth as auth_router
+
+    engine, w = await _world()
+    tasks: list[asyncio.Task] = []
+    reached, release = asyncio.Event(), asyncio.Event()
+    try:
+        secret, _ = await _enable_totp(w)
+        code = pyotp.TOTP(secret).now()
+        real_lock = auth_router._lock_person_sessions
+
+        async def paused_lock(session, user_id, *, exclusive):
+            if not exclusive and user_id == w.user_id and not reached.is_set():
+                reached.set()  # password checked; the second step's code is checked right after this
+                await release.wait()
+            return await real_lock(session, user_id, exclusive=exclusive)
+
+        monkeypatch.setattr(auth_router, "_lock_person_sessions", paused_lock)
+        valid = asyncio.create_task(_sign_in(w, code=code))
+        tasks.append(valid)
+        await asyncio.wait_for(reached.wait(), 15)
+        async with w.Session() as s:  # what the fifth wrong code leaves behind
+            await s.execute(text("UPDATE users SET totp_fail_count = 0, totp_locked_until = now() + interval '5 minutes' WHERE id = :i"), {"i": w.user_id})
+            await s.commit()
+        rows_before = await w.token_rows()
+        release.set()
+        answer = await asyncio.wait_for(valid, _WAIT)
+        assert answer.status_code == 429 and answer.json()["error"]["code"] == "TOTP_LOCKED", f"{answer.status_code} {answer.text}"
+        assert (await _row(w, "totp_last_timestep"))[0] is None, "a refused code is not recorded as used"
+        assert await w.token_rows() == rows_before
+    finally:
+        release.set()
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         await _close(engine, w)

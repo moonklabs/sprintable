@@ -1368,8 +1368,11 @@ async def login(
         # story 4838: BEFORE the person's row is written — a password change holds this lock (exclusive) and writes that row next. This rare branch (a lock-out that has just run out) therefore holds the lock through the
         # password check below; accepted: a revoke waits for it, nothing more
         await _lock_person_sessions(session, user.id, exclusive=False)
+        # story 4839: only if the CURRENT row still shows a lock-out that has run out — requests that read the same expired lock-out must not each clear the count the others have just added
         await session.execute(
-            update(User).where(User.id == user.id).values(login_fail_count=0, login_locked_until=None)
+            update(User).where(
+                User.id == user.id, User.login_locked_until.is_not(None), User.login_locked_until <= func.now(),
+            ).values(login_fail_count=0, login_locked_until=None)
         )
 
     if not user or not verify_password(body.password, user.hashed_password):
@@ -1407,7 +1410,8 @@ async def login(
     # story 4838: the session stored below queues on the person's session lock like every other issuer (refresh · switch) — an all-device revoke (a password change · a reset…) either ran before
     # (then the hash read again here is no longer the one just checked, or the account is closed: refused, nothing stored) or waits until this sign-in's session is committed and ends it. The (slow) hash check stays outside the lock.
     await _lock_person_sessions(session, user.id, exclusive=False)
-    _now = (await session.execute(select(User.hashed_password, User.is_active, User.login_locked_until).where(User.id == user.id))).one_or_none()
+    # story 4839: FOR UPDATE — a failure being counted (it holds the row until it commits) is waited for, so what is read here is the lock-out as it stands once that failure is in; the session lock is taken first, the row second (the order every revoke keeps)
+    _now = (await session.execute(select(User.hashed_password, User.is_active, User.login_locked_until).where(User.id == user.id).with_for_update())).one_or_none()
     if _now is not None and _now.is_active and _now.hashed_password == user.hashed_password and _now.login_locked_until is not None and _now.login_locked_until > datetime.now(timezone.utc):
         # story 4839: the account was locked by failures counted while this request was checking the password — a right password does not get past a lock-out that is already in force
         await session.commit()
@@ -1460,6 +1464,7 @@ async def login(
             update(User).where(
                 User.id == user.id,
                 or_(User.totp_last_timestep.is_(None), User.totp_last_timestep < timestep),
+                or_(User.totp_locked_until.is_(None), User.totp_locked_until <= func.now()),
             ).values(
                 totp_last_timestep=timestep,
                 totp_fail_count=0,
@@ -1467,6 +1472,10 @@ async def login(
             ).returning(User.id)
         )).first()
         if _recorded is None:
+            # nothing recorded: the step was already used — or a lock-out went on after the check at the top (failures counted while this request was running)
+            _locked_until = (await session.execute(select(User.totp_locked_until).where(User.id == user.id))).scalar_one_or_none()
+            if _locked_until is not None and _locked_until > datetime.now(timezone.utc):
+                return _err("TOTP_LOCKED", f"Too many failures. Retry after {max(0, int((_locked_until - datetime.now(timezone.utc)).total_seconds()))}s", 429)
             return _err("TOTP_REPLAYED", "TOTP code already used", 403)
 
     # 로그인 성공 — 실패 카운터 리셋 (story 4839: asks the current row, not the one read at the start — failures counted meanwhile are cleared too; a no-op statement when there is nothing to clear)
