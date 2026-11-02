@@ -7,6 +7,7 @@ import { ExternalLink, Link2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { safeHttpUrl } from '../lib/safe-content-url';
 import { cardVariants } from '@/components/ui/card';
+import { isImeComposing } from '@/lib/ime-composition';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
@@ -77,6 +78,8 @@ export function EmbedView({ node, updateAttributes, selected }: ReactNodeViewPro
   }, [editUrl, updateAttributes]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // 한글 등 입력기 조합 중의 엔터(글자 확정) · 에스케이프(조합 취소)는 적용 · 되돌림으로 읽지 않는다 — 반쯤 쓴 URL이 그대로 적용되던 것(4831 측정 중 발견).
+    if (isImeComposing(e)) return;
     if (e.key === 'Enter') { e.preventDefault(); applyUrl(); }
     if (e.key === 'Escape') setEditUrl(url);
   }, [applyUrl, url]);

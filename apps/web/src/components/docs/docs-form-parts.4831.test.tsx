@@ -35,8 +35,8 @@ function setNative(el: HTMLInputElement, value: string) {
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(el, value);
   el.dispatchEvent(new Event('input', { bubbles: true }));
 }
-function key(el: Element, k: string): KeyboardEvent {
-  const ev = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true });
+function key(el: Element, k: string, init: KeyboardEventInit = {}): KeyboardEvent {
+  const ev = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...init });
   el.dispatchEvent(ev);
   return ev;
 }
@@ -70,6 +70,25 @@ describe('EmbedView — URL 칸 (편집기 노드뷰)', () => {
       await act(async () => { e = key(input, k); });
       expect(e.defaultPrevented, k).toBe(false);
     }
+  });
+
+  it('한글 조합 중의 엔터는 적용하지 않고 기본 동작도 막지 않는다 · 조합 중의 에스케이프는 되돌리지 않는다 · 조합이 끝난 뒤의 엔터만 적용한다', async () => {
+    const update = vi.fn();
+    await act(async () => { root.render(wrap(<EmbedView {...props(true, update)} />)); });
+    const input = container.querySelector<HTMLInputElement>('input[data-slot="input"]')!;
+    await act(async () => { setNative(input, 'https://example.com/b한'); });
+    let enter!: KeyboardEvent;
+    await act(async () => { enter = key(input, 'Enter', { isComposing: true }); });
+    expect(update).not.toHaveBeenCalled();
+    expect(enter.defaultPrevented).toBe(false);
+    await act(async () => { key(input, 'Escape', { isComposing: true }); });
+    expect(input.value).toBe('https://example.com/b한');
+    // 옛 표지: 일부 브라우저는 조합 중 키를 keyCode 229로만 알린다
+    await act(async () => { key(input, 'Enter', { keyCode: 229 }); });
+    expect(update).not.toHaveBeenCalled();
+    await act(async () => { enter = key(input, 'Enter'); });
+    expect(enter.defaultPrevented).toBe(true);
+    expect(update).toHaveBeenCalledWith({ url: 'https://example.com/b한' });
   });
 
   it('칸을 떠나면(blur) 적용된다', async () => {

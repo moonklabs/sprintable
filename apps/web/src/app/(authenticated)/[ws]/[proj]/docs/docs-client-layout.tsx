@@ -26,6 +26,7 @@ import { closedDrawerProps, useSwipeDrawer } from '@/lib/use-swipe-drawer';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { newDocUrl, docUrl } from '@/components/docs/lib/doc-project-url';
 import { fetchWithAuth } from '@/lib/db/client';
+import { isImeComposing } from '@/lib/ime-composition';
 import { DocsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 import { applyDocMove, placedFromSiblings, planDocMove, withEffectiveParents, type DocMoveAction, type MenuMovePlan, type MenuMoveResult } from '@/components/docs/lib/doc-move';
 import { applyReorderResult, saveDocOrder } from '@/components/docs/lib/doc-reorder-api';
@@ -485,6 +486,8 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             value={newFolderName}
             onChange={(e) => { setNewFolderName(e.target.value); if (folderCreateError) setFolderCreateError(null); }}
             onKeyDown={(e) => {
+              // 한글 등 입력기 조합 중의 엔터(글자 확정) · 에스케이프(조합 취소)는 제출 · 닫기로 읽지 않는다 — 반쯤 쓴 폴더 이름으로 폴더가 만들어지던 것(4831 측정 중 발견).
+              if (isImeComposing(e)) return;
               if (e.key === 'Enter') { e.preventDefault(); void submitCreateFolder(); }
               if (e.key === 'Escape') { e.preventDefault(); cancelCreateFolder(); }
             }}
