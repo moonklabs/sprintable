@@ -21,10 +21,10 @@ def answer_login_rows(session, user) -> None:
 
     async def execute(stmt, *args, **kwargs):
         cols = [c.name for c in getattr(stmt, "selected_columns", [])]
-        if cols == ["hashed_password", "is_active", "login_locked_until"]:
+        if cols == ["hashed_password", "is_active", "login_locked_until", "totp_enabled", "totp_secret"]:
             session.hash_rereads += 1
             result = MagicMock()
-            result.one_or_none.return_value = SimpleNamespace(hashed_password=user.hashed_password, is_active=True, login_locked_until=None)
+            result.one_or_none.return_value = SimpleNamespace(hashed_password=user.hashed_password, is_active=True, login_locked_until=None, totp_enabled=user.totp_enabled, totp_secret=user.totp_secret)
             return result
         sql = str(stmt)
         if sql.startswith("UPDATE users SET login_fail_count") and "RETURNING" in sql:

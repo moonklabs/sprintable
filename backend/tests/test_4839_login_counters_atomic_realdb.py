@@ -24,7 +24,7 @@ pytestmark = [
     pytest.mark.anyio,
 ]
 
-_WAIT = 60
+_WAIT = 25  # under the suite's per-test timeout (30 s): a hang ends in this test's own cleanup, not in the runner's kill
 _WRONG = "wrong-" + "pw-4839"
 
 
@@ -38,7 +38,7 @@ class _Together:
         self.arrived += 1
         if self.arrived >= self.n:
             self.go.set()
-        await asyncio.wait_for(self.go.wait(), 30)
+        await asyncio.wait_for(self.go.wait(), 20)
 
 
 def _overlap(monkeypatch, w, n: int) -> None:
@@ -87,7 +87,10 @@ async def _wait_until_a_row_wait_exists(w, timeout: float = 10.0, at_least: int 
     deadline = loop.time() + timeout
     while loop.time() < deadline:
         async with w.Session() as s:
-            if (await s.execute(text("SELECT count(*) FROM pg_locks WHERE NOT granted AND locktype IN ('transactionid', 'tuple')"))).scalar_one() >= at_least:
+            if (await s.execute(text(
+                "SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid "
+                "WHERE NOT l.granted AND l.locktype IN ('transactionid', 'tuple') AND a.datname = current_database() AND a.pid <> pg_backend_pid() AND a.query ILIKE '%users%'"
+            ))).scalar_one() >= at_least:
                 return True
         await asyncio.sleep(0.05)
     return False
@@ -365,6 +368,84 @@ async def test_a_valid_second_step_code_is_not_recorded_when_a_lock_out_went_on_
         assert answer.status_code == 429 and answer.json()["error"]["code"] == "TOTP_LOCKED", f"{answer.status_code} {answer.text}"
         assert (await _row(w, "totp_last_timestep"))[0] is None, "a refused code is not recorded as used"
         assert await w.token_rows() == rows_before
+    finally:
+        release.set()
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await _close(engine, w)
+
+
+async def test_a_second_step_switched_on_while_the_sign_in_was_running_is_asked_for(monkeypatch):
+    """the person's second step is switched on after this request read the person and before the session is made: the read under the person's lock sees it — the password alone no longer gets a session"""
+    from sqlalchemy import text
+
+    import app.routers.auth as auth_router
+
+    engine, w = await _world()
+    tasks: list[asyncio.Task] = []
+    reached, release = asyncio.Event(), asyncio.Event()
+    try:
+        real_lock = auth_router._lock_person_sessions
+
+        async def paused_lock(session, user_id, *, exclusive):
+            if not exclusive and user_id == w.user_id and not reached.is_set():
+                reached.set()
+                await release.wait()
+            return await real_lock(session, user_id, exclusive=exclusive)
+
+        monkeypatch.setattr(auth_router, "_lock_person_sessions", paused_lock)
+        right = asyncio.create_task(_sign_in(w))
+        tasks.append(right)
+        await asyncio.wait_for(reached.wait(), 15)
+        await _enable_totp(w)
+        rows_before = await w.token_rows()
+        release.set()
+        answer = await asyncio.wait_for(right, _WAIT)
+        assert answer.status_code == 403 and answer.json()["error"]["code"] == "TOTP_REQUIRED", f"{answer.status_code} {answer.text}"
+        assert await w.token_rows() == rows_before
+    finally:
+        release.set()
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await _close(engine, w)
+
+
+async def test_the_row_the_sign_in_holds_does_not_block_a_foreign_key_check_on_the_person(monkeypatch):
+    """while a sign-in holds the person's row (after the read under the session lock, before the session is stored) a row that REFERENCES the person — a member being inserted, an invite being accepted — still goes through:
+    the read takes the row the way a plain UPDATE does (FOR NO KEY UPDATE), which does not conflict with the key-share lock a foreign-key check takes. A FOR UPDATE would make it wait, and wait for the session's organization lock
+    the sign-in is about to ask for — a cycle."""
+    from sqlalchemy import text
+
+    import app.routers.auth as auth_router
+
+    engine, w = await _world()
+    tasks: list[asyncio.Task] = []
+    reached, release = asyncio.Event(), asyncio.Event()
+    try:
+        original = auth_router._sign_in_session_context
+
+        async def paused_context(user, session):
+            if user.id == w.user_id and not reached.is_set():
+                reached.set()  # the row is held by this request's transaction
+                await release.wait()
+            return await original(user, session)
+
+        monkeypatch.setattr(auth_router, "_sign_in_session_context", paused_context)
+        right = asyncio.create_task(_sign_in(w))
+        tasks.append(right)
+        await asyncio.wait_for(reached.wait(), 15)
+        async with w.Session() as other:
+            async with other.begin():
+                await other.execute(text("SET LOCAL lock_timeout = '1500ms'"))
+                got = (await other.execute(text("SELECT id FROM users WHERE id = :i FOR KEY SHARE"), {"i": w.user_id})).first()
+                assert got is not None, "a foreign-key check on the person waits for the sign-in's row lock"
+        release.set()
+        answer = await asyncio.wait_for(right, _WAIT)
+        assert answer.status_code == 200, answer.text
     finally:
         release.set()
         for t in tasks:

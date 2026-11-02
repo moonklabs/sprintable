@@ -1364,16 +1364,8 @@ async def login(
         if user.login_locked_until > datetime.now(timezone.utc):
             remaining = int((user.login_locked_until - datetime.now(timezone.utc)).total_seconds())
             return _err("ACCOUNT_LOCKED", f"Account locked. Try again in {remaining} seconds", 429)
-        # 잠금 해제 시간 경과 — 카운터 초기화
-        # story 4838: BEFORE the person's row is written — a password change holds this lock (exclusive) and writes that row next. This rare branch (a lock-out that has just run out) therefore holds the lock through the
-        # password check below; accepted: a revoke waits for it, nothing more
-        await _lock_person_sessions(session, user.id, exclusive=False)
-        # story 4839: only if the CURRENT row still shows a lock-out that has run out — requests that read the same expired lock-out must not each clear the count the others have just added
-        await session.execute(
-            update(User).where(
-                User.id == user.id, User.login_locked_until.is_not(None), User.login_locked_until <= func.now(),
-            ).values(login_fail_count=0, login_locked_until=None)
-        )
+        # 잠금 해제 시간 경과 — story 4839: nothing is written here any more (the person's row was held through the password hashing below). A lock-out that has run out is cleared where the count is
+        # next written: the failure statement below, or the success reset.
 
     if not user or not verify_password(body.password, user.hashed_password):
         # 실패 카운터 증가 — story 4839: ONE statement adds one and returns the new count; the answer is decided from that returned value, not from the row read at the start of the request
@@ -1381,11 +1373,17 @@ async def login(
         # The 5th failure answers 401 and sets the lock; an attempt whose failure is counted after that (count > 5) finds the account already locked: 429.
         _already_locked_remaining: int | None = None
         if user:
+            # a lock-out that has run out is cleared first, judged on the CURRENT row (requests that read the same expired lock-out must not each clear the count the others have just added)
+            await session.execute(
+                update(User).where(
+                    User.id == user.id, User.login_locked_until.is_not(None), User.login_locked_until <= func.clock_timestamp(),
+                ).values(login_fail_count=0, login_locked_until=None)
+            )
             _counted = (await session.execute(
                 update(User).where(User.id == user.id).values(
                     login_fail_count=func.coalesce(User.login_fail_count, 0) + 1,
                     login_locked_until=case(
-                        (func.coalesce(User.login_fail_count, 0) + 1 >= 5, func.now() + timedelta(minutes=5)),
+                        (func.coalesce(User.login_fail_count, 0) + 1 >= 5, func.clock_timestamp() + timedelta(minutes=5)),
                         else_=User.login_locked_until,
                     ),
                 ).returning(User.login_fail_count, User.login_locked_until)
@@ -1410,8 +1408,11 @@ async def login(
     # story 4838: the session stored below queues on the person's session lock like every other issuer (refresh · switch) — an all-device revoke (a password change · a reset…) either ran before
     # (then the hash read again here is no longer the one just checked, or the account is closed: refused, nothing stored) or waits until this sign-in's session is committed and ends it. The (slow) hash check stays outside the lock.
     await _lock_person_sessions(session, user.id, exclusive=False)
-    # story 4839: FOR UPDATE — a failure being counted (it holds the row until it commits) is waited for, so what is read here is the lock-out as it stands once that failure is in; the session lock is taken first, the row second (the order every revoke keeps)
-    _now = (await session.execute(select(User.hashed_password, User.is_active, User.login_locked_until).where(User.id == user.id).with_for_update())).one_or_none()
+    # story 4839: the row is taken here — a failure being counted (it holds the row until it commits) is waited for, so what is read here is the lock-out as it stands once that failure is in; the session lock is taken first, the row second (the order every revoke keeps)
+    # FOR NO KEY UPDATE (not FOR UPDATE): the same row lock a plain UPDATE of the row takes — it queues with the failure/reset statements but does not block a foreign-key check on the person's id (a member row being inserted for them)
+    _now = (await session.execute(
+        select(User.hashed_password, User.is_active, User.login_locked_until, User.totp_enabled, User.totp_secret).where(User.id == user.id).with_for_update(key_share=True)
+    )).one_or_none()
     if _now is not None and _now.is_active and _now.hashed_password == user.hashed_password and _now.login_locked_until is not None and _now.login_locked_until > datetime.now(timezone.utc):
         # story 4839: the account was locked by failures counted while this request was checking the password — a right password does not get past a lock-out that is already in force
         await session.commit()
@@ -1427,7 +1428,7 @@ async def login(
         await session.commit()
         return _err("INVALID_CREDENTIALS", "Invalid email or password", 401)
 
-    if user.totp_enabled:
+    if _now.totp_enabled:  # story 4839: the second step is judged on what the row says now (it may have been switched on while this request was running)
         if not body.totp_code:
             return _err("TOTP_REQUIRED", "TOTP code required", 403)
 
@@ -1438,20 +1439,20 @@ async def login(
             remaining = int((user.totp_locked_until - now).total_seconds())
             return _err("TOTP_LOCKED", f"Too many failures. Retry after {remaining}s", 429)
 
-        timestep = verify_totp_with_timestep(user.totp_secret or "", body.totp_code)
+        timestep = verify_totp_with_timestep(_now.totp_secret or "", body.totp_code)
 
         if timestep is None:
             # 실패: 카운터 증가, 5회 도달 시 5분 lockout — story 4839: one statement reads the row's lock-out state under the row lock, counts and answers from what it returns
             # (a failure counted after the lock-out is already in force changes nothing and is answered 429, like the password lock-out). The read under the person's session lock above already holds this row until the end of the request;
-            # the statement takes it again (FOR UPDATE) so that it is correct on its own, whatever is above it.
+            # the statement takes it again (FOR NO KEY UPDATE) so that it is correct on its own, whatever is above it.
             _failed = (await session.execute(text(
-                "WITH old AS (SELECT id, totp_locked_until AS was_locked_until FROM users WHERE id = :uid FOR UPDATE) "
+                "WITH old AS (SELECT id, totp_locked_until AS was_locked_until FROM users WHERE id = :uid FOR NO KEY UPDATE) "
                 "UPDATE users u SET "
-                "totp_fail_count = CASE WHEN old.was_locked_until > now() THEN u.totp_fail_count "
+                "totp_fail_count = CASE WHEN old.was_locked_until > clock_timestamp() THEN u.totp_fail_count "
                 "WHEN COALESCE(u.totp_fail_count, 0) + 1 >= 5 THEN 0 ELSE COALESCE(u.totp_fail_count, 0) + 1 END, "
-                "totp_locked_until = CASE WHEN old.was_locked_until > now() THEN u.totp_locked_until "
-                "WHEN COALESCE(u.totp_fail_count, 0) + 1 >= 5 THEN now() + interval '5 minutes' ELSE u.totp_locked_until END "
-                "FROM old WHERE u.id = old.id RETURNING (old.was_locked_until > now()) AS already_locked, u.totp_locked_until AS locked_until"
+                "totp_locked_until = CASE WHEN old.was_locked_until > clock_timestamp() THEN u.totp_locked_until "
+                "WHEN COALESCE(u.totp_fail_count, 0) + 1 >= 5 THEN clock_timestamp() + interval '5 minutes' ELSE u.totp_locked_until END "
+                "FROM old WHERE u.id = old.id RETURNING (old.was_locked_until > clock_timestamp()) AS already_locked, u.totp_locked_until AS locked_until"
             ), {"uid": user.id})).one()
             await session.commit()
             if _failed.already_locked:
@@ -1465,7 +1466,7 @@ async def login(
             update(User).where(
                 User.id == user.id,
                 or_(User.totp_last_timestep.is_(None), User.totp_last_timestep < timestep),
-                or_(User.totp_locked_until.is_(None), User.totp_locked_until <= func.now()),
+                or_(User.totp_locked_until.is_(None), User.totp_locked_until <= func.clock_timestamp()),
             ).values(
                 totp_last_timestep=timestep,
                 totp_fail_count=0,
