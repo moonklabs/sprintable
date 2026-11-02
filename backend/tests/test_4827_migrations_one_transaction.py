@@ -162,6 +162,10 @@ def env_violations(source: str) -> list[str]:
             for kw in node.keywords:
                 if kw.arg == "isolation_level" or kw.arg is None:
                     out.append(f"env.py:{node.lineno}: execution_options(isolation_level=…)")
+    # a setting handed over as TEXT (`cfg["sqlalchemy.isolation_level"] = …`, `set_main_option("…isolation_level", …)`, an engine option dict): env.py has no reason to name these
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and not _is_docstring(tree, node) and re.search(r"isolation_level|autocommit|transaction_per_migration", node.value, re.IGNORECASE):
+            out.append(f"env.py:{node.lineno}: the text {node.value[:40]!r} (a setting that changes the transaction)")
     # the driver's own switches (a raw DBAPI connection in autocommit makes every statement its own transaction)
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in _DBAPI_SETTERS:
@@ -349,6 +353,9 @@ def test_no_migration_ends_the_single_transaction() -> None:
         ("c.execution_options(**o)", "isolation_level"),
         ("def f(c):\n    context.run_migrations()\n    c.commit()\n    context.run_migrations()\n", "between two run_migrations"),
         ("def f():\n    context.run_migrations()\n    context.run_migrations()\n", "called 2 times"),
+        ("def f(cfg):\n    cfg[\"sqlalchemy.isolation_level\"] = \"AUTOCOMMIT\"\n", "a setting that changes the transaction"),
+        ("def f(cfg):\n    cfg.set_main_option(\"sqlalchemy.isolation_level\", \"AUTOCOMMIT\")\n", "a setting that changes the transaction"),
+        ("def f():\n    return create_engine(url, connect_args={\"options\": \"-c default_transaction_isolation=x\"}, execution_options={\"isolation_level\": \"AUTOCOMMIT\"})\n", "a setting that changes the transaction"),
         ("def f(c):\n    c.connection.set_session(autocommit=True)\n", "set_session"),
         ("def f(c):\n    c.connection.set_isolation_level(0)\n", "set_isolation_level"),
         ("def f(c):\n    c.connection.autocommit = True\n", ".autocommit assigned"),
