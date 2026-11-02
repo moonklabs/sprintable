@@ -73,7 +73,7 @@ async function mountGroupRoom() {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 const editBtn = () => [...container.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === koMessages.chats.editRoomName) as HTMLButtonElement;
-const titleInput = () => container.querySelector(`input[aria-label="${koMessages.chats.editRoomName}"]`) as HTMLInputElement | null;
+const titleInput = () => container.querySelector(`input[data-slot="input"][aria-label="${koMessages.chats.editRoomName}"]`) as HTMLInputElement | null;
 function keydown(el: Element, k: string, init: KeyboardEventInit = {}): KeyboardEvent {
   const ev = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...init });
   el.dispatchEvent(ev);

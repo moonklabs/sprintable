@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { AlertTriangle, Check, Circle, CircleDashed, CircleDot, Loader2, SquareX, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
@@ -348,9 +349,9 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
             <DialogTitle>{t('sheet.title')}</DialogTitle>
             <DialogDescription className="break-keep">{t('sheet.note')}</DialogDescription>
           </DialogHeader>
-          <textarea
+          <Textarea
             aria-label={t('sheet.title')}
-            className="min-h-24 w-full rounded-md border border-border bg-background p-2 text-base"
+            className="min-h-24"
             value={draft}
             maxLength={INSTRUCTION_MAX}
             onChange={(e) => setDraft(e.target.value)}

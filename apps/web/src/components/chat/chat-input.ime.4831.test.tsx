@@ -33,7 +33,7 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-const textarea = () => container.querySelector('textarea') as HTMLTextAreaElement;
+const textarea = () => container.querySelector('textarea[data-slot="textarea"]') as HTMLTextAreaElement;
 async function mount(onSend = vi.fn(async () => {}), onEscape = vi.fn()) {
   await act(async () => {
     root.render(

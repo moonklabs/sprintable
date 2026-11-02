@@ -67,7 +67,7 @@ afterEach(async () => {
 });
 
 function textarea(): HTMLTextAreaElement {
-  return container.querySelector('textarea') as HTMLTextAreaElement;
+  return container.querySelector('textarea[data-slot="textarea"]') as HTMLTextAreaElement;
 }
 
 describe('ChatInput — 진입 시 자동 포커스(story #2032 AC1)', () => {
