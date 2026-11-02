@@ -144,7 +144,7 @@ describe('SupportWidgetLauncher — story #3260 셸', () => {
     await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const panel = container.querySelector('[role="dialog"]')!;
     expect(panel).toBeTruthy();
-    expect(panel.getAttribute('aria-modal')).toBeNull();
+    expect(panel.getAttribute('aria-modal') ?? 'false').toBe('false'); // 모달이 아니다(속성 없음 · "false" 모두 같은 뜻)
     await act(async () => {
       document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
       document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));

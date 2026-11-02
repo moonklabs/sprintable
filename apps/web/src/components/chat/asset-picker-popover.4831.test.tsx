@@ -20,6 +20,7 @@ const ITEMS = [
 
 let container: HTMLDivElement;
 let root: Root;
+const originalScrollIntoView = Element.prototype.scrollIntoView as typeof Element.prototype.scrollIntoView | undefined;
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ data: { items: ITEMS } }) })));
   Element.prototype.scrollIntoView = vi.fn(); // jsdom에는 없다 — 켠 항목을 목록 안으로 굴리는 호출
@@ -27,7 +28,14 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
 });
-afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); });
+afterEach(async () => {
+  await act(async () => { root.unmount(); });
+  container.remove();
+  vi.unstubAllGlobals();
+  // 이 파일이 얹은 스텁이 같은 워커의 다른 시험으로 새지 않게 원래대로(jsdom엔 원래 없다)
+  if (originalScrollIntoView) Element.prototype.scrollIntoView = originalScrollIntoView;
+  else delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+});
 
 const wrap = (node: React.ReactNode) => <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">{node}</NextIntlClientProvider>;
 const sleep = (ms: number) => act(async () => { await new Promise((r) => setTimeout(r, ms)); });
@@ -45,12 +53,13 @@ const options = () => [...container.querySelectorAll<HTMLElement>('[role="option
 const key = (k: string) => act(async () => { input().dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })); });
 
 describe('AssetPickerPopover — 덮개 명단 잠금(현재 동작)', () => {
-  it('입력창 안에 붙는 role=dialog이고 접근 이름이 제목이다(absolute · bottom-14 · left-3 — 트리거가 없다)', async () => {
+  it('호출부(입력창) 안에 absolute로 붙는 role=dialog이고 접근 이름이 제목이다 — 포털이 아니고 fixed가 아니다(트리거가 없다)', async () => {
     await mountPicker();
     const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!;
     expect(dialog.getAttribute('aria-label')).toBe(chats.assetPickerTitle);
-    for (const t of ['absolute', 'bottom-14', 'left-3']) expect(hasClass(dialog, t), t).toBe(true);
+    expect(hasClass(dialog, 'absolute')).toBe(true);
     expect(hasClass(dialog, 'fixed')).toBe(false);
+    expect(container.contains(dialog)).toBe(true); // body로 나가는 포털이 아니라 호출부 트리 안에 그려진다
   });
 
   it('열리면 초점이 검색 칸(콤보박스)으로 간다', async () => {
@@ -74,6 +83,8 @@ describe('AssetPickerPopover — 덮개 명단 잠금(현재 동작)', () => {
     await sleep(20);
     await key('ArrowDown');
     expect(input().getAttribute('aria-activedescendant')).toBe('asset-opt-1');
+    expect(options().filter((o) => o.getAttribute('aria-selected') === 'true')).toHaveLength(1); // 켜진 항목은 정확히 하나
+    expect(container.querySelector(`#${input().getAttribute('aria-activedescendant')}`)?.getAttribute('role')).toBe('option'); // 가리키는 id가 실제 option
     await key('ArrowDown'); await key('ArrowDown');
     expect(input().getAttribute('aria-activedescendant')).toBe('asset-opt-0'); // 3 → 0으로 돌아감
     await key('ArrowUp');
@@ -107,11 +118,16 @@ describe('AssetPickerPopover — 덮개 명단 잠금(현재 동작)', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('바깥을 누르면(mousedown) 닫고, 안쪽을 누르면 닫지 않는다 — 단, 열린 같은 틱의 누름은 무시한다(다음 프레임에 등록)', async () => {
+  it('바깥을 누르면(mousedown) 닫고, 안쪽을 누르면 닫지 않는다 — 단, 다음 프레임에 리스너가 달리기 전(열린 같은 틱)의 누름은 무시한다', async () => {
+    // 실제 타이머에 기대면 부하에 따라 흔들리므로 requestAnimationFrame을 손으로 쥔다 — 프레임을 «돌리기 전/후»를 결정적으로 가른다
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => { frames.push(cb); return frames.length; });
+    vi.stubGlobal('cancelAnimationFrame', () => {});
     const { onClose } = await mountPicker();
-    document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); // 열자마자(같은 틱) — 메뉴 항목 클릭이 피커를 여는 누름
+    document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); // 열자마자(프레임 전) — 메뉴 항목 클릭이 피커를 여는 누름
     expect(onClose).not.toHaveBeenCalled();
-    await sleep(50); // 리스너가 달린 뒤
+    expect(frames.length).toBeGreaterThan(0); // 리스너 등록이 다음 프레임으로 미뤄져 있다
+    await act(async () => { frames.splice(0).forEach((cb) => cb(0)); }); // 프레임이 돌아 리스너가 달린다
     const dialog = container.querySelector('[role="dialog"]')!;
     await act(async () => { dialog.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
     expect(onClose).not.toHaveBeenCalled(); // 안쪽

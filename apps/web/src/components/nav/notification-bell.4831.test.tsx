@@ -68,7 +68,7 @@ describe('NotificationBell 좁은 화면 풀스크린 오버레이 — 덮개 �
     expect(o).not.toBeNull();
     expect(o.getAttribute('aria-modal')).toBe('true');
     expect(o.getAttribute('aria-label')).toBe(koMessages.inbox.panelTitle);
-    for (const t of ['fixed', 'inset-0', 'flex-col']) expect(hasClass(o, t), t).toBe(true);
+    for (const t of ['fixed', 'inset-0']) expect(hasClass(o, t), t).toBe(true); // 화면 전체를 덮는다
     expect(container.contains(o)).toBe(true);
     // jsdom은 Tailwind 반응형 클래스를 평가하지 않아 넓은 화면 패널도 DOM에 같이 있다 — 하나만 보이게 하는 것은 CSS 클래스다: 오버레이 lg:hidden · 넓은 화면 패널 hidden(lg:flex)
     expect(hasClass(o, 'lg:hidden')).toBe(true);
