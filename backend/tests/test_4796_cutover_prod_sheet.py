@@ -901,7 +901,8 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     root = _fresh(tmp_path, "new")
     p, _ = _run(block, root, extra={"REPO": str(_ROOT), "CUR": "0466"})
     assert p.returncode == 0, p.stderr
-    assert "revisions to run: 3" in p.stdout
+    newer = [f for f in (_ROOT / "backend/alembic/versions").glob("0*.py") if int(re.match(r"0(\d{3})", f.name).group(1)) > 466]
+    assert len(newer) >= 3 and f"revisions to run: {len(newer)}" in p.stdout  # the revisions after 0466 — counted from the files, so a new migration does not move this (story 4826)
     hits = [line for line in p.stdout.splitlines() if re.match(r"^0\d{3}[a-z]?_\S+\.py:\d+: ", line)]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"

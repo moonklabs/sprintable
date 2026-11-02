@@ -179,6 +179,60 @@ async def test_a_lap_that_raises_does_not_end_the_loop(monkeypatch) -> None:
 
 
 @pytest.mark.anyio
+async def test_a_lap_that_stalls_anywhere_is_logged_and_the_loop_goes_on(monkeypatch, caplog) -> None:
+    """the deadline is for the WHOLE lap (prerequisite check · call · record), not only the HTTP call: a stall in any of them is cut off and the next lap comes"""
+    monkeypatch.setattr(et, "LAP_GRACE_SEC", 0.05)
+    laps = {"n": 0}
+    sleeps: list[float] = []
+
+    async def fake_sleep(s: float) -> None:
+        sleeps.append(s)
+        if laps["n"] >= 2:
+            raise asyncio.CancelledError
+
+    async def fake_since(name):
+        return None
+
+    async def stalled_lap(app, j, *, call=None):
+        laps["n"] += 1
+        await asyncio.Event().wait()  # never finishes
+
+    monkeypatch.delenv("EMBEDDED_TIMER_SPEEDUP", raising=False)
+    monkeypatch.setattr(et, "_seconds_since_last_run", fake_since)
+    monkeypatch.setattr(et, "_lap", stalled_lap)
+    job = TimerJob("hitl-timeouts", "GET", 600, deadline_seconds=0.05)
+    with caplog.at_level(logging.WARNING, logger=et.logger.name), pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(et._job_loop(object(), job, 0, sleep=fake_sleep), 5)
+    assert laps["n"] == 2  # the first stalled lap did not hold the loop: the second came
+    assert any("did not finish within" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.anyio
+async def test_a_stalled_read_of_the_last_run_counts_as_never_ran(monkeypatch) -> None:
+    monkeypatch.setattr(et, "LAP_GRACE_SEC", 0.05)
+    sleeps: list[float] = []
+    ran: list[str] = []
+
+    async def fake_sleep(s: float) -> None:
+        sleeps.append(s)
+        if ran:
+            raise asyncio.CancelledError
+
+    async def stalled_since(name):
+        await asyncio.Event().wait()
+
+    async def fake_lap(app, j, *, call=None):
+        ran.append(j.route)
+
+    monkeypatch.delenv("EMBEDDED_TIMER_SPEEDUP", raising=False)
+    monkeypatch.setattr(et, "_seconds_since_last_run", stalled_since)
+    monkeypatch.setattr(et, "_lap", fake_lap)
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(et._job_loop(object(), JOB, 0, sleep=fake_sleep), 5)
+    assert sleeps[1] == 0.0 and ran == ["hitl-timeouts"]  # not knowing = due now
+
+
+@pytest.mark.anyio
 async def test_a_job_never_overlaps_itself(monkeypatch) -> None:
     live = {"now": 0, "max": 0}
 

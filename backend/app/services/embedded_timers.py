@@ -40,6 +40,7 @@ CRON_PREFIX = "/api/v2/internal/cron/"
 START_DELAY_SEC = 20.0  # after the app is up, before the first look at what is due
 STAGGER_SEC = 3.0  # each job's first look comes this much after the previous job's — a start is not a stampede
 RESTART_PAUSE_SEC = 60.0  # a loop that ended with an error (a bug) is started again after this (or its own interval if shorter)
+LAP_GRACE_SEC = 60.0  # on top of a job's deadline: what the whole lap (prerequisite check · the call · the record of it) and the start-up read of the last run may take
 DEFAULT_DEADLINE_SEC = 180.0  # the cloud scheduler's default `attempt_deadline`
 MAX_SPEEDUP = 100_000.0
 
@@ -209,19 +210,21 @@ async def _job_loop(app: Any, job: TimerJob, index: int, *, sleep: Callable[[flo
     interval = job.every_seconds / k
     await sleep((START_DELAY_SEC + index * STAGGER_SEC) / k)
     try:
-        since = await _seconds_since_last_run(job.name)
+        since = await asyncio.wait_for(_seconds_since_last_run(job.name), LAP_GRACE_SEC)
     except asyncio.CancelledError:
         raise
-    except Exception:  # noqa: BLE001 — not knowing the last run is «never ran»: one lap now, then the interval
+    except Exception:  # noqa: BLE001 — not knowing the last run (an error or a stalled read) is «never ran»: one lap now, then the interval
         logger.warning("embedded timer: the last run of %s could not be read", job.name, exc_info=True)
         since = None
     # catch-up: the interval passed while the app was closed → one lap now (however many were missed); else wait out the rest of it
     await sleep(0.0 if since is None else max(0.0, interval - since))
     while True:
         try:
-            await _lap(app, job, call=call)
+            await asyncio.wait_for(_lap(app, job, call=call), job.deadline_seconds + LAP_GRACE_SEC)
         except asyncio.CancelledError:
             raise
+        except asyncio.TimeoutError:
+            logger.warning("embedded timer: a lap of %s did not finish within %.0f s (prerequisite · call · record) — next lap in one interval", job.name, job.deadline_seconds + LAP_GRACE_SEC)
         except Exception:  # noqa: BLE001 — never ends the loop
             logger.warning("embedded timer: a lap of %s failed", job.name, exc_info=True)
         await sleep(interval)

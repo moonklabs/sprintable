@@ -26,7 +26,11 @@ _APP_DIR = Path(__file__).parent.parent / "app"
 # engine.dispose() 前에 백그라운드 루프를 반드시 먼저 멈춰야 하는 순서를 못 지키게 되는
 # 퇴행이라 전환하지 않았다). 이 안전성이 유지되는지는
 # test_realtime_main_lifespan_shutdown_order.py가 실행으로 계속 지킨다.
+# embedded_timers.py: story 4826 — the app's own server's job loops. run_embedded_timers keeps every task in a local list and `gather`s it, cancelling and awaiting each in its
+# finally; start_embedded_timers returns the one task to the lifespan in main.py, which keeps it in embedded_timers_task and cancels + awaits it in ITS finally — not fire-and-forget;
+# test_4826_embedded_timers.py runs the real lifespan: 15 loops up on start, all cancelled on stop.
 _ALLOWED_FILES = {
+    _APP_DIR / "services" / "embedded_timers.py",
     _APP_DIR / "main.py",
     _APP_DIR / "services" / "pg_pubsub.py",
     _APP_DIR / "services" / "l2_trigger_worker.py",
