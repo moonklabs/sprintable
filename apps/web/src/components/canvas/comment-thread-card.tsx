@@ -9,6 +9,7 @@ import { AnchorPin } from './anchor-pin';
 import type { MemberRef } from '@/services/canvas';
 import type { CommentThread } from '@/services/canvas-comments';
 import { Input } from '@/components/ui/input';
+import { isImeComposing } from '@/lib/ime-composition';
 
 const ROLLUP_LABEL_KEY: Record<CommentThread['rollup'], string> = {
   open: 'rollupOpen',
@@ -96,7 +97,8 @@ export function CommentThreadCard({
               type="text"
               value={replyDraft}
               onChange={(e) => setReplyDraft(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleReply(); }}
+              // 조합 중의 엔터는 글자 확정 키 — 보내기로 읽으면 반쯤 쓴 답글이 나가고 칸이 비워져 확정된 글자가 다음 답글로 또 나간다(4831 측정 중 발견).
+              onKeyDown={(e) => { if (isImeComposing(e)) return; if (e.key === 'Enter') handleReply(); }}
               placeholder={t('replyPlaceholder')}
               className="h-auto min-w-0 flex-1 px-2 py-1 lg:text-editorial-meta text-foreground bg-background dark:bg-background"
             />
