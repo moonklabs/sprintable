@@ -390,6 +390,49 @@ async def test_a_provider_sign_in_that_matched_an_open_account_before_its_deleti
         await _close(engine, w)
 
 
+@pytest.mark.parametrize("meanwhile", ["unlinked", "relinked_to_another_id"])
+async def test_a_provider_sign_in_whose_provider_id_left_the_account_meanwhile_is_refused(meanwhile, monkeypatch):
+    """the account is matched by the provider id; while the sign-in waits in front of the lock the provider id is taken off the account (unlinked) or replaced by another. The read under the lock
+    compares the id with the one the provider proved: refused, no session stored."""
+    from sqlalchemy import update
+
+    import app.routers.auth as auth_router
+    from app.models.user import User
+
+    engine, w = await _world()
+    tasks: list[asyncio.Task] = []
+    pause = _Pause()
+    try:
+        sub = await _provider_world(w)
+        real_lock = auth_router._lock_person_sessions
+
+        async def paused_before_lock(session, user_id, *, exclusive):
+            if not exclusive and user_id == w.user_id and not pause.reached.is_set():
+                await pause.hold()  # the person is matched by the provider id; the lock is not taken yet
+            return await real_lock(session, user_id, exclusive=exclusive)
+
+        monkeypatch.setattr(auth_router, "_lock_person_sessions", paused_before_lock)
+        callback = asyncio.create_task(_provider_callback(w, monkeypatch, sub))
+        tasks.append(callback)
+        try:
+            await asyncio.wait_for(pause.reached.wait(), 15)
+        except asyncio.TimeoutError:
+            pytest.fail("the provider sign-in did not take the person's session lock before issuing its session")
+        async with w.Session() as s:
+            await s.execute(update(User).where(User.id == w.user_id).values(google_id=None if meanwhile == "unlinked" else f"{sub}-other"))
+            await s.commit()
+        rows_before = await w.token_rows()
+        pause.release.set()
+        answer = await asyncio.wait_for(callback, _WAIT)
+
+        assert answer.status_code == 401, f"{meanwhile}: {answer.status_code} {answer.text}"
+        assert await w.token_rows() == rows_before, "a refused provider sign-in must store no session row"
+        assert await _live_except(w, None) == 0
+    finally:
+        await _settle(pause, *tasks)
+        await _close(engine, w)
+
+
 async def test_a_provider_that_would_be_linked_by_e_mail_is_not_linked_to_an_account_closed_meanwhile(monkeypatch):
     """the e-mail road: the provider id is written onto the account found by its e-mail. That write is made under the session lock on an account still open — an account a deletion closed
     first is left as it was (no provider id written onto it) and the sign-in is refused."""
