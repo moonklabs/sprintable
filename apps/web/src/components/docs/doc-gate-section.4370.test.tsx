@@ -38,7 +38,7 @@ afterEach(async () => { await act(async () => { root.unmount(); }); container.re
 
 const settle = async () => { await act(async () => { await new Promise((r) => setTimeout(r, 30)); }); };
 const button = (label: string) => [...document.body.querySelectorAll('button')].find((b) => b.textContent?.trim() === label) as HTMLButtonElement;
-const reason = () => document.body.querySelector<HTMLTextAreaElement>(`textarea[placeholder="${docs.docGateRejectReasonPlaceholder}"]`);
+const reason = () => document.body.querySelector<HTMLTextAreaElement>(`textarea[data-slot="textarea"][placeholder="${docs.docGateRejectReasonPlaceholder}"]`);
 
 async function visit() {
   await act(async () => {

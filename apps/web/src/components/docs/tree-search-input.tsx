@@ -2,6 +2,7 @@
 
 import { useRef } from 'react';
 import { Search, X } from 'lucide-react';
+import { Input } from '@/components/ui/input';
 
 interface TreeSearchInputProps {
   value: string;
@@ -32,22 +33,22 @@ export function TreeSearchInput({
     <div className="flex-shrink-0 px-3 pb-2 pt-1">
       {/* story #2963 §2 — 에디토리얼 검색 필드(hairline border·proof-bg). debounce·API·핸들러
           무변경, 형태만(shadcn rounded-xl+muted bg → hairline+proof-bg). */}
-      <div className="flex items-center gap-1.5 border border-border bg-muted/40 px-2.5 py-1.5 ring-1 ring-transparent focus-within:ring-primary/30">
-        <Search className="size-3.5 shrink-0 text-muted-foreground" />
-        <input
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+        <Input
           ref={inputRef}
           type="text"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className="min-w-0 flex-1 bg-transparent text-base lg:text-sm text-foreground outline-none placeholder:text-muted-foreground"
+          className="h-auto bg-card py-1.5 pl-8 pr-8 dark:bg-card"
         />
         {isSearching && (
           <button
             type="button"
             onClick={() => { onClear(); inputRef.current?.focus(); }}
             aria-label={clearLabel}
-            className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
           >
             <X className="size-3.5" />
           </button>

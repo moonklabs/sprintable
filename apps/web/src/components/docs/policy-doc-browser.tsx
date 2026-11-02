@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import { useLocale } from 'next-intl';
 import { Menu, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { ContextualPanelLayout, useContextualPanelState } from '@/components/ui/contextual-panel-layout';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { cn } from '@/lib/utils';
@@ -196,12 +197,12 @@ export function PolicyDocBrowser({ projectId, t }: PolicyDocBrowserProps) {
                   <div className="text-sm font-semibold text-foreground">{t('policyEpics')}</div>
                   <div className="mt-1 text-sm text-muted-foreground">{t('policyEpicsDescription')}</div>
                 </div>
-                <input
+                <Input
                   type="text"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder={t('policySearchPlaceholder')}
-                  className="w-full rounded-2xl border border-overlay-line-1 bg-muted/90 px-4 py-2.5 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:border-brand/20 focus:outline-none"
+                  className="h-auto border-overlay-line-1 bg-muted/90 px-4 py-2.5 dark:bg-muted/90"
                 />
               </div>
             </div>

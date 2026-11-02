@@ -7,6 +7,7 @@ import { ExternalLink, Link2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { safeHttpUrl } from '../lib/safe-content-url';
 import { cardVariants } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
 // ─── URL Helpers ──────────────────────────────────────────────────────────────
@@ -88,14 +89,15 @@ export function EmbedView({ node, updateAttributes, selected }: ReactNodeViewPro
       {selected && (
         <div className="mb-2 flex items-center gap-2 rounded-xl border border-brand/30 bg-brand/6 px-3 py-2">
           <Link2 className="size-3.5 flex-shrink-0 text-muted-foreground" />
-          <input
+          <Input
             ref={inputRef}
             value={editUrl}
             onChange={(e) => setEditUrl(e.target.value)}
             onKeyDown={handleKeyDown}
             onBlur={applyUrl}
             placeholder={t('embedUrlPlaceholder')}
-            className="flex-1 bg-transparent text-base lg:text-sm outline-none placeholder:text-muted-foreground"
+            // brand 색 면(bg-brand/6) 안이라 흐린 안내 글자를 받치는 불투명 면을 남긴다(부품은 투명 · dark:bg-input/30).
+            className="min-w-0 flex-1 bg-card dark:bg-card"
           />
         </div>
       )}
