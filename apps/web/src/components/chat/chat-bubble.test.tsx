@@ -556,6 +556,50 @@ describe('ChatBubble — story #2349 사용자 차단 마스킹', () => {
   });
 });
 
+// story 4831 — 프로필 팝업을 바탕 Popover로 옮기며 «바깥 누름»이 마우스 주 버튼의 click만 남았다. 우클릭 메뉴가 뜰 때 열려 있던 프로필이 같이 남지 않아야 한다(같은 말풍선 · 다른 말풍선 모두).
+describe('ChatBubble — story 4831 프로필 팝업이 열린 채 우클릭하면 두 층이 겹치지 않는다', () => {
+  const nameOf = () => Array.from(container.querySelectorAll('span')).find((s) => s.textContent === baseMessage.sender_name)!;
+  const profileOpen = () => document.body.querySelector('[data-slot="popover-content"]') !== null;
+  const menuOpen = () => document.body.querySelector('[role="menu"]') !== null;
+  // 마우스 우클릭은 브라우저에서 pointerdown(button 2) → contextmenu 순서로 온다. 메뉴 키(키보드)는 contextmenu만 온다.
+  const rightClick = async (el: Element, withPointerdown = true) => {
+    await act(async () => {
+      if (withPointerdown) el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 2 }));
+      el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+    });
+  };
+
+  it('같은 말풍선: 프로필을 연 뒤 우클릭하면 프로필은 닫히고 우클릭 메뉴만 남는다', async () => {
+    await act(async () => { root.render(wrap(<ChatBubble message={baseMessage} isMine={false} />)); });
+    await act(async () => { nameOf().dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(profileOpen()).toBe(true);
+    await rightClick(container.querySelector(`#msg-${baseMessage.id}`)!);
+    expect(menuOpen()).toBe(true);
+    expect(profileOpen()).toBe(false);
+  });
+
+  it('다른 말풍선: 한 말풍선의 프로필이 열린 채 다른 말풍선을 우클릭하면 프로필이 닫힌다', async () => {
+    const other = { ...baseMessage, id: 'msg-other', content: '다른 메시지' };
+    await act(async () => {
+      root.render(wrap(<><ChatBubble message={baseMessage} isMine={false} /><ChatBubble message={other} isMine={false} /></>));
+    });
+    await act(async () => { nameOf().dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(profileOpen()).toBe(true);
+    await rightClick(container.querySelector('#msg-msg-other')!);
+    expect(menuOpen()).toBe(true);
+    expect(profileOpen()).toBe(false);
+  });
+
+  it('메뉴 키(contextmenu만 오고 pointerdown이 없는 경우)도 프로필을 닫는다', async () => {
+    await act(async () => { root.render(wrap(<ChatBubble message={baseMessage} isMine={false} />)); });
+    await act(async () => { nameOf().dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(profileOpen()).toBe(true);
+    await rightClick(container.querySelector(`#msg-${baseMessage.id}`)!, false);
+    expect(menuOpen()).toBe(true);
+    expect(profileOpen()).toBe(false);
+  });
+});
+
 describe('ChatBubble — story #2572 HITL 승인 요청 버튼 카드', () => {
   const HITL_CONTENT = '🔒 승인 요청: `Bash`\n입력: {"command":"rm -rf /tmp/x"}\n\n「allow」 또는 「deny <사유>」로 답해주세요 (600초 내 무응답 시 자동 거부).';
   const hitlMessage: ChatMessage = {
