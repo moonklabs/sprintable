@@ -414,6 +414,51 @@ async def test_a_second_step_switched_on_while_the_sign_in_was_running_is_asked_
         await _close(engine, w)
 
 
+async def test_a_code_of_the_secret_replaced_while_the_sign_in_was_running_is_refused(monkeypatch):
+    """the person's second step is set up again (a new secret) after this request read the person and before the code is checked: the code is judged against the secret the row holds now, so a code of the old one gets no session"""
+    import pyotp
+    from sqlalchemy import text
+
+    import app.routers.auth as auth_router
+
+    engine, w = await _world()
+    tasks: list[asyncio.Task] = []
+    reached, release = asyncio.Event(), asyncio.Event()
+    try:
+        old_secret, _ = await _enable_totp(w)
+        old_code = pyotp.TOTP(old_secret).now()
+        new_secret = pyotp.random_base32()
+        assert pyotp.TOTP(new_secret).now() != old_code
+        real_lock = auth_router._lock_person_sessions
+
+        async def paused_lock(session, user_id, *, exclusive):
+            if not exclusive and user_id == w.user_id and not reached.is_set():
+                reached.set()  # password checked, the person read; the code is checked after this
+                await release.wait()
+            return await real_lock(session, user_id, exclusive=exclusive)
+
+        monkeypatch.setattr(auth_router, "_lock_person_sessions", paused_lock)
+        stale = asyncio.create_task(_sign_in(w, code=old_code))
+        tasks.append(stale)
+        await asyncio.wait_for(reached.wait(), 15)
+        async with w.Session() as s:
+            await s.execute(text("UPDATE users SET totp_secret = :s, totp_last_timestep = NULL WHERE id = :i"), {"s": new_secret, "i": w.user_id})
+            await s.commit()
+        rows_before = await w.token_rows()
+        release.set()
+        answer = await asyncio.wait_for(stale, _WAIT)
+        assert answer.status_code == 403 and answer.json()["error"]["code"] == "INVALID_TOTP", f"{answer.status_code} {answer.text}"
+        assert (await _row(w, "totp_last_timestep"))[0] is None, "a refused code is not recorded as used"
+        assert await w.token_rows() == rows_before
+    finally:
+        release.set()
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await _close(engine, w)
+
+
 async def test_the_row_the_sign_in_holds_does_not_block_a_foreign_key_check_on_the_person(monkeypatch):
     """while a sign-in holds the person's row (after the read under the session lock, before the session is stored) a row that REFERENCES the person — a member being inserted, an invite being accepted — still goes through:
     the read takes the row the way a plain UPDATE does (FOR NO KEY UPDATE), which does not conflict with the key-share lock a foreign-key check takes. A FOR UPDATE would make it wait, and wait for the session's organization lock
