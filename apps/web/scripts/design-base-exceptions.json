@@ -61,6 +61,10 @@
       "file": "components/shared/avatar.tsx",
       "kinds": ["color_bw", "space_inline"],
       "why": "color_bw: mono 연동 아이콘은 검정 단색 원본이라 두 테마 모두 흰 원판 위에 놓아야 보인다(고정 흰색). space_inline: 글자 크기에 비례해 계산되는 작은 글자 배지(fontSize가 7px까지 내려감)의 padding."
-    }
+    },
+    { "file": "components/desktop/desktop-continue-card.tsx", "kinds": ["raw_control"], "count": 4, "why": "앱으로 넘기는 폼(POST /native/continue/open)에 실리는 숨은 값 4개(PKCE 챌린지 · 방식 · 콜백 모드 · 돌아갈 앱) — 사람이 쓰는 입력칸이 아니라 값 운반이라 부품이 없다." },
+    { "file": "components/chat/chat-input.tsx", "kinds": ["raw_control"], "count": 1, "why": "첨부 파일 선택(type=file, 숨김) — 브라우저 파일 대화상자를 여는 입력이라 부품이 없다. 보이는 단추는 Button이다." },
+    { "file": "components/kanban/story-detail-panel.tsx", "kinds": ["raw_control"], "count": 1, "why": "첨부 파일 선택(type=file, 숨김) — 브라우저 파일 대화상자를 여는 입력이라 부품이 없다. 보이는 단추는 Button이다." },
+    { "file": "components/docs/doc-editor.tsx", "kinds": ["raw_control"], "count": 2, "why": "편집기 표면 둘 — 제목 줄 글 칸 · 원문 마크다운 칸. 값은 바탕 토큰만 쓰고 키보드 · 초점은 편집기 규칙을 따른다(PO 판정 2026-11-02, «맨 입력칸» 변형을 만들지 않는다)." }
   ]
 }
