@@ -98,7 +98,7 @@ export function CommentThreadCard({
               onChange={(e) => setReplyDraft(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleReply(); }}
               placeholder={t('replyPlaceholder')}
-              className="h-auto min-w-0 flex-1 px-2 py-1 lg:text-editorial-meta bg-background dark:bg-background"
+              className="h-auto min-w-0 flex-1 px-2 py-1 lg:text-editorial-meta text-foreground bg-background dark:bg-background"
             />
             <button
               type="button"

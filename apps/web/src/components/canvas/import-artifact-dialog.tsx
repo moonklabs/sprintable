@@ -121,7 +121,7 @@ export function ImportArtifactDialog({ open, onOpenChange, onImport, targetId }:
               onChange={(e) => setHtmlContent(e.target.value)}
               placeholder={t('importHtmlPlaceholder')}
               rows={5}
-              className="min-h-0 resize-none px-2 py-1.5 font-mono lg:text-editorial-meta bg-background dark:bg-background"
+              className="min-h-0 resize-none px-2 py-1.5 font-mono lg:text-editorial-meta text-foreground bg-background dark:bg-background"
             />
             {htmlContent.trim() ? (
               <div className="h-56 w-full overflow-hidden rounded-md border border-border">

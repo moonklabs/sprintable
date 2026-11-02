@@ -119,7 +119,7 @@ export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, ca
                   readOnly
                   value={result.download_url}
                   onFocus={(e) => e.currentTarget.select()}
-                  className="h-auto px-2 py-1 font-mono lg:text-editorial-meta bg-background dark:bg-background"
+                  className="h-auto px-2 py-1 font-mono lg:text-editorial-meta text-foreground bg-background dark:bg-background"
                   data-testid="export-dialog-copy-failed-raw-link"
                 />
               </div>

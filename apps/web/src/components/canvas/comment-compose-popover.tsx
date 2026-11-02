@@ -103,7 +103,7 @@ export function CommentComposePopover({ onSubmit, onCancel, style, className, dr
         placeholder={t('newThreadComposePlaceholder')}
         rows={2}
         // story #4373 — 화면 크기 그대로 읽히게(모바일 16px · 확대 방지).
-        className="min-h-0 resize-none px-2 py-1 bg-background dark:bg-background"
+        className="min-h-0 resize-none px-2 py-1 text-foreground bg-background dark:bg-background"
       />
       <div className="mt-1.5 flex items-center justify-end gap-1.5">
         <button

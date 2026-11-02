@@ -35,7 +35,7 @@ export function PropertyPanel({ node, onChangeText, onDelete, className }: Prope
         type="text"
         value={text}
         onChange={(e) => onChangeText(node.id, e.target.value)}
-        className="h-auto mb-3 px-2 py-1 lg:text-editorial-meta bg-background dark:bg-background"
+        className="h-auto mb-3 px-2 py-1 lg:text-editorial-meta text-foreground bg-background dark:bg-background"
       />
       <button
         type="button"

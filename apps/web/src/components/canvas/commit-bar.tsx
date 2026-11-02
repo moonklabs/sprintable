@@ -35,7 +35,7 @@ export function CommitBar({ changeCount, onCommit, onDone, className }: CommitBa
           onChange={(e) => setSummary(e.target.value)}
           placeholder={t('commitSummaryPlaceholder')}
           disabled={changeCount === 0}
-          className="h-auto min-w-0 flex-1 px-2 py-1 lg:text-editorial-meta bg-background dark:bg-background"
+          className="h-auto min-w-0 flex-1 px-2 py-1 lg:text-editorial-meta text-foreground bg-background dark:bg-background"
         />
         <button
           type="button"

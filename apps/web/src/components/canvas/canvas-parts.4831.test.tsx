@@ -62,6 +62,7 @@ describe('코멘트 쓰기 팝오버(story 4831)', () => {
     expect(field.rows).toBe(2);
     expect(field.className).toContain('resize-none');
     expect(field.className).toContain('min-h-0');
+    expect(field.className).toContain('text-foreground');
     expect(document.activeElement).toBe(field); // ref가 부품을 거쳐 네이티브 칸에 닿아 열리면 초점이 간다
     await act(async () => { setValue(field, '  핀 코멘트  '); });
     await act(async () => { key(field, 'Enter', { shiftKey: true }); });
@@ -80,6 +81,7 @@ describe('핀 설명 창(story 4831)', () => {
     expect(field.dataset.slot).toBe('textarea');
     expect(field.rows).toBe(4);
     expect(field.className).toContain('resize-none');
+    expect(field.className).toContain('text-foreground');
     const save = buttonWith(document.body, c.specPinSaveAction);
     expect(save.disabled).toBe(true); // 빈 설명은 저장 못 함
     await act(async () => { setValue(field, '  버튼 여백은 12px  '); });
@@ -98,6 +100,7 @@ describe('코멘트 스레드 카드 답글 칸(story 4831)', () => {
     expect(input.dataset.slot).toBe('input');
     expect(input.className).toContain('min-w-0');
     expect(input.className).toContain('flex-1');
+    expect(input.className).toContain('text-foreground');
     await act(async () => { setValue(input, '  확인했어요  '); });
     await act(async () => { key(input, 'Enter'); });
     expect(onReply).toHaveBeenCalledWith(thread.id, '확인했어요');
@@ -113,6 +116,7 @@ describe('커밋 바 요약 칸(story 4831)', () => {
     expect(input.dataset.slot).toBe('input');
     expect(input.className).toContain('min-w-0');
     expect(input.className).toContain('flex-1');
+    expect(input.className).toContain('text-foreground');
     await act(async () => { setValue(input, '  버튼 위계 상향  '); });
     await act(async () => { buttonWith(container, c.commitAction).click(); });
     expect(onCommit).toHaveBeenCalledWith('버튼 위계 상향');
@@ -130,6 +134,7 @@ describe('속성 패널 글자 칸(story 4831)', () => {
     expect(input.dataset.slot).toBe('input');
     expect(input.value).toBe('다시 결제하기');
     expect(input.className).toContain('mb-3');
+    expect(input.className).toContain('text-foreground');
     await act(async () => { setValue(input, '결제하기'); });
     expect(onChangeText).toHaveBeenCalledWith('n1', '결제하기');
   });
@@ -162,6 +167,7 @@ describe('내보내기 창 링크 직접 선택 칸(story 4831)', () => {
     expect(raw.readOnly).toBe(true);
     expect(raw.value).toBe('https://files.example/export-1.html');
     expect(raw.className).toContain('font-mono');
+    expect(raw.className).toContain('text-foreground'); // 부모(내보냈어요 안내)는 흐린 글자색이라 링크 값은 본문색을 직접 가진다
     const select = vi.spyOn(raw, 'select');
     await act(async () => { raw.dispatchEvent(new FocusEvent('focus', { bubbles: false })); raw.dispatchEvent(new FocusEvent('focusin', { bubbles: true })); });
     expect(select).toHaveBeenCalled();
@@ -176,6 +182,7 @@ describe('임포트 창 HTML 붙여넣기 칸(story 4831)', () => {
     const field = document.body.querySelector(`textarea[placeholder="${c.importHtmlPlaceholder}"]`) as HTMLTextAreaElement;
     expect(field.dataset.slot).toBe('textarea');
     expect(field.rows).toBe(5);
+    expect(field.className).toContain('text-foreground');
     expect(field.className).toContain('resize-none');
     expect(field.className).toContain('font-mono');
   });
