@@ -15,7 +15,8 @@
  * 바탕 부품의 `ui/select` · `ui/textarea`는 부품 «정의 자신»이라 쓰는 날 태그를 명단에 올린다.
  * 정규식이 아니라 TypeScript 구문 트리로 본다: 문자열 · 주석 속 `<input>`(예: HTML 문자열을 만드는 변환기)은 세지 않는다.
  * 한계: 세는 것은 JSX 소스의 소문자 태그뿐이다 — `document.createElement('input')` · `React.createElement('input')`처럼 실행 중에 만드는 입력칸은 못 본다
- * (지금은 문서 슬래시 명령의 이미지 URL 입력 하나뿐이며, 편집기 표면이라 이 가드의 범위 밖으로 둔다).
+ * (지금은 둘이다: 문서 슬래시 명령의 파일 고르기 입력(`type=file`, 화면에 그려지지 않고 파일 대화상자만 연다)과 복사 대체 경로의 임시 `textarea`(`lib/clipboard.ts`,
+ * 눌러 복사한 뒤 바로 지운다) — 둘 다 사람이 쓰는 칸으로 그려지지 않아 이 가드의 범위 밖으로 둔다. 새 런타임 생성 칸이 사람이 쓰는 칸이면 이 한계 때문에 가드가 못 본다).
  * 부품으로 바꾸지 않는 입력(파일 선택 · 숨은 값) · 편집기 표면은 명단에 `kinds: ['raw_control']` + `count`(그 파일의 정확한 개수) + `why`로 올린다 —
  * 개수가 실제와 다르면(새로 늘었거나 낡았거나) 실패.
  *
@@ -480,7 +481,12 @@ export function evaluate(reader: SourceReader, groups: Group[], exceptions: Exce
       problems.push(`${label}: «${RAW_KIND}»에는 개수(count, 1 이상 정수)가 필요하다`);
       continue;
     }
-    allowedRaw.set(e.file, (allowedRaw.get(e.file) ?? 0) + (e.count as number));
+    if (allowedRaw.has(e.file)) {
+      // 한 파일에 항목이 둘이면 합쳐 맞는 것처럼 보여도 «항목마다 정확히»가 깨진다(어느 까닭이 어느 칸의 것인지 흐려짐) — 한 항목으로 합쳐 count를 적는다
+      problems.push(`${label}: «${RAW_KIND}» 항목이 같은 파일에 둘 이상이다 — 한 항목으로 합쳐 count를 적는다`);
+      continue;
+    }
+    allowedRaw.set(e.file, e.count as number);
   }
   let rawFound = 0;
   let rawAllowed = 0;

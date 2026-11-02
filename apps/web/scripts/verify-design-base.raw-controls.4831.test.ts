@@ -2,7 +2,7 @@
  * story 4831 — verify-design-base.ts의 «날것 입력칸»(raw_control) 종류 시험.
  *   ① 스캐너(구문 트리): 날 <input> · <textarea> · <select>만 센다 — 부품 · 문자열 · 주석 속 마크업은 안 센다
  *   ② 판정: 닫힌 묶음에서는 명단 개수와 «정확히» 같아야 한다(늘면 새 날것 · 모자라면 낡은 항목) · 열린 묶음은 안 센다
- *   ③ 실제 소스 트리: 닫힌 일곱 묶음의 날것은 명단 8건뿐이고 문제 0이다
+ *   ③ 실제 소스 트리: 닫힌 아홉 묶음(전부)의 날것은 명단 13건뿐이고 문제 0이다
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -112,6 +112,15 @@ describe('판정 — 닫힌 묶음의 날것 입력칸', () => {
   it('닫히지 않은 묶음의 파일을 날것 예외로 올리면 실패한다', () => {
     const r = run(tree({ 'components/one/new.tsx': WITH_INPUT }), [raw('components/one/new.tsx', 1)], OPEN);
     expect(r.problems.join(' | ')).toContain('닫힌 묶음(Group.closed)의 파일에만 올린다');
+  });
+  it('같은 파일에 날것 예외 항목이 둘이면 합이 맞아도 실패한다(항목마다 정확히 — 한 항목으로 합쳐 count를 적는다)', () => {
+    const two = 'export const B = () => <div><input /><textarea /></div>;\n';
+    // 실제 개수 2 = 항목 둘의 count 합 2 — 합산하던 때는 문제 0이었다
+    const r = run(tree({ 'components/one/new.tsx': two }), [raw('components/one/new.tsx', 1), raw('components/one/new.tsx', 1)]);
+    expect(r.problems.join(' | ')).toContain('항목이 같은 파일에 둘 이상이다');
+    // 한 항목으로 합치면 통과한다
+    const merged = run(tree({ 'components/one/new.tsx': two }), [raw('components/one/new.tsx', 2)]);
+    expect(merged.problems).toEqual([]);
   });
   it('열린 묶음은 날것을 세지 않는다(아직 교체 중인 묶음)', () => {
     const r = run(tree({ 'components/one/new.tsx': WITH_INPUT }), [], OPEN);
