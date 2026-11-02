@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { Input } from '@/components/ui/input';
 
 interface CommitBarProps {
   changeCount: number;
@@ -28,13 +29,13 @@ export function CommitBar({ changeCount, onCommit, onDone, className }: CommitBa
     <div className={className}>
       <div className="flex items-center gap-2 border-t border-border pt-3">
         <span className="text-editorial-meta text-muted-foreground">{t('changeCount', { count: changeCount })}</span>
-        <input
+        <Input
           type="text"
           value={summary}
           onChange={(e) => setSummary(e.target.value)}
           placeholder={t('commitSummaryPlaceholder')}
           disabled={changeCount === 0}
-          className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-base lg:text-editorial-meta text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+          className="h-auto min-w-0 flex-1 px-2 py-1 lg:text-editorial-meta bg-background dark:bg-background"
         />
         <button
           type="button"

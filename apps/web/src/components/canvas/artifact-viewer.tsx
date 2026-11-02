@@ -18,6 +18,7 @@ import type { ArtifactVersion, MemberRef, VisualArtifact } from '@/services/canv
 import type { ArtifactNode } from '@/services/canvas-nodes';
 import type { CommentThread } from '@/services/canvas-comments';
 import type { SpecPin } from '@/services/canvas-spec-pins';
+import { Select } from '@/components/ui/select';
 
 interface ArtifactViewerProps {
   artifact: VisualArtifact;
@@ -187,15 +188,15 @@ export function ArtifactViewer({
            * 현재로 복원)가 있었는데 E-CANVAS엔 그 반대(rollback) 엔드포인트가 없다 — 열람과
            * 복원은 다른 기능이다. 실사용에서 필요해지면 별건으로 서야 한다(#2378 AC1 조사
            * 기록, 지금 새로 짓지 않는다 — 짓다 만 것이 아니라 «아직 안 지은 것»). */}
-          <select
+          <Select
             value={selectedVersion}
             onChange={(e) => setSelectedVersion(Number(e.target.value))}
-            className="shrink-0 rounded-md border border-border bg-muted px-1.5 py-0.5 text-base lg:text-editorial-meta text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            className="h-auto w-auto shrink-0 bg-muted px-1.5 py-0.5 text-muted-foreground lg:text-editorial-meta dark:bg-muted"
           >
             {[...versions].sort((a, b) => b.version - a.version).map((v) => (
               <option key={v.id} value={v.version}>v{v.version}</option>
             ))}
-          </select>
+          </Select>
           {/* story d425dccc — 고정 넓이 html 전용 확대 뷰 진입점. v1의 축소-fit 토글은 방향
            * 오판으로 제거(스펙 ⓒ 판정) — 대신 큰 표면에서 실제 크기+pan으로 본다.
            * tree/image는 컨테이너에 맞춰 이미 렌더돼 대상이 아니다. */}

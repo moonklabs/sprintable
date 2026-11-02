@@ -8,6 +8,7 @@ import { pickIGaJosa } from '@/lib/korean-particle';
 import { AnchorPin } from './anchor-pin';
 import type { MemberRef } from '@/services/canvas';
 import type { CommentThread } from '@/services/canvas-comments';
+import { Input } from '@/components/ui/input';
 
 const ROLLUP_LABEL_KEY: Record<CommentThread['rollup'], string> = {
   open: 'rollupOpen',
@@ -91,13 +92,13 @@ export function CommentThreadCard({
 
         {!resolved ? (
           <div className="flex items-center gap-1.5 pt-1">
-            <input
+            <Input
               type="text"
               value={replyDraft}
               onChange={(e) => setReplyDraft(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleReply(); }}
               placeholder={t('replyPlaceholder')}
-              className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-base lg:text-editorial-meta text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              className="h-auto min-w-0 flex-1 px-2 py-1 lg:text-editorial-meta bg-background dark:bg-background"
             />
             <button
               type="button"

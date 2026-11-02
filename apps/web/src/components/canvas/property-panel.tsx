@@ -1,5 +1,6 @@
 import { useTranslations } from 'next-intl';
 import type { ArtifactNode } from '@/services/canvas-nodes';
+import { Input } from '@/components/ui/input';
 
 interface PropertyPanelProps {
   node: ArtifactNode | null;
@@ -30,11 +31,11 @@ export function PropertyPanel({ node, onChangeText, onDelete, className }: Prope
     <div className={className}>
       <p className="mb-2 text-micro font-bold uppercase tracking-wide text-muted-foreground">{node.type}</p>
       <label className="mb-1 block text-micro text-muted-foreground">{t('propertyTextLabel')}</label>
-      <input
+      <Input
         type="text"
         value={text}
         onChange={(e) => onChangeText(node.id, e.target.value)}
-        className="mb-3 w-full rounded-md border border-border bg-background px-2 py-1 text-base lg:text-editorial-meta text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        className="h-auto mb-3 px-2 py-1 lg:text-editorial-meta bg-background dark:bg-background"
       />
       <button
         type="button"

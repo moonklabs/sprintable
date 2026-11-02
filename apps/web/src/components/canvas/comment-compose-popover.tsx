@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { AnchoredPopover, isOutsidePress } from '@/components/shared/anchored-popover';
 import { leaveMultilineFieldOnEsc } from '@/lib/inner-layer-esc';
 import { useFieldDraft } from '@/hooks/use-field-draft';
+import { Textarea } from '@/components/ui/textarea';
 
 interface CommentComposePopoverProps {
   /** 성공이면 true — 그때만 초안을 지운다. */
@@ -92,7 +93,7 @@ export function CommentComposePopover({ onSubmit, onCancel, style, className, dr
 
   const fields = (
     <>
-      <textarea
+      <Textarea
         ref={inputRef}
         value={body}
         onChange={(e) => setBody(e.target.value)}
@@ -102,7 +103,7 @@ export function CommentComposePopover({ onSubmit, onCancel, style, className, dr
         placeholder={t('newThreadComposePlaceholder')}
         rows={2}
         // story #4373 — 화면 크기 그대로 읽히게(모바일 16px · 확대 방지).
-        className="w-full resize-none rounded-md border border-border bg-background px-2 py-1 text-base text-foreground lg:text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        className="min-h-0 resize-none px-2 py-1 bg-background dark:bg-background"
       />
       <div className="mt-1.5 flex items-center justify-end gap-1.5">
         <button
