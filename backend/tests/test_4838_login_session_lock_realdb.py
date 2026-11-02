@@ -45,6 +45,16 @@ def _delete(w, session_tokens: dict):
     return w.client.post("/api/v2/account/delete", headers={"Authorization": f"Bearer {session_tokens['access_token']}"})
 
 
+async def _failure_audit_rows(w) -> list[str]:
+    """the `detail` of every `login_failure` audit row of the person"""
+    from sqlalchemy import select
+
+    from app.models.login_audit_log import LoginAuditLog
+
+    async with w.Session() as s:
+        return list((await s.execute(select(LoginAuditLog.detail).where(LoginAuditLog.user_id == w.user_id, LoginAuditLog.event_type == "login_failure"))).scalars())
+
+
 async def _wait_for_a_session_lock_waiter(w, timeout: float = 10.0) -> bool:
     """true as soon as some backend waits for a PERSON'S SESSION LOCK (an advisory lock of this namespace that is not granted) — the request under test has reached its queue position"""
     from sqlalchemy import text
@@ -102,11 +112,13 @@ async def test_a_sign_in_that_read_the_person_before_a_password_change_is_refuse
         changed = await asyncio.wait_for(_change(w, existing), _WAIT)
         assert changed.status_code == 200, changed.text
         rows_before = await w.token_rows()
+        failures_before = await _failure_audit_rows(w)
         pause.release.set()
         answer = await asyncio.wait_for(sign_in, _WAIT)
 
         assert answer.status_code == 401, f"a sign-in began before the change was answered {answer.status_code}: {answer.text}"
         assert await w.token_rows() == rows_before, "a refused sign-in must store no session row"
+        assert await _failure_audit_rows(w) == failures_before + ["INVALID_CREDENTIALS"], "a sign-in refused under the lock leaves one login_failure audit row"
         assert await _live_except(w, None) == 0, "a session stored for a sign-in that began before the change is alive after it"
         assert (await _sign_in(w, _NEW_PASSWORD)).status_code == 200
     finally:
@@ -141,11 +153,13 @@ async def test_a_sign_in_that_checked_the_password_before_a_password_change_is_r
         changed = await asyncio.wait_for(_change(w, existing), _WAIT)
         assert changed.status_code == 200, changed.text
         rows_before = await w.token_rows()
+        failures_before = await _failure_audit_rows(w)
         pause.release.set()
         answer = await asyncio.wait_for(sign_in, _WAIT)
 
         assert answer.status_code == 401, f"{answer.status_code}: {answer.text}"
         assert await w.token_rows() == rows_before
+        assert await _failure_audit_rows(w) == failures_before + ["INVALID_CREDENTIALS"]
         assert await _live_except(w, None) == 0
     finally:
         await _settle(pause, *tasks)
