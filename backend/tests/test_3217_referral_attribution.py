@@ -172,9 +172,11 @@ async def _oauth_client(session: AsyncMock):
     import app.routers.auth as auth_router
 
     inner = session.execute
+    session.provider_rereads = 0  # how many times the sign-in asked: the tests below assert the re-read really happens
 
     async def execute(stmt, *args, **kwargs):
         if [c.name for c in getattr(stmt, "selected_columns", [])] == ["is_active", "google_id"]:
+            session.provider_rereads += 1
             result = MagicMock()
             result.one_or_none.return_value = (True, auth_router._exchange_oauth_code_for_userinfo.return_value[0])
             return result

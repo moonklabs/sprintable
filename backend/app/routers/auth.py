@@ -1365,7 +1365,9 @@ async def login(
             remaining = int((user.login_locked_until - datetime.now(timezone.utc)).total_seconds())
             return _err("ACCOUNT_LOCKED", f"Account locked. Try again in {remaining} seconds", 429)
         # 잠금 해제 시간 경과 — 카운터 초기화
-        await _lock_person_sessions(session, user.id, exclusive=False)  # story 4838: BEFORE the person's row is written — a password change holds this lock (exclusive) and writes that row next
+        # story 4838: BEFORE the person's row is written — a password change holds this lock (exclusive) and writes that row next. This rare branch (a lock-out that has just run out) therefore holds the lock through the
+        # password check below; accepted: a revoke waits for it, nothing more
+        await _lock_person_sessions(session, user.id, exclusive=False)
         await session.execute(
             update(User).where(User.id == user.id).values(login_fail_count=0, login_locked_until=None)
         )
@@ -2217,6 +2219,11 @@ async def oauth_callback(
                     ip_address=request.client.host if request.client else None,
                 )
             if reclaimed_epoch is None:
+                # story 4838: the link writes the person's row — under the session lock, on an account still open (a deletion that got the lock first closed it)
+                await _lock_person_sessions(session, user.id, exclusive=False)
+                if not (await session.execute(select(User.is_active).where(User.id == user.id))).scalar_one_or_none():
+                    await session.commit()
+                    return _err("INVALID_CREDENTIALS", "Sign-in is no longer valid for this account", 401)
                 await session.execute(
                     update(User).where(User.id == user.id).values(**{f"{provider}_id": oauth_id})
                 )

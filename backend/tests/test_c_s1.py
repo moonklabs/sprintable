@@ -67,9 +67,11 @@ def _hash_reread(session, user) -> None:
     """story 4838 — the sign-in reads the person's hash (and whether the account is open) again under the session lock: a statement that asks for exactly those two columns. This mocked session
     answers it with the user's own hash, account open (nothing changed in between); every other statement is answered as the test set it up."""
     inner = session.execute
+    session.hash_rereads = 0  # how many times the sign-in asked: a test of the sign-in road asserts the re-read really happens
 
     async def execute(stmt, *args, **kwargs):
         if [c.name for c in getattr(stmt, "selected_columns", [])] == ["hashed_password", "is_active"]:
+            session.hash_rereads += 1
             result = MagicMock()
             result.one_or_none.return_value = SimpleNamespace(hashed_password=user.hashed_password, is_active=True)
             return result
@@ -299,6 +301,7 @@ async def test_login_success_200():
         data = resp.json()["data"]
         assert "access_token" in data
         assert "refresh_token" in data
+        assert session.hash_rereads == 1  # story 4838: the session is stored after the account was read again under the person's session lock
     finally:
         app.dependency_overrides.clear()
 
