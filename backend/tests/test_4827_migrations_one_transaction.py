@@ -63,8 +63,13 @@ def _sql_statements(text: str) -> list[str]:
     while i < n:
         c = text[i]
         if c in ("'", '"'):
+            # E'…' is an escape string: a backslash escapes the next character (E'it\'s' is one string)
+            escaped = c == "'" and i > 0 and text[i - 1] in "eE" and (i < 2 or not (text[i - 2].isalnum() or text[i - 2] == "_"))
             j = i + 1
             while j < n:
+                if escaped and text[j] == "\\":
+                    j += 2
+                    continue
                 if text[j] == c:
                     if j + 1 < n and text[j + 1] == c:
                         j += 2
@@ -157,6 +162,14 @@ def env_violations(source: str) -> list[str]:
             for kw in node.keywords:
                 if kw.arg == "isolation_level" or kw.arg is None:
                     out.append(f"env.py:{node.lineno}: execution_options(isolation_level=…)")
+    # the driver's own switches (a raw DBAPI connection in autocommit makes every statement its own transaction)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in _DBAPI_SETTERS:
+            out.append(f"env.py:{node.lineno}: .{node.func.attr}()")
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Attribute) and t.attr in _DBAPI_ATTRS:
+                    out.append(f"env.py:{node.lineno}: .{t.attr} assigned")
     # the migrations are run once: no ending of the transaction between two run_migrations() calls, none in a loop
     for fn in [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
         runs = [n.lineno for n in ast.walk(fn) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "run_migrations"]
@@ -336,6 +349,9 @@ def test_no_migration_ends_the_single_transaction() -> None:
         ("c.execution_options(**o)", "isolation_level"),
         ("def f(c):\n    context.run_migrations()\n    c.commit()\n    context.run_migrations()\n", "between two run_migrations"),
         ("def f():\n    context.run_migrations()\n    context.run_migrations()\n", "called 2 times"),
+        ("def f(c):\n    c.connection.set_session(autocommit=True)\n", "set_session"),
+        ("def f(c):\n    c.connection.set_isolation_level(0)\n", "set_isolation_level"),
+        ("def f(c):\n    c.connection.autocommit = True\n", ".autocommit assigned"),
         ("def f(xs):\n    for x in xs:\n        context.run_migrations()\n", "in a loop"),
     ],
 )
@@ -429,6 +445,9 @@ def test_control_sql_is_read_like_sql() -> None:
     assert version_violations("def upgrade():\n    op.execute(\"UPDATE t SET a = 'CREATE INDEX CONCURRENTLY'\")\n") == []
     # a quoted identifier is not a statement either
     assert version_violations("def upgrade():\n    op.execute('ALTER TABLE \"commit\" ADD COLUMN a int; SELECT 1')\n") == []
+    # an escape string: E'it\\'s' is one string, so the COMMIT after it is a statement — and a word inside it is not
+    assert version_violations("def upgrade():\n    op.get_bind().exec_driver_sql(r\"SELECT E'it\\'s'; COMMIT\")\n")
+    assert version_violations("def upgrade():\n    op.get_bind().exec_driver_sql(r\"SELECT E'it\\'s; COMMIT'\")\n") == []
     # a nested block comment hides nothing that follows it
     assert version_violations("def upgrade():\n    op.execute('/* a /* b */ c */ SELECT 1; COMMIT')\n")
 
