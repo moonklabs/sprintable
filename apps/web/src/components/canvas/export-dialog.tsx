@@ -11,6 +11,7 @@ import {
 } from '@/services/canvas-export';
 import type { ArtifactFormat } from '@/services/canvas';
 import { copyTextSafely } from '@/lib/clipboard';
+import { Input } from '@/components/ui/input';
 
 export type ExportTheme = 'light' | 'dark';
 
@@ -114,11 +115,11 @@ export function ExportDialog({ open, onOpenChange, artifactId, versionNumber, ca
             {linkCopyFailed && result?.download_url ? (
               <div className="space-y-1">
                 <p role="alert" className="text-destructive">{tc('copyFailedSelectManually')}</p>
-                <input
+                <Input
                   readOnly
                   value={result.download_url}
                   onFocus={(e) => e.currentTarget.select()}
-                  className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-base lg:text-editorial-meta text-foreground"
+                  className="h-auto px-2 py-1 font-mono lg:text-editorial-meta text-foreground bg-background dark:bg-background"
                   data-testid="export-dialog-copy-failed-raw-link"
                 />
               </div>

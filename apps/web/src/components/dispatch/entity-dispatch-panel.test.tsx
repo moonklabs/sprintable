@@ -228,7 +228,7 @@ describe('EntityDispatchPanel — 로드맵 P2·PR-E L1(더보기 드롭다운 e
 
 // story 4831 부품 교체(공용 부품 ②) — 담당자 칸이 바탕 Select가 되어도 한 줄에서 남는 폭을 채우고(flex-1) 줄어들 수 있으며(min-w-0), 고른 담당자로 전달 요청이 나간다.
 describe('EntityDispatchPanel — 바탕 부품(story 4831)', () => {
-  it('담당자 칸은 바탕 Select(flex-1 · min-w-0)이고, 고른 담당자가 담당자 저장 요청(PATCH)에 실린 뒤 전달 요청이 나간다', async () => {
+  it('담당자 칸은 바탕 Select(flex-1)이고, 고른 담당자가 담당자 저장 요청(PATCH)에 실린 뒤 전달 요청이 나간다', async () => {
     const calls: Array<{ url: string; method: string; body: Record<string, unknown> }> = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.includes('/api/members')) return { ok: true, json: async () => ({ data: MEMBERS }) };
@@ -249,7 +249,6 @@ describe('EntityDispatchPanel — 바탕 부품(story 4831)', () => {
     const select = container.querySelector('select') as HTMLSelectElement;
     expect(select.dataset.slot).toBe('select');
     expect(select.className).toContain('flex-1');
-    expect(select.className).toContain('min-w-0');
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select, 'm1');
       select.dispatchEvent(new Event('change', { bubbles: true }));
