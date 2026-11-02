@@ -224,7 +224,7 @@ describe('BoostRequestDialog — 바탕 부품(story 4831)', () => {
     expect(endsAt.dataset.slot).toBe('input');
     expect(budget.className).toContain('w-32');
     for (const x of [currency, startsAt, endsAt]) expect(x.className).toContain('w-auto');
-    for (const x of [select, objective]) expect(x.className).not.toContain('w-auto');
+    for (const x of [select, objective]) { expect(x.className).toContain('w-full'); expect(x.className).not.toContain('w-auto'); }
     expect(budget.type).toBe('number');
     expect(startsAt.type).toBe('datetime-local');
     expect(budget.min).toBe('0');
