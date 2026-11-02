@@ -10,6 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { LegalFooter } from '@/components/legal/legal-footer';
 import { safeNextPath } from '@/lib/auth/session-redirect';
+import { isImeComposing } from '@/lib/ime-composition';
 
 function checkPasswordRules(pw: string) {
   return {
@@ -196,7 +197,11 @@ export default function RegisterPage() {
             className="h-auto px-4 py-3"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleRegister()}
+            onKeyDown={(e) => {
+              // 한글 등 입력기 조합 중의 엔터는 «글자 확정 키»다 — 가입 제출로 읽으면 반쯤 쓴 이름(예: «홍길ㄷ»)으로 가입 요청이 나간다(4831 측정 중 발견).
+              if (isImeComposing(e)) return;
+              if (e.key === 'Enter') handleRegister();
+            }}
             disabled={loading}
           />
           <Input
