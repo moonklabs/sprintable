@@ -75,6 +75,7 @@ export function ProjectAccessPicker({ selected, onChange, disabled = false, idPr
                 <Checkbox
                   id={id}
                   checked={selected.includes(a.id)}
+                  disabled={disabled}
                   onCheckedChange={(checked) => toggle(a.id, checked)}
                   data-testid="project-access-checkbox"
                   data-agent-id={a.id}

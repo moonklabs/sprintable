@@ -99,7 +99,8 @@ describe('[SID:4831] ProjectAccessPicker — 바탕 Checkbox', () => {
     const label = host.querySelector('label') as HTMLLabelElement;
     const hidden = host.querySelector(`input[type="checkbox"]#${label.htmlFor}`) as HTMLInputElement;
     expect(hidden).toBeTruthy(); // 라벨의 htmlFor가 가리키는 숨은 입력
-    await act(async () => { hidden.click(); });
+    expect(hidden.labels?.[0]).toBe(label); // 라벨과 입력이 실제로 이어져 있다(htmlFor가 깨지면 여기서 빨개진다)
+    await act(async () => { label.click(); }); // 사람이 라벨 글자를 누르는 길 그대로
     expect(onChange).toHaveBeenLastCalledWith(['a-1']);
     const box = host.querySelectorAll<HTMLElement>('[data-testid="project-access-checkbox"]')[1]!;
     await act(async () => {
@@ -112,5 +113,24 @@ describe('[SID:4831] ProjectAccessPicker — 바탕 Checkbox', () => {
       box.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true, cancelable: true }));
     });
     expect(onChange).toHaveBeenLastCalledWith(['a-2']);
+  });
+
+  it('목록이 잠기면(프로젝트를 만드는 중) 보이는 체크 칸도 잠겨 마우스 · 라벨 · 스페이스 어느 길로도 켜지지 않는다', async () => {
+    fetchWithAuth.mockResolvedValue({ ok: true, json: async () => ({ data: AGENTS }) });
+    const onChange = vi.fn();
+    await act(async () => {
+      root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC"><ProjectAccessPicker selected={[]} onChange={onChange} idPrefix="t" disabled /></NextIntlClientProvider>);
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const box = host.querySelector<HTMLElement>('[data-testid="project-access-checkbox"]')!;
+    expect(box.getAttribute('aria-disabled')).toBe('true'); // 보이는 칸이 잠김(fieldset은 span을 못 잠근다)
+    const label = host.querySelector('label') as HTMLLabelElement;
+    await act(async () => { box.click(); });
+    await act(async () => { label.click(); });
+    await act(async () => {
+      box.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
+      box.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true, cancelable: true }));
+    });
+    expect(onChange).not.toHaveBeenCalled();
   });
 });
