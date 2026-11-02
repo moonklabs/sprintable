@@ -352,6 +352,7 @@ def test_no_migration_ends_the_single_transaction() -> None:
         ("def f(c):\n    c.connection.set_session(autocommit=True)\n", "set_session"),
         ("def f(c):\n    c.connection.set_isolation_level(0)\n", "set_isolation_level"),
         ("def f(c):\n    c.connection.autocommit = True\n", ".autocommit assigned"),
+        ("def f(c):\n    c.connection.isolation_level = 0\n", ".isolation_level assigned"),
         ("def f(xs):\n    for x in xs:\n        context.run_migrations()\n", "in a loop"),
     ],
 )
