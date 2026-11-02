@@ -237,3 +237,25 @@ describe('EntityAwareTextarea — 후보 Esc는 «썼다» 표시([SID:4367])', 
     expect(second.defaultPrevented).toBe(false);
   });
 });
+
+// story 4831 부품 교체(공용 부품 ④) — 공용 글 칸이 바탕 Textarea가 되어도 호출부가 넘긴 클래스가 부품 기본을 이기고, 자동 초점 · 쓴 글 전달이 그대로다.
+describe('EntityAwareTextarea — 바탕 부품(story 4831)', () => {
+  it('글 칸은 바탕 Textarea이고 호출부 클래스(min-h-[160px] · font-mono)가 부품의 min-h-16을 이기며, 자동 초점이 가고 쓴 글이 onChange로 간다', async () => {
+    const onChange = vi.fn();
+    await act(async () => {
+      root.render(<EntityAwareTextarea value="" onChange={onChange} className="min-h-[160px] font-mono" autoFocus />);
+    });
+    const el = textarea();
+    expect(el.dataset.slot).toBe('textarea');
+    const tokens = el.className.split(/\s+/);
+    expect(tokens).toContain('min-h-[160px]');
+    expect(tokens).toContain('font-mono');
+    expect(tokens).not.toContain('min-h-16');
+    expect(document.activeElement).toBe(el);
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(el, '설명');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(onChange).toHaveBeenCalledWith('설명', expect.anything());
+  });
+});

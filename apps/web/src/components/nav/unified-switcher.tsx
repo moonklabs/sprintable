@@ -31,6 +31,8 @@ import { orgRoleLabel } from '@/lib/org-member-role';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { ProjectLimitBanner } from '@/components/nav/project-limit-banner';
 import { NewProjectMacBlock } from '@/components/nav/new-project-mac-block';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 
 // story #2076: 로직(withSwitchedSlugs 포함)이 hooks/use-unified-switcher.ts로 이동했다 —
 // 사이드바(UnifiedSwitcher, ≥1024)와 신규 ContextSwitcherChip(top-bar 칩+바텀시트, <1024)이
@@ -224,9 +226,9 @@ export function UnifiedSwitcher({
               <label className="text-sm font-medium" htmlFor="unified-proj-name">
                 {t('switcherProjectNameLabel')} <span className="text-destructive">*</span>
               </label>
-              <input
+              <Input
                 id="unified-proj-name"
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                className="h-auto bg-background dark:bg-background"
                 placeholder={t('switcherProjectNamePlaceholder')}
                 value={s.newProjectName}
                 onChange={(e) => s.setNewProjectName(e.target.value)}
@@ -238,9 +240,9 @@ export function UnifiedSwitcher({
               <label className="text-sm font-medium" htmlFor="unified-proj-desc">
                 {t('switcherDescriptionLabel')} <span className="text-muted-foreground text-xs">{t('switcherOptionalLabel')}</span>
               </label>
-              <textarea
+              <Textarea
                 id="unified-proj-desc"
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                className="min-h-0 bg-background dark:bg-background"
                 placeholder={t('switcherProjectDescPlaceholder')}
                 rows={3}
                 value={s.newProjectDesc}
