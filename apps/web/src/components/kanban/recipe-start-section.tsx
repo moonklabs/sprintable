@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
@@ -287,23 +288,15 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
         </div>
       )}
       {notStarted.length > 1 && (
-        <div className="mb-2 flex flex-col gap-1">
+        <RadioGroup name={`recipe-start-${storyId}`} className="mb-2 gap-1" value={selectedKey} onValueChange={(v) => setSelectedKey(v)}>
           {notStarted.map((c) => (
             <label key={c.key} className="flex items-center gap-2 text-sm text-foreground">
-              <input
-                type="radio"
-                name={`recipe-start-${storyId}`}
-                checked={selectedKey === c.key}
-                onChange={() => setSelectedKey(c.key)}
-                // story #4075(유나 design CHANGES) — 다크에서 브라우저 기본 accent가 뜨던
-                // 것을 토큰으로(globals.css .tiptap-content 체크박스의 accent-color: var(...)
-                // 관례와 동형, 여긴 Tailwind arbitrary-value 유틸).
-                className="accent-[var(--primary)]"
-              />
+              {/* story #4075 · 4831 — 켜진 색은 부품의 primary 면(전에는 브라우저 기본 accent를 토큰으로 덮던 자리) */}
+              <RadioGroupItem value={c.key} />
               {presetName(c, tPreset)}
             </label>
           ))}
-        </div>
+        </RadioGroup>
       )}
       {/* story #4273(유나 처방) — 시작 전 후보는 하나여도 이름을 단다(여럿일 때 라디오 라벨과 같은 presetName · 같은 text-sm). 하나면 자동
           선택돼 버튼만 남아, 바로 위 다른 레시피의 진행 줄과 붙어 «그 레시피를 다시 시작»으로 읽혔다. 버튼 문구는 그대로. */}
