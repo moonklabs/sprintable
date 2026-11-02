@@ -52,6 +52,7 @@ import { RecipeStartSection } from '@/components/kanban/recipe-start-section';
 import { PrLinkSection } from '@/components/integrations/pr-link-section';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { isImeComposing } from '@/lib/ime-composition';
 import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -1645,6 +1646,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   value={titleDraft}
                   onChange={(e) => setTitleDraft(e.target.value)}
                   onKeyDown={(e) => {
+                    // 한글 등 입력기 조합 중의 엔터는 «글자 확정 키»다 — 저장으로 읽으면 반쯤 쓴 제목이 저장되고 편집창이 닫혀 확정된 글자가 사라진다(4831 측정 중 발견).
+                    if (isImeComposing(e)) return;
                     if (e.key === 'Enter') void handleSaveTitle();
                   }}
                   className="h-auto bg-muted px-2 py-1 text-lg font-semibold lg:text-lg dark:bg-muted"
@@ -2223,7 +2226,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           type="text"
                           value={newLabelName}
                           onChange={(e) => setNewLabelName(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter') void handleCreateLabel(); }}
+                          // 조합 중의 엔터는 글자 확정 키 — 만들기로 읽으면 반쯤 쓴 이름의 조직 라벨이 실제로 만들어진다(4831 측정 중 발견).
+                          onKeyDown={(e) => { if (isImeComposing(e)) return; if (e.key === 'Enter') void handleCreateLabel(); }}
                           placeholder={t('newLabelNamePlaceholder')}
                           className="h-auto min-w-0 flex-1 bg-background px-2 py-1 lg:text-xs dark:bg-background"
                         />
