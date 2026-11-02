@@ -11,8 +11,12 @@
  *
  * 또 하나의 종류 — 날것 입력칸(`raw_control`): 부품(Input · Textarea · Select · Checkbox · RadioGroup) 대신 쓴 날 `<input>` · `<textarea>` · `<select>`.
  * 이 종류는 «닫힌 묶음»(`Group.closed`)에서만 센다 — 묶음의 부품 교체가 끝난 뒤 0으로 못 박는 것이다(아직 교체 중인 묶음은 닫지 않는다).
+ * 지금 닫힌 것은 첫 실행 길 · 대화 · 보드 · 승인 · 에이전트 · 문서·목표 · 브리핑이고, 공용 부품 · 바탕 부품은 교체 PR이 끝날 때까지 열어 둔다
+ * (바탕 부품은 닫을 때 `ui/input` · `ui/textarea` · `ui/select`가 부품 «정의 자신»이라 쓰는 날 태그도 명단에 올린다).
  * 정규식이 아니라 TypeScript 구문 트리로 본다: 문자열 · 주석 속 `<input>`(예: HTML 문자열을 만드는 변환기)은 세지 않는다.
- * 부품이 없는 입력(파일 선택 · 숨은 값) · 편집기 표면은 명단에 `kinds: ['raw_control']` + `count`(그 파일의 정확한 개수) + `why`로 올린다 —
+ * 한계: 세는 것은 JSX 소스의 소문자 태그뿐이다 — `document.createElement('input')` · `React.createElement('input')`처럼 실행 중에 만드는 입력칸은 못 본다
+ * (지금은 문서 슬래시 명령의 이미지 URL 입력 하나뿐이며, 편집기 표면이라 이 가드의 범위 밖으로 둔다).
+ * 부품으로 바꾸지 않는 입력(파일 선택 · 숨은 값) · 편집기 표면은 명단에 `kinds: ['raw_control']` + `count`(그 파일의 정확한 개수) + `why`로 올린다 —
  * 개수가 실제와 다르면(새로 늘었거나 낡았거나) 실패.
  *
  * 예외 명단 `design-base-exceptions.json`은 «바탕이 정할 수 없는 값»(제3자 브랜드색 · 사용자 데이터 색 · 라이브러리 입력 등)만 담는다.
