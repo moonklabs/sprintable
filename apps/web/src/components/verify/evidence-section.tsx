@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
+import { Input } from '@/components/ui/input';
 import { pickIGaJosa } from '@/lib/korean-particle';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { deriveTrustStage, asVerificationSheet, type EvidenceItem, type EvidenceType, type VerificationSheetItem } from '@/services/verify';
@@ -419,19 +420,19 @@ export function EvidenceSection({
                     </button>
                   ))}
                 </div>
-                <input
+                <Input
                   type="text"
                   value={addRef}
                   onChange={(e) => setAddRef(e.target.value)}
                   placeholder={t('evidenceRefPlaceholder')}
-                  className="w-full rounded border border-border bg-background px-2 py-1 text-base lg:text-xs"
+                  className="h-auto bg-background px-2 py-1 lg:text-xs dark:bg-background"
                 />
-                <input
+                <Input
                   type="text"
                   value={addNote}
                   onChange={(e) => setAddNote(e.target.value)}
                   placeholder={t('evidenceNotePlaceholder')}
-                  className="w-full rounded border border-border bg-background px-2 py-1 text-base lg:text-xs"
+                  className="h-auto bg-background px-2 py-1 lg:text-xs dark:bg-background"
                 />
                 {addError ? <p className="text-editorial-meta text-destructive">{t('evidenceAddFailed')}</p> : null}
                 <div className="flex justify-end gap-1.5">

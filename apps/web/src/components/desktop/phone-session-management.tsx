@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Textarea } from '@/components/ui/textarea';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { formatViewerDate } from '@/lib/viewer-time-zone';
@@ -580,8 +581,8 @@ function RowEditor({ row, t, name, busy, unreachable, onEdit }: {
       {EDIT_FIELDS.map((k) => (
         <label key={k} className="block space-y-1 text-xs">
           <span className="font-medium text-foreground">{label(k)}</span>
-          <textarea
-            className="min-h-16 w-full rounded-md border bg-background p-2 text-base lg:text-sm"
+          <Textarea
+            className="bg-background p-2 dark:bg-background"
             rows={3}
             maxLength={EDIT_FIELD_MAX * 2}
             value={text[k]}

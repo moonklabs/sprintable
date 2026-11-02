@@ -238,7 +238,7 @@ describe('[SID:4576] Kadir 4969 (2선) — no switching mid-start · no old tick
   it('changing the project unticks at once — the old project\'s ticks never go with the new project id', async () => {
     stub(() => new Response('{}'));
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />, 'ko', true);
-    const pick = () => container.querySelector('[data-testid=setup-project-pick] select') as HTMLSelectElement;
+    const pick = () => container.querySelector('[data-testid=setup-project-pick] select[data-slot="select"]') as HTMLSelectElement;
     const choose = async (v: string) => { await act(async () => { const el = pick(); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(el, v); el.dispatchEvent(new Event('change', { bubbles: true })); }); await settle(); };
     await choose('p-1');
     await chooseMove();

@@ -724,7 +724,11 @@ describe('[4733 S5·P2] filling in and fixing on the phone', () => {
     world.view = needsView();
     await screen();
     await press(byId('phone-sessions-edit-open'));
-    const ta = (k: string) => byId(`phone-sessions-edit-${k}`) as HTMLTextAreaElement;
+    const ta = (k: string) => {
+      const el = byId(`phone-sessions-edit-${k}`) as HTMLTextAreaElement;
+      expect(el.getAttribute('data-slot'), k).toBe('textarea');
+      return el;
+    };
     expect([ta('done').value, ta('plan').value, ta('blockers').value]).toEqual(['', '', '']); // the phone is never shown the fields' text — a field it types into replaces the whole of it
     expect(ta('plan').placeholder).toBe('비어 있어요 — 여기에 써 주세요');
     expect(ta('done').placeholder).toBe('쓰지 않으면 지금 글 그대로예요');
