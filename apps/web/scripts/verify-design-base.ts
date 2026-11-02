@@ -9,6 +9,16 @@
  * 임의 간격 p-[7px] · padding/margin/gap 인라인 · 임의 모서리 rounded-[5px] · borderRadius 인라인.
  * 주석은 먼저 지운다(주석 속 «#3127» 같은 이슈 번호를 색으로 세지 않으려고). 시험 · 가드 · stories 파일은 뺀다.
  *
+ * 또 하나의 종류 — 날것 입력칸(`raw_control`): 부품(Input · Textarea · Select · Checkbox · RadioGroup) 대신 쓴 날 `<input>` · `<textarea>` · `<select>`.
+ * 이 종류는 «닫힌 묶음»(`Group.closed`)에서만 센다 — 묶음의 부품 교체가 끝난 뒤 0으로 못 박는 것이다(아직 교체 중인 묶음은 닫지 않는다).
+ * 지금 닫힌 것은 첫 실행 길 · 대화 · 보드 · 승인 · 에이전트 · 문서·목표 · 브리핑이고, 공용 부품 · 바탕 부품은 교체 PR이 끝날 때까지 열어 둔다
+ * (바탕 부품은 닫을 때 `ui/input` · `ui/textarea` · `ui/select`가 부품 «정의 자신»이라 쓰는 날 태그도 명단에 올린다).
+ * 정규식이 아니라 TypeScript 구문 트리로 본다: 문자열 · 주석 속 `<input>`(예: HTML 문자열을 만드는 변환기)은 세지 않는다.
+ * 한계: 세는 것은 JSX 소스의 소문자 태그뿐이다 — `document.createElement('input')` · `React.createElement('input')`처럼 실행 중에 만드는 입력칸은 못 본다
+ * (지금은 문서 슬래시 명령의 이미지 URL 입력 하나뿐이며, 편집기 표면이라 이 가드의 범위 밖으로 둔다).
+ * 부품으로 바꾸지 않는 입력(파일 선택 · 숨은 값) · 편집기 표면은 명단에 `kinds: ['raw_control']` + `count`(그 파일의 정확한 개수) + `why`로 올린다 —
+ * 개수가 실제와 다르면(새로 늘었거나 낡았거나) 실패.
+ *
  * 예외 명단 `design-base-exceptions.json`은 «바탕이 정할 수 없는 값»(제3자 브랜드색 · 사용자 데이터 색 · 라이브러리 입력 등)만 담는다.
  *   - 항목마다 `why`(까닭) 필수 — 비어 있거나 짧으면 실패.
  *   - 명단이 가리키는 파일이 묶음 안에 없거나, 적은 종류가 그 파일에서 0건이면 실패(낡은 항목은 걷는다).
@@ -21,6 +31,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 
 // ---- 값의 종류 ----
 export const OFF_KINDS = [
@@ -44,29 +55,31 @@ export type Hits = Partial<Record<OffKind, Hit[]>>;
 export interface Group {
   name: string;
   prefixes: string[];
+  /** 부품 교체가 끝나 날것 입력칸을 0(명단 개수만큼)으로 못 박은 묶음. 아직 교체 중인 묶음은 켜지 않는다. */
+  closed?: boolean;
 }
 
 export const GROUPS: Group[] = [
   {
-    name: '첫 실행 길 (로그인·가입·메일 인증·온보딩·desktop setup)',
+    name: '첫 실행 길 (로그인·가입·메일 인증·온보딩·desktop setup)', closed: true,
     prefixes: [
       'app/login', 'app/register', 'app/verify-email', 'app/forgot-password', 'app/reset-password', 'app/set-password',
       'app/mfa', 'app/invite', 'app/onboarding', 'app/desktop', 'app/auth', 'app/phone-start', 'app/phone-landing',
       'app/(authenticated)/desktop', 'components/auth', 'components/desktop', 'components/verify',
     ],
   },
-  { name: '대화 (chats)', prefixes: ['app/(authenticated)/chats', 'components/chat', 'components/chat-v3'] },
+  { name: '대화 (chats)', closed: true, prefixes: ['app/(authenticated)/chats', 'components/chat', 'components/chat-v3'] },
   {
-    name: '보드 (flow·sprints)',
+    name: '보드 (flow·sprints)', closed: true,
     prefixes: ['app/(authenticated)/[ws]/[proj]/flow', 'app/(authenticated)/[ws]/[proj]/sprints', 'components/flow', 'components/sprints', 'components/kanban'],
   },
-  { name: '승인 (gates)', prefixes: ['app/(authenticated)/gates', 'app/(authenticated)/inbox', 'components/inbox', 'components/cage'] },
-  { name: '에이전트 (organization/workforce)', prefixes: ['app/(authenticated)/organization/workforce', 'components/agents'] },
+  { name: '승인 (gates)', closed: true, prefixes: ['app/(authenticated)/gates', 'app/(authenticated)/inbox', 'components/inbox', 'components/cage'] },
+  { name: '에이전트 (organization/workforce)', closed: true, prefixes: ['app/(authenticated)/organization/workforce', 'components/agents'] },
   {
-    name: '문서·목표',
+    name: '문서·목표', closed: true,
     prefixes: ['app/(authenticated)/[ws]/[proj]/docs', 'app/(authenticated)/[ws]/[proj]/goals', 'app/(authenticated)/docs', 'components/docs', 'components/goals'],
   },
-  { name: '브리핑 (org-briefing)', prefixes: ['app/(authenticated)/org-briefing', 'components/org-briefing'] },
+  { name: '브리핑 (org-briefing)', closed: true, prefixes: ['app/(authenticated)/org-briefing', 'components/org-briefing'] },
   {
     name: '공용 부품 (화면이 부르는 공용 폴더)',
     prefixes: [
@@ -263,6 +276,36 @@ export function scanText(text: string): Hits {
   return m;
 }
 
+// ---- 날것 입력칸 (구문 트리) ----
+export const RAW_KIND = 'raw_control';
+const RAW_TAGS: ReadonlySet<string> = new Set(['input', 'textarea', 'select']);
+export interface RawControl {
+  line: number;
+  tag: string;
+  /** `type="…"`가 문자열 상수일 때만(없거나 식이면 null) */
+  type: string | null;
+}
+
+/** 소스에서 날 `<input>` · `<textarea>` · `<select>` JSX를 센다(부품 `<Input>` 등 대문자 이름 · 문자열 · 주석 속 마크업은 세지 않는다). */
+export function scanRawControls(text: string, file = 'x.tsx'): RawControl[] {
+  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const out: RawControl[] = [];
+  const visit = (node: ts.Node): void => {
+    if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && ts.isIdentifier(node.tagName) && RAW_TAGS.has(node.tagName.text)) {
+      const typeAttr = node.attributes.properties.find((p): p is ts.JsxAttribute => ts.isJsxAttribute(p) && p.name.getText(sf) === 'type');
+      const init = typeAttr?.initializer;
+      out.push({
+        line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
+        tag: node.tagName.text,
+        type: init && ts.isStringLiteral(init) ? init.text : null,
+      });
+    }
+    node.forEachChild(visit);
+  };
+  visit(sf);
+  return out;
+}
+
 // ---- 소스 읽기 (실제 디스크 / 메모리) ----
 export interface SourceReader {
   /** 접두사(폴더 또는 파일) 아래의 파일(src 기준 상대 경로). 접두사 자체가 없으면 null. */
@@ -309,6 +352,8 @@ export interface ExceptionEntry {
   file: string;
   kinds: string[];
   why: string;
+  /** `raw_control`을 적을 때 필수 — 그 파일의 날것 입력칸 «정확한» 개수(다르면 실패: 새로 늘었거나 낡았다). */
+  count?: number;
 }
 
 export function loadExceptions(filePath: string): ExceptionEntry[] {
@@ -334,6 +379,8 @@ export interface Evaluation {
   groups: GroupStat[];
   unionFiles: number;
   offFiles: OffFile[];
+  /** 날것 입력칸: 닫힌 묶음의 파일 수 · 찾은 수 · 명단이 허용한 수 */
+  rawControls: { closedFiles: number; found: number; allowed: number };
   problems: string[];
 }
 
@@ -358,7 +405,7 @@ export function evaluate(reader: SourceReader, groups: Group[], exceptions: Exce
   }
 
   // 2) 명단 형식 · 까닭 · 대상 파일
-  const kindSet: ReadonlySet<string> = new Set(OFF_KINDS);
+  const kindSet: ReadonlySet<string> = new Set<string>([...OFF_KINDS, RAW_KIND]);
   const matched = new Map<ExceptionEntry, string[]>();
   for (const e of exceptions) {
     const label = `예외 명단 «${e.file}»`;
@@ -370,7 +417,7 @@ export function evaluate(reader: SourceReader, groups: Group[], exceptions: Exce
       problems.push(`${label}: 까닭(why)이 없거나 너무 짧다(${MIN_WHY_LENGTH}자 이상) — 까닭 없이 올리지 않는다`);
     }
     if (!Array.isArray(e.kinds) || !e.kinds.length) problems.push(`${label}: kinds가 비었다`);
-    else for (const k of e.kinds) if (!kindSet.has(k)) problems.push(`${label}: 모르는 종류 «${k}» (${OFF_KINDS.join(' · ')})`);
+    else for (const k of e.kinds) if (!kindSet.has(k)) problems.push(`${label}: 모르는 종류 «${k}» (${[...OFF_KINDS, RAW_KIND].join(' · ')})`);
     const files = union.filter((rel) => sameFile(rel, e.file));
     if (!files.length) problems.push(`${label}: 검사 묶음 안에 그 파일이 없다 — 항목을 걷거나 경로를 고친다`);
     matched.set(e, files);
@@ -384,7 +431,7 @@ export function evaluate(reader: SourceReader, groups: Group[], exceptions: Exce
   const exempt = new Map<string, Set<string>>();
   for (const [e, files] of matched) {
     for (const k of Array.isArray(e.kinds) ? e.kinds : []) {
-      if (!kindSet.has(k)) continue;
+      if (!kindSet.has(k) || k === RAW_KIND) continue; // 날것 입력칸은 아래 6)에서 개수로 따로 본다
       const total = files.reduce((n, rel) => n + (raw.get(rel)?.[k as OffKind]?.length ?? 0), 0);
       if (files.length && total === 0) problems.push(`예외 명단 «${e.file}»: «${k}»가 그 파일에서 0건이다 — 낡은 항목이니 걷는다`);
       for (const rel of files) {
@@ -416,7 +463,39 @@ export function evaluate(reader: SourceReader, groups: Group[], exceptions: Exce
   });
   const offFiles = [...offByFile.values()];
   for (const o of offFiles) problems.push(`바탕 밖 값 ${o.count}건: ${o.samples.join(' | ')}`);
-  return { groups: stats, unionFiles: union.length, offFiles, problems };
+
+  // 6) 날것 입력칸 — 닫힌 묶음에서는 명단의 개수와 «정확히» 같아야 한다(더 늘면 새 날것, 모자라면 낡은 항목)
+  const closedFiles = new Set<string>();
+  for (const g of groups) if (g.closed) for (const f of groupFiles.get(g.name) ?? []) closedFiles.add(f);
+  const allowedRaw = new Map<string, number>();
+  for (const e of exceptions) {
+    if (!Array.isArray(e.kinds) || !e.kinds.includes(RAW_KIND) || typeof e.file !== 'string') continue;
+    const label = `예외 명단 «${e.file}»`;
+    if (!closedFiles.has(e.file)) {
+      problems.push(`${label}: «${RAW_KIND}»은 닫힌 묶음(Group.closed)의 파일에만 올린다`);
+      continue;
+    }
+    if (!Number.isInteger(e.count) || (e.count as number) < 1) {
+      problems.push(`${label}: «${RAW_KIND}»에는 개수(count, 1 이상 정수)가 필요하다`);
+      continue;
+    }
+    allowedRaw.set(e.file, (allowedRaw.get(e.file) ?? 0) + (e.count as number));
+  }
+  let rawFound = 0;
+  let rawAllowed = 0;
+  for (const rel of [...closedFiles].sort()) {
+    const hits = scanRawControls(reader.read(rel), rel);
+    const allowed = allowedRaw.get(rel) ?? 0;
+    rawFound += hits.length;
+    rawAllowed += Math.min(allowed, hits.length);
+    const show = (h: RawControl): string => `${rel}:${h.line} <${h.tag}${h.type ? ` type="${h.type}"` : ''}>`;
+    if (hits.length > allowed) {
+      problems.push(`날것 입력칸 ${hits.length - allowed}건 더(명단 ${allowed}건): ${hits.slice(0, 3).map(show).join(' | ')} — 부품(Input · Textarea · Select · Checkbox · RadioGroup)으로 바꾼다`);
+    } else if (hits.length < allowed) {
+      problems.push(`예외 명단 «${rel}»: 날것 입력칸이 ${hits.length}건뿐인데 ${allowed}건이라 적혀 있다 — 낡은 항목이니 개수를 고치거나 걷는다`);
+    }
+  }
+  return { groups: stats, unionFiles: union.length, offFiles, rawControls: { closedFiles: closedFiles.size, found: rawFound, allowed: rawAllowed }, problems };
 }
 
 // ---- 실행 ----
@@ -429,6 +508,7 @@ function main(): number {
   console.log('[story 4831 AC4] 바탕 한 벌 — 묶음별 바탕 밖 파일');
   for (const g of result.groups) console.log(`  ${String(g.offFiles).padStart(3)} / ${String(g.files).padStart(3)}  ${g.name}`);
   console.log(`  합(고유 파일) ${result.offFiles.length} / ${result.unionFiles}`);
+  console.log(`[날것 입력칸] 닫힌 묶음 ${result.rawControls.closedFiles}파일 — 찾은 ${result.rawControls.found}건 · 명단 허용 ${result.rawControls.allowed}건`);
   if (result.problems.length) {
     console.error(`\nFAIL: ${result.problems.length}건`);
     for (const p of result.problems) console.error(`  - ${p}`);
@@ -438,7 +518,7 @@ function main(): number {
     );
     return 1;
   }
-  console.log('OK: 바탕 밖 값 0');
+  console.log('OK: 바탕 밖 값 0 · 닫힌 묶음의 날것 입력칸은 명단 밖 0');
   return 0;
 }
 
