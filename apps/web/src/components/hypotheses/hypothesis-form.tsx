@@ -3,6 +3,9 @@
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import type { MetricDefinition } from '@sprintable/core-storage';
 
 export interface HypothesisFormValue {
@@ -56,12 +59,12 @@ export function HypothesisForm({
       {/* 1. statement */}
       <div className="space-y-1">
         <label className="text-xs font-medium text-muted-foreground">{t('statementField')}</label>
-        <textarea
+        <Textarea
           rows={2}
           value={value.statement}
           onChange={(e) => setValue((v) => ({ ...v, statement: e.target.value }))}
           placeholder={t('statementPlaceholder')}
-          className="w-full resize-y rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          className="min-h-0 bg-background dark:bg-background"
         />
       </div>
 
@@ -69,23 +72,23 @@ export function HypothesisForm({
       <div className="space-y-1">
         <label className="text-xs font-medium text-muted-foreground">{t('metricField')}</label>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_auto_auto]">
-          <input
+          <Input
             value={md.metric}
             onChange={(e) => setMd({ metric: e.target.value })}
             placeholder={t('metricPlaceholder')}
-            className="rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            className="h-auto bg-background dark:bg-background"
           />
-          <select
+          <Select
             value={md.source}
             onChange={(e) => setMd({ source: e.target.value as MetricDefinition['source'] })}
-            className="rounded-xl border border-border bg-background px-2 py-2 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            className="h-auto px-2 bg-background dark:bg-background"
           >
             {SOURCES.map((s) => (
               <option key={s} value={s}>
                 {s === 'ga4' ? t('sourceGa4') : s === 'manual' ? t('sourceManual') : t('sourceInternal')}
               </option>
             ))}
-          </select>
+          </Select>
           <div className="flex overflow-hidden rounded-xl border border-border">
             {(['up', 'down'] as const).map((dir) => (
               <button
@@ -102,13 +105,13 @@ export function HypothesisForm({
               </button>
             ))}
           </div>
-          <input
+          <Input
             type="number"
             inputMode="decimal"
             value={Number.isNaN(md.target) ? '' : md.target}
             onChange={(e) => setMd({ target: e.target.value === '' ? 0 : Number(e.target.value) })}
             placeholder={t('targetPlaceholder')}
-            className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary sm:w-20"
+            className="h-auto tabular-nums bg-background dark:bg-background"
           />
         </div>
       </div>
@@ -116,11 +119,11 @@ export function HypothesisForm({
       {/* 3. measure_after */}
       <div className="space-y-1">
         <label className="text-xs font-medium text-muted-foreground">{t('measureAfterField')}</label>
-        <input
+        <Input
           type="date"
           value={value.measure_after}
           onChange={(e) => setValue((v) => ({ ...v, measure_after: e.target.value }))}
-          className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          className="h-auto bg-background dark:bg-background"
         />
       </div>
 
