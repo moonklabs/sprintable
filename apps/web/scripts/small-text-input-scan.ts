@@ -21,6 +21,8 @@ import { cn } from '../src/lib/utils';
 const NON_TEXT_TYPES = new Set(['checkbox', 'radio', 'hidden', 'file', 'range', 'color', 'submit', 'button', 'image', 'reset']);
 const RAW_TAGS = new Set(['input', 'textarea', 'select']);
 const SHARED_TAGS = new Set(['Input', 'Textarea']);
+/** 래퍼 «정의»가 그릴 수 있는 공용 부품 — SHARED_TAGS에 `Select`를 더한 것. `Select`는 호출부 쪽에서는 자동 발견된 래퍼로 계속 읽고(데스크톱 무변 검사 포함), 래퍼 정의가 그 위에 얹힐 때(OperatorSelect)만 밑단 클래스로 읽는다. */
+const WRAPPER_BODY_SHARED = new Set([...SHARED_TAGS, 'Select']);
 /**
  * 프로젝트 자신의 글자 눈금 — globals.css `@theme`의 `--text-<이름>: <n>px`(editorial-meta 11 · editorial-ui 13 · micro 10 …)을 그대로 읽는다(숫자를 여기 또 박지 않음).
  * 이게 없으면 `lg:text-editorial-meta` 같은 클래스가 «크기 없음»으로 읽혀, 공용 부품(text-base lg:text-sm)과 합쳐질 때 데스크톱 크기가 틀리게 계산된다
@@ -211,6 +213,7 @@ function tsxFiles(dir: string, out: string[] = []): string[] {
 /** 공용 부품 → 정의 파일. 그 부품이 스스로 가진 className(첫 JSX 요소의 cn 첫 문자열들)을 읽는다. */
 export const SHARED_DEFS: Readonly<Record<string, string>> = {
   Input: 'components/ui/input.tsx',
+  Select: 'components/ui/select.tsx',
 };
 
 function componentClasses(content: string, rel: string, name: string): string {
@@ -262,10 +265,10 @@ export function wrapperSizes(contentOf: (rel: string) => string): Map<string, Wr
       if (px !== undefined) return;
       if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
         const tag = node.tagName.getText(sf);
-        if (RAW_TAGS.has(tag) || SHARED_TAGS.has(tag)) {
+        if (RAW_TAGS.has(tag) || WRAPPER_BODY_SHARED.has(tag)) {
           const init = attr(node, 'className')?.initializer;
           classes = init ? classText(init, constants) : '';
-          inner = SHARED_TAGS.has(tag) ? sharedBase(tag) : '';
+          inner = WRAPPER_BODY_SHARED.has(tag) ? sharedBase(tag) : '';
           px = belowLgFontPx(cn(inner, classes)) ?? null;
           return;
         }
