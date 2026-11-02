@@ -12,6 +12,7 @@ import {
   DialogClose,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import type { Hypothesis } from '@sprintable/core-storage';
 
 const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
@@ -110,7 +111,7 @@ export function HypothesisResolveDialog({
                   신호가 깎인다. `*` 자체는 유지하되 중립색(muted)으로. */}
               {t('actualInputLabel')} <span className="text-muted-foreground">*</span>
             </label>
-            <input
+            <Input
               id="resolve-actual"
               type="number"
               inputMode="decimal"
@@ -122,7 +123,7 @@ export function HypothesisResolveDialog({
               // placeholder 키를 신설.
               placeholder={t('resolveActualPlaceholder')}
               autoFocus
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              className="h-auto tabular-nums bg-background dark:bg-background"
             />
           </div>
 
@@ -147,13 +148,13 @@ export function HypothesisResolveDialog({
             <label className="text-xs font-medium text-muted-foreground" htmlFor="resolve-reason">
               {t('reasonInputLabel')} <span className="text-muted-foreground">*</span>
             </label>
-            <input
+            <Input
               id="resolve-reason"
               type="text"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder={t('reasonInputPlaceholder')}
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              className="h-auto bg-background dark:bg-background"
             />
             {/* 힌트는 유지(PO 지시) — "제품이 파는 것을 직접 말해주는 자리"라 3중 반복이어도 값어치가 큼. */}
             <p className="text-editorial-meta text-muted-foreground">{t('reasonHint')}</p>

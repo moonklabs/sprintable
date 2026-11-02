@@ -2,6 +2,9 @@
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import type { MetricDefinition } from '@sprintable/core-storage';
 
 export type { MetricDefinition };
@@ -46,17 +49,17 @@ export function OutcomeIntentFields({ value, onChange, defaultOpen = false, open
       </div>
       <div className="space-y-1">
         <label className="text-xs font-medium text-muted-foreground">{t('hypothesisField')}</label>
-        <textarea rows={2} value={value.success_hypothesis} onChange={(e) => onChange({ ...value, success_hypothesis: e.target.value })}
+        <Textarea rows={2} value={value.success_hypothesis} onChange={(e) => onChange({ ...value, success_hypothesis: e.target.value })}
           placeholder={placeholder}
-          className="w-full resize-y rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary" />
+          className="min-h-0 bg-background dark:bg-background" />
       </div>
       <div className="space-y-1">
         <label className="text-xs font-medium text-muted-foreground">{t('metricField')}</label>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_auto]">
-          <select value={md?.metric ?? 'velocity'} onChange={(e) => setMd({ metric: e.target.value })}
-            className="rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary">
+          <Select value={md?.metric ?? 'velocity'} onChange={(e) => setMd({ metric: e.target.value })}
+            className="h-auto bg-background dark:bg-background">
             {INTERNAL_METRICS.map((m) => <option key={m} value={m}>{t(`metric_${m}` as 'metric_velocity')}</option>)}
-          </select>
+          </Select>
           <div className="flex overflow-hidden rounded-xl border border-border">
             {(['up', 'down'] as const).map((dir) => (
               <button key={dir} type="button" onClick={() => setMd({ direction: dir })}
@@ -66,16 +69,16 @@ export function OutcomeIntentFields({ value, onChange, defaultOpen = false, open
               </button>
             ))}
           </div>
-          <input type="number" inputMode="decimal" value={md?.target ?? ''}
+          <Input type="number" inputMode="decimal" value={md?.target ?? ''}
             onChange={(e) => setMd({ target: e.target.value === '' ? 0 : Number(e.target.value) })} placeholder={t('targetPlaceholder')}
-            className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground tabular-nums placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary sm:w-24" />
+            className="h-auto tabular-nums bg-background dark:bg-background sm:w-24" />
         </div>
         {!isInternal ? <p className="text-editorial-meta text-muted-foreground">{t('externalSourceNote')}</p> : null}
       </div>
       <div className="space-y-1">
         <label className="text-xs font-medium text-muted-foreground">{t('measureAfterField')}</label>
-        <input type="date" value={value.measure_after} onChange={(e) => onChange({ ...value, measure_after: e.target.value })}
-          className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary" />
+        <Input type="date" value={value.measure_after} onChange={(e) => onChange({ ...value, measure_after: e.target.value })}
+          className="h-auto bg-background dark:bg-background" />
         <p className="text-editorial-meta text-muted-foreground">{t('measureAfterHint')}</p>
       </div>
     </div>

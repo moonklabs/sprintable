@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { Shield, ShieldCheck, ShieldX, Sparkles, User, CheckCircle, XCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { gateNeedsAction } from '@/components/cage/gate-evidence';
 import type { GateItem } from '@/components/kanban/types';
 import type { Hypothesis } from '@sprintable/core-storage';
@@ -135,12 +136,12 @@ export function HypothesisGateBadge({ hypothesis, gate, resolveName = () => '', 
       {/* 반려 사유 입력(인라인) */}
       {canAct && rejectNote !== null ? (
         <div className="flex items-center gap-1.5">
-          <input
+          <Input
             type="text"
             value={rejectNote}
             onChange={(e) => setRejectNote(e.target.value)}
             placeholder={t('gateRejectNotePlaceholder')}
-            className="h-7 flex-1 rounded-md border border-border bg-background px-2 text-base lg:text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            className="h-7 min-w-0 flex-1 px-2 py-0 lg:text-xs bg-background dark:bg-background"
           />
           <Button
             size="sm"
