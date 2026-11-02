@@ -36,6 +36,13 @@ def _has_adc() -> bool:
         return False
 
 
+def has_credentials() -> bool:
+    """Whether a Vertex call can be made at all: `GOOGLE_APPLICATION_CREDENTIALS` is set, or Application Default Credentials resolve. The ONE check — `embed_text` asks it, and so
+    does anything that decides whether to call `embed_text` at all (story 4826: the in-app timer of the embedding backlog skips its lap without it — a lap without credentials would
+    count a retry on every pending row and, five laps on, leave them failed for good)."""
+    return bool(os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")) or _has_adc()
+
+
 def embed_text(text: str) -> list[float] | None:
     """단일 텍스트를 임베딩. 인증 불가/API 오류/빈 입력 시 None(예외 전파 없음).
 
@@ -46,8 +53,7 @@ def embed_text(text: str) -> list[float] | None:
     if not text or not text.strip():
         return None
 
-    creds_file = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-    if not creds_file and not _has_adc():
+    if not has_credentials():
         logger.warning("embedding_client: 인증 정보 없음 → None 처리(pending 유지)")
         return None
 
