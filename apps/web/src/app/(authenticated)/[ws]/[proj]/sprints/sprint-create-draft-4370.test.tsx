@@ -17,6 +17,7 @@ const sp = koMessages.sprints as Record<string, string>;
 let container: HTMLDivElement;
 let root: Root;
 let createOk = true;
+let posts: Array<Record<string, unknown>> = [];
 
 beforeEach(() => {
   window.sessionStorage.clear();
@@ -24,8 +25,10 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   createOk = true;
+  posts = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (url === '/api/sprints' && init?.method === 'POST') {
+      posts.push(JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>);
       return createOk
         ? { ok: true, text: async () => '', json: async () => ({ data: { id: 'sp-new', title: 'x', status: 'planning' } }) }
         : { ok: false, text: async () => 'fail', json: async () => null };
@@ -100,5 +103,30 @@ describe('스프린트 만들기 창 폼 초안(story #4370)', () => {
     await settle();
     await open();
     expect(titleInput()!.value).toBe('');
+  });
+});
+
+describe('스프린트 만들기 창 — 용량 · 인원이 만들기 요청에 실린다(story 4831 바탕 부품)', () => {
+  const numberInputs = () => [...document.body.querySelectorAll<HTMLInputElement>('input[data-slot="input"][type=number]')];
+  it('쓴 용량 · 인원 · 목표가 요청 본문에 숫자로 실리고, 비워 두면 그 필드는 아예 빠진다', async () => {
+    await mount();
+    await open();
+    await setValue(titleInput()!, '11월 스프린트');
+    await setValue(goalInput()!, '결제 흐름 마무리');
+    await setValue(numberInputs()[0]!, '13');
+    await setValue(numberInputs()[1]!, '4');
+    await act(async () => { button(sp.saveDraft)!.click(); });
+    await settle();
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatchObject({ title: '11월 스프린트', goal: '결제 흐름 마무리', capacity: 13, team_size: 4, project_id: 'proj-1' });
+
+    await open();
+    await setValue(titleInput()!, '비운 스프린트');
+    await act(async () => { button(sp.saveDraft)!.click(); });
+    await settle();
+    expect(posts).toHaveLength(2);
+    expect(posts[1]).toMatchObject({ title: '비운 스프린트', goal: null });
+    expect(posts[1]).not.toHaveProperty('capacity');
+    expect(posts[1]).not.toHaveProperty('team_size');
   });
 });

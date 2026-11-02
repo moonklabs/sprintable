@@ -8,6 +8,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { HypothesisDeclarationCard } from './hypothesis-declaration-card';
 import { EMPTY_DECLARATION, type HypothesisDeclarationValue } from '@/services/hypothesis-declaration';
+import type { Hypothesis } from '@sprintable/core-storage';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -17,15 +18,15 @@ beforeEach(() => { container = document.createElement('div'); document.body.appe
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); });
 
 let latest: HypothesisDeclarationValue = EMPTY_DECLARATION;
-function Harness({ initial }: { initial: HypothesisDeclarationValue }) {
+function Harness({ initial, linkable = [] }: { initial: HypothesisDeclarationValue; linkable?: Hypothesis[] }) {
   const [v, setV] = useState(initial);
   useEffect(() => { latest = v; });
-  return <HypothesisDeclarationCard projectId="proj-1" contextTitle="에픽" value={v} onChange={setV} linkableHypotheses={[]} />;
+  return <HypothesisDeclarationCard projectId="proj-1" contextTitle="에픽" value={v} onChange={setV} linkableHypotheses={linkable} />;
 }
 let mounts = 0;
-const mount = async (initial: HypothesisDeclarationValue = EMPTY_DECLARATION) => {
+const mount = async (initial: HypothesisDeclarationValue = EMPTY_DECLARATION, linkable: Hypothesis[] = []) => {
   mounts += 1; // a new key per mount: the harness keeps its own state, so a second mount in one test must be a fresh component
-  await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><Harness key={mounts} initial={initial} /></NextIntlClientProvider>); });
+  await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><Harness key={mounts} initial={initial} linkable={linkable} /></NextIntlClientProvider>); });
 };
 const th = koMessages.hypotheses as unknown as Record<string, string>;
 const sp = koMessages.sprints as unknown as Record<string, string>;
@@ -77,12 +78,31 @@ describe('스프린트 가설 선언 카드 — 새로 정의 모드의 칸들(s
     expect(q<HTMLTextAreaElement>('textarea[data-slot="textarea"]').className).not.toContain('border-primary/40');
   });
 
-  it('기존 링크 모드의 검색 칸은 바탕 Input이고 쓴 글자로 후보를 거른다', async () => {
-    await mount({ ...EMPTY_DECLARATION, mode: 'link' });
+  it('기존 링크 모드의 검색 칸은 바탕 Input이고 쓴 글자로 후보를 거르며, 고른 후보가 선언 값에 실린다', async () => {
+    const linkable = [
+      { id: 'h-1', statement: '결제 전환율을 올린다', status: 'proposed', metric_definition: { metric: '전환율', source: 'manual', target: 5, direction: 'up' } },
+      { id: 'h-2', statement: '온보딩 이탈을 줄인다', status: 'proposed', metric_definition: null },
+    ] as unknown as Hypothesis[];
+    await mount({ ...EMPTY_DECLARATION, mode: 'link' }, linkable);
     const search = q<HTMLInputElement>(`input[data-slot="input"][placeholder="${th.pickerSearch}"]`);
     expect(search).toBeTruthy();
+    // 쓰기 전에는 후보 둘이 다 있다(«없음» 문구는 없다)
+    expect(container.textContent).toContain('결제 전환율을 올린다');
+    expect(container.textContent).toContain('온보딩 이탈을 줄인다');
+    expect(container.textContent).not.toContain(th.pickerEmpty);
+    // 쓴 글자로 거른다
+    await act(async () => { setInput(search, '결제'); });
+    expect(container.textContent).toContain('결제 전환율을 올린다');
+    expect(container.textContent).not.toContain('온보딩 이탈을 줄인다');
+    // 맞는 후보가 없으면 «없음» 문구
     await act(async () => { setInput(search, '없는 가설'); });
+    expect(container.textContent).not.toContain('결제 전환율을 올린다');
     expect(container.textContent).toContain(th.pickerEmpty);
+    // 지우면 다시 둘, 고르면 선언 값에 실린다
+    await act(async () => { setInput(search, ''); });
+    const pick = [...container.querySelectorAll('button')].find((x) => x.textContent === '온보딩 이탈을 줄인다')!;
+    await act(async () => { pick.click(); });
+    expect(latest.linkedHypothesisId).toBe('h-2');
     void sp;
   });
 });
