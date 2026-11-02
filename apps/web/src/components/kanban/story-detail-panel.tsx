@@ -51,6 +51,8 @@ import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel
 import { RecipeStartSection } from '@/components/kanban/recipe-start-section';
 import { PrLinkSection } from '@/components/integrations/pr-link-section';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { COLUMNS } from './types';
@@ -1636,7 +1638,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
             ) : null}
             {editingTitle ? (
               <div className="space-y-2">
-                <input
+                <Input
                   ref={titleInputRef}
                   data-testid="story-title-input"
                   type="text"
@@ -1645,7 +1647,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') void handleSaveTitle();
                   }}
-                  className="w-full rounded-md border border-border bg-muted px-2 py-1 text-lg font-semibold text-foreground outline-none focus:ring-2 focus:ring-primary"
+                  className="h-auto bg-muted px-2 py-1 text-lg font-semibold lg:text-lg dark:bg-muted"
                 />
                 <div className="flex gap-2">
                   <Button size="sm" onClick={handleSaveTitle} disabled={savingTitle || !titleDraft.trim()}>
@@ -2217,13 +2219,13 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                             />
                           ))}
                         </div>
-                        <input
+                        <Input
                           type="text"
                           value={newLabelName}
                           onChange={(e) => setNewLabelName(e.target.value)}
                           onKeyDown={(e) => { if (e.key === 'Enter') void handleCreateLabel(); }}
                           placeholder={t('newLabelNamePlaceholder')}
-                          className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-base lg:text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                          className="h-auto min-w-0 flex-1 bg-background px-2 py-1 lg:text-xs dark:bg-background"
                         />
                         <Button
                           type="button"
@@ -2395,12 +2397,12 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                       </Button>
                     ))}
                   </div>
-                  <input
+                  <Input
                     type="text"
                     value={depQuery}
                     onChange={(e) => setDepQuery(e.target.value)}
                     placeholder={t('dep.searchPlaceholder')}
-                    className="w-full rounded border border-border bg-background px-2 py-1 text-base lg:text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                    className="h-auto bg-background px-2 py-1 lg:text-xs dark:bg-background"
                   />
                   {/* story #2328(C-11 ㉡층): 2글자 미만이면 후보(depCandidates), 2글자
                       이상이면 검색 결과(depQueryResults) — 절대 안 섞는다(갈아치움). */}
@@ -2545,11 +2547,11 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               <TabsContent value="comments" className="mt-4 space-y-4">
                 {/* Comment input */}
                 <div className="space-y-2">
-                  <textarea
+                  <Textarea
                     placeholder={t('commentInputPlaceholder')}
                     value={commentInput}
                     onChange={(e) => setCommentInput(e.target.value)}
-                    className="flex field-sizing-content min-h-[80px] w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-2 text-base lg:text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex field-sizing-content min-h-[80px] resize-none px-2.5"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                         void handleSubmitComment();

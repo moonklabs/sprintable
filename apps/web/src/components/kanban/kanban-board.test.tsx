@@ -911,7 +911,7 @@ describe('KanbanBoard — 상세 패널 story 전환 시 로컬 state 리셋(#35
       titleButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await Promise.resolve();
     });
-    expect(dialog().querySelector('[data-testid="story-title-input"]')).not.toBeNull();
+    expect(dialog().querySelector('input[data-slot="input"][data-testid="story-title-input"]')).not.toBeNull();
 
     await openPanel('S2');
 
