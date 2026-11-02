@@ -18,18 +18,20 @@ function PopoverClose({ ...props }: PopoverPrimitive.Close.Props) {
   return <PopoverPrimitive.Close data-slot="popover-close" {...props} />
 }
 
+// anchor — 트리거 없이 «점»(클릭한 자리)에 붙이는 팝오버용(보낸 사람 프로필). Base UI Positioner가 가상 요소(getBoundingClientRect만 가진 객체)를 받는다.
 function PopoverContent({
   align = "center",
   alignOffset = 0,
   side = "bottom",
   sideOffset = 6,
+  anchor,
   className,
   ...props
 }: Omit<PopoverPrimitive.Popup.Props, "className"> & { className?: string } &
-  Pick<PopoverPrimitive.Positioner.Props, "align" | "alignOffset" | "side" | "sideOffset">) {
+  Pick<PopoverPrimitive.Positioner.Props, "align" | "alignOffset" | "side" | "sideOffset" | "anchor">) {
   return (
     <PopoverPrimitive.Portal>
-      <PopoverPrimitive.Positioner className="isolate z-50 outline-none" align={align} alignOffset={alignOffset} side={side} sideOffset={sideOffset}>
+      <PopoverPrimitive.Positioner className="isolate z-50 outline-none" align={align} alignOffset={alignOffset} side={side} sideOffset={sideOffset} anchor={anchor}>
         <PopoverPrimitive.Popup
           data-slot="popover-content"
           className={cn(
