@@ -2,11 +2,12 @@
 //
 // story 4831 덮개 — ContextualPanelLayout의 서랍 가지(손으로 지은 role=dialog + 가림막 단추 + useFocusTrap)를 바탕 Sheet로 옮기기 «전»에 현재 동작을 잠근다.
 // 이 파일에는 서랍 동작을 잠그는 시험이 하나도 없었다(contextual-panel-layout.test.tsx는 순수 도우미 1건뿐). 현재 코드에서 통과하는 특성화 시험이고,
-// 옮기는 PR이 일부러 바꾸는 넷(가림막 모양 · 2xl 이상에서의 처리 · 기본 닫기 단추 · 초점 관리자)만 그 PR에서 이 시험과 함께 고친다.
+// 옮기는 PR이 일부러 바꾸는 셋(가림막 모양 · 기본 닫기 단추 · 초점 관리자)만 그 PR에서 이 시험과 함께 고친다. 2xl 이상으로 넓어질 때 서랍이 닫히는 것은 훅(useContextualPanelState)이
+// 이미 하고 있어 바뀌지 않는다 — 아래 마지막 시험이 그 동작을 잠근다(옮긴 뒤의 정확성이 거기에 달려 있다).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, useState, type ReactNode } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { ContextualPanelLayout } from './contextual-panel-layout';
+import { ContextualPanelLayout, useContextualPanelState } from './contextual-panel-layout';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -32,7 +33,6 @@ interface HostProps {
   side?: 'left' | 'right';
   width?: string;
   onChange?: (open: boolean) => void;
-  children?: ReactNode;
 }
 // 호출부(dashboard-shell · policy-doc-browser)처럼 서랍 열림 상태를 부모가 쥔다.
 function Host({ initialOpen = false, inlinePanelOpen = false, side, width, onChange }: HostProps) {
@@ -169,5 +169,42 @@ describe('ContextualPanelLayout 서랍 — 덮개 잠금(현재 동작)', () => 
     await key(inner, 'Escape'); // 표시 없는 Esc
     expect(onChange).toHaveBeenCalledWith(false);
     expect(dialog()).toBeNull();
+  });
+});
+
+// 서랍을 여는 상태는 훅이 쥔다. 넓은 화면(>= 2xl, 인라인 패널을 지원하는 폭)으로 넘어가면 훅이 서랍을 닫는다 — `2xl:hidden`은 그 상태 갱신 직전 한 순간을 가리는 보조일 뿐이다.
+// 바탕 Sheet(모달)로 옮기면 CSS로 숨겨도 모달이 열린 채 남으므로 정확성은 이 닫기에 달려 있다.
+describe('useContextualPanelState — 넓은 화면으로 넘어가면 서랍을 닫는다', () => {
+  let listeners: Array<(e: { matches: boolean }) => void>;
+  beforeEach(() => {
+    listeners = [];
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: false,
+      addEventListener: (_: string, cb: (e: { matches: boolean }) => void) => { listeners.push(cb); },
+      removeEventListener: (_: string, cb: (e: { matches: boolean }) => void) => { listeners = listeners.filter((l) => l !== cb); },
+    })));
+  });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  function Probe() {
+    const p = useContextualPanelState({ defaultOpen: false });
+    return (
+      <div>
+        <button type="button" id="probe-open" onClick={p.openPanel}>열기</button>
+        <span id="probe-state">{`drawer=${p.drawerOpen} inline=${p.supportsInlinePanel}`}</span>
+      </div>
+    );
+  }
+  const state = () => document.getElementById('probe-state')!.textContent;
+
+  it('좁은 화면에서 서랍을 열고, 2xl 이상으로 넘어가면 닫히며 인라인 지원으로 바뀌고, 다시 좁아져도 서랍이 되살아나지 않는다', async () => {
+    await act(async () => { root.render(<Probe />); });
+    expect(state()).toBe('drawer=false inline=false');
+    await act(async () => { (document.getElementById('probe-open') as HTMLButtonElement).click(); });
+    expect(state()).toBe('drawer=true inline=false');
+    await act(async () => { listeners.forEach((l) => l({ matches: true })); });
+    expect(state()).toBe('drawer=false inline=true');
+    await act(async () => { listeners.forEach((l) => l({ matches: false })); });
+    expect(state()).toBe('drawer=false inline=false'); // 닫힌 채 — 서랍이 CSS로만 숨어 있다 되살아나는 일은 없다
   });
 });
