@@ -110,6 +110,11 @@ class Settings(BaseSettings):
     # route exists only when it is on. The value is never logged or printed.
     local_bootstrap_secret: str = ""
 
+    # story 4826 (공개 2-③ (나)) — the app's own server runs the scheduled jobs itself (`app/services/embedded_timers.py`), in-process, instead of a cloud scheduler.
+    # On by default (`is_embedded` still decides WHERE it can run: only the app's own server); the test configuration (tests/conftest.py) turns it off, and the
+    # one test that checks the lifespan turns it back on. An explicit setting, not a look at whether pytest is running.
+    embedded_timers_enabled: bool = True
+
     # story #3259(지원v1·1경계) — Support Gateway 위임 토큰 서명 시크릿. jwt_secret과 **의도적으로
     # 분리**(별도 값) — 이 시크릿이 유출돼도 fleet JWT_SECRET과는 무관(반대도 동일). Support
     # Gateway는 이 시크릿의 검증만 하고 jwt_secret은 아예 모른다(support-gateway/app/config.py).

@@ -170,6 +170,10 @@ async def lifespan(app: FastAPI):
         from app.services.desktop_limit_notice import lift_sweep_loop  # story 4781: the «working again» line waits for the hold, the sweep tells it when no report comes
 
         lift_sweep_task = asyncio.create_task(lift_sweep_loop())
+
+    from app.services.embedded_timers import start_embedded_timers  # story 4826: the app's own server knocks on its own cron routes (None elsewhere)
+
+    embedded_timers_task = start_embedded_timers(app)
     try:
         yield
     finally:
@@ -189,6 +193,8 @@ async def lifespan(app: FastAPI):
             delivery_dispatcher_task.cancel()
         if lift_sweep_task is not None:
             lift_sweep_task.cancel()
+        if embedded_timers_task is not None:
+            embedded_timers_task.cancel()
         try:
             if task is not None:
                 try:
@@ -218,6 +224,11 @@ async def lifespan(app: FastAPI):
             if lift_sweep_task is not None:
                 try:
                     await lift_sweep_task
+                except asyncio.CancelledError:
+                    pass
+            if embedded_timers_task is not None:
+                try:
+                    await embedded_timers_task
                 except asyncio.CancelledError:
                     pass
         finally:

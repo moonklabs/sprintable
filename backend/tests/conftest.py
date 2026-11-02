@@ -56,6 +56,10 @@ from unittest.mock import AsyncMock, MagicMock
 # 환경을 따로 넘기므로 이 기본값의 영향을 안 받는다.
 os.environ.setdefault("SANDBOX_CHANNEL_ENABLED", "true")
 
+# story 4826 — the app's own server starts its in-app timers with the lifespan when `is_embedded`; no test wants a loop of 15 jobs running behind it (and a loop that
+# crosses the tests' event loops would mix their futures into the shared pool). The test configuration turns the setting off; the lifespan test turns it on by patching.
+os.environ.setdefault("EMBEDDED_TIMERS_ENABLED", "false")
+
 # PO 2026-10-07 22:51Z (Minh's catch_test_host · «사람 손 없이»): no test looks for cloud credentials on a metadata server — google-auth
 # (google.auth.default() — embedding · firebase · admin auth) and boto (the S3 storage provider) each asked 169.254.169.254, a sandbox
 # network question every run. Set before anything imports them: google-auth reads NO_GCE_CHECK once, when its metadata module loads.
