@@ -26,7 +26,7 @@ def _normalize_email(v: str) -> str:
         raise ValueError("Invalid email format")
     return v
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import delete, func, literal, or_, select, update
+from sqlalchemy import case, delete, func, literal, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -1373,18 +1373,22 @@ async def login(
         )
 
     if not user or not verify_password(body.password, user.hashed_password):
-        # 실패 카운터 증가
+        # 실패 카운터 증가 — story 4839: ONE statement adds one and returns the new count; the answer is decided from that returned value, not from the row read at the start of the request
+        # (requests in flight together all read the same old count, so counting from the read let them overwrite each other and walk past the 5-failure lock-out).
+        # The 5th failure answers 401 and sets the lock; an attempt whose failure is counted after that (count > 5) finds the account already locked: 429.
+        _already_locked_remaining: int | None = None
         if user:
-            new_count = (user.login_fail_count or 0) + 1
-            locked_until = (
-                datetime.now(timezone.utc) + timedelta(minutes=5) if new_count >= 5 else None
-            )
-            await session.execute(
+            _counted = (await session.execute(
                 update(User).where(User.id == user.id).values(
-                    login_fail_count=new_count,
-                    login_locked_until=locked_until,
-                )
-            )
+                    login_fail_count=func.coalesce(User.login_fail_count, 0) + 1,
+                    login_locked_until=case(
+                        (func.coalesce(User.login_fail_count, 0) + 1 >= 5, func.now() + timedelta(minutes=5)),
+                        else_=User.login_locked_until,
+                    ),
+                ).returning(User.login_fail_count, User.login_locked_until)
+            )).one()
+            if _counted.login_fail_count > 5 and _counted.login_locked_until is not None:
+                _already_locked_remaining = max(0, int((_counted.login_locked_until - datetime.now(timezone.utc)).total_seconds()))
         _ip = request.client.host if request.client else None
         _ua = request.headers.get("user-agent")
         await _write_audit(
@@ -1393,15 +1397,21 @@ async def login(
             email=body.email,
             ip_address=_ip,
             user_agent=_ua,
-            detail="INVALID_CREDENTIALS",
+            detail="ACCOUNT_LOCKED" if _already_locked_remaining is not None else "INVALID_CREDENTIALS",
         )
         await session.commit()
+        if _already_locked_remaining is not None:
+            return _err("ACCOUNT_LOCKED", f"Account locked. Try again in {_already_locked_remaining} seconds", 429)
         return _err("INVALID_CREDENTIALS", "Invalid email or password", 401)
 
     # story 4838: the session stored below queues on the person's session lock like every other issuer (refresh · switch) — an all-device revoke (a password change · a reset…) either ran before
     # (then the hash read again here is no longer the one just checked, or the account is closed: refused, nothing stored) or waits until this sign-in's session is committed and ends it. The (slow) hash check stays outside the lock.
     await _lock_person_sessions(session, user.id, exclusive=False)
-    _now = (await session.execute(select(User.hashed_password, User.is_active).where(User.id == user.id))).one_or_none()
+    _now = (await session.execute(select(User.hashed_password, User.is_active, User.login_locked_until).where(User.id == user.id))).one_or_none()
+    if _now is not None and _now.is_active and _now.hashed_password == user.hashed_password and _now.login_locked_until is not None and _now.login_locked_until > datetime.now(timezone.utc):
+        # story 4839: the account was locked by failures counted while this request was checking the password — a right password does not get past a lock-out that is already in force
+        await session.commit()
+        return _err("ACCOUNT_LOCKED", f"Account locked. Try again in {int((_now.login_locked_until - datetime.now(timezone.utc)).total_seconds())} seconds", 429)
     if _now is None or not _now.is_active or _now.hashed_password != user.hashed_password:
         await _write_audit(
             session, "login_failure",
@@ -1427,35 +1437,45 @@ async def login(
         timestep = verify_totp_with_timestep(user.totp_secret or "", body.totp_code)
 
         if timestep is None:
-            # 실패: 카운터 증가, 5회 도달 시 5분 lockout
-            fail_count = (getattr(user, "totp_fail_count", 0) or 0) + 1
-            updates: dict = {"totp_fail_count": fail_count}
-            if fail_count >= 5:
-                updates["totp_locked_until"] = now + timedelta(minutes=5)
-                updates["totp_fail_count"] = 0
-            await session.execute(update(User).where(User.id == user.id).values(**updates))
+            # 실패: 카운터 증가, 5회 도달 시 5분 lockout — story 4839: one statement reads the row's lock-out state under the row lock, counts and answers from what it returns
+            # (a failure counted after the lock-out is already in force changes nothing and is answered 429, like the password lock-out)
+            _failed = (await session.execute(text(
+                "WITH old AS (SELECT id, totp_locked_until AS was_locked_until FROM users WHERE id = :uid FOR UPDATE) "
+                "UPDATE users u SET "
+                "totp_fail_count = CASE WHEN old.was_locked_until > now() THEN u.totp_fail_count "
+                "WHEN COALESCE(u.totp_fail_count, 0) + 1 >= 5 THEN 0 ELSE COALESCE(u.totp_fail_count, 0) + 1 END, "
+                "totp_locked_until = CASE WHEN old.was_locked_until > now() THEN u.totp_locked_until "
+                "WHEN COALESCE(u.totp_fail_count, 0) + 1 >= 5 THEN now() + interval '5 minutes' ELSE u.totp_locked_until END "
+                "FROM old WHERE u.id = old.id RETURNING (old.was_locked_until > now()) AS already_locked, u.totp_locked_until AS locked_until"
+            ), {"uid": user.id})).one()
             await session.commit()
+            if _failed.already_locked:
+                _wait = max(0, int((_failed.locked_until - datetime.now(timezone.utc)).total_seconds()))
+                return _err("TOTP_LOCKED", f"Too many failures. Retry after {_wait}s", 429)
             return _err("INVALID_TOTP", "Invalid TOTP code", 403)
 
-        # replay 체크: 같은 timestep 재사용 거부
-        last_ts = getattr(user, "totp_last_timestep", None)
-        if last_ts is not None and timestep <= last_ts:
-            return _err("TOTP_REPLAYED", "TOTP code already used", 403)
-
-        # 성공: 카운터 리셋 + timestep 업데이트
-        await session.execute(
-            update(User).where(User.id == user.id).values(
+        # 성공 + replay 체크를 한 문장으로 — story 4839: the step is recorded only if it is later than the one already used, in the same statement that checks it
+        # (checking the row read at the start of the request let several requests with the same code all pass; the row lock makes the second one find the step recorded)
+        _recorded = (await session.execute(
+            update(User).where(
+                User.id == user.id,
+                or_(User.totp_last_timestep.is_(None), User.totp_last_timestep < timestep),
+            ).values(
                 totp_last_timestep=timestep,
                 totp_fail_count=0,
                 totp_locked_until=None,
-            )
-        )
+            ).returning(User.id)
+        )).first()
+        if _recorded is None:
+            return _err("TOTP_REPLAYED", "TOTP code already used", 403)
 
-    # 로그인 성공 — 실패 카운터 리셋
-    if user.login_fail_count or user.login_locked_until:
-        await session.execute(
-            update(User).where(User.id == user.id).values(login_fail_count=0, login_locked_until=None)
-        )
+    # 로그인 성공 — 실패 카운터 리셋 (story 4839: asks the current row, not the one read at the start — failures counted meanwhile are cleared too; a no-op statement when there is nothing to clear)
+    await session.execute(
+        update(User).where(
+            User.id == user.id,
+            or_(User.login_fail_count != 0, User.login_locked_until.is_not(None)),
+        ).values(login_fail_count=0, login_locked_until=None)
+    )
 
     _md = await _sign_in_session_context(user, session)  # story 4762 — a live org, as a refresh
     if settings.build_app_metadata_defallback:

@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from tests.login_row_mocks import answer_login_rows as _hash_reread
 
 
 @pytest.fixture
@@ -62,22 +63,6 @@ def _make_user(
     u.password_set_at = None
     return u
 
-
-def _hash_reread(session, user) -> None:
-    """story 4838 — the sign-in reads the person's hash (and whether the account is open) again under the session lock: a statement that asks for exactly those two columns. This mocked session
-    answers it with the user's own hash, account open (nothing changed in between); every other statement is answered as the test set it up."""
-    inner = session.execute
-    session.hash_rereads = 0  # how many times the sign-in asked: a test of the sign-in road asserts the re-read really happens
-
-    async def execute(stmt, *args, **kwargs):
-        if [c.name for c in getattr(stmt, "selected_columns", [])] == ["hashed_password", "is_active"]:
-            session.hash_rereads += 1
-            result = MagicMock()
-            result.one_or_none.return_value = SimpleNamespace(hashed_password=user.hashed_password, is_active=True)
-            return result
-        return await inner(stmt, *args, **kwargs)
-
-    session.execute = execute
 
 
 # ─── security.py unit tests ───────────────────────────────────────────────────
@@ -314,6 +299,7 @@ async def test_login_wrong_password_401():
         result = MagicMock()
         result.scalar_one_or_none.return_value = user
         session.execute = AsyncMock(return_value=result)
+        _hash_reread(session, user)
         async with client as c:
             resp = await c.post("/api/v2/auth/token", json={"email": "test@example.com", "password": "wrong"})
         assert resp.status_code == 401
