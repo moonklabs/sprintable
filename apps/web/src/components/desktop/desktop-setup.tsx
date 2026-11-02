@@ -901,7 +901,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
               // story 4504 AC4 + 4831: the fold is on a click that reaches the radio itself — the visible control (a span) or its hidden input (what a
               // label's default action clicks when the card's TEXT is pressed) — never on the label's own click (a browser does the label's
               // default action only after the listeners and the update they flushed, so folding there removed the radio before it was chosen).
-              // React runs the radio's change before this click handler, so the choice is made first. An arrow key's click has no press: it only chooses.
+              // Both the choice (the radio's change) and this fold are state updates of the same click: React batches them into one render, so the
+              // list goes away in the render that also holds the choice (real Chromium: the pressed card is the chosen one). An arrow key's click has no press: it only chooses.
               onClick={(e) => {
                 const t = e.target as Element;
                 if (!(t.closest('[role=radio]') || (t instanceof HTMLInputElement && t.type === 'radio'))) return;

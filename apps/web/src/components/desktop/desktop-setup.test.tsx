@@ -2489,6 +2489,31 @@ describe('[SID:4446] the recipe is one card with [바꾸기]; «시작» is the 
     expect(document.activeElement).toBe(chosen()!.querySelector('button'));
   });
 
+  it('[SID:4831] real arrow keys after a press that never got its click: the press mark is cleared by the key, the list stays open and only the choice moves (a stale mark must not fold an arrow)', async () => {
+    recipesNow = () => new Response(JSON.stringify({ recipes: [...RECIPES, { id: 'rec-3', key: 'org.third', name: '셋째 일', roles: [{ role: '조사', kind: 'agent', stages: ['r'] }] }] }), { status: 200 });
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    await openRecipes();
+    const first = recipeInputs().find(isOn)!;
+    await act(async () => { first.focus(); });
+    // a press on a card (it sets the press mark) whose release/click has not come yet
+    await act(async () => { recipeInputs()[1].closest('label')!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); });
+    expect(recipeInputs()).toHaveLength(3);
+    // a REAL arrow key on the focused radio (not .click()): the part moves the choice with its own click
+    const arrow = async (key: string) => { await act(async () => { (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); }); };
+    await arrow('ArrowDown');
+    expect(recipeInputs()).toHaveLength(3); // still open
+    expect(recipeInputs().indexOf(recipeInputs().find(isOn)!)).toBe(1); // …and the choice moved one card
+    await arrow('ArrowDown');
+    expect(recipeInputs()).toHaveLength(3);
+    expect(recipeInputs().indexOf(recipeInputs().find(isOn)!)).toBe(2);
+    await arrow('ArrowUp');
+    expect(recipeInputs()).toHaveLength(3);
+    expect(recipeInputs().indexOf(recipeInputs().find(isOn)!)).toBe(1);
+    hasFocus.mockRestore();
+  });
+
   it('focus leaving the list folds it: to another control, focus stays there; to nowhere, back on [바꾸기]', async () => {
     stub(() => new Response('{}'));
     await mount(<DesktopSetup code={CODE} runtimes={['claude']} />);
