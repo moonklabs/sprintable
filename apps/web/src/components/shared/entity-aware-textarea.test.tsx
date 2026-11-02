@@ -256,6 +256,6 @@ describe('EntityAwareTextarea — 바탕 부품(story 4831)', () => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(el, '설명');
       el.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    expect(onChange).toHaveBeenCalledWith('설명', expect.anything());
+    expect(onChange).toHaveBeenCalledWith('설명');
   });
 });
