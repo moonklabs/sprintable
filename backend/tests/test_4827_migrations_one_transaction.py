@@ -162,6 +162,10 @@ def env_violations(source: str) -> list[str]:
             for kw in node.keywords:
                 if kw.arg == "isolation_level" or kw.arg is None:
                     out.append(f"env.py:{node.lineno}: execution_options(isolation_level=…)")
+        # an engine / connection constructor given the setting as a keyword (`engine_from_config(cfg, isolation_level="AUTOCOMMIT")`, `create_engine(url, isolation_level=…)`)
+        for kw in node.keywords:
+            if kw.arg in ("isolation_level", "autocommit"):
+                out.append(f"env.py:{node.lineno}: a call is given {kw.arg}=…")
     # a setting handed over as TEXT (`cfg["sqlalchemy.isolation_level"] = …`, `set_main_option("…isolation_level", …)`, an engine option dict): env.py has no reason to name these
     for node in ast.walk(tree):
         if isinstance(node, ast.Constant) and isinstance(node.value, str) and not _is_docstring(tree, node) and re.search(r"isolation_level|autocommit|transaction_per_migration", node.value, re.IGNORECASE):
@@ -353,6 +357,9 @@ def test_no_migration_ends_the_single_transaction() -> None:
         ("c.execution_options(**o)", "isolation_level"),
         ("def f(c):\n    context.run_migrations()\n    c.commit()\n    context.run_migrations()\n", "between two run_migrations"),
         ("def f():\n    context.run_migrations()\n    context.run_migrations()\n", "called 2 times"),
+        ("def f(cfg):\n    return engine_from_config(cfg, prefix='sqlalchemy.', poolclass=pool.NullPool, isolation_level='AUTOCOMMIT')\n", "a call is given isolation_level"),
+        ("def f(url):\n    return create_engine(url, isolation_level='AUTOCOMMIT')\n", "a call is given isolation_level"),
+        ("def f(url):\n    return create_engine(url, autocommit=True)\n", "a call is given autocommit"),
         ("def f(cfg):\n    cfg[\"sqlalchemy.isolation_level\"] = \"AUTOCOMMIT\"\n", "a setting that changes the transaction"),
         ("def f(cfg):\n    cfg.set_main_option(\"sqlalchemy.isolation_level\", \"AUTOCOMMIT\")\n", "a setting that changes the transaction"),
         ("def f():\n    return create_engine(url, connect_args={\"options\": \"-c default_transaction_isolation=x\"}, execution_options={\"isolation_level\": \"AUTOCOMMIT\"})\n", "a setting that changes the transaction"),
