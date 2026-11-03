@@ -14,7 +14,7 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => c
 
 import { DesktopSetup } from './desktop-setup';
 import { SetupProgressView } from './desktop-setup-progress';
-import { moveConfirmBody, moveListOrder, moveProgress, parseSetupQuery, setupFragment, parseSetupFragment, NOT_CONNECTED_AFTER_HANDOVER_MS, type AttachableAgent, type SetupStatus } from '@/lib/desktop-setup';
+import { moveConfirmBody, moveListOrder, moveRowState, moveProgress, parseSetupQuery, setupFragment, parseSetupFragment, NOT_CONNECTED_AFTER_HANDOVER_MS, type AttachableAgent, type SetupStatus } from '@/lib/desktop-setup';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -77,52 +77,64 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); sessionStorage.clear(); });
 
-// ── story 4678 (P1′-a · Yuna §J ①c): the move list's «not on this project's team» row gets [프로젝트 팀에 넣기] too ──
-describe('[SID:4678] the move list · a row not on the team', () => {
+// ── story 4832 (PO 11-03 «팀에 넣고 옮기기»): a row not on the project's team is tickable — moving it puts it on the team (one confirmation, `add_to_team`) ──
+describe('[SID:4832] the move list · a row not on the team', () => {
   const ZED: AttachableAgent = { id: 'a-zed', name: '제드', runtime: 'codex', live_keys: 0, last_used_at: null, in_project: false };
-  function stubGrant() {
-    stub(() => new Response('{}'));
-    const base = globalThis.fetch as unknown as (i: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-    let granted = false;
-    agentsNow = () => new Response(JSON.stringify({ agents: [{ ...DAMRONG, in_project: granted }, DAN, KADIR, ZED] }), { status: 200 });
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes('/api/projects/') && url.endsWith('/access')) {
-        calls.push({ url, method: init?.method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-        granted = true;
-        return new Response('{}', { status: 201 });
-      }
-      return base(input, init);
-    }));
-  }
   const rowOf = (name: string) => rows().find((r) => r.textContent?.includes(name))!;
+  const putButtons = () => container.querySelectorAll('[data-testid=setup-put-on-team]');
 
-  it('the row says it is not on the team and has the button; pressing it grants in place, reads the list again, and the row can be ticked (focus on its checkbox) · a runtime this computer lacks gets the runtime line, no button', async () => {
-    stubGrant();
+  it('the line is there BEFORE any tick, the row is tickable but not ticked, there is no separate «프로젝트 팀에 넣기» button here, and a program this computer lacks stays the blocker', async () => {
+    stub(() => new Response('{}'));
+    agentsNow = () => new Response(JSON.stringify({ agents: [DAMRONG, DAN, KADIR, ZED] }), { status: 200 });
     await mount(<DesktopSetup code={CODE} runtimes={['claude']} canMove />);
     await chooseMove();
     const row = rowOf('담롱');
-    expect(row.dataset.state).toBe('not-in-project');
-    expect(row.textContent).toContain('이 프로젝트 팀에 아직 없어요');
-    expect(isOff(row.querySelector('[role=checkbox]'))).toBe(true);
-    const put = row.querySelector('[data-testid=setup-put-on-team]') as HTMLButtonElement;
-    expect([put.textContent, put.getAttribute('aria-label')]).toEqual(['프로젝트 팀에 넣기', '프로젝트 팀에 넣기 · 담롱']);
-    // Codex is not on this computer: the blocker is the runtime — said once, with no button next to it
-    expect(rowOf('제드').querySelector('[data-testid=setup-put-on-team]')).toBeNull();
-    expect(rowOf('제드').textContent).toContain('Codex가 이 컴퓨터에 없어요');
-    expect(rowOf('제드').textContent).not.toContain('이 프로젝트 팀에 아직 없어요');
+    expect(row.dataset.state).toBe('needs-team');
+    expect(row.textContent).toContain('Claude Code 에이전트 · 옮기면 프로젝트 팀에도 들어가요'); // line removed → fails
+    expect(isOff(row.querySelector('[role=checkbox]'))).toBe(false); // tickable
+    expect(isOn(row.querySelector('[role=checkbox]'))).toBe(false); // never pre-ticked
+    expect(putButtons()).toHaveLength(0); // the move list has one way, not two
+    // Codex is not on this computer: the blocker is the runtime — said once, whatever the team says
+    for (const name of ['제드', '까디르 QA']) {
+      expect(rowOf(name).dataset.state).toBe('runtime-missing');
+      expect(rowOf(name).textContent).toContain('Codex가 이 컴퓨터에 없어요');
+      expect(isOff(rowOf(name).querySelector('[role=checkbox]'))).toBe(true);
+    }
+    expect(rowOf('제드').textContent).not.toContain('팀에도 들어가요');
+  });
 
-    await act(async () => { put.click(); });
+  it('[옮기기] sends add_to_team for the ticked agent that is off the team — and only for that one', async () => {
+    stub(() => new Response(JSON.stringify({ setup_id: 's-1', work_item_id: null, members: [] }), { status: 200 }));
+    agentsNow = () => new Response(JSON.stringify({ agents: [DAMRONG, DAN] }), { status: 200 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} canMove setupId="s-1" />);
+    await chooseMove();
+    await tick('담롱');
+    await tick('댄 어윈');
+    expect(startRowLine()).toBe('에이전트 2개를 이 컴퓨터로 옮겨요');
+    calls = [];
+    await act(async () => { button('옮기기')!.click(); });
     await settle();
-    const posts = calls.filter((c) => c.url.endsWith('/access'));
+    const posts = calls.filter((c) => c.method === 'POST');
     expect(posts).toHaveLength(1);
-    expect(posts[0]).toMatchObject({ method: 'POST', body: { member_id: 'a-dam', org_member_id: null, permission: 'granted' } });
-    expect(rowOf('담롱').dataset.state).toBe('ok');
-    const box = rowOf('담롱').querySelector('[role=checkbox]') as HTMLElement;
-    expect(isOff(box)).toBe(false);
-    expect(isOn(box)).toBe(false); // not ticked for them
-    expect(document.activeElement).toBe(box); // the pressed button is gone — focus goes to the row's checkbox, not the page
-    expect(container.querySelector('[data-testid=setup-put-on-team-done]')).toBeNull(); // the recipe page's role fields are not here — no «위 역할 칸» line
+    expect(posts[0].url).toContain('/api/desktop/setup-codes/confirm');
+    expect(posts[0].body).toEqual({ code: CODE, project_id: 'p-1', roles: [{ role: 'move', agent_id: 'a-dam', add_to_team: true }, { role: 'move', agent_id: 'a-dan' }] }); // the ask on every ticked row → fails
+  });
+
+  it('an agent ticked and then unticked asks for nothing; one off the team alone is movable (the start button is on)', async () => {
+    stub(() => new Response(JSON.stringify({ setup_id: 's-1', work_item_id: null, members: [] }), { status: 200 }));
+    agentsNow = () => new Response(JSON.stringify({ agents: [DAMRONG] }), { status: 200 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} canMove setupId="s-1" />);
+    await chooseMove();
+    expect(button('옮기기')!.disabled).toBe(true);
+    await tick('담롱');
+    expect(button('옮기기')!.disabled).toBe(false);
+    await tick('담롱');
+    expect(button('옮기기')!.disabled).toBe(true);
+    await tick('담롱');
+    calls = [];
+    await act(async () => { button('옮기기')!.click(); });
+    await settle();
+    expect(calls.filter((c) => c.method === 'POST')[0]!.body).toEqual({ code: CODE, project_id: 'p-1', roles: [{ role: 'move', agent_id: 'a-dam', add_to_team: true }] });
   });
 });
 
@@ -152,12 +164,12 @@ describe('[SID:4576] the two ways · the move list', () => {
     expect(container.querySelector('#setup-roles')).toBeNull();
     expect(container.querySelector('#setup-folder')).toBeNull();
     expect(text()).toContain('이 컴퓨터에서 찾은 에이전트: Claude Code · Codex');
-    expect(rows().map((r) => [r.querySelector('.font-medium')!.textContent, r.dataset.state])).toEqual([['댄 어윈', 'ok'], ['까디르 QA', 'ok'], ['담롱', 'not-in-project']]);
+    expect(rows().map((r) => [r.querySelector('.font-medium')!.textContent, r.dataset.state])).toEqual([['댄 어윈', 'ok'], ['까디르 QA', 'ok'], ['담롱', 'needs-team']]);
     expect(rows()[0].textContent).toContain('Claude Code 에이전트 · 이 컴퓨터로 옮길 수 있어요'); // 4832: the tool being here is not the agent being here
     expect(rows()[0].textContent).not.toContain('이 컴퓨터에 있음');
-    expect(rows()[2].textContent).toContain('이 프로젝트 팀에 아직 없어요'); // 4678: the line, then [프로젝트 팀에 넣기] (the button's own test: desktop-setup.4678.test)
-    expect(rows()[2].querySelector('[data-testid=setup-put-on-team]')?.textContent).toBe('프로젝트 팀에 넣기');
-    expect(isOff(rows()[2].querySelector('[role=checkbox]'))).toBe(true);
+    expect(rows()[2].textContent).toContain('옮기면 프로젝트 팀에도 들어가요'); // 4832: the line says it before any tick; no separate button
+    expect(rows()[2].querySelector('[data-testid=setup-put-on-team]')).toBeNull();
+    expect(isOff(rows()[2].querySelector('[role=checkbox]'))).toBe(false); // 4832: tickable (moving it puts it on the team)
     expect(rows().every((r) => !isOn(r.querySelector('[role=checkbox]')))).toBe(true);
     expect(text()).toContain('작업 폴더는 옮긴 뒤 앱에서 에이전트마다 골라요 — 이 컴퓨터에서 일한 적이 있는 에이전트는 그 폴더를 그대로 써요');
     expect(button('옮기기')!.disabled).toBe(true);
@@ -166,9 +178,9 @@ describe('[SID:4576] the two ways · the move list', () => {
   });
 
   it('only rows that cannot move → the start line says none can be moved (each row keeps its why)', async () => {
-    agentsNow = () => new Response(JSON.stringify({ agents: [DAMRONG] }), { status: 200 });
+    agentsNow = () => new Response(JSON.stringify({ agents: [KADIR] }), { status: 200 }); // a codex agent on a computer that has only claude (4832: an agent off the team is no longer a blocker by itself)
     stub(() => new Response('{}'));
-    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} canMove />);
     await chooseMove();
     expect(container.querySelector('[data-testid=setup-move-empty]')).toBeNull();
     expect(startRowLine()).toBe('옮길 수 있는 에이전트가 없어요');
@@ -495,7 +507,17 @@ describe('[SID:4576] the address and the confirm body', () => {
 
   it('moveConfirmBody: each agent once, no recipe or folder · moveListOrder: movable first, server order kept inside each group', () => {
     expect(moveConfirmBody(CODE, 'p-1', ['a', 'b', 'a'])).toEqual({ code: CODE, project_id: 'p-1', roles: [{ role: 'move', agent_id: 'a' }, { role: 'move', agent_id: 'b' }] });
+    // 4832: an agent off the team whose program is here is movable too (the move puts it on the team) — after the ready ones; only a program this computer lacks sorts last
     expect(moveListOrder([DAMRONG, DAN, KADIR], ['claude']).map((a) => a.id)).toEqual(['a-dan', 'a-dam', 'a-kadir']);
+    expect(moveListOrder([KADIR, DAMRONG, DAN], ['claude']).map((a) => a.id)).toEqual(['a-dan', 'a-dam', 'a-kadir']);
+  });
+
+  it('[SID:4832] moveConfirmBody: add_to_team rides only on the agents asked for that are also in the move · moveRowState: only a missing program blocks', () => {
+    expect(moveConfirmBody(CODE, 'p-1', ['a', 'b'], ['b'])).toEqual({ code: CODE, project_id: 'p-1', roles: [{ role: 'move', agent_id: 'a' }, { role: 'move', agent_id: 'b', add_to_team: true }] });
+    expect(moveConfirmBody(CODE, 'p-1', ['a'], ['zzz'])).toEqual({ code: CODE, project_id: 'p-1', roles: [{ role: 'move', agent_id: 'a' }] }); // an id that is not in the move asks for nothing
+    expect(moveConfirmBody(CODE, 'p-1', ['a'])).toEqual({ code: CODE, project_id: 'p-1', roles: [{ role: 'move', agent_id: 'a' }] }); // no ask: the body an older server reads
+    expect([DAN, DAMRONG, KADIR].map((a) => moveRowState(a, ['claude']))).toEqual(['ok', 'needs-team', 'runtime-missing']);
+    expect(moveRowState({ ...KADIR, in_project: false }, ['claude'])).toBe('runtime-missing'); // the blocker stays whatever the team says
   });
 });
 
@@ -587,9 +609,9 @@ describe('[SID:4670] «폰으로도 에이전트 다루기» on the move road (t
 });
 
 describe('[SID:4831] the move list tick is the base Checkbox (a label press, Space, Enter)', () => {
-  it('pressing the row\'s name (the label) ticks it and again unticks it · Enter does not tick · Space does · a row that is not ok stays off', async () => {
+  it('pressing the row\'s name (the label) ticks it and again unticks it · Enter does not tick · Space does · a row whose program is missing stays off', async () => {
     stub(() => new Response('{}'));
-    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} canMove />);
     await chooseMove();
     const row = rows().find((r) => r.textContent?.includes('댄 어윈'))!;
     const box = () => row.querySelector('[role=checkbox]') as HTMLElement;
@@ -607,7 +629,7 @@ describe('[SID:4831] the move list tick is the base Checkbox (a label press, Spa
       box().dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true, cancelable: true }));
     });
     expect(isOn(box())).toBe(true);
-    const off = rows().find((r) => r.dataset.state !== 'ok')!;
+    const off = rows().find((r) => r.dataset.state === 'runtime-missing')!; // 4832: only a program this computer lacks blocks now (a codex agent here, claude only on the computer)
     await act(async () => { (off.querySelector('label') as HTMLElement).click(); });
     expect(isOn(off.querySelector('[role=checkbox]'))).toBe(false);
   });

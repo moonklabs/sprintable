@@ -7379,7 +7379,7 @@
         "kindMoveOldApp": "This version of the app can't move agents — please update the app",
         "lead": "Choose the agents to move and the app on this computer takes them over — their roles, work and project settings stay as they are, and no first task is created.",
         "listTitle": "Agents to move",
-        "rowNotInProject": "Not on this project's team yet",
+        "rowNeedsTeam": "{runtime} agent · moving it also puts it on the project's team",
         "rowRuntimeMissing": "{runtime} isn't on this computer",
         "folderNote": "You choose each agent's working folder in the app after the move — an agent that already worked on this computer keeps its folder",
         "start": "Move",

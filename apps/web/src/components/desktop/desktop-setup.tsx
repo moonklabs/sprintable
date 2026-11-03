@@ -28,7 +28,7 @@ import {
   agentRoomOf, agentRowCount, confirmBody, firstProjectConfirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type OldRuntime, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk, withPreselectedAgent,
   type AgentRoom, type AttachableAgent, type DesktopRuntime, roomShort, type PreselectHold, type SetupRecipe, type SetupRoleRow, movedRowCount, ownerKey, preselectHoldOf, withAttachable, withDefaultRecipeFirst,
   addAgentTool, hasSignInCheck, JUDGED_AGENT_TOOLS,
-  moveConfirmBody, movableState, moveListOrder } from '@/lib/desktop-setup';
+  moveConfirmBody, moveRowState, moveListOrder } from '@/lib/desktop-setup';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { appSetupLink, nativeReturnApp, RETURN_APP_PARAM } from '@/lib/auth/native-return-app';
 import { putOrgRemoteControl, useOrgRemoteControl } from '@/lib/org-remote-control';
@@ -443,7 +443,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     attachableRef.current = list;
     setAttachable(list);
     // Kadir 4969 (2선): ticks follow the fresh list — an agent that dropped out is untied, never ticked again by itself
-    setMoving((ms) => ms.filter((id) => list.some((a) => a.id === id && movableState(a, runtimes) === 'ok')));
+    setMoving((ms) => ms.filter((id) => list.some((a) => a.id === id && moveRowState(a, runtimes) !== 'runtime-missing')));
     // story 4680: the recruiter's agent (`agent=` in the address) takes the first agent row once it is among the choices — once
     // (PO 5065 ②): the list is read again on «목록 다시 불러오기» (4576 · move mode) and a recipe change rebuilds the rows; a
     // person's own choice after that is never written over. Whether to apply is decided here (the updater stays pure); a
@@ -573,9 +573,10 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   // story 4678: the ones [프로젝트 팀에 넣기] can help — not on the team, and a runtime this computer has (without one, putting it on
   // the team would still leave it unusable: that is the line the move list gives instead)
   const outsiders = attachable.filter((a) => !a.in_project && runtimes.includes(a.runtime));
-  const movableOutsiders = movable.filter((a) => !a.in_project && runtimes.includes(a.runtime));
-  const moveChosen = moving.filter((id) => attachable.some((a) => a.id === id && movableState(a, runtimes) === 'ok'));
-  const anyMovable = movable.some((a) => movableState(a, runtimes) === 'ok');
+  const moveChosen = moving.filter((id) => attachable.some((a) => a.id === id && moveRowState(a, runtimes) !== 'runtime-missing'));
+  // story 4832: the ticked agents that are not on the team yet — the confirmation asks the server to put them there (`add_to_team`)
+  const moveAddToTeam = moveChosen.filter((id) => attachable.some((a) => a.id === id && !a.in_project));
+  const anyMovable = movable.some((a) => moveRowState(a, runtimes) !== 'runtime-missing');
   const roleName = (role: string) => stageRoleLabel(role, tOrg);
   const humanRoles = useMemo(() => rows.filter((r) => r.owner.kind === 'me').map((r) => stageRoleLabel(r.role, tOrg)), [rows, tOrg]);
   const humanList = humanRoles.join(' · ');
@@ -670,7 +671,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     try {
       const res = await fetchWithAuth('/api/desktop/setup-codes/confirm', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(moveConfirmBody(code, chosenProject, moveChosen)),
+        body: JSON.stringify(moveConfirmBody(code, chosenProject, moveChosen, moveAddToTeam)),
       });
       if (res.ok) {
         // the tab had no project: the one moved into becomes the tab's, as a recipe start does (story 4496)
@@ -842,28 +843,25 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
           ) : (
           <ul className="mt-2 flex flex-col divide-y rounded-md border">
             {movable.map((a) => {
-              const state = movableState(a, runtimes);
-              const on = state === 'ok' && moving.includes(a.id);
-              // move.rowNotInProject says the same as the select's existingNotInProject (4565) without the name — change one, change both
-              // (kept two keys: the en select line starts lower-case after «{name} · »)
-              // story 4678: «팀에 아직 없어요» is a line with a button next to it — only where the button can help; a missing runtime is the
-              // blocker that stays whatever the team says
-              const canPutOnTeam = state === 'not-in-project' && runtimes.includes(a.runtime);
-              const second = canPutOnTeam ? t('move.rowNotInProject')
-                : state === 'runtime-missing' || state === 'not-in-project' ? t('move.rowRuntimeMissing', { runtime: RUNTIME_LABEL[a.runtime], iGa: pickIGaJosa(RUNTIME_LABEL[a.runtime]) })
+              const state = moveRowState(a, runtimes);
+              const tickable = state !== 'runtime-missing';
+              const on = tickable && moving.includes(a.id);
+              // story 4832: an agent off the team can be ticked — the line says so BEFORE the tick (moving it puts it on the team too, in the same confirmation); a program this
+              // computer lacks is the blocker that stays
+              const second = state === 'runtime-missing' ? t('move.rowRuntimeMissing', { runtime: RUNTIME_LABEL[a.runtime], iGa: pickIGaJosa(RUNTIME_LABEL[a.runtime]) })
+                : state === 'needs-team' ? t('move.rowNeedsTeam', { runtime: RUNTIME_LABEL[a.runtime] })
                   : t('move.rowOk', { runtime: RUNTIME_LABEL[a.runtime] });
               return (
                 <li key={a.id} className="p-3" data-testid="setup-move-row" data-state={state}>
                   <div className="flex gap-3">
-                    <Checkbox id={`setup-move-${a.id}`} data-move-id={a.id} checked={on} disabled={state !== 'ok'} onCheckedChange={(checked) => toggleMove(a.id, checked === true)} className="mt-1 self-start" />
+                    <Checkbox id={`setup-move-${a.id}`} data-move-id={a.id} checked={on} disabled={!tickable} onCheckedChange={(checked) => toggleMove(a.id, checked === true)} className="mt-1 self-start" />
                     <div className="min-w-0 break-keep">
-                      <label htmlFor={`setup-move-${a.id}`} className={`block ${state === 'ok' ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-                        <span className={`block text-sm font-medium ${state === 'ok' ? '' : 'text-muted-foreground'}`}>{a.name}</span>
+                      <label htmlFor={`setup-move-${a.id}`} className={`block ${tickable ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                        <span className={`block text-sm font-medium ${tickable ? '' : 'text-muted-foreground'}`}>{a.name}</span>
                         <span className="block text-xs text-muted-foreground">{second}</span>
                       </label>
                       {/* the 4565 note under a ticked row only (same place, same words — under the name's column) */}
                       {on ? <MovedAgentNote agent={a} /> : null}
-                      {canPutOnTeam ? <div className="mt-1"><PutOnTeamButton agent={a} state={teamState[a.id]} onPress={() => void putOnTeam(a, movableOutsiders)} /></div> : null}
                     </div>
                   </div>
                 </li>
