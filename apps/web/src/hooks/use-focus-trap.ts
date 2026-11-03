@@ -13,9 +13,9 @@ interface UseFocusTrapOptions {
 }
 
 /**
- * story #2061 — 손수 구현된 모달 중 공용 Dialog(base-ui)로 바로 교체하기 어려운 자리
- * (예: contextual-panel-layout.tsx의 반응형 드로어 — renderPanel 렌더prop이 inline 컬럼/
- * 드로어 두 모드를 동시에 지원해 Dialog Popup으로 감쌀 수 없다)를 위한 최소 포커스 트랩.
+ * story #2061 — 손수 구현된 모달 중 공용 Dialog(base-ui)로 바로 교체하기 어려운 자리를 위한 최소 포커스 트랩.
+ * (story 4831: contextual-panel-layout의 서랍은 이 훅 없이 바탕 Sheet로 옮겼다 — 서랍 가지에서만 renderPanel을 따로 부르므로 감쌀 수 있었다.
+ * 남은 쓰임은 같은 요소가 docked ↔ overlay로 모양만 바뀌는 채팅 레일 · 손가락을 따라 움직이는 스와이프 서랍 · 풀스크린 오버레이처럼 Dialog로 못 옮기는 자리다.)
  *
  * active===true인 동안: 컨테이너 안으로 초점을 옮기고, Tab이 컨테이너를 새지 않게 순환시키며,
  * Escape를 누르면 onClose를 호출한다. active가 false로 돌아가면(닫힘) 여는 것 직전의 포커스
