@@ -47,7 +47,7 @@ function progressIdOf(fromAnswer: unknown, fromAddress: string | null): string |
   return fromAddress && SETUP_UUID.test(fromAddress) ? fromAddress : null;
 }
 
-export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { query: SetupQuery; onTeam: () => void; /** story 4711 (`agent=` branch): the recruiter's agent, already checked movable — the card's ① is that one agent (read-only) and «시작» is the MOVE confirmation, never a new agent */ agent?: AttachableAgent; /** the move could not be confirmed because the agent is no longer movable (left the project …): the wrapper falls to the recipe page with its reasons */ onNotMovable?: () => void }) {
+export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }: { query: SetupQuery; onTeam: () => void; /** story 4832: the app can take a move → a link under the card to the recipe page with «이미 있는 에이전트 옮기기» chosen (a person with agents already is not left to guess that the team link holds it) */ onMove?: () => void; /** story 4711 (`agent=` branch): the recruiter's agent, already checked movable — the card's ① is that one agent (read-only) and «시작» is the MOVE confirmation, never a new agent */ agent?: AttachableAgent; /** the move could not be confirmed because the agent is no longer movable (left the project …): the wrapper falls to the recipe page with its reasons */ onNotMovable?: () => void }) {
   const t = useTranslations('desktop.setup');
   const tNewOrg = useTranslations('desktopOnboarding');
   const tOnboarding = useTranslations('onboarding');
@@ -483,7 +483,12 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
           <p className="text-xs text-muted-foreground">{t('toolNote')}</p>
         </section>
       </Card>
-      {agent ? null : <p className="text-sm"><Button type="button" variant="link" className="h-auto p-0 underline underline-offset-2" disabled={starting} onClick={onTeam}>{t('quick.team')}</Button></p>}
+      {agent ? null : (
+        <p className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+          {onMove ? <Button type="button" variant="link" className="h-auto p-0 underline underline-offset-2" disabled={starting} onClick={onMove} data-testid="quick-move">{t('quick.move')}</Button> : null}
+          <Button type="button" variant="link" className="h-auto p-0 underline underline-offset-2" disabled={starting} onClick={onTeam}>{t('quick.team')}</Button>
+        </p>
+      )}
     </div>
   );
 }

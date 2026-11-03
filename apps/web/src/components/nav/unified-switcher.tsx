@@ -1,6 +1,7 @@
 'use client';
 
 import { firstGraphemes } from '@/lib/first-graphemes';
+import { useEffect, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { Check, ChevronDown, Loader2, Plus, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -31,6 +32,8 @@ import { orgRoleLabel } from '@/lib/org-member-role';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { ProjectLimitBanner } from '@/components/nav/project-limit-banner';
 import { NewProjectMacBlock } from '@/components/nav/new-project-mac-block';
+import { NEW_PROJECT_PARAM, OPEN_NEW_PROJECT_EVENT } from '@/components/nav/new-project-entry';
+import { desktopApp } from '@/lib/desktop-app';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 
@@ -70,6 +73,22 @@ export function UnifiedSwitcher({
   const tCommon = useTranslations('common');
   const tSettings = useTranslations('settings');
   const s = useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjectId });
+  // story 4832: the sidebar's «새 프로젝트» line (desktop app) opens this dialog — only THIS instance listens (the top-bar chip would open a second one)
+  const openCreateProject = useRef(s.setCreateProjectOpen);
+  useEffect(() => { openCreateProject.current = s.setCreateProjectOpen; }); // the hook's setter is a new function each render — the listener reads the latest (kept after render, never during it)
+  useEffect(() => {
+    if (!desktopApp()) return; // the line and the menu's flag are the desktop app's: a browser link carrying the flag opens nothing
+    const open = () => openCreateProject.current(true);
+    window.addEventListener(OPEN_NEW_PROJECT_EVENT, open);
+    // the app menu's ⌘N (story 4832): the flag on the page address — read once, then taken off (a reload must not open it again)
+    const here = new URL(window.location.href);
+    if (here.searchParams.get(NEW_PROJECT_PARAM) === '1') {
+      here.searchParams.delete(NEW_PROJECT_PARAM);
+      window.history.replaceState(window.history.state, '', `${here.pathname}${here.search}${here.hash}`);
+      open();
+    }
+    return () => window.removeEventListener(OPEN_NEW_PROJECT_EVENT, open);
+  }, []);
 
   return (
     <>

@@ -28,6 +28,9 @@ export interface SetupQuery { code: string; runtimes: DesktopRuntime[]; setupId:
   /** story 4711: the app said `caps=solo` — it can take the first setup in three steps (one new agent for a picked folder).
    *  Absent = an app from before: the page is today's recipe setup. Only present when true. */
   canSolo?: true;
+  /** story 4832: `kind=move` — the app was asked to open the page with «이미 있는 에이전트 옮기기» chosen (the sidebar's own door). Only with `caps=move`
+   *  (an app that cannot take a move would show a choice it cannot keep); absent otherwise. */
+  kind?: 'move';
   /** story 4711: the runtime the person had picked before the Mac folder window (`pick=` — the app puts it back, the address is new). */
   pick?: DesktopRuntime;
   /** story 4711: the versions the app read (`rv=claude:2.1.289,codex:0.159.3`) — shown after the program's name; only well-shaped ones. */
@@ -85,7 +88,7 @@ export function parseSetupQuery(params: { get(name: string): string | null }): S
   const pick = DESKTOP_RUNTIMES.find((r) => r === pickAsked && runtimes.includes(r));
   const versions = parseRuntimeVersions(params.get('rv'), runtimes);
   const folder = parseSoloFolder(params);
-  return { code, runtimes, setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null, blocked: runtimes.filter((r) => blockedAsked.has(r)), ...withOld(parseOldRuntimes(params.get('old'), runtimes)), ...(caps.has('move') ? { canMove: true as const } : {}), ...solo, ...(pick ? { pick } : {}), ...(Object.keys(versions).length ? { versions } : {}), ...(folder ? { folder } : {}), ...(AGENT_ID_RE.test(agent) ? { agent } : {}) };
+  return { code, runtimes, setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null, blocked: runtimes.filter((r) => blockedAsked.has(r)), ...withOld(parseOldRuntimes(params.get('old'), runtimes)), ...(caps.has('move') ? { canMove: true as const } : {}), ...solo, ...(pick ? { pick } : {}), ...(Object.keys(versions).length ? { versions } : {}), ...(folder ? { folder } : {}), ...(AGENT_ID_RE.test(agent) ? { agent } : {}), ...(params.get('kind') === 'move' && caps.has('move') ? { kind: 'move' as const } : {}) };
 }
 
 
@@ -426,6 +429,7 @@ export function setupFragment(q: SetupQuery): string {
   const caps = [...(q.canMove ? ['move'] : []), ...(q.canSolo ? ['solo'] : [])];
   if (caps.length) p.set('caps', caps.join(','));
   if (q.agent) p.set('agent', q.agent);
+  if (q.kind) p.set('kind', q.kind);
   if (q.pick) p.set('pick', q.pick);
   const rv = Object.entries(q.versions ?? {});
   if (rv.length) p.set('rv', rv.map(([r, v]) => `${r}:${v}`).join(','));
