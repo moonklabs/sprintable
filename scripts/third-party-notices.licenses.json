@@ -1,0 +1,4801 @@
+{
+ "npm:@alloc/quick-lru@5.2.0": {
+  "l": "MIT"
+ },
+ "npm:@antfu/install-pkg@1.1.0": {
+  "l": "MIT"
+ },
+ "npm:@asamuzakjp/css-color@5.1.11": {
+  "l": "MIT"
+ },
+ "npm:@asamuzakjp/dom-selector@7.1.1": {
+  "l": "MIT"
+ },
+ "npm:@asamuzakjp/generational-cache@1.0.1": {
+  "l": "MIT"
+ },
+ "npm:@asamuzakjp/nwsapi@2.3.9": {
+  "l": "MIT"
+ },
+ "npm:@aws-crypto/crc32@5.2.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-crypto/crc32c@5.2.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-crypto/sha1-browser@5.2.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-crypto/sha256-browser@5.2.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-crypto/sha256-js@5.2.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-crypto/supports-web-crypto@5.2.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-crypto/util@5.2.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-sdk/checksums@3.1000.8": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-sdk/client-s3@3.1075.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-sdk/core@3.974.23": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-sdk/credential-provider-env@3.972.49": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-sdk/credential-provider-http@3.972.51": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-sdk/credential-provider-ini@3.972.56": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-sdk/credential-provider-login@3.972.55": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-sdk/credential-provider-node@3.972.58": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-sdk/credential-provider-process@3.972.49": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-sdk/credential-provider-sso@3.972.55": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-sdk/credential-provider-web-identity@3.972.55": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-sdk/middleware-flexible-checksums@3.974.33": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-sdk/middleware-sdk-s3@3.972.54": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-sdk/nested-clients@3.997.23": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-sdk/s3-request-presigner@3.1075.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-sdk/signature-v4-multi-region@3.996.35": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-sdk/token-providers@3.1074.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-sdk/types@3.973.13": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-sdk/util-locate-window@3.965.8": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws-sdk/xml-builder@3.972.31": {
+  "l": "Apache-2.0"
+ },
+ "npm:@aws/lambda-invoke-store@0.2.4": {
+  "l": "Apache-2.0"
+ },
+ "npm:@axe-core/playwright@4.13.0": {
+  "l": "MPL-2.0",
+  "s": "https://github.com/dequelabs/axe-core-npm"
+ },
+ "npm:@babel/code-frame@7.29.0": {
+  "l": "MIT"
+ },
+ "npm:@babel/compat-data@7.29.0": {
+  "l": "MIT"
+ },
+ "npm:@babel/core@7.29.0": {
+  "l": "MIT"
+ },
+ "npm:@babel/generator@7.29.1": {
+  "l": "MIT"
+ },
+ "npm:@babel/helper-annotate-as-pure@7.27.3": {
+  "l": "MIT"
+ },
+ "npm:@babel/helper-compilation-targets@7.28.6": {
+  "l": "MIT"
+ },
+ "npm:@babel/helper-create-class-features-plugin@7.28.6": {
+  "l": "MIT"
+ },
+ "npm:@babel/helper-globals@7.28.0": {
+  "l": "MIT"
+ },
+ "npm:@babel/helper-member-expression-to-functions@7.28.5": {
+  "l": "MIT"
+ },
+ "npm:@babel/helper-module-imports@7.28.6": {
+  "l": "MIT"
+ },
+ "npm:@babel/helper-module-transforms@7.28.6": {
+  "l": "MIT"
+ },
+ "npm:@babel/helper-optimise-call-expression@7.27.1": {
+  "l": "MIT"
+ },
+ "npm:@babel/helper-plugin-utils@7.28.6": {
+  "l": "MIT"
+ },
+ "npm:@babel/helper-replace-supers@7.28.6": {
+  "l": "MIT"
+ },
+ "npm:@babel/helper-skip-transparent-expression-wrappers@7.27.1": {
+  "l": "MIT"
+ },
+ "npm:@babel/helper-string-parser@7.27.1": {
+  "l": "MIT"
+ },
+ "npm:@babel/helper-validator-identifier@7.28.5": {
+  "l": "MIT"
+ },
+ "npm:@babel/helper-validator-option@7.27.1": {
+  "l": "MIT"
+ },
+ "npm:@babel/helpers@7.29.2": {
+  "l": "MIT"
+ },
+ "npm:@babel/parser@7.29.2": {
+  "l": "MIT"
+ },
+ "npm:@babel/plugin-syntax-jsx@7.28.6": {
+  "l": "MIT"
+ },
+ "npm:@babel/plugin-syntax-typescript@7.28.6": {
+  "l": "MIT"
+ },
+ "npm:@babel/plugin-transform-modules-commonjs@7.28.6": {
+  "l": "MIT"
+ },
+ "npm:@babel/plugin-transform-typescript@7.28.6": {
+  "l": "MIT"
+ },
+ "npm:@babel/preset-typescript@7.28.5": {
+  "l": "MIT"
+ },
+ "npm:@babel/runtime@7.29.2": {
+  "l": "MIT"
+ },
+ "npm:@babel/template@7.28.6": {
+  "l": "MIT"
+ },
+ "npm:@babel/traverse@7.29.0": {
+  "l": "MIT"
+ },
+ "npm:@babel/types@7.29.0": {
+  "l": "MIT"
+ },
+ "npm:@base-ui/react@1.3.0": {
+  "l": "MIT"
+ },
+ "npm:@base-ui/utils@0.2.6": {
+  "l": "MIT"
+ },
+ "npm:@braintree/sanitize-url@7.1.2": {
+  "l": "MIT"
+ },
+ "npm:@bramus/specificity@2.4.2": {
+  "l": "MIT"
+ },
+ "npm:@chevrotain/types@11.1.2": {
+  "l": "Apache-2.0"
+ },
+ "npm:@csstools/color-helpers@6.0.2": {
+  "l": "MIT-0"
+ },
+ "npm:@csstools/css-calc@3.2.1": {
+  "l": "MIT"
+ },
+ "npm:@csstools/css-color-parser@4.1.3": {
+  "l": "MIT"
+ },
+ "npm:@csstools/css-parser-algorithms@4.0.0": {
+  "l": "MIT"
+ },
+ "npm:@csstools/css-syntax-patches-for-csstree@1.1.5": {
+  "l": "MIT-0"
+ },
+ "npm:@csstools/css-tokenizer@4.0.0": {
+  "l": "MIT"
+ },
+ "npm:@dnd-kit/accessibility@3.1.1": {
+  "l": "MIT"
+ },
+ "npm:@dnd-kit/core@6.3.1": {
+  "l": "MIT"
+ },
+ "npm:@dnd-kit/sortable@10.0.0": {
+  "l": "MIT"
+ },
+ "npm:@dnd-kit/utilities@3.2.2": {
+  "l": "MIT"
+ },
+ "npm:@dotenvx/dotenvx@1.59.1": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:@ecies/ciphers@0.2.6": {
+  "l": "MIT"
+ },
+ "npm:@emnapi/core@1.9.1": {
+  "l": "MIT"
+ },
+ "npm:@emnapi/runtime@1.9.1": {
+  "l": "MIT"
+ },
+ "npm:@emnapi/wasi-threads@1.2.0": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/aix-ppc64@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/aix-ppc64@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/android-arm64@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/android-arm64@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/android-arm@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/android-arm@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/android-x64@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/android-x64@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/darwin-arm64@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/darwin-arm64@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/darwin-x64@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/darwin-x64@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/freebsd-arm64@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/freebsd-arm64@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/freebsd-x64@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/freebsd-x64@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/linux-arm64@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/linux-arm64@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/linux-arm@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/linux-arm@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/linux-ia32@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/linux-ia32@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/linux-loong64@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/linux-loong64@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/linux-mips64el@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/linux-mips64el@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/linux-ppc64@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/linux-ppc64@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/linux-riscv64@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/linux-riscv64@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/linux-s390x@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/linux-s390x@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/linux-x64@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/linux-x64@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/netbsd-arm64@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/netbsd-x64@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/netbsd-x64@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/openbsd-arm64@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/openbsd-x64@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/openbsd-x64@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/openharmony-arm64@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/sunos-x64@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/sunos-x64@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/win32-arm64@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/win32-arm64@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/win32-ia32@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/win32-ia32@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/win32-x64@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:@esbuild/win32-x64@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:@eslint-community/eslint-utils@4.9.1": {
+  "l": "MIT"
+ },
+ "npm:@eslint-community/regexpp@4.12.2": {
+  "l": "MIT"
+ },
+ "npm:@eslint/config-array@0.21.2": {
+  "l": "Apache-2.0"
+ },
+ "npm:@eslint/config-helpers@0.4.2": {
+  "l": "Apache-2.0"
+ },
+ "npm:@eslint/core@0.17.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:@eslint/eslintrc@3.3.5": {
+  "l": "MIT"
+ },
+ "npm:@eslint/js@9.39.4": {
+  "l": "MIT"
+ },
+ "npm:@eslint/object-schema@2.1.7": {
+  "l": "Apache-2.0"
+ },
+ "npm:@eslint/plugin-kit@0.4.1": {
+  "l": "Apache-2.0"
+ },
+ "npm:@exodus/bytes@1.15.1": {
+  "l": "MIT"
+ },
+ "npm:@firebase/ai@1.4.1": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/analytics-compat@0.2.23": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/analytics-types@0.8.3": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/analytics@0.10.17": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/app-check-compat@0.3.26": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/app-check-interop-types@0.3.3": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/app-check-types@0.5.3": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/app-check@0.10.1": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/app-compat@0.4.2": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/app-types@0.9.3": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/app@0.13.2": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/auth-compat@0.5.28": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/auth-interop-types@0.2.4": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/auth-types@0.13.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/auth@1.10.8": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/component@0.6.18": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/data-connect@0.3.10": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/database-compat@2.0.11": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/database-types@1.0.15": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/database@1.0.20": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/firestore-compat@0.3.53": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/firestore-types@3.0.3": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/firestore@4.8.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/functions-compat@0.3.26": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/functions-types@0.6.3": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/functions@0.12.9": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/installations-compat@0.2.18": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/installations-types@0.5.3": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/installations@0.6.18": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/logger@0.4.4": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/messaging-compat@0.2.22": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/messaging-interop-types@0.2.3": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/messaging@0.12.22": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/performance-compat@0.2.20": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/performance-types@0.2.3": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/performance@0.7.7": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/remote-config-compat@0.2.18": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/remote-config-types@0.4.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/remote-config@0.6.5": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/storage-compat@0.3.24": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/storage-types@0.8.3": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/storage@0.13.14": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/util@1.12.1": {
+  "l": "Apache-2.0"
+ },
+ "npm:@firebase/webchannel-wrapper@1.0.3": {
+  "l": "Apache-2.0"
+ },
+ "npm:@floating-ui/core@1.7.5": {
+  "l": "MIT"
+ },
+ "npm:@floating-ui/dom@1.7.6": {
+  "l": "MIT"
+ },
+ "npm:@floating-ui/react-dom@2.1.8": {
+  "l": "MIT"
+ },
+ "npm:@floating-ui/utils@0.2.11": {
+  "l": "MIT"
+ },
+ "npm:@formatjs/bigdecimal@0.2.0": {
+  "l": "MIT"
+ },
+ "npm:@formatjs/ecma402-abstract@3.2.0": {
+  "l": "MIT"
+ },
+ "npm:@formatjs/fast-memoize@3.1.1": {
+  "l": "MIT"
+ },
+ "npm:@formatjs/icu-messageformat-parser@3.5.3": {
+  "l": "MIT"
+ },
+ "npm:@formatjs/icu-skeleton-parser@2.1.3": {
+  "l": "MIT"
+ },
+ "npm:@formatjs/intl-localematcher@0.8.2": {
+  "l": "MIT"
+ },
+ "npm:@google-cloud/paginator@5.0.2": {
+  "l": "Apache-2.0"
+ },
+ "npm:@google-cloud/projectify@4.0.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:@google-cloud/promisify@4.0.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:@google-cloud/storage@7.19.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:@grpc/grpc-js@1.9.16": {
+  "l": "Apache-2.0"
+ },
+ "npm:@grpc/proto-loader@0.7.15": {
+  "l": "Apache-2.0"
+ },
+ "npm:@hono/node-server@1.19.12": {
+  "l": "MIT"
+ },
+ "npm:@humanfs/core@0.19.1": {
+  "l": "Apache-2.0"
+ },
+ "npm:@humanfs/node@0.16.7": {
+  "l": "Apache-2.0"
+ },
+ "npm:@humanwhocodes/module-importer@1.0.1": {
+  "l": "Apache-2.0"
+ },
+ "npm:@humanwhocodes/retry@0.4.3": {
+  "l": "Apache-2.0"
+ },
+ "npm:@iconify/types@2.0.0": {
+  "l": "MIT"
+ },
+ "npm:@iconify/utils@3.1.3": {
+  "l": "MIT"
+ },
+ "npm:@img/colour@1.1.0": {
+  "l": "MIT"
+ },
+ "npm:@img/sharp-darwin-arm64@0.34.5": {
+  "l": "Apache-2.0"
+ },
+ "npm:@img/sharp-darwin-x64@0.34.5": {
+  "l": "Apache-2.0"
+ },
+ "npm:@img/sharp-libvips-darwin-arm64@1.2.4": {
+  "l": "LGPL-3.0-or-later",
+  "s": "https://github.com/lovell/sharp-libvips"
+ },
+ "npm:@img/sharp-libvips-darwin-x64@1.2.4": {
+  "l": "LGPL-3.0-or-later",
+  "s": "https://github.com/lovell/sharp-libvips"
+ },
+ "npm:@img/sharp-libvips-linux-arm64@1.2.4": {
+  "l": "LGPL-3.0-or-later",
+  "s": "https://github.com/lovell/sharp-libvips"
+ },
+ "npm:@img/sharp-libvips-linux-arm@1.2.4": {
+  "l": "LGPL-3.0-or-later",
+  "s": "https://github.com/lovell/sharp-libvips"
+ },
+ "npm:@img/sharp-libvips-linux-ppc64@1.2.4": {
+  "l": "LGPL-3.0-or-later",
+  "s": "https://github.com/lovell/sharp-libvips"
+ },
+ "npm:@img/sharp-libvips-linux-riscv64@1.2.4": {
+  "l": "LGPL-3.0-or-later",
+  "s": "https://github.com/lovell/sharp-libvips"
+ },
+ "npm:@img/sharp-libvips-linux-s390x@1.2.4": {
+  "l": "LGPL-3.0-or-later",
+  "s": "https://github.com/lovell/sharp-libvips"
+ },
+ "npm:@img/sharp-libvips-linux-x64@1.2.4": {
+  "l": "LGPL-3.0-or-later",
+  "s": "https://github.com/lovell/sharp-libvips"
+ },
+ "npm:@img/sharp-libvips-linuxmusl-arm64@1.2.4": {
+  "l": "LGPL-3.0-or-later",
+  "s": "https://github.com/lovell/sharp-libvips"
+ },
+ "npm:@img/sharp-libvips-linuxmusl-x64@1.2.4": {
+  "l": "LGPL-3.0-or-later",
+  "s": "https://github.com/lovell/sharp-libvips"
+ },
+ "npm:@img/sharp-linux-arm64@0.34.5": {
+  "l": "Apache-2.0"
+ },
+ "npm:@img/sharp-linux-arm@0.34.5": {
+  "l": "Apache-2.0"
+ },
+ "npm:@img/sharp-linux-ppc64@0.34.5": {
+  "l": "Apache-2.0"
+ },
+ "npm:@img/sharp-linux-riscv64@0.34.5": {
+  "l": "Apache-2.0"
+ },
+ "npm:@img/sharp-linux-s390x@0.34.5": {
+  "l": "Apache-2.0"
+ },
+ "npm:@img/sharp-linux-x64@0.34.5": {
+  "l": "Apache-2.0"
+ },
+ "npm:@img/sharp-linuxmusl-arm64@0.34.5": {
+  "l": "Apache-2.0"
+ },
+ "npm:@img/sharp-linuxmusl-x64@0.34.5": {
+  "l": "Apache-2.0"
+ },
+ "npm:@img/sharp-wasm32@0.34.5": {
+  "l": "Apache-2.0 AND LGPL-3.0-or-later AND MIT",
+  "s": "https://github.com/lovell/sharp"
+ },
+ "npm:@img/sharp-win32-arm64@0.34.5": {
+  "l": "Apache-2.0 AND LGPL-3.0-or-later",
+  "s": "https://github.com/lovell/sharp"
+ },
+ "npm:@img/sharp-win32-ia32@0.34.5": {
+  "l": "Apache-2.0 AND LGPL-3.0-or-later",
+  "s": "https://github.com/lovell/sharp"
+ },
+ "npm:@img/sharp-win32-x64@0.34.5": {
+  "l": "Apache-2.0 AND LGPL-3.0-or-later",
+  "s": "https://github.com/lovell/sharp"
+ },
+ "npm:@inquirer/ansi@1.0.2": {
+  "l": "MIT"
+ },
+ "npm:@inquirer/confirm@5.1.21": {
+  "l": "MIT"
+ },
+ "npm:@inquirer/core@10.3.2": {
+  "l": "MIT"
+ },
+ "npm:@inquirer/figures@1.0.15": {
+  "l": "MIT"
+ },
+ "npm:@inquirer/input@4.3.1": {
+  "l": "MIT"
+ },
+ "npm:@inquirer/password@4.0.23": {
+  "l": "MIT"
+ },
+ "npm:@inquirer/select@4.4.2": {
+  "l": "MIT"
+ },
+ "npm:@inquirer/type@3.0.10": {
+  "l": "MIT"
+ },
+ "npm:@jridgewell/gen-mapping@0.3.13": {
+  "l": "MIT"
+ },
+ "npm:@jridgewell/remapping@2.3.5": {
+  "l": "MIT"
+ },
+ "npm:@jridgewell/resolve-uri@3.1.2": {
+  "l": "MIT"
+ },
+ "npm:@jridgewell/sourcemap-codec@1.5.5": {
+  "l": "MIT"
+ },
+ "npm:@jridgewell/trace-mapping@0.3.31": {
+  "l": "MIT"
+ },
+ "npm:@mermaid-js/parser@1.1.1": {
+  "l": "MIT"
+ },
+ "npm:@mixmark-io/domino@2.2.0": {
+  "l": "BSD-2-Clause"
+ },
+ "npm:@modelcontextprotocol/sdk@1.29.0": {
+  "l": "MIT"
+ },
+ "npm:@mswjs/interceptors@0.41.3": {
+  "l": "MIT"
+ },
+ "npm:@napi-rs/wasm-runtime@0.2.12": {
+  "l": "MIT"
+ },
+ "npm:@napi-rs/wasm-runtime@1.1.2": {
+  "l": "MIT"
+ },
+ "npm:@next/env@16.2.2": {
+  "l": "MIT"
+ },
+ "npm:@next/eslint-plugin-next@16.2.2": {
+  "l": "MIT"
+ },
+ "npm:@next/swc-darwin-arm64@16.2.2": {
+  "l": "MIT"
+ },
+ "npm:@next/swc-darwin-x64@16.2.2": {
+  "l": "MIT"
+ },
+ "npm:@next/swc-linux-arm64-gnu@16.2.2": {
+  "l": "MIT"
+ },
+ "npm:@next/swc-linux-arm64-musl@16.2.2": {
+  "l": "MIT"
+ },
+ "npm:@next/swc-linux-x64-gnu@16.2.2": {
+  "l": "MIT"
+ },
+ "npm:@next/swc-linux-x64-musl@16.2.2": {
+  "l": "MIT"
+ },
+ "npm:@next/swc-win32-arm64-msvc@16.2.2": {
+  "l": "MIT"
+ },
+ "npm:@next/swc-win32-x64-msvc@16.2.2": {
+  "l": "MIT"
+ },
+ "npm:@noble/ciphers@1.3.0": {
+  "l": "MIT"
+ },
+ "npm:@noble/curves@1.9.7": {
+  "l": "MIT"
+ },
+ "npm:@noble/hashes@1.8.0": {
+  "l": "MIT"
+ },
+ "npm:@nodable/entities@2.1.0": {
+  "l": "MIT"
+ },
+ "npm:@nodelib/fs.scandir@2.1.5": {
+  "l": "MIT"
+ },
+ "npm:@nodelib/fs.stat@2.0.5": {
+  "l": "MIT"
+ },
+ "npm:@nodelib/fs.walk@1.2.8": {
+  "l": "MIT"
+ },
+ "npm:@nolyfill/is-core-module@1.0.39": {
+  "l": "MIT"
+ },
+ "npm:@open-draft/deferred-promise@2.2.0": {
+  "l": "MIT"
+ },
+ "npm:@open-draft/logger@0.3.0": {
+  "l": "MIT"
+ },
+ "npm:@open-draft/until@2.1.0": {
+  "l": "MIT"
+ },
+ "npm:@oxc-project/types@0.122.0": {
+  "l": "MIT"
+ },
+ "npm:@parcel/watcher-android-arm64@2.5.6": {
+  "l": "MIT"
+ },
+ "npm:@parcel/watcher-darwin-arm64@2.5.6": {
+  "l": "MIT"
+ },
+ "npm:@parcel/watcher-darwin-x64@2.5.6": {
+  "l": "MIT"
+ },
+ "npm:@parcel/watcher-freebsd-x64@2.5.6": {
+  "l": "MIT"
+ },
+ "npm:@parcel/watcher-linux-arm-glibc@2.5.6": {
+  "l": "MIT"
+ },
+ "npm:@parcel/watcher-linux-arm-musl@2.5.6": {
+  "l": "MIT"
+ },
+ "npm:@parcel/watcher-linux-arm64-glibc@2.5.6": {
+  "l": "MIT"
+ },
+ "npm:@parcel/watcher-linux-arm64-musl@2.5.6": {
+  "l": "MIT"
+ },
+ "npm:@parcel/watcher-linux-x64-glibc@2.5.6": {
+  "l": "MIT"
+ },
+ "npm:@parcel/watcher-linux-x64-musl@2.5.6": {
+  "l": "MIT"
+ },
+ "npm:@parcel/watcher-win32-arm64@2.5.6": {
+  "l": "MIT"
+ },
+ "npm:@parcel/watcher-win32-ia32@2.5.6": {
+  "l": "MIT"
+ },
+ "npm:@parcel/watcher-win32-x64@2.5.6": {
+  "l": "MIT"
+ },
+ "npm:@parcel/watcher@2.5.6": {
+  "l": "MIT"
+ },
+ "npm:@playwright/test@1.64.1": {
+  "l": "Apache-2.0"
+ },
+ "npm:@protobufjs/aspromise@1.1.2": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:@protobufjs/base64@1.1.2": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:@protobufjs/codegen@2.0.5": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:@protobufjs/eventemitter@1.1.1": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:@protobufjs/fetch@1.1.1": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:@protobufjs/float@1.0.2": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:@protobufjs/path@1.1.2": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:@protobufjs/pool@1.1.0": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:@protobufjs/utf8@1.1.2": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:@radix-ui/react-compose-refs@1.1.2": {
+  "l": "MIT"
+ },
+ "npm:@radix-ui/react-slot@1.2.4": {
+  "l": "MIT"
+ },
+ "npm:@remirror/core-constants@3.0.0": {
+  "l": "MIT"
+ },
+ "npm:@rolldown/binding-android-arm64@1.0.0-rc.12": {
+  "l": "MIT"
+ },
+ "npm:@rolldown/binding-darwin-arm64@1.0.0-rc.12": {
+  "l": "MIT"
+ },
+ "npm:@rolldown/binding-darwin-x64@1.0.0-rc.12": {
+  "l": "MIT"
+ },
+ "npm:@rolldown/binding-freebsd-x64@1.0.0-rc.12": {
+  "l": "MIT"
+ },
+ "npm:@rolldown/binding-linux-arm-gnueabihf@1.0.0-rc.12": {
+  "l": "MIT"
+ },
+ "npm:@rolldown/binding-linux-arm64-gnu@1.0.0-rc.12": {
+  "l": "MIT"
+ },
+ "npm:@rolldown/binding-linux-arm64-musl@1.0.0-rc.12": {
+  "l": "MIT"
+ },
+ "npm:@rolldown/binding-linux-ppc64-gnu@1.0.0-rc.12": {
+  "l": "MIT"
+ },
+ "npm:@rolldown/binding-linux-s390x-gnu@1.0.0-rc.12": {
+  "l": "MIT"
+ },
+ "npm:@rolldown/binding-linux-x64-gnu@1.0.0-rc.12": {
+  "l": "MIT"
+ },
+ "npm:@rolldown/binding-linux-x64-musl@1.0.0-rc.12": {
+  "l": "MIT"
+ },
+ "npm:@rolldown/binding-openharmony-arm64@1.0.0-rc.12": {
+  "l": "MIT"
+ },
+ "npm:@rolldown/binding-wasm32-wasi@1.0.0-rc.12": {
+  "l": "MIT"
+ },
+ "npm:@rolldown/binding-win32-arm64-msvc@1.0.0-rc.12": {
+  "l": "MIT"
+ },
+ "npm:@rolldown/binding-win32-x64-msvc@1.0.0-rc.12": {
+  "l": "MIT"
+ },
+ "npm:@rolldown/pluginutils@1.0.0-rc.12": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-android-arm-eabi@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-android-arm64@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-darwin-arm64@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-darwin-x64@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-freebsd-arm64@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-freebsd-x64@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-linux-arm-gnueabihf@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-linux-arm-musleabihf@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-linux-arm64-gnu@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-linux-arm64-musl@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-linux-loong64-gnu@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-linux-loong64-musl@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-linux-ppc64-gnu@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-linux-ppc64-musl@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-linux-riscv64-gnu@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-linux-riscv64-musl@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-linux-s390x-gnu@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-linux-x64-gnu@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-linux-x64-musl@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-openbsd-x64@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-openharmony-arm64@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-win32-arm64-msvc@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-win32-ia32-msvc@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-win32-x64-gnu@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rollup/rollup-win32-x64-msvc@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:@rtsao/scc@1.1.0": {
+  "l": "MIT"
+ },
+ "npm:@schummar/icu-type-parser@1.21.5": {
+  "l": "MIT"
+ },
+ "npm:@sec-ant/readable-stream@0.4.1": {
+  "l": "MIT"
+ },
+ "npm:@shikijs/core@4.1.0": {
+  "l": "MIT"
+ },
+ "npm:@shikijs/engine-javascript@4.1.0": {
+  "l": "MIT"
+ },
+ "npm:@shikijs/engine-oniguruma@4.1.0": {
+  "l": "MIT"
+ },
+ "npm:@shikijs/langs@4.1.0": {
+  "l": "MIT"
+ },
+ "npm:@shikijs/primitive@4.1.0": {
+  "l": "MIT"
+ },
+ "npm:@shikijs/themes@4.1.0": {
+  "l": "MIT"
+ },
+ "npm:@shikijs/types@4.1.0": {
+  "l": "MIT"
+ },
+ "npm:@shikijs/vscode-textmate@10.0.2": {
+  "l": "MIT"
+ },
+ "npm:@sindresorhus/merge-streams@4.0.0": {
+  "l": "MIT"
+ },
+ "npm:@smithy/core@3.26.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:@smithy/credential-provider-imds@4.4.2": {
+  "l": "Apache-2.0"
+ },
+ "npm:@smithy/fetch-http-handler@5.5.2": {
+  "l": "Apache-2.0"
+ },
+ "npm:@smithy/is-array-buffer@2.2.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:@smithy/node-http-handler@4.8.2": {
+  "l": "Apache-2.0"
+ },
+ "npm:@smithy/signature-v4@5.5.2": {
+  "l": "Apache-2.0"
+ },
+ "npm:@smithy/types@4.15.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:@smithy/util-buffer-from@2.2.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:@smithy/util-utf8@2.3.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:@standard-schema/spec@1.1.0": {
+  "l": "MIT"
+ },
+ "npm:@supabase/auth-js@2.101.1": {
+  "l": "MIT"
+ },
+ "npm:@supabase/functions-js@2.101.1": {
+  "l": "MIT"
+ },
+ "npm:@supabase/phoenix@0.4.0": {
+  "l": "MIT"
+ },
+ "npm:@supabase/postgrest-js@2.101.1": {
+  "l": "MIT"
+ },
+ "npm:@supabase/realtime-js@2.101.1": {
+  "l": "MIT"
+ },
+ "npm:@supabase/storage-js@2.101.1": {
+  "l": "MIT"
+ },
+ "npm:@supabase/supabase-js@2.101.1": {
+  "l": "MIT"
+ },
+ "npm:@swc/core-darwin-arm64@1.15.21": {
+  "l": "Apache-2.0 AND MIT"
+ },
+ "npm:@swc/core-darwin-x64@1.15.21": {
+  "l": "Apache-2.0 AND MIT"
+ },
+ "npm:@swc/core-linux-arm-gnueabihf@1.15.21": {
+  "l": "Apache-2.0"
+ },
+ "npm:@swc/core-linux-arm64-gnu@1.15.21": {
+  "l": "Apache-2.0 AND MIT"
+ },
+ "npm:@swc/core-linux-arm64-musl@1.15.21": {
+  "l": "Apache-2.0 AND MIT"
+ },
+ "npm:@swc/core-linux-ppc64-gnu@1.15.21": {
+  "l": "Apache-2.0 AND MIT"
+ },
+ "npm:@swc/core-linux-s390x-gnu@1.15.21": {
+  "l": "Apache-2.0 AND MIT"
+ },
+ "npm:@swc/core-linux-x64-gnu@1.15.21": {
+  "l": "Apache-2.0 AND MIT"
+ },
+ "npm:@swc/core-linux-x64-musl@1.15.21": {
+  "l": "Apache-2.0 AND MIT"
+ },
+ "npm:@swc/core-win32-arm64-msvc@1.15.21": {
+  "l": "Apache-2.0 AND MIT"
+ },
+ "npm:@swc/core-win32-ia32-msvc@1.15.21": {
+  "l": "Apache-2.0 AND MIT"
+ },
+ "npm:@swc/core-win32-x64-msvc@1.15.21": {
+  "l": "Apache-2.0 AND MIT"
+ },
+ "npm:@swc/core@1.15.21": {
+  "l": "Apache-2.0"
+ },
+ "npm:@swc/counter@0.1.3": {
+  "l": "Apache-2.0"
+ },
+ "npm:@swc/helpers@0.5.15": {
+  "l": "Apache-2.0"
+ },
+ "npm:@swc/types@0.1.26": {
+  "l": "Apache-2.0"
+ },
+ "npm:@tailwindcss/node@4.2.2": {
+  "l": "MIT"
+ },
+ "npm:@tailwindcss/oxide-android-arm64@4.2.2": {
+  "l": "MIT"
+ },
+ "npm:@tailwindcss/oxide-darwin-arm64@4.2.2": {
+  "l": "MIT"
+ },
+ "npm:@tailwindcss/oxide-darwin-x64@4.2.2": {
+  "l": "MIT"
+ },
+ "npm:@tailwindcss/oxide-freebsd-x64@4.2.2": {
+  "l": "MIT"
+ },
+ "npm:@tailwindcss/oxide-linux-arm-gnueabihf@4.2.2": {
+  "l": "MIT"
+ },
+ "npm:@tailwindcss/oxide-linux-arm64-gnu@4.2.2": {
+  "l": "MIT"
+ },
+ "npm:@tailwindcss/oxide-linux-arm64-musl@4.2.2": {
+  "l": "MIT"
+ },
+ "npm:@tailwindcss/oxide-linux-x64-gnu@4.2.2": {
+  "l": "MIT"
+ },
+ "npm:@tailwindcss/oxide-linux-x64-musl@4.2.2": {
+  "l": "MIT"
+ },
+ "npm:@tailwindcss/oxide-wasm32-wasi@4.2.2": {
+  "l": "MIT"
+ },
+ "npm:@tailwindcss/oxide-win32-arm64-msvc@4.2.2": {
+  "l": "MIT"
+ },
+ "npm:@tailwindcss/oxide-win32-x64-msvc@4.2.2": {
+  "l": "MIT"
+ },
+ "npm:@tailwindcss/oxide@4.2.2": {
+  "l": "MIT"
+ },
+ "npm:@tailwindcss/postcss@4.2.2": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/core@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-blockquote@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-bold@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-bubble-menu@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-bubble-menu@3.23.5": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-bullet-list@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-code-block@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-code@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-document@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-dropcursor@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-floating-menu@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-gapcursor@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-hard-break@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-heading@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-highlight@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-horizontal-rule@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-image@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-italic@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-link@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-list-item@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-list-keymap@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-list@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-ordered-list@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-paragraph@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-placeholder@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-strike@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-table-cell@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-table-header@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-table-row@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-table@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-task-item@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-task-list@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-text@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extension-underline@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/extensions@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/pm@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/react@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/starter-kit@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tiptap/suggestion@3.22.3": {
+  "l": "MIT"
+ },
+ "npm:@tootallnate/once@2.0.0": {
+  "l": "MIT"
+ },
+ "npm:@tosspayments/tosspayments-sdk@2.7.1": {
+  "l": "MIT"
+ },
+ "npm:@ts-morph/common@0.27.0": {
+  "l": "MIT"
+ },
+ "npm:@turbo/darwin-64@2.9.3": {
+  "l": "MIT"
+ },
+ "npm:@turbo/darwin-arm64@2.9.3": {
+  "l": "MIT"
+ },
+ "npm:@turbo/linux-64@2.9.3": {
+  "l": "MIT"
+ },
+ "npm:@turbo/linux-arm64@2.9.3": {
+  "l": "MIT"
+ },
+ "npm:@turbo/windows-64@2.9.3": {
+  "l": "MIT"
+ },
+ "npm:@turbo/windows-arm64@2.9.3": {
+  "l": "MIT"
+ },
+ "npm:@tybys/wasm-util@0.10.1": {
+  "l": "MIT"
+ },
+ "npm:@types/caseless@0.12.5": {
+  "l": "MIT"
+ },
+ "npm:@types/chai@5.2.3": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-array@3.2.2": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-axis@3.0.6": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-brush@3.0.6": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-chord@3.0.6": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-color@3.1.3": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-contour@3.0.6": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-delaunay@6.0.4": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-dispatch@3.0.7": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-drag@3.0.7": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-dsv@3.0.7": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-ease@3.0.2": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-fetch@3.0.7": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-force@3.0.10": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-format@3.0.4": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-geo@3.1.0": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-hierarchy@3.1.7": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-interpolate@3.0.4": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-path@3.1.1": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-polygon@3.0.2": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-quadtree@3.0.6": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-random@3.0.3": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-scale-chromatic@3.1.0": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-scale@4.0.9": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-selection@3.0.11": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-shape@3.1.8": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-time-format@4.0.3": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-time@3.0.4": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-timer@3.0.2": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-transition@3.0.9": {
+  "l": "MIT"
+ },
+ "npm:@types/d3-zoom@3.0.8": {
+  "l": "MIT"
+ },
+ "npm:@types/d3@7.4.3": {
+  "l": "MIT"
+ },
+ "npm:@types/debug@4.1.13": {
+  "l": "MIT"
+ },
+ "npm:@types/deep-eql@4.0.2": {
+  "l": "MIT"
+ },
+ "npm:@types/dompurify@3.2.0": {
+  "l": "MIT"
+ },
+ "npm:@types/estree-jsx@1.0.5": {
+  "l": "MIT"
+ },
+ "npm:@types/estree@1.0.8": {
+  "l": "MIT"
+ },
+ "npm:@types/geojson@7946.0.16": {
+  "l": "MIT"
+ },
+ "npm:@types/hast@3.0.4": {
+  "l": "MIT"
+ },
+ "npm:@types/json-schema@7.0.15": {
+  "l": "MIT"
+ },
+ "npm:@types/json5@0.0.29": {
+  "l": "MIT"
+ },
+ "npm:@types/linkify-it@5.0.0": {
+  "l": "MIT"
+ },
+ "npm:@types/markdown-it@14.1.2": {
+  "l": "MIT"
+ },
+ "npm:@types/mdast@4.0.4": {
+  "l": "MIT"
+ },
+ "npm:@types/mdurl@2.0.0": {
+  "l": "MIT"
+ },
+ "npm:@types/ms@2.1.0": {
+  "l": "MIT"
+ },
+ "npm:@types/node@20.19.37": {
+  "l": "MIT"
+ },
+ "npm:@types/node@22.19.17": {
+  "l": "MIT"
+ },
+ "npm:@types/react-dom@19.2.3": {
+  "l": "MIT"
+ },
+ "npm:@types/react@19.2.14": {
+  "l": "MIT"
+ },
+ "npm:@types/request@2.48.13": {
+  "l": "MIT"
+ },
+ "npm:@types/statuses@2.0.6": {
+  "l": "MIT"
+ },
+ "npm:@types/tough-cookie@4.0.5": {
+  "l": "MIT"
+ },
+ "npm:@types/trusted-types@2.0.7": {
+  "l": "MIT"
+ },
+ "npm:@types/turndown@5.0.6": {
+  "l": "MIT"
+ },
+ "npm:@types/unist@2.0.11": {
+  "l": "MIT"
+ },
+ "npm:@types/unist@3.0.3": {
+  "l": "MIT"
+ },
+ "npm:@types/use-sync-external-store@0.0.6": {
+  "l": "MIT"
+ },
+ "npm:@types/validate-npm-package-name@4.0.2": {
+  "l": "MIT"
+ },
+ "npm:@types/ws@8.18.1": {
+  "l": "MIT"
+ },
+ "npm:@typescript-eslint/eslint-plugin@8.58.0": {
+  "l": "MIT"
+ },
+ "npm:@typescript-eslint/parser@8.58.0": {
+  "l": "MIT"
+ },
+ "npm:@typescript-eslint/project-service@8.58.0": {
+  "l": "MIT"
+ },
+ "npm:@typescript-eslint/scope-manager@8.58.0": {
+  "l": "MIT"
+ },
+ "npm:@typescript-eslint/tsconfig-utils@8.58.0": {
+  "l": "MIT"
+ },
+ "npm:@typescript-eslint/type-utils@8.58.0": {
+  "l": "MIT"
+ },
+ "npm:@typescript-eslint/types@8.58.0": {
+  "l": "MIT"
+ },
+ "npm:@typescript-eslint/typescript-estree@8.58.0": {
+  "l": "MIT"
+ },
+ "npm:@typescript-eslint/utils@8.58.0": {
+  "l": "MIT"
+ },
+ "npm:@typescript-eslint/visitor-keys@8.58.0": {
+  "l": "MIT"
+ },
+ "npm:@ungap/structured-clone@1.3.0": {
+  "l": "ISC"
+ },
+ "npm:@unrs/resolver-binding-android-arm-eabi@1.11.1": {
+  "l": "MIT"
+ },
+ "npm:@unrs/resolver-binding-android-arm64@1.11.1": {
+  "l": "MIT"
+ },
+ "npm:@unrs/resolver-binding-darwin-arm64@1.11.1": {
+  "l": "MIT"
+ },
+ "npm:@unrs/resolver-binding-darwin-x64@1.11.1": {
+  "l": "MIT"
+ },
+ "npm:@unrs/resolver-binding-freebsd-x64@1.11.1": {
+  "l": "MIT"
+ },
+ "npm:@unrs/resolver-binding-linux-arm-gnueabihf@1.11.1": {
+  "l": "MIT"
+ },
+ "npm:@unrs/resolver-binding-linux-arm-musleabihf@1.11.1": {
+  "l": "MIT"
+ },
+ "npm:@unrs/resolver-binding-linux-arm64-gnu@1.11.1": {
+  "l": "MIT"
+ },
+ "npm:@unrs/resolver-binding-linux-arm64-musl@1.11.1": {
+  "l": "MIT"
+ },
+ "npm:@unrs/resolver-binding-linux-ppc64-gnu@1.11.1": {
+  "l": "MIT"
+ },
+ "npm:@unrs/resolver-binding-linux-riscv64-gnu@1.11.1": {
+  "l": "MIT"
+ },
+ "npm:@unrs/resolver-binding-linux-riscv64-musl@1.11.1": {
+  "l": "MIT"
+ },
+ "npm:@unrs/resolver-binding-linux-s390x-gnu@1.11.1": {
+  "l": "MIT"
+ },
+ "npm:@unrs/resolver-binding-linux-x64-gnu@1.11.1": {
+  "l": "MIT"
+ },
+ "npm:@unrs/resolver-binding-linux-x64-musl@1.11.1": {
+  "l": "MIT"
+ },
+ "npm:@unrs/resolver-binding-wasm32-wasi@1.11.1": {
+  "l": "MIT"
+ },
+ "npm:@unrs/resolver-binding-win32-arm64-msvc@1.11.1": {
+  "l": "MIT"
+ },
+ "npm:@unrs/resolver-binding-win32-ia32-msvc@1.11.1": {
+  "l": "MIT"
+ },
+ "npm:@unrs/resolver-binding-win32-x64-msvc@1.11.1": {
+  "l": "MIT"
+ },
+ "npm:@upsetjs/venn.js@2.0.0": {
+  "l": "MIT"
+ },
+ "npm:@vitest/expect@2.1.9": {
+  "l": "MIT"
+ },
+ "npm:@vitest/expect@4.1.2": {
+  "l": "MIT"
+ },
+ "npm:@vitest/mocker@2.1.9": {
+  "l": "MIT"
+ },
+ "npm:@vitest/mocker@4.1.2": {
+  "l": "MIT"
+ },
+ "npm:@vitest/pretty-format@2.1.9": {
+  "l": "MIT"
+ },
+ "npm:@vitest/pretty-format@4.1.2": {
+  "l": "MIT"
+ },
+ "npm:@vitest/runner@2.1.9": {
+  "l": "MIT"
+ },
+ "npm:@vitest/runner@4.1.2": {
+  "l": "MIT"
+ },
+ "npm:@vitest/snapshot@2.1.9": {
+  "l": "MIT"
+ },
+ "npm:@vitest/snapshot@4.1.2": {
+  "l": "MIT"
+ },
+ "npm:@vitest/spy@2.1.9": {
+  "l": "MIT"
+ },
+ "npm:@vitest/spy@4.1.2": {
+  "l": "MIT"
+ },
+ "npm:@vitest/utils@2.1.9": {
+  "l": "MIT"
+ },
+ "npm:@vitest/utils@4.1.2": {
+  "l": "MIT"
+ },
+ "npm:@xyflow/react@12.10.2": {
+  "l": "MIT"
+ },
+ "npm:@xyflow/system@0.0.76": {
+  "l": "MIT"
+ },
+ "npm:abort-controller@3.0.0": {
+  "l": "MIT"
+ },
+ "npm:accepts@2.0.0": {
+  "l": "MIT"
+ },
+ "npm:acorn-jsx@5.3.2": {
+  "l": "MIT"
+ },
+ "npm:acorn@8.16.0": {
+  "l": "MIT"
+ },
+ "npm:agent-base@6.0.2": {
+  "l": "MIT"
+ },
+ "npm:agent-base@7.1.4": {
+  "l": "MIT"
+ },
+ "npm:ajv-formats@3.0.1": {
+  "l": "MIT"
+ },
+ "npm:ajv@6.14.0": {
+  "l": "MIT"
+ },
+ "npm:ajv@8.18.0": {
+  "l": "MIT"
+ },
+ "npm:ansi-regex@5.0.1": {
+  "l": "MIT"
+ },
+ "npm:ansi-regex@6.2.2": {
+  "l": "MIT"
+ },
+ "npm:ansi-styles@4.3.0": {
+  "l": "MIT"
+ },
+ "npm:argparse@2.0.1": {
+  "l": "Python-2.0"
+ },
+ "npm:aria-query@5.3.2": {
+  "l": "Apache-2.0"
+ },
+ "npm:array-buffer-byte-length@1.0.2": {
+  "l": "MIT"
+ },
+ "npm:array-includes@3.1.9": {
+  "l": "MIT"
+ },
+ "npm:array.prototype.findlast@1.2.5": {
+  "l": "MIT"
+ },
+ "npm:array.prototype.findlastindex@1.2.6": {
+  "l": "MIT"
+ },
+ "npm:array.prototype.flat@1.3.3": {
+  "l": "MIT"
+ },
+ "npm:array.prototype.flatmap@1.3.3": {
+  "l": "MIT"
+ },
+ "npm:array.prototype.tosorted@1.1.4": {
+  "l": "MIT"
+ },
+ "npm:arraybuffer.prototype.slice@1.0.4": {
+  "l": "MIT"
+ },
+ "npm:arrify@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:assertion-error@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:ast-types-flow@0.0.8": {
+  "l": "MIT"
+ },
+ "npm:ast-types@0.16.1": {
+  "l": "MIT"
+ },
+ "npm:async-function@1.0.0": {
+  "l": "MIT"
+ },
+ "npm:async-retry@1.3.3": {
+  "l": "MIT"
+ },
+ "npm:asynckit@0.4.0": {
+  "l": "MIT"
+ },
+ "npm:available-typed-arrays@1.0.7": {
+  "l": "MIT"
+ },
+ "npm:axe-core@4.11.2": {
+  "l": "MPL-2.0",
+  "s": "https://github.com/dequelabs/axe-core"
+ },
+ "npm:axe-core@4.13.0": {
+  "l": "MPL-2.0",
+  "s": "https://github.com/dequelabs/axe-core"
+ },
+ "npm:axios@1.15.0": {
+  "l": "MIT"
+ },
+ "npm:axobject-query@4.1.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:bail@2.0.2": {
+  "l": "MIT"
+ },
+ "npm:balanced-match@1.0.2": {
+  "l": "MIT"
+ },
+ "npm:balanced-match@4.0.4": {
+  "l": "MIT"
+ },
+ "npm:base64-arraybuffer@1.0.2": {
+  "l": "MIT"
+ },
+ "npm:base64-js@1.5.1": {
+  "l": "MIT"
+ },
+ "npm:baseline-browser-mapping@2.10.13": {
+  "l": "Apache-2.0"
+ },
+ "npm:bidi-js@1.0.3": {
+  "l": "MIT"
+ },
+ "npm:bignumber.js@9.3.1": {
+  "l": "MIT"
+ },
+ "npm:body-parser@2.2.2": {
+  "l": "MIT"
+ },
+ "npm:bowser@2.14.1": {
+  "l": "MIT"
+ },
+ "npm:brace-expansion@1.1.13": {
+  "l": "MIT"
+ },
+ "npm:brace-expansion@5.0.5": {
+  "l": "MIT"
+ },
+ "npm:braces@3.0.3": {
+  "l": "MIT"
+ },
+ "npm:browserslist@4.28.2": {
+  "l": "MIT"
+ },
+ "npm:buffer-equal-constant-time@1.0.1": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:bundle-name@4.1.0": {
+  "l": "MIT"
+ },
+ "npm:bytes@3.1.2": {
+  "l": "MIT"
+ },
+ "npm:cac@6.7.14": {
+  "l": "MIT"
+ },
+ "npm:call-bind-apply-helpers@1.0.2": {
+  "l": "MIT"
+ },
+ "npm:call-bind@1.0.8": {
+  "l": "MIT"
+ },
+ "npm:call-bound@1.0.4": {
+  "l": "MIT"
+ },
+ "npm:callsites@3.1.0": {
+  "l": "MIT"
+ },
+ "npm:caniuse-lite@1.0.30001782": {
+  "l": "CC-BY-4.0"
+ },
+ "npm:ccount@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:chai@5.3.3": {
+  "l": "MIT"
+ },
+ "npm:chai@6.2.2": {
+  "l": "MIT"
+ },
+ "npm:chalk@4.1.2": {
+  "l": "MIT"
+ },
+ "npm:chalk@5.6.2": {
+  "l": "MIT"
+ },
+ "npm:character-entities-html4@2.1.0": {
+  "l": "MIT"
+ },
+ "npm:character-entities-legacy@3.0.0": {
+  "l": "MIT"
+ },
+ "npm:character-entities@2.0.2": {
+  "l": "MIT"
+ },
+ "npm:character-reference-invalid@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:check-error@2.1.3": {
+  "l": "MIT"
+ },
+ "npm:class-variance-authority@0.7.1": {
+  "l": "Apache-2.0"
+ },
+ "npm:classcat@5.0.5": {
+  "l": "MIT"
+ },
+ "npm:cli-cursor@5.0.0": {
+  "l": "MIT"
+ },
+ "npm:cli-spinners@2.9.2": {
+  "l": "MIT"
+ },
+ "npm:cli-width@4.1.0": {
+  "l": "ISC"
+ },
+ "npm:client-only@0.0.1": {
+  "l": "MIT"
+ },
+ "npm:cliui@8.0.1": {
+  "l": "ISC"
+ },
+ "npm:clsx@2.1.1": {
+  "l": "MIT"
+ },
+ "npm:code-block-writer@13.0.3": {
+  "l": "MIT"
+ },
+ "npm:color-convert@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:color-name@1.1.4": {
+  "l": "MIT"
+ },
+ "npm:combined-stream@1.0.8": {
+  "l": "MIT"
+ },
+ "npm:comma-separated-tokens@2.0.3": {
+  "l": "MIT"
+ },
+ "npm:commander@11.1.0": {
+  "l": "MIT"
+ },
+ "npm:commander@14.0.3": {
+  "l": "MIT"
+ },
+ "npm:commander@7.2.0": {
+  "l": "MIT"
+ },
+ "npm:commander@8.3.0": {
+  "l": "MIT"
+ },
+ "npm:concat-map@0.0.1": {
+  "l": "MIT"
+ },
+ "npm:concurrently@9.2.1": {
+  "l": "MIT"
+ },
+ "npm:content-disposition@1.0.1": {
+  "l": "MIT"
+ },
+ "npm:content-type@1.0.5": {
+  "l": "MIT"
+ },
+ "npm:convert-source-map@2.0.0": {
+  "l": "MIT"
+ },
+ "npm:cookie-signature@1.2.2": {
+  "l": "MIT"
+ },
+ "npm:cookie@0.7.2": {
+  "l": "MIT"
+ },
+ "npm:cookie@1.1.1": {
+  "l": "MIT"
+ },
+ "npm:core-util-is@1.0.3": {
+  "l": "MIT"
+ },
+ "npm:cors@2.8.6": {
+  "l": "MIT"
+ },
+ "npm:cose-base@1.0.3": {
+  "l": "MIT"
+ },
+ "npm:cose-base@2.2.0": {
+  "l": "MIT"
+ },
+ "npm:cosmiconfig@9.0.1": {
+  "l": "MIT"
+ },
+ "npm:crelt@1.0.6": {
+  "l": "MIT"
+ },
+ "npm:cross-spawn@7.0.6": {
+  "l": "MIT"
+ },
+ "npm:css-line-break@2.1.0": {
+  "l": "MIT"
+ },
+ "npm:css-tree@3.2.1": {
+  "l": "MIT"
+ },
+ "npm:cssesc@3.0.0": {
+  "l": "MIT"
+ },
+ "npm:csstype@3.2.3": {
+  "l": "MIT"
+ },
+ "npm:cytoscape-cose-bilkent@4.1.0": {
+  "l": "MIT"
+ },
+ "npm:cytoscape-fcose@2.2.0": {
+  "l": "MIT"
+ },
+ "npm:cytoscape@3.33.4": {
+  "l": "MIT"
+ },
+ "npm:d3-array@2.12.1": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:d3-array@3.2.4": {
+  "l": "ISC"
+ },
+ "npm:d3-axis@3.0.0": {
+  "l": "ISC"
+ },
+ "npm:d3-brush@3.0.0": {
+  "l": "ISC"
+ },
+ "npm:d3-chord@3.0.1": {
+  "l": "ISC"
+ },
+ "npm:d3-color@3.1.0": {
+  "l": "ISC"
+ },
+ "npm:d3-contour@4.0.2": {
+  "l": "ISC"
+ },
+ "npm:d3-delaunay@6.0.4": {
+  "l": "ISC"
+ },
+ "npm:d3-dispatch@3.0.1": {
+  "l": "ISC"
+ },
+ "npm:d3-drag@3.0.0": {
+  "l": "ISC"
+ },
+ "npm:d3-dsv@3.0.1": {
+  "l": "ISC"
+ },
+ "npm:d3-ease@3.0.1": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:d3-fetch@3.0.1": {
+  "l": "ISC"
+ },
+ "npm:d3-force@3.0.0": {
+  "l": "ISC"
+ },
+ "npm:d3-format@3.1.2": {
+  "l": "ISC"
+ },
+ "npm:d3-geo@3.1.1": {
+  "l": "ISC"
+ },
+ "npm:d3-hierarchy@3.1.2": {
+  "l": "ISC"
+ },
+ "npm:d3-interpolate@3.0.1": {
+  "l": "ISC"
+ },
+ "npm:d3-path@1.0.9": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:d3-path@3.1.0": {
+  "l": "ISC"
+ },
+ "npm:d3-polygon@3.0.1": {
+  "l": "ISC"
+ },
+ "npm:d3-quadtree@3.0.1": {
+  "l": "ISC"
+ },
+ "npm:d3-random@3.0.1": {
+  "l": "ISC"
+ },
+ "npm:d3-sankey@0.12.3": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:d3-scale-chromatic@3.1.0": {
+  "l": "ISC"
+ },
+ "npm:d3-scale@4.0.2": {
+  "l": "ISC"
+ },
+ "npm:d3-selection@3.0.0": {
+  "l": "ISC"
+ },
+ "npm:d3-shape@1.3.7": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:d3-shape@3.2.0": {
+  "l": "ISC"
+ },
+ "npm:d3-time-format@4.1.0": {
+  "l": "ISC"
+ },
+ "npm:d3-time@3.1.0": {
+  "l": "ISC"
+ },
+ "npm:d3-timer@3.0.1": {
+  "l": "ISC"
+ },
+ "npm:d3-transition@3.0.1": {
+  "l": "ISC"
+ },
+ "npm:d3-zoom@3.0.0": {
+  "l": "ISC"
+ },
+ "npm:d3@7.9.0": {
+  "l": "ISC"
+ },
+ "npm:dagre-d3-es@7.0.14": {
+  "l": "MIT"
+ },
+ "npm:damerau-levenshtein@1.0.8": {
+  "l": "BSD-2-Clause"
+ },
+ "npm:data-uri-to-buffer@4.0.1": {
+  "l": "MIT"
+ },
+ "npm:data-urls@7.0.0": {
+  "l": "MIT"
+ },
+ "npm:data-view-buffer@1.0.2": {
+  "l": "MIT"
+ },
+ "npm:data-view-byte-length@1.0.2": {
+  "l": "MIT"
+ },
+ "npm:data-view-byte-offset@1.0.1": {
+  "l": "MIT"
+ },
+ "npm:dayjs@1.11.20": {
+  "l": "MIT"
+ },
+ "npm:debug@3.2.7": {
+  "l": "MIT"
+ },
+ "npm:debug@4.4.3": {
+  "l": "MIT"
+ },
+ "npm:decimal.js@10.6.0": {
+  "l": "MIT"
+ },
+ "npm:decode-named-character-reference@1.3.0": {
+  "l": "MIT"
+ },
+ "npm:dedent@1.7.2": {
+  "l": "MIT"
+ },
+ "npm:deep-eql@5.0.2": {
+  "l": "MIT"
+ },
+ "npm:deep-is@0.1.4": {
+  "l": "MIT"
+ },
+ "npm:deepmerge@4.3.1": {
+  "l": "MIT"
+ },
+ "npm:default-browser-id@5.0.1": {
+  "l": "MIT"
+ },
+ "npm:default-browser@5.5.0": {
+  "l": "MIT"
+ },
+ "npm:define-data-property@1.1.4": {
+  "l": "MIT"
+ },
+ "npm:define-lazy-prop@3.0.0": {
+  "l": "MIT"
+ },
+ "npm:define-properties@1.2.1": {
+  "l": "MIT"
+ },
+ "npm:delaunator@5.1.0": {
+  "l": "ISC"
+ },
+ "npm:delayed-stream@1.0.0": {
+  "l": "MIT"
+ },
+ "npm:depd@2.0.0": {
+  "l": "MIT"
+ },
+ "npm:dequal@2.0.3": {
+  "l": "MIT"
+ },
+ "npm:detect-libc@2.1.2": {
+  "l": "Apache-2.0"
+ },
+ "npm:devlop@1.1.0": {
+  "l": "MIT"
+ },
+ "npm:diff@8.0.4": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:doctrine@2.1.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:docx-preview@0.4.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:dompurify@3.3.3": {
+  "l": "(MPL-2.0 OR Apache-2.0)"
+ },
+ "npm:dotenv@17.4.0": {
+  "l": "BSD-2-Clause"
+ },
+ "npm:dunder-proto@1.0.1": {
+  "l": "MIT"
+ },
+ "npm:duplexify@4.1.3": {
+  "l": "MIT"
+ },
+ "npm:ecdsa-sig-formatter@1.0.11": {
+  "l": "Apache-2.0"
+ },
+ "npm:eciesjs@0.4.18": {
+  "l": "MIT"
+ },
+ "npm:ee-first@1.1.1": {
+  "l": "MIT"
+ },
+ "npm:electron-to-chromium@1.5.329": {
+  "l": "ISC"
+ },
+ "npm:emoji-regex@10.6.0": {
+  "l": "MIT"
+ },
+ "npm:emoji-regex@8.0.0": {
+  "l": "MIT"
+ },
+ "npm:emoji-regex@9.2.2": {
+  "l": "MIT"
+ },
+ "npm:encodeurl@2.0.0": {
+  "l": "MIT"
+ },
+ "npm:end-of-stream@1.4.5": {
+  "l": "MIT"
+ },
+ "npm:enhanced-resolve@5.20.1": {
+  "l": "MIT"
+ },
+ "npm:entities@4.5.0": {
+  "l": "BSD-2-Clause"
+ },
+ "npm:entities@6.0.1": {
+  "l": "BSD-2-Clause"
+ },
+ "npm:entities@8.0.0": {
+  "l": "BSD-2-Clause"
+ },
+ "npm:env-paths@2.2.1": {
+  "l": "MIT"
+ },
+ "npm:error-ex@1.3.4": {
+  "l": "MIT"
+ },
+ "npm:es-abstract@1.24.1": {
+  "l": "MIT"
+ },
+ "npm:es-define-property@1.0.1": {
+  "l": "MIT"
+ },
+ "npm:es-errors@1.3.0": {
+  "l": "MIT"
+ },
+ "npm:es-iterator-helpers@1.3.1": {
+  "l": "MIT"
+ },
+ "npm:es-module-lexer@1.7.0": {
+  "l": "MIT"
+ },
+ "npm:es-module-lexer@2.0.0": {
+  "l": "MIT"
+ },
+ "npm:es-object-atoms@1.1.1": {
+  "l": "MIT"
+ },
+ "npm:es-set-tostringtag@2.1.0": {
+  "l": "MIT"
+ },
+ "npm:es-shim-unscopables@1.1.0": {
+  "l": "MIT"
+ },
+ "npm:es-to-primitive@1.3.0": {
+  "l": "MIT"
+ },
+ "npm:es-toolkit@1.46.1": {
+  "l": "MIT"
+ },
+ "npm:esbuild@0.21.5": {
+  "l": "MIT"
+ },
+ "npm:esbuild@0.27.4": {
+  "l": "MIT"
+ },
+ "npm:escalade@3.2.0": {
+  "l": "MIT"
+ },
+ "npm:escape-html@1.0.3": {
+  "l": "MIT"
+ },
+ "npm:escape-string-regexp@4.0.0": {
+  "l": "MIT"
+ },
+ "npm:escape-string-regexp@5.0.0": {
+  "l": "MIT"
+ },
+ "npm:eslint-config-next@16.2.2": {
+  "l": "MIT"
+ },
+ "npm:eslint-import-resolver-node@0.3.9": {
+  "l": "MIT"
+ },
+ "npm:eslint-import-resolver-typescript@3.10.1": {
+  "l": "ISC"
+ },
+ "npm:eslint-module-utils@2.12.1": {
+  "l": "MIT"
+ },
+ "npm:eslint-plugin-import@2.32.0": {
+  "l": "MIT"
+ },
+ "npm:eslint-plugin-jsx-a11y@6.10.2": {
+  "l": "MIT"
+ },
+ "npm:eslint-plugin-react-hooks@7.0.1": {
+  "l": "MIT"
+ },
+ "npm:eslint-plugin-react@7.37.5": {
+  "l": "MIT"
+ },
+ "npm:eslint-scope@8.4.0": {
+  "l": "BSD-2-Clause"
+ },
+ "npm:eslint-visitor-keys@3.4.3": {
+  "l": "Apache-2.0"
+ },
+ "npm:eslint-visitor-keys@4.2.1": {
+  "l": "Apache-2.0"
+ },
+ "npm:eslint-visitor-keys@5.0.1": {
+  "l": "Apache-2.0"
+ },
+ "npm:eslint@9.39.4": {
+  "l": "MIT"
+ },
+ "npm:espree@10.4.0": {
+  "l": "BSD-2-Clause"
+ },
+ "npm:esprima@4.0.1": {
+  "l": "BSD-2-Clause"
+ },
+ "npm:esquery@1.7.0": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:esrecurse@4.3.0": {
+  "l": "BSD-2-Clause"
+ },
+ "npm:estraverse@5.3.0": {
+  "l": "BSD-2-Clause"
+ },
+ "npm:estree-util-is-identifier-name@3.0.0": {
+  "l": "MIT"
+ },
+ "npm:estree-walker@3.0.3": {
+  "l": "MIT"
+ },
+ "npm:esutils@2.0.3": {
+  "l": "BSD-2-Clause"
+ },
+ "npm:etag@1.8.1": {
+  "l": "MIT"
+ },
+ "npm:event-target-shim@5.0.1": {
+  "l": "MIT"
+ },
+ "npm:eventsource-parser@3.0.6": {
+  "l": "MIT"
+ },
+ "npm:eventsource@3.0.7": {
+  "l": "MIT"
+ },
+ "npm:execa@5.1.1": {
+  "l": "MIT"
+ },
+ "npm:execa@9.6.1": {
+  "l": "MIT"
+ },
+ "npm:expect-type@1.3.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:express-rate-limit@8.3.2": {
+  "l": "MIT"
+ },
+ "npm:express@5.2.1": {
+  "l": "MIT"
+ },
+ "npm:extend@3.0.2": {
+  "l": "MIT"
+ },
+ "npm:fast-deep-equal@3.1.3": {
+  "l": "MIT"
+ },
+ "npm:fast-equals@5.4.0": {
+  "l": "MIT"
+ },
+ "npm:fast-glob@3.3.1": {
+  "l": "MIT"
+ },
+ "npm:fast-glob@3.3.3": {
+  "l": "MIT"
+ },
+ "npm:fast-json-stable-stringify@2.1.0": {
+  "l": "MIT"
+ },
+ "npm:fast-levenshtein@2.0.6": {
+  "l": "MIT"
+ },
+ "npm:fast-uri@3.1.0": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:fast-xml-builder@1.1.5": {
+  "l": "MIT"
+ },
+ "npm:fast-xml-parser@5.7.2": {
+  "l": "MIT"
+ },
+ "npm:fastq@1.20.1": {
+  "l": "ISC"
+ },
+ "npm:faye-websocket@0.11.4": {
+  "l": "Apache-2.0"
+ },
+ "npm:fdir@6.5.0": {
+  "l": "MIT"
+ },
+ "npm:fetch-blob@3.2.0": {
+  "l": "MIT"
+ },
+ "npm:figures@6.1.0": {
+  "l": "MIT"
+ },
+ "npm:file-entry-cache@8.0.0": {
+  "l": "MIT"
+ },
+ "npm:fill-range@7.1.1": {
+  "l": "MIT"
+ },
+ "npm:finalhandler@2.1.1": {
+  "l": "MIT"
+ },
+ "npm:find-up@5.0.0": {
+  "l": "MIT"
+ },
+ "npm:firebase@11.10.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:flat-cache@4.0.1": {
+  "l": "MIT"
+ },
+ "npm:flatted@3.4.2": {
+  "l": "ISC"
+ },
+ "npm:follow-redirects@1.16.0": {
+  "l": "MIT"
+ },
+ "npm:for-each@0.3.5": {
+  "l": "MIT"
+ },
+ "npm:form-data@2.5.5": {
+  "l": "MIT"
+ },
+ "npm:form-data@4.0.5": {
+  "l": "MIT"
+ },
+ "npm:formdata-polyfill@4.0.10": {
+  "l": "MIT"
+ },
+ "npm:forwarded@0.2.0": {
+  "l": "MIT"
+ },
+ "npm:framer-motion@12.38.0": {
+  "l": "MIT"
+ },
+ "npm:fresh@2.0.0": {
+  "l": "MIT"
+ },
+ "npm:fs-extra@11.3.4": {
+  "l": "MIT"
+ },
+ "npm:fsevents@2.3.3": {
+  "l": "MIT"
+ },
+ "npm:function-bind@1.1.2": {
+  "l": "MIT"
+ },
+ "npm:function.prototype.name@1.1.8": {
+  "l": "MIT"
+ },
+ "npm:functions-have-names@1.2.3": {
+  "l": "MIT"
+ },
+ "npm:fuzzysort@3.1.0": {
+  "l": "MIT"
+ },
+ "npm:gaxios@6.7.1": {
+  "l": "Apache-2.0"
+ },
+ "npm:gcp-metadata@6.1.1": {
+  "l": "Apache-2.0"
+ },
+ "npm:generator-function@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:gensync@1.0.0-beta.2": {
+  "l": "MIT"
+ },
+ "npm:get-caller-file@2.0.5": {
+  "l": "ISC"
+ },
+ "npm:get-east-asian-width@1.5.0": {
+  "l": "MIT"
+ },
+ "npm:get-intrinsic@1.3.0": {
+  "l": "MIT"
+ },
+ "npm:get-own-enumerable-keys@1.0.0": {
+  "l": "MIT"
+ },
+ "npm:get-proto@1.0.1": {
+  "l": "MIT"
+ },
+ "npm:get-stream@6.0.1": {
+  "l": "MIT"
+ },
+ "npm:get-stream@9.0.1": {
+  "l": "MIT"
+ },
+ "npm:get-symbol-description@1.1.0": {
+  "l": "MIT"
+ },
+ "npm:get-tsconfig@4.13.7": {
+  "l": "MIT"
+ },
+ "npm:glob-parent@5.1.2": {
+  "l": "ISC"
+ },
+ "npm:glob-parent@6.0.2": {
+  "l": "ISC"
+ },
+ "npm:globals@14.0.0": {
+  "l": "MIT"
+ },
+ "npm:globals@16.4.0": {
+  "l": "MIT"
+ },
+ "npm:globalthis@1.0.4": {
+  "l": "MIT"
+ },
+ "npm:google-auth-library@9.15.1": {
+  "l": "Apache-2.0"
+ },
+ "npm:google-logging-utils@0.0.2": {
+  "l": "Apache-2.0"
+ },
+ "npm:gopd@1.2.0": {
+  "l": "MIT"
+ },
+ "npm:graceful-fs@4.2.11": {
+  "l": "ISC"
+ },
+ "npm:graphql@16.13.2": {
+  "l": "MIT"
+ },
+ "npm:gtoken@7.1.0": {
+  "l": "MIT"
+ },
+ "npm:hachure-fill@0.5.2": {
+  "l": "MIT"
+ },
+ "npm:has-bigints@1.1.0": {
+  "l": "MIT"
+ },
+ "npm:has-flag@4.0.0": {
+  "l": "MIT"
+ },
+ "npm:has-property-descriptors@1.0.2": {
+  "l": "MIT"
+ },
+ "npm:has-proto@1.2.0": {
+  "l": "MIT"
+ },
+ "npm:has-symbols@1.1.0": {
+  "l": "MIT"
+ },
+ "npm:has-tostringtag@1.0.2": {
+  "l": "MIT"
+ },
+ "npm:hasown@2.0.2": {
+  "l": "MIT"
+ },
+ "npm:hast-util-from-parse5@8.0.3": {
+  "l": "MIT"
+ },
+ "npm:hast-util-parse-selector@4.0.0": {
+  "l": "MIT"
+ },
+ "npm:hast-util-raw@9.1.0": {
+  "l": "MIT"
+ },
+ "npm:hast-util-sanitize@5.0.2": {
+  "l": "MIT"
+ },
+ "npm:hast-util-to-html@9.0.5": {
+  "l": "MIT"
+ },
+ "npm:hast-util-to-jsx-runtime@2.3.6": {
+  "l": "MIT"
+ },
+ "npm:hast-util-to-parse5@8.0.1": {
+  "l": "MIT"
+ },
+ "npm:hast-util-whitespace@3.0.0": {
+  "l": "MIT"
+ },
+ "npm:hastscript@9.0.1": {
+  "l": "MIT"
+ },
+ "npm:headers-polyfill@4.0.3": {
+  "l": "MIT"
+ },
+ "npm:hermes-estree@0.25.1": {
+  "l": "MIT"
+ },
+ "npm:hermes-parser@0.25.1": {
+  "l": "MIT"
+ },
+ "npm:hono@4.12.9": {
+  "l": "MIT"
+ },
+ "npm:html-encoding-sniffer@6.0.0": {
+  "l": "MIT"
+ },
+ "npm:html-entities@2.6.0": {
+  "l": "MIT"
+ },
+ "npm:html-url-attributes@3.0.1": {
+  "l": "MIT"
+ },
+ "npm:html-void-elements@3.0.0": {
+  "l": "MIT"
+ },
+ "npm:html2canvas-pro@2.2.3": {
+  "l": "MIT"
+ },
+ "npm:http-errors@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:http-parser-js@0.5.10": {
+  "l": "MIT"
+ },
+ "npm:http-proxy-agent@5.0.0": {
+  "l": "MIT"
+ },
+ "npm:https-proxy-agent@5.0.1": {
+  "l": "MIT"
+ },
+ "npm:https-proxy-agent@7.0.6": {
+  "l": "MIT"
+ },
+ "npm:human-signals@2.1.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:human-signals@8.0.1": {
+  "l": "Apache-2.0"
+ },
+ "npm:iceberg-js@0.8.1": {
+  "l": "MIT"
+ },
+ "npm:iconv-lite@0.6.3": {
+  "l": "MIT"
+ },
+ "npm:iconv-lite@0.7.2": {
+  "l": "MIT"
+ },
+ "npm:icu-minify@4.9.0": {
+  "l": "MIT"
+ },
+ "npm:idb@7.1.1": {
+  "l": "ISC"
+ },
+ "npm:ignore@5.3.2": {
+  "l": "MIT"
+ },
+ "npm:ignore@7.0.5": {
+  "l": "MIT"
+ },
+ "npm:immediate@3.0.6": {
+  "l": "MIT"
+ },
+ "npm:immer@11.1.4": {
+  "l": "MIT"
+ },
+ "npm:import-fresh@3.3.1": {
+  "l": "MIT"
+ },
+ "npm:import-meta-resolve@4.2.0": {
+  "l": "MIT"
+ },
+ "npm:imurmurhash@0.1.4": {
+  "l": "MIT"
+ },
+ "npm:inherits@2.0.4": {
+  "l": "ISC"
+ },
+ "npm:inline-style-parser@0.2.7": {
+  "l": "MIT"
+ },
+ "npm:internal-slot@1.1.0": {
+  "l": "MIT"
+ },
+ "npm:internmap@1.0.1": {
+  "l": "ISC"
+ },
+ "npm:internmap@2.0.3": {
+  "l": "ISC"
+ },
+ "npm:intl-messageformat@11.2.0": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:ip-address@10.1.0": {
+  "l": "MIT"
+ },
+ "npm:ipaddr.js@1.9.1": {
+  "l": "MIT"
+ },
+ "npm:is-alphabetical@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:is-alphanumerical@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:is-array-buffer@3.0.5": {
+  "l": "MIT"
+ },
+ "npm:is-arrayish@0.2.1": {
+  "l": "MIT"
+ },
+ "npm:is-async-function@2.1.1": {
+  "l": "MIT"
+ },
+ "npm:is-bigint@1.1.0": {
+  "l": "MIT"
+ },
+ "npm:is-boolean-object@1.2.2": {
+  "l": "MIT"
+ },
+ "npm:is-bun-module@2.0.0": {
+  "l": "MIT"
+ },
+ "npm:is-callable@1.2.7": {
+  "l": "MIT"
+ },
+ "npm:is-core-module@2.16.1": {
+  "l": "MIT"
+ },
+ "npm:is-data-view@1.0.2": {
+  "l": "MIT"
+ },
+ "npm:is-date-object@1.1.0": {
+  "l": "MIT"
+ },
+ "npm:is-decimal@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:is-docker@3.0.0": {
+  "l": "MIT"
+ },
+ "npm:is-extglob@2.1.1": {
+  "l": "MIT"
+ },
+ "npm:is-finalizationregistry@1.1.1": {
+  "l": "MIT"
+ },
+ "npm:is-fullwidth-code-point@3.0.0": {
+  "l": "MIT"
+ },
+ "npm:is-generator-function@1.1.2": {
+  "l": "MIT"
+ },
+ "npm:is-glob@4.0.3": {
+  "l": "MIT"
+ },
+ "npm:is-hexadecimal@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:is-in-ssh@1.0.0": {
+  "l": "MIT"
+ },
+ "npm:is-inside-container@1.0.0": {
+  "l": "MIT"
+ },
+ "npm:is-interactive@2.0.0": {
+  "l": "MIT"
+ },
+ "npm:is-map@2.0.3": {
+  "l": "MIT"
+ },
+ "npm:is-negative-zero@2.0.3": {
+  "l": "MIT"
+ },
+ "npm:is-node-process@1.2.0": {
+  "l": "MIT"
+ },
+ "npm:is-number-object@1.1.1": {
+  "l": "MIT"
+ },
+ "npm:is-number@7.0.0": {
+  "l": "MIT"
+ },
+ "npm:is-obj@3.0.0": {
+  "l": "MIT"
+ },
+ "npm:is-plain-obj@4.1.0": {
+  "l": "MIT"
+ },
+ "npm:is-potential-custom-element-name@1.0.1": {
+  "l": "MIT"
+ },
+ "npm:is-promise@4.0.0": {
+  "l": "MIT"
+ },
+ "npm:is-regex@1.2.1": {
+  "l": "MIT"
+ },
+ "npm:is-regexp@3.1.0": {
+  "l": "MIT"
+ },
+ "npm:is-set@2.0.3": {
+  "l": "MIT"
+ },
+ "npm:is-shared-array-buffer@1.0.4": {
+  "l": "MIT"
+ },
+ "npm:is-stream@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:is-stream@4.0.1": {
+  "l": "MIT"
+ },
+ "npm:is-string@1.1.1": {
+  "l": "MIT"
+ },
+ "npm:is-symbol@1.1.1": {
+  "l": "MIT"
+ },
+ "npm:is-typed-array@1.1.15": {
+  "l": "MIT"
+ },
+ "npm:is-unicode-supported@1.3.0": {
+  "l": "MIT"
+ },
+ "npm:is-unicode-supported@2.1.0": {
+  "l": "MIT"
+ },
+ "npm:is-weakmap@2.0.2": {
+  "l": "MIT"
+ },
+ "npm:is-weakref@1.1.1": {
+  "l": "MIT"
+ },
+ "npm:is-weakset@2.0.4": {
+  "l": "MIT"
+ },
+ "npm:is-wsl@3.1.1": {
+  "l": "MIT"
+ },
+ "npm:isarray@1.0.0": {
+  "l": "MIT"
+ },
+ "npm:isarray@2.0.5": {
+  "l": "MIT"
+ },
+ "npm:isexe@2.0.0": {
+  "l": "ISC"
+ },
+ "npm:isexe@3.1.5": {
+  "l": "BlueOak-1.0.0"
+ },
+ "npm:iterator.prototype@1.1.5": {
+  "l": "MIT"
+ },
+ "npm:jiti@2.6.1": {
+  "l": "MIT"
+ },
+ "npm:jose@6.2.3": {
+  "l": "MIT"
+ },
+ "npm:js-tokens@4.0.0": {
+  "l": "MIT"
+ },
+ "npm:js-yaml@4.1.1": {
+  "l": "MIT"
+ },
+ "npm:jsdom@29.1.1": {
+  "l": "MIT"
+ },
+ "npm:jsesc@3.1.0": {
+  "l": "MIT"
+ },
+ "npm:json-bigint@1.0.0": {
+  "l": "MIT"
+ },
+ "npm:json-buffer@3.0.1": {
+  "l": "MIT"
+ },
+ "npm:json-parse-even-better-errors@2.3.1": {
+  "l": "MIT"
+ },
+ "npm:json-schema-traverse@0.4.1": {
+  "l": "MIT"
+ },
+ "npm:json-schema-traverse@1.0.0": {
+  "l": "MIT"
+ },
+ "npm:json-schema-typed@8.0.2": {
+  "l": "BSD-2-Clause"
+ },
+ "npm:json-stable-stringify-without-jsonify@1.0.1": {
+  "l": "MIT"
+ },
+ "npm:json5@1.0.2": {
+  "l": "MIT"
+ },
+ "npm:json5@2.2.3": {
+  "l": "MIT"
+ },
+ "npm:jsonfile@6.2.0": {
+  "l": "MIT"
+ },
+ "npm:jsx-ast-utils@3.3.5": {
+  "l": "MIT"
+ },
+ "npm:jszip@3.10.1": {
+  "l": "(MIT OR GPL-3.0-or-later)"
+ },
+ "npm:jwa@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:jws@4.0.1": {
+  "l": "MIT"
+ },
+ "npm:katex@0.16.47": {
+  "l": "MIT"
+ },
+ "npm:keyv@4.5.4": {
+  "l": "MIT"
+ },
+ "npm:khroma@2.1.0": {
+  "l": "",
+  "s": "https://github.com/fabiospampinato/khroma"
+ },
+ "npm:kleur@3.0.3": {
+  "l": "MIT"
+ },
+ "npm:kleur@4.1.5": {
+  "l": "MIT"
+ },
+ "npm:language-subtag-registry@0.3.23": {
+  "l": "CC0-1.0"
+ },
+ "npm:language-tags@1.0.9": {
+  "l": "MIT"
+ },
+ "npm:layout-base@1.0.2": {
+  "l": "MIT"
+ },
+ "npm:layout-base@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:levn@0.4.1": {
+  "l": "MIT"
+ },
+ "npm:lie@3.3.0": {
+  "l": "MIT"
+ },
+ "npm:lightningcss-android-arm64@1.32.0": {
+  "l": "MPL-2.0",
+  "s": "https://github.com/parcel-bundler/lightningcss"
+ },
+ "npm:lightningcss-darwin-arm64@1.32.0": {
+  "l": "MPL-2.0",
+  "s": "https://github.com/parcel-bundler/lightningcss"
+ },
+ "npm:lightningcss-darwin-x64@1.32.0": {
+  "l": "MPL-2.0",
+  "s": "https://github.com/parcel-bundler/lightningcss"
+ },
+ "npm:lightningcss-freebsd-x64@1.32.0": {
+  "l": "MPL-2.0",
+  "s": "https://github.com/parcel-bundler/lightningcss"
+ },
+ "npm:lightningcss-linux-arm-gnueabihf@1.32.0": {
+  "l": "MPL-2.0",
+  "s": "https://github.com/parcel-bundler/lightningcss"
+ },
+ "npm:lightningcss-linux-arm64-gnu@1.32.0": {
+  "l": "MPL-2.0",
+  "s": "https://github.com/parcel-bundler/lightningcss"
+ },
+ "npm:lightningcss-linux-arm64-musl@1.32.0": {
+  "l": "MPL-2.0",
+  "s": "https://github.com/parcel-bundler/lightningcss"
+ },
+ "npm:lightningcss-linux-x64-gnu@1.32.0": {
+  "l": "MPL-2.0",
+  "s": "https://github.com/parcel-bundler/lightningcss"
+ },
+ "npm:lightningcss-linux-x64-musl@1.32.0": {
+  "l": "MPL-2.0",
+  "s": "https://github.com/parcel-bundler/lightningcss"
+ },
+ "npm:lightningcss-win32-arm64-msvc@1.32.0": {
+  "l": "MPL-2.0",
+  "s": "https://github.com/parcel-bundler/lightningcss"
+ },
+ "npm:lightningcss-win32-x64-msvc@1.32.0": {
+  "l": "MPL-2.0",
+  "s": "https://github.com/parcel-bundler/lightningcss"
+ },
+ "npm:lightningcss@1.32.0": {
+  "l": "MPL-2.0",
+  "s": "https://github.com/parcel-bundler/lightningcss"
+ },
+ "npm:lines-and-columns@1.2.4": {
+  "l": "MIT"
+ },
+ "npm:linkify-it@5.0.0": {
+  "l": "MIT"
+ },
+ "npm:linkifyjs@4.3.2": {
+  "l": "MIT"
+ },
+ "npm:locate-path@6.0.0": {
+  "l": "MIT"
+ },
+ "npm:lodash-es@4.18.1": {
+  "l": "MIT"
+ },
+ "npm:lodash.camelcase@4.3.0": {
+  "l": "MIT"
+ },
+ "npm:lodash.merge@4.6.2": {
+  "l": "MIT"
+ },
+ "npm:log-symbols@6.0.0": {
+  "l": "MIT"
+ },
+ "npm:long@5.3.2": {
+  "l": "Apache-2.0"
+ },
+ "npm:longest-streak@3.1.0": {
+  "l": "MIT"
+ },
+ "npm:loose-envify@1.4.0": {
+  "l": "MIT"
+ },
+ "npm:loupe@3.2.1": {
+  "l": "MIT"
+ },
+ "npm:lru-cache@11.5.1": {
+  "l": "BlueOak-1.0.0"
+ },
+ "npm:lru-cache@5.1.1": {
+  "l": "ISC"
+ },
+ "npm:lucide-react@1.7.0": {
+  "l": "ISC"
+ },
+ "npm:magic-string@0.30.21": {
+  "l": "MIT"
+ },
+ "npm:markdown-it@14.1.1": {
+  "l": "MIT"
+ },
+ "npm:markdown-table@3.0.4": {
+  "l": "MIT"
+ },
+ "npm:marked@16.4.2": {
+  "l": "MIT"
+ },
+ "npm:math-intrinsics@1.1.0": {
+  "l": "MIT"
+ },
+ "npm:mdast-util-find-and-replace@3.0.2": {
+  "l": "MIT"
+ },
+ "npm:mdast-util-from-markdown@2.0.3": {
+  "l": "MIT"
+ },
+ "npm:mdast-util-gfm-autolink-literal@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:mdast-util-gfm-footnote@2.1.0": {
+  "l": "MIT"
+ },
+ "npm:mdast-util-gfm-strikethrough@2.0.0": {
+  "l": "MIT"
+ },
+ "npm:mdast-util-gfm-table@2.0.0": {
+  "l": "MIT"
+ },
+ "npm:mdast-util-gfm-task-list-item@2.0.0": {
+  "l": "MIT"
+ },
+ "npm:mdast-util-gfm@3.1.0": {
+  "l": "MIT"
+ },
+ "npm:mdast-util-mdx-expression@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:mdast-util-mdx-jsx@3.2.0": {
+  "l": "MIT"
+ },
+ "npm:mdast-util-mdxjs-esm@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:mdast-util-newline-to-break@2.0.0": {
+  "l": "MIT"
+ },
+ "npm:mdast-util-phrasing@4.1.0": {
+  "l": "MIT"
+ },
+ "npm:mdast-util-to-hast@13.2.1": {
+  "l": "MIT"
+ },
+ "npm:mdast-util-to-markdown@2.1.2": {
+  "l": "MIT"
+ },
+ "npm:mdast-util-to-string@4.0.0": {
+  "l": "MIT"
+ },
+ "npm:mdn-data@2.27.1": {
+  "l": "CC0-1.0"
+ },
+ "npm:mdurl@2.0.0": {
+  "l": "MIT"
+ },
+ "npm:media-typer@1.1.0": {
+  "l": "MIT"
+ },
+ "npm:merge-descriptors@2.0.0": {
+  "l": "MIT"
+ },
+ "npm:merge-stream@2.0.0": {
+  "l": "MIT"
+ },
+ "npm:merge2@1.4.1": {
+  "l": "MIT"
+ },
+ "npm:mermaid@11.15.0": {
+  "l": "MIT"
+ },
+ "npm:micromark-core-commonmark@2.0.3": {
+  "l": "MIT"
+ },
+ "npm:micromark-extension-gfm-autolink-literal@2.1.0": {
+  "l": "MIT"
+ },
+ "npm:micromark-extension-gfm-footnote@2.1.0": {
+  "l": "MIT"
+ },
+ "npm:micromark-extension-gfm-strikethrough@2.1.0": {
+  "l": "MIT"
+ },
+ "npm:micromark-extension-gfm-table@2.1.1": {
+  "l": "MIT"
+ },
+ "npm:micromark-extension-gfm-tagfilter@2.0.0": {
+  "l": "MIT"
+ },
+ "npm:micromark-extension-gfm-task-list-item@2.1.0": {
+  "l": "MIT"
+ },
+ "npm:micromark-extension-gfm@3.0.0": {
+  "l": "MIT"
+ },
+ "npm:micromark-factory-destination@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:micromark-factory-label@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:micromark-factory-space@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:micromark-factory-title@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:micromark-factory-whitespace@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:micromark-util-character@2.1.1": {
+  "l": "MIT"
+ },
+ "npm:micromark-util-chunked@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:micromark-util-classify-character@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:micromark-util-combine-extensions@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:micromark-util-decode-numeric-character-reference@2.0.2": {
+  "l": "MIT"
+ },
+ "npm:micromark-util-decode-string@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:micromark-util-encode@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:micromark-util-html-tag-name@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:micromark-util-normalize-identifier@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:micromark-util-resolve-all@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:micromark-util-sanitize-uri@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:micromark-util-subtokenize@2.1.0": {
+  "l": "MIT"
+ },
+ "npm:micromark-util-symbol@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:micromark-util-types@2.0.2": {
+  "l": "MIT"
+ },
+ "npm:micromark@4.0.2": {
+  "l": "MIT"
+ },
+ "npm:micromatch@4.0.8": {
+  "l": "MIT"
+ },
+ "npm:mime-db@1.52.0": {
+  "l": "MIT"
+ },
+ "npm:mime-db@1.54.0": {
+  "l": "MIT"
+ },
+ "npm:mime-types@2.1.35": {
+  "l": "MIT"
+ },
+ "npm:mime-types@3.0.2": {
+  "l": "MIT"
+ },
+ "npm:mime@3.0.0": {
+  "l": "MIT"
+ },
+ "npm:mimic-fn@2.1.0": {
+  "l": "MIT"
+ },
+ "npm:mimic-function@5.0.1": {
+  "l": "MIT"
+ },
+ "npm:minimatch@10.2.5": {
+  "l": "BlueOak-1.0.0"
+ },
+ "npm:minimatch@3.1.5": {
+  "l": "ISC"
+ },
+ "npm:minimist@1.2.8": {
+  "l": "MIT"
+ },
+ "npm:motion-dom@12.38.0": {
+  "l": "MIT"
+ },
+ "npm:motion-utils@12.36.0": {
+  "l": "MIT"
+ },
+ "npm:ms@2.1.3": {
+  "l": "MIT"
+ },
+ "npm:msw@2.12.14": {
+  "l": "MIT"
+ },
+ "npm:mute-stream@2.0.0": {
+  "l": "ISC"
+ },
+ "npm:nanoid@3.3.11": {
+  "l": "MIT"
+ },
+ "npm:napi-postinstall@0.3.4": {
+  "l": "MIT"
+ },
+ "npm:natural-compare@1.4.0": {
+  "l": "MIT"
+ },
+ "npm:negotiator@1.0.0": {
+  "l": "MIT"
+ },
+ "npm:next-intl-swc-plugin-extractor@4.9.0": {
+  "l": "MIT"
+ },
+ "npm:next-intl@4.9.0": {
+  "l": "MIT"
+ },
+ "npm:next-themes@0.4.6": {
+  "l": "MIT"
+ },
+ "npm:next@16.2.2": {
+  "l": "MIT"
+ },
+ "npm:node-addon-api@7.1.1": {
+  "l": "MIT"
+ },
+ "npm:node-domexception@1.0.0": {
+  "l": "MIT"
+ },
+ "npm:node-exports-info@1.6.0": {
+  "l": "MIT"
+ },
+ "npm:node-fetch@2.7.0": {
+  "l": "MIT"
+ },
+ "npm:node-fetch@3.3.2": {
+  "l": "MIT"
+ },
+ "npm:node-releases@2.0.36": {
+  "l": "MIT"
+ },
+ "npm:npm-run-path@4.0.1": {
+  "l": "MIT"
+ },
+ "npm:npm-run-path@6.0.0": {
+  "l": "MIT"
+ },
+ "npm:object-assign@4.1.1": {
+  "l": "MIT"
+ },
+ "npm:object-inspect@1.13.4": {
+  "l": "MIT"
+ },
+ "npm:object-keys@1.1.1": {
+  "l": "MIT"
+ },
+ "npm:object-treeify@1.1.33": {
+  "l": "MIT"
+ },
+ "npm:object.assign@4.1.7": {
+  "l": "MIT"
+ },
+ "npm:object.entries@1.1.9": {
+  "l": "MIT"
+ },
+ "npm:object.fromentries@2.0.8": {
+  "l": "MIT"
+ },
+ "npm:object.groupby@1.0.3": {
+  "l": "MIT"
+ },
+ "npm:object.values@1.2.1": {
+  "l": "MIT"
+ },
+ "npm:obug@2.1.1": {
+  "l": "MIT"
+ },
+ "npm:on-finished@2.4.1": {
+  "l": "MIT"
+ },
+ "npm:once@1.4.0": {
+  "l": "ISC"
+ },
+ "npm:onetime@5.1.2": {
+  "l": "MIT"
+ },
+ "npm:onetime@7.0.0": {
+  "l": "MIT"
+ },
+ "npm:oniguruma-parser@0.12.2": {
+  "l": "MIT"
+ },
+ "npm:oniguruma-to-es@4.3.6": {
+  "l": "MIT"
+ },
+ "npm:open@11.0.0": {
+  "l": "MIT"
+ },
+ "npm:optionator@0.9.4": {
+  "l": "MIT"
+ },
+ "npm:ora@8.2.0": {
+  "l": "MIT"
+ },
+ "npm:orderedmap@2.1.1": {
+  "l": "MIT"
+ },
+ "npm:outvariant@1.4.3": {
+  "l": "MIT"
+ },
+ "npm:own-keys@1.0.1": {
+  "l": "MIT"
+ },
+ "npm:p-limit@3.1.0": {
+  "l": "MIT"
+ },
+ "npm:p-locate@5.0.0": {
+  "l": "MIT"
+ },
+ "npm:package-manager-detector@1.6.0": {
+  "l": "MIT"
+ },
+ "npm:pako@1.0.11": {
+  "l": "(MIT AND Zlib)"
+ },
+ "npm:parent-module@1.0.1": {
+  "l": "MIT"
+ },
+ "npm:parse-entities@4.0.2": {
+  "l": "MIT"
+ },
+ "npm:parse-json@5.2.0": {
+  "l": "MIT"
+ },
+ "npm:parse-ms@4.0.0": {
+  "l": "MIT"
+ },
+ "npm:parse5@7.3.0": {
+  "l": "MIT"
+ },
+ "npm:parse5@8.0.1": {
+  "l": "MIT"
+ },
+ "npm:parseurl@1.3.3": {
+  "l": "MIT"
+ },
+ "npm:path-browserify@1.0.1": {
+  "l": "MIT"
+ },
+ "npm:path-data-parser@0.1.0": {
+  "l": "MIT"
+ },
+ "npm:path-exists@4.0.0": {
+  "l": "MIT"
+ },
+ "npm:path-expression-matcher@1.5.0": {
+  "l": "MIT"
+ },
+ "npm:path-key@3.1.1": {
+  "l": "MIT"
+ },
+ "npm:path-key@4.0.0": {
+  "l": "MIT"
+ },
+ "npm:path-parse@1.0.7": {
+  "l": "MIT"
+ },
+ "npm:path-to-regexp@6.3.0": {
+  "l": "MIT"
+ },
+ "npm:path-to-regexp@8.4.1": {
+  "l": "MIT"
+ },
+ "npm:pathe@1.1.2": {
+  "l": "MIT"
+ },
+ "npm:pathe@2.0.3": {
+  "l": "MIT"
+ },
+ "npm:pathval@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:picocolors@1.1.1": {
+  "l": "ISC"
+ },
+ "npm:picomatch@2.3.2": {
+  "l": "MIT"
+ },
+ "npm:picomatch@4.0.4": {
+  "l": "MIT"
+ },
+ "npm:pkce-challenge@5.0.1": {
+  "l": "MIT"
+ },
+ "npm:playwright-core@1.64.1": {
+  "l": "Apache-2.0"
+ },
+ "npm:playwright@1.64.1": {
+  "l": "Apache-2.0"
+ },
+ "npm:po-parser@2.1.1": {
+  "l": "MIT"
+ },
+ "npm:points-on-curve@0.2.0": {
+  "l": "MIT"
+ },
+ "npm:points-on-path@0.2.1": {
+  "l": "MIT"
+ },
+ "npm:possible-typed-array-names@1.1.0": {
+  "l": "MIT"
+ },
+ "npm:postcss-selector-parser@7.1.1": {
+  "l": "MIT"
+ },
+ "npm:postcss@8.4.31": {
+  "l": "MIT"
+ },
+ "npm:postcss@8.5.8": {
+  "l": "MIT"
+ },
+ "npm:powershell-utils@0.1.0": {
+  "l": "MIT"
+ },
+ "npm:prelude-ls@1.2.1": {
+  "l": "MIT"
+ },
+ "npm:pretty-ms@9.3.0": {
+  "l": "MIT"
+ },
+ "npm:process-nextick-args@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:prompts@2.4.2": {
+  "l": "MIT"
+ },
+ "npm:prop-types@15.8.1": {
+  "l": "MIT"
+ },
+ "npm:property-information@7.1.0": {
+  "l": "MIT"
+ },
+ "npm:prosemirror-changeset@2.4.0": {
+  "l": "MIT"
+ },
+ "npm:prosemirror-collab@1.3.1": {
+  "l": "MIT"
+ },
+ "npm:prosemirror-commands@1.7.1": {
+  "l": "MIT"
+ },
+ "npm:prosemirror-dropcursor@1.8.2": {
+  "l": "MIT"
+ },
+ "npm:prosemirror-gapcursor@1.4.1": {
+  "l": "MIT"
+ },
+ "npm:prosemirror-history@1.5.0": {
+  "l": "MIT"
+ },
+ "npm:prosemirror-inputrules@1.5.1": {
+  "l": "MIT"
+ },
+ "npm:prosemirror-keymap@1.2.3": {
+  "l": "MIT"
+ },
+ "npm:prosemirror-markdown@1.13.4": {
+  "l": "MIT"
+ },
+ "npm:prosemirror-menu@1.3.0": {
+  "l": "MIT"
+ },
+ "npm:prosemirror-model@1.25.4": {
+  "l": "MIT"
+ },
+ "npm:prosemirror-schema-basic@1.2.4": {
+  "l": "MIT"
+ },
+ "npm:prosemirror-schema-list@1.5.1": {
+  "l": "MIT"
+ },
+ "npm:prosemirror-state@1.4.4": {
+  "l": "MIT"
+ },
+ "npm:prosemirror-tables@1.8.5": {
+  "l": "MIT"
+ },
+ "npm:prosemirror-trailing-node@3.0.0": {
+  "l": "MIT"
+ },
+ "npm:prosemirror-transform@1.12.0": {
+  "l": "MIT"
+ },
+ "npm:prosemirror-view@1.41.8": {
+  "l": "MIT"
+ },
+ "npm:protobufjs@7.6.5": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:proxy-addr@2.0.7": {
+  "l": "MIT"
+ },
+ "npm:proxy-from-env@2.1.0": {
+  "l": "MIT"
+ },
+ "npm:punycode.js@2.3.1": {
+  "l": "MIT"
+ },
+ "npm:punycode@2.3.1": {
+  "l": "MIT"
+ },
+ "npm:qrcode.react@4.2.0": {
+  "l": "ISC"
+ },
+ "npm:qs@6.15.0": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:queue-microtask@1.2.3": {
+  "l": "MIT"
+ },
+ "npm:range-parser@1.2.1": {
+  "l": "MIT"
+ },
+ "npm:raw-body@3.0.2": {
+  "l": "MIT"
+ },
+ "npm:react-dom@19.2.4": {
+  "l": "MIT"
+ },
+ "npm:react-is@16.13.1": {
+  "l": "MIT"
+ },
+ "npm:react-markdown@10.1.0": {
+  "l": "MIT"
+ },
+ "npm:react@19.2.4": {
+  "l": "MIT"
+ },
+ "npm:readable-stream@2.3.8": {
+  "l": "MIT"
+ },
+ "npm:readable-stream@3.6.2": {
+  "l": "MIT"
+ },
+ "npm:recast@0.23.11": {
+  "l": "MIT"
+ },
+ "npm:reflect.getprototypeof@1.0.10": {
+  "l": "MIT"
+ },
+ "npm:regex-recursion@6.0.2": {
+  "l": "MIT"
+ },
+ "npm:regex-utilities@2.3.0": {
+  "l": "MIT"
+ },
+ "npm:regex@6.1.0": {
+  "l": "MIT"
+ },
+ "npm:regexp.prototype.flags@1.5.4": {
+  "l": "MIT"
+ },
+ "npm:rehype-raw@7.0.0": {
+  "l": "MIT"
+ },
+ "npm:rehype-sanitize@6.0.0": {
+  "l": "MIT"
+ },
+ "npm:remark-breaks@4.0.0": {
+  "l": "MIT"
+ },
+ "npm:remark-gfm@4.0.1": {
+  "l": "MIT"
+ },
+ "npm:remark-parse@11.0.0": {
+  "l": "MIT"
+ },
+ "npm:remark-rehype@11.1.2": {
+  "l": "MIT"
+ },
+ "npm:remark-stringify@11.0.0": {
+  "l": "MIT"
+ },
+ "npm:require-directory@2.1.1": {
+  "l": "MIT"
+ },
+ "npm:require-from-string@2.0.2": {
+  "l": "MIT"
+ },
+ "npm:reselect@5.1.1": {
+  "l": "MIT"
+ },
+ "npm:resolve-from@4.0.0": {
+  "l": "MIT"
+ },
+ "npm:resolve-pkg-maps@1.0.0": {
+  "l": "MIT"
+ },
+ "npm:resolve@1.22.11": {
+  "l": "MIT"
+ },
+ "npm:resolve@2.0.0-next.6": {
+  "l": "MIT"
+ },
+ "npm:restore-cursor@5.1.0": {
+  "l": "MIT"
+ },
+ "npm:retry-request@7.0.2": {
+  "l": "MIT"
+ },
+ "npm:retry@0.13.1": {
+  "l": "MIT"
+ },
+ "npm:rettime@0.10.1": {
+  "l": "MIT"
+ },
+ "npm:reusify@1.1.0": {
+  "l": "MIT"
+ },
+ "npm:robust-predicates@3.0.3": {
+  "l": "Unlicense"
+ },
+ "npm:rolldown@1.0.0-rc.12": {
+  "l": "MIT"
+ },
+ "npm:rollup@4.60.4": {
+  "l": "MIT"
+ },
+ "npm:rope-sequence@1.3.4": {
+  "l": "MIT"
+ },
+ "npm:roughjs@4.6.6": {
+  "l": "MIT"
+ },
+ "npm:router@2.2.0": {
+  "l": "MIT"
+ },
+ "npm:run-applescript@7.1.0": {
+  "l": "MIT"
+ },
+ "npm:run-parallel@1.2.0": {
+  "l": "MIT"
+ },
+ "npm:rw@1.3.3": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:rxjs@7.8.2": {
+  "l": "Apache-2.0"
+ },
+ "npm:safe-array-concat@1.1.3": {
+  "l": "MIT"
+ },
+ "npm:safe-buffer@5.1.2": {
+  "l": "MIT"
+ },
+ "npm:safe-buffer@5.2.1": {
+  "l": "MIT"
+ },
+ "npm:safe-push-apply@1.0.0": {
+  "l": "MIT"
+ },
+ "npm:safe-regex-test@1.1.0": {
+  "l": "MIT"
+ },
+ "npm:safer-buffer@2.1.2": {
+  "l": "MIT"
+ },
+ "npm:saxes@6.0.0": {
+  "l": "ISC"
+ },
+ "npm:scheduler@0.27.0": {
+  "l": "MIT"
+ },
+ "npm:semver@6.3.1": {
+  "l": "ISC"
+ },
+ "npm:semver@7.7.4": {
+  "l": "ISC"
+ },
+ "npm:send@1.2.1": {
+  "l": "MIT"
+ },
+ "npm:serve-static@2.2.1": {
+  "l": "MIT"
+ },
+ "npm:set-function-length@1.2.2": {
+  "l": "MIT"
+ },
+ "npm:set-function-name@2.0.2": {
+  "l": "MIT"
+ },
+ "npm:set-proto@1.0.0": {
+  "l": "MIT"
+ },
+ "npm:setimmediate@1.0.5": {
+  "l": "MIT"
+ },
+ "npm:setprototypeof@1.2.0": {
+  "l": "ISC"
+ },
+ "npm:shadcn@4.1.2": {
+  "l": "MIT"
+ },
+ "npm:sharp@0.34.5": {
+  "l": "Apache-2.0"
+ },
+ "npm:shebang-command@2.0.0": {
+  "l": "MIT"
+ },
+ "npm:shebang-regex@3.0.0": {
+  "l": "MIT"
+ },
+ "npm:shell-quote@1.8.3": {
+  "l": "MIT"
+ },
+ "npm:shiki@4.1.0": {
+  "l": "MIT"
+ },
+ "npm:side-channel-list@1.0.0": {
+  "l": "MIT"
+ },
+ "npm:side-channel-map@1.0.1": {
+  "l": "MIT"
+ },
+ "npm:side-channel-weakmap@1.0.2": {
+  "l": "MIT"
+ },
+ "npm:side-channel@1.1.0": {
+  "l": "MIT"
+ },
+ "npm:siginfo@2.0.0": {
+  "l": "ISC"
+ },
+ "npm:signal-exit@3.0.7": {
+  "l": "ISC"
+ },
+ "npm:signal-exit@4.1.0": {
+  "l": "ISC"
+ },
+ "npm:sisteransi@1.0.5": {
+  "l": "MIT"
+ },
+ "npm:smol-toml@1.9.0": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:source-map-js@1.2.1": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:source-map@0.6.1": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:space-separated-tokens@2.0.2": {
+  "l": "MIT"
+ },
+ "npm:stable-hash@0.0.5": {
+  "l": "MIT"
+ },
+ "npm:stackback@0.0.2": {
+  "l": "MIT"
+ },
+ "npm:statuses@2.0.2": {
+  "l": "MIT"
+ },
+ "npm:std-env@3.10.0": {
+  "l": "MIT"
+ },
+ "npm:std-env@4.0.0": {
+  "l": "MIT"
+ },
+ "npm:stdin-discarder@0.2.2": {
+  "l": "MIT"
+ },
+ "npm:stop-iteration-iterator@1.1.0": {
+  "l": "MIT"
+ },
+ "npm:stream-events@1.0.5": {
+  "l": "MIT"
+ },
+ "npm:stream-shift@1.0.3": {
+  "l": "MIT"
+ },
+ "npm:strict-event-emitter@0.5.1": {
+  "l": "MIT"
+ },
+ "npm:string-width@4.2.3": {
+  "l": "MIT"
+ },
+ "npm:string-width@7.2.0": {
+  "l": "MIT"
+ },
+ "npm:string.prototype.includes@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:string.prototype.matchall@4.0.12": {
+  "l": "MIT"
+ },
+ "npm:string.prototype.repeat@1.0.0": {
+  "l": "MIT"
+ },
+ "npm:string.prototype.trim@1.2.10": {
+  "l": "MIT"
+ },
+ "npm:string.prototype.trimend@1.0.9": {
+  "l": "MIT"
+ },
+ "npm:string.prototype.trimstart@1.0.8": {
+  "l": "MIT"
+ },
+ "npm:string_decoder@1.1.1": {
+  "l": "MIT"
+ },
+ "npm:string_decoder@1.3.0": {
+  "l": "MIT"
+ },
+ "npm:stringify-entities@4.0.4": {
+  "l": "MIT"
+ },
+ "npm:stringify-object@5.0.0": {
+  "l": "BSD-2-Clause"
+ },
+ "npm:strip-ansi@6.0.1": {
+  "l": "MIT"
+ },
+ "npm:strip-ansi@7.2.0": {
+  "l": "MIT"
+ },
+ "npm:strip-bom@3.0.0": {
+  "l": "MIT"
+ },
+ "npm:strip-final-newline@2.0.0": {
+  "l": "MIT"
+ },
+ "npm:strip-final-newline@4.0.0": {
+  "l": "MIT"
+ },
+ "npm:strip-json-comments@3.1.1": {
+  "l": "MIT"
+ },
+ "npm:strnum@2.2.3": {
+  "l": "MIT"
+ },
+ "npm:stubs@3.0.0": {
+  "l": "MIT"
+ },
+ "npm:style-to-js@1.1.21": {
+  "l": "MIT"
+ },
+ "npm:style-to-object@1.0.14": {
+  "l": "MIT"
+ },
+ "npm:styled-jsx@5.1.6": {
+  "l": "MIT"
+ },
+ "npm:stylis@4.4.0": {
+  "l": "MIT"
+ },
+ "npm:supports-color@7.2.0": {
+  "l": "MIT"
+ },
+ "npm:supports-color@8.1.1": {
+  "l": "MIT"
+ },
+ "npm:supports-preserve-symlinks-flag@1.0.0": {
+  "l": "MIT"
+ },
+ "npm:symbol-tree@3.2.4": {
+  "l": "MIT"
+ },
+ "npm:tabbable@6.4.0": {
+  "l": "MIT"
+ },
+ "npm:tagged-tag@1.0.0": {
+  "l": "MIT"
+ },
+ "npm:tailwind-merge@3.5.0": {
+  "l": "MIT"
+ },
+ "npm:tailwindcss@4.2.2": {
+  "l": "MIT"
+ },
+ "npm:tapable@2.3.2": {
+  "l": "MIT"
+ },
+ "npm:teeny-request@9.0.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:text-segmentation@1.0.3": {
+  "l": "MIT"
+ },
+ "npm:tiny-invariant@1.3.3": {
+  "l": "MIT"
+ },
+ "npm:tinybench@2.9.0": {
+  "l": "MIT"
+ },
+ "npm:tinyexec@0.3.2": {
+  "l": "MIT"
+ },
+ "npm:tinyexec@1.0.4": {
+  "l": "MIT"
+ },
+ "npm:tinyglobby@0.2.15": {
+  "l": "MIT"
+ },
+ "npm:tinypool@1.1.1": {
+  "l": "MIT"
+ },
+ "npm:tinyrainbow@1.2.0": {
+  "l": "MIT"
+ },
+ "npm:tinyrainbow@3.1.0": {
+  "l": "MIT"
+ },
+ "npm:tinyspy@3.0.2": {
+  "l": "MIT"
+ },
+ "npm:tldts-core@7.0.27": {
+  "l": "MIT"
+ },
+ "npm:tldts@7.0.27": {
+  "l": "MIT"
+ },
+ "npm:to-regex-range@5.0.1": {
+  "l": "MIT"
+ },
+ "npm:toidentifier@1.0.1": {
+  "l": "MIT"
+ },
+ "npm:tough-cookie@6.0.1": {
+  "l": "BSD-3-Clause"
+ },
+ "npm:tr46@0.0.3": {
+  "l": "MIT"
+ },
+ "npm:tr46@6.0.0": {
+  "l": "MIT"
+ },
+ "npm:tree-kill@1.2.2": {
+  "l": "MIT"
+ },
+ "npm:trim-lines@3.0.1": {
+  "l": "MIT"
+ },
+ "npm:trough@2.2.0": {
+  "l": "MIT"
+ },
+ "npm:ts-api-utils@2.5.0": {
+  "l": "MIT"
+ },
+ "npm:ts-dedent@2.2.0": {
+  "l": "MIT"
+ },
+ "npm:ts-morph@26.0.0": {
+  "l": "MIT"
+ },
+ "npm:tsconfig-paths@3.15.0": {
+  "l": "MIT"
+ },
+ "npm:tsconfig-paths@4.2.0": {
+  "l": "MIT"
+ },
+ "npm:tslib@2.8.1": {
+  "l": "0BSD"
+ },
+ "npm:tsx@4.21.0": {
+  "l": "MIT"
+ },
+ "npm:turbo@2.9.3": {
+  "l": "MIT"
+ },
+ "npm:turndown@7.2.4": {
+  "l": "MIT"
+ },
+ "npm:tw-animate-css@1.4.0": {
+  "l": "MIT"
+ },
+ "npm:type-check@0.4.0": {
+  "l": "MIT"
+ },
+ "npm:type-fest@5.5.0": {
+  "l": "(MIT OR CC0-1.0)"
+ },
+ "npm:type-is@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:typed-array-buffer@1.0.3": {
+  "l": "MIT"
+ },
+ "npm:typed-array-byte-length@1.0.3": {
+  "l": "MIT"
+ },
+ "npm:typed-array-byte-offset@1.0.4": {
+  "l": "MIT"
+ },
+ "npm:typed-array-length@1.0.7": {
+  "l": "MIT"
+ },
+ "npm:typescript-eslint@8.58.0": {
+  "l": "MIT"
+ },
+ "npm:typescript@5.9.3": {
+  "l": "Apache-2.0"
+ },
+ "npm:uc.micro@2.1.0": {
+  "l": "MIT"
+ },
+ "npm:unbox-primitive@1.1.0": {
+  "l": "MIT"
+ },
+ "npm:undici-types@6.21.0": {
+  "l": "MIT"
+ },
+ "npm:undici@7.27.2": {
+  "l": "MIT"
+ },
+ "npm:undici@7.30.0": {
+  "l": "MIT"
+ },
+ "npm:unicorn-magic@0.3.0": {
+  "l": "MIT"
+ },
+ "npm:unified@11.0.5": {
+  "l": "MIT"
+ },
+ "npm:unist-util-is@6.0.1": {
+  "l": "MIT"
+ },
+ "npm:unist-util-position@5.0.0": {
+  "l": "MIT"
+ },
+ "npm:unist-util-stringify-position@4.0.0": {
+  "l": "MIT"
+ },
+ "npm:unist-util-visit-parents@6.0.2": {
+  "l": "MIT"
+ },
+ "npm:unist-util-visit@5.1.0": {
+  "l": "MIT"
+ },
+ "npm:universalify@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:unpipe@1.0.0": {
+  "l": "MIT"
+ },
+ "npm:unrs-resolver@1.11.1": {
+  "l": "MIT"
+ },
+ "npm:until-async@3.0.2": {
+  "l": "MIT"
+ },
+ "npm:update-browserslist-db@1.2.3": {
+  "l": "MIT"
+ },
+ "npm:uri-js@4.4.1": {
+  "l": "BSD-2-Clause"
+ },
+ "npm:use-intl@4.9.0": {
+  "l": "MIT"
+ },
+ "npm:use-sync-external-store@1.6.0": {
+  "l": "MIT"
+ },
+ "npm:util-deprecate@1.0.2": {
+  "l": "MIT"
+ },
+ "npm:utrie@1.0.2": {
+  "l": "MIT"
+ },
+ "npm:uuid@14.0.0": {
+  "l": "MIT"
+ },
+ "npm:uuid@8.3.2": {
+  "l": "MIT"
+ },
+ "npm:uuid@9.0.1": {
+  "l": "MIT"
+ },
+ "npm:validate-npm-package-name@7.0.2": {
+  "l": "ISC"
+ },
+ "npm:vary@1.1.2": {
+  "l": "MIT"
+ },
+ "npm:vfile-location@5.0.3": {
+  "l": "MIT"
+ },
+ "npm:vfile-message@4.0.3": {
+  "l": "MIT"
+ },
+ "npm:vfile@6.0.3": {
+  "l": "MIT"
+ },
+ "npm:vite-node@2.1.9": {
+  "l": "MIT"
+ },
+ "npm:vite@5.4.21": {
+  "l": "MIT"
+ },
+ "npm:vite@8.0.3": {
+  "l": "MIT"
+ },
+ "npm:vitest@2.1.9": {
+  "l": "MIT"
+ },
+ "npm:vitest@4.1.2": {
+  "l": "MIT"
+ },
+ "npm:w3c-keyname@2.2.8": {
+  "l": "MIT"
+ },
+ "npm:w3c-xmlserializer@5.0.0": {
+  "l": "MIT"
+ },
+ "npm:web-namespaces@2.0.1": {
+  "l": "MIT"
+ },
+ "npm:web-streams-polyfill@3.3.3": {
+  "l": "MIT"
+ },
+ "npm:web-vitals@4.2.4": {
+  "l": "Apache-2.0"
+ },
+ "npm:webidl-conversions@3.0.1": {
+  "l": "BSD-2-Clause"
+ },
+ "npm:webidl-conversions@8.0.1": {
+  "l": "BSD-2-Clause"
+ },
+ "npm:websocket-driver@0.7.5": {
+  "l": "Apache-2.0"
+ },
+ "npm:websocket-extensions@0.1.4": {
+  "l": "Apache-2.0"
+ },
+ "npm:whatwg-mimetype@5.0.0": {
+  "l": "MIT"
+ },
+ "npm:whatwg-url@16.0.1": {
+  "l": "MIT"
+ },
+ "npm:whatwg-url@5.0.0": {
+  "l": "MIT"
+ },
+ "npm:which-boxed-primitive@1.1.1": {
+  "l": "MIT"
+ },
+ "npm:which-builtin-type@1.2.1": {
+  "l": "MIT"
+ },
+ "npm:which-collection@1.0.2": {
+  "l": "MIT"
+ },
+ "npm:which-typed-array@1.1.20": {
+  "l": "MIT"
+ },
+ "npm:which@2.0.2": {
+  "l": "ISC"
+ },
+ "npm:which@4.0.0": {
+  "l": "ISC"
+ },
+ "npm:why-is-node-running@2.3.0": {
+  "l": "MIT"
+ },
+ "npm:word-wrap@1.2.5": {
+  "l": "MIT"
+ },
+ "npm:wrap-ansi@6.2.0": {
+  "l": "MIT"
+ },
+ "npm:wrap-ansi@7.0.0": {
+  "l": "MIT"
+ },
+ "npm:wrappy@1.0.2": {
+  "l": "ISC"
+ },
+ "npm:ws@8.20.0": {
+  "l": "MIT"
+ },
+ "npm:wsl-utils@0.3.1": {
+  "l": "MIT"
+ },
+ "npm:xml-name-validator@5.0.0": {
+  "l": "Apache-2.0"
+ },
+ "npm:xmlchars@2.2.0": {
+  "l": "MIT"
+ },
+ "npm:y18n@5.0.8": {
+  "l": "ISC"
+ },
+ "npm:yallist@3.1.1": {
+  "l": "ISC"
+ },
+ "npm:yargs-parser@21.1.1": {
+  "l": "ISC"
+ },
+ "npm:yargs@17.7.2": {
+  "l": "MIT"
+ },
+ "npm:yocto-queue@0.1.0": {
+  "l": "MIT"
+ },
+ "npm:yoctocolors-cjs@2.1.3": {
+  "l": "MIT"
+ },
+ "npm:yoctocolors@2.1.2": {
+  "l": "MIT"
+ },
+ "npm:zod-to-json-schema@3.25.2": {
+  "l": "ISC"
+ },
+ "npm:zod-validation-error@4.0.2": {
+  "l": "MIT"
+ },
+ "npm:zod@3.25.76": {
+  "l": "MIT"
+ },
+ "npm:zod@4.3.6": {
+  "l": "MIT"
+ },
+ "npm:zustand@4.5.7": {
+  "l": "MIT"
+ },
+ "npm:zwitch@2.0.4": {
+  "l": "MIT"
+ },
+ "pypi:aiosqlite@0.22.1": {
+  "l": "MIT License"
+ },
+ "pypi:alembic@1.18.4": {
+  "l": "MIT"
+ },
+ "pypi:alembic@1.19.1": {
+  "l": "MIT"
+ },
+ "pypi:annotated-doc@0.0.4": {
+  "l": "MIT"
+ },
+ "pypi:annotated-doc@0.0.5": {
+  "l": "MIT"
+ },
+ "pypi:annotated-types@0.7.0": {
+  "l": "MIT License"
+ },
+ "pypi:annotated-types@0.8.0": {
+  "l": "MIT"
+ },
+ "pypi:anyio@4.13.0": {
+  "l": "MIT"
+ },
+ "pypi:anyio@4.14.2": {
+  "l": "MIT"
+ },
+ "pypi:argon2-cffi-bindings@25.1.0": {
+  "l": "MIT"
+ },
+ "pypi:argon2-cffi@25.1.0": {
+  "l": "MIT"
+ },
+ "pypi:asyncpg@0.31.0": {
+  "l": "Apache-2.0"
+ },
+ "pypi:attrs@26.1.0": {
+  "l": "MIT"
+ },
+ "pypi:bcrypt@5.0.0": {
+  "l": "Apache Software License"
+ },
+ "pypi:boto3@1.43.36": {
+  "l": "Apache-2.0"
+ },
+ "pypi:botocore@1.43.36": {
+  "l": "Apache-2.0"
+ },
+ "pypi:cbor2@6.1.3": {
+  "l": "MIT"
+ },
+ "pypi:certifi@2026.4.22": {
+  "l": "Mozilla Public License 2.0 (MPL 2.0)",
+  "s": "https://github.com/certifi/python-certifi"
+ },
+ "pypi:certifi@2026.7.22": {
+  "l": "Mozilla Public License 2.0 (MPL 2.0)",
+  "s": "https://github.com/certifi/python-certifi"
+ },
+ "pypi:cffi@2.0.0": {
+  "l": "MIT"
+ },
+ "pypi:cffi@2.1.1": {
+  "l": "MIT-0"
+ },
+ "pypi:charset-normalizer@3.4.7": {
+  "l": "MIT"
+ },
+ "pypi:charset-normalizer@3.5.1": {
+  "l": "MIT"
+ },
+ "pypi:click@8.3.3": {
+  "l": "BSD-3-Clause"
+ },
+ "pypi:click@8.5.0": {
+  "l": "BSD-3-Clause"
+ },
+ "pypi:colorama@0.4.6": {
+  "l": "BSD License"
+ },
+ "pypi:cryptography@47.0.0": {
+  "l": "Apache-2.0 OR BSD-3-Clause"
+ },
+ "pypi:cryptography@50.0.1": {
+  "l": "Apache-2.0 OR BSD-3-Clause"
+ },
+ "pypi:deprecated@1.3.1": {
+  "l": "MIT License"
+ },
+ "pypi:distro@1.9.0": {
+  "l": "(Apache Software License) AND Apache License, Version 2.0",
+  "s": "https://github.com/python-distro/distro"
+ },
+ "pypi:ecdsa@0.19.2": {
+  "l": "MIT"
+ },
+ "pypi:fakeredis@2.36.2": {
+  "l": "BSD-3-Clause"
+ },
+ "pypi:fastapi@0.136.1": {
+  "l": "MIT"
+ },
+ "pypi:fastapi@0.141.1": {
+  "l": "MIT"
+ },
+ "pypi:google-analytics-data@0.22.0": {
+  "l": "Apache Software License"
+ },
+ "pypi:google-api-core@2.30.3": {
+  "l": "Apache Software License"
+ },
+ "pypi:google-auth@2.53.0": {
+  "l": "Apache Software License"
+ },
+ "pypi:google-auth@2.57.0": {
+  "l": "Apache Software License"
+ },
+ "pypi:google-cloud-core@2.6.0": {
+  "l": "Apache Software License"
+ },
+ "pypi:google-cloud-storage@3.12.0": {
+  "l": "Apache Software License"
+ },
+ "pypi:google-crc32c@1.8.0": {
+  "l": "",
+  "s": "https://github.com/googleapis/python-crc32c"
+ },
+ "pypi:google-genai@2.10.0": {
+  "l": "Apache-2.0"
+ },
+ "pypi:google-genai@2.20.0": {
+  "l": "Apache-2.0"
+ },
+ "pypi:google-resumable-media@2.10.0": {
+  "l": "Apache Software License"
+ },
+ "pypi:googleapis-common-protos@1.75.0": {
+  "l": "Apache Software License"
+ },
+ "pypi:greenlet@3.5.0": {
+  "l": "MIT AND PSF-2.0"
+ },
+ "pypi:greenlet@3.5.5": {
+  "l": "MIT AND PSF-2.0"
+ },
+ "pypi:grpcio-status@1.80.0": {
+  "l": "Apache-2.0"
+ },
+ "pypi:grpcio@1.80.0": {
+  "l": "Apache-2.0"
+ },
+ "pypi:h11@0.16.0": {
+  "l": "MIT License"
+ },
+ "pypi:h2@4.4.1": {
+  "l": "MIT"
+ },
+ "pypi:hpack@4.2.0": {
+  "l": "MIT"
+ },
+ "pypi:httpcore2@2.12.0": {
+  "l": "BSD-3-Clause"
+ },
+ "pypi:httpcore@1.0.9": {
+  "l": "BSD-3-Clause"
+ },
+ "pypi:httptools@0.7.1": {
+  "l": "MIT"
+ },
+ "pypi:httptools@0.8.0": {
+  "l": "MIT"
+ },
+ "pypi:httpx2-jsfetch@1.0": {
+  "l": "BSD-3-Clause"
+ },
+ "pypi:httpx2@2.12.0": {
+  "l": "BSD-3-Clause"
+ },
+ "pypi:httpx@0.28.1": {
+  "l": "BSD License"
+ },
+ "pypi:hyperframe@6.1.0": {
+  "l": "(MIT License) AND The MIT License (MIT)  Copyright (c) 2014 Cory Benfield  Permission is hereby gr",
+  "s": "https://github.com/python-hyper/hyperframe/"
+ },
+ "pypi:idna@3.19": {
+  "l": "BSD-3-Clause"
+ },
+ "pypi:imagesize@2.0.0": {
+  "l": "MIT License"
+ },
+ "pypi:iniconfig@2.3.0": {
+  "l": "MIT"
+ },
+ "pypi:jmespath@1.1.0": {
+  "l": "MIT License"
+ },
+ "pypi:jsonschema-specifications@2025.9.1": {
+  "l": "MIT"
+ },
+ "pypi:jsonschema@4.26.0": {
+  "l": "MIT"
+ },
+ "pypi:limits@5.8.0": {
+  "l": "MIT"
+ },
+ "pypi:lupa@2.8": {
+  "l": "MIT style",
+  "s": "https://github.com/scoder/lupa"
+ },
+ "pypi:lxml@6.1.1": {
+  "l": "BSD-3-Clause"
+ },
+ "pypi:mako@1.3.12": {
+  "l": "MIT License"
+ },
+ "pypi:mako@1.4.1": {
+  "l": "MIT"
+ },
+ "pypi:markdown@3.10.3": {
+  "l": "BSD-3-Clause"
+ },
+ "pypi:markupsafe@3.0.3": {
+  "l": "BSD-3-Clause"
+ },
+ "pypi:mcp-types@2.0.0": {
+  "l": "MIT License"
+ },
+ "pypi:mcp@2.0.0": {
+  "l": "MIT License"
+ },
+ "pypi:numpy@2.5.0": {
+  "l": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+ },
+ "pypi:opentelemetry-api@1.44.0": {
+  "l": "Apache-2.0"
+ },
+ "pypi:packaging@26.2": {
+  "l": "Apache-2.0 OR BSD-2-Clause"
+ },
+ "pypi:packaging@26.3": {
+  "l": "Apache-2.0 OR BSD-2-Clause"
+ },
+ "pypi:passlib@1.7.4": {
+  "l": "BSD"
+ },
+ "pypi:pgvector@0.4.2": {
+  "l": "",
+  "s": "https://github.com/pgvector/pgvector-python"
+ },
+ "pypi:pillow@12.3.0": {
+  "l": "MIT-CMU"
+ },
+ "pypi:pluggy@1.6.0": {
+  "l": "MIT License"
+ },
+ "pypi:proto-plus@1.28.0": {
+  "l": "Apache Software License"
+ },
+ "pypi:protobuf@6.33.6": {
+  "l": "3-Clause BSD License"
+ },
+ "pypi:psycopg2-binary@2.9.12": {
+  "l": "(GNU Library or Lesser General Public License (LGPL)) AND LGPL with exceptions",
+  "s": "https://psycopg.org/"
+ },
+ "pypi:pyasn1-modules@0.4.2": {
+  "l": "BSD License"
+ },
+ "pypi:pyasn1@0.6.3": {
+  "l": "BSD-2-Clause"
+ },
+ "pypi:pyasn1@0.6.4": {
+  "l": "BSD-2-Clause"
+ },
+ "pypi:pycparser@3.0": {
+  "l": "BSD-3-Clause"
+ },
+ "pypi:pydantic-core@2.46.3": {
+  "l": "MIT"
+ },
+ "pypi:pydantic-core@2.46.5": {
+  "l": "MIT"
+ },
+ "pypi:pydantic-settings@2.14.0": {
+  "l": "MIT"
+ },
+ "pypi:pydantic-settings@2.15.0": {
+  "l": "MIT"
+ },
+ "pypi:pydantic@2.13.3": {
+  "l": "MIT"
+ },
+ "pypi:pydantic@2.13.5": {
+  "l": "MIT"
+ },
+ "pypi:pygments@2.20.0": {
+  "l": "BSD-2-Clause"
+ },
+ "pypi:pygments@2.21.0": {
+  "l": "BSD-2-Clause"
+ },
+ "pypi:pyjwt@2.12.1": {
+  "l": "MIT"
+ },
+ "pypi:pyjwt@2.13.0": {
+  "l": "MIT"
+ },
+ "pypi:pyotp@2.9.0": {
+  "l": "MIT License"
+ },
+ "pypi:pypdf@6.13.2": {
+  "l": "BSD-3-Clause"
+ },
+ "pypi:pytest-anyio@0.0.0": {
+  "l": "MIT License"
+ },
+ "pypi:pytest-asyncio@1.3.0": {
+  "l": "Apache-2.0"
+ },
+ "pypi:pytest-asyncio@1.4.0": {
+  "l": "Apache-2.0"
+ },
+ "pypi:pytest-timeout@2.4.0": {
+  "l": "DFSG approved OR MIT License",
+  "s": "https://github.com/pytest-dev/pytest-timeout"
+ },
+ "pypi:pytest@9.0.3": {
+  "l": "MIT"
+ },
+ "pypi:pytest@9.1.1": {
+  "l": "MIT"
+ },
+ "pypi:python-dateutil@2.9.0.post0": {
+  "l": "(Apache Software License OR BSD License) AND Dual License",
+  "s": "https://github.com/dateutil/dateutil"
+ },
+ "pypi:python-docx@1.2.0": {
+  "l": "MIT License"
+ },
+ "pypi:python-dotenv@1.2.2": {
+  "l": "BSD-3-Clause"
+ },
+ "pypi:python-dotenv@1.2.3": {
+  "l": "BSD-3-Clause"
+ },
+ "pypi:python-jose@3.5.0": {
+  "l": "MIT License"
+ },
+ "pypi:python-multipart@0.0.29": {
+  "l": "Apache-2.0"
+ },
+ "pypi:pywin32@311": {
+  "l": "Python Software Foundation License"
+ },
+ "pypi:pyyaml@6.0.3": {
+  "l": "MIT License"
+ },
+ "pypi:redis@8.0.1": {
+  "l": "MIT"
+ },
+ "pypi:referencing@0.37.0": {
+  "l": "MIT"
+ },
+ "pypi:requests@2.34.2": {
+  "l": "Apache Software License"
+ },
+ "pypi:resend@2.30.1": {
+  "l": "MIT License"
+ },
+ "pypi:rpds-py@0.30.0": {
+  "l": "MIT"
+ },
+ "pypi:rsa@4.9.1": {
+  "l": "Apache Software License"
+ },
+ "pypi:s3transfer@0.19.0": {
+  "l": "(Apache Software License) AND Apache License 2.0",
+  "s": "https://github.com/boto/s3transfer"
+ },
+ "pypi:six@1.17.0": {
+  "l": "MIT License"
+ },
+ "pypi:slowapi@0.1.10": {
+  "l": "MIT License"
+ },
+ "pypi:slowapi@0.1.9": {
+  "l": "MIT License"
+ },
+ "pypi:sniffio@1.3.1": {
+  "l": "Apache Software License OR MIT License"
+ },
+ "pypi:sortedcontainers@2.4.0": {
+  "l": "Apache Software License"
+ },
+ "pypi:sqlalchemy@2.0.49": {
+  "l": "MIT"
+ },
+ "pypi:sqlalchemy@2.0.52": {
+  "l": "MIT"
+ },
+ "pypi:sse-starlette@3.4.4": {
+  "l": "BSD-3-Clause"
+ },
+ "pypi:starlette@1.0.0": {
+  "l": "BSD-3-Clause"
+ },
+ "pypi:starlette@1.6.0": {
+  "l": "BSD-3-Clause"
+ },
+ "pypi:tenacity@9.1.4": {
+  "l": "Apache Software License"
+ },
+ "pypi:truststore@0.10.4": {
+  "l": "MIT"
+ },
+ "pypi:typing-extensions@4.15.0": {
+  "l": "PSF-2.0"
+ },
+ "pypi:typing-extensions@4.16.0": {
+  "l": "PSF-2.0"
+ },
+ "pypi:typing-inspection@0.4.2": {
+  "l": "MIT"
+ },
+ "pypi:typing-inspection@0.4.4": {
+  "l": "MIT"
+ },
+ "pypi:tzdata@2026.3": {
+  "l": "Apache-2.0"
+ },
+ "pypi:urllib3@2.7.0": {
+  "l": "MIT"
+ },
+ "pypi:uvicorn@0.46.0": {
+  "l": "BSD-3-Clause"
+ },
+ "pypi:uvicorn@0.52.4": {
+  "l": "BSD-3-Clause"
+ },
+ "pypi:uvloop@0.22.1": {
+  "l": "Apache Software License OR MIT License"
+ },
+ "pypi:watchfiles@1.1.1": {
+  "l": "MIT License"
+ },
+ "pypi:watchfiles@1.2.0": {
+  "l": "MIT License"
+ },
+ "pypi:websockets@16.0": {
+  "l": "BSD-3-Clause"
+ },
+ "pypi:websockets@16.1.1": {
+  "l": "BSD-3-Clause"
+ },
+ "pypi:wrapt@2.1.2": {
+  "l": "BSD-2-Clause"
+ },
+ "pypi:wrapt@2.4.0": {
+  "l": "BSD-2-Clause"
+ }
+}
