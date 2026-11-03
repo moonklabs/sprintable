@@ -14,6 +14,7 @@ import {
   evaluate,
   fsReader,
   loadExceptions,
+  loadOutsideOverlayBaseline,
   mapReader,
   scanRawControls,
   type ExceptionEntry,
@@ -140,7 +141,7 @@ describe('판정 — 닫힌 묶음의 날것 입력칸', () => {
 });
 
 // ---- 실제 소스 트리 ----
-describe('실제 소스 트리 — 닫힌 묶음의 날것 입력칸', () => {
+describe('실제 소스 트리 — 닫힌 묶음의 날것 입력칸', { timeout: 30_000 }, () => {
   const closedNames = GROUPS.filter((g) => g.closed).map((g) => g.name);
   it('묶음 아홉이 모두 닫혀 있다(공용 부품 · 바탕 부품까지 — 교체가 끝났다)', () => {
     expect(GROUPS).toHaveLength(9);
@@ -148,7 +149,7 @@ describe('실제 소스 트리 — 닫힌 묶음의 날것 입력칸', () => {
     for (const g of GROUPS) expect(g.closed, g.name).toBe(true);
   });
   it('날것은 명단 13건뿐이고 문제 0이다(첫 실행 길 4 · 대화 1 · 보드 1 · 문서 2 · 공용 3 · 바탕 정의 2)', () => {
-    const r = evaluate(fsReader(SRC_ROOT), GROUPS, loadExceptions(EXCEPTIONS_PATH));
+    const r = evaluate(fsReader(SRC_ROOT), GROUPS, loadExceptions(EXCEPTIONS_PATH), loadOutsideOverlayBaseline(EXCEPTIONS_PATH));
     expect(r.problems).toEqual([]);
     expect(r.rawControls.found).toBe(13);
     expect(r.rawControls.allowed).toBe(13);
@@ -166,7 +167,7 @@ describe('실제 소스 트리 — 닫힌 묶음의 날것 입력칸', () => {
   });
   it('양성 대조: 명단에서 부품 정의 자신(ui/select) 항목을 빼면 새 날것으로 잡힌다', () => {
     const without = loadExceptions(EXCEPTIONS_PATH).filter((e) => e.file !== 'components/ui/select.tsx');
-    const r = evaluate(fsReader(SRC_ROOT), GROUPS, without);
+    const r = evaluate(fsReader(SRC_ROOT), GROUPS, without, loadOutsideOverlayBaseline(EXCEPTIONS_PATH));
     expect(r.problems.join(' | ')).toContain('날것 입력칸 1건 더(명단 0건): components/ui/select.tsx');
   });
   it('양성 대조: 실제 닫힌 파일에 날 입력칸을 넣으면 같은 판정이 빨개진다', () => {
@@ -178,7 +179,7 @@ describe('실제 소스 트리 — 닫힌 묶음의 날것 입력칸', () => {
   });
   it('양성 대조: 명단에서 한 항목을 빼면 그 파일의 날것이 새 날것으로 잡힌다', () => {
     const without = loadExceptions(EXCEPTIONS_PATH).filter((e) => e.file !== 'components/docs/doc-editor.tsx');
-    const r = evaluate(fsReader(SRC_ROOT), GROUPS, without);
+    const r = evaluate(fsReader(SRC_ROOT), GROUPS, without, loadOutsideOverlayBaseline(EXCEPTIONS_PATH));
     expect(r.problems.join(' | ')).toContain('날것 입력칸 2건 더(명단 0건): components/docs/doc-editor.tsx');
   });
   it('양성 대조: HTML 문자열을 만드는 변환기(content-converter)의 «<input»은 안 센다', () => {

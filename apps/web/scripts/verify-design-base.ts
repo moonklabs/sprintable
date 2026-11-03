@@ -20,14 +20,24 @@
  * 부품으로 바꾸지 않는 입력(파일 선택 · 숨은 값) · 편집기 표면은 명단에 `kinds: ['raw_control']` + `count`(그 파일의 정확한 개수) + `why`로 올린다 —
  * 개수가 실제와 다르면(새로 늘었거나 낡았거나) 실패.
  *
- * 예외 명단 `design-base-exceptions.json`은 «바탕이 정할 수 없는 값»(제3자 브랜드색 · 사용자 데이터 색 · 라이브러리 입력 등)만 담는다.
+ * 또 하나의 종류 — 덮개(`overlay`): 손으로 지은 덮개 층(전체 화면 가림막 클래스 `fixed inset-0` 또는 손으로 쓴 `role="dialog"` — 입력창 안 콤보박스처럼 전체 화면이 아니어도 대화상자 역할을 손으로 쓰면 센다). 구문 트리로 `fixed`와 `inset-0` 클래스 토큰이 함께 든 문자열과 손으로 쓴 JSX `role="dialog"`를 센다
+ * (묶음 안에서는 처음 재던 4816 인벤토리의 정규식 셈과 같은 수라 숫자가 이어진다 · 주석 속 언급과 `inset-0.5` 같은 비슷한 클래스는 안 센다).
+ * 이것도 닫힌 묶음에서만 센다. 바탕 부품(Dialog · Sheet · Popover)으로 못 옮기는 덮개는 명단에 `kinds: ['overlay']` + `count`(그 파일의 정확한 표시 수) + `why` +
+ * `lockedBy`(그 현재 동작을 잠그는 시험 — `시험 파일::시험 제목`, 파일은 src 기준 경로)로 올린다. 가드는 인용한 시험이 «실제로 있는지»까지 본다: 파일이 있고, 제목이
+ * `it(…)` · `test(…)`의 문자열 첫 인자로 있으며, `skip` · `todo` 아래가 아니어야 한다 — 시험이 지워지거나 이름이 바뀌거나 꺼지면 CI가 빨개진다(까닭만 남고 잠금이 사라지는 것을 막는다).
+ *
+ * 묶음 «밖»(AC의 아홉 묶음에 안 든 파일)의 덮개는 기준선으로 고정한다: 같은 구문 트리 셈을 소스 전체에 돌려 `outsideOverlayBaseline`(파일 → 표시 수)보다 늘면 실패,
+ * 줄면 허용하고 기준선을 내리라고 알린다(raw-button 기준선 가드와 같은 결). 지금은 `components/storage/storage-view.tsx` 한 파일(4표시)이 알려진 채무다.
+ *
+ * 예외 명단 `design-base-exceptions.json`은 «바탕이 정할 수 없는 값»(제3자 브랜드색 · 사용자 데이터 색 · 라이브러리 입력 등)을 담고, 날것 입력칸(`raw_control`)과 덮개(`overlay`)는
+ * «부품으로 못 바꾸는 까닭»을 담는다(덮개는 현재 동작을 잠그는 시험까지).
  *   - 항목마다 `why`(까닭) 필수 — 비어 있거나 짧으면 실패.
  *   - 명단이 가리키는 파일이 묶음 안에 없거나, 적은 종류가 그 파일에서 0건이면 실패(낡은 항목은 걷는다).
  *   - 도구가 값을 오인하는 경우는 명단이 아니라 이 스캐너를 고친다(워크셀의 토큰만 섞는 color-mix가 그 예).
  * 묶음 경로가 사라지거나 비면 실패(폴더 이동으로 가드가 헛도는 것을 막는다).
  *
  * 한계: 값이 토큰과 같은 hex여도 직접 쓴 것은 센다(토큰을 «거쳤나»를 본다, 값이 맞는지는 따로).
- * 이 스캐너는 정규식 기반 정적 상한이라 `cn()`이 조합한 클래스 이름이나 변수로 만든 문자열 값은 못 본다.
+ * 색 · 글자 · 간격 스캐너는 정규식 기반 정적 상한이라 `cn()`이 조합한 클래스 이름이나 변수로 만든 문자열 값은 못 본다(날것 입력칸과 덮개는 구문 트리로 센다 — 그 한계는 각 항목에).
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -280,6 +290,7 @@ export function scanText(text: string): Hits {
 
 // ---- 날것 입력칸 (구문 트리) ----
 export const RAW_KIND = 'raw_control';
+export const OVERLAY_KIND = 'overlay';
 const RAW_TAGS: ReadonlySet<string> = new Set(['input', 'textarea', 'select']);
 export interface RawControl {
   line: number;
@@ -308,11 +319,81 @@ export function scanRawControls(text: string, file = 'x.tsx'): RawControl[] {
   return out;
 }
 
+// ---- 덮개 (손으로 지은 전체 화면 층) ----
+export interface OverlayMark {
+  line: number;
+  mark: 'fixed inset-0' | 'role=dialog';
+}
+
+/**
+ * 소스에서 손으로 지은 덮개 표시를 센다 — 구문 트리로: ① 한 문자열(템플릿 조각 포함) 안에 클래스 토큰 `fixed`와 `inset-0`이 함께 있는 것
+ * ② 손으로 쓴 JSX `role="dialog"` 속성. 주석 속 언급 · `inset-0.5` 같은 비슷한 클래스 · 토큰 순서가 반대인 경우에 흔들리지 않는다.
+ * 묶음 안에서는 처음 재던 4816 인벤토리(정규식)와 같은 수를 낸다(서랍을 Sheet로 옮기기 전 16곳 — 측정해 확인했고, 옮긴 뒤 아홉 묶음 안은 14곳). 한계: 변수로 이어 붙이거나 `max-lg:fixed`처럼 접두사가 붙은 토큰, 한 문자열 안에
+ * 같이 있지 않은 두 토큰은 못 본다(정적 상한).
+ */
+export function scanOverlays(text: string, file = 'x.tsx'): OverlayMark[] {
+  if (!text.includes('inset-0') && !text.includes('dialog')) return []; // 두 표시 모두 이 글자를 품는다 — 소스 전체를 훑을 때 구문 분석을 아낀다
+  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const found: Array<OverlayMark & { pos: number }> = [];
+  const lineAt = (node: ts.Node): number => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+  const visit = (node: ts.Node): void => {
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) {
+      const tokens = node.text.split(/\s+/);
+      if (tokens.includes('fixed') && tokens.includes('inset-0')) found.push({ pos: node.getStart(sf), line: lineAt(node), mark: 'fixed inset-0' });
+    }
+    if (ts.isJsxAttribute(node) && ts.isIdentifier(node.name) && node.name.text === 'role' && node.initializer) {
+      const init = node.initializer;
+      const value = ts.isStringLiteral(init)
+        ? init.text
+        : ts.isJsxExpression(init) && init.expression && (ts.isStringLiteral(init.expression) || ts.isNoSubstitutionTemplateLiteral(init.expression))
+          ? init.expression.text
+          : null;
+      if (value === 'dialog') found.push({ pos: node.getStart(sf), line: lineAt(node), mark: 'role=dialog' });
+    }
+    node.forEachChild(visit);
+  };
+  visit(sf);
+  return found.sort((a, b) => a.pos - b.pos).map(({ line, mark }) => ({ line, mark }));
+}
+
+/**
+ * 시험 파일에서 «켜져 있는» 시험 제목을 모은다 — `it('…')` · `test('…')`(문자열 · 보간 없는 템플릿 첫 인자). `it.skip` · `it.todo`는 callee가 점 접근이라 모이지 않고,
+ * 호출 사슬의 어느 마디에든 `skip` · `todo` · `skipIf` · `runIf`(조건부라 굳은 잠금이 아니다) 또는 `xdescribe` · `xit` · `xtest`가 든 `describe` 아래의 시험도 뺀다
+ * (`describe.skip.each(표)('…', …)` · `xdescribe.each(…)(…)` · `describe.skipIf(…)(…)` 포함). 제목은 `describe` 경로 없이 `it`의 제목 그대로다.
+ */
+export function activeTestTitles(text: string, file = 'x.test.tsx'): Set<string> {
+  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const titles = new Set<string>();
+  const OFF_NAMES: ReadonlySet<string> = new Set(['skip', 'todo', 'skipIf', 'runIf']);
+  // 호출 사슬 전체를 본다: `describe.skip.each(표)('…', fn)`의 바깥 호출은 callee가 호출식이고 `skip`은 그 안쪽 마디에 있다.
+  const isOff = (callee: ts.Expression): boolean => {
+    if (ts.isIdentifier(callee)) return callee.text === 'xdescribe' || callee.text === 'xit' || callee.text === 'xtest';
+    if (ts.isPropertyAccessExpression(callee)) return OFF_NAMES.has(callee.name.text) || isOff(callee.expression);
+    if (ts.isCallExpression(callee)) return isOff(callee.expression);
+    return false;
+  };
+  const underOff = (node: ts.Node): boolean => {
+    for (let p = node.parent; p; p = p.parent) if (ts.isCallExpression(p) && isOff(p.expression)) return true;
+    return false;
+  };
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && (node.expression.text === 'it' || node.expression.text === 'test')) {
+      const first = node.arguments[0];
+      if (first && (ts.isStringLiteral(first) || ts.isNoSubstitutionTemplateLiteral(first)) && !underOff(node)) titles.add(first.text);
+    }
+    node.forEachChild(visit);
+  };
+  visit(sf);
+  return titles;
+}
+
 // ---- 소스 읽기 (실제 디스크 / 메모리) ----
 export interface SourceReader {
   /** 접두사(폴더 또는 파일) 아래의 파일(src 기준 상대 경로). 접두사 자체가 없으면 null. */
   list(prefix: string): string[] | null;
   read(rel: string): string;
+  /** src 전체(시험 · 가드 · stories 제외)의 .ts · .tsx. 없는 판독기는 «묶음 밖 덮개» 검사를 건너뛴다. */
+  listAll?(): string[];
 }
 
 export function fsReader(srcRoot: string): SourceReader {
@@ -324,16 +405,18 @@ export function fsReader(srcRoot: string): SourceReader {
       else if (EXT.test(entry) && !SKIP_FILE.test(r)) out.push(r);
     }
   };
+  const list = (prefix: string): string[] | null => {
+    const abs = path.join(srcRoot, prefix);
+    if (!existsSync(abs)) return null;
+    if (statSync(abs).isFile()) return [prefix];
+    const out: string[] = [];
+    walk(abs, prefix, out);
+    return out;
+  };
   return {
-    list(prefix) {
-      const abs = path.join(srcRoot, prefix);
-      if (!existsSync(abs)) return null;
-      if (statSync(abs).isFile()) return [prefix];
-      const out: string[] = [];
-      walk(abs, prefix, out);
-      return out;
-    },
+    list,
     read: (rel) => readFileSync(path.join(srcRoot, rel), 'utf8'),
+    listAll: () => readdirSync(srcRoot).sort().flatMap((entry) => list(entry) ?? []).filter((f) => EXT.test(f) && !SKIP_FILE.test(f)),
   };
 }
 
@@ -346,6 +429,7 @@ export function mapReader(files: Record<string, string>): SourceReader {
       return hit.filter((k) => k === prefix || (EXT.test(k) && !SKIP_FILE.test(k))).sort();
     },
     read: (rel) => files[rel],
+    listAll: () => keys.filter((k) => EXT.test(k) && !SKIP_FILE.test(k)).sort(),
   };
 }
 
@@ -356,11 +440,19 @@ export interface ExceptionEntry {
   why: string;
   /** `raw_control`을 적을 때 필수 — 그 파일의 날것 입력칸 «정확한» 개수(다르면 실패: 새로 늘었거나 낡았다). */
   count?: number;
+  /** `overlay`를 적을 때 필수 — 그 덮개의 현재 동작을 잠그는 시험들(`시험 파일::시험 제목`, 파일은 src 기준). 가드가 실제로 있는지 본다. */
+  lockedBy?: string[];
 }
 
 export function loadExceptions(filePath: string): ExceptionEntry[] {
   const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as { exceptions?: ExceptionEntry[] };
   return parsed.exceptions ?? [];
+}
+
+/** 묶음 «밖» 덮개의 기준선(파일 → 표시 수). 늘면 실패, 줄면 허용(기준선을 내리라고 알린다) — raw-button 기준선 가드와 같은 결. */
+export function loadOutsideOverlayBaseline(filePath: string): Record<string, number> {
+  const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as { outsideOverlayBaseline?: Record<string, number> };
+  return parsed.outsideOverlayBaseline ?? {};
 }
 
 // 명단의 file은 src 기준 경로 «정확히 일치»만 가린다 — 이름만 같은 다른 폴더의 파일까지 가리지 않는다.
@@ -383,10 +475,14 @@ export interface Evaluation {
   offFiles: OffFile[];
   /** 날것 입력칸: 닫힌 묶음의 파일 수 · 찾은 수 · 명단이 허용한 수 */
   rawControls: { closedFiles: number; found: number; allowed: number };
+  /** 덮개: 닫힌 묶음의 파일 수 · 찾은 표시 수 · 명단이 허용한 수 · 명단이 인용한 시험 수 */
+  overlays: { closedFiles: number; found: number; allowed: number; lockedTests: number };
+  /** 묶음 밖 덮개: 소스 전체 파일 수(null이면 판독기가 listAll을 안 줘서 건너뜀) · 묶음 밖에서 찾은 표시 수 · 기준선 합 · 기준선보다 줄어 내릴 수 있는 파일 */
+  outsideOverlays: { scannedFiles: number | null; found: number; baseline: number; shrunk: string[] };
   problems: string[];
 }
 
-export function evaluate(reader: SourceReader, groups: Group[], exceptions: ExceptionEntry[]): Evaluation {
+export function evaluate(reader: SourceReader, groups: Group[], exceptions: ExceptionEntry[], outsideOverlayBaseline: Record<string, number> = {}): Evaluation {
   const problems: string[] = [];
 
   // 1) 묶음 → 파일. 접두사가 없으면, 묶음이 비면 실패.
@@ -407,7 +503,7 @@ export function evaluate(reader: SourceReader, groups: Group[], exceptions: Exce
   }
 
   // 2) 명단 형식 · 까닭 · 대상 파일
-  const kindSet: ReadonlySet<string> = new Set<string>([...OFF_KINDS, RAW_KIND]);
+  const kindSet: ReadonlySet<string> = new Set<string>([...OFF_KINDS, RAW_KIND, OVERLAY_KIND]);
   const matched = new Map<ExceptionEntry, string[]>();
   for (const e of exceptions) {
     const label = `예외 명단 «${e.file}»`;
@@ -419,7 +515,7 @@ export function evaluate(reader: SourceReader, groups: Group[], exceptions: Exce
       problems.push(`${label}: 까닭(why)이 없거나 너무 짧다(${MIN_WHY_LENGTH}자 이상) — 까닭 없이 올리지 않는다`);
     }
     if (!Array.isArray(e.kinds) || !e.kinds.length) problems.push(`${label}: kinds가 비었다`);
-    else for (const k of e.kinds) if (!kindSet.has(k)) problems.push(`${label}: 모르는 종류 «${k}» (${[...OFF_KINDS, RAW_KIND].join(' · ')})`);
+    else for (const k of e.kinds) if (!kindSet.has(k)) problems.push(`${label}: 모르는 종류 «${k}» (${[...OFF_KINDS, RAW_KIND, OVERLAY_KIND].join(' · ')})`);
     const files = union.filter((rel) => sameFile(rel, e.file));
     if (!files.length) problems.push(`${label}: 검사 묶음 안에 그 파일이 없다 — 항목을 걷거나 경로를 고친다`);
     matched.set(e, files);
@@ -433,7 +529,7 @@ export function evaluate(reader: SourceReader, groups: Group[], exceptions: Exce
   const exempt = new Map<string, Set<string>>();
   for (const [e, files] of matched) {
     for (const k of Array.isArray(e.kinds) ? e.kinds : []) {
-      if (!kindSet.has(k) || k === RAW_KIND) continue; // 날것 입력칸은 아래 6)에서 개수로 따로 본다
+      if (!kindSet.has(k) || k === RAW_KIND || k === OVERLAY_KIND) continue; // 날것 입력칸 · 덮개는 아래 6) 7)에서 개수로 따로 본다
       const total = files.reduce((n, rel) => n + (raw.get(rel)?.[k as OffKind]?.length ?? 0), 0);
       if (files.length && total === 0) problems.push(`예외 명단 «${e.file}»: «${k}»가 그 파일에서 0건이다 — 낡은 항목이니 걷는다`);
       for (const rel of files) {
@@ -502,7 +598,124 @@ export function evaluate(reader: SourceReader, groups: Group[], exceptions: Exce
       problems.push(`예외 명단 «${rel}»: 날것 입력칸이 ${hits.length}건뿐인데 ${allowed}건이라 적혀 있다 — 낡은 항목이니 개수를 고치거나 걷는다`);
     }
   }
-  return { groups: stats, unionFiles: union.length, offFiles, rawControls: { closedFiles: closedFiles.size, found: rawFound, allowed: rawAllowed }, problems };
+
+  // 7) 덮개 — 닫힌 묶음에서는 명단의 개수와 «정확히» 같아야 하고, 명단 항목은 현재 동작을 잠그는 시험을 인용해야 하며 그 시험이 «실제로 있어야» 한다
+  const allowedOverlay = new Map<string, number>();
+  const titlesCache = new Map<string, Set<string> | null>();
+  const titlesOf = (testFile: string): Set<string> | null => {
+    if (!titlesCache.has(testFile)) {
+      let text: string | undefined;
+      try {
+        text = reader.read(testFile);
+      } catch {
+        text = undefined;
+      }
+      titlesCache.set(testFile, typeof text === 'string' ? activeTestTitles(text, testFile) : null);
+    }
+    return titlesCache.get(testFile) ?? null;
+  };
+  let lockedTests = 0;
+  for (const e of exceptions) {
+    if (!Array.isArray(e.kinds) || !e.kinds.includes(OVERLAY_KIND) || typeof e.file !== 'string') continue;
+    const label = `예외 명단 «${e.file}»`;
+    if (e.kinds.length !== 1) {
+      problems.push(`${label}: «${OVERLAY_KIND}»은 다른 종류와 한 항목에 섞지 않는다(항목을 나눈다 — count가 종류마다 다르다)`);
+      continue;
+    }
+    if (!closedFiles.has(e.file)) {
+      problems.push(`${label}: «${OVERLAY_KIND}»은 닫힌 묶음(Group.closed)의 파일에만 올린다`);
+      continue;
+    }
+    if (!Number.isInteger(e.count) || (e.count as number) < 1) {
+      problems.push(`${label}: «${OVERLAY_KIND}»에는 개수(count, 1 이상 정수)가 필요하다`);
+      continue;
+    }
+    if (allowedOverlay.has(e.file)) {
+      problems.push(`${label}: «${OVERLAY_KIND}» 항목이 같은 파일에 둘 이상이다 — 한 항목으로 합쳐 count를 적는다`);
+      continue;
+    }
+    allowedOverlay.set(e.file, e.count as number);
+    if (!Array.isArray(e.lockedBy) || !e.lockedBy.length) {
+      problems.push(`${label}: «${OVERLAY_KIND}»에는 현재 동작을 잠그는 시험(lockedBy: ['시험 파일::시험 제목', …])이 필요하다 — 까닭만으로 올리지 않는다`);
+      continue;
+    }
+    for (const cite of e.lockedBy) {
+      const at = typeof cite === 'string' ? cite.indexOf('::') : -1;
+      if (at < 1 || at === cite.length - 2) {
+        problems.push(`${label}: lockedBy «${String(cite)}»의 꼴이 '시험 파일::시험 제목'이 아니다`);
+        continue;
+      }
+      const testFile = cite.slice(0, at);
+      const title = cite.slice(at + 2);
+      if (testFile.startsWith('/') || testFile.includes('\\') || testFile.split('/').some((seg) => seg === '..' || seg === '.')) {
+        problems.push(`${label}: lockedBy 파일 «${testFile}»은 src 기준 상대 경로여야 한다(절대 경로 · 역슬래시 · . · .. 금지)`);
+        continue;
+      }
+      if (!/\.test\.tsx?$/.test(testFile)) {
+        problems.push(`${label}: lockedBy 파일 «${testFile}»이 시험 파일(.test.ts · .test.tsx)이 아니다`);
+        continue;
+      }
+      const titles = titlesOf(testFile);
+      if (titles === null) {
+        problems.push(`${label}: lockedBy 시험 파일 «${testFile}»을 읽을 수 없다 — 파일이 지워지거나 옮겨졌다(옮겼다면 항목의 경로를 고친다)`);
+      } else if (!titles.has(title)) {
+        problems.push(`${label}: 잠그는 시험 «${title}»을 «${testFile}»에서 못 찾는다 — 시험이 지워졌거나 이름이 바뀌었거나 꺼졌다(skip · todo)`);
+      } else {
+        lockedTests += 1;
+      }
+    }
+  }
+  let overlayFound = 0;
+  let overlayAllowed = 0;
+  for (const rel of [...closedFiles].sort()) {
+    const marks = scanOverlays(reader.read(rel), rel);
+    const allowed = allowedOverlay.get(rel) ?? 0;
+    overlayFound += marks.length;
+    overlayAllowed += Math.min(allowed, marks.length);
+    const show = (m: OverlayMark): string => `${rel}:${m.line} ${m.mark}`;
+    if (marks.length > allowed) {
+      problems.push(`손으로 지은 덮개 ${marks.length - allowed}곳 더(명단 ${allowed}곳): ${marks.slice(0, 3).map(show).join(' | ')} — 바탕 부품(Dialog · Sheet · Popover)으로 바꾼다. 못 바꾸면 까닭 + 현재 동작을 잠그는 시험(lockedBy)과 함께 명단에 올린다`);
+    } else if (marks.length < allowed) {
+      problems.push(`예외 명단 «${rel}»: 덮개 표시가 ${marks.length}곳뿐인데 ${allowed}곳이라 적혀 있다 — 낡은 항목이니 개수를 고치거나 걷는다`);
+    }
+  }
+
+  // 8) 묶음 «밖» 덮개 — 소스 전체에 같은 셈을 돌려 기준선으로 고정한다(새 덮개가 묶음 밖에서 자라는 것을 막는다). 늘면 실패 · 줄면 허용.
+  const outside = { scannedFiles: null as number | null, found: 0, baseline: 0, shrunk: [] as string[] };
+  for (const [file, n] of Object.entries(outsideOverlayBaseline)) {
+    if (!Number.isInteger(n) || n < 1) problems.push(`묶음 밖 덮개 기준선 «${file}»: 개수(1 이상 정수)가 필요하다`);
+    else if (union.includes(file)) problems.push(`묶음 밖 덮개 기준선 «${file}»: 묶음 안의 파일이다 — 묶음 안은 기준선이 아니라 예외 명단(까닭 + 잠그는 시험)에 올린다`);
+    else outside.baseline += n;
+  }
+  if (reader.listAll) {
+    const inUnion = new Set(union);
+    const all = reader.listAll().filter((f) => !inUnion.has(f));
+    outside.scannedFiles = all.length;
+    const seen = new Set<string>();
+    for (const rel of all) {
+      const marks = scanOverlays(reader.read(rel), rel);
+      const base = outsideOverlayBaseline[rel] ?? 0;
+      if (marks.length) seen.add(rel);
+      outside.found += marks.length;
+      if (marks.length > base) {
+        problems.push(`묶음 밖 덮개 ${marks.length - base}곳 더(기준선 ${base}곳): ${marks.slice(0, 3).map((m) => `${rel}:${m.line} ${m.mark}`).join(' | ')} — 새 덮개는 바탕 부품(Dialog · Sheet · Popover)으로 만든다`);
+      } else if (marks.length < base) {
+        outside.shrunk.push(`${rel} (기준선 ${base}곳 → 지금 ${marks.length}곳)`);
+      }
+    }
+    for (const file of Object.keys(outsideOverlayBaseline)) {
+      if (!inUnion.has(file) && !all.includes(file)) problems.push(`묶음 밖 덮개 기준선 «${file}»: 그 파일이 없다 — 항목을 걷거나 경로를 고친다`);
+    }
+  }
+  return {
+    groups: stats,
+    unionFiles: union.length,
+    offFiles,
+    rawControls: { closedFiles: closedFiles.size, found: rawFound, allowed: rawAllowed },
+    overlays: { closedFiles: closedFiles.size, found: overlayFound, allowed: overlayAllowed, lockedTests },
+    outsideOverlays: outside,
+    problems,
+  };
 }
 
 // ---- 실행 ----
@@ -511,11 +724,14 @@ export const SRC_ROOT = path.resolve(HERE, '../src');
 export const EXCEPTIONS_PATH = path.resolve(HERE, 'design-base-exceptions.json');
 
 function main(): number {
-  const result = evaluate(fsReader(SRC_ROOT), GROUPS, loadExceptions(EXCEPTIONS_PATH));
+  const result = evaluate(fsReader(SRC_ROOT), GROUPS, loadExceptions(EXCEPTIONS_PATH), loadOutsideOverlayBaseline(EXCEPTIONS_PATH));
   console.log('[story 4831 AC4] 바탕 한 벌 — 묶음별 바탕 밖 파일');
   for (const g of result.groups) console.log(`  ${String(g.offFiles).padStart(3)} / ${String(g.files).padStart(3)}  ${g.name}`);
   console.log(`  합(고유 파일) ${result.offFiles.length} / ${result.unionFiles}`);
   console.log(`[날것 입력칸] 닫힌 묶음 ${result.rawControls.closedFiles}파일 — 찾은 ${result.rawControls.found}건 · 명단 허용 ${result.rawControls.allowed}건`);
+  console.log(`[덮개] 닫힌 묶음 ${result.overlays.closedFiles}파일 — 찾은 ${result.overlays.found}곳 · 명단 허용 ${result.overlays.allowed}곳 · 인용한 잠금 시험 ${result.overlays.lockedTests}건 확인`);
+  console.log(`[묶음 밖 덮개] 소스 전체 중 묶음 밖 ${result.outsideOverlays.scannedFiles ?? '-'}파일 — 찾은 ${result.outsideOverlays.found}곳 · 기준선 ${result.outsideOverlays.baseline}곳`);
+  for (const line of result.outsideOverlays.shrunk) console.log(`  ⚠️ 기준선보다 줄었다(design-base-exceptions.json의 outsideOverlayBaseline을 내린다): ${line}`);
   if (result.problems.length) {
     console.error(`\nFAIL: ${result.problems.length}건`);
     for (const p of result.problems) console.error(`  - ${p}`);
@@ -525,7 +741,7 @@ function main(): number {
     );
     return 1;
   }
-  console.log('OK: 바탕 밖 값 0 · 닫힌 묶음의 날것 입력칸은 명단 밖 0');
+  console.log('OK: 바탕 밖 값 0 · 닫힌 묶음의 날것 입력칸 · 덮개는 명단 밖 0 · 묶음 밖 덮개는 기준선을 안 넘음');
   return 0;
 }
 

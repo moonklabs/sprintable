@@ -15,6 +15,7 @@ import {
   evaluate,
   fsReader,
   loadExceptions,
+  loadOutsideOverlayBaseline,
   mapReader,
   scanText,
   stripComments,
@@ -214,11 +215,11 @@ describe('판정', () => {
 });
 
 // ---- 실제 소스 트리 ----
-describe('실제 소스 트리', () => {
+describe('실제 소스 트리', { timeout: 30_000 }, () => {
   it('종류 목록은 11가지다', () => expect(OFF_KINDS).toHaveLength(11));
 
   it('develop은 바탕 밖 값 0 · 문제 0이다', () => {
-    const r = evaluate(fsReader(SRC_ROOT), GROUPS, loadExceptions(EXCEPTIONS_PATH));
+    const r = evaluate(fsReader(SRC_ROOT), GROUPS, loadExceptions(EXCEPTIONS_PATH), loadOutsideOverlayBaseline(EXCEPTIONS_PATH));
     expect(r.problems).toEqual([]);
     expect(r.offFiles).toEqual([]);
     expect(r.unionFiles).toBeGreaterThanOrEqual(MIN_EXPECTED_FILES);
