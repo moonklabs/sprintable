@@ -987,3 +987,49 @@ describe('[SID:4784] the card is the moment an agent is made — «에이전트 
     expect(container.querySelector('[data-testid=quick-create-nothing]')!.textContent).toBe('No agent is created until you press it');
   });
 });
+
+describe('[SID:4832] the card has its own way to «이미 있는 에이전트 옮기기»', () => {
+  const kindOn = (v: 'recipe' | 'move') => container.querySelectorAll('[data-testid=setup-kind] [role=radio]')[v === 'recipe' ? 0 : 1]?.getAttribute('aria-checked') === 'true';
+  async function entry(hash: string) {
+    stub();
+    // the recipe page (where the move radio lives) reads the recipe list and the movable agents — the card's own stub answers neither
+    recipesNow = () => new Response(JSON.stringify({ recipes: [{ id: 'rec-1', key: 'org.research_one', name: '조사 한 명', roles: [{ role: '조사', kind: 'agent', stages: ['research'] }] }] }), { status: 200 });
+    const base = globalThis.fetch;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => (String(input).includes('/api/desktop/setup/agents') ? new Response(JSON.stringify({ agents: [] }), { status: 200 }) : base(input, init))));
+    hash = hash.replace(/&setup=[^&]*/, ''); // no setup id in the address: the entry does not ask the server whether it was already started (the stub answers that read 200 → the progress view)
+    ctx.mockReturnValue({ projectId: PROJ, currentProjectSlug: 'proj', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'owner' }], projectMemberships: [] });
+    window.location.hash = hash;
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DesktopSetupEntry /></NextIntlClientProvider>); });
+    for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); });
+  }
+
+  it('the card shows the move link beside the team link when the app can move; pressing it opens the recipe page with the move chosen', async () => {
+    await entry(frag(''));
+    expect(container.querySelector('[data-testid=quick-card]')).not.toBeNull();
+    const move = container.querySelector('[data-testid=quick-move]') as HTMLButtonElement;
+    expect(move.textContent).toBe('이미 있는 에이전트 옮기기 →'); // link removed → fails
+    await act(async () => { move.click(); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid=quick-card]')).toBeNull();
+    expect(kindOn('move')).toBe(true);
+  });
+
+  it('an app from before (no caps=move) has no move link on the card', async () => {
+    await entry(`#code=${CODE}&setup=11111111-1111-4111-8111-aaaaaaaaaaaa&runtimes=claude&caps=solo`);
+    expect(container.querySelector('[data-testid=quick-card]')).not.toBeNull();
+    expect(container.querySelector('[data-testid=quick-move]')).toBeNull();
+  });
+
+  it('kind=move in the address skips the card: the recipe page opens with the move chosen (the sidebar\'s move door)', async () => {
+    await entry(frag('&kind=move'));
+    expect(container.querySelector('[data-testid=quick-card]')).toBeNull(); // showsQuickCard ignoring kind → the card is drawn → fails
+    expect(kindOn('move')).toBe(true);
+  });
+
+  it('the move door\'s link is the app\'s own scheme with one intent', () => {
+    expect(appSetupLink(null, 'move')).toBe('ai.sprintable:/desktop/setup?intent=move');
+    expect(appSetupLink('dev', 'move')).toBe('ai.sprintable.dev:/desktop/setup?intent=move');
+    expect(appSetupLink(null, 'move', { agent: '11111111-1111-4111-8111-111111111111', pick: 'codex' })).toBe('ai.sprintable:/desktop/setup?intent=move'); // pick rides only on a folder ask; intent wins over agent
+  });
+});
+

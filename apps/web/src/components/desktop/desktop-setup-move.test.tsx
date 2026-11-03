@@ -153,7 +153,8 @@ describe('[SID:4576] the two ways · the move list', () => {
     expect(container.querySelector('#setup-folder')).toBeNull();
     expect(text()).toContain('이 컴퓨터에서 찾은 에이전트: Claude Code · Codex');
     expect(rows().map((r) => [r.querySelector('.font-medium')!.textContent, r.dataset.state])).toEqual([['댄 어윈', 'ok'], ['까디르 QA', 'ok'], ['담롱', 'not-in-project']]);
-    expect(rows()[0].textContent).toContain('Claude Code · 이 컴퓨터에 있음');
+    expect(rows()[0].textContent).toContain('Claude Code 에이전트 · 이 컴퓨터로 옮길 수 있어요'); // 4832: the tool being here is not the agent being here
+    expect(rows()[0].textContent).not.toContain('이 컴퓨터에 있음');
     expect(rows()[2].textContent).toContain('이 프로젝트 팀에 아직 없어요'); // 4678: the line, then [프로젝트 팀에 넣기] (the button's own test: desktop-setup.4678.test)
     expect(rows()[2].querySelector('[data-testid=setup-put-on-team]')?.textContent).toBe('프로젝트 팀에 넣기');
     expect(isOff(rows()[2].querySelector('[role=checkbox]'))).toBe(true);
@@ -414,7 +415,7 @@ describe('[SID:4576] the move\'s progress — two steps, by name', () => {
     expect(line()).toBeUndefined();
   });
 
-  it('one connected, one still on its way → ① done with the pairs · ② running with «{이름}은 아직 연결하고 있어요» · the leaving line', async () => {
+  it('one connected, one still on its way → ① done with the pairs · ② running with «{이름}은 시작했어요 — Sprintable에 첫 연결을 기다려요» · the leaving line', async () => {
     statusNow = () => base({ tools_connected: [{ member_id: 'm-dan', at: '2026-10-06T04:41:00Z' }] });
     stub(() => new Response('{}'));
     await mount(<SetupProgressView setupId="s-1" recipeName="" />);
@@ -422,7 +423,7 @@ describe('[SID:4576] the move\'s progress — two steps, by name', () => {
     // Yuna 05:20Z: ① is done (the app took them over, «{이름} · {런타임}»); the agent still on its way is ②'s line
     const steps = [...container.querySelectorAll('li[data-state]')] as HTMLElement[];
     expect(steps[0].textContent).toBe('에이전트를 준비했어요댄 어윈 · Claude Code, 까디르 QA · Codex');
-    expect(steps[1].querySelector('[data-testid=setup-still-preparing]')?.textContent).toBe('까디르 QA는 아직 연결하고 있어요'); // Yuna 05:39Z: ②'s word
+    expect(steps[1].querySelector('[data-testid=setup-still-preparing]')?.textContent).toBe('까디르 QA는 시작했어요 — Sprintable에 첫 연결을 기다려요'); // 4832: the same word the app's strip says («시작했어요»), then what is awaited
     expect(steps[0].querySelector('[data-testid=setup-still-preparing]')).toBeNull();
     expect(text()).toContain('Sprintable에 연결하고 있어요');
     expect(text()).toContain('떠나도 옮기기는 이 컴퓨터에서 이어져요.');
@@ -611,3 +612,46 @@ describe('[SID:4831] the move list tick is the base Checkbox (a label press, Spa
     expect(isOn(off.querySelector('[role=checkbox]'))).toBe(false);
   });
 });
+
+describe('[SID:4832] the page can open with «이미 있는 에이전트 옮기기» chosen', () => {
+  const kindOn = (v: 'recipe' | 'move') => isOn(kindRadio(v));
+
+  it('initialKind=move + an app that can move: the move radio is on at first sight and the agents are listed — nothing ticked', async () => {
+    agentsNow = () => new Response(JSON.stringify({ agents: [DAN, KADIR] }), { status: 200 });
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove initialKind="move" />);
+    expect(kindOn('move')).toBe(true); // initialKind unused → recipe is on → fails
+    expect(kindOn('recipe')).toBe(false);
+    expect(container.querySelector('[data-testid=setup-recipe-chosen]')).toBeNull();
+    expect(container.querySelectorAll('[data-testid=setup-move-row]').length).toBe(2);
+    expect([...container.querySelectorAll('[data-testid=setup-move-row] [role=checkbox]')].some((c) => isOn(c))).toBe(false); // choosing the way is not choosing the agents
+  });
+
+  it('without canMove the hint changes nothing (an app that cannot take a move keeps the recipe page)', async () => {
+    agentsNow = () => new Response(JSON.stringify({ agents: [DAN] }), { status: 200 });
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} initialKind="move" />);
+    expect(container.querySelector('[data-testid=setup-recipe-chosen]')).not.toBeNull();
+  });
+
+  it('without canMove and with nothing to move, the hint draws no choice at all (the kind choice is drawn for a move that was asked, so an unkept ask must not draw it)', async () => {
+    agentsNow = () => new Response(JSON.stringify({ agents: [] }), { status: 200 });
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} initialKind="move" />);
+    expect(container.querySelector('[data-testid=setup-kind]')).toBeNull(); // initialKind used without canMove → the choice is drawn → fails
+    expect(container.querySelector('[data-testid=setup-recipe-chosen]')).not.toBeNull();
+  });
+
+  it('the address: kind=move rides with caps=move only; any other value is dropped; the fragment keeps it across a reload', () => {
+    const base = `#code=${CODE}&runtimes=claude`;
+    expect(parseSetupFragment(`${base}&caps=move&kind=move`)!.kind).toBe('move');
+    expect(parseSetupFragment(`${base}&caps=move,solo&kind=move`)!.kind).toBe('move');
+    expect(parseSetupFragment(`${base}&kind=move`)!.kind).toBeUndefined(); // an app that cannot take a move
+    expect(parseSetupFragment(`${base}&caps=move&kind=recipe`)!.kind).toBeUndefined();
+    expect(parseSetupFragment(`${base}&caps=move`)!.kind).toBeUndefined();
+    const q = parseSetupFragment(`${base}&caps=move,solo&kind=move`)!;
+    expect(parseSetupFragment(setupFragment(q))!.kind).toBe('move');
+    expect(setupFragment(parseSetupFragment(`${base}&caps=move`)!)).not.toContain('kind=');
+  });
+});
+

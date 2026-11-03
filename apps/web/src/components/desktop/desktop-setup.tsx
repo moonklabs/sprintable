@@ -235,7 +235,7 @@ export interface MyInvite { invite_id: string; org_id: string; org_name: string;
  */
 type OrgMode = { kind: 'has-org' } | { kind: 'checking' } | { kind: 'new' } | { kind: 'invited'; invites: MyInvite[] } | { kind: 'invite-failed' };
 
-export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null, old = [], canMove = false, preselect = null }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[]; setupId?: string | null; old?: OldRuntime[]; canMove?: boolean; /** story 4680: the agent the recruiter just made — chosen for the first agent row once the list has it */ preselect?: string | null }) {
+export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null, old = [], canMove = false, preselect = null, initialKind = 'recipe' }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[]; setupId?: string | null; old?: OldRuntime[]; canMove?: boolean; /** story 4680: the agent the recruiter just made — chosen for the first agent row once the list has it */ preselect?: string | null; /** story 4832: `move` = the page opens with «이미 있는 에이전트 옮기기» chosen (the sidebar's move door · the card's move link); still only a choice — nothing is ticked */ initialKind?: 'recipe' | 'move' }) {
   // ⑥ 갈래 가: 찾았지만 회사 설정으로 도구를 못 붙이는 런타임은 고를 수 없고, 꺼진 선택지로만 보인다. PO 08:37Z · 유나 08:38Z.
   const runtimes = useMemo(() => found.filter((r) => !blocked.includes(r)), [found, blocked]);
   const claudeBlocked = blocked.includes('claude');
@@ -343,7 +343,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const [rateLine, setRateLine] = useState<string | null>(null);
   // story #4576 — «레시피로 시작» (default: moving stops the agent wherever it worked, so only when a person chooses it) or
   // «이미 있는 에이전트 옮기기»; the agents ticked for the move (none by default — the same reason)
-  const [setupKind, setSetupKind] = useState<'recipe' | 'move'>('recipe');
+  const [setupKind, setSetupKind] = useState<'recipe' | 'move'>(canMove ? initialKind : 'recipe');
   const [moving, setMoving] = useState<string[]>([]);
 
   // 로그인이 필요했던 설정이면 한 번(4426 · 사람 손 셈) — 설정 id가 없으면 이 흐름에 묶을 수 없어 보내지 않는다
@@ -851,7 +851,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
               const canPutOnTeam = state === 'not-in-project' && runtimes.includes(a.runtime);
               const second = canPutOnTeam ? t('move.rowNotInProject')
                 : state === 'runtime-missing' || state === 'not-in-project' ? t('move.rowRuntimeMissing', { runtime: RUNTIME_LABEL[a.runtime], iGa: pickIGaJosa(RUNTIME_LABEL[a.runtime]) })
-                  : t('onThisComputer', { runtime: RUNTIME_LABEL[a.runtime] });
+                  : t('move.rowOk', { runtime: RUNTIME_LABEL[a.runtime] });
               return (
                 <li key={a.id} className="p-3" data-testid="setup-move-row" data-state={state}>
                   <div className="flex gap-3">
@@ -1643,6 +1643,8 @@ function SetupOrProgress({ query }: { query: SetupQuery }) {
   const id = query.setupId && SETUP_ID_SHAPE.test(query.setupId) ? query.setupId : null;
   const [started, setStarted] = useState<boolean | null>(id ? null : false);
   const [teamPath, setTeamPath] = useState(false);
+  // story 4832: the card's own «이미 있는 에이전트 옮기기» link — the recipe page with the move chosen (the sidebar's move door opens it the same way: `kind=move`)
+  const [moveFirst, setMoveFirst] = useState(false);
   useEffect(() => {
     if (!id) return;
     let off = false;
@@ -1663,8 +1665,8 @@ function SetupOrProgress({ query }: { query: SetupQuery }) {
   // A recruiter's agent (`agent=`) keeps the recipe page for now — its own branch of the card comes with the recruiter's PR.
   // story 4711 (`agent=` branch): a recruiter's agent, an app that can move → the card with ① fixed to that agent (a move, never a new agent)
   if (query.agent && query.canMove === true && !teamPath) return <DesktopSetupAgent query={query} onTeam={() => setTeamPath(true)} />;
-  if (showsQuickCard(query, teamPath) && !query.agent) return <DesktopSetupQuick query={query} onTeam={() => setTeamPath(true)} />;
-  return <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} old={query.old ?? []} canMove={query.canMove === true} preselect={query.agent ?? null} />;
+  if (showsQuickCard(query, teamPath) && !query.agent) return <DesktopSetupQuick query={query} onTeam={() => setTeamPath(true)} onMove={query.canMove === true ? () => { setMoveFirst(true); setTeamPath(true); } : undefined} />;
+  return <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} old={query.old ?? []} canMove={query.canMove === true} preselect={query.agent ?? null} initialKind={query.kind === 'move' || moveFirst ? 'move' : 'recipe'} />;
 }
 
 /** 코드 없이 브라우저로 직접 온 경우(AC5). */

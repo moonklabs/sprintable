@@ -179,7 +179,8 @@ export function soloOutcome(status: number, error: ErrorBody | undefined, retryA
 /** Whether the page shows this card (not the recipe setup): the app said it can, no recruiter's agent (`agent=` keeps today's page until
  *  its own branch), and the person has not asked for the team path. */
 export function showsQuickCard(q: SetupQuery, teamPath: boolean): boolean {
-  return q.canSolo === true && !teamPath;
+  // story 4832: a page opened to MOVE agents (`kind=move`) is the recipe page with «옮기기» chosen — never the new-agent card
+  return q.canSolo === true && !teamPath && q.kind !== 'move';
 }
 
 export { isFolderRefused };

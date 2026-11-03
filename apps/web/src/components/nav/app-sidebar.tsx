@@ -11,7 +11,7 @@ import { CommandPalette } from '@/components/command-palette/command-palette';
 import { useCommandPalette } from '@/components/command-palette/command-palette-context';
 import { ProfileMenu } from '@/components/nav/profile-menu';
 import { BusinessInfoDisclosure } from '@/components/nav/business-info-disclosure';
-import { NewProjectEntry } from '@/components/nav/new-project-entry';
+import { MoveAgentsEntry, NewProjectEntry } from '@/components/nav/new-project-entry';
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
 import { Button } from '@/components/ui/button';
 import { fetchDesignatedPendingCount, subscribeDesignatedPendingCount } from '@/lib/designated-pending-count-client';
@@ -386,6 +386,8 @@ export function AppSidebar({
         />
         {/* story 4713: inside the desktop app «+ 새 프로젝트» is one line right here, outside the switcher's menu (a browser: nothing) */}
         <NewProjectEntry className="mt-1 h-8 min-h-0 w-full justify-start gap-2 px-2.5 text-sm text-muted-foreground" />
+        {/* story 4832: the door for this organization's agents → this computer, named by what it does (not behind «새 프로젝트») */}
+        <MoveAgentsEntry className="h-8 min-h-0 w-full justify-start gap-2 px-2.5 text-sm text-muted-foreground" />
         {/* 3826-pre — text-sidebar-foreground/60(알파 합성) → solid text-muted-foreground.
             v3 ink 재조정 후 실 대비 미달 실측(#767573/#fbfaf9=4.43:1·⌘K kbd
             #747371/#f7f6f3=4.37:1). */}
