@@ -101,7 +101,6 @@ _KNOWN = {
     "app/routers/me.py::get_me",
     "app/routers/me.py::update_me",
     "app/routers/notification_preferences.py::upsert_preferences",
-    "app/routers/project_access.py::create_project_access",
     "app/routers/project_access.py::delete_project_access",
     "app/routers/project_access.py::list_project_access",
     "app/routers/project_access.py::set_project_role",

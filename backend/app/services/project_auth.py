@@ -186,6 +186,14 @@ async def has_project_role(
     return PROJECT_ROLE_RANK.get(role, 0) >= PROJECT_ROLE_RANK.get(min_role, 99)
 
 
+async def can_manage_project_access(session: AsyncSession, user_id: uuid.UUID, project_id: uuid.UUID) -> bool:
+    """story 4832 — may this person decide who is on this project's team (grant an agent project access)? An effective project admin or
+    above (an explicit project owner/admin grant, or org owner/admin, the floor in `get_project_role`). The ONE place the rule lives: the
+    access route and every other path that puts an agent on a project's team (`project_agent_grant.grant_agent_project_access`) ask it, so a
+    later narrowing of the rule narrows them all together."""
+    return await has_project_role(session, user_id, project_id, min_role="admin")
+
+
 async def holds_agent_seat(
     session: AsyncSession,
     user_id: uuid.UUID,
