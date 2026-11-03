@@ -75,12 +75,27 @@ async def test_accessible_project_ids_includes_agent_grant_branch():
 
 # ── project_access POST — 에이전트 grant(member_id) 경로 ──────────────────────
 
+class _NestedCM:
+    """story 4832: the grant function writes inside a savepoint (`session.begin_nested()`) — an async context manager that does nothing here"""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
 async def _call_create(body_dict, execute_results):
-    """create_project_access 직접 호출 — _require_owner_or_admin no-op, execute 시퀀스 주입."""
+    """create_project_access 직접 호출 — _require_owner_or_admin no-op, execute 시퀀스 주입.
+
+    story 4832: the agent branch is `grant_agent_project_access` (the access route's checks in one function). Its first read is the project's existence (answered by an
+    always-truthy row, the placeholder at the front of the sequence) and its own «who may manage access» rule is stood in for like the route's (this test is about the
+    agent checks that follow; the rule and the route's answers have their own real-DB test: test_4832_move_adds_to_team_realdb)."""
     from app.routers.project_access import ProjectAccessCreate, create_project_access
 
     session = AsyncMock()
-    results = list(execute_results)
+    results = [MagicMock()] + list(execute_results)
+    session.begin_nested = MagicMock(return_value=_NestedCM())
 
     async def _execute(*a, **k):
         r = results.pop(0) if results else MagicMock()
@@ -101,7 +116,8 @@ async def _call_create(body_dict, execute_results):
 
     auth = MagicMock()
     auth.user_id = str(uuid.uuid4())
-    with patch("app.routers.project_access._require_owner_or_admin", new=AsyncMock()):
+    with patch("app.routers.project_access._require_owner_or_admin", new=AsyncMock()), \
+            patch("app.services.project_agent_grant.can_manage_project_access", new=AsyncMock(return_value=True)):
         return await create_project_access(PROJ, ProjectAccessCreate(**body_dict), auth, session), session
 
 
