@@ -411,7 +411,7 @@ substitutions:
 steps:
   # story 4786 (E-INFRA-DIET): fail-closed — a prod build must carry its own minimum instances (`_MINS_EXPLICIT`, sent by the workflow's prod branch; backend and frontend >= 1; maximums >= 2, story 4790: the default maximum is dev's 1/3); the defaults are dev-safe. Runs first and every step that would otherwise start at once waits for it.
   - id: guard-prod-mins
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:591.0.0
     entrypoint: bash
     args:
       - -c
@@ -441,7 +441,7 @@ steps:
   # responseHeader(=GCS의 Access-Control-Allow-Headers 대응 필드)에 x-goog-if-generation-match를
   # 추가(Content-Type은 기존에 이미 있었음) — 둘 중 하나라도 빠지면 프리플라이트가 여전히 막힌다.
   - id: apply-gcs-attachments-cors
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:591.0.0
     entrypoint: bash
     args:
       - -c
@@ -477,7 +477,7 @@ steps:
   # 풀었었다 — 그 손적용 자체가 드리프트 씨앗(다음 배포가 검증 안 하면 재적용 없이 방치)이라
   # 여기 SSOT로 편입해 매 배포마다 멱등 재적용+검증하게 한다.
   - id: apply-gcs-avatars-cors
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:591.0.0
     entrypoint: bash
     args:
       - -c
@@ -514,7 +514,7 @@ steps:
   # 같은 두 갈래 형태로 승격). 버킷 자체는 페드루가 gcloud로 이미 프로비저닝(2026-09-04,
   # public-read·cloudrun-runtime-dev=objectAdmin) — 이 스텝은 CORS만 멱등 재적용+검증.
   - id: apply-gcs-channel-media-cors
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:591.0.0
     entrypoint: bash
     args:
       - -c
@@ -678,7 +678,7 @@ steps:
   # migrate.sh(정본 `heads` 복수)를 안 타는 상태였다. 매 배포마다 잡을 SHA-pinned 이미지 +
   # canonical command(`/app/scripts/migrate.sh`)로 강제 재배포해 드리프트가 다시 쌓일 수 없게 한다.
   - id: update-migrate-job
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:591.0.0
     entrypoint: bash
     args:
       - -c
@@ -694,7 +694,7 @@ steps:
   # (migrate 실패 시 배포 자동 abort — "잡 성공≠앱DB 배포" 상태가 재발할 수 없음). 실패는
   # Cloud Build 로그 + GHA 워크플로우 실패(빨간 X·커밋 상태)로 가시화된다.
   - id: run-migrate-job
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:591.0.0
     entrypoint: bash
     args:
       - -c
@@ -712,7 +712,7 @@ steps:
   # backend의 run-migrate-job과 동형 fail-closed 계약 — 배포 하드게이트(false)일 때도 이
   # 두 스텝은 그냥 스킵(잡 자체가 없거나 provision만 하고 execute는 건너뜀)해 깨지지 않는다.
   - id: update-support-gateway-migrate-job
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:591.0.0
     entrypoint: bash
     args:
       - -c
@@ -729,7 +729,7 @@ steps:
     waitFor: [push-support-gateway]
 
   - id: run-support-gateway-migrate-job
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:591.0.0
     entrypoint: bash
     args:
       - -c
@@ -746,7 +746,7 @@ steps:
 
   # ─── Deploy to Cloud Run ───────────────────────────────────────────────────
   - id: deploy-frontend
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:591.0.0
     entrypoint: bash
     args:
       - -c
@@ -828,7 +828,7 @@ steps:
   # 프로세스 실보고) · min=0(열람 트리거라 상시 트래픽 없음, scale-to-zero) · timeout=120s(대형
   # pptx 변환 지연 흡수).
   - id: deploy-office-converter
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:591.0.0
     entrypoint: bash
     args:
       - -c
@@ -887,7 +887,7 @@ steps:
     waitFor: ['guard-prod-mins']  # story 4786: nothing starts before the prod guard has passed
 
   - id: deploy-backend
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:591.0.0
     entrypoint: bash
     args:
       - -c
@@ -970,8 +970,10 @@ steps:
   # Ready가 된 뒤: 없으면 create · 다르면 update · 정의에 없는 -dev 작업은 보고만(삭제 안 함) · 적용 뒤 재조회로 차이 0
   # 확인. Authorization 값·호스트는 실물 sprintable-backend-dev describe(CRON_SECRET secretKeyRef · status.url)에서
   # 읽고 로그엔 값을 찍지 않는다. 실패는 빌드 실패(set -e — 삼키지 않는다). prod는 이 카드 밖이라 스킵.
+  # 11-03 PO: every cloud-sdk step names 591.0.0 (backend/tests/test_cloudbuild_sdk_image_pinned.py). The unversioned image moved to a release
+  # without a system python3 and this step failed with «python3: command not found» (127). Raise the version on purpose, after checking this step.
   - id: apply-cloud-scheduler
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:591.0.0
     entrypoint: bash
     args:
       - -c
@@ -1000,7 +1002,7 @@ steps:
   # dev가 아니면 스킵(서비스 미존재 상태에서 이 스텝이 자동 생성해버리는 것 방지 — 프로덕션
   # 승격 시점에 이 가드를 열고 _REALTIME_* 값을 prod로 배선).
   - id: deploy-realtime
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:591.0.0
     entrypoint: bash
     args:
       - -c
@@ -1071,7 +1073,7 @@ steps:
   # 실제로 요청을 받고 있다(2026-08-02 실측). backend-prod 가 이 파이프라인으로 갱신되는데
   # mcp-prod 만 안 따라가는 것이 바로 #2426이 없애려던 «불일치»다.
   - id: deploy-mcp
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:591.0.0
     entrypoint: bash
     args:
       - -c
@@ -1162,7 +1164,7 @@ steps:
   # 프로비저닝하기 전까지는 이 스텝이 그 이유로 막힌다 — 코드/배선은 여기까지, 시크릿 생성은
   # PO 레인(infra/cloudbuild-secret-manifest.txt에 SUPPORT_GATEWAY_ADMIN_TOKEN_dev 등재 済).
   - id: deploy-support-gateway
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:591.0.0
     entrypoint: bash
     args:
       - -c
@@ -1235,7 +1237,7 @@ steps:
   # 으로 여는 방식은 쓰지 않는다). 스크립트 자체가 이미 무중단 rolling-update(--max-unavailable=0
   # --max-surge=1)로 설계돼 있다(story #2114 S5 실증).
   - id: deploy-realtime-gce
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:591.0.0
     entrypoint: bash
     args:
       - -c

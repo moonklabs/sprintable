@@ -25,7 +25,7 @@ tags: ['vm-bundle']
 
 steps:
   - id: resolve-backend
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:591.0.0
     entrypoint: bash
     timeout: 120s
     args:
@@ -104,7 +104,7 @@ steps:
         echo "build-frontend-vm: $$ref"
 
   - id: bundle-vm
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:591.0.0
     entrypoint: bash
     timeout: 120s
     waitFor: [build-frontend-vm]
