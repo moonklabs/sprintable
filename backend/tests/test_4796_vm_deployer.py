@@ -97,8 +97,8 @@ class FakeRunner:
         self.iptables_rc = 0
         self.images_out = ""   # what `docker image ls --digests` prints: «<id> <repository>@<digest>» per line
 
-    def run(self, args, env, cwd=None, timeout=900, stdin=None):
-        self.calls.append({"args": list(args), "env": dict(env), "stdin": stdin})
+    def run(self, args, env, cwd=None, timeout=900, stdin=None, whole=False):
+        self.calls.append({"args": list(args), "env": dict(env), "stdin": stdin, "whole": whole})
         joined = " ".join(args)
         for marker, exc in self.raise_on.items():
             if marker in joined:
@@ -827,15 +827,73 @@ def test_old_images_of_our_registry_are_removed_but_the_running_and_previous_sta
     ]) + "\n"
     world.publish("b" * 40)
     assert world.dep.run_once() == "deployed"
-    assert _image_rm_calls(world) == ["sha256:old-b", "sha256:old-f"]
+    assert _image_rm_calls(world) == sorted([old_b, old_f])
+    ls = [c for c in world.runner.calls if c["args"][:3] == ["docker", "image", "ls"]]
+    assert ls and all(c["whole"] for c in ls)   # a decision is made from this listing: it is read whole, never the truncated log tail
 
 
 def test_the_first_deploy_keeps_only_its_own_images(world) -> None:
     mine = f"{REG}/backend@{_digest('a' * 40)}"
-    world.runner.images_out = f"sha256:mine {mine}\nsha256:stray {REG}/backend@{_digest('z' * 40)}\n"
+    stray = f"{REG}/backend@{_digest('z' * 40)}"
+    world.runner.images_out = f"sha256:mine {mine}\nsha256:stray {stray}\n"
     world.publish("a" * 40)
     assert world.dep.run_once() == "deployed"
-    assert _image_rm_calls(world) == ["sha256:stray"]
+    assert _image_rm_calls(world) == [stray]
+
+
+def test_a_kept_reference_with_a_tag_still_keeps_its_image(world) -> None:
+    """desired.json may say «repository:tag@digest» while Docker lists «repository@digest»: compared raw, the running image would look unkept"""
+    world.publish("a" * 40)
+    world.dep.run_once()
+    tagged = f"{REG}/backend:v2@{_digest('b' * 40)}"
+    world.runner.images_out = f"sha256:new-b {REG}/backend@{_digest('b' * 40)}\nsha256:old {REG}/backend@{_digest('c' * 40)}\n"
+    world.publish("b" * 40, backend=tagged)
+    assert world.dep.run_once() == "deployed"
+    assert _image_rm_calls(world) == [f"{REG}/backend@{_digest('c' * 40)}"]
+
+
+def test_a_rollback_removes_the_failed_candidates_images_and_keeps_the_restored_ones(world) -> None:
+    a = world.publish("a" * 40)
+    world.dep.run_once()
+    b = world.publish("b" * 40)
+    world.runner.images_out = "\n".join(f"sha256:{n} {r}" for n, r in [("ab", a["backend_image"]), ("af", a["frontend_image"]), ("bb", b["backend_image"]), ("bf", b["frontend_image"])]) + "\n"
+    world.runner.healthy_after = 10**6   # the candidate never turns green; the rollback's `up` turns health on
+    orig = world.runner.run
+
+    def run(args, env, **kw):
+        if env.get("BACKEND_IMAGE") == a["backend_image"] and "up" in args:
+            world.runner.healthy_after = 0
+            world.runner._probes = 0
+        return orig(args, env, **kw)
+
+    world.runner.run = run
+    assert world.dep.run_once() == "rolled-back"
+    assert _image_rm_calls(world) == sorted([b["backend_image"], b["frontend_image"]])
+
+
+def test_the_image_prune_stops_at_its_deadline(world) -> None:
+    world.publish("a" * 40)
+    world.dep.run_once()
+    olds = [f"{REG}/backend@{_digest(c * 40)}" for c in "cde"]
+    world.runner.images_out = "".join(f"sha256:{i} {r}\n" for i, r in enumerate(olds))
+    orig = world.runner.run
+
+    def run(args, env, **kw):
+        if args[:3] == ["docker", "image", "rm"]:
+            world.clock.t += D.IMAGE_PRUNE_DEADLINE * 0.6   # each removal is slow
+        return orig(args, env, **kw)
+
+    world.runner.run = run
+    world.publish("b" * 40)
+    assert world.dep.run_once() == "deployed"
+    assert len(_image_rm_calls(world)) == 2 and any("deadline" in line for line in world.logs)
+
+
+def test_the_runner_returns_a_whole_listing_only_when_asked() -> None:
+    env = {"PATH": "/bin:/usr/bin"}
+    rc, tail = D.Runner().run([sys.executable, "-c", "print('x' * 6000)"], env)
+    rc2, whole = D.Runner().run([sys.executable, "-c", "print('x' * 6000)"], env, whole=True)
+    assert rc == rc2 == 0 and len(tail) == 4000 and len(whole) == 6001
 
 
 def test_an_image_prune_that_fails_does_not_change_what_the_deploy_reported(world) -> None:

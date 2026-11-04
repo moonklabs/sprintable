@@ -45,7 +45,7 @@ class GwRunner(S.FakeRunner):
         self.gateway_role_fails_for = 0   # how many times the question «does the application role own the database?» is answered «no»
         self.metadata_rc = 1
 
-    def run(self, args, env, cwd=None, timeout=900, stdin=None):
+    def run(self, args, env, cwd=None, timeout=900, stdin=None, whole=False):
         joined = " ".join(args)
         if args[:2] == ["docker", "compose"] and args[-1] == "gateway-db" and "up" in args:
             self.calls.append({"args": list(args), "env": dict(env), "stdin": stdin})
@@ -56,7 +56,7 @@ class GwRunner(S.FakeRunner):
                 self.gateway_role_fails_for -= 1
                 return (1, "")
             return (0, "") if self.gateway_db_probe_ok else (1, "no response")
-        return super().run(args, env, cwd=cwd, timeout=timeout, stdin=stdin)
+        return super().run(args, env, cwd=cwd, timeout=timeout, stdin=stdin, whole=whole)
 
 
 def _make_world(tmp_path: Path, private_ip=lambda: PRIVATE_IP, secret_overrides: dict | None = None, extra_bundle: dict | None = None):

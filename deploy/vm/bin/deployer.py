@@ -107,13 +107,39 @@ class Config:
 
 # ───────────────────────── the outside world, injectable ─────────────────────────
 
+IMAGE_PRUNE_DEADLINE = 600   # seconds for one image prune pass; what is left waits for the next deploy (the unit itself may run far longer)
+
+
+def _digest_ref(ref: str) -> str:
+    """«repository[:tag]@digest» → «repository@digest» (the form `docker image ls --digests` prints); a reference without a digest is returned as it is"""
+    repo, at, digest = ref.partition("@")
+    if not at:
+        return ref
+    last = repo.rsplit("/", 1)
+    if ":" in last[-1]:
+        last[-1] = last[-1].split(":", 1)[0]
+    return "/".join(last) + "@" + digest
+
+
+def _kept_images(record: Mapping | None) -> set[str]:
+    """the images a recorded release needs, and those of the release it replaced (a rollback goes back to that one)"""
+    out: set[str] = set()
+    for r in (record, (record or {}).get("previous")):
+        if isinstance(r, Mapping):
+            out |= {r[k] for k in ("backend_image", "frontend_image") if isinstance(r.get(k), str)}
+    return out
+
+
 class Runner:
-    def run(self, args: Sequence[str], env: Mapping[str, str], cwd: Path | None = None, timeout: float = 900, stdin: str | None = None) -> tuple[int, str]:
+    def run(self, args: Sequence[str], env: Mapping[str, str], cwd: Path | None = None, timeout: float = 900, stdin: str | None = None,
+            whole: bool = False) -> tuple[int, str]:
+        """the output's last 4000 characters (enough for a log line) — or all of it with `whole`, for a listing a decision is made from"""
         try:
             p = subprocess.run(list(args), env=dict(env), cwd=cwd, input=stdin, capture_output=True, text=True, timeout=timeout, check=False)
         except subprocess.TimeoutExpired:
             return 124, f"timed out after {int(timeout)} s"
-        return p.returncode, (p.stdout + p.stderr)[-4000:]
+        out = p.stdout + p.stderr
+        return p.returncode, out if whole else out[-4000:]
 
 
 class GcsStore:
@@ -443,6 +469,7 @@ class Deployer:
             self.log(f"reconcile failed: {self._scrub(str(e)) if isinstance(e, DeployError) else type(e).__name__}")
             return "reconcile-failed"
         self._pending_path.unlink(missing_ok=True)
+        self._prune_images(_kept_images(current))
         return None
 
     def _stop_first_release(self, pending: Mapping) -> str | None:
@@ -790,8 +817,7 @@ class Deployer:
         record["previous"] = {k: current[k] for k in STATE_KEYS} if current else None
         _write_json(self._current_path, record)
         self._pending_path.unlink(missing_ok=True)
-        self._prune(keep={desired["sha"], *([current["sha"]] if current else [])},
-                    keep_images={desired["backend_image"], desired["frontend_image"], *([current["backend_image"], current["frontend_image"]] if current else [])})
+        self._prune(keep={desired["sha"], *([current["sha"]] if current else [])}, keep_images=_kept_images(record))
 
     def _rollback(self, current: Mapping | None) -> str:
         try:
@@ -822,6 +848,7 @@ class Deployer:
         except Exception as e:  # noqa: BLE001 — the outcome is recorded, never a traceback
             self.log(f"rollback failed: {self._scrub(str(e)) if isinstance(e, DeployError) else type(e).__name__}")
             return "rollback-failed"
+        self._prune_images(_kept_images(current))   # the failed candidate's images go; the restored release and the one before it stay
         return "rolled-back"
 
     def _prune(self, keep: set[str], keep_images: set[str] = frozenset()) -> None:
@@ -838,13 +865,15 @@ class Deployer:
     def _prune_images(self, keep: set[str]) -> None:
         """best effort, like the release folders: every release pulls its own backend and frontend images (about 1.5 GB), and nothing removed them —
         11-04 the dev disk filled and the next deploy could not pull. Kept: the images of the release now running and of the one a rollback goes back
-        to (`keep`, exact digests). Only images of our own registry are candidates (the database and proxy images are never touched), an image with
-        any kept reference stays, and `docker image rm` without -f refuses an image a container still uses."""
+        to (`keep`, compared as «repository@digest»). Fails closed: the listing is read whole; an image is a candidate only when EVERY reference it has is
+        a digest reference of our own registry and none is kept (a tag, «<none>», another registry or a kept reference keeps the whole image); removal is
+        by reference without -f (Docker refuses an image a container uses), and the whole pass stops at IMAGE_PRUNE_DEADLINE."""
+        keep = {_digest_ref(r) for r in keep}
         if not keep:
             return
         env = {"PATH": os.environ.get("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")}
         try:
-            rc, out = self.runner.run(["docker", "image", "ls", "--digests", "--no-trunc", "--format", "{{.ID}} {{.Repository}}@{{.Digest}}"], env, timeout=60)
+            rc, out = self.runner.run(["docker", "image", "ls", "--digests", "--no-trunc", "--format", "{{.ID}} {{.Repository}}@{{.Digest}}"], env, timeout=60, whole=True)
             if rc != 0:
                 self.log("image prune skipped: the image list could not be read")
                 return
@@ -853,15 +882,18 @@ class Deployer:
                 parts = line.split()
                 if len(parts) == 2:
                     refs.setdefault(parts[0], set()).add(parts[1])
-            drop = sorted(i for i, rs in refs.items() if all(r.startswith(self._image_prefix) for r in rs) and not rs & keep)
-            removed = 0
-            for image_id in drop:
-                rc, _ = self.runner.run(["docker", "image", "rm", image_id], env, timeout=120)
+            ours = re.compile(re.escape(self._image_prefix) + r"[^@\s:]+@sha256:[0-9a-f]{64}")
+            drop = sorted(r for rs in refs.values() if all(ours.fullmatch(r) for r in rs) and not rs & keep for r in rs)
+            started, removed = self.now(), 0
+            for n, ref in enumerate(drop):
+                if self.now() - started > IMAGE_PRUNE_DEADLINE:
+                    self.log(f"image prune stopped at its deadline: {len(drop) - n} references left for the next deploy")
+                    break
+                rc, _ = self.runner.run(["docker", "image", "rm", ref], env, timeout=120)
                 removed += rc == 0
-            self.log(f"image prune: {removed} of {len(drop)} old images removed")
+            self.log(f"image prune: {removed} of {len(drop)} old image references removed")
         except OSError as e:
             self.log(f"image prune skipped: {type(e).__name__}")
-
 
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
