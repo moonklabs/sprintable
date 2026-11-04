@@ -790,7 +790,8 @@ class Deployer:
         record["previous"] = {k: current[k] for k in STATE_KEYS} if current else None
         _write_json(self._current_path, record)
         self._pending_path.unlink(missing_ok=True)
-        self._prune(keep={desired["sha"], *([current["sha"]] if current else [])})
+        self._prune(keep={desired["sha"], *([current["sha"]] if current else [])},
+                    keep_images={desired["backend_image"], desired["frontend_image"], *([current["backend_image"], current["frontend_image"]] if current else [])})
 
     def _rollback(self, current: Mapping | None) -> str:
         try:
@@ -823,7 +824,7 @@ class Deployer:
             return "rollback-failed"
         return "rolled-back"
 
-    def _prune(self, keep: set[str]) -> None:
+    def _prune(self, keep: set[str], keep_images: set[str] = frozenset()) -> None:
         """best effort: a failure here must not change what the deploy reported"""
         try:
             releases = self.cfg.install_dir / "releases"
@@ -832,6 +833,34 @@ class Deployer:
                 shutil.rmtree(d, ignore_errors=True)
         except OSError as e:
             self.log(f"prune skipped: {type(e).__name__}")
+        self._prune_images(keep_images)
+
+    def _prune_images(self, keep: set[str]) -> None:
+        """best effort, like the release folders: every release pulls its own backend and frontend images (about 1.5 GB), and nothing removed them —
+        11-04 the dev disk filled and the next deploy could not pull. Kept: the images of the release now running and of the one a rollback goes back
+        to (`keep`, exact digests). Only images of our own registry are candidates (the database and proxy images are never touched), an image with
+        any kept reference stays, and `docker image rm` without -f refuses an image a container still uses."""
+        if not keep:
+            return
+        env = {"PATH": os.environ.get("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")}
+        try:
+            rc, out = self.runner.run(["docker", "image", "ls", "--digests", "--no-trunc", "--format", "{{.ID}} {{.Repository}}@{{.Digest}}"], env, timeout=60)
+            if rc != 0:
+                self.log("image prune skipped: the image list could not be read")
+                return
+            refs: dict[str, set[str]] = {}
+            for line in out.splitlines():
+                parts = line.split()
+                if len(parts) == 2:
+                    refs.setdefault(parts[0], set()).add(parts[1])
+            drop = sorted(i for i, rs in refs.items() if all(r.startswith(self._image_prefix) for r in rs) and not rs & keep)
+            removed = 0
+            for image_id in drop:
+                rc, _ = self.runner.run(["docker", "image", "rm", image_id], env, timeout=120)
+                removed += rc == 0
+            self.log(f"image prune: {removed} of {len(drop)} old images removed")
+        except OSError as e:
+            self.log(f"image prune skipped: {type(e).__name__}")
 
 
 def main(argv: list[str]) -> int:

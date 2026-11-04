@@ -95,6 +95,7 @@ class FakeRunner:
         self.metadata_rc = 1   # the gateway database container asked for the metadata server: refused (1) is the answer wanted; 0 would mean it can reach it
         self.chain_lines = ["-N DOCKER-USER", "-A DOCKER-USER -d 169.254.169.254/32 -i br-gwdb -j DROP", "-A DOCKER-USER -j RETURN"]   # what `iptables -S DOCKER-USER` prints: the metadata rule first
         self.iptables_rc = 0
+        self.images_out = ""   # what `docker image ls --digests` prints: «<id> <repository>@<digest>» per line
 
     def run(self, args, env, cwd=None, timeout=900, stdin=None):
         self.calls.append({"args": list(args), "env": dict(env), "stdin": stdin})
@@ -104,6 +105,8 @@ class FakeRunner:
                 raise exc
         if args[:1] == ["iptables"]:
             return self.iptables_rc, "\n".join(self.chain_lines) + "\n"
+        if args[:3] == ["docker", "image", "ls"]:
+            return 0, self.images_out
         if "169.254.169.254" in joined:
             return self.metadata_rc, ""
         if "process.exit(r.status<500" in joined:
@@ -193,7 +196,7 @@ def _text_tree(root: Path) -> str:
 def test_a_deploy_migrates_before_it_swaps_and_checks_health_after(world) -> None:
     d = world.publish("a" * 40)
     assert world.dep.run_once() == "deployed"
-    assert world.runner.verbs() == ["iptables", "login", "pull", "logout", "up:db", "up:gwdb", "exec:gwdb-ready", "exec:gwdb-metadata", "run", "iptables", "up:all", "exec:reload", "exec:gwdb-reload", "exec:gwdb-metadata", "exec:health-be", "exec:health-fe", "exec:gwdb-ready"]
+    assert world.runner.verbs() == ["iptables", "login", "pull", "logout", "up:db", "up:gwdb", "exec:gwdb-ready", "exec:gwdb-metadata", "run", "iptables", "up:all", "exec:reload", "exec:gwdb-reload", "exec:gwdb-metadata", "exec:health-be", "exec:health-fe", "exec:gwdb-ready", "image"]
     cur = _state(world, "current.json")
     assert cur["sha"] == d["sha"] and cur["previous"] is None
     assert (world.cfg.install_dir / "releases" / d["sha"] / "compose.yml").exists()
@@ -801,6 +804,48 @@ def test_a_rollback_that_raises_unexpectedly_is_reported_not_thrown(world) -> No
 
     world.dep._activate = lambda p: flaky(world.dep, p)
     assert world.dep.run_once() == "rollback-failed"
+
+
+def _image_rm_calls(world) -> list[str]:
+    return [c["args"][3] for c in world.runner.calls if c["args"][:3] == ["docker", "image", "rm"]]
+
+
+def test_old_images_of_our_registry_are_removed_but_the_running_and_previous_stay(world) -> None:
+    """11-04: every release pulled its own images and nothing removed them — the dev disk filled and a deploy could not pull"""
+    world.publish("a" * 40)
+    world.dep.run_once()
+    old_b, old_f = f"{REG}/backend@{_digest('c' * 40)}", f"{REG}/frontend-vm@{_digest('c' * 40)}"
+    prev_b, prev_f = f"{REG}/backend@{_digest('a' * 40)}", f"{REG}/frontend-vm@{_digest('a' * 40)}"
+    new_b, new_f = f"{REG}/backend@{_digest('b' * 40)}", f"{REG}/frontend-vm@{_digest('b' * 40)}"
+    world.runner.images_out = "\n".join([
+        f"sha256:new-b {new_b}", f"sha256:new-f {new_f}",            # the release being deployed
+        f"sha256:prev-b {prev_b}", f"sha256:prev-f {prev_f}",        # the one a rollback goes back to
+        f"sha256:old-b {old_b}", f"sha256:old-f {old_f}",            # older: removed
+        f"sha256:shared {REG}/backend@{_digest('d' * 40)}", f"sha256:shared {prev_b}",   # one image with a kept reference: stays
+        "sha256:db pgvector/pgvector@sha256:" + "d" * 64,             # another registry: never touched
+        f"sha256:mixed {REG}/backend@<none>", "sha256:mixed caddy@<none>",   # carries a reference outside our registry: stays
+    ]) + "\n"
+    world.publish("b" * 40)
+    assert world.dep.run_once() == "deployed"
+    assert _image_rm_calls(world) == ["sha256:old-b", "sha256:old-f"]
+
+
+def test_the_first_deploy_keeps_only_its_own_images(world) -> None:
+    mine = f"{REG}/backend@{_digest('a' * 40)}"
+    world.runner.images_out = f"sha256:mine {mine}\nsha256:stray {REG}/backend@{_digest('z' * 40)}\n"
+    world.publish("a" * 40)
+    assert world.dep.run_once() == "deployed"
+    assert _image_rm_calls(world) == ["sha256:stray"]
+
+
+def test_an_image_prune_that_fails_does_not_change_what_the_deploy_reported(world) -> None:
+    world.publish("a" * 40)
+    world.dep.run_once()
+    world.publish("b" * 40)
+    world.runner.raise_on["image ls"] = OSError("docker is gone")
+    assert world.dep.run_once() == "deployed"
+    assert _state(world, "current.json")["sha"] == "b" * 40
+    assert _image_rm_calls(world) == []
 
 
 def test_a_prune_that_fails_does_not_change_what_the_deploy_reported(world, monkeypatch) -> None:
