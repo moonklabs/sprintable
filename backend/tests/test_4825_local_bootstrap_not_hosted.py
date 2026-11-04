@@ -37,6 +37,9 @@ ALLOWED = {
     # build never sets it) and `turbo.json`, which only DECLARES that build variable to turbo's strict env mode (declaring is not setting) — and their tests
     "apps/web/embedded-host-guard.cjs",
     "apps/web/embedded-host-guard.test.ts",
+    # story 4844: the relay of `/api/v2/*` at the same door (installed only when the switch is set, inside the guard), and its test
+    "apps/web/embedded-api-relay.cjs",
+    "apps/web/embedded-api-relay.test.ts",
     "apps/web/next.config.ts",
     "apps/web/next.config.embedded.test.ts",
     "turbo.json",
