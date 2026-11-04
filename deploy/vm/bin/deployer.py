@@ -866,33 +866,38 @@ class Deployer:
         """best effort, like the release folders: every release pulls its own backend and frontend images (about 1.5 GB), and nothing removed them —
         11-04 the dev disk filled and the next deploy could not pull. Kept: the images of the release now running and of the one a rollback goes back
         to (`keep`, compared as «repository@digest»). Fails closed: the listing is read whole; an image is a candidate only when EVERY reference it has is
-        a digest reference of our own registry and none is kept (a tag, «<none>», another registry or a kept reference keeps the whole image); removal is
-        by reference without -f (Docker refuses an image a container uses), and the whole pass stops at IMAGE_PRUNE_DEADLINE."""
+        a digest reference of our own registry with no tag and none is kept (a tag, «<none>», another registry or a kept reference keeps the whole image);
+        removal is by reference without -f (Docker refuses an image a container uses), and the whole pass, listing included, ends by IMAGE_PRUNE_DEADLINE."""
         keep = {_digest_ref(r) for r in keep}
         if not keep:
             return
         env = {"PATH": os.environ.get("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")}
+        started = self.now()   # the deadline covers the listing too
         try:
-            rc, out = self.runner.run(["docker", "image", "ls", "--digests", "--no-trunc", "--format", "{{.ID}} {{.Repository}}@{{.Digest}}"], env, timeout=60, whole=True)
+            rc, out = self.runner.run(["docker", "image", "ls", "--digests", "--no-trunc", "--format", "{{.ID}} {{.Repository}} {{.Tag}} {{.Digest}}"],
+                                      env, timeout=60, whole=True)
             if rc != 0:
                 self.log("image prune skipped: the image list could not be read")
                 return
             refs: dict[str, set[str]] = {}
             for line in out.splitlines():
                 parts = line.split()
-                if len(parts) == 2:
-                    refs.setdefault(parts[0], set()).add(parts[1])
+                if len(parts) == 4:
+                    image_id, repo, tag, digest = parts
+                    # a row with a tag is written WITH it, so it never looks like a bare digest reference (and keeps its image)
+                    refs.setdefault(image_id, set()).add(f"{repo}@{digest}" if tag == "<none>" else f"{repo}:{tag}@{digest}")
             ours = re.compile(re.escape(self._image_prefix) + r"[^@\s:]+@sha256:[0-9a-f]{64}")
             drop = sorted(r for rs in refs.values() if all(ours.fullmatch(r) for r in rs) and not rs & keep for r in rs)
-            started, removed = self.now(), 0
+            removed = 0
             for n, ref in enumerate(drop):
-                if self.now() - started > IMAGE_PRUNE_DEADLINE:
+                left = IMAGE_PRUNE_DEADLINE - (self.now() - started)
+                if left <= 0:
                     self.log(f"image prune stopped at its deadline: {len(drop) - n} references left for the next deploy")
                     break
-                rc, _ = self.runner.run(["docker", "image", "rm", ref], env, timeout=120)
+                rc, _ = self.runner.run(["docker", "image", "rm", ref], env, timeout=min(120, left))
                 removed += rc == 0
             self.log(f"image prune: {removed} of {len(drop)} old image references removed")
-        except OSError as e:
+        except Exception as e:  # noqa: BLE001 — best effort: nothing here may change what a deploy, a rollback or a recovery reports
             self.log(f"image prune skipped: {type(e).__name__}")
 
 def main(argv: list[str]) -> int:

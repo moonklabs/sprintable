@@ -98,7 +98,7 @@ class FakeRunner:
         self.images_out = ""   # what `docker image ls --digests` prints: «<id> <repository>@<digest>» per line
 
     def run(self, args, env, cwd=None, timeout=900, stdin=None, whole=False):
-        self.calls.append({"args": list(args), "env": dict(env), "stdin": stdin, "whole": whole})
+        self.calls.append({"args": list(args), "env": dict(env), "stdin": stdin, "whole": whole, "timeout": timeout})
         joined = " ".join(args)
         for marker, exc in self.raise_on.items():
             if marker in joined:
@@ -806,6 +806,16 @@ def test_a_rollback_that_raises_unexpectedly_is_reported_not_thrown(world) -> No
     assert world.dep.run_once() == "rollback-failed"
 
 
+def _ls(*rows) -> str:
+    """rows (image id, «repository@digest»[, tag]) printed the way `docker image ls --digests --format "{{.ID}} {{.Repository}} {{.Tag}} {{.Digest}}"` does"""
+    out = []
+    for row in rows:
+        image_id, ref, tag = (*row, "<none>")[:3]
+        repo, _, digest = ref.rpartition("@")
+        out.append(f"{image_id} {repo} {tag} {digest}")
+    return "\n".join(out) + "\n"
+
+
 def _image_rm_calls(world) -> list[str]:
     return [c["args"][3] for c in world.runner.calls if c["args"][:3] == ["docker", "image", "rm"]]
 
@@ -817,14 +827,15 @@ def test_old_images_of_our_registry_are_removed_but_the_running_and_previous_sta
     old_b, old_f = f"{REG}/backend@{_digest('c' * 40)}", f"{REG}/frontend-vm@{_digest('c' * 40)}"
     prev_b, prev_f = f"{REG}/backend@{_digest('a' * 40)}", f"{REG}/frontend-vm@{_digest('a' * 40)}"
     new_b, new_f = f"{REG}/backend@{_digest('b' * 40)}", f"{REG}/frontend-vm@{_digest('b' * 40)}"
-    world.runner.images_out = "\n".join([
-        f"sha256:new-b {new_b}", f"sha256:new-f {new_f}",            # the release being deployed
-        f"sha256:prev-b {prev_b}", f"sha256:prev-f {prev_f}",        # the one a rollback goes back to
-        f"sha256:old-b {old_b}", f"sha256:old-f {old_f}",            # older: removed
-        f"sha256:shared {REG}/backend@{_digest('d' * 40)}", f"sha256:shared {prev_b}",   # one image with a kept reference: stays
-        "sha256:db pgvector/pgvector@sha256:" + "d" * 64,             # another registry: never touched
-        f"sha256:mixed {REG}/backend@<none>", "sha256:mixed caddy@<none>",   # carries a reference outside our registry: stays
-    ]) + "\n"
+    world.runner.images_out = _ls(
+        ("sha256:new-b", new_b), ("sha256:new-f", new_f),              # the release being deployed
+        ("sha256:prev-b", prev_b), ("sha256:prev-f", prev_f),          # the one a rollback goes back to
+        ("sha256:old-b", old_b), ("sha256:old-f", old_f),              # older: removed
+        ("sha256:shared", f"{REG}/backend@{_digest('d' * 40)}"), ("sha256:shared", prev_b),   # one image with a kept reference: stays
+        ("sha256:db", "pgvector/pgvector@sha256:" + "d" * 64, "pg15"),   # another registry: never touched
+        ("sha256:mixed", f"{REG}/backend@<none>"), ("sha256:mixed", "caddy@<none>", "2.8.4-alpine"),   # a reference outside our registry: stays
+        ("sha256:tagged", f"{REG}/backend@{_digest('e' * 40)}", "v1"),   # carries a tag: stays (a tag is never a bare digest reference)
+    )
     world.publish("b" * 40)
     assert world.dep.run_once() == "deployed"
     assert _image_rm_calls(world) == sorted([old_b, old_f])
@@ -835,7 +846,7 @@ def test_old_images_of_our_registry_are_removed_but_the_running_and_previous_sta
 def test_the_first_deploy_keeps_only_its_own_images(world) -> None:
     mine = f"{REG}/backend@{_digest('a' * 40)}"
     stray = f"{REG}/backend@{_digest('z' * 40)}"
-    world.runner.images_out = f"sha256:mine {mine}\nsha256:stray {stray}\n"
+    world.runner.images_out = _ls(("sha256:mine", mine), ("sha256:stray", stray))
     world.publish("a" * 40)
     assert world.dep.run_once() == "deployed"
     assert _image_rm_calls(world) == [stray]
@@ -846,7 +857,7 @@ def test_a_kept_reference_with_a_tag_still_keeps_its_image(world) -> None:
     world.publish("a" * 40)
     world.dep.run_once()
     tagged = f"{REG}/backend:v2@{_digest('b' * 40)}"
-    world.runner.images_out = f"sha256:new-b {REG}/backend@{_digest('b' * 40)}\nsha256:old {REG}/backend@{_digest('c' * 40)}\n"
+    world.runner.images_out = _ls(("sha256:new-b", f"{REG}/backend@{_digest('b' * 40)}"), ("sha256:old", f"{REG}/backend@{_digest('c' * 40)}"))
     world.publish("b" * 40, backend=tagged)
     assert world.dep.run_once() == "deployed"
     assert _image_rm_calls(world) == [f"{REG}/backend@{_digest('c' * 40)}"]
@@ -856,7 +867,7 @@ def test_a_rollback_removes_the_failed_candidates_images_and_keeps_the_restored_
     a = world.publish("a" * 40)
     world.dep.run_once()
     b = world.publish("b" * 40)
-    world.runner.images_out = "\n".join(f"sha256:{n} {r}" for n, r in [("ab", a["backend_image"]), ("af", a["frontend_image"]), ("bb", b["backend_image"]), ("bf", b["frontend_image"])]) + "\n"
+    world.runner.images_out = _ls(("sha256:ab", a["backend_image"]), ("sha256:af", a["frontend_image"]), ("sha256:bb", b["backend_image"]), ("sha256:bf", b["frontend_image"]))
     world.runner.healthy_after = 10**6   # the candidate never turns green; the rollback's `up` turns health on
     orig = world.runner.run
 
@@ -871,22 +882,43 @@ def test_a_rollback_removes_the_failed_candidates_images_and_keeps_the_restored_
     assert _image_rm_calls(world) == sorted([b["backend_image"], b["frontend_image"]])
 
 
+def test_an_image_prune_error_of_any_kind_leaves_a_rollback_rolled_back(world) -> None:
+    a = world.publish("a" * 40)
+    world.dep.run_once()
+    world.publish("b" * 40)
+    world.runner.raise_on["image ls"] = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "bad byte")   # not an OSError
+    world.runner.healthy_after = 10**6
+    orig = world.runner.run
+
+    def run(args, env, **kw):
+        if env.get("BACKEND_IMAGE") == a["backend_image"] and "up" in args:
+            world.runner.healthy_after = 0
+            world.runner._probes = 0
+        return orig(args, env, **kw)
+
+    world.runner.run = run
+    assert world.dep.run_once() == "rolled-back"
+    assert _state(world, "current.json")["sha"] == "a" * 40
+
+
 def test_the_image_prune_stops_at_its_deadline(world) -> None:
     world.publish("a" * 40)
     world.dep.run_once()
     olds = [f"{REG}/backend@{_digest(c * 40)}" for c in "cde"]
-    world.runner.images_out = "".join(f"sha256:{i} {r}\n" for i, r in enumerate(olds))
+    world.runner.images_out = _ls(*((f"sha256:{i}", r) for i, r in enumerate(olds)))
     orig = world.runner.run
 
     def run(args, env, **kw):
         if args[:3] == ["docker", "image", "rm"]:
-            world.clock.t += D.IMAGE_PRUNE_DEADLINE * 0.6   # each removal is slow
+            world.clock.t += D.IMAGE_PRUNE_DEADLINE * 0.9   # each removal is slow: after the first, a tenth of the time is left
         return orig(args, env, **kw)
 
     world.runner.run = run
     world.publish("b" * 40)
     assert world.dep.run_once() == "deployed"
     assert len(_image_rm_calls(world)) == 2 and any("deadline" in line for line in world.logs)
+    rm_timeouts = [c["timeout"] for c in world.runner.calls if c["args"][:3] == ["docker", "image", "rm"]]
+    assert rm_timeouts[1] <= D.IMAGE_PRUNE_DEADLINE * 0.1 + 1e-9 < 120   # the second removal may only use the time that is left, not its usual 120 s
 
 
 def test_the_runner_returns_a_whole_listing_only_when_asked() -> None:
