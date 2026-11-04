@@ -328,7 +328,7 @@ http.createServer((req, res) => { res.end('next'); }).listen(Number(process.env.
     const port = (probe.address() as net.AddressInfo).port;
     await new Promise<void>((r) => probe.close(() => r()));
     let log = '';
-    const proc = spawn(process.execPath, [path.join(tmp, 'embedded-entry.cjs')], { cwd: tmp, env: { PATH: process.env['PATH'] ?? '', SPRINTABLE_EMBEDDED: '1', PORT: String(port), ...extra } });
+    const proc = spawn(process.execPath, [path.join(tmp, 'embedded-entry.cjs')], { cwd: tmp, env: { PATH: process.env['PATH'] ?? '', NODE_ENV: 'production', SPRINTABLE_EMBEDDED: '1', PORT: String(port), ...extra } as NodeJS.ProcessEnv }); // (Next's types make NODE_ENV a required literal of ProcessEnv: the cast keeps `extra` free to carry other names)
     proc.stdout!.on('data', (d: Buffer) => { log += d.toString(); });
     proc.stderr!.on('data', (d: Buffer) => { log += d.toString(); });
     const exited = new Promise<number | null>((r) => proc.on('exit', (c) => r(c)));
