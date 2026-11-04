@@ -11,6 +11,11 @@
 # Only caddy publishes ports to the world (80, 443). The database, backend and frontend are reachable on the compose network only. One more server listens, on the VM's PRIVATE address only: the support
 # gateway's own database (`gateway-db` below, RUNBOOK §13) — behind a firewall rule that admits the gateway's Cloud Run revisions and nobody else.
 
+# MEMORY CAGES (story 4843). Every service has `mem_limit` and `memswap_limit` EQUAL to it: a container may not use more than its limit and may not use swap at all, so a leaking process is
+# killed by the kernel alone (OOM) and brought back by `restart: unless-stopped`, instead of filling the VM's memory and swap until the whole machine thrashes and stops answering (prod, 2026-11-04,
+# 01:04Z–03:20Z). The values are one table, pinned with its arithmetic by backend/tests/test_4843_vm_memory_limits.py (RESIDENT services must fit in the VM's memory minus the operating system's share).
+# A limit is the line at which the container is killed — not its normal size. Changing one is a compose change: `bootstrap.sh` again (RUNBOOK §6), and the container is recreated by the next deploy.
+
 name: sprintable
 
 x-logging: &logging
@@ -25,6 +30,8 @@ services:
     image: pgvector/pgvector:pg15
     restart: unless-stopped
     logging: *logging
+    mem_limit: 1312m
+    memswap_limit: 1312m
     environment:
       POSTGRES_DB: ${DB_NAME:?}
       POSTGRES_USER: ${DB_USER:?}
@@ -61,6 +68,8 @@ services:
     # «no», on purpose: after a boot or a restart of docker nothing but sprintable-gateway-db-firewall.service starts this container, and only once the rule that keeps the metadata server out of its reach is in place
     restart: "no"
     logging: *logging
+    mem_limit: 288m
+    memswap_limit: 288m
     networks:
       - gateway-db
     environment:
@@ -101,6 +110,8 @@ services:
     profiles: ["migrate"]
     restart: "no"
     logging: *logging
+    mem_limit: 1024m
+    memswap_limit: 1024m
     command: ["/app/scripts/migrate.sh"]
     environment:
       - ALEMBIC_DATABASE_URL   # by name
@@ -112,6 +123,8 @@ services:
     image: ${BACKEND_IMAGE:?}
     restart: unless-stopped
     logging: *logging
+    mem_limit: 800m
+    memswap_limit: 800m
     # the service variables are listed by name in pass-through.yml. SPRINTABLE_LOCAL_DEV and K_SERVICE are never set here (render_env.py refuses them).
     depends_on:
       db:
@@ -129,6 +142,8 @@ services:
     image: ${FRONTEND_IMAGE:?}
     restart: unless-stopped
     logging: *logging
+    mem_limit: 576m
+    memswap_limit: 576m
     environment:
       PORT: "3000"
       HOSTNAME: 0.0.0.0
@@ -145,6 +160,8 @@ services:
     image: caddy:2.8.4-alpine
     restart: unless-stopped
     logging: *logging
+    mem_limit: 352m
+    memswap_limit: 352m
     depends_on:
       backend:
         condition: service_healthy
