@@ -153,6 +153,8 @@ class RoleIn(BaseModel):
     # story 4653 (PO 14015 · 17027 ②): the CLI names this agent uses — the runtime's own included or not; a name off the rule, or a
     # list longer than the cap, is refused with a 422 that names it (never dropped silently)
     tools: list[str] | None = Field(default=None, max_length=AGENT_TOOLS_CAP)
+    # story 4832: a MOVE row whose agent is not on the project's team yet — put it there with the confirmation (only the move honours it)
+    add_to_team: bool = False
 
     @field_validator("tools")
     @classmethod
@@ -229,7 +231,7 @@ async def post_confirm(
     org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ):
     user_id = _human_only(auth)
-    roles = [RoleChoice(role=r.role, runtime=r.runtime, owner=r.owner, agent_id=r.agent_id, tools=r.tools) for r in body.roles]
+    roles = [RoleChoice(role=r.role, runtime=r.runtime, owner=r.owner, agent_id=r.agent_id, tools=r.tools, add_to_team=r.add_to_team) for r in body.roles]
     made_project: uuid.UUID | None = None
     try:
         if body.project_id is None and not body.project_name:

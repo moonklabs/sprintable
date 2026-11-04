@@ -390,10 +390,13 @@ export function confirmBody(code: string, rows: readonly SetupRoleRow[], project
 /** story #4576 — «이미 있는 에이전트 옮기기»: no recipe (the server takes that as a move — device and keys only: no recipe-stage
  * binding · no story · no publish). Every row is an agent the organization already has; a move has no recipe role, so the row's
  * `role` is a fixed word the server does not read. No folder: each agent's working folder is chosen in the app after the move. */
-export interface MoveConfirmBody { code: string; project_id: string; roles: { role: string; agent_id: string }[] }
+export interface MoveConfirmBody { code: string; project_id: string; roles: { role: string; agent_id: string; add_to_team?: true }[] }
 export const MOVE_ROW_ROLE = 'move';
-export function moveConfirmBody(code: string, projectId: string, agentIds: readonly string[]): MoveConfirmBody {
-  return { code, project_id: projectId, roles: [...new Set(agentIds)].map((agent_id) => ({ role: MOVE_ROW_ROLE, agent_id })) };
+/** story 4832: `addToTeam` = the ticked agents that are not on the project's team yet — their rows carry `add_to_team: true` (the server puts them on the team in the
+ *  same confirmation; a row without it is refused as before). Only ids that are also in `agentIds` count. */
+export function moveConfirmBody(code: string, projectId: string, agentIds: readonly string[], addToTeam: readonly string[] = []): MoveConfirmBody {
+  const team = new Set(addToTeam);
+  return { code, project_id: projectId, roles: [...new Set(agentIds)].map((agent_id) => ({ role: MOVE_ROW_ROLE, agent_id, ...(team.has(agent_id) ? { add_to_team: true as const } : {}) })) };
 }
 
 /** story #4576 — whether an attachable agent can be moved from this computer now: in this project and its runtime found here. */
@@ -401,9 +404,15 @@ export type MovableState = 'ok' | 'not-in-project' | 'runtime-missing';
 export function movableState(a: AttachableAgent, runtimes: readonly DesktopRuntime[]): MovableState {
   return !a.in_project ? 'not-in-project' : !runtimes.includes(a.runtime) ? 'runtime-missing' : 'ok';
 }
-/** the move list's order (Yuna): the movable ones first, the rest after — each group in the server's order. */
+/** story 4832 — the MOVE list's own reading of a row (the recruiter's single-agent branch keeps `movableState`): an agent off the project's team whose program is found
+ *  here can be ticked — moving it puts it on the team (`add_to_team`, the admin the list is read for may do that); only a program this computer lacks blocks. */
+export type MoveRowState = 'ok' | 'needs-team' | 'runtime-missing';
+export function moveRowState(a: AttachableAgent, runtimes: readonly DesktopRuntime[]): MoveRowState {
+  return !runtimes.includes(a.runtime) ? 'runtime-missing' : a.in_project ? 'ok' : 'needs-team';
+}
+/** the move list's order (Yuna): the ready ones first, then the ones the move would also put on the team, the blocked last — each group in the server's order. */
 export function moveListOrder(attachable: readonly AttachableAgent[], runtimes: readonly DesktopRuntime[]): AttachableAgent[] {
-  return [...attachable.filter((a) => movableState(a, runtimes) === 'ok'), ...attachable.filter((a) => movableState(a, runtimes) !== 'ok')];
+  return (['ok', 'needs-team', 'runtime-missing'] as const).flatMap((state) => attachable.filter((a) => moveRowState(a, runtimes) === state));
 }
 
 /** (나) confirm-new-org's body (design doc 9a4cb445): the usual fields without a project, plus the new organization's and first

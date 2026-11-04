@@ -69,6 +69,10 @@ PROJECT_GUARD_FUNCTIONS: frozenset[str] = frozenset({
     # 실수로 안 빠져야 했다). project_settings.py:upsert_project_settings가 이걸 직접 호출하는데도
     # allowlist에 올라 있던 원인이 이것 — 그 allowlist 엔트리는 이 추가와 함께 제거한다.
     "has_project_role",
+    # story 4832 — the ONE place the rule «may this person decide who is on a project's team» lives (`project_auth.can_manage_project_access` = has_project_role admin):
+    # the access route's owner/admin check and `project_agent_grant.grant_agent_project_access` both ask it. A project guard by name and by what it does; without this
+    # name the access routes read as unguarded (they no longer call has_project_role directly).
+    "can_manage_project_access",
     "resolve_member",
     "accessible_project_ids_in_org",
     # story #4299 — `get_project_scoped_org_id`가 project org 조회와 has_project_access 판정을 한 SQL로 합친 헬퍼
