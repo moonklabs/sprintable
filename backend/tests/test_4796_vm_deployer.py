@@ -936,6 +936,55 @@ def test_nothing_in_the_image_prune_escapes_a_deploy_or_a_rollback(world, monkey
     assert any("image prune skipped: RuntimeError" in line for line in world.logs)
 
 
+def test_not_even_a_failing_log_line_lets_a_cleanup_change_a_deploy_or_a_rollback(world, monkeypatch) -> None:
+    """both cleanups fail AND the line about the failure cannot be written: the deploy is still deployed and the rollback still rolled-back"""
+    def boom(self):
+        raise OSError("I/O error")
+
+    def log(m):
+        if "prune" in m:
+            raise OSError("the log cannot be written")
+        world.logs.append(m)
+
+    world.publish("a" * 40)
+    assert world.dep.run_once() == "deployed"
+    b = world.publish("b" * 40)
+    monkeypatch.setattr(D.Path, "iterdir", boom)
+    world.runner.raise_on["image ls"] = OSError("docker is gone")
+    world.dep.log = log
+    assert world.dep.run_once() == "deployed"
+    assert _state(world, "current.json")["sha"] == "b" * 40
+    world.publish("c" * 40)
+    world.runner.healthy_after = 10**6
+    orig = world.runner.run
+
+    def run(args, env, **kw):
+        if env.get("BACKEND_IMAGE") == b["backend_image"] and "up" in args:
+            world.runner.healthy_after = 0
+            world.runner._probes = 0
+        return orig(args, env, **kw)
+
+    world.runner.run = run
+    assert world.dep.run_once() == "rolled-back"
+    assert _state(world, "current.json")["sha"] == "b" * 40
+
+
+def test_a_failing_folder_prune_does_not_skip_the_image_prune(world, monkeypatch) -> None:
+    world.publish("a" * 40)
+    world.dep.run_once()
+    old = f"{REG}/backend@{_digest('c' * 40)}"
+    world.runner.images_out = _ls(("sha256:old", old))
+
+    def boom(self):
+        raise OSError("I/O error")
+
+    monkeypatch.setattr(D.Path, "iterdir", boom)
+    world.publish("b" * 40)
+    assert world.dep.run_once() == "deployed"
+    assert _image_rm_calls(world) == [old]
+    assert any(line == "prune skipped: OSError" for line in world.logs)
+
+
 def test_the_image_prune_stops_at_its_deadline(world) -> None:
     world.publish("a" * 40)
     world.dep.run_once()
