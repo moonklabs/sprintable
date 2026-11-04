@@ -85,7 +85,11 @@ def test_caddy_serves_the_three_hosts_and_never_buffers_a_stream() -> None:
     text = (_VM / "Caddyfile").read_text()
     for host in ("{$API_HOST}", "{$REALTIME_HOST}", "{$APP_HOST}"):
         assert host in text
-    assert re.sub(r"(?m)^\s*#.*$", "", text).count("flush_interval -1") == 2
+    code = re.sub(r"(?m)^\s*#.*$", "", text)
+    # the property, not a count: EVERY reverse_proxy flushes each chunk at once (a stream must not be held back), however many the file has (story 4843 added the app name's /api/v2/* one)
+    blocks = re.findall(r"(?ms)^\s*reverse_proxy\b[^\n{]*\{(.*?)^\s*\}", code)
+    assert blocks and len(blocks) == len(re.findall(r"(?m)^\s*reverse_proxy\b", code)), "every reverse_proxy has a block (a one-line reverse_proxy has no flush_interval)"
+    assert all("flush_interval -1" in b for b in blocks), "a reverse_proxy without flush_interval -1 would hold an event stream back"
     api_block = re.sub(r"(?m)^\s*#.*$", "", text).split("{$APP_HOST}")[0]
     assert "encode" not in api_block, "compression would hold SSE frames back on the API host"
     assert "reverse_proxy backend:8000" in text and "reverse_proxy frontend:3000" in text
