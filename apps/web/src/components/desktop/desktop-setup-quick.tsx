@@ -202,7 +202,7 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
         setMadeSetupId(made);
         if (!projectId && !(await joinNewOrg({ project_id: agentProject }))) { setView({ kind: 'done-reload' }); return; }
         await turnPhoneControlOn(orgId);
-        if (made) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(made)); // a reload goes back to the progress (as the solo start does)
+        if (made) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(made, query.canWorkdir === true)); // a reload goes back to the progress (as the solo start does)
         setView({ kind: 'started' });
         return;
       }
@@ -248,7 +248,7 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
         if ((newOrg || !projectId) && !(await joinNewOrg(newOrg ? okBody : { project_id: okBody?.project_id ?? useProject ?? matched?.projectId }))) { setView({ kind: 'done-reload' }); return; }
         await turnPhoneControlOn(newOrg ? okBody?.org_id ?? null : orgId); // story 4670 AC1: after the start went through — the one PUT, or none
         // a reload from here goes back to this setup's progress (the id is in the address the app opened), not to «앱에서 열어 주세요» — as the recipe page's reload does (4429 ①)
-        if (made) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(made));
+        if (made) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(made, query.canWorkdir === true));
         setView({ kind: 'started' });
         return;
       }
@@ -298,8 +298,8 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
   const reloadKeepingSetup = () => { window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment(query)); window.location.reload(); };
   if (orgMode.kind === 'invited') return <InvitedInApp invites={orgMode.invites} onReload={reloadKeepingSetup} />;
   if (orgMode.kind === 'has-org' && !isAdmin) return <Failure failure="not-admin" onReloadPage={reloadKeepingSetup} />;
-  if (view.kind === 'done-reload') return <SetupDoneReload setupId={madeSetupId} />;
-  if (view.kind === 'started') return <SetupProgressView setupId={madeSetupId} recipeName="" phoneControlFailed={phoneControlFailed} onPhoneRetry={retryPhoneControl} />;
+  if (view.kind === 'done-reload') return <SetupDoneReload setupId={madeSetupId} canWorkdir={query.canWorkdir === true} />;
+  if (view.kind === 'started') return <SetupProgressView setupId={madeSetupId} recipeName="" phoneControlFailed={phoneControlFailed} onPhoneRetry={retryPhoneControl} canWorkdir={query.canWorkdir === true} />;
   if (view.kind === 'failed') {
     const onReloadPage = view.failure === 'has-org' || view.failure === 'not-admin' ? reloadKeepingSetup : undefined;
     return <Failure failure={view.failure} counts={view.counts ?? null} plan={view.plan ?? null} solo onRetry={view.failure === 'offline' ? () => void (agent ? startAgent() : start(limitAsk?.id)) : undefined} onReloadPage={onReloadPage} />;

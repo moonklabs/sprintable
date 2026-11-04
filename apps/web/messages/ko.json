@@ -1591,6 +1591,7 @@
     "open": "열기",
     "opening": "여는 중…",
     "otherAccount": "로그아웃하고 다른 계정으로",
+    "emailUnverified": "이메일 인증이 아직이에요 — 받은 메일의 [이메일 인증하기]를 눌러 주세요. 지금 열어도 돼요.",
     "error": "열지 못했어요. 잠시 뒤 다시 눌러 주세요.",
     "invalidTitle": "앱에서 열어 주세요",
     "invalidBody": "이 화면은 앱이 브라우저로 보낼 때만 열려요. 앱에서 로그인을 다시 시작해 주세요."
@@ -7391,6 +7392,8 @@
         "titleRunning": "에이전트를 옮기고 있어요",
         "titleDone": "에이전트를 옮겼어요",
         "folderWait": "{names}{josa} 작업 폴더를 고르면 시작해요 — 창 아래 «이 컴퓨터의 에이전트» 알림에서 [작업 폴더 고르기]를 눌러 주세요",
+        "folderWaitHere": "{names}{josa} 작업 폴더를 고르면 시작해요 — 아래 버튼을 눌러 폴더를 골라 주세요",
+        "pickFolder": "작업 폴더 고르기 · {name}",
         "stepConnectRunning": "Sprintable에 연결하고 있어요",
         "stepConnectWaiting": "Sprintable에 연결해요",
         "stepConnectDone": "Sprintable에 연결했어요",

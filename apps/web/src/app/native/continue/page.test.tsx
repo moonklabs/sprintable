@@ -4,16 +4,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ReactElement } from 'react';
 
-const h = vi.hoisted(() => ({ session: vi.fn(), redirect: vi.fn(), backendFetch: vi.fn() }));
+const h = vi.hoisted(() => ({ session: vi.fn(), redirect: vi.fn(), backendFetch: vi.fn(), unverified: vi.fn() }));
 vi.mock('@/lib/db/server', () => ({ getServerSession: h.session }));
 vi.mock('@/lib/backend-fetch', () => ({ backendFetch: h.backendFetch }));
 vi.mock('next/navigation', () => ({ redirect: (to: string) => { h.redirect(to); throw new Error(`REDIRECT:${to}`); } }));
 vi.mock('next-intl/server', () => ({ getTranslations: async () => (k: string) => k }));
 vi.mock('@/components/desktop/desktop-continue-card', () => ({
-  DesktopContinueCard: (p: { account: string; here: string; failed?: boolean; start: { challenge: string; returnApp: string | null } }) => (
-    <div data-card data-account={p.account} data-here={p.here} data-app={p.start.returnApp ?? ''} data-failed={p.failed ? '1' : ''} />
+  DesktopContinueCard: (p: { account: string; here: string; failed?: boolean; emailUnverified?: boolean; start: { challenge: string; returnApp: string | null } }) => (
+    <div data-card data-account={p.account} data-here={p.here} data-app={p.start.returnApp ?? ''} data-failed={p.failed ? '1' : ''} data-unverified={p.emailUnverified ? '1' : ''} />
   ),
 }));
+vi.mock('@/lib/auth/email-unverified', () => ({ emailUnverified: h.unverified }));
 
 import DesktopContinuePage from './page';
 
@@ -26,6 +27,7 @@ beforeEach(() => {
   h.session.mockReset().mockResolvedValue({ user_id: 'u1', email: 'jay@example.com', access_token: 't', org_id: null, project_id: null });
   h.redirect.mockReset();
   h.backendFetch.mockReset();
+  h.unverified.mockReset().mockResolvedValue(false);
 });
 
 describe('/native/continue', () => {
@@ -36,6 +38,24 @@ describe('/native/continue', () => {
     expect(html).toContain('data-app="dev"');
     expect(h.redirect).not.toHaveBeenCalled();
     expect(h.backendFetch).not.toHaveBeenCalled(); // opening the page makes no code
+  });
+
+  it('an account whose e-mail is not verified yet → the card gets the flag, read with the person\'s own token; the page still gates on the session only (no redirect, no code)', async () => {
+    h.unverified.mockResolvedValue(true);
+    const html = await render(GOOD);
+    expect(html).toContain('data-unverified="1"');
+    expect(h.unverified).toHaveBeenCalledWith('t');
+    expect(h.redirect).not.toHaveBeenCalled();
+    expect(h.backendFetch).not.toHaveBeenCalled();
+    h.unverified.mockResolvedValue(false);
+    expect(await render(GOOD)).toContain('data-unverified=""');
+  });
+
+  it('the account is not read for a page that shows no card (not signed in · a start that is off)', async () => {
+    h.session.mockResolvedValue(null);
+    await expect(render(GOOD)).rejects.toThrow('REDIRECT:');
+    await render({});
+    expect(h.unverified).not.toHaveBeenCalled();
   });
 
   it('the form route sent the person back with failed=1 → the card gets failed (and `here` stays without it, so a sign-in round trip does not keep the flag)', async () => {
