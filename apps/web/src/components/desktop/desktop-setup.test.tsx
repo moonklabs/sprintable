@@ -9,16 +9,16 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
 
-const { ctx, sp } = vi.hoisted(() => ({ ctx: vi.fn(), sp: { value: null as URLSearchParams | null } }));
+const { ctx, sp, router } = vi.hoisted(() => ({ ctx: vi.fn(), sp: { value: null as URLSearchParams | null }, router: { replace: vi.fn(), push: vi.fn() } }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ctx() }));
 // the query the router reports (the dashboard shell adds ?p= with a router replace)
-vi.mock('next/navigation', async (orig) => ({ ...(await orig<typeof import('next/navigation')>()), useSearchParams: () => sp.value }));
+vi.mock('next/navigation', async (orig) => ({ ...(await orig<typeof import('next/navigation')>()), useSearchParams: () => sp.value, useRouter: () => router }));
 // story 4670: the end card draws the phone app's QR block (PhoneAppGet) when the app can be got — a published Android store by default;
 // one test turns it off (no store · no opt-in page in this environment) for the §E ③f shape
 const { phonePub } = vi.hoisted(() => ({ phonePub: { android: true, ios: false } }));
 vi.mock('@/lib/phone-app-store', async (orig) => ({ ...(await orig<typeof import('@/lib/phone-app-store')>()), PHONE_APP_PUBLISHED: phonePub }));
 
-import { ATTACHABLE_READ_LIMIT_MS, DesktopSetup, DesktopSetupEntry, Failure, INSTALL, OpenInDesktopApp, SETUP_APP_LINK, SETUP_REOPEN_LINK, ToolsNotConnected, failureForCode, inviteUntilDate } from './desktop-setup';
+import { ATTACHABLE_READ_LIMIT_MS, IN_APP_SETUP_WAIT_MS, DesktopSetup, DesktopSetupEntry, Failure, INSTALL, OpenInDesktopApp, SETUP_APP_LINK, SETUP_REOPEN_LINK, ToolsNotConnected, failureForCode, inviteUntilDate } from './desktop-setup';
 import { pickEulReulJosa, pickEunNeunJosa } from '@/lib/korean-particle';
 import { DesktopSetupDocWatch } from './desktop-setup-doc-watch';
 import { SetupProgressView } from './desktop-setup-progress';
@@ -3207,5 +3207,92 @@ describe('[SID:4831] 담당 선택 · 도구 입력칸 (바탕 부품)', () => {
     await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
     expect(box.textContent).toContain('aws');
     expect(input.value).toBe('');
+  });
+});
+
+// story 4832 (AC2 «막다른 곳 0», PO 11-04): the setup page inside the desktop app (the bridge is there) without setup values is not a guest — «데스크톱 앱에서 열어 주세요 · 앱 열기» would offer the
+// app to the app. The window waits for the values (a sign-in return can add them to the same page a moment later), then goes on to the start screen. A browser keeps the card.
+describe('[SID:4832] the setup page without setup values, inside the desktop app', () => {
+  const bridge = { inApp: true, device: { name: 'Mac' }, runtimes: [], pickFolder: async () => null, startHere: async () => ({ ok: true }), setProjectFolder: async () => ({ ok: true }) };
+  const inApp = (on: boolean) => { if (on) (window as unknown as { sprintableDesktop?: unknown }).sprintableDesktop = bridge; else delete (window as unknown as { sprintableDesktop?: unknown }).sprintableDesktop; };
+  const wait = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+  const loadingMark = () => container.querySelector('[aria-label="설정을 불러오고 있어요"]');
+  beforeEach(() => { router.replace.mockReset(); vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); });
+  afterEach(() => { inApp(false); vi.useRealTimers(); });
+
+  it('no «앱 열기» card: the loading mark; after the wait the window goes on to the start screen (once)', async () => {
+    stub(() => new Response('{}'));
+    window.history.replaceState(null, '', '/desktop/setup');
+    inApp(true);
+    await mount(<DesktopSetupEntry />);
+    expect(text()).not.toContain('데스크톱 앱에서 열어 주세요');
+    expect([...container.querySelectorAll('a')].some((a) => a.textContent === '앱 열기')).toBe(false);
+    expect(loadingMark()).not.toBeNull();
+    await wait(IN_APP_SETUP_WAIT_MS - 1);
+    expect(router.replace).not.toHaveBeenCalled();
+    await wait(1);
+    expect(router.replace).toHaveBeenCalledTimes(1);
+    expect(String(router.replace.mock.calls[0]![0])).toMatch(/^\/org-briefing(\?|$)/); // the start screen (the flag-off «오늘») with the project
+    await wait(IN_APP_SETUP_WAIT_MS * 3);
+    expect(router.replace).toHaveBeenCalledTimes(1);
+  });
+
+  it('values that arrive within the wait (the app adds them to the same page) show the card and the move never happens', async () => {
+    stub(() => new Response('{}'));
+    window.history.replaceState(null, '', '/desktop/setup');
+    inApp(true);
+    await mount(<DesktopSetupEntry />);
+    await wait(IN_APP_SETUP_WAIT_MS - 1000);
+    // jsdom queues the `hashchange` event with a timer, which the fake clock holds back until it is advanced a tick
+    await act(async () => { window.location.hash = `code=${CODE}&setup=s-1&runtimes=claude`; await vi.advanceTimersByTimeAsync(5); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(text()).toContain('에이전트를 이 컴퓨터에서 시작해요');
+    await wait(IN_APP_SETUP_WAIT_MS * 2);
+    expect(router.replace).not.toHaveBeenCalled();
+  });
+
+  it('values in the address at the wait\'s last moment (their event not yet delivered) are not sent away', async () => {
+    stub(() => new Response('{}'));
+    window.history.replaceState(null, '', '/desktop/setup');
+    inApp(true);
+    await mount(<DesktopSetupEntry />);
+    // the address carries the values, but no `hashchange` has reached the page (replaceState fires none)
+    window.history.replaceState(null, '', `/desktop/setup#code=${CODE}&setup=s-1&runtimes=claude`);
+    await wait(IN_APP_SETUP_WAIT_MS);
+    expect(router.replace).not.toHaveBeenCalled();
+    window.history.replaceState(null, '', '/desktop/setup');
+  });
+
+  it('a `#progress=` in the address at the wait\'s last moment is not sent away either', async () => {
+    stub(() => new Response('{}'));
+    window.history.replaceState(null, '', '/desktop/setup');
+    inApp(true);
+    await mount(<DesktopSetupEntry />);
+    window.history.replaceState(null, '', '/desktop/setup#progress=s-1');
+    await wait(IN_APP_SETUP_WAIT_MS);
+    expect(router.replace).not.toHaveBeenCalled();
+    window.history.replaceState(null, '', '/desktop/setup');
+  });
+
+  it('with the values already in the address: the card at once — no wait, no move', async () => {
+    stub(() => new Response('{}'));
+    window.history.replaceState(null, '', `/desktop/setup#code=${CODE}&setup=s-0&runtimes=claude`);
+    inApp(true);
+    await mount(<DesktopSetupEntry />);
+    expect(text()).toContain('에이전트를 이 컴퓨터에서 시작해요');
+    expect(loadingMark()).toBeNull();
+    await wait(IN_APP_SETUP_WAIT_MS * 2);
+    expect(router.replace).not.toHaveBeenCalled();
+  });
+
+  it('a browser (no bridge) keeps «데스크톱 앱에서 열어 주세요» with «앱 열기» and never moves', async () => {
+    stub(() => new Response('{}'));
+    window.history.replaceState(null, '', '/desktop/setup');
+    inApp(false);
+    await mount(<DesktopSetupEntry />);
+    expect(text()).toContain('데스크톱 앱에서 열어 주세요');
+    expect([...container.querySelectorAll('a')].some((a) => a.textContent === '앱 열기')).toBe(true);
+    await wait(IN_APP_SETUP_WAIT_MS * 2);
+    expect(router.replace).not.toHaveBeenCalled();
   });
 });
