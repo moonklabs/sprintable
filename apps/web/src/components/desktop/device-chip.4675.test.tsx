@@ -8,6 +8,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { DeviceChip } from './device-chip';
+import { EmbeddedServerProvider } from '@/components/embedded-server-context';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -35,5 +36,15 @@ describe('[SID:4675] DeviceChip', () => {
     await mount(<><DeviceChip name={null} /><DeviceChip name={undefined} /><DeviceChip name="" /></>);
     expect(container.querySelectorAll('[data-testid=device-chip]')).toHaveLength(0);
     expect(container.textContent).toBe('');
+  });
+});
+
+describe('[SID:4832] DeviceChip on the app\'s own server', () => {
+  it('one computer there: a name that would draw the chip on a hosted server draws nothing; outside the provider (hosted) it is as before', async () => {
+    await mount(<EmbeddedServerProvider embedded><DeviceChip name="yoonjae의 맥" /></EmbeddedServerProvider>);
+    expect(container.querySelectorAll('[data-testid=device-chip]')).toHaveLength(0);
+    expect(container.textContent).toBe('');
+    await mount(<EmbeddedServerProvider embedded={false}><DeviceChip name="yoonjae의 맥" /></EmbeddedServerProvider>);
+    expect(container.querySelectorAll('[data-testid=device-chip]')).toHaveLength(1);
   });
 });

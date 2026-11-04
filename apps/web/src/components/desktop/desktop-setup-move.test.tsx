@@ -14,6 +14,7 @@ import enMessages from '../../../messages/en.json';
 const { ctx } = vi.hoisted(() => ({ ctx: vi.fn() }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ctx() }));
 
+import { EmbeddedServerProvider } from '@/components/embedded-server-context';
 import { DesktopSetup, PROGRESS_FRAGMENT, progressFromFragment, progressWorkdirFromFragment } from './desktop-setup';
 import { SetupProgressView } from './desktop-setup-progress';
 import { moveConfirmBody, moveListOrder, moveRowState, moveProgress, parseSetupQuery, setupFragment, parseSetupFragment, NOT_CONNECTED_AFTER_HANDOVER_MS, type AttachableAgent, type SetupStatus } from '@/lib/desktop-setup';
@@ -466,6 +467,29 @@ describe('[SID:4576] the move\'s progress — two steps, by name', () => {
       expect(src).toContain('canWorkdir={query.canWorkdir === true}');
       expect(src).toContain("...(canWorkdir ? { canWorkdir: true as const } : {})"); // a reload keeps the mark
     });
+  });
+
+  // story 4832: the app's own (local) server has no phone relay — the finished move's phone card (phone app · pairing · the remote-control line) says nothing there
+  it('[SID:4832] a finished move: the phone card on a hosted server, none on the app\'s own server (the rest of the end screen is the same)', async () => {
+    statusNow = () => base({ tools_connected: [{ member_id: 'm-dan', at: '2026-10-06T04:41:00Z' }, { member_id: 'm-kad', at: '2026-10-06T04:41:02Z' }] });
+    stub(() => new Response('{}'));
+    await mount(<EmbeddedServerProvider embedded={false}><SetupProgressView setupId="s-1" recipeName="" /></EmbeddedServerProvider>);
+    await read();
+    expect(container.querySelector('[data-testid=setup-phone-card]')).not.toBeNull();
+    act(() => root.unmount()); root = createRoot(container);
+    await mount(<EmbeddedServerProvider embedded><SetupProgressView setupId="s-1" recipeName="" /></EmbeddedServerProvider>);
+    await read();
+    expect(text()).toContain('에이전트를 옮겼어요');
+    expect(text()).toContain('이제 이 컴퓨터에서 일해요');
+    expect(container.querySelector('[data-testid=setup-phone-card]')).toBeNull();
+    expect(text()).not.toContain('폰 페어링 열기');
+  });
+
+  it('[SID:4832] the recipe setup\'s phone-control tick is gated on the same marker (a source pin: the tick, and so its PUT, are off on the local server)', () => {
+    const src = readFileSync(path.resolve(__dirname, 'desktop-setup.tsx'), 'utf8');
+    expect(src).toContain('const showPhoneControl = !embedded && (newOrg ||');
+    expect(src).toContain('const embedded = useEmbeddedServer();');
+    expect(src).toMatch(/async function turnPhoneControlOn\(phoneOrg: string \| null \| undefined\) \{\n\s*if \(!showPhoneControl \|\| !phoneControl \|\| !phoneOrg\) return;/);
   });
 
   it('every agent connected → «에이전트를 옮겼어요» · «{이름} · {런타임}» · only [오늘로 가기] and the done line', async () => {

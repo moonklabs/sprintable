@@ -19,6 +19,7 @@ vi.mock('next/navigation', () => ({
 const { NewProjectEntry, MoveAgentsEntry, NEW_PROJECT_LINK, MOVE_AGENTS_LINK, OPEN_NEW_PROJECT_EVENT, NEW_PROJECT_PARAM } = await import('./new-project-entry');
 const { AppSidebar } = await import('./app-sidebar');
 const { SidebarProvider } = await import('@/components/ui/sidebar');
+const { EmbeddedServerProvider } = await import('@/components/embedded-server-context');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -179,5 +180,16 @@ describe('[SID:4713] the real sidebar draws it under the switcher — inside the
     await mountSidebar();
     expect(entry()).toBeNull();
     expect(moveEntry()).toBeNull();
+  });
+});
+
+describe('[SID:4832] MoveAgentsEntry on the app\'s own server', () => {
+  it('inside the app but on its own (local) server there is no other computer\'s server to move agents from: no line; on a hosted server the line is there as before', async () => {
+    inApp();
+    await act(async () => { root.render(withProviders(<EmbeddedServerProvider embedded><MoveAgentsEntry /></EmbeddedServerProvider>)); });
+    expect(moveEntry()).toBeNull();
+    await act(async () => { root.render(withProviders(<EmbeddedServerProvider embedded={false}><MoveAgentsEntry /></EmbeddedServerProvider>)); });
+    expect(moveEntry()).not.toBeNull();
+    expect(moveEntry()?.textContent).toBe('이 컴퓨터로 에이전트 옮기기');
   });
 });

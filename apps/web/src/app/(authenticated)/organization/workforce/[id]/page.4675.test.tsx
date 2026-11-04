@@ -48,9 +48,11 @@ function stub(session: object | null, role = 'admin') {
     return { ok: false, json: async () => null };
   }));
 }
-async function mount() {
+async function mount(embedded = false) {
   const { default: AgentDetailPage } = await import('./page');
-  await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><AgentDetailPage /></NextIntlClientProvider>); });
+  // imported after the page, from the same module registry (the afterEach resets it) — the context the page reads is this one
+  const { EmbeddedServerProvider } = await import('@/components/embedded-server-context');
+  await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><EmbeddedServerProvider embedded={embedded}><AgentDetailPage /></EmbeddedServerProvider></NextIntlClientProvider>); });
   for (let i = 0; i < 12; i++) await act(async () => { await Promise.resolve(); });
 }
 // the page's module graph (with the strip's word table) takes a few seconds to load the first time — not the test's own time
@@ -101,5 +103,22 @@ describe('[SID:4675] AgentDetailPage — «지금 도는 컴퓨터»', () => {
     stub(null); // an older server (404) — the page as it was
     await mount();
     expect(line()).toBeNull();
+  }, SLOW);
+});
+
+describe('[SID:4832] AgentDetailPage on the app\'s own server', () => {
+  it('one computer there: no «지금 도는 컴퓨터» line and no link to a device list that is not drawn — for a running agent and a bound-never-run one; a hosted server keeps the line', async () => {
+    stub({ setup_id: SETUP, device_name: 'yoonjae의 맥', state: 'working', activity: 'working', limit: null, bound_setup_id: SETUP, bound_device_name: 'yoonjae의 맥' });
+    await mount(true);
+    expect(line()).toBeNull();
+    expect(container.querySelector('[data-testid=agent-see-devices]')).toBeNull();
+    await act(async () => { root.unmount(); }); root = createRoot(container); vi.resetModules();
+    stub({ setup_id: null, device_name: null, state: null, bound_setup_id: SETUP, bound_device_name: '스튜디오 맥' });
+    await mount(true);
+    expect(line()).toBeNull();
+    await act(async () => { root.unmount(); }); root = createRoot(container); vi.resetModules();
+    stub({ setup_id: SETUP, device_name: 'yoonjae의 맥', state: 'working', activity: 'working', limit: null, bound_setup_id: SETUP, bound_device_name: 'yoonjae의 맥' });
+    await mount(false);
+    expect(line()?.textContent).toContain('지금 도는 컴퓨터: yoonjae의 맥 · 작업 중');
   }, SLOW);
 });

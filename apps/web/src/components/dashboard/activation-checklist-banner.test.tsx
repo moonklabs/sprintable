@@ -5,6 +5,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ActivationChecklistBanner } from './activation-checklist-banner';
+import { EmbeddedServerProvider } from '@/components/embedded-server-context';
+import enMessages from '../../../messages/en.json';
 import { ACTIVATION_REFRESH_MS, _resetActivationStatusCacheForTests } from '@/hooks/use-activation-status';
 
 // story #3201 — useDashboardContext(projectId)·useRouter 신규 의존성. storage-capacity-
@@ -98,6 +100,7 @@ function wrap(node: React.ReactNode) {
 
 function stubChecklist(data: {
   steps: Record<string, boolean>;
+  applicable_steps?: string[];
   completed: number;
   total: number;
   all_complete: boolean;
@@ -560,5 +563,94 @@ describe('ActivationChecklistBanner — 회신이 오면 스스로 체크 (story
     await flush();
     expect(container.textContent).toContain('3/5단계 완료');
     expect(checks()).toBe(before + 1);
+  });
+});
+
+// story 4832 — the app's own (local) server makes the account, its verified address and its organization itself: its checklist counts the two steps that are the
+// person's own (`applicable_steps`), draws only those, and says «첫 에이전트를 연결해 볼까요?» instead of «가입을 마무리해 볼까요?». A hosted server is as before.
+describe('[SID:4832] ActivationChecklistBanner — the local server\'s two counted steps', () => {
+  const LOCAL = {
+    steps: { signed_up: true, email_verified: true, org_created: true, agent_connected: false, first_roundtrip: false },
+    applicable_steps: ['agent_connected', 'first_roundtrip'],
+    completed: 0,
+    total: 2,
+    all_complete: false,
+    first_instruction_conversation_id: null,
+  };
+  const rows = () => container.querySelectorAll('[data-testid="activation-banner"] ul > li');
+
+  it('draws only the counted steps, with the local title and «0/2» (ko)', async () => {
+    stubChecklist(LOCAL);
+    await act(async () => { root.render(wrap(<EmbeddedServerProvider embedded><ActivationChecklistBanner /></EmbeddedServerProvider>)); });
+    await flush();
+    expect(rows()).toHaveLength(2);
+    expect(container.textContent).toContain('첫 에이전트를 연결해 볼까요?');
+    expect(container.textContent).toContain('0/2단계 완료');
+    expect(container.textContent).toContain('에이전트 연결하기');
+    expect(container.textContent).toContain('첫 지시 보내고 회신 받기');
+    for (const gone of ['가입을 마무리해 볼까요?', '가입하기', '이메일 인증하기', '조직 만들기']) expect(container.textContent).not.toContain(gone);
+  });
+
+  it('the rows follow the server\'s `applicable_steps` — not the page\'s own guess (a hosted page, a local answer: two rows too)', async () => {
+    stubChecklist(LOCAL);
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    expect(rows()).toHaveLength(2);
+    expect(container.textContent).toContain('첫 에이전트를 연결해 볼까요?');
+  });
+
+  it('a hosted answer is as before: all five rows (named or not), the sign-up title, «2/5»', async () => {
+    stubChecklist({ ...PARTIAL, applicable_steps: ['signed_up', 'email_verified', 'org_created', 'agent_connected', 'first_roundtrip'] });
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    expect(rows()).toHaveLength(5);
+    expect(container.textContent).toContain('가입을 마무리해 볼까요?');
+    expect(container.textContent).toContain('2/5단계 완료');
+    expect(container.textContent).not.toContain('첫 에이전트를 연결해 볼까요?');
+    act(() => root.unmount()); root = createRoot(container);
+    stubChecklist(PARTIAL); // an older server: no `applicable_steps` at all
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    expect(rows()).toHaveLength(5);
+    expect(container.textContent).toContain('가입을 마무리해 볼까요?');
+  });
+
+  it('an answer WITHOUT `applicable_steps` is read as the five its own count is over — also on a page that thinks it is local (the aggregate and the rows never disagree)', async () => {
+    stubChecklist(PARTIAL);
+    await act(async () => { root.render(wrap(<EmbeddedServerProvider embedded><ActivationChecklistBanner /></EmbeddedServerProvider>)); });
+    await flush();
+    expect(rows()).toHaveLength(5);
+    expect(container.textContent).toContain('2/5단계 완료');
+    expect(container.textContent).toContain('가입을 마무리해 볼까요?');
+    expect(container.textContent).not.toContain('첫 에이전트를 연결해 볼까요?');
+  });
+
+  it('before the answer the skeleton has the row count of the server the page runs on: two on the local server, five on a hosted one (no jump when the answer arrives)', async () => {
+    const d = deferredChecklistResponse();
+    await act(async () => { root.render(wrap(<EmbeddedServerProvider embedded><ActivationChecklistBanner /></EmbeddedServerProvider>)); });
+    expect(container.querySelectorAll('[data-testid="activation-skeleton-expanded"] li')).toHaveLength(2);
+    d.resolve(LOCAL as unknown as typeof PARTIAL);
+    await flush();
+    expect(rows()).toHaveLength(2);
+    act(() => root.unmount()); root = createRoot(container);
+    _resetActivationStatusCacheForTests();
+    deferredChecklistResponse();
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    expect(container.querySelectorAll('[data-testid="activation-skeleton-expanded"] li')).toHaveLength(5);
+  });
+
+  it('the finish and the collapsed chip use the local words (ko · en); the hosted words stay hosted', async () => {
+    expect(koMessages.activation.doneTitleLocal).toBe('시작 준비를 마쳤어요');
+    expect(koMessages.activation.doneBodyLocal).toBe('첫 지시를 보냈고 회신도 받았어요 — 두 단계가 모두 끝났어요.');
+    expect(koMessages.activation.collapsedChipLocal).toBe('시작하기 {completed}/{total}');
+    expect(enMessages.activation.bannerTitleLocal).toBe('Connect your first agent?');
+    expect(enMessages.activation.collapsedChipLocal).toBe('Getting started {completed}/{total}');
+    stubChecklist(LOCAL);
+    document.cookie = 'sp_activation_collapsed=1; Path=/';
+    mockInitialActivationCollapsed = true;
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="activation-chip"]')?.textContent).toContain('시작하기 0/2');
+    expect(container.textContent).not.toContain('가입 완료');
   });
 });

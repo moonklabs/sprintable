@@ -53,7 +53,8 @@ export default function DesktopPage() {
       {/* story #4733 — «세션 관리»: end and start the sessions of a paired computer from the phone app (nothing outside the phone app) */}
       {local ? null : <PhoneSessionManagement />}
       {/* story #4424 — «연결된 기기» (org owner/admin only; nothing for a member) */}
-      <DesktopDevices />
+      {/* story 4832: a local install has one computer — nothing to list or disconnect */}
+      {local ? null : <DesktopDevices />}
     </div>
   );
 }

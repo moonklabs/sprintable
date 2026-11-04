@@ -5,6 +5,7 @@
  * the owner's name. Every place reads the one org value (`useOrgRemoteControl`) and shows nothing while it is on or not known.
  * The link only moves to the card (`/desktop#remote-control`); turning it on stays one press on the card itself.
  */
+import { useEmbeddedServer } from '@/components/embedded-server-context';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
@@ -104,7 +105,9 @@ export function useRemoteOff(): RemoteOff | null {
   const { orgId } = useDashboardContext();
   const [state] = useOrgRemoteControl(orgId);
   const t = useTranslations('remoteControlOff');
-  if (!state || state.enabled) return null;
+  // story 4832: the app's own server has no remote control to be «off» — every line and link that says so (and points at the switch) is gone there
+  const embedded = useEmbeddedServer();
+  if (embedded || !state || state.enabled) return null;
   const owners = formatOwners(state.owner_names ?? [], (first, n) => t('ownersMore', { first, n }));
   return {
     owner: state.can_change,

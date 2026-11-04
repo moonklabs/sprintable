@@ -23,6 +23,9 @@ export interface ActivationState {
     agent_connected: boolean;
     first_roundtrip: boolean;
   };
+  /** story 4832: the steps `completed` / `total` / `all_complete` are over — all five on a hosted server, the two that are the person's own on the app's own (local) server
+   *  (the app makes the account, its verified address and its organization itself). Absent (an older server) = all five. */
+  applicable_steps?: (keyof ActivationState['steps'])[];
   completed: number;
   total: number;
   all_complete: boolean;

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEmbeddedServer } from '@/components/embedded-server-context';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -130,6 +131,7 @@ function isWebhookUrlAllowed(url: string): boolean {
 }
 
 export default function AgentDetailPage() {
+  const embedded = useEmbeddedServer();
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('settings');
   const ta = useTranslations('agents');
@@ -507,7 +509,8 @@ export default function AgentDetailPage() {
                       «{name}에 연결됨 · 아직 안 돌았어요» · neither → no line. The device row link for an org owner/admin only (the
                       list is theirs · 4424). */}
                   {(() => {
-                    const line = desk?.state && desk.device_name
+                    // story 4832: one computer in the app's own server — no «지금 도는 컴퓨터» line (and no link to a device list that is not drawn there)
+                    const line = embedded ? null : desk?.state && desk.device_name
                       ? ta('runningOn', { name: desk.device_name, state: sessionStateLabel(desk, tSession) })
                       : desk?.bound_device_name ? ta('boundNotRunYet', { name: desk.bound_device_name }) : null;
                     if (!line) return null;

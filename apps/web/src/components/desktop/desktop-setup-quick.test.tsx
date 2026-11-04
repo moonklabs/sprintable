@@ -2,6 +2,7 @@
 //
 // story 4711 — 처음 셋업 세 걸음(에이전트 → 폴더 → 시작): one card · the folder comes back from the app's Mac window in the `#` ·
 // [시작] = one confirm-solo with the runtime and the folder's NAME (never a path) · the free plan's one project asks instead of 402.
+import { EmbeddedServerProvider } from '@/components/embedded-server-context';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StrictMode } from 'react';
 import { act } from 'react';
@@ -67,10 +68,11 @@ async function mount(hash: string, opts: { role?: string; projects?: { projectId
     orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: opts.role ?? 'owner' }], projectMemberships: opts.projects ?? [],
   });
   const query = parseSetupFragment(hash)!;
-  await act(async () => { root.render(<NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul"><DesktopSetupQuick query={query} onTeam={() => { teamPressed = true; }} /></NextIntlClientProvider>); });
+  await act(async () => { root.render(<EmbeddedServerProvider embedded={onEmbeddedServer}><NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul"><DesktopSetupQuick query={query} onTeam={() => { teamPressed = true; }} /></NextIntlClientProvider></EmbeddedServerProvider>); });
   for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
 }
 let teamPressed = false;
+let onEmbeddedServer = false; // story 4832: the page is served by the app's own (local) server
 const text = () => container.textContent ?? '';
 const buttonOf = (label: string) => [...container.querySelectorAll('button')].find((b) => b.textContent === label) as HTMLButtonElement | undefined;
 const linkOf = (label: string) => [...container.querySelectorAll('a')].find((a) => a.textContent === label) as HTMLAnchorElement | undefined;
@@ -79,7 +81,7 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   confirmNow = () => new Response(JSON.stringify({ project_id: PROJ, conversation_id: 'c-1', members: [] }), { status: 200 });
   invitesNow = () => new Response(JSON.stringify({ invites: [] }), { status: 200 });
-  recipesNow = () => new Response('{}', { status: 404 }); statusNow = () => ({}); __resetOrgRemoteControlForTest(); teamPressed = false; ee.on = false; sp.value = null; remoteGet = remoteOf({ enabled: true, can_change: true, enabled_at: 'now' }); remotePut = () => new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'now' } }), { status: 200 }); stub();
+  recipesNow = () => new Response('{}', { status: 404 }); statusNow = () => ({}); __resetOrgRemoteControlForTest(); teamPressed = false; onEmbeddedServer = false; ee.on = false; sp.value = null; remoteGet = remoteOf({ enabled: true, can_change: true, enabled_at: 'now' }); remotePut = () => new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'now' } }), { status: 200 }); stub();
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); sessionStorage.clear(); });
 
@@ -381,6 +383,19 @@ describe('[SID:4670 AC1] «폰으로도 에이전트 다루기» on the three-st
     expect(container.querySelectorAll('[role=checkbox]')).toHaveLength(1);
     const row = container.querySelector('[data-testid=setup-phone-control]')!;
     expect(row.nextElementSibling?.querySelector('button')?.textContent).toBe('만들기'); // just above «만들기»
+  });
+
+  it('[SID:4832] on the app\'s own (local) server there is no phone relay: no tick even for an owner whose remote control is off, and the start sends no PUT', async () => {
+    onEmbeddedServer = true;
+    remoteGet = remoteOf(OFF_OWNER);
+    await mount(frag(FOLDER), { projectId: PROJ, projects: [{ projectId: PROJ, projectName: 'P', orgId: 'o-1' }] });
+    expect(tick()).toBeNull();
+    expect(container.querySelector('[data-testid=setup-phone-control]')).toBeNull();
+    await press();
+    expect(calls.some((c) => c.url.endsWith('/confirm-solo'))).toBe(true);
+    expect(puts()).toHaveLength(0);
+    // a new organization («새 조직» — a maker is the owner-to-be, so hosted always shows it) draws none either
+    onEmbeddedServer = false;
   });
 
   it('already on · the person cannot change it → no row', async () => {

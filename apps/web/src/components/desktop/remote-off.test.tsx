@@ -18,7 +18,8 @@ vi.mock('@/hooks/use-flat-href', () => ({ useFlatHref: () => (p: string) => p })
 vi.mock('next/link', () => ({ default: ({ href, children, ...rest }: { href: string; children: unknown }) => <a href={href} {...rest}>{children as never}</a> }));
 vi.mock('@/hooks/use-sse-notifications', () => ({ useSseNotifications: () => {} }));
 vi.mock('@/components/viewer-time-zone', () => ({ useViewerTimeZone: () => 'Asia/Seoul' }));
-const { formatOwners, markArrival, holdArrivalFocus } = await import('./remote-off');
+const { formatOwners, markArrival, holdArrivalFocus, useRemoteOff } = await import('./remote-off');
+const { EmbeddedServerProvider } = await import('@/components/embedded-server-context');
 const { AgentPermissionRequests } = await import('@/components/inbox/agent-permission-requests');
 const { DesktopRemoteControlCard } = await import('./desktop-remote-control-card');
 const { AgentSessionStrip } = await import('@/components/chat/agent-session-strip');
@@ -447,5 +448,28 @@ describe('chat strip line (Yuna row 3 · only while it works or waits)', () => {
     await render(<AgentSessionStrip agentId="a-1" conversationId="c-1" />);
     expect(q('agent-session-line')).toBeNull();
     expect(link()).toBeNull();
+  });
+});
+
+// story 4832 — the app's own server has no remote control to be «off»: every line and link built on `useRemoteOff` (the approvals line, the chat strip, the pairing screen, the
+// confirm page) is gone there; a hosted server is as the tests above pin it.
+describe('[SID:4832] useRemoteOff on the app\'s own server', () => {
+  function Probe() {
+    const off = useRemoteOff();
+    return <p data-testid="probe">{off ? (off.owner ? 'off-owner' : 'off-member') : 'nothing'}</p>;
+  }
+  it('off + a person who can switch it: «off-owner» on a hosted server, «nothing» on the local one (and the approvals line shows no link)', async () => {
+    org = { enabled: false, can_change: true, owner_names: ['송윤재'], connected_setups: 1 };
+    await render(<EmbeddedServerProvider embedded={false}><Probe /></EmbeddedServerProvider>);
+    expect(q('probe')?.textContent).toBe('off-owner');
+    act(() => root.unmount()); root = createRoot(container);
+    orgId = `org-${++n}`;
+    await render(<EmbeddedServerProvider embedded><Probe /></EmbeddedServerProvider>);
+    expect(q('probe')?.textContent).toBe('nothing');
+    act(() => root.unmount()); root = createRoot(container);
+    orgId = `org-${++n}`;
+    await render(<EmbeddedServerProvider embedded><AgentPermissionRequests /></EmbeddedServerProvider>);
+    expect(link()).toBeNull();
+    expect(q('agent-permission-remote-off')).toBeNull();
   });
 });

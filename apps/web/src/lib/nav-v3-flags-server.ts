@@ -10,6 +10,7 @@
  * layout.tsx 주석 참고) — client 컴포넌트는 이 함수 대신 DashboardContext.navV3Flags
  * (dashboard-shell.tsx)를 쓴다, 그쪽은 이 함수가 서버에서 읽어 내려보낸 값이다.
  */
+import { isEmbeddedServer } from '@/lib/embedded-api-origin';
 import { isDesktopDownloadEnabled } from '@/lib/desktop-download-gate';
 import type { NavV3Flags } from '@/lib/nav-v3-destinations';
 
@@ -18,6 +19,6 @@ export function readNavV3FlagsFromEnv(): NavV3Flags {
     todayV3Enabled: process.env['TODAY_V3_ENABLED'] === 'true',
     chatV3Enabled: process.env['CHAT_V3_ENABLED'] === 'true',
     connectRulesV3Enabled: process.env['CONNECT_RULES_V3_ENABLED'] === 'true',
-    desktopDownloadEnabled: isDesktopDownloadEnabled(process.env['DESKTOP_DOWNLOAD_ENABLED']),  // story #4524 — /desktop's own gate
+    desktopDownloadEnabled: isDesktopDownloadEnabled(process.env['DESKTOP_DOWNLOAD_ENABLED']) && !isEmbeddedServer(),  // story #4524 — /desktop's own gate · story 4832: no «데스크톱 앱 · 연결된 기기» entry in the app's own server
   };
 }

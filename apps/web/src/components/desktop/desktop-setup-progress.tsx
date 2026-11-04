@@ -1,5 +1,6 @@
 'use client';
 
+import { useEmbeddedServer } from '@/components/embedded-server-context';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations, useLocale } from 'next-intl';
 import { useSearchParams } from 'next/navigation';
@@ -312,7 +313,13 @@ function PhoneControlFailedLine() {
  * its band's [폰 페어링] pressed (sprintable-mobile · no setup starts). A member reads where pairing is done instead. The org's
  * remote-control line (§E ③e · [켜기]) joins with the switch pieces after the security lens.
  */
-export function PhoneHandoffCard({ isAdmin, app }: { isAdmin: boolean; app: NativeReturnApp | null }) {
+export function PhoneHandoffCard(props: { isAdmin: boolean; app: NativeReturnApp | null }) {
+  // story 4832: the app's own server has no phone relay — the card (phone app, pairing, the remote-control line) says nothing there
+  const embedded = useEmbeddedServer();
+  return embedded ? null : <PhoneHandoffCardBody {...props} />;
+}
+
+function PhoneHandoffCardBody({ isAdmin, app }: { isAdmin: boolean; app: NativeReturnApp | null }) {
   // the file's namespace with dotted keys (the repo's i18n key check binds one namespace per hook name in a file — story #2371)
   const t = useTranslations('desktop.setup');
   const tRemote = useTranslations('desktop.remote');

@@ -25,13 +25,15 @@ async function cardsWith(embedded: string | undefined): Promise<unknown[]> {
 }
 
 describe('[SID:4829] /desktop — the phone cards in local mode', () => {
-  it('local mode: the three phone cards are one guidance card (nothing of the phone relay is drawn)', async () => {
+  it('local mode: the three phone cards are one guidance card (nothing of the phone relay is drawn) and the device list is not drawn (4832)', async () => {
     const types = await cardsWith('1');
     const { DesktopOpenAppCard } = await import('@/components/desktop/desktop-open-app-card');
     const { DesktopDownloadCard } = await import('@/components/desktop/desktop-download-card');
     const { DesktopDevices } = await import('@/components/desktop/desktop-devices');
     const { PhoneRelayLocalNotice } = await import('@/components/desktop/phone-relay-local-notice');
-    expect(types).toEqual([DesktopOpenAppCard, DesktopDownloadCard, PhoneRelayLocalNotice, DesktopDevices]);
+    // story 4832: and no «연결된 기기» list — a local install has one computer, nothing to list or disconnect
+    expect(types).toEqual([DesktopOpenAppCard, DesktopDownloadCard, PhoneRelayLocalNotice]);
+    expect(types).not.toContain(DesktopDevices);
   });
 
   it('hosted mode (AC2): the cards are exactly what they were — the guidance is not drawn', async () => {
