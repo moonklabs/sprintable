@@ -867,13 +867,14 @@ class Deployer:
         11-04 the dev disk filled and the next deploy could not pull. Kept: the images of the release now running and of the one a rollback goes back
         to (`keep`, compared as «repository@digest»). Fails closed: the listing is read whole; an image is a candidate only when EVERY reference it has is
         a digest reference of our own registry with no tag and none is kept (a tag, «<none>», another registry or a kept reference keeps the whole image);
-        removal is by reference without -f (Docker refuses an image a container uses), and the whole pass, listing included, ends by IMAGE_PRUNE_DEADLINE."""
-        keep = {_digest_ref(r) for r in keep}
-        if not keep:
-            return
-        env = {"PATH": os.environ.get("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")}
-        started = self.now()   # the deadline covers the listing too
+        removal is by reference without -f (Docker refuses an image a container uses), and the whole pass, listing included, ends by IMAGE_PRUNE_DEADLINE.
+        The WHOLE body is inside the one `try`: nothing in a best-effort pass may change what a deploy, a rollback or a recovery reports."""
         try:
+            keep = {_digest_ref(r) for r in keep}
+            if not keep:
+                return
+            env = {"PATH": os.environ.get("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")}
+            started = self.now()   # the deadline covers the listing too
             rc, out = self.runner.run(["docker", "image", "ls", "--digests", "--no-trunc", "--format", "{{.ID}} {{.Repository}} {{.Tag}} {{.Digest}}"],
                                       env, timeout=60, whole=True)
             if rc != 0:

@@ -901,6 +901,41 @@ def test_an_image_prune_error_of_any_kind_leaves_a_rollback_rolled_back(world) -
     assert _state(world, "current.json")["sha"] == "a" * 40
 
 
+@pytest.mark.parametrize("piece", ["clock", "keep"])
+def test_nothing_in_the_image_prune_escapes_a_deploy_or_a_rollback(world, monkeypatch, piece) -> None:
+    """every line of the pass is inside its one `try` — the clock read before the listing and the kept-reference set included"""
+    if piece == "clock":
+        clock = world.dep.now
+
+        def now():
+            if sys._getframe(1).f_code.co_name == "_prune_images":
+                raise RuntimeError("clock")
+            return clock()
+
+        world.dep.now = now
+    else:
+        monkeypatch.setattr(D, "_digest_ref", lambda r: (_ for _ in ()).throw(RuntimeError("keep")))
+    world.publish("a" * 40)
+    assert world.dep.run_once() == "deployed"
+    b = world.publish("b" * 40)
+    assert world.dep.run_once() == "deployed"
+    assert _state(world, "current.json")["sha"] == "b" * 40
+    world.publish("c" * 40)
+    world.runner.healthy_after = 10**6
+    orig = world.runner.run
+
+    def run(args, env, **kw):
+        if env.get("BACKEND_IMAGE") == b["backend_image"] and "up" in args:
+            world.runner.healthy_after = 0
+            world.runner._probes = 0
+        return orig(args, env, **kw)
+
+    world.runner.run = run
+    assert world.dep.run_once() == "rolled-back"
+    assert _state(world, "current.json")["sha"] == "b" * 40
+    assert any("image prune skipped: RuntimeError" in line for line in world.logs)
+
+
 def test_the_image_prune_stops_at_its_deadline(world) -> None:
     world.publish("a" * 40)
     world.dep.run_once()
