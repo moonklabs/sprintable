@@ -1,5 +1,6 @@
 'use client';
 
+import { EmbeddedServerProvider } from '@/components/embedded-server-context';
 import { createContext, useContext, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, startTransition } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -160,6 +161,8 @@ interface DashboardShellProps extends DashboardContext {
   // 부분적으로 stale하면(org_id는 reset·project_id는 옛 org 그대로) `orgId`와 갈릴 수 있다 — 아래
   // 자동 switch-org effect의 불일치 판정은 이 값을 우선한다(없으면 `orgId`로 폴백).
   jwtOrgId?: string;
+  /** story 4832 — the page is served by the desktop app's own (embedded) server: the layout reads it from the server's env, the shell provides it to `useEmbeddedServer()` */
+  embedded?: boolean;
   children: React.ReactNode;
 }
 
@@ -419,6 +422,7 @@ export function DashboardShell({
   activationSeedFromHint,
   activationOrgId,
   initialActivationCollapsed,
+  embedded = false,
   children,
 }: DashboardShellProps) {
   const pathname = usePathname();
@@ -546,6 +550,7 @@ export function DashboardShell({
   return (
     <ToastProvider>
     <CommandPaletteProvider>
+    <EmbeddedServerProvider embedded={embedded}>
     <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug: scopedProjectSlug, projectPathUnresolved: pathUnresolved, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot, initialActivationComplete, activationSeedFromHint, activationOrgId, initialActivationCollapsed, navV3Flags, inShell: true }}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
@@ -595,6 +600,7 @@ export function DashboardShell({
       </RealtimeProvider>
       </RefreshProvider>
     </DashboardCtx.Provider>
+    </EmbeddedServerProvider>
     </CommandPaletteProvider>
     </ToastProvider>
   );

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEmbeddedServer } from '@/components/embedded-server-context';
 import { useSyncExternalStore } from 'react';
 import { useTranslations } from 'next-intl';
 import { Monitor, Plus } from 'lucide-react';
@@ -48,7 +49,8 @@ export function NewProjectEntry({ className }: { className?: string }) {
 export function MoveAgentsEntry({ className }: { className?: string }) {
   const t = useTranslations('nav');
   const bridge = useSyncExternalStore<SprintableDesktop | undefined>(subscribeDesktopApp, desktopApp, () => undefined);
-  if (!bridge) return null;
+  const embedded = useEmbeddedServer(); // story 4832: in the app's own server there is no other computer's server to move agents from
+  if (!bridge || embedded) return null;
   return (
     <Button
       type="button"

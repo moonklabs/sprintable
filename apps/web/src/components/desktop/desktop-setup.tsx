@@ -1,5 +1,6 @@
 'use client';
 
+import { useEmbeddedServer } from '@/components/embedded-server-context';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useSearchParams } from 'next/navigation';
@@ -568,7 +569,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const moveMode = showKinds && canMove && setupKind === 'move';
   // story 4670 AC1 (PO dev walk 10-15): the tick is for BOTH ways — the hire → «이 컴퓨터에서 시작» road lands on «옮기기» (the agent
   // just made is an «existing agent»), so a tick that left that way out left the usual new-customer road without it.
-  const showPhoneControl = newOrg || (orgMode.kind === 'has-org' && (remoteReadFailed || (!!remoteState && remoteState.can_change && !remoteState.enabled)));
+  const embedded = useEmbeddedServer(); // story 4832: the app's own server has no phone relay — no tick, so no PUT either (`turnPhoneControlOn` gates on this)
+  const showPhoneControl = !embedded && (newOrg || (orgMode.kind === 'has-org' && (remoteReadFailed || (!!remoteState && remoteState.can_change && !remoteState.enabled))));
   const movable = useMemo(() => moveListOrder(attachable, runtimes), [attachable, runtimes]);
   // story 4678: the ones [프로젝트 팀에 넣기] can help — not on the team, and a runtime this computer has (without one, putting it on
   // the team would still leave it unusable: that is the line the move list gives instead)

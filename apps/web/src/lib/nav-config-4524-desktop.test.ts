@@ -61,3 +61,22 @@ describe('story #4524 — the «데스크톱 앱» sidebar entry', () => {
     expect([nav(en).desktopApp, nav(en).descDesktopApp]).toEqual(['Desktop app', 'The app for this computer · connected devices']);
   });
 });
+
+// story 4832 — the app's own (local) server has one computer: «데스크톱 앱 · 연결된 기기» (the device list) has nothing to show, so the sidebar draws no such entry there
+// even when the download gate is on. Hosted (any other value of the marker) is as above.
+describe('[SID:4832] the «데스크톱 앱» entry on the app\'s own server', () => {
+  const keys = ['DESKTOP_DOWNLOAD_ENABLED', 'SPRINTABLE_EMBEDDED'] as const;
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  afterEach(() => { for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
+
+  it('the gate on + the exact marker «1» → the flag is off (no entry); the gate on + anything else → on, as before', () => {
+    process.env.DESKTOP_DOWNLOAD_ENABLED = 'true';
+    process.env.SPRINTABLE_EMBEDDED = '1';
+    expect(readNavV3FlagsFromEnv().desktopDownloadEnabled).toBe(false);
+    expect(resolveNavGroups(readNavV3FlagsFromEnv()).flatMap((g) => g.items.map((i) => i.id))).not.toContain('desktop-app');
+    for (const value of [undefined, '', '0', 'true']) {
+      if (value === undefined) delete process.env.SPRINTABLE_EMBEDDED; else process.env.SPRINTABLE_EMBEDDED = value;
+      expect(readNavV3FlagsFromEnv().desktopDownloadEnabled, `marker ${String(value)}`).toBe(true);
+    }
+  });
+});

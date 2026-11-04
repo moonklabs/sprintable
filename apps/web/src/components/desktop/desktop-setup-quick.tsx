@@ -1,5 +1,6 @@
 'use client';
 
+import { useEmbeddedServer } from '@/components/embedded-server-context';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2, Smartphone } from 'lucide-react';
@@ -69,7 +70,8 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
   const [phoneControlPicked, setPhoneControl] = useState<boolean | null>(null);
   const phoneControl = phoneControlPicked ?? !remoteReadFailed;
   const [phoneControlFailed, setPhoneControlFailed] = useState(false);
-  const showPhoneControl = newOrg || (orgMode.kind === 'has-org' && (remoteReadFailed || (!!remoteState && remoteState.can_change && !remoteState.enabled)));
+  const embedded = useEmbeddedServer(); // story 4832: the app's own server has no phone relay — no tick, so no PUT either (`turnPhoneControlOn` gates on this)
+  const showPhoneControl = !embedded && (newOrg || (orgMode.kind === 'has-org' && (remoteReadFailed || (!!remoteState && remoteState.can_change && !remoteState.enabled))));
   const phoneOrgRef = useRef<string | null>(null);
   async function turnPhoneControlOn(phoneOrg: string | null | undefined) {
     if (!showPhoneControl || !phoneControl || !phoneOrg) return;

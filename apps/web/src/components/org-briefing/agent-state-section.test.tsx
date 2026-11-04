@@ -15,6 +15,7 @@ const hook = vi.hoisted(() => ({ value: { rows: [] as AgentStateRow[], loaded: t
 vi.mock('@/hooks/use-agent-states', () => ({ useAgentStates: () => hook.value }));
 
 import { AgentStateList, AgentStateSection, toShown } from './agent-state-section';
+import { EmbeddedServerProvider } from '@/components/embedded-server-context';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -179,5 +180,27 @@ describe('the section waits for the first answer', () => {
     hook.value = { rows: [row({ agent_name: 'late' })], loaded: true, readAt: NOW };
     await mountSection();
     expect(names()).toEqual(['late']);
+  });
+});
+
+describe('[SID:4832] the rows on the app\'s own server', () => {
+  const mountIn = async (embedded: boolean, rows: AgentStateRow[]) => {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <EmbeddedServerProvider embedded={embedded}><AgentStateList rows={rows} now={NOW} /></EmbeddedServerProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+  };
+  it('one computer there: no device name under the state and no «아직 안 돌았어요» line; a hosted server keeps both', async () => {
+    const rows = [row({ agent_name: '댄', device_name: 'mac-1', state: 'working' }), row({ agent_name: '까디르', device_name: null, state: null, activity: null, state_at: null, bound_device_name: 'mac-2' })];
+    await mountIn(false, rows);
+    expect(container.querySelectorAll('[data-testid="agent-state-device"]').length).toBe(1);
+    expect(container.textContent).toContain('mac-2에 연결됨');
+    await mountIn(true, rows);
+    expect(container.querySelectorAll('[data-testid="agent-state-device"]')).toHaveLength(0);
+    expect(container.textContent).not.toContain('mac-1');
+    expect(container.textContent).not.toContain('mac-2');
   });
 });

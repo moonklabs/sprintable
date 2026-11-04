@@ -1,5 +1,6 @@
 'use client';
 
+import { useEmbeddedServer } from '@/components/embedded-server-context';
 import { useState } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
@@ -37,9 +38,10 @@ function Row({ item, now }: { item: Shown; now: number }) {
   const { row, word } = item;
   // the link carries the conversation's own project (the server always sends both); without a project there is no honest link, so no link
   const href = row.conversation_id && row.conversation_project_id ? withProjectParam(`/chats/${row.conversation_id}`, row.conversation_project_id) : null;
-  const device = row.device_name ?? row.bound_device_name;
+  const embedded = useEmbeddedServer(); // story 4832: one computer in the app's own server — no device name and no «아직 안 돌았어요» line
+  const device = embedded ? null : row.device_name ?? row.bound_device_name;
   const state = word === null
-    ? (row.bound_device_name ? tAgents('boundNotRunYet', { name: row.bound_device_name }) : '')
+    ? (row.bound_device_name && !embedded ? tAgents('boundNotRunYet', { name: row.bound_device_name }) : '')
     : sessionStateLabel(row, tState);
   const rest = word === null ? null : limitLine(word, row.limit, now);
   const restText = rest ? restSentence(tState, rest.key, rest.at ? limitTime(rest.at, now, locale) : '') : null;
