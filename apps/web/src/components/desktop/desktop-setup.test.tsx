@@ -3251,6 +3251,29 @@ describe('[SID:4832] the setup page without setup values, inside the desktop app
     expect(router.replace).not.toHaveBeenCalled();
   });
 
+  it('values in the address at the wait\'s last moment (their event not yet delivered) are not sent away', async () => {
+    stub(() => new Response('{}'));
+    window.history.replaceState(null, '', '/desktop/setup');
+    inApp(true);
+    await mount(<DesktopSetupEntry />);
+    // the address carries the values, but no `hashchange` has reached the page (replaceState fires none)
+    window.history.replaceState(null, '', `/desktop/setup#code=${CODE}&setup=s-1&runtimes=claude`);
+    await wait(IN_APP_SETUP_WAIT_MS);
+    expect(router.replace).not.toHaveBeenCalled();
+    window.history.replaceState(null, '', '/desktop/setup');
+  });
+
+  it('a `#progress=` in the address at the wait\'s last moment is not sent away either', async () => {
+    stub(() => new Response('{}'));
+    window.history.replaceState(null, '', '/desktop/setup');
+    inApp(true);
+    await mount(<DesktopSetupEntry />);
+    window.history.replaceState(null, '', '/desktop/setup#progress=s-1');
+    await wait(IN_APP_SETUP_WAIT_MS);
+    expect(router.replace).not.toHaveBeenCalled();
+    window.history.replaceState(null, '', '/desktop/setup');
+  });
+
   it('with the values already in the address: the card at once — no wait, no move', async () => {
     stub(() => new Response('{}'));
     window.history.replaceState(null, '', `/desktop/setup#code=${CODE}&setup=s-0&runtimes=claude`);

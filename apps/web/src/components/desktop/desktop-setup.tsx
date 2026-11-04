@@ -1607,7 +1607,12 @@ function InAppSetupWait() {
   const flatHref = useFlatHref();
   const todayHref = flatHref(resolveNavV3Destinations(navV3Flags ?? DEFAULT_NAV_V3_FLAGS).today.path);
   useEffect(() => {
-    const id = setTimeout(() => router.replace(todayHref), IN_APP_SETUP_WAIT_MS);
+    const id = setTimeout(() => {
+      // values that reached the address at the last moment (their `hashchange` still queued behind this timer) are not sent away: the handler takes them in a tick
+      const hash = window.location.hash;
+      if (hasSetupFragment(hash) || progressFromFragment(hash)) return;
+      router.replace(todayHref);
+    }, IN_APP_SETUP_WAIT_MS);
     return () => clearTimeout(id);
   }, [router, todayHref]);
   return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
