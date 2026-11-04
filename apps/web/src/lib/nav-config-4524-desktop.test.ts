@@ -1,6 +1,6 @@
 // story #4524 (Min's 4503 AC4 run · Yuna 04:47Z) — the sidebar's «데스크톱 앱» entry to /desktop («연결된 기기»: where a person
 // disconnects a device), shown only where /desktop exists: DESKTOP_DOWNLOAD_ENABLED (server-only) — /desktop redirects when off.
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Monitor } from 'lucide-react';
 
 import en from '../../messages/en.json';
@@ -8,6 +8,9 @@ import ko from '../../messages/ko.json';
 import { NAV_GROUPS, resolveNavGroups } from './nav-config';
 import { DEFAULT_NAV_V3_FLAGS } from './nav-v3-destinations';
 import { readNavV3FlagsFromEnv } from './nav-v3-flags-server';
+
+const embeddedMock = vi.hoisted(() => ({ on: false }));
+vi.mock('./embedded-api-origin', () => ({ isEmbeddedServer: () => embeddedMock.on }));
 
 const ids = (groups: ReturnType<typeof resolveNavGroups>, groupId: string) =>
   groups.find((g) => g.id === groupId)?.items.map((i) => i.id) ?? [];
@@ -63,20 +66,24 @@ describe('story #4524 — the «데스크톱 앱» sidebar entry', () => {
 });
 
 // story 4832 — the app's own (local) server has one computer: «데스크톱 앱 · 연결된 기기» (the device list) has nothing to show, so the sidebar draws no such entry there
-// even when the download gate is on. Hosted (any other value of the marker) is as above.
+// even when the download gate is on. The marker itself is read by `isEmbeddedServer()` (its own test pins the exact value); here that one helper is stood in for, so this
+// file names no deployment variable (story 4825's guard allows only the reading code and the tests that must set it).
 describe('[SID:4832] the «데스크톱 앱» entry on the app\'s own server', () => {
-  const keys = ['DESKTOP_DOWNLOAD_ENABLED', 'SPRINTABLE_EMBEDDED'] as const;
-  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
-  afterEach(() => { for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
+  const saved = process.env.DESKTOP_DOWNLOAD_ENABLED;
+  afterEach(() => {
+    embeddedMock.on = false;
+    if (saved === undefined) delete process.env.DESKTOP_DOWNLOAD_ENABLED; else process.env.DESKTOP_DOWNLOAD_ENABLED = saved;
+  });
 
-  it('the gate on + the exact marker «1» → the flag is off (no entry); the gate on + anything else → on, as before', () => {
+  it('the gate on + the local server → the flag is off (no entry); the gate on + any other server → on, as before; the gate off → off either way', () => {
     process.env.DESKTOP_DOWNLOAD_ENABLED = 'true';
-    process.env.SPRINTABLE_EMBEDDED = '1';
+    embeddedMock.on = true;
     expect(readNavV3FlagsFromEnv().desktopDownloadEnabled).toBe(false);
     expect(resolveNavGroups(readNavV3FlagsFromEnv()).flatMap((g) => g.items.map((i) => i.id))).not.toContain('desktop-app');
-    for (const value of [undefined, '', '0', 'true']) {
-      if (value === undefined) delete process.env.SPRINTABLE_EMBEDDED; else process.env.SPRINTABLE_EMBEDDED = value;
-      expect(readNavV3FlagsFromEnv().desktopDownloadEnabled, `marker ${String(value)}`).toBe(true);
-    }
+    embeddedMock.on = false;
+    expect(readNavV3FlagsFromEnv().desktopDownloadEnabled).toBe(true);
+    expect(resolveNavGroups(readNavV3FlagsFromEnv()).flatMap((g) => g.items.map((i) => i.id))).toContain('desktop-app');
+    process.env.DESKTOP_DOWNLOAD_ENABLED = 'false';
+    expect(readNavV3FlagsFromEnv().desktopDownloadEnabled).toBe(false);
   });
 });
