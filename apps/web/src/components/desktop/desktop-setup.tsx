@@ -3,7 +3,7 @@
 import { useEmbeddedServer } from '@/components/embedded-server-context';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -20,6 +20,8 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { SetupProgressView } from './desktop-setup-progress';
 import { DesktopSetupAgent, DesktopSetupQuick } from './desktop-setup-quick';
 import { showsQuickCard } from '@/lib/desktop-setup-quick';
+import { desktopApp } from '@/lib/desktop-app';
+import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { defaultOrgName } from '@/lib/default-org-name';
 import { InviteCheckFailedCard } from './invite-check-failed';
 import { formatLocaleDate } from '@/lib/i18n';
@@ -1592,8 +1594,27 @@ function ResumeProgress({ setupId, canWorkdir = false }: { setupId: string; canW
   return ok ? <SetupProgressView setupId={setupId} recipeName="" canWorkdir={canWorkdir} /> : <SetupDoneReload setupId={setupId} canWorkdir={canWorkdir} />;
 }
 
+/** story 4832 (AC2 «막다른 곳 0»): how long the app's own window waits for the setup values before it goes on to the start screen. The app can add them to the same page a moment after it opened it (after a sign-in
+ *  return — dev 실측 15:24Z), so the page must not leave at once; it also must not stay: nothing in the window would ever bring them (a reload of the card after its values left the address). */
+export const IN_APP_SETUP_WAIT_MS = 4000;
+
+/** The page inside the desktop app (the bridge is there) without setup values: not a guest to be told «open it in the app» — this IS the app. It waits (no words: the card's loading mark) for
+ *  the values, then goes on to the start screen. A browser never gets here (`desktopApp()` is undefined there) and keeps the «앱 열기» card. */
+function InAppSetupWait() {
+  const t = useTranslations('desktop.setup');
+  const router = useRouter();
+  const { navV3Flags } = useDashboardContext();
+  const flatHref = useFlatHref();
+  const todayHref = flatHref(resolveNavV3Destinations(navV3Flags ?? DEFAULT_NAV_V3_FLAGS).today.path);
+  useEffect(() => {
+    const id = setTimeout(() => router.replace(todayHref), IN_APP_SETUP_WAIT_MS);
+    return () => clearTimeout(id);
+  }, [router, todayHref]);
+  return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
+}
+
 export function DesktopSetupEntry() {
-  const [entry, setEntry] = useState<{ query: SetupQuery | null; progress?: string | null; progressWorkdir?: boolean } | null>(null);
+  const [entry, setEntry] = useState<{ query: SetupQuery | null; progress?: string | null; progressWorkdir?: boolean; inApp?: boolean } | null>(null);
   const searchParams = useSearchParams();
   const strip = () => window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
   useEffect(() => {
@@ -1603,7 +1624,8 @@ export function DesktopSetupEntry() {
     const progressWorkdir = progress ? progressWorkdirFromFragment(hash) : false;
     // off the address at once; the state change follows on the next microtask (no cascading render inside the effect)
     if (hash) strip();
-    void Promise.resolve().then(() => setEntry({ query, progress, progressWorkdir }));
+    const inApp = !query && !progress && desktopApp() !== undefined;
+    void Promise.resolve().then(() => setEntry({ query, progress, progressWorkdir, ...(inApp ? { inApp: true } : {}) }));
     // The values can also arrive AFTER this page is up: after an email login the desktop app reopens the same page with its `#`,
     // and that is a same-document fragment change, not a new load (dev 실측 15:24Z — the page showed «데스크톱 앱에서 열어 주세요»).
     // A newer code replaces an older one (the app restarted the setup).
@@ -1627,7 +1649,8 @@ export function DesktopSetupEntry() {
   }, [searchParams]);
   if (!entry) return null;
   if (!entry.query && entry.progress) return <ResumeProgress setupId={entry.progress} canWorkdir={entry.progressWorkdir === true} />;
-  return entry.query ? <SetupOrProgress key={entry.query.code} query={entry.query} /> : <OpenInDesktopApp />;
+  if (entry.query) return <SetupOrProgress key={entry.query.code} query={entry.query} />;
+  return entry.inApp ? <InAppSetupWait /> : <OpenInDesktopApp />;
 }
 
 /** story 4701: how long «시작» waits for the existing-agents list before the page says it failed (Yuna 4701-copy-1015 §3: the limit is the implementer's call) */
