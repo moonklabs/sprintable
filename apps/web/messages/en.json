@@ -1591,6 +1591,7 @@
     "open": "Open",
     "opening": "Opening…",
     "otherAccount": "Sign out and use another account",
+    "emailUnverified": "Your e-mail is not verified yet — press [Verify email] in the mail we sent. You can open the app now.",
     "error": "Could not open it. Please press it again in a moment.",
     "invalidTitle": "Open this from the app",
     "invalidBody": "This page only opens when the app sends you to the browser. Please start sign-in again from the app."
@@ -7391,6 +7392,8 @@
         "titleRunning": "Moving agents",
         "titleDone": "Agents moved",
         "folderWait": "{count, plural, one {{names} starts} other {{names} start}} once you choose a working folder — press [Choose working folder] on the notice in «Agents on this computer» at the bottom of the window",
+        "folderWaitHere": "{count, plural, one {{names} starts} other {{names} start}} once you choose a working folder — press the button below to choose it",
+        "pickFolder": "Choose working folder · {name}",
         "stepConnectRunning": "Connecting to Sprintable",
         "stepConnectWaiting": "Connects to Sprintable",
         "stepConnectDone": "Connected to Sprintable",

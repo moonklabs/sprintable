@@ -3,6 +3,8 @@
 // story #4576 — «이미 있는 에이전트 옮기기» (Yuna «4576 셋업 첫 고르기» · doc b0713c54): the two ways on the setup page, the move
 // list, its confirm (no recipe · device and keys only), its refusals and its two-step progress.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
@@ -12,7 +14,7 @@ import enMessages from '../../../messages/en.json';
 const { ctx } = vi.hoisted(() => ({ ctx: vi.fn() }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ctx() }));
 
-import { DesktopSetup } from './desktop-setup';
+import { DesktopSetup, PROGRESS_FRAGMENT, progressFromFragment, progressWorkdirFromFragment } from './desktop-setup';
 import { SetupProgressView } from './desktop-setup-progress';
 import { moveConfirmBody, moveListOrder, moveRowState, moveProgress, parseSetupQuery, setupFragment, parseSetupFragment, NOT_CONNECTED_AFTER_HANDOVER_MS, type AttachableAgent, type SetupStatus } from '@/lib/desktop-setup';
 
@@ -378,6 +380,92 @@ describe('[SID:4576] the move\'s progress — two steps, by name', () => {
     expect(text()).toContain('Sprintable에 연결해요'); // ② waiting
     expect(text()).not.toContain('첫 일감');
     expect(text()).not.toContain('결과 보기');
+  });
+
+  // story 4832: the progress page's [작업 폴더 고르기] for ONE agent — offered only to an app that said `caps=workdir` (an older app would read the link as «start a setup»),
+  // for the agents that wait for their folder, by member id (never by name), in `intent=workdir&member=` (never `agent=`: an older app would START that agent)
+  describe('[SID:4832] the per-agent folder link', () => {
+    const U1 = '11111111-1111-4111-8111-111111111111';
+    const U2 = '22222222-2222-4222-8222-222222222222';
+    const wait = (id: string) => ({ member_id: id, at: '2026-10-06T04:40:00Z', reason: 'workdir_needed', code: null, runtime: 'claude', limit: null, first_member_id: null });
+    const withIds = (signals: object, ids: [string, string] = [U1, U2]) => ({ ...base(signals), members: [
+      { stage: null, role: null, member_id: ids[0], kind: 'agent', runtime: 'claude', name: '댄 어윈' }, { stage: null, role: null, member_id: ids[1], kind: 'agent', runtime: 'codex', name: '까디르 QA' }] });
+    const links = () => [...container.querySelectorAll('[data-testid=setup-move-pick-folder]')] as HTMLAnchorElement[];
+    const POINTER = '창 아래 «이 컴퓨터의 에이전트» 알림에서 [작업 폴더 고르기]를 눌러 주세요';
+
+    it('an app with caps=workdir: one link per waiting agent — its own id in `intent=workdir&member=`, the name on the button, the pointer line gone', async () => {
+      statusNow = () => withIds({ agents_start_failed: [wait(U1), wait(U2)] });
+      stub(() => new Response('{}'));
+      await mount(<SetupProgressView setupId="s-1" recipeName="" canWorkdir />);
+      await read();
+      expect(links().map((a) => a.textContent)).toEqual(['작업 폴더 고르기 · 댄 어윈', '작업 폴더 고르기 · 까디르 QA']);
+      expect(links().map((a) => a.dataset.member)).toEqual([U1, U2]);
+      for (const [i, a] of links().entries()) {
+        const id = [U1, U2][i]!;
+        expect(a.getAttribute('href')).toMatch(new RegExp(`^ai\\.sprintable(\\.dev|\\.check)?:/desktop/setup\\?intent=workdir&member=${id}$`));
+        expect(a.getAttribute('href')).not.toContain('agent='); // an app that knew no `workdir` would START that agent
+        expect(a.getAttribute('href')).not.toContain('댄'); // by id, never by name
+      }
+      expect(container.querySelector('[data-testid=setup-move-folder-wait]')?.textContent).toContain('댄 어윈 · 까디르 QA는 작업 폴더를 고르면 시작해요 — 아래 버튼을 눌러 폴더를 골라 주세요');
+      expect(text()).not.toContain(POINTER);
+    });
+
+    it('an OLDER app (no caps=workdir) + this page: no link at all — the pointer to the window\'s notice, as before (the older app would read the link as «start a setup»)', async () => {
+      statusNow = () => withIds({ agents_start_failed: [wait(U1), wait(U2)] });
+      stub(() => new Response('{}'));
+      await mount(<SetupProgressView setupId="s-1" recipeName="" />);
+      await read();
+      expect(links()).toHaveLength(0);
+      expect(container.querySelector('a[href*="intent=workdir"]')).toBeNull();
+      expect(container.querySelector('[data-testid=setup-move-folder-wait]')?.textContent).toContain(POINTER);
+    });
+
+    it('only the agents that WAIT get a link — a connected one does not; an id that is not uuid-shaped gets none (and with none left, the pointer line stays)', async () => {
+      statusNow = () => withIds({ tools_connected: [{ member_id: U2, at: '2026-10-06T04:41:00Z' }], agents_start_failed: [wait(U1)] });
+      stub(() => new Response('{}'));
+      await mount(<SetupProgressView setupId="s-1" recipeName="" canWorkdir />);
+      await read();
+      expect(links().map((a) => a.dataset.member)).toEqual([U1]);
+      act(() => root.unmount()); root = createRoot(container);
+      statusNow = () => base({ agents_start_failed: [wait('m-dan')] }); // the old test ids
+      await mount(<SetupProgressView setupId="s-1" recipeName="" canWorkdir />);
+      await read();
+      expect(links()).toHaveLength(0);
+      expect(container.querySelector('[data-testid=setup-move-folder-wait]')?.textContent).toContain(POINTER);
+    });
+
+    it('some waiting agents have a button and some do not (an id the link cannot carry): the pointer line stays — it covers them all — and the buttons that exist are shown', async () => {
+      statusNow = () => withIds({ agents_start_failed: [wait(U1), wait('m-dan')] }, [U1, 'm-dan']);
+      stub(() => new Response('{}'));
+      await mount(<SetupProgressView setupId="s-1" recipeName="" canWorkdir />);
+      await read();
+      expect(links().map((a) => a.dataset.member)).toEqual([U1]);
+      expect(container.querySelector('[data-testid=setup-move-folder-wait]')?.textContent).toContain(POINTER);
+      expect(text()).not.toContain('아래 버튼을 눌러');
+    });
+
+    it('a reopened or reloaded progress keeps the mark: the entry\'s progress paths read `caps=workdir` from the progress address and hand it on (a dropped hand is a red test)', () => {
+      const src = readFileSync(path.resolve(__dirname, 'desktop-setup.tsx'), 'utf8');
+      const quick = readFileSync(path.resolve(__dirname, 'desktop-setup-quick.tsx'), 'utf8');
+      expect(src).toContain('<ResumeProgress setupId={entry.progress} canWorkdir={entry.progressWorkdir === true} />');
+      expect(src).toContain('<SetupProgressView setupId={id} recipeName="" canWorkdir={query.canWorkdir === true} />');
+      expect(src).toContain('PROGRESS_FRAGMENT(id, query.canWorkdir === true)');
+      expect(src).toContain('<SetupProgressView setupId={setupId} recipeName="" canWorkdir={canWorkdir} />');
+      expect(src).toContain('reloadToProgress(setupId, canWorkdir)');
+      expect(quick).toContain('canWorkdir={query.canWorkdir === true} />;');
+      expect(quick.match(/PROGRESS_FRAGMENT\(made, query\.canWorkdir === true\)/g)).toHaveLength(2);
+      expect(progressWorkdirFromFragment(PROGRESS_FRAGMENT('11111111-1111-4111-8111-111111111111', true))).toBe(true);
+      expect(progressWorkdirFromFragment(PROGRESS_FRAGMENT('11111111-1111-4111-8111-111111111111'))).toBe(false);
+      expect(progressFromFragment(PROGRESS_FRAGMENT('11111111-1111-4111-8111-111111111111', true))).toBe('11111111-1111-4111-8111-111111111111'); // the id still reads as before
+      expect(progressWorkdirFromFragment('#progress=x&caps=move,solo')).toBe(false);
+    });
+
+    it('the page that starts the move hands canWorkdir to its progress, and the entry hands the query\'s mark to the page (a dropped prop is a red test)', () => {
+      const src = readFileSync(path.resolve(__dirname, 'desktop-setup.tsx'), 'utf8');
+      expect(src).toContain('phoneControlFailed={phoneControlFailed} canWorkdir={canWorkdir} />;');
+      expect(src).toContain('canWorkdir={query.canWorkdir === true}');
+      expect(src).toContain("...(canWorkdir ? { canWorkdir: true as const } : {})"); // a reload keeps the mark
+    });
   });
 
   it('every agent connected → «에이전트를 옮겼어요» · «{이름} · {런타임}» · only [오늘로 가기] and the done line', async () => {

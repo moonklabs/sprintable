@@ -28,6 +28,9 @@ export interface SetupQuery { code: string; runtimes: DesktopRuntime[]; setupId:
   /** story 4711: the app said `caps=solo` — it can take the first setup in three steps (one new agent for a picked folder).
    *  Absent = an app from before: the page is today's recipe setup. Only present when true. */
   canSolo?: true;
+  /** story 4832: the app said `caps=workdir` — it answers the move progress page's per-agent [작업 폴더 고르기] link (`intent=workdir`). Absent = an app from before: the
+   *  page keeps «창 아래 알림에서 고르기» and shows NO link (an older app would read the link as «start a setup»). Only present when true. */
+  canWorkdir?: true;
   /** story 4832: `kind=move` — the app was asked to open the page with «이미 있는 에이전트 옮기기» chosen (the sidebar's own door). Only with `caps=move`
    *  (an app that cannot take a move would show a choice it cannot keep); absent otherwise. */
   kind?: 'move';
@@ -84,11 +87,12 @@ export function parseSetupQuery(params: { get(name: string): string | null }): S
   const caps = new Set((params.get('caps') ?? '').split(',').map((s) => s.trim()));
   const agent = params.get('agent') ?? '';
   const solo = caps.has('solo') ? { canSolo: true as const } : {};
+  const workdir = caps.has('workdir') ? { canWorkdir: true as const } : {};
   const pickAsked = params.get('pick') ?? '';
   const pick = DESKTOP_RUNTIMES.find((r) => r === pickAsked && runtimes.includes(r));
   const versions = parseRuntimeVersions(params.get('rv'), runtimes);
   const folder = parseSoloFolder(params);
-  return { code, runtimes, setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null, blocked: runtimes.filter((r) => blockedAsked.has(r)), ...withOld(parseOldRuntimes(params.get('old'), runtimes)), ...(caps.has('move') ? { canMove: true as const } : {}), ...solo, ...(pick ? { pick } : {}), ...(Object.keys(versions).length ? { versions } : {}), ...(folder ? { folder } : {}), ...(AGENT_ID_RE.test(agent) ? { agent } : {}), ...(params.get('kind') === 'move' && caps.has('move') ? { kind: 'move' as const } : {}) };
+  return { code, runtimes, setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null, blocked: runtimes.filter((r) => blockedAsked.has(r)), ...withOld(parseOldRuntimes(params.get('old'), runtimes)), ...(caps.has('move') ? { canMove: true as const } : {}), ...solo, ...workdir, ...(pick ? { pick } : {}), ...(Object.keys(versions).length ? { versions } : {}), ...(folder ? { folder } : {}), ...(AGENT_ID_RE.test(agent) ? { agent } : {}), ...(params.get('kind') === 'move' && caps.has('move') ? { kind: 'move' as const } : {}) };
 }
 
 
@@ -435,7 +439,7 @@ export function setupFragment(q: SetupQuery): string {
   if (q.setupId) p.set('setup', q.setupId);
   if (q.blocked.length) p.set('blocked', q.blocked.join(','));
   if (q.old?.length) p.set('old', q.old.map((o) => `${o.runtime}:${o.version}:${o.min}`).join(','));
-  const caps = [...(q.canMove ? ['move'] : []), ...(q.canSolo ? ['solo'] : [])];
+  const caps = [...(q.canMove ? ['move'] : []), ...(q.canSolo ? ['solo'] : []), ...(q.canWorkdir ? ['workdir'] : [])];
   if (caps.length) p.set('caps', caps.join(','));
   if (q.agent) p.set('agent', q.agent);
   if (q.kind) p.set('kind', q.kind);
@@ -729,6 +733,8 @@ export interface MoveProgress {
   /** ① done, ② not: the agents not connected yet (not failed · not stopped · not past the threshold) — ②'s own line (Yuna 05:20Z) */
   stillPreparing: string[];
   folderWait: string[];
+  /** story 4832: the agents in `folderWait`, by member id and in the same order — the per-agent [작업 폴더 고르기] link names its agent by id (never by name) */
+  folderWaitIds: string[];
   startFailed: { memberId: string; name: string; runtime: DesktopRuntime | null; line: StartFailedLine; limit: number | null }[];
   stopped: { names: string[]; claude: boolean } | null;
   notConnected: { names: string[]; claude: boolean } | null;
@@ -774,6 +780,7 @@ export function moveProgress(s: SetupStatus, now: number, handedOverSeenAt: numb
     pairs: ready === 'done' ? ids.filter((id) => !failedIds.has(id) && !stoppedIds.has(id)).map((id) => ({ name: nameOf(id), runtime: runtimeOf(id) })).filter((p): p is { name: string; runtime: DesktopRuntime } => !!p.runtime) : [],
     stillPreparing: ready === 'done' && connectedStep !== 'done' ? pending.filter((id) => !late.includes(id)).map(nameOf) : [],
     folderWait: ids.filter((id) => waitIds.has(id)).map(nameOf),
+    folderWaitIds: ids.filter((id) => waitIds.has(id)),
     startFailed,
     stopped: stoppedIds.size ? { names: ids.filter((id) => stoppedIds.has(id)).map(nameOf), claude: ids.some((id) => stoppedIds.has(id) && runtimeOf(id) === 'claude') } : null,
     notConnected: late.length ? { names: late.map(nameOf), claude: late.some((id) => runtimeOf(id) === 'claude') } : null,

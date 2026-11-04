@@ -177,10 +177,10 @@ export async function renewToken(): Promise<boolean> {
 }
 
 /** The address a reload goes to for this setup's progress (4429 ①): the setup id only — no code (it is used already). */
-export const PROGRESS_FRAGMENT = (setupId: string) => `#progress=${encodeURIComponent(setupId)}`;
-function reloadToProgress(setupId: string): void {
+export const PROGRESS_FRAGMENT = (setupId: string, canWorkdir = false) => `#progress=${encodeURIComponent(setupId)}${canWorkdir ? '&caps=workdir' : ''}`;
+function reloadToProgress(setupId: string, canWorkdir = false): void {
   // replaceState, not `location.hash =`: no hashchange for the page's own handler (same as 4429 ②)
-  window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(setupId));
+  window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(setupId, canWorkdir));
   window.location.reload();
 }
 
@@ -199,14 +199,14 @@ export async function fetchMyInvites(): Promise<MyInvite[]> {
  * The setup is saved but its progress cannot be read with the old token (4429 ① · Yuna 09:42Z): in the progress's place, not over
  * it — «앱이 받아 가기를 기다리는 중» would say what the page does not know. No red: only «seeing» is blocked.
  */
-export function SetupDoneReload({ setupId }: { setupId: string | null }) {
+export function SetupDoneReload({ setupId, canWorkdir = false }: { setupId: string | null; /** story 4832: the app's `caps=workdir` mark, kept in the progress address a reload goes to */ canWorkdir?: boolean }) {
   const t = useTranslations('desktop.setup');
   return (
     <Card className="break-keep flex flex-col gap-3 p-6" data-testid="setup-done-reload">
       <h1 className="text-lg font-semibold">{t('doneReload.title')}</h1>
       <p className="text-sm text-muted-foreground">{t('doneReload.body')}</p>
       <div className="flex gap-2">
-        <Button onClick={() => (setupId ? reloadToProgress(setupId) : window.location.reload())}>{t('failure.has-org.action')}</Button>
+        <Button onClick={() => (setupId ? reloadToProgress(setupId, canWorkdir) : window.location.reload())}>{t('failure.has-org.action')}</Button>
       </div>
     </Card>
   );
@@ -235,7 +235,7 @@ export interface MyInvite { invite_id: string; org_id: string; org_name: string;
  */
 type OrgMode = { kind: 'has-org' } | { kind: 'checking' } | { kind: 'new' } | { kind: 'invited'; invites: MyInvite[] } | { kind: 'invite-failed' };
 
-export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null, old = [], canMove = false, preselect = null, initialKind = 'recipe' }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[]; setupId?: string | null; old?: OldRuntime[]; canMove?: boolean; /** story 4680: the agent the recruiter just made — chosen for the first agent row once the list has it */ preselect?: string | null; /** story 4832: `move` = the page opens with «이미 있는 에이전트 옮기기» chosen (the sidebar's move door · the card's move link); still only a choice — nothing is ticked */ initialKind?: 'recipe' | 'move' }) {
+export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null, old = [], canMove = false, canWorkdir = false, preselect = null, initialKind = 'recipe' }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[]; setupId?: string | null; old?: OldRuntime[]; canMove?: boolean; /** story 4832: the app answers the progress page's per-agent folder link (`caps=workdir`) */ canWorkdir?: boolean; /** story 4680: the agent the recruiter just made — chosen for the first agent row once the list has it */ preselect?: string | null; /** story 4832: `move` = the page opens with «이미 있는 에이전트 옮기기» chosen (the sidebar's move door · the card's move link); still only a choice — nothing is ticked */ initialKind?: 'recipe' | 'move' }) {
   // ⑥ 갈래 가: 찾았지만 회사 설정으로 도구를 못 붙이는 런타임은 고를 수 없고, 꺼진 선택지로만 보인다. PO 08:37Z · 유나 08:38Z.
   const runtimes = useMemo(() => found.filter((r) => !blocked.includes(r)), [found, blocked]);
   const claudeBlocked = blocked.includes('claude');
@@ -705,7 +705,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   // — «이미 조직이 있어요» [다시 불러오기] (4429 ②) and, story 4721, the member card's [다시 확인] and its switch into the new organization
   const reloadKeepingSetup = () => {
     // replaceState, not `location.hash =`: no hashchange (the page's own handler would take the values off again before the reload)
-    window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment({ code, runtimes: found, setupId, blocked, old, ...(canMove ? { canMove: true as const } : {}), ...(preselect ? { agent: preselect } : {}) }));
+    window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment({ code, runtimes: found, setupId, blocked, old, ...(canMove ? { canMove: true as const } : {}), ...(canWorkdir ? { canWorkdir: true as const } : {}), ...(preselect ? { agent: preselect } : {}) }));
     window.location.reload();
   };
   if (orgMode.kind === 'invited') return <InvitedInApp invites={orgMode.invites} onReload={reloadKeepingSetup} />;
@@ -727,8 +727,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     // story 4494 (Yuna 10:11Z ⓐ): nothing usable, but installed below the floor — say that, not «찾지 못했어요»
     return blocked.length === 0 && old.length > 0 ? <TooOldCard old={old} /> : <Failure failure={blocked.length > 0 ? 'managed' : 'no-agent'} />;
   }
-  if (view.kind === 'done-reload') return <SetupDoneReload setupId={setupId} />;
-  if (view.kind === 'started') return <SetupProgressView setupId={setupId} recipeName={recipe ? presetName(recipe, tPreset) : ''} phoneControlFailed={phoneControlFailed} />;
+  if (view.kind === 'done-reload') return <SetupDoneReload setupId={setupId} canWorkdir={canWorkdir} />;
+  if (view.kind === 'started') return <SetupProgressView setupId={setupId} recipeName={recipe ? presetName(recipe, tPreset) : ''} phoneControlFailed={phoneControlFailed} canWorkdir={canWorkdir} />;
 
   const setOwner = (role: string, key: string) => {
     preselectSpent.current = true; // story 4680 (PO (나)): a person set a row — the recruiter's preselect never lands after this
@@ -1575,27 +1575,33 @@ export function progressFromFragment(hash: string): string | null {
   return /^[A-Za-z0-9-]{1,64}$/.test(id) ? id : null;
 }
 
+/** story 4832: the `caps=workdir` the page kept in that address (the app said it answers the per-agent folder link) — a reload of the progress must not lose it. */
+export function progressWorkdirFromFragment(hash: string): boolean {
+  return (new URLSearchParams(hash.replace(/^#/, '')).get('caps') ?? '').split(',').map((c) => c.trim()).includes('workdir');
+}
+
 /** After that reload: renew the token first (a new page load may get it now), then the progress — or the same card again. */
-function ResumeProgress({ setupId }: { setupId: string }) {
+function ResumeProgress({ setupId, canWorkdir = false }: { setupId: string; canWorkdir?: boolean }) {
   const t = useTranslations('desktop.setup');
   const [ok, setOk] = useState<boolean | null>(null);
   useEffect(() => { let off = false; void renewToken().then((r) => { if (!off) setOk(r); }); return () => { off = true; }; }, []);
   // named like the page's other loading card, so a screen reader is not silent (Yuna 10:02Z)
   if (ok === null) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
-  return ok ? <SetupProgressView setupId={setupId} recipeName="" /> : <SetupDoneReload setupId={setupId} />;
+  return ok ? <SetupProgressView setupId={setupId} recipeName="" canWorkdir={canWorkdir} /> : <SetupDoneReload setupId={setupId} canWorkdir={canWorkdir} />;
 }
 
 export function DesktopSetupEntry() {
-  const [entry, setEntry] = useState<{ query: SetupQuery | null; progress?: string | null } | null>(null);
+  const [entry, setEntry] = useState<{ query: SetupQuery | null; progress?: string | null; progressWorkdir?: boolean } | null>(null);
   const searchParams = useSearchParams();
   const strip = () => window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
   useEffect(() => {
     const hash = window.location.hash;
     const query = parseSetupFragment(hash);
     const progress = query ? null : progressFromFragment(hash);
+    const progressWorkdir = progress ? progressWorkdirFromFragment(hash) : false;
     // off the address at once; the state change follows on the next microtask (no cascading render inside the effect)
     if (hash) strip();
-    void Promise.resolve().then(() => setEntry({ query, progress }));
+    void Promise.resolve().then(() => setEntry({ query, progress, progressWorkdir }));
     // The values can also arrive AFTER this page is up: after an email login the desktop app reopens the same page with its `#`,
     // and that is a same-document fragment change, not a new load (dev 실측 15:24Z — the page showed «데스크톱 앱에서 열어 주세요»).
     // A newer code replaces an older one (the app restarted the setup).
@@ -1607,7 +1613,7 @@ export function DesktopSetupEntry() {
       const progress = q ? null : progressFromFragment(hash);
       if (!q && !progress) return;
       strip();
-      setEntry({ query: q, progress });
+      setEntry({ query: q, progress, progressWorkdir: progress ? progressWorkdirFromFragment(hash) : false });
     };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
@@ -1618,7 +1624,7 @@ export function DesktopSetupEntry() {
     if (hasSetupFragment(window.location.hash)) strip();
   }, [searchParams]);
   if (!entry) return null;
-  if (!entry.query && entry.progress) return <ResumeProgress setupId={entry.progress} />;
+  if (!entry.query && entry.progress) return <ResumeProgress setupId={entry.progress} canWorkdir={entry.progressWorkdir === true} />;
   return entry.query ? <SetupOrProgress key={entry.query.code} query={entry.query} /> : <OpenInDesktopApp />;
 }
 
@@ -1652,19 +1658,19 @@ function SetupOrProgress({ query }: { query: SetupQuery }) {
       .then((ok) => {
         if (off) return;
         // replaceState, not `location.hash =`: no hashchange for the page's own handler (same as 4429 ②)
-        if (ok) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(id));
+        if (ok) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(id, query.canWorkdir === true));
         setStarted(ok);
       });
     return () => { off = true; };
-  }, [id]);
+  }, [id, query.canWorkdir]);
   if (started === null) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
-  if (started && id) return <SetupProgressView setupId={id} recipeName="" />;
+  if (started && id) return <SetupProgressView setupId={id} recipeName="" canWorkdir={query.canWorkdir === true} />;
   // story 4711: an app that can take the first setup in three steps gets that card; the recipe setup is one link away («팀 꾸리기»).
   // A recruiter's agent (`agent=`) keeps the recipe page for now — its own branch of the card comes with the recruiter's PR.
   // story 4711 (`agent=` branch): a recruiter's agent, an app that can move → the card with ① fixed to that agent (a move, never a new agent)
   if (query.agent && query.canMove === true && !teamPath) return <DesktopSetupAgent query={query} onTeam={() => setTeamPath(true)} />;
   if (showsQuickCard(query, teamPath) && !query.agent) return <DesktopSetupQuick query={query} onTeam={() => setTeamPath(true)} onMove={query.canMove === true ? () => { setMoveFirst(true); setTeamPath(true); } : undefined} />;
-  return <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} old={query.old ?? []} canMove={query.canMove === true} preselect={query.agent ?? null} initialKind={query.kind === 'move' || moveFirst ? 'move' : 'recipe'} />;
+  return <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} old={query.old ?? []} canMove={query.canMove === true} canWorkdir={query.canWorkdir === true} preselect={query.agent ?? null} initialKind={query.kind === 'move' || moveFirst ? 'move' : 'recipe'} />;
 }
 
 /** 코드 없이 브라우저로 직접 온 경우(AC5). */

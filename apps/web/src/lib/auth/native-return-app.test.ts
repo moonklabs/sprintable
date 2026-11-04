@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { appReturnUrl, appScheme, appSetupLink, defaultScheme, nativeReturnApp } from './native-return-app';
+import { appReturnUrl, appScheme, appSetupLink, appWorkdirLink, defaultScheme, nativeReturnApp } from './native-return-app';
 
 // story #4626 (PO 08:04Z): which desktop app a hand-back opens — a closed table. A value outside it is the default, and no
 // string from the URL ever reaches a link.
@@ -120,5 +120,18 @@ describe('native-return-app — story 4696: the default scheme by host', () => {
     expect(appSetupLink(null, undefined, { agent: 'a1111111-0000-4000-8000-000000000001' })).toBe('ai.sprintable:/desktop/setup?agent=a1111111-0000-4000-8000-000000000001');
     expect(appReturnUrl(new URLSearchParams('code=abc&app=check'))).toBe('ai.sprintable.check:/oauth-return?code=abc');
     expect(appSetupLink('dev')).toBe('ai.sprintable.dev:/desktop/setup');   // an explicit `dev` (the dev phone app · Dev Setup) is the same on any host
+  });
+});
+
+describe('[SID:4832] appWorkdirLink — the per-agent folder link', () => {
+  const U = '11111111-1111-4111-8111-111111111111';
+  it('`intent=workdir&member=<id>` for that app\'s own scheme — never `agent=` (an older app would read that as «start that agent»)', () => {
+    expect(appWorkdirLink(null, U)).toBe(`ai.sprintable:/desktop/setup?intent=workdir&member=${U}`);
+    expect(appWorkdirLink('dev', U)).toBe(`ai.sprintable.dev:/desktop/setup?intent=workdir&member=${U}`);
+    expect(appWorkdirLink('check', U)).toBe(`ai.sprintable.check:/desktop/setup?intent=workdir&member=${U}`);
+    expect(appWorkdirLink(null, U)).not.toContain('agent=');
+  });
+  it('an id that is not uuid-shaped makes no link at all (never a bare setup link, which would START a setup)', () => {
+    for (const bad of ['', 'm-dan', '../x', `${U}x`, `${U}&intent=reopen`, ' ', '댄 어윈', 'a'.repeat(36), '-'.repeat(36), `${U.slice(0, 8)}${U.slice(9)}-`]) expect(appWorkdirLink(null, bad)).toBeNull();
   });
 });
