@@ -206,6 +206,37 @@ describe('ConversationPage — 방에서 방으로 옮길 때(같은 컴포넌�
     expect((container.querySelector('#room-project') as HTMLSelectElement).value).toBe('');
   });
 
+  it('⭐A의 본문(json)을 읽는 사이에 B로 옮기면, 뒤늦게 다 읽힌 A가 B의 프로젝트를 덮지 않는다', async () => {
+    let releaseBody: (() => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/conversations/conv-1') return { ok: true, status: 200, json: async () => { await new Promise<void>((resolve) => { releaseBody = resolve; }); return room('proj-a'); } };
+      if (url === '/api/conversations/conv-2') return { ok: true, status: 200, json: async () => room('proj-b') };
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }));
+    const tree = await renderPage();
+    await act(async () => { root.render(tree()); }); await settle();
+    expect(releaseBody).not.toBeUndefined();
+    paramRef.current = 'conv-2';
+    await act(async () => { root.render(tree()); }); await settle();
+    expect(chatViewProject()).toBe('proj-b');
+    await act(async () => { releaseBody!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(chatViewProject()).toBe('proj-b');
+  });
+
+  it('⭐A를 못 읽었다고(500) 아직 읽는 중인 B에 «방 정보를 못 읽었어요»가 번지지 않는다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/conversations/conv-1') return { ok: false, status: 500, json: async () => null };
+      if (url === '/api/conversations/conv-2') return new Promise(() => {}); // B is still being read
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }));
+    const tree = await renderPage();
+    await act(async () => { root.render(tree()); }); await settle();
+    expect(container.querySelector('[data-testid="room-info-failed"]')).not.toBeNull();
+    paramRef.current = 'conv-2';
+    await act(async () => { root.render(tree()); }); await settle();
+    expect(container.querySelector('[data-testid="room-info-failed"]')).toBeNull();
+  });
+
   it('A에서 «열 수 없음»(403)이었다고 B까지 막히지 않는다', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url === '/api/conversations/conv-1') return { ok: false, status: 403, json: async () => null };
