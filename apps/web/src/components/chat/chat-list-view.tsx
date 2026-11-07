@@ -268,7 +268,9 @@ function ConversationRow({
       type="button"
       variant="ghost"
       onClick={onClick}
-      className="h-auto w-full items-center justify-start gap-3 rounded-lg px-3 py-2.5 text-left font-normal transition hover:bg-muted/60 active:bg-muted"
+      // story 4853 (phone · point 1) — while the round support button floats over this list (it carries `data-support-launcher` on <html>, support-widget-launcher.tsx) the row keeps its
+      // right side clear of it at phone width, so the time and the unread badge are not hidden behind it. A class literal on purpose (Tailwind reads it as written): the attribute is the launcher's SUPPORT_LAUNCHER_ATTR.
+      className="h-auto w-full items-center justify-start gap-3 rounded-lg px-3 py-2.5 text-left font-normal transition hover:bg-muted/60 active:bg-muted max-md:[:root[data-support-launcher]_&]:pr-16"
     >
       {/* story #2968 — 1:1(DM·agent 탭)은 avatar.tsx 정본으로 실사진(3단 폴백은 그 컴포넌트
           책임). group은 특정 1인 사진이 의미가 없어(다인원) 기존 아이콘 자리를 유지한다. */}
