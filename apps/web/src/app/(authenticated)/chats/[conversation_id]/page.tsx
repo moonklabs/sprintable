@@ -14,6 +14,7 @@ import { DeliveryContractModal } from '@/components/chat/delivery-contract-modal
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { Avatar } from '@/components/shared/avatar';
 import { useDashboardContext } from '../../../dashboard/dashboard-shell';
@@ -59,8 +60,9 @@ interface ConversationMeta {
   // story #4631 C — the open flood block (agent messages paused), absent when none is open
   agentsPaused: AgentsPausedState | null;
   // story 4847 (AC2) — the project THIS ROOM belongs to (the server's single-room answer says it). It is what the story/doc pickers, the attachments and the
-  // mention search work in — not the project the person happens to be looking at: opening a room no longer switches the current project. null = the room has none.
-  projectId: string | null;
+  // mention search work in — not the project the person happens to be looking at: opening a room no longer switches the current project. null = the room has none;
+  // undefined = the answer did not say (an older response without the field): not the same as «none», so nothing is asked and nothing is guessed.
+  projectId: string | null | undefined;
 }
 
 // story #2168 PR-②(오르테가 지적) — `?from=`은 사용자가 URL을 통해 조작 가능한 값이다.
@@ -112,6 +114,7 @@ export default function ConversationPage() {
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
   const [chosenProjectId, setChosenProjectId] = useState<string | null>(null); // story 4847 — for a room that has no project of its own
+  const [metaFailed, setMetaFailed] = useState(false); // story 4847 — the room's own facts could not be read (not a 403): say so and offer to read them again
 
   // story #2168 PR-② — chat-list-view.tsx의 "다른 프로젝트" 항목 클릭이 실어 보내는 복귀 정보.
   // `from` = 원래 있던 프로젝트(뒤로가기 시 복귀 대상) · `pn` = 이 대화가 속한 프로젝트명(권한
@@ -131,7 +134,7 @@ export default function ConversationPage() {
     try {
       const res = await fetchWithAuth(`/api/conversations/${conversation_id}`);
       if (res.status === 403) { setBlocked(true); return; }
-      if (!res.ok) return;
+      if (!res.ok) { setMetaFailed(true); return; }
       const conv = await res.json() as {
         title: string | null; type: 'dm' | 'group'; participants?: Participant[]; muted?: boolean; last_read_at?: string | null;
         free_response?: boolean; circuit_breaker?: AgentsPausedState | null; project_id?: string | null;
@@ -144,9 +147,10 @@ export default function ConversationPage() {
         lastReadAt: conv.last_read_at ?? null,
         freeResponse: conv.free_response ?? false,
         agentsPaused: conv.circuit_breaker ?? null,
-        projectId: conv.project_id ?? null,
+        projectId: conv.project_id,
       });
-    } catch { /* non-critical */ }
+      setMetaFailed(false);
+    } catch { setMetaFailed(true); }
   }, [conversation_id]);
 
   // per-대화 알림 mute 토글 (270c87e6 AC③⑤). 낙관 갱신 → PATCH /mute → 실패 시 롤백.
@@ -260,7 +264,7 @@ export default function ConversationPage() {
     .map((p) => ({ agentId: p.member_id, agentName: participantDisplayLabel(p, tc), runtimeType: p.runtime_type ?? null }));
 
   // story 4847 (AC2) — the room's own project works the pickers and the attachments; a room with none lets the person choose (one project → that one).
-  const roomProjectId = meta ? (meta.projectId ?? chosenProjectId ?? (projectMemberships.length === 1 ? projectMemberships[0]!.projectId : undefined)) : undefined;
+  const roomProjectId = meta ? (meta.projectId ?? (meta.projectId === null ? (chosenProjectId ?? (projectMemberships.length === 1 ? projectMemberships[0]!.projectId : undefined)) : undefined)) : undefined;
   const askRoomProject = Boolean(meta) && meta!.projectId === null && projectMemberships.length > 1;
 
   return (
@@ -396,6 +400,12 @@ export default function ConversationPage() {
           {/* story #4534 — a DM with an agent: its session on the computer (the web looks · inside the phone app: [멈춤] [지금 지시]) */}
           {headerAvatarParticipant?.type === 'agent' ? <AgentSessionStrip agentId={headerAvatarParticipant.member_id} conversationId={conversation_id} /> : null}
           {/* story #4631 C · D — agent messages paused: the band (and an owner/admin's [멈춤 풀기]) — one per conversation */}
+          {metaFailed && !meta ? (
+            <div className="flex items-center gap-2 border-b border-border px-4 py-2" role="status" data-testid="room-info-failed">
+              <p className="text-xs text-muted-foreground">{t('roomInfoLoadFailed')}</p>
+              <Button type="button" variant="link" size="xs" onClick={() => void fetchMeta()} className="h-auto px-0 text-xs">{tc('retry')}</Button>
+            </div>
+          ) : null}
           {askRoomProject ? (
             <div className="flex items-center gap-2 border-b border-border px-4 py-2" data-testid="room-project-ask">
               <label htmlFor="room-project" className="flex-shrink-0 text-xs text-muted-foreground">{t('roomProjectAsk')}</label>

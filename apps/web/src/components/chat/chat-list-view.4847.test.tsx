@@ -228,6 +228,99 @@ describe('ChatListView — 질문이 바뀌는 사이의 경합(story 4847)', ()
   });
 });
 
+describe('ChatListView — 같은 것을 두 번 묻는 경합 · 현재 프로젝트 변경(story 4847, codex)', () => {
+  const ALL = '/api/conversations?limit=30&offset=0';
+
+  it('⭐현재 프로젝트가 바뀌어도 조직 전체 목록은 다시 묻지 않는다(질문에 현재 프로젝트가 없으므로)', async () => {
+    const fetchMock = stubOrgServer();
+    await mount({ projectId: 'proj-a' });
+    const before = listCalls(fetchMock).length;
+    await act(async () => { root.render(wrap(<ChatListView projectId="proj-b" currentTeamMemberId="me-1" />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(listCalls(fetchMock)).toHaveLength(before);
+    expect(container.textContent).toContain('에이 방'); // still the list it had
+  });
+
+  it('⭐«모든 프로젝트»를 묻는 중에 다른 프로젝트로 갔다가 «모든 프로젝트»로 돌아오면, 첫 물음의 뒤늦은 실패가 지금 목록을 오류로 덮지 않는다', async () => {
+    let releaseFirst: (() => void) | undefined;
+    let allCalls = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url === ALL) {
+        allCalls++;
+        if (allCalls === 1) { await new Promise<void>((resolve) => { releaseFirst = resolve; }); return { ok: false, status: 500, json: async () => null }; }
+        return { ok: true, json: async () => ({ data: [A1, B1], total: 2 }) };
+      }
+      if (url.includes('project_id=proj-a')) return { ok: true, json: async () => ({ data: [A1], total: 1 }) };
+      return { ok: false, status: 404, json: async () => null };
+    }));
+    await mount();
+    expect(releaseFirst).not.toBeUndefined();
+    await chooseFilter('proj-a');
+    await chooseFilter(''); // «모든 프로젝트» again: the same question as the first one, asked a second time
+    expect(container.textContent).toContain('비 방');
+    await act(async () => { releaseFirst!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).not.toContain(koMessages.chats.conversationsLoadFailed);
+    expect(container.textContent).toContain('비 방');
+  });
+
+  it('⭐옛 물음이 뒤늦게 422를 받아도 «프로젝트 단위 대비 경로»로 넘어가지 않는다(지금 걸러 보기가 그대로 산다)', async () => {
+    let release422: (() => void) | undefined;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url === ALL) { await new Promise<void>((resolve) => { release422 = resolve; }); return { ok: false, status: 422, json: async () => null }; }
+      if (url.includes('project_id=proj-b')) return { ok: true, json: async () => ({ data: [B1], total: 1 }) };
+      return { ok: false, status: 404, json: async () => null };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [A, B], role: 'member', projectId: 'proj-a' });
+    await mount({ projectId: 'proj-a' });
+    await chooseFilter('proj-b');
+    await act(async () => { release422!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(filterSelect()).not.toBeNull(); // not the project-only list
+    expect(container.textContent).toContain('비 방');
+    expect(listCalls(fetchMock).every((u) => !u.endsWith('&project_id=proj-a'))).toBe(true); // never asked for the current project's own list
+  });
+
+  it('⭐«더 보기»를 누른 뒤 걸러 보기를 바꾸면, 뒤늦게 온 이전 목록의 다음 쪽이 새 목록에 붙지 않고 «더 보기»도 멈춰 있지 않는다', async () => {
+    window.sessionStorage.setItem(CHAT_PROJECT_FILTER_KEY, 'proj-a');
+    let releaseMore: (() => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('project_id=proj-a') && url.includes('offset=0')) return { ok: true, json: async () => ({ data: [A1], total: 3 }) };
+      if (url.includes('project_id=proj-a') && url.includes('offset=1')) {
+        await new Promise<void>((resolve) => { releaseMore = resolve; });
+        return { ok: true, json: async () => ({ data: [room('conv-a2', '에이 둘째 방', { id: A.projectId, name: A.projectName }, '2026-11-07T00:30:00Z')], total: 3 }) };
+      }
+      if (url.includes('project_id=proj-b')) return { ok: true, json: async () => ({ data: [B1], total: 1 }) };
+      return { ok: false, status: 404, json: async () => null };
+    }));
+    await mount();
+    const more = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.common.loadMore))!;
+    await act(async () => { more.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); });
+    expect(releaseMore).not.toBeUndefined();
+    await chooseFilter('proj-b');
+    await act(async () => { releaseMore!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('비 방');
+    expect(container.textContent).not.toContain('에이 둘째 방');
+    expect(container.textContent).not.toContain('에이 방');
+  });
+
+  it('프로젝트 목록을 아직 모를 때 기억된 프로젝트 값은 일단 쓰고, 목록이 와서 내 프로젝트가 아니면 «모든 프로젝트»로 돌아간다', async () => {
+    const UUID = '11111111-1111-4111-8111-111111111111';
+    window.sessionStorage.setItem(CHAT_PROJECT_FILTER_KEY, UUID);
+    const fetchMock = stubOrgServer();
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'member', projectId: undefined });
+    await mount();
+    expect(listCalls(fetchMock)).toEqual([`/api/conversations?limit=30&offset=0&project_id=${UUID}`]);
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [A, B], role: 'member', projectId: undefined }); // the shell has now told the person's projects
+    await act(async () => { root.render(wrap(<ChatListView projectId={null} currentTeamMemberId="me-1" />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(listCalls(fetchMock).at(-1)).toBe('/api/conversations?limit=30&offset=0');
+    expect(window.sessionStorage.getItem(CHAT_PROJECT_FILTER_KEY)).toBeNull();
+  });
+});
+
 describe('ChatListView — 관리자의 에이전트 탭 · 지시 한 줄 · 새 방(story 4847)', () => {
   it('에이전트 탭은 지금 프로젝트가 있을 때만 있다(그 프로젝트의 에이전트 방을 읽는 탭이라)', async () => {
     stubOrgServer();

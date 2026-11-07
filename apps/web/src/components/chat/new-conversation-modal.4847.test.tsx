@@ -115,4 +115,39 @@ describe('NewConversationModal — 조직 구성원 · 방의 프로젝트(story
     await click(createBtn());
     expect((posts[0] as { project_id: string }).project_id).toBe('proj-b');
   });
+
+  it('⭐주어진 기본 프로젝트가 내 프로젝트가 아니면 기본값으로 쓰지 않는다 — 고를 때까지 만들 수 없다', async () => {
+    const posts: unknown[] = [];
+    await mount(mockFetches(posts), 'someone-elses-project', [A, B]);
+    expect(projectSelect()!.value).toBe('');
+    await click(botBtn());
+    expect(createBtn().disabled).toBe(true);
+    expect(posts).toHaveLength(0);
+  });
+
+  it('⭐창이 열려 있는 동안 기본 프로젝트가 바뀌면 따라가고(고른 적 없을 때), 고른 뒤에는 고른 값을 지킨다', async () => {
+    const posts: unknown[] = [];
+    const fetchMock = mockFetches(posts);
+    await mount(fetchMock, 'proj-a', [A, B]);
+    const rerender = async (projectId: string) => {
+      await act(async () => {
+        root.render(
+          <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+            <DashboardCtx.Provider value={{ projectMemberships: [A, B] } as never}>
+              <NewConversationModal projectId={projectId} onClose={() => {}} onCreated={() => {}} />
+            </DashboardCtx.Provider>
+          </NextIntlClientProvider>,
+        );
+      });
+    };
+    await rerender('proj-b');
+    expect(projectSelect()!.value).toBe('proj-b');
+    await choose(projectSelect()!, 'proj-a');
+    await rerender('proj-b');
+    expect(projectSelect()!.value).toBe('proj-a');
+    await click(botBtn());
+    await click(createBtn());
+    expect((posts[0] as { project_id: string }).project_id).toBe('proj-a');
+  });
 });
+

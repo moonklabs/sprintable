@@ -122,6 +122,36 @@ describe('ConversationPage — 방의 프로젝트로 일한다(story 4847 AC2)'
   });
 });
 
+describe('ConversationPage — 방 정보를 못 읽었을 때 · 필드가 없을 때(story 4847, codex)', () => {
+  it('⭐방 정보를 못 읽으면(403 아님) 조용히 프로젝트 없이 두지 않고 안내와 «다시 시도»를 보이고, 다시 읽으면 방의 프로젝트로 일한다', async () => {
+    let calls = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/conversations/conv-1') {
+        calls++;
+        if (calls === 1) return { ok: false, status: 500, json: async () => null };
+        return { ok: true, status: 200, json: async () => ({ title: '회의', type: 'group', participants: [], project_id: 'proj-b' }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }));
+    await mount();
+    const notice = container.querySelector('[data-testid="room-info-failed"]');
+    expect(notice).not.toBeNull();
+    expect(notice!.textContent).toContain(koMessages.chats.roomInfoLoadFailed);
+    expect(chatViewProject()).toBe('');
+    const retry = [...notice!.querySelectorAll('button')].find((b) => b.textContent === koMessages.common.retry)!;
+    await act(async () => { retry.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="room-info-failed"]')).toBeNull();
+    expect(chatViewProject()).toBe('proj-b');
+  });
+
+  it('⭐옛 응답에 project_id 필드가 아예 없으면 «프로젝트 없는 방»으로 읽지 않는다 — 고르는 칸도 안 뜨고 프로젝트도 짐작하지 않는다', async () => {
+    stubFetch({}); // no project_id key at all
+    await mount();
+    expect(container.querySelector('[data-testid="room-project-ask"]')).toBeNull();
+    expect(chatViewProject()).toBe('');
+  });
+});
+
 describe('ConversationPage — 프로젝트 없는 방(story 4847 AC2 «없으면 고르게»)', () => {
   it('⭐프로젝트가 둘 이상이면 고르는 칸이 뜨고, 고르기 전엔 ChatView에 프로젝트가 없고 고르면 그 프로젝트로 일한다', async () => {
     stubFetch({ project_id: null });

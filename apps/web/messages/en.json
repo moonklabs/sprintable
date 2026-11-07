@@ -5818,7 +5818,8 @@
     "roomProjectAsk": "This room has no project — the project for stories, docs and attachments",
     "roomNoProject": "No project",
     "projectFilterLabel": "Filter by project",
-    "projectFilterAll": "All projects"
+    "projectFilterAll": "All projects",
+    "roomInfoLoadFailed": "Could not load this room's details — stories, docs and attachments work once they are loaded"
   },
   "eventCard": {
     "viewStory": "View story",

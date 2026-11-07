@@ -471,10 +471,11 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // drop 한다. render 단계 동기라 async resolve 시 항상 최신 projectId 를 가리킨다(assignee last-write-wins 동류).
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
-  // story 4847 — what the MY list is asking for (the filter, or the project in the project-only fallback); a response for another ask is dropped like a response for another project
-  const listScope = projectOnly ? `p:${projectId ?? ''}` : (projectFilter || '*');
-  const listScopeRef = useRef(listScope);
-  listScopeRef.current = listScope;
+  // story 4847 — the MY list's requests are numbered: only the newest whole-list ask (and a «더 보기» that belongs to it) may answer. Comparing what was asked is not enough —
+  // two asks for the same thing (the filter set back to «all», a refetch after a reconnect) must not let the older one's failure, 422 or page cover the newer list.
+  const listSeqRef = useRef(0);
+  // the project the list is scoped by: only the project-only fallback is — in the organization-wide list the current project is not part of the question, so changing it asks nothing
+  const scopeProjectId = projectOnly ? projectId : null;
 
   // story #3621 — boolean 반환(성공/실패)을 추가했다. AC1 폴링 fallback이 이 값으로
   // 폴 간격을 좁히거나(성공) 넓힌다(실패, sse-polling-fallback.ts). 기존 호출부(`void
@@ -486,39 +487,40 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     //
     // 카디르 QA(#4142, 9e6bd5c8d 재현) — 성공 경로는 stale 응답을 거르는데 실패 경로(!res.ok·catch)는
     // 그 검사가 없어, A pending 中 B로 전환 → B 성공 렌더 → 뒤늦게 도착한 A의 실패가 B 화면을 덮는
-    // 클래스가 있었다("지정 경로만 막는 fix는 클래스를 남긴다"). 이 클로저가 캡처한 `listScope`
-    // (이 호출을 일으킨 시점의 질문)를 응답 시점의 `listScopeRef.current`(최신)와 항상 먼저 대조 —
-    // 성공/실패 두 경로가 같은 가드를 탄다. (story 4847: 질문 = 걸러 보기 값 · 프로젝트 단위 대비 경로의 프로젝트.)
+    // 클래스가 있었다("지정 경로만 막는 fix는 클래스를 남긴다"). 성공/실패/422/finally 모두 같은 `stale()`를 먼저 탄다.
+    // story 4847: 비교 대상은 «무엇을 물었나»가 아니라 «몇 번째 물음인가»(같은 것을 두 번 물으면 같은 질문이라 못 가른다).
+    const seq = append ? listSeqRef.current : ++listSeqRef.current;
+    const stale = () => seq !== listSeqRef.current;
     if (!append) setLoadError(false);
-    const scopeQuery = projectOnly ? `&project_id=${projectId}` : projectFilter ? `&project_id=${projectFilter}` : '';
+    const scopeQuery = scopeProjectId ? `&project_id=${scopeProjectId}` : projectFilter ? `&project_id=${projectFilter}` : '';
     try {
       const res = await fetchWithAuth(
         `/api/conversations?limit=${PAGE_LIMIT}&offset=${nextOffset}${scopeQuery}`
       );
+      if (stale()) return false; // 더 새로운 물음이 있음 — 이 응답은 현 화면 안 덮음
       if (!res.ok) {
         // story 4847 — a server that does not yet answer the organization-wide read (it requires a project): ask for the current project's rooms instead
-        if (res.status === 422 && !projectOnly && projectId) { setProjectOnly(true); return false; }
-        if (!append && listScope === listScopeRef.current) setLoadError(true);
+        if (res.status === 422 && !projectOnly && projectIdRef.current) { setProjectOnly(true); return false; }
+        if (!append) setLoadError(true);
         return false;
       }
       const json = await res.json() as { data: ConversationItem[]; total: number };
-      if (listScope !== listScopeRef.current) return false; // 질문이 바뀜 — stale 응답 drop(현 화면 안 덮음)
+      if (stale()) return false;
       const items = json.data ?? [];
       setConversations((prev) => append ? [...prev, ...items] : items);
       setMyOffset(nextOffset + items.length);
       setMyTotal(json.total ?? 0);
       return true;
     } catch {
-      if (!append && listScope === listScopeRef.current) setLoadError(true);
+      if (!append && !stale()) setLoadError(true);
       return false;
     } finally {
       // 페드루 그라운딩(2026-09-10 12:34Z) — 위 loadError와 같은 축: A의 늦은 finally가
       // B로 전환된 뒤 B의 loading을 조용히 꺼버리면(응답 도착 前인데도 "로딩 아님"으로
       // 보임) B가 아직 안 왔는데도 순간 잘못된 화면(0건 등)이 뜬다.
-      if (listScope === listScopeRef.current) setLoading(false);
-      setLoadingMore(false);
+      if (!stale()) { setLoading(false); setLoadingMore(false); }
     }
-  }, [projectId, projectFilter, projectOnly, listScope]);
+  }, [scopeProjectId, projectFilter, projectOnly]);
 
   const fetchAllConversations = useCallback(async (nextOffset = 0, append = false) => {
     // 카디르 QA(#4142) — 위 fetchConversations와 동형 stale-drop 가드(성공/실패 두 경로
@@ -594,6 +596,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     if (!filterReady) return; // story 4847 — ask once the tab's own filter is read (no first ask for «all» that the stored choice then replaces)
     setConversations([]);
     setLoading(true);
+    setLoadingMore(false);
     void fetchConversations(0, false);
   }, [fetchConversations, filterReady]);
 
@@ -602,7 +605,9 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   useEffect(() => {
     let stored = '';
     try { stored = window.sessionStorage.getItem(CHAT_PROJECT_FILTER_KEY) ?? ''; } catch { /* storage unavailable — «all» */ }
-    if (stored === 'none' || projectMemberships.some((m) => m.projectId === stored)) setProjectFilter(stored);
+    // the person's project list may not be known at this first moment (the shell fills it in): a project-shaped value is kept then and dropped below once the list says it is not theirs
+    const known = projectMemberships.length === 0 ? /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stored) : projectMemberships.some((m) => m.projectId === stored);
+    if (stored === 'none' || known) setProjectFilter(stored);
     setFilterReady(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -614,6 +619,12 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       else window.sessionStorage.removeItem(CHAT_PROJECT_FILTER_KEY);
     } catch { /* storage unavailable — the choice just does not outlive the page */ }
   }, []);
+
+  // story 4847 — a chosen project that is not (or no longer) one of the person's: back to «all» (e.g. the filter was kept before the project list was known)
+  useEffect(() => {
+    if (!projectFilter || projectFilter === 'none' || projectMemberships.length === 0) return;
+    if (!projectMemberships.some((m) => m.projectId === projectFilter)) handleProjectFilterChange('');
+  }, [projectFilter, projectMemberships, handleProjectFilterChange]);
 
   // story #3831 — compose 값은 목록이 로드된 뒤 딱 한 번만 소비한다(consumedComposeRef) —
   // 안 그러면 목록이 갱신될 때마다(새 메시지 SSE 등) 다시 리다이렉트/모달을 트리거한다.
