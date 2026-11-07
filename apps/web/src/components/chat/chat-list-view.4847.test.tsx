@@ -205,6 +205,29 @@ describe('ChatListView — 프로젝트로 걸러 보기(story 4847 AC1)', () =>
   });
 });
 
+describe('ChatListView — 질문이 바뀌는 사이의 경합(story 4847)', () => {
+  it('⭐A를 묻는 중에 B로 걸러 보기를 바꾸면, 뒤늦게 온 A의 성공 응답이 B 목록을 덮지 않는다', async () => {
+    window.sessionStorage.setItem(CHAT_PROJECT_FILTER_KEY, 'proj-a');
+    let releaseA: (() => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('project_id=proj-a')) {
+        await new Promise<void>((resolve) => { releaseA = resolve; });
+        return { ok: true, json: async () => ({ data: [A1], total: 1 }) };
+      }
+      if (url.includes('project_id=proj-b')) return { ok: true, json: async () => ({ data: [B1], total: 1 }) };
+      return { ok: false, status: 404, json: async () => null };
+    }));
+    await mount();
+    expect(releaseA).not.toBeUndefined();
+    await chooseFilter('proj-b');
+    expect(container.textContent).toContain('비 방');
+    await act(async () => { releaseA!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('비 방');
+    expect(container.textContent).not.toContain('에이 방');
+  });
+});
+
 describe('ChatListView — 관리자의 에이전트 탭 · 지시 한 줄 · 새 방(story 4847)', () => {
   it('에이전트 탭은 지금 프로젝트가 있을 때만 있다(그 프로젝트의 에이전트 방을 읽는 탭이라)', async () => {
     stubOrgServer();
