@@ -15,15 +15,19 @@ const FASTAPI_URL = () => fastapiBaseUrl();
 // chat-attach: 파일을 서버사이드에서 GCS로 업로드하고 메시지 첨부 메타({url,name,content_type,size})를 돌려준다.
 // 업로드된 GCS object URL은 리로드/다른 인스턴스에서도 유효(multi-instance safe) — BE 계약대로
 // 이후 POST /api/v2/conversations/{id}/messages 의 attachments 에 그대로 실어 보낸다.
-/** `org/{org}/chat/{conversation}/` or `org/{org}/project/{project}/chat/{conversation}/` — this organization's and this room's, nothing else, no dot segments */
-function isThisRoomsPrefix(prefix: string, orgId: string, conversationId: string): boolean {
-  if (!prefix.endsWith('/') || prefix.includes('//') || prefix.includes('\\')) return false;
-  const parts = prefix.split('/').filter((p) => p.length > 0);
-  if (parts.some((p) => p === '.' || p === '..')) return false; // a dot segment stands for another place
-  const roomOnly = parts.length === 4 && parts[0] === 'org' && parts[2] === 'chat';
-  const inProject = parts.length === 6 && parts[0] === 'org' && parts[2] === 'project' && parts[4] === 'chat';
-  if (!roomOnly && !inProject) return false;
-  return parts[1] === orgId && parts[parts.length - 1] === conversationId;
+/**
+ * `org/{org}/chat/{conversation}/` (a room with no project) or `org/{org}/project/{project}/chat/{conversation}/` (a room with that project) — this organization's, this room's,
+ * and for a project room that room's own project; nothing else. Every segment is non-empty (no leading slash, no `//`), none is `.` or `..`, no backslash: the prefix becomes a
+ * storage object path and must not name another place.
+ */
+function isThisRoomsPrefix(prefix: string, orgId: string, conversationId: string, projectId: string | null | undefined): boolean {
+  if (!prefix.endsWith('/') || prefix.includes('\\')) return false;
+  const parts = prefix.slice(0, -1).split('/');
+  if (parts.some((p) => p.length === 0 || p === '.' || p === '..')) return false;
+  if (parts[0] !== 'org' || parts[1] !== orgId || parts[parts.length - 1] !== conversationId) return false;
+  if (parts.length === 4) return parts[2] === 'chat' && !projectId; // a room with no project
+  if (parts.length === 6) return parts[2] === 'project' && parts[4] === 'chat' && Boolean(projectId) && parts[3] === projectId; // a room with a project: that project
+  return false;
 }
 
 export async function POST(
@@ -63,7 +67,7 @@ export async function POST(
   // upload alike). Until it does, a room with a project keeps the path built here and a room with none is refused with the same code the server uses — a file must not be left in storage
   // unregistered, to be refused only at the send. The prefix is taken only when it is this organization's and this room's (the room was just read by this person: nothing else may name a path).
   const prefix = conv?.attachment_path_prefix;
-  const roomPrefix = typeof prefix === 'string' && isThisRoomsPrefix(prefix, orgId, conversation_id) ? prefix : null;
+  const roomPrefix = typeof prefix === 'string' && isThisRoomsPrefix(prefix, orgId, conversation_id, projectId) ? prefix : null;
   if (!projectId && !roomPrefix) {
     return NextResponse.json(
       { data: null, error: { code: ATTACHMENT_NEEDS_PROJECT, message: 'a room with no project cannot take a new attachment' }, meta: null },

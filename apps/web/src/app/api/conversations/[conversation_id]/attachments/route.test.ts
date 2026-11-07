@@ -104,5 +104,25 @@ describe('POST /api/conversations/{id}/attachments — a prefix is taken only wh
   bad('a dot segment standing for the project', `org/${ORG}/project/../chat/${CONV}/`);
   bad('a single-dot segment standing for the project', `org/${ORG}/project/./chat/${CONV}/`);
   bad('a backslash inside the project segment', `org/${ORG}/project/p\\1/chat/${CONV}/`);
+  bad('a leading slash (it would leave the storage root)', `/org/${ORG}/chat/${CONV}/`);
+  bad('another project of the same organization (the room\'s own is proj-1)', `org/${ORG}/project/proj-2/chat/${CONV}/`);
+  bad('the project segment spelled «chat»', `org/${ORG}/project/chat/chat/${CONV}/`);
+  bad('the project segment with a trailing space', `org/${ORG}/project/proj-1 /chat/${CONV}/`);
+  bad('the project segment percent-encoded', `org/${ORG}/project/%2e%2e/chat/${CONV}/`);
   bad('not a string', 42 as unknown as string);
 });
+
+describe('POST /api/conversations/{id}/attachments — the prefix\'s shape must fit the room\'s own project', () => {
+  it('⭐a room with a project is not given the project-less shape (it keeps its own path)', async () => {
+    room({ project_id: PROJ, org_id: ORG, attachment_path_prefix: `org/${ORG}/chat/${CONV}/` });
+    expect((await call()).status).toBe(200);
+    expect(putObject.mock.calls[0]![1]).toMatch(new RegExp(`^org/${ORG}/project/${PROJ}/chat/${CONV}/`));
+  });
+
+  it('⭐a room with no project is not given a project shape (refused)', async () => {
+    room({ project_id: null, org_id: ORG, attachment_path_prefix: `org/${ORG}/project/${PROJ}/chat/${CONV}/` });
+    expect((await call()).status).toBe(400);
+    expect(putObject).not.toHaveBeenCalled();
+  });
+});
+
