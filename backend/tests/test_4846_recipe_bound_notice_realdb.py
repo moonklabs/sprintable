@@ -199,6 +199,50 @@ async def test_which_bindings_count_for_a_notice_about_a_work_item_of_a_project(
         assert got is want, (binding, grant, got)
 
 
+async def test_a_caller_who_names_the_room_gets_the_ordinary_rule_not_the_binding():
+    """the lens find: an organization-wide binding of an agent whose project was revoked, a work item of that project, and `conversation_id` = a group room of
+    the project the agent is still a participant of → the notice went into that room (201). The mark is built only for the room the publish chooses itself;
+    a named room takes the ordinary rule: the agent needs the project there (403), and with the project it goes in."""
+    from sqlalchemy import select
+
+    from app.models.conversation import Conversation, ConversationParticipant
+    from app.models.project_access import ProjectAccess
+    from app.routers.events import EventPublishRequest, publish_registry_event
+
+    Session = await _realdb_session_sync()
+    w = await _world(Session, binding="org", grant=True)
+    async with Session() as s:                                                   # a group room of the project the agent is a participant of
+        group = Conversation(id=uuid.uuid4(), org_id=w["org_id"], project_id=w["project_id"], type="group", created_by=w["owner_member_id"])
+        s.add(group)
+        await s.flush()
+        for member in (w["owner_member_id"], w["agent_id"]):
+            s.add(ConversationParticipant(conversation_id=group.id, member_id=member))
+        stories = [await _seed_story(s, w["org_id"], w["project_id"], title=f"S{i}") for i in range(3)]
+        await s.commit()
+
+    async def publish_into(story_id, conversation_id):
+        async with Session() as s:
+            await publish_registry_event(
+                EventPublishRequest(
+                    definition_key=_KEY, conversation_id=conversation_id,
+                    payload={"stage": "draft", "work_item_type": "story", "work_item_id": str(story_id)},
+                ),
+                BackgroundTasks(), _fake_request(), db=s, auth=_auth(w["agent_id"], w["org_id"]), org_id=w["org_id"],
+            )
+            await s.commit()
+
+    await publish_into(stories[0], group.id)                                     # with the project: the named room goes in as it always did
+    async with Session() as s:                                                   # the project is revoked
+        from sqlalchemy import delete
+
+        await s.execute(delete(ProjectAccess).where(ProjectAccess.member_id == w["agent_id"]))
+        await s.commit()
+    with pytest.raises(HTTPException) as e:                                      # a named room takes the ordinary rule, the binding does not open it
+        await publish_into(stories[1], group.id)
+    assert e.value.status_code == 403 and e.value.detail == "Not a participant"
+    await publish_into(stories[2], None)                                         # no room named: the publish's own room still takes the binding's notice
+
+
 async def test_a_plain_context_with_the_same_claims_or_a_mark_for_another_project_does_not_pass():
     from app.dependencies.auth import AuthContext, RecipeBoundAuth
 

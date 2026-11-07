@@ -3274,9 +3274,14 @@ async def _publish_registry_event_core(
         event_context={"event_key": definition.key, "payload": payload, "refs": {**refs, **(routing_context or {})}},
     )
     send_auth = auth
-    if sender.type == "agent" and not _is_system_publisher and not isinstance(auth, ServerIssuedAuth) and project_id is not None:
+    if (
+        sender.type == "agent" and not _is_system_publisher and not isinstance(auth, ServerIssuedAuth) and project_id is not None
+        and conversation_id is None
+    ):
         # story #4846 (AC12): an agent writes in a room of a project only while it has the project — except the notice of a recipe it is BOUND to, whose
-        # ground is the binding (a setting the user gave the agent): the mark is built here, after the check, and nowhere else
+        # ground is the binding (a setting the user gave the agent): the mark is built here, after the check, and nowhere else. Only for the room the publish
+        # CHOOSES ITSELF (the event's own conversation): a caller who names a room (`conversation_id`) picks where the notice goes, so that room takes the
+        # ordinary rule (the agent needs the project there) — otherwise the binding would open every room of the project the agent was removed from
         from app.dependencies.auth import RecipeBoundAuth
         from app.services.recipe_role_bindings import agent_bound_to_recipe
 
