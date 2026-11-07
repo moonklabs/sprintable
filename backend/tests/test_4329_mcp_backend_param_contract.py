@@ -30,6 +30,8 @@ INPUT_OVERRIDES: dict[str, dict[str, typing.Any]] = {
     # attachments는 {content_base64, name, content_type} 구조 검증 + 별도 업로드 경로 — 대조 대상(본문 필드)과 무관
     "sprintable_update_doc": {"attachments": None},
     "sprintable_send_chat_message": {"attachments": None},
+    # story #4846: a project filter and `only_without_project` are two ways to ask — the probe fills every field, so it is told to ask the first way (the second is a scenario below)
+    "sprintable_list_conversations": {"only_without_project": False},
     # story #4581: media_manifest is a list of objects the server validates (site_posts.py) — an empty list stands for it · lang has min_length 2
     "sprintable_create_site_post_draft": {"media_manifest": [], "lang": "ko"},
     # image_base64 · image_path 중 정확히 하나
@@ -49,6 +51,8 @@ INPUT_OVERRIDES: dict[str, dict[str, typing.Any]] = {
 # 입력에 따라 다른 요청을 내는 도구의 추가 갈래(도구 이름 → 입력 덮어쓰기 목록).
 EXTRA_SCENARIOS: dict[str, list[dict[str, typing.Any]]] = {
     "sprintable_create_spec_pin": [{"anchor_type": "node", "node_id": U, "anchor_x": None, "anchor_y": None}],
+    # story #4846: the other way to ask — the rooms without a project (`project_id=none` on the wire)
+    "sprintable_list_conversations": [{"project_id": None, "only_without_project": True, "include_agent_conversations": False}],
 }
 
 # 라우트가 `Request`를 직접 받아 본문을 손으로 검증하는 자리 → 그 모델. 코드 대조 근거는 아래 테스트가 매번 확인한다

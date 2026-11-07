@@ -66,7 +66,6 @@ _KNOWN = {
     "app/routers/auth_native_bootstrap.py::native_bootstrap_challenge",
     "app/routers/conversations.py::add_participant",
     "app/routers/conversations.py::get_conversation",
-    "app/routers/conversations.py::list_conversations",
     "app/routers/conversations.py::list_conversations_by_work_item",
     "app/routers/conversations.py::mark_conversation_read",
     "app/routers/conversations.py::release_circuit_breaker_endpoint",

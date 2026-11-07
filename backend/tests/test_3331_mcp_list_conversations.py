@@ -51,7 +51,9 @@ async def test_list_conversations_calls_existing_rest_endpoint_with_resolved_pro
         mock_client.get_full = AsyncMock(side_effect=fake_get_full)
         out = await list_conversations(ListConversationsInput())
 
-    assert calls == [("/api/v2/conversations", {"project_id": "proj-1"})]
+    # story #4846: no project argument = every room I am in (the organization's list), not «the default project's»; no «ambiguous» error either
+    assert calls == [("/api/v2/conversations", {})]
+    mock_client.require_project_id.assert_not_called()
     parsed = json.loads(out[0].text)
     # AC1 — 목록 항목이 id·제목·참여자·마지막 메시지 시각·미읽음 수를 담고 있다(REST가 이미
     # 주는 값을 그대로 통과·지어내지 않음).
@@ -81,6 +83,7 @@ async def test_list_conversations_include_agent_conversations_flag_passed_as_str
         mock_client.get_full = AsyncMock(side_effect=fake_get_full)
         await list_conversations(ListConversationsInput(include_agent_conversations=True))
 
+    # the admin's view of the agents' rooms is of ONE project: the key's project (there is no project argument here)
     assert calls[0][1] == {"project_id": "proj-1", "include_agent_conversations": "true"}
 
 
@@ -121,20 +124,14 @@ async def test_list_conversations_limit_offset_stringified_and_passed():
         mock_client.get_full = AsyncMock(side_effect=fake_get_full)
         await list_conversations(ListConversationsInput(limit=10, offset=20))
 
-    assert calls[0][1] == {"project_id": "proj-1", "limit": "10", "offset": "20"}
+    assert calls[0][1] == {"limit": "10", "offset": "20"}
 
 
 @pytest.mark.anyio
-async def test_list_conversations_project_id_override_reaches_query_string():
-    """⭐PO 변경요청①(2026-09-02, PR#3712 리뷰) — API가 project_id 필수(422·PO 실측)라 이
-    도구는 «내가 참여한 방 전부»가 아니라 «기본 프로젝트 안의 내 방»이다(다중 프로젝트
-    org에선 조용히 좁아짐). per-call project_id override(SprintableInput 상속 필드,
-    E-MCP-OPT ff6cb90d 관례 — server.py wrapper가 kwargs["project_id"]를 contextvar로
-    태운다)가 실제로 쿼리스트링에 반영되는지 실증. client를 통째로 mock하면 진짜
-    require_project_id()의 override-우선 로직을 타지 않으므로, 여기선 get_full만 patch하고
-    나머지는 실 client 싱글턴을 그대로 쓴다."""
-    from sprintable_mcp.api_client import reset_project_override, set_project_override
-    from sprintable_mcp.tools import chat as chat_mod
+async def test_list_conversations_project_id_argument_filters_and_only_without_project_asks_for_none():
+    """story #4846 (AC5): `project_id` (the base-class field) is now a FILTER — given, the query carries it; `only_without_project` asks for the rooms
+    that have no project (`none`); the two together are refused."""
+    from sprintable_mcp.tools.chat import ListConversationsInput, list_conversations
 
     calls: list[tuple[str, dict | None]] = []
 
@@ -142,17 +139,58 @@ async def test_list_conversations_project_id_override_reaches_query_string():
         calls.append((path, params))
         return _LIST_RESP
 
-    original_project_id = chat_mod.client._project_id
-    chat_mod.client._project_id = "default-project"
-    tok = set_project_override("override-project")
-    try:
-        with patch.object(chat_mod.client, "get_full", new=AsyncMock(side_effect=fake_get_full)):
-            await chat_mod.list_conversations(chat_mod.ListConversationsInput())
-    finally:
-        reset_project_override(tok)
-        chat_mod.client._project_id = original_project_id
+    with patch("sprintable_mcp.tools.chat.client") as mock_client:
+        mock_client.get_full = AsyncMock(side_effect=fake_get_full)
+        await list_conversations(ListConversationsInput(project_id="proj-9"))
+        await list_conversations(ListConversationsInput(only_without_project=True))
+        both = await list_conversations(ListConversationsInput(project_id="proj-9", only_without_project=True))
 
-    assert calls[0][1]["project_id"] == "override-project"
+    assert calls[0][1] == {"project_id": "proj-9"}
+    assert calls[1][1] == {"project_id": "none"}
+    assert len(calls) == 2 and "error" in both[0].text.lower()
+
+
+@pytest.mark.anyio
+async def test_the_admins_agent_view_keeps_the_none_filter_and_the_explicit_project():
+    """the admin's view of the agents' rooms: `only_without_project` asks for the ones without a project (`none` is not replaced by the key's default);
+    an explicit project is kept; with neither, the key's default project."""
+    from sprintable_mcp.tools.chat import ListConversationsInput, list_conversations
+
+    calls: list[dict | None] = []
+
+    async def fake_get_full(path, params=None):
+        calls.append(params)
+        return _LIST_RESP
+
+    with patch("sprintable_mcp.tools.chat.client") as mock_client:
+        mock_client.require_project_id.return_value = "default-proj"
+        mock_client.get_full = AsyncMock(side_effect=fake_get_full)
+        await list_conversations(ListConversationsInput(include_agent_conversations=True, only_without_project=True))
+        await list_conversations(ListConversationsInput(include_agent_conversations=True, project_id="proj-9"))
+        await list_conversations(ListConversationsInput(include_agent_conversations=True))
+
+    assert calls == [
+        {"project_id": "none", "include_agent_conversations": "true"},
+        {"project_id": "proj-9", "include_agent_conversations": "true"},
+        {"project_id": "default-proj", "include_agent_conversations": "true"},
+    ]
+
+
+@pytest.mark.anyio
+async def test_list_conversations_with_several_projects_is_not_an_error():
+    """AC5: a key that reaches several projects (no default) lists the organization's rooms — `require_project_id` is never asked."""
+    from sprintable_mcp.api_client import SprintableApiError
+    from sprintable_mcp.tools.chat import ListConversationsInput, list_conversations
+
+    async def fake_get_full(path, params=None):
+        return _LIST_RESP
+
+    with patch("sprintable_mcp.tools.chat.client") as mock_client:
+        mock_client.require_project_id.side_effect = SprintableApiError(400, "여러 프로젝트에 접근 가능한 키입니다.")
+        mock_client.get_full = AsyncMock(side_effect=fake_get_full)
+        out = await list_conversations(ListConversationsInput())
+
+    assert "error" not in out[0].text.lower()
 
 
 @pytest.mark.anyio
@@ -163,31 +201,53 @@ async def test_list_conversations_error_surfaces():
 
     with patch("sprintable_mcp.tools.chat.client") as mock_client:
         mock_client.require_project_id.side_effect = Exception("여러 프로젝트에 접근 가능한 키입니다.")
-        out = await list_conversations(ListConversationsInput())
+        out = await list_conversations(ListConversationsInput(include_agent_conversations=True))
 
     assert "error" in out[0].text.lower()
 
 
 @pytest.mark.anyio
 async def test_create_conversation_unaffected_still_posts_new_room_every_call():
-    """회귀 0 — create_conversation은 여전히 «만드는» 도구다(dedup 없음, 문서 문구만 갱신했지
-    동작은 무변경). 이 PR이 create_conversation의 실제 생성 동작을 바꾸지 않았음을 고정."""
+    """회귀 0 — create_conversation은 여전히 «만드는» 도구다(dedup 없음)."""
     from sprintable_mcp.tools.chat import CreateConversationInput, create_conversation
 
-    calls: list[str] = []
+    calls: list[tuple[str, dict]] = []
 
     async def fake_post(path, json=None):
-        calls.append(path)
+        calls.append((path, json))
         return {"id": "new-conv", "type": "group", "title": None, "existing": False}
 
     with patch("sprintable_mcp.tools.chat.client") as mock_client:
-        mock_client.require_project_id.return_value = "proj-1"
+        mock_client.project_id = "proj-1"
         mock_client.post = AsyncMock(side_effect=fake_post)
         out = await create_conversation(CreateConversationInput(participant_ids=["p1", "p2"]))
 
-    assert calls == ["/api/v2/conversations"]
+    assert [c[0] for c in calls] == ["/api/v2/conversations"]
+    assert calls[0][1]["project_id"] == "proj-1"          # the key's default project, as before, when it has one
     parsed = json.loads(out[0].text)
     assert parsed["conversation_id"] == "new-conv"
+
+
+@pytest.mark.anyio
+async def test_create_conversation_project_is_optional_and_never_an_ambiguity_error():
+    """story #4846 (AC5): the project given → that one; none given and the key has no single default → the room has NO project (no «여러 프로젝트» error)."""
+    from sprintable_mcp.tools.chat import CreateConversationInput, create_conversation
+
+    bodies: list[dict] = []
+
+    async def fake_post(path, json=None):
+        bodies.append(json)
+        return {"id": "new-conv"}
+
+    with patch("sprintable_mcp.tools.chat.client") as mock_client:
+        mock_client.project_id = None
+        mock_client.post = AsyncMock(side_effect=fake_post)
+        await create_conversation(CreateConversationInput(participant_ids=["p1"], project_id="proj-7"))
+        out = await create_conversation(CreateConversationInput(participant_ids=["p1"]))
+
+    assert bodies[0]["project_id"] == "proj-7"
+    assert "project_id" not in bodies[1] and "error" not in out[0].text.lower()
+    mock_client.require_project_id.assert_not_called()
 
 
 def test_list_conversations_registered_in_tool_registry():
@@ -198,6 +258,7 @@ def test_list_conversations_registered_in_tool_registry():
     assert len(matches) == 1, "sprintable_list_conversations가 TOOLS에 정확히 1건 등재돼야 함"
     _name, description, input_model, fn = matches[0]
     assert "내가 참여한 방 목록" in description
+    assert "프로젝트 없는 방" in description and "only_without_project" in description
     assert "백스톱" in description
     from sprintable_mcp.tools.chat import ListConversationsInput, list_conversations
     assert input_model is ListConversationsInput
