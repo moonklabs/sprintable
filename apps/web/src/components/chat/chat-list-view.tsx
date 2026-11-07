@@ -503,9 +503,9 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       if (stale()) return true; // 더 새로운 물음이 있음 — 이 응답은 현 화면 안 덮음. (실패가 아니다: 폴링은 `true`면 간격을 넓히지 않는다 — 밀려난 물음을 실패로 세면 안 된다)
       if (!res.ok) {
         // story 4847 — a server that does not yet answer the organization-wide read (it requires a project): ask for the current project's rooms instead
-        if (res.status === 422 && !projectOnly) {
-          if (projectIdRef.current) { fallingBack = true; setProjectOnly(true); } else setNeedsProject(true);
-          return false;
+        if (res.status === 422) {
+          if (!projectIdRef.current) { setNeedsProject(true); return false; } // nothing to ask for: the «pick a project» line (also when the project was lost while in the project-only list)
+          if (!projectOnly) { fallingBack = true; setProjectOnly(true); return false; }
         }
         if (!append) setLoadError(true);
         return false;
@@ -618,7 +618,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
 
   // an older server, and a project is picked after all: the project-only list it can answer
   useEffect(() => {
-    if (needsProject && projectId) { setNeedsProject(false); setProjectOnly(true); }
+    if (needsProject && projectId) { setNeedsProject(false); setProjectOnly(true); setLoading(true); } // loading in the same step: no moment of «0 rooms» for the instruction line to land on
   }, [needsProject, projectId]);
 
   const handleProjectFilterChange = useCallback((next: string) => {
@@ -640,7 +640,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // 대화가 있으면 updated_at 최신 1건(가장 최근 대화)으로 보낸다 — API 응답 배열 순서에
   // 기대지 않고 값으로 직접 고른다.
   useEffect(() => {
-    if (!composeParam || loading || consumedComposeRef.current) return;
+    if (!composeParam || loading || needsProject || consumedComposeRef.current) return; // with the «pick a project» line up there is no list to route to yet
     consumedComposeRef.current = true;
     // story 4847 — the instruction line came from the current project's «오늘»: it goes to that project's latest room (the list now holds every project's)
     const pool = projectId ? conversations.filter((c) => c.project_id === undefined || c.project_id === projectId) : conversations;
@@ -651,7 +651,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     } else {
       setShowModal(true);
     }
-  }, [composeParam, loading, conversations, projectId, router, setShowModal, flatHref]);
+  }, [composeParam, loading, needsProject, conversations, projectId, router, setShowModal, flatHref]);
 
   // perf(17960f86): agent 탭("전체/에이전트", include_agent_conversations=true)은 비기본 탭이라
   // mount 시 eager fetch(측정 ~663ms 낭비) 하지 않고, 사용자가 탭을 처음 열 때 1회만 lazy 로드.

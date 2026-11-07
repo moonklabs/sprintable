@@ -584,4 +584,30 @@ describe('ChatListView — 옛 서버(422)에서는 지금 화면과 같다 (sto
     expect(container.textContent).toContain('회의방');
     expect(listCalls(fetchMock).at(-1)).toBe('/api/conversations?limit=30&offset=0&project_id=proj-a');
   });
+
+  it('⭐옛 서버의 프로젝트 단위 목록을 보다가 현재 프로젝트를 잃으면 오류가 아니라 «프로젝트를 고르세요» 한 줄이다', async () => {
+    oldServer(); ctx();
+    await mount({ projectId: 'proj-a' });
+    expect(container.textContent).toContain('회의방');
+    ctx({ projectId: undefined });
+    await act(async () => { root.render(wrap(<ChatListView projectId={null} currentTeamMemberId="me-1" />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="chats-no-project"]')?.textContent).toBe(koMessages.chats.pickProject);
+    expect(container.textContent).not.toContain(koMessages.chats.conversationsLoadFailed);
+  });
+
+  it('⭐현재 프로젝트가 없는 동안엔 지시 한 줄(?compose=)이 소비되지 않는다 — 새 대화 모달도 안 열리고, 프로젝트가 생기면 그 목록의 가장 최근 방으로 간다', async () => {
+    searchParamsValueRef.current = 'compose=' + encodeURIComponent('지시');
+    oldServer(); ctx({ projectId: undefined });
+    const onOpenChange = vi.fn();
+    await mount({ projectId: null, open: false, onOpenChange });
+    expect(container.querySelector('[data-testid="chats-no-project"]')).not.toBeNull();
+    expect(onOpenChange).not.toHaveBeenCalledWith(true);
+    expect(replaceMock).not.toHaveBeenCalled();
+    ctx();
+    await act(async () => { root.render(wrap(<ChatListView projectId="proj-a" currentTeamMemberId="me-1" open={false} onOpenChange={onOpenChange} />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(replaceMock).toHaveBeenCalledWith('/chats/conv-dm?compose=' + encodeURIComponent('지시') + '&p=proj-a');
+  });
 });
+
