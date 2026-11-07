@@ -64,6 +64,36 @@ def decode_json_attachment(content_base64: str, *, max_size: int = MAX_JSON_ATTA
     return data
 
 
+# story 4856 — the declared `content_type` is what the CALLER says; an agent that does not know a picture's type passes a generic one («application/octet-stream»), a near miss
+# («image/jpg») or a wrong one, and the server used to store and report it as given. The chat bubble draws a picture only for `image/*` (a thumbnail, and a larger view on a click),
+# so such a picture became a file card, and its size was never measured. The server knows better than the caller: it reads the first bytes.
+_IMAGE_MAGIC: tuple[tuple[str, bytes, int, bytes | None], ...] = (
+    # (content type, signature, offset, a second signature that must follow at offset 8 — only for WebP's RIFF container)
+    ("image/png", b"\x89PNG\r\n\x1a\n", 0, None),
+    ("image/jpeg", b"\xff\xd8\xff", 0, None),
+    ("image/gif", b"GIF87a", 0, None),
+    ("image/gif", b"GIF89a", 0, None),
+    ("image/webp", b"RIFF", 0, b"WEBP"),
+)
+
+
+def sniff_image_content_type(data: bytes) -> str | None:
+    """the picture type the first bytes say (PNG · JPEG · GIF · WebP), or None when they are not one of those. SVG is not sniffed on purpose (it can carry script)."""
+    for content_type, signature, offset, second in _IMAGE_MAGIC:
+        if data[offset:offset + len(signature)] != signature:
+            continue
+        if second is not None and data[8:8 + len(second)] != second:
+            continue
+        return content_type
+    return None
+
+
+def resolve_attachment_content_type(declared: str, data: bytes) -> str:
+    """the content type to store and report: when the bytes are a picture, the type the bytes say (the caller's value may be generic, a near miss or wrong); otherwise the
+    caller's value as declared (documents, text, … are not judged here)."""
+    return sniff_image_content_type(data) or declared
+
+
 def build_mcp_object_path(
     *, org_id: uuid.UUID, project_id: uuid.UUID, kind: str, resource_id: uuid.UUID, safe_name: str,
 ) -> str:

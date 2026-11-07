@@ -3686,21 +3686,23 @@ async def upload_conversation_attachment(
         safe_name=safe_name,
     )
 
+    # story 4856 — the bytes decide what a picture is (the caller may have declared a generic or wrong type): store, measure and report the resolved type.
+    content_type = mcp_attachment_upload.resolve_attachment_content_type(body.content_type, data)
     uploaded = await get_storage_provider().put_object(
-        DEFAULT_CONTAINER, object_path, data, content_type=body.content_type,
+        DEFAULT_CONTAINER, object_path, data, content_type=content_type,
     )
     if not uploaded:
         raise HTTPException(status_code=502, detail="upload failed")
 
     # story #2055 AC1: 바이트가 이미 메모리에 있으므로 재다운로드 없이 직접 측정.
     from app.services.image_dimensions import measure_image_dimensions_from_bytes
-    dims = measure_image_dimensions_from_bytes(body.content_type, data)
+    dims = measure_image_dimensions_from_bytes(content_type, data)
     width, height = dims if dims is not None else (None, None)
 
     return MessageAttachment(
         url=object_path,
         name=body.name,
-        content_type=body.content_type,
+        content_type=content_type,
         size=len(data),
         width=width,
         height=height,
