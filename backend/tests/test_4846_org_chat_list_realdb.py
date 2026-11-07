@@ -261,8 +261,14 @@ async def test_a_project_admin_who_is_an_ordinary_organization_member_cannot_loo
             app.dependency_overrides.clear()
         assert refused.status_code == 403, refused.text
         assert own.status_code == 403, own.text          # nor the project they administer: the same room is a 403 to read by id
-        assert (await _list(Session, w, "org_owner", project_id="none", include_agent_conversations="true")).status_code == 200
-        assert (await _list(Session, w, "org_owner", project_id=str(w.p1), include_agent_conversations="true")).status_code == 200
+        none_view = await _list(Session, w, "org_owner", project_id="none", include_agent_conversations="true")
+        p1_view = await _list(Session, w, "org_owner", project_id=str(w.p1), include_agent_conversations="true")
+        assert none_view.status_code == 200 and _ids(none_view) == [str(w.n_agents)], none_view.text          # the owner sees the room, not an empty answer
+        assert p1_view.status_code == 200 and str(w.r_agents) in _ids(p1_view), p1_view.text
+        # and what the owner is shown the owner can read: the same room by id
+        from tests.test_4846_org_chat_rooms_realdb import _status
+
+        assert await _status(Session, w, "org_owner", w.n_agents) == 200 and await _status(Session, w, "org_owner", w.r_agents) == 200
     finally:
         await engine.dispose()
 

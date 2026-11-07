@@ -211,7 +211,7 @@ class ListConversationsInput(SprintableInput):
     발견 못 함). `GET /api/v2/conversations`(agent 키 호환 확認 完 — 이 라우터의 다른
     엔드포인트와 동일 `get_current_user` 의존성)를 그대로 노출 — 새 REST·새 인증 0.
 
-    ⚠️이 REST가 받는 파라미터는 project_id(필수)·include_agent_conversations·limit·offset
+    ⚠️이 REST가 받는 파라미터는 project_id(선택 — 거르기만)·include_agent_conversations·limit·offset
     뿐이다(conversations.py::list_conversations 실측) — `since`나 참여자 필터는 API 자체에
     없어 지어내지 않는다(story 처방 2/3은 이 PR 스코프 밖, API 확장이 별도 필요).
 
