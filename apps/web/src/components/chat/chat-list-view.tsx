@@ -446,6 +446,8 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const [filterReady, setFilterReady] = useState(false);
   // story 4847 — an older server answers the organization-wide read with 422 (it still wants a project): fall back to that project's own list (and the old «다른 프로젝트» block)
   const [projectOnly, setProjectOnly] = useState(false);
+  // …and with no current project an older server has nothing to list: the screen then says so in one line, as it did before (the layout used to stop there)
+  const [needsProject, setNeedsProject] = useState(false);
   const [internalShowModal, setInternalShowModal] = useState(false);
   const showModal = open !== undefined ? open : internalShowModal;
   const setShowModal = onOpenChange ?? setInternalShowModal;
@@ -491,6 +493,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     // story 4847: 비교 대상은 «무엇을 물었나»가 아니라 «몇 번째 물음인가»(같은 것을 두 번 물으면 같은 질문이라 못 가른다).
     const seq = append ? listSeqRef.current : ++listSeqRef.current;
     const stale = () => seq !== listSeqRef.current;
+    let fallingBack = false; // the project-only list is being asked for next: until it answers the screen is still «loading», not «0 rooms»
     if (!append) setLoadError(false);
     const scopeQuery = scopeProjectId ? `&project_id=${scopeProjectId}` : projectFilter ? `&project_id=${projectFilter}` : '';
     try {
@@ -500,7 +503,10 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       if (stale()) return true; // 더 새로운 물음이 있음 — 이 응답은 현 화면 안 덮음. (실패가 아니다: 폴링은 `true`면 간격을 넓히지 않는다 — 밀려난 물음을 실패로 세면 안 된다)
       if (!res.ok) {
         // story 4847 — a server that does not yet answer the organization-wide read (it requires a project): ask for the current project's rooms instead
-        if (res.status === 422 && !projectOnly && projectIdRef.current) { setProjectOnly(true); return false; }
+        if (res.status === 422 && !projectOnly) {
+          if (projectIdRef.current) { fallingBack = true; setProjectOnly(true); } else setNeedsProject(true);
+          return false;
+        }
         if (!append) setLoadError(true);
         return false;
       }
@@ -518,7 +524,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       // 페드루 그라운딩(2026-09-10 12:34Z) — 위 loadError와 같은 축: A의 늦은 finally가
       // B로 전환된 뒤 B의 loading을 조용히 꺼버리면(응답 도착 前인데도 "로딩 아님"으로
       // 보임) B가 아직 안 왔는데도 순간 잘못된 화면(0건 등)이 뜬다.
-      if (!stale()) { setLoading(false); setLoadingMore(false); }
+      if (!stale()) { if (!fallingBack) setLoading(false); setLoadingMore(false); }
     }
   }, [scopeProjectId, projectFilter, projectOnly]);
 
@@ -609,6 +615,11 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     setFilterReady(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // an older server, and a project is picked after all: the project-only list it can answer
+  useEffect(() => {
+    if (needsProject && projectId) { setNeedsProject(false); setProjectOnly(true); }
+  }, [needsProject, projectId]);
 
   const handleProjectFilterChange = useCallback((next: string) => {
     setProjectFilter(next);
@@ -960,6 +971,14 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       )}
     </div>
   );
+
+  if (needsProject) {
+    return (
+      <div className="flex h-64 items-center justify-center px-6 text-center" data-testid="chats-no-project">
+        <p className="text-sm text-muted-foreground">{t('pickProject')}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col">

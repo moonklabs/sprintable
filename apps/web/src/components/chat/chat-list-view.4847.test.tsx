@@ -505,3 +505,83 @@ describe('ChatListView — 옛 서버(조직 전체를 못 묻는 서버)의 대
     expect(filterSelect()).toBeNull(); // the project-only list has nothing to filter
   });
 });
+
+// PO's merge condition (4847): on an older server (the organization-wide read answers 422) the screen is what it was before this story — same rooms, same sections, same «다른 프로젝트» block and
+// its navigation, same agent tab, same «더 보기», same instruction-line route, and with no current project the same one «pick a project» line.
+describe('ChatListView — 옛 서버(422)에서는 지금 화면과 같다 (story 4847 병합 조건)', () => {
+  const OLD_ROWS = [
+    { id: 'conv-dm', type: 'dm', title: null, latest_message: { content: '안녕', created_at: '2026-11-07T02:00:00Z' }, updated_at: '2026-11-07T02:00:00Z', unread_count: 1, participants: [{ member_id: 'me-1', name: '나', type: 'human' }, { member_id: 'a-bot', name: '점검봇', type: 'agent' }] },
+    { id: 'conv-group', type: 'group', title: '회의방', latest_message: null, updated_at: '2026-11-07T01:00:00Z', unread_count: 0, participants: [] },
+  ];
+  const OUTSIDE = { id: 'conv-x', type: 'group', title: '밖의 방', project_id: 'proj-b', project_name: '프로젝트 비', project_slug: 'b' };
+  function oldServer() {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/recent-outside-project')) return { ok: true, json: async () => ({ data: [OUTSIDE] }) };
+      if (url.startsWith('/api/conversations?')) {
+        const q = new URL(url, 'http://x').searchParams;
+        if (!q.has('project_id')) return { ok: false, status: 422, json: async () => ({ detail: 'project_id required' }) };
+        if (q.get('include_agent_conversations') === 'true') return { ok: true, json: async () => ({ data: [...OLD_ROWS, { id: 'conv-agent', type: 'group', title: '에이전트끼리', latest_message: null, updated_at: '2026-11-07T00:00:00Z', participants: [] }], total: 3 }) };
+        return { ok: true, json: async () => ({ data: OLD_ROWS, total: 2 }) };
+      }
+      return { ok: false, status: 404, json: async () => null };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+  const ctx = (extra: Record<string, unknown> = {}) => useDashboardContextMock.mockReturnValue({ projectMemberships: [A, B], role: 'member', projectId: 'proj-a', ...extra });
+
+  it('⭐같은 방 · 같은 구역 · 프로젝트 표시와 걸러 보기는 없다(옛 목록에는 없던 것) · 같은 «현재 프로젝트» 질문', async () => {
+    const fetchMock = oldServer(); ctx();
+    await mount({ projectId: 'proj-a' });
+    const params = (u: string) => Object.fromEntries(new URL(u, 'http://x').searchParams);
+    expect(listCalls(fetchMock).map(params)).toEqual([{ limit: '30', offset: '0' }, { limit: '30', offset: '0', project_id: 'proj-a' }]);
+    expect(container.textContent).toContain(koMessages.chats.dmSection);
+    expect(container.textContent).toContain(koMessages.chats.groupSection);
+    expect(container.textContent).toContain('점검봇');
+    expect(container.textContent).toContain('회의방');
+    expect(container.querySelectorAll('[data-testid="room-project"]')).toHaveLength(0);
+    expect(filterSelect()).toBeNull();
+  });
+
+  it('⭐«다른 프로젝트» 칸이 그대로 있고, 누르면 예전처럼 대상 프로젝트(p) · 원 프로젝트(from) · 이름(pn)을 실어 이동한다', async () => {
+    oldServer(); ctx();
+    await mount({ projectId: 'proj-a' });
+    expect(container.textContent).toContain(koMessages.chats.otherProjectsSection);
+    const row = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('밖의 방'))!;
+    await act(async () => { row.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const url = String(pushMock.mock.calls.at(-1)![0]);
+    expect(url).toContain('/chats/conv-x?');
+    expect(new URL(url, 'http://x').searchParams.get('p')).toBe('proj-b');
+    expect(new URL(url, 'http://x').searchParams.get('from')).toBe('proj-a');
+    expect(new URL(url, 'http://x').searchParams.get('pn')).toBe('프로젝트 비');
+  });
+
+  it('관리자의 에이전트 탭도 그대로: 같은 주소(project_id · include_agent_conversations)로 읽는다', async () => {
+    const fetchMock = oldServer(); ctx({ role: 'admin' });
+    await mount({ projectId: 'proj-a' });
+    const tab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === koMessages.chats.agentChatsTab)!;
+    await act(async () => { tab.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); tab.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    expect(listCalls(fetchMock).at(-1)).toBe('/api/conversations?project_id=proj-a&include_agent_conversations=true&limit=30&offset=0');
+  });
+
+  it('지시 한 줄은 그 목록의 가장 최근 방으로, 현재 프로젝트를 싣고 간다', async () => {
+    searchParamsValueRef.current = 'compose=' + encodeURIComponent('지시');
+    oldServer(); ctx();
+    await mount({ projectId: 'proj-a' });
+    expect(replaceMock).toHaveBeenCalledWith('/chats/conv-dm?compose=' + encodeURIComponent('지시') + '&p=proj-a');
+  });
+
+  it('⭐현재 프로젝트가 없으면 예전처럼 «프로젝트를 고르세요» 한 줄 — 오류도 목록도 아니다. 프로젝트를 고르면 그 프로젝트의 목록이 선다', async () => {
+    const fetchMock = oldServer(); ctx({ projectId: undefined });
+    await mount({ projectId: null });
+    expect(container.querySelector('[data-testid="chats-no-project"]')?.textContent).toBe(koMessages.chats.pickProject);
+    expect(container.textContent).not.toContain(koMessages.chats.conversationsLoadFailed);
+    expect(container.textContent).not.toContain('회의방');
+    ctx();
+    await act(async () => { root.render(wrap(<ChatListView projectId="proj-a" currentTeamMemberId="me-1" />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="chats-no-project"]')).toBeNull();
+    expect(container.textContent).toContain('회의방');
+    expect(listCalls(fetchMock).at(-1)).toBe('/api/conversations?limit=30&offset=0&project_id=proj-a');
+  });
+});

@@ -5318,6 +5318,7 @@
   },
   "chats": {
     "noProjectYet": "No project to show yet — create one from the switcher at the top (already have one? reload this page).",
+    "pickProject": "Pick a project from the switcher at the top to see its chats.",
     "agentsPaused": {
       "title": "Agent messages in this conversation are paused",
       "since": "started {time}",
