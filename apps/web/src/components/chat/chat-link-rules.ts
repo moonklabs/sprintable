@@ -22,16 +22,26 @@ export type PlainPart = { kind: 'text'; value: string } | { kind: 'url'; value: 
 // the characters of an address (RFC 3986): it stops at a space, a quote, an angle bracket and at any non-ASCII character — a Korean particle written right after an address is not part of it
 const URL_RE = /https?:\/\/[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]+/gi;
 
-/** an address followed by sentence punctuation or by the bracket that closes a phrase: the punctuation / the unbalanced closing bracket is not part of the address */
+/** the longest address that is linked; a longer run is left as text (a message can be 128 KiB and every room member's screen renders it) */
+export const MAX_LINKED_URL = 2048;
+
+/** an address followed by sentence punctuation or by the bracket that closes a phrase: the punctuation / the unbalanced closing bracket is not part of the address.
+ *  Linear: the brackets are counted once and the end is moved back (no slicing, no recount per character) — a run of `)` after an address used to cost time squared in its length. */
 function trimTail(url: string): string {
-  let u = url;
-  for (;;) {
-    const last = u[u.length - 1];
-    if (last !== undefined && '.,;:!?\''.includes(last)) { u = u.slice(0, -1); continue; }
-    const pair = last === ')' ? '(' : last === ']' ? '[' : null;
-    if (pair && u.split(last!).length > u.split(pair).length) { u = u.slice(0, -1); continue; } // more closers than openers: the last one closes the sentence's bracket
-    return u;
+  let opens = 0; let closes = 0; let squareOpens = 0; let squareCloses = 0;
+  for (let i = 0; i < url.length; i++) {
+    const c = url[i];
+    if (c === '(') opens++; else if (c === ')') closes++; else if (c === '[') squareOpens++; else if (c === ']') squareCloses++;
   }
+  let end = url.length;
+  while (end > 0) {
+    const last = url[end - 1] as string;
+    if ('.,;:!?\''.includes(last)) { end--; continue; }
+    if (last === ')' && closes > opens) { closes--; end--; continue; } // more closers than openers: the last one closes the sentence's bracket
+    if (last === ']' && squareCloses > squareOpens) { squareCloses--; end--; continue; }
+    break;
+  }
+  return url.slice(0, end);
 }
 
 /** a plain message cut into text and addresses (http · https only; mailto addresses and `www.` words stay text here — the markdown path of the bubble links those) */
@@ -42,8 +52,9 @@ export function splitPlainUrls(text: string): PlainPart[] {
     const at = m.index ?? 0;
     if (at < from) continue;
     if (at > 0 && /[A-Za-z0-9]/.test(text[at - 1] ?? '')) continue; // `xhttp://…` is a word, not an address
+    if (m[0].length > MAX_LINKED_URL) continue; // far longer than any address: left as text
     const url = trimTail(m[0]);
-    if (!/^https?:\/\/[^\s/?#]+/i.test(url)) continue;
+    if (!/^https?:\/\/(?:[A-Za-z0-9]|\[)[^\s/?#]*/i.test(url)) continue; // a host starts with a letter, a digit or `[` (`https://:80` and `https:///x` are not addresses)
     if (at > from) parts.push({ kind: 'text', value: text.slice(from, at) });
     parts.push({ kind: 'url', value: url });
     from = at + url.length;
@@ -52,6 +63,7 @@ export function splitPlainUrls(text: string): PlainPart[] {
   return parts;
 }
 
-/** a mention is an `@name` that starts a word: the «@example» inside `probe@example.org` is not one */
-export const MENTION_RE = /(?<![\w.+\-[(])@([\w가-힣]+)/g;
-export const HAS_MENTION_RE = /(?<![\w.+\-[(])@[\w가-힣]+/;
+/** a mention is an `@name` that starts a word: the «@example» inside `probe@example.org` (or `담롱@example.org`) is not one, and neither is the «@user» of `https://medium.com/@user`.
+ *  Not after a letter / digit of any script, `_`, `+`, `-`, `/`, `[` or `(` (the last two: it is already inside a markdown link). A «!» before it is left as it was (`foo!@bar` stays a mention). */
+export const MENTION_RE = /(?<![\p{L}\p{N}_+\-/[(])@([\w가-힣]+)/gu;
+export const HAS_MENTION_RE = /(?<![\p{L}\p{N}_+\-/[(])@[\w가-힣]+/u;

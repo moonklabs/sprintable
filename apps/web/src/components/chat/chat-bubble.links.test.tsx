@@ -74,6 +74,24 @@ describe('[SID:4854] plain message with a bare address', () => {
   });
 });
 
+describe('[SID:4854] an address with an @ in it (a profile address)', () => {
+  it('plain message: the whole address is one anchor, no mention is made inside it', async () => {
+    await render('profile https://medium.com/@user/post here');
+    expect(hrefs()).toEqual(['https://medium.com/@user/post']);
+    expect(container.querySelectorAll('span.font-medium.text-primary')).toHaveLength(0);
+  });
+  it('markdown message: same', async () => {
+    await render('**profile** https://medium.com/@user/post here');
+    expect(hrefs()).toEqual(['https://medium.com/@user/post']);
+    expect(container.querySelectorAll('span.font-medium.text-primary')).toHaveLength(0);
+  });
+  it('a real mention beside it is still a mention', async () => {
+    await render('https://medium.com/@user/post cc @alice');
+    expect(hrefs()).toEqual(['https://medium.com/@user/post']);
+    expect(Array.from(container.querySelectorAll('span.font-medium.text-primary')).map((m) => m.textContent)).toEqual(['@alice']);
+  });
+});
+
 describe('[SID:4854] markdown links', () => {
   it('an outside link keeps target=_blank rel=noopener noreferrer', async () => {
     await render('**go** [md-link](https://example.org/md-link)');
