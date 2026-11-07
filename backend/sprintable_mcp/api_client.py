@@ -73,6 +73,21 @@ _invalidated_checks: set[object] = set()
 # after this window (not at the next restart); inside the window the cached context is served without asking the backend, as before.
 _auth_checked_at: dict[str, float] = {}
 AUTH_RECHECK_SECONDS = 60.0
+# story 4851 (the 4849 review) — an ordinary call that answers 401 re-asks the server about the key (see `_raise_if_key_revoked`); that is capped to ONE question per key per window, and the
+# answer is remembered for the window: (asked at, «the server no longer knows this key»). Without the cap every 401 of a busy key would cost an extra /auth/me.
+_recheck_after_401: dict[str, tuple[float, bool]] = {}
+_RECHECK_MEMO_MAX = 256
+
+
+def _remember_recheck(key: str, at: float, revoked: bool) -> None:
+    """the ONLY writer of `_recheck_after_401`: expired entries go on every write, and when it is full of fresh ones the oldest goes — so the bound holds however many checks are in flight
+    (a check that was started, got evicted meanwhile and now writes its verdict simply makes room again; an evicted key is just asked again)."""
+    for stale in [k for k, (when, _) in _recheck_after_401.items() if at - when >= AUTH_RECHECK_SECONDS]:
+        del _recheck_after_401[stale]
+    _recheck_after_401.pop(key, None)
+    while len(_recheck_after_401) >= _RECHECK_MEMO_MAX:
+        del _recheck_after_401[next(iter(_recheck_after_401))]
+    _recheck_after_401[key] = (at, revoked)
 
 
 def set_cached_default_project(key: str, project_id: str) -> None:
@@ -317,14 +332,30 @@ class SprintableClient:
             raise ServerUnreachable() from None
 
     async def _raise_if_key_revoked(self, key: str) -> None:
+        now = time.monotonic()
+        memo = _recheck_after_401.get(key)
+        if memo is not None and now - memo[0] < AUTH_RECHECK_SECONDS:
+            if memo[1]:
+                raise InvalidApiKey()   # asked a moment ago and the server did not know the key: the same answer, without asking again
+            return                      # asked a moment ago and the server still knows it: this 401 is about something else, the original error stands
+        _remember_recheck(key, now, False)   # marks «asked just now» before the await, so concurrent 401s of this key do not each ask
+        answered = False
         try:
             await self.get("/api/v2/auth/me")
+            answered = True
         except SprintableApiError as exc:
             if exc.status in (401, 403):
+                _remember_recheck(key, now, True)
                 _forget_key(key)
                 raise InvalidApiKey(exc.status) from None
+            # any other answer of the server (500, 503, 429, 404 …) says nothing about the key: the original error stands
         except Exception:  # noqa: BLE001 — transport trouble, an unreadable answer, anything: cannot tell, so the original error stands
             pass
+        if not answered and _recheck_after_401.get(key) == (now, False):
+            # the question did not get a «the key is fine» answer (anything but a 401 / 403 verdict or a good answer): the mark made before the await is taken back (only OUR mark;
+            # a newer verdict stays) — otherwise a revoked key whose re-check ended in a server error or was lost in transit would not be asked about again for a whole window,
+            # and its line would come 60 seconds late
+            del _recheck_after_401[key]
 
     async def resolve_auth_context(self) -> dict[str, str]:
         """GET /api/v2/auth/me → org_id/project_id/member_id 캐시(stdio 부팅 시 1회).
@@ -414,21 +445,29 @@ class SprintableClient:
     @property
     def member_id(self) -> str:
         # stdio env-key 해소값 우선 → 없으면(http) per-key 해소 캐시.
+        if _api_key_override.get():   # story 4851 — a request with its own key (HTTP): that key's context only, never the process-wide value
+            return self._effective_ctx().get("member_id", "")
         return self._member_id or self._effective_ctx().get("member_id", "")
 
     @property
     def org_id(self) -> str:
+        if _api_key_override.get():
+            return self._effective_ctx().get("org_id", "")
         return self._org_id or self._effective_ctx().get("org_id", "")
 
     @property
     def project_id(self) -> str:
         # per-call override(85429ee0) 우선. override=None(=미설정·arg 부재)은 falsy 라 skip →
         # stdio env-key default → http per-key 해소 default(ee2f4e58). 이 fall-through 가 422 제거 핵심.
-        return (
-            _project_override.get()
-            or self._project_id
-            or self._effective_ctx().get("project_id", "")
-        )
+        explicit = _project_override.get()
+        if explicit:
+            return explicit
+        if _api_key_override.get():
+            # story 4851 — an HTTP process serves many keys, so the process-wide value (`_project_id`, written by the stdio startup check) must never answer for one of them:
+            # a key answers from its OWN context. Before this, one key's set_default_project turned every other key's no-argument call to that project (403 for keys without
+            # access, a write into the wrong project for keys that share it).
+            return self._effective_ctx().get("project_id", "")
+        return self._project_id or self._effective_ctx().get("project_id", "")
 
     def require_project_id(self) -> str:
         """E-MCP-OPT(story ff6cb90d §1) — **무인자 콜 + 기본값 미설정 = 명시 에러**가 실제로 나가는
@@ -440,8 +479,9 @@ class SprintableClient:
         if pid:
             return pid
         ctx = self._effective_ctx()
-        accessible = ctx.get("accessible_project_ids") or self._accessible_project_ids
-        if not ctx and not self._auth_resolved and not accessible and not self._project_id_ambiguous:
+        per_key = bool(_api_key_override.get())   # story 4851 — HTTP: this key's context only, the process-wide fields belong to the one key of a stdio process
+        accessible = ctx.get("accessible_project_ids") or ([] if per_key else self._accessible_project_ids)
+        if not ctx and (per_key or not self._auth_resolved) and not accessible and (per_key or not self._project_id_ambiguous):
             # story 4849 — nothing was resolved for this key (the check failed, or never ran): that is NOT «several projects» — before this, a key the server did not know was told
             # «this key can reach several projects», a false guide.
             raise SprintableApiError(

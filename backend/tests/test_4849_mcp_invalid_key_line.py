@@ -39,15 +39,28 @@ def anyio_backend():
     return "asyncio"
 
 
+_MODULE_STATE = ("_auth_ctx_cache", "_auth_checked_at", "_inflight_checks", "_recheck_after_401")
+
+
 @pytest.fixture(autouse=True)
 def _clear_cache():
-    for d in (ac._auth_ctx_cache, ac._auth_checked_at, ac._inflight_checks):
-        d.clear()
+    """module-wide state shared with every other test of the process: a blank state for this test, and the copy put back afterwards (nothing is cleared for the next test)"""
+    import copy
+
+    saved_module = {name: copy.copy(getattr(ac, name)) for name in _MODULE_STATE}
+    saved_invalidated = set(ac._invalidated_checks)
+    saved_client = copy.copy(ac.client.__dict__)
+    for name in _MODULE_STATE:
+        getattr(ac, name).clear()
     ac._invalidated_checks.clear()
     yield
-    for d in (ac._auth_ctx_cache, ac._auth_checked_at, ac._inflight_checks):
-        d.clear()
+    for name, saved in saved_module.items():
+        getattr(ac, name).clear()
+        getattr(ac, name).update(saved)
     ac._invalidated_checks.clear()
+    ac._invalidated_checks.update(saved_invalidated)
+    ac.client.__dict__.clear()
+    ac.client.__dict__.update(saved_client)
 
 
 def _client() -> SprintableClient:
@@ -196,9 +209,11 @@ async def test_a_good_key_goes_through_as_before():
 
 
 @pytest.mark.anyio
-async def test_any_other_failure_of_the_check_stays_non_fatal_as_before():
+@pytest.mark.parametrize("status_of_the_check", [400, 404, 422, 429])
+async def test_any_other_answer_of_the_check_passes_without_a_verdict_as_before(status_of_the_check):
+    """only 401 / 403 (the key is not known) and 5xx / timeout / no connection (the server cannot be asked) change the door's answer; the backend re-reads the key on every call anyway"""
     door = _Door()
-    with patch.object(ac.client, "ensure_auth_context", new=AsyncMock(side_effect=SprintableApiError(422, "odd"))):
+    with patch.object(ac.client, "ensure_auth_context", new=AsyncMock(side_effect=SprintableApiError(status_of_the_check, "odd"))):
         status, _, _ = await door.run()
     assert status == 200 and door.reached is True
 
@@ -299,6 +314,161 @@ async def test_a_401_that_is_not_about_the_key_stands_as_it_was_and_the_key_stay
         ac.reset_api_key_override(tok)
     assert not isinstance(ei.value, InvalidApiKey) and ei.value.status == 401
     assert "fine" in ac._auth_ctx_cache and asked == ["/api/v2/channel-posts", "/api/v2/auth/me"]
+
+
+@pytest.mark.anyio
+async def test_the_recheck_of_a_401_is_asked_once_per_key_per_window():
+    """a busy key whose calls answer 401 for a reason that is not the key (a connector's upstream token) costs ONE /auth/me per window, not one per 401"""
+    c = _client()
+    http, asked = _fake_http({"/api/v2/channel-posts": 401, "/api/v2/auth/me": 200})
+    tok = ac.set_api_key_override("busy")
+    try:
+        with patch.object(ac.httpx, "AsyncClient", new=http):
+            for _ in range(4):
+                with pytest.raises(SprintableApiError) as ei:
+                    await c.request("GET", "/api/v2/channel-posts")
+                assert not isinstance(ei.value, InvalidApiKey) and ei.value.status == 401
+            assert asked.count("/api/v2/auth/me") == 1
+            at, revoked = ac._recheck_after_401["busy"]
+            ac._recheck_after_401["busy"] = (at - ac.AUTH_RECHECK_SECONDS - 1, revoked)   # the window has passed
+            with pytest.raises(SprintableApiError):
+                await c.request("GET", "/api/v2/channel-posts")
+            assert asked.count("/api/v2/auth/me") == 2
+    finally:
+        ac.reset_api_key_override(tok)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("end_of_the_recheck", [
+    SprintableApiError(500, "boom"), SprintableApiError(503, "down"), SprintableApiError(429, "slow down"), SprintableApiError(404, "odd"),
+    httpx.ConnectError("lost"), ValueError("unreadable answer"),
+])
+async def test_a_recheck_that_ends_without_a_verdict_does_not_hold_the_next_401_off_for_a_window(end_of_the_recheck):
+    """the mark «asked just now, the key is fine» is made before the question; whenever the question ends in anything but a verdict (a 401 / 403) or a good answer — a server error, a
+    throttle, a transport error, an unreadable answer — the mark is taken back, so a revoked key is asked about again at its next 401"""
+    c = _client()
+    http, asked = _fake_http({"/api/v2/stories": 401})
+    tok = ac.set_api_key_override("flaky")
+    try:
+        with patch.object(ac.httpx, "AsyncClient", new=http), patch.object(c, "get", new=AsyncMock(side_effect=end_of_the_recheck)) as g:
+            for _ in range(3):
+                with pytest.raises(SprintableApiError) as ei:
+                    await c.request("GET", "/api/v2/stories")
+                assert not isinstance(ei.value, InvalidApiKey)   # cannot tell: the original 401 stands
+            assert g.await_count == 3                            # asked every time, not once per window
+            assert "flaky" not in ac._recheck_after_401
+    finally:
+        ac.reset_api_key_override(tok)
+
+
+@pytest.mark.anyio
+async def test_a_key_found_revoked_keeps_the_same_answer_for_the_window_without_asking_again():
+    c = _client()
+    http, asked = _fake_http({"/api/v2/stories": 401, "/api/v2/auth/me": 401})
+    tok = ac.set_api_key_override("gone2")
+    try:
+        with patch.object(ac.httpx, "AsyncClient", new=http):
+            for _ in range(3):
+                with pytest.raises(InvalidApiKey):
+                    await c.request("GET", "/api/v2/stories")
+            assert asked.count("/api/v2/auth/me") == 1
+    finally:
+        ac.reset_api_key_override(tok)
+
+
+@pytest.mark.anyio
+async def test_the_recheck_memo_is_hard_bounded_even_when_every_entry_is_fresh():
+    c = _client()
+    http, _ = _fake_http({"/api/v2/channel-posts": 401, "/api/v2/auth/me": 200})
+    with patch.object(ac.httpx, "AsyncClient", new=http):
+        for i in range(ac._RECHECK_MEMO_MAX + 40):          # all within one window: nothing is stale
+            tok = ac.set_api_key_override(f"k{i}")
+            try:
+                with pytest.raises(SprintableApiError):
+                    await c.request("GET", "/api/v2/channel-posts")
+            finally:
+                ac.reset_api_key_override(tok)
+    assert len(ac._recheck_after_401) == ac._RECHECK_MEMO_MAX
+    assert "k0" not in ac._recheck_after_401 and f"k{ac._RECHECK_MEMO_MAX + 39}" in ac._recheck_after_401   # the oldest went, the newest stays
+
+
+@pytest.mark.anyio
+async def test_the_recheck_memo_stays_bounded_with_hundreds_of_rechecks_in_flight_at_once():
+    """the in-flight race: a re-check that was started, evicted meanwhile, and writes its verdict afterwards must not push the memo over its bound"""
+    import asyncio
+
+    c = _client()
+    gate = asyncio.Event()
+
+    class _Resp:
+        def __init__(self, status):
+            self.status_code, self.is_success, self.headers = status, status < 400, {}
+            self.content = b'{"data": {"member_id": "m"}}' if status < 400 else b'{"detail": "x"}'
+            self.text = self.content.decode()
+        def json(self):
+            import json as _j
+            return _j.loads(self.content)
+
+    class _Http:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def request(self, method, url, **k):
+            if url.endswith("/api/v2/auth/me"):
+                await gate.wait()          # every re-check is still waiting for the server
+                return _Resp(401)          # …and the server does not know the key
+            return _Resp(401)
+
+    async def one(i: int):
+        tok = ac.set_api_key_override(f"race-{i}")
+        try:
+            with pytest.raises(SprintableApiError):
+                await c.request("GET", "/api/v2/stories")
+        finally:
+            ac.reset_api_key_override(tok)
+
+    n = ac._RECHECK_MEMO_MAX + 60
+    with patch.object(ac.httpx, "AsyncClient", new=_Http):
+        tasks = [asyncio.create_task(one(i)) for i in range(n)]
+        for _ in range(50):
+            await asyncio.sleep(0)         # all of them reach the gate
+        assert len(ac._recheck_after_401) <= ac._RECHECK_MEMO_MAX
+        gate.set()
+        await asyncio.gather(*tasks)
+    assert len(ac._recheck_after_401) <= ac._RECHECK_MEMO_MAX
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("backend_status", [400, 404, 422, 429])
+async def test_real_answers_of_the_check_other_than_401_403_5xx_are_no_verdict(backend_status):
+    """through the real client: /auth/me answering 400 / 404 / 422 / 429 leaves the door open (the backend re-reads the key on every call anyway)"""
+    door = _Door()
+    with patch.object(ac.client, "get", new=AsyncMock(side_effect=SprintableApiError(backend_status, "odd"))):
+        status, _, _ = await door.run()
+    assert status == 200 and door.reached is True
+
+
+@pytest.mark.anyio
+async def test_expired_memo_entries_go_on_the_next_insert_whatever_the_size():
+    c = _client()
+    http, _ = _fake_http({"/api/v2/channel-posts": 401, "/api/v2/auth/me": 200})
+    with patch.object(ac.httpx, "AsyncClient", new=http):
+        for k in ("old1", "old2", "old3"):
+            tok = ac.set_api_key_override(k)
+            try:
+                with pytest.raises(SprintableApiError):
+                    await c.request("GET", "/api/v2/channel-posts")
+            finally:
+                ac.reset_api_key_override(tok)
+        for k, (at, rv) in list(ac._recheck_after_401.items()):
+            ac._recheck_after_401[k] = (at - ac.AUTH_RECHECK_SECONDS - 1, rv)   # their window has passed (the memo is far below its limit)
+        tok = ac.set_api_key_override("new")
+        try:
+            with pytest.raises(SprintableApiError):
+                await c.request("GET", "/api/v2/channel-posts")
+        finally:
+            ac.reset_api_key_override(tok)
+    assert list(ac._recheck_after_401) == ["new"]
 
 
 @pytest.mark.anyio
