@@ -490,7 +490,7 @@ async def test_a_room_without_a_project_refuses_a_new_attachment_out_loud():
                     "attachments": [{"url": f"org/{w.org}/project/{w.p1}/chat/{w.n_human}/a.txt", "name": "a.txt", "size": 3, "content_type": "text/plain"}],
                 })
                 assert r.status_code == 400, r.text
-                assert "ATTACHMENT_NEEDS_PROJECT" in r.text and "첨부" in r.text   # a reason a person can read
+                assert "ATTACHMENT_NEEDS_PROJECT" in r.text and "cannot take an attachment yet" in r.text   # a reason a person can read
                 ok = await c.post(f"/api/v2/conversations/{w.n_human}/messages", json={"content": "text only"})
                 assert ok.status_code == 201, ok.text
         finally:
@@ -564,7 +564,7 @@ async def test_a_project_whose_rooms_hold_chat_attachments_is_not_deleted_yet():
             await s.commit()
         r = await _delete_project(Session, w, w.p1)
         assert r.status_code == 409 and "PROJECT_HAS_CHAT_ATTACHMENTS" in r.text, r.text
-        assert "첨부" in r.json()["error"]["message"] if "error" in r.json() else "첨부" in r.text   # a reason a person can read
+        assert "attached in its chat rooms" in r.json()["error"]["message"]   # a reason a person can read
         async with Session() as s:
             assert (await s.execute(text("SELECT count(*) FROM projects WHERE id = :p"), {"p": w.p1})).scalar_one() == 1
         # every path that deletes a project goes through the repository: the guard is there, not only in the route

@@ -97,7 +97,8 @@ class AttachmentNeedsProject(ValueError):
     (main.py). The attachment PR of the story (AC6) turns this refusal into a real upload and read."""
 
     code = "ATTACHMENT_NEEDS_PROJECT"
-    message = "프로젝트가 없는 채팅방에는 아직 첨부 파일을 올릴 수 없어요. 글만 보낼 수 있어요."
+    # an English sentence a person can read when it reaches them; the web shows its own wording for the code (story #3779: no new Korean user strings in the backend)
+    message = "A chat room without a project cannot take an attachment yet; text can be sent."
 
 
 async def sync_attachment_assets(

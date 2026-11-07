@@ -16,7 +16,8 @@ class ProjectHasChatAttachments(Exception):
     open, a loss the attachment PR of this story could not undo. The API answers 409 `PROJECT_HAS_CHAT_ATTACHMENTS` (main.py). Lifted by that PR."""
 
     code = "PROJECT_HAS_CHAT_ATTACHMENTS"
-    message = "이 프로젝트의 채팅방에 첨부 파일이 있어 지금은 프로젝트를 지울 수 없어요. 첨부를 방과 함께 보존하는 기능이 들어온 뒤에 지울 수 있어요."
+    # an English sentence a person can read when it reaches them; the web shows its own wording for the code (the repo's rule: no new Korean user strings in the backend, story #3779)
+    message = "This project cannot be deleted for now: files are attached in its chat rooms, and they cannot yet be kept with the rooms."
 
 
 class ProjectRepository(BaseRepository[Project]):
