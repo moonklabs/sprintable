@@ -31,7 +31,6 @@ type ModalError = { kind: 'generic'; message: string } | { kind: 'policy'; messa
 interface AddParticipantModalProps {
   conversationId: string;
   conversationType: 'dm' | 'group';
-  projectId: string;
   existingParticipantIds: string[];
   onClose: () => void;
   onAdded: (newConversationId?: string) => void;
@@ -40,7 +39,6 @@ interface AddParticipantModalProps {
 export function AddParticipantModal({
   conversationId,
   conversationType,
-  projectId,
   existingParticipantIds,
   onClose,
   onAdded,
@@ -55,8 +53,10 @@ export function AddParticipantModal({
   const [error, setError] = useState<ModalError | null>(null);
 
   useEffect(() => {
-    fetchWithAuth(`/api/members?is_active=true&project_id=${projectId}`)
-      .then((r) => r.json())
+    // story 4847 (AC3) — who can join a room is the organization's people, not the current project's: a room is not tied to the project the
+    // person happens to be looking at (and the server's no-`project_id` branch of /api/members is the org roster, agents included)
+    fetchWithAuth('/api/members?is_active=true')
+      .then((r) => { if (!r.ok) throw new Error(`members ${r.status}`); return r.json(); })
       .then((json) => {
         // story #3997 — 「시스템 발행」을 이 대화에 참가자로 추가하는 것 자체가
         // 의미 없다(연결 대상이 아닌 내부 멤버) — 선택지에서 제외.
@@ -65,7 +65,7 @@ export function AddParticipantModal({
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [projectId]);
+  }, []);
 
   const available = members.filter((m) => !existingParticipantIds.includes(m.id));
   const rowLabels = memberRowLabels(available, tc, () => '');

@@ -22,7 +22,7 @@ vi.mock('@/components/realtime-provider', () => ({
 
 let container: HTMLDivElement;
 let root: Root;
-beforeEach(() => { container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); useDashboardContextMock.mockReturnValue({ role: 'member' }); });
+beforeEach(() => { container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'member' }); });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); });
 
 const ME = { member_id: 'me-1', name: '나', type: 'human' as const };

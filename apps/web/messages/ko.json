@@ -5318,7 +5318,6 @@
   },
   "chats": {
     "noProjectYet": "보여 줄 프로젝트가 아직 없어요. 위쪽 전환기에서 만들어 주세요(이미 있다면 새로고침).",
-    "pickProject": "위쪽 전환기에서 프로젝트를 고르면 그 대화가 보여요.",
     "agentsPaused": {
       "title": "이 대화의 에이전트 메시지를 멈췄어요",
       "since": "{time}부터",
@@ -5813,7 +5812,13 @@
     "editRoomName": "방 이름 편집",
     "muteNotifications": "알림 끄기",
     "unmuteNotifications": "알림 켜기",
-    "notificationsMuted": "알림 꺼짐"
+    "notificationsMuted": "알림 꺼짐",
+    "newRoomProject": "새 방의 프로젝트",
+    "newRoomProjectPick": "프로젝트를 고르세요",
+    "roomProjectAsk": "이 방에는 프로젝트가 없어요 — 스토리 · 문서 · 첨부에 쓸 프로젝트",
+    "roomNoProject": "프로젝트 없음",
+    "projectFilterLabel": "프로젝트로 걸러 보기",
+    "projectFilterAll": "모든 프로젝트"
   },
   "eventCard": {
     "viewStory": "스토리 보기",

@@ -8,9 +8,7 @@
   "keys": [
     "app/(authenticated)/channel/page.tsx::fetchWithAuth('/api/channel/token')",
     "app/(authenticated)/organization/channels/page.tsx::const res = await fetchWithAuth(`/api/organizations/${orgId}/channel-connections/${conn.id}/test`, { method: 'POST' });",
-    "components/chat/add-participant-modal.tsx::fetchWithAuth(`/api/members?is_active=true&project_id=${projectId}`)",
     "components/chat/new-conversation-modal.tsx::fetchWithAuth('/api/team-members?type=agent')",
-    "components/chat/new-conversation-modal.tsx::fetchWithAuth(`/api/members?is_active=true&project_id=${projectId}`)",
     "ee/components/billing/billing-tab.tsx::fetchWithAuth('/api/billing/status', { credentials: 'include' })",
     "hooks/use-entity-picker.ts::fetchWithAuth(`/api/entities/search?${params}`)"
   ]

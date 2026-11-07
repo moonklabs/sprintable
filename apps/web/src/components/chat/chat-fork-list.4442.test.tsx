@@ -19,7 +19,7 @@ vi.mock('next/navigation', () => ({
 }));
 vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => false }));
 vi.mock('@/hooks/use-auto-refresh', () => ({ useAutoRefresh: () => {} }));
-vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ({ role: 'member' }) }));
+vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ({ role: 'member', projectMemberships: [] }) }));
 vi.mock('@/components/realtime-provider', () => ({
   useSseMultiplexerContext: () => null,
   useSseConnectedContext: () => true,

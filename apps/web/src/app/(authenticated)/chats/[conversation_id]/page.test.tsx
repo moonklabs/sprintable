@@ -55,7 +55,7 @@ beforeEach(() => {
   root = createRoot(container);
   replaceMock.mockClear();
   searchParamsRef.current = '';
-  useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectId: 'proj-content' });
+  useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectId: 'proj-content', projectMemberships: [] });
 });
 
 afterEach(async () => {

@@ -13,6 +13,7 @@ import { AddParticipantModal } from '@/components/chat/add-participant-modal';
 import { DeliveryContractModal } from '@/components/chat/delivery-contract-modal';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { useToast } from '@/components/ui/toast';
 import { Avatar } from '@/components/shared/avatar';
 import { useDashboardContext } from '../../../dashboard/dashboard-shell';
@@ -57,6 +58,9 @@ interface ConversationMeta {
   freeResponse: boolean;
   // story #4631 C — the open flood block (agent messages paused), absent when none is open
   agentsPaused: AgentsPausedState | null;
+  // story 4847 (AC2) — the project THIS ROOM belongs to (the server's single-room answer says it). It is what the story/doc pickers, the attachments and the
+  // mention search work in — not the project the person happens to be looking at: opening a room no longer switches the current project. null = the room has none.
+  projectId: string | null;
 }
 
 // story #2168 PR-②(오르테가 지적) — `?from=`은 사용자가 URL을 통해 조작 가능한 값이다.
@@ -100,13 +104,14 @@ export default function ConversationPage() {
   const composeText = searchParams.get('compose');
   const t = useTranslations('chats');
   const tc = useTranslations('common');
-  const { currentTeamMemberId, projectId } = useDashboardContext();
+  const { currentTeamMemberId, projectMemberships } = useDashboardContext();
   const { addToast } = useToast();
   const [meta, setMeta] = useState<ConversationMeta | null>(null);
   const [showAddParticipant, setShowAddParticipant] = useState(false);
   const [showDeliveryContract, setShowDeliveryContract] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
+  const [chosenProjectId, setChosenProjectId] = useState<string | null>(null); // story 4847 — for a room that has no project of its own
 
   // story #2168 PR-② — chat-list-view.tsx의 "다른 프로젝트" 항목 클릭이 실어 보내는 복귀 정보.
   // `from` = 원래 있던 프로젝트(뒤로가기 시 복귀 대상) · `pn` = 이 대화가 속한 프로젝트명(권한
@@ -123,14 +128,13 @@ export default function ConversationPage() {
   // 포함)를 낭비했고, org 대화가 30건 넘으면 최근 30건 밖 대화를 열 때 `.find()`가 undefined를
   // 반환해 헤더가 영구 공백이었다(정합성 버그, BE #2286이 단독조회에 participants 추가해 해소).
   const fetchMeta = useCallback(async () => {
-    if (!projectId) return;
     try {
       const res = await fetchWithAuth(`/api/conversations/${conversation_id}`);
       if (res.status === 403) { setBlocked(true); return; }
       if (!res.ok) return;
       const conv = await res.json() as {
         title: string | null; type: 'dm' | 'group'; participants?: Participant[]; muted?: boolean; last_read_at?: string | null;
-        free_response?: boolean; circuit_breaker?: AgentsPausedState | null;
+        free_response?: boolean; circuit_breaker?: AgentsPausedState | null; project_id?: string | null;
       };
       setMeta({
         title: conv.title,
@@ -140,9 +144,10 @@ export default function ConversationPage() {
         lastReadAt: conv.last_read_at ?? null,
         freeResponse: conv.free_response ?? false,
         agentsPaused: conv.circuit_breaker ?? null,
+        projectId: conv.project_id ?? null,
       });
     } catch { /* non-critical */ }
-  }, [conversation_id, projectId]);
+  }, [conversation_id]);
 
   // per-대화 알림 mute 토글 (270c87e6 AC③⑤). 낙관 갱신 → PATCH /mute → 실패 시 롤백.
   // mute는 알림 생성/노출만 억제(참여자 지위·메시지 수신 불변, BE).
@@ -253,6 +258,10 @@ export default function ConversationPage() {
     // story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, 사람언어 폴백 통일.
     // story #3758(9번째) — resolved 비트로 갈라 그린다.
     .map((p) => ({ agentId: p.member_id, agentName: participantDisplayLabel(p, tc), runtimeType: p.runtime_type ?? null }));
+
+  // story 4847 (AC2) — the room's own project works the pickers and the attachments; a room with none lets the person choose (one project → that one).
+  const roomProjectId = meta ? (meta.projectId ?? chosenProjectId ?? (projectMemberships.length === 1 ? projectMemberships[0]!.projectId : undefined)) : undefined;
+  const askRoomProject = Boolean(meta) && meta!.projectId === null && projectMemberships.length > 1;
 
   return (
     <>
@@ -387,12 +396,23 @@ export default function ConversationPage() {
           {/* story #4534 — a DM with an agent: its session on the computer (the web looks · inside the phone app: [멈춤] [지금 지시]) */}
           {headerAvatarParticipant?.type === 'agent' ? <AgentSessionStrip agentId={headerAvatarParticipant.member_id} conversationId={conversation_id} /> : null}
           {/* story #4631 C · D — agent messages paused: the band (and an owner/admin's [멈춤 풀기]) — one per conversation */}
+          {askRoomProject ? (
+            <div className="flex items-center gap-2 border-b border-border px-4 py-2" data-testid="room-project-ask">
+              <label htmlFor="room-project" className="flex-shrink-0 text-xs text-muted-foreground">{t('roomProjectAsk')}</label>
+              <Select id="room-project" value={chosenProjectId ?? ''} onChange={(e) => setChosenProjectId(e.target.value || null)} className="max-w-xs">
+                <option value="">{t('newRoomProjectPick')}</option>
+                {projectMemberships.map((p) => (
+                  <option key={p.projectId} value={p.projectId}>{p.projectName}</option>
+                ))}
+              </Select>
+            </div>
+          ) : null}
           <AgentsPausedBand key={conversation_id} conversationId={conversation_id} state={meta?.agentsPaused ?? null} onResumed={() => void fetchMeta()} />
           <ChatView
             key={conversation_id}
             threadId={conversation_id}
             currentTeamMemberId={currentTeamMemberId}
-            projectId={projectId}
+            projectId={roomProjectId}
             apiPrefix={CHAT_API_PREFIX}
             commandTargets={commandTargets}
             presenceById={presenceById}
@@ -405,11 +425,10 @@ export default function ConversationPage() {
         )}
       </div>
 
-      {showAddParticipant && meta && projectId && (
+      {showAddParticipant && meta && (
         <AddParticipantModal
           conversationId={conversation_id}
           conversationType={meta.type}
-          projectId={projectId}
           existingParticipantIds={meta.participants.map((p) => p.member_id)}
           onClose={() => setShowAddParticipant(false)}
           onAdded={handleParticipantAdded}
