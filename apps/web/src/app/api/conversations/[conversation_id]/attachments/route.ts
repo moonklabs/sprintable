@@ -17,8 +17,9 @@ const FASTAPI_URL = () => fastapiBaseUrl();
 // 이후 POST /api/v2/conversations/{id}/messages 의 attachments 에 그대로 실어 보낸다.
 /** `org/{org}/chat/{conversation}/` or `org/{org}/project/{project}/chat/{conversation}/` — this organization's and this room's, nothing else, no dot segments */
 function isThisRoomsPrefix(prefix: string, orgId: string, conversationId: string): boolean {
-  if (!prefix.endsWith('/') || prefix.includes('..') || prefix.includes('//') || prefix.includes('\\')) return false;
+  if (!prefix.endsWith('/') || prefix.includes('//') || prefix.includes('\\')) return false;
   const parts = prefix.split('/').filter((p) => p.length > 0);
+  if (parts.some((p) => p === '.' || p === '..')) return false; // a dot segment stands for another place
   const roomOnly = parts.length === 4 && parts[0] === 'org' && parts[2] === 'chat';
   const inProject = parts.length === 6 && parts[0] === 'org' && parts[2] === 'project' && parts[4] === 'chat';
   if (!roomOnly && !inProject) return false;
