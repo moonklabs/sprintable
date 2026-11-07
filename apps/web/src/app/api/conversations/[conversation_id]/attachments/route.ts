@@ -6,6 +6,7 @@ import { GCS_MEMO_ATTACHMENTS_BUCKET } from '@/lib/storage/config';
 import { createStorageService } from '@/lib/storage/factory';
 import { backendFetch } from '@/lib/backend-fetch';
 import { fastapiBaseUrl } from '@/lib/fastapi-url';
+import { ATTACHMENT_NEEDS_PROJECT } from '@/lib/chat-attachment-error';
 
 // BE _MAX_ATTACHMENT_SIZE 정합 (conversations.py)
 const MAX_ATTACHMENT_SIZE = 100 * 1024 * 1024; // 100MB
@@ -14,6 +15,20 @@ const FASTAPI_URL = () => fastapiBaseUrl();
 // chat-attach: 파일을 서버사이드에서 GCS로 업로드하고 메시지 첨부 메타({url,name,content_type,size})를 돌려준다.
 // 업로드된 GCS object URL은 리로드/다른 인스턴스에서도 유효(multi-instance safe) — BE 계약대로
 // 이후 POST /api/v2/conversations/{id}/messages 의 attachments 에 그대로 실어 보낸다.
+/**
+ * `org/{org}/chat/{conversation}/` (a room with no project) or `org/{org}/project/{project}/chat/{conversation}/` (a room with that project) — this organization's, this room's,
+ * and for a project room that room's own project; nothing else. The segments are compared EXACTLY with the ids this route just read from the backend, so a dot or empty segment,
+ * a backslash, another room / organization / project can never match; the prefix becomes a storage object path and must name nothing but its own room.
+ */
+function isThisRoomsPrefix(prefix: string, orgId: string, conversationId: string, projectId: string | null | undefined): boolean {
+  if (!prefix.endsWith('/')) return false;
+  const parts = prefix.slice(0, -1).split('/');
+  if (parts[0] !== 'org' || parts[1] !== orgId || parts[parts.length - 1] !== conversationId) return false;
+  if (parts.length === 4) return parts[2] === 'chat' && !projectId; // a room with no project
+  if (parts.length === 6) return parts[2] === 'project' && parts[4] === 'chat' && parts[3] === projectId; // a room with a project: that project
+  return false;
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ conversation_id: string }> },
@@ -41,15 +56,28 @@ export async function POST(
   if (!convRes.ok) {
     return NextResponse.json({ error: { message: 'conversation not found or no access' } }, { status: convRes.status === 403 ? 403 : 404 });
   }
-  const conv = (await convRes.json().catch(() => null)) as { project_id?: string | null; org_id?: string | null } | null;
+  const conv = (await convRes.json().catch(() => null)) as { project_id?: string | null; org_id?: string | null; attachment_path_prefix?: string | null } | null;
   const projectId = conv?.project_id;
   const orgId = conv?.org_id;
-  if (!projectId || !orgId) {
-    return NextResponse.json({ error: { message: 'conversation org/project could not be resolved' } }, { status: 422 });
+  if (!orgId) {
+    return NextResponse.json({ error: { message: 'conversation org could not be resolved' } }, { status: 422 });
+  }
+  // story 4847 — where the file goes is the SERVER's call once it says so (4846 PR2 · AC6: `attachment_path_prefix` on the single-room answer, built in one place for the web and the MCP
+  // upload alike). Until it does, a room with a project keeps the path built here and a room with none is refused with the same code the server uses — a file must not be left in storage
+  // unregistered, to be refused only at the send. The prefix is taken only when it is this organization's and this room's (the room was just read by this person: nothing else may name a path).
+  const prefix = conv?.attachment_path_prefix;
+  const roomPrefix = typeof prefix === 'string' && isThisRoomsPrefix(prefix, orgId, conversation_id, projectId) ? prefix : null;
+  if (!projectId && !roomPrefix) {
+    return NextResponse.json(
+      { data: null, error: { code: ATTACHMENT_NEEDS_PROJECT, message: 'a room with no project cannot take a new attachment' }, meta: null },
+      { status: 400 },
+    );
   }
   const safeName = (file.name || 'file').replace(/[^\w.\-]+/g, '_').slice(-128) || 'file';
   // E-STORAGE-SSOT S7: org/project namespace(Storage UI 노출)·source segment(conv) 유지(IDOR scope).
-  const objectPath = `org/${orgId}/project/${projectId}/chat/${conversation_id}/${randomUUID()}-${safeName}`;
+  const objectPath = roomPrefix
+    ? `${roomPrefix}${randomUUID()}-${safeName}`
+    : `org/${orgId}/project/${projectId}/chat/${conversation_id}/${randomUUID()}-${safeName}`;
 
   try {
     const storage = await createStorageService();

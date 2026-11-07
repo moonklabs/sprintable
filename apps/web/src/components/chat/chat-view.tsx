@@ -1,6 +1,7 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { throwForFailedResponse } from '@/lib/chat-attachment-error';
 import { ChevronLeft, RefreshCw, UserX } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -739,7 +740,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error('Failed to send message');
+    if (!res.ok) await throwForFailedResponse(res, 'Failed to send message'); // …and so does a send that registers an attachment in such a room
     // Backend: { data: _to_chat_message } or { forked: true, forked_conversation_id, data }
     const raw = await res.json() as Record<string, unknown>;
     // AC3: DM fork 응답 감지 → 새 그룹 conversation으로 자동 네비게이션
@@ -790,7 +791,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       method: 'POST',
       body: formData,
     });
-    if (!res.ok) throw new Error('Failed to upload attachment');
+    if (!res.ok) await throwForFailedResponse(res, 'Failed to upload attachment'); // story 4847 — a room with no project says so (by code), not a bare «failed»
     return await res.json() as SendAttachment;
   }, [apiPrefix, threadId, projectId]);
 

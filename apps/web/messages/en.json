@@ -5744,6 +5744,7 @@
     "replyCount": "{count, plural, one {# reply} other {# replies}}",
     "removeAttachment": "Remove attachment",
     "attachmentUploadFailed": "Attachment upload failed. Please try again.",
+    "attachmentNeedsProject": "This room has no project, so files cannot be attached to it. Attach them in a room that has a project.",
     "maxAttachmentsReached": "You can upload up to {max, plural, one {# file} other {# files}} at once.",
     "attachmentsDropped": "The last {dropped, plural, one {# file you picked wasn't} other {# files you picked weren't}} attached — a message can carry up to {max, plural, one {# file} other {# files}}.",
     "commandCandidatesLabel": "Command candidates",
