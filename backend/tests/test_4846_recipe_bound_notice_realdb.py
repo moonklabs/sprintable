@@ -138,14 +138,18 @@ async def test_an_organization_wide_binding_lets_the_notice_out_but_not_an_ordin
     assert e.value.status_code == 403
 
 
-async def test_a_project_binding_carries_the_notice_while_the_agent_has_the_project_and_stops_when_revoked():
+async def test_a_project_binding_carries_the_notice_while_the_agent_has_the_project_and_stops_when_revoked(caplog):
     Session = await _realdb_session_sync()
     w = await _world(Session, binding="project", grant=True)
     await _publish(Session, w)
     w2 = await _world(Session, binding="project", grant=False)                   # the project revoked: the binding's notices stop with it
-    with pytest.raises(HTTPException) as e:
-        await _publish(Session, w2)
+    with caplog.at_level("WARNING", logger="app.services.recipe_role_bindings"):
+        with pytest.raises(HTTPException) as e:
+            await _publish(Session, w2)
     assert e.value.status_code == 403 and e.value.detail == "Not a participant"        # the room's term, not the stage rule
+    # the refusal leaves ONE line with the reason, the recipe, the project and the agent (no content) — counted in the logs after a deploy to clean up
+    lines = [r.getMessage() for r in caplog.records if "RECIPE_BINDING_LACKS_GRANT" in r.getMessage()]
+    assert len(lines) == 1 and str(w2["agent_id"]) in lines[0] and str(w2["project_id"]) in lines[0] and _KEY in lines[0], lines
 
 
 async def test_an_agent_that_is_not_the_stage_assignee_is_refused_by_the_stage_rule_before_the_room_is_asked():

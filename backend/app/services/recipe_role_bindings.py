@@ -3,12 +3,15 @@
 write bindings the same way (no second copy of the upsert). Neither function commits."""
 from __future__ import annotations
 
+import logging
 import uuid
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.recipe_role_binding import RecipeRoleBinding
+
+logger = logging.getLogger(__name__)
 
 
 def stage_target(definition, stage: str) -> str:
@@ -36,7 +39,17 @@ async def agent_bound_to_recipe(
     )).scalars().all())
     if None in scopes:
         return True
-    return project_id is not None and project_id in scopes and bool(await has_project_access(db, agent_member_id, project_id, org_id))
+    if project_id is None or project_id not in scopes:
+        return False
+    if await has_project_access(db, agent_member_id, project_id, org_id):
+        return True
+    # a binding of the project whose agent no longer has it: its notices stop here — one line with the reason (no content), so the number of such bindings
+    # can be counted in the logs after a deploy and the bindings cleaned up (give the grant, or bind organization-wide)
+    logger.warning(
+        "recipe notice refused reason=RECIPE_BINDING_LACKS_GRANT definition_key=%s project_id=%s agent_member_id=%s org_id=%s",
+        definition_key, project_id, agent_member_id, org_id,
+    )
+    return False
 
 
 async def upsert_role_binding(
