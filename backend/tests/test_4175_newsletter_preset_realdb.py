@@ -192,7 +192,7 @@ async def _setup_real_stibee(Session):
             select(OrgMember.id).where(OrgMember.org_id == org_id, OrgMember.user_id == owner_user_id)
         )).scalar_one()
         await _seed_default_role(s, org_id)
-        agent_id = await _seed_agent(s, org_id, project_id)
+        agent_id = await _seed_agent(s, org_id, project_id, grant=True)   # story #4846 AC12
         story_id = await _seed_story(s, org_id, project_id)
         conn = await _seed_channel_connection(s, org_id, channel="stibee")
         pub, _ = await _seed_publication(s, org_id=org_id, connection_id=conn.id, work_item_id=story_id, channel="stibee")

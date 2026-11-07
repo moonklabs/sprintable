@@ -68,7 +68,6 @@ _KNOWN = {
     "app/routers/conversations.py::get_conversation",
     "app/routers/conversations.py::list_conversations",
     "app/routers/conversations.py::list_conversations_by_work_item",
-    "app/routers/conversations.py::list_working_members",
     "app/routers/conversations.py::mark_conversation_read",
     "app/routers/conversations.py::release_circuit_breaker_endpoint",
     "app/routers/conversations.py::set_conversation_mute",

@@ -512,7 +512,7 @@ async def test_list_messages_response_shape():
         mock_msg = _make_msg()
 
         conv_project_result = MagicMock()
-        conv_project_result.scalar_one_or_none.return_value = PROJECT_ID
+        conv_project_result.first.return_value = (uuid.uuid4(), PROJECT_ID)  # story #4846: (exists, project_id) — a room may have no project
 
         member_result = MagicMock()
         member_result.scalars.return_value.first.return_value = mock_member
@@ -556,7 +556,8 @@ async def test_list_messages_response_shape():
         viewer_blocks_result.scalars.return_value.all.return_value = []
 
         session.execute = AsyncMock(side_effect=[
-            conv_project_result, member_result, pids_result, agents_result, msgs_result, sender_result,
+            # story #4846: one query fewer than before — the project-access read (`has_project_access`) is gone from the room-read check
+            conv_project_result, member_result, pids_result, msgs_result, sender_result,
             runtime_type_result, refs_result, blocked_sender_result, viewer_blocks_result,
         ])
 

@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.datetime_query import aware_datetime_query
 from app.dependencies.auth import (
     AuthContext,
+    ServerIssuedAuth,
     get_current_user,
     get_current_user_streaming,
     get_verified_org_id,
@@ -438,7 +439,7 @@ class CreateEventRequest(BaseModel):
 
 class EventResponse(BaseModel):
     id: uuid.UUID
-    project_id: uuid.UUID
+    project_id: uuid.UUID | None = None  # story #4846: the chat event rows of a room without a project carry none
     org_id: uuid.UUID
     event_type: str
     source_entity_type: str | None
@@ -3272,8 +3273,23 @@ async def _publish_registry_event_core(
         mentioned_ids=list(escalation_ids),
         event_context={"event_key": definition.key, "payload": payload, "refs": {**refs, **(routing_context or {})}},
     )
+    send_auth = auth
+    # story #4846 (AC12): an agent writes in a room of a project only while it has the project — except the notice of a recipe it is BOUND to, whose ground is
+    # the binding (a setting the user gave the agent). Every condition of that exception lives in ONE predicate (see its docstring); the mark is built here,
+    # after it holds, and nowhere else.
+    from app.services.recipe_role_bindings import recipe_notice_stands_on_binding
+
+    if await recipe_notice_stands_on_binding(
+        db, org_id=org_id, sender_type=sender.type, plain_call=not _is_system_publisher and not isinstance(auth, ServerIssuedAuth),
+        definition=definition, project_id=project_id, named_room=conversation_id is not None, agent_member_id=sender.id,
+    ):
+        from app.dependencies.auth import RecipeBoundAuth
+
+        send_auth = RecipeBoundAuth(
+            user_id=auth.user_id, email=auth.email, claims=auth.claims, org_id=auth.org_id, bound_project_id=project_id,
+        )
     msg_response = await send_message_core(
-        conv.id, send_body, background_tasks, db=db, auth=auth, org_id=org_id, after_commit=after_commit,
+        conv.id, send_body, background_tasks, db=db, auth=send_auth, org_id=org_id, after_commit=after_commit,
         as_system_publisher=post_as_system_publisher,
     )
     if sender.type == "agent" and payload.get("work_item_type") == "story" and payload.get("work_item_id"):
@@ -3460,7 +3476,7 @@ async def publish_preset_event(
     # SAVEPOINT 안에서 예약된 wake(event_seq)는 그 SAVEPOINT 소유라, 실패해 롤백되면 그것만 버려진다(after_commit 기전).
     async with db.begin_nested():
         system_member = await _get_or_create_system_publisher(db, org_id)
-        auth = AuthContext(
+        auth = ServerIssuedAuth(
             user_id=str(system_member.id), email=None,
             claims={"app_metadata": {"api_key_id": "system-publisher"}}, org_id=str(org_id),
         )
@@ -4140,6 +4156,31 @@ async def apply_recipe_role_bindings(
             status_code=422,
             detail=f"agent(s) not found in this org: {missing_agents}",
         )
+
+    if body.project_id is not None:
+        # story #4846 (AC12): a binding of a PROJECT says «this agent does this recipe's work in that project», and an agent writes in a project's rooms only
+        # while it has the project — so it is told now, not by a notice that silently stops later. An organization-wide binding (no project) is unchanged.
+        from app.services.project_auth import has_project_access as _agent_has_project
+
+        agent_kind = {
+            member_id: kind for member_id, kind in (await db.execute(
+                select(TeamMember.id, TeamMember.type).where(TeamMember.id.in_(agent_ids), TeamMember.org_id == org_id)
+            )).all()
+        }
+        lacking = []
+        for agent_id in sorted(agent_ids, key=str):
+            # only an AGENT needs the project to write there; a person mapped to a stage is not asked (human stages never required a grant)
+            if agent_kind.get(agent_id) == "agent" and not await _agent_has_project(db, agent_id, body.project_id, org_id):
+                lacking.append(str(agent_id))
+        if lacking:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "AGENT_LACKS_PROJECT",
+                    "message": "Agent(s) are not members of this project — give them the project first, or bind them organization-wide",
+                    "errors": lacking,
+                },
+            )
 
     channel_connection_ids = {uuid.UUID(v) for v in channel_stage_values.values()}
     valid_connections = set((await db.execute(

@@ -29,6 +29,26 @@ class AuthContext:
     org_id: str | None = field(default=None)
 
 
+@dataclass
+class ServerIssuedAuth(AuthContext):
+    """story #4846 — an AuthContext that only SERVER code builds, for a message or notice the server itself issues (the system publisher's automatic
+    notices, an operator alert, the repeat scheduler, a server-executed chat command). `get_current_user` and every other dependency return a plain
+    `AuthContext`, never this class, and nothing a request carries (key, header, body, token claims) can make one — which is why the checks that must not
+    stop the server's own voice (the agent's-project term of a room, AC12) test `isinstance(auth, ServerIssuedAuth)` and NOT a string in the claims."""
+
+
+@dataclass
+class RecipeBoundAuth(AuthContext):
+    """story #4846 (AC12) — an AuthContext that only SERVER code builds, in ONE place: the recipe publish (`_publish_registry_event_core`), after it has
+    checked that THIS agent is bound to THIS recipe (an organization-wide binding, or a binding of the work item's project while the agent still holds that
+    project). The agent stays the sender; what the mark does is let that one notice past the room's «an agent needs the room's project» term, for a room of
+    `bound_project_id` and no other. The binding is a setting the user gave the agent themselves, so it is the ground of the notice; revoking the project
+    takes the project binding's notices away with it. Like `ServerIssuedAuth`, no dependency returns this class and nothing a request carries can make one,
+    so the term tests `isinstance` and never a string in the claims."""
+
+    bound_project_id: uuid.UUID | None = None
+
+
 async def _persist_first_auth_seen(
     member_id: uuid.UUID, org_id: str | None, project_id: str | None,
     transport: str | None = None,

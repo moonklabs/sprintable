@@ -1757,9 +1757,10 @@ async def get_story_outgoing_references(
                 "referenced_at": r.created_at.isoformat(),
                 "still_exists": r.still_exists,
                 "proof_payload": r.proof_payload,
+                # story #4846: a room may have no project — the key is there and its value is None: that is null, not the string «None»
                 "conversation_project_id": (
-                    str(project_by_conversation[conversation_id_by_target_id[r.target_id]])
-                    if conversation_id_by_target_id.get(r.target_id) in project_by_conversation else None
+                    None if project_by_conversation.get(conversation_id_by_target_id.get(r.target_id)) is None
+                    else str(project_by_conversation[conversation_id_by_target_id[r.target_id]])
                 ),
             }
             for r in refs

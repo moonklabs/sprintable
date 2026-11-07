@@ -241,6 +241,28 @@ async def test_last_server_stage_reaches_the_person_who_approved_the_publish_gat
 
 
 @pytest.mark.anyio
+async def test_an_agent_with_an_organization_wide_binding_and_no_project_grant_still_sends_the_stage_notice():
+    """story #4846 (AC12), the safety net on the existing recipe world: an agent bound to the recipe ORGANIZATION-WIDE (no project) sends the stage notice
+    without a grant on the work item's project — the binding is the user's setting and the ground of the notice (owner decision). An ordinary message of
+    the same agent is refused there (pinned in test_4846_recipe_bound_notice_realdb)."""
+    from sqlalchemy import delete, update
+
+    from app.models.project_access import ProjectAccess
+    from app.models.recipe_role_binding import RecipeRoleBinding
+
+    engine, Session = await _realdb_session()
+    try:
+        w = await _world(Session)
+        async with Session() as s:
+            await s.execute(delete(ProjectAccess).where(ProjectAccess.member_id == w["creator_id"]))
+            await s.execute(update(RecipeRoleBinding).where(RecipeRoleBinding.agent_member_id == w["creator_id"]).values(project_id=None))
+            await s.commit()
+        await _publish(Session, w, "draft")
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_agent_bound_to_the_previous_stage_also_receives_the_result():
     """AC2 — 직전 stage(pending_approval)에 에이전트가 묶여 있으면 그 에이전트도 받는다(승인자 ∪ 직전 stage 에이전트)."""
     from app.main import app

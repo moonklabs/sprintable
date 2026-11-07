@@ -4,6 +4,7 @@ message_gating.py와 동일 패턴). "연쇄 cap 초과 시 침묵이 아니라 
 chain_depth_cap·reason)."""
 from __future__ import annotations
 
+import contextlib
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -140,15 +141,20 @@ async def test_no_human_participants_no_event_and_no_db_roundtrip():
 
 
 @pytest.mark.anyio
-async def test_no_project_id_returns_empty_without_query():
-    """project_id 없는 conversation은 조회조차 안 한다(_dispatch_conversation_event와 동일
-    선행 가드 — DM 미배정 등 edge case)."""
+async def test_a_room_without_a_project_is_judged_like_any_other():
+    """story #4846: a conversation with no project is a room like the others — it used to return before any query (no event, silently); now its
+    human participants get the event, with no project on the row."""
     conversation = SimpleNamespace(id=uuid.uuid4(), project_id=None)
     msg = _msg()
     sender = _sender()
+    human = uuid.uuid4()
 
-    db = _DB([])  # execute가 호출되면 IndexError로 즉시 실패 — 조회 0회를 강제.
-    result = await conv._dispatch_human_intervention_event(
-        db, conversation, msg, uuid.uuid4(), sender, {uuid.uuid4()}, chain_depth_cap=4,
-    )
-    assert result == []
+    db = _DB([_result_scalars([human])])
+    with contextlib.ExitStack() as stack:
+        for p in _patches():
+            stack.enter_context(p)
+        result = await conv._dispatch_human_intervention_event(
+            db, conversation, msg, uuid.uuid4(), sender, {uuid.uuid4()}, chain_depth_cap=4,
+        )
+    assert len(result) == 1 and len(db.added) == 1
+    assert db.added[0].project_id is None and db.added[0].recipient_id == human

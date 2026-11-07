@@ -790,8 +790,8 @@ async def dispatch_approval_discussion_reply(
 
 
 async def _card_recipients_in_org(
-    db: AsyncSession, org_id: uuid.UUID, recipient_project_ids: dict[uuid.UUID, uuid.UUID],
-) -> dict[uuid.UUID, uuid.UUID]:
+    db: AsyncSession, org_id: uuid.UUID, recipient_project_ids: dict[uuid.UUID, uuid.UUID | None],
+) -> dict[uuid.UUID, uuid.UUID | None]:
     """story #4500 · #4505 (one place for the card notices — resolved · tossed): the ids a card mentioned, each resolved to
     its living member (an old alias id), and only this org's members receive — {canonical id: project}."""
     from app.services.member_resolver import canonicalize_member_ids, filter_org_member_ids
@@ -847,14 +847,13 @@ async def notify_gate_card_recipients_resolved(
         select(Conversation.id, Conversation.project_id).where(Conversation.id.in_(conv_ids), Conversation.org_id == org_id)
     )).all())
 
-    recipient_project_ids: dict[uuid.UUID, uuid.UUID] = {}
+    recipient_project_ids: dict[uuid.UUID, uuid.UUID | None] = {}
     for row in rows:
-        proj_id = conv_project_ids.get(row.conversation_id)
-        if proj_id is None:
-            continue  # project 없는 conversation은 스킵(Event.project_id NOT NULL) — 조용히 건너뜀.
+        if row.conversation_id not in conv_project_ids:
+            continue  # another org's conversation (story #4500) — skipped. story #4846: a room WITHOUT a project is this org's room: its notice goes, with no project.
         for mid in (row.mentioned_ids or []):
             try:
-                recipient_project_ids[uuid.UUID(str(mid))] = proj_id
+                recipient_project_ids[uuid.UUID(str(mid))] = conv_project_ids[row.conversation_id]
             except (ValueError, TypeError, AttributeError):
                 continue  # 손상된/구형 payload — 지어내지 않고 건너뜀(_batch_resolve_linked_proof 동일 관례).
     recipient_project_ids = await _card_recipients_in_org(db, org_id, recipient_project_ids)
@@ -921,11 +920,13 @@ async def notify_gate_delegated_to_old_approver(
     if row is None:
         return []
     conversation_id = row[0]
-    proj_id = (await db.execute(
-        select(Conversation.project_id).where(Conversation.id == conversation_id)
-    )).scalar_one_or_none()
-    if proj_id is None:
+    # story #4846: a room may have no project, so «no project» is not «no such conversation» — it is that conversation, with no project label.
+    conv_row = (await db.execute(
+        select(Conversation.id, Conversation.project_id).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+    )).first()
+    if conv_row is None:
         return []
+    proj_id = conv_row.project_id
 
     from app.services.member_resolver import lookup_members_by_ids
     members = await lookup_members_by_ids({old_approver_id, new_approver_id}, db)
@@ -1079,14 +1080,13 @@ async def notify_gate_tossed(
         select(Conversation.id, Conversation.project_id).where(Conversation.id.in_(conv_ids), Conversation.org_id == org_id)
     )).all())
 
-    recipient_project_ids: dict[uuid.UUID, uuid.UUID] = {}
+    recipient_project_ids: dict[uuid.UUID, uuid.UUID | None] = {}
     for row in rows:
-        proj_id = conv_project_ids.get(row.conversation_id)
-        if proj_id is None:
-            continue  # project 없는 conversation은 스킵(Event.project_id NOT NULL) — 조용히 건너뜀.
+        if row.conversation_id not in conv_project_ids:
+            continue  # another org's conversation (story #4500) — skipped. story #4846: a room WITHOUT a project is this org's room: its notice goes, with no project.
         for mid in (row.mentioned_ids or []):
             try:
-                recipient_project_ids[uuid.UUID(str(mid))] = proj_id
+                recipient_project_ids[uuid.UUID(str(mid))] = conv_project_ids[row.conversation_id]
             except (ValueError, TypeError, AttributeError):
                 continue  # 손상된/구형 payload — 지어내지 않고 건너뜀.
     recipient_project_ids = await _card_recipients_in_org(db, org_id, recipient_project_ids)

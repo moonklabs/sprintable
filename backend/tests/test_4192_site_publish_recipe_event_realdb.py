@@ -108,7 +108,7 @@ async def _world(Session):
         org_id, project_id = await _seed_org(s)
         await _seed_default_role(s, org_id)
         await _seed_system_publisher_teammember_shim(s, org_id, project_id)
-        agent_id = await _seed_agent(s, org_id, project_id)
+        agent_id = await _seed_agent(s, org_id, project_id, grant=True)   # story #4846 AC12
         human_user_id, human_id = await _seed_human(s, org_id)
         story_id = await _seed_story(s, org_id, project_id)
         await _bind_creator_stages(s, org_id=org_id, project_id=project_id, agent_id=agent_id)
