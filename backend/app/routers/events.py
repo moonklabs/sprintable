@@ -3274,23 +3274,20 @@ async def _publish_registry_event_core(
         event_context={"event_key": definition.key, "payload": payload, "refs": {**refs, **(routing_context or {})}},
     )
     send_auth = auth
-    if (
-        sender.type == "agent" and not _is_system_publisher and not isinstance(auth, ServerIssuedAuth) and project_id is not None
-        and conversation_id is None
-    ):
-        # story #4846 (AC12): an agent writes in a room of a project only while it has the project — except the notice of a recipe it is BOUND to, whose
-        # ground is the binding (a setting the user gave the agent): the mark is built here, after the check, and nowhere else. Only for the room the publish
-        # CHOOSES ITSELF (the event's own conversation): a caller who names a room (`conversation_id`) picks where the notice goes, so that room takes the
-        # ordinary rule (the agent needs the project there) — otherwise the binding would open every room of the project the agent was removed from
-        from app.dependencies.auth import RecipeBoundAuth
-        from app.services.recipe_role_bindings import agent_bound_to_recipe
+    # story #4846 (AC12): an agent writes in a room of a project only while it has the project — except the notice of a recipe it is BOUND to, whose ground is
+    # the binding (a setting the user gave the agent). Every condition of that exception lives in ONE predicate (see its docstring); the mark is built here,
+    # after it holds, and nowhere else.
+    from app.services.recipe_role_bindings import recipe_notice_stands_on_binding
 
-        if await agent_bound_to_recipe(
-            db, org_id=org_id, agent_member_id=sender.id, definition_key=definition.key, project_id=project_id,
-        ):
-            send_auth = RecipeBoundAuth(
-                user_id=auth.user_id, email=auth.email, claims=auth.claims, org_id=auth.org_id, bound_project_id=project_id,
-            )
+    if await recipe_notice_stands_on_binding(
+        db, org_id=org_id, sender_type=sender.type, plain_call=not _is_system_publisher and not isinstance(auth, ServerIssuedAuth),
+        definition=definition, project_id=project_id, named_room=conversation_id is not None, agent_member_id=sender.id,
+    ):
+        from app.dependencies.auth import RecipeBoundAuth
+
+        send_auth = RecipeBoundAuth(
+            user_id=auth.user_id, email=auth.email, claims=auth.claims, org_id=auth.org_id, bound_project_id=project_id,
+        )
     msg_response = await send_message_core(
         conv.id, send_body, background_tasks, db=db, auth=send_auth, org_id=org_id, after_commit=after_commit,
         as_system_publisher=post_as_system_publisher,
@@ -4165,9 +4162,15 @@ async def apply_recipe_role_bindings(
         # while it has the project — so it is told now, not by a notice that silently stops later. An organization-wide binding (no project) is unchanged.
         from app.services.project_auth import has_project_access as _agent_has_project
 
+        agent_kind = {
+            member_id: kind for member_id, kind in (await db.execute(
+                select(TeamMember.id, TeamMember.type).where(TeamMember.id.in_(agent_ids), TeamMember.org_id == org_id)
+            )).all()
+        }
         lacking = []
         for agent_id in sorted(agent_ids, key=str):
-            if not await _agent_has_project(db, agent_id, body.project_id, org_id):
+            # only an AGENT needs the project to write there; a person mapped to a stage is not asked (human stages never required a grant)
+            if agent_kind.get(agent_id) == "agent" and not await _agent_has_project(db, agent_id, body.project_id, org_id):
                 lacking.append(str(agent_id))
         if lacking:
             raise HTTPException(

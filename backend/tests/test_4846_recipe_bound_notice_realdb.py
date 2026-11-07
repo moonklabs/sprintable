@@ -301,3 +301,113 @@ async def test_binding_an_agent_to_a_project_needs_the_agent_to_have_the_project
         await apply(w["project_id"])
     assert e.value.status_code == 409 and e.value.detail["code"] == "AGENT_LACKS_PROJECT"
     await apply(None)                                                            # the organization-wide binding is unchanged
+
+
+async def test_the_mark_is_only_for_a_recipe_and_the_apply_409_only_for_an_agent():
+    """self-QA round: (1) a binding row of an event key whose definition is NOT a recipe (no `recipe_role_binding` routing) must not let that event past the
+    room's agent-project term; (2) a PERSON mapped to a stage is not asked for the project — only an agent is."""
+    from app.models.event_definition import EventDefinition
+    from app.models.recipe_role_binding import RecipeRoleBinding
+    from app.models.team import TeamMember
+    from app.routers.events import ApplyRecipeRoleBindingsRequest, EventPublishRequest, apply_recipe_role_bindings, publish_registry_event
+
+    Session = await _realdb_session_sync()
+    w = await _world(Session, binding="none", grant=False)
+    other_key = f"org.moonklabs.plain_{uuid.uuid4().hex[:6]}"
+    human_outside = uuid.uuid4()
+    async with Session() as s:
+        s.add(EventDefinition(
+            id=uuid.uuid4(), key=other_key, org_id=w["org_id"], name="plain", description="not a recipe",
+            payload_schema={"type": "object", "required": ["work_item_type", "work_item_id"],
+                            "properties": {"work_item_type": {"type": "string"}, "work_item_id": {"type": "string"}}},
+            routing={"escalation": {"kind": "server_derived", "target": "none"}, "broadcast": {"kind": "server_derived", "target": "none"}},
+            block_template={}, stage_metadata={}, enabled=True, version=1,
+        ))
+        s.add(RecipeRoleBinding(id=uuid.uuid4(), org_id=w["org_id"], project_id=None, stage="x", agent_member_id=w["agent_id"], event_definition_key=other_key))
+        s.add(TeamMember(id=human_outside, org_id=w["org_id"], project_id=w["other_project"], type="human", name="outside", is_active=True))
+        await s.commit()
+
+    async with Session() as s:                                                   # (1) the plain event of an agent with a binding row but no project → refused
+        with pytest.raises(HTTPException) as e:
+            await publish_registry_event(
+                EventPublishRequest(definition_key=other_key, payload={"work_item_type": "story", "work_item_id": str(w["story_id"])}),
+                BackgroundTasks(), _fake_request(), db=s, auth=_auth(w["agent_id"], w["org_id"]), org_id=w["org_id"],
+            )
+        assert e.value.status_code == 403 and e.value.detail == "Not a participant"
+
+    async with Session() as s:                                                   # (2) a person without the project, mapped to a stage → not a 409
+        from sqlalchemy import select
+
+        definition_id = (await s.execute(select(EventDefinition.id).where(EventDefinition.key == _KEY))).scalar_one()
+        owner = _auth(w["owner_user_id"], w["org_id"])
+        owner.claims.clear()
+        owner.claims["app_metadata"] = {}
+        out = await apply_recipe_role_bindings(
+            definition_id, ApplyRecipeRoleBindingsRequest(project_id=w["project_id"], role_mapping={"draft": str(human_outside)}),
+            db=s, auth=owner, org_id=w["org_id"],
+        )
+        await s.commit()
+        assert out is not None
+
+
+async def test_the_truth_table_of_the_one_predicate_that_lets_a_notice_carry_the_mark():
+    """the mark stood too wide three times (a bypass of the room term; a room the caller named; an event that is not a recipe's). Its conditions are ONE predicate
+    (`recipe_notice_stands_on_binding`) and this is its truth table: definition kind (recipe / not) × binding (organization-wide / project + the project held /
+    project + revoked / none) × room (the publish's own / named by the caller) — the mark stands ONLY for a recipe, bound organization-wide or by the project the agent
+    still holds, in the publish's own room; then each other term (sender an agent · a plain call · a known project) turned off on the best cell. A mutant deletes each term."""
+    from sqlalchemy import delete, select
+
+    from app.models.event_definition import EventDefinition
+    from app.models.project_access import ProjectAccess
+    from app.models.recipe_role_binding import RecipeRoleBinding
+    from app.services.recipe_role_bindings import recipe_notice_stands_on_binding
+
+    Session = await _realdb_session_sync()
+    w = await _world(Session, binding="none", grant=True)
+    plain_key = f"org.moonklabs.plain_{uuid.uuid4().hex[:6]}"
+    async with Session() as s:
+        s.add(EventDefinition(
+            id=uuid.uuid4(), key=plain_key, org_id=w["org_id"], name="plain", description="not a recipe",
+            payload_schema={"type": "object"},
+            routing={"escalation": {"kind": "server_derived", "target": "none"}, "broadcast": {"kind": "server_derived", "target": "none"}},
+            block_template={}, stage_metadata={}, enabled=True, version=1,
+        ))
+        await s.commit()
+    async with Session() as s:
+        definitions = {
+            "recipe": (await s.execute(select(EventDefinition).where(EventDefinition.key == _KEY))).scalars().first(),
+            "plain": (await s.execute(select(EventDefinition).where(EventDefinition.key == plain_key))).scalars().first(),
+        }
+
+    async def arrange(kind: str, binding: str) -> None:
+        async with Session() as s:
+            await s.execute(delete(RecipeRoleBinding).where(RecipeRoleBinding.org_id == w["org_id"]))
+            if binding != "none":
+                s.add(RecipeRoleBinding(
+                    id=uuid.uuid4(), org_id=w["org_id"], project_id=None if binding == "org" else w["project_id"], stage="draft",
+                    agent_member_id=w["agent_id"], event_definition_key=definitions[kind].key,
+                ))
+            await s.execute(delete(ProjectAccess).where(ProjectAccess.member_id == w["agent_id"]))
+            if binding != "project_revoked":
+                s.add(ProjectAccess(project_id=w["project_id"], member_id=w["agent_id"], org_member_id=None, permission="granted"))
+            await s.commit()
+
+    async def stands(kind, *, named=False, sender_type="agent", plain_call=True, project=True) -> bool:
+        async with Session() as s:
+            return await recipe_notice_stands_on_binding(
+                s, org_id=w["org_id"], sender_type=sender_type, plain_call=plain_call, definition=definitions[kind],
+                project_id=w["project_id"] if project else None, named_room=named, agent_member_id=w["agent_id"],
+            )
+
+    for kind in ("recipe", "plain"):
+        for binding in ("org", "project", "project_revoked", "none"):
+            await arrange(kind, binding)
+            for named in (False, True):
+                want = kind == "recipe" and binding in ("org", "project") and not named
+                assert await stands(kind, named=named) is want, (kind, binding, "named" if named else "own room")
+
+    await arrange("recipe", "org")                                                  # the best cell, then each remaining term off
+    assert await stands("recipe") is True
+    assert await stands("recipe", sender_type="human") is False
+    assert await stands("recipe", plain_call=False) is False
+    assert await stands("recipe", project=False) is False

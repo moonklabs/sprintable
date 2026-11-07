@@ -52,6 +52,34 @@ async def agent_bound_to_recipe(
     return False
 
 
+def is_recipe_definition(definition) -> bool:
+    """a RECIPE is an event definition whose broadcast is routed by the recipe role bindings"""
+    return (((getattr(definition, "routing", None) or {}).get("broadcast")) or {}).get("kind") == "recipe_role_binding"
+
+
+async def recipe_notice_stands_on_binding(
+    db: AsyncSession, *, org_id: uuid.UUID, sender_type: str, plain_call: bool, definition, project_id: uuid.UUID | None,
+    named_room: bool, agent_member_id: uuid.UUID,
+) -> bool:
+    """story #4846 (AC12) — THE ONE PREDICATE for «this publish may carry the recipe-bound mark». Every term must hold, and the truth table of
+    tests/test_4846_recipe_bound_notice_realdb.py pins each (a mutant deletes each term):
+      · the sender is an AGENT, and the call is a plain one (not the system publisher and not a server-issued context — those have their own ground);
+      · the event is about a work item of a known project;
+      · the caller did NOT name the room (a named room is the caller's choice and takes the ordinary rule);
+      · the event is a RECIPE's (its broadcast is routed by the role bindings), not any event of a key that has a binding row;
+      · this agent is bound to this recipe for that project (`agent_bound_to_recipe`)."""
+    return bool(
+        sender_type == "agent"
+        and plain_call
+        and project_id is not None
+        and not named_room
+        and is_recipe_definition(definition)
+        and await agent_bound_to_recipe(
+            db, org_id=org_id, agent_member_id=agent_member_id, definition_key=definition.key, project_id=project_id,
+        )
+    )
+
+
 async def upsert_role_binding(
     db: AsyncSession,
     *,
