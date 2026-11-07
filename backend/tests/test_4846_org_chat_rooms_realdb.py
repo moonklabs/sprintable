@@ -808,7 +808,7 @@ async def test_the_servers_own_notices_reach_a_room_of_a_project_its_publisher_i
             assert e.value.status_code == 403
         # and over HTTP: a request whose auth carries the very same claims is just an agent without the project
         from app.dependencies.auth import get_current_user
-        from app.dependencies.database import get_db
+        from tests.conftest import override_db_and_read
 
         async def _db():
             async with Session() as s2:
@@ -822,7 +822,7 @@ async def test_the_servers_own_notices_reach_a_room_of_a_project_its_publisher_i
         async def _auth():
             return outside
 
-        app.dependency_overrides[get_db] = _db
+        override_db_and_read(app, _db)   # the one way a test overrides the session (the guard of story 2451)
         app.dependency_overrides[get_current_user] = _auth
         try:
             async with _client_for(app) as c:
