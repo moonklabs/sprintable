@@ -1286,20 +1286,14 @@ async def test_sabotage_intra_statement_revoke_barrier_agent_admin_bypass_eligib
 # ─── §5회차 Blocker 2: `_can_read_conversation`의 project_access_valid — agent grant-loss ──
 
 
-async def test_can_read_conversation_agent_participant_keeps_the_room_after_grant_loss():
-    """story #4846 (AC2): the agent participant reads its room with or without the project grant (the old expectation after the revoke was
-    False: the `project_access_valid` atom). It is still total (never raises) and still True before the revoke.
+async def test_can_read_conversation_agent_grant_loss_atom_direct():
+    """story #4846 (AC12, owner decision): an AGENT participant reads a room WITH a project only while it has that project — revoking the grant is the
+    user stopping the agent there (as before this story: the original expectation of this test is back), and granting it again brings the room back.
+    A PERSON who lost the project keeps the room (the other tests of this story). Total: never raises.
 
-    (former docstring) 산티아고 Blocker 2(§5회차): `_can_read_conversation`이 API-key(에이전트) caller의
-    `project_access_valid`를 `True`로 하드코딩(재검증 없음)하던 구 동작을 없애고, human과 동일하게
-    `has_project_access`를 실제로 호출하는지 **직접**(HTTP 왕복이 아니라 함수 자체) 실증한다 —
-    "어떤 status code가 뜨는가"가 아니라 predicate의 진리값 자체를 단정해 어떤 atom을 겨냥하는지
-    모호함이 없게 한다.
-
-    유효 grant 보유 시 True(과차단 회귀 아님을 함께 확인) → grant 회수(`_revoke_team_member` —
-    이 project에 대한 유일한 project_access 행 삭제, agent_project_profiles는 유지되므로
-    `_resolve_member`의 sender 해소 자체는 여전히 성공한다 — False가 sender-resolution 실패가
-    아니라 project_access_valid 재평가 자체에서 나온다는 것을 보장) 후 False."""
+    (former docstring) 산티아고 Blocker 2(§5회차): `_can_read_conversation`이 API-key(에이전트) caller의 `project_access_valid`를 `True`로 하드코딩하던 구 동작을
+    없애고 `has_project_access`를 실제로 호출하는지 **직접** 실증한다.
+    """
     from app.routers.conversations import _can_read_conversation
     from app.dependencies.auth import AuthContext
 
@@ -1330,7 +1324,18 @@ async def test_can_read_conversation_agent_participant_keeps_the_room_after_gran
 
         async with Session() as s:
             result_after = await _can_read_conversation(conv_id, s, auth, org.id)
-        assert result_after is True, "a participant agent keeps its room after its project grant is gone (story #4846)"
+        assert result_after is False, (
+            "Blocker 2(§5회차) 회귀 / AC12: 에이전트 grant 회수 후에도 _can_read_conversation이 True를 반환함"
+        )
+
+        # granted again → the room is back (the participant row was never removed)
+        async with Session() as s:
+            from app.models.project_access import ProjectAccess
+
+            s.add(ProjectAccess(id=uuid.uuid4(), project_id=project.id, org_member_id=None, member_id=agent_id, permission="granted", role="member"))
+            await s.commit()
+        async with Session() as s:
+            assert await _can_read_conversation(conv_id, s, auth, org.id) is True
     finally:
         await engine.dispose()
 

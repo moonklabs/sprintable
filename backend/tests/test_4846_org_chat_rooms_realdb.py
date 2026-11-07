@@ -651,6 +651,128 @@ async def test_deleting_a_project_with_text_only_rooms_keeps_the_rooms():
         await engine.dispose()
 
 
+async def test_a_revoked_agent_loses_the_rooms_of_that_project_and_gets_them_back_when_granted_again():
+    """AC12 (owner decision): revoking an agent's access to a project is the user stopping that agent there — so in a room WITH that project the agent can
+    no longer read (REST), write (REST) or be heard (socket / bulk), the participant row stays, and granting it again brings the room back. A room WITHOUT
+    a project asks nothing more of the agent than being in it. A PERSON who lost the project is the other way round (they keep their room)."""
+    from sqlalchemy import select, text
+
+    from app.models.conversation import Conversation
+    from app.models.project_access import ProjectAccess
+    from app.services.conversation_auth import (
+        agent_project_valid_for_room,
+        conversation_readable_predicate,
+        socket_can_read_conversation,
+    )
+
+    engine, Session, w = await _world()
+    try:
+        async def agent_view():
+            read = await _status(Session, w, "agent_participant", w.r_human)
+            write = await _post(Session, w, w.g_p, w.r_human, agent=True)
+            read_n = await _status(Session, w, "agent_participant", w.n_human)
+            async with Session() as s:
+                sock = await socket_can_read_conversation(s, w.r_human, w.org, member_id=w.g_p, access_user_id=w.g_p, via_agent_key=True)
+                sock_n = await socket_can_read_conversation(s, w.n_human, w.org, member_id=w.g_p, access_user_id=w.g_p, via_agent_key=True)
+                admin = text("false")
+                bulk = set((await s.execute(
+                    select(Conversation.id).where(
+                        Conversation.org_id == w.org,
+                        conversation_readable_predicate(
+                            Conversation.id, caller_member_id=w.g_p, admin_bypass_eligible=False,
+                            agent_project_valid=await agent_project_valid_for_room(
+                                s, caller_is_agent=True, caller_id=w.g_p, conv_project_id=w.p1, org_id=w.org),
+                        ),
+                    )
+                )).scalars().all())
+            return read, write, read_n, sock, sock_n, w.r_human in bulk
+
+        assert await agent_view() == (200, 201, 200, True, True, True)           # granted: as always
+        async with Session() as s:
+            await s.execute(text("DELETE FROM project_access WHERE member_id = :m AND project_id = :p"), {"m": w.g_p, "p": w.p1})
+            await s.commit()
+        assert await agent_view() == (403, 403, 200, False, True, False)         # revoked: the P1 room is closed to it (read · write · socket · bulk); the room without a project is not
+        async with Session() as s:
+            assert (await s.execute(text("SELECT count(*) FROM conversation_participants WHERE conversation_id = :c AND member_id = :m"),
+                                    {"c": w.r_human, "m": w.g_p})).scalar_one() == 1       # the participant row stays
+            s.add(ProjectAccess(id=uuid.uuid4(), project_id=w.p1, org_member_id=None, member_id=w.g_p, permission="granted", role="member"))
+            await s.commit()
+        assert await agent_view() == (200, 201, 200, True, True, True)           # granted again: the room is back
+        # a PERSON who lost the project is the other way round
+        async with Session() as s:
+            await s.execute(text("DELETE FROM project_access WHERE member_id = :m"), {"m": w.h_a})
+            await s.commit()
+        assert await _status(Session, w, "participant", w.r_human) == 200
+    finally:
+        await engine.dispose()
+
+
+async def test_an_agent_key_of_another_organization_is_not_a_member_here_and_cannot_ask_for_our_room():
+    """codex/lens: the REST agent branch is tied to the organization like the socket judge's owner check; and asking for a room of another organization
+    directly — as a person or as an agent of that other organization — finds nothing (404)."""
+    from fastapi import HTTPException
+
+    from app.dependencies.auth import AuthContext
+    from app.main import app
+    from app.routers.conversations import _resolve_member
+    from tests.test_1994_backlink_api_realdb import _make_agent_member, _make_human_member, _make_org, _make_project
+
+    engine, Session, w = await _world()
+    try:
+        async with Session() as s:
+            other_org = await _make_org(s)
+            other_project = await _make_project(s, other_org.id, "Other")
+            other_agent = await _make_agent_member(s, other_org.id, other_project.id)
+            _m, other_user = await _make_human_member(s, other_org.id, other_project.id)
+        # our agent presented with another organization's id is not a member there; the other organization's agent is not a member of ours
+        auth_ours = AuthContext(user_id=str(w.g_p), email="a@x", claims={"app_metadata": {"org_id": str(other_org.id), "api_key_id": str(uuid.uuid4())}})
+        async with Session() as s:
+            with pytest.raises(HTTPException) as e1:
+                await _resolve_member(auth_ours, other_org.id, s, project_id=None)
+            assert e1.value.status_code == 400
+            auth_theirs = AuthContext(user_id=str(other_agent), email="b@x", claims={"app_metadata": {"org_id": str(w.org), "api_key_id": str(uuid.uuid4())}})
+            with pytest.raises(HTTPException) as e2:
+                await _resolve_member(auth_theirs, w.org, s, project_id=None)
+            assert e2.value.status_code == 400
+        # the other organization asks for our room directly
+        for setup, who in ((_setup_app_human, other_user), (_setup_app_agent, other_agent)):
+            await setup(app, Session, who, other_org.id)
+            try:
+                async with _client_for(app) as c:
+                    for path in (f"/api/v2/conversations/{w.r_human}", f"/api/v2/conversations/{w.n_human}/messages"):
+                        r = await c.get(path)
+                        assert r.status_code == 404, (path, r.status_code, r.text)
+                    assert (await c.post(f"/api/v2/conversations/{w.n_human}/messages", json={"content": "x"})).status_code == 404
+            finally:
+                app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+async def test_the_webhook_of_a_participant_agent_is_sent_for_a_room_without_a_project():
+    """the send path, not only the target resolution: the delivery is scheduled with NO project and with exactly the targets of the participants"""
+    from unittest.mock import AsyncMock, patch
+
+    from app.models.webhook_config import WebhookConfig
+
+    engine, Session, w = await _world()
+    try:
+        async with Session() as s:
+            mine = WebhookConfig(id=uuid.uuid4(), org_id=w.org, member_id=w.g_p, project_id=w.p1, url="https://a.example/hook", events=[])
+            stranger = WebhookConfig(id=uuid.uuid4(), org_id=w.org, member_id=w.g_plain, project_id=w.p1, url="https://b.example/hook", events=[])
+            s.add_all([mine, stranger])
+            await s.commit()
+        spy = AsyncMock()
+        with patch("app.services.conversation_webhook.deliver_conversation_message_webhook", spy):
+            await _send(Session, w, w.n_human, mentioned=[w.g_p])
+        assert spy.await_count == 1, spy.await_args_list
+        kw = spy.await_args.kwargs
+        assert kw["project_id"] is None and kw["conversation_id"] == w.n_human
+        assert {t.id for t in kw["targets"]} == {mine.id}
+    finally:
+        await engine.dispose()
+
+
 async def test_ac7_a_new_conversation_is_a_new_room():
     """The same participants twice → two rooms (no «existing» room is reused, nothing is merged)."""
     from app.main import app

@@ -642,6 +642,14 @@ async def list_entity_backlinks(
             # §6회차(마지막 atom) fix: 위에서 조립한 correlated EXISTS — 사전계산된 bool/`.in_()`
             # 멤버십이 아니라 메인 statement 실행 시점의 스냅샷으로 평가된다.
             admin_bypass_eligible=admin_bypass_eligible,
+            # story #4846 (AC12): an agent needs its project in a room that has one; a person, and a room without a project, ask nothing more.
+            agent_project_valid=(
+                or_(
+                    Conversation.project_id.is_(None),
+                    project_access_valid_correlated(Conversation.project_id, caller_id=uid, org_id=org_id),
+                )
+                if is_api_key else True
+            ),
         )
 
     # ── 단일 authz-embedded keyset 쿼리 — Python authz filter/retry 0, 2-phase 없음 ──

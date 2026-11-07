@@ -144,7 +144,10 @@ async def _resolve_member(
     """TeamMember 우선; grant-only 휴먼이면 ResolvedMember(org_member.id) 반환."""
     is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
     if is_api_key:
-        tm = (await db.execute(select(TeamMember).where(TeamMember.id == uuid.UUID(auth.user_id)))).scalars().first()
+        # story #4846: an agent of ANOTHER organization is not a member here (the socket judge asks the same of its owner)
+        tm = (await db.execute(
+            select(TeamMember).where(TeamMember.id == uuid.UUID(auth.user_id), TeamMember.org_id == org_id)
+        )).scalars().first()
         if tm is None:
             raise HTTPException(status_code=400, detail="Team member not found")
         return tm
@@ -161,20 +164,35 @@ async def _resolve_member(
     return await resolve_member(auth, org_id, db, project_id=project_id)
 
 
-async def _resolve_room_member(auth: AuthContext, org_id: uuid.UUID, db: AsyncSession) -> "ResolvedMember | TeamMember":
+async def _resolve_room_member(
+    auth: AuthContext, org_id: uuid.UUID, db: AsyncSession, conversation_id: uuid.UUID | None = None,
+) -> "ResolvedMember | TeamMember":
     """story #4846 — the caller as a member of an existing ROOM. A room belongs to the organization (its project is a label, maybe none), and
     being in it is what reads and writes it (`conversation_auth`), so the member is resolved for the organization, not for the room's project:
     a participant who lost access to the room's project is still the member of the room. Who may act in WHICH room is still decided by the
     participant check / `_can_read_conversation` that every caller runs next.
 
     Someone who is not a member of the organization at all is not in any of its rooms: that answers 403 «Not a participant» (it was 403 «No access
-    to this project» while the lookup was project-bound; the organization-level lookup says 400 «Organization member not found»)."""
+    to this project» while the lookup was project-bound; the organization-level lookup says 400 «Organization member not found», and an agent key of
+    another organization «Team member not found»).
+
+    An AGENT acts in a room that has a project only while it has that project (AC12 — the user stopping an agent there is not undone by the room):
+    pass `conversation_id` and the agent without the project gets 403 here, for every read and write route that resolves its caller this way."""
     try:
-        return await _resolve_member(auth, org_id, db, project_id=None)
+        member = await _resolve_member(auth, org_id, db, project_id=None)
     except HTTPException as e:
-        if e.status_code == 400 and e.detail == "Organization member not found":
+        if e.status_code == 400 and e.detail in ("Organization member not found", "Team member not found"):
             raise HTTPException(status_code=403, detail="Not a participant") from e
         raise
+    if conversation_id is not None and bool(auth.claims.get("app_metadata", {}).get("api_key_id")):
+        from app.services.conversation_auth import agent_project_valid_for_room, conversation_project
+
+        found, conv_project_id = await conversation_project(db, conversation_id, org_id)
+        if found and not await agent_project_valid_for_room(
+            db, caller_is_agent=True, caller_id=member.id, conv_project_id=conv_project_id, org_id=org_id,
+        ):
+            raise HTTPException(status_code=403, detail="Not a participant")
+    return member
 
 
 async def _effective_org_role(
@@ -1867,7 +1885,7 @@ async def get_conversation(
     ):
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    sender = await _resolve_room_member(auth, org_id, db)
+    sender = await _resolve_room_member(auth, org_id, db, conversation_id)
 
     # 270c87e6: caller의 mute 상태 노출(FE 토글 초기 상태·#1426). 비참여자(admin-bypass agent-only)는 False.
     # story #1976: 같은 단건 조회에 last_read_at도 편승(신규 쿼리 아님) — unread_count는 참여자일 때만 계산.
@@ -1997,11 +2015,16 @@ async def _can_read_conversation(
             else org_admin_valid_correlated(caller_id=uuid.UUID(auth.user_id), org_id=org_id)
         )
 
-        # story #4846: no project-access atom any more — being in the room reads it (conversation_auth docstring).
+        # story #4846: a PERSON needs no project access to read their room (conversation_auth docstring); an AGENT needs its project in a room that has one (AC12).
+        from app.services.conversation_auth import agent_project_valid_for_room
+
         predicate = conversation_readable_predicate(
             literal(conversation_id),
             caller_member_id=sender.id,
             admin_bypass_eligible=admin_bypass_eligible,
+            agent_project_valid=await agent_project_valid_for_room(
+                db, caller_is_agent=is_api_key, caller_id=uuid.UUID(auth.user_id), conv_project_id=conv_project_id, org_id=org_id,
+            ),
         )
         result = (await db.execute(select(predicate))).scalar_one()
         return bool(result)
@@ -2176,7 +2199,7 @@ async def delete_message(
     이상하다.
     """
     conv_project_id = await _authorize_message_read(conversation_id, db, auth, org_id)
-    member = await _resolve_room_member(auth, org_id, db)
+    member = await _resolve_room_member(auth, org_id, db, conversation_id)
 
     msg = (await db.execute(
         select(ConversationMessage).where(
@@ -2283,7 +2306,7 @@ async def list_working_members(
     if not (await conversation_project(db, conversation_id, org_id))[0]:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    sender = await _resolve_room_member(auth, org_id, db)
+    sender = await _resolve_room_member(auth, org_id, db, conversation_id)
     participant = (await db.execute(
         select(ConversationParticipant.id).where(
             ConversationParticipant.conversation_id == conversation_id,
@@ -2320,7 +2343,7 @@ async def set_conversation_mute(
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    sender = await _resolve_room_member(auth, org_id, db)
+    sender = await _resolve_room_member(auth, org_id, db, conversation_id)
     participant = (await db.execute(
         select(ConversationParticipant).where(
             ConversationParticipant.conversation_id == conversation_id,
@@ -2358,7 +2381,7 @@ async def mark_conversation_read(
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    sender = await _resolve_room_member(auth, org_id, db)
+    sender = await _resolve_room_member(auth, org_id, db, conversation_id)
     up_to = body.up_to or datetime.now(timezone.utc)
 
     result = await db.execute(_mark_read_update_stmt(conversation_id, sender.id, up_to))
@@ -2443,7 +2466,7 @@ async def release_circuit_breaker_endpoint(
             detail="서킷브레이커 해제는 org owner/admin만 가능합니다.",
         )
 
-    sender = await _resolve_room_member(auth, org_id, db)
+    sender = await _resolve_room_member(auth, org_id, db, conversation_id)
 
     from app.services.chain_escalation import release_circuit_breaker
 
@@ -2469,7 +2492,7 @@ async def add_participant(
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    sender = await _resolve_room_member(auth, org_id, db)
+    sender = await _resolve_room_member(auth, org_id, db, conversation_id)
 
     # 요청자 참여 여부 확인
     is_participant = (await db.execute(
@@ -2580,7 +2603,7 @@ async def send_message_core(
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    sender = await _resolve_room_member(auth, org_id, db)
+    sender = await _resolve_room_member(auth, org_id, db, conversation_id)
     if after_commit is not None and sender.type != "agent":
         raise ValueError("send_message_core(after_commit=...) is for server-issued (agent) messages only")
 
@@ -3534,7 +3557,7 @@ async def upload_conversation_attachment(
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    sender = await _resolve_room_member(auth, org_id, db)
+    sender = await _resolve_room_member(auth, org_id, db, conversation_id)
     participant = (await db.execute(
         select(ConversationParticipant.id).where(
             ConversationParticipant.conversation_id == conversation_id,
@@ -3600,7 +3623,7 @@ async def update_conversation_status(
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    requester = await _resolve_room_member(auth, org_id, db)
+    requester = await _resolve_room_member(auth, org_id, db, conversation_id)
 
     # 참여자 검증
     participant = (await db.execute(
@@ -3653,7 +3676,7 @@ async def update_conversation(
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    requester = await _resolve_room_member(auth, org_id, db)
+    requester = await _resolve_room_member(auth, org_id, db, conversation_id)
     participant = (await db.execute(
         select(ConversationParticipant.id).where(
             ConversationParticipant.conversation_id == conversation_id,
