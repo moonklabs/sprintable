@@ -167,7 +167,7 @@ async def _send(db: AsyncSession, alert: OperatorAlert, conversation_id: uuid.UU
     """운영 대화에 메시지 한 건(flush만 — 커밋은 부르는 쪽). 새 메시지 id."""
     from fastapi import BackgroundTasks, HTTPException
 
-    from app.dependencies.auth import AuthContext
+    from app.dependencies.auth import ServerIssuedAuth
     from app.models.conversation import Conversation, ConversationParticipant
     from app.routers.conversations import SendMessageRequest, send_message_core
     from app.routers.events import _get_or_create_system_publisher
@@ -183,7 +183,7 @@ async def _send(db: AsyncSession, alert: OperatorAlert, conversation_id: uuid.UU
         .values(id=uuid.uuid4(), conversation_id=conv.id, member_id=publisher.id)
         .on_conflict_do_nothing(constraint="uq_conversation_participant")
     )
-    auth = AuthContext(
+    auth = ServerIssuedAuth(
         user_id=str(publisher.id), email=None,
         claims={"app_metadata": {"api_key_id": "system-publisher"}}, org_id=str(conv.org_id),
     )

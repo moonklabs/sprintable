@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.datetime_query import aware_datetime_query
 from app.dependencies.auth import (
     AuthContext,
+    ServerIssuedAuth,
     get_current_user,
     get_current_user_streaming,
     get_verified_org_id,
@@ -3460,7 +3461,7 @@ async def publish_preset_event(
     # SAVEPOINT 안에서 예약된 wake(event_seq)는 그 SAVEPOINT 소유라, 실패해 롤백되면 그것만 버려진다(after_commit 기전).
     async with db.begin_nested():
         system_member = await _get_or_create_system_publisher(db, org_id)
-        auth = AuthContext(
+        auth = ServerIssuedAuth(
             user_id=str(system_member.id), email=None,
             claims={"app_metadata": {"api_key_id": "system-publisher"}}, org_id=str(org_id),
         )

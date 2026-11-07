@@ -129,6 +129,14 @@ async def authorize_attachment(
             raise HTTPException(status_code=403, detail="Attachment path not scoped to this conversation")
         # 권한: conversation 참가자(canonical member). team_member 봐주기 없음.
         member = await resolve_member(auth, org_id, db, project_id=None)
+        # story #4846 (AC12): an agent reads a room that has a project only with that project, as every other read of the room does
+        from app.services.conversation_auth import agent_project_valid_for_room
+
+        if not await agent_project_valid_for_room(
+            db, caller_is_agent=bool(auth.claims.get("app_metadata", {}).get("api_key_id")), caller_id=member.id,
+            conv_project_id=conv_proj, org_id=org_id,
+        ):
+            raise HTTPException(status_code=403, detail="Not a participant of this conversation")
         is_participant = (await db.execute(
             select(ConversationParticipant.id).where(
                 ConversationParticipant.conversation_id == conversation_id,

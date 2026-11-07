@@ -29,6 +29,14 @@ class AuthContext:
     org_id: str | None = field(default=None)
 
 
+@dataclass
+class ServerIssuedAuth(AuthContext):
+    """story #4846 — an AuthContext that only SERVER code builds, for a message or notice the server itself issues (the system publisher's automatic
+    notices, an operator alert, the repeat scheduler, a server-executed chat command). `get_current_user` and every other dependency return a plain
+    `AuthContext`, never this class, and nothing a request carries (key, header, body, token claims) can make one — which is why the checks that must not
+    stop the server's own voice (the agent's-project term of a room, AC12) test `isinstance(auth, ServerIssuedAuth)` and NOT a string in the claims."""
+
+
 async def _persist_first_auth_seen(
     member_id: uuid.UUID, org_id: str | None, project_id: str | None,
     transport: str | None = None,

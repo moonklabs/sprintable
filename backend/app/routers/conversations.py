@@ -19,7 +19,7 @@ from sqlalchemy.orm import aliased
 from app.core.datetime_query import OffsetDatetime
 from app.core.config import settings
 from app.core.pagination import assemble_page, decode_cursor
-from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+from app.dependencies.auth import AuthContext, ServerIssuedAuth, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db, get_read_db
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.doc import Doc
@@ -184,7 +184,10 @@ async def _resolve_room_member(
         if e.status_code == 400 and e.detail in ("Organization member not found", "Team member not found"):
             raise HTTPException(status_code=403, detail="Not a participant") from e
         raise
-    if conversation_id is not None and bool(auth.claims.get("app_metadata", {}).get("api_key_id")):
+    if (
+        conversation_id is not None and bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+        and not isinstance(auth, ServerIssuedAuth)           # the server's own notices (the system publisher is placed in ONE project) are not an agent's project act
+    ):
         from app.services.conversation_auth import agent_project_valid_for_room, conversation_project
 
         found, conv_project_id = await conversation_project(db, conversation_id, org_id)
@@ -212,7 +215,9 @@ async def _effective_org_role(
     재평가 — 휴먼은 원래대로 org-wide OrgMember.role(진짜 org 전체 권한이라 무관)."""
     if bool(auth.claims.get("app_metadata", {}).get("api_key_id")):
         if project_id is None:
-            return sender.role  # 레거시 폴백(project_id 미전달 호출부 — 현재 전 호출부가 전달함)
+            # story #4846: an agent holds no organization-wide role, so asked about no project (a room or a view WITHOUT one) it is no admin — it used to fall
+            # back to the role of «some» team_members row, which made an agent that is admin in any project an admin of the rooms that belong to none
+            return "member"
         from app.services.project_auth import get_project_role
         role = await get_project_role(db, sender.id, project_id)
         return role or "member"

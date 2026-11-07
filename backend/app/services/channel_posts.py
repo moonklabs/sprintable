@@ -2997,10 +2997,10 @@ async def _emit_recipe_published_stage_event_locked(
 
     from fastapi import BackgroundTasks
 
-    from app.dependencies.auth import AuthContext
+    from app.dependencies.auth import ServerIssuedAuth
 
     system_member = await _get_or_create_system_publisher(event_db, org_id)
-    auth = AuthContext(
+    auth = ServerIssuedAuth(
         user_id=str(system_member.id), email=None,
         claims={"app_metadata": {"api_key_id": "system-publisher"}}, org_id=str(org_id),
     )

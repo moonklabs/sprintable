@@ -773,6 +773,160 @@ async def test_the_webhook_of_a_participant_agent_is_sent_for_a_room_without_a_p
         await engine.dispose()
 
 
+async def _publisher_world():
+    """the system publisher is an agent placed in ONE project (P2) and is a participant of a room of ANOTHER project (P1)"""
+    from tests.test_1994_backlink_api_realdb import _make_agent_member, _make_conversation
+
+    engine, Session, w = await _world()
+    async with Session() as s:
+        w.pub = await _make_agent_member(s, w.org, w.p2)
+        w.r_pub = await _make_conversation(s, w.org, w.p1, [w.h_a, w.pub], w.h_a, "group")
+    return engine, Session, w
+
+
+async def test_the_servers_own_notices_reach_a_room_of_a_project_its_publisher_is_not_placed_in():
+    """lens (5432): the system publisher is placed in ONE project and issues notices to rooms of every project; the AC12 check (an agent needs the room's
+    project) must not stop the server's own voice — and nothing a request carries may make that mark."""
+    from fastapi import BackgroundTasks, HTTPException
+
+    from app.dependencies.auth import AuthContext, ServerIssuedAuth
+    from app.main import app
+    from app.routers.conversations import SendMessageRequest, send_message_core
+
+    engine, Session, w = await _publisher_world()
+    try:
+        claims = {"app_metadata": {"api_key_id": "system-publisher", "org_id": str(w.org)}}
+        server = ServerIssuedAuth(user_id=str(w.pub), email=None, claims=claims, org_id=str(w.org))
+        outside = AuthContext(user_id=str(w.pub), email=None, claims=claims, org_id=str(w.org))     # the same claims, but from a request
+        async with Session() as s:
+            got = await send_message_core(w.r_pub, SendMessageRequest(content="automatic notice"), BackgroundTasks(), db=s, auth=server, org_id=w.org)
+            assert got                                                                               # delivered: a message row exists
+            await s.commit()
+        async with Session() as s:
+            with pytest.raises(HTTPException) as e:
+                await send_message_core(w.r_pub, SendMessageRequest(content="forged"), BackgroundTasks(), db=s, auth=outside, org_id=w.org)
+            assert e.value.status_code == 403
+        # and over HTTP: a request whose auth carries the very same claims is just an agent without the project
+        from app.dependencies.auth import get_current_user
+        from app.dependencies.database import get_db
+
+        async def _db():
+            async with Session() as s2:
+                try:
+                    yield s2
+                    await s2.commit()
+                except Exception:
+                    await s2.rollback()
+                    raise
+
+        async def _auth():
+            return outside
+
+        app.dependency_overrides[get_db] = _db
+        app.dependency_overrides[get_current_user] = _auth
+        try:
+            async with _client_for(app) as c:
+                r = await c.post(f"/api/v2/conversations/{w.r_pub}/messages", json={"content": "forged over http"})
+            assert r.status_code == 403, r.text
+        finally:
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+async def test_server_issued_auth_is_never_what_a_dependency_returns():
+    """the mark is a class only server code instantiates: `get_current_user` (and the dependencies built on it) return a plain AuthContext"""
+    import inspect
+
+    import app.dependencies.auth as auth_mod
+
+    src = inspect.getsource(auth_mod)
+    assert src.count("ServerIssuedAuth(") == 0 or src.count("ServerIssuedAuth(") == src.count("class ServerIssuedAuth(AuthContext)"), "nothing in auth.py builds one"
+
+
+async def test_an_agent_has_no_organization_wide_role_without_a_project():
+    """lens (5433): `_effective_org_role` with no project fell back to the role of «some» team_members row — an agent that is admin in any project was the admin
+    of every room that belongs to none"""
+    from app.dependencies.auth import AuthContext
+    from app.routers.conversations import _effective_org_role, _resolve_member
+
+    engine, Session, w = await _world()
+    try:
+        auth = AuthContext(user_id=str(w.g_admin), email=None, claims={"app_metadata": {"api_key_id": str(uuid.uuid4()), "org_id": str(w.org)}}, org_id=str(w.org))
+        async with Session() as s:
+            sender = await _resolve_member(auth, w.org, s, project_id=None)
+            assert await _effective_org_role(auth, w.org, s, sender, project_id=w.p1) == "admin"        # admin of the project it is admin in
+            assert await _effective_org_role(auth, w.org, s, sender, project_id=None) == "member"        # of no project: no role
+    finally:
+        await engine.dispose()
+
+
+async def test_the_attachment_authorize_route_asks_the_agents_project_like_every_other_read():
+    from sqlalchemy import text
+
+    from app.main import app
+
+    engine, Session, w = await _world()
+    try:
+        path = f"org/{w.org}/project/{w.p1}/chat/{w.r_human}/f.txt"
+
+        async def authorize():
+            await _setup_app_agent(app, Session, w.g_p, w.org)
+            try:
+                async with _client_for(app) as c:
+                    r = await c.get("/api/v2/attachments/authorize", params={"conversation_id": str(w.r_human), "path": path})
+                return r.status_code, r.text
+            finally:
+                app.dependency_overrides.clear()
+
+        code, body = await authorize()
+        assert code == 403 and "does not belong" in body, (code, body)          # granted: past the participant gate (the file is not this room's)
+        async with Session() as s:
+            await s.execute(text("DELETE FROM project_access WHERE member_id = :m AND project_id = :p"), {"m": w.g_p, "p": w.p1})
+            await s.commit()
+        code, body = await authorize()
+        assert code == 403 and "Not a participant" in body, (code, body)        # revoked: stopped at the participant gate
+    finally:
+        await engine.dispose()
+
+
+async def test_the_backlinks_of_a_doc_follow_the_agents_project_term_of_the_room():
+    """lens recommendation: the bulk (backlinks) form of the agent's project term had no test — a mutant survived. An agent with a grant on P2 only reads a doc
+    of P2; a room of P1 (the agent a participant) mentions it: the item is shown while the agent has P1 and hidden once P1 is revoked."""
+    from app.main import app
+    from tests.test_1994_backlink_api_realdb import _add_message, _make_doc, _make_mention
+    from sqlalchemy import text
+    from app.models.project_access import ProjectAccess
+    from datetime import datetime, timezone
+
+    engine, Session, w = await _world()
+    try:
+        async with Session() as s:
+            doc = await _make_doc(s, w.org, w.p2, title="Target")
+            s.add(ProjectAccess(id=uuid.uuid4(), project_id=w.p2, org_member_id=None, member_id=w.g_p, permission="granted", role="member"))
+            await s.commit()
+            msg = await _add_message(s, w.r_agents, w.g_2, f"[doc](entity:doc:{doc.id})", datetime.now(timezone.utc))
+            await _make_mention(s, w.org, "chat_message", msg.id, doc.id, created_by=w.g_2)
+
+        async def backlinks():
+            await _setup_app_agent(app, Session, w.g_p, w.org)
+            try:
+                async with _client_for(app) as c:
+                    r = await c.get(f"/api/v2/docs/{doc.id}/backlinks")
+                assert r.status_code == 200, r.text
+                return [i["source_id"] for i in r.json()["data"]]
+            finally:
+                app.dependency_overrides.clear()
+
+        assert await backlinks() == [str(msg.id)]
+        async with Session() as s:
+            await s.execute(text("DELETE FROM project_access WHERE member_id = :m AND project_id = :p"), {"m": w.g_p, "p": w.p1})
+            await s.commit()
+        assert await backlinks() == []
+    finally:
+        await engine.dispose()
+
+
 async def test_ac7_a_new_conversation_is_a_new_room():
     """The same participants twice → two rooms (no «existing» room is reused, nothing is merged)."""
     from app.main import app
