@@ -104,6 +104,8 @@ describe('POST /api/conversations/{id}/attachments — a prefix is taken only wh
   bad('a dot segment standing for the project', `org/${ORG}/project/../chat/${CONV}/`);
   bad('a single-dot segment standing for the project', `org/${ORG}/project/./chat/${CONV}/`);
   bad('a backslash inside the project segment', `org/${ORG}/project/p\\1/chat/${CONV}/`);
+  bad('another first segment (not under org/)', `x/${ORG}/chat/${CONV}/`);
+  bad('a prefix that is only a path under another root', `${ORG}/chat/${CONV}/`);
   bad('a leading slash (it would leave the storage root)', `/org/${ORG}/chat/${CONV}/`);
   bad('another project of the same organization (the room\'s own is proj-1)', `org/${ORG}/project/proj-2/chat/${CONV}/`);
   bad('the project segment spelled «chat»', `org/${ORG}/project/chat/chat/${CONV}/`);

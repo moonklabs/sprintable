@@ -17,16 +17,15 @@ const FASTAPI_URL = () => fastapiBaseUrl();
 // 이후 POST /api/v2/conversations/{id}/messages 의 attachments 에 그대로 실어 보낸다.
 /**
  * `org/{org}/chat/{conversation}/` (a room with no project) or `org/{org}/project/{project}/chat/{conversation}/` (a room with that project) — this organization's, this room's,
- * and for a project room that room's own project; nothing else. Every segment is non-empty (no leading slash, no `//`), none is `.` or `..`, no backslash: the prefix becomes a
- * storage object path and must not name another place.
+ * and for a project room that room's own project; nothing else. The segments are compared EXACTLY with the ids this route just read from the backend, so a dot or empty segment,
+ * a backslash, another room / organization / project can never match; the prefix becomes a storage object path and must name nothing but its own room.
  */
 function isThisRoomsPrefix(prefix: string, orgId: string, conversationId: string, projectId: string | null | undefined): boolean {
-  if (!prefix.endsWith('/') || prefix.includes('\\')) return false;
+  if (!prefix.endsWith('/')) return false;
   const parts = prefix.slice(0, -1).split('/');
-  if (parts.some((p) => p.length === 0 || p === '.' || p === '..')) return false;
   if (parts[0] !== 'org' || parts[1] !== orgId || parts[parts.length - 1] !== conversationId) return false;
   if (parts.length === 4) return parts[2] === 'chat' && !projectId; // a room with no project
-  if (parts.length === 6) return parts[2] === 'project' && parts[4] === 'chat' && Boolean(projectId) && parts[3] === projectId; // a room with a project: that project
+  if (parts.length === 6) return parts[2] === 'project' && parts[4] === 'chat' && parts[3] === projectId; // a room with a project: that project
   return false;
 }
 
