@@ -30,6 +30,7 @@ from app.models.doc import Doc
 from app.models.pm import Story
 from app.models.team import TeamMember
 from app.services.asset_registry import DEFAULT_CONTAINER
+from app.services.chat_asset_scope import asset_scope_clause, room_readable_clause
 from app.services.member_resolver import canonicalize_member_id, resolve_member
 from app.services.project_auth import accessible_project_ids_in_org, has_project_access, require_project_access
 from app.services.text_preview import plain_text_preview
@@ -138,21 +139,31 @@ def _decode_cursor(cursor: str, sort: str) -> tuple[Any, uuid.UUID]:
 
 
 async def _scope_filter(db, auth, org_id, project_id):
-    """org + project 접근권으로 쿼리 스코프(IDOR 차단). 반환=(WHERE clauses, accessible project set).
+    """org + project 접근권으로 쿼리 스코프(IDOR 차단). 반환=(WHERE clauses, accessible project set, room ctx).
 
     accessible set 은 enrich source 스코프(타 project source 누수 차단·까심 R3)에도 재사용한다.
+
+    story #4846 (AC10): an asset whose every link is a chat message follows its ROOM (the one readable predicate), not its project — see
+    `chat_asset_scope`; every other asset follows the project scope below, as before. `room ctx` = (caller member id, is agent, user id) for the enrichment.
     """
+    from app.services.backlinks import _chat_predicate_inputs
+
     user_id = uuid.UUID(auth.user_id)
     clauses = [Asset.org_id == org_id, Asset.deleted_at.is_(None)]
     if project_id is not None:
         if not await has_project_access(db, user_id, project_id, org_id):
             raise HTTPException(status_code=403, detail="No access to this project")
-        clauses.append(Asset.project_id == project_id)
+        clauses.append(Asset.project_id == project_id)           # the filter the caller asked for, for every asset
         accessible = {project_id}
+        project_rule = Asset.project_id == project_id
     else:
         accessible = set(await accessible_project_ids_in_org(db, user_id, org_id))
-        clauses.append(or_(Asset.project_id.is_(None), Asset.project_id.in_(accessible)))
-    return clauses, accessible
+        project_rule = or_(Asset.project_id.is_(None), Asset.project_id.in_(accessible))
+    caller_member_id, is_agent = await _chat_predicate_inputs(db, org_id, auth)
+    clauses.append(asset_scope_clause(
+        project_rule, caller_member_id=caller_member_id, is_agent=bool(is_agent), user_id=user_id, org_id=org_id,
+    ))
+    return clauses, accessible, (caller_member_id, bool(is_agent), user_id)
 
 
 @router.get("/assets", response_model=AssetPage)
@@ -169,7 +180,7 @@ async def list_assets(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> AssetPage:
-    clauses, accessible = await _scope_filter(db, auth, org_id, project_id)
+    clauses, accessible, room_ctx = await _scope_filter(db, auth, org_id, project_id)
     if folder_id is not None:
         clauses.append(Asset.folder_id == folder_id)
     if mime:
@@ -194,7 +205,7 @@ async def list_assets(
     )
     assets = list((await db.execute(stmt)).scalars().all())
 
-    enriched = await _enrich(db, org_id, accessible, assets)
+    enriched = await _enrich(db, org_id, accessible, assets, room_ctx)
     items = [enriched[a.id] for a in assets]
     next_cursor = None
     if len(assets) == limit:
@@ -349,6 +360,7 @@ async def _enrich(
     org_id: uuid.UUID,
     accessible: set[uuid.UUID],
     assets: list[Asset],
+    room_ctx: tuple | None = None,
 ) -> dict[uuid.UUID, AssetResponse]:
     """페이지 단위 batch enrich(N+1 회피): created_by(name/avatar) + source_links(title/deeplink).
 
@@ -395,14 +407,23 @@ async def _enrich(
         )
     )).all() if by_type.get("doc") and accessible else []
     doc_t = {r[0]: (r[1], r[2]) for r in doc_rows}
+    # story #4846 (AC10): a message is shown as a source only to someone who can READ its room (with the caller's room context; a caller without one — the
+    # upload-confirm response, a manual asset — keeps the project scope). A room without a project is listed here too.
+    if room_ctx is not None:
+        _member, _is_agent, _uid = room_ctx
+        msg_scope = room_readable_clause(
+            Conversation.id, Conversation.project_id, caller_member_id=_member, is_agent=_is_agent, user_id=_uid, org_id=org_id,
+        )
+    else:
+        msg_scope = Conversation.project_id.in_(accessible)
     msg_rows = (await db.execute(
         select(ConversationMessage.id, ConversationMessage.conversation_id, ConversationMessage.content)
         .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
         .where(
             ConversationMessage.id.in_(by_type["conversation_message"]),
-            Conversation.org_id == org_id, Conversation.project_id.in_(accessible),
+            Conversation.org_id == org_id, msg_scope,
         )
-    )).all() if by_type.get("conversation_message") and accessible else []
+    )).all() if by_type.get("conversation_message") and (accessible or room_ctx is not None) else []
     msg_t = {r[0]: (r[1], r[2]) for r in msg_rows}
 
     # created_by enrich — team_members 뷰(name NOT NULL·avatar nullable)·org-scoped(member=org 레벨).
@@ -479,13 +500,13 @@ async def get_asset(
         aid = uuid.UUID(asset_id)
     except ValueError:
         raise HTTPException(status_code=404, detail="Asset not found") from None
-    clauses, accessible = await _scope_filter(db, auth, org_id, None)
+    clauses, accessible, room_ctx = await _scope_filter(db, auth, org_id, None)
     asset = (await db.execute(
         select(Asset).where(Asset.id == aid, and_(*clauses))
     )).scalar_one_or_none()
     if asset is None:
         raise HTTPException(status_code=404, detail="Asset not found")
-    enriched = await _enrich(db, org_id, accessible, [asset])
+    enriched = await _enrich(db, org_id, accessible, [asset], room_ctx)
     return enriched[asset.id]
 
 
@@ -507,13 +528,26 @@ async def delete_asset(
         aid = uuid.UUID(asset_id)
     except ValueError:
         raise HTTPException(status_code=404, detail="Asset not found") from None
-    clauses, _accessible = await _scope_filter(db, auth, org_id, None)
+    clauses, _accessible, _room_ctx = await _scope_filter(db, auth, org_id, None)
     asset = (await db.execute(
         select(Asset).where(Asset.id == aid, and_(*clauses))
     )).scalar_one_or_none()
     if asset is None:
         raise HTTPException(status_code=404, detail="Asset not found")
     asset.deleted_at = datetime.now(timezone.utc)
+    # story #4846 (AC10): what was derived from this file (the converted PDF) lives as long as it does — its scope is its origin's, so it must not outlive it
+    from sqlalchemy import update
+
+    from app.services.office_conversion import converted_object_path
+
+    await db.execute(
+        update(Asset)
+        .where(
+            Asset.org_id == asset.org_id, Asset.container == asset.container, Asset.deleted_at.is_(None),
+            Asset.object_path == converted_object_path(asset.org_id, asset.project_id, asset.id),
+        )
+        .values(deleted_at=asset.deleted_at)
+    )
     await db.commit()
     return {"ok": True}
 
@@ -541,7 +575,7 @@ async def get_asset_text(
         aid = uuid.UUID(asset_id)
     except ValueError:
         raise HTTPException(status_code=404, detail="Asset not found") from None
-    clauses, _accessible = await _scope_filter(db, auth, org_id, None)
+    clauses, _accessible, _room_ctx = await _scope_filter(db, auth, org_id, None)
     asset = (await db.execute(
         select(Asset).where(Asset.id == aid, and_(*clauses))
     )).scalar_one_or_none()
