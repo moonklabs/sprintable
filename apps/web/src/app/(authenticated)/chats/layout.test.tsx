@@ -375,6 +375,21 @@ describe('ChatsLayout — story #4762 AC2 (no project is an answer, not «loadin
     }
   });
 
+  it('⭐프로젝트가 하나도 없으면 «새 대화» 단추가 없다(만들 수 없는 창을 열지 않는다) — 프로젝트가 있으면 있다', async () => {
+    const hasNewConversation = () => [...container.querySelectorAll('button')].some((b) => b.textContent?.includes(koMessages.chats.newConversation));
+    await renderWith({ currentTeamMemberId: 'member-1', projectId: undefined, projectMemberships: [] });
+    expect(hasNewConversation()).toBe(false);
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await renderWith({ currentTeamMemberId: 'member-1', projectId: undefined, projectMemberships: [{ projectId: 'p1', projectName: 'A' }] });
+    expect(hasNewConversation()).toBe(true);
+  });
+
+  it('경로의 프로젝트를 아직 푸는 중이면 «새 대화» 단추를 지우지 않는다', async () => {
+    await renderWith({ currentTeamMemberId: 'member-1', projectId: undefined, projectMemberships: [], projectPathUnresolved: true });
+    expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes(koMessages.chats.newConversation))).toBe(true);
+  });
+
   it('a member id that is not known yet still shows the loading line (that one IS «not known yet»)', async () => {
     await renderWith({ currentTeamMemberId: undefined, projectId: undefined, projectMemberships: [] });
     expect(container.querySelector('[data-testid="chats-no-project"]')).toBeNull();

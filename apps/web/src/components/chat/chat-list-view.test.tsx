@@ -1265,6 +1265,7 @@ describe('ChatListView — story #3831 지시 한 줄 compose 경유(새 API 0·
   });
 
   it('대화가 0건이면 리다이렉트 대신 새 대화 모달을 연다(onOpenChange 호출)', async () => {
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [{ projectId: 'proj-current', projectName: 'A' }], role: 'member', projectId: 'proj-current' }); // a person with a project (with none, story 4847: no window to open)
     searchParamsValueRef.current = 'compose=' + encodeURIComponent('유튜브 챕터 3개로 나눠줘');
     stubFetch([]);
     const onOpenChange = vi.fn();

@@ -9,6 +9,7 @@ import { ChatListView } from '@/components/chat/chat-list-view';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { ChatRailProvider, useChatRail } from './chat-rail-context';
+import { isNoProjectAtAll } from './no-project';
 
 /**
  * story #2921 S1(P0-C, 챗 리디자인 시안 §S1) — D04 「Chat 분리=맥락 두동강」 처방 골격.
@@ -35,7 +36,10 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
   const t = useTranslations('chats');
   const tc = useTranslations('common');
   const pathname = usePathname();
-  const { currentTeamMemberId, projectId } = useDashboardContext();
+  const dashboardCtx = useDashboardContext();
+  const { currentTeamMemberId, projectId } = dashboardCtx;
+  // a room is filed under a project (until 4846 PR1 lets one be made without): with no project at all «새 대화» would open a window that cannot create
+  const canStartRoom = !isNoProjectAtAll(dashboardCtx);
   const [showModal, setShowModal] = useState(false);
   const { railMode, toggleManualExpand } = useChatRail();
   // story #2921 S6 후속(유나 design:changes 2026-08-22, CI a11y 가드 지적 처방) — overlay는
@@ -123,10 +127,12 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
       >
         <div className="flex flex-shrink-0 items-center justify-between border-b border-border px-3 py-2.5">
           <h1 id="chat-rail-heading" className="text-sm font-medium text-foreground">{t('title')}</h1>
-          <Button size="sm" variant="outline" onClick={() => setShowModal(true)}>
-            <Plus className="mr-1.5 h-3.5 w-3.5" />
-            {t('newConversation')}
-          </Button>
+          {canStartRoom ? (
+            <Button size="sm" variant="outline" onClick={() => setShowModal(true)}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              {t('newConversation')}
+            </Button>
+          ) : null}
         </div>
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <ChatListView
