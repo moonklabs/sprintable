@@ -12,7 +12,9 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import { _resetActivationStatusCacheForTests } from '@/hooks/use-activation-status';
-import { SupportWidgetLauncher } from './support-widget-launcher';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { SupportWidgetLauncher, SUPPORT_LAUNCHER_ATTR } from './support-widget-launcher';
 
 const ACTIVATION_COMPLETE_KEY = 'sprintable_activation_checklist_complete:org-1';
 // story #4219 F1 — 완주 플래그는 org 범위라 런처도 대시보드 컨텍스트의 org로 읽는다.
@@ -389,6 +391,71 @@ describe('SupportWidgetLauncher — story #3274 2차: 설정 라우트 숨김(�
     usePathnameMock.mockReturnValue('/board');
     await mount();
     expect(container.querySelector('button')).toBeTruthy();
+  });
+});
+
+// story 4853 (phone · point 1) — while the button is drawn, <html> carries data-support-launcher, so a screen under the button (the chat list) can keep clear of it with a CSS variant.
+// The mark follows the SAME «drawn» value as the early return: never on while the button is not there.
+describe('SupportWidgetLauncher — story 4853: <html> is marked while the button is drawn', () => {
+  const marked = () => document.documentElement.hasAttribute(SUPPORT_LAUNCHER_ATTR);
+  afterEach(() => { document.documentElement.removeAttribute(SUPPORT_LAUNCHER_ATTR); });
+
+  it('the attribute is data-support-launcher (the chat list row names it in a CSS variant)', () => {
+    expect(SUPPORT_LAUNCHER_ATTR).toBe('data-support-launcher');
+    const list = readFileSync(join(__dirname, '..', 'chat', 'chat-list-view.tsx'), 'utf8');
+    expect(list).toContain(`max-md:[:root[${SUPPORT_LAUNCHER_ATTR}]_&]:pr-16`);
+  });
+
+  it('drawn (onboarding not finished) — marked, also on the mobile chat LIST where the button floats over the rows', async () => {
+    setInnerWidth(500);
+    usePathnameMock.mockReturnValue('/chats');
+    await mount();
+    expect(container.querySelector('button')).toBeTruthy();
+    expect(marked()).toBe(true);
+  });
+
+  it('removed when the launcher goes away (unmount)', async () => {
+    await mount();
+    expect(marked()).toBe(true);
+    await act(async () => { root.unmount(); });
+    expect(marked()).toBe(false);
+    root = createRoot(container); // afterEach unmounts it again
+  });
+
+  it('not drawn (the mobile chat room) → not marked', async () => {
+    setInnerWidth(500);
+    usePathnameMock.mockReturnValue('/chats/conv-123');
+    await mount();
+    expect(container.querySelector('button')).toBeNull();
+    expect(marked()).toBe(false);
+  });
+
+  it('not drawn (the settings pages) → not marked', async () => {
+    usePathnameMock.mockReturnValue('/settings');
+    await mount();
+    expect(container.querySelector('button')).toBeNull();
+    expect(marked()).toBe(false);
+  });
+
+  it('not drawn (a finished onboarding) → not marked', async () => {
+    window.localStorage.setItem(ACTIVATION_COMPLETE_KEY, '1');
+    usePathnameMock.mockReturnValue('/board');
+    await mount();
+    expect(container.querySelector('button')).toBeNull();
+    expect(marked()).toBe(false);
+  });
+
+  it('the mark follows the route: drawn on the list, gone when the person goes into a room (mobile), back on the list', async () => {
+    setInnerWidth(500);
+    usePathnameMock.mockReturnValue('/chats');
+    await mount();
+    expect(marked()).toBe(true);
+    usePathnameMock.mockReturnValue('/chats/conv-123');
+    await mount();
+    expect(marked()).toBe(false);
+    usePathnameMock.mockReturnValue('/chats');
+    await mount();
+    expect(marked()).toBe(true);
   });
 });
 
