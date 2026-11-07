@@ -50,6 +50,10 @@ interface ChatRailContextValue {
    * (`ChatListView`)의 활성 탭 로더가 쥐고 있으므로 그 함수 자체를 끌어올린다. */
   retryConversations: () => void;
   setRetryConversations: (fn: () => void) => void;
+  /** story 4847 — the list was answered by a server that serves the organization's rooms as a whole (not the older project-only list): it also lets a room be made without a project,
+   * so a person with no project of their own may still start one. The list reports it; the layout (the «새 대화» button) and the outlet read it. */
+  roomsAreOrgWide: boolean;
+  setRoomsAreOrgWide: (value: boolean) => void;
 }
 
 const ChatRailContext = createContext<ChatRailContextValue | null>(null);
@@ -64,6 +68,7 @@ export function ChatRailProvider({ children }: { children: ReactNode }) {
   const [conversationCount, setConversationCount] = useState(0);
   const [activeList, setActiveList] = useState<'my' | 'agent'>('my');
   const [conversationsLoadError, setConversationsLoadError] = useState(false);
+  const [roomsAreOrgWide, setRoomsAreOrgWide] = useState(false);
   // 함수 값 자체를 state로 들고 있으려면 setState에 팩토리 형(() => fn)으로 넘겨야 한다
   // (그냥 fn을 넘기면 React가 "updater 함수"로 오인해 즉시 호출한다) — setRetryConversations는
   // 그 함정을 감싸는 얇은 래퍼.
@@ -105,10 +110,11 @@ export function ChatRailProvider({ children }: { children: ReactNode }) {
       activeList, setActiveList,
       conversationsLoadError, setConversationsLoadError,
       retryConversations, setRetryConversations,
+      roomsAreOrgWide, setRoomsAreOrgWide,
     }),
     [
       railMode, toggleManualExpand, setReadingOpen, conversationsLoading, conversationCount, activeList,
-      conversationsLoadError, retryConversations, setRetryConversations,
+      conversationsLoadError, retryConversations, setRetryConversations, roomsAreOrgWide,
     ],
   );
 

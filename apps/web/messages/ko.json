@@ -5817,6 +5817,7 @@
     "notificationsMuted": "알림 꺼짐",
     "newRoomProject": "새 방의 프로젝트",
     "newRoomProjectPick": "프로젝트를 고르세요",
+    "newRoomProjectNone": "조직 (프로젝트 없음)",
     "roomProjectAsk": "이 방에는 프로젝트가 없어요 — 스토리 · 문서 · 첨부에 쓸 프로젝트",
     "roomNoProject": "프로젝트 없음",
     "projectFilterLabel": "프로젝트로 걸러 보기",

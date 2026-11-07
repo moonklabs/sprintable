@@ -43,23 +43,32 @@ interface AgentFacts {
 // 딥링크가 필요해 단순 문자열보다 구조가 더 필요하다(그 외 실패는 기존처럼 문자열 그대로).
 type ModalError = { kind: 'generic'; message: string } | { kind: 'policy'; message: string; agentId: string };
 
+/** story 4847 — the value that stands for «no project» in the project choice (and as the default handed in by the list's filter «프로젝트 없음») */
+export const NO_ROOM_PROJECT = 'none';
+
 interface NewConversationModalProps {
-  /** the project a NEW room is made in when the person does not choose another: the list's project filter, else the current project, else none (they pick) — story 4847 */
+  /** the project a NEW room is made in when the person does not choose another: the list's project filter (`NO_ROOM_PROJECT` for «프로젝트 없음»), else the current project, else none (they pick) — story 4847 */
   projectId: string | null;
+  /** story 4847 — the server serves the organization's rooms as a whole, so a room may be made with no project: the choice «조직 (프로젝트 없음)» is offered (and is the only one for a person with no project of their own) */
+  allowNoProject?: boolean;
   onClose: () => void;
   onCreated: (conversationId: string) => void;
 }
 
-export function NewConversationModal({ projectId, onClose, onCreated }: NewConversationModalProps) {
+export function NewConversationModal({ projectId, allowNoProject = false, onClose, onCreated }: NewConversationModalProps) {
   // story 4847 (AC3) — the people to pick from are the organization's; only the NEW room needs a project (the server files a room under one), so
   // the modal says which one it will be — the given default, changeable when the person can use more than one.
   const { projectMemberships } = useDashboardContext();
   // the default is worked out on every render (not frozen at first render): it must be one of the person's projects (an unknown one is no default), and it follows the given one while the window is open
-  const defaultRoomProject = projectId && (projectMemberships.length === 0 || projectMemberships.some((m) => m.projectId === projectId))
-    ? projectId
-    : projectMemberships.length === 1 ? projectMemberships[0]!.projectId : '';
+  const onlyProject = projectMemberships.length === 1 ? projectMemberships[0]!.projectId : '';
+  const defaultRoomProject = projectId === NO_ROOM_PROJECT
+    ? (allowNoProject ? NO_ROOM_PROJECT : onlyProject)
+    : projectId && (projectMemberships.length === 0 || projectMemberships.some((m) => m.projectId === projectId))
+      ? projectId
+      : allowNoProject && projectMemberships.length === 0 ? NO_ROOM_PROJECT : onlyProject; // a person with no project of their own can still start a room — with none
   const [chosenProject, setChosenProject] = useState<string | null>(null);
-  const roomProjectId = chosenProject ?? defaultRoomProject;
+  // «no project» is a choice only while the server allows it (the list can fall back to an older server with the window open)
+  const roomProjectId = chosenProject !== null && (chosenProject !== NO_ROOM_PROJECT || allowNoProject) ? chosenProject : defaultRoomProject;
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('chats');
   // story #3194 — agentNotConnected 배지 문구 재사용(발명 0, agent-management-tab.tsx와 동일 키).
@@ -122,7 +131,7 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
           type: isDm ? 'dm' : 'group',
           title: !isDm && groupTitle.trim() ? groupTitle.trim() : null,
           participant_ids: selected,
-          project_id: roomProjectId,
+          project_id: roomProjectId === NO_ROOM_PROJECT ? undefined : roomProjectId, // no key = a room with no project
         }),
       });
       if (!res.ok) {
@@ -201,7 +210,7 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
           )}
 
           {/* story 4847 — which project the new room is filed under (only asked when there is a real choice) */}
-          {projectMemberships.length > 1 && (
+          {projectMemberships.length + (allowNoProject ? 1 : 0) > 1 && (
             <div className="mt-3">
               <label htmlFor="new-room-project" className="mb-1 block text-xs text-muted-foreground">{t('newRoomProject')}</label>
               <Select id="new-room-project" value={roomProjectId} onChange={(e) => setChosenProject(e.target.value)} disabled={creating}>
@@ -209,6 +218,7 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
                 {projectMemberships.map((p) => (
                   <option key={p.projectId} value={p.projectId}>{p.projectName}</option>
                 ))}
+                {allowNoProject ? <option value={NO_ROOM_PROJECT}>{t('newRoomProjectNone')}</option> : null}
               </Select>
             </div>
           )}

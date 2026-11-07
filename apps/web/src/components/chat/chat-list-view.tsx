@@ -453,6 +453,9 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const [projectOnly, setProjectOnly] = useState(false);
   // …and with no current project an older server has nothing to list: the screen then says so in one line, as it did before (the layout used to stop there)
   const [needsProject, setNeedsProject] = useState(false);
+  // story 4847 — the server answered the whole-organization read: it serves the organization's rooms as a whole, so a room may be made without a project too (the «조직(프로젝트 없음)» choice, and a «새 대화» for a person who has no project).
+  // An older server answers 422 there and gets neither. Only a question about all rooms (or the ones with none) proves it: a project's own list is one an older server answers as well.
+  const [roomsAreOrgWide, setRoomsAreOrgWide] = useState(false);
   const [internalShowModal, setInternalShowModal] = useState(false);
   const showModal = open !== undefined ? open : internalShowModal;
   const setShowModal = onOpenChange ?? setInternalShowModal;
@@ -509,6 +512,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       if (!res.ok) {
         // story 4847 — a server that does not yet answer the organization-wide read (it requires a project): ask for the current project's rooms instead
         if (res.status === 422) {
+          setRoomsAreOrgWide(false);
           if (!projectIdRef.current) { setNeedsProject(true); return false; } // nothing to ask for: the «pick a project» line (also when the project was lost while in the project-only list)
           if (!projectOnly) { fallingBack = true; setProjectOnly(true); return false; }
         }
@@ -518,6 +522,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       const json = await res.json() as { data: ConversationItem[]; total: number };
       if (stale()) return true;
       const items = json.data ?? [];
+      if (!scopeProjectId && (!projectFilter || projectFilter === 'none')) setRoomsAreOrgWide(true);
       setConversations((prev) => append ? [...prev, ...items] : items);
       setMyOffset(nextOffset + items.length);
       setMyTotal(json.total ?? 0);
@@ -623,7 +628,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
 
   // an older server, and a project is picked after all: the project-only list it can answer
   useEffect(() => {
-    if (needsProject && projectId) { setNeedsProject(false); setProjectOnly(true); setLoading(true); } // loading in the same step: no moment of «0 rooms» for the instruction line to land on
+    if (needsProject && projectId) { setNeedsProject(false); setProjectOnly(true); setLoading(true); setRoomsAreOrgWide(false); } // loading in the same step: no moment of «0 rooms» for the instruction line to land on
   }, [needsProject, projectId]);
 
   const handleProjectFilterChange = useCallback((next: string) => {
@@ -653,10 +658,10 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       const mostRecent = pool.reduce((a, b) => (a.updated_at > b.updated_at ? a : b));
       // 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트.
       router.replace(flatHref(`/chats/${mostRecent.id}?compose=${encodeURIComponent(composeParam)}`));
-    } else if (!noProjectAtAll) {
-      setShowModal(true); // (with no project nothing can be made yet: no window to open)
+    } else if (!noProjectAtAll || roomsAreOrgWide) {
+      setShowModal(true); // (with no project, on a server that cannot make a room without one, nothing can be made: no window to open)
     }
-  }, [composeParam, loading, needsProject, noProjectAtAll, conversations, projectId, router, setShowModal, flatHref]);
+  }, [composeParam, loading, needsProject, noProjectAtAll, roomsAreOrgWide, conversations, projectId, router, setShowModal, flatHref]);
 
   // perf(17960f86): agent 탭("전체/에이전트", include_agent_conversations=true)은 비기본 탭이라
   // mount 시 eager fetch(측정 ~663ms 낭비) 하지 않고, 사용자가 탭을 처음 열 때 1회만 lazy 로드.
@@ -834,9 +839,10 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     chatRail?.setConversationCount(isAgent ? agentOnlyConvs.length : conversations.length);
     chatRail?.setConversationsLoadError(isAgent ? agentLoadError : loadError);
     chatRail?.setRetryConversations(retryActiveList);
+    chatRail?.setRoomsAreOrgWide(roomsAreOrgWide);
   }, [
     chatRail, isAdminOrOwner, activeList, loading, agentLoading, conversations.length, agentOnlyConvs.length,
-    loadError, agentLoadError, retryActiveList,
+    loadError, agentLoadError, retryActiveList, roomsAreOrgWide,
   ]);
 
   const myListContent = loading ? (
@@ -865,8 +871,8 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     </div>
   ) : conversations.length === 0 ? (
     // story 4847 — a person with no project AND no room read has nothing to look at and nowhere to start one: say what to do next (the line the layout used to stop on).
-    // A person with no project but rooms never gets here — they see their rooms.
-    noProjectAtAll ? (
+    // A person with no project but rooms never gets here — they see their rooms. On an org-wide server a room can be made with no project, so there is somewhere to start: the ordinary empty state.
+    noProjectAtAll && !roomsAreOrgWide ? (
       <div className="flex h-full items-center justify-center px-6 text-center" data-testid="chats-no-project">
         <p className="text-sm text-muted-foreground">{t('noProjectYet')}</p>
       </div>
@@ -1060,7 +1066,8 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
 
       {showModal && (
         <NewConversationModal
-          projectId={projectFilter && projectFilter !== 'none' ? projectFilter : projectId}
+          projectId={projectFilter ? projectFilter : projectId}
+          allowNoProject={roomsAreOrgWide}
           onClose={() => setShowModal(false)}
           onCreated={handleCreated}
         />

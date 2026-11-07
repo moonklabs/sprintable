@@ -87,6 +87,13 @@ function ReadingOpenProbe({ open }: { open: boolean }) {
   return <div data-testid="outlet-content">outlet</div>;
 }
 
+// story 4847 — stands in for ChatListView's report «the server serves the organization's rooms as a whole» (the real list is out of this file's scope)
+function OrgWideProbe({ on }: { on: boolean }) {
+  const { setRoomsAreOrgWide } = useChatRail();
+  useEffect(() => { setRoomsAreOrgWide(on); }, [on, setRoomsAreOrgWide]);
+  return <div data-testid="outlet-content">outlet</div>;
+}
+
 afterEach(async () => {
   await act(async () => { root.unmount(); });
   container.remove();
@@ -383,6 +390,18 @@ describe('ChatsLayout — story #4762 AC2 (no project is an answer, not «loadin
     root = createRoot(container);
     await renderWith({ currentTeamMemberId: 'member-1', projectId: undefined, projectMemberships: [{ projectId: 'p1', projectName: 'A' }] });
     expect(hasNewConversation()).toBe(true);
+  });
+
+  it('⭐프로젝트가 하나도 없어도 서버가 조직 전체를 읽어 주면(프로젝트 없는 방을 만들 수 있다) «새 대화» 단추가 있고, 누르면 목록에 open=true가 간다 — 옛 서버로 돌아가면 다시 없다', async () => {
+    usePathnameMock.mockReturnValue('/chats');
+    useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'member-1', projectId: undefined, projectMemberships: [] });
+    const newConversationBtn = () => [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.chats.newConversation));
+    await act(async () => { root.render(wrap(<ChatsLayout><OrgWideProbe on /></ChatsLayout>)); });
+    expect(newConversationBtn()).toBeTruthy();
+    await act(async () => { newConversationBtn()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(container.querySelector('[data-testid="chat-list-view"]')?.textContent).toContain('open=true');
+    await act(async () => { root.render(wrap(<ChatsLayout><OrgWideProbe on={false} /></ChatsLayout>)); });
+    expect(newConversationBtn()).toBeUndefined();
   });
 
   it('경로의 프로젝트를 아직 푸는 중이면 «새 대화» 단추를 지우지 않는다', async () => {
