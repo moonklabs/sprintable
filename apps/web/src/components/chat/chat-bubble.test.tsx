@@ -12,7 +12,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { ChatBubble } from './chat-bubble';
-import type { ChatMessage } from '@/hooks/use-chat-sse';
+import { normalizeToMessage, type ChatMessage } from '@/hooks/use-chat-sse';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
 
@@ -2564,5 +2564,127 @@ describe('ChatBubble — story #4430 «not delivered» line', () => {
     expect(container.querySelector('[data-testid="withheld-delivery-line"]')).toBeNull();
     await act(async () => { root.render(wrap(<ChatBubble message={{ ...baseMessage, content: '평범한 말' }} isMine />)); });
     expect(container.querySelector('[data-testid="withheld-delivery-line"]')).toBeNull();
+  });
+});
+
+// story 4856 — an attachment's signed-URL request names the CONVERSATION. `memo_id` is the parent message's id for a thread reply (normalizeToMessage: thread_id first), which the backend answers
+// «conversation not found»: the picture in a thread never showed (a file in a thread never opened). Measured on dev: an agent's thread reply carried thread_id = the parent message's id.
+describe('ChatBubble — story 4856 첨부 서명 요청은 대화 id를 싣는다(스레드 답글 포함)', () => {
+  const CONV = '00000000-0000-4000-8000-0000000000c1';
+  const PARENT = '00000000-0000-4000-8000-0000000000a1';
+  let ioCallbacks: Array<(entries: Array<{ isIntersecting: boolean }>) => void>;
+  let signed: URL[];
+
+  beforeEach(() => {
+    ioCallbacks = [];
+    signed = [];
+    class FakeIntersectionObserver {
+      constructor(cb: (entries: Array<{ isIntersecting: boolean }>) => void) {
+        ioCallbacks.push(cb);
+      }
+      observe = vi.fn();
+      disconnect = vi.fn();
+    }
+    (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = FakeIntersectionObserver;
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      const url = new URL(String(input), 'http://localhost');
+      signed.push(url);
+      return { ok: true, status: 200, json: async () => ({ data: { url: `https://signed/${url.searchParams.get('path') ?? ''}` } }) };
+    }));
+    vi.stubGlobal('open', vi.fn());
+  });
+
+  const raw = (over: Record<string, unknown>) => ({
+    id: 'm-1', conversation_id: CONV, thread_id: null, content: '그림', created_at: '2026-11-07T15:16:25Z',
+    sender: { id: 'a-1', name: '유나', type: 'agent' },
+    attachments: [
+      { url: 'org/o/project/p/chat/c/mcp/u-4856-5.png', name: '4856-5.png', content_type: 'image/png', size: 115 },
+      { url: 'org/o/project/p/chat/c/mcp/u-doc.pdf', name: 'doc.pdf', content_type: 'application/pdf', size: 10 },
+    ],
+    ...over,
+  });
+
+  async function show(r: Record<string, unknown>) {
+    await act(async () => { root.render(wrap(<ChatBubble message={normalizeToMessage(r)} isMine={false} />)); });
+    await act(async () => { ioCallbacks.forEach((cb) => cb([{ isIntersecting: true }])); await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('normalizeToMessage: 스레드 답글의 memo_id는 부모 메시지 id 그대로(다른 읽는 곳 무변), conversation_id는 실제 대화 id', () => {
+    const m = normalizeToMessage(raw({ thread_id: PARENT }));
+    expect(m.memo_id).toBe(PARENT);
+    expect(m.conversation_id).toBe(CONV);
+  });
+
+  it.each([
+    ['최상위 메시지(thread_id 없음)', raw({}), CONV],
+    ['옛 모양: memo_id만 있음(그게 곧 대화 id)', { id: 'm', memo_id: CONV, content: '', created_at: '', attachments: [] }, CONV],
+    ['옛 모양: thread_id만 있음(그게 곧 대화 id)', { id: 'm', thread_id: CONV, content: '', created_at: '', attachments: [] }, CONV],
+  ])('normalizeToMessage — %s → conversation_id', (_n, input, want) => {
+    expect(normalizeToMessage(input as Record<string, unknown>).conversation_id).toBe(want);
+  });
+
+  it('스레드 답글 속 그림의 서명 요청은 대화 id를 싣는다(부모 메시지 id 아님)', async () => {
+    await show(raw({ thread_id: PARENT }));
+    const image = signed.filter((u) => (u.searchParams.get('path') ?? '').endsWith('4856-5.png'));
+    expect(image.length).toBeGreaterThan(0);
+    for (const u of image) {
+      expect(u.searchParams.get('conversation_id')).toBe(CONV);
+    }
+    expect(signed.every((u) => u.searchParams.get('conversation_id') !== PARENT)).toBe(true);
+  });
+
+  it('스레드 답글 속 파일 카드를 눌러도 서명 요청은 대화 id를 싣는다', async () => {
+    await show(raw({ thread_id: PARENT }));
+    signed.length = 0;
+    const card = Array.from(container.querySelectorAll('button')).find((b) => (b.textContent ?? '').includes('doc.pdf'));
+    expect(card).toBeDefined();
+    await act(async () => { card!.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    expect(signed).toHaveLength(1);
+    expect(signed[0]!.searchParams.get('conversation_id')).toBe(CONV);
+  });
+
+  it.each([
+    ['오디오', 'voice.m4a', 'audio/mp4'],
+    ['비디오', 'clip.mp4', 'video/mp4'],
+  ])('스레드 답글 속 %s 카드를 [재생]해도 서명 요청은 대화 id를 싣는다', async (_n, name, contentType) => {
+    await show(raw({ thread_id: PARENT, attachments: [{ url: `org/o/project/p/chat/c/mcp/u-${name}`, name, content_type: contentType, size: 10 }] }));
+    expect(signed).toHaveLength(0);   // before [재생] nothing is signed
+    const play = Array.from(container.querySelectorAll('button')).find((b) => (b.getAttribute('aria-label') ?? '').includes(name));
+    expect(play).toBeDefined();
+    await act(async () => { play!.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    expect(signed).toHaveLength(1);
+    expect(signed[0]!.searchParams.get('conversation_id')).toBe(CONV);
+  });
+
+  it('그림을 눌러 크게 볼 때(라이트박스) 서명 요청도 대화 id를 싣는다', async () => {
+    await show(raw({ thread_id: PARENT }));
+    signed.length = 0;
+    const thumb = Array.from(container.querySelectorAll('button')).find((b) => b.getAttribute('aria-label') === '4856-5.png');
+    expect(thumb).toBeDefined();
+    await act(async () => { thumb!.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    expect(document.querySelector('img[data-next-image="true"][alt="4856-5.png"]')).not.toBeNull();   // the larger view opened (one picture: no «n / m» counter)
+    expect(signed.length).toBeGreaterThan(0);
+    expect(signed.every((u) => u.searchParams.get('conversation_id') === CONV)).toBe(true);
+  });
+
+  it('최상위 메시지는 이전과 같다(대화 id)', async () => {
+    await show(raw({}));
+    expect(signed.length).toBeGreaterThan(0);
+    expect(signed.every((u) => u.searchParams.get('conversation_id') === CONV)).toBe(true);
+  });
+
+  it('conversation_id가 없는 메시지 객체(memo_id만 가진 픽스처·옛 호출부)도 이전처럼 memo_id로 서명한다', async () => {
+    const legacy: ChatMessage = { ...baseMessage, memo_id: CONV, content: '그림', attachments: [{ url: 'x/z.png', name: 'z.png', content_type: 'image/png' }] };
+    expect(legacy.conversation_id).toBeUndefined();
+    await act(async () => { root.render(wrap(<ChatBubble message={legacy} isMine={false} />)); });
+    await act(async () => { ioCallbacks.forEach((cb) => cb([{ isIntersecting: true }])); await Promise.resolve(); await Promise.resolve(); });
+    expect(signed.length).toBeGreaterThan(0);
+    expect(signed.every((u) => u.searchParams.get('conversation_id') === CONV)).toBe(true);
+  });
+
+  it('conversation_id 없는 옛 모양(memo_id만)도 이전처럼 memo_id로 서명한다', async () => {
+    await show({ id: 'm', memo_id: CONV, content: '그림', created_at: '2026-11-07T15:16:25Z', sender: { id: 'a-1', name: '유나', type: 'agent' }, attachments: [{ url: 'x/y.png', name: 'y.png', content_type: 'image/png' }] });
+    expect(signed.length).toBeGreaterThan(0);
+    expect(signed.every((u) => u.searchParams.get('conversation_id') === CONV)).toBe(true);
   });
 });

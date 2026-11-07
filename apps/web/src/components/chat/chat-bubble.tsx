@@ -460,6 +460,9 @@ export function ChatBubble({
   // 있어도 이미지끼리의 상대 순서만 쓰면 되므로). react-hooks/immutability가 render 중
   // 변수 재대입을 막아 카운터를 안 쓴다 — 대신 "이 위치 앞의 이미지 개수"를 순수하게 센다
   // (한 메시지 첨부 수는 항상 소수라 O(n²)는 무관하다).
+  // story 4856 — the id a signed-URL request for this message's attachments names: the CONVERSATION's. `memo_id` is the parent message's id for a thread reply, which the backend
+  // answers «conversation not found» (so a picture in a thread never showed).
+  const attachmentConversationId = message.conversation_id || message.memo_id;
   const imageAttachmentEntries = useMemo(() => {
     const atts = message.attachments ?? [];
     const isImageAtt = (a: (typeof atts)[number]) => Boolean(a.url) && a.content_type?.startsWith('image/');
@@ -775,7 +778,7 @@ export function ChatBubble({
                     <AttachmentImage
                       key={href ?? i}
                       storedUrl={href}
-                      conversationId={message.memo_id}
+                      conversationId={attachmentConversationId}
                       alt={label}
                       onOpen={() => setLightboxIndex(imageIndex)}
                     />
@@ -788,7 +791,7 @@ export function ChatBubble({
                     <AttachmentMedia
                       key={href ?? i}
                       storedUrl={href}
-                      conversationId={message.memo_id}
+                      conversationId={attachmentConversationId}
                       label={label}
                       kind={isAudio ? 'audio' : 'video'}
                     />
@@ -798,7 +801,7 @@ export function ChatBubble({
                   <AttachmentFile
                     key={href ?? i}
                     storedUrl={href}
-                    conversationId={message.memo_id}
+                    conversationId={attachmentConversationId}
                     label={label}
                     Icon={getFileIcon(att.content_type)}
                     contentType={att.content_type}
@@ -878,7 +881,7 @@ export function ChatBubble({
         <ImageLightbox
           items={lightboxItems}
           startIndex={lightboxIndex}
-          conversationId={message.memo_id}
+          conversationId={attachmentConversationId}
           onClose={() => setLightboxIndex(null)}
         />
       )}
