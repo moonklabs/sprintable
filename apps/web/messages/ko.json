@@ -5813,7 +5813,14 @@
     "editRoomName": "방 이름 편집",
     "muteNotifications": "알림 끄기",
     "unmuteNotifications": "알림 켜기",
-    "notificationsMuted": "알림 꺼짐"
+    "notificationsMuted": "알림 꺼짐",
+    "newRoomProject": "새 방의 프로젝트",
+    "newRoomProjectPick": "프로젝트를 고르세요",
+    "roomProjectAsk": "이 방에는 프로젝트가 없어요 — 스토리 · 문서 · 첨부에 쓸 프로젝트",
+    "roomNoProject": "프로젝트 없음",
+    "projectFilterLabel": "프로젝트로 걸러 보기",
+    "projectFilterAll": "모든 프로젝트",
+    "roomInfoLoadFailed": "방 정보를 불러오지 못했어요 — 스토리 · 문서 · 첨부는 다시 불러온 뒤에 쓸 수 있어요"
   },
   "eventCard": {
     "viewStory": "스토리 보기",

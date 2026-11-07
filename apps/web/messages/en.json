@@ -5813,7 +5813,14 @@
     "editRoomName": "Edit room name",
     "muteNotifications": "Mute notifications",
     "unmuteNotifications": "Unmute notifications",
-    "notificationsMuted": "Notifications muted"
+    "notificationsMuted": "Notifications muted",
+    "newRoomProject": "Project for this room",
+    "newRoomProjectPick": "Choose a project",
+    "roomProjectAsk": "This room has no project — the project for stories, docs and attachments",
+    "roomNoProject": "No project",
+    "projectFilterLabel": "Filter by project",
+    "projectFilterAll": "All projects",
+    "roomInfoLoadFailed": "Could not load this room's details — stories, docs and attachments work once they are loaded"
   },
   "eventCard": {
     "viewStory": "View story",

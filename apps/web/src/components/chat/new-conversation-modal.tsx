@@ -13,6 +13,8 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { buildPolicyDeniedMessage, parseAgentMessagePolicyDenied } from '@/lib/agent-message-policy-error';
 import { memberDisplayLabel, memberRowLabels } from '@/lib/member-display';
 import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
+import { Select } from '@/components/ui/select';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -42,12 +44,22 @@ interface AgentFacts {
 type ModalError = { kind: 'generic'; message: string } | { kind: 'policy'; message: string; agentId: string };
 
 interface NewConversationModalProps {
-  projectId: string;
+  /** the project a NEW room is made in when the person does not choose another: the list's project filter, else the current project, else none (they pick) — story 4847 */
+  projectId: string | null;
   onClose: () => void;
   onCreated: (conversationId: string) => void;
 }
 
 export function NewConversationModal({ projectId, onClose, onCreated }: NewConversationModalProps) {
+  // story 4847 (AC3) — the people to pick from are the organization's; only the NEW room needs a project (the server files a room under one), so
+  // the modal says which one it will be — the given default, changeable when the person can use more than one.
+  const { projectMemberships } = useDashboardContext();
+  // the default is worked out on every render (not frozen at first render): it must be one of the person's projects (an unknown one is no default), and it follows the given one while the window is open
+  const defaultRoomProject = projectId && (projectMemberships.length === 0 || projectMemberships.some((m) => m.projectId === projectId))
+    ? projectId
+    : projectMemberships.length === 1 ? projectMemberships[0]!.projectId : '';
+  const [chosenProject, setChosenProject] = useState<string | null>(null);
+  const roomProjectId = chosenProject ?? defaultRoomProject;
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('chats');
   // story #3194 — agentNotConnected 배지 문구 재사용(발명 0, agent-management-tab.tsx와 동일 키).
@@ -66,8 +78,8 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
   const [error, setError] = useState<ModalError | null>(null);
 
   useEffect(() => {
-    fetchWithAuth(`/api/members?is_active=true&project_id=${projectId}`)
-      .then((r) => r.json())
+    fetchWithAuth('/api/members?is_active=true')
+      .then((r) => { if (!r.ok) throw new Error(`members ${r.status}`); return r.json(); })
       .then((json) => {
         // story #3997 — 「시스템 발행」에게 DM을 보내는 것 자체가 의미 없다(연결
         // 대상이 아닌 내부 멤버) — 선택지에서 제외.
@@ -89,14 +101,14 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
         setFactsById(map);
       })
       .catch(() => {});
-  }, [projectId]);
+  }, []);
 
   const toggle = (id: string) => {
     setSelected((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
   };
 
   const isDm = selected.length === 1;
-  const canCreate = selected.length >= 1;
+  const canCreate = selected.length >= 1 && roomProjectId !== '';
 
   const handleCreate = async () => {
     if (!canCreate || creating) return;
@@ -110,7 +122,7 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
           type: isDm ? 'dm' : 'group',
           title: !isDm && groupTitle.trim() ? groupTitle.trim() : null,
           participant_ids: selected,
-          project_id: projectId,
+          project_id: roomProjectId,
         }),
       });
       if (!res.ok) {
@@ -186,6 +198,19 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
                 </li>
               ))}
             </ul>
+          )}
+
+          {/* story 4847 — which project the new room is filed under (only asked when there is a real choice) */}
+          {projectMemberships.length > 1 && (
+            <div className="mt-3">
+              <label htmlFor="new-room-project" className="mb-1 block text-xs text-muted-foreground">{t('newRoomProject')}</label>
+              <Select id="new-room-project" value={roomProjectId} onChange={(e) => setChosenProject(e.target.value)} disabled={creating}>
+                {roomProjectId === '' ? <option value="">{t('newRoomProjectPick')}</option> : null}
+                {projectMemberships.map((p) => (
+                  <option key={p.projectId} value={p.projectId}>{p.projectName}</option>
+                ))}
+              </Select>
+            </div>
           )}
 
           {/* Group title (2명+ 선택 시) */}
