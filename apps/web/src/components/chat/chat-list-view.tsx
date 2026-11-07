@@ -596,7 +596,6 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     if (!filterReady) return; // story 4847 — ask once the tab's own filter is read (no first ask for «all» that the stored choice then replaces)
     setConversations([]);
     setLoading(true);
-    setLoadingMore(false);
     void fetchConversations(0, false);
   }, [fetchConversations, filterReady]);
 
