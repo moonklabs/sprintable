@@ -155,17 +155,18 @@ async def _seed_story(session, org_id, project_id, *, assignee_id=None, title="�
     return story.id
 
 
-async def _publish_first_collect(session, *, org_id, story_id, definition_key, repeat, requester_id=None):
+async def _publish_first_collect(session, *, org_id, story_id, definition_key, repeat, requester_id=None, server_issued=False):
     from app.dependencies.auth import AuthContext
     from app.routers.events import _publish_registry_event_core
     from fastapi import BackgroundTasks
 
     # requester_id는 TeamMember.id(에이전트) — api_key_id 마커로 agent 분기를 태운다
     # (member_resolver.py::_resolve_member_legacy, human/JWT 분기와 갈리는 지점).
-    # the repeat scheduler publishes as the system publisher with the server-issued context (story #4846 AC12 — the server's own voice is not an agent's project act)
+    # the repeat scheduler publishes as the system publisher with the server-issued context (story #4846 AC12 — the server's own voice is not an agent's
+    # project act); a manual publish by an agent keeps the plain context and the ordinary rule
     from app.dependencies.auth import ServerIssuedAuth
 
-    auth = ServerIssuedAuth(
+    auth = (ServerIssuedAuth if server_issued else AuthContext)(
         user_id=str(requester_id or uuid.uuid4()), email=None,
         claims={"app_metadata": {"api_key_id": "test-agent"}}, org_id=str(org_id),
     )
@@ -269,7 +270,7 @@ async def test_ac2_definition_disabled_pauses_with_zero_publish_and_one_notifica
             publisher_id = await _seed_system_publisher(s, org_id, project_id)
             definition = await _seed_cyclic_definition(s, org_id=org_id, key="org.e3337b.cyclic")
             story_id = await _seed_story(s, org_id, project_id)
-            await _publish_first_collect(s, org_id=org_id, story_id=story_id, definition_key=definition.key, repeat="PT10M", requester_id=publisher_id)
+            await _publish_first_collect(s, org_id=org_id, story_id=story_id, definition_key=definition.key, repeat="PT10M", requester_id=publisher_id, server_issued=True)
             await s.commit()
 
             definition.enabled = False
@@ -310,7 +311,7 @@ async def test_ac2_project_deleted_pauses_with_zero_publish_and_one_notification
             publisher_id = await _seed_system_publisher(s, org_id, project_id)
             definition = await _seed_cyclic_definition(s, org_id=org_id, key="org.e3337c.cyclic")
             story_id = await _seed_story(s, org_id, project_id)
-            await _publish_first_collect(s, org_id=org_id, story_id=story_id, definition_key=definition.key, repeat="PT10M", requester_id=publisher_id)
+            await _publish_first_collect(s, org_id=org_id, story_id=story_id, definition_key=definition.key, repeat="PT10M", requester_id=publisher_id, server_issued=True)
             await s.commit()
 
             project = (await s.execute(select(Project).where(Project.id == project_id))).scalar_one()
@@ -354,7 +355,7 @@ async def test_ac2_three_consecutive_failures_pauses_with_zero_publish_and_one_n
             publisher_id = await _seed_system_publisher(s, org_id, project_id)
             definition = await _seed_cyclic_definition(s, org_id=org_id, key="org.e3337d.cyclic")
             story_id = await _seed_story(s, org_id, project_id)
-            await _publish_first_collect(s, org_id=org_id, story_id=story_id, definition_key=definition.key, repeat="PT10M", requester_id=publisher_id)
+            await _publish_first_collect(s, org_id=org_id, story_id=story_id, definition_key=definition.key, repeat="PT10M", requester_id=publisher_id, server_issued=True)
             await s.commit()
 
             # 정의를 "channel 필수"로 바꿔 이후 모든 재발행이 거부되게 만든다(스냅샷엔
