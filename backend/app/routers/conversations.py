@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import and_, func, select, text, tuple_, update
+from sqlalchemy import and_, func, or_, select, text, tuple_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -19,7 +19,13 @@ from sqlalchemy.orm import aliased
 from app.core.datetime_query import OffsetDatetime
 from app.core.config import settings
 from app.core.pagination import assemble_page, decode_cursor
-from app.dependencies.auth import AuthContext, ServerIssuedAuth, get_current_user, get_verified_org_id
+from app.dependencies.auth import (
+    AuthContext,
+    ServerIssuedAuth,
+    get_current_user,
+    get_verified_org_id,
+    get_verified_org_id_no_project_gate,
+)
 from app.dependencies.database import get_db, get_read_db
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.doc import Doc
@@ -1240,7 +1246,7 @@ async def _create_conversation_record(
     db: AsyncSession,
     *,
     org_id: uuid.UUID,
-    project_id: uuid.UUID,
+    project_id: uuid.UUID | None,
     member_ids: set[uuid.UUID],
     conv_type: str,
     title: str | None,
@@ -1273,7 +1279,7 @@ class CreateConversationRequest(BaseModel):
     type: str = "group"  # dm | group
     title: str | None = None
     participant_ids: list[uuid.UUID]
-    project_id: uuid.UUID
+    project_id: uuid.UUID | None = None   # story #4846: a room may have no project (the label is optional)
 
 
 class ConversationResponse(BaseModel):
@@ -1484,8 +1490,15 @@ async def create_conversation(
     auth: AuthContext = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_verified_org_id),
 ) -> dict:
-    """POST /api/v2/conversations — dm/group 생성 (dm 중복 방지)."""
+    """POST /api/v2/conversations — dm/group 생성 (dm 중복 방지).
+
+    story #4846 (AC5): `project_id` is optional — without it the room belongs to the organization and has no project; with it, the caller needs that
+    project (as before) and it must be a project of this organization."""
     sender = await _resolve_member(auth, org_id, db, project_id=body.project_id)
+    if body.project_id is not None and (await db.execute(
+        select(Project.id).where(Project.id == body.project_id, Project.org_id == org_id)
+    )).first() is None:
+        raise HTTPException(status_code=404, detail="Project not found")
 
     # E-SECURITY SEC-S3(story 90cd7e57): participant_ids가 org 멤버십 필터 없이 그대로 insert
     # 됐음(add_participant/멘션발송과 비대칭 — 그 두 경로는 이미 org-scope 검증). cross-org UUID를
@@ -1524,23 +1537,39 @@ async def create_conversation(
 
 @router.get("")
 async def list_conversations(
-    project_id: uuid.UUID = Query(...),
+    project_id: str | None = Query(default=None, description="a project id to filter by, or `none` for the rooms without a project; absent = all my rooms in the organization"),
     include_agent_conversations: bool = Query(default=False),
     limit: int = Query(default=30, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),  # story #4846: the project is a filter here — a stale or lost X-Project-Id must not 403 the list; the admin's project view checks the project itself
 ) -> dict:
-    """GET /api/v2/conversations — 최근 메시지 미리보기 + 참여 대화 목록."""
-    sender = await _resolve_member(auth, org_id, db, project_id=project_id)
+    """GET /api/v2/conversations — 최근 메시지 미리보기 + 참여 대화 목록.
 
-    # AC5: include_agent_conversations는 owner/admin만 허용 (org-effective role — project team_member
-    # role이 낮아도 org owner/admin이면 상속·#1223↔SSOT뷰 갭 보정)
-    if include_agent_conversations and await _effective_org_role(
-        auth, org_id, db, sender, project_id=project_id,
-    ) not in ("owner", "admin"):
-        raise HTTPException(status_code=403, detail="Only owner/admin can view agent conversations.")
+    story #4846 (AC4): the list is the ORGANIZATION's — the rooms I am in, whatever their project. `project_id` is only a filter (a project id, or `none` for
+    the rooms that have no project); each row says its own `project_id` / `project_name` (both null for a room without a project). Being in the room is what
+    lists it, as it is what reads it: the rooms are gathered and then kept through the SAME readable predicate as every read (so a room I cannot read is not
+    listed with its last line — an agent without the room's project, for one). `include_agent_conversations` (an admin's view of the agents' rooms of ONE
+    project, or `none`: the agents' rooms that have no project) needs a project id or `none`."""
+    project_none = project_id is not None and project_id.strip().lower() == "none"
+    project_uuid: uuid.UUID | None = None
+    if project_id is not None and not project_none:
+        try:
+            project_uuid = uuid.UUID(project_id)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="project_id must be a project id or `none`") from None
+
+    if include_agent_conversations:
+        if project_uuid is None and not project_none:
+            raise HTTPException(status_code=400, detail="include_agent_conversations needs a project id or `none`")
+        sender = await _resolve_member(auth, org_id, db, project_id=project_uuid)
+        # AC5: include_agent_conversations는 owner/admin만 허용 (org-effective role — project team_member
+        # role이 낮아도 org owner/admin이면 상속·#1223↔SSOT뷰 갭 보정)
+        if await _effective_org_role(auth, org_id, db, sender, project_id=project_uuid) not in ("owner", "admin"):
+            raise HTTPException(status_code=403, detail="Only owner/admin can view agent conversations.")
+    else:
+        sender = await _resolve_room_member(auth, org_id, db)
 
     conv_ids_result = await db.execute(
         select(
@@ -1564,10 +1593,17 @@ async def list_conversations(
     # project 내 agent type member가 participant인 conversation 후보를 모으되,
     # 휴먼 참가 대화(=private)는 보수적 판별로 제외 — admin에게 추가 노출 금지.
     # (본인 참여 대화는 base conv_ids로 이미 포함되니 무관.)
-    if include_agent_conversations:
+    if include_agent_conversations and project_none:
+        # the agents' rooms that have no project (they are in no project's view): every room of the organization without a project and without a person in it
+        no_project_convs = {r[0] for r in (await db.execute(
+            select(Conversation.id).where(Conversation.org_id == org_id, Conversation.project_id.is_(None))
+        )).all()}
+        if no_project_convs:
+            conv_ids.update(no_project_convs - await _conversations_with_human_participant(list(no_project_convs), db))
+    elif include_agent_conversations:
         agent_ids_result = await db.execute(
             select(TeamMember.id).where(
-                TeamMember.project_id == project_id,
+                TeamMember.project_id == project_uuid,
                 TeamMember.org_id == org_id,
                 TeamMember.type == "agent",
                 TeamMember.is_active.is_(True),
@@ -1587,11 +1623,29 @@ async def list_conversations(
     if not conv_ids:
         return {"data": [], "total": 0, "limit": limit, "offset": offset}
 
-    conv_filter = (
-        Conversation.id.in_(conv_ids),
-        Conversation.org_id == org_id,
-        Conversation.project_id == project_id,
+    # the SAME predicate as every read (bulk form): a room is listed only if it can be read. The admin's agent view has already established the admin; an
+    # agent caller needs its project in a room that has one (AC12); a person asks nothing more of a room they are in.
+    from app.services.conversation_auth import conversation_readable_predicate
+    from app.services.project_auth import project_access_valid_correlated
+
+    caller_is_agent = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
+    readable = conversation_readable_predicate(
+        Conversation.id,
+        caller_member_id=sender.id,
+        admin_bypass_eligible=include_agent_conversations,
+        agent_project_valid=(
+            or_(
+                Conversation.project_id.is_(None),
+                project_access_valid_correlated(Conversation.project_id, caller_id=uuid.UUID(auth.user_id), org_id=org_id),
+            )
+            if caller_is_agent else True
+        ),
     )
+    conv_filter: tuple = (Conversation.id.in_(conv_ids), Conversation.org_id == org_id, readable)
+    if project_none:
+        conv_filter += (Conversation.project_id.is_(None),)
+    elif project_uuid is not None:
+        conv_filter += (Conversation.project_id == project_uuid,)
     total = (await db.execute(
         select(func.count()).select_from(Conversation).where(*conv_filter)
     )).scalar_one()
@@ -1617,6 +1671,18 @@ async def list_conversations(
     # story #2925: 행 승격 신호 배치 조회(N+1 방지 — 쿼리 2개 고정, 리스트 크기 무관).
     linked_proof_map = await _batch_resolve_linked_proof(conv_id_list, org_id, db)
 
+    # story #4846: each room's project label — one batch read (a room without a project has none)
+    from app.models.project import Project
+
+    listed_project_ids = {c.project_id for c in convs if c.project_id is not None}
+    project_names: dict[uuid.UUID, str] = {}
+    if listed_project_ids:
+        project_names = {
+            pid: name for pid, name in (await db.execute(
+                select(Project.id, Project.name).where(Project.id.in_(listed_project_ids), Project.org_id == org_id)
+            )).all()
+        }
+
     result = []
     for conv in convs:
         latest_msg = (await db.execute(
@@ -1628,6 +1694,8 @@ async def list_conversations(
 
         result.append({
             "id": str(conv.id),
+            "project_id": str(conv.project_id) if conv.project_id is not None else None,   # story #4846: the room's label (null = no project)
+            "project_name": project_names.get(conv.project_id) if conv.project_id is not None else None,
             "type": conv.type,
             "title": conv.title,
             "status": conv.status,
