@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic.fields import PydanticUndefined
 
 from .api_client import (
+    InvalidApiKey,
     _api_key_override,
     client,
     reset_project_override,
@@ -35,7 +36,7 @@ from .api_client import (
 from .config import settings
 from .datetime_params import offset_required_note
 from .removed_args import removed_arg_hints
-from .response import ok
+from .response import err, ok
 from .schemas import SprintableInput
 from .tools.attachments import MAX_TOTAL_ATTACHMENT_BYTES
 
@@ -258,6 +259,8 @@ async def _load_scope_for(key: str) -> list[str] | None:
     try:
         manifest = await client.get("/api/v2/mcp/manifest")
         scope: list[str] | None = manifest.get("scope") or []
+    except InvalidApiKey:
+        raise   # story 4849 — the server no longer knows this key: say so (nothing is cached as «fail-open» for it)
     except Exception:
         scope = _SCOPE_FAILOPEN  # 매니페스트 미가용 → fail-open(백엔드가 최종 SSOT)
         logger.warning("MCP toolset manifest load failed — falling back to legacy scope")
@@ -337,7 +340,10 @@ def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
         # E-MCP-HTTP S1: effective 키(http=per-request bearer override·stdio=env 단일키)별 scope 로드
         # (per-key bounded 캐시). 멀티테넌트서 키마다 다른 scope 정확 적용.
         _eff_key = _api_key_override.get() or settings.agent_api_key
-        _scope = await _load_scope_for(_eff_key)
+        try:
+            _scope = await _load_scope_for(_eff_key)
+        except InvalidApiKey as exc:
+            return err(exc)   # story 4849 — the same «Error: INVALID_API_KEY: …» reply as any tool error
         if not is_tool_allowed(name, _scope):
             return _denied(name)
         # 85429ee0: per-call project_id override → contextvar(tool 호출 스코프). client.project_id +

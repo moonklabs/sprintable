@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
-from ..api_client import _api_key_override, _auth_ctx_cache, as_mapping, client
+from ..api_client import _api_key_override, as_mapping, client, set_cached_default_project
 from ..response import err, ok
 
 
@@ -52,9 +52,7 @@ async def set_default_project(args: SetDefaultProjectInput) -> list:
             client._project_id = new_default  # stdio(override 無) 경로.
             client._project_id_ambiguous = False
             _key = _api_key_override.get() or client._api_key
-            if _key in _auth_ctx_cache:
-                _auth_ctx_cache[_key]["project_id"] = new_default
-                _auth_ctx_cache[_key]["is_project_ambiguous"] = False
+            set_cached_default_project(_key, new_default)   # story 4849: also marks checks of this key that are still in flight
         return ok(result)
     except Exception as exc:
         return err(exc)
