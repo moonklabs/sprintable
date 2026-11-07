@@ -641,7 +641,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // an older server, and a project is picked after all: the project-only list it can answer
   useEffect(() => {
     if (needsProject && projectId) { setNeedsProject(false); setProjectOnly(true); setLoading(true); setRoomsAreOrgWide(false); } // loading in the same step: no moment of «0 rooms» for the instruction line to land on
-  }, [needsProject, projectId]);
+  }, [needsProject, projectId, setRoomsAreOrgWide]);
 
   const handleProjectFilterChange = useCallback((next: string) => {
     setProjectFilter(next);
@@ -820,7 +820,12 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // 없습니다」·오른쪽 「선택하면…」 모순 재발). 처방 둘 다: ①isAgent 판정 자체에
   // isAdminOrOwner를 게이트 ②isAdminOrOwner가 꺼지는 전환에서 activeList를 'my'로 리셋.
   useEffect(() => {
-    if (!isAdminOrOwner) setActiveList('my');
+    if (!isAdminOrOwner) {
+      setActiveList('my');
+      // story 4847 — the agents view is gone with the tab: what it was told (a refusal) and that it was read must not outlive it, or the same person getting the tab back would see the old refusal without a new ask
+      agentLoadedRef.current = false;
+      setAgentForbidden(false);
+    }
   }, [isAdminOrOwner]);
 
   // story #3790(유나 定) — 재시도는 항상 append=false(전체 재조회)로 부른다. 시작 시

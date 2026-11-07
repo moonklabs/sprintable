@@ -948,6 +948,38 @@ describe('ChatListView — 에이전트 탭은 조직 owner/admin 몫(story 4847
     expect(container.textContent).toContain(koMessages.chats.noAgentConversations);
   });
 
+  it('⭐탭이 사라졌다가(조직 역할이 내려감) 돌아오면 옛 거절은 걷히고 다시 묻는다', async () => {
+    let agentStatus = 403;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('include_agent_conversations=true')) {
+        return agentStatus === 403 ? { ok: false, status: 403, json: async () => ({}) } : { ok: true, json: async () => ({ data: [], total: 0 }) };
+      }
+      if (url.startsWith('/api/conversations?')) return { ok: true, json: async () => ({ data: [A1], total: 1 }) };
+      return { ok: false, status: 404, json: async () => null };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const agentAsks = () => fetchMock.mock.calls.filter((c) => String(c[0]).includes('include_agent_conversations=true')).length;
+    const rerender = async () => {
+      await act(async () => { root.render(wrap(<ChatListView projectId="proj-a" currentTeamMemberId="me-1" />)); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    };
+    withCtx({ role: 'admin', ...ORG_ADMIN });
+    await mount({ projectId: 'proj-a' });
+    await openAgentTab();
+    expect(container.querySelector('[data-testid="agent-chats-admin-only"]')).not.toBeNull();
+    expect(agentAsks()).toBe(1);
+    withCtx({ role: 'admin', ...orgAs('member') }); // the organization role went down: the tab is gone
+    await rerender();
+    expect(tabs()).not.toContain(koMessages.chats.agentChatsTab);
+    agentStatus = 200;
+    withCtx({ role: 'admin', ...ORG_ADMIN }); // …and came back
+    await rerender();
+    await openAgentTab();
+    expect(agentAsks()).toBe(2); // asked again, not answered from the old refusal
+    expect(container.querySelector('[data-testid="agent-chats-admin-only"]')).toBeNull();
+  });
+
   it('⭐다른 실패(500)는 그대로 «불러오지 못했어요 · 다시 시도»다 — 403만 따로 말한다', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
