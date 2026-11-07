@@ -1,0 +1,1 @@
+{"file": "tests/test_4846_recipe_bound_notice_realdb.py", "sec": 30.0, "provisional": true, "source": "story #4846 — recipe-bound notice tests (the recipe publish world needs the create_all harness); provisional until the first CI shard run measures it"}

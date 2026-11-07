@@ -175,6 +175,9 @@ async def test_stage_gate_with_anchored_org_owner_delivers_card_end_to_end():
                 name="댄", is_active=True,
             )
             s.add(publisher)
+            from tests.conftest import grant_org_projects
+
+            await grant_org_projects(s, org_id, agent_member_id=publisher.id)   # story #4846 AC12: a real agent has its project's grant
             await s.commit()
 
             from app.models.pm import Story

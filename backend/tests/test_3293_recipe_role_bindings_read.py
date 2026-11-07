@@ -71,9 +71,11 @@ async def _seed_org_project(session, *, slug="axis2c"):
 
 async def _seed_agent(session, org_id, project_id, *, name="agent"):
     from app.models.team import TeamMember
+    from tests.conftest import grant_org_projects
 
     m = TeamMember(id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="agent", name=name, is_active=True)
     session.add(m)
+    await grant_org_projects(session, org_id, agent_member_id=m.id)   # story #4846 AC12: a real agent has its project's grant (the story-4351 seed line)
     await session.commit()
     return m.id
 
@@ -237,6 +239,12 @@ async def test_no_project_access_rejected_404():
 
             definition = await _seed_cyclic_definition(s)
             outsider_id = await _seed_agent(s, org_id, project_a, name="outsider")
+            from sqlalchemy import delete as _delete
+
+            from app.models.project_access import ProjectAccess as _PA
+
+            await s.execute(_delete(_PA).where(_PA.member_id == outsider_id, _PA.project_id == project_b.id))   # the outsider has project A only (the seed grants every project that exists)
+            await s.commit()
 
             with pytest.raises(HTTPException) as ei:
                 await get_recipe_role_bindings(

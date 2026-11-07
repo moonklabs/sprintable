@@ -102,9 +102,11 @@ async def _seed_system_publisher(session, org_id, project_id):
 
 async def _seed_agent(session, org_id, project_id, *, name="executor"):
     from app.models.team import TeamMember
+    from tests.conftest import grant_org_projects
 
     m = TeamMember(id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="agent", name=name, is_active=True)
     session.add(m)
+    await grant_org_projects(session, org_id, agent_member_id=m.id)   # story #4846 AC12: a real agent has its project's grant (the story-4351 seed line)
     await session.commit()
     return m.id
 
@@ -160,7 +162,10 @@ async def _publish_first_collect(session, *, org_id, story_id, definition_key, r
 
     # requester_id는 TeamMember.id(에이전트) — api_key_id 마커로 agent 분기를 태운다
     # (member_resolver.py::_resolve_member_legacy, human/JWT 분기와 갈리는 지점).
-    auth = AuthContext(
+    # the repeat scheduler publishes as the system publisher with the server-issued context (story #4846 AC12 — the server's own voice is not an agent's project act)
+    from app.dependencies.auth import ServerIssuedAuth
+
+    auth = ServerIssuedAuth(
         user_id=str(requester_id or uuid.uuid4()), email=None,
         claims={"app_metadata": {"api_key_id": "test-agent"}}, org_id=str(org_id),
     )

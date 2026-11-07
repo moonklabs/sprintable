@@ -19,7 +19,7 @@ from sqlalchemy.orm import aliased
 from app.core.datetime_query import OffsetDatetime
 from app.core.config import settings
 from app.core.pagination import assemble_page, decode_cursor
-from app.dependencies.auth import AuthContext, ServerIssuedAuth, get_current_user, get_verified_org_id
+from app.dependencies.auth import AuthContext, RecipeBoundAuth, ServerIssuedAuth, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db, get_read_db
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.doc import Doc
@@ -191,7 +191,9 @@ async def _resolve_room_member(
         from app.services.conversation_auth import agent_project_valid_for_room, conversation_project
 
         found, conv_project_id = await conversation_project(db, conversation_id, org_id)
-        if found and not await agent_project_valid_for_room(
+        # a recipe notice the publish has checked against the agent's binding passes, for the room of the project it was checked for and no other
+        bound_notice = isinstance(auth, RecipeBoundAuth) and conv_project_id == auth.bound_project_id
+        if found and not bound_notice and not await agent_project_valid_for_room(
             db, caller_is_agent=True, caller_id=member.id, conv_project_id=conv_project_id, org_id=org_id,
         ):
             raise HTTPException(status_code=403, detail="Not a participant")

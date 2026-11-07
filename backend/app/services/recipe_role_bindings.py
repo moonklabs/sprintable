@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.recipe_role_binding import RecipeRoleBinding
@@ -17,6 +17,26 @@ def stage_target(definition, stage: str) -> str:
     capability = (definition.stage_metadata.get(stage) or {}).get("capability")
     target = (capability or {}).get("target")
     return target if target in ("channel_connection", "generation_connector") else "agent"
+
+
+async def agent_bound_to_recipe(
+    db: AsyncSession, *, org_id: uuid.UUID, agent_member_id: uuid.UUID, definition_key: str, project_id: uuid.UUID | None,
+) -> bool:
+    """story #4846 (AC12) — is this agent bound to this recipe, for a notice about a work item of `project_id`? An organization-wide binding (no project) is
+    the user saying «this agent does this recipe's work across the organization» and counts for any project; a binding of `project_id` counts only while the
+    agent still holds that project (revoking the project stops the notices of that binding)."""
+    from app.services.project_auth import has_project_access
+
+    scopes = set((await db.execute(
+        select(RecipeRoleBinding.project_id).where(
+            RecipeRoleBinding.org_id == org_id, RecipeRoleBinding.agent_member_id == agent_member_id,
+            RecipeRoleBinding.event_definition_key == definition_key,
+            or_(RecipeRoleBinding.project_id.is_(None), RecipeRoleBinding.project_id == project_id),
+        )
+    )).scalars().all())
+    if None in scopes:
+        return True
+    return project_id is not None and project_id in scopes and bool(await has_project_access(db, agent_member_id, project_id, org_id))
 
 
 async def upsert_role_binding(

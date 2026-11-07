@@ -3273,8 +3273,21 @@ async def _publish_registry_event_core(
         mentioned_ids=list(escalation_ids),
         event_context={"event_key": definition.key, "payload": payload, "refs": {**refs, **(routing_context or {})}},
     )
+    send_auth = auth
+    if sender.type == "agent" and not _is_system_publisher and not isinstance(auth, ServerIssuedAuth) and project_id is not None:
+        # story #4846 (AC12): an agent writes in a room of a project only while it has the project — except the notice of a recipe it is BOUND to, whose
+        # ground is the binding (a setting the user gave the agent): the mark is built here, after the check, and nowhere else
+        from app.dependencies.auth import RecipeBoundAuth
+        from app.services.recipe_role_bindings import agent_bound_to_recipe
+
+        if await agent_bound_to_recipe(
+            db, org_id=org_id, agent_member_id=sender.id, definition_key=definition.key, project_id=project_id,
+        ):
+            send_auth = RecipeBoundAuth(
+                user_id=auth.user_id, email=auth.email, claims=auth.claims, org_id=auth.org_id, bound_project_id=project_id,
+            )
     msg_response = await send_message_core(
-        conv.id, send_body, background_tasks, db=db, auth=auth, org_id=org_id, after_commit=after_commit,
+        conv.id, send_body, background_tasks, db=db, auth=send_auth, org_id=org_id, after_commit=after_commit,
         as_system_publisher=post_as_system_publisher,
     )
     if sender.type == "agent" and payload.get("work_item_type") == "story" and payload.get("work_item_id"):
@@ -4141,6 +4154,25 @@ async def apply_recipe_role_bindings(
             status_code=422,
             detail=f"agent(s) not found in this org: {missing_agents}",
         )
+
+    if body.project_id is not None:
+        # story #4846 (AC12): a binding of a PROJECT says «this agent does this recipe's work in that project», and an agent writes in a project's rooms only
+        # while it has the project — so it is told now, not by a notice that silently stops later. An organization-wide binding (no project) is unchanged.
+        from app.services.project_auth import has_project_access as _agent_has_project
+
+        lacking = []
+        for agent_id in sorted(agent_ids, key=str):
+            if not await _agent_has_project(db, agent_id, body.project_id, org_id):
+                lacking.append(str(agent_id))
+        if lacking:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "AGENT_LACKS_PROJECT",
+                    "message": "Agent(s) are not members of this project — give them the project first, or bind them organization-wide",
+                    "errors": lacking,
+                },
+            )
 
     channel_connection_ids = {uuid.UUID(v) for v in channel_stage_values.values()}
     valid_connections = set((await db.execute(
