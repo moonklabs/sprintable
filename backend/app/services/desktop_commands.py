@@ -342,7 +342,7 @@ async def sessions_overview(db: AsyncSession, *, member_id: uuid.UUID, user_id: 
             "bound_setup_id": str(bound[a.id]["setup_id"]) if a.id in bound else None,
             "bound_device_name": bound[a.id]["device_name"] if a.id in bound else None,
             "conversation_id": str(dm_of[a.id][0]) if a.id in dm_of else None,
-            "conversation_project_id": str(dm_of[a.id][1]) if a.id in dm_of else None,
+            "conversation_project_id": str(dm_of[a.id][1]) if a.id in dm_of and dm_of[a.id][1] is not None else None,  # story #4846: a room may have no project
             "setup_id": None, "device_name": None, "state": None, "activity": None, "state_at": None, "limit": None, "first_screen": None,
         }
         pick = picks.get(a.id)

@@ -90,6 +90,16 @@ def path_in_source_scope(
     )
 
 
+class AttachmentNeedsProject(ValueError):
+    """story #4846 — a chat attachment of a room WITHOUT a project. Its asset would be registered with no project, which the rest of the asset code reads as
+    «the organization's» (listing, text read, authorize): open to people who are not in the room. So the one place a chat attachment becomes an asset
+    refuses it (and the one place that builds a project-scoped object path for a chat upload refuses it too); the API answers 400 `ATTACHMENT_NEEDS_PROJECT`
+    (main.py). The attachment PR of the story (AC6) turns this refusal into a real upload and read."""
+
+    code = "ATTACHMENT_NEEDS_PROJECT"
+    message = "프로젝트가 없는 채팅방에는 아직 첨부 파일을 올릴 수 없어요. 글만 보낼 수 있어요."
+
+
 async def sync_attachment_assets(
     session: AsyncSession,
     *,
@@ -118,6 +128,8 @@ async def sync_attachment_assets(
     """
     if source_type not in ASSET_LINK_SOURCE_TYPES:
         raise ValueError(f"invalid asset link source_type: {source_type}")
+    if source_type == "conversation_message" and project_id is None and attachments:
+        raise AttachmentNeedsProject()
 
     scope_id = path_scope_id if path_scope_id is not None else source_id
     asset_ids: list[uuid.UUID] = []

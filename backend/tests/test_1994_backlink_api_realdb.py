@@ -1058,12 +1058,10 @@ async def test_sabotage_intra_statement_revoke_barrier_doc_source_project_access
         await engine.dispose()
 
 
-async def test_sabotage_intra_statement_revoke_barrier_chat_source_project_access_valid():
-    """위 테스트의 chat-source 짝 — `conversation_readable_predicate`에 넘기는
-    `project_access_valid`도 같은 `project_access_valid_correlated` SSOT를 쓰므로(Conversation.
-    project_id에 correlate) 동일한 intra-statement revoke barrier를 만족해야 한다. caller가
-    conversation 참가자이고(participant atom 유지) admin도 아닌 상태에서, source message가 속한
-    project에 대한 grant만 메인 쿼리 실행 직전에 revoke한다."""
+async def test_chat_source_participant_keeps_the_item_when_the_project_grant_is_revoked_mid_statement():
+    """story #4846 (AC2): this test used to pin the chat-source `project_access_valid` atom (a participant lost the item when the room's
+    project grant was revoked right before the main statement). That atom is gone — being in the room reads it — so the same revoke now leaves
+    the participant's own chat item in place. (The doc-source barriers above and the admin-bypass barriers below are unchanged.)"""
     from app.main import app
     from sqlalchemy import event
 
@@ -1114,10 +1112,7 @@ async def test_sabotage_intra_statement_revoke_barrier_chat_source_project_acces
 
         assert revoked["done"] is True, "revoke hook 미발동(mentions 쿼리 미탐지) — 테스트 자체 결함"
         assert resp.status_code == 200, resp.text
-        assert resp.json()["data"] == [], (
-            "Blocker 1(§5회차) 회귀: 메인 statement 실행 직전 커밋된 revoke가 chat-source "
-            f"project_access_valid atom(conversation_readable_predicate 경유)에 반영되지 않음 — {resp.json()}"
-        )
+        assert [i["source_id"] for i in resp.json()["data"]] == [str(msg.id)], resp.json()
     finally:
         await engine.dispose()
 
@@ -1291,8 +1286,11 @@ async def test_sabotage_intra_statement_revoke_barrier_agent_admin_bypass_eligib
 # ─── §5회차 Blocker 2: `_can_read_conversation`의 project_access_valid — agent grant-loss ──
 
 
-async def test_can_read_conversation_agent_grant_loss_atom_direct():
-    """산티아고 Blocker 2(§5회차): `_can_read_conversation`이 API-key(에이전트) caller의
+async def test_can_read_conversation_agent_participant_keeps_the_room_after_grant_loss():
+    """story #4846 (AC2): the agent participant reads its room with or without the project grant (the old expectation after the revoke was
+    False: the `project_access_valid` atom). It is still total (never raises) and still True before the revoke.
+
+    (former docstring) 산티아고 Blocker 2(§5회차): `_can_read_conversation`이 API-key(에이전트) caller의
     `project_access_valid`를 `True`로 하드코딩(재검증 없음)하던 구 동작을 없애고, human과 동일하게
     `has_project_access`를 실제로 호출하는지 **직접**(HTTP 왕복이 아니라 함수 자체) 실증한다 —
     "어떤 status code가 뜨는가"가 아니라 predicate의 진리값 자체를 단정해 어떤 atom을 겨냥하는지
@@ -1332,10 +1330,7 @@ async def test_can_read_conversation_agent_grant_loss_atom_direct():
 
         async with Session() as s:
             result_after = await _can_read_conversation(conv_id, s, auth, org.id)
-        assert result_after is False, (
-            "Blocker 2(§5회차) 회귀: 에이전트 grant 회수 후에도 _can_read_conversation이 True를 "
-            "반환함 — project_access_valid가 is_api_key=True로 하드코딩된 채 재검증 안 됨"
-        )
+        assert result_after is True, "a participant agent keeps its room after its project grant is gone (story #4846)"
     finally:
         await engine.dispose()
 
@@ -1348,8 +1343,11 @@ async def test_can_read_conversation_agent_grant_loss_atom_direct():
 # ─── (1) B1: revoked grant — 해당 항목만 제외, 전체 호출 poison 안 됨 ────────────
 
 
-async def test_sabotage_revoked_grant_excludes_only_that_item_not_whole_call():
-    """산티아고 B1: `_can_read_conversation`의 두 번째 `_resolve_member(project_id=...)` 호출이
+async def test_revoked_project_grant_keeps_the_participants_item_and_never_poisons_the_call():
+    """story #4846 (AC2): a participant who lost the room's project keeps the room — the item stays (it used to be left out), the call is 200,
+    and `_can_read_conversation` answers True without raising (the never-raise contract of B1 is unchanged).
+
+    (former docstring) 산티아고 B1: `_can_read_conversation`의 두 번째 `_resolve_member(project_id=...)` 호출이
     grant-loss caller에서 HTTPException을 raise할 수 있었다(B1 하드닝 前) — 이게 잡히지 않으면
     mention **한 행**의 미인가가 backlinks 응답 **전체**를 poison한다(403/500). 이 테스트는:
 
@@ -1407,9 +1405,7 @@ async def test_sabotage_revoked_grant_excludes_only_that_item_not_whole_call():
                 f"poison함 — {resp_after.status_code} {resp_after.text}"
             )
             body_after = resp_after.json()
-            assert body_after["data"] == [], (
-                "회수 후에도 item이 남아있음 — 인가 필터가 실제로 걸리지 않음", body_after,
-            )
+            assert [i["source_id"] for i in body_after["data"]] == [str(msg.id)], body_after
             assert body_after["meta"]["has_more"] is False
         finally:
             await client.aclose()
@@ -1421,7 +1417,7 @@ async def test_sabotage_revoked_grant_excludes_only_that_item_not_whole_call():
                 claims={"app_metadata": {"org_id": str(org.id)}},
             )
             result = await _can_read_conversation(conv_id, s2, auth, org.id)
-            assert result is False, "grant-loss 후 _can_read_conversation은 raise 없이 False여야 함(B1 계약)"
+            assert result is True, "grant-loss 후에도 참가자는 방을 읽는다 — raise 없이 True (story #4846)"
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()

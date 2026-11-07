@@ -161,6 +161,22 @@ async def _resolve_member(
     return await resolve_member(auth, org_id, db, project_id=project_id)
 
 
+async def _resolve_room_member(auth: AuthContext, org_id: uuid.UUID, db: AsyncSession) -> "ResolvedMember | TeamMember":
+    """story #4846 — the caller as a member of an existing ROOM. A room belongs to the organization (its project is a label, maybe none), and
+    being in it is what reads and writes it (`conversation_auth`), so the member is resolved for the organization, not for the room's project:
+    a participant who lost access to the room's project is still the member of the room. Who may act in WHICH room is still decided by the
+    participant check / `_can_read_conversation` that every caller runs next.
+
+    Someone who is not a member of the organization at all is not in any of its rooms: that answers 403 «Not a participant» (it was 403 «No access
+    to this project» while the lookup was project-bound; the organization-level lookup says 400 «Organization member not found»)."""
+    try:
+        return await _resolve_member(auth, org_id, db, project_id=None)
+    except HTTPException as e:
+        if e.status_code == 400 and e.detail == "Organization member not found":
+            raise HTTPException(status_code=403, detail="Not a participant") from e
+        raise
+
+
 async def _effective_org_role(
     auth: AuthContext, org_id: uuid.UUID, db: AsyncSession, sender: "ResolvedMember | TeamMember",
     project_id: uuid.UUID | None = None,
@@ -790,9 +806,7 @@ async def _dispatch_conversation_event(
         스트림도 없음 = 맨 호스팅 MCP)의 member id가 여기에 담긴다. 그런 에이전트에겐 «입력 중»(set_working)을 켜지 않는다.
     반환값: [(pid_str, payload)] — db.commit() 완료 후 _push_to_agent() 호출용.
     """
-    if not conversation.project_id:
-        return []
-
+    # story #4846: a room without a project is a room like any other — its events carry no project (events.project_id is nullable).
     payload = _msg_payload(msg, sender, references=references)
 
     # story #2650: SSE/webhook 패리티 — conversation_webhook.py가 이미 하는 첨부 컨텍스트 주입
@@ -929,7 +943,7 @@ async def _dispatch_mention_events(
     references: story #2889 — _dispatch_conversation_event와 동일 원칙(위 docstring 참고).
     반환값: [(pid_str, payload)] — db.commit() 완료 후 _push_to_agent() 호출용.
     """
-    if not conversation.project_id or not mention_targets:
+    if not mention_targets:
         return []
 
     payload = _msg_payload(msg, sender, references=references)
@@ -999,9 +1013,6 @@ async def _dispatch_human_intervention_event(
 
     references: story #2889 — _dispatch_conversation_event와 동일 원칙.
     """
-    if not conversation.project_id:
-        return []
-
     # story #3629(3627 클래스, 페드루 PO 確定 2026-09-07) — team_members INNER JOIN
     # 단독으론 org_member-only 휴먼(SSOT 전환 이후 org 다수)이 조용히 human_targets에서
     # 빠졌다(chain-expired 개입 알림이 그 휴먼에게 영원히 안 감). is_human_member_condition
@@ -1061,13 +1072,13 @@ async def _command_capability_gate(
     없음/unknown) 에이전트는 **주입 차단**(반환된 id 를 dispatch exclude 로 사용) + audit log
     `command_blocked_unsupported_runtime` 기록 + hint 생성. 지원 에이전트는 그대로 pass-through.
 
-    비-command 메시지는 빈 결과 → 기존 경로 무영향(AC4 회귀). project_id 없는 conversation 은
-    애초에 에이전트 dispatch 가 없어 게이트 무의미 → 빈 결과.
+    비-command 메시지는 빈 결과 → 기존 경로 무영향(AC4 회귀). story #4846: project_id 없는 방도 에이전트 dispatch 가 있으므로 게이트는 똑같이 막는다 —
+    다만 audit log 행(agent_audit_logs.project_id NOT NULL)은 프로젝트가 있는 방에서만 쓰고, 없는 방은 같은 내용을 서버 로그 한 줄로 남긴다.
 
     반환: (blocked_agent_ids, hints) — hints 는 발신자에게 돌려줄 구조화 안내.
     """
     candidate = classify_command(msg.content)
-    if candidate is None or not conv.project_id:
+    if candidate is None:
         return set(), []
 
     rows = (await db.execute(
@@ -1087,22 +1098,28 @@ async def _command_capability_gate(
             continue  # AC2: 지원 런타임 → pass-through(기존 dispatch)
         # AC3/AC4: 미지원(또는 runtime_type 없음/unknown) → 차단 + audit + hint
         blocked.add(agent_id)
-        db.add(AgentAuditLog(
-            org_id=org_id,
-            project_id=conv.project_id,
-            agent_id=agent_id,
-            event_type="command_blocked_unsupported_runtime",
-            severity="info",
-            summary=f"'/{candidate.name}' blocked — runtime '{runtime_type or 'unset'}' lacks deterministic command support",
-            payload={
-                "command": candidate.name,
-                "raw": candidate.raw,
-                "runtime_type": runtime_type,
-                "conversation_id": str(conv.id),
-                "message_id": str(msg.id),
-                "sender_id": str(sender.id),
-            },
-        ))
+        if conv.project_id is None:
+            logger.info(
+                "command_blocked_unsupported_runtime (room without a project) conversation_id=%s message_id=%s agent_id=%s command=%s runtime_type=%s",
+                conv.id, msg.id, agent_id, candidate.name, runtime_type,
+            )
+        else:
+            db.add(AgentAuditLog(
+                org_id=org_id,
+                project_id=conv.project_id,
+                agent_id=agent_id,
+                event_type="command_blocked_unsupported_runtime",
+                severity="info",
+                summary=f"'/{candidate.name}' blocked — runtime '{runtime_type or 'unset'}' lacks deterministic command support",
+                payload={
+                    "command": candidate.name,
+                    "raw": candidate.raw,
+                    "runtime_type": runtime_type,
+                    "conversation_id": str(conv.id),
+                    "message_id": str(msg.id),
+                    "sender_id": str(sender.id),
+                },
+            ))
         hints.append({
             "agent_id": str(agent_id),
             "agent_name": agent_name,
@@ -1243,7 +1260,7 @@ class ConversationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    project_id: uuid.UUID
+    project_id: uuid.UUID | None = None  # story #4846: a room may have no project
     org_id: uuid.UUID
     type: str
     title: str | None = None
@@ -1846,11 +1863,11 @@ async def get_conversation(
     # 통일. 404로 존재-비노출(구 403 "Not a participant"는 참가여부를 노출했다 — 다른 리소스
     # (goals·stories·sprints·retros·gates) 다수 관례에 맞춰 통일, story #2697 AC②).
     if not await _can_read_conversation(
-        conversation_id, db, auth, org_id, _conv_project_id=conv.project_id,
+        conversation_id, db, auth, org_id, _conv_scope=(True, conv.project_id),
     ):
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+    sender = await _resolve_room_member(auth, org_id, db)
 
     # 270c87e6: caller의 mute 상태 노출(FE 토글 초기 상태·#1426). 비참여자(admin-bypass agent-only)는 False.
     # story #1976: 같은 단건 조회에 last_read_at도 편승(신규 쿼리 아님) — unread_count는 참여자일 때만 계산.
@@ -1903,7 +1920,7 @@ async def _can_read_conversation(
     auth: AuthContext,
     org_id: uuid.UUID,
     *,
-    _conv_project_id: uuid.UUID | None = None,
+    _conv_scope: tuple[bool, uuid.UUID | None] | None = None,
 ) -> bool:
     """story #1994(E-KNOWLEDGE-LINK S2) 4~6회차 pass §8②: 메시지 조회 인가의 canonical bool 술어.
 
@@ -1928,17 +1945,15 @@ async def _can_read_conversation(
     행 단위 판정을 기대하는 호출부까지 통째로 poison했다. 아래 본문은 try/except HTTPException
     로 감싸 False로 정규화한다.
 
-    `_conv_project_id`: `_authorize_message_read`가 이미 조회해둔 project_id를 넘기면 동일 PK
+    `_conv_scope`: `_authorize_message_read`가 이미 조회해둔 `(exists, project_id)`(`conversation_auth.conversation_project`)를 넘기면 동일 PK
     SELECT를 중복 실행하지 않는다(메시지 목록/단건/리플 등 hot path 성능 보존). 직접 호출부
-    (백링크)는 생략 — 이 함수가 자체적으로 조회한다.
+    (백링크)는 생략 — 이 함수가 자체적으로 조회한다. story #4846: 방은 프로젝트 없이도 있어서 «project_id가 None» ≠ «방 없음».
     """
-    conv_project_id = _conv_project_id
-    if conv_project_id is None:
-        conv_project_id = (await db.execute(
-            select(Conversation.project_id).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
-        )).scalar_one_or_none()
-        if conv_project_id is None:
-            return False
+    from app.services.conversation_auth import conversation_project
+
+    found, conv_project_id = _conv_scope if _conv_scope is not None else await conversation_project(db, conversation_id, org_id)
+    if not found:
+        return False
 
     # story #1994 B1 하드닝(산티아고 sabotage-probe 발견): 아래(org-level 1차 해소부터
     # project-access 재확인까지)는 `_resolve_member` → `member_resolver.resolve_member`가
@@ -1971,50 +1986,21 @@ async def _can_read_conversation(
         # 판단)에서 여전히 쓰이므로 그대로 유지 — 이 함수만 소싱 방식을 바꾼다.
         from sqlalchemy import literal
 
-        from app.services.project_auth import (
-            has_project_access,
-            org_admin_valid_correlated,
-            project_admin_valid_correlated,
-        )
+        from app.services.conversation_auth import agent_room_admin_bypass, conversation_readable_predicate
+        from app.services.project_auth import org_admin_valid_correlated
 
         is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
 
         admin_bypass_eligible = (
-            project_admin_valid_correlated(
-                literal(conv_project_id), caller_id=sender.id, org_id=org_id,
-            )
+            agent_room_admin_bypass(conv_project_id, caller_id=sender.id, org_id=org_id)
             if is_api_key
             else org_admin_valid_correlated(caller_id=uuid.UUID(auth.user_id), org_id=org_id)
         )
 
-        # project_access_valid(B1 grant-loss recheck — "참가 당시"가 아니라 "지금" 접근 가능한가):
-        # `has_project_access`(project_auth.py SSOT)를 boolean으로 직접 호출한다(재구현 아님).
-        #
-        # §5회차(산티아고 Blocker 2): 예전엔 API-key(에이전트) caller에게 `project_access_valid`를
-        # `True`로 하드코딩하고 재검증을 생략했다("기존 `_resolve_member`의 is_api_key 분기가
-        # project_id 무관하게 TeamMember.id 매치만 확인했다"는 이유로 그 동작을 "보존"한 것 — 그러나
-        # 산티아고 지적대로 이 "보존된" 동작 자체가 버그였다: grant가 회수된 에이전트도 여기선 계속
-        # `project_access_valid=True`를 받아, 같은 caller/project 쌍에 대해 `backlinks.py`(항상 live
-        # grant set을 correlate)와 이 함수(항상 True)가 서로 다른 답을 내는 "사실 하나·구현 둘" 드리프트가
-        # 있었다. `has_project_access`의 4-branch WHERE는 이미 caller type별로 내부 분기한다
-        # (`tm.type='human'` team_member 분기 vs `m.type='agent'` project_access grant 분기) —
-        # human/agent 무관하게 그냥 호출하면 두 caller 모두 정확한 답을 받는다(Python 레벨
-        # is_api_key 분기 자체가 불필요 — 재구현 0, project_auth.py가 이미 caller-type-aware SSOT).
-        #
-        # 이 atom(`project_access_valid`)은 §6회차 스코프 밖 — 여전히 요청당 1회 사전 SELECT로
-        # 소싱한다(reviewer round-5 verdict가 `admin_bypass_eligible` 하나만 잔여로 지목했다).
-        project_access_valid = await has_project_access(
-            db, uuid.UUID(auth.user_id), conv_project_id, org_id,
-        )
-
-        from app.services.conversation_auth import conversation_readable_predicate
-
+        # story #4846: no project-access atom any more — being in the room reads it (conversation_auth docstring).
         predicate = conversation_readable_predicate(
             literal(conversation_id),
             caller_member_id=sender.id,
-            project_access_valid=project_access_valid,
-            # §6회차 fix: 위에서 조립한 correlated EXISTS — `_effective_org_role`의 사전
-            # 해소 bool이 아니라, 이 `select(predicate)` 실행 시점의 스냅샷으로 평가된다.
             admin_bypass_eligible=admin_bypass_eligible,
         )
         result = (await db.execute(select(predicate))).scalar_one()
@@ -2035,12 +2021,13 @@ async def _authorize_message_read(
     story #1994 리팩터: 실제 판정 로직은 `_can_read_conversation`(canonical bool 술어)에 있다 —
     이 함수는 그 위에 404(대화 없음)/403(비참여자) raise semantics만 얹는 얇은 wrapper.
     """
-    conv_project_id = (await db.execute(
-        select(Conversation.project_id).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
-    )).scalar_one_or_none()
-    if conv_project_id is None:
+    from app.services.conversation_auth import conversation_project
+
+    scope = await conversation_project(db, conversation_id, org_id)
+    if not scope[0]:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    if not await _can_read_conversation(conversation_id, db, auth, org_id, _conv_project_id=conv_project_id):
+    conv_project_id = scope[1]
+    if not await _can_read_conversation(conversation_id, db, auth, org_id, _conv_scope=scope):
         raise HTTPException(status_code=403, detail="Not a participant")
     return conv_project_id
 
@@ -2189,7 +2176,7 @@ async def delete_message(
     이상하다.
     """
     conv_project_id = await _authorize_message_read(conversation_id, db, auth, org_id)
-    member = await _resolve_member(auth, org_id, db, project_id=conv_project_id)
+    member = await _resolve_room_member(auth, org_id, db)
 
     msg = (await db.execute(
         select(ConversationMessage).where(
@@ -2291,15 +2278,12 @@ async def list_working_members(
     online dot 과 분리 표시(AC2). ephemeral·TTL 기반(미reply 시 자동 소멸). participant 만 조회 가능.
     응답: {"data": [{"member_id", "state", "updated_at"}]}.
     """
-    conv_project_id = (await db.execute(
-        select(Conversation.project_id).where(
-            Conversation.id == conversation_id, Conversation.org_id == org_id
-        )
-    )).scalar_one_or_none()
-    if conv_project_id is None:
+    from app.services.conversation_auth import conversation_project
+
+    if not (await conversation_project(db, conversation_id, org_id))[0]:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    sender = await _resolve_member(auth, org_id, db, project_id=conv_project_id)
+    sender = await _resolve_room_member(auth, org_id, db)
     participant = (await db.execute(
         select(ConversationParticipant.id).where(
             ConversationParticipant.conversation_id == conversation_id,
@@ -2336,7 +2320,7 @@ async def set_conversation_mute(
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+    sender = await _resolve_room_member(auth, org_id, db)
     participant = (await db.execute(
         select(ConversationParticipant).where(
             ConversationParticipant.conversation_id == conversation_id,
@@ -2374,7 +2358,7 @@ async def mark_conversation_read(
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+    sender = await _resolve_room_member(auth, org_id, db)
     up_to = body.up_to or datetime.now(timezone.utc)
 
     result = await db.execute(_mark_read_update_stmt(conversation_id, sender.id, up_to))
@@ -2459,7 +2443,7 @@ async def release_circuit_breaker_endpoint(
             detail="서킷브레이커 해제는 org owner/admin만 가능합니다.",
         )
 
-    sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+    sender = await _resolve_room_member(auth, org_id, db)
 
     from app.services.chain_escalation import release_circuit_breaker
 
@@ -2485,7 +2469,7 @@ async def add_participant(
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+    sender = await _resolve_room_member(auth, org_id, db)
 
     # 요청자 참여 여부 확인
     is_participant = (await db.execute(
@@ -2596,7 +2580,7 @@ async def send_message_core(
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+    sender = await _resolve_room_member(auth, org_id, db)
     if after_commit is not None and sender.type != "agent":
         raise ValueError("send_message_core(after_commit=...) is for server-issued (agent) messages only")
 
@@ -2615,9 +2599,18 @@ async def send_message_core(
             raise HTTPException(status_code=403, detail="Not a participant")
     elif participant is None:
         # 발화 403 해소(270c87e6): 프로젝트 접근권 휴먼이 그룹/스레드 대화에 발화하면 auto-join.
-        # _resolve_member가 이미 project 접근을 검증했으므로 접근권은 성립. 단 타인 간 1:1 DM은
+        # 접근권 = 그 방 프로젝트의 접근. story #4846: 방 안 호출자 해소가 조직 단위로 바뀌어(`_resolve_room_member`) 이 자리가 더는 project 접근을
+        # 검증해 주지 않으므로 여기서 직접 묻는다 — 프로젝트가 없는 방은 «스스로 들어오는» 길이 없다(참가자만). 단 타인 간 1:1 DM은
         # 예외(비공개 보호·여전히 403)이고, 에이전트 인가(allowlist·creator 동석)는 불변(403 유지).
-        if sender.type == "human" and conv.type != "dm":
+        from app.services.project_auth import has_project_access
+
+        # (the 403 below says «you are not a participant» — the room is known to this organization member either way; it is not a project-access
+        # denial, so the question is asked on its own line, not in the `if` that the 403-lint reads as one)
+        may_join = (
+            sender.type == "human" and conv.type != "dm" and conv.project_id is not None
+            and await has_project_access(db, uuid.UUID(auth.user_id), conv.project_id, org_id)
+        )
+        if may_join:
             db.add(ConversationParticipant(conversation_id=conversation_id, member_id=sender.id))
             await db.flush()
         else:
@@ -2738,9 +2731,13 @@ async def send_message_core(
     _explicit_story_ids_before_promotion = {
         eid for etype, eid in extract_chat_entity_mentions(body.content or "") if etype == "story"
     }
-    body.content, _auto_story_ids = await promote_bare_story_refs(
-        db, org_id=org_id, project_id=conv.project_id, content=body.content or "",
-    )
+    # story #4846: a bare story number («#123») is a number inside ONE project — a room without a project has none to read it in, so nothing is promoted.
+    if conv.project_id is not None:
+        body.content, _auto_story_ids = await promote_bare_story_refs(
+            db, org_id=org_id, project_id=conv.project_id, content=body.content or "",
+        )
+    else:
+        _auto_story_ids = set()
     _auto_story_ids -= _explicit_story_ids_before_promotion
 
     # E-ACTIVATION S1(까디르 QA): audience 도 cross-org/삭제 id 차단 — mentioned_ids 와 동형 org 필터.
@@ -3061,7 +3058,7 @@ async def send_message_core(
     from app.services.conversation_webhook import resolve_conversation_webhook_targets
     webhook_targets: list = []
     webhook_authorized_ids = {d.member_id for d in decisions} - {sender.id}
-    if conv.project_id and webhook_authorized_ids:
+    if webhook_authorized_ids:
         try:
             # P0 message-loss savepoint 격리 — 위 blocks와 동일 근거.
             async with db.begin_nested():
@@ -3537,7 +3534,7 @@ async def upload_conversation_attachment(
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+    sender = await _resolve_room_member(auth, org_id, db)
     participant = (await db.execute(
         select(ConversationParticipant.id).where(
             ConversationParticipant.conversation_id == conversation_id,
@@ -3546,6 +3543,10 @@ async def upload_conversation_attachment(
     )).scalar_one_or_none()
     if participant is None:
         raise HTTPException(status_code=403, detail="Not a participant")
+    if conv.project_id is None:  # story #4846: the object path is project-scoped (`project/<id>/…`) — never built as `project/None`
+        from app.services.asset_registry import AttachmentNeedsProject
+
+        raise AttachmentNeedsProject()
 
     data = mcp_attachment_upload.decode_json_attachment(body.content_base64)
 
@@ -3599,7 +3600,7 @@ async def update_conversation_status(
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    requester = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+    requester = await _resolve_room_member(auth, org_id, db)
 
     # 참여자 검증
     participant = (await db.execute(
@@ -3652,7 +3653,7 @@ async def update_conversation(
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    requester = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
+    requester = await _resolve_room_member(auth, org_id, db)
     participant = (await db.execute(
         select(ConversationParticipant.id).where(
             ConversationParticipant.conversation_id == conversation_id,

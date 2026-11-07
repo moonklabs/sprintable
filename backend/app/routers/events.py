@@ -438,7 +438,7 @@ class CreateEventRequest(BaseModel):
 
 class EventResponse(BaseModel):
     id: uuid.UUID
-    project_id: uuid.UUID
+    project_id: uuid.UUID | None = None  # story #4846: the chat event rows of a room without a project carry none
     org_id: uuid.UUID
     event_type: str
     source_entity_type: str | None

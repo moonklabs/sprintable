@@ -157,7 +157,7 @@ async def _resolve_member_id(
 class NotificationResponse(BaseModel):
     id: uuid.UUID
     org_id: uuid.UUID
-    project_id: uuid.UUID
+    project_id: uuid.UUID | None = None  # story #4846: a room without a project has none
     event_type: str
     source_entity_type: str | None
     source_entity_id: uuid.UUID | None
@@ -262,8 +262,9 @@ async def mark_read(
     event = result.scalar_one_or_none()
     if event is None:
         raise HTTPException(status_code=404, detail="Notification not found")
-    # event.project_id로 정확한 member_id resolve → access check
-    member_id = await _resolve_member_id(auth, org_id, db, project_id=event.project_id)
+    # story #4846: the recipient is the caller, whatever happened to their access to the event's project (a participant who lost it still marks their own
+    # line read; the event may carry no project at all) — so the member is resolved for the organization; `recipient_id != member_id` below is the gate.
+    member_id = await _resolve_member_id(auth, org_id, db, project_id=None)
     if event.recipient_id != member_id:
         raise HTTPException(status_code=403, detail="Access denied")
 

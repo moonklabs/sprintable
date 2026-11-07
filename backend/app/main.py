@@ -17,6 +17,8 @@ from app.core.db_error_redaction import safe_exception_text
 from app.core.logging_config import configure_logging
 from app.core.rate_limit import limiter
 from app.models.conversation import MessageContentTooLong
+from app.repositories.project import ProjectHasChatAttachments
+from app.services.asset_registry import AttachmentNeedsProject
 
 # story #2179(2026-07-24, 오르테가군 판정) 근본수정 — 예전엔 `APP_ENV` 문자열 비교로 JSON
 # 로그 여부를 갈랐다("development"가 아니면 JSON). 그런데 JSON 로그가 필요한 진짜 조건은
@@ -360,6 +362,18 @@ async def message_too_long_handler(request: Request, exc: MessageContentTooLong)
     return await http_exception_handler(request, HTTPException(status_code=422, detail={
         "code": "message_too_long", "message": message, "limit": exc.limit, "got": exc.got,
     }))
+
+
+@app.exception_handler(AttachmentNeedsProject)
+async def attachment_needs_project_handler(request: Request, exc: AttachmentNeedsProject) -> JSONResponse:
+    """story #4846: a chat attachment of a room without a project — 400 `ATTACHMENT_NEEDS_PROJECT` (any route that registers or uploads one)."""
+    return await http_exception_handler(request, HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}))
+
+
+@app.exception_handler(ProjectHasChatAttachments)
+async def project_has_chat_attachments_handler(request: Request, exc: ProjectHasChatAttachments) -> JSONResponse:
+    """story #4846: deleting a project whose chat rooms hold message attachments — 409 `PROJECT_HAS_CHAT_ATTACHMENTS` with a reason a person can read."""
+    return await http_exception_handler(request, HTTPException(status_code=409, detail={"code": exc.code, "message": exc.message}))
 
 
 @app.exception_handler(RateLimitExceeded)
