@@ -28,8 +28,9 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(searchParamsValueRef.current),
 }));
 
+const { sseOpts } = vi.hoisted(() => ({ sseOpts: { current: undefined as undefined | { onPoll?: () => Promise<boolean> } } }));
 vi.mock('@/hooks/use-chat-sse', () => ({
-  useChatSse: () => ({ connected: true, polling: false }),
+  useChatSse: (opts: { onPoll?: () => Promise<boolean> }) => { sseOpts.current = opts; return { connected: true, polling: false }; },
 }));
 vi.mock('@/components/realtime-provider', () => ({
   useSseMultiplexerContext: () => ({ isAlive: () => false, subscribe: () => () => {}, subscribeMessage: () => () => {}, subscribeReconnect: () => () => {}, connected: true }),
@@ -373,6 +374,34 @@ describe('ChatListView — 같은 것을 두 번 묻는 경합 · 현재 프로�
     await act(async () => { releaseMoreB!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     expect(container.textContent).toContain('비 둘째 방');
     expect(container.textContent).not.toContain('에이 둘째 방');
+  });
+
+  it('⭐폴링 물음이 새 걸러 보기에 밀려나면 «실패»로 세지 않는다(폴링이 간격을 넓히지 않게 true) — 진짜 서버 실패는 false', async () => {
+    let releasePoll: (() => void) | undefined;
+    let allCalls = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url === ALL) {
+        allCalls++;
+        if (allCalls === 2) { await new Promise<void>((resolve) => { releasePoll = resolve; }); return { ok: true, json: async () => ({ data: [A1, B1], total: 2 }) }; }
+        if (allCalls >= 3) return { ok: false, status: 500, json: async () => null };
+        return { ok: true, json: async () => ({ data: [A1, B1], total: 2 }) };
+      }
+      if (url.includes('project_id=proj-a')) return { ok: true, json: async () => ({ data: [A1], total: 1 }) };
+      return { ok: false, status: 404, json: async () => null };
+    }));
+    await mount();
+    let pollResult: boolean | undefined;
+    await act(async () => { void sseOpts.current!.onPoll!().then((ok) => { pollResult = ok; }); await Promise.resolve(); });
+    expect(releasePoll).not.toBeUndefined();
+    await chooseFilter('proj-a'); // supersedes the poll's ask
+    await act(async () => { releasePoll!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(pollResult).toBe(true);
+    // a real failure of the poll's own ask is still a failure
+    await chooseFilter('');
+    let second: boolean | undefined;
+    await act(async () => { void sseOpts.current!.onPoll!().then((ok) => { second = ok; }); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(second).toBe(false);
   });
 
   it('프로젝트 목록을 아직 모를 때 기억된 프로젝트 값은 일단 쓰고, 목록이 와서 내 프로젝트가 아니면 «모든 프로젝트»로 돌아간다', async () => {

@@ -9,9 +9,10 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../messages/ko.json';
 
-const { useDashboardContextMock, routerMock } = vi.hoisted(() => ({
+const { useDashboardContextMock, routerMock, paramRef } = vi.hoisted(() => ({
   useDashboardContextMock: vi.fn(),
   routerMock: { replace: vi.fn(), push: vi.fn() },
+  paramRef: { current: 'conv-1' },
 }));
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
@@ -19,7 +20,7 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
 }));
 
 vi.mock('next/navigation', () => ({
-  useParams: () => ({ conversation_id: 'conv-1' }),
+  useParams: () => ({ conversation_id: paramRef.current }),
   useRouter: () => routerMock,
   useSearchParams: () => new URLSearchParams(''),
 }));
@@ -47,6 +48,7 @@ beforeEach(() => {
   root = createRoot(container);
   routerMock.replace.mockClear();
   routerMock.push.mockClear();
+  paramRef.current = 'conv-1';
   useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectId: 'proj-a', projectMemberships: [A, B] });
 });
 
@@ -119,6 +121,103 @@ describe('ConversationPage — 방의 프로젝트로 일한다(story 4847 AC2)'
     stubFetch({ project_id: 'proj-b' });
     await mount();
     expect(container.querySelector('[data-testid="room-project-ask"]')).toBeNull();
+  });
+});
+
+describe('ConversationPage — 방에서 방으로 옮길 때(같은 컴포넌트가 재사용됨 · story 4847, codex)', () => {
+  const room = (project_id: string | null) => ({ title: '회의', type: 'group', participants: [], project_id });
+  async function renderPage() {
+    const { default: ConversationPage } = await import('./page');
+    const { TopBarProvider, useTopBar } = await import('@/components/nav/top-bar-context');
+    function TopBarRenderer() { const { title, actions } = useTopBar(); return <div>{title}{actions}</div>; }
+    const tree = () => (
+      <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+        <TopBarProvider><TopBarRenderer /><ConversationPage /></TopBarProvider>
+      </NextIntlClientProvider>
+    );
+    return tree;
+  }
+  const settle = async () => { await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); }); };
+
+  it('⭐A에서 B로 옮기면, B의 정보가 올 때까지 ChatView는 A의 프로젝트가 아니라 «프로젝트 없음»으로 서고, 오면 B의 프로젝트로 일한다', async () => {
+    let releaseB: (() => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/conversations/conv-1') return { ok: true, status: 200, json: async () => room('proj-a') };
+      if (url === '/api/conversations/conv-2') { await new Promise<void>((resolve) => { releaseB = resolve; }); return { ok: true, status: 200, json: async () => room('proj-b') }; }
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }));
+    const tree = await renderPage();
+    await act(async () => { root.render(tree()); }); await settle();
+    expect(chatViewProject()).toBe('proj-a');
+    paramRef.current = 'conv-2';
+    await act(async () => { root.render(tree()); }); await settle();
+    expect(releaseB).not.toBeUndefined();
+    expect(chatViewProject()).toBe(''); // not A's project
+    await act(async () => { releaseB!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(chatViewProject()).toBe('proj-b');
+  });
+
+  it('⭐A의 늦은 응답이 B를 옮긴 뒤에 도착해도 B의 프로젝트를 덮지 않는다', async () => {
+    let releaseA: (() => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/conversations/conv-1') { await new Promise<void>((resolve) => { releaseA = resolve; }); return { ok: true, status: 200, json: async () => room('proj-a') }; }
+      if (url === '/api/conversations/conv-2') return { ok: true, status: 200, json: async () => room('proj-b') };
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }));
+    const tree = await renderPage();
+    await act(async () => { root.render(tree()); }); await settle();
+    paramRef.current = 'conv-2';
+    await act(async () => { root.render(tree()); }); await settle();
+    expect(chatViewProject()).toBe('proj-b');
+    await act(async () => { releaseA!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(chatViewProject()).toBe('proj-b');
+  });
+
+  it('⭐A는 읽혔고 B는 못 읽으면(500) B에서 «방 정보를 못 읽었어요» 안내가 선다 — A의 정보가 남아 가리지 않는다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/conversations/conv-1') return { ok: true, status: 200, json: async () => room('proj-a') };
+      if (url === '/api/conversations/conv-2') return { ok: false, status: 500, json: async () => null };
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }));
+    const tree = await renderPage();
+    await act(async () => { root.render(tree()); }); await settle();
+    paramRef.current = 'conv-2';
+    await act(async () => { root.render(tree()); }); await settle();
+    expect(container.querySelector('[data-testid="room-info-failed"]')).not.toBeNull();
+    expect(chatViewProject()).toBe('');
+  });
+
+  it('⭐프로젝트 없는 방 A에서 고른 프로젝트는 프로젝트 없는 방 B로 따라가지 않는다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/conversations/conv-1' || url === '/api/conversations/conv-2') return { ok: true, status: 200, json: async () => room(null) };
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }));
+    const tree = await renderPage();
+    await act(async () => { root.render(tree()); }); await settle();
+    const select = container.querySelector('#room-project') as HTMLSelectElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select, 'proj-b');
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(chatViewProject()).toBe('proj-b');
+    paramRef.current = 'conv-2';
+    await act(async () => { root.render(tree()); }); await settle();
+    expect(chatViewProject()).toBe('');
+    expect((container.querySelector('#room-project') as HTMLSelectElement).value).toBe('');
+  });
+
+  it('A에서 «열 수 없음»(403)이었다고 B까지 막히지 않는다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/conversations/conv-1') return { ok: false, status: 403, json: async () => null };
+      if (url === '/api/conversations/conv-2') return { ok: true, status: 200, json: async () => room('proj-b') };
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }));
+    const tree = await renderPage();
+    await act(async () => { root.render(tree()); }); await settle();
+    expect(container.querySelector('[data-testid="chat-view-stub"]')).toBeNull();
+    paramRef.current = 'conv-2';
+    await act(async () => { root.render(tree()); }); await settle();
+    expect(chatViewProject()).toBe('proj-b');
   });
 });
 

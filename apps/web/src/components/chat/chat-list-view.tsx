@@ -497,7 +497,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       const res = await fetchWithAuth(
         `/api/conversations?limit=${PAGE_LIMIT}&offset=${nextOffset}${scopeQuery}`
       );
-      if (stale()) return false; // 더 새로운 물음이 있음 — 이 응답은 현 화면 안 덮음
+      if (stale()) return true; // 더 새로운 물음이 있음 — 이 응답은 현 화면 안 덮음. (실패가 아니다: 폴링은 `true`면 간격을 넓히지 않는다 — 밀려난 물음을 실패로 세면 안 된다)
       if (!res.ok) {
         // story 4847 — a server that does not yet answer the organization-wide read (it requires a project): ask for the current project's rooms instead
         if (res.status === 422 && !projectOnly && projectIdRef.current) { setProjectOnly(true); return false; }
@@ -505,7 +505,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
         return false;
       }
       const json = await res.json() as { data: ConversationItem[]; total: number };
-      if (stale()) return false;
+      if (stale()) return true;
       const items = json.data ?? [];
       setConversations((prev) => append ? [...prev, ...items] : items);
       setMyOffset(nextOffset + items.length);
