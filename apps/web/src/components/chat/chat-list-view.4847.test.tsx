@@ -694,6 +694,16 @@ describe('ChatListView — 프로젝트가 하나도 없는 사람(story 4847, P
     expect(replaceMock).not.toHaveBeenCalled();
   });
 
+  it('⭐프로젝트 0 · 읽기 실패(서버가 조직 전체를 읽어 주는지 모름)면 지시 한 줄(?compose=)이 만들 수 있는지 모르는 새 대화 창을 열지 않는다', async () => {
+    searchParamsValueRef.current = 'compose=' + encodeURIComponent('지시');
+    noProjects();
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => null })));
+    const onOpenChange = vi.fn();
+    await mount({ open: false, onOpenChange });
+    expect(container.textContent).toContain(koMessages.chats.conversationsLoadFailed);
+    expect(onOpenChange).not.toHaveBeenCalledWith(true);
+  });
+
   it('프로젝트 0 · 방 있음이면 지시 한 줄은 그 목록의 가장 최근 방으로 간다', async () => {
     searchParamsValueRef.current = 'compose=' + encodeURIComponent('지시');
     noProjects(); stubOrgServer([B1, N1]);

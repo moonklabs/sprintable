@@ -197,6 +197,21 @@ describe('NewConversationModal — 프로젝트 없는 새 방(story 4847)', () 
     expect('project_id' in posts[0]!).toBe(false);
   });
 
+  it('⭐서버가 허락해도 기본 프로젝트가 없는 사람(프로젝트 둘 이상)은 «조직 (프로젝트 없음)»으로 가 버리지 않는다 — 고를 때까지 만들 수 없고, 하나뿐이면 그 프로젝트가 기본값이다', async () => {
+    const posts: Array<Record<string, unknown>> = [];
+    await mount(mockFetches(posts), null, [A, B], true);
+    await click(botBtn());
+    expect(projectSelect()!.value).toBe('');
+    expect(createBtn().disabled).toBe(true);
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await mount(mockFetches(posts), null, [A], true);
+    expect(projectSelect()!.value).toBe('proj-a');
+    await click(botBtn());
+    await click(createBtn());
+    expect(posts).toEqual([{ type: 'dm', title: null, participant_ids: ['a-bot'], project_id: 'proj-a' }]);
+  });
+
   it('⭐옛 서버(고르게 하지 않는다)에서는 선택지가 없고, 하나뿐인 프로젝트는 묻지 않고 그 프로젝트로 만든다 — 지금과 같다', async () => {
     const posts: unknown[] = [];
     await mount(mockFetches(posts), 'proj-a', [A], false);
@@ -214,15 +229,20 @@ describe('NewConversationModal — 프로젝트 없는 새 방(story 4847)', () 
     expect(createBtn().disabled).toBe(true);
   });
 
-  it('⭐옛 서버에서 프로젝트가 하나도 없는 사람은 만들 수 없다(지금과 같다) — 창이 열려 있는 동안 옛 서버로 돌아가면 «조직 (프로젝트 없음)»으로 고른 값도 거둬진다', async () => {
+  it('⭐옛 서버에서 프로젝트가 하나도 없는 사람은 만들 수 없다(지금과 같다)', async () => {
     await mount(mockFetches([]), null, [], false);
     await click(botBtn());
     expect(createBtn().disabled).toBe(true);
-    // the same window on a server that allowed it, where «none» was chosen, then the list falls back to the older server
-    await act(async () => { root.render(modalTree('proj-a', [A, B], true)); });
+  });
+
+  it('⭐창이 열려 있는 동안 목록이 옛 서버로 돌아가면, «조직 (프로젝트 없음)»으로 고른 값은 거둬지고 기본 프로젝트로 만들어진다(없는 프로젝트 «none»도 프로젝트 없는 방도 아니다)', async () => {
+    const posts: Array<Record<string, unknown>> = [];
+    await mount(mockFetches(posts), 'proj-a', [A, B], true);
+    await click(botBtn());
     await choose(projectSelect()!, 'none');
-    expect(createBtn().disabled).toBe(false);
     await act(async () => { root.render(modalTree('proj-a', [A, B], false)); });
-    expect(projectSelect()!.value).toBe('proj-a');
+    expect(noneOption()).toBeNull();
+    await click(createBtn());
+    expect(posts).toEqual([{ type: 'dm', title: null, participant_ids: ['a-bot'], project_id: 'proj-a' }]);
   });
 });
