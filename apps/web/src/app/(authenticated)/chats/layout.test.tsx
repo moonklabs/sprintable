@@ -330,11 +330,12 @@ describe('ChatsLayout — story #4762 AC2 (no project is an answer, not «loadin
     await act(async () => { root.render(wrap(<ChatsLayout><div>children</div></ChatsLayout>)); });
   }
 
-  it('a person with no project at all sees the «create one» line — no chat list, no loading line', async () => {
+  // story 4847 — a person with no project at all is no longer stopped by the layout: they may still have rooms (a room outlives its project). The «no project yet» line is the
+  // list's own empty state (chat-list-view.4847.test.tsx).
+  it('⭐a person with no project at all gets the list mounted — the layout draws no stop line and no loading line', async () => {
     await renderWith({ currentTeamMemberId: 'member-1', projectId: undefined, projectMemberships: [] });
-    const line = container.querySelector('[data-testid="chats-no-project"]');
-    expect(line?.textContent).toBe(koMessages.chats.noProjectYet);
-    expect(container.querySelector('[data-testid="chat-list-view"]')).toBeNull();
+    expect(container.querySelectorAll('[data-testid="chat-list-view"]')).toHaveLength(1);
+    expect(container.querySelector('[data-testid="chats-no-project"]')).toBeNull();
     expect(container.textContent).not.toContain(koMessages.common.loading);
   });
 

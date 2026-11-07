@@ -859,9 +859,17 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       </Button>
     </div>
   ) : conversations.length === 0 ? (
-    <div className="flex h-full items-center justify-center">
-      <EmptyState title={t('noConversations')} description={t('startNewConversation')} className="w-full max-w-xs" />
-    </div>
+    // story 4847 — a person with no project AND no room read has nothing to look at and nowhere to start one: say what to do next (the line the layout used to stop on).
+    // A person with no project but rooms never gets here — they see their rooms.
+    projectMemberships.length === 0 ? (
+      <div className="flex h-full items-center justify-center px-6 text-center" data-testid="chats-no-project">
+        <p className="text-sm text-muted-foreground">{t('noProjectYet')}</p>
+      </div>
+    ) : (
+      <div className="flex h-full items-center justify-center">
+        <EmptyState title={t('noConversations')} description={t('startNewConversation')} className="w-full max-w-xs" />
+      </div>
+    )
   ) : (
     <div className="space-y-4">
       {dmConvs.length > 0 && (
@@ -975,7 +983,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   if (needsProject) {
     return (
       <div className="flex h-64 items-center justify-center px-6 text-center" data-testid="chats-no-project">
-        <p className="text-sm text-muted-foreground">{t('pickProject')}</p>
+        <p className="text-sm text-muted-foreground">{projectMemberships.length === 0 ? t('noProjectYet') : t('pickProject')}</p>
       </div>
     );
   }
